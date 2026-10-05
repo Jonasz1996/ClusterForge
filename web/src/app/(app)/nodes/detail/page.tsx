@@ -4,8 +4,10 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState, type ReactNode } from "react";
 import { MetricsPanels } from "@/components/charts/MetricsPanels";
+import { JobList } from "@/components/jobs/JobList";
 import { InstallAgent } from "@/components/inventory/InstallAgent";
 import { NodeForm } from "@/components/inventory/NodeForm";
+import { NodeProxmoxCard } from "@/components/proxmox/NodeProxmoxCard";
 import {
   AgentBadge,
   ago,
@@ -35,6 +37,7 @@ import {
   type Node,
   type NodeRuntime,
 } from "@/lib/inventory";
+import { useJobs } from "@/lib/proxmox";
 
 export default function NodeDetailPage() {
   return (
@@ -57,6 +60,7 @@ function NodeDetailInner() {
   const remove = useDeleteNode();
   const router = useRouter();
   const [editing, setEditing] = useState(false);
+  const jobs = useJobs({ node_id: id, limit: 10 }, id !== "");
 
   if (id === "") return <Alert>Geen node opgegeven.</Alert>;
 
@@ -139,7 +143,14 @@ function NodeDetailInner() {
                 </dl>
               </Card>
               <AgentCard node={node.data} runtime={runtime.data} isAdmin={isAdmin} />
+              <NodeProxmoxCard node={node.data} isAdmin={isAdmin} />
             </div>
+          )}
+
+          {(jobs.data?.length ?? 0) > 0 && (
+            <Card title="Taken">
+              <JobList jobs={jobs.data!} />
+            </Card>
           )}
 
           {node.data.agent && (

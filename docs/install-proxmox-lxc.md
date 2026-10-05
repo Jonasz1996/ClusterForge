@@ -55,8 +55,12 @@ git -C /opt/clusterforge config core.sshCommand "ssh -i /root/.ssh/clusterforge"
 cd /opt/clusterforge/deploy
 cp .env.example .env
 sed -i "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$(openssl rand -hex 24)/" .env
+sed -i "s/^CF_MASTER_KEY=.*/CF_MASTER_KEY=$(openssl rand -hex 32)/" .env
+grep CF_MASTER_KEY .env
 nano .env
 ```
+
+`CF_MASTER_KEY` versleutelt het Proxmox-token in de database. Bewaar de waarde ook ergens anders, bijvoorbeeld in je wachtwoordmanager: zet je de LXC ooit opnieuw op met een back-up van de database maar zonder deze sleutel, dan moet je het token opnieuw invullen.
 
 Kies in `.env` één van deze twee situaties:
 
@@ -129,6 +133,31 @@ Heb je al een Grafana, dan kan die de metrics rechtstreeks uit VictoriaMetrics l
 
    Pas het adres en de uid van het dashboard aan als die bij jou anders zijn, en voer `docker compose up -d` opnieuw uit.
 
+## 9. Proxmox koppelen
+
+Maak op een van je Proxmox-hosts een API-token voor ClusterForge, als root:
+
+```sh
+pveum role add ClusterForge --privs "VM.Audit VM.PowerMgmt VM.Snapshot VM.Migrate Sys.Audit Datastore.Audit Datastore.AllocateSpace"
+pveum user add clusterforge@pve --comment "ClusterForge"
+pveum acl modify / --users clusterforge@pve --roles ClusterForge
+pveum user token add clusterforge@pve cf --privsep 0
+```
+
+Kopieer het secret uit de uitvoer van het laatste commando; Proxmox toont het maar één keer. Klik dan in ClusterForge bij Proxmox op "Proxmox koppelen":
+
+1. API-adres: het adres van een Proxmox-host, bijvoorbeeld `https://10.0.10.11:8006`. In een Proxmox-cluster is één host genoeg.
+2. Token-id: `clusterforge@pve!cf`, en het token-secret.
+3. Klik naast de vingerafdruk op "Ophalen". Vergelijk de getoonde vingerafdruk met die op de host en klik op "Deze vingerafdruk gebruiken":
+
+   ```sh
+   openssl x509 -in /etc/pve/local/pve-ssl.pem -noout -fingerprint -sha256
+   ```
+
+   Heeft Proxmox een certificaat van een echte CA (bijvoorbeeld via ACME), dan kun je de vingerafdruk leeg laten.
+
+Na het opslaan staan de hosts, VM's, containers en storage er binnen enkele seconden. Koppel daarna elke VM die een node is aan die node: in de lijst met VM's staat "Koppelen aan …" als de naam overeenkomt met een node, en bij de node zelf kun je een VM kiezen. De LXC moet poort 8006 van de Proxmox-host kunnen bereiken.
+
 ## Bijwerken
 
 ```sh
@@ -148,4 +177,8 @@ Databasemigraties lopen automatisch bij het starten van de server.
 | Build stopt met `killed` | Te weinig geheugen; geef de LXC tijdelijk 3 GB |
 | Bij een node staat "Grafieken staan uit" | `CF_VICTORIAMETRICS_URL` is niet gezet; de compose-stack zet die standaard |
 | Node blijft Offline na het installeren van de agent | Poort 4222 niet bereikbaar vanaf de node, of `CF_NATS_ADVERTISE` wijst niet naar de LXC; kijk op de node met `journalctl -u cf-agent` |
+| Bij Proxmox staat dat de server geen masterkey heeft | `CF_MASTER_KEY` is niet gezet in `.env`; zet hem en voer `docker compose up -d` uit |
+| Koppelen geeft een fout over het certificaat | De vingerafdruk klopt niet (nieuw certificaat op de host?); haal hem opnieuw op via Bewerken |
+| Koppelen geeft 401 of 403 | Token-ID of secret verkeerd, of de rol mist rechten; controleer met `pveum user token permissions clusterforge@pve cf` |
+| "Het token-secret is niet te ontsleutelen" | `CF_MASTER_KEY` is veranderd; vul het secret opnieuw in via Proxmox → Bewerken |
 | Logs bekijken | `docker compose logs -f server` |

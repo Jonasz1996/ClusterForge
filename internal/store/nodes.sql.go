@@ -14,9 +14,9 @@ import (
 )
 
 const createNode = `-- name: CreateNode :one
-INSERT INTO nodes (cluster_id, hostname, role, description, lifecycle, primary_ip, tags)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, cluster_id, hostname, role, description, lifecycle, primary_ip, tags, created_at, updated_at, status, status_reason, status_since
+INSERT INTO nodes (cluster_id, hostname, role, description, lifecycle, primary_ip, tags, proxmox_id, pve_vmid)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+RETURNING id, cluster_id, hostname, role, description, lifecycle, primary_ip, tags, created_at, updated_at, status, status_reason, status_since, proxmox_id, pve_vmid
 `
 
 type CreateNodeParams struct {
@@ -27,6 +27,8 @@ type CreateNodeParams struct {
 	Lifecycle   NodeLifecycle
 	PrimaryIp   *netip.Addr
 	Tags        []string
+	ProxmoxID   *uuid.UUID
+	PveVmid     *int32
 }
 
 func (q *Queries) CreateNode(ctx context.Context, arg CreateNodeParams) (Node, error) {
@@ -38,6 +40,8 @@ func (q *Queries) CreateNode(ctx context.Context, arg CreateNodeParams) (Node, e
 		arg.Lifecycle,
 		arg.PrimaryIp,
 		arg.Tags,
+		arg.ProxmoxID,
+		arg.PveVmid,
 	)
 	var i Node
 	err := row.Scan(
@@ -54,6 +58,8 @@ func (q *Queries) CreateNode(ctx context.Context, arg CreateNodeParams) (Node, e
 		&i.Status,
 		&i.StatusReason,
 		&i.StatusSince,
+		&i.ProxmoxID,
+		&i.PveVmid,
 	)
 	return i, err
 }
@@ -71,12 +77,16 @@ func (q *Queries) DeleteNode(ctx context.Context, id uuid.UUID) (int64, error) {
 }
 
 const getNode = `-- name: GetNode :one
-SELECT n.id, n.cluster_id, n.hostname, n.role, n.description, n.lifecycle, n.primary_ip, n.tags, n.created_at, n.updated_at, n.status, n.status_reason, n.status_since, c.slug AS cluster_slug, c.name AS cluster_name,
+SELECT n.id, n.cluster_id, n.hostname, n.role, n.description, n.lifecycle, n.primary_ip, n.tags, n.created_at, n.updated_at, n.status, n.status_reason, n.status_since, n.proxmox_id, n.pve_vmid, c.slug AS cluster_slug, c.name AS cluster_name,
        a.id AS agent_id, a.version AS agent_version, a.enrolled_at AS agent_enrolled_at,
-       a.last_seen_at AS agent_last_seen_at
+       a.last_seen_at AS agent_last_seen_at,
+       pc.name AS proxmox_name, r.type AS pve_type, r.pve_node, r.name AS pve_name, r.status AS pve_status,
+       r.data AS pve_data
 FROM nodes n
 LEFT JOIN clusters c ON c.id = n.cluster_id
 LEFT JOIN agents a ON a.node_id = n.id AND a.revoked_at IS NULL
+LEFT JOIN proxmox_connections pc ON pc.id = n.proxmox_id
+LEFT JOIN proxmox_resources r ON r.connection_id = n.proxmox_id AND r.vmid = n.pve_vmid AND r.type IN ('qemu', 'lxc')
 WHERE n.id = $1
 `
 
@@ -88,6 +98,12 @@ type GetNodeRow struct {
 	AgentVersion    *string
 	AgentEnrolledAt *time.Time
 	AgentLastSeenAt *time.Time
+	ProxmoxName     *string
+	PveType         *string
+	PveNode         *string
+	PveName         *string
+	PveStatus       *string
+	PveData         []byte
 }
 
 func (q *Queries) GetNode(ctx context.Context, id uuid.UUID) (GetNodeRow, error) {
@@ -107,23 +123,35 @@ func (q *Queries) GetNode(ctx context.Context, id uuid.UUID) (GetNodeRow, error)
 		&i.Node.Status,
 		&i.Node.StatusReason,
 		&i.Node.StatusSince,
+		&i.Node.ProxmoxID,
+		&i.Node.PveVmid,
 		&i.ClusterSlug,
 		&i.ClusterName,
 		&i.AgentID,
 		&i.AgentVersion,
 		&i.AgentEnrolledAt,
 		&i.AgentLastSeenAt,
+		&i.ProxmoxName,
+		&i.PveType,
+		&i.PveNode,
+		&i.PveName,
+		&i.PveStatus,
+		&i.PveData,
 	)
 	return i, err
 }
 
 const listNodes = `-- name: ListNodes :many
-SELECT n.id, n.cluster_id, n.hostname, n.role, n.description, n.lifecycle, n.primary_ip, n.tags, n.created_at, n.updated_at, n.status, n.status_reason, n.status_since, c.slug AS cluster_slug, c.name AS cluster_name,
+SELECT n.id, n.cluster_id, n.hostname, n.role, n.description, n.lifecycle, n.primary_ip, n.tags, n.created_at, n.updated_at, n.status, n.status_reason, n.status_since, n.proxmox_id, n.pve_vmid, c.slug AS cluster_slug, c.name AS cluster_name,
        a.id AS agent_id, a.version AS agent_version, a.enrolled_at AS agent_enrolled_at,
-       a.last_seen_at AS agent_last_seen_at
+       a.last_seen_at AS agent_last_seen_at,
+       pc.name AS proxmox_name, r.type AS pve_type, r.pve_node, r.name AS pve_name, r.status AS pve_status,
+       r.data AS pve_data
 FROM nodes n
 LEFT JOIN clusters c ON c.id = n.cluster_id
 LEFT JOIN agents a ON a.node_id = n.id AND a.revoked_at IS NULL
+LEFT JOIN proxmox_connections pc ON pc.id = n.proxmox_id
+LEFT JOIN proxmox_resources r ON r.connection_id = n.proxmox_id AND r.vmid = n.pve_vmid AND r.type IN ('qemu', 'lxc')
 ORDER BY lower(n.hostname)
 `
 
@@ -135,6 +163,12 @@ type ListNodesRow struct {
 	AgentVersion    *string
 	AgentEnrolledAt *time.Time
 	AgentLastSeenAt *time.Time
+	ProxmoxName     *string
+	PveType         *string
+	PveNode         *string
+	PveName         *string
+	PveStatus       *string
+	PveData         []byte
 }
 
 func (q *Queries) ListNodes(ctx context.Context) ([]ListNodesRow, error) {
@@ -160,12 +194,20 @@ func (q *Queries) ListNodes(ctx context.Context) ([]ListNodesRow, error) {
 			&i.Node.Status,
 			&i.Node.StatusReason,
 			&i.Node.StatusSince,
+			&i.Node.ProxmoxID,
+			&i.Node.PveVmid,
 			&i.ClusterSlug,
 			&i.ClusterName,
 			&i.AgentID,
 			&i.AgentVersion,
 			&i.AgentEnrolledAt,
 			&i.AgentLastSeenAt,
+			&i.ProxmoxName,
+			&i.PveType,
+			&i.PveNode,
+			&i.PveName,
+			&i.PveStatus,
+			&i.PveData,
 		); err != nil {
 			return nil, err
 		}
@@ -178,12 +220,16 @@ func (q *Queries) ListNodes(ctx context.Context) ([]ListNodesRow, error) {
 }
 
 const listNodesByCluster = `-- name: ListNodesByCluster :many
-SELECT n.id, n.cluster_id, n.hostname, n.role, n.description, n.lifecycle, n.primary_ip, n.tags, n.created_at, n.updated_at, n.status, n.status_reason, n.status_since, c.slug AS cluster_slug, c.name AS cluster_name,
+SELECT n.id, n.cluster_id, n.hostname, n.role, n.description, n.lifecycle, n.primary_ip, n.tags, n.created_at, n.updated_at, n.status, n.status_reason, n.status_since, n.proxmox_id, n.pve_vmid, c.slug AS cluster_slug, c.name AS cluster_name,
        a.id AS agent_id, a.version AS agent_version, a.enrolled_at AS agent_enrolled_at,
-       a.last_seen_at AS agent_last_seen_at
+       a.last_seen_at AS agent_last_seen_at,
+       pc.name AS proxmox_name, r.type AS pve_type, r.pve_node, r.name AS pve_name, r.status AS pve_status,
+       r.data AS pve_data
 FROM nodes n
 LEFT JOIN clusters c ON c.id = n.cluster_id
 LEFT JOIN agents a ON a.node_id = n.id AND a.revoked_at IS NULL
+LEFT JOIN proxmox_connections pc ON pc.id = n.proxmox_id
+LEFT JOIN proxmox_resources r ON r.connection_id = n.proxmox_id AND r.vmid = n.pve_vmid AND r.type IN ('qemu', 'lxc')
 WHERE n.cluster_id = $1
 ORDER BY lower(n.hostname)
 `
@@ -196,6 +242,12 @@ type ListNodesByClusterRow struct {
 	AgentVersion    *string
 	AgentEnrolledAt *time.Time
 	AgentLastSeenAt *time.Time
+	ProxmoxName     *string
+	PveType         *string
+	PveNode         *string
+	PveName         *string
+	PveStatus       *string
+	PveData         []byte
 }
 
 func (q *Queries) ListNodesByCluster(ctx context.Context, clusterID *uuid.UUID) ([]ListNodesByClusterRow, error) {
@@ -221,12 +273,20 @@ func (q *Queries) ListNodesByCluster(ctx context.Context, clusterID *uuid.UUID) 
 			&i.Node.Status,
 			&i.Node.StatusReason,
 			&i.Node.StatusSince,
+			&i.Node.ProxmoxID,
+			&i.Node.PveVmid,
 			&i.ClusterSlug,
 			&i.ClusterName,
 			&i.AgentID,
 			&i.AgentVersion,
 			&i.AgentEnrolledAt,
 			&i.AgentLastSeenAt,
+			&i.ProxmoxName,
+			&i.PveType,
+			&i.PveNode,
+			&i.PveName,
+			&i.PveStatus,
+			&i.PveData,
 		); err != nil {
 			return nil, err
 		}
@@ -239,7 +299,7 @@ func (q *Queries) ListNodesByCluster(ctx context.Context, clusterID *uuid.UUID) 
 }
 
 const lockNode = `-- name: LockNode :one
-SELECT id, cluster_id, hostname, role, description, lifecycle, primary_ip, tags, created_at, updated_at, status, status_reason, status_since FROM nodes WHERE id = $1 FOR UPDATE
+SELECT id, cluster_id, hostname, role, description, lifecycle, primary_ip, tags, created_at, updated_at, status, status_reason, status_since, proxmox_id, pve_vmid FROM nodes WHERE id = $1 FOR UPDATE
 `
 
 func (q *Queries) LockNode(ctx context.Context, id uuid.UUID) (Node, error) {
@@ -259,6 +319,8 @@ func (q *Queries) LockNode(ctx context.Context, id uuid.UUID) (Node, error) {
 		&i.Status,
 		&i.StatusReason,
 		&i.StatusSince,
+		&i.ProxmoxID,
+		&i.PveVmid,
 	)
 	return i, err
 }
@@ -266,9 +328,9 @@ func (q *Queries) LockNode(ctx context.Context, id uuid.UUID) (Node, error) {
 const updateNode = `-- name: UpdateNode :one
 UPDATE nodes
 SET cluster_id = $2, hostname = $3, role = $4, description = $5, lifecycle = $6,
-    primary_ip = $7, tags = $8, updated_at = now()
+    primary_ip = $7, tags = $8, proxmox_id = $9, pve_vmid = $10, updated_at = now()
 WHERE id = $1
-RETURNING id, cluster_id, hostname, role, description, lifecycle, primary_ip, tags, created_at, updated_at, status, status_reason, status_since
+RETURNING id, cluster_id, hostname, role, description, lifecycle, primary_ip, tags, created_at, updated_at, status, status_reason, status_since, proxmox_id, pve_vmid
 `
 
 type UpdateNodeParams struct {
@@ -280,6 +342,8 @@ type UpdateNodeParams struct {
 	Lifecycle   NodeLifecycle
 	PrimaryIp   *netip.Addr
 	Tags        []string
+	ProxmoxID   *uuid.UUID
+	PveVmid     *int32
 }
 
 func (q *Queries) UpdateNode(ctx context.Context, arg UpdateNodeParams) (Node, error) {
@@ -292,6 +356,8 @@ func (q *Queries) UpdateNode(ctx context.Context, arg UpdateNodeParams) (Node, e
 		arg.Lifecycle,
 		arg.PrimaryIp,
 		arg.Tags,
+		arg.ProxmoxID,
+		arg.PveVmid,
 	)
 	var i Node
 	err := row.Scan(
@@ -308,6 +374,8 @@ func (q *Queries) UpdateNode(ctx context.Context, arg UpdateNodeParams) (Node, e
 		&i.Status,
 		&i.StatusReason,
 		&i.StatusSince,
+		&i.ProxmoxID,
+		&i.PveVmid,
 	)
 	return i, err
 }

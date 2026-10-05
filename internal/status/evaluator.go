@@ -103,7 +103,10 @@ func (e *Evaluator) Evaluate(ctx context.Context) error {
 			if n.HeartbeatAt != nil {
 				age = now.Sub(*n.HeartbeatAt)
 			}
-			in := NodeInput{HasAgent: n.HasAgent, HeartbeatAge: age, DiskUsedRatio: n.DiskUsedRatio, DiskUsedMount: n.DiskUsedMount}
+			in := NodeInput{
+				HasAgent: n.HasAgent, HeartbeatAge: age, DiskUsedRatio: n.DiskUsedRatio, DiskUsedMount: n.DiskUsedMount,
+				VMStatus: n.VmStatus,
+			}
 			_ = json.Unmarshal(n.Services, &in.Services)
 			_ = json.Unmarshal(n.EnabledServices, &in.EnabledServices)
 			res := Node(in)

@@ -54,6 +54,14 @@ type NodeFields struct {
 	// PrimaryIP is leeg als de node geen vast adres heeft.
 	PrimaryIP string   `json:"primary_ip"`
 	Tags      []string `json:"tags"`
+	// Proxmox koppelt de node aan een VM of container; nil als er geen is.
+	Proxmox *ProxmoxLink `json:"proxmox"`
+}
+
+// ProxmoxLink wijst een VM of container in een Proxmox-omgeving aan.
+type ProxmoxLink struct {
+	ConnectionID uuid.UUID `json:"connection_id"`
+	VMID         int       `json:"vmid"`
 }
 
 type VIPFields struct {
@@ -99,6 +107,8 @@ func translate(err error) error {
 			return ConflictError{Msg: "er bestaat al een node met deze hostname"}
 		case "vips_address_key":
 			return ConflictError{Msg: "dit VIP-adres is al in gebruik"}
+		case "nodes_proxmox_vm_key":
+			return ConflictError{Msg: "deze VM is al aan een andere node gekoppeld"}
 		}
 	case "23503":
 		switch pe.ConstraintName {
@@ -106,6 +116,8 @@ func translate(err error) error {
 			return ValidationError{Msg: "cluster bestaat niet"}
 		case "cluster_owners_user_id_fkey":
 			return ValidationError{Msg: "een van de owners bestaat niet"}
+		case "nodes_proxmox_id_fkey":
+			return ValidationError{Msg: "Proxmox-koppeling bestaat niet"}
 		}
 	}
 	return err
@@ -235,9 +247,10 @@ func (s *Service) CreateNode(ctx context.Context, actor events.Actor, f NodeFiel
 	var n store.Node
 	err := s.tx(ctx, func(q *store.Queries) error {
 		var err error
+		proxmoxID, vmid := f.Proxmox.columns()
 		n, err = q.CreateNode(ctx, store.CreateNodeParams{
 			ClusterID: f.ClusterID, Hostname: f.Hostname, Role: f.Role, Description: f.Description,
-			Lifecycle: f.Lifecycle, PrimaryIp: parseIP(f.PrimaryIP), Tags: f.Tags,
+			Lifecycle: f.Lifecycle, PrimaryIp: parseIP(f.PrimaryIP), Tags: f.Tags, ProxmoxID: proxmoxID, PveVmid: vmid,
 		})
 		if err != nil {
 			return err
@@ -269,10 +282,11 @@ func (s *Service) UpdateNode(ctx context.Context, actor events.Actor, id uuid.UU
 		if len(d) == 0 {
 			return nil
 		}
+		proxmoxID, vmid := after.Proxmox.columns()
 		n, err = q.UpdateNode(ctx, store.UpdateNodeParams{
 			ID: id, ClusterID: after.ClusterID, Hostname: after.Hostname, Role: after.Role,
 			Description: after.Description, Lifecycle: after.Lifecycle, PrimaryIp: parseIP(after.PrimaryIP),
-			Tags: after.Tags,
+			Tags: after.Tags, ProxmoxID: proxmoxID, PveVmid: vmid,
 		})
 		if err != nil {
 			return err
@@ -324,10 +338,22 @@ func nodeFields(n store.Node) NodeFields {
 	if n.PrimaryIp != nil {
 		ip = n.PrimaryIp.String()
 	}
+	var link *ProxmoxLink
+	if n.ProxmoxID != nil && n.PveVmid != nil {
+		link = &ProxmoxLink{ConnectionID: *n.ProxmoxID, VMID: int(*n.PveVmid)}
+	}
 	return NodeFields{
 		ClusterID: n.ClusterID, Hostname: n.Hostname, Role: n.Role, Description: n.Description,
-		Lifecycle: n.Lifecycle, PrimaryIP: ip, Tags: n.Tags,
+		Lifecycle: n.Lifecycle, PrimaryIP: ip, Tags: n.Tags, Proxmox: link,
 	}
+}
+
+func (l *ProxmoxLink) columns() (*uuid.UUID, *int32) {
+	if l == nil {
+		return nil, nil
+	}
+	id, vmid := l.ConnectionID, int32(l.VMID)
+	return &id, &vmid
 }
 
 func parseIP(s string) *netip.Addr {
@@ -490,6 +516,9 @@ func equal(a, b any) bool {
 		return (x == nil) == (y == nil) && (x == nil || *x == *y)
 	case *int:
 		y := b.(*int)
+		return (x == nil) == (y == nil) && (x == nil || *x == *y)
+	case *ProxmoxLink:
+		y := b.(*ProxmoxLink)
 		return (x == nil) == (y == nil) && (x == nil || *x == *y)
 	}
 	return reflect.DeepEqual(a, b)

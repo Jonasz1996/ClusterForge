@@ -18,8 +18,10 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/httpapi/gen"
 	"github.com/Jonasz1996/clusterforge/internal/inventory"
+	"github.com/Jonasz1996/clusterforge/internal/jobs"
 	"github.com/Jonasz1996/clusterforge/internal/live"
 	"github.com/Jonasz1996/clusterforge/internal/metrics"
+	"github.com/Jonasz1996/clusterforge/internal/proxmox"
 	"github.com/Jonasz1996/clusterforge/internal/store"
 	"github.com/Jonasz1996/clusterforge/internal/webui"
 )
@@ -35,6 +37,8 @@ type Server struct {
 	bus          AgentBus
 	hub          *live.Hub
 	metrics      *metrics.Client
+	pve          *proxmox.Service
+	jobs         *jobs.Runner
 	version      string
 	loginLimiter *ipLimiter
 	// enrollLimiter remt het raden van enrollmenttokens.
@@ -43,22 +47,38 @@ type Server struct {
 
 var _ gen.ServerInterface = (*Server)(nil)
 
-func New(cfg config.Config, log *slog.Logger, pool *pgxpool.Pool, authSvc *auth.Service, bus AgentBus, hub *live.Hub, version string) *Server {
-	ev := events.NewWriter(store.New(pool), log)
-	inv := inventory.NewService(pool, ev)
-	inv.Disconnect = bus.Disconnect
+// Deps zijn de onderdelen die de server gebruikt; main maakt ze aan en
+// start hun achtergrondwerk.
+type Deps struct {
+	Config  config.Config
+	Log     *slog.Logger
+	Pool    *pgxpool.Pool
+	Auth    *auth.Service
+	Bus     AgentBus
+	Hub     *live.Hub
+	Proxmox *proxmox.Service
+	Jobs    *jobs.Runner
+	Version string
+}
+
+func New(d Deps) *Server {
+	ev := events.NewWriter(store.New(d.Pool), d.Log)
+	inv := inventory.NewService(d.Pool, ev)
+	inv.Disconnect = d.Bus.Disconnect
 	return &Server{
-		cfg:     cfg,
-		log:     log,
-		pool:    pool,
-		q:       store.New(pool),
-		auth:    authSvc,
+		cfg:     d.Config,
+		log:     d.Log,
+		pool:    d.Pool,
+		q:       store.New(d.Pool),
+		auth:    d.Auth,
 		inv:     inv,
-		agents:  agents.NewService(pool, ev, bus),
-		bus:     bus,
-		hub:     hub,
-		metrics: metrics.NewClient(cfg.VictoriaMetricsURL),
-		version: version,
+		agents:  agents.NewService(d.Pool, ev, d.Bus),
+		bus:     d.Bus,
+		hub:     d.Hub,
+		metrics: metrics.NewClient(d.Config.VictoriaMetricsURL),
+		pve:     d.Proxmox,
+		jobs:    d.Jobs,
+		version: d.Version,
 		// 10 pogingen direct, daarna één per 6 seconden per IP-adres.
 		loginLimiter:  newIPLimiter(6*time.Second, 10),
 		enrollLimiter: newIPLimiter(6*time.Second, 20),

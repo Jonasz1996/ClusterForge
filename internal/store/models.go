@@ -99,6 +99,51 @@ func (ns NullEnvironment) Value() (driver.Value, error) {
 	return string(ns.Environment), nil
 }
 
+type JobStatus string
+
+const (
+	JobStatusQueued    JobStatus = "queued"
+	JobStatusRunning   JobStatus = "running"
+	JobStatusSucceeded JobStatus = "succeeded"
+	JobStatusFailed    JobStatus = "failed"
+	JobStatusCanceled  JobStatus = "canceled"
+)
+
+func (e *JobStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = JobStatus(s)
+	case string:
+		*e = JobStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for JobStatus: %T", src)
+	}
+	return nil
+}
+
+type NullJobStatus struct {
+	JobStatus JobStatus
+	Valid     bool // Valid is true if JobStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullJobStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.JobStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.JobStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullJobStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.JobStatus), nil
+}
+
 type NodeLifecycle string
 
 const (
@@ -248,6 +293,37 @@ type Event struct {
 	Payload     []byte
 }
 
+type Job struct {
+	ID              uuid.UUID
+	Kind            string
+	Title           string
+	Status          JobStatus
+	Params          []byte
+	ClusterID       *uuid.UUID
+	NodeID          *uuid.UUID
+	ProxmoxID       *uuid.UUID
+	RequestedBy     *uuid.UUID
+	Error           string
+	CancelRequested bool
+	Attempts        int32
+	CreatedAt       time.Time
+	StartedAt       *time.Time
+	FinishedAt      *time.Time
+	HeartbeatAt     *time.Time
+}
+
+type JobStep struct {
+	JobID      uuid.UUID
+	Seq        int32
+	Name       string
+	Status     JobStatus
+	StartedAt  time.Time
+	FinishedAt *time.Time
+	State      []byte
+	Log        []string
+	Error      string
+}
+
 type Node struct {
 	ID           uuid.UUID
 	ClusterID    *uuid.UUID
@@ -262,6 +338,8 @@ type Node struct {
 	Status       string
 	StatusReason string
 	StatusSince  *time.Time
+	ProxmoxID    *uuid.UUID
+	PveVmid      *int32
 }
 
 type NodeFact struct {
@@ -283,6 +361,34 @@ type NodeStatus struct {
 	Services      []byte
 	DiskUsedRatio float64
 	DiskUsedMount string
+}
+
+type ProxmoxConnection struct {
+	ID             uuid.UUID
+	Name           string
+	ApiUrl         string
+	TokenID        string
+	TokenSecretEnc []byte
+	KeyID          string
+	TlsFingerprint string
+	PveVersion     string
+	LastSyncAt     *time.Time
+	LastError      string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
+type ProxmoxResource struct {
+	ConnectionID uuid.UUID
+	PveID        string
+	Type         string
+	PveNode      string
+	Vmid         *int32
+	Name         string
+	Status       string
+	Template     bool
+	Data         []byte
+	SyncedAt     time.Time
 }
 
 type ServerSecret struct {

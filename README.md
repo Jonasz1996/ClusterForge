@@ -12,7 +12,7 @@ Het technisch ontwerp staat in [docs/design/mvp-fase-1.md](docs/design/mvp-fase-
 | 2. Inventory | Clusters, nodes, VIP's | klaar |
 | 3. Agent | Enrollment, heartbeat, facts | klaar |
 | 4. Monitoring | Metrics, status, dashboards | klaar |
-| 5. Proxmox | Sync en VM-acties | gepland |
+| 5. Proxmox | Sync en VM-acties | klaar |
 | 6. Node lifecycle | Reboot, maintenance, drain | gepland |
 | 7. Templates en deployment | Clusters uit templates | gepland |
 
@@ -22,7 +22,7 @@ Stap voor stap in een Debian-container op Proxmox: [docs/install-proxmox-lxc.md]
 
 ```sh
 cd deploy
-cp .env.example .env          # zet minstens POSTGRES_PASSWORD
+cp .env.example .env          # zet minstens POSTGRES_PASSWORD en CF_MASTER_KEY
 docker compose up -d --build
 docker compose exec -it server clusterforge-server admin create -username jonas
 ```
@@ -47,6 +47,8 @@ Agents verbinden zelf naar de server, op poort 4222 (NATS met TLS). Die poort mo
 | `CF_VICTORIAMETRICS_URL` | (leeg) | VictoriaMetrics voor de metrics, bijvoorbeeld `http://victoriametrics:8428`; leeg zet de grafieken uit |
 | `CF_GRAFANA_NODE_URL` | (leeg) | Link naar Grafana bij elke node, met `{hostname}`, `{node_id}`, `{cluster}`, `{cluster_id}` en `{env}` |
 | `CF_GRAFANA_CLUSTER_URL` | (leeg) | Link naar Grafana bij elk cluster, met `{cluster}`, `{cluster_id}` en `{env}` |
+| `CF_MASTER_KEY` | (leeg) | Sleutel van 32 bytes (base64 of hex) waarmee de server geheimen zoals het Proxmox-token versleutelt; maak er een met `openssl rand -hex 32`. Zonder sleutel kan Proxmox niet gekoppeld worden |
+| `CF_MASTER_KEY_FILE` | (leeg) | Bestand met de masterkey, in plaats van `CF_MASTER_KEY` |
 
 ### Commando's
 
@@ -94,6 +96,31 @@ De status van nodes en clusters wordt elke 5 seconden opnieuw berekend:
 
 Nodes in onderhoud, draining, opbouw of uit dienst tellen niet mee voor het cluster. Elke statuswissel en elke VIP-verhuis komt in de activiteitenlog, en de webinterface werkt live bij.
 
+Een node zonder agent of heartbeat die aan een Proxmox-VM gekoppeld is, krijgt zijn status van Proxmox: staat de VM uit, dan is de node Down met als reden "VM staat uit in Proxmox".
+
+## Proxmox
+
+ClusterForge praat met de REST-API van Proxmox VE (8 of nieuwer) via een API-token. Maak dat token één keer aan op een van je Proxmox-hosts, als root:
+
+```sh
+pveum role add ClusterForge --privs "VM.Audit VM.PowerMgmt VM.Snapshot VM.Migrate Sys.Audit Datastore.Audit Datastore.AllocateSpace"
+pveum user add clusterforge@pve --comment "ClusterForge"
+pveum acl modify / --users clusterforge@pve --roles ClusterForge
+pveum user token add clusterforge@pve cf --privsep 0
+```
+
+Het laatste commando toont het secret één keer. Klik in de webinterface bij Proxmox op "Proxmox koppelen" en vul het API-adres (`https://pve1.example.lan:8006`), de token-id (`clusterforge@pve!cf`) en het secret in. Heeft Proxmox een zelfondertekend certificaat, klik dan naast de vingerafdruk op "Ophalen" en vergelijk de vingerafdruk met die op de host (`openssl x509 -in /etc/pve/local/pve-ssl.pem -noout -fingerprint -sha256`); ClusterForge vertrouwt daarna alleen dat certificaat. Het secret wordt versleuteld met `CF_MASTER_KEY` opgeslagen. Verlies je die sleutel, dan vul je het secret opnieuw in via Bewerken.
+
+Is je Proxmox een cluster, dan is één koppeling genoeg: ClusterForge ziet via elke host alle hosts, VM's, containers en storage. Losse hosts koppel je elk apart.
+
+Elke 20 seconden haalt ClusterForge de stand op. Bij Proxmox zie je de hosts met hun belasting, alle VM's en containers en de storage. Een VM koppel je aan een node met "Koppelen" (of maak er meteen een node van), waarna de node zijn VM-status, host en acties toont. Start, afsluiten, hard uitzetten, herstarten, snapshot maken en live migreren naar een andere host doe je vanaf de node of vanuit het overzicht; viewers kunnen alleen kijken. Verandert een gekoppelde VM buiten ClusterForge om (gestart, gestopt, verhuisd of verdwenen), dan komt dat in de activiteitenlog.
+
+Wil je ook de CPU, het geheugen en de schijven van de Proxmox-hosts zelf in grafieken, zet dan ook daar de agent op.
+
+## Taken
+
+Alles wat even duurt, zoals een VM migreren, loopt als taak op de achtergrond. Bij Taken zie je wat er loopt en wat er gebeurd is, met per stap het logboek uit Proxmox. Een lopende taak kun je annuleren; ClusterForge stopt dan ook de taak in Proxmox. Valt de server weg tijdens een taak, dan gaat hij na de herstart verder waar hij was, zonder de actie in Proxmox nog eens te starten.
+
 ## Ontwikkelen
 
 Nodig: Go 1.26, Node 22 met pnpm, Docker.
@@ -133,6 +160,9 @@ internal/agent/            code van cf-agent zelf: aanmelden, verbinden, facts e
 internal/metrics/          metrics naar VictoriaMetrics schrijven en de grafieken opvragen
 internal/status/           statusregels voor nodes en clusters, VIP-eigenaars
 internal/live/             live updates naar de webinterface (Server-Sent Events)
+internal/proxmox/          Proxmox-API: koppelingen, sync elke 20 s en VM-acties; pvefake/ is een nep-Proxmox voor tests
+internal/jobs/             taken op de achtergrond met stappen, logboek en annuleren
+internal/secrets/          versleutelen van geheimen met de masterkey
 pkg/protocol/              berichten tussen server en agent
 internal/webui/            ingebedde webinterface
 migrations/                goose SQL-migraties

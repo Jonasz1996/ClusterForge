@@ -81,6 +81,10 @@ func (f *NodeFields) normalize() error {
 		}
 		f.PrimaryIP = ip.String()
 	}
+	// VMID's in Proxmox lopen van 100 tot 999999999.
+	if f.Proxmox != nil && (f.Proxmox.VMID < 100 || f.Proxmox.VMID > 999999999) {
+		return invalid("ongeldig VMID %d", f.Proxmox.VMID)
+	}
 	tags, err := normalizeTags(f.Tags)
 	f.Tags = tags
 	return err

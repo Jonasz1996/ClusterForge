@@ -119,11 +119,13 @@ SELECT n.id, n.hostname, n.cluster_id, n.lifecycle, n.status, n.status_reason,
        coalesce(s.services, '{}'::jsonb)::jsonb AS services,
        coalesce(s.disk_used_ratio, 0)::float8 AS disk_used_ratio,
        coalesce(s.disk_used_mount, '')::text AS disk_used_mount,
-       coalesce(jsonb_path_query_array(f.facts, '$.services[*] ? (@.enabled == "enabled").name'), '[]'::jsonb)::jsonb AS enabled_services
+       coalesce(jsonb_path_query_array(f.facts, '$.services[*] ? (@.enabled == "enabled").name'), '[]'::jsonb)::jsonb AS enabled_services,
+       coalesce(r.status, '')::text AS vm_status
 FROM nodes n
 LEFT JOIN agents a ON a.node_id = n.id AND a.revoked_at IS NULL
 LEFT JOIN node_status s ON s.node_id = n.id
 LEFT JOIN node_facts f ON f.node_id = n.id
+LEFT JOIN proxmox_resources r ON r.connection_id = n.proxmox_id AND r.vmid = n.pve_vmid AND r.type IN ('qemu', 'lxc')
 `
 
 type ListNodeStatusInputsRow struct {
@@ -140,6 +142,7 @@ type ListNodeStatusInputsRow struct {
 	DiskUsedRatio   float64
 	DiskUsedMount   string
 	EnabledServices []byte
+	VmStatus        string
 }
 
 // Alles wat de statusregels per node nodig hebben.
@@ -166,6 +169,7 @@ func (q *Queries) ListNodeStatusInputs(ctx context.Context) ([]ListNodeStatusInp
 			&i.DiskUsedRatio,
 			&i.DiskUsedMount,
 			&i.EnabledServices,
+			&i.VmStatus,
 		); err != nil {
 			return nil, err
 		}

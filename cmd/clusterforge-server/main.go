@@ -28,8 +28,11 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/config"
 	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/httpapi"
+	"github.com/Jonasz1996/clusterforge/internal/jobs"
 	"github.com/Jonasz1996/clusterforge/internal/live"
 	"github.com/Jonasz1996/clusterforge/internal/metrics"
+	"github.com/Jonasz1996/clusterforge/internal/proxmox"
+	"github.com/Jonasz1996/clusterforge/internal/secrets"
 	"github.com/Jonasz1996/clusterforge/internal/status"
 	"github.com/Jonasz1996/clusterforge/internal/store"
 	"github.com/Jonasz1996/clusterforge/pkg/protocol"
@@ -107,6 +110,15 @@ func serve() error {
 		log.Warn("er bestaan nog geen gebruikers; maak een beheerder aan met: clusterforge-server admin create -username <naam>")
 	}
 
+	var box *secrets.Box
+	if cfg.MasterKey != nil {
+		if box, err = secrets.New(cfg.MasterKey); err != nil {
+			return err
+		}
+	} else {
+		log.Warn("CF_MASTER_KEY is niet gezet; Proxmox koppelen kan pas met een masterkey")
+	}
+
 	eval := status.NewEvaluator(pool, ev, log)
 	ingest := metrics.NewIngester(cfg.VictoriaMetricsURL, q, log)
 	if !ingest.Enabled() {
@@ -123,13 +135,25 @@ func serve() error {
 	}
 	defer bus.Close()
 	hub := live.NewHub(pool, log)
+	runner := jobs.NewRunner(pool, ev, log)
+	pve := proxmox.NewService(pool, ev, log, box, runner)
+	pve.Changed = eval.Kick
 	go hub.Run(ctx)
 	go eval.Run(ctx)
 	go ingest.Run(ctx)
+	go pve.Run(ctx)
+	jobsDone := make(chan struct{})
+	go func() {
+		defer close(jobsDone)
+		runner.Run(ctx)
+	}()
 
 	srv := &http.Server{
-		Addr:              cfg.Listen,
-		Handler:           httpapi.New(cfg, log, pool, authSvc, bus, hub, version).Handler(),
+		Addr: cfg.Listen,
+		Handler: httpapi.New(httpapi.Deps{
+			Config: cfg, Log: log, Pool: pool, Auth: authSvc, Bus: bus, Hub: hub, Proxmox: pve, Jobs: runner,
+			Version: version,
+		}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      60 * time.Second,
@@ -155,6 +179,12 @@ func serve() error {
 		defer cancel()
 		if err := srv.Shutdown(shutdownCtx); err != nil {
 			return err
+		}
+		// Lopende taken zetten zichzelf terug in de wachtrij en gaan na de
+		// herstart verder.
+		select {
+		case <-jobsDone:
+		case <-shutdownCtx.Done():
 		}
 	}
 	return nil

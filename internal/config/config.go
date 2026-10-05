@@ -9,6 +9,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Jonasz1996/clusterforge/internal/secrets"
 )
 
 type Config struct {
@@ -47,6 +49,10 @@ type Config struct {
 	// CF_GRAFANA_CLUSTER_URL). Leeg verbergt de link.
 	GrafanaNodeURL    string
 	GrafanaClusterURL string
+	// MasterKey versleutelt geheimen in de database, zoals Proxmox-tokens
+	// (CF_MASTER_KEY of CF_MASTER_KEY_FILE, 32 bytes in base64 of hex). Zonder
+	// sleutel kun je geen Proxmox koppelen.
+	MasterKey []byte
 }
 
 func FromEnv() (Config, error) {
@@ -75,6 +81,9 @@ func FromEnv() (Config, error) {
 			return c, fmt.Errorf("%s moet met http:// of https:// beginnen", name)
 		}
 	}
+	if err := c.readMasterKey(); err != nil {
+		return c, err
+	}
 	if v := os.Getenv("CF_SECURE_COOKIES"); v != "" {
 		b, err := strconv.ParseBool(v)
 		if err != nil {
@@ -100,6 +109,29 @@ func FromEnv() (Config, error) {
 		c.SessionTTL = d
 	}
 	return c, nil
+}
+
+func (c *Config) readMasterKey() error {
+	v, name := os.Getenv("CF_MASTER_KEY"), "CF_MASTER_KEY"
+	if f := os.Getenv("CF_MASTER_KEY_FILE"); f != "" {
+		if v != "" {
+			return fmt.Errorf("zet CF_MASTER_KEY of CF_MASTER_KEY_FILE, niet allebei")
+		}
+		b, err := os.ReadFile(f)
+		if err != nil {
+			return fmt.Errorf("CF_MASTER_KEY_FILE: %w", err)
+		}
+		v, name = string(b), "CF_MASTER_KEY_FILE"
+	}
+	if strings.TrimSpace(v) == "" {
+		return nil
+	}
+	key, err := secrets.ParseKey(v)
+	if err != nil {
+		return fmt.Errorf("%s: %w", name, err)
+	}
+	c.MasterKey = key
+	return nil
 }
 
 func envOr(key, def string) string {

@@ -464,6 +464,195 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/proxmox": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Gekoppelde Proxmox-omgevingen */
+        get: operations["listProxmox"];
+        put?: never;
+        /** Proxmox koppelen (admin); de server test de verbinding eerst */
+        post: operations["createProxmox"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/proxmox/probe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Certificaat van een Proxmox-adres ophalen om de vingerafdruk te controleren (admin) */
+        post: operations["probeProxmox"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/proxmox/{proxmoxId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proxmoxId: string;
+            };
+            cookie?: never;
+        };
+        /** Eén Proxmox-omgeving */
+        get: operations["getProxmox"];
+        put?: never;
+        post?: never;
+        /** Proxmox-koppeling verwijderen (admin); nodes blijven bestaan zonder koppeling */
+        delete: operations["deleteProxmox"];
+        options?: never;
+        head?: never;
+        /** Proxmox-koppeling wijzigen (admin); zonder token_secret blijft het oude */
+        patch: operations["updateProxmox"];
+        trace?: never;
+    };
+    "/proxmox/{proxmoxId}/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proxmoxId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Nu synchroniseren in plaats van op de volgende ronde te wachten (admin) */
+        post: operations["syncProxmox"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/proxmox/{proxmoxId}/resources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proxmoxId: string;
+            };
+            cookie?: never;
+        };
+        /** Hosts, VM's, containers en storage uit de laatste sync */
+        get: operations["getProxmoxResources"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/proxmox/{proxmoxId}/vms/{vmid}/actions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proxmoxId: string;
+                vmid: number;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Een VM of container starten, stoppen, snapshotten of migreren (admin); wordt een taak */
+        post: operations["vmAction"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/proxmox/{proxmoxId}/vms/{vmid}/snapshots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proxmoxId: string;
+                vmid: number;
+            };
+            cookie?: never;
+        };
+        /** Snapshots van een VM of container, rechtstreeks uit Proxmox */
+        get: operations["listVmSnapshots"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Recente taken, nieuwste eerst */
+        get: operations["listJobs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/jobs/{jobId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                jobId: string;
+            };
+            cookie?: never;
+        };
+        /** Eén taak met zijn stappen en uitvoer */
+        get: operations["getJob"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/jobs/{jobId}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                jobId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Taak annuleren (admin); een lopende Proxmox-taak wordt gestopt */
+        post: operations["cancelJob"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -611,6 +800,8 @@ export interface components {
         Node: {
             /** Format: uuid */
             id: string;
+            /** @description De gekoppelde VM of container in Proxmox, of null */
+            proxmox: components["schemas"]["NodeProxmox"] | null;
             status: components["schemas"]["Status"];
             /** @description Waarom de status niet healthy is */
             status_reason: string;
@@ -642,6 +833,8 @@ export interface components {
             lifecycle?: components["schemas"]["NodeLifecycle"];
             primary_ip?: string | null;
             tags?: string[];
+            /** @description Koppeling met een VM of container in Proxmox; null koppelt los */
+            proxmox?: components["schemas"]["ProxmoxLink"] | null;
         };
         NodePatch: {
             hostname?: string;
@@ -652,6 +845,8 @@ export interface components {
             lifecycle?: components["schemas"]["NodeLifecycle"];
             primary_ip?: string | null;
             tags?: string[];
+            /** @description Koppeling met een VM of container in Proxmox; null koppelt los */
+            proxmox?: components["schemas"]["ProxmoxLink"] | null;
         };
         Vip: {
             /** Format: uuid */
@@ -867,6 +1062,209 @@ export interface components {
             grafana_node_url: string;
             /** @description Link naar Grafana voor een cluster, met {cluster}, {cluster_id} en {env}; leeg als niet ingesteld */
             grafana_cluster_url: string;
+        };
+        ProxmoxConnection: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            /** @description Bijvoorbeeld https://pve1.lan:8006 */
+            api_url: string;
+            /** @description Bijvoorbeeld clusterforge@pve!cf */
+            token_id: string;
+            /** @description SHA-256 van het certificaat zoals Proxmox hem toont; leeg betekent gewone CA-controle */
+            tls_fingerprint: string;
+            pve_version: string;
+            /** Format: date-time */
+            last_sync_at: string | null;
+            /** @description Fout van de laatste sync; leeg als die lukte */
+            last_error: string;
+            counts: components["schemas"]["ProxmoxCounts"];
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        ProxmoxCounts: {
+            hosts: number;
+            vms: number;
+            containers: number;
+        };
+        ProxmoxInput: {
+            name: string;
+            api_url: string;
+            token_id: string;
+            token_secret: string;
+            tls_fingerprint?: string;
+        };
+        ProxmoxPatch: {
+            name?: string;
+            api_url?: string;
+            token_id?: string;
+            token_secret?: string;
+            tls_fingerprint?: string;
+        };
+        ProxmoxProbe: {
+            /** @description Het adres zoals de server het gebruikt */
+            api_url: string;
+            fingerprint: string;
+            subject: string;
+            issuer: string;
+            /** Format: date-time */
+            not_after: string;
+            /** @description Of het certificaat ook zonder vingerafdruk geldig is */
+            trusted: boolean;
+        };
+        ProxmoxResources: {
+            hosts: components["schemas"]["ProxmoxHost"][];
+            guests: components["schemas"]["ProxmoxGuest"][];
+            storages: components["schemas"]["ProxmoxStorage"][];
+        };
+        ProxmoxHost: {
+            name: string;
+            /** @description online of offline */
+            status: string;
+            /**
+             * Format: double
+             * @description Bezetting van 0 tot 1
+             */
+            cpu: number;
+            /** Format: double */
+            maxcpu: number;
+            /** Format: int64 */
+            mem: number;
+            /** Format: int64 */
+            maxmem: number;
+            /** Format: int64 */
+            disk: number;
+            /** Format: int64 */
+            maxdisk: number;
+            /** Format: int64 */
+            uptime: number;
+        };
+        /** @enum {string} */
+        GuestType: "qemu" | "lxc";
+        ProxmoxGuest: {
+            vmid: number;
+            type: components["schemas"]["GuestType"];
+            name: string;
+            /** @description De Proxmox-host waar de VM nu staat */
+            host: string;
+            /** @description running */
+            status: string;
+            template: boolean;
+            /** Format: double */
+            cpu: number;
+            /** Format: double */
+            maxcpu: number;
+            /** Format: int64 */
+            mem: number;
+            /** Format: int64 */
+            maxmem: number;
+            /** Format: int64 */
+            disk: number;
+            /** Format: int64 */
+            maxdisk: number;
+            /** Format: int64 */
+            uptime: number;
+            tags: string[];
+            /** @description Lopende bewerking in Proxmox */
+            lock: string;
+            /**
+             * Format: uuid
+             * @description De gekoppelde node in ClusterForge
+             */
+            node_id: string | null;
+            node_hostname: string | null;
+        };
+        ProxmoxStorage: {
+            name: string;
+            host: string;
+            shared: boolean;
+            type: string;
+            content: string;
+            /** Format: int64 */
+            disk: number;
+            /** Format: int64 */
+            maxdisk: number;
+        };
+        ProxmoxSnapshot: {
+            name: string;
+            description: string;
+            parent: string;
+            /** Format: date-time */
+            time: string | null;
+            vmstate: boolean;
+        };
+        ProxmoxLink: {
+            /** Format: uuid */
+            connection_id: string;
+            vmid: number;
+        };
+        NodeProxmox: {
+            /** Format: uuid */
+            connection_id: string;
+            connection_name: string;
+            vmid: number;
+            /** @description false als de VM niet in de laatste sync zat */
+            found: boolean;
+            type: string;
+            host: string;
+            name: string;
+            status: string;
+            /** Format: int64 */
+            uptime: number;
+        };
+        /** @enum {string} */
+        VmAction: "start" | "stop" | "shutdown" | "reboot" | "snapshot" | "migrate";
+        VmActionInput: {
+            action: components["schemas"]["VmAction"];
+            /** @description Leeg geeft cf-<datum>-<tijd> */
+            snapshot_name?: string;
+            description?: string;
+            /** @description Ook het geheugen in de snapshot (alleen VM's die draaien) */
+            vmstate?: boolean;
+            /** @description Doelhost bij migreren */
+            target?: string;
+        };
+        /** @enum {string} */
+        JobStatus: "queued" | "running" | "succeeded" | "failed" | "canceled";
+        Job: {
+            /** Format: uuid */
+            id: string;
+            kind: string;
+            title: string;
+            status: components["schemas"]["JobStatus"];
+            error: string;
+            /** Format: uuid */
+            cluster_id: string | null;
+            /** Format: uuid */
+            node_id: string | null;
+            /** Format: uuid */
+            proxmox_id: string | null;
+            /** @description Gebruikersnaam van wie de taak vroeg */
+            requested_by: string | null;
+            attempts: number;
+            cancel_requested: boolean;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            started_at: string | null;
+            /** Format: date-time */
+            finished_at: string | null;
+        };
+        JobDetail: components["schemas"]["Job"] & {
+            steps: components["schemas"]["JobStep"][];
+        };
+        JobStep: {
+            seq: number;
+            name: string;
+            status: components["schemas"]["JobStatus"];
+            /** Format: date-time */
+            started_at: string;
+            /** Format: date-time */
+            finished_at: string | null;
+            log: string[];
+            error: string;
         };
     };
     responses: {
@@ -1720,6 +2118,357 @@ export interface operations {
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
+        };
+    };
+    listProxmox: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["ProxmoxConnection"][];
+                        /** @description false als de server geen masterkey heeft; dan kun je geen Proxmox koppelen */
+                        enabled: boolean;
+                    };
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    createProxmox: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProxmoxInput"];
+            };
+        };
+        responses: {
+            /** @description Gekoppeld */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProxmoxConnection"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    probeProxmox: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    api_url: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProxmoxProbe"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+        };
+    };
+    getProxmox: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proxmoxId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProxmoxConnection"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    deleteProxmox: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proxmoxId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Verwijderd */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    updateProxmox: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proxmoxId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ProxmoxPatch"];
+            };
+        };
+        responses: {
+            /** @description Gewijzigd */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProxmoxConnection"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    syncProxmox: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proxmoxId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Gesynchroniseerd; last_error zegt of het lukte */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProxmoxConnection"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    getProxmoxResources: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proxmoxId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProxmoxResources"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    vmAction: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proxmoxId: string;
+                vmid: number;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VmActionInput"];
+            };
+        };
+        responses: {
+            /** @description Taak aangemaakt */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Job"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    listVmSnapshots: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proxmoxId: string;
+                vmid: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["ProxmoxSnapshot"][];
+                    };
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    listJobs: {
+        parameters: {
+            query?: {
+                node_id?: string;
+                cluster_id?: string;
+                proxmox_id?: string;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["Job"][];
+                    };
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    getJob: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                jobId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobDetail"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    cancelJob: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                jobId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Geannuleerd of annuleren gevraagd */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Job"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
         };
     };
 }
