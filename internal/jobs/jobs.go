@@ -357,6 +357,10 @@ func (r *Runner) finish(j store.Job, status store.JobStatus, msg string) {
 	}
 }
 
+// Interrupted is true als ctx afliep omdat de server stopt. De taak gaat na
+// de herstart verder, dus een handler moet dan niets terugdraaien.
+func Interrupted(ctx context.Context) bool { return errors.Is(context.Cause(ctx), errShutdown) }
+
 // Job is een lopende taak, zoals de handler hem ziet.
 type Job struct {
 	store.Job

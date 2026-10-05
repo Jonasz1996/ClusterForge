@@ -1,5 +1,6 @@
-// cf-agent draait op elke node: hij meldt zich aan bij ClusterForge en stuurt
-// daarna heartbeats en facts over één uitgaande NATS-verbinding.
+// cf-agent draait op elke node: hij meldt zich aan bij ClusterForge, stuurt
+// daarna heartbeats, metrics en facts over één uitgaande NATS-verbinding en
+// voert de commando's van de server uit.
 package main
 
 import (
@@ -94,6 +95,7 @@ func run(args []string, log *slog.Logger) error {
 	fl := flag.NewFlagSet("run", flag.ExitOnError)
 	config := fl.String("config", agent.DefaultConfigPath, "pad van het configuratiebestand")
 	enrollFile := fl.String("enroll-file", agent.DefaultEnrollPath, "eenmalig aanmeldbestand als er nog geen configuratie is")
+	statePath := fl.String("state", agent.DefaultStatePath, "bestand waarin de agent onderhoud en herstarts onthoudt")
 	_ = fl.Parse(args)
 
 	c, err := agent.LoadConfig(*config)
@@ -115,7 +117,7 @@ func run(args []string, log *slog.Logger) error {
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
-	a := &agent.Agent{Config: c, Version: version, Log: log}
+	a := &agent.Agent{Config: c, Version: version, Log: log, StatePath: *statePath}
 	log.Info("cf-agent gestart", "version", version, "node", c.NodeID, "nats", c.NatsURL)
 	return a.Run(ctx)
 }

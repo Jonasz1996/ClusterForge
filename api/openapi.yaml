@@ -382,6 +382,31 @@ paths:
               schema: { $ref: "#/components/schemas/NodeRuntime" }
         "401": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /nodes/{nodeId}/actions:
+    parameters:
+      - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: nodeAction
+      summary: Een node herstarten, afsluiten, in of uit onderhoud zetten of zijn facts verzamelen (admin); wordt een taak
+      description: |
+        Bij onderhoud, herstarten en afsluiten zet de agent eerst keepalived uit zodat de VIP's naar een andere node gaan.
+        Kan geen andere node een VIP overnemen, dan antwoordt de server 409 met code needs_force; met force=true gaat het toch door.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/NodeActionInput" }
+      responses:
+        "202":
+          description: Taak aangemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
   /nodes/{nodeId}/metrics:
     parameters:
       - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -1019,10 +1044,11 @@ components:
       enum: [online, late, offline]
     AgentSummary:
       type: object
-      required: [id, version, enrolled_at, last_seen_at, connection]
+      required: [id, version, enrolled_at, last_seen_at, connection, commands]
       properties:
         id: { type: string, format: uuid }
         version: { type: string }
+        commands: { type: boolean, description: De agent kan commando's uitvoeren (herstarten, onderhoud); oudere agents niet }
         enrolled_at: { type: string, format: date-time }
         last_seen_at: { type: string, format: date-time, nullable: true }
         connection: { $ref: "#/components/schemas/AgentConnection" }
@@ -1367,6 +1393,18 @@ components:
         description: { type: string }
         vmstate: { type: boolean, description: Ook het geheugen in de snapshot (alleen VM's die draaien) }
         target: { type: string, description: Doelhost bij migreren }
+    NodeAction:
+      type: string
+      enum: [refresh_facts, reboot, shutdown, maintenance, activate]
+      description: activate beëindigt het onderhoud
+    NodeActionInput:
+      type: object
+      required: [action]
+      properties:
+        action: { $ref: "#/components/schemas/NodeAction" }
+        reason: { type: string, description: Komt in de activiteitenlog en in het systeemlog van de node }
+        drain: { type: boolean, description: Bij herstarten of afsluiten eerst de VIP's weghalen (standaard ja) }
+        force: { type: boolean, description: Doorgaan ook als geen andere node een VIP kan overnemen }
     JobStatus:
       type: string
       enum: [queued, running, succeeded, failed, canceled]

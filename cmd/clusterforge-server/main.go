@@ -29,6 +29,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/httpapi"
 	"github.com/Jonasz1996/clusterforge/internal/jobs"
+	"github.com/Jonasz1996/clusterforge/internal/lifecycle"
 	"github.com/Jonasz1996/clusterforge/internal/live"
 	"github.com/Jonasz1996/clusterforge/internal/metrics"
 	"github.com/Jonasz1996/clusterforge/internal/proxmox"
@@ -138,6 +139,8 @@ func serve() error {
 	runner := jobs.NewRunner(pool, ev, log)
 	pve := proxmox.NewService(pool, ev, log, box, runner)
 	pve.Changed = eval.Kick
+	life := lifecycle.NewService(pool, ev, log, runner, bus)
+	life.Changed = eval.Kick
 	go hub.Run(ctx)
 	go eval.Run(ctx)
 	go ingest.Run(ctx)
@@ -152,7 +155,7 @@ func serve() error {
 		Addr: cfg.Listen,
 		Handler: httpapi.New(httpapi.Deps{
 			Config: cfg, Log: log, Pool: pool, Auth: authSvc, Bus: bus, Hub: hub, Proxmox: pve, Jobs: runner,
-			Version: version,
+			Lifecycle: life, Version: version,
 		}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,

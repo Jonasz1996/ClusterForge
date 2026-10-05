@@ -6,7 +6,7 @@ import { ClusterHealth } from "@/components/monitoring/ClusterHealth";
 import { Alert, Card } from "@/components/ui";
 import { api, unwrap, type ApiEvent } from "@/lib/api/client";
 import { useMe } from "@/lib/auth";
-import { statuses, useClusters, useNodes, type Status } from "@/lib/inventory";
+import { lifecycleInfo, statuses, useClusters, useNodes, type Status } from "@/lib/inventory";
 import { vmStatusInfo } from "@/lib/proxmox";
 
 const actionLabels: Record<string, string> = {
@@ -28,6 +28,7 @@ const actionLabels: Record<string, string> = {
   "vip.deleted": "VIP verwijderd",
   "vip.owner_changed": "VIP verhuisd",
   "node.status_changed": "Status van node",
+  "node.lifecycle_changed": "Lifecycle van node",
   "cluster.status_changed": "Status van cluster",
   "agent.enrolled": "Agent aangemeld",
   "agent.revoked": "Agent ingetrokken",
@@ -68,6 +69,9 @@ function detail(e: ApiEvent): string | null {
     return `→ ${e.action === "vm.moved" ? p.to : vmStatusInfo(p.to).label.toLowerCase()}`;
   }
   if (e.action === "job.failed" && typeof p.error === "string") return p.error;
+  if (e.action === "node.lifecycle_changed" && typeof p.to === "string") {
+    return `→ ${lifecycleInfo(p.to).label.toLowerCase()}${typeof p.reason === "string" ? ` (${p.reason})` : ""}`;
+  }
   if (e.action.endsWith(".status_changed") && typeof p.to === "string") {
     return `→ ${statuses[p.to as Status]?.label ?? p.to}`;
   }

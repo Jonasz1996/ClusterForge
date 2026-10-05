@@ -10,7 +10,10 @@ import (
 
 // Version is de protocolversie. Een agent meldt die bij elke heartbeat, zodat
 // de server geen berichten stuurt die de agent niet kent.
-const Version = 1
+const Version = 2
+
+// CommandsSince is de eerste protocolversie met commando's.
+const CommandsSince = 2
 
 // Berichttypes.
 const (
@@ -18,6 +21,8 @@ const (
 	TypeFacts     = "facts"
 	TypeMetrics   = "metrics"
 	TypeAck       = "ack"
+	TypeCommand   = "command"
+	TypeResult    = "command_result"
 )
 
 // Envelope is de buitenkant van elk bericht.
@@ -157,6 +162,47 @@ type Upgrades struct {
 	Total    int      `json:"total"`
 	Security int      `json:"security"`
 	Packages []string `json:"packages"`
+}
+
+// Commando's die de server een agent kan sturen. De agent voert alleen deze
+// uit; er is geen vrije shell.
+const (
+	// CmdFactsCollect verzamelt de facts meteen en stuurt ze naar de server.
+	CmdFactsCollect = "facts.collect"
+	// CmdReboot en CmdShutdown herstarten of stoppen de machine na
+	// DelaySeconds, zodat het antwoord nog de deur uit kan.
+	CmdReboot   = "system.reboot"
+	CmdShutdown = "system.shutdown"
+	// CmdMaintenanceEnter zet keepalived uit (stop en disable), zodat de VIP's
+	// naar de andere nodes gaan en na een reboot niet terugkomen. De agent
+	// onthoudt hoe keepalived stond.
+	CmdMaintenanceEnter = "node.maintenance.enter"
+	// CmdMaintenanceExit zet keepalived terug zoals het voor het onderhoud
+	// stond.
+	CmdMaintenanceExit = "node.maintenance.exit"
+)
+
+// Command is een opdracht van de server. De server stuurt het als request op
+// cf.node.<id>.cmd; de agent antwoordt met een Result. Een commando dat
+// opnieuw gestuurd wordt, houdt hetzelfde ID; de agent voert het dan niet
+// nog eens uit.
+type Command struct {
+	ID     string `json:"id"`
+	Action string `json:"action"`
+	// Deadline: na dit tijdstip weigert de agent het commando.
+	Deadline     time.Time `json:"deadline"`
+	Reason       string    `json:"reason,omitempty"`
+	DelaySeconds int       `json:"delay_seconds,omitempty"`
+}
+
+// Result is het antwoord van de agent op een commando.
+type Result struct {
+	OK     bool     `json:"ok"`
+	Error  string   `json:"error,omitempty"`
+	Output []string `json:"output,omitempty"`
+	// Repeat is true als de agent dit commando al eerder kreeg en het niet
+	// opnieuw uitvoerde.
+	Repeat bool `json:"repeat,omitempty"`
 }
 
 // Ack is het antwoord van de server op een request.

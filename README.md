@@ -13,7 +13,7 @@ Het technisch ontwerp staat in [docs/design/mvp-fase-1.md](docs/design/mvp-fase-
 | 3. Agent | Enrollment, heartbeat, facts | klaar |
 | 4. Monitoring | Metrics, status, dashboards | klaar |
 | 5. Proxmox | Sync en VM-acties | klaar |
-| 6. Node lifecycle | Reboot, maintenance, drain | gepland |
+| 6. Node lifecycle | Reboot, maintenance, drain | klaar |
 | 7. Templates en deployment | Clusters uit templates | gepland |
 
 ## Draaien met Docker Compose
@@ -117,9 +117,26 @@ Elke 20 seconden haalt ClusterForge de stand op. Bij Proxmox zie je de hosts met
 
 Wil je ook de CPU, het geheugen en de schijven van de Proxmox-hosts zelf in grafieken, zet dan ook daar de agent op.
 
+## Onderhoud, herstarten en afsluiten
+
+Bij elke node staat de kaart Beheer:
+
+| Actie | Wat er gebeurt |
+| --- | --- |
+| Onderhoud | De agent zet keepalived uit (stop en disable), ClusterForge wacht tot de VIP's bij een andere node staan en zet de node dan in onderhoud. Hij telt niet mee voor de status van het cluster en keepalived blijft uit, ook na een herstart. |
+| Onderhoud beëindigen | Keepalived komt terug zoals het voor het onderhoud stond, en de node is weer actief. |
+| Herstarten | Eerst de VIP's weg en de node in onderhoud, dan herstarten, wachten tot de node terug is, keepalived weer aan en de node weer actief. |
+| Afsluiten | Zoals herstarten, maar de node blijft uit en in onderhoud. Start hem in Proxmox of op de machine zelf en beëindig daarna het onderhoud. |
+
+Kan geen andere node een VIP overnemen (geen actieve, online node waarop keepalived draait), dan vraagt ClusterForge eerst of je toch door wilt. Staan de VIP's na twee minuten nog niet ergens anders, dan zet de taak keepalived weer aan en blijft de node actief. Elke stap staat met het antwoord van de agent bij Taken, en elke wissel van lifecycle komt in de activiteitenlog, met de reden die je opgaf.
+
+Een node zonder agent kun je alleen in en uit onderhoud zetten; de VIP's haal je dan zelf weg.
+
+De agent voert alleen deze vaste commando's uit, nooit een vrije shell: facts verzamelen, keepalived uit- en aanzetten voor onderhoud, herstarten en afsluiten met `systemctl`. Hij onthoudt het onderhoud en het laatste herstartcommando in `/var/lib/clusterforge/agent-state.json`, zodat hij na een herstart niet nog eens herstart. Een agent van voor deze versie kan geen commando's uitvoeren; trek hem in en installeer hem opnieuw.
+
 ## Taken
 
-Alles wat even duurt, zoals een VM migreren, loopt als taak op de achtergrond. Bij Taken zie je wat er loopt en wat er gebeurd is, met per stap het logboek uit Proxmox. Een lopende taak kun je annuleren; ClusterForge stopt dan ook de taak in Proxmox. Valt de server weg tijdens een taak, dan gaat hij na de herstart verder waar hij was, zonder de actie in Proxmox nog eens te starten.
+Alles wat even duurt, zoals een VM migreren of een node herstarten, loopt als taak op de achtergrond. Bij Taken zie je wat er loopt en wat er gebeurd is, met per stap het logboek uit Proxmox. Een lopende taak kun je annuleren; ClusterForge stopt dan ook de taak in Proxmox. Valt de server weg tijdens een taak, dan gaat hij na de herstart verder waar hij was, zonder de actie in Proxmox nog eens te starten.
 
 ## Ontwikkelen
 
@@ -162,6 +179,7 @@ internal/status/           statusregels voor nodes en clusters, VIP-eigenaars
 internal/live/             live updates naar de webinterface (Server-Sent Events)
 internal/proxmox/          Proxmox-API: koppelingen, sync elke 20 s en VM-acties; pvefake/ is een nep-Proxmox voor tests
 internal/jobs/             taken op de achtergrond met stappen, logboek en annuleren
+internal/lifecycle/        acties op nodes via de agent: onderhoud, herstarten, afsluiten
 internal/secrets/          versleutelen van geheimen met de masterkey
 pkg/protocol/              berichten tussen server en agent
 internal/webui/            ingebedde webinterface

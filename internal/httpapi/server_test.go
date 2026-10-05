@@ -25,6 +25,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/config"
 	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/jobs"
+	"github.com/Jonasz1996/clusterforge/internal/lifecycle"
 	"github.com/Jonasz1996/clusterforge/internal/live"
 	"github.com/Jonasz1996/clusterforge/internal/metrics"
 	"github.com/Jonasz1996/clusterforge/internal/proxmox"
@@ -48,6 +49,7 @@ type testEnv struct {
 	vm   *fakeVM
 	pve  *proxmox.Service
 	jobs *jobs.Runner
+	life *lifecycle.Service
 }
 
 func newTestEnv(t *testing.T) *testEnv {
@@ -90,6 +92,11 @@ func newTestEnv(t *testing.T) *testEnv {
 	pve := proxmox.NewService(pool, ev, log, box, runner)
 	pve.TaskPoll = 20 * time.Millisecond
 	pve.Changed = eval.Kick
+	life := lifecycle.NewService(pool, ev, log, runner, bus)
+	life.Changed = eval.Kick
+	life.Poll, life.PowerDelay, life.OffAfter = 20*time.Millisecond, 0, time.Second
+	life.Offline, life.Stale = time.Second, time.Second
+	life.MoveTimeout, life.BootTimeout, life.OffTimeout, life.ReadyTimeout = 5*time.Second, 8*time.Second, 8*time.Second, 5*time.Second
 	var wg sync.WaitGroup
 	wg.Add(3)
 	go func() { defer wg.Done(); hub.Run(runCtx) }()
@@ -100,10 +107,13 @@ func newTestEnv(t *testing.T) *testEnv {
 		SecureCookies: false, SessionTTL: time.Hour, AgentDir: t.TempDir(), VictoriaMetricsURL: vm.srv.URL,
 		GrafanaNodeURL: "https://grafana.example/d/node?var-node={hostname}",
 	}
-	api := New(Deps{Config: cfg, Log: log, Pool: pool, Auth: a, Bus: bus, Hub: hub, Proxmox: pve, Jobs: runner, Version: "test"})
+	api := New(Deps{
+		Config: cfg, Log: log, Pool: pool, Auth: a, Bus: bus, Hub: hub, Proxmox: pve, Jobs: runner, Lifecycle: life,
+		Version: "test",
+	})
 	srv := httptest.NewServer(api.Handler())
 	t.Cleanup(srv.Close)
-	return &testEnv{t: t, srv: srv, auth: a, pool: pool, api: api, bus: bus, eval: eval, vm: vm, pve: pve, jobs: runner}
+	return &testEnv{t: t, srv: srv, auth: a, pool: pool, api: api, bus: bus, eval: eval, vm: vm, pve: pve, jobs: runner, life: life}
 }
 
 // fakeVM speelt VictoriaMetrics: het bewaart wat binnenkomt en geeft op elke
@@ -189,7 +199,8 @@ func (c *client) do(method, path string, body any, out any) int {
 }
 
 type apiErr struct {
-	Code string `json:"code"`
+	Code    string `json:"code"`
+	Message string `json:"message"`
 }
 
 type me struct {
