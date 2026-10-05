@@ -138,7 +138,7 @@ Heb je al een Grafana, dan kan die de metrics rechtstreeks uit VictoriaMetrics l
 Maak op een van je Proxmox-hosts een API-token voor ClusterForge, als root:
 
 ```sh
-pveum role add ClusterForge --privs "VM.Audit VM.PowerMgmt VM.Snapshot VM.Migrate VM.Allocate VM.Clone VM.Config.CPU VM.Config.Memory VM.Config.Disk VM.Config.Network VM.Config.Cloudinit VM.Config.Options VM.Monitor Sys.Audit Datastore.Audit Datastore.AllocateSpace SDN.Use"
+pveum role add ClusterForge --privs "VM.Audit VM.PowerMgmt VM.Snapshot VM.Migrate VM.Allocate VM.Clone VM.Config.CPU VM.Config.Memory VM.Config.Disk VM.Config.Network VM.Config.Cloudinit VM.Config.Options VM.Monitor VM.Backup Sys.Audit Datastore.Audit Datastore.AllocateSpace SDN.Use"
 pveum user add clusterforge@pve --comment "ClusterForge"
 pveum acl modify / --users clusterforge@pve --roles ClusterForge
 pveum user token add clusterforge@pve cf --privsep 0
@@ -210,6 +210,7 @@ Databasemigraties lopen automatisch bij het starten van de server.
 | Koppelen geeft 401 of 403 | Token-ID of secret verkeerd, of de rol mist rechten; controleer met `pveum user token permissions clusterforge@pve cf` |
 | "Het token-secret is niet te ontsleutelen" | `CF_MASTER_KEY` is veranderd; vul het secret opnieuw in via Proxmox → Bewerken |
 | Uitrollen geeft 403 bij het klonen of instellen | De rol mist rechten om VM's te maken; voer `pveum role modify ClusterForge --privs "…"` uit met de lijst uit stap 9 |
+| Bij Back-ups staat "Proxmox toont geen enkele back-up" | De rol mist `VM.Backup`; voer `pveum role modify ClusterForge --privs "…"` uit met de lijst uit stap 9, of er draait nog geen back-upjob in Proxmox |
 | Uitrol blijft wachten op de QEMU guest agent | De VM start niet goed, of de golden image heeft geen qemu-guest-agent; maak hem opnieuw met het script en `--replace` |
 | "cf-agent meldt zich niet aan" | De VM bereikt ClusterForge of poort 4222 niet; log in via de console van Proxmox en kijk met `journalctl -u cf-agent` |
 | Controle "geeft nog geen 200" | Nginx draait niet of het VIP is niet bereikbaar vanaf de LXC; kijk op de node naar `systemctl status nginx keepalived` en klik daarna op Opnieuw proberen |

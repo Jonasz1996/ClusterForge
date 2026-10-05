@@ -13,6 +13,7 @@ const (
 	CategoryJobs      Category = "jobs"
 	CategoryAgents    Category = "agents"
 	CategoryProxmox   Category = "proxmox"
+	CategoryBackups   Category = "backups"
 	CategoryStatus    Category = "status"
 )
 
@@ -27,6 +28,7 @@ var Categories = []struct {
 	{CategoryJobs, "Taken"},
 	{CategoryAgents, "Agents"},
 	{CategoryProxmox, "Proxmox"},
+	{CategoryBackups, "Back-ups"},
 	{CategoryStatus, "Status"},
 }
 
@@ -83,6 +85,14 @@ var Known = map[string]Spec{
 	"vm.status_changed":      {CategoryProxmox, "Status van VM gewijzigd"},
 	"vm.moved":               {CategoryProxmox, "VM verhuisd"},
 	"vm.missing":             {CategoryProxmox, "VM verdwenen uit Proxmox"},
+
+	"backup.fresh":               {CategoryBackups, "Back-up weer vers"},
+	"backup.stale":               {CategoryBackups, "Back-up te oud"},
+	"backup.missing":             {CategoryBackups, "Back-up ontbreekt"},
+	"backup.inventory_failed":    {CategoryBackups, "Back-ups niet te lezen"},
+	"backup.inventory_recovered": {CategoryBackups, "Back-ups weer te lezen"},
+	"backup.policy_updated":      {CategoryBackups, "Back-upbeleid gewijzigd"},
+	"backup.watch_updated":       {CategoryBackups, "Lijst ook bewaken gewijzigd"},
 
 	"node.status_changed":    {CategoryStatus, "Status van node gewijzigd"},
 	"cluster.status_changed": {CategoryStatus, "Status van cluster gewijzigd"},

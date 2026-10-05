@@ -57,6 +57,51 @@ func (e AuditEntryActorType) Valid() bool {
 	}
 }
 
+// Defines values for BackupFreshness.
+const (
+	BackupFreshnessMissing BackupFreshness = "missing"
+	BackupFreshnessOk      BackupFreshness = "ok"
+	BackupFreshnessStale   BackupFreshness = "stale"
+	BackupFreshnessUnknown BackupFreshness = "unknown"
+)
+
+// Valid indicates whether the value is a known member of the BackupFreshness enum.
+func (e BackupFreshness) Valid() bool {
+	switch e {
+	case BackupFreshnessMissing:
+		return true
+	case BackupFreshnessOk:
+		return true
+	case BackupFreshnessStale:
+		return true
+	case BackupFreshnessUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for BackupVolumeVerify.
+const (
+	BackupVolumeVerifyEmpty  BackupVolumeVerify = ""
+	BackupVolumeVerifyFailed BackupVolumeVerify = "failed"
+	BackupVolumeVerifyOk     BackupVolumeVerify = "ok"
+)
+
+// Valid indicates whether the value is a known member of the BackupVolumeVerify enum.
+func (e BackupVolumeVerify) Valid() bool {
+	switch e {
+	case BackupVolumeVerifyEmpty:
+		return true
+	case BackupVolumeVerifyFailed:
+		return true
+	case BackupVolumeVerifyOk:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ClusterType.
 const (
 	Cron         ClusterType = "cron"
@@ -206,25 +251,25 @@ func (e HealthStatus) Valid() bool {
 
 // Defines values for JobStatus.
 const (
-	Canceled  JobStatus = "canceled"
-	Failed    JobStatus = "failed"
-	Queued    JobStatus = "queued"
-	Running   JobStatus = "running"
-	Succeeded JobStatus = "succeeded"
+	JobStatusCanceled  JobStatus = "canceled"
+	JobStatusFailed    JobStatus = "failed"
+	JobStatusQueued    JobStatus = "queued"
+	JobStatusRunning   JobStatus = "running"
+	JobStatusSucceeded JobStatus = "succeeded"
 )
 
 // Valid indicates whether the value is a known member of the JobStatus enum.
 func (e JobStatus) Valid() bool {
 	switch e {
-	case Canceled:
+	case JobStatusCanceled:
 		return true
-	case Failed:
+	case JobStatusFailed:
 		return true
-	case Queued:
+	case JobStatusQueued:
 		return true
-	case Running:
+	case JobStatusRunning:
 		return true
-	case Succeeded:
+	case JobStatusSucceeded:
 		return true
 	default:
 		return false
@@ -592,6 +637,132 @@ type AuditRef struct {
 	Deleted bool   `json:"deleted"`
 	Id      string `json:"id"`
 	Name    string `json:"name"`
+}
+
+// BackupClusterState defines model for BackupClusterState.
+type BackupClusterState struct {
+	// Freshness ok: de nieuwste back-up is jonger dan de maximale leeftijd. stale: ze
+	// is ouder. missing: Proxmox heeft geen back-up. unknown: de back-ups
+	// van de koppeling zijn niet te lezen.
+	Freshness BackupFreshness    `json:"freshness"`
+	Id        openapi_types.UUID `json:"id"`
+}
+
+// BackupConnection defines model for BackupConnection.
+type BackupConnection struct {
+	BackupCount int `json:"backup_count"`
+
+	// CheckedAt Laatste poging om de back-ups te lezen
+	CheckedAt nullable.Nullable[time.Time] `json:"checked_at"`
+	Error     string                       `json:"error"`
+	Id        openapi_types.UUID           `json:"id"`
+	Name      string                       `json:"name"`
+
+	// NotBackedUp VM's die in geen back-upjob zitten; null als Proxmox dat niet liet lezen
+	NotBackedUp nullable.Nullable[[]BackupUncovered] `json:"not_backed_up"`
+
+	// Watch De lijst "ook bewaken"
+	Watch []BackupWatchEntry `json:"watch"`
+}
+
+// BackupFreshness ok: de nieuwste back-up is jonger dan de maximale leeftijd. stale: ze
+// is ouder. missing: Proxmox heeft geen back-up. unknown: de back-ups
+// van de koppeling zijn niet te lezen.
+type BackupFreshness string
+
+// BackupItem defines model for BackupItem.
+type BackupItem struct {
+	Cluster        nullable.Nullable[BackupRef] `json:"cluster"`
+	ConnectionId   openapi_types.UUID           `json:"connection_id"`
+	ConnectionName string                       `json:"connection_name"`
+	Count          int                          `json:"count"`
+
+	// Freshness ok: de nieuwste back-up is jonger dan de maximale leeftijd. stale: ze
+	// is ouder. missing: Proxmox heeft geen back-up. unknown: de back-ups
+	// van de koppeling zijn niet te lezen.
+	Freshness BackupFreshness `json:"freshness"`
+	GuestType string          `json:"guest_type"`
+
+	// Label Het label uit de lijst "ook bewaken"
+	Label       string                          `json:"label"`
+	Latest      nullable.Nullable[BackupVolume] `json:"latest"`
+	MaxAgeHours int                             `json:"max_age_hours"`
+
+	// Name Naam van de VM in Proxmox; leeg als hij er niet meer is
+	Name string                       `json:"name"`
+	Node nullable.Nullable[BackupRef] `json:"node"`
+
+	// Reason Waarom de stand niet ok is
+	Reason string                       `json:"reason"`
+	Since  nullable.Nullable[time.Time] `json:"since"`
+	Vmid   int                          `json:"vmid"`
+
+	// Watched Bewaakt via de lijst "ook bewaken" in plaats van via een node
+	Watched bool `json:"watched"`
+}
+
+// BackupOverview defines model for BackupOverview.
+type BackupOverview struct {
+	Clusters    []BackupClusterState `json:"clusters"`
+	Connections []BackupConnection   `json:"connections"`
+	Items       []BackupItem         `json:"items"`
+}
+
+// BackupPolicy defines model for BackupPolicy.
+type BackupPolicy struct {
+	// Default Het cluster heeft nog geen eigen beleid
+	Default     bool `json:"default"`
+	MaxAgeHours int  `json:"max_age_hours"`
+}
+
+// BackupPolicyInput defines model for BackupPolicyInput.
+type BackupPolicyInput struct {
+	MaxAgeHours int `json:"max_age_hours"`
+}
+
+// BackupRef defines model for BackupRef.
+type BackupRef struct {
+	Id   openapi_types.UUID `json:"id"`
+	Name string             `json:"name"`
+}
+
+// BackupUncovered defines model for BackupUncovered.
+type BackupUncovered struct {
+	Name string                       `json:"name"`
+	Node nullable.Nullable[BackupRef] `json:"node"`
+	Type string                       `json:"type"`
+	Vmid int                          `json:"vmid"`
+}
+
+// BackupVolume defines model for BackupVolume.
+type BackupVolume struct {
+	Format string `json:"format"`
+
+	// Host De Proxmox-host waarlangs de back-up gelezen is
+	Host      string    `json:"host"`
+	Notes     string    `json:"notes"`
+	Protected bool      `json:"protected"`
+	Size      int64     `json:"size"`
+	Storage   string    `json:"storage"`
+	Time      time.Time `json:"time"`
+
+	// Verify Verificatie door Proxmox Backup Server; leeg als die er niet is
+	Verify BackupVolumeVerify `json:"verify"`
+	Volid  string             `json:"volid"`
+}
+
+// BackupVolumeVerify Verificatie door Proxmox Backup Server; leeg als die er niet is
+type BackupVolumeVerify string
+
+// BackupWatchEntry defines model for BackupWatchEntry.
+type BackupWatchEntry struct {
+	Label string `json:"label"`
+	Vmid  int    `json:"vmid"`
+}
+
+// BackupWatchInput defines model for BackupWatchInput.
+type BackupWatchInput struct {
+	Items []BackupWatchEntry `json:"items"`
 }
 
 // ChangePasswordRequest defines model for ChangePasswordRequest.
@@ -1144,6 +1315,12 @@ type NodeActionInput struct {
 	Reason *string `json:"reason,omitempty"`
 }
 
+// NodeBackups defines model for NodeBackups.
+type NodeBackups struct {
+	Backups []BackupVolume                `json:"backups"`
+	Item    nullable.Nullable[BackupItem] `json:"item"`
+}
+
 // NodeInput defines model for NodeInput.
 type NodeInput struct {
 	ClusterId   nullable.Nullable[openapi_types.UUID] `json:"cluster_id,omitempty"`
@@ -1620,6 +1797,9 @@ type CreateClusterJSONRequestBody = ClusterInput
 // UpdateClusterJSONRequestBody defines body for UpdateCluster for application/json ContentType.
 type UpdateClusterJSONRequestBody = ClusterPatch
 
+// UpdateBackupPolicyJSONRequestBody defines body for UpdateBackupPolicy for application/json ContentType.
+type UpdateBackupPolicyJSONRequestBody = BackupPolicyInput
+
 // CreateVipJSONRequestBody defines body for CreateVip for application/json ContentType.
 type CreateVipJSONRequestBody = VipInput
 
@@ -1649,6 +1829,9 @@ type ProbeProxmoxJSONRequestBody ProbeProxmoxJSONBody
 
 // UpdateProxmoxJSONRequestBody defines body for UpdateProxmox for application/json ContentType.
 type UpdateProxmoxJSONRequestBody = ProxmoxPatch
+
+// SetBackupWatchJSONRequestBody defines body for SetBackupWatch for application/json ContentType.
+type SetBackupWatchJSONRequestBody = BackupWatchInput
 
 // VmActionJSONRequestBody defines body for VmAction for application/json ContentType.
 type VmActionJSONRequestBody = VmActionInput
@@ -1694,6 +1877,9 @@ type ServerInterface interface {
 	// BeginTotpSetup Nieuw TOTP-geheim aanmaken (nog niet actief)
 	// (POST /auth/totp/setup)
 	BeginTotpSetup(w http.ResponseWriter, r *http.Request)
+	// GetBackups Back-upstand van elke bewaakte VM, per koppeling de dekking, en per cluster de slechtste stand
+	// (GET /backups)
+	GetBackups(w http.ResponseWriter, r *http.Request)
 	// ListClusters Alle clusters met aantallen nodes en VIP's
 	// (GET /clusters)
 	ListClusters(w http.ResponseWriter, r *http.Request)
@@ -1709,6 +1895,12 @@ type ServerInterface interface {
 	// UpdateCluster Cluster wijzigen (admin); alleen meegestuurde velden veranderen
 	// (PATCH /clusters/{clusterId})
 	UpdateCluster(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
+	// GetBackupPolicy Back-upbeleid van een cluster, of de standaard als het er nog geen heeft
+	// (GET /clusters/{clusterId}/backup-policy)
+	GetBackupPolicy(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
+	// UpdateBackupPolicy Back-upbeleid van een cluster wijzigen (admin)
+	// (PUT /clusters/{clusterId}/backup-policy)
+	UpdateBackupPolicy(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
 	// GetClusterMetrics Grafieken van een cluster, met een lijn per node
 	// (GET /clusters/{clusterId}/metrics)
 	GetClusterMetrics(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params GetClusterMetricsParams)
@@ -1769,6 +1961,9 @@ type ServerInterface interface {
 	// NodeAction Een node herstarten, afsluiten, in of uit onderhoud zetten of zijn facts verzamelen (admin); wordt een taak
 	// (POST /nodes/{nodeId}/actions)
 	NodeAction(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// GetNodeBackups Back-upstand en alle back-ups van de VM van een node
+	// (GET /nodes/{nodeId}/backups)
+	GetNodeBackups(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
 	// GetNodeFacts Facts en laatste heartbeat van de agent op deze node
 	// (GET /nodes/{nodeId}/facts)
 	GetNodeFacts(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
@@ -1793,10 +1988,13 @@ type ServerInterface interface {
 	// UpdateProxmox Proxmox-koppeling wijzigen (admin); zonder token_secret blijft het oude
 	// (PATCH /proxmox/{proxmoxId})
 	UpdateProxmox(w http.ResponseWriter, r *http.Request, proxmoxId openapi_types.UUID)
+	// SetBackupWatch De lijst "ook bewaken" van een koppeling vervangen (admin)
+	// (PUT /proxmox/{proxmoxId}/backup-watch)
+	SetBackupWatch(w http.ResponseWriter, r *http.Request, proxmoxId openapi_types.UUID)
 	// GetProxmoxResources Hosts, VM's, containers en storage uit de laatste sync
 	// (GET /proxmox/{proxmoxId}/resources)
 	GetProxmoxResources(w http.ResponseWriter, r *http.Request, proxmoxId openapi_types.UUID)
-	// SyncProxmox Nu synchroniseren in plaats van op de volgende ronde te wachten (admin)
+	// SyncProxmox Nu synchroniseren en de back-ups opnieuw lezen in plaats van op de volgende ronde te wachten (admin)
 	// (POST /proxmox/{proxmoxId}/sync)
 	SyncProxmox(w http.ResponseWriter, r *http.Request, proxmoxId openapi_types.UUID)
 	// VmAction Een VM of container starten, stoppen, snapshotten of migreren (admin); wordt een taak
@@ -1898,6 +2096,12 @@ func (_ Unimplemented) BeginTotpSetup(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// GetBackups Back-upstand van elke bewaakte VM, per koppeling de dekking, en per cluster de slechtste stand
+// (GET /backups)
+func (_ Unimplemented) GetBackups(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // ListClusters Alle clusters met aantallen nodes en VIP's
 // (GET /clusters)
 func (_ Unimplemented) ListClusters(w http.ResponseWriter, r *http.Request) {
@@ -1925,6 +2129,18 @@ func (_ Unimplemented) GetCluster(w http.ResponseWriter, r *http.Request, cluste
 // UpdateCluster Cluster wijzigen (admin); alleen meegestuurde velden veranderen
 // (PATCH /clusters/{clusterId})
 func (_ Unimplemented) UpdateCluster(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetBackupPolicy Back-upbeleid van een cluster, of de standaard als het er nog geen heeft
+// (GET /clusters/{clusterId}/backup-policy)
+func (_ Unimplemented) GetBackupPolicy(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// UpdateBackupPolicy Back-upbeleid van een cluster wijzigen (admin)
+// (PUT /clusters/{clusterId}/backup-policy)
+func (_ Unimplemented) UpdateBackupPolicy(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -2048,6 +2264,12 @@ func (_ Unimplemented) NodeAction(w http.ResponseWriter, r *http.Request, nodeId
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// GetNodeBackups Back-upstand en alle back-ups van de VM van een node
+// (GET /nodes/{nodeId}/backups)
+func (_ Unimplemented) GetNodeBackups(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // GetNodeFacts Facts en laatste heartbeat van de agent op deze node
 // (GET /nodes/{nodeId}/facts)
 func (_ Unimplemented) GetNodeFacts(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
@@ -2096,13 +2318,19 @@ func (_ Unimplemented) UpdateProxmox(w http.ResponseWriter, r *http.Request, pro
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// SetBackupWatch De lijst "ook bewaken" van een koppeling vervangen (admin)
+// (PUT /proxmox/{proxmoxId}/backup-watch)
+func (_ Unimplemented) SetBackupWatch(w http.ResponseWriter, r *http.Request, proxmoxId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // GetProxmoxResources Hosts, VM's, containers en storage uit de laatste sync
 // (GET /proxmox/{proxmoxId}/resources)
 func (_ Unimplemented) GetProxmoxResources(w http.ResponseWriter, r *http.Request, proxmoxId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// SyncProxmox Nu synchroniseren in plaats van op de volgende ronde te wachten (admin)
+// SyncProxmox Nu synchroniseren en de back-ups opnieuw lezen in plaats van op de volgende ronde te wachten (admin)
 // (POST /proxmox/{proxmoxId}/sync)
 func (_ Unimplemented) SyncProxmox(w http.ResponseWriter, r *http.Request, proxmoxId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -2611,6 +2839,20 @@ func (siw *ServerInterfaceWrapper) BeginTotpSetup(w http.ResponseWriter, r *http
 	handler.ServeHTTP(w, r)
 }
 
+// GetBackups operation middleware
+func (siw *ServerInterfaceWrapper) GetBackups(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetBackups(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListClusters operation middleware
 func (siw *ServerInterfaceWrapper) ListClusters(w http.ResponseWriter, r *http.Request) {
 
@@ -2708,6 +2950,58 @@ func (siw *ServerInterfaceWrapper) UpdateCluster(w http.ResponseWriter, r *http.
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.UpdateCluster(w, r, clusterId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetBackupPolicy operation middleware
+func (siw *ServerInterfaceWrapper) GetBackupPolicy(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetBackupPolicy(w, r, clusterId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateBackupPolicy operation middleware
+func (siw *ServerInterfaceWrapper) UpdateBackupPolicy(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateBackupPolicy(w, r, clusterId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -3210,6 +3504,32 @@ func (siw *ServerInterfaceWrapper) NodeAction(w http.ResponseWriter, r *http.Req
 	handler.ServeHTTP(w, r)
 }
 
+// GetNodeBackups operation middleware
+func (siw *ServerInterfaceWrapper) GetNodeBackups(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetNodeBackups(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetNodeFacts operation middleware
 func (siw *ServerInterfaceWrapper) GetNodeFacts(w http.ResponseWriter, r *http.Request) {
 
@@ -3389,6 +3709,32 @@ func (siw *ServerInterfaceWrapper) UpdateProxmox(w http.ResponseWriter, r *http.
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.UpdateProxmox(w, r, proxmoxId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetBackupWatch operation middleware
+func (siw *ServerInterfaceWrapper) SetBackupWatch(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "proxmoxId" -------------
+	var proxmoxId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "proxmoxId", chi.URLParam(r, "proxmoxId"), &proxmoxId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "proxmoxId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetBackupWatch(w, r, proxmoxId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -3867,6 +4213,21 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/proxmox/{proxmoxId}/vms/{vmid}/snapshots", wrapper.ListVmSnapshots)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/backups", wrapper.GetBackups)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/nodes/{nodeId}/backups", wrapper.GetNodeBackups)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/clusters/{clusterId}/backup-policy", wrapper.GetBackupPolicy)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/clusters/{clusterId}/backup-policy", wrapper.UpdateBackupPolicy)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/proxmox/{proxmoxId}/backup-watch", wrapper.SetBackupWatch)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/jobs", wrapper.ListJobs)

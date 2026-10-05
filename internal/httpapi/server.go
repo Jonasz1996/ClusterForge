@@ -15,6 +15,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/agents"
 	"github.com/Jonasz1996/clusterforge/internal/audit"
 	"github.com/Jonasz1996/clusterforge/internal/auth"
+	"github.com/Jonasz1996/clusterforge/internal/backups"
 	"github.com/Jonasz1996/clusterforge/internal/config"
 	"github.com/Jonasz1996/clusterforge/internal/deploy"
 	"github.com/Jonasz1996/clusterforge/internal/events"
@@ -46,6 +47,7 @@ type Server struct {
 	jobs         *jobs.Runner
 	life         *lifecycle.Service
 	deploy       *deploy.Service
+	backups      *backups.Service
 	version      string
 	loginLimiter *ipLimiter
 	// enrollLimiter remt het raden van enrollmenttokens.
@@ -68,7 +70,9 @@ type Deps struct {
 	// Lifecycle voert acties op nodes uit via hun agent.
 	Lifecycle *lifecycle.Service
 	// Deploy rolt clusters uit templates uit.
-	Deploy  *deploy.Service
+	Deploy *deploy.Service
+	// Backups leest de back-ups uit Proxmox en bewaakt hun versheid.
+	Backups *backups.Service
 	Version string
 }
 
@@ -93,6 +97,7 @@ func New(d Deps) *Server {
 		jobs:    d.Jobs,
 		life:    d.Lifecycle,
 		deploy:  d.Deploy,
+		backups: d.Backups,
 		version: d.Version,
 		// 10 pogingen direct, daarna één per 6 seconden per IP-adres.
 		loginLimiter:  newIPLimiter(6*time.Second, 10),

@@ -243,6 +243,28 @@ type Agent struct {
 	RevokedAt       *time.Time
 }
 
+type BackupPolicy struct {
+	ClusterID   uuid.UUID
+	MaxAgeHours int32
+	UpdatedAt   time.Time
+	UpdatedBy   *uuid.UUID
+}
+
+type BackupStatus struct {
+	ConnectionID   uuid.UUID
+	Vmid           int32
+	Freshness      string
+	LatestBackupAt *time.Time
+	ChangedAt      time.Time
+}
+
+type BackupWatch struct {
+	ConnectionID uuid.UUID
+	Vmid         int32
+	Label        string
+	CreatedAt    time.Time
+}
+
 type Cluster struct {
 	ID              uuid.UUID
 	Slug            string
@@ -374,19 +396,38 @@ type NodeStatus struct {
 	DiskUsedMount string
 }
 
+type ProxmoxBackup struct {
+	ConnectionID uuid.UUID
+	Volid        string
+	Storage      string
+	PveNode      string
+	Vmid         int32
+	GuestType    string
+	Ctime        time.Time
+	SizeBytes    int64
+	Format       string
+	Notes        string
+	Protected    bool
+	VerifyState  string
+	SyncedAt     time.Time
+}
+
 type ProxmoxConnection struct {
-	ID             uuid.UUID
-	Name           string
-	ApiUrl         string
-	TokenID        string
-	TokenSecretEnc []byte
-	KeyID          string
-	TlsFingerprint string
-	PveVersion     string
-	LastSyncAt     *time.Time
-	LastError      string
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	ID              uuid.UUID
+	Name            string
+	ApiUrl          string
+	TokenID         string
+	TokenSecretEnc  []byte
+	KeyID           string
+	TlsFingerprint  string
+	PveVersion      string
+	LastSyncAt      *time.Time
+	LastError       string
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+	BackupCheckedAt *time.Time
+	BackupError     string
+	NotBackedUp     []byte
 }
 
 type ProxmoxResource struct {

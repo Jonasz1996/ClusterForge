@@ -170,11 +170,13 @@ func (s *Server) SyncProxmox(w http.ResponseWriter, r *http.Request, id uuid.UUI
 	if _, ok := requireAdmin(w, r); !ok {
 		return
 	}
-	// Een fout van Proxmox staat daarna in last_error.
+	// Een fout van Proxmox staat daarna in last_error, een fout bij het
+	// lezen van de back-ups in de back-upstand van de koppeling.
 	if err := s.pve.Sync(r.Context(), id); errors.Is(err, proxmox.ErrNotFound) {
 		s.proxmoxError(w, r, err)
 		return
 	}
+	_ = s.backups.Inventory(r.Context(), id)
 	s.writeProxmox(w, r, http.StatusOK, id)
 }
 

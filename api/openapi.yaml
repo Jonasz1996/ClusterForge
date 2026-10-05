@@ -718,7 +718,7 @@ paths:
       - { name: proxmoxId, in: path, required: true, schema: { type: string, format: uuid } }
     post:
       operationId: syncProxmox
-      summary: Nu synchroniseren in plaats van op de volgende ronde te wachten (admin)
+      summary: Nu synchroniseren en de back-ups opnieuw lezen in plaats van op de volgende ronde te wachten (admin)
       responses:
         "200":
           description: Gesynchroniseerd; last_error zegt of het lukte
@@ -789,6 +789,84 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "502": { $ref: "#/components/responses/Error" }
         "503": { $ref: "#/components/responses/Error" }
+  /backups:
+    get:
+      operationId: getBackups
+      summary: Back-upstand van elke bewaakte VM, per koppeling de dekking, en per cluster de slechtste stand
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BackupOverview" }
+        "401": { $ref: "#/components/responses/Error" }
+  /nodes/{nodeId}/backups:
+    parameters:
+      - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getNodeBackups
+      summary: Back-upstand en alle back-ups van de VM van een node
+      responses:
+        "200":
+          description: OK; item is null als de node niet aan een VM gekoppeld is
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NodeBackups" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /clusters/{clusterId}/backup-policy:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getBackupPolicy
+      summary: Back-upbeleid van een cluster, of de standaard als het er nog geen heeft
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BackupPolicy" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    put:
+      operationId: updateBackupPolicy
+      summary: Back-upbeleid van een cluster wijzigen (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BackupPolicyInput" }
+      responses:
+        "200":
+          description: Gewijzigd
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BackupPolicy" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /proxmox/{proxmoxId}/backup-watch:
+    parameters:
+      - { name: proxmoxId, in: path, required: true, schema: { type: string, format: uuid } }
+    put:
+      operationId: setBackupWatch
+      summary: De lijst "ook bewaken" van een koppeling vervangen (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BackupWatchInput" }
+      responses:
+        "200":
+          description: Vervangen
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BackupConnection" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
   /jobs:
     get:
       operationId: listJobs
@@ -1063,6 +1141,161 @@ components:
         cluster_id: { type: string, format: uuid, nullable: true }
         action: { type: string }
         payload: { type: object, additionalProperties: true }
+    BackupRef:
+      type: object
+      required: [id, name]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+    BackupFreshness:
+      type: string
+      enum: [ok, stale, missing, unknown]
+      description: |
+        ok: de nieuwste back-up is jonger dan de maximale leeftijd. stale: ze
+        is ouder. missing: Proxmox heeft geen back-up. unknown: de back-ups
+        van de koppeling zijn niet te lezen.
+    BackupVolume:
+      type: object
+      required: [volid, storage, host, time, size, format, notes, protected, verify]
+      properties:
+        volid: { type: string }
+        storage: { type: string }
+        host:
+          type: string
+          description: De Proxmox-host waarlangs de back-up gelezen is
+        time: { type: string, format: date-time }
+        size: { type: integer, format: int64 }
+        format: { type: string }
+        notes: { type: string }
+        protected: { type: boolean }
+        verify:
+          type: string
+          description: Verificatie door Proxmox Backup Server; leeg als die er niet is
+          enum: ["", ok, failed]
+    BackupItem:
+      type: object
+      required: [connection_id, connection_name, vmid, name, label, guest_type, node, cluster, watched, freshness, reason, since, max_age_hours, latest, count]
+      properties:
+        connection_id: { type: string, format: uuid }
+        connection_name: { type: string }
+        vmid: { type: integer }
+        name:
+          type: string
+          description: Naam van de VM in Proxmox; leeg als hij er niet meer is
+        label:
+          type: string
+          description: Het label uit de lijst "ook bewaken"
+        guest_type: { type: string }
+        node:
+          allOf: [{ $ref: "#/components/schemas/BackupRef" }]
+          nullable: true
+        cluster:
+          allOf: [{ $ref: "#/components/schemas/BackupRef" }]
+          nullable: true
+        watched:
+          type: boolean
+          description: Bewaakt via de lijst "ook bewaken" in plaats van via een node
+        freshness: { $ref: "#/components/schemas/BackupFreshness" }
+        reason:
+          type: string
+          description: Waarom de stand niet ok is
+        since:
+          type: string
+          format: date-time
+          nullable: true
+        max_age_hours: { type: integer }
+        latest:
+          allOf: [{ $ref: "#/components/schemas/BackupVolume" }]
+          nullable: true
+        count: { type: integer }
+    BackupUncovered:
+      type: object
+      required: [vmid, name, type, node]
+      properties:
+        vmid: { type: integer }
+        name: { type: string }
+        type: { type: string }
+        node:
+          allOf: [{ $ref: "#/components/schemas/BackupRef" }]
+          nullable: true
+    BackupConnection:
+      type: object
+      required: [id, name, checked_at, error, watch, not_backed_up, backup_count]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        checked_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Laatste poging om de back-ups te lezen
+        error: { type: string }
+        watch:
+          type: array
+          description: De lijst "ook bewaken"
+          items: { $ref: "#/components/schemas/BackupWatchEntry" }
+        not_backed_up:
+          type: array
+          nullable: true
+          description: VM's die in geen back-upjob zitten; null als Proxmox dat niet liet lezen
+          items: { $ref: "#/components/schemas/BackupUncovered" }
+        backup_count: { type: integer }
+    BackupClusterState:
+      type: object
+      required: [id, freshness]
+      properties:
+        id: { type: string, format: uuid }
+        freshness: { $ref: "#/components/schemas/BackupFreshness" }
+    BackupOverview:
+      type: object
+      required: [items, connections, clusters]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/BackupItem" }
+        connections:
+          type: array
+          items: { $ref: "#/components/schemas/BackupConnection" }
+        clusters:
+          type: array
+          items: { $ref: "#/components/schemas/BackupClusterState" }
+    NodeBackups:
+      type: object
+      required: [item, backups]
+      properties:
+        item:
+          allOf: [{ $ref: "#/components/schemas/BackupItem" }]
+          nullable: true
+        backups:
+          type: array
+          items: { $ref: "#/components/schemas/BackupVolume" }
+    BackupPolicy:
+      type: object
+      required: [max_age_hours, default]
+      properties:
+        max_age_hours: { type: integer }
+        default:
+          type: boolean
+          description: Het cluster heeft nog geen eigen beleid
+    BackupPolicyInput:
+      type: object
+      required: [max_age_hours]
+      properties:
+        max_age_hours: { type: integer, minimum: 1, maximum: 720 }
+    BackupWatchEntry:
+      type: object
+      required: [vmid, label]
+      properties:
+        vmid: { type: integer }
+        label: { type: string, maxLength: 100 }
+    BackupWatchInput:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          maxItems: 50
+          items: { $ref: "#/components/schemas/BackupWatchEntry" }
     AuditRef:
       type: object
       required: [id, name, deleted]

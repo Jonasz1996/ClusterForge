@@ -1,6 +1,7 @@
 // Package pvefake is een nep-Proxmox voor tests en lokale ontwikkeling. Hij
 // kent net genoeg van de API om ClusterForge te bedienen: resources, power,
-// snapshots, migratie, klonen, configuratie, de guest agent en taken.
+// snapshots, migratie, klonen, configuratie, de guest agent, back-ups en
+// taken.
 package pvefake
 
 import (
@@ -58,6 +59,47 @@ type Storage struct {
 	Content string
 }
 
+// Backup is een back-up op een storage. Een storage waarvan de naam met
+// "pbs" begint, speelt Proxmox Backup Server.
+type Backup struct {
+	Storage   string
+	VMID      int
+	Type      string // qemu of lxc
+	Time      time.Time
+	Size      int64
+	Notes     string
+	Protected bool
+	// Verify is de verificatie van Proxmox Backup Server: "", ok of failed.
+	Verify string
+}
+
+func (b Backup) volume() map[string]any {
+	typ := b.Type
+	if typ == "" {
+		typ = "qemu"
+	}
+	v := map[string]any{
+		"content": "backup", "vmid": b.VMID, "subtype": typ, "ctime": b.Time.Unix(), "size": b.Size,
+		"notes": b.Notes,
+	}
+	if b.Protected {
+		v["protected"] = 1
+	}
+	if strings.HasPrefix(b.Storage, "pbs") {
+		kind := map[string]string{"qemu": "vm", "lxc": "ct"}[typ]
+		v["volid"] = fmt.Sprintf("%s:backup/%s/%d/%s", b.Storage, kind, b.VMID, b.Time.UTC().Format("2006-01-02T15:04:05Z"))
+		v["format"] = "pbs-" + kind
+		if b.Verify != "" {
+			v["verification"] = map[string]any{"state": b.Verify, "upid": "UPID:pbs:verify"}
+		}
+		return v
+	}
+	ext := map[string]string{"qemu": "vma.zst", "lxc": "tar.zst"}[typ]
+	v["volid"] = fmt.Sprintf("%s:backup/vzdump-%s-%d-%s.%s", b.Storage, typ, b.VMID, b.Time.UTC().Format("2006_01_02-15_04_05"), ext)
+	v["format"] = ext
+	return v
+}
+
 type task struct {
 	upid     string
 	node     string
@@ -90,6 +132,44 @@ type Server struct {
 	agentDelay time.Duration
 	// onFileWrite wordt aangeroepen na een file-write via de guest agent.
 	onFileWrite func(vmid int, name, file, content string)
+	backups     []Backup
+	// hideBackups speelt een token zonder VM.Backup: Proxmox laat dan alle
+	// back-ups weg uit de lijst, zonder fout.
+	hideBackups bool
+	// backupJobs zijn de VMID's die in een back-upjob zitten.
+	backupJobs map[int]bool
+}
+
+// AddBackup zet een back-up op een storage.
+func (s *Server) AddBackup(b Backup) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.backups = append(s.backups, b)
+}
+
+// RemoveBackups verwijdert de back-ups van een VM, zoals een prune.
+func (s *Server) RemoveBackups(vmid int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.backups = slices.DeleteFunc(s.backups, func(b Backup) bool { return b.VMID == vmid })
+}
+
+// HideBackups speelt een token zonder het recht VM.Backup.
+func (s *Server) HideBackups(hide bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.hideBackups = hide
+}
+
+// SetBackupJobs bepaalt welke VM's in een back-upjob zitten; de rest staat
+// in /cluster/backup-info/not-backed-up.
+func (s *Server) SetBackupJobs(vmids ...int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.backupJobs = map[int]bool{}
+	for _, id := range vmids {
+		s.backupJobs[id] = true
+	}
 }
 
 // SetAgentDelay bepaalt hoe lang de guest agent na het starten van een VM
@@ -138,6 +218,17 @@ func (s *Server) AddHost(h Host) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.hosts = append(s.hosts, &h)
+}
+
+// SetHostOnline zet een host aan of uit.
+func (s *Server) SetHostOnline(name string, online bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, h := range s.hosts {
+		if h.Name == name {
+			h.Online = online
+		}
+	}
 }
 
 func (s *Server) AddGuest(g Guest) {
@@ -215,6 +306,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("PUT "+p+"/nodes/{node}/{type}/{vmid}/resize", s.resize)
 	mux.HandleFunc("POST "+p+"/nodes/{node}/{type}/{vmid}/agent/ping", s.agentPing)
 	mux.HandleFunc("POST "+p+"/nodes/{node}/{type}/{vmid}/agent/file-write", s.fileWrite)
+	mux.HandleFunc("GET "+p+"/nodes/{node}/storage/{storage}/content", s.storageContent)
+	mux.HandleFunc("GET "+p+"/cluster/backup-info/not-backed-up", s.notBackedUp)
 	mux.HandleFunc("GET "+p+"/nodes/{node}/tasks/{upid}/status", s.taskStatus)
 	mux.HandleFunc("GET "+p+"/nodes/{node}/tasks/{upid}/log", s.taskLog)
 	mux.HandleFunc("DELETE "+p+"/nodes/{node}/tasks/{upid}", s.stopTask)
@@ -481,6 +574,39 @@ func (s *Server) stopTask(w http.ResponseWriter, r *http.Request) {
 		t.log = append(t.log, "received interrupt", "TASK ERROR: interrupted by signal")
 	}
 	ok(w, nil)
+}
+
+func (s *Server) storageContent(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	name, node := r.PathValue("storage"), r.PathValue("node")
+	if !slices.ContainsFunc(s.storages, func(st Storage) bool { return st.Name == name && (st.Shared || st.Node == node) }) {
+		fail(w, http.StatusInternalServerError, fmt.Sprintf("storage '%s' does not exist", name))
+		return
+	}
+	out := []map[string]any{}
+	if c := r.URL.Query().Get("content"); c != "" && c != "backup" || s.hideBackups {
+		ok(w, out)
+		return
+	}
+	for _, b := range s.backups {
+		if b.Storage == name {
+			out = append(out, b.volume())
+		}
+	}
+	ok(w, out)
+}
+
+func (s *Server) notBackedUp(w http.ResponseWriter, _ *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := []map[string]any{}
+	for _, g := range s.guests {
+		if !g.Template && !s.backupJobs[g.VMID] {
+			out = append(out, map[string]any{"vmid": g.VMID, "name": g.Name, "type": g.Type})
+		}
+	}
+	ok(w, out)
 }
 
 func (s *Server) nextID(w http.ResponseWriter, _ *http.Request) {

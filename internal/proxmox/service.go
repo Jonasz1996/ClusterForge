@@ -340,6 +340,12 @@ func (s *Service) apiByID(ctx context.Context, id uuid.UUID) (API, store.Proxmox
 	return api, c, err
 }
 
+// APIFor geeft de client en de gegevens van een verbinding, voor andere
+// diensten die Proxmox lezen.
+func (s *Service) APIFor(ctx context.Context, id uuid.UUID) (API, store.ProxmoxConnection, error) {
+	return s.apiByID(ctx, id)
+}
+
 func (s *Service) dropClient(id uuid.UUID) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

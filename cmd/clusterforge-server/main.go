@@ -25,6 +25,7 @@ import (
 
 	"github.com/Jonasz1996/clusterforge/internal/agentbus"
 	"github.com/Jonasz1996/clusterforge/internal/auth"
+	"github.com/Jonasz1996/clusterforge/internal/backups"
 	"github.com/Jonasz1996/clusterforge/internal/config"
 	"github.com/Jonasz1996/clusterforge/internal/deploy"
 	"github.com/Jonasz1996/clusterforge/internal/events"
@@ -144,10 +145,12 @@ func serve() error {
 	life.Changed = eval.Kick
 	dep := deploy.NewService(pool, ev, log, runner, box, pve, bus)
 	dep.Changed = eval.Kick
+	bk := backups.NewService(pool, ev, log, pve)
 	go hub.Run(ctx)
 	go eval.Run(ctx)
 	go ingest.Run(ctx)
 	go pve.Run(ctx)
+	go bk.Run(ctx)
 	jobsDone := make(chan struct{})
 	go func() {
 		defer close(jobsDone)
@@ -158,7 +161,7 @@ func serve() error {
 		Addr: cfg.Listen,
 		Handler: httpapi.New(httpapi.Deps{
 			Config: cfg, Log: log, Pool: pool, Auth: authSvc, Bus: bus, Hub: hub, Proxmox: pve, Jobs: runner,
-			Lifecycle: life, Deploy: dep, Version: version,
+			Lifecycle: life, Deploy: dep, Backups: bk, Version: version,
 		}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,

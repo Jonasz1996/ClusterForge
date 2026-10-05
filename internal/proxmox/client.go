@@ -49,6 +49,13 @@ type API interface {
 	AgentPing(ctx context.Context, g Guest) error
 	// AgentFileWrite schrijft een bestand in de VM via de guest agent.
 	AgentFileWrite(ctx context.Context, g Guest, file, content string) error
+
+	// BackupContent geeft de back-ups op een storage, gelezen via host node.
+	// Zonder de rechten VM.Backup en Datastore.AllocateSpace laat Proxmox
+	// back-ups stilzwijgend weg.
+	BackupContent(ctx context.Context, node, storage string) ([]BackupVolume, error)
+	// NotBackedUp geeft de VM's en containers die in geen back-upjob zitten.
+	NotBackedUp(ctx context.Context) ([]UncoveredGuest, error)
 }
 
 type Version struct {
@@ -99,6 +106,44 @@ type Snapshot struct {
 	Parent      string `json:"parent"`
 	Time        int64  `json:"snaptime"`
 	VMState     int    `json:"vmstate"`
+}
+
+// BackupVolume is één back-up op een storage: een vzdump-bestand of een
+// snapshot in Proxmox Backup Server.
+type BackupVolume struct {
+	Volid     string  `json:"volid"`
+	Content   string  `json:"content"`
+	VMID      int     `json:"vmid"`
+	Subtype   string  `json:"subtype"`
+	Ctime     int64   `json:"ctime"`
+	Size      int64   `json:"size"`
+	Format    string  `json:"format"`
+	Notes     string  `json:"notes"`
+	Protected pveBool `json:"protected"`
+	// Verification is de controle van Proxmox Backup Server zelf.
+	Verification *struct {
+		State string `json:"state"`
+	} `json:"verification"`
+}
+
+// UncoveredGuest is een VM of container die in geen back-upjob zit.
+type UncoveredGuest struct {
+	VMID int    `json:"vmid"`
+	Name string `json:"name"`
+	Type string `json:"type"`
+}
+
+// pveBool leest een vlag die Proxmox als 0/1 of als true/false geeft.
+type pveBool bool
+
+func (b *pveBool) UnmarshalJSON(data []byte) error {
+	switch strings.Trim(string(data), `"`) {
+	case "1", "true":
+		*b = true
+	default:
+		*b = false
+	}
+	return nil
 }
 
 type TaskStatus struct {
@@ -467,6 +512,28 @@ func (c *Client) AgentPing(ctx context.Context, g Guest) error {
 
 func (c *Client) AgentFileWrite(ctx context.Context, g Guest, file, content string) error {
 	return c.do(ctx, http.MethodPost, g.path()+"/agent/file-write", url.Values{"file": {file}, "content": {content}}, nil)
+}
+
+func (c *Client) BackupContent(ctx context.Context, node, storage string) ([]BackupVolume, error) {
+	var out []BackupVolume
+	path := "/nodes/" + url.PathEscape(node) + "/storage/" + url.PathEscape(storage) + "/content?content=backup"
+	if err := c.do(ctx, http.MethodGet, path, nil, &out); err != nil {
+		return nil, err
+	}
+	// Alleen back-ups van een VM of container, ook als het filter op
+	// content genegeerd wordt.
+	vols := out[:0]
+	for _, v := range out {
+		if v.Content == "backup" && v.VMID > 0 {
+			vols = append(vols, v)
+		}
+	}
+	return vols, nil
+}
+
+func (c *Client) NotBackedUp(ctx context.Context) ([]UncoveredGuest, error) {
+	var out []UncoveredGuest
+	return out, c.do(ctx, http.MethodGet, "/cluster/backup-info/not-backed-up", nil, &out)
 }
 
 // upidNode haalt de host uit een taak-id: UPID:pve1:0000ABCD:...

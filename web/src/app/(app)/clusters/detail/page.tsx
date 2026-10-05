@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState, type FormEvent } from "react";
 import { HistoryCard } from "@/components/audit/AuditList";
+import { ClusterBackupsCard } from "@/components/backups/Backups";
 import { MetricsPanels } from "@/components/charts/MetricsPanels";
 import { ClusterForm } from "@/components/inventory/ClusterForm";
 import { NodeForm } from "@/components/inventory/NodeForm";
@@ -127,6 +128,7 @@ function ClusterDetailInner() {
 
           <NodesCard c={cluster.data} isAdmin={isAdmin} />
           <VipsCard c={cluster.data} isAdmin={isAdmin} />
+          <ClusterBackupsCard clusterId={id} isAdmin={isAdmin} />
           {(jobs.data?.length ?? 0) > 0 && (
             <Card title="Taken">
               <JobList jobs={jobs.data!} />

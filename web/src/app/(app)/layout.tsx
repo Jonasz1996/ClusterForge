@@ -16,6 +16,7 @@ const nav: NavItem[] = [
   { href: "/nodes", label: "Nodes" },
   { href: "/monitoring", label: "Monitoring" },
   { href: "/proxmox", label: "Proxmox" },
+  { href: "/back-ups", label: "Back-ups" },
   { href: "/taken", label: "Taken" },
   { href: "/templates", label: "Templates" },
   { href: "/logboek", label: "Logboek", adminOnly: true },

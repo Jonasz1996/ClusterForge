@@ -613,7 +613,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Nu synchroniseren in plaats van op de volgende ronde te wachten (admin) */
+        /** Nu synchroniseren en de back-ups opnieuw lezen in plaats van op de volgende ronde te wachten (admin) */
         post: operations["syncProxmox"];
         delete?: never;
         options?: never;
@@ -673,6 +673,81 @@ export interface paths {
         /** Snapshots van een VM of container, rechtstreeks uit Proxmox */
         get: operations["listVmSnapshots"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/backups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Back-upstand van elke bewaakte VM, per koppeling de dekking, en per cluster de slechtste stand */
+        get: operations["getBackups"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/nodes/{nodeId}/backups": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        /** Back-upstand en alle back-ups van de VM van een node */
+        get: operations["getNodeBackups"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/clusters/{clusterId}/backup-policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        /** Back-upbeleid van een cluster, of de standaard als het er nog geen heeft */
+        get: operations["getBackupPolicy"];
+        /** Back-upbeleid van een cluster wijzigen (admin) */
+        put: operations["updateBackupPolicy"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/proxmox/{proxmoxId}/backup-watch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proxmoxId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** De lijst "ook bewaken" van een koppeling vervangen (admin) */
+        put: operations["setBackupWatch"];
         post?: never;
         delete?: never;
         options?: never;
@@ -890,6 +965,110 @@ export interface components {
             payload: {
                 [key: string]: unknown;
             };
+        };
+        BackupRef: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+        };
+        /**
+         * @description ok: de nieuwste back-up is jonger dan de maximale leeftijd. stale: ze
+         *     is ouder. missing: Proxmox heeft geen back-up. unknown: de back-ups
+         *     van de koppeling zijn niet te lezen.
+         * @enum {string}
+         */
+        BackupFreshness: "ok" | "stale" | "missing" | "unknown";
+        BackupVolume: {
+            volid: string;
+            storage: string;
+            /** @description De Proxmox-host waarlangs de back-up gelezen is */
+            host: string;
+            /** Format: date-time */
+            time: string;
+            /** Format: int64 */
+            size: number;
+            format: string;
+            notes: string;
+            protected: boolean;
+            /**
+             * @description Verificatie door Proxmox Backup Server; leeg als die er niet is
+             * @enum {string}
+             */
+            verify: "" | "ok" | "failed";
+        };
+        BackupItem: {
+            /** Format: uuid */
+            connection_id: string;
+            connection_name: string;
+            vmid: number;
+            /** @description Naam van de VM in Proxmox; leeg als hij er niet meer is */
+            name: string;
+            /** @description Het label uit de lijst "ook bewaken" */
+            label: string;
+            guest_type: string;
+            node: components["schemas"]["BackupRef"] | null;
+            cluster: components["schemas"]["BackupRef"] | null;
+            /** @description Bewaakt via de lijst "ook bewaken" in plaats van via een node */
+            watched: boolean;
+            freshness: components["schemas"]["BackupFreshness"];
+            /** @description Waarom de stand niet ok is */
+            reason: string;
+            /** Format: date-time */
+            since: string | null;
+            max_age_hours: number;
+            latest: components["schemas"]["BackupVolume"] | null;
+            count: number;
+        };
+        BackupUncovered: {
+            vmid: number;
+            name: string;
+            type: string;
+            node: components["schemas"]["BackupRef"] | null;
+        };
+        BackupConnection: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            /**
+             * Format: date-time
+             * @description Laatste poging om de back-ups te lezen
+             */
+            checked_at: string | null;
+            error: string;
+            /** @description De lijst "ook bewaken" */
+            watch: components["schemas"]["BackupWatchEntry"][];
+            /** @description VM's die in geen back-upjob zitten; null als Proxmox dat niet liet lezen */
+            not_backed_up: components["schemas"]["BackupUncovered"][] | null;
+            backup_count: number;
+        };
+        BackupClusterState: {
+            /** Format: uuid */
+            id: string;
+            freshness: components["schemas"]["BackupFreshness"];
+        };
+        BackupOverview: {
+            items: components["schemas"]["BackupItem"][];
+            connections: components["schemas"]["BackupConnection"][];
+            clusters: components["schemas"]["BackupClusterState"][];
+        };
+        NodeBackups: {
+            item: components["schemas"]["BackupItem"] | null;
+            backups: components["schemas"]["BackupVolume"][];
+        };
+        BackupPolicy: {
+            max_age_hours: number;
+            /** @description Het cluster heeft nog geen eigen beleid */
+            default: boolean;
+        };
+        BackupPolicyInput: {
+            max_age_hours: number;
+        };
+        BackupWatchEntry: {
+            vmid: number;
+            label: string;
+        };
+        BackupWatchInput: {
+            items: components["schemas"]["BackupWatchEntry"][];
         };
         AuditRef: {
             id: string;
@@ -2890,6 +3069,135 @@ export interface operations {
             404: components["responses"]["Error"];
             502: components["responses"]["Error"];
             503: components["responses"]["Error"];
+        };
+    };
+    getBackups: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupOverview"];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    getNodeBackups: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK; item is null als de node niet aan een VM gekoppeld is */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NodeBackups"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    getBackupPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupPolicy"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    updateBackupPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BackupPolicyInput"];
+            };
+        };
+        responses: {
+            /** @description Gewijzigd */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupPolicy"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    setBackupWatch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proxmoxId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BackupWatchInput"];
+            };
+        };
+        responses: {
+            /** @description Vervangen */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupConnection"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
         };
     };
     listJobs: {
