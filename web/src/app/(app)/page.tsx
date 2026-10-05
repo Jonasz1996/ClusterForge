@@ -7,6 +7,7 @@ import { Alert, Card } from "@/components/ui";
 import { api, unwrap, type ApiEvent } from "@/lib/api/client";
 import { useMe } from "@/lib/auth";
 import { statuses, useClusters, useNodes, type Status } from "@/lib/inventory";
+import { vmStatusInfo } from "@/lib/proxmox";
 
 const actionLabels: Record<string, string> = {
   "auth.login": "Ingelogd",
@@ -33,13 +34,26 @@ const actionLabels: Record<string, string> = {
   "node.facts_changed": "Facts gewijzigd",
   "enrollment_token.created": "Enrollmenttoken gemaakt",
   "enrollment_token.deleted": "Enrollmenttoken ingetrokken",
+  "proxmox.created": "Proxmox gekoppeld",
+  "proxmox.updated": "Proxmox-koppeling gewijzigd",
+  "proxmox.deleted": "Proxmox-koppeling verwijderd",
+  "proxmox.sync_failed": "Proxmox niet bereikbaar",
+  "proxmox.sync_recovered": "Proxmox weer bereikbaar",
+  "vm.status_changed": "VM-status",
+  "vm.moved": "VM verhuisd",
+  "vm.missing": "VM verdwenen uit Proxmox",
+  "job.queued": "Taak gestart",
+  "job.succeeded": "Taak gelukt",
+  "job.failed": "Taak mislukt",
+  "job.canceled": "Taak geannuleerd",
+  "job.cancel_requested": "Taak annuleren gevraagd",
 };
 
 // subject geeft een leesbare naam voor het onderwerp van een event, voor zover
 // de payload die bevat.
 function subject(e: ApiEvent): string | null {
   const p = e.payload;
-  for (const k of ["name", "hostname", "address"]) {
+  for (const k of ["name", "hostname", "address", "title"]) {
     const v = p[k];
     if (typeof v === "string") return v;
     if (v && typeof v === "object" && "to" in v && typeof v.to === "string") return v.to;
@@ -50,6 +64,10 @@ function subject(e: ApiEvent): string | null {
 // detail vult een event aan met de nieuwe status of eigenaar.
 function detail(e: ApiEvent): string | null {
   const p = e.payload;
+  if ((e.action === "vm.status_changed" || e.action === "vm.moved") && typeof p.to === "string") {
+    return `→ ${e.action === "vm.moved" ? p.to : vmStatusInfo(p.to).label.toLowerCase()}`;
+  }
+  if (e.action === "job.failed" && typeof p.error === "string") return p.error;
   if (e.action.endsWith(".status_changed") && typeof p.to === "string") {
     return `→ ${statuses[p.to as Status]?.label ?? p.to}`;
   }

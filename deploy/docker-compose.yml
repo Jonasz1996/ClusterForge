@@ -22,6 +22,7 @@ services:
       CF_VICTORIAMETRICS_URL: http://victoriametrics:8428
       CF_GRAFANA_NODE_URL: ${CF_GRAFANA_NODE_URL:-}
       CF_GRAFANA_CLUSTER_URL: ${CF_GRAFANA_CLUSTER_URL:-}
+      CF_MASTER_KEY: ${CF_MASTER_KEY:-}
     ports:
       - "${CF_BIND:-127.0.0.1}:8080:8080"
       # Agents verbinden hier rechtstreeks mee (TLS), niet via de reverse proxy.

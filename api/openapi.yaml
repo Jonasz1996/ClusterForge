@@ -519,6 +519,237 @@ paths:
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /proxmox:
+    get:
+      operationId: listProxmox
+      summary: Gekoppelde Proxmox-omgevingen
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, enabled]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/ProxmoxConnection" }
+                  enabled:
+                    type: boolean
+                    description: false als de server geen masterkey heeft; dan kun je geen Proxmox koppelen
+        "401": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createProxmox
+      summary: Proxmox koppelen (admin); de server test de verbinding eerst
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ProxmoxInput" }
+      responses:
+        "201":
+          description: Gekoppeld
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProxmoxConnection" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /proxmox/probe:
+    post:
+      operationId: probeProxmox
+      summary: Certificaat van een Proxmox-adres ophalen om de vingerafdruk te controleren (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [api_url]
+              properties:
+                api_url: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProxmoxProbe" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /proxmox/{proxmoxId}:
+    parameters:
+      - { name: proxmoxId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getProxmox
+      summary: Eén Proxmox-omgeving
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProxmoxConnection" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: updateProxmox
+      summary: Proxmox-koppeling wijzigen (admin); zonder token_secret blijft het oude
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ProxmoxPatch" }
+      responses:
+        "200":
+          description: Gewijzigd
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProxmoxConnection" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteProxmox
+      summary: Proxmox-koppeling verwijderen (admin); nodes blijven bestaan zonder koppeling
+      responses:
+        "204": { description: Verwijderd }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /proxmox/{proxmoxId}/sync:
+    parameters:
+      - { name: proxmoxId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: syncProxmox
+      summary: Nu synchroniseren in plaats van op de volgende ronde te wachten (admin)
+      responses:
+        "200":
+          description: Gesynchroniseerd; last_error zegt of het lukte
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProxmoxConnection" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /proxmox/{proxmoxId}/resources:
+    parameters:
+      - { name: proxmoxId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getProxmoxResources
+      summary: Hosts, VM's, containers en storage uit de laatste sync
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProxmoxResources" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /proxmox/{proxmoxId}/vms/{vmid}/actions:
+    parameters:
+      - { name: proxmoxId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: vmid, in: path, required: true, schema: { type: integer } }
+    post:
+      operationId: vmAction
+      summary: Een VM of container starten, stoppen, snapshotten of migreren (admin); wordt een taak
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/VmActionInput" }
+      responses:
+        "202":
+          description: Taak aangemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /proxmox/{proxmoxId}/vms/{vmid}/snapshots:
+    parameters:
+      - { name: proxmoxId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: vmid, in: path, required: true, schema: { type: integer } }
+    get:
+      operationId: listVmSnapshots
+      summary: Snapshots van een VM of container, rechtstreeks uit Proxmox
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/ProxmoxSnapshot" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /jobs:
+    get:
+      operationId: listJobs
+      summary: Recente taken, nieuwste eerst
+      parameters:
+        - { name: node_id, in: query, schema: { type: string, format: uuid } }
+        - { name: cluster_id, in: query, schema: { type: string, format: uuid } }
+        - { name: proxmox_id, in: query, schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Job" }
+        "401": { $ref: "#/components/responses/Error" }
+  /jobs/{jobId}:
+    parameters:
+      - { name: jobId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getJob
+      summary: Eén taak met zijn stappen en uitvoer
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/JobDetail" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /jobs/{jobId}/cancel:
+    parameters:
+      - { name: jobId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: cancelJob
+      summary: Taak annuleren (admin); een lopende Proxmox-taak wordt gestopt
+      responses:
+        "202":
+          description: Geannuleerd of annuleren gevraagd
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
 components:
   securitySchemes:
     session:
@@ -694,9 +925,13 @@ components:
         owner_ids: { type: array, items: { type: string, format: uuid } }
     Node:
       type: object
-      required: [id, cluster_id, cluster_slug, cluster_name, hostname, role, description, lifecycle, primary_ip, tags, created_at, updated_at, agent, status, status_reason, status_since]
+      required: [id, cluster_id, cluster_slug, cluster_name, hostname, role, description, lifecycle, primary_ip, tags, created_at, updated_at, agent, status, status_reason, status_since, proxmox]
       properties:
         id: { type: string, format: uuid }
+        proxmox:
+          description: De gekoppelde VM of container in Proxmox, of null
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/NodeProxmox" }]
         status: { $ref: "#/components/schemas/Status" }
         status_reason: { type: string, description: Waarom de status niet healthy is }
         status_since: { type: string, format: date-time, nullable: true }
@@ -726,6 +961,10 @@ components:
         lifecycle: { $ref: "#/components/schemas/NodeLifecycle" }
         primary_ip: { type: string, nullable: true }
         tags: { type: array, items: { type: string } }
+        proxmox:
+          description: Koppeling met een VM of container in Proxmox; null koppelt los
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/ProxmoxLink" }]
     NodePatch:
       type: object
       properties:
@@ -736,6 +975,10 @@ components:
         lifecycle: { $ref: "#/components/schemas/NodeLifecycle" }
         primary_ip: { type: string, nullable: true }
         tags: { type: array, items: { type: string } }
+        proxmox:
+          description: Koppeling met een VM of container in Proxmox; null koppelt los
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/ProxmoxLink" }]
     Vip:
       type: object
       required: [id, cluster_id, address, interface, vrid, description, owner_node_id, owner_hostname, owner_since]
@@ -980,3 +1223,186 @@ components:
         grafana_cluster_url:
           type: string
           description: Link naar Grafana voor een cluster, met {cluster}, {cluster_id} en {env}; leeg als niet ingesteld
+    ProxmoxConnection:
+      type: object
+      required: [id, name, api_url, token_id, tls_fingerprint, pve_version, last_sync_at, last_error, counts, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        api_url: { type: string, description: "Bijvoorbeeld https://pve1.lan:8006" }
+        token_id: { type: string, description: "Bijvoorbeeld clusterforge@pve!cf" }
+        tls_fingerprint: { type: string, description: SHA-256 van het certificaat zoals Proxmox hem toont; leeg betekent gewone CA-controle }
+        pve_version: { type: string }
+        last_sync_at: { type: string, format: date-time, nullable: true }
+        last_error: { type: string, description: Fout van de laatste sync; leeg als die lukte }
+        counts: { $ref: "#/components/schemas/ProxmoxCounts" }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    ProxmoxCounts:
+      type: object
+      required: [hosts, vms, containers]
+      properties:
+        hosts: { type: integer }
+        vms: { type: integer }
+        containers: { type: integer }
+    ProxmoxInput:
+      type: object
+      required: [name, api_url, token_id, token_secret]
+      properties:
+        name: { type: string }
+        api_url: { type: string }
+        token_id: { type: string }
+        token_secret: { type: string, writeOnly: true }
+        tls_fingerprint: { type: string }
+    ProxmoxPatch:
+      type: object
+      properties:
+        name: { type: string }
+        api_url: { type: string }
+        token_id: { type: string }
+        token_secret: { type: string, writeOnly: true }
+        tls_fingerprint: { type: string }
+    ProxmoxProbe:
+      type: object
+      required: [api_url, fingerprint, subject, issuer, not_after, trusted]
+      properties:
+        api_url: { type: string, description: Het adres zoals de server het gebruikt }
+        fingerprint: { type: string }
+        subject: { type: string }
+        issuer: { type: string }
+        not_after: { type: string, format: date-time }
+        trusted: { type: boolean, description: Of het certificaat ook zonder vingerafdruk geldig is }
+    ProxmoxResources:
+      type: object
+      required: [hosts, guests, storages]
+      properties:
+        hosts: { type: array, items: { $ref: "#/components/schemas/ProxmoxHost" } }
+        guests: { type: array, items: { $ref: "#/components/schemas/ProxmoxGuest" } }
+        storages: { type: array, items: { $ref: "#/components/schemas/ProxmoxStorage" } }
+    ProxmoxHost:
+      type: object
+      required: [name, status, cpu, maxcpu, mem, maxmem, disk, maxdisk, uptime]
+      properties:
+        name: { type: string }
+        status: { type: string, description: online of offline }
+        cpu: { type: number, format: double, description: Bezetting van 0 tot 1 }
+        maxcpu: { type: number, format: double }
+        mem: { type: integer, format: int64 }
+        maxmem: { type: integer, format: int64 }
+        disk: { type: integer, format: int64 }
+        maxdisk: { type: integer, format: int64 }
+        uptime: { type: integer, format: int64 }
+    GuestType:
+      type: string
+      enum: [qemu, lxc]
+    ProxmoxGuest:
+      type: object
+      required: [vmid, type, name, host, status, template, cpu, maxcpu, mem, maxmem, disk, maxdisk, uptime, tags, lock, node_id, node_hostname]
+      properties:
+        vmid: { type: integer }
+        type: { $ref: "#/components/schemas/GuestType" }
+        name: { type: string }
+        host: { type: string, description: De Proxmox-host waar de VM nu staat }
+        status: { type: string, description: running, stopped of paused }
+        template: { type: boolean }
+        cpu: { type: number, format: double }
+        maxcpu: { type: number, format: double }
+        mem: { type: integer, format: int64 }
+        maxmem: { type: integer, format: int64 }
+        disk: { type: integer, format: int64 }
+        maxdisk: { type: integer, format: int64 }
+        uptime: { type: integer, format: int64 }
+        tags: { type: array, items: { type: string } }
+        lock: { type: string, description: Lopende bewerking in Proxmox, zoals migrate of backup }
+        node_id: { type: string, format: uuid, nullable: true, description: De gekoppelde node in ClusterForge }
+        node_hostname: { type: string, nullable: true }
+    ProxmoxStorage:
+      type: object
+      required: [name, host, shared, type, content, disk, maxdisk]
+      properties:
+        name: { type: string }
+        host: { type: string }
+        shared: { type: boolean }
+        type: { type: string }
+        content: { type: string }
+        disk: { type: integer, format: int64 }
+        maxdisk: { type: integer, format: int64 }
+    ProxmoxSnapshot:
+      type: object
+      required: [name, description, parent, time, vmstate]
+      properties:
+        name: { type: string }
+        description: { type: string }
+        parent: { type: string }
+        time: { type: string, format: date-time, nullable: true }
+        vmstate: { type: boolean }
+    ProxmoxLink:
+      type: object
+      required: [connection_id, vmid]
+      properties:
+        connection_id: { type: string, format: uuid }
+        vmid: { type: integer }
+    NodeProxmox:
+      type: object
+      required: [connection_id, connection_name, vmid, found, type, host, name, status, uptime]
+      properties:
+        connection_id: { type: string, format: uuid }
+        connection_name: { type: string }
+        vmid: { type: integer }
+        found: { type: boolean, description: false als de VM niet in de laatste sync zat }
+        type: { type: string }
+        host: { type: string }
+        name: { type: string }
+        status: { type: string }
+        uptime: { type: integer, format: int64 }
+    VmAction:
+      type: string
+      enum: [start, stop, shutdown, reboot, snapshot, migrate]
+    VmActionInput:
+      type: object
+      required: [action]
+      properties:
+        action: { $ref: "#/components/schemas/VmAction" }
+        snapshot_name: { type: string, description: Leeg geeft cf-<datum>-<tijd> }
+        description: { type: string }
+        vmstate: { type: boolean, description: Ook het geheugen in de snapshot (alleen VM's die draaien) }
+        target: { type: string, description: Doelhost bij migreren }
+    JobStatus:
+      type: string
+      enum: [queued, running, succeeded, failed, canceled]
+    Job:
+      type: object
+      required: [id, kind, title, status, error, cluster_id, node_id, proxmox_id, requested_by, attempts, cancel_requested, created_at, started_at, finished_at]
+      properties:
+        id: { type: string, format: uuid }
+        kind: { type: string }
+        title: { type: string }
+        status: { $ref: "#/components/schemas/JobStatus" }
+        error: { type: string }
+        cluster_id: { type: string, format: uuid, nullable: true }
+        node_id: { type: string, format: uuid, nullable: true }
+        proxmox_id: { type: string, format: uuid, nullable: true }
+        requested_by: { type: string, nullable: true, description: Gebruikersnaam van wie de taak vroeg }
+        attempts: { type: integer }
+        cancel_requested: { type: boolean }
+        created_at: { type: string, format: date-time }
+        started_at: { type: string, format: date-time, nullable: true }
+        finished_at: { type: string, format: date-time, nullable: true }
+    JobDetail:
+      allOf:
+        - { $ref: "#/components/schemas/Job" }
+        - type: object
+          required: [steps]
+          properties:
+            steps: { type: array, items: { $ref: "#/components/schemas/JobStep" } }
+    JobStep:
+      type: object
+      required: [seq, name, status, started_at, finished_at, log, error]
+      properties:
+        seq: { type: integer }
+        name: { type: string }
+        status: { $ref: "#/components/schemas/JobStatus" }
+        started_at: { type: string, format: date-time }
+        finished_at: { type: string, format: date-time, nullable: true }
+        log: { type: array, items: { type: string } }
+        error: { type: string }

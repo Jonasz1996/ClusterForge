@@ -107,7 +107,7 @@ func (q *Queries) DeleteEnrollmentToken(ctx context.Context, id uuid.UUID) (int6
 }
 
 const findNodeByHostname = `-- name: FindNodeByHostname :one
-SELECT id, cluster_id, hostname, role, description, lifecycle, primary_ip, tags, created_at, updated_at, status, status_reason, status_since FROM nodes WHERE lower(hostname) = lower($1::text) FOR UPDATE
+SELECT id, cluster_id, hostname, role, description, lifecycle, primary_ip, tags, created_at, updated_at, status, status_reason, status_since, proxmox_id, pve_vmid FROM nodes WHERE lower(hostname) = lower($1::text) FOR UPDATE
 `
 
 func (q *Queries) FindNodeByHostname(ctx context.Context, hostname string) (Node, error) {
@@ -127,6 +127,8 @@ func (q *Queries) FindNodeByHostname(ctx context.Context, hostname string) (Node
 		&i.Status,
 		&i.StatusReason,
 		&i.StatusSince,
+		&i.ProxmoxID,
+		&i.PveVmid,
 	)
 	return i, err
 }

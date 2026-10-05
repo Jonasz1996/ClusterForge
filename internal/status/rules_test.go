@@ -33,6 +33,12 @@ func TestNode(t *testing.T) {
 			in.Services = map[string]string{"nginx": "inactive", "ssh": "inactive", "docker": "inactive"}
 			in.EnabledServices = []string{"nginx", "ssh"}
 		}), Result{Degraded, "service nginx draait niet"}},
+		{"VM uit zonder agent", NodeInput{VMStatus: "stopped"}, Result{Down, "VM staat uit in Proxmox"}},
+		{"VM draait zonder agent", NodeInput{VMStatus: "running"}, Result{Unknown, "geen agent"}},
+		{"VM uit en geen heartbeat", with(func(in *NodeInput) { in.HeartbeatAge, in.VMStatus = 2*time.Minute, "stopped" }), Result{Down, "VM staat uit in Proxmox"}},
+		{"VM gepauzeerd", with(func(in *NodeInput) { in.HeartbeatAge, in.VMStatus = 2*time.Minute, "paused" }), Result{Down, "VM is gepauzeerd in Proxmox"}},
+		// Een verse heartbeat wint van een verouderde sync.
+		{"VM uit maar heartbeat vers", with(func(in *NodeInput) { in.VMStatus = "stopped" }), Result{Healthy, ""}},
 		{"meerdere problemen", with(func(in *NodeInput) {
 			in.HeartbeatAge = 40 * time.Second
 			in.Services = map[string]string{"nginx": "failed"}

@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/httpapi/gen"
 	"github.com/Jonasz1996/clusterforge/internal/inventory"
+	"github.com/Jonasz1996/clusterforge/internal/proxmox"
 	"github.com/Jonasz1996/clusterforge/internal/status"
 	"github.com/Jonasz1996/clusterforge/internal/store"
 )
@@ -218,7 +220,7 @@ func (s *Server) CreateNode(w http.ResponseWriter, r *http.Request) {
 	}
 	f := inventory.NodeFields{
 		Hostname: req.Hostname, Role: deref(req.Role), Description: deref(req.Description), Tags: deref(req.Tags),
-		ClusterID: nullablePtr(req.ClusterId), PrimaryIP: req.PrimaryIp.GetOrEmpty(),
+		ClusterID: nullablePtr(req.ClusterId), PrimaryIP: req.PrimaryIp.GetOrEmpty(), Proxmox: proxmoxLink(req.Proxmox),
 	}
 	if req.Lifecycle != nil {
 		f.Lifecycle = store.NodeLifecycle(*req.Lifecycle)
@@ -252,6 +254,9 @@ func (s *Server) UpdateNode(w http.ResponseWriter, r *http.Request, id uuid.UUID
 		}
 		if req.PrimaryIp.IsSpecified() {
 			f.PrimaryIP = req.PrimaryIp.GetOrEmpty()
+		}
+		if req.Proxmox.IsSpecified() {
+			f.Proxmox = proxmoxLink(req.Proxmox)
 		}
 	})
 	if s.inventoryError(w, r, err) {
@@ -294,6 +299,12 @@ type nodeRow struct {
 	AgentVersion    *string
 	AgentEnrolledAt *time.Time
 	AgentLastSeenAt *time.Time
+	ProxmoxName     *string
+	PveType         *string
+	PveNode         *string
+	PveName         *string
+	PveStatus       *string
+	PveData         []byte
 }
 
 func toAPINode(r nodeRow) gen.Node {
@@ -320,7 +331,34 @@ func toAPINode(r nodeRow) gen.Node {
 		ClusterId: nullableOf(n.ClusterID), ClusterSlug: nullableOf(clusterSlug), ClusterName: nullableOf(clusterName),
 		PrimaryIp: nullableOf(ip), CreatedAt: n.CreatedAt, UpdatedAt: n.UpdatedAt, Agent: agent,
 		Status: gen.Status(n.Status), StatusReason: n.StatusReason, StatusSince: nullableOf(n.StatusSince),
+		Proxmox: nodeProxmox(r),
 	}
+}
+
+func nodeProxmox(r nodeRow) nullable.Nullable[gen.NodeProxmox] {
+	n := r.Node
+	if n.ProxmoxID == nil || n.PveVmid == nil {
+		return nullable.NewNullNullable[gen.NodeProxmox]()
+	}
+	p := gen.NodeProxmox{
+		ConnectionId: *n.ProxmoxID, ConnectionName: deref(r.ProxmoxName), Vmid: int(*n.PveVmid),
+		Found: r.PveType != nil, Type: deref(r.PveType), Host: deref(r.PveNode), Name: deref(r.PveName),
+		Status: deref(r.PveStatus),
+	}
+	var res proxmox.Resource
+	if len(r.PveData) > 0 && json.Unmarshal(r.PveData, &res) == nil {
+		p.Uptime = res.Uptime
+	}
+	return nullable.NewNullableWithValue(p)
+}
+
+// proxmoxLink zet de koppeling uit een request om; null of ontbrekend is nil.
+func proxmoxLink(n nullable.Nullable[gen.ProxmoxLink]) *inventory.ProxmoxLink {
+	l, err := n.Get()
+	if err != nil {
+		return nil
+	}
+	return &inventory.ProxmoxLink{ConnectionID: l.ConnectionId, VMID: l.Vmid}
 }
 
 // connection leidt de verbindingsstatus af uit de laatste heartbeat.

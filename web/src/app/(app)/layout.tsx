@@ -15,7 +15,8 @@ const nav: NavItem[] = [
   { href: "/clusters", label: "Clusters" },
   { href: "/nodes", label: "Nodes" },
   { href: "/monitoring", label: "Monitoring" },
-  { href: "/proxmox", label: "Proxmox", soon: "mijlpaal 5" },
+  { href: "/proxmox", label: "Proxmox" },
+  { href: "/taken", label: "Taken" },
   { href: "/templates", label: "Templates", soon: "mijlpaal 7" },
   { href: "/instellingen", label: "Instellingen" },
 ];

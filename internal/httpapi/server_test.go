@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
-	"os"
 	"slices"
 	"strings"
 	"sync"
@@ -25,10 +24,14 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/auth"
 	"github.com/Jonasz1996/clusterforge/internal/config"
 	"github.com/Jonasz1996/clusterforge/internal/events"
+	"github.com/Jonasz1996/clusterforge/internal/jobs"
 	"github.com/Jonasz1996/clusterforge/internal/live"
 	"github.com/Jonasz1996/clusterforge/internal/metrics"
+	"github.com/Jonasz1996/clusterforge/internal/proxmox"
+	"github.com/Jonasz1996/clusterforge/internal/secrets"
 	"github.com/Jonasz1996/clusterforge/internal/status"
 	"github.com/Jonasz1996/clusterforge/internal/store"
+	"github.com/Jonasz1996/clusterforge/internal/store/storetest"
 	"github.com/Jonasz1996/clusterforge/pkg/protocol"
 )
 
@@ -43,26 +46,14 @@ type testEnv struct {
 	bus  *agentbus.Bus
 	eval *status.Evaluator
 	vm   *fakeVM
+	pve  *proxmox.Service
+	jobs *jobs.Runner
 }
 
 func newTestEnv(t *testing.T) *testEnv {
 	t.Helper()
-	url := os.Getenv("CF_TEST_DATABASE_URL")
-	if url == "" {
-		t.Skip("CF_TEST_DATABASE_URL niet gezet; integratietest overgeslagen")
-	}
 	ctx := context.Background()
-	pool, err := store.Open(ctx, url)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(pool.Close)
-	if _, err := pool.Exec(ctx, "DROP SCHEMA public CASCADE; CREATE SCHEMA public"); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.Migrate(ctx, pool); err != nil {
-		t.Fatal(err)
-	}
+	pool := storetest.DB(t)
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	q := store.New(pool)
 	a, err := auth.NewService(q, events.NewWriter(q, log), time.Hour)
@@ -90,19 +81,29 @@ func newTestEnv(t *testing.T) *testEnv {
 	t.Cleanup(bus.Close)
 	runCtx, stop := context.WithCancel(ctx)
 	hub := live.NewHub(pool, log)
+	runner := jobs.NewRunner(pool, ev, log)
+	runner.Poll, runner.Heartbeat = 50*time.Millisecond, 50*time.Millisecond
+	box, err := secrets.New(bytes.Repeat([]byte{1}, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pve := proxmox.NewService(pool, ev, log, box, runner)
+	pve.TaskPoll = 20 * time.Millisecond
+	pve.Changed = eval.Kick
 	var wg sync.WaitGroup
-	wg.Add(2)
+	wg.Add(3)
 	go func() { defer wg.Done(); hub.Run(runCtx) }()
 	go func() { defer wg.Done(); eval.Run(runCtx) }()
+	go func() { defer wg.Done(); runner.Run(runCtx) }()
 	t.Cleanup(func() { stop(); wg.Wait() })
 	cfg := config.Config{
 		SecureCookies: false, SessionTTL: time.Hour, AgentDir: t.TempDir(), VictoriaMetricsURL: vm.srv.URL,
 		GrafanaNodeURL: "https://grafana.example/d/node?var-node={hostname}",
 	}
-	api := New(cfg, log, pool, a, bus, hub, "test")
+	api := New(Deps{Config: cfg, Log: log, Pool: pool, Auth: a, Bus: bus, Hub: hub, Proxmox: pve, Jobs: runner, Version: "test"})
 	srv := httptest.NewServer(api.Handler())
 	t.Cleanup(srv.Close)
-	return &testEnv{t: t, srv: srv, auth: a, pool: pool, api: api, bus: bus, eval: eval, vm: vm}
+	return &testEnv{t: t, srv: srv, auth: a, pool: pool, api: api, bus: bus, eval: eval, vm: vm, pve: pve, jobs: runner}
 }
 
 // fakeVM speelt VictoriaMetrics: het bewaart wat binnenkomt en geeft op elke

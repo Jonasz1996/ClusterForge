@@ -111,6 +111,24 @@ func (e EventActorType) Valid() bool {
 	}
 }
 
+// Defines values for GuestType.
+const (
+	Lxc  GuestType = "lxc"
+	Qemu GuestType = "qemu"
+)
+
+// Valid indicates whether the value is a known member of the GuestType enum.
+func (e GuestType) Valid() bool {
+	switch e {
+	case Lxc:
+		return true
+	case Qemu:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for HealthDatabase.
 const (
 	HealthDatabaseOk          HealthDatabase = "ok"
@@ -141,6 +159,33 @@ func (e HealthStatus) Valid() bool {
 	case HealthStatusDegraded:
 		return true
 	case HealthStatusOk:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for JobStatus.
+const (
+	Canceled  JobStatus = "canceled"
+	Failed    JobStatus = "failed"
+	Queued    JobStatus = "queued"
+	Running   JobStatus = "running"
+	Succeeded JobStatus = "succeeded"
+)
+
+// Valid indicates whether the value is a known member of the JobStatus enum.
+func (e JobStatus) Valid() bool {
+	switch e {
+	case Canceled:
+		return true
+	case Failed:
+		return true
+	case Queued:
+		return true
+	case Running:
+		return true
+	case Succeeded:
 		return true
 	default:
 		return false
@@ -261,6 +306,36 @@ func (e Status) Valid() bool {
 	case StatusSplitBrain:
 		return true
 	case StatusUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for VmAction.
+const (
+	Migrate  VmAction = "migrate"
+	Reboot   VmAction = "reboot"
+	Shutdown VmAction = "shutdown"
+	Snapshot VmAction = "snapshot"
+	Start    VmAction = "start"
+	Stop     VmAction = "stop"
+)
+
+// Valid indicates whether the value is a known member of the VmAction enum.
+func (e VmAction) Valid() bool {
+	switch e {
+	case Migrate:
+		return true
+	case Reboot:
+		return true
+	case Shutdown:
+		return true
+	case Snapshot:
+		return true
+	case Start:
+		return true
+	case Stop:
 		return true
 	default:
 		return false
@@ -525,6 +600,9 @@ type Facts struct {
 	Virtualization string `json:"virtualization"`
 }
 
+// GuestType defines model for GuestType.
+type GuestType string
+
 // Health defines model for Health.
 type Health struct {
 	Database HealthDatabase `json:"database"`
@@ -545,6 +623,61 @@ type HeartbeatStatus struct {
 	ReceivedAt    time.Time         `json:"received_at"`
 	Services      map[string]string `json:"services"`
 	UptimeSeconds int64             `json:"uptime_seconds"`
+}
+
+// Job defines model for Job.
+type Job struct {
+	Attempts        int                                   `json:"attempts"`
+	CancelRequested bool                                  `json:"cancel_requested"`
+	ClusterId       nullable.Nullable[openapi_types.UUID] `json:"cluster_id"`
+	CreatedAt       time.Time                             `json:"created_at"`
+	Error           string                                `json:"error"`
+	FinishedAt      nullable.Nullable[time.Time]          `json:"finished_at"`
+	Id              openapi_types.UUID                    `json:"id"`
+	Kind            string                                `json:"kind"`
+	NodeId          nullable.Nullable[openapi_types.UUID] `json:"node_id"`
+	ProxmoxId       nullable.Nullable[openapi_types.UUID] `json:"proxmox_id"`
+
+	// RequestedBy Gebruikersnaam van wie de taak vroeg
+	RequestedBy nullable.Nullable[string]    `json:"requested_by"`
+	StartedAt   nullable.Nullable[time.Time] `json:"started_at"`
+	Status      JobStatus                    `json:"status"`
+	Title       string                       `json:"title"`
+}
+
+// JobDetail defines model for JobDetail.
+type JobDetail struct {
+	Attempts        int                                   `json:"attempts"`
+	CancelRequested bool                                  `json:"cancel_requested"`
+	ClusterId       nullable.Nullable[openapi_types.UUID] `json:"cluster_id"`
+	CreatedAt       time.Time                             `json:"created_at"`
+	Error           string                                `json:"error"`
+	FinishedAt      nullable.Nullable[time.Time]          `json:"finished_at"`
+	Id              openapi_types.UUID                    `json:"id"`
+	Kind            string                                `json:"kind"`
+	NodeId          nullable.Nullable[openapi_types.UUID] `json:"node_id"`
+	ProxmoxId       nullable.Nullable[openapi_types.UUID] `json:"proxmox_id"`
+
+	// RequestedBy Gebruikersnaam van wie de taak vroeg
+	RequestedBy nullable.Nullable[string]    `json:"requested_by"`
+	StartedAt   nullable.Nullable[time.Time] `json:"started_at"`
+	Status      JobStatus                    `json:"status"`
+	Steps       []JobStep                    `json:"steps"`
+	Title       string                       `json:"title"`
+}
+
+// JobStatus defines model for JobStatus.
+type JobStatus string
+
+// JobStep defines model for JobStep.
+type JobStep struct {
+	Error      string                       `json:"error"`
+	FinishedAt nullable.Nullable[time.Time] `json:"finished_at"`
+	Log        []string                     `json:"log"`
+	Name       string                       `json:"name"`
+	Seq        int                          `json:"seq"`
+	StartedAt  time.Time                    `json:"started_at"`
+	Status     JobStatus                    `json:"status"`
 }
 
 // LoginRequest defines model for LoginRequest.
@@ -630,7 +763,10 @@ type Node struct {
 	Id          openapi_types.UUID                    `json:"id"`
 	Lifecycle   NodeLifecycle                         `json:"lifecycle"`
 	PrimaryIp   nullable.Nullable[string]             `json:"primary_ip"`
-	Role        string                                `json:"role"`
+
+	// Proxmox De gekoppelde VM of container in Proxmox, of null
+	Proxmox nullable.Nullable[NodeProxmox] `json:"proxmox"`
+	Role    string                         `json:"role"`
 
 	// Status Berekend uit heartbeats, metrics en VIP's (zie internal/status).
 	// unknown betekent: geen agent of nog geen gegevens.
@@ -650,8 +786,11 @@ type NodeInput struct {
 	Hostname    string                                `json:"hostname"`
 	Lifecycle   *NodeLifecycle                        `json:"lifecycle,omitempty"`
 	PrimaryIp   nullable.Nullable[string]             `json:"primary_ip,omitempty"`
-	Role        *string                               `json:"role,omitempty"`
-	Tags        *[]string                             `json:"tags,omitempty"`
+
+	// Proxmox Koppeling met een VM of container in Proxmox; null koppelt los
+	Proxmox nullable.Nullable[ProxmoxLink] `json:"proxmox,omitempty"`
+	Role    *string                        `json:"role,omitempty"`
+	Tags    *[]string                      `json:"tags,omitempty"`
 }
 
 // NodeLifecycle defines model for NodeLifecycle.
@@ -664,8 +803,26 @@ type NodePatch struct {
 	Hostname    *string                               `json:"hostname,omitempty"`
 	Lifecycle   *NodeLifecycle                        `json:"lifecycle,omitempty"`
 	PrimaryIp   nullable.Nullable[string]             `json:"primary_ip,omitempty"`
-	Role        *string                               `json:"role,omitempty"`
-	Tags        *[]string                             `json:"tags,omitempty"`
+
+	// Proxmox Koppeling met een VM of container in Proxmox; null koppelt los
+	Proxmox nullable.Nullable[ProxmoxLink] `json:"proxmox,omitempty"`
+	Role    *string                        `json:"role,omitempty"`
+	Tags    *[]string                      `json:"tags,omitempty"`
+}
+
+// NodeProxmox defines model for NodeProxmox.
+type NodeProxmox struct {
+	ConnectionId   openapi_types.UUID `json:"connection_id"`
+	ConnectionName string             `json:"connection_name"`
+
+	// Found false als de VM niet in de laatste sync zat
+	Found  bool   `json:"found"`
+	Host   string `json:"host"`
+	Name   string `json:"name"`
+	Status string `json:"status"`
+	Type   string `json:"type"`
+	Uptime int64  `json:"uptime"`
+	Vmid   int    `json:"vmid"`
 }
 
 // NodeRuntime defines model for NodeRuntime.
@@ -674,6 +831,144 @@ type NodeRuntime struct {
 	CollectedAt nullable.Nullable[time.Time]       `json:"collected_at"`
 	Facts       nullable.Nullable[Facts]           `json:"facts"`
 	Heartbeat   nullable.Nullable[HeartbeatStatus] `json:"heartbeat"`
+}
+
+// ProxmoxConnection defines model for ProxmoxConnection.
+type ProxmoxConnection struct {
+	// ApiUrl Bijvoorbeeld https://pve1.lan:8006
+	ApiUrl    string             `json:"api_url"`
+	Counts    ProxmoxCounts      `json:"counts"`
+	CreatedAt time.Time          `json:"created_at"`
+	Id        openapi_types.UUID `json:"id"`
+
+	// LastError Fout van de laatste sync; leeg als die lukte
+	LastError  string                       `json:"last_error"`
+	LastSyncAt nullable.Nullable[time.Time] `json:"last_sync_at"`
+	Name       string                       `json:"name"`
+	PveVersion string                       `json:"pve_version"`
+
+	// TlsFingerprint SHA-256 van het certificaat zoals Proxmox hem toont; leeg betekent gewone CA-controle
+	TlsFingerprint string `json:"tls_fingerprint"`
+
+	// TokenId Bijvoorbeeld clusterforge@pve!cf
+	TokenId   string    `json:"token_id"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// ProxmoxCounts defines model for ProxmoxCounts.
+type ProxmoxCounts struct {
+	Containers int `json:"containers"`
+	Hosts      int `json:"hosts"`
+	Vms        int `json:"vms"`
+}
+
+// ProxmoxGuest defines model for ProxmoxGuest.
+type ProxmoxGuest struct {
+	Cpu  float64 `json:"cpu"`
+	Disk int64   `json:"disk"`
+
+	// Host De Proxmox-host waar de VM nu staat
+	Host string `json:"host"`
+
+	// Lock Lopende bewerking in Proxmox
+	Lock         string                    `json:"lock"`
+	Maxcpu       float64                   `json:"maxcpu"`
+	Maxdisk      int64                     `json:"maxdisk"`
+	Maxmem       int64                     `json:"maxmem"`
+	Mem          int64                     `json:"mem"`
+	Name         string                    `json:"name"`
+	NodeHostname nullable.Nullable[string] `json:"node_hostname"`
+
+	// NodeId De gekoppelde node in ClusterForge
+	NodeId nullable.Nullable[openapi_types.UUID] `json:"node_id"`
+
+	// Status running
+	Status   string    `json:"status"`
+	Tags     []string  `json:"tags"`
+	Template bool      `json:"template"`
+	Type     GuestType `json:"type"`
+	Uptime   int64     `json:"uptime"`
+	Vmid     int       `json:"vmid"`
+}
+
+// ProxmoxHost defines model for ProxmoxHost.
+type ProxmoxHost struct {
+	// Cpu Bezetting van 0 tot 1
+	Cpu     float64 `json:"cpu"`
+	Disk    int64   `json:"disk"`
+	Maxcpu  float64 `json:"maxcpu"`
+	Maxdisk int64   `json:"maxdisk"`
+	Maxmem  int64   `json:"maxmem"`
+	Mem     int64   `json:"mem"`
+	Name    string  `json:"name"`
+
+	// Status online of offline
+	Status string `json:"status"`
+	Uptime int64  `json:"uptime"`
+}
+
+// ProxmoxInput defines model for ProxmoxInput.
+type ProxmoxInput struct {
+	ApiUrl         string  `json:"api_url"`
+	Name           string  `json:"name"`
+	TlsFingerprint *string `json:"tls_fingerprint,omitempty"`
+	TokenId        string  `json:"token_id"`
+	TokenSecret    *string `json:"token_secret,omitempty"`
+}
+
+// ProxmoxLink defines model for ProxmoxLink.
+type ProxmoxLink struct {
+	ConnectionId openapi_types.UUID `json:"connection_id"`
+	Vmid         int                `json:"vmid"`
+}
+
+// ProxmoxPatch defines model for ProxmoxPatch.
+type ProxmoxPatch struct {
+	ApiUrl         *string `json:"api_url,omitempty"`
+	Name           *string `json:"name,omitempty"`
+	TlsFingerprint *string `json:"tls_fingerprint,omitempty"`
+	TokenId        *string `json:"token_id,omitempty"`
+	TokenSecret    *string `json:"token_secret,omitempty"`
+}
+
+// ProxmoxProbe defines model for ProxmoxProbe.
+type ProxmoxProbe struct {
+	// ApiUrl Het adres zoals de server het gebruikt
+	ApiUrl      string    `json:"api_url"`
+	Fingerprint string    `json:"fingerprint"`
+	Issuer      string    `json:"issuer"`
+	NotAfter    time.Time `json:"not_after"`
+	Subject     string    `json:"subject"`
+
+	// Trusted Of het certificaat ook zonder vingerafdruk geldig is
+	Trusted bool `json:"trusted"`
+}
+
+// ProxmoxResources defines model for ProxmoxResources.
+type ProxmoxResources struct {
+	Guests   []ProxmoxGuest   `json:"guests"`
+	Hosts    []ProxmoxHost    `json:"hosts"`
+	Storages []ProxmoxStorage `json:"storages"`
+}
+
+// ProxmoxSnapshot defines model for ProxmoxSnapshot.
+type ProxmoxSnapshot struct {
+	Description string                       `json:"description"`
+	Name        string                       `json:"name"`
+	Parent      string                       `json:"parent"`
+	Time        nullable.Nullable[time.Time] `json:"time"`
+	Vmstate     bool                         `json:"vmstate"`
+}
+
+// ProxmoxStorage defines model for ProxmoxStorage.
+type ProxmoxStorage struct {
+	Content string `json:"content"`
+	Disk    int64  `json:"disk"`
+	Host    string `json:"host"`
+	Maxdisk int64  `json:"maxdisk"`
+	Name    string `json:"name"`
+	Shared  bool   `json:"shared"`
+	Type    string `json:"type"`
 }
 
 // Role defines model for Role.
@@ -763,6 +1058,24 @@ type VipPatch struct {
 	Vrid        nullable.Nullable[int] `json:"vrid,omitempty"`
 }
 
+// VmAction defines model for VmAction.
+type VmAction string
+
+// VmActionInput defines model for VmActionInput.
+type VmActionInput struct {
+	Action      VmAction `json:"action"`
+	Description *string  `json:"description,omitempty"`
+
+	// SnapshotName Leeg geeft cf-<datum>-<tijd>
+	SnapshotName *string `json:"snapshot_name,omitempty"`
+
+	// Target Doelhost bij migreren
+	Target *string `json:"target,omitempty"`
+
+	// Vmstate Ook het geheugen in de snapshot (alleen VM's die draaien)
+	Vmstate *bool `json:"vmstate,omitempty"`
+}
+
 // GetClusterMetricsParams defines parameters for GetClusterMetrics.
 type GetClusterMetricsParams struct {
 	Range *MetricsRange `form:"range,omitempty" json:"range,omitempty"`
@@ -773,9 +1086,22 @@ type ListEventsParams struct {
 	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// ListJobsParams defines parameters for ListJobs.
+type ListJobsParams struct {
+	NodeId    *openapi_types.UUID `form:"node_id,omitempty" json:"node_id,omitempty"`
+	ClusterId *openapi_types.UUID `form:"cluster_id,omitempty" json:"cluster_id,omitempty"`
+	ProxmoxId *openapi_types.UUID `form:"proxmox_id,omitempty" json:"proxmox_id,omitempty"`
+	Limit     *int                `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
 // GetNodeMetricsParams defines parameters for GetNodeMetrics.
 type GetNodeMetricsParams struct {
 	Range *MetricsRange `form:"range,omitempty" json:"range,omitempty"`
+}
+
+// ProbeProxmoxJSONBody defines parameters for ProbeProxmox.
+type ProbeProxmoxJSONBody struct {
+	ApiUrl string `json:"api_url"`
 }
 
 // EnrollAgentJSONRequestBody defines body for EnrollAgent for application/json ContentType.
@@ -810,6 +1136,18 @@ type CreateNodeJSONRequestBody = NodeInput
 
 // UpdateNodeJSONRequestBody defines body for UpdateNode for application/json ContentType.
 type UpdateNodeJSONRequestBody = NodePatch
+
+// CreateProxmoxJSONRequestBody defines body for CreateProxmox for application/json ContentType.
+type CreateProxmoxJSONRequestBody = ProxmoxInput
+
+// ProbeProxmoxJSONRequestBody defines body for ProbeProxmox for application/json ContentType.
+type ProbeProxmoxJSONRequestBody ProbeProxmoxJSONBody
+
+// UpdateProxmoxJSONRequestBody defines body for UpdateProxmox for application/json ContentType.
+type UpdateProxmoxJSONRequestBody = ProxmoxPatch
+
+// VmActionJSONRequestBody defines body for VmAction for application/json ContentType.
+type VmActionJSONRequestBody = VmActionInput
 
 // UpdateVipJSONRequestBody defines body for UpdateVip for application/json ContentType.
 type UpdateVipJSONRequestBody = VipPatch
@@ -882,6 +1220,15 @@ type ServerInterface interface {
 	// GetInfo Instellingen van de server die de webinterface nodig heeft
 	// (GET /info)
 	GetInfo(w http.ResponseWriter, r *http.Request)
+	// ListJobs Recente taken, nieuwste eerst
+	// (GET /jobs)
+	ListJobs(w http.ResponseWriter, r *http.Request, params ListJobsParams)
+	// GetJob Eén taak met zijn stappen en uitvoer
+	// (GET /jobs/{jobId})
+	GetJob(w http.ResponseWriter, r *http.Request, jobId openapi_types.UUID)
+	// CancelJob Taak annuleren (admin); een lopende Proxmox-taak wordt gestopt
+	// (POST /jobs/{jobId}/cancel)
+	CancelJob(w http.ResponseWriter, r *http.Request, jobId openapi_types.UUID)
 	// ListNodes Alle nodes, met hun cluster
 	// (GET /nodes)
 	ListNodes(w http.ResponseWriter, r *http.Request)
@@ -903,6 +1250,36 @@ type ServerInterface interface {
 	// GetNodeMetrics Grafieken van één node uit VictoriaMetrics
 	// (GET /nodes/{nodeId}/metrics)
 	GetNodeMetrics(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID, params GetNodeMetricsParams)
+	// ListProxmox Gekoppelde Proxmox-omgevingen
+	// (GET /proxmox)
+	ListProxmox(w http.ResponseWriter, r *http.Request)
+	// CreateProxmox Proxmox koppelen (admin); de server test de verbinding eerst
+	// (POST /proxmox)
+	CreateProxmox(w http.ResponseWriter, r *http.Request)
+	// ProbeProxmox Certificaat van een Proxmox-adres ophalen om de vingerafdruk te controleren (admin)
+	// (POST /proxmox/probe)
+	ProbeProxmox(w http.ResponseWriter, r *http.Request)
+	// DeleteProxmox Proxmox-koppeling verwijderen (admin); nodes blijven bestaan zonder koppeling
+	// (DELETE /proxmox/{proxmoxId})
+	DeleteProxmox(w http.ResponseWriter, r *http.Request, proxmoxId openapi_types.UUID)
+	// GetProxmox Eén Proxmox-omgeving
+	// (GET /proxmox/{proxmoxId})
+	GetProxmox(w http.ResponseWriter, r *http.Request, proxmoxId openapi_types.UUID)
+	// UpdateProxmox Proxmox-koppeling wijzigen (admin); zonder token_secret blijft het oude
+	// (PATCH /proxmox/{proxmoxId})
+	UpdateProxmox(w http.ResponseWriter, r *http.Request, proxmoxId openapi_types.UUID)
+	// GetProxmoxResources Hosts, VM's, containers en storage uit de laatste sync
+	// (GET /proxmox/{proxmoxId}/resources)
+	GetProxmoxResources(w http.ResponseWriter, r *http.Request, proxmoxId openapi_types.UUID)
+	// SyncProxmox Nu synchroniseren in plaats van op de volgende ronde te wachten (admin)
+	// (POST /proxmox/{proxmoxId}/sync)
+	SyncProxmox(w http.ResponseWriter, r *http.Request, proxmoxId openapi_types.UUID)
+	// VmAction Een VM of container starten, stoppen, snapshotten of migreren (admin); wordt een taak
+	// (POST /proxmox/{proxmoxId}/vms/{vmid}/actions)
+	VmAction(w http.ResponseWriter, r *http.Request, proxmoxId openapi_types.UUID, vmid int)
+	// ListVmSnapshots Snapshots van een VM of container, rechtstreeks uit Proxmox
+	// (GET /proxmox/{proxmoxId}/vms/{vmid}/snapshots)
+	ListVmSnapshots(w http.ResponseWriter, r *http.Request, proxmoxId openapi_types.UUID, vmid int)
 	// Stream Live wijzigingen als Server-Sent Events
 	// (GET /stream)
 	Stream(w http.ResponseWriter, r *http.Request)
@@ -1053,6 +1430,24 @@ func (_ Unimplemented) GetInfo(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// ListJobs Recente taken, nieuwste eerst
+// (GET /jobs)
+func (_ Unimplemented) ListJobs(w http.ResponseWriter, r *http.Request, params ListJobsParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetJob Eén taak met zijn stappen en uitvoer
+// (GET /jobs/{jobId})
+func (_ Unimplemented) GetJob(w http.ResponseWriter, r *http.Request, jobId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CancelJob Taak annuleren (admin); een lopende Proxmox-taak wordt gestopt
+// (POST /jobs/{jobId}/cancel)
+func (_ Unimplemented) CancelJob(w http.ResponseWriter, r *http.Request, jobId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // ListNodes Alle nodes, met hun cluster
 // (GET /nodes)
 func (_ Unimplemented) ListNodes(w http.ResponseWriter, r *http.Request) {
@@ -1092,6 +1487,66 @@ func (_ Unimplemented) GetNodeFacts(w http.ResponseWriter, r *http.Request, node
 // GetNodeMetrics Grafieken van één node uit VictoriaMetrics
 // (GET /nodes/{nodeId}/metrics)
 func (_ Unimplemented) GetNodeMetrics(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID, params GetNodeMetricsParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListProxmox Gekoppelde Proxmox-omgevingen
+// (GET /proxmox)
+func (_ Unimplemented) ListProxmox(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CreateProxmox Proxmox koppelen (admin); de server test de verbinding eerst
+// (POST /proxmox)
+func (_ Unimplemented) CreateProxmox(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ProbeProxmox Certificaat van een Proxmox-adres ophalen om de vingerafdruk te controleren (admin)
+// (POST /proxmox/probe)
+func (_ Unimplemented) ProbeProxmox(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// DeleteProxmox Proxmox-koppeling verwijderen (admin); nodes blijven bestaan zonder koppeling
+// (DELETE /proxmox/{proxmoxId})
+func (_ Unimplemented) DeleteProxmox(w http.ResponseWriter, r *http.Request, proxmoxId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetProxmox Eén Proxmox-omgeving
+// (GET /proxmox/{proxmoxId})
+func (_ Unimplemented) GetProxmox(w http.ResponseWriter, r *http.Request, proxmoxId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// UpdateProxmox Proxmox-koppeling wijzigen (admin); zonder token_secret blijft het oude
+// (PATCH /proxmox/{proxmoxId})
+func (_ Unimplemented) UpdateProxmox(w http.ResponseWriter, r *http.Request, proxmoxId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetProxmoxResources Hosts, VM's, containers en storage uit de laatste sync
+// (GET /proxmox/{proxmoxId}/resources)
+func (_ Unimplemented) GetProxmoxResources(w http.ResponseWriter, r *http.Request, proxmoxId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SyncProxmox Nu synchroniseren in plaats van op de volgende ronde te wachten (admin)
+// (POST /proxmox/{proxmoxId}/sync)
+func (_ Unimplemented) SyncProxmox(w http.ResponseWriter, r *http.Request, proxmoxId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// VmAction Een VM of container starten, stoppen, snapshotten of migreren (admin); wordt een taak
+// (POST /proxmox/{proxmoxId}/vms/{vmid}/actions)
+func (_ Unimplemented) VmAction(w http.ResponseWriter, r *http.Request, proxmoxId openapi_types.UUID, vmid int) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListVmSnapshots Snapshots van een VM of container, rechtstreeks uit Proxmox
+// (GET /proxmox/{proxmoxId}/vms/{vmid}/snapshots)
+func (_ Unimplemented) ListVmSnapshots(w http.ResponseWriter, r *http.Request, proxmoxId openapi_types.UUID, vmid int) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -1555,6 +2010,130 @@ func (siw *ServerInterfaceWrapper) GetInfo(w http.ResponseWriter, r *http.Reques
 	handler.ServeHTTP(w, r)
 }
 
+// ListJobs operation middleware
+func (siw *ServerInterfaceWrapper) ListJobs(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListJobsParams
+
+	// ------------- Optional query parameter "node_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "node_id", r.URL.Query(), &params.NodeId, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "node_id"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "node_id", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cluster_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cluster_id", r.URL.Query(), &params.ClusterId, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cluster_id"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cluster_id", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "proxmox_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "proxmox_id", r.URL.Query(), &params.ProxmoxId, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "proxmox_id"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "proxmox_id", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListJobs(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetJob operation middleware
+func (siw *ServerInterfaceWrapper) GetJob(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "jobId" -------------
+	var jobId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "jobId", chi.URLParam(r, "jobId"), &jobId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "jobId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetJob(w, r, jobId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CancelJob operation middleware
+func (siw *ServerInterfaceWrapper) CancelJob(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "jobId" -------------
+	var jobId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "jobId", chi.URLParam(r, "jobId"), &jobId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "jobId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CancelJob(w, r, jobId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListNodes operation middleware
 func (siw *ServerInterfaceWrapper) ListNodes(w http.ResponseWriter, r *http.Request) {
 
@@ -1720,6 +2299,248 @@ func (siw *ServerInterfaceWrapper) GetNodeMetrics(w http.ResponseWriter, r *http
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetNodeMetrics(w, r, nodeId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListProxmox operation middleware
+func (siw *ServerInterfaceWrapper) ListProxmox(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListProxmox(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateProxmox operation middleware
+func (siw *ServerInterfaceWrapper) CreateProxmox(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateProxmox(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ProbeProxmox operation middleware
+func (siw *ServerInterfaceWrapper) ProbeProxmox(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ProbeProxmox(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteProxmox operation middleware
+func (siw *ServerInterfaceWrapper) DeleteProxmox(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "proxmoxId" -------------
+	var proxmoxId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "proxmoxId", chi.URLParam(r, "proxmoxId"), &proxmoxId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "proxmoxId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteProxmox(w, r, proxmoxId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetProxmox operation middleware
+func (siw *ServerInterfaceWrapper) GetProxmox(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "proxmoxId" -------------
+	var proxmoxId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "proxmoxId", chi.URLParam(r, "proxmoxId"), &proxmoxId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "proxmoxId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetProxmox(w, r, proxmoxId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateProxmox operation middleware
+func (siw *ServerInterfaceWrapper) UpdateProxmox(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "proxmoxId" -------------
+	var proxmoxId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "proxmoxId", chi.URLParam(r, "proxmoxId"), &proxmoxId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "proxmoxId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateProxmox(w, r, proxmoxId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetProxmoxResources operation middleware
+func (siw *ServerInterfaceWrapper) GetProxmoxResources(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "proxmoxId" -------------
+	var proxmoxId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "proxmoxId", chi.URLParam(r, "proxmoxId"), &proxmoxId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "proxmoxId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetProxmoxResources(w, r, proxmoxId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SyncProxmox operation middleware
+func (siw *ServerInterfaceWrapper) SyncProxmox(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "proxmoxId" -------------
+	var proxmoxId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "proxmoxId", chi.URLParam(r, "proxmoxId"), &proxmoxId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "proxmoxId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SyncProxmox(w, r, proxmoxId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// VmAction operation middleware
+func (siw *ServerInterfaceWrapper) VmAction(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "proxmoxId" -------------
+	var proxmoxId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "proxmoxId", chi.URLParam(r, "proxmoxId"), &proxmoxId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "proxmoxId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "vmid" -------------
+	var vmid int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "vmid", chi.URLParam(r, "vmid"), &vmid, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "vmid", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.VmAction(w, r, proxmoxId, vmid)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListVmSnapshots operation middleware
+func (siw *ServerInterfaceWrapper) ListVmSnapshots(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "proxmoxId" -------------
+	var proxmoxId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "proxmoxId", chi.URLParam(r, "proxmoxId"), &proxmoxId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "proxmoxId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "vmid" -------------
+	var vmid int
+
+	err = runtime.BindStyledParameterWithOptions("simple", "vmid", chi.URLParam(r, "vmid"), &vmid, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "integer", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "vmid", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListVmSnapshots(w, r, proxmoxId, vmid)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2020,6 +2841,45 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/agents/{agentId}/revoke", wrapper.RevokeAgent)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/proxmox", wrapper.ListProxmox)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/proxmox", wrapper.CreateProxmox)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/proxmox/probe", wrapper.ProbeProxmox)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/proxmox/{proxmoxId}", wrapper.DeleteProxmox)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/proxmox/{proxmoxId}", wrapper.GetProxmox)
+	})
+	r.Group(func(r chi.Router) {
+		r.Patch(options.BaseURL+"/proxmox/{proxmoxId}", wrapper.UpdateProxmox)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/proxmox/{proxmoxId}/sync", wrapper.SyncProxmox)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/proxmox/{proxmoxId}/resources", wrapper.GetProxmoxResources)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/proxmox/{proxmoxId}/vms/{vmid}/actions", wrapper.VmAction)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/proxmox/{proxmoxId}/vms/{vmid}/snapshots", wrapper.ListVmSnapshots)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/jobs", wrapper.ListJobs)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/jobs/{jobId}", wrapper.GetJob)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/jobs/{jobId}/cancel", wrapper.CancelJob)
 	})
 
 	return r

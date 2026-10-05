@@ -52,11 +52,20 @@ type NodeInput struct {
 	Services map[string]string
 	// EnabledServices zijn de units die volgens de facts enabled staan.
 	EnabledServices []string
+	// VMStatus is de toestand van de gekoppelde VM in Proxmox (running,
+	// stopped, paused); leeg zonder koppeling.
+	VMStatus string
 }
 
 // Node past de regels voor één node toe.
 func Node(in NodeInput) Result {
+	// Zonder heartbeat weet Proxmox soms waarom.
+	offline := !in.HasAgent || in.HeartbeatAge < 0 || in.HeartbeatAge > HeartbeatDown
 	switch {
+	case offline && in.VMStatus == "stopped":
+		return Result{Down, "VM staat uit in Proxmox"}
+	case offline && in.VMStatus == "paused":
+		return Result{Down, "VM is gepauzeerd in Proxmox"}
 	case !in.HasAgent:
 		return Result{Unknown, "geen agent"}
 	case in.HeartbeatAge < 0:
