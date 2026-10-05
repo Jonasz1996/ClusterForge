@@ -1,0 +1,240 @@
+openapi: 3.0.3
+info:
+  title: ClusterForge API
+  version: 0.1.0
+  description: |
+    REST-API van clusterforge-server. Dit bestand is de bron van waarheid:
+    de Go-servertypes (internal/httpapi/gen) en de TypeScript-client
+    (web/src/lib/api/schema.ts) worden eruit gegenereerd met `make generate`.
+
+    Authenticatie gebeurt met een sessiecookie (`cf_session`). Elke request
+    die iets wijzigt, behalve login, stuurt de CSRF-token uit `/auth/me` of
+    de login-respons mee in de header `X-CSRF-Token`.
+servers:
+  - url: /api/v1
+security:
+  - session: []
+paths:
+  /health:
+    get:
+      operationId: getHealth
+      summary: Gezondheid van de server en de database
+      security: []
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
+        "503":
+          description: Database niet bereikbaar
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
+  /auth/login:
+    post:
+      operationId: login
+      summary: Inloggen met wachtwoord en, indien ingesteld, TOTP-code
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LoginRequest" }
+      responses:
+        "200":
+          description: Ingelogd; de sessiecookie staat in Set-Cookie
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Me" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+  /auth/logout:
+    post:
+      operationId: logout
+      summary: Uitloggen
+      responses:
+        "204": { description: Uitgelogd }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /auth/me:
+    get:
+      operationId: getMe
+      summary: De ingelogde gebruiker en de CSRF-token van de sessie
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Me" }
+        "401": { $ref: "#/components/responses/Error" }
+  /auth/password:
+    post:
+      operationId: changePassword
+      summary: Wachtwoord wijzigen; andere sessies worden beëindigd
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ChangePasswordRequest" }
+      responses:
+        "204": { description: Gewijzigd }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /auth/totp/setup:
+    post:
+      operationId: beginTotpSetup
+      summary: Nieuw TOTP-geheim aanmaken (nog niet actief)
+      responses:
+        "200":
+          description: Geheim en otpauth-URL voor de authenticator-app
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TotpSetup" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /auth/totp/enable:
+    post:
+      operationId: enableTotp
+      summary: TOTP activeren met een code uit de authenticator-app
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TotpCodeRequest" }
+      responses:
+        "204": { description: Geactiveerd }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /auth/totp/disable:
+    post:
+      operationId: disableTotp
+      summary: TOTP uitzetten met wachtwoord en een geldige code
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TotpDisableRequest" }
+      responses:
+        "204": { description: Uitgezet }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /events:
+    get:
+      operationId: listEvents
+      summary: Recente events, nieuwste eerst (alleen admin)
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Event" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+components:
+  securitySchemes:
+    session:
+      type: apiKey
+      in: cookie
+      name: cf_session
+  responses:
+    Error:
+      description: Fout
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+  schemas:
+    Error:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          description: Stabiele foutcode, bijvoorbeeld invalid_credentials of totp_required
+        message:
+          type: string
+    Health:
+      type: object
+      required: [status, version, database]
+      properties:
+        status: { type: string, enum: [ok, degraded] }
+        version: { type: string }
+        database: { type: string, enum: [ok, unreachable] }
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username: { type: string }
+        password: { type: string, format: password }
+        totp_code: { type: string, description: Zescijferige code, alleen als TOTP aan staat }
+    Role:
+      type: string
+      enum: [admin, viewer]
+    User:
+      type: object
+      required: [id, username, role, totp_enabled, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        username: { type: string }
+        role: { $ref: "#/components/schemas/Role" }
+        totp_enabled: { type: boolean }
+        created_at: { type: string, format: date-time }
+    Me:
+      type: object
+      required: [user, csrf_token, session_expires_at]
+      properties:
+        user: { $ref: "#/components/schemas/User" }
+        csrf_token: { type: string }
+        session_expires_at: { type: string, format: date-time }
+    ChangePasswordRequest:
+      type: object
+      required: [current_password, new_password]
+      properties:
+        current_password: { type: string, format: password }
+        new_password: { type: string, format: password, minLength: 12 }
+    TotpSetup:
+      type: object
+      required: [secret, otpauth_url]
+      properties:
+        secret: { type: string }
+        otpauth_url: { type: string }
+    TotpCodeRequest:
+      type: object
+      required: [code]
+      properties:
+        code: { type: string }
+    TotpDisableRequest:
+      type: object
+      required: [password, code]
+      properties:
+        password: { type: string, format: password }
+        code: { type: string }
+    Event:
+      type: object
+      required: [id, ts, actor_type, actor_id, subject_type, subject_id, action, payload]
+      properties:
+        id: { type: integer, format: int64 }
+        ts: { type: string, format: date-time }
+        actor_type: { type: string, enum: [user, agent, system] }
+        actor_id: { type: string }
+        subject_type: { type: string }
+        subject_id: { type: string }
+        cluster_id: { type: string, format: uuid, nullable: true }
+        action: { type: string }
+        payload: { type: object, additionalProperties: true }
