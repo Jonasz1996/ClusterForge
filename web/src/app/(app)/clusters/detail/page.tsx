@@ -10,6 +10,7 @@ import { ClusterForm } from "@/components/inventory/ClusterForm";
 import { NodeForm } from "@/components/inventory/NodeForm";
 import { SpecCard } from "@/components/inventory/SpecCard";
 import { ClusterDriftCard } from "@/components/drift/Drift";
+import { FailoverBanner, FailoverCard } from "@/components/failover/Failover";
 import { JobList } from "@/components/jobs/JobList";
 import {
   AgentBadge,
@@ -111,6 +112,7 @@ function ClusterDetailInner() {
           />
 
           <StatusNote status={cluster.data.status} reason={cluster.data.status_reason} since={cluster.data.status_since} />
+          <FailoverBanner clusterId={id} isAdmin={isAdmin} />
 
           {editing ? (
             <Card title="Cluster bewerken">
@@ -132,6 +134,7 @@ function ClusterDetailInner() {
           <ClusterDriftCard clusterId={id} isAdmin={isAdmin} />
           {cluster.data.template_name && <SpecCard clusterId={id} />}
           <VipsCard c={cluster.data} isAdmin={isAdmin} />
+          <FailoverCard clusterId={id} isAdmin={isAdmin} />
           <ClusterBackupsCard clusterId={id} isAdmin={isAdmin} />
           {(jobs.data?.length ?? 0) > 0 && (
             <Card title="Taken">

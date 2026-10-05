@@ -33,6 +33,8 @@ export class ApiError extends Error {
     message: string,
     // field is het veld met de fout, zoals params.vip, als de server het noemt.
     public field?: string,
+    // checks zijn de controles bij precheck_failed.
+    public checks?: components["schemas"]["TestRunCheck"][],
   ) {
     super(message);
   }
@@ -47,6 +49,7 @@ export function unwrap<T>(res: { data?: T; error?: unknown; response: Response }
       body?.code ?? "unknown",
       body?.message ?? `Onverwachte fout (${res.response.status})`,
       body?.field,
+      body?.checks,
     );
   }
   return res.data as T;

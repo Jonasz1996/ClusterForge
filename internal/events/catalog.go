@@ -15,6 +15,7 @@ const (
 	CategoryProxmox   Category = "proxmox"
 	CategoryBackups   Category = "backups"
 	CategoryDrift     Category = "drift"
+	CategoryFailover  Category = "failover"
 	CategoryStatus    Category = "status"
 )
 
@@ -31,6 +32,7 @@ var Categories = []struct {
 	{CategoryProxmox, "Proxmox"},
 	{CategoryBackups, "Back-ups"},
 	{CategoryDrift, "Drift"},
+	{CategoryFailover, "Failovertests"},
 	{CategoryStatus, "Status"},
 }
 
@@ -118,6 +120,13 @@ var Known = map[string]Spec{
 	"drift.ignore_added":   {CategoryDrift, "Drift genegeerd"},
 	"drift.ignore_removed": {CategoryDrift, "Negeerregel opgeheven"},
 	"drift.baseline_set":   {CategoryDrift, "Baseline vastgelegd"},
+
+	"failover_test.created":   {CategoryFailover, "Failovertest aangemaakt"},
+	"failover_test.updated":   {CategoryFailover, "Failovertest gewijzigd"},
+	"failover_test.deleted":   {CategoryFailover, "Failovertest verwijderd"},
+	"failover.fault_injected": {CategoryFailover, "Storing van een failovertest veroorzaakt"},
+	"failover.fault_cleared":  {CategoryFailover, "Storing van een failovertest opgeheven"},
+	"failover.finished":       {CategoryFailover, "Failovertest klaar"},
 
 	"node.status_changed":    {CategoryStatus, "Status van node gewijzigd"},
 	"cluster.status_changed": {CategoryStatus, "Status van cluster gewijzigd"},

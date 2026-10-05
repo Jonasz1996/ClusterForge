@@ -20,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Jonasz1996/clusterforge/internal/events"
+	"github.com/Jonasz1996/clusterforge/internal/health"
 	"github.com/Jonasz1996/clusterforge/internal/jobs"
 	"github.com/Jonasz1996/clusterforge/internal/status"
 	"github.com/Jonasz1996/clusterforge/internal/store"
@@ -686,20 +687,5 @@ func seconds(d time.Duration) string {
 
 // poll roept check aan tot die true geeft, een fout geeft of ctx afloopt.
 func (r *runCtx) poll(ctx context.Context, check func(context.Context) (bool, error)) error {
-	t := time.NewTicker(r.s.Poll)
-	defer t.Stop()
-	for {
-		ok, err := check(ctx)
-		if err != nil && ctx.Err() == nil {
-			return err
-		}
-		if ok {
-			return nil
-		}
-		select {
-		case <-ctx.Done():
-			return context.Cause(ctx)
-		case <-t.C:
-		}
-	}
+	return health.Poll(ctx, r.s.Poll, check)
 }

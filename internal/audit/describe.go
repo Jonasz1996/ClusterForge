@@ -131,6 +131,13 @@ func subjectName(r store.ListAuditRow, p map[string]any, n names, e Entry) (stri
 		return str(p, "name"), false
 	case "enrollment_token":
 		return str(p, "description"), false
+	case "failover_test":
+		if m, ok := p["name"].(map[string]any); ok {
+			return text(m["to"]), false
+		}
+		return or(str(p, "test"), str(p, "name")), false
+	case "test_run":
+		return str(p, "name"), false
 	case "audit":
 		return events.Lookup(r.SubjectID).Label, false
 	}
@@ -366,6 +373,22 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 		return "Negeerregel van cluster " + name + " opgeheven: " + str(p, "key") + prefixed(" op ", str(p, "node"))
 	case "drift.baseline_set":
 		return fmt.Sprintf("Baseline van cluster %s vastgelegd voor %s (revisie %s)", name, list(p["nodes"]), num(p["revision"]))
+	case "failover_test.created":
+		return "Failovertest " + name + " aangemaakt" + paren(str(p, "scenario"))
+	case "failover_test.updated":
+		return "Failovertest " + name + " gewijzigd" + changeSummary(e.Changes)
+	case "failover_test.deleted":
+		return "Failovertest " + name + " verwijderd"
+	case "failover.fault_injected":
+		return fmt.Sprintf("Failovertest %s: %s gestopt op %s", str(p, "name"), str(p, "unit"), str(p, "hostname"))
+	case "failover.fault_cleared":
+		s := fmt.Sprintf("Failovertest %s: %s weer gestart op %s", str(p, "name"), str(p, "unit"), str(p, "hostname"))
+		if b, _ := p["restore"].(bool); b {
+			s += " (opnieuw herstellen)"
+		}
+		return s
+	case "failover.finished":
+		return "Failovertest " + str(p, "name") + colon(str(p, "summary"))
 	}
 	if strings.HasPrefix(r.Action, "job.") {
 		return spec.Label + ": " + name
@@ -413,8 +436,10 @@ var fieldLabels = map[string][][2]string{
 		{"environment", "Omgeving"}, {"git_repo_url", "Git-repository"}, {"tags", "Tags"}, {"owner_ids", "Owners"}},
 	"node": {{"hostname", "Hostnaam"}, {"cluster_id", "Cluster"}, {"role", "Rol"}, {"description", "Omschrijving"},
 		{"lifecycle", "Lifecycle"}, {"primary_ip", "IP-adres"}, {"tags", "Tags"}, {"proxmox", "Proxmox-VM"}},
-	"vip":                   {{"address", "Adres"}, {"interface", "Interface"}, {"vrid", "VRRP-id"}, {"description", "Omschrijving"}},
-	"proxmox":               {{"name", "Naam"}, {"api_url", "API-adres"}, {"token_id", "Token-id"}, {"token_secret", "Token-secret"}, {"tls_fingerprint", "TLS-vingerafdruk"}},
+	"vip":     {{"address", "Adres"}, {"interface", "Interface"}, {"vrid", "VRRP-id"}, {"description", "Omschrijving"}},
+	"proxmox": {{"name", "Naam"}, {"api_url", "API-adres"}, {"token_id", "Token-id"}, {"token_secret", "Token-secret"}, {"tls_fingerprint", "TLS-vingerafdruk"}},
+	"failover_test": {{"name", "Naam"}, {"vip", "VIP"}, {"scenario", "Scenario"}, {"max_takeover_seconds", "Verwachting in seconden"},
+		{"expect_failback", "Terug naar de oorspronkelijke node"}, {"probe", "Probe"}},
 	"backup.policy_updated": {{"max_age_hours", "Maximale leeftijd in uren"}},
 	"backup.watch_updated":  {{"watch", "Ook bewaken"}},
 }
