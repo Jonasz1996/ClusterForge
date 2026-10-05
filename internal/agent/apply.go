@@ -82,16 +82,13 @@ func (a *Agent) applyPackage(ctx context.Context, p *protocol.PackageStep) (bool
 	if len(p.Names) == 0 {
 		return false, nil, errors.New("geen pakketten")
 	}
-	for _, n := range p.Names {
-		if !packageName.MatchString(n) {
-			return false, nil, fmt.Errorf("ongeldige pakketnaam %q", n)
-		}
+	states, err := a.packageStates(ctx, p.Names)
+	if err != nil {
+		return false, nil, err
 	}
 	var todo []string
 	for _, n := range p.Names {
-		out, err := a.exec(ctx, "dpkg-query", "-W", "-f=${Status}", n)
-		installed := err == nil && strings.HasSuffix(strings.TrimSpace(string(out)), "install ok installed")
-		if installed != (p.State == "absent") {
+		if states[n].Installed != (p.State == "absent") {
 			continue
 		}
 		todo = append(todo, n)
@@ -288,10 +285,11 @@ func (a *Agent) applyService(ctx context.Context, s *protocol.ServiceStep) (bool
 }
 
 func (a *Agent) applyUser(ctx context.Context, u *protocol.UserStep) (bool, []string, error) {
-	if !userName.MatchString(u.Name) {
-		return false, nil, fmt.Errorf("ongeldige gebruikersnaam %q", u.Name)
+	exists, err := a.userExists(ctx, u.Name)
+	if err != nil {
+		return false, nil, err
 	}
-	if _, err := a.exec(ctx, "id", "-u", u.Name); err == nil {
+	if exists {
 		return false, []string{"gebruiker " + u.Name + ": bestaat al"}, nil
 	}
 	args := []string{}

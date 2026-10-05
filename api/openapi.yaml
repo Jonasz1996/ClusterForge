@@ -814,6 +814,70 @@ paths:
               schema: { $ref: "#/components/schemas/NodeBackups" }
         "401": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /clusters/{clusterId}/drift:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getClusterDrift
+      summary: Drift van een cluster per node, met waarmee vergeleken wordt
+      description: >-
+        source is null voor een cluster zonder gewenste staat. Viewers mogen
+        dit zien: er staan geen geheimen, inhoud of hashes in.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DriftReport" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /clusters/{clusterId}/drift/check:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: checkClusterDrift
+      summary: Alle actieve nodes nu controleren (admin)
+      description: >-
+        Synchroon en zonder bevestiging na 30 seconden; elke node heeft 20
+        seconden. Een controle verandert niets op de nodes.
+      responses:
+        "200":
+          description: De drift na de controle
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DriftReport" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /nodes/{nodeId}/drift:
+    parameters:
+      - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getNodeDrift
+      summary: Drift van één node
+      responses:
+        "200":
+          description: OK; nodes heeft hoogstens deze ene node
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DriftReport" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /nodes/{nodeId}/drift/check:
+    parameters:
+      - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: checkNodeDrift
+      summary: Eén node nu controleren (admin)
+      responses:
+        "200":
+          description: De drift na de controle
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DriftReport" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
   /clusters/{clusterId}/spec-revisions:
     parameters:
       - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -1288,6 +1352,81 @@ components:
         backups:
           type: array
           items: { $ref: "#/components/schemas/BackupVolume" }
+    DriftReport:
+      type: object
+      required: [source, notes, nodes]
+      properties:
+        source:
+          allOf: [{ $ref: "#/components/schemas/DriftSource" }]
+          nullable: true
+        notes:
+          type: array
+          description: Wat de vergelijking beïnvloedt, zoals een nieuwere templateversie of een afwijkend lidmaatschap
+          items: { type: string }
+        nodes: { type: array, items: { $ref: "#/components/schemas/DriftNode" } }
+    DriftSource:
+      type: object
+      required: [kind, template, template_version, spec_revision]
+      properties:
+        kind: { type: string, enum: [template, baseline] }
+        template: { type: string }
+        template_version: { type: string }
+        spec_revision: { type: integer }
+    DriftNode:
+      type: object
+      required: [node_id, hostname, status, checked_at, drift_since, spec_revision, findings, unchecked, error, skipped, agent_too_old]
+      properties:
+        node_id: { type: string, format: uuid }
+        hostname: { type: string }
+        status:
+          type: string
+          description: unknown als de node nog nooit gecontroleerd is; none als hij niet in de gewenste staat staat
+          enum: [in_sync, drift, error, none, unknown]
+        checked_at: { type: string, format: date-time, nullable: true }
+        drift_since: { type: string, format: date-time, nullable: true }
+        spec_revision: { type: integer, description: De revisie van de laatste controle }
+        findings:
+          type: array
+          description: Bij status error de afwijkingen van de laatste geslaagde controle
+          items: { $ref: "#/components/schemas/DriftFinding" }
+        unchecked: { type: array, items: { $ref: "#/components/schemas/DriftUnchecked" } }
+        error: { type: string }
+        skipped:
+          type: string
+          description: Waarom de node nu niet gecontroleerd wordt, zoals "agent te oud voor driftcontrole"; leeg als hij wel gecontroleerd wordt
+        agent_too_old: { type: boolean }
+    DriftFinding:
+      type: object
+      required: [key, step, kind, title, aspect, expected, actual, detail, mtime, since, fingerprint]
+      properties:
+        key: { type: string, description: "Stap en aspect, zoals file:/etc/keepalived/keepalived.conf:content" }
+        step: { type: string, description: "De stap, zoals file:/etc/keepalived/keepalived.conf" }
+        kind: { type: string, enum: [package, file, directory, service, user, command] }
+        title: { type: string }
+        aspect: { type: string, enum: [exists, type, content, mode, owner, group, installed, loaded, enabled, active, creates] }
+        expected: { type: string }
+        actual: { type: string }
+        detail: { type: string }
+        mtime: { type: string, format: date-time, nullable: true, description: Wanneer het bestand op de node veranderde }
+        since: { type: string, format: date-time }
+        fingerprint: { type: string, description: HMAC van de waargenomen waarde; verandert als er op de node opnieuw iets wijzigt }
+    DriftUnchecked:
+      type: object
+      required: [step, title, reason]
+      properties:
+        step: { type: string }
+        title: { type: string }
+        reason: { type: string }
+    ClusterDriftSummary:
+      type: object
+      required: [status, nodes_with_drift, checked_at]
+      properties:
+        status:
+          type: string
+          description: none zonder gewenste staat; unknown als niet elke actieve node het laatste uur gecontroleerd is
+          enum: [in_sync, drift, unknown, none]
+        nodes_with_drift: { type: integer }
+        checked_at: { type: string, format: date-time, nullable: true, description: De oudste laatste controle van de actieve nodes }
     SpecHistory:
       type: object
       required: [template, revision, params, notes, items]
@@ -1531,10 +1670,11 @@ components:
       allOf:
         - $ref: "#/components/schemas/Cluster"
         - type: object
-          required: [node_count, vip_count, vips]
+          required: [node_count, vip_count, vips, drift]
           properties:
             node_count: { type: integer }
             vip_count: { type: integer }
+            drift: { $ref: "#/components/schemas/ClusterDriftSummary" }
             vips:
               type: array
               description: De VIP's met hun huidige eigenaar
@@ -1573,9 +1713,14 @@ components:
         owner_ids: { type: array, items: { type: string, format: uuid } }
     Node:
       type: object
-      required: [id, cluster_id, cluster_slug, cluster_name, hostname, role, description, lifecycle, primary_ip, tags, created_at, updated_at, agent, status, status_reason, status_since, proxmox]
+      required: [id, cluster_id, cluster_slug, cluster_name, hostname, role, description, lifecycle, primary_ip, tags, created_at, updated_at, agent, status, status_reason, status_since, proxmox, drift_status]
       properties:
         id: { type: string, format: uuid }
+        drift_status:
+          type: string
+          nullable: true
+          description: De laatste driftcontrole, of null als de node nooit gecontroleerd is
+          enum: [in_sync, drift, error, none]
         proxmox:
           description: De gekoppelde VM of container in Proxmox, of null
           nullable: true

@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState, type ReactNode } from "react";
 import { HistoryCard } from "@/components/audit/AuditList";
 import { NodeBackupsCard } from "@/components/backups/Backups";
+import { NodeDriftCard } from "@/components/drift/Drift";
 import { MetricsPanels } from "@/components/charts/MetricsPanels";
 import { JobList } from "@/components/jobs/JobList";
 import { InstallAgent } from "@/components/inventory/InstallAgent";
@@ -148,6 +149,7 @@ function NodeDetailInner() {
               </Card>
               <AgentCard node={node.data} runtime={runtime.data} isAdmin={isAdmin} />
               <NodeLifecycleCard node={node.data} runtime={runtime.data} jobs={jobs.data} isAdmin={isAdmin} />
+              {node.data.cluster_id && <NodeDriftCard nodeId={id} isAdmin={isAdmin} />}
               <NodeProxmoxCard node={node.data} isAdmin={isAdmin} />
             </div>
           )}

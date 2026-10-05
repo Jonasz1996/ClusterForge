@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/store"
@@ -344,6 +345,17 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 		return "Back-upbeleid van cluster " + name + " gewijzigd" + changeSummary(e.Changes)
 	case "backup.watch_updated":
 		return "Lijst ook bewaken van Proxmox-koppeling " + name + " gewijzigd" + changeSummary(e.Changes)
+	case "drift.detected":
+		return fmt.Sprintf("Drift op %s: %s", name, count(p["count"], "afwijking", "afwijkingen"))
+	case "drift.changed":
+		return fmt.Sprintf("Drift op %s veranderd: nu %s", name, count(p["count"], "afwijking", "afwijkingen"))
+	case "drift.resolved":
+		if d, ok := p["duration_seconds"].(float64); ok {
+			return fmt.Sprintf("Drift op %s verdwenen na %s", name, duration(time.Duration(d)*time.Second))
+		}
+		return "Drift op " + name + " verdwenen"
+	case "drift.check_failed":
+		return "Driftcontrole van " + name + " mislukt" + colon(str(p, "error"))
 	}
 	if strings.HasPrefix(r.Action, "job.") {
 		return spec.Label + ": " + name
@@ -509,6 +521,30 @@ func list(v any) string {
 }
 
 func num(v any) string { return text(v) }
+
+// count geeft "1 afwijking" of "4 afwijkingen".
+func count(v any, one, many string) string {
+	n, _ := v.(float64)
+	if n == 1 {
+		return "1 " + one
+	}
+	return fmt.Sprintf("%d %s", int(n), many)
+}
+
+// duration zegt hoe lang iets duurde, afgerond op wat leest.
+func duration(d time.Duration) string {
+	switch {
+	case d < time.Minute:
+		return fmt.Sprintf("%d seconden", int(d.Seconds()))
+	case d < 2*time.Minute:
+		return "1 minuut"
+	case d < time.Hour:
+		return fmt.Sprintf("%d minuten", int(d.Minutes()))
+	case d < 48*time.Hour:
+		return fmt.Sprintf("%d uur", int(d.Hours()))
+	}
+	return fmt.Sprintf("%d dagen", int(d.Hours()/24))
+}
 
 func str(p map[string]any, k string) string {
 	s, _ := p[k].(string)

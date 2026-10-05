@@ -71,7 +71,7 @@ func (b *Bus) Command(ctx context.Context, nodeID uuid.UUID, cmd protocol.Comman
 // hoort hier bij. Een onbekend commando telt als wijziging.
 func changes(action string) bool {
 	switch action {
-	case protocol.CmdFactsCollect:
+	case protocol.CmdFactsCollect, protocol.CmdInspect:
 		return false
 	}
 	return true

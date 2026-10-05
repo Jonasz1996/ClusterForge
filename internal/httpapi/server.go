@@ -18,6 +18,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/backups"
 	"github.com/Jonasz1996/clusterforge/internal/config"
 	"github.com/Jonasz1996/clusterforge/internal/deploy"
+	"github.com/Jonasz1996/clusterforge/internal/drift"
 	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/httpapi/gen"
 	"github.com/Jonasz1996/clusterforge/internal/inventory"
@@ -48,6 +49,7 @@ type Server struct {
 	life         *lifecycle.Service
 	deploy       *deploy.Service
 	backups      *backups.Service
+	drift        *drift.Service
 	version      string
 	loginLimiter *ipLimiter
 	// enrollLimiter remt het raden van enrollmenttokens.
@@ -75,6 +77,8 @@ type Deps struct {
 	Deploy *deploy.Service
 	// Backups leest de back-ups uit Proxmox en bewaakt hun versheid.
 	Backups *backups.Service
+	// Drift vergelijkt de nodes met de gewenste staat.
+	Drift   *drift.Service
 	Version string
 }
 
@@ -100,6 +104,7 @@ func New(d Deps) *Server {
 		life:    d.Lifecycle,
 		deploy:  d.Deploy,
 		backups: d.Backups,
+		drift:   d.Drift,
 		version: d.Version,
 		// 10 pogingen direct, daarna één per 6 seconden per IP-adres.
 		loginLimiter:  newIPLimiter(6*time.Second, 10),

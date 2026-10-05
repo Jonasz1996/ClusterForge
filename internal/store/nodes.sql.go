@@ -81,12 +81,13 @@ SELECT n.id, n.cluster_id, n.hostname, n.role, n.description, n.lifecycle, n.pri
        a.id AS agent_id, a.version AS agent_version, a.enrolled_at AS agent_enrolled_at,
        a.last_seen_at AS agent_last_seen_at, a.protocol_version AS agent_protocol,
        pc.name AS proxmox_name, r.type AS pve_type, r.pve_node, r.name AS pve_name, r.status AS pve_status,
-       r.data AS pve_data
+       r.data AS pve_data, d.status AS drift_status
 FROM nodes n
 LEFT JOIN clusters c ON c.id = n.cluster_id
 LEFT JOIN agents a ON a.node_id = n.id AND a.revoked_at IS NULL
 LEFT JOIN proxmox_connections pc ON pc.id = n.proxmox_id
 LEFT JOIN proxmox_resources r ON r.connection_id = n.proxmox_id AND r.vmid = n.pve_vmid AND r.type IN ('qemu', 'lxc')
+LEFT JOIN drift_checks d ON d.node_id = n.id
 WHERE n.id = $1
 `
 
@@ -105,6 +106,7 @@ type GetNodeRow struct {
 	PveName         *string
 	PveStatus       *string
 	PveData         []byte
+	DriftStatus     *string
 }
 
 func (q *Queries) GetNode(ctx context.Context, id uuid.UUID) (GetNodeRow, error) {
@@ -139,6 +141,7 @@ func (q *Queries) GetNode(ctx context.Context, id uuid.UUID) (GetNodeRow, error)
 		&i.PveName,
 		&i.PveStatus,
 		&i.PveData,
+		&i.DriftStatus,
 	)
 	return i, err
 }
@@ -165,12 +168,13 @@ SELECT n.id, n.cluster_id, n.hostname, n.role, n.description, n.lifecycle, n.pri
        a.id AS agent_id, a.version AS agent_version, a.enrolled_at AS agent_enrolled_at,
        a.last_seen_at AS agent_last_seen_at, a.protocol_version AS agent_protocol,
        pc.name AS proxmox_name, r.type AS pve_type, r.pve_node, r.name AS pve_name, r.status AS pve_status,
-       r.data AS pve_data
+       r.data AS pve_data, d.status AS drift_status
 FROM nodes n
 LEFT JOIN clusters c ON c.id = n.cluster_id
 LEFT JOIN agents a ON a.node_id = n.id AND a.revoked_at IS NULL
 LEFT JOIN proxmox_connections pc ON pc.id = n.proxmox_id
 LEFT JOIN proxmox_resources r ON r.connection_id = n.proxmox_id AND r.vmid = n.pve_vmid AND r.type IN ('qemu', 'lxc')
+LEFT JOIN drift_checks d ON d.node_id = n.id
 ORDER BY lower(n.hostname)
 `
 
@@ -189,6 +193,7 @@ type ListNodesRow struct {
 	PveName         *string
 	PveStatus       *string
 	PveData         []byte
+	DriftStatus     *string
 }
 
 func (q *Queries) ListNodes(ctx context.Context) ([]ListNodesRow, error) {
@@ -229,6 +234,7 @@ func (q *Queries) ListNodes(ctx context.Context) ([]ListNodesRow, error) {
 			&i.PveName,
 			&i.PveStatus,
 			&i.PveData,
+			&i.DriftStatus,
 		); err != nil {
 			return nil, err
 		}
@@ -245,12 +251,13 @@ SELECT n.id, n.cluster_id, n.hostname, n.role, n.description, n.lifecycle, n.pri
        a.id AS agent_id, a.version AS agent_version, a.enrolled_at AS agent_enrolled_at,
        a.last_seen_at AS agent_last_seen_at, a.protocol_version AS agent_protocol,
        pc.name AS proxmox_name, r.type AS pve_type, r.pve_node, r.name AS pve_name, r.status AS pve_status,
-       r.data AS pve_data
+       r.data AS pve_data, d.status AS drift_status
 FROM nodes n
 LEFT JOIN clusters c ON c.id = n.cluster_id
 LEFT JOIN agents a ON a.node_id = n.id AND a.revoked_at IS NULL
 LEFT JOIN proxmox_connections pc ON pc.id = n.proxmox_id
 LEFT JOIN proxmox_resources r ON r.connection_id = n.proxmox_id AND r.vmid = n.pve_vmid AND r.type IN ('qemu', 'lxc')
+LEFT JOIN drift_checks d ON d.node_id = n.id
 WHERE n.cluster_id = $1
 ORDER BY lower(n.hostname)
 `
@@ -270,6 +277,7 @@ type ListNodesByClusterRow struct {
 	PveName         *string
 	PveStatus       *string
 	PveData         []byte
+	DriftStatus     *string
 }
 
 func (q *Queries) ListNodesByCluster(ctx context.Context, clusterID *uuid.UUID) ([]ListNodesByClusterRow, error) {
@@ -310,6 +318,7 @@ func (q *Queries) ListNodesByCluster(ctx context.Context, clusterID *uuid.UUID) 
 			&i.PveName,
 			&i.PveStatus,
 			&i.PveData,
+			&i.DriftStatus,
 		); err != nil {
 			return nil, err
 		}

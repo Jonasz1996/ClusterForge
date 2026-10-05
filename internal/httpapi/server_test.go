@@ -25,6 +25,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/backups"
 	"github.com/Jonasz1996/clusterforge/internal/config"
 	"github.com/Jonasz1996/clusterforge/internal/deploy"
+	"github.com/Jonasz1996/clusterforge/internal/drift"
 	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/jobs"
 	"github.com/Jonasz1996/clusterforge/internal/lifecycle"
@@ -54,6 +55,7 @@ type testEnv struct {
 	life    *lifecycle.Service
 	deploy  *deploy.Service
 	backups *backups.Service
+	drift   *drift.Service
 }
 
 func newTestEnv(t *testing.T) *testEnv {
@@ -108,6 +110,9 @@ func newTestEnv(t *testing.T) *testEnv {
 	dep.Poll, dep.GuestAgentTimeout, dep.EnrollTimeout = 20*time.Millisecond, 5*time.Second, 8*time.Second
 	dep.HTTPGet = func(context.Context, string) (int, error) { return http.StatusOK, nil }
 	bk := backups.NewService(pool, ev, log, pve)
+	// Zonder Interval loopt de scanner niet; een test start hem zelf.
+	drf := drift.NewService(pool, ev, log, bus, dep, box.Derive(secrets.PurposeFile))
+	drf.Interval = 0
 	var wg sync.WaitGroup
 	wg.Add(3)
 	go func() { defer wg.Done(); hub.Run(runCtx) }()
@@ -120,12 +125,12 @@ func newTestEnv(t *testing.T) *testEnv {
 	}
 	api := New(Deps{
 		Config: cfg, Log: log, Pool: pool, Auth: a, Bus: bus, Hub: hub, Proxmox: pve, Jobs: runner, Lifecycle: life,
-		Deploy: dep, Backups: bk, Version: "test",
+		Deploy: dep, Backups: bk, Drift: drf, Version: "test",
 	})
 	srv := httptest.NewServer(api.Handler())
 	t.Cleanup(srv.Close)
 	return &testEnv{t: t, srv: srv, auth: a, pool: pool, api: api, bus: bus, eval: eval, vm: vm, pve: pve, jobs: runner, life: life, deploy: dep,
-		backups: bk}
+		backups: bk, drift: drf}
 }
 
 // fakeVM speelt VictoriaMetrics: het bewaart wat binnenkomt en geeft op elke

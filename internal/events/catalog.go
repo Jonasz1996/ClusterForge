@@ -14,6 +14,7 @@ const (
 	CategoryAgents    Category = "agents"
 	CategoryProxmox   Category = "proxmox"
 	CategoryBackups   Category = "backups"
+	CategoryDrift     Category = "drift"
 	CategoryStatus    Category = "status"
 )
 
@@ -29,6 +30,7 @@ var Categories = []struct {
 	{CategoryAgents, "Agents"},
 	{CategoryProxmox, "Proxmox"},
 	{CategoryBackups, "Back-ups"},
+	{CategoryDrift, "Drift"},
 	{CategoryStatus, "Status"},
 }
 
@@ -108,6 +110,11 @@ var Known = map[string]Spec{
 	"backup.inventory_recovered": {CategoryBackups, "Back-ups weer te lezen"},
 	"backup.policy_updated":      {CategoryBackups, "Back-upbeleid gewijzigd"},
 	"backup.watch_updated":       {CategoryBackups, "Lijst ook bewaken gewijzigd"},
+
+	"drift.detected":     {CategoryDrift, "Drift gevonden"},
+	"drift.changed":      {CategoryDrift, "Drift veranderd"},
+	"drift.resolved":     {CategoryDrift, "Drift verdwenen"},
+	"drift.check_failed": {CategoryDrift, "Driftcontrole mislukt"},
 
 	"node.status_changed":    {CategoryStatus, "Status van node gewijzigd"},
 	"cluster.status_changed": {CategoryStatus, "Status van cluster gewijzigd"},

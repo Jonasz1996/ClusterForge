@@ -55,6 +55,7 @@ func (s *Server) ListClusters(w http.ResponseWriter, r *http.Request) {
 		vips[v.ClusterID] = append(vips[v.ClusterID], gen.VipOwner{Address: v.Address.String(), OwnerHostname: nullableOf(v.OwnerHostname)})
 	}
 	items := make([]gen.ClusterListItem, 0, len(rows))
+	now := time.Now()
 	for _, row := range rows {
 		c := toAPICluster(row.Cluster)
 		items = append(items, gen.ClusterListItem{
@@ -64,7 +65,7 @@ func (s *Server) ListClusters(w http.ResponseWriter, r *http.Request) {
 			TemplateName: c.TemplateName, TemplateVersion: c.TemplateVersion, SpecRevision: c.SpecRevision,
 			CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt,
 			NodeCount: int(row.NodeCount), VipCount: int(row.VipCount),
-			Vips: nonNil(vips[row.Cluster.ID]),
+			Vips: nonNil(vips[row.Cluster.ID]), Drift: clusterDrift(row, now),
 		})
 	}
 	writeJSON(w, http.StatusOK, list[gen.ClusterListItem]{items})
@@ -310,6 +311,7 @@ type nodeRow struct {
 	PveName         *string
 	PveStatus       *string
 	PveData         []byte
+	DriftStatus     *string
 }
 
 func toAPINode(r nodeRow) gen.Node {
@@ -337,7 +339,7 @@ func toAPINode(r nodeRow) gen.Node {
 		ClusterId: nullableOf(n.ClusterID), ClusterSlug: nullableOf(clusterSlug), ClusterName: nullableOf(clusterName),
 		PrimaryIp: nullableOf(ip), CreatedAt: n.CreatedAt, UpdatedAt: n.UpdatedAt, Agent: agent,
 		Status: gen.Status(n.Status), StatusReason: n.StatusReason, StatusSince: nullableOf(n.StatusSince),
-		Proxmox: nodeProxmox(r),
+		Proxmox: nodeProxmox(r), DriftStatus: nullableOf((*gen.NodeDriftStatus)(r.DriftStatus)),
 	}
 }
 

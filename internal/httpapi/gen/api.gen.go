@@ -102,6 +102,30 @@ func (e BackupVolumeVerify) Valid() bool {
 	}
 }
 
+// Defines values for ClusterDriftSummaryStatus.
+const (
+	ClusterDriftSummaryStatusDrift   ClusterDriftSummaryStatus = "drift"
+	ClusterDriftSummaryStatusInSync  ClusterDriftSummaryStatus = "in_sync"
+	ClusterDriftSummaryStatusNone    ClusterDriftSummaryStatus = "none"
+	ClusterDriftSummaryStatusUnknown ClusterDriftSummaryStatus = "unknown"
+)
+
+// Valid indicates whether the value is a known member of the ClusterDriftSummaryStatus enum.
+func (e ClusterDriftSummaryStatus) Valid() bool {
+	switch e {
+	case ClusterDriftSummaryStatusDrift:
+		return true
+	case ClusterDriftSummaryStatusInSync:
+		return true
+	case ClusterDriftSummaryStatusNone:
+		return true
+	case ClusterDriftSummaryStatusUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ClusterType.
 const (
 	Cron         ClusterType = "cron"
@@ -147,6 +171,126 @@ func (e DeployTargetNetwork) Valid() bool {
 	case Dhcp:
 		return true
 	case Static:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DriftFindingAspect.
+const (
+	DriftFindingAspectActive    DriftFindingAspect = "active"
+	DriftFindingAspectContent   DriftFindingAspect = "content"
+	DriftFindingAspectCreates   DriftFindingAspect = "creates"
+	DriftFindingAspectEnabled   DriftFindingAspect = "enabled"
+	DriftFindingAspectExists    DriftFindingAspect = "exists"
+	DriftFindingAspectGroup     DriftFindingAspect = "group"
+	DriftFindingAspectInstalled DriftFindingAspect = "installed"
+	DriftFindingAspectLoaded    DriftFindingAspect = "loaded"
+	DriftFindingAspectMode      DriftFindingAspect = "mode"
+	DriftFindingAspectOwner     DriftFindingAspect = "owner"
+	DriftFindingAspectType      DriftFindingAspect = "type"
+)
+
+// Valid indicates whether the value is a known member of the DriftFindingAspect enum.
+func (e DriftFindingAspect) Valid() bool {
+	switch e {
+	case DriftFindingAspectActive:
+		return true
+	case DriftFindingAspectContent:
+		return true
+	case DriftFindingAspectCreates:
+		return true
+	case DriftFindingAspectEnabled:
+		return true
+	case DriftFindingAspectExists:
+		return true
+	case DriftFindingAspectGroup:
+		return true
+	case DriftFindingAspectInstalled:
+		return true
+	case DriftFindingAspectLoaded:
+		return true
+	case DriftFindingAspectMode:
+		return true
+	case DriftFindingAspectOwner:
+		return true
+	case DriftFindingAspectType:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DriftFindingKind.
+const (
+	DriftFindingKindCommand   DriftFindingKind = "command"
+	DriftFindingKindDirectory DriftFindingKind = "directory"
+	DriftFindingKindFile      DriftFindingKind = "file"
+	DriftFindingKindPackage   DriftFindingKind = "package"
+	DriftFindingKindService   DriftFindingKind = "service"
+	DriftFindingKindUser      DriftFindingKind = "user"
+)
+
+// Valid indicates whether the value is a known member of the DriftFindingKind enum.
+func (e DriftFindingKind) Valid() bool {
+	switch e {
+	case DriftFindingKindCommand:
+		return true
+	case DriftFindingKindDirectory:
+		return true
+	case DriftFindingKindFile:
+		return true
+	case DriftFindingKindPackage:
+		return true
+	case DriftFindingKindService:
+		return true
+	case DriftFindingKindUser:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DriftNodeStatus.
+const (
+	DriftNodeStatusDrift   DriftNodeStatus = "drift"
+	DriftNodeStatusError   DriftNodeStatus = "error"
+	DriftNodeStatusInSync  DriftNodeStatus = "in_sync"
+	DriftNodeStatusNone    DriftNodeStatus = "none"
+	DriftNodeStatusUnknown DriftNodeStatus = "unknown"
+)
+
+// Valid indicates whether the value is a known member of the DriftNodeStatus enum.
+func (e DriftNodeStatus) Valid() bool {
+	switch e {
+	case DriftNodeStatusDrift:
+		return true
+	case DriftNodeStatusError:
+		return true
+	case DriftNodeStatusInSync:
+		return true
+	case DriftNodeStatusNone:
+		return true
+	case DriftNodeStatusUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DriftSourceKind.
+const (
+	DriftSourceKindBaseline DriftSourceKind = "baseline"
+	DriftSourceKindTemplate DriftSourceKind = "template"
+)
+
+// Valid indicates whether the value is a known member of the DriftSourceKind enum.
+func (e DriftSourceKind) Valid() bool {
+	switch e {
+	case DriftSourceKindBaseline:
+		return true
+	case DriftSourceKindTemplate:
 		return true
 	default:
 		return false
@@ -318,6 +462,30 @@ func (e MetricsRange) Valid() bool {
 	case N6h:
 		return true
 	case N7d:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for NodeDriftStatus.
+const (
+	NodeDriftStatusDrift  NodeDriftStatus = "drift"
+	NodeDriftStatusError  NodeDriftStatus = "error"
+	NodeDriftStatusInSync NodeDriftStatus = "in_sync"
+	NodeDriftStatusNone   NodeDriftStatus = "none"
+)
+
+// Valid indicates whether the value is a known member of the NodeDriftStatus enum.
+func (e NodeDriftStatus) Valid() bool {
+	switch e {
+	case NodeDriftStatusDrift:
+		return true
+	case NodeDriftStatusError:
+		return true
+	case NodeDriftStatusInSync:
+		return true
+	case NodeDriftStatusNone:
 		return true
 	default:
 		return false
@@ -860,6 +1028,19 @@ type ClusterDetail struct {
 	Vips            []Vip                     `json:"vips"`
 }
 
+// ClusterDriftSummary defines model for ClusterDriftSummary.
+type ClusterDriftSummary struct {
+	// CheckedAt De oudste laatste controle van de actieve nodes
+	CheckedAt      nullable.Nullable[time.Time] `json:"checked_at"`
+	NodesWithDrift int                          `json:"nodes_with_drift"`
+
+	// Status none zonder gewenste staat; unknown als niet elke actieve node het laatste uur gecontroleerd is
+	Status ClusterDriftSummaryStatus `json:"status"`
+}
+
+// ClusterDriftSummaryStatus none zonder gewenste staat; unknown als niet elke actieve node het laatste uur gecontroleerd is
+type ClusterDriftSummaryStatus string
+
 // ClusterInput defines model for ClusterInput.
 type ClusterInput struct {
 	Description *string               `json:"description,omitempty"`
@@ -874,13 +1055,14 @@ type ClusterInput struct {
 
 // ClusterListItem defines model for ClusterListItem.
 type ClusterListItem struct {
-	CreatedAt   time.Time          `json:"created_at"`
-	Description string             `json:"description"`
-	Environment Environment        `json:"environment"`
-	GitRepoUrl  string             `json:"git_repo_url"`
-	Id          openapi_types.UUID `json:"id"`
-	Name        string             `json:"name"`
-	NodeCount   int                `json:"node_count"`
+	CreatedAt   time.Time           `json:"created_at"`
+	Description string              `json:"description"`
+	Drift       ClusterDriftSummary `json:"drift"`
+	Environment Environment         `json:"environment"`
+	GitRepoUrl  string              `json:"git_repo_url"`
+	Id          openapi_types.UUID  `json:"id"`
+	Name        string              `json:"name"`
+	NodeCount   int                 `json:"node_count"`
 
 	// Slug Korte unieke naam, bijvoorbeeld webcluster-prod
 	Slug string `json:"slug"`
@@ -1000,6 +1182,88 @@ type DeployTarget struct {
 
 // DeployTargetNetwork defines model for DeployTarget.Network.
 type DeployTargetNetwork string
+
+// DriftFinding defines model for DriftFinding.
+type DriftFinding struct {
+	Actual   string             `json:"actual"`
+	Aspect   DriftFindingAspect `json:"aspect"`
+	Detail   string             `json:"detail"`
+	Expected string             `json:"expected"`
+
+	// Fingerprint HMAC van de waargenomen waarde; verandert als er op de node opnieuw iets wijzigt
+	Fingerprint string `json:"fingerprint"`
+
+	// Key Stap en aspect, zoals file:/etc/keepalived/keepalived.conf:content
+	Key  string           `json:"key"`
+	Kind DriftFindingKind `json:"kind"`
+
+	// Mtime Wanneer het bestand op de node veranderde
+	Mtime nullable.Nullable[time.Time] `json:"mtime"`
+	Since time.Time                    `json:"since"`
+
+	// Step De stap, zoals file:/etc/keepalived/keepalived.conf
+	Step  string `json:"step"`
+	Title string `json:"title"`
+}
+
+// DriftFindingAspect defines model for DriftFinding.Aspect.
+type DriftFindingAspect string
+
+// DriftFindingKind defines model for DriftFinding.Kind.
+type DriftFindingKind string
+
+// DriftNode defines model for DriftNode.
+type DriftNode struct {
+	AgentTooOld bool                         `json:"agent_too_old"`
+	CheckedAt   nullable.Nullable[time.Time] `json:"checked_at"`
+	DriftSince  nullable.Nullable[time.Time] `json:"drift_since"`
+	Error       string                       `json:"error"`
+
+	// Findings Bij status error de afwijkingen van de laatste geslaagde controle
+	Findings []DriftFinding     `json:"findings"`
+	Hostname string             `json:"hostname"`
+	NodeId   openapi_types.UUID `json:"node_id"`
+
+	// Skipped Waarom de node nu niet gecontroleerd wordt, zoals "agent te oud voor driftcontrole"; leeg als hij wel gecontroleerd wordt
+	Skipped string `json:"skipped"`
+
+	// SpecRevision De revisie van de laatste controle
+	SpecRevision int `json:"spec_revision"`
+
+	// Status unknown als de node nog nooit gecontroleerd is; none als hij niet in de gewenste staat staat
+	Status    DriftNodeStatus  `json:"status"`
+	Unchecked []DriftUnchecked `json:"unchecked"`
+}
+
+// DriftNodeStatus unknown als de node nog nooit gecontroleerd is; none als hij niet in de gewenste staat staat
+type DriftNodeStatus string
+
+// DriftReport defines model for DriftReport.
+type DriftReport struct {
+	Nodes []DriftNode `json:"nodes"`
+
+	// Notes Wat de vergelijking beïnvloedt, zoals een nieuwere templateversie of een afwijkend lidmaatschap
+	Notes  []string                       `json:"notes"`
+	Source nullable.Nullable[DriftSource] `json:"source"`
+}
+
+// DriftSource defines model for DriftSource.
+type DriftSource struct {
+	Kind            DriftSourceKind `json:"kind"`
+	SpecRevision    int             `json:"spec_revision"`
+	Template        string          `json:"template"`
+	TemplateVersion string          `json:"template_version"`
+}
+
+// DriftSourceKind defines model for DriftSource.Kind.
+type DriftSourceKind string
+
+// DriftUnchecked defines model for DriftUnchecked.
+type DriftUnchecked struct {
+	Reason string `json:"reason"`
+	Step   string `json:"step"`
+	Title  string `json:"title"`
+}
 
 // EnrollRequest defines model for EnrollRequest.
 type EnrollRequest struct {
@@ -1301,10 +1565,13 @@ type Node struct {
 	ClusterSlug nullable.Nullable[string]             `json:"cluster_slug"`
 	CreatedAt   time.Time                             `json:"created_at"`
 	Description string                                `json:"description"`
-	Hostname    string                                `json:"hostname"`
-	Id          openapi_types.UUID                    `json:"id"`
-	Lifecycle   NodeLifecycle                         `json:"lifecycle"`
-	PrimaryIp   nullable.Nullable[string]             `json:"primary_ip"`
+
+	// DriftStatus De laatste driftcontrole, of null als de node nooit gecontroleerd is
+	DriftStatus nullable.Nullable[NodeDriftStatus] `json:"drift_status"`
+	Hostname    string                             `json:"hostname"`
+	Id          openapi_types.UUID                 `json:"id"`
+	Lifecycle   NodeLifecycle                      `json:"lifecycle"`
+	PrimaryIp   nullable.Nullable[string]          `json:"primary_ip"`
 
 	// Proxmox De gekoppelde VM of container in Proxmox, of null
 	Proxmox nullable.Nullable[NodeProxmox] `json:"proxmox"`
@@ -1320,6 +1587,9 @@ type Node struct {
 	Tags         []string                     `json:"tags"`
 	UpdatedAt    time.Time                    `json:"updated_at"`
 }
+
+// NodeDriftStatus De laatste driftcontrole, of null als de node nooit gecontroleerd is
+type NodeDriftStatus string
 
 // NodeAction activate beëindigt het onderhoud
 type NodeAction string
@@ -1981,6 +2251,12 @@ type ServerInterface interface {
 	// UpdateBackupPolicy Back-upbeleid van een cluster wijzigen (admin)
 	// (PUT /clusters/{clusterId}/backup-policy)
 	UpdateBackupPolicy(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
+	// GetClusterDrift Drift van een cluster per node, met waarmee vergeleken wordt
+	// (GET /clusters/{clusterId}/drift)
+	GetClusterDrift(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
+	// CheckClusterDrift Alle actieve nodes nu controleren (admin)
+	// (POST /clusters/{clusterId}/drift/check)
+	CheckClusterDrift(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
 	// GetClusterMetrics Grafieken van een cluster, met een lijn per node
 	// (GET /clusters/{clusterId}/metrics)
 	GetClusterMetrics(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params GetClusterMetricsParams)
@@ -2047,6 +2323,12 @@ type ServerInterface interface {
 	// GetNodeBackups Back-upstand en alle back-ups van de VM van een node
 	// (GET /nodes/{nodeId}/backups)
 	GetNodeBackups(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// GetNodeDrift Drift van één node
+	// (GET /nodes/{nodeId}/drift)
+	GetNodeDrift(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// CheckNodeDrift Eén node nu controleren (admin)
+	// (POST /nodes/{nodeId}/drift/check)
+	CheckNodeDrift(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
 	// GetNodeFacts Facts en laatste heartbeat van de agent op deze node
 	// (GET /nodes/{nodeId}/facts)
 	GetNodeFacts(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
@@ -2227,6 +2509,18 @@ func (_ Unimplemented) UpdateBackupPolicy(w http.ResponseWriter, r *http.Request
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// GetClusterDrift Drift van een cluster per node, met waarmee vergeleken wordt
+// (GET /clusters/{clusterId}/drift)
+func (_ Unimplemented) GetClusterDrift(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CheckClusterDrift Alle actieve nodes nu controleren (admin)
+// (POST /clusters/{clusterId}/drift/check)
+func (_ Unimplemented) CheckClusterDrift(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // GetClusterMetrics Grafieken van een cluster, met een lijn per node
 // (GET /clusters/{clusterId}/metrics)
 func (_ Unimplemented) GetClusterMetrics(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params GetClusterMetricsParams) {
@@ -2356,6 +2650,18 @@ func (_ Unimplemented) NodeAction(w http.ResponseWriter, r *http.Request, nodeId
 // GetNodeBackups Back-upstand en alle back-ups van de VM van een node
 // (GET /nodes/{nodeId}/backups)
 func (_ Unimplemented) GetNodeBackups(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetNodeDrift Drift van één node
+// (GET /nodes/{nodeId}/drift)
+func (_ Unimplemented) GetNodeDrift(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CheckNodeDrift Eén node nu controleren (admin)
+// (POST /nodes/{nodeId}/drift/check)
+func (_ Unimplemented) CheckNodeDrift(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -3100,6 +3406,58 @@ func (siw *ServerInterfaceWrapper) UpdateBackupPolicy(w http.ResponseWriter, r *
 	handler.ServeHTTP(w, r)
 }
 
+// GetClusterDrift operation middleware
+func (siw *ServerInterfaceWrapper) GetClusterDrift(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetClusterDrift(w, r, clusterId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CheckClusterDrift operation middleware
+func (siw *ServerInterfaceWrapper) CheckClusterDrift(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CheckClusterDrift(w, r, clusterId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetClusterMetrics operation middleware
 func (siw *ServerInterfaceWrapper) GetClusterMetrics(w http.ResponseWriter, r *http.Request) {
 
@@ -3636,6 +3994,58 @@ func (siw *ServerInterfaceWrapper) GetNodeBackups(w http.ResponseWriter, r *http
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetNodeBackups(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetNodeDrift operation middleware
+func (siw *ServerInterfaceWrapper) GetNodeDrift(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetNodeDrift(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CheckNodeDrift operation middleware
+func (siw *ServerInterfaceWrapper) CheckNodeDrift(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CheckNodeDrift(w, r, nodeId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -4334,6 +4744,18 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/nodes/{nodeId}/backups", wrapper.GetNodeBackups)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/clusters/{clusterId}/drift", wrapper.GetClusterDrift)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/clusters/{clusterId}/drift/check", wrapper.CheckClusterDrift)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/nodes/{nodeId}/drift", wrapper.GetNodeDrift)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/nodes/{nodeId}/drift/check", wrapper.CheckNodeDrift)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/clusters/{clusterId}/spec-revisions", wrapper.ListSpecRevisions)

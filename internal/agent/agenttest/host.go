@@ -43,6 +43,7 @@ type Host struct {
 	mu       sync.Mutex
 	group    *Group
 	packages map[string]bool
+	versions map[string]string
 	units    map[string]*Unit
 	users    map[string]bool
 	calls    []string
@@ -52,7 +53,7 @@ type Host struct {
 func NewHost(root, address string) *Host {
 	return &Host{
 		Root: root, Address: address, Interface: "eth0",
-		packages: map[string]bool{}, units: map[string]*Unit{}, users: map[string]bool{"root": true},
+		packages: map[string]bool{}, versions: map[string]string{}, units: map[string]*Unit{}, users: map[string]bool{"root": true},
 		fail: map[string]string{},
 	}
 }
@@ -142,11 +143,7 @@ func (h *Host) Exec(_ context.Context, name string, args ...string) ([]byte, err
 func (h *Host) exec(name string, args []string) ([]byte, error) {
 	switch name {
 	case "dpkg-query":
-		pkg := args[len(args)-1]
-		if h.packages[pkg] {
-			return []byte("install ok installed"), nil
-		}
-		return []byte("dpkg-query: no packages found matching " + pkg + "\n"), errors.New("exit status 1")
+		return h.dpkgQuery(args)
 	case "apt-get":
 		return h.apt(args)
 	case "systemctl":
@@ -165,6 +162,71 @@ func (h *Host) exec(name string, args []string) ([]byte, error) {
 		return nil, nil
 	}
 	return nil, fmt.Errorf("onbekend commando %s", name)
+}
+
+// dpkgQuery speelt dpkg-query -W -f=... namen... na, met de escapes \t en
+// \n in het formaat. Een onbekend pakket geeft een melding en exit 1, de
+// bekende staan dan toch in de uitvoer.
+func (h *Host) dpkgQuery(args []string) ([]byte, error) {
+	format := "${Package}\t${Version}\n"
+	var names []string
+	for _, a := range args {
+		switch {
+		case a == "-W":
+		case strings.HasPrefix(a, "-f="):
+			format = strings.TrimPrefix(a, "-f=")
+		default:
+			names = append(names, a)
+		}
+	}
+	format = strings.NewReplacer(`\t`, "\t", `\n`, "\n").Replace(format)
+	var b strings.Builder
+	missing := false
+	for _, n := range names {
+		if !h.packages[n] {
+			fmt.Fprintf(&b, "dpkg-query: no packages found matching %s\n", n)
+			missing = true
+			continue
+		}
+		b.WriteString(strings.NewReplacer("${Package}", n, "${Status}", "install ok installed", "${Version}", h.version(n)).Replace(format))
+	}
+	if missing {
+		return []byte(b.String()), errors.New("exit status 1")
+	}
+	return []byte(b.String()), nil
+}
+
+// SetVersion zet de versie van een pakket, zoals dpkg-query hem meldt.
+func (h *Host) SetVersion(name, version string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.versions[name] = version
+}
+
+func (h *Host) version(name string) string {
+	if v, ok := h.versions[name]; ok {
+		return v
+	}
+	return "1.0-1"
+}
+
+// SetUnit zet een unit zoals iemand die met de hand zou veranderen, zonder
+// dat het in Calls komt.
+func (h *Host) SetUnit(name string, u Unit) {
+	h.mu.Lock()
+	h.units[name] = &u
+	g := h.group
+	h.mu.Unlock()
+	if g != nil {
+		g.update()
+	}
+}
+
+// Remove haalt een pakket weg zoals iemand het met de hand zou doen.
+func (h *Host) Remove(name string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	delete(h.packages, name)
 }
 
 func (h *Host) apt(args []string) ([]byte, error) {

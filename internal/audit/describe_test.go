@@ -139,6 +139,13 @@ func TestSummaries(t *testing.T) {
 		{row("backup.watch_updated", "proxmox", pveID.String(), map[string]any{"name": "Thuislab",
 			"watch": map[string]any{"from": []any{}, "to": []any{"VM 100 (clusterforge)"}}}),
 			"Lijst ook bewaken van Proxmox-koppeling Thuislab gewijzigd: ook bewaken VM 100 (clusterforge)"},
+		{row("drift.detected", "node", web01ID.String(), map[string]any{"hostname": "web01", "count": 4,
+			"keys": []any{"file:/etc/keepalived/keepalived.conf:content"}}), "Drift op web01: 4 afwijkingen"},
+		{row("drift.changed", "node", web01ID.String(), map[string]any{"hostname": "web01", "count": 1}), "Drift op web01 veranderd: nu 1 afwijking"},
+		{row("drift.resolved", "node", web01ID.String(), map[string]any{"hostname": "web01", "duration_seconds": 5400}),
+			"Drift op web01 verdwenen na 1 uur"},
+		{row("drift.check_failed", "node", web01ID.String(), map[string]any{"hostname": "web01", "error": "geheim auth_pass ontbreekt"}),
+			"Driftcontrole van web01 mislukt: geheim auth_pass ontbreekt"},
 		{row("iets.nieuws", "node", web01ID.String(), nil), "iets.nieuws: web01"},
 		{row("iets.nieuws", "test", "", nil), "iets.nieuws"},
 	} {

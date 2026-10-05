@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 	"os/exec"
+	"reflect"
 	"strings"
 	"time"
 
@@ -56,13 +57,54 @@ func (a *Agent) loadState() (agentState, error) {
 	return st, nil
 }
 
-func (a *Agent) saveState(st agentState) error {
-	b, err := json.MarshalIndent(st, "", "  ")
+// updateState is de enige manier om de state te schrijven: onder één slot,
+// opnieuw gelezen vlak voor de wijziging, en met behoud van velden die deze
+// versie van de agent niet kent.
+func (a *Agent) updateState(change func(st *agentState)) error {
+	a.stateMu.Lock()
+	defer a.stateMu.Unlock()
+	raw := map[string]json.RawMessage{}
+	b, err := os.ReadFile(a.statePath())
+	switch {
+	case err == nil:
+		if err := json.Unmarshal(b, &raw); err != nil {
+			return fmt.Errorf("%s: %w", a.statePath(), err)
+		}
+	case !errors.Is(err, fs.ErrNotExist):
+		return err
+	}
+	st, err := a.loadState()
 	if err != nil {
 		return err
 	}
-	return writeFileAtomic(a.statePath(), append(b, '\n'), 0o600)
+	change(&st)
+	known, err := json.Marshal(st)
+	if err != nil {
+		return err
+	}
+	for _, k := range stateFields {
+		delete(raw, k)
+	}
+	if err := json.Unmarshal(known, &raw); err != nil {
+		return err
+	}
+	out, err := json.MarshalIndent(raw, "", "  ")
+	if err != nil {
+		return err
+	}
+	return writeFileAtomic(a.statePath(), append(out, '\n'), 0o600)
 }
+
+// stateFields zijn de JSON-namen van de velden van agentState.
+var stateFields = func() []string {
+	var out []string
+	t := reflect.TypeFor[agentState]()
+	for i := range t.NumField() {
+		name, _, _ := strings.Cut(t.Field(i).Tag.Get("json"), ",")
+		out = append(out, name)
+	}
+	return out
+}()
 
 // exec voert een systeemcommando uit en geeft stdout en stderr samen terug.
 func (a *Agent) exec(ctx context.Context, name string, args ...string) ([]byte, error) {
@@ -110,9 +152,12 @@ func (a *Agent) handleCommand(data []byte) protocol.Result {
 	}
 	a.Log.Info("commando ontvangen", "action", cmd.Action, "id", cmd.ID, "reason", cmd.Reason)
 	limit := 2 * time.Minute
-	if cmd.Action == protocol.CmdApply {
+	switch cmd.Action {
+	case protocol.CmdApply:
 		// Pakketten installeren kan even duren.
 		limit = applyTimeout
+	case protocol.CmdInspect:
+		limit = inspectTimeout
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), limit)
 	defer cancel()
@@ -124,6 +169,9 @@ func (a *Agent) handleCommand(data []byte) protocol.Result {
 		if a.factsNow != nil {
 			a.signal(a.factsNow)
 		}
+	case protocol.CmdInspect:
+		// Alleen lezen: geen facts achteraf, want er veranderde niets.
+		res = a.inspect(ctx, cmd.Inspect)
 	case protocol.CmdFactsCollect:
 		if err := a.sendFacts(ctx); err != nil {
 			res = failed(nil, "facts sturen mislukt: "+err.Error())
@@ -159,24 +207,6 @@ func failed(out []string, msg string) protocol.Result {
 	return protocol.Result{Error: msg, Output: out}
 }
 
-// unit leest hoe een systemd-unit erbij staat.
-func (a *Agent) unit(ctx context.Context, name string) (loaded, enabled, active bool, err error) {
-	out, err := a.exec(ctx, "systemctl", "show", name, "--property=LoadState,UnitFileState,ActiveState")
-	if err != nil {
-		return false, false, false, fmt.Errorf("systemctl show %s: %w", name, err)
-	}
-	props := map[string]string{}
-	for line := range strings.Lines(string(out)) {
-		if k, v, ok := strings.Cut(strings.TrimSpace(line), "="); ok {
-			props[k] = v
-		}
-	}
-	loaded = props["LoadState"] == "loaded"
-	enabled = props["UnitFileState"] == "enabled" || props["UnitFileState"] == "enabled-runtime"
-	active = props["ActiveState"] == "active" || props["ActiveState"] == "activating" || props["ActiveState"] == "reloading"
-	return loaded, enabled, active, nil
-}
-
 // maintenanceEnter zet keepalived uit zodat de VIP's naar de andere nodes
 // gaan. Disable zorgt dat het ook na een reboot uit blijft.
 func (a *Agent) maintenanceEnter(ctx context.Context) protocol.Result {
@@ -193,8 +223,10 @@ func (a *Agent) maintenanceEnter(ctx context.Context) protocol.Result {
 	}
 	// Eerst onthouden hoe het stond, dan pas iets veranderen: zo kan het
 	// onderhoud altijd netjes eindigen.
-	st.Maintenance, st.KeepalivedEnabled, st.KeepalivedActive = true, loaded && enabled, loaded && active
-	if err := a.saveState(st); err != nil {
+	err = a.updateState(func(st *agentState) {
+		st.Maintenance, st.KeepalivedEnabled, st.KeepalivedActive = true, loaded && enabled, loaded && active
+	})
+	if err != nil {
 		return failed(nil, "state bewaren mislukt: "+err.Error())
 	}
 	switch {
@@ -246,7 +278,10 @@ func (a *Agent) maintenanceExit(ctx context.Context) protocol.Result {
 	default:
 		lines = append(lines, "keepalived blijft uit, zoals voor het onderhoud")
 	}
-	if err := a.saveState(agentState{PowerCommand: st.PowerCommand}); err != nil {
+	err = a.updateState(func(st *agentState) {
+		st.Maintenance, st.KeepalivedEnabled, st.KeepalivedActive = false, false, false
+	})
+	if err != nil {
 		return failed(lines, "state bewaren mislukt: "+err.Error())
 	}
 	return done(lines)
@@ -264,8 +299,7 @@ func (a *Agent) power(cmd protocol.Command) protocol.Result {
 	}
 	// Zonder bewaard id zou een herhaald commando na de herstart nog eens
 	// herstarten; dan liever niet.
-	st.PowerCommand = cmd.ID
-	if err := a.saveState(st); err != nil {
+	if err := a.updateState(func(st *agentState) { st.PowerCommand = cmd.ID }); err != nil {
 		return failed(nil, "state bewaren mislukt: "+err.Error())
 	}
 	verb, what := "reboot", "herstart"

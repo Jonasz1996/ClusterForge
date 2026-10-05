@@ -9,22 +9,34 @@
 # Met --no-enroll in plaats van --token wordt de agent alleen geïnstalleerd,
 # voor een eigen golden image: de agent meldt zich dan aan zodra ClusterForge
 # /etc/clusterforge/enroll.json in de nieuwe VM zet.
+#
+# Met --upgrade in plaats van --token wordt een aangemelde agent bijgewerkt
+# naar de versie van de server: nieuwe binary na een checksumcontrole, de
+# aanmelding in /etc/clusterforge/agent.json blijft, en de service herstart.
 set -eu
 
 SERVER=""
 TOKEN=""
 NO_ENROLL=0
+UPGRADE=0
+# CF_INSTALL_ROOT zet alles onder een andere map; alleen voor de tests.
+ROOT="${CF_INSTALL_ROOT:-}"
+BIN="$ROOT/usr/local/bin/cf-agent"
+ETC="$ROOT/etc/clusterforge"
 while [ $# -gt 0 ]; do
 	case "$1" in
 	--server) SERVER="${2:-}"; shift 2 ;;
 	--token) TOKEN="${2:-}"; shift 2 ;;
 	--no-enroll) NO_ENROLL=1; shift ;;
+	--upgrade) UPGRADE=1; shift ;;
 	*) echo "onbekende optie: $1" >&2; exit 2 ;;
 	esac
 done
-if [ -z "$SERVER" ] || { [ -z "$TOKEN" ] && [ "$NO_ENROLL" = 0 ]; }; then
+if [ -z "$SERVER" ] || { [ -z "$TOKEN" ] && [ "$NO_ENROLL" = 0 ] && [ "$UPGRADE" = 0 ]; } ||
+	[ $((NO_ENROLL + UPGRADE)) -gt 1 ] || { [ -n "$TOKEN" ] && [ $((NO_ENROLL + UPGRADE)) -gt 0 ]; }; then
 	echo "gebruik: agent.sh --server https://clusterforge.example --token cfe_..." >&2
 	echo "     of: agent.sh --server https://clusterforge.example --no-enroll" >&2
+	echo "     of: agent.sh --server https://clusterforge.example --upgrade" >&2
 	exit 2
 fi
 if [ "$(id -u)" != 0 ]; then
@@ -35,8 +47,12 @@ if ! command -v systemctl >/dev/null 2>&1; then
 	echo "systemd is nodig voor cf-agent" >&2
 	exit 1
 fi
-if [ "$NO_ENROLL" = 1 ] && [ -f /etc/clusterforge/agent.json ]; then
+if [ "$NO_ENROLL" = 1 ] && [ -f "$ETC/agent.json" ]; then
 	echo "deze machine is al aangemeld (/etc/clusterforge/agent.json); --no-enroll is voor een golden image" >&2
+	exit 1
+fi
+if [ "$UPGRADE" = 1 ] && { [ ! -f "$ETC/agent.json" ] || [ ! -x "$BIN" ]; }; then
+	echo "deze machine heeft nog geen aangemelde cf-agent; installeer hem met --token" >&2
 	exit 1
 fi
 case "$(uname -m)" in
@@ -66,10 +82,22 @@ if [ "$EXPECTED" != "$ACTUAL" ]; then
 	exit 1
 fi
 
-install -m 0755 "$TMP/cf-agent" /usr/local/bin/cf-agent
-install -d -m 0700 /etc/clusterforge
+if [ "$UPGRADE" = 1 ]; then
+	OLD="$("$BIN" version 2>/dev/null || echo onbekend)"
+	# Eerst naast de oude zetten en dan in één keer vervangen, zodat er nooit
+	# een halve binary staat.
+	install -m 0755 "$TMP/cf-agent" "$BIN.new"
+	mv -f "$BIN.new" "$BIN"
+	systemctl restart cf-agent
+	echo "klaar: cf-agent bijgewerkt van $OLD naar $("$BIN" version); de aanmelding is gebleven"
+	exit 0
+fi
 
-cat >/etc/systemd/system/cf-agent.service <<'UNIT'
+install -D -m 0755 "$TMP/cf-agent" "$BIN"
+install -d -m 0700 "$ETC"
+
+install -d "$ROOT/etc/systemd/system"
+cat >"$ROOT/etc/systemd/system/cf-agent.service" <<'UNIT'
 [Unit]
 Description=ClusterForge agent
 Documentation=https://github.com/Jonasz1996/ClusterForge
@@ -95,7 +123,7 @@ if [ "$NO_ENROLL" = 1 ]; then
 fi
 
 echo "aanmelden bij $SERVER"
-/usr/local/bin/cf-agent enroll -server "$SERVER" -token "$TOKEN"
+"$BIN" enroll -server "$SERVER" -token "$TOKEN"
 
 systemctl enable cf-agent >/dev/null 2>&1
 systemctl restart cf-agent

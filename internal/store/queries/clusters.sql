@@ -1,7 +1,16 @@
 -- name: ListClusters :many
+-- Met de samenvatting van de drift over de actieve nodes: hoeveel drift
+-- hebben, hoeveel niet of met een fout gecontroleerd zijn, en de oudste
+-- controle.
 SELECT sqlc.embed(c),
        (SELECT count(*) FROM nodes n WHERE n.cluster_id = c.id)::int AS node_count,
-       (SELECT count(*) FROM vips v WHERE v.cluster_id = c.id)::int AS vip_count
+       (SELECT count(*) FROM vips v WHERE v.cluster_id = c.id)::int AS vip_count,
+       (SELECT count(*) FROM nodes n JOIN drift_checks d ON d.node_id = n.id
+        WHERE n.cluster_id = c.id AND n.lifecycle = 'active' AND d.status = 'drift')::int AS drift_nodes,
+       (SELECT count(*) FROM nodes n LEFT JOIN drift_checks d ON d.node_id = n.id
+        WHERE n.cluster_id = c.id AND n.lifecycle = 'active' AND (d.node_id IS NULL OR d.status = 'error'))::int AS drift_unknown,
+       (SELECT min(d.checked_at) FROM nodes n JOIN drift_checks d ON d.node_id = n.id
+        WHERE n.cluster_id = c.id AND n.lifecycle = 'active') AS drift_checked_at
 FROM clusters c
 ORDER BY c.name;
 
