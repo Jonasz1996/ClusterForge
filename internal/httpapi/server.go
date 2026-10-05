@@ -13,7 +13,9 @@ import (
 
 	"github.com/Jonasz1996/clusterforge/internal/auth"
 	"github.com/Jonasz1996/clusterforge/internal/config"
+	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/httpapi/gen"
+	"github.com/Jonasz1996/clusterforge/internal/inventory"
 	"github.com/Jonasz1996/clusterforge/internal/store"
 	"github.com/Jonasz1996/clusterforge/internal/webui"
 )
@@ -24,6 +26,7 @@ type Server struct {
 	pool         *pgxpool.Pool
 	q            *store.Queries
 	auth         *auth.Service
+	inv          *inventory.Service
 	version      string
 	loginLimiter *ipLimiter
 }
@@ -37,6 +40,7 @@ func New(cfg config.Config, log *slog.Logger, pool *pgxpool.Pool, authSvc *auth.
 		pool:    pool,
 		q:       store.New(pool),
 		auth:    authSvc,
+		inv:     inventory.NewService(pool, events.NewWriter(store.New(pool), log)),
 		version: version,
 		// 10 pogingen direct, daarna één per 6 seconden per IP-adres.
 		loginLimiter: newIPLimiter(6*time.Second, 10),

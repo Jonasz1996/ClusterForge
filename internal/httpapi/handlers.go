@@ -156,7 +156,7 @@ func (s *Server) ListEvents(w http.ResponseWriter, r *http.Request, params gen.L
 			ActorId:     e.ActorID,
 			SubjectType: e.SubjectType,
 			SubjectId:   e.SubjectID,
-			ClusterId:   e.ClusterID,
+			ClusterId:   nullableOf(e.ClusterID),
 			Action:      e.Action,
 			Payload:     payload,
 		})

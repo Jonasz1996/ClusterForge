@@ -5,3 +5,5 @@ generate:
   chi-server: true
 output-options:
   skip-prune: false
+  # nullable.Nullable onderscheidt "niet meegestuurd" van "null" in PATCH-requests.
+  nullable-type: true

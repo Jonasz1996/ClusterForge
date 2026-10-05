@@ -147,6 +147,227 @@ paths:
                     items: { $ref: "#/components/schemas/Event" }
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
+  /users:
+    get:
+      operationId: listUsers
+      summary: Actieve gebruikers, voor bijvoorbeeld de keuze van owners
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/UserRef" }
+        "401": { $ref: "#/components/responses/Error" }
+  /clusters:
+    get:
+      operationId: listClusters
+      summary: Alle clusters met aantallen nodes en VIP's
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/ClusterListItem" }
+        "401": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createCluster
+      summary: Cluster aanmaken (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ClusterInput" }
+      responses:
+        "201":
+          description: Aangemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ClusterDetail" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /clusters/{clusterId}:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getCluster
+      summary: Cluster met nodes, VIP's en owners
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ClusterDetail" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: updateCluster
+      summary: Cluster wijzigen (admin); alleen meegestuurde velden veranderen
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ClusterPatch" }
+      responses:
+        "200":
+          description: Gewijzigd
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ClusterDetail" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteCluster
+      summary: Cluster verwijderen (admin); nodes blijven bestaan zonder cluster, VIP's verdwijnen
+      responses:
+        "204": { description: Verwijderd }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /clusters/{clusterId}/vips:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: createVip
+      summary: VIP toevoegen aan een cluster (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/VipInput" }
+      responses:
+        "201":
+          description: Aangemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Vip" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /vips/{vipId}:
+    parameters:
+      - { name: vipId, in: path, required: true, schema: { type: string, format: uuid } }
+    patch:
+      operationId: updateVip
+      summary: VIP wijzigen (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/VipPatch" }
+      responses:
+        "200":
+          description: Gewijzigd
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Vip" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteVip
+      summary: VIP verwijderen (admin)
+      responses:
+        "204": { description: Verwijderd }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /nodes:
+    get:
+      operationId: listNodes
+      summary: Alle nodes, met hun cluster
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Node" }
+        "401": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createNode
+      summary: Node aanmaken (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/NodeInput" }
+      responses:
+        "201":
+          description: Aangemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Node" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /nodes/{nodeId}:
+    parameters:
+      - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getNode
+      summary: Eén node
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Node" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: updateNode
+      summary: Node wijzigen (admin); cluster_id null haalt de node uit zijn cluster
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/NodePatch" }
+      responses:
+        "200":
+          description: Gewijzigd
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Node" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteNode
+      summary: Node verwijderen (admin)
+      responses:
+        "204": { description: Verwijderd }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
 components:
   securitySchemes:
     session:
@@ -238,3 +459,138 @@ components:
         cluster_id: { type: string, format: uuid, nullable: true }
         action: { type: string }
         payload: { type: object, additionalProperties: true }
+    UserRef:
+      type: object
+      required: [id, username]
+      properties:
+        id: { type: string, format: uuid }
+        username: { type: string }
+    ClusterType:
+      type: string
+      enum: [keepalived, nginx, docker, cron, postgresql_ha, mariadb_ha, generic]
+    Environment:
+      type: string
+      enum: [lab, test, prod]
+    NodeLifecycle:
+      type: string
+      enum: [provisioning, active, maintenance, draining, decommissioned]
+    Cluster:
+      type: object
+      required: [id, slug, name, description, type, environment, status, tags, git_repo_url, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        slug: { type: string, description: "Korte unieke naam, bijvoorbeeld webcluster-prod" }
+        name: { type: string }
+        description: { type: string }
+        type: { $ref: "#/components/schemas/ClusterType" }
+        environment: { $ref: "#/components/schemas/Environment" }
+        status: { type: string, description: "unknown tot de agent (mijlpaal 3) gegevens levert" }
+        tags: { type: array, items: { type: string } }
+        git_repo_url: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    ClusterListItem:
+      allOf:
+        - $ref: "#/components/schemas/Cluster"
+        - type: object
+          required: [node_count, vip_count]
+          properties:
+            node_count: { type: integer }
+            vip_count: { type: integer }
+    ClusterDetail:
+      allOf:
+        - $ref: "#/components/schemas/Cluster"
+        - type: object
+          required: [owners, nodes, vips]
+          properties:
+            owners: { type: array, items: { $ref: "#/components/schemas/UserRef" } }
+            nodes: { type: array, items: { $ref: "#/components/schemas/Node" } }
+            vips: { type: array, items: { $ref: "#/components/schemas/Vip" } }
+    ClusterInput:
+      type: object
+      required: [slug, name, type, environment]
+      properties:
+        slug: { type: string }
+        name: { type: string }
+        description: { type: string }
+        type: { $ref: "#/components/schemas/ClusterType" }
+        environment: { $ref: "#/components/schemas/Environment" }
+        git_repo_url: { type: string }
+        tags: { type: array, items: { type: string } }
+        owner_ids: { type: array, items: { type: string, format: uuid } }
+    ClusterPatch:
+      type: object
+      properties:
+        slug: { type: string }
+        name: { type: string }
+        description: { type: string }
+        type: { $ref: "#/components/schemas/ClusterType" }
+        environment: { $ref: "#/components/schemas/Environment" }
+        git_repo_url: { type: string }
+        tags: { type: array, items: { type: string } }
+        owner_ids: { type: array, items: { type: string, format: uuid } }
+    Node:
+      type: object
+      required: [id, cluster_id, cluster_slug, cluster_name, hostname, role, description, lifecycle, primary_ip, tags, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        cluster_id: { type: string, format: uuid, nullable: true }
+        cluster_slug: { type: string, nullable: true }
+        cluster_name: { type: string, nullable: true }
+        hostname: { type: string }
+        role: { type: string }
+        description: { type: string }
+        lifecycle: { $ref: "#/components/schemas/NodeLifecycle" }
+        primary_ip: { type: string, nullable: true }
+        tags: { type: array, items: { type: string } }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    NodeInput:
+      type: object
+      required: [hostname]
+      properties:
+        hostname: { type: string }
+        cluster_id: { type: string, format: uuid, nullable: true }
+        role: { type: string }
+        description: { type: string }
+        lifecycle: { $ref: "#/components/schemas/NodeLifecycle" }
+        primary_ip: { type: string, nullable: true }
+        tags: { type: array, items: { type: string } }
+    NodePatch:
+      type: object
+      properties:
+        hostname: { type: string }
+        cluster_id: { type: string, format: uuid, nullable: true }
+        role: { type: string }
+        description: { type: string }
+        lifecycle: { $ref: "#/components/schemas/NodeLifecycle" }
+        primary_ip: { type: string, nullable: true }
+        tags: { type: array, items: { type: string } }
+    Vip:
+      type: object
+      required: [id, cluster_id, address, interface, vrid, description, owner_node_id, owner_hostname, owner_since]
+      properties:
+        id: { type: string, format: uuid }
+        cluster_id: { type: string, format: uuid }
+        address: { type: string }
+        interface: { type: string }
+        vrid: { type: integer, nullable: true }
+        description: { type: string }
+        owner_node_id: { type: string, format: uuid, nullable: true }
+        owner_hostname: { type: string, nullable: true }
+        owner_since: { type: string, format: date-time, nullable: true }
+    VipInput:
+      type: object
+      required: [address]
+      properties:
+        address: { type: string }
+        interface: { type: string }
+        vrid: { type: integer, nullable: true }
+        description: { type: string }
+    VipPatch:
+      type: object
+      properties:
+        address: { type: string }
+        interface: { type: string }
+        vrid: { type: integer, nullable: true }
+        description: { type: string }
