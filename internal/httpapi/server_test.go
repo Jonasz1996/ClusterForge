@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/pquerna/otp/totp"
 
+	"github.com/Jonasz1996/clusterforge/internal/agentbus"
 	"github.com/Jonasz1996/clusterforge/internal/auth"
 	"github.com/Jonasz1996/clusterforge/internal/config"
 	"github.com/Jonasz1996/clusterforge/internal/events"
@@ -30,6 +31,7 @@ type testEnv struct {
 	auth *auth.Service
 	pool *pgxpool.Pool
 	api  *Server
+	bus  *agentbus.Bus
 }
 
 func newTestEnv(t *testing.T) *testEnv {
@@ -56,11 +58,16 @@ func newTestEnv(t *testing.T) *testEnv {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg := config.Config{SecureCookies: false, SessionTTL: time.Hour}
-	api := New(cfg, log, pool, a, "test")
+	bus, err := agentbus.Start(ctx, "127.0.0.1:0", pool, events.NewWriter(q, log), log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(bus.Close)
+	cfg := config.Config{SecureCookies: false, SessionTTL: time.Hour, AgentDir: t.TempDir()}
+	api := New(cfg, log, pool, a, bus, "test")
 	srv := httptest.NewServer(api.Handler())
 	t.Cleanup(srv.Close)
-	return &testEnv{t: t, srv: srv, auth: a, pool: pool, api: api}
+	return &testEnv{t: t, srv: srv, auth: a, pool: pool, api: api, bus: bus}
 }
 
 func (e *testEnv) createUser(name, password string, role store.UserRole) {

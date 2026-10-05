@@ -368,6 +368,97 @@ paths:
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /nodes/{nodeId}/facts:
+    parameters:
+      - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getNodeFacts
+      summary: Facts en laatste heartbeat van de agent op deze node
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NodeRuntime" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /enrollment-tokens:
+    get:
+      operationId: listEnrollmentTokens
+      summary: Bruikbare enrollmenttokens (admin)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/EnrollmentToken" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createEnrollmentToken
+      summary: Enrollmenttoken aanmaken (admin); het token zelf staat alleen in dit antwoord
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/EnrollmentTokenInput" }
+      responses:
+        "201":
+          description: Aangemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NewEnrollmentToken" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /enrollment-tokens/{tokenId}:
+    parameters:
+      - { name: tokenId, in: path, required: true, schema: { type: string, format: uuid } }
+    delete:
+      operationId: deleteEnrollmentToken
+      summary: Enrollmenttoken intrekken (admin)
+      responses:
+        "204": { description: Verwijderd }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /agents/enroll:
+    post:
+      operationId: enrollAgent
+      summary: Een agent meldt zich aan met een enrollmenttoken (zonder sessie)
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/EnrollRequest" }
+      responses:
+        "200":
+          description: Aangemeld
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EnrollResponse" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+  /agents/{agentId}/revoke:
+    parameters:
+      - { name: agentId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: revokeAgent
+      summary: Agent intrekken (admin); de verbinding wordt meteen verbroken
+      responses:
+        "204": { description: Ingetrokken }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
 components:
   securitySchemes:
     session:
@@ -531,9 +622,13 @@ components:
         owner_ids: { type: array, items: { type: string, format: uuid } }
     Node:
       type: object
-      required: [id, cluster_id, cluster_slug, cluster_name, hostname, role, description, lifecycle, primary_ip, tags, created_at, updated_at]
+      required: [id, cluster_id, cluster_slug, cluster_name, hostname, role, description, lifecycle, primary_ip, tags, created_at, updated_at, agent]
       properties:
         id: { type: string, format: uuid }
+        agent:
+          description: De actieve agent, of null als er (nog) geen agent is
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/AgentSummary" }]
         cluster_id: { type: string, format: uuid, nullable: true }
         cluster_slug: { type: string, nullable: true }
         cluster_name: { type: string, nullable: true }
@@ -594,3 +689,163 @@ components:
         interface: { type: string }
         vrid: { type: integer, nullable: true }
         description: { type: string }
+    AgentConnection:
+      type: string
+      description: online bij een heartbeat in de laatste 30 s, late tot 90 s, daarna offline
+      enum: [online, late, offline]
+    AgentSummary:
+      type: object
+      required: [id, version, enrolled_at, last_seen_at, connection]
+      properties:
+        id: { type: string, format: uuid }
+        version: { type: string }
+        enrolled_at: { type: string, format: date-time }
+        last_seen_at: { type: string, format: date-time, nullable: true }
+        connection: { $ref: "#/components/schemas/AgentConnection" }
+    NodeRuntime:
+      type: object
+      required: [facts, collected_at, changed_at, heartbeat]
+      properties:
+        facts:
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/Facts" }]
+        collected_at: { type: string, format: date-time, nullable: true }
+        changed_at: { type: string, format: date-time, nullable: true }
+        heartbeat:
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/HeartbeatStatus" }]
+    HeartbeatStatus:
+      type: object
+      required: [received_at, uptime_seconds, load, addresses, services]
+      properties:
+        received_at: { type: string, format: date-time }
+        uptime_seconds: { type: integer, format: int64 }
+        load: { type: array, items: { type: number }, minItems: 3, maxItems: 3 }
+        addresses: { type: array, items: { type: string } }
+        services: { type: object, additionalProperties: { type: string } }
+    Facts:
+      type: object
+      description: Zoals de agent ze verzamelt; zie pkg/protocol
+      required: [hostname, machine_id, os, kernel, arch, virtualization, cpus, memory_bytes, swap_bytes, boot_time, primary_address, interfaces, filesystems, services, docker, keepalived, upgrades]
+      properties:
+        hostname: { type: string }
+        machine_id: { type: string }
+        os:
+          type: object
+          required: [id, version_id, codename, pretty_name]
+          properties:
+            id: { type: string }
+            version_id: { type: string }
+            codename: { type: string }
+            pretty_name: { type: string }
+        kernel: { type: string }
+        arch: { type: string }
+        virtualization: { type: string }
+        cpus: { type: integer }
+        memory_bytes: { type: integer, format: int64 }
+        swap_bytes: { type: integer, format: int64 }
+        boot_time: { type: string, format: date-time }
+        primary_address: { type: string }
+        interfaces:
+          type: array
+          nullable: true
+          items:
+            type: object
+            required: [name, mac, up, addresses]
+            properties:
+              name: { type: string }
+              mac: { type: string }
+              up: { type: boolean }
+              addresses: { type: array, nullable: true, items: { type: string } }
+        filesystems:
+          type: array
+          nullable: true
+          items:
+            type: object
+            required: [mount, device, type, size_bytes, used_bytes]
+            properties:
+              mount: { type: string }
+              device: { type: string }
+              type: { type: string }
+              size_bytes: { type: integer, format: int64 }
+              used_bytes: { type: integer, format: int64 }
+        services:
+          type: array
+          nullable: true
+          items:
+            type: object
+            required: [name, active, enabled]
+            properties:
+              name: { type: string }
+              active: { type: string }
+              enabled: { type: string }
+        docker:
+          type: object
+          nullable: true
+          required: [version, containers]
+          properties:
+            version: { type: string }
+            containers: { type: integer }
+        keepalived:
+          type: object
+          nullable: true
+          required: [active, vips]
+          properties:
+            active: { type: string }
+            vips: { type: array, nullable: true, items: { type: string } }
+        upgrades:
+          type: object
+          nullable: true
+          required: [total, security, packages]
+          properties:
+            total: { type: integer }
+            security: { type: integer }
+            packages: { type: array, nullable: true, items: { type: string } }
+    EnrollmentToken:
+      type: object
+      required: [id, description, node_id, node_hostname, cluster_id, cluster_name, max_uses, uses, expires_at, created_at, created_by]
+      properties:
+        id: { type: string, format: uuid }
+        description: { type: string }
+        node_id: { type: string, format: uuid, nullable: true }
+        node_hostname: { type: string, nullable: true }
+        cluster_id: { type: string, format: uuid, nullable: true }
+        cluster_name: { type: string, nullable: true }
+        max_uses: { type: integer }
+        uses: { type: integer }
+        expires_at: { type: string, format: date-time }
+        created_at: { type: string, format: date-time }
+        created_by: { type: string, nullable: true, description: Gebruikersnaam }
+    EnrollmentTokenInput:
+      type: object
+      properties:
+        description: { type: string }
+        node_id: { type: string, format: uuid, nullable: true, description: Alleen deze bestaande node mag zich ermee aanmelden }
+        cluster_id: { type: string, format: uuid, nullable: true, description: Nieuwe nodes komen in dit cluster }
+        max_uses: { type: integer, minimum: 1, maximum: 100, description: Standaard 1 }
+        ttl_hours: { type: integer, minimum: 1, maximum: 720, description: Standaard 24 }
+    NewEnrollmentToken:
+      allOf:
+        - { $ref: "#/components/schemas/EnrollmentToken" }
+        - type: object
+          required: [token]
+          properties:
+            token: { type: string, description: Alleen nu zichtbaar }
+    EnrollRequest:
+      type: object
+      required: [token, nkey_public, hostname, machine_id, agent_version, protocol_version]
+      properties:
+        token: { type: string }
+        nkey_public: { type: string }
+        hostname: { type: string }
+        machine_id: { type: string }
+        agent_version: { type: string }
+        protocol_version: { type: integer }
+    EnrollResponse:
+      type: object
+      required: [agent_id, node_id, nats_url, nats_cert_sha256]
+      properties:
+        agent_id: { type: string, format: uuid }
+        node_id: { type: string, format: uuid }
+        nats_url: { type: string, description: Bijvoorbeeld tls://clusterforge.lan:4222 }
+        nats_cert_sha256: { type: string, description: Hex-sha256 van het NATS-certificaat; de agent pint het }

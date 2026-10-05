@@ -8,6 +8,7 @@ package store
 import (
 	"context"
 	"net/netip"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -67,15 +68,23 @@ func (q *Queries) DeleteNode(ctx context.Context, id uuid.UUID) (int64, error) {
 }
 
 const getNode = `-- name: GetNode :one
-SELECT n.id, n.cluster_id, n.hostname, n.role, n.description, n.lifecycle, n.primary_ip, n.tags, n.created_at, n.updated_at, c.slug AS cluster_slug, c.name AS cluster_name
-FROM nodes n LEFT JOIN clusters c ON c.id = n.cluster_id
+SELECT n.id, n.cluster_id, n.hostname, n.role, n.description, n.lifecycle, n.primary_ip, n.tags, n.created_at, n.updated_at, c.slug AS cluster_slug, c.name AS cluster_name,
+       a.id AS agent_id, a.version AS agent_version, a.enrolled_at AS agent_enrolled_at,
+       a.last_seen_at AS agent_last_seen_at
+FROM nodes n
+LEFT JOIN clusters c ON c.id = n.cluster_id
+LEFT JOIN agents a ON a.node_id = n.id AND a.revoked_at IS NULL
 WHERE n.id = $1
 `
 
 type GetNodeRow struct {
-	Node        Node
-	ClusterSlug *string
-	ClusterName *string
+	Node            Node
+	ClusterSlug     *string
+	ClusterName     *string
+	AgentID         *uuid.UUID
+	AgentVersion    *string
+	AgentEnrolledAt *time.Time
+	AgentLastSeenAt *time.Time
 }
 
 func (q *Queries) GetNode(ctx context.Context, id uuid.UUID) (GetNodeRow, error) {
@@ -94,20 +103,32 @@ func (q *Queries) GetNode(ctx context.Context, id uuid.UUID) (GetNodeRow, error)
 		&i.Node.UpdatedAt,
 		&i.ClusterSlug,
 		&i.ClusterName,
+		&i.AgentID,
+		&i.AgentVersion,
+		&i.AgentEnrolledAt,
+		&i.AgentLastSeenAt,
 	)
 	return i, err
 }
 
 const listNodes = `-- name: ListNodes :many
-SELECT n.id, n.cluster_id, n.hostname, n.role, n.description, n.lifecycle, n.primary_ip, n.tags, n.created_at, n.updated_at, c.slug AS cluster_slug, c.name AS cluster_name
-FROM nodes n LEFT JOIN clusters c ON c.id = n.cluster_id
+SELECT n.id, n.cluster_id, n.hostname, n.role, n.description, n.lifecycle, n.primary_ip, n.tags, n.created_at, n.updated_at, c.slug AS cluster_slug, c.name AS cluster_name,
+       a.id AS agent_id, a.version AS agent_version, a.enrolled_at AS agent_enrolled_at,
+       a.last_seen_at AS agent_last_seen_at
+FROM nodes n
+LEFT JOIN clusters c ON c.id = n.cluster_id
+LEFT JOIN agents a ON a.node_id = n.id AND a.revoked_at IS NULL
 ORDER BY lower(n.hostname)
 `
 
 type ListNodesRow struct {
-	Node        Node
-	ClusterSlug *string
-	ClusterName *string
+	Node            Node
+	ClusterSlug     *string
+	ClusterName     *string
+	AgentID         *uuid.UUID
+	AgentVersion    *string
+	AgentEnrolledAt *time.Time
+	AgentLastSeenAt *time.Time
 }
 
 func (q *Queries) ListNodes(ctx context.Context) ([]ListNodesRow, error) {
@@ -132,6 +153,10 @@ func (q *Queries) ListNodes(ctx context.Context) ([]ListNodesRow, error) {
 			&i.Node.UpdatedAt,
 			&i.ClusterSlug,
 			&i.ClusterName,
+			&i.AgentID,
+			&i.AgentVersion,
+			&i.AgentEnrolledAt,
+			&i.AgentLastSeenAt,
 		); err != nil {
 			return nil, err
 		}
@@ -144,29 +169,52 @@ func (q *Queries) ListNodes(ctx context.Context) ([]ListNodesRow, error) {
 }
 
 const listNodesByCluster = `-- name: ListNodesByCluster :many
-SELECT id, cluster_id, hostname, role, description, lifecycle, primary_ip, tags, created_at, updated_at FROM nodes WHERE cluster_id = $1 ORDER BY lower(hostname)
+SELECT n.id, n.cluster_id, n.hostname, n.role, n.description, n.lifecycle, n.primary_ip, n.tags, n.created_at, n.updated_at, c.slug AS cluster_slug, c.name AS cluster_name,
+       a.id AS agent_id, a.version AS agent_version, a.enrolled_at AS agent_enrolled_at,
+       a.last_seen_at AS agent_last_seen_at
+FROM nodes n
+LEFT JOIN clusters c ON c.id = n.cluster_id
+LEFT JOIN agents a ON a.node_id = n.id AND a.revoked_at IS NULL
+WHERE n.cluster_id = $1
+ORDER BY lower(n.hostname)
 `
 
-func (q *Queries) ListNodesByCluster(ctx context.Context, clusterID *uuid.UUID) ([]Node, error) {
+type ListNodesByClusterRow struct {
+	Node            Node
+	ClusterSlug     *string
+	ClusterName     *string
+	AgentID         *uuid.UUID
+	AgentVersion    *string
+	AgentEnrolledAt *time.Time
+	AgentLastSeenAt *time.Time
+}
+
+func (q *Queries) ListNodesByCluster(ctx context.Context, clusterID *uuid.UUID) ([]ListNodesByClusterRow, error) {
 	rows, err := q.db.Query(ctx, listNodesByCluster, clusterID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []Node{}
+	items := []ListNodesByClusterRow{}
 	for rows.Next() {
-		var i Node
+		var i ListNodesByClusterRow
 		if err := rows.Scan(
-			&i.ID,
-			&i.ClusterID,
-			&i.Hostname,
-			&i.Role,
-			&i.Description,
-			&i.Lifecycle,
-			&i.PrimaryIp,
-			&i.Tags,
-			&i.CreatedAt,
-			&i.UpdatedAt,
+			&i.Node.ID,
+			&i.Node.ClusterID,
+			&i.Node.Hostname,
+			&i.Node.Role,
+			&i.Node.Description,
+			&i.Node.Lifecycle,
+			&i.Node.PrimaryIp,
+			&i.Node.Tags,
+			&i.Node.CreatedAt,
+			&i.Node.UpdatedAt,
+			&i.ClusterSlug,
+			&i.ClusterName,
+			&i.AgentID,
+			&i.AgentVersion,
+			&i.AgentEnrolledAt,
+			&i.AgentLastSeenAt,
 		); err != nil {
 			return nil, err
 		}
