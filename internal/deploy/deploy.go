@@ -311,10 +311,33 @@ func (s *Service) Request(ctx context.Context, actor events.Actor, req Request) 
 		}); err != nil {
 			return err
 		}
-		for name, v := range secretValues {
+		err = s.ev.Write(ctx, q, events.Event{
+			Actor: actor, SubjectType: "cluster", SubjectID: c.ID.String(), ClusterID: &c.ID, Action: "cluster.spec_changed",
+			Payload: map[string]any{
+				"name": c.Name, "revision": rev, "previous_revision": nil, "source": "ui",
+				"template": tpl.Name, "template_version": tpl.Version,
+			},
+		})
+		if err != nil {
+			return err
+		}
+		names := make([]string, 0, len(secretValues))
+		for name := range secretValues {
+			names = append(names, name)
+		}
+		slices.Sort(names)
+		for _, name := range names {
 			if err := q.InsertSecret(ctx, store.InsertSecretParams{
-				ClusterID: c.ID, Name: name, ValueEnc: s.box.Seal([]byte(v), secretAAD(c.ID, name)), KeyID: s.box.KeyID,
+				ClusterID: c.ID, Name: name, ValueEnc: s.box.Seal([]byte(secretValues[name]), secretAAD(c.ID, name)), KeyID: s.box.KeyID,
 			}); err != nil {
+				return err
+			}
+			// Van een geheim alleen de naam, nooit de waarde.
+			err := s.ev.Write(ctx, q, events.Event{
+				Actor: actor, SubjectType: "cluster", SubjectID: c.ID.String(), ClusterID: &c.ID, Action: "secret.created",
+				Payload: map[string]any{"name": c.Name, "secret_name": name},
+			})
+			if err != nil {
 				return err
 			}
 		}
@@ -340,7 +363,7 @@ func (s *Service) Request(ctx context.Context, actor events.Actor, req Request) 
 			}
 			n.ID = created.ID
 		}
-		job, err = s.jobs.EnqueueTx(ctx, q, jobs.Spec{
+		job, err = s.jobs.EnqueueForClusterTx(ctx, q, jobs.Spec{
 			Kind: Kind, Title: "Uitrollen: " + p.Cluster.Name, Params: p, ClusterID: &c.ID,
 			ProxmoxID: &p.Target.ProxmoxID, Actor: actor,
 		})

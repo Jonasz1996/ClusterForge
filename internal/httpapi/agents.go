@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -13,6 +14,7 @@ import (
 	"github.com/oapi-codegen/nullable"
 
 	"github.com/Jonasz1996/clusterforge/internal/agents"
+	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/httpapi/gen"
 	"github.com/Jonasz1996/clusterforge/pkg/protocol"
 )
@@ -118,6 +120,19 @@ func (s *Server) EnrollAgent(w http.ResponseWriter, r *http.Request) {
 		AgentVersion: req.AgentVersion, ProtocolVersion: req.ProtocolVersion,
 	})
 	if errors.Is(err, agents.ErrInvalidToken) {
+		reason := "unknown"
+		var te agents.TokenError
+		if errors.As(err, &te) {
+			reason = te.Reason
+		}
+		host := req.Hostname
+		if len(host) > 64 {
+			host = strings.ToValidUTF8(host[:64], "")
+		}
+		s.throttle.Write(r.Context(), clientIP(r), events.Event{
+			Actor: events.System(), SubjectType: "agent", SubjectID: "onbekend", Action: "agent.enroll_failed",
+			Payload: map[string]any{"ip": clientIP(r), "hostname": host, "reason": reason},
+		})
 		writeError(w, http.StatusUnauthorized, "invalid_token", err.Error())
 		return
 	}

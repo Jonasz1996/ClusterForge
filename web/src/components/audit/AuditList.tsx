@@ -113,6 +113,16 @@ function AuditDetails({ e }: { e: AuditEntry }) {
             <dd className="tabular-nums">{e.ip}</dd>
           </>
         )}
+        {e.session && (
+          <>
+            <dt className="text-slate-500">Sessie</dt>
+            <dd>
+              <code className="text-xs" title="Regels met dezelfde code komen uit dezelfde login">
+                {e.session}
+              </code>
+            </dd>
+          </>
+        )}
         {e.node && e.subject.type !== "node" && (
           <>
             <dt className="text-slate-500">Node</dt>

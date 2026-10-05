@@ -143,6 +143,23 @@ func (q *Queries) GetNode(ctx context.Context, id uuid.UUID) (GetNodeRow, error)
 	return i, err
 }
 
+const getNodeRef = `-- name: GetNodeRef :one
+SELECT hostname, cluster_id FROM nodes WHERE id = $1
+`
+
+type GetNodeRefRow struct {
+	Hostname  string
+	ClusterID *uuid.UUID
+}
+
+// Naam en cluster van een node, voor een event.
+func (q *Queries) GetNodeRef(ctx context.Context, id uuid.UUID) (GetNodeRefRow, error) {
+	row := q.db.QueryRow(ctx, getNodeRef, id)
+	var i GetNodeRefRow
+	err := row.Scan(&i.Hostname, &i.ClusterID)
+	return i, err
+}
+
 const listNodes = `-- name: ListNodes :many
 SELECT n.id, n.cluster_id, n.hostname, n.role, n.description, n.lifecycle, n.primary_ip, n.tags, n.created_at, n.updated_at, n.status, n.status_reason, n.status_since, n.proxmox_id, n.pve_vmid, c.slug AS cluster_slug, c.name AS cluster_name,
        a.id AS agent_id, a.version AS agent_version, a.enrolled_at AS agent_enrolled_at,

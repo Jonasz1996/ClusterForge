@@ -124,7 +124,16 @@ func (s *Service) RequestAction(ctx context.Context, actor events.Actor, connID 
 	case !errors.Is(err, pgx.ErrNoRows):
 		return store.Job{}, err
 	}
-	return s.jobs.Enqueue(ctx, spec)
+	if spec.ClusterID == nil {
+		return s.jobs.Enqueue(ctx, spec)
+	}
+	// Een VM van een node in een cluster neemt het clusterslot.
+	j, err := s.jobs.EnqueueForCluster(ctx, spec)
+	var busy jobs.BusyError
+	if errors.As(err, &busy) {
+		return store.Job{}, ConflictError{busy.Error()}
+	}
+	return j, err
 }
 
 func (s *Service) onlineHosts(ctx context.Context, connID uuid.UUID) ([]string, error) {

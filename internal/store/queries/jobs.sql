@@ -1,7 +1,21 @@
 -- name: CreateJob :one
-INSERT INTO jobs (kind, title, params, cluster_id, node_id, proxmox_id, requested_by)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+INSERT INTO jobs (kind, title, params, cluster_id, node_id, proxmox_id, requested_by, cluster_slot)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 RETURNING *;
+
+-- name: LockClusterForJob :one
+-- Vergrendelt de clusterrij, zodat twee aanvragen het slot niet tegelijk
+-- vrij zien.
+SELECT name FROM clusters WHERE id = $1 FOR UPDATE;
+
+-- name: GetClusterSlotJob :one
+-- De wachtende of lopende schrijvende taak in een cluster, ook een taak op
+-- een node van dat cluster.
+SELECT j.id, j.title FROM jobs j
+WHERE j.cluster_slot AND j.status IN ('queued', 'running')
+  AND (j.cluster_id = @cluster_id::uuid OR j.node_id IN (SELECT n.id FROM nodes n WHERE n.cluster_id = @cluster_id::uuid))
+ORDER BY j.created_at
+LIMIT 1;
 
 -- name: ClaimJob :one
 -- Neemt de oudste wachtende taak; SKIP LOCKED laat meerdere workers naast

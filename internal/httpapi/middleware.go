@@ -14,6 +14,7 @@ import (
 	"golang.org/x/time/rate"
 
 	"github.com/Jonasz1996/clusterforge/internal/auth"
+	"github.com/Jonasz1996/clusterforge/internal/events"
 )
 
 const (
@@ -42,7 +43,7 @@ var publicRoutes = map[string]bool{
 func (s *Server) requireSession(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if publicRoutes[r.Method+" "+r.URL.Path] {
-			next.ServeHTTP(w, r)
+			next.ServeHTTP(w, r.WithContext(events.WithRequest(r.Context(), clientIP(r), nil)))
 			return
 		}
 		c, err := r.Cookie(sessionCookie)
@@ -71,7 +72,9 @@ func (s *Server) requireSession(next http.Handler) http.Handler {
 		if p.Refreshed {
 			s.setSessionCookie(w, c.Value, p.ExpiresAt)
 		}
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), principalKey, p)))
+		// Elk event van deze request krijgt het IP en de sessie mee.
+		ctx := events.WithRequest(context.WithValue(r.Context(), principalKey, p), clientIP(r), p.SessionID)
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 

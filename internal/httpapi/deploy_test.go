@@ -406,8 +406,16 @@ func TestDeploy(t *testing.T) {
 	if pn.Proxmox == nil || pn.Proxmox.VMID != w1.VMID {
 		t.Fatalf("Proxmox-koppeling van web-01: %+v", pn.Proxmox)
 	}
-	if acts := eventActions(t, e, res.ClusterID); !slices.Contains(acts, "cluster.deployed") {
+	if acts := eventActions(t, e, res.ClusterID); !slices.Contains(acts, "cluster.deployed") || !slices.Contains(acts, "cluster.spec_changed") ||
+		!slices.Contains(acts, "secret.created") {
 		t.Fatalf("events: %v", acts)
+	}
+	// Wat de agents moesten doen, staat in het logboek; een bestand alleen
+	// met zijn vingerafdruk.
+	var files int
+	if err := e.pool.QueryRow(context.Background(), `SELECT count(*) FROM events, jsonb_array_elements(payload->'steps') st
+		WHERE action = 'agent.command' AND cluster_id = $1 AND st->>'kind' = 'file' AND length(st->>'fingerprint') = 64`, res.ClusterID).Scan(&files); err != nil || files == 0 {
+		t.Fatalf("bestanden in agent.command: %d %v", files, err)
 	}
 
 	// Het geheim staat nergens leesbaar.
@@ -416,7 +424,10 @@ func TestDeploy(t *testing.T) {
 		(SELECT count(*) FROM jobs WHERE params::text LIKE '%geheim12%') +
 		(SELECT count(*) FROM clusters WHERE spec::text LIKE '%geheim12%') +
 		(SELECT count(*) FROM cluster_spec_revisions WHERE spec::text LIKE '%geheim12%') +
-		(SELECT count(*) FROM events WHERE payload::text LIKE '%geheim12%')`).Scan(&leaks)
+		(SELECT count(*) FROM events WHERE payload::text LIKE '%geheim12%') +
+		(SELECT count(*) FROM jobs WHERE error LIKE '%geheim12%') +
+		(SELECT count(*) FROM job_steps WHERE state::text LIKE '%geheim12%' OR array_to_string(log, ' ') LIKE '%geheim12%' OR error LIKE '%geheim12%') +
+		(SELECT count(*) FROM events WHERE payload::text LIKE '%geheim-secret%')`).Scan(&leaks)
 	if leaks != 0 || strings.Contains(logs, "geheim12") {
 		t.Fatalf("auth_pass staat %d keer in de database of in het log", leaks)
 	}

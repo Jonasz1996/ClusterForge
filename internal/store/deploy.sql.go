@@ -136,7 +136,7 @@ const retryJob = `-- name: RetryJob :one
 UPDATE jobs
 SET status = 'queued', error = '', cancel_requested = false, attempts = 0, finished_at = NULL, heartbeat_at = NULL
 WHERE id = $1 AND status IN ('failed', 'canceled') AND kind = ANY($2::text[])
-RETURNING id, kind, title, status, params, cluster_id, node_id, proxmox_id, requested_by, error, cancel_requested, attempts, created_at, started_at, finished_at, heartbeat_at
+RETURNING id, kind, title, status, params, cluster_id, node_id, proxmox_id, requested_by, error, cancel_requested, attempts, created_at, started_at, finished_at, heartbeat_at, cluster_slot
 `
 
 type RetryJobParams struct {
@@ -164,6 +164,7 @@ func (q *Queries) RetryJob(ctx context.Context, arg RetryJobParams) (Job, error)
 		&i.StartedAt,
 		&i.FinishedAt,
 		&i.HeartbeatAt,
+		&i.ClusterSlot,
 	)
 	return i, err
 }

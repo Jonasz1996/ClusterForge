@@ -52,6 +52,8 @@ type Server struct {
 	loginLimiter *ipLimiter
 	// enrollLimiter remt het raden van enrollmenttokens.
 	enrollLimiter *ipLimiter
+	// throttle remt events die een aanvaller gratis kan laten schrijven.
+	throttle *events.Throttle
 }
 
 var _ gen.ServerInterface = (*Server)(nil)
@@ -102,6 +104,7 @@ func New(d Deps) *Server {
 		// 10 pogingen direct, daarna één per 6 seconden per IP-adres.
 		loginLimiter:  newIPLimiter(6*time.Second, 10),
 		enrollLimiter: newIPLimiter(6*time.Second, 20),
+		throttle:      events.NewThrottle(ev),
 	}
 }
 

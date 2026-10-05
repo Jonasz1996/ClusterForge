@@ -167,9 +167,18 @@ func (s *Server) ProbeProxmox(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) SyncProxmox(w http.ResponseWriter, r *http.Request, id uuid.UUID) {
-	if _, ok := requireAdmin(w, r); !ok {
+	p, ok := requireAdmin(w, r)
+	if !ok {
 		return
 	}
+	conn, err := s.q.GetProxmoxConnection(r.Context(), id)
+	if s.proxmoxError(w, r, err) {
+		return
+	}
+	_ = s.ev.Write(r.Context(), nil, events.Event{
+		Actor: events.User(p.User.ID), SubjectType: "proxmox", SubjectID: id.String(),
+		Action: "proxmox.sync_requested", Payload: map[string]any{"name": conn.Name},
+	})
 	// Een fout van Proxmox staat daarna in last_error, een fout bij het
 	// lezen van de back-ups in de back-upstand van de koppeling.
 	if err := s.pve.Sync(r.Context(), id); errors.Is(err, proxmox.ErrNotFound) {

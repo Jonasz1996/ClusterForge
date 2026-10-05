@@ -1314,7 +1314,7 @@ components:
         to: { type: string }
     AuditEntry:
       type: object
-      required: [id, ts, action, category, summary, actor, on_behalf_of, subject, cluster, node, job, ip, changes, payload]
+      required: [id, ts, action, category, summary, actor, on_behalf_of, subject, cluster, node, job, ip, session, changes, payload]
       properties:
         id: { type: integer, format: int64 }
         ts: { type: string, format: date-time }
@@ -1352,6 +1352,10 @@ components:
           allOf: [{ $ref: "#/components/schemas/AuditRef" }]
           nullable: true
         ip: { type: string, nullable: true }
+        session:
+          type: string
+          nullable: true
+          description: Het begin van de sessiehash; regels met dezelfde waarde komen uit dezelfde login
         changes:
           type: array
           items: { $ref: "#/components/schemas/AuditChange" }

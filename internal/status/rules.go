@@ -30,6 +30,11 @@ const (
 	// DiskFull is de bezetting vanaf waar een bestandssysteem een node
 	// degraded maakt.
 	DiskFull = 0.90
+	// VIPGrace is hoe lang een VIP op twee nodes of op geen enkele mag
+	// staan voor het telt: anderhalf heartbeatinterval. Bij een gewone
+	// wissel meldt de nieuwe node het adres vaak al voordat de heartbeat van
+	// de oude het kwijt is, of andersom.
+	VIPGrace = 15 * time.Second
 )
 
 // ignoredInactive zijn units die normaal inactief zijn terwijl ze enabled
@@ -108,8 +113,10 @@ type ClusterNode struct {
 	Counts bool
 	Result Result
 	// Addresses zijn de adressen uit een recente heartbeat; leeg als de node
-	// down is of geen agent heeft.
+	// down is, geen agent heeft of zijn VM uit staat.
 	Addresses []string
+	// HeartbeatAge is de leeftijd van de heartbeat waar Addresses uit komen.
+	HeartbeatAge time.Duration
 }
 
 type ClusterVIP struct {
@@ -123,21 +130,58 @@ type ClusterResult struct {
 	Holders map[uuid.UUID][]uuid.UUID
 }
 
-// Cluster past de regels voor een cluster toe.
+// Holders geeft per VIP de nodes die het adres nu hebben. Melden meerdere
+// nodes het, dan tellen nodes met een heartbeat ouder dan grace niet mee
+// zolang er een verse melding is: hun adressen zijn van voor de wissel, zoals
+// bij een node die net vastliep.
+func Holders(nodes []ClusterNode, vips []ClusterVIP, grace time.Duration) map[uuid.UUID][]uuid.UUID {
+	out := map[uuid.UUID][]uuid.UUID{}
+	for _, v := range vips {
+		var all, fresh []uuid.UUID
+		for _, n := range nodes {
+			if slices.Contains(n.Addresses, v.Address) {
+				all = append(all, n.ID)
+				if n.HeartbeatAge <= grace {
+					fresh = append(fresh, n.ID)
+				}
+			}
+		}
+		switch {
+		case len(all) > 1 && len(fresh) > 0:
+			out[v.ID] = fresh
+		case all == nil:
+			out[v.ID] = []uuid.UUID{}
+		default:
+			out[v.ID] = all
+		}
+	}
+	return out
+}
+
+// Settle geeft de houders die meetellen. Staat een VIP op precies één node,
+// dan is dat de houder. Staat het op meerdere of op geen enkele, dan blijft
+// de vorige eigenaar staan zolang dat korter dan VIPGrace duurt; pas daarna
+// is het split-brain of een VIP zonder eigenaar.
+func Settle(raw []uuid.UUID, owner *uuid.UUID, unsettledFor, grace time.Duration) []uuid.UUID {
+	if len(raw) == 1 || owner == nil || unsettledFor >= grace {
+		return raw
+	}
+	return []uuid.UUID{*owner}
+}
+
+// Cluster past de regels voor een cluster toe, met de houders zoals de
+// heartbeats ze nu melden.
 func Cluster(nodes []ClusterNode, vips []ClusterVIP) ClusterResult {
-	res := ClusterResult{Holders: map[uuid.UUID][]uuid.UUID{}}
+	return ClusterWith(nodes, vips, Holders(nodes, vips, VIPGrace))
+}
+
+// ClusterWith past de regels toe met houders die de aanroeper al bepaalde,
+// bijvoorbeeld na Settle.
+func ClusterWith(nodes []ClusterNode, vips []ClusterVIP, holders map[uuid.UUID][]uuid.UUID) ClusterResult {
+	res := ClusterResult{Holders: holders}
 	hostname := map[uuid.UUID]string{}
 	for _, n := range nodes {
 		hostname[n.ID] = n.Hostname
-	}
-	for _, v := range vips {
-		holders := []uuid.UUID{}
-		for _, n := range nodes {
-			if slices.Contains(n.Addresses, v.Address) {
-				holders = append(holders, n.ID)
-			}
-		}
-		res.Holders[v.ID] = holders
 	}
 
 	var counted, monitored, down []ClusterNode

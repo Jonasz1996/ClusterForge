@@ -136,12 +136,13 @@ func (s *Service) Login(ctx context.Context, in LoginInput) (Session, error) {
 	if err != nil {
 		return Session{}, fmt.Errorf("sessie aanmaken: %w", err)
 	}
-	_ = s.ev.Write(ctx, nil, events.Event{
+	// De login hoort al bij de nieuwe sessie.
+	_ = s.ev.Write(events.WithRequest(ctx, in.IP, hashToken(token)), nil, events.Event{
 		Actor:       events.User(user.ID),
 		SubjectType: "user",
 		SubjectID:   user.ID.String(),
 		Action:      "auth.login",
-		Payload:     map[string]any{"ip": in.IP},
+		Payload:     map[string]any{"ip": in.IP, "user_agent": truncate(in.UserAgent, 200)},
 	})
 	return Session{Token: token, CSRFToken: csrf, ExpiresAt: expires, User: user}, nil
 }
@@ -240,6 +241,7 @@ func (s *Service) ChangePassword(ctx context.Context, p Principal, current, next
 		return err
 	}
 	if !ok {
+		s.reauthFailed(ctx, p.User, "password_change", "bad_password")
 		return ErrInvalidCredentials
 	}
 	if err := checkPassword(next); err != nil {
@@ -275,6 +277,10 @@ func (s *Service) BeginTOTPSetup(ctx context.Context, p Principal) (secret, otpa
 	if err := s.q.SetPendingTOTPSecret(ctx, store.SetPendingTOTPSecretParams{ID: p.User.ID, TotpSecret: &sec}); err != nil {
 		return "", "", err
 	}
+	_ = s.ev.Write(ctx, nil, events.Event{
+		Actor: events.User(p.User.ID), SubjectType: "user", SubjectID: p.User.ID.String(),
+		Action: "auth.totp_setup_started",
+	})
 	return sec, key.URL(), nil
 }
 
@@ -290,6 +296,9 @@ func (s *Service) EnableTOTP(ctx context.Context, p Principal, code string) erro
 		return ErrTOTPNotPending
 	}
 	if err := s.useTOTP(ctx, user, code); err != nil {
+		if errors.Is(err, ErrInvalidTOTP) {
+			s.reauthFailed(ctx, user, "totp_enable", "bad_totp")
+		}
 		return err
 	}
 	if err := s.q.EnableTOTP(ctx, user.ID); err != nil {
@@ -313,12 +322,16 @@ func (s *Service) DisableTOTP(ctx context.Context, p Principal, password, code s
 		return err
 	}
 	if !ok {
+		s.reauthFailed(ctx, user, "totp_disable", "bad_password")
 		return ErrInvalidCredentials
 	}
 	if user.TotpEnabledAt == nil || user.TotpSecret == nil {
 		return nil
 	}
 	if err := s.useTOTP(ctx, user, code); err != nil {
+		if errors.Is(err, ErrInvalidTOTP) {
+			s.reauthFailed(ctx, user, "totp_disable", "bad_totp")
+		}
 		return err
 	}
 	if err := s.q.DisableTOTP(ctx, user.ID); err != nil {
@@ -327,6 +340,15 @@ func (s *Service) DisableTOTP(ctx context.Context, p Principal, password, code s
 	return s.ev.Write(ctx, nil, events.Event{
 		Actor: events.User(user.ID), SubjectType: "user", SubjectID: user.ID.String(),
 		Action: "auth.totp_disabled",
+	})
+}
+
+// reauthFailed legt vast dat een ingelogde gebruiker zijn wachtwoord of code
+// fout invulde bij een gevoelige wijziging. what zegt welke.
+func (s *Service) reauthFailed(ctx context.Context, user store.User, what, reason string) {
+	_ = s.ev.Write(ctx, nil, events.Event{
+		Actor: events.User(user.ID), SubjectType: "user", SubjectID: user.ID.String(),
+		Action: "auth.reauth_failed", Payload: map[string]any{"what": what, "reason": reason},
 	})
 }
 

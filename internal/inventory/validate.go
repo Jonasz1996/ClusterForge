@@ -3,6 +3,7 @@ package inventory
 import (
 	"fmt"
 	"net/netip"
+	"net/url"
 	"regexp"
 	"slices"
 	"strings"
@@ -50,6 +51,9 @@ func (f *ClusterFields) normalize() error {
 			strings.HasPrefix(f.GitRepoURL, "git@")
 		if !ok || len(f.GitRepoURL) > 512 || strings.ContainsAny(f.GitRepoURL, " \t\r\n") {
 			return invalid("git-repository moet beginnen met https://, ssh:// of git@")
+		}
+		if credentialsInURL(f.GitRepoURL) {
+			return invalid("zet geen gebruikersnaam, wachtwoord of token in de git-URL; die komt dan in het logboek terecht")
 		}
 	}
 	tags, err := normalizeTags(f.Tags)
@@ -146,4 +150,24 @@ func validLifecycle(l store.NodeLifecycle) bool {
 		return true
 	}
 	return false
+}
+
+// credentialsInURL is true als een git-URL een wachtwoord of token draagt.
+// Bij SSH is een gebruikersnaam als git@ gewoon; bij HTTPS is elke
+// gebruikersnaam verdacht, want daar staat meestal een token.
+func credentialsInURL(raw string) bool {
+	if strings.HasPrefix(raw, "git@") {
+		return false
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		// Geen geldige URL: zoek dan zelf naar gebruiker:wachtwoord@.
+		at := strings.LastIndex(raw, "@")
+		return at > 0 && strings.Contains(raw[:at], ":") && strings.Contains(raw[:at], "//")
+	}
+	if u.User == nil {
+		return false
+	}
+	_, hasPassword := u.User.Password()
+	return u.Scheme == "https" || hasPassword
 }

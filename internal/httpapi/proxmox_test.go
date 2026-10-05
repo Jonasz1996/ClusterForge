@@ -296,7 +296,7 @@ func TestProxmox(t *testing.T) {
 		t.Fatalf("na herstel: %q", synced.LastError)
 	}
 	got := eventActions(t, e, conn.ID)
-	if n := countOf(got, "proxmox.sync_failed"); n != 1 || countOf(got, "proxmox.sync_recovered") != 1 {
+	if n := countOf(got, "proxmox.sync_failed"); n != 1 || countOf(got, "proxmox.sync_recovered") != 1 || countOf(got, "proxmox.sync_requested") != 4 {
 		t.Fatalf("sync-events: %v", got)
 	}
 

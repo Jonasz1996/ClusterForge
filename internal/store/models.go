@@ -343,6 +343,7 @@ type Job struct {
 	StartedAt       *time.Time
 	FinishedAt      *time.Time
 	HeartbeatAt     *time.Time
+	ClusterSlot     bool
 }
 
 type JobStep struct {

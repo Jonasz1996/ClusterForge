@@ -47,8 +47,12 @@ func describe(r store.ListAuditRow, n names) Entry {
 		}
 		e.Job = &Ref{ID: *r.JobRef, Name: title}
 	}
-	if ip := str(p, "ip"); ip != "" {
+	origin, _ := p["origin"].(map[string]any)
+	if ip := or(str(p, "ip"), str(origin, "ip")); ip != "" {
 		e.IP = &ip
+	}
+	if sess := str(origin, "session"); sess != "" {
+		e.Session = &sess
 	}
 	e.Subject.Name, e.Subject.Deleted = subjectName(r, p, n, e)
 	if r.Action == "auth.login_failed" && e.Subject.Name == "onbekend" {
@@ -126,8 +130,80 @@ func subjectName(r store.ListAuditRow, p map[string]any, n names, e Entry) (stri
 		return str(p, "name"), false
 	case "enrollment_token":
 		return str(p, "description"), false
+	case "audit":
+		return events.Lookup(r.SubjectID).Label, false
 	}
 	return r.SubjectID, false
+}
+
+var reauthWhat = map[string]string{
+	"password_change": "wachtwoord wijzigen",
+	"totp_enable":     "tweestapsverificatie aanzetten",
+	"totp_disable":    "tweestapsverificatie uitzetten",
+}
+
+var enrollReasons = map[string]string{
+	"unknown": "onbekend token",
+	"expired": "token verlopen",
+	"used_up": "token opgebruikt",
+}
+
+var specSources = map[string]string{"ui": "via de webinterface", "git": "uit Git"}
+
+// commandText zegt in gewone woorden wat een commando naar een agent doet.
+func commandText(p map[string]any) string {
+	switch str(p, "command") {
+	case "system.reboot":
+		return "herstarten"
+	case "system.shutdown":
+		return "afsluiten"
+	case "node.maintenance.enter":
+		return "onderhoud starten, keepalived uit"
+	case "node.maintenance.exit":
+		return "onderhoud beëindigen, keepalived terug"
+	case "apply.steps":
+		steps, _ := p["steps"].([]any)
+		if len(steps) == 1 {
+			if st, ok := steps[0].(map[string]any); ok {
+				return stepText(st)
+			}
+		}
+		return fmt.Sprintf("%d stappen toepassen", len(steps))
+	}
+	return str(p, "command")
+}
+
+func stepText(st map[string]any) string {
+	switch str(st, "kind") {
+	case "package":
+		verb := "installeren"
+		if str(st, "state") == "absent" {
+			verb = "verwijderen"
+		}
+		pk, _ := st["packages"].([]any)
+		if len(pk) > 1 {
+			return "pakketten " + list(pk) + " " + verb
+		}
+		return "pakket " + list(pk) + " " + verb
+	case "file":
+		return "bestand " + str(st, "path") + " schrijven"
+	case "service":
+		verb := map[string]string{"started": "starten", "stopped": "stoppen", "restarted": "herstarten", "reloaded": "herladen"}[str(st, "state")]
+		if verb == "" {
+			verb = "instellen"
+		}
+		return "service " + str(st, "unit") + " " + verb
+	case "user":
+		return "gebruiker " + str(st, "user") + " aanmaken"
+	case "directory":
+		return "map " + str(st, "path") + " maken"
+	case "command":
+		if c := str(st, "creates"); c != "" {
+			return "commando uitvoeren (tenzij " + c + " al bestaat)"
+		}
+		return "commando uitvoeren"
+	}
+	return "stap " + str(st, "kind")
 }
 
 var loginReasons = map[string]string{
@@ -158,6 +234,16 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 			}
 		}
 		return "Mislukte inlogpoging " + who + paren(reason) + vanaf(e)
+	case "auth.reauth_failed":
+		reason := loginReasons[str(p, "reason")]
+		return "Bevestiging mislukt bij " + or(reauthWhat[str(p, "what")], str(p, "what")) + colon(reason) + vanaf(e)
+	case "auth.totp_setup_started":
+		return "Instellen van tweestapsverificatie gestart" + vanaf(e)
+	case "auth.rate_limited":
+		return "Loginlimiet bereikt" + vanaf(e)
+	case "audit.throttled":
+		return fmt.Sprintf("%s keer '%s' niet apart vastgelegd: te veel binnen %s seconden",
+			num(p["omitted"]), events.Lookup(str(p, "action")).Label, num(p["seconds"]))
 	case "user.created":
 		return fmt.Sprintf("Gebruiker %s aangemaakt als %s", name, or(roles[str(p, "role")], str(p, "role")))
 	case "audit.exported":
@@ -166,6 +252,11 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 		return "Cluster " + name + " aangemaakt"
 	case "cluster.deleted":
 		return "Cluster " + name + " verwijderd"
+	case "cluster.spec_changed":
+		return fmt.Sprintf("Specificatie van cluster %s: revisie %s uit %s %s", name, num(p["revision"]),
+			str(p, "template"), str(p, "template_version")) + paren(specSources[str(p, "source")])
+	case "secret.created":
+		return "Geheim " + str(p, "secret_name") + " van cluster " + name + " opgeslagen"
 	case "cluster.deployed":
 		return fmt.Sprintf("Cluster %s uitgerold uit %s %s met %s nodes", name, str(p, "template"), str(p, "version"), num(p["nodes"]))
 	case "node.created":
@@ -208,6 +299,15 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 			s += "; de vorige agent is ingetrokken"
 		}
 		return s
+	case "agent.enroll_failed":
+		host := str(p, "hostname")
+		who := "Aanmelding van een agent"
+		if host != "" {
+			who = "Aanmelding van agent op " + host
+		}
+		return who + " geweigerd" + colon(or(enrollReasons[str(p, "reason")], str(p, "reason"))) + vanaf(e)
+	case "agent.command":
+		return "Commando aan " + name + ": " + commandText(p) + paren(prefixed("reden: ", str(p, "reason")))
 	case "agent.revoked":
 		return "Agent op " + str(p, "hostname") + " ingetrokken"
 	case "enrollment_token.created":
@@ -216,6 +316,8 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 		return "Proxmox-koppeling " + name + " aangemaakt"
 	case "proxmox.deleted":
 		return "Proxmox-koppeling " + name + " verwijderd"
+	case "proxmox.sync_requested":
+		return "Proxmox-koppeling " + name + " nu ververst"
 	case "proxmox.sync_failed":
 		return "Proxmox " + name + " niet bereikbaar" + colon(str(p, "error"))
 	case "proxmox.sync_recovered":

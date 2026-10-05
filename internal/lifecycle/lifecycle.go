@@ -246,13 +246,23 @@ func (s *Service) RequestAction(ctx context.Context, actor events.Actor, nodeID 
 			return store.Job{}, err
 		}
 	}
-	j, err := s.jobs.Enqueue(ctx, jobs.Spec{
+	spec := jobs.Spec{
 		Kind: KindNodeAction, Title: title + ": " + rt.Hostname, Params: p,
 		NodeID: &nodeID, ClusterID: rt.ClusterID, Actor: actor,
-	})
+	}
+	// Facts verversen leest alleen; al het andere neemt het clusterslot.
+	enqueue := s.jobs.EnqueueForCluster
+	if req.Action == ActionRefreshFacts {
+		enqueue = s.jobs.Enqueue
+	}
+	j, err := enqueue(ctx, spec)
 	var pgErr *pgconn.PgError
-	if errors.As(err, &pgErr) && pgErr.ConstraintName == "jobs_node_action_key" {
+	var busy jobs.BusyError
+	switch {
+	case errors.As(err, &pgErr) && pgErr.ConstraintName == "jobs_node_action_key":
 		return store.Job{}, ConflictError{"er loopt al een taak voor deze node"}
+	case errors.As(err, &busy):
+		return store.Job{}, ConflictError{busy.Error()}
 	}
 	return j, err
 }

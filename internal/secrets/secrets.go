@@ -6,21 +6,29 @@ package secrets
 import (
 	"crypto/aes"
 	"crypto/cipher"
+	"crypto/hkdf"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 )
 
 // ErrWrongKey betekent dat een geheim met een andere masterkey versleuteld is.
 var ErrWrongKey = errors.New("geheim is met een andere masterkey versleuteld")
 
+// PurposeFile is het doel van de sleutel voor vingerafdrukken van
+// gerenderde bestanden, in het logboek en later bij drift.
+const PurposeFile = "file fingerprint"
+
 // Box versleutelt en ontsleutelt met één masterkey.
 type Box struct {
 	aead cipher.AEAD
+	key  []byte
 	// KeyID herkent de sleutel zonder hem prijs te geven; hij gaat mee in de
 	// database zodat een gewijzigde sleutel een duidelijke fout geeft.
 	KeyID string
@@ -51,7 +59,31 @@ func New(key []byte) (*Box, error) {
 		return nil, err
 	}
 	sum := sha256.Sum256(append([]byte("clusterforge-key-id:"), key...))
-	return &Box{aead: aead, KeyID: hex.EncodeToString(sum[:8])}, nil
+	return &Box{aead: aead, key: slices.Clone(key), KeyID: hex.EncodeToString(sum[:8])}, nil
+}
+
+// Derive leidt met HKDF een eigen sleutel af voor één doel. Wat met die
+// sleutel gemaakt is, zoals een vingerafdruk in de database, verraadt de
+// masterkey niet en is zonder de masterkey niet na te rekenen. Zonder
+// masterkey (een nil Box) is er geen sleutel.
+func (b *Box) Derive(purpose string) []byte {
+	if b == nil {
+		return nil
+	}
+	k, err := hkdf.Key(sha256.New, b.key, nil, "clusterforge "+purpose, 32)
+	if err != nil {
+		panic(err)
+	}
+	return k
+}
+
+// Fingerprint is de HMAC-SHA256 van data met een afgeleide sleutel. Een
+// gewone hash van een gerenderd bestand is offline te raden, want op het
+// geheim na is de inhoud bekend; zonder de sleutel lukt dat niet.
+func Fingerprint(key, data []byte) string {
+	m := hmac.New(sha256.New, key)
+	m.Write(data)
+	return hex.EncodeToString(m.Sum(nil))
 }
 
 // Seal versleutelt plaintext. aad bindt het geheim aan zijn plaats, zoals

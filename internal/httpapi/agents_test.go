@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -273,6 +274,19 @@ func TestEnrollmentTokens(t *testing.T) {
 	}
 	if _, err := agent.Enroll(ctx, agent.EnrollOptions{ServerURL: e.srv.URL, Token: tok3.Token, Root: fakeRoot(t, strings.Repeat("5", 32))}); err == nil {
 		t.Fatal("verwijderd token geaccepteerd")
+	}
+	// Elke weigering staat in het logboek, met de reden.
+	var reasons []string
+	for _, it := range c.audit("category=agents").Items {
+		if it.Action == "agent.enroll_failed" {
+			reasons = append(reasons, str(it.Payload["reason"]))
+			if !strings.HasSuffix(it.Summary, " vanaf 127.0.0.1") {
+				t.Errorf("agent.enroll_failed: %q", it.Summary)
+			}
+		}
+	}
+	if !slices.Equal(reasons, []string{"unknown", "expired", "used_up"}) {
+		t.Fatalf("redenen: %v", reasons)
 	}
 
 	// Viewers mogen geen tokens zien of maken.

@@ -25,6 +25,10 @@ LEFT JOIN proxmox_resources r ON r.connection_id = n.proxmox_id AND r.vmid = n.p
 WHERE n.cluster_id = $1
 ORDER BY lower(n.hostname);
 
+-- name: GetNodeRef :one
+-- Naam en cluster van een node, voor een event.
+SELECT hostname, cluster_id FROM nodes WHERE id = $1;
+
 -- name: GetNode :one
 SELECT sqlc.embed(n), c.slug AS cluster_slug, c.name AS cluster_name,
        a.id AS agent_id, a.version AS agent_version, a.enrolled_at AS agent_enrolled_at,
