@@ -16,6 +16,10 @@ Het technisch ontwerp staat in [docs/design/mvp-fase-1.md](docs/design/mvp-fase-
 | 6. Node lifecycle | Reboot, maintenance, drain | klaar |
 | 7. Templates en deployment | Clusters uit templates | klaar |
 
+| Fase 2 | Inhoud | Status |
+| --- | --- | --- |
+| 1. Logboek | Wie deed wat, wanneer en vanaf waar; filters en export | klaar |
+
 ## Draaien met Docker Compose
 
 Stap voor stap in een Debian-container op Proxmox: [docs/install-proxmox-lxc.md](docs/install-proxmox-lxc.md).
@@ -94,7 +98,7 @@ De status van nodes en clusters wordt elke 5 seconden opnieuw berekend:
 | Split-brain | | Een VIP op twee nodes tegelijk |
 | Onbekend | Geen agent | Geen agent op de actieve nodes |
 
-Nodes in onderhoud, draining, opbouw of uit dienst tellen niet mee voor het cluster. Elke statuswissel en elke VIP-verhuis komt in de activiteitenlog, en de webinterface werkt live bij.
+Nodes in onderhoud, draining, opbouw of uit dienst tellen niet mee voor het cluster. Elke statuswissel en elke VIP-verhuis komt in het [logboek](#logboek), en de webinterface werkt live bij.
 
 Een node zonder agent of heartbeat die aan een Proxmox-VM gekoppeld is, krijgt zijn status van Proxmox: staat de VM uit, dan is de node Down met als reden "VM staat uit in Proxmox".
 
@@ -115,7 +119,7 @@ Het laatste commando toont het secret één keer. Klik in de webinterface bij Pr
 
 Is je Proxmox een cluster, dan is één koppeling genoeg: ClusterForge ziet via elke host alle hosts, VM's, containers en storage. Losse hosts koppel je elk apart.
 
-Elke 20 seconden haalt ClusterForge de stand op. Bij Proxmox zie je de hosts met hun belasting, alle VM's en containers en de storage. Een VM koppel je aan een node met "Koppelen" (of maak er meteen een node van), waarna de node zijn VM-status, host en acties toont. Start, afsluiten, hard uitzetten, herstarten, snapshot maken en live migreren naar een andere host doe je vanaf de node of vanuit het overzicht; viewers kunnen alleen kijken. Verandert een gekoppelde VM buiten ClusterForge om (gestart, gestopt, verhuisd of verdwenen), dan komt dat in de activiteitenlog.
+Elke 20 seconden haalt ClusterForge de stand op. Bij Proxmox zie je de hosts met hun belasting, alle VM's en containers en de storage. Een VM koppel je aan een node met "Koppelen" (of maak er meteen een node van), waarna de node zijn VM-status, host en acties toont. Start, afsluiten, hard uitzetten, herstarten, snapshot maken en live migreren naar een andere host doe je vanaf de node of vanuit het overzicht; viewers kunnen alleen kijken. Verandert een gekoppelde VM buiten ClusterForge om (gestart, gestopt, verhuisd of verdwenen), dan komt dat in het logboek.
 
 Wil je ook de CPU, het geheugen en de schijven van de Proxmox-hosts zelf in grafieken, zet dan ook daar de agent op.
 
@@ -158,7 +162,7 @@ Bij elke node staat de kaart Beheer:
 | Herstarten | Eerst de VIP's weg en de node in onderhoud, dan herstarten, wachten tot de node terug is, keepalived weer aan en de node weer actief. |
 | Afsluiten | Zoals herstarten, maar de node blijft uit en in onderhoud. Start hem in Proxmox of op de machine zelf en beëindig daarna het onderhoud. |
 
-Kan geen andere node een VIP overnemen (geen actieve, online node waarop keepalived draait), dan vraagt ClusterForge eerst of je toch door wilt. Staan de VIP's na twee minuten nog niet ergens anders, dan zet de taak keepalived weer aan en blijft de node actief. Elke stap staat met het antwoord van de agent bij Taken, en elke wissel van lifecycle komt in de activiteitenlog, met de reden die je opgaf.
+Kan geen andere node een VIP overnemen (geen actieve, online node waarop keepalived draait), dan vraagt ClusterForge eerst of je toch door wilt. Staan de VIP's na twee minuten nog niet ergens anders, dan zet de taak keepalived weer aan en blijft de node actief. Elke stap staat met het antwoord van de agent bij Taken, en elke wissel van lifecycle komt in het logboek, met de reden die je opgaf.
 
 Een node zonder agent kun je alleen in en uit onderhoud zetten; de VIP's haal je dan zelf weg.
 
@@ -167,6 +171,12 @@ De agent voert alleen vaste soorten commando's uit: facts verzamelen, keepalived
 ## Taken
 
 Alles wat even duurt, zoals een VM migreren, een node herstarten of een cluster uitrollen, loopt als taak op de achtergrond. Bij Taken zie je wat er loopt en wat er gebeurd is, met per stap het logboek uit Proxmox. Een lopende taak kun je annuleren; ClusterForge stopt dan ook de taak in Proxmox. Valt de server weg tijdens een taak, dan gaat hij na de herstart verder waar hij was, zonder de actie in Proxmox nog eens te starten.
+
+## Logboek
+
+Bij Logboek (alleen voor beheerders) staat alles wat er in ClusterForge veranderde, nieuwste eerst: wie het deed (een gebruiker, de agent op een node, of het systeem namens wie de taak aanvroeg), wanneer, vanaf welk IP-adres en wat er veranderde. Klik een regel open voor de oude en nieuwe waarde per veld, de taak en de ruwe gegevens. Je filtert op periode, persoon, soort, cluster, node (ook verwijderde) en tekst. De filters staan in de adresbalk, zodat je een gefilterde weergave kunt doorsturen. Exporteren geeft dezelfde selectie als NDJSON-bestand (één regel per gebeurtenis, tot 100.000 regels), en elke export komt zelf in het logboek. De pagina van een cluster, node of taak toont onderaan de laatste tien regels.
+
+Regels kunnen niet gewijzigd of verwijderd worden, ook niet met `TRUNCATE` in de database. Een mislukte login bewaart de gebruiker en de reden, maar nooit wat er in het naamveld getypt werd: dat is soms een wachtwoord.
 
 ## Ontwikkelen
 

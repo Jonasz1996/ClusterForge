@@ -7,7 +7,7 @@ import { Button } from "@/components/ui";
 import { useLogout, useRequireMe } from "@/lib/auth";
 import { useLiveUpdates } from "@/lib/live";
 
-type NavItem = { href: string; label: string; soon?: string };
+type NavItem = { href: string; label: string; soon?: string; adminOnly?: boolean };
 
 // Onderdelen die later komen staan al in de navigatie, met de mijlpaal erbij.
 const nav: NavItem[] = [
@@ -18,6 +18,7 @@ const nav: NavItem[] = [
   { href: "/proxmox", label: "Proxmox" },
   { href: "/taken", label: "Taken" },
   { href: "/templates", label: "Templates" },
+  { href: "/logboek", label: "Logboek", adminOnly: true },
   { href: "/instellingen", label: "Instellingen" },
 ];
 
@@ -26,6 +27,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   const logout = useLogout();
   const pathname = usePathname();
   useLiveUpdates(!!me.data);
+  const isAdmin = me.data?.user.role === "admin";
 
   if (!me.data) {
     return (
@@ -40,7 +42,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
       <aside className="border-b border-slate-200 bg-white md:w-60 md:shrink-0 md:border-r md:border-b-0 dark:border-slate-800 dark:bg-slate-900">
         <div className="px-5 py-4 text-lg font-semibold tracking-tight">ClusterForge</div>
         <nav className="flex gap-1 overflow-x-auto px-3 pb-3 md:flex-col md:overflow-visible">
-          {nav.map((item) =>
+          {nav.filter((item) => !item.adminOnly || isAdmin).map((item) =>
             item.soon ? (
               <span
                 key={item.href}

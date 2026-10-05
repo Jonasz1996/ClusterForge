@@ -300,6 +300,8 @@ type Event struct {
 	ClusterID   *uuid.UUID
 	Action      string
 	Payload     []byte
+	NodeRef     *string
+	JobRef      *string
 }
 
 type Job struct {

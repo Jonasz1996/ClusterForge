@@ -128,7 +128,7 @@ paths:
   /events:
     get:
       operationId: listEvents
-      summary: Recente events, nieuwste eerst (alleen admin)
+      summary: Recente events, nieuwste eerst, zonder zinnen (alleen admin; het logboek staat onder /audit)
       parameters:
         - name: limit
           in: query
@@ -145,6 +145,72 @@ paths:
                   items:
                     type: array
                     items: { $ref: "#/components/schemas/Event" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /audit:
+    get:
+      operationId: listAudit
+      summary: Het logboek, nieuwste eerst, met een zin per regel (alleen admin)
+      description: |
+        Filters zijn optioneel en worden gecombineerd. Paginering gaat met
+        `before`: geef het `next_before` van de vorige pagina mee.
+      parameters:
+        - $ref: "#/components/parameters/AuditBefore"
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+        - $ref: "#/components/parameters/AuditFrom"
+        - $ref: "#/components/parameters/AuditTo"
+        - $ref: "#/components/parameters/AuditUser"
+        - $ref: "#/components/parameters/AuditActorType"
+        - $ref: "#/components/parameters/AuditCluster"
+        - $ref: "#/components/parameters/AuditNode"
+        - $ref: "#/components/parameters/AuditJob"
+        - $ref: "#/components/parameters/AuditCategory"
+        - $ref: "#/components/parameters/AuditQuery"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuditPage" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /audit/info:
+    get:
+      operationId: getAuditInfo
+      summary: Soorten, gebruikers en verwijderde onderwerpen voor de filters van het logboek (alleen admin)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuditInfo" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /audit/export:
+    get:
+      operationId: exportAudit
+      summary: Het logboek als NDJSON, met dezelfde filters (alleen admin)
+      description: |
+        Eén AuditEntry per regel, nieuwste eerst, hoogstens 100.000 regels.
+        Elke export komt zelf in het logboek als audit.exported.
+      parameters:
+        - $ref: "#/components/parameters/AuditFrom"
+        - $ref: "#/components/parameters/AuditTo"
+        - $ref: "#/components/parameters/AuditUser"
+        - $ref: "#/components/parameters/AuditActorType"
+        - $ref: "#/components/parameters/AuditCluster"
+        - $ref: "#/components/parameters/AuditNode"
+        - $ref: "#/components/parameters/AuditJob"
+        - $ref: "#/components/parameters/AuditCategory"
+        - $ref: "#/components/parameters/AuditQuery"
+      responses:
+        "200":
+          description: Bijlage met NDJSON
+          content:
+            application/x-ndjson:
+              schema: { type: string, format: binary }
+        "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
   /users:
@@ -447,7 +513,7 @@ paths:
       summary: Live wijzigingen als Server-Sent Events
       description: |
         Een event `change` per nieuw event in de eventlog, met als data een
-        JSON-object met id, action, subject_type, subject_id en cluster_id.
+        JSON-object met alleen het id. Wat er veranderde, staat in het logboek.
         De stream sluit na enkele minuten; de browser verbindt dan opnieuw.
       responses:
         "200":
@@ -860,6 +926,55 @@ components:
       type: apiKey
       in: cookie
       name: cf_session
+  parameters:
+    AuditBefore:
+      name: before
+      in: query
+      description: Alleen regels met een kleiner id (de volgende pagina)
+      schema: { type: integer, format: int64 }
+    AuditFrom:
+      name: from
+      in: query
+      description: Vanaf dit tijdstip
+      schema: { type: string, format: date-time }
+    AuditTo:
+      name: to
+      in: query
+      description: Tot (niet tot en met) dit tijdstip
+      schema: { type: string, format: date-time }
+    AuditUser:
+      name: user
+      in: query
+      description: Wat deze gebruiker deed, wat namens hem gebeurde en wat over zijn account ging
+      schema: { type: string, format: uuid }
+    AuditActorType:
+      name: actor_type
+      in: query
+      schema: { type: string, enum: [user, agent, system] }
+    AuditCluster:
+      name: cluster
+      in: query
+      description: Ook een verwijderd cluster
+      schema: { type: string, format: uuid }
+    AuditNode:
+      name: node
+      in: query
+      description: Ook taken en agents van deze node
+      schema: { type: string, format: uuid }
+    AuditJob:
+      name: job
+      in: query
+      schema: { type: string, format: uuid }
+    AuditCategory:
+      name: category
+      in: query
+      description: Een soort uit /audit/info
+      schema: { type: string }
+    AuditQuery:
+      name: q
+      in: query
+      description: Zoekt in action, payload en de namen van gebruiker, cluster, node en taak
+      schema: { type: string, maxLength: 200 }
   responses:
     Error:
       description: Fout
@@ -948,6 +1063,107 @@ components:
         cluster_id: { type: string, format: uuid, nullable: true }
         action: { type: string }
         payload: { type: object, additionalProperties: true }
+    AuditRef:
+      type: object
+      required: [id, name, deleted]
+      properties:
+        id: { type: string }
+        name: { type: string }
+        deleted: { type: boolean }
+    AuditChange:
+      type: object
+      required: [field, label, from, to]
+      description: Eén gewijzigd veld; een lege waarde betekent geen waarde.
+      properties:
+        field: { type: string }
+        label: { type: string }
+        from: { type: string }
+        to: { type: string }
+    AuditEntry:
+      type: object
+      required: [id, ts, action, category, summary, actor, on_behalf_of, subject, cluster, node, job, ip, changes, payload]
+      properties:
+        id: { type: integer, format: int64 }
+        ts: { type: string, format: date-time }
+        action: { type: string }
+        category: { type: string }
+        summary:
+          type: string
+          description: Wat er gebeurde, als Nederlandse zin
+        actor:
+          type: object
+          required: [type, id, name]
+          properties:
+            type: { type: string, enum: [user, agent, system] }
+            id: { type: string }
+            name: { type: string }
+        on_behalf_of:
+          description: De gebruiker die de taak aanvroeg, als het systeem dit namens hem deed
+          allOf: [{ $ref: "#/components/schemas/AuditRef" }]
+          nullable: true
+        subject:
+          type: object
+          required: [type, id, name, deleted]
+          properties:
+            type: { type: string }
+            id: { type: string }
+            name: { type: string }
+            deleted: { type: boolean }
+        cluster:
+          allOf: [{ $ref: "#/components/schemas/AuditRef" }]
+          nullable: true
+        node:
+          allOf: [{ $ref: "#/components/schemas/AuditRef" }]
+          nullable: true
+        job:
+          allOf: [{ $ref: "#/components/schemas/AuditRef" }]
+          nullable: true
+        ip: { type: string, nullable: true }
+        changes:
+          type: array
+          items: { $ref: "#/components/schemas/AuditChange" }
+        payload: { type: object, additionalProperties: true }
+    AuditPage:
+      type: object
+      required: [items, next_before]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/AuditEntry" }
+        next_before:
+          type: integer
+          format: int64
+          nullable: true
+          description: Geef dit mee als before voor de volgende pagina; null op de laatste
+    AuditInfo:
+      type: object
+      required: [categories, users, deleted_clusters, deleted_nodes, total, oldest]
+      properties:
+        categories:
+          type: array
+          items:
+            type: object
+            required: [key, label]
+            properties:
+              key: { type: string }
+              label: { type: string }
+        users:
+          type: array
+          items:
+            type: object
+            required: [id, username, disabled]
+            properties:
+              id: { type: string, format: uuid }
+              username: { type: string }
+              disabled: { type: boolean }
+        deleted_clusters:
+          type: array
+          items: { $ref: "#/components/schemas/AuditRef" }
+        deleted_nodes:
+          type: array
+          items: { $ref: "#/components/schemas/AuditRef" }
+        total: { type: integer, format: int64 }
+        oldest: { type: string, format: date-time, nullable: true }
     UserRef:
       type: object
       required: [id, username]

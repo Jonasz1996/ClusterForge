@@ -147,8 +147,67 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Recente events, nieuwste eerst (alleen admin) */
+        /** Recente events, nieuwste eerst, zonder zinnen (alleen admin; het logboek staat onder /audit) */
         get: operations["listEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/audit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Het logboek, nieuwste eerst, met een zin per regel (alleen admin)
+         * @description Filters zijn optioneel en worden gecombineerd. Paginering gaat met
+         *     `before`: geef het `next_before` van de vorige pagina mee.
+         */
+        get: operations["listAudit"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/audit/info": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Soorten, gebruikers en verwijderde onderwerpen voor de filters van het logboek (alleen admin) */
+        get: operations["getAuditInfo"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/audit/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Het logboek als NDJSON, met dezelfde filters (alleen admin)
+         * @description Eén AuditEntry per regel, nieuwste eerst, hoogstens 100.000 regels.
+         *     Elke export komt zelf in het logboek als audit.exported.
+         */
+        get: operations["exportAudit"];
         put?: never;
         post?: never;
         delete?: never;
@@ -385,7 +444,7 @@ export interface paths {
         /**
          * Live wijzigingen als Server-Sent Events
          * @description Een event `change` per nieuw event in de eventlog, met als data een
-         *     JSON-object met id, action, subject_type, subject_id en cluster_id.
+         *     JSON-object met alleen het id. Wat er veranderde, staat in het logboek.
          *     De stream sluit na enkele minuten; de browser verbindt dan opnieuw.
          */
         get: operations["stream"];
@@ -831,6 +890,76 @@ export interface components {
             payload: {
                 [key: string]: unknown;
             };
+        };
+        AuditRef: {
+            id: string;
+            name: string;
+            deleted: boolean;
+        };
+        /** @description Eén gewijzigd veld; een lege waarde betekent geen waarde. */
+        AuditChange: {
+            field: string;
+            label: string;
+            from: string;
+            to: string;
+        };
+        AuditEntry: {
+            /** Format: int64 */
+            id: number;
+            /** Format: date-time */
+            ts: string;
+            action: string;
+            category: string;
+            /** @description Wat er gebeurde, als Nederlandse zin */
+            summary: string;
+            actor: {
+                /** @enum {string} */
+                type: "user" | "agent" | "system";
+                id: string;
+                name: string;
+            };
+            /** @description De gebruiker die de taak aanvroeg, als het systeem dit namens hem deed */
+            on_behalf_of: components["schemas"]["AuditRef"] | null;
+            subject: {
+                type: string;
+                id: string;
+                name: string;
+                deleted: boolean;
+            };
+            cluster: components["schemas"]["AuditRef"] | null;
+            node: components["schemas"]["AuditRef"] | null;
+            job: components["schemas"]["AuditRef"] | null;
+            ip: string | null;
+            changes: components["schemas"]["AuditChange"][];
+            payload: {
+                [key: string]: unknown;
+            };
+        };
+        AuditPage: {
+            items: components["schemas"]["AuditEntry"][];
+            /**
+             * Format: int64
+             * @description Geef dit mee als before voor de volgende pagina; null op de laatste
+             */
+            next_before: number | null;
+        };
+        AuditInfo: {
+            categories: {
+                key: string;
+                label: string;
+            }[];
+            users: {
+                /** Format: uuid */
+                id: string;
+                username: string;
+                disabled: boolean;
+            }[];
+            deleted_clusters: components["schemas"]["AuditRef"][];
+            deleted_nodes: components["schemas"]["AuditRef"][];
+            /** Format: int64 */
+            total: number;
+            /** Format: date-time */
+            oldest: string | null;
         };
         UserRef: {
             /** Format: uuid */
@@ -1493,7 +1622,26 @@ export interface components {
             };
         };
     };
-    parameters: never;
+    parameters: {
+        /** @description Alleen regels met een kleiner id (de volgende pagina) */
+        AuditBefore: number;
+        /** @description Vanaf dit tijdstip */
+        AuditFrom: string;
+        /** @description Tot (niet tot en met) dit tijdstip */
+        AuditTo: string;
+        /** @description Wat deze gebruiker deed, wat namens hem gebeurde en wat over zijn account ging */
+        AuditUser: string;
+        AuditActorType: "user" | "agent" | "system";
+        /** @description Ook een verwijderd cluster */
+        AuditCluster: string;
+        /** @description Ook taken en agents van deze node */
+        AuditNode: string;
+        AuditJob: string;
+        /** @description Een soort uit /audit/info */
+        AuditCategory: string;
+        /** @description Zoekt in action, payload en de namen van gebruiker, cluster, node en taak */
+        AuditQuery: string;
+    };
     requestBodies: never;
     headers: never;
     pathItems: never;
@@ -1718,6 +1866,111 @@ export interface operations {
                     };
                 };
             };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+        };
+    };
+    listAudit: {
+        parameters: {
+            query?: {
+                /** @description Alleen regels met een kleiner id (de volgende pagina) */
+                before?: components["parameters"]["AuditBefore"];
+                limit?: number;
+                /** @description Vanaf dit tijdstip */
+                from?: components["parameters"]["AuditFrom"];
+                /** @description Tot (niet tot en met) dit tijdstip */
+                to?: components["parameters"]["AuditTo"];
+                /** @description Wat deze gebruiker deed, wat namens hem gebeurde en wat over zijn account ging */
+                user?: components["parameters"]["AuditUser"];
+                actor_type?: components["parameters"]["AuditActorType"];
+                /** @description Ook een verwijderd cluster */
+                cluster?: components["parameters"]["AuditCluster"];
+                /** @description Ook taken en agents van deze node */
+                node?: components["parameters"]["AuditNode"];
+                job?: components["parameters"]["AuditJob"];
+                /** @description Een soort uit /audit/info */
+                category?: components["parameters"]["AuditCategory"];
+                /** @description Zoekt in action, payload en de namen van gebruiker, cluster, node en taak */
+                q?: components["parameters"]["AuditQuery"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditPage"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+        };
+    };
+    getAuditInfo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuditInfo"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+        };
+    };
+    exportAudit: {
+        parameters: {
+            query?: {
+                /** @description Vanaf dit tijdstip */
+                from?: components["parameters"]["AuditFrom"];
+                /** @description Tot (niet tot en met) dit tijdstip */
+                to?: components["parameters"]["AuditTo"];
+                /** @description Wat deze gebruiker deed, wat namens hem gebeurde en wat over zijn account ging */
+                user?: components["parameters"]["AuditUser"];
+                actor_type?: components["parameters"]["AuditActorType"];
+                /** @description Ook een verwijderd cluster */
+                cluster?: components["parameters"]["AuditCluster"];
+                /** @description Ook taken en agents van deze node */
+                node?: components["parameters"]["AuditNode"];
+                job?: components["parameters"]["AuditJob"];
+                /** @description Een soort uit /audit/info */
+                category?: components["parameters"]["AuditCategory"];
+                /** @description Zoekt in action, payload en de namen van gebruiker, cluster, node en taak */
+                q?: components["parameters"]["AuditQuery"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Bijlage met NDJSON */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/x-ndjson": string;
+                };
+            };
+            400: components["responses"]["Error"];
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
         };
