@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Alert, Card } from "@/components/ui";
 import { api, unwrap, type ApiEvent } from "@/lib/api/client";
 import { useMe } from "@/lib/auth";
+import { useClusters, useNodes } from "@/lib/inventory";
 
 const actionLabels: Record<string, string> = {
   "auth.login": "Ingelogd",
@@ -14,7 +15,28 @@ const actionLabels: Record<string, string> = {
   "auth.totp_enabled": "Tweestapsverificatie aangezet",
   "auth.totp_disabled": "Tweestapsverificatie uitgezet",
   "user.created": "Gebruiker aangemaakt",
+  "cluster.created": "Cluster aangemaakt",
+  "cluster.updated": "Cluster gewijzigd",
+  "cluster.deleted": "Cluster verwijderd",
+  "node.created": "Node aangemaakt",
+  "node.updated": "Node gewijzigd",
+  "node.deleted": "Node verwijderd",
+  "vip.created": "VIP toegevoegd",
+  "vip.updated": "VIP gewijzigd",
+  "vip.deleted": "VIP verwijderd",
 };
+
+// subject geeft een leesbare naam voor het onderwerp van een event, voor zover
+// de payload die bevat.
+function subject(e: ApiEvent): string | null {
+  const p = e.payload;
+  for (const k of ["name", "hostname", "address"]) {
+    const v = p[k];
+    if (typeof v === "string") return v;
+    if (v && typeof v === "object" && "to" in v && typeof v.to === "string") return v.to;
+  }
+  return null;
+}
 
 export default function OverviewPage() {
   const me = useMe();
@@ -24,6 +46,8 @@ export default function OverviewPage() {
     queryFn: async () => (await api.GET("/health")).data,
     refetchInterval: 30_000,
   });
+  const clusters = useClusters();
+  const nodes = useNodes();
   const events = useQuery({
     queryKey: ["events", 20],
     queryFn: async () => unwrap(await api.GET("/events", { params: { query: { limit: 20 } } })).items,
@@ -35,7 +59,7 @@ export default function OverviewPage() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Overzicht</h1>
         <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
-          Clusters en nodes verschijnen hier zodra de inventory er is.
+          Monitoring en clusterstatus komen hier zodra de agent er is.
         </p>
       </div>
 
@@ -49,10 +73,15 @@ export default function OverviewPage() {
         </Alert>
       )}
 
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <Link href="/clusters">
+          <Stat label="Clusters" value={clusters.data ? String(clusters.data.length) : "…"} />
+        </Link>
+        <Link href="/nodes">
+          <Stat label="Nodes" value={nodes.data ? String(nodes.data.length) : "…"} />
+        </Link>
         <Stat label="Server" value={health.data?.status === "ok" ? "Gezond" : health.isLoading ? "…" : "Probleem"} />
         <Stat label="Database" value={health.data?.database === "ok" ? "Bereikbaar" : health.isLoading ? "…" : "Onbereikbaar"} />
-        <Stat label="Versie" value={health.data?.version ?? "…"} />
       </div>
 
       {isAdmin && (
@@ -84,6 +113,7 @@ function EventList({ items }: { items: ApiEvent[] }) {
         <li key={e.id} className="flex items-baseline justify-between gap-4 py-2 text-sm">
           <span>
             {actionLabels[e.action] ?? e.action}
+            {subject(e) && <span className="font-medium"> {subject(e)}</span>}
             {typeof e.payload.ip === "string" && <span className="text-slate-500"> vanaf {e.payload.ip}</span>}
           </span>
           <time className="shrink-0 text-xs text-slate-500" dateTime={e.ts}>
