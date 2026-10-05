@@ -84,6 +84,38 @@ func (q *Queries) GetVIP(ctx context.Context, id uuid.UUID) (Vip, error) {
 	return i, err
 }
 
+const listVIPOwners = `-- name: ListVIPOwners :many
+SELECT v.cluster_id, v.address, n.hostname AS owner_hostname
+FROM vips v LEFT JOIN nodes n ON n.id = v.owner_node_id
+ORDER BY v.address
+`
+
+type ListVIPOwnersRow struct {
+	ClusterID     uuid.UUID
+	Address       netip.Addr
+	OwnerHostname *string
+}
+
+func (q *Queries) ListVIPOwners(ctx context.Context) ([]ListVIPOwnersRow, error) {
+	rows, err := q.db.Query(ctx, listVIPOwners)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListVIPOwnersRow{}
+	for rows.Next() {
+		var i ListVIPOwnersRow
+		if err := rows.Scan(&i.ClusterID, &i.Address, &i.OwnerHostname); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listVIPsByCluster = `-- name: ListVIPsByCluster :many
 SELECT v.id, v.cluster_id, v.address, v.interface, v.vrid, v.description, v.owner_node_id, v.owner_since, v.created_at, v.updated_at, n.hostname AS owner_hostname
 FROM vips v LEFT JOIN nodes n ON n.id = v.owner_node_id

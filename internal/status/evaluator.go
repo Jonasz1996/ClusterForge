@@ -96,7 +96,9 @@ func (e *Evaluator) Evaluate(ctx context.Context) error {
 			return err
 		}
 		perCluster := map[uuid.UUID][]ClusterNode{}
+		hostnames := map[uuid.UUID]string{}
 		for _, n := range nodes {
+			hostnames[n.ID] = n.Hostname
 			age := time.Duration(-1)
 			if n.HeartbeatAt != nil {
 				age = now.Sub(*n.HeartbeatAt)
@@ -131,7 +133,7 @@ func (e *Evaluator) Evaluate(ctx context.Context) error {
 				return err
 			}
 			for _, v := range vipsPerCluster[c.ID] {
-				if err := e.saveVIPOwner(ctx, q, v, res.Holders[v.ID]); err != nil {
+				if err := e.saveVIPOwner(ctx, q, v, res.Holders[v.ID], hostnames); err != nil {
 					return err
 				}
 			}
@@ -171,14 +173,14 @@ func (e *Evaluator) saveCluster(ctx context.Context, q *store.Queries, c store.L
 	return e.ev.Write(ctx, q, events.Event{
 		Actor: systemActor, SubjectType: "cluster", SubjectID: c.ID.String(), ClusterID: &id,
 		Action:  "cluster.status_changed",
-		Payload: map[string]any{"from": c.Status, "to": res.Status, "reason": res.Reason},
+		Payload: map[string]any{"name": c.Name, "from": c.Status, "to": res.Status, "reason": res.Reason},
 	})
 }
 
 // saveVIPOwner maakt de node die het adres heeft eigenaar. Hebben meerdere
 // nodes het (split-brain), dan blijft de huidige eigenaar staan als hij er
 // een van is; zo springt het VIP niet bij elke berekening heen en weer.
-func (e *Evaluator) saveVIPOwner(ctx context.Context, q *store.Queries, v store.ListAllVIPsRow, holders []uuid.UUID) error {
+func (e *Evaluator) saveVIPOwner(ctx context.Context, q *store.Queries, v store.ListAllVIPsRow, holders []uuid.UUID, hostnames map[uuid.UUID]string) error {
 	var owner *uuid.UUID
 	switch {
 	case len(holders) == 0:
@@ -194,10 +196,13 @@ func (e *Evaluator) saveVIPOwner(ctx context.Context, q *store.Queries, v store.
 		return err
 	}
 	cid := v.ClusterID
+	payload := map[string]any{"address": v.Address.String(), "from": v.OwnerNodeID, "to": owner, "owner_hostname": nil}
+	if owner != nil {
+		payload["owner_hostname"] = hostnames[*owner]
+	}
 	return e.ev.Write(ctx, q, events.Event{
 		Actor: systemActor, SubjectType: "vip", SubjectID: v.ID.String(), ClusterID: &cid,
-		Action:  "vip.owner_changed",
-		Payload: map[string]any{"address": v.Address.String(), "from": v.OwnerNodeID, "to": owner},
+		Action: "vip.owner_changed", Payload: payload,
 	})
 }
 

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { InstallAgent } from "@/components/inventory/InstallAgent";
 import { NodeForm } from "@/components/inventory/NodeForm";
-import { AgentBadge, Empty, LifecycleBadge, QueryState, Tags } from "@/components/inventory/bits";
+import { AgentBadge, Empty, LifecycleBadge, QueryState, StatusBadge, Tags } from "@/components/inventory/bits";
 import { Button, Card, Input, PageHeader, Select } from "@/components/ui";
 import {
   lifecycles,
@@ -155,7 +155,7 @@ export default function NodesPage() {
                         </Link>
                         <span className="min-w-28 font-mono text-xs text-slate-600 dark:text-slate-400">{n.primary_ip ?? "–"}</span>
                         {n.role && <span className="text-slate-600 dark:text-slate-400">{n.role}</span>}
-                        <AgentBadge agent={n.agent} />
+                        {n.agent ? <StatusBadge status={n.status} reason={n.status_reason} /> : <AgentBadge agent={null} />}
                         {n.lifecycle !== "active" && <LifecycleBadge lifecycle={n.lifecycle} />}
                         <Tags tags={n.tags} />
                       </li>

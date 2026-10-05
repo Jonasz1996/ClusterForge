@@ -42,6 +42,15 @@ func (s *Server) ListClusters(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, r, err)
 		return
 	}
+	owners, err := s.q.ListVIPOwners(r.Context())
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	vips := map[uuid.UUID][]gen.VipOwner{}
+	for _, v := range owners {
+		vips[v.ClusterID] = append(vips[v.ClusterID], gen.VipOwner{Address: v.Address.String(), OwnerHostname: nullableOf(v.OwnerHostname)})
+	}
 	items := make([]gen.ClusterListItem, 0, len(rows))
 	for _, row := range rows {
 		c := toAPICluster(row.Cluster)
@@ -51,6 +60,7 @@ func (s *Server) ListClusters(w http.ResponseWriter, r *http.Request) {
 			Status: c.Status, StatusReason: c.StatusReason, StatusSince: c.StatusSince,
 			CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt,
 			NodeCount: int(row.NodeCount), VipCount: int(row.VipCount),
+			Vips: nonNil(vips[row.Cluster.ID]),
 		})
 	}
 	writeJSON(w, http.StatusOK, list[gen.ClusterListItem]{items})
@@ -467,9 +477,9 @@ func nullablePtr[T any](n nullable.Nullable[T]) *T {
 	return &v
 }
 
-func nonNil(s []string) []string {
+func nonNil[T any](s []T) []T {
 	if s == nil {
-		return []string{}
+		return []T{}
 	}
 	return s
 }

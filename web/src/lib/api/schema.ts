@@ -580,6 +580,8 @@ export interface components {
         ClusterListItem: components["schemas"]["Cluster"] & {
             node_count: number;
             vip_count: number;
+            /** @description De VIP's met hun huidige eigenaar */
+            vips: components["schemas"]["VipOwner"][];
         };
         ClusterDetail: components["schemas"]["Cluster"] & {
             owners: components["schemas"]["UserRef"][];
@@ -665,6 +667,10 @@ export interface components {
             owner_hostname: string | null;
             /** Format: date-time */
             owner_since: string | null;
+        };
+        VipOwner: {
+            address: string;
+            owner_hostname: string | null;
         };
         VipInput: {
             address: string;

@@ -3,6 +3,7 @@ package agent
 import (
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 
@@ -66,6 +67,11 @@ func (c *Collector) Metrics() protocol.Metrics {
 	if bt := c.bootTime(); !bt.IsZero() {
 		m.add("node_boot_time_seconds", float64(bt.Unix()))
 	}
+	// Grafana-dashboards voor node_exporter kiezen hun nodes via deze metric.
+	m.add("node_uname_info", 1,
+		"sysname", c.read("/proc/sys/kernel/ostype"), "release", c.read("/proc/sys/kernel/osrelease"),
+		"version", c.read("/proc/sys/kernel/version"), "machine", unameMachine(),
+		"nodename", c.read("/proc/sys/kernel/hostname"))
 	if len(m.samples) > protocol.MaxSamples {
 		m.samples = m.samples[:protocol.MaxSamples]
 	}
@@ -167,5 +173,17 @@ func (c *Collector) hwmonMetrics(m *metricSet) {
 			}
 			m.add("node_hwmon_temp_celsius", v/1000, "chip", chip, "sensor", sensor)
 		}
+	}
+}
+
+// unameMachine geeft de architectuur zoals uname -m.
+func unameMachine() string {
+	switch runtime.GOARCH {
+	case "amd64":
+		return "x86_64"
+	case "arm64":
+		return "aarch64"
+	default:
+		return runtime.GOARCH
 	}
 }

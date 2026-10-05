@@ -373,6 +373,9 @@ type ClusterListItem struct {
 	Type         ClusterType                  `json:"type"`
 	UpdatedAt    time.Time                    `json:"updated_at"`
 	VipCount     int                          `json:"vip_count"`
+
+	// Vips De VIP's met hun huidige eigenaar
+	Vips []VipOwner `json:"vips"`
 }
 
 // ClusterPatch defines model for ClusterPatch.
@@ -744,6 +747,12 @@ type VipInput struct {
 	Description *string                `json:"description,omitempty"`
 	Interface   *string                `json:"interface,omitempty"`
 	Vrid        nullable.Nullable[int] `json:"vrid,omitempty"`
+}
+
+// VipOwner defines model for VipOwner.
+type VipOwner struct {
+	Address       string                    `json:"address"`
+	OwnerHostname nullable.Nullable[string] `json:"owner_hostname"`
 }
 
 // VipPatch defines model for VipPatch.

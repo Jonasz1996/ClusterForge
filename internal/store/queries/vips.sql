@@ -23,3 +23,8 @@ DELETE FROM vips WHERE id = $1;
 
 -- name: LockVIP :one
 SELECT * FROM vips WHERE id = $1 FOR UPDATE;
+
+-- name: ListVIPOwners :many
+SELECT v.cluster_id, v.address, n.hostname AS owner_hostname
+FROM vips v LEFT JOIN nodes n ON n.id = v.owner_node_id
+ORDER BY v.address;

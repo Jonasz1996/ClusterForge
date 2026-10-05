@@ -14,7 +14,7 @@ LEFT JOIN node_status s ON s.node_id = n.id
 LEFT JOIN node_facts f ON f.node_id = n.id;
 
 -- name: ListClusterStatuses :many
-SELECT id, status, status_reason FROM clusters;
+SELECT id, name, status, status_reason FROM clusters;
 
 -- name: ListAllVIPs :many
 SELECT id, cluster_id, address, owner_node_id FROM vips;

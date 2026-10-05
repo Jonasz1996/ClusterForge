@@ -3,14 +3,18 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState, type FormEvent } from "react";
+import { MetricsPanels } from "@/components/charts/MetricsPanels";
 import { ClusterForm } from "@/components/inventory/ClusterForm";
 import { NodeForm } from "@/components/inventory/NodeForm";
 import {
   AgentBadge,
   Empty,
   EnvBadge,
+  GrafanaButton,
   LifecycleBadge,
   QueryState,
+  StatusBadge,
+  StatusNote,
   Tags,
   tableClass,
   tdClass,
@@ -18,12 +22,14 @@ import {
 } from "@/components/inventory/bits";
 import { Alert, Button, Card, Input, PageHeader, Select } from "@/components/ui";
 import {
+  grafanaLink,
   typeLabel,
   useCluster,
   useCreateNode,
   useCreateVip,
   useDeleteCluster,
   useDeleteVip,
+  useInfo,
   useIsAdmin,
   useNodes,
   useUpdateCluster,
@@ -44,6 +50,7 @@ export default function ClusterDetailPage() {
 function ClusterDetailInner() {
   const id = useSearchParams().get("id") ?? "";
   const cluster = useCluster(id);
+  const info = useInfo();
   const isAdmin = useIsAdmin();
   const update = useUpdateCluster(id);
   const remove = useDeleteCluster();
@@ -65,6 +72,7 @@ function ClusterDetailInner() {
             title={cluster.data.name}
             description={
               <span className="inline-flex flex-wrap items-center gap-2">
+                <StatusBadge status={cluster.data.status} reason={cluster.data.status_reason} />
                 <EnvBadge env={cluster.data.environment} />
                 <span>{typeLabel(cluster.data.type)}</span>
                 <span className="text-slate-400">·</span>
@@ -95,6 +103,8 @@ function ClusterDetailInner() {
             }
           />
 
+          <StatusNote status={cluster.data.status} reason={cluster.data.status_reason} since={cluster.data.status_since} />
+
           {editing ? (
             <Card title="Cluster bewerken">
               <ClusterForm
@@ -113,6 +123,21 @@ function ClusterDetailInner() {
 
           <NodesCard c={cluster.data} isAdmin={isAdmin} />
           <VipsCard c={cluster.data} isAdmin={isAdmin} />
+          {cluster.data.nodes.some((n) => n.agent) && (
+            <MetricsPanels
+              kind="cluster"
+              id={id}
+              actions={
+                <GrafanaButton
+                  href={grafanaLink(info.data?.grafana_cluster_url ?? "", {
+                    cluster: cluster.data.slug,
+                    cluster_id: cluster.data.id,
+                    env: cluster.data.environment,
+                  })}
+                />
+              }
+            />
+          )}
         </div>
       )}
     </QueryState>
@@ -126,7 +151,6 @@ function Info({ c }: { c: ClusterDetail }) {
     ["Owners", c.owners.length ? c.owners.map((o) => o.username).join(", ") : <span className="text-slate-400">Geen</span>],
     ["Tags", c.tags.length ? <Tags tags={c.tags} /> : <span className="text-slate-400">Geen</span>],
     ["Git-repository", c.git_repo_url ? <code className="text-xs break-all">{c.git_repo_url}</code> : <span className="text-slate-400">Geen</span>],
-    ["Status", c.status === "unknown" ? <span className="text-slate-400">Nog niet berekend; komt met de monitoring</span> : c.status],
     ["Laatst gewijzigd", fmt.format(new Date(c.updated_at))],
   ];
   return (
@@ -231,7 +255,7 @@ function NodesCard({ c, isAdmin }: { c: ClusterDetail; isAdmin: boolean }) {
                   <th className={thClass}>Hostname</th>
                   <th className={thClass}>Rol</th>
                   <th className={thClass}>IP-adres</th>
-                  <th className={thClass}>Agent</th>
+                  <th className={thClass}>Status</th>
                   <th className={thClass}>Lifecycle</th>
                   {isAdmin && <th className={thClass} />}
                 </tr>
@@ -247,7 +271,10 @@ function NodesCard({ c, isAdmin }: { c: ClusterDetail; isAdmin: boolean }) {
                     <td className={tdClass}>{n.role || <span className="text-slate-400">–</span>}</td>
                     <td className={`${tdClass} font-mono text-xs`}>{n.primary_ip ?? <span className="text-slate-400">–</span>}</td>
                     <td className={tdClass}>
-                      <AgentBadge agent={n.agent} />
+                      {n.agent ? <StatusBadge status={n.status} reason={n.status_reason} /> : <AgentBadge agent={null} />}
+                      {n.status !== "healthy" && n.status_reason && n.agent && (
+                        <div className="mt-1 text-xs text-slate-500">{n.status_reason}</div>
+                      )}
                     </td>
                     <td className={tdClass}>
                       <LifecycleBadge lifecycle={n.lifecycle} />

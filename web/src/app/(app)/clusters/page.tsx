@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { ClusterForm } from "@/components/inventory/ClusterForm";
-import { Empty, EnvBadge, QueryState, Tags, tableClass, tdClass, thClass } from "@/components/inventory/bits";
+import { Empty, EnvBadge, QueryState, StatusBadge, Tags, tableClass, tdClass, thClass } from "@/components/inventory/bits";
 import { Button, Card, Input, PageHeader, Select } from "@/components/ui";
 import { environments, typeLabel, useClusters, useCreateCluster, useIsAdmin } from "@/lib/inventory";
 
@@ -81,6 +81,7 @@ export default function ClustersPage() {
                 <thead className="border-b border-slate-200 dark:border-slate-800">
                   <tr>
                     <th className={thClass}>Naam</th>
+                    <th className={thClass}>Status</th>
                     <th className={thClass}>Type</th>
                     <th className={thClass}>Omgeving</th>
                     <th className={`${thClass} text-right`}>Nodes</th>
@@ -97,6 +98,9 @@ export default function ClustersPage() {
                         </Link>
                         <div className="text-xs text-slate-500">{c.slug}</div>
                       </td>
+                      <td className={tdClass}>
+                        <StatusBadge status={c.status} reason={c.status_reason} />
+                      </td>
                       <td className={tdClass}>{typeLabel(c.type)}</td>
                       <td className={tdClass}>
                         <EnvBadge env={c.environment} />
@@ -110,7 +114,7 @@ export default function ClustersPage() {
                   ))}
                   {filtered.length === 0 && (
                     <tr>
-                      <td colSpan={6} className="px-3 py-6 text-center text-sm text-slate-500">
+                      <td colSpan={7} className="px-3 py-6 text-center text-sm text-slate-500">
                         Geen clusters gevonden met dit filter.
                       </td>
                     </tr>

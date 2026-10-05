@@ -133,6 +133,20 @@ func TestMonitoring(t *testing.T) {
 	startAgent(t, e, c, web02.ID, strings.Repeat("2", 32), a2)
 
 	clusterIs("gezond cluster", "healthy", owner("web01"))
+	var list struct {
+		Items []struct {
+			Status string `json:"status"`
+			Vips   []struct {
+				Address       string  `json:"address"`
+				OwnerHostname *string `json:"owner_hostname"`
+			} `json:"vips"`
+		} `json:"items"`
+	}
+	c.do("GET", "/api/v1/clusters", nil, &list)
+	if len(list.Items) != 1 || list.Items[0].Status != "healthy" || len(list.Items[0].Vips) != 1 ||
+		list.Items[0].Vips[0].OwnerHostname == nil || *list.Items[0].Vips[0].OwnerHostname != "web01" {
+		t.Errorf("clusterlijst: %+v", list.Items)
+	}
 	for _, n := range d.Nodes {
 		want := map[string]string{"web01": "healthy", "web02": "healthy", "web03": "unknown"}[n.Hostname]
 		if n.Status != want {

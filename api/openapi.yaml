@@ -652,10 +652,14 @@ components:
       allOf:
         - $ref: "#/components/schemas/Cluster"
         - type: object
-          required: [node_count, vip_count]
+          required: [node_count, vip_count, vips]
           properties:
             node_count: { type: integer }
             vip_count: { type: integer }
+            vips:
+              type: array
+              description: De VIP's met hun huidige eigenaar
+              items: { $ref: "#/components/schemas/VipOwner" }
     ClusterDetail:
       allOf:
         - $ref: "#/components/schemas/Cluster"
@@ -745,6 +749,12 @@ components:
         owner_node_id: { type: string, format: uuid, nullable: true }
         owner_hostname: { type: string, nullable: true }
         owner_since: { type: string, format: date-time, nullable: true }
+    VipOwner:
+      type: object
+      required: [address, owner_hostname]
+      properties:
+        address: { type: string }
+        owner_hostname: { type: string, nullable: true }
     VipInput:
       type: object
       required: [address]

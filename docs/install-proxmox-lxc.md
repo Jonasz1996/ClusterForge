@@ -112,6 +112,23 @@ Het script installeert `/usr/local/bin/cf-agent` en de systemd-service `cf-agent
 
 Een server opnieuw installeren of een agent intrekken: trek hem in bij de node in de webinterface en voer het commando opnieuw uit met een nieuw token.
 
+Zodra de agent draait, verschijnen de status en de grafieken van de node vanzelf. De metrics komen in de VictoriaMetrics uit de compose-stack; daar is niets voor in te stellen.
+
+## 8. Grafana koppelen (optioneel)
+
+Heb je al een Grafana, dan kan die de metrics rechtstreeks uit VictoriaMetrics lezen:
+
+1. Zet in `.env` `CF_VM_BIND=0.0.0.0` en voer `docker compose up -d` opnieuw uit. VictoriaMetrics heeft geen login: beperk poort 8428 met de Proxmox-firewall tot je Grafana.
+2. Voeg in Grafana een databron van het type Prometheus toe met URL `http://<ip van de LXC>:8428`.
+3. Importeer het dashboard Node Exporter Full (id 1860). Kies bij job `clusterforge`; de nodes staan onder hun hostname.
+4. Voor een link vanuit ClusterForge naar dat dashboard zet je in `.env`:
+
+   ```sh
+   CF_GRAFANA_NODE_URL=https://grafana.example.lan/d/rYdddlPWk/node-exporter-full?var-job=clusterforge&var-node={hostname}
+   ```
+
+   Pas het adres en de uid van het dashboard aan als die bij jou anders zijn, en voer `docker compose up -d` opnieuw uit.
+
 ## Bijwerken
 
 ```sh
@@ -129,5 +146,6 @@ Databasemigraties lopen automatisch bij het starten van de server.
 | `docker run` geeft fouten over `permission denied` of `sysctl` | `nesting` en `keyctl` staan niet aan, of de container is niet herstart |
 | Inloggen lijkt te lukken maar je komt terug op het loginscherm | `CF_SECURE_COOKIES=true` zonder TLS |
 | Build stopt met `killed` | Te weinig geheugen; geef de LXC tijdelijk 3 GB |
+| Bij een node staat "Grafieken staan uit" | `CF_VICTORIAMETRICS_URL` is niet gezet; de compose-stack zet die standaard |
 | Node blijft Offline na het installeren van de agent | Poort 4222 niet bereikbaar vanaf de node, of `CF_NATS_ADVERTISE` wijst niet naar de LXC; kijk op de node met `journalctl -u cf-agent` |
 | Logs bekijken | `docker compose logs -f server` |

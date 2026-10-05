@@ -32,6 +32,8 @@ vethabc: 1 1 0 0 0 0 0 0 1 1 0 0 0 0 0 0
 `)
 	writeFile(t, root, "/sys/class/hwmon/hwmon0/name", "coretemp\n")
 	writeFile(t, root, "/sys/class/hwmon/hwmon0/temp1_input", "45000\n")
+	writeFile(t, root, "/proc/sys/kernel/ostype", "Linux\n")
+	writeFile(t, root, "/proc/sys/kernel/hostname", "web01\n")
 
 	m := (&Collector{Root: root}).Metrics()
 	got := map[string]float64{}
@@ -66,6 +68,13 @@ vethabc: 1 1 0 0 0 0 0 0 1 1 0 0 0 0 0 0
 		if fmt.Sprintf("%.6g", g) != fmt.Sprintf("%.6g", v) {
 			t.Errorf("%s = %v, want %v", k, g, v)
 		}
+	}
+	uname := false
+	for _, s := range m.Samples {
+		uname = uname || (s.Name == "node_uname_info" && s.Labels["nodename"] == "web01" && s.Labels["sysname"] == "Linux")
+	}
+	if !uname {
+		t.Error("node_uname_info ontbreekt")
 	}
 	if got[`node_filesystem_size_bytes{device="/dev/sda1",fstype="ext4",mountpoint="/"}`] <= 0 {
 		t.Error("geen grootte voor /")
