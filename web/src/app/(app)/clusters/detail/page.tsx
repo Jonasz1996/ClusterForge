@@ -129,7 +129,7 @@ function ClusterDetailInner() {
           )}
 
           <NodesCard c={cluster.data} isAdmin={isAdmin} />
-          {cluster.data.template_name && <ClusterDriftCard clusterId={id} isAdmin={isAdmin} />}
+          <ClusterDriftCard clusterId={id} isAdmin={isAdmin} />
           {cluster.data.template_name && <SpecCard clusterId={id} />}
           <VipsCard c={cluster.data} isAdmin={isAdmin} />
           <ClusterBackupsCard clusterId={id} isAdmin={isAdmin} />

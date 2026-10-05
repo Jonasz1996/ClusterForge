@@ -111,10 +111,13 @@ var Known = map[string]Spec{
 	"backup.policy_updated":      {CategoryBackups, "Back-upbeleid gewijzigd"},
 	"backup.watch_updated":       {CategoryBackups, "Lijst ook bewaken gewijzigd"},
 
-	"drift.detected":     {CategoryDrift, "Drift gevonden"},
-	"drift.changed":      {CategoryDrift, "Drift veranderd"},
-	"drift.resolved":     {CategoryDrift, "Drift verdwenen"},
-	"drift.check_failed": {CategoryDrift, "Driftcontrole mislukt"},
+	"drift.detected":       {CategoryDrift, "Drift gevonden"},
+	"drift.changed":        {CategoryDrift, "Drift veranderd"},
+	"drift.resolved":       {CategoryDrift, "Drift verdwenen"},
+	"drift.check_failed":   {CategoryDrift, "Driftcontrole mislukt"},
+	"drift.ignore_added":   {CategoryDrift, "Drift genegeerd"},
+	"drift.ignore_removed": {CategoryDrift, "Negeerregel opgeheven"},
+	"drift.baseline_set":   {CategoryDrift, "Baseline vastgelegd"},
 
 	"node.status_changed":    {CategoryStatus, "Status van node gewijzigd"},
 	"cluster.status_changed": {CategoryStatus, "Status van cluster gewijzigd"},

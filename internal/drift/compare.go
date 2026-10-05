@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/Jonasz1996/clusterforge/internal/secrets"
 	"github.com/Jonasz1996/clusterforge/internal/templates"
 	"github.com/Jonasz1996/clusterforge/pkg/protocol"
@@ -37,6 +39,11 @@ type Finding struct {
 	// Fingerprint is de HMAC van de waargenomen waarde. Verandert hij, dan
 	// is er op de node opnieuw iets gewijzigd.
 	Fingerprint string `json:"fingerprint"`
+	// Ignored zegt of een negeerregel de stap dekte toen de controle werd
+	// opgeslagen; zo'n afwijking telt niet voor de status en de events.
+	Ignored bool `json:"ignored,omitempty"`
+	// IgnoreID is de regel die de stap dekt.
+	IgnoreID *uuid.UUID `json:"ignore_id,omitempty"`
 }
 
 // Unchecked is een stap die een controle niet kan bekijken, zoals een
@@ -116,13 +123,38 @@ func Align(steps []templates.Step, obs []protocol.Observation) ([]protocol.Obser
 // betekenis van apply: wat apply zou veranderen, is een afwijking. key is de
 // afgeleide sleutel voor de vingerafdrukken.
 func Compare(key []byte, steps []templates.Step, obs []protocol.Observation) Result {
+	return compare(key, steps, templateContents(steps), obs)
+}
+
+// templateContents is de verwachte inhoud van de bestanden: wat de template
+// rendert.
+func templateContents(steps []templates.Step) []*contentWant {
+	contents := make([]*contentWant, len(steps))
+	for i, s := range steps {
+		if s.File != nil {
+			sum := sha256.Sum256([]byte(s.File.Content))
+			contents[i] = &contentWant{sha: hex.EncodeToString(sum[:]), size: int64(len(s.File.Content)), label: "inhoud volgens template"}
+		}
+	}
+	return contents
+}
+
+// contentWant is de verwachte inhoud van een bestand: de sha256 bij een
+// template, de HMAC van die sha256 bij een baseline.
+type contentWant struct {
+	sha, hmac string
+	size      int64
+	label     string
+}
+
+func compare(key []byte, steps []templates.Step, contents []*contentWant, obs []protocol.Observation) Result {
 	c := comparer{key: key, res: Result{Findings: []Finding{}, Unchecked: []Unchecked{}}}
 	for i, s := range steps {
 		var o protocol.Observation
 		if i < len(obs) {
 			o = obs[i]
 		}
-		c.step(s.Step, o)
+		c.step(s.Step, o, contents[i])
 	}
 	return c.res
 }
@@ -132,7 +164,7 @@ type comparer struct {
 	res Result
 }
 
-func (c *comparer) step(s protocol.Step, o protocol.Observation) {
+func (c *comparer) step(s protocol.Step, o protocol.Observation, content *contentWant) {
 	step, title := stepID(s)
 	switch {
 	case o.Skipped != "":
@@ -147,7 +179,7 @@ func (c *comparer) step(s protocol.Step, o protocol.Observation) {
 		c.packages(s.Package, o)
 	case "file":
 		f := s.File
-		c.path(step, title, "file", o.Path, f.Mode, "0644", f.Owner, f.Group, &f.Content)
+		c.path(step, title, "file", o.Path, f.Mode, "0644", f.Owner, f.Group, content)
 	case "directory":
 		d := s.Directory
 		c.path(step, title, "directory", o.Path, d.Mode, "0755", d.Owner, d.Group, nil)
@@ -250,7 +282,7 @@ var (
 	activeText  = map[bool]string{true: "active", false: "inactive"}
 )
 
-func (c *comparer) path(step, title, kind string, st *protocol.PathState, mode, defMode, owner, group string, content *string) {
+func (c *comparer) path(step, title, kind string, st *protocol.PathState, mode, defMode, owner, group string, content *contentWant) {
 	if st == nil {
 		c.res.Unchecked = append(c.res.Unchecked, Unchecked{Step: step, Title: title, Reason: "de agent gaf niets terug"})
 		return
@@ -267,7 +299,7 @@ func (c *comparer) path(step, title, kind string, st *protocol.PathState, mode, 
 		return
 	}
 	if content != nil {
-		c.content(step, title, f, st, *content)
+		c.content(step, title, f, st, content)
 	}
 	if want := permText(mode, defMode); st.Mode != want {
 		c.add(f("mode", want, st.Mode), st.Mode)
@@ -282,29 +314,31 @@ func (c *comparer) path(step, title, kind string, st *protocol.PathState, mode, 
 
 var typeName = map[string]string{"file": "een bestand", "directory": "een map", "other": "iets anders dan een bestand of map"}
 
-func (c *comparer) content(step, title string, f func(aspect, expected, actual string) Finding, st *protocol.PathState, content string) {
-	sum := sha256.Sum256([]byte(content))
-	want := hex.EncodeToString(sum[:])
+func (c *comparer) content(step, title string, f func(aspect, expected, actual string) Finding, st *protocol.PathState, want *contentWant) {
 	var observed string
 	switch {
+	case want.hmac != "" && c.key == nil:
+		// Zonder sleutel is de vastgelegde HMAC niet na te rekenen.
+		c.res.Unchecked = append(c.res.Unchecked, Unchecked{Step: step, Title: title, Reason: "inhoud niet vergeleken: CF_MASTER_KEY ontbreekt"})
+		return
 	case st.SHA256 != "":
-		if st.SHA256 == want {
+		if (want.sha != "" && st.SHA256 == want.sha) || (want.hmac != "" && secrets.Fingerprint(c.key, []byte(st.SHA256)) == want.hmac) {
 			return
 		}
 		observed = st.SHA256
-	case st.Size == int64(len(content)):
-		// Te groot om te hashen en toch even groot: dat kan niet bij een
-		// gerenderd bestand, maar zeg het liever dan te gokken.
+	case st.Size == want.size:
+		// Te groot om te hashen en toch even groot: zeg het liever dan te
+		// gokken.
 		c.res.Unchecked = append(c.res.Unchecked, Unchecked{Step: step, Title: title, Reason: "inhoud niet vergeleken: te groot om te hashen"})
 		return
 	default:
 		observed = strconv.FormatInt(st.Size, 10)
 	}
-	fd := f("content", "inhoud volgens template", "inhoud wijkt af")
-	if st.Size == int64(len(content)) {
+	fd := f("content", want.label, "inhoud wijkt af")
+	if st.Size == want.size {
 		fd.Detail = fmt.Sprintf("even groot (%s bytes)", thousands(st.Size))
 	} else {
-		fd.Detail = fmt.Sprintf("%s bytes in plaats van %s", thousands(st.Size), thousands(int64(len(content))))
+		fd.Detail = fmt.Sprintf("%s bytes in plaats van %s", thousands(st.Size), thousands(want.size))
 	}
 	if !st.ModTime.IsZero() {
 		t := st.ModTime

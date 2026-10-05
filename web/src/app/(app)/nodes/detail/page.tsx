@@ -149,7 +149,7 @@ function NodeDetailInner() {
               </Card>
               <AgentCard node={node.data} runtime={runtime.data} isAdmin={isAdmin} />
               <NodeLifecycleCard node={node.data} runtime={runtime.data} jobs={jobs.data} isAdmin={isAdmin} />
-              {node.data.cluster_id && <NodeDriftCard nodeId={id} isAdmin={isAdmin} />}
+              {node.data.cluster_id && <NodeDriftCard nodeId={id} clusterId={node.data.cluster_id} isAdmin={isAdmin} />}
               <NodeProxmoxCard node={node.data} isAdmin={isAdmin} />
             </div>
           )}

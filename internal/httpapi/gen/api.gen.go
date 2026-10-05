@@ -102,6 +102,30 @@ func (e BackupVolumeVerify) Valid() bool {
 	}
 }
 
+// Defines values for BaselineItemKind.
+const (
+	BaselineItemKindDirectory BaselineItemKind = "directory"
+	BaselineItemKindFile      BaselineItemKind = "file"
+	BaselineItemKindPackage   BaselineItemKind = "package"
+	BaselineItemKindService   BaselineItemKind = "service"
+)
+
+// Valid indicates whether the value is a known member of the BaselineItemKind enum.
+func (e BaselineItemKind) Valid() bool {
+	switch e {
+	case BaselineItemKindDirectory:
+		return true
+	case BaselineItemKindFile:
+		return true
+	case BaselineItemKindPackage:
+		return true
+	case BaselineItemKindService:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ClusterDriftSummaryStatus.
 const (
 	ClusterDriftSummaryStatusDrift   ClusterDriftSummaryStatus = "drift"
@@ -957,6 +981,62 @@ type BackupWatchInput struct {
 	Items []BackupWatchEntry `json:"items"`
 }
 
+// BaselineInput defines model for BaselineInput.
+type BaselineInput struct {
+	// Files Volledige paden van bestanden of mappen
+	Files    []string             `json:"files"`
+	NodeIds  []openapi_types.UUID `json:"node_ids"`
+	Packages []string             `json:"packages"`
+
+	// Preview Alleen tonen wat er vastgelegd zou worden
+	Preview  *bool    `json:"preview,omitempty"`
+	Services []string `json:"services"`
+}
+
+// BaselineItem defines model for BaselineItem.
+type BaselineItem struct {
+	Active nullable.Nullable[bool] `json:"active"`
+
+	// Content Of de inhoud vergeleken wordt
+	Content bool                    `json:"content"`
+	Enabled nullable.Nullable[bool] `json:"enabled"`
+	Group   string                  `json:"group"`
+	Kind    BaselineItemKind        `json:"kind"`
+	Mode    string                  `json:"mode"`
+	Name    string                  `json:"name"`
+	Owner   string                  `json:"owner"`
+	Size    int64                   `json:"size"`
+	Version string                  `json:"version"`
+}
+
+// BaselineItemKind defines model for BaselineItem.Kind.
+type BaselineItemKind string
+
+// BaselineItems defines model for BaselineItems.
+type BaselineItems struct {
+	Files    []string `json:"files"`
+	Packages []string `json:"packages"`
+	Services []string `json:"services"`
+}
+
+// BaselineNode defines model for BaselineNode.
+type BaselineNode struct {
+	Hostname string             `json:"hostname"`
+	Items    []BaselineItem     `json:"items"`
+	NodeId   openapi_types.UUID `json:"node_id"`
+
+	// Notes Wat niet vastgelegd werd en waarom
+	Notes []string `json:"notes"`
+}
+
+// BaselineResult defines model for BaselineResult.
+type BaselineResult struct {
+	Nodes []BaselineNode `json:"nodes"`
+
+	// Revision De nieuwe spec-revisie; 0 bij preview
+	Revision int `json:"revision"`
+}
+
 // ChangePasswordRequest defines model for ChangePasswordRequest.
 type ChangePasswordRequest struct {
 	CurrentPassword string `json:"current_password"`
@@ -1191,7 +1271,11 @@ type DriftFinding struct {
 	Expected string             `json:"expected"`
 
 	// Fingerprint HMAC van de waargenomen waarde; verandert als er op de node opnieuw iets wijzigt
-	Fingerprint string `json:"fingerprint"`
+	Fingerprint string                                `json:"fingerprint"`
+	IgnoreId    nullable.Nullable[openapi_types.UUID] `json:"ignore_id"`
+
+	// Ignored Een negeerregel dekt deze stap; telt niet voor de status
+	Ignored bool `json:"ignored"`
 
 	// Key Stap en aspect, zoals file:/etc/keepalived/keepalived.conf:content
 	Key  string           `json:"key"`
@@ -1211,6 +1295,34 @@ type DriftFindingAspect string
 
 // DriftFindingKind defines model for DriftFinding.Kind.
 type DriftFindingKind string
+
+// DriftIgnore defines model for DriftIgnore.
+type DriftIgnore struct {
+	CreatedAt time.Time                             `json:"created_at"`
+	CreatedBy nullable.Nullable[AuditRef]           `json:"created_by"`
+	Expired   bool                                  `json:"expired"`
+	ExpiresAt nullable.Nullable[time.Time]          `json:"expires_at"`
+	Hostname  nullable.Nullable[string]             `json:"hostname"`
+	Id        openapi_types.UUID                    `json:"id"`
+	Key       string                                `json:"key"`
+	NodeId    nullable.Nullable[openapi_types.UUID] `json:"node_id"`
+	Reason    string                                `json:"reason"`
+}
+
+// DriftIgnoreInput defines model for DriftIgnoreInput.
+type DriftIgnoreInput struct {
+	ExpiresAt nullable.Nullable[time.Time] `json:"expires_at,omitempty"`
+	Key       string                       `json:"key"`
+
+	// NodeId Leeg voor het hele cluster
+	NodeId nullable.Nullable[openapi_types.UUID] `json:"node_id,omitempty"`
+	Reason string                                `json:"reason"`
+}
+
+// DriftIgnoreList defines model for DriftIgnoreList.
+type DriftIgnoreList struct {
+	Items []DriftIgnore `json:"items"`
+}
 
 // DriftNode defines model for DriftNode.
 type DriftNode struct {
@@ -1249,10 +1361,17 @@ type DriftReport struct {
 
 // DriftSource defines model for DriftSource.
 type DriftSource struct {
-	Kind            DriftSourceKind `json:"kind"`
-	SpecRevision    int             `json:"spec_revision"`
-	Template        string          `json:"template"`
-	TemplateVersion string          `json:"template_version"`
+	// BaselineAt Wanneer de baseline het laatst is vastgelegd
+	BaselineAt nullable.Nullable[time.Time] `json:"baseline_at"`
+
+	// Items Wat de baseline vastlegt; null bij een template
+	Items        nullable.Nullable[BaselineItems] `json:"items"`
+	Kind         DriftSourceKind                  `json:"kind"`
+	SpecRevision int                              `json:"spec_revision"`
+
+	// Template Leeg bij een baseline
+	Template        string `json:"template"`
+	TemplateVersion string `json:"template_version"`
 }
 
 // DriftSourceKind defines model for DriftSource.Kind.
@@ -2150,6 +2269,12 @@ type UpdateClusterJSONRequestBody = ClusterPatch
 // UpdateBackupPolicyJSONRequestBody defines body for UpdateBackupPolicy for application/json ContentType.
 type UpdateBackupPolicyJSONRequestBody = BackupPolicyInput
 
+// CaptureBaselineJSONRequestBody defines body for CaptureBaseline for application/json ContentType.
+type CaptureBaselineJSONRequestBody = BaselineInput
+
+// CreateDriftIgnoreJSONRequestBody defines body for CreateDriftIgnore for application/json ContentType.
+type CreateDriftIgnoreJSONRequestBody = DriftIgnoreInput
+
 // CreateVipJSONRequestBody defines body for CreateVip for application/json ContentType.
 type CreateVipJSONRequestBody = VipInput
 
@@ -2254,9 +2379,18 @@ type ServerInterface interface {
 	// GetClusterDrift Drift van een cluster per node, met waarmee vergeleken wordt
 	// (GET /clusters/{clusterId}/drift)
 	GetClusterDrift(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
+	// CaptureBaseline Baseline vastleggen voor een cluster zonder template (admin)
+	// (POST /clusters/{clusterId}/drift/baseline)
+	CaptureBaseline(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
 	// CheckClusterDrift Alle actieve nodes nu controleren (admin)
 	// (POST /clusters/{clusterId}/drift/check)
 	CheckClusterDrift(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
+	// ListDriftIgnores Negeerregels van een cluster, ook de verlopen
+	// (GET /clusters/{clusterId}/drift/ignores)
+	ListDriftIgnores(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
+	// CreateDriftIgnore Een stap negeren op één node of het hele cluster (admin)
+	// (POST /clusters/{clusterId}/drift/ignores)
+	CreateDriftIgnore(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
 	// GetClusterMetrics Grafieken van een cluster, met een lijn per node
 	// (GET /clusters/{clusterId}/metrics)
 	GetClusterMetrics(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params GetClusterMetricsParams)
@@ -2272,6 +2406,9 @@ type ServerInterface interface {
 	// PlanDeployment Controleren wat een uitrol zou maken (admin)
 	// (POST /deployments/plan)
 	PlanDeployment(w http.ResponseWriter, r *http.Request)
+	// DeleteDriftIgnore Een negeerregel opheffen (admin)
+	// (DELETE /drift-ignores/{ignoreId})
+	DeleteDriftIgnore(w http.ResponseWriter, r *http.Request, ignoreId openapi_types.UUID)
 	// ListEnrollmentTokens Bruikbare enrollmenttokens (admin)
 	// (GET /enrollment-tokens)
 	ListEnrollmentTokens(w http.ResponseWriter, r *http.Request)
@@ -2515,9 +2652,27 @@ func (_ Unimplemented) GetClusterDrift(w http.ResponseWriter, r *http.Request, c
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// CaptureBaseline Baseline vastleggen voor een cluster zonder template (admin)
+// (POST /clusters/{clusterId}/drift/baseline)
+func (_ Unimplemented) CaptureBaseline(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // CheckClusterDrift Alle actieve nodes nu controleren (admin)
 // (POST /clusters/{clusterId}/drift/check)
 func (_ Unimplemented) CheckClusterDrift(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListDriftIgnores Negeerregels van een cluster, ook de verlopen
+// (GET /clusters/{clusterId}/drift/ignores)
+func (_ Unimplemented) ListDriftIgnores(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CreateDriftIgnore Een stap negeren op één node of het hele cluster (admin)
+// (POST /clusters/{clusterId}/drift/ignores)
+func (_ Unimplemented) CreateDriftIgnore(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -2548,6 +2703,12 @@ func (_ Unimplemented) DeployCluster(w http.ResponseWriter, r *http.Request) {
 // PlanDeployment Controleren wat een uitrol zou maken (admin)
 // (POST /deployments/plan)
 func (_ Unimplemented) PlanDeployment(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// DeleteDriftIgnore Een negeerregel opheffen (admin)
+// (DELETE /drift-ignores/{ignoreId})
+func (_ Unimplemented) DeleteDriftIgnore(w http.ResponseWriter, r *http.Request, ignoreId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -3432,6 +3593,32 @@ func (siw *ServerInterfaceWrapper) GetClusterDrift(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
+// CaptureBaseline operation middleware
+func (siw *ServerInterfaceWrapper) CaptureBaseline(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CaptureBaseline(w, r, clusterId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // CheckClusterDrift operation middleware
 func (siw *ServerInterfaceWrapper) CheckClusterDrift(w http.ResponseWriter, r *http.Request) {
 
@@ -3449,6 +3636,58 @@ func (siw *ServerInterfaceWrapper) CheckClusterDrift(w http.ResponseWriter, r *h
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CheckClusterDrift(w, r, clusterId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListDriftIgnores operation middleware
+func (siw *ServerInterfaceWrapper) ListDriftIgnores(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListDriftIgnores(w, r, clusterId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateDriftIgnore operation middleware
+func (siw *ServerInterfaceWrapper) CreateDriftIgnore(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateDriftIgnore(w, r, clusterId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -3571,6 +3810,32 @@ func (siw *ServerInterfaceWrapper) PlanDeployment(w http.ResponseWriter, r *http
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.PlanDeployment(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteDriftIgnore operation middleware
+func (siw *ServerInterfaceWrapper) DeleteDriftIgnore(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "ignoreId" -------------
+	var ignoreId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "ignoreId", chi.URLParam(r, "ignoreId"), &ignoreId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "ignoreId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteDriftIgnore(w, r, ignoreId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -4750,6 +5015,18 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/clusters/{clusterId}/drift/check", wrapper.CheckClusterDrift)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/clusters/{clusterId}/drift/baseline", wrapper.CaptureBaseline)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/clusters/{clusterId}/drift/ignores", wrapper.ListDriftIgnores)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/clusters/{clusterId}/drift/ignores", wrapper.CreateDriftIgnore)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/drift-ignores/{ignoreId}", wrapper.DeleteDriftIgnore)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/nodes/{nodeId}/drift", wrapper.GetNodeDrift)
