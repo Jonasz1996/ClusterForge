@@ -34,6 +34,21 @@ type API interface {
 	TaskStatus(ctx context.Context, upid string) (TaskStatus, error)
 	TaskLog(ctx context.Context, upid string) ([]string, error)
 	StopTask(ctx context.Context, upid string) error
+
+	// Voor nieuwe VM's uit een golden image.
+	NextID(ctx context.Context) (int, error)
+	// Clone maakt een volledige kopie van src met id newID op host target.
+	Clone(ctx context.Context, src Guest, newID int, name, target, storage string) (string, error)
+	Config(ctx context.Context, g Guest) (map[string]any, error)
+	// SetConfig wijzigt de configuratie; het taak-id is leeg als Proxmox
+	// het meteen deed.
+	SetConfig(ctx context.Context, g Guest, form url.Values) (string, error)
+	// Resize maakt een schijf groter tot size, zoals "20G".
+	Resize(ctx context.Context, g Guest, disk, size string) (string, error)
+	// AgentPing lukt als de QEMU guest agent in de VM antwoordt.
+	AgentPing(ctx context.Context, g Guest) error
+	// AgentFileWrite schrijft een bestand in de VM via de guest agent.
+	AgentFileWrite(ctx context.Context, g Guest, file, content string) error
 }
 
 type Version struct {
@@ -404,6 +419,54 @@ func (c *Client) StopTask(ctx context.Context, upid string) error {
 		return err
 	}
 	return c.do(ctx, http.MethodDelete, "/nodes/"+url.PathEscape(node)+"/tasks/"+url.PathEscape(upid), nil, nil)
+}
+
+func (c *Client) NextID(ctx context.Context) (int, error) {
+	// Proxmox geeft het id als tekst of als getal, afhankelijk van de versie.
+	var raw json.RawMessage
+	if err := c.do(ctx, http.MethodGet, "/cluster/nextid", nil, &raw); err != nil {
+		return 0, err
+	}
+	id, err := strconv.Atoi(strings.Trim(string(raw), `"`))
+	if err != nil {
+		return 0, fmt.Errorf("onverwacht vmid van Proxmox: %s", raw)
+	}
+	return id, nil
+}
+
+func (c *Client) Clone(ctx context.Context, src Guest, newID int, name, target, storage string) (string, error) {
+	form := url.Values{"newid": {strconv.Itoa(newID)}, "name": {name}, "full": {"1"}}
+	if target != "" && target != src.Node {
+		form.Set("target", target)
+	}
+	if storage != "" {
+		form.Set("storage", storage)
+	}
+	var upid string
+	return upid, c.do(ctx, http.MethodPost, src.path()+"/clone", form, &upid)
+}
+
+func (c *Client) Config(ctx context.Context, g Guest) (map[string]any, error) {
+	var out map[string]any
+	return out, c.do(ctx, http.MethodGet, g.path()+"/config", nil, &out)
+}
+
+func (c *Client) SetConfig(ctx context.Context, g Guest, form url.Values) (string, error) {
+	var upid string
+	return upid, c.do(ctx, http.MethodPost, g.path()+"/config", form, &upid)
+}
+
+func (c *Client) Resize(ctx context.Context, g Guest, disk, size string) (string, error) {
+	var upid string
+	return upid, c.do(ctx, http.MethodPut, g.path()+"/resize", url.Values{"disk": {disk}, "size": {size}}, &upid)
+}
+
+func (c *Client) AgentPing(ctx context.Context, g Guest) error {
+	return c.do(ctx, http.MethodPost, g.path()+"/agent/ping", url.Values{}, nil)
+}
+
+func (c *Client) AgentFileWrite(ctx context.Context, g Guest, file, content string) error {
+	return c.do(ctx, http.MethodPost, g.path()+"/agent/file-write", url.Values{"file": {file}, "content": {content}}, nil)
 }
 
 // upidNode haalt de host uit een taak-id: UPID:pve1:0000ABCD:...

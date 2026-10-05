@@ -64,6 +64,19 @@ func actions(t *testing.T, pool *pgxpool.Pool, id uuid.UUID) []string {
 	return out
 }
 
+// actionsAfter wacht tot er n events zijn: het event van een afgeronde taak
+// komt net na zijn status.
+func actionsAfter(t *testing.T, pool *pgxpool.Pool, id uuid.UUID, n int) []string {
+	t.Helper()
+	var got []string
+	for deadline := time.Now().Add(2 * time.Second); time.Now().Before(deadline); time.Sleep(10 * time.Millisecond) {
+		if got = actions(t, pool, id); len(got) >= n {
+			break
+		}
+	}
+	return got
+}
+
 func TestRunSucceedsAndFails(t *testing.T) {
 	ctx := context.Background()
 	pool := storetest.DB(t)
@@ -99,7 +112,7 @@ func TestRunSucceedsAndFails(t *testing.T) {
 	if len(steps) != 1 || steps[0].Status != store.JobStatusSucceeded || len(steps[0].Log) != 1 || steps[0].Log[0] != "hallo web01" {
 		t.Errorf("steps = %+v", steps)
 	}
-	if got := actions(t, pool, okJob.ID); len(got) != 2 || got[0] != "job.queued" || got[1] != "job.succeeded" {
+	if got := actionsAfter(t, pool, okJob.ID, 2); len(got) != 2 || got[0] != "job.queued" || got[1] != "job.succeeded" {
 		t.Errorf("events = %v", got)
 	}
 
@@ -113,6 +126,10 @@ func TestRunSucceedsAndFails(t *testing.T) {
 	}
 	if j := waitStatus(t, q, unknown.ID, store.JobStatusFailed); j.Error == "" {
 		t.Error("onbekende soort zonder fout")
+	}
+	// Finished komt na de status in de database; wacht er even op.
+	for deadline := time.Now().Add(2 * time.Second); finished.Load() < 3 && time.Now().Before(deadline); {
+		time.Sleep(10 * time.Millisecond)
 	}
 	if finished.Load() != 3 {
 		t.Errorf("Finished %d keer", finished.Load())
@@ -158,7 +175,7 @@ func TestCancel(t *testing.T) {
 	if len(steps) != 1 || steps[0].Status != store.JobStatusCanceled {
 		t.Errorf("steps = %+v", steps)
 	}
-	if got := actions(t, pool, running.ID); len(got) != 3 || got[1] != "job.cancel_requested" || got[2] != "job.canceled" {
+	if got := actionsAfter(t, pool, running.ID, 3); len(got) != 3 || got[1] != "job.cancel_requested" || got[2] != "job.canceled" {
 		t.Errorf("events = %v", got)
 	}
 }

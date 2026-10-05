@@ -23,6 +23,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/agentbus"
 	"github.com/Jonasz1996/clusterforge/internal/auth"
 	"github.com/Jonasz1996/clusterforge/internal/config"
+	"github.com/Jonasz1996/clusterforge/internal/deploy"
 	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/jobs"
 	"github.com/Jonasz1996/clusterforge/internal/lifecycle"
@@ -39,17 +40,18 @@ import (
 // testEnv start de volledige HTTP-server tegen een echte PostgreSQL uit
 // CF_TEST_DATABASE_URL. Het schema wordt per test leeggemaakt.
 type testEnv struct {
-	t    *testing.T
-	srv  *httptest.Server
-	auth *auth.Service
-	pool *pgxpool.Pool
-	api  *Server
-	bus  *agentbus.Bus
-	eval *status.Evaluator
-	vm   *fakeVM
-	pve  *proxmox.Service
-	jobs *jobs.Runner
-	life *lifecycle.Service
+	t      *testing.T
+	srv    *httptest.Server
+	auth   *auth.Service
+	pool   *pgxpool.Pool
+	api    *Server
+	bus    *agentbus.Bus
+	eval   *status.Evaluator
+	vm     *fakeVM
+	pve    *proxmox.Service
+	jobs   *jobs.Runner
+	life   *lifecycle.Service
+	deploy *deploy.Service
 }
 
 func newTestEnv(t *testing.T) *testEnv {
@@ -97,6 +99,10 @@ func newTestEnv(t *testing.T) *testEnv {
 	life.Poll, life.PowerDelay, life.OffAfter = 20*time.Millisecond, 0, time.Second
 	life.Offline, life.Stale = time.Second, time.Second
 	life.MoveTimeout, life.BootTimeout, life.OffTimeout, life.ReadyTimeout = 5*time.Second, 8*time.Second, 8*time.Second, 5*time.Second
+	dep := deploy.NewService(pool, ev, log, runner, box, pve, bus)
+	dep.Changed = eval.Kick
+	dep.Poll, dep.GuestAgentTimeout, dep.EnrollTimeout = 20*time.Millisecond, 5*time.Second, 8*time.Second
+	dep.HTTPGet = func(context.Context, string) (int, error) { return http.StatusOK, nil }
 	var wg sync.WaitGroup
 	wg.Add(3)
 	go func() { defer wg.Done(); hub.Run(runCtx) }()
@@ -109,11 +115,11 @@ func newTestEnv(t *testing.T) *testEnv {
 	}
 	api := New(Deps{
 		Config: cfg, Log: log, Pool: pool, Auth: a, Bus: bus, Hub: hub, Proxmox: pve, Jobs: runner, Lifecycle: life,
-		Version: "test",
+		Deploy: dep, Version: "test",
 	})
 	srv := httptest.NewServer(api.Handler())
 	t.Cleanup(srv.Close)
-	return &testEnv{t: t, srv: srv, auth: a, pool: pool, api: api, bus: bus, eval: eval, vm: vm, pve: pve, jobs: runner, life: life}
+	return &testEnv{t: t, srv: srv, auth: a, pool: pool, api: api, bus: bus, eval: eval, vm: vm, pve: pve, jobs: runner, life: life, deploy: dep}
 }
 
 // fakeVM speelt VictoriaMetrics: het bewaart wat binnenkomt en geeft op elke

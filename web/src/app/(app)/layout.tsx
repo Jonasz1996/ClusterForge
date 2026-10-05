@@ -17,7 +17,7 @@ const nav: NavItem[] = [
   { href: "/monitoring", label: "Monitoring" },
   { href: "/proxmox", label: "Proxmox" },
   { href: "/taken", label: "Taken" },
-  { href: "/templates", label: "Templates", soon: "mijlpaal 7" },
+  { href: "/templates", label: "Templates" },
   { href: "/instellingen", label: "Instellingen" },
 ];
 

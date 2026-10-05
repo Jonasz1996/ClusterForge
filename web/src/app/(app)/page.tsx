@@ -20,6 +20,7 @@ const actionLabels: Record<string, string> = {
   "cluster.created": "Cluster aangemaakt",
   "cluster.updated": "Cluster gewijzigd",
   "cluster.deleted": "Cluster verwijderd",
+  "cluster.deployed": "Cluster uitgerold",
   "node.created": "Node aangemaakt",
   "node.updated": "Node gewijzigd",
   "node.deleted": "Node verwijderd",
@@ -48,6 +49,7 @@ const actionLabels: Record<string, string> = {
   "job.failed": "Taak mislukt",
   "job.canceled": "Taak geannuleerd",
   "job.cancel_requested": "Taak annuleren gevraagd",
+  "job.retried": "Taak opnieuw gestart",
 };
 
 // subject geeft een leesbare naam voor het onderwerp van een event, voor zover

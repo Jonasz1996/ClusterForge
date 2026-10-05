@@ -66,11 +66,17 @@ func (a *Agent) saveState(st agentState) error {
 
 // exec voert een systeemcommando uit en geeft stdout en stderr samen terug.
 func (a *Agent) exec(ctx context.Context, name string, args ...string) ([]byte, error) {
+	return a.execTimeout(ctx, 60*time.Second, name, args...)
+}
+
+// execTimeout is exec met een eigen tijdslimiet, voor trage commando's zoals
+// apt-get install.
+func (a *Agent) execTimeout(ctx context.Context, timeout time.Duration, name string, args ...string) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 	if a.Exec != nil {
 		return a.Exec(ctx, name, args...)
 	}
-	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
-	defer cancel()
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Env = append(os.Environ(), "LC_ALL=C")
 	return cmd.CombinedOutput()
@@ -103,10 +109,21 @@ func (a *Agent) handleCommand(data []byte) protocol.Result {
 		return failed(nil, "commando verlopen; klopt de klok van deze node?")
 	}
 	a.Log.Info("commando ontvangen", "action", cmd.Action, "id", cmd.ID, "reason", cmd.Reason)
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	limit := 2 * time.Minute
+	if cmd.Action == protocol.CmdApply {
+		// Pakketten installeren kan even duren.
+		limit = applyTimeout
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), limit)
 	defer cancel()
 	var res protocol.Result
 	switch cmd.Action {
+	case protocol.CmdApply:
+		res = a.apply(ctx, cmd.Steps)
+		// Pakketten en services zijn veranderd; de server ziet het meteen.
+		if a.factsNow != nil {
+			a.signal(a.factsNow)
+		}
 	case protocol.CmdFactsCollect:
 		if err := a.sendFacts(ctx); err != nil {
 			res = failed(nil, "facts sturen mislukt: "+err.Error())

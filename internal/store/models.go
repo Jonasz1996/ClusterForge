@@ -268,6 +268,15 @@ type ClusterOwner struct {
 	UserID    uuid.UUID
 }
 
+type ClusterSpecRevision struct {
+	ClusterID uuid.UUID
+	Revision  int32
+	Spec      []byte
+	Source    string
+	CreatedBy *uuid.UUID
+	CreatedAt time.Time
+}
+
 type EnrollmentToken struct {
 	ID          uuid.UUID
 	TokenHash   []byte
@@ -389,6 +398,15 @@ type ProxmoxResource struct {
 	Template     bool
 	Data         []byte
 	SyncedAt     time.Time
+}
+
+type Secret struct {
+	ID        uuid.UUID
+	ClusterID uuid.UUID
+	Name      string
+	ValueEnc  []byte
+	KeyID     string
+	CreatedAt time.Time
 }
 
 type ServerSecret struct {

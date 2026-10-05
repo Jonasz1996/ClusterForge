@@ -89,6 +89,10 @@ func (s *Service) tx(ctx context.Context, fn func(q *store.Queries) error) error
 	}))
 }
 
+// Translate zet databasefouten om in fouten die de gebruiker begrijpt, voor
+// wie de Tx-functies gebruikt.
+func Translate(err error) error { return translate(err) }
+
 // translate zet databasefouten om in fouten die de gebruiker begrijpt.
 func translate(err error) error {
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -126,31 +130,38 @@ func translate(err error) error {
 // --- clusters ---
 
 func (s *Service) CreateCluster(ctx context.Context, actor events.Actor, f ClusterFields) (store.Cluster, error) {
+	var c store.Cluster
+	err := s.tx(ctx, func(q *store.Queries) error {
+		var err error
+		c, err = s.CreateClusterTx(ctx, q, actor, f)
+		return err
+	})
+	return c, err
+}
+
+// CreateClusterTx maakt een cluster binnen de transactie van de aanroeper,
+// zoals een uitrol die er meteen nodes in zet. Fouten gaan door Translate.
+func (s *Service) CreateClusterTx(ctx context.Context, q *store.Queries, actor events.Actor, f ClusterFields) (store.Cluster, error) {
 	f.OwnerIDs = dedupe(f.OwnerIDs)
 	if err := f.normalize(); err != nil {
 		return store.Cluster{}, err
 	}
-	var c store.Cluster
-	err := s.tx(ctx, func(q *store.Queries) error {
-		var err error
-		c, err = q.CreateCluster(ctx, store.CreateClusterParams{
-			Slug: f.Slug, Name: f.Name, Description: f.Description, Type: f.Type,
-			Environment: f.Environment, GitRepoUrl: f.GitRepoURL, Tags: f.Tags,
-		})
-		if err != nil {
-			return err
-		}
-		for _, uid := range f.OwnerIDs {
-			if err := q.AddClusterOwner(ctx, store.AddClusterOwnerParams{ClusterID: c.ID, UserID: uid}); err != nil {
-				return err
-			}
-		}
-		return s.ev.Write(ctx, q, events.Event{
-			Actor: actor, SubjectType: "cluster", SubjectID: c.ID.String(), ClusterID: &c.ID,
-			Action: "cluster.created", Payload: snapshot(f),
-		})
+	c, err := q.CreateCluster(ctx, store.CreateClusterParams{
+		Slug: f.Slug, Name: f.Name, Description: f.Description, Type: f.Type,
+		Environment: f.Environment, GitRepoUrl: f.GitRepoURL, Tags: f.Tags,
 	})
-	return c, err
+	if err != nil {
+		return store.Cluster{}, err
+	}
+	for _, uid := range f.OwnerIDs {
+		if err := q.AddClusterOwner(ctx, store.AddClusterOwnerParams{ClusterID: c.ID, UserID: uid}); err != nil {
+			return store.Cluster{}, err
+		}
+	}
+	return c, s.ev.Write(ctx, q, events.Event{
+		Actor: actor, SubjectType: "cluster", SubjectID: c.ID.String(), ClusterID: &c.ID,
+		Action: "cluster.created", Payload: snapshot(f),
+	})
 }
 
 // UpdateCluster past change toe op de huidige velden. Zonder verschil
@@ -238,29 +249,35 @@ func clusterFields(c store.Cluster, owners []store.ListClusterOwnersRow) Cluster
 // --- nodes ---
 
 func (s *Service) CreateNode(ctx context.Context, actor events.Actor, f NodeFields) (store.Node, error) {
+	var n store.Node
+	err := s.tx(ctx, func(q *store.Queries) error {
+		var err error
+		n, err = s.CreateNodeTx(ctx, q, actor, f)
+		return err
+	})
+	return n, err
+}
+
+// CreateNodeTx maakt een node binnen de transactie van de aanroeper.
+func (s *Service) CreateNodeTx(ctx context.Context, q *store.Queries, actor events.Actor, f NodeFields) (store.Node, error) {
 	if f.Lifecycle == "" {
 		f.Lifecycle = store.NodeLifecycleActive
 	}
 	if err := f.normalize(); err != nil {
 		return store.Node{}, err
 	}
-	var n store.Node
-	err := s.tx(ctx, func(q *store.Queries) error {
-		var err error
-		proxmoxID, vmid := f.Proxmox.columns()
-		n, err = q.CreateNode(ctx, store.CreateNodeParams{
-			ClusterID: f.ClusterID, Hostname: f.Hostname, Role: f.Role, Description: f.Description,
-			Lifecycle: f.Lifecycle, PrimaryIp: parseIP(f.PrimaryIP), Tags: f.Tags, ProxmoxID: proxmoxID, PveVmid: vmid,
-		})
-		if err != nil {
-			return err
-		}
-		return s.ev.Write(ctx, q, events.Event{
-			Actor: actor, SubjectType: "node", SubjectID: n.ID.String(), ClusterID: n.ClusterID,
-			Action: "node.created", Payload: snapshot(f),
-		})
+	proxmoxID, vmid := f.Proxmox.columns()
+	n, err := q.CreateNode(ctx, store.CreateNodeParams{
+		ClusterID: f.ClusterID, Hostname: f.Hostname, Role: f.Role, Description: f.Description,
+		Lifecycle: f.Lifecycle, PrimaryIp: parseIP(f.PrimaryIP), Tags: f.Tags, ProxmoxID: proxmoxID, PveVmid: vmid,
 	})
-	return n, err
+	if err != nil {
+		return store.Node{}, err
+	}
+	return n, s.ev.Write(ctx, q, events.Event{
+		Actor: actor, SubjectType: "node", SubjectID: n.ID.String(), ClusterID: n.ClusterID,
+		Action: "node.created", Payload: snapshot(f),
+	})
 }
 
 func (s *Service) UpdateNode(ctx context.Context, actor events.Actor, id uuid.UUID, change func(*NodeFields)) (store.Node, error) {
@@ -370,28 +387,34 @@ func parseIP(s string) *netip.Addr {
 // --- VIP's ---
 
 func (s *Service) CreateVIP(ctx context.Context, actor events.Actor, clusterID uuid.UUID, f VIPFields) (store.Vip, error) {
-	if err := f.normalize(); err != nil {
-		return store.Vip{}, err
-	}
 	var v store.Vip
 	err := s.tx(ctx, func(q *store.Queries) error {
 		if _, err := q.LockCluster(ctx, clusterID); err != nil {
 			return err
 		}
 		var err error
-		v, err = q.CreateVIP(ctx, store.CreateVIPParams{
-			ClusterID: clusterID, Address: netip.MustParseAddr(f.Address), Interface: f.Interface,
-			Vrid: toInt32(f.VRID), Description: f.Description,
-		})
-		if err != nil {
-			return err
-		}
-		return s.ev.Write(ctx, q, events.Event{
-			Actor: actor, SubjectType: "vip", SubjectID: v.ID.String(), ClusterID: &clusterID,
-			Action: "vip.created", Payload: snapshot(f),
-		})
+		v, err = s.CreateVIPTx(ctx, q, actor, clusterID, f)
+		return err
 	})
 	return v, err
+}
+
+// CreateVIPTx maakt een VIP binnen de transactie van de aanroeper.
+func (s *Service) CreateVIPTx(ctx context.Context, q *store.Queries, actor events.Actor, clusterID uuid.UUID, f VIPFields) (store.Vip, error) {
+	if err := f.normalize(); err != nil {
+		return store.Vip{}, err
+	}
+	v, err := q.CreateVIP(ctx, store.CreateVIPParams{
+		ClusterID: clusterID, Address: netip.MustParseAddr(f.Address), Interface: f.Interface,
+		Vrid: toInt32(f.VRID), Description: f.Description,
+	})
+	if err != nil {
+		return store.Vip{}, err
+	}
+	return v, s.ev.Write(ctx, q, events.Event{
+		Actor: actor, SubjectType: "vip", SubjectID: v.ID.String(), ClusterID: &clusterID,
+		Action: "vip.created", Payload: snapshot(f),
+	})
 }
 
 func (s *Service) UpdateVIP(ctx context.Context, actor events.Actor, id uuid.UUID, change func(*VIPFields)) (store.Vip, error) {

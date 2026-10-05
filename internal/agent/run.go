@@ -34,6 +34,9 @@ type Agent struct {
 	// Exec voert de systeemcommando's van een commando uit (systemctl); nil
 	// gebruikt exec. Tests vervangen het.
 	Exec func(ctx context.Context, name string, args ...string) ([]byte, error)
+	// Root is de bestandssysteemwortel voor deploystappen; leeg is "/".
+	// Tests gebruiken een map.
+	Root string
 
 	nc        *nats.Conn
 	factsNow  chan struct{}

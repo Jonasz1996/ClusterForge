@@ -298,6 +298,15 @@ func TestAgentDownloads(t *testing.T) {
 	if resp.StatusCode != 200 || !strings.HasPrefix(string(body), "#!/bin/sh") {
 		t.Fatalf("installatiescript: %d", resp.StatusCode)
 	}
+	resp, err = http.Get(e.srv.URL + "/install/golden-image.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ = io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if resp.StatusCode != 200 || !strings.HasPrefix(string(body), "#!/bin/bash") || !strings.Contains(string(body), "qm template") {
+		t.Fatalf("golden-image-script: %d", resp.StatusCode)
+	}
 	if err := os.WriteFile(filepath.Join(e.api.cfg.AgentDir, "cf-agent-linux-amd64"), []byte("binary"), 0o644); err != nil {
 		t.Fatal(err)
 	}

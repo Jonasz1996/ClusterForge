@@ -31,6 +31,8 @@ export class ApiError extends Error {
     public status: number,
     public code: string,
     message: string,
+    // field is het veld met de fout, zoals params.vip, als de server het noemt.
+    public field?: string,
   ) {
     super(message);
   }
@@ -44,6 +46,7 @@ export function unwrap<T>(res: { data?: T; error?: unknown; response: Response }
       res.response.status,
       body?.code ?? "unknown",
       body?.message ?? `Onverwachte fout (${res.response.status})`,
+      body?.field,
     );
   }
   return res.data as T;

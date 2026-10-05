@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"runtime/debug"
+	"slices"
 	"sync"
 	"time"
 
@@ -28,6 +29,10 @@ var (
 	ErrNotFound = errors.New("taak niet gevonden")
 	// ErrFinished betekent dat de taak al klaar is en niet meer te annuleren.
 	ErrFinished = errors.New("taak is al klaar")
+	// ErrNotRetryable betekent dat dit soort taak niet opnieuw kan.
+	ErrNotRetryable = errors.New("deze taak kan niet opnieuw; start een nieuwe")
+	// ErrNotFailed betekent dat de taak nog loopt of gelukt is.
+	ErrNotFailed = errors.New("alleen een mislukte of geannuleerde taak kan opnieuw")
 
 	// errShutdown is de oorzaak als de server stopt; de taak wordt dan later
 	// hervat in plaats van als mislukt gemarkeerd.
@@ -72,6 +77,8 @@ type Runner struct {
 	// Finished wordt aangeroepen als een taak klaar is. Mag nil zijn.
 	Finished func(store.Job)
 
+	retryable []string
+
 	kick    chan struct{}
 	mu      sync.Mutex
 	running map[uuid.UUID]context.CancelCauseFunc
@@ -98,6 +105,21 @@ func (r *Runner) Kick() {
 
 // Enqueue zet een taak in de wachtrij en legt vast wie hem vroeg.
 func (r *Runner) Enqueue(ctx context.Context, s Spec) (store.Job, error) {
+	var j store.Job
+	err := pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
+		var err error
+		j, err = r.EnqueueTx(ctx, store.New(tx), s)
+		return err
+	})
+	if err == nil {
+		r.Kick()
+	}
+	return j, err
+}
+
+// EnqueueTx zet een taak in de wachtrij binnen een transactie van de
+// aanroeper. Roep na de commit Kick aan.
+func (r *Runner) EnqueueTx(ctx context.Context, q *store.Queries, s Spec) (store.Job, error) {
 	params, err := json.Marshal(s.Params)
 	if err != nil {
 		return store.Job{}, err
@@ -108,25 +130,52 @@ func (r *Runner) Enqueue(ctx context.Context, s Spec) (store.Job, error) {
 			requestedBy = &id
 		}
 	}
-	var j store.Job
-	err = pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
-		q := store.New(tx)
-		j, err = q.CreateJob(ctx, store.CreateJobParams{
-			Kind: s.Kind, Title: s.Title, Params: params, ClusterID: s.ClusterID, NodeID: s.NodeID,
-			ProxmoxID: s.ProxmoxID, RequestedBy: requestedBy,
-		})
-		if err != nil {
-			return err
-		}
-		return r.ev.Write(ctx, q, events.Event{
-			Actor: s.Actor, SubjectType: "job", SubjectID: j.ID.String(), ClusterID: j.ClusterID,
-			Action: "job.queued", Payload: map[string]any{"kind": j.Kind, "title": j.Title, "node_id": j.NodeID},
-		})
+	j, err := q.CreateJob(ctx, store.CreateJobParams{
+		Kind: s.Kind, Title: s.Title, Params: params, ClusterID: s.ClusterID, NodeID: s.NodeID,
+		ProxmoxID: s.ProxmoxID, RequestedBy: requestedBy,
 	})
-	if err == nil {
-		r.Kick()
+	if err != nil {
+		return store.Job{}, err
 	}
-	return j, err
+	return j, r.ev.Write(ctx, q, events.Event{
+		Actor: s.Actor, SubjectType: "job", SubjectID: j.ID.String(), ClusterID: j.ClusterID,
+		Action: "job.queued", Payload: map[string]any{"kind": j.Kind, "title": j.Title, "node_id": j.NodeID},
+	})
+}
+
+// Retryable geeft aan dat een mislukte taak van deze soort opnieuw kan
+// vanaf de stap die mislukte. Alleen voor soorten waarvan elke stap
+// hervatbaar is.
+func (r *Runner) Retryable(kind string) { r.retryable = append(r.retryable, kind) }
+
+// CanRetry is true als een taak van deze soort opnieuw kan.
+func (r *Runner) CanRetry(kind string) bool { return slices.Contains(r.retryable, kind) }
+
+// Retry zet een mislukte of geannuleerde taak opnieuw in de wachtrij. Stappen
+// die lukten, worden overgeslagen.
+func (r *Runner) Retry(ctx context.Context, id uuid.UUID, actor events.Actor) (store.Job, error) {
+	j, err := r.q.RetryJob(ctx, store.RetryJobParams{ID: id, Kinds: r.retryable})
+	if errors.Is(err, pgx.ErrNoRows) {
+		cur, gerr := r.q.GetJob(ctx, id)
+		switch {
+		case errors.Is(gerr, pgx.ErrNoRows):
+			return store.Job{}, ErrNotFound
+		case gerr != nil:
+			return store.Job{}, gerr
+		case !r.CanRetry(cur.Job.Kind):
+			return store.Job{}, ErrNotRetryable
+		}
+		return store.Job{}, ErrNotFailed
+	}
+	if err != nil {
+		return store.Job{}, err
+	}
+	_ = r.ev.Write(ctx, nil, events.Event{
+		Actor: actor, SubjectType: "job", SubjectID: id.String(), ClusterID: j.ClusterID,
+		Action: "job.retried", Payload: map[string]any{"kind": j.Kind, "title": j.Title, "node_id": j.NodeID},
+	})
+	r.Kick()
+	return j, nil
 }
 
 // Cancel annuleert een taak. Een wachtende taak stopt meteen; een lopende

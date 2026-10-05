@@ -26,6 +26,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/agentbus"
 	"github.com/Jonasz1996/clusterforge/internal/auth"
 	"github.com/Jonasz1996/clusterforge/internal/config"
+	"github.com/Jonasz1996/clusterforge/internal/deploy"
 	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/httpapi"
 	"github.com/Jonasz1996/clusterforge/internal/jobs"
@@ -141,6 +142,8 @@ func serve() error {
 	pve.Changed = eval.Kick
 	life := lifecycle.NewService(pool, ev, log, runner, bus)
 	life.Changed = eval.Kick
+	dep := deploy.NewService(pool, ev, log, runner, box, pve, bus)
+	dep.Changed = eval.Kick
 	go hub.Run(ctx)
 	go eval.Run(ctx)
 	go ingest.Run(ctx)
@@ -155,7 +158,7 @@ func serve() error {
 		Addr: cfg.Listen,
 		Handler: httpapi.New(httpapi.Deps{
 			Config: cfg, Log: log, Pool: pool, Auth: authSvc, Bus: bus, Hub: hub, Proxmox: pve, Jobs: runner,
-			Lifecycle: life, Version: version,
+			Lifecycle: life, Deploy: dep, Version: version,
 		}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,

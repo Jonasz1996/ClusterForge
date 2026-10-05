@@ -10,10 +10,13 @@ import (
 
 // Version is de protocolversie. Een agent meldt die bij elke heartbeat, zodat
 // de server geen berichten stuurt die de agent niet kent.
-const Version = 2
+const Version = 3
 
 // CommandsSince is de eerste protocolversie met commando's.
 const CommandsSince = 2
+
+// ApplySince is de eerste protocolversie die deploystappen uitvoert.
+const ApplySince = 3
 
 // Berichttypes.
 const (
@@ -180,6 +183,9 @@ const (
 	// CmdMaintenanceExit zet keepalived terug zoals het voor het onderhoud
 	// stond.
 	CmdMaintenanceExit = "node.maintenance.exit"
+	// CmdApply voert deploystappen uit, in volgorde, en stopt bij de eerste
+	// die mislukt.
+	CmdApply = "apply.steps"
 )
 
 // Command is een opdracht van de server. De server stuurt het als request op
@@ -193,6 +199,8 @@ type Command struct {
 	Deadline     time.Time `json:"deadline"`
 	Reason       string    `json:"reason,omitempty"`
 	DelaySeconds int       `json:"delay_seconds,omitempty"`
+	// Steps zijn de stappen van CmdApply.
+	Steps []Step `json:"steps,omitempty"`
 }
 
 // Result is het antwoord van de agent op een commando.
@@ -203,6 +211,97 @@ type Result struct {
 	// Repeat is true als de agent dit commando al eerder kreeg en het niet
 	// opnieuw uitvoerde.
 	Repeat bool `json:"repeat,omitempty"`
+	// Steps is het resultaat per stap van CmdApply, tot en met de stap die
+	// mislukte.
+	Steps []StepResult `json:"steps,omitempty"`
+}
+
+// Step is één deploystap. Precies één veld is gezet. Elke stap is
+// idempotent: hij kijkt eerst hoe het ervoor staat en verandert alleen wat
+// anders is.
+type Step struct {
+	Package   *PackageStep   `json:"package,omitempty"`
+	File      *FileStep      `json:"file,omitempty"`
+	Service   *ServiceStep   `json:"service,omitempty"`
+	User      *UserStep      `json:"user,omitempty"`
+	Directory *DirectoryStep `json:"directory,omitempty"`
+	Command   *CommandStep   `json:"command,omitempty"`
+}
+
+// PackageStep installeert of verwijdert apt-pakketten.
+type PackageStep struct {
+	Names []string `json:"names"`
+	// State is present (standaard) of absent.
+	State string `json:"state,omitempty"`
+}
+
+// FileStep schrijft een bestand. De server rendert de inhoud; de agent
+// schrijft hem alleen als hij anders is.
+type FileStep struct {
+	Path    string `json:"path"`
+	Content string `json:"content"`
+	// Mode is octaal, zoals "0644"; leeg is 0644.
+	Mode  string `json:"mode,omitempty"`
+	Owner string `json:"owner,omitempty"`
+	Group string `json:"group,omitempty"`
+}
+
+// ServiceStep zet een systemd-service aan of uit.
+type ServiceStep struct {
+	Name    string `json:"name"`
+	Enabled *bool  `json:"enabled,omitempty"`
+	// State is started, stopped, restarted of reloaded; leeg laat hem zoals
+	// hij is.
+	State string `json:"state,omitempty"`
+}
+
+// UserStep maakt een gebruiker aan als die nog niet bestaat.
+type UserStep struct {
+	Name   string `json:"name"`
+	System bool   `json:"system,omitempty"`
+	Home   string `json:"home,omitempty"`
+	Shell  string `json:"shell,omitempty"`
+}
+
+// DirectoryStep maakt een map met de gegeven rechten.
+type DirectoryStep struct {
+	Path  string `json:"path"`
+	Mode  string `json:"mode,omitempty"`
+	Owner string `json:"owner,omitempty"`
+	Group string `json:"group,omitempty"`
+}
+
+// CommandStep voert een shellcommando uit, maar alleen als Creates nog niet
+// bestaat of Unless niet lukt. Een van beide is verplicht, zodat de stap
+// idempotent blijft.
+type CommandStep struct {
+	Run     string `json:"run"`
+	Creates string `json:"creates,omitempty"`
+	Unless  string `json:"unless,omitempty"`
+}
+
+// StepResult is het resultaat van één stap.
+type StepResult struct {
+	Changed bool     `json:"changed"`
+	Output  []string `json:"output,omitempty"`
+	Error   string   `json:"error,omitempty"`
+}
+
+// Kind geeft het soort stap, of "" als er geen of meer dan één veld gezet is.
+func (s Step) Kind() string {
+	kind := ""
+	for k, set := range map[string]bool{
+		"package": s.Package != nil, "file": s.File != nil, "service": s.Service != nil,
+		"user": s.User != nil, "directory": s.Directory != nil, "command": s.Command != nil,
+	} {
+		if set {
+			if kind != "" {
+				return ""
+			}
+			kind = k
+		}
+	}
+	return kind
 }
 
 // Ack is het antwoord van de server op een request.
