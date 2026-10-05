@@ -20,6 +20,7 @@ Het technisch ontwerp staat in [docs/design/mvp-fase-1.md](docs/design/mvp-fase-
 | --- | --- | --- |
 | 1. Logboek | Wie deed wat, wanneer en vanaf waar; filters en export | klaar |
 | 2. Back-ups | Versheid van de Proxmox-back-ups per VM, VM's zonder back-upjob | klaar |
+| 3. Herkomst en clusterslot | IP, sessie en taak bij elke regel, commando's aan agents in het logboek, één schrijvende taak per cluster | klaar |
 
 ## Draaien met Docker Compose
 
@@ -99,7 +100,7 @@ De status van nodes en clusters wordt elke 5 seconden opnieuw berekend:
 | Split-brain | | Een VIP op twee nodes tegelijk |
 | Onbekend | Geen agent | Geen agent op de actieve nodes |
 
-Nodes in onderhoud, draining, opbouw of uit dienst tellen niet mee voor het cluster. Elke statuswissel en elke VIP-verhuis komt in het [logboek](#logboek), en de webinterface werkt live bij.
+Een VIP mag 15 seconden op twee nodes of op geen enkele staan voordat het telt, zodat een gewone wissel geen vals split-brain geeft. Nodes in onderhoud, draining, opbouw of uit dienst tellen niet mee voor het cluster. Elke statuswissel en elke VIP-verhuis komt in het [logboek](#logboek), en de webinterface werkt live bij.
 
 Een node zonder agent of heartbeat die aan een Proxmox-VM gekoppeld is, krijgt zijn status van Proxmox: staat de VM uit, dan is de node Down met als reden "VM staat uit in Proxmox".
 
@@ -179,11 +180,13 @@ De agent voert alleen vaste soorten commando's uit: facts verzamelen, keepalived
 
 ## Taken
 
-Alles wat even duurt, zoals een VM migreren, een node herstarten of een cluster uitrollen, loopt als taak op de achtergrond. Bij Taken zie je wat er loopt en wat er gebeurd is, met per stap het logboek uit Proxmox. Een lopende taak kun je annuleren; ClusterForge stopt dan ook de taak in Proxmox. Valt de server weg tijdens een taak, dan gaat hij na de herstart verder waar hij was, zonder de actie in Proxmox nog eens te starten.
+Alles wat even duurt, zoals een VM migreren, een node herstarten of een cluster uitrollen, loopt als taak op de achtergrond. Bij Taken zie je wat er loopt en wat er gebeurd is, met per stap het logboek uit Proxmox. Een lopende taak kun je annuleren; ClusterForge stopt dan ook de taak in Proxmox. Valt de server weg tijdens een taak, dan gaat hij na de herstart verder waar hij was, zonder de actie in Proxmox nog eens te starten. Per cluster loopt hoogstens één taak die iets verandert, zoals een uitrol, een herstart of een VM-actie; een tweede krijgt de melding dat er al een taak loopt. Facts verversen telt niet mee.
 
 ## Logboek
 
 Bij Logboek (alleen voor beheerders) staat alles wat er in ClusterForge veranderde, nieuwste eerst: wie het deed (een gebruiker, de agent op een node, of het systeem namens wie de taak aanvroeg), wanneer, vanaf welk IP-adres en wat er veranderde. Klik een regel open voor de oude en nieuwe waarde per veld, de taak en de ruwe gegevens. Je filtert op periode, persoon, soort, cluster, node (ook verwijderde) en tekst. De filters staan in de adresbalk, zodat je een gefilterde weergave kunt doorsturen. Exporteren geeft dezelfde selectie als NDJSON-bestand (één regel per gebeurtenis, tot 100.000 regels), en elke export komt zelf in het logboek. De pagina van een cluster, node of taak toont onderaan de laatste tien regels.
+
+Elke regel draagt zijn herkomst: het IP-adres, de sessie (regels met dezelfde sessiecode komen uit dezelfde login) en de taak waar hij bij hoort. Elk commando dat ClusterForge naar een agent stuurt, zoals herstarten, keepalived uitzetten of een bestand schrijven, komt in het logboek voordat het vertrekt; lukt dat niet, dan gaat het commando niet weg. Van een bestand staan alleen het pad en een vingerafdruk, nooit de inhoud. Velden als wachtwoorden en geheimen staan er als "[verborgen]", en heel lange waarden worden ingekort. Mislukte aanmeldingen van agents en de loginlimiet komen per minuut hoogstens drie keer per IP-adres en tien keer in totaal in het logboek; de rest telt één samenvattende regel.
 
 Regels kunnen niet gewijzigd of verwijderd worden, ook niet met `TRUNCATE` in de database. Een mislukte login bewaart de gebruiker en de reden, maar nooit wat er in het naamveld getypt werd: dat is soms een wachtwoord.
 

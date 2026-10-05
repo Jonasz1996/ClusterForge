@@ -77,14 +77,17 @@ type Entry struct {
 	Actor    Actor     `json:"actor"`
 	// OnBehalfOf is de gebruiker die de taak aanvroeg waarvan dit event deel
 	// is, als het systeem het schreef.
-	OnBehalfOf *Ref           `json:"on_behalf_of"`
-	Subject    Subject        `json:"subject"`
-	Cluster    *Ref           `json:"cluster"`
-	Node       *Ref           `json:"node"`
-	Job        *Ref           `json:"job"`
-	IP         *string        `json:"ip"`
-	Changes    []Change       `json:"changes"`
-	Payload    map[string]any `json:"payload"`
+	OnBehalfOf *Ref    `json:"on_behalf_of"`
+	Subject    Subject `json:"subject"`
+	Cluster    *Ref    `json:"cluster"`
+	Node       *Ref    `json:"node"`
+	Job        *Ref    `json:"job"`
+	IP         *string `json:"ip"`
+	// Session is het begin van de sessiehash: regels met dezelfde waarde
+	// komen uit dezelfde login.
+	Session *string        `json:"session"`
+	Changes []Change       `json:"changes"`
+	Payload map[string]any `json:"payload"`
 }
 
 type Service struct {

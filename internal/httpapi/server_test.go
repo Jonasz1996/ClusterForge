@@ -69,7 +69,8 @@ func newTestEnv(t *testing.T) *testEnv {
 	vm := newFakeVM(t)
 	ev := events.NewWriter(q, log)
 	eval := status.NewEvaluator(pool, ev, log)
-	eval.Warmup = 0
+	// Heartbeats komen hier elke 100 ms; een wissel duurt dus veel korter.
+	eval.Warmup, eval.VIPGrace = 0, time.Second
 	ingest := metrics.NewIngester(vm.srv.URL, q, log)
 	bus, err := agentbus.Start(ctx, "127.0.0.1:0", pool, ev, log, agentbus.Hooks{
 		Metrics: func(ctx context.Context, nodeID uuid.UUID, m protocol.Metrics) error {
@@ -93,6 +94,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	if err != nil {
 		t.Fatal(err)
 	}
+	bus.SetFingerprintKey(box.Derive(secrets.PurposeFile))
 	pve := proxmox.NewService(pool, ev, log, box, runner)
 	pve.TaskPoll = 20 * time.Millisecond
 	pve.Changed = eval.Kick

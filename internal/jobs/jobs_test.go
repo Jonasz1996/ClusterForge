@@ -87,6 +87,12 @@ func TestRunSucceedsAndFails(t *testing.T) {
 		if err := j.Decode(&p); err != nil {
 			return err
 		}
+		// Een event uit de handler hoort bij de taak.
+		if err := r.ev.Write(ctx, nil, events.Event{
+			Actor: events.System(), SubjectType: "node", SubjectID: "n1", Action: "node.updated",
+		}); err != nil {
+			return err
+		}
 		return j.Step(ctx, "groeten", func(ctx context.Context, s *Step) error {
 			s.Logf("hallo %s", p.Name)
 			return nil
@@ -96,7 +102,18 @@ func TestRunSucceedsAndFails(t *testing.T) {
 		return j.Step(ctx, "mislukken", func(ctx context.Context, s *Step) error { return errors.New("kapot") })
 	})
 	var finished atomic.Int32
-	r.Finished = func(store.Job) { finished.Add(1) }
+	statuses := sync.Map{}
+	for _, kind := range []string{"test.ok", "test.fail", "test.onbekend"} {
+		r.OnFinished(kind, func(_ context.Context, j store.Job) {
+			statuses.Store(j.ID, j.Status)
+			finished.Add(1)
+		})
+	}
+	// Een tweede abonnee op dezelfde soort hoort het ook, en een panic in
+	// de eerste houdt de tweede niet tegen.
+	var second atomic.Int32
+	r.OnFinished("test.ok", func(context.Context, store.Job) { panic("stuk") })
+	r.OnFinished("test.ok", func(context.Context, store.Job) { second.Add(1) })
 	stop := start(r)
 	defer stop()
 
@@ -131,8 +148,17 @@ func TestRunSucceedsAndFails(t *testing.T) {
 	for deadline := time.Now().Add(2 * time.Second); finished.Load() < 3 && time.Now().Before(deadline); {
 		time.Sleep(10 * time.Millisecond)
 	}
-	if finished.Load() != 3 {
-		t.Errorf("Finished %d keer", finished.Load())
+	if finished.Load() != 3 || second.Load() != 1 {
+		t.Errorf("OnFinished %d keer, tweede abonnee %d keer", finished.Load(), second.Load())
+	}
+	for id, want := range map[uuid.UUID]store.JobStatus{okJob.ID: store.JobStatusSucceeded, failJob.ID: store.JobStatusFailed, unknown.ID: store.JobStatusFailed} {
+		if got, _ := statuses.Load(id); got != want {
+			t.Errorf("OnFinished kreeg status %v, wil %s", got, want)
+		}
+	}
+	var jobRef string
+	if err := pool.QueryRow(ctx, "SELECT payload->'origin'->>'job_id' FROM events WHERE action = 'node.updated'").Scan(&jobRef); err != nil || jobRef != okJob.ID.String() {
+		t.Errorf("event uit de handler draagt job_id %q (%v)", jobRef, err)
 	}
 }
 
@@ -150,12 +176,23 @@ func TestCancel(t *testing.T) {
 		})
 	})
 
-	// Een wachtende taak stopt meteen.
+	var finished atomic.Int32
+	r.OnFinished("test.wait", func(_ context.Context, j store.Job) {
+		if j.Status == store.JobStatusCanceled {
+			finished.Add(1)
+		}
+	})
+
+	// Een wachtende taak stopt meteen, en zijn module hoort het, ook al
+	// draaide de handler nooit.
 	queued, _ := r.Enqueue(ctx, Spec{Kind: "test.wait", Title: "Wacht", Actor: events.System()})
 	if _, err := r.Cancel(ctx, queued.ID, events.System()); err != nil {
 		t.Fatal(err)
 	}
 	waitStatus(t, q, queued.ID, store.JobStatusCanceled)
+	if finished.Load() != 1 {
+		t.Errorf("OnFinished na annuleren in de wachtrij: %d", finished.Load())
+	}
 	if _, err := r.Cancel(ctx, queued.ID, events.System()); !errors.Is(err, ErrFinished) {
 		t.Errorf("tweede keer annuleren: %v", err)
 	}
@@ -250,5 +287,94 @@ func TestRequeueStale(t *testing.T) {
 	defer stop()
 	if done := waitStatus(t, q, j.ID, store.JobStatusSucceeded); done.Attempts != 2 {
 		t.Errorf("attempts = %d", done.Attempts)
+	}
+}
+
+func TestClusterSlot(t *testing.T) {
+	ctx := context.Background()
+	pool := storetest.DB(t)
+	q := store.New(pool)
+	r := newRunner(pool)
+	cluster := func(slug string) uuid.UUID {
+		c, err := q.CreateCluster(ctx, store.CreateClusterParams{Slug: slug, Name: "Cluster " + slug, Type: "keepalived", Environment: store.EnvironmentLab, Tags: []string{}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c.ID
+	}
+	web, db := cluster("web"), cluster("db")
+	node, err := q.CreateNode(ctx, store.CreateNodeParams{ClusterID: &web, Hostname: "web01", Lifecycle: store.NodeLifecycleActive, Tags: []string{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec := func(title string, c *uuid.UUID, n *uuid.UUID) Spec {
+		return Spec{Kind: "test.wait", Title: title, ClusterID: c, NodeID: n, Actor: events.System()}
+	}
+
+	// Een taak op een node van het cluster houdt het slot.
+	first, err := r.EnqueueForCluster(ctx, spec("Herstarten: web01", &web, &node.ID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = r.EnqueueForCluster(ctx, spec("VM stoppen", &web, nil))
+	var busy BusyError
+	if !errors.As(err, &busy) || busy.JobID != first.ID || busy.Title != "Herstarten: web01" || busy.Cluster != "Cluster web" {
+		t.Fatalf("tweede schrijvende taak: %v", err)
+	}
+	if busy.Error() != "in cluster Cluster web loopt al een taak (Herstarten: web01); wacht tot die klaar is" {
+		t.Errorf("melding: %s", busy.Error())
+	}
+	// Lezen telt niet mee, en een ander cluster ook niet.
+	if _, err := r.Enqueue(ctx, spec("Facts verversen", &web, &node.ID)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.EnqueueForCluster(ctx, spec("Uitrollen", &db, nil)); err != nil {
+		t.Fatal(err)
+	}
+	// Na afloop is het slot vrij.
+	if _, err := r.Cancel(ctx, first.ID, events.System()); err != nil {
+		t.Fatal(err)
+	}
+	stop, err := r.EnqueueForCluster(ctx, spec("VM stoppen", &web, nil))
+	if err != nil {
+		t.Fatalf("na annuleren: %v", err)
+	}
+	// Opnieuw proberen neemt het slot ook.
+	r.Retryable("test.wait")
+	if _, err := r.Retry(ctx, first.ID, events.System()); !errors.As(err, &busy) || busy.JobID != stop.ID {
+		t.Fatalf("opnieuw terwijl een ander het slot heeft: %v", err)
+	}
+	if _, err := r.Cancel(ctx, stop.ID, events.System()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.Retry(ctx, first.ID, events.System()); err != nil {
+		t.Fatalf("opnieuw: %v", err)
+	}
+	if _, err := r.EnqueueForCluster(ctx, spec("VM stoppen", &web, nil)); !errors.As(err, &busy) || busy.JobID != first.ID {
+		t.Fatalf("na opnieuw: %v", err)
+	}
+
+	// Twee gelijktijdige aanvragen: precies één krijgt het slot.
+	other := cluster("app")
+	var ok, refused atomic.Int32
+	var wg sync.WaitGroup
+	for range 8 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := r.EnqueueForCluster(ctx, spec("Tegelijk", &other, nil))
+			switch {
+			case err == nil:
+				ok.Add(1)
+			case errors.As(err, &BusyError{}):
+				refused.Add(1)
+			default:
+				t.Error(err)
+			}
+		}()
+	}
+	wg.Wait()
+	if ok.Load() != 1 || refused.Load() != 7 {
+		t.Fatalf("%d kregen het slot, %d geweigerd", ok.Load(), refused.Load())
 	}
 }

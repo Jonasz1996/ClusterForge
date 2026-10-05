@@ -28,6 +28,13 @@ var (
 	ErrNotFound     = errors.New("niet gevonden")
 )
 
+// TokenError zegt waarom een enrollmenttoken niet geldt: unknown, expired of
+// used_up. Voor de agent is het gewoon ErrInvalidToken.
+type TokenError struct{ Reason string }
+
+func (e TokenError) Error() string        { return ErrInvalidToken.Error() }
+func (e TokenError) Is(target error) bool { return target == ErrInvalidToken }
+
 type ValidationError struct{ Msg string }
 
 func (e ValidationError) Error() string { return e.Msg }
@@ -147,7 +154,7 @@ func (s *Service) Enroll(ctx context.Context, req protocol.EnrollRequest) (store
 	req.MachineID = strings.ToLower(strings.TrimSpace(req.MachineID))
 	switch {
 	case !strings.HasPrefix(req.Token, tokenPrefix):
-		return store.Agent{}, ErrInvalidToken
+		return store.Agent{}, TokenError{"unknown"}
 	case !nkeys.IsValidPublicUserKey(req.NkeyPublic):
 		return store.Agent{}, ValidationError{"ongeldige publieke sleutel"}
 	case !hostnameRe.MatchString(req.Hostname):
@@ -164,13 +171,16 @@ func (s *Service) Enroll(ctx context.Context, req protocol.EnrollRequest) (store
 	err := s.tx(ctx, func(q *store.Queries) error {
 		tok, err := q.LockEnrollmentTokenByHash(ctx, hashToken(req.Token))
 		if errors.Is(err, pgx.ErrNoRows) {
-			return ErrInvalidToken
+			return TokenError{"unknown"}
 		}
 		if err != nil {
 			return err
 		}
-		if time.Now().After(tok.ExpiresAt) || tok.Uses >= tok.MaxUses {
-			return ErrInvalidToken
+		switch {
+		case time.Now().After(tok.ExpiresAt):
+			return TokenError{"expired"}
+		case tok.Uses >= tok.MaxUses:
+			return TokenError{"used_up"}
 		}
 
 		var node store.Node

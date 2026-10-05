@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"slices"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -33,12 +34,20 @@ type Evaluator struct {
 	Warmup time.Duration
 	// Now is de klok; tests zetten hem vooruit.
 	Now func() time.Time
+	// VIPGrace is hoe lang een VIP op meerdere of geen nodes mag staan voor
+	// het telt; zie status.VIPGrace.
+	VIPGrace time.Duration
+
+	mu sync.Mutex
+	// unsettled is per VIP sinds wanneer het niet op precies één node staat.
+	unsettled map[uuid.UUID]time.Time
 }
 
 func NewEvaluator(pool *pgxpool.Pool, ev *events.Writer, log *slog.Logger) *Evaluator {
 	return &Evaluator{
 		pool: pool, ev: ev, log: log, kick: make(chan struct{}, 1),
-		started: time.Now(), Warmup: HeartbeatLate, Now: time.Now,
+		started: time.Now(), Warmup: HeartbeatLate, Now: time.Now, VIPGrace: VIPGrace,
+		unsettled: map[uuid.UUID]time.Time{},
 	}
 }
 
@@ -116,8 +125,10 @@ func (e *Evaluator) Evaluate(ctx context.Context) error {
 			if n.ClusterID == nil {
 				continue
 			}
-			cn := ClusterNode{ID: n.ID, Hostname: n.Hostname, Counts: n.Lifecycle == store.NodeLifecycleActive, Result: res}
-			if n.HasAgent && age >= 0 && age <= HeartbeatDown {
+			cn := ClusterNode{ID: n.ID, Hostname: n.Hostname, Counts: n.Lifecycle == store.NodeLifecycleActive, Result: res, HeartbeatAge: age}
+			// Een node waarvan de VM uit staat, heeft geen adressen meer,
+			// ook al is zijn laatste heartbeat nog jong.
+			if n.HasAgent && age >= 0 && age <= HeartbeatDown && n.VmStatus != "stopped" {
 				cn.Addresses = n.Addresses
 			}
 			perCluster[*n.ClusterID] = append(perCluster[*n.ClusterID], cn)
@@ -126,12 +137,18 @@ func (e *Evaluator) Evaluate(ctx context.Context) error {
 		for _, v := range vips {
 			vipsPerCluster[v.ClusterID] = append(vipsPerCluster[v.ClusterID], v)
 		}
+		seen := map[uuid.UUID]bool{}
 		for _, c := range clusters {
 			cv := make([]ClusterVIP, len(vipsPerCluster[c.ID]))
 			for i, v := range vipsPerCluster[c.ID] {
 				cv[i] = ClusterVIP{ID: v.ID, Address: v.Address.String()}
 			}
-			res := Cluster(perCluster[c.ID], cv)
+			holders := Holders(perCluster[c.ID], cv, e.VIPGrace)
+			for _, v := range vipsPerCluster[c.ID] {
+				seen[v.ID] = true
+				holders[v.ID] = Settle(holders[v.ID], v.OwnerNodeID, e.unsettledFor(v.ID, len(holders[v.ID]) == 1, now), e.VIPGrace)
+			}
+			res := ClusterWith(perCluster[c.ID], cv, holders)
 			if err := e.saveCluster(ctx, q, c, res.Result); err != nil {
 				return err
 			}
@@ -141,8 +158,36 @@ func (e *Evaluator) Evaluate(ctx context.Context) error {
 				}
 			}
 		}
+		e.forget(seen)
 		return nil
 	})
+}
+
+// unsettledFor zegt hoe lang een VIP al niet op precies één node staat.
+func (e *Evaluator) unsettledFor(id uuid.UUID, settled bool, now time.Time) time.Duration {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if settled {
+		delete(e.unsettled, id)
+		return 0
+	}
+	since, ok := e.unsettled[id]
+	if !ok {
+		e.unsettled[id] = now
+		return 0
+	}
+	return now.Sub(since)
+}
+
+// forget ruimt VIP's op die niet meer bestaan.
+func (e *Evaluator) forget(seen map[uuid.UUID]bool) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	for id := range e.unsettled {
+		if !seen[id] {
+			delete(e.unsettled, id)
+		}
+	}
 }
 
 func (e *Evaluator) saveNode(ctx context.Context, q *store.Queries, n store.ListNodeStatusInputsRow, res Result) error {

@@ -170,7 +170,7 @@ func (s *Server) RetryJob(w http.ResponseWriter, r *http.Request, id uuid.UUID) 
 	switch {
 	case errors.Is(err, jobs.ErrNotFound):
 		writeError(w, http.StatusNotFound, "not_found", "taak niet gevonden")
-	case errors.Is(err, jobs.ErrNotRetryable), errors.Is(err, jobs.ErrNotFailed):
+	case errors.Is(err, jobs.ErrNotRetryable), errors.Is(err, jobs.ErrNotFailed), errors.As(err, new(jobs.BusyError)):
 		writeError(w, http.StatusConflict, "conflict", err.Error())
 	case err != nil:
 		s.internalError(w, r, err)
@@ -180,6 +180,8 @@ func (s *Server) RetryJob(w http.ResponseWriter, r *http.Request, id uuid.UUID) 
 			s.internalError(w, r, err)
 			return
 		}
-		writeJSON(w, http.StatusAccepted, toAPIJob(row.Job, row.RequestedByName))
+		// De taak zoals hij in de wachtrij kwam; de runner kan hem intussen
+		// al genomen hebben.
+		writeJSON(w, http.StatusAccepted, toAPIJob(j, row.RequestedByName))
 	}
 }

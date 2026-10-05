@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Jonasz1996/clusterforge/internal/auth"
+	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/httpapi/gen"
 	"github.com/Jonasz1996/clusterforge/internal/store"
 )
@@ -26,6 +27,10 @@ func (s *Server) GetHealth(w http.ResponseWriter, r *http.Request) {
 func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 	ip := clientIP(r)
 	if !s.loginLimiter.allow(ip) {
+		s.throttle.Write(r.Context(), ip, events.Event{
+			Actor: events.System(), SubjectType: "auth", SubjectID: "login", Action: "auth.rate_limited",
+			Payload: map[string]any{"ip": ip},
+		})
 		w.Header().Set("Retry-After", "6")
 		writeError(w, http.StatusTooManyRequests, "rate_limited", "te veel inlogpogingen, probeer het straks opnieuw")
 		return

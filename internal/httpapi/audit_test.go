@@ -44,6 +44,7 @@ type auditEntry struct {
 	Node    *auditRef `json:"node"`
 	Job     *auditRef `json:"job"`
 	IP      *string   `json:"ip"`
+	Session *string   `json:"session"`
 	Changes []struct {
 		Field string `json:"field"`
 		Label string `json:"label"`

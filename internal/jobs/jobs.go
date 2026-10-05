@@ -53,6 +53,22 @@ type Spec struct {
 	NodeID    *uuid.UUID
 	ProxmoxID *uuid.UUID
 	Actor     events.Actor
+
+	// clusterSlot zet EnqueueForCluster: de taak houdt het slot van zijn
+	// cluster tot hij klaar is.
+	clusterSlot bool
+}
+
+// BusyError betekent dat er in het cluster al een schrijvende taak wacht of
+// loopt.
+type BusyError struct {
+	Cluster string
+	JobID   uuid.UUID
+	Title   string
+}
+
+func (e BusyError) Error() string {
+	return fmt.Sprintf("in cluster %s loopt al een taak (%s); wacht tot die klaar is", e.Cluster, e.Title)
 }
 
 type Runner struct {
@@ -74,10 +90,9 @@ type Runner struct {
 	StaleAfter time.Duration
 	// MaxAttempts is hoe vaak een taak onderbroken mag worden.
 	MaxAttempts int32
-	// Finished wordt aangeroepen als een taak klaar is. Mag nil zijn.
-	Finished func(store.Job)
 
 	retryable []string
+	finished  map[string][]FinishedFunc
 
 	kick    chan struct{}
 	mu      sync.Mutex
@@ -94,6 +109,35 @@ func NewRunner(pool *pgxpool.Pool, ev *events.Writer, log *slog.Logger) *Runner 
 
 // Register koppelt een soort taak aan zijn handler. Alleen voor Run.
 func (r *Runner) Register(kind string, h HandlerFunc) { r.handlers[kind] = h }
+
+// FinishedFunc hoort dat een taak klaar is, met zijn eindstatus.
+type FinishedFunc func(ctx context.Context, j store.Job)
+
+// OnFinished laat fn weten dat een taak van deze soort klaar is: gelukt,
+// mislukt of geannuleerd, ook als zijn handler nooit draaide (geannuleerd in
+// de wachtrij, te vaak onderbroken). Zo rondt elke module haar eigen
+// gegevens af. Alleen bij het opstarten aanroepen.
+func (r *Runner) OnFinished(kind string, fn FinishedFunc) {
+	if r.finished == nil {
+		r.finished = map[string][]FinishedFunc{}
+	}
+	r.finished[kind] = append(r.finished[kind], fn)
+}
+
+func (r *Runner) notifyFinished(j store.Job) {
+	for _, fn := range r.finished[j.Kind] {
+		func() {
+			ctx, cancel := context.WithTimeout(events.WithJob(context.Background(), j.ID), 30*time.Second)
+			defer cancel()
+			defer func() {
+				if p := recover(); p != nil {
+					r.log.Error("panic na afloop van taak", "job", j.ID, "panic", p, "stack", string(debug.Stack()))
+				}
+			}()
+			fn(ctx, j)
+		}()
+	}
+}
 
 // Kick laat een wachtende worker meteen naar nieuwe taken kijken.
 func (r *Runner) Kick() {
@@ -132,7 +176,7 @@ func (r *Runner) EnqueueTx(ctx context.Context, q *store.Queries, s Spec) (store
 	}
 	j, err := q.CreateJob(ctx, store.CreateJobParams{
 		Kind: s.Kind, Title: s.Title, Params: params, ClusterID: s.ClusterID, NodeID: s.NodeID,
-		ProxmoxID: s.ProxmoxID, RequestedBy: requestedBy,
+		ProxmoxID: s.ProxmoxID, RequestedBy: requestedBy, ClusterSlot: s.clusterSlot,
 	})
 	if err != nil {
 		return store.Job{}, err
@@ -141,6 +185,54 @@ func (r *Runner) EnqueueTx(ctx context.Context, q *store.Queries, s Spec) (store
 		Actor: s.Actor, SubjectType: "job", SubjectID: j.ID.String(), ClusterID: j.ClusterID,
 		Action: "job.queued", Payload: map[string]any{"kind": j.Kind, "title": j.Title, "node_id": j.NodeID},
 	})
+}
+
+// EnqueueForCluster zet een schrijvende taak in de wachtrij, maar alleen als
+// er in zijn cluster geen andere wacht of loopt; anders is het een
+// BusyError. Een taak op een node van het cluster telt mee. Zo valt een
+// herstel nooit samen met een reboot of een VM-stop in hetzelfde cluster.
+// Zonder cluster is het gewoon Enqueue.
+func (r *Runner) EnqueueForCluster(ctx context.Context, s Spec) (store.Job, error) {
+	var j store.Job
+	err := pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
+		var err error
+		j, err = r.EnqueueForClusterTx(ctx, store.New(tx), s)
+		return err
+	})
+	if err == nil {
+		r.Kick()
+	}
+	return j, err
+}
+
+// EnqueueForClusterTx is EnqueueForCluster binnen een transactie van de
+// aanroeper. De clusterrij blijft vergrendeld tot de commit.
+func (r *Runner) EnqueueForClusterTx(ctx context.Context, q *store.Queries, s Spec) (store.Job, error) {
+	s.clusterSlot = true
+	if s.ClusterID != nil {
+		if err := lockSlot(ctx, q, *s.ClusterID, uuid.Nil); err != nil {
+			return store.Job{}, err
+		}
+	}
+	return r.EnqueueTx(ctx, q, s)
+}
+
+// lockSlot vergrendelt de clusterrij tot de commit en geeft een BusyError
+// als er in het cluster al een andere schrijvende taak dan self wacht of
+// loopt.
+func lockSlot(ctx context.Context, q *store.Queries, clusterID, self uuid.UUID) error {
+	name, err := q.LockClusterForJob(ctx, clusterID)
+	if err != nil {
+		return err
+	}
+	busy, err := q.GetClusterSlotJob(ctx, clusterID)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows) || err == nil && busy.ID == self:
+		return nil
+	case err != nil:
+		return err
+	}
+	return BusyError{Cluster: name, JobID: busy.ID, Title: busy.Title}
 }
 
 // Retryable geeft aan dat een mislukte taak van deze soort opnieuw kan
@@ -152,21 +244,32 @@ func (r *Runner) Retryable(kind string) { r.retryable = append(r.retryable, kind
 func (r *Runner) CanRetry(kind string) bool { return slices.Contains(r.retryable, kind) }
 
 // Retry zet een mislukte of geannuleerde taak opnieuw in de wachtrij. Stappen
-// die lukten, worden overgeslagen.
+// die lukten, worden overgeslagen. Een taak die het slot van zijn cluster
+// hield, moet het opnieuw kunnen nemen; anders is het een BusyError.
 func (r *Runner) Retry(ctx context.Context, id uuid.UUID, actor events.Actor) (store.Job, error) {
-	j, err := r.q.RetryJob(ctx, store.RetryJobParams{ID: id, Kinds: r.retryable})
-	if errors.Is(err, pgx.ErrNoRows) {
-		cur, gerr := r.q.GetJob(ctx, id)
+	var j store.Job
+	err := pgx.BeginFunc(ctx, r.pool, func(tx pgx.Tx) error {
+		q := store.New(tx)
+		cur, err := q.GetJob(ctx, id)
 		switch {
-		case errors.Is(gerr, pgx.ErrNoRows):
-			return store.Job{}, ErrNotFound
-		case gerr != nil:
-			return store.Job{}, gerr
-		case !r.CanRetry(cur.Job.Kind):
-			return store.Job{}, ErrNotRetryable
+		case errors.Is(err, pgx.ErrNoRows):
+			return ErrNotFound
+		case err != nil:
+			return err
+		case cur.Job.ClusterSlot && cur.Job.ClusterID != nil:
+			if err := lockSlot(ctx, q, *cur.Job.ClusterID, id); err != nil {
+				return err
+			}
 		}
-		return store.Job{}, ErrNotFailed
-	}
+		j, err = q.RetryJob(ctx, store.RetryJobParams{ID: id, Kinds: r.retryable})
+		switch {
+		case errors.Is(err, pgx.ErrNoRows) && !r.CanRetry(cur.Job.Kind):
+			return ErrNotRetryable
+		case errors.Is(err, pgx.ErrNoRows):
+			return ErrNotFailed
+		}
+		return err
+	})
 	if err != nil {
 		return store.Job{}, err
 	}
@@ -187,6 +290,7 @@ func (r *Runner) Cancel(ctx context.Context, id uuid.UUID, actor events.Actor) (
 			Actor: actor, SubjectType: "job", SubjectID: id.String(), ClusterID: j.ClusterID,
 			Action: "job.canceled", Payload: map[string]any{"kind": j.Kind, "title": j.Title},
 		})
+		r.notifyFinished(j)
 		return j, nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
@@ -303,7 +407,8 @@ func (r *Runner) execute(ctx context.Context, j store.Job) {
 		return
 	}
 
-	jctx, cancel := context.WithCancelCause(context.Background())
+	// Alles wat de handler doet, hoort in het logboek bij deze taak.
+	jctx, cancel := context.WithCancelCause(events.WithJob(context.Background(), j.ID))
 	defer cancel(nil)
 	stop := context.AfterFunc(ctx, func() { cancel(errShutdown) })
 	defer stop()
@@ -401,9 +506,7 @@ func (r *Runner) finish(j store.Job, status store.JobStatus, msg string) {
 		Actor: events.System(), SubjectType: "job", SubjectID: j.ID.String(), ClusterID: j.ClusterID,
 		Action: "job." + string(status), Payload: payload,
 	})
-	if r.Finished != nil {
-		r.Finished(done)
-	}
+	r.notifyFinished(done)
 }
 
 // Interrupted is true als ctx afliep omdat de server stopt. De taak gaat na

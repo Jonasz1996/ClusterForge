@@ -293,6 +293,26 @@ func TestNodeLifecycle(t *testing.T) {
 	if l := lifecycleOf(lb01.ID); l != "active" {
 		t.Fatalf("lifecycle na reboot: %s", l)
 	}
+	// In het logboek: wie de taak vroeg en vanaf waar, en elk commando aan de
+	// agent als deel van de taak.
+	byJob := c.audit("job=" + j.ID).Items
+	if q := find(t, byJob, "job.queued"); q.IP == nil || *q.IP != "127.0.0.1" || q.Session == nil || q.Actor.Name != "admin" {
+		t.Fatalf("job.queued: %+v", q)
+	}
+	var commands []string
+	for _, it := range byJob {
+		if it.Action != "agent.command" {
+			continue
+		}
+		commands = append(commands, it.Summary)
+		if it.Actor.Type != "system" || it.OnBehalfOf == nil || it.OnBehalfOf.Name != "admin" || it.Node == nil || it.Node.ID != lb01.ID ||
+			it.Job == nil || it.Job.ID != j.ID {
+			t.Fatalf("agent.command: %+v", it)
+		}
+	}
+	if !slices.Contains(commands, "Commando aan lb01: herstarten (reden: kernelupdate)") || len(commands) < 3 {
+		t.Fatalf("commando's in het logboek: %q", commands)
+	}
 	clusterIs("VIP weer op lb01", "healthy", "lb01")
 
 	// Afsluiten zonder de VIP eerst weg te halen; lb02 heeft hem niet.

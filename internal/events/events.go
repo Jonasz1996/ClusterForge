@@ -4,7 +4,6 @@ package events
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
 
 	"github.com/google/uuid"
@@ -41,19 +40,18 @@ func NewWriter(q *store.Queries, log *slog.Logger) *Writer {
 
 // Write slaat een event op. q kan een transactie zijn, zodat het event samen
 // met de wijziging zelf wordt vastgelegd; nil gebruikt de standaardverbinding.
+// De herkomst uit ctx (IP, sessie, taak) komt onder payload.origin, en de
+// waarde van een veld als password of *_secret wordt "[verborgen]".
 func (w *Writer) Write(ctx context.Context, q *store.Queries, e Event) error {
 	if q == nil {
 		q = w.q
 	}
-	payload := []byte("{}")
-	if len(e.Payload) > 0 {
-		b, err := json.Marshal(e.Payload)
-		if err != nil {
-			return err
-		}
-		payload = b
+	payload, err := encodePayload(e.Payload, OriginFrom(ctx))
+	if err != nil {
+		w.log.ErrorContext(ctx, "event schrijven mislukt", "action", e.Action, "err", err)
+		return err
 	}
-	err := q.InsertEvent(ctx, store.InsertEventParams{
+	err = q.InsertEvent(ctx, store.InsertEventParams{
 		ActorType:   e.Actor.Type,
 		ActorID:     e.Actor.ID,
 		SubjectType: e.SubjectType,

@@ -592,7 +592,10 @@ type AuditEntry struct {
 	// OnBehalfOf De gebruiker die de taak aanvroeg, als het systeem dit namens hem deed
 	OnBehalfOf nullable.Nullable[AuditRef] `json:"on_behalf_of"`
 	Payload    map[string]interface{}      `json:"payload"`
-	Subject    struct {
+
+	// Session Het begin van de sessiehash; regels met dezelfde waarde komen uit dezelfde login
+	Session nullable.Nullable[string] `json:"session"`
+	Subject struct {
 		Deleted bool   `json:"deleted"`
 		Id      string `json:"id"`
 		Name    string `json:"name"`

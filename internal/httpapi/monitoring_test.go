@@ -187,6 +187,26 @@ func TestMonitoring(t *testing.T) {
 	a1.set("192.0.2.11")
 	clusterIs("failover", "healthy", owner("web02"))
 
+	// Een gewone wissel, waarbij het VIP heel even op beide of op geen enkele
+	// node staat, is geen split-brain en geen VIP zonder eigenaar.
+	statusChanges := func() int {
+		var n int
+		_ = e.pool.QueryRow(context.Background(), "SELECT count(*) FROM events WHERE action = 'cluster.status_changed' AND subject_id = $1", cl.ID).Scan(&n)
+		return n
+	}
+	before := statusChanges()
+	a1.set("192.0.2.11", "10.99.0.20")
+	time.Sleep(200 * time.Millisecond)
+	a2.set("192.0.2.12")
+	clusterIs("wissel naar web01", "healthy", owner("web01"))
+	a1.set("192.0.2.11")
+	time.Sleep(200 * time.Millisecond)
+	a2.set("192.0.2.12", "10.99.0.20")
+	clusterIs("wissel terug naar web02", "healthy", owner("web02"))
+	if n := statusChanges(); n != before {
+		t.Fatalf("%d statuswijzigingen tijdens een gewone wissel", n-before)
+	}
+
 	// web01 valt weg: de node is down, het cluster degraded.
 	stop1()
 	if _, err := e.pool.Exec(context.Background(), "UPDATE node_status SET heartbeat_at = now() - interval '5 minutes' WHERE node_id = $1", web01.ID); err != nil {

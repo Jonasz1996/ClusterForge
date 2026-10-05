@@ -13,7 +13,7 @@ import (
 )
 
 const cancelQueuedJob = `-- name: CancelQueuedJob :one
-UPDATE jobs SET status = 'canceled', finished_at = now() WHERE id = $1 AND status = 'queued' RETURNING id, kind, title, status, params, cluster_id, node_id, proxmox_id, requested_by, error, cancel_requested, attempts, created_at, started_at, finished_at, heartbeat_at
+UPDATE jobs SET status = 'canceled', finished_at = now() WHERE id = $1 AND status = 'queued' RETURNING id, kind, title, status, params, cluster_id, node_id, proxmox_id, requested_by, error, cancel_requested, attempts, created_at, started_at, finished_at, heartbeat_at, cluster_slot
 `
 
 func (q *Queries) CancelQueuedJob(ctx context.Context, id uuid.UUID) (Job, error) {
@@ -36,6 +36,7 @@ func (q *Queries) CancelQueuedJob(ctx context.Context, id uuid.UUID) (Job, error
 		&i.StartedAt,
 		&i.FinishedAt,
 		&i.HeartbeatAt,
+		&i.ClusterSlot,
 	)
 	return i, err
 }
@@ -46,7 +47,7 @@ SET status = 'running', attempts = attempts + 1, started_at = coalesce(started_a
 WHERE id = (
     SELECT j.id FROM jobs j WHERE j.status = 'queued' ORDER BY j.created_at FOR UPDATE SKIP LOCKED LIMIT 1
 )
-RETURNING id, kind, title, status, params, cluster_id, node_id, proxmox_id, requested_by, error, cancel_requested, attempts, created_at, started_at, finished_at, heartbeat_at
+RETURNING id, kind, title, status, params, cluster_id, node_id, proxmox_id, requested_by, error, cancel_requested, attempts, created_at, started_at, finished_at, heartbeat_at, cluster_slot
 `
 
 // Neemt de oudste wachtende taak; SKIP LOCKED laat meerdere workers naast
@@ -71,14 +72,15 @@ func (q *Queries) ClaimJob(ctx context.Context) (Job, error) {
 		&i.StartedAt,
 		&i.FinishedAt,
 		&i.HeartbeatAt,
+		&i.ClusterSlot,
 	)
 	return i, err
 }
 
 const createJob = `-- name: CreateJob :one
-INSERT INTO jobs (kind, title, params, cluster_id, node_id, proxmox_id, requested_by)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, kind, title, status, params, cluster_id, node_id, proxmox_id, requested_by, error, cancel_requested, attempts, created_at, started_at, finished_at, heartbeat_at
+INSERT INTO jobs (kind, title, params, cluster_id, node_id, proxmox_id, requested_by, cluster_slot)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+RETURNING id, kind, title, status, params, cluster_id, node_id, proxmox_id, requested_by, error, cancel_requested, attempts, created_at, started_at, finished_at, heartbeat_at, cluster_slot
 `
 
 type CreateJobParams struct {
@@ -89,6 +91,7 @@ type CreateJobParams struct {
 	NodeID      *uuid.UUID
 	ProxmoxID   *uuid.UUID
 	RequestedBy *uuid.UUID
+	ClusterSlot bool
 }
 
 func (q *Queries) CreateJob(ctx context.Context, arg CreateJobParams) (Job, error) {
@@ -100,6 +103,7 @@ func (q *Queries) CreateJob(ctx context.Context, arg CreateJobParams) (Job, erro
 		arg.NodeID,
 		arg.ProxmoxID,
 		arg.RequestedBy,
+		arg.ClusterSlot,
 	)
 	var i Job
 	err := row.Scan(
@@ -119,6 +123,7 @@ func (q *Queries) CreateJob(ctx context.Context, arg CreateJobParams) (Job, erro
 		&i.StartedAt,
 		&i.FinishedAt,
 		&i.HeartbeatAt,
+		&i.ClusterSlot,
 	)
 	return i, err
 }
@@ -126,7 +131,7 @@ func (q *Queries) CreateJob(ctx context.Context, arg CreateJobParams) (Job, erro
 const finishJob = `-- name: FinishJob :one
 UPDATE jobs SET status = $2, error = $3, finished_at = now()
 WHERE id = $1 AND status IN ('queued', 'running')
-RETURNING id, kind, title, status, params, cluster_id, node_id, proxmox_id, requested_by, error, cancel_requested, attempts, created_at, started_at, finished_at, heartbeat_at
+RETURNING id, kind, title, status, params, cluster_id, node_id, proxmox_id, requested_by, error, cancel_requested, attempts, created_at, started_at, finished_at, heartbeat_at, cluster_slot
 `
 
 type FinishJobParams struct {
@@ -155,12 +160,35 @@ func (q *Queries) FinishJob(ctx context.Context, arg FinishJobParams) (Job, erro
 		&i.StartedAt,
 		&i.FinishedAt,
 		&i.HeartbeatAt,
+		&i.ClusterSlot,
 	)
 	return i, err
 }
 
+const getClusterSlotJob = `-- name: GetClusterSlotJob :one
+SELECT j.id, j.title FROM jobs j
+WHERE j.cluster_slot AND j.status IN ('queued', 'running')
+  AND (j.cluster_id = $1::uuid OR j.node_id IN (SELECT n.id FROM nodes n WHERE n.cluster_id = $1::uuid))
+ORDER BY j.created_at
+LIMIT 1
+`
+
+type GetClusterSlotJobRow struct {
+	ID    uuid.UUID
+	Title string
+}
+
+// De wachtende of lopende schrijvende taak in een cluster, ook een taak op
+// een node van dat cluster.
+func (q *Queries) GetClusterSlotJob(ctx context.Context, clusterID uuid.UUID) (GetClusterSlotJobRow, error) {
+	row := q.db.QueryRow(ctx, getClusterSlotJob, clusterID)
+	var i GetClusterSlotJobRow
+	err := row.Scan(&i.ID, &i.Title)
+	return i, err
+}
+
 const getJob = `-- name: GetJob :one
-SELECT j.id, j.kind, j.title, j.status, j.params, j.cluster_id, j.node_id, j.proxmox_id, j.requested_by, j.error, j.cancel_requested, j.attempts, j.created_at, j.started_at, j.finished_at, j.heartbeat_at, u.username AS requested_by_name
+SELECT j.id, j.kind, j.title, j.status, j.params, j.cluster_id, j.node_id, j.proxmox_id, j.requested_by, j.error, j.cancel_requested, j.attempts, j.created_at, j.started_at, j.finished_at, j.heartbeat_at, j.cluster_slot, u.username AS requested_by_name
 FROM jobs j LEFT JOIN users u ON u.id = j.requested_by
 WHERE j.id = $1
 `
@@ -190,6 +218,7 @@ func (q *Queries) GetJob(ctx context.Context, id uuid.UUID) (GetJobRow, error) {
 		&i.Job.StartedAt,
 		&i.Job.FinishedAt,
 		&i.Job.HeartbeatAt,
+		&i.Job.ClusterSlot,
 		&i.RequestedByName,
 	)
 	return i, err
@@ -241,7 +270,7 @@ func (q *Queries) ListJobSteps(ctx context.Context, jobID uuid.UUID) ([]JobStep,
 }
 
 const listJobs = `-- name: ListJobs :many
-SELECT j.id, j.kind, j.title, j.status, j.params, j.cluster_id, j.node_id, j.proxmox_id, j.requested_by, j.error, j.cancel_requested, j.attempts, j.created_at, j.started_at, j.finished_at, j.heartbeat_at, u.username AS requested_by_name
+SELECT j.id, j.kind, j.title, j.status, j.params, j.cluster_id, j.node_id, j.proxmox_id, j.requested_by, j.error, j.cancel_requested, j.attempts, j.created_at, j.started_at, j.finished_at, j.heartbeat_at, j.cluster_slot, u.username AS requested_by_name
 FROM jobs j LEFT JOIN users u ON u.id = j.requested_by
 WHERE ($1::uuid IS NULL OR j.node_id = $1)
   AND ($2::uuid IS NULL OR j.proxmox_id = $2)
@@ -293,6 +322,7 @@ func (q *Queries) ListJobs(ctx context.Context, arg ListJobsParams) ([]ListJobsR
 			&i.Job.StartedAt,
 			&i.Job.FinishedAt,
 			&i.Job.HeartbeatAt,
+			&i.Job.ClusterSlot,
 			&i.RequestedByName,
 		); err != nil {
 			return nil, err
@@ -305,8 +335,21 @@ func (q *Queries) ListJobs(ctx context.Context, arg ListJobsParams) ([]ListJobsR
 	return items, nil
 }
 
+const lockClusterForJob = `-- name: LockClusterForJob :one
+SELECT name FROM clusters WHERE id = $1 FOR UPDATE
+`
+
+// Vergrendelt de clusterrij, zodat twee aanvragen het slot niet tegelijk
+// vrij zien.
+func (q *Queries) LockClusterForJob(ctx context.Context, id uuid.UUID) (string, error) {
+	row := q.db.QueryRow(ctx, lockClusterForJob, id)
+	var name string
+	err := row.Scan(&name)
+	return name, err
+}
+
 const requestJobCancel = `-- name: RequestJobCancel :one
-UPDATE jobs SET cancel_requested = true WHERE id = $1 AND status = 'running' RETURNING id, kind, title, status, params, cluster_id, node_id, proxmox_id, requested_by, error, cancel_requested, attempts, created_at, started_at, finished_at, heartbeat_at
+UPDATE jobs SET cancel_requested = true WHERE id = $1 AND status = 'running' RETURNING id, kind, title, status, params, cluster_id, node_id, proxmox_id, requested_by, error, cancel_requested, attempts, created_at, started_at, finished_at, heartbeat_at, cluster_slot
 `
 
 func (q *Queries) RequestJobCancel(ctx context.Context, id uuid.UUID) (Job, error) {
@@ -329,6 +372,7 @@ func (q *Queries) RequestJobCancel(ctx context.Context, id uuid.UUID) (Job, erro
 		&i.StartedAt,
 		&i.FinishedAt,
 		&i.HeartbeatAt,
+		&i.ClusterSlot,
 	)
 	return i, err
 }

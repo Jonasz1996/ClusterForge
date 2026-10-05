@@ -44,6 +44,8 @@ type Bus struct {
 	// internalToken is het wachtwoord van de eigen verbinding van de server.
 	// Het bestaat alleen in het geheugen van dit proces.
 	internalToken string
+	// fpKey maakt de vingerafdrukken van bestanden in agent.command.
+	fpKey []byte
 }
 
 // Hooks geven berichten van agents door aan de rest van de server. Elk veld

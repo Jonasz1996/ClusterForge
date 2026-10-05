@@ -49,3 +49,27 @@ func TestParseKey(t *testing.T) {
 		}
 	}
 }
+
+func TestDerive(t *testing.T) {
+	key := bytes.Repeat([]byte{7}, 32)
+	b, err := New(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a1, a2, other := b.Derive(PurposeFile), b.Derive(PurposeFile), b.Derive("iets anders")
+	if len(a1) != 32 || !bytes.Equal(a1, a2) || bytes.Equal(a1, other) || bytes.Equal(a1, key) {
+		t.Fatal("afgeleide sleutels kloppen niet")
+	}
+	b2, _ := New(bytes.Repeat([]byte{8}, 32))
+	if bytes.Equal(b2.Derive(PurposeFile), a1) {
+		t.Fatal("een andere masterkey geeft dezelfde sleutel")
+	}
+	var none *Box
+	if none.Derive(PurposeFile) != nil {
+		t.Fatal("zonder masterkey hoort er geen sleutel te zijn")
+	}
+	f1, f2 := Fingerprint(a1, []byte("auth_pass geheim12")), Fingerprint(a1, []byte("auth_pass geheim13"))
+	if len(f1) != 64 || f1 == f2 || f1 != Fingerprint(a1, []byte("auth_pass geheim12")) || f1 == Fingerprint(other, []byte("auth_pass geheim12")) {
+		t.Fatal("vingerafdrukken kloppen niet")
+	}
+}

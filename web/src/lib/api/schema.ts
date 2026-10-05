@@ -1109,6 +1109,8 @@ export interface components {
             node: components["schemas"]["AuditRef"] | null;
             job: components["schemas"]["AuditRef"] | null;
             ip: string | null;
+            /** @description Het begin van de sessiehash; regels met dezelfde waarde komen uit dezelfde login */
+            session: string | null;
             changes: components["schemas"]["AuditChange"][];
             payload: {
                 [key: string]: unknown;
