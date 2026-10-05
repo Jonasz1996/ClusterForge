@@ -310,6 +310,87 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/nodes/{nodeId}/metrics": {
+        parameters: {
+            query?: {
+                range?: components["schemas"]["MetricsRange"];
+            };
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        /** Grafieken van één node uit VictoriaMetrics */
+        get: operations["getNodeMetrics"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/clusters/{clusterId}/metrics": {
+        parameters: {
+            query?: {
+                range?: components["schemas"]["MetricsRange"];
+            };
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        /** Grafieken van een cluster, met een lijn per node */
+        get: operations["getClusterMetrics"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/stream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Live wijzigingen als Server-Sent Events
+         * @description Een event `change` per nieuw event in de eventlog, met als data een
+         *     JSON-object met id, action, subject_type, subject_id en cluster_id.
+         *     De stream sluit na enkele minuten; de browser verbindt dan opnieuw.
+         */
+        get: operations["stream"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/info": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Instellingen van de server die de webinterface nodig heeft */
+        get: operations["getInfo"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/enrollment-tokens": {
         parameters: {
             query?: never;
@@ -469,6 +550,12 @@ export interface components {
         Environment: "lab" | "test" | "prod";
         /** @enum {string} */
         NodeLifecycle: "provisioning" | "active" | "maintenance" | "draining" | "decommissioned";
+        /**
+         * @description Berekend uit heartbeats, metrics en VIP's (zie internal/status).
+         *     unknown betekent: geen agent of nog geen gegevens.
+         * @enum {string}
+         */
+        Status: "unknown" | "healthy" | "degraded" | "down" | "split_brain";
         Cluster: {
             /** Format: uuid */
             id: string;
@@ -478,8 +565,11 @@ export interface components {
             description: string;
             type: components["schemas"]["ClusterType"];
             environment: components["schemas"]["Environment"];
-            /** @description unknown tot de agent (mijlpaal 3) gegevens levert */
-            status: string;
+            status: components["schemas"]["Status"];
+            /** @description Waarom de status niet healthy is */
+            status_reason: string;
+            /** Format: date-time */
+            status_since: string | null;
             tags: string[];
             git_repo_url: string;
             /** Format: date-time */
@@ -519,6 +609,11 @@ export interface components {
         Node: {
             /** Format: uuid */
             id: string;
+            status: components["schemas"]["Status"];
+            /** @description Waarom de status niet healthy is */
+            status_reason: string;
+            /** Format: date-time */
+            status_since: string | null;
             /** @description De actieve agent, of null als er (nog) geen agent is */
             agent: components["schemas"]["AgentSummary"] | null;
             /** Format: uuid */
@@ -729,6 +824,43 @@ export interface components {
             nats_url: string;
             /** @description Hex-sha256 van het NATS-certificaat; de agent pint het */
             nats_cert_sha256: string;
+        };
+        /**
+         * @default 1h
+         * @enum {string}
+         */
+        MetricsRange: "1h" | "6h" | "24h" | "7d";
+        Metrics: {
+            range: components["schemas"]["MetricsRange"];
+            /** Format: date-time */
+            start: string;
+            /** Format: date-time */
+            end: string;
+            step_seconds: number;
+            /** @description Unix-tijden in seconden; de waarden van elke lijn horen hierbij */
+            timestamps: number[];
+            panels: components["schemas"]["MetricPanel"][];
+        };
+        MetricPanel: {
+            id: string;
+            title: string;
+            /** @enum {string} */
+            unit: "percent" | "load" | "bytes_per_second" | "celsius";
+            series: components["schemas"]["MetricSeries"][];
+        };
+        MetricSeries: {
+            label: string;
+            /** @description Eén waarde per tijdstip in timestamps; null als er geen meting is */
+            values: (number | null)[];
+        };
+        ServerInfo: {
+            version: string;
+            /** @description Of er een VictoriaMetrics is ingesteld */
+            metrics_enabled: boolean;
+            /** @description Link naar Grafana voor een node, met {hostname}, {node_id}, {cluster}, {cluster_id} en {env}; leeg als niet ingesteld */
+            grafana_node_url: string;
+            /** @description Link naar Grafana voor een cluster, met {cluster}, {cluster_id} en {env}; leeg als niet ingesteld */
+            grafana_cluster_url: string;
         };
     };
     responses: {
@@ -1359,6 +1491,104 @@ export interface operations {
             };
             401: components["responses"]["Error"];
             404: components["responses"]["Error"];
+        };
+    };
+    getNodeMetrics: {
+        parameters: {
+            query?: {
+                range?: components["schemas"]["MetricsRange"];
+            };
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Metrics"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    getClusterMetrics: {
+        parameters: {
+            query?: {
+                range?: components["schemas"]["MetricsRange"];
+            };
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Metrics"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    stream: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Stream */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string;
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    getInfo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ServerInfo"];
+                };
+            };
+            401: components["responses"]["Error"];
         };
     };
     listEnrollmentTokens: {

@@ -28,6 +28,9 @@ func (b *Bus) subscribe() error {
 	if _, err := b.nc.Subscribe("cf.node.*."+protocol.SubjectFacts, b.onFacts); err != nil {
 		return err
 	}
+	if _, err := b.nc.Subscribe("cf.node.*."+protocol.SubjectMetrics, b.onMetrics); err != nil {
+		return err
+	}
 	return b.nc.Flush()
 }
 
@@ -63,6 +66,14 @@ func (b *Bus) onHeartbeat(m *nats.Msg) {
 	defer cancel()
 	if err := b.handleHeartbeat(ctx, nodeID, hb); err != nil {
 		b.log.Error("heartbeat verwerken mislukt", "node", nodeID, "err", err)
+		return
+	}
+	b.changed()
+}
+
+func (b *Bus) changed() {
+	if b.hooks.Changed != nil {
+		b.hooks.Changed()
 	}
 }
 
@@ -80,54 +91,13 @@ func (b *Bus) handleHeartbeat(ctx context.Context, nodeID uuid.UUID, hb protocol
 		if err != nil {
 			return err
 		}
-		err = q.UpsertNodeStatus(ctx, store.UpsertNodeStatusParams{
+		// De VIP-eigenaar en de status berekent internal/status hieruit.
+		return q.UpsertNodeStatus(ctx, store.UpsertNodeStatusParams{
 			NodeID: nodeID, UptimeSeconds: hb.UptimeSeconds,
 			Load1: hb.Load[0], Load5: hb.Load[1], Load15: hb.Load[2],
 			Addresses: addrs, Services: services,
 		})
-		if err != nil {
-			return err
-		}
-		return b.reconcileVIPs(ctx, q, nodeID, addrs)
 	})
-}
-
-// reconcileVIPs zet de eigenaar van de VIP's in het cluster van de node: heeft
-// de node het adres op een interface, dan is hij eigenaar; is hij eigenaar maar
-// heeft hij het adres niet meer, dan is er (voorlopig) geen eigenaar.
-func (b *Bus) reconcileVIPs(ctx context.Context, q *store.Queries, nodeID uuid.UUID, addrs []string) error {
-	vips, err := q.ListVIPsForOwnership(ctx, nodeID)
-	if err != nil {
-		return err
-	}
-	for _, v := range vips {
-		has := slices.Contains(addrs, v.Address.String())
-		owned := v.OwnerNodeID != nil && *v.OwnerNodeID == nodeID
-		var newOwner *uuid.UUID
-		switch {
-		case has && !owned:
-			// Een VIP die de node niet bezit komt volgens de query altijd uit
-			// zijn eigen cluster.
-			newOwner = &nodeID
-		case !has && owned:
-			newOwner = nil
-		default:
-			continue
-		}
-		if err := q.SetVIPOwner(ctx, store.SetVIPOwnerParams{ID: v.ID, OwnerNodeID: newOwner}); err != nil {
-			return err
-		}
-		payload := map[string]any{"address": v.Address.String(), "from": v.OwnerNodeID, "to": newOwner}
-		cid := v.ClusterID
-		err := b.ev.Write(ctx, q, events.Event{
-			Actor: events.Actor{Type: store.ActorTypeAgent, ID: nodeID.String()}, SubjectType: "vip",
-			SubjectID: v.ID.String(), ClusterID: &cid, Action: "vip.owner_changed", Payload: payload,
-		})
-		if err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 func (b *Bus) onFacts(m *nats.Msg) {
@@ -154,8 +124,27 @@ func (b *Bus) onFacts(m *nats.Msg) {
 	err = b.handleFacts(ctx, nodeID, f)
 	if err != nil {
 		b.log.Error("facts verwerken mislukt", "node", nodeID, "err", err)
+	} else {
+		b.changed()
 	}
 	reply(err)
+}
+
+func (b *Bus) onMetrics(m *nats.Msg) {
+	if b.hooks.Metrics == nil {
+		return
+	}
+	var batch protocol.Metrics
+	nodeID, err := decode(m, protocol.TypeMetrics, &batch)
+	if err != nil {
+		b.log.Warn("ongeldige metrics", "subject", m.Subject, "err", err)
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := b.hooks.Metrics(ctx, nodeID, batch); err != nil {
+		b.log.Warn("metrics verwerken mislukt", "node", nodeID, "err", err)
+	}
 }
 
 func (b *Bus) handleFacts(ctx context.Context, nodeID uuid.UUID, f protocol.Facts) error {

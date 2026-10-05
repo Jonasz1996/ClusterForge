@@ -16,7 +16,7 @@ import (
 const createNode = `-- name: CreateNode :one
 INSERT INTO nodes (cluster_id, hostname, role, description, lifecycle, primary_ip, tags)
 VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, cluster_id, hostname, role, description, lifecycle, primary_ip, tags, created_at, updated_at
+RETURNING id, cluster_id, hostname, role, description, lifecycle, primary_ip, tags, created_at, updated_at, status, status_reason, status_since
 `
 
 type CreateNodeParams struct {
@@ -51,6 +51,9 @@ func (q *Queries) CreateNode(ctx context.Context, arg CreateNodeParams) (Node, e
 		&i.Tags,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Status,
+		&i.StatusReason,
+		&i.StatusSince,
 	)
 	return i, err
 }
@@ -68,7 +71,7 @@ func (q *Queries) DeleteNode(ctx context.Context, id uuid.UUID) (int64, error) {
 }
 
 const getNode = `-- name: GetNode :one
-SELECT n.id, n.cluster_id, n.hostname, n.role, n.description, n.lifecycle, n.primary_ip, n.tags, n.created_at, n.updated_at, c.slug AS cluster_slug, c.name AS cluster_name,
+SELECT n.id, n.cluster_id, n.hostname, n.role, n.description, n.lifecycle, n.primary_ip, n.tags, n.created_at, n.updated_at, n.status, n.status_reason, n.status_since, c.slug AS cluster_slug, c.name AS cluster_name,
        a.id AS agent_id, a.version AS agent_version, a.enrolled_at AS agent_enrolled_at,
        a.last_seen_at AS agent_last_seen_at
 FROM nodes n
@@ -101,6 +104,9 @@ func (q *Queries) GetNode(ctx context.Context, id uuid.UUID) (GetNodeRow, error)
 		&i.Node.Tags,
 		&i.Node.CreatedAt,
 		&i.Node.UpdatedAt,
+		&i.Node.Status,
+		&i.Node.StatusReason,
+		&i.Node.StatusSince,
 		&i.ClusterSlug,
 		&i.ClusterName,
 		&i.AgentID,
@@ -112,7 +118,7 @@ func (q *Queries) GetNode(ctx context.Context, id uuid.UUID) (GetNodeRow, error)
 }
 
 const listNodes = `-- name: ListNodes :many
-SELECT n.id, n.cluster_id, n.hostname, n.role, n.description, n.lifecycle, n.primary_ip, n.tags, n.created_at, n.updated_at, c.slug AS cluster_slug, c.name AS cluster_name,
+SELECT n.id, n.cluster_id, n.hostname, n.role, n.description, n.lifecycle, n.primary_ip, n.tags, n.created_at, n.updated_at, n.status, n.status_reason, n.status_since, c.slug AS cluster_slug, c.name AS cluster_name,
        a.id AS agent_id, a.version AS agent_version, a.enrolled_at AS agent_enrolled_at,
        a.last_seen_at AS agent_last_seen_at
 FROM nodes n
@@ -151,6 +157,9 @@ func (q *Queries) ListNodes(ctx context.Context) ([]ListNodesRow, error) {
 			&i.Node.Tags,
 			&i.Node.CreatedAt,
 			&i.Node.UpdatedAt,
+			&i.Node.Status,
+			&i.Node.StatusReason,
+			&i.Node.StatusSince,
 			&i.ClusterSlug,
 			&i.ClusterName,
 			&i.AgentID,
@@ -169,7 +178,7 @@ func (q *Queries) ListNodes(ctx context.Context) ([]ListNodesRow, error) {
 }
 
 const listNodesByCluster = `-- name: ListNodesByCluster :many
-SELECT n.id, n.cluster_id, n.hostname, n.role, n.description, n.lifecycle, n.primary_ip, n.tags, n.created_at, n.updated_at, c.slug AS cluster_slug, c.name AS cluster_name,
+SELECT n.id, n.cluster_id, n.hostname, n.role, n.description, n.lifecycle, n.primary_ip, n.tags, n.created_at, n.updated_at, n.status, n.status_reason, n.status_since, c.slug AS cluster_slug, c.name AS cluster_name,
        a.id AS agent_id, a.version AS agent_version, a.enrolled_at AS agent_enrolled_at,
        a.last_seen_at AS agent_last_seen_at
 FROM nodes n
@@ -209,6 +218,9 @@ func (q *Queries) ListNodesByCluster(ctx context.Context, clusterID *uuid.UUID) 
 			&i.Node.Tags,
 			&i.Node.CreatedAt,
 			&i.Node.UpdatedAt,
+			&i.Node.Status,
+			&i.Node.StatusReason,
+			&i.Node.StatusSince,
 			&i.ClusterSlug,
 			&i.ClusterName,
 			&i.AgentID,
@@ -227,7 +239,7 @@ func (q *Queries) ListNodesByCluster(ctx context.Context, clusterID *uuid.UUID) 
 }
 
 const lockNode = `-- name: LockNode :one
-SELECT id, cluster_id, hostname, role, description, lifecycle, primary_ip, tags, created_at, updated_at FROM nodes WHERE id = $1 FOR UPDATE
+SELECT id, cluster_id, hostname, role, description, lifecycle, primary_ip, tags, created_at, updated_at, status, status_reason, status_since FROM nodes WHERE id = $1 FOR UPDATE
 `
 
 func (q *Queries) LockNode(ctx context.Context, id uuid.UUID) (Node, error) {
@@ -244,6 +256,9 @@ func (q *Queries) LockNode(ctx context.Context, id uuid.UUID) (Node, error) {
 		&i.Tags,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Status,
+		&i.StatusReason,
+		&i.StatusSince,
 	)
 	return i, err
 }
@@ -253,7 +268,7 @@ UPDATE nodes
 SET cluster_id = $2, hostname = $3, role = $4, description = $5, lifecycle = $6,
     primary_ip = $7, tags = $8, updated_at = now()
 WHERE id = $1
-RETURNING id, cluster_id, hostname, role, description, lifecycle, primary_ip, tags, created_at, updated_at
+RETURNING id, cluster_id, hostname, role, description, lifecycle, primary_ip, tags, created_at, updated_at, status, status_reason, status_since
 `
 
 type UpdateNodeParams struct {
@@ -290,6 +305,9 @@ func (q *Queries) UpdateNode(ctx context.Context, arg UpdateNodeParams) (Node, e
 		&i.Tags,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Status,
+		&i.StatusReason,
+		&i.StatusSince,
 	)
 	return i, err
 }

@@ -17,7 +17,8 @@ import (
 	"github.com/Jonasz1996/clusterforge/pkg/protocol"
 )
 
-// Agent houdt de verbinding met de server en stuurt heartbeats en facts.
+// Agent houdt de verbinding met de server en stuurt heartbeats, metrics en
+// facts.
 type Agent struct {
 	Config    *Config
 	Version   string
@@ -25,6 +26,7 @@ type Agent struct {
 	Collector *Collector
 	// Intervallen; nul gebruikt de standaard uit protocol. Tests maken ze kort.
 	HeartbeatInterval time.Duration
+	MetricsInterval   time.Duration
 	FactsInterval     time.Duration
 
 	nc        *nats.Conn
@@ -92,7 +94,7 @@ func (a *Agent) signal(ch chan struct{}) {
 	}
 }
 
-// Run stuurt heartbeats en facts tot ctx afloopt.
+// Run stuurt heartbeats, metrics en facts tot ctx afloopt.
 func (a *Agent) Run(ctx context.Context) error {
 	if a.nc == nil {
 		if err := a.Connect(); err != nil {
@@ -103,15 +105,19 @@ func (a *Agent) Run(ctx context.Context) error {
 	if a.nc.IsConnected() {
 		a.signal(a.factsNow)
 	}
-	hbEvery, factsEvery := a.HeartbeatInterval, a.FactsInterval
+	hbEvery, metricsEvery, factsEvery := a.HeartbeatInterval, a.MetricsInterval, a.FactsInterval
 	if hbEvery == 0 {
 		hbEvery = protocol.HeartbeatInterval
+	}
+	if metricsEvery == 0 {
+		metricsEvery = protocol.MetricsInterval
 	}
 	if factsEvery == 0 {
 		factsEvery = protocol.FactsInterval
 	}
 
 	go a.factsLoop(ctx, factsEvery)
+	go a.metricsLoop(ctx, metricsEvery)
 
 	t := time.NewTicker(hbEvery)
 	defer t.Stop()
@@ -135,6 +141,26 @@ func (a *Agent) sendHeartbeat(ctx context.Context) {
 	hb := a.Collector.Heartbeat(ctx, a.Version)
 	if err := a.publish(protocol.SubjectHeartbeat, protocol.TypeHeartbeat, hb); err != nil {
 		a.Log.Warn("heartbeat sturen mislukt", "err", err)
+	}
+}
+
+// metricsLoop stuurt elke interval een batch metrics. Een batch die niet weg
+// kan, vervalt: de tellers lopen door en de volgende batch is weer actueel.
+func (a *Agent) metricsLoop(ctx context.Context, every time.Duration) {
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+		if !a.nc.IsConnected() {
+			continue
+		}
+		if err := a.publish(protocol.SubjectMetrics, protocol.TypeMetrics, a.Collector.Metrics()); err != nil {
+			a.Log.Warn("metrics sturen mislukt", "err", err)
+		}
 	}
 }
 

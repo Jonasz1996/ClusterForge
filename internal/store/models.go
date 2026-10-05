@@ -214,6 +214,8 @@ type Cluster struct {
 	TemplateVersion *string
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
+	StatusReason    string
+	StatusSince     *time.Time
 }
 
 type ClusterOwner struct {
@@ -247,16 +249,19 @@ type Event struct {
 }
 
 type Node struct {
-	ID          uuid.UUID
-	ClusterID   *uuid.UUID
-	Hostname    string
-	Role        string
-	Description string
-	Lifecycle   NodeLifecycle
-	PrimaryIp   *netip.Addr
-	Tags        []string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	ID           uuid.UUID
+	ClusterID    *uuid.UUID
+	Hostname     string
+	Role         string
+	Description  string
+	Lifecycle    NodeLifecycle
+	PrimaryIp    *netip.Addr
+	Tags         []string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+	Status       string
+	StatusReason string
+	StatusSince  *time.Time
 }
 
 type NodeFact struct {
@@ -276,6 +281,8 @@ type NodeStatus struct {
 	Load15        float64
 	Addresses     []string
 	Services      []byte
+	DiskUsedRatio float64
+	DiskUsedMount string
 }
 
 type ServerSecret struct {

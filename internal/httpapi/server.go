@@ -18,6 +18,8 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/httpapi/gen"
 	"github.com/Jonasz1996/clusterforge/internal/inventory"
+	"github.com/Jonasz1996/clusterforge/internal/live"
+	"github.com/Jonasz1996/clusterforge/internal/metrics"
 	"github.com/Jonasz1996/clusterforge/internal/store"
 	"github.com/Jonasz1996/clusterforge/internal/webui"
 )
@@ -31,6 +33,8 @@ type Server struct {
 	inv          *inventory.Service
 	agents       *agents.Service
 	bus          AgentBus
+	hub          *live.Hub
+	metrics      *metrics.Client
 	version      string
 	loginLimiter *ipLimiter
 	// enrollLimiter remt het raden van enrollmenttokens.
@@ -39,7 +43,7 @@ type Server struct {
 
 var _ gen.ServerInterface = (*Server)(nil)
 
-func New(cfg config.Config, log *slog.Logger, pool *pgxpool.Pool, authSvc *auth.Service, bus AgentBus, version string) *Server {
+func New(cfg config.Config, log *slog.Logger, pool *pgxpool.Pool, authSvc *auth.Service, bus AgentBus, hub *live.Hub, version string) *Server {
 	ev := events.NewWriter(store.New(pool), log)
 	inv := inventory.NewService(pool, ev)
 	inv.Disconnect = bus.Disconnect
@@ -52,6 +56,8 @@ func New(cfg config.Config, log *slog.Logger, pool *pgxpool.Pool, authSvc *auth.
 		inv:     inv,
 		agents:  agents.NewService(pool, ev, bus),
 		bus:     bus,
+		hub:     hub,
+		metrics: metrics.NewClient(cfg.VictoriaMetricsURL),
 		version: version,
 		// 10 pogingen direct, daarna één per 6 seconden per IP-adres.
 		loginLimiter:  newIPLimiter(6*time.Second, 10),

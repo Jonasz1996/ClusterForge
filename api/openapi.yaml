@@ -382,6 +382,66 @@ paths:
               schema: { $ref: "#/components/schemas/NodeRuntime" }
         "401": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /nodes/{nodeId}/metrics:
+    parameters:
+      - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: range, in: query, schema: { $ref: "#/components/schemas/MetricsRange" } }
+    get:
+      operationId: getNodeMetrics
+      summary: Grafieken van één node uit VictoriaMetrics
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Metrics" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /clusters/{clusterId}/metrics:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: range, in: query, schema: { $ref: "#/components/schemas/MetricsRange" } }
+    get:
+      operationId: getClusterMetrics
+      summary: Grafieken van een cluster, met een lijn per node
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Metrics" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /stream:
+    get:
+      operationId: stream
+      summary: Live wijzigingen als Server-Sent Events
+      description: |
+        Een event `change` per nieuw event in de eventlog, met als data een
+        JSON-object met id, action, subject_type, subject_id en cluster_id.
+        De stream sluit na enkele minuten; de browser verbindt dan opnieuw.
+      responses:
+        "200":
+          description: Stream
+          content:
+            text/event-stream:
+              schema: { type: string }
+        "401": { $ref: "#/components/responses/Error" }
+  /info:
+    get:
+      operationId: getInfo
+      summary: Instellingen van de server die de webinterface nodig heeft
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ServerInfo" }
+        "401": { $ref: "#/components/responses/Error" }
   /enrollment-tokens:
     get:
       operationId: listEnrollmentTokens
@@ -565,9 +625,15 @@ components:
     NodeLifecycle:
       type: string
       enum: [provisioning, active, maintenance, draining, decommissioned]
+    Status:
+      type: string
+      description: |
+        Berekend uit heartbeats, metrics en VIP's (zie internal/status).
+        unknown betekent: geen agent of nog geen gegevens.
+      enum: [unknown, healthy, degraded, down, split_brain]
     Cluster:
       type: object
-      required: [id, slug, name, description, type, environment, status, tags, git_repo_url, created_at, updated_at]
+      required: [id, slug, name, description, type, environment, status, status_reason, status_since, tags, git_repo_url, created_at, updated_at]
       properties:
         id: { type: string, format: uuid }
         slug: { type: string, description: "Korte unieke naam, bijvoorbeeld webcluster-prod" }
@@ -575,7 +641,9 @@ components:
         description: { type: string }
         type: { $ref: "#/components/schemas/ClusterType" }
         environment: { $ref: "#/components/schemas/Environment" }
-        status: { type: string, description: "unknown tot de agent (mijlpaal 3) gegevens levert" }
+        status: { $ref: "#/components/schemas/Status" }
+        status_reason: { type: string, description: Waarom de status niet healthy is }
+        status_since: { type: string, format: date-time, nullable: true }
         tags: { type: array, items: { type: string } }
         git_repo_url: { type: string }
         created_at: { type: string, format: date-time }
@@ -622,9 +690,12 @@ components:
         owner_ids: { type: array, items: { type: string, format: uuid } }
     Node:
       type: object
-      required: [id, cluster_id, cluster_slug, cluster_name, hostname, role, description, lifecycle, primary_ip, tags, created_at, updated_at, agent]
+      required: [id, cluster_id, cluster_slug, cluster_name, hostname, role, description, lifecycle, primary_ip, tags, created_at, updated_at, agent, status, status_reason, status_since]
       properties:
         id: { type: string, format: uuid }
+        status: { $ref: "#/components/schemas/Status" }
+        status_reason: { type: string, description: Waarom de status niet healthy is }
+        status_since: { type: string, format: date-time, nullable: true }
         agent:
           description: De actieve agent, of null als er (nog) geen agent is
           nullable: true
@@ -849,3 +920,53 @@ components:
         node_id: { type: string, format: uuid }
         nats_url: { type: string, description: Bijvoorbeeld tls://clusterforge.lan:4222 }
         nats_cert_sha256: { type: string, description: Hex-sha256 van het NATS-certificaat; de agent pint het }
+    MetricsRange:
+      type: string
+      enum: ["1h", "6h", "24h", "7d"]
+      default: "1h"
+    Metrics:
+      type: object
+      required: [range, start, end, step_seconds, timestamps, panels]
+      properties:
+        range: { $ref: "#/components/schemas/MetricsRange" }
+        start: { type: string, format: date-time }
+        end: { type: string, format: date-time }
+        step_seconds: { type: integer }
+        timestamps:
+          type: array
+          description: Unix-tijden in seconden; de waarden van elke lijn horen hierbij
+          items: { type: integer, format: int64 }
+        panels:
+          type: array
+          items: { $ref: "#/components/schemas/MetricPanel" }
+    MetricPanel:
+      type: object
+      required: [id, title, unit, series]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        unit: { type: string, enum: [percent, load, bytes_per_second, celsius] }
+        series:
+          type: array
+          items: { $ref: "#/components/schemas/MetricSeries" }
+    MetricSeries:
+      type: object
+      required: [label, values]
+      properties:
+        label: { type: string }
+        values:
+          type: array
+          description: Eén waarde per tijdstip in timestamps; null als er geen meting is
+          items: { type: number, format: double, nullable: true }
+    ServerInfo:
+      type: object
+      required: [version, metrics_enabled, grafana_node_url, grafana_cluster_url]
+      properties:
+        version: { type: string }
+        metrics_enabled: { type: boolean, description: Of er een VictoriaMetrics is ingesteld }
+        grafana_node_url:
+          type: string
+          description: Link naar Grafana voor een node, met {hostname}, {node_id}, {cluster}, {cluster_id} en {env}; leeg als niet ingesteld
+        grafana_cluster_url:
+          type: string
+          description: Link naar Grafana voor een cluster, met {cluster}, {cluster_id} en {env}; leeg als niet ingesteld

@@ -20,6 +20,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/google/uuid"
 	"golang.org/x/term"
 
 	"github.com/Jonasz1996/clusterforge/internal/agentbus"
@@ -27,7 +28,11 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/config"
 	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/httpapi"
+	"github.com/Jonasz1996/clusterforge/internal/live"
+	"github.com/Jonasz1996/clusterforge/internal/metrics"
+	"github.com/Jonasz1996/clusterforge/internal/status"
 	"github.com/Jonasz1996/clusterforge/internal/store"
+	"github.com/Jonasz1996/clusterforge/pkg/protocol"
 )
 
 // version wordt bij het bouwen gezet met -ldflags "-X main.version=...".
@@ -102,15 +107,29 @@ func serve() error {
 		log.Warn("er bestaan nog geen gebruikers; maak een beheerder aan met: clusterforge-server admin create -username <naam>")
 	}
 
-	bus, err := agentbus.Start(ctx, cfg.NATSListen, pool, ev, log)
+	eval := status.NewEvaluator(pool, ev, log)
+	ingest := metrics.NewIngester(cfg.VictoriaMetricsURL, q, log)
+	if !ingest.Enabled() {
+		log.Warn("CF_VICTORIAMETRICS_URL is niet gezet; metrics van agents worden niet bewaard")
+	}
+	bus, err := agentbus.Start(ctx, cfg.NATSListen, pool, ev, log, agentbus.Hooks{
+		Metrics: func(ctx context.Context, nodeID uuid.UUID, m protocol.Metrics) error {
+			return ingest.Ingest(ctx, nodeID, m, time.Now())
+		},
+		Changed: eval.Kick,
+	})
 	if err != nil {
 		return err
 	}
 	defer bus.Close()
+	hub := live.NewHub(pool, log)
+	go hub.Run(ctx)
+	go eval.Run(ctx)
+	go ingest.Run(ctx)
 
 	srv := &http.Server{
 		Addr:              cfg.Listen,
-		Handler:           httpapi.New(cfg, log, pool, authSvc, bus, version).Handler(),
+		Handler:           httpapi.New(cfg, log, pool, authSvc, bus, hub, version).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      60 * time.Second,

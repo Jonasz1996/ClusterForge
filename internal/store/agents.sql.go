@@ -107,7 +107,7 @@ func (q *Queries) DeleteEnrollmentToken(ctx context.Context, id uuid.UUID) (int6
 }
 
 const findNodeByHostname = `-- name: FindNodeByHostname :one
-SELECT id, cluster_id, hostname, role, description, lifecycle, primary_ip, tags, created_at, updated_at FROM nodes WHERE lower(hostname) = lower($1::text) FOR UPDATE
+SELECT id, cluster_id, hostname, role, description, lifecycle, primary_ip, tags, created_at, updated_at, status, status_reason, status_since FROM nodes WHERE lower(hostname) = lower($1::text) FOR UPDATE
 `
 
 func (q *Queries) FindNodeByHostname(ctx context.Context, hostname string) (Node, error) {
@@ -124,6 +124,9 @@ func (q *Queries) FindNodeByHostname(ctx context.Context, hostname string) (Node
 		&i.Tags,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Status,
+		&i.StatusReason,
+		&i.StatusSince,
 	)
 	return i, err
 }
@@ -209,7 +212,7 @@ func (q *Queries) GetNodeFacts(ctx context.Context, nodeID uuid.UUID) (NodeFact,
 }
 
 const getNodeStatus = `-- name: GetNodeStatus :one
-SELECT node_id, heartbeat_at, uptime_seconds, load1, load5, load15, addresses, services FROM node_status WHERE node_id = $1
+SELECT node_id, heartbeat_at, uptime_seconds, load1, load5, load15, addresses, services, disk_used_ratio, disk_used_mount FROM node_status WHERE node_id = $1
 `
 
 func (q *Queries) GetNodeStatus(ctx context.Context, nodeID uuid.UUID) (NodeStatus, error) {
@@ -224,6 +227,8 @@ func (q *Queries) GetNodeStatus(ctx context.Context, nodeID uuid.UUID) (NodeStat
 		&i.Load15,
 		&i.Addresses,
 		&i.Services,
+		&i.DiskUsedRatio,
+		&i.DiskUsedMount,
 	)
 	return i, err
 }
@@ -302,45 +307,6 @@ func (q *Queries) ListActiveEnrollmentTokens(ctx context.Context) ([]ListActiveE
 			&i.NodeHostname,
 			&i.ClusterName,
 			&i.CreatedByUsername,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listVIPsForOwnership = `-- name: ListVIPsForOwnership :many
-SELECT v.id, v.cluster_id, v.address, v.interface, v.vrid, v.description, v.owner_node_id, v.owner_since, v.created_at, v.updated_at FROM vips v
-WHERE v.cluster_id = (SELECT n.cluster_id FROM nodes n WHERE n.id = $1)
-   OR v.owner_node_id = $1
-FOR UPDATE OF v
-`
-
-// VIP's in het cluster van de node, plus VIP's die de node nu bezit.
-func (q *Queries) ListVIPsForOwnership(ctx context.Context, nodeID uuid.UUID) ([]Vip, error) {
-	rows, err := q.db.Query(ctx, listVIPsForOwnership, nodeID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []Vip{}
-	for rows.Next() {
-		var i Vip
-		if err := rows.Scan(
-			&i.ID,
-			&i.ClusterID,
-			&i.Address,
-			&i.Interface,
-			&i.Vrid,
-			&i.Description,
-			&i.OwnerNodeID,
-			&i.OwnerSince,
-			&i.CreatedAt,
-			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}

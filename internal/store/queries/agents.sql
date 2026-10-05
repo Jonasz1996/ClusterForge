@@ -88,12 +88,5 @@ SET facts = EXCLUDED.facts, collected_at = EXCLUDED.collected_at,
 -- name: SetNodePrimaryIPIfEmpty :exec
 UPDATE nodes SET primary_ip = $2, updated_at = now() WHERE id = $1 AND primary_ip IS NULL;
 
--- name: ListVIPsForOwnership :many
--- VIP's in het cluster van de node, plus VIP's die de node nu bezit.
-SELECT v.* FROM vips v
-WHERE v.cluster_id = (SELECT n.cluster_id FROM nodes n WHERE n.id = @node_id)
-   OR v.owner_node_id = @node_id
-FOR UPDATE OF v;
-
 -- name: SetVIPOwner :exec
 UPDATE vips SET owner_node_id = $2, owner_since = now() WHERE id = $1;

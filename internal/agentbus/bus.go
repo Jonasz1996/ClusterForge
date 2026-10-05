@@ -36,6 +36,7 @@ type Bus struct {
 	pool        *pgxpool.Pool
 	q           *store.Queries
 	ev          *events.Writer
+	hooks       Hooks
 	ns          *server.Server
 	nc          *nats.Conn
 	fingerprint string
@@ -44,9 +45,18 @@ type Bus struct {
 	internalToken string
 }
 
+// Hooks geven berichten van agents door aan de rest van de server. Elk veld
+// mag nil zijn.
+type Hooks struct {
+	// Metrics verwerkt een batch metrics van een node.
+	Metrics func(ctx context.Context, nodeID uuid.UUID, m protocol.Metrics) error
+	// Changed wordt aangeroepen na elke heartbeat en nieuwe facts.
+	Changed func()
+}
+
 // Start start NATS op listen (host:poort; poort 0 kiest een vrije poort) en
 // verbindt de server er zelf mee.
-func Start(ctx context.Context, listen string, pool *pgxpool.Pool, ev *events.Writer, log *slog.Logger) (*Bus, error) {
+func Start(ctx context.Context, listen string, pool *pgxpool.Pool, ev *events.Writer, log *slog.Logger, hooks Hooks) (*Bus, error) {
 	host, portStr, err := net.SplitHostPort(listen)
 	if err != nil {
 		return nil, fmt.Errorf("NATS-adres %q: %w", listen, err)
@@ -68,7 +78,7 @@ func Start(ctx context.Context, listen string, pool *pgxpool.Pool, ev *events.Wr
 		return nil, err
 	}
 	b := &Bus{
-		log: log, pool: pool, q: q, ev: ev, fingerprint: fingerprint,
+		log: log, pool: pool, q: q, ev: ev, hooks: hooks, fingerprint: fingerprint,
 		internalToken: hex.EncodeToString(tok),
 	}
 
