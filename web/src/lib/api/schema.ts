@@ -157,6 +157,140 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Actieve gebruikers, voor bijvoorbeeld de keuze van owners */
+        get: operations["listUsers"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/clusters": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Alle clusters met aantallen nodes en VIP's */
+        get: operations["listClusters"];
+        put?: never;
+        /** Cluster aanmaken (admin) */
+        post: operations["createCluster"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/clusters/{clusterId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        /** Cluster met nodes, VIP's en owners */
+        get: operations["getCluster"];
+        put?: never;
+        post?: never;
+        /** Cluster verwijderen (admin); nodes blijven bestaan zonder cluster, VIP's verdwijnen */
+        delete: operations["deleteCluster"];
+        options?: never;
+        head?: never;
+        /** Cluster wijzigen (admin); alleen meegestuurde velden veranderen */
+        patch: operations["updateCluster"];
+        trace?: never;
+    };
+    "/clusters/{clusterId}/vips": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** VIP toevoegen aan een cluster (admin) */
+        post: operations["createVip"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/vips/{vipId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                vipId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** VIP verwijderen (admin) */
+        delete: operations["deleteVip"];
+        options?: never;
+        head?: never;
+        /** VIP wijzigen (admin) */
+        patch: operations["updateVip"];
+        trace?: never;
+    };
+    "/nodes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Alle nodes, met hun cluster */
+        get: operations["listNodes"];
+        put?: never;
+        /** Node aanmaken (admin) */
+        post: operations["createNode"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/nodes/{nodeId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        /** Eén node */
+        get: operations["getNode"];
+        put?: never;
+        post?: never;
+        /** Node verwijderen (admin) */
+        delete: operations["deleteNode"];
+        options?: never;
+        head?: never;
+        /** Node wijzigen (admin); cluster_id null haalt de node uit zijn cluster */
+        patch: operations["updateNode"];
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -231,6 +365,129 @@ export interface components {
             payload: {
                 [key: string]: unknown;
             };
+        };
+        UserRef: {
+            /** Format: uuid */
+            id: string;
+            username: string;
+        };
+        /** @enum {string} */
+        ClusterType: "keepalived" | "nginx" | "docker" | "cron" | "postgresql_ha" | "mariadb_ha" | "generic";
+        /** @enum {string} */
+        Environment: "lab" | "test" | "prod";
+        /** @enum {string} */
+        NodeLifecycle: "provisioning" | "active" | "maintenance" | "draining" | "decommissioned";
+        Cluster: {
+            /** Format: uuid */
+            id: string;
+            /** @description Korte unieke naam, bijvoorbeeld webcluster-prod */
+            slug: string;
+            name: string;
+            description: string;
+            type: components["schemas"]["ClusterType"];
+            environment: components["schemas"]["Environment"];
+            /** @description unknown tot de agent (mijlpaal 3) gegevens levert */
+            status: string;
+            tags: string[];
+            git_repo_url: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        ClusterListItem: components["schemas"]["Cluster"] & {
+            node_count: number;
+            vip_count: number;
+        };
+        ClusterDetail: components["schemas"]["Cluster"] & {
+            owners: components["schemas"]["UserRef"][];
+            nodes: components["schemas"]["Node"][];
+            vips: components["schemas"]["Vip"][];
+        };
+        ClusterInput: {
+            slug: string;
+            name: string;
+            description?: string;
+            type: components["schemas"]["ClusterType"];
+            environment: components["schemas"]["Environment"];
+            git_repo_url?: string;
+            tags?: string[];
+            owner_ids?: string[];
+        };
+        ClusterPatch: {
+            slug?: string;
+            name?: string;
+            description?: string;
+            type?: components["schemas"]["ClusterType"];
+            environment?: components["schemas"]["Environment"];
+            git_repo_url?: string;
+            tags?: string[];
+            owner_ids?: string[];
+        };
+        Node: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            cluster_id: string | null;
+            cluster_slug: string | null;
+            cluster_name: string | null;
+            hostname: string;
+            role: string;
+            description: string;
+            lifecycle: components["schemas"]["NodeLifecycle"];
+            primary_ip: string | null;
+            tags: string[];
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        NodeInput: {
+            hostname: string;
+            /** Format: uuid */
+            cluster_id?: string | null;
+            role?: string;
+            description?: string;
+            lifecycle?: components["schemas"]["NodeLifecycle"];
+            primary_ip?: string | null;
+            tags?: string[];
+        };
+        NodePatch: {
+            hostname?: string;
+            /** Format: uuid */
+            cluster_id?: string | null;
+            role?: string;
+            description?: string;
+            lifecycle?: components["schemas"]["NodeLifecycle"];
+            primary_ip?: string | null;
+            tags?: string[];
+        };
+        Vip: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            cluster_id: string;
+            address: string;
+            interface: string;
+            vrid: number | null;
+            description: string;
+            /** Format: uuid */
+            owner_node_id: string | null;
+            owner_hostname: string | null;
+            /** Format: date-time */
+            owner_since: string | null;
+        };
+        VipInput: {
+            address: string;
+            interface?: string;
+            vrid?: number | null;
+            description?: string;
+        };
+        VipPatch: {
+            address?: string;
+            interface?: string;
+            vrid?: number | null;
+            description?: string;
         };
     };
     responses: {
@@ -471,6 +728,372 @@ export interface operations {
             };
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
+        };
+    };
+    listUsers: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["UserRef"][];
+                    };
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    listClusters: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["ClusterListItem"][];
+                    };
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    createCluster: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClusterInput"];
+            };
+        };
+        responses: {
+            /** @description Aangemaakt */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClusterDetail"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    getCluster: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClusterDetail"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    deleteCluster: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Verwijderd */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    updateCluster: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClusterPatch"];
+            };
+        };
+        responses: {
+            /** @description Gewijzigd */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClusterDetail"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    createVip: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VipInput"];
+            };
+        };
+        responses: {
+            /** @description Aangemaakt */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Vip"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    deleteVip: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                vipId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Verwijderd */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    updateVip: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                vipId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VipPatch"];
+            };
+        };
+        responses: {
+            /** @description Gewijzigd */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Vip"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    listNodes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["Node"][];
+                    };
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    createNode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NodeInput"];
+            };
+        };
+        responses: {
+            /** @description Aangemaakt */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Node"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    getNode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Node"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    deleteNode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Verwijderd */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    updateNode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NodePatch"];
+            };
+        };
+        responses: {
+            /** @description Gewijzigd */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Node"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
         };
     };
 }

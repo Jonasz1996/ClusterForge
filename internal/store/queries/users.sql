@@ -29,3 +29,6 @@ UPDATE users SET totp_secret = NULL, totp_enabled_at = NULL, totp_last_step = NU
 -- latere) al gebruikt is.
 UPDATE users SET totp_last_step = $2
 WHERE id = $1 AND (totp_last_step IS NULL OR totp_last_step < $2);
+
+-- name: ListUsers :many
+SELECT id, username, role FROM users WHERE disabled_at IS NULL ORDER BY lower(username);

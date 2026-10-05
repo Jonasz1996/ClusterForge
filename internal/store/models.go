@@ -7,6 +7,7 @@ package store
 import (
 	"database/sql/driver"
 	"fmt"
+	"net/netip"
 	"time"
 
 	"github.com/google/uuid"
@@ -55,6 +56,94 @@ func (ns NullActorType) Value() (driver.Value, error) {
 	return string(ns.ActorType), nil
 }
 
+type Environment string
+
+const (
+	EnvironmentLab  Environment = "lab"
+	EnvironmentTest Environment = "test"
+	EnvironmentProd Environment = "prod"
+)
+
+func (e *Environment) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = Environment(s)
+	case string:
+		*e = Environment(s)
+	default:
+		return fmt.Errorf("unsupported scan type for Environment: %T", src)
+	}
+	return nil
+}
+
+type NullEnvironment struct {
+	Environment Environment
+	Valid       bool // Valid is true if Environment is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullEnvironment) Scan(value interface{}) error {
+	if value == nil {
+		ns.Environment, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.Environment.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullEnvironment) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.Environment), nil
+}
+
+type NodeLifecycle string
+
+const (
+	NodeLifecycleProvisioning   NodeLifecycle = "provisioning"
+	NodeLifecycleActive         NodeLifecycle = "active"
+	NodeLifecycleMaintenance    NodeLifecycle = "maintenance"
+	NodeLifecycleDraining       NodeLifecycle = "draining"
+	NodeLifecycleDecommissioned NodeLifecycle = "decommissioned"
+)
+
+func (e *NodeLifecycle) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = NodeLifecycle(s)
+	case string:
+		*e = NodeLifecycle(s)
+	default:
+		return fmt.Errorf("unsupported scan type for NodeLifecycle: %T", src)
+	}
+	return nil
+}
+
+type NullNodeLifecycle struct {
+	NodeLifecycle NodeLifecycle
+	Valid         bool // Valid is true if NodeLifecycle is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullNodeLifecycle) Scan(value interface{}) error {
+	if value == nil {
+		ns.NodeLifecycle, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.NodeLifecycle.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullNodeLifecycle) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.NodeLifecycle), nil
+}
+
 type UserRole string
 
 const (
@@ -97,6 +186,29 @@ func (ns NullUserRole) Value() (driver.Value, error) {
 	return string(ns.UserRole), nil
 }
 
+type Cluster struct {
+	ID              uuid.UUID
+	Slug            string
+	Name            string
+	Description     string
+	Type            string
+	Environment     Environment
+	GitRepoUrl      string
+	Tags            []string
+	Status          string
+	Spec            []byte
+	SpecRevision    int32
+	TemplateName    *string
+	TemplateVersion *string
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+}
+
+type ClusterOwner struct {
+	ClusterID uuid.UUID
+	UserID    uuid.UUID
+}
+
 type Event struct {
 	ID          int64
 	Ts          time.Time
@@ -107,6 +219,19 @@ type Event struct {
 	ClusterID   *uuid.UUID
 	Action      string
 	Payload     []byte
+}
+
+type Node struct {
+	ID          uuid.UUID
+	ClusterID   *uuid.UUID
+	Hostname    string
+	Role        string
+	Description string
+	Lifecycle   NodeLifecycle
+	PrimaryIp   *netip.Addr
+	Tags        []string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }
 
 type Session struct {
@@ -131,4 +256,17 @@ type User struct {
 	DisabledAt    *time.Time
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
+}
+
+type Vip struct {
+	ID          uuid.UUID
+	ClusterID   uuid.UUID
+	Address     netip.Addr
+	Interface   string
+	Vrid        *int32
+	Description string
+	OwnerNodeID *uuid.UUID
+	OwnerSince  *time.Time
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
 }

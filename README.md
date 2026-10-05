@@ -9,7 +9,7 @@ Het technisch ontwerp staat in [docs/design/mvp-fase-1.md](docs/design/mvp-fase-
 | Mijlpaal | Inhoud | Status |
 | --- | --- | --- |
 | 1. Fundament | Server, database, login met TOTP, webinterface, CI | klaar |
-| 2. Inventory | Clusters, nodes, VIP's | gepland |
+| 2. Inventory | Clusters, nodes, VIP's | klaar |
 | 3. Agent | Enrollment, heartbeat, facts | gepland |
 | 4. Monitoring | Metrics, status, dashboards | gepland |
 | 5. Proxmox | Sync en VM-acties | gepland |
@@ -80,6 +80,7 @@ internal/auth/             wachtwoorden (argon2id), TOTP, sessies
 internal/httpapi/          HTTP-handlers; gen/ is gegenereerd uit api/openapi.yaml
 internal/store/            sqlc-queries; queries/ is de bron
 internal/events/           append-only eventlog
+internal/inventory/        clusters, nodes en VIP's: validatie en wijzigingen met events
 internal/webui/            ingebedde webinterface
 migrations/                goose SQL-migraties
 api/openapi.yaml           API-specificatie, bron van waarheid

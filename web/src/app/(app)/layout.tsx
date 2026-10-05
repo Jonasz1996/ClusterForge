@@ -11,8 +11,8 @@ type NavItem = { href: string; label: string; soon?: string };
 // Onderdelen die later komen staan al in de navigatie, met de mijlpaal erbij.
 const nav: NavItem[] = [
   { href: "/", label: "Overzicht" },
-  { href: "/clusters", label: "Clusters", soon: "mijlpaal 2" },
-  { href: "/nodes", label: "Nodes", soon: "mijlpaal 2" },
+  { href: "/clusters", label: "Clusters" },
+  { href: "/nodes", label: "Nodes" },
   { href: "/monitoring", label: "Monitoring", soon: "mijlpaal 4" },
   { href: "/proxmox", label: "Proxmox", soon: "mijlpaal 5" },
   { href: "/templates", label: "Templates", soon: "mijlpaal 7" },
@@ -54,7 +54,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
                 key={item.href}
                 href={item.href}
                 className={`shrink-0 rounded-md px-3 py-2 text-sm font-medium ${
-                  pathname === item.href
+                  (item.href === "/" ? pathname === "/" : pathname.startsWith(item.href))
                     ? "bg-brand-50 text-brand-700 dark:bg-slate-800 dark:text-white"
                     : "text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800"
                 }`}

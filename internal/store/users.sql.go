@@ -114,6 +114,36 @@ func (q *Queries) GetUserByUsername(ctx context.Context, lower string) (User, er
 	return i, err
 }
 
+const listUsers = `-- name: ListUsers :many
+SELECT id, username, role FROM users WHERE disabled_at IS NULL ORDER BY lower(username)
+`
+
+type ListUsersRow struct {
+	ID       uuid.UUID
+	Username string
+	Role     UserRole
+}
+
+func (q *Queries) ListUsers(ctx context.Context) ([]ListUsersRow, error) {
+	rows, err := q.db.Query(ctx, listUsers)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListUsersRow{}
+	for rows.Next() {
+		var i ListUsersRow
+		if err := rows.Scan(&i.ID, &i.Username, &i.Role); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const setPendingTOTPSecret = `-- name: SetPendingTOTPSecret :exec
 UPDATE users SET totp_secret = $2, totp_enabled_at = NULL, totp_last_step = NULL, updated_at = now() WHERE id = $1
 `

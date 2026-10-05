@@ -10,9 +10,64 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/oapi-codegen/nullable"
 	"github.com/oapi-codegen/runtime"
 	openapi_types "github.com/oapi-codegen/runtime/types"
 )
+
+// Defines values for ClusterType.
+const (
+	Cron         ClusterType = "cron"
+	Docker       ClusterType = "docker"
+	Generic      ClusterType = "generic"
+	Keepalived   ClusterType = "keepalived"
+	MariadbHa    ClusterType = "mariadb_ha"
+	Nginx        ClusterType = "nginx"
+	PostgresqlHa ClusterType = "postgresql_ha"
+)
+
+// Valid indicates whether the value is a known member of the ClusterType enum.
+func (e ClusterType) Valid() bool {
+	switch e {
+	case Cron:
+		return true
+	case Docker:
+		return true
+	case Generic:
+		return true
+	case Keepalived:
+		return true
+	case MariadbHa:
+		return true
+	case Nginx:
+		return true
+	case PostgresqlHa:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for Environment.
+const (
+	Lab  Environment = "lab"
+	Prod Environment = "prod"
+	Test Environment = "test"
+)
+
+// Valid indicates whether the value is a known member of the Environment enum.
+func (e Environment) Valid() bool {
+	switch e {
+	case Lab:
+		return true
+	case Prod:
+		return true
+	case Test:
+		return true
+	default:
+		return false
+	}
+}
 
 // Defines values for EventActorType.
 const (
@@ -71,6 +126,33 @@ func (e HealthStatus) Valid() bool {
 	}
 }
 
+// Defines values for NodeLifecycle.
+const (
+	Active         NodeLifecycle = "active"
+	Decommissioned NodeLifecycle = "decommissioned"
+	Draining       NodeLifecycle = "draining"
+	Maintenance    NodeLifecycle = "maintenance"
+	Provisioning   NodeLifecycle = "provisioning"
+)
+
+// Valid indicates whether the value is a known member of the NodeLifecycle enum.
+func (e NodeLifecycle) Valid() bool {
+	switch e {
+	case Active:
+		return true
+	case Decommissioned:
+		return true
+	case Draining:
+		return true
+	case Maintenance:
+		return true
+	case Provisioning:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for Role.
 const (
 	Admin  Role = "admin"
@@ -95,6 +177,98 @@ type ChangePasswordRequest struct {
 	NewPassword     string `json:"new_password"`
 }
 
+// Cluster defines model for Cluster.
+type Cluster struct {
+	CreatedAt   time.Time          `json:"created_at"`
+	Description string             `json:"description"`
+	Environment Environment        `json:"environment"`
+	GitRepoUrl  string             `json:"git_repo_url"`
+	Id          openapi_types.UUID `json:"id"`
+	Name        string             `json:"name"`
+
+	// Slug Korte unieke naam, bijvoorbeeld webcluster-prod
+	Slug string `json:"slug"`
+
+	// Status unknown tot de agent (mijlpaal 3) gegevens levert
+	Status    string      `json:"status"`
+	Tags      []string    `json:"tags"`
+	Type      ClusterType `json:"type"`
+	UpdatedAt time.Time   `json:"updated_at"`
+}
+
+// ClusterDetail defines model for ClusterDetail.
+type ClusterDetail struct {
+	CreatedAt   time.Time          `json:"created_at"`
+	Description string             `json:"description"`
+	Environment Environment        `json:"environment"`
+	GitRepoUrl  string             `json:"git_repo_url"`
+	Id          openapi_types.UUID `json:"id"`
+	Name        string             `json:"name"`
+	Nodes       []Node             `json:"nodes"`
+	Owners      []UserRef          `json:"owners"`
+
+	// Slug Korte unieke naam, bijvoorbeeld webcluster-prod
+	Slug string `json:"slug"`
+
+	// Status unknown tot de agent (mijlpaal 3) gegevens levert
+	Status    string      `json:"status"`
+	Tags      []string    `json:"tags"`
+	Type      ClusterType `json:"type"`
+	UpdatedAt time.Time   `json:"updated_at"`
+	Vips      []Vip       `json:"vips"`
+}
+
+// ClusterInput defines model for ClusterInput.
+type ClusterInput struct {
+	Description *string               `json:"description,omitempty"`
+	Environment Environment           `json:"environment"`
+	GitRepoUrl  *string               `json:"git_repo_url,omitempty"`
+	Name        string                `json:"name"`
+	OwnerIds    *[]openapi_types.UUID `json:"owner_ids,omitempty"`
+	Slug        string                `json:"slug"`
+	Tags        *[]string             `json:"tags,omitempty"`
+	Type        ClusterType           `json:"type"`
+}
+
+// ClusterListItem defines model for ClusterListItem.
+type ClusterListItem struct {
+	CreatedAt   time.Time          `json:"created_at"`
+	Description string             `json:"description"`
+	Environment Environment        `json:"environment"`
+	GitRepoUrl  string             `json:"git_repo_url"`
+	Id          openapi_types.UUID `json:"id"`
+	Name        string             `json:"name"`
+	NodeCount   int                `json:"node_count"`
+
+	// Slug Korte unieke naam, bijvoorbeeld webcluster-prod
+	Slug string `json:"slug"`
+
+	// Status unknown tot de agent (mijlpaal 3) gegevens levert
+	Status    string      `json:"status"`
+	Tags      []string    `json:"tags"`
+	Type      ClusterType `json:"type"`
+	UpdatedAt time.Time   `json:"updated_at"`
+	VipCount  int         `json:"vip_count"`
+}
+
+// ClusterPatch defines model for ClusterPatch.
+type ClusterPatch struct {
+	Description *string               `json:"description,omitempty"`
+	Environment *Environment          `json:"environment,omitempty"`
+	GitRepoUrl  *string               `json:"git_repo_url,omitempty"`
+	Name        *string               `json:"name,omitempty"`
+	OwnerIds    *[]openapi_types.UUID `json:"owner_ids,omitempty"`
+	Slug        *string               `json:"slug,omitempty"`
+	Tags        *[]string             `json:"tags,omitempty"`
+	Type        *ClusterType          `json:"type,omitempty"`
+}
+
+// ClusterType defines model for ClusterType.
+type ClusterType string
+
+// Environment defines model for Environment.
+type Environment string
+
 // Error defines model for Error.
 type Error struct {
 	// Code Stabiele foutcode, bijvoorbeeld invalid_credentials of totp_required
@@ -104,15 +278,15 @@ type Error struct {
 
 // Event defines model for Event.
 type Event struct {
-	Action      string                 `json:"action"`
-	ActorId     string                 `json:"actor_id"`
-	ActorType   EventActorType         `json:"actor_type"`
-	ClusterId   *openapi_types.UUID    `json:"cluster_id,omitempty"`
-	Id          int64                  `json:"id"`
-	Payload     map[string]interface{} `json:"payload"`
-	SubjectId   string                 `json:"subject_id"`
-	SubjectType string                 `json:"subject_type"`
-	Ts          time.Time              `json:"ts"`
+	Action      string                                `json:"action"`
+	ActorId     string                                `json:"actor_id"`
+	ActorType   EventActorType                        `json:"actor_type"`
+	ClusterId   nullable.Nullable[openapi_types.UUID] `json:"cluster_id,omitempty"`
+	Id          int64                                 `json:"id"`
+	Payload     map[string]interface{}                `json:"payload"`
+	SubjectId   string                                `json:"subject_id"`
+	SubjectType string                                `json:"subject_type"`
+	Ts          time.Time                             `json:"ts"`
 }
 
 // EventActorType defines model for Event.ActorType.
@@ -147,6 +321,47 @@ type Me struct {
 	User             User      `json:"user"`
 }
 
+// Node defines model for Node.
+type Node struct {
+	ClusterId   nullable.Nullable[openapi_types.UUID] `json:"cluster_id"`
+	ClusterName nullable.Nullable[string]             `json:"cluster_name"`
+	ClusterSlug nullable.Nullable[string]             `json:"cluster_slug"`
+	CreatedAt   time.Time                             `json:"created_at"`
+	Description string                                `json:"description"`
+	Hostname    string                                `json:"hostname"`
+	Id          openapi_types.UUID                    `json:"id"`
+	Lifecycle   NodeLifecycle                         `json:"lifecycle"`
+	PrimaryIp   nullable.Nullable[string]             `json:"primary_ip"`
+	Role        string                                `json:"role"`
+	Tags        []string                              `json:"tags"`
+	UpdatedAt   time.Time                             `json:"updated_at"`
+}
+
+// NodeInput defines model for NodeInput.
+type NodeInput struct {
+	ClusterId   nullable.Nullable[openapi_types.UUID] `json:"cluster_id,omitempty"`
+	Description *string                               `json:"description,omitempty"`
+	Hostname    string                                `json:"hostname"`
+	Lifecycle   *NodeLifecycle                        `json:"lifecycle,omitempty"`
+	PrimaryIp   nullable.Nullable[string]             `json:"primary_ip,omitempty"`
+	Role        *string                               `json:"role,omitempty"`
+	Tags        *[]string                             `json:"tags,omitempty"`
+}
+
+// NodeLifecycle defines model for NodeLifecycle.
+type NodeLifecycle string
+
+// NodePatch defines model for NodePatch.
+type NodePatch struct {
+	ClusterId   nullable.Nullable[openapi_types.UUID] `json:"cluster_id,omitempty"`
+	Description *string                               `json:"description,omitempty"`
+	Hostname    *string                               `json:"hostname,omitempty"`
+	Lifecycle   *NodeLifecycle                        `json:"lifecycle,omitempty"`
+	PrimaryIp   nullable.Nullable[string]             `json:"primary_ip,omitempty"`
+	Role        *string                               `json:"role,omitempty"`
+	Tags        *[]string                             `json:"tags,omitempty"`
+}
+
 // Role defines model for Role.
 type Role string
 
@@ -176,6 +391,41 @@ type User struct {
 	Username    string             `json:"username"`
 }
 
+// UserRef defines model for UserRef.
+type UserRef struct {
+	Id       openapi_types.UUID `json:"id"`
+	Username string             `json:"username"`
+}
+
+// Vip defines model for Vip.
+type Vip struct {
+	Address       string                                `json:"address"`
+	ClusterId     openapi_types.UUID                    `json:"cluster_id"`
+	Description   string                                `json:"description"`
+	Id            openapi_types.UUID                    `json:"id"`
+	Interface     string                                `json:"interface"`
+	OwnerHostname nullable.Nullable[string]             `json:"owner_hostname"`
+	OwnerNodeId   nullable.Nullable[openapi_types.UUID] `json:"owner_node_id"`
+	OwnerSince    nullable.Nullable[time.Time]          `json:"owner_since"`
+	Vrid          nullable.Nullable[int]                `json:"vrid"`
+}
+
+// VipInput defines model for VipInput.
+type VipInput struct {
+	Address     string                 `json:"address"`
+	Description *string                `json:"description,omitempty"`
+	Interface   *string                `json:"interface,omitempty"`
+	Vrid        nullable.Nullable[int] `json:"vrid,omitempty"`
+}
+
+// VipPatch defines model for VipPatch.
+type VipPatch struct {
+	Address     *string                `json:"address,omitempty"`
+	Description *string                `json:"description,omitempty"`
+	Interface   *string                `json:"interface,omitempty"`
+	Vrid        nullable.Nullable[int] `json:"vrid,omitempty"`
+}
+
 // ListEventsParams defines parameters for ListEvents.
 type ListEventsParams struct {
 	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
@@ -192,6 +442,24 @@ type DisableTotpJSONRequestBody = TotpDisableRequest
 
 // EnableTotpJSONRequestBody defines body for EnableTotp for application/json ContentType.
 type EnableTotpJSONRequestBody = TotpCodeRequest
+
+// CreateClusterJSONRequestBody defines body for CreateCluster for application/json ContentType.
+type CreateClusterJSONRequestBody = ClusterInput
+
+// UpdateClusterJSONRequestBody defines body for UpdateCluster for application/json ContentType.
+type UpdateClusterJSONRequestBody = ClusterPatch
+
+// CreateVipJSONRequestBody defines body for CreateVip for application/json ContentType.
+type CreateVipJSONRequestBody = VipInput
+
+// CreateNodeJSONRequestBody defines body for CreateNode for application/json ContentType.
+type CreateNodeJSONRequestBody = NodeInput
+
+// UpdateNodeJSONRequestBody defines body for UpdateNode for application/json ContentType.
+type UpdateNodeJSONRequestBody = NodePatch
+
+// UpdateVipJSONRequestBody defines body for UpdateVip for application/json ContentType.
+type UpdateVipJSONRequestBody = VipPatch
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
@@ -216,12 +484,54 @@ type ServerInterface interface {
 	// BeginTotpSetup Nieuw TOTP-geheim aanmaken (nog niet actief)
 	// (POST /auth/totp/setup)
 	BeginTotpSetup(w http.ResponseWriter, r *http.Request)
+	// ListClusters Alle clusters met aantallen nodes en VIP's
+	// (GET /clusters)
+	ListClusters(w http.ResponseWriter, r *http.Request)
+	// CreateCluster Cluster aanmaken (admin)
+	// (POST /clusters)
+	CreateCluster(w http.ResponseWriter, r *http.Request)
+	// DeleteCluster Cluster verwijderen (admin); nodes blijven bestaan zonder cluster, VIP's verdwijnen
+	// (DELETE /clusters/{clusterId})
+	DeleteCluster(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
+	// GetCluster Cluster met nodes, VIP's en owners
+	// (GET /clusters/{clusterId})
+	GetCluster(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
+	// UpdateCluster Cluster wijzigen (admin); alleen meegestuurde velden veranderen
+	// (PATCH /clusters/{clusterId})
+	UpdateCluster(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
+	// CreateVip VIP toevoegen aan een cluster (admin)
+	// (POST /clusters/{clusterId}/vips)
+	CreateVip(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
 	// ListEvents Recente events, nieuwste eerst (alleen admin)
 	// (GET /events)
 	ListEvents(w http.ResponseWriter, r *http.Request, params ListEventsParams)
 	// GetHealth Gezondheid van de server en de database
 	// (GET /health)
 	GetHealth(w http.ResponseWriter, r *http.Request)
+	// ListNodes Alle nodes, met hun cluster
+	// (GET /nodes)
+	ListNodes(w http.ResponseWriter, r *http.Request)
+	// CreateNode Node aanmaken (admin)
+	// (POST /nodes)
+	CreateNode(w http.ResponseWriter, r *http.Request)
+	// DeleteNode Node verwijderen (admin)
+	// (DELETE /nodes/{nodeId})
+	DeleteNode(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// GetNode Eén node
+	// (GET /nodes/{nodeId})
+	GetNode(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// UpdateNode Node wijzigen (admin); cluster_id null haalt de node uit zijn cluster
+	// (PATCH /nodes/{nodeId})
+	UpdateNode(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// ListUsers Actieve gebruikers, voor bijvoorbeeld de keuze van owners
+	// (GET /users)
+	ListUsers(w http.ResponseWriter, r *http.Request)
+	// DeleteVip VIP verwijderen (admin)
+	// (DELETE /vips/{vipId})
+	DeleteVip(w http.ResponseWriter, r *http.Request, vipId openapi_types.UUID)
+	// UpdateVip VIP wijzigen (admin)
+	// (PATCH /vips/{vipId})
+	UpdateVip(w http.ResponseWriter, r *http.Request, vipId openapi_types.UUID)
 }
 
 // Unimplemented server implementation that returns http.StatusNotImplemented for each endpoint.
@@ -270,6 +580,42 @@ func (_ Unimplemented) BeginTotpSetup(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// ListClusters Alle clusters met aantallen nodes en VIP's
+// (GET /clusters)
+func (_ Unimplemented) ListClusters(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CreateCluster Cluster aanmaken (admin)
+// (POST /clusters)
+func (_ Unimplemented) CreateCluster(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// DeleteCluster Cluster verwijderen (admin); nodes blijven bestaan zonder cluster, VIP's verdwijnen
+// (DELETE /clusters/{clusterId})
+func (_ Unimplemented) DeleteCluster(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetCluster Cluster met nodes, VIP's en owners
+// (GET /clusters/{clusterId})
+func (_ Unimplemented) GetCluster(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// UpdateCluster Cluster wijzigen (admin); alleen meegestuurde velden veranderen
+// (PATCH /clusters/{clusterId})
+func (_ Unimplemented) UpdateCluster(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CreateVip VIP toevoegen aan een cluster (admin)
+// (POST /clusters/{clusterId}/vips)
+func (_ Unimplemented) CreateVip(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // ListEvents Recente events, nieuwste eerst (alleen admin)
 // (GET /events)
 func (_ Unimplemented) ListEvents(w http.ResponseWriter, r *http.Request, params ListEventsParams) {
@@ -279,6 +625,54 @@ func (_ Unimplemented) ListEvents(w http.ResponseWriter, r *http.Request, params
 // GetHealth Gezondheid van de server en de database
 // (GET /health)
 func (_ Unimplemented) GetHealth(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListNodes Alle nodes, met hun cluster
+// (GET /nodes)
+func (_ Unimplemented) ListNodes(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CreateNode Node aanmaken (admin)
+// (POST /nodes)
+func (_ Unimplemented) CreateNode(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// DeleteNode Node verwijderen (admin)
+// (DELETE /nodes/{nodeId})
+func (_ Unimplemented) DeleteNode(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetNode Eén node
+// (GET /nodes/{nodeId})
+func (_ Unimplemented) GetNode(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// UpdateNode Node wijzigen (admin); cluster_id null haalt de node uit zijn cluster
+// (PATCH /nodes/{nodeId})
+func (_ Unimplemented) UpdateNode(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListUsers Actieve gebruikers, voor bijvoorbeeld de keuze van owners
+// (GET /users)
+func (_ Unimplemented) ListUsers(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// DeleteVip VIP verwijderen (admin)
+// (DELETE /vips/{vipId})
+func (_ Unimplemented) DeleteVip(w http.ResponseWriter, r *http.Request, vipId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// UpdateVip VIP wijzigen (admin)
+// (PATCH /vips/{vipId})
+func (_ Unimplemented) UpdateVip(w http.ResponseWriter, r *http.Request, vipId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -389,6 +783,138 @@ func (siw *ServerInterfaceWrapper) BeginTotpSetup(w http.ResponseWriter, r *http
 	handler.ServeHTTP(w, r)
 }
 
+// ListClusters operation middleware
+func (siw *ServerInterfaceWrapper) ListClusters(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListClusters(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateCluster operation middleware
+func (siw *ServerInterfaceWrapper) CreateCluster(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateCluster(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteCluster operation middleware
+func (siw *ServerInterfaceWrapper) DeleteCluster(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteCluster(w, r, clusterId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetCluster operation middleware
+func (siw *ServerInterfaceWrapper) GetCluster(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetCluster(w, r, clusterId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateCluster operation middleware
+func (siw *ServerInterfaceWrapper) UpdateCluster(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateCluster(w, r, clusterId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateVip operation middleware
+func (siw *ServerInterfaceWrapper) CreateVip(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateVip(w, r, clusterId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListEvents operation middleware
 func (siw *ServerInterfaceWrapper) ListEvents(w http.ResponseWriter, r *http.Request) {
 
@@ -427,6 +953,178 @@ func (siw *ServerInterfaceWrapper) GetHealth(w http.ResponseWriter, r *http.Requ
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetHealth(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListNodes operation middleware
+func (siw *ServerInterfaceWrapper) ListNodes(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListNodes(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateNode operation middleware
+func (siw *ServerInterfaceWrapper) CreateNode(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateNode(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteNode operation middleware
+func (siw *ServerInterfaceWrapper) DeleteNode(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteNode(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetNode operation middleware
+func (siw *ServerInterfaceWrapper) GetNode(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetNode(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateNode operation middleware
+func (siw *ServerInterfaceWrapper) UpdateNode(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateNode(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListUsers operation middleware
+func (siw *ServerInterfaceWrapper) ListUsers(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListUsers(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteVip operation middleware
+func (siw *ServerInterfaceWrapper) DeleteVip(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "vipId" -------------
+	var vipId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "vipId", chi.URLParam(r, "vipId"), &vipId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "vipId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteVip(w, r, vipId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateVip operation middleware
+func (siw *ServerInterfaceWrapper) UpdateVip(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "vipId" -------------
+	var vipId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "vipId", chi.URLParam(r, "vipId"), &vipId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "vipId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateVip(w, r, vipId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -575,6 +1273,48 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/events", wrapper.ListEvents)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/users", wrapper.ListUsers)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/clusters", wrapper.ListClusters)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/clusters", wrapper.CreateCluster)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/clusters/{clusterId}", wrapper.DeleteCluster)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/clusters/{clusterId}", wrapper.GetCluster)
+	})
+	r.Group(func(r chi.Router) {
+		r.Patch(options.BaseURL+"/clusters/{clusterId}", wrapper.UpdateCluster)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/clusters/{clusterId}/vips", wrapper.CreateVip)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/vips/{vipId}", wrapper.DeleteVip)
+	})
+	r.Group(func(r chi.Router) {
+		r.Patch(options.BaseURL+"/vips/{vipId}", wrapper.UpdateVip)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/nodes", wrapper.ListNodes)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/nodes", wrapper.CreateNode)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/nodes/{nodeId}", wrapper.DeleteNode)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/nodes/{nodeId}", wrapper.GetNode)
+	})
+	r.Group(func(r chi.Router) {
+		r.Patch(options.BaseURL+"/nodes/{nodeId}", wrapper.UpdateNode)
 	})
 
 	return r
