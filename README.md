@@ -11,7 +11,7 @@ Het technisch ontwerp staat in [docs/design/mvp-fase-1.md](docs/design/mvp-fase-
 | 1. Fundament | Server, database, login met TOTP, webinterface, CI | klaar |
 | 2. Inventory | Clusters, nodes, VIP's | klaar |
 | 3. Agent | Enrollment, heartbeat, facts | klaar |
-| 4. Monitoring | Metrics, status, dashboards | gepland |
+| 4. Monitoring | Metrics, status, dashboards | klaar |
 | 5. Proxmox | Sync en VM-acties | gepland |
 | 6. Node lifecycle | Reboot, maintenance, drain | gepland |
 | 7. Templates en deployment | Clusters uit templates | gepland |
@@ -44,6 +44,9 @@ Agents verbinden zelf naar de server, op poort 4222 (NATS met TLS). Die poort mo
 | `CF_NATS_LISTEN` | `:4222` | Adres waarop agents met NATS verbinden |
 | `CF_NATS_ADVERTISE` | (leeg) | `host[:poort]` waarmee agents NATS bereiken; leeg betekent de hostnaam waarmee de agent zich aanmeldt |
 | `CF_AGENT_DIR` | `/usr/share/clusterforge/agents` | Map met de `cf-agent`-binaries die de server aanbiedt om te downloaden |
+| `CF_VICTORIAMETRICS_URL` | (leeg) | VictoriaMetrics voor de metrics, bijvoorbeeld `http://victoriametrics:8428`; leeg zet de grafieken uit |
+| `CF_GRAFANA_NODE_URL` | (leeg) | Link naar Grafana bij elke node, met `{hostname}`, `{node_id}`, `{cluster}`, `{cluster_id}` en `{env}` |
+| `CF_GRAFANA_CLUSTER_URL` | (leeg) | Link naar Grafana bij elk cluster, met `{cluster}`, `{cluster_id}` en `{env}` |
 
 ### Commando's
 
@@ -64,7 +67,7 @@ Maak in de webinterface bij Nodes → Agent installeren een token aan en voer he
 curl -fsSL https://clusterforge.example/install/agent.sh | sudo sh -s -- --server https://clusterforge.example --token cfe_...
 ```
 
-Het script downloadt `cf-agent` van je eigen server, controleert de checksum, meldt de node aan en start de systemd-service `cf-agent`. Bestaat er nog geen node met die hostname, dan maakt de aanmelding er een aan. De agent stuurt elke 10 seconden een heartbeat en elk kwartier (en bij elke nieuwe verbinding) zijn facts: OS, kernel, CPU, geheugen, schijven, netwerk, services, updates, Docker en Keepalived.
+Het script downloadt `cf-agent` van je eigen server, controleert de checksum, meldt de node aan en start de systemd-service `cf-agent`. Bestaat er nog geen node met die hostname, dan maakt de aanmelding er een aan. De agent stuurt elke 10 seconden een heartbeat, elke 15 seconden metrics en elk kwartier (en bij elke nieuwe verbinding) zijn facts: OS, kernel, CPU, geheugen, schijven, netwerk, services, updates, Docker en Keepalived.
 
 ```text
 cf-agent enroll -server URL -token cfe_...      meldt deze machine aan (doet het installatiescript)
@@ -74,6 +77,22 @@ cf-agent version                                toont de versie
 ```
 
 De sleutel van de agent staat in `/etc/clusterforge/agent.json`. Intrekken kan bij de node in de webinterface; de verbinding valt dan meteen weg.
+
+## Monitoring
+
+De agent stuurt elke 15 seconden metrics mee over dezelfde verbinding: CPU, load, geheugen, schijven, schijf-I/O, netwerk en temperatuur. De namen volgen node_exporter, en de server voegt de labels `job="clusterforge"`, `instance` en `node` (hostname), `node_id`, `cluster`, `cluster_id` en `env` toe. Bestaande Grafana-dashboards voor node_exporter, zoals Node Exporter Full, werken daardoor met VictoriaMetrics als Prometheus-databron.
+
+De status van nodes en clusters wordt elke 5 seconden opnieuw berekend:
+
+| Status | Node | Cluster |
+| --- | --- | --- |
+| Gezond | Heartbeat binnen 30 s, geen probleem | Alle actieve nodes gezond, elk VIP precies één eigenaar |
+| Verminderd | Heartbeat 30 tot 90 s oud, een schijf voor 90 % vol, een gefaalde service, of een service die enabled is maar niet draait | Minstens één actieve node niet gezond, maar de VIP's zijn in orde |
+| Down | Geen heartbeat in 90 s | Een VIP zonder eigenaar, of alle nodes down |
+| Split-brain | | Een VIP op twee nodes tegelijk |
+| Onbekend | Geen agent | Geen agent op de actieve nodes |
+
+Nodes in onderhoud, draining, opbouw of uit dienst tellen niet mee voor het cluster. Elke statuswissel en elke VIP-verhuis komt in de activiteitenlog, en de webinterface werkt live bij.
 
 ## Ontwikkelen
 
@@ -110,7 +129,10 @@ internal/inventory/        clusters, nodes en VIP's: validatie en wijzigingen me
 internal/agents/           enrollmenttokens, aanmelden en intrekken van agents
 internal/agentbus/         ingebedde NATS-server: authenticatie per node, heartbeats en facts
 internal/agentdist/        installatiescript en downloads van cf-agent
-internal/agent/            code van cf-agent zelf: aanmelden, verbinden, facts verzamelen
+internal/agent/            code van cf-agent zelf: aanmelden, verbinden, facts en metrics verzamelen
+internal/metrics/          metrics naar VictoriaMetrics schrijven en de grafieken opvragen
+internal/status/           statusregels voor nodes en clusters, VIP-eigenaars
+internal/live/             live updates naar de webinterface (Server-Sent Events)
 pkg/protocol/              berichten tussen server en agent
 internal/webui/            ingebedde webinterface
 migrations/                goose SQL-migraties

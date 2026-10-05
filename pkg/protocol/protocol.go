@@ -16,6 +16,7 @@ const Version = 1
 const (
 	TypeHeartbeat = "heartbeat"
 	TypeFacts     = "facts"
+	TypeMetrics   = "metrics"
 	TypeAck       = "ack"
 )
 
@@ -33,6 +34,7 @@ type Envelope struct {
 const (
 	SubjectHeartbeat = "hb"
 	SubjectFacts     = "facts"
+	SubjectMetrics   = "metrics"
 	SubjectEvents    = "events"
 	SubjectCommands  = "cmd"
 )
@@ -70,8 +72,25 @@ type Heartbeat struct {
 
 const (
 	HeartbeatInterval = 10 * time.Second
+	MetricsInterval   = 15 * time.Second
 	FactsInterval     = 15 * time.Minute
 )
+
+// Metrics is een batch metingen. De namen volgen node_exporter, zodat
+// bestaande Grafana-dashboards werken. De server voegt de labels voor node,
+// cluster en omgeving toe en gebruikt zijn eigen klok als tijdstip.
+type Metrics struct {
+	Samples []Sample `json:"samples"`
+}
+
+type Sample struct {
+	Name   string            `json:"name"`
+	Labels map[string]string `json:"labels,omitempty"`
+	Value  float64           `json:"value"`
+}
+
+// MaxSamples is het grootste aantal metingen dat de server per batch aanneemt.
+const MaxSamples = 5000
 
 // Facts beschrijven de node. De agent stuurt ze bij start, na een herverbinding
 // en elke FactsInterval; de server bewaart alleen een gewijzigde set.

@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 import { Button } from "@/components/ui";
 import { useLogout, useRequireMe } from "@/lib/auth";
+import { useLiveUpdates } from "@/lib/live";
 
 type NavItem = { href: string; label: string; soon?: string };
 
@@ -13,7 +14,7 @@ const nav: NavItem[] = [
   { href: "/", label: "Overzicht" },
   { href: "/clusters", label: "Clusters" },
   { href: "/nodes", label: "Nodes" },
-  { href: "/monitoring", label: "Monitoring", soon: "mijlpaal 4" },
+  { href: "/monitoring", label: "Monitoring" },
   { href: "/proxmox", label: "Proxmox", soon: "mijlpaal 5" },
   { href: "/templates", label: "Templates", soon: "mijlpaal 7" },
   { href: "/instellingen", label: "Instellingen" },
@@ -23,6 +24,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   const me = useRequireMe();
   const logout = useLogout();
   const pathname = usePathname();
+  useLiveUpdates(!!me.data);
 
   if (!me.data) {
     return (

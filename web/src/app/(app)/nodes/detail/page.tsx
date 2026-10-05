@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState, type ReactNode } from "react";
+import { MetricsPanels } from "@/components/charts/MetricsPanels";
 import { InstallAgent } from "@/components/inventory/InstallAgent";
 import { NodeForm } from "@/components/inventory/NodeForm";
 import {
@@ -11,7 +12,10 @@ import {
   formatBytes,
   formatDuration,
   LifecycleBadge,
+  GrafanaButton,
   QueryState,
+  StatusBadge,
+  StatusNote,
   Tags,
   tableClass,
   tdClass,
@@ -19,7 +23,9 @@ import {
 } from "@/components/inventory/bits";
 import { Alert, Badge, Button, Card, PageHeader } from "@/components/ui";
 import {
+  grafanaLink,
   useDeleteNode,
+  useInfo,
   useIsAdmin,
   useNode,
   useNodeFacts,
@@ -45,6 +51,7 @@ function NodeDetailInner() {
   const id = useSearchParams().get("id") ?? "";
   const node = useNode(id);
   const runtime = useNodeFacts(id);
+  const info = useInfo();
   const isAdmin = useIsAdmin();
   const update = useUpdateNode();
   const remove = useDeleteNode();
@@ -66,7 +73,7 @@ function NodeDetailInner() {
             title={node.data.hostname}
             description={
               <span className="inline-flex flex-wrap items-center gap-2">
-                <AgentBadge agent={node.data.agent} />
+                <StatusBadge status={node.data.status} reason={node.data.status_reason} />
                 <LifecycleBadge lifecycle={node.data.lifecycle} />
                 {node.data.cluster_id ? (
                   <Link href={`/clusters/detail?id=${node.data.cluster_id}`} className="hover:underline">
@@ -101,6 +108,8 @@ function NodeDetailInner() {
             }
           />
 
+          <StatusNote status={node.data.status} reason={node.data.status_reason} since={node.data.status_since} />
+
           {editing ? (
             <Card title="Node bewerken">
               <NodeForm
@@ -131,6 +140,14 @@ function NodeDetailInner() {
               </Card>
               <AgentCard node={node.data} runtime={runtime.data} isAdmin={isAdmin} />
             </div>
+          )}
+
+          {node.data.agent && (
+            <MetricsPanels
+              kind="node"
+              id={id}
+              actions={<GrafanaButton href={grafanaLink(info.data?.grafana_node_url ?? "", nodeLinkValues(node.data))} />}
+            />
           )}
 
           {runtime.data?.facts && <FactsView facts={runtime.data.facts} runtime={runtime.data} />}
@@ -371,4 +388,8 @@ function Table({ head, children }: { head: string[]; children: ReactNode }) {
       </table>
     </div>
   );
+}
+
+function nodeLinkValues(n: Node) {
+  return { hostname: n.hostname, node_id: n.id, cluster: n.cluster_slug, cluster_id: n.cluster_id, env: null };
 }

@@ -2,10 +2,11 @@
 
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
+import { ClusterHealth } from "@/components/monitoring/ClusterHealth";
 import { Alert, Card } from "@/components/ui";
 import { api, unwrap, type ApiEvent } from "@/lib/api/client";
 import { useMe } from "@/lib/auth";
-import { useClusters, useNodes } from "@/lib/inventory";
+import { statuses, useClusters, useNodes, type Status } from "@/lib/inventory";
 
 const actionLabels: Record<string, string> = {
   "auth.login": "Ingelogd",
@@ -25,6 +26,8 @@ const actionLabels: Record<string, string> = {
   "vip.updated": "VIP gewijzigd",
   "vip.deleted": "VIP verwijderd",
   "vip.owner_changed": "VIP verhuisd",
+  "node.status_changed": "Status van node",
+  "cluster.status_changed": "Status van cluster",
   "agent.enrolled": "Agent aangemeld",
   "agent.revoked": "Agent ingetrokken",
   "node.facts_changed": "Facts gewijzigd",
@@ -40,6 +43,18 @@ function subject(e: ApiEvent): string | null {
     const v = p[k];
     if (typeof v === "string") return v;
     if (v && typeof v === "object" && "to" in v && typeof v.to === "string") return v.to;
+  }
+  return null;
+}
+
+// detail vult een event aan met de nieuwe status of eigenaar.
+function detail(e: ApiEvent): string | null {
+  const p = e.payload;
+  if (e.action.endsWith(".status_changed") && typeof p.to === "string") {
+    return `→ ${statuses[p.to as Status]?.label ?? p.to}`;
+  }
+  if (e.action === "vip.owner_changed" && "owner_hostname" in p) {
+    return typeof p.owner_hostname === "string" ? `→ ${p.owner_hostname}` : "→ geen eigenaar";
   }
   return null;
 }
@@ -65,7 +80,7 @@ export default function OverviewPage() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Overzicht</h1>
         <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
-          Monitoring en clusterstatus komen hier zodra de agent er is.
+          De status van je clusters en wie elk VIP heeft, live bijgewerkt.
         </p>
       </div>
 
@@ -81,7 +96,17 @@ export default function OverviewPage() {
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <Link href="/clusters">
-          <Stat label="Clusters" value={clusters.data ? String(clusters.data.length) : "…"} />
+          <Stat
+            label="Clusters"
+            value={
+              clusters.data
+                ? `${clusters.data.length}` +
+                  (clusters.data.some((c) => c.status !== "unknown")
+                    ? ` · ${clusters.data.filter((c) => c.status === "healthy").length} gezond`
+                    : "")
+                : "…"
+            }
+          />
         </Link>
         <Link href="/nodes">
           <Stat
@@ -99,6 +124,13 @@ export default function OverviewPage() {
         <Stat label="Server" value={health.data?.status === "ok" ? "Gezond" : health.isLoading ? "…" : "Probleem"} />
         <Stat label="Database" value={health.data?.database === "ok" ? "Bereikbaar" : health.isLoading ? "…" : "Onbereikbaar"} />
       </div>
+
+      {clusters.data && clusters.data.length > 0 && (
+        <section className="space-y-3">
+          <h2 className="text-lg font-semibold">Clusterstatus</h2>
+          <ClusterHealth clusters={clusters.data} />
+        </section>
+      )}
 
       {isAdmin && (
         <Card title="Recente activiteit">
@@ -130,6 +162,7 @@ function EventList({ items }: { items: ApiEvent[] }) {
           <span>
             {actionLabels[e.action] ?? e.action}
             {subject(e) && <span className="font-medium"> {subject(e)}</span>}
+            {detail(e) && <span> {detail(e)}</span>}
             {typeof e.payload.ip === "string" && <span className="text-slate-500"> vanaf {e.payload.ip}</span>}
           </span>
           <time className="shrink-0 text-xs text-slate-500" dateTime={e.ts}>

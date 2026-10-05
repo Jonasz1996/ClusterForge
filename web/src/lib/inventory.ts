@@ -25,6 +25,12 @@ export type NodeRuntime = components["schemas"]["NodeRuntime"];
 export type Facts = components["schemas"]["Facts"];
 export type EnrollmentToken = components["schemas"]["EnrollmentToken"];
 export type EnrollmentTokenInput = components["schemas"]["EnrollmentTokenInput"];
+export type Status = components["schemas"]["Status"];
+export type VipOwner = components["schemas"]["VipOwner"];
+export type Metrics = components["schemas"]["Metrics"];
+export type MetricPanel = components["schemas"]["MetricPanel"];
+export type MetricsRange = components["schemas"]["MetricsRange"];
+export type ServerInfo = components["schemas"]["ServerInfo"];
 
 export const clusterTypes: { value: ClusterType; label: string }[] = [
   { value: "keepalived", label: "Keepalived" },
@@ -56,6 +62,21 @@ export const connections: Record<AgentConnection, { label: string; tone: "green"
   offline: { label: "Offline", tone: "red" },
 };
 
+export const statuses: Record<Status, { label: string; tone: "slate" | "green" | "amber" | "red" }> = {
+  healthy: { label: "Gezond", tone: "green" },
+  degraded: { label: "Verminderd", tone: "amber" },
+  down: { label: "Down", tone: "red" },
+  split_brain: { label: "Split-brain", tone: "red" },
+  unknown: { label: "Onbekend", tone: "slate" },
+};
+
+export const metricsRanges: { value: MetricsRange; label: string }[] = [
+  { value: "1h", label: "1 uur" },
+  { value: "6h", label: "6 uur" },
+  { value: "24h", label: "24 uur" },
+  { value: "7d", label: "7 dagen" },
+];
+
 export const typeLabel = (t: string) => clusterTypes.find((x) => x.value === t)?.label ?? t;
 export const envInfo = (e: string) => environments.find((x) => x.value === e) ?? { value: e, label: e, tone: "amber" as const };
 export const lifecycleInfo = (l: string) => lifecycles.find((x) => x.value === l) ?? { value: l, label: l, tone: "slate" as const };
@@ -76,6 +97,8 @@ const keys = {
   users: ["users"] as const,
   facts: (id: string) => ["nodes", id, "facts"] as const,
   tokens: ["enrollment-tokens"] as const,
+  metrics: (kind: "node" | "cluster", id: string, range: MetricsRange) => ["metrics", kind, id, range] as const,
+  info: ["info"] as const,
 };
 
 export function useIsAdmin() {
@@ -157,6 +180,33 @@ export function useRevokeAgent() {
       unwrap(await api.POST("/agents/{agentId}/revoke", { params: { path: { agentId: id } } })),
     onSuccess: invalidate,
   });
+}
+
+// Grafieken verversen elke halve minuut; de agent meet elke 15 s.
+export function useMetrics(kind: "node" | "cluster", id: string, range: MetricsRange) {
+  return useQuery({
+    queryKey: keys.metrics(kind, id, range),
+    queryFn: async () =>
+      unwrap(
+        kind === "node"
+          ? await api.GET("/nodes/{nodeId}/metrics", { params: { path: { nodeId: id }, query: { range } } })
+          : await api.GET("/clusters/{clusterId}/metrics", { params: { path: { clusterId: id }, query: { range } } }),
+      ),
+    enabled: id !== "",
+    refetchInterval: 30_000,
+    placeholderData: (prev) => prev,
+    retry: false,
+  });
+}
+
+export function useInfo() {
+  return useQuery({ queryKey: keys.info, queryFn: async () => unwrap(await api.GET("/info")), staleTime: 5 * 60_000 });
+}
+
+// grafanaLink vult de plaatshouders in een Grafana-URL in.
+export function grafanaLink(template: string, values: Record<string, string | null | undefined>) {
+  if (!template) return null;
+  return template.replace(/\{(\w+)\}/g, (m, k: string) => (k in values ? encodeURIComponent(values[k] ?? "") : m));
 }
 
 export function useUsers() {

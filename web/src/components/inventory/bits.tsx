@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { Alert, Badge } from "@/components/ui";
-import { connections, envInfo, lifecycleInfo, type AgentSummary } from "@/lib/inventory";
+import { connections, envInfo, lifecycleInfo, statuses, type AgentSummary, type Status } from "@/lib/inventory";
 
 export function EnvBadge({ env }: { env: string }) {
   const e = envInfo(env);
@@ -10,6 +10,42 @@ export function EnvBadge({ env }: { env: string }) {
 export function LifecycleBadge({ lifecycle }: { lifecycle: string }) {
   const l = lifecycleInfo(lifecycle);
   return <Badge tone={l.tone}>{l.label}</Badge>;
+}
+
+// StatusBadge toont de berekende status; de reden staat in de tooltip.
+export function StatusBadge({ status, reason }: { status: Status; reason?: string }) {
+  const st = statuses[status] ?? statuses.unknown;
+  return (
+    <span title={reason || undefined}>
+      <Badge tone={st.tone}>
+        <span className="mr-1 inline-block size-1.5 rounded-full bg-current" aria-hidden />
+        {st.label}
+      </Badge>
+    </span>
+  );
+}
+
+const sinceFmt = new Intl.DateTimeFormat("nl-BE", { dateStyle: "short", timeStyle: "short" });
+
+// StatusNote legt uit waarom iets niet gezond is, met sinds wanneer.
+export function StatusNote({ status, reason, since }: { status: Status; reason: string; since: string | null }) {
+  if (status === "healthy" || status === "unknown" || !reason) return null;
+  const st = statuses[status];
+  return (
+    <Alert kind={status === "degraded" ? "info" : "error"}>
+      <span className="font-medium">{st.label}</span>
+      {since && <span> sinds {sinceFmt.format(new Date(since))}</span>}: {reason}
+    </Alert>
+  );
+}
+
+export function GrafanaButton({ href }: { href: string | null }) {
+  if (!href) return null;
+  return (
+    <a href={href} target="_blank" rel="noreferrer" className="text-sm font-medium text-brand-600 hover:underline dark:text-brand-500">
+      Openen in Grafana ↗
+    </a>
+  );
 }
 
 export function AgentBadge({ agent }: { agent: AgentSummary | null }) {

@@ -20,7 +20,7 @@ dev-down: ## Stop de ontwikkelcontainers
 
 .PHONY: dev-server
 dev-server: ## Start de Go-server op :8080 tegen de ontwikkeldatabase
-	CF_DATABASE_URL="$(DEV_DATABASE_URL)" CF_SECURE_COOKIES=false CF_LOG_LEVEL=debug CF_AGENT_DIR=bin/agents go run ./cmd/clusterforge-server serve
+	CF_DATABASE_URL="$(DEV_DATABASE_URL)" CF_SECURE_COOKIES=false CF_LOG_LEVEL=debug CF_AGENT_DIR=bin/agents CF_VICTORIAMETRICS_URL=http://127.0.0.1:8428 go run ./cmd/clusterforge-server serve
 
 .PHONY: dev-web
 dev-web: ## Start de Next.js-devserver op :3000 (stuurt /api door naar :8080)

@@ -13,6 +13,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/httpapi/gen"
 	"github.com/Jonasz1996/clusterforge/internal/inventory"
+	"github.com/Jonasz1996/clusterforge/internal/status"
 	"github.com/Jonasz1996/clusterforge/internal/store"
 )
 
@@ -41,14 +42,25 @@ func (s *Server) ListClusters(w http.ResponseWriter, r *http.Request) {
 		s.internalError(w, r, err)
 		return
 	}
+	owners, err := s.q.ListVIPOwners(r.Context())
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	vips := map[uuid.UUID][]gen.VipOwner{}
+	for _, v := range owners {
+		vips[v.ClusterID] = append(vips[v.ClusterID], gen.VipOwner{Address: v.Address.String(), OwnerHostname: nullableOf(v.OwnerHostname)})
+	}
 	items := make([]gen.ClusterListItem, 0, len(rows))
 	for _, row := range rows {
 		c := toAPICluster(row.Cluster)
 		items = append(items, gen.ClusterListItem{
 			Id: c.Id, Slug: c.Slug, Name: c.Name, Description: c.Description, Type: c.Type,
-			Environment: c.Environment, GitRepoUrl: c.GitRepoUrl, Tags: c.Tags, Status: c.Status,
+			Environment: c.Environment, GitRepoUrl: c.GitRepoUrl, Tags: c.Tags,
+			Status: c.Status, StatusReason: c.StatusReason, StatusSince: c.StatusSince,
 			CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt,
 			NodeCount: int(row.NodeCount), VipCount: int(row.VipCount),
+			Vips: nonNil(vips[row.Cluster.ID]),
 		})
 	}
 	writeJSON(w, http.StatusOK, list[gen.ClusterListItem]{items})
@@ -148,7 +160,8 @@ func (s *Server) writeClusterDetail(w http.ResponseWriter, r *http.Request, stat
 	base := toAPICluster(c)
 	d := gen.ClusterDetail{
 		Id: base.Id, Slug: base.Slug, Name: base.Name, Description: base.Description, Type: base.Type,
-		Environment: base.Environment, GitRepoUrl: base.GitRepoUrl, Tags: base.Tags, Status: base.Status,
+		Environment: base.Environment, GitRepoUrl: base.GitRepoUrl, Tags: base.Tags,
+		Status: base.Status, StatusReason: base.StatusReason, StatusSince: base.StatusSince,
 		CreatedAt: base.CreatedAt, UpdatedAt: base.UpdatedAt,
 		Owners: make([]gen.UserRef, 0, len(owners)),
 		Nodes:  make([]gen.Node, 0, len(nodes)),
@@ -170,7 +183,8 @@ func toAPICluster(c store.Cluster) gen.Cluster {
 	return gen.Cluster{
 		Id: c.ID, Slug: c.Slug, Name: c.Name, Description: c.Description, Type: gen.ClusterType(c.Type),
 		Environment: gen.Environment(c.Environment), GitRepoUrl: c.GitRepoUrl, Tags: nonNil(c.Tags),
-		Status: c.Status, CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt,
+		Status: gen.Status(c.Status), StatusReason: c.StatusReason, StatusSince: nullableOf(c.StatusSince),
+		CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt,
 	}
 }
 
@@ -305,6 +319,7 @@ func toAPINode(r nodeRow) gen.Node {
 		Lifecycle: gen.NodeLifecycle(n.Lifecycle), Tags: nonNil(n.Tags),
 		ClusterId: nullableOf(n.ClusterID), ClusterSlug: nullableOf(clusterSlug), ClusterName: nullableOf(clusterName),
 		PrimaryIp: nullableOf(ip), CreatedAt: n.CreatedAt, UpdatedAt: n.UpdatedAt, Agent: agent,
+		Status: gen.Status(n.Status), StatusReason: n.StatusReason, StatusSince: nullableOf(n.StatusSince),
 	}
 }
 
@@ -313,9 +328,9 @@ func connection(lastSeen *time.Time, now time.Time) gen.AgentConnection {
 	switch {
 	case lastSeen == nil:
 		return gen.Offline
-	case now.Sub(*lastSeen) <= 30*time.Second:
+	case now.Sub(*lastSeen) <= status.HeartbeatLate:
 		return gen.Online
-	case now.Sub(*lastSeen) <= 90*time.Second:
+	case now.Sub(*lastSeen) <= status.HeartbeatDown:
 		return gen.Late
 	default:
 		return gen.Offline
@@ -462,9 +477,9 @@ func nullablePtr[T any](n nullable.Nullable[T]) *T {
 	return &v
 }
 
-func nonNil(s []string) []string {
+func nonNil[T any](s []T) []T {
 	if s == nil {
-		return []string{}
+		return []T{}
 	}
 	return s
 }

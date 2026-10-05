@@ -147,6 +147,54 @@ func (e HealthStatus) Valid() bool {
 	}
 }
 
+// Defines values for MetricPanelUnit.
+const (
+	BytesPerSecond MetricPanelUnit = "bytes_per_second"
+	Celsius        MetricPanelUnit = "celsius"
+	Load           MetricPanelUnit = "load"
+	Percent        MetricPanelUnit = "percent"
+)
+
+// Valid indicates whether the value is a known member of the MetricPanelUnit enum.
+func (e MetricPanelUnit) Valid() bool {
+	switch e {
+	case BytesPerSecond:
+		return true
+	case Celsius:
+		return true
+	case Load:
+		return true
+	case Percent:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MetricsRange.
+const (
+	N1h  MetricsRange = "1h"
+	N24h MetricsRange = "24h"
+	N6h  MetricsRange = "6h"
+	N7d  MetricsRange = "7d"
+)
+
+// Valid indicates whether the value is a known member of the MetricsRange enum.
+func (e MetricsRange) Valid() bool {
+	switch e {
+	case N1h:
+		return true
+	case N24h:
+		return true
+	case N6h:
+		return true
+	case N7d:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for NodeLifecycle.
 const (
 	Active         NodeLifecycle = "active"
@@ -192,6 +240,33 @@ func (e Role) Valid() bool {
 	}
 }
 
+// Defines values for Status.
+const (
+	StatusDegraded   Status = "degraded"
+	StatusDown       Status = "down"
+	StatusHealthy    Status = "healthy"
+	StatusSplitBrain Status = "split_brain"
+	StatusUnknown    Status = "unknown"
+)
+
+// Valid indicates whether the value is a known member of the Status enum.
+func (e Status) Valid() bool {
+	switch e {
+	case StatusDegraded:
+		return true
+	case StatusDown:
+		return true
+	case StatusHealthy:
+		return true
+	case StatusSplitBrain:
+		return true
+	case StatusUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
 // AgentConnection online bij een heartbeat in de laatste 30 s, late tot 90 s, daarna offline
 type AgentConnection string
 
@@ -223,11 +298,16 @@ type Cluster struct {
 	// Slug Korte unieke naam, bijvoorbeeld webcluster-prod
 	Slug string `json:"slug"`
 
-	// Status unknown tot de agent (mijlpaal 3) gegevens levert
-	Status    string      `json:"status"`
-	Tags      []string    `json:"tags"`
-	Type      ClusterType `json:"type"`
-	UpdatedAt time.Time   `json:"updated_at"`
+	// Status Berekend uit heartbeats, metrics en VIP's (zie internal/status).
+	// unknown betekent: geen agent of nog geen gegevens.
+	Status Status `json:"status"`
+
+	// StatusReason Waarom de status niet healthy is
+	StatusReason string                       `json:"status_reason"`
+	StatusSince  nullable.Nullable[time.Time] `json:"status_since"`
+	Tags         []string                     `json:"tags"`
+	Type         ClusterType                  `json:"type"`
+	UpdatedAt    time.Time                    `json:"updated_at"`
 }
 
 // ClusterDetail defines model for ClusterDetail.
@@ -244,12 +324,17 @@ type ClusterDetail struct {
 	// Slug Korte unieke naam, bijvoorbeeld webcluster-prod
 	Slug string `json:"slug"`
 
-	// Status unknown tot de agent (mijlpaal 3) gegevens levert
-	Status    string      `json:"status"`
-	Tags      []string    `json:"tags"`
-	Type      ClusterType `json:"type"`
-	UpdatedAt time.Time   `json:"updated_at"`
-	Vips      []Vip       `json:"vips"`
+	// Status Berekend uit heartbeats, metrics en VIP's (zie internal/status).
+	// unknown betekent: geen agent of nog geen gegevens.
+	Status Status `json:"status"`
+
+	// StatusReason Waarom de status niet healthy is
+	StatusReason string                       `json:"status_reason"`
+	StatusSince  nullable.Nullable[time.Time] `json:"status_since"`
+	Tags         []string                     `json:"tags"`
+	Type         ClusterType                  `json:"type"`
+	UpdatedAt    time.Time                    `json:"updated_at"`
+	Vips         []Vip                        `json:"vips"`
 }
 
 // ClusterInput defines model for ClusterInput.
@@ -277,12 +362,20 @@ type ClusterListItem struct {
 	// Slug Korte unieke naam, bijvoorbeeld webcluster-prod
 	Slug string `json:"slug"`
 
-	// Status unknown tot de agent (mijlpaal 3) gegevens levert
-	Status    string      `json:"status"`
-	Tags      []string    `json:"tags"`
-	Type      ClusterType `json:"type"`
-	UpdatedAt time.Time   `json:"updated_at"`
-	VipCount  int         `json:"vip_count"`
+	// Status Berekend uit heartbeats, metrics en VIP's (zie internal/status).
+	// unknown betekent: geen agent of nog geen gegevens.
+	Status Status `json:"status"`
+
+	// StatusReason Waarom de status niet healthy is
+	StatusReason string                       `json:"status_reason"`
+	StatusSince  nullable.Nullable[time.Time] `json:"status_since"`
+	Tags         []string                     `json:"tags"`
+	Type         ClusterType                  `json:"type"`
+	UpdatedAt    time.Time                    `json:"updated_at"`
+	VipCount     int                          `json:"vip_count"`
+
+	// Vips De VIP's met hun huidige eigenaar
+	Vips []VipOwner `json:"vips"`
 }
 
 // ClusterPatch defines model for ClusterPatch.
@@ -470,6 +563,40 @@ type Me struct {
 	User             User      `json:"user"`
 }
 
+// MetricPanel defines model for MetricPanel.
+type MetricPanel struct {
+	Id     string          `json:"id"`
+	Series []MetricSeries  `json:"series"`
+	Title  string          `json:"title"`
+	Unit   MetricPanelUnit `json:"unit"`
+}
+
+// MetricPanelUnit defines model for MetricPanel.Unit.
+type MetricPanelUnit string
+
+// MetricSeries defines model for MetricSeries.
+type MetricSeries struct {
+	Label string `json:"label"`
+
+	// Values Eén waarde per tijdstip in timestamps; null als er geen meting is
+	Values []nullable.Nullable[float64] `json:"values"`
+}
+
+// Metrics defines model for Metrics.
+type Metrics struct {
+	End         time.Time     `json:"end"`
+	Panels      []MetricPanel `json:"panels"`
+	Range       MetricsRange  `json:"range"`
+	Start       time.Time     `json:"start"`
+	StepSeconds int           `json:"step_seconds"`
+
+	// Timestamps Unix-tijden in seconden; de waarden van elke lijn horen hierbij
+	Timestamps []int64 `json:"timestamps"`
+}
+
+// MetricsRange defines model for MetricsRange.
+type MetricsRange string
+
 // NewEnrollmentToken defines model for NewEnrollmentToken.
 type NewEnrollmentToken struct {
 	ClusterId   nullable.Nullable[openapi_types.UUID] `json:"cluster_id"`
@@ -504,8 +631,16 @@ type Node struct {
 	Lifecycle   NodeLifecycle                         `json:"lifecycle"`
 	PrimaryIp   nullable.Nullable[string]             `json:"primary_ip"`
 	Role        string                                `json:"role"`
-	Tags        []string                              `json:"tags"`
-	UpdatedAt   time.Time                             `json:"updated_at"`
+
+	// Status Berekend uit heartbeats, metrics en VIP's (zie internal/status).
+	// unknown betekent: geen agent of nog geen gegevens.
+	Status Status `json:"status"`
+
+	// StatusReason Waarom de status niet healthy is
+	StatusReason string                       `json:"status_reason"`
+	StatusSince  nullable.Nullable[time.Time] `json:"status_since"`
+	Tags         []string                     `json:"tags"`
+	UpdatedAt    time.Time                    `json:"updated_at"`
 }
 
 // NodeInput defines model for NodeInput.
@@ -543,6 +678,23 @@ type NodeRuntime struct {
 
 // Role defines model for Role.
 type Role string
+
+// ServerInfo defines model for ServerInfo.
+type ServerInfo struct {
+	// GrafanaClusterUrl Link naar Grafana voor een cluster, met {cluster}, {cluster_id} en {env}; leeg als niet ingesteld
+	GrafanaClusterUrl string `json:"grafana_cluster_url"`
+
+	// GrafanaNodeUrl Link naar Grafana voor een node, met {hostname}, {node_id}, {cluster}, {cluster_id} en {env}; leeg als niet ingesteld
+	GrafanaNodeUrl string `json:"grafana_node_url"`
+
+	// MetricsEnabled Of er een VictoriaMetrics is ingesteld
+	MetricsEnabled bool   `json:"metrics_enabled"`
+	Version        string `json:"version"`
+}
+
+// Status Berekend uit heartbeats, metrics en VIP's (zie internal/status).
+// unknown betekent: geen agent of nog geen gegevens.
+type Status string
 
 // TotpCodeRequest defines model for TotpCodeRequest.
 type TotpCodeRequest struct {
@@ -597,6 +749,12 @@ type VipInput struct {
 	Vrid        nullable.Nullable[int] `json:"vrid,omitempty"`
 }
 
+// VipOwner defines model for VipOwner.
+type VipOwner struct {
+	Address       string                    `json:"address"`
+	OwnerHostname nullable.Nullable[string] `json:"owner_hostname"`
+}
+
 // VipPatch defines model for VipPatch.
 type VipPatch struct {
 	Address     *string                `json:"address,omitempty"`
@@ -605,9 +763,19 @@ type VipPatch struct {
 	Vrid        nullable.Nullable[int] `json:"vrid,omitempty"`
 }
 
+// GetClusterMetricsParams defines parameters for GetClusterMetrics.
+type GetClusterMetricsParams struct {
+	Range *MetricsRange `form:"range,omitempty" json:"range,omitempty"`
+}
+
 // ListEventsParams defines parameters for ListEvents.
 type ListEventsParams struct {
 	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// GetNodeMetricsParams defines parameters for GetNodeMetrics.
+type GetNodeMetricsParams struct {
+	Range *MetricsRange `form:"range,omitempty" json:"range,omitempty"`
 }
 
 // EnrollAgentJSONRequestBody defines body for EnrollAgent for application/json ContentType.
@@ -690,6 +858,9 @@ type ServerInterface interface {
 	// UpdateCluster Cluster wijzigen (admin); alleen meegestuurde velden veranderen
 	// (PATCH /clusters/{clusterId})
 	UpdateCluster(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
+	// GetClusterMetrics Grafieken van een cluster, met een lijn per node
+	// (GET /clusters/{clusterId}/metrics)
+	GetClusterMetrics(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params GetClusterMetricsParams)
 	// CreateVip VIP toevoegen aan een cluster (admin)
 	// (POST /clusters/{clusterId}/vips)
 	CreateVip(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
@@ -708,6 +879,9 @@ type ServerInterface interface {
 	// GetHealth Gezondheid van de server en de database
 	// (GET /health)
 	GetHealth(w http.ResponseWriter, r *http.Request)
+	// GetInfo Instellingen van de server die de webinterface nodig heeft
+	// (GET /info)
+	GetInfo(w http.ResponseWriter, r *http.Request)
 	// ListNodes Alle nodes, met hun cluster
 	// (GET /nodes)
 	ListNodes(w http.ResponseWriter, r *http.Request)
@@ -726,6 +900,12 @@ type ServerInterface interface {
 	// GetNodeFacts Facts en laatste heartbeat van de agent op deze node
 	// (GET /nodes/{nodeId}/facts)
 	GetNodeFacts(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// GetNodeMetrics Grafieken van één node uit VictoriaMetrics
+	// (GET /nodes/{nodeId}/metrics)
+	GetNodeMetrics(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID, params GetNodeMetricsParams)
+	// Stream Live wijzigingen als Server-Sent Events
+	// (GET /stream)
+	Stream(w http.ResponseWriter, r *http.Request)
 	// ListUsers Actieve gebruikers, voor bijvoorbeeld de keuze van owners
 	// (GET /users)
 	ListUsers(w http.ResponseWriter, r *http.Request)
@@ -825,6 +1005,12 @@ func (_ Unimplemented) UpdateCluster(w http.ResponseWriter, r *http.Request, clu
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// GetClusterMetrics Grafieken van een cluster, met een lijn per node
+// (GET /clusters/{clusterId}/metrics)
+func (_ Unimplemented) GetClusterMetrics(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params GetClusterMetricsParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // CreateVip VIP toevoegen aan een cluster (admin)
 // (POST /clusters/{clusterId}/vips)
 func (_ Unimplemented) CreateVip(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
@@ -861,6 +1047,12 @@ func (_ Unimplemented) GetHealth(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// GetInfo Instellingen van de server die de webinterface nodig heeft
+// (GET /info)
+func (_ Unimplemented) GetInfo(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // ListNodes Alle nodes, met hun cluster
 // (GET /nodes)
 func (_ Unimplemented) ListNodes(w http.ResponseWriter, r *http.Request) {
@@ -894,6 +1086,18 @@ func (_ Unimplemented) UpdateNode(w http.ResponseWriter, r *http.Request, nodeId
 // GetNodeFacts Facts en laatste heartbeat van de agent op deze node
 // (GET /nodes/{nodeId}/facts)
 func (_ Unimplemented) GetNodeFacts(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetNodeMetrics Grafieken van één node uit VictoriaMetrics
+// (GET /nodes/{nodeId}/metrics)
+func (_ Unimplemented) GetNodeMetrics(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID, params GetNodeMetricsParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// Stream Live wijzigingen als Server-Sent Events
+// (GET /stream)
+func (_ Unimplemented) Stream(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -1168,6 +1372,48 @@ func (siw *ServerInterfaceWrapper) UpdateCluster(w http.ResponseWriter, r *http.
 	handler.ServeHTTP(w, r)
 }
 
+// GetClusterMetrics operation middleware
+func (siw *ServerInterfaceWrapper) GetClusterMetrics(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetClusterMetricsParams
+
+	// ------------- Optional query parameter "range" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "range", r.URL.Query(), &params.Range, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "range"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "range", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetClusterMetrics(w, r, clusterId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // CreateVip operation middleware
 func (siw *ServerInterfaceWrapper) CreateVip(w http.ResponseWriter, r *http.Request) {
 
@@ -1286,6 +1532,20 @@ func (siw *ServerInterfaceWrapper) GetHealth(w http.ResponseWriter, r *http.Requ
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetHealth(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetInfo operation middleware
+func (siw *ServerInterfaceWrapper) GetInfo(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetInfo(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1418,6 +1678,62 @@ func (siw *ServerInterfaceWrapper) GetNodeFacts(w http.ResponseWriter, r *http.R
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetNodeFacts(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetNodeMetrics operation middleware
+func (siw *ServerInterfaceWrapper) GetNodeMetrics(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetNodeMetricsParams
+
+	// ------------- Optional query parameter "range" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "range", r.URL.Query(), &params.Range, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "range"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "range", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetNodeMetrics(w, r, nodeId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// Stream operation middleware
+func (siw *ServerInterfaceWrapper) Stream(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.Stream(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1677,6 +1993,18 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/nodes/{nodeId}/facts", wrapper.GetNodeFacts)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/nodes/{nodeId}/metrics", wrapper.GetNodeMetrics)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/clusters/{clusterId}/metrics", wrapper.GetClusterMetrics)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/stream", wrapper.Stream)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/info", wrapper.GetInfo)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/enrollment-tokens", wrapper.ListEnrollmentTokens)

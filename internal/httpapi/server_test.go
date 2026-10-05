@@ -4,15 +4,20 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/cookiejar"
 	"net/http/httptest"
 	"os"
+	"slices"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/pquerna/otp/totp"
 
@@ -20,7 +25,11 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/auth"
 	"github.com/Jonasz1996/clusterforge/internal/config"
 	"github.com/Jonasz1996/clusterforge/internal/events"
+	"github.com/Jonasz1996/clusterforge/internal/live"
+	"github.com/Jonasz1996/clusterforge/internal/metrics"
+	"github.com/Jonasz1996/clusterforge/internal/status"
 	"github.com/Jonasz1996/clusterforge/internal/store"
+	"github.com/Jonasz1996/clusterforge/pkg/protocol"
 )
 
 // testEnv start de volledige HTTP-server tegen een echte PostgreSQL uit
@@ -32,6 +41,8 @@ type testEnv struct {
 	pool *pgxpool.Pool
 	api  *Server
 	bus  *agentbus.Bus
+	eval *status.Evaluator
+	vm   *fakeVM
 }
 
 func newTestEnv(t *testing.T) *testEnv {
@@ -58,16 +69,80 @@ func newTestEnv(t *testing.T) *testEnv {
 	if err != nil {
 		t.Fatal(err)
 	}
-	bus, err := agentbus.Start(ctx, "127.0.0.1:0", pool, events.NewWriter(q, log), log)
+	vm := newFakeVM(t)
+	ev := events.NewWriter(q, log)
+	eval := status.NewEvaluator(pool, ev, log)
+	eval.Warmup = 0
+	ingest := metrics.NewIngester(vm.srv.URL, q, log)
+	bus, err := agentbus.Start(ctx, "127.0.0.1:0", pool, ev, log, agentbus.Hooks{
+		Metrics: func(ctx context.Context, nodeID uuid.UUID, m protocol.Metrics) error {
+			if err := ingest.Ingest(ctx, nodeID, m, time.Now()); err != nil {
+				return err
+			}
+			ingest.Flush(ctx)
+			return nil
+		},
+		Changed: eval.Kick,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(bus.Close)
-	cfg := config.Config{SecureCookies: false, SessionTTL: time.Hour, AgentDir: t.TempDir()}
-	api := New(cfg, log, pool, a, bus, "test")
+	runCtx, stop := context.WithCancel(ctx)
+	hub := live.NewHub(pool, log)
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() { defer wg.Done(); hub.Run(runCtx) }()
+	go func() { defer wg.Done(); eval.Run(runCtx) }()
+	t.Cleanup(func() { stop(); wg.Wait() })
+	cfg := config.Config{
+		SecureCookies: false, SessionTTL: time.Hour, AgentDir: t.TempDir(), VictoriaMetricsURL: vm.srv.URL,
+		GrafanaNodeURL: "https://grafana.example/d/node?var-node={hostname}",
+	}
+	api := New(cfg, log, pool, a, bus, hub, "test")
 	srv := httptest.NewServer(api.Handler())
 	t.Cleanup(srv.Close)
-	return &testEnv{t: t, srv: srv, auth: a, pool: pool, api: api, bus: bus}
+	return &testEnv{t: t, srv: srv, auth: a, pool: pool, api: api, bus: bus, eval: eval, vm: vm}
+}
+
+// fakeVM speelt VictoriaMetrics: het bewaart wat binnenkomt en geeft op elke
+// query één vaste lijn terug.
+type fakeVM struct {
+	srv     *httptest.Server
+	mu      sync.Mutex
+	lines   []string
+	queries []string
+}
+
+func newFakeVM(t *testing.T) *fakeVM {
+	vm := &fakeVM{}
+	vm.srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/import/prometheus":
+			body, _ := io.ReadAll(r.Body)
+			vm.mu.Lock()
+			vm.lines = append(vm.lines, strings.Split(strings.TrimSpace(string(body)), "\n")...)
+			vm.mu.Unlock()
+			w.WriteHeader(http.StatusNoContent)
+		case "/api/v1/query_range":
+			vm.mu.Lock()
+			vm.queries = append(vm.queries, r.URL.Query().Get("query"))
+			vm.mu.Unlock()
+			start := r.URL.Query().Get("start")
+			_, _ = fmt.Fprintf(w, `{"status":"success","data":{"resultType":"matrix","result":[`+
+				`{"metric":{"node":"web01","device":"eth0","mountpoint":"/"},"values":[[%s,"1.5"]]}]}}`, start)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(vm.srv.Close)
+	return vm
+}
+
+func (vm *fakeVM) received() []string {
+	vm.mu.Lock()
+	defer vm.mu.Unlock()
+	return slices.Clone(vm.lines)
 }
 
 func (e *testEnv) createUser(name, password string, role store.UserRole) {

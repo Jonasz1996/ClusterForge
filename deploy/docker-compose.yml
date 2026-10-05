@@ -10,6 +10,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      victoriametrics:
+        condition: service_started
     environment:
       CF_DATABASE_URL: postgres://clusterforge:${POSTGRES_PASSWORD:?zet POSTGRES_PASSWORD}@postgres:5432/clusterforge?sslmode=disable
       CF_LISTEN: ":8080"
@@ -17,6 +19,9 @@ services:
       CF_TRUST_PROXY_HEADERS: ${CF_TRUST_PROXY_HEADERS:-false}
       CF_SESSION_TTL: ${CF_SESSION_TTL:-12h}
       CF_NATS_ADVERTISE: ${CF_NATS_ADVERTISE:-}
+      CF_VICTORIAMETRICS_URL: http://victoriametrics:8428
+      CF_GRAFANA_NODE_URL: ${CF_GRAFANA_NODE_URL:-}
+      CF_GRAFANA_CLUSTER_URL: ${CF_GRAFANA_CLUSTER_URL:-}
     ports:
       - "${CF_BIND:-127.0.0.1}:8080:8080"
       # Agents verbinden hier rechtstreeks mee (TLS), niet via de reverse proxy.
@@ -40,6 +45,10 @@ services:
     restart: unless-stopped
     command: ["-retentionPeriod=90d"]
     volumes: [vmdata:/victoria-metrics-data]
+    # Alleen nodig als Grafana de metrics rechtstreeks leest. VictoriaMetrics
+    # heeft geen login; open dit alleen naar je Grafana.
+    ports:
+      - "${CF_VM_BIND:-127.0.0.1}:8428:8428"
 
 volumes:
   pgdata:

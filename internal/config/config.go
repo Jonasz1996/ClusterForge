@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -37,6 +38,15 @@ type Config struct {
 	// AgentDir bevat de cf-agent-binaries die de server aanbiedt om te
 	// downloaden (CF_AGENT_DIR, standaard /usr/share/clusterforge/agents).
 	AgentDir string
+	// VictoriaMetricsURL is het adres van VictoriaMetrics, bijvoorbeeld
+	// http://victoriametrics:8428 (CF_VICTORIAMETRICS_URL). Leeg zet de
+	// grafieken uit.
+	VictoriaMetricsURL string
+	// GrafanaNodeURL en GrafanaClusterURL zijn links naar Grafana-dashboards
+	// met plaatshouders zoals {hostname} en {cluster} (CF_GRAFANA_NODE_URL,
+	// CF_GRAFANA_CLUSTER_URL). Leeg verbergt de link.
+	GrafanaNodeURL    string
+	GrafanaClusterURL string
 }
 
 func FromEnv() (Config, error) {
@@ -49,9 +59,21 @@ func FromEnv() (Config, error) {
 		NATSListen:    envOr("CF_NATS_LISTEN", ":4222"),
 		NATSAdvertise: os.Getenv("CF_NATS_ADVERTISE"),
 		AgentDir:      envOr("CF_AGENT_DIR", "/usr/share/clusterforge/agents"),
+
+		VictoriaMetricsURL: os.Getenv("CF_VICTORIAMETRICS_URL"),
+		GrafanaNodeURL:     os.Getenv("CF_GRAFANA_NODE_URL"),
+		GrafanaClusterURL:  os.Getenv("CF_GRAFANA_CLUSTER_URL"),
 	}
 	if c.DatabaseURL == "" {
 		return c, fmt.Errorf("CF_DATABASE_URL is niet gezet")
+	}
+	for name, v := range map[string]string{
+		"CF_VICTORIAMETRICS_URL": c.VictoriaMetricsURL, "CF_GRAFANA_NODE_URL": c.GrafanaNodeURL,
+		"CF_GRAFANA_CLUSTER_URL": c.GrafanaClusterURL,
+	} {
+		if v != "" && !strings.HasPrefix(v, "http://") && !strings.HasPrefix(v, "https://") {
+			return c, fmt.Errorf("%s moet met http:// of https:// beginnen", name)
+		}
 	}
 	if v := os.Getenv("CF_SECURE_COOKIES"); v != "" {
 		b, err := strconv.ParseBool(v)

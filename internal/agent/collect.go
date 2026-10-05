@@ -185,22 +185,37 @@ func (c *Collector) bootTime() time.Time {
 	return time.Time{}
 }
 
-func (c *Collector) filesystems() []protocol.Filesystem {
-	var out []protocol.Filesystem
+type fsStat struct{ size, free, avail uint64 }
+
+type mount struct{ device, path, fstype string }
+
+// mounts geeft de echte bestandssystemen uit /proc/mounts.
+func (c *Collector) mounts() []mount {
+	var out []mount
 	seen := map[string]bool{}
 	for line := range strings.SplitSeq(c.read("/proc/mounts"), "\n") {
 		f := strings.Fields(line)
 		if len(f) < 3 || !slices.Contains(realFilesystems, f[2]) {
 			continue
 		}
-		dev, mount, typ := f[0], unescapeMount(f[1]), f[2]
+		m := mount{device: f[0], path: unescapeMount(f[1]), fstype: f[2]}
 		// Dezelfde schijf op meerdere plekken (bind mounts) één keer tellen.
-		if seen[dev] && typ != "zfs" {
+		if seen[m.device] && m.fstype != "zfs" {
 			continue
 		}
-		seen[dev] = true
-		size, used := statfs(c.path(mount))
-		out = append(out, protocol.Filesystem{Mount: mount, Device: dev, Type: typ, SizeBytes: size, UsedBytes: used})
+		seen[m.device] = true
+		out = append(out, m)
+	}
+	return out
+}
+
+func (c *Collector) filesystems() []protocol.Filesystem {
+	var out []protocol.Filesystem
+	for _, m := range c.mounts() {
+		st, _ := statfs(c.path(m.path))
+		out = append(out, protocol.Filesystem{
+			Mount: m.path, Device: m.device, Type: m.fstype, SizeBytes: st.size, UsedBytes: st.size - st.free,
+		})
 	}
 	return out
 }
