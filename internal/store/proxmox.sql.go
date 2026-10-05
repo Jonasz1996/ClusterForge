@@ -48,7 +48,7 @@ func (q *Queries) CountProxmoxResources(ctx context.Context) ([]CountProxmoxReso
 const createProxmoxConnection = `-- name: CreateProxmoxConnection :one
 INSERT INTO proxmox_connections (id, name, api_url, token_id, token_secret_enc, key_id, tls_fingerprint, pve_version)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-RETURNING id, name, api_url, token_id, token_secret_enc, key_id, tls_fingerprint, pve_version, last_sync_at, last_error, created_at, updated_at
+RETURNING id, name, api_url, token_id, token_secret_enc, key_id, tls_fingerprint, pve_version, last_sync_at, last_error, created_at, updated_at, backup_checked_at, backup_error, not_backed_up
 `
 
 type CreateProxmoxConnectionParams struct {
@@ -87,6 +87,9 @@ func (q *Queries) CreateProxmoxConnection(ctx context.Context, arg CreateProxmox
 		&i.LastError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.BackupCheckedAt,
+		&i.BackupError,
+		&i.NotBackedUp,
 	)
 	return i, err
 }
@@ -140,7 +143,7 @@ func (q *Queries) GetNodeByGuest(ctx context.Context, arg GetNodeByGuestParams) 
 }
 
 const getProxmoxConnection = `-- name: GetProxmoxConnection :one
-SELECT id, name, api_url, token_id, token_secret_enc, key_id, tls_fingerprint, pve_version, last_sync_at, last_error, created_at, updated_at FROM proxmox_connections WHERE id = $1
+SELECT id, name, api_url, token_id, token_secret_enc, key_id, tls_fingerprint, pve_version, last_sync_at, last_error, created_at, updated_at, backup_checked_at, backup_error, not_backed_up FROM proxmox_connections WHERE id = $1
 `
 
 func (q *Queries) GetProxmoxConnection(ctx context.Context, id uuid.UUID) (ProxmoxConnection, error) {
@@ -159,6 +162,9 @@ func (q *Queries) GetProxmoxConnection(ctx context.Context, id uuid.UUID) (Proxm
 		&i.LastError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.BackupCheckedAt,
+		&i.BackupError,
+		&i.NotBackedUp,
 	)
 	return i, err
 }
@@ -237,7 +243,7 @@ func (q *Queries) ListLinkedGuests(ctx context.Context, proxmoxID *uuid.UUID) ([
 }
 
 const listProxmoxConnections = `-- name: ListProxmoxConnections :many
-SELECT id, name, api_url, token_id, token_secret_enc, key_id, tls_fingerprint, pve_version, last_sync_at, last_error, created_at, updated_at FROM proxmox_connections ORDER BY lower(name)
+SELECT id, name, api_url, token_id, token_secret_enc, key_id, tls_fingerprint, pve_version, last_sync_at, last_error, created_at, updated_at, backup_checked_at, backup_error, not_backed_up FROM proxmox_connections ORDER BY lower(name)
 `
 
 func (q *Queries) ListProxmoxConnections(ctx context.Context) ([]ProxmoxConnection, error) {
@@ -262,6 +268,9 @@ func (q *Queries) ListProxmoxConnections(ctx context.Context) ([]ProxmoxConnecti
 			&i.LastError,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.BackupCheckedAt,
+			&i.BackupError,
+			&i.NotBackedUp,
 		); err != nil {
 			return nil, err
 		}
@@ -321,7 +330,7 @@ func (q *Queries) ListProxmoxResources(ctx context.Context, connectionID uuid.UU
 }
 
 const lockProxmoxConnection = `-- name: LockProxmoxConnection :one
-SELECT id, name, api_url, token_id, token_secret_enc, key_id, tls_fingerprint, pve_version, last_sync_at, last_error, created_at, updated_at FROM proxmox_connections WHERE id = $1 FOR UPDATE
+SELECT id, name, api_url, token_id, token_secret_enc, key_id, tls_fingerprint, pve_version, last_sync_at, last_error, created_at, updated_at, backup_checked_at, backup_error, not_backed_up FROM proxmox_connections WHERE id = $1 FOR UPDATE
 `
 
 func (q *Queries) LockProxmoxConnection(ctx context.Context, id uuid.UUID) (ProxmoxConnection, error) {
@@ -340,6 +349,9 @@ func (q *Queries) LockProxmoxConnection(ctx context.Context, id uuid.UUID) (Prox
 		&i.LastError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.BackupCheckedAt,
+		&i.BackupError,
+		&i.NotBackedUp,
 	)
 	return i, err
 }
@@ -377,7 +389,7 @@ UPDATE proxmox_connections
 SET name = $2, api_url = $3, token_id = $4, token_secret_enc = $5, key_id = $6, tls_fingerprint = $7,
     updated_at = now()
 WHERE id = $1
-RETURNING id, name, api_url, token_id, token_secret_enc, key_id, tls_fingerprint, pve_version, last_sync_at, last_error, created_at, updated_at
+RETURNING id, name, api_url, token_id, token_secret_enc, key_id, tls_fingerprint, pve_version, last_sync_at, last_error, created_at, updated_at, backup_checked_at, backup_error, not_backed_up
 `
 
 type UpdateProxmoxConnectionParams struct {
@@ -414,6 +426,9 @@ func (q *Queries) UpdateProxmoxConnection(ctx context.Context, arg UpdateProxmox
 		&i.LastError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.BackupCheckedAt,
+		&i.BackupError,
+		&i.NotBackedUp,
 	)
 	return i, err
 }

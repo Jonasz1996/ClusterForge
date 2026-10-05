@@ -22,6 +22,7 @@ export function useLiveUpdates(enabled: boolean) {
         void qc.invalidateQueries({ queryKey: ["audit"] });
         void qc.invalidateQueries({ queryKey: ["jobs"] });
         void qc.invalidateQueries({ queryKey: ["proxmox"] });
+        void qc.invalidateQueries({ queryKey: ["backups"] });
       }, 300);
     };
     es.addEventListener("change", onChange);

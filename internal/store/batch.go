@@ -18,6 +18,83 @@ var (
 	ErrBatchAlreadyClosed = errors.New("batch already closed")
 )
 
+const upsertProxmoxBackup = `-- name: UpsertProxmoxBackup :batchexec
+INSERT INTO proxmox_backups (connection_id, volid, storage, pve_node, vmid, guest_type, ctime, size_bytes, format,
+                             notes, protected, verify_state, synced_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+ON CONFLICT (connection_id, volid) DO UPDATE
+SET storage = EXCLUDED.storage, pve_node = EXCLUDED.pve_node, vmid = EXCLUDED.vmid, guest_type = EXCLUDED.guest_type,
+    ctime = EXCLUDED.ctime, size_bytes = EXCLUDED.size_bytes, format = EXCLUDED.format, notes = EXCLUDED.notes,
+    protected = EXCLUDED.protected, verify_state = EXCLUDED.verify_state, synced_at = EXCLUDED.synced_at
+`
+
+type UpsertProxmoxBackupBatchResults struct {
+	br     pgx.BatchResults
+	tot    int
+	closed bool
+}
+
+type UpsertProxmoxBackupParams struct {
+	ConnectionID uuid.UUID
+	Volid        string
+	Storage      string
+	PveNode      string
+	Vmid         int32
+	GuestType    string
+	Ctime        time.Time
+	SizeBytes    int64
+	Format       string
+	Notes        string
+	Protected    bool
+	VerifyState  string
+	SyncedAt     time.Time
+}
+
+func (q *Queries) UpsertProxmoxBackup(ctx context.Context, arg []UpsertProxmoxBackupParams) *UpsertProxmoxBackupBatchResults {
+	batch := &pgx.Batch{}
+	for _, a := range arg {
+		vals := []interface{}{
+			a.ConnectionID,
+			a.Volid,
+			a.Storage,
+			a.PveNode,
+			a.Vmid,
+			a.GuestType,
+			a.Ctime,
+			a.SizeBytes,
+			a.Format,
+			a.Notes,
+			a.Protected,
+			a.VerifyState,
+			a.SyncedAt,
+		}
+		batch.Queue(upsertProxmoxBackup, vals...)
+	}
+	br := q.db.SendBatch(ctx, batch)
+	return &UpsertProxmoxBackupBatchResults{br, len(arg), false}
+}
+
+func (b *UpsertProxmoxBackupBatchResults) Exec(f func(int, error)) {
+	defer b.br.Close()
+	for t := 0; t < b.tot; t++ {
+		if b.closed {
+			if f != nil {
+				f(t, ErrBatchAlreadyClosed)
+			}
+			continue
+		}
+		_, err := b.br.Exec()
+		if f != nil {
+			f(t, err)
+		}
+	}
+}
+
+func (b *UpsertProxmoxBackupBatchResults) Close() error {
+	b.closed = true
+	return b.br.Close()
+}
+
 const upsertProxmoxResource = `-- name: UpsertProxmoxResource :batchexec
 INSERT INTO proxmox_resources (connection_id, pve_id, type, pve_node, vmid, name, status, template, data, synced_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)

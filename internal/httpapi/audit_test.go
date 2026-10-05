@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/store"
 )
 
@@ -273,7 +274,7 @@ func TestAudit(t *testing.T) {
 		DeletedNodes    []auditRef                    `json:"deleted_nodes"`
 		Total           int                           `json:"total"`
 	}
-	if s := c.do("GET", "/api/v1/audit/info", nil, &info); s != 200 || len(info.Categories) != 7 || len(info.Users) != 2 ||
+	if s := c.do("GET", "/api/v1/audit/info", nil, &info); s != 200 || len(info.Categories) != len(events.Categories) || len(info.Users) != 2 ||
 		len(info.DeletedClusters) != 1 || info.DeletedClusters[0].Name != "webcluster-prod" || len(info.DeletedNodes) != 1 || info.Total < total {
 		t.Fatalf("info: %d %+v", s, info)
 	}

@@ -3,10 +3,12 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
+import { BackupBadge } from "@/components/backups/Backups";
 import { InstallAgent } from "@/components/inventory/InstallAgent";
 import { NodeForm } from "@/components/inventory/NodeForm";
 import { AgentBadge, Empty, LifecycleBadge, QueryState, StatusBadge, Tags } from "@/components/inventory/bits";
 import { Button, Card, Input, PageHeader, Select } from "@/components/ui";
+import { useBackups } from "@/lib/backups";
 import {
   lifecycles,
   useCreateNode,
@@ -21,6 +23,11 @@ type Group = { key: string; title: string; href?: string; nodes: Node[] };
 
 export default function NodesPage() {
   const nodes = useNodes(true);
+  const backups = useBackups();
+  const backupOf = useMemo(
+    () => new Map((backups.data?.items ?? []).filter((it) => it.node).map((it) => [it.node!.id, it.freshness])),
+    [backups.data],
+  );
   const isAdmin = useIsAdmin();
   const create = useCreateNode();
   const router = useRouter();
@@ -157,6 +164,7 @@ export default function NodesPage() {
                         {n.role && <span className="text-slate-600 dark:text-slate-400">{n.role}</span>}
                         {n.agent ? <StatusBadge status={n.status} reason={n.status_reason} /> : <AgentBadge agent={null} />}
                         {n.lifecycle !== "active" && <LifecycleBadge lifecycle={n.lifecycle} />}
+                        <BackupBadge freshness={backupOf.get(n.id)} />
                         <Tags tags={n.tags} />
                       </li>
                     ))}

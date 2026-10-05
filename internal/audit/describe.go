@@ -58,6 +58,9 @@ func describe(r store.ListAuditRow, n names) Entry {
 	if strings.HasSuffix(r.Action, ".updated") {
 		e.Changes = changes(r.SubjectType, p, n)
 	}
+	if r.Action == "backup.policy_updated" || r.Action == "backup.watch_updated" {
+		e.Changes = changes(r.Action, p, n)
+	}
 	e.Summary = summary(r, p, n, e, spec)
 	return e
 }
@@ -225,6 +228,20 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 		return fmt.Sprintf("VM %s van %s is verdwenen uit Proxmox", num(p["vmid"]), str(p, "hostname"))
 	case "job.failed":
 		return spec.Label + ": " + name + colon(str(p, "error"))
+	case "backup.fresh":
+		return "Back-up van " + backupOf(r, p, name) + " weer vers"
+	case "backup.stale":
+		return fmt.Sprintf("Back-up van %s te oud: de nieuwste is ouder dan %s uur", backupOf(r, p, name), num(p["max_age_hours"]))
+	case "backup.missing":
+		return "Geen back-up van " + backupOf(r, p, name) + " in Proxmox"
+	case "backup.inventory_failed":
+		return "Back-ups van Proxmox-koppeling " + name + " niet te lezen" + colon(str(p, "error"))
+	case "backup.inventory_recovered":
+		return "Back-ups van Proxmox-koppeling " + name + " weer te lezen"
+	case "backup.policy_updated":
+		return "Back-upbeleid van cluster " + name + " gewijzigd" + changeSummary(e.Changes)
+	case "backup.watch_updated":
+		return "Lijst ook bewaken van Proxmox-koppeling " + name + " gewijzigd" + changeSummary(e.Changes)
 	}
 	if strings.HasPrefix(r.Action, "job.") {
 		return spec.Label + ": " + name
@@ -233,6 +250,15 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 		return spec.Label + ": " + name
 	}
 	return spec.Label
+}
+
+// backupOf noemt de VM van een back-upevent: de node, of de VM zelf als
+// hij via "ook bewaken" zonder node bewaakt wordt.
+func backupOf(r store.ListAuditRow, p map[string]any, name string) string {
+	if r.SubjectType == "node" {
+		return name
+	}
+	return "VM " + num(p["vmid"]) + paren(str(p, "name"))
 }
 
 // changeSummary noemt één wijziging voluit en meerdere bij naam.
@@ -263,8 +289,10 @@ var fieldLabels = map[string][][2]string{
 		{"environment", "Omgeving"}, {"git_repo_url", "Git-repository"}, {"tags", "Tags"}, {"owner_ids", "Owners"}},
 	"node": {{"hostname", "Hostnaam"}, {"cluster_id", "Cluster"}, {"role", "Rol"}, {"description", "Omschrijving"},
 		{"lifecycle", "Lifecycle"}, {"primary_ip", "IP-adres"}, {"tags", "Tags"}, {"proxmox", "Proxmox-VM"}},
-	"vip":     {{"address", "Adres"}, {"interface", "Interface"}, {"vrid", "VRRP-id"}, {"description", "Omschrijving"}},
-	"proxmox": {{"name", "Naam"}, {"api_url", "API-adres"}, {"token_id", "Token-id"}, {"token_secret", "Token-secret"}, {"tls_fingerprint", "TLS-vingerafdruk"}},
+	"vip":                   {{"address", "Adres"}, {"interface", "Interface"}, {"vrid", "VRRP-id"}, {"description", "Omschrijving"}},
+	"proxmox":               {{"name", "Naam"}, {"api_url", "API-adres"}, {"token_id", "Token-id"}, {"token_secret", "Token-secret"}, {"tls_fingerprint", "TLS-vingerafdruk"}},
+	"backup.policy_updated": {{"max_age_hours", "Maximale leeftijd in uren"}},
+	"backup.watch_updated":  {{"watch", "Ook bewaken"}},
 }
 
 func changes(subjectType string, p map[string]any, n names) []Change {

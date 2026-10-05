@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState, type ReactNode } from "react";
 import { HistoryCard } from "@/components/audit/AuditList";
+import { NodeBackupsCard } from "@/components/backups/Backups";
 import { MetricsPanels } from "@/components/charts/MetricsPanels";
 import { JobList } from "@/components/jobs/JobList";
 import { InstallAgent } from "@/components/inventory/InstallAgent";
@@ -156,6 +157,8 @@ function NodeDetailInner() {
               <JobList jobs={jobs.data!} />
             </Card>
           )}
+
+          {node.data.proxmox && <NodeBackupsCard nodeId={id} />}
 
           {node.data.agent && (
             <MetricsPanels
