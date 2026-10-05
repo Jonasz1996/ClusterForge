@@ -79,7 +79,7 @@ func (q *Queries) DeleteNode(ctx context.Context, id uuid.UUID) (int64, error) {
 const getNode = `-- name: GetNode :one
 SELECT n.id, n.cluster_id, n.hostname, n.role, n.description, n.lifecycle, n.primary_ip, n.tags, n.created_at, n.updated_at, n.status, n.status_reason, n.status_since, n.proxmox_id, n.pve_vmid, c.slug AS cluster_slug, c.name AS cluster_name,
        a.id AS agent_id, a.version AS agent_version, a.enrolled_at AS agent_enrolled_at,
-       a.last_seen_at AS agent_last_seen_at,
+       a.last_seen_at AS agent_last_seen_at, a.protocol_version AS agent_protocol,
        pc.name AS proxmox_name, r.type AS pve_type, r.pve_node, r.name AS pve_name, r.status AS pve_status,
        r.data AS pve_data
 FROM nodes n
@@ -98,6 +98,7 @@ type GetNodeRow struct {
 	AgentVersion    *string
 	AgentEnrolledAt *time.Time
 	AgentLastSeenAt *time.Time
+	AgentProtocol   *int32
 	ProxmoxName     *string
 	PveType         *string
 	PveNode         *string
@@ -131,6 +132,7 @@ func (q *Queries) GetNode(ctx context.Context, id uuid.UUID) (GetNodeRow, error)
 		&i.AgentVersion,
 		&i.AgentEnrolledAt,
 		&i.AgentLastSeenAt,
+		&i.AgentProtocol,
 		&i.ProxmoxName,
 		&i.PveType,
 		&i.PveNode,
@@ -144,7 +146,7 @@ func (q *Queries) GetNode(ctx context.Context, id uuid.UUID) (GetNodeRow, error)
 const listNodes = `-- name: ListNodes :many
 SELECT n.id, n.cluster_id, n.hostname, n.role, n.description, n.lifecycle, n.primary_ip, n.tags, n.created_at, n.updated_at, n.status, n.status_reason, n.status_since, n.proxmox_id, n.pve_vmid, c.slug AS cluster_slug, c.name AS cluster_name,
        a.id AS agent_id, a.version AS agent_version, a.enrolled_at AS agent_enrolled_at,
-       a.last_seen_at AS agent_last_seen_at,
+       a.last_seen_at AS agent_last_seen_at, a.protocol_version AS agent_protocol,
        pc.name AS proxmox_name, r.type AS pve_type, r.pve_node, r.name AS pve_name, r.status AS pve_status,
        r.data AS pve_data
 FROM nodes n
@@ -163,6 +165,7 @@ type ListNodesRow struct {
 	AgentVersion    *string
 	AgentEnrolledAt *time.Time
 	AgentLastSeenAt *time.Time
+	AgentProtocol   *int32
 	ProxmoxName     *string
 	PveType         *string
 	PveNode         *string
@@ -202,6 +205,7 @@ func (q *Queries) ListNodes(ctx context.Context) ([]ListNodesRow, error) {
 			&i.AgentVersion,
 			&i.AgentEnrolledAt,
 			&i.AgentLastSeenAt,
+			&i.AgentProtocol,
 			&i.ProxmoxName,
 			&i.PveType,
 			&i.PveNode,
@@ -222,7 +226,7 @@ func (q *Queries) ListNodes(ctx context.Context) ([]ListNodesRow, error) {
 const listNodesByCluster = `-- name: ListNodesByCluster :many
 SELECT n.id, n.cluster_id, n.hostname, n.role, n.description, n.lifecycle, n.primary_ip, n.tags, n.created_at, n.updated_at, n.status, n.status_reason, n.status_since, n.proxmox_id, n.pve_vmid, c.slug AS cluster_slug, c.name AS cluster_name,
        a.id AS agent_id, a.version AS agent_version, a.enrolled_at AS agent_enrolled_at,
-       a.last_seen_at AS agent_last_seen_at,
+       a.last_seen_at AS agent_last_seen_at, a.protocol_version AS agent_protocol,
        pc.name AS proxmox_name, r.type AS pve_type, r.pve_node, r.name AS pve_name, r.status AS pve_status,
        r.data AS pve_data
 FROM nodes n
@@ -242,6 +246,7 @@ type ListNodesByClusterRow struct {
 	AgentVersion    *string
 	AgentEnrolledAt *time.Time
 	AgentLastSeenAt *time.Time
+	AgentProtocol   *int32
 	ProxmoxName     *string
 	PveType         *string
 	PveNode         *string
@@ -281,6 +286,7 @@ func (q *Queries) ListNodesByCluster(ctx context.Context, clusterID *uuid.UUID) 
 			&i.AgentVersion,
 			&i.AgentEnrolledAt,
 			&i.AgentLastSeenAt,
+			&i.AgentProtocol,
 			&i.ProxmoxName,
 			&i.PveType,
 			&i.PveNode,

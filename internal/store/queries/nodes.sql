@@ -1,7 +1,7 @@
 -- name: ListNodes :many
 SELECT sqlc.embed(n), c.slug AS cluster_slug, c.name AS cluster_name,
        a.id AS agent_id, a.version AS agent_version, a.enrolled_at AS agent_enrolled_at,
-       a.last_seen_at AS agent_last_seen_at,
+       a.last_seen_at AS agent_last_seen_at, a.protocol_version AS agent_protocol,
        pc.name AS proxmox_name, r.type AS pve_type, r.pve_node, r.name AS pve_name, r.status AS pve_status,
        r.data AS pve_data
 FROM nodes n
@@ -14,7 +14,7 @@ ORDER BY lower(n.hostname);
 -- name: ListNodesByCluster :many
 SELECT sqlc.embed(n), c.slug AS cluster_slug, c.name AS cluster_name,
        a.id AS agent_id, a.version AS agent_version, a.enrolled_at AS agent_enrolled_at,
-       a.last_seen_at AS agent_last_seen_at,
+       a.last_seen_at AS agent_last_seen_at, a.protocol_version AS agent_protocol,
        pc.name AS proxmox_name, r.type AS pve_type, r.pve_node, r.name AS pve_name, r.status AS pve_status,
        r.data AS pve_data
 FROM nodes n
@@ -28,7 +28,7 @@ ORDER BY lower(n.hostname);
 -- name: GetNode :one
 SELECT sqlc.embed(n), c.slug AS cluster_slug, c.name AS cluster_name,
        a.id AS agent_id, a.version AS agent_version, a.enrolled_at AS agent_enrolled_at,
-       a.last_seen_at AS agent_last_seen_at,
+       a.last_seen_at AS agent_last_seen_at, a.protocol_version AS agent_protocol,
        pc.name AS proxmox_name, r.type AS pve_type, r.pve_node, r.name AS pve_name, r.status AS pve_status,
        r.data AS pve_data
 FROM nodes n

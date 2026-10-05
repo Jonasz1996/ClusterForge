@@ -63,6 +63,13 @@ func procRoot(t *testing.T, machineID string) string {
 // tot de test stopt of stop wordt aangeroepen.
 func startAgent(t *testing.T, e *testEnv, c *client, nodeID, machineID string, a *addrs) (stop func()) {
 	t.Helper()
+	return startAgentWith(t, e, c, nodeID, machineID, a, nil)
+}
+
+// startAgentWith is startAgent met een kans om de agent aan te passen voor
+// hij start; root is zijn bestandssysteemwortel.
+func startAgentWith(t *testing.T, e *testEnv, c *client, nodeID, machineID string, a *addrs, setup func(ag *agent.Agent, root string)) (stop func()) {
+	t.Helper()
 	var tok newToken
 	if status := c.do("POST", "/api/v1/enrollment-tokens", map[string]any{"node_id": nodeID}, &tok); status != http.StatusCreated {
 		t.Fatalf("token: %d", status)
@@ -77,11 +84,16 @@ func startAgent(t *testing.T, e *testEnv, c *client, nodeID, machineID string, a
 	ag := &agent.Agent{
 		Config: cfg, Version: "test", Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Collector: col,
 		HeartbeatInterval: 100 * time.Millisecond, MetricsInterval: 100 * time.Millisecond,
+		StatePath: filepath.Join(root, "var/lib/clusterforge/agent-state.json"),
+	}
+	if setup != nil {
+		setup(ag, root)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() { defer close(done); _ = ag.Run(ctx) }()
-	stop = func() { cancel(); <-done }
+	var once sync.Once
+	stop = func() { once.Do(func() { cancel(); <-done }) }
 	t.Cleanup(stop)
 	return stop
 }

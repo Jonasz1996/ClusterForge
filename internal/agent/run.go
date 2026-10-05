@@ -17,8 +17,8 @@ import (
 	"github.com/Jonasz1996/clusterforge/pkg/protocol"
 )
 
-// Agent houdt de verbinding met de server en stuurt heartbeats, metrics en
-// facts.
+// Agent houdt de verbinding met de server, stuurt heartbeats, metrics en
+// facts, en voert de commando's van de server uit.
 type Agent struct {
 	Config    *Config
 	Version   string
@@ -28,6 +28,12 @@ type Agent struct {
 	HeartbeatInterval time.Duration
 	MetricsInterval   time.Duration
 	FactsInterval     time.Duration
+	// StatePath is het bestand waarin de agent onderhoud en power-commando's
+	// onthoudt; leeg gebruikt DefaultStatePath.
+	StatePath string
+	// Exec voert de systeemcommando's van een commando uit (systemctl); nil
+	// gebruikt exec. Tests vervangen het.
+	Exec func(ctx context.Context, name string, args ...string) ([]byte, error)
 
 	nc        *nats.Conn
 	factsNow  chan struct{}
@@ -84,6 +90,11 @@ func (a *Agent) Connect() error {
 			a.Log.Warn("NATS-fout", "err", err)
 		}),
 	)
+	if err != nil {
+		return err
+	}
+	// Een subscription overleeft herverbindingen; nats.go zet hem zelf terug.
+	_, err = a.nc.Subscribe(protocol.Subject(a.Config.NodeID, protocol.SubjectCommands), a.onCommand)
 	return err
 }
 

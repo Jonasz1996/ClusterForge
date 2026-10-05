@@ -22,14 +22,16 @@ export default function MonitoringPage() {
         key: c.id, href: `/clusters/detail?id=${c.id}`, name: c.name, kind: "Cluster",
         status: c.status, reason: c.status_reason, since: c.status_since,
       })),
+    // Een node in onderhoud of uit dienst mag down zijn.
     ...(nodes.data ?? [])
-      .filter((n) => n.status !== "healthy" && n.status !== "unknown")
+      .filter((n) => n.status !== "healthy" && n.status !== "unknown" && !resting(n.lifecycle))
       .map((n) => ({
         key: n.id, href: `/nodes/detail?id=${n.id}`, name: n.hostname, kind: n.cluster_name ? `Node in ${n.cluster_name}` : "Node",
         status: n.status, reason: n.status_reason, since: n.status_since,
       })),
   ].sort(bySeverity);
   const withoutAgent = (nodes.data ?? []).filter((n) => !n.agent).length;
+  const inMaintenance = (nodes.data ?? []).filter((n) => resting(n.lifecycle) && n.lifecycle !== "decommissioned").length;
 
   return (
     <div className="space-y-6">
@@ -69,6 +71,12 @@ export default function MonitoringPage() {
               ))}
             </ul>
           )}
+          {inMaintenance > 0 && (
+            <p className="mt-3 text-xs text-slate-500">
+              {inMaintenance} {inMaintenance === 1 ? "node staat" : "nodes staan"} in onderhoud en{" "}
+              {inMaintenance === 1 ? "telt" : "tellen"} niet mee.
+            </p>
+          )}
           {withoutAgent > 0 && (
             <p className="mt-3 text-xs text-slate-500">
               {withoutAgent} {withoutAgent === 1 ? "node heeft" : "nodes hebben"} nog geen agent en {withoutAgent === 1 ? "telt" : "tellen"}{" "}
@@ -94,6 +102,8 @@ export default function MonitoringPage() {
     </div>
   );
 }
+
+const resting = (l: string) => l === "maintenance" || l === "draining" || l === "decommissioned";
 
 function Counts({ title, items }: { title: string; items?: { status: Status }[] }) {
   return (

@@ -310,6 +310,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/nodes/{nodeId}/actions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Een node herstarten, afsluiten, in of uit onderhoud zetten of zijn facts verzamelen (admin); wordt een taak
+         * @description Bij onderhoud, herstarten en afsluiten zet de agent eerst keepalived uit zodat de VIP's naar een andere node gaan.
+         *     Kan geen andere node een VIP overnemen, dan antwoordt de server 409 met code needs_force; met force=true gaat het toch door.
+         */
+        post: operations["nodeAction"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/nodes/{nodeId}/metrics": {
         parameters: {
             query?: {
@@ -888,6 +911,8 @@ export interface components {
             /** Format: uuid */
             id: string;
             version: string;
+            /** @description De agent kan commando's uitvoeren (herstarten */
+            commands: boolean;
             /** Format: date-time */
             enrolled_at: string;
             /** Format: date-time */
@@ -1225,6 +1250,20 @@ export interface components {
             vmstate?: boolean;
             /** @description Doelhost bij migreren */
             target?: string;
+        };
+        /**
+         * @description activate beëindigt het onderhoud
+         * @enum {string}
+         */
+        NodeAction: "refresh_facts" | "reboot" | "shutdown" | "maintenance" | "activate";
+        NodeActionInput: {
+            action: components["schemas"]["NodeAction"];
+            /** @description Komt in de activiteitenlog en in het systeemlog van de node */
+            reason?: string;
+            /** @description Bij herstarten of afsluiten eerst de VIP's weghalen (standaard ja) */
+            drain?: boolean;
+            /** @description Doorgaan ook als geen andere node een VIP kan overnemen */
+            force?: boolean;
         };
         /** @enum {string} */
         JobStatus: "queued" | "running" | "succeeded" | "failed" | "canceled";
@@ -1895,6 +1934,37 @@ export interface operations {
             };
             401: components["responses"]["Error"];
             404: components["responses"]["Error"];
+        };
+    };
+    nodeAction: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NodeActionInput"];
+            };
+        };
+        responses: {
+            /** @description Taak aangemaakt */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Job"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
         };
     };
     getNodeMetrics: {

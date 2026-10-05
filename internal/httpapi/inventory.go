@@ -17,6 +17,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/proxmox"
 	"github.com/Jonasz1996/clusterforge/internal/status"
 	"github.com/Jonasz1996/clusterforge/internal/store"
+	"github.com/Jonasz1996/clusterforge/pkg/protocol"
 )
 
 type list[T any] struct {
@@ -299,6 +300,7 @@ type nodeRow struct {
 	AgentVersion    *string
 	AgentEnrolledAt *time.Time
 	AgentLastSeenAt *time.Time
+	AgentProtocol   *int32
 	ProxmoxName     *string
 	PveType         *string
 	PveNode         *string
@@ -323,6 +325,7 @@ func toAPINode(r nodeRow) gen.Node {
 		agent = nullable.NewNullableWithValue(gen.AgentSummary{
 			Id: *r.AgentID, Version: deref(r.AgentVersion), EnrolledAt: deref(r.AgentEnrolledAt),
 			LastSeenAt: nullableOf(r.AgentLastSeenAt), Connection: connection(r.AgentLastSeenAt, time.Now()),
+			Commands: r.AgentProtocol != nil && *r.AgentProtocol >= protocol.CommandsSince,
 		})
 	}
 	return gen.Node{

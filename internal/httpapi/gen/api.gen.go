@@ -240,27 +240,54 @@ func (e MetricsRange) Valid() bool {
 	}
 }
 
+// Defines values for NodeAction.
+const (
+	NodeActionActivate     NodeAction = "activate"
+	NodeActionMaintenance  NodeAction = "maintenance"
+	NodeActionReboot       NodeAction = "reboot"
+	NodeActionRefreshFacts NodeAction = "refresh_facts"
+	NodeActionShutdown     NodeAction = "shutdown"
+)
+
+// Valid indicates whether the value is a known member of the NodeAction enum.
+func (e NodeAction) Valid() bool {
+	switch e {
+	case NodeActionActivate:
+		return true
+	case NodeActionMaintenance:
+		return true
+	case NodeActionReboot:
+		return true
+	case NodeActionRefreshFacts:
+		return true
+	case NodeActionShutdown:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for NodeLifecycle.
 const (
-	Active         NodeLifecycle = "active"
-	Decommissioned NodeLifecycle = "decommissioned"
-	Draining       NodeLifecycle = "draining"
-	Maintenance    NodeLifecycle = "maintenance"
-	Provisioning   NodeLifecycle = "provisioning"
+	NodeLifecycleActive         NodeLifecycle = "active"
+	NodeLifecycleDecommissioned NodeLifecycle = "decommissioned"
+	NodeLifecycleDraining       NodeLifecycle = "draining"
+	NodeLifecycleMaintenance    NodeLifecycle = "maintenance"
+	NodeLifecycleProvisioning   NodeLifecycle = "provisioning"
 )
 
 // Valid indicates whether the value is a known member of the NodeLifecycle enum.
 func (e NodeLifecycle) Valid() bool {
 	switch e {
-	case Active:
+	case NodeLifecycleActive:
 		return true
-	case Decommissioned:
+	case NodeLifecycleDecommissioned:
 		return true
-	case Draining:
+	case NodeLifecycleDraining:
 		return true
-	case Maintenance:
+	case NodeLifecycleMaintenance:
 		return true
-	case Provisioning:
+	case NodeLifecycleProvisioning:
 		return true
 	default:
 		return false
@@ -314,28 +341,28 @@ func (e Status) Valid() bool {
 
 // Defines values for VmAction.
 const (
-	Migrate  VmAction = "migrate"
-	Reboot   VmAction = "reboot"
-	Shutdown VmAction = "shutdown"
-	Snapshot VmAction = "snapshot"
-	Start    VmAction = "start"
-	Stop     VmAction = "stop"
+	VmActionMigrate  VmAction = "migrate"
+	VmActionReboot   VmAction = "reboot"
+	VmActionShutdown VmAction = "shutdown"
+	VmActionSnapshot VmAction = "snapshot"
+	VmActionStart    VmAction = "start"
+	VmActionStop     VmAction = "stop"
 )
 
 // Valid indicates whether the value is a known member of the VmAction enum.
 func (e VmAction) Valid() bool {
 	switch e {
-	case Migrate:
+	case VmActionMigrate:
 		return true
-	case Reboot:
+	case VmActionReboot:
 		return true
-	case Shutdown:
+	case VmActionShutdown:
 		return true
-	case Snapshot:
+	case VmActionSnapshot:
 		return true
-	case Start:
+	case VmActionStart:
 		return true
-	case Stop:
+	case VmActionStop:
 		return true
 	default:
 		return false
@@ -347,6 +374,9 @@ type AgentConnection string
 
 // AgentSummary defines model for AgentSummary.
 type AgentSummary struct {
+	// Commands De agent kan commando's uitvoeren (herstarten
+	Commands bool `json:"commands"`
+
 	// Connection online bij een heartbeat in de laatste 30 s, late tot 90 s, daarna offline
 	Connection AgentConnection              `json:"connection"`
 	EnrolledAt time.Time                    `json:"enrolled_at"`
@@ -779,6 +809,24 @@ type Node struct {
 	UpdatedAt    time.Time                    `json:"updated_at"`
 }
 
+// NodeAction activate beëindigt het onderhoud
+type NodeAction string
+
+// NodeActionInput defines model for NodeActionInput.
+type NodeActionInput struct {
+	// Action activate beëindigt het onderhoud
+	Action NodeAction `json:"action"`
+
+	// Drain Bij herstarten of afsluiten eerst de VIP's weghalen (standaard ja)
+	Drain *bool `json:"drain,omitempty"`
+
+	// Force Doorgaan ook als geen andere node een VIP kan overnemen
+	Force *bool `json:"force,omitempty"`
+
+	// Reason Komt in de activiteitenlog en in het systeemlog van de node
+	Reason *string `json:"reason,omitempty"`
+}
+
 // NodeInput defines model for NodeInput.
 type NodeInput struct {
 	ClusterId   nullable.Nullable[openapi_types.UUID] `json:"cluster_id,omitempty"`
@@ -1137,6 +1185,9 @@ type CreateNodeJSONRequestBody = NodeInput
 // UpdateNodeJSONRequestBody defines body for UpdateNode for application/json ContentType.
 type UpdateNodeJSONRequestBody = NodePatch
 
+// NodeActionJSONRequestBody defines body for NodeAction for application/json ContentType.
+type NodeActionJSONRequestBody = NodeActionInput
+
 // CreateProxmoxJSONRequestBody defines body for CreateProxmox for application/json ContentType.
 type CreateProxmoxJSONRequestBody = ProxmoxInput
 
@@ -1244,6 +1295,9 @@ type ServerInterface interface {
 	// UpdateNode Node wijzigen (admin); cluster_id null haalt de node uit zijn cluster
 	// (PATCH /nodes/{nodeId})
 	UpdateNode(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// NodeAction Een node herstarten, afsluiten, in of uit onderhoud zetten of zijn facts verzamelen (admin); wordt een taak
+	// (POST /nodes/{nodeId}/actions)
+	NodeAction(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
 	// GetNodeFacts Facts en laatste heartbeat van de agent op deze node
 	// (GET /nodes/{nodeId}/facts)
 	GetNodeFacts(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
@@ -1475,6 +1529,12 @@ func (_ Unimplemented) GetNode(w http.ResponseWriter, r *http.Request, nodeId op
 // UpdateNode Node wijzigen (admin); cluster_id null haalt de node uit zijn cluster
 // (PATCH /nodes/{nodeId})
 func (_ Unimplemented) UpdateNode(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// NodeAction Een node herstarten, afsluiten, in of uit onderhoud zetten of zijn facts verzamelen (admin); wordt een taak
+// (POST /nodes/{nodeId}/actions)
+func (_ Unimplemented) NodeAction(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -2240,6 +2300,32 @@ func (siw *ServerInterfaceWrapper) UpdateNode(w http.ResponseWriter, r *http.Req
 	handler.ServeHTTP(w, r)
 }
 
+// NodeAction operation middleware
+func (siw *ServerInterfaceWrapper) NodeAction(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.NodeAction(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetNodeFacts operation middleware
 func (siw *ServerInterfaceWrapper) GetNodeFacts(w http.ResponseWriter, r *http.Request) {
 
@@ -2814,6 +2900,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/nodes/{nodeId}/facts", wrapper.GetNodeFacts)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/nodes/{nodeId}/actions", wrapper.NodeAction)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/nodes/{nodeId}/metrics", wrapper.GetNodeMetrics)

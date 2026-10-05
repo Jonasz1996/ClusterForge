@@ -7,6 +7,7 @@ import { MetricsPanels } from "@/components/charts/MetricsPanels";
 import { JobList } from "@/components/jobs/JobList";
 import { InstallAgent } from "@/components/inventory/InstallAgent";
 import { NodeForm } from "@/components/inventory/NodeForm";
+import { NodeLifecycleCard } from "@/components/inventory/NodeLifecycleCard";
 import { NodeProxmoxCard } from "@/components/proxmox/NodeProxmoxCard";
 import {
   AgentBadge,
@@ -37,6 +38,7 @@ import {
   type Node,
   type NodeRuntime,
 } from "@/lib/inventory";
+import { useNodeAction } from "@/lib/lifecycle";
 import { useJobs } from "@/lib/proxmox";
 
 export default function NodeDetailPage() {
@@ -143,6 +145,7 @@ function NodeDetailInner() {
                 </dl>
               </Card>
               <AgentCard node={node.data} runtime={runtime.data} isAdmin={isAdmin} />
+              <NodeLifecycleCard node={node.data} runtime={runtime.data} jobs={jobs.data} isAdmin={isAdmin} />
               <NodeProxmoxCard node={node.data} isAdmin={isAdmin} />
             </div>
           )}
@@ -173,7 +176,9 @@ const dtClass = "text-slate-500";
 
 function AgentCard({ node, runtime, isAdmin }: { node: Node; runtime?: NodeRuntime; isAdmin: boolean }) {
   const revoke = useRevokeAgent();
+  const refresh = useNodeAction();
   const [installing, setInstalling] = useState(false);
+  const [refreshed, setRefreshed] = useState<string | null>(null);
   const a = node.agent;
 
   if (!a) {
@@ -216,7 +221,24 @@ function AgentCard({ node, runtime, isAdmin }: { node: Node; runtime?: NodeRunti
         )}
       </dl>
       {isAdmin && (
-        <div className="mt-4">
+        <div className="mt-4 flex flex-wrap items-center gap-2">
+          {a.commands && a.connection !== "offline" && (
+            <Button
+              variant="secondary"
+              disabled={refresh.isPending}
+              onClick={() =>
+                refresh.mutate(
+                  { nodeId: node.id, body: { action: "refresh_facts" } },
+                  {
+                    onSuccess: () => setRefreshed("Gevraagd; de facts komen zo binnen."),
+                    onError: (e) => setRefreshed(e.message),
+                  },
+                )
+              }
+            >
+              Facts vernieuwen
+            </Button>
+          )}
           <Button
             variant="secondary"
             disabled={revoke.isPending}
@@ -231,6 +253,7 @@ function AgentCard({ node, runtime, isAdmin }: { node: Node; runtime?: NodeRunti
           >
             Agent intrekken
           </Button>
+          {refreshed && <span className="text-xs text-slate-500">{refreshed}</span>}
         </div>
       )}
     </Card>

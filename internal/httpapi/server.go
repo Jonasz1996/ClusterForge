@@ -19,6 +19,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/httpapi/gen"
 	"github.com/Jonasz1996/clusterforge/internal/inventory"
 	"github.com/Jonasz1996/clusterforge/internal/jobs"
+	"github.com/Jonasz1996/clusterforge/internal/lifecycle"
 	"github.com/Jonasz1996/clusterforge/internal/live"
 	"github.com/Jonasz1996/clusterforge/internal/metrics"
 	"github.com/Jonasz1996/clusterforge/internal/proxmox"
@@ -39,6 +40,7 @@ type Server struct {
 	metrics      *metrics.Client
 	pve          *proxmox.Service
 	jobs         *jobs.Runner
+	life         *lifecycle.Service
 	version      string
 	loginLimiter *ipLimiter
 	// enrollLimiter remt het raden van enrollmenttokens.
@@ -58,7 +60,9 @@ type Deps struct {
 	Hub     *live.Hub
 	Proxmox *proxmox.Service
 	Jobs    *jobs.Runner
-	Version string
+	// Lifecycle voert acties op nodes uit via hun agent.
+	Lifecycle *lifecycle.Service
+	Version   string
 }
 
 func New(d Deps) *Server {
@@ -78,6 +82,7 @@ func New(d Deps) *Server {
 		metrics: metrics.NewClient(d.Config.VictoriaMetricsURL),
 		pve:     d.Proxmox,
 		jobs:    d.Jobs,
+		life:    d.Lifecycle,
 		version: d.Version,
 		// 10 pogingen direct, daarna één per 6 seconden per IP-adres.
 		loginLimiter:  newIPLimiter(6*time.Second, 10),

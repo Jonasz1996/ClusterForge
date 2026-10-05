@@ -3,7 +3,8 @@
 // Elke agent logt in met zijn eigen nkey. De server controleert de handtekening
 // en zoekt de sleutel op in de tabel agents; een ingetrokken of onbekende sleutel
 // komt er niet in. Na het inloggen mag een agent alleen publiceren onder
-// cf.node.<eigen node-id> en alleen luisteren op zijn eigen inbox en commando's.
+// cf.node.<eigen node-id>, alleen luisteren op zijn eigen inbox en commando's,
+// en alleen antwoorden op een commando dat hij kreeg.
 package agentbus
 
 import (
@@ -210,6 +211,8 @@ func agentPermissions(nodeID uuid.UUID) *server.Permissions {
 			protocol.Subject(id, protocol.SubjectCommands),
 			protocol.InboxPrefix(id) + ".>",
 		}},
+		// Eén antwoord op elk commando van de server, naar diens inbox.
+		Response: &server.ResponsePermission{MaxMsgs: 1, Expires: 5 * time.Minute},
 	}
 }
 
