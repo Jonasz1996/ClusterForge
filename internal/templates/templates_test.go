@@ -9,7 +9,7 @@ import (
 
 func keepalivedNginx(t *testing.T) *Template {
 	t.Helper()
-	tpl, ok := Get("keepalived-nginx")
+	tpl, ok := Latest("keepalived-nginx")
 	if !ok {
 		t.Fatal("keepalived-nginx ontbreekt")
 	}

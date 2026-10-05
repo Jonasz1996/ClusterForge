@@ -78,6 +78,8 @@ type Service struct {
 	HTTPGet func(ctx context.Context, url string) (int, error)
 	// Changed wordt aangeroepen als nodes van lifecycle veranderen. Mag nil zijn.
 	Changed func()
+	// Templates zijn de templates die de server kent; tests zetten er andere.
+	Templates *templates.Registry
 }
 
 func NewService(pool *pgxpool.Pool, ev *events.Writer, log *slog.Logger, runner *jobs.Runner, box *secrets.Box,
@@ -86,7 +88,7 @@ func NewService(pool *pgxpool.Pool, ev *events.Writer, log *slog.Logger, runner 
 		pool: pool, q: store.New(pool), ev: ev, log: log, jobs: runner, box: box, pve: pve, bus: bus,
 		inv: inventory.NewService(pool, ev), agents: agents.NewService(pool, ev, bus),
 		Poll: 3 * time.Second, GuestAgentTimeout: 10 * time.Minute, EnrollTimeout: 5 * time.Minute,
-		HTTPGet: httpGet,
+		HTTPGet: httpGet, Templates: templates.BuiltinRegistry(),
 	}
 	runner.Register(Kind, s.run)
 	runner.Retryable(Kind)
@@ -217,7 +219,7 @@ func (s *Service) plan(ctx context.Context, req Request) (*templates.Template, *
 	if s.box == nil {
 		return nil, nil, invalid("", "de server heeft geen masterkey (CF_MASTER_KEY); die is nodig voor Proxmox en voor de geheimen van een cluster")
 	}
-	tpl, ok := templates.Get(req.Template)
+	tpl, ok := s.Templates.Latest(req.Template)
 	if !ok {
 		return nil, nil, invalid("template", "onbekende template %q", req.Template)
 	}
@@ -270,21 +272,6 @@ func (s *Service) Request(ctx context.Context, actor events.Actor, req Request) 
 		secretValues[name], _ = p.Params[name].(string)
 		delete(p.Params, name)
 	}
-	spec, err := json.Marshal(map[string]any{
-		"template": map[string]string{"name": tpl.Name, "version": tpl.Version},
-		"params":   p.Params, "secrets": p.Secrets, "target": p.Target,
-		"nodes": func() []map[string]any {
-			var out []map[string]any
-			for _, n := range p.Nodes {
-				out = append(out, map[string]any{"hostname": n.Hostname, "role": n.Role, "address": n.Address, "vm": n.VM})
-			}
-			return out
-		}(),
-	})
-	if err != nil {
-		return store.Job{}, uuid.Nil, err
-	}
-
 	var job store.Job
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q := store.New(tx)
@@ -296,6 +283,33 @@ func (s *Service) Request(ctx context.Context, actor events.Actor, req Request) 
 			return err
 		}
 		p.ClusterID = c.ID
+		if p.VIP != "" {
+			vrid, _ := p.Params["vrid"].(int)
+			f := inventory.VIPFields{Address: p.VIP, Description: "Uitgerold met " + tpl.Name}
+			if vrid > 0 {
+				f.VRID = &vrid
+			}
+			if _, err := s.inv.CreateVIPTx(ctx, q, actor, c.ID, f); err != nil {
+				return err
+			}
+		}
+		for i := range p.Nodes {
+			n := &p.Nodes[i]
+			created, err := s.inv.CreateNodeTx(ctx, q, actor, inventory.NodeFields{
+				ClusterID: &c.ID, Hostname: n.Hostname, Role: n.Role, Lifecycle: store.NodeLifecycleProvisioning,
+				PrimaryIP: n.Address, Tags: []string{},
+				Description: fmt.Sprintf("Uitgerold met %s %s", tpl.Name, tpl.Version),
+			})
+			if err != nil {
+				return err
+			}
+			n.ID = created.ID
+		}
+		// De gewenste staat, nu de nodes hun id hebben.
+		spec, err := json.Marshal(p.spec())
+		if err != nil {
+			return err
+		}
 		rev, err := q.SetClusterSpec(ctx, store.SetClusterSpecParams{
 			ID: c.ID, Spec: spec, TemplateName: &tpl.Name, TemplateVersion: &tpl.Version,
 		})
@@ -340,28 +354,6 @@ func (s *Service) Request(ctx context.Context, actor events.Actor, req Request) 
 			if err != nil {
 				return err
 			}
-		}
-		if p.VIP != "" {
-			vrid, _ := p.Params["vrid"].(int)
-			f := inventory.VIPFields{Address: p.VIP, Description: "Uitgerold met " + tpl.Name}
-			if vrid > 0 {
-				f.VRID = &vrid
-			}
-			if _, err := s.inv.CreateVIPTx(ctx, q, actor, c.ID, f); err != nil {
-				return err
-			}
-		}
-		for i := range p.Nodes {
-			n := &p.Nodes[i]
-			created, err := s.inv.CreateNodeTx(ctx, q, actor, inventory.NodeFields{
-				ClusterID: &c.ID, Hostname: n.Hostname, Role: n.Role, Lifecycle: store.NodeLifecycleProvisioning,
-				PrimaryIP: n.Address, Tags: []string{},
-				Description: fmt.Sprintf("Uitgerold met %s %s", tpl.Name, tpl.Version),
-			})
-			if err != nil {
-				return err
-			}
-			n.ID = created.ID
 		}
 		job, err = s.jobs.EnqueueForClusterTx(ctx, q, jobs.Spec{
 			Kind: Kind, Title: "Uitrollen: " + p.Cluster.Name, Params: p, ClusterID: &c.ID,

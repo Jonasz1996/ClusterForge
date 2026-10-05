@@ -814,6 +814,25 @@ paths:
               schema: { $ref: "#/components/schemas/NodeBackups" }
         "401": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /clusters/{clusterId}/spec-revisions:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: listSpecRevisions
+      summary: De gewenste staat van een cluster uit een template, met elke revisie en wat ze veranderde
+      description: >-
+        Zonder template (een cluster dat met de hand is aangemaakt) is template
+        null en zijn er geen revisies. notes zegt wat er niet klopt: een
+        templateversie die niet in deze server zit, nodes die niet bij de spec
+        passen, of een node die niet te renderen is.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SpecHistory" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
   /clusters/{clusterId}/backup-policy:
     parameters:
       - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -1269,6 +1288,72 @@ components:
         backups:
           type: array
           items: { $ref: "#/components/schemas/BackupVolume" }
+    SpecHistory:
+      type: object
+      required: [template, revision, params, notes, items]
+      properties:
+        template:
+          allOf: [{ $ref: "#/components/schemas/SpecTemplate" }]
+          nullable: true
+        revision: { type: integer, description: Huidige revisie; 0 zonder spec }
+        params:
+          type: array
+          description: De parameters van de huidige revisie; van een geheim alleen dat het opgeslagen is
+          items: { $ref: "#/components/schemas/SpecParam" }
+        notes:
+          type: array
+          items: { type: string }
+        items:
+          type: array
+          description: Nieuwste eerst
+          items: { $ref: "#/components/schemas/SpecRevision" }
+    SpecTemplate:
+      type: object
+      required: [name, version, available, latest]
+      properties:
+        name: { type: string }
+        version: { type: string }
+        available:
+          type: boolean
+          description: Deze versie zit in de server
+        latest:
+          type: string
+          nullable: true
+          description: De nieuwste versie in de server
+    SpecParam:
+      type: object
+      required: [name, label, value, secret]
+      properties:
+        name: { type: string }
+        label: { type: string }
+        value: { type: string, nullable: true }
+        secret: { type: boolean }
+    SpecRevision:
+      type: object
+      required: [revision, source, created_at, created_by, template, template_version, nodes, changes]
+      properties:
+        revision: { type: integer }
+        source: { type: string, enum: [ui, api, git] }
+        created_at: { type: string, format: date-time }
+        created_by:
+          allOf: [{ $ref: "#/components/schemas/AuditRef" }]
+          nullable: true
+        template: { type: string }
+        template_version: { type: string }
+        nodes:
+          type: array
+          items: { type: string }
+        changes:
+          type: array
+          description: Wat er veranderde tegenover de vorige revisie; leeg bij de eerste
+          items: { $ref: "#/components/schemas/SpecChange" }
+    SpecChange:
+      type: object
+      required: [label, from, to]
+      properties:
+        label: { type: string }
+        from: { type: string }
+        to: { type: string }
     BackupPolicy:
       type: object
       required: [max_age_hours, default]

@@ -146,6 +146,15 @@ func serve() error {
 	life.Changed = eval.Kick
 	dep := deploy.NewService(pool, ev, log, runner, box, pve, bus)
 	dep.Changed = eval.Kick
+	// Een cluster rendert alleen met de templateversie waarmee het is
+	// uitgerold; zit die niet in deze binary, dan moet de beheerder dat weten.
+	if missing, err := dep.MissingTemplates(ctx); err != nil {
+		log.Error("templateversies controleren mislukt", "err", err)
+	} else {
+		for _, m := range missing {
+			log.Error("templateversie ontbreekt in deze server; zet de server terug op een versie die haar kent", "cluster", m)
+		}
+	}
 	bk := backups.NewService(pool, ev, log, pve)
 	go hub.Run(ctx)
 	go eval.Run(ctx)

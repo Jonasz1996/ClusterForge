@@ -716,6 +716,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/clusters/{clusterId}/spec-revisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * De gewenste staat van een cluster uit een template, met elke revisie en wat ze veranderde
+         * @description Zonder template (een cluster dat met de hand is aangemaakt) is template null en zijn er geen revisies. notes zegt wat er niet klopt: een templateversie die niet in deze server zit, nodes die niet bij de spec passen, of een node die niet te renderen is.
+         */
+        get: operations["listSpecRevisions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/clusters/{clusterId}/backup-policy": {
         parameters: {
             query?: never;
@@ -1054,6 +1076,48 @@ export interface components {
         NodeBackups: {
             item: components["schemas"]["BackupItem"] | null;
             backups: components["schemas"]["BackupVolume"][];
+        };
+        SpecHistory: {
+            template: components["schemas"]["SpecTemplate"] | null;
+            /** @description Huidige revisie; 0 zonder spec */
+            revision: number;
+            /** @description De parameters van de huidige revisie; van een geheim alleen dat het opgeslagen is */
+            params: components["schemas"]["SpecParam"][];
+            notes: string[];
+            /** @description Nieuwste eerst */
+            items: components["schemas"]["SpecRevision"][];
+        };
+        SpecTemplate: {
+            name: string;
+            version: string;
+            /** @description Deze versie zit in de server */
+            available: boolean;
+            /** @description De nieuwste versie in de server */
+            latest: string | null;
+        };
+        SpecParam: {
+            name: string;
+            label: string;
+            value: string | null;
+            secret: boolean;
+        };
+        SpecRevision: {
+            revision: number;
+            /** @enum {string} */
+            source: "ui" | "api" | "git";
+            /** Format: date-time */
+            created_at: string;
+            created_by: components["schemas"]["AuditRef"] | null;
+            template: string;
+            template_version: string;
+            nodes: string[];
+            /** @description Wat er veranderde tegenover de vorige revisie; leeg bij de eerste */
+            changes: components["schemas"]["SpecChange"][];
+        };
+        SpecChange: {
+            label: string;
+            from: string;
+            to: string;
         };
         BackupPolicy: {
             max_age_hours: number;
@@ -3112,6 +3176,30 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["NodeBackups"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    listSpecRevisions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpecHistory"];
                 };
             };
             401: components["responses"]["Error"];

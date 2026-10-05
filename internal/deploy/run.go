@@ -5,9 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/netip"
 	"net/url"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -17,7 +15,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"golang.org/x/sync/errgroup"
 
-	"github.com/Jonasz1996/clusterforge/internal/agentbus"
 	"github.com/Jonasz1996/clusterforge/internal/agents"
 	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/jobs"
@@ -48,13 +45,13 @@ func (s *Service) run(ctx context.Context, j *jobs.Job) error {
 	if j.RequestedBy != nil {
 		r.actor = events.User(*j.RequestedBy)
 	}
-	tpl, ok := templates.Get(r.p.Template)
+	// Altijd de versie van de aanvraag, ook als de server intussen een
+	// nieuwere kent.
+	tpl, ok := s.Templates.Get(r.p.Template, r.p.Version)
 	if !ok {
-		return fmt.Errorf("template %s zit niet meer in deze server", r.p.Template)
+		return fmt.Errorf("template %s %s zit niet meer in deze server", r.p.Template, r.p.Version)
 	}
 	r.tpl = tpl
-	// Na een update van de server kan de template een nieuwere versie zijn;
-	// de stappen moeten dan nog steeds met deze parameters werken.
 	api, err := s.pve.API(ctx, r.p.Target.ProxmoxID)
 	if err != nil {
 		return err
@@ -442,67 +439,32 @@ func seconds(d time.Duration) string {
 // renderContext bouwt wat de sjablonen zien, met de adressen en
 // netwerkkaarten uit de facts van de nodes.
 func (r *runCtx) renderContext(ctx context.Context) (templates.Context, error) {
-	values, err := r.tpl.Validate(r.p.Params)
+	secrets, nodes, err := r.renderInputs(ctx)
 	if err != nil {
-		return templates.Context{}, fmt.Errorf("parameters passen niet meer bij de template: %w", err)
+		return templates.Context{}, err
 	}
-	for _, name := range r.p.Secrets {
-		sec, err := r.s.q.GetSecret(ctx, store.GetSecretParams{ClusterID: r.p.ClusterID, Name: name})
-		if err != nil {
-			return templates.Context{}, fmt.Errorf("geheim %s: %w", name, err)
-		}
-		v, err := r.s.box.Open(sec.ValueEnc, secretAAD(r.p.ClusterID, name), sec.KeyID)
-		if err != nil {
-			return templates.Context{}, fmt.Errorf("geheim %s is niet te ontsleutelen (%w); is CF_MASTER_KEY veranderd?", name, err)
-		}
-		values[name] = string(v)
+	return r.p.spec().Context(r.tpl, secrets, nodes)
+}
+
+// renderInputs leest de geheimen van het cluster en wat de server van de
+// nodes weet.
+func (r *runCtx) renderInputs(ctx context.Context) (map[string]string, map[uuid.UUID]NodeState, error) {
+	secrets, err := r.s.openSecrets(ctx, r.p.ClusterID, r.p.Secrets)
+	if err != nil {
+		return nil, nil, err
 	}
-	c := templates.Context{Params: values, Cluster: r.p.Cluster}
+	nodes := map[uuid.UUID]NodeState{}
 	for _, n := range r.p.Nodes {
-		info, err := r.nodeInfo(ctx, n)
+		row, err := r.s.q.GetDeployNode(ctx, n.ID)
 		if err != nil {
-			return templates.Context{}, err
+			return nil, nil, err
 		}
-		c.Nodes = append(c.Nodes, info)
+		nodes[n.ID] = nodeState(row.PrimaryIp, row.Facts)
 	}
-	return c, nil
+	return secrets, nodes, nil
 }
 
-func (r *runCtx) nodeInfo(ctx context.Context, n plannedNode) (templates.NodeInfo, error) {
-	info := templates.NodeInfo{Hostname: n.Hostname, Role: n.Role, Index: n.Index, Address: n.Address, Prefix: n.Prefix}
-	row, err := r.s.q.GetDeployNode(ctx, n.ID)
-	if err != nil {
-		return info, err
-	}
-	var facts protocol.Facts
-	if len(row.Facts) > 0 {
-		_ = json.Unmarshal(row.Facts, &facts)
-	}
-	if info.Address == "" {
-		info.Address = row.PrimaryIp
-		if info.Address == "" {
-			info.Address = facts.PrimaryAddress
-		}
-	}
-	for _, iface := range facts.Interfaces {
-		for _, a := range iface.Addresses {
-			pf, err := netip.ParsePrefix(a)
-			if err == nil && pf.Addr().String() == info.Address {
-				info.Interface, info.Prefix = iface.Name, pf.Bits()
-			}
-		}
-	}
-	switch {
-	case info.Address == "":
-		return info, fmt.Errorf("het adres van %s is nog niet bekend; de agent heeft nog geen facts gestuurd", n.Hostname)
-	case info.Interface == "":
-		return info, fmt.Errorf("geen netwerkkaart met %s gevonden in de facts van %s", info.Address, n.Hostname)
-	}
-	return info, nil
-}
-
-// apply voert de stappen van de template op één node uit, één commando per
-// stap, zodat de voortgang zichtbaar is.
+// apply voert de stappen van de template op één node uit.
 func (r *runCtx) apply(ctx context.Context, st *jobs.Step, n *plannedNode) error {
 	row, err := r.s.q.GetDeployNode(ctx, n.ID)
 	if err != nil {
@@ -511,112 +473,19 @@ func (r *runCtx) apply(ctx context.Context, st *jobs.Step, n *plannedNode) error
 	if row.AgentProtocol == nil || *row.AgentProtocol < protocol.ApplySince {
 		return fmt.Errorf("de agent op %s is te oud voor deploystappen; bouw de golden image opnieuw", n.Hostname)
 	}
-	c, err := r.renderContext(ctx)
+	secrets, nodes, err := r.renderInputs(ctx)
 	if err != nil {
 		return err
 	}
-	for i := range c.Nodes {
-		if c.Nodes[i].Hostname == n.Hostname {
-			c.Node = &c.Nodes[i]
-		}
-	}
-	steps, err := r.tpl.Steps(n.Role, c)
+	steps, err := RenderNode(r.tpl, r.p.spec(), secrets, nodes, n.ID)
 	if err != nil {
 		return err
 	}
-	var notify []protocol.ServiceStep
-	changed := 0
-	for i, s := range steps {
-		res, err := r.applyOne(ctx, st, n, fmt.Sprintf("%d", i+1), s.Step)
-		if err != nil {
-			return fmt.Errorf("%s: %w", s.Title, err)
-		}
-		mark := "ongewijzigd"
-		if res.Changed {
-			mark = "aangepast"
-			changed++
-			for _, h := range s.Notify {
-				if !containsService(notify, h) {
-					notify = append(notify, h)
-				}
-			}
-			// Een service die net gestart of herstart is, leest zijn
-			// configuratie al opnieuw.
-			if svc := s.Service; svc != nil && (svc.State == "started" || svc.State == "restarted") {
-				notify = slices.DeleteFunc(notify, func(h protocol.ServiceStep) bool { return h.Name == svc.Name })
-			}
-		}
-		st.Logf("%s: %s", s.Title, mark)
-		_ = st.Flush(ctx)
-	}
-	for i, h := range notify {
-		h := h
-		if _, err := r.applyOne(ctx, st, n, fmt.Sprintf("notify-%d", i+1), protocol.Step{Service: &h}); err != nil {
-			return fmt.Errorf("service %s: %w", h.Name, err)
-		}
-		st.Logf("service %s: %s na gewijzigde configuratie", h.Name, map[string]string{"reloaded": "herladen", "restarted": "herstart"}[h.State])
-	}
-	st.Logf("%d van %d stappen pasten iets aan", changed, len(steps))
-	return nil
-}
-
-func containsService(list []protocol.ServiceStep, s protocol.ServiceStep) bool {
-	for _, x := range list {
-		if x.Name == s.Name && x.State == s.State {
-			return true
-		}
-	}
-	return false
-}
-
-// applyOne stuurt één stap naar de agent, met een paar pogingen als de
-// agent even niet bereikbaar is.
-func (r *runCtx) applyOne(ctx context.Context, st *jobs.Step, n *plannedNode, suffix string, step protocol.Step) (protocol.StepResult, error) {
-	cmd := protocol.Command{
-		ID: r.j.ID.String() + "-" + n.ID.String() + "-" + suffix, Action: protocol.CmdApply, Steps: []protocol.Step{step},
-	}
-	var res protocol.Result
-	var err error
-	for attempt := range 3 {
-		if attempt > 0 {
-			select {
-			case <-ctx.Done():
-				return protocol.StepResult{}, context.Cause(ctx)
-			case <-time.After(5 * r.s.Poll):
-			}
-		}
-		cmd.Deadline = time.Now().Add(2 * time.Minute)
-		cctx, cancel := context.WithTimeout(ctx, 15*time.Minute)
-		res, err = r.s.bus.Command(cctx, n.ID, cmd)
-		cancel()
-		unreachable := errors.Is(err, agentbus.ErrAgentOffline) || errors.Is(err, agentbus.ErrNoAnswer)
-		if err == nil || ctx.Err() != nil || !unreachable {
-			break
-		}
-		st.Logf("agent op %s niet bereikt: %v", n.Hostname, err)
-		_ = st.Flush(ctx)
-	}
-	if ctx.Err() != nil {
-		return protocol.StepResult{}, context.Cause(ctx)
-	}
-	if err != nil {
-		return protocol.StepResult{}, err
-	}
-	var sr protocol.StepResult
-	if len(res.Steps) > 0 {
-		sr = res.Steps[0]
-	}
-	for _, line := range sr.Output {
-		st.Logf("  %s", line)
-	}
-	if !res.OK {
-		msg := res.Error
-		if sr.Error != "" {
-			msg = sr.Error
-		}
-		return sr, errors.New(msg)
-	}
-	return sr, nil
+	_, err = ApplySteps(ctx, r.s.bus, ApplyOptions{
+		NodeID: n.ID, Hostname: n.Hostname, CommandID: r.j.ID.String() + "-" + n.ID.String(), Retry: 5 * r.s.Poll,
+		Logf: st.Logf, Flush: func() { _ = st.Flush(ctx) },
+	}, steps)
+	return err
 }
 
 // check voert de controles van de template uit.

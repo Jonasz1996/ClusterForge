@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/oapi-codegen/nullable"
 
 	"github.com/Jonasz1996/clusterforge/internal/deploy"
@@ -184,4 +185,52 @@ func (s *Server) RetryJob(w http.ResponseWriter, r *http.Request, id uuid.UUID) 
 		// al genomen hebben.
 		writeJSON(w, http.StatusAccepted, toAPIJob(j, row.RequestedByName))
 	}
+}
+
+// ListSpecRevisions toont de gewenste staat van een cluster en haar
+// revisies. Ook voor viewers: er staan geen geheimen in.
+func (s *Server) ListSpecRevisions(w http.ResponseWriter, r *http.Request, id uuid.UUID) {
+	h, err := s.deploy.History(r.Context(), id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "not_found", "cluster niet gevonden")
+		return
+	}
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	out := gen.SpecHistory{
+		Template: nullable.NewNullNullable[gen.SpecTemplate](), Revision: h.Revision,
+		Params: []gen.SpecParam{}, Notes: h.Notes, Items: []gen.SpecRevision{},
+	}
+	if t := h.Template; t != nil {
+		st := gen.SpecTemplate{Name: t.Name, Version: t.Version, Available: t.Available, Latest: nullable.NewNullNullable[string]()}
+		if t.Latest != "" {
+			st.Latest = nullable.NewNullableWithValue(t.Latest)
+		}
+		out.Template = nullable.NewNullableWithValue(st)
+	}
+	for _, p := range h.Params {
+		sp := gen.SpecParam{Name: p.Name, Label: p.Label, Secret: p.Secret, Value: nullable.NewNullNullable[string]()}
+		if p.Value != nil {
+			sp.Value = nullable.NewNullableWithValue(*p.Value)
+		}
+		out.Params = append(out.Params, sp)
+	}
+	for _, rev := range h.Revisions {
+		item := gen.SpecRevision{
+			Revision: rev.Revision, Source: gen.SpecRevisionSource(rev.Source), CreatedAt: rev.CreatedAt,
+			CreatedBy: nullable.NewNullNullable[gen.AuditRef](), Template: rev.Template, TemplateVersion: rev.TemplateVersion,
+			Nodes: rev.Nodes, Changes: []gen.SpecChange{},
+		}
+		// Een verwijderde gebruiker laat created_by leeg.
+		if rev.CreatedBy != nil && rev.CreatedByName != nil {
+			item.CreatedBy = nullable.NewNullableWithValue(gen.AuditRef{Id: rev.CreatedBy.String(), Name: *rev.CreatedByName})
+		}
+		for _, c := range rev.Changes {
+			item.Changes = append(item.Changes, gen.SpecChange{Label: c.Label, From: c.From, To: c.To})
+		}
+		out.Items = append(out.Items, item)
+	}
+	writeJSON(w, http.StatusOK, out)
 }

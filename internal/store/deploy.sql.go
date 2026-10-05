@@ -132,6 +132,126 @@ func (q *Queries) InsertSpecRevision(ctx context.Context, arg InsertSpecRevision
 	return err
 }
 
+const listDesiredNodes = `-- name: ListDesiredNodes :many
+SELECT n.id, n.hostname, n.lifecycle, coalesce(host(n.primary_ip), '')::text AS primary_ip, f.facts
+FROM nodes n
+LEFT JOIN node_facts f ON f.node_id = n.id
+WHERE n.cluster_id = $1
+ORDER BY n.hostname
+`
+
+type ListDesiredNodesRow struct {
+	ID        uuid.UUID
+	Hostname  string
+	Lifecycle NodeLifecycle
+	PrimaryIp string
+	Facts     []byte
+}
+
+// De nodes van een cluster met wat renderen nodig heeft: het vaste adres
+// en de facts.
+func (q *Queries) ListDesiredNodes(ctx context.Context, clusterID *uuid.UUID) ([]ListDesiredNodesRow, error) {
+	rows, err := q.db.Query(ctx, listDesiredNodes, clusterID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDesiredNodesRow{}
+	for rows.Next() {
+		var i ListDesiredNodesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Hostname,
+			&i.Lifecycle,
+			&i.PrimaryIp,
+			&i.Facts,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSpecRevisions = `-- name: ListSpecRevisions :many
+SELECT r.revision, r.spec, r.source, r.created_at, r.created_by, u.username AS created_by_name
+FROM cluster_spec_revisions r
+LEFT JOIN users u ON u.id = r.created_by
+WHERE r.cluster_id = $1
+ORDER BY r.revision DESC
+`
+
+type ListSpecRevisionsRow struct {
+	Revision      int32
+	Spec          []byte
+	Source        string
+	CreatedAt     time.Time
+	CreatedBy     *uuid.UUID
+	CreatedByName *string
+}
+
+func (q *Queries) ListSpecRevisions(ctx context.Context, clusterID uuid.UUID) ([]ListSpecRevisionsRow, error) {
+	rows, err := q.db.Query(ctx, listSpecRevisions, clusterID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListSpecRevisionsRow{}
+	for rows.Next() {
+		var i ListSpecRevisionsRow
+		if err := rows.Scan(
+			&i.Revision,
+			&i.Spec,
+			&i.Source,
+			&i.CreatedAt,
+			&i.CreatedBy,
+			&i.CreatedByName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listTemplateClusters = `-- name: ListTemplateClusters :many
+SELECT name, template_name::text AS template_name, template_version::text AS template_version
+FROM clusters WHERE template_name IS NOT NULL AND template_version IS NOT NULL
+ORDER BY name
+`
+
+type ListTemplateClustersRow struct {
+	Name            string
+	TemplateName    string
+	TemplateVersion string
+}
+
+func (q *Queries) ListTemplateClusters(ctx context.Context) ([]ListTemplateClustersRow, error) {
+	rows, err := q.db.Query(ctx, listTemplateClusters)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListTemplateClustersRow{}
+	for rows.Next() {
+		var i ListTemplateClustersRow
+		if err := rows.Scan(&i.Name, &i.TemplateName, &i.TemplateVersion); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const retryJob = `-- name: RetryJob :one
 UPDATE jobs
 SET status = 'queued', error = '', cancel_requested = false, attempts = 0, finished_at = NULL, heartbeat_at = NULL

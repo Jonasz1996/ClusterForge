@@ -55,3 +55,20 @@ export function useRetryJob() {
 export function mib(n: number) {
   return n % 1024 === 0 ? `${n / 1024} GB` : `${n} MB`;
 }
+
+export type SpecHistory = components["schemas"]["SpecHistory"];
+export type SpecRevision = components["schemas"]["SpecRevision"];
+
+export const specSources: Record<SpecRevision["source"], string> = {
+  ui: "webinterface",
+  api: "API",
+  git: "Git",
+};
+
+export function useSpecHistory(clusterId: string, enabled = true) {
+  return useQuery({
+    queryKey: ["clusters", clusterId, "spec-revisions"],
+    queryFn: async () => unwrap(await api.GET("/clusters/{clusterId}/spec-revisions", { params: { path: { clusterId } } })),
+    enabled,
+  });
+}
