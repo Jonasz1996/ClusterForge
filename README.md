@@ -18,6 +18,8 @@ Het technisch ontwerp staat in [docs/design/mvp-fase-1.md](docs/design/mvp-fase-
 
 ## Draaien met Docker Compose
 
+Stap voor stap in een Debian-container op Proxmox: [docs/install-proxmox-lxc.md](docs/install-proxmox-lxc.md).
+
 ```sh
 cd deploy
 cp .env.example .env          # zet minstens POSTGRES_PASSWORD
