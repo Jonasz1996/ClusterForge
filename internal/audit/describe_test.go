@@ -69,6 +69,8 @@ func TestSummaries(t *testing.T) {
 			"owner_ids": map[string]any{"from": []any{}, "to": []any{jonasID.String()}}}), "Cluster webcluster-prod gewijzigd: tags, owners"},
 		{row("node.updated", "node", web01ID.String(), map[string]any{"cluster_id": map[string]any{"from": nil, "to": webID.String()}}),
 			"Node web01 gewijzigd: cluster webcluster-prod"},
+		{row("node.updated", "node", web01ID.String(), map[string]any{"cluster_id": map[string]any{"from": webID.String(), "to": nil}}),
+			"Node web01 gewijzigd: cluster webcluster-prod weggehaald"},
 		{row("proxmox.updated", "proxmox", pveID.String(), map[string]any{"token_secret": "gewijzigd"}),
 			"Proxmox-koppeling Thuislab gewijzigd: token-secret gewijzigd"},
 		{row("proxmox.updated", "proxmox", uuid.NewString(), map[string]any{"name": map[string]any{"from": "Lab", "to": "Thuislab"}}),

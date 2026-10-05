@@ -245,6 +245,9 @@ func changeSummary(cs []Change) string {
 		if c.From == "" {
 			return ": " + strings.ToLower(c.Label) + " " + c.To
 		}
+		if c.To == "" {
+			return ": " + strings.ToLower(c.Label) + " " + c.From + " weggehaald"
+		}
 		return fmt.Sprintf(": %s van %s naar %s", strings.ToLower(c.Label), c.From, c.To)
 	}
 	labels := make([]string, len(cs))
