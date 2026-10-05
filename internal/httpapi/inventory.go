@@ -61,6 +61,7 @@ func (s *Server) ListClusters(w http.ResponseWriter, r *http.Request) {
 			Id: c.Id, Slug: c.Slug, Name: c.Name, Description: c.Description, Type: c.Type,
 			Environment: c.Environment, GitRepoUrl: c.GitRepoUrl, Tags: c.Tags,
 			Status: c.Status, StatusReason: c.StatusReason, StatusSince: c.StatusSince,
+			TemplateName: c.TemplateName, TemplateVersion: c.TemplateVersion, SpecRevision: c.SpecRevision,
 			CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt,
 			NodeCount: int(row.NodeCount), VipCount: int(row.VipCount),
 			Vips: nonNil(vips[row.Cluster.ID]),
@@ -165,6 +166,7 @@ func (s *Server) writeClusterDetail(w http.ResponseWriter, r *http.Request, stat
 		Id: base.Id, Slug: base.Slug, Name: base.Name, Description: base.Description, Type: base.Type,
 		Environment: base.Environment, GitRepoUrl: base.GitRepoUrl, Tags: base.Tags,
 		Status: base.Status, StatusReason: base.StatusReason, StatusSince: base.StatusSince,
+		TemplateName: base.TemplateName, TemplateVersion: base.TemplateVersion, SpecRevision: base.SpecRevision,
 		CreatedAt: base.CreatedAt, UpdatedAt: base.UpdatedAt,
 		Owners: make([]gen.UserRef, 0, len(owners)),
 		Nodes:  make([]gen.Node, 0, len(nodes)),
@@ -187,7 +189,8 @@ func toAPICluster(c store.Cluster) gen.Cluster {
 		Id: c.ID, Slug: c.Slug, Name: c.Name, Description: c.Description, Type: gen.ClusterType(c.Type),
 		Environment: gen.Environment(c.Environment), GitRepoUrl: c.GitRepoUrl, Tags: nonNil(c.Tags),
 		Status: gen.Status(c.Status), StatusReason: c.StatusReason, StatusSince: nullableOf(c.StatusSince),
-		CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt,
+		TemplateName: nullableOf(c.TemplateName), TemplateVersion: nullableOf(c.TemplateVersion),
+		SpecRevision: int(c.SpecRevision), CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt,
 	}
 }
 

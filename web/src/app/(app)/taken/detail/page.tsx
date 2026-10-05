@@ -7,6 +7,7 @@ import { jobDuration, JobStatusBadge } from "@/components/jobs/JobList";
 import { QueryState } from "@/components/inventory/bits";
 import { Alert, Button, Card, PageHeader } from "@/components/ui";
 import { useIsAdmin, useNode } from "@/lib/inventory";
+import { useRetryJob } from "@/lib/deploy";
 import { jobActive, useCancelJob, useJob, type JobDetail } from "@/lib/proxmox";
 
 export default function JobDetailPage() {
@@ -26,6 +27,7 @@ function JobDetailInner() {
   const job = useJob(id);
   const isAdmin = useIsAdmin();
   const cancel = useCancelJob();
+  const retry = useRetryJob();
   if (id === "") return <Alert>Geen taak opgegeven.</Alert>;
 
   return (
@@ -47,21 +49,32 @@ function JobDetailInner() {
             }
             actions={
               isAdmin &&
-              jobActive(job.data.status) &&
-              !job.data.cancel_requested && (
-                <Button
-                  variant="secondary"
-                  disabled={cancel.isPending}
-                  onClick={() => {
-                    if (window.confirm("Taak annuleren? Een lopende Proxmox-taak wordt gestopt.")) cancel.mutate(job.data!.id);
-                  }}
-                >
-                  Annuleren
-                </Button>
-              )
+              (jobActive(job.data.status)
+                ? !job.data.cancel_requested && (
+                    <Button
+                      variant="secondary"
+                      disabled={cancel.isPending}
+                      onClick={() => {
+                        if (window.confirm("Taak annuleren? Een lopende Proxmox-taak wordt gestopt.")) cancel.mutate(job.data!.id);
+                      }}
+                    >
+                      Annuleren
+                    </Button>
+                  )
+                : job.data.retryable && (
+                    <Button disabled={retry.isPending} onClick={() => retry.mutate(job.data!.id)}>
+                      Opnieuw proberen
+                    </Button>
+                  ))
             }
           />
           {job.data.status === "failed" && job.data.error && <Alert>{job.data.error}</Alert>}
+          {job.data.retryable && (
+            <p className="text-sm text-slate-600 dark:text-slate-400">
+              Opnieuw proberen gaat verder bij de stap die misliep; wat al gelukt is, wordt overgeslagen.
+            </p>
+          )}
+          {retry.error && <Alert>{retry.error.message}</Alert>}
           <Card>
             <dl className={dlClass}>
               <dt className={dtClass}>Gevraagd door</dt>

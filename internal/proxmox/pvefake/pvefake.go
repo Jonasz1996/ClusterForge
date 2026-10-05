@@ -1,12 +1,14 @@
 // Package pvefake is een nep-Proxmox voor tests en lokale ontwikkeling. Hij
 // kent net genoeg van de API om ClusterForge te bedienen: resources, power,
-// snapshots, migratie en taken.
+// snapshots, migratie, klonen, configuratie, de guest agent en taken.
 package pvefake
 
 import (
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
+	"net/url"
 	"slices"
 	"strconv"
 	"strings"
@@ -36,6 +38,14 @@ type Guest struct {
 	CPU       float64
 	Tags      string
 	Snapshots []string
+	// Config is de VM-configuratie zoals GET .../config hem geeft.
+	Config map[string]string
+	// Files zijn de bestanden die via de guest agent geschreven zijn.
+	Files map[string]string
+	// NoAgent: de guest agent antwoordt nooit.
+	NoAgent bool
+
+	startedAt time.Time
 }
 
 type Storage struct {
@@ -44,6 +54,8 @@ type Storage struct {
 	Shared  bool
 	Disk    int64
 	MaxDisk int64
+	// Content is wat erop mag, zoals "images,rootdir"; leeg is dat.
+	Content string
 }
 
 type task struct {
@@ -74,6 +86,26 @@ type Server struct {
 	seq      int
 	// Calls telt de aanroepen per pad, voor tests.
 	calls []string
+	// agentDelay is hoe lang de guest agent na het starten nog niet antwoordt.
+	agentDelay time.Duration
+	// onFileWrite wordt aangeroepen na een file-write via de guest agent.
+	onFileWrite func(vmid int, name, file, content string)
+}
+
+// SetAgentDelay bepaalt hoe lang de guest agent na het starten van een VM
+// nog niet antwoordt.
+func (s *Server) SetAgentDelay(d time.Duration) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.agentDelay = d
+}
+
+// OnFileWrite laat tests reageren op een bestand dat ClusterForge via de
+// guest agent schrijft, zoals het aanmeldbestand van cf-agent.
+func (s *Server) OnFileWrite(f func(vmid int, name, file, content string)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onFileWrite = f
 }
 
 func New(token string) *Server {
@@ -129,6 +161,8 @@ func (s *Server) Guest(vmid int) (Guest, bool) {
 		if g.VMID == vmid {
 			c := *g
 			c.Snapshots = slices.Clone(g.Snapshots)
+			c.Config = maps.Clone(g.Config)
+			c.Files = maps.Clone(g.Files)
 			return c, true
 		}
 	}
@@ -174,6 +208,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST "+p+"/nodes/{node}/{type}/{vmid}/snapshot", s.snapshot)
 	mux.HandleFunc("GET "+p+"/nodes/{node}/{type}/{vmid}/snapshot", s.snapshots)
 	mux.HandleFunc("POST "+p+"/nodes/{node}/{type}/{vmid}/migrate", s.migrate)
+	mux.HandleFunc("GET "+p+"/cluster/nextid", s.nextID)
+	mux.HandleFunc("POST "+p+"/nodes/{node}/{type}/{vmid}/clone", s.clone)
+	mux.HandleFunc("GET "+p+"/nodes/{node}/{type}/{vmid}/config", s.config)
+	mux.HandleFunc("POST "+p+"/nodes/{node}/{type}/{vmid}/config", s.setConfig)
+	mux.HandleFunc("PUT "+p+"/nodes/{node}/{type}/{vmid}/resize", s.resize)
+	mux.HandleFunc("POST "+p+"/nodes/{node}/{type}/{vmid}/agent/ping", s.agentPing)
+	mux.HandleFunc("POST "+p+"/nodes/{node}/{type}/{vmid}/agent/file-write", s.fileWrite)
 	mux.HandleFunc("GET "+p+"/nodes/{node}/tasks/{upid}/status", s.taskStatus)
 	mux.HandleFunc("GET "+p+"/nodes/{node}/tasks/{upid}/log", s.taskLog)
 	mux.HandleFunc("DELETE "+p+"/nodes/{node}/tasks/{upid}", s.stopTask)
@@ -240,9 +281,14 @@ func (s *Server) resources(w http.ResponseWriter, r *http.Request) {
 		if st.Shared {
 			shared = 1
 		}
+		content := st.Content
+		if content == "" {
+			content = "images,rootdir"
+		}
 		out = append(out, map[string]any{
 			"id": "storage/" + st.Node + "/" + st.Name, "type": "storage", "storage": st.Name, "node": st.Node,
 			"status": "available", "shared": shared, "disk": st.Disk, "maxdisk": st.MaxDisk, "plugintype": "dir",
+			"content": content,
 		})
 	}
 	ok(w, out)
@@ -320,7 +366,15 @@ func (s *Server) power(w http.ResponseWriter, r *http.Request) {
 	if action == "start" && g.Status == "running" {
 		s.fail[kind] = fmt.Sprintf("VM %d already running", g.VMID)
 	}
-	ok(w, s.newTask(g.Node, kind, g.VMID, func() { g.Status = to }, fmt.Sprintf("%s %d", action, g.VMID)))
+	if g.Template {
+		s.fail[kind] = "you can't start a vm if it's a template"
+	}
+	ok(w, s.newTask(g.Node, kind, g.VMID, func() {
+		if to == "running" && g.Status != "running" || action == "reboot" {
+			g.startedAt = time.Now()
+		}
+		g.Status = to
+	}, fmt.Sprintf("%s %d", action, g.VMID)))
 }
 
 func (s *Server) snapshot(w http.ResponseWriter, r *http.Request) {
@@ -425,6 +479,202 @@ func (s *Server) stopTask(w http.ResponseWriter, r *http.Request) {
 	if !t.finished {
 		t.stopped = true
 		t.log = append(t.log, "received interrupt", "TASK ERROR: interrupted by signal")
+	}
+	ok(w, nil)
+}
+
+func (s *Server) nextID(w http.ResponseWriter, _ *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.finishTasks()
+	ok(w, strconv.Itoa(s.freeID()))
+}
+
+func (s *Server) freeID() int {
+	for id := 100; ; id++ {
+		if !slices.ContainsFunc(s.guests, func(g *Guest) bool { return g.VMID == id }) {
+			return id
+		}
+	}
+}
+
+// diskStorage geeft de storage van de bootschijf, zoals local-lvm.
+func diskStorage(cfg map[string]string) string {
+	st, _, _ := strings.Cut(cfg["scsi0"], ":")
+	return st
+}
+
+func (s *Server) clone(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.finishTasks()
+	src := s.guest(w, r)
+	if src == nil {
+		return
+	}
+	_ = r.ParseForm()
+	newID, _ := strconv.Atoi(r.PostForm.Get("newid"))
+	if newID < 100 || slices.ContainsFunc(s.guests, func(g *Guest) bool { return g.VMID == newID }) {
+		fail(w, http.StatusInternalServerError, fmt.Sprintf("unable to create VM %d: config file already exists", newID))
+		return
+	}
+	target := r.PostForm.Get("target")
+	if target == "" {
+		target = src.Node
+	}
+	if !slices.ContainsFunc(s.hosts, func(h *Host) bool { return h.Name == target && h.Online }) {
+		fail(w, http.StatusInternalServerError, "target node is not online")
+		return
+	}
+	shared := slices.ContainsFunc(s.storages, func(st Storage) bool { return st.Name == diskStorage(src.Config) && st.Shared })
+	if target != src.Node && !shared {
+		fail(w, http.StatusInternalServerError, "Can't clone to non-shared storage '"+diskStorage(src.Config)+"'")
+		return
+	}
+	cfg := maps.Clone(src.Config)
+	if cfg == nil {
+		cfg = map[string]string{}
+	}
+	if st := r.PostForm.Get("storage"); st != "" {
+		_, rest, _ := strings.Cut(cfg["scsi0"], ":")
+		cfg["scsi0"] = st + ":" + rest
+	}
+	name := r.PostForm.Get("name")
+	cfg["name"] = name
+	// Het id is meteen bezet, ook al loopt de kloon nog.
+	g := &Guest{
+		Type: "qemu", VMID: newID, Name: name, Node: target, Status: "stopped", MaxCPU: src.MaxCPU, MaxMem: src.MaxMem,
+		Config: cfg, Files: map[string]string{}, NoAgent: src.NoAgent,
+	}
+	s.guests = append(s.guests, g)
+	upid := s.newTask(src.Node, "qmclone", src.VMID, nil, fmt.Sprintf("create full clone of drive scsi0 (%s)", cfg["scsi0"]))
+	if t := s.tasks[upid]; t.exit != "OK" {
+		// Een mislukte kloon laat geen VM achter.
+		s.guests = slices.DeleteFunc(s.guests, func(x *Guest) bool { return x == g })
+	}
+	ok(w, upid)
+}
+
+func (s *Server) config(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.finishTasks()
+	g := s.guest(w, r)
+	if g == nil {
+		return
+	}
+	out := map[string]any{}
+	for k, v := range g.Config {
+		out[k] = v
+	}
+	if g.Template {
+		out["template"] = 1
+	}
+	ok(w, out)
+}
+
+func (s *Server) setConfig(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.finishTasks()
+	g := s.guest(w, r)
+	if g == nil {
+		return
+	}
+	_ = r.ParseForm()
+	if g.Config == nil {
+		g.Config = map[string]string{}
+	}
+	for k, v := range r.PostForm {
+		if k == "sshkeys" {
+			// Proxmox wil de sleutels nog eens URL-gecodeerd.
+			if d, err := url.PathUnescape(v[0]); err == nil {
+				v = []string{d}
+			}
+		}
+		g.Config[k] = v[0]
+		switch k {
+		case "cores":
+			g.MaxCPU, _ = strconv.Atoi(v[0])
+		case "memory":
+			mb, _ := strconv.ParseInt(v[0], 10, 64)
+			g.MaxMem = mb << 20
+		case "name":
+			g.Name = v[0]
+		case "tags":
+			g.Tags = v[0]
+		}
+	}
+	ok(w, s.newTask(g.Node, "qmconfig", g.VMID, nil, "update VM "+strconv.Itoa(g.VMID)))
+}
+
+func (s *Server) resize(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.finishTasks()
+	g := s.guest(w, r)
+	if g == nil {
+		return
+	}
+	_ = r.ParseForm()
+	disk, size := r.PostForm.Get("disk"), r.PostForm.Get("size")
+	cur, found := g.Config[disk]
+	if !found {
+		fail(w, http.StatusBadRequest, "disk '"+disk+"' does not exist")
+		return
+	}
+	parts := strings.Split(cur, ",")
+	for i, p := range parts {
+		if strings.HasPrefix(p, "size=") {
+			parts[i] = "size=" + size
+		}
+	}
+	g.Config[disk] = strings.Join(parts, ",")
+	ok(w, nil)
+}
+
+func (s *Server) agentReady(g *Guest) bool {
+	return g.Status == "running" && !g.NoAgent && time.Since(g.startedAt) >= s.agentDelay
+}
+
+func (s *Server) agentPing(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.finishTasks()
+	g := s.guest(w, r)
+	if g == nil {
+		return
+	}
+	if !s.agentReady(g) {
+		fail(w, http.StatusInternalServerError, "QEMU guest agent is not running")
+		return
+	}
+	ok(w, map[string]any{})
+}
+
+func (s *Server) fileWrite(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	s.finishTasks()
+	g := s.guest(w, r)
+	if g == nil {
+		s.mu.Unlock()
+		return
+	}
+	if !s.agentReady(g) {
+		s.mu.Unlock()
+		fail(w, http.StatusInternalServerError, "QEMU guest agent is not running")
+		return
+	}
+	_ = r.ParseForm()
+	file, content := r.PostForm.Get("file"), r.PostForm.Get("content")
+	if g.Files == nil {
+		g.Files = map[string]string{}
+	}
+	g.Files[file] = content
+	hook, vmid, name := s.onFileWrite, g.VMID, g.Name
+	s.mu.Unlock()
+	if hook != nil {
+		go hook(vmid, name, file, content)
 	}
 	ok(w, nil)
 }

@@ -138,11 +138,13 @@ Heb je al een Grafana, dan kan die de metrics rechtstreeks uit VictoriaMetrics l
 Maak op een van je Proxmox-hosts een API-token voor ClusterForge, als root:
 
 ```sh
-pveum role add ClusterForge --privs "VM.Audit VM.PowerMgmt VM.Snapshot VM.Migrate Sys.Audit Datastore.Audit Datastore.AllocateSpace"
+pveum role add ClusterForge --privs "VM.Audit VM.PowerMgmt VM.Snapshot VM.Migrate VM.Allocate VM.Clone VM.Config.CPU VM.Config.Memory VM.Config.Disk VM.Config.Network VM.Config.Cloudinit VM.Config.Options VM.Monitor Sys.Audit Datastore.Audit Datastore.AllocateSpace SDN.Use"
 pveum user add clusterforge@pve --comment "ClusterForge"
 pveum acl modify / --users clusterforge@pve --roles ClusterForge
 pveum user token add clusterforge@pve cf --privsep 0
 ```
+
+Draai je Proxmox VE 9, vervang dan `VM.Monitor` door `VM.GuestAgent.Audit VM.GuestAgent.FileWrite`; zegt `pveum` dat een recht niet bestaat, dan heb je de lijst voor de andere versie. Kijk je versie na met `pveversion`.
 
 Kopieer het secret uit de uitvoer van het laatste commando; Proxmox toont het maar één keer. Klik dan in ClusterForge bij Proxmox op "Proxmox koppelen":
 
@@ -157,6 +159,32 @@ Kopieer het secret uit de uitvoer van het laatste commando; Proxmox toont het ma
    Heeft Proxmox een certificaat van een echte CA (bijvoorbeeld via ACME), dan kun je de vingerafdruk leeg laten.
 
 Na het opslaan staan de hosts, VM's, containers en storage er binnen enkele seconden. Koppel daarna elke VM die een node is aan die node: in de lijst met VM's staat "Koppelen aan …" als de naam overeenkomt met een node, en bij de node zelf kun je een VM kiezen. De LXC moet poort 8006 van de Proxmox-host kunnen bereiken.
+
+## 10. Een golden image maken en een cluster uitrollen
+
+ClusterForge rolt nieuwe clusters uit door VM's te klonen uit een golden image: een VM-template met Debian 13, cloud-init, de QEMU guest agent en cf-agent. Maak die één keer, als root op een van je Proxmox-hosts (de host moet internet hebben):
+
+```sh
+curl -fsSL https://clusterforge.example.lan/install/golden-image.sh \
+  | bash -s -- --server https://clusterforge.example.lan --storage local-lvm
+```
+
+Gebruik het adres waarop de LXC bereikbaar is. Het script installeert zo nodig `libguestfs-tools`, haalt het cloud-image van Debian (en controleert de checksum), zet er qemu-guest-agent en cf-agent in en maakt VM-template 9000 met de naam `debian-13-clusterforge`. Andere keuzes:
+
+| Optie | Standaard | Wanneer |
+| --- | --- | --- |
+| `--storage` | `local-lvm` | Kies gedeelde storage (Ceph, NFS) om de VM's over meerdere hosts te verdelen; op lokale storage komen ze allemaal op deze host |
+| `--vmid` | `9000` | Als 9000 al bezet is |
+| `--bridge` | `vmbr0` | Een andere netwerkbridge |
+| `--replace` | | Een eerdere golden image vervangen, bijvoorbeeld na een update van ClusterForge |
+
+Daarna, in ClusterForge:
+
+1. Proxmox → Synchroniseren (of wacht 20 seconden), zodat de template er staat.
+2. Clusters → Cluster uitrollen. Kies Nginx met keepalived, geef een naam en een vrij VIP, kies de golden image en vul het eerste adres met prefix (bijvoorbeeld `10.0.20.11/24`), de gateway en DNS in. Plak je publieke SSH-sleutel; daarmee log je in als `debian`.
+3. Onderaan staat welke nodes er komen. Klik op Uitrollen en volg de taak. Na een paar minuten staan de nodes op Actief en antwoordt `http://<VIP>/`.
+
+De nieuwe VM's moeten het adres van ClusterForge (veld "Adres van ClusterForge" in het formulier) en poort 4222 van de LXC kunnen bereiken.
 
 ## Bijwerken
 
@@ -181,4 +209,8 @@ Databasemigraties lopen automatisch bij het starten van de server.
 | Koppelen geeft een fout over het certificaat | De vingerafdruk klopt niet (nieuw certificaat op de host?); haal hem opnieuw op via Bewerken |
 | Koppelen geeft 401 of 403 | Token-ID of secret verkeerd, of de rol mist rechten; controleer met `pveum user token permissions clusterforge@pve cf` |
 | "Het token-secret is niet te ontsleutelen" | `CF_MASTER_KEY` is veranderd; vul het secret opnieuw in via Proxmox → Bewerken |
+| Uitrollen geeft 403 bij het klonen of instellen | De rol mist rechten om VM's te maken; voer `pveum role modify ClusterForge --privs "…"` uit met de lijst uit stap 9 |
+| Uitrol blijft wachten op de QEMU guest agent | De VM start niet goed, of de golden image heeft geen qemu-guest-agent; maak hem opnieuw met het script en `--replace` |
+| "cf-agent meldt zich niet aan" | De VM bereikt ClusterForge of poort 4222 niet; log in via de console van Proxmox en kijk met `journalctl -u cf-agent` |
+| Controle "geeft nog geen 200" | Nginx draait niet of het VIP is niet bereikbaar vanaf de LXC; kijk op de node naar `systemctl status nginx keepalived` en klik daarna op Opnieuw proberen |
 | Logs bekijken | `docker compose logs -f server` |

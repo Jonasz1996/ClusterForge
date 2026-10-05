@@ -69,6 +69,24 @@ func (e ClusterType) Valid() bool {
 	}
 }
 
+// Defines values for DeployTargetNetwork.
+const (
+	Dhcp   DeployTargetNetwork = "dhcp"
+	Static DeployTargetNetwork = "static"
+)
+
+// Valid indicates whether the value is a known member of the DeployTargetNetwork enum.
+func (e DeployTargetNetwork) Valid() bool {
+	switch e {
+	case Dhcp:
+		return true
+	case Static:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for Environment.
 const (
 	Lab  Environment = "lab"
@@ -339,6 +357,39 @@ func (e Status) Valid() bool {
 	}
 }
 
+// Defines values for TemplateParamType.
+const (
+	Bool   TemplateParamType = "bool"
+	Cidr   TemplateParamType = "cidr"
+	Int    TemplateParamType = "int"
+	Ipv4   TemplateParamType = "ipv4"
+	Secret TemplateParamType = "secret"
+	Size   TemplateParamType = "size"
+	String TemplateParamType = "string"
+)
+
+// Valid indicates whether the value is a known member of the TemplateParamType enum.
+func (e TemplateParamType) Valid() bool {
+	switch e {
+	case Bool:
+		return true
+	case Cidr:
+		return true
+	case Int:
+		return true
+	case Ipv4:
+		return true
+	case Secret:
+		return true
+	case Size:
+		return true
+	case String:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for VmAction.
 const (
 	VmActionMigrate  VmAction = "migrate"
@@ -403,6 +454,9 @@ type Cluster struct {
 	// Slug Korte unieke naam, bijvoorbeeld webcluster-prod
 	Slug string `json:"slug"`
 
+	// SpecRevision Revisie van de gewenste staat; 0 zonder spec
+	SpecRevision int `json:"spec_revision"`
+
 	// Status Berekend uit heartbeats, metrics en VIP's (zie internal/status).
 	// unknown betekent: geen agent of nog geen gegevens.
 	Status Status `json:"status"`
@@ -411,8 +465,12 @@ type Cluster struct {
 	StatusReason string                       `json:"status_reason"`
 	StatusSince  nullable.Nullable[time.Time] `json:"status_since"`
 	Tags         []string                     `json:"tags"`
-	Type         ClusterType                  `json:"type"`
-	UpdatedAt    time.Time                    `json:"updated_at"`
+
+	// TemplateName De template waaruit het cluster is uitgerold
+	TemplateName    nullable.Nullable[string] `json:"template_name"`
+	TemplateVersion nullable.Nullable[string] `json:"template_version"`
+	Type            ClusterType               `json:"type"`
+	UpdatedAt       time.Time                 `json:"updated_at"`
 }
 
 // ClusterDetail defines model for ClusterDetail.
@@ -429,6 +487,9 @@ type ClusterDetail struct {
 	// Slug Korte unieke naam, bijvoorbeeld webcluster-prod
 	Slug string `json:"slug"`
 
+	// SpecRevision Revisie van de gewenste staat; 0 zonder spec
+	SpecRevision int `json:"spec_revision"`
+
 	// Status Berekend uit heartbeats, metrics en VIP's (zie internal/status).
 	// unknown betekent: geen agent of nog geen gegevens.
 	Status Status `json:"status"`
@@ -437,9 +498,13 @@ type ClusterDetail struct {
 	StatusReason string                       `json:"status_reason"`
 	StatusSince  nullable.Nullable[time.Time] `json:"status_since"`
 	Tags         []string                     `json:"tags"`
-	Type         ClusterType                  `json:"type"`
-	UpdatedAt    time.Time                    `json:"updated_at"`
-	Vips         []Vip                        `json:"vips"`
+
+	// TemplateName De template waaruit het cluster is uitgerold
+	TemplateName    nullable.Nullable[string] `json:"template_name"`
+	TemplateVersion nullable.Nullable[string] `json:"template_version"`
+	Type            ClusterType               `json:"type"`
+	UpdatedAt       time.Time                 `json:"updated_at"`
+	Vips            []Vip                     `json:"vips"`
 }
 
 // ClusterInput defines model for ClusterInput.
@@ -467,6 +532,9 @@ type ClusterListItem struct {
 	// Slug Korte unieke naam, bijvoorbeeld webcluster-prod
 	Slug string `json:"slug"`
 
+	// SpecRevision Revisie van de gewenste staat; 0 zonder spec
+	SpecRevision int `json:"spec_revision"`
+
 	// Status Berekend uit heartbeats, metrics en VIP's (zie internal/status).
 	// unknown betekent: geen agent of nog geen gegevens.
 	Status Status `json:"status"`
@@ -475,9 +543,13 @@ type ClusterListItem struct {
 	StatusReason string                       `json:"status_reason"`
 	StatusSince  nullable.Nullable[time.Time] `json:"status_since"`
 	Tags         []string                     `json:"tags"`
-	Type         ClusterType                  `json:"type"`
-	UpdatedAt    time.Time                    `json:"updated_at"`
-	VipCount     int                          `json:"vip_count"`
+
+	// TemplateName De template waaruit het cluster is uitgerold
+	TemplateName    nullable.Nullable[string] `json:"template_name"`
+	TemplateVersion nullable.Nullable[string] `json:"template_version"`
+	Type            ClusterType               `json:"type"`
+	UpdatedAt       time.Time                 `json:"updated_at"`
+	VipCount        int                       `json:"vip_count"`
 
 	// Vips De VIP's met hun huidige eigenaar
 	Vips []VipOwner `json:"vips"`
@@ -497,6 +569,84 @@ type ClusterPatch struct {
 
 // ClusterType defines model for ClusterType.
 type ClusterType string
+
+// DeployCluster defines model for DeployCluster.
+type DeployCluster struct {
+	Description *string     `json:"description,omitempty"`
+	Environment Environment `json:"environment"`
+	Name        string      `json:"name"`
+
+	// Slug Ook het begin van de hostnames: <slug>-01, <slug>-02
+	Slug string `json:"slug"`
+}
+
+// DeployInput defines model for DeployInput.
+type DeployInput struct {
+	Cluster DeployCluster `json:"cluster"`
+
+	// Params Waarden voor de parameters van de template
+	Params map[string]interface{} `json:"params"`
+
+	// ServerUrl Het adres waarmee de nieuwe nodes ClusterForge bereiken
+	ServerUrl string       `json:"server_url"`
+	Target    DeployTarget `json:"target"`
+	Template  string       `json:"template"`
+}
+
+// DeployPlan defines model for DeployPlan.
+type DeployPlan struct {
+	Nodes []DeployPlanNode `json:"nodes"`
+
+	// Vip Leeg als de template geen VIP heeft
+	Vip  string                 `json:"vip"`
+	Vrid nullable.Nullable[int] `json:"vrid"`
+}
+
+// DeployPlanNode defines model for DeployPlanNode.
+type DeployPlanNode struct {
+	// Address Adres met prefix, zoals 10.0.20.11/24; leeg bij DHCP
+	Address string `json:"address"`
+	Cpu     int    `json:"cpu"`
+	DiskGib int    `json:"disk_gib"`
+
+	// Host De Proxmox-host voor de VM
+	Host      string `json:"host"`
+	Hostname  string `json:"hostname"`
+	MemoryMib int    `json:"memory_mib"`
+	Role      string `json:"role"`
+}
+
+// DeployResult defines model for DeployResult.
+type DeployResult struct {
+	ClusterId openapi_types.UUID `json:"cluster_id"`
+	Job       Job                `json:"job"`
+}
+
+// DeployTarget defines model for DeployTarget.
+type DeployTarget struct {
+	// Bridge Standaard vmbr0
+	Bridge *string   `json:"bridge,omitempty"`
+	Dns    *[]string `json:"dns,omitempty"`
+
+	// FirstIp Adres van de eerste node met prefix, zoals 10.0.20.11/24; de volgende nodes krijgen de adressen erna
+	FirstIp *string `json:"first_ip,omitempty"`
+	Gateway *string `json:"gateway,omitempty"`
+
+	// ImageVmid De VM-template (golden image) om uit te klonen
+	ImageVmid int                 `json:"image_vmid"`
+	Network   DeployTargetNetwork `json:"network"`
+	ProxmoxId openapi_types.UUID  `json:"proxmox_id"`
+
+	// SshKeys Publieke SSH-sleutels
+	SshKeys *string `json:"ssh_keys,omitempty"`
+
+	// Storage Storage voor de schijven; leeg is die van de template
+	Storage *string                `json:"storage,omitempty"`
+	Vlan    nullable.Nullable[int] `json:"vlan,omitempty"`
+}
+
+// DeployTargetNetwork defines model for DeployTarget.Network.
+type DeployTargetNetwork string
 
 // EnrollRequest defines model for EnrollRequest.
 type EnrollRequest struct {
@@ -559,8 +709,11 @@ type Environment string
 // Error defines model for Error.
 type Error struct {
 	// Code Stabiele foutcode, bijvoorbeeld invalid_credentials of totp_required
-	Code    string `json:"code"`
-	Message string `json:"message"`
+	Code string `json:"code"`
+
+	// Field Het veld met de fout, zoals params.vip, als de fout bij één veld hoort
+	Field   *string `json:"field,omitempty"`
+	Message string  `json:"message"`
 }
 
 // Event defines model for Event.
@@ -669,10 +822,13 @@ type Job struct {
 	ProxmoxId       nullable.Nullable[openapi_types.UUID] `json:"proxmox_id"`
 
 	// RequestedBy Gebruikersnaam van wie de taak vroeg
-	RequestedBy nullable.Nullable[string]    `json:"requested_by"`
-	StartedAt   nullable.Nullable[time.Time] `json:"started_at"`
-	Status      JobStatus                    `json:"status"`
-	Title       string                       `json:"title"`
+	RequestedBy nullable.Nullable[string] `json:"requested_by"`
+
+	// Retryable De taak is mislukt en kan opnieuw vanaf de mislukte stap
+	Retryable bool                         `json:"retryable"`
+	StartedAt nullable.Nullable[time.Time] `json:"started_at"`
+	Status    JobStatus                    `json:"status"`
+	Title     string                       `json:"title"`
 }
 
 // JobDetail defines model for JobDetail.
@@ -689,11 +845,14 @@ type JobDetail struct {
 	ProxmoxId       nullable.Nullable[openapi_types.UUID] `json:"proxmox_id"`
 
 	// RequestedBy Gebruikersnaam van wie de taak vroeg
-	RequestedBy nullable.Nullable[string]    `json:"requested_by"`
-	StartedAt   nullable.Nullable[time.Time] `json:"started_at"`
-	Status      JobStatus                    `json:"status"`
-	Steps       []JobStep                    `json:"steps"`
-	Title       string                       `json:"title"`
+	RequestedBy nullable.Nullable[string] `json:"requested_by"`
+
+	// Retryable De taak is mislukt en kan opnieuw vanaf de mislukte stap
+	Retryable bool                         `json:"retryable"`
+	StartedAt nullable.Nullable[time.Time] `json:"started_at"`
+	Status    JobStatus                    `json:"status"`
+	Steps     []JobStep                    `json:"steps"`
+	Title     string                       `json:"title"`
 }
 
 // JobStatus defines model for JobStatus.
@@ -1039,6 +1198,44 @@ type ServerInfo struct {
 // unknown betekent: geen agent of nog geen gegevens.
 type Status string
 
+// Template defines model for Template.
+type Template struct {
+	ClusterType ClusterType     `json:"cluster_type"`
+	Description string          `json:"description"`
+	Name        string          `json:"name"`
+	Params      []TemplateParam `json:"params"`
+	Roles       []TemplateRole  `json:"roles"`
+	Title       string          `json:"title"`
+	Version     string          `json:"version"`
+}
+
+// TemplateParam defines model for TemplateParam.
+type TemplateParam struct {
+	Default nullable.Nullable[string] `json:"default"`
+	Help    string                    `json:"help"`
+	Label   string                    `json:"label"`
+	Max     nullable.Nullable[string] `json:"max"`
+	Min     nullable.Nullable[string] `json:"min"`
+	Name    string                    `json:"name"`
+
+	// Optional Mag leeg blijven; een secret wordt dan gegenereerd
+	Optional bool              `json:"optional"`
+	Type     TemplateParamType `json:"type"`
+}
+
+// TemplateParamType defines model for TemplateParamType.
+type TemplateParamType string
+
+// TemplateRole defines model for TemplateRole.
+type TemplateRole struct {
+	// Count Vast aantal nodes
+	Count nullable.Nullable[int] `json:"count"`
+
+	// CountParam De parameter met het aantal nodes
+	CountParam nullable.Nullable[string] `json:"count_param"`
+	Name       string                    `json:"name"`
+}
+
 // TotpCodeRequest defines model for TotpCodeRequest.
 type TotpCodeRequest struct {
 	Code string `json:"code"`
@@ -1176,6 +1373,12 @@ type UpdateClusterJSONRequestBody = ClusterPatch
 // CreateVipJSONRequestBody defines body for CreateVip for application/json ContentType.
 type CreateVipJSONRequestBody = VipInput
 
+// DeployClusterJSONRequestBody defines body for DeployCluster for application/json ContentType.
+type DeployClusterJSONRequestBody = DeployInput
+
+// PlanDeploymentJSONRequestBody defines body for PlanDeployment for application/json ContentType.
+type PlanDeploymentJSONRequestBody = DeployInput
+
 // CreateEnrollmentTokenJSONRequestBody defines body for CreateEnrollmentToken for application/json ContentType.
 type CreateEnrollmentTokenJSONRequestBody = EnrollmentTokenInput
 
@@ -1253,6 +1456,12 @@ type ServerInterface interface {
 	// CreateVip VIP toevoegen aan een cluster (admin)
 	// (POST /clusters/{clusterId}/vips)
 	CreateVip(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
+	// DeployCluster Een nieuw cluster uitrollen uit een template (admin)
+	// (POST /deployments)
+	DeployCluster(w http.ResponseWriter, r *http.Request)
+	// PlanDeployment Controleren wat een uitrol zou maken (admin)
+	// (POST /deployments/plan)
+	PlanDeployment(w http.ResponseWriter, r *http.Request)
 	// ListEnrollmentTokens Bruikbare enrollmenttokens (admin)
 	// (GET /enrollment-tokens)
 	ListEnrollmentTokens(w http.ResponseWriter, r *http.Request)
@@ -1280,6 +1489,9 @@ type ServerInterface interface {
 	// CancelJob Taak annuleren (admin); een lopende Proxmox-taak wordt gestopt
 	// (POST /jobs/{jobId}/cancel)
 	CancelJob(w http.ResponseWriter, r *http.Request, jobId openapi_types.UUID)
+	// RetryJob Een mislukte uitrol opnieuw proberen vanaf de mislukte stap (admin)
+	// (POST /jobs/{jobId}/retry)
+	RetryJob(w http.ResponseWriter, r *http.Request, jobId openapi_types.UUID)
 	// ListNodes Alle nodes, met hun cluster
 	// (GET /nodes)
 	ListNodes(w http.ResponseWriter, r *http.Request)
@@ -1337,6 +1549,9 @@ type ServerInterface interface {
 	// Stream Live wijzigingen als Server-Sent Events
 	// (GET /stream)
 	Stream(w http.ResponseWriter, r *http.Request)
+	// ListTemplates De clustertemplates in deze server
+	// (GET /templates)
+	ListTemplates(w http.ResponseWriter, r *http.Request)
 	// ListUsers Actieve gebruikers, voor bijvoorbeeld de keuze van owners
 	// (GET /users)
 	ListUsers(w http.ResponseWriter, r *http.Request)
@@ -1448,6 +1663,18 @@ func (_ Unimplemented) CreateVip(w http.ResponseWriter, r *http.Request, cluster
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// DeployCluster Een nieuw cluster uitrollen uit een template (admin)
+// (POST /deployments)
+func (_ Unimplemented) DeployCluster(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// PlanDeployment Controleren wat een uitrol zou maken (admin)
+// (POST /deployments/plan)
+func (_ Unimplemented) PlanDeployment(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // ListEnrollmentTokens Bruikbare enrollmenttokens (admin)
 // (GET /enrollment-tokens)
 func (_ Unimplemented) ListEnrollmentTokens(w http.ResponseWriter, r *http.Request) {
@@ -1499,6 +1726,12 @@ func (_ Unimplemented) GetJob(w http.ResponseWriter, r *http.Request, jobId open
 // CancelJob Taak annuleren (admin); een lopende Proxmox-taak wordt gestopt
 // (POST /jobs/{jobId}/cancel)
 func (_ Unimplemented) CancelJob(w http.ResponseWriter, r *http.Request, jobId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RetryJob Een mislukte uitrol opnieuw proberen vanaf de mislukte stap (admin)
+// (POST /jobs/{jobId}/retry)
+func (_ Unimplemented) RetryJob(w http.ResponseWriter, r *http.Request, jobId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -1613,6 +1846,12 @@ func (_ Unimplemented) ListVmSnapshots(w http.ResponseWriter, r *http.Request, p
 // Stream Live wijzigingen als Server-Sent Events
 // (GET /stream)
 func (_ Unimplemented) Stream(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListTemplates De clustertemplates in deze server
+// (GET /templates)
+func (_ Unimplemented) ListTemplates(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -1955,6 +2194,34 @@ func (siw *ServerInterfaceWrapper) CreateVip(w http.ResponseWriter, r *http.Requ
 	handler.ServeHTTP(w, r)
 }
 
+// DeployCluster operation middleware
+func (siw *ServerInterfaceWrapper) DeployCluster(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeployCluster(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PlanDeployment operation middleware
+func (siw *ServerInterfaceWrapper) PlanDeployment(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PlanDeployment(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListEnrollmentTokens operation middleware
 func (siw *ServerInterfaceWrapper) ListEnrollmentTokens(w http.ResponseWriter, r *http.Request) {
 
@@ -2185,6 +2452,32 @@ func (siw *ServerInterfaceWrapper) CancelJob(w http.ResponseWriter, r *http.Requ
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CancelJob(w, r, jobId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RetryJob operation middleware
+func (siw *ServerInterfaceWrapper) RetryJob(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "jobId" -------------
+	var jobId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "jobId", chi.URLParam(r, "jobId"), &jobId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "jobId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RetryJob(w, r, jobId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -2650,6 +2943,20 @@ func (siw *ServerInterfaceWrapper) Stream(w http.ResponseWriter, r *http.Request
 	handler.ServeHTTP(w, r)
 }
 
+// ListTemplates operation middleware
+func (siw *ServerInterfaceWrapper) ListTemplates(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListTemplates(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListUsers operation middleware
 func (siw *ServerInterfaceWrapper) ListUsers(w http.ResponseWriter, r *http.Request) {
 
@@ -2969,6 +3276,18 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/jobs/{jobId}/cancel", wrapper.CancelJob)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/jobs/{jobId}/retry", wrapper.RetryJob)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/templates", wrapper.ListTemplates)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/deployments", wrapper.DeployCluster)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/deployments/plan", wrapper.PlanDeployment)
 	})
 
 	return r

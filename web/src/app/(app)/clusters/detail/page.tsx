@@ -6,6 +6,7 @@ import { Suspense, useState, type FormEvent } from "react";
 import { MetricsPanels } from "@/components/charts/MetricsPanels";
 import { ClusterForm } from "@/components/inventory/ClusterForm";
 import { NodeForm } from "@/components/inventory/NodeForm";
+import { JobList } from "@/components/jobs/JobList";
 import {
   AgentBadge,
   Empty,
@@ -38,6 +39,7 @@ import {
   type ClusterDetail,
   type Vip,
 } from "@/lib/inventory";
+import { useJobs } from "@/lib/proxmox";
 
 export default function ClusterDetailPage() {
   return (
@@ -54,6 +56,7 @@ function ClusterDetailInner() {
   const isAdmin = useIsAdmin();
   const update = useUpdateCluster(id);
   const remove = useDeleteCluster();
+  const jobs = useJobs({ cluster_id: id, limit: 10 }, id !== "");
   const router = useRouter();
   const [editing, setEditing] = useState(false);
 
@@ -123,6 +126,11 @@ function ClusterDetailInner() {
 
           <NodesCard c={cluster.data} isAdmin={isAdmin} />
           <VipsCard c={cluster.data} isAdmin={isAdmin} />
+          {(jobs.data?.length ?? 0) > 0 && (
+            <Card title="Taken">
+              <JobList jobs={jobs.data!} />
+            </Card>
+          )}
           {cluster.data.nodes.some((n) => n.agent) && (
             <MetricsPanels
               kind="cluster"
@@ -150,6 +158,19 @@ function Info({ c }: { c: ClusterDetail }) {
     ["Beschrijving", c.description || <span className="text-slate-400">Geen</span>],
     ["Owners", c.owners.length ? c.owners.map((o) => o.username).join(", ") : <span className="text-slate-400">Geen</span>],
     ["Tags", c.tags.length ? <Tags tags={c.tags} /> : <span className="text-slate-400">Geen</span>],
+    ...(c.template_name
+      ? ([
+          [
+            "Template",
+            <span key="t">
+              <Link href="/templates" className="text-brand-700 hover:underline dark:text-sky-300">
+                {c.template_name}
+              </Link>{" "}
+              {c.template_version} <span className="text-slate-500">· spec-revisie {c.spec_revision}</span>
+            </span>,
+          ],
+        ] as [string, React.ReactNode][])
+      : []),
     ["Git-repository", c.git_repo_url ? <code className="text-xs break-all">{c.git_repo_url}</code> : <span className="text-slate-400">Geen</span>],
     ["Laatst gewijzigd", fmt.format(new Date(c.updated_at))],
   ];

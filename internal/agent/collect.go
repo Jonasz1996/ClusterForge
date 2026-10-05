@@ -38,6 +38,9 @@ type Collector struct {
 	// Addresses geeft de IP-adressen voor de heartbeat; nil leest ze van de
 	// interfaces.
 	Addresses func() []string
+	// Interfaces geeft de netwerkinterfaces voor de facts; nil leest ze van
+	// het systeem.
+	Interfaces func() []protocol.Interface
 }
 
 func (c *Collector) path(p string) string {
@@ -107,13 +110,17 @@ func (c *Collector) Heartbeat(ctx context.Context, version string) protocol.Hear
 func (c *Collector) Facts(ctx context.Context) protocol.Facts {
 	hostname, _ := os.Hostname()
 	f := protocol.Facts{
-		Hostname:   hostname,
-		MachineID:  c.machineID(),
-		OS:         c.osRelease(),
-		Kernel:     c.read("/proc/sys/kernel/osrelease"),
-		Arch:       runtime.GOARCH,
-		CPUs:       runtime.NumCPU(),
-		Interfaces: interfaces(),
+		Hostname:  hostname,
+		MachineID: c.machineID(),
+		OS:        c.osRelease(),
+		Kernel:    c.read("/proc/sys/kernel/osrelease"),
+		Arch:      runtime.GOARCH,
+		CPUs:      runtime.NumCPU(),
+	}
+	if c.Interfaces != nil {
+		f.Interfaces = c.Interfaces()
+	} else {
+		f.Interfaces = interfaces()
 	}
 	mem := c.meminfo()
 	f.MemoryBytes, f.SwapBytes = mem["MemTotal"]*1024, mem["SwapTotal"]*1024

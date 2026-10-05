@@ -676,6 +676,85 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/jobs/{jobId}/retry": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                jobId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Een mislukte uitrol opnieuw proberen vanaf de mislukte stap (admin) */
+        post: operations["retryJob"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/templates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** De clustertemplates in deze server */
+        get: operations["listTemplates"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/deployments": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Een nieuw cluster uitrollen uit een template (admin)
+         * @description Maakt het cluster met zijn nodes (lifecycle provisioning) en start de
+         *     uitrol als taak: VM's klonen in Proxmox, agents aanmelden, de stappen
+         *     uitvoeren en controleren. Een validatiefout noemt het veld in field.
+         */
+        post: operations["deployCluster"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/deployments/plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Controleren wat een uitrol zou maken (admin)
+         * @description Doet dezelfde controles als een uitrol en geeft de nodes die er zouden
+         *     komen, met hun adres en Proxmox-host, zonder iets te maken.
+         */
+        post: operations["planDeployment"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -684,6 +763,8 @@ export interface components {
             /** @description Stabiele foutcode, bijvoorbeeld invalid_credentials of totp_required */
             code: string;
             message: string;
+            /** @description Het veld met de fout, zoals params.vip, als de fout bij één veld hoort */
+            field?: string;
         };
         Health: {
             /** @enum {string} */
@@ -769,6 +850,11 @@ export interface components {
          */
         Status: "unknown" | "healthy" | "degraded" | "down" | "split_brain";
         Cluster: {
+            /** @description De template waaruit het cluster is uitgerold */
+            template_name: string | null;
+            template_version: string | null;
+            /** @description Revisie van de gewenste staat; 0 zonder spec */
+            spec_revision: number;
             /** Format: uuid */
             id: string;
             /** @description Korte unieke naam, bijvoorbeeld webcluster-prod */
@@ -1270,6 +1356,8 @@ export interface components {
         Job: {
             /** Format: uuid */
             id: string;
+            /** @description De taak is mislukt en kan opnieuw vanaf de mislukte stap */
+            retryable: boolean;
             kind: string;
             title: string;
             status: components["schemas"]["JobStatus"];
@@ -1304,6 +1392,94 @@ export interface components {
             finished_at: string | null;
             log: string[];
             error: string;
+        };
+        /** @enum {string} */
+        TemplateParamType: "string" | "int" | "bool" | "ipv4" | "cidr" | "size" | "secret";
+        TemplateParam: {
+            name: string;
+            type: components["schemas"]["TemplateParamType"];
+            label: string;
+            help: string;
+            /** @description Mag leeg blijven; een secret wordt dan gegenereerd */
+            optional: boolean;
+            default: string | null;
+            min: string | null;
+            max: string | null;
+        };
+        TemplateRole: {
+            name: string;
+            /** @description Vast aantal nodes */
+            count: number | null;
+            /** @description De parameter met het aantal nodes */
+            count_param: string | null;
+        };
+        Template: {
+            name: string;
+            version: string;
+            title: string;
+            description: string;
+            cluster_type: components["schemas"]["ClusterType"];
+            params: components["schemas"]["TemplateParam"][];
+            roles: components["schemas"]["TemplateRole"][];
+        };
+        DeployCluster: {
+            name: string;
+            /** @description Ook het begin van de hostnames: <slug>-01, <slug>-02 */
+            slug: string;
+            environment: components["schemas"]["Environment"];
+            description?: string;
+        };
+        DeployTarget: {
+            /** Format: uuid */
+            proxmox_id: string;
+            /** @description De VM-template (golden image) om uit te klonen */
+            image_vmid: number;
+            /** @description Storage voor de schijven; leeg is die van de template */
+            storage?: string;
+            /** @description Standaard vmbr0 */
+            bridge?: string;
+            vlan?: number | null;
+            /** @enum {string} */
+            network: "dhcp" | "static";
+            /** @description Adres van de eerste node met prefix, zoals 10.0.20.11/24; de volgende nodes krijgen de adressen erna */
+            first_ip?: string;
+            gateway?: string;
+            dns?: string[];
+            /** @description Publieke SSH-sleutels */
+            ssh_keys?: string;
+        };
+        DeployInput: {
+            template: string;
+            cluster: components["schemas"]["DeployCluster"];
+            /** @description Waarden voor de parameters van de template */
+            params: {
+                [key: string]: unknown;
+            };
+            target: components["schemas"]["DeployTarget"];
+            /** @description Het adres waarmee de nieuwe nodes ClusterForge bereiken */
+            server_url: string;
+        };
+        DeployPlanNode: {
+            hostname: string;
+            role: string;
+            /** @description Adres met prefix, zoals 10.0.20.11/24; leeg bij DHCP */
+            address: string;
+            /** @description De Proxmox-host voor de VM */
+            host: string;
+            cpu: number;
+            memory_mib: number;
+            disk_gib: number;
+        };
+        DeployPlan: {
+            nodes: components["schemas"]["DeployPlanNode"][];
+            /** @description Leeg als de template geen VIP heeft */
+            vip: string;
+            vrid: number | null;
+        };
+        DeployResult: {
+            job: components["schemas"]["Job"];
+            /** Format: uuid */
+            cluster_id: string;
         };
     };
     responses: {
@@ -2539,6 +2715,112 @@ export interface operations {
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];
+        };
+    };
+    retryJob: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                jobId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Weer in de wachtrij */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Job"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    listTemplates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["Template"][];
+                    };
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    deployCluster: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeployInput"];
+            };
+        };
+        responses: {
+            /** @description Uitrol gestart */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeployResult"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+        };
+    };
+    planDeployment: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeployInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeployPlan"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            502: components["responses"]["Error"];
         };
     };
 }

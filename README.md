@@ -14,7 +14,7 @@ Het technisch ontwerp staat in [docs/design/mvp-fase-1.md](docs/design/mvp-fase-
 | 4. Monitoring | Metrics, status, dashboards | klaar |
 | 5. Proxmox | Sync en VM-acties | klaar |
 | 6. Node lifecycle | Reboot, maintenance, drain | klaar |
-| 7. Templates en deployment | Clusters uit templates | gepland |
+| 7. Templates en deployment | Clusters uit templates | klaar |
 
 ## Draaien met Docker Compose
 
@@ -103,11 +103,13 @@ Een node zonder agent of heartbeat die aan een Proxmox-VM gekoppeld is, krijgt z
 ClusterForge praat met de REST-API van Proxmox VE (8 of nieuwer) via een API-token. Maak dat token één keer aan op een van je Proxmox-hosts, als root:
 
 ```sh
-pveum role add ClusterForge --privs "VM.Audit VM.PowerMgmt VM.Snapshot VM.Migrate Sys.Audit Datastore.Audit Datastore.AllocateSpace"
+pveum role add ClusterForge --privs "VM.Audit VM.PowerMgmt VM.Snapshot VM.Migrate VM.Allocate VM.Clone VM.Config.CPU VM.Config.Memory VM.Config.Disk VM.Config.Network VM.Config.Cloudinit VM.Config.Options VM.Monitor Sys.Audit Datastore.Audit Datastore.AllocateSpace SDN.Use"
 pveum user add clusterforge@pve --comment "ClusterForge"
 pveum acl modify / --users clusterforge@pve --roles ClusterForge
 pveum user token add clusterforge@pve cf --privsep 0
 ```
+
+Dat is de rol voor Proxmox VE 8. Op Proxmox VE 9 bestaat `VM.Monitor` niet meer; zet daar `VM.GuestAgent.Audit VM.GuestAgent.FileWrite` in de plaats. Bestaat de rol al uit een eerdere versie, vervang dan `role add` door `role modify` met dezelfde lijst. De rechten om VM's te maken en de guest agent te gebruiken zijn alleen nodig om [clusters uit te rollen](#clusters-uitrollen).
 
 Het laatste commando toont het secret één keer. Klik in de webinterface bij Proxmox op "Proxmox koppelen" en vul het API-adres (`https://pve1.example.lan:8006`), de token-id (`clusterforge@pve!cf`) en het secret in. Heeft Proxmox een zelfondertekend certificaat, klik dan naast de vingerafdruk op "Ophalen" en vergelijk de vingerafdruk met die op de host (`openssl x509 -in /etc/pve/local/pve-ssl.pem -noout -fingerprint -sha256`); ClusterForge vertrouwt daarna alleen dat certificaat. Het secret wordt versleuteld met `CF_MASTER_KEY` opgeslagen. Verlies je die sleutel, dan vul je het secret opnieuw in via Bewerken.
 
@@ -116,6 +118,34 @@ Is je Proxmox een cluster, dan is één koppeling genoeg: ClusterForge ziet via 
 Elke 20 seconden haalt ClusterForge de stand op. Bij Proxmox zie je de hosts met hun belasting, alle VM's en containers en de storage. Een VM koppel je aan een node met "Koppelen" (of maak er meteen een node van), waarna de node zijn VM-status, host en acties toont. Start, afsluiten, hard uitzetten, herstarten, snapshot maken en live migreren naar een andere host doe je vanaf de node of vanuit het overzicht; viewers kunnen alleen kijken. Verandert een gekoppelde VM buiten ClusterForge om (gestart, gestopt, verhuisd of verdwenen), dan komt dat in de activiteitenlog.
 
 Wil je ook de CPU, het geheugen en de schijven van de Proxmox-hosts zelf in grafieken, zet dan ook daar de agent op.
+
+## Clusters uitrollen
+
+Een template beschrijft een volledig cluster: hoeveel VM's, hoe groot, welke software erop komt en hoe ClusterForge achteraf controleert dat het werkt. De eerste template, Nginx met keepalived, zet twee tot vijf webservers achter één VIP. De templates zitten in de server ingebouwd; bij Templates zie je ze met hun parameters.
+
+Wat je nodig hebt:
+
+1. Een gekoppelde Proxmox, met een token dat VM's mag maken (zie de rol hierboven).
+2. Een golden image: een VM-template met Debian 13, cloud-init, de QEMU guest agent en cf-agent. Maak hem als root op een Proxmox-host met het script dat ClusterForge zelf serveert:
+
+   ```sh
+   curl -fsSL https://clusterforge.example/install/golden-image.sh | bash -s -- --server https://clusterforge.example --storage local-lvm
+   ```
+
+   Het script haalt het cloud-image van Debian, zet er qemu-guest-agent en cf-agent in met `virt-customize` (uit `libguestfs-tools`, dat het zo nodig installeert) en maakt VM-template 9000. Met `--vmid`, `--storage`, `--bridge` en `--name` kies je iets anders, en `--replace` vervangt een eerdere template. Op gedeelde storage (Ceph, NFS) verdeelt ClusterForge de VM's over de hosts; op lokale storage komen ze allemaal op de host van de template.
+3. De nieuwe VM's moeten ClusterForge kunnen bereiken: het webadres om zich aan te melden, en poort 4222 voor NATS.
+
+Klik bij Clusters op "Cluster uitrollen", kies de template en vul de naam, de parameters (bij Nginx met keepalived het VIP), de golden image en het netwerk in. Onderaan zie je meteen welke nodes er komen, met hun adres en Proxmox-host; een fout staat bij het veld. Na "Uitrollen" loopt de taak:
+
+1. Per node de VM klonen, cores, geheugen, netwerk en cloud-init instellen, de schijf vergroten en starten.
+2. De agents aanmelden: wachten op de guest agent, via de guest agent een eenmalig aanmeldbestand in de VM zetten (`/etc/clusterforge/enroll.json`) en wachten tot cf-agent zich meldt.
+3. Per node de stappen van de template: pakketten, bestanden en services. Elke stap meldt of hij iets veranderde.
+4. Controleren: een node heeft het VIP en `http://<VIP>/` antwoordt.
+5. De nodes worden actief en tellen mee voor de status van het cluster.
+
+Loopt een stap mis, dan staat bij de taak waarom. Los het op en klik op "Opnieuw proberen"; de taak gaat verder bij de stap die misliep. Wil je het cluster niet meer, verwijder dan het cluster en de nodes, en de VM's in Proxmox; ClusterForge ruimt in deze versie niets vanzelf op. Geheimen van een template, zoals het VRRP-wachtwoord, staan versleuteld met `CF_MASTER_KEY` in de database en nooit in de taak of het logboek.
+
+Een eigen golden image kan ook: installeer cf-agent erin met `agent.sh --server https://clusterforge.example --no-enroll`. De agent meldt zich dan aan zodra ClusterForge het aanmeldbestand in de nieuwe VM zet. Zorg ook voor cloud-init en qemu-guest-agent, en maak `/etc/machine-id` leeg voor je er een template van maakt.
 
 ## Onderhoud, herstarten en afsluiten
 
@@ -132,11 +162,11 @@ Kan geen andere node een VIP overnemen (geen actieve, online node waarop keepali
 
 Een node zonder agent kun je alleen in en uit onderhoud zetten; de VIP's haal je dan zelf weg.
 
-De agent voert alleen deze vaste commando's uit, nooit een vrije shell: facts verzamelen, keepalived uit- en aanzetten voor onderhoud, herstarten en afsluiten met `systemctl`. Hij onthoudt het onderhoud en het laatste herstartcommando in `/var/lib/clusterforge/agent-state.json`, zodat hij na een herstart niet nog eens herstart. Een agent van voor deze versie kan geen commando's uitvoeren; trek hem in en installeer hem opnieuw.
+De agent voert alleen vaste soorten commando's uit: facts verzamelen, keepalived uit- en aanzetten voor onderhoud, herstarten en afsluiten met `systemctl`, en de stappen van een template (pakketten met apt, bestanden, services, gebruikers, mappen en commando's). Omdat hij als root bestanden schrijft, kan wie de server beheert alles op de nodes; bescherm de server en `CF_MASTER_KEY` daarom als een beheerwachtwoord. Hij onthoudt het onderhoud en het laatste herstartcommando in `/var/lib/clusterforge/agent-state.json`, zodat hij na een herstart niet nog eens herstart. Een agent van voor deze versie kan geen commando's uitvoeren; trek hem in en installeer hem opnieuw.
 
 ## Taken
 
-Alles wat even duurt, zoals een VM migreren of een node herstarten, loopt als taak op de achtergrond. Bij Taken zie je wat er loopt en wat er gebeurd is, met per stap het logboek uit Proxmox. Een lopende taak kun je annuleren; ClusterForge stopt dan ook de taak in Proxmox. Valt de server weg tijdens een taak, dan gaat hij na de herstart verder waar hij was, zonder de actie in Proxmox nog eens te starten.
+Alles wat even duurt, zoals een VM migreren, een node herstarten of een cluster uitrollen, loopt als taak op de achtergrond. Bij Taken zie je wat er loopt en wat er gebeurd is, met per stap het logboek uit Proxmox. Een lopende taak kun je annuleren; ClusterForge stopt dan ook de taak in Proxmox. Valt de server weg tijdens een taak, dan gaat hij na de herstart verder waar hij was, zonder de actie in Proxmox nog eens te starten.
 
 ## Ontwikkelen
 

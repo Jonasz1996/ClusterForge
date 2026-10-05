@@ -35,11 +35,21 @@ export default function ClustersPage() {
       <PageHeader
         title="Clusters"
         description="Groepen nodes die samen één dienst leveren."
-        actions={isAdmin && !adding && <Button onClick={() => setAdding(true)}>Nieuw cluster</Button>}
+        actions={
+          isAdmin &&
+          !adding && (
+            <>
+              <Button variant="secondary" onClick={() => setAdding(true)}>
+                Bestaand cluster toevoegen
+              </Button>
+              <Button onClick={() => router.push("/clusters/uitrollen")}>Cluster uitrollen</Button>
+            </>
+          )
+        }
       />
 
       {adding && (
-        <Card title="Nieuw cluster">
+        <Card title="Bestaand cluster toevoegen">
           <ClusterForm
             submitLabel="Aanmaken"
             onCancel={() => setAdding(false)}

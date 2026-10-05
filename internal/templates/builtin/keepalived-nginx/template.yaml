@@ -1,0 +1,78 @@
+name: keepalived-nginx
+version: 1.0.0
+title: Nginx met keepalived
+description: >-
+  Twee of meer webservers met Nginx achter één virtueel IP-adres. Keepalived
+  geeft het VIP aan de node met de hoogste prioriteit; valt die node of Nginx
+  erop uit, dan neemt de volgende het binnen enkele seconden over.
+cluster_type: keepalived
+
+params:
+  - name: vip
+    type: ipv4
+    label: VIP
+    help: Het adres waarop de website bereikbaar wordt. Het moet vrij zijn en in hetzelfde netwerk liggen als de nodes.
+  - name: node_count
+    type: int
+    label: Aantal nodes
+    default: 2
+    min: 2
+    max: 5
+  - name: vrid
+    type: int
+    label: VRRP-id
+    help: Uniek per keepalived-groep in hetzelfde netwerk. Leeg laten kiest een vrij nummer.
+    optional: true
+    min: 1
+    max: 255
+  - name: cpu
+    type: int
+    label: vCPU per node
+    default: 2
+    min: 1
+    max: 16
+  - name: memory
+    type: size
+    label: Geheugen per node
+    default: 2G
+    min: 512M
+    max: 64G
+  - name: disk
+    type: size
+    label: Schijf per node
+    default: 20G
+    min: 8G
+    max: 1T
+  - name: auth_pass
+    type: secret
+    label: VRRP-wachtwoord
+    help: Leeg laten maakt er een. Keepalived gebruikt hoogstens 8 tekens.
+    length: 8
+
+roles:
+  - name: web
+    count: "{{ .params.node_count }}"
+    vm:
+      cpu: "{{ .params.cpu }}"
+      memory: "{{ .params.memory }}"
+      disk: "{{ .params.disk }}"
+    steps:
+      - package: { names: [keepalived, nginx] }
+      - file:
+          path: /var/www/html/index.html
+          template: index.html.tmpl
+      - service: { name: nginx, enabled: true, state: started }
+      - file:
+          path: /etc/keepalived/keepalived.conf
+          template: keepalived.conf.tmpl
+          mode: "0640"
+          notify: [service:keepalived:reload]
+      - service: { name: keepalived, enabled: true, state: started }
+
+checks:
+  - vip_owned: { vip: "{{ .params.vip }}", within: 60s }
+  - http: { url: "http://{{ .params.vip }}/", expect: 200, within: 60s }
+
+services:
+  - { name: nginx, kind: web }
+  - { name: keepalived, kind: vip }

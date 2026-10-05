@@ -14,7 +14,7 @@ import {
 } from "@/lib/inventory";
 
 // slugify maakt een voorstel voor de slug op basis van de naam.
-function slugify(s: string) {
+export function slugify(s: string) {
   return s
     .toLowerCase()
     .normalize("NFKD")

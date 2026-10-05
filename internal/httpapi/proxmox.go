@@ -289,6 +289,7 @@ func toAPIJob(j store.Job, requestedBy *string) gen.Job {
 		Id: j.ID, Kind: j.Kind, Title: j.Title, Status: gen.JobStatus(j.Status), Error: j.Error,
 		ClusterId: nullableOf(j.ClusterID), NodeId: nullableOf(j.NodeID), ProxmoxId: nullableOf(j.ProxmoxID),
 		RequestedBy: nullableOf(requestedBy), Attempts: int(j.Attempts), CancelRequested: j.CancelRequested,
+		Retryable: retryableKinds[j.Kind] && (j.Status == store.JobStatusFailed || j.Status == store.JobStatusCanceled),
 		CreatedAt: j.CreatedAt, StartedAt: nullableOf(j.StartedAt), FinishedAt: nullableOf(j.FinishedAt),
 	}
 }
@@ -331,8 +332,8 @@ func (s *Server) GetJob(w http.ResponseWriter, r *http.Request, id uuid.UUID) {
 	d := gen.JobDetail{
 		Id: j.Id, Kind: j.Kind, Title: j.Title, Status: j.Status, Error: j.Error, ClusterId: j.ClusterId,
 		NodeId: j.NodeId, ProxmoxId: j.ProxmoxId, RequestedBy: j.RequestedBy, Attempts: j.Attempts,
-		CancelRequested: j.CancelRequested, CreatedAt: j.CreatedAt, StartedAt: j.StartedAt, FinishedAt: j.FinishedAt,
-		Steps: make([]gen.JobStep, 0, len(steps)),
+		CancelRequested: j.CancelRequested, Retryable: j.Retryable, CreatedAt: j.CreatedAt, StartedAt: j.StartedAt,
+		FinishedAt: j.FinishedAt, Steps: make([]gen.JobStep, 0, len(steps)),
 	}
 	for _, st := range steps {
 		d.Steps = append(d.Steps, gen.JobStep{

@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/Jonasz1996/clusterforge/internal/agent"
 )
@@ -25,7 +26,8 @@ const usage = `cf-agent: de ClusterForge-agent
 
 Gebruik:
   cf-agent enroll -server https://clusterforge.example -token cfe_...
-  cf-agent run       verbindt met ClusterForge (zo start systemd hem)
+  cf-agent run       verbindt met ClusterForge (zo start systemd hem); nog niet
+                     aangemeld, dan wacht hij op /etc/clusterforge/enroll.json
   cf-agent facts     toont de facts van deze machine
   cf-agent version
 `
@@ -74,12 +76,12 @@ func enroll(args []string) error {
 	if *server == "" || *token == "" {
 		return errors.New("-server en -token zijn verplicht")
 	}
-	return doEnroll(*server, *token, *caFile, *config)
-}
-
-func doEnroll(server, token, caFile, config string) error {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
+	return doEnroll(ctx, *server, *token, *caFile, *config)
+}
+
+func doEnroll(ctx context.Context, server, token, caFile, config string) error {
 	c, err := agent.Enroll(ctx, agent.EnrollOptions{ServerURL: server, Token: token, CAFile: caFile, Version: version})
 	if err != nil {
 		return err
@@ -98,26 +100,54 @@ func run(args []string, log *slog.Logger) error {
 	statePath := fl.String("state", agent.DefaultStatePath, "bestand waarin de agent onderhoud en herstarts onthoudt")
 	_ = fl.Parse(args)
 
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
 	c, err := agent.LoadConfig(*config)
 	if errors.Is(err, fs.ErrNotExist) {
-		// Nog niet aangemeld: een aanmeldbestand (bijvoorbeeld van Proxmox) gebruiken.
-		e, ferr := agent.LoadEnrollFile(*enrollFile)
-		if ferr != nil {
-			return fmt.Errorf("niet aangemeld; draai eerst cf-agent enroll (%s ontbreekt)", *config)
+		c, err = waitEnroll(ctx, log, *config, *enrollFile)
+		if ctx.Err() != nil {
+			return nil
 		}
-		if err := doEnroll(e.Server, e.Token, "", *config); err != nil {
-			return err
-		}
-		_ = os.Remove(*enrollFile)
-		c, err = agent.LoadConfig(*config)
 	}
 	if err != nil {
 		return err
 	}
 
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer cancel()
 	a := &agent.Agent{Config: c, Version: version, Log: log, StatePath: *statePath}
 	log.Info("cf-agent gestart", "version", version, "node", c.NodeID, "nats", c.NatsURL)
 	return a.Run(ctx)
+}
+
+// waitEnroll wacht tot de agent aangemeld is: via een aanmeldbestand, dat
+// ClusterForge in een nieuwe VM uit een golden image zet, of via cf-agent
+// enroll.
+func waitEnroll(ctx context.Context, log *slog.Logger, config, enrollFile string) (*agent.Config, error) {
+	log.Info("nog niet aangemeld; wachten op een aanmeldbestand of cf-agent enroll", "bestand", enrollFile)
+	for {
+		delay := 2 * time.Second
+		if c, err := agent.LoadConfig(config); err == nil {
+			return c, nil
+		}
+		e, err := agent.LoadEnrollFile(enrollFile)
+		switch {
+		case err == nil:
+			log.Info("aanmelden met het aanmeldbestand", "server", e.Server)
+			if err := doEnroll(ctx, e.Server, e.Token, "", config); err != nil {
+				log.Error("aanmelden mislukt; straks opnieuw", "err", err)
+				delay = 15 * time.Second
+				break
+			}
+			_ = os.Remove(enrollFile)
+			return agent.LoadConfig(config)
+		case !errors.Is(err, fs.ErrNotExist):
+			// Misschien nog half geschreven.
+			log.Error("aanmeldbestand onleesbaar", "err", err)
+			delay = 5 * time.Second
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(delay):
+		}
+	}
 }

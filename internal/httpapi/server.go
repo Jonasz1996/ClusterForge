@@ -15,6 +15,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/agents"
 	"github.com/Jonasz1996/clusterforge/internal/auth"
 	"github.com/Jonasz1996/clusterforge/internal/config"
+	"github.com/Jonasz1996/clusterforge/internal/deploy"
 	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/httpapi/gen"
 	"github.com/Jonasz1996/clusterforge/internal/inventory"
@@ -41,6 +42,7 @@ type Server struct {
 	pve          *proxmox.Service
 	jobs         *jobs.Runner
 	life         *lifecycle.Service
+	deploy       *deploy.Service
 	version      string
 	loginLimiter *ipLimiter
 	// enrollLimiter remt het raden van enrollmenttokens.
@@ -62,7 +64,9 @@ type Deps struct {
 	Jobs    *jobs.Runner
 	// Lifecycle voert acties op nodes uit via hun agent.
 	Lifecycle *lifecycle.Service
-	Version   string
+	// Deploy rolt clusters uit templates uit.
+	Deploy  *deploy.Service
+	Version string
 }
 
 func New(d Deps) *Server {
@@ -83,6 +87,7 @@ func New(d Deps) *Server {
 		pve:     d.Proxmox,
 		jobs:    d.Jobs,
 		life:    d.Lifecycle,
+		deploy:  d.Deploy,
 		version: d.Version,
 		// 10 pogingen direct, daarna één per 6 seconden per IP-adres.
 		loginLimiter:  newIPLimiter(6*time.Second, 10),
@@ -116,6 +121,7 @@ func (s *Server) Handler() http.Handler {
 		})
 	})
 	r.Get("/install/agent.sh", agentdist.InstallScript)
+	r.Get("/install/golden-image.sh", agentdist.GoldenImageScript)
 	r.Get("/downloads/*", agentdist.Downloads(s.cfg.AgentDir))
 	r.Head("/downloads/*", agentdist.Downloads(s.cfg.AgentDir))
 	r.Handle("/*", webui.Handler())

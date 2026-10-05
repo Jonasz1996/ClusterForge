@@ -775,6 +775,85 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
+  /jobs/{jobId}/retry:
+    parameters:
+      - { name: jobId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: retryJob
+      summary: Een mislukte uitrol opnieuw proberen vanaf de mislukte stap (admin)
+      responses:
+        "202":
+          description: Weer in de wachtrij
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /templates:
+    get:
+      operationId: listTemplates
+      summary: De clustertemplates in deze server
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/Template" }
+        "401": { $ref: "#/components/responses/Error" }
+  /deployments:
+    post:
+      operationId: deployCluster
+      summary: Een nieuw cluster uitrollen uit een template (admin)
+      description: |
+        Maakt het cluster met zijn nodes (lifecycle provisioning) en start de
+        uitrol als taak: VM's klonen in Proxmox, agents aanmelden, de stappen
+        uitvoeren en controleren. Een validatiefout noemt het veld in field.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DeployInput" }
+      responses:
+        "202":
+          description: Uitrol gestart
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DeployResult" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+  /deployments/plan:
+    post:
+      operationId: planDeployment
+      summary: Controleren wat een uitrol zou maken (admin)
+      description: |
+        Doet dezelfde controles als een uitrol en geeft de nodes die er zouden
+        komen, met hun adres en Proxmox-host, zonder iets te maken.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DeployInput" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DeployPlan" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
 components:
   securitySchemes:
     session:
@@ -797,6 +876,9 @@ components:
           description: Stabiele foutcode, bijvoorbeeld invalid_credentials of totp_required
         message:
           type: string
+        field:
+          type: string
+          description: Het veld met de fout, zoals params.vip, als de fout bij één veld hoort
     Health:
       type: object
       required: [status, version, database]
@@ -889,8 +971,11 @@ components:
       enum: [unknown, healthy, degraded, down, split_brain]
     Cluster:
       type: object
-      required: [id, slug, name, description, type, environment, status, status_reason, status_since, tags, git_repo_url, created_at, updated_at]
+      required: [id, slug, name, description, type, environment, status, status_reason, status_since, tags, git_repo_url, template_name, template_version, spec_revision, created_at, updated_at]
       properties:
+        template_name: { type: string, nullable: true, description: De template waaruit het cluster is uitgerold }
+        template_version: { type: string, nullable: true }
+        spec_revision: { type: integer, description: Revisie van de gewenste staat; 0 zonder spec }
         id: { type: string, format: uuid }
         slug: { type: string, description: "Korte unieke naam, bijvoorbeeld webcluster-prod" }
         name: { type: string }
@@ -1410,9 +1495,10 @@ components:
       enum: [queued, running, succeeded, failed, canceled]
     Job:
       type: object
-      required: [id, kind, title, status, error, cluster_id, node_id, proxmox_id, requested_by, attempts, cancel_requested, created_at, started_at, finished_at]
+      required: [id, kind, title, status, error, cluster_id, node_id, proxmox_id, requested_by, attempts, cancel_requested, retryable, created_at, started_at, finished_at]
       properties:
         id: { type: string, format: uuid }
+        retryable: { type: boolean, description: De taak is mislukt en kan opnieuw vanaf de mislukte stap }
         kind: { type: string }
         title: { type: string }
         status: { $ref: "#/components/schemas/JobStatus" }
@@ -1444,3 +1530,94 @@ components:
         finished_at: { type: string, format: date-time, nullable: true }
         log: { type: array, items: { type: string } }
         error: { type: string }
+    TemplateParamType:
+      type: string
+      enum: [string, int, bool, ipv4, cidr, size, secret]
+    TemplateParam:
+      type: object
+      required: [name, type, label, help, optional, default, min, max]
+      properties:
+        name: { type: string }
+        type: { $ref: "#/components/schemas/TemplateParamType" }
+        label: { type: string }
+        help: { type: string }
+        optional: { type: boolean, description: Mag leeg blijven; een secret wordt dan gegenereerd }
+        default: { type: string, nullable: true }
+        min: { type: string, nullable: true }
+        max: { type: string, nullable: true }
+    TemplateRole:
+      type: object
+      required: [name, count, count_param]
+      properties:
+        name: { type: string }
+        count: { type: integer, nullable: true, description: Vast aantal nodes, of null als een parameter het bepaalt }
+        count_param: { type: string, nullable: true, description: De parameter met het aantal nodes }
+    Template:
+      type: object
+      required: [name, version, title, description, cluster_type, params, roles]
+      properties:
+        name: { type: string }
+        version: { type: string }
+        title: { type: string }
+        description: { type: string }
+        cluster_type: { $ref: "#/components/schemas/ClusterType" }
+        params: { type: array, items: { $ref: "#/components/schemas/TemplateParam" } }
+        roles: { type: array, items: { $ref: "#/components/schemas/TemplateRole" } }
+    DeployCluster:
+      type: object
+      required: [name, slug, environment]
+      properties:
+        name: { type: string }
+        slug: { type: string, description: "Ook het begin van de hostnames: <slug>-01, <slug>-02" }
+        environment: { $ref: "#/components/schemas/Environment" }
+        description: { type: string }
+    DeployTarget:
+      type: object
+      required: [proxmox_id, image_vmid, network]
+      properties:
+        proxmox_id: { type: string, format: uuid }
+        image_vmid: { type: integer, description: De VM-template (golden image) om uit te klonen }
+        storage: { type: string, description: Storage voor de schijven; leeg is die van de template }
+        bridge: { type: string, description: Standaard vmbr0 }
+        vlan: { type: integer, nullable: true }
+        network: { type: string, enum: [dhcp, static] }
+        first_ip: { type: string, description: "Adres van de eerste node met prefix, zoals 10.0.20.11/24; de volgende nodes krijgen de adressen erna" }
+        gateway: { type: string }
+        dns: { type: array, items: { type: string } }
+        ssh_keys: { type: string, description: Publieke SSH-sleutels, één per regel }
+    DeployInput:
+      type: object
+      required: [template, cluster, params, target, server_url]
+      properties:
+        template: { type: string }
+        cluster: { $ref: "#/components/schemas/DeployCluster" }
+        params:
+          type: object
+          additionalProperties: true
+          description: Waarden voor de parameters van de template
+        target: { $ref: "#/components/schemas/DeployTarget" }
+        server_url: { type: string, description: Het adres waarmee de nieuwe nodes ClusterForge bereiken }
+    DeployPlanNode:
+      type: object
+      required: [hostname, role, address, host, cpu, memory_mib, disk_gib]
+      properties:
+        hostname: { type: string }
+        role: { type: string }
+        address: { type: string, description: "Adres met prefix, zoals 10.0.20.11/24; leeg bij DHCP" }
+        host: { type: string, description: De Proxmox-host voor de VM }
+        cpu: { type: integer }
+        memory_mib: { type: integer }
+        disk_gib: { type: integer }
+    DeployPlan:
+      type: object
+      required: [nodes, vip, vrid]
+      properties:
+        nodes: { type: array, items: { $ref: "#/components/schemas/DeployPlanNode" } }
+        vip: { type: string, description: Leeg als de template geen VIP heeft }
+        vrid: { type: integer, nullable: true }
+    DeployResult:
+      type: object
+      required: [job, cluster_id]
+      properties:
+        job: { $ref: "#/components/schemas/Job" }
+        cluster_id: { type: string, format: uuid }
