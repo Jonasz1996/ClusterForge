@@ -158,9 +158,9 @@ func commandText(p map[string]any) string {
 	case "system.shutdown":
 		return "afsluiten"
 	case "node.maintenance.enter":
-		return "onderhoud starten (keepalived uit)"
+		return "onderhoud starten, keepalived uit"
 	case "node.maintenance.exit":
-		return "onderhoud beëindigen (keepalived terug)"
+		return "onderhoud beëindigen, keepalived terug"
 	case "apply.steps":
 		steps, _ := p["steps"].([]any)
 		if len(steps) == 1 {
