@@ -3,19 +3,29 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
+import { InstallAgent } from "@/components/inventory/InstallAgent";
 import { NodeForm } from "@/components/inventory/NodeForm";
-import { Empty, LifecycleBadge, QueryState, Tags } from "@/components/inventory/bits";
+import { AgentBadge, Empty, LifecycleBadge, QueryState, Tags } from "@/components/inventory/bits";
 import { Button, Card, Input, PageHeader, Select } from "@/components/ui";
-import { lifecycles, useCreateNode, useIsAdmin, useNodes, type Node } from "@/lib/inventory";
+import {
+  lifecycles,
+  useCreateNode,
+  useDeleteEnrollmentToken,
+  useEnrollmentTokens,
+  useIsAdmin,
+  useNodes,
+  type Node,
+} from "@/lib/inventory";
 
 type Group = { key: string; title: string; href?: string; nodes: Node[] };
 
 export default function NodesPage() {
-  const nodes = useNodes();
+  const nodes = useNodes(true);
   const isAdmin = useIsAdmin();
   const create = useCreateNode();
   const router = useRouter();
   const [adding, setAdding] = useState(false);
+  const [installing, setInstalling] = useState(false);
   const [search, setSearch] = useState("");
   const [lifecycle, setLifecycle] = useState("");
 
@@ -55,8 +65,25 @@ export default function NodesPage() {
       <PageHeader
         title="Nodes"
         description="Alle servers, per cluster."
-        actions={isAdmin && !adding && <Button onClick={() => setAdding(true)}>Nieuwe node</Button>}
+        actions={
+          isAdmin &&
+          !adding &&
+          !installing && (
+            <>
+              <Button variant="secondary" onClick={() => setAdding(true)}>
+                Nieuwe node
+              </Button>
+              <Button onClick={() => setInstalling(true)}>Agent installeren</Button>
+            </>
+          )
+        }
       />
+
+      {installing && (
+        <Card title="Agent installeren">
+          <InstallAgent onClose={() => setInstalling(false)} />
+        </Card>
+      )}
 
       {adding && (
         <Card title="Nieuwe node">
@@ -74,8 +101,10 @@ export default function NodesPage() {
       <QueryState q={nodes}>
         {nodes.data?.length === 0 ? (
           <Empty>
-            Nog geen nodes. {isAdmin ? "Voeg er een toe met de knop hierboven." : "Een beheerder kan ze toevoegen."} Vanaf
-            de agent (mijlpaal 3) melden nodes zich ook zelf aan.
+            Nog geen nodes.{" "}
+            {isAdmin
+              ? "Installeer de agent op een server; die meldt zich dan zelf aan. Of voeg een node met de hand toe."
+              : "Een beheerder kan ze toevoegen."}
           </Empty>
         ) : (
           <>
@@ -126,7 +155,8 @@ export default function NodesPage() {
                         </Link>
                         <span className="min-w-28 font-mono text-xs text-slate-600 dark:text-slate-400">{n.primary_ip ?? "–"}</span>
                         {n.role && <span className="text-slate-600 dark:text-slate-400">{n.role}</span>}
-                        <LifecycleBadge lifecycle={n.lifecycle} />
+                        <AgentBadge agent={n.agent} />
+                        {n.lifecycle !== "active" && <LifecycleBadge lifecycle={n.lifecycle} />}
                         <Tags tags={n.tags} />
                       </li>
                     ))}
@@ -137,6 +167,43 @@ export default function NodesPage() {
           </>
         )}
       </QueryState>
+
+      {isAdmin && <ActiveTokens />}
     </div>
+  );
+}
+
+function ActiveTokens() {
+  const tokens = useEnrollmentTokens(true);
+  const remove = useDeleteEnrollmentToken();
+  if (!tokens.data?.length) return null;
+  const fmt = new Intl.DateTimeFormat("nl-BE", { dateStyle: "short", timeStyle: "short" });
+  return (
+    <Card title="Bruikbare enrollmenttokens">
+      <ul className="divide-y divide-slate-100 text-sm dark:divide-slate-800">
+        {tokens.data.map((t) => (
+          <li key={t.id} className="flex flex-wrap items-center justify-between gap-2 py-2">
+            <span>
+              {t.description || (t.node_hostname ? `Voor ${t.node_hostname}` : "Zonder omschrijving")}
+              <span className="text-slate-500">
+                {" "}
+                · {t.uses} van {t.max_uses} gebruikt · geldig tot {fmt.format(new Date(t.expires_at))}
+                {t.cluster_name && ` · naar ${t.cluster_name}`}
+              </span>
+            </span>
+            <Button
+              variant="ghost"
+              className="px-2 py-1 text-xs text-red-600!"
+              onClick={() => {
+                if (window.confirm("Dit token intrekken? Servers die het nog niet gebruikten kunnen zich er dan niet meer mee aanmelden."))
+                  void remove.mutateAsync(t.id);
+              }}
+            >
+              Intrekken
+            </Button>
+          </li>
+        ))}
+      </ul>
+    </Card>
   );
 }

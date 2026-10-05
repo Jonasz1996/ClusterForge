@@ -1,14 +1,29 @@
 -- name: ListNodes :many
-SELECT sqlc.embed(n), c.slug AS cluster_slug, c.name AS cluster_name
-FROM nodes n LEFT JOIN clusters c ON c.id = n.cluster_id
+SELECT sqlc.embed(n), c.slug AS cluster_slug, c.name AS cluster_name,
+       a.id AS agent_id, a.version AS agent_version, a.enrolled_at AS agent_enrolled_at,
+       a.last_seen_at AS agent_last_seen_at
+FROM nodes n
+LEFT JOIN clusters c ON c.id = n.cluster_id
+LEFT JOIN agents a ON a.node_id = n.id AND a.revoked_at IS NULL
 ORDER BY lower(n.hostname);
 
 -- name: ListNodesByCluster :many
-SELECT * FROM nodes WHERE cluster_id = $1 ORDER BY lower(hostname);
+SELECT sqlc.embed(n), c.slug AS cluster_slug, c.name AS cluster_name,
+       a.id AS agent_id, a.version AS agent_version, a.enrolled_at AS agent_enrolled_at,
+       a.last_seen_at AS agent_last_seen_at
+FROM nodes n
+LEFT JOIN clusters c ON c.id = n.cluster_id
+LEFT JOIN agents a ON a.node_id = n.id AND a.revoked_at IS NULL
+WHERE n.cluster_id = $1
+ORDER BY lower(n.hostname);
 
 -- name: GetNode :one
-SELECT sqlc.embed(n), c.slug AS cluster_slug, c.name AS cluster_name
-FROM nodes n LEFT JOIN clusters c ON c.id = n.cluster_id
+SELECT sqlc.embed(n), c.slug AS cluster_slug, c.name AS cluster_name,
+       a.id AS agent_id, a.version AS agent_version, a.enrolled_at AS agent_enrolled_at,
+       a.last_seen_at AS agent_last_seen_at
+FROM nodes n
+LEFT JOIN clusters c ON c.id = n.cluster_id
+LEFT JOIN agents a ON a.node_id = n.id AND a.revoked_at IS NULL
 WHERE n.id = $1;
 
 -- name: CreateNode :one

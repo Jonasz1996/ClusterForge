@@ -20,7 +20,7 @@ dev-down: ## Stop de ontwikkelcontainers
 
 .PHONY: dev-server
 dev-server: ## Start de Go-server op :8080 tegen de ontwikkeldatabase
-	CF_DATABASE_URL="$(DEV_DATABASE_URL)" CF_SECURE_COOKIES=false CF_LOG_LEVEL=debug go run ./cmd/clusterforge-server serve
+	CF_DATABASE_URL="$(DEV_DATABASE_URL)" CF_SECURE_COOKIES=false CF_LOG_LEVEL=debug CF_AGENT_DIR=bin/agents go run ./cmd/clusterforge-server serve
 
 .PHONY: dev-web
 dev-web: ## Start de Next.js-devserver op :3000 (stuurt /api door naar :8080)
@@ -45,6 +45,14 @@ web: ## Bouw de webinterface en kopieer hem naar internal/webui/dist
 .PHONY: build
 build: web ## Bouw bin/clusterforge-server met ingebedde webinterface
 	CGO_ENABLED=0 go build -trimpath -ldflags "$(LDFLAGS)" -o bin/clusterforge-server ./cmd/clusterforge-server
+
+.PHONY: agent
+agent: ## Bouw cf-agent voor amd64 en arm64 in bin/agents (die serveert make dev-server)
+	mkdir -p bin/agents
+	for arch in amd64 arm64; do \
+		CGO_ENABLED=0 GOOS=linux GOARCH=$$arch go build -trimpath -ldflags "$(LDFLAGS)" -o bin/agents/cf-agent-linux-$$arch ./cmd/cf-agent && \
+		(cd bin/agents && sha256sum cf-agent-linux-$$arch > cf-agent-linux-$$arch.sha256); \
+	done
 
 .PHONY: test
 test: ## Draai alle Go-tests (integratietests tegen TEST_DATABASE_URL)

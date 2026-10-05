@@ -3,6 +3,7 @@ package httpapi
 import (
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -157,7 +158,7 @@ func (s *Server) writeClusterDetail(w http.ResponseWriter, r *http.Request, stat
 		d.Owners = append(d.Owners, gen.UserRef{Id: o.ID, Username: o.Username})
 	}
 	for _, n := range nodes {
-		d.Nodes = append(d.Nodes, toAPINode(n, &c.Slug, &c.Name))
+		d.Nodes = append(d.Nodes, toAPINode(nodeRow(n)))
 	}
 	for _, v := range vips {
 		d.Vips = append(d.Vips, toAPIVip(v.Vip, v.OwnerHostname))
@@ -183,7 +184,7 @@ func (s *Server) ListNodes(w http.ResponseWriter, r *http.Request) {
 	}
 	items := make([]gen.Node, 0, len(rows))
 	for _, row := range rows {
-		items = append(items, toAPINode(row.Node, row.ClusterSlug, row.ClusterName))
+		items = append(items, toAPINode(nodeRow(row)))
 	}
 	writeJSON(w, http.StatusOK, list[gen.Node]{items})
 }
@@ -266,23 +267,58 @@ func (s *Server) writeNode(w http.ResponseWriter, r *http.Request, status int, i
 		s.internalError(w, r, err)
 		return
 	}
-	writeJSON(w, status, toAPINode(row.Node, row.ClusterSlug, row.ClusterName))
+	writeJSON(w, status, toAPINode(nodeRow(row)))
 }
 
-func toAPINode(n store.Node, clusterSlug, clusterName *string) gen.Node {
+// nodeRow heeft dezelfde velden als de rijen van ListNodes, GetNode en
+// ListNodesByCluster, zodat die er rechtstreeks naar om te zetten zijn.
+type nodeRow struct {
+	Node            store.Node
+	ClusterSlug     *string
+	ClusterName     *string
+	AgentID         *uuid.UUID
+	AgentVersion    *string
+	AgentEnrolledAt *time.Time
+	AgentLastSeenAt *time.Time
+}
+
+func toAPINode(r nodeRow) gen.Node {
+	n := r.Node
 	var ip *string
 	if n.PrimaryIp != nil {
 		s := n.PrimaryIp.String()
 		ip = &s
 	}
+	clusterSlug, clusterName := r.ClusterSlug, r.ClusterName
 	if n.ClusterID == nil {
 		clusterSlug, clusterName = nil, nil
+	}
+	agent := nullable.NewNullNullable[gen.AgentSummary]()
+	if r.AgentID != nil {
+		agent = nullable.NewNullableWithValue(gen.AgentSummary{
+			Id: *r.AgentID, Version: deref(r.AgentVersion), EnrolledAt: deref(r.AgentEnrolledAt),
+			LastSeenAt: nullableOf(r.AgentLastSeenAt), Connection: connection(r.AgentLastSeenAt, time.Now()),
+		})
 	}
 	return gen.Node{
 		Id: n.ID, Hostname: n.Hostname, Role: n.Role, Description: n.Description,
 		Lifecycle: gen.NodeLifecycle(n.Lifecycle), Tags: nonNil(n.Tags),
 		ClusterId: nullableOf(n.ClusterID), ClusterSlug: nullableOf(clusterSlug), ClusterName: nullableOf(clusterName),
-		PrimaryIp: nullableOf(ip), CreatedAt: n.CreatedAt, UpdatedAt: n.UpdatedAt,
+		PrimaryIp: nullableOf(ip), CreatedAt: n.CreatedAt, UpdatedAt: n.UpdatedAt, Agent: agent,
+	}
+}
+
+// connection leidt de verbindingsstatus af uit de laatste heartbeat.
+func connection(lastSeen *time.Time, now time.Time) gen.AgentConnection {
+	switch {
+	case lastSeen == nil:
+		return gen.Offline
+	case now.Sub(*lastSeen) <= 30*time.Second:
+		return gen.Online
+	case now.Sub(*lastSeen) <= 90*time.Second:
+		return gen.Late
+	default:
+		return gen.Offline
 	}
 }
 

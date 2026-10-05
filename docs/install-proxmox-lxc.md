@@ -67,6 +67,14 @@ Kies in `.env` één van deze twee situaties:
 
 Met `CF_SECURE_COOKIES=true` en gewone http lukt inloggen niet: de browser weigert dan de sessiecookie. Zet het terug op `true` zodra er TLS voor staat. Zet `CF_TRUST_PROXY_HEADERS` alleen op `true` als poort 8080 niet rechtstreeks bereikbaar is voor andere machines, anders kan iemand een vals IP-adres meesturen.
 
+Agents verbinden rechtstreeks met de LXC op poort 4222, niet via je reverse proxy. Zet daarom in `.env` het vaste IP-adres (of een DNS-naam die ernaar wijst) van de LXC:
+
+```sh
+CF_NATS_ADVERTISE=10.0.10.50
+```
+
+Laat je het leeg, dan krijgt een agent de hostnaam van de URL waarmee hij zich aanmeldt; achter een proxy op een andere machine is dat de proxy, en daar staat geen NATS.
+
 ## 5. Starten en een beheerder aanmaken
 
 ```sh
@@ -90,7 +98,19 @@ clusterforge.example.lan {
 
 Voor nginx: `proxy_pass http://10.0.10.50:8080;` met `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;` en `proxy_set_header Host $host;`.
 
-Beperk poort 8080 op de LXC tot je proxy, bijvoorbeeld met de Proxmox-firewall op de container.
+Beperk poort 8080 op de LXC tot je proxy, bijvoorbeeld met de Proxmox-firewall op de container. Poort 4222 moet wel open staan voor de servers waarop je een agent zet; die verbinding is altijd TLS, met een certificaat dat de agent bij het aanmelden vastlegt.
+
+## 7. Agents op je servers zetten
+
+Log in, ga naar Nodes → Agent installeren en maak een token. Standaard is het 24 uur geldig en één keer bruikbaar; zet "Aantal keer bruikbaar" hoger als je meerdere servers tegelijk aanmeldt. Kies eventueel meteen het cluster waar de nieuwe nodes in horen. Kopieer het commando en voer het als root uit op elke server:
+
+```sh
+curl -fsSL https://clusterforge.example.lan/install/agent.sh | sudo sh -s -- --server https://clusterforge.example.lan --token cfe_...
+```
+
+Het script installeert `/usr/local/bin/cf-agent` en de systemd-service `cf-agent`. Binnen enkele seconden staat de server bij Nodes als Online, met zijn facts op de detailpagina. Nodig op de server: systemd en `curl` of `wget`.
+
+Een server opnieuw installeren of een agent intrekken: trek hem in bij de node in de webinterface en voer het commando opnieuw uit met een nieuw token.
 
 ## Bijwerken
 
@@ -109,4 +129,5 @@ Databasemigraties lopen automatisch bij het starten van de server.
 | `docker run` geeft fouten over `permission denied` of `sysctl` | `nesting` en `keyctl` staan niet aan, of de container is niet herstart |
 | Inloggen lijkt te lukken maar je komt terug op het loginscherm | `CF_SECURE_COOKIES=true` zonder TLS |
 | Build stopt met `killed` | Te weinig geheugen; geef de LXC tijdelijk 3 GB |
+| Node blijft Offline na het installeren van de agent | Poort 4222 niet bereikbaar vanaf de node, of `CF_NATS_ADVERTISE` wijst niet naar de LXC; kijk op de node met `journalctl -u cf-agent` |
 | Logs bekijken | `docker compose logs -f server` |

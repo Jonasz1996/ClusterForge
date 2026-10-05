@@ -32,8 +32,9 @@ func principalFrom(ctx context.Context) (auth.Principal, bool) {
 
 // publicRoutes hebben geen sessie nodig.
 var publicRoutes = map[string]bool{
-	"GET /api/v1/health":      true,
-	"POST /api/v1/auth/login": true,
+	"GET /api/v1/health":         true,
+	"POST /api/v1/auth/login":    true,
+	"POST /api/v1/agents/enroll": true,
 }
 
 // requireSession laat alleen requests met een geldige sessie door en eist

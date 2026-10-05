@@ -15,6 +15,27 @@ import (
 	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
+// Defines values for AgentConnection.
+const (
+	Late    AgentConnection = "late"
+	Offline AgentConnection = "offline"
+	Online  AgentConnection = "online"
+)
+
+// Valid indicates whether the value is a known member of the AgentConnection enum.
+func (e AgentConnection) Valid() bool {
+	switch e {
+	case Late:
+		return true
+	case Offline:
+		return true
+	case Online:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ClusterType.
 const (
 	Cron         ClusterType = "cron"
@@ -171,6 +192,19 @@ func (e Role) Valid() bool {
 	}
 }
 
+// AgentConnection online bij een heartbeat in de laatste 30 s, late tot 90 s, daarna offline
+type AgentConnection string
+
+// AgentSummary defines model for AgentSummary.
+type AgentSummary struct {
+	// Connection online bij een heartbeat in de laatste 30 s, late tot 90 s, daarna offline
+	Connection AgentConnection              `json:"connection"`
+	EnrolledAt time.Time                    `json:"enrolled_at"`
+	Id         openapi_types.UUID           `json:"id"`
+	LastSeenAt nullable.Nullable[time.Time] `json:"last_seen_at"`
+	Version    string                       `json:"version"`
+}
+
 // ChangePasswordRequest defines model for ChangePasswordRequest.
 type ChangePasswordRequest struct {
 	CurrentPassword string `json:"current_password"`
@@ -266,6 +300,61 @@ type ClusterPatch struct {
 // ClusterType defines model for ClusterType.
 type ClusterType string
 
+// EnrollRequest defines model for EnrollRequest.
+type EnrollRequest struct {
+	AgentVersion    string `json:"agent_version"`
+	Hostname        string `json:"hostname"`
+	MachineId       string `json:"machine_id"`
+	NkeyPublic      string `json:"nkey_public"`
+	ProtocolVersion int    `json:"protocol_version"`
+	Token           string `json:"token"`
+}
+
+// EnrollResponse defines model for EnrollResponse.
+type EnrollResponse struct {
+	AgentId openapi_types.UUID `json:"agent_id"`
+
+	// NatsCertSha256 Hex-sha256 van het NATS-certificaat; de agent pint het
+	NatsCertSha256 string `json:"nats_cert_sha256"`
+
+	// NatsUrl Bijvoorbeeld tls://clusterforge.lan:4222
+	NatsUrl string             `json:"nats_url"`
+	NodeId  openapi_types.UUID `json:"node_id"`
+}
+
+// EnrollmentToken defines model for EnrollmentToken.
+type EnrollmentToken struct {
+	ClusterId   nullable.Nullable[openapi_types.UUID] `json:"cluster_id"`
+	ClusterName nullable.Nullable[string]             `json:"cluster_name"`
+	CreatedAt   time.Time                             `json:"created_at"`
+
+	// CreatedBy Gebruikersnaam
+	CreatedBy    nullable.Nullable[string]             `json:"created_by"`
+	Description  string                                `json:"description"`
+	ExpiresAt    time.Time                             `json:"expires_at"`
+	Id           openapi_types.UUID                    `json:"id"`
+	MaxUses      int                                   `json:"max_uses"`
+	NodeHostname nullable.Nullable[string]             `json:"node_hostname"`
+	NodeId       nullable.Nullable[openapi_types.UUID] `json:"node_id"`
+	Uses         int                                   `json:"uses"`
+}
+
+// EnrollmentTokenInput defines model for EnrollmentTokenInput.
+type EnrollmentTokenInput struct {
+	// ClusterId Nieuwe nodes komen in dit cluster
+	ClusterId   nullable.Nullable[openapi_types.UUID] `json:"cluster_id,omitempty"`
+	Description *string                               `json:"description,omitempty"`
+
+	// MaxUses Standaard 1
+	MaxUses *int `json:"max_uses,omitempty"`
+
+	// NodeId Alleen deze bestaande node mag zich ermee aanmelden
+	NodeId nullable.Nullable[openapi_types.UUID] `json:"node_id,omitempty"`
+
+	// TtlHours Standaard 24
+	TtlHours *int `json:"ttl_hours,omitempty"`
+}
+
 // Environment defines model for Environment.
 type Environment string
 
@@ -292,6 +381,57 @@ type Event struct {
 // EventActorType defines model for Event.ActorType.
 type EventActorType string
 
+// Facts Zoals de agent ze verzamelt; zie pkg/protocol
+type Facts struct {
+	Arch     string    `json:"arch"`
+	BootTime time.Time `json:"boot_time"`
+	Cpus     int       `json:"cpus"`
+	Docker   nullable.Nullable[struct {
+		Containers int    `json:"containers"`
+		Version    string `json:"version"`
+	}] `json:"docker"`
+	Filesystems nullable.Nullable[[]struct {
+		Device    string `json:"device"`
+		Mount     string `json:"mount"`
+		SizeBytes int64  `json:"size_bytes"`
+		Type      string `json:"type"`
+		UsedBytes int64  `json:"used_bytes"`
+	}] `json:"filesystems"`
+	Hostname   string `json:"hostname"`
+	Interfaces nullable.Nullable[[]struct {
+		Addresses nullable.Nullable[[]string] `json:"addresses"`
+		Mac       string                      `json:"mac"`
+		Name      string                      `json:"name"`
+		Up        bool                        `json:"up"`
+	}] `json:"interfaces"`
+	Keepalived nullable.Nullable[struct {
+		Active string                      `json:"active"`
+		Vips   nullable.Nullable[[]string] `json:"vips"`
+	}] `json:"keepalived"`
+	Kernel      string `json:"kernel"`
+	MachineId   string `json:"machine_id"`
+	MemoryBytes int64  `json:"memory_bytes"`
+	Os          struct {
+		Codename   string `json:"codename"`
+		Id         string `json:"id"`
+		PrettyName string `json:"pretty_name"`
+		VersionId  string `json:"version_id"`
+	} `json:"os"`
+	PrimaryAddress string `json:"primary_address"`
+	Services       nullable.Nullable[[]struct {
+		Active  string `json:"active"`
+		Enabled string `json:"enabled"`
+		Name    string `json:"name"`
+	}] `json:"services"`
+	SwapBytes int64 `json:"swap_bytes"`
+	Upgrades  nullable.Nullable[struct {
+		Packages nullable.Nullable[[]string] `json:"packages"`
+		Security int                         `json:"security"`
+		Total    int                         `json:"total"`
+	}] `json:"upgrades"`
+	Virtualization string `json:"virtualization"`
+}
+
 // Health defines model for Health.
 type Health struct {
 	Database HealthDatabase `json:"database"`
@@ -304,6 +444,15 @@ type HealthDatabase string
 
 // HealthStatus defines model for Health.Status.
 type HealthStatus string
+
+// HeartbeatStatus defines model for HeartbeatStatus.
+type HeartbeatStatus struct {
+	Addresses     []string          `json:"addresses"`
+	Load          []float32         `json:"load"`
+	ReceivedAt    time.Time         `json:"received_at"`
+	Services      map[string]string `json:"services"`
+	UptimeSeconds int64             `json:"uptime_seconds"`
+}
 
 // LoginRequest defines model for LoginRequest.
 type LoginRequest struct {
@@ -321,8 +470,30 @@ type Me struct {
 	User             User      `json:"user"`
 }
 
+// NewEnrollmentToken defines model for NewEnrollmentToken.
+type NewEnrollmentToken struct {
+	ClusterId   nullable.Nullable[openapi_types.UUID] `json:"cluster_id"`
+	ClusterName nullable.Nullable[string]             `json:"cluster_name"`
+	CreatedAt   time.Time                             `json:"created_at"`
+
+	// CreatedBy Gebruikersnaam
+	CreatedBy    nullable.Nullable[string]             `json:"created_by"`
+	Description  string                                `json:"description"`
+	ExpiresAt    time.Time                             `json:"expires_at"`
+	Id           openapi_types.UUID                    `json:"id"`
+	MaxUses      int                                   `json:"max_uses"`
+	NodeHostname nullable.Nullable[string]             `json:"node_hostname"`
+	NodeId       nullable.Nullable[openapi_types.UUID] `json:"node_id"`
+
+	// Token Alleen nu zichtbaar
+	Token string `json:"token"`
+	Uses  int    `json:"uses"`
+}
+
 // Node defines model for Node.
 type Node struct {
+	// Agent De actieve agent, of null als er (nog) geen agent is
+	Agent       nullable.Nullable[AgentSummary]       `json:"agent"`
 	ClusterId   nullable.Nullable[openapi_types.UUID] `json:"cluster_id"`
 	ClusterName nullable.Nullable[string]             `json:"cluster_name"`
 	ClusterSlug nullable.Nullable[string]             `json:"cluster_slug"`
@@ -360,6 +531,14 @@ type NodePatch struct {
 	PrimaryIp   nullable.Nullable[string]             `json:"primary_ip,omitempty"`
 	Role        *string                               `json:"role,omitempty"`
 	Tags        *[]string                             `json:"tags,omitempty"`
+}
+
+// NodeRuntime defines model for NodeRuntime.
+type NodeRuntime struct {
+	ChangedAt   nullable.Nullable[time.Time]       `json:"changed_at"`
+	CollectedAt nullable.Nullable[time.Time]       `json:"collected_at"`
+	Facts       nullable.Nullable[Facts]           `json:"facts"`
+	Heartbeat   nullable.Nullable[HeartbeatStatus] `json:"heartbeat"`
 }
 
 // Role defines model for Role.
@@ -431,6 +610,9 @@ type ListEventsParams struct {
 	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// EnrollAgentJSONRequestBody defines body for EnrollAgent for application/json ContentType.
+type EnrollAgentJSONRequestBody = EnrollRequest
+
 // LoginJSONRequestBody defines body for Login for application/json ContentType.
 type LoginJSONRequestBody = LoginRequest
 
@@ -452,6 +634,9 @@ type UpdateClusterJSONRequestBody = ClusterPatch
 // CreateVipJSONRequestBody defines body for CreateVip for application/json ContentType.
 type CreateVipJSONRequestBody = VipInput
 
+// CreateEnrollmentTokenJSONRequestBody defines body for CreateEnrollmentToken for application/json ContentType.
+type CreateEnrollmentTokenJSONRequestBody = EnrollmentTokenInput
+
 // CreateNodeJSONRequestBody defines body for CreateNode for application/json ContentType.
 type CreateNodeJSONRequestBody = NodeInput
 
@@ -463,6 +648,12 @@ type UpdateVipJSONRequestBody = VipPatch
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
+	// EnrollAgent Een agent meldt zich aan met een enrollmenttoken (zonder sessie)
+	// (POST /agents/enroll)
+	EnrollAgent(w http.ResponseWriter, r *http.Request)
+	// RevokeAgent Agent intrekken (admin); de verbinding wordt meteen verbroken
+	// (POST /agents/{agentId}/revoke)
+	RevokeAgent(w http.ResponseWriter, r *http.Request, agentId openapi_types.UUID)
 	// Login Inloggen met wachtwoord en, indien ingesteld, TOTP-code
 	// (POST /auth/login)
 	Login(w http.ResponseWriter, r *http.Request)
@@ -502,6 +693,15 @@ type ServerInterface interface {
 	// CreateVip VIP toevoegen aan een cluster (admin)
 	// (POST /clusters/{clusterId}/vips)
 	CreateVip(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
+	// ListEnrollmentTokens Bruikbare enrollmenttokens (admin)
+	// (GET /enrollment-tokens)
+	ListEnrollmentTokens(w http.ResponseWriter, r *http.Request)
+	// CreateEnrollmentToken Enrollmenttoken aanmaken (admin); het token zelf staat alleen in dit antwoord
+	// (POST /enrollment-tokens)
+	CreateEnrollmentToken(w http.ResponseWriter, r *http.Request)
+	// DeleteEnrollmentToken Enrollmenttoken intrekken (admin)
+	// (DELETE /enrollment-tokens/{tokenId})
+	DeleteEnrollmentToken(w http.ResponseWriter, r *http.Request, tokenId openapi_types.UUID)
 	// ListEvents Recente events, nieuwste eerst (alleen admin)
 	// (GET /events)
 	ListEvents(w http.ResponseWriter, r *http.Request, params ListEventsParams)
@@ -523,6 +723,9 @@ type ServerInterface interface {
 	// UpdateNode Node wijzigen (admin); cluster_id null haalt de node uit zijn cluster
 	// (PATCH /nodes/{nodeId})
 	UpdateNode(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// GetNodeFacts Facts en laatste heartbeat van de agent op deze node
+	// (GET /nodes/{nodeId}/facts)
+	GetNodeFacts(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
 	// ListUsers Actieve gebruikers, voor bijvoorbeeld de keuze van owners
 	// (GET /users)
 	ListUsers(w http.ResponseWriter, r *http.Request)
@@ -537,6 +740,18 @@ type ServerInterface interface {
 // Unimplemented server implementation that returns http.StatusNotImplemented for each endpoint.
 
 type Unimplemented struct{}
+
+// EnrollAgent Een agent meldt zich aan met een enrollmenttoken (zonder sessie)
+// (POST /agents/enroll)
+func (_ Unimplemented) EnrollAgent(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RevokeAgent Agent intrekken (admin); de verbinding wordt meteen verbroken
+// (POST /agents/{agentId}/revoke)
+func (_ Unimplemented) RevokeAgent(w http.ResponseWriter, r *http.Request, agentId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
 
 // Login Inloggen met wachtwoord en, indien ingesteld, TOTP-code
 // (POST /auth/login)
@@ -616,6 +831,24 @@ func (_ Unimplemented) CreateVip(w http.ResponseWriter, r *http.Request, cluster
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// ListEnrollmentTokens Bruikbare enrollmenttokens (admin)
+// (GET /enrollment-tokens)
+func (_ Unimplemented) ListEnrollmentTokens(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CreateEnrollmentToken Enrollmenttoken aanmaken (admin); het token zelf staat alleen in dit antwoord
+// (POST /enrollment-tokens)
+func (_ Unimplemented) CreateEnrollmentToken(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// DeleteEnrollmentToken Enrollmenttoken intrekken (admin)
+// (DELETE /enrollment-tokens/{tokenId})
+func (_ Unimplemented) DeleteEnrollmentToken(w http.ResponseWriter, r *http.Request, tokenId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // ListEvents Recente events, nieuwste eerst (alleen admin)
 // (GET /events)
 func (_ Unimplemented) ListEvents(w http.ResponseWriter, r *http.Request, params ListEventsParams) {
@@ -658,6 +891,12 @@ func (_ Unimplemented) UpdateNode(w http.ResponseWriter, r *http.Request, nodeId
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// GetNodeFacts Facts en laatste heartbeat van de agent op deze node
+// (GET /nodes/{nodeId}/facts)
+func (_ Unimplemented) GetNodeFacts(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // ListUsers Actieve gebruikers, voor bijvoorbeeld de keuze van owners
 // (GET /users)
 func (_ Unimplemented) ListUsers(w http.ResponseWriter, r *http.Request) {
@@ -684,6 +923,46 @@ type ServerInterfaceWrapper struct {
 }
 
 type MiddlewareFunc func(http.Handler) http.Handler
+
+// EnrollAgent operation middleware
+func (siw *ServerInterfaceWrapper) EnrollAgent(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.EnrollAgent(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RevokeAgent operation middleware
+func (siw *ServerInterfaceWrapper) RevokeAgent(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "agentId" -------------
+	var agentId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "agentId", chi.URLParam(r, "agentId"), &agentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "agentId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RevokeAgent(w, r, agentId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
 
 // Login operation middleware
 func (siw *ServerInterfaceWrapper) Login(w http.ResponseWriter, r *http.Request) {
@@ -915,6 +1194,60 @@ func (siw *ServerInterfaceWrapper) CreateVip(w http.ResponseWriter, r *http.Requ
 	handler.ServeHTTP(w, r)
 }
 
+// ListEnrollmentTokens operation middleware
+func (siw *ServerInterfaceWrapper) ListEnrollmentTokens(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListEnrollmentTokens(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateEnrollmentToken operation middleware
+func (siw *ServerInterfaceWrapper) CreateEnrollmentToken(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateEnrollmentToken(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteEnrollmentToken operation middleware
+func (siw *ServerInterfaceWrapper) DeleteEnrollmentToken(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "tokenId" -------------
+	var tokenId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "tokenId", chi.URLParam(r, "tokenId"), &tokenId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tokenId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteEnrollmentToken(w, r, tokenId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListEvents operation middleware
 func (siw *ServerInterfaceWrapper) ListEvents(w http.ResponseWriter, r *http.Request) {
 
@@ -1059,6 +1392,32 @@ func (siw *ServerInterfaceWrapper) UpdateNode(w http.ResponseWriter, r *http.Req
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.UpdateNode(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetNodeFacts operation middleware
+func (siw *ServerInterfaceWrapper) GetNodeFacts(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetNodeFacts(w, r, nodeId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -1315,6 +1674,24 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Patch(options.BaseURL+"/nodes/{nodeId}", wrapper.UpdateNode)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/nodes/{nodeId}/facts", wrapper.GetNodeFacts)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/enrollment-tokens", wrapper.ListEnrollmentTokens)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/enrollment-tokens", wrapper.CreateEnrollmentToken)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/enrollment-tokens/{tokenId}", wrapper.DeleteEnrollmentToken)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/agents/enroll", wrapper.EnrollAgent)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/agents/{agentId}/revoke", wrapper.RevokeAgent)
 	})
 
 	return r

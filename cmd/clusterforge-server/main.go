@@ -22,6 +22,7 @@ import (
 
 	"golang.org/x/term"
 
+	"github.com/Jonasz1996/clusterforge/internal/agentbus"
 	"github.com/Jonasz1996/clusterforge/internal/auth"
 	"github.com/Jonasz1996/clusterforge/internal/config"
 	"github.com/Jonasz1996/clusterforge/internal/events"
@@ -101,9 +102,15 @@ func serve() error {
 		log.Warn("er bestaan nog geen gebruikers; maak een beheerder aan met: clusterforge-server admin create -username <naam>")
 	}
 
+	bus, err := agentbus.Start(ctx, cfg.NATSListen, pool, ev, log)
+	if err != nil {
+		return err
+	}
+	defer bus.Close()
+
 	srv := &http.Server{
 		Addr:              cfg.Listen,
-		Handler:           httpapi.New(cfg, log, pool, authSvc, version).Handler(),
+		Handler:           httpapi.New(cfg, log, pool, authSvc, bus, version).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
 		WriteTimeout:      60 * time.Second,

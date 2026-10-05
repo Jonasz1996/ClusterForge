@@ -16,7 +16,11 @@ services:
       CF_SECURE_COOKIES: ${CF_SECURE_COOKIES:-true}
       CF_TRUST_PROXY_HEADERS: ${CF_TRUST_PROXY_HEADERS:-false}
       CF_SESSION_TTL: ${CF_SESSION_TTL:-12h}
-    ports: ["${CF_BIND:-127.0.0.1}:8080:8080"]
+      CF_NATS_ADVERTISE: ${CF_NATS_ADVERTISE:-}
+    ports:
+      - "${CF_BIND:-127.0.0.1}:8080:8080"
+      # Agents verbinden hier rechtstreeks mee (TLS), niet via de reverse proxy.
+      - "${CF_NATS_BIND:-0.0.0.0}:4222:4222"
 
   postgres:
     image: postgres:16-alpine

@@ -66,6 +66,9 @@ type VIPFields struct {
 type Service struct {
 	pool *pgxpool.Pool
 	ev   *events.Writer
+	// Disconnect verbreekt de NATS-verbinding van een agent; nodig als zijn
+	// node verdwijnt. Mag nil zijn.
+	Disconnect func(nkeyPublic string)
 }
 
 func NewService(pool *pgxpool.Pool, ev *events.Writer) *Service {
@@ -288,10 +291,18 @@ func (s *Service) UpdateNode(ctx context.Context, actor events.Actor, id uuid.UU
 	return n, err
 }
 
+// DeleteNode verwijdert een node; zijn agent verdwijnt mee en wordt
+// losgekoppeld.
 func (s *Service) DeleteNode(ctx context.Context, actor events.Actor, id uuid.UUID) error {
-	return s.tx(ctx, func(q *store.Queries) error {
+	var agentKey string
+	err := s.tx(ctx, func(q *store.Queries) error {
 		cur, err := q.LockNode(ctx, id)
 		if err != nil {
+			return err
+		}
+		if a, err := q.GetActiveAgentByNode(ctx, id); err == nil {
+			agentKey = a.NkeyPublic
+		} else if !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
 		if _, err := q.DeleteNode(ctx, id); err != nil {
@@ -302,6 +313,10 @@ func (s *Service) DeleteNode(ctx context.Context, actor events.Actor, id uuid.UU
 			Action: "node.deleted", Payload: map[string]any{"hostname": cur.Hostname},
 		})
 	})
+	if err == nil && agentKey != "" && s.Disconnect != nil {
+		s.Disconnect(agentKey)
+	}
+	return err
 }
 
 func nodeFields(n store.Node) NodeFields {

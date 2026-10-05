@@ -27,6 +27,16 @@ type Config struct {
 	TrustProxyHeaders bool
 	// LogLevel is debug, info, warn of error (CF_LOG_LEVEL, standaard info).
 	LogLevel string
+	// NATSListen is het adres waarop agents met NATS verbinden (CF_NATS_LISTEN,
+	// standaard ":4222").
+	NATSListen string
+	// NATSAdvertise is host:poort van NATS zoals agents die bereiken
+	// (CF_NATS_ADVERTISE). Leeg betekent: de hostnaam waarmee de agent zich
+	// aanmeldt, met de poort van NATSListen.
+	NATSAdvertise string
+	// AgentDir bevat de cf-agent-binaries die de server aanbiedt om te
+	// downloaden (CF_AGENT_DIR, standaard /usr/share/clusterforge/agents).
+	AgentDir string
 }
 
 func FromEnv() (Config, error) {
@@ -36,6 +46,9 @@ func FromEnv() (Config, error) {
 		SecureCookies: true,
 		SessionTTL:    12 * time.Hour,
 		LogLevel:      envOr("CF_LOG_LEVEL", "info"),
+		NATSListen:    envOr("CF_NATS_LISTEN", ":4222"),
+		NATSAdvertise: os.Getenv("CF_NATS_ADVERTISE"),
+		AgentDir:      envOr("CF_AGENT_DIR", "/usr/share/clusterforge/agents"),
 	}
 	if c.DatabaseURL == "" {
 		return c, fmt.Errorf("CF_DATABASE_URL is niet gezet")

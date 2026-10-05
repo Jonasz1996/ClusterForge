@@ -5,7 +5,17 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState, type FormEvent } from "react";
 import { ClusterForm } from "@/components/inventory/ClusterForm";
 import { NodeForm } from "@/components/inventory/NodeForm";
-import { Empty, EnvBadge, LifecycleBadge, QueryState, Tags, tableClass, tdClass, thClass } from "@/components/inventory/bits";
+import {
+  AgentBadge,
+  Empty,
+  EnvBadge,
+  LifecycleBadge,
+  QueryState,
+  Tags,
+  tableClass,
+  tdClass,
+  thClass,
+} from "@/components/inventory/bits";
 import { Alert, Button, Card, Input, PageHeader, Select } from "@/components/ui";
 import {
   typeLabel,
@@ -116,7 +126,7 @@ function Info({ c }: { c: ClusterDetail }) {
     ["Owners", c.owners.length ? c.owners.map((o) => o.username).join(", ") : <span className="text-slate-400">Geen</span>],
     ["Tags", c.tags.length ? <Tags tags={c.tags} /> : <span className="text-slate-400">Geen</span>],
     ["Git-repository", c.git_repo_url ? <code className="text-xs break-all">{c.git_repo_url}</code> : <span className="text-slate-400">Geen</span>],
-    ["Status", c.status === "unknown" ? <span className="text-slate-400">Onbekend tot de agent er is</span> : c.status],
+    ["Status", c.status === "unknown" ? <span className="text-slate-400">Nog niet berekend; komt met de monitoring</span> : c.status],
     ["Laatst gewijzigd", fmt.format(new Date(c.updated_at))],
   ];
   return (
@@ -221,6 +231,7 @@ function NodesCard({ c, isAdmin }: { c: ClusterDetail; isAdmin: boolean }) {
                   <th className={thClass}>Hostname</th>
                   <th className={thClass}>Rol</th>
                   <th className={thClass}>IP-adres</th>
+                  <th className={thClass}>Agent</th>
                   <th className={thClass}>Lifecycle</th>
                   {isAdmin && <th className={thClass} />}
                 </tr>
@@ -235,6 +246,9 @@ function NodesCard({ c, isAdmin }: { c: ClusterDetail; isAdmin: boolean }) {
                     </td>
                     <td className={tdClass}>{n.role || <span className="text-slate-400">–</span>}</td>
                     <td className={`${tdClass} font-mono text-xs`}>{n.primary_ip ?? <span className="text-slate-400">–</span>}</td>
+                    <td className={tdClass}>
+                      <AgentBadge agent={n.agent} />
+                    </td>
                     <td className={tdClass}>
                       <LifecycleBadge lifecycle={n.lifecycle} />
                     </td>

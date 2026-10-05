@@ -11,6 +11,8 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Jonasz1996/clusterforge/internal/agentdist"
+	"github.com/Jonasz1996/clusterforge/internal/agents"
 	"github.com/Jonasz1996/clusterforge/internal/auth"
 	"github.com/Jonasz1996/clusterforge/internal/config"
 	"github.com/Jonasz1996/clusterforge/internal/events"
@@ -27,23 +29,33 @@ type Server struct {
 	q            *store.Queries
 	auth         *auth.Service
 	inv          *inventory.Service
+	agents       *agents.Service
+	bus          AgentBus
 	version      string
 	loginLimiter *ipLimiter
+	// enrollLimiter remt het raden van enrollmenttokens.
+	enrollLimiter *ipLimiter
 }
 
 var _ gen.ServerInterface = (*Server)(nil)
 
-func New(cfg config.Config, log *slog.Logger, pool *pgxpool.Pool, authSvc *auth.Service, version string) *Server {
+func New(cfg config.Config, log *slog.Logger, pool *pgxpool.Pool, authSvc *auth.Service, bus AgentBus, version string) *Server {
+	ev := events.NewWriter(store.New(pool), log)
+	inv := inventory.NewService(pool, ev)
+	inv.Disconnect = bus.Disconnect
 	return &Server{
 		cfg:     cfg,
 		log:     log,
 		pool:    pool,
 		q:       store.New(pool),
 		auth:    authSvc,
-		inv:     inventory.NewService(pool, events.NewWriter(store.New(pool), log)),
+		inv:     inv,
+		agents:  agents.NewService(pool, ev, bus),
+		bus:     bus,
 		version: version,
 		// 10 pogingen direct, daarna één per 6 seconden per IP-adres.
-		loginLimiter: newIPLimiter(6*time.Second, 10),
+		loginLimiter:  newIPLimiter(6*time.Second, 10),
+		enrollLimiter: newIPLimiter(6*time.Second, 20),
 	}
 }
 
@@ -72,6 +84,9 @@ func (s *Server) Handler() http.Handler {
 			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "methode niet toegestaan")
 		})
 	})
+	r.Get("/install/agent.sh", agentdist.InstallScript)
+	r.Get("/downloads/*", agentdist.Downloads(s.cfg.AgentDir))
+	r.Head("/downloads/*", agentdist.Downloads(s.cfg.AgentDir))
 	r.Handle("/*", webui.Handler())
 	return r
 }

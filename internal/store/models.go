@@ -186,6 +186,18 @@ func (ns NullUserRole) Value() (driver.Value, error) {
 	return string(ns.UserRole), nil
 }
 
+type Agent struct {
+	ID              uuid.UUID
+	NodeID          uuid.UUID
+	NkeyPublic      string
+	MachineID       string
+	Version         string
+	ProtocolVersion int32
+	EnrolledAt      time.Time
+	LastSeenAt      *time.Time
+	RevokedAt       *time.Time
+}
+
 type Cluster struct {
 	ID              uuid.UUID
 	Slug            string
@@ -207,6 +219,19 @@ type Cluster struct {
 type ClusterOwner struct {
 	ClusterID uuid.UUID
 	UserID    uuid.UUID
+}
+
+type EnrollmentToken struct {
+	ID          uuid.UUID
+	TokenHash   []byte
+	Description string
+	NodeID      *uuid.UUID
+	ClusterID   *uuid.UUID
+	MaxUses     int32
+	Uses        int32
+	ExpiresAt   time.Time
+	CreatedBy   *uuid.UUID
+	CreatedAt   time.Time
 }
 
 type Event struct {
@@ -232,6 +257,31 @@ type Node struct {
 	Tags        []string
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
+}
+
+type NodeFact struct {
+	NodeID      uuid.UUID
+	Hash        string
+	Facts       []byte
+	CollectedAt time.Time
+	ChangedAt   time.Time
+}
+
+type NodeStatus struct {
+	NodeID        uuid.UUID
+	HeartbeatAt   time.Time
+	UptimeSeconds int64
+	Load1         float64
+	Load5         float64
+	Load15        float64
+	Addresses     []string
+	Services      []byte
+}
+
+type ServerSecret struct {
+	Name      string
+	Value     []byte
+	CreatedAt time.Time
 }
 
 type Session struct {
