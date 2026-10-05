@@ -313,6 +313,17 @@ type DriftCheck struct {
 	DriftSince      *time.Time
 }
 
+type DriftIgnore struct {
+	ID        uuid.UUID
+	ClusterID uuid.UUID
+	NodeID    *uuid.UUID
+	Key       string
+	Reason    string
+	ExpiresAt *time.Time
+	CreatedBy *uuid.UUID
+	CreatedAt time.Time
+}
+
 type EnrollmentToken struct {
 	ID          uuid.UUID
 	TokenHash   []byte

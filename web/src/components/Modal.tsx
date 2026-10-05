@@ -3,7 +3,17 @@
 import { useEffect, type ReactNode } from "react";
 
 // Modal is een eenvoudig dialoogvenster; Escape of een klik ernaast sluit het.
-export function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+export function Modal({
+  title,
+  onClose,
+  children,
+  wide = false,
+}: {
+  title: string;
+  onClose: () => void;
+  children: ReactNode;
+  wide?: boolean;
+}) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -22,7 +32,7 @@ export function Modal({ title, onClose, children }: { title: string; onClose: ()
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="max-h-full w-full max-w-md overflow-y-auto rounded-lg bg-white p-5 text-left shadow-xl dark:bg-slate-900"
+        className={`max-h-full w-full ${wide ? "max-w-3xl" : "max-w-md"} overflow-y-auto rounded-lg bg-white p-5 text-left shadow-xl dark:bg-slate-900`}
       >
         <h2 className="mb-4 text-base font-semibold">{title}</h2>
         {children}

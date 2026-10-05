@@ -23,6 +23,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/status"
 	"github.com/Jonasz1996/clusterforge/internal/store"
+	"github.com/Jonasz1996/clusterforge/internal/templates"
 	"github.com/Jonasz1996/clusterforge/pkg/protocol"
 )
 
@@ -177,6 +178,7 @@ type observation struct {
 	// niets geschreven.
 	skip      string
 	status    string
+	source    string
 	findings  []Finding
 	unchecked []Unchecked
 	err       string
@@ -287,23 +289,12 @@ func (s *Service) observe(ctx context.Context, n store.ListDriftNodesRow, timeou
 	if reason := Skip(n, busy, s.Now()); reason != "" {
 		return observation{skip: reason}
 	}
-	d, err := s.dep.Desired(ctx, *n.ClusterID)
-	switch {
-	case errors.Is(err, deploy.ErrNoSpec):
-		return observation{skip: "geen gewenste staat"}
-	case err != nil:
-		return observation{status: Error, err: "gewenste staat: " + err.Error()}
+	exp := s.expected(ctx, n)
+	if exp.skip != "" || exp.status != "" {
+		return exp.observation
 	}
-	obs := observation{revision: d.Revision, version: d.Spec.Template.Version}
-	if !d.Has(n.ID) {
-		obs.status = None
-		return obs
-	}
-	steps, err := d.Render(n.ID)
-	if err != nil {
-		obs.status, obs.err = Error, "niet te renderen: "+err.Error()
-		return obs
-	}
+	steps, contents := exp.steps, exp.contents
+	obs := exp.observation
 	cmd := protocol.Command{
 		ID: "drift-" + uuid.NewString(), Action: protocol.CmdInspect, Deadline: time.Now().Add(timeout), Inspect: Request(steps),
 	}
@@ -328,13 +319,65 @@ func (s *Service) observe(ctx context.Context, n store.ListDriftNodesRow, timeou
 		obs.status, obs.err = Error, err.Error()
 		return obs
 	}
-	cmp := Compare(s.key, steps, aligned)
+	cmp := compare(s.key, steps, contents, aligned)
 	obs.findings, obs.unchecked = cmp.Findings, cmp.Unchecked
 	obs.status = InSync
 	if len(obs.findings) > 0 {
 		obs.status = Drift
 	}
 	return obs
+}
+
+// expectation is wat een node hoort te hebben, of waarom dat niet te zeggen
+// is (skip, of status none of error in observation).
+type expectation struct {
+	observation
+	steps    []templates.Step
+	contents []*contentWant
+}
+
+// expected leest de gewenste staat van de node: de gerenderde template, of
+// zijn deel van de baseline.
+func (s *Service) expected(ctx context.Context, n store.ListDriftNodesRow) expectation {
+	c, err := s.q.GetCluster(ctx, *n.ClusterID)
+	if err != nil {
+		return expectation{observation: observation{skip: err.Error()}}
+	}
+	if c.TemplateName == nil {
+		b, err := ParseBaseline(c.Spec)
+		switch {
+		case err != nil:
+			return expectation{observation: observation{status: Error, source: "baseline", err: "baseline: " + err.Error()}}
+		case b == nil:
+			return expectation{observation: observation{skip: "geen gewenste staat"}}
+		}
+		obs := observation{source: "baseline", revision: int(c.SpecRevision)}
+		bn, ok := b.Node(n.ID)
+		if !ok {
+			obs.status = None
+			return expectation{observation: obs}
+		}
+		steps, contents := bn.Steps()
+		return expectation{observation: obs, steps: steps, contents: contents}
+	}
+	d, err := s.dep.Desired(ctx, *n.ClusterID)
+	switch {
+	case errors.Is(err, deploy.ErrNoSpec):
+		return expectation{observation: observation{skip: "geen gewenste staat"}}
+	case err != nil:
+		return expectation{observation: observation{status: Error, source: "template", err: "gewenste staat: " + err.Error()}}
+	}
+	obs := observation{source: "template", revision: d.Revision, version: d.Spec.Template.Version}
+	if !d.Has(n.ID) {
+		obs.status = None
+		return expectation{observation: obs}
+	}
+	steps, err := d.Render(n.ID)
+	if err != nil {
+		obs.status, obs.err = Error, "niet te renderen: "+err.Error()
+		return expectation{observation: obs}
+	}
+	return expectation{observation: obs, steps: steps, contents: templateContents(steps)}
 }
 
 // save legt een controle vast en schrijft een event bij elke overgang, in
@@ -346,90 +389,154 @@ func (s *Service) save(ctx context.Context, n store.ListDriftNodesRow, obs obser
 			return err
 		}
 		prev, err := q.GetDriftCheck(ctx, n.ID)
-		exists := err == nil
 		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
-		// Op microseconden, zoals PostgreSQL het bewaart: dan is Since van
-		// een nieuwe afwijking gelijk aan drift_since.
-		now := s.Now().Truncate(time.Microsecond)
-		row := store.UpsertDriftCheckParams{
-			NodeID: n.ID, Status: obs.status, Source: "template", SpecRevision: int32(obs.revision), //nolint:gosec // een revisie past altijd
-			TemplateVersion: obs.version, CheckedAt: now, Error: obs.err,
+		var prevp *store.DriftCheck
+		if err == nil {
+			prevp = &prev
 		}
-		var prevFindings []Finding
-		if exists {
-			_ = json.Unmarshal(prev.Findings, &prevFindings)
-		}
-		prevDrift := exists && prev.Fingerprint != ""
-		emit := func(action string, payload map[string]any) error {
-			payload["hostname"] = n.Hostname
-			return s.ev.Write(ctx, q, events.Event{
-				Actor: events.System(), SubjectType: "node", SubjectID: n.ID.String(), ClusterID: n.ClusterID,
-				Action: action, Payload: payload,
-			})
-		}
+		return s.write(ctx, q, n, obs, prevp, s.Now().Truncate(time.Microsecond))
+	})
+}
 
-		switch obs.status {
-		case Error:
-			// De afwijkingen van de laatste geslaagde controle blijven staan.
-			row.Findings, row.Unchecked, row.Fingerprint, row.DriftSince = []byte("[]"), []byte("[]"), "", nil
-			if exists {
-				row.Findings, row.Unchecked, row.Fingerprint, row.DriftSince = prev.Findings, prev.Unchecked, prev.Fingerprint, prev.DriftSince
-				if obs.revision == 0 {
-					row.SpecRevision, row.TemplateVersion = prev.SpecRevision, prev.TemplateVersion
-				}
-			}
-			if !exists || prev.Status != Error {
-				if err := emit("drift.check_failed", map[string]any{"error": obs.err}); err != nil {
-					return err
-				}
-			}
-		case None:
-			row.Findings, row.Unchecked = []byte("[]"), []byte("[]")
-		default:
-			for i := range obs.findings {
-				obs.findings[i].Since = now
-				if j := slices.IndexFunc(prevFindings, func(f Finding) bool { return f.Key == obs.findings[i].Key }); j >= 0 && prevDrift {
-					obs.findings[i].Since = prevFindings[j].Since
-				}
-			}
-			if row.Findings, err = json.Marshal(obs.findings); err != nil {
+// Reevaluate rekent de laatste controles van een cluster opnieuw door met de
+// negeerregels van nu, zonder de nodes opnieuw te bekijken. Zo geldt een
+// nieuwe of opgeheven regel meteen, met het event dat bij de overgang hoort.
+func (s *Service) Reevaluate(ctx context.Context, clusterID uuid.UUID) error {
+	rows, err := s.q.ListDriftNodes(ctx, store.ListDriftNodesParams{ClusterID: &clusterID})
+	if err != nil {
+		return err
+	}
+	for _, n := range rows {
+		err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+			q := store.New(tx)
+			if err := q.LockDriftNode(ctx, n.ID.String()); err != nil {
 				return err
 			}
-			if obs.unchecked == nil {
-				obs.unchecked = []Unchecked{}
-			}
-			if row.Unchecked, err = json.Marshal(obs.unchecked); err != nil {
-				return err
-			}
-			keys := Keys(obs.findings)
-			row.Fingerprint = keysFingerprint(keys)
-			switch {
-			case len(keys) > 0 && !prevDrift:
-				row.DriftSince = &now
-				err = emit("drift.detected", map[string]any{
-					"count": len(keys), "keys": firstKeys(keys), "spec_revision": obs.revision, "template_version": obs.version,
-				})
-			case len(keys) > 0:
-				row.DriftSince = prev.DriftSince
-				if row.Fingerprint != prev.Fingerprint {
-					added, removed := diffKeys(Keys(prevFindings), keys)
-					err = emit("drift.changed", map[string]any{"count": len(keys), "added": firstKeys(added), "removed": firstKeys(removed)})
-				}
-			case prevDrift:
-				payload := map[string]any{"removed": firstKeys(Keys(prevFindings))}
-				if prev.DriftSince != nil {
-					payload["duration_seconds"] = int(now.Sub(*prev.DriftSince).Seconds())
-				}
-				err = emit("drift.resolved", payload)
+			prev, err := q.GetDriftCheck(ctx, n.ID)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil
 			}
 			if err != nil {
 				return err
 			}
+			if prev.Status != InSync && prev.Status != Drift {
+				return nil
+			}
+			obs := observation{
+				status: prev.Status, source: prev.Source, revision: int(prev.SpecRevision), version: prev.TemplateVersion, unchecked: []Unchecked{},
+			}
+			_ = json.Unmarshal(prev.Findings, &obs.findings)
+			_ = json.Unmarshal(prev.Unchecked, &obs.unchecked)
+			return s.write(ctx, q, n, obs, &prev, prev.CheckedAt)
+		})
+		if err != nil {
+			return fmt.Errorf("%s: %w", n.Hostname, err)
 		}
-		return q.UpsertDriftCheck(ctx, row)
-	})
+	}
+	return nil
+}
+
+// write slaat obs op tegenover de vorige controle prev (nil als er geen
+// is). Alleen de afwijkingen die geen negeerregel dekt, tellen voor de
+// status, de vingerafdruk en de events.
+func (s *Service) write(ctx context.Context, q *store.Queries, n store.ListDriftNodesRow, obs observation, prev *store.DriftCheck, checkedAt time.Time) error {
+	now := s.Now().Truncate(time.Microsecond)
+	row := store.UpsertDriftCheckParams{
+		NodeID: n.ID, Status: obs.status, Source: obs.source, SpecRevision: int32(obs.revision), //nolint:gosec // een revisie past altijd
+		TemplateVersion: obs.version, CheckedAt: checkedAt, Error: obs.err,
+	}
+	if row.Source == "" {
+		row.Source = "template"
+	}
+	var prevFindings []Finding
+	if prev != nil {
+		_ = json.Unmarshal(prev.Findings, &prevFindings)
+	}
+	prevDrift := prev != nil && prev.Fingerprint != ""
+	emit := func(action string, payload map[string]any) error {
+		payload["hostname"] = n.Hostname
+		return s.ev.Write(ctx, q, events.Event{
+			Actor: events.System(), SubjectType: "node", SubjectID: n.ID.String(), ClusterID: n.ClusterID,
+			Action: action, Payload: payload,
+		})
+	}
+
+	switch obs.status {
+	case Error:
+		// De afwijkingen van de laatste geslaagde controle blijven staan.
+		row.Findings, row.Unchecked, row.Fingerprint, row.DriftSince = []byte("[]"), []byte("[]"), "", nil
+		if prev != nil {
+			row.Findings, row.Unchecked, row.Fingerprint, row.DriftSince = prev.Findings, prev.Unchecked, prev.Fingerprint, prev.DriftSince
+			if obs.revision == 0 {
+				row.SpecRevision, row.TemplateVersion, row.Source = prev.SpecRevision, prev.TemplateVersion, prev.Source
+			}
+		}
+		if prev == nil || prev.Status != Error {
+			if err := emit("drift.check_failed", map[string]any{"error": obs.err}); err != nil {
+				return err
+			}
+		}
+	case None:
+		row.Findings, row.Unchecked = []byte("[]"), []byte("[]")
+	default:
+		ignores, err := q.ListActiveDriftIgnores(ctx, store.ListActiveDriftIgnoresParams{ClusterID: *n.ClusterID, NodeID: &n.ID, Now: now})
+		if err != nil {
+			return err
+		}
+		rules := make([]Ignore, 0, len(ignores))
+		for _, r := range ignores {
+			rules = append(rules, Ignore{ID: r.ID, NodeID: r.NodeID, Key: r.Key})
+		}
+		if obs.findings == nil {
+			obs.findings = []Finding{}
+		}
+		keys := markIgnored(obs.findings, rules)
+		row.Status = InSync
+		if len(keys) > 0 {
+			row.Status = Drift
+		}
+		for i := range obs.findings {
+			obs.findings[i].Since = now
+			if j := slices.IndexFunc(prevFindings, func(f Finding) bool { return f.Key == obs.findings[i].Key }); j >= 0 && prevDrift {
+				obs.findings[i].Since = prevFindings[j].Since
+			}
+		}
+		if row.Findings, err = json.Marshal(obs.findings); err != nil {
+			return err
+		}
+		if obs.unchecked == nil {
+			obs.unchecked = []Unchecked{}
+		}
+		if row.Unchecked, err = json.Marshal(obs.unchecked); err != nil {
+			return err
+		}
+		row.Fingerprint = keysFingerprint(keys)
+		switch {
+		case len(keys) > 0 && !prevDrift:
+			row.DriftSince = &now
+			err = emit("drift.detected", map[string]any{
+				"count": len(keys), "keys": firstKeys(keys), "source": row.Source, "spec_revision": obs.revision, "template_version": obs.version,
+			})
+		case len(keys) > 0:
+			row.DriftSince = prev.DriftSince
+			if row.Fingerprint != prev.Fingerprint {
+				added, removed := diffKeys(activeKeys(prevFindings), keys)
+				err = emit("drift.changed", map[string]any{"count": len(keys), "added": firstKeys(added), "removed": firstKeys(removed)})
+			}
+		case prevDrift:
+			payload := map[string]any{"removed": firstKeys(activeKeys(prevFindings))}
+			if prev.DriftSince != nil {
+				payload["duration_seconds"] = int(now.Sub(*prev.DriftSince).Seconds())
+			}
+			err = emit("drift.resolved", payload)
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return q.UpsertDriftCheck(ctx, row)
 }
 
 // keysFingerprint hasht de gesorteerde sleutels; zonder afwijkingen leeg.

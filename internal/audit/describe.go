@@ -254,6 +254,9 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 	case "cluster.deleted":
 		return "Cluster " + name + " verwijderd"
 	case "cluster.spec_changed":
+		if str(p, "kind") == "baseline" {
+			return fmt.Sprintf("Specificatie van cluster %s: revisie %s, een baseline", name, num(p["revision"])) + paren(specSources[str(p, "source")])
+		}
 		return fmt.Sprintf("Specificatie van cluster %s: revisie %s uit %s %s", name, num(p["revision"]),
 			str(p, "template"), str(p, "template_version")) + paren(specSources[str(p, "source")])
 	case "secret.created":
@@ -356,6 +359,13 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 		return "Drift op " + name + " verdwenen"
 	case "drift.check_failed":
 		return "Driftcontrole van " + name + " mislukt" + colon(str(p, "error"))
+	case "drift.ignore_added":
+		return "Drift genegeerd in cluster " + name + ": " + str(p, "key") + prefixed(" op ", str(p, "node")) +
+			paren(str(p, "reason")) + prefixed(" tot ", day(str(p, "expires_at")))
+	case "drift.ignore_removed":
+		return "Negeerregel van cluster " + name + " opgeheven: " + str(p, "key") + prefixed(" op ", str(p, "node"))
+	case "drift.baseline_set":
+		return fmt.Sprintf("Baseline van cluster %s vastgelegd voor %s (revisie %s)", name, list(p["nodes"]), num(p["revision"]))
 	}
 	if strings.HasPrefix(r.Action, "job.") {
 		return spec.Label + ": " + name
@@ -563,6 +573,15 @@ func paren(s string) string {
 		return ""
 	}
 	return " (" + s + ")"
+}
+
+// day geeft de datum van een tijdstip uit een payload, zoals 12-10-2026.
+func day(s string) string {
+	t, err := time.Parse(time.RFC3339Nano, s)
+	if err != nil {
+		return ""
+	}
+	return t.Local().Format("2-1-2006")
 }
 
 func colon(s string) string {

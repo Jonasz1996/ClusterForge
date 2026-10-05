@@ -29,6 +29,9 @@ type Source struct {
 	Template string
 	Version  string
 	Revision int
+	// BaselineAt en Items alleen bij een baseline.
+	BaselineAt *time.Time
+	Items      *BaselineItems
 }
 
 // NodeReport is de laatste controle van één node, met waarom hij nu niet
@@ -57,7 +60,18 @@ func (s *Service) Report(ctx context.Context, clusterID uuid.UUID, nodeID *uuid.
 		return rep, err
 	}
 	if c.TemplateName == nil {
-		return rep, nil
+		b, err := ParseBaseline(c.Spec)
+		if err != nil || b == nil {
+			return rep, nil
+		}
+		rep.Source = &Source{Kind: "baseline", Revision: int(c.SpecRevision), Items: &b.Items}
+		if t, err := s.q.GetSpecRevisionTime(ctx, store.GetSpecRevisionTimeParams{ClusterID: clusterID, Revision: c.SpecRevision}); err == nil {
+			rep.Source.BaselineAt = &t
+		}
+		if err := s.baselineNotes(ctx, &rep, clusterID, b); err != nil {
+			return rep, err
+		}
+		return rep, s.nodeReports(ctx, &rep, clusterID, nodeID)
 	}
 	rep.Source = &Source{Kind: "template", Template: *c.TemplateName, Version: deref(c.TemplateVersion), Revision: int(c.SpecRevision)}
 	d, err := s.dep.Desired(ctx, clusterID)
@@ -76,15 +90,35 @@ func (s *Service) Report(ctx context.Context, clusterID uuid.UUID, nodeID *uuid.
 			rep.Notes = append(rep.Notes, d.Membership...)
 		}
 	}
+	return rep, s.nodeReports(ctx, &rep, clusterID, nodeID)
+}
+
+// baselineNotes meldt actieve nodes die nog geen baseline hebben.
+func (s *Service) baselineNotes(ctx context.Context, rep *Report, clusterID uuid.UUID, b *Baseline) error {
+	rows, err := s.q.ListCaptureNodes(ctx, &clusterID)
+	if err != nil {
+		return err
+	}
+	for _, n := range rows {
+		if _, ok := b.Node(n.ID); !ok && n.Lifecycle == store.NodeLifecycleActive {
+			rep.Notes = append(rep.Notes, n.Hostname+" is een actieve node van dit cluster, maar heeft nog geen baseline; leg die vast om hem te controleren.")
+		}
+	}
+	return nil
+}
+
+// nodeReports leest per node de laatste controle. Of een afwijking
+// genegeerd is, hangt af van de regels van nu, dus ook de status.
+func (s *Service) nodeReports(ctx context.Context, rep *Report, clusterID uuid.UUID, nodeID *uuid.UUID) error {
 	rows, err := s.q.ListDriftNodes(ctx, store.ListDriftNodesParams{ClusterID: &clusterID, NodeID: nodeID})
 	if err != nil {
-		return rep, err
+		return err
 	}
 	now := s.Now()
 	for _, n := range rows {
 		busy, err := s.q.NodeJobBusy(ctx, store.NodeJobBusyParams{NodeID: &n.ID, ClusterID: n.ClusterID})
 		if err != nil {
-			return rep, err
+			return err
 		}
 		nr := NodeReport{
 			NodeID: n.ID, Hostname: n.Hostname, Status: "unknown", Findings: []Finding{}, Unchecked: []Unchecked{},
@@ -94,15 +128,30 @@ func (s *Service) Report(ctx context.Context, clusterID uuid.UUID, nodeID *uuid.
 		switch {
 		case errors.Is(err, pgx.ErrNoRows):
 		case err != nil:
-			return rep, err
+			return err
 		default:
 			nr.Status, nr.CheckedAt, nr.DriftSince, nr.SpecRevision, nr.Error = row.Status, &row.CheckedAt, row.DriftSince, int(row.SpecRevision), row.Error
 			_ = json.Unmarshal(row.Findings, &nr.Findings)
 			_ = json.Unmarshal(row.Unchecked, &nr.Unchecked)
+			ignores, err := s.q.ListActiveDriftIgnores(ctx, store.ListActiveDriftIgnoresParams{ClusterID: clusterID, NodeID: &n.ID, Now: now})
+			if err != nil {
+				return err
+			}
+			rules := make([]Ignore, 0, len(ignores))
+			for _, r := range ignores {
+				rules = append(rules, Ignore{ID: r.ID, NodeID: r.NodeID, Key: r.Key})
+			}
+			keys := markIgnored(nr.Findings, rules)
+			if nr.Status == InSync || nr.Status == Drift {
+				nr.Status = InSync
+				if len(keys) > 0 {
+					nr.Status = Drift
+				}
+			}
 		}
 		rep.Nodes = append(rep.Nodes, nr)
 	}
-	return rep, nil
+	return nil
 }
 
 func deref[T any](p *T) T {

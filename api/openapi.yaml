@@ -849,6 +849,82 @@ paths:
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /clusters/{clusterId}/drift/baseline:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: captureBaseline
+      summary: Baseline vastleggen voor een cluster zonder template (admin)
+      description: >-
+        Bekijkt de gekozen nodes met state.inspect en legt vast wat er nu
+        staat, als nieuwe spec-revisie. Nodes die al een baseline hebben en
+        niet gekozen zijn, houden de hunne. Met preview alleen tonen, zonder
+        op te slaan. Van een bestand komen alleen grootte, rechten, eigenaar
+        en een HMAC van de inhoud in de baseline; het antwoord bevat geen
+        hash.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BaselineInput" }
+      responses:
+        "200":
+          description: Wat vastgelegd is, of bij preview zou worden
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BaselineResult" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /clusters/{clusterId}/drift/ignores:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: listDriftIgnores
+      summary: Negeerregels van een cluster, ook de verlopen
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DriftIgnoreList" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createDriftIgnore
+      summary: Een stap negeren op één node of het hele cluster (admin)
+      description: >-
+        key is een stap zoals file:/etc/nginx/nginx.conf of service:nginx,
+        een voorvoegsel dat op * eindigt, of * alleen (alleen met een
+        einddatum). De regel geldt meteen.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DriftIgnoreInput" }
+      responses:
+        "201":
+          description: Aangemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DriftIgnore" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /drift-ignores/{ignoreId}:
+    parameters:
+      - { name: ignoreId, in: path, required: true, schema: { type: string, format: uuid } }
+    delete:
+      operationId: deleteDriftIgnore
+      summary: Een negeerregel opheffen (admin)
+      responses:
+        "204": { description: Opgeheven }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
   /nodes/{nodeId}/drift:
     parameters:
       - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -1366,12 +1442,89 @@ components:
         nodes: { type: array, items: { $ref: "#/components/schemas/DriftNode" } }
     DriftSource:
       type: object
-      required: [kind, template, template_version, spec_revision]
+      required: [kind, template, template_version, spec_revision, baseline_at, items]
       properties:
         kind: { type: string, enum: [template, baseline] }
-        template: { type: string }
+        template: { type: string, description: Leeg bij een baseline }
         template_version: { type: string }
         spec_revision: { type: integer }
+        baseline_at: { type: string, format: date-time, nullable: true, description: Wanneer de baseline het laatst is vastgelegd }
+        items:
+          allOf: [{ $ref: "#/components/schemas/BaselineItems" }]
+          nullable: true
+          description: Wat de baseline vastlegt; null bij een template
+    BaselineItems:
+      type: object
+      required: [packages, services, files]
+      properties:
+        packages: { type: array, items: { type: string } }
+        services: { type: array, items: { type: string } }
+        files: { type: array, items: { type: string } }
+    BaselineInput:
+      type: object
+      required: [node_ids, packages, services, files]
+      properties:
+        node_ids: { type: array, items: { type: string, format: uuid } }
+        packages: { type: array, items: { type: string } }
+        services: { type: array, items: { type: string } }
+        files: { type: array, items: { type: string }, description: Volledige paden van bestanden of mappen }
+        preview: { type: boolean, description: Alleen tonen wat er vastgelegd zou worden }
+    BaselineResult:
+      type: object
+      required: [revision, nodes]
+      properties:
+        revision: { type: integer, description: De nieuwe spec-revisie; 0 bij preview }
+        nodes: { type: array, items: { $ref: "#/components/schemas/BaselineNode" } }
+    BaselineNode:
+      type: object
+      required: [node_id, hostname, items, notes]
+      properties:
+        node_id: { type: string, format: uuid }
+        hostname: { type: string }
+        items: { type: array, items: { $ref: "#/components/schemas/BaselineItem" } }
+        notes: { type: array, items: { type: string }, description: Wat niet vastgelegd werd en waarom }
+    BaselineItem:
+      type: object
+      required: [kind, name, version, enabled, active, mode, owner, group, size, content]
+      properties:
+        kind: { type: string, enum: [package, service, file, directory] }
+        name: { type: string }
+        version: { type: string }
+        enabled: { type: boolean, nullable: true }
+        active: { type: boolean, nullable: true }
+        mode: { type: string }
+        owner: { type: string }
+        group: { type: string }
+        size: { type: integer, format: int64 }
+        content: { type: boolean, description: Of de inhoud vergeleken wordt }
+    DriftIgnoreInput:
+      type: object
+      required: [key, reason]
+      properties:
+        node_id: { type: string, format: uuid, nullable: true, description: Leeg voor het hele cluster }
+        key: { type: string }
+        reason: { type: string }
+        expires_at: { type: string, format: date-time, nullable: true }
+    DriftIgnore:
+      type: object
+      required: [id, node_id, hostname, key, reason, expires_at, expired, created_by, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        node_id: { type: string, format: uuid, nullable: true }
+        hostname: { type: string, nullable: true }
+        key: { type: string }
+        reason: { type: string }
+        expires_at: { type: string, format: date-time, nullable: true }
+        expired: { type: boolean }
+        created_by:
+          allOf: [{ $ref: "#/components/schemas/AuditRef" }]
+          nullable: true
+        created_at: { type: string, format: date-time }
+    DriftIgnoreList:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/DriftIgnore" } }
     DriftNode:
       type: object
       required: [node_id, hostname, status, checked_at, drift_since, spec_revision, findings, unchecked, error, skipped, agent_too_old]
@@ -1397,7 +1550,7 @@ components:
         agent_too_old: { type: boolean }
     DriftFinding:
       type: object
-      required: [key, step, kind, title, aspect, expected, actual, detail, mtime, since, fingerprint]
+      required: [key, step, kind, title, aspect, expected, actual, detail, mtime, since, fingerprint, ignored, ignore_id]
       properties:
         key: { type: string, description: "Stap en aspect, zoals file:/etc/keepalived/keepalived.conf:content" }
         step: { type: string, description: "De stap, zoals file:/etc/keepalived/keepalived.conf" }
@@ -1410,6 +1563,8 @@ components:
         mtime: { type: string, format: date-time, nullable: true, description: Wanneer het bestand op de node veranderde }
         since: { type: string, format: date-time }
         fingerprint: { type: string, description: HMAC van de waargenomen waarde; verandert als er op de node opnieuw iets wijzigt }
+        ignored: { type: boolean, description: Een negeerregel dekt deze stap; telt niet voor de status }
+        ignore_id: { type: string, format: uuid, nullable: true }
     DriftUnchecked:
       type: object
       required: [step, title, reason]

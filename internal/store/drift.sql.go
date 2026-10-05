@@ -12,6 +12,15 @@ import (
 	"github.com/google/uuid"
 )
 
+const deleteDriftIgnore = `-- name: DeleteDriftIgnore :exec
+DELETE FROM drift_ignores WHERE id = $1
+`
+
+func (q *Queries) DeleteDriftIgnore(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deleteDriftIgnore, id)
+	return err
+}
+
 const getDriftCheck = `-- name: GetDriftCheck :one
 SELECT node_id, status, source, spec_revision, template_version, findings, unchecked, fingerprint, error, checked_at, drift_since FROM drift_checks WHERE node_id = $1
 `
@@ -33,6 +42,178 @@ func (q *Queries) GetDriftCheck(ctx context.Context, nodeID uuid.UUID) (DriftChe
 		&i.DriftSince,
 	)
 	return i, err
+}
+
+const getDriftIgnore = `-- name: GetDriftIgnore :one
+SELECT id, cluster_id, node_id, key, reason, expires_at, created_by, created_at FROM drift_ignores WHERE id = $1
+`
+
+func (q *Queries) GetDriftIgnore(ctx context.Context, id uuid.UUID) (DriftIgnore, error) {
+	row := q.db.QueryRow(ctx, getDriftIgnore, id)
+	var i DriftIgnore
+	err := row.Scan(
+		&i.ID,
+		&i.ClusterID,
+		&i.NodeID,
+		&i.Key,
+		&i.Reason,
+		&i.ExpiresAt,
+		&i.CreatedBy,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getSpecRevisionTime = `-- name: GetSpecRevisionTime :one
+SELECT created_at FROM cluster_spec_revisions WHERE cluster_id = $1 AND revision = $2
+`
+
+type GetSpecRevisionTimeParams struct {
+	ClusterID uuid.UUID
+	Revision  int32
+}
+
+func (q *Queries) GetSpecRevisionTime(ctx context.Context, arg GetSpecRevisionTimeParams) (time.Time, error) {
+	row := q.db.QueryRow(ctx, getSpecRevisionTime, arg.ClusterID, arg.Revision)
+	var created_at time.Time
+	err := row.Scan(&created_at)
+	return created_at, err
+}
+
+const insertDriftIgnore = `-- name: InsertDriftIgnore :one
+INSERT INTO drift_ignores (cluster_id, node_id, key, reason, expires_at, created_by)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING id, cluster_id, node_id, key, reason, expires_at, created_by, created_at
+`
+
+type InsertDriftIgnoreParams struct {
+	ClusterID uuid.UUID
+	NodeID    *uuid.UUID
+	Key       string
+	Reason    string
+	ExpiresAt *time.Time
+	CreatedBy *uuid.UUID
+}
+
+func (q *Queries) InsertDriftIgnore(ctx context.Context, arg InsertDriftIgnoreParams) (DriftIgnore, error) {
+	row := q.db.QueryRow(ctx, insertDriftIgnore,
+		arg.ClusterID,
+		arg.NodeID,
+		arg.Key,
+		arg.Reason,
+		arg.ExpiresAt,
+		arg.CreatedBy,
+	)
+	var i DriftIgnore
+	err := row.Scan(
+		&i.ID,
+		&i.ClusterID,
+		&i.NodeID,
+		&i.Key,
+		&i.Reason,
+		&i.ExpiresAt,
+		&i.CreatedBy,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const listActiveDriftIgnores = `-- name: ListActiveDriftIgnores :many
+SELECT id, cluster_id, node_id, key, reason, expires_at, created_by, created_at FROM drift_ignores
+WHERE cluster_id = $1 AND (node_id IS NULL OR node_id = $2)
+  AND (expires_at IS NULL OR expires_at > $3::timestamptz)
+ORDER BY created_at
+`
+
+type ListActiveDriftIgnoresParams struct {
+	ClusterID uuid.UUID
+	NodeID    *uuid.UUID
+	Now       time.Time
+}
+
+// De regels die nu tellen voor een node: die van de node en die van het
+// hele cluster, zonder de verlopen.
+func (q *Queries) ListActiveDriftIgnores(ctx context.Context, arg ListActiveDriftIgnoresParams) ([]DriftIgnore, error) {
+	rows, err := q.db.Query(ctx, listActiveDriftIgnores, arg.ClusterID, arg.NodeID, arg.Now)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []DriftIgnore{}
+	for rows.Next() {
+		var i DriftIgnore
+		if err := rows.Scan(
+			&i.ID,
+			&i.ClusterID,
+			&i.NodeID,
+			&i.Key,
+			&i.Reason,
+			&i.ExpiresAt,
+			&i.CreatedBy,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCaptureNodes = `-- name: ListCaptureNodes :many
+SELECT n.id, n.hostname, n.cluster_id, n.lifecycle, n.role,
+       coalesce(a.protocol_version, 0)::int AS agent_protocol,
+       (a.id IS NOT NULL)::boolean AS has_agent,
+       s.heartbeat_at
+FROM nodes n
+LEFT JOIN agents a ON a.node_id = n.id AND a.revoked_at IS NULL
+LEFT JOIN node_status s ON s.node_id = n.id
+WHERE n.cluster_id = $1
+ORDER BY n.hostname
+`
+
+type ListCaptureNodesRow struct {
+	ID            uuid.UUID
+	Hostname      string
+	ClusterID     *uuid.UUID
+	Lifecycle     NodeLifecycle
+	Role          string
+	AgentProtocol int32
+	HasAgent      bool
+	HeartbeatAt   *time.Time
+}
+
+// De nodes van een cluster, ook zonder gewenste staat, voor het vastleggen
+// van een baseline.
+func (q *Queries) ListCaptureNodes(ctx context.Context, clusterID *uuid.UUID) ([]ListCaptureNodesRow, error) {
+	rows, err := q.db.Query(ctx, listCaptureNodes, clusterID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListCaptureNodesRow{}
+	for rows.Next() {
+		var i ListCaptureNodesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Hostname,
+			&i.ClusterID,
+			&i.Lifecycle,
+			&i.Role,
+			&i.AgentProtocol,
+			&i.HasAgent,
+			&i.HeartbeatAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listClusterDriftChecks = `-- name: ListClusterDriftChecks :many
@@ -71,13 +252,66 @@ func (q *Queries) ListClusterDriftChecks(ctx context.Context, clusterID *uuid.UU
 	return items, nil
 }
 
+const listDriftIgnores = `-- name: ListDriftIgnores :many
+SELECT i.id, i.cluster_id, i.node_id, i.key, i.reason, i.expires_at, i.created_by, i.created_at, n.hostname AS node_hostname, u.username AS created_by_name
+FROM drift_ignores i
+LEFT JOIN nodes n ON n.id = i.node_id
+LEFT JOIN users u ON u.id = i.created_by
+WHERE i.cluster_id = $1
+ORDER BY i.created_at DESC
+`
+
+type ListDriftIgnoresRow struct {
+	ID            uuid.UUID
+	ClusterID     uuid.UUID
+	NodeID        *uuid.UUID
+	Key           string
+	Reason        string
+	ExpiresAt     *time.Time
+	CreatedBy     *uuid.UUID
+	CreatedAt     time.Time
+	NodeHostname  *string
+	CreatedByName *string
+}
+
+func (q *Queries) ListDriftIgnores(ctx context.Context, clusterID uuid.UUID) ([]ListDriftIgnoresRow, error) {
+	rows, err := q.db.Query(ctx, listDriftIgnores, clusterID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDriftIgnoresRow{}
+	for rows.Next() {
+		var i ListDriftIgnoresRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ClusterID,
+			&i.NodeID,
+			&i.Key,
+			&i.Reason,
+			&i.ExpiresAt,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.NodeHostname,
+			&i.CreatedByName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listDriftNodes = `-- name: ListDriftNodes :many
 SELECT n.id, n.hostname, n.cluster_id, n.lifecycle,
        coalesce(a.protocol_version, 0)::int AS agent_protocol,
        (a.id IS NOT NULL)::boolean AS has_agent,
        s.heartbeat_at
 FROM nodes n
-JOIN clusters c ON c.id = n.cluster_id AND c.template_name IS NOT NULL
+JOIN clusters c ON c.id = n.cluster_id AND (c.template_name IS NOT NULL OR c.spec->>'kind' = 'baseline')
 LEFT JOIN agents a ON a.node_id = n.id AND a.revoked_at IS NULL
 LEFT JOIN node_status s ON s.node_id = n.id
 WHERE ($1::uuid IS NULL OR n.cluster_id = $1)
@@ -100,7 +334,8 @@ type ListDriftNodesRow struct {
 	HeartbeatAt   *time.Time
 }
 
-// De nodes van clusters met een gewenste staat, met wat de scanner moet
+// De nodes van clusters met een gewenste staat (een template of een
+// baseline), met wat de scanner moet
 // weten om te beslissen of hij ze controleert. Zonder cluster_id alle.
 func (q *Queries) ListDriftNodes(ctx context.Context, arg ListDriftNodesParams) ([]ListDriftNodesRow, error) {
 	rows, err := q.db.Query(ctx, listDriftNodes, arg.ClusterID, arg.NodeID)
@@ -128,6 +363,15 @@ func (q *Queries) ListDriftNodes(ctx context.Context, arg ListDriftNodesParams) 
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockBaseline = `-- name: LockBaseline :exec
+SELECT pg_advisory_xact_lock(hashtextextended('baseline:' || $1::text, 0))
+`
+
+func (q *Queries) LockBaseline(ctx context.Context, clusterID string) error {
+	_, err := q.db.Exec(ctx, lockBaseline, clusterID)
+	return err
 }
 
 const lockDriftNode = `-- name: LockDriftNode :exec
@@ -161,6 +405,26 @@ func (q *Queries) NodeJobBusy(ctx context.Context, arg NodeJobBusyParams) (bool,
 	var column_1 bool
 	err := row.Scan(&column_1)
 	return column_1, err
+}
+
+const setBaselineSpec = `-- name: SetBaselineSpec :one
+UPDATE clusters
+SET spec = $1, spec_revision = spec_revision + 1, template_name = NULL, template_version = NULL, updated_at = now()
+WHERE id = $2 AND template_name IS NULL
+RETURNING spec_revision
+`
+
+type SetBaselineSpecParams struct {
+	Spec []byte
+	ID   uuid.UUID
+}
+
+// Een baseline is de gewenste staat van een cluster zonder template.
+func (q *Queries) SetBaselineSpec(ctx context.Context, arg SetBaselineSpecParams) (int32, error) {
+	row := q.db.QueryRow(ctx, setBaselineSpec, arg.Spec, arg.ID)
+	var spec_revision int32
+	err := row.Scan(&spec_revision)
+	return spec_revision, err
 }
 
 const upsertDriftCheck = `-- name: UpsertDriftCheck :exec

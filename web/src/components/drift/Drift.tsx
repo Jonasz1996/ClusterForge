@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
+import { BaselineWizard, IgnoredList, IgnoreForm } from "@/components/drift/Baseline";
 import { CopyBlock } from "@/components/inventory/InstallAgent";
 import { ago, QueryState } from "@/components/inventory/bits";
 import { Alert, Badge, Button, Card } from "@/components/ui";
@@ -14,6 +15,7 @@ import {
   type DriftFinding,
   type DriftNode,
   type DriftReport,
+  type DriftSource,
 } from "@/lib/drift";
 
 const timeFmt = new Intl.DateTimeFormat("nl-BE", { dateStyle: "medium", timeStyle: "short" });
@@ -59,8 +61,8 @@ export function ClusterDriftCard({ clusterId, isAdmin }: { clusterId: string; is
   const q = useClusterDrift(clusterId);
   const check = useCheckDrift("cluster", clusterId);
   return (
-    <DriftCard q={q} check={check} isAdmin={isAdmin} scope="cluster">
-      {(r) =>
+    <DriftCard q={q} check={check} isAdmin={isAdmin} clusterId={clusterId} scope="cluster">
+      {(r, recapture) =>
         r.nodes.length === 0 ? (
           <p className="text-sm text-slate-500">Dit cluster heeft nog geen nodes om te controleren.</p>
         ) : (
@@ -82,7 +84,7 @@ export function ClusterDriftCard({ clusterId, isAdmin }: { clusterId: string; is
                     <NodeSummary n={n} />
                   </summary>
                   <div className="px-3 pt-1 pb-4 sm:pl-8">
-                    <NodeDetail n={n} />
+                    <NodeDetail n={n} source={r.source} clusterId={clusterId} isAdmin={isAdmin} recapture={recapture} />
                   </div>
                 </details>
               </li>
@@ -96,19 +98,19 @@ export function ClusterDriftCard({ clusterId, isAdmin }: { clusterId: string; is
 
 // NodeDriftCard is dezelfde kaart voor één node. Zonder gewenste staat
 // toont hij niets.
-export function NodeDriftCard({ nodeId, isAdmin }: { nodeId: string; isAdmin: boolean }) {
+export function NodeDriftCard({ nodeId, clusterId, isAdmin }: { nodeId: string; clusterId: string; isAdmin: boolean }) {
   const q = useNodeDrift(nodeId);
   const check = useCheckDrift("node", nodeId);
   if (!q.data?.source) return null;
   return (
-    <DriftCard q={q} check={check} isAdmin={isAdmin} scope="node">
-      {(r) =>
+    <DriftCard q={q} check={check} isAdmin={isAdmin} clusterId={clusterId} nodeId={nodeId} scope="node">
+      {(r, recapture) =>
         r.nodes.map((n) => (
           <div key={n.node_id} className="space-y-3">
             <p className="flex flex-wrap items-center gap-x-3 gap-y-1">
               <NodeSummary n={n} />
             </p>
-            <NodeDetail n={n} />
+            <NodeDetail n={n} source={r.source} clusterId={clusterId} isAdmin={isAdmin} recapture={recapture} />
           </div>
         ))
       }
@@ -123,45 +125,66 @@ function DriftCard({
   q,
   check,
   isAdmin,
+  clusterId,
+  nodeId,
   scope,
   children,
 }: {
   q: Q;
   check: Check;
   isAdmin: boolean;
+  clusterId: string;
+  nodeId?: string;
   scope: "cluster" | "node";
-  children: (r: DriftReport) => ReactNode;
+  children: (r: DriftReport, recapture: (nodeId: string) => void) => ReactNode;
 }) {
+  // De wizard: null is dicht, "" voor het hele cluster, anders één node.
+  const [wizard, setWizard] = useState<string | null>(null);
   const r = q.data;
+  const src = r?.source ?? null;
   const last = r?.nodes.reduce<string | null>((acc, n) => (n.checked_at && (!acc || n.checked_at > acc) ? n.checked_at : acc), null);
+  const lastText = ` · laatste controle ${last ? timeFmt.format(new Date(last)) : "nog niet gedaan"}`;
   return (
     <Card
       title={
         <span className="flex flex-wrap items-start justify-between gap-2">
           <span>
             Drift
-            {r?.source && (
+            {src && (
               <span className="mt-0.5 block text-sm font-normal text-slate-500">
-                Template {r.source.template} {r.source.template_version}, spec-revisie {r.source.spec_revision} · laatste controle{" "}
-                {last ? timeFmt.format(new Date(last)) : "nog niet gedaan"}
+                {src.kind === "baseline"
+                  ? `Baseline van ${src.baseline_at ? timeFmt.format(new Date(src.baseline_at)) : "onbekende datum"}, revisie ${src.spec_revision}`
+                  : `Template ${src.template} ${src.template_version}, spec-revisie ${src.spec_revision}`}
+                {lastText}
               </span>
             )}
           </span>
-          {isAdmin && r?.source && (
-            <Button variant="secondary" disabled={check.isPending} onClick={() => check.mutate()}>
-              {check.isPending ? "Controleren…" : "Nu controleren"}
-            </Button>
+          {isAdmin && src && (
+            <span className="flex flex-wrap gap-2">
+              {src.kind === "baseline" && scope === "cluster" && (
+                <Button variant="secondary" onClick={() => setWizard("")}>
+                  Baseline vastleggen
+                </Button>
+              )}
+              <Button variant="secondary" disabled={check.isPending} onClick={() => check.mutate()}>
+                {check.isPending ? "Controleren…" : "Nu controleren"}
+              </Button>
+            </span>
           )}
         </span>
       }
     >
       <QueryState q={q}>
-        {r && !r.source && (
-          <p className="text-sm text-slate-500">
-            Dit cluster komt niet uit een template en heeft dus geen gewenste staat om mee te vergelijken.
-          </p>
+        {r && !src && (
+          <div className="space-y-3 text-sm">
+            <p className="text-slate-600 dark:text-slate-400">
+              Dit cluster komt niet uit een template en heeft dus nog geen gewenste staat. Leg een baseline vast: ClusterForge
+              onthoudt dan hoe de gekozen pakketten, services en bestanden er nu bij staan, en meldt elke afwijking.
+            </p>
+            {isAdmin && <Button onClick={() => setWizard("")}>Baseline vastleggen</Button>}
+          </div>
         )}
-        {r && r.source && (
+        {r && src && (
           <div className="space-y-4">
             {check.isError && (
               <Alert>{check.error instanceof Error ? check.error.message : "Controleren mislukt"}</Alert>
@@ -175,30 +198,47 @@ function DriftCard({
             )}
             {scope === "cluster" && (
               <p className="text-sm text-slate-600 dark:text-slate-400">
+                {src.kind === "baseline" && src.items && <>Vastgelegd: {itemsText(src.items)}. </>}
                 Een controle kijkt alleen; ze verandert nooit iets op de nodes.
               </p>
             )}
-            {children(r)}
+            {children(r, (id) => setWizard(id))}
+            <IgnoredList clusterId={clusterId} nodeId={nodeId} isAdmin={isAdmin} />
           </div>
         )}
       </QueryState>
+      {wizard !== null && (
+        <BaselineWizard clusterId={clusterId} source={src} node={wizard || undefined} onClose={() => setWizard(null)} />
+      )}
     </Card>
   );
+}
+
+function itemsText(it: NonNullable<DriftSource["items"]>) {
+  const parts = [
+    it.packages.length > 0 && `${it.packages.length} ${it.packages.length === 1 ? "pakket" : "pakketten"}`,
+    it.services.length > 0 && `${it.services.length} ${it.services.length === 1 ? "service" : "services"}`,
+    it.files.length > 0 && `${it.files.length} ${it.files.length === 1 ? "bestand of map" : "bestanden en mappen"}`,
+  ].filter(Boolean);
+  return parts.join(", ");
 }
 
 // NodeSummary is de regel per node: badge, aantal afwijkingen en wanneer.
 function NodeSummary({ n }: { n: DriftNode }) {
   const skippedOnly = n.status === "unknown" && n.skipped !== "";
   const st = driftStatuses[n.status];
+  const active = n.findings.filter((f) => !f.ignored).length;
+  const ignored = n.findings.length - active;
   return (
     <>
       {skippedOnly ? <Badge>Overgeslagen</Badge> : <Badge tone={st.tone}>{st.label}</Badge>}
-      {n.findings.length > 0 && (
+      {active > 0 && (
         <span className="text-sm">
-          {n.findings.length} {n.findings.length === 1 ? "afwijking" : "afwijkingen"}
+          {active} {active === 1 ? "afwijking" : "afwijkingen"}
           {n.drift_since && <span className="text-slate-500"> · sinds {timeFmt.format(new Date(n.drift_since))}</span>}
         </span>
       )}
+      {ignored > 0 && <span className="text-xs text-slate-500">{ignored} genegeerd</span>}
       <span className="text-xs text-slate-500">
         {n.checked_at ? `gecontroleerd ${ago(n.checked_at)}` : skippedOnly ? n.skipped : "nog niet gecontroleerd"}
       </span>
@@ -208,8 +248,23 @@ function NodeSummary({ n }: { n: DriftNode }) {
 
 // NodeDetail toont de afwijkingen per stap, wat niet te controleren was en
 // waarom een node nu overgeslagen wordt.
-function NodeDetail({ n }: { n: DriftNode }) {
+function NodeDetail({
+  n,
+  source,
+  clusterId,
+  isAdmin,
+  recapture,
+}: {
+  n: DriftNode;
+  source: DriftSource | null;
+  clusterId: string;
+  isAdmin: boolean;
+  recapture: (nodeId: string) => void;
+}) {
+  const [ignoring, setIgnoring] = useState<string | null>(null);
   const groups = groupBy(n.findings);
+  const baseline = source?.kind === "baseline";
+  const anyIgnored = n.findings.some((f) => f.ignored);
   return (
     <div className="space-y-3 text-sm">
       {n.agent_too_old && (
@@ -230,24 +285,65 @@ function NodeDetail({ n }: { n: DriftNode }) {
           {n.findings.length > 0 && " Hieronder staan de afwijkingen van de laatste geslaagde controle."}
         </Alert>
       )}
-      {n.status === "none" && (
-        <p className="text-slate-500">Deze node staat niet in de specificatie van het cluster, dus er is niets om mee te vergelijken.</p>
+      {n.status === "none" &&
+        (baseline ? (
+          <p className="text-slate-500">Deze node heeft nog geen baseline, dus er is niets om mee te vergelijken.</p>
+        ) : (
+          <p className="text-slate-500">Deze node staat niet in de specificatie van het cluster, dus er is niets om mee te vergelijken.</p>
+        ))}
+      {n.status === "in_sync" && (
+        <p className="text-slate-500">
+          Alles op deze node is {baseline ? "zoals vastgelegd in de baseline" : "zoals de template het wil"}
+          {anyIgnored && ", op de genegeerde afwijkingen na"}.
+        </p>
       )}
-      {n.status === "in_sync" && <p className="text-slate-500">Alles op deze node is zoals de template het wil.</p>}
+      {baseline && isAdmin && (
+        <div>
+          <Button variant="secondary" className="px-2.5 py-1 text-xs" onClick={() => recapture(n.node_id)}>
+            {n.status === "none" ? "Baseline vastleggen" : "Opnieuw vastleggen"}
+          </Button>
+        </div>
+      )}
 
       {groups.length > 0 && (
         <ul className="space-y-3">
-          {groups.map((g) => (
-            <li key={g.step}>
-              <div className="font-medium break-all">{g.title}</div>
-              <dl className="mt-1 grid grid-cols-[5.5rem_1fr] gap-x-3 gap-y-0.5">
-                <dt className="text-slate-500">Verwacht</dt>
-                <dd className="break-words">{g.findings.map(expectedText).join(", ")}</dd>
-                <dt className="text-slate-500">Werkelijk</dt>
-                <dd className="break-words">{g.findings.map(actualText).join(", ")}</dd>
-              </dl>
-            </li>
-          ))}
+          {groups.map((g) => {
+            const ignored = g.findings.every((f) => f.ignored);
+            return (
+              <li key={g.step}>
+                <div className={ignored ? "opacity-60" : undefined}>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-medium break-all">{g.title}</span>
+                    {ignored && <Badge>genegeerd</Badge>}
+                    {isAdmin && !ignored && ignoring !== g.step && (
+                      <button
+                        type="button"
+                        className="text-xs text-brand-700 hover:underline dark:text-sky-300"
+                        onClick={() => setIgnoring(g.step)}
+                      >
+                        Negeren…
+                      </button>
+                    )}
+                  </div>
+                  <dl className="mt-1 grid grid-cols-[5.5rem_1fr] gap-x-3 gap-y-0.5">
+                    <dt className="text-slate-500">Verwacht</dt>
+                    <dd className="break-words">{g.findings.map(expectedText).join(", ")}</dd>
+                    <dt className="text-slate-500">Werkelijk</dt>
+                    <dd className="break-words">{g.findings.map(actualText).join(", ")}</dd>
+                  </dl>
+                </div>
+                {ignoring === g.step && (
+                  <IgnoreForm
+                    clusterId={clusterId}
+                    nodeId={n.node_id}
+                    hostname={n.hostname}
+                    step={g.step}
+                    onDone={() => setIgnoring(null)}
+                  />
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
 

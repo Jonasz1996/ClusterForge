@@ -760,6 +760,70 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/clusters/{clusterId}/drift/baseline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Baseline vastleggen voor een cluster zonder template (admin)
+         * @description Bekijkt de gekozen nodes met state.inspect en legt vast wat er nu staat, als nieuwe spec-revisie. Nodes die al een baseline hebben en niet gekozen zijn, houden de hunne. Met preview alleen tonen, zonder op te slaan. Van een bestand komen alleen grootte, rechten, eigenaar en een HMAC van de inhoud in de baseline; het antwoord bevat geen hash.
+         */
+        post: operations["captureBaseline"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/clusters/{clusterId}/drift/ignores": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        /** Negeerregels van een cluster, ook de verlopen */
+        get: operations["listDriftIgnores"];
+        put?: never;
+        /**
+         * Een stap negeren op één node of het hele cluster (admin)
+         * @description key is een stap zoals file:/etc/nginx/nginx.conf of service:nginx, een voorvoegsel dat op * eindigt, of * alleen (alleen met een einddatum). De regel geldt meteen.
+         */
+        post: operations["createDriftIgnore"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/drift-ignores/{ignoreId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ignoreId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Een negeerregel opheffen (admin) */
+        delete: operations["deleteDriftIgnore"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/nodes/{nodeId}/drift": {
         parameters: {
             query?: never;
@@ -1168,9 +1232,88 @@ export interface components {
         DriftSource: {
             /** @enum {string} */
             kind: "template" | "baseline";
+            /** @description Leeg bij een baseline */
             template: string;
             template_version: string;
             spec_revision: number;
+            /**
+             * Format: date-time
+             * @description Wanneer de baseline het laatst is vastgelegd
+             */
+            baseline_at: string | null;
+            /** @description Wat de baseline vastlegt; null bij een template */
+            items: components["schemas"]["BaselineItems"] | null;
+        };
+        BaselineItems: {
+            packages: string[];
+            services: string[];
+            files: string[];
+        };
+        BaselineInput: {
+            node_ids: string[];
+            packages: string[];
+            services: string[];
+            /** @description Volledige paden van bestanden of mappen */
+            files: string[];
+            /** @description Alleen tonen wat er vastgelegd zou worden */
+            preview?: boolean;
+        };
+        BaselineResult: {
+            /** @description De nieuwe spec-revisie; 0 bij preview */
+            revision: number;
+            nodes: components["schemas"]["BaselineNode"][];
+        };
+        BaselineNode: {
+            /** Format: uuid */
+            node_id: string;
+            hostname: string;
+            items: components["schemas"]["BaselineItem"][];
+            /** @description Wat niet vastgelegd werd en waarom */
+            notes: string[];
+        };
+        BaselineItem: {
+            /** @enum {string} */
+            kind: "package" | "service" | "file" | "directory";
+            name: string;
+            version: string;
+            enabled: boolean | null;
+            active: boolean | null;
+            mode: string;
+            owner: string;
+            group: string;
+            /** Format: int64 */
+            size: number;
+            /** @description Of de inhoud vergeleken wordt */
+            content: boolean;
+        };
+        DriftIgnoreInput: {
+            /**
+             * Format: uuid
+             * @description Leeg voor het hele cluster
+             */
+            node_id?: string | null;
+            key: string;
+            reason: string;
+            /** Format: date-time */
+            expires_at?: string | null;
+        };
+        DriftIgnore: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            node_id: string | null;
+            hostname: string | null;
+            key: string;
+            reason: string;
+            /** Format: date-time */
+            expires_at: string | null;
+            expired: boolean;
+            created_by: components["schemas"]["AuditRef"] | null;
+            /** Format: date-time */
+            created_at: string;
+        };
+        DriftIgnoreList: {
+            items: components["schemas"]["DriftIgnore"][];
         };
         DriftNode: {
             /** Format: uuid */
@@ -1217,6 +1360,10 @@ export interface components {
             since: string;
             /** @description HMAC van de waargenomen waarde; verandert als er op de node opnieuw iets wijzigt */
             fingerprint: string;
+            /** @description Een negeerregel dekt deze stap; telt niet voor de status */
+            ignored: boolean;
+            /** Format: uuid */
+            ignore_id: string | null;
         };
         DriftUnchecked: {
             step: string;
@@ -3390,6 +3537,114 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["DriftReport"];
                 };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    captureBaseline: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["BaselineInput"];
+            };
+        };
+        responses: {
+            /** @description Wat vastgelegd is, of bij preview zou worden */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BaselineResult"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    listDriftIgnores: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DriftIgnoreList"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    createDriftIgnore: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DriftIgnoreInput"];
+            };
+        };
+        responses: {
+            /** @description Aangemaakt */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DriftIgnore"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    deleteDriftIgnore: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ignoreId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Opgeheven */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
