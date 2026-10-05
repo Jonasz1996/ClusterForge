@@ -86,7 +86,7 @@ func (s *Service) Login(ctx context.Context, in LoginInput) (Session, error) {
 	user, err := s.q.GetUserByUsername(ctx, in.Username)
 	if errors.Is(err, pgx.ErrNoRows) {
 		_, _ = VerifyPassword(in.Password, s.dummyHash)
-		s.loginFailed(ctx, in, "unknown_user")
+		s.loginFailed(ctx, nil, in, "unknown_user")
 		return Session{}, ErrInvalidCredentials
 	}
 	if err != nil {
@@ -96,8 +96,12 @@ func (s *Service) Login(ctx context.Context, in LoginInput) (Session, error) {
 	if err != nil {
 		return Session{}, fmt.Errorf("wachtwoord controleren: %w", err)
 	}
-	if !ok || user.DisabledAt != nil {
-		s.loginFailed(ctx, in, "bad_password")
+	if !ok {
+		s.loginFailed(ctx, &user, in, "bad_password")
+		return Session{}, ErrInvalidCredentials
+	}
+	if user.DisabledAt != nil {
+		s.loginFailed(ctx, &user, in, "disabled")
 		return Session{}, ErrInvalidCredentials
 	}
 	if user.TotpEnabledAt != nil {
@@ -106,7 +110,7 @@ func (s *Service) Login(ctx context.Context, in LoginInput) (Session, error) {
 		}
 		if err := s.useTOTP(ctx, user, in.TOTPCode); err != nil {
 			if errors.Is(err, ErrInvalidTOTP) {
-				s.loginFailed(ctx, in, "bad_totp")
+				s.loginFailed(ctx, &user, in, "bad_totp")
 			}
 			return Session{}, err
 		}
@@ -142,11 +146,17 @@ func (s *Service) Login(ctx context.Context, in LoginInput) (Session, error) {
 	return Session{Token: token, CSRFToken: csrf, ExpiresAt: expires, User: user}, nil
 }
 
-func (s *Service) loginFailed(ctx context.Context, in LoginInput, reason string) {
+// loginFailed legt een mislukte poging vast. Wat er getypt werd, komt er
+// nooit in: in het naamveld staat soms per ongeluk een wachtwoord.
+func (s *Service) loginFailed(ctx context.Context, user *store.User, in LoginInput, reason string) {
+	subject := "onbekend"
+	if user != nil {
+		subject = user.ID.String()
+	}
 	_ = s.ev.Write(ctx, nil, events.Event{
 		Actor:       events.System(),
 		SubjectType: "user",
-		SubjectID:   truncate(in.Username, 64),
+		SubjectID:   subject,
 		Action:      "auth.login_failed",
 		Payload:     map[string]any{"ip": in.IP, "reason": reason},
 	})

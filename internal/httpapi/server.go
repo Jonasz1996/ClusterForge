@@ -13,6 +13,7 @@ import (
 
 	"github.com/Jonasz1996/clusterforge/internal/agentdist"
 	"github.com/Jonasz1996/clusterforge/internal/agents"
+	"github.com/Jonasz1996/clusterforge/internal/audit"
 	"github.com/Jonasz1996/clusterforge/internal/auth"
 	"github.com/Jonasz1996/clusterforge/internal/config"
 	"github.com/Jonasz1996/clusterforge/internal/deploy"
@@ -33,7 +34,9 @@ type Server struct {
 	log          *slog.Logger
 	pool         *pgxpool.Pool
 	q            *store.Queries
+	ev           *events.Writer
 	auth         *auth.Service
+	audit        *audit.Service
 	inv          *inventory.Service
 	agents       *agents.Service
 	bus          AgentBus
@@ -78,7 +81,9 @@ func New(d Deps) *Server {
 		log:     d.Log,
 		pool:    d.Pool,
 		q:       store.New(d.Pool),
+		ev:      ev,
 		auth:    d.Auth,
+		audit:   audit.NewService(store.New(d.Pool)),
 		inv:     inv,
 		agents:  agents.NewService(d.Pool, ev, d.Bus),
 		bus:     d.Bus,

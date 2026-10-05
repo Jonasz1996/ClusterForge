@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef } from "react";
+import { HistoryCard } from "@/components/audit/AuditList";
 import { jobDuration, JobStatusBadge } from "@/components/jobs/JobList";
 import { QueryState } from "@/components/inventory/bits";
 import { Alert, Button, Card, PageHeader } from "@/components/ui";
@@ -97,6 +98,7 @@ function JobDetailInner() {
             </dl>
           </Card>
           <Steps job={job.data} />
+          <HistoryCard filter={{ job: job.data.id }} isAdmin={isAdmin} />
         </div>
       )}
     </QueryState>

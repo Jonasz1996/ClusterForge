@@ -36,6 +36,27 @@ func (e AgentConnection) Valid() bool {
 	}
 }
 
+// Defines values for AuditEntryActorType.
+const (
+	AuditEntryActorTypeAgent  AuditEntryActorType = "agent"
+	AuditEntryActorTypeSystem AuditEntryActorType = "system"
+	AuditEntryActorTypeUser   AuditEntryActorType = "user"
+)
+
+// Valid indicates whether the value is a known member of the AuditEntryActorType enum.
+func (e AuditEntryActorType) Valid() bool {
+	switch e {
+	case AuditEntryActorTypeAgent:
+		return true
+	case AuditEntryActorTypeSystem:
+		return true
+	case AuditEntryActorTypeUser:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ClusterType.
 const (
 	Cron         ClusterType = "cron"
@@ -420,6 +441,69 @@ func (e VmAction) Valid() bool {
 	}
 }
 
+// Defines values for AuditActorType.
+const (
+	AuditActorTypeAgent  AuditActorType = "agent"
+	AuditActorTypeSystem AuditActorType = "system"
+	AuditActorTypeUser   AuditActorType = "user"
+)
+
+// Valid indicates whether the value is a known member of the AuditActorType enum.
+func (e AuditActorType) Valid() bool {
+	switch e {
+	case AuditActorTypeAgent:
+		return true
+	case AuditActorTypeSystem:
+		return true
+	case AuditActorTypeUser:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ListAuditParamsActorType.
+const (
+	ListAuditParamsActorTypeAgent  ListAuditParamsActorType = "agent"
+	ListAuditParamsActorTypeSystem ListAuditParamsActorType = "system"
+	ListAuditParamsActorTypeUser   ListAuditParamsActorType = "user"
+)
+
+// Valid indicates whether the value is a known member of the ListAuditParamsActorType enum.
+func (e ListAuditParamsActorType) Valid() bool {
+	switch e {
+	case ListAuditParamsActorTypeAgent:
+		return true
+	case ListAuditParamsActorTypeSystem:
+		return true
+	case ListAuditParamsActorTypeUser:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ExportAuditParamsActorType.
+const (
+	ExportAuditParamsActorTypeAgent  ExportAuditParamsActorType = "agent"
+	ExportAuditParamsActorTypeSystem ExportAuditParamsActorType = "system"
+	ExportAuditParamsActorTypeUser   ExportAuditParamsActorType = "user"
+)
+
+// Valid indicates whether the value is a known member of the ExportAuditParamsActorType enum.
+func (e ExportAuditParamsActorType) Valid() bool {
+	switch e {
+	case ExportAuditParamsActorTypeAgent:
+		return true
+	case ExportAuditParamsActorTypeSystem:
+		return true
+	case ExportAuditParamsActorTypeUser:
+		return true
+	default:
+		return false
+	}
+}
+
 // AgentConnection online bij een heartbeat in de laatste 30 s, late tot 90 s, daarna offline
 type AgentConnection string
 
@@ -434,6 +518,80 @@ type AgentSummary struct {
 	Id         openapi_types.UUID           `json:"id"`
 	LastSeenAt nullable.Nullable[time.Time] `json:"last_seen_at"`
 	Version    string                       `json:"version"`
+}
+
+// AuditChange Eén gewijzigd veld; een lege waarde betekent geen waarde.
+type AuditChange struct {
+	Field string `json:"field"`
+	From  string `json:"from"`
+	Label string `json:"label"`
+	To    string `json:"to"`
+}
+
+// AuditEntry defines model for AuditEntry.
+type AuditEntry struct {
+	Action string `json:"action"`
+	Actor  struct {
+		Id   string              `json:"id"`
+		Name string              `json:"name"`
+		Type AuditEntryActorType `json:"type"`
+	} `json:"actor"`
+	Category string                      `json:"category"`
+	Changes  []AuditChange               `json:"changes"`
+	Cluster  nullable.Nullable[AuditRef] `json:"cluster"`
+	Id       int64                       `json:"id"`
+	Ip       nullable.Nullable[string]   `json:"ip"`
+	Job      nullable.Nullable[AuditRef] `json:"job"`
+	Node     nullable.Nullable[AuditRef] `json:"node"`
+
+	// OnBehalfOf De gebruiker die de taak aanvroeg, als het systeem dit namens hem deed
+	OnBehalfOf nullable.Nullable[AuditRef] `json:"on_behalf_of"`
+	Payload    map[string]interface{}      `json:"payload"`
+	Subject    struct {
+		Deleted bool   `json:"deleted"`
+		Id      string `json:"id"`
+		Name    string `json:"name"`
+		Type    string `json:"type"`
+	} `json:"subject"`
+
+	// Summary Wat er gebeurde, als Nederlandse zin
+	Summary string    `json:"summary"`
+	Ts      time.Time `json:"ts"`
+}
+
+// AuditEntryActorType defines model for AuditEntry.Actor.Type.
+type AuditEntryActorType string
+
+// AuditInfo defines model for AuditInfo.
+type AuditInfo struct {
+	Categories []struct {
+		Key   string `json:"key"`
+		Label string `json:"label"`
+	} `json:"categories"`
+	DeletedClusters []AuditRef                   `json:"deleted_clusters"`
+	DeletedNodes    []AuditRef                   `json:"deleted_nodes"`
+	Oldest          nullable.Nullable[time.Time] `json:"oldest"`
+	Total           int64                        `json:"total"`
+	Users           []struct {
+		Disabled bool               `json:"disabled"`
+		Id       openapi_types.UUID `json:"id"`
+		Username string             `json:"username"`
+	} `json:"users"`
+}
+
+// AuditPage defines model for AuditPage.
+type AuditPage struct {
+	Items []AuditEntry `json:"items"`
+
+	// NextBefore Geef dit mee als before voor de volgende pagina; null op de laatste
+	NextBefore nullable.Nullable[int64] `json:"next_before"`
+}
+
+// AuditRef defines model for AuditRef.
+type AuditRef struct {
+	Deleted bool   `json:"deleted"`
+	Id      string `json:"id"`
+	Name    string `json:"name"`
 }
 
 // ChangePasswordRequest defines model for ChangePasswordRequest.
@@ -1321,6 +1479,98 @@ type VmActionInput struct {
 	Vmstate *bool `json:"vmstate,omitempty"`
 }
 
+// AuditActorType defines model for AuditActorType.
+type AuditActorType string
+
+// AuditBefore defines model for AuditBefore.
+type AuditBefore = int64
+
+// AuditCategory defines model for AuditCategory.
+type AuditCategory = string
+
+// AuditCluster defines model for AuditCluster.
+type AuditCluster = openapi_types.UUID
+
+// AuditFrom defines model for AuditFrom.
+type AuditFrom = time.Time
+
+// AuditJob defines model for AuditJob.
+type AuditJob = openapi_types.UUID
+
+// AuditNode defines model for AuditNode.
+type AuditNode = openapi_types.UUID
+
+// AuditQuery defines model for AuditQuery.
+type AuditQuery = string
+
+// AuditTo defines model for AuditTo.
+type AuditTo = time.Time
+
+// AuditUser defines model for AuditUser.
+type AuditUser = openapi_types.UUID
+
+// ListAuditParams defines parameters for ListAudit.
+type ListAuditParams struct {
+	// Before Alleen regels met een kleiner id (de volgende pagina)
+	Before *AuditBefore `form:"before,omitempty" json:"before,omitempty"`
+	Limit  *int         `form:"limit,omitempty" json:"limit,omitempty"`
+
+	// From Vanaf dit tijdstip
+	From *AuditFrom `form:"from,omitempty" json:"from,omitempty"`
+
+	// To Tot (niet tot en met) dit tijdstip
+	To *AuditTo `form:"to,omitempty" json:"to,omitempty"`
+
+	// User Wat deze gebruiker deed, wat namens hem gebeurde en wat over zijn account ging
+	User      *AuditUser                `form:"user,omitempty" json:"user,omitempty"`
+	ActorType *ListAuditParamsActorType `form:"actor_type,omitempty" json:"actor_type,omitempty"`
+
+	// Cluster Ook een verwijderd cluster
+	Cluster *AuditCluster `form:"cluster,omitempty" json:"cluster,omitempty"`
+
+	// Node Ook taken en agents van deze node
+	Node *AuditNode `form:"node,omitempty" json:"node,omitempty"`
+	Job  *AuditJob  `form:"job,omitempty" json:"job,omitempty"`
+
+	// Category Een soort uit /audit/info
+	Category *AuditCategory `form:"category,omitempty" json:"category,omitempty"`
+
+	// Q Zoekt in action, payload en de namen van gebruiker, cluster, node en taak
+	Q *AuditQuery `form:"q,omitempty" json:"q,omitempty"`
+}
+
+// ListAuditParamsActorType defines parameters for ListAudit.
+type ListAuditParamsActorType string
+
+// ExportAuditParams defines parameters for ExportAudit.
+type ExportAuditParams struct {
+	// From Vanaf dit tijdstip
+	From *AuditFrom `form:"from,omitempty" json:"from,omitempty"`
+
+	// To Tot (niet tot en met) dit tijdstip
+	To *AuditTo `form:"to,omitempty" json:"to,omitempty"`
+
+	// User Wat deze gebruiker deed, wat namens hem gebeurde en wat over zijn account ging
+	User      *AuditUser                  `form:"user,omitempty" json:"user,omitempty"`
+	ActorType *ExportAuditParamsActorType `form:"actor_type,omitempty" json:"actor_type,omitempty"`
+
+	// Cluster Ook een verwijderd cluster
+	Cluster *AuditCluster `form:"cluster,omitempty" json:"cluster,omitempty"`
+
+	// Node Ook taken en agents van deze node
+	Node *AuditNode `form:"node,omitempty" json:"node,omitempty"`
+	Job  *AuditJob  `form:"job,omitempty" json:"job,omitempty"`
+
+	// Category Een soort uit /audit/info
+	Category *AuditCategory `form:"category,omitempty" json:"category,omitempty"`
+
+	// Q Zoekt in action, payload en de namen van gebruiker, cluster, node en taak
+	Q *AuditQuery `form:"q,omitempty" json:"q,omitempty"`
+}
+
+// ExportAuditParamsActorType defines parameters for ExportAudit.
+type ExportAuditParamsActorType string
+
 // GetClusterMetricsParams defines parameters for GetClusterMetrics.
 type GetClusterMetricsParams struct {
 	Range *MetricsRange `form:"range,omitempty" json:"range,omitempty"`
@@ -1414,6 +1664,15 @@ type ServerInterface interface {
 	// RevokeAgent Agent intrekken (admin); de verbinding wordt meteen verbroken
 	// (POST /agents/{agentId}/revoke)
 	RevokeAgent(w http.ResponseWriter, r *http.Request, agentId openapi_types.UUID)
+	// ListAudit Het logboek, nieuwste eerst, met een zin per regel (alleen admin)
+	// (GET /audit)
+	ListAudit(w http.ResponseWriter, r *http.Request, params ListAuditParams)
+	// ExportAudit Het logboek als NDJSON, met dezelfde filters (alleen admin)
+	// (GET /audit/export)
+	ExportAudit(w http.ResponseWriter, r *http.Request, params ExportAuditParams)
+	// GetAuditInfo Soorten, gebruikers en verwijderde onderwerpen voor de filters van het logboek (alleen admin)
+	// (GET /audit/info)
+	GetAuditInfo(w http.ResponseWriter, r *http.Request)
 	// Login Inloggen met wachtwoord en, indien ingesteld, TOTP-code
 	// (POST /auth/login)
 	Login(w http.ResponseWriter, r *http.Request)
@@ -1471,7 +1730,7 @@ type ServerInterface interface {
 	// DeleteEnrollmentToken Enrollmenttoken intrekken (admin)
 	// (DELETE /enrollment-tokens/{tokenId})
 	DeleteEnrollmentToken(w http.ResponseWriter, r *http.Request, tokenId openapi_types.UUID)
-	// ListEvents Recente events, nieuwste eerst (alleen admin)
+	// ListEvents Recente events, nieuwste eerst, zonder zinnen (alleen admin; het logboek staat onder /audit)
 	// (GET /events)
 	ListEvents(w http.ResponseWriter, r *http.Request, params ListEventsParams)
 	// GetHealth Gezondheid van de server en de database
@@ -1576,6 +1835,24 @@ func (_ Unimplemented) EnrollAgent(w http.ResponseWriter, r *http.Request) {
 // RevokeAgent Agent intrekken (admin); de verbinding wordt meteen verbroken
 // (POST /agents/{agentId}/revoke)
 func (_ Unimplemented) RevokeAgent(w http.ResponseWriter, r *http.Request, agentId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListAudit Het logboek, nieuwste eerst, met een zin per regel (alleen admin)
+// (GET /audit)
+func (_ Unimplemented) ListAudit(w http.ResponseWriter, r *http.Request, params ListAuditParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ExportAudit Het logboek als NDJSON, met dezelfde filters (alleen admin)
+// (GET /audit/export)
+func (_ Unimplemented) ExportAudit(w http.ResponseWriter, r *http.Request, params ExportAuditParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetAuditInfo Soorten, gebruikers en verwijderde onderwerpen voor de filters van het logboek (alleen admin)
+// (GET /audit/info)
+func (_ Unimplemented) GetAuditInfo(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -1693,7 +1970,7 @@ func (_ Unimplemented) DeleteEnrollmentToken(w http.ResponseWriter, r *http.Requ
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// ListEvents Recente events, nieuwste eerst (alleen admin)
+// ListEvents Recente events, nieuwste eerst, zonder zinnen (alleen admin; het logboek staat onder /audit)
 // (GET /events)
 func (_ Unimplemented) ListEvents(w http.ResponseWriter, r *http.Request, params ListEventsParams) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -1913,6 +2190,320 @@ func (siw *ServerInterfaceWrapper) RevokeAgent(w http.ResponseWriter, r *http.Re
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RevokeAgent(w, r, agentId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListAudit operation middleware
+func (siw *ServerInterfaceWrapper) ListAudit(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListAuditParams
+
+	// ------------- Optional query parameter "before" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "before", r.URL.Query(), &params.Before, runtime.BindQueryParameterOptions{Type: "integer", Format: "int64"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "before"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "before", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "from" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "from", r.URL.Query(), &params.From, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "from"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "from", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "to" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "to", r.URL.Query(), &params.To, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "to"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "to", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "user" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "user", r.URL.Query(), &params.User, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "user"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "user", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "actor_type" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "actor_type", r.URL.Query(), &params.ActorType, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "actor_type"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "actor_type", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cluster" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cluster", r.URL.Query(), &params.Cluster, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cluster"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cluster", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "node" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "node", r.URL.Query(), &params.Node, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "node"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "node", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "job" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "job", r.URL.Query(), &params.Job, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "job"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "job", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "category" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "category", r.URL.Query(), &params.Category, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "category"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "category", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "q" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "q", r.URL.Query(), &params.Q, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "q"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "q", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListAudit(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ExportAudit operation middleware
+func (siw *ServerInterfaceWrapper) ExportAudit(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ExportAuditParams
+
+	// ------------- Optional query parameter "from" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "from", r.URL.Query(), &params.From, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "from"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "from", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "to" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "to", r.URL.Query(), &params.To, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "to"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "to", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "user" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "user", r.URL.Query(), &params.User, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "user"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "user", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "actor_type" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "actor_type", r.URL.Query(), &params.ActorType, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "actor_type"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "actor_type", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cluster" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cluster", r.URL.Query(), &params.Cluster, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cluster"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cluster", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "node" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "node", r.URL.Query(), &params.Node, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "node"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "node", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "job" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "job", r.URL.Query(), &params.Job, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "job"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "job", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "category" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "category", r.URL.Query(), &params.Category, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "category"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "category", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "q" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "q", r.URL.Query(), &params.Q, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "q"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "q", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ExportAudit(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetAuditInfo operation middleware
+func (siw *ServerInterfaceWrapper) GetAuditInfo(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetAuditInfo(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -3162,6 +3753,15 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/events", wrapper.ListEvents)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/audit", wrapper.ListAudit)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/audit/info", wrapper.GetAuditInfo)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/audit/export", wrapper.ExportAudit)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/users", wrapper.ListUsers)

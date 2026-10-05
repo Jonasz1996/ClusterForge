@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState, type FormEvent } from "react";
+import { HistoryCard } from "@/components/audit/AuditList";
 import { MetricsPanels } from "@/components/charts/MetricsPanels";
 import { ClusterForm } from "@/components/inventory/ClusterForm";
 import { NodeForm } from "@/components/inventory/NodeForm";
@@ -146,6 +147,7 @@ function ClusterDetailInner() {
               }
             />
           )}
+          <HistoryCard filter={{ cluster: id }} isAdmin={isAdmin} />
         </div>
       )}
     </QueryState>

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState, type ReactNode } from "react";
+import { HistoryCard } from "@/components/audit/AuditList";
 import { MetricsPanels } from "@/components/charts/MetricsPanels";
 import { JobList } from "@/components/jobs/JobList";
 import { InstallAgent } from "@/components/inventory/InstallAgent";
@@ -165,6 +166,7 @@ function NodeDetailInner() {
           )}
 
           {runtime.data?.facts && <FactsView facts={runtime.data.facts} runtime={runtime.data} />}
+          <HistoryCard filter={{ node: id }} isAdmin={isAdmin} />
         </div>
       )}
     </QueryState>

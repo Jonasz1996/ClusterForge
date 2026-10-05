@@ -315,10 +315,14 @@ func TestStream(t *testing.T) {
 			if !ok {
 				t.Fatal("stream gesloten")
 			}
+			// De notificatie draagt alleen het id; wat het was, staat in het logboek.
 			var ev struct {
-				Action string `json:"action"`
+				ID int64 `json:"id"`
 			}
-			if data, ok := strings.CutPrefix(l, "data: "); ok && json.Unmarshal([]byte(data), &ev) == nil && ev.Action == "cluster.created" {
+			if data, ok := strings.CutPrefix(l, "data: "); ok && json.Unmarshal([]byte(data), &ev) == nil && ev.ID > 0 {
+				if got := c.audit("limit=1").Items[0]; got.ID != ev.ID || got.Action != "cluster.created" {
+					t.Fatalf("notificatie %d, nieuwste regel %+v", ev.ID, got)
+				}
 				return
 			}
 		case <-timeout:

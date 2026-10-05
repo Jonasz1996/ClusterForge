@@ -7,9 +7,26 @@ package store
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 )
+
+const auditStats = `-- name: AuditStats :one
+SELECT count(*) AS total, coalesce(min(ts), now())::timestamptz AS oldest FROM events
+`
+
+type AuditStatsRow struct {
+	Total  int64
+	Oldest time.Time
+}
+
+func (q *Queries) AuditStats(ctx context.Context) (AuditStatsRow, error) {
+	row := q.db.QueryRow(ctx, auditStats)
+	var i AuditStatsRow
+	err := row.Scan(&i.Total, &i.Oldest)
+	return i, err
+}
 
 const insertEvent = `-- name: InsertEvent :exec
 INSERT INTO events (actor_type, actor_id, subject_type, subject_id, cluster_id, action, payload)
@@ -39,8 +56,274 @@ func (q *Queries) InsertEvent(ctx context.Context, arg InsertEventParams) error 
 	return err
 }
 
+const listAudit = `-- name: ListAudit :many
+SELECT e.id, e.ts, e.actor_type, e.actor_id, e.subject_type, e.subject_id, e.cluster_id,
+       e.action, e.payload, e.node_ref, e.job_ref,
+       au.username AS actor_username,
+       coalesce(agn.hostname, an.hostname, '')::text AS actor_hostname,
+       coalesce(e.cluster_id::text, CASE WHEN e.subject_type = 'cluster' THEN e.subject_id END, '')::text AS cluster_ref,
+       (c.id IS NOT NULL)::boolean AS cluster_exists,
+       coalesce(c.name, (
+           SELECT d.payload->>'name' FROM events d
+           WHERE d.subject_type = 'cluster' AND d.action = 'cluster.deleted'
+             AND d.subject_id = coalesce(e.cluster_id::text, CASE WHEN e.subject_type = 'cluster' THEN e.subject_id END)
+           LIMIT 1), '')::text AS cluster_name,
+       (n.id IS NOT NULL)::boolean AS node_exists,
+       coalesce(n.hostname, (
+           SELECT d.payload->>'hostname' FROM events d
+           WHERE d.subject_type = 'node' AND d.action = 'node.deleted' AND d.subject_id = e.node_ref
+           LIMIT 1), '')::text AS node_hostname,
+       j.title AS job_title,
+       j.requested_by AS job_requested_by,
+       ju.username AS job_requested_by_username
+FROM events e
+LEFT JOIN users au ON e.actor_type = 'user' AND au.id::text = e.actor_id
+LEFT JOIN agents ag ON e.actor_type = 'agent' AND ag.id::text = e.actor_id
+LEFT JOIN nodes agn ON agn.id = ag.node_id
+LEFT JOIN nodes an ON e.actor_type = 'agent' AND an.id::text = e.actor_id
+LEFT JOIN clusters c ON c.id::text = coalesce(e.cluster_id::text, CASE WHEN e.subject_type = 'cluster' THEN e.subject_id END)
+LEFT JOIN nodes n ON n.id::text = e.node_ref
+LEFT JOIN jobs j ON j.id::text = e.job_ref
+LEFT JOIN users ju ON ju.id = j.requested_by
+WHERE ($1::bigint IS NULL OR e.id < $1::bigint)
+  AND ($2::timestamptz IS NULL OR e.ts >= $2::timestamptz)
+  AND ($3::timestamptz IS NULL OR e.ts < $3::timestamptz)
+  AND ($4::actor_type IS NULL OR e.actor_type = $4::actor_type)
+  AND ($5::text IS NULL
+       OR (e.actor_type = 'user' AND e.actor_id = $5::text)
+       OR (e.subject_type = 'user' AND e.subject_id = $5::text)
+       OR (e.actor_type = 'system' AND j.requested_by::text = $5::text))
+  AND ($6::text IS NULL
+       OR e.cluster_id::text = $6::text
+       OR (e.subject_type = 'cluster' AND e.subject_id = $6::text))
+  AND ($7::text IS NULL OR e.node_ref = $7::text)
+  AND ($8::text IS NULL OR e.job_ref = $8::text)
+  AND ($9::text[] IS NULL OR e.action = ANY($9::text[]))
+  AND ($10::text IS NULL
+       OR e.action ILIKE $10::text
+       OR e.payload::text ILIKE $10::text
+       OR au.username ILIKE $10::text
+       OR c.name ILIKE $10::text
+       OR n.hostname ILIKE $10::text
+       OR agn.hostname ILIKE $10::text
+       OR an.hostname ILIKE $10::text
+       OR j.title ILIKE $10::text)
+ORDER BY e.id DESC
+LIMIT $11
+`
+
+type ListAuditParams struct {
+	BeforeID  *int64
+	FromTs    *time.Time
+	ToTs      *time.Time
+	ActorType NullActorType
+	UserID    *string
+	ClusterID *string
+	NodeID    *string
+	JobID     *string
+	Actions   []string
+	Pattern   *string
+	Lim       int32
+}
+
+type ListAuditRow struct {
+	ID                     int64
+	Ts                     time.Time
+	ActorType              ActorType
+	ActorID                string
+	SubjectType            string
+	SubjectID              string
+	ClusterID              *uuid.UUID
+	Action                 string
+	Payload                []byte
+	NodeRef                *string
+	JobRef                 *string
+	ActorUsername          *string
+	ActorHostname          string
+	ClusterRef             string
+	ClusterExists          bool
+	ClusterName            string
+	NodeExists             bool
+	NodeHostname           string
+	JobTitle               *string
+	JobRequestedBy         *uuid.UUID
+	JobRequestedByUsername *string
+}
+
+// Het logboek, nieuwste eerst, met de namen die de zinnen nodig hebben. Een
+// verwijderd cluster of een verwijderde node krijgt zijn naam uit het event
+// van de verwijdering.
+func (q *Queries) ListAudit(ctx context.Context, arg ListAuditParams) ([]ListAuditRow, error) {
+	rows, err := q.db.Query(ctx, listAudit,
+		arg.BeforeID,
+		arg.FromTs,
+		arg.ToTs,
+		arg.ActorType,
+		arg.UserID,
+		arg.ClusterID,
+		arg.NodeID,
+		arg.JobID,
+		arg.Actions,
+		arg.Pattern,
+		arg.Lim,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAuditRow{}
+	for rows.Next() {
+		var i ListAuditRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Ts,
+			&i.ActorType,
+			&i.ActorID,
+			&i.SubjectType,
+			&i.SubjectID,
+			&i.ClusterID,
+			&i.Action,
+			&i.Payload,
+			&i.NodeRef,
+			&i.JobRef,
+			&i.ActorUsername,
+			&i.ActorHostname,
+			&i.ClusterRef,
+			&i.ClusterExists,
+			&i.ClusterName,
+			&i.NodeExists,
+			&i.NodeHostname,
+			&i.JobTitle,
+			&i.JobRequestedBy,
+			&i.JobRequestedByUsername,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAuditNames = `-- name: ListAuditNames :many
+SELECT 'cluster'::text AS kind, id, name FROM clusters
+UNION ALL
+SELECT 'node'::text AS kind, id, hostname AS name FROM nodes
+UNION ALL
+SELECT 'proxmox'::text AS kind, id, name FROM proxmox_connections
+`
+
+type ListAuditNamesRow struct {
+	Kind string
+	ID   uuid.UUID
+	Name string
+}
+
+// Namen van clusters, nodes en Proxmox-koppelingen op id, voor het logboek.
+func (q *Queries) ListAuditNames(ctx context.Context) ([]ListAuditNamesRow, error) {
+	rows, err := q.db.Query(ctx, listAuditNames)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAuditNamesRow{}
+	for rows.Next() {
+		var i ListAuditNamesRow
+		if err := rows.Scan(&i.Kind, &i.ID, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAuditUsers = `-- name: ListAuditUsers :many
+SELECT id, username, role, disabled_at FROM users ORDER BY username
+`
+
+type ListAuditUsersRow struct {
+	ID         uuid.UUID
+	Username   string
+	Role       UserRole
+	DisabledAt *time.Time
+}
+
+// Alle gebruikers, ook uitgeschakelde, voor het filter en de namen in het logboek.
+func (q *Queries) ListAuditUsers(ctx context.Context) ([]ListAuditUsersRow, error) {
+	rows, err := q.db.Query(ctx, listAuditUsers)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAuditUsersRow{}
+	for rows.Next() {
+		var i ListAuditUsersRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Username,
+			&i.Role,
+			&i.DisabledAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDeletedSubjects = `-- name: ListDeletedSubjects :many
+SELECT subject_type, subject_id, coalesce(payload->>'name', payload->>'hostname', '')::text AS name,
+       cluster_id, ts
+FROM events
+WHERE action IN ('cluster.deleted', 'node.deleted')
+ORDER BY ts DESC
+`
+
+type ListDeletedSubjectsRow struct {
+	SubjectType string
+	SubjectID   string
+	Name        string
+	ClusterID   *uuid.UUID
+	Ts          time.Time
+}
+
+// Verwijderde clusters en nodes, zodat het logboek er nog op kan filteren.
+func (q *Queries) ListDeletedSubjects(ctx context.Context) ([]ListDeletedSubjectsRow, error) {
+	rows, err := q.db.Query(ctx, listDeletedSubjects)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDeletedSubjectsRow{}
+	for rows.Next() {
+		var i ListDeletedSubjectsRow
+		if err := rows.Scan(
+			&i.SubjectType,
+			&i.SubjectID,
+			&i.Name,
+			&i.ClusterID,
+			&i.Ts,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRecentEvents = `-- name: ListRecentEvents :many
-SELECT id, ts, actor_type, actor_id, subject_type, subject_id, cluster_id, action, payload FROM events ORDER BY id DESC LIMIT $1
+SELECT id, ts, actor_type, actor_id, subject_type, subject_id, cluster_id, action, payload, node_ref, job_ref FROM events ORDER BY id DESC LIMIT $1
 `
 
 func (q *Queries) ListRecentEvents(ctx context.Context, limit int32) ([]Event, error) {
@@ -62,6 +345,8 @@ func (q *Queries) ListRecentEvents(ctx context.Context, limit int32) ([]Event, e
 			&i.ClusterID,
 			&i.Action,
 			&i.Payload,
+			&i.NodeRef,
+			&i.JobRef,
 		); err != nil {
 			return nil, err
 		}
