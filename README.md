@@ -22,6 +22,7 @@ Het technisch ontwerp staat in [docs/design/mvp-fase-1.md](docs/design/mvp-fase-
 | 2. Back-ups | Versheid van de Proxmox-back-ups per VM, VM's zonder back-upjob | klaar |
 | 3. Herkomst en clusterslot | IP, sessie en taak bij elke regel, commando's aan agents in het logboek, één schrijvende taak per cluster | klaar |
 | 4. Gewenste staat | Specificatie per cluster met revisies, vaste templateversies, controle op onveilige waarden in templates | klaar |
+| 5. Drift zien | Per node zien wat afwijkt van de gewenste staat van een cluster uit een template, zonder iets op de node te veranderen | klaar |
 
 ## Draaien met Docker Compose
 
@@ -56,6 +57,7 @@ Agents verbinden zelf naar de server, op poort 4222 (NATS met TLS). Die poort mo
 | `CF_GRAFANA_CLUSTER_URL` | (leeg) | Link naar Grafana bij elk cluster, met `{cluster}`, `{cluster_id}` en `{env}` |
 | `CF_MASTER_KEY` | (leeg) | Sleutel van 32 bytes (base64 of hex) waarmee de server geheimen zoals het Proxmox-token versleutelt; maak er een met `openssl rand -hex 32`. Zonder sleutel kan Proxmox niet gekoppeld worden |
 | `CF_MASTER_KEY_FILE` | (leeg) | Bestand met de masterkey, in plaats van `CF_MASTER_KEY` |
+| `CF_DRIFT_INTERVAL` | `15m` | Hoe vaak de server elke node op drift controleert; `0` zet dat uit (Nu controleren blijft werken), anders minstens `1m` |
 
 ### Commando's
 
@@ -86,6 +88,14 @@ cf-agent version                                toont de versie
 ```
 
 De sleutel van de agent staat in `/etc/clusterforge/agent.json`. Intrekken kan bij de node in de webinterface; de verbinding valt dan meteen weg.
+
+Een nieuwere agent zet je erop zonder opnieuw aan te melden:
+
+```sh
+curl -fsSL https://clusterforge.example/install/agent.sh | sudo sh -s -- --server https://clusterforge.example --upgrade
+```
+
+Het script controleert de checksum, vervangt alleen de binary en herstart `cf-agent`; `agent.json` blijft staan. Mislukt de download of de checksum, dan blijft de oude agent draaien.
 
 ## Monitoring
 
@@ -170,6 +180,14 @@ Templates hebben een versie, en een cluster blijft op de versie waarmee het uitg
 
 In de commando's en paden van een template mag alleen iets komen waarvan de vorm vastligt: getallen, IP-adressen, groottes, ja of nee, strings met een pattern van alleen letters, cijfers en `. _ - : @ , + =`, de slug en omgeving van het cluster, en hostname, rol, index, adres en prefix van een node. Een template die daar iets anders gebruikt, laadt niet. Zo kan een parameter, ook een die later uit Git komt, geen eigen shellcommando op de nodes uitvoeren.
 
+### Drift
+
+Een cluster uit een template krijgt de kaart Drift. Daar zie je per node of hij nog klopt met de gewenste staat: in orde, drift, fout, geen verwachte staat (een node die niet in de specificatie staat) of overgeslagen. Klap een node open voor de afwijkingen per stap, zoals een met de hand aangepast configuratiebestand, andere rechten, een uitgeschakelde service of een ontbrekend pakket, met wat de template verwacht en wat er werkelijk staat. Bij een bestand staat hoe groot het is tegenover de template en wanneer het op de node veranderde, nooit de inhoud of een hash. In de clusterlijst en het overzicht staat een gele badge "Drift · 2 nodes", of een grijze "drift onbekend" als de laatste controle ouder is dan een uur.
+
+De server controleert elke actieve node met een verbonden agent elk kwartier (`CF_DRIFT_INTERVAL`), opnieuw na een uitrol of een actie op een node, en meteen met de knop Nu controleren. Een nieuwe afwijking telt pas als ze er een halve minuut later nog is, zodat een korte herstart geen melding geeft; de knop slaat die tweede blik over. Nodes in onderhoud of met een lopende taak worden overgeslagen, en hun laatste uitkomst blijft staan. In het logboek komt alleen een overgang: drift gevonden, veranderd, verdwenen of een controle die mislukt. Een controle stuurt de agent alleen leesopdrachten (`dpkg-query`, `systemctl show`, `id` en het lezen van bestanden) en verandert nooit iets; herstellen komt in een latere mijlpaal. Een stap met `unless` wordt niet gecontroleerd, want die test is vrije shell.
+
+Drift kan alleen met een agent van deze versie of nieuwer. Een oudere agent staat als "agent te oud voor driftcontrole", met het upgradecommando om te kopiëren. Werk ook je golden image bij (opnieuw `agent.sh --no-enroll` en de VM weer als template), anders krijgen nieuwe VM's de oude agent.
+
 ## Onderhoud, herstarten en afsluiten
 
 Bij elke node staat de kaart Beheer:
@@ -185,7 +203,7 @@ Kan geen andere node een VIP overnemen (geen actieve, online node waarop keepali
 
 Een node zonder agent kun je alleen in en uit onderhoud zetten; de VIP's haal je dan zelf weg.
 
-De agent voert alleen vaste soorten commando's uit: facts verzamelen, keepalived uit- en aanzetten voor onderhoud, herstarten en afsluiten met `systemctl`, en de stappen van een template (pakketten met apt, bestanden, services, gebruikers, mappen en commando's). Omdat hij als root bestanden schrijft, kan wie de server beheert alles op de nodes; bescherm de server en `CF_MASTER_KEY` daarom als een beheerwachtwoord. Hij onthoudt het onderhoud en het laatste herstartcommando in `/var/lib/clusterforge/agent-state.json`, zodat hij na een herstart niet nog eens herstart. Een agent van voor deze versie kan geen commando's uitvoeren; trek hem in en installeer hem opnieuw.
+De agent voert alleen vaste soorten commando's uit: facts verzamelen, de toestand lezen voor de driftcontrole, keepalived uit- en aanzetten voor onderhoud, herstarten en afsluiten met `systemctl`, en de stappen van een template (pakketten met apt, bestanden, services, gebruikers, mappen en commando's). Omdat hij als root bestanden schrijft, kan wie de server beheert alles op de nodes; bescherm de server en `CF_MASTER_KEY` daarom als een beheerwachtwoord. Hij onthoudt het onderhoud en het laatste herstartcommando in `/var/lib/clusterforge/agent-state.json`, zodat hij na een herstart niet nog eens herstart. Een agent van voor deze versie kan geen commando's uitvoeren; trek hem in en installeer hem opnieuw.
 
 ## Taken
 
@@ -248,6 +266,7 @@ internal/templates/        ingebouwde templates per versie, parameters en de con
 internal/deploy/           clusters uitrollen, de gewenste staat en haar revisies
 internal/audit/            het logboek: lezen, filteren, beschrijven en exporteren
 internal/backups/          versheid van de Proxmox-back-ups per VM
+internal/drift/            driftcontrole: vergelijken met de gewenste staat, de scanner en het rapport
 pkg/protocol/              berichten tussen server en agent
 internal/webui/            ingebedde webinterface
 migrations/                goose SQL-migraties

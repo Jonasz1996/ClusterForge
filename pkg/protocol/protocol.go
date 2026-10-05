@@ -10,13 +10,19 @@ import (
 
 // Version is de protocolversie. Een agent meldt die bij elke heartbeat, zodat
 // de server geen berichten stuurt die de agent niet kent.
-const Version = 3
+const Version = 4
 
 // CommandsSince is de eerste protocolversie met commando's.
 const CommandsSince = 2
 
 // ApplySince is de eerste protocolversie die deploystappen uitvoert.
 const ApplySince = 3
+
+// InspectSince is de eerste protocolversie die state.inspect kent. Een
+// oudere agent weigert een onbekend commando, maar leest velden die hij niet
+// kent zonder fout; daarom is inspecteren een eigen commando en geen vlag op
+// apply.steps.
+const InspectSince = 4
 
 // Berichttypes.
 const (
@@ -186,6 +192,10 @@ const (
 	// CmdApply voert deploystappen uit, in volgorde, en stopt bij de eerste
 	// die mislukt.
 	CmdApply = "apply.steps"
+	// CmdInspect leest hoe de stappen in Inspect erbij staan, zonder iets te
+	// veranderen: dpkg-query, systemctl show, id en stat, nooit apt-get, een
+	// ander systemctl-werkwoord of sh.
+	CmdInspect = "state.inspect"
 )
 
 // Command is een opdracht van de server. De server stuurt het als request op
@@ -201,6 +211,8 @@ type Command struct {
 	DelaySeconds int       `json:"delay_seconds,omitempty"`
 	// Steps zijn de stappen van CmdApply.
 	Steps []Step `json:"steps,omitempty"`
+	// Inspect zijn de stappen van CmdInspect.
+	Inspect []InspectStep `json:"inspect,omitempty"`
 }
 
 // Result is het antwoord van de agent op een commando.
@@ -214,6 +226,8 @@ type Result struct {
 	// Steps is het resultaat per stap van CmdApply, tot en met de stap die
 	// mislukte.
 	Steps []StepResult `json:"steps,omitempty"`
+	// Observations is wat CmdInspect zag, één per stap in dezelfde volgorde.
+	Observations []Observation `json:"observations,omitempty"`
 }
 
 // Step is één deploystap. Precies één veld is gezet. Elke stap is
@@ -293,6 +307,83 @@ func (s Step) Kind() string {
 	for k, set := range map[string]bool{
 		"package": s.Package != nil, "file": s.File != nil, "service": s.Service != nil,
 		"user": s.User != nil, "directory": s.Directory != nil, "command": s.Command != nil,
+	} {
+		if set {
+			if kind != "" {
+				return ""
+			}
+			kind = k
+		}
+	}
+	return kind
+}
+
+// InspectStep zegt wat de agent moet bekijken. Precies één veld is gezet.
+// Er is bewust geen inhoud of commando: de agent leest alleen, en de server
+// vergelijkt.
+type InspectStep struct {
+	Packages  []string `json:"packages,omitempty"`
+	File      string   `json:"file,omitempty"`
+	Directory string   `json:"directory,omitempty"`
+	Service   string   `json:"service,omitempty"`
+	User      string   `json:"user,omitempty"`
+	// Creates is het creates-pad van een command-stap: bestaat het, dan zou
+	// apply het commando overslaan.
+	Creates string `json:"creates,omitempty"`
+}
+
+// Observation is wat de agent van één InspectStep zag.
+type Observation struct {
+	Packages []PackageState `json:"packages,omitempty"`
+	// Path is gezet voor File, Directory en Creates.
+	Path    *PathState `json:"path,omitempty"`
+	Service *UnitState `json:"service,omitempty"`
+	// UserExists is gezet voor User.
+	UserExists *bool `json:"user_exists,omitempty"`
+	// Skipped zegt waarom de agent deze stap niet kon bekijken, zoals een
+	// node zonder dpkg.
+	Skipped string `json:"skipped,omitempty"`
+	Error   string `json:"error,omitempty"`
+}
+
+type PackageState struct {
+	Name      string `json:"name"`
+	Installed bool   `json:"installed"`
+	Version   string `json:"version,omitempty"`
+}
+
+// PathState beschrijft een bestand of map. Een symlink wordt gevolgd, zoals
+// apply dat doet; Symlink zegt dan alleen waar hij naar wijst.
+type PathState struct {
+	Exists bool `json:"exists"`
+	// Type is file, directory of other.
+	Type    string    `json:"type,omitempty"`
+	Size    int64     `json:"size,omitempty"`
+	Mode    string    `json:"mode,omitempty"`
+	Owner   string    `json:"owner,omitempty"`
+	Group   string    `json:"group,omitempty"`
+	ModTime time.Time `json:"mtime,omitzero"`
+	// SHA256 is de hash van een gewoon bestand tot MaxInspectHash bytes. De
+	// server rekent er in het geheugen mee en bewaart hem nooit.
+	SHA256  string `json:"sha256,omitempty"`
+	Symlink string `json:"symlink,omitempty"`
+}
+
+// MaxInspectHash is het grootste bestand dat state.inspect hasht.
+const MaxInspectHash = 16 << 20
+
+type UnitState struct {
+	Loaded  bool `json:"loaded"`
+	Enabled bool `json:"enabled"`
+	Active  bool `json:"active"`
+}
+
+// Kind geeft het soort stap, of "" als er geen of meer dan één veld gezet is.
+func (s InspectStep) Kind() string {
+	kind := ""
+	for k, set := range map[string]bool{
+		"package": len(s.Packages) > 0, "file": s.File != "", "directory": s.Directory != "",
+		"service": s.Service != "", "user": s.User != "", "command": s.Creates != "",
 	} {
 		if set {
 			if kind != "" {

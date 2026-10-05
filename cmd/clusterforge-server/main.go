@@ -28,6 +28,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/backups"
 	"github.com/Jonasz1996/clusterforge/internal/config"
 	"github.com/Jonasz1996/clusterforge/internal/deploy"
+	"github.com/Jonasz1996/clusterforge/internal/drift"
 	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/httpapi"
 	"github.com/Jonasz1996/clusterforge/internal/jobs"
@@ -156,11 +157,28 @@ func serve() error {
 		}
 	}
 	bk := backups.NewService(pool, ev, log, pve)
+	drf := drift.NewService(pool, ev, log, bus, dep, box.Derive(secrets.PurposeFile))
+	drf.Interval = cfg.DriftInterval
+	// Na een uitrol, een node- of VM-actie meteen opnieuw kijken.
+	recheck := func(ctx context.Context, j store.Job) {
+		switch {
+		case j.NodeID != nil:
+			drf.KickNode(*j.NodeID)
+		case j.ClusterID != nil:
+			if err := drf.Kick(ctx, j.ClusterID); err != nil {
+				log.Warn("driftcontrole na taak plannen mislukt", "job", j.ID, "err", err)
+			}
+		}
+	}
+	for _, kind := range []string{deploy.Kind, lifecycle.KindNodeAction, proxmox.KindVMAction} {
+		runner.OnFinished(kind, recheck)
+	}
 	go hub.Run(ctx)
 	go eval.Run(ctx)
 	go ingest.Run(ctx)
 	go pve.Run(ctx)
 	go bk.Run(ctx)
+	go drf.Run(ctx)
 	jobsDone := make(chan struct{})
 	go func() {
 		defer close(jobsDone)
@@ -171,7 +189,7 @@ func serve() error {
 		Addr: cfg.Listen,
 		Handler: httpapi.New(httpapi.Deps{
 			Config: cfg, Log: log, Pool: pool, Auth: authSvc, Bus: bus, Hub: hub, Proxmox: pve, Jobs: runner,
-			Lifecycle: life, Deploy: dep, Backups: bk, Version: version,
+			Lifecycle: life, Deploy: dep, Backups: bk, Drift: drf, Version: version,
 		}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,

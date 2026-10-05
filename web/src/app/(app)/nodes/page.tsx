@@ -7,7 +7,7 @@ import { BackupBadge } from "@/components/backups/Backups";
 import { InstallAgent } from "@/components/inventory/InstallAgent";
 import { NodeForm } from "@/components/inventory/NodeForm";
 import { AgentBadge, Empty, LifecycleBadge, QueryState, StatusBadge, Tags } from "@/components/inventory/bits";
-import { Button, Card, Input, PageHeader, Select } from "@/components/ui";
+import { Badge, Button, Card, Input, PageHeader, Select } from "@/components/ui";
 import { useBackups } from "@/lib/backups";
 import {
   lifecycles,
@@ -164,6 +164,11 @@ export default function NodesPage() {
                         {n.role && <span className="text-slate-600 dark:text-slate-400">{n.role}</span>}
                         {n.agent ? <StatusBadge status={n.status} reason={n.status_reason} /> : <AgentBadge agent={null} />}
                         {n.lifecycle !== "active" && <LifecycleBadge lifecycle={n.lifecycle} />}
+                        {n.drift_status === "drift" && (
+                          <span title="Wijkt af van de gewenste staat">
+                            <Badge tone="amber">Drift</Badge>
+                          </span>
+                        )}
                         <BackupBadge freshness={backupOf.get(n.id)} />
                         <Tags tags={n.tags} />
                       </li>

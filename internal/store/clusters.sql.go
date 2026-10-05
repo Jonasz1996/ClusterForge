@@ -159,17 +159,29 @@ func (q *Queries) ListClusterOwners(ctx context.Context, clusterID uuid.UUID) ([
 const listClusters = `-- name: ListClusters :many
 SELECT c.id, c.slug, c.name, c.description, c.type, c.environment, c.git_repo_url, c.tags, c.status, c.spec, c.spec_revision, c.template_name, c.template_version, c.created_at, c.updated_at, c.status_reason, c.status_since,
        (SELECT count(*) FROM nodes n WHERE n.cluster_id = c.id)::int AS node_count,
-       (SELECT count(*) FROM vips v WHERE v.cluster_id = c.id)::int AS vip_count
+       (SELECT count(*) FROM vips v WHERE v.cluster_id = c.id)::int AS vip_count,
+       (SELECT count(*) FROM nodes n JOIN drift_checks d ON d.node_id = n.id
+        WHERE n.cluster_id = c.id AND n.lifecycle = 'active' AND d.status = 'drift')::int AS drift_nodes,
+       (SELECT count(*) FROM nodes n LEFT JOIN drift_checks d ON d.node_id = n.id
+        WHERE n.cluster_id = c.id AND n.lifecycle = 'active' AND (d.node_id IS NULL OR d.status = 'error'))::int AS drift_unknown,
+       (SELECT min(d.checked_at) FROM nodes n JOIN drift_checks d ON d.node_id = n.id
+        WHERE n.cluster_id = c.id AND n.lifecycle = 'active') AS drift_checked_at
 FROM clusters c
 ORDER BY c.name
 `
 
 type ListClustersRow struct {
-	Cluster   Cluster
-	NodeCount int32
-	VipCount  int32
+	Cluster        Cluster
+	NodeCount      int32
+	VipCount       int32
+	DriftNodes     int32
+	DriftUnknown   int32
+	DriftCheckedAt interface{}
 }
 
+// Met de samenvatting van de drift over de actieve nodes: hoeveel drift
+// hebben, hoeveel niet of met een fout gecontroleerd zijn, en de oudste
+// controle.
 func (q *Queries) ListClusters(ctx context.Context) ([]ListClustersRow, error) {
 	rows, err := q.db.Query(ctx, listClusters)
 	if err != nil {
@@ -199,6 +211,9 @@ func (q *Queries) ListClusters(ctx context.Context) ([]ListClustersRow, error) {
 			&i.Cluster.StatusSince,
 			&i.NodeCount,
 			&i.VipCount,
+			&i.DriftNodes,
+			&i.DriftUnknown,
+			&i.DriftCheckedAt,
 		); err != nil {
 			return nil, err
 		}

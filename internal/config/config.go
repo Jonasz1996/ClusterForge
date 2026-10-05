@@ -53,6 +53,10 @@ type Config struct {
 	// (CF_MASTER_KEY of CF_MASTER_KEY_FILE, 32 bytes in base64 of hex). Zonder
 	// sleutel kun je geen Proxmox koppelen.
 	MasterKey []byte
+	// DriftInterval is hoe vaak de server elke node op drift controleert
+	// (CF_DRIFT_INTERVAL, standaard 15m). 0 zet de controles op de
+	// achtergrond uit; Nu controleren blijft werken.
+	DriftInterval time.Duration
 }
 
 func FromEnv() (Config, error) {
@@ -61,6 +65,7 @@ func FromEnv() (Config, error) {
 		Listen:        envOr("CF_LISTEN", ":8080"),
 		SecureCookies: true,
 		SessionTTL:    12 * time.Hour,
+		DriftInterval: 15 * time.Minute,
 		LogLevel:      envOr("CF_LOG_LEVEL", "info"),
 		NATSListen:    envOr("CF_NATS_LISTEN", ":4222"),
 		NATSAdvertise: os.Getenv("CF_NATS_ADVERTISE"),
@@ -107,6 +112,16 @@ func FromEnv() (Config, error) {
 			return c, fmt.Errorf("CF_SESSION_TTL moet minstens 1m zijn")
 		}
 		c.SessionTTL = d
+	}
+	if v := os.Getenv("CF_DRIFT_INTERVAL"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			return c, fmt.Errorf("CF_DRIFT_INTERVAL: %w", err)
+		}
+		if d != 0 && d < time.Minute {
+			return c, fmt.Errorf("CF_DRIFT_INTERVAL moet 0 of minstens 1m zijn")
+		}
+		c.DriftInterval = d
 	}
 	return c, nil
 }

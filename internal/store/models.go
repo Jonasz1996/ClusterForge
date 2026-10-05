@@ -299,6 +299,20 @@ type ClusterSpecRevision struct {
 	CreatedAt time.Time
 }
 
+type DriftCheck struct {
+	NodeID          uuid.UUID
+	Status          string
+	Source          string
+	SpecRevision    int32
+	TemplateVersion string
+	Findings        []byte
+	Unchecked       []byte
+	Fingerprint     string
+	Error           string
+	CheckedAt       time.Time
+	DriftSince      *time.Time
+}
+
 type EnrollmentToken struct {
 	ID          uuid.UUID
 	TokenHash   []byte

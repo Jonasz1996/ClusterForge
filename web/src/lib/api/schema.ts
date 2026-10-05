@@ -716,6 +716,88 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/clusters/{clusterId}/drift": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Drift van een cluster per node, met waarmee vergeleken wordt
+         * @description source is null voor een cluster zonder gewenste staat. Viewers mogen dit zien: er staan geen geheimen, inhoud of hashes in.
+         */
+        get: operations["getClusterDrift"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/clusters/{clusterId}/drift/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Alle actieve nodes nu controleren (admin)
+         * @description Synchroon en zonder bevestiging na 30 seconden; elke node heeft 20 seconden. Een controle verandert niets op de nodes.
+         */
+        post: operations["checkClusterDrift"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/nodes/{nodeId}/drift": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        /** Drift van één node */
+        get: operations["getNodeDrift"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/nodes/{nodeId}/drift/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Eén node nu controleren (admin) */
+        post: operations["checkNodeDrift"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/clusters/{clusterId}/spec-revisions": {
         parameters: {
             query?: never;
@@ -1077,6 +1159,83 @@ export interface components {
             item: components["schemas"]["BackupItem"] | null;
             backups: components["schemas"]["BackupVolume"][];
         };
+        DriftReport: {
+            source: components["schemas"]["DriftSource"] | null;
+            /** @description Wat de vergelijking beïnvloedt, zoals een nieuwere templateversie of een afwijkend lidmaatschap */
+            notes: string[];
+            nodes: components["schemas"]["DriftNode"][];
+        };
+        DriftSource: {
+            /** @enum {string} */
+            kind: "template" | "baseline";
+            template: string;
+            template_version: string;
+            spec_revision: number;
+        };
+        DriftNode: {
+            /** Format: uuid */
+            node_id: string;
+            hostname: string;
+            /**
+             * @description unknown als de node nog nooit gecontroleerd is; none als hij niet in de gewenste staat staat
+             * @enum {string}
+             */
+            status: "in_sync" | "drift" | "error" | "none" | "unknown";
+            /** Format: date-time */
+            checked_at: string | null;
+            /** Format: date-time */
+            drift_since: string | null;
+            /** @description De revisie van de laatste controle */
+            spec_revision: number;
+            /** @description Bij status error de afwijkingen van de laatste geslaagde controle */
+            findings: components["schemas"]["DriftFinding"][];
+            unchecked: components["schemas"]["DriftUnchecked"][];
+            error: string;
+            /** @description Waarom de node nu niet gecontroleerd wordt, zoals "agent te oud voor driftcontrole"; leeg als hij wel gecontroleerd wordt */
+            skipped: string;
+            agent_too_old: boolean;
+        };
+        DriftFinding: {
+            /** @description Stap en aspect, zoals file:/etc/keepalived/keepalived.conf:content */
+            key: string;
+            /** @description De stap, zoals file:/etc/keepalived/keepalived.conf */
+            step: string;
+            /** @enum {string} */
+            kind: "package" | "file" | "directory" | "service" | "user" | "command";
+            title: string;
+            /** @enum {string} */
+            aspect: "exists" | "type" | "content" | "mode" | "owner" | "group" | "installed" | "loaded" | "enabled" | "active" | "creates";
+            expected: string;
+            actual: string;
+            detail: string;
+            /**
+             * Format: date-time
+             * @description Wanneer het bestand op de node veranderde
+             */
+            mtime: string | null;
+            /** Format: date-time */
+            since: string;
+            /** @description HMAC van de waargenomen waarde; verandert als er op de node opnieuw iets wijzigt */
+            fingerprint: string;
+        };
+        DriftUnchecked: {
+            step: string;
+            title: string;
+            reason: string;
+        };
+        ClusterDriftSummary: {
+            /**
+             * @description none zonder gewenste staat; unknown als niet elke actieve node het laatste uur gecontroleerd is
+             * @enum {string}
+             */
+            status: "in_sync" | "drift" | "unknown" | "none";
+            nodes_with_drift: number;
+            /**
+             * Format: date-time
+             * @description De oudste laatste controle van de actieve nodes
+             */
+            checked_at: string | null;
+        };
         SpecHistory: {
             template: components["schemas"]["SpecTemplate"] | null;
             /** @description Huidige revisie; 0 zonder spec */
@@ -1252,6 +1411,7 @@ export interface components {
         ClusterListItem: components["schemas"]["Cluster"] & {
             node_count: number;
             vip_count: number;
+            drift: components["schemas"]["ClusterDriftSummary"];
             /** @description De VIP's met hun huidige eigenaar */
             vips: components["schemas"]["VipOwner"][];
         };
@@ -1283,6 +1443,11 @@ export interface components {
         Node: {
             /** Format: uuid */
             id: string;
+            /**
+             * @description De laatste driftcontrole, of null als de node nooit gecontroleerd is
+             * @enum {string|null}
+             */
+            drift_status: "in_sync" | "drift" | "error" | "none" | null;
             /** @description De gekoppelde VM of container in Proxmox, of null */
             proxmox: components["schemas"]["NodeProxmox"] | null;
             status: components["schemas"]["Status"];
@@ -3179,6 +3344,104 @@ export interface operations {
                 };
             };
             401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    getClusterDrift: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DriftReport"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    checkClusterDrift: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description De drift na de controle */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DriftReport"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    getNodeDrift: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK; nodes heeft hoogstens deze ene node */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DriftReport"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    checkNodeDrift: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description De drift na de controle */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DriftReport"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
             404: components["responses"]["Error"];
         };
     };

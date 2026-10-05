@@ -346,7 +346,9 @@ func (r *runCtx) enrolled(ctx context.Context, n *plannedNode) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	return row.AgentProtocol != nil && row.HeartbeatAt != nil && time.Since(*row.HeartbeatAt) < status.HeartbeatLate, nil
+	// Ook de facts moeten er zijn: de software-stap leest de netwerkkaart
+	// daaruit, en ze kunnen na de eerste heartbeat binnenkomen.
+	return row.AgentProtocol != nil && row.HeartbeatAt != nil && time.Since(*row.HeartbeatAt) < status.HeartbeatLate && len(row.Facts) > 0, nil
 }
 
 func (r *runCtx) enroll(ctx context.Context, n *plannedNode, logf func(string, ...any)) error {

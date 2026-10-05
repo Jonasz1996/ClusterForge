@@ -111,6 +111,11 @@ type Desired struct {
 	nodes   map[uuid.UUID]NodeState
 }
 
+// Has zegt of de node in de spec staat.
+func (d *Desired) Has(nodeID uuid.UUID) bool {
+	return slices.ContainsFunc(d.Spec.Nodes, func(n SpecNode) bool { return n.NodeID == nodeID })
+}
+
 // Render geeft de stappen van één node.
 func (d *Desired) Render(nodeID uuid.UUID) ([]templates.Step, error) {
 	return RenderNode(d.Template, d.Spec, d.secrets, d.nodes, nodeID)

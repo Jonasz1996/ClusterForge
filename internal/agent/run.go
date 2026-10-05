@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net"
 	"net/url"
+	"sync"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -41,6 +42,8 @@ type Agent struct {
 	nc        *nats.Conn
 	factsNow  chan struct{}
 	connected chan struct{}
+	// stateMu bewaakt StatePath; zie updateState.
+	stateMu sync.Mutex
 }
 
 // Connect verbindt met NATS. Is de server nog niet bereikbaar, dan blijft de

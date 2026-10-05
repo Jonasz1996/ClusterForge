@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { DriftBadge } from "@/components/drift/Drift";
 import { EnvBadge, StatusBadge } from "@/components/inventory/bits";
 import type { Cluster, Status } from "@/lib/inventory";
 
@@ -29,7 +30,10 @@ export function ClusterHealth({ clusters }: { clusters: Cluster[] }) {
                 <EnvBadge env={c.environment} />
               </div>
             </div>
-            <StatusBadge status={c.status} reason={c.status_reason} />
+            <span className="flex flex-col items-end gap-1">
+              <StatusBadge status={c.status} reason={c.status_reason} />
+              <DriftBadge drift={c.drift} />
+            </span>
           </div>
           {c.status_reason && <p className="mt-2 text-xs text-slate-500">{c.status_reason}</p>}
           {c.vips.length > 0 && (

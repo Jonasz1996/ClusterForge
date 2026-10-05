@@ -50,7 +50,9 @@ func TestChanges(t *testing.T) {
 			t.Errorf("%s hoort in het logboek", a)
 		}
 	}
-	if changes(protocol.CmdFactsCollect) {
-		t.Error("facts.collect leest alleen")
+	for _, a := range []string{protocol.CmdFactsCollect, protocol.CmdInspect} {
+		if changes(a) {
+			t.Errorf("%s leest alleen", a)
+		}
 	}
 }
