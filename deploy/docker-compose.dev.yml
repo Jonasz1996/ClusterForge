@@ -1,0 +1,27 @@
+# Ontwikkelomgeving: alleen de afhankelijkheden. De server en de Next.js-
+# devserver draai je lokaal met `make dev-server` en `make dev-web`.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: clusterforge
+      POSTGRES_PASSWORD: clusterforge
+      POSTGRES_DB: clusterforge
+    ports: ["127.0.0.1:5432:5432"]
+    volumes:
+      - pgdata-dev:/var/lib/postgresql/data
+      - ./dev-init.sql:/docker-entrypoint-initdb.d/dev-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U clusterforge"]
+      interval: 5s
+      retries: 10
+
+  victoriametrics:
+    image: victoriametrics/victoria-metrics:v1.153.0
+    command: ["-retentionPeriod=30d"]
+    ports: ["127.0.0.1:8428:8428"]
+    volumes: [vmdata-dev:/victoria-metrics-data]
+
+volumes:
+  pgdata-dev:
+  vmdata-dev:

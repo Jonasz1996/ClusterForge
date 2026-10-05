@@ -1,0 +1,42 @@
+# Productie-opzet op één VM of LXC. Zet de waarden in een .env-bestand naast
+# dit bestand (zie .env.example) en zet de server achter je reverse proxy met TLS.
+services:
+  server:
+    image: ${CF_IMAGE:-ghcr.io/jonasz1996/clusterforge-server:latest}
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      CF_DATABASE_URL: postgres://clusterforge:${POSTGRES_PASSWORD:?zet POSTGRES_PASSWORD}@postgres:5432/clusterforge?sslmode=disable
+      CF_LISTEN: ":8080"
+      CF_SECURE_COOKIES: ${CF_SECURE_COOKIES:-true}
+      CF_TRUST_PROXY_HEADERS: ${CF_TRUST_PROXY_HEADERS:-false}
+      CF_SESSION_TTL: ${CF_SESSION_TTL:-12h}
+    ports: ["${CF_BIND:-127.0.0.1}:8080:8080"]
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: clusterforge
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?zet POSTGRES_PASSWORD}
+      POSTGRES_DB: clusterforge
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U clusterforge"]
+      interval: 5s
+      retries: 10
+
+  victoriametrics:
+    image: victoriametrics/victoria-metrics:v1.153.0
+    restart: unless-stopped
+    command: ["-retentionPeriod=90d"]
+    volumes: [vmdata:/victoria-metrics-data]
+
+volumes:
+  pgdata:
+  vmdata:
