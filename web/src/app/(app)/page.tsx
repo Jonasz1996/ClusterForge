@@ -24,6 +24,12 @@ const actionLabels: Record<string, string> = {
   "vip.created": "VIP toegevoegd",
   "vip.updated": "VIP gewijzigd",
   "vip.deleted": "VIP verwijderd",
+  "vip.owner_changed": "VIP verhuisd",
+  "agent.enrolled": "Agent aangemeld",
+  "agent.revoked": "Agent ingetrokken",
+  "node.facts_changed": "Facts gewijzigd",
+  "enrollment_token.created": "Enrollmenttoken gemaakt",
+  "enrollment_token.deleted": "Enrollmenttoken ingetrokken",
 };
 
 // subject geeft een leesbare naam voor het onderwerp van een event, voor zover
@@ -47,7 +53,7 @@ export default function OverviewPage() {
     refetchInterval: 30_000,
   });
   const clusters = useClusters();
-  const nodes = useNodes();
+  const nodes = useNodes(true);
   const events = useQuery({
     queryKey: ["events", 20],
     queryFn: async () => unwrap(await api.GET("/events", { params: { query: { limit: 20 } } })).items,
@@ -78,7 +84,17 @@ export default function OverviewPage() {
           <Stat label="Clusters" value={clusters.data ? String(clusters.data.length) : "…"} />
         </Link>
         <Link href="/nodes">
-          <Stat label="Nodes" value={nodes.data ? String(nodes.data.length) : "…"} />
+          <Stat
+            label="Nodes"
+            value={
+              nodes.data
+                ? `${nodes.data.length}` +
+                  (nodes.data.some((n) => n.agent)
+                    ? ` · ${nodes.data.filter((n) => n.agent?.connection === "online").length} online`
+                    : "")
+                : "…"
+            }
+          />
         </Link>
         <Stat label="Server" value={health.data?.status === "ok" ? "Gezond" : health.isLoading ? "…" : "Probleem"} />
         <Stat label="Database" value={health.data?.database === "ok" ? "Bereikbaar" : health.isLoading ? "…" : "Onbereikbaar"} />

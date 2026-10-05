@@ -291,6 +291,98 @@ export interface paths {
         patch: operations["updateNode"];
         trace?: never;
     };
+    "/nodes/{nodeId}/facts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        /** Facts en laatste heartbeat van de agent op deze node */
+        get: operations["getNodeFacts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/enrollment-tokens": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Bruikbare enrollmenttokens (admin) */
+        get: operations["listEnrollmentTokens"];
+        put?: never;
+        /** Enrollmenttoken aanmaken (admin); het token zelf staat alleen in dit antwoord */
+        post: operations["createEnrollmentToken"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/enrollment-tokens/{tokenId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tokenId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Enrollmenttoken intrekken (admin) */
+        delete: operations["deleteEnrollmentToken"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agents/enroll": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Een agent meldt zich aan met een enrollmenttoken (zonder sessie) */
+        post: operations["enrollAgent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agents/{agentId}/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agentId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Agent intrekken (admin); de verbinding wordt meteen verbroken */
+        post: operations["revokeAgent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -427,6 +519,8 @@ export interface components {
         Node: {
             /** Format: uuid */
             id: string;
+            /** @description De actieve agent, of null als er (nog) geen agent is */
+            agent: components["schemas"]["AgentSummary"] | null;
             /** Format: uuid */
             cluster_id: string | null;
             cluster_slug: string | null;
@@ -488,6 +582,153 @@ export interface components {
             interface?: string;
             vrid?: number | null;
             description?: string;
+        };
+        /**
+         * @description online bij een heartbeat in de laatste 30 s, late tot 90 s, daarna offline
+         * @enum {string}
+         */
+        AgentConnection: "online" | "late" | "offline";
+        AgentSummary: {
+            /** Format: uuid */
+            id: string;
+            version: string;
+            /** Format: date-time */
+            enrolled_at: string;
+            /** Format: date-time */
+            last_seen_at: string | null;
+            connection: components["schemas"]["AgentConnection"];
+        };
+        NodeRuntime: {
+            facts: components["schemas"]["Facts"] | null;
+            /** Format: date-time */
+            collected_at: string | null;
+            /** Format: date-time */
+            changed_at: string | null;
+            heartbeat: components["schemas"]["HeartbeatStatus"] | null;
+        };
+        HeartbeatStatus: {
+            /** Format: date-time */
+            received_at: string;
+            /** Format: int64 */
+            uptime_seconds: number;
+            load: number[];
+            addresses: string[];
+            services: {
+                [key: string]: string;
+            };
+        };
+        /** @description Zoals de agent ze verzamelt; zie pkg/protocol */
+        Facts: {
+            hostname: string;
+            machine_id: string;
+            os: {
+                id: string;
+                version_id: string;
+                codename: string;
+                pretty_name: string;
+            };
+            kernel: string;
+            arch: string;
+            virtualization: string;
+            cpus: number;
+            /** Format: int64 */
+            memory_bytes: number;
+            /** Format: int64 */
+            swap_bytes: number;
+            /** Format: date-time */
+            boot_time: string;
+            primary_address: string;
+            interfaces: {
+                name: string;
+                mac: string;
+                up: boolean;
+                addresses: string[] | null;
+            }[] | null;
+            filesystems: {
+                mount: string;
+                device: string;
+                type: string;
+                /** Format: int64 */
+                size_bytes: number;
+                /** Format: int64 */
+                used_bytes: number;
+            }[] | null;
+            services: {
+                name: string;
+                active: string;
+                enabled: string;
+            }[] | null;
+            docker: {
+                version: string;
+                containers: number;
+            } | null;
+            keepalived: {
+                active: string;
+                vips: string[] | null;
+            } | null;
+            upgrades: {
+                total: number;
+                security: number;
+                packages: string[] | null;
+            } | null;
+        };
+        EnrollmentToken: {
+            /** Format: uuid */
+            id: string;
+            description: string;
+            /** Format: uuid */
+            node_id: string | null;
+            node_hostname: string | null;
+            /** Format: uuid */
+            cluster_id: string | null;
+            cluster_name: string | null;
+            max_uses: number;
+            uses: number;
+            /** Format: date-time */
+            expires_at: string;
+            /** Format: date-time */
+            created_at: string;
+            /** @description Gebruikersnaam */
+            created_by: string | null;
+        };
+        EnrollmentTokenInput: {
+            description?: string;
+            /**
+             * Format: uuid
+             * @description Alleen deze bestaande node mag zich ermee aanmelden
+             */
+            node_id?: string | null;
+            /**
+             * Format: uuid
+             * @description Nieuwe nodes komen in dit cluster
+             */
+            cluster_id?: string | null;
+            /** @description Standaard 1 */
+            max_uses?: number;
+            /** @description Standaard 24 */
+            ttl_hours?: number;
+        };
+        NewEnrollmentToken: components["schemas"]["EnrollmentToken"] & {
+            /** @description Alleen nu zichtbaar */
+            token: string;
+        };
+        EnrollRequest: {
+            token: string;
+            nkey_public: string;
+            hostname: string;
+            machine_id: string;
+            agent_version: string;
+            protocol_version: number;
+        };
+        EnrollResponse: {
+            /** Format: uuid */
+            agent_id: string;
+            /** Format: uuid */
+            node_id: string;
+            /** @description Bijvoorbeeld tls://clusterforge.lan:4222 */
+            nats_url: string;
+            /** @description Hex-sha256 van het NATS-certificaat; de agent pint het */
+            nats_cert_sha256: string;
         };
     };
     responses: {
@@ -1094,6 +1335,155 @@ export interface operations {
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];
+        };
+    };
+    getNodeFacts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NodeRuntime"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    listEnrollmentTokens: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["EnrollmentToken"][];
+                    };
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+        };
+    };
+    createEnrollmentToken: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EnrollmentTokenInput"];
+            };
+        };
+        responses: {
+            /** @description Aangemaakt */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NewEnrollmentToken"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+        };
+    };
+    deleteEnrollmentToken: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tokenId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Verwijderd */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    enrollAgent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["EnrollRequest"];
+            };
+        };
+        responses: {
+            /** @description Aangemeld */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnrollResponse"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            429: components["responses"]["Error"];
+        };
+    };
+    revokeAgent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                agentId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Ingetrokken */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
         };
     };
 }

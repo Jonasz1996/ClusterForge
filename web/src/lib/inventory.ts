@@ -19,6 +19,12 @@ export type Vip = components["schemas"]["Vip"];
 export type VipInput = components["schemas"]["VipInput"];
 export type VipPatch = components["schemas"]["VipPatch"];
 export type UserRef = components["schemas"]["UserRef"];
+export type AgentSummary = components["schemas"]["AgentSummary"];
+export type AgentConnection = components["schemas"]["AgentConnection"];
+export type NodeRuntime = components["schemas"]["NodeRuntime"];
+export type Facts = components["schemas"]["Facts"];
+export type EnrollmentToken = components["schemas"]["EnrollmentToken"];
+export type EnrollmentTokenInput = components["schemas"]["EnrollmentTokenInput"];
 
 export const clusterTypes: { value: ClusterType; label: string }[] = [
   { value: "keepalived", label: "Keepalived" },
@@ -44,6 +50,12 @@ export const lifecycles: { value: NodeLifecycle; label: string; tone: "slate" | 
   { value: "decommissioned", label: "Uit dienst", tone: "slate" },
 ];
 
+export const connections: Record<AgentConnection, { label: string; tone: "green" | "amber" | "red" }> = {
+  online: { label: "Online", tone: "green" },
+  late: { label: "Vertraagd", tone: "amber" },
+  offline: { label: "Offline", tone: "red" },
+};
+
 export const typeLabel = (t: string) => clusterTypes.find((x) => x.value === t)?.label ?? t;
 export const envInfo = (e: string) => environments.find((x) => x.value === e) ?? { value: e, label: e, tone: "amber" as const };
 export const lifecycleInfo = (l: string) => lifecycles.find((x) => x.value === l) ?? { value: l, label: l, tone: "slate" as const };
@@ -62,6 +74,8 @@ const keys = {
   nodes: ["nodes"] as const,
   node: (id: string) => ["nodes", id] as const,
   users: ["users"] as const,
+  facts: (id: string) => ["nodes", id, "facts"] as const,
+  tokens: ["enrollment-tokens"] as const,
 };
 
 export function useIsAdmin() {
@@ -72,16 +86,25 @@ export function useClusters() {
   return useQuery({ queryKey: keys.clusters, queryFn: async () => unwrap(await api.GET("/clusters")).items });
 }
 
+// Agentstatus verandert vanzelf; daarom verversen de schermen die hem tonen
+// regelmatig.
+export const liveInterval = 15_000;
+
 export function useCluster(id: string) {
   return useQuery({
     queryKey: keys.cluster(id),
     queryFn: async () => unwrap(await api.GET("/clusters/{clusterId}", { params: { path: { clusterId: id } } })),
     enabled: id !== "",
+    refetchInterval: liveInterval,
   });
 }
 
-export function useNodes() {
-  return useQuery({ queryKey: keys.nodes, queryFn: async () => unwrap(await api.GET("/nodes")).items });
+export function useNodes(live = false) {
+  return useQuery({
+    queryKey: keys.nodes,
+    queryFn: async () => unwrap(await api.GET("/nodes")).items,
+    refetchInterval: live ? liveInterval : false,
+  });
 }
 
 export function useNode(id: string) {
@@ -89,6 +112,50 @@ export function useNode(id: string) {
     queryKey: keys.node(id),
     queryFn: async () => unwrap(await api.GET("/nodes/{nodeId}", { params: { path: { nodeId: id } } })),
     enabled: id !== "",
+    refetchInterval: liveInterval,
+  });
+}
+
+export function useNodeFacts(id: string) {
+  return useQuery({
+    queryKey: keys.facts(id),
+    queryFn: async () => unwrap(await api.GET("/nodes/{nodeId}/facts", { params: { path: { nodeId: id } } })),
+    enabled: id !== "",
+    refetchInterval: liveInterval,
+  });
+}
+
+export function useEnrollmentTokens(enabled: boolean) {
+  return useQuery({
+    queryKey: keys.tokens,
+    queryFn: async () => unwrap(await api.GET("/enrollment-tokens")).items,
+    enabled,
+  });
+}
+
+export function useCreateEnrollmentToken() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: EnrollmentTokenInput) => unwrap(await api.POST("/enrollment-tokens", { body })),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: keys.tokens }),
+  });
+}
+
+export function useDeleteEnrollmentToken() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) =>
+      unwrap(await api.DELETE("/enrollment-tokens/{tokenId}", { params: { path: { tokenId: id } } })),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: keys.tokens }),
+  });
+}
+
+export function useRevokeAgent() {
+  const invalidate = useInvalidate();
+  return useMutation({
+    mutationFn: async (id: string) =>
+      unwrap(await api.POST("/agents/{agentId}/revoke", { params: { path: { agentId: id } } })),
+    onSuccess: invalidate,
   });
 }
 

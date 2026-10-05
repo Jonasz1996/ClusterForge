@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { Alert, Badge } from "@/components/ui";
-import { envInfo, lifecycleInfo } from "@/lib/inventory";
+import { connections, envInfo, lifecycleInfo, type AgentSummary } from "@/lib/inventory";
 
 export function EnvBadge({ env }: { env: string }) {
   const e = envInfo(env);
@@ -10,6 +10,46 @@ export function EnvBadge({ env }: { env: string }) {
 export function LifecycleBadge({ lifecycle }: { lifecycle: string }) {
   const l = lifecycleInfo(lifecycle);
   return <Badge tone={l.tone}>{l.label}</Badge>;
+}
+
+export function AgentBadge({ agent }: { agent: AgentSummary | null }) {
+  if (!agent) return <Badge>Geen agent</Badge>;
+  const c = connections[agent.connection];
+  return (
+    <Badge tone={c.tone}>
+      <span className="mr-1 inline-block size-1.5 rounded-full bg-current" aria-hidden />
+      {c.label}
+    </Badge>
+  );
+}
+
+export function formatBytes(n: number) {
+  const units = ["B", "KB", "MB", "GB", "TB", "PB"];
+  let i = 0;
+  while (n >= 1024 && i < units.length - 1) {
+    n /= 1024;
+    i++;
+  }
+  return `${n.toLocaleString("nl-BE", { maximumFractionDigits: n < 10 && i > 0 ? 1 : 0 })} ${units[i]}`;
+}
+
+export function formatDuration(seconds: number) {
+  const d = Math.floor(seconds / 86400);
+  const h = Math.floor((seconds % 86400) / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  if (d > 0) return `${d} d ${h} u`;
+  if (h > 0) return `${h} u ${m} min`;
+  return `${m} min`;
+}
+
+// ago zegt hoe lang geleden iets was, in gewone woorden.
+export function ago(iso: string | null | undefined, now = Date.now()) {
+  if (!iso) return "nooit";
+  const s = Math.max(0, Math.round((now - new Date(iso).getTime()) / 1000));
+  if (s < 60) return `${s} s geleden`;
+  if (s < 3600) return `${Math.floor(s / 60)} min geleden`;
+  if (s < 86400) return `${Math.floor(s / 3600)} u geleden`;
+  return `${Math.floor(s / 86400)} d geleden`;
 }
 
 export function Tags({ tags }: { tags: string[] }) {
