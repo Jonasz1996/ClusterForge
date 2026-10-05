@@ -15,7 +15,7 @@ export function Button({
   variant = "primary",
   className,
   ...props
-}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: "primary" | "secondary" | "ghost" | "danger" }) {
+}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: "primary" | "secondary" | "secondary-danger" | "ghost" | "danger" }) {
   return (
     <button
       className={cx(
@@ -23,6 +23,8 @@ export function Button({
         variant === "primary" && "bg-brand-600 text-white hover:bg-brand-700",
         variant === "secondary" &&
           "border border-slate-300 bg-white text-slate-800 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800",
+        variant === "secondary-danger" &&
+          "border border-slate-300 bg-white text-red-700 hover:bg-red-50 dark:border-slate-700 dark:bg-slate-900 dark:text-red-300 dark:hover:bg-slate-800",
         variant === "ghost" && "text-slate-600 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800",
         variant === "danger" && "bg-red-600 text-white hover:bg-red-700",
         className,

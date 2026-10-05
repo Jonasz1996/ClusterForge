@@ -73,8 +73,7 @@ export function GuestActions({
           {items.map((it) => (
             <Button
               key={it.label}
-              variant="secondary"
-              className={`px-2.5 py-1.5 ${it.danger ? "text-red-700 dark:text-red-300" : ""}`}
+              variant={it.danger ? "secondary-danger" : "secondary"}
               disabled={action.isPending}
               onClick={it.onClick}
             >
