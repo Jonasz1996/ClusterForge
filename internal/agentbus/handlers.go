@@ -181,7 +181,7 @@ func (b *Bus) handleFacts(ctx context.Context, nodeID uuid.UUID, f protocol.Fact
 		}); err != nil {
 			return err
 		}
-		if ip, err := netip.ParseAddr(f.PrimaryAddress); err == nil {
+		if ip, err := netip.ParseAddr(f.PrimaryAddress); err == nil && !ip.IsLoopback() {
 			if err := q.SetNodePrimaryIPIfEmpty(ctx, store.SetNodePrimaryIPIfEmptyParams{ID: nodeID, PrimaryIp: &ip}); err != nil {
 				return err
 			}

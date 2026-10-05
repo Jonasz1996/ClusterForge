@@ -41,13 +41,15 @@ var _ gen.ServerInterface = (*Server)(nil)
 
 func New(cfg config.Config, log *slog.Logger, pool *pgxpool.Pool, authSvc *auth.Service, bus AgentBus, version string) *Server {
 	ev := events.NewWriter(store.New(pool), log)
+	inv := inventory.NewService(pool, ev)
+	inv.Disconnect = bus.Disconnect
 	return &Server{
 		cfg:     cfg,
 		log:     log,
 		pool:    pool,
 		q:       store.New(pool),
 		auth:    authSvc,
-		inv:     inventory.NewService(pool, ev),
+		inv:     inv,
 		agents:  agents.NewService(pool, ev, bus),
 		bus:     bus,
 		version: version,
@@ -84,6 +86,7 @@ func (s *Server) Handler() http.Handler {
 	})
 	r.Get("/install/agent.sh", agentdist.InstallScript)
 	r.Get("/downloads/*", agentdist.Downloads(s.cfg.AgentDir))
+	r.Head("/downloads/*", agentdist.Downloads(s.cfg.AgentDir))
 	r.Handle("/*", webui.Handler())
 	return r
 }

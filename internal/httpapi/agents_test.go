@@ -317,3 +317,37 @@ func TestAgentDownloads(t *testing.T) {
 		}
 	}
 }
+
+func TestDeleteNodeDisconnectsAgent(t *testing.T) {
+	e, c := adminClient(t)
+	ctx := context.Background()
+
+	var tok newToken
+	c.do("POST", "/api/v1/enrollment-tokens", map[string]any{}, &tok)
+	cfg, err := agent.Enroll(ctx, agent.EnrollOptions{ServerURL: e.srv.URL, Token: tok.Token, Root: fakeRoot(t, strings.Repeat("3", 32))})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	kp, _ := nkeys.FromSeed([]byte(cfg.NkeySeed))
+	pub, _ := kp.PublicKey()
+	closed := make(chan struct{})
+	nc, err := nats.Connect(cfg.NatsURL, nats.Nkey(pub, kp.Sign), nats.Secure(protocol.PinnedTLSConfig(cfg.NatsCertSHA256)),
+		nats.NoReconnect(), nats.ClosedHandler(func(*nats.Conn) { close(closed) }))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer nc.Close()
+
+	if status := c.do("DELETE", "/api/v1/nodes/"+cfg.NodeID, nil, nil); status != http.StatusNoContent {
+		t.Fatalf("delete: %d", status)
+	}
+	select {
+	case <-closed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("verbinding van de agent bleef open na het verwijderen van zijn node")
+	}
+	if _, err := nats.Connect(cfg.NatsURL, nats.Nkey(pub, kp.Sign), nats.Secure(protocol.PinnedTLSConfig(cfg.NatsCertSHA256))); err == nil {
+		t.Fatal("sleutel van verwijderde node toegelaten")
+	}
+}
