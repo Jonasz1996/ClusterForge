@@ -88,10 +88,29 @@ type FieldError struct {
 
 func (e FieldError) Error() string { return e.Msg }
 
-// Validate controleert de ingevulde parameters en geeft ze genormaliseerd
-// terug: getallen als int, groottes als "2G", netwerken als 10.0.0.0/24.
-// Lege secrets worden gegenereerd; Secrets zegt welke dat zijn.
+// Validate controleert de ingevulde parameters van een nieuwe uitrol en geeft
+// ze genormaliseerd terug: getallen als int, groottes als "2G", netwerken als
+// 10.0.0.0/24. Lege secrets worden gegenereerd; Secrets zegt welke dat zijn.
 func (t *Template) Validate(input map[string]any) (map[string]any, error) {
+	return t.validate(input, true)
+}
+
+// Values geeft de waarden om een bestaand cluster mee te renderen: de
+// parameters uit de spec met de opgeslagen geheimen erbij. Een ontbrekend
+// geheim is hier een fout; een nieuwe waarde zou elke node een ander
+// wachtwoord geven.
+func (t *Template) Values(params map[string]any, secrets map[string]string) (map[string]any, error) {
+	in := make(map[string]any, len(params)+len(secrets))
+	for k, v := range params {
+		in[k] = v
+	}
+	for k, v := range secrets {
+		in[k] = v
+	}
+	return t.validate(in, false)
+}
+
+func (t *Template) validate(input map[string]any, generate bool) (map[string]any, error) {
 	out := map[string]any{}
 	known := map[string]bool{}
 	for _, p := range t.Params {
@@ -104,9 +123,11 @@ func (t *Template) Validate(input map[string]any) (map[string]any, error) {
 			switch {
 			case p.Default != nil:
 				v = p.Default
-			case p.Type == "secret":
+			case p.Type == "secret" && generate:
 				out[p.Name] = randomSecret(p.Length)
 				continue
+			case p.Type == "secret":
+				return nil, FieldError{p.Name, "geheim " + p.Name + " ontbreekt"}
 			case p.Optional:
 				out[p.Name] = nil
 				continue

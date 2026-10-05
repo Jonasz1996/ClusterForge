@@ -21,6 +21,7 @@ Het technisch ontwerp staat in [docs/design/mvp-fase-1.md](docs/design/mvp-fase-
 | 1. Logboek | Wie deed wat, wanneer en vanaf waar; filters en export | klaar |
 | 2. Back-ups | Versheid van de Proxmox-back-ups per VM, VM's zonder back-upjob | klaar |
 | 3. Herkomst en clusterslot | IP, sessie en taak bij elke regel, commando's aan agents in het logboek, één schrijvende taak per cluster | klaar |
+| 4. Gewenste staat | Specificatie per cluster met revisies, vaste templateversies, controle op onveilige waarden in templates | klaar |
 
 ## Draaien met Docker Compose
 
@@ -161,6 +162,14 @@ Loopt een stap mis, dan staat bij de taak waarom. Los het op en klik op "Opnieuw
 
 Een eigen golden image kan ook: installeer cf-agent erin met `agent.sh --server https://clusterforge.example --no-enroll`. De agent meldt zich dan aan zodra ClusterForge het aanmeldbestand in de nieuwe VM zet. Zorg ook voor cloud-init en qemu-guest-agent, en maak `/etc/machine-id` leeg voor je er een template van maakt.
 
+### Gewenste staat
+
+Elk cluster uit een template heeft een specificatie, de gewenste staat: de templateversie, de parameters, het netwerk en de nodes. Daarmee berekent ClusterForge op elk moment voor elke node opnieuw wat er hoort te staan, precies zoals bij de uitrol. Geheimen staan er niet in, alleen dat ze versleuteld opgeslagen zijn. Elke wijziging is een nieuwe revisie. Bij een cluster zie je onder Specificatie de huidige parameters en de historie, met per revisie wanneer ze gemaakt is, door wie, waarvandaan (webinterface, API of Git) en wat er veranderde. Wat niet klopt staat erboven: een node die niet meer bij het cluster hoort, een actieve node die niet in de specificatie staat, of een templateversie die deze server niet kent.
+
+Templates hebben een versie, en een cluster blijft op de versie waarmee het uitgerold is. Een nieuwere ClusterForge brengt nieuwe versies mee naast de oude: een nieuw cluster krijgt de nieuwste, een bestaand cluster verandert pas als iemand zijn specificatie bewust wijzigt. Mist een versie die een cluster gebruikt, bijvoorbeeld na een downgrade, dan meldt de server dat bij het starten en bij het cluster.
+
+In de commando's en paden van een template mag alleen iets komen waarvan de vorm vastligt: getallen, IP-adressen, groottes, ja of nee, strings met een pattern van alleen letters, cijfers en `. _ - : @ , + =`, de slug en omgeving van het cluster, en hostname, rol, index, adres en prefix van een node. Een template die daar iets anders gebruikt, laadt niet. Zo kan een parameter, ook een die later uit Git komt, geen eigen shellcommando op de nodes uitvoeren.
+
 ## Onderhoud, herstarten en afsluiten
 
 Bij elke node staat de kaart Beheer:
@@ -212,6 +221,8 @@ Open http://localhost:3000.
 | `cf-agent` voor amd64 en arm64 (in `bin/agents`, voor `make dev-server`) | `make agent` |
 | Container-image | `make docker` |
 
+De ingebouwde templates staan in `internal/templates/builtin/<naam>/<versie>/`. Een uitgebrachte versie verander je niet meer, want clusters kunnen ze gebruiken: kopieer de map naar een nieuwe versie, pas die aan en zet hem in de lijst `released` in `internal/templates/registry_test.go`. De test faalt als een uitgebrachte versie verdwijnt of een nieuwe er niet in staat.
+
 ### Indeling
 
 ```text
@@ -233,6 +244,10 @@ internal/proxmox/          Proxmox-API: koppelingen, sync elke 20 s en VM-acties
 internal/jobs/             taken op de achtergrond met stappen, logboek en annuleren
 internal/lifecycle/        acties op nodes via de agent: onderhoud, herstarten, afsluiten
 internal/secrets/          versleutelen van geheimen met de masterkey
+internal/templates/        ingebouwde templates per versie, parameters en de controle op onveilige waarden
+internal/deploy/           clusters uitrollen, de gewenste staat en haar revisies
+internal/audit/            het logboek: lezen, filteren, beschrijven en exporteren
+internal/backups/          versheid van de Proxmox-back-ups per VM
 pkg/protocol/              berichten tussen server en agent
 internal/webui/            ingebedde webinterface
 migrations/                goose SQL-migraties

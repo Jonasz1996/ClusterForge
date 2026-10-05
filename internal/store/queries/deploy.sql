@@ -51,3 +51,24 @@ SELECT EXISTS (SELECT 1 FROM clusters WHERE slug = $1);
 -- Na een uitrol: de netwerkkaart van het VIP, als die nog leeg is.
 UPDATE vips SET interface = @interface, updated_at = now()
 WHERE cluster_id = @cluster_id AND host(address) = @address::text AND interface = '';
+
+-- name: ListDesiredNodes :many
+-- De nodes van een cluster met wat renderen nodig heeft: het vaste adres
+-- en de facts.
+SELECT n.id, n.hostname, n.lifecycle, coalesce(host(n.primary_ip), '')::text AS primary_ip, f.facts
+FROM nodes n
+LEFT JOIN node_facts f ON f.node_id = n.id
+WHERE n.cluster_id = $1
+ORDER BY n.hostname;
+
+-- name: ListSpecRevisions :many
+SELECT r.revision, r.spec, r.source, r.created_at, r.created_by, u.username AS created_by_name
+FROM cluster_spec_revisions r
+LEFT JOIN users u ON u.id = r.created_by
+WHERE r.cluster_id = $1
+ORDER BY r.revision DESC;
+
+-- name: ListTemplateClusters :many
+SELECT name, template_name::text AS template_name, template_version::text AS template_version
+FROM clusters WHERE template_name IS NOT NULL AND template_version IS NOT NULL
+ORDER BY name;

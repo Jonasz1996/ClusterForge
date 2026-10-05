@@ -6,12 +6,10 @@ package templates
 
 import (
 	"bytes"
-	"embed"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
-	"path"
 	"regexp"
 	"slices"
 	"strconv"
@@ -23,9 +21,6 @@ import (
 
 	"github.com/Jonasz1996/clusterforge/pkg/protocol"
 )
-
-//go:embed builtin
-var builtinFS embed.FS
 
 // Template is een geladen clustertemplate.
 type Template struct {
@@ -105,6 +100,9 @@ func Parse(fsys fs.FS) (*Template, error) {
 		}
 		roles[r.Name] = true
 	}
+	if err := t.checkUnsafe(); err != nil {
+		return nil, err
+	}
 	t.files = template.New("files").Funcs(funcs).Option("missingkey=error")
 	if sub, err := fs.Sub(fsys, "files"); err == nil {
 		err := fs.WalkDir(sub, ".", func(p string, d fs.DirEntry, err error) error {
@@ -128,36 +126,6 @@ func Parse(fsys fs.FS) (*Template, error) {
 		return nil, err
 	}
 	return &t, nil
-}
-
-var builtin []*Template
-
-func init() {
-	dirs, err := fs.ReadDir(builtinFS, "builtin")
-	if err != nil {
-		panic(err)
-	}
-	for _, d := range dirs {
-		sub, _ := fs.Sub(builtinFS, path.Join("builtin", d.Name()))
-		t, err := Parse(sub)
-		if err != nil {
-			panic(fmt.Sprintf("ingebouwde template %s: %v", d.Name(), err))
-		}
-		builtin = append(builtin, t)
-	}
-}
-
-// Builtin geeft de templates die in de server zitten.
-func Builtin() []*Template { return builtin }
-
-// Get zoekt een ingebouwde template op naam.
-func Get(name string) (*Template, bool) {
-	for _, t := range builtin {
-		if t.Name == name {
-			return t, true
-		}
-	}
-	return nil, false
 }
 
 // --- renderen ---

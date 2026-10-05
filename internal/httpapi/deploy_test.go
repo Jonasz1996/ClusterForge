@@ -15,6 +15,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/Jonasz1996/clusterforge/internal/agent"
 	"github.com/Jonasz1996/clusterforge/internal/agent/agenttest"
 	"github.com/Jonasz1996/clusterforge/internal/proxmox/pvefake"
@@ -430,6 +432,104 @@ func TestDeploy(t *testing.T) {
 		(SELECT count(*) FROM events WHERE payload::text LIKE '%geheim-secret%')`).Scan(&leaks)
 	if leaks != 0 || strings.Contains(logs, "geheim12") {
 		t.Fatalf("auth_pass staat %d keer in de database of in het log", leaks)
+	}
+
+	// De gewenste staat uit clusters.spec geeft precies de bestanden die de
+	// uitrol op de nodes zette.
+	clusterID := uuid.MustParse(res.ClusterID)
+	desired, err := e.deploy.Desired(context.Background(), clusterID)
+	if err != nil || desired.Revision != 1 || desired.Template.Version != "1.0.0" || len(desired.Membership) != 0 {
+		t.Fatalf("gewenste staat: %+v %v", desired, err)
+	}
+	for _, n := range cl.Nodes {
+		steps, err := desired.Render(uuid.MustParse(n.ID))
+		if err != nil {
+			t.Fatalf("%s renderen: %v", n.Hostname, err)
+		}
+		files := 0
+		for _, st := range steps {
+			if st.File == nil {
+				continue
+			}
+			files++
+			got, err := os.ReadFile(filepath.Join(f.host(n.Hostname).Root, st.File.Path))
+			if err != nil || string(got) != st.File.Content {
+				t.Fatalf("%s %s wijkt af van de gewenste staat: %v", n.Hostname, st.File.Path, err)
+			}
+		}
+		if files != 2 {
+			t.Fatalf("%s: %d bestanden", n.Hostname, files)
+		}
+	}
+
+	// De historie van de spec, ook voor een viewer, zonder geheimen.
+	type specHistory struct {
+		Template *struct {
+			Name      string  `json:"name"`
+			Version   string  `json:"version"`
+			Available bool    `json:"available"`
+			Latest    *string `json:"latest"`
+		} `json:"template"`
+		Revision int `json:"revision"`
+		Params   []struct {
+			Name   string  `json:"name"`
+			Label  string  `json:"label"`
+			Value  *string `json:"value"`
+			Secret bool    `json:"secret"`
+		} `json:"params"`
+		Notes []string `json:"notes"`
+		Items []struct {
+			Revision        int       `json:"revision"`
+			Source          string    `json:"source"`
+			CreatedBy       *auditRef `json:"created_by"`
+			TemplateVersion string    `json:"template_version"`
+			Nodes           []string  `json:"nodes"`
+			Changes         []any     `json:"changes"`
+		} `json:"items"`
+	}
+	var hist specHistory
+	if s := v.do("GET", "/api/v1/clusters/"+res.ClusterID+"/spec-revisions", nil, &hist); s != 200 {
+		t.Fatalf("historie: %d", s)
+	}
+	if hist.Template == nil || hist.Template.Version != "1.0.0" || !hist.Template.Available || hist.Revision != 1 || len(hist.Notes) != 0 ||
+		len(hist.Items) != 1 || hist.Items[0].CreatedBy == nil || hist.Items[0].CreatedBy.Name != "admin" ||
+		!slices.Equal(hist.Items[0].Nodes, []string{"web-01", "web-02"}) || len(hist.Items[0].Changes) != 0 {
+		t.Fatalf("historie: %+v", hist)
+	}
+	for _, p := range hist.Params {
+		if (p.Name == "auth_pass") != (p.Secret && p.Value == nil) {
+			t.Fatalf("parameter %+v", p)
+		}
+		if p.Name == "vip" && (p.Value == nil || *p.Value != "10.0.20.100" || p.Label != "VIP") {
+			t.Fatalf("vip: %+v", p)
+		}
+	}
+	// Een node die met de hand bij het cluster komt, past niet bij de spec.
+	var extra node
+	c.do("POST", "/api/v1/nodes", map[string]any{"hostname": "web-09", "cluster_id": res.ClusterID}, &extra)
+	c.do("GET", "/api/v1/clusters/"+res.ClusterID+"/spec-revisions", nil, &hist)
+	if !slices.Equal(hist.Notes, []string{"web-09 is een actieve node van dit cluster, maar staat niet in de specificatie"}) {
+		t.Fatalf("lidmaatschap: %q", hist.Notes)
+	}
+	c.do("DELETE", "/api/v1/nodes/"+extra.ID, nil, nil)
+	// Een versie die de server niet kent: geen gewenste staat, wel een melding.
+	if _, err := e.pool.Exec(context.Background(), `UPDATE clusters SET template_version = '0.9.0',
+		spec = jsonb_set(spec, '{template,version}', '"0.9.0"') WHERE id = $1`, res.ClusterID); err != nil {
+		t.Fatal(err)
+	}
+	c.do("GET", "/api/v1/clusters/"+res.ClusterID+"/spec-revisions", nil, &hist)
+	if hist.Template.Available || len(hist.Notes) != 1 || !strings.Contains(hist.Notes[0], "keepalived-nginx 0.9.0 zit niet in deze server") {
+		t.Fatalf("onbekende versie: %+v", hist)
+	}
+	if _, err := e.deploy.Desired(context.Background(), clusterID); err == nil {
+		t.Fatal("gewenste staat met een onbekende versie")
+	}
+	if m, _ := e.deploy.MissingTemplates(context.Background()); !slices.Equal(m, []string{"Web gebruikt keepalived-nginx 0.9.0"}) {
+		t.Fatalf("ontbrekende versies: %v", m)
+	}
+	if _, err := e.pool.Exec(context.Background(), `UPDATE clusters SET template_version = '1.0.0',
+		spec = jsonb_set(spec, '{template,version}', '"1.0.0"') WHERE id = $1`, res.ClusterID); err != nil {
+		t.Fatal(err)
 	}
 
 	// Dezelfde VIP of slug kan niet nog eens.

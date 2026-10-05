@@ -396,6 +396,27 @@ func (e Role) Valid() bool {
 	}
 }
 
+// Defines values for SpecRevisionSource.
+const (
+	Api SpecRevisionSource = "api"
+	Git SpecRevisionSource = "git"
+	Ui  SpecRevisionSource = "ui"
+)
+
+// Valid indicates whether the value is a known member of the SpecRevisionSource enum.
+func (e SpecRevisionSource) Valid() bool {
+	switch e {
+	case Api:
+		return true
+	case Git:
+		return true
+	case Ui:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for Status.
 const (
 	StatusDegraded   Status = "degraded"
@@ -1532,6 +1553,62 @@ type ServerInfo struct {
 	Version        string `json:"version"`
 }
 
+// SpecChange defines model for SpecChange.
+type SpecChange struct {
+	From  string `json:"from"`
+	Label string `json:"label"`
+	To    string `json:"to"`
+}
+
+// SpecHistory defines model for SpecHistory.
+type SpecHistory struct {
+	// Items Nieuwste eerst
+	Items []SpecRevision `json:"items"`
+	Notes []string       `json:"notes"`
+
+	// Params De parameters van de huidige revisie; van een geheim alleen dat het opgeslagen is
+	Params []SpecParam `json:"params"`
+
+	// Revision Huidige revisie; 0 zonder spec
+	Revision int                             `json:"revision"`
+	Template nullable.Nullable[SpecTemplate] `json:"template"`
+}
+
+// SpecParam defines model for SpecParam.
+type SpecParam struct {
+	Label  string                    `json:"label"`
+	Name   string                    `json:"name"`
+	Secret bool                      `json:"secret"`
+	Value  nullable.Nullable[string] `json:"value"`
+}
+
+// SpecRevision defines model for SpecRevision.
+type SpecRevision struct {
+	// Changes Wat er veranderde tegenover de vorige revisie; leeg bij de eerste
+	Changes         []SpecChange                `json:"changes"`
+	CreatedAt       time.Time                   `json:"created_at"`
+	CreatedBy       nullable.Nullable[AuditRef] `json:"created_by"`
+	Nodes           []string                    `json:"nodes"`
+	Revision        int                         `json:"revision"`
+	Source          SpecRevisionSource          `json:"source"`
+	Template        string                      `json:"template"`
+	TemplateVersion string                      `json:"template_version"`
+}
+
+// SpecRevisionSource defines model for SpecRevision.Source.
+type SpecRevisionSource string
+
+// SpecTemplate defines model for SpecTemplate.
+type SpecTemplate struct {
+	// Available Deze versie zit in de server
+	Available bool `json:"available"`
+
+	// Latest De nieuwste versie in de server
+	Latest  nullable.Nullable[string] `json:"latest"`
+	Name    string                    `json:"name"`
+	Version string                    `json:"version"`
+}
+
 // Status Berekend uit heartbeats, metrics en VIP's (zie internal/status).
 // unknown betekent: geen agent of nog geen gegevens.
 type Status string
@@ -1907,6 +1984,9 @@ type ServerInterface interface {
 	// GetClusterMetrics Grafieken van een cluster, met een lijn per node
 	// (GET /clusters/{clusterId}/metrics)
 	GetClusterMetrics(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params GetClusterMetricsParams)
+	// ListSpecRevisions De gewenste staat van een cluster uit een template, met elke revisie en wat ze veranderde
+	// (GET /clusters/{clusterId}/spec-revisions)
+	ListSpecRevisions(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
 	// CreateVip VIP toevoegen aan een cluster (admin)
 	// (POST /clusters/{clusterId}/vips)
 	CreateVip(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
@@ -2150,6 +2230,12 @@ func (_ Unimplemented) UpdateBackupPolicy(w http.ResponseWriter, r *http.Request
 // GetClusterMetrics Grafieken van een cluster, met een lijn per node
 // (GET /clusters/{clusterId}/metrics)
 func (_ Unimplemented) GetClusterMetrics(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params GetClusterMetricsParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListSpecRevisions De gewenste staat van een cluster uit een template, met elke revisie en wat ze veranderde
+// (GET /clusters/{clusterId}/spec-revisions)
+func (_ Unimplemented) ListSpecRevisions(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -3047,6 +3133,32 @@ func (siw *ServerInterfaceWrapper) GetClusterMetrics(w http.ResponseWriter, r *h
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetClusterMetrics(w, r, clusterId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListSpecRevisions operation middleware
+func (siw *ServerInterfaceWrapper) ListSpecRevisions(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListSpecRevisions(w, r, clusterId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -4222,6 +4334,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/nodes/{nodeId}/backups", wrapper.GetNodeBackups)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/clusters/{clusterId}/spec-revisions", wrapper.ListSpecRevisions)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/clusters/{clusterId}/backup-policy", wrapper.GetBackupPolicy)
