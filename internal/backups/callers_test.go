@@ -11,11 +11,12 @@ import (
 )
 
 // TestSandboxCallers eist dat alleen de bewaakte functies in sandbox.go een
-// VM terugzetten, verwijderen of de guest agent iets vragen. Elke andere
-// aanroep van Restore, Destroy of AgentInfo kan een productie-VM raken.
+// VM terugzetten, verwijderen, de guest agent iets vragen of er cf-agent
+// verify starten. Elke andere aanroep van Restore, Destroy, AgentInfo,
+// AgentRunVerify of AgentExecStatus kan een productie-VM raken.
 func TestSandboxCallers(t *testing.T) {
 	root := filepath.Join("..", "..")
-	guarded := map[string]bool{"Restore": true, "Destroy": true, "AgentInfo": true}
+	guarded := map[string]bool{"Restore": true, "Destroy": true, "AgentInfo": true, "AgentRunVerify": true, "AgentExecStatus": true}
 	allowed := map[string]bool{
 		filepath.Join("internal", "backups", "sandbox.go"): true,
 		// De definitie zelf en de nep-Proxmox van de tests.
@@ -64,7 +65,7 @@ func TestSandboxCallers(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if found < 3 {
+	if found < 5 {
 		t.Fatalf("maar %d bewaakte aanroepen in sandbox.go gevonden; klopt de zoekopdracht nog?", found)
 	}
 }

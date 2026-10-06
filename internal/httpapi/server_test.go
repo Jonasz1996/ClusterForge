@@ -128,6 +128,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	bk := backups.NewService(pool, ev, log, pve)
 	bk.Poll, bk.ConnPoll, bk.BootTimeout, bk.NoAgentWait = 20*time.Millisecond, 20*time.Millisecond, 3*time.Second, 100*time.Millisecond
 	bk.AgentTimeout, bk.LockWait = 2*time.Second, time.Second
+	bk.Running = dep.Running
 	conns := &testConns{bus: bus}
 	bk.EnableVerify(runner, conns)
 	// Zonder Interval loopt de scanner niet; een test start hem zelf.

@@ -35,6 +35,13 @@ func kaLatest() string {
 
 func deployWeb(t *testing.T, e *testEnv, c *client) (*fleet, string, map[string]string) {
 	t.Helper()
+	f, clusterID, ids, _, _ := deployWebPVE(t, e, c)
+	return f, clusterID, ids
+}
+
+// deployWebPVE is deployWeb, met de nep-Proxmox en de koppeling erbij.
+func deployWebPVE(t *testing.T, e *testEnv, c *client) (*fleet, string, map[string]string, *pvefake.Server, pveConn) {
+	t.Helper()
 	pve, srv, fp := newPVE(t)
 	pve.AddGuest(pvefake.Guest{
 		Type: "qemu", VMID: 9001, Name: "debian-13-cf", Node: "pve1", Status: "stopped", Template: true, MaxCPU: 1, MaxMem: 1 << 30,
@@ -83,7 +90,7 @@ func deployWeb(t *testing.T, e *testEnv, c *client) (*fleet, string, map[string]
 	for _, n := range cl.Nodes {
 		ids[n.Hostname] = n.ID
 	}
-	return f, res.ClusterID, ids
+	return f, res.ClusterID, ids, pve, conn
 }
 
 type driftFinding struct {

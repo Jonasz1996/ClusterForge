@@ -86,6 +86,13 @@ type Measurements struct {
 	OS             string     `json:"os,omitempty"`
 	Filesystems    int        `json:"filesystems,omitempty"`
 	DestroyedAt    *time.Time `json:"destroyed_at,omitempty"`
+	// Uit cf-agent verify: de versie van de agent in de back-up, hoeveel
+	// van de verwachte services actief waren en de databases, zoals
+	// "PostgreSQL met 3 databases".
+	AgentVersion     string   `json:"agent_version,omitempty"`
+	ServicesExpected int      `json:"services_expected,omitempty"`
+	ServicesActive   int      `json:"services_active,omitempty"`
+	Databases        []string `json:"databases,omitempty"`
 }
 
 // Check is één controle in het rapport.
@@ -95,6 +102,8 @@ type Check struct {
 	Detail string `json:"detail"`
 	// Warning: niet in orde, maar geen reden om de back-up af te keuren.
 	Warning bool `json:"warning,omitempty"`
+	// Code zegt wat de beheerder kan doen, zoals agent_too_old.
+	Code string `json:"code,omitempty"`
 }
 
 // TimelineEvent is een moment in de controle, in ms na de start van de taak.
@@ -731,6 +740,7 @@ func (v *verify) check(ctx context.Context, st *jobs.Step) error {
 		}
 		v.addCheck(Check{Name: "Bestandssystemen", OK: root, Detail: detail})
 	}
+	v.deep(ctx, st)
 	v.connectionCheck()
 	v.m.CheckSeconds = secs(s.Now().Sub(t0))
 	v.event("Controles klaar")
@@ -943,6 +953,13 @@ func (v *verify) verdict(ctx context.Context, runErr error) (string, string) {
 	if v.m.Filesystems > 0 {
 		found = append(found, count(v.m.Filesystems, "bestandssysteem", "bestandssystemen"))
 	}
+	switch n := v.m.ServicesExpected; {
+	case n > 0 && v.m.ServicesActive == n:
+		found = append(found, count(n, "service actief", "services actief"))
+	case n > 0:
+		found = append(found, fmt.Sprintf("%d van %d services actief", v.m.ServicesActive, n))
+	}
+	found = append(found, v.m.Databases...)
 	if len(found) > 0 {
 		parts = append(parts, strings.Join(found, ", ")+".")
 	}

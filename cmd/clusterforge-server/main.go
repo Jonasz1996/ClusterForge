@@ -166,6 +166,7 @@ func serve() error {
 	}
 	bk := backups.NewService(pool, ev, log, pve)
 	bk.SandboxStorage, bk.BootTimeout, bk.Window = cfg.SandboxStorage, cfg.SandboxBootTimeout, cfg.TestWindow
+	bk.Running = dep.Running
 	bk.EnableVerify(runner, bus)
 	drf := drift.NewService(pool, ev, log, bus, dep, box.Derive(secrets.PurposeFile))
 	drf.Interval = cfg.DriftInterval

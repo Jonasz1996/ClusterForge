@@ -204,6 +204,8 @@ func backupReport(run store.TestRun, sb *backups.Sandbox) gen.BackupVerifyReport
 			CheckSeconds: nullableOf(m.CheckSeconds), CleanupSeconds: nullableOf(m.CleanupSeconds),
 			TotalSeconds: nullableOf(m.TotalSeconds), Host: m.Host, Storage: m.Storage, SandboxVmid: m.SandboxVMID,
 			Hostname: m.Hostname, Os: m.OS, Filesystems: m.Filesystems, DestroyedAt: nullableOf(m.DestroyedAt),
+			AgentVersion: m.AgentVersion, ServicesExpected: m.ServicesExpected, ServicesActive: m.ServicesActive,
+			Databases: nonNil(m.Databases),
 		},
 		Sandbox: nullable.NewNullNullable[gen.BackupSandbox](),
 	}

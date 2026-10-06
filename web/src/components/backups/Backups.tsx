@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { Alert, Badge, Button, Card, Input, Label, cx } from "@/components/ui";
-import { LastVerification, runningFor, VerifyDialog } from "@/components/backups/Verify";
+import { deepProblem, DeepHelp, LastVerification, runningFor, VerifyDialog } from "@/components/backups/Verify";
 import { RunBadge, reportHref } from "@/components/failover/Failover";
 import { formatBytes, tableClass, tdClass, thClass } from "@/components/inventory/bits";
 import {
@@ -75,6 +75,7 @@ export function NodeBackupsCard({ nodeId, isAdmin }: { nodeId: string; isAdmin: 
   const it = q.data?.item;
   if (!q.data || !it) return null;
   const running = runningFor(runs.data, nodeId);
+  const last = runs.data?.find((r) => r.result);
   const isVM = it.guest_type === "qemu";
   return (
     <Card
@@ -167,6 +168,11 @@ export function NodeBackupsCard({ nodeId, isAdmin }: { nodeId: string; isAdmin: 
               </li>
             ))}
           </ul>
+        )}
+        {isVM && deepProblem(last) && (
+          <div className="mt-3">
+            <DeepHelp run={last} compact />
+          </div>
         )}
       </div>
     </Card>

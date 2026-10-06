@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/Jonasz1996/clusterforge/internal/agent"
+	"github.com/Jonasz1996/clusterforge/pkg/protocol"
 )
 
 // version wordt bij het bouwen gezet met -ldflags "-X main.version=...".
@@ -29,6 +30,9 @@ Gebruik:
   cf-agent run       verbindt met ClusterForge (zo start systemd hem); nog niet
                      aangemeld, dan wacht hij op /etc/clusterforge/enroll.json
   cf-agent facts     toont de facts van deze machine
+  cf-agent verify -  leest een controle-aanvraag (JSON) van stdin en schrijft het
+                     resultaat naar stdout; de back-upcontrole start dit in een
+                     teruggezette sandbox
   cf-agent version
 `
 
@@ -44,6 +48,8 @@ func main() {
 		err = enroll(os.Args[2:])
 	case "run":
 		err = run(os.Args[2:], log)
+	case "verify":
+		os.Exit(verify(os.Args[2:]))
 	case "facts":
 		f := (&agent.Collector{}).Facts(context.Background())
 		enc := json.NewEncoder(os.Stdout)
@@ -61,6 +67,19 @@ func main() {
 		fmt.Fprintln(os.Stderr, "fout:", err)
 		os.Exit(1)
 	}
+}
+
+// verify voert de diepe back-upcontrole uit en geeft de exitcode: 0, ook als
+// controles falen, of 3 bij een ongeldige aanvraag.
+func verify(args []string) int {
+	if len(args) != 1 || args[0] != "-" {
+		fmt.Fprintln(os.Stderr, "gebruik: cf-agent verify - (de aanvraag komt als JSON op stdin)")
+		return protocol.VerifyInvalid
+	}
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+	v := &agent.Verifier{Version: version}
+	return v.Main(ctx, os.Stdin, os.Stdout)
 }
 
 func enroll(args []string) error {
@@ -102,6 +121,13 @@ func run(args []string, log *slog.Logger) error {
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
+	// Een sandbox van de back-upcontrole is een kopie van een node, met
+	// dezelfde sleutel. Die mag nooit als de node binnenkomen.
+	if agent.InSandbox("") {
+		log.Info("dit is een sandbox van de back-upcontrole (serienummer " + protocol.SandboxSerial + "); de agent verbindt niet en wacht tot hij gestopt wordt")
+		<-ctx.Done()
+		return nil
+	}
 	c, err := agent.LoadConfig(*config)
 	if errors.Is(err, fs.ErrNotExist) {
 		c, err = waitEnroll(ctx, log, *config, *enrollFile)

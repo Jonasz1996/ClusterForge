@@ -1850,6 +1850,13 @@ export interface components {
             filesystems: number;
             /** Format: date-time */
             destroyed_at: string | null;
+            /** @description De versie van cf-agent in de back-up, uit cf-agent verify; leeg als die niet liep */
+            agent_version: string;
+            /** @description De services die cf-agent verify controleerde */
+            services_expected: number;
+            services_active: number;
+            /** @description Zoals "PostgreSQL met 3 databases" */
+            databases: string[];
         };
         BackupVerifyReport: {
             definition: components["schemas"]["BackupVerifyDefinition"];
@@ -2106,6 +2113,8 @@ export interface components {
             detail: string;
             /** @description Niet in orde, maar geen reden om af te keuren */
             warning: boolean;
+            /** @description Wat de beheerder kan doen, of leeg. agent_too_old: de back-up heeft geen cf-agent die verify kent; exec_forbidden: het API-token mag in de sandbox niets starten via de guest agent. */
+            code: string;
         };
         TestRunEvent: {
             /**

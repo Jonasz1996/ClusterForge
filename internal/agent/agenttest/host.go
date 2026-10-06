@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -17,9 +18,9 @@ import (
 	"time"
 )
 
-// Unit is de toestand van een systemd-unit.
+// Unit is de toestand van een systemd-unit. Failed: de unit startte niet.
 type Unit struct {
-	Enabled, Active bool
+	Enabled, Active, Failed bool
 }
 
 // Provides zegt welke units een pakket meebrengt en hoe ze na het
@@ -49,6 +50,7 @@ type Host struct {
 	users    map[string]bool
 	calls    []string
 	fail     map[string]*failure
+	journal  map[string]string
 }
 
 type failure struct {
@@ -114,7 +116,10 @@ func (h *Host) Addresses() []string {
 }
 
 // queries zijn commando's die niets veranderen; ze komen niet in Calls.
-var queries = []string{"systemctl show", "dpkg-query", "id ", "journalctl", "apt-get -s", "systemd-detect-virt", "docker "}
+var queries = []string{
+	"systemctl show", "systemctl --failed", "systemctl is-system-running", "dpkg-query", "id ", "journalctl", "apt-get -s",
+	"systemd-detect-virt", "docker ",
+}
 
 func (h *Host) record(call string) {
 	if !slices.ContainsFunc(queries, func(q string) bool { return strings.HasPrefix(call, q) }) {
@@ -160,6 +165,10 @@ func (h *Host) exec(name string, args []string) ([]byte, error) {
 	case "systemctl":
 		return h.systemctl(args)
 	case "journalctl":
+		// journalctl -u <unit> ...
+		if len(args) > 1 && args[0] == "-u" && h.journal[args[1]] != "" {
+			return []byte(h.journal[args[1]]), nil
+		}
 		return []byte("-- No entries --\n"), nil
 	case "id":
 		if h.users[args[len(args)-1]] {
@@ -231,6 +240,16 @@ func (h *Host) SetUnit(name string, u Unit) {
 	if g != nil {
 		g.update()
 	}
+}
+
+// SetJournal zet wat journalctl -u unit toont, zoals een foutmelding.
+func (h *Host) SetJournal(unit, text string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.journal == nil {
+		h.journal = map[string]string{}
+	}
+	h.journal[unit] = text
 }
 
 // Power zet de machine uit of aan, zoals een harde stop of een start van
@@ -306,6 +325,23 @@ func (h *Host) systemctl(args []string) ([]byte, error) {
 		h.daemonReload()
 		return nil, nil
 	}
+	if args[0] == "is-system-running" {
+		for _, u := range h.units {
+			if u.Failed {
+				return []byte("degraded\n"), errors.New("exit status 1")
+			}
+		}
+		return []byte("running\n"), nil
+	}
+	if args[0] == "--failed" {
+		var b strings.Builder
+		for _, name := range slices.Sorted(maps.Keys(h.units)) {
+			if h.units[name].Failed {
+				fmt.Fprintf(&b, "%s.service loaded failed failed %s\n", name, name)
+			}
+		}
+		return []byte(b.String()), nil
+	}
 	if len(args) < 2 {
 		return nil, errors.New("systemctl zonder unit")
 	}
@@ -322,9 +358,12 @@ func (h *Host) systemctl(args []string) ([]byte, error) {
 				b.WriteString("LoadState=not-found\nUnitFileState=\nActiveState=inactive\n\n")
 				continue
 			}
+			active := map[bool]string{true: "active", false: "inactive"}[u.Active]
+			if u.Failed {
+				active = "failed"
+			}
 			fmt.Fprintf(&b, "LoadState=loaded\nUnitFileState=%s\nActiveState=%s\n\n",
-				map[bool]string{true: "enabled", false: "disabled"}[u.Enabled],
-				map[bool]string{true: "active", false: "inactive"}[u.Active])
+				map[bool]string{true: "enabled", false: "disabled"}[u.Enabled], active)
 		}
 		return []byte(b.String()), nil
 	}
@@ -342,7 +381,7 @@ func (h *Host) systemctl(args []string) ([]byte, error) {
 			u.Active = false
 		}
 	case "start", "restart", "reload-or-restart":
-		u.Active = true
+		u.Active, u.Failed = true, false
 	case "stop":
 		u.Active = false
 	default:

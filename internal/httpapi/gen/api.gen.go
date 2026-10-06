@@ -1580,19 +1580,29 @@ type BackupVerifyInput struct {
 
 // BackupVerifyMeasurements defines model for BackupVerifyMeasurements.
 type BackupVerifyMeasurements struct {
+	// AgentVersion De versie van cf-agent in de back-up, uit cf-agent verify; leeg als die niet liep
+	AgentVersion string `json:"agent_version"`
+
 	// BootSeconds Van starten tot de guest agent antwoordt
-	BootSeconds    nullable.Nullable[float64]   `json:"boot_seconds"`
-	CheckSeconds   nullable.Nullable[float64]   `json:"check_seconds"`
-	CleanupSeconds nullable.Nullable[float64]   `json:"cleanup_seconds"`
-	DestroyedAt    nullable.Nullable[time.Time] `json:"destroyed_at"`
-	Filesystems    int                          `json:"filesystems"`
-	Host           string                       `json:"host"`
+	BootSeconds    nullable.Nullable[float64] `json:"boot_seconds"`
+	CheckSeconds   nullable.Nullable[float64] `json:"check_seconds"`
+	CleanupSeconds nullable.Nullable[float64] `json:"cleanup_seconds"`
+
+	// Databases Zoals "PostgreSQL met 3 databases"
+	Databases   []string                     `json:"databases"`
+	DestroyedAt nullable.Nullable[time.Time] `json:"destroyed_at"`
+	Filesystems int                          `json:"filesystems"`
+	Host        string                       `json:"host"`
 
 	// Hostname Wat de guest agent als hostname gaf
 	Hostname       string                     `json:"hostname"`
 	Os             string                     `json:"os"`
 	RestoreSeconds nullable.Nullable[float64] `json:"restore_seconds"`
 	SandboxVmid    int                        `json:"sandbox_vmid"`
+	ServicesActive int                        `json:"services_active"`
+
+	// ServicesExpected De services die cf-agent verify controleerde
+	ServicesExpected int `json:"services_expected"`
 
 	// Storage De sandbox-storage
 	Storage      string                     `json:"storage"`
@@ -3593,6 +3603,8 @@ type TestRunTrigger string
 
 // TestRunCheck defines model for TestRunCheck.
 type TestRunCheck struct {
+	// Code Wat de beheerder kan doen, of leeg. agent_too_old: de back-up heeft geen cf-agent die verify kent; exec_forbidden: het API-token mag in de sandbox niets starten via de guest agent.
+	Code   string `json:"code"`
 	Detail string `json:"detail"`
 	Name   string `json:"name"`
 	Ok     bool   `json:"ok"`

@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/Jonasz1996/clusterforge/internal/proxmox"
+	"github.com/Jonasz1996/clusterforge/pkg/protocol"
 )
 
 // Een sandbox is een teruggezette kopie van een productie-VM. Hij mag het
@@ -199,9 +200,9 @@ func hasAgent(cfg map[string]string) bool {
 // sandboxTag is de tag op elke sandbox, naast de pool.
 const sandboxTag = "cf-sandbox"
 
-// sandboxSerial is het SMBIOS-serienummer van een sandbox. Vanaf mijlpaal 16
-// leest cf-agent het en verbindt hij dan niet met NATS.
-const sandboxSerial = "cf-sandbox"
+// sandboxSerial is het SMBIOS-serienummer van een sandbox. cf-agent leest
+// het en verbindt dan niet met NATS.
+const sandboxSerial = protocol.SandboxSerial
 
 // isolation is de wijziging die een teruggezette VM afsluit.
 func isolation(cfg map[string]string, description string) map[string]string {
