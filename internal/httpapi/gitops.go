@@ -156,6 +156,10 @@ func (s *Server) ListGitChanges(w http.ResponseWriter, r *http.Request, params g
 		arg.Status = &st
 	}
 	if params.Limit != nil {
+		if *params.Limit < 1 || *params.Limit > 200 {
+			writeError(w, http.StatusBadRequest, "validation", "limit moet tussen 1 en 200 liggen")
+			return
+		}
 		arg.Max = int32(*params.Limit)
 	}
 	rows, err := s.q.ListGitChanges(r.Context(), arg)
