@@ -364,17 +364,7 @@ func (s *Service) Request(ctx context.Context, actor events.Actor, req Request) 
 		}
 		slices.Sort(names)
 		for _, name := range names {
-			if err := q.InsertSecret(ctx, store.InsertSecretParams{
-				ClusterID: c.ID, Name: name, ValueEnc: s.box.Seal([]byte(secretValues[name]), secretAAD(c.ID, name)), KeyID: s.box.KeyID,
-			}); err != nil {
-				return err
-			}
-			// Van een geheim alleen de naam, nooit de waarde.
-			err := s.ev.Write(ctx, q, events.Event{
-				Actor: actor, SubjectType: "cluster", SubjectID: c.ID.String(), ClusterID: &c.ID, Action: "secret.created",
-				Payload: map[string]any{"name": c.Name, "secret_name": name},
-			})
-			if err != nil {
+			if err := s.AddSecretTx(ctx, q, actor, c.ID, c.Name, name, secretValues[name]); err != nil {
 				return err
 			}
 		}
@@ -419,6 +409,24 @@ func (s *Service) checkCluster(ctx context.Context, c templates.ClusterInfo) err
 		return invalid("cluster.slug", "er bestaat al een cluster met slug %s", c.Slug)
 	}
 	return nil
+}
+
+// AddSecretTx bewaart een nieuw geheim van een cluster, versleuteld met de
+// masterkey, met het event secret.created zonder de waarde.
+func (s *Service) AddSecretTx(ctx context.Context, q *store.Queries, actor events.Actor, clusterID uuid.UUID, clusterName, name, value string) error {
+	if s.box == nil {
+		return errors.New("de server heeft geen masterkey (CF_MASTER_KEY); zonder kan hij geen geheim bewaren")
+	}
+	if err := q.InsertSecret(ctx, store.InsertSecretParams{
+		ClusterID: clusterID, Name: name, ValueEnc: s.box.Seal([]byte(value), secretAAD(clusterID, name)), KeyID: s.box.KeyID,
+	}); err != nil {
+		return err
+	}
+	// Van een geheim alleen de naam, nooit de waarde.
+	return s.ev.Write(ctx, q, events.Event{
+		Actor: actor, SubjectType: "cluster", SubjectID: clusterID.String(), ClusterID: &clusterID, Action: "secret.created",
+		Payload: map[string]any{"name": clusterName, "secret_name": name},
+	})
 }
 
 func secretAAD(clusterID uuid.UUID, name string) []byte {

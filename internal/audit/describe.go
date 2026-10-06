@@ -277,8 +277,12 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 		if str(p, "kind") == "baseline" {
 			return fmt.Sprintf("Specificatie van cluster %s: revisie %s, een baseline", name, num(p["revision"])) + paren(specSources[str(p, "source")])
 		}
+		source := specSources[str(p, "source")]
+		if c := str(p, "commit"); c != "" {
+			source += ", commit " + shortSHA(c)
+		}
 		return fmt.Sprintf("Specificatie van cluster %s: revisie %s uit %s %s", name, num(p["revision"]),
-			str(p, "template"), str(p, "template_version")) + paren(specSources[str(p, "source")])
+			str(p, "template"), str(p, "template_version")) + paren(source)
 	case "secret.created":
 		return "Geheim " + str(p, "secret_name") + " van cluster " + name + " opgeslagen"
 	case "cluster.deployed":
@@ -523,6 +527,24 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 		return fmt.Sprintf("%s %s uit commit %s gepland", what, or(str(p, "name"), str(p, "slug")), shortSHA(str(p, "commit"))) + colon(str(p, "summary"))
 	case "gitops.change_superseded":
 		return fmt.Sprintf("Wijziging voor %s uit commit %s vervalt", str(p, "slug"), shortSHA(str(p, "commit"))) + colon(str(p, "reason"))
+	case "gitops.change_approved":
+		s := fmt.Sprintf("Wijziging voor %s uit commit %s goedgekeurd: revisie %s", or(str(p, "name"), str(p, "slug")), shortSHA(str(p, "commit")), num(p["revision"]))
+		if p["job_id"] != nil {
+			s += ", wordt toegepast"
+		}
+		return s
+	case "gitops.change_rejected":
+		return fmt.Sprintf("Wijziging voor %s uit commit %s afgewezen", or(str(p, "name"), str(p, "slug")), shortSHA(str(p, "commit"))) + colon(str(p, "reason"))
+	case "gitops.change_applied":
+		s := fmt.Sprintf("Wijziging voor %s uit commit %s toegepast (revisie %s)", str(p, "slug"), shortSHA(str(p, "commit")), num(p["revision"]))
+		if b, _ := p["no_steps"].(bool); b {
+			s += "; op de nodes veranderde niets"
+		}
+		return s
+	case "gitops.change_failed":
+		return fmt.Sprintf("Wijziging voor %s uit commit %s mislukt", str(p, "slug"), shortSHA(str(p, "commit"))) + colon(str(p, "error"))
+	case "gitops.reapply_requested":
+		return fmt.Sprintf("Revisie %s van cluster %s opnieuw toepassen (toegepast was revisie %s)", num(p["revision"]), name, num(p["applied_revision"]))
 	case "cluster.git_linked":
 		return "Cluster " + name + " aan Git gekoppeld" + prefixed(": ", str(p, "path"))
 	case "cluster.git_unlinked":

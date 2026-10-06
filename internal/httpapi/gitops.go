@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/oapi-codegen/nullable"
 
+	"github.com/Jonasz1996/clusterforge/internal/auth"
 	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/gitops"
 	"github.com/Jonasz1996/clusterforge/internal/httpapi/gen"
@@ -194,7 +195,7 @@ func toAPIGitChange(row store.GetGitChangeRow) (gen.GitChange, gitops.Plan, erro
 			Sha: row.CommitSha, Message: row.CommitMessage, Author: row.CommitAuthor, Verified: row.CommitVerified, Url: row.CommitUrl,
 			Date: deref(row.CommittedAt),
 		},
-		BaseRevision: int(row.BaseRevision), Summary: plan.Summary, JobId: nullableOf(row.JobID),
+		BaseRevision: int(row.BaseRevision), Revision: nullableOf(intp(row.Revision)), Summary: plan.Summary, JobId: nullableOf(row.JobID),
 		DecidedBy: nullableOf(row.DecidedByName), DecidedAt: nullableOf(row.DecidedAt), Reason: row.Reason,
 		CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
 	}
@@ -238,13 +239,154 @@ func (s *Server) GetGitChange(w http.ResponseWriter, r *http.Request, id uuid.UU
 	if repo, err := s.q.GetGitRepo(ctx); err == nil && repo.ID == row.RepoID {
 		fileURL = gitops.FileURL(repo.ApiUrl, repo.Owner, repo.Name, repo.Branch, row.Path)
 	}
+	ch := gitChangeOf(row)
+	approval, err := s.git.ApprovalFor(ctx, ch)
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	blocked := ""
+	if row.Status == "pending" {
+		blocked = gitops.Blocked(row.Kind, plan)
+	}
 	writeJSON(w, http.StatusOK, gen.GitChangeDetail{
 		Id: c.Id, ClusterId: c.ClusterId, ClusterName: c.ClusterName, ClusterEnvironment: c.ClusterEnvironment,
 		Slug: c.Slug, Path: c.Path, Kind: gen.GitChangeDetailKind(c.Kind), Status: c.Status, Commit: c.Commit,
-		BaseRevision: c.BaseRevision, Summary: c.Summary, JobId: c.JobId, DecidedBy: c.DecidedBy, DecidedAt: c.DecidedAt,
+		BaseRevision: c.BaseRevision, Revision: c.Revision, Summary: c.Summary, JobId: c.JobId, DecidedBy: c.DecidedBy, DecidedAt: c.DecidedAt,
 		Reason: c.Reason, CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt,
 		Plan: p, Local: local, FileUrl: fileURL,
+		NeedsConfirmation: approval.Prod, FullApply: row.Status == "pending" && approval.All, Blocked: blocked,
 	})
+}
+
+// gitChangeOf haalt de wijziging uit een rij met join.
+func gitChangeOf(row store.GetGitChangeRow) store.GitChange {
+	return store.GitChange{
+		ID: row.ID, RepoID: row.RepoID, ClusterID: row.ClusterID, Slug: row.Slug, Path: row.Path, Kind: row.Kind,
+		CommitSha: row.CommitSha, Status: row.Status, BaseRevision: row.BaseRevision, Spec: row.Spec, Metadata: row.Metadata,
+		Plan: row.Plan, Revision: row.Revision, JobID: row.JobID,
+	}
+}
+
+// confirmProd vraagt op prod tweestapsverificatie en de slug, zoals bij
+// herstel. Het geeft false als er al een antwoord is geschreven.
+func confirmProd(w http.ResponseWriter, p auth.Principal, prod bool, slug string, confirm *string, what string) bool {
+	if !prod {
+		return true
+	}
+	if p.User.TotpEnabledAt == nil {
+		writeError(w, http.StatusForbidden, "totp_required", "op prod kan alleen een beheerder met tweestapsverificatie "+what+"; zet die aan bij Instellingen")
+		return false
+	}
+	if confirm == nil || *confirm != slug {
+		writeError(w, http.StatusConflict, "needs_confirmation", "dit is een prodcluster; tik ter bevestiging de slug "+slug+" in")
+		return false
+	}
+	return true
+}
+
+// ApproveGitChange keurt een wachtende wijziging goed en zet haar
+// toepassing in de wachtrij.
+func (s *Server) ApproveGitChange(w http.ResponseWriter, r *http.Request, id uuid.UUID) {
+	p, ok := requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	var in gen.GitApproveInput
+	if r.ContentLength != 0 && !decode(w, r, &in) {
+		return
+	}
+	ctx := r.Context()
+	row, err := s.q.GetGitChange(ctx, id)
+	if err != nil {
+		s.gitError(w, r, err)
+		return
+	}
+	approval, err := s.git.ApprovalFor(ctx, gitChangeOf(row))
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	if row.Status == "pending" && !confirmProd(w, p, approval.Prod, approval.Slug, in.Confirm, "een wijziging goedkeuren") {
+		return
+	}
+	d, err := s.git.Approve(ctx, events.User(p.User.ID), id)
+	if err != nil {
+		s.gitError(w, r, err)
+		return
+	}
+	row, err = s.q.GetGitChange(ctx, d.Change.ID)
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	c, _, err := toAPIGitChange(row)
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	out := gen.GitDecision{Change: c, Job: nullable.NewNullNullable[gen.Job]()}
+	status := http.StatusOK
+	if d.Job != nil {
+		out.Job = nullable.NewNullableWithValue(toAPIJob(*d.Job, &p.User.Username))
+		status = http.StatusAccepted
+	}
+	writeJSON(w, status, out)
+}
+
+func (s *Server) RejectGitChange(w http.ResponseWriter, r *http.Request, id uuid.UUID) {
+	p, ok := requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	var in gen.GitRejectInput
+	if !decode(w, r, &in) {
+		return
+	}
+	ctx := r.Context()
+	if _, err := s.git.Reject(ctx, events.User(p.User.ID), id, in.Reason); err != nil {
+		s.gitError(w, r, err)
+		return
+	}
+	row, err := s.q.GetGitChange(ctx, id)
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	c, _, err := toAPIGitChange(row)
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, c)
+}
+
+// ReapplyClusterGit past de huidige revisie opnieuw toe als ze niet op
+// alle nodes staat.
+func (s *Server) ReapplyClusterGit(w http.ResponseWriter, r *http.Request, id uuid.UUID) {
+	p, ok := requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	var in gen.GitReapplyInput
+	if r.ContentLength != 0 && !decode(w, r, &in) {
+		return
+	}
+	ctx := r.Context()
+	c, err := s.q.GetCluster(ctx, id)
+	if err != nil {
+		s.gitError(w, r, err)
+		return
+	}
+	if c.AppliedRevision < c.SpecRevision && !confirmProd(w, p, c.Environment == store.EnvironmentProd, c.Slug, in.Confirm, "opnieuw toepassen") {
+		return
+	}
+	j, err := s.git.Reapply(ctx, events.User(p.User.ID), id)
+	if err != nil {
+		s.gitError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, toAPIJob(j, &p.User.Username))
 }
 
 // ExportClusterGit geeft cluster.yaml als download. Ook voor viewers: er
@@ -308,4 +450,12 @@ func (s *Server) gitError(w http.ResponseWriter, r *http.Request, err error) {
 	default:
 		s.internalError(w, r, err)
 	}
+}
+
+func intp(v *int32) *int {
+	if v == nil {
+		return nil
+	}
+	n := int(*v)
+	return &n
 }

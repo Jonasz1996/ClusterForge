@@ -156,6 +156,11 @@ var Known = map[string]Spec{
 	"gitops.file_missing":      {CategoryGitOps, "Clusterbestand ontbreekt"},
 	"gitops.change_planned":    {CategoryGitOps, "Wijziging uit Git gepland"},
 	"gitops.change_superseded": {CategoryGitOps, "Wijziging uit Git vervangen"},
+	"gitops.change_approved":   {CategoryGitOps, "Wijziging uit Git goedgekeurd"},
+	"gitops.change_rejected":   {CategoryGitOps, "Wijziging uit Git afgewezen"},
+	"gitops.change_applied":    {CategoryGitOps, "Wijziging uit Git toegepast"},
+	"gitops.change_failed":     {CategoryGitOps, "Wijziging uit Git mislukt"},
+	"gitops.reapply_requested": {CategoryGitOps, "Revisie opnieuw toepassen"},
 	"cluster.git_linked":       {CategoryGitOps, "Cluster aan Git gekoppeld"},
 	"cluster.git_unlinked":     {CategoryGitOps, "Cluster van Git ontkoppeld"},
 

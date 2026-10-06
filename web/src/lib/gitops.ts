@@ -14,12 +14,16 @@ export type GitChange = components["schemas"]["GitChange"];
 export type GitChangeDetail = components["schemas"]["GitChangeDetail"];
 export type GitChangeStatus = components["schemas"]["GitChangeStatus"];
 export type GitPlan = components["schemas"]["GitPlan"];
+export type GitDecision = components["schemas"]["GitDecision"];
 
 type Tone = "slate" | "green" | "amber" | "red" | "blue";
 
 export const fileStates: Record<GitFileState, { label: string; tone: Tone }> = {
   in_sync: { label: "In sync", tone: "green" },
   pending: { label: "Wijziging wacht", tone: "blue" },
+  applying: { label: "Wordt toegepast", tone: "blue" },
+  not_applied: { label: "Niet toegepast", tone: "red" },
+  rejected: { label: "Afgewezen", tone: "slate" },
   invalid: { label: "Ongeldig", tone: "red" },
   new: { label: "Nieuw", tone: "blue" },
   unlinked: { label: "Niet gekoppeld", tone: "slate" },
@@ -134,6 +138,34 @@ export function useUnlinkCluster() {
   const invalidate = useInvalidate();
   return useMutation({
     mutationFn: async (clusterId: string) => unwrap(await api.POST("/clusters/{clusterId}/git/unlink", { params: { path: { clusterId } } })),
+    onSuccess: invalidate,
+  });
+}
+
+// useApproveGitChange keurt een wachtende wijziging goed; op prod met de slug.
+export function useApproveGitChange(changeId: string) {
+  const invalidate = useInvalidate();
+  return useMutation({
+    mutationFn: async (confirm?: string) =>
+      unwrap(await api.POST("/gitops/changes/{changeId}/approve", { params: { path: { changeId } }, body: { confirm } })),
+    onSuccess: invalidate,
+  });
+}
+
+export function useRejectGitChange(changeId: string) {
+  const invalidate = useInvalidate();
+  return useMutation({
+    mutationFn: async (reason: string) => unwrap(await api.POST("/gitops/changes/{changeId}/reject", { params: { path: { changeId } }, body: { reason } })),
+    onSuccess: invalidate,
+  });
+}
+
+// useReapplyCluster past de huidige revisie opnieuw toe na een mislukte toepassing.
+export function useReapplyCluster(clusterId: string) {
+  const invalidate = useInvalidate();
+  return useMutation({
+    mutationFn: async (confirm?: string) =>
+      unwrap(await api.POST("/clusters/{clusterId}/git/reapply", { params: { path: { clusterId } }, body: { confirm } })),
     onSuccess: invalidate,
   });
 }

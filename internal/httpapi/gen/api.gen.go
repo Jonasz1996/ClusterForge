@@ -536,17 +536,22 @@ func (e GitChangeStatus) Valid() bool {
 
 // Defines values for GitFileState.
 const (
-	GitFileStateInSync   GitFileState = "in_sync"
-	GitFileStateInvalid  GitFileState = "invalid"
-	GitFileStateMissing  GitFileState = "missing"
-	GitFileStateNew      GitFileState = "new"
-	GitFileStatePending  GitFileState = "pending"
-	GitFileStateUnlinked GitFileState = "unlinked"
+	GitFileStateApplying   GitFileState = "applying"
+	GitFileStateInSync     GitFileState = "in_sync"
+	GitFileStateInvalid    GitFileState = "invalid"
+	GitFileStateMissing    GitFileState = "missing"
+	GitFileStateNew        GitFileState = "new"
+	GitFileStateNotApplied GitFileState = "not_applied"
+	GitFileStatePending    GitFileState = "pending"
+	GitFileStateRejected   GitFileState = "rejected"
+	GitFileStateUnlinked   GitFileState = "unlinked"
 )
 
 // Valid indicates whether the value is a known member of the GitFileState enum.
 func (e GitFileState) Valid() bool {
 	switch e {
+	case GitFileStateApplying:
+		return true
 	case GitFileStateInSync:
 		return true
 	case GitFileStateInvalid:
@@ -555,7 +560,11 @@ func (e GitFileState) Valid() bool {
 		return true
 	case GitFileStateNew:
 		return true
+	case GitFileStateNotApplied:
+		return true
 	case GitFileStatePending:
+		return true
+	case GitFileStateRejected:
 		return true
 	case GitFileStateUnlinked:
 		return true
@@ -1692,9 +1701,11 @@ type ChangePasswordRequest struct {
 
 // Cluster defines model for Cluster.
 type Cluster struct {
-	CreatedAt   time.Time   `json:"created_at"`
-	Description string      `json:"description"`
-	Environment Environment `json:"environment"`
+	// AppliedRevision De revisie die op alle nodes staat; lager dan spec_revision na een mislukte toepassing
+	AppliedRevision int         `json:"applied_revision"`
+	CreatedAt       time.Time   `json:"created_at"`
+	Description     string      `json:"description"`
+	Environment     Environment `json:"environment"`
 
 	// GitManaged Komt uit Git; naam, omgeving, tags, nodes en VIP's wijzigen dan in cluster.yaml
 	GitManaged bool               `json:"git_managed"`
@@ -1726,9 +1737,11 @@ type Cluster struct {
 
 // ClusterDetail defines model for ClusterDetail.
 type ClusterDetail struct {
-	CreatedAt   time.Time   `json:"created_at"`
-	Description string      `json:"description"`
-	Environment Environment `json:"environment"`
+	// AppliedRevision De revisie die op alle nodes staat; lager dan spec_revision na een mislukte toepassing
+	AppliedRevision int         `json:"applied_revision"`
+	CreatedAt       time.Time   `json:"created_at"`
+	Description     string      `json:"description"`
+	Environment     Environment `json:"environment"`
 
 	// GitManaged Komt uit Git; naam, omgeving, tags, nodes en VIP's wijzigen dan in cluster.yaml
 	GitManaged bool               `json:"git_managed"`
@@ -1788,10 +1801,12 @@ type ClusterInput struct {
 
 // ClusterListItem defines model for ClusterListItem.
 type ClusterListItem struct {
-	CreatedAt   time.Time           `json:"created_at"`
-	Description string              `json:"description"`
-	Drift       ClusterDriftSummary `json:"drift"`
-	Environment Environment         `json:"environment"`
+	// AppliedRevision De revisie die op alle nodes staat; lager dan spec_revision na een mislukte toepassing
+	AppliedRevision int                 `json:"applied_revision"`
+	CreatedAt       time.Time           `json:"created_at"`
+	Description     string              `json:"description"`
+	Drift           ClusterDriftSummary `json:"drift"`
+	Environment     Environment         `json:"environment"`
 
 	// GitManaged Komt uit Git; naam, omgeving, tags, nodes en VIP's wijzigen dan in cluster.yaml
 	GitManaged bool               `json:"git_managed"`
@@ -2491,6 +2506,12 @@ type FailoverVIPOption struct {
 	Probe FailoverProbe `json:"probe"`
 }
 
+// GitApproveInput defines model for GitApproveInput.
+type GitApproveInput struct {
+	// Confirm Op prod de slug van het cluster
+	Confirm *string `json:"confirm,omitempty"`
+}
+
 // GitChange defines model for GitChange.
 type GitChange struct {
 	BaseRevision       int                                   `json:"base_revision"`
@@ -2507,9 +2528,14 @@ type GitChange struct {
 	JobId       nullable.Nullable[openapi_types.UUID] `json:"job_id"`
 	Kind        GitChangeKind                         `json:"kind"`
 	Path        string                                `json:"path"`
-	Reason      string                                `json:"reason"`
-	Slug        string                                `json:"slug"`
-	Status      GitChangeStatus                       `json:"status"`
+
+	// Reason De reden van afwijzen of vervallen, of de fout van de taak
+	Reason string `json:"reason"`
+
+	// Revision De spec-revisie die de goedkeuring maakte
+	Revision nullable.Nullable[int] `json:"revision"`
+	Slug     string                 `json:"slug"`
+	Status   GitChangeStatus        `json:"status"`
 
 	// Summary Zoals: node_count van 2 naar 3; keepalived.conf op 2 nodes, 1 nieuwe node
 	Summary   string    `json:"summary"`
@@ -2521,28 +2547,42 @@ type GitChangeKind string
 
 // GitChangeDetail defines model for GitChangeDetail.
 type GitChangeDetail struct {
-	BaseRevision       int                                   `json:"base_revision"`
+	BaseRevision int `json:"base_revision"`
+
+	// Blocked Waarom goedkeuren in deze versie nog niet kan; leeg als het kan
+	Blocked            string                                `json:"blocked"`
 	ClusterEnvironment Environment                           `json:"cluster_environment"`
 	ClusterId          nullable.Nullable[openapi_types.UUID] `json:"cluster_id"`
 
 	// ClusterName De naam nu
-	ClusterName string                                `json:"cluster_name"`
-	Commit      GitCommit                             `json:"commit"`
-	CreatedAt   time.Time                             `json:"created_at"`
-	DecidedAt   nullable.Nullable[time.Time]          `json:"decided_at"`
-	DecidedBy   nullable.Nullable[string]             `json:"decided_by"`
-	FileUrl     string                                `json:"file_url"`
-	Id          openapi_types.UUID                    `json:"id"`
-	JobId       nullable.Nullable[openapi_types.UUID] `json:"job_id"`
-	Kind        GitChangeDetailKind                   `json:"kind"`
+	ClusterName string                       `json:"cluster_name"`
+	Commit      GitCommit                    `json:"commit"`
+	CreatedAt   time.Time                    `json:"created_at"`
+	DecidedAt   nullable.Nullable[time.Time] `json:"decided_at"`
+	DecidedBy   nullable.Nullable[string]    `json:"decided_by"`
+	FileUrl     string                       `json:"file_url"`
+
+	// FullApply Een eerdere revisie is niet op alle nodes toegepast, dus goedkeuren past alle stappen opnieuw toe
+	FullApply bool                                  `json:"full_apply"`
+	Id        openapi_types.UUID                    `json:"id"`
+	JobId     nullable.Nullable[openapi_types.UUID] `json:"job_id"`
+	Kind      GitChangeDetailKind                   `json:"kind"`
 
 	// Local Uit de laatste driftcontrole, wat op de nodes al afwijkt en overschreven wordt
-	Local  []string        `json:"local"`
-	Path   string          `json:"path"`
-	Plan   GitPlan         `json:"plan"`
-	Reason string          `json:"reason"`
-	Slug   string          `json:"slug"`
-	Status GitChangeStatus `json:"status"`
+	Local []string `json:"local"`
+
+	// NeedsConfirmation Het cluster is of wordt prod: goedkeuren vraagt de slug
+	NeedsConfirmation bool    `json:"needs_confirmation"`
+	Path              string  `json:"path"`
+	Plan              GitPlan `json:"plan"`
+
+	// Reason De reden van afwijzen of vervallen, of de fout van de taak
+	Reason string `json:"reason"`
+
+	// Revision De spec-revisie die de goedkeuring maakte
+	Revision nullable.Nullable[int] `json:"revision"`
+	Slug     string                 `json:"slug"`
+	Status   GitChangeStatus        `json:"status"`
 
 	// Summary Zoals: node_count van 2 naar 3; keepalived.conf op 2 nodes, 1 nieuwe node
 	Summary   string    `json:"summary"`
@@ -2569,6 +2609,14 @@ type GitCommit struct {
 	Verified bool `json:"verified"`
 }
 
+// GitDecision defines model for GitDecision.
+type GitDecision struct {
+	Change GitChange `json:"change"`
+
+	// Job null als er op geen node iets verandert
+	Job nullable.Nullable[Job] `json:"job"`
+}
+
 // GitFieldChange defines model for GitFieldChange.
 type GitFieldChange struct {
 	Field string `json:"field"`
@@ -2589,7 +2637,7 @@ type GitFieldError struct {
 
 // GitFile defines model for GitFile.
 type GitFile struct {
-	// ChangeId De wachtende wijziging
+	// ChangeId De wachtende, afgewezen, lopende of mislukte wijziging
 	ChangeId    nullable.Nullable[openapi_types.UUID] `json:"change_id"`
 	ClusterId   nullable.Nullable[openapi_types.UUID] `json:"cluster_id"`
 	ClusterName string                                `json:"cluster_name"`
@@ -2603,18 +2651,24 @@ type GitFile struct {
 	Secret bool   `json:"secret"`
 	Slug   string `json:"slug"`
 
-	// State in_sync: gelijk aan het cluster; pending: een wijziging wacht; invalid:
-	// fouten; new: een nieuw cluster; unlinked: het cluster bestaat maar is
-	// niet gekoppeld; missing: het bestand van een gekoppeld cluster ontbreekt
+	// State in_sync: gelijk aan het cluster; pending: een wijziging wacht; applying:
+	// een goedgekeurde wijziging wordt toegepast; not_applied: gelijk aan de
+	// spec, maar die staat niet op alle nodes; rejected: deze inhoud is
+	// afgewezen; invalid: fouten; new: een nieuw cluster; unlinked: het
+	// cluster bestaat maar is niet gekoppeld; missing: het bestand van een
+	// gekoppeld cluster ontbreekt
 	State GitFileState `json:"state"`
 
 	// Url Het bestand op de website
 	Url string `json:"url"`
 }
 
-// GitFileState in_sync: gelijk aan het cluster; pending: een wijziging wacht; invalid:
-// fouten; new: een nieuw cluster; unlinked: het cluster bestaat maar is
-// niet gekoppeld; missing: het bestand van een gekoppeld cluster ontbreekt
+// GitFileState in_sync: gelijk aan het cluster; pending: een wijziging wacht; applying:
+// een goedgekeurde wijziging wordt toegepast; not_applied: gelijk aan de
+// spec, maar die staat niet op alle nodes; rejected: deze inhoud is
+// afgewezen; invalid: fouten; new: een nieuw cluster; unlinked: het
+// cluster bestaat maar is niet gekoppeld; missing: het bestand van een
+// gekoppeld cluster ontbreekt
 type GitFileState string
 
 // GitPlan defines model for GitPlan.
@@ -2677,6 +2731,17 @@ type GitProbe struct {
 	// Files De gevonden clusterbestanden
 	Files []string  `json:"files"`
 	Head  GitCommit `json:"head"`
+}
+
+// GitReapplyInput defines model for GitReapplyInput.
+type GitReapplyInput struct {
+	// Confirm Op prod de slug van het cluster
+	Confirm *string `json:"confirm,omitempty"`
+}
+
+// GitRejectInput defines model for GitRejectInput.
+type GitRejectInput struct {
+	Reason string `json:"reason"`
 }
 
 // GitRepo defines model for GitRepo.
@@ -3385,7 +3450,13 @@ type SpecParam struct {
 // SpecRevision defines model for SpecRevision.
 type SpecRevision struct {
 	// Changes Wat er veranderde tegenover de vorige revisie; leeg bij de eerste
-	Changes         []SpecChange                `json:"changes"`
+	Changes []SpecChange `json:"changes"`
+
+	// CommitSha De commit bij bron git
+	CommitSha nullable.Nullable[string] `json:"commit_sha"`
+
+	// CommitUrl De commit op GitHub, of leeg
+	CommitUrl       string                      `json:"commit_url"`
 	CreatedAt       time.Time                   `json:"created_at"`
 	CreatedBy       nullable.Nullable[AuditRef] `json:"created_by"`
 	Nodes           []string                    `json:"nodes"`
@@ -3843,6 +3914,9 @@ type RemediateClusterDriftJSONRequestBody = RemediationInput
 // CreateFailoverTestJSONRequestBody defines body for CreateFailoverTest for application/json ContentType.
 type CreateFailoverTestJSONRequestBody = FailoverTestInput
 
+// ReapplyClusterGitJSONRequestBody defines body for ReapplyClusterGit for application/json ContentType.
+type ReapplyClusterGitJSONRequestBody = GitReapplyInput
+
 // CreateVipJSONRequestBody defines body for CreateVip for application/json ContentType.
 type CreateVipJSONRequestBody = VipInput
 
@@ -3866,6 +3940,12 @@ type UpdateFailoverTestJSONRequestBody = FailoverTestInput
 
 // StartFailoverTestJSONRequestBody defines body for StartFailoverTest for application/json ContentType.
 type StartFailoverTestJSONRequestBody = FailoverStartInput
+
+// ApproveGitChangeJSONRequestBody defines body for ApproveGitChange for application/json ContentType.
+type ApproveGitChangeJSONRequestBody = GitApproveInput
+
+// RejectGitChangeJSONRequestBody defines body for RejectGitChange for application/json ContentType.
+type RejectGitChangeJSONRequestBody = GitRejectInput
 
 // SaveGitRepoJSONRequestBody defines body for SaveGitRepo for application/json ContentType.
 type SaveGitRepoJSONRequestBody = GitRepoInput
@@ -4004,6 +4084,9 @@ type ServerInterface interface {
 	// LinkClusterGit Het cluster aan zijn bestand in Git koppelen (admin)
 	// (POST /clusters/{clusterId}/git/link)
 	LinkClusterGit(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
+	// ReapplyClusterGit De huidige revisie opnieuw toepassen (admin)
+	// (POST /clusters/{clusterId}/git/reapply)
+	ReapplyClusterGit(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
 	// UnlinkClusterGit Het cluster van Git ontkoppelen (admin); een wachtende wijziging vervalt
 	// (POST /clusters/{clusterId}/git/unlink)
 	UnlinkClusterGit(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
@@ -4070,6 +4153,12 @@ type ServerInterface interface {
 	// GetGitChange Eén wijziging met commit, plan, diffs en lokale afwijkingen
 	// (GET /gitops/changes/{changeId})
 	GetGitChange(w http.ResponseWriter, r *http.Request, changeId openapi_types.UUID)
+	// ApproveGitChange Een wachtende wijziging goedkeuren en toepassen (admin)
+	// (POST /gitops/changes/{changeId}/approve)
+	ApproveGitChange(w http.ResponseWriter, r *http.Request, changeId openapi_types.UUID)
+	// RejectGitChange Een wachtende wijziging afwijzen met een reden (admin)
+	// (POST /gitops/changes/{changeId}/reject)
+	RejectGitChange(w http.ResponseWriter, r *http.Request, changeId openapi_types.UUID)
 	// ListGitFiles De clusterbestanden uit de laatste scan, met hun toestand en fouten
 	// (GET /gitops/files)
 	ListGitFiles(w http.ResponseWriter, r *http.Request)
@@ -4403,6 +4492,12 @@ func (_ Unimplemented) LinkClusterGit(w http.ResponseWriter, r *http.Request, cl
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// ReapplyClusterGit De huidige revisie opnieuw toepassen (admin)
+// (POST /clusters/{clusterId}/git/reapply)
+func (_ Unimplemented) ReapplyClusterGit(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // UnlinkClusterGit Het cluster van Git ontkoppelen (admin); een wachtende wijziging vervalt
 // (POST /clusters/{clusterId}/git/unlink)
 func (_ Unimplemented) UnlinkClusterGit(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
@@ -4532,6 +4627,18 @@ func (_ Unimplemented) ListGitChanges(w http.ResponseWriter, r *http.Request, pa
 // GetGitChange Eén wijziging met commit, plan, diffs en lokale afwijkingen
 // (GET /gitops/changes/{changeId})
 func (_ Unimplemented) GetGitChange(w http.ResponseWriter, r *http.Request, changeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ApproveGitChange Een wachtende wijziging goedkeuren en toepassen (admin)
+// (POST /gitops/changes/{changeId}/approve)
+func (_ Unimplemented) ApproveGitChange(w http.ResponseWriter, r *http.Request, changeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RejectGitChange Een wachtende wijziging afwijzen met een reden (admin)
+// (POST /gitops/changes/{changeId}/reject)
+func (_ Unimplemented) RejectGitChange(w http.ResponseWriter, r *http.Request, changeId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -5736,6 +5843,32 @@ func (siw *ServerInterfaceWrapper) LinkClusterGit(w http.ResponseWriter, r *http
 	handler.ServeHTTP(w, r)
 }
 
+// ReapplyClusterGit operation middleware
+func (siw *ServerInterfaceWrapper) ReapplyClusterGit(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ReapplyClusterGit(w, r, clusterId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // UnlinkClusterGit operation middleware
 func (siw *ServerInterfaceWrapper) UnlinkClusterGit(w http.ResponseWriter, r *http.Request) {
 
@@ -6354,6 +6487,58 @@ func (siw *ServerInterfaceWrapper) GetGitChange(w http.ResponseWriter, r *http.R
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetGitChange(w, r, changeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ApproveGitChange operation middleware
+func (siw *ServerInterfaceWrapper) ApproveGitChange(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "changeId" -------------
+	var changeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "changeId", chi.URLParam(r, "changeId"), &changeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "changeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ApproveGitChange(w, r, changeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RejectGitChange operation middleware
+func (siw *ServerInterfaceWrapper) RejectGitChange(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "changeId" -------------
+	var changeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "changeId", chi.URLParam(r, "changeId"), &changeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "changeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RejectGitChange(w, r, changeId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -7956,6 +8141,15 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/gitops/changes/{changeId}", wrapper.GetGitChange)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/gitops/changes/{changeId}/approve", wrapper.ApproveGitChange)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/gitops/changes/{changeId}/reject", wrapper.RejectGitChange)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/clusters/{clusterId}/git/reapply", wrapper.ReapplyClusterGit)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/clusters/{clusterId}/git/export", wrapper.ExportClusterGit)

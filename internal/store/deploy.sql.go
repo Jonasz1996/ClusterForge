@@ -109,8 +109,8 @@ func (q *Queries) InsertSecret(ctx context.Context, arg InsertSecretParams) erro
 }
 
 const insertSpecRevision = `-- name: InsertSpecRevision :exec
-INSERT INTO cluster_spec_revisions (cluster_id, revision, spec, source, created_by)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO cluster_spec_revisions (cluster_id, revision, spec, source, created_by, commit_sha)
+VALUES ($1, $2, $3, $4, $5, $6)
 `
 
 type InsertSpecRevisionParams struct {
@@ -119,6 +119,7 @@ type InsertSpecRevisionParams struct {
 	Spec      []byte
 	Source    string
 	CreatedBy *uuid.UUID
+	CommitSha *string
 }
 
 func (q *Queries) InsertSpecRevision(ctx context.Context, arg InsertSpecRevisionParams) error {
@@ -128,6 +129,7 @@ func (q *Queries) InsertSpecRevision(ctx context.Context, arg InsertSpecRevision
 		arg.Spec,
 		arg.Source,
 		arg.CreatedBy,
+		arg.CommitSha,
 	)
 	return err
 }
@@ -177,7 +179,7 @@ func (q *Queries) ListDesiredNodes(ctx context.Context, clusterID *uuid.UUID) ([
 }
 
 const listSpecRevisions = `-- name: ListSpecRevisions :many
-SELECT r.revision, r.spec, r.source, r.created_at, r.created_by, u.username AS created_by_name
+SELECT r.revision, r.spec, r.source, r.commit_sha, r.created_at, r.created_by, u.username AS created_by_name
 FROM cluster_spec_revisions r
 LEFT JOIN users u ON u.id = r.created_by
 WHERE r.cluster_id = $1
@@ -188,6 +190,7 @@ type ListSpecRevisionsRow struct {
 	Revision      int32
 	Spec          []byte
 	Source        string
+	CommitSha     *string
 	CreatedAt     time.Time
 	CreatedBy     *uuid.UUID
 	CreatedByName *string
@@ -206,6 +209,7 @@ func (q *Queries) ListSpecRevisions(ctx context.Context, clusterID uuid.UUID) ([
 			&i.Revision,
 			&i.Spec,
 			&i.Source,
+			&i.CommitSha,
 			&i.CreatedAt,
 			&i.CreatedBy,
 			&i.CreatedByName,
@@ -252,6 +256,16 @@ func (q *Queries) ListTemplateClusters(ctx context.Context) ([]ListTemplateClust
 	return items, nil
 }
 
+const markSpecApplied = `-- name: MarkSpecApplied :exec
+UPDATE clusters SET applied_revision = spec_revision WHERE id = $1
+`
+
+// Na een geslaagde uitrol staat de huidige revisie op alle nodes.
+func (q *Queries) MarkSpecApplied(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, markSpecApplied, id)
+	return err
+}
+
 const retryJob = `-- name: RetryJob :one
 UPDATE jobs
 SET status = 'queued', error = '', cancel_requested = false, attempts = 0, finished_at = NULL, heartbeat_at = NULL
@@ -287,6 +301,22 @@ func (q *Queries) RetryJob(ctx context.Context, arg RetryJobParams) (Job, error)
 		&i.ClusterSlot,
 	)
 	return i, err
+}
+
+const setAppliedRevision = `-- name: SetAppliedRevision :exec
+UPDATE clusters SET applied_revision = greatest(applied_revision, $1::int)
+WHERE id = $2 AND spec_revision >= $1::int
+`
+
+type SetAppliedRevisionParams struct {
+	Revision int32
+	ID       uuid.UUID
+}
+
+// Na een geslaagde toepassing; een oudere revisie zet hem nooit terug.
+func (q *Queries) SetAppliedRevision(ctx context.Context, arg SetAppliedRevisionParams) error {
+	_, err := q.db.Exec(ctx, setAppliedRevision, arg.Revision, arg.ID)
+	return err
 }
 
 const setClusterSpec = `-- name: SetClusterSpec :one

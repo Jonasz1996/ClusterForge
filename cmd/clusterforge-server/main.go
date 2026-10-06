@@ -202,7 +202,7 @@ func serve() error {
 	eval.After = dps.Evaluate
 	// GitOps leest de gekoppelde repository elke minuut; na een uitrol of
 	// toepassing kijkt het meteen of een plan verouderd is.
-	git := gitops.NewService(pool, ev, log, box, dep)
+	git := gitops.NewService(pool, ev, log, box, dep, ro)
 	for _, kind := range []string{deploy.Kind, rollout.Kind} {
 		runner.OnFinished(kind, func(context.Context, store.Job) { git.Kick(false) })
 	}

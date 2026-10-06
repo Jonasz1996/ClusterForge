@@ -153,6 +153,7 @@ func (s *Service) planUpdate(ctx context.Context, c *Cluster, ch *Checked, commi
 
 	oldTpl, ok := s.reg().Get(old.Template.Name, old.Template.Version)
 	if !ok {
+		oldTpl = nil
 		p.Warnings = append(p.Warnings, fmt.Sprintf("%s %s zit niet in deze server; de huidige stappen zijn niet te renderen, dus het plan toont geen diffs.",
 			old.Template.Name, old.Template.Version))
 	}
@@ -160,39 +161,28 @@ func (s *Service) planUpdate(ctx context.Context, c *Cluster, ch *Checked, commi
 	if err != nil {
 		return nil, deploy.Spec{}, nil, err
 	}
+	isNew := func(id uuid.UUID) bool {
+		return slices.ContainsFunc(growth.Nodes, func(g deploy.SpecNode) bool { return g.NodeID == id })
+	}
+	diffs, warnings := nodeDiffs(oldTpl, newTpl, old, next, states, all, isNew, c.Revision, commit)
+	p.Warnings = append(p.Warnings, warnings...)
 	byNode := map[uuid.UUID]PlanNode{}
 	var order []uuid.UUID
 	for _, n := range next.Nodes {
-		isNew := slices.ContainsFunc(growth.Nodes, func(g deploy.SpecNode) bool { return g.NodeID == n.NodeID })
-		pn := PlanNode{NodeID: n.NodeID, Hostname: n.Hostname, New: isNew, VIPs: owned[n.NodeID], Steps: []StepChange{}}
+		d, rendered := diffs[n.NodeID]
+		if !rendered {
+			continue
+		}
+		if len(d.Steps) == 0 {
+			p.Unchanged = append(p.Unchanged, n.Hostname)
+			continue
+		}
+		pn := PlanNode{NodeID: n.NodeID, Hostname: n.Hostname, New: isNew(n.NodeID), VIPs: owned[n.NodeID], Steps: d.Steps}
 		if pn.VIPs == nil {
 			pn.VIPs = []string{}
 		}
-		if isNew {
+		if pn.New {
 			pn.NodeID = uuid.Nil
-		}
-		var before []templates.Step
-		if !isNew && ok {
-			if n.NodeID == uuid.Nil {
-				continue
-			}
-			before, err = deploy.RenderMasked(oldTpl, old, states, n.NodeID)
-			if err != nil {
-				p.Warnings = append(p.Warnings, fmt.Sprintf("De huidige stappen van %s zijn niet te renderen: %v.", n.Hostname, err))
-				continue
-			}
-		} else if !isNew {
-			continue
-		}
-		after, err := deploy.RenderMasked(newTpl, next, all, n.NodeID)
-		if err != nil {
-			p.Warnings = append(p.Warnings, fmt.Sprintf("De nieuwe stappen van %s zijn niet te renderen: %v.", n.Hostname, err))
-			continue
-		}
-		pn.Steps = compareSteps(n.Hostname, before, after, c.Revision, commit)
-		if len(pn.Steps) == 0 {
-			p.Unchanged = append(p.Unchanged, n.Hostname)
-			continue
 		}
 		byNode[n.NodeID] = pn
 		order = append(order, n.NodeID)
@@ -208,6 +198,44 @@ func (s *Service) planUpdate(ctx context.Context, c *Cluster, ch *Checked, commi
 	p.NoSteps = len(p.Nodes) == 0
 	p.Summary = summary(p)
 	return p, next, nil, nil
+}
+
+// nodeDiff is wat er op één node verandert, met de nieuwe stappen.
+type nodeDiff struct {
+	Steps []StepChange
+	After []templates.Step
+}
+
+// nodeDiffs rendert elke node van next met de stappen ervoor (uit old) en
+// erna, met plaatshouders voor de geheimen, en geeft per node wat er
+// verandert. Zonder oldTpl, of voor een node die niet te renderen is, staat
+// de node er niet in; dat laatste komt in de waarschuwingen. Een nieuwe node
+// heeft geen stappen ervoor.
+func nodeDiffs(oldTpl, newTpl *templates.Template, old, next deploy.Spec, states, all map[uuid.UUID]deploy.NodeState,
+	isNew func(uuid.UUID) bool, revision int, commit string) (map[uuid.UUID]nodeDiff, []string) {
+	out := map[uuid.UUID]nodeDiff{}
+	var warnings []string
+	for _, n := range next.Nodes {
+		var before []templates.Step
+		if !isNew(n.NodeID) {
+			if oldTpl == nil || n.NodeID == uuid.Nil {
+				continue
+			}
+			var err error
+			before, err = deploy.RenderMasked(oldTpl, old, states, n.NodeID)
+			if err != nil {
+				warnings = append(warnings, fmt.Sprintf("De huidige stappen van %s zijn niet te renderen: %v.", n.Hostname, err))
+				continue
+			}
+		}
+		after, err := deploy.RenderMasked(newTpl, next, all, n.NodeID)
+		if err != nil {
+			warnings = append(warnings, fmt.Sprintf("De nieuwe stappen van %s zijn niet te renderen: %v.", n.Hostname, err))
+			continue
+		}
+		out[n.NodeID] = nodeDiff{Steps: compareSteps(n.Hostname, before, after, revision, commit), After: after}
+	}
+	return out, warnings
 }
 
 // fileError zet een fout van de uitrolcontroles om naar het veld in het

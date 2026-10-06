@@ -6,8 +6,17 @@ WHERE id = @id
 RETURNING spec_revision;
 
 -- name: InsertSpecRevision :exec
-INSERT INTO cluster_spec_revisions (cluster_id, revision, spec, source, created_by)
-VALUES ($1, $2, $3, $4, $5);
+INSERT INTO cluster_spec_revisions (cluster_id, revision, spec, source, created_by, commit_sha)
+VALUES ($1, $2, $3, $4, $5, $6);
+
+-- name: MarkSpecApplied :exec
+-- Na een geslaagde uitrol staat de huidige revisie op alle nodes.
+UPDATE clusters SET applied_revision = spec_revision WHERE id = $1;
+
+-- name: SetAppliedRevision :exec
+-- Na een geslaagde toepassing; een oudere revisie zet hem nooit terug.
+UPDATE clusters SET applied_revision = greatest(applied_revision, @revision::int)
+WHERE id = @id AND spec_revision >= @revision::int;
 
 -- name: InsertSecret :exec
 INSERT INTO secrets (cluster_id, name, value_enc, key_id) VALUES ($1, $2, $3, $4);
@@ -62,7 +71,7 @@ WHERE n.cluster_id = $1
 ORDER BY n.hostname;
 
 -- name: ListSpecRevisions :many
-SELECT r.revision, r.spec, r.source, r.created_at, r.created_by, u.username AS created_by_name
+SELECT r.revision, r.spec, r.source, r.commit_sha, r.created_at, r.created_by, u.username AS created_by_name
 FROM cluster_spec_revisions r
 LEFT JOIN users u ON u.id = r.created_by
 WHERE r.cluster_id = $1

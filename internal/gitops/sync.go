@@ -185,6 +185,14 @@ func (s *Service) evaluate(ctx context.Context, repo store.GitRepo, head Commit,
 	for _, p := range pendingRows {
 		pending[p.Slug] = p
 	}
+	latestRows, err := s.q.ListLatestGitChanges(ctx)
+	if err != nil {
+		return err
+	}
+	latest := map[string]store.GitChange{}
+	for _, l := range latestRows {
+		latest[l.Slug] = l
+	}
 	prev := map[string]FileEntry{}
 	for _, e := range Scan(repo) {
 		prev[e.Path] = e
@@ -195,7 +203,7 @@ func (s *Service) evaluate(ctx context.Context, repo store.GitRepo, head Commit,
 	for _, f := range files {
 		slug := slugOf(repo.Path, f.Path)
 		seen[slug] = true
-		o, err := s.evaluateFile(ctx, repo, head, f, slug, blobs[f.SHA], tooBig[f.SHA], clusters, pending, prev[f.Path])
+		o, err := s.evaluateFile(ctx, repo, head, f, slug, blobs[f.SHA], tooBig[f.SHA], clusters, pending, latest[slug], prev[f.Path])
 		if err != nil {
 			return err
 		}
@@ -249,9 +257,10 @@ func (s *Service) evaluate(ctx context.Context, repo store.GitRepo, head Commit,
 
 // evaluateFile leest, controleert en plant één bestand. Een plan komt er
 // alleen als er nog geen wachtende wijziging is voor deze inhoud en deze
-// revisie van het cluster.
+// revisie van het cluster, en als die inhoud niet is afgewezen. latest is
+// de nieuwste wijziging voor deze slug.
 func (s *Service) evaluateFile(ctx context.Context, repo store.GitRepo, head Commit, f TreeEntry, slug string, data []byte, tooBig bool,
-	clusters map[string]store.ListGitClustersRow, pending map[string]store.GitChange, prev FileEntry) (outcome, error) {
+	clusters map[string]store.ListGitClustersRow, pending map[string]store.GitChange, latest store.GitChange, prev FileEntry) (outcome, error) {
 	o := outcome{entry: FileEntry{Path: f.Path, Slug: slug, BlobSHA: f.SHA, Errors: []FieldError{}, Commit: head.SHA}}
 	if prev.BlobSHA == f.SHA && prev.Commit != "" {
 		o.entry.Commit = prev.Commit
@@ -298,7 +307,19 @@ func (s *Service) evaluateFile(ctx context.Context, repo store.GitRepo, head Com
 	}
 
 	if linked && ch.Same(c) {
+		// Gelijk aan de spec; loopt de toepassing nog of mislukte ze, dan
+		// staat dat erbij.
 		o.entry.State = "in_sync"
+		switch {
+		case latest.Status == "applying":
+			o.entry.State = "applying"
+		case c.Applied < c.Revision:
+			o.entry.State = "not_applied"
+		}
+		if o.entry.State != "in_sync" && latest.ID != uuid.Nil && latest.Revision != nil && int(*latest.Revision) == c.Revision {
+			id := latest.ID
+			o.entry.ChangeID = &id
+		}
 		if hasPending {
 			o.supersede = "het bestand is weer gelijk aan het cluster"
 		}
@@ -313,6 +334,14 @@ func (s *Service) evaluateFile(ctx context.Context, repo store.GitRepo, head Com
 		o.entry.ChangeID = &id
 		o.entry.State = map[bool]string{true: "pending", false: "new"}[linked]
 		o.entry.Commit = p.CommitSha
+		return o, nil
+	}
+	// Afgewezen blijft afgewezen tot een nieuwe commit het bestand wijzigt.
+	if !hasPending && latest.Status == "rejected" && latest.BlobSha == f.SHA && int(latest.BaseRevision) == revision &&
+		latest.CommitSha == o.entry.Commit && (latest.ClusterID == nil) == !linked {
+		id := latest.ID
+		o.entry.ChangeID = &id
+		o.entry.State = "rejected"
 		return o, nil
 	}
 	key := fmt.Sprintf("%s@%d", f.SHA, revision)
@@ -370,7 +399,7 @@ func newSpec(ch *Checked) deploy.Spec {
 func (s *Service) clusterOf(ctx context.Context, r store.ListGitClustersRow) *Cluster {
 	c := &Cluster{
 		ID: r.ID, Slug: r.Slug, Name: r.Name, Description: r.Description, Environment: string(r.Environment),
-		Type: r.Type, Tags: r.Tags, Linked: r.GitRepoID != nil, Revision: int(r.SpecRevision),
+		Type: r.Type, Tags: r.Tags, Linked: r.GitRepoID != nil, Revision: int(r.SpecRevision), Applied: int(r.AppliedRevision),
 	}
 	if c.Tags == nil {
 		c.Tags = []string{}

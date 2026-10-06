@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Badge, Card } from "@/components/ui";
 import { QueryState, tableClass, tdClass, thClass } from "@/components/inventory/bits";
 import { specSources, useSpecHistory, type SpecRevision } from "@/lib/deploy";
+import { CommitLink } from "@/components/gitops/bits";
 
 const timeFmt = new Intl.DateTimeFormat("nl-BE", { dateStyle: "medium", timeStyle: "short" });
 const none = <span className="text-slate-400">–</span>;
@@ -82,7 +83,15 @@ export function SpecCard({ clusterId }: { clusterId: string }) {
                           <td className={tdClass}>
                             {r.created_by ? <span className={r.created_by.deleted ? "text-slate-500 line-through" : undefined}>{r.created_by.name}</span> : none}
                           </td>
-                          <td className={tdClass}>{specSources[r.source]}</td>
+                          <td className={tdClass}>
+                            {specSources[r.source]}
+                            {r.commit_sha && (
+                              <>
+                                {" · "}
+                                <CommitLink sha={r.commit_sha} url={r.commit_url || undefined} />
+                              </>
+                            )}
+                          </td>
                           <td className={tdClass}>
                             <Changes r={r} first={i === h.items.length - 1} />
                           </td>

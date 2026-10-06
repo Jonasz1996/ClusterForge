@@ -204,7 +204,7 @@ function FilesCard({ repo, isAdmin }: { repo: GitRepo; isAdmin: boolean }) {
                     <td className={`${tdClass} text-right whitespace-nowrap`}>
                       {f.change_id && (
                         <Link href={`/gitops/wijziging?id=${f.change_id}`} className="text-sm text-brand-700 hover:underline dark:text-sky-300">
-                          Plan bekijken
+                          {f.state === "pending" || f.state === "new" ? "Plan bekijken" : "Wijziging bekijken"}
                         </Link>
                       )}
                       {f.state === "unlinked" && isAdmin && f.cluster_id && <LinkButton clusterId={f.cluster_id} path={f.path} small />}
@@ -243,7 +243,16 @@ function ChangesCard() {
                   <p className="text-xs text-slate-500">
                     <CommitLink sha={c.commit.sha} url={c.commit.url} /> &ldquo;
                     {commitTitle(c.commit)}&rdquo; · {c.commit.author}
+                    {c.revision !== null && ` · revisie ${c.revision}`}
                     {c.reason && ` · ${c.reason}`}
+                    {c.job_id && (
+                      <>
+                        {" · "}
+                        <Link href={`/taken/detail?id=${c.job_id}`} className="text-brand-700 hover:underline dark:text-sky-300">
+                          taak
+                        </Link>
+                      </>
+                    )}
                   </p>
                 </div>
                 <span className="text-xs text-slate-500">{ago(c.created_at)}</span>

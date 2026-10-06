@@ -302,6 +302,7 @@ type Cluster struct {
 	StatusReason    string
 	StatusSince     *time.Time
 	GitRepoID       *uuid.UUID
+	AppliedRevision int32
 }
 
 type ClusterOwner struct {
@@ -413,6 +414,7 @@ type GitChange struct {
 	Reason         string
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
+	Revision       *int32
 }
 
 type GitRepo struct {

@@ -1,13 +1,14 @@
 // Package rollout past een wijziging die meer dan één node raakt toe met
 // één taak, cluster.apply: node voor node, met de VIP-eigenaar als laatste,
 // en na elke node de gezondheidspoort. De taak stopt zodra iets niet gezond
-// is, zodat de nodes daarna ongemoeid blijven. In deze versie is herstel van
-// drift de enige modus; GitOps en het bijwerken van een templateversie
-// gebruiken later dezelfde taak.
+// is, zodat de nodes daarna ongemoeid blijven. Er zijn twee modi: drift
+// herstellen, en een nieuwe revisie van de gewenste staat toepassen, zoals
+// een goedgekeurde wijziging uit Git.
 package rollout
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -35,6 +36,11 @@ const Kind = "cluster.apply"
 
 // ModeRemediate: alleen de gekozen afwijkende stappen opnieuw toepassen.
 const ModeRemediate = "remediate"
+
+// ModeChange: een nieuwe revisie toepassen. Per node de stappen die
+// veranderen, of met All alle stappen behalve wat genegeerd wordt. Na een
+// geslaagde taak is de revisie toegepast.
+const ModeChange = "change"
 
 // FieldError is een fout in één veld van de invoer.
 type FieldError struct{ Field, Message string }
@@ -91,9 +97,16 @@ func NewService(pool *pgxpool.Pool, ev *events.Writer, log *slog.Logger, runner 
 	return s
 }
 
-// finished controleert het cluster meteen opnieuw, zodat verdwenen drift
-// het event drift.resolved met deze taak krijgt.
+// finished zet na een geslaagde wijziging de toegepaste revisie en
+// controleert het cluster meteen opnieuw, zodat verdwenen drift het event
+// drift.resolved met deze taak krijgt.
 func (s *Service) finished(ctx context.Context, j store.Job) {
+	var p Plan
+	if j.ClusterID != nil && j.Status == store.JobStatusSucceeded && json.Unmarshal(j.Params, &p) == nil && p.Mode == ModeChange {
+		if err := s.q.SetAppliedRevision(ctx, store.SetAppliedRevisionParams{ID: *j.ClusterID, Revision: int32(p.Revision)}); err != nil {
+			s.log.Warn("toegepaste revisie bewaren mislukt", "job", j.ID, "err", err)
+		}
+	}
 	if j.ClusterID != nil {
 		if err := s.drift.CheckAfterJob(ctx, *j.ClusterID, j.ID); err != nil {
 			s.log.Warn("driftcontrole na herstel mislukt", "job", j.ID, "err", err)
@@ -131,6 +144,13 @@ type Plan struct {
 	Nodes       []PlanNode `json:"nodes"`
 	// Notes zeggen in gewone zinnen wat er hoogstens kan gebeuren.
 	Notes []string `json:"notes"`
+	// All: bij een wijziging alle stappen toepassen, niet alleen die
+	// veranderen, zodat de nodes ook bijkomen na een eerdere toepassing
+	// die mislukte.
+	All bool `json:"all,omitempty"`
+	// ChangeID en Commit wijzen naar de wijziging uit Git.
+	ChangeID *uuid.UUID `json:"change_id,omitempty"`
+	Commit   string     `json:"commit,omitempty"`
 }
 
 // NeedsConfirmation: op prod moet de beheerder de slug intikken.
@@ -213,7 +233,7 @@ func (s *Service) PlanRemediation(ctx context.Context, clusterID uuid.UUID, choi
 			return Plan{}, &FieldError{Field: "nodes", Message: "een gekozen node hoort niet bij de gewenste staat van dit cluster"}
 		}
 		n := rows[i]
-		if err := nodeUsable(n); err != nil {
+		if err := nodeUsable(n, ModeRemediate); err != nil {
 			return Plan{}, err
 		}
 		j := slices.IndexFunc(rep.Nodes, func(r drift.NodeReport) bool { return r.NodeID == n.ID })
@@ -250,13 +270,18 @@ func (s *Service) PlanRemediation(ctx context.Context, clusterID uuid.UUID, choi
 	return p, nil
 }
 
-// nodeUsable zegt of herstel nu op deze node kan.
-func nodeUsable(n store.ListDriftNodesRow) error {
+// nodeUsable zegt of herstel of een wijziging nu op deze node kan. Herstel
+// inspecteert eerst en vraagt dus een nieuwere agent.
+func nodeUsable(n store.ListDriftNodesRow, mode string) error {
+	what, need := "herstel", minProtocol
+	if mode == ModeChange {
+		what, need = "een wijziging", protocol.ApplySince
+	}
 	switch {
 	case n.Lifecycle != store.NodeLifecycleActive:
-		return &ConflictError{Code: "node_not_active", Msg: n.Hostname + " is niet actief; herstel kan alleen op een actieve node"}
-	case !n.HasAgent || n.AgentProtocol < minProtocol:
-		return &ConflictError{Code: "agent_too_old", Msg: fmt.Sprintf("de agent op %s is te oud voor herstel; werk hem bij met install.sh --upgrade", n.Hostname)}
+		return &ConflictError{Code: "node_not_active", Msg: n.Hostname + " is niet actief; " + what + " kan alleen op een actieve node"}
+	case !n.HasAgent || n.AgentProtocol < int32(need):
+		return &ConflictError{Code: "agent_too_old", Msg: fmt.Sprintf("de agent op %s is te oud voor %s; werk hem bij met install.sh --upgrade", n.Hostname, what)}
 	case n.HeartbeatAt == nil || time.Since(*n.HeartbeatAt) > status.HeartbeatDown:
 		return &ConflictError{Code: "agent_offline", Msg: fmt.Sprintf("de agent op %s is niet verbonden", n.Hostname)}
 	}
@@ -502,3 +527,108 @@ func (s *Service) StartRemediation(ctx context.Context, actor events.Actor, p Pl
 	s.jobs.Kick()
 	return j, nil
 }
+
+// ChangeNode is een node van een wijziging, met de stappen die veranderen
+// en de services die het toepassen herlaadt, herstart of stopt.
+type ChangeNode struct {
+	NodeID   uuid.UUID
+	Hostname string
+	Steps    []PlanStep
+	Services []string
+}
+
+// ChangeInput is een revisie van de gewenste staat die de taak toepast.
+type ChangeInput struct {
+	ClusterID uuid.UUID
+	// Revision is de revisie die de taak toepast, met haar template.
+	Revision          int
+	Template, Version string
+	// Nodes staan in de volgorde van de spec. Zonder All blijft een node
+	// zonder stappen ongemoeid.
+	Nodes    []ChangeNode
+	All      bool
+	ChangeID *uuid.UUID
+	Commit   string
+}
+
+// PlanChange zet een wijziging om in een plan: de nodes zonder VIP eerst,
+// de eigenaar als laatste. Elke node moet nu actief en verbonden zijn, zodat
+// een goedkeuring niet pas in de taak strandt. Er verandert nog niets.
+func (s *Service) PlanChange(ctx context.Context, in ChangeInput) (Plan, error) {
+	c, err := s.q.GetCluster(ctx, in.ClusterID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Plan{}, ErrNotFound
+	}
+	if err != nil {
+		return Plan{}, err
+	}
+	rows, err := s.q.ListDriftNodes(ctx, store.ListDriftNodesParams{ClusterID: &in.ClusterID})
+	if err != nil {
+		return Plan{}, err
+	}
+	owned, err := s.ownedVIPs(ctx, in.ClusterID)
+	if err != nil {
+		return Plan{}, err
+	}
+	byNode := map[uuid.UUID]PlanNode{}
+	order := make([]uuid.UUID, 0, len(in.Nodes))
+	for _, cn := range in.Nodes {
+		if !in.All && len(cn.Steps) == 0 {
+			continue
+		}
+		i := slices.IndexFunc(rows, func(r store.ListDriftNodesRow) bool { return r.ID == cn.NodeID })
+		if i < 0 {
+			return Plan{}, &ConflictError{Code: "membership", Msg: cn.Hostname + " is geen node van dit cluster meer; de gewenste staat klopt niet met het cluster"}
+		}
+		if err := nodeUsable(rows[i], ModeChange); err != nil {
+			return Plan{}, err
+		}
+		pn := PlanNode{NodeID: cn.NodeID, Hostname: cn.Hostname, VIPs: owned[cn.NodeID], Steps: cn.Steps, Ignored: []string{}, Services: cn.Services}
+		if pn.VIPs == nil {
+			pn.VIPs = []string{}
+		}
+		if pn.Steps == nil {
+			pn.Steps = []PlanStep{}
+		}
+		if pn.Services == nil {
+			pn.Services = []string{}
+		}
+		byNode[cn.NodeID] = pn
+		order = append(order, cn.NodeID)
+	}
+	if len(order) == 0 {
+		return Plan{}, &ConflictError{Code: "nothing", Msg: "er is op geen enkele node iets toe te passen"}
+	}
+	p := Plan{
+		Mode: ModeChange, ClusterID: c.ID, Cluster: c.Name, Slug: c.Slug, Environment: string(c.Environment),
+		Template: in.Template, Version: in.Version, Revision: in.Revision, All: in.All, ChangeID: in.ChangeID, Commit: in.Commit,
+	}
+	p.Nodes = Order(order, byNode)
+	p.Notes = notes(p)
+	if p.All {
+		p.Notes = append(p.Notes, "Op elke node worden alle stappen van de template opnieuw toegepast, behalve wat genegeerd wordt; wat al goed staat, blijft zoals het is.")
+	}
+	return p, nil
+}
+
+// EnqueueTx zet een plan in de wachtrij, door het clusterslot, in de
+// transactie van de aanvrager. Een bezet slot is een ConflictError busy.
+func (s *Service) EnqueueTx(ctx context.Context, q *store.Queries, actor events.Actor, title string, p Plan) (store.Job, error) {
+	j, err := s.jobs.EnqueueForClusterTx(ctx, q, jobs.Spec{Kind: Kind, Title: title, Params: p, ClusterID: &p.ClusterID, Actor: actor})
+	var busy jobs.BusyError
+	if errors.As(err, &busy) {
+		return store.Job{}, &ConflictError{Code: "busy", Msg: busy.Error()}
+	}
+	return j, err
+}
+
+// Kick laat de taken meteen starten, na de commit van EnqueueTx.
+func (s *Service) Kick() { s.jobs.Kick() }
+
+// Touched geeft de services die het toepassen van een stap kan herladen,
+// herstarten of stoppen.
+func Touched(ts templates.Step) []string { return touched(ts) }
+
+// OnFinished laat fn weten dat een cluster.apply klaar is, na de eigen
+// afronding van deze service.
+func (s *Service) OnFinished(fn jobs.FinishedFunc) { s.jobs.OnFinished(Kind, fn) }

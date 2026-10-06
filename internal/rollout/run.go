@@ -39,7 +39,7 @@ func (s *Service) run(ctx context.Context, j *jobs.Job) error {
 	if err := j.Decode(&p); err != nil {
 		return err
 	}
-	if p.Mode != ModeRemediate {
+	if p.Mode != ModeRemediate && p.Mode != ModeChange {
 		return fmt.Errorf("onbekende modus %q", p.Mode)
 	}
 	// Bovenaan elke poging, ook na een herstart van de server.
@@ -48,12 +48,15 @@ func (s *Service) run(ctx context.Context, j *jobs.Job) error {
 	}
 	for i := range p.Nodes {
 		n := &p.Nodes[i]
-		name := "Herstel op " + n.Hostname
+		name, step := "Herstel op "+n.Hostname, s.remediate
+		if p.Mode == ModeChange {
+			name, step = "Toepassen op "+n.Hostname, s.change
+		}
 		if len(n.VIPs) > 0 {
 			name += " (VIP-eigenaar)"
 		}
 		if err := j.Step(ctx, name, func(ctx context.Context, st *jobs.Step) error {
-			return s.remediate(ctx, j, st, p, n)
+			return step(ctx, j, st, p, n)
 		}); err != nil {
 			return err
 		}
@@ -68,11 +71,15 @@ func (s *Service) current(ctx context.Context, p Plan) (*deploy.Desired, error) 
 	if err != nil {
 		return nil, fmt.Errorf("de gewenste staat is niet te lezen: %w", err)
 	}
+	again := "vraag het herstel opnieuw aan vanuit de drift van nu"
+	if p.Mode == ModeChange {
+		again = "de taak past alleen de revisie toe die goedgekeurd is"
+	}
 	switch {
 	case d.Revision != p.Revision:
-		return nil, fmt.Errorf("de specificatie veranderde sinds de aanvraag (revisie %d, nu %d); vraag het herstel opnieuw aan vanuit de drift van nu", p.Revision, d.Revision)
+		return nil, fmt.Errorf("de specificatie veranderde sinds de aanvraag (revisie %d, nu %d); %s", p.Revision, d.Revision, again)
 	case d.Spec.Template.Version != p.Version:
-		return nil, fmt.Errorf("de templateversie veranderde sinds de aanvraag (%s, nu %s); vraag het herstel opnieuw aan", p.Version, d.Spec.Template.Version)
+		return nil, fmt.Errorf("de templateversie veranderde sinds de aanvraag (%s, nu %s); %s", p.Version, d.Spec.Template.Version, again)
 	case len(d.Membership) > 0:
 		return nil, errors.New("het lidmaatschap wijkt nu af van de specificatie: " + strings.Join(d.Membership, "; "))
 	}
@@ -94,7 +101,7 @@ func (s *Service) remediate(ctx context.Context, j *jobs.Job, st *jobs.Step, p P
 	if len(rows) == 0 || rows[0].ClusterID == nil || *rows[0].ClusterID != p.ClusterID || !d.Has(n.NodeID) {
 		return fmt.Errorf("%s hoort niet meer bij dit cluster", n.Hostname)
 	}
-	if err := nodeUsable(rows[0]); err != nil {
+	if err := nodeUsable(rows[0], p.Mode); err != nil {
 		return err
 	}
 	var ns nodeState
@@ -147,24 +154,38 @@ func (s *Service) remediate(ctx context.Context, j *jobs.Job, st *jobs.Step, p P
 		st.Logf("hervat na een onderbreking; het herstel was al begonnen, dus %s opnieuw toepassen", n.Hostname)
 	}
 
+	if err := s.apply(ctx, j, st, p, n, &ns, ids, steps); err != nil {
+		return err
+	}
+	return s.settle(ctx, st, p, n, d, rendered, "het herstel van "+n.Hostname, n.Hostname+" is hersteld")
+}
+
+// apply past de stappen toe op een node die een eventueel VIP kan
+// afstaan. De stappen liggen vast voor het eerste commando de deur uitgaat.
+func (s *Service) apply(ctx context.Context, j *jobs.Job, st *jobs.Step, p Plan, n *PlanNode, ns *nodeState, ids []string, steps []templates.Step) error {
 	if err := s.takeover(ctx, p.ClusterID, n, st); err != nil {
 		return err
 	}
 	if ns.AppliedAt == nil {
 		now := time.Now()
 		ns.AppliedAt, ns.Steps = &now, ids
-		if err := st.SetState(ctx, ns); err != nil {
+		if err := st.SetState(ctx, *ns); err != nil {
 			return err
 		}
 	}
-	if _, err := deploy.ApplySteps(ctx, s.bus, deploy.ApplyOptions{
+	_, err := deploy.ApplySteps(ctx, s.bus, deploy.ApplyOptions{
 		NodeID: n.NodeID, Hostname: n.Hostname, CommandID: j.ID.String() + "-" + n.NodeID.String(), Retry: s.Retry,
-		Logf: st.Logf, Flush: flush,
-	}, steps); err != nil {
-		return err
-	}
-	since := time.Now()
+		Logf: st.Logf, Flush: func() { _ = st.Flush(ctx) },
+	}, steps)
+	return err
+}
 
+// settle wacht na het toepassen tot de node gezond is, elk VIP één houder
+// heeft en de controles van de template slagen. after zegt waarna, zoals
+// "het herstel van web-02".
+func (s *Service) settle(ctx context.Context, st *jobs.Step, p Plan, n *PlanNode, d *deploy.Desired, rendered []templates.Step, after, done string) error {
+	flush := func() { _ = st.Flush(ctx) }
+	since := time.Now()
 	progress := func(msg string) {
 		st.Logf("%s", msg)
 		flush()
@@ -173,7 +194,7 @@ func (s *Service) remediate(ctx context.Context, j *jobs.Job, st *jobs.Step, p P
 	st.Logf("wachten tot %s gezond is (%s active)", n.Hostname, strings.Join(services, ", "))
 	flush()
 	rctx, cancel := context.WithTimeoutCause(ctx, s.ReadyTimeout, fmt.Errorf("%s gaf in %s geen twee gezonde heartbeats", n.Hostname, s.ReadyTimeout))
-	err = s.Gate.NodeReady(rctx, n.NodeID, since, services, progress)
+	err := s.Gate.NodeReady(rctx, n.NodeID, since, services, progress)
 	cancel()
 	if err != nil {
 		return fmt.Errorf("%s komt niet gezond terug: %w; de taak stopt hier", n.Hostname, err)
@@ -187,7 +208,7 @@ func (s *Service) remediate(ctx context.Context, j *jobs.Job, st *jobs.Step, p P
 		_, err := s.Gate.Settled(sctx, p.ClusterID, vips, since, nil, progress)
 		cancel()
 		if err != nil {
-			return fmt.Errorf("na het herstel van %s: %w; de taak stopt hier", n.Hostname, err)
+			return fmt.Errorf("na %s: %w; de taak stopt hier", after, err)
 		}
 	}
 	c, err := d.Context()
@@ -195,10 +216,77 @@ func (s *Service) remediate(ctx context.Context, j *jobs.Job, st *jobs.Step, p P
 		return err
 	}
 	if err := s.dep.Check(ctx, p.ClusterID, d.Template, c, s.CheckTimeout, st.Logf, flush); err != nil {
-		return fmt.Errorf("controle na het herstel van %s: %w; de taak stopt hier", n.Hostname, err)
+		return fmt.Errorf("controle na %s: %w; de taak stopt hier", after, err)
 	}
-	st.Logf("%s is hersteld", n.Hostname)
+	st.Logf("%s", done)
 	return nil
+}
+
+// change past op één node de stappen van een nieuwe revisie toe en wacht
+// tot de node en het cluster gezond zijn. Met All zijn dat alle stappen,
+// behalve wat nu genegeerd wordt.
+func (s *Service) change(ctx context.Context, j *jobs.Job, st *jobs.Step, p Plan, n *PlanNode) error {
+	d, err := s.current(ctx, p)
+	if err != nil {
+		return err
+	}
+	rows, err := s.q.ListDriftNodes(ctx, store.ListDriftNodesParams{NodeID: &n.NodeID})
+	if err != nil {
+		return err
+	}
+	if len(rows) == 0 || rows[0].ClusterID == nil || *rows[0].ClusterID != p.ClusterID || !d.Has(n.NodeID) {
+		return fmt.Errorf("%s hoort niet meer bij dit cluster", n.Hostname)
+	}
+	if err := nodeUsable(rows[0], p.Mode); err != nil {
+		return err
+	}
+	rendered, err := d.Render(n.NodeID)
+	if err != nil {
+		return fmt.Errorf("de stappen van %s zijn niet te renderen: %w", n.Hostname, err)
+	}
+	var ns nodeState
+	st.State(&ns)
+	ids := ns.Steps
+	switch {
+	case ns.AppliedAt != nil:
+		st.Logf("hervat na een onderbreking; het toepassen was al begonnen, dus %s opnieuw toepassen", n.Hostname)
+	case p.All:
+		ids = nil
+		for _, ts := range rendered {
+			ids = append(ids, drift.StepIDs(ts)...)
+		}
+		ignored, err := s.drift.IgnoredSteps(ctx, p.ClusterID, n.NodeID, ids)
+		if err != nil {
+			return err
+		}
+		for _, id := range ignored {
+			st.Logf("%s wordt genegeerd en blijft zoals het is", id)
+		}
+		ids = slices.DeleteFunc(ids, func(id string) bool { return slices.Contains(ignored, id) })
+	default:
+		ids = make([]string, 0, len(n.Steps))
+		for _, ps := range n.Steps {
+			ids = append(ids, ps.Step)
+		}
+	}
+	steps := Select(rendered, ids)
+	if len(steps) == 0 {
+		st.Logf("niets toe te passen op %s", n.Hostname)
+		return nil
+	}
+	titles := make([]string, 0, len(steps))
+	for _, ts := range steps {
+		titles = append(titles, lowerFirst(title(ts, drift.StepIDs(ts)[0])))
+	}
+	if !p.All {
+		st.Logf("revisie %d toepassen: %s", p.Revision, strings.Join(titles, ", "))
+	} else {
+		st.Logf("revisie %d toepassen: alle %d stappen", p.Revision, len(steps))
+	}
+	if err := s.apply(ctx, j, st, p, n, &ns, ids, steps); err != nil {
+		return err
+	}
+	return s.settle(ctx, st, p, n, d, rendered, "het toepassen op "+n.Hostname, n.Hostname+" is bijgewerkt")
 }
 
 // takeover controleert dat een andere node de VIP's van deze node kan
