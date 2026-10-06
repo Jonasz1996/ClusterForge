@@ -24,6 +24,7 @@ export function GitCard({ c, isAdmin }: { c: ClusterDetail; isAdmin: boolean }) 
   const change = pending.data?.[0];
   const running = applying.data?.[0];
   const behind = c.applied_revision < c.spec_revision;
+  const shown = file?.state === "applying" || file?.state === "not_applied";
 
   return (
     <Card
@@ -110,9 +111,10 @@ export function GitCard({ c, isAdmin }: { c: ClusterDetail; isAdmin: boolean }) 
             </p>
             {file && (
               <p className="flex flex-wrap items-center gap-2">
-                <FileStateBadge state={file.state} />
+                {/* Toepassen en niet toegepast staan al bij de revisie hierboven. */}
+                {!shown && <FileStateBadge state={file.state} />}
                 <span className="text-slate-500">
-                  commit <CommitLink sha={file.commit} />
+                  {shown ? "Commit" : "commit"} <CommitLink sha={file.commit} />
                 </span>
               </p>
             )}
