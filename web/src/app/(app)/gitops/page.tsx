@@ -117,6 +117,16 @@ function RepoCard({ repo, isAdmin, interval }: { repo: GitRepo | null; isAdmin: 
         <dd>
           <code className="text-xs">{repo.branch}</code> · <code className="text-xs">{repo.path}/</code>
         </dd>
+        <dt className="text-slate-500">Adres van ClusterForge</dt>
+        <dd>
+          {repo.server_url ? (
+            <code className="text-xs break-all">{repo.server_url}</code>
+          ) : (
+            <span className="text-amber-700 dark:text-amber-300">
+              Niet ingevuld; nodig om uit Git omhoog te schalen of een nieuw cluster uit te rollen. Kies Bewerken.
+            </span>
+          )}
+        </dd>
         <dt className="text-slate-500">Laatste commit</dt>
         <dd>{repo.head ? <CommitLine c={repo.head} /> : <span className="text-slate-400">Nog niet gelezen</span>}</dd>
         <dt className="text-slate-500">Gelezen</dt>

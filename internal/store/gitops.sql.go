@@ -24,20 +24,21 @@ func (q *Queries) CountPendingGitChanges(ctx context.Context) (int32, error) {
 }
 
 const createGitRepo = `-- name: CreateGitRepo :one
-INSERT INTO git_repos (id, api_url, owner, name, branch, path, token_enc, key_id)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-RETURNING id, api_url, owner, name, branch, path, token_enc, key_id, head_sha, head_etag, synced_sha, head_commit, scan, last_sync_at, last_error, created_at, updated_at
+INSERT INTO git_repos (id, api_url, owner, name, branch, path, token_enc, key_id, server_url)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+RETURNING id, api_url, owner, name, branch, path, token_enc, key_id, head_sha, head_etag, synced_sha, head_commit, scan, last_sync_at, last_error, created_at, updated_at, server_url
 `
 
 type CreateGitRepoParams struct {
-	ID       uuid.UUID
-	ApiUrl   string
-	Owner    string
-	Name     string
-	Branch   string
-	Path     string
-	TokenEnc []byte
-	KeyID    string
+	ID        uuid.UUID
+	ApiUrl    string
+	Owner     string
+	Name      string
+	Branch    string
+	Path      string
+	TokenEnc  []byte
+	KeyID     string
+	ServerUrl string
 }
 
 func (q *Queries) CreateGitRepo(ctx context.Context, arg CreateGitRepoParams) (GitRepo, error) {
@@ -50,6 +51,7 @@ func (q *Queries) CreateGitRepo(ctx context.Context, arg CreateGitRepoParams) (G
 		arg.Path,
 		arg.TokenEnc,
 		arg.KeyID,
+		arg.ServerUrl,
 	)
 	var i GitRepo
 	err := row.Scan(
@@ -70,6 +72,7 @@ func (q *Queries) CreateGitRepo(ctx context.Context, arg CreateGitRepoParams) (G
 		&i.LastError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ServerUrl,
 	)
 	return i, err
 }
@@ -77,8 +80,9 @@ func (q *Queries) CreateGitRepo(ctx context.Context, arg CreateGitRepoParams) (G
 const decideGitChange = `-- name: DecideGitChange :one
 UPDATE git_changes
 SET status = $1, revision = $2, job_id = $3, reason = $4,
-    decided_by = $5, decided_at = now(), updated_at = now()
-WHERE id = $6 AND status = 'pending'
+    cluster_id = COALESCE($5, cluster_id),
+    decided_by = $6, decided_at = now(), updated_at = now()
+WHERE id = $7 AND status = 'pending'
 RETURNING id, repo_id, cluster_id, slug, path, kind, commit_sha, commit_message, commit_author, commit_verified, commit_url, committed_at, blob_sha, base_revision, spec, metadata, plan, status, job_id, decided_by, decided_at, reason, created_at, updated_at, revision
 `
 
@@ -87,17 +91,20 @@ type DecideGitChangeParams struct {
 	Revision  *int32
 	JobID     *uuid.UUID
 	Reason    string
+	ClusterID *uuid.UUID
 	DecidedBy *uuid.UUID
 	ID        uuid.UUID
 }
 
-// Goedkeuren (applying met een taak, of meteen applied) of afwijzen.
+// Goedkeuren (applying met een taak, of meteen applied) of afwijzen. Bij
+// een nieuw cluster wijst de wijziging daarna naar het cluster.
 func (q *Queries) DecideGitChange(ctx context.Context, arg DecideGitChangeParams) (GitChange, error) {
 	row := q.db.QueryRow(ctx, decideGitChange,
 		arg.Status,
 		arg.Revision,
 		arg.JobID,
 		arg.Reason,
+		arg.ClusterID,
 		arg.DecidedBy,
 		arg.ID,
 	)
@@ -146,7 +153,7 @@ func (q *Queries) DeleteGitRepo(ctx context.Context, id uuid.UUID) (int64, error
 
 const finishGitChange = `-- name: FinishGitChange :one
 UPDATE git_changes SET status = $1, reason = $2, updated_at = now()
-WHERE job_id = $3 AND status = 'applying'
+WHERE job_id = $3 AND (status = 'applying' OR (status = 'failed' AND $1::text = 'applied'))
 RETURNING id, repo_id, cluster_id, slug, path, kind, commit_sha, commit_message, commit_author, commit_verified, commit_url, committed_at, blob_sha, base_revision, spec, metadata, plan, status, job_id, decided_by, decided_at, reason, created_at, updated_at, revision
 `
 
@@ -156,7 +163,9 @@ type FinishGitChangeParams struct {
 	JobID  *uuid.UUID
 }
 
-// Na de taak: applied of failed.
+// Na de taak: applied of failed. Een uitrol kan na een mislukking opnieuw
+// proberen met dezelfde taak; lukt dat, dan wordt de wijziging alsnog
+// applied.
 func (q *Queries) FinishGitChange(ctx context.Context, arg FinishGitChangeParams) (GitChange, error) {
 	row := q.db.QueryRow(ctx, finishGitChange, arg.Status, arg.Reason, arg.JobID)
 	var i GitChange
@@ -266,7 +275,7 @@ func (q *Queries) GetGitChange(ctx context.Context, id uuid.UUID) (GetGitChangeR
 }
 
 const getGitRepo = `-- name: GetGitRepo :one
-SELECT id, api_url, owner, name, branch, path, token_enc, key_id, head_sha, head_etag, synced_sha, head_commit, scan, last_sync_at, last_error, created_at, updated_at FROM git_repos LIMIT 1
+SELECT id, api_url, owner, name, branch, path, token_enc, key_id, head_sha, head_etag, synced_sha, head_commit, scan, last_sync_at, last_error, created_at, updated_at, server_url FROM git_repos LIMIT 1
 `
 
 func (q *Queries) GetGitRepo(ctx context.Context) (GitRepo, error) {
@@ -290,6 +299,7 @@ func (q *Queries) GetGitRepo(ctx context.Context) (GitRepo, error) {
 		&i.LastError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ServerUrl,
 	)
 	return i, err
 }
@@ -704,7 +714,7 @@ func (q *Queries) LockGitChange(ctx context.Context, id uuid.UUID) (GitChange, e
 }
 
 const lockGitRepo = `-- name: LockGitRepo :one
-SELECT id, api_url, owner, name, branch, path, token_enc, key_id, head_sha, head_etag, synced_sha, head_commit, scan, last_sync_at, last_error, created_at, updated_at FROM git_repos LIMIT 1 FOR UPDATE
+SELECT id, api_url, owner, name, branch, path, token_enc, key_id, head_sha, head_etag, synced_sha, head_commit, scan, last_sync_at, last_error, created_at, updated_at, server_url FROM git_repos LIMIT 1 FOR UPDATE
 `
 
 func (q *Queries) LockGitRepo(ctx context.Context) (GitRepo, error) {
@@ -728,6 +738,7 @@ func (q *Queries) LockGitRepo(ctx context.Context) (GitRepo, error) {
 		&i.LastError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ServerUrl,
 	)
 	return i, err
 }
@@ -886,27 +897,28 @@ func (q *Queries) UnlinkGitClusters(ctx context.Context, repoID *uuid.UUID) ([]U
 const updateGitRepo = `-- name: UpdateGitRepo :one
 UPDATE git_repos
 SET api_url = $1, owner = $2, name = $3, branch = $4, path = $5,
-    token_enc = $6, key_id = $7,
-    head_sha = CASE WHEN $8::boolean THEN '' ELSE head_sha END,
+    token_enc = $6, key_id = $7, server_url = $8,
+    head_sha = CASE WHEN $9::boolean THEN '' ELSE head_sha END,
     head_etag = '',
-    synced_sha = CASE WHEN $8::boolean THEN '' ELSE synced_sha END,
-    head_commit = CASE WHEN $8::boolean THEN NULL ELSE head_commit END,
-    scan = CASE WHEN $8::boolean THEN '[]'::jsonb ELSE scan END,
+    synced_sha = CASE WHEN $9::boolean THEN '' ELSE synced_sha END,
+    head_commit = CASE WHEN $9::boolean THEN NULL ELSE head_commit END,
+    scan = CASE WHEN $9::boolean THEN '[]'::jsonb ELSE scan END,
     last_error = '', updated_at = now()
-WHERE id = $9
-RETURNING id, api_url, owner, name, branch, path, token_enc, key_id, head_sha, head_etag, synced_sha, head_commit, scan, last_sync_at, last_error, created_at, updated_at
+WHERE id = $10
+RETURNING id, api_url, owner, name, branch, path, token_enc, key_id, head_sha, head_etag, synced_sha, head_commit, scan, last_sync_at, last_error, created_at, updated_at, server_url
 `
 
 type UpdateGitRepoParams struct {
-	ApiUrl   string
-	Owner    string
-	Name     string
-	Branch   string
-	Path     string
-	TokenEnc []byte
-	KeyID    string
-	Reset    bool
-	ID       uuid.UUID
+	ApiUrl    string
+	Owner     string
+	Name      string
+	Branch    string
+	Path      string
+	TokenEnc  []byte
+	KeyID     string
+	ServerUrl string
+	Reset     bool
+	ID        uuid.UUID
 }
 
 // Een andere repository, branch of map begint opnieuw: de kop, de ETag en
@@ -920,6 +932,7 @@ func (q *Queries) UpdateGitRepo(ctx context.Context, arg UpdateGitRepoParams) (G
 		arg.Path,
 		arg.TokenEnc,
 		arg.KeyID,
+		arg.ServerUrl,
 		arg.Reset,
 		arg.ID,
 	)
@@ -942,6 +955,7 @@ func (q *Queries) UpdateGitRepo(ctx context.Context, arg UpdateGitRepoParams) (G
 		&i.LastError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ServerUrl,
 	)
 	return i, err
 }

@@ -101,8 +101,8 @@ type Holder struct {
 
 // Snapshot is wat de verse heartbeats van een cluster zeggen.
 type Snapshot struct {
-	// Holders per VIP: de actieve nodes die het adres in een heartbeat na
-	// since melden.
+	// Holders per VIP: de actieve nodes, en die in also, die het adres in
+	// een heartbeat na since melden.
 	Holders map[string][]Holder
 	// Waiting zijn de actieve nodes met een agent die nog geen heartbeat na
 	// since stuurden.
@@ -117,8 +117,9 @@ func (s Snapshot) Owner(vip string) (Holder, bool) {
 	return Holder{}, false
 }
 
-// Look leest de verse heartbeats van de actieve nodes van een cluster.
-func (g *Gate) Look(ctx context.Context, clusterID uuid.UUID, vips []string, since time.Time) (Snapshot, error) {
+// Look leest de verse heartbeats van de actieve nodes van een cluster, en
+// van de nodes in also.
+func (g *Gate) Look(ctx context.Context, clusterID uuid.UUID, vips []string, since time.Time, also ...uuid.UUID) (Snapshot, error) {
 	nodes, err := g.q.ListFailoverNodes(ctx, &clusterID)
 	if err != nil {
 		return Snapshot{}, err
@@ -128,7 +129,7 @@ func (g *Gate) Look(ctx context.Context, clusterID uuid.UUID, vips []string, sin
 		snap.Holders[v] = []Holder{}
 	}
 	for _, n := range nodes {
-		if n.Lifecycle != store.NodeLifecycleActive || !n.HasAgent {
+		if (n.Lifecycle != store.NodeLifecycleActive && !slices.Contains(also, n.ID)) || !n.HasAgent {
 			continue
 		}
 		if n.HeartbeatAt == nil || !n.HeartbeatAt.After(since) {
@@ -146,12 +147,15 @@ func (g *Gate) Look(ctx context.Context, clusterID uuid.UUID, vips []string, sin
 
 // Settled wacht tot elke actieve node na since een heartbeat stuurde en elk
 // VIP precies één houder heeft. Met want moet een VIP bij die node staan.
-func (g *Gate) Settled(ctx context.Context, clusterID uuid.UUID, vips []string, since time.Time, want map[string]uuid.UUID, progress func(string)) (Snapshot, error) {
+// also zijn nodes die meetellen hoewel ze (nog) niet actief zijn, zoals een
+// nieuwe node bij omhoog schalen.
+func (g *Gate) Settled(ctx context.Context, clusterID uuid.UUID, vips []string, since time.Time, want map[string]uuid.UUID,
+	progress func(string), also ...uuid.UUID) (Snapshot, error) {
 	var snap Snapshot
 	last := ""
 	err := Poll(ctx, g.Poll, func(ctx context.Context) (bool, error) {
 		var err error
-		snap, err = g.Look(ctx, clusterID, vips, since)
+		snap, err = g.Look(ctx, clusterID, vips, since, also...)
 		if err != nil {
 			return false, err
 		}

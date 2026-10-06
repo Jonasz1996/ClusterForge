@@ -34,7 +34,8 @@ type Plan struct {
 	// VM-vorm.
 	NewNodes []PlanNewNode `json:"new_nodes"`
 	// Nodes zijn de nodes met een wijziging, in de volgorde van het
-	// toepassen: nieuwe nodes eerst, de VIP-eigenaar als laatste.
+	// toepassen: de bestaande nodes met de VIP-eigenaar als laatste, en
+	// daarna de nieuwe.
 	Nodes []PlanNode `json:"nodes"`
 	// Unchanged zijn de nodes waar niets verandert.
 	Unchanged []string `json:"unchanged"`
@@ -267,15 +268,17 @@ func (s *Service) ownedVIPs(ctx context.Context, clusterID uuid.UUID) (map[uuid.
 	return out, nil
 }
 
-// orderNodes zet de nodes in de volgorde van het toepassen: nieuwe nodes
-// eerst, dan die zonder VIP, de eigenaars als laatste, elk in de volgorde
-// van de spec.
+// orderNodes zet de nodes in de volgorde van het toepassen: de bestaande
+// zonder VIP, dan de eigenaars, en de nieuwe nodes als laatste, elk in de
+// volgorde van de spec. Zo kennen de bestaande nodes een nieuwe peer al
+// voor hij start; andersom zou de nieuwe node de VIP-eigenaar niet horen
+// en het VIP ook nemen.
 func orderNodes(order []uuid.UUID, nodes map[uuid.UUID]PlanNode) []PlanNode {
 	out := []PlanNode{}
 	for _, group := range []func(PlanNode) bool{
-		func(n PlanNode) bool { return n.New },
 		func(n PlanNode) bool { return !n.New && len(n.VIPs) == 0 },
 		func(n PlanNode) bool { return !n.New && len(n.VIPs) > 0 },
+		func(n PlanNode) bool { return n.New },
 	} {
 		for _, id := range order {
 			if n := nodes[id]; group(n) {
@@ -556,12 +559,13 @@ func count(n int, one, many string) string {
 
 // planCreate plant een nieuw cluster met de controles van de uitrol: de
 // Proxmox-koppeling op naam, vrije adressen en VIP, en genoeg capaciteit.
-func (s *Service) planCreate(ctx context.Context, ch *Checked) (*Plan, []FieldError, error) {
+// Het geeft ook het doel zoals de uitrol het krijgt.
+func (s *Service) planCreate(ctx context.Context, ch *Checked) (*Plan, deploy.Target, []FieldError, error) {
 	f := ch.File
 	t := f.Target
 	conns, err := s.q.ListProxmoxConnections(ctx)
 	if err != nil {
-		return nil, nil, err
+		return nil, deploy.Target{}, nil, err
 	}
 	i := slices.IndexFunc(conns, func(c store.ProxmoxConnection) bool { return c.Name == t.Proxmox })
 	if i < 0 {
@@ -573,7 +577,7 @@ func (s *Service) planCreate(ctx context.Context, ch *Checked) (*Plan, []FieldEr
 		if len(names) > 0 {
 			msg += "; er zijn: " + strings.Join(names, ", ")
 		}
-		return nil, []FieldError{{Field: "target.proxmox", Line: f.Line("target.proxmox"), Message: msg}}, nil
+		return nil, deploy.Target{}, []FieldError{{Field: "target.proxmox", Line: f.Line("target.proxmox"), Message: msg}}, nil
 	}
 	req := deploy.Request{
 		Template: ch.Template.Name,
@@ -592,9 +596,9 @@ func (s *Service) planCreate(ctx context.Context, ch *Checked) (*Plan, []FieldEr
 	if err != nil {
 		var ve deploy.ValidationError
 		if errors.As(err, &ve) {
-			return nil, []FieldError{fileError(f, ve)}, nil
+			return nil, deploy.Target{}, []FieldError{fileError(f, ve)}, nil
 		}
-		return nil, nil, err
+		return nil, deploy.Target{}, nil, err
 	}
 	p := &Plan{
 		Kind: "create", Template: PlanTemplate{Name: ch.Template.Name, To: ch.Template.Version},
@@ -609,7 +613,7 @@ func (s *Service) planCreate(ctx context.Context, ch *Checked) (*Plan, []FieldEr
 		p.Warnings = append(p.Warnings, fmt.Sprintf("Zonder vrid kiest ClusterForge VRRP-id %d; zet hem daarna in het bestand, want na de uitrol ligt hij vast.", plan.VRID))
 	}
 	p.Summary = fmt.Sprintf("nieuw cluster met %s uit %s %s", count(len(p.NewNodes), "node", "nodes"), ch.Template.Name, ch.Template.Version)
-	return p, nil, nil
+	return p, req.Target, nil, nil
 }
 
 func quote(s string) string { return "“" + s + "”" }

@@ -3703,13 +3703,16 @@ components:
         url: { type: string, description: De commit op de website }
     GitRepo:
       type: object
-      required: [id, api_url, repository, branch, path, web_url, head, last_sync_at, last_error, created_at, updated_at]
+      required: [id, api_url, repository, branch, path, server_url, web_url, head, last_sync_at, last_error, created_at, updated_at]
       properties:
         id: { type: string, format: uuid }
         api_url: { type: string }
         repository: { type: string, description: "eigenaar/naam" }
         branch: { type: string }
         path: { type: string, description: De map met een map per cluster }
+        server_url:
+          type: string
+          description: Het adres waarmee nieuwe nodes uit Git ClusterForge bereiken; leeg als het nog niet ingevuld is
         web_url: { type: string, description: De repository op de website }
         head:
           description: De laatste commit die de server zag
@@ -3738,6 +3741,9 @@ components:
         branch: { type: string, description: Standaard main }
         path: { type: string, description: Standaard clusters }
         token: { type: string, format: password, description: "Fine-grained token met alleen Contents: read; leeg laat het opgeslagen token staan" }
+        server_url:
+          type: string
+          description: "Het adres waarmee nieuwe nodes ClusterForge bereiken, zoals https://clusterforge.lan; nodig voor omhoog schalen en nieuwe clusters"
     GitProbe:
       type: object
       required: [head, files]
@@ -3804,13 +3810,16 @@ components:
       allOf:
         - $ref: "#/components/schemas/GitChange"
         - type: object
-          required: [plan, local, file_url, needs_confirmation, full_apply, blocked]
+          required: [plan, local, file_url, needs_confirmation, full_apply, blocked, blocked_code]
           properties:
             needs_confirmation: { type: boolean, description: "Het cluster is of wordt prod: goedkeuren vraagt de slug" }
             full_apply:
               type: boolean
               description: Een eerdere revisie is niet op alle nodes toegepast, dus goedkeuren past alle stappen opnieuw toe
-            blocked: { type: string, description: "Waarom goedkeuren in deze versie nog niet kan; leeg als het kan" }
+            blocked: { type: string, description: "Waarom goedkeuren nu niet kan; leeg als het kan" }
+            blocked_code:
+              type: string
+              description: "no_server_url: het adres van ClusterForge ontbreekt bij de koppeling; dhcp_growth: omhoog schalen met DHCP; leeg als goedkeuren kan"
             plan: { $ref: "#/components/schemas/GitPlan" }
             local:
               type: array
@@ -3901,7 +3910,7 @@ components:
         new_nodes: { type: array, items: { $ref: "#/components/schemas/GitPlanNewNode" } }
         nodes:
           type: array
-          description: In de volgorde van toepassen; de VIP-eigenaar als laatste
+          description: In de volgorde van toepassen; de bestaande nodes met de VIP-eigenaar als laatste, daarna de nieuwe
           items: { $ref: "#/components/schemas/GitPlanNode" }
         unchanged: { type: array, items: { type: string } }
         warnings: { type: array, items: { type: string } }

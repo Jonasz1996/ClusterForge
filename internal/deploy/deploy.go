@@ -216,10 +216,6 @@ func (s *Service) Plan(ctx context.Context, req Request) (Plan, error) {
 	return out, nil
 }
 
-func (s *Service) plan(ctx context.Context, req Request) (*templates.Template, *params, error) {
-	return s.planVersion(ctx, req, "", true)
-}
-
 // planVersion controleert een aanvraag voor een templateversie; leeg is de
 // nieuwste. Zonder needServer mag het adres van ClusterForge ontbreken.
 func (s *Service) planVersion(ctx context.Context, req Request, version string, needServer bool) (*templates.Template, *params, error) {
@@ -276,9 +272,39 @@ func (s *Service) planVersion(ctx context.Context, req Request, version string, 
 // Request controleert de aanvraag, maakt het cluster met zijn nodes (in
 // lifecycle provisioning) en zet de uitrol als taak in de wachtrij.
 func (s *Service) Request(ctx context.Context, actor events.Actor, req Request) (store.Job, uuid.UUID, error) {
-	tpl, p, err := s.plan(ctx, req)
+	return s.RequestWith(ctx, actor, req, RequestOptions{})
+}
+
+// RequestOptions passen een uitrol aan voor een andere bron dan de
+// webinterface, zoals een goedgekeurd bestand uit Git.
+type RequestOptions struct {
+	// Version kiest de templateversie; leeg is de nieuwste.
+	Version string
+	// Source is de bron van spec-revisie 1: ui (standaard) of git, met
+	// CommitSha.
+	Source    string
+	CommitSha *string
+	Tags      []string
+	// Payload komt erbij in het event cluster.spec_changed.
+	Payload map[string]any
+	// InTx draait aan het eind van de transactie, met het nieuwe cluster,
+	// de spec-revisie en de taak.
+	InTx func(ctx context.Context, q *store.Queries, c store.Cluster, revision int32, j store.Job) error
+}
+
+// RequestWith is Request met opties.
+func (s *Service) RequestWith(ctx context.Context, actor events.Actor, req Request, o RequestOptions) (store.Job, uuid.UUID, error) {
+	tpl, p, err := s.planVersion(ctx, req, o.Version, true)
 	if err != nil {
 		return store.Job{}, uuid.Nil, err
+	}
+	source := o.Source
+	if source == "" {
+		source = "ui"
+	}
+	tags := o.Tags
+	if tags == nil {
+		tags = []string{}
 	}
 
 	// Geheimen apart, de rest van de parameters gaat in de spec en de taak.
@@ -292,7 +318,7 @@ func (s *Service) Request(ctx context.Context, actor events.Actor, req Request) 
 		q := store.New(tx)
 		c, err := s.inv.CreateClusterTx(ctx, q, actor, inventory.ClusterFields{
 			Slug: p.Cluster.Slug, Name: p.Cluster.Name, Description: strings.TrimSpace(req.Cluster.Description),
-			Type: tpl.ClusterType, Environment: store.Environment(p.Cluster.Environment), Tags: []string{},
+			Type: tpl.ClusterType, Environment: store.Environment(p.Cluster.Environment), Tags: tags,
 		})
 		if err != nil {
 			return err
@@ -336,16 +362,20 @@ func (s *Service) Request(ctx context.Context, actor events.Actor, req Request) 
 			by = &id
 		}
 		if err := q.InsertSpecRevision(ctx, store.InsertSpecRevisionParams{
-			ClusterID: c.ID, Revision: rev, Spec: spec, Source: "ui", CreatedBy: by,
+			ClusterID: c.ID, Revision: rev, Spec: spec, Source: source, CreatedBy: by, CommitSha: o.CommitSha,
 		}); err != nil {
 			return err
 		}
+		payload := map[string]any{
+			"name": c.Name, "revision": rev, "previous_revision": nil, "source": source,
+			"template": tpl.Name, "template_version": tpl.Version,
+		}
+		for k, v := range o.Payload {
+			payload[k] = v
+		}
 		err = s.ev.Write(ctx, q, events.Event{
 			Actor: actor, SubjectType: "cluster", SubjectID: c.ID.String(), ClusterID: &c.ID, Action: "cluster.spec_changed",
-			Payload: map[string]any{
-				"name": c.Name, "revision": rev, "previous_revision": nil, "source": "ui",
-				"template": tpl.Name, "template_version": tpl.Version,
-			},
+			Payload: payload,
 		})
 		if err != nil {
 			return err
@@ -372,7 +402,10 @@ func (s *Service) Request(ctx context.Context, actor events.Actor, req Request) 
 			Kind: Kind, Title: "Uitrollen: " + p.Cluster.Name, Params: p, ClusterID: &c.ID,
 			ProxmoxID: &p.Target.ProxmoxID, Actor: actor,
 		})
-		return err
+		if err != nil || o.InTx == nil {
+			return err
+		}
+		return o.InTx(ctx, q, c, rev, job)
 	})
 	if err != nil {
 		var ve inventory.ValidationError
@@ -384,6 +417,9 @@ func (s *Service) Request(ctx context.Context, actor events.Actor, req Request) 
 	s.jobs.Kick()
 	return job, p.ClusterID, nil
 }
+
+// OnFinished laat fn weten dat een uitrol klaar is.
+func (s *Service) OnFinished(fn jobs.FinishedFunc) { s.jobs.OnFinished(Kind, fn) }
 
 // slugRe laat ruimte voor -NN of -<rol>-NN in een hostname van hoogstens
 // 63 tekens.
@@ -432,6 +468,10 @@ func (s *Service) AddSecretTx(ctx context.Context, q *store.Queries, actor event
 func secretAAD(clusterID uuid.UUID, name string) []byte {
 	return []byte("secret:" + clusterID.String() + ":" + name)
 }
+
+// NormalizeServerURL controleert het adres waarmee nieuwe nodes
+// ClusterForge bereiken en geeft het zonder / aan het eind.
+func NormalizeServerURL(raw string) (string, error) { return serverURL(raw) }
 
 func serverURL(raw string) (string, error) {
 	u, err := url.Parse(strings.TrimSpace(raw))

@@ -5,8 +5,8 @@ SELECT * FROM git_repos LIMIT 1;
 SELECT * FROM git_repos LIMIT 1 FOR UPDATE;
 
 -- name: CreateGitRepo :one
-INSERT INTO git_repos (id, api_url, owner, name, branch, path, token_enc, key_id)
-VALUES (@id, @api_url, @owner, @name, @branch, @path, @token_enc, @key_id)
+INSERT INTO git_repos (id, api_url, owner, name, branch, path, token_enc, key_id, server_url)
+VALUES (@id, @api_url, @owner, @name, @branch, @path, @token_enc, @key_id, @server_url)
 RETURNING *;
 
 -- name: UpdateGitRepo :one
@@ -14,7 +14,7 @@ RETURNING *;
 -- de scan vervallen.
 UPDATE git_repos
 SET api_url = @api_url, owner = @owner, name = @name, branch = @branch, path = @path,
-    token_enc = @token_enc, key_id = @key_id,
+    token_enc = @token_enc, key_id = @key_id, server_url = @server_url,
     head_sha = CASE WHEN @reset::boolean THEN '' ELSE head_sha END,
     head_etag = '',
     synced_sha = CASE WHEN @reset::boolean THEN '' ELSE synced_sha END,
@@ -98,17 +98,21 @@ SELECT count(*)::int FROM git_changes WHERE status = 'pending';
 SELECT * FROM git_changes WHERE id = $1 FOR UPDATE;
 
 -- name: DecideGitChange :one
--- Goedkeuren (applying met een taak, of meteen applied) of afwijzen.
+-- Goedkeuren (applying met een taak, of meteen applied) of afwijzen. Bij
+-- een nieuw cluster wijst de wijziging daarna naar het cluster.
 UPDATE git_changes
 SET status = @status, revision = sqlc.narg('revision'), job_id = sqlc.narg('job_id'), reason = @reason,
+    cluster_id = COALESCE(sqlc.narg('cluster_id'), cluster_id),
     decided_by = @decided_by, decided_at = now(), updated_at = now()
 WHERE id = @id AND status = 'pending'
 RETURNING *;
 
 -- name: FinishGitChange :one
--- Na de taak: applied of failed.
+-- Na de taak: applied of failed. Een uitrol kan na een mislukking opnieuw
+-- proberen met dezelfde taak; lukt dat, dan wordt de wijziging alsnog
+-- applied.
 UPDATE git_changes SET status = @status, reason = @reason, updated_at = now()
-WHERE job_id = @job_id AND status = 'applying'
+WHERE job_id = @job_id AND (status = 'applying' OR (status = 'failed' AND @status::text = 'applied'))
 RETURNING *;
 
 -- name: ListLatestGitChanges :many

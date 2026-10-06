@@ -353,11 +353,12 @@ func (s *Service) evaluateFile(ctx context.Context, repo store.GitRepo, head Com
 	}
 	var plan *Plan
 	var spec deploy.Spec
+	var target deploy.Target
 	var err error
 	if linked {
 		plan, spec, errs, err = s.planUpdate(ctx, c, ch, head.SHA)
 	} else {
-		plan, errs, err = s.planCreate(ctx, ch)
+		plan, target, errs, err = s.planCreate(ctx, ch)
 	}
 	if err != nil {
 		return o, err
@@ -374,7 +375,7 @@ func (s *Service) evaluateFile(ctx context.Context, repo store.GitRepo, head Com
 		o.cluster = o.entry.ClusterID
 		o.entry.State = "pending"
 	} else {
-		o.entry.State, o.spec = "new", newSpec(ch)
+		o.entry.State, o.spec = "new", newSpec(ch, target)
 	}
 	if hasPending {
 		o.supersede = "een nieuwere commit " + short(head.SHA) + " wijzigt het bestand"
@@ -386,12 +387,13 @@ func (s *Service) evaluateFile(ctx context.Context, repo store.GitRepo, head Com
 }
 
 // newSpec is de gewenste staat van een nieuw cluster zoals Git haar
-// beschrijft; de nodes en het doel vult de uitrol in.
-func newSpec(ch *Checked) deploy.Spec {
+// beschrijft, met het doel zoals de uitrol het krijgt; de nodes vult de
+// uitrol in.
+func newSpec(ch *Checked, target deploy.Target) deploy.Spec {
 	return deploy.Spec{
 		Template: deploy.SpecTemplate{Name: ch.Template.Name, Version: ch.Template.Version},
 		Cluster:  templates.ClusterInfo{Name: ch.Metadata.Name, Slug: ch.File.Cluster.Slug, Environment: ch.Metadata.Environment},
-		Params:   ch.Params, Secrets: ch.Template.Secrets(), Nodes: []deploy.SpecNode{},
+		Params:   ch.Params, Secrets: ch.Template.Secrets(), Target: target, Nodes: []deploy.SpecNode{},
 	}
 }
 

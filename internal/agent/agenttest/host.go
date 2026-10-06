@@ -412,6 +412,8 @@ func (h *Host) keepalivedConf() string {
 }
 
 var (
+	srcRe      = regexp.MustCompile(`(?m)^\s*unicast_src_ip\s+(\S+)`)
+	peersRe    = regexp.MustCompile(`(?s)unicast_peer\s*\{([^}]*)\}`)
 	priorityRe = regexp.MustCompile(`(?m)^\s*priority\s+(\d+)`)
 	vipBlockRe = regexp.MustCompile(`(?s)virtual_ipaddress\s*\{([^}]*)\}`)
 	trackRe    = regexp.MustCompile(`(?s)track_script\s*\{[^}]*\}`)
@@ -440,9 +442,43 @@ func (h *Host) vrrp() (priority int, vips []string, tracked string) {
 	return priority, vips, tracked
 }
 
+// unicast leest het eigen adres en de peers van een keepalived-configuratie
+// met unicast_peer; ok is false bij multicast.
+func (h *Host) unicast() (src string, peers []string, ok bool) {
+	conf := h.keepalivedConf()
+	m := peersRe.FindStringSubmatch(conf)
+	if m == nil {
+		return "", nil, false
+	}
+	src = h.Address
+	if s := srcRe.FindStringSubmatch(conf); s != nil {
+		src = s[1]
+	}
+	return src, strings.Fields(m[1]), true
+}
+
+// vrrpPeer is wat een draaiende keepalived over unicast weet.
+type vrrpPeer struct {
+	unicast bool
+	src     string
+	peers   []string
+}
+
+// hears zegt of h de adverts van o ontvangt. Met unicast stuurt o alleen
+// naar zijn peers, en neemt h alleen adverts aan van zijn peers. Kent een
+// van beide de ander niet, dan hoort h niets en wordt hij zelf MASTER.
+func hears(h, o vrrpPeer) bool {
+	if !h.unicast || !o.unicast {
+		return true
+	}
+	return slices.Contains(o.peers, h.src) && slices.Contains(h.peers, o.src)
+}
+
 // Group is een L2-netwerk met keepalived: een VIP staat op de machine met de
 // hoogste prioriteit waarop keepalived draait. Bewaakt een track_script een
 // unit die niet draait, dan staat de machine in FAULT en krijgt ze geen VIP.
+// Met unicast_peer hoort een machine alleen de peers die elkaar kennen; een
+// machine die de houder niet hoort, neemt het VIP er ook bij (split-brain).
 type Group struct {
 	// Takeover is hoe lang het duurt voor een andere machine een VIP
 	// overneemt van een machine die wegvalt; zolang heeft niemand het. Een
@@ -452,6 +488,12 @@ type Group struct {
 	mu    sync.Mutex
 	hosts []*Host
 	owner map[string]*Host
+	// extra zijn per VIP de machines die de houder niet horen en het VIP
+	// ook hebben.
+	extra map[string][]*Host
+	// splits onthoudt elk split-brain, zoals "10.0.20.100 op 10.0.20.11 en
+	// 10.0.20.13".
+	splits []string
 	// lost is wanneer een VIP zijn houder verloor.
 	lost  map[string]time.Time
 	timer *time.Timer
@@ -474,6 +516,7 @@ func (g *Group) update() {
 	best := map[string]int{}
 	want := map[string]*Host{}
 	eligible := map[*Host][]string{}
+	peer := map[*Host]vrrpPeer{}
 	for _, h := range g.hosts {
 		h.mu.Lock()
 		u := h.units["keepalived"]
@@ -482,11 +525,13 @@ func (g *Group) update() {
 		if t := h.units[tracked]; tracked != "" && (t == nil || !t.Active) {
 			running = false
 		}
+		src, peers, uni := h.unicast()
 		h.mu.Unlock()
 		if !running {
 			continue
 		}
 		eligible[h] = vips
+		peer[h] = vrrpPeer{unicast: uni, src: src, peers: peers}
 		for _, v := range vips {
 			if _, ok := want[v]; !ok || prio > best[v] {
 				want[v], best[v] = h, prio
@@ -532,6 +577,34 @@ func (g *Group) update() {
 		}
 		g.timer = time.AfterFunc(wait, g.update)
 	}
+	// Wie de houder niet hoort, is zelf MASTER.
+	g.extra = map[string][]*Host{}
+	for v, o := range g.owner {
+		if o == nil {
+			continue
+		}
+		addrs := []string{o.Address}
+		for h, vips := range eligible {
+			if h != o && slices.Contains(vips, v) && !hears(peer[h], peer[o]) {
+				g.extra[v] = append(g.extra[v], h)
+				addrs = append(addrs, h.Address)
+			}
+		}
+		if len(addrs) > 1 {
+			slices.Sort(addrs)
+			split := v + " op " + strings.Join(addrs, " en ")
+			if len(g.splits) == 0 || g.splits[len(g.splits)-1] != split {
+				g.splits = append(g.splits, split)
+			}
+		}
+	}
+}
+
+// Splits geeft elk split-brain dat de groep zag, in volgorde.
+func (g *Group) Splits() []string {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return slices.Clone(g.splits)
 }
 
 func (g *Group) held(h *Host) []string {
@@ -539,7 +612,7 @@ func (g *Group) held(h *Host) []string {
 	defer g.mu.Unlock()
 	var out []string
 	for v, o := range g.owner {
-		if o == h {
+		if o == h || slices.Contains(g.extra[v], h) {
 			out = append(out, v)
 		}
 	}
