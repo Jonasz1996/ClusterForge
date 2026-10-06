@@ -121,6 +121,11 @@ func (d *Desired) Render(nodeID uuid.UUID) ([]templates.Step, error) {
 	return RenderNode(d.Template, d.Spec, d.secrets, d.nodes, nodeID)
 }
 
+// Context is wat de sjablonen en de controles van de template zien.
+func (d *Desired) Context() (templates.Context, error) {
+	return d.Spec.Context(d.Template, d.secrets, d.nodes)
+}
+
 // Desired leest de gewenste staat van een cluster. Zonder spec is het
 // ErrNoSpec; ontbreekt de templateversie in deze server, een geheim of de
 // masterkey, dan is het een fout en wordt er niets verzonnen.

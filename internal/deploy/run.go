@@ -410,9 +410,13 @@ func (r *runCtx) enroll(ctx context.Context, n *plannedNode, logf func(string, .
 var errTimeout = errors.New("wachten duurde te lang")
 
 func (r *runCtx) poll(ctx context.Context, limit time.Duration, check func(context.Context) (bool, error)) error {
+	return r.s.poll(ctx, limit, check)
+}
+
+func (s *Service) poll(ctx context.Context, limit time.Duration, check func(context.Context) (bool, error)) error {
 	ctx, cancel := context.WithTimeoutCause(ctx, limit, errTimeout)
 	defer cancel()
-	t := time.NewTicker(r.s.Poll)
+	t := time.NewTicker(s.Poll)
 	defer t.Stop()
 	for {
 		ok, err := check(ctx)
@@ -496,20 +500,36 @@ func (r *runCtx) check(ctx context.Context, st *jobs.Step) error {
 	if err != nil {
 		return err
 	}
-	checks, err := r.tpl.RenderChecks(c)
+	return r.s.Check(ctx, r.p.ClusterID, r.tpl, c, 0, st.Logf, func() { _ = st.Flush(ctx) })
+}
+
+// Check voert de controles van een template uit: een node heeft het VIP en
+// de HTTP-controle slaagt. Is limit groter dan nul, dan wacht elke controle
+// hoogstens zo lang, ook als de template meer tijd geeft. flush bewaart wat
+// logf schreef en mag nil zijn.
+func (s *Service) Check(ctx context.Context, clusterID uuid.UUID, tpl *templates.Template, c templates.Context, limit time.Duration,
+	logf func(string, ...any), flush func()) error {
+	if flush == nil {
+		flush = func() {}
+	}
+	checks, err := tpl.RenderChecks(c)
 	if err != nil {
 		return err
 	}
 	for _, ch := range checks {
+		within := ch.Within()
+		if limit > 0 && limit < within {
+			within = limit
+		}
 		start := time.Now()
 		switch {
 		case ch.VIPOwned != nil:
 			vip := ch.VIPOwned.VIP
-			st.Logf("wachten tot een node %s heeft", vip)
-			_ = st.Flush(ctx)
+			logf("wachten tot een node %s heeft", vip)
+			flush()
 			var owner string
-			err := r.poll(ctx, ch.Within(), func(ctx context.Context) (bool, error) {
-				vips, err := r.s.q.ListVIPsByCluster(ctx, r.p.ClusterID)
+			err := s.poll(ctx, within, func(ctx context.Context) (bool, error) {
+				vips, err := s.q.ListVIPsByCluster(ctx, clusterID)
 				if err != nil {
 					return false, err
 				}
@@ -522,15 +542,15 @@ func (r *runCtx) check(ctx context.Context, st *jobs.Step) error {
 				return false, nil
 			})
 			if err != nil {
-				return fmt.Errorf("geen enkele node heeft %s na %s; kijk naar keepalived met journalctl -u keepalived", vip, seconds(ch.Within()))
+				return fmt.Errorf("geen enkele node heeft %s na %s; kijk naar keepalived met journalctl -u keepalived", vip, seconds(within))
 			}
-			st.Logf("%s staat op %s (na %s)", vip, owner, seconds(time.Since(start)))
+			logf("%s staat op %s (na %s)", vip, owner, seconds(time.Since(start)))
 		case ch.HTTP != nil:
-			st.Logf("GET %s", ch.HTTP.URL)
-			_ = st.Flush(ctx)
+			logf("GET %s", ch.HTTP.URL)
+			flush()
 			var last string
-			err := r.poll(ctx, ch.Within(), func(ctx context.Context) (bool, error) {
-				code, err := r.s.HTTPGet(ctx, ch.HTTP.URL)
+			err := s.poll(ctx, within, func(ctx context.Context) (bool, error) {
+				code, err := s.HTTPGet(ctx, ch.HTTP.URL)
 				if err != nil {
 					var ue *url.Error
 					if errors.As(err, &ue) {
@@ -543,11 +563,11 @@ func (r *runCtx) check(ctx context.Context, st *jobs.Step) error {
 				return code == ch.HTTP.Expect, nil
 			})
 			if err != nil {
-				return fmt.Errorf("%s geeft na %s nog geen %d; laatste antwoord: %s", ch.HTTP.URL, seconds(ch.Within()), ch.HTTP.Expect, last)
+				return fmt.Errorf("%s geeft na %s nog geen %d; laatste antwoord: %s", ch.HTTP.URL, seconds(within), ch.HTTP.Expect, last)
 			}
-			st.Logf("%s geeft %d", ch.HTTP.URL, ch.HTTP.Expect)
+			logf("%s geeft %d", ch.HTTP.URL, ch.HTTP.Expect)
 		}
-		_ = st.Flush(ctx)
+		flush()
 	}
 	return nil
 }

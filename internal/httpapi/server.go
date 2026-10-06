@@ -29,6 +29,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/live"
 	"github.com/Jonasz1996/clusterforge/internal/metrics"
 	"github.com/Jonasz1996/clusterforge/internal/proxmox"
+	"github.com/Jonasz1996/clusterforge/internal/rollout"
 	"github.com/Jonasz1996/clusterforge/internal/store"
 	"github.com/Jonasz1996/clusterforge/internal/webui"
 )
@@ -54,6 +55,7 @@ type Server struct {
 	drift        *drift.Service
 	failover     *failover.Service
 	deps         *deps.Service
+	rollout      *rollout.Service
 	version      string
 	loginLimiter *ipLimiter
 	// enrollLimiter remt het raden van enrollmenttokens.
@@ -86,7 +88,9 @@ type Deps struct {
 	// Failover voert failovertests uit.
 	Failover *failover.Service
 	// Deps beheert diensten en afhankelijkheden.
-	Deps    *deps.Service
+	Deps *deps.Service
+	// Rollout past wijzigingen toe met cluster.apply, zoals herstel.
+	Rollout *rollout.Service
 	Version string
 }
 
@@ -115,6 +119,7 @@ func New(d Deps) *Server {
 		drift:    d.Drift,
 		failover: d.Failover,
 		deps:     d.Deps,
+		rollout:  d.Rollout,
 		version:  d.Version,
 		// 10 pogingen direct, daarna één per 6 seconden per IP-adres.
 		loginLimiter:  newIPLimiter(6*time.Second, 10),

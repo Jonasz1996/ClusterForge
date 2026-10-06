@@ -929,6 +929,42 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
+  /clusters/{clusterId}/drift/remediate:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: remediateClusterDrift
+      summary: Gekozen afwijkingen herstellen met cluster.apply (admin)
+      description: >-
+        Alleen voor een cluster uit een template met een kloppend
+        lidmaatschap. Per node de gekozen stappen met de vingerafdrukken
+        die getoond werden; is er intussen iets veranderd, dan is het 409
+        drift_changed. Met preview alleen het plan, in de volgorde van de
+        taak met de VIP-eigenaar als laatste. Op prod moet confirm gelijk
+        zijn aan de slug (anders 409 needs_confirmation) en moet de
+        gebruiker tweestapsverificatie aan hebben (anders 403
+        totp_required).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RemediationInput" }
+      responses:
+        "200":
+          description: Het plan, bij preview
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RemediationResult" }
+        "202":
+          description: De taak staat in de wachtrij
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RemediationResult" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
   /clusters/{clusterId}/drift/ignores:
     parameters:
       - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -2201,6 +2237,64 @@ components:
         fingerprint: { type: string, description: HMAC van de waargenomen waarde; verandert als er op de node opnieuw iets wijzigt }
         ignored: { type: boolean, description: Een negeerregel dekt deze stap; telt niet voor de status }
         ignore_id: { type: string, format: uuid, nullable: true }
+    RemediationInput:
+      type: object
+      required: [nodes]
+      properties:
+        nodes: { type: array, items: { $ref: "#/components/schemas/RemediationChoice" } }
+        confirm: { type: string, description: Op prod de slug van het cluster }
+        preview: { type: boolean, description: "Alleen het plan tonen, zonder iets te starten" }
+    RemediationChoice:
+      type: object
+      required: [node_id, steps]
+      properties:
+        node_id: { type: string, format: uuid }
+        steps: { type: array, items: { $ref: "#/components/schemas/RemediationStepChoice" } }
+    RemediationStepChoice:
+      type: object
+      required: [step, fingerprints]
+      properties:
+        step: { type: string, description: "De stap, zoals file:/etc/keepalived/keepalived.conf" }
+        fingerprints: { type: array, items: { type: string }, description: De vingerafdrukken van de afwijkingen van die stap die getoond werden }
+    RemediationResult:
+      type: object
+      required: [plan, job]
+      properties:
+        plan: { $ref: "#/components/schemas/RemediationPlan" }
+        job:
+          allOf: [{ $ref: "#/components/schemas/Job" }]
+          nullable: true
+          description: null bij preview
+    RemediationPlan:
+      type: object
+      required: [cluster_id, cluster, slug, environment, template, version, revision, needs_confirmation, nodes, notes]
+      properties:
+        cluster_id: { type: string, format: uuid }
+        cluster: { type: string }
+        slug: { type: string }
+        environment: { $ref: "#/components/schemas/Environment" }
+        template: { type: string }
+        version: { type: string }
+        revision: { type: integer }
+        needs_confirmation: { type: boolean, description: Op prod moet de slug ingetikt worden }
+        nodes: { type: array, items: { $ref: "#/components/schemas/RemediationPlanNode" }, description: In de volgorde van de taak }
+        notes: { type: array, items: { type: string }, description: "Wat er hoogstens kan gebeuren, in gewone zinnen" }
+    RemediationPlanNode:
+      type: object
+      required: [node_id, hostname, vips, steps, ignored]
+      properties:
+        node_id: { type: string, format: uuid }
+        hostname: { type: string }
+        vips: { type: array, items: { type: string }, description: De VIP's die de node nu heeft; zo'n node komt als laatste }
+        steps: { type: array, items: { $ref: "#/components/schemas/RemediationPlanStep" } }
+        ignored: { type: array, items: { type: string }, description: Genegeerde stappen die blijven zoals ze zijn }
+    RemediationPlanStep:
+      type: object
+      required: [step, title, action]
+      properties:
+        step: { type: string }
+        title: { type: string }
+        action: { type: string, description: "Wat er gebeurt, zoals: bestand /etc/keepalived/keepalived.conf overschrijven, daarna keepalived herladen" }
     DriftUnchecked:
       type: object
       required: [step, title, reason]

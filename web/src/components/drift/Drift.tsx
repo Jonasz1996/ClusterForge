@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useState, type ReactNode } from "react";
 import { BaselineWizard, IgnoredList, IgnoreForm } from "@/components/drift/Baseline";
+import { RemediateDialog } from "@/components/drift/Remediate";
+import { actualText, expectedText } from "@/components/drift/text";
 import { CopyBlock } from "@/components/inventory/InstallAgent";
 import { ago, QueryState } from "@/components/inventory/bits";
 import { Alert, Badge, Button, Card } from "@/components/ui";
@@ -142,6 +144,10 @@ function DriftCard({
   const [wizard, setWizard] = useState<string | null>(null);
   const r = q.data;
   const src = r?.source ?? null;
+  const [remediate, setRemediate] = useState(false);
+  // Herstellen kan alleen bij een template: van een baseline kent
+  // ClusterForge bij bestanden alleen een vingerafdruk.
+  const canRemediate = isAdmin && src?.kind === "template" && (r?.nodes.some((n) => n.findings.some((f) => !f.ignored)) ?? false);
   const last = r?.nodes.reduce<string | null>((acc, n) => (n.checked_at && (!acc || n.checked_at > acc) ? n.checked_at : acc), null);
   const lastText = ` · laatste controle ${last ? timeFmt.format(new Date(last)) : "nog niet gedaan"}`;
   return (
@@ -166,6 +172,7 @@ function DriftCard({
                   Baseline vastleggen
                 </Button>
               )}
+              {canRemediate && <Button onClick={() => setRemediate(true)}>Herstellen…</Button>}
               <Button variant="secondary" disabled={check.isPending} onClick={() => check.mutate()}>
                 {check.isPending ? "Controleren…" : "Nu controleren"}
               </Button>
@@ -210,6 +217,7 @@ function DriftCard({
       {wizard !== null && (
         <BaselineWizard clusterId={clusterId} source={src} node={wizard || undefined} onClose={() => setWizard(null)} />
       )}
+      {remediate && r && <RemediateDialog clusterId={clusterId} report={r} onClose={() => setRemediate(false)} />}
     </Card>
   );
 }
@@ -361,21 +369,6 @@ function NodeDetail({
       )}
     </div>
   );
-}
-
-const aspectPrefix: Partial<Record<DriftFinding["aspect"], string>> = {
-  mode: "rechten ",
-  owner: "eigenaar ",
-  group: "groep ",
-};
-
-function expectedText(f: DriftFinding) {
-  return (aspectPrefix[f.aspect] ?? "") + f.expected;
-}
-
-function actualText(f: DriftFinding) {
-  const extra = [f.detail, f.mtime && `gewijzigd op de node om ${timeFmt.format(new Date(f.mtime))}`].filter(Boolean);
-  return (aspectPrefix[f.aspect] ?? "") + f.actual + (extra.length ? ` (${extra.join(", ")})` : "");
 }
 
 function groupBy(findings: DriftFinding[]) {

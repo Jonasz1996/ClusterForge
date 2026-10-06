@@ -184,6 +184,9 @@ type observation struct {
 	err       string
 	revision  int
 	version   string
+	// jobID is de taak waarna gecontroleerd wordt, zoals een herstel; die
+	// komt in drift.resolved.
+	jobID *uuid.UUID
 }
 
 // scheduled is een controle op de achtergrond, met bevestiging.
@@ -530,6 +533,9 @@ func (s *Service) write(ctx context.Context, q *store.Queries, n store.ListDrift
 			if prev.DriftSince != nil {
 				payload["duration_seconds"] = int(now.Sub(*prev.DriftSince).Seconds())
 			}
+			if obs.jobID != nil {
+				payload["job_id"] = *obs.jobID
+			}
 			err = emit("drift.resolved", payload)
 		}
 		if err != nil {
@@ -576,6 +582,16 @@ func diffKeys(old, cur []string) (added, removed []string) {
 // CheckNow controleert de nodes meteen, zonder bevestiging, allemaal
 // tegelijk. Zonder nodeID alle nodes van het cluster.
 func (s *Service) CheckNow(ctx context.Context, clusterID uuid.UUID, nodeID *uuid.UUID) error {
+	return s.checkNow(ctx, clusterID, nodeID, nil)
+}
+
+// CheckAfterJob controleert de nodes van een cluster meteen na een taak die
+// drift herstelde; verdwijnt de drift, dan staat de taak in het event.
+func (s *Service) CheckAfterJob(ctx context.Context, clusterID, jobID uuid.UUID) error {
+	return s.checkNow(ctx, clusterID, nil, &jobID)
+}
+
+func (s *Service) checkNow(ctx context.Context, clusterID uuid.UUID, nodeID, jobID *uuid.UUID) error {
 	rows, err := s.q.ListDriftNodes(ctx, store.ListDriftNodesParams{ClusterID: &clusterID, NodeID: nodeID})
 	if err != nil {
 		return err
@@ -587,6 +603,7 @@ func (s *Service) CheckNow(ctx context.Context, clusterID uuid.UUID, nodeID *uui
 			if obs.skip != "" {
 				return nil
 			}
+			obs.jobID = jobID
 			if err := s.save(ctx, n, obs); err != nil {
 				return fmt.Errorf("%s: %w", n.Hostname, err)
 			}
@@ -594,4 +611,31 @@ func (s *Service) CheckNow(ctx context.Context, clusterID uuid.UUID, nodeID *uui
 		})
 	}
 	return g.Wait()
+}
+
+// InspectSteps bekijkt alleen deze stappen van een node met state.inspect
+// en vergelijkt ze met de template, zonder iets op te slaan. Een herstel
+// kijkt zo vlak voor het toepassen of de node nog is zoals de beheerder hem
+// zag.
+func (s *Service) InspectSteps(ctx context.Context, nodeID uuid.UUID, steps []templates.Step) ([]Finding, error) {
+	req := Request(steps)
+	var res protocol.Result
+	if len(req) > 0 {
+		cctx, cancel := context.WithTimeout(ctx, s.Timeout)
+		defer cancel()
+		cmd := protocol.Command{ID: "inspect-" + uuid.NewString(), Action: protocol.CmdInspect, Deadline: time.Now().Add(s.Timeout), Inspect: req}
+		var err error
+		res, err = s.bus.Command(cctx, nodeID, cmd)
+		switch {
+		case err != nil:
+			return nil, err
+		case !res.OK:
+			return nil, errors.New("de agent: " + res.Error)
+		}
+	}
+	aligned, err := Align(steps, res.Observations)
+	if err != nil {
+		return nil, err
+	}
+	return compare(s.key, steps, templateContents(steps), aligned).Findings, nil
 }

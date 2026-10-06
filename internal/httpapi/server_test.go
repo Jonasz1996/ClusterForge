@@ -35,6 +35,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/live"
 	"github.com/Jonasz1996/clusterforge/internal/metrics"
 	"github.com/Jonasz1996/clusterforge/internal/proxmox"
+	"github.com/Jonasz1996/clusterforge/internal/rollout"
 	"github.com/Jonasz1996/clusterforge/internal/secrets"
 	"github.com/Jonasz1996/clusterforge/internal/status"
 	"github.com/Jonasz1996/clusterforge/internal/store"
@@ -61,6 +62,7 @@ type testEnv struct {
 	drift   *drift.Service
 	fo      *failover.Service
 	deps    *deps.Service
+	ro      *rollout.Service
 	conns   *testConns
 
 	// De runner heeft een eigen context, zodat een test hem kan herstarten.
@@ -135,6 +137,10 @@ func newTestEnv(t *testing.T) *testEnv {
 	fo.ReturnTimeout, fo.Fresh, fo.EmergencyTimeout = 8*time.Second, 2*time.Second, 3*time.Second
 	// De resolver draait niet vanzelf; een test roept Resolve aan.
 	dps := deps.NewService(pool, ev, log)
+	ro := rollout.NewService(pool, ev, log, runner, bus, dep, drf)
+	ro.Changed = eval.Kick
+	ro.Gate.Poll, ro.Retry, ro.Fresh = 20*time.Millisecond, 50*time.Millisecond, 2*time.Second
+	ro.ReadyTimeout, ro.SettleTimeout, ro.CheckTimeout = 5*time.Second, 5*time.Second, 2*time.Second
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() { defer wg.Done(); hub.Run(runCtx) }()
@@ -145,12 +151,12 @@ func newTestEnv(t *testing.T) *testEnv {
 	}
 	api := New(Deps{
 		Config: cfg, Log: log, Pool: pool, Auth: a, Bus: bus, Hub: hub, Proxmox: pve, Jobs: runner, Lifecycle: life,
-		Deploy: dep, Backups: bk, Drift: drf, Failover: fo, Deps: dps, Version: "test",
+		Deploy: dep, Backups: bk, Drift: drf, Failover: fo, Deps: dps, Rollout: ro, Version: "test",
 	})
 	srv := httptest.NewServer(api.Handler())
 	t.Cleanup(srv.Close)
 	e := &testEnv{t: t, srv: srv, auth: a, pool: pool, api: api, bus: bus, eval: eval, vm: vm, pve: pve, jobs: runner, life: life, deploy: dep,
-		backups: bk, drift: drf, fo: fo, deps: dps, conns: conns, runCtx: runCtx}
+		backups: bk, drift: drf, fo: fo, deps: dps, ro: ro, conns: conns, runCtx: runCtx}
 	e.startRunner()
 	t.Cleanup(func() {
 		stop()
@@ -182,6 +188,16 @@ func (e *testEnv) startRunner() {
 	e.runnerMu.Lock()
 	e.runnerStop, e.runnerDone = cancel, done
 	e.runnerMu.Unlock()
+}
+
+// stopRunner stopt de runner tot startRunner; taken blijven in de
+// wachtrij staan.
+func (e *testEnv) stopRunner() {
+	e.runnerMu.Lock()
+	stop, done := e.runnerStop, e.runnerDone
+	e.runnerMu.Unlock()
+	stop()
+	<-done
 }
 
 // restartRunner stopt de runner zoals bij een nette stop van de server en
