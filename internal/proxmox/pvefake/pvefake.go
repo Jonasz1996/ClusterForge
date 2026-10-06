@@ -47,6 +47,9 @@ type Guest struct {
 	NoAgent bool
 	// Pool is de resource pool.
 	Pool string
+	// HAState is de toestand bij Proxmox HA, zoals "started"; leeg als HA
+	// de VM niet beheert.
+	HAState string
 	// Hostname, OS en Filesystems zijn wat de guest agent meldt; leeg
 	// geeft de naam van de VM, Debian 13 en één bestandssysteem.
 	Hostname    string
@@ -144,7 +147,9 @@ type Server struct {
 	agentDelay time.Duration
 	// onFileWrite wordt aangeroepen na een file-write via de guest agent.
 	onFileWrite func(vmid int, name, file, content string)
-	backups     []Backup
+	// onPower wordt aangeroepen als een VM aan- of uitgaat.
+	onPower func(vmid int, status string)
+	backups []Backup
 	// hideBackups speelt een token zonder VM.Backup: Proxmox laat dan alle
 	// back-ups weg uit de lijst, zonder fout.
 	hideBackups bool
@@ -236,6 +241,14 @@ func (s *Server) OnFileWrite(f func(vmid int, name, file, content string)) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.onFileWrite = f
+}
+
+// OnPower laat een test weten dat een VM aan- of uitging, bijvoorbeeld om
+// de agent op die VM te stoppen of weer te starten.
+func (s *Server) OnPower(f func(vmid int, status string)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onPower = f
 }
 
 func New(token string) *Server {
@@ -427,6 +440,9 @@ func (s *Server) resources(w http.ResponseWriter, r *http.Request) {
 		if g.Pool != "" {
 			m["pool"] = g.Pool
 		}
+		if g.HAState != "" {
+			m["hastate"] = g.HAState
+		}
 		if g.Status == "running" {
 			m["cpu"], m["mem"], m["uptime"] = g.CPU, g.Mem, 3600
 		}
@@ -530,6 +546,9 @@ func (s *Server) power(w http.ResponseWriter, r *http.Request) {
 			g.startedAt = time.Now()
 		}
 		g.Status = to
+		if hook, vmid := s.onPower, g.VMID; hook != nil {
+			go hook(vmid, to)
+		}
 	}, fmt.Sprintf("%s %d", action, g.VMID)))
 }
 

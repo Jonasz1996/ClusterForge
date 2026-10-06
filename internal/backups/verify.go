@@ -119,58 +119,83 @@ func (e ConflictError) Error() string { return e.Msg }
 // StartVerify zet een controle van de nieuwste back-up van de VM van een
 // node in de wachtrij, of van volid als die gegeven is.
 func (s *Service) StartVerify(ctx context.Context, actor events.Actor, nodeID uuid.UUID, volid string) (store.TestRun, error) {
-	if s.runner == nil {
-		return store.TestRun{}, ConflictError{"conflict", "de back-upcontrole staat uit op deze server"}
-	}
-	n, err := s.q.GetVerifyNode(ctx, nodeID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return store.TestRun{}, ErrNotFound
-	}
+	n, def, err := s.prepare(ctx, nodeID, volid)
 	if err != nil {
 		return store.TestRun{}, err
 	}
+	return s.enqueue(ctx, actor, n, def, TriggerManual)
+}
+
+// Hoe een controle gestart is, zoals in test_runs.trigger.
+const (
+	TriggerManual   = "manual"
+	TriggerSchedule = "schedule"
+)
+
+// prepare kiest de back-up die gecontroleerd wordt, of zegt waarom het nu
+// niet kan.
+func (s *Service) prepare(ctx context.Context, nodeID uuid.UUID, volid string) (store.GetVerifyNodeRow, Definition, error) {
+	var none store.GetVerifyNodeRow
+	if s.runner == nil {
+		return none, Definition{}, ConflictError{"conflict", "de back-upcontrole staat uit op deze server"}
+	}
+	n, err := s.q.GetVerifyNode(ctx, nodeID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return none, Definition{}, ErrNotFound
+	}
+	if err != nil {
+		return none, Definition{}, err
+	}
 	switch {
 	case n.ProxmoxID == nil || n.PveVmid == nil:
-		return store.TestRun{}, ConflictError{"conflict", "deze node is niet aan een VM in Proxmox gekoppeld"}
+		return n, Definition{}, ConflictError{"conflict", "deze node is niet aan een VM in Proxmox gekoppeld"}
 	case n.LastError != nil && *n.LastError != "":
-		return store.TestRun{}, ConflictError{"conflict", "Proxmox is niet bereikbaar: " + *n.LastError}
+		return n, Definition{}, ConflictError{"conflict", "Proxmox is niet bereikbaar: " + *n.LastError}
 	case deref(n.GuestType) == "lxc":
-		return store.TestRun{}, ConflictError{"conflict", "een LXC-container heeft geen guest agent; die krijgt alleen versheid en dekking, geen controle in een sandbox"}
+		return n, Definition{}, ConflictError{"conflict", "een LXC-container heeft geen guest agent; die krijgt alleen versheid en dekking, geen controle in een sandbox"}
 	}
 	var b store.ProxmoxBackup
 	volid = strings.TrimSpace(volid)
 	if volid != "" {
 		b, err = s.q.GetBackup(ctx, store.GetBackupParams{ConnectionID: *n.ProxmoxID, Volid: volid})
 		if errors.Is(err, pgx.ErrNoRows) || err == nil && b.Vmid != *n.PveVmid {
-			return store.TestRun{}, ValidationError{"deze back-up hoort niet bij de VM van " + n.Hostname}
+			return n, Definition{}, ValidationError{"deze back-up hoort niet bij de VM van " + n.Hostname}
 		}
 	} else {
 		b, err = s.q.GetLatestGuestBackup(ctx, store.GetLatestGuestBackupParams{ConnectionID: *n.ProxmoxID, Vmid: *n.PveVmid})
 		if errors.Is(err, pgx.ErrNoRows) {
-			return store.TestRun{}, ConflictError{"conflict", "Proxmox heeft geen back-up van deze VM"}
+			return n, Definition{}, ConflictError{"conflict", "Proxmox heeft geen back-up van deze VM"}
 		}
 	}
 	if err != nil {
-		return store.TestRun{}, err
+		return n, Definition{}, err
 	}
 	if b.GuestType == "lxc" {
-		return store.TestRun{}, ConflictError{"conflict", "dit is een back-up van een LXC-container; die krijgt alleen versheid en dekking"}
+		return n, Definition{}, ConflictError{"conflict", "dit is een back-up van een LXC-container; die krijgt alleen versheid en dekking"}
 	}
-	def := Definition{
+	return n, Definition{
 		Volid: b.Volid, BackupTime: b.Ctime, Size: b.SizeBytes, Format: b.Format, BackupStorage: b.Storage,
 		ConnectionID: *n.ProxmoxID, ConnectionName: deref(n.ConnectionName), SourceVMID: int(*n.PveVmid),
 		GuestName: deref(n.GuestName), Chosen: volid != "",
-	}
+	}, nil
+}
+
+// enqueue maakt de run en de taak in één transactie.
+func (s *Service) enqueue(ctx context.Context, actor events.Actor, n store.GetVerifyNodeRow, def Definition, trigger string) (store.TestRun, error) {
 	defJSON, err := json.Marshal(def)
 	if err != nil {
 		return store.TestRun{}, err
+	}
+	title := "Back-upcontrole: " + n.Hostname
+	if trigger == TriggerSchedule {
+		title += " (gepland)"
 	}
 	var run store.TestRun
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q := store.New(tx)
 		var err error
 		run, err = q.InsertTestRun(ctx, store.InsertTestRunParams{
-			Kind: KindVerify, ClusterID: n.ClusterID, NodeID: &n.ID, Hostname: n.Hostname,
+			Kind: KindVerify, Trigger: trigger, ClusterID: n.ClusterID, NodeID: &n.ID, Hostname: n.Hostname,
 			Definition: defJSON, Checks: []byte("[]"), RequestedBy: userOf(actor),
 		})
 		if err != nil {
@@ -179,7 +204,7 @@ func (s *Service) StartVerify(ctx context.Context, actor events.Actor, nodeID uu
 		// Geen clusterslot: de controle raakt de productie-VM niet aan. Het
 		// testslot houdt het bij één sandbox tegelijk.
 		j, err := s.runner.EnqueueTx(ctx, q, jobs.Spec{
-			Kind: KindVerify, Title: "Back-upcontrole: " + n.Hostname, Params: verifyParams{RunID: run.ID},
+			Kind: KindVerify, Title: title, Params: verifyParams{RunID: run.ID},
 			ClusterID: n.ClusterID, NodeID: &n.ID, ProxmoxID: n.ProxmoxID, Actor: actor,
 		})
 		if err != nil {
@@ -947,7 +972,7 @@ func (v *verify) cleanupText() string {
 func (s *Service) finishedEvent(ctx context.Context, run store.TestRun, def Definition, m Measurements) {
 	p := map[string]any{
 		"run_id": run.ID, "node_id": run.NodeID, "hostname": run.Hostname, "volid": def.Volid,
-		"result": deref(run.Result), "summary": run.Summary,
+		"result": deref(run.Result), "summary": run.Summary, "trigger": run.Trigger,
 	}
 	if m.RestoreSeconds != nil {
 		p["restore_seconds"] = *m.RestoreSeconds

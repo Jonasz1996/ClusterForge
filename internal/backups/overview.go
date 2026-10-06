@@ -388,6 +388,15 @@ type Policy struct {
 	MaxAgeHours int `json:"max_age_hours"`
 	// Default is true als het cluster nog geen eigen beleid heeft.
 	Default bool `json:"default"`
+	// VerifyEnabled: de controle draait gepland in het testvenster, met
+	// NextRunAt als volgende moment.
+	VerifyEnabled bool       `json:"verify_enabled"`
+	NextRunAt     *time.Time `json:"next_run_at"`
+	// LastVerified is de laatste echte controle van een node van dit
+	// cluster; nil als nooit.
+	LastVerified *time.Time `json:"last_verified_at"`
+	// Window is het testvenster in gewone taal.
+	Window string `json:"window"`
 }
 
 // Policy geeft het beleid van een cluster, of de standaard.
@@ -397,14 +406,26 @@ func (s *Service) Policy(ctx context.Context, clusterID uuid.UUID) (Policy, erro
 	} else if err != nil {
 		return Policy{}, err
 	}
+	out := Policy{MaxAgeHours: DefaultMaxAgeHours, Default: true, Window: s.Window.String()}
+	verified, err := s.q.LastTestedAt(ctx, store.LastTestedAtParams{
+		ClusterID: &clusterID, Kind: KindVerify, Results: []string{"pass", "warning", "fail"},
+	})
+	if err != nil {
+		return Policy{}, err
+	}
+	if verified.Unix() > 0 {
+		out.LastVerified = &verified
+	}
 	p, err := s.q.GetBackupPolicy(ctx, clusterID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return Policy{MaxAgeHours: DefaultMaxAgeHours, Default: true}, nil
+		return out, nil
 	}
 	if err != nil {
 		return Policy{}, err
 	}
-	return Policy{MaxAgeHours: int(p.MaxAgeHours)}, nil
+	out.MaxAgeHours, out.Default = int(p.MaxAgeHours), false
+	out.VerifyEnabled, out.NextRunAt = p.VerifyEnabled, p.NextRunAt
+	return out, nil
 }
 
 // UpdatePolicy wijzigt de maximale leeftijd van de back-ups van een cluster.

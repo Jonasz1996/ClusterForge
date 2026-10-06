@@ -20,6 +20,7 @@ import (
 
 	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/jobs"
+	"github.com/Jonasz1996/clusterforge/internal/planner"
 	"github.com/Jonasz1996/clusterforge/internal/proxmox"
 	"github.com/Jonasz1996/clusterforge/internal/store"
 )
@@ -105,6 +106,8 @@ type Service struct {
 	MaxSandboxAge time.Duration
 	// JobLimit is de limiet van de hele taak.
 	JobLimit time.Duration
+	// Window is het testvenster waarin geplande controles draaien.
+	Window planner.Window
 
 	runner    *jobs.Runner
 	conns     Connections
@@ -123,7 +126,7 @@ func NewService(pool *pgxpool.Pool, ev *events.Writer, log *slog.Logger, pve *pr
 		InventoryEvery: 15 * time.Minute, Tick: time.Minute, Now: time.Now,
 		BootTimeout: 10 * time.Minute, NoAgentWait: 30 * time.Second, AgentTimeout: time.Minute,
 		Poll: 3 * time.Second, ConnPoll: 2 * time.Second, LockWait: 10 * time.Minute,
-		CleanEvery: 5 * time.Minute, MaxSandboxAge: 3 * time.Hour, JobLimit: 2 * time.Hour,
+		CleanEvery: 5 * time.Minute, MaxSandboxAge: 3 * time.Hour, JobLimit: 2 * time.Hour, Window: planner.DefaultWindow,
 		sbLocks: map[uuid.UUID]*sync.Mutex{}, cleanKick: make(chan struct{}, 1),
 		kick: make(chan struct{}, 1),
 	}

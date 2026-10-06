@@ -79,7 +79,7 @@ func (q *Queries) FinishTestRun(ctx context.Context, arg FinishTestRunParams) (T
 }
 
 const getFailoverTest = `-- name: GetFailoverTest :one
-SELECT t.id, t.cluster_id, t.vip_id, t.name, t.scenario, t.service, t.max_takeover_seconds, t.expect_failback, t.probe, t.created_by, t.created_at, t.updated_at, v.address AS vip_address
+SELECT t.id, t.cluster_id, t.vip_id, t.name, t.scenario, t.service, t.max_takeover_seconds, t.expect_failback, t.probe, t.created_by, t.created_at, t.updated_at, t.scheduled, t.next_run_at, v.address AS vip_address
 FROM failover_tests t
 JOIN vips v ON v.id = t.vip_id
 WHERE t.id = $1
@@ -106,6 +106,8 @@ func (q *Queries) GetFailoverTest(ctx context.Context, id uuid.UUID) (GetFailove
 		&i.FailoverTest.CreatedBy,
 		&i.FailoverTest.CreatedAt,
 		&i.FailoverTest.UpdatedAt,
+		&i.FailoverTest.Scheduled,
+		&i.FailoverTest.NextRunAt,
 		&i.VipAddress,
 	)
 	return i, err
@@ -205,10 +207,26 @@ func (q *Queries) GetTestSlotJob(ctx context.Context) (GetTestSlotJobRow, error)
 	return i, err
 }
 
+const getTestSlotReleasedAt = `-- name: GetTestSlotReleasedAt :one
+SELECT coalesce(max(finished_at), 'epoch'::timestamptz)::timestamptz AS released_at FROM jobs
+WHERE kind IN ('backup.verify', 'failover.test') AND status NOT IN ('queued', 'running')
+`
+
+// Wanneer de laatste invasieve test klaar was; een geplande run die daarop
+// wachtte, is niet te laat.
+func (q *Queries) GetTestSlotReleasedAt(ctx context.Context) (time.Time, error) {
+	row := q.db.QueryRow(ctx, getTestSlotReleasedAt)
+	var released_at time.Time
+	err := row.Scan(&released_at)
+	return released_at, err
+}
+
 const insertFailoverTest = `-- name: InsertFailoverTest :one
-INSERT INTO failover_tests (cluster_id, vip_id, name, scenario, service, max_takeover_seconds, expect_failback, probe, created_by)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-RETURNING id, cluster_id, vip_id, name, scenario, service, max_takeover_seconds, expect_failback, probe, created_by, created_at, updated_at
+INSERT INTO failover_tests (cluster_id, vip_id, name, scenario, service, max_takeover_seconds, expect_failback, probe, created_by,
+                            scheduled, next_run_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9,
+        $10, $11)
+RETURNING id, cluster_id, vip_id, name, scenario, service, max_takeover_seconds, expect_failback, probe, created_by, created_at, updated_at, scheduled, next_run_at
 `
 
 type InsertFailoverTestParams struct {
@@ -221,6 +239,8 @@ type InsertFailoverTestParams struct {
 	ExpectFailback     bool
 	Probe              []byte
 	CreatedBy          *uuid.UUID
+	Scheduled          bool
+	NextRunAt          *time.Time
 }
 
 func (q *Queries) InsertFailoverTest(ctx context.Context, arg InsertFailoverTestParams) (FailoverTest, error) {
@@ -234,6 +254,8 @@ func (q *Queries) InsertFailoverTest(ctx context.Context, arg InsertFailoverTest
 		arg.ExpectFailback,
 		arg.Probe,
 		arg.CreatedBy,
+		arg.Scheduled,
+		arg.NextRunAt,
 	)
 	var i FailoverTest
 	err := row.Scan(
@@ -249,18 +271,21 @@ func (q *Queries) InsertFailoverTest(ctx context.Context, arg InsertFailoverTest
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Scheduled,
+		&i.NextRunAt,
 	)
 	return i, err
 }
 
 const insertTestRun = `-- name: InsertTestRun :one
-INSERT INTO test_runs (kind, cluster_id, test_id, node_id, hostname, job_id, definition, checks, requested_by)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+INSERT INTO test_runs (kind, trigger, cluster_id, test_id, node_id, hostname, job_id, definition, checks, requested_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 RETURNING id, kind, trigger, cluster_id, test_id, node_id, hostname, job_id, definition, result, restored, summary, checks, timeline, measurements, requested_by, created_at, finished_at
 `
 
 type InsertTestRunParams struct {
 	Kind        string
+	Trigger     string
 	ClusterID   *uuid.UUID
 	TestID      *uuid.UUID
 	NodeID      *uuid.UUID
@@ -274,6 +299,7 @@ type InsertTestRunParams struct {
 func (q *Queries) InsertTestRun(ctx context.Context, arg InsertTestRunParams) (TestRun, error) {
 	row := q.db.QueryRow(ctx, insertTestRun,
 		arg.Kind,
+		arg.Trigger,
 		arg.ClusterID,
 		arg.TestID,
 		arg.NodeID,
@@ -305,6 +331,26 @@ func (q *Queries) InsertTestRun(ctx context.Context, arg InsertTestRunParams) (T
 		&i.FinishedAt,
 	)
 	return i, err
+}
+
+const lastTestedAt = `-- name: LastTestedAt :one
+SELECT coalesce(max(finished_at), 'epoch'::timestamptz)::timestamptz AS tested_at FROM test_runs
+WHERE cluster_id = $1 AND kind = $2 AND result = ANY($3::text[])
+`
+
+type LastTestedAtParams struct {
+	ClusterID *uuid.UUID
+	Kind      string
+	Results   []string
+}
+
+// Wanneer een cluster het laatst echt getest of gecontroleerd is; epoch als
+// nooit.
+func (q *Queries) LastTestedAt(ctx context.Context, arg LastTestedAtParams) (time.Time, error) {
+	row := q.db.QueryRow(ctx, lastTestedAt, arg.ClusterID, arg.Kind, arg.Results)
+	var tested_at time.Time
+	err := row.Scan(&tested_at)
+	return tested_at, err
 }
 
 const latestTestRuns = `-- name: LatestTestRuns :many
@@ -361,8 +407,58 @@ func (q *Queries) LatestTestRuns(ctx context.Context, clusterID *uuid.UUID) ([]L
 	return items, nil
 }
 
+const listDueFailoverTests = `-- name: ListDueFailoverTests :many
+SELECT t.id, t.cluster_id, t.vip_id, t.name, t.scenario, t.service, t.max_takeover_seconds, t.expect_failback, t.probe, t.created_by, t.created_at, t.updated_at, t.scheduled, t.next_run_at, v.address AS vip_address
+FROM failover_tests t
+JOIN vips v ON v.id = t.vip_id
+WHERE t.scheduled AND t.next_run_at <= $1
+ORDER BY t.next_run_at, t.created_at
+`
+
+type ListDueFailoverTestsRow struct {
+	FailoverTest FailoverTest
+	VipAddress   netip.Addr
+}
+
+// Geplande tests waarvan het moment voorbij is, oudste eerst.
+func (q *Queries) ListDueFailoverTests(ctx context.Context, now *time.Time) ([]ListDueFailoverTestsRow, error) {
+	rows, err := q.db.Query(ctx, listDueFailoverTests, now)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDueFailoverTestsRow{}
+	for rows.Next() {
+		var i ListDueFailoverTestsRow
+		if err := rows.Scan(
+			&i.FailoverTest.ID,
+			&i.FailoverTest.ClusterID,
+			&i.FailoverTest.VipID,
+			&i.FailoverTest.Name,
+			&i.FailoverTest.Scenario,
+			&i.FailoverTest.Service,
+			&i.FailoverTest.MaxTakeoverSeconds,
+			&i.FailoverTest.ExpectFailback,
+			&i.FailoverTest.Probe,
+			&i.FailoverTest.CreatedBy,
+			&i.FailoverTest.CreatedAt,
+			&i.FailoverTest.UpdatedAt,
+			&i.FailoverTest.Scheduled,
+			&i.FailoverTest.NextRunAt,
+			&i.VipAddress,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listFailoverNodes = `-- name: ListFailoverNodes :many
-SELECT n.id, n.hostname, n.lifecycle, n.status,
+SELECT n.id, n.hostname, n.lifecycle, n.status, n.proxmox_id, n.pve_vmid,
        (a.id IS NOT NULL)::boolean AS has_agent,
        coalesce(a.protocol_version, 0)::int AS agent_protocol,
        s.heartbeat_at,
@@ -382,6 +478,8 @@ type ListFailoverNodesRow struct {
 	Hostname       string
 	Lifecycle      NodeLifecycle
 	Status         string
+	ProxmoxID      *uuid.UUID
+	PveVmid        *int32
 	HasAgent       bool
 	AgentProtocol  int32
 	HeartbeatAt    *time.Time
@@ -406,6 +504,8 @@ func (q *Queries) ListFailoverNodes(ctx context.Context, clusterID *uuid.UUID) (
 			&i.Hostname,
 			&i.Lifecycle,
 			&i.Status,
+			&i.ProxmoxID,
+			&i.PveVmid,
 			&i.HasAgent,
 			&i.AgentProtocol,
 			&i.HeartbeatAt,
@@ -424,7 +524,7 @@ func (q *Queries) ListFailoverNodes(ctx context.Context, clusterID *uuid.UUID) (
 }
 
 const listFailoverTests = `-- name: ListFailoverTests :many
-SELECT t.id, t.cluster_id, t.vip_id, t.name, t.scenario, t.service, t.max_takeover_seconds, t.expect_failback, t.probe, t.created_by, t.created_at, t.updated_at, v.address AS vip_address, v.owner_node_id AS vip_owner_id, o.hostname AS vip_owner_hostname
+SELECT t.id, t.cluster_id, t.vip_id, t.name, t.scenario, t.service, t.max_takeover_seconds, t.expect_failback, t.probe, t.created_by, t.created_at, t.updated_at, t.scheduled, t.next_run_at, v.address AS vip_address, v.owner_node_id AS vip_owner_id, o.hostname AS vip_owner_hostname
 FROM failover_tests t
 JOIN vips v ON v.id = t.vip_id
 LEFT JOIN nodes o ON o.id = v.owner_node_id
@@ -461,6 +561,8 @@ func (q *Queries) ListFailoverTests(ctx context.Context, clusterID uuid.UUID) ([
 			&i.FailoverTest.CreatedBy,
 			&i.FailoverTest.CreatedAt,
 			&i.FailoverTest.UpdatedAt,
+			&i.FailoverTest.Scheduled,
+			&i.FailoverTest.NextRunAt,
 			&i.VipAddress,
 			&i.VipOwnerID,
 			&i.VipOwnerHostname,
@@ -585,6 +687,23 @@ func (q *Queries) ListUnrestoredRuns(ctx context.Context, clusterID *uuid.UUID) 
 	return items, nil
 }
 
+const setFailoverTestNextRun = `-- name: SetFailoverTestNextRun :exec
+UPDATE failover_tests SET scheduled = $1, next_run_at = $2 WHERE id = $3
+`
+
+type SetFailoverTestNextRunParams struct {
+	Scheduled bool
+	NextRunAt *time.Time
+	ID        uuid.UUID
+}
+
+// Na een geplande run of een overgeslagen run: het volgende venster, of de
+// planning uit.
+func (q *Queries) SetFailoverTestNextRun(ctx context.Context, arg SetFailoverTestNextRunParams) error {
+	_, err := q.db.Exec(ctx, setFailoverTestNextRun, arg.Scheduled, arg.NextRunAt, arg.ID)
+	return err
+}
+
 const setTestRunChecks = `-- name: SetTestRunChecks :exec
 UPDATE test_runs SET checks = $1 WHERE id = $2
 `
@@ -630,9 +749,10 @@ func (q *Queries) SetTestRunRestored(ctx context.Context, arg SetTestRunRestored
 const updateFailoverTest = `-- name: UpdateFailoverTest :one
 UPDATE failover_tests
 SET vip_id = $1, name = $2, scenario = $3, service = $4,
-    max_takeover_seconds = $5, expect_failback = $6, probe = $7, updated_at = now()
-WHERE id = $8
-RETURNING id, cluster_id, vip_id, name, scenario, service, max_takeover_seconds, expect_failback, probe, created_by, created_at, updated_at
+    max_takeover_seconds = $5, expect_failback = $6, probe = $7,
+    scheduled = $8, next_run_at = $9, updated_at = now()
+WHERE id = $10
+RETURNING id, cluster_id, vip_id, name, scenario, service, max_takeover_seconds, expect_failback, probe, created_by, created_at, updated_at, scheduled, next_run_at
 `
 
 type UpdateFailoverTestParams struct {
@@ -643,6 +763,8 @@ type UpdateFailoverTestParams struct {
 	MaxTakeoverSeconds int32
 	ExpectFailback     bool
 	Probe              []byte
+	Scheduled          bool
+	NextRunAt          *time.Time
 	ID                 uuid.UUID
 }
 
@@ -655,6 +777,8 @@ func (q *Queries) UpdateFailoverTest(ctx context.Context, arg UpdateFailoverTest
 		arg.MaxTakeoverSeconds,
 		arg.ExpectFailback,
 		arg.Probe,
+		arg.Scheduled,
+		arg.NextRunAt,
 		arg.ID,
 	)
 	var i FailoverTest
@@ -671,6 +795,8 @@ func (q *Queries) UpdateFailoverTest(ctx context.Context, arg UpdateFailoverTest
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Scheduled,
+		&i.NextRunAt,
 	)
 	return i, err
 }

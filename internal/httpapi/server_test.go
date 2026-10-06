@@ -135,6 +135,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	fo.Changed = eval.Kick
 	fo.ProbeInterval, fo.Gate.Poll, fo.Retry = 20*time.Millisecond, 20*time.Millisecond, 50*time.Millisecond
 	fo.ReturnTimeout, fo.Fresh, fo.EmergencyTimeout = 8*time.Second, 2*time.Second, 3*time.Second
+	fo.Proxmox, fo.BootTimeout = pve, 8*time.Second
 	// De resolver draait niet vanzelf; een test roept Resolve aan.
 	dps := deps.NewService(pool, ev, log)
 	ro := rollout.NewService(pool, ev, log, runner, bus, dep, drf)

@@ -11,6 +11,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -85,7 +87,9 @@ type Measurements struct {
 // vast voor het commando de deur uitgaat; een hervatte stap stuurt de
 // storing dus nooit opnieuw.
 type measureState struct {
-	InjectedAt  time.Time    `json:"injected_at"`
+	InjectedAt time.Time `json:"injected_at"`
+	// InjectTask is bij vm_hard_stop de Proxmox-taak die de VM uitzet.
+	InjectTask  string       `json:"inject_task,omitempty"`
 	InjectError string       `json:"inject_error,omitempty"`
 	Interrupted bool         `json:"interrupted,omitempty"`
 	Measurement *Measurement `json:"measurement,omitempty"`
@@ -239,7 +243,7 @@ func (r *testRun) precheck(ctx context.Context, st *jobs.Step) error {
 	if err != nil {
 		return err
 	}
-	plan, err := r.s.precheck(ctx, c, r.def, r.j.ID)
+	plan, err := r.s.precheck(ctx, c, r.def, r.j.ID, r.run.Trigger)
 	if ctx.Err() != nil {
 		return context.Cause(ctx)
 	}
@@ -294,9 +298,19 @@ func (r *testRun) measureStep(ctx context.Context, st *jobs.Step, ms *measureSta
 		ms.InjectedAt = time.Time{}
 		return err
 	}
-	st.Logf("%s stoppen op %s", r.def.Unit, host)
-	_ = st.Flush(ctx)
-	err := r.s.apply(ctx, st, r.plan.Target.ID, r.run.ID.String()+"-inject", r.reason(), r.def.Unit, "stopped", 1)
+	var err error
+	if r.def.Scenario == VMHardStop {
+		st.Logf("VM %d van %s hard uitzetten via Proxmox", r.plan.VM.VMID, host)
+		_ = st.Flush(ctx)
+		ms.InjectTask, err = r.s.Proxmox.PowerVM(ctx, r.plan.VM.ConnectionID, r.plan.VM.VMID, "stop")
+		if err == nil {
+			_ = st.SetState(ctx, ms)
+		}
+	} else {
+		st.Logf("%s stoppen op %s", r.def.Unit, host)
+		_ = st.Flush(ctx)
+		err = r.s.apply(ctx, st, r.plan.Target.ID, r.run.ID.String()+"-inject", r.reason(), r.def.Unit, "stopped", 1)
+	}
 	switch {
 	case err == nil:
 		r.event(ctx, "failover.fault_injected", nil)
@@ -317,6 +331,17 @@ func (r *testRun) measureStep(ctx context.Context, st *jobs.Step, ms *measureSta
 	m := r.measure(ctx, st, ms.InjectedAt)
 	if jobs.Interrupted(ctx) {
 		return context.Cause(ctx)
+	}
+	if ms.InjectTask != "" {
+		// De meting liep al terwijl Proxmox de VM uitzette; nu moet blijken
+		// of dat ook lukte.
+		wctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
+		err := r.s.Proxmox.WaitVMTask(wctx, r.plan.VM.ConnectionID, ms.InjectTask, nil)
+		cancel()
+		if err != nil {
+			ms.InjectError = err.Error()
+			st.Logf("de VM uitzetten lukte niet: %v", err)
+		}
 	}
 	ms.Measurement = &m
 	return st.SetState(ctx, ms)
@@ -402,25 +427,52 @@ func (r *testRun) takenOver(ctx context.Context, vips []string, since time.Time)
 	if err != nil {
 		return health.Holder{}, false
 	}
-	for _, v := range vips {
-		if o, ok := snap.Owner(v); !ok || o.ID == r.plan.Target.ID {
+	owner := snap.Owner
+	if r.def.Scenario == VMHardStop {
+		// Een VM die hard uitgaat, stuurt geen heartbeat meer. Zijn laatste
+		// kan van net na de start van de meting zijn, toen Proxmox hem nog
+		// aan het stoppen was, en dan nog het VIP tonen. Alleen de andere
+		// nodes tellen.
+		owner = func(v string) (health.Holder, bool) {
+			var others []health.Holder
+			for _, h := range snap.Holders[v] {
+				if h.ID != r.plan.Target.ID {
+					others = append(others, h)
+				}
+			}
+			if len(others) == 1 {
+				return others[0], true
+			}
 			return health.Holder{}, false
 		}
 	}
-	if o, ok := snap.Owner(r.def.VIP); ok {
+	for _, v := range vips {
+		if o, ok := owner(v); !ok || o.ID == r.plan.Target.ID {
+			return health.Holder{}, false
+		}
+	}
+	if o, ok := owner(r.def.VIP); ok {
 		return o, true
 	}
-	o, _ := snap.Owner(vips[0])
+	o, _ := owner(vips[0])
 	return o, true
 }
 
-// restore start de gestopte dienst weer.
+// restore start de gestopte dienst of VM weer.
 func (r *testRun) restore(ctx context.Context, st *jobs.Step) error {
 	host := r.plan.Target.Hostname
-	st.Logf("%s weer starten op %s", r.def.Unit, host)
-	_ = st.Flush(ctx)
-	if err := r.s.apply(ctx, st, r.plan.Target.ID, r.run.ID.String()+"-clear", r.reason(), r.def.Unit, "started", 3); err != nil {
-		return err
+	if r.def.Scenario == VMHardStop {
+		st.Logf("VM %d van %s weer starten via Proxmox", r.plan.VM.VMID, host)
+		_ = st.Flush(ctx)
+		if err := r.s.startVM(ctx, st, *r.plan.VM); err != nil {
+			return err
+		}
+	} else {
+		st.Logf("%s weer starten op %s", r.def.Unit, host)
+		_ = st.Flush(ctx)
+		if err := r.s.apply(ctx, st, r.plan.Target.ID, r.run.ID.String()+"-clear", r.reason(), r.def.Unit, "started", 3); err != nil {
+			return err
+		}
 	}
 	r.clearedAt = time.Now()
 	r.event(ctx, "failover.fault_cleared", nil)
@@ -429,12 +481,62 @@ func (r *testRun) restore(ctx context.Context, st *jobs.Step) error {
 
 var errReturnTimeout = errors.New("de terugkeer duurde te lang")
 
+// startVM zet een VM weer aan en wacht op Proxmox. Draait hij al, dan is er
+// niets te doen.
+func (s *Service) startVM(ctx context.Context, st *jobs.Step, vm VMRef) error {
+	if s.Proxmox == nil {
+		return errors.New("ClusterForge heeft geen Proxmox-koppeling meer; start de VM in Proxmox")
+	}
+	if g, err := s.Proxmox.GuestStatus(ctx, vm.ConnectionID, vm.VMID); err == nil && g.Status == "running" {
+		st.Logf("VM %d draait al", vm.VMID)
+		return nil
+	}
+	upid, err := s.Proxmox.PowerVM(ctx, vm.ConnectionID, vm.VMID, "start")
+	if err != nil {
+		return err
+	}
+	return s.Proxmox.WaitVMTask(ctx, vm.ConnectionID, upid, st)
+}
+
+// returnTimeout is hoe lang de terugkeer mag duren: na een harde stop moet
+// de VM eerst opstarten.
+func (s *Service) returnTimeout(def Definition) time.Duration {
+	if def.Scenario == VMHardStop {
+		return s.BootTimeout
+	}
+	return s.ReturnTimeout
+}
+
+// faultText en clearText beschrijven de storing en het herstel.
+func faultText(def Definition, host string) string {
+	if def.Scenario == VMHardStop {
+		return "VM van " + host + " hard uitgezet"
+	}
+	return def.Unit + " gestopt op " + host
+}
+
+func clearText(def Definition, host string) string {
+	if def.Scenario == VMHardStop {
+		return "VM van " + host + " weer gestart"
+	}
+	return def.Unit + " weer gestart op " + host
+}
+
+// stillDown zegt wat er mogelijk nog uit staat als het herstel niet lukte.
+func stillDown(def Definition, host string) string {
+	if def.Scenario == VMHardStop {
+		return "de VM van " + host + " staat mogelijk nog uit"
+	}
+	return def.Unit + " staat mogelijk nog uit op " + host
+}
+
 // returnStep wacht met verse heartbeats tot de dienst weer draait en elk VIP
 // één houder heeft, met expect_failback bij de oorspronkelijke node. De
 // probe loopt mee en meet de korte onderbreking bij die terugkeer.
 func (r *testRun) returnStep(ctx context.Context, st *jobs.Step, ret *returnState) error {
 	s, def, target := r.s, r.def, r.plan.Target
-	ctx, cancel := context.WithTimeoutCause(ctx, s.ReturnTimeout, errReturnTimeout)
+	timeout := s.returnTimeout(def)
+	ctx, cancel := context.WithTimeoutCause(ctx, timeout, errReturnTimeout)
 	defer cancel()
 	since := r.clearedAt
 	pl := newProbeLog(r.injectedAt, def.VIP)
@@ -456,7 +558,7 @@ func (r *testRun) returnStep(ctx context.Context, st *jobs.Step, ret *returnStat
 	}
 	failed := func(err error) error {
 		if errors.Is(context.Cause(ctx), errReturnTimeout) {
-			msg := "de terugkeer lukte niet binnen " + seconds(s.ReturnTimeout)
+			msg := "de terugkeer lukte niet binnen " + seconds(timeout)
 			if last != "" {
 				msg += ": " + last
 			}
@@ -563,6 +665,17 @@ func (s *Service) probeLoop(ctx context.Context, def Definition, pl *probeLog) {
 func (r *testRun) emergency() {
 	ctx, cancel := context.WithTimeout(events.WithJob(context.Background(), r.j.ID), r.s.EmergencyTimeout)
 	defer cancel()
+	if r.def.Scenario == VMHardStop {
+		if r.plan.VM == nil || r.s.Proxmox == nil {
+			return
+		}
+		if _, err := r.s.Proxmox.PowerVM(ctx, r.plan.VM.ConnectionID, r.plan.VM.VMID, "start"); err != nil {
+			r.s.log.Error("noodherstel van failovertest mislukt", "run", r.run.ID, "node", r.plan.Target.Hostname, "err", err)
+		} else {
+			r.s.log.Info("noodherstel van failovertest: VM gestart", "run", r.run.ID, "node", r.plan.Target.Hostname, "vmid", r.plan.VM.VMID)
+		}
+		return
+	}
 	res, err := r.s.bus.Command(ctx, r.plan.Target.ID, serviceCommand(r.run.ID.String()+"-clear", r.reason()+" (noodherstel)", r.def.Unit, "started"))
 	switch {
 	case err != nil:
@@ -623,7 +736,7 @@ func (s *Service) apply(ctx context.Context, st *jobs.Step, nodeID uuid.UUID, id
 func (r *testRun) event(ctx context.Context, action string, extra map[string]any) {
 	payload := map[string]any{
 		"run_id": r.run.ID, "test_id": r.def.TestID, "name": r.def.Name, "node_id": r.plan.Target.ID,
-		"hostname": r.plan.Target.Hostname, "unit": r.def.Unit, "vip": r.def.VIP,
+		"hostname": r.plan.Target.Hostname, "unit": r.def.Unit, "vip": r.def.VIP, "scenario": r.def.Scenario,
 	}
 	maps.Copy(payload, extra)
 	if err := r.s.ev.Write(ctx, nil, events.Event{
@@ -662,8 +775,12 @@ func verdict(def Definition, plan Plan, o outcome) (result, summary string, rest
 		}
 		return "error", msg + "; er is niets veranderd", nil
 	case o.restoreErr != nil:
-		return "error", fmt.Sprintf("ERROR: herstel mislukt: %v. %s staat mogelijk nog uit op %s; kies Opnieuw herstellen",
-			o.restoreErr, def.Unit, plan.Target.Hostname), &no
+		down := stillDown(def, plan.Target.Hostname)
+		if def.Scenario == VMHardStop {
+			// Een dienst blijft klein geschreven, zoals in systemctl.
+			down = upper(down)
+		}
+		return "error", fmt.Sprintf("ERROR: herstel mislukt: %v. %s; kies Opnieuw herstellen", o.restoreErr, down), &no
 	}
 	back := "alles hersteld"
 	if o.ret != nil && o.ret.Owner != "" {
@@ -709,7 +826,7 @@ func (r *testRun) report(o outcome) ([]TimelineEvent, Measurements) {
 	meas := Measurements{ExpectMS: r.def.expect().Milliseconds(), Probe: []Segment{}}
 	timeline := []TimelineEvent{}
 	if o.injected && o.injectErr == "" {
-		timeline = append(timeline, TimelineEvent{TMS: 0, Kind: "fault", Text: r.def.Unit + " gestopt op " + r.plan.Target.Hostname})
+		timeline = append(timeline, TimelineEvent{TMS: 0, Kind: "fault", Text: faultText(r.def, r.plan.Target.Hostname)})
 	}
 	if m := o.m; m != nil {
 		timeline = append(timeline, m.Timeline...)
@@ -724,7 +841,7 @@ func (r *testRun) report(o outcome) ([]TimelineEvent, Measurements) {
 	}
 	if !r.clearedAt.IsZero() {
 		at := r.clearedAt.Sub(r.injectedAt).Milliseconds()
-		timeline = append(timeline, TimelineEvent{TMS: at, Kind: "clear", Text: r.def.Unit + " weer gestart op " + r.plan.Target.Hostname})
+		timeline = append(timeline, TimelineEvent{TMS: at, Kind: "clear", Text: clearText(r.def, r.plan.Target.Hostname)})
 		meas.EndMS = max(meas.EndMS, at)
 	}
 	if ret := o.ret; ret != nil {
@@ -831,7 +948,7 @@ func (s *Service) testFinished(ctx context.Context, j store.Job) {
 	case injected:
 		restored = &returned
 		if !returned {
-			summary += fmt.Sprintf("; %s staat mogelijk nog uit op %s; kies Opnieuw herstellen", def.Unit, run.Hostname)
+			summary += "; " + stillDown(def, run.Hostname) + "; kies Opnieuw herstellen"
 		}
 	case j.Status == store.JobStatusCanceled:
 		result, summary = "canceled", "Afgebroken voor de start; er is niets veranderd"
@@ -847,7 +964,7 @@ func (s *Service) testFinished(ctx context.Context, j store.Job) {
 	}
 	payload := map[string]any{
 		"run_id": run.ID, "test_id": def.TestID, "name": def.Name, "node_id": run.NodeID, "hostname": run.Hostname,
-		"unit": def.Unit, "vip": def.VIP, "result": result, "summary": summary,
+		"unit": def.Unit, "vip": def.VIP, "result": result, "summary": summary, "scenario": def.Scenario, "trigger": run.Trigger,
 	}
 	if restored != nil {
 		payload["restored"] = *restored
@@ -875,16 +992,31 @@ func (s *Service) runRestore(ctx context.Context, j *jobs.Job) error {
 	ran := false
 	err = j.Step(ctx, stepRestore, func(ctx context.Context, st *jobs.Step) error {
 		ran = true
-		st.Logf("%s weer starten op %s", def.Unit, run.Hostname)
-		if err := s.apply(ctx, st, target, j.ID.String()+"-clear", "failovertest "+def.Name+" opnieuw herstellen", def.Unit, "started", 3); err != nil {
-			return err
+		if def.Scenario == VMHardStop {
+			row, err := s.q.GetNode(ctx, target)
+			if err != nil {
+				return err
+			}
+			n := row.Node
+			if n.ProxmoxID == nil || n.PveVmid == nil {
+				return errors.New(run.Hostname + " is niet meer aan een VM gekoppeld; start de VM in Proxmox")
+			}
+			st.Logf("VM %d van %s weer starten via Proxmox", *n.PveVmid, run.Hostname)
+			if err := s.startVM(ctx, st, VMRef{ConnectionID: *n.ProxmoxID, VMID: int(*n.PveVmid)}); err != nil {
+				return err
+			}
+		} else {
+			st.Logf("%s weer starten op %s", def.Unit, run.Hostname)
+			if err := s.apply(ctx, st, target, j.ID.String()+"-clear", "failovertest "+def.Name+" opnieuw herstellen", def.Unit, "started", 3); err != nil {
+				return err
+			}
 		}
 		rs.ClearedAt = time.Now()
 		_ = s.ev.Write(ctx, nil, events.Event{
 			Actor: events.System(), SubjectType: "test_run", SubjectID: run.ID.String(), ClusterID: &cluster,
 			Action: "failover.fault_cleared", Payload: map[string]any{
 				"run_id": run.ID, "test_id": def.TestID, "name": def.Name, "node_id": target, "hostname": run.Hostname,
-				"unit": def.Unit, "vip": def.VIP, "restore": true,
+				"unit": def.Unit, "vip": def.VIP, "scenario": def.Scenario, "restore": true,
 			},
 		})
 		return st.SetState(ctx, rs)
@@ -896,7 +1028,7 @@ func (s *Service) runRestore(ctx context.Context, j *jobs.Job) error {
 		j.Done(stepRestore, &rs)
 	}
 	err = j.Step(ctx, stepReturn, func(ctx context.Context, st *jobs.Step) error {
-		ctx, cancel := context.WithTimeoutCause(ctx, s.ReturnTimeout, errReturnTimeout)
+		ctx, cancel := context.WithTimeoutCause(ctx, s.returnTimeout(def), errReturnTimeout)
 		defer cancel()
 		progress := func(msg string) {
 			st.Logf("%s", msg)
@@ -1015,6 +1147,15 @@ func (p *probeLog) finish(end time.Time) ([]Segment, []TimelineEvent) {
 		p.segs[n-1].ToMS = max(p.segs[n-1].ToMS, p.ms(end))
 	}
 	return slices.Clone(p.segs), slices.Clone(p.events)
+}
+
+// upper zet de eerste letter in hoofdletter.
+func upper(s string) string {
+	if s == "" {
+		return s
+	}
+	r, n := utf8.DecodeRuneInString(s)
+	return string(unicode.ToUpper(r)) + s[n:]
 }
 
 func short(s string) string {

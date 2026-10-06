@@ -451,6 +451,7 @@ func (e EventActorType) Valid() bool {
 const (
 	KeepalivedStop FailoverScenario = "keepalived_stop"
 	ServiceStop    FailoverScenario = "service_stop"
+	VmHardStop     FailoverScenario = "vm_hard_stop"
 )
 
 // Valid indicates whether the value is a known member of the FailoverScenario enum.
@@ -459,6 +460,8 @@ func (e FailoverScenario) Valid() bool {
 	case KeepalivedStop:
 		return true
 	case ServiceStop:
+		return true
+	case VmHardStop:
 		return true
 	default:
 		return false
@@ -1332,13 +1335,24 @@ type BackupOverview struct {
 // BackupPolicy defines model for BackupPolicy.
 type BackupPolicy struct {
 	// Default Het cluster heeft nog geen eigen beleid
-	Default     bool `json:"default"`
-	MaxAgeHours int  `json:"max_age_hours"`
+	Default bool `json:"default"`
+
+	// LastVerifiedAt De laatste controle van een node van dit cluster
+	LastVerifiedAt nullable.Nullable[time.Time] `json:"last_verified_at"`
+	MaxAgeHours    int                          `json:"max_age_hours"`
+	NextRunAt      nullable.Nullable[time.Time] `json:"next_run_at"`
+
+	// VerifyEnabled De back-upcontrole draait gepland in het testvenster, telkens voor de node die het langst niet gecontroleerd werd
+	VerifyEnabled bool `json:"verify_enabled"`
+
+	// Window Het testvenster in gewone taal
+	Window string `json:"window"`
 }
 
-// BackupPolicyInput defines model for BackupPolicyInput.
+// BackupPolicyInput Alleen de velden die meegegeven zijn, veranderen
 type BackupPolicyInput struct {
-	MaxAgeHours int `json:"max_age_hours"`
+	MaxAgeHours   *int  `json:"max_age_hours,omitempty"`
+	VerifyEnabled *bool `json:"verify_enabled,omitempty"`
 }
 
 // BackupRef defines model for BackupRef.
@@ -2193,10 +2207,20 @@ type FailoverOptions struct {
 	// DefaultFailback Aan voor clusters uit keepalived-nginx, dat preempt gebruikt
 	DefaultFailback bool `json:"default_failback"`
 
-	// RunBlocked Waarom een test hier nu niet kan starten, zoals op prod; leeg als het kan
-	RunBlocked string                   `json:"run_blocked"`
-	Scenarios  []FailoverScenarioOption `json:"scenarios"`
-	Vips       []FailoverVIPOption      `json:"vips"`
+	// LastTestedAt De laatste test met PASS, WARNING of FAIL
+	LastTestedAt nullable.Nullable[time.Time] `json:"last_tested_at"`
+
+	// NextWindow Het begin van het volgende testvenster
+	NextWindow time.Time `json:"next_window"`
+
+	// Prod Prodcluster: een test start alleen met de hand, met de slug als bevestiging en tweestapsverificatie, en is niet te plannen
+	Prod      bool                     `json:"prod"`
+	Scenarios []FailoverScenarioOption `json:"scenarios"`
+	Slug      string                   `json:"slug"`
+	Vips      []FailoverVIPOption      `json:"vips"`
+
+	// Window Het testvenster in gewone taal, zoals zondag van 03:00 tot 05:00
+	Window string `json:"window"`
 }
 
 // FailoverProbe Een HTTP-pad met de verwachte status, of een TCP-poort. De host is altijd het VIP.
@@ -2236,6 +2260,12 @@ type FailoverScenarioOption struct {
 	Units []string `json:"units"`
 }
 
+// FailoverStartInput defines model for FailoverStartInput.
+type FailoverStartInput struct {
+	// Confirm Op prod de slug van het cluster
+	Confirm *string `json:"confirm,omitempty"`
+}
+
 // FailoverTest defines model for FailoverTest.
 type FailoverTest struct {
 	ClusterId openapi_types.UUID `json:"cluster_id"`
@@ -2249,9 +2279,15 @@ type FailoverTest struct {
 	MaxTakeoverSeconds int                        `json:"max_takeover_seconds"`
 	Name               string                     `json:"name"`
 
+	// NextRunAt De volgende geplande run
+	NextRunAt nullable.Nullable[time.Time] `json:"next_run_at"`
+
 	// Probe Een HTTP-pad met de verwachte status, of een TCP-poort. De host is altijd het VIP.
-	Probe      FailoverProbe      `json:"probe"`
-	Scenario   FailoverScenario   `json:"scenario"`
+	Probe    FailoverProbe    `json:"probe"`
+	Scenario FailoverScenario `json:"scenario"`
+
+	// Scheduled Gepland in het testvenster
+	Scheduled  bool               `json:"scheduled"`
 	Service    string             `json:"service"`
 	UpdatedAt  time.Time          `json:"updated_at"`
 	VipAddress string             `json:"vip_address"`
@@ -2273,6 +2309,9 @@ type FailoverTestInput struct {
 	// Probe Een HTTP-pad met de verwachte status, of een TCP-poort. De host is altijd het VIP.
 	Probe    FailoverProbe    `json:"probe"`
 	Scenario FailoverScenario `json:"scenario"`
+
+	// Scheduled Gepland in het testvenster; niet op prod. Standaard uit
+	Scheduled *bool `json:"scheduled,omitempty"`
 
 	// Service nginx of haproxy bij service_stop
 	Service *string            `json:"service,omitempty"`
@@ -3377,6 +3416,9 @@ type CreateEnrollmentTokenJSONRequestBody = EnrollmentTokenInput
 
 // UpdateFailoverTestJSONRequestBody defines body for UpdateFailoverTest for application/json ContentType.
 type UpdateFailoverTestJSONRequestBody = FailoverTestInput
+
+// StartFailoverTestJSONRequestBody defines body for StartFailoverTest for application/json ContentType.
+type StartFailoverTestJSONRequestBody = FailoverStartInput
 
 // CreateNodeJSONRequestBody defines body for CreateNode for application/json ContentType.
 type CreateNodeJSONRequestBody = NodeInput

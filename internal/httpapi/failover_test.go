@@ -115,8 +115,12 @@ type failoverList struct {
 				} `json:"http"`
 			} `json:"probe"`
 		} `json:"vips"`
-		DefaultFailback bool   `json:"default_failback"`
-		RunBlocked      string `json:"run_blocked"`
+		DefaultFailback bool       `json:"default_failback"`
+		Prod            bool       `json:"prod"`
+		Slug            string     `json:"slug"`
+		Window          string     `json:"window"`
+		NextWindow      time.Time  `json:"next_window"`
+		LastTestedAt    *time.Time `json:"last_tested_at"`
 	} `json:"options"`
 	Unrestored []testRunView `json:"unrestored"`
 }
@@ -218,9 +222,15 @@ func TestFailover(t *testing.T) {
 	if s := c.do("GET", listURL, nil, &list); s != 200 {
 		t.Fatalf("lijst: %d", s)
 	}
-	if len(list.Items) != 0 || len(list.Options.Scenarios) != 2 || !list.Options.Scenarios[0].Available || !list.Options.Scenarios[1].Available ||
-		!slices.Equal(list.Options.Scenarios[1].Units, []string{"nginx"}) || list.Options.RunBlocked != "" || list.Options.DefaultFailback {
+	if len(list.Items) != 0 || len(list.Options.Scenarios) != 3 || !list.Options.Scenarios[0].Available || !list.Options.Scenarios[1].Available ||
+		!slices.Equal(list.Options.Scenarios[1].Units, []string{"nginx"}) || list.Options.Prod || list.Options.DefaultFailback ||
+		list.Options.Slug != "lb" || list.Options.Window != "zondag van 03:00 tot 05:00" || list.Options.LastTestedAt != nil ||
+		list.Options.NextWindow.IsZero() {
 		t.Fatalf("opties: %+v", list.Options)
+	}
+	// Zonder koppeling aan een VM kan de VM niet hard uit.
+	if vm := list.Options.Scenarios[2]; vm.Key != "vm_hard_stop" || vm.Available || !strings.Contains(vm.Reason, "geen Proxmox-koppeling voor web01, web02") {
+		t.Fatalf("vm_hard_stop zonder koppeling: %+v", vm)
 	}
 	if v := list.Options.Vips; len(v) != 1 || v[0].Address != failoverVIP || v[0].Probe.HTTP == nil || v[0].Probe.HTTP.Path != "/" {
 		t.Fatalf("VIP's: %+v", v)
@@ -238,7 +248,7 @@ func TestFailover(t *testing.T) {
 	}
 	for field, change := range map[string]func(m map[string]any){
 		"name":                 func(m map[string]any) { m["name"] = "  " },
-		"scenario":             func(m map[string]any) { m["scenario"] = "vm_hard_stop" },
+		"scenario":             func(m map[string]any) { m["scenario"] = "reboot" },
 		"service":              func(m map[string]any) { m["scenario"], m["service"] = "service_stop", "apache2" },
 		"max_takeover_seconds": func(m map[string]any) { m["max_takeover_seconds"] = 121 },
 		"probe": func(m map[string]any) {
@@ -413,10 +423,16 @@ func TestFailover(t *testing.T) {
 		}
 	}
 	c.do("PATCH", "/api/v1/clusters/"+cl.ID, map[string]any{"environment": "prod"}, nil)
-	precheck("prod", "prod_locked")
+	var ae apiErr
+	if s := c.do("POST", testURL+"/runs", nil, &ae); s != http.StatusForbidden || ae.Code != "totp_required" {
+		t.Fatalf("prod zonder tweestapsverificatie: %d %+v", s, ae)
+	}
 	c.do("GET", listURL, nil, &list)
-	if list.Options.RunBlocked == "" {
-		t.Fatal("op prod geen run_blocked")
+	if !list.Options.Prod || list.Options.Slug != "lb" || list.Options.LastTestedAt == nil {
+		t.Fatalf("opties op prod: %+v", list.Options)
+	}
+	if vm := list.Options.Scenarios[2]; vm.Available || !strings.Contains(vm.Reason, "niet op prod") {
+		t.Fatalf("vm_hard_stop op prod: %+v", vm)
 	}
 	c.do("PATCH", "/api/v1/clusters/"+cl.ID, map[string]any{"environment": "lab"}, nil)
 

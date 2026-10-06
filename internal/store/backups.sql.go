@@ -70,7 +70,7 @@ func (q *Queries) DeleteStaleProxmoxBackups(ctx context.Context, arg DeleteStale
 }
 
 const getBackupPolicy = `-- name: GetBackupPolicy :one
-SELECT cluster_id, max_age_hours, updated_at, updated_by FROM backup_policies WHERE cluster_id = $1
+SELECT cluster_id, max_age_hours, updated_at, updated_by, verify_enabled, next_run_at FROM backup_policies WHERE cluster_id = $1
 `
 
 func (q *Queries) GetBackupPolicy(ctx context.Context, clusterID uuid.UUID) (BackupPolicy, error) {
@@ -81,6 +81,8 @@ func (q *Queries) GetBackupPolicy(ctx context.Context, clusterID uuid.UUID) (Bac
 		&i.MaxAgeHours,
 		&i.UpdatedAt,
 		&i.UpdatedBy,
+		&i.VerifyEnabled,
+		&i.NextRunAt,
 	)
 	return i, err
 }
@@ -360,6 +362,41 @@ func (q *Queries) ListBackupWatch(ctx context.Context) ([]BackupWatch, error) {
 	return items, nil
 }
 
+const listDueBackupVerifies = `-- name: ListDueBackupVerifies :many
+SELECT bp.cluster_id, bp.next_run_at, c.name AS cluster_name
+FROM backup_policies bp
+JOIN clusters c ON c.id = bp.cluster_id
+WHERE bp.verify_enabled AND bp.next_run_at <= $1
+ORDER BY bp.next_run_at, c.name
+`
+
+type ListDueBackupVerifiesRow struct {
+	ClusterID   uuid.UUID
+	NextRunAt   *time.Time
+	ClusterName string
+}
+
+// Clusters waarvan de geplande back-upcontrole aan de beurt is.
+func (q *Queries) ListDueBackupVerifies(ctx context.Context, now *time.Time) ([]ListDueBackupVerifiesRow, error) {
+	rows, err := q.db.Query(ctx, listDueBackupVerifies, now)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDueBackupVerifiesRow{}
+	for rows.Next() {
+		var i ListDueBackupVerifiesRow
+		if err := rows.Scan(&i.ClusterID, &i.NextRunAt, &i.ClusterName); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listGuestBackups = `-- name: ListGuestBackups :many
 SELECT connection_id, volid, storage, pve_node, vmid, guest_type, ctime, size_bytes, format, notes, protected, verify_state, synced_at FROM proxmox_backups
 WHERE connection_id = $1 AND vmid = $2
@@ -446,6 +483,44 @@ func (q *Queries) ListLatestBackups(ctx context.Context) ([]ProxmoxBackup, error
 	return items, nil
 }
 
+const listVerifyCandidates = `-- name: ListVerifyCandidates :many
+SELECT n.id, n.hostname,
+       coalesce((SELECT max(r.created_at) FROM test_runs r
+                 WHERE r.node_id = n.id AND r.kind = 'backup.verify' AND r.result IN ('pass', 'warning', 'fail')),
+                'epoch'::timestamptz)::timestamptz AS last_verified_at
+FROM nodes n
+WHERE n.cluster_id = $1 AND n.proxmox_id IS NOT NULL AND n.pve_vmid IS NOT NULL
+ORDER BY last_verified_at, n.hostname
+`
+
+type ListVerifyCandidatesRow struct {
+	ID             uuid.UUID
+	Hostname       string
+	LastVerifiedAt time.Time
+}
+
+// De nodes van een cluster die aan een VM gekoppeld zijn, de langst niet
+// gecontroleerde eerst.
+func (q *Queries) ListVerifyCandidates(ctx context.Context, clusterID *uuid.UUID) ([]ListVerifyCandidatesRow, error) {
+	rows, err := q.db.Query(ctx, listVerifyCandidates, clusterID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListVerifyCandidatesRow{}
+	for rows.Next() {
+		var i ListVerifyCandidatesRow
+		if err := rows.Scan(&i.ID, &i.Hostname, &i.LastVerifiedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const setBackupInventoryResult = `-- name: SetBackupInventoryResult :exec
 UPDATE proxmox_connections
 SET backup_checked_at = now(), backup_error = $1::text,
@@ -461,6 +536,46 @@ type SetBackupInventoryResultParams struct {
 
 func (q *Queries) SetBackupInventoryResult(ctx context.Context, arg SetBackupInventoryResultParams) error {
 	_, err := q.db.Exec(ctx, setBackupInventoryResult, arg.Error, arg.NotBackedUp, arg.ID)
+	return err
+}
+
+const setBackupVerifyNextRun = `-- name: SetBackupVerifyNextRun :exec
+UPDATE backup_policies SET next_run_at = $1 WHERE cluster_id = $2 AND verify_enabled
+`
+
+type SetBackupVerifyNextRunParams struct {
+	NextRunAt *time.Time
+	ClusterID uuid.UUID
+}
+
+func (q *Queries) SetBackupVerifyNextRun(ctx context.Context, arg SetBackupVerifyNextRunParams) error {
+	_, err := q.db.Exec(ctx, setBackupVerifyNextRun, arg.NextRunAt, arg.ClusterID)
+	return err
+}
+
+const setBackupVerifySchedule = `-- name: SetBackupVerifySchedule :exec
+INSERT INTO backup_policies (cluster_id, verify_enabled, next_run_at, updated_by)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (cluster_id) DO UPDATE
+SET verify_enabled = EXCLUDED.verify_enabled, next_run_at = EXCLUDED.next_run_at,
+    updated_by = EXCLUDED.updated_by, updated_at = now()
+`
+
+type SetBackupVerifyScheduleParams struct {
+	ClusterID     uuid.UUID
+	VerifyEnabled bool
+	NextRunAt     *time.Time
+	UpdatedBy     *uuid.UUID
+}
+
+// De back-upcontrole van een cluster gepland aan of uit.
+func (q *Queries) SetBackupVerifySchedule(ctx context.Context, arg SetBackupVerifyScheduleParams) error {
+	_, err := q.db.Exec(ctx, setBackupVerifySchedule,
+		arg.ClusterID,
+		arg.VerifyEnabled,
+		arg.NextRunAt,
+		arg.UpdatedBy,
+	)
 	return err
 }
 
