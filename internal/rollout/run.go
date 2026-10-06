@@ -11,11 +11,14 @@ import (
 	"unicode/utf8"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 
 	"github.com/Jonasz1996/clusterforge/internal/deploy"
 	"github.com/Jonasz1996/clusterforge/internal/drift"
+	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/health"
 	"github.com/Jonasz1996/clusterforge/internal/jobs"
+	"github.com/Jonasz1996/clusterforge/internal/status"
 	"github.com/Jonasz1996/clusterforge/internal/store"
 	"github.com/Jonasz1996/clusterforge/internal/templates"
 	"github.com/Jonasz1996/clusterforge/pkg/protocol"
@@ -43,8 +46,28 @@ func (s *Service) run(ctx context.Context, j *jobs.Job) error {
 		return fmt.Errorf("onbekende modus %q", p.Mode)
 	}
 	// Bovenaan elke poging, ook na een herstart van de server.
-	if _, err := s.current(ctx, p); err != nil {
+	d, err := s.current(ctx, p)
+	if err != nil {
 		return err
+	}
+	// Omhoog schalen: eerst de nieuwe VM's met hun agents, zodat de
+	// bestaande nodes ze met hun adres en netwerkkaart kunnen renderen.
+	if len(p.NewNodes) > 0 {
+		g, err := s.dep.Grow(ctx, j, p.ClusterID, d.Spec, p.ServerURL, p.NewNodes)
+		if err != nil {
+			return err
+		}
+		defer g.Close(ctx)
+		for i, n := range p.NewNodes {
+			if err := j.Step(ctx, "VM "+n.Hostname+" maken", func(ctx context.Context, st *jobs.Step) error {
+				return g.CreateVM(ctx, st, i)
+			}); err != nil {
+				return err
+			}
+		}
+		if err := j.Step(ctx, "Agents aanmelden", g.Enroll); err != nil {
+			return err
+		}
 	}
 	for i := range p.Nodes {
 		n := &p.Nodes[i]
@@ -57,6 +80,14 @@ func (s *Service) run(ctx context.Context, j *jobs.Job) error {
 		}
 		if err := j.Step(ctx, name, func(ctx context.Context, st *jobs.Step) error {
 			return step(ctx, j, st, p, n)
+		}); err != nil {
+			return err
+		}
+	}
+	// De nieuwe nodes als laatste: nu kennen de bestaande hun adres al.
+	for _, n := range p.NewNodes {
+		if err := j.Step(ctx, "Toepassen op "+n.Hostname+" (nieuw)", func(ctx context.Context, st *jobs.Step) error {
+			return s.join(ctx, j, st, p, n)
 		}); err != nil {
 			return err
 		}
@@ -204,8 +235,10 @@ func (s *Service) settle(ctx context.Context, st *jobs.Step, p Plan, n *PlanNode
 		return err
 	}
 	if len(vips) > 0 {
+		// Ook een nieuwe node die nog niet meetelt, mag geen tweede houder
+		// zijn.
 		sctx, cancel := context.WithTimeoutCause(ctx, s.SettleTimeout, fmt.Errorf("de VIP's hadden na %s nog geen vaste houder", s.SettleTimeout))
-		_, err := s.Gate.Settled(sctx, p.ClusterID, vips, since, nil, progress)
+		_, err := s.Gate.Settled(sctx, p.ClusterID, vips, since, nil, progress, p.newIDs()...)
 		cancel()
 		if err != nil {
 			return fmt.Errorf("na %s: %w; de taak stopt hier", after, err)
@@ -287,6 +320,81 @@ func (s *Service) change(ctx context.Context, j *jobs.Job, st *jobs.Step, p Plan
 		return err
 	}
 	return s.settle(ctx, st, p, n, d, rendered, "het toepassen op "+n.Hostname, n.Hostname+" is bijgewerkt")
+}
+
+// join past alle stappen van de template toe op een nieuwe node, wacht tot
+// hij en het cluster gezond zijn, ook zonder tweede houder van een VIP, en
+// neemt hem dan in gebruik.
+func (s *Service) join(ctx context.Context, j *jobs.Job, st *jobs.Step, p Plan, n deploy.NewNode) error {
+	d, err := s.current(ctx, p)
+	if err != nil {
+		return err
+	}
+	rows, err := s.q.ListDriftNodes(ctx, store.ListDriftNodesParams{NodeID: &n.NodeID})
+	if err != nil {
+		return err
+	}
+	if len(rows) == 0 || rows[0].ClusterID == nil || *rows[0].ClusterID != p.ClusterID || !d.Has(n.NodeID) {
+		return fmt.Errorf("%s hoort niet meer bij dit cluster", n.Hostname)
+	}
+	switch row := rows[0]; {
+	case !row.HasAgent || row.AgentProtocol < int32(protocol.ApplySince):
+		return fmt.Errorf("de agent op %s is te oud voor deploystappen; bouw de golden image opnieuw", n.Hostname)
+	case row.HeartbeatAt == nil || time.Since(*row.HeartbeatAt) > status.HeartbeatDown:
+		return fmt.Errorf("de agent op %s is niet verbonden", n.Hostname)
+	}
+	rendered, err := d.Render(n.NodeID)
+	if err != nil {
+		return fmt.Errorf("de stappen van %s zijn niet te renderen: %w", n.Hostname, err)
+	}
+	var ns nodeState
+	st.State(&ns)
+	ids := ns.Steps
+	if ns.AppliedAt == nil {
+		ids = nil
+		for _, ts := range rendered {
+			ids = append(ids, drift.StepIDs(ts)...)
+		}
+		st.Logf("revisie %d toepassen op de nieuwe node: alle %d stappen", p.Revision, len(rendered))
+	} else {
+		st.Logf("hervat na een onderbreking; het toepassen was al begonnen, dus %s opnieuw toepassen", n.Hostname)
+	}
+	pn := &PlanNode{NodeID: n.NodeID, Hostname: n.Hostname}
+	if err := s.apply(ctx, j, st, p, pn, &ns, ids, Select(rendered, ids)); err != nil {
+		return err
+	}
+	if err := s.settle(ctx, st, p, pn, d, rendered, "het toepassen op "+n.Hostname, n.Hostname+" is gezond"); err != nil {
+		return err
+	}
+	return s.activate(ctx, j, st, p, n)
+}
+
+// activate neemt een nieuwe node in gebruik: vanaf nu telt hij mee voor de
+// status van het cluster.
+func (s *Service) activate(ctx context.Context, j *jobs.Job, st *jobs.Step, p Plan, n deploy.NewNode) error {
+	actor := events.System()
+	if j.RequestedBy != nil {
+		actor = events.User(*j.RequestedBy)
+	}
+	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		q := store.New(tx)
+		row, err := q.SetNodeLifecycle(ctx, store.SetNodeLifecycleParams{NodeID: n.NodeID, Lifecycle: store.NodeLifecycleActive})
+		if err != nil || row.Previous == store.NodeLifecycleActive {
+			return err
+		}
+		return s.ev.Write(ctx, q, events.Event{
+			Actor: actor, SubjectType: "node", SubjectID: n.NodeID.String(), ClusterID: &p.ClusterID, Action: "node.lifecycle_changed",
+			Payload: map[string]any{"hostname": n.Hostname, "from": row.Previous, "to": store.NodeLifecycleActive, "job_id": j.ID, "title": j.Title},
+		})
+	})
+	if err != nil {
+		return err
+	}
+	if s.Changed != nil {
+		s.Changed()
+	}
+	st.Logf("%s is actief en telt mee voor de status van %s", n.Hostname, p.Cluster)
+	return nil
 }
 
 // takeover controleert dat een andere node de VIP's van deze node kan

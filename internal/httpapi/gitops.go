@@ -46,7 +46,7 @@ func (s *Server) writeGitStatus(w http.ResponseWriter, r *http.Request, status i
 
 func toAPIGitRepo(r store.GitRepo) gen.GitRepo {
 	out := gen.GitRepo{
-		Id: r.ID, ApiUrl: r.ApiUrl, Repository: r.Owner + "/" + r.Name, Branch: r.Branch, Path: r.Path,
+		Id: r.ID, ApiUrl: r.ApiUrl, Repository: r.Owner + "/" + r.Name, Branch: r.Branch, Path: r.Path, ServerUrl: r.ServerUrl,
 		WebUrl: gitops.WebURL(r.ApiUrl) + "/" + r.Owner + "/" + r.Name, Head: nullable.NewNullNullable[gen.GitCommit](),
 		LastSyncAt: nullableOf(r.LastSyncAt), LastError: r.LastError, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
 	}
@@ -64,6 +64,7 @@ func gitInput(in gen.GitRepoInput) gitops.RepoInput {
 	owner, name := gitops.SplitRepository(in.Repository)
 	return gitops.RepoInput{
 		APIURL: deref(in.ApiUrl), Owner: owner, Name: name, Branch: deref(in.Branch), Path: deref(in.Path), Token: deref(in.Token),
+		ServerURL: deref(in.ServerUrl),
 	}
 }
 
@@ -235,9 +236,10 @@ func (s *Server) GetGitChange(w http.ResponseWriter, r *http.Request, id uuid.UU
 		s.internalError(w, r, err)
 		return
 	}
-	fileURL := ""
+	fileURL, serverURL := "", ""
 	if repo, err := s.q.GetGitRepo(ctx); err == nil && repo.ID == row.RepoID {
 		fileURL = gitops.FileURL(repo.ApiUrl, repo.Owner, repo.Name, repo.Branch, row.Path)
+		serverURL = repo.ServerUrl
 	}
 	ch := gitChangeOf(row)
 	approval, err := s.git.ApprovalFor(ctx, ch)
@@ -245,9 +247,9 @@ func (s *Server) GetGitChange(w http.ResponseWriter, r *http.Request, id uuid.UU
 		s.internalError(w, r, err)
 		return
 	}
-	blocked := ""
+	code, blocked := "", ""
 	if row.Status == "pending" {
-		blocked = gitops.Blocked(row.Kind, plan)
+		code, blocked = gitops.Blocked(row.Kind, plan, serverURL)
 	}
 	writeJSON(w, http.StatusOK, gen.GitChangeDetail{
 		Id: c.Id, ClusterId: c.ClusterId, ClusterName: c.ClusterName, ClusterEnvironment: c.ClusterEnvironment,
@@ -255,7 +257,7 @@ func (s *Server) GetGitChange(w http.ResponseWriter, r *http.Request, id uuid.UU
 		BaseRevision: c.BaseRevision, Revision: c.Revision, Summary: c.Summary, JobId: c.JobId, DecidedBy: c.DecidedBy, DecidedAt: c.DecidedAt,
 		Reason: c.Reason, CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt,
 		Plan: p, Local: local, FileUrl: fileURL,
-		NeedsConfirmation: approval.Prod, FullApply: row.Status == "pending" && approval.All, Blocked: blocked,
+		NeedsConfirmation: approval.Prod, FullApply: row.Status == "pending" && approval.All, Blocked: blocked, BlockedCode: code,
 	})
 }
 

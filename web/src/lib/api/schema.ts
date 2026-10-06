@@ -3381,6 +3381,8 @@ export interface components {
             branch: string;
             /** @description De map met een map per cluster */
             path: string;
+            /** @description Het adres waarmee nieuwe nodes uit Git ClusterForge bereiken; leeg als het nog niet ingevuld is */
+            server_url: string;
             /** @description De repository op de website */
             web_url: string;
             /** @description De laatste commit die de server zag */
@@ -3417,6 +3419,8 @@ export interface components {
              * @description Fine-grained token met alleen Contents: read; leeg laat het opgeslagen token staan
              */
             token?: string;
+            /** @description Het adres waarmee nieuwe nodes ClusterForge bereiken, zoals https://clusterforge.lan; nodig voor omhoog schalen en nieuwe clusters */
+            server_url?: string;
         };
         GitProbe: {
             head: components["schemas"]["GitCommit"];
@@ -3498,8 +3502,10 @@ export interface components {
             needs_confirmation: boolean;
             /** @description Een eerdere revisie is niet op alle nodes toegepast, dus goedkeuren past alle stappen opnieuw toe */
             full_apply: boolean;
-            /** @description Waarom goedkeuren in deze versie nog niet kan; leeg als het kan */
+            /** @description Waarom goedkeuren nu niet kan; leeg als het kan */
             blocked: string;
+            /** @description no_server_url: het adres van ClusterForge ontbreekt bij de koppeling; dhcp_growth: omhoog schalen met DHCP; leeg als goedkeuren kan */
+            blocked_code: string;
             plan: components["schemas"]["GitPlan"];
             /** @description Uit de laatste driftcontrole, wat op de nodes al afwijkt en overschreven wordt */
             local: string[];
@@ -3573,7 +3579,7 @@ export interface components {
             metadata: components["schemas"]["GitFieldChange"][];
             params: components["schemas"]["GitFieldChange"][];
             new_nodes: components["schemas"]["GitPlanNewNode"][];
-            /** @description In de volgorde van toepassen; de VIP-eigenaar als laatste */
+            /** @description In de volgorde van toepassen; de bestaande nodes met de VIP-eigenaar als laatste, daarna de nieuwe */
             nodes: components["schemas"]["GitPlanNode"][];
             unchanged: string[];
             warnings: string[];

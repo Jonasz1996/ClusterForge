@@ -85,7 +85,8 @@ type Service struct {
 }
 
 // NewService maakt de service. Een goedgekeurde wijziging gaat met ro als
-// cluster.apply naar de nodes.
+// cluster.apply naar de nodes, een nieuw cluster met dep als
+// cluster.deploy.
 func NewService(pool *pgxpool.Pool, ev *events.Writer, log *slog.Logger, box *secrets.Box, dep *deploy.Service, ro *rollout.Service) *Service {
 	s := &Service{
 		pool: pool, q: store.New(pool), ev: ev, log: log, box: box, dep: dep, ro: ro,
@@ -95,6 +96,7 @@ func NewService(pool *pgxpool.Pool, ev *events.Writer, log *slog.Logger, box *se
 		blobs:     map[string][]byte{}, l2: map[string][]FieldError{},
 	}
 	ro.OnFinished(s.finished)
+	dep.OnFinished(s.finished)
 	return s
 }
 
@@ -139,14 +141,16 @@ func (s *Service) Run(ctx context.Context) {
 }
 
 // RepoInput zijn de velden van de koppeling. Een leeg token laat het
-// bestaande staan.
+// bestaande staan. ServerURL is het adres waarmee nieuwe nodes
+// ClusterForge bereiken; leeg mag, dan kan Git geen nodes maken.
 type RepoInput struct {
-	APIURL string
-	Owner  string
-	Name   string
-	Branch string
-	Path   string
-	Token  string
+	APIURL    string
+	Owner     string
+	Name      string
+	Branch    string
+	Path      string
+	Token     string
+	ServerURL string
 }
 
 var pathRe = regexp.MustCompile(`^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*$`)
@@ -179,6 +183,13 @@ func (in *RepoInput) normalize() error {
 	in.Token = strings.TrimSpace(in.Token)
 	if len(in.Token) > 500 || strings.ContainsAny(in.Token, " \t\r\n") {
 		return ValidationError{"token", "het token is ongeldig"}
+	}
+	if in.ServerURL = strings.TrimSpace(in.ServerURL); in.ServerURL != "" {
+		u, err := deploy.NormalizeServerURL(in.ServerURL)
+		if err != nil || len(u) > 500 {
+			return ValidationError{"server_url", "geef het adres waarmee de nodes ClusterForge bereiken, zoals https://clusterforge.lan"}
+		}
+		in.ServerURL = u
 	}
 	return nil
 }
@@ -290,7 +301,7 @@ func (s *Service) Save(ctx context.Context, actor events.Actor, in RepoInput) (s
 			id := uuid.New()
 			r, err := q.CreateGitRepo(ctx, store.CreateGitRepoParams{
 				ID: id, ApiUrl: in.APIURL, Owner: in.Owner, Name: in.Name, Branch: in.Branch, Path: in.Path,
-				TokenEnc: s.box.Seal([]byte(token), aad(id)), KeyID: s.box.KeyID,
+				TokenEnc: s.box.Seal([]byte(token), aad(id)), KeyID: s.box.KeyID, ServerUrl: in.ServerURL,
 			})
 			if err != nil {
 				return err
@@ -298,7 +309,8 @@ func (s *Service) Save(ctx context.Context, actor events.Actor, in RepoInput) (s
 			out = r
 			return s.ev.Write(ctx, q, events.Event{
 				Actor: actor, SubjectType: "git_repo", SubjectID: id.String(), Action: "gitops.repo_connected",
-				Payload: map[string]any{"repo": in.Owner + "/" + in.Name, "api_url": in.APIURL, "branch": in.Branch, "path": in.Path},
+				Payload: map[string]any{"repo": in.Owner + "/" + in.Name, "api_url": in.APIURL, "branch": in.Branch, "path": in.Path,
+					"server_url": in.ServerURL},
 			})
 		}
 		locked, err := q.LockGitRepo(ctx)
@@ -313,7 +325,11 @@ func (s *Service) Save(ctx context.Context, actor events.Actor, in RepoInput) (s
 				diff[k] = map[string]any{"from": before[k], "to": after[k]}
 			}
 		}
+		// Een ander adres van ClusterForge begint niet opnieuw.
 		reset := len(diff) > 0
+		if locked.ServerUrl != in.ServerURL {
+			diff["server_url"] = map[string]any{"from": locked.ServerUrl, "to": in.ServerURL}
+		}
 		enc, keyID := locked.TokenEnc, locked.KeyID
 		if in.Token != "" {
 			enc, keyID = s.box.Seal([]byte(token), aad(locked.ID)), s.box.KeyID
@@ -322,7 +338,7 @@ func (s *Service) Save(ctx context.Context, actor events.Actor, in RepoInput) (s
 		}
 		out, err = q.UpdateGitRepo(ctx, store.UpdateGitRepoParams{
 			ID: locked.ID, ApiUrl: in.APIURL, Owner: in.Owner, Name: in.Name, Branch: in.Branch, Path: in.Path,
-			TokenEnc: enc, KeyID: keyID, Reset: reset,
+			TokenEnc: enc, KeyID: keyID, ServerUrl: in.ServerURL, Reset: reset,
 		})
 		if err != nil || len(diff) == 0 {
 			return err

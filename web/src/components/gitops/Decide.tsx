@@ -36,31 +36,71 @@ export function ApproveDialog({ c, onClose }: { c: GitChangeDetail; onClose: () 
       },
     });
   const err = errorText(approve.error, "Goedkeuren mislukt");
+  const grow = p.nodes.filter((n) => n.new).map((n) => n.hostname);
 
   return (
-    <Modal title="Goedkeuren en toepassen" onClose={onClose} wide>
+    <Modal title={c.kind === "create" ? "Goedkeuren en uitrollen" : "Goedkeuren en toepassen"} onClose={onClose} wide>
       <div className="space-y-4 text-sm">
-        <p>
-          ClusterForge schrijft revisie {p.base_revision + 1} van {name} met bron Git en commit <code className="text-xs">{shortSha(c.commit.sha)}</code>
-          {p.metadata.length > 0 && <>, en zet {p.metadata.map((f) => `${f.label.toLowerCase()} op ${f.to || "leeg"}`).join(", ")}</>}.
-        </p>
-        {noJob ? (
+        {c.kind === "create" ? (
+          <>
+            <p>
+              ClusterForge maakt het cluster {name} met spec-revisie 1, bron Git en commit{" "}
+              <code className="text-xs">{shortSha(c.commit.sha)}</code>, en koppelt het aan <code className="text-xs">{c.path}</code>.
+              Daarna rolt een taak het uit, zoals bij Uitrollen: de VM&apos;s maken in {p.proxmox || "Proxmox"}, de agents aanmelden, de
+              software van {p.template.name} {p.template.to} installeren en controleren of het cluster werkt.
+            </p>
+            <ul className="space-y-1">
+              {p.new_nodes.map((n) => (
+                <li key={n.hostname} className="rounded-md border border-slate-200 px-3 py-2 dark:border-slate-800">
+                  <span className="font-medium">{n.hostname}</span>{" "}
+                  <span className="text-slate-600 dark:text-slate-400">{n.address ? `${n.address}/${n.prefix}` : "DHCP"}</span>
+                </li>
+              ))}
+            </ul>
+            <p className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
+              Mislukt de uitrol, dan open je de taak en kies je Opnieuw proberen; stappen die al lukten, slaat ze over. ClusterForge
+              verwijdert vanuit Git nooit een cluster of VM.
+            </p>
+          </>
+        ) : (
+          <p>
+            ClusterForge schrijft revisie {p.base_revision + 1} van {name} met bron Git en commit{" "}
+            <code className="text-xs">{shortSha(c.commit.sha)}</code>
+            {p.metadata.length > 0 && <>, en zet {p.metadata.map((f) => `${f.label.toLowerCase()} op ${f.to || "leeg"}`).join(", ")}</>}
+            {grow.length > 0 && <>, en zet {grow.join(" en ")} in provisioning in de inventory</>}.
+          </p>
+        )}
+        {c.kind === "create" ? null : noJob ? (
           <p className="text-slate-600 dark:text-slate-400">Op de nodes verandert niets, dus de wijziging is meteen toegepast.</p>
         ) : (
           <>
-            <p className="text-slate-600 dark:text-slate-400">Daarna past een taak de wijziging toe, node voor node in deze volgorde:</p>
+            <p className="text-slate-600 dark:text-slate-400">
+              {grow.length > 0
+                ? `Daarna maakt een taak eerst de VM van ${grow.join(" en ")} en meldt de agent aan. Dan past ze de wijziging toe, node voor node in deze volgorde:`
+                : "Daarna past een taak de wijziging toe, node voor node in deze volgorde:"}
+            </p>
             <ol className="space-y-2">
               {p.nodes.map((n, i) => (
-                <li key={n.node_id} className="rounded-md border border-slate-200 px-3 py-2 dark:border-slate-800">
+                <li key={n.hostname} className="rounded-md border border-slate-200 px-3 py-2 dark:border-slate-800">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-slate-500">{i + 1}.</span>
                     <span className="font-medium">{n.hostname}</span>
+                    {n.new && <Badge tone="blue">Nieuwe node</Badge>}
                     {n.vips.length > 0 && <Badge tone="amber">VIP-eigenaar · {n.vips.join(", ")}</Badge>}
                   </div>
-                  <p className="mt-1 pl-5 text-slate-600 dark:text-slate-400">{n.steps.map((s) => s.title).join(", ")}</p>
+                  <p className="mt-1 pl-5 text-slate-600 dark:text-slate-400">
+                    {n.new ? `Alle ${n.steps.length} stappen van de template` : n.steps.map((s) => s.title).join(", ")}
+                  </p>
                 </li>
               ))}
             </ol>
+            {grow.length > 0 && (
+              <p className="text-slate-600 dark:text-slate-400">
+                De bestaande nodes komen eerst, zodat ze {grow.join(" en ")} als peer kennen voor die start. Andersom zou de nieuwe node de
+                VIP-eigenaar niet horen en het VIP ook nemen. {grow.join(" en ")}{" "}
+                {grow.length === 1 ? "telt pas mee voor de status als hij gezond is." : "tellen pas mee voor de status als ze gezond zijn."}
+              </p>
+            )}
             {c.full_apply && (
               <Alert kind="info">
                 Een eerdere revisie staat nog niet op alle nodes. Daarom past de taak op elke node alle stappen van de template opnieuw toe, niet
@@ -80,7 +120,7 @@ export function ApproveDialog({ c, onClose }: { c: GitChangeDetail; onClose: () 
             Annuleren
           </Button>
           <Button type="button" disabled={!ok || approve.isPending} onClick={start}>
-            {approve.isPending ? "Goedkeuren…" : "Goedkeuren en toepassen"}
+            {approve.isPending ? "Goedkeuren…" : c.kind === "create" ? "Goedkeuren en uitrollen" : "Goedkeuren en toepassen"}
           </Button>
         </div>
       </div>

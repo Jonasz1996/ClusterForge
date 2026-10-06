@@ -236,13 +236,13 @@ func TestGitOpsApply(t *testing.T) {
 	}
 	eventually(t, "in sync", func() bool { return c.gitFiles()["clusters/web/cluster.yaml"].State == "in_sync" })
 
-	// Omhoog schalen kan nog niet uit Git.
+	// Omhoog schalen vraagt het adres van ClusterForge bij de koppeling.
 	grow := strings.Replace(tags, "node_count: 2", "node_count: 3", 1)
 	growID := commit(grow)
-	if ch := detail(growID); ch.Blocked == "" {
-		t.Fatalf("omhoog schalen niet geblokkeerd: %+v", ch)
+	if ch := detail(growID); ch.BlockedCode != "no_server_url" || !strings.Contains(ch.Blocked, "adres van ClusterForge") {
+		t.Fatalf("omhoog schalen zonder adres: %+v", ch)
 	}
-	if s := c.do("POST", "/api/v1/gitops/changes/"+growID+"/approve", map[string]any{"confirm": "web"}, &ae); s != 409 || ae.Code != "not_supported" {
+	if s := c.do("POST", "/api/v1/gitops/changes/"+growID+"/approve", map[string]any{"confirm": "web"}, &ae); s != 409 || ae.Code != "no_server_url" {
 		t.Fatalf("omhoog schalen: %d %+v", s, ae)
 	}
 

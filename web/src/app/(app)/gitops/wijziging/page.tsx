@@ -66,7 +66,26 @@ function ChangeView({ c }: { c: GitChangeDetail }) {
               Dit is een plan: er is nog niets op de nodes veranderd.{" "}
               {isAdmin ? "Lees het na en keur het goed of wijs het af." : "Een beheerder keurt het goed of wijst het af."}
             </p>
-            {c.blocked && <Alert>{c.blocked}</Alert>}
+            {c.blocked && (
+              <Alert>
+                {c.blocked}
+                {c.blocked_code === "no_server_url" && (
+                  <>
+                    {" "}
+                    <Link href="/gitops" className="font-medium underline">
+                      Naar de koppeling
+                    </Link>
+                    .
+                  </>
+                )}
+              </Alert>
+            )}
+            {c.kind === "create" && !c.blocked && (
+              <Alert kind="info">
+                Goedkeuren maakt het cluster met spec-revisie 1 uit deze commit en rolt het uit, zoals bij Uitrollen: VM&apos;s maken,
+                agents aanmelden, software installeren en controleren.
+              </Alert>
+            )}
             {c.full_apply && !c.blocked && (
               <Alert kind="info">
                 Een eerdere revisie staat nog niet op alle nodes. Goedkeuren past daarom op elke node alle stappen van de template opnieuw toe.
@@ -75,7 +94,7 @@ function ChangeView({ c }: { c: GitChangeDetail }) {
             {isAdmin && (
               <div className="flex flex-wrap gap-2">
                 <Button type="button" disabled={!!c.blocked} onClick={() => setDialog("approve")}>
-                  Goedkeuren en toepassen…
+                  {c.kind === "create" ? "Goedkeuren en uitrollen…" : "Goedkeuren en toepassen…"}
                 </Button>
                 <Button type="button" variant="secondary-danger" onClick={() => setDialog("reject")}>
                   Afwijzen…
@@ -97,7 +116,10 @@ function ChangeView({ c }: { c: GitChangeDetail }) {
               .
             </>
           )}
-          {c.status === "failed" && (
+          {c.status === "failed" && c.kind === "create" && (
+            <> Open de taak en kies Opnieuw proberen; stappen die al lukten, slaat ze over.</>
+          )}
+          {c.status === "failed" && c.kind !== "create" && (
             <>
               {" "}
               Breng de nodes bij met Opnieuw toepassen op{" "}
@@ -185,8 +207,10 @@ function ChangeView({ c }: { c: GitChangeDetail }) {
                     <td className={`${tdClass} font-medium`}>{n.hostname}</td>
                     <td className={tdClass}>{n.role}</td>
                     <td className={`${tdClass} font-mono text-xs`}>{n.address ? `${n.address}/${n.prefix}` : "DHCP"}</td>
-                    <td className={tdClass}>{n.host || <span className="text-slate-400">–</span>}</td>
-                    <td className={tdClass}>
+                    <td className={`${tdClass} whitespace-nowrap`}>
+                      {n.host || <span className="text-slate-400">{c.kind === "update" ? "kiest de taak" : "–"}</span>}
+                    </td>
+                    <td className={`${tdClass} whitespace-nowrap`}>
                       {n.vm.cpu} vCPU · {mib(n.vm.memory_mib)} · {n.vm.disk_gib} GB
                     </td>
                   </tr>
@@ -213,8 +237,14 @@ function ChangeView({ c }: { c: GitChangeDetail }) {
             </p>
           ) : (
             <ol className="space-y-4">
+              {p.new_nodes.length > 0 && (
+                <li className="text-sm text-slate-600 dark:text-slate-400">
+                  Eerst: de VM van {p.new_nodes.map((n) => n.hostname).join(" en ")} maken en de agent aanmelden. Daarna de bestaande nodes,
+                  zodat ze de nieuwe peer kennen voor die start.
+                </li>
+              )}
               {p.nodes.map((n, i) => (
-                <li key={n.node_id} className="space-y-2">
+                <li key={n.hostname} className="space-y-2">
                   <div className="flex flex-wrap items-center gap-2 text-sm">
                     <span className="font-medium">
                       {i + 1}. {n.hostname}
@@ -270,10 +300,13 @@ function decision(c: GitChangeDetail) {
     case "rejected":
       return `Afgewezen door ${by}: ${c.reason}.`;
     case "applying":
+      if (c.kind === "create") return `Goedgekeurd door ${by}; de uitrol loopt.`;
       return `Goedgekeurd door ${by} als revisie ${c.revision}; de taak past de wijziging nu toe.`;
     case "applied":
+      if (c.kind === "create") return `Goedgekeurd door ${by} en uitgerold als revisie ${c.revision}.`;
       return `Goedgekeurd door ${by} en toegepast als revisie ${c.revision}${c.job_id ? "" : "; op de nodes veranderde niets"}.`;
     case "failed":
+      if (c.kind === "create") return `Goedgekeurd door ${by}, maar de uitrol mislukte: ${c.reason}.`;
       return `Goedgekeurd door ${by} als revisie ${c.revision}, maar het toepassen mislukte: ${c.reason}.`;
   }
   return "";

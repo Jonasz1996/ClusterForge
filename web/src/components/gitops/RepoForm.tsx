@@ -21,6 +21,10 @@ export function RepoForm({
   const [path, setPath] = useState(initial?.path ?? "clusters");
   const [token, setToken] = useState("");
   const [apiUrl, setApiUrl] = useState(initial?.api_url ?? "");
+  // Het adres van deze pagina is meestal ook wat nieuwe nodes bereiken.
+  const [serverUrl, setServerUrl] = useState(
+    initial?.server_url || (typeof window === "undefined" ? "" : window.location.origin),
+  );
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   const probe = useProbeGitRepo();
@@ -30,6 +34,7 @@ export function RepoForm({
     path,
     token,
     api_url: apiUrl,
+    server_url: serverUrl.trim(),
   });
 
   const submit = async (e: FormEvent) => {
@@ -78,6 +83,18 @@ export function RepoForm({
         </Field>
         <Field label="Map" htmlFor="git-path" hint="Per cluster een map met de slug als naam, met daarin cluster.yaml.">
           <Input id="git-path" value={path} onChange={(e) => setPath(e.target.value)} placeholder="clusters" />
+        </Field>
+        <Field
+          label="Adres van ClusterForge"
+          htmlFor="git-server"
+          hint="Hiermee melden nieuwe nodes uit Git zich aan, bij omhoog schalen en bij een nieuw cluster. Ze moeten het kunnen bereiken, en NATS op poort 4222."
+        >
+          <Input
+            id="git-server"
+            value={serverUrl}
+            onChange={(e) => setServerUrl(e.target.value)}
+            placeholder="https://clusterforge.lan"
+          />
         </Field>
       </div>
       <details className="text-sm">

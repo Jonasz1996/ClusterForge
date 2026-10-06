@@ -2559,8 +2559,11 @@ type GitChangeKind string
 type GitChangeDetail struct {
 	BaseRevision int `json:"base_revision"`
 
-	// Blocked Waarom goedkeuren in deze versie nog niet kan; leeg als het kan
-	Blocked            string                                `json:"blocked"`
+	// Blocked Waarom goedkeuren nu niet kan; leeg als het kan
+	Blocked string `json:"blocked"`
+
+	// BlockedCode no_server_url: het adres van ClusterForge ontbreekt bij de koppeling; dhcp_growth: omhoog schalen met DHCP; leeg als goedkeuren kan
+	BlockedCode        string                                `json:"blocked_code"`
 	ClusterEnvironment Environment                           `json:"cluster_environment"`
 	ClusterId          nullable.Nullable[openapi_types.UUID] `json:"cluster_id"`
 
@@ -2691,7 +2694,7 @@ type GitPlan struct {
 	// NoSteps Geen gerenderde stap verandert
 	NoSteps bool `json:"no_steps"`
 
-	// Nodes In de volgorde van toepassen; de VIP-eigenaar als laatste
+	// Nodes In de volgorde van toepassen; de bestaande nodes met de VIP-eigenaar als laatste, daarna de nieuwe
 	Nodes    []GitPlanNode    `json:"nodes"`
 	Params   []GitFieldChange `json:"params"`
 	Proxmox  *string          `json:"proxmox,omitempty"`
@@ -2772,8 +2775,11 @@ type GitRepo struct {
 	Path string `json:"path"`
 
 	// Repository eigenaar/naam
-	Repository string    `json:"repository"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	Repository string `json:"repository"`
+
+	// ServerUrl Het adres waarmee nieuwe nodes uit Git ClusterForge bereiken; leeg als het nog niet ingevuld is
+	ServerUrl string    `json:"server_url"`
+	UpdatedAt time.Time `json:"updated_at"`
 
 	// WebUrl De repository op de website
 	WebUrl string `json:"web_url"`
@@ -2792,6 +2798,9 @@ type GitRepoInput struct {
 
 	// Repository eigenaar/naam, of de link naar de repository
 	Repository string `json:"repository"`
+
+	// ServerUrl Het adres waarmee nieuwe nodes ClusterForge bereiken, zoals https://clusterforge.lan; nodig voor omhoog schalen en nieuwe clusters
+	ServerUrl *string `json:"server_url,omitempty"`
 
 	// Token Fine-grained token met alleen Contents: read; leeg laat het opgeslagen token staan
 	Token *string `json:"token,omitempty"`

@@ -151,6 +151,21 @@ type Plan struct {
 	// ChangeID en Commit wijzen naar de wijziging uit Git.
 	ChangeID *uuid.UUID `json:"change_id,omitempty"`
 	Commit   string     `json:"commit,omitempty"`
+	// NewNodes komen bij omhoog schalen bij het cluster. De taak maakt eerst
+	// hun VM's en meldt hun agents aan met ServerURL; na de bestaande nodes
+	// past ze de template op elke nieuwe node toe en neemt ze hem in
+	// gebruik.
+	NewNodes  []deploy.NewNode `json:"new_nodes,omitempty"`
+	ServerURL string           `json:"server_url,omitempty"`
+}
+
+// newIDs zijn de ids van de nieuwe nodes.
+func (p Plan) newIDs() []uuid.UUID {
+	out := make([]uuid.UUID, 0, len(p.NewNodes))
+	for _, n := range p.NewNodes {
+		out = append(out, n.NodeID)
+	}
+	return out
 }
 
 // NeedsConfirmation: op prod moet de beheerder de slug intikken.
@@ -464,6 +479,15 @@ func notes(p Plan) []string {
 				n.Hostname, strings.Join(n.VIPs, ", ")))
 		}
 	}
+	if len(p.NewNodes) > 0 {
+		hosts := make([]string, len(p.NewNodes))
+		for i, n := range p.NewNodes {
+			hosts[i] = n.Hostname
+		}
+		out = append(out, fmt.Sprintf("Eerst maakt de taak de VM van %s en meldt ze de agent aan. Dan komen de bestaande nodes aan de beurt, en pas daarna "+
+			"krijgt %s de software van de template, zodat geen node start met een peer die de andere nog niet kennen. Pas als %s gezond is, telt hij mee.",
+			strings.Join(hosts, " en "), strings.Join(hosts, " en "), strings.Join(hosts, " en ")))
+	}
 	var ignored []string
 	for _, n := range p.Nodes {
 		for _, id := range n.Ignored {
@@ -549,11 +573,17 @@ type ChangeInput struct {
 	All      bool
 	ChangeID *uuid.UUID
 	Commit   string
+	// New zijn de nodes die erbij komen, met het adres waarmee ze zich
+	// aanmelden. Hun id mag nog een plan-id zijn; de aanroeper zet het
+	// echte voor EnqueueTx.
+	New       []deploy.NewNode
+	ServerURL string
 }
 
 // PlanChange zet een wijziging om in een plan: de nodes zonder VIP eerst,
-// de eigenaar als laatste. Elke node moet nu actief en verbonden zijn, zodat
-// een goedkeuring niet pas in de taak strandt. Er verandert nog niets.
+// de eigenaar als laatste, en nieuwe nodes daarna. Elke bestaande node moet
+// nu actief en verbonden zijn, zodat een goedkeuring niet pas in de taak
+// strandt. Er verandert nog niets.
 func (s *Service) PlanChange(ctx context.Context, in ChangeInput) (Plan, error) {
 	c, err := s.q.GetCluster(ctx, in.ClusterID)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -596,12 +626,16 @@ func (s *Service) PlanChange(ctx context.Context, in ChangeInput) (Plan, error) 
 		byNode[cn.NodeID] = pn
 		order = append(order, cn.NodeID)
 	}
-	if len(order) == 0 {
+	if len(order) == 0 && len(in.New) == 0 {
 		return Plan{}, &ConflictError{Code: "nothing", Msg: "er is op geen enkele node iets toe te passen"}
+	}
+	if len(in.New) > 0 && in.ServerURL == "" {
+		return Plan{}, &ConflictError{Code: "no_server_url", Msg: "nieuwe nodes hebben het adres van ClusterForge nodig om zich aan te melden"}
 	}
 	p := Plan{
 		Mode: ModeChange, ClusterID: c.ID, Cluster: c.Name, Slug: c.Slug, Environment: string(c.Environment),
 		Template: in.Template, Version: in.Version, Revision: in.Revision, All: in.All, ChangeID: in.ChangeID, Commit: in.Commit,
+		NewNodes: in.New, ServerURL: in.ServerURL,
 	}
 	p.Nodes = Order(order, byNode)
 	p.Notes = notes(p)

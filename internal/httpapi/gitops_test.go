@@ -101,6 +101,8 @@ type gitFile struct {
 
 type gitChange struct {
 	ID          string    `json:"id"`
+	ClusterID   *string   `json:"cluster_id"`
+	Slug        string    `json:"slug"`
 	Status      string    `json:"status"`
 	Kind        string    `json:"kind"`
 	ClusterName string    `json:"cluster_name"`
@@ -112,8 +114,13 @@ type gitChange struct {
 		Metadata     []struct {
 			Field, From, To string
 		} `json:"metadata"`
+		NewNodes []struct {
+			Hostname string `json:"hostname"`
+			Address  string `json:"address"`
+		} `json:"new_nodes"`
 		Nodes []struct {
 			Hostname string   `json:"hostname"`
+			New      bool     `json:"new"`
 			VIPs     []string `json:"vips"`
 			Steps    []struct {
 				Step   string `json:"step"`
@@ -130,6 +137,7 @@ type gitChange struct {
 	NeedsConfirmation bool     `json:"needs_confirmation"`
 	FullApply         bool     `json:"full_apply"`
 	Blocked           string   `json:"blocked"`
+	BlockedCode       string   `json:"blocked_code"`
 }
 
 func (c *client) gitFiles() map[string]gitFile {

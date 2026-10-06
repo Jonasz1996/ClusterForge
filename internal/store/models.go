@@ -435,6 +435,7 @@ type GitRepo struct {
 	LastError  string
 	CreatedAt  time.Time
 	UpdatedAt  time.Time
+	ServerUrl  string
 }
 
 type Job struct {

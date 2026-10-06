@@ -528,9 +528,15 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 	case "gitops.change_superseded":
 		return fmt.Sprintf("Wijziging voor %s uit commit %s vervalt", str(p, "slug"), shortSHA(str(p, "commit"))) + colon(str(p, "reason"))
 	case "gitops.change_approved":
+		if str(p, "kind") == "create" {
+			return fmt.Sprintf("Nieuw cluster %s uit commit %s goedgekeurd: wordt uitgerold", or(str(p, "name"), str(p, "slug")), shortSHA(str(p, "commit")))
+		}
 		s := fmt.Sprintf("Wijziging voor %s uit commit %s goedgekeurd: revisie %s", or(str(p, "name"), str(p, "slug")), shortSHA(str(p, "commit")), num(p["revision"]))
 		if p["job_id"] != nil {
 			s += ", wordt toegepast"
+		}
+		if n, _ := p["new_nodes"].(float64); n > 0 {
+			s += " met " + count(n, "nieuwe node", "nieuwe nodes")
 		}
 		return s
 	case "gitops.change_rejected":
@@ -690,7 +696,7 @@ var fieldLabels = map[string][][2]string{
 	"backup.policy_updated": {{"max_age_hours", "Maximale leeftijd in uren"}, {"verify_enabled", "Geplande back-upcontrole"}},
 	"backup.watch_updated":  {{"watch", "Ook bewaken"}},
 	"gitops.repo_updated": {{"repo", "Repository"}, {"branch", "Branch"}, {"path", "Map"}, {"api_url", "API-adres"},
-		{"token_changed", "Token"}},
+		{"server_url", "Adres van ClusterForge"}, {"token_changed", "Token"}},
 }
 
 func changes(subjectType string, p map[string]any, n names) []Change {
