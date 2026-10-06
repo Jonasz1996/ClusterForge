@@ -13,6 +13,7 @@ import { SpecCard } from "@/components/inventory/SpecCard";
 import { ClusterDepsCard } from "@/components/deps/ClusterDeps";
 import { ClusterDriftCard } from "@/components/drift/Drift";
 import { FailoverBanner, FailoverCard } from "@/components/failover/Failover";
+import { GitCard } from "@/components/gitops/GitCard";
 import { JobList } from "@/components/jobs/JobList";
 import {
   AgentBadge,
@@ -97,9 +98,11 @@ function ClusterDetailInner() {
                   <Button variant="secondary" onClick={() => setEditing(true)}>
                     Bewerken
                   </Button>
-                  <Button variant="danger" disabled={remove.isPending} onClick={() => setDeleting(true)}>
-                    Verwijderen
-                  </Button>
+                  {!cluster.data.git_managed && (
+                    <Button variant="danger" disabled={remove.isPending} onClick={() => setDeleting(true)}>
+                      Verwijderen
+                    </Button>
+                  )}
                 </>
               )
             }
@@ -125,6 +128,7 @@ function ClusterDetailInner() {
             <Card title="Cluster bewerken">
               <ClusterForm
                 initial={cluster.data}
+                gitManaged={cluster.data.git_managed}
                 submitLabel="Opslaan"
                 onCancel={() => setEditing(false)}
                 onSubmit={async (v) => {
@@ -140,6 +144,7 @@ function ClusterDetailInner() {
           <NodesCard c={cluster.data} isAdmin={isAdmin} />
           <ClusterDriftCard clusterId={id} isAdmin={isAdmin} />
           {cluster.data.template_name && <SpecCard clusterId={id} />}
+          {cluster.data.template_name && <GitCard c={cluster.data} isAdmin={isAdmin} />}
           <VipsCard c={cluster.data} isAdmin={isAdmin} />
           <ClusterDepsCard clusterId={id} isAdmin={isAdmin} />
           <FailoverCard clusterId={id} isAdmin={isAdmin} />
@@ -207,7 +212,9 @@ function Info({ c }: { c: ClusterDetail }) {
   );
 }
 
-function NodesCard({ c, isAdmin }: { c: ClusterDetail; isAdmin: boolean }) {
+function NodesCard({ c, isAdmin: admin }: { c: ClusterDetail; isAdmin: boolean }) {
+  // Bij een cluster uit Git komen de nodes uit cluster.yaml.
+  const isAdmin = admin && !c.git_managed;
   const [mode, setMode] = useState<"none" | "new" | "existing">("none");
   const createNode = useCreateNode();
   const updateNode = useUpdateNode();
@@ -344,7 +351,9 @@ function NodesCard({ c, isAdmin }: { c: ClusterDetail; isAdmin: boolean }) {
   );
 }
 
-function VipsCard({ c, isAdmin }: { c: ClusterDetail; isAdmin: boolean }) {
+function VipsCard({ c, isAdmin: admin }: { c: ClusterDetail; isAdmin: boolean }) {
+  // Bij een cluster uit Git liggen de VIP's vast in cluster.yaml.
+  const isAdmin = admin && !c.git_managed;
   const [adding, setAdding] = useState(false);
   const create = useCreateVip(c.id);
   return (

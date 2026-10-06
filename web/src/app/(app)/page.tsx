@@ -8,6 +8,7 @@ import { Alert, Card } from "@/components/ui";
 import { api } from "@/lib/api/client";
 import { useAuditRecent } from "@/lib/audit";
 import { useMe } from "@/lib/auth";
+import { useGitRepo } from "@/lib/gitops";
 import { useClusters, useNodes } from "@/lib/inventory";
 
 export default function OverviewPage() {
@@ -21,6 +22,8 @@ export default function OverviewPage() {
   const clusters = useClusters();
   const nodes = useNodes(true);
   const events = useAuditRecent({}, 20, isAdmin);
+  const git = useGitRepo();
+  const waiting = git.data?.pending_changes ?? 0;
 
   return (
     <div className="space-y-6">
@@ -36,6 +39,15 @@ export default function OverviewPage() {
           Tweestapsverificatie staat nog uit.{" "}
           <Link href="/instellingen" className="font-medium underline">
             Zet het aan bij Instellingen
+          </Link>
+          .
+        </Alert>
+      )}
+
+      {waiting > 0 && (
+        <Alert kind="info">
+          <Link href="/gitops" className="font-medium underline">
+            {waiting === 1 ? "1 wijziging uit Git wacht" : `${waiting} wijzigingen uit Git wachten`} op goedkeuring
           </Link>
           .
         </Alert>

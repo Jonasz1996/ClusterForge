@@ -89,6 +89,7 @@ function TemplateCard({ t, isAdmin }: { t: Template; isAdmin: boolean }) {
                 </td>
                 <td className={tdClass}>
                   {paramTypes[p.type]}
+                  {p.immutable && <div className="text-xs text-slate-500">ligt vast na de uitrol</div>}
                   {(p.min || p.max) && (
                     <div className="text-xs text-slate-500">
                       {p.min && `min ${p.min}`}

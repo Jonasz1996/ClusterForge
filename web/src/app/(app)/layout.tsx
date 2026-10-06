@@ -20,6 +20,7 @@ const nav: NavItem[] = [
   { href: "/back-ups", label: "Back-ups" },
   { href: "/taken", label: "Taken" },
   { href: "/templates", label: "Templates" },
+  { href: "/gitops", label: "GitOps" },
   { href: "/logboek", label: "Logboek", adminOnly: true },
   { href: "/instellingen", label: "Instellingen" },
 ];

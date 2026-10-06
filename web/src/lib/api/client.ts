@@ -35,6 +35,8 @@ export class ApiError extends Error {
     public field?: string,
     // checks zijn de controles bij precheck_failed.
     public checks?: components["schemas"]["TestRunCheck"][],
+    // diff is bij git_mismatch het verschil tussen Git en de export.
+    public diff?: string,
   ) {
     super(message);
   }
@@ -50,6 +52,7 @@ export function unwrap<T>(res: { data?: T; error?: unknown; response: Response }
       body?.message ?? `Onverwachte fout (${res.response.status})`,
       body?.field,
       body?.checks,
+      body?.diff,
     );
   }
   return res.data as T;
