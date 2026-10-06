@@ -1,23 +1,29 @@
 "use client";
 
 import Link from "next/link";
-import { Button, Card } from "@/components/ui";
+import { useState } from "react";
+import { Badge, Button, Card } from "@/components/ui";
 import { exportUrl, useGitChanges, useGitFiles, useGitRepo, useUnlinkCluster } from "@/lib/gitops";
 import type { ClusterDetail } from "@/lib/inventory";
 import { CommitLink, FileStateBadge } from "./bits";
+import { ReapplyDialog } from "./Decide";
 import { LinkButton } from "./LinkButton";
 
 // GitCard toont bij een cluster uit een template of het in Git staat, met
-// de toestand van zijn bestand, een wachtend plan en export, koppelen of
-// ontkoppelen.
+// de toestand van zijn bestand, een wachtend plan, de gewenste en de
+// toegepaste revisie, en export, koppelen, ontkoppelen of opnieuw toepassen.
 export function GitCard({ c, isAdmin }: { c: ClusterDetail; isAdmin: boolean }) {
   const repo = useGitRepo();
   const hasRepo = !!repo.data?.repo;
   const files = useGitFiles(hasRepo);
   const pending = useGitChanges({ cluster_id: c.id, status: "pending" }, hasRepo);
+  const applying = useGitChanges({ cluster_id: c.id, status: "applying" }, hasRepo);
   const unlink = useUnlinkCluster();
+  const [reapply, setReapply] = useState(false);
   const file = files.data?.find((f) => f.cluster_id === c.id);
   const change = pending.data?.[0];
+  const running = applying.data?.[0];
+  const behind = c.applied_revision < c.spec_revision;
 
   return (
     <Card
@@ -54,6 +60,40 @@ export function GitCard({ c, isAdmin }: { c: ClusterDetail; isAdmin: boolean }) 
       }
     >
       <div className="space-y-2 text-sm">
+        {c.spec_revision > 0 && (
+          <p className="flex flex-wrap items-center gap-2">
+            {running ? (
+              <>
+                <Badge tone="blue">Wordt toegepast</Badge>
+                <span>
+                  Revisie {running.revision} uit commit <CommitLink sha={running.commit.sha} url={running.commit.url} />
+                  {running.job_id && (
+                    <>
+                      {" · "}
+                      <Link href={`/taken/detail?id=${running.job_id}`} className="text-brand-700 hover:underline dark:text-sky-300">
+                        naar de taak
+                      </Link>
+                    </>
+                  )}
+                </span>
+              </>
+            ) : behind ? (
+              <>
+                <Badge tone="red">Niet toegepast</Badge>
+                <span>
+                  Gewenste revisie {c.spec_revision}, toegepast {c.applied_revision > 0 ? `revisie ${c.applied_revision}` : "nog niets"}
+                </span>
+                {isAdmin && (
+                  <Button variant="secondary" onClick={() => setReapply(true)}>
+                    Opnieuw toepassen…
+                  </Button>
+                )}
+              </>
+            ) : (
+              <span className="text-slate-600 dark:text-slate-400">Revisie {c.spec_revision} staat op alle nodes.</span>
+            )}
+          </p>
+        )}
         {c.git_managed ? (
           <>
             <p>
@@ -122,6 +162,16 @@ export function GitCard({ c, isAdmin }: { c: ClusterDetail; isAdmin: boolean }) 
           </p>
         )}
       </div>
+      {reapply && (
+        <ReapplyDialog
+          clusterId={c.id}
+          name={c.name}
+          slug={c.slug}
+          prod={c.environment === "prod"}
+          revision={c.spec_revision}
+          onClose={() => setReapply(false)}
+        />
+      )}
     </Card>
   );
 }

@@ -2,12 +2,14 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Suspense } from "react";
+import { Suspense, useState } from "react";
 import { ChangeStatusBadge, CommitLine, Diff } from "@/components/gitops/bits";
+import { ApproveDialog, RejectDialog } from "@/components/gitops/Decide";
 import { EnvBadge, QueryState, tableClass, tdClass, thClass } from "@/components/inventory/bits";
-import { Alert, Badge, Card, PageHeader } from "@/components/ui";
+import { Alert, Badge, Button, Card, PageHeader } from "@/components/ui";
 import { mib } from "@/lib/deploy";
 import { useGitChange, type GitChangeDetail, type GitPlan } from "@/lib/gitops";
+import { useIsAdmin } from "@/lib/inventory";
 
 export default function GitChangePage() {
   return (
@@ -24,9 +26,13 @@ function GitChangeInner() {
   return <QueryState q={change}>{change.data && <ChangeView c={change.data} />}</QueryState>;
 }
 
+const timeFmt = new Intl.DateTimeFormat("nl-BE", { dateStyle: "medium", timeStyle: "short" });
+
 function ChangeView({ c }: { c: GitChangeDetail }) {
   const p = c.plan;
   const name = c.cluster_name || c.slug;
+  const isAdmin = useIsAdmin();
+  const [dialog, setDialog] = useState<"approve" | "reject" | null>(null);
   return (
     <div className="space-y-6">
       <div className="text-sm">
@@ -54,16 +60,58 @@ function ChangeView({ c }: { c: GitChangeDetail }) {
         }
       />
       {c.status === "pending" && (
-        <Alert kind="info">
-          Dit is een plan: er is nog niets op de nodes veranderd. Goedkeuren en toepassen komt in de volgende mijlpaal; tot dan kun je het plan hier
-          nalezen.
+        <Card>
+          <div className="space-y-3 text-sm">
+            <p>
+              Dit is een plan: er is nog niets op de nodes veranderd.{" "}
+              {isAdmin ? "Lees het na en keur het goed of wijs het af." : "Een beheerder keurt het goed of wijst het af."}
+            </p>
+            {c.blocked && <Alert>{c.blocked}</Alert>}
+            {c.full_apply && !c.blocked && (
+              <Alert kind="info">
+                Een eerdere revisie staat nog niet op alle nodes. Goedkeuren past daarom op elke node alle stappen van de template opnieuw toe.
+              </Alert>
+            )}
+            {isAdmin && (
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" disabled={!!c.blocked} onClick={() => setDialog("approve")}>
+                  Goedkeuren en toepassen…
+                </Button>
+                <Button type="button" variant="secondary-danger" onClick={() => setDialog("reject")}>
+                  Afwijzen…
+                </Button>
+              </div>
+            )}
+          </div>
+        </Card>
+      )}
+      {c.status !== "pending" && c.status !== "superseded" && c.decided_at && (
+        <Alert kind={c.status === "failed" ? "error" : c.status === "applied" ? "success" : "info"}>
+          {decision(c)}
+          {c.job_id && (
+            <>
+              {" "}
+              <Link href={`/taken/detail?id=${c.job_id}`} className="font-medium underline">
+                Naar de taak
+              </Link>
+              .
+            </>
+          )}
+          {c.status === "failed" && (
+            <>
+              {" "}
+              Breng de nodes bij met Opnieuw toepassen op{" "}
+              <Link href={`/clusters/detail?id=${c.cluster_id}`} className="font-medium underline">
+                de clusterpagina
+              </Link>
+              , of draai de commit terug met git revert.
+            </>
+          )}
         </Alert>
       )}
-      {(c.status === "superseded" || c.status === "rejected") && c.reason && (
-        <Alert kind="info">
-          {c.status === "superseded" ? "Dit plan vervalt" : "Afgewezen"}: {c.reason}.
-        </Alert>
-      )}
+      {c.status === "superseded" && c.reason && <Alert kind="info">Dit plan vervalt: {c.reason}.</Alert>}
+      {dialog === "approve" && <ApproveDialog c={c} onClose={() => setDialog(null)} />}
+      {dialog === "reject" && <RejectDialog c={c} onClose={() => setDialog(null)} />}
 
       <Card>
         <dl className="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-[8rem_1fr]">
@@ -213,6 +261,22 @@ function ChangeView({ c }: { c: GitChangeDetail }) {
       )}
     </div>
   );
+}
+
+// decision zegt wie besliste en wat er daarna gebeurde.
+function decision(c: GitChangeDetail) {
+  const by = `${c.decided_by ?? "een verwijderde gebruiker"} op ${timeFmt.format(new Date(c.decided_at!))}`;
+  switch (c.status) {
+    case "rejected":
+      return `Afgewezen door ${by}: ${c.reason}.`;
+    case "applying":
+      return `Goedgekeurd door ${by} als revisie ${c.revision}; de taak past de wijziging nu toe.`;
+    case "applied":
+      return `Goedgekeurd door ${by} en toegepast als revisie ${c.revision}${c.job_id ? "" : "; op de nodes veranderde niets"}.`;
+    case "failed":
+      return `Goedgekeurd door ${by} als revisie ${c.revision}, maar het toepassen mislukte: ${c.reason}.`;
+  }
+  return "";
 }
 
 // basis zegt waartegen het plan rekent: de revisie, de template en het

@@ -32,6 +32,7 @@ Het technisch ontwerp staat in [docs/design/mvp-fase-1.md](docs/design/mvp-fase-
 | 12. Impact bij acties | Per dienst de opgeslagen status met een regel in het logboek bij elke verandering, "geraakt door" in de clusterlijst, en in de bevestigingsvensters welke bekende diensten down of verminderd raken | klaar |
 | 13. Meer templates | Docker-hosts, Cron-cluster en Eigen applicatie (een container achter een VIP), met hun diensten meteen in de graaf | klaar |
 | 14. GitOps: lezen en plannen | Clusters uit een template beschrijven in een GitHub-repository; elk bestand gecontroleerd met veld en regel, en per wijziging een plan met de diff per node, zonder iets op de nodes te veranderen | klaar |
+| 15. GitOps: goedkeuren en toepassen | Een plan goedkeuren of afwijzen; goedkeuren schrijft een revisie met de commit en past de wijziging node voor node toe, met de VIP-eigenaar als laatste; terugdraaien met git revert, en Opnieuw toepassen na een mislukte toepassing | klaar |
 
 ## Draaien met Docker Compose
 
@@ -254,7 +255,7 @@ Drift kan alleen met een agent van deze versie of nieuwer. Een oudere agent staa
 
 ## GitOps
 
-Een cluster uit een ingebouwde template kun je beschrijven in een GitHub-repository: per cluster een bestand `clusters/<slug>/cluster.yaml`. ClusterForge leest de repository elke minuut, controleert elk bestand en toont voor een wijziging wat ze op elke node zou doen. In deze versie blijft het daarbij: goedkeuren en toepassen komen in een volgende mijlpaal, en er verandert nog niets op de nodes. ClusterForge schrijft zelf nooit naar Git.
+Een cluster uit een ingebouwde template kun je beschrijven in een GitHub-repository: per cluster een bestand `clusters/<slug>/cluster.yaml`. ClusterForge leest de repository elke minuut, controleert elk bestand en toont voor een wijziging wat ze op elke node zou doen. Pas als een beheerder het plan goedkeurt, verandert er iets op de nodes. ClusterForge schrijft zelf nooit naar Git.
 
 Zo begin je:
 
@@ -288,9 +289,21 @@ target:                     # alleen gelezen bij een nieuw cluster
   first_ip: 10.0.20.11/24
 ```
 
-Bij elk bestand staat bij GitOps een toestand: in sync, wijziging wacht, ongeldig, nieuw, niet gekoppeld of ontbreekt. Een ongeldig bestand toont elke fout met veld en regel, zoals "regel 5, cluster.environment: kies lab, test of prod". De controle is streng: geen onbekende velden, de slug gelijk aan de map, een template en versie die de server kent, alle parameters ingevuld, en niets wijzigen wat vastligt (slug, templatenaam, VIP, VRRP-id en de VM-vorm). Een geheim in het bestand is een fout; ClusterForge bewaart zo'n bestand dan niet, en je haalt het geheim best ook uit de geschiedenis van de repository. Minder nodes dan nu kan niet via Git, daarvoor zijn de lifecycle-acties.
+Bij elk bestand staat bij GitOps een toestand: in sync, wijziging wacht, wordt toegepast, niet toegepast, afgewezen, ongeldig, nieuw, niet gekoppeld of ontbreekt. Een ongeldig bestand toont elke fout met veld en regel, zoals "regel 5, cluster.environment: kies lab, test of prod". De controle is streng: geen onbekende velden, de slug gelijk aan de map, een template en versie die de server kent, alle parameters ingevuld, en niets wijzigen wat vastligt (slug, templatenaam, VIP, VRRP-id en de VM-vorm). Een geheim in het bestand is een fout; ClusterForge bewaart zo'n bestand dan niet, en je haalt het geheim best ook uit de geschiedenis van de repository. Minder nodes dan nu kan niet via Git, daarvoor zijn de lifecycle-acties.
 
 Een geldig bestand dat afwijkt van het cluster wordt een plan. Op de pagina van de wijziging zie je de commit (met of GitHub hem geverifieerd vindt), de velden oud en nieuw, en per node in de volgorde van toepassen welke stappen veranderen, met een uitklapbare diff; de VIP-eigenaar komt als laatste. Geheimen staan er als `[geheim]` in. Uit de laatste driftcontrole staat erbij wat op een node al afwijkt en overschreven zou worden. Per cluster wacht er hoogstens één plan; een nieuwere commit vervangt het.
+
+### Goedkeuren en toepassen
+
+Alleen een beheerder keurt een plan goed, ook in lab. Op prod moet hij tweestapsverificatie aan hebben en de slug van het cluster intikken; dat geldt ook als het cluster naar prod gaat. Goedkeuren leest eerst de laatste commit, controleert dat het plan nog klopt met het cluster en de nodes, en doet dan alles in één keer: het schrijft een nieuwe revisie van de gewenste staat met bron Git en de commit (te zien in de historie van het cluster, met een link naar GitHub), zet naam, beschrijving, omgeving en tags uit het bestand, en start een taak die de wijziging toepast. Die taak raakt alleen de stappen uit het plan, node voor node in de volgorde van het plan: eerst de nodes zonder VIP, de VIP-eigenaar als laatste. Na elke node wacht ze tot die gezond is, elk VIP één houder heeft en de controles van de template slagen, zoals de HTTP-controle van nginx. Lukt dat niet, dan stopt ze en blijven de nodes daarna ongemoeid. Verandert er op geen enkele node iets, zoals bij alleen andere tags, dan is de wijziging meteen toegepast, zonder taak. Een geheim dat een nieuwere templateversie erbij heeft, maakt ClusterForge zelf aan.
+
+Afwijzen vraagt een reden. Het bestand blijft dan afgewezen tot een nieuwe commit het wijzigt, en er komt geen nieuw plan voor dezelfde inhoud; draai de commit in Git dus ook terug.
+
+Terugdraaien doe je met `git revert`: de oude inhoud wordt een nieuw plan en volgt dezelfde weg. Mislukte een toepassing, dan staat het cluster op "niet toegepast": de kaart Git toont de gewenste en de toegepaste revisie, bijvoorbeeld "gewenste revisie 4, toegepast revisie 3", met de knop Opnieuw toepassen. Die past op elke node alle stappen van de template opnieuw toe, behalve wat genegeerd wordt. Een volgende goedgekeurde wijziging, zoals de revert, doet dat ook vanzelf zolang een eerdere revisie niet overal staat. De mislukte wijziging zelf blijft mislukt in de lijst. Omhoog schalen en nieuwe clusters uit Git kunnen in deze versie nog niet; zo'n plan kun je wel nalezen.
+
+Elke beslissing staat in het logboek met de commit en de auteur: goedgekeurd, afgewezen, toegepast of mislukt, en de commando's aan de agents staan onder de taak.
+
+### Lezen
 
 De server vraagt GitHub elke minuut alleen of de branch veranderde (met een ETag, dus zonder kosten als er niets nieuws is) en leest daarna alleen de bestanden die veranderden. Nu synchroniseren leest meteen opnieuw. Lukt het lezen niet, bijvoorbeeld door een verlopen token, dan staat de fout bij de koppeling en in het logboek, en blijft alles zoals het was.
 
