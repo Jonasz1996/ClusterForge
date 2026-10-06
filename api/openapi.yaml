@@ -2055,7 +2055,7 @@ components:
         confirm: { type: string, description: Op prod de slug van het cluster }
     FailoverTest:
       type: object
-      required: [id, cluster_id, vip_id, vip_address, vip_owner, name, scenario, service, description, max_takeover_seconds,
+      required: [id, cluster_id, vip_id, vip_address, vip_owner, vip_owner_id, name, scenario, service, description, max_takeover_seconds,
         expect_failback, probe, scheduled, next_run_at, last_run, created_at, updated_at]
       properties:
         id: { type: string, format: uuid }
@@ -2063,6 +2063,7 @@ components:
         vip_id: { type: string, format: uuid }
         vip_address: { type: string }
         vip_owner: { type: string, nullable: true, description: De node die het VIP nu heeft }
+        vip_owner_id: { type: string, format: uuid, nullable: true }
         name: { type: string }
         scenario: { $ref: "#/components/schemas/FailoverScenario" }
         service: { type: string }
@@ -2586,11 +2587,18 @@ components:
       allOf:
         - $ref: "#/components/schemas/Cluster"
         - type: object
-          required: [node_count, vip_count, vips, drift]
+          required: [node_count, vip_count, vips, drift, impact, impacted_by]
           properties:
             node_count: { type: integer }
             vip_count: { type: integer }
             drift: { $ref: "#/components/schemas/ClusterDriftSummary" }
+            impact:
+              description: >-
+                De ergste doorgegeven uitval op de bevestigde diensten van dit
+                cluster, langs bekende afhankelijkheden van buiten; uitval
+                binnen het cluster zegt de status al
+              allOf: [{ $ref: "#/components/schemas/ServiceImpact" }]
+            impacted_by: { type: array, items: { type: string }, description: "De clusters, nodes of extern waar die uitval begint, zoals db-prod" }
             vips:
               type: array
               description: De VIP's met hun huidige eigenaar

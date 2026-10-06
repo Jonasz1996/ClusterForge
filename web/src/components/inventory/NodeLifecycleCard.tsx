@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import { NodeImpact } from "@/components/deps/ImpactList";
 import { Modal } from "@/components/Modal";
 import { Alert, Button, Card, Field, Input } from "@/components/ui";
 import { ApiError } from "@/lib/api/client";
@@ -114,11 +115,11 @@ export function NodeLifecycleCard({
   );
 }
 
-const dialogs: Record<Dialog, { title: (h: string) => string; confirm: string; danger?: boolean }> = {
-  maintenance: { title: (h) => `${h} in onderhoud zetten`, confirm: "In onderhoud zetten" },
+const dialogs: Record<Dialog, { title: (h: string) => string; confirm: string; danger?: boolean; impact?: (h: string) => string }> = {
+  maintenance: { title: (h) => `${h} in onderhoud zetten`, confirm: "In onderhoud zetten", impact: (h) => `Wat raakt het onderhoud van ${h}?` },
   activate: { title: (h) => `Onderhoud van ${h} beëindigen`, confirm: "Onderhoud beëindigen" },
-  reboot: { title: (h) => `${h} herstarten`, confirm: "Herstarten", danger: true },
-  shutdown: { title: (h) => `${h} afsluiten`, confirm: "Afsluiten", danger: true },
+  reboot: { title: (h) => `${h} herstarten`, confirm: "Herstarten", danger: true, impact: (h) => `Wat raakt het herstarten van ${h}?` },
+  shutdown: { title: (h) => `${h} afsluiten`, confirm: "Afsluiten", danger: true, impact: (h) => `Wat raakt het afsluiten van ${h}?` },
 };
 
 function ActionDialog({
@@ -193,6 +194,7 @@ function ActionDialog({
         }}
       >
         <p className="text-sm">{text}</p>
+        {d.impact && <NodeImpact nodeId={node.id} title={d.impact(host)} />}
         {canDrain && (
           <label className="flex items-start gap-2 text-sm">
             <input

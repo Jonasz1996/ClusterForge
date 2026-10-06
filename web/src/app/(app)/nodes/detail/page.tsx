@@ -8,6 +8,7 @@ import { NodeBackupsCard } from "@/components/backups/Backups";
 import { NodeDriftCard } from "@/components/drift/Drift";
 import { MetricsPanels } from "@/components/charts/MetricsPanels";
 import { JobList } from "@/components/jobs/JobList";
+import { ConfirmDelete } from "@/components/inventory/ConfirmDelete";
 import { InstallAgent } from "@/components/inventory/InstallAgent";
 import { NodeForm } from "@/components/inventory/NodeForm";
 import { NodeLifecycleCard } from "@/components/inventory/NodeLifecycleCard";
@@ -65,6 +66,7 @@ function NodeDetailInner() {
   const remove = useDeleteNode();
   const router = useRouter();
   const [editing, setEditing] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const jobs = useJobs({ node_id: id, limit: 10 }, id !== "");
 
   if (id === "") return <Alert>Geen node opgegeven.</Alert>;
@@ -100,22 +102,30 @@ function NodeDetailInner() {
                   <Button variant="secondary" onClick={() => setEditing(true)}>
                     Bewerken
                   </Button>
-                  <Button
-                    variant="danger"
-                    disabled={remove.isPending}
-                    onClick={async () => {
-                      if (!window.confirm(`Node ${node.data!.hostname} verwijderen? Een agent op deze node wordt ook ingetrokken.`))
-                        return;
-                      await remove.mutateAsync(node.data!.id);
-                      router.push("/nodes");
-                    }}
-                  >
+                  <Button variant="danger" disabled={remove.isPending} onClick={() => setDeleting(true)}>
                     Verwijderen
                   </Button>
                 </>
               )
             }
           />
+
+          {deleting && (
+            <ConfirmDelete
+              title={`Node ${node.data.hostname} verwijderen`}
+              text={
+                node.data.cluster_id
+                  ? "Een agent op deze node wordt ook ingetrokken. De diensten van het cluster blijven bestaan."
+                  : "Een agent op deze node wordt ook ingetrokken, en de diensten op deze node verdwijnen."
+              }
+              nodeId={node.data.cluster_id ? undefined : id}
+              what="de node"
+              pending={remove.isPending}
+              error={remove.error}
+              onClose={() => setDeleting(false)}
+              onConfirm={() => remove.mutate(id, { onSuccess: () => router.push("/nodes") })}
+            />
+          )}
 
           <StatusNote status={node.data.status} reason={node.data.status_reason} since={node.data.status_since} />
 

@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { ImpactLine } from "@/components/deps/ImpactList";
 import { Modal } from "@/components/Modal";
 import { ProdConfirm, prodConfirmed, useProdTotp } from "@/components/ProdConfirm";
 import { expectedText, shortActual } from "@/components/drift/text";
@@ -194,6 +195,9 @@ export function RemediateDialog({ clusterId, report, onClose }: { clusterId: str
                       </li>
                     ))}
                   </ul>
+                  <div className="mt-1 pl-9">
+                    <ImpactLine nodeId={n.node_id} prefix={`Valt ${n.hostname} hierbij weg, dan raakt dat:`} />
+                  </div>
                 </li>
               ))}
             </ol>

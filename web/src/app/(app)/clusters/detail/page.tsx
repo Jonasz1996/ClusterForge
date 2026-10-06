@@ -7,6 +7,7 @@ import { HistoryCard } from "@/components/audit/AuditList";
 import { ClusterBackupsCard } from "@/components/backups/Backups";
 import { MetricsPanels } from "@/components/charts/MetricsPanels";
 import { ClusterForm } from "@/components/inventory/ClusterForm";
+import { ConfirmDelete } from "@/components/inventory/ConfirmDelete";
 import { NodeForm } from "@/components/inventory/NodeForm";
 import { SpecCard } from "@/components/inventory/SpecCard";
 import { ClusterDepsCard } from "@/components/deps/ClusterDeps";
@@ -65,6 +66,7 @@ function ClusterDetailInner() {
   const jobs = useJobs({ cluster_id: id, limit: 10 }, id !== "");
   const router = useRouter();
   const [editing, setEditing] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   if (id === "") return <Alert>Geen cluster opgegeven.</Alert>;
 
@@ -95,22 +97,26 @@ function ClusterDetailInner() {
                   <Button variant="secondary" onClick={() => setEditing(true)}>
                     Bewerken
                   </Button>
-                  <Button
-                    variant="danger"
-                    disabled={remove.isPending}
-                    onClick={async () => {
-                      const c = cluster.data!;
-                      if (!window.confirm(`Cluster ${c.name} verwijderen? De nodes blijven bestaan zonder cluster; de VIP's verdwijnen.`)) return;
-                      await remove.mutateAsync(c.id);
-                      router.push("/clusters");
-                    }}
-                  >
+                  <Button variant="danger" disabled={remove.isPending} onClick={() => setDeleting(true)}>
                     Verwijderen
                   </Button>
                 </>
               )
             }
           />
+
+          {deleting && (
+            <ConfirmDelete
+              title={`Cluster ${cluster.data.name} verwijderen`}
+              text="De nodes blijven bestaan zonder cluster; de VIP's en de diensten van dit cluster verdwijnen."
+              clusterId={id}
+              what="het cluster"
+              pending={remove.isPending}
+              error={remove.error}
+              onClose={() => setDeleting(false)}
+              onConfirm={() => remove.mutate(id, { onSuccess: () => router.push("/clusters") })}
+            />
+          )}
 
           <StatusNote status={cluster.data.status} reason={cluster.data.status_reason} since={cluster.data.status_since} />
           <FailoverBanner clusterId={id} isAdmin={isAdmin} />

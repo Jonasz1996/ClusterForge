@@ -266,7 +266,7 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 	case "cluster.created":
 		return "Cluster " + name + " aangemaakt"
 	case "cluster.deleted":
-		return "Cluster " + name + " verwijderd"
+		return "Cluster " + name + " verwijderd" + usedBy(p)
 	case "cluster.spec_changed":
 		if str(p, "kind") == "baseline" {
 			return fmt.Sprintf("Specificatie van cluster %s: revisie %s, een baseline", name, num(p["revision"])) + paren(specSources[str(p, "source")])
@@ -283,7 +283,7 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 		}
 		return "Node " + name + " toegevoegd"
 	case "node.deleted":
-		return "Node " + name + " verwijderd"
+		return "Node " + name + " verwijderd" + usedBy(p)
 	case "vip.created":
 		return "VIP " + name + " toegevoegd"
 	case "vip.deleted":
@@ -478,6 +478,8 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 	case "dependency.deleted":
 		return "Afhankelijkheid van " + serviceIn(str(p, "consumer"), str(p, "consumer_scope")) + " op " +
 			serviceIn(str(p, "provider"), str(p, "provider_scope")) + " verwijderd"
+	case "service.status_changed":
+		return serviceStatusChanged(serviceIn(name, str(p, "scope")), p)
 	}
 	if strings.HasPrefix(r.Action, "job.") {
 		return spec.Label + ": " + name
@@ -486,6 +488,52 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 		return spec.Label + ": " + name
 	}
 	return spec.Label
+}
+
+// serviceStatusChanged zegt wat er met een dienst gebeurde: zijn eigen
+// status, de doorgegeven uitval of allebei.
+func serviceStatusChanged(where string, p map[string]any) string {
+	var parts []string
+	if from, to := str(p, "from"), str(p, "to"); from != to {
+		parts = append(parts, fmt.Sprintf("van %s naar %s", status(from), status(to))+colon(str(p, "reason")))
+	}
+	if from, to := str(p, "impact_from"), str(p, "impact"); from != to {
+		switch to {
+		case "down":
+			parts = append(parts, "down door een afhankelijkheid"+colon(str(p, "impact_reason")))
+		case "degraded":
+			parts = append(parts, "verminderd door een afhankelijkheid"+colon(str(p, "impact_reason")))
+		default:
+			parts = append(parts, "niet meer geraakt door een afhankelijkheid")
+		}
+	}
+	if len(parts) == 0 {
+		return "Status van " + where + " gewijzigd"
+	}
+	return where + " " + strings.Join(parts, ", en ")
+}
+
+// usedBy noemt de diensten van buiten die afhingen van een verwijderd
+// cluster of een verwijderde node: die afhankelijkheden verdwenen mee.
+func usedBy(p map[string]any) string {
+	deps, _ := p["used_by"].([]any)
+	var who []any
+	seen := map[string]bool{}
+	for _, d := range deps {
+		m, _ := d.(map[string]any)
+		c := serviceIn(str(m, "consumer"), str(m, "consumer_scope"))
+		if !seen[c] {
+			seen[c] = true
+			who = append(who, c)
+		}
+	}
+	switch len(deps) {
+	case 0:
+		return ""
+	case 1:
+		return "; daarmee verdween de afhankelijkheid van " + enList(who)
+	}
+	return "; daarmee verdwenen de afhankelijkheden van " + enList(who)
 }
 
 // serviceIn noemt een dienst met zijn cluster of node: "nginx in web-prod",

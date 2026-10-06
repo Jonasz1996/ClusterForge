@@ -5,7 +5,8 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useMemo, useState, useSyncExternalStore } from "react";
 import { ServiceDialog } from "@/components/deps/Dialogs";
-import { ImpactList, ServicePanel, ServiceStatusText, StatusDot } from "@/components/deps/Panel";
+import { ImpactList } from "@/components/deps/ImpactList";
+import { ServicePanel, ServiceStatusText, StatusDot } from "@/components/deps/Panel";
 import { Empty, EnvBadge, QueryState, StatusBadge, tableClass, tdClass, thClass } from "@/components/inventory/bits";
 import { Alert, Button, cx, PageHeader, Select } from "@/components/ui";
 import {

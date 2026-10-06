@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -54,9 +55,30 @@ func (s *Server) ListClusters(w http.ResponseWriter, r *http.Request) {
 	for _, v := range owners {
 		vips[v.ClusterID] = append(vips[v.ClusterID], gen.VipOwner{Address: v.Address.String(), OwnerHostname: nullableOf(v.OwnerHostname)})
 	}
+	impacts, err := s.q.ListClusterImpacts(r.Context())
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	// Per cluster de ergste doorgegeven uitval en waar ze begint.
+	impact := map[uuid.UUID]gen.ServiceImpact{}
+	impactedBy := map[uuid.UUID][]string{}
+	for _, im := range impacts {
+		if impact[im.ClusterID] != gen.ServiceImpactDown {
+			impact[im.ClusterID] = gen.ServiceImpact(im.Impact)
+		}
+		if by := impactedBy[im.ClusterID]; !slices.Contains(by, im.CauseGroup) {
+			impactedBy[im.ClusterID] = append(by, im.CauseGroup)
+		}
+	}
 	items := make([]gen.ClusterListItem, 0, len(rows))
 	now := time.Now()
 	for _, row := range rows {
+		id := row.Cluster.ID
+		imp := impact[id]
+		if imp == "" {
+			imp = gen.ServiceImpactNone
+		}
 		c := toAPICluster(row.Cluster)
 		items = append(items, gen.ClusterListItem{
 			Id: c.Id, Slug: c.Slug, Name: c.Name, Description: c.Description, Type: c.Type,
@@ -66,6 +88,7 @@ func (s *Server) ListClusters(w http.ResponseWriter, r *http.Request) {
 			CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt,
 			NodeCount: int(row.NodeCount), VipCount: int(row.VipCount),
 			Vips: nonNil(vips[row.Cluster.ID]), Drift: clusterDrift(row, now),
+			Impact: imp, ImpactedBy: nonNil(impactedBy[id]),
 		})
 	}
 	writeJSON(w, http.StatusOK, list[gen.ClusterListItem]{items})

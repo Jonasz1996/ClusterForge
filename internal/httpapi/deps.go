@@ -126,13 +126,7 @@ func depService(g *deps.Graph, sv deps.Svc) gen.DepService {
 	}
 	if e.Impact != deps.ImpactNone {
 		out.CauseId = nullable.NewNullableWithValue(e.Cause)
-		for _, id := range e.Path {
-			out.ImpactPath = append(out.ImpactPath, g.LabelFrom(sv.ID, id))
-		}
-		out.ImpactReason = g.LabelFrom(sv.ID, e.Cause) + " is down"
-		if len(e.Path) > 2 {
-			out.ImpactReason += ", via " + strings.Join(out.ImpactPath[1:len(out.ImpactPath)-1], " en ")
-		}
+		out.ImpactReason, out.ImpactPath = g.ImpactText(sv.ID)
 	}
 	return out
 }

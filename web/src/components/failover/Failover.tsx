@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
+import { NodeImpact } from "@/components/deps/ImpactList";
 import { Modal } from "@/components/Modal";
 import { ProdConfirm, prodConfirmed, useProdTotp } from "@/components/ProdConfirm";
 import { Empty } from "@/components/inventory/bits";
@@ -278,6 +279,12 @@ function StartDialog({ t, options, onClose }: { t: FailoverTest; options: Failov
         <p className="text-slate-500">
           Afbreken kan op de rapportpagina; ClusterForge {vm ? "start de VM" : `zet ${unitOf(t)}`} dan meteen weer aan.
         </p>
+        {t.vip_owner_id && (
+          <NodeImpact
+            nodeId={t.vip_owner_id}
+            title={vm ? `Wat raakt het wegvallen van ${t.vip_owner ?? "de eigenaar"}?` : `Wat raakt het als ${t.vip_owner ?? "de eigenaar"} helemaal wegvalt?`}
+          />
+        )}
         {options.prod && (
           <>
             <p>{serverGoneText(t)}</p>

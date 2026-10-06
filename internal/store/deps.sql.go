@@ -66,7 +66,7 @@ func (q *Queries) DeleteServiceDependency(ctx context.Context, id uuid.UUID) err
 }
 
 const findServiceByName = `-- name: FindServiceByName :one
-SELECT id, cluster_id, node_id, name, kind, unit, port, address, description, source, state, last_seen_at, created_at, updated_at FROM services
+SELECT id, cluster_id, node_id, name, kind, unit, port, address, description, source, state, last_seen_at, created_at, updated_at, status, status_reason, impact, impact_reason, impact_cause_id, impact_since FROM services
 WHERE cluster_id IS NOT DISTINCT FROM $1::uuid
   AND node_id IS NOT DISTINCT FROM $2::uuid
   AND lower(name) = lower($3)
@@ -98,12 +98,18 @@ func (q *Queries) FindServiceByName(ctx context.Context, arg FindServiceByNamePa
 		&i.LastSeenAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Status,
+		&i.StatusReason,
+		&i.Impact,
+		&i.ImpactReason,
+		&i.ImpactCauseID,
+		&i.ImpactSince,
 	)
 	return i, err
 }
 
 const getService = `-- name: GetService :one
-SELECT id, cluster_id, node_id, name, kind, unit, port, address, description, source, state, last_seen_at, created_at, updated_at FROM services WHERE id = $1
+SELECT id, cluster_id, node_id, name, kind, unit, port, address, description, source, state, last_seen_at, created_at, updated_at, status, status_reason, impact, impact_reason, impact_cause_id, impact_since FROM services WHERE id = $1
 `
 
 func (q *Queries) GetService(ctx context.Context, id uuid.UUID) (Service, error) {
@@ -124,6 +130,12 @@ func (q *Queries) GetService(ctx context.Context, id uuid.UUID) (Service, error)
 		&i.LastSeenAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Status,
+		&i.StatusReason,
+		&i.Impact,
+		&i.ImpactReason,
+		&i.ImpactCauseID,
+		&i.ImpactSince,
 	)
 	return i, err
 }
@@ -152,7 +164,7 @@ func (q *Queries) GetServiceDependency(ctx context.Context, id uuid.UUID) (Servi
 const insertService = `-- name: InsertService :one
 INSERT INTO services (cluster_id, node_id, name, kind, unit, port, address, description, source, state, last_seen_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-RETURNING id, cluster_id, node_id, name, kind, unit, port, address, description, source, state, last_seen_at, created_at, updated_at
+RETURNING id, cluster_id, node_id, name, kind, unit, port, address, description, source, state, last_seen_at, created_at, updated_at, status, status_reason, impact, impact_reason, impact_cause_id, impact_since
 `
 
 type InsertServiceParams struct {
@@ -199,6 +211,12 @@ func (q *Queries) InsertService(ctx context.Context, arg InsertServiceParams) (S
 		&i.LastSeenAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Status,
+		&i.StatusReason,
+		&i.Impact,
+		&i.ImpactReason,
+		&i.ImpactCauseID,
+		&i.ImpactSince,
 	)
 	return i, err
 }
@@ -242,6 +260,47 @@ func (q *Queries) InsertServiceDependency(ctx context.Context, arg InsertService
 	return i, err
 }
 
+const listClusterImpacts = `-- name: ListClusterImpacts :many
+SELECT s.cluster_id::uuid AS cluster_id, s.impact,
+       coalesce(cc.name, cn.hostname, 'extern')::text AS cause_group
+FROM services s
+JOIN services cause ON cause.id = s.impact_cause_id
+LEFT JOIN clusters cc ON cc.id = cause.cluster_id
+LEFT JOIN nodes cn ON cn.id = cause.node_id
+WHERE s.state = 'confirmed' AND s.impact <> 'none' AND s.cluster_id IS NOT NULL
+  AND cause.cluster_id IS DISTINCT FROM s.cluster_id
+ORDER BY 1, 3
+`
+
+type ListClusterImpactsRow struct {
+	ClusterID  uuid.UUID
+	Impact     string
+	CauseGroup string
+}
+
+// Per cluster de doorgegeven uitval op zijn bevestigde diensten, met de groep
+// waar ze begint. Uitval binnen het cluster zelf telt niet: dat zegt de
+// status van het cluster al.
+func (q *Queries) ListClusterImpacts(ctx context.Context) ([]ListClusterImpactsRow, error) {
+	rows, err := q.db.Query(ctx, listClusterImpacts)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListClusterImpactsRow{}
+	for rows.Next() {
+		var i ListClusterImpactsRow
+		if err := rows.Scan(&i.ClusterID, &i.Impact, &i.CauseGroup); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listDepClusters = `-- name: ListDepClusters :many
 SELECT id, name, slug, environment, type, status, status_reason FROM clusters ORDER BY name
 `
@@ -273,6 +332,63 @@ func (q *Queries) ListDepClusters(ctx context.Context) ([]ListDepClustersRow, er
 			&i.Type,
 			&i.Status,
 			&i.StatusReason,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listIncomingDependencies = `-- name: ListIncomingDependencies :many
+SELECT d.id, d.strength, d.source, p.name AS provider, c.name AS consumer,
+       coalesce(cc.name, cn.hostname, 'extern')::text AS consumer_scope
+FROM service_dependencies d
+JOIN services p ON p.id = d.to_service_id
+JOIN services c ON c.id = d.from_service_id
+LEFT JOIN clusters cc ON cc.id = c.cluster_id
+LEFT JOIN nodes cn ON cn.id = c.node_id
+WHERE (p.cluster_id = $1::uuid OR p.node_id = $2::uuid)
+  AND (c.cluster_id IS DISTINCT FROM p.cluster_id OR c.node_id IS DISTINCT FROM p.node_id)
+  AND d.state = 'confirmed' AND c.state = 'confirmed'
+ORDER BY consumer_scope, c.name, p.name
+`
+
+type ListIncomingDependenciesParams struct {
+	ClusterID *uuid.UUID
+	NodeID    *uuid.UUID
+}
+
+type ListIncomingDependenciesRow struct {
+	ID            uuid.UUID
+	Strength      string
+	Source        string
+	Provider      string
+	Consumer      string
+	ConsumerScope string
+}
+
+// De pijlen van buiten naar de diensten van een cluster of een losse node:
+// die verdwijnen met het cluster of de node, en komen in het event.
+func (q *Queries) ListIncomingDependencies(ctx context.Context, arg ListIncomingDependenciesParams) ([]ListIncomingDependenciesRow, error) {
+	rows, err := q.db.Query(ctx, listIncomingDependencies, arg.ClusterID, arg.NodeID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListIncomingDependenciesRow{}
+	for rows.Next() {
+		var i ListIncomingDependenciesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Strength,
+			&i.Source,
+			&i.Provider,
+			&i.Consumer,
+			&i.ConsumerScope,
 		); err != nil {
 			return nil, err
 		}
@@ -319,7 +435,7 @@ func (q *Queries) ListServiceDependencies(ctx context.Context) ([]ServiceDepende
 }
 
 const listServices = `-- name: ListServices :many
-SELECT id, cluster_id, node_id, name, kind, unit, port, address, description, source, state, last_seen_at, created_at, updated_at FROM services ORDER BY lower(name), id
+SELECT id, cluster_id, node_id, name, kind, unit, port, address, description, source, state, last_seen_at, created_at, updated_at, status, status_reason, impact, impact_reason, impact_cause_id, impact_since FROM services ORDER BY lower(name), id
 `
 
 func (q *Queries) ListServices(ctx context.Context) ([]Service, error) {
@@ -346,6 +462,12 @@ func (q *Queries) ListServices(ctx context.Context) ([]Service, error) {
 			&i.LastSeenAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Status,
+			&i.StatusReason,
+			&i.Impact,
+			&i.ImpactReason,
+			&i.ImpactCauseID,
+			&i.ImpactSince,
 		); err != nil {
 			return nil, err
 		}
@@ -358,7 +480,7 @@ func (q *Queries) ListServices(ctx context.Context) ([]Service, error) {
 }
 
 const lockService = `-- name: LockService :one
-SELECT id, cluster_id, node_id, name, kind, unit, port, address, description, source, state, last_seen_at, created_at, updated_at FROM services WHERE id = $1 FOR UPDATE
+SELECT id, cluster_id, node_id, name, kind, unit, port, address, description, source, state, last_seen_at, created_at, updated_at, status, status_reason, impact, impact_reason, impact_cause_id, impact_since FROM services WHERE id = $1 FOR UPDATE
 `
 
 func (q *Queries) LockService(ctx context.Context, id uuid.UUID) (Service, error) {
@@ -379,6 +501,12 @@ func (q *Queries) LockService(ctx context.Context, id uuid.UUID) (Service, error
 		&i.LastSeenAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Status,
+		&i.StatusReason,
+		&i.Impact,
+		&i.ImpactReason,
+		&i.ImpactCauseID,
+		&i.ImpactSince,
 	)
 	return i, err
 }
@@ -404,6 +532,38 @@ func (q *Queries) LockServiceDependency(ctx context.Context, id uuid.UUID) (Serv
 	return i, err
 }
 
+const setServiceStatus = `-- name: SetServiceStatus :exec
+UPDATE services
+SET status = $1, status_reason = $2, impact = $3, impact_reason = $4,
+    impact_cause_id = $5, impact_since = $6
+WHERE id = $7
+`
+
+type SetServiceStatusParams struct {
+	Status        *string
+	StatusReason  string
+	Impact        string
+	ImpactReason  string
+	ImpactCauseID *uuid.UUID
+	ImpactSince   *time.Time
+	ID            uuid.UUID
+}
+
+// deps.Evaluate schrijft de status en impact; updated_at blijft staan, want
+// die zegt wanneer iemand de dienst wijzigde.
+func (q *Queries) SetServiceStatus(ctx context.Context, arg SetServiceStatusParams) error {
+	_, err := q.db.Exec(ctx, setServiceStatus,
+		arg.Status,
+		arg.StatusReason,
+		arg.Impact,
+		arg.ImpactReason,
+		arg.ImpactCauseID,
+		arg.ImpactSince,
+		arg.ID,
+	)
+	return err
+}
+
 const touchServices = `-- name: TouchServices :exec
 UPDATE services SET last_seen_at = $1
 WHERE cluster_id = $2 AND unit = ANY($3::text[])
@@ -426,7 +586,7 @@ UPDATE services
 SET name = $1, kind = $2, unit = $3, port = $4, address = $5, description = $6,
     source = $7, state = $8, updated_at = now()
 WHERE id = $9
-RETURNING id, cluster_id, node_id, name, kind, unit, port, address, description, source, state, last_seen_at, created_at, updated_at
+RETURNING id, cluster_id, node_id, name, kind, unit, port, address, description, source, state, last_seen_at, created_at, updated_at, status, status_reason, impact, impact_reason, impact_cause_id, impact_since
 `
 
 type UpdateServiceParams struct {
@@ -469,6 +629,12 @@ func (q *Queries) UpdateService(ctx context.Context, arg UpdateServiceParams) (S
 		&i.LastSeenAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Status,
+		&i.StatusReason,
+		&i.Impact,
+		&i.ImpactReason,
+		&i.ImpactCauseID,
+		&i.ImpactSince,
 	)
 	return i, err
 }

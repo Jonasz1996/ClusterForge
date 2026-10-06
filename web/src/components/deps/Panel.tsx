@@ -18,10 +18,10 @@ import {
   useUpdateService,
   type DepEdge,
   type DepService,
-  type Impact,
   type Index,
 } from "@/lib/deps";
 import { DependencyDialog, ServiceDialog } from "./Dialogs";
+import { ImpactList } from "./ImpactList";
 
 export function StatusDot({ status, className }: { status: DepService["status"]; className?: string }) {
   return <span className={cx("inline-block size-2 shrink-0 rounded-full", serviceStatuses[status].dot, className)} aria-hidden />;
@@ -308,44 +308,5 @@ function DeleteService({ s, arrows, onClose, onDeleted }: { s: DepService; arrow
         </div>
       </div>
     </Modal>
-  );
-}
-
-// ImpactList is het antwoord op Wat raakt uitval?, per groep met prod
-// bovenaan.
-export function ImpactList({ impact }: { impact: Impact }) {
-  const byGroup = impact.groups.map((g) => ({ g, items: impact.items.filter((i) => i.group_id === g.group_id) }));
-  return (
-    <section className="rounded-md border border-slate-200 p-3 dark:border-slate-800" aria-label="Wat raakt uitval">
-      <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
-        <h3 className="font-medium">Wat raakt uitval van {impact.target.name}?</h3>
-        <span className="text-xs text-slate-500">bekende afhankelijkheden</span>
-      </div>
-      {impact.items.length === 0 ? (
-        <p className="text-slate-500">Er hangt geen bekende dienst van af.</p>
-      ) : (
-        <div className="space-y-3">
-          {byGroup.map(({ g, items }) => (
-            <div key={g.group_id}>
-              <div className="mb-1 flex items-center gap-1.5 text-xs font-medium tracking-wide text-slate-500 uppercase">
-                {g.environment && <EnvBadge env={g.environment} />}
-                <span>{g.name}</span>
-              </div>
-              <ul className="space-y-1">
-                {items.map((it) => (
-                  <li key={it.service_id} className="grid grid-cols-[auto_1fr] items-baseline gap-x-2">
-                    <Badge tone={it.impact === "down" ? "red" : "amber"}>{it.impact === "down" ? "down" : "verminderd"}</Badge>
-                    <span>
-                      <span className="font-medium">{it.name}</span>
-                      <span className="text-slate-500"> · {it.reason}</span>
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
-        </div>
-      )}
-    </section>
   );
 }
