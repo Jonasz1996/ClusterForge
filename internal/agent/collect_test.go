@@ -69,6 +69,23 @@ func TestParseSystemctlShow(t *testing.T) {
 	}
 }
 
+// De PostgreSQL-instantie komt via een patroon in dezelfde aanroep mee.
+func TestServicesWithPattern(t *testing.T) {
+	var args []string
+	c := &Collector{Run: func(_ context.Context, name string, a ...string) ([]byte, error) {
+		args = a
+		return []byte("Id=postgresql.service\nLoadState=loaded\nActiveState=active\nUnitFileState=enabled\n\n" +
+			"Id=postgresql@16-main.service\nLoadState=loaded\nActiveState=failed\nUnitFileState=enabled-runtime\n"), nil
+	}}
+	got := c.services(context.Background())
+	if !slices.Contains(args, "postgresql@*-main.service") || !slices.Contains(args, "redis-server.service") || !slices.Contains(args, "php8.4-fpm.service") {
+		t.Fatalf("systemctl %v", args)
+	}
+	if len(got) != 2 || got[1].Name != "postgresql@16-main" || got[1].Active != "failed" {
+		t.Fatalf("got %+v", got)
+	}
+}
+
 func TestFactsFromRoot(t *testing.T) {
 	root := t.TempDir()
 	writeFile(t, root, "/etc/os-release", "PRETTY_NAME=\"Debian GNU/Linux 13 (trixie)\"\nID=debian\nVERSION_ID=\"13\"\nVERSION_CODENAME=trixie\n")

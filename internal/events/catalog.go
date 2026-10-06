@@ -16,6 +16,7 @@ const (
 	CategoryBackups   Category = "backups"
 	CategoryDrift     Category = "drift"
 	CategoryFailover  Category = "failover"
+	CategoryDeps      Category = "dependencies"
 	CategoryStatus    Category = "status"
 )
 
@@ -33,6 +34,7 @@ var Categories = []struct {
 	{CategoryBackups, "Back-ups"},
 	{CategoryDrift, "Drift"},
 	{CategoryFailover, "Failovertests"},
+	{CategoryDeps, "Afhankelijkheden"},
 	{CategoryStatus, "Status"},
 }
 
@@ -132,6 +134,13 @@ var Known = map[string]Spec{
 	"failover.fault_injected": {CategoryFailover, "Storing van een failovertest veroorzaakt"},
 	"failover.fault_cleared":  {CategoryFailover, "Storing van een failovertest opgeheven"},
 	"failover.finished":       {CategoryFailover, "Failovertest klaar"},
+
+	"service.created":    {CategoryDeps, "Dienst toegevoegd"},
+	"service.updated":    {CategoryDeps, "Dienst gewijzigd"},
+	"service.deleted":    {CategoryDeps, "Dienst verwijderd"},
+	"dependency.created": {CategoryDeps, "Afhankelijkheid toegevoegd"},
+	"dependency.updated": {CategoryDeps, "Afhankelijkheid gewijzigd"},
+	"dependency.deleted": {CategoryDeps, "Afhankelijkheid verwijderd"},
 
 	"node.status_changed":    {CategoryStatus, "Status van node gewijzigd"},
 	"cluster.status_changed": {CategoryStatus, "Status van cluster gewijzigd"},

@@ -313,6 +313,14 @@ func TestDeploy(t *testing.T) {
 		len(cl.Nodes) != 2 || cl.Nodes[0].Lifecycle != "provisioning" || len(cl.Vips) != 1 || cl.Vips[0].Vrid == nil || *cl.Vips[0].Vrid != 51 {
 		t.Fatalf("cluster tijdens de uitrol: %+v", cl)
 	}
+	// De diensten van de template staan meteen in de graaf, nog onbekend
+	// zolang de nodes worden opgezet.
+	var dg depGraph
+	c.do("GET", "/api/v1/dependency-graph?cluster_id="+res.ClusterID, nil, &dg)
+	if got := strings.Join(dg.names(), " "); got != "Web/keepalived Web/nginx" || len(dg.Edges) != 1 || dg.Edges[0].Source != "template" ||
+		dg.Edges[0].Strength != "hard" || dg.svc(t, "Web", "nginx").Status != "unknown" || dg.svc(t, "Web", "keepalived").Status != "unknown" {
+		t.Fatalf("diensten uit de template: %s %+v", got, dg)
+	}
 
 	var j retryJob
 	eventually(t, "uitrol mislukt", func() bool {
@@ -438,7 +446,7 @@ func TestDeploy(t *testing.T) {
 	// uitrol op de nodes zette.
 	clusterID := uuid.MustParse(res.ClusterID)
 	desired, err := e.deploy.Desired(context.Background(), clusterID)
-	if err != nil || desired.Revision != 1 || desired.Template.Version != "1.0.0" || len(desired.Membership) != 0 {
+	if err != nil || desired.Revision != 1 || desired.Template.Version != kaLatest() || len(desired.Membership) != 0 {
 		t.Fatalf("gewenste staat: %+v %v", desired, err)
 	}
 	for _, n := range cl.Nodes {
@@ -491,7 +499,7 @@ func TestDeploy(t *testing.T) {
 	if s := v.do("GET", "/api/v1/clusters/"+res.ClusterID+"/spec-revisions", nil, &hist); s != 200 {
 		t.Fatalf("historie: %d", s)
 	}
-	if hist.Template == nil || hist.Template.Version != "1.0.0" || !hist.Template.Available || hist.Revision != 1 || len(hist.Notes) != 0 ||
+	if hist.Template == nil || hist.Template.Version != kaLatest() || !hist.Template.Available || hist.Revision != 1 || len(hist.Notes) != 0 ||
 		len(hist.Items) != 1 || hist.Items[0].CreatedBy == nil || hist.Items[0].CreatedBy.Name != "admin" ||
 		!slices.Equal(hist.Items[0].Nodes, []string{"web-01", "web-02"}) || len(hist.Items[0].Changes) != 0 {
 		t.Fatalf("historie: %+v", hist)
@@ -527,8 +535,8 @@ func TestDeploy(t *testing.T) {
 	if m, _ := e.deploy.MissingTemplates(context.Background()); !slices.Equal(m, []string{"Web gebruikt keepalived-nginx 0.9.0"}) {
 		t.Fatalf("ontbrekende versies: %v", m)
 	}
-	if _, err := e.pool.Exec(context.Background(), `UPDATE clusters SET template_version = '1.0.0',
-		spec = jsonb_set(spec, '{template,version}', '"1.0.0"') WHERE id = $1`, res.ClusterID); err != nil {
+	if _, err := e.pool.Exec(context.Background(), `UPDATE clusters SET template_version = $2,
+		spec = jsonb_set(spec, '{template,version}', to_jsonb($2::text)) WHERE id = $1`, res.ClusterID, kaLatest()); err != nil {
 		t.Fatal(err)
 	}
 

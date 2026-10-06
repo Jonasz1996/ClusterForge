@@ -26,6 +26,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/backups"
 	"github.com/Jonasz1996/clusterforge/internal/config"
 	"github.com/Jonasz1996/clusterforge/internal/deploy"
+	"github.com/Jonasz1996/clusterforge/internal/deps"
 	"github.com/Jonasz1996/clusterforge/internal/drift"
 	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/failover"
@@ -59,6 +60,7 @@ type testEnv struct {
 	backups *backups.Service
 	drift   *drift.Service
 	fo      *failover.Service
+	deps    *deps.Service
 	conns   *testConns
 
 	// De runner heeft een eigen context, zodat een test hem kan herstarten.
@@ -131,6 +133,8 @@ func newTestEnv(t *testing.T) *testEnv {
 	fo.Changed = eval.Kick
 	fo.ProbeInterval, fo.Gate.Poll, fo.Retry = 20*time.Millisecond, 20*time.Millisecond, 50*time.Millisecond
 	fo.ReturnTimeout, fo.Fresh, fo.EmergencyTimeout = 8*time.Second, 2*time.Second, 3*time.Second
+	// De resolver draait niet vanzelf; een test roept Resolve aan.
+	dps := deps.NewService(pool, ev, log)
 	var wg sync.WaitGroup
 	wg.Add(2)
 	go func() { defer wg.Done(); hub.Run(runCtx) }()
@@ -141,12 +145,12 @@ func newTestEnv(t *testing.T) *testEnv {
 	}
 	api := New(Deps{
 		Config: cfg, Log: log, Pool: pool, Auth: a, Bus: bus, Hub: hub, Proxmox: pve, Jobs: runner, Lifecycle: life,
-		Deploy: dep, Backups: bk, Drift: drf, Failover: fo, Version: "test",
+		Deploy: dep, Backups: bk, Drift: drf, Failover: fo, Deps: dps, Version: "test",
 	})
 	srv := httptest.NewServer(api.Handler())
 	t.Cleanup(srv.Close)
 	e := &testEnv{t: t, srv: srv, auth: a, pool: pool, api: api, bus: bus, eval: eval, vm: vm, pve: pve, jobs: runner, life: life, deploy: dep,
-		backups: bk, drift: drf, fo: fo, conns: conns, runCtx: runCtx}
+		backups: bk, drift: drf, fo: fo, deps: dps, conns: conns, runCtx: runCtx}
 	e.startRunner()
 	t.Cleanup(func() {
 		stop()

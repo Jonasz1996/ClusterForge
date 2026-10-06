@@ -1367,6 +1367,149 @@ paths:
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
         "502": { $ref: "#/components/responses/Error" }
+  /dependency-graph:
+    get:
+      operationId: getDependencyGraph
+      summary: De afhankelijkheidsgraaf in één aanroep
+      description: |
+        Groepen (clusters, losse nodes en Extern), diensten met hun eigen
+        status, de doorgegeven uitval en hun instanties, en de pijlen. De
+        status wordt over de hele graaf uitgerekend, ook met een filter. Met
+        level=cluster komen er geen diensten en zijn de pijlen tussen groepen
+        samengevoegd.
+      parameters:
+        - { name: cluster_id, in: query, required: false, description: Dat cluster plus zijn directe buren, schema: { type: string, format: uuid } }
+        - { name: environment, in: query, required: false, description: De clusters van die omgeving plus hun directe buren, schema: { $ref: "#/components/schemas/Environment" } }
+        - { name: include_suggested, in: query, required: false, description: Ook voorgestelde diensten, schema: { type: boolean } }
+        - { name: include_ignored, in: query, required: false, description: Ook genegeerde diensten, om ze terug te zetten, schema: { type: boolean } }
+        - { name: level, in: query, required: false, schema: { type: string, enum: [service, cluster] } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DependencyGraph" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+  /services:
+    post:
+      operationId: createService
+      summary: Een dienst aanmaken in een cluster, op een losse node of extern (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ServiceInput" }
+      responses:
+        "201":
+          description: Aangemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DepService" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /services/{serviceId}:
+    parameters:
+      - { name: serviceId, in: path, required: true, schema: { type: string, format: uuid } }
+    patch:
+      operationId: updateService
+      summary: Een dienst wijzigen, of een voorstel bevestigen, negeren of terugzetten (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ServicePatch" }
+      responses:
+        "200":
+          description: Gewijzigd
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DepService" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteService
+      summary: Een dienst met zijn pijlen verwijderen (admin)
+      description: Een dienst met een unit blijft als genegeerde rij staan, zodat hij niet opnieuw voorgesteld wordt.
+      responses:
+        "204": { description: Verwijderd }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /dependencies:
+    post:
+      operationId: createDependency
+      summary: Vastleggen dat een dienst van een andere afhangt (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DependencyInput" }
+      responses:
+        "201":
+          description: Aangemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DepEdge" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /dependencies/{dependencyId}:
+    parameters:
+      - { name: dependencyId, in: path, required: true, schema: { type: string, format: uuid } }
+    patch:
+      operationId: updateDependency
+      summary: Sterkte of notitie van een afhankelijkheid wijzigen (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DependencyPatch" }
+      responses:
+        "200":
+          description: Gewijzigd
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DepEdge" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteDependency
+      summary: Een afhankelijkheid verwijderen (admin)
+      responses:
+        "204": { description: Verwijderd }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /impact:
+    get:
+      operationId: getImpact
+      summary: Wat raakt uitval van een dienst, cluster of node
+      description: |
+        Precies één van service_id, cluster_id en node_id. Alleen bekende
+        afhankelijkheden; prod staat bovenaan. Bij een node telt een tweede
+        gezonde instantie mee, net als de overname van het VIP.
+      parameters:
+        - { name: service_id, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: cluster_id, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: node_id, in: query, required: false, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Impact" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
 components:
   securitySchemes:
     session:
@@ -2887,6 +3030,181 @@ components:
         name: { type: string }
         count: { type: integer, nullable: true, description: "Vast aantal nodes, of null als een parameter het bepaalt" }
         count_param: { type: string, nullable: true, description: De parameter met het aantal nodes }
+    ServiceKind:
+      type: string
+      description: De soort van een dienst; een vaste lijst in internal/deps
+      enum: [web, lb, vip, database, cache, queue, storage, dns, cron, container, app, external, other]
+    ServiceSource:
+      type: string
+      enum: [template, manual, discovered]
+    ServiceState:
+      type: string
+      enum: [confirmed, suggested, ignored]
+    ServiceStatus:
+      type: string
+      description: De eigen status uit de heartbeats; unknown zonder unit, zonder instanties of extern
+      enum: [unknown, healthy, degraded, down]
+    ServiceImpact:
+      type: string
+      description: Wat een afhankelijkheid doet; none zonder uitval
+      enum: [none, degraded, down]
+    DependencyStrength:
+      type: string
+      enum: [hard, soft]
+    DepGroup:
+      type: object
+      required: [id, kind, name, cluster_id, node_id, environment, status, status_reason, impact, impacted_by, suggestions]
+      properties:
+        id: { type: string, description: "cluster:<id>, node:<id> of external" }
+        kind: { type: string, enum: [cluster, node, external] }
+        name: { type: string }
+        cluster_id: { type: string, format: uuid, nullable: true }
+        node_id: { type: string, format: uuid, nullable: true }
+        environment:
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/Environment" }]
+        status: { $ref: "#/components/schemas/Status" }
+        status_reason: { type: string }
+        impact: { $ref: "#/components/schemas/ServiceImpact" }
+        impacted_by: { type: array, items: { type: string }, description: De groepen waar doorgegeven uitval vandaan komt }
+        suggestions: { type: integer, description: Voorgestelde diensten in deze groep }
+    DepInstance:
+      type: object
+      required: [node_id, hostname, state, running]
+      properties:
+        node_id: { type: string, format: uuid }
+        hostname: { type: string }
+        state: { type: string, description: ActiveState van de unit; leeg zonder verse heartbeat }
+        running: { type: boolean }
+    DepService:
+      type: object
+      required: [id, group_id, cluster_id, node_id, name, kind, unit, port, address, description, source, state, status,
+        status_reason, impact, impact_reason, impact_path, cause_id, instances, last_seen_at, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        group_id: { type: string }
+        cluster_id: { type: string, format: uuid, nullable: true }
+        node_id: { type: string, format: uuid, nullable: true }
+        name: { type: string }
+        kind: { $ref: "#/components/schemas/ServiceKind" }
+        unit: { type: string }
+        port: { type: integer, nullable: true }
+        address: { type: string }
+        description: { type: string }
+        source: { $ref: "#/components/schemas/ServiceSource" }
+        state: { $ref: "#/components/schemas/ServiceState" }
+        status: { $ref: "#/components/schemas/ServiceStatus" }
+        status_reason: { type: string }
+        impact: { $ref: "#/components/schemas/ServiceImpact" }
+        impact_reason: { type: string, description: "Zoals: mariadb in db-prod is down, via php8.2-fpm" }
+        impact_path: { type: array, items: { type: string }, description: Van de oorzaak naar deze dienst }
+        cause_id: { type: string, format: uuid, nullable: true }
+        instances: { type: array, items: { $ref: "#/components/schemas/DepInstance" } }
+        last_seen_at: { type: string, format: date-time, nullable: true, description: Wanneer de resolver de unit het laatst zag }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    DepEdge:
+      type: object
+      required: [id, from, to, strength, source, state, note, affected, count]
+      properties:
+        id: { type: string, description: "Het id van de afhankelijkheid; bij level=cluster <van>|<naar>" }
+        from: { type: string, description: De afnemer (dienst-id, of groep-id bij level=cluster) }
+        to: { type: string, description: De leverancier }
+        strength: { $ref: "#/components/schemas/DependencyStrength" }
+        source: { $ref: "#/components/schemas/ServiceSource" }
+        state: { $ref: "#/components/schemas/ServiceState" }
+        note: { type: string }
+        affected: { type: boolean, description: Uitval bereikte de afnemer langs deze pijl }
+        count: { type: integer, description: Hoeveel pijlen samengevoegd zijn; 1 per dienst }
+    DependencyGraph:
+      type: object
+      required: [level, groups, services, edges, suggestions]
+      properties:
+        level: { type: string, enum: [service, cluster] }
+        groups: { type: array, items: { $ref: "#/components/schemas/DepGroup" } }
+        services: { type: array, items: { $ref: "#/components/schemas/DepService" } }
+        edges: { type: array, items: { $ref: "#/components/schemas/DepEdge" } }
+        suggestions: { type: integer, description: Voorgestelde diensten binnen het filter }
+    ServiceInput:
+      type: object
+      required: [name, kind]
+      properties:
+        cluster_id: { type: string, format: uuid }
+        node_id: { type: string, format: uuid, description: Een losse node zonder cluster }
+        name: { type: string }
+        kind: { $ref: "#/components/schemas/ServiceKind" }
+        unit: { type: string }
+        port: { type: integer }
+        address: { type: string, description: Alleen extern, met port }
+        description: { type: string }
+    ServicePatch:
+      type: object
+      properties:
+        name: { type: string }
+        kind: { $ref: "#/components/schemas/ServiceKind" }
+        unit: { type: string }
+        port: { type: integer, nullable: true }
+        address: { type: string }
+        description: { type: string }
+        state: { $ref: "#/components/schemas/ServiceState" }
+    DependencyInput:
+      type: object
+      required: [from_service_id, to_service_id]
+      properties:
+        from_service_id: { type: string, format: uuid, description: De afnemer }
+        to_service_id: { type: string, format: uuid, description: De leverancier }
+        strength: { $ref: "#/components/schemas/DependencyStrength" }
+        note: { type: string }
+    DependencyPatch:
+      type: object
+      properties:
+        strength: { $ref: "#/components/schemas/DependencyStrength" }
+        note: { type: string }
+    ImpactItem:
+      type: object
+      required: [service_id, name, kind, group_id, group_name, environment, impact, direct, reason, path, dependency_id, source]
+      properties:
+        service_id: { type: string, format: uuid }
+        name: { type: string }
+        kind: { $ref: "#/components/schemas/ServiceKind" }
+        group_id: { type: string }
+        group_name: { type: string }
+        environment:
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/Environment" }]
+        impact: { $ref: "#/components/schemas/ServiceImpact" }
+        direct: { type: boolean, description: Geraakt door de storing zelf, niet langs een pijl }
+        reason: { type: string, description: "Zoals: hangt hard af van mariadb in db-prod · handmatig" }
+        path: { type: array, items: { type: string }, description: Van de oorzaak naar deze dienst }
+        dependency_id: { type: string, format: uuid, nullable: true, description: De laatste pijl van het pad }
+        source:
+          nullable: true
+          description: De bron van die pijl
+          allOf: [{ $ref: "#/components/schemas/ServiceSource" }]
+    ImpactGroup:
+      type: object
+      required: [group_id, name, environment, impact, count]
+      properties:
+        group_id: { type: string }
+        name: { type: string }
+        environment:
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/Environment" }]
+        impact: { $ref: "#/components/schemas/ServiceImpact" }
+        count: { type: integer }
+    Impact:
+      type: object
+      required: [target, items, groups]
+      properties:
+        target:
+          type: object
+          required: [kind, id, name]
+          properties:
+            kind: { type: string, enum: [service, cluster, node] }
+            id: { type: string, format: uuid }
+            name: { type: string, description: "Zoals: mariadb in db-prod" }
+        items: { type: array, items: { $ref: "#/components/schemas/ImpactItem" } }
+        groups: { type: array, items: { $ref: "#/components/schemas/ImpactGroup" }, description: Per groep de ergste impact, prod bovenaan }
     Template:
       type: object
       required: [name, version, title, description, cluster_type, params, roles]

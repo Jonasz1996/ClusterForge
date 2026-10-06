@@ -146,6 +146,11 @@ roles:
 		"parametertype":    {strings.Replace(base, "type: int", "type: getal", 1) + "      - package: { names: [x] }\n", nil, "onbekend type"},
 		"default te groot": {strings.Replace(base, "default: 1", "default: 1, max: 0", 1) + "      - package: { names: [x] }\n", nil, ""},
 		"yaml-veld":        {base + "      - package: { names: [x] }\nkleur: rood\n", nil, "kleur"},
+		"depends_on weg":   {base + "      - package: { names: [x] }\nservices:\n  - { name: a, kind: web, depends_on: [b] }\n", nil, "staat niet in de template"},
+		"op zichzelf":      {base + "      - package: { names: [x] }\nservices:\n  - { name: a, kind: web, depends_on: [a] }\n", nil, "van zichzelf"},
+		"dubbele dienst":   {base + "      - package: { names: [x] }\nservices:\n  - { name: a, kind: web }\n  - { name: a, kind: vip }\n", nil, "twee keer"},
+		"sterkte":          {base + "      - package: { names: [x] }\nservices:\n  - { name: a, kind: web, depends_on: [b], strength: sterk }\n  - { name: b, kind: vip }\n", nil, "hard of soft"},
+		"zonder soort":     {base + "      - package: { names: [x] }\nservices:\n  - { name: a }\n", nil, "kind"},
 	} {
 		fsys := fstest.MapFS{"template.yaml": {Data: []byte(tc.yaml)}}
 		for p, c := range tc.files {

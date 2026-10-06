@@ -28,6 +28,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/backups"
 	"github.com/Jonasz1996/clusterforge/internal/config"
 	"github.com/Jonasz1996/clusterforge/internal/deploy"
+	"github.com/Jonasz1996/clusterforge/internal/deps"
 	"github.com/Jonasz1996/clusterforge/internal/drift"
 	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/failover"
@@ -184,6 +185,8 @@ func serve() error {
 	go pve.Run(ctx)
 	go bk.Run(ctx)
 	go drf.Run(ctx)
+	dps := deps.NewService(pool, ev, log)
+	go dps.Run(ctx)
 	jobsDone := make(chan struct{})
 	go func() {
 		defer close(jobsDone)
@@ -194,7 +197,7 @@ func serve() error {
 		Addr: cfg.Listen,
 		Handler: httpapi.New(httpapi.Deps{
 			Config: cfg, Log: log, Pool: pool, Auth: authSvc, Bus: bus, Hub: hub, Proxmox: pve, Jobs: runner,
-			Lifecycle: life, Deploy: dep, Backups: bk, Drift: drf, Failover: fo, Version: version,
+			Lifecycle: life, Deploy: dep, Backups: bk, Drift: drf, Failover: fo, Deps: dps, Version: version,
 		}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,

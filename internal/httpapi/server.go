@@ -18,6 +18,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/backups"
 	"github.com/Jonasz1996/clusterforge/internal/config"
 	"github.com/Jonasz1996/clusterforge/internal/deploy"
+	"github.com/Jonasz1996/clusterforge/internal/deps"
 	"github.com/Jonasz1996/clusterforge/internal/drift"
 	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/failover"
@@ -52,6 +53,7 @@ type Server struct {
 	backups      *backups.Service
 	drift        *drift.Service
 	failover     *failover.Service
+	deps         *deps.Service
 	version      string
 	loginLimiter *ipLimiter
 	// enrollLimiter remt het raden van enrollmenttokens.
@@ -83,7 +85,9 @@ type Deps struct {
 	Drift *drift.Service
 	// Failover voert failovertests uit.
 	Failover *failover.Service
-	Version  string
+	// Deps beheert diensten en afhankelijkheden.
+	Deps    *deps.Service
+	Version string
 }
 
 func New(d Deps) *Server {
@@ -110,6 +114,7 @@ func New(d Deps) *Server {
 		backups:  d.Backups,
 		drift:    d.Drift,
 		failover: d.Failover,
+		deps:     d.Deps,
 		version:  d.Version,
 		// 10 pogingen direct, daarna één per 6 seconden per IP-adres.
 		loginLimiter:  newIPLimiter(6*time.Second, 10),

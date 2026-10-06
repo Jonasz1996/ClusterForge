@@ -1,0 +1,40 @@
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}). Wijzigingen hier
+# worden bij de volgende uitrol overschreven.
+
+global_defs {
+    router_id {{ .node.hostname }}
+    enable_script_security
+    script_user root
+}
+
+# Valt Nginx uit, dan geeft deze node het VIP af.
+vrrp_script chk_nginx {
+    script "/usr/bin/systemctl is-active --quiet nginx"
+    interval 2
+    fall 2
+    rise 2
+}
+
+vrrp_instance VI_{{ .params.vrid }} {
+    state BACKUP
+    interface {{ .node.interface }}
+    virtual_router_id {{ .params.vrid }}
+    priority {{ sub 160 (mul .node.index 10) }}
+    advert_int 1
+    unicast_src_ip {{ .node.address }}
+    unicast_peer {
+{{- range .peers }}
+        {{ .address }}
+{{- end }}
+    }
+    authentication {
+        auth_type PASS
+        auth_pass {{ .params.auth_pass }}
+    }
+    virtual_ipaddress {
+        {{ .params.vip }}/{{ .node.prefix }} dev {{ .node.interface }}
+    }
+    track_script {
+        chk_nginx
+    }
+}

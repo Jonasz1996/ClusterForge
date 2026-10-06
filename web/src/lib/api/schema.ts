@@ -1226,6 +1226,129 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/dependency-graph": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * De afhankelijkheidsgraaf in één aanroep
+         * @description Groepen (clusters, losse nodes en Extern), diensten met hun eigen
+         *     status, de doorgegeven uitval en hun instanties, en de pijlen. De
+         *     status wordt over de hele graaf uitgerekend, ook met een filter. Met
+         *     level=cluster komen er geen diensten en zijn de pijlen tussen groepen
+         *     samengevoegd.
+         */
+        get: operations["getDependencyGraph"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/services": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Een dienst aanmaken in een cluster, op een losse node of extern (admin) */
+        post: operations["createService"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/services/{serviceId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serviceId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Een dienst met zijn pijlen verwijderen (admin)
+         * @description Een dienst met een unit blijft als genegeerde rij staan, zodat hij niet opnieuw voorgesteld wordt.
+         */
+        delete: operations["deleteService"];
+        options?: never;
+        head?: never;
+        /** Een dienst wijzigen, of een voorstel bevestigen, negeren of terugzetten (admin) */
+        patch: operations["updateService"];
+        trace?: never;
+    };
+    "/dependencies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Vastleggen dat een dienst van een andere afhangt (admin) */
+        post: operations["createDependency"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/dependencies/{dependencyId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                dependencyId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Een afhankelijkheid verwijderen (admin) */
+        delete: operations["deleteDependency"];
+        options?: never;
+        head?: never;
+        /** Sterkte of notitie van een afhankelijkheid wijzigen (admin) */
+        patch: operations["updateDependency"];
+        trace?: never;
+    };
+    "/impact": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Wat raakt uitval van een dienst, cluster of node
+         * @description Precies één van service_id, cluster_id en node_id. Alleen bekende
+         *     afhankelijkheden; prod staat bovenaan. Bij een node telt een tweede
+         *     gezonde instantie mee, net als de overname van het VIP.
+         */
+        get: operations["getImpact"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2561,6 +2684,201 @@ export interface components {
             count: number | null;
             /** @description De parameter met het aantal nodes */
             count_param: string | null;
+        };
+        /**
+         * @description De soort van een dienst; een vaste lijst in internal/deps
+         * @enum {string}
+         */
+        ServiceKind: "web" | "lb" | "vip" | "database" | "cache" | "queue" | "storage" | "dns" | "cron" | "container" | "app" | "external" | "other";
+        /** @enum {string} */
+        ServiceSource: "template" | "manual" | "discovered";
+        /** @enum {string} */
+        ServiceState: "confirmed" | "suggested" | "ignored";
+        /**
+         * @description De eigen status uit de heartbeats; unknown zonder unit, zonder instanties of extern
+         * @enum {string}
+         */
+        ServiceStatus: "unknown" | "healthy" | "degraded" | "down";
+        /**
+         * @description Wat een afhankelijkheid doet; none zonder uitval
+         * @enum {string}
+         */
+        ServiceImpact: "none" | "degraded" | "down";
+        /** @enum {string} */
+        DependencyStrength: "hard" | "soft";
+        DepGroup: {
+            /** @description cluster:<id>, node:<id> of external */
+            id: string;
+            /** @enum {string} */
+            kind: "cluster" | "node" | "external";
+            name: string;
+            /** Format: uuid */
+            cluster_id: string | null;
+            /** Format: uuid */
+            node_id: string | null;
+            environment: components["schemas"]["Environment"] | null;
+            status: components["schemas"]["Status"];
+            status_reason: string;
+            impact: components["schemas"]["ServiceImpact"];
+            /** @description De groepen waar doorgegeven uitval vandaan komt */
+            impacted_by: string[];
+            /** @description Voorgestelde diensten in deze groep */
+            suggestions: number;
+        };
+        DepInstance: {
+            /** Format: uuid */
+            node_id: string;
+            hostname: string;
+            /** @description ActiveState van de unit; leeg zonder verse heartbeat */
+            state: string;
+            running: boolean;
+        };
+        DepService: {
+            /** Format: uuid */
+            id: string;
+            group_id: string;
+            /** Format: uuid */
+            cluster_id: string | null;
+            /** Format: uuid */
+            node_id: string | null;
+            name: string;
+            kind: components["schemas"]["ServiceKind"];
+            unit: string;
+            port: number | null;
+            address: string;
+            description: string;
+            source: components["schemas"]["ServiceSource"];
+            state: components["schemas"]["ServiceState"];
+            status: components["schemas"]["ServiceStatus"];
+            status_reason: string;
+            impact: components["schemas"]["ServiceImpact"];
+            /** @description Zoals: mariadb in db-prod is down, via php8.2-fpm */
+            impact_reason: string;
+            /** @description Van de oorzaak naar deze dienst */
+            impact_path: string[];
+            /** Format: uuid */
+            cause_id: string | null;
+            instances: components["schemas"]["DepInstance"][];
+            /**
+             * Format: date-time
+             * @description Wanneer de resolver de unit het laatst zag
+             */
+            last_seen_at: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        DepEdge: {
+            /** @description Het id van de afhankelijkheid; bij level=cluster <van>|<naar> */
+            id: string;
+            /** @description De afnemer (dienst-id */
+            from: string;
+            /** @description De leverancier */
+            to: string;
+            strength: components["schemas"]["DependencyStrength"];
+            source: components["schemas"]["ServiceSource"];
+            state: components["schemas"]["ServiceState"];
+            note: string;
+            /** @description Uitval bereikte de afnemer langs deze pijl */
+            affected: boolean;
+            /** @description Hoeveel pijlen samengevoegd zijn; 1 per dienst */
+            count: number;
+        };
+        DependencyGraph: {
+            /** @enum {string} */
+            level: "service" | "cluster";
+            groups: components["schemas"]["DepGroup"][];
+            services: components["schemas"]["DepService"][];
+            edges: components["schemas"]["DepEdge"][];
+            /** @description Voorgestelde diensten binnen het filter */
+            suggestions: number;
+        };
+        ServiceInput: {
+            /** Format: uuid */
+            cluster_id?: string;
+            /**
+             * Format: uuid
+             * @description Een losse node zonder cluster
+             */
+            node_id?: string;
+            name: string;
+            kind: components["schemas"]["ServiceKind"];
+            unit?: string;
+            port?: number;
+            /** @description Alleen extern */
+            address?: string;
+            description?: string;
+        };
+        ServicePatch: {
+            name?: string;
+            kind?: components["schemas"]["ServiceKind"];
+            unit?: string;
+            port?: number | null;
+            address?: string;
+            description?: string;
+            state?: components["schemas"]["ServiceState"];
+        };
+        DependencyInput: {
+            /**
+             * Format: uuid
+             * @description De afnemer
+             */
+            from_service_id: string;
+            /**
+             * Format: uuid
+             * @description De leverancier
+             */
+            to_service_id: string;
+            strength?: components["schemas"]["DependencyStrength"];
+            note?: string;
+        };
+        DependencyPatch: {
+            strength?: components["schemas"]["DependencyStrength"];
+            note?: string;
+        };
+        ImpactItem: {
+            /** Format: uuid */
+            service_id: string;
+            name: string;
+            kind: components["schemas"]["ServiceKind"];
+            group_id: string;
+            group_name: string;
+            environment: components["schemas"]["Environment"] | null;
+            impact: components["schemas"]["ServiceImpact"];
+            /** @description Geraakt door de storing zelf */
+            direct: boolean;
+            /** @description Zoals: hangt hard af van mariadb in db-prod · handmatig */
+            reason: string;
+            /** @description Van de oorzaak naar deze dienst */
+            path: string[];
+            /**
+             * Format: uuid
+             * @description De laatste pijl van het pad
+             */
+            dependency_id: string | null;
+            /** @description De bron van die pijl */
+            source: components["schemas"]["ServiceSource"] | null;
+        };
+        ImpactGroup: {
+            group_id: string;
+            name: string;
+            environment: components["schemas"]["Environment"] | null;
+            impact: components["schemas"]["ServiceImpact"];
+            count: number;
+        };
+        Impact: {
+            target: {
+                /** @enum {string} */
+                kind: "service" | "cluster" | "node";
+                /** Format: uuid */
+                id: string;
+                /** @description Zoals: mariadb in db-prod */
+                name: string;
+            };
+            items: components["schemas"]["ImpactItem"][];
+            /** @description Per groep de ergste impact */
+            groups: components["schemas"]["ImpactGroup"][];
         };
         Template: {
             name: string;
@@ -4770,6 +5088,228 @@ export interface operations {
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
             502: components["responses"]["Error"];
+        };
+    };
+    getDependencyGraph: {
+        parameters: {
+            query?: {
+                /** @description Dat cluster plus zijn directe buren */
+                cluster_id?: string;
+                /** @description De clusters van die omgeving plus hun directe buren */
+                environment?: components["schemas"]["Environment"];
+                /** @description Ook voorgestelde diensten */
+                include_suggested?: boolean;
+                /** @description Ook genegeerde diensten */
+                include_ignored?: boolean;
+                level?: "service" | "cluster";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DependencyGraph"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+        };
+    };
+    createService: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ServiceInput"];
+            };
+        };
+        responses: {
+            /** @description Aangemaakt */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DepService"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    deleteService: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serviceId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Verwijderd */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    updateService: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                serviceId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ServicePatch"];
+            };
+        };
+        responses: {
+            /** @description Gewijzigd */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DepService"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    createDependency: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DependencyInput"];
+            };
+        };
+        responses: {
+            /** @description Aangemaakt */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DepEdge"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    deleteDependency: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                dependencyId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Verwijderd */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    updateDependency: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                dependencyId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DependencyPatch"];
+            };
+        };
+        responses: {
+            /** @description Gewijzigd */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DepEdge"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    getImpact: {
+        parameters: {
+            query?: {
+                service_id?: string;
+                cluster_id?: string;
+                node_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Impact"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
         };
     };
 }

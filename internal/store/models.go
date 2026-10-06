@@ -515,6 +515,35 @@ type ServerSecret struct {
 	CreatedAt time.Time
 }
 
+type Service struct {
+	ID          uuid.UUID
+	ClusterID   *uuid.UUID
+	NodeID      *uuid.UUID
+	Name        string
+	Kind        string
+	Unit        string
+	Port        *int32
+	Address     string
+	Description string
+	Source      string
+	State       string
+	LastSeenAt  *time.Time
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+type ServiceDependency struct {
+	ID            uuid.UUID
+	FromServiceID uuid.UUID
+	ToServiceID   uuid.UUID
+	Strength      string
+	Source        string
+	State         string
+	Note          string
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+}
+
 type Session struct {
 	ID         []byte
 	UserID     uuid.UUID

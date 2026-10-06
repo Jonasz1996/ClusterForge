@@ -9,6 +9,7 @@ import { MetricsPanels } from "@/components/charts/MetricsPanels";
 import { ClusterForm } from "@/components/inventory/ClusterForm";
 import { NodeForm } from "@/components/inventory/NodeForm";
 import { SpecCard } from "@/components/inventory/SpecCard";
+import { ClusterDepsCard } from "@/components/deps/ClusterDeps";
 import { ClusterDriftCard } from "@/components/drift/Drift";
 import { FailoverBanner, FailoverCard } from "@/components/failover/Failover";
 import { JobList } from "@/components/jobs/JobList";
@@ -134,6 +135,7 @@ function ClusterDetailInner() {
           <ClusterDriftCard clusterId={id} isAdmin={isAdmin} />
           {cluster.data.template_name && <SpecCard clusterId={id} />}
           <VipsCard c={cluster.data} isAdmin={isAdmin} />
+          <ClusterDepsCard clusterId={id} isAdmin={isAdmin} />
           <FailoverCard clusterId={id} isAdmin={isAdmin} />
           <ClusterBackupsCard clusterId={id} isAdmin={isAdmin} />
           {(jobs.data?.length ?? 0) > 0 && (
