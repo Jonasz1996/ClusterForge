@@ -56,6 +56,25 @@ type API interface {
 	BackupContent(ctx context.Context, node, storage string) ([]BackupVolume, error)
 	// NotBackedUp geeft de VM's en containers die in geen back-upjob zitten.
 	NotBackedUp(ctx context.Context) ([]UncoveredGuest, error)
+
+	// Voor de back-upcontrole. Alleen de bewaakte functies van het
+	// sandbox-register in internal/backups roepen Restore, Destroy en
+	// AgentInfo aan; een test controleert dat.
+
+	// ExtractConfig leest de VM-configuratie uit een back-up, zonder iets
+	// terug te zetten.
+	ExtractConfig(ctx context.Context, node, volid string) (map[string]string, error)
+	// Restore zet een back-up terug als nieuwe VM vmid in pool, met nieuwe
+	// MAC-adressen. Nooit over een bestaande VM (geen force) en nooit
+	// gestart.
+	Restore(ctx context.Context, node string, vmid int, archive, storage, pool string) (string, error)
+	// Destroy verwijdert een VM met purge, maar nooit met
+	// destroy-unreferenced-disks: op gedeelde storage kan die een schijf van
+	// een andere VM met hetzelfde VMID wissen.
+	Destroy(ctx context.Context, g Guest) (string, error)
+	// AgentInfo stelt de guest agent één vaste, alleen lezende vraag:
+	// get-host-name, get-osinfo of get-fsinfo.
+	AgentInfo(ctx context.Context, g Guest, command string) (json.RawMessage, error)
 }
 
 type Version struct {
@@ -87,7 +106,14 @@ type Resource struct {
 	Shared   int     `json:"shared,omitempty"`
 	Content  string  `json:"content,omitempty"`
 	Plugin   string  `json:"plugintype,omitempty"`
+	// Pool is de resource pool van een VM of container.
+	Pool string `json:"pool,omitempty"`
 }
+
+// SandboxPool is de resource pool in Proxmox waarin ClusterForge de
+// tijdelijke VM's van een back-upcontrole terugzet. Alleen een VM in deze pool
+// mag ClusterForge verwijderen.
+const SandboxPool = "cf-sandbox"
 
 // Guest is een VM (qemu) of container (lxc) op een host.
 type Guest struct {
@@ -534,6 +560,68 @@ func (c *Client) BackupContent(ctx context.Context, node, storage string) ([]Bac
 func (c *Client) NotBackedUp(ctx context.Context) ([]UncoveredGuest, error) {
 	var out []UncoveredGuest
 	return out, c.do(ctx, http.MethodGet, "/cluster/backup-info/not-backed-up", nil, &out)
+}
+
+func (c *Client) ExtractConfig(ctx context.Context, node, volid string) (map[string]string, error) {
+	var raw string
+	q := url.Values{"volume": {volid}}
+	if err := c.do(ctx, http.MethodGet, "/nodes/"+url.PathEscape(node)+"/vzdump/extractconfig?"+q.Encode(), nil, &raw); err != nil {
+		return nil, err
+	}
+	return ParseConfig(raw), nil
+}
+
+// ParseConfig leest een VM-configuratie in de tekstvorm van Proxmox. De
+// beschrijving (regels met #) en snapshots ([naam]) tellen niet mee.
+func ParseConfig(raw string) map[string]string {
+	out := map[string]string{}
+	for _, line := range strings.Split(raw, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "[") {
+			break
+		}
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		k, v, ok := strings.Cut(line, ":")
+		if !ok {
+			continue
+		}
+		out[strings.TrimSpace(k)] = strings.TrimSpace(v)
+	}
+	return out
+}
+
+func (c *Client) Restore(ctx context.Context, node string, vmid int, archive, storage, pool string) (string, error) {
+	form := url.Values{
+		"vmid": {strconv.Itoa(vmid)}, "archive": {archive}, "storage": {storage}, "pool": {pool}, "unique": {"1"},
+	}
+	var upid string
+	return upid, c.do(ctx, http.MethodPost, "/nodes/"+url.PathEscape(node)+"/qemu", form, &upid)
+}
+
+func (c *Client) Destroy(ctx context.Context, g Guest) (string, error) {
+	if g.Type != "qemu" {
+		return "", fmt.Errorf("alleen een VM kan als sandbox verwijderd worden, geen %s", g.Type)
+	}
+	var upid string
+	return upid, c.do(ctx, http.MethodDelete, g.path()+"?purge=1", nil, &upid)
+}
+
+// agentInfo zijn de vragen die AgentInfo aan de guest agent mag stellen.
+var agentInfo = map[string]bool{"get-host-name": true, "get-osinfo": true, "get-fsinfo": true}
+
+func (c *Client) AgentInfo(ctx context.Context, g Guest, command string) (json.RawMessage, error) {
+	if !agentInfo[command] {
+		return nil, fmt.Errorf("onbekende vraag aan de guest agent: %q", command)
+	}
+	var out struct {
+		Result json.RawMessage `json:"result"`
+	}
+	if err := c.do(ctx, http.MethodGet, g.path()+"/agent/"+command, nil, &out); err != nil {
+		return nil, err
+	}
+	return out.Result, nil
 }
 
 // upidNode haalt de host uit een taak-id: UPID:pve1:0000ABCD:...

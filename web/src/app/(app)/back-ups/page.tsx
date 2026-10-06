@@ -1,8 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { BackupTable, FreshnessBadge, Latest } from "@/components/backups/Backups";
+import { SandboxesCard, verifiable, VerifyHistory } from "@/components/backups/Verify";
+import { reportHref } from "@/components/failover/Failover";
 import { ago, Empty, QueryState } from "@/components/inventory/bits";
 import { Alert, Button, Card, Input, Label, PageHeader, Select } from "@/components/ui";
 import {
@@ -13,6 +15,7 @@ import {
   type BackupItem,
 } from "@/lib/backups";
 import { useIsAdmin } from "@/lib/inventory";
+import { recent, useTestRuns, useVerifyRuns } from "@/lib/verify";
 
 export default function BackupsPage() {
   const q = useBackups();
@@ -22,12 +25,13 @@ export default function BackupsPage() {
   const nodeItems = items.filter((it) => !it.watched);
   const shown = only ? nodeItems.filter((it) => it.freshness !== "ok") : nodeItems;
   const conns = q.data?.connections ?? [];
+  const runs = useVerifyRuns();
 
   return (
     <div className="space-y-6">
       <PageHeader
         title="Back-ups"
-        description="Hoe oud de nieuwste back-up van elke VM in Proxmox is, en welke VM's in geen back-upjob zitten. Back-ups maken blijft de taak van Proxmox."
+        description="Hoe oud de nieuwste back-up van elke VM in Proxmox is, welke VM's in geen back-upjob zitten en of een back-up echt terug te zetten is. Back-ups maken blijft de taak van Proxmox."
       />
       <QueryState q={q}>
         {conns.length === 0 ? (
@@ -60,12 +64,16 @@ export default function BackupsPage() {
               ) : shown.length === 0 ? (
                 <p className="text-sm text-slate-500">Elke node heeft een verse back-up.</p>
               ) : (
-                <BackupTable items={shown} />
+                <BackupTable items={shown} isAdmin={isAdmin} />
               )}
             </Card>
             {conns.map((c) => (
               <ConnectionCard key={c.id} c={c} items={items.filter((it) => it.connection_id === c.id)} isAdmin={isAdmin} />
             ))}
+            <SandboxesCard sandboxes={q.data?.sandboxes ?? []} isAdmin={isAdmin} />
+            <Card title="Geschiedenis van de controles">
+              <VerifyHistory runs={(runs.data ?? []).slice(0, 20)} />
+            </Card>
           </>
         )}
       </QueryState>
@@ -74,14 +82,37 @@ export default function BackupsPage() {
 }
 
 function Tiles({ items, conns }: { items: BackupItem[]; conns: BackupConnection[] }) {
+  const rejected = useTestRuns({ kind: "backup.verify", result: "fail", limit: 1 });
   const fresh = items.filter((it) => it.freshness === "ok").length;
-  const bad = items.filter((it) => it.freshness === "stale" || it.freshness === "missing").length;
   const unknownCoverage = conns.some((c) => c.not_backed_up === null);
   const uncovered = conns.reduce((n, c) => n + (c.not_backed_up?.length ?? 0), 0);
+  const eligible = items.filter(verifiable);
+  const verified = eligible.filter((it) => {
+    const v = it.last_verification;
+    return v && (v.result === "pass" || v.result === "warning") && recent(v.finished_at);
+  }).length;
+  const last = rejected.data?.[0];
   return (
-    <div className="grid gap-4 sm:grid-cols-3">
+    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
       <Tile label="Verse back-up" value={`${fresh} van ${items.length}`} tone={fresh === items.length ? "good" : "plain"} />
-      <Tile label="Te oud of ontbrekend" value={String(bad)} tone={bad > 0 ? "bad" : "good"} />
+      <Tile
+        label="Gecontroleerd, laatste 30 dagen"
+        value={`${verified} van ${eligible.length}`}
+        tone={eligible.length > 0 && verified === eligible.length ? "good" : "plain"}
+      />
+      <Tile
+        label="Laatste afgekeurde controle"
+        value={
+          last ? (
+            <Link href={reportHref(last.id)} className="hover:underline">
+              {last.hostname}, {dayFmt.format(new Date(last.finished_at ?? last.created_at))}
+            </Link>
+          ) : (
+            "geen"
+          )
+        }
+        tone={last && recent(last.finished_at ?? last.created_at) ? "bad" : "plain"}
+      />
       <Tile
         label="Niet in een back-upjob"
         value={unknownCoverage && uncovered === 0 ? "onbekend" : String(uncovered)}
@@ -91,7 +122,9 @@ function Tiles({ items, conns }: { items: BackupItem[]; conns: BackupConnection[
   );
 }
 
-function Tile({ label, value, tone }: { label: string; value: string; tone: "good" | "bad" | "warn" | "plain" }) {
+const dayFmt = new Intl.DateTimeFormat("nl-BE", { day: "2-digit", month: "2-digit" });
+
+function Tile({ label, value, tone }: { label: string; value: ReactNode; tone: "good" | "bad" | "warn" | "plain" }) {
   const color = {
     good: "text-emerald-700 dark:text-emerald-400",
     bad: "text-red-700 dark:text-red-400",

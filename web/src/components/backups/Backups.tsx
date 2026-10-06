@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useState } from "react";
 import { Alert, Badge, Button, Card, Input, Label } from "@/components/ui";
+import { LastVerification, runningFor, VerifyDialog } from "@/components/backups/Verify";
+import { RunBadge, reportHref } from "@/components/failover/Failover";
 import { formatBytes, tableClass, tdClass, thClass } from "@/components/inventory/bits";
 import {
   backupAge,
@@ -16,6 +18,7 @@ import {
   type BackupItem,
   type BackupVolume,
 } from "@/lib/backups";
+import { useVerifyRuns } from "@/lib/verify";
 
 const linkClass = "text-brand-600 hover:underline dark:text-brand-500";
 const none = <span className="text-slate-400">–</span>;
@@ -61,11 +64,16 @@ export function Latest({ v }: { v: BackupVolume | null }) {
   );
 }
 
-// NodeBackupsCard toont op de nodepagina de stand en de back-ups van de VM.
-export function NodeBackupsCard({ nodeId }: { nodeId: string }) {
+// NodeBackupsCard toont op de nodepagina de stand en de back-ups van de VM,
+// de laatste controles en voor een admin de knop Back-up controleren.
+export function NodeBackupsCard({ nodeId, isAdmin }: { nodeId: string; isAdmin: boolean }) {
   const q = useNodeBackups(nodeId);
+  const runs = useVerifyRuns(nodeId);
+  const [verifying, setVerifying] = useState(false);
   const it = q.data?.item;
   if (!q.data || !it) return null;
+  const running = runningFor(runs.data, nodeId);
+  const isVM = it.guest_type === "qemu";
   return (
     <Card
       title={
@@ -73,12 +81,25 @@ export function NodeBackupsCard({ nodeId }: { nodeId: string }) {
           <span className="flex items-center gap-2">
             Back-ups <FreshnessBadge freshness={it.freshness} />
           </span>
-          <Link href="/back-ups" className={`text-sm font-normal ${linkClass}`}>
-            Alle back-ups
-          </Link>
+          <span className="flex flex-wrap items-center gap-3">
+            <Link href="/back-ups" className={`text-sm font-normal ${linkClass}`}>
+              Alle back-ups
+            </Link>
+            {isAdmin && isVM && (
+              <Button
+                variant="secondary"
+                disabled={q.data.backups.length === 0 || !!running}
+                title={running ? "Er loopt al een controle van deze node" : undefined}
+                onClick={() => setVerifying(true)}
+              >
+                Back-up controleren
+              </Button>
+            )}
+          </span>
         </span>
       }
     >
+      {verifying && <VerifyDialog nodeId={nodeId} name={it.node?.name ?? `VM ${it.vmid}`} onClose={() => setVerifying(false)} />}
       {it.reason && <p className="mb-3 text-sm text-slate-600 dark:text-slate-400">{it.reason}</p>}
       {q.data.backups.length === 0 ? (
         <p className="text-sm text-slate-500">Proxmox heeft geen back-ups van VM {it.vmid}.</p>
@@ -121,6 +142,31 @@ export function NodeBackupsCard({ nodeId }: { nodeId: string }) {
         Een back-up mag hoogstens {it.max_age_hours} uur oud zijn. Back-ups maken en opruimen doen de back-upjobs van
         Proxmox.
       </p>
+      <div className="mt-5">
+        <h3 className="mb-2 text-sm font-medium">Laatste controles</h3>
+        {!isVM ? (
+          <p className="text-sm text-slate-500">
+            Een container krijgt alleen versheid en dekking: hij heeft geen guest agent om na het terugzetten te controleren.
+          </p>
+        ) : (runs.data ?? []).length === 0 ? (
+          <p className="text-sm text-slate-500">
+            Nog niet gecontroleerd. Een controle zet een back-up terug als tijdelijke VM met afgesloten netwerk, start en
+            controleert hem en verwijdert hem weer.
+          </p>
+        ) : (
+          <ul className="space-y-1.5 text-sm">
+            {runs.data!.slice(0, 5).map((r) => (
+              <li key={r.id} className="flex flex-wrap items-baseline gap-2">
+                <RunBadge run={r} />
+                <Link href={reportHref(r.id)} className={`tabular-nums ${linkClass}`}>
+                  {backupTimeFmt.format(new Date(r.created_at))}
+                </Link>
+                <span className="text-slate-600 dark:text-slate-400">{r.summary || "loopt…"}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
     </Card>
   );
 }
@@ -144,7 +190,7 @@ export function ClusterBackupsCard({ clusterId, isAdmin }: { clusterId: string; 
         </span>
       }
     >
-      <BackupTable items={items} showCluster={false} />
+      <BackupTable items={items} showCluster={false} isAdmin={isAdmin} />
       {policy.data &&
         (editing ? (
           <PolicyForm clusterId={clusterId} maxAge={policy.data.max_age_hours} onDone={() => setEditing(false)} />
@@ -206,8 +252,17 @@ function PolicyForm({ clusterId, maxAge, onDone }: { clusterId: string; maxAge: 
   );
 }
 
-// BackupTable is één regel per bewaakte VM.
-export function BackupTable({ items, showCluster = true }: { items: BackupItem[]; showCluster?: boolean }) {
+// BackupTable is één regel per bewaakte VM, met de laatste controle.
+export function BackupTable({
+  items,
+  showCluster = true,
+  isAdmin = false,
+}: {
+  items: BackupItem[];
+  showCluster?: boolean;
+  isAdmin?: boolean;
+}) {
+  const runs = useVerifyRuns();
   return (
     <div className="overflow-x-auto">
       <table className={tableClass}>
@@ -218,6 +273,7 @@ export function BackupTable({ items, showCluster = true }: { items: BackupItem[]
             <th className={thClass}>Stand</th>
             <th className={thClass}>Nieuwste back-up</th>
             <th className={`${thClass} text-right`}>Aantal</th>
+            <th className={thClass}>Laatste controle</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -257,6 +313,9 @@ export function BackupTable({ items, showCluster = true }: { items: BackupItem[]
                 <Latest v={it.latest} />
               </td>
               <td className={`${tdClass} text-right tabular-nums`}>{it.count}</td>
+              <td className={tdClass}>
+                <LastVerification it={it} running={runningFor(runs.data, it.node?.id)} isAdmin={isAdmin} />
+              </td>
             </tr>
           ))}
         </tbody>

@@ -25,6 +25,7 @@ Het technisch ontwerp staat in [docs/design/mvp-fase-1.md](docs/design/mvp-fase-
 | 5. Drift zien | Per node zien wat afwijkt van de gewenste staat van een cluster uit een template, zonder iets op de node te veranderen | klaar |
 | 6. Baseline en negeren | Een baseline als gewenste staat voor clusters zonder template, en afwijkingen bewust negeren met een reden | klaar |
 | 7. Failovertest | Met de hand keepalived of nginx stoppen op de VIP-eigenaar in lab en test, meten hoe snel een andere node overneemt, en alles weer herstellen | klaar |
+| 8. Back-upcontrole | Een back-up terugzetten als tijdelijke VM met afgesloten netwerk, opstarten, controleren via de guest agent en altijd weer verwijderen | klaar |
 
 ## Draaien met Docker Compose
 
@@ -60,6 +61,8 @@ Agents verbinden zelf naar de server, op poort 4222 (NATS met TLS). Die poort mo
 | `CF_MASTER_KEY` | (leeg) | Sleutel van 32 bytes (base64 of hex) waarmee de server geheimen zoals het Proxmox-token versleutelt; maak er een met `openssl rand -hex 32`. Zonder sleutel kan Proxmox niet gekoppeld worden |
 | `CF_MASTER_KEY_FILE` | (leeg) | Bestand met de masterkey, in plaats van `CF_MASTER_KEY` |
 | `CF_DRIFT_INTERVAL` | `15m` | Hoe vaak de server elke node op drift controleert; `0` zet dat uit (Nu controleren blijft werken), anders minstens `1m` |
+| `CF_SANDBOX_STORAGE` | (leeg) | Proxmox-storage voor de tijdelijke VM van een back-upcontrole; leeg kiest per host de storage voor VM-schijven met de meeste vrije ruimte |
+| `CF_SANDBOX_BOOT_TIMEOUT` | `10m` | Hoe lang een teruggezette VM mag doen over opstarten tot de guest agent antwoordt; tussen `30s` en `1h` |
 
 ### Commando's
 
@@ -122,13 +125,13 @@ Een node zonder agent of heartbeat die aan een Proxmox-VM gekoppeld is, krijgt z
 ClusterForge praat met de REST-API van Proxmox VE (8 of nieuwer) via een API-token. Maak dat token één keer aan op een van je Proxmox-hosts, als root:
 
 ```sh
-pveum role add ClusterForge --privs "VM.Audit VM.PowerMgmt VM.Snapshot VM.Migrate VM.Allocate VM.Clone VM.Config.CPU VM.Config.Memory VM.Config.Disk VM.Config.Network VM.Config.Cloudinit VM.Config.Options VM.Monitor VM.Backup Sys.Audit Datastore.Audit Datastore.AllocateSpace SDN.Use"
+pveum role add ClusterForge --privs "VM.Audit VM.PowerMgmt VM.Snapshot VM.Migrate VM.Allocate VM.Clone VM.Config.CPU VM.Config.Memory VM.Config.Disk VM.Config.Network VM.Config.Cloudinit VM.Config.Options VM.Config.HWType VM.Config.CDROM VM.Monitor VM.Backup Sys.Audit Datastore.Audit Datastore.AllocateSpace SDN.Use"
 pveum user add clusterforge@pve --comment "ClusterForge"
 pveum acl modify / --users clusterforge@pve --roles ClusterForge
 pveum user token add clusterforge@pve cf --privsep 0
 ```
 
-Dat is de rol voor Proxmox VE 8. Op Proxmox VE 9 bestaat `VM.Monitor` niet meer; zet daar `VM.GuestAgent.Audit VM.GuestAgent.FileWrite` in de plaats. Bestaat de rol al uit een eerdere versie, vervang dan `role add` door `role modify` met dezelfde lijst. De rechten om VM's te maken en de guest agent te gebruiken zijn alleen nodig om [clusters uit te rollen](#clusters-uitrollen). `VM.Backup` en `Datastore.AllocateSpace` zijn nodig om de [back-ups](#back-ups) te lezen: zonder die rechten laat Proxmox ze stilzwijgend weg. Een rol uit een eerdere versie mist `VM.Backup`.
+Dat is de rol voor Proxmox VE 8. Op Proxmox VE 9 bestaat `VM.Monitor` niet meer; zet daar `VM.GuestAgent.Audit VM.GuestAgent.FileWrite` in de plaats. Bestaat de rol al uit een eerdere versie, vervang dan `role add` door `role modify` met dezelfde lijst. De rechten om VM's te maken en de guest agent te gebruiken zijn alleen nodig om [clusters uit te rollen](#clusters-uitrollen). `VM.Backup` en `Datastore.AllocateSpace` zijn nodig om de [back-ups](#back-ups) te lezen: zonder die rechten laat Proxmox ze stilzwijgend weg. Een rol uit een eerdere versie mist `VM.Backup`. `VM.Config.HWType` en `VM.Config.CDROM` zijn nodig om een teruggezette back-up af te sluiten bij de [back-upcontrole](#back-ups-controleren); een rol uit een eerdere versie mist ze.
 
 Het laatste commando toont het secret één keer. Klik in de webinterface bij Proxmox op "Proxmox koppelen" en vul het API-adres (`https://pve1.example.lan:8006`), de token-id (`clusterforge@pve!cf`) en het secret in. Heeft Proxmox een zelfondertekend certificaat, klik dan naast de vingerafdruk op "Ophalen" en vergelijk de vingerafdruk met die op de host (`openssl x509 -in /etc/pve/local/pve-ssl.pem -noout -fingerprint -sha256`); ClusterForge vertrouwt daarna alleen dat certificaat. Het secret wordt versleuteld met `CF_MASTER_KEY` opgeslagen. Verlies je die sleutel, dan vul je het secret opnieuw in via Bewerken.
 
@@ -145,6 +148,32 @@ ClusterForge maakt zelf geen back-ups; dat blijven de back-upjobs van Proxmox (v
 Is de nieuwste back-up ouder dan de maximale leeftijd, dan staat de VM op "Te oud"; zonder back-up op "Geen back-up". De maximale leeftijd is standaard 30 uur, wat past bij een dagelijkse back-upjob. Een admin stelt hem per cluster in, onderaan de kaart Back-ups op de clusterpagina; voor VM's op de lijst "Ook bewaken" geldt de standaard. Elke wissel komt één keer in het logboek, en de clusters en nodes tonen een back-upbadge. Daaronder staan de VM's en containers die in geen enkele back-upjob van Proxmox zitten. "Nu verversen" leest de back-ups meteen opnieuw, bijvoorbeeld na een back-upjob.
 
 Toont Proxmox geen enkele back-up terwijl er VM's bewaakt worden, dan meldt ClusterForge dat één keer als leesfout in plaats van elke VM op "Geen back-up" te zetten: meestal mist het API-token dan `VM.Backup`. Staat een host uit, dan blijven de back-ups op zijn lokale storage staan zoals ze laatst gelezen zijn.
+
+### Back-ups controleren
+
+Een back-up die er is, is nog geen back-up die terug te zetten is. Nu controleren (op de pagina Back-ups) of Back-up controleren (op de node, met een andere back-up te kiezen) zet een back-up terug als tijdelijke VM, start hem, controleert hem en verwijdert hem altijd weer. De VM van de node zelf raakt ClusterForge daarbij niet aan. Maak eerst één keer de pool aan waarin die tijdelijke VM's komen, op een van je Proxmox-hosts als root:
+
+```sh
+pveum pool add cf-sandbox --comment "ClusterForge back-upcontrole"
+pveum acl modify /pool/cf-sandbox --users clusterforge@pve --roles PVEPoolAdmin
+```
+
+De controle is een taak met zes stappen, en het rapport toont ze allemaal:
+
+1. **Kiezen.** De nieuwste back-up, of de gekozen. Staat de back-up op Proxmox Backup Server of andere gedeelde storage, dan gaat de VM naar de host met het meeste vrije geheugen; anders naar de host met de back-up. De schijven komen op `CF_SANDBOX_STORAGE`, of op de storage voor VM-schijven met de meeste vrije ruimte. Zou die storage daarna voor meer dan 85 % vol zijn, of heeft de host niet het geheugen van de VM plus 1 GiB vrij, dan wordt de controle overgeslagen in plaats van je productie-VM's te laten vastlopen.
+2. **Terugzetten** onder een nieuw VMID in pool `cf-sandbox`, nooit over een bestaande VM en zonder te starten.
+3. **Isoleren.** Elke netwerkkaart krijgt `link_down=1`, opstarten bij boot en de bescherming gaan uit, en de VM krijgt de tag en het SMBIOS-serienummer `cf-sandbox`. Heeft de VM iets dat niet zeker af te sluiten is, zoals virtiofs, PCI- of USB-doorgifte of een schijf van de host, dan wordt hij niet gestart en meteen opgeruimd. ClusterForge leest de config terug en start alleen als elke regel klopt.
+4. **Starten** en wachten tot de guest agent antwoordt, hoogstens `CF_SANDBOX_BOOT_TIMEOUT`. Zonder guest agent telt alleen dat de VM blijft draaien, met een waarschuwing.
+5. **Controleren** via de guest agent: hostname, besturingssysteem en bestandssystemen, en dat de agent van de node niet ineens twee keer verbonden is.
+6. **Opruimen**: hard uitzetten en verwijderen.
+
+De uitslag leest bijvoorbeeld als "geslaagd. Terugzetten 3 min 12 s, opstarten 41 s. Hostname web01, Debian 13, 2 bestandssystemen. Sandbox-VM 131 verwijderd om 04:07." De hersteltijd (terugzetten plus opstarten) staat ook bij de node op de pagina Back-ups, met daaronder de geschiedenis van de controles. Er loopt hoogstens één back-upcontrole of failovertest tegelijk.
+
+Een kopie van een node draagt dezelfde agentsleutel. Zolang een sandbox bestaat, weigert ClusterForge daarom een tweede verbinding met de sleutel van de bronnode, en komt die er toch, dan zet het de sandbox meteen hard uit en keurt de controle af. Op de pagina Proxmox heeft een sandbox geen actieknoppen en kan hij niet aan een node gekoppeld worden; starten en stoppen doet de controle zelf.
+
+De tijdelijke VM verdwijnt altijd: na de controle, bij Afbreken, en na een herstart van de server midden in de taak (de run eindigt dan met "onderbroken door herstart van de server"). Lukt verwijderen niet, bijvoorbeeld omdat Proxmox de VM vergrendeld heeft, dan staat hij bij Sandboxes op de pagina Back-ups, komt er één regel in het logboek en probeert de opruimer het elke 5 minuten opnieuw; Opruimen doet het meteen. De opruimer raakt alleen VM's aan die ClusterForge zelf teruggezet heeft en die nog in pool `cf-sandbox` zitten.
+
+Wil je de isolatie één keer met eigen ogen zien: open tijdens een controle in Proxmox de VM in pool `cf-sandbox`. Bij Hardware staat elke netwerkkaart op `link_down=1`, en in de console toont `ip link` de kaarten als `NO-CARRIER`. Containers (LXC) krijgen alleen versheid en dekking, want ze hebben geen guest agent.
 
 ## Clusters uitrollen
 
@@ -281,7 +310,7 @@ internal/secrets/          versleutelen van geheimen met de masterkey
 internal/templates/        ingebouwde templates per versie, parameters en de controle op onveilige waarden
 internal/deploy/           clusters uitrollen, de gewenste staat en haar revisies
 internal/audit/            het logboek: lezen, filteren, beschrijven en exporteren
-internal/backups/          versheid van de Proxmox-back-ups per VM
+internal/backups/          versheid van de Proxmox-back-ups per VM, de back-upcontrole in een sandbox en de opruimer
 internal/drift/            driftcontrole: vergelijken met de gewenste staat, de scanner en het rapport
 internal/health/           wachten op verse heartbeats: een node klaar, de VIP's op hun plaats
 internal/failover/         failovertests: voorcontrole, storing, meting, herstel en het rapport

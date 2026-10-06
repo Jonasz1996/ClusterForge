@@ -81,6 +81,33 @@ func (e BackupFreshness) Valid() bool {
 	}
 }
 
+// Defines values for BackupSandboxState.
+const (
+	BackupSandboxStateDestroyFailed BackupSandboxState = "destroy_failed"
+	BackupSandboxStateDestroyed     BackupSandboxState = "destroyed"
+	BackupSandboxStateNone          BackupSandboxState = "none"
+	BackupSandboxStatePresent       BackupSandboxState = "present"
+	BackupSandboxStateReserved      BackupSandboxState = "reserved"
+)
+
+// Valid indicates whether the value is a known member of the BackupSandboxState enum.
+func (e BackupSandboxState) Valid() bool {
+	switch e {
+	case BackupSandboxStateDestroyFailed:
+		return true
+	case BackupSandboxStateDestroyed:
+		return true
+	case BackupSandboxStateNone:
+		return true
+	case BackupSandboxStatePresent:
+		return true
+	case BackupSandboxStateReserved:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for BackupVolumeVerify.
 const (
 	BackupVolumeVerifyEmpty  BackupVolumeVerify = ""
@@ -687,6 +714,24 @@ func (e TemplateParamType) Valid() bool {
 	}
 }
 
+// Defines values for TestRunKind.
+const (
+	TestRunKindBackupVerify TestRunKind = "backup.verify"
+	TestRunKindFailoverTest TestRunKind = "failover.test"
+)
+
+// Valid indicates whether the value is a known member of the TestRunKind enum.
+func (e TestRunKind) Valid() bool {
+	switch e {
+	case TestRunKindBackupVerify:
+		return true
+	case TestRunKindFailoverTest:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for TestRunTrigger.
 const (
 	Manual   TestRunTrigger = "manual"
@@ -712,6 +757,7 @@ const (
 	TestRunEventKindFault    TestRunEventKind = "fault"
 	TestRunEventKindReady    TestRunEventKind = "ready"
 	TestRunEventKindReturn   TestRunEventKind = "return"
+	TestRunEventKindStep     TestRunEventKind = "step"
 	TestRunEventKindTakeover TestRunEventKind = "takeover"
 	TestRunEventKindUp       TestRunEventKind = "up"
 )
@@ -728,6 +774,8 @@ func (e TestRunEventKind) Valid() bool {
 	case TestRunEventKindReady:
 		return true
 	case TestRunEventKindReturn:
+		return true
+	case TestRunEventKindStep:
 		return true
 	case TestRunEventKindTakeover:
 		return true
@@ -861,12 +909,30 @@ func (e ExportAuditParamsActorType) Valid() bool {
 	}
 }
 
+// Defines values for ListTestRunsParamsKind.
+const (
+	ListTestRunsParamsKindBackupVerify ListTestRunsParamsKind = "backup.verify"
+	ListTestRunsParamsKindFailoverTest ListTestRunsParamsKind = "failover.test"
+)
+
+// Valid indicates whether the value is a known member of the ListTestRunsParamsKind enum.
+func (e ListTestRunsParamsKind) Valid() bool {
+	switch e {
+	case ListTestRunsParamsKindBackupVerify:
+		return true
+	case ListTestRunsParamsKindFailoverTest:
+		return true
+	default:
+		return false
+	}
+}
+
 // AgentConnection online bij een heartbeat in de laatste 30 s, late tot 90 s, daarna offline
 type AgentConnection string
 
 // AgentSummary defines model for AgentSummary.
 type AgentSummary struct {
-	// Commands De agent kan commando's uitvoeren (herstarten
+	// Commands De agent kan commando's uitvoeren (herstarten, onderhoud); oudere agents niet
 	Commands bool `json:"commands"`
 
 	// Connection online bij een heartbeat in de laatste 30 s, late tot 90 s, daarna offline
@@ -999,9 +1065,12 @@ type BackupItem struct {
 	GuestType string          `json:"guest_type"`
 
 	// Label Het label uit de lijst "ook bewaken"
-	Label       string                          `json:"label"`
-	Latest      nullable.Nullable[BackupVolume] `json:"latest"`
-	MaxAgeHours int                             `json:"max_age_hours"`
+	Label string `json:"label"`
+
+	// LastVerification De laatste afgeronde back-upcontrole van de node
+	LastVerification nullable.Nullable[BackupVerification] `json:"last_verification"`
+	Latest           nullable.Nullable[BackupVolume]       `json:"latest"`
+	MaxAgeHours      int                                   `json:"max_age_hours"`
 
 	// Name Naam van de VM in Proxmox; leeg als hij er niet meer is
 	Name string                       `json:"name"`
@@ -1021,6 +1090,9 @@ type BackupOverview struct {
 	Clusters    []BackupClusterState `json:"clusters"`
 	Connections []BackupConnection   `json:"connections"`
 	Items       []BackupItem         `json:"items"`
+
+	// Sandboxes Sandboxes die nog kunnen bestaan, ook na een mislukte verwijdering
+	Sandboxes []BackupSandbox `json:"sandboxes"`
 }
 
 // BackupPolicy defines model for BackupPolicy.
@@ -1041,12 +1113,105 @@ type BackupRef struct {
 	Name string             `json:"name"`
 }
 
+// BackupSandbox defines model for BackupSandbox.
+type BackupSandbox struct {
+	ConnectionId   openapi_types.UUID                    `json:"connection_id"`
+	ConnectionName string                                `json:"connection_name"`
+	CreatedAt      time.Time                             `json:"created_at"`
+	DestroyedAt    nullable.Nullable[time.Time]          `json:"destroyed_at"`
+	Error          string                                `json:"error"`
+	Host           string                                `json:"host"`
+	Id             openapi_types.UUID                    `json:"id"`
+	RunId          nullable.Nullable[openapi_types.UUID] `json:"run_id"`
+
+	// Running De controle van deze sandbox loopt nog
+	Running bool `json:"running"`
+
+	// Source De node van de bron-VM
+	Source nullable.Nullable[BackupRef] `json:"source"`
+
+	// SourceVmid Het VMID van de VM waarvan de back-up is
+	SourceVmid int `json:"source_vmid"`
+
+	// State none als de VM er nooit kwam of niet (meer) in pool cf-sandbox zit
+	State   BackupSandboxState `json:"state"`
+	Storage string             `json:"storage"`
+
+	// Vmid Het VMID van de sandbox
+	Vmid  int    `json:"vmid"`
+	Volid string `json:"volid"`
+}
+
+// BackupSandboxState none als de VM er nooit kwam of niet (meer) in pool cf-sandbox zit
+type BackupSandboxState string
+
 // BackupUncovered defines model for BackupUncovered.
 type BackupUncovered struct {
 	Name string                       `json:"name"`
 	Node nullable.Nullable[BackupRef] `json:"node"`
 	Type string                       `json:"type"`
 	Vmid int                          `json:"vmid"`
+}
+
+// BackupVerification defines model for BackupVerification.
+type BackupVerification struct {
+	FinishedAt nullable.Nullable[time.Time] `json:"finished_at"`
+
+	// RecoverySeconds Hersteltijd, terugzetten plus opstarten
+	RecoverySeconds nullable.Nullable[float64] `json:"recovery_seconds"`
+	Result          TestRunResult              `json:"result"`
+	RunId           openapi_types.UUID         `json:"run_id"`
+	Summary         string                     `json:"summary"`
+}
+
+// BackupVerifyDefinition defines model for BackupVerifyDefinition.
+type BackupVerifyDefinition struct {
+	BackupStorage string    `json:"backup_storage"`
+	BackupTime    time.Time `json:"backup_time"`
+
+	// Chosen Iemand koos deze back-up; anders de nieuwste
+	Chosen         bool               `json:"chosen"`
+	ConnectionId   openapi_types.UUID `json:"connection_id"`
+	ConnectionName string             `json:"connection_name"`
+	Format         string             `json:"format"`
+	GuestName      string             `json:"guest_name"`
+	Size           int64              `json:"size"`
+	SourceVmid     int                `json:"source_vmid"`
+	Volid          string             `json:"volid"`
+}
+
+// BackupVerifyInput defines model for BackupVerifyInput.
+type BackupVerifyInput struct {
+	// Volid Een andere back-up van dezelfde VM; leeg is de nieuwste
+	Volid *string `json:"volid,omitempty"`
+}
+
+// BackupVerifyMeasurements defines model for BackupVerifyMeasurements.
+type BackupVerifyMeasurements struct {
+	// BootSeconds Van starten tot de guest agent antwoordt
+	BootSeconds    nullable.Nullable[float64]   `json:"boot_seconds"`
+	CheckSeconds   nullable.Nullable[float64]   `json:"check_seconds"`
+	CleanupSeconds nullable.Nullable[float64]   `json:"cleanup_seconds"`
+	DestroyedAt    nullable.Nullable[time.Time] `json:"destroyed_at"`
+	Filesystems    int                          `json:"filesystems"`
+	Host           string                       `json:"host"`
+
+	// Hostname Wat de guest agent als hostname gaf
+	Hostname       string                     `json:"hostname"`
+	Os             string                     `json:"os"`
+	RestoreSeconds nullable.Nullable[float64] `json:"restore_seconds"`
+	SandboxVmid    int                        `json:"sandbox_vmid"`
+
+	// Storage De sandbox-storage
+	Storage      string                     `json:"storage"`
+	TotalSeconds nullable.Nullable[float64] `json:"total_seconds"`
+}
+
+// BackupVerifyReport defines model for BackupVerifyReport.
+type BackupVerifyReport struct {
+	Definition   BackupVerifyDefinition           `json:"definition"`
+	Measurements BackupVerifyMeasurements         `json:"measurements"`
+	Sandbox      nullable.Nullable[BackupSandbox] `json:"sandbox"`
 }
 
 // BackupVolume defines model for BackupVolume.
@@ -1351,7 +1516,7 @@ type DeployTarget struct {
 	Network   DeployTargetNetwork `json:"network"`
 	ProxmoxId openapi_types.UUID  `json:"proxmox_id"`
 
-	// SshKeys Publieke SSH-sleutels
+	// SshKeys Publieke SSH-sleutels, één per regel
 	SshKeys *string `json:"ssh_keys,omitempty"`
 
 	// Storage Storage voor de schijven; leeg is die van de template
@@ -1856,7 +2021,7 @@ type JobStep struct {
 type LoginRequest struct {
 	Password string `json:"password"`
 
-	// TotpCode Zescijferige code
+	// TotpCode Zescijferige code, alleen als TOTP aan staat
 	TotpCode *string `json:"totp_code,omitempty"`
 	Username string  `json:"username"`
 }
@@ -2072,7 +2237,7 @@ type ProxmoxGuest struct {
 	// Host De Proxmox-host waar de VM nu staat
 	Host string `json:"host"`
 
-	// Lock Lopende bewerking in Proxmox
+	// Lock Lopende bewerking in Proxmox, zoals migrate of backup
 	Lock         string                    `json:"lock"`
 	Maxcpu       float64                   `json:"maxcpu"`
 	Maxdisk      int64                     `json:"maxdisk"`
@@ -2084,7 +2249,10 @@ type ProxmoxGuest struct {
 	// NodeId De gekoppelde node in ClusterForge
 	NodeId nullable.Nullable[openapi_types.UUID] `json:"node_id"`
 
-	// Status running
+	// Sandbox Een tijdelijke sandbox van een back-upcontrole; daarop kan geen VM-actie
+	Sandbox bool `json:"sandbox"`
+
+	// Status running, stopped of paused
 	Status   string    `json:"status"`
 	Tags     []string  `json:"tags"`
 	Template bool      `json:"template"`
@@ -2279,7 +2447,7 @@ type TemplateParamType string
 
 // TemplateRole defines model for TemplateRole.
 type TemplateRole struct {
-	// Count Vast aantal nodes
+	// Count Vast aantal nodes, of null als een parameter het bepaalt
 	Count nullable.Nullable[int] `json:"count"`
 
 	// CountParam De parameter met het aantal nodes
@@ -2289,23 +2457,27 @@ type TemplateRole struct {
 
 // TestRun defines model for TestRun.
 type TestRun struct {
+	// Backup Alleen bij backup.verify
+	Backup      nullable.Nullable[BackupVerifyReport] `json:"backup"`
 	Checks      []TestRunCheck                        `json:"checks"`
 	ClusterId   nullable.Nullable[openapi_types.UUID] `json:"cluster_id"`
 	ClusterName string                                `json:"cluster_name"`
 	CreatedAt   time.Time                             `json:"created_at"`
-	Definition  FailoverDefinition                    `json:"definition"`
-	FinishedAt  nullable.Nullable[time.Time]          `json:"finished_at"`
 
-	// Hostname De node die de storing kreeg
+	// Definition Alleen bij failover.test
+	Definition nullable.Nullable[FailoverDefinition] `json:"definition"`
+	FinishedAt nullable.Nullable[time.Time]          `json:"finished_at"`
+
+	// Hostname De node die de storing kreeg, of waarvan de back-up gecontroleerd werd
 	Hostname  string                                `json:"hostname"`
 	Id        openapi_types.UUID                    `json:"id"`
 	JobId     nullable.Nullable[openapi_types.UUID] `json:"job_id"`
 	JobStatus nullable.Nullable[JobStatus]          `json:"job_status"`
+	Kind      TestRunKind                           `json:"kind"`
 
-	// Kind failover.test
-	Kind         string                                `json:"kind"`
-	Measurements FailoverMeasurements                  `json:"measurements"`
-	NodeId       nullable.Nullable[openapi_types.UUID] `json:"node_id"`
+	// Measurements Alleen bij failover.test
+	Measurements nullable.Nullable[FailoverMeasurements] `json:"measurements"`
+	NodeId       nullable.Nullable[openapi_types.UUID]   `json:"node_id"`
 
 	// RequestedBy Gebruikersnaam van wie de run vroeg
 	RequestedBy nullable.Nullable[string] `json:"requested_by"`
@@ -2321,6 +2493,9 @@ type TestRun struct {
 	Trigger  TestRunTrigger                        `json:"trigger"`
 }
 
+// TestRunKind defines model for TestRun.Kind.
+type TestRunKind string
+
 // TestRunTrigger defines model for TestRun.Trigger.
 type TestRunTrigger string
 
@@ -2329,13 +2504,16 @@ type TestRunCheck struct {
 	Detail string `json:"detail"`
 	Name   string `json:"name"`
 	Ok     bool   `json:"ok"`
+
+	// Warning Niet in orde, maar geen reden om af te keuren
+	Warning bool `json:"warning"`
 }
 
 // TestRunEvent defines model for TestRunEvent.
 type TestRunEvent struct {
 	Kind TestRunEventKind `json:"kind"`
 
-	// TMs Milliseconden na de storing
+	// TMs Milliseconden na de storing, of bij een back-upcontrole na de start
 	TMs  int64  `json:"t_ms"`
 	Text string `json:"text"`
 }
@@ -2563,6 +2741,18 @@ type ProbeProxmoxJSONBody struct {
 	ApiUrl string `json:"api_url"`
 }
 
+// ListTestRunsParams defines parameters for ListTestRuns.
+type ListTestRunsParams struct {
+	Kind      *ListTestRunsParamsKind `form:"kind,omitempty" json:"kind,omitempty"`
+	ClusterId *openapi_types.UUID     `form:"cluster_id,omitempty" json:"cluster_id,omitempty"`
+	NodeId    *openapi_types.UUID     `form:"node_id,omitempty" json:"node_id,omitempty"`
+	Result    *TestRunResult          `form:"result,omitempty" json:"result,omitempty"`
+	Limit     *int                    `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// ListTestRunsParamsKind defines parameters for ListTestRuns.
+type ListTestRunsParamsKind string
+
 // EnrollAgentJSONRequestBody defines body for EnrollAgent for application/json ContentType.
 type EnrollAgentJSONRequestBody = EnrollRequest
 
@@ -2620,6 +2810,9 @@ type UpdateNodeJSONRequestBody = NodePatch
 // NodeActionJSONRequestBody defines body for NodeAction for application/json ContentType.
 type NodeActionJSONRequestBody = NodeActionInput
 
+// VerifyNodeBackupJSONRequestBody defines body for VerifyNodeBackup for application/json ContentType.
+type VerifyNodeBackupJSONRequestBody = BackupVerifyInput
+
 // CreateProxmoxJSONRequestBody defines body for CreateProxmox for application/json ContentType.
 type CreateProxmoxJSONRequestBody = ProxmoxInput
 
@@ -2676,6 +2869,9 @@ type ServerInterface interface {
 	// BeginTotpSetup Nieuw TOTP-geheim aanmaken (nog niet actief)
 	// (POST /auth/totp/setup)
 	BeginTotpSetup(w http.ResponseWriter, r *http.Request)
+	// CleanupBackupSandbox Een sandbox nu opruimen (admin)
+	// (POST /backup-sandboxes/{sandboxId}/cleanup)
+	CleanupBackupSandbox(w http.ResponseWriter, r *http.Request, sandboxId openapi_types.UUID)
 	// GetBackups Back-upstand van elke bewaakte VM, per koppeling de dekking, en per cluster de slechtste stand
 	// (GET /backups)
 	GetBackups(w http.ResponseWriter, r *http.Request)
@@ -2805,6 +3001,9 @@ type ServerInterface interface {
 	// GetNodeBackups Back-upstand en alle back-ups van de VM van een node
 	// (GET /nodes/{nodeId}/backups)
 	GetNodeBackups(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// VerifyNodeBackup Back-up controleren in een sandbox (admin)
+	// (POST /nodes/{nodeId}/backups/verify)
+	VerifyNodeBackup(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
 	// GetNodeDrift Drift van één node
 	// (GET /nodes/{nodeId}/drift)
 	GetNodeDrift(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
@@ -2856,6 +3055,9 @@ type ServerInterface interface {
 	// ListTemplates De clustertemplates in deze server
 	// (GET /templates)
 	ListTemplates(w http.ResponseWriter, r *http.Request)
+	// ListTestRuns Runs van failovertests en back-upcontroles, nieuwste eerst
+	// (GET /test-runs)
+	ListTestRuns(w http.ResponseWriter, r *http.Request, params ListTestRunsParams)
 	// GetTestRun Het rapport van één run
 	// (GET /test-runs/{runId})
 	GetTestRun(w http.ResponseWriter, r *http.Request, runId openapi_types.UUID)
@@ -2946,6 +3148,12 @@ func (_ Unimplemented) EnableTotp(w http.ResponseWriter, r *http.Request) {
 // BeginTotpSetup Nieuw TOTP-geheim aanmaken (nog niet actief)
 // (POST /auth/totp/setup)
 func (_ Unimplemented) BeginTotpSetup(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CleanupBackupSandbox Een sandbox nu opruimen (admin)
+// (POST /backup-sandboxes/{sandboxId}/cleanup)
+func (_ Unimplemented) CleanupBackupSandbox(w http.ResponseWriter, r *http.Request, sandboxId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -3207,6 +3415,12 @@ func (_ Unimplemented) GetNodeBackups(w http.ResponseWriter, r *http.Request, no
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// VerifyNodeBackup Back-up controleren in een sandbox (admin)
+// (POST /nodes/{nodeId}/backups/verify)
+func (_ Unimplemented) VerifyNodeBackup(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // GetNodeDrift Drift van één node
 // (GET /nodes/{nodeId}/drift)
 func (_ Unimplemented) GetNodeDrift(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
@@ -3306,6 +3520,12 @@ func (_ Unimplemented) Stream(w http.ResponseWriter, r *http.Request) {
 // ListTemplates De clustertemplates in deze server
 // (GET /templates)
 func (_ Unimplemented) ListTemplates(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListTestRuns Runs van failovertests en back-upcontroles, nieuwste eerst
+// (GET /test-runs)
+func (_ Unimplemented) ListTestRuns(w http.ResponseWriter, r *http.Request, params ListTestRunsParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -3791,6 +4011,32 @@ func (siw *ServerInterfaceWrapper) BeginTotpSetup(w http.ResponseWriter, r *http
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.BeginTotpSetup(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CleanupBackupSandbox operation middleware
+func (siw *ServerInterfaceWrapper) CleanupBackupSandbox(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "sandboxId" -------------
+	var sandboxId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "sandboxId", chi.URLParam(r, "sandboxId"), &sandboxId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "sandboxId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CleanupBackupSandbox(w, r, sandboxId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -4855,6 +5101,32 @@ func (siw *ServerInterfaceWrapper) GetNodeBackups(w http.ResponseWriter, r *http
 	handler.ServeHTTP(w, r)
 }
 
+// VerifyNodeBackup operation middleware
+func (siw *ServerInterfaceWrapper) VerifyNodeBackup(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.VerifyNodeBackup(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetNodeDrift operation middleware
 func (siw *ServerInterfaceWrapper) GetNodeDrift(w http.ResponseWriter, r *http.Request) {
 
@@ -5271,6 +5543,91 @@ func (siw *ServerInterfaceWrapper) ListTemplates(w http.ResponseWriter, r *http.
 	handler.ServeHTTP(w, r)
 }
 
+// ListTestRuns operation middleware
+func (siw *ServerInterfaceWrapper) ListTestRuns(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListTestRunsParams
+
+	// ------------- Optional query parameter "kind" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "kind", r.URL.Query(), &params.Kind, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "kind"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "kind", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cluster_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cluster_id", r.URL.Query(), &params.ClusterId, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cluster_id"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cluster_id", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "node_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "node_id", r.URL.Query(), &params.NodeId, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "node_id"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "node_id", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "result" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "result", r.URL.Query(), &params.Result, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "result"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "result", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListTestRuns(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetTestRun operation middleware
 func (siw *ServerInterfaceWrapper) GetTestRun(w http.ResponseWriter, r *http.Request) {
 
@@ -5650,6 +6007,12 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Get(options.BaseURL+"/nodes/{nodeId}/backups", wrapper.GetNodeBackups)
 	})
 	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/nodes/{nodeId}/backups/verify", wrapper.VerifyNodeBackup)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/backup-sandboxes/{sandboxId}/cleanup", wrapper.CleanupBackupSandbox)
+	})
+	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/clusters/{clusterId}/drift", wrapper.GetClusterDrift)
 	})
 	r.Group(func(r chi.Router) {
@@ -5687,6 +6050,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/failover-tests/{testId}/runs", wrapper.StartFailoverTest)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/test-runs", wrapper.ListTestRuns)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/test-runs/{runId}", wrapper.GetTestRun)

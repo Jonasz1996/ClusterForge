@@ -71,6 +71,13 @@ func (s *Service) RequestAction(ctx context.Context, actor events.Actor, connID 
 	if g.Template {
 		return store.Job{}, ValidationError{"dit is een template; die kun je niet starten, snapshotten of migreren"}
 	}
+	sandbox, err := s.q.IsSandboxGuest(ctx, store.IsSandboxGuestParams{ConnectionID: connID, Vmid: int32(vmid)})
+	if err != nil {
+		return store.Job{}, err
+	}
+	if sandbox {
+		return store.Job{}, ConflictError{"dit is een tijdelijke sandbox van een back-upcontrole; ClusterForge start, stopt en verwijdert hem zelf"}
+	}
 	p := vmActionParams{ConnectionID: connID, VMID: vmid, Name: g.Name, Action: req.Action}
 	title := fmt.Sprintf("%s: %s (%s %d)", actionTitles[req.Action], g.Name, kind, vmid)
 	switch req.Action {
@@ -243,6 +250,12 @@ func issue(ctx context.Context, api API, g Guest, p vmActionParams) (string, err
 	return "", fmt.Errorf("onbekende actie %q", p.Action)
 }
 
+// WaitTask volgt een Proxmox-taak tot hij klaar is en neemt zijn uitvoer
+// over in de stap. st mag nil zijn als er geen taak in ClusterForge bij hoort.
+func (s *Service) WaitTask(ctx context.Context, api API, upid string, st *jobs.Step) error {
+	return s.waitTask(ctx, api, upid, st)
+}
+
 // waitTask volgt een Proxmox-taak tot hij klaar is en neemt zijn uitvoer
 // over in de stap.
 func (s *Service) waitTask(ctx context.Context, api API, upid string, st *jobs.Step) error {
@@ -260,17 +273,23 @@ func (s *Service) waitTask(ctx context.Context, api API, upid string, st *jobs.S
 			}
 		case err == nil:
 			failures = 0
-			if lines, err := api.TaskLog(ctx, upid); err == nil {
-				st.SetLog(lines)
+			if st != nil {
+				if lines, err := api.TaskLog(ctx, upid); err == nil {
+					st.SetLog(lines)
+				}
 			}
 			if !status.Running() {
-				_ = st.Flush(ctx)
+				if st != nil {
+					_ = st.Flush(ctx)
+				}
 				if status.OK() {
 					return nil
 				}
 				return fmt.Errorf("taak in Proxmox mislukt: %s", status.ExitStatus)
 			}
-			_ = st.Flush(ctx)
+			if st != nil {
+				_ = st.Flush(ctx)
+			}
 		}
 		select {
 		case <-ctx.Done():
@@ -278,9 +297,12 @@ func (s *Service) waitTask(ctx context.Context, api API, upid string, st *jobs.S
 			if errors.Is(cause, jobs.ErrCanceled) {
 				sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
 				defer cancel()
-				if err := api.StopTask(sctx, upid); err != nil {
+				err := api.StopTask(sctx, upid)
+				switch {
+				case st == nil:
+				case err != nil:
 					st.Logf("Proxmox-taak stoppen mislukt: %v", err)
-				} else {
+				default:
 					st.Logf("Proxmox-taak gestopt")
 				}
 			}

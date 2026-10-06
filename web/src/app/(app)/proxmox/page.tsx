@@ -322,6 +322,11 @@ function Guests({
                     <td className={tdClass}>
                       <span className="font-medium">{g.name || "–"}</span>{" "}
                       <span className="text-xs text-slate-400">{g.type === "lxc" ? "container" : "VM"}</span>
+                      {g.sandbox && (
+                        <span className="ml-1" title="Tijdelijke VM van een back-upcontrole; ClusterForge start en verwijdert hem zelf">
+                          <Badge tone="blue">Sandbox</Badge>
+                        </span>
+                      )}
                       {g.tags.length > 0 && (
                         <div className="mt-1">
                           <Tags tags={g.tags} />
@@ -359,7 +364,11 @@ function Guests({
                     </td>
                     {isAdmin && (
                       <td className={`${tdClass} text-right`}>
-                        <GuestActions proxmoxId={conn.id} guest={g} hosts={hosts} onResult={onResult} />
+                        {g.sandbox ? (
+                          <span className="text-xs text-slate-400">–</span>
+                        ) : (
+                          <GuestActions proxmoxId={conn.id} guest={g} hosts={hosts} onResult={onResult} />
+                        )}
                       </td>
                     )}
                   </tr>
@@ -386,7 +395,7 @@ function NodeCell({ conn, guest, nodes, isAdmin }: { conn: ProxmoxConnection; gu
       </Link>
     );
   }
-  if (!isAdmin || guest.template) return <span className="text-slate-400">–</span>;
+  if (!isAdmin || guest.template || guest.sandbox) return <span className="text-slate-400">–</span>;
   const link = { connection_id: conn.id, vmid: guest.vmid };
   const short = guest.name.toLowerCase();
   const match = nodes.find((n) => !n.proxmox && (n.hostname.toLowerCase() === short || n.hostname.toLowerCase().split(".")[0] === short));

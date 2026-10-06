@@ -250,6 +250,22 @@ type BackupPolicy struct {
 	UpdatedBy   *uuid.UUID
 }
 
+type BackupSandbox struct {
+	ID           uuid.UUID
+	ConnectionID uuid.UUID
+	Vmid         int32
+	SourceVmid   int32
+	SourceNodeID *uuid.UUID
+	RunID        *uuid.UUID
+	Volid        string
+	State        string
+	Host         string
+	Storage      string
+	Error        string
+	CreatedAt    time.Time
+	DestroyedAt  *time.Time
+}
+
 type BackupStatus struct {
 	ConnectionID   uuid.UUID
 	Vmid           int32

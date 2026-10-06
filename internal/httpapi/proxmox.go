@@ -199,6 +199,17 @@ func (s *Server) GetProxmoxResources(w http.ResponseWriter, r *http.Request, id 
 		return
 	}
 	out := gen.ProxmoxResources{Hosts: []gen.ProxmoxHost{}, Guests: []gen.ProxmoxGuest{}, Storages: []gen.ProxmoxStorage{}}
+	live, err := s.q.ListLiveSandboxes(r.Context())
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	sandbox := map[int]bool{}
+	for _, l := range live {
+		if l.BackupSandbox.ConnectionID == id {
+			sandbox[int(l.BackupSandbox.Vmid)] = true
+		}
+	}
 	for _, row := range rows {
 		var res proxmox.Resource
 		if err := json.Unmarshal(row.ProxmoxResource.Data, &res); err != nil {
@@ -217,6 +228,7 @@ func (s *Server) GetProxmoxResources(w http.ResponseWriter, r *http.Request, id 
 				Template: res.Template == 1, Cpu: res.CPU, Maxcpu: res.MaxCPU, Mem: res.Mem, Maxmem: res.MaxMem,
 				Disk: res.Disk, Maxdisk: res.MaxDisk, Uptime: res.Uptime, Tags: tags, Lock: res.Lock,
 				NodeId: nullableOf(row.NodeID), NodeHostname: nullableOf(row.NodeHostname),
+				Sandbox: sandbox[res.VMID] || res.Pool == proxmox.SandboxPool,
 			})
 		case "storage":
 			out.Storages = append(out.Storages, gen.ProxmoxStorage{
