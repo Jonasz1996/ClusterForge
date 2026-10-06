@@ -375,7 +375,7 @@ func toAPIRun(run store.TestRun, jobStatus store.NullJobStatus, requestedBy *str
 	var checks []backups.Check
 	_ = json.Unmarshal(run.Checks, &checks)
 	for _, c := range checks {
-		out.Checks = append(out.Checks, gen.TestRunCheck{Name: c.Name, Ok: c.OK, Detail: c.Detail, Warning: c.Warning})
+		out.Checks = append(out.Checks, gen.TestRunCheck{Name: c.Name, Ok: c.OK, Detail: c.Detail, Warning: c.Warning, Code: c.Code})
 	}
 	var timeline []backups.TimelineEvent
 	_ = json.Unmarshal(run.Timeline, &timeline)

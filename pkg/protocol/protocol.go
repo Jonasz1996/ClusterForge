@@ -435,3 +435,81 @@ func (f Facts) Stable() Facts {
 	}
 	return out
 }
+
+// De diepe back-upcontrole. ClusterForge start cf-agent verify via de QEMU
+// guest agent in een teruggezette sandbox, niet via NATS: de kopie heeft
+// geen netwerk. De aanvraag gaat als JSON naar stdin, het antwoord komt als
+// JSON op stdout. Een agent zonder verify geeft exitcode 2 zonder JSON.
+const (
+	// VerifyPath is het programma dat de server in de sandbox start, met
+	// de vaste argumenten "verify -".
+	VerifyPath = "/usr/local/bin/cf-agent"
+	// VerifyInvalid is de exitcode bij een ongeldige aanvraag.
+	VerifyInvalid = 3
+	// SandboxSerial is het SMBIOS-serienummer van een sandbox. cf-agent run
+	// verbindt dan niet met de server.
+	SandboxSerial = "cf-sandbox"
+	// VerifyCheckLimit en VerifyLimit zijn de limieten van de agent per
+	// controle en voor alles samen.
+	VerifyCheckLimit = 60 * time.Second
+	VerifyLimit      = 5 * time.Minute
+)
+
+// VerifyRequest zegt wat er in de sandbox moet draaien. Het zijn alleen
+// namen, poorten en adressen op loopback: geen vrije SQL of shell.
+type VerifyRequest struct {
+	// Services zijn systemd-units die active moeten zijn, zoals nginx of
+	// postgresql@16-main.
+	Services []string `json:"services"`
+	// TCP zijn poorten die op loopback verbindingen moeten aannemen.
+	TCP []VerifyTCP `json:"tcp,omitempty"`
+	// HTTP zijn adressen op loopback met de verwachte statuscode.
+	HTTP []VerifyHTTP `json:"http,omitempty"`
+	// PostgreSQL en MariaDB vragen de vaste databasecontroles.
+	PostgreSQL bool `json:"postgresql,omitempty"`
+	MariaDB    bool `json:"mariadb,omitempty"`
+}
+
+type VerifyTCP struct {
+	// Host is 127.0.0.1 of ::1.
+	Host string `json:"host"`
+	Port int    `json:"port"`
+	// Service is de unit die op deze poort hoort te luisteren.
+	Service string `json:"service,omitempty"`
+}
+
+type VerifyHTTP struct {
+	// URL begint met http://127.0.0.1 of http://[::1].
+	URL    string `json:"url"`
+	Expect int    `json:"expect"`
+}
+
+// VerifyResult is het antwoord van cf-agent verify. Error is gezet bij een
+// ongeldige aanvraag (exitcode 3); dan zijn er geen controles.
+type VerifyResult struct {
+	ProtocolVersion int           `json:"protocol_version"`
+	AgentVersion    string        `json:"agent_version"`
+	Error           string        `json:"error,omitempty"`
+	Checks          []VerifyCheck `json:"checks"`
+	// Seconds is hoe lang alles samen duurde.
+	Seconds float64 `json:"seconds"`
+}
+
+// Uitkomsten van een VerifyCheck.
+const (
+	VerifyOK      = "ok"
+	VerifyWarning = "warning"
+	VerifyFail    = "fail"
+)
+
+// VerifyCheck is één controle in de sandbox.
+type VerifyCheck struct {
+	// Kind is service, units, tcp, http, postgresql of mariadb.
+	Kind string `json:"kind"`
+	// Name is de unit, de poort of het adres.
+	Name   string `json:"name"`
+	Status string `json:"status"`
+	Detail string `json:"detail"`
+	// Count is bij een database het aantal databases.
+	Count int `json:"count,omitempty"`
+}

@@ -2,8 +2,8 @@ package backups
 
 // Het sandbox-register en de bewaakte functies. ClusterForge start, wijzigt en
 // verwijdert alleen een VM die het zelf als sandbox terugzette. Dit bestand is
-// de enige plek die Restore, Destroy en AgentInfo van de Proxmox-API aanroept;
-// TestSandboxCallers bewaakt dat.
+// de enige plek die Restore, Destroy, AgentInfo, AgentRunVerify en
+// AgentExecStatus van de Proxmox-API aanroept; TestSandboxCallers bewaakt dat.
 
 import (
 	"context"
@@ -170,6 +170,16 @@ func (v sandboxVM) agentPing(ctx context.Context) error { return v.api.AgentPing
 func (v sandboxVM) agentInfo(ctx context.Context, command string) ([]byte, error) {
 	raw, err := v.api.AgentInfo(ctx, v.guest(), command)
 	return raw, err
+}
+
+// runVerify start cf-agent verify in de sandbox: het enige programma dat
+// ClusterForge in een VM start, met een vaste opdrachtregel.
+func (v sandboxVM) runVerify(ctx context.Context, request []byte) (int, error) {
+	return v.api.AgentRunVerify(ctx, v.guest(), request)
+}
+
+func (v sandboxVM) execStatus(ctx context.Context, pid int) (proxmox.ExecStatus, error) {
+	return v.api.AgentExecStatus(ctx, v.guest(), pid)
 }
 
 // lockSandbox zorgt dat de taak en de opruimer niet tegelijk met dezelfde

@@ -2088,7 +2088,7 @@ components:
     BackupVerifyMeasurements:
       type: object
       required: [restore_seconds, boot_seconds, check_seconds, cleanup_seconds, total_seconds, host, storage, sandbox_vmid, hostname, os,
-        filesystems, destroyed_at]
+        filesystems, destroyed_at, agent_version, services_expected, services_active, databases]
       properties:
         restore_seconds: { type: number, format: double, nullable: true }
         boot_seconds: { type: number, format: double, nullable: true, description: Van starten tot de guest agent antwoordt }
@@ -2102,6 +2102,13 @@ components:
         os: { type: string }
         filesystems: { type: integer }
         destroyed_at: { type: string, format: date-time, nullable: true }
+        agent_version: { type: string, description: "De versie van cf-agent in de back-up, uit cf-agent verify; leeg als die niet liep" }
+        services_expected: { type: integer, description: De services die cf-agent verify controleerde }
+        services_active: { type: integer }
+        databases:
+          type: array
+          description: Zoals "PostgreSQL met 3 databases"
+          items: { type: string }
     BackupVerifyReport:
       type: object
       required: [definition, measurements, sandbox]
@@ -2383,12 +2390,17 @@ components:
       enum: [pass, warning, fail, error, skipped, canceled]
     TestRunCheck:
       type: object
-      required: [name, ok, detail, warning]
+      required: [name, ok, detail, warning, code]
       properties:
         name: { type: string }
         ok: { type: boolean }
         detail: { type: string }
         warning: { type: boolean, description: "Niet in orde, maar geen reden om af te keuren" }
+        code:
+          type: string
+          description: >-
+            Wat de beheerder kan doen, of leeg. agent_too_old: de back-up heeft geen cf-agent die verify kent; exec_forbidden: het
+            API-token mag in de sandbox niets starten via de guest agent.
     TestRunEvent:
       type: object
       required: [t_ms, kind, text]

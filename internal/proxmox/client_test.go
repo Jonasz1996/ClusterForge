@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/Jonasz1996/clusterforge/internal/proxmox/pvefake"
+	"github.com/Jonasz1996/clusterforge/pkg/protocol"
 )
 
 func TestNormalizeURL(t *testing.T) {
@@ -176,5 +178,66 @@ func TestClientTLSAndAuth(t *testing.T) {
 	p, err := Probe(ctx, srv.URL)
 	if err != nil || p.Fingerprint != fp || p.Trusted {
 		t.Errorf("Probe = %+v, %v", p, err)
+	}
+}
+
+func TestAgentVerify(t *testing.T) {
+	ctx := context.Background()
+	pve, srv, fp := newFake(t)
+	c, err := NewClient(Config{URL: srv.URL, TokenID: "clusterforge@pve!cf", TokenSecret: "geheim", Fingerprint: FormatFingerprint(fp)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	web := Guest{Type: "qemu", Node: "pve1", VMID: 101}
+	upid, _ := c.Power(ctx, web, "start")
+	if st, err := c.TaskStatus(ctx, upid); err != nil || !st.OK() {
+		t.Fatalf("start: %+v %v", st, err)
+	}
+
+	release := make(chan struct{})
+	type call struct {
+		command []string
+		input   string
+	}
+	calls := make(chan call, 1)
+	pve.OnExec(func(_ int, _ string, command []string, input string) (int, string, string) {
+		calls <- call{command, input}
+		<-release
+		return 0, `{"protocol_version":1}`, "klaar"
+	})
+	request := []byte(`{"services":["nginx"],"tcp":[{"host":"127.0.0.1","port":80}]}`)
+	pid, err := c.AgentRunVerify(ctx, web, request)
+	if err != nil || pid == 0 {
+		t.Fatalf("AgentRunVerify = %d, %v", pid, err)
+	}
+	if st, err := c.AgentExecStatus(ctx, web, pid); err != nil || bool(st.Exited) {
+		t.Fatalf("nog bezig: %+v %v", st, err)
+	}
+	close(release)
+	var st ExecStatus
+	for i := 0; i < 100 && !bool(st.Exited); i++ {
+		if st, err = c.AgentExecStatus(ctx, web, pid); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !bool(st.Exited) || st.ExitCode != 0 || st.OutData != `{"protocol_version":1}` || st.ErrData != "klaar" {
+		t.Fatalf("AgentExecStatus = %+v", st)
+	}
+	// Altijd hetzelfde programma; de aanvraag gaat via stdin.
+	if got := <-calls; !slices.Equal(got.command, []string{protocol.VerifyPath, "verify", "-"}) || got.input != string(request) {
+		t.Fatalf("exec: %q %q", got.command, got.input)
+	}
+
+	if _, err := c.AgentRunVerify(ctx, web, make([]byte, maxVerifyInput+1)); err == nil {
+		t.Error("te grote aanvraag geaccepteerd")
+	}
+	if _, err := c.AgentRunVerify(ctx, Guest{Type: "lxc", Node: "pve2", VMID: 200}, request); err == nil {
+		t.Error("exec in een container geaccepteerd")
+	}
+	pve.SetExecForbidden(true)
+	var pe *Error
+	if _, err := c.AgentRunVerify(ctx, web, request); !errors.As(err, &pe) || pe.Code != 403 {
+		t.Errorf("zonder recht: %v", err)
 	}
 }

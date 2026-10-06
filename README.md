@@ -33,6 +33,7 @@ Het technisch ontwerp staat in [docs/design/mvp-fase-1.md](docs/design/mvp-fase-
 | 13. Meer templates | Docker-hosts, Cron-cluster en Eigen applicatie (een container achter een VIP), met hun diensten meteen in de graaf | klaar |
 | 14. GitOps: lezen en plannen | Clusters uit een template beschrijven in een GitHub-repository; elk bestand gecontroleerd met veld en regel, en per wijziging een plan met de diff per node, zonder iets op de nodes te veranderen | klaar |
 | 15. GitOps: goedkeuren en toepassen | Een plan goedkeuren of afwijzen; goedkeuren schrijft een revisie met de commit en past de wijziging node voor node toe, met de VIP-eigenaar als laatste; terugdraaien met git revert, en Opnieuw toepassen na een mislukte toepassing | klaar |
+| 16. Diepe back-upcontrole | In de teruggezette sandbox controleert cf-agent verify of de services van de node draaien, hun poorten luisteren, de HTTP-controles van de template slagen en PostgreSQL of MariaDB antwoordt | klaar |
 
 ## Draaien met Docker Compose
 
@@ -140,7 +141,7 @@ pveum acl modify / --users clusterforge@pve --roles ClusterForge
 pveum user token add clusterforge@pve cf --privsep 0
 ```
 
-Dat is de rol voor Proxmox VE 8. Op Proxmox VE 9 bestaat `VM.Monitor` niet meer; zet daar `VM.GuestAgent.Audit VM.GuestAgent.FileWrite` in de plaats. Bestaat de rol al uit een eerdere versie, vervang dan `role add` door `role modify` met dezelfde lijst. De rechten om VM's te maken en de guest agent te gebruiken zijn alleen nodig om [clusters uit te rollen](#clusters-uitrollen). `VM.Backup` en `Datastore.AllocateSpace` zijn nodig om de [back-ups](#back-ups) te lezen: zonder die rechten laat Proxmox ze stilzwijgend weg. Een rol uit een eerdere versie mist `VM.Backup`. `VM.Config.HWType` en `VM.Config.CDROM` zijn nodig om een teruggezette back-up af te sluiten bij de [back-upcontrole](#back-ups-controleren); een rol uit een eerdere versie mist ze.
+Dat is de rol voor Proxmox VE 8. Op Proxmox VE 9 bestaat `VM.Monitor` niet meer; zet daar `VM.GuestAgent.Audit VM.GuestAgent.FileWrite` in de plaats, en geef voor de [diepe back-upcontrole](#diepe-controle-met-cf-agent-verify) `VM.GuestAgent.Unrestricted` alleen op de sandbox-pool. Bestaat de rol al uit een eerdere versie, vervang dan `role add` door `role modify` met dezelfde lijst. De rechten om VM's te maken en de guest agent te gebruiken zijn alleen nodig om [clusters uit te rollen](#clusters-uitrollen). `VM.Backup` en `Datastore.AllocateSpace` zijn nodig om de [back-ups](#back-ups) te lezen: zonder die rechten laat Proxmox ze stilzwijgend weg. Een rol uit een eerdere versie mist `VM.Backup`. `VM.Config.HWType` en `VM.Config.CDROM` zijn nodig om een teruggezette back-up af te sluiten bij de [back-upcontrole](#back-ups-controleren); een rol uit een eerdere versie mist ze.
 
 Het laatste commando toont het secret één keer. Klik in de webinterface bij Proxmox op "Proxmox koppelen" en vul het API-adres (`https://pve1.example.lan:8006`), de token-id (`clusterforge@pve!cf`) en het secret in. Heeft Proxmox een zelfondertekend certificaat, klik dan naast de vingerafdruk op "Ophalen" en vergelijk de vingerafdruk met die op de host (`openssl x509 -in /etc/pve/local/pve-ssl.pem -noout -fingerprint -sha256`); ClusterForge vertrouwt daarna alleen dat certificaat. Het secret wordt versleuteld met `CF_MASTER_KEY` opgeslagen. Verlies je die sleutel, dan vul je het secret opnieuw in via Bewerken.
 
@@ -173,7 +174,7 @@ De controle is een taak met zes stappen, en het rapport toont ze allemaal:
 2. **Terugzetten** onder een nieuw VMID in pool `cf-sandbox`, nooit over een bestaande VM en zonder te starten.
 3. **Isoleren.** Elke netwerkkaart krijgt `link_down=1`, opstarten bij boot en de bescherming gaan uit, en de VM krijgt de tag en het SMBIOS-serienummer `cf-sandbox`. Heeft de VM iets dat niet zeker af te sluiten is, zoals virtiofs, PCI- of USB-doorgifte of een schijf van de host, dan wordt hij niet gestart en meteen opgeruimd. ClusterForge leest de config terug en start alleen als elke regel klopt.
 4. **Starten** en wachten tot de guest agent antwoordt, hoogstens `CF_SANDBOX_BOOT_TIMEOUT`. Zonder guest agent telt alleen dat de VM blijft draaien, met een waarschuwing.
-5. **Controleren** via de guest agent: hostname, besturingssysteem en bestandssystemen, en dat de agent van de node niet ineens twee keer verbonden is.
+5. **Controleren** via de guest agent: hostname, besturingssysteem en bestandssystemen, dan de [diepe controle](#diepe-controle-met-cf-agent-verify) met cf-agent in de sandbox, en dat de agent van de node niet ineens twee keer verbonden is.
 6. **Opruimen**: hard uitzetten en verwijderen.
 
 De uitslag leest bijvoorbeeld als "geslaagd. Terugzetten 3 min 12 s, opstarten 41 s. Hostname web01, Debian 13, 2 bestandssystemen. Sandbox-VM 131 verwijderd om 04:07." De hersteltijd (terugzetten plus opstarten) staat ook bij de node op de pagina Back-ups, met daaronder de geschiedenis van de controles. Er loopt hoogstens één back-upcontrole of failovertest tegelijk.
@@ -183,6 +184,35 @@ Een kopie van een node draagt dezelfde agentsleutel. Zolang een sandbox bestaat,
 De tijdelijke VM verdwijnt altijd: na de controle, bij Afbreken, en na een herstart van de server midden in de taak (de run eindigt dan met "onderbroken door herstart van de server"). Lukt verwijderen niet, bijvoorbeeld omdat Proxmox de VM vergrendeld heeft, dan staat hij bij Sandboxes op de pagina Back-ups, komt er één regel in het logboek en probeert de opruimer het elke 5 minuten opnieuw; Opruimen doet het meteen. De opruimer raakt alleen VM's aan die ClusterForge zelf teruggezet heeft en die nog in pool `cf-sandbox` zitten.
 
 Wil je de isolatie één keer met eigen ogen zien: open tijdens een controle in Proxmox de VM in pool `cf-sandbox`. Bij Hardware staat elke netwerkkaart op `link_down=1`, en in de console toont `ip link` de kaarten als `NO-CARRIER`. Containers (LXC) krijgen alleen versheid en dekking, want ze hebben geen guest agent.
+
+### Diepe controle met cf-agent verify
+
+Dat een VM opstart, zegt nog niet dat de website of de database erop werkt. Daarom start ClusterForge in de sandbox via de guest agent `cf-agent verify` met een aanvraag die zegt wat er moet draaien. Die aanvraag komt van ClusterForge zelf: de services die de template van het cluster start (met de vaste templateversie uit de gewenste staat), aangevuld met de services die op de productienode actief waren volgens de laatste facts. Er staat geen geheim in, en geen vrije opdracht of SQL: cf-agent voert alleen zijn eigen vaste controles uit en alleen op 127.0.0.1. Die controles zijn:
+
+- **Services.** Elke verwachte service moet `active` zijn. Een service die niet bestaat of in de sandbox niet kan werken, zoals keepalived dat zijn VIP niet kan zetten ("Cannot assign requested address") of een Patroni- of Galera-node zonder de rest van het cluster, geeft een waarschuwing in plaats van een afkeuring.
+- **Gefaalde units.** Units die na het opstarten gefaald zijn. De wait-online-units en `networking.service` falen in een sandbox zonder netwerk vaak en tellen niet mee; andere geven een waarschuwing.
+- **Poorten.** De poort van elke service uit de template moet op 127.0.0.1 te bereiken zijn.
+- **HTTP.** De HTTP-controles van de template, omgezet naar 127.0.0.1 met hetzelfde pad, moeten de verwachte status geven.
+- **PostgreSQL en MariaDB.** Staat de database bij de services, dan moet hij antwoorden en zijn lijst met databases geven; bij PostgreSQL moet ook elke database open te maken zijn. Het rapport noemt alleen namen en aantallen, zoals "PostgreSQL met 3 databases", nooit inhoud.
+
+Een afkeuring hier keurt de hele back-up af: "back-up afgekeurd: 1 controle mislukt. HTTP http://127.0.0.1/: gaf 503 in plaats van 200." Een controle duurt hoogstens een minuut, alles samen hoogstens vijf.
+
+Op Proxmox VE 9 heeft het token daarvoor `VM.GuestAgent.Unrestricted` nodig. Geef dat alleen op de sandbox-pool, als root op een van je Proxmox-hosts:
+
+```sh
+pveum role add ClusterForgeSandbox --privs "VM.GuestAgent.Unrestricted"
+pveum acl modify /pool/cf-sandbox --users clusterforge@pve --roles ClusterForgeSandbox
+```
+
+Op Proxmox VE 8 valt het onder `VM.Monitor`, dat al in de rol hierboven staat. Mist het recht, dan slaagt de controle met de waarschuwing "het API-token mag in de sandbox niets starten via de guest agent" en staan deze commando's in het rapport.
+
+De diepe controle werkt alleen met een back-up waarin al een cf-agent met `verify` staat. In een oudere back-up slaagt de controle met de waarschuwing "cf-agent in deze back-up kent verify nog niet", en het rapport en de kaart Back-ups op de node tonen de drie stappen om dat te regelen:
+
+1. Werk cf-agent bij op de node met het commando van de kaart Drift (`agent.sh --upgrade`); de aanmelding blijft staan.
+2. Bouw de golden image opnieuw met `golden-image.sh --replace` en dezelfde `--vmid` en `--storage` als de eerste keer, zodat nieuwe VM's de nieuwe agent ook hebben.
+3. Laat Proxmox een nieuwe back-up maken, klik op Back-ups op Nu verversen en controleer opnieuw.
+
+De nieuwe agent herkent een sandbox aan het SMBIOS-serienummer `cf-sandbox`. Start hij daar, dan verbindt hij niet met ClusterForge en wacht hij tot de VM verwijderd wordt; zo praat een kopie van een node nooit mee als die node.
 
 ## Clusters uitrollen
 

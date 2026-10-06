@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Jonasz1996/clusterforge/internal/deploy"
 	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/jobs"
 	"github.com/Jonasz1996/clusterforge/internal/planner"
@@ -108,6 +109,13 @@ type Service struct {
 	JobLimit time.Duration
 	// Window is het testvenster waarin geplande controles draaien.
 	Window planner.Window
+	// Running geeft wat er volgens de gewenste staat op een node draait;
+	// de diepe controle vraagt die services, poorten en adressen aan
+	// cf-agent verify. Nil: alleen wat de facts van de node zeggen.
+	Running func(ctx context.Context, clusterID, nodeID uuid.UUID) (deploy.Running, error)
+	// VerifyWait is hoe lang de controle op cf-agent verify wacht; nul is
+	// de limiet van de agent plus 30 s.
+	VerifyWait time.Duration
 
 	runner    *jobs.Runner
 	conns     Connections

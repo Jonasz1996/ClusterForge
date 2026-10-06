@@ -15,9 +15,12 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Jonasz1996/clusterforge/pkg/protocol"
 )
 
 // API is wat de rest van ClusterForge van Proxmox gebruikt. Tests zetten er
@@ -75,6 +78,37 @@ type API interface {
 	// AgentInfo stelt de guest agent één vaste, alleen lezende vraag:
 	// get-host-name, get-osinfo of get-fsinfo.
 	AgentInfo(ctx context.Context, g Guest, command string) (json.RawMessage, error)
+	// AgentRunVerify start via de guest agent het enige programma dat
+	// ClusterForge in een VM start: cf-agent verify -, met request als
+	// stdin. Het geeft het pid van het proces in de VM.
+	AgentRunVerify(ctx context.Context, g Guest, request []byte) (int, error)
+	// AgentExecStatus vraagt of een proces van AgentRunVerify klaar is, met
+	// zijn exitcode en uitvoer.
+	AgentExecStatus(ctx context.Context, g Guest, pid int) (ExecStatus, error)
+}
+
+// ExecStatus is de toestand van een proces dat via de guest agent loopt.
+// Proxmox geeft out-data en err-data al gedecodeerd.
+type ExecStatus struct {
+	Exited       flag   `json:"exited"`
+	ExitCode     int    `json:"exitcode"`
+	Signal       int    `json:"signal"`
+	OutData      string `json:"out-data"`
+	ErrData      string `json:"err-data"`
+	OutTruncated flag   `json:"out-truncated"`
+}
+
+// flag is een boolean die Proxmox als true of als 1 kan geven.
+type flag bool
+
+func (f *flag) UnmarshalJSON(b []byte) error {
+	switch strings.Trim(string(b), `"`) {
+	case "true", "1":
+		*f = true
+	default:
+		*f = false
+	}
+	return nil
 }
 
 type Version struct {
@@ -622,6 +656,36 @@ func (c *Client) AgentInfo(ctx context.Context, g Guest, command string) (json.R
 		return nil, err
 	}
 	return out.Result, nil
+}
+
+// verifyArgv is het enige commando dat AgentRunVerify start; het staat hier
+// vast en komt nooit uit een aanvraag.
+var verifyArgv = []string{protocol.VerifyPath, "verify", "-"}
+
+// maxVerifyInput is wat Proxmox als input-data aanneemt.
+const maxVerifyInput = 64 << 10
+
+func (c *Client) AgentRunVerify(ctx context.Context, g Guest, request []byte) (int, error) {
+	if g.Type != "qemu" {
+		return 0, fmt.Errorf("alleen een VM heeft een guest agent, geen %s", g.Type)
+	}
+	if len(request) > maxVerifyInput {
+		return 0, fmt.Errorf("de aanvraag voor cf-agent verify is groter dan %d bytes", maxVerifyInput)
+	}
+	form := url.Values{"command": slices.Clone(verifyArgv), "input-data": {string(request)}}
+	var out struct {
+		PID int `json:"pid"`
+	}
+	if err := c.do(ctx, http.MethodPost, g.path()+"/agent/exec", form, &out); err != nil {
+		return 0, err
+	}
+	return out.PID, nil
+}
+
+func (c *Client) AgentExecStatus(ctx context.Context, g Guest, pid int) (ExecStatus, error) {
+	var out ExecStatus
+	q := url.Values{"pid": {strconv.Itoa(pid)}}
+	return out, c.do(ctx, http.MethodGet, g.path()+"/agent/exec-status?"+q.Encode(), nil, &out)
 }
 
 // upidNode haalt de host uit een taak-id: UPID:pve1:0000ABCD:...

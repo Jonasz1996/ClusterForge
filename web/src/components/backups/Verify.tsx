@@ -4,7 +4,9 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, type ReactNode } from "react";
 import { Modal } from "@/components/Modal";
+import { upgradeCommand } from "@/components/drift/Drift";
 import { Checks, reportHref, RunBadge } from "@/components/failover/Failover";
+import { CopyBlock } from "@/components/inventory/InstallAgent";
 import { ago, formatBytes, tableClass, tdClass, thClass } from "@/components/inventory/bits";
 import { Alert, Badge, Button, Card, Select, cx } from "@/components/ui";
 import { backupTimeFmt, useNodeBackups, type BackupItem } from "@/lib/backups";
@@ -25,6 +27,91 @@ const timeFmt = new Intl.DateTimeFormat("nl-BE", { hour: "2-digit", minute: "2-d
 const dlClass = "grid gap-x-4 gap-y-2.5 text-sm sm:grid-cols-[9rem_1fr]";
 const dtClass = "text-slate-500";
 const none = <span className="text-slate-400">–</span>;
+
+// deepProblem is de reden dat de diepe controle van een run niet liep,
+// als ClusterForge daar stappen voor kan geven.
+export function deepProblem(run: TestRun | undefined) {
+  return run?.checks.find((c) => c.code === "agent_too_old" || c.code === "exec_forbidden")?.code as
+    | "agent_too_old"
+    | "exec_forbidden"
+    | undefined;
+}
+
+function origin() {
+  return typeof window === "undefined" ? "https://clusterforge.example" : window.location.origin;
+}
+
+// AgentSteps zijn de drie stappen als de back-up geen cf-agent met verify
+// heeft: de agent bijwerken, de golden image opnieuw bouwen en een nieuwe
+// back-up laten maken.
+export function AgentSteps() {
+  const o = origin();
+  return (
+    <ol className="list-decimal space-y-3 pl-5 text-sm">
+      <li className="space-y-1.5">
+        <p>Werk cf-agent bij op de node zelf. De aanmelding blijft staan.</p>
+        <CopyBlock text={upgradeCommand()} />
+      </li>
+      <li className="space-y-1.5">
+        <p>
+          Bouw de golden image opnieuw, zodat nieuwe VM&apos;s de nieuwe agent ook hebben. Draai dit als root op de
+          Proxmox-host met de image, met dezelfde <code>--vmid</code> en <code>--storage</code> als de eerste keer.
+        </p>
+        <CopyBlock text={`curl -fsSL ${o}/install/golden-image.sh | bash -s -- --server ${o} --storage local-lvm --replace`} />
+      </li>
+      <li>
+        <p>
+          Laat Proxmox een nieuwe back-up maken: wacht op de back-upjob, of kies in Proxmox bij de VM onder Backup voor
+          Backup now. Klik daarna op de pagina Back-ups op Nu verversen en controleer opnieuw.
+        </p>
+      </li>
+    </ol>
+  );
+}
+
+// ExecRights zegt welk recht het token mist om cf-agent verify in de
+// sandbox te starten.
+export function ExecRights() {
+  return (
+    <div className="space-y-1.5 text-sm">
+      <p>
+        Op Proxmox VE 9 mag het token alleen iets starten via de guest agent met <code>VM.GuestAgent.Unrestricted</code>.
+        Geef dat recht alleen op de sandbox-pool, als root op een van je Proxmox-hosts:
+      </p>
+      <CopyBlock
+        text={`pveum role add ClusterForgeSandbox --privs "VM.GuestAgent.Unrestricted"\npveum acl modify /pool/cf-sandbox --users clusterforge@pve --roles ClusterForgeSandbox`}
+      />
+      <p className="text-slate-600 dark:text-slate-400">
+        Op Proxmox VE 8 valt dit onder <code>VM.Monitor</code> in de rol ClusterForge, zoals in de README.
+      </p>
+    </div>
+  );
+}
+
+// DeepHelp legt uit waarom de diepe controle niet liep en wat je eraan doet.
+export function DeepHelp({ run, compact = false }: { run: TestRun | undefined; compact?: boolean }) {
+  const problem = deepProblem(run);
+  if (!problem) return null;
+  return (
+    <div className="space-y-3 rounded border border-amber-200 bg-amber-50 px-3 py-3 text-amber-950 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-100">
+      <p className="text-sm">
+        {problem === "agent_too_old" ? (
+          <>
+            <span className="font-medium">Geen diepe controle{compact ? " bij de laatste controle" : ""}.</span> De cf-agent in
+            deze back-up kent <code>verify</code> nog niet, dus alleen terugzetten, opstarten en de guest agent zijn
+            gecontroleerd. Services, poorten en databases controleren lukt vanaf een back-up met de nieuwe agent:
+          </>
+        ) : (
+          <>
+            <span className="font-medium">Geen diepe controle{compact ? " bij de laatste controle" : ""}.</span> Het API-token
+            mag in de sandbox niets starten via de guest agent.
+          </>
+        )}
+      </p>
+      {problem === "agent_too_old" ? <AgentSteps /> : <ExecRights />}
+    </div>
+  );
+}
 
 // verifiable zegt of de back-up van een regel te controleren is: een VM met
 // een node, geen container.
@@ -113,8 +200,8 @@ export function VerifyDialog({ nodeId, name, onClose }: { nodeId: string; name: 
       <div className="space-y-4 text-sm">
         <p>
           ClusterForge zet de back-up terug als tijdelijke VM in pool cf-sandbox, met elke netwerkkaart losgekoppeld. Het
-          start de VM, controleert hem via de guest agent en verwijdert hem daarna altijd. De VM van {name} zelf blijft
-          onaangeroerd.
+          start de VM, controleert via de guest agent en met cf-agent verify of de services, poorten en databases
+          werken, en verwijdert hem daarna altijd. De VM van {name} zelf blijft onaangeroerd.
         </p>
         {list.length === 0 ? (
           <p className="text-slate-500">{backups.isLoading ? "Back-ups laden…" : "Er is geen back-up om te controleren."}</p>
@@ -331,7 +418,7 @@ export function BackupReport({ run, isAdmin }: { run: TestRun; isAdmin: boolean 
           <BigResult run={run} />
           <p
             className={cx(
-              "min-w-0 flex-1 text-sm leading-6",
+              "min-w-56 flex-1 text-sm leading-6",
               run.result === "fail" || run.result === "error" ? "text-red-700 dark:text-red-300" : "",
             )}
           >
@@ -381,6 +468,28 @@ export function BackupReport({ run, isAdmin }: { run: TestRun; isAdmin: boolean 
                 <span className="text-slate-500">
                   (terugzetten {duration(m.restore_seconds)}, opstarten {duration(m.boot_seconds)})
                 </span>
+              </dd>
+            </>
+          )}
+          {m.services_expected > 0 && (
+            <>
+              <dt className={dtClass}>Services</dt>
+              <dd>
+                {m.services_active} van {m.services_expected} actief
+              </dd>
+            </>
+          )}
+          {m.databases.length > 0 && (
+            <>
+              <dt className={dtClass}>Databases</dt>
+              <dd>{m.databases.join(", ")}</dd>
+            </>
+          )}
+          {m.agent_version && (
+            <>
+              <dt className={dtClass}>cf-agent</dt>
+              <dd>
+                {m.agent_version} <span className="text-slate-500">in de back-up</span>
               </dd>
             </>
           )}
@@ -434,6 +543,11 @@ export function BackupReport({ run, isAdmin }: { run: TestRun; isAdmin: boolean 
       {run.checks.length > 0 && (
         <Card title="Controles">
           <Checks checks={run.checks} />
+          {deepProblem(run) && (
+            <div className="mt-4">
+              <DeepHelp run={run} />
+            </div>
+          )}
         </Card>
       )}
       <SandboxDetails run={run} isAdmin={isAdmin} />

@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/Jonasz1996/clusterforge/internal/agent"
+	"github.com/Jonasz1996/clusterforge/internal/agent/agenttest"
 	"github.com/Jonasz1996/clusterforge/internal/proxmox/pvefake"
 	"github.com/Jonasz1996/clusterforge/internal/store"
 )
@@ -33,6 +34,7 @@ type verifyRun struct {
 		OK      bool   `json:"ok"`
 		Warning bool   `json:"warning"`
 		Detail  string `json:"detail"`
+		Code    string `json:"code"`
 	} `json:"checks"`
 	Timeline []struct {
 		Kind string `json:"kind"`
@@ -45,15 +47,19 @@ type verifyRun struct {
 			Chosen bool   `json:"chosen"`
 		} `json:"definition"`
 		Measurements struct {
-			RestoreSeconds *float64 `json:"restore_seconds"`
-			BootSeconds    *float64 `json:"boot_seconds"`
-			TotalSeconds   *float64 `json:"total_seconds"`
-			SandboxVMID    int      `json:"sandbox_vmid"`
-			Host           string   `json:"host"`
-			Storage        string   `json:"storage"`
-			Hostname       string   `json:"hostname"`
-			OS             string   `json:"os"`
-			Filesystems    int      `json:"filesystems"`
+			RestoreSeconds   *float64 `json:"restore_seconds"`
+			BootSeconds      *float64 `json:"boot_seconds"`
+			TotalSeconds     *float64 `json:"total_seconds"`
+			SandboxVMID      int      `json:"sandbox_vmid"`
+			Host             string   `json:"host"`
+			Storage          string   `json:"storage"`
+			Hostname         string   `json:"hostname"`
+			OS               string   `json:"os"`
+			Filesystems      int      `json:"filesystems"`
+			AgentVersion     string   `json:"agent_version"`
+			ServicesExpected int      `json:"services_expected"`
+			ServicesActive   int      `json:"services_active"`
+			Databases        []string `json:"databases"`
 		} `json:"measurements"`
 		Sandbox *sandboxView `json:"sandbox"`
 	} `json:"backup"`
@@ -95,6 +101,7 @@ func TestBackupVerify(t *testing.T) {
 	ctx := context.Background()
 	pve, srv, fp := newPVE(t)
 	pve.AddPool("cf-sandbox")
+	pve.OnExec((&sandboxAgent{host: agenttest.NewHost(t.TempDir(), "192.0.2.50")}).exec)
 	now := time.Now().Truncate(time.Second)
 	pve.AddStorage(pvefake.Storage{Name: "pbs", Node: "pve1", Shared: true, Content: "backup"})
 	pve.AddBackup(pvefake.Backup{Storage: "pbs", VMID: 101, Time: now.Add(-6 * time.Hour), Size: 4 << 30, Verify: "ok"})
@@ -193,7 +200,7 @@ func TestBackupVerify(t *testing.T) {
 			!strings.Contains(r.Summary, " verwijderd om ") {
 			t.Fatalf("uitkomst: %s %q %+v", *r.Result, r.Summary, r.Checks)
 		}
-		want := []string{"Terugzetten", "Isolatie", "Opstarten", "Hostname", "Besturingssysteem", "Bestandssystemen", "Agentverbinding", "Opruimen"}
+		want := []string{"Terugzetten", "Isolatie", "Opstarten", "Hostname", "Besturingssysteem", "Bestandssystemen", "Gefaalde units", "Agentverbinding", "Opruimen"}
 		if !slices.Equal(r.checkNames(), want) {
 			t.Fatalf("controles: %v", r.checkNames())
 		}

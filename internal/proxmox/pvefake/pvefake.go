@@ -157,6 +157,24 @@ type Server struct {
 	backupJobs map[int]bool
 	// pools zijn de resource pools die bestaan.
 	pools map[string]bool
+	// onExec speelt een programma in een VM na; nil: het programma bestaat
+	// niet in de VM.
+	onExec ExecFunc
+	// execForbidden speelt een token zonder het recht om via de guest agent
+	// iets te starten.
+	execForbidden bool
+	execs         map[int]*execRun
+	pid           int
+}
+
+// ExecFunc speelt een programma na dat via de guest agent in VM vmid
+// (met naam name) start: de exitcode, stdout en stderr.
+type ExecFunc func(vmid int, name string, command []string, input string) (exitcode int, stdout, stderr string)
+
+type execRun struct {
+	done          bool
+	code          int
+	stdout, stder string
 }
 
 // AddPool maakt een resource pool, zoals pveum pool add.
@@ -241,6 +259,22 @@ func (s *Server) OnFileWrite(f func(vmid int, name, file, content string)) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.onFileWrite = f
+}
+
+// OnExec laat tests een programma in een VM naspelen, zoals cf-agent
+// verify. Zonder OnExec bestaat het programma niet en geeft Proxmox een fout.
+func (s *Server) OnExec(f ExecFunc) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onExec = f
+}
+
+// SetExecForbidden speelt een token dat via de guest agent niets mag
+// starten (403).
+func (s *Server) SetExecForbidden(forbidden bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.execForbidden = forbidden
 }
 
 // OnPower laat een test weten dat een VM aan- of uitging, bijvoorbeeld om
@@ -375,6 +409,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST "+p+"/nodes/{node}/qemu", s.restore)
 	mux.HandleFunc("DELETE "+p+"/nodes/{node}/{type}/{vmid}", s.destroy)
 	mux.HandleFunc("GET "+p+"/nodes/{node}/{type}/{vmid}/agent/{command}", s.agentInfo)
+	mux.HandleFunc("POST "+p+"/nodes/{node}/{type}/{vmid}/agent/exec", s.agentExec)
+	mux.HandleFunc("GET "+p+"/nodes/{node}/{type}/{vmid}/agent/exec-status", s.agentExecStatus)
 	mux.HandleFunc("GET "+p+"/nodes/{node}/tasks/{upid}/status", s.taskStatus)
 	mux.HandleFunc("GET "+p+"/nodes/{node}/tasks/{upid}/log", s.taskLog)
 	mux.HandleFunc("DELETE "+p+"/nodes/{node}/tasks/{upid}", s.stopTask)
@@ -1085,6 +1121,80 @@ func (s *Server) destroy(w http.ResponseWriter, r *http.Request) {
 	ok(w, s.newTask(g.Node, kind, g.VMID, func() {
 		s.guests = slices.DeleteFunc(s.guests, func(x *Guest) bool { return x == g })
 	}, fmt.Sprintf("destroy VM %d", g.VMID)))
+}
+
+// agentExec start een programma in de VM, zoals guest-exec: meteen een pid,
+// de uitkomst later via exec-status.
+func (s *Server) agentExec(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	s.finishTasks()
+	g := s.guest(w, r)
+	if g == nil {
+		s.mu.Unlock()
+		return
+	}
+	if s.execForbidden {
+		s.mu.Unlock()
+		fail(w, http.StatusForbidden, fmt.Sprintf("Permission check failed (/vms/%d, VM.GuestAgent.Unrestricted)", g.VMID))
+		return
+	}
+	if !s.agentReady(g) {
+		s.mu.Unlock()
+		fail(w, http.StatusInternalServerError, "QEMU guest agent is not running")
+		return
+	}
+	_ = r.ParseForm()
+	command, input := r.PostForm["command"], r.PostForm.Get("input-data")
+	if len(command) == 0 {
+		s.mu.Unlock()
+		fail(w, http.StatusBadRequest, "Parameter verification failed. command: property is missing and it is not optional")
+		return
+	}
+	hook := s.onExec
+	if hook == nil {
+		s.mu.Unlock()
+		fail(w, http.StatusInternalServerError, fmt.Sprintf("Agent error: Failed to execute child process “%s” (No such file or directory)", command[0]))
+		return
+	}
+	if s.execs == nil {
+		s.execs = map[int]*execRun{}
+	}
+	s.pid++
+	pid, run, vmid, name := s.pid, &execRun{}, g.VMID, g.Name
+	s.execs[pid] = run
+	s.mu.Unlock()
+	go func() {
+		code, stdout, stderr := hook(vmid, name, command, input)
+		s.mu.Lock()
+		run.done, run.code, run.stdout, run.stder = true, code, stdout, stderr
+		s.mu.Unlock()
+	}()
+	ok(w, map[string]any{"pid": pid})
+}
+
+func (s *Server) agentExecStatus(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if g := s.guest(w, r); g == nil {
+		return
+	}
+	pid, _ := strconv.Atoi(r.URL.Query().Get("pid"))
+	run := s.execs[pid]
+	switch {
+	case run == nil:
+		fail(w, http.StatusInternalServerError, "Agent error: Invalid parameter 'pid'")
+	case !run.done:
+		ok(w, map[string]any{"exited": 0})
+	default:
+		out := map[string]any{"exited": 1, "exitcode": run.code}
+		if run.stdout != "" {
+			out["out-data"] = run.stdout
+		}
+		if run.stder != "" {
+			out["err-data"] = run.stder
+		}
+		ok(w, out)
+	}
 }
 
 func (s *Server) agentInfo(w http.ResponseWriter, r *http.Request) {
