@@ -824,6 +824,114 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/clusters/{clusterId}/failover-tests": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Failovertests van een cluster met hun laatste run
+         * @description Met wat het formulier nodig heeft (welke scenario's nu kunnen en waarom niet, de VIP's met hun standaardprobe) en de runs die niet volledig hersteld zijn, voor de rode balk.
+         */
+        get: operations["listFailoverTests"];
+        put?: never;
+        /** Nieuwe failovertest (admin) */
+        post: operations["createFailoverTest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/failover-tests/{testId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                testId: string;
+            };
+            cookie?: never;
+        };
+        /** Eén failovertest */
+        get: operations["getFailoverTest"];
+        put?: never;
+        post?: never;
+        /** Een failovertest verwijderen (admin); de runs blijven als geschiedenis */
+        delete: operations["deleteFailoverTest"];
+        options?: never;
+        head?: never;
+        /** Een failovertest wijzigen (admin); oude runs houden hun definitie */
+        patch: operations["updateFailoverTest"];
+        trace?: never;
+    };
+    "/failover-tests/{testId}/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                testId: string;
+            };
+            cookie?: never;
+        };
+        /** De runs van één test, nieuwste eerst */
+        get: operations["listFailoverTestRuns"];
+        put?: never;
+        /**
+         * Nu testen (admin)
+         * @description Doet de voorcontrole synchroon en zet de run en de taak in één transactie in de wachtrij, door het clusterslot en het testslot. 409 met code prod_locked op prod, precheck_failed met de controles, of busy als er al een test of een taak in het cluster loopt.
+         */
+        post: operations["startFailoverTest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/test-runs/{runId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                runId: string;
+            };
+            cookie?: never;
+        };
+        /** Het rapport van één run */
+        get: operations["getTestRun"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/test-runs/{runId}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                runId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Opnieuw herstellen (admin)
+         * @description Voor een failoverrun met restored false: een taak door het clusterslot die de dienst start en de terugkeer controleert.
+         */
+        post: operations["restoreTestRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/nodes/{nodeId}/drift": {
         parameters: {
             query?: never;
@@ -1067,6 +1175,8 @@ export interface components {
             message: string;
             /** @description Het veld met de fout, zoals params.vip, als de fout bij één veld hoort */
             field?: string;
+            /** @description Bij precheck_failed de controles van de voorcontrole */
+            checks?: components["schemas"]["TestRunCheck"][];
         };
         Health: {
             /** @enum {string} */
@@ -1314,6 +1424,193 @@ export interface components {
         };
         DriftIgnoreList: {
             items: components["schemas"]["DriftIgnore"][];
+        };
+        /** @enum {string} */
+        FailoverScenario: "keepalived_stop" | "service_stop";
+        FailoverProbeHTTP: {
+            /** @description Begint met /, zoals /health */
+            path: string;
+            /** @description De verwachte HTTP-status */
+            expect: number;
+        };
+        FailoverProbeTCP: {
+            port: number;
+        };
+        /** @description Een HTTP-pad met de verwachte status, of een TCP-poort. De host is altijd het VIP. */
+        FailoverProbe: {
+            http?: components["schemas"]["FailoverProbeHTTP"];
+            tcp?: components["schemas"]["FailoverProbeTCP"];
+        };
+        FailoverTestInput: {
+            name: string;
+            /** Format: uuid */
+            vip_id: string;
+            scenario: components["schemas"]["FailoverScenario"];
+            /** @description nginx of haproxy bij service_stop */
+            service?: string;
+            /** @description 1 tot 120 */
+            max_takeover_seconds: number;
+            /** @description Het VIP moet daarna terug naar de oorspronkelijke node */
+            expect_failback: boolean;
+            probe: components["schemas"]["FailoverProbe"];
+        };
+        FailoverTest: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            cluster_id: string;
+            /** Format: uuid */
+            vip_id: string;
+            vip_address: string;
+            /** @description De node die het VIP nu heeft */
+            vip_owner: string | null;
+            name: string;
+            scenario: components["schemas"]["FailoverScenario"];
+            service: string;
+            /** @description Het scenario in gewone taal, zoals keepalived stoppen op de eigenaar */
+            description: string;
+            max_takeover_seconds: number;
+            expect_failback: boolean;
+            probe: components["schemas"]["FailoverProbe"];
+            last_run: components["schemas"]["TestRun"] | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        FailoverScenarioOption: {
+            key: components["schemas"]["FailoverScenario"];
+            label: string;
+            available: boolean;
+            /** @description Waarom het scenario hier nu niet kan */
+            reason: string;
+            default_seconds: number;
+            /** @description De diensten die service_stop hier kan stoppen */
+            units: string[];
+        };
+        FailoverVIPOption: {
+            /** Format: uuid */
+            id: string;
+            address: string;
+            owner_hostname: string | null;
+            probe: components["schemas"]["FailoverProbe"];
+        };
+        FailoverOptions: {
+            scenarios: components["schemas"]["FailoverScenarioOption"][];
+            vips: components["schemas"]["FailoverVIPOption"][];
+            /** @description Aan voor clusters uit keepalived-nginx, dat preempt gebruikt */
+            default_failback: boolean;
+            /** @description Waarom een test hier nu niet kan starten, zoals op prod; leeg als het kan */
+            run_blocked: string;
+        };
+        FailoverTestList: {
+            items: components["schemas"]["FailoverTest"][];
+            options: components["schemas"]["FailoverOptions"];
+            /** @description Runs waarvan het herstel niet lukte */
+            unrestored: components["schemas"]["TestRun"][];
+        };
+        /** @enum {string} */
+        TestRunResult: "pass" | "warning" | "fail" | "error" | "skipped" | "canceled";
+        TestRunCheck: {
+            name: string;
+            ok: boolean;
+            detail: string;
+        };
+        TestRunEvent: {
+            /**
+             * Format: int64
+             * @description Milliseconden na de storing
+             */
+            t_ms: number;
+            /** @enum {string} */
+            kind: "fault" | "down" | "up" | "takeover" | "clear" | "ready" | "return";
+            text: string;
+        };
+        TestRunSegment: {
+            /** Format: int64 */
+            from_ms: number;
+            /** Format: int64 */
+            to_ms: number;
+            ok: boolean;
+        };
+        FailoverMeasurements: {
+            /**
+             * Format: int64
+             * @description Van de eerste mislukte probe tot de eerste van drie goede op rij
+             */
+            downtime_ms: number | null;
+            /** Format: int64 */
+            expect_ms: number;
+            /** Format: int64 */
+            window_ms: number;
+            takeover_node: string;
+            /** Format: uuid */
+            takeover_node_id: string | null;
+            /**
+             * Format: int64
+             * @description Wanneer een verse heartbeat de overname bevestigde
+             */
+            takeover_ms: number | null;
+            /**
+             * Format: int64
+             * @description De onderbreking bij de terugkeer
+             */
+            failback_ms: number | null;
+            returned_to: string;
+            /** Format: int64 */
+            end_ms: number;
+            probe: components["schemas"]["TestRunSegment"][];
+        };
+        FailoverDefinition: {
+            /** Format: uuid */
+            test_id: string;
+            name: string;
+            scenario: components["schemas"]["FailoverScenario"];
+            service: string;
+            unit: string;
+            vip: string;
+            max_takeover_seconds: number;
+            expect_failback: boolean;
+            probe: components["schemas"]["FailoverProbe"];
+            description: string;
+        };
+        TestRun: {
+            /** Format: uuid */
+            id: string;
+            /** @description failover.test */
+            kind: string;
+            /** @enum {string} */
+            trigger: "manual" | "schedule";
+            /** Format: uuid */
+            cluster_id: string | null;
+            cluster_name: string;
+            /** Format: uuid */
+            test_id: string | null;
+            /** Format: uuid */
+            node_id: string | null;
+            /** @description De node die de storing kreeg */
+            hostname: string;
+            /** Format: uuid */
+            job_id: string | null;
+            job_status: components["schemas"]["JobStatus"] | null;
+            /** @description Leeg zolang de taak wacht of loopt */
+            result: components["schemas"]["TestRunResult"] | null;
+            /** @description false als het herstel niet lukte; leeg als er niets te herstellen was */
+            restored: boolean | null;
+            summary: string;
+            checks: components["schemas"]["TestRunCheck"][];
+            timeline: components["schemas"]["TestRunEvent"][];
+            measurements: components["schemas"]["FailoverMeasurements"];
+            definition: components["schemas"]["FailoverDefinition"];
+            /** @description Gebruikersnaam van wie de run vroeg */
+            requested_by: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            finished_at: string | null;
+        };
+        TestRunList: {
+            items: components["schemas"]["TestRun"][];
         };
         DriftNode: {
             /** Format: uuid */
@@ -3649,6 +3946,237 @@ export interface operations {
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
+        };
+    };
+    listFailoverTests: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FailoverTestList"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    createFailoverTest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FailoverTestInput"];
+            };
+        };
+        responses: {
+            /** @description Aangemaakt */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FailoverTest"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    getFailoverTest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                testId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FailoverTest"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    deleteFailoverTest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                testId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Verwijderd */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    updateFailoverTest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                testId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FailoverTestInput"];
+            };
+        };
+        responses: {
+            /** @description Gewijzigd */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FailoverTest"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    listFailoverTestRuns: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                testId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TestRunList"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    startFailoverTest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                testId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description In de wachtrij */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TestRun"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    getTestRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                runId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TestRun"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    restoreTestRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                runId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description In de wachtrij */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Job"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
         };
     };
     getNodeDrift: {

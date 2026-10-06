@@ -351,6 +351,21 @@ type Event struct {
 	JobRef      *string
 }
 
+type FailoverTest struct {
+	ID                 uuid.UUID
+	ClusterID          uuid.UUID
+	VipID              uuid.UUID
+	Name               string
+	Scenario           string
+	Service            string
+	MaxTakeoverSeconds int32
+	ExpectFailback     bool
+	Probe              []byte
+	CreatedBy          *uuid.UUID
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+}
+
 type Job struct {
 	ID              uuid.UUID
 	Kind            string
@@ -493,6 +508,27 @@ type Session struct {
 	CreatedAt  time.Time
 	LastSeenAt time.Time
 	ExpiresAt  time.Time
+}
+
+type TestRun struct {
+	ID           uuid.UUID
+	Kind         string
+	Trigger      string
+	ClusterID    *uuid.UUID
+	TestID       *uuid.UUID
+	NodeID       *uuid.UUID
+	Hostname     string
+	JobID        *uuid.UUID
+	Definition   []byte
+	Result       *string
+	Restored     *bool
+	Summary      string
+	Checks       []byte
+	Timeline     []byte
+	Measurements []byte
+	RequestedBy  *uuid.UUID
+	CreatedAt    time.Time
+	FinishedAt   *time.Time
 }
 
 type User struct {

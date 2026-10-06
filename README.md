@@ -24,6 +24,7 @@ Het technisch ontwerp staat in [docs/design/mvp-fase-1.md](docs/design/mvp-fase-
 | 4. Gewenste staat | Specificatie per cluster met revisies, vaste templateversies, controle op onveilige waarden in templates | klaar |
 | 5. Drift zien | Per node zien wat afwijkt van de gewenste staat van een cluster uit een template, zonder iets op de node te veranderen | klaar |
 | 6. Baseline en negeren | Een baseline als gewenste staat voor clusters zonder template, en afwijkingen bewust negeren met een reden | klaar |
+| 7. Failovertest | Met de hand keepalived of nginx stoppen op de VIP-eigenaar in lab en test, meten hoe snel een andere node overneemt, en alles weer herstellen | klaar |
 
 ## Draaien met Docker Compose
 
@@ -193,6 +194,16 @@ Een afwijking die zo hoort, negeer je met Negeren… bij de stap: met een reden,
 
 Drift kan alleen met een agent van deze versie of nieuwer. Een oudere agent staat als "agent te oud voor driftcontrole", met het upgradecommando om te kopiëren. Werk ook je golden image bij (opnieuw `agent.sh --no-enroll` en de VM weer als template), anders krijgen nieuwe VM's de oude agent.
 
+## Failovertests
+
+Een failovertest bewijst dat een VIP echt verhuist als de node die het heeft uitvalt. Op de pagina van een cluster staat de kaart Failovertests. Een beheerder voegt er een test toe: het scenario (keepalived stoppen op de eigenaar, of nginx of haproxy stoppen op de eigenaar), het VIP, binnen hoeveel seconden een andere node moet overnemen (standaard 5 s voor keepalived en 10 s voor een dienst), of het VIP daarna terug moet naar de oorspronkelijke node (standaard aan bij keepalived-nginx, dat preempt gebruikt) en de probe: een HTTP-pad met de verwachte status of een TCP-poort op het VIP. Scenario's die op dit cluster niet kunnen, staan grijs met de reden.
+
+Nu testen toont eerst wat er gaat gebeuren, bijvoorbeeld: "keepalived wordt gestopt op web01, nu eigenaar van 10.0.30.100. Verwacht: een andere node neemt binnen 5 s over. Lukt dat niet, dan is 10.0.30.100 hoogstens 20 s onbereikbaar; daarna zet ClusterForge keepalived weer aan." Daarna doet de server een strenge voorcontrole zonder uitweg: lab of test, het cluster gezond, geen database op de nodes (een VIP dat naar een replica verhuist, kan schrijfacties laten mislukken), verse heartbeats, precies één eigenaar per VIP, een agent die deploystappen kan uitvoeren, de dienst draait, een reservenode met keepalived, geen andere taak in het cluster, geen andere test in heel ClusterForge en een probe die drie keer slaagt. Faalt er één, dan start de test niet en staan de controles in het venster.
+
+De test zelf is een taak met vijf stappen. ClusterForge stopt de dienst op de eigenaar (een stop, nooit een disable), vraagt het VIP elke kwart seconde op en wacht tot een verse heartbeat een andere eigenaar meldt en de probe weer drie keer op rij slaagt. Daarna start hij de dienst weer, wacht tot de node gezond is en, als dat verwacht wordt, tot het VIP terug is. De uitslag is bijvoorbeeld "PASS: 10.0.30.100 3,4 s onbereikbaar, overgenomen door web02, daarna terug op web01, alles hersteld" of "FAIL: … meer dan de verwachte 5 s". Het rapport toont de test, de verwachting en het resultaat, een tijdlijn met de probe in groen en rood en markeringen voor de storing, de overname, het herstel en de terugkeer, en de stappen met hun log. Afbreken herstelt meteen.
+
+De dienst komt altijd terug: na de meting, bij een fout, bij Afbreken, bij een nette stop van de server en na een crash, als de taak verder gaat. Lukt het herstel toch niet, dan staat bovenaan het cluster een rode balk "Failovertest niet volledig hersteld" met de knop Opnieuw herstellen. Op prod kan een failovertest nog niet; dat komt later, met de hand en met een extra bevestiging. Elke test en run komt in het logboek, met het run-id bij elke regel en het stop- en startcommando aan de agent.
+
 ## Onderhoud, herstarten en afsluiten
 
 Bij elke node staat de kaart Beheer:
@@ -208,7 +219,7 @@ Kan geen andere node een VIP overnemen (geen actieve, online node waarop keepali
 
 Een node zonder agent kun je alleen in en uit onderhoud zetten; de VIP's haal je dan zelf weg.
 
-De agent voert alleen vaste soorten commando's uit: facts verzamelen, de toestand lezen voor de driftcontrole, keepalived uit- en aanzetten voor onderhoud, herstarten en afsluiten met `systemctl`, en de stappen van een template (pakketten met apt, bestanden, services, gebruikers, mappen en commando's). Omdat hij als root bestanden schrijft, kan wie de server beheert alles op de nodes; bescherm de server en `CF_MASTER_KEY` daarom als een beheerwachtwoord. Hij onthoudt het onderhoud en het laatste herstartcommando in `/var/lib/clusterforge/agent-state.json`, zodat hij na een herstart niet nog eens herstart. Een agent van voor deze versie kan geen commando's uitvoeren; trek hem in en installeer hem opnieuw.
+De agent voert alleen vaste soorten commando's uit: facts verzamelen, de toestand lezen voor de driftcontrole, keepalived uit- en aanzetten voor onderhoud, keepalived, nginx of haproxy stoppen en starten voor een failovertest, herstarten en afsluiten met `systemctl`, en de stappen van een template (pakketten met apt, bestanden, services, gebruikers, mappen en commando's). Omdat hij als root bestanden schrijft, kan wie de server beheert alles op de nodes; bescherm de server en `CF_MASTER_KEY` daarom als een beheerwachtwoord. Hij onthoudt het onderhoud en het laatste herstartcommando in `/var/lib/clusterforge/agent-state.json`, zodat hij na een herstart niet nog eens herstart. Een agent van voor deze versie kan geen commando's uitvoeren; trek hem in en installeer hem opnieuw.
 
 ## Taken
 
@@ -272,6 +283,8 @@ internal/deploy/           clusters uitrollen, de gewenste staat en haar revisie
 internal/audit/            het logboek: lezen, filteren, beschrijven en exporteren
 internal/backups/          versheid van de Proxmox-back-ups per VM
 internal/drift/            driftcontrole: vergelijken met de gewenste staat, de scanner en het rapport
+internal/health/           wachten op verse heartbeats: een node klaar, de VIP's op hun plaats
+internal/failover/         failovertests: voorcontrole, storing, meting, herstel en het rapport
 pkg/protocol/              berichten tussen server en agent
 internal/webui/            ingebedde webinterface
 migrations/                goose SQL-migraties

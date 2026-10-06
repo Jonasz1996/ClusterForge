@@ -363,6 +363,24 @@ func (e EventActorType) Valid() bool {
 	}
 }
 
+// Defines values for FailoverScenario.
+const (
+	KeepalivedStop FailoverScenario = "keepalived_stop"
+	ServiceStop    FailoverScenario = "service_stop"
+)
+
+// Valid indicates whether the value is a known member of the FailoverScenario enum.
+func (e FailoverScenario) Valid() bool {
+	switch e {
+	case KeepalivedStop:
+		return true
+	case ServiceStop:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for GuestType.
 const (
 	Lxc  GuestType = "lxc"
@@ -663,6 +681,87 @@ func (e TemplateParamType) Valid() bool {
 	case Size:
 		return true
 	case String:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TestRunTrigger.
+const (
+	Manual   TestRunTrigger = "manual"
+	Schedule TestRunTrigger = "schedule"
+)
+
+// Valid indicates whether the value is a known member of the TestRunTrigger enum.
+func (e TestRunTrigger) Valid() bool {
+	switch e {
+	case Manual:
+		return true
+	case Schedule:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TestRunEventKind.
+const (
+	TestRunEventKindClear    TestRunEventKind = "clear"
+	TestRunEventKindDown     TestRunEventKind = "down"
+	TestRunEventKindFault    TestRunEventKind = "fault"
+	TestRunEventKindReady    TestRunEventKind = "ready"
+	TestRunEventKindReturn   TestRunEventKind = "return"
+	TestRunEventKindTakeover TestRunEventKind = "takeover"
+	TestRunEventKindUp       TestRunEventKind = "up"
+)
+
+// Valid indicates whether the value is a known member of the TestRunEventKind enum.
+func (e TestRunEventKind) Valid() bool {
+	switch e {
+	case TestRunEventKindClear:
+		return true
+	case TestRunEventKindDown:
+		return true
+	case TestRunEventKindFault:
+		return true
+	case TestRunEventKindReady:
+		return true
+	case TestRunEventKindReturn:
+		return true
+	case TestRunEventKindTakeover:
+		return true
+	case TestRunEventKindUp:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TestRunResult.
+const (
+	TestRunResultCanceled TestRunResult = "canceled"
+	TestRunResultError    TestRunResult = "error"
+	TestRunResultFail     TestRunResult = "fail"
+	TestRunResultPass     TestRunResult = "pass"
+	TestRunResultSkipped  TestRunResult = "skipped"
+	TestRunResultWarning  TestRunResult = "warning"
+)
+
+// Valid indicates whether the value is a known member of the TestRunResult enum.
+func (e TestRunResult) Valid() bool {
+	switch e {
+	case TestRunResultCanceled:
+		return true
+	case TestRunResultError:
+		return true
+	case TestRunResultFail:
+		return true
+	case TestRunResultPass:
+		return true
+	case TestRunResultSkipped:
+		return true
+	case TestRunResultWarning:
 		return true
 	default:
 		return false
@@ -1444,6 +1543,9 @@ type Environment string
 
 // Error defines model for Error.
 type Error struct {
+	// Checks Bij precheck_failed de controles van de voorcontrole
+	Checks *[]TestRunCheck `json:"checks,omitempty"`
+
 	// Code Stabiele foutcode, bijvoorbeeld invalid_credentials of totp_required
 	Code string `json:"code"`
 
@@ -1517,6 +1619,151 @@ type Facts struct {
 		Total    int                         `json:"total"`
 	}] `json:"upgrades"`
 	Virtualization string `json:"virtualization"`
+}
+
+// FailoverDefinition defines model for FailoverDefinition.
+type FailoverDefinition struct {
+	Description        string `json:"description"`
+	ExpectFailback     bool   `json:"expect_failback"`
+	MaxTakeoverSeconds int    `json:"max_takeover_seconds"`
+	Name               string `json:"name"`
+
+	// Probe Een HTTP-pad met de verwachte status, of een TCP-poort. De host is altijd het VIP.
+	Probe    FailoverProbe      `json:"probe"`
+	Scenario FailoverScenario   `json:"scenario"`
+	Service  string             `json:"service"`
+	TestId   openapi_types.UUID `json:"test_id"`
+	Unit     string             `json:"unit"`
+	Vip      string             `json:"vip"`
+}
+
+// FailoverMeasurements defines model for FailoverMeasurements.
+type FailoverMeasurements struct {
+	// DowntimeMs Van de eerste mislukte probe tot de eerste van drie goede op rij
+	DowntimeMs nullable.Nullable[int64] `json:"downtime_ms"`
+	EndMs      int64                    `json:"end_ms"`
+	ExpectMs   int64                    `json:"expect_ms"`
+
+	// FailbackMs De onderbreking bij de terugkeer
+	FailbackMs nullable.Nullable[int64] `json:"failback_ms"`
+	Probe      []TestRunSegment         `json:"probe"`
+	ReturnedTo string                   `json:"returned_to"`
+
+	// TakeoverMs Wanneer een verse heartbeat de overname bevestigde
+	TakeoverMs     nullable.Nullable[int64]              `json:"takeover_ms"`
+	TakeoverNode   string                                `json:"takeover_node"`
+	TakeoverNodeId nullable.Nullable[openapi_types.UUID] `json:"takeover_node_id"`
+	WindowMs       int64                                 `json:"window_ms"`
+}
+
+// FailoverOptions defines model for FailoverOptions.
+type FailoverOptions struct {
+	// DefaultFailback Aan voor clusters uit keepalived-nginx, dat preempt gebruikt
+	DefaultFailback bool `json:"default_failback"`
+
+	// RunBlocked Waarom een test hier nu niet kan starten, zoals op prod; leeg als het kan
+	RunBlocked string                   `json:"run_blocked"`
+	Scenarios  []FailoverScenarioOption `json:"scenarios"`
+	Vips       []FailoverVIPOption      `json:"vips"`
+}
+
+// FailoverProbe Een HTTP-pad met de verwachte status, of een TCP-poort. De host is altijd het VIP.
+type FailoverProbe struct {
+	Http *FailoverProbeHTTP `json:"http,omitempty"`
+	Tcp  *FailoverProbeTCP  `json:"tcp,omitempty"`
+}
+
+// FailoverProbeHTTP defines model for FailoverProbeHTTP.
+type FailoverProbeHTTP struct {
+	// Expect De verwachte HTTP-status
+	Expect int `json:"expect"`
+
+	// Path Begint met /, zoals /health
+	Path string `json:"path"`
+}
+
+// FailoverProbeTCP defines model for FailoverProbeTCP.
+type FailoverProbeTCP struct {
+	Port int `json:"port"`
+}
+
+// FailoverScenario defines model for FailoverScenario.
+type FailoverScenario string
+
+// FailoverScenarioOption defines model for FailoverScenarioOption.
+type FailoverScenarioOption struct {
+	Available      bool             `json:"available"`
+	DefaultSeconds int              `json:"default_seconds"`
+	Key            FailoverScenario `json:"key"`
+	Label          string           `json:"label"`
+
+	// Reason Waarom het scenario hier nu niet kan
+	Reason string `json:"reason"`
+
+	// Units De diensten die service_stop hier kan stoppen
+	Units []string `json:"units"`
+}
+
+// FailoverTest defines model for FailoverTest.
+type FailoverTest struct {
+	ClusterId openapi_types.UUID `json:"cluster_id"`
+	CreatedAt time.Time          `json:"created_at"`
+
+	// Description Het scenario in gewone taal, zoals keepalived stoppen op de eigenaar
+	Description        string                     `json:"description"`
+	ExpectFailback     bool                       `json:"expect_failback"`
+	Id                 openapi_types.UUID         `json:"id"`
+	LastRun            nullable.Nullable[TestRun] `json:"last_run"`
+	MaxTakeoverSeconds int                        `json:"max_takeover_seconds"`
+	Name               string                     `json:"name"`
+
+	// Probe Een HTTP-pad met de verwachte status, of een TCP-poort. De host is altijd het VIP.
+	Probe      FailoverProbe      `json:"probe"`
+	Scenario   FailoverScenario   `json:"scenario"`
+	Service    string             `json:"service"`
+	UpdatedAt  time.Time          `json:"updated_at"`
+	VipAddress string             `json:"vip_address"`
+	VipId      openapi_types.UUID `json:"vip_id"`
+
+	// VipOwner De node die het VIP nu heeft
+	VipOwner nullable.Nullable[string] `json:"vip_owner"`
+}
+
+// FailoverTestInput defines model for FailoverTestInput.
+type FailoverTestInput struct {
+	// ExpectFailback Het VIP moet daarna terug naar de oorspronkelijke node
+	ExpectFailback bool `json:"expect_failback"`
+
+	// MaxTakeoverSeconds 1 tot 120
+	MaxTakeoverSeconds int    `json:"max_takeover_seconds"`
+	Name               string `json:"name"`
+
+	// Probe Een HTTP-pad met de verwachte status, of een TCP-poort. De host is altijd het VIP.
+	Probe    FailoverProbe    `json:"probe"`
+	Scenario FailoverScenario `json:"scenario"`
+
+	// Service nginx of haproxy bij service_stop
+	Service *string            `json:"service,omitempty"`
+	VipId   openapi_types.UUID `json:"vip_id"`
+}
+
+// FailoverTestList defines model for FailoverTestList.
+type FailoverTestList struct {
+	Items   []FailoverTest  `json:"items"`
+	Options FailoverOptions `json:"options"`
+
+	// Unrestored Runs waarvan het herstel niet lukte
+	Unrestored []TestRun `json:"unrestored"`
+}
+
+// FailoverVIPOption defines model for FailoverVIPOption.
+type FailoverVIPOption struct {
+	Address       string                    `json:"address"`
+	Id            openapi_types.UUID        `json:"id"`
+	OwnerHostname nullable.Nullable[string] `json:"owner_hostname"`
+
+	// Probe Een HTTP-pad met de verwachte status, of een TCP-poort. De host is altijd het VIP.
+	Probe FailoverProbe `json:"probe"`
 }
 
 // GuestType defines model for GuestType.
@@ -2040,6 +2287,77 @@ type TemplateRole struct {
 	Name       string                    `json:"name"`
 }
 
+// TestRun defines model for TestRun.
+type TestRun struct {
+	Checks      []TestRunCheck                        `json:"checks"`
+	ClusterId   nullable.Nullable[openapi_types.UUID] `json:"cluster_id"`
+	ClusterName string                                `json:"cluster_name"`
+	CreatedAt   time.Time                             `json:"created_at"`
+	Definition  FailoverDefinition                    `json:"definition"`
+	FinishedAt  nullable.Nullable[time.Time]          `json:"finished_at"`
+
+	// Hostname De node die de storing kreeg
+	Hostname  string                                `json:"hostname"`
+	Id        openapi_types.UUID                    `json:"id"`
+	JobId     nullable.Nullable[openapi_types.UUID] `json:"job_id"`
+	JobStatus nullable.Nullable[JobStatus]          `json:"job_status"`
+
+	// Kind failover.test
+	Kind         string                                `json:"kind"`
+	Measurements FailoverMeasurements                  `json:"measurements"`
+	NodeId       nullable.Nullable[openapi_types.UUID] `json:"node_id"`
+
+	// RequestedBy Gebruikersnaam van wie de run vroeg
+	RequestedBy nullable.Nullable[string] `json:"requested_by"`
+
+	// Restored false als het herstel niet lukte; leeg als er niets te herstellen was
+	Restored nullable.Nullable[bool] `json:"restored"`
+
+	// Result Leeg zolang de taak wacht of loopt
+	Result   nullable.Nullable[TestRunResult]      `json:"result"`
+	Summary  string                                `json:"summary"`
+	TestId   nullable.Nullable[openapi_types.UUID] `json:"test_id"`
+	Timeline []TestRunEvent                        `json:"timeline"`
+	Trigger  TestRunTrigger                        `json:"trigger"`
+}
+
+// TestRunTrigger defines model for TestRun.Trigger.
+type TestRunTrigger string
+
+// TestRunCheck defines model for TestRunCheck.
+type TestRunCheck struct {
+	Detail string `json:"detail"`
+	Name   string `json:"name"`
+	Ok     bool   `json:"ok"`
+}
+
+// TestRunEvent defines model for TestRunEvent.
+type TestRunEvent struct {
+	Kind TestRunEventKind `json:"kind"`
+
+	// TMs Milliseconden na de storing
+	TMs  int64  `json:"t_ms"`
+	Text string `json:"text"`
+}
+
+// TestRunEventKind defines model for TestRunEvent.Kind.
+type TestRunEventKind string
+
+// TestRunList defines model for TestRunList.
+type TestRunList struct {
+	Items []TestRun `json:"items"`
+}
+
+// TestRunResult defines model for TestRunResult.
+type TestRunResult string
+
+// TestRunSegment defines model for TestRunSegment.
+type TestRunSegment struct {
+	FromMs int64 `json:"from_ms"`
+	Ok     bool  `json:"ok"`
+	ToMs   int64 `json:"to_ms"`
+}
+
 // TotpCodeRequest defines model for TotpCodeRequest.
 type TotpCodeRequest struct {
 	Code string `json:"code"`
@@ -2275,6 +2593,9 @@ type CaptureBaselineJSONRequestBody = BaselineInput
 // CreateDriftIgnoreJSONRequestBody defines body for CreateDriftIgnore for application/json ContentType.
 type CreateDriftIgnoreJSONRequestBody = DriftIgnoreInput
 
+// CreateFailoverTestJSONRequestBody defines body for CreateFailoverTest for application/json ContentType.
+type CreateFailoverTestJSONRequestBody = FailoverTestInput
+
 // CreateVipJSONRequestBody defines body for CreateVip for application/json ContentType.
 type CreateVipJSONRequestBody = VipInput
 
@@ -2286,6 +2607,9 @@ type PlanDeploymentJSONRequestBody = DeployInput
 
 // CreateEnrollmentTokenJSONRequestBody defines body for CreateEnrollmentToken for application/json ContentType.
 type CreateEnrollmentTokenJSONRequestBody = EnrollmentTokenInput
+
+// UpdateFailoverTestJSONRequestBody defines body for UpdateFailoverTest for application/json ContentType.
+type UpdateFailoverTestJSONRequestBody = FailoverTestInput
 
 // CreateNodeJSONRequestBody defines body for CreateNode for application/json ContentType.
 type CreateNodeJSONRequestBody = NodeInput
@@ -2391,6 +2715,12 @@ type ServerInterface interface {
 	// CreateDriftIgnore Een stap negeren op één node of het hele cluster (admin)
 	// (POST /clusters/{clusterId}/drift/ignores)
 	CreateDriftIgnore(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
+	// ListFailoverTests Failovertests van een cluster met hun laatste run
+	// (GET /clusters/{clusterId}/failover-tests)
+	ListFailoverTests(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
+	// CreateFailoverTest Nieuwe failovertest (admin)
+	// (POST /clusters/{clusterId}/failover-tests)
+	CreateFailoverTest(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
 	// GetClusterMetrics Grafieken van een cluster, met een lijn per node
 	// (GET /clusters/{clusterId}/metrics)
 	GetClusterMetrics(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params GetClusterMetricsParams)
@@ -2421,6 +2751,21 @@ type ServerInterface interface {
 	// ListEvents Recente events, nieuwste eerst, zonder zinnen (alleen admin; het logboek staat onder /audit)
 	// (GET /events)
 	ListEvents(w http.ResponseWriter, r *http.Request, params ListEventsParams)
+	// DeleteFailoverTest Een failovertest verwijderen (admin); de runs blijven als geschiedenis
+	// (DELETE /failover-tests/{testId})
+	DeleteFailoverTest(w http.ResponseWriter, r *http.Request, testId openapi_types.UUID)
+	// GetFailoverTest Eén failovertest
+	// (GET /failover-tests/{testId})
+	GetFailoverTest(w http.ResponseWriter, r *http.Request, testId openapi_types.UUID)
+	// UpdateFailoverTest Een failovertest wijzigen (admin); oude runs houden hun definitie
+	// (PATCH /failover-tests/{testId})
+	UpdateFailoverTest(w http.ResponseWriter, r *http.Request, testId openapi_types.UUID)
+	// ListFailoverTestRuns De runs van één test, nieuwste eerst
+	// (GET /failover-tests/{testId}/runs)
+	ListFailoverTestRuns(w http.ResponseWriter, r *http.Request, testId openapi_types.UUID)
+	// StartFailoverTest Nu testen (admin)
+	// (POST /failover-tests/{testId}/runs)
+	StartFailoverTest(w http.ResponseWriter, r *http.Request, testId openapi_types.UUID)
 	// GetHealth Gezondheid van de server en de database
 	// (GET /health)
 	GetHealth(w http.ResponseWriter, r *http.Request)
@@ -2511,6 +2856,12 @@ type ServerInterface interface {
 	// ListTemplates De clustertemplates in deze server
 	// (GET /templates)
 	ListTemplates(w http.ResponseWriter, r *http.Request)
+	// GetTestRun Het rapport van één run
+	// (GET /test-runs/{runId})
+	GetTestRun(w http.ResponseWriter, r *http.Request, runId openapi_types.UUID)
+	// RestoreTestRun Opnieuw herstellen (admin)
+	// (POST /test-runs/{runId}/restore)
+	RestoreTestRun(w http.ResponseWriter, r *http.Request, runId openapi_types.UUID)
 	// ListUsers Actieve gebruikers, voor bijvoorbeeld de keuze van owners
 	// (GET /users)
 	ListUsers(w http.ResponseWriter, r *http.Request)
@@ -2676,6 +3027,18 @@ func (_ Unimplemented) CreateDriftIgnore(w http.ResponseWriter, r *http.Request,
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// ListFailoverTests Failovertests van een cluster met hun laatste run
+// (GET /clusters/{clusterId}/failover-tests)
+func (_ Unimplemented) ListFailoverTests(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CreateFailoverTest Nieuwe failovertest (admin)
+// (POST /clusters/{clusterId}/failover-tests)
+func (_ Unimplemented) CreateFailoverTest(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // GetClusterMetrics Grafieken van een cluster, met een lijn per node
 // (GET /clusters/{clusterId}/metrics)
 func (_ Unimplemented) GetClusterMetrics(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params GetClusterMetricsParams) {
@@ -2733,6 +3096,36 @@ func (_ Unimplemented) DeleteEnrollmentToken(w http.ResponseWriter, r *http.Requ
 // ListEvents Recente events, nieuwste eerst, zonder zinnen (alleen admin; het logboek staat onder /audit)
 // (GET /events)
 func (_ Unimplemented) ListEvents(w http.ResponseWriter, r *http.Request, params ListEventsParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// DeleteFailoverTest Een failovertest verwijderen (admin); de runs blijven als geschiedenis
+// (DELETE /failover-tests/{testId})
+func (_ Unimplemented) DeleteFailoverTest(w http.ResponseWriter, r *http.Request, testId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetFailoverTest Eén failovertest
+// (GET /failover-tests/{testId})
+func (_ Unimplemented) GetFailoverTest(w http.ResponseWriter, r *http.Request, testId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// UpdateFailoverTest Een failovertest wijzigen (admin); oude runs houden hun definitie
+// (PATCH /failover-tests/{testId})
+func (_ Unimplemented) UpdateFailoverTest(w http.ResponseWriter, r *http.Request, testId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListFailoverTestRuns De runs van één test, nieuwste eerst
+// (GET /failover-tests/{testId}/runs)
+func (_ Unimplemented) ListFailoverTestRuns(w http.ResponseWriter, r *http.Request, testId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// StartFailoverTest Nu testen (admin)
+// (POST /failover-tests/{testId}/runs)
+func (_ Unimplemented) StartFailoverTest(w http.ResponseWriter, r *http.Request, testId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -2913,6 +3306,18 @@ func (_ Unimplemented) Stream(w http.ResponseWriter, r *http.Request) {
 // ListTemplates De clustertemplates in deze server
 // (GET /templates)
 func (_ Unimplemented) ListTemplates(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetTestRun Het rapport van één run
+// (GET /test-runs/{runId})
+func (_ Unimplemented) GetTestRun(w http.ResponseWriter, r *http.Request, runId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RestoreTestRun Opnieuw herstellen (admin)
+// (POST /test-runs/{runId}/restore)
+func (_ Unimplemented) RestoreTestRun(w http.ResponseWriter, r *http.Request, runId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -3697,6 +4102,58 @@ func (siw *ServerInterfaceWrapper) CreateDriftIgnore(w http.ResponseWriter, r *h
 	handler.ServeHTTP(w, r)
 }
 
+// ListFailoverTests operation middleware
+func (siw *ServerInterfaceWrapper) ListFailoverTests(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListFailoverTests(w, r, clusterId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateFailoverTest operation middleware
+func (siw *ServerInterfaceWrapper) CreateFailoverTest(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateFailoverTest(w, r, clusterId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetClusterMetrics operation middleware
 func (siw *ServerInterfaceWrapper) GetClusterMetrics(w http.ResponseWriter, r *http.Request) {
 
@@ -3923,6 +4380,136 @@ func (siw *ServerInterfaceWrapper) ListEvents(w http.ResponseWriter, r *http.Req
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListEvents(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteFailoverTest operation middleware
+func (siw *ServerInterfaceWrapper) DeleteFailoverTest(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "testId" -------------
+	var testId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "testId", chi.URLParam(r, "testId"), &testId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "testId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteFailoverTest(w, r, testId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetFailoverTest operation middleware
+func (siw *ServerInterfaceWrapper) GetFailoverTest(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "testId" -------------
+	var testId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "testId", chi.URLParam(r, "testId"), &testId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "testId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetFailoverTest(w, r, testId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateFailoverTest operation middleware
+func (siw *ServerInterfaceWrapper) UpdateFailoverTest(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "testId" -------------
+	var testId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "testId", chi.URLParam(r, "testId"), &testId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "testId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateFailoverTest(w, r, testId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListFailoverTestRuns operation middleware
+func (siw *ServerInterfaceWrapper) ListFailoverTestRuns(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "testId" -------------
+	var testId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "testId", chi.URLParam(r, "testId"), &testId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "testId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListFailoverTestRuns(w, r, testId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// StartFailoverTest operation middleware
+func (siw *ServerInterfaceWrapper) StartFailoverTest(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "testId" -------------
+	var testId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "testId", chi.URLParam(r, "testId"), &testId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "testId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StartFailoverTest(w, r, testId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -4684,6 +5271,58 @@ func (siw *ServerInterfaceWrapper) ListTemplates(w http.ResponseWriter, r *http.
 	handler.ServeHTTP(w, r)
 }
 
+// GetTestRun operation middleware
+func (siw *ServerInterfaceWrapper) GetTestRun(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "runId" -------------
+	var runId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "runId", chi.URLParam(r, "runId"), &runId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "runId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetTestRun(w, r, runId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RestoreTestRun operation middleware
+func (siw *ServerInterfaceWrapper) RestoreTestRun(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "runId" -------------
+	var runId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "runId", chi.URLParam(r, "runId"), &runId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "runId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RestoreTestRun(w, r, runId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListUsers operation middleware
 func (siw *ServerInterfaceWrapper) ListUsers(w http.ResponseWriter, r *http.Request) {
 
@@ -5027,6 +5666,33 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Delete(options.BaseURL+"/drift-ignores/{ignoreId}", wrapper.DeleteDriftIgnore)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/clusters/{clusterId}/failover-tests", wrapper.ListFailoverTests)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/clusters/{clusterId}/failover-tests", wrapper.CreateFailoverTest)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/failover-tests/{testId}", wrapper.DeleteFailoverTest)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/failover-tests/{testId}", wrapper.GetFailoverTest)
+	})
+	r.Group(func(r chi.Router) {
+		r.Patch(options.BaseURL+"/failover-tests/{testId}", wrapper.UpdateFailoverTest)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/failover-tests/{testId}/runs", wrapper.ListFailoverTestRuns)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/failover-tests/{testId}/runs", wrapper.StartFailoverTest)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/test-runs/{runId}", wrapper.GetTestRun)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/test-runs/{runId}/restore", wrapper.RestoreTestRun)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/nodes/{nodeId}/drift", wrapper.GetNodeDrift)

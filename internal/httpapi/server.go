@@ -20,6 +20,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/deploy"
 	"github.com/Jonasz1996/clusterforge/internal/drift"
 	"github.com/Jonasz1996/clusterforge/internal/events"
+	"github.com/Jonasz1996/clusterforge/internal/failover"
 	"github.com/Jonasz1996/clusterforge/internal/httpapi/gen"
 	"github.com/Jonasz1996/clusterforge/internal/inventory"
 	"github.com/Jonasz1996/clusterforge/internal/jobs"
@@ -50,6 +51,7 @@ type Server struct {
 	deploy       *deploy.Service
 	backups      *backups.Service
 	drift        *drift.Service
+	failover     *failover.Service
 	version      string
 	loginLimiter *ipLimiter
 	// enrollLimiter remt het raden van enrollmenttokens.
@@ -78,8 +80,10 @@ type Deps struct {
 	// Backups leest de back-ups uit Proxmox en bewaakt hun versheid.
 	Backups *backups.Service
 	// Drift vergelijkt de nodes met de gewenste staat.
-	Drift   *drift.Service
-	Version string
+	Drift *drift.Service
+	// Failover voert failovertests uit.
+	Failover *failover.Service
+	Version  string
 }
 
 func New(d Deps) *Server {
@@ -87,25 +91,26 @@ func New(d Deps) *Server {
 	inv := inventory.NewService(d.Pool, ev)
 	inv.Disconnect = d.Bus.Disconnect
 	return &Server{
-		cfg:     d.Config,
-		log:     d.Log,
-		pool:    d.Pool,
-		q:       store.New(d.Pool),
-		ev:      ev,
-		auth:    d.Auth,
-		audit:   audit.NewService(store.New(d.Pool)),
-		inv:     inv,
-		agents:  agents.NewService(d.Pool, ev, d.Bus),
-		bus:     d.Bus,
-		hub:     d.Hub,
-		metrics: metrics.NewClient(d.Config.VictoriaMetricsURL),
-		pve:     d.Proxmox,
-		jobs:    d.Jobs,
-		life:    d.Lifecycle,
-		deploy:  d.Deploy,
-		backups: d.Backups,
-		drift:   d.Drift,
-		version: d.Version,
+		cfg:      d.Config,
+		log:      d.Log,
+		pool:     d.Pool,
+		q:        store.New(d.Pool),
+		ev:       ev,
+		auth:     d.Auth,
+		audit:    audit.NewService(store.New(d.Pool)),
+		inv:      inv,
+		agents:   agents.NewService(d.Pool, ev, d.Bus),
+		bus:      d.Bus,
+		hub:      d.Hub,
+		metrics:  metrics.NewClient(d.Config.VictoriaMetricsURL),
+		pve:      d.Proxmox,
+		jobs:     d.Jobs,
+		life:     d.Lifecycle,
+		deploy:   d.Deploy,
+		backups:  d.Backups,
+		drift:    d.Drift,
+		failover: d.Failover,
+		version:  d.Version,
 		// 10 pogingen direct, daarna één per 6 seconden per IP-adres.
 		loginLimiter:  newIPLimiter(6*time.Second, 10),
 		enrollLimiter: newIPLimiter(6*time.Second, 20),

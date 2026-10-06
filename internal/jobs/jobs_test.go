@@ -378,3 +378,122 @@ func TestClusterSlot(t *testing.T) {
 		t.Fatalf("%d kregen het slot, %d geweigerd", ok.Load(), refused.Load())
 	}
 }
+
+// Herstel loopt door als iemand annuleert, maar stopt als de server stopt;
+// een hervatte taak leest de state van een geslaagde stap met Done.
+func TestDetachAndDone(t *testing.T) {
+	ctx := context.Background()
+	pool := storetest.DB(t)
+	q := store.New(pool)
+	started := make(chan struct{}, 2)
+	var restored atomic.Int32
+	var plan atomic.Value
+	handler := func(ctx context.Context, j *Job) error {
+		var p struct{ Target string }
+		ran := false
+		if err := j.Step(ctx, "plan", func(ctx context.Context, s *Step) error {
+			ran = true
+			return s.SetState(ctx, struct{ Target string }{"web01"})
+		}); err != nil {
+			return err
+		}
+		if !ran && !j.Done("plan", &p) {
+			return errors.New("plan niet gevonden")
+		}
+		if ran {
+			p.Target = "web01"
+		}
+		plan.Store(p.Target)
+		err := j.Step(ctx, "storing", func(ctx context.Context, s *Step) error {
+			started <- struct{}{}
+			<-ctx.Done()
+			if Interrupted(ctx) {
+				return context.Cause(ctx)
+			}
+			return nil
+		})
+		if Interrupted(ctx) {
+			return err
+		}
+		dctx, cancel := Detach(ctx)
+		defer cancel()
+		err = j.Step(dctx, "herstellen", func(ctx context.Context, s *Step) error {
+			select {
+			case <-ctx.Done():
+				return context.Cause(ctx)
+			case <-time.After(100 * time.Millisecond):
+			}
+			restored.Add(1)
+			return nil
+		})
+		if err != nil {
+			return err
+		}
+		if Canceled(ctx) {
+			return ErrCanceled
+		}
+		return nil
+	}
+
+	// Annuleren breekt de storing af, maar het herstel loopt.
+	r := newRunner(pool)
+	r.Register("test.detach", handler)
+	stop := start(r)
+	j, _ := r.Enqueue(ctx, Spec{Kind: "test.detach", Title: "Detach", Actor: events.System()})
+	<-started
+	if _, err := r.Cancel(ctx, j.ID, events.System()); err != nil {
+		t.Fatal(err)
+	}
+	waitStatus(t, q, j.ID, store.JobStatusCanceled)
+	steps, _ := q.ListJobSteps(ctx, j.ID)
+	if restored.Load() != 1 || len(steps) != 3 || steps[2].Status != store.JobStatusSucceeded {
+		t.Fatalf("herstel na annuleren: %d keer, %+v", restored.Load(), steps)
+	}
+
+	// Een stop van de server breekt ook het herstel af; de hervatte taak
+	// leest het plan van de eerste poging.
+	j2, _ := r.Enqueue(ctx, Spec{Kind: "test.detach", Title: "Detach", Actor: events.System()})
+	<-started
+	stop()
+	waitStatus(t, q, j2.ID, store.JobStatusQueued)
+	if restored.Load() != 1 {
+		t.Fatalf("herstel tijdens een stop: %d", restored.Load())
+	}
+	plan.Store("")
+	r2 := newRunner(pool)
+	r2.Register("test.detach", handler)
+	stop2 := start(r2)
+	defer stop2()
+	<-started
+	if _, err := r2.Cancel(ctx, j2.ID, events.System()); err != nil {
+		t.Fatal(err)
+	}
+	waitStatus(t, q, j2.ID, store.JobStatusCanceled)
+	if restored.Load() != 2 || plan.Load() != "web01" {
+		t.Fatalf("na hervatten: herstel %d keer, plan %q", restored.Load(), plan.Load())
+	}
+}
+
+func TestDetach(t *testing.T) {
+	user, cancel := context.WithCancelCause(context.Background())
+	d, stop := Detach(user)
+	defer stop()
+	cancel(ErrCanceled)
+	time.Sleep(20 * time.Millisecond)
+	if d.Err() != nil || !Canceled(user) || Canceled(d) {
+		t.Fatalf("na annuleren: %v", context.Cause(d))
+	}
+
+	server, shutdown := context.WithCancelCause(context.Background())
+	d2, stop2 := Detach(server)
+	defer stop2()
+	shutdown(errShutdown)
+	select {
+	case <-d2.Done():
+	case <-time.After(time.Second):
+		t.Fatal("Detach stopt niet als de server stopt")
+	}
+	if !Interrupted(d2) {
+		t.Fatalf("oorzaak: %v", context.Cause(d2))
+	}
+}

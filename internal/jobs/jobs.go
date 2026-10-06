@@ -420,7 +420,11 @@ func (r *Runner) execute(ctx context.Context, j store.Job) {
 		delete(r.running, j.ID)
 		r.mu.Unlock()
 	}()
-	go r.heartbeat(jctx, j.ID, cancel)
+	// De heartbeat loopt tot de handler terugkeert, ook na annuleren: een
+	// handler die dan nog herstelt, mag niet als onderbroken gelden.
+	hctx, hstop := context.WithCancel(context.Background())
+	defer hstop()
+	go r.heartbeat(hctx, j.ID, cancel)
 
 	steps, err := r.q.ListJobSteps(jctx, j.ID)
 	if err != nil {
@@ -513,6 +517,25 @@ func (r *Runner) finish(j store.Job, status store.JobStatus, msg string) {
 // de herstart verder, dus een handler moet dan niets terugdraaien.
 func Interrupted(ctx context.Context) bool { return errors.Is(context.Cause(ctx), errShutdown) }
 
+// Detach geeft een context die doorloopt als een gebruiker de taak
+// annuleert, maar stopt als de server stopt. Voor herstel dat altijd moet
+// gebeuren; Interrupted werkt er gewoon op.
+func Detach(ctx context.Context) (context.Context, context.CancelFunc) {
+	d, cancel := context.WithCancelCause(context.WithoutCancel(ctx))
+	stop := context.AfterFunc(ctx, func() {
+		if Interrupted(ctx) {
+			cancel(errShutdown)
+		}
+	})
+	return d, func() {
+		stop()
+		cancel(nil)
+	}
+}
+
+// Canceled is true als een gebruiker de taak annuleerde.
+func Canceled(ctx context.Context) bool { return errors.Is(context.Cause(ctx), ErrCanceled) }
+
 // Job is een lopende taak, zoals de handler hem ziet.
 type Job struct {
 	store.Job
@@ -523,6 +546,18 @@ type Job struct {
 
 // Decode leest de parameters van de taak.
 func (j *Job) Decode(v any) error { return json.Unmarshal(j.Params, v) }
+
+// Done leest de state van een stap die bij een eerdere poging al lukte;
+// false als er zo geen stap is. Step slaat zo'n stap over, dus een handler
+// die zijn uitkomst later nodig heeft, haalt hem hier.
+func (j *Job) Done(name string, v any) bool {
+	for _, prev := range j.steps {
+		if prev.Name == name && prev.Status == store.JobStatusSucceeded {
+			return json.Unmarshal(prev.State, v) == nil
+		}
+	}
+	return false
+}
 
 // Step voert één stap uit. Een stap die bij een eerdere poging al lukte,
 // wordt overgeslagen; een onderbroken stap krijgt zijn bewaarde state terug.

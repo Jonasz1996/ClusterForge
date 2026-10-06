@@ -925,6 +925,147 @@ paths:
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /clusters/{clusterId}/failover-tests:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: listFailoverTests
+      summary: Failovertests van een cluster met hun laatste run
+      description: >-
+        Met wat het formulier nodig heeft (welke scenario's nu kunnen en
+        waarom niet, de VIP's met hun standaardprobe) en de runs die niet
+        volledig hersteld zijn, voor de rode balk.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FailoverTestList" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createFailoverTest
+      summary: Nieuwe failovertest (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/FailoverTestInput" }
+      responses:
+        "201":
+          description: Aangemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FailoverTest" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /failover-tests/{testId}:
+    parameters:
+      - { name: testId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getFailoverTest
+      summary: Eén failovertest
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FailoverTest" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    patch:
+      operationId: updateFailoverTest
+      summary: Een failovertest wijzigen (admin); oude runs houden hun definitie
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/FailoverTestInput" }
+      responses:
+        "200":
+          description: Gewijzigd
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FailoverTest" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteFailoverTest
+      summary: Een failovertest verwijderen (admin); de runs blijven als geschiedenis
+      responses:
+        "204": { description: Verwijderd }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /failover-tests/{testId}/runs:
+    parameters:
+      - { name: testId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: listFailoverTestRuns
+      summary: De runs van één test, nieuwste eerst
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TestRunList" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: startFailoverTest
+      summary: Nu testen (admin)
+      description: >-
+        Doet de voorcontrole synchroon en zet de run en de taak in één
+        transactie in de wachtrij, door het clusterslot en het testslot. 409
+        met code prod_locked op prod, precheck_failed met de controles, of
+        busy als er al een test of een taak in het cluster loopt.
+      responses:
+        "202":
+          description: In de wachtrij
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TestRun" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /test-runs/{runId}:
+    parameters:
+      - { name: runId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getTestRun
+      summary: Het rapport van één run
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TestRun" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /test-runs/{runId}/restore:
+    parameters:
+      - { name: runId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: restoreTestRun
+      summary: Opnieuw herstellen (admin)
+      description: >-
+        Voor een failoverrun met restored false: een taak door het
+        clusterslot die de dienst start en de terugkeer controleert.
+      responses:
+        "202":
+          description: In de wachtrij
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
   /nodes/{nodeId}/drift:
     parameters:
       - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -1231,6 +1372,10 @@ components:
         field:
           type: string
           description: Het veld met de fout, zoals params.vip, als de fout bij één veld hoort
+        checks:
+          type: array
+          description: Bij precheck_failed de controles van de voorcontrole
+          items: { $ref: "#/components/schemas/TestRunCheck" }
     Health:
       type: object
       required: [status, version, database]
@@ -1525,6 +1670,182 @@ components:
       required: [items]
       properties:
         items: { type: array, items: { $ref: "#/components/schemas/DriftIgnore" } }
+    FailoverScenario:
+      type: string
+      enum: [keepalived_stop, service_stop]
+    FailoverProbeHTTP:
+      type: object
+      required: [path, expect]
+      properties:
+        path: { type: string, description: "Begint met /, zoals /health" }
+        expect: { type: integer, description: De verwachte HTTP-status }
+    FailoverProbeTCP:
+      type: object
+      required: [port]
+      properties:
+        port: { type: integer }
+    FailoverProbe:
+      type: object
+      description: Een HTTP-pad met de verwachte status, of een TCP-poort. De host is altijd het VIP.
+      properties:
+        http: { $ref: "#/components/schemas/FailoverProbeHTTP" }
+        tcp: { $ref: "#/components/schemas/FailoverProbeTCP" }
+    FailoverTestInput:
+      type: object
+      required: [name, vip_id, scenario, max_takeover_seconds, expect_failback, probe]
+      properties:
+        name: { type: string }
+        vip_id: { type: string, format: uuid }
+        scenario: { $ref: "#/components/schemas/FailoverScenario" }
+        service: { type: string, description: nginx of haproxy bij service_stop }
+        max_takeover_seconds: { type: integer, description: 1 tot 120 }
+        expect_failback: { type: boolean, description: Het VIP moet daarna terug naar de oorspronkelijke node }
+        probe: { $ref: "#/components/schemas/FailoverProbe" }
+    FailoverTest:
+      type: object
+      required: [id, cluster_id, vip_id, vip_address, vip_owner, name, scenario, service, description, max_takeover_seconds,
+        expect_failback, probe, last_run, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        cluster_id: { type: string, format: uuid }
+        vip_id: { type: string, format: uuid }
+        vip_address: { type: string }
+        vip_owner: { type: string, nullable: true, description: De node die het VIP nu heeft }
+        name: { type: string }
+        scenario: { $ref: "#/components/schemas/FailoverScenario" }
+        service: { type: string }
+        description: { type: string, description: "Het scenario in gewone taal, zoals keepalived stoppen op de eigenaar" }
+        max_takeover_seconds: { type: integer }
+        expect_failback: { type: boolean }
+        probe: { $ref: "#/components/schemas/FailoverProbe" }
+        last_run:
+          allOf: [{ $ref: "#/components/schemas/TestRun" }]
+          nullable: true
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    FailoverScenarioOption:
+      type: object
+      required: [key, label, available, reason, default_seconds, units]
+      properties:
+        key: { $ref: "#/components/schemas/FailoverScenario" }
+        label: { type: string }
+        available: { type: boolean }
+        reason: { type: string, description: Waarom het scenario hier nu niet kan }
+        default_seconds: { type: integer }
+        units: { type: array, items: { type: string }, description: De diensten die service_stop hier kan stoppen }
+    FailoverVIPOption:
+      type: object
+      required: [id, address, owner_hostname, probe]
+      properties:
+        id: { type: string, format: uuid }
+        address: { type: string }
+        owner_hostname: { type: string, nullable: true }
+        probe: { $ref: "#/components/schemas/FailoverProbe" }
+    FailoverOptions:
+      type: object
+      required: [scenarios, vips, default_failback, run_blocked]
+      properties:
+        scenarios: { type: array, items: { $ref: "#/components/schemas/FailoverScenarioOption" } }
+        vips: { type: array, items: { $ref: "#/components/schemas/FailoverVIPOption" } }
+        default_failback: { type: boolean, description: "Aan voor clusters uit keepalived-nginx, dat preempt gebruikt" }
+        run_blocked: { type: string, description: "Waarom een test hier nu niet kan starten, zoals op prod; leeg als het kan" }
+    FailoverTestList:
+      type: object
+      required: [items, options, unrestored]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/FailoverTest" } }
+        options: { $ref: "#/components/schemas/FailoverOptions" }
+        unrestored:
+          type: array
+          description: Runs waarvan het herstel niet lukte
+          items: { $ref: "#/components/schemas/TestRun" }
+    TestRunResult:
+      type: string
+      enum: [pass, warning, fail, error, skipped, canceled]
+    TestRunCheck:
+      type: object
+      required: [name, ok, detail]
+      properties:
+        name: { type: string }
+        ok: { type: boolean }
+        detail: { type: string }
+    TestRunEvent:
+      type: object
+      required: [t_ms, kind, text]
+      properties:
+        t_ms: { type: integer, format: int64, description: Milliseconden na de storing }
+        kind: { type: string, enum: [fault, down, up, takeover, clear, ready, return] }
+        text: { type: string }
+    TestRunSegment:
+      type: object
+      required: [from_ms, to_ms, ok]
+      properties:
+        from_ms: { type: integer, format: int64 }
+        to_ms: { type: integer, format: int64 }
+        ok: { type: boolean }
+    FailoverMeasurements:
+      type: object
+      required: [downtime_ms, expect_ms, window_ms, takeover_node, takeover_node_id, takeover_ms, failback_ms, returned_to, end_ms, probe]
+      properties:
+        downtime_ms: { type: integer, format: int64, nullable: true, description: Van de eerste mislukte probe tot de eerste van drie goede op rij }
+        expect_ms: { type: integer, format: int64 }
+        window_ms: { type: integer, format: int64 }
+        takeover_node: { type: string }
+        takeover_node_id: { type: string, format: uuid, nullable: true }
+        takeover_ms: { type: integer, format: int64, nullable: true, description: Wanneer een verse heartbeat de overname bevestigde }
+        failback_ms: { type: integer, format: int64, nullable: true, description: De onderbreking bij de terugkeer }
+        returned_to: { type: string }
+        end_ms: { type: integer, format: int64 }
+        probe: { type: array, items: { $ref: "#/components/schemas/TestRunSegment" } }
+    FailoverDefinition:
+      type: object
+      required: [test_id, name, scenario, service, unit, vip, max_takeover_seconds, expect_failback, probe, description]
+      properties:
+        test_id: { type: string, format: uuid }
+        name: { type: string }
+        scenario: { $ref: "#/components/schemas/FailoverScenario" }
+        service: { type: string }
+        unit: { type: string }
+        vip: { type: string }
+        max_takeover_seconds: { type: integer }
+        expect_failback: { type: boolean }
+        probe: { $ref: "#/components/schemas/FailoverProbe" }
+        description: { type: string }
+    TestRun:
+      type: object
+      required: [id, kind, trigger, cluster_id, cluster_name, test_id, node_id, hostname, job_id, job_status, result, restored,
+        summary, checks, timeline, measurements, definition, requested_by, created_at, finished_at]
+      properties:
+        id: { type: string, format: uuid }
+        kind: { type: string, description: failover.test }
+        trigger: { type: string, enum: [manual, schedule] }
+        cluster_id: { type: string, format: uuid, nullable: true }
+        cluster_name: { type: string }
+        test_id: { type: string, format: uuid, nullable: true }
+        node_id: { type: string, format: uuid, nullable: true }
+        hostname: { type: string, description: De node die de storing kreeg }
+        job_id: { type: string, format: uuid, nullable: true }
+        job_status:
+          allOf: [{ $ref: "#/components/schemas/JobStatus" }]
+          nullable: true
+        result:
+          allOf: [{ $ref: "#/components/schemas/TestRunResult" }]
+          nullable: true
+          description: Leeg zolang de taak wacht of loopt
+        restored: { type: boolean, nullable: true, description: false als het herstel niet lukte; leeg als er niets te herstellen was }
+        summary: { type: string }
+        checks: { type: array, items: { $ref: "#/components/schemas/TestRunCheck" } }
+        timeline: { type: array, items: { $ref: "#/components/schemas/TestRunEvent" } }
+        measurements: { $ref: "#/components/schemas/FailoverMeasurements" }
+        definition: { $ref: "#/components/schemas/FailoverDefinition" }
+        requested_by: { type: string, nullable: true, description: Gebruikersnaam van wie de run vroeg }
+        created_at: { type: string, format: date-time }
+        finished_at: { type: string, format: date-time, nullable: true }
+    TestRunList:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/TestRun" } }
     DriftNode:
       type: object
       required: [node_id, hostname, status, checked_at, drift_since, spec_revision, findings, unchecked, error, skipped, agent_too_old]

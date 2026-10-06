@@ -30,6 +30,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/deploy"
 	"github.com/Jonasz1996/clusterforge/internal/drift"
 	"github.com/Jonasz1996/clusterforge/internal/events"
+	"github.com/Jonasz1996/clusterforge/internal/failover"
 	"github.com/Jonasz1996/clusterforge/internal/httpapi"
 	"github.com/Jonasz1996/clusterforge/internal/jobs"
 	"github.com/Jonasz1996/clusterforge/internal/lifecycle"
@@ -170,7 +171,9 @@ func serve() error {
 			}
 		}
 	}
-	for _, kind := range []string{deploy.Kind, lifecycle.KindNodeAction, proxmox.KindVMAction} {
+	fo := failover.NewService(pool, ev, log, runner, bus)
+	fo.Changed = eval.Kick
+	for _, kind := range []string{deploy.Kind, lifecycle.KindNodeAction, proxmox.KindVMAction, failover.KindTest, failover.KindRestore} {
 		runner.OnFinished(kind, recheck)
 	}
 	go hub.Run(ctx)
@@ -189,7 +192,7 @@ func serve() error {
 		Addr: cfg.Listen,
 		Handler: httpapi.New(httpapi.Deps{
 			Config: cfg, Log: log, Pool: pool, Auth: authSvc, Bus: bus, Hub: hub, Proxmox: pve, Jobs: runner,
-			Lifecycle: life, Deploy: dep, Backups: bk, Drift: drf, Version: version,
+			Lifecycle: life, Deploy: dep, Backups: bk, Drift: drf, Failover: fo, Version: version,
 		}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,

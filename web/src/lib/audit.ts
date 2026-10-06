@@ -86,6 +86,10 @@ export function subjectHref(e: AuditEntry): string | null {
       return e.cluster && !e.cluster.deleted ? `/clusters/detail?id=${e.cluster.id}` : null;
     case "agent":
       return e.node && !e.node.deleted ? `/nodes/detail?id=${e.node.id}` : null;
+    case "failover_test":
+      return e.cluster && !e.cluster.deleted ? `/clusters/detail?id=${e.cluster.id}` : null;
+    case "test_run":
+      return `/tests/detail?id=${e.subject.id}`;
   }
   return null;
 }

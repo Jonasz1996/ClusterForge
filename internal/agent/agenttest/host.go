@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Unit is de toestand van een systemd-unit.
@@ -47,23 +48,31 @@ type Host struct {
 	units    map[string]*Unit
 	users    map[string]bool
 	calls    []string
-	fail     map[string]string
+	fail     map[string]*failure
+}
+
+type failure struct {
+	output string
+	times  int
 }
 
 func NewHost(root, address string) *Host {
 	return &Host{
 		Root: root, Address: address, Interface: "eth0",
 		packages: map[string]bool{}, versions: map[string]string{}, units: map[string]*Unit{}, users: map[string]bool{"root": true},
-		fail: map[string]string{},
+		fail: map[string]*failure{},
 	}
 }
 
 // Fail laat het eerstvolgende commando dat met prefix begint mislukken met
 // output als uitvoer.
-func (h *Host) Fail(prefix, output string) {
+func (h *Host) Fail(prefix, output string) { h.FailTimes(prefix, output, 1) }
+
+// FailTimes laat de volgende n commando's die met prefix beginnen mislukken.
+func (h *Host) FailTimes(prefix, output string, n int) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.fail[prefix] = output
+	h.fail[prefix] = &failure{output: output, times: n}
 }
 
 // Calls geeft de commando's die iets veranderen, zonder de vragen.
@@ -123,11 +132,13 @@ func (h *Host) Exec(_ context.Context, name string, args ...string) ([]byte, err
 		call = strings.TrimSpace(name + " " + strings.Join(args, " "))
 	}
 	h.record(call)
-	for prefix, out := range h.fail {
+	for prefix, f := range h.fail {
 		if strings.HasPrefix(call, prefix) {
-			delete(h.fail, prefix)
+			if f.times--; f.times <= 0 {
+				delete(h.fail, prefix)
+			}
 			h.mu.Unlock()
-			return []byte(out), errors.New("exit status 1")
+			return []byte(f.output), errors.New("exit status 1")
 		}
 	}
 	out, err := h.exec(name, args)
@@ -333,10 +344,13 @@ func (h *Host) keepalivedConf() string {
 var (
 	priorityRe = regexp.MustCompile(`(?m)^\s*priority\s+(\d+)`)
 	vipBlockRe = regexp.MustCompile(`(?s)virtual_ipaddress\s*\{([^}]*)\}`)
+	trackRe    = regexp.MustCompile(`(?s)track_script\s*\{[^}]*\}`)
+	isActiveRe = regexp.MustCompile(`is-active\s+--quiet\s+([\w@.-]+)`)
 )
 
-// vrrp leest prioriteit en VIP's uit de keepalived-configuratie.
-func (h *Host) vrrp() (priority int, vips []string) {
+// vrrp leest prioriteit en VIP's uit de keepalived-configuratie, en de unit
+// die een track_script met systemctl is-active bewaakt.
+func (h *Host) vrrp() (priority int, vips []string, tracked string) {
 	conf := h.keepalivedConf()
 	if m := priorityRe.FindStringSubmatch(conf); m != nil {
 		priority, _ = strconv.Atoi(m[1])
@@ -348,15 +362,29 @@ func (h *Host) vrrp() (priority int, vips []string) {
 			}
 		}
 	}
-	return priority, vips
+	if trackRe.MatchString(conf) {
+		if m := isActiveRe.FindStringSubmatch(conf); m != nil {
+			tracked = strings.TrimSuffix(m[1], ".service")
+		}
+	}
+	return priority, vips, tracked
 }
 
 // Group is een L2-netwerk met keepalived: een VIP staat op de machine met de
-// hoogste prioriteit waarop keepalived draait.
+// hoogste prioriteit waarop keepalived draait. Bewaakt een track_script een
+// unit die niet draait, dan staat de machine in FAULT en krijgt ze geen VIP.
 type Group struct {
+	// Takeover is hoe lang het duurt voor een andere machine een VIP
+	// overneemt van een machine die wegvalt; zolang heeft niemand het. Een
+	// machine met een hogere prioriteit die terugkomt, neemt het meteen.
+	Takeover time.Duration
+
 	mu    sync.Mutex
 	hosts []*Host
 	owner map[string]*Host
+	// lost is wanneer een VIP zijn houder verloor.
+	lost  map[string]time.Time
+	timer *time.Timer
 }
 
 // Join zet een machine in het netwerk.
@@ -374,23 +402,66 @@ func (g *Group) update() {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	best := map[string]int{}
-	owner := map[string]*Host{}
+	want := map[string]*Host{}
+	eligible := map[*Host][]string{}
 	for _, h := range g.hosts {
 		h.mu.Lock()
 		u := h.units["keepalived"]
 		running := u != nil && u.Active
-		prio, vips := h.vrrp()
+		prio, vips, tracked := h.vrrp()
+		if t := h.units[tracked]; tracked != "" && (t == nil || !t.Active) {
+			running = false
+		}
 		h.mu.Unlock()
 		if !running {
 			continue
 		}
+		eligible[h] = vips
 		for _, v := range vips {
-			if _, ok := owner[v]; !ok || prio > best[v] {
-				owner[v], best[v] = h, prio
+			if _, ok := want[v]; !ok || prio > best[v] {
+				want[v], best[v] = h, prio
 			}
 		}
 	}
-	g.owner = owner
+	if g.owner == nil {
+		g.owner, g.lost = map[string]*Host{}, map[string]time.Time{}
+	}
+	now := time.Now()
+	var wait time.Duration
+	for v := range g.owner {
+		if _, ok := want[v]; !ok {
+			want[v] = nil
+		}
+	}
+	for v, w := range want {
+		cur := g.owner[v]
+		switch {
+		case cur != nil && slices.Contains(eligible[cur], v):
+			// De houder draait nog: een hogere prioriteit neemt meteen over.
+			g.owner[v] = w
+			continue
+		case cur != nil:
+			delete(g.owner, v)
+			g.lost[v] = now
+		}
+		if w == nil {
+			continue
+		}
+		if since, ok := g.lost[v]; ok && now.Sub(since) < g.Takeover {
+			if d := g.Takeover - now.Sub(since); wait == 0 || d < wait {
+				wait = d
+			}
+			continue
+		}
+		g.owner[v] = w
+		delete(g.lost, v)
+	}
+	if wait > 0 {
+		if g.timer != nil {
+			g.timer.Stop()
+		}
+		g.timer = time.AfterFunc(wait, g.update)
+	}
 }
 
 func (g *Group) held(h *Host) []string {
