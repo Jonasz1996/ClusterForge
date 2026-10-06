@@ -378,6 +378,7 @@ make dev-up            # PostgreSQL en VictoriaMetrics in Docker
 make dev-admin USER=jonas
 make dev-server        # Go-server op :8080
 make dev-web           # Next.js op :3000, stuurt /api door naar :8080
+make dev-github        # optioneel: een nep-GitHub op :8098 voor GitOps
 ```
 
 Open http://localhost:3000.
@@ -391,7 +392,7 @@ Open http://localhost:3000.
 | `cf-agent` voor amd64 en arm64 (in `bin/agents`, voor `make dev-server`) | `make agent` |
 | Container-image | `make docker` |
 
-Voor GitOps zonder echte GitHub start `go run ./hack/ghfake-dev -dir /tmp/cf-config`: een nep-GitHub die de inhoud van die map als repository toont en opnieuw commit zodra er iets verandert. Koppel dan met API-adres `http://127.0.0.1:8098`, repository `jonas/cf-config` en token `dev-token`.
+Voor GitOps zonder echte GitHub start `make dev-github DIR=/tmp/cf-config`: een nep-GitHub die de inhoud van die map als repository toont en opnieuw commit zodra er iets verandert. Koppel dan met API-adres `http://127.0.0.1:8098`, repository `jonas/cf-config` en token `dev-token`.
 
 De ingebouwde templates staan in `internal/templates/builtin/<naam>/<versie>/`. Wat een uitgebrachte versie op de nodes zet, verander je niet meer, want clusters kunnen ze gebruiken: kopieer de map naar een nieuwe versie, pas die aan en zet hem in de lijst `released` in `internal/templates/registry_test.go`. De test faalt als een uitgebrachte versie verdwijnt of een nieuwe er niet in staat.
 
