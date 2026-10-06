@@ -26,11 +26,14 @@ export function slugify(s: string) {
 
 export function ClusterForm({
   initial,
+  gitManaged = false,
   submitLabel,
   onSubmit,
   onCancel,
 }: {
   initial?: ClusterDetail;
+  // gitManaged: het cluster komt uit Git; alleen de owners zijn hier te wijzigen.
+  gitManaged?: boolean;
   submitLabel: string;
   onSubmit: (v: ClusterInput) => Promise<unknown>;
   onCancel?: () => void;
@@ -73,66 +76,69 @@ export function ClusterForm({
   return (
     <form onSubmit={submit} className="space-y-4">
       {error && <Alert>{error}</Alert>}
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="Naam" htmlFor="c-name">
-          <Input
-            id="c-name"
-            required
-            maxLength={128}
-            value={name}
-            onChange={(e) => {
-              setName(e.target.value);
-              if (!slugTouched) setSlug(slugify(e.target.value));
-            }}
-          />
+      {gitManaged && <Alert kind="info">Dit cluster komt uit Git: wijzig naam, omgeving, beschrijving en tags in cluster.yaml.</Alert>}
+      <fieldset disabled={gitManaged} className="space-y-4 disabled:opacity-60">
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Naam" htmlFor="c-name">
+            <Input
+              id="c-name"
+              required
+              maxLength={128}
+              value={name}
+              onChange={(e) => {
+                setName(e.target.value);
+                if (!slugTouched) setSlug(slugify(e.target.value));
+              }}
+            />
+          </Field>
+          <Field label="Slug" htmlFor="c-slug" hint="Korte naam voor URL's en de CLI">
+            <Input
+              id="c-slug"
+              required
+              pattern="[a-z0-9][a-z0-9\-]{0,62}"
+              value={slug}
+              onChange={(e) => {
+                setSlug(e.target.value);
+                setSlugTouched(true);
+              }}
+            />
+          </Field>
+          <Field label="Type" htmlFor="c-type">
+            <Select id="c-type" value={type} onChange={(e) => setType(e.target.value as ClusterType)}>
+              {clusterTypes.map((t) => (
+                <option key={t.value} value={t.value}>
+                  {t.label}
+                </option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Omgeving" htmlFor="c-env">
+            <Select id="c-env" value={environment} onChange={(e) => setEnvironment(e.target.value as Environment)}>
+              {environments.map((t) => (
+                <option key={t.value} value={t.value}>
+                  {t.label}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        </div>
+        <Field label="Beschrijving" htmlFor="c-desc">
+          <Textarea id="c-desc" rows={2} maxLength={2000} value={description} onChange={(e) => setDescription(e.target.value)} />
         </Field>
-        <Field label="Slug" htmlFor="c-slug" hint="Korte naam voor URL's en de CLI">
-          <Input
-            id="c-slug"
-            required
-            pattern="[a-z0-9][a-z0-9\-]{0,62}"
-            value={slug}
-            onChange={(e) => {
-              setSlug(e.target.value);
-              setSlugTouched(true);
-            }}
-          />
-        </Field>
-        <Field label="Type" htmlFor="c-type">
-          <Select id="c-type" value={type} onChange={(e) => setType(e.target.value as ClusterType)}>
-            {clusterTypes.map((t) => (
-              <option key={t.value} value={t.value}>
-                {t.label}
-              </option>
-            ))}
-          </Select>
-        </Field>
-        <Field label="Omgeving" htmlFor="c-env">
-          <Select id="c-env" value={environment} onChange={(e) => setEnvironment(e.target.value as Environment)}>
-            {environments.map((t) => (
-              <option key={t.value} value={t.value}>
-                {t.label}
-              </option>
-            ))}
-          </Select>
-        </Field>
-      </div>
-      <Field label="Beschrijving" htmlFor="c-desc">
-        <Textarea id="c-desc" rows={2} maxLength={2000} value={description} onChange={(e) => setDescription(e.target.value)} />
-      </Field>
-      <div className="grid gap-4 sm:grid-cols-2">
-        <Field label="Git-repository" htmlFor="c-git" hint="Optioneel; voor GitOps in fase 2">
-          <Input
-            id="c-git"
-            placeholder="git@github.com:org/repo.git"
-            value={gitRepoUrl}
-            onChange={(e) => setGitRepoUrl(e.target.value)}
-          />
-        </Field>
-        <Field label="Tags" htmlFor="c-tags" hint="Gescheiden door komma's of spaties">
-          <Input id="c-tags" placeholder="web, dc1" value={tags} onChange={(e) => setTags(e.target.value)} />
-        </Field>
-      </div>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Git-repository" htmlFor="c-git" hint={gitManaged ? "De link naar cluster.yaml" : "Optioneel; een link naar de code of configuratie"}>
+            <Input
+              id="c-git"
+              placeholder="git@github.com:org/repo.git"
+              value={gitRepoUrl}
+              onChange={(e) => setGitRepoUrl(e.target.value)}
+            />
+          </Field>
+          <Field label="Tags" htmlFor="c-tags" hint="Gescheiden door komma's of spaties">
+            <Input id="c-tags" placeholder="web, dc1" value={tags} onChange={(e) => setTags(e.target.value)} />
+          </Field>
+        </div>
+      </fieldset>
       <fieldset>
         <legend className="mb-1 text-sm font-medium text-slate-700 dark:text-slate-300">Owners</legend>
         <div className="flex flex-wrap gap-x-4 gap-y-2">

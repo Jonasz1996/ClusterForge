@@ -301,6 +301,7 @@ type Cluster struct {
 	UpdatedAt       time.Time
 	StatusReason    string
 	StatusSince     *time.Time
+	GitRepoID       *uuid.UUID
 }
 
 type ClusterOwner struct {
@@ -315,6 +316,7 @@ type ClusterSpecRevision struct {
 	Source    string
 	CreatedBy *uuid.UUID
 	CreatedAt time.Time
+	CommitSha *string
 }
 
 type DriftCheck struct {
@@ -384,6 +386,53 @@ type FailoverTest struct {
 	UpdatedAt          time.Time
 	Scheduled          bool
 	NextRunAt          *time.Time
+}
+
+type GitChange struct {
+	ID             uuid.UUID
+	RepoID         uuid.UUID
+	ClusterID      *uuid.UUID
+	Slug           string
+	Path           string
+	Kind           string
+	CommitSha      string
+	CommitMessage  string
+	CommitAuthor   string
+	CommitVerified bool
+	CommitUrl      string
+	CommittedAt    *time.Time
+	BlobSha        string
+	BaseRevision   int32
+	Spec           []byte
+	Metadata       []byte
+	Plan           []byte
+	Status         string
+	JobID          *uuid.UUID
+	DecidedBy      *uuid.UUID
+	DecidedAt      *time.Time
+	Reason         string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
+type GitRepo struct {
+	ID         uuid.UUID
+	ApiUrl     string
+	Owner      string
+	Name       string
+	Branch     string
+	Path       string
+	TokenEnc   []byte
+	KeyID      string
+	HeadSha    string
+	HeadEtag   string
+	SyncedSha  string
+	HeadCommit []byte
+	Scan       []byte
+	LastSyncAt *time.Time
+	LastError  string
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
 }
 
 type Job struct {

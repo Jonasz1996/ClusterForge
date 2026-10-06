@@ -26,6 +26,10 @@ dev-server: ## Start de Go-server op :8080 tegen de ontwikkeldatabase
 dev-web: ## Start de Next.js-devserver op :3000 (stuurt /api door naar :8080)
 	cd web && pnpm dev
 
+.PHONY: dev-github
+dev-github: ## Start een nep-GitHub op :8098 die de map DIR als repository toont, voor GitOps
+	go run ./cmd/ghfake-dev -dir $(or $(DIR),/tmp/cf-config)
+
 .PHONY: dev-admin
 dev-admin: ## Maak een beheerder aan in de ontwikkeldatabase (USER=naam)
 	CF_DATABASE_URL="$(DEV_DATABASE_URL)" go run ./cmd/clusterforge-server admin create -username $(or $(USER),admin)

@@ -3,8 +3,10 @@
 package inventory
 
 import (
+	"cmp"
 	"context"
 	"errors"
+	"maps"
 	"net/netip"
 	"reflect"
 	"slices"
@@ -28,9 +30,38 @@ func (e ValidationError) Error() string { return e.Msg }
 
 // ConflictError betekent dat de invoer botst met wat er al is, zoals een
 // slug die al bestaat.
-type ConflictError struct{ Msg string }
+type ConflictError struct {
+	Msg string
+	// Code is een stabiele code voor de API; leeg is "conflict".
+	Code string
+}
 
 func (e ConflictError) Error() string { return e.Msg }
+
+// gitManaged is de fout voor een wijziging aan wat bij een gekoppeld
+// cluster uit Git komt.
+func gitManaged(what string) error {
+	return ConflictError{Code: "git_managed", Msg: what + " komt bij dit cluster uit Git; wijzig het in cluster.yaml, of ontkoppel het cluster eerst"}
+}
+
+// gitFields zijn de velden van een cluster die bij een gekoppeld cluster
+// uit Git komen. owner_ids hoort er niet bij.
+var gitFields = map[string]string{
+	"slug": "de slug", "name": "de naam", "description": "de beschrijving", "type": "het type",
+	"environment": "de omgeving", "git_repo_url": "de git-repository", "tags": "de tags",
+}
+
+// linkedCluster zegt of een cluster aan Git gekoppeld is.
+func linkedCluster(ctx context.Context, q *store.Queries, id *uuid.UUID) (bool, error) {
+	if id == nil {
+		return false, nil
+	}
+	c, err := q.GetCluster(ctx, *id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	return err == nil && c.GitRepoID != nil, err
+}
 
 // ClusterFields zijn de velden van een cluster die een gebruiker beheert. De
 // json-namen worden gebruikt in de eventpayload.
@@ -183,13 +214,29 @@ func (s *Service) UpdateCluster(ctx context.Context, actor events.Actor, id uuid
 		after.OwnerIDs = slices.Clone(before.OwnerIDs)
 		change(&after)
 		after.OwnerIDs = dedupe(after.OwnerIDs)
+		// Een ongewijzigd Git-adres wordt niet opnieuw gecontroleerd: GitOps
+		// zet er de link naar het bestand in, in tests en make dev over http.
+		keepURL := after.GitRepoURL == before.GitRepoURL
+		if keepURL {
+			after.GitRepoURL = ""
+		}
 		if err := after.normalize(); err != nil {
 			return err
+		}
+		if keepURL {
+			after.GitRepoURL = before.GitRepoURL
 		}
 		d := diff(before, after)
 		c = cur
 		if len(d) == 0 {
 			return nil
+		}
+		if cur.GitRepoID != nil {
+			for _, k := range slices.Sorted(maps.Keys(d)) {
+				if what, ok := gitFields[k]; ok {
+					return gitManaged(strings.ToUpper(what[:1]) + what[1:])
+				}
+			}
 		}
 		c, err = q.UpdateCluster(ctx, store.UpdateClusterParams{
 			ID: id, Slug: after.Slug, Name: after.Name, Description: after.Description, Type: after.Type,
@@ -223,6 +270,9 @@ func (s *Service) DeleteCluster(ctx context.Context, actor events.Actor, id uuid
 		cur, err := q.LockCluster(ctx, id)
 		if err != nil {
 			return err
+		}
+		if cur.GitRepoID != nil {
+			return ConflictError{Code: "git_managed", Msg: "dit cluster wordt vanuit Git beheerd; ontkoppel het eerst, dan kun je het verwijderen"}
 		}
 		payload := map[string]any{"slug": cur.Slug, "name": cur.Name}
 		if err := usedBy(ctx, q, payload, &id, nil); err != nil {
@@ -274,6 +324,9 @@ func clusterFields(c store.Cluster, owners []store.ListClusterOwnersRow) Cluster
 func (s *Service) CreateNode(ctx context.Context, actor events.Actor, f NodeFields) (store.Node, error) {
 	var n store.Node
 	err := s.tx(ctx, func(q *store.Queries) error {
+		if linked, err := linkedCluster(ctx, q, f.ClusterID); err != nil || linked {
+			return cmp.Or(err, gitManaged("Welke nodes erin zitten"))
+		}
 		var err error
 		n, err = s.CreateNodeTx(ctx, q, actor, f)
 		return err
@@ -325,6 +378,18 @@ func (s *Service) UpdateNode(ctx context.Context, actor events.Actor, id uuid.UU
 		if len(d) == 0 {
 			return nil
 		}
+		if _, moved := d["cluster_id"]; moved {
+			for _, id := range []*uuid.UUID{before.ClusterID, after.ClusterID} {
+				if linked, err := linkedCluster(ctx, q, id); err != nil || linked {
+					return cmp.Or(err, gitManaged("Welke nodes erin zitten"))
+				}
+			}
+		}
+		if _, changed := d["primary_ip"]; changed {
+			if linked, err := linkedCluster(ctx, q, before.ClusterID); err != nil || linked {
+				return cmp.Or(err, gitManaged("Het adres van een node"))
+			}
+		}
 		if _, changed := d["proxmox"]; changed {
 			if err := notSandbox(ctx, q, after.Proxmox); err != nil {
 				return err
@@ -361,6 +426,9 @@ func (s *Service) DeleteNode(ctx context.Context, actor events.Actor, id uuid.UU
 		cur, err := q.LockNode(ctx, id)
 		if err != nil {
 			return err
+		}
+		if linked, err := linkedCluster(ctx, q, cur.ClusterID); err != nil || linked {
+			return cmp.Or(err, gitManaged("Welke nodes erin zitten"))
 		}
 		if a, err := q.GetActiveAgentByNode(ctx, id); err == nil {
 			agentKey = a.NkeyPublic
@@ -440,10 +508,13 @@ func parseIP(s string) *netip.Addr {
 func (s *Service) CreateVIP(ctx context.Context, actor events.Actor, clusterID uuid.UUID, f VIPFields) (store.Vip, error) {
 	var v store.Vip
 	err := s.tx(ctx, func(q *store.Queries) error {
-		if _, err := q.LockCluster(ctx, clusterID); err != nil {
+		c, err := q.LockCluster(ctx, clusterID)
+		if err != nil {
 			return err
 		}
-		var err error
+		if c.GitRepoID != nil {
+			return gitManaged("Het VIP")
+		}
 		v, err = s.CreateVIPTx(ctx, q, actor, clusterID, f)
 		return err
 	})
@@ -474,6 +545,9 @@ func (s *Service) UpdateVIP(ctx context.Context, actor events.Actor, id uuid.UUI
 		cur, err := q.LockVIP(ctx, id)
 		if err != nil {
 			return err
+		}
+		if linked, err := linkedCluster(ctx, q, &cur.ClusterID); err != nil || linked {
+			return cmp.Or(err, gitManaged("Het VIP"))
 		}
 		before := vipFields(cur)
 		after := before
@@ -506,6 +580,9 @@ func (s *Service) DeleteVIP(ctx context.Context, actor events.Actor, id uuid.UUI
 		cur, err := q.LockVIP(ctx, id)
 		if err != nil {
 			return err
+		}
+		if linked, err := linkedCluster(ctx, q, &cur.ClusterID); err != nil || linked {
+			return cmp.Or(err, gitManaged("Het VIP"))
 		}
 		if _, err := q.DeleteVIP(ctx, id); err != nil {
 			return err

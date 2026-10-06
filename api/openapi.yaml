@@ -1553,6 +1553,179 @@ paths:
         "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /gitops/repo:
+    get:
+      operationId: getGitRepo
+      summary: De koppeling met Git en de stand van de laatste synchronisatie
+      description: Ook voor viewers. Het token komt nooit terug.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GitRepoStatus" }
+        "401": { $ref: "#/components/responses/Error" }
+    put:
+      operationId: saveGitRepo
+      summary: De koppeling maken of wijzigen (admin)
+      description: |
+        Leest eerst de kop van de branch; lukt dat niet, dan wordt er niets
+        opgeslagen. Een leeg token laat het opgeslagen token staan. Na het
+        opslaan leest de server de repository meteen.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GitRepoInput" }
+      responses:
+        "200":
+          description: Opgeslagen
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GitRepoStatus" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteGitRepo
+      summary: De koppeling verwijderen (admin); alle clusters worden ontkoppeld
+      responses:
+        "204": { description: Verwijderd }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /gitops/repo/probe:
+    post:
+      operationId: probeGitRepo
+      summary: Token, branch en map testen zonder op te slaan (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GitRepoInput" }
+      responses:
+        "200":
+          description: De kop van de branch en de clusterbestanden
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GitProbe" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /gitops/sync:
+    post:
+      operationId: syncGit
+      summary: Nu synchroniseren (admin)
+      description: Leest de repository opnieuw, ook als de kop niet veranderde, en controleert elk bestand opnieuw.
+      responses:
+        "202": { description: Aangestoten }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /gitops/files:
+    get:
+      operationId: listGitFiles
+      summary: De clusterbestanden uit de laatste scan, met hun toestand en fouten
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/GitFile" }
+        "401": { $ref: "#/components/responses/Error" }
+  /gitops/changes:
+    get:
+      operationId: listGitChanges
+      summary: Wijzigingen uit Git, eerst wat wacht of loopt
+      parameters:
+        - { name: status, in: query, schema: { $ref: "#/components/schemas/GitChangeStatus" } }
+        - { name: cluster_id, in: query, schema: { type: string, format: uuid } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/GitChange" }
+        "401": { $ref: "#/components/responses/Error" }
+  /gitops/changes/{changeId}:
+    parameters:
+      - { name: changeId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getGitChange
+      summary: Eén wijziging met commit, plan, diffs en lokale afwijkingen
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GitChangeDetail" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /clusters/{clusterId}/git/export:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: exportClusterGit
+      summary: Het cluster als cluster.yaml, zonder geheimen
+      description: Alleen voor een cluster uit een ingebouwde template. Ook voor viewers.
+      responses:
+        "200":
+          description: Het bestand
+          content:
+            application/yaml:
+              schema: { type: string }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /clusters/{clusterId}/git/link:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: linkClusterGit
+      summary: Het cluster aan zijn bestand in Git koppelen (admin)
+      description: |
+        Lukt alleen als het bestand in de repository gelijk is aan de export;
+        anders 409 met code git_mismatch en de diff. Daarna is Git de bron
+        van waarheid en geven wijzigingen aan wat uit Git komt 409.
+      responses:
+        "200":
+          description: Gekoppeld
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Cluster" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /clusters/{clusterId}/git/unlink:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: unlinkClusterGit
+      summary: Het cluster van Git ontkoppelen (admin); een wachtende wijziging vervalt
+      responses:
+        "200":
+          description: Ontkoppeld
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Cluster" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
 components:
   securitySchemes:
     session:
@@ -1631,6 +1804,9 @@ components:
           type: array
           description: Bij precheck_failed de controles van de voorcontrole
           items: { $ref: "#/components/schemas/TestRunCheck" }
+        diff:
+          type: string
+          description: Bij git_mismatch het verschil tussen het bestand in Git en de export
     Health:
       type: object
       required: [status, version, database]
@@ -2565,7 +2741,7 @@ components:
       enum: [unknown, healthy, degraded, down, split_brain]
     Cluster:
       type: object
-      required: [id, slug, name, description, type, environment, status, status_reason, status_since, tags, git_repo_url, template_name, template_version, spec_revision, created_at, updated_at]
+      required: [id, slug, name, description, type, environment, status, status_reason, status_since, tags, git_repo_url, git_managed, template_name, template_version, spec_revision, created_at, updated_at]
       properties:
         template_name: { type: string, nullable: true, description: De template waaruit het cluster is uitgerold }
         template_version: { type: string, nullable: true }
@@ -2581,6 +2757,7 @@ components:
         status_since: { type: string, format: date-time, nullable: true }
         tags: { type: array, items: { type: string } }
         git_repo_url: { type: string }
+        git_managed: { type: boolean, description: "Komt uit Git; naam, omgeving, tags, nodes en VIP's wijzigen dan in cluster.yaml" }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
     ClusterListItem:
@@ -3146,13 +3323,14 @@ components:
       enum: [string, int, bool, ipv4, cidr, size, secret]
     TemplateParam:
       type: object
-      required: [name, type, label, help, optional, default, min, max]
+      required: [name, type, label, help, optional, immutable, default, min, max]
       properties:
         name: { type: string }
         type: { $ref: "#/components/schemas/TemplateParamType" }
         label: { type: string }
         help: { type: string }
         optional: { type: boolean, description: Mag leeg blijven; een secret wordt dan gegenereerd }
+        immutable: { type: boolean, description: Ligt vast na de uitrol }
         default: { type: string, nullable: true }
         min: { type: string, nullable: true }
         max: { type: string, nullable: true }
@@ -3418,3 +3596,190 @@ components:
       properties:
         job: { $ref: "#/components/schemas/Job" }
         cluster_id: { type: string, format: uuid }
+    GitCommit:
+      type: object
+      required: [sha, message, author, date, verified, url]
+      properties:
+        sha: { type: string }
+        message: { type: string }
+        author: { type: string }
+        date: { type: string, format: date-time }
+        verified: { type: boolean, description: Of GitHub de handtekening van de commit geldig vindt }
+        url: { type: string, description: De commit op de website }
+    GitRepo:
+      type: object
+      required: [id, api_url, repository, branch, path, web_url, head, last_sync_at, last_error, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        api_url: { type: string }
+        repository: { type: string, description: "eigenaar/naam" }
+        branch: { type: string }
+        path: { type: string, description: De map met een map per cluster }
+        web_url: { type: string, description: De repository op de website }
+        head:
+          description: De laatste commit die de server zag
+          allOf: [{ $ref: "#/components/schemas/GitCommit" }]
+          nullable: true
+        last_sync_at: { type: string, format: date-time, nullable: true }
+        last_error: { type: string, description: Waarom de laatste synchronisatie mislukte; leeg als ze lukte }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    GitRepoStatus:
+      type: object
+      required: [enabled, repo, interval_seconds, pending_changes]
+      properties:
+        enabled: { type: boolean, description: Zonder CF_MASTER_KEY staat GitOps uit }
+        repo:
+          allOf: [{ $ref: "#/components/schemas/GitRepo" }]
+          nullable: true
+        interval_seconds: { type: integer, description: Tijd tussen twee keer lezen }
+        pending_changes: { type: integer, description: Wijzigingen die wachten op goedkeuring }
+    GitRepoInput:
+      type: object
+      required: [repository]
+      properties:
+        api_url: { type: string, description: "Standaard https://api.github.com" }
+        repository: { type: string, description: "eigenaar/naam, of de link naar de repository" }
+        branch: { type: string, description: Standaard main }
+        path: { type: string, description: Standaard clusters }
+        token: { type: string, format: password, description: "Fine-grained token met alleen Contents: read; leeg laat het opgeslagen token staan" }
+    GitProbe:
+      type: object
+      required: [head, files]
+      properties:
+        head: { $ref: "#/components/schemas/GitCommit" }
+        files: { type: array, items: { type: string }, description: De gevonden clusterbestanden }
+    GitFieldError:
+      type: object
+      required: [field, line, message]
+      properties:
+        field: { type: string, description: "Zoals params.vip of cluster.name" }
+        line: { type: integer, description: De regel in het bestand; 0 als die niet bekend is }
+        message: { type: string }
+    GitFileState:
+      type: string
+      description: |
+        in_sync: gelijk aan het cluster; pending: een wijziging wacht; invalid:
+        fouten; new: een nieuw cluster; unlinked: het cluster bestaat maar is
+        niet gekoppeld; missing: het bestand van een gekoppeld cluster ontbreekt
+      enum: [in_sync, pending, invalid, new, unlinked, missing]
+    GitFile:
+      type: object
+      required: [path, slug, state, cluster_id, cluster_name, errors, change_id, commit, secret, url]
+      properties:
+        path: { type: string }
+        slug: { type: string }
+        state: { $ref: "#/components/schemas/GitFileState" }
+        cluster_id: { type: string, format: uuid, nullable: true }
+        cluster_name: { type: string }
+        errors: { type: array, items: { $ref: "#/components/schemas/GitFieldError" } }
+        change_id: { type: string, format: uuid, nullable: true, description: De wachtende wijziging }
+        commit: { type: string, description: De commit waarin de server deze inhoud voor het eerst zag }
+        secret: { type: boolean, description: Er stond een geheim in; de inhoud wordt niet bewaard }
+        url: { type: string, description: Het bestand op de website }
+    GitChangeStatus:
+      type: string
+      enum: [pending, applying, applied, failed, rejected, superseded]
+    GitChange:
+      type: object
+      required: [id, cluster_id, cluster_name, cluster_environment, slug, path, kind, status, commit, base_revision, summary, job_id, decided_by, decided_at, reason, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        cluster_id: { type: string, format: uuid, nullable: true }
+        cluster_name: { type: string, description: De naam nu, of die uit het bestand bij een nieuw cluster }
+        cluster_environment: { $ref: "#/components/schemas/Environment" }
+        slug: { type: string }
+        path: { type: string }
+        kind: { type: string, enum: [create, update] }
+        status: { $ref: "#/components/schemas/GitChangeStatus" }
+        commit: { $ref: "#/components/schemas/GitCommit" }
+        base_revision: { type: integer }
+        summary: { type: string, description: "Zoals: node_count van 2 naar 3; keepalived.conf op 2 nodes, 1 nieuwe node" }
+        job_id: { type: string, format: uuid, nullable: true }
+        decided_by: { type: string, nullable: true }
+        decided_at: { type: string, format: date-time, nullable: true }
+        reason: { type: string }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    GitChangeDetail:
+      allOf:
+        - $ref: "#/components/schemas/GitChange"
+        - type: object
+          required: [plan, local, file_url]
+          properties:
+            plan: { $ref: "#/components/schemas/GitPlan" }
+            local:
+              type: array
+              items: { type: string }
+              description: Uit de laatste driftcontrole, wat op de nodes al afwijkt en overschreven wordt
+            file_url: { type: string }
+    GitFieldChange:
+      type: object
+      required: [field, label, from, to]
+      properties:
+        field: { type: string }
+        label: { type: string }
+        from: { type: string }
+        to: { type: string }
+    GitPlanNewNode:
+      type: object
+      required: [hostname, role, address, prefix, host, vm]
+      properties:
+        hostname: { type: string }
+        role: { type: string }
+        address: { type: string }
+        prefix: { type: integer }
+        host: { type: string }
+        vm:
+          type: object
+          required: [cpu, memory_mib, disk_gib]
+          properties:
+            cpu: { type: integer }
+            memory_mib: { type: integer }
+            disk_gib: { type: integer }
+    GitStepChange:
+      type: object
+      required: [step, ids, title, change, summary]
+      properties:
+        step: { type: string, description: "Zoals file:/var/www/html/index.html" }
+        ids: { type: array, items: { type: string } }
+        title: { type: string }
+        change: { type: string, enum: [added, changed, removed] }
+        summary: { type: string }
+        diff: { type: string, description: "Unified diff; geheimen staan er als [geheim] in" }
+    GitPlanNode:
+      type: object
+      required: [node_id, hostname, new, vips, steps]
+      properties:
+        node_id: { type: string, format: uuid }
+        hostname: { type: string }
+        new: { type: boolean }
+        vips: { type: array, items: { type: string }, description: De VIP's die deze node nu heeft }
+        steps: { type: array, items: { $ref: "#/components/schemas/GitStepChange" } }
+    GitPlan:
+      type: object
+      required: [kind, summary, base_revision, template, metadata, params, new_nodes, nodes, unchanged, warnings, no_steps]
+      properties:
+        kind: { type: string, enum: [create, update] }
+        summary: { type: string }
+        base_revision: { type: integer }
+        template:
+          type: object
+          required: [name, from, to]
+          properties:
+            name: { type: string }
+            from: { type: string, description: Leeg bij een nieuw cluster }
+            to: { type: string }
+        metadata: { type: array, items: { $ref: "#/components/schemas/GitFieldChange" } }
+        params: { type: array, items: { $ref: "#/components/schemas/GitFieldChange" } }
+        new_nodes: { type: array, items: { $ref: "#/components/schemas/GitPlanNewNode" } }
+        nodes:
+          type: array
+          description: In de volgorde van toepassen; de VIP-eigenaar als laatste
+          items: { $ref: "#/components/schemas/GitPlanNode" }
+        unchanged: { type: array, items: { type: string } }
+        warnings: { type: array, items: { type: string } }
+        no_steps: { type: boolean, description: Geen gerenderde stap verandert }
+        vip: { type: string }
+        vrid: { type: integer }
+        proxmox: { type: string }

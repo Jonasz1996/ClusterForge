@@ -49,7 +49,7 @@ func toAPITemplate(t *templates.Template) gen.Template {
 	for _, p := range t.Params {
 		out.Params = append(out.Params, gen.TemplateParam{
 			Name: p.Name, Type: gen.TemplateParamType(p.Type), Label: p.Label, Help: p.Help,
-			Optional: p.Optional || p.Type == "secret", Default: str(p.Default), Min: str(p.Min), Max: str(p.Max),
+			Optional: p.Optional || p.Type == "secret", Immutable: p.Immutable, Default: str(p.Default), Min: str(p.Min), Max: str(p.Max),
 		})
 	}
 	for _, role := range t.Roles {

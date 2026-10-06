@@ -25,6 +25,7 @@ export function useLiveUpdates(enabled: boolean) {
         void qc.invalidateQueries({ queryKey: ["backups"] });
         void qc.invalidateQueries({ queryKey: ["test-runs"] });
         void qc.invalidateQueries({ queryKey: ["deps"] });
+        void qc.invalidateQueries({ queryKey: ["gitops"] });
       }, 300);
     };
     es.addEventListener("change", onChange);

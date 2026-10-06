@@ -63,7 +63,7 @@ func describe(r store.ListAuditRow, n names) Entry {
 	if strings.HasSuffix(r.Action, ".updated") {
 		e.Changes = changes(r.SubjectType, p, n)
 	}
-	if r.Action == "backup.policy_updated" || r.Action == "backup.watch_updated" {
+	if r.Action == "backup.policy_updated" || r.Action == "backup.watch_updated" || r.Action == "gitops.repo_updated" {
 		e.Changes = changes(r.Action, p, n)
 	}
 	e.Summary = summary(r, p, n, e, spec)
@@ -145,6 +145,12 @@ func subjectName(r store.ListAuditRow, p map[string]any, n names, e Entry) (stri
 		return or(str(p, "service"), str(p, "name")), false
 	case "dependency":
 		return str(p, "consumer") + " → " + str(p, "provider"), false
+	case "git_repo":
+		return str(p, "repo"), false
+	case "git_file":
+		return r.SubjectID, false
+	case "git_change":
+		return or(str(p, "name"), str(p, "slug")), false
 	case "audit":
 		return events.Lookup(r.SubjectID).Label, false
 	}
@@ -480,6 +486,47 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 			serviceIn(str(p, "provider"), str(p, "provider_scope")) + " verwijderd"
 	case "service.status_changed":
 		return serviceStatusChanged(serviceIn(name, str(p, "scope")), p)
+	case "gitops.repo_connected":
+		return "Git-repository " + str(p, "repo") + " gekoppeld" + paren("branch "+str(p, "branch")+", map "+str(p, "path"))
+	case "gitops.repo_updated":
+		if len(e.Changes) == 1 && e.Changes[0].Field == "token_changed" {
+			return "Token van de Git-koppeling vervangen"
+		}
+		return "Koppeling met Git gewijzigd" + changeSummary(e.Changes)
+	case "gitops.repo_disconnected":
+		s := "Git-repository " + str(p, "repo") + " ontkoppeld"
+		if n, _ := p["clusters"].(float64); n > 0 {
+			s += "; " + count(n, "cluster", "clusters") + " niet meer vanuit Git beheerd"
+		}
+		return s
+	case "gitops.commit_seen":
+		return fmt.Sprintf("Nieuwe commit %s %q van %s", shortSHA(str(p, "sha")), str(p, "message"), str(p, "author")) + verifiedText(p)
+	case "gitops.sync_failed":
+		return "Lezen uit Git mislukt" + colon(str(p, "error"))
+	case "gitops.sync_recovered":
+		return "Lezen uit Git lukt weer" + prefixed(" bij commit ", shortSHA(str(p, "sha")))
+	case "gitops.file_invalid":
+		errs, _ := p["errors"].([]any)
+		first := ""
+		if len(errs) > 0 {
+			m, _ := errs[0].(map[string]any)
+			first = prefixed("regel ", num(m["line"])) + prefixed(", ", str(m, "field")) + ": " + str(m, "message")
+		}
+		return fmt.Sprintf("%s ongeldig in commit %s (%s)", str(p, "path"), shortSHA(str(p, "commit")), count(float64(len(errs)), "fout", "fouten")) + colon(first)
+	case "gitops.file_missing":
+		return str(p, "path") + " ontbreekt in commit " + shortSHA(str(p, "commit")) + "; cluster " + str(p, "name") + " blijft zoals het is"
+	case "gitops.change_planned":
+		what := "Wijziging"
+		if str(p, "kind") == "create" {
+			what = "Nieuw cluster"
+		}
+		return fmt.Sprintf("%s %s uit commit %s gepland", what, or(str(p, "name"), str(p, "slug")), shortSHA(str(p, "commit"))) + colon(str(p, "summary"))
+	case "gitops.change_superseded":
+		return fmt.Sprintf("Wijziging voor %s uit commit %s vervalt", str(p, "slug"), shortSHA(str(p, "commit"))) + colon(str(p, "reason"))
+	case "cluster.git_linked":
+		return "Cluster " + name + " aan Git gekoppeld" + prefixed(": ", str(p, "path"))
+	case "cluster.git_unlinked":
+		return "Cluster " + name + " van Git ontkoppeld" + colon(str(p, "reason"))
 	}
 	if strings.HasPrefix(r.Action, "job.") {
 		return spec.Label + ": " + name
@@ -488,6 +535,20 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 		return spec.Label + ": " + name
 	}
 	return spec.Label
+}
+
+func shortSHA(sha string) string {
+	if len(sha) > 7 {
+		return sha[:7]
+	}
+	return sha
+}
+
+func verifiedText(p map[string]any) string {
+	if b, _ := p["verified"].(bool); b {
+		return ", geverifieerd"
+	}
+	return ""
 }
 
 // serviceStatusChanged zegt wat er met een dienst gebeurde: zijn eigen
@@ -606,6 +667,8 @@ var fieldLabels = map[string][][2]string{
 	"dependency":            {{"strength", "Sterkte"}, {"note", "Notitie"}},
 	"backup.policy_updated": {{"max_age_hours", "Maximale leeftijd in uren"}, {"verify_enabled", "Geplande back-upcontrole"}},
 	"backup.watch_updated":  {{"watch", "Ook bewaken"}},
+	"gitops.repo_updated": {{"repo", "Repository"}, {"branch", "Branch"}, {"path", "Map"}, {"api_url", "API-adres"},
+		{"token_changed", "Token"}},
 }
 
 func changes(subjectType string, p map[string]any, n names) []Change {
@@ -619,9 +682,12 @@ func changes(subjectType string, p map[string]any, n names) []Change {
 		known[field] = true
 		m, isDiff := v.(map[string]any)
 		if !isDiff {
-			if field == "token_secret" {
+			switch field {
+			case "token_secret":
 				// Van een geheim staat alleen dat het veranderde.
 				out = append(out, Change{Field: field, Label: label, To: text(v)})
+			case "token_changed":
+				out = append(out, Change{Field: field, Label: label, To: "vervangen"})
 			}
 			return
 		}

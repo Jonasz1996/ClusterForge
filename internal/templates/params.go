@@ -6,6 +6,7 @@ import (
 	"math"
 	"net/netip"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -24,6 +25,9 @@ type Param struct {
 	Pattern  string `yaml:"pattern"`
 	// Length is de lengte van een gegenereerd secret.
 	Length int `yaml:"length"`
+	// Immutable zegt dat de waarde na de uitrol vastligt, zoals het VIP:
+	// GitOps weigert een andere waarde voor een bestaand cluster.
+	Immutable bool `yaml:"immutable"`
 
 	re *regexp.Regexp
 }
@@ -110,11 +114,86 @@ func (t *Template) Values(params map[string]any, secrets map[string]string) (map
 	return t.validate(in, false)
 }
 
-func (t *Template) validate(input map[string]any, generate bool) (map[string]any, error) {
+// SecretPlaceholder staat in een plan of diff op de plaats van een geheim.
+// Het oude en het nieuwe render krijgen dezelfde plaatshouder, dus een diff
+// laat nooit een geheim zien en er hoeft niets ontsleuteld te worden.
+const SecretPlaceholder = "[geheim]"
+
+// MaskedValues is Values met SecretPlaceholder voor elk geheim, om te tonen
+// wat een wijziging zou doen. Wat ermee gerenderd is, gaat nooit naar een
+// node.
+func (t *Template) MaskedValues(params map[string]any) (map[string]any, error) {
+	in := make(map[string]any, len(params))
+	for k, v := range params {
+		in[k] = v
+	}
+	return t.validate(in, false, t.Secrets()...)
+}
+
+// Param geeft de parameter met deze naam.
+func (t *Template) Param(name string) (Param, bool) {
+	for _, p := range t.Params {
+		if p.Name == name {
+			return p, true
+		}
+	}
+	return Param{}, false
+}
+
+// Normalize controleert één waarde voor een parameter zoals Validate dat
+// doet, met min, max en pattern, en geeft haar genormaliseerd terug.
+func (t *Template) Normalize(name string, v any) (any, error) {
+	for i := range t.Params {
+		if t.Params[i].Name == name {
+			return t.Params[i].normalize(v, true)
+		}
+	}
+	return nil, fmt.Errorf("onbekende parameter %s", name)
+}
+
+var paramRefRe = regexp.MustCompile(`\.params\.([a-z][a-z0-9_]*)`)
+
+// VMParams zijn de parameters die de vorm van de VM's bepalen. Na de uitrol
+// liggen ze vast: een bestaande VM wordt niet groter gemaakt.
+func (t *Template) VMParams() []string {
+	var out []string
+	for _, r := range t.Roles {
+		for _, s := range []string{r.VM.CPU, r.VM.Memory, r.VM.Disk} {
+			for _, m := range paramRefRe.FindAllStringSubmatch(s, -1) {
+				if !slices.Contains(out, m[1]) {
+					out = append(out, m[1])
+				}
+			}
+		}
+	}
+	return out
+}
+
+// CountParam is de parameter waaruit het aantal nodes van een rol komt, of
+// "" als het aantal vastligt.
+func (t *Template) CountParam(role string) string {
+	if r := t.role(role); r != nil {
+		if m := paramRefRe.FindStringSubmatch(r.Count); m != nil {
+			return m[1]
+		}
+	}
+	return ""
+}
+
+// validate controleert de invoer. masked zijn geheimen die de plaatshouder
+// krijgen in plaats van een waarde.
+func (t *Template) validate(input map[string]any, generate bool, masked ...string) (map[string]any, error) {
 	out := map[string]any{}
 	known := map[string]bool{}
 	for _, p := range t.Params {
 		known[p.Name] = true
+		if p.Type == "secret" && slices.Contains(masked, p.Name) {
+			if _, given := input[p.Name]; given {
+				return nil, FieldError{p.Name, "geheim " + p.Name + " hoort niet bij de parameters"}
+			}
+			out[p.Name] = SecretPlaceholder
+			continue
+		}
 		v, ok := input[p.Name]
 		if s, isStr := v.(string); isStr && strings.TrimSpace(s) == "" {
 			ok = false

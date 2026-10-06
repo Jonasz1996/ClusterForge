@@ -35,6 +35,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/drift"
 	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/failover"
+	"github.com/Jonasz1996/clusterforge/internal/gitops"
 	"github.com/Jonasz1996/clusterforge/internal/httpapi"
 	"github.com/Jonasz1996/clusterforge/internal/jobs"
 	"github.com/Jonasz1996/clusterforge/internal/lifecycle"
@@ -199,6 +200,12 @@ func serve() error {
 	// evaluator, na diens commit.
 	dps := deps.NewService(pool, ev, log)
 	eval.After = dps.Evaluate
+	// GitOps leest de gekoppelde repository elke minuut; na een uitrol of
+	// toepassing kijkt het meteen of een plan verouderd is.
+	git := gitops.NewService(pool, ev, log, box, dep)
+	for _, kind := range []string{deploy.Kind, rollout.Kind} {
+		runner.OnFinished(kind, func(context.Context, store.Job) { git.Kick(false) })
+	}
 	go hub.Run(ctx)
 	go eval.Run(ctx)
 	go ingest.Run(ctx)
@@ -207,6 +214,9 @@ func serve() error {
 	go drf.Run(ctx)
 	go sched.Run(ctx)
 	go dps.Run(ctx)
+	if git.Enabled() {
+		go git.Run(ctx)
+	}
 	jobsDone := make(chan struct{})
 	go func() {
 		defer close(jobsDone)
@@ -219,7 +229,8 @@ func serve() error {
 		Addr: cfg.Listen,
 		Handler: httpapi.New(httpapi.Deps{
 			Config: cfg, Log: log, Pool: pool, Auth: authSvc, Bus: bus, Hub: hub, Proxmox: pve, Jobs: runner,
-			Lifecycle: life, Deploy: dep, Backups: bk, Drift: drf, Failover: fo, Deps: dps, Rollout: ro, Version: version,
+			Lifecycle: life, Deploy: dep, Backups: bk, Drift: drf, Failover: fo, Deps: dps, Rollout: ro, GitOps: git,
+			Version: version,
 		}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,

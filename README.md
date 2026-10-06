@@ -31,6 +31,7 @@ Het technisch ontwerp staat in [docs/design/mvp-fase-1.md](docs/design/mvp-fase-
 | 11. Planning en prod | Failovertests en back-upcontroles gepland in een testvenster, de VM hard uitzetten in lab en test, en failovertests op prod met de hand met de slug en tweestapsverificatie | klaar |
 | 12. Impact bij acties | Per dienst de opgeslagen status met een regel in het logboek bij elke verandering, "geraakt door" in de clusterlijst, en in de bevestigingsvensters welke bekende diensten down of verminderd raken | klaar |
 | 13. Meer templates | Docker-hosts, Cron-cluster en Eigen applicatie (een container achter een VIP), met hun diensten meteen in de graaf | klaar |
+| 14. GitOps: lezen en plannen | Clusters uit een template beschrijven in een GitHub-repository; elk bestand gecontroleerd met veld en regel, en per wijziging een plan met de diff per node, zonder iets op de nodes te veranderen | klaar |
 
 ## Draaien met Docker Compose
 
@@ -251,6 +252,48 @@ De taak (`cluster.apply`) bekijkt elke node vlak voor ze iets toepast opnieuw. I
 
 Drift kan alleen met een agent van deze versie of nieuwer. Een oudere agent staat als "agent te oud voor driftcontrole", met het upgradecommando om te kopiëren. Werk ook je golden image bij (opnieuw `agent.sh --no-enroll` en de VM weer als template), anders krijgen nieuwe VM's de oude agent.
 
+## GitOps
+
+Een cluster uit een ingebouwde template kun je beschrijven in een GitHub-repository: per cluster een bestand `clusters/<slug>/cluster.yaml`. ClusterForge leest de repository elke minuut, controleert elk bestand en toont voor een wijziging wat ze op elke node zou doen. In deze versie blijft het daarbij: goedkeuren en toepassen komen in een volgende mijlpaal, en er verandert nog niets op de nodes. ClusterForge schrijft zelf nooit naar Git.
+
+Zo begin je:
+
+1. Maak een repository, bijvoorbeeld `clusterforge-config`, en op GitHub een fine-grained token (Settings → Developer settings → Fine-grained tokens) met alleen die repository en alleen Contents: Read-only.
+2. Koppel bij GitOps de repository (eigenaar/naam of de link), de branch (standaard `main`), de map (standaard `clusters`) en het token. Testen leest de laatste commit en de clusterbestanden zonder iets op te slaan. Het token wordt versleuteld met `CF_MASTER_KEY` bewaard en komt nooit terug uit de API; zonder masterkey staat GitOps uit. De server moet `api.github.com` op poort 443 kunnen bereiken.
+3. Exporteer een cluster (bij GitOps onder "Clusters nog niet in Git", of op de kaart Git van het cluster) en commit het bestand ongewijzigd als `clusters/<slug>/cluster.yaml`.
+4. Klik op Koppelen. Dat lukt alleen als het bestand gelijk is aan de export; anders zie je het verschil. Vanaf dan is Git de bron van waarheid: naam, beschrijving, omgeving, tags, VIP's, welke nodes erin zitten en hun IP-adres wijzig je in het bestand, en de API weigert ze met 409. Verwijderen kan pas na Ontkoppelen. Node-acties zoals onderhoud en herstarten blijven gewoon in ClusterForge.
+
+Een bestand ziet er zo uit:
+
+```yaml
+clusterforge: 1
+cluster:
+  name: Webcluster
+  slug: web                 # gelijk aan de mapnaam
+  environment: prod
+  tags: [web]
+template:
+  name: keepalived-nginx
+  version: 1.1.0            # verplicht
+params:                     # alle parameters behalve geheimen, zoals auth_pass
+  vip: 10.0.20.100          # ligt vast
+  node_count: 2
+  vrid: 51                  # ligt vast
+  cpu: 2                    # cpu, memory en disk liggen vast na de uitrol
+  memory: 2G
+  disk: 20G
+target:                     # alleen gelezen bij een nieuw cluster
+  proxmox: Thuislab         # de naam van de Proxmox-koppeling
+  image_vmid: 9000
+  first_ip: 10.0.20.11/24
+```
+
+Bij elk bestand staat bij GitOps een toestand: in sync, wijziging wacht, ongeldig, nieuw, niet gekoppeld of ontbreekt. Een ongeldig bestand toont elke fout met veld en regel, zoals "regel 5, cluster.environment: kies lab, test of prod". De controle is streng: geen onbekende velden, de slug gelijk aan de map, een template en versie die de server kent, alle parameters ingevuld, en niets wijzigen wat vastligt (slug, templatenaam, VIP, VRRP-id en de VM-vorm). Een geheim in het bestand is een fout; ClusterForge bewaart zo'n bestand dan niet, en je haalt het geheim best ook uit de geschiedenis van de repository. Minder nodes dan nu kan niet via Git, daarvoor zijn de lifecycle-acties.
+
+Een geldig bestand dat afwijkt van het cluster wordt een plan. Op de pagina van de wijziging zie je de commit (met of GitHub hem geverifieerd vindt), de velden oud en nieuw, en per node in de volgorde van toepassen welke stappen veranderen, met een uitklapbare diff; de VIP-eigenaar komt als laatste. Geheimen staan er als `[geheim]` in. Uit de laatste driftcontrole staat erbij wat op een node al afwijkt en overschreven zou worden. Per cluster wacht er hoogstens één plan; een nieuwere commit vervangt het.
+
+De server vraagt GitHub elke minuut alleen of de branch veranderde (met een ETag, dus zonder kosten als er niets nieuws is) en leest daarna alleen de bestanden die veranderden. Nu synchroniseren leest meteen opnieuw. Lukt het lezen niet, bijvoorbeeld door een verlopen token, dan staat de fout bij de koppeling en in het logboek, en blijft alles zoals het was.
+
 ## Failovertests
 
 Een failovertest bewijst dat een VIP echt verhuist als de node die het heeft uitvalt. Op de pagina van een cluster staat de kaart Failovertests. Een beheerder voegt er een test toe: het scenario (keepalived stoppen op de eigenaar, nginx of haproxy stoppen op de eigenaar, of de VM van de eigenaar hard uitzetten via Proxmox), het VIP, binnen hoeveel seconden een andere node moet overnemen (standaard 5 s voor keepalived en 10 s voor een dienst of een VM), of het VIP daarna terug moet naar de oorspronkelijke node (standaard aan bij de templates met keepalived, die preempt gebruiken) en de probe: een HTTP-pad met de verwachte status of een TCP-poort op het VIP. Scenario's die op dit cluster niet kunnen, staan grijs met de reden.
@@ -335,6 +378,7 @@ make dev-up            # PostgreSQL en VictoriaMetrics in Docker
 make dev-admin USER=jonas
 make dev-server        # Go-server op :8080
 make dev-web           # Next.js op :3000, stuurt /api door naar :8080
+make dev-github        # optioneel: een nep-GitHub op :8098 voor GitOps
 ```
 
 Open http://localhost:3000.
@@ -347,6 +391,8 @@ Open http://localhost:3000.
 | Binary met ingebedde webinterface | `make build` |
 | `cf-agent` voor amd64 en arm64 (in `bin/agents`, voor `make dev-server`) | `make agent` |
 | Container-image | `make docker` |
+
+Voor GitOps zonder echte GitHub start `make dev-github DIR=/tmp/cf-config`: een nep-GitHub die de inhoud van die map als repository toont en opnieuw commit zodra er iets verandert. Koppel dan met API-adres `http://127.0.0.1:8098`, repository `jonas/cf-config` en token `dev-token`.
 
 De ingebouwde templates staan in `internal/templates/builtin/<naam>/<versie>/`. Wat een uitgebrachte versie op de nodes zet, verander je niet meer, want clusters kunnen ze gebruiken: kopieer de map naar een nieuwe versie, pas die aan en zet hem in de lijst `released` in `internal/templates/registry_test.go`. De test faalt als een uitgebrachte versie verdwijnt of een nieuwe er niet in staat.
 
@@ -378,6 +424,7 @@ internal/backups/          versheid van de Proxmox-back-ups per VM, de back-upco
 internal/drift/            driftcontrole: vergelijken met de gewenste staat, de scanner en het rapport
 internal/health/           wachten op verse heartbeats: een node klaar, de VIP's op hun plaats
 internal/failover/         failovertests: voorcontrole, storing, meting, herstel en het rapport
+internal/gitops/           GitOps: de repository lezen, clusterbestanden controleren, plannen en koppelen; ghfake/ is een nep-GitHub
 internal/deps/             diensten en afhankelijkheden: graaf, status, doorgeven, impact en voorstellen
 internal/rollout/          cluster.apply: wijzigingen node voor node toepassen, zoals drift herstellen
 internal/planner/          het testvenster, zomer- en wintertijd, en wanneer een geplande run start of overgeslagen wordt
