@@ -13,23 +13,39 @@ JOIN vips v ON v.id = t.vip_id
 WHERE t.id = @id;
 
 -- name: InsertFailoverTest :one
-INSERT INTO failover_tests (cluster_id, vip_id, name, scenario, service, max_takeover_seconds, expect_failback, probe, created_by)
-VALUES (@cluster_id, @vip_id, @name, @scenario, @service, @max_takeover_seconds, @expect_failback, @probe, @created_by)
+INSERT INTO failover_tests (cluster_id, vip_id, name, scenario, service, max_takeover_seconds, expect_failback, probe, created_by,
+                            scheduled, next_run_at)
+VALUES (@cluster_id, @vip_id, @name, @scenario, @service, @max_takeover_seconds, @expect_failback, @probe, @created_by,
+        @scheduled, @next_run_at)
 RETURNING *;
 
 -- name: UpdateFailoverTest :one
 UPDATE failover_tests
 SET vip_id = @vip_id, name = @name, scenario = @scenario, service = @service,
-    max_takeover_seconds = @max_takeover_seconds, expect_failback = @expect_failback, probe = @probe, updated_at = now()
+    max_takeover_seconds = @max_takeover_seconds, expect_failback = @expect_failback, probe = @probe,
+    scheduled = @scheduled, next_run_at = @next_run_at, updated_at = now()
 WHERE id = @id
 RETURNING *;
+
+-- name: SetFailoverTestNextRun :exec
+-- Na een geplande run of een overgeslagen run: het volgende venster, of de
+-- planning uit.
+UPDATE failover_tests SET scheduled = @scheduled, next_run_at = @next_run_at WHERE id = @id;
+
+-- name: ListDueFailoverTests :many
+-- Geplande tests waarvan het moment voorbij is, oudste eerst.
+SELECT sqlc.embed(t), v.address AS vip_address
+FROM failover_tests t
+JOIN vips v ON v.id = t.vip_id
+WHERE t.scheduled AND t.next_run_at <= @now
+ORDER BY t.next_run_at, t.created_at;
 
 -- name: DeleteFailoverTest :execrows
 DELETE FROM failover_tests WHERE id = @id;
 
 -- name: InsertTestRun :one
-INSERT INTO test_runs (kind, cluster_id, test_id, node_id, hostname, job_id, definition, checks, requested_by)
-VALUES (@kind, @cluster_id, @test_id, @node_id, @hostname, @job_id, @definition, @checks, @requested_by)
+INSERT INTO test_runs (kind, trigger, cluster_id, test_id, node_id, hostname, job_id, definition, checks, requested_by)
+VALUES (@kind, @trigger, @cluster_id, @test_id, @node_id, @hostname, @job_id, @definition, @checks, @requested_by)
 RETURNING *;
 
 -- name: GetTestRun :one
@@ -85,7 +101,7 @@ UPDATE test_runs SET restored = true, summary = @summary WHERE id = @id;
 -- name: ListFailoverNodes :many
 -- Wat de voorcontrole van een failovertest per node moet weten, uit de
 -- laatste heartbeat en facts.
-SELECT n.id, n.hostname, n.lifecycle, n.status,
+SELECT n.id, n.hostname, n.lifecycle, n.status, n.proxmox_id, n.pve_vmid,
        (a.id IS NOT NULL)::boolean AS has_agent,
        coalesce(a.protocol_version, 0)::int AS agent_protocol,
        s.heartbeat_at,
@@ -104,6 +120,18 @@ ORDER BY n.hostname;
 SELECT id, title FROM jobs
 WHERE kind IN ('backup.verify', 'failover.test') AND status IN ('queued', 'running')
 ORDER BY created_at LIMIT 1;
+
+-- name: GetTestSlotReleasedAt :one
+-- Wanneer de laatste invasieve test klaar was; een geplande run die daarop
+-- wachtte, is niet te laat.
+SELECT coalesce(max(finished_at), 'epoch'::timestamptz)::timestamptz AS released_at FROM jobs
+WHERE kind IN ('backup.verify', 'failover.test') AND status NOT IN ('queued', 'running');
+
+-- name: LastTestedAt :one
+-- Wanneer een cluster het laatst echt getest of gecontroleerd is; epoch als
+-- nooit.
+SELECT coalesce(max(finished_at), 'epoch'::timestamptz)::timestamptz AS tested_at FROM test_runs
+WHERE cluster_id = @cluster_id AND kind = @kind AND result = ANY(@results::text[]);
 
 -- name: SetTestRunChecks :exec
 UPDATE test_runs SET checks = @checks WHERE id = @id;

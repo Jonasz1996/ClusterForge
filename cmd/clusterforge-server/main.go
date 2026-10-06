@@ -19,6 +19,9 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	// De tijdzones zitten in de binary, ook in een image zonder tzdata: het
+	// testvenster rekent met zomer- en wintertijd.
+	_ "time/tzdata"
 
 	"github.com/google/uuid"
 	"golang.org/x/term"
@@ -37,6 +40,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/lifecycle"
 	"github.com/Jonasz1996/clusterforge/internal/live"
 	"github.com/Jonasz1996/clusterforge/internal/metrics"
+	"github.com/Jonasz1996/clusterforge/internal/planner"
 	"github.com/Jonasz1996/clusterforge/internal/proxmox"
 	"github.com/Jonasz1996/clusterforge/internal/rollout"
 	"github.com/Jonasz1996/clusterforge/internal/secrets"
@@ -160,7 +164,7 @@ func serve() error {
 		}
 	}
 	bk := backups.NewService(pool, ev, log, pve)
-	bk.SandboxStorage, bk.BootTimeout = cfg.SandboxStorage, cfg.SandboxBootTimeout
+	bk.SandboxStorage, bk.BootTimeout, bk.Window = cfg.SandboxStorage, cfg.SandboxBootTimeout, cfg.TestWindow
 	bk.EnableVerify(runner, bus)
 	drf := drift.NewService(pool, ev, log, bus, dep, box.Derive(secrets.PurposeFile))
 	drf.Interval = cfg.DriftInterval
@@ -177,6 +181,15 @@ func serve() error {
 	}
 	fo := failover.NewService(pool, ev, log, runner, bus)
 	fo.Changed = eval.Kick
+	fo.Proxmox, fo.Window = pve, cfg.TestWindow
+	// Geplande failovertests en back-upcontroles; als een test klaar is en
+	// het testslot vrijkomt, kijkt de planner meteen of er een wacht.
+	sched := planner.NewScheduler(pool, log,
+		planner.Task{Name: "failovertests", Tick: fo.RunScheduled},
+		planner.Task{Name: "back-upcontroles", Tick: bk.RunScheduled})
+	for _, kind := range []string{failover.KindTest, backups.KindVerify} {
+		runner.OnFinished(kind, func(context.Context, store.Job) { sched.Kick() })
+	}
 	ro := rollout.NewService(pool, ev, log, runner, bus, dep, drf)
 	ro.Changed = eval.Kick
 	for _, kind := range []string{deploy.Kind, lifecycle.KindNodeAction, proxmox.KindVMAction, failover.KindTest, failover.KindRestore} {
@@ -188,6 +201,7 @@ func serve() error {
 	go pve.Run(ctx)
 	go bk.Run(ctx)
 	go drf.Run(ctx)
+	go sched.Run(ctx)
 	dps := deps.NewService(pool, ev, log)
 	go dps.Run(ctx)
 	jobsDone := make(chan struct{})
@@ -195,6 +209,8 @@ func serve() error {
 		defer close(jobsDone)
 		runner.Run(ctx)
 	}()
+
+	log.Info("testvenster", "venster", cfg.TestWindow.String(), "tijdzone", time.Local.String())
 
 	srv := &http.Server{
 		Addr: cfg.Listen,

@@ -24,6 +24,9 @@ services:
       CF_GRAFANA_CLUSTER_URL: ${CF_GRAFANA_CLUSTER_URL:-}
       CF_DRIFT_INTERVAL: ${CF_DRIFT_INTERVAL:-15m}
       CF_MASTER_KEY: ${CF_MASTER_KEY:-}
+      CF_TEST_WINDOW: ${CF_TEST_WINDOW:-zo 03:00-05:00}
+      # Het testvenster rekent op deze klok, met zomer- en wintertijd.
+      TZ: ${TZ:-Europe/Brussels}
     ports:
       - "${CF_BIND:-127.0.0.1}:8080:8080"
       # Agents verbinden hier rechtstreeks mee (TLS), niet via de reverse proxy.

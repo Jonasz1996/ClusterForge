@@ -948,7 +948,7 @@ export interface paths {
         put?: never;
         /**
          * Nu testen (admin)
-         * @description Doet de voorcontrole synchroon en zet de run en de taak in één transactie in de wachtrij, door het clusterslot en het testslot. 409 met code prod_locked op prod, precheck_failed met de controles, of busy als er al een test of een taak in het cluster loopt.
+         * @description Doet de voorcontrole synchroon en zet de run en de taak in één transactie in de wachtrij, door het clusterslot en het testslot. Op prod alleen met tweestapsverificatie (anders 403 totp_required) en de slug van het cluster als confirm (anders 409 needs_confirmation). 409 precheck_failed met de controles, of busy als er al een test of een taak in het cluster loopt.
          */
         post: operations["startFailoverTest"];
         delete?: never;
@@ -1729,7 +1729,7 @@ export interface components {
             items: components["schemas"]["DriftIgnore"][];
         };
         /** @enum {string} */
-        FailoverScenario: "keepalived_stop" | "service_stop";
+        FailoverScenario: "keepalived_stop" | "service_stop" | "vm_hard_stop";
         FailoverProbeHTTP: {
             /** @description Begint met /, zoals /health */
             path: string;
@@ -1756,6 +1756,12 @@ export interface components {
             /** @description Het VIP moet daarna terug naar de oorspronkelijke node */
             expect_failback: boolean;
             probe: components["schemas"]["FailoverProbe"];
+            /** @description Gepland in het testvenster; niet op prod. Standaard uit */
+            scheduled?: boolean;
+        };
+        FailoverStartInput: {
+            /** @description Op prod de slug van het cluster */
+            confirm?: string;
         };
         FailoverTest: {
             /** Format: uuid */
@@ -1775,6 +1781,13 @@ export interface components {
             max_takeover_seconds: number;
             expect_failback: boolean;
             probe: components["schemas"]["FailoverProbe"];
+            /** @description Gepland in het testvenster */
+            scheduled: boolean;
+            /**
+             * Format: date-time
+             * @description De volgende geplande run
+             */
+            next_run_at: string | null;
             last_run: components["schemas"]["TestRun"] | null;
             /** Format: date-time */
             created_at: string;
@@ -1803,8 +1816,21 @@ export interface components {
             vips: components["schemas"]["FailoverVIPOption"][];
             /** @description Aan voor clusters uit keepalived-nginx, dat preempt gebruikt */
             default_failback: boolean;
-            /** @description Waarom een test hier nu niet kan starten, zoals op prod; leeg als het kan */
-            run_blocked: string;
+            /** @description Prodcluster: een test start alleen met de hand, met de slug als bevestiging en tweestapsverificatie, en is niet te plannen */
+            prod: boolean;
+            slug: string;
+            /** @description Het testvenster in gewone taal, zoals zondag van 03:00 tot 05:00 */
+            window: string;
+            /**
+             * Format: date-time
+             * @description Het begin van het volgende testvenster
+             */
+            next_window: string;
+            /**
+             * Format: date-time
+             * @description De laatste test met PASS, WARNING of FAIL
+             */
+            last_tested_at: string | null;
         };
         FailoverTestList: {
             items: components["schemas"]["FailoverTest"][];
@@ -2090,9 +2116,22 @@ export interface components {
             max_age_hours: number;
             /** @description Het cluster heeft nog geen eigen beleid */
             default: boolean;
+            /** @description De back-upcontrole draait gepland in het testvenster, telkens voor de node die het langst niet gecontroleerd werd */
+            verify_enabled: boolean;
+            /** Format: date-time */
+            next_run_at: string | null;
+            /**
+             * Format: date-time
+             * @description De laatste controle van een node van dit cluster
+             */
+            last_verified_at: string | null;
+            /** @description Het testvenster in gewone taal */
+            window: string;
         };
+        /** @description Alleen de velden die meegegeven zijn, veranderen */
         BackupPolicyInput: {
-            max_age_hours: number;
+            max_age_hours?: number;
+            verify_enabled?: boolean;
         };
         BackupWatchEntry: {
             vmid: number;
@@ -4771,7 +4810,11 @@ export interface operations {
             };
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["FailoverStartInput"];
+            };
+        };
         responses: {
             /** @description In de wachtrij */
             202: {

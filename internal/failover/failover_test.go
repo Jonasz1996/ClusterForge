@@ -47,22 +47,37 @@ func TestInputValidate(t *testing.T) {
 		return Input{Name: " web ", Scenario: KeepalivedStop, Service: "nginx", MaxTakeoverSeconds: 5, Probe: DefaultProbe}
 	}
 	in := ok()
-	if err := in.validate(); err != nil || in.Name != "web" || in.Service != "" {
+	if err := in.validate(store.EnvironmentLab); err != nil || in.Name != "web" || in.Service != "" {
 		t.Fatalf("geldig: %v %+v", err, in)
 	}
-	for field, change := range map[string]func(*Input){
-		"name":                 func(in *Input) { in.Name = strings.Repeat("x", 201) },
-		"scenario":             func(in *Input) { in.Scenario = "vm_hard_stop" },
-		"service":              func(in *Input) { in.Scenario, in.Service = ServiceStop, "sshd" },
-		"max_takeover_seconds": func(in *Input) { in.MaxTakeoverSeconds = 0 },
-		"probe":                func(in *Input) { in.Probe = Probe{} },
+	vm := Input{Name: "vm", Scenario: VMHardStop, Service: "nginx", MaxTakeoverSeconds: 10, Probe: DefaultProbe, Scheduled: true}
+	if err := vm.validate(store.EnvironmentTest); err != nil || vm.Service != "" {
+		t.Fatalf("vm_hard_stop gepland op test: %v %+v", err, vm)
+	}
+	for name, tc := range map[string]struct {
+		change func(*Input)
+		env    store.Environment
+		field  string
+	}{
+		"naam":                {func(in *Input) { in.Name = strings.Repeat("x", 201) }, store.EnvironmentLab, "name"},
+		"scenario":            {func(in *Input) { in.Scenario = "reboot" }, store.EnvironmentLab, "scenario"},
+		"dienst":              {func(in *Input) { in.Scenario, in.Service = ServiceStop, "sshd" }, store.EnvironmentLab, "service"},
+		"verwachting":         {func(in *Input) { in.MaxTakeoverSeconds = 0 }, store.EnvironmentLab, "max_takeover_seconds"},
+		"probe":               {func(in *Input) { in.Probe = Probe{} }, store.EnvironmentLab, "probe"},
+		"vm hard uit op prod": {func(in *Input) { in.Scenario = VMHardStop }, store.EnvironmentProd, "scenario"},
+		"gepland op prod":     {func(in *Input) { in.Scheduled = true }, store.EnvironmentProd, "scheduled"},
 	} {
 		in := ok()
-		change(&in)
+		tc.change(&in)
 		var fe *FieldError
-		if err := in.validate(); !errors.As(err, &fe) || fe.Field != field {
-			t.Errorf("%s: %v", field, err)
+		if err := in.validate(tc.env); !errors.As(err, &fe) || fe.Field != tc.field {
+			t.Errorf("%s: %v", name, err)
 		}
+	}
+	// Met de hand op prod mag wel.
+	prod := ok()
+	if err := prod.validate(store.EnvironmentProd); err != nil {
+		t.Fatalf("met de hand op prod: %v", err)
 	}
 }
 
@@ -215,9 +230,14 @@ func TestVerdict(t *testing.T) {
 			t.Errorf("%s:\n kreeg  %s %q %v\n wilde  %s %q %v", name, result, summary, restored, tc.result, tc.summary, tc.restored)
 		}
 	}
+	// Na een harde stop gaat het om de VM, niet om keepalived.
+	vm := def
+	vm.Scenario = VMHardStop
+	_, summary, _ := verdict(vm, plan, outcome{injected: true, m: m(nil), restoreErr: errors.New("VM 101 start niet")})
+	if want := "ERROR: herstel mislukt: VM 101 start niet. De VM van web-01 staat mogelijk nog uit; kies Opnieuw herstellen"; summary != want {
+		t.Errorf("VM niet hersteld: %q", summary)
+	}
 }
-
-func ptr[T any](v T) *T { return &v }
 
 func TestTemplateDefaults(t *testing.T) {
 	s := &Service{Templates: templates.BuiltinRegistry()}

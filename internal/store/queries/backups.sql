@@ -112,6 +112,36 @@ INSERT INTO backup_watch (connection_id, vmid, label) VALUES ($1, $2, $3);
 -- name: GetBackupPolicy :one
 SELECT * FROM backup_policies WHERE cluster_id = $1;
 
+-- name: SetBackupVerifySchedule :exec
+-- De back-upcontrole van een cluster gepland aan of uit.
+INSERT INTO backup_policies (cluster_id, verify_enabled, next_run_at, updated_by)
+VALUES (@cluster_id, @verify_enabled, @next_run_at, @updated_by)
+ON CONFLICT (cluster_id) DO UPDATE
+SET verify_enabled = EXCLUDED.verify_enabled, next_run_at = EXCLUDED.next_run_at,
+    updated_by = EXCLUDED.updated_by, updated_at = now();
+
+-- name: SetBackupVerifyNextRun :exec
+UPDATE backup_policies SET next_run_at = @next_run_at WHERE cluster_id = @cluster_id AND verify_enabled;
+
+-- name: ListDueBackupVerifies :many
+-- Clusters waarvan de geplande back-upcontrole aan de beurt is.
+SELECT bp.cluster_id, bp.next_run_at, c.name AS cluster_name
+FROM backup_policies bp
+JOIN clusters c ON c.id = bp.cluster_id
+WHERE bp.verify_enabled AND bp.next_run_at <= @now
+ORDER BY bp.next_run_at, c.name;
+
+-- name: ListVerifyCandidates :many
+-- De nodes van een cluster die aan een VM gekoppeld zijn, de langst niet
+-- gecontroleerde eerst.
+SELECT n.id, n.hostname,
+       coalesce((SELECT max(r.created_at) FROM test_runs r
+                 WHERE r.node_id = n.id AND r.kind = 'backup.verify' AND r.result IN ('pass', 'warning', 'fail')),
+                'epoch'::timestamptz)::timestamptz AS last_verified_at
+FROM nodes n
+WHERE n.cluster_id = @cluster_id AND n.proxmox_id IS NOT NULL AND n.pve_vmid IS NOT NULL
+ORDER BY last_verified_at, n.hostname;
+
 -- name: UpsertBackupPolicy :exec
 INSERT INTO backup_policies (cluster_id, max_age_hours, updated_by)
 VALUES ($1, $2, $3)

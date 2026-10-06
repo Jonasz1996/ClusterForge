@@ -12,6 +12,7 @@ import { Alert, Button, Card, PageHeader, cx } from "@/components/ui";
 import {
   probeText,
   seconds,
+  stillDown,
   useRestoreTestRun,
   useTestRun,
   type FailoverDefinition,
@@ -44,6 +45,8 @@ function TestRunInner() {
   const restore = useRestoreTestRun();
   if (id === "") return <Alert>Geen testrun opgegeven.</Alert>;
   const isBackup = run.data?.kind === "backup.verify";
+  const skipped = run.data?.result === "skipped";
+  const vm = run.data?.definition?.scenario === "vm_hard_stop";
 
   return (
     <QueryState q={run}>
@@ -63,7 +66,11 @@ function TestRunInner() {
             )}
           </div>
           <PageHeader
-            title={isBackup ? `Back-upcontrole: ${run.data.hostname}` : `Failovertest: ${run.data.definition?.name ?? ""}`}
+            title={
+              isBackup
+                ? `Back-upcontrole: ${run.data.hostname || run.data.cluster_name}`
+                : `Failovertest: ${run.data.definition?.name ?? ""}`
+            }
             description={
               <span className="inline-flex flex-wrap items-center gap-2">
                 <RunBadge run={run.data} />
@@ -71,6 +78,7 @@ function TestRunInner() {
                   <span>{isBackup ? "wordt afgebroken en opgeruimd…" : "wordt afgebroken en hersteld…"}</span>
                 )}
                 <span>{fmt.format(new Date(run.data.created_at))}</span>
+                {run.data.trigger === "schedule" && <span className="text-slate-400">· gepland in het testvenster</span>}
                 {run.data.requested_by && <span className="text-slate-400">· door {run.data.requested_by}</span>}
               </span>
             }
@@ -84,7 +92,9 @@ function TestRunInner() {
                       onClick={() => {
                         const question = isBackup
                           ? "Controle afbreken? ClusterForge zet de sandbox-VM uit en verwijdert hem."
-                          : `Test afbreken? ClusterForge zet ${run.data?.definition?.unit || "de dienst"} meteen weer aan.`;
+                          : vm
+                            ? "Test afbreken? ClusterForge start de VM meteen weer."
+                            : `Test afbreken? ClusterForge zet ${run.data?.definition?.unit || "de dienst"} meteen weer aan.`;
                         if (window.confirm(question)) cancel.mutate(job.data!.id);
                       }}
                     >
@@ -102,7 +112,7 @@ function TestRunInner() {
           />
           {!isBackup && run.data.restored === false && (
             <Alert>
-              Niet volledig hersteld: {run.data.definition?.unit || "de dienst"} staat mogelijk nog uit op {run.data.hostname}.
+              Niet volledig hersteld: {stillDown(run.data.definition, run.data.hostname)}.
             </Alert>
           )}
           {restore.error && <Alert>{restore.error.message}</Alert>}
@@ -114,7 +124,15 @@ function TestRunInner() {
               </Link>
             </Alert>
           )}
-          {isBackup ? (
+          {skipped ? (
+            <>
+              <Alert kind="info">
+                {run.data.summary}
+                <span className="block">Er is niets veranderd; er was geen taak.</span>
+              </Alert>
+              {run.data.checks.length > 0 && <Precheck checks={run.data.checks} />}
+            </>
+          ) : isBackup ? (
             <BackupReport run={run.data} isAdmin={isAdmin} />
           ) : (
             run.data.definition &&

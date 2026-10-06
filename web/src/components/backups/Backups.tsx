@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
-import { Alert, Badge, Button, Card, Input, Label } from "@/components/ui";
+import { Alert, Badge, Button, Card, Input, Label, cx } from "@/components/ui";
 import { LastVerification, runningFor, VerifyDialog } from "@/components/backups/Verify";
 import { RunBadge, reportHref } from "@/components/failover/Failover";
 import { formatBytes, tableClass, tdClass, thClass } from "@/components/inventory/bits";
@@ -16,8 +16,10 @@ import {
   useUpdateBackupPolicy,
   type BackupFreshness,
   type BackupItem,
+  type BackupPolicy,
   type BackupVolume,
 } from "@/lib/backups";
+import { longAgo } from "@/lib/failover";
 import { useVerifyRuns } from "@/lib/verify";
 
 const linkClass = "text-brand-600 hover:underline dark:text-brand-500";
@@ -207,7 +209,42 @@ export function ClusterBackupsCard({ clusterId, isAdmin }: { clusterId: string; 
             )}
           </p>
         ))}
+      {policy.data && <VerifySchedule clusterId={clusterId} policy={policy.data} isAdmin={isAdmin} />}
     </Card>
+  );
+}
+
+// VerifySchedule zegt wanneer het cluster het laatst gecontroleerd is en
+// zet de geplande controle in het testvenster aan of uit.
+function VerifySchedule({ clusterId, policy, isAdmin }: { clusterId: string; policy: BackupPolicy; isAdmin: boolean }) {
+  const update = useUpdateBackupPolicy(clusterId);
+  const old = longAgo(policy.last_verified_at);
+  return (
+    <div className="mt-3 space-y-1.5 rounded-md bg-slate-50 p-3 text-xs dark:bg-slate-800/50">
+      <p className={cx(old ? "font-medium text-amber-700 dark:text-amber-400" : "text-slate-600 dark:text-slate-400")}>
+        {policy.last_verified_at
+          ? `Niet gecontroleerd sinds ${backupTimeFmt.format(new Date(policy.last_verified_at))}`
+          : "Nog nooit gecontroleerd in een sandbox"}
+      </p>
+      <label className="flex items-start gap-2 text-sm">
+        <input
+          type="checkbox"
+          className="mt-0.5"
+          checked={policy.verify_enabled}
+          disabled={!isAdmin || update.isPending}
+          onChange={(e) => update.mutate({ verify_enabled: e.target.checked })}
+        />
+        <span>
+          Gepland controleren in het testvenster
+          <span className="block text-xs text-slate-500">
+            {policy.verify_enabled && policy.next_run_at
+              ? `Volgende controle ${backupTimeFmt.format(new Date(policy.next_run_at))}, voor de node die het langst niet gecontroleerd is.`
+              : `Venster: ${policy.window}. Elke keer de node die het langst niet gecontroleerd is.`}
+          </span>
+        </span>
+      </label>
+      {update.error && <Alert>{update.error.message}</Alert>}
+    </div>
   );
 }
 
@@ -227,7 +264,7 @@ function PolicyForm({ clusterId, maxAge, onDone }: { clusterId: string; maxAge: 
           return;
         }
         try {
-          await update.mutateAsync(n);
+          await update.mutateAsync({ max_age_hours: n });
           onDone();
         } catch (err) {
           setError(err instanceof Error ? err.message : "Opslaan mislukt");

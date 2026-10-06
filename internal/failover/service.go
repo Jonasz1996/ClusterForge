@@ -23,6 +23,8 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/health"
 	"github.com/Jonasz1996/clusterforge/internal/jobs"
+	"github.com/Jonasz1996/clusterforge/internal/planner"
+	"github.com/Jonasz1996/clusterforge/internal/proxmox"
 	"github.com/Jonasz1996/clusterforge/internal/status"
 	"github.com/Jonasz1996/clusterforge/internal/store"
 	"github.com/Jonasz1996/clusterforge/internal/templates"
@@ -33,6 +35,16 @@ import (
 const (
 	KeepalivedStop = "keepalived_stop"
 	ServiceStop    = "service_stop"
+	// VMHardStop zet de VM van de eigenaar hard uit via Proxmox. Alleen in
+	// lab en test: een hard gestopte VM heeft geen agent, en alleen de
+	// server zet hem weer aan.
+	VMHardStop = "vm_hard_stop"
+)
+
+// Hoe een run gestart is, zoals in test_runs.trigger.
+const (
+	TriggerManual   = "manual"
+	TriggerSchedule = "schedule"
 )
 
 // Soorten taak.
@@ -56,7 +68,7 @@ type Scenario struct {
 }
 
 // Scenarios staan in de volgorde van het formulier.
-var Scenarios = []Scenario{{KeepalivedStop, 5}, {ServiceStop, 10}}
+var Scenarios = []Scenario{{KeepalivedStop, 5}, {ServiceStop, 10}, {VMHardStop, 10}}
 
 // Describe zegt in gewone taal wat een test doet.
 func Describe(scenario, service string) string {
@@ -68,11 +80,14 @@ func Describe(scenario, service string) string {
 			service = "de dienst"
 		}
 		return service + " stoppen op de eigenaar"
+	case VMHardStop:
+		return "de VM van de eigenaar hard uitzetten"
 	}
 	return scenario
 }
 
-// unitOf is de systemd-unit die de storing stopt.
+// unitOf is de systemd-unit die de storing stopt, of bij vm_hard_stop de
+// unit die na de terugkeer weer moet draaien.
 func unitOf(scenario, service string) string {
 	if scenario == ServiceStop {
 		return service
@@ -85,11 +100,13 @@ type FieldError struct{ Field, Message string }
 
 func (e *FieldError) Error() string { return e.Message }
 
-var (
-	ErrNotFound = errors.New("niet gevonden")
-	// ErrProdLocked: op prod start een test pas vanaf mijlpaal 11, met de
-	// hand en met de bevestiging bij prod.
-	ErrProdLocked = errors.New("op prod start een failovertest nog niet; dat komt in een volgende versie, met de hand en met een extra bevestiging")
+var ErrNotFound = errors.New("niet gevonden")
+
+// Waarom iets op prod niet kan. Op prod start een test alleen met de hand,
+// met de bevestiging bij prod, en nooit met vm_hard_stop.
+const (
+	msgProdSchedule = "op prod kan een failovertest niet gepland worden; daar start je hem alleen met de hand"
+	msgProdHardStop = "VM hard uitzetten kan alleen in lab en test: een hard gestopte VM heeft geen agent, en alleen ClusterForge zet hem weer aan"
 )
 
 // ConflictError betekent dat het nu niet kan, met een stabiele code.
@@ -123,6 +140,17 @@ type Commander interface {
 	Command(ctx context.Context, nodeID uuid.UUID, cmd protocol.Command) (protocol.Result, error)
 }
 
+// Proxmox zet voor vm_hard_stop de VM van een node uit en weer aan.
+type Proxmox interface {
+	// GuestStatus leest de VM live: of hij draait en of Proxmox HA hem
+	// beheert.
+	GuestStatus(ctx context.Context, connID uuid.UUID, vmid int) (proxmox.Resource, error)
+	// PowerVM vraagt start of stop en geeft het id van de Proxmox-taak.
+	PowerVM(ctx context.Context, connID uuid.UUID, vmid int, action string) (string, error)
+	// WaitVMTask wacht tot een Proxmox-taak klaar is.
+	WaitVMTask(ctx context.Context, connID uuid.UUID, upid string, st *jobs.Step) error
+}
+
 type Service struct {
 	pool *pgxpool.Pool
 	q    *store.Queries
@@ -131,6 +159,12 @@ type Service struct {
 	jobs *jobs.Runner
 	bus  Commander
 
+	// Proxmox zet VM's uit en aan voor vm_hard_stop; nil zonder masterkey.
+	Proxmox Proxmox
+	// Window is het testvenster waarin geplande tests draaien.
+	Window planner.Window
+	// BootTimeout is hoe lang de terugkeer na vm_hard_stop mag duren.
+	BootTimeout time.Duration
 	// Gate wacht op verse heartbeats.
 	Gate *health.Gate
 	// Templates geven de standaardprobe van een cluster uit een template.
@@ -161,7 +195,7 @@ func NewService(pool *pgxpool.Pool, ev *events.Writer, log *slog.Logger, runner 
 		Gate: health.NewGate(pool), Templates: templates.BuiltinRegistry(),
 		Prober: NetProber{Timeout: 400 * time.Millisecond}, ProbeInterval: 250 * time.Millisecond,
 		ReturnTimeout: 3 * time.Minute, Fresh: status.HeartbeatLate, MaxWindow: 120 * time.Second,
-		Retry: 5 * time.Second, EmergencyTimeout: 10 * time.Second,
+		Retry: 5 * time.Second, EmergencyTimeout: 10 * time.Second, Window: planner.DefaultWindow, BootTimeout: 15 * time.Minute,
 	}
 	// Geen van beide is Retryable: een retry uren later voert oude
 	// beslissingen uit. Een mislukte test start je opnieuw.
@@ -186,9 +220,11 @@ type Input struct {
 	MaxTakeoverSeconds int
 	ExpectFailback     bool
 	Probe              Probe
+	// Scheduled zet de test gepland in het testvenster; niet op prod.
+	Scheduled bool
 }
 
-func (in *Input) validate() error {
+func (in *Input) validate(env store.Environment) error {
 	in.Name = strings.TrimSpace(in.Name)
 	switch n := len([]rune(in.Name)); {
 	case n == 0:
@@ -203,8 +239,16 @@ func (in *Input) validate() error {
 		if !slices.Contains(Units, in.Service) {
 			return &FieldError{Field: "service", Message: "kies welke dienst stopt: " + strings.Join(Units, " of ")}
 		}
+	case VMHardStop:
+		in.Service = ""
+		if env == store.EnvironmentProd {
+			return &FieldError{Field: "scenario", Message: msgProdHardStop}
+		}
 	default:
-		return &FieldError{Field: "scenario", Message: "kies keepalived stoppen of een dienst stoppen"}
+		return &FieldError{Field: "scenario", Message: "kies keepalived stoppen, een dienst stoppen of de VM hard uitzetten"}
+	}
+	if in.Scheduled && env == store.EnvironmentProd {
+		return &FieldError{Field: "scheduled", Message: msgProdSchedule}
 	}
 	if in.MaxTakeoverSeconds < 1 || in.MaxTakeoverSeconds > 120 {
 		return &FieldError{Field: "max_takeover_seconds", Message: "de verwachting ligt tussen 1 en 120 seconden"}
@@ -236,15 +280,20 @@ func (s *Service) vipOf(ctx context.Context, q *store.Queries, clusterID, vipID 
 
 // Create maakt een test.
 func (s *Service) Create(ctx context.Context, actor events.Actor, clusterID uuid.UUID, in Input) (store.FailoverTest, error) {
-	if err := in.validate(); err != nil {
-		return store.FailoverTest{}, err
-	}
 	c, err := s.q.GetCluster(ctx, clusterID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return store.FailoverTest{}, ErrNotFound
 	}
 	if err != nil {
 		return store.FailoverTest{}, err
+	}
+	if err := in.validate(c.Environment); err != nil {
+		return store.FailoverTest{}, err
+	}
+	var next *time.Time
+	if in.Scheduled {
+		t := s.Window.First(time.Now())
+		next = &t
 	}
 	probe, err := json.Marshal(in.Probe)
 	if err != nil {
@@ -260,7 +309,7 @@ func (s *Service) Create(ctx context.Context, actor events.Actor, clusterID uuid
 		out, err = q.InsertFailoverTest(ctx, store.InsertFailoverTestParams{
 			ClusterID: clusterID, VipID: in.VIPID, Name: in.Name, Scenario: in.Scenario, Service: in.Service,
 			MaxTakeoverSeconds: int32(in.MaxTakeoverSeconds), ExpectFailback: in.ExpectFailback, //nolint:gosec // gecontroleerd: 1 tot 120
-			Probe: probe, CreatedBy: userOf(actor),
+			Probe: probe, CreatedBy: userOf(actor), Scheduled: in.Scheduled, NextRunAt: next,
 		})
 		if err != nil {
 			return err
@@ -270,6 +319,7 @@ func (s *Service) Create(ctx context.Context, actor events.Actor, clusterID uuid
 			Action: "failover_test.created", Payload: map[string]any{
 				"name": in.Name, "cluster": c.Name, "scenario": Describe(in.Scenario, in.Service), "vip": vip,
 				"max_takeover_seconds": in.MaxTakeoverSeconds, "expect_failback": in.ExpectFailback, "probe": in.Probe.String(),
+				"scheduled": in.Scheduled,
 			},
 		})
 	})
@@ -278,9 +328,6 @@ func (s *Service) Create(ctx context.Context, actor events.Actor, clusterID uuid
 
 // Update wijzigt een test. Oude runs houden hun definitie van bij de start.
 func (s *Service) Update(ctx context.Context, actor events.Actor, id uuid.UUID, in Input) (store.FailoverTest, error) {
-	if err := in.validate(); err != nil {
-		return store.FailoverTest{}, err
-	}
 	probe, err := json.Marshal(in.Probe)
 	if err != nil {
 		return store.FailoverTest{}, err
@@ -296,14 +343,30 @@ func (s *Service) Update(ctx context.Context, actor events.Actor, id uuid.UUID, 
 			return err
 		}
 		old := cur.FailoverTest
+		c, err := q.GetCluster(ctx, old.ClusterID)
+		if err != nil {
+			return err
+		}
+		if err := in.validate(c.Environment); err != nil {
+			return err
+		}
 		vip, err := s.vipOf(ctx, q, old.ClusterID, in.VIPID)
 		if err != nil {
 			return err
 		}
+		// Blijft de planning aan, dan blijft ook het volgende moment staan.
+		next := old.NextRunAt
+		switch {
+		case !in.Scheduled:
+			next = nil
+		case !old.Scheduled || next == nil:
+			t := s.Window.First(time.Now())
+			next = &t
+		}
 		out, err = q.UpdateFailoverTest(ctx, store.UpdateFailoverTestParams{
 			ID: id, VipID: in.VIPID, Name: in.Name, Scenario: in.Scenario, Service: in.Service,
 			MaxTakeoverSeconds: int32(in.MaxTakeoverSeconds), ExpectFailback: in.ExpectFailback, //nolint:gosec // gecontroleerd: 1 tot 120
-			Probe: probe,
+			Probe: probe, Scheduled: in.Scheduled, NextRunAt: next,
 		})
 		if err != nil {
 			return err
@@ -322,6 +385,7 @@ func (s *Service) Update(ctx context.Context, actor events.Actor, id uuid.UUID, 
 		diff("max_takeover_seconds", int(old.MaxTakeoverSeconds), in.MaxTakeoverSeconds)
 		diff("expect_failback", old.ExpectFailback, in.ExpectFailback)
 		diff("probe", oldProbe.String(), in.Probe.String())
+		diff("scheduled", old.Scheduled, in.Scheduled)
 		if len(payload) == 0 {
 			return nil
 		}
@@ -380,9 +444,16 @@ type Options struct {
 	Scenarios       []ScenarioOption
 	VIPs            []VIPOption
 	DefaultFailback bool
-	// RunBlocked zegt waarom een test hier nu niet kan starten, zoals op
-	// prod; leeg als het kan.
-	RunBlocked string
+	// Prod: een test start alleen met de hand, met de clusternaam als
+	// bevestiging en tweestapsverificatie, en kan niet gepland worden.
+	Prod bool
+	Slug string
+	// Window is het testvenster in gewone taal, NextWindow het begin van het
+	// volgende venster.
+	Window     string
+	NextWindow time.Time
+	// LastTested is de laatste echte test (PASS of FAIL); nil als nooit.
+	LastTested *time.Time
 }
 
 // Options zegt welke scenario's dit cluster nu kan testen.
@@ -402,21 +473,32 @@ func (s *Service) Options(ctx context.Context, clusterID uuid.UUID) (Options, er
 	if err != nil {
 		return Options{}, err
 	}
+	tested, err := s.q.LastTestedAt(ctx, store.LastTestedAtParams{ClusterID: &clusterID, Kind: KindTest, Results: []string{"pass", "fail"}})
+	if err != nil {
+		return Options{}, err
+	}
 	tpl := s.templateOf(c)
-	out := Options{DefaultFailback: tpl.failback}
-	if c.Environment == store.EnvironmentProd {
-		out.RunBlocked = ErrProdLocked.Error()
+	start, _ := s.Window.Next(time.Now())
+	out := Options{
+		DefaultFailback: tpl.failback, Prod: c.Environment == store.EnvironmentProd, Slug: c.Slug,
+		Window: s.Window.String(), NextWindow: start,
+	}
+	if tested.Unix() > 0 {
+		out.LastTested = &tested
 	}
 	for _, v := range vips {
 		addr := v.Vip.Address.String()
 		out.VIPs = append(out.VIPs, VIPOption{ID: v.Vip.ID, Address: addr, OwnerHostname: v.OwnerHostname, Probe: tpl.probe(addr)})
 	}
 	dbs := databasesOn(nodes)
-	keepalived, units := 0, []string{}
+	keepalived, units, unlinked := 0, []string{}, []string{}
 	for _, n := range nodes {
 		st := health.ServiceStates(n.Services)
 		if _, ok := st["keepalived"]; ok {
 			keepalived++
+			if n.ProxmoxID == nil || n.PveVmid == nil {
+				unlinked = append(unlinked, n.Hostname)
+			}
 		}
 		for _, u := range Units {
 			if _, ok := st[u]; ok && !slices.Contains(units, u) {
@@ -435,6 +517,12 @@ func (s *Service) Options(ctx context.Context, clusterID uuid.UUID) (Options, er
 			o.Available, o.Reason = false, "er zijn geen twee nodes met keepalived die een VIP kunnen overnemen"
 		case sc.Key == ServiceStop && len(units) == 0:
 			o.Available, o.Reason = false, "op geen enkele node draait "+strings.Join(Units, " of ")
+		case sc.Key == VMHardStop && out.Prod:
+			o.Available, o.Reason = false, "niet op prod; alleen in lab en test"
+		case sc.Key == VMHardStop && s.Proxmox == nil:
+			o.Available, o.Reason = false, "geen Proxmox-koppeling; zet CF_MASTER_KEY en koppel Proxmox"
+		case sc.Key == VMHardStop && len(unlinked) > 0:
+			o.Available, o.Reason = false, "geen Proxmox-koppeling voor "+strings.Join(unlinked, ", ")+"; koppel elke node met keepalived aan zijn VM"
 		}
 		if sc.Key == ServiceStop {
 			o.Label = "nginx of haproxy stoppen op de eigenaar"
@@ -558,6 +646,14 @@ type Plan struct {
 	VIPs []string `json:"vips"`
 	// Peers kunnen het VIP overnemen.
 	Peers []string `json:"peers"`
+	// VM is bij vm_hard_stop de VM van het doel in Proxmox.
+	VM *VMRef `json:"vm,omitempty"`
+}
+
+// VMRef is een VM in Proxmox.
+type VMRef struct {
+	ConnectionID uuid.UUID `json:"connection_id"`
+	VMID         int       `json:"vmid"`
 }
 
 var statusLabels = map[string]string{
@@ -566,17 +662,23 @@ var statusLabels = map[string]string{
 }
 
 // precheck controleert of de test nu veilig kan. self is de taak die de
-// test uitvoert; zijn eigen sloten tellen niet als bezet.
-func (s *Service) precheck(ctx context.Context, c store.Cluster, def Definition, self uuid.UUID) (Plan, error) {
+// test uitvoert; zijn eigen sloten tellen niet als bezet. trigger zegt of de
+// test met de hand of gepland start.
+func (s *Service) precheck(ctx context.Context, c store.Cluster, def Definition, self uuid.UUID, trigger string) (Plan, error) {
 	plan := Plan{Checks: []Check{}, TargetVIPs: []string{}, VIPs: []string{}, Peers: []string{}}
 	add := func(name string, ok bool, detail string) {
 		plan.Checks = append(plan.Checks, Check{Name: name, OK: ok, Detail: detail})
 	}
 
-	if c.Environment == store.EnvironmentProd {
-		add("Omgeving", false, "op prod start een failovertest nog niet")
-	} else {
+	switch {
+	case c.Environment != store.EnvironmentProd:
 		add("Omgeving", true, "het cluster staat in "+string(c.Environment))
+	case trigger == TriggerSchedule:
+		add("Omgeving", false, msgProdSchedule)
+	case def.Scenario == VMHardStop:
+		add("Omgeving", false, msgProdHardStop)
+	default:
+		add("Omgeving", true, "het cluster staat in prod; de test start alleen met de hand en met bevestiging")
 	}
 	if c.Status == string(status.Healthy) {
 		add("Cluster gezond", true, "het cluster is gezond")
@@ -639,6 +741,8 @@ func (s *Service) precheck(ctx context.Context, c store.Cluster, def Definition,
 		i := slices.IndexFunc(nodes, func(n store.ListFailoverNodesRow) bool { return n.ID == owner.ID })
 		switch {
 		case i < 0:
+		case def.Scenario == VMHardStop:
+			// De storing en het herstel gaan via Proxmox, niet via de agent.
 		case nodes[i].AgentProtocol < protocol.ApplySince:
 			add("Agent", false, "de agent op "+owner.Hostname+" is te oud voor deploystappen; werk hem bij met het installatiescript")
 		default:
@@ -650,6 +754,14 @@ func (s *Service) precheck(ctx context.Context, c store.Cluster, def Definition,
 				add("Dienst draait", true, def.Unit+" draait op "+owner.Hostname)
 			} else {
 				add("Dienst draait", false, def.Unit+" draait niet op "+owner.Hostname+" ("+or(st[def.Unit], "onbekend")+")")
+			}
+			if def.Scenario == VMHardStop {
+				plan.VM = s.vmCheck(ctx, nodes[i], add)
+				if st["docker"] == "active" {
+					add("Geen docker", false, "op "+owner.Hostname+" draait docker; containers met volumes kunnen data bevatten")
+				} else {
+					add("Geen docker", true, "op "+owner.Hostname+" draait geen docker")
+				}
 			}
 		}
 		for _, n := range nodes {
@@ -703,6 +815,33 @@ func (s *Service) precheck(ctx context.Context, c store.Cluster, def Definition,
 	return plan, nil
 }
 
+// vmCheck zoekt de VM van het doel in Proxmox: die moet draaien en mag
+// niet onder Proxmox HA staan, want de HA-manager zou meespelen.
+func (s *Service) vmCheck(ctx context.Context, n store.ListFailoverNodesRow, add func(string, bool, string)) *VMRef {
+	switch {
+	case s.Proxmox == nil:
+		add("VM", false, "ClusterForge heeft geen Proxmox-koppeling; zet CF_MASTER_KEY en koppel Proxmox")
+		return nil
+	case n.ProxmoxID == nil || n.PveVmid == nil:
+		add("VM", false, n.Hostname+" is niet aan een VM in Proxmox gekoppeld")
+		return nil
+	}
+	ref := &VMRef{ConnectionID: *n.ProxmoxID, VMID: int(*n.PveVmid)}
+	g, err := s.Proxmox.GuestStatus(ctx, ref.ConnectionID, ref.VMID)
+	switch {
+	case err != nil:
+		add("VM", false, fmt.Sprintf("VM %d van %s is niet te lezen in Proxmox: %v", ref.VMID, n.Hostname, err))
+	case g.Status != "running":
+		add("VM", false, fmt.Sprintf("VM %d van %s draait niet (%s)", ref.VMID, n.Hostname, or(g.Status, "onbekend")))
+	case g.HAState != "":
+		add("VM", false, fmt.Sprintf("VM %d van %s staat onder Proxmox HA (%s); de HA-manager zou de VM zelf weer starten of verplaatsen", ref.VMID, n.Hostname, g.HAState))
+	default:
+		add("VM", true, fmt.Sprintf("VM %d van %s draait op %s en staat niet onder Proxmox HA", ref.VMID, n.Hostname, g.Node))
+		return ref
+	}
+	return nil
+}
+
 // probeTimes vraagt het VIP n keer na elkaar op; de eerste fout stopt.
 func (s *Service) probeTimes(ctx context.Context, def Definition, n int) error {
 	for i := range n {
@@ -741,7 +880,8 @@ type runParams struct {
 }
 
 // Start doet de voorcontrole en zet de test in de wachtrij: de run en de
-// taak in één transactie, door het clusterslot en het testslot.
+// taak in één transactie, door het clusterslot en het testslot. Op prod
+// controleert de API eerst de bevestiging.
 func (s *Service) Start(ctx context.Context, actor events.Actor, testID uuid.UUID) (store.TestRun, error) {
 	row, err := s.q.GetFailoverTest(ctx, testID)
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -754,17 +894,19 @@ func (s *Service) Start(ctx context.Context, actor events.Actor, testID uuid.UUI
 	if err != nil {
 		return store.TestRun{}, err
 	}
-	if c.Environment == store.EnvironmentProd {
-		return store.TestRun{}, ErrProdLocked
-	}
 	def, err := definitionOf(row)
 	if err != nil {
 		return store.TestRun{}, err
 	}
-	plan, err := s.precheck(ctx, c, def, uuid.Nil)
+	plan, err := s.precheck(ctx, c, def, uuid.Nil, TriggerManual)
 	if err != nil {
 		return store.TestRun{}, err
 	}
+	return s.enqueue(ctx, actor, c, def, plan, TriggerManual)
+}
+
+// enqueue maakt de run en de taak.
+func (s *Service) enqueue(ctx context.Context, actor events.Actor, c store.Cluster, def Definition, plan Plan, trigger string) (store.TestRun, error) {
 	defJSON, err := json.Marshal(def)
 	if err != nil {
 		return store.TestRun{}, err
@@ -773,19 +915,23 @@ func (s *Service) Start(ctx context.Context, actor events.Actor, testID uuid.UUI
 	if err != nil {
 		return store.TestRun{}, err
 	}
+	title := "Failovertest: " + def.Name
+	if trigger == TriggerSchedule {
+		title += " (gepland)"
+	}
 	var run store.TestRun
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q := store.New(tx)
 		var err error
 		run, err = q.InsertTestRun(ctx, store.InsertTestRunParams{
-			Kind: KindTest, ClusterID: &c.ID, TestID: &testID, NodeID: &plan.Target.ID, Hostname: plan.Target.Hostname,
+			Kind: KindTest, Trigger: trigger, ClusterID: &c.ID, TestID: &def.TestID, NodeID: &plan.Target.ID, Hostname: plan.Target.Hostname,
 			Definition: defJSON, Checks: checks, RequestedBy: userOf(actor),
 		})
 		if err != nil {
 			return err
 		}
 		j, err := s.jobs.EnqueueForClusterTx(ctx, q, jobs.Spec{
-			Kind: KindTest, Title: "Failovertest: " + def.Name, Params: runParams{RunID: run.ID},
+			Kind: KindTest, Title: title, Params: runParams{RunID: run.ID},
 			ClusterID: &c.ID, NodeID: &plan.Target.ID, Actor: actor,
 		})
 		if err != nil {

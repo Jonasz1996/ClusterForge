@@ -1107,9 +1107,16 @@ paths:
       summary: Nu testen (admin)
       description: >-
         Doet de voorcontrole synchroon en zet de run en de taak in één
-        transactie in de wachtrij, door het clusterslot en het testslot. 409
-        met code prod_locked op prod, precheck_failed met de controles, of
-        busy als er al een test of een taak in het cluster loopt.
+        transactie in de wachtrij, door het clusterslot en het testslot. Op
+        prod alleen met tweestapsverificatie (anders 403 totp_required) en
+        de slug van het cluster als confirm (anders 409 needs_confirmation).
+        409 precheck_failed met de controles, of busy als er al een test of
+        een taak in het cluster loopt.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/FailoverStartInput" }
       responses:
         "202":
           description: In de wachtrij
@@ -2012,7 +2019,7 @@ components:
         items: { type: array, items: { $ref: "#/components/schemas/DriftIgnore" } }
     FailoverScenario:
       type: string
-      enum: [keepalived_stop, service_stop]
+      enum: [keepalived_stop, service_stop, vm_hard_stop]
     FailoverProbeHTTP:
       type: object
       required: [path, expect]
@@ -2041,10 +2048,15 @@ components:
         max_takeover_seconds: { type: integer, description: 1 tot 120 }
         expect_failback: { type: boolean, description: Het VIP moet daarna terug naar de oorspronkelijke node }
         probe: { $ref: "#/components/schemas/FailoverProbe" }
+        scheduled: { type: boolean, description: "Gepland in het testvenster; niet op prod. Standaard uit" }
+    FailoverStartInput:
+      type: object
+      properties:
+        confirm: { type: string, description: Op prod de slug van het cluster }
     FailoverTest:
       type: object
       required: [id, cluster_id, vip_id, vip_address, vip_owner, name, scenario, service, description, max_takeover_seconds,
-        expect_failback, probe, last_run, created_at, updated_at]
+        expect_failback, probe, scheduled, next_run_at, last_run, created_at, updated_at]
       properties:
         id: { type: string, format: uuid }
         cluster_id: { type: string, format: uuid }
@@ -2058,6 +2070,8 @@ components:
         max_takeover_seconds: { type: integer }
         expect_failback: { type: boolean }
         probe: { $ref: "#/components/schemas/FailoverProbe" }
+        scheduled: { type: boolean, description: Gepland in het testvenster }
+        next_run_at: { type: string, format: date-time, nullable: true, description: De volgende geplande run }
         last_run:
           allOf: [{ $ref: "#/components/schemas/TestRun" }]
           nullable: true
@@ -2083,12 +2097,20 @@ components:
         probe: { $ref: "#/components/schemas/FailoverProbe" }
     FailoverOptions:
       type: object
-      required: [scenarios, vips, default_failback, run_blocked]
+      required: [scenarios, vips, default_failback, prod, slug, window, next_window, last_tested_at]
       properties:
         scenarios: { type: array, items: { $ref: "#/components/schemas/FailoverScenarioOption" } }
         vips: { type: array, items: { $ref: "#/components/schemas/FailoverVIPOption" } }
         default_failback: { type: boolean, description: "Aan voor clusters uit keepalived-nginx, dat preempt gebruikt" }
-        run_blocked: { type: string, description: "Waarom een test hier nu niet kan starten, zoals op prod; leeg als het kan" }
+        prod:
+          type: boolean
+          description: >-
+            Prodcluster: een test start alleen met de hand, met de slug als
+            bevestiging en tweestapsverificatie, en is niet te plannen
+        slug: { type: string }
+        window: { type: string, description: "Het testvenster in gewone taal, zoals zondag van 03:00 tot 05:00" }
+        next_window: { type: string, format: date-time, description: Het begin van het volgende testvenster }
+        last_tested_at: { type: string, format: date-time, nullable: true, description: "De laatste test met PASS, WARNING of FAIL" }
     FailoverTestList:
       type: object
       required: [items, options, unrestored]
@@ -2380,17 +2402,26 @@ components:
         to: { type: string }
     BackupPolicy:
       type: object
-      required: [max_age_hours, default]
+      required: [max_age_hours, default, verify_enabled, next_run_at, last_verified_at, window]
       properties:
         max_age_hours: { type: integer }
         default:
           type: boolean
           description: Het cluster heeft nog geen eigen beleid
+        verify_enabled:
+          type: boolean
+          description: >-
+            De back-upcontrole draait gepland in het testvenster, telkens voor
+            de node die het langst niet gecontroleerd werd
+        next_run_at: { type: string, format: date-time, nullable: true }
+        last_verified_at: { type: string, format: date-time, nullable: true, description: De laatste controle van een node van dit cluster }
+        window: { type: string, description: Het testvenster in gewone taal }
     BackupPolicyInput:
       type: object
-      required: [max_age_hours]
+      description: Alleen de velden die meegegeven zijn, veranderen
       properties:
         max_age_hours: { type: integer, minimum: 1, maximum: 720 }
+        verify_enabled: { type: boolean }
     BackupWatchEntry:
       type: object
       required: [vmid, label]

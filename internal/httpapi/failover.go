@@ -184,7 +184,36 @@ func (s *Server) StartFailoverTest(w http.ResponseWriter, r *http.Request, id uu
 	if !ok {
 		return
 	}
-	run, err := s.failover.Start(r.Context(), events.User(p.User.ID), id)
+	var req gen.FailoverStartInput
+	if r.ContentLength != 0 && !decode(w, r, &req) {
+		return
+	}
+	ctx := r.Context()
+	t, err := s.q.GetFailoverTest(ctx, id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "not_found", "failovertest niet gevonden")
+		return
+	}
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	c, err := s.q.GetCluster(ctx, t.FailoverTest.ClusterID)
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	if c.Environment == store.EnvironmentProd {
+		if p.User.TotpEnabledAt == nil {
+			writeError(w, http.StatusForbidden, "totp_required", "op prod kan alleen een beheerder met tweestapsverificatie een failovertest starten; zet die aan bij Instellingen")
+			return
+		}
+		if req.Confirm == nil || *req.Confirm != c.Slug {
+			writeError(w, http.StatusConflict, "needs_confirmation", "dit is een prodcluster; tik ter bevestiging de slug "+c.Slug+" in")
+			return
+		}
+	}
+	run, err := s.failover.Start(ctx, events.User(p.User.ID), id)
 	if s.failoverError(w, r, err) {
 		return
 	}
@@ -248,8 +277,6 @@ func (s *Server) failoverError(w http.ResponseWriter, r *http.Request, err error
 		writeJSON(w, http.StatusBadRequest, gen.Error{Code: "validation", Message: fe.Message, Field: optional(fe.Field)})
 	case errors.Is(err, failover.ErrNotFound):
 		writeError(w, http.StatusNotFound, "not_found", "niet gevonden")
-	case errors.Is(err, failover.ErrProdLocked):
-		writeError(w, http.StatusConflict, "prod_locked", err.Error())
 	case errors.As(err, &pe):
 		checks := make([]gen.TestRunCheck, 0, len(pe.Checks))
 		for _, c := range pe.Checks {
@@ -267,7 +294,7 @@ func (s *Server) failoverError(w http.ResponseWriter, r *http.Request, err error
 func fromAPITestInput(in gen.FailoverTestInput) failover.Input {
 	out := failover.Input{
 		Name: in.Name, VIPID: in.VipId, Scenario: string(in.Scenario), MaxTakeoverSeconds: in.MaxTakeoverSeconds,
-		ExpectFailback: in.ExpectFailback, Probe: fromAPIProbe(in.Probe),
+		ExpectFailback: in.ExpectFailback, Probe: fromAPIProbe(in.Probe), Scheduled: in.Scheduled != nil && *in.Scheduled,
 	}
 	if in.Service != nil {
 		out.Service = *in.Service
@@ -300,7 +327,8 @@ func toAPIProbe(p failover.Probe) gen.FailoverProbe {
 func toAPIOptions(o failover.Options) gen.FailoverOptions {
 	out := gen.FailoverOptions{
 		Scenarios: make([]gen.FailoverScenarioOption, 0, len(o.Scenarios)), Vips: make([]gen.FailoverVIPOption, 0, len(o.VIPs)),
-		DefaultFailback: o.DefaultFailback, RunBlocked: o.RunBlocked,
+		DefaultFailback: o.DefaultFailback, Prod: o.Prod, Slug: o.Slug, Window: o.Window, NextWindow: o.NextWindow,
+		LastTestedAt: nullableOf(o.LastTested),
 	}
 	for _, sc := range o.Scenarios {
 		out.Scenarios = append(out.Scenarios, gen.FailoverScenarioOption{
@@ -322,7 +350,7 @@ func toAPITest(row store.ListFailoverTestsRow, last *gen.TestRun) gen.FailoverTe
 		Id: t.ID, ClusterId: t.ClusterID, VipId: t.VipID, VipAddress: row.VipAddress.String(), VipOwner: nullableOf(row.VipOwnerHostname),
 		Name: t.Name, Scenario: gen.FailoverScenario(t.Scenario), Service: t.Service, Description: failover.Describe(t.Scenario, t.Service),
 		MaxTakeoverSeconds: int(t.MaxTakeoverSeconds), ExpectFailback: t.ExpectFailback, Probe: toAPIProbe(probe),
-		LastRun: nullableOf(last), CreatedAt: t.CreatedAt, UpdatedAt: t.UpdatedAt,
+		Scheduled: t.Scheduled, NextRunAt: nullableOf(t.NextRunAt), LastRun: nullableOf(last), CreatedAt: t.CreatedAt, UpdatedAt: t.UpdatedAt,
 	}
 }
 

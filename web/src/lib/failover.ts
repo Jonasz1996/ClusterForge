@@ -100,12 +100,18 @@ export function useDeleteFailoverTest() {
 }
 
 // useStartFailoverTest geeft de nieuwe run terug; een mislukte voorcontrole
-// komt als ApiError met code precheck_failed en de controles.
+// komt als ApiError met code precheck_failed en de controles. Op prod is
+// confirm de slug van het cluster.
 export function useStartFailoverTest() {
   const refresh = useRefresh();
   return useMutation({
-    mutationFn: async (testId: string) =>
-      unwrap(await api.POST("/failover-tests/{testId}/runs", { params: { path: { testId } } })),
+    mutationFn: async ({ testId, confirm }: { testId: string; confirm?: string }) =>
+      unwrap(
+        await api.POST("/failover-tests/{testId}/runs", {
+          params: { path: { testId } },
+          body: confirm ? { confirm } : {},
+        }),
+      ),
     onSuccess: refresh,
   });
 }
@@ -119,15 +125,28 @@ export function useRestoreTestRun() {
   });
 }
 
-// unitOf is wat de test stopt: keepalived of de gekozen dienst.
+// unitOf is wat de test stopt: keepalived, de gekozen dienst of de VM.
 export function unitOf(t: Pick<FailoverTest, "scenario" | "service">) {
+  if (t.scenario === "vm_hard_stop") return "de VM";
   return t.scenario === "keepalived_stop" ? "keepalived" : t.service;
+}
+
+// stillDown zegt wat er mogelijk nog uit staat als het herstel niet lukte.
+export function stillDown(def: Pick<FailoverDefinition, "scenario" | "unit"> | null | undefined, hostname: string) {
+  if (def?.scenario === "vm_hard_stop") return `de VM van ${hostname} staat mogelijk nog uit`;
+  return `${def?.unit || "de dienst"} staat mogelijk nog uit op ${hostname}`;
 }
 
 // windowSeconds is hoe lang de meting hoogstens duurt; zo lang kan het VIP
 // in het slechtste geval onbereikbaar zijn. Hetzelfde als de server.
 export function windowSeconds(expect: number) {
   return Math.min(2 * expect + 10, 120);
+}
+
+// longAgo is true als at meer dan dertig dagen geleden is, of er nooit een
+// test of controle was.
+export function longAgo(at: string | null | undefined, now = Date.now()) {
+  return !at || now - new Date(at).getTime() > 30 * 24 * 3600 * 1000;
 }
 
 export function probeText(p: FailoverProbe) {
@@ -154,15 +173,30 @@ export function seconds(ms: number) {
 // confirmText is de zin in het bevestigingsvenster, met de VIP's die de
 // eigenaar nu heeft.
 export function confirmText(t: FailoverTest, options: FailoverOptions) {
-  const unit = unitOf(t);
   const owner = t.vip_owner;
   const owned = owner ? options.vips.filter((v) => v.owner_hostname === owner).map((v) => v.address) : [t.vip_address];
-  const where = owner ? `op ${owner}, nu eigenaar van ${list(owned.length ? owned : [t.vip_address])}` : `op de eigenaar van ${t.vip_address}`;
+  const vips = list(owned.length ? owned : [t.vip_address]);
+  const fault =
+    t.scenario === "vm_hard_stop"
+      ? `De VM van ${owner ?? `de eigenaar van ${t.vip_address}`} wordt via Proxmox hard uitgezet, zoals bij een stroomonderbreking` +
+        (owner ? `; hij heeft nu ${vips}. ` : ". ")
+      : `${unitOf(t)} wordt gestopt ${owner ? `op ${owner}, nu eigenaar van ${vips}` : `op de eigenaar van ${t.vip_address}`}. `;
+  const back = t.scenario === "vm_hard_stop" ? "start ClusterForge de VM weer" : `zet ClusterForge ${unitOf(t)} weer aan`;
   return (
-    `${unit} wordt gestopt ${where}. ` +
+    fault +
     `Verwacht: een andere node neemt binnen ${t.max_takeover_seconds} s over` +
     (t.expect_failback ? ` en daarna gaat het VIP terug naar ${owner ?? "de oorspronkelijke node"}. ` : ". ") +
-    `Lukt dat niet, dan is ${t.vip_address} hoogstens ${windowSeconds(t.max_takeover_seconds)} s onbereikbaar; ` +
-    `daarna zet ClusterForge ${unit} weer aan.`
+    `Lukt dat niet, dan is ${t.vip_address} hoogstens ${windowSeconds(t.max_takeover_seconds)} s onbereikbaar; daarna ${back}.`
+  );
+}
+
+// serverGoneText zegt op prod wat er gebeurt als ClusterForge midden in de
+// test wegvalt.
+export function serverGoneText(t: FailoverTest) {
+  const owner = t.vip_owner ?? "de eigenaar";
+  const what = t.scenario === "vm_hard_stop" ? `de VM van ${owner}` : `${unitOf(t)} op ${owner}`;
+  return (
+    `Valt ClusterForge tijdens de test weg, dan blijft ${t.vip_address} bereikbaar op de andere node. ` +
+    `Alleen staat ${what} dan uit, dus er is geen reservenode tot ClusterForge terug is en herstelt.`
   );
 }

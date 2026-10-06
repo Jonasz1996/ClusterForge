@@ -4,13 +4,17 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 import { Modal } from "@/components/Modal";
+import { ProdConfirm, prodConfirmed, useProdTotp } from "@/components/ProdConfirm";
 import { Empty } from "@/components/inventory/bits";
 import { Alert, Badge, Button, Card, Field, Input, Label, Select, cx } from "@/components/ui";
 import { ApiError } from "@/lib/api/client";
 import {
   confirmText,
+  longAgo,
   probeText,
   runResults,
+  serverGoneText,
+  stillDown,
   unitOf,
   useCreateFailoverTest,
   useDeleteFailoverTest,
@@ -64,7 +68,6 @@ export function FailoverBanner({ clusterId, isAdmin }: { clusterId: string; isAd
 
 function UnrestoredRow({ run, isAdmin }: { run: TestRun; isAdmin: boolean }) {
   const restore = useRestoreTestRun();
-  const unit = run.definition?.unit || "de dienst";
   return (
     <div
       role="alert"
@@ -72,7 +75,7 @@ function UnrestoredRow({ run, isAdmin }: { run: TestRun; isAdmin: boolean }) {
     >
       <div>
         <p className="font-medium">
-          Failovertest niet volledig hersteld: {unit} staat mogelijk nog uit op {run.hostname}.
+          Failovertest niet volledig hersteld: {stillDown(run.definition, run.hostname)}.
         </p>
         <p className="mt-0.5">
           {run.definition?.name ?? "Failovertest"}, {fmt.format(new Date(run.created_at))}.{" "}
@@ -126,10 +129,11 @@ export function FailoverCard({ clusterId, isAdmin }: { clusterId: string; isAdmi
         </span>
       }
     >
+      {items.length > 0 && <TestedLine options={options} />}
       {items.length === 0 ? (
         <Empty>
           {canCreate
-            ? "Nog geen failovertests. Een test stopt keepalived of nginx op de node met het VIP en meet hoe snel een andere node overneemt."
+            ? "Nog geen failovertests. Een test stopt keepalived of nginx op de node met het VIP, of zet zijn VM hard uit, en meet hoe snel een andere node overneemt."
             : `Hier kan nog geen failovertest: ${options.scenarios[0]?.reason ?? "geen scenario beschikbaar"}.`}
         </Empty>
       ) : (
@@ -138,16 +142,13 @@ export function FailoverCard({ clusterId, isAdmin }: { clusterId: string; isAdmi
             <TestRow
               key={t.id}
               t={t}
-              options={options}
+              prod={options.prod}
               isAdmin={isAdmin}
               onEdit={() => setForm(t)}
               onStart={() => setStarting(t)}
             />
           ))}
         </ul>
-      )}
-      {isAdmin && options.run_blocked && items.length > 0 && (
-        <p className="mt-3 text-xs text-slate-500">Testen kan hier nu niet: {options.run_blocked}.</p>
       )}
       {form && (
         <Modal title={form === "new" ? "Failovertest toevoegen" : "Failovertest bewerken"} onClose={() => setForm(null)} wide>
@@ -159,15 +160,28 @@ export function FailoverCard({ clusterId, isAdmin }: { clusterId: string; isAdmi
   );
 }
 
+// TestedLine zegt wanneer het cluster het laatst echt getest is en wanneer
+// het testvenster is.
+function TestedLine({ options }: { options: FailoverOptions }) {
+  return (
+    <p className="mb-3 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
+      <span className={cx(longAgo(options.last_tested_at) && "font-medium text-amber-700 dark:text-amber-400")}>
+        {options.last_tested_at ? `Niet getest sinds ${fmt.format(new Date(options.last_tested_at))}` : "Nog nooit getest"}
+      </span>
+      <span>{options.prod ? "Prod: alleen met de hand, met bevestiging" : `Testvenster: ${options.window}`}</span>
+    </p>
+  );
+}
+
 function TestRow({
   t,
-  options,
+  prod,
   isAdmin,
   onEdit,
   onStart,
 }: {
   t: FailoverTest;
-  options: FailoverOptions;
+  prod: boolean;
   isAdmin: boolean;
   onEdit: () => void;
   onStart: () => void;
@@ -186,6 +200,13 @@ function TestRow({
           <p className="text-xs text-slate-500">
             {expectation(t)} · probe {probeText(t.probe)}
           </p>
+          {t.scheduled && t.next_run_at && (
+            <p className="text-xs text-slate-500">
+              {prod
+                ? "Was gepland, maar dit cluster staat nu in prod: de volgende run wordt overgeslagen en de planning gaat uit."
+                : `Gepland in het testvenster, volgende run ${fmt.format(new Date(t.next_run_at))}.`}
+            </p>
+          )}
           <p className="flex flex-wrap items-center gap-2 text-xs">
             {t.last_run ? (
               <>
@@ -211,7 +232,7 @@ function TestRow({
               <Button variant="secondary" onClick={onEdit}>
                 Bewerken
               </Button>
-              <Button disabled={!!options.run_blocked || !!running} title={options.run_blocked || undefined} onClick={onStart}>
+              <Button disabled={!!running} onClick={onStart}>
                 {running ? "Loopt…" : "Nu testen"}
               </Button>
             </>
@@ -246,14 +267,23 @@ function RunHistory({ testId }: { testId: string }) {
 function StartDialog({ t, options, onClose }: { t: FailoverTest; options: FailoverOptions; onClose: () => void }) {
   const start = useStartFailoverTest();
   const router = useRouter();
+  const totp = useProdTotp();
+  const [confirm, setConfirm] = useState("");
   const err = start.error instanceof ApiError ? start.error : null;
+  const vm = t.scenario === "vm_hard_stop";
   return (
     <Modal title={`Failovertest starten: ${t.name}`} onClose={onClose}>
       <div className="space-y-4 text-sm">
         <p>{confirmText(t, options)}</p>
         <p className="text-slate-500">
-          Afbreken kan op de rapportpagina; ClusterForge zet {unitOf(t)} dan meteen weer aan.
+          Afbreken kan op de rapportpagina; ClusterForge {vm ? "start de VM" : `zet ${unitOf(t)}`} dan meteen weer aan.
         </p>
+        {options.prod && (
+          <>
+            <p>{serverGoneText(t)}</p>
+            <ProdConfirm slug={options.slug} value={confirm} onChange={setConfirm} />
+          </>
+        )}
         {err?.code === "precheck_failed" && err.checks ? (
           <div className="space-y-2">
             <Alert>De test start niet, omdat de voorcontrole faalt.</Alert>
@@ -268,13 +298,13 @@ function StartDialog({ t, options, onClose }: { t: FailoverTest; options: Failov
           </Button>
           <Button
             variant="danger"
-            disabled={start.isPending}
+            disabled={start.isPending || (options.prod && !prodConfirmed(options.slug, confirm, totp))}
             onClick={async () => {
-              const run = await start.mutateAsync(t.id).catch(() => null);
+              const run = await start.mutateAsync({ testId: t.id, confirm: options.prod ? confirm : undefined }).catch(() => null);
               if (run) router.push(reportHref(run.id));
             }}
           >
-            {start.isPending ? "Voorcontrole…" : `${unitOf(t)} stoppen en meten`}
+            {start.isPending ? "Voorcontrole…" : vm ? "VM hard uitzetten en meten" : `${unitOf(t)} stoppen en meten`}
           </Button>
         </div>
       </div>
@@ -336,12 +366,14 @@ function FailoverForm({
   const [expect, setExpect] = useState(String(startProbe.http?.expect ?? 200));
   const [port, setPort] = useState(String(startProbe.tcp?.port ?? 80));
   const [probeTouched, setProbeTouched] = useState(!!initial);
+  const [scheduled, setScheduled] = useState(initial?.scheduled ?? false);
   const [name, setName] = useState(initial?.name ?? "");
   const [nameTouched, setNameTouched] = useState(!!initial);
   const [error, setError] = useState<{ message: string; field?: string } | null>(null);
   const busy = create.isPending || update.isPending || remove.isPending;
 
-  const defaultName = (sc: FailoverScenario, svc: string) => (sc === "keepalived_stop" ? "keepalived stoppen" : `${svc} stoppen`);
+  const defaultName = (sc: FailoverScenario, svc: string) =>
+    sc === "vm_hard_stop" ? "VM hard uitzetten" : sc === "keepalived_stop" ? "keepalived stoppen" : `${svc} stoppen`;
   const shownName = nameTouched ? name : defaultName(scenario, service);
 
   function pickScenario(key: FailoverScenario) {
@@ -377,6 +409,7 @@ function FailoverForm({
       max_takeover_seconds: Number(secs),
       expect_failback: failback,
       probe: probeKind === "tcp" ? { tcp: { port: Number(port) } } : { http: { path, expect: Number(expect) } },
+      scheduled: scheduled && !options.prod,
     };
     try {
       if (initial) await update.mutateAsync({ id: initial.id, body });
@@ -493,6 +526,25 @@ function FailoverForm({
           <span className="block text-xs text-slate-500">
             Aan bij keepalived met preempt, zoals de template keepalived-nginx. Uit als het VIP na een overname blijft waar het is.
           </span>
+        </span>
+      </label>
+
+      <label className={cx("flex items-start gap-2 text-sm", options.prod && "opacity-60")}>
+        <input
+          type="checkbox"
+          className="mt-0.5"
+          checked={scheduled && !options.prod}
+          disabled={options.prod}
+          onChange={(e) => setScheduled(e.target.checked)}
+        />
+        <span>
+          Gepland in het testvenster
+          <span className="block text-xs text-slate-500">
+            {options.prod
+              ? "Op prod start een failovertest alleen met de hand, met de slug als bevestiging."
+              : `Venster: ${options.window}. Loopt er dan een andere test, dan wacht hij; lukt de voorcontrole niet, dan wordt de run overgeslagen.`}
+          </span>
+          {fieldError("scheduled")}
         </span>
       </label>
 

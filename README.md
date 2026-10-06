@@ -28,6 +28,7 @@ Het technisch ontwerp staat in [docs/design/mvp-fase-1.md](docs/design/mvp-fase-
 | 8. Back-upcontrole | Een back-up terugzetten als tijdelijke VM met afgesloten netwerk, opstarten, controleren via de guest agent en altijd weer verwijderen | klaar |
 | 9. Diensten en afhankelijkheden | Welke dienst van welke andere afhangt, over clusters heen; voorstellen uit de agents en "Wat raakt uitval?" | klaar |
 | 10. Drift herstellen | Gekozen afwijkingen opnieuw toepassen, node voor node met de VIP-eigenaar als laatste en een gezondheidscontrole na elke node; op prod met de slug en tweestapsverificatie | klaar |
+| 11. Planning en prod | Failovertests en back-upcontroles gepland in een testvenster, de VM hard uitzetten in lab en test, en failovertests op prod met de hand met de slug en tweestapsverificatie | klaar |
 
 ## Draaien met Docker Compose
 
@@ -65,6 +66,8 @@ Agents verbinden zelf naar de server, op poort 4222 (NATS met TLS). Die poort mo
 | `CF_DRIFT_INTERVAL` | `15m` | Hoe vaak de server elke node op drift controleert; `0` zet dat uit (Nu controleren blijft werken), anders minstens `1m` |
 | `CF_SANDBOX_STORAGE` | (leeg) | Proxmox-storage voor de tijdelijke VM van een back-upcontrole; leeg kiest per host de storage voor VM-schijven met de meeste vrije ruimte |
 | `CF_SANDBOX_BOOT_TIMEOUT` | `10m` | Hoe lang een teruggezette VM mag doen over opstarten tot de guest agent antwoordt; tussen `30s` en `1h` |
+| `CF_TEST_WINDOW` | `zo 03:00-05:00` | Het testvenster voor geplande failovertests en back-upcontroles: dagen (`ma` tot `zo`, met komma's, of `dagelijks`) en de tijden, op de klok van `TZ` |
+| `TZ` | `Europe/Brussels` in Docker Compose | Tijdzone van de server; het testvenster volgt zomer- en wintertijd |
 
 ### Commando's
 
@@ -231,13 +234,23 @@ Drift kan alleen met een agent van deze versie of nieuwer. Een oudere agent staa
 
 ## Failovertests
 
-Een failovertest bewijst dat een VIP echt verhuist als de node die het heeft uitvalt. Op de pagina van een cluster staat de kaart Failovertests. Een beheerder voegt er een test toe: het scenario (keepalived stoppen op de eigenaar, of nginx of haproxy stoppen op de eigenaar), het VIP, binnen hoeveel seconden een andere node moet overnemen (standaard 5 s voor keepalived en 10 s voor een dienst), of het VIP daarna terug moet naar de oorspronkelijke node (standaard aan bij keepalived-nginx, dat preempt gebruikt) en de probe: een HTTP-pad met de verwachte status of een TCP-poort op het VIP. Scenario's die op dit cluster niet kunnen, staan grijs met de reden.
+Een failovertest bewijst dat een VIP echt verhuist als de node die het heeft uitvalt. Op de pagina van een cluster staat de kaart Failovertests. Een beheerder voegt er een test toe: het scenario (keepalived stoppen op de eigenaar, nginx of haproxy stoppen op de eigenaar, of de VM van de eigenaar hard uitzetten via Proxmox), het VIP, binnen hoeveel seconden een andere node moet overnemen (standaard 5 s voor keepalived en 10 s voor een dienst of een VM), of het VIP daarna terug moet naar de oorspronkelijke node (standaard aan bij keepalived-nginx, dat preempt gebruikt) en de probe: een HTTP-pad met de verwachte status of een TCP-poort op het VIP. Scenario's die op dit cluster niet kunnen, staan grijs met de reden.
 
-Nu testen toont eerst wat er gaat gebeuren, bijvoorbeeld: "keepalived wordt gestopt op web01, nu eigenaar van 10.0.30.100. Verwacht: een andere node neemt binnen 5 s over. Lukt dat niet, dan is 10.0.30.100 hoogstens 20 s onbereikbaar; daarna zet ClusterForge keepalived weer aan." Daarna doet de server een strenge voorcontrole zonder uitweg: lab of test, het cluster gezond, geen database op de nodes (een VIP dat naar een replica verhuist, kan schrijfacties laten mislukken), verse heartbeats, precies één eigenaar per VIP, een agent die deploystappen kan uitvoeren, de dienst draait, een reservenode met keepalived, geen andere taak in het cluster, geen andere test in heel ClusterForge en een probe die drie keer slaagt. Faalt er één, dan start de test niet en staan de controles in het venster.
+Nu testen toont eerst wat er gaat gebeuren, bijvoorbeeld: "keepalived wordt gestopt op web01, nu eigenaar van 10.0.30.100. Verwacht: een andere node neemt binnen 5 s over. Lukt dat niet, dan is 10.0.30.100 hoogstens 20 s onbereikbaar; daarna zet ClusterForge keepalived weer aan." Daarna doet de server een strenge voorcontrole zonder uitweg: het cluster gezond, geen database op de nodes (een VIP dat naar een replica verhuist, kan schrijfacties laten mislukken), verse heartbeats, precies één eigenaar per VIP, een agent die deploystappen kan uitvoeren, de dienst draait, een reservenode met keepalived, geen andere taak in het cluster, geen andere test in heel ClusterForge en een probe die drie keer slaagt. Faalt er één, dan start de test niet en staan de controles in het venster.
 
 De test zelf is een taak met vijf stappen. ClusterForge stopt de dienst op de eigenaar (een stop, nooit een disable), vraagt het VIP elke kwart seconde op en wacht tot een verse heartbeat een andere eigenaar meldt en de probe weer drie keer op rij slaagt. Daarna start hij de dienst weer, wacht tot de node gezond is en, als dat verwacht wordt, tot het VIP terug is. De uitslag is bijvoorbeeld "PASS: 10.0.30.100 3,4 s onbereikbaar, overgenomen door web02, daarna terug op web01, alles hersteld" of "FAIL: … meer dan de verwachte 5 s". Het rapport toont de test, de verwachting en het resultaat, een tijdlijn met de probe in groen en rood en markeringen voor de storing, de overname, het herstel en de terugkeer, en de stappen met hun log. Afbreken herstelt meteen.
 
-De dienst komt altijd terug: na de meting, bij een fout, bij Afbreken, bij een nette stop van de server en na een crash, als de taak verder gaat. Lukt het herstel toch niet, dan staat bovenaan het cluster een rode balk "Failovertest niet volledig hersteld" met de knop Opnieuw herstellen. Op prod kan een failovertest nog niet; dat komt later, met de hand en met een extra bevestiging. Elke test en run komt in het logboek, met het run-id bij elke regel en het stop- en startcommando aan de agent.
+De dienst komt altijd terug: na de meting, bij een fout, bij Afbreken, bij een nette stop van de server en na een crash, als de taak verder gaat. Lukt het herstel toch niet, dan staat bovenaan het cluster een rode balk "Failovertest niet volledig hersteld" met de knop Opnieuw herstellen. Elke test en run komt in het logboek, met het run-id bij elke regel en het stop- en startcommando aan de agent.
+
+**De VM hard uitzetten** speelt een stroomonderbreking na: ClusterForge zet de VM van de eigenaar via Proxmox uit zonder hem af te sluiten, meet de overname en start de VM daarna weer; de terugkeer mag dan zo lang duren als het opstarten. Dat kan alleen in lab en test, als elke node met keepalived aan zijn VM gekoppeld is. De voorcontrole eist daarnaast dat de VM draait, niet onder Proxmox HA staat (de HA-manager zou hem zelf weer starten of verplaatsen) en dat er geen docker op draait, omdat containers met volumes data kunnen bevatten.
+
+**Op prod** start een failovertest alleen met de hand: keepalived of een dienst stoppen, niet de VM. Net als bij Drift herstellen moet de beheerder tweestapsverificatie aan hebben en de slug van het cluster intikken. Het venster zegt ook wat er gebeurt als ClusterForge midden in de test wegvalt: het VIP blijft bereikbaar op de andere node, alleen is er dan geen reservenode tot ClusterForge terug is en herstelt.
+
+### Planning
+
+Een failovertest kan gepland draaien in het testvenster (`CF_TEST_WINDOW`, standaard zondag van 03:00 tot 05:00 op de klok van de server); zet het vinkje Gepland in het testvenster bij de test. Voor de back-upcontrole staat het vinkje per cluster op de kaart Back-ups, en elke run controleert de node die het langst niet gecontroleerd is. Planning staat standaard uit, en een geplande failovertest kan niet op prod. Gaat een cluster naar prod, dan wordt de volgende geplande run overgeslagen en gaat de planning uit.
+
+Het testvenster volgt de klok, ook bij zomer- en wintertijd: "elke 7 dagen om 04:00" blijft om 04:00 op de klok, op 25 oktober 2026 dus een uur later in UTC. De planner kijkt elke minuut en start nooit twee tests tegelijk: loopt er al een failovertest of back-upcontrole, of een andere taak in het cluster, dan wacht de volgende. De voorcontrole loopt voordat er een taak is; lukt ze niet, dan komt er een overgeslagen run met de reden en de controles, zonder taak, en schuift de test naar het volgende venster. Hetzelfde geldt voor een run die meer dan 30 minuten te laat is (wachten op een andere test telt niet mee) of die buiten het venster zou vallen, bijvoorbeeld omdat ClusterForge niet draaide: dan geen inhaalrun midden op de dag, maar één overgeslagen run en de volgende in het eerstvolgende venster. De kaarten op de clusterpagina tonen "Niet getest sinds" en "Niet gecontroleerd sinds", in oranje na dertig dagen of als het nog nooit gebeurde.
 
 ## Afhankelijkheden
 
@@ -338,6 +351,7 @@ internal/health/           wachten op verse heartbeats: een node klaar, de VIP's
 internal/failover/         failovertests: voorcontrole, storing, meting, herstel en het rapport
 internal/deps/             diensten en afhankelijkheden: graaf, status, doorgeven, impact en voorstellen
 internal/rollout/          cluster.apply: wijzigingen node voor node toepassen, zoals drift herstellen
+internal/planner/          het testvenster, zomer- en wintertijd, en wanneer een geplande run start of overgeslagen wordt
 pkg/protocol/              berichten tussen server en agent
 internal/webui/            ingebedde webinterface
 migrations/                goose SQL-migraties

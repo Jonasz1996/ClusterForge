@@ -50,7 +50,11 @@ func (s *Server) UpdateBackupPolicy(w http.ResponseWriter, r *http.Request, id u
 	if !decode(w, r, &req) {
 		return
 	}
-	if s.backupError(w, r, s.backups.UpdatePolicy(r.Context(), events.User(p.User.ID), &p.User.ID, id, req.MaxAgeHours)) {
+	actor := events.User(p.User.ID)
+	if req.MaxAgeHours != nil && s.backupError(w, r, s.backups.UpdatePolicy(r.Context(), actor, &p.User.ID, id, *req.MaxAgeHours)) {
+		return
+	}
+	if req.VerifyEnabled != nil && s.backupError(w, r, s.backups.SetVerifySchedule(r.Context(), actor, &p.User.ID, id, *req.VerifyEnabled)) {
 		return
 	}
 	s.GetBackupPolicy(w, r, id)

@@ -233,6 +233,20 @@ func (h *Host) SetUnit(name string, u Unit) {
 	}
 }
 
+// Power zet de machine uit of aan, zoals een harde stop of een start van
+// de VM: uit stopt elke unit, aan start de units die enabled zijn.
+func (h *Host) Power(on bool) {
+	h.mu.Lock()
+	for _, u := range h.units {
+		u.Active = on && u.Enabled
+	}
+	g := h.group
+	h.mu.Unlock()
+	if g != nil {
+		g.update()
+	}
+}
+
 // Remove haalt een pakket weg zoals iemand het met de hand zou doen.
 func (h *Host) Remove(name string) {
 	h.mu.Lock()

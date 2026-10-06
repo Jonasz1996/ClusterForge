@@ -371,6 +371,9 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 	case "backup.sandbox_connection_refused":
 		return "Tweede agentverbinding van " + or(str(p, "hostname"), name) + " geweigerd tijdens een back-upcontrole" + prefixed(" vanaf ", str(p, "remote"))
 	case "backup.verify_finished":
+		if str(p, "trigger") == "schedule" {
+			return "Geplande back-upcontrole van " + str(p, "hostname") + colon(str(p, "summary"))
+		}
 		return "Back-upcontrole van " + str(p, "hostname") + colon(str(p, "summary"))
 	case "drift.detected":
 		return fmt.Sprintf("Drift op %s: %s", name, count(p["count"], "afwijking", "afwijkingen"))
@@ -407,14 +410,23 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 	case "failover_test.deleted":
 		return "Failovertest " + name + " verwijderd"
 	case "failover.fault_injected":
+		if str(p, "scenario") == "vm_hard_stop" {
+			return fmt.Sprintf("Failovertest %s: VM van %s hard uitgezet", str(p, "name"), str(p, "hostname"))
+		}
 		return fmt.Sprintf("Failovertest %s: %s gestopt op %s", str(p, "name"), str(p, "unit"), str(p, "hostname"))
 	case "failover.fault_cleared":
 		s := fmt.Sprintf("Failovertest %s: %s weer gestart op %s", str(p, "name"), str(p, "unit"), str(p, "hostname"))
+		if str(p, "scenario") == "vm_hard_stop" {
+			s = fmt.Sprintf("Failovertest %s: VM van %s weer gestart", str(p, "name"), str(p, "hostname"))
+		}
 		if b, _ := p["restore"].(bool); b {
 			s += " (opnieuw herstellen)"
 		}
 		return s
 	case "failover.finished":
+		if str(p, "trigger") == "schedule" {
+			return "Geplande failovertest " + str(p, "name") + colon(str(p, "summary"))
+		}
 		return "Failovertest " + str(p, "name") + colon(str(p, "summary"))
 	case "service.created":
 		kind := paren(or(kindLabels[str(p, "kind")], str(p, "kind")))
@@ -540,11 +552,11 @@ var fieldLabels = map[string][][2]string{
 	"vip":     {{"address", "Adres"}, {"interface", "Interface"}, {"vrid", "VRRP-id"}, {"description", "Omschrijving"}},
 	"proxmox": {{"name", "Naam"}, {"api_url", "API-adres"}, {"token_id", "Token-id"}, {"token_secret", "Token-secret"}, {"tls_fingerprint", "TLS-vingerafdruk"}},
 	"failover_test": {{"name", "Naam"}, {"vip", "VIP"}, {"scenario", "Scenario"}, {"max_takeover_seconds", "Verwachting in seconden"},
-		{"expect_failback", "Terug naar de oorspronkelijke node"}, {"probe", "Probe"}},
+		{"expect_failback", "Terug naar de oorspronkelijke node"}, {"probe", "Probe"}, {"scheduled", "Gepland in het testvenster"}},
 	"service": {{"name", "Naam"}, {"kind", "Soort"}, {"unit", "Unit"}, {"port", "Poort"}, {"address", "Adres"},
 		{"description", "Omschrijving"}, {"state", "Staat"}},
 	"dependency":            {{"strength", "Sterkte"}, {"note", "Notitie"}},
-	"backup.policy_updated": {{"max_age_hours", "Maximale leeftijd in uren"}},
+	"backup.policy_updated": {{"max_age_hours", "Maximale leeftijd in uren"}, {"verify_enabled", "Geplande back-upcontrole"}},
 	"backup.watch_updated":  {{"watch", "Ook bewaken"}},
 }
 

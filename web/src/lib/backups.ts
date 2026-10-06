@@ -10,6 +10,7 @@ export type BackupVolume = components["schemas"]["BackupVolume"];
 export type BackupConnection = components["schemas"]["BackupConnection"];
 export type BackupFreshness = components["schemas"]["BackupFreshness"];
 export type BackupPolicy = components["schemas"]["BackupPolicy"];
+export type BackupPolicyInput = components["schemas"]["BackupPolicyInput"];
 export type BackupWatchEntry = components["schemas"]["BackupWatchEntry"];
 
 type Tone = "slate" | "green" | "amber" | "red" | "blue";
@@ -58,13 +59,8 @@ export function useBackupPolicy(clusterId: string) {
 export function useUpdateBackupPolicy(clusterId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (max_age_hours: number) =>
-      unwrap(
-        await api.PUT("/clusters/{clusterId}/backup-policy", {
-          params: { path: { clusterId } },
-          body: { max_age_hours },
-        }),
-      ),
+    mutationFn: async (body: BackupPolicyInput) =>
+      unwrap(await api.PUT("/clusters/{clusterId}/backup-policy", { params: { path: { clusterId } }, body })),
     onSuccess: () => void qc.invalidateQueries({ queryKey: keys.all }),
   });
 }

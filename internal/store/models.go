@@ -244,10 +244,12 @@ type Agent struct {
 }
 
 type BackupPolicy struct {
-	ClusterID   uuid.UUID
-	MaxAgeHours int32
-	UpdatedAt   time.Time
-	UpdatedBy   *uuid.UUID
+	ClusterID     uuid.UUID
+	MaxAgeHours   int32
+	UpdatedAt     time.Time
+	UpdatedBy     *uuid.UUID
+	VerifyEnabled bool
+	NextRunAt     *time.Time
 }
 
 type BackupSandbox struct {
@@ -380,6 +382,8 @@ type FailoverTest struct {
 	CreatedBy          *uuid.UUID
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
+	Scheduled          bool
+	NextRunAt          *time.Time
 }
 
 type Job struct {

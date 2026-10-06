@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Jonasz1996/clusterforge/internal/planner"
 	"github.com/Jonasz1996/clusterforge/internal/secrets"
 )
 
@@ -65,6 +66,10 @@ type Config struct {
 	// opstarten tot de guest agent antwoordt (CF_SANDBOX_BOOT_TIMEOUT,
 	// standaard 10m).
 	SandboxBootTimeout time.Duration
+	// TestWindow is het venster waarin geplande failovertests en
+	// back-upcontroles draaien, op de klok van de tijdzone van de server
+	// (CF_TEST_WINDOW, standaard "zo 03:00-05:00"; de tijdzone komt uit TZ).
+	TestWindow planner.Window
 }
 
 func FromEnv() (Config, error) {
@@ -142,6 +147,14 @@ func FromEnv() (Config, error) {
 			return c, fmt.Errorf("CF_SANDBOX_BOOT_TIMEOUT moet tussen 30s en 1h liggen")
 		}
 		c.SandboxBootTimeout = d
+	}
+	c.TestWindow = planner.DefaultWindow
+	if v := strings.TrimSpace(os.Getenv("CF_TEST_WINDOW")); v != "" {
+		w, err := planner.ParseWindow(v)
+		if err != nil {
+			return c, fmt.Errorf("CF_TEST_WINDOW: %w", err)
+		}
+		c.TestWindow = w
 	}
 	return c, nil
 }
