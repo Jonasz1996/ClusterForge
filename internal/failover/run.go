@@ -296,12 +296,24 @@ func (r *testRun) measureStep(ctx context.Context, st *jobs.Step, ms *measureSta
 	}
 	st.Logf("%s stoppen op %s", r.def.Unit, host)
 	_ = st.Flush(ctx)
-	if err := r.s.apply(ctx, st, r.plan.Target.ID, r.run.ID.String()+"-inject", r.reason(), r.def.Unit, "stopped", 1); err != nil {
+	err := r.s.apply(ctx, st, r.plan.Target.ID, r.run.ID.String()+"-inject", r.reason(), r.def.Unit, "stopped", 1)
+	switch {
+	case err == nil:
+		r.event(ctx, "failover.fault_injected", nil)
+	case jobs.Interrupted(ctx):
+		// De server stopt terwijl het commando onderweg is, dus de storing
+		// is er misschien al. De hervatte stap telt de meting niet en het
+		// herstel volgt.
+		return context.Cause(ctx)
+	case jobs.Canceled(ctx):
+		// Afgebroken terwijl het commando onderweg was: ook dan is de
+		// storing er misschien al. De meting telt als afgebroken en het
+		// herstel volgt.
+	default:
 		ms.InjectError = err.Error()
 		_ = st.SetState(ctx, ms)
 		return err
 	}
-	r.event(ctx, "failover.fault_injected", nil)
 	m := r.measure(ctx, st, ms.InjectedAt)
 	if jobs.Interrupted(ctx) {
 		return context.Cause(ctx)
