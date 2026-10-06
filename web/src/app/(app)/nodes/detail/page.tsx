@@ -160,7 +160,7 @@ function NodeDetailInner() {
             </Card>
           )}
 
-          {node.data.proxmox && <NodeBackupsCard nodeId={id} />}
+          {node.data.proxmox && <NodeBackupsCard nodeId={id} isAdmin={isAdmin} />}
 
           {node.data.agent && (
             <MetricsPanels

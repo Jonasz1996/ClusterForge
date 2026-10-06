@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -58,6 +59,7 @@ type testEnv struct {
 	backups *backups.Service
 	drift   *drift.Service
 	fo      *failover.Service
+	conns   *testConns
 
 	// De runner heeft een eigen context, zodat een test hem kan herstarten.
 	runCtx     context.Context
@@ -118,6 +120,10 @@ func newTestEnv(t *testing.T) *testEnv {
 	dep.Poll, dep.GuestAgentTimeout, dep.EnrollTimeout = 20*time.Millisecond, 5*time.Second, 8*time.Second
 	dep.HTTPGet = func(context.Context, string) (int, error) { return http.StatusOK, nil }
 	bk := backups.NewService(pool, ev, log, pve)
+	bk.Poll, bk.ConnPoll, bk.BootTimeout, bk.NoAgentWait = 20*time.Millisecond, 20*time.Millisecond, 3*time.Second, 100*time.Millisecond
+	bk.AgentTimeout, bk.LockWait = 2*time.Second, time.Second
+	conns := &testConns{bus: bus}
+	bk.EnableVerify(runner, conns)
 	// Zonder Interval loopt de scanner niet; een test start hem zelf.
 	drf := drift.NewService(pool, ev, log, bus, dep, box.Derive(secrets.PurposeFile))
 	drf.Interval = 0
@@ -140,7 +146,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	srv := httptest.NewServer(api.Handler())
 	t.Cleanup(srv.Close)
 	e := &testEnv{t: t, srv: srv, auth: a, pool: pool, api: api, bus: bus, eval: eval, vm: vm, pve: pve, jobs: runner, life: life, deploy: dep,
-		backups: bk, drift: drf, fo: fo, runCtx: runCtx}
+		backups: bk, drift: drf, fo: fo, conns: conns, runCtx: runCtx}
 	e.startRunner()
 	t.Cleanup(func() {
 		stop()
@@ -151,6 +157,18 @@ func newTestEnv(t *testing.T) *testEnv {
 		<-done
 	})
 	return e
+}
+
+// testConns telt de verbindingen van de echte bus, plus extra: zo speelt een
+// test een tweede verbinding die Bus.Check toch doorliet.
+type testConns struct {
+	bus   *agentbus.Bus
+	extra atomic.Int32
+}
+
+func (c *testConns) Connections(nkey string) (int, error) {
+	n, err := c.bus.Connections(nkey)
+	return n + int(c.extra.Load()), err
 }
 
 func (e *testEnv) startRunner() {

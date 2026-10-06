@@ -559,6 +559,14 @@ func (j *Job) Done(name string, v any) bool {
 	return false
 }
 
+// Previous geeft de stappen van eerdere pogingen, op volgorde. Leeg bij de
+// eerste poging.
+func (j *Job) Previous() []store.JobStep { return slices.Clone(j.steps) }
+
+// Keep laat de volgende stap zoals een eerdere poging hem achterliet en
+// voert niets uit; voor een taak die na een herstart niet verder gaat.
+func (j *Job) Keep() { j.next++ }
+
 // Step voert één stap uit. Een stap die bij een eerdere poging al lukte,
 // wordt overgeslagen; een onderbroken stap krijgt zijn bewaarde state terug.
 // Stappen worden herkend aan hun volgorde, dus een handler moet ze altijd in

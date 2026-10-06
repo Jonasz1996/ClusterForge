@@ -266,6 +266,9 @@ func (s *Service) CreateNodeTx(ctx context.Context, q *store.Queries, actor even
 	if err := f.normalize(); err != nil {
 		return store.Node{}, err
 	}
+	if err := notSandbox(ctx, q, f.Proxmox); err != nil {
+		return store.Node{}, err
+	}
 	proxmoxID, vmid := f.Proxmox.columns()
 	n, err := q.CreateNode(ctx, store.CreateNodeParams{
 		ClusterID: f.ClusterID, Hostname: f.Hostname, Role: f.Role, Description: f.Description,
@@ -298,6 +301,11 @@ func (s *Service) UpdateNode(ctx context.Context, actor events.Actor, id uuid.UU
 		n = cur
 		if len(d) == 0 {
 			return nil
+		}
+		if _, changed := d["proxmox"]; changed {
+			if err := notSandbox(ctx, q, after.Proxmox); err != nil {
+				return err
+			}
 		}
 		proxmoxID, vmid := after.Proxmox.columns()
 		n, err = q.UpdateNode(ctx, store.UpdateNodeParams{
@@ -363,6 +371,22 @@ func nodeFields(n store.Node) NodeFields {
 		ClusterID: n.ClusterID, Hostname: n.Hostname, Role: n.Role, Description: n.Description,
 		Lifecycle: n.Lifecycle, PrimaryIP: ip, Tags: n.Tags, Proxmox: link,
 	}
+}
+
+// notSandbox weigert een koppeling met een sandbox-VM van een
+// back-upcontrole: die VM is tijdelijk en ClusterForge ruimt hem zelf op.
+func notSandbox(ctx context.Context, q *store.Queries, l *ProxmoxLink) error {
+	if l == nil {
+		return nil
+	}
+	sandbox, err := q.IsSandboxGuest(ctx, store.IsSandboxGuestParams{ConnectionID: l.ConnectionID, Vmid: int32(l.VMID)})
+	if err != nil {
+		return err
+	}
+	if sandbox {
+		return ValidationError{Msg: "deze VM is een tijdelijke sandbox van een back-upcontrole en kan niet aan een node gekoppeld worden"}
+	}
+	return nil
 }
 
 func (l *ProxmoxLink) columns() (*uuid.UUID, *int32) {

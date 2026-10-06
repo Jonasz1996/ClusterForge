@@ -64,7 +64,7 @@ export function FailoverBanner({ clusterId, isAdmin }: { clusterId: string; isAd
 
 function UnrestoredRow({ run, isAdmin }: { run: TestRun; isAdmin: boolean }) {
   const restore = useRestoreTestRun();
-  const unit = run.definition.unit || "de dienst";
+  const unit = run.definition?.unit || "de dienst";
   return (
     <div
       role="alert"
@@ -75,7 +75,7 @@ function UnrestoredRow({ run, isAdmin }: { run: TestRun; isAdmin: boolean }) {
           Failovertest niet volledig hersteld: {unit} staat mogelijk nog uit op {run.hostname}.
         </p>
         <p className="mt-0.5">
-          {run.definition.name}, {fmt.format(new Date(run.created_at))}.{" "}
+          {run.definition?.name ?? "Failovertest"}, {fmt.format(new Date(run.created_at))}.{" "}
           <Link href={reportHref(run.id)} className="underline">
             Rapport bekijken
           </Link>
@@ -282,14 +282,17 @@ function StartDialog({ t, options, onClose }: { t: FailoverTest; options: Failov
   );
 }
 
-// Checks toont de controles van de voorcontrole.
+// Checks toont de controles van een run: in orde, een waarschuwing of mislukt.
 export function Checks({ checks }: { checks: TestRunCheck[] }) {
   return (
     <ul className="space-y-1 text-sm">
-      {checks.map((c) => (
-        <li key={c.name} className="flex gap-2">
-          <span aria-hidden className={c.ok ? "text-emerald-600" : "text-red-600"}>
-            {c.ok ? "✓" : "✗"}
+      {checks.map((c, i) => (
+        <li key={`${c.name}-${i}`} className="flex gap-2">
+          <span
+            aria-label={c.ok ? "in orde" : c.warning ? "waarschuwing" : "mislukt"}
+            className={cx("w-3 shrink-0 text-center", c.ok ? "text-emerald-600" : c.warning ? "text-amber-600" : "text-red-600")}
+          >
+            {c.ok ? "✓" : c.warning ? "!" : "✗"}
           </span>
           <span>
             <span className="font-medium">{c.name}</span>

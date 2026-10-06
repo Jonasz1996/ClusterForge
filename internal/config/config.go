@@ -57,19 +57,29 @@ type Config struct {
 	// (CF_DRIFT_INTERVAL, standaard 15m). 0 zet de controles op de
 	// achtergrond uit; Nu controleren blijft werken.
 	DriftInterval time.Duration
+	// SandboxStorage is de Proxmox-storage waarop de back-upcontrole een
+	// back-up terugzet (CF_SANDBOX_STORAGE). Leeg kiest per controle de
+	// storage met content images en de meeste vrije ruimte.
+	SandboxStorage string
+	// SandboxBootTimeout is hoe lang een teruggezette VM mag doen over het
+	// opstarten tot de guest agent antwoordt (CF_SANDBOX_BOOT_TIMEOUT,
+	// standaard 10m).
+	SandboxBootTimeout time.Duration
 }
 
 func FromEnv() (Config, error) {
 	c := Config{
-		DatabaseURL:   os.Getenv("CF_DATABASE_URL"),
-		Listen:        envOr("CF_LISTEN", ":8080"),
-		SecureCookies: true,
-		SessionTTL:    12 * time.Hour,
-		DriftInterval: 15 * time.Minute,
-		LogLevel:      envOr("CF_LOG_LEVEL", "info"),
-		NATSListen:    envOr("CF_NATS_LISTEN", ":4222"),
-		NATSAdvertise: os.Getenv("CF_NATS_ADVERTISE"),
-		AgentDir:      envOr("CF_AGENT_DIR", "/usr/share/clusterforge/agents"),
+		DatabaseURL:        os.Getenv("CF_DATABASE_URL"),
+		Listen:             envOr("CF_LISTEN", ":8080"),
+		SecureCookies:      true,
+		SessionTTL:         12 * time.Hour,
+		DriftInterval:      15 * time.Minute,
+		SandboxBootTimeout: 10 * time.Minute,
+		SandboxStorage:     strings.TrimSpace(os.Getenv("CF_SANDBOX_STORAGE")),
+		LogLevel:           envOr("CF_LOG_LEVEL", "info"),
+		NATSListen:         envOr("CF_NATS_LISTEN", ":4222"),
+		NATSAdvertise:      os.Getenv("CF_NATS_ADVERTISE"),
+		AgentDir:           envOr("CF_AGENT_DIR", "/usr/share/clusterforge/agents"),
 
 		VictoriaMetricsURL: os.Getenv("CF_VICTORIAMETRICS_URL"),
 		GrafanaNodeURL:     os.Getenv("CF_GRAFANA_NODE_URL"),
@@ -122,6 +132,16 @@ func FromEnv() (Config, error) {
 			return c, fmt.Errorf("CF_DRIFT_INTERVAL moet 0 of minstens 1m zijn")
 		}
 		c.DriftInterval = d
+	}
+	if v := os.Getenv("CF_SANDBOX_BOOT_TIMEOUT"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			return c, fmt.Errorf("CF_SANDBOX_BOOT_TIMEOUT: %w", err)
+		}
+		if d < 30*time.Second || d > time.Hour {
+			return c, fmt.Errorf("CF_SANDBOX_BOOT_TIMEOUT moet tussen 30s en 1h liggen")
+		}
+		c.SandboxBootTimeout = d
 	}
 	return c, nil
 }

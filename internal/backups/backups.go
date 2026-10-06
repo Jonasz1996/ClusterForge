@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Jonasz1996/clusterforge/internal/events"
+	"github.com/Jonasz1996/clusterforge/internal/jobs"
 	"github.com/Jonasz1996/clusterforge/internal/proxmox"
 	"github.com/Jonasz1996/clusterforge/internal/store"
 )
@@ -80,6 +81,37 @@ type Service struct {
 	// Now is de klok; tests vervangen hem.
 	Now func() time.Time
 
+	// De back-upcontrole; zie EnableVerify.
+
+	// SandboxStorage is de storage voor elke sandbox; leeg kiest de storage
+	// met content images en de meeste vrije ruimte.
+	SandboxStorage string
+	// BootTimeout is hoe lang de guest agent na het starten mag zwijgen.
+	BootTimeout time.Duration
+	// NoAgentWait is hoe lang een VM zonder guest agent na het starten moet
+	// blijven draaien.
+	NoAgentWait time.Duration
+	// AgentTimeout is de limiet van één vraag aan de guest agent.
+	AgentTimeout time.Duration
+	// Poll is hoe vaak de controle de guest agent of een lock opvraagt.
+	Poll time.Duration
+	// ConnPoll is hoe vaak de controle de verbindingen van de bronnode telt.
+	ConnPoll time.Duration
+	// LockWait is hoe lang Opruimen wacht als Proxmox de VM vergrendeld heeft.
+	LockWait time.Duration
+	// CleanEvery is het ritme van de opruimer.
+	CleanEvery time.Duration
+	// MaxSandboxAge: een oudere sandbox ruimt de opruimer altijd op.
+	MaxSandboxAge time.Duration
+	// JobLimit is de limiet van de hele taak.
+	JobLimit time.Duration
+
+	runner    *jobs.Runner
+	conns     Connections
+	sbMu      sync.Mutex
+	sbLocks   map[uuid.UUID]*sync.Mutex
+	cleanKick chan struct{}
+
 	kick  chan struct{}
 	invMu sync.Mutex
 	evMu  sync.Mutex
@@ -89,6 +121,10 @@ func NewService(pool *pgxpool.Pool, ev *events.Writer, log *slog.Logger, pve *pr
 	return &Service{
 		pool: pool, q: store.New(pool), ev: ev, log: log, pve: pve,
 		InventoryEvery: 15 * time.Minute, Tick: time.Minute, Now: time.Now,
+		BootTimeout: 10 * time.Minute, NoAgentWait: 30 * time.Second, AgentTimeout: time.Minute,
+		Poll: 3 * time.Second, ConnPoll: 2 * time.Second, LockWait: 10 * time.Minute,
+		CleanEvery: 5 * time.Minute, MaxSandboxAge: 3 * time.Hour, JobLimit: 2 * time.Hour,
+		sbLocks: map[uuid.UUID]*sync.Mutex{}, cleanKick: make(chan struct{}, 1),
 		kick: make(chan struct{}, 1),
 	}
 }
@@ -101,8 +137,12 @@ func (s *Service) Kick() {
 	}
 }
 
-// Run leest de back-ups op tijd opnieuw en berekent de versheid tot ctx stopt.
+// Run leest de back-ups op tijd opnieuw en berekent de versheid tot ctx
+// stopt. Staat de back-upcontrole aan, dan loopt ook de opruimer.
 func (s *Service) Run(ctx context.Context) {
+	if s.runner != nil {
+		go s.cleaner(ctx)
+	}
 	t := time.NewTicker(s.Tick)
 	defer t.Stop()
 	for {

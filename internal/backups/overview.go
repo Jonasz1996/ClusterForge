@@ -57,6 +57,79 @@ type Item struct {
 	MaxAgeHours int        `json:"max_age_hours"`
 	Latest      *Volume    `json:"latest"`
 	Count       int        `json:"count"`
+	// LastVerification is de laatste afgeronde back-upcontrole van de node.
+	LastVerification *Verification `json:"last_verification"`
+}
+
+// Verification is de uitkomst van een back-upcontrole.
+type Verification struct {
+	RunID      uuid.UUID  `json:"run_id"`
+	Result     string     `json:"result"`
+	Summary    string     `json:"summary"`
+	FinishedAt *time.Time `json:"finished_at"`
+	// RecoverySeconds is de hersteltijd: terugzetten plus opstarten.
+	RecoverySeconds *float64 `json:"recovery_seconds"`
+}
+
+// Sandbox is een sandbox die nog kan bestaan.
+type Sandbox struct {
+	ID             uuid.UUID  `json:"id"`
+	ConnectionID   uuid.UUID  `json:"connection_id"`
+	ConnectionName string     `json:"connection_name"`
+	VMID           int        `json:"vmid"`
+	SourceVMID     int        `json:"source_vmid"`
+	Source         *Ref       `json:"source"`
+	RunID          *uuid.UUID `json:"run_id"`
+	// Running is true zolang de controle van de sandbox nog loopt.
+	Running     bool       `json:"running"`
+	Volid       string     `json:"volid"`
+	State       string     `json:"state"`
+	Host        string     `json:"host"`
+	Storage     string     `json:"storage"`
+	Error       string     `json:"error"`
+	CreatedAt   time.Time  `json:"created_at"`
+	DestroyedAt *time.Time `json:"destroyed_at"`
+}
+
+func sandboxOf(b store.BackupSandbox, connName string, source *string, running bool) Sandbox {
+	sb := Sandbox{
+		ID: b.ID, ConnectionID: b.ConnectionID, ConnectionName: connName, VMID: int(b.Vmid),
+		SourceVMID: int(b.SourceVmid), RunID: b.RunID, Volid: b.Volid, State: b.State, Host: b.Host,
+		Storage: b.Storage, Error: b.Error, CreatedAt: b.CreatedAt, DestroyedAt: b.DestroyedAt, Running: running,
+	}
+	if b.SourceNodeID != nil {
+		sb.Source = &Ref{ID: *b.SourceNodeID, Name: deref(source)}
+	}
+	return sb
+}
+
+// Sandbox geeft één sandbox, ook een opgeruimde.
+func (s *Service) Sandbox(ctx context.Context, id uuid.UUID) (Sandbox, error) {
+	r, err := s.q.GetSandboxView(ctx, id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Sandbox{}, ErrNotFound
+	}
+	if err != nil {
+		return Sandbox{}, err
+	}
+	running := r.RunResult == nil && r.JobStatus.Valid &&
+		(r.JobStatus.JobStatus == store.JobStatusQueued || r.JobStatus.JobStatus == store.JobStatusRunning)
+	return sandboxOf(r.BackupSandbox, r.ConnectionName, r.SourceHostname, running && liveState(r.BackupSandbox.State)), nil
+}
+
+// RunSandbox geeft de sandbox van een run; nil als er geen was.
+func (s *Service) RunSandbox(ctx context.Context, run store.TestRun, running bool) (*Sandbox, error) {
+	b, err := s.q.GetRunSandbox(ctx, &run.ID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	var def Definition
+	_ = json.Unmarshal(run.Definition, &def)
+	sb := sandboxOf(b, def.ConnectionName, &run.Hostname, running && liveState(b.State))
+	return &sb, nil
 }
 
 // Uncovered is een VM of container die in geen back-upjob zit.
@@ -97,16 +170,21 @@ type Overview struct {
 	Items       []Item         `json:"items"`
 	Connections []Connection   `json:"connections"`
 	Clusters    []ClusterState `json:"clusters"`
+	Sandboxes   []Sandbox      `json:"sandboxes"`
 }
 
 // Overview geeft de stand van elke bewaakte VM en elke koppeling.
 func (s *Service) Overview(ctx context.Context) (Overview, error) {
-	out := Overview{Items: []Item{}, Connections: []Connection{}, Clusters: []ClusterState{}}
+	out := Overview{Items: []Item{}, Connections: []Connection{}, Clusters: []ClusterState{}, Sandboxes: []Sandbox{}}
 	targets, err := s.q.ListBackupTargets(ctx)
 	if err != nil {
 		return out, err
 	}
 	latest, err := latestByVM(ctx, s.q)
+	if err != nil {
+		return out, err
+	}
+	verified, err := s.lastVerifications(ctx)
 	if err != nil {
 		return out, err
 	}
@@ -116,6 +194,9 @@ func (s *Service) Overview(ctx context.Context) (Overview, error) {
 	linked := map[key]*Ref{}
 	for _, t := range targets {
 		it := item(t, latest, now)
+		if it.Node != nil {
+			it.LastVerification = verified[it.Node.ID]
+		}
 		out.Items = append(out.Items, it)
 		if it.Node != nil {
 			linked[key{t.ConnectionID, t.Vmid}] = it.Node
@@ -149,6 +230,45 @@ func (s *Service) Overview(ctx context.Context) (Overview, error) {
 			}
 		}
 		out.Connections = append(out.Connections, cn)
+	}
+	out.Sandboxes, err = s.sandboxes(ctx)
+	return out, err
+}
+
+func (s *Service) lastVerifications(ctx context.Context) (map[uuid.UUID]*Verification, error) {
+	rows, err := s.q.LatestVerifications(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[uuid.UUID]*Verification, len(rows))
+	for _, r := range rows {
+		if r.NodeID == nil || r.Result == nil {
+			continue
+		}
+		v := &Verification{RunID: r.ID, Result: *r.Result, Summary: r.Summary, FinishedAt: r.FinishedAt}
+		var m Measurements
+		if json.Unmarshal(r.Measurements, &m) == nil && m.RestoreSeconds != nil {
+			total := *m.RestoreSeconds
+			if m.BootSeconds != nil {
+				total += *m.BootSeconds
+			}
+			v.RecoverySeconds = &total
+		}
+		out[*r.NodeID] = v
+	}
+	return out, nil
+}
+
+func (s *Service) sandboxes(ctx context.Context) ([]Sandbox, error) {
+	rows, err := s.q.ListLiveSandboxes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := []Sandbox{}
+	for _, r := range rows {
+		running := r.RunResult == nil && r.JobStatus.Valid &&
+			(r.JobStatus.JobStatus == store.JobStatusQueued || r.JobStatus.JobStatus == store.JobStatusRunning)
+		out = append(out, sandboxOf(r.BackupSandbox, r.ConnectionName, r.SourceHostname, running))
 	}
 	return out, nil
 }

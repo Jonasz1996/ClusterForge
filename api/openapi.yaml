@@ -814,6 +814,57 @@ paths:
               schema: { $ref: "#/components/schemas/NodeBackups" }
         "401": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /nodes/{nodeId}/backups/verify:
+    parameters:
+      - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: verifyNodeBackup
+      summary: Back-up controleren in een sandbox (admin)
+      description: >-
+        Zet de nieuwste back-up van de VM van de node terug als tijdelijke VM
+        in pool cf-sandbox, met elke netwerkkaart op link_down, start hem,
+        controleert hem via de guest agent en verwijdert hem altijd weer. Met
+        volid een andere back-up van dezelfde VM. 409 met code busy als er al
+        een failovertest of back-upcontrole loopt, of conflict als de node
+        geen VM heeft, het een container is of er geen back-up is.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BackupVerifyInput" }
+      responses:
+        "202":
+          description: In de wachtrij
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TestRun" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /backup-sandboxes/{sandboxId}/cleanup:
+    parameters:
+      - { name: sandboxId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: cleanupBackupSandbox
+      summary: Een sandbox nu opruimen (admin)
+      description: >-
+        Verwijdert de sandbox langs dezelfde bewaakte weg als de opruimer,
+        bijvoorbeeld na destroy_failed. Wacht tot Proxmox klaar is. 409 als de
+        controle nog loopt, Proxmox de VM vergrendeld heeft of de sandbox al
+        opgeruimd is.
+      responses:
+        "200":
+          description: Opgeruimd, of de VM bestond niet (meer)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BackupSandbox" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
   /clusters/{clusterId}/drift:
     parameters:
       - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -1033,6 +1084,24 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
+  /test-runs:
+    get:
+      operationId: listTestRuns
+      summary: Runs van failovertests en back-upcontroles, nieuwste eerst
+      parameters:
+        - { name: kind, in: query, required: false, schema: { type: string, enum: [failover.test, backup.verify] } }
+        - { name: cluster_id, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: node_id, in: query, required: false, schema: { type: string, format: uuid } }
+        - { name: result, in: query, required: false, schema: { $ref: "#/components/schemas/TestRunResult" } }
+        - { name: limit, in: query, required: false, schema: { type: integer, minimum: 1, maximum: 200, default: 50 } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TestRunList" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
   /test-runs/{runId}:
     parameters:
       - { name: runId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -1389,7 +1458,7 @@ components:
       properties:
         username: { type: string }
         password: { type: string, format: password }
-        totp_code: { type: string, description: Zescijferige code, alleen als TOTP aan staat }
+        totp_code: { type: string, description: "Zescijferige code, alleen als TOTP aan staat" }
     Role:
       type: string
       enum: [admin, viewer]
@@ -1478,7 +1547,8 @@ components:
           enum: ["", ok, failed]
     BackupItem:
       type: object
-      required: [connection_id, connection_name, vmid, name, label, guest_type, node, cluster, watched, freshness, reason, since, max_age_hours, latest, count]
+      required: [connection_id, connection_name, vmid, name, label, guest_type, node, cluster, watched, freshness, reason, since, max_age_hours, latest, count,
+        last_verification]
       properties:
         connection_id: { type: string, format: uuid }
         connection_name: { type: string }
@@ -1512,6 +1582,93 @@ components:
           allOf: [{ $ref: "#/components/schemas/BackupVolume" }]
           nullable: true
         count: { type: integer }
+        last_verification:
+          allOf: [{ $ref: "#/components/schemas/BackupVerification" }]
+          nullable: true
+          description: De laatste afgeronde back-upcontrole van de node
+    BackupVerification:
+      type: object
+      required: [run_id, result, summary, finished_at, recovery_seconds]
+      properties:
+        run_id: { type: string, format: uuid }
+        result: { $ref: "#/components/schemas/TestRunResult" }
+        summary: { type: string }
+        finished_at: { type: string, format: date-time, nullable: true }
+        recovery_seconds:
+          type: number
+          format: double
+          nullable: true
+          description: Hersteltijd, terugzetten plus opstarten
+    BackupSandbox:
+      type: object
+      required: [id, connection_id, connection_name, vmid, source_vmid, source, run_id, running, volid, state, host, storage, error,
+        created_at, destroyed_at]
+      properties:
+        id: { type: string, format: uuid }
+        connection_id: { type: string, format: uuid }
+        connection_name: { type: string }
+        vmid: { type: integer, description: Het VMID van de sandbox }
+        source_vmid: { type: integer, description: Het VMID van de VM waarvan de back-up is }
+        source:
+          allOf: [{ $ref: "#/components/schemas/BackupRef" }]
+          nullable: true
+          description: De node van de bron-VM
+        run_id: { type: string, format: uuid, nullable: true }
+        running: { type: boolean, description: De controle van deze sandbox loopt nog }
+        volid: { type: string }
+        state:
+          type: string
+          enum: [reserved, present, destroyed, destroy_failed, none]
+          description: none als de VM er nooit kwam of niet (meer) in pool cf-sandbox zit
+        host: { type: string }
+        storage: { type: string }
+        error: { type: string }
+        created_at: { type: string, format: date-time }
+        destroyed_at: { type: string, format: date-time, nullable: true }
+    BackupVerifyInput:
+      type: object
+      properties:
+        volid: { type: string, description: Een andere back-up van dezelfde VM; leeg is de nieuwste }
+    BackupVerifyDefinition:
+      type: object
+      required: [volid, backup_time, size, format, backup_storage, connection_id, connection_name, source_vmid, guest_name, chosen]
+      properties:
+        volid: { type: string }
+        backup_time: { type: string, format: date-time }
+        size: { type: integer, format: int64 }
+        format: { type: string }
+        backup_storage: { type: string }
+        connection_id: { type: string, format: uuid }
+        connection_name: { type: string }
+        source_vmid: { type: integer }
+        guest_name: { type: string }
+        chosen: { type: boolean, description: Iemand koos deze back-up; anders de nieuwste }
+    BackupVerifyMeasurements:
+      type: object
+      required: [restore_seconds, boot_seconds, check_seconds, cleanup_seconds, total_seconds, host, storage, sandbox_vmid, hostname, os,
+        filesystems, destroyed_at]
+      properties:
+        restore_seconds: { type: number, format: double, nullable: true }
+        boot_seconds: { type: number, format: double, nullable: true, description: Van starten tot de guest agent antwoordt }
+        check_seconds: { type: number, format: double, nullable: true }
+        cleanup_seconds: { type: number, format: double, nullable: true }
+        total_seconds: { type: number, format: double, nullable: true }
+        host: { type: string }
+        storage: { type: string, description: De sandbox-storage }
+        sandbox_vmid: { type: integer }
+        hostname: { type: string, description: Wat de guest agent als hostname gaf }
+        os: { type: string }
+        filesystems: { type: integer }
+        destroyed_at: { type: string, format: date-time, nullable: true }
+    BackupVerifyReport:
+      type: object
+      required: [definition, measurements, sandbox]
+      properties:
+        definition: { $ref: "#/components/schemas/BackupVerifyDefinition" }
+        measurements: { $ref: "#/components/schemas/BackupVerifyMeasurements" }
+        sandbox:
+          allOf: [{ $ref: "#/components/schemas/BackupSandbox" }]
+          nullable: true
     BackupUncovered:
       type: object
       required: [vmid, name, type, node]
@@ -1552,7 +1709,7 @@ components:
         freshness: { $ref: "#/components/schemas/BackupFreshness" }
     BackupOverview:
       type: object
-      required: [items, connections, clusters]
+      required: [items, connections, clusters, sandboxes]
       properties:
         items:
           type: array
@@ -1563,6 +1720,10 @@ components:
         clusters:
           type: array
           items: { $ref: "#/components/schemas/BackupClusterState" }
+        sandboxes:
+          type: array
+          description: Sandboxes die nog kunnen bestaan, ook na een mislukte verwijdering
+          items: { $ref: "#/components/schemas/BackupSandbox" }
     NodeBackups:
       type: object
       required: [item, backups]
@@ -1764,17 +1925,18 @@ components:
       enum: [pass, warning, fail, error, skipped, canceled]
     TestRunCheck:
       type: object
-      required: [name, ok, detail]
+      required: [name, ok, detail, warning]
       properties:
         name: { type: string }
         ok: { type: boolean }
         detail: { type: string }
+        warning: { type: boolean, description: "Niet in orde, maar geen reden om af te keuren" }
     TestRunEvent:
       type: object
       required: [t_ms, kind, text]
       properties:
-        t_ms: { type: integer, format: int64, description: Milliseconden na de storing }
-        kind: { type: string, enum: [fault, down, up, takeover, clear, ready, return] }
+        t_ms: { type: integer, format: int64, description: "Milliseconden na de storing, of bij een back-upcontrole na de start" }
+        kind: { type: string, enum: [fault, down, up, takeover, clear, ready, return, step] }
         text: { type: string }
     TestRunSegment:
       type: object
@@ -1814,16 +1976,16 @@ components:
     TestRun:
       type: object
       required: [id, kind, trigger, cluster_id, cluster_name, test_id, node_id, hostname, job_id, job_status, result, restored,
-        summary, checks, timeline, measurements, definition, requested_by, created_at, finished_at]
+        summary, checks, timeline, measurements, definition, backup, requested_by, created_at, finished_at]
       properties:
         id: { type: string, format: uuid }
-        kind: { type: string, description: failover.test }
+        kind: { type: string, enum: [failover.test, backup.verify] }
         trigger: { type: string, enum: [manual, schedule] }
         cluster_id: { type: string, format: uuid, nullable: true }
         cluster_name: { type: string }
         test_id: { type: string, format: uuid, nullable: true }
         node_id: { type: string, format: uuid, nullable: true }
-        hostname: { type: string, description: De node die de storing kreeg }
+        hostname: { type: string, description: "De node die de storing kreeg, of waarvan de back-up gecontroleerd werd" }
         job_id: { type: string, format: uuid, nullable: true }
         job_status:
           allOf: [{ $ref: "#/components/schemas/JobStatus" }]
@@ -1836,8 +1998,18 @@ components:
         summary: { type: string }
         checks: { type: array, items: { $ref: "#/components/schemas/TestRunCheck" } }
         timeline: { type: array, items: { $ref: "#/components/schemas/TestRunEvent" } }
-        measurements: { $ref: "#/components/schemas/FailoverMeasurements" }
-        definition: { $ref: "#/components/schemas/FailoverDefinition" }
+        measurements:
+          allOf: [{ $ref: "#/components/schemas/FailoverMeasurements" }]
+          nullable: true
+          description: Alleen bij failover.test
+        definition:
+          allOf: [{ $ref: "#/components/schemas/FailoverDefinition" }]
+          nullable: true
+          description: Alleen bij failover.test
+        backup:
+          allOf: [{ $ref: "#/components/schemas/BackupVerifyReport" }]
+          nullable: true
+          description: Alleen bij backup.verify
         requested_by: { type: string, nullable: true, description: Gebruikersnaam van wie de run vroeg }
         created_at: { type: string, format: date-time }
         finished_at: { type: string, format: date-time, nullable: true }
@@ -2292,7 +2464,7 @@ components:
       properties:
         id: { type: string, format: uuid }
         version: { type: string }
-        commands: { type: boolean, description: De agent kan commando's uitvoeren (herstarten, onderhoud); oudere agents niet }
+        commands: { type: boolean, description: "De agent kan commando's uitvoeren (herstarten, onderhoud); oudere agents niet" }
         enrolled_at: { type: string, format: date-time }
         last_seen_at: { type: string, format: date-time, nullable: true }
         connection: { $ref: "#/components/schemas/AgentConnection" }
@@ -2567,13 +2739,14 @@ components:
       enum: [qemu, lxc]
     ProxmoxGuest:
       type: object
-      required: [vmid, type, name, host, status, template, cpu, maxcpu, mem, maxmem, disk, maxdisk, uptime, tags, lock, node_id, node_hostname]
+      required: [vmid, type, name, host, status, template, cpu, maxcpu, mem, maxmem, disk, maxdisk, uptime, tags, lock, node_id, node_hostname,
+        sandbox]
       properties:
         vmid: { type: integer }
         type: { $ref: "#/components/schemas/GuestType" }
         name: { type: string }
         host: { type: string, description: De Proxmox-host waar de VM nu staat }
-        status: { type: string, description: running, stopped of paused }
+        status: { type: string, description: "running, stopped of paused" }
         template: { type: boolean }
         cpu: { type: number, format: double }
         maxcpu: { type: number, format: double }
@@ -2583,9 +2756,12 @@ components:
         maxdisk: { type: integer, format: int64 }
         uptime: { type: integer, format: int64 }
         tags: { type: array, items: { type: string } }
-        lock: { type: string, description: Lopende bewerking in Proxmox, zoals migrate of backup }
+        lock: { type: string, description: "Lopende bewerking in Proxmox, zoals migrate of backup" }
         node_id: { type: string, format: uuid, nullable: true, description: De gekoppelde node in ClusterForge }
         node_hostname: { type: string, nullable: true }
+        sandbox:
+          type: boolean
+          description: Een tijdelijke sandbox van een back-upcontrole; daarop kan geen VM-actie
     ProxmoxStorage:
       type: object
       required: [name, host, shared, type, content, disk, maxdisk]
@@ -2709,7 +2885,7 @@ components:
       required: [name, count, count_param]
       properties:
         name: { type: string }
-        count: { type: integer, nullable: true, description: Vast aantal nodes, of null als een parameter het bepaalt }
+        count: { type: integer, nullable: true, description: "Vast aantal nodes, of null als een parameter het bepaalt" }
         count_param: { type: string, nullable: true, description: De parameter met het aantal nodes }
     Template:
       type: object
@@ -2743,7 +2919,7 @@ components:
         first_ip: { type: string, description: "Adres van de eerste node met prefix, zoals 10.0.20.11/24; de volgende nodes krijgen de adressen erna" }
         gateway: { type: string }
         dns: { type: array, items: { type: string } }
-        ssh_keys: { type: string, description: Publieke SSH-sleutels, één per regel }
+        ssh_keys: { type: string, description: "Publieke SSH-sleutels, één per regel" }
     DeployInput:
       type: object
       required: [template, cluster, params, target, server_url]

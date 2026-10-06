@@ -716,6 +716,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/nodes/{nodeId}/backups/verify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Back-up controleren in een sandbox (admin)
+         * @description Zet de nieuwste back-up van de VM van de node terug als tijdelijke VM in pool cf-sandbox, met elke netwerkkaart op link_down, start hem, controleert hem via de guest agent en verwijdert hem altijd weer. Met volid een andere back-up van dezelfde VM. 409 met code busy als er al een failovertest of back-upcontrole loopt, of conflict als de node geen VM heeft, het een container is of er geen back-up is.
+         */
+        post: operations["verifyNodeBackup"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/backup-sandboxes/{sandboxId}/cleanup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sandboxId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Een sandbox nu opruimen (admin)
+         * @description Verwijdert de sandbox langs dezelfde bewaakte weg als de opruimer, bijvoorbeeld na destroy_failed. Wacht tot Proxmox klaar is. 409 als de controle nog loopt, Proxmox de VM vergrendeld heeft of de sandbox al opgeruimd is.
+         */
+        post: operations["cleanupBackupSandbox"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/clusters/{clusterId}/drift": {
         parameters: {
             query?: never;
@@ -885,6 +929,23 @@ export interface paths {
          * @description Doet de voorcontrole synchroon en zet de run en de taak in één transactie in de wachtrij, door het clusterslot en het testslot. 409 met code prod_locked op prod, precheck_failed met de controles, of busy als er al een test of een taak in het cluster loopt.
          */
         post: operations["startFailoverTest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/test-runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Runs van failovertests en back-upcontroles, nieuwste eerst */
+        get: operations["listTestRuns"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -1189,7 +1250,7 @@ export interface components {
             username: string;
             /** Format: password */
             password: string;
-            /** @description Zescijferige code */
+            /** @description Zescijferige code, alleen als TOTP aan staat */
             totp_code?: string;
         };
         /** @enum {string} */
@@ -1296,6 +1357,101 @@ export interface components {
             max_age_hours: number;
             latest: components["schemas"]["BackupVolume"] | null;
             count: number;
+            /** @description De laatste afgeronde back-upcontrole van de node */
+            last_verification: components["schemas"]["BackupVerification"] | null;
+        };
+        BackupVerification: {
+            /** Format: uuid */
+            run_id: string;
+            result: components["schemas"]["TestRunResult"];
+            summary: string;
+            /** Format: date-time */
+            finished_at: string | null;
+            /**
+             * Format: double
+             * @description Hersteltijd, terugzetten plus opstarten
+             */
+            recovery_seconds: number | null;
+        };
+        BackupSandbox: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            connection_id: string;
+            connection_name: string;
+            /** @description Het VMID van de sandbox */
+            vmid: number;
+            /** @description Het VMID van de VM waarvan de back-up is */
+            source_vmid: number;
+            /** @description De node van de bron-VM */
+            source: components["schemas"]["BackupRef"] | null;
+            /** Format: uuid */
+            run_id: string | null;
+            /** @description De controle van deze sandbox loopt nog */
+            running: boolean;
+            volid: string;
+            /**
+             * @description none als de VM er nooit kwam of niet (meer) in pool cf-sandbox zit
+             * @enum {string}
+             */
+            state: "reserved" | "present" | "destroyed" | "destroy_failed" | "none";
+            host: string;
+            storage: string;
+            error: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            destroyed_at: string | null;
+        };
+        BackupVerifyInput: {
+            /** @description Een andere back-up van dezelfde VM; leeg is de nieuwste */
+            volid?: string;
+        };
+        BackupVerifyDefinition: {
+            volid: string;
+            /** Format: date-time */
+            backup_time: string;
+            /** Format: int64 */
+            size: number;
+            format: string;
+            backup_storage: string;
+            /** Format: uuid */
+            connection_id: string;
+            connection_name: string;
+            source_vmid: number;
+            guest_name: string;
+            /** @description Iemand koos deze back-up; anders de nieuwste */
+            chosen: boolean;
+        };
+        BackupVerifyMeasurements: {
+            /** Format: double */
+            restore_seconds: number | null;
+            /**
+             * Format: double
+             * @description Van starten tot de guest agent antwoordt
+             */
+            boot_seconds: number | null;
+            /** Format: double */
+            check_seconds: number | null;
+            /** Format: double */
+            cleanup_seconds: number | null;
+            /** Format: double */
+            total_seconds: number | null;
+            host: string;
+            /** @description De sandbox-storage */
+            storage: string;
+            sandbox_vmid: number;
+            /** @description Wat de guest agent als hostname gaf */
+            hostname: string;
+            os: string;
+            filesystems: number;
+            /** Format: date-time */
+            destroyed_at: string | null;
+        };
+        BackupVerifyReport: {
+            definition: components["schemas"]["BackupVerifyDefinition"];
+            measurements: components["schemas"]["BackupVerifyMeasurements"];
+            sandbox: components["schemas"]["BackupSandbox"] | null;
         };
         BackupUncovered: {
             vmid: number;
@@ -1328,6 +1484,8 @@ export interface components {
             items: components["schemas"]["BackupItem"][];
             connections: components["schemas"]["BackupConnection"][];
             clusters: components["schemas"]["BackupClusterState"][];
+            /** @description Sandboxes die nog kunnen bestaan, ook na een mislukte verwijdering */
+            sandboxes: components["schemas"]["BackupSandbox"][];
         };
         NodeBackups: {
             item: components["schemas"]["BackupItem"] | null;
@@ -1515,15 +1673,17 @@ export interface components {
             name: string;
             ok: boolean;
             detail: string;
+            /** @description Niet in orde, maar geen reden om af te keuren */
+            warning: boolean;
         };
         TestRunEvent: {
             /**
              * Format: int64
-             * @description Milliseconden na de storing
+             * @description Milliseconden na de storing, of bij een back-upcontrole na de start
              */
             t_ms: number;
             /** @enum {string} */
-            kind: "fault" | "down" | "up" | "takeover" | "clear" | "ready" | "return";
+            kind: "fault" | "down" | "up" | "takeover" | "clear" | "ready" | "return" | "step";
             text: string;
         };
         TestRunSegment: {
@@ -1577,8 +1737,8 @@ export interface components {
         TestRun: {
             /** Format: uuid */
             id: string;
-            /** @description failover.test */
-            kind: string;
+            /** @enum {string} */
+            kind: "failover.test" | "backup.verify";
             /** @enum {string} */
             trigger: "manual" | "schedule";
             /** Format: uuid */
@@ -1588,7 +1748,7 @@ export interface components {
             test_id: string | null;
             /** Format: uuid */
             node_id: string | null;
-            /** @description De node die de storing kreeg */
+            /** @description De node die de storing kreeg, of waarvan de back-up gecontroleerd werd */
             hostname: string;
             /** Format: uuid */
             job_id: string | null;
@@ -1600,8 +1760,12 @@ export interface components {
             summary: string;
             checks: components["schemas"]["TestRunCheck"][];
             timeline: components["schemas"]["TestRunEvent"][];
-            measurements: components["schemas"]["FailoverMeasurements"];
-            definition: components["schemas"]["FailoverDefinition"];
+            /** @description Alleen bij failover.test */
+            measurements: components["schemas"]["FailoverMeasurements"] | null;
+            /** @description Alleen bij failover.test */
+            definition: components["schemas"]["FailoverDefinition"] | null;
+            /** @description Alleen bij backup.verify */
+            backup: components["schemas"]["BackupVerifyReport"] | null;
             /** @description Gebruikersnaam van wie de run vroeg */
             requested_by: string | null;
             /** Format: date-time */
@@ -1980,7 +2144,7 @@ export interface components {
             /** Format: uuid */
             id: string;
             version: string;
-            /** @description De agent kan commando's uitvoeren (herstarten */
+            /** @description De agent kan commando's uitvoeren (herstarten, onderhoud); oudere agents niet */
             commands: boolean;
             /** Format: date-time */
             enrolled_at: string;
@@ -2243,7 +2407,7 @@ export interface components {
             name: string;
             /** @description De Proxmox-host waar de VM nu staat */
             host: string;
-            /** @description running */
+            /** @description running, stopped of paused */
             status: string;
             template: boolean;
             /** Format: double */
@@ -2261,7 +2425,7 @@ export interface components {
             /** Format: int64 */
             uptime: number;
             tags: string[];
-            /** @description Lopende bewerking in Proxmox */
+            /** @description Lopende bewerking in Proxmox, zoals migrate of backup */
             lock: string;
             /**
              * Format: uuid
@@ -2269,6 +2433,8 @@ export interface components {
              */
             node_id: string | null;
             node_hostname: string | null;
+            /** @description Een tijdelijke sandbox van een back-upcontrole; daarop kan geen VM-actie */
+            sandbox: boolean;
         };
         ProxmoxStorage: {
             name: string;
@@ -2391,7 +2557,7 @@ export interface components {
         };
         TemplateRole: {
             name: string;
-            /** @description Vast aantal nodes */
+            /** @description Vast aantal nodes, of null als een parameter het bepaalt */
             count: number | null;
             /** @description De parameter met het aantal nodes */
             count_param: string | null;
@@ -2428,7 +2594,7 @@ export interface components {
             first_ip?: string;
             gateway?: string;
             dns?: string[];
-            /** @description Publieke SSH-sleutels */
+            /** @description Publieke SSH-sleutels, één per regel */
             ssh_keys?: string;
         };
         DeployInput: {
@@ -3791,6 +3957,64 @@ export interface operations {
             404: components["responses"]["Error"];
         };
     };
+    verifyNodeBackup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["BackupVerifyInput"];
+            };
+        };
+        responses: {
+            /** @description In de wachtrij */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TestRun"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    cleanupBackupSandbox: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                sandboxId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Opgeruimd, of de VM bestond niet (meer) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackupSandbox"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+        };
+    };
     getClusterDrift: {
         parameters: {
             query?: never;
@@ -4127,6 +4351,34 @@ export interface operations {
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];
+        };
+    };
+    listTestRuns: {
+        parameters: {
+            query?: {
+                kind?: "failover.test" | "backup.verify";
+                cluster_id?: string;
+                node_id?: string;
+                result?: components["schemas"]["TestRunResult"];
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TestRunList"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
         };
     };
     getTestRun: {

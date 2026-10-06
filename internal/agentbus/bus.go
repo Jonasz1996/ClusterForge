@@ -19,6 +19,7 @@ import (
 	"log/slog"
 	"net"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -46,6 +47,17 @@ type Bus struct {
 	internalToken string
 	// fpKey maakt de vingerafdrukken van bestanden in agent.command.
 	fpKey []byte
+
+	// refusedMu en refused houden bij wanneer het laatste event over een
+	// geweigerde tweede verbinding per node geschreven werd.
+	refusedMu sync.Mutex
+	refused   map[uuid.UUID]time.Time
+
+	// authed houdt per sleutel de adressen bij van verbindingen die door
+	// Check kwamen. Connz toont ook een verbinding die nog inlogt of net
+	// geweigerd wordt; Connections telt die niet mee.
+	authedMu sync.Mutex
+	authed   map[string]map[string]struct{}
 }
 
 // Hooks geven berichten van agents door aan de rest van de server. Elk veld
@@ -82,7 +94,8 @@ func Start(ctx context.Context, listen string, pool *pgxpool.Pool, ev *events.Wr
 	}
 	b := &Bus{
 		log: log, pool: pool, q: q, ev: ev, hooks: hooks, fingerprint: fingerprint,
-		internalToken: hex.EncodeToString(tok),
+		internalToken: hex.EncodeToString(tok), refused: map[uuid.UUID]time.Time{},
+		authed: map[string]map[string]struct{}{},
 	}
 
 	tlsConfig := &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12}
@@ -158,6 +171,37 @@ func (b *Bus) Disconnect(nkeyPublic string) {
 	}
 }
 
+// Connections telt de open, ingelogde verbindingen met de sleutel van een
+// agent. Een verbinding die nog inlogt of geweigerd wordt, telt niet mee.
+func (b *Bus) Connections(nkeyPublic string) (int, error) {
+	return b.authedConnections(nkeyPublic, "")
+}
+
+// authedConnections telt de ingelogde verbindingen van een sleutel, voegt
+// add toe als die niet leeg is en vergeet adressen die niet meer open zijn.
+func (b *Bus) authedConnections(nkeyPublic, add string) (int, error) {
+	conns, err := b.ns.Connz(&server.ConnzOptions{User: nkeyPublic, Limit: 100})
+	if err != nil {
+		return 0, err
+	}
+	b.authedMu.Lock()
+	defer b.authedMu.Unlock()
+	known := b.authed[nkeyPublic]
+	live := map[string]struct{}{}
+	for _, ci := range conns.Conns {
+		addr := net.JoinHostPort(ci.IP, strconv.Itoa(ci.Port))
+		if _, ok := known[addr]; ok || addr == add {
+			live[addr] = struct{}{}
+		}
+	}
+	if len(live) == 0 {
+		delete(b.authed, nkeyPublic)
+	} else {
+		b.authed[nkeyPublic] = live
+	}
+	return len(live), nil
+}
+
 func (b *Bus) Close() {
 	if b.nc != nil {
 		_ = b.nc.Drain()
@@ -201,8 +245,87 @@ func (b *Bus) Check(c server.ClientAuthentication) bool {
 		b.log.Warn("agent geweigerd: onbekende of ingetrokken sleutel", "nkey", o.Nkey, "remote", c.RemoteAddress().String())
 		return false
 	}
+	if b.secondDuringSandbox(ctx, agent.NodeID, o.Nkey, c.RemoteAddress()) {
+		return false
+	}
+	if ra := c.RemoteAddress(); ra != nil {
+		if _, err := b.authedConnections(o.Nkey, ra.String()); err != nil {
+			b.log.Warn("NATS-verbindingen opzoeken mislukt", "err", err)
+		}
+	}
 	c.RegisterUser(&server.User{Username: agent.NodeID.String(), Permissions: agentPermissions(agent.NodeID)})
 	return true
+}
+
+// secondDuringSandbox is true als dit een tweede gelijktijdige verbinding
+// met de sleutel van een node is terwijl er een sandbox van zijn VM bestaat.
+// Die teruggezette kopie draagt dezelfde agent.json; kwam ze binnen, dan
+// kreeg ze de commando's van de echte node.
+func (b *Bus) secondDuringSandbox(ctx context.Context, nodeID uuid.UUID, nkey string, self net.Addr) bool {
+	conns, err := b.ns.Connz(&server.ConnzOptions{User: nkey, Limit: 100})
+	if err != nil {
+		b.log.Warn("NATS-verbindingen opzoeken mislukt", "err", err)
+		return false
+	}
+	others := 0
+	for _, ci := range conns.Conns {
+		// De verbinding die nu inlogt, staat zelf ook in de lijst.
+		if self != nil && net.JoinHostPort(ci.IP, strconv.Itoa(ci.Port)) == self.String() {
+			continue
+		}
+		others++
+	}
+	if others == 0 {
+		return false
+	}
+	active, err := b.q.SandboxActiveForNode(ctx, &nodeID)
+	if err != nil {
+		// Bij twijfel weigeren: de agent probeert het straks opnieuw.
+		b.log.Warn("sandbox-register lezen mislukt; tweede verbinding geweigerd", "node", nodeID, "err", err)
+		return true
+	}
+	if !active {
+		return false
+	}
+	remote := ""
+	if self != nil {
+		remote = self.String()
+	}
+	b.log.Warn("tweede agentverbinding geweigerd tijdens een back-upcontrole", "node", nodeID, "remote", remote)
+	b.refusedEvent(nodeID, remote)
+	return true
+}
+
+// refusedEvent schrijft hoogstens één event per node per tien minuten, los
+// van de NATS-goroutine.
+func (b *Bus) refusedEvent(nodeID uuid.UUID, remote string) {
+	b.refusedMu.Lock()
+	last, seen := b.refused[nodeID]
+	now := time.Now()
+	if seen && now.Sub(last) < 10*time.Minute {
+		b.refusedMu.Unlock()
+		return
+	}
+	b.refused[nodeID] = now
+	b.refusedMu.Unlock()
+	if b.ev == nil {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		e := events.Event{
+			Actor: events.System(), SubjectType: "node", SubjectID: nodeID.String(),
+			Action: "backup.sandbox_connection_refused", Payload: map[string]any{"remote": remote},
+		}
+		if n, err := b.q.GetNode(ctx, nodeID); err == nil {
+			e.ClusterID = n.Node.ClusterID
+			e.Payload["hostname"] = n.Node.Hostname
+		}
+		if err := b.ev.Write(ctx, nil, e); err != nil {
+			b.log.Warn("event schrijven mislukt", "err", err)
+		}
+	}()
 }
 
 func agentPermissions(nodeID uuid.UUID) *server.Permissions {

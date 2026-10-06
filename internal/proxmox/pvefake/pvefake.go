@@ -45,6 +45,13 @@ type Guest struct {
 	Files map[string]string
 	// NoAgent: de guest agent antwoordt nooit.
 	NoAgent bool
+	// Pool is de resource pool.
+	Pool string
+	// Hostname, OS en Filesystems zijn wat de guest agent meldt; leeg
+	// geeft de naam van de VM, Debian 13 en één bestandssysteem.
+	Hostname    string
+	OS          string
+	Filesystems []string
 
 	startedAt time.Time
 }
@@ -71,7 +78,12 @@ type Backup struct {
 	Protected bool
 	// Verify is de verificatie van Proxmox Backup Server: "", ok of failed.
 	Verify string
+	// Config is de VM-configuratie in de back-up; nil neemt die van de VM
+	// met hetzelfde VMID, of een eenvoudige.
+	Config map[string]string
 }
+
+func (b Backup) volid() string { return b.volume()["volid"].(string) }
 
 func (b Backup) volume() map[string]any {
 	typ := b.Type
@@ -138,6 +150,44 @@ type Server struct {
 	hideBackups bool
 	// backupJobs zijn de VMID's die in een back-upjob zitten.
 	backupJobs map[int]bool
+	// pools zijn de resource pools die bestaan.
+	pools map[string]bool
+}
+
+// AddPool maakt een resource pool, zoals pveum pool add.
+func (s *Server) AddPool(name string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.pools == nil {
+		s.pools = map[string]bool{}
+	}
+	s.pools[name] = true
+}
+
+// Guests geeft de VMID's van alle VM's en containers.
+func (s *Server) Guests() []int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.finishTasks()
+	var out []int
+	for _, g := range s.guests {
+		out = append(out, g.VMID)
+	}
+	return out
+}
+
+// SetGuestConfig zet één configsleutel van buitenaf.
+func (s *Server) SetGuestConfig(vmid int, key, value string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, g := range s.guests {
+		if g.VMID == vmid {
+			if g.Config == nil {
+				g.Config = map[string]string{}
+			}
+			g.Config[key] = value
+		}
+	}
 }
 
 // AddBackup zet een back-up op een storage.
@@ -308,14 +358,24 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST "+p+"/nodes/{node}/{type}/{vmid}/agent/file-write", s.fileWrite)
 	mux.HandleFunc("GET "+p+"/nodes/{node}/storage/{storage}/content", s.storageContent)
 	mux.HandleFunc("GET "+p+"/cluster/backup-info/not-backed-up", s.notBackedUp)
+	mux.HandleFunc("GET "+p+"/nodes/{node}/vzdump/extractconfig", s.extractConfig)
+	mux.HandleFunc("POST "+p+"/nodes/{node}/qemu", s.restore)
+	mux.HandleFunc("DELETE "+p+"/nodes/{node}/{type}/{vmid}", s.destroy)
+	mux.HandleFunc("GET "+p+"/nodes/{node}/{type}/{vmid}/agent/{command}", s.agentInfo)
 	mux.HandleFunc("GET "+p+"/nodes/{node}/tasks/{upid}/status", s.taskStatus)
 	mux.HandleFunc("GET "+p+"/nodes/{node}/tasks/{upid}/log", s.taskLog)
 	mux.HandleFunc("DELETE "+p+"/nodes/{node}/tasks/{upid}", s.stopTask)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
 		authorized := r.Header.Get("Authorization") == "PVEAPIToken="+s.token
-		if authorized && r.Method != http.MethodGet {
-			s.calls = append(s.calls, r.Method+" "+strings.TrimPrefix(r.URL.Path, p))
+		// Het teruglezen van een configuratie telt ook, zodat een test de
+		// volgorde wijzigen, teruglezen, starten kan bewijzen.
+		if authorized && (r.Method != http.MethodGet || strings.HasSuffix(r.URL.Path, "/config")) {
+			call := r.Method + " " + strings.TrimPrefix(r.URL.Path, p)
+			if r.URL.RawQuery != "" && r.Method == http.MethodDelete {
+				call += "?" + r.URL.RawQuery
+			}
+			s.calls = append(s.calls, call)
 		}
 		s.mu.Unlock()
 		if !authorized {
@@ -363,6 +423,9 @@ func (s *Server) resources(w http.ResponseWriter, r *http.Request) {
 		}
 		if g.Template {
 			m["template"] = 1
+		}
+		if g.Pool != "" {
+			m["pool"] = g.Pool
 		}
 		if g.Status == "running" {
 			m["cpu"], m["mem"], m["uptime"] = g.CPU, g.Mem, 3600
@@ -711,7 +774,13 @@ func (s *Server) setConfig(w http.ResponseWriter, r *http.Request) {
 	if g.Config == nil {
 		g.Config = map[string]string{}
 	}
+	for _, k := range strings.Split(r.PostForm.Get("delete"), ",") {
+		delete(g.Config, strings.TrimSpace(k))
+	}
 	for k, v := range r.PostForm {
+		if k == "delete" {
+			continue
+		}
 		if k == "sshkeys" {
 			// Proxmox wil de sleutels nog eens URL-gecodeerd.
 			if d, err := url.PathUnescape(v[0]); err == nil {
@@ -803,4 +872,242 @@ func (s *Server) fileWrite(w http.ResponseWriter, r *http.Request) {
 		go hook(vmid, name, file, content)
 	}
 	ok(w, nil)
+}
+
+// configText geeft een configuratie in de tekstvorm van Proxmox.
+func configText(cfg map[string]string) string {
+	keys := slices.Sorted(maps.Keys(cfg))
+	var b strings.Builder
+	for _, k := range keys {
+		fmt.Fprintf(&b, "%s: %s\n", k, cfg[k])
+	}
+	return b.String()
+}
+
+// backupConfig is de configuratie in een back-up.
+func (s *Server) backupConfig(b Backup) map[string]string {
+	if b.Config != nil {
+		return maps.Clone(b.Config)
+	}
+	for _, g := range s.guests {
+		if g.VMID == b.VMID && g.Config != nil {
+			cfg := maps.Clone(g.Config)
+			cfg["name"] = g.Name
+			return cfg
+		}
+	}
+	return map[string]string{
+		"name": fmt.Sprintf("vm%d", b.VMID), "cores": "2", "memory": "2048", "ostype": "l26", "agent": "1",
+		"scsi0":  fmt.Sprintf("local-lvm:vm-%d-disk-0,size=32G", b.VMID),
+		"net0":   "virtio=BC:24:11:00:00:01,bridge=vmbr0",
+		"scsihw": "virtio-scsi-single", "boot": "order=scsi0",
+	}
+}
+
+func (s *Server) findBackup(volid string) (Backup, bool) {
+	for _, b := range s.backups {
+		if b.volid() == volid {
+			return b, true
+		}
+	}
+	return Backup{}, false
+}
+
+func (s *Server) reachable(storage, node string) bool {
+	return slices.ContainsFunc(s.storages, func(st Storage) bool { return st.Name == storage && (st.Shared || st.Node == node) })
+}
+
+func (s *Server) extractConfig(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	volid := r.URL.Query().Get("volume")
+	b, found := s.findBackup(volid)
+	if !found || !s.reachable(b.Storage, r.PathValue("node")) {
+		fail(w, http.StatusInternalServerError, "unable to parse volume ID '"+volid+"'")
+		return
+	}
+	ok(w, configText(s.backupConfig(b)))
+}
+
+// isDisk is true voor een configsleutel die een schijf is.
+func isDisk(k string) bool {
+	for _, p := range []string{"scsi", "virtio", "sata", "ide", "efidisk", "tpmstate", "unused"} {
+		if rest, found := strings.CutPrefix(k, p); found && rest != "" && strings.Trim(rest, "0123456789") == "" {
+			return true
+		}
+	}
+	return false
+}
+
+// restore speelt qmrestore: een nieuwe VM uit een back-up, nooit over een
+// bestaande.
+func (s *Server) restore(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.finishTasks()
+	_ = r.ParseForm()
+	node := r.PathValue("node")
+	archive, storage, pool := r.PostForm.Get("archive"), r.PostForm.Get("storage"), r.PostForm.Get("pool")
+	vmid, _ := strconv.Atoi(r.PostForm.Get("vmid"))
+	if r.PostForm.Get("force") != "" {
+		fail(w, http.StatusBadRequest, "force is not allowed in this fake")
+		return
+	}
+	if archive == "" {
+		fail(w, http.StatusNotImplemented, "creating a VM without archive is not supported by this fake")
+		return
+	}
+	if vmid < 100 || slices.ContainsFunc(s.guests, func(g *Guest) bool { return g.VMID == vmid }) {
+		fail(w, http.StatusInternalServerError, fmt.Sprintf("unable to restore VM %d - VM %d already exists", vmid, vmid))
+		return
+	}
+	b, found := s.findBackup(archive)
+	if !found || !s.reachable(b.Storage, node) {
+		fail(w, http.StatusInternalServerError, "unable to parse volume ID '"+archive+"'")
+		return
+	}
+	if pool != "" && !s.pools[pool] {
+		fail(w, http.StatusInternalServerError, "pool '"+pool+"' does not exist")
+		return
+	}
+	if !s.reachable(storage, node) {
+		fail(w, http.StatusInternalServerError, "storage '"+storage+"' does not exist")
+		return
+	}
+	cfg := s.backupConfig(b)
+	n := 0
+	for _, k := range slices.Sorted(maps.Keys(cfg)) {
+		v := cfg[k]
+		vol, opts, _ := strings.Cut(v, ",")
+		if !isDisk(k) || vol == "none" || strings.Contains(v, "media=cdrom") && !strings.Contains(v, "cloudinit") {
+			continue
+		}
+		name := fmt.Sprintf("vm-%d-disk-%d", vmid, n)
+		if strings.Contains(v, "cloudinit") {
+			name = fmt.Sprintf("vm-%d-cloudinit", vmid)
+		} else {
+			n++
+		}
+		cfg[k] = storage + ":" + name
+		if opts != "" {
+			cfg[k] += "," + opts
+		}
+	}
+	if r.PostForm.Get("unique") == "1" {
+		for k, v := range cfg {
+			if rest, found := strings.CutPrefix(k, "net"); found && strings.Trim(rest, "0123456789") == "" {
+				// Een nieuw MAC-adres, zoals unique=1 bij Proxmox.
+				model, after, _ := strings.Cut(v, "=")
+				_, opts, _ := strings.Cut(after, ",")
+				cfg[k] = fmt.Sprintf("%s=BC:24:11:%02X:%02X:7A", model, vmid>>8&0xff, vmid&0xff)
+				if opts != "" {
+					cfg[k] += "," + opts
+				}
+			}
+		}
+	}
+	name := cfg["name"]
+	src, _ := s.guestByID(b.VMID)
+	g := &Guest{
+		Type: "qemu", VMID: vmid, Name: name, Node: node, Status: "stopped", Config: cfg, Files: map[string]string{},
+		Pool: pool, NoAgent: cfg["agent"] == "" || strings.HasPrefix(cfg["agent"], "0") || strings.Contains(cfg["agent"], "enabled=0"),
+	}
+	if c, err := strconv.Atoi(cfg["cores"]); err == nil {
+		g.MaxCPU = c
+	}
+	if m, err := strconv.ParseInt(cfg["memory"], 10, 64); err == nil {
+		g.MaxMem = m << 20
+	}
+	if src != nil {
+		g.Hostname, g.OS, g.Filesystems = src.Hostname, src.OS, slices.Clone(src.Filesystems)
+		if g.Hostname == "" {
+			g.Hostname = src.Name
+		}
+	}
+	s.guests = append(s.guests, g)
+	upid := s.newTask(node, "qmrestore", vmid, nil, "restore vma archive: "+archive, "map 'drive-scsi0' to '"+cfg["scsi0"]+"'")
+	if t := s.tasks[upid]; t.exit != "OK" {
+		// Een mislukt terugzetten laat geen VM achter.
+		s.guests = slices.DeleteFunc(s.guests, func(x *Guest) bool { return x == g })
+	}
+	ok(w, upid)
+}
+
+func (s *Server) guestByID(vmid int) (*Guest, bool) {
+	for _, g := range s.guests {
+		if g.VMID == vmid {
+			return g, true
+		}
+	}
+	return nil, false
+}
+
+func (s *Server) destroy(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.finishTasks()
+	g := s.guest(w, r)
+	if g == nil {
+		return
+	}
+	if r.URL.Query().Get("destroy-unreferenced-disks") == "1" {
+		fail(w, http.StatusBadRequest, "destroy-unreferenced-disks is not allowed in this fake")
+		return
+	}
+	if g.Config["protection"] == "1" {
+		fail(w, http.StatusInternalServerError, fmt.Sprintf("can't remove VM %d - protection mode enabled", g.VMID))
+		return
+	}
+	if g.Status == "running" {
+		fail(w, http.StatusInternalServerError, fmt.Sprintf("VM %d is running - destroy failed", g.VMID))
+		return
+	}
+	kind := map[string]string{"qemu": "qm", "lxc": "vz"}[g.Type] + "destroy"
+	ok(w, s.newTask(g.Node, kind, g.VMID, func() {
+		s.guests = slices.DeleteFunc(s.guests, func(x *Guest) bool { return x == g })
+	}, fmt.Sprintf("destroy VM %d", g.VMID)))
+}
+
+func (s *Server) agentInfo(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.finishTasks()
+	g := s.guest(w, r)
+	if g == nil {
+		return
+	}
+	if !s.agentReady(g) {
+		fail(w, http.StatusInternalServerError, "QEMU guest agent is not running")
+		return
+	}
+	var result any
+	switch r.PathValue("command") {
+	case "get-host-name":
+		h := g.Hostname
+		if h == "" {
+			h = g.Name
+		}
+		result = map[string]any{"host-name": h}
+	case "get-osinfo":
+		pretty := g.OS
+		if pretty == "" {
+			pretty = "Debian GNU/Linux 13 (trixie)"
+		}
+		result = map[string]any{"id": "debian", "name": "Debian GNU/Linux", "pretty-name": pretty, "version-id": "13"}
+	case "get-fsinfo":
+		mounts := g.Filesystems
+		if mounts == nil {
+			mounts = []string{"/"}
+		}
+		fs := []map[string]any{}
+		for i, m := range mounts {
+			fs = append(fs, map[string]any{"name": fmt.Sprintf("sda%d", i+1), "mountpoint": m, "type": "ext4",
+				"total-bytes": int64(30 << 30), "used-bytes": int64(4 << 30)})
+		}
+		result = fs
+	default:
+		fail(w, http.StatusNotImplemented, "Method not implemented")
+		return
+	}
+	ok(w, map[string]any{"result": result})
 }

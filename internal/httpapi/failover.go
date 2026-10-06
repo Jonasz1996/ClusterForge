@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/oapi-codegen/nullable"
 
+	"github.com/Jonasz1996/clusterforge/internal/backups"
 	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/failover"
 	"github.com/Jonasz1996/clusterforge/internal/httpapi/gen"
@@ -208,7 +209,17 @@ func (s *Server) writeTestRun(w http.ResponseWriter, r *http.Request, id uuid.UU
 	if row.ClusterName != nil {
 		name = *row.ClusterName
 	}
-	writeJSON(w, status, toAPIRun(row.TestRun, row.JobStatus, row.RequestedByName, name))
+	out := toAPIRun(row.TestRun, row.JobStatus, row.RequestedByName, name)
+	if row.TestRun.Kind == backups.KindVerify {
+		running := row.JobStatus.Valid && (row.JobStatus.JobStatus == store.JobStatusQueued || row.JobStatus.JobStatus == store.JobStatusRunning)
+		sb, err := s.backups.RunSandbox(r.Context(), row.TestRun, running)
+		if err != nil {
+			s.internalError(w, r, err)
+			return
+		}
+		out.Backup = nullable.NewNullableWithValue(backupReport(row.TestRun, sb))
+	}
+	writeJSON(w, status, out)
 }
 
 func (s *Server) RestoreTestRun(w http.ResponseWriter, r *http.Request, id uuid.UUID) {
@@ -317,11 +328,14 @@ func toAPITest(row store.ListFailoverTestsRow, last *gen.TestRun) gen.FailoverTe
 
 func toAPIRun(run store.TestRun, jobStatus store.NullJobStatus, requestedBy *string, clusterName string) gen.TestRun {
 	out := gen.TestRun{
-		Id: run.ID, Kind: run.Kind, Trigger: gen.TestRunTrigger(run.Trigger), ClusterId: nullableOf(run.ClusterID), ClusterName: clusterName,
-		TestId: nullableOf(run.TestID), NodeId: nullableOf(run.NodeID), Hostname: run.Hostname, JobId: nullableOf(run.JobID),
-		JobStatus: nullable.NewNullNullable[gen.JobStatus](), Result: nullable.NewNullNullable[gen.TestRunResult](),
-		Restored: nullableOf(run.Restored), Summary: run.Summary, Checks: []gen.TestRunCheck{}, Timeline: []gen.TestRunEvent{},
-		RequestedBy: nullableOf(requestedBy), CreatedAt: run.CreatedAt, FinishedAt: nullableOf(run.FinishedAt),
+		Id: run.ID, Kind: gen.TestRunKind(run.Kind), Trigger: gen.TestRunTrigger(run.Trigger), ClusterId: nullableOf(run.ClusterID),
+		ClusterName: clusterName, TestId: nullableOf(run.TestID), NodeId: nullableOf(run.NodeID), Hostname: run.Hostname,
+		JobId: nullableOf(run.JobID), JobStatus: nullable.NewNullNullable[gen.JobStatus](),
+		Result: nullable.NewNullNullable[gen.TestRunResult](), Restored: nullableOf(run.Restored), Summary: run.Summary,
+		Checks: []gen.TestRunCheck{}, Timeline: []gen.TestRunEvent{}, RequestedBy: nullableOf(requestedBy),
+		CreatedAt: run.CreatedAt, FinishedAt: nullableOf(run.FinishedAt),
+		Measurements: nullable.NewNullNullable[gen.FailoverMeasurements](),
+		Definition:   nullable.NewNullNullable[gen.FailoverDefinition](), Backup: nullable.NewNullNullable[gen.BackupVerifyReport](),
 	}
 	if jobStatus.Valid {
 		out.JobStatus = nullable.NewNullableWithValue(gen.JobStatus(jobStatus.JobStatus))
@@ -329,35 +343,46 @@ func toAPIRun(run store.TestRun, jobStatus store.NullJobStatus, requestedBy *str
 	if run.Result != nil {
 		out.Result = nullable.NewNullableWithValue(gen.TestRunResult(*run.Result))
 	}
-	var checks []failover.Check
+	// Failovertest en back-upcontrole delen de vorm van checks en timeline.
+	var checks []backups.Check
 	_ = json.Unmarshal(run.Checks, &checks)
 	for _, c := range checks {
-		out.Checks = append(out.Checks, gen.TestRunCheck{Name: c.Name, Ok: c.OK, Detail: c.Detail})
+		out.Checks = append(out.Checks, gen.TestRunCheck{Name: c.Name, Ok: c.OK, Detail: c.Detail, Warning: c.Warning})
 	}
-	var timeline []failover.TimelineEvent
+	var timeline []backups.TimelineEvent
 	_ = json.Unmarshal(run.Timeline, &timeline)
 	for _, e := range timeline {
 		out.Timeline = append(out.Timeline, gen.TestRunEvent{TMs: e.TMS, Kind: gen.TestRunEventKind(e.Kind), Text: e.Text})
 	}
+	switch run.Kind {
+	case failover.KindTest:
+		failoverReport(run, &out)
+	case backups.KindVerify:
+		out.Backup = nullable.NewNullableWithValue(backupReport(run, nil))
+	}
+	return out
+}
+
+func failoverReport(run store.TestRun, out *gen.TestRun) {
 	var m failover.Measurements
 	_ = json.Unmarshal(run.Measurements, &m)
-	out.Measurements = gen.FailoverMeasurements{
+	meas := gen.FailoverMeasurements{
 		DowntimeMs: nullableOf(m.DowntimeMS), ExpectMs: m.ExpectMS, WindowMs: m.WindowMS, TakeoverNode: m.TakeoverNode,
 		TakeoverNodeId: nullableOf(m.TakeoverNodeID), TakeoverMs: nullableOf(m.TakeoverMS), FailbackMs: nullableOf(m.FailbackMS),
 		ReturnedTo: m.ReturnedTo, EndMs: m.EndMS, Probe: make([]gen.TestRunSegment, 0, len(m.Probe)),
 	}
 	for _, sg := range m.Probe {
-		out.Measurements.Probe = append(out.Measurements.Probe, gen.TestRunSegment{FromMs: sg.FromMS, ToMs: sg.ToMS, Ok: sg.OK})
+		meas.Probe = append(meas.Probe, gen.TestRunSegment{FromMs: sg.FromMS, ToMs: sg.ToMS, Ok: sg.OK})
 	}
 	var def failover.Definition
 	_ = json.Unmarshal(run.Definition, &def)
-	out.Definition = gen.FailoverDefinition{
+	if meas.ExpectMs == 0 {
+		meas.ExpectMs = int64(def.MaxTakeoverSeconds) * 1000
+	}
+	out.Measurements = nullable.NewNullableWithValue(meas)
+	out.Definition = nullable.NewNullableWithValue(gen.FailoverDefinition{
 		TestId: def.TestID, Name: def.Name, Scenario: gen.FailoverScenario(def.Scenario), Service: def.Service, Unit: def.Unit,
 		Vip: def.VIP, MaxTakeoverSeconds: def.MaxTakeoverSeconds, ExpectFailback: def.ExpectFailback, Probe: toAPIProbe(def.Probe),
 		Description: failover.Describe(def.Scenario, def.Service),
-	}
-	if out.Measurements.ExpectMs == 0 {
-		out.Measurements.ExpectMs = int64(def.MaxTakeoverSeconds) * 1000
-	}
-	return out
+	})
 }

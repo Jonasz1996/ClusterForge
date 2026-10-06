@@ -4,11 +4,21 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 import { HistoryCard } from "@/components/audit/AuditList";
+import { BackupReport } from "@/components/backups/Verify";
 import { Checks, expectation, RunBadge } from "@/components/failover/Failover";
 import { QueryState } from "@/components/inventory/bits";
 import { Steps } from "@/components/jobs/Steps";
 import { Alert, Button, Card, PageHeader, cx } from "@/components/ui";
-import { probeText, seconds, useRestoreTestRun, useTestRun, type TestRun, type TestRunEvent } from "@/lib/failover";
+import {
+  probeText,
+  seconds,
+  useRestoreTestRun,
+  useTestRun,
+  type FailoverDefinition,
+  type FailoverMeasurements,
+  type TestRun,
+  type TestRunEvent,
+} from "@/lib/failover";
 import { useIsAdmin } from "@/lib/inventory";
 import { jobActive, useCancelJob, useJob } from "@/lib/proxmox";
 
@@ -33,13 +43,18 @@ function TestRunInner() {
   const cancel = useCancelJob();
   const restore = useRestoreTestRun();
   if (id === "") return <Alert>Geen testrun opgegeven.</Alert>;
+  const isBackup = run.data?.kind === "backup.verify";
 
   return (
     <QueryState q={run}>
       {run.data && (
         <div className="space-y-6">
           <div className="text-sm">
-            {run.data.cluster_id ? (
+            {isBackup ? (
+              <Link href="/back-ups" className="text-slate-500 hover:underline">
+                ← Back-ups
+              </Link>
+            ) : run.data.cluster_id ? (
               <Link href={`/clusters/detail?id=${run.data.cluster_id}`} className="text-slate-500 hover:underline">
                 ← {run.data.cluster_name}
               </Link>
@@ -48,11 +63,13 @@ function TestRunInner() {
             )}
           </div>
           <PageHeader
-            title={`Failovertest: ${run.data.definition.name}`}
+            title={isBackup ? `Back-upcontrole: ${run.data.hostname}` : `Failovertest: ${run.data.definition?.name ?? ""}`}
             description={
               <span className="inline-flex flex-wrap items-center gap-2">
                 <RunBadge run={run.data} />
-                {job.data?.cancel_requested && jobActive(job.data.status) && <span>wordt afgebroken en hersteld…</span>}
+                {job.data?.cancel_requested && jobActive(job.data.status) && (
+                  <span>{isBackup ? "wordt afgebroken en opgeruimd…" : "wordt afgebroken en hersteld…"}</span>
+                )}
                 <span>{fmt.format(new Date(run.data.created_at))}</span>
                 {run.data.requested_by && <span className="text-slate-400">· door {run.data.requested_by}</span>}
               </span>
@@ -65,14 +82,16 @@ function TestRunInner() {
                       variant="danger"
                       disabled={cancel.isPending}
                       onClick={() => {
-                        if (window.confirm(`Test afbreken? ClusterForge zet ${run.data!.definition.unit} meteen weer aan.`))
-                          cancel.mutate(job.data!.id);
+                        const question = isBackup
+                          ? "Controle afbreken? ClusterForge zet de sandbox-VM uit en verwijdert hem."
+                          : `Test afbreken? ClusterForge zet ${run.data?.definition?.unit || "de dienst"} meteen weer aan.`;
+                        if (window.confirm(question)) cancel.mutate(job.data!.id);
                       }}
                     >
                       Afbreken
                     </Button>
                   )}
-                  {run.data.restored === false && !restore.data && (
+                  {!isBackup && run.data.restored === false && !restore.data && (
                     <Button variant="danger" disabled={restore.isPending} onClick={() => restore.mutate(run.data!.id)}>
                       Opnieuw herstellen
                     </Button>
@@ -81,9 +100,9 @@ function TestRunInner() {
               )
             }
           />
-          {run.data.restored === false && (
+          {!isBackup && run.data.restored === false && (
             <Alert>
-              Niet volledig hersteld: {run.data.definition.unit} staat mogelijk nog uit op {run.data.hostname}.
+              Niet volledig hersteld: {run.data.definition?.unit || "de dienst"} staat mogelijk nog uit op {run.data.hostname}.
             </Alert>
           )}
           {restore.error && <Alert>{restore.error.message}</Alert>}
@@ -95,9 +114,18 @@ function TestRunInner() {
               </Link>
             </Alert>
           )}
-          <Summary run={run.data} />
-          <Timeline run={run.data} />
-          {run.data.checks.length > 0 && <Precheck checks={run.data.checks} />}
+          {isBackup ? (
+            <BackupReport run={run.data} isAdmin={isAdmin} />
+          ) : (
+            run.data.definition &&
+            run.data.measurements && (
+              <>
+                <Summary run={run.data} d={run.data.definition} m={run.data.measurements} />
+                <Timeline run={run.data} m={run.data.measurements} />
+                {run.data.checks.length > 0 && <Precheck checks={run.data.checks} />}
+              </>
+            )
+          )}
           {job.data && (
             <div className="space-y-4">
               <h2 className="flex flex-wrap items-baseline justify-between gap-2 text-base font-semibold">
@@ -116,9 +144,7 @@ function TestRunInner() {
   );
 }
 
-function Summary({ run }: { run: TestRun }) {
-  const d = run.definition;
-  const m = run.measurements;
+function Summary({ run, d, m }: { run: TestRun; d: FailoverDefinition; m: FailoverMeasurements }) {
   return (
     <Card>
       <dl className={dlClass}>
@@ -205,12 +231,12 @@ const markers: Record<TestRunEvent["kind"], { color: string; label: string } | n
   return: { color: "bg-violet-600", label: "Terugkeer" },
   down: null,
   up: null,
+  step: null,
 };
 
 // Timeline toont de probe als horizontale balk, groen of rood, met
 // markeringen voor de storing, de overname, het herstel en de terugkeer.
-function Timeline({ run }: { run: TestRun }) {
-  const m = run.measurements;
+function Timeline({ run, m }: { run: TestRun; m: FailoverMeasurements }) {
   const events = run.timeline;
   if (m.probe.length === 0 && events.length === 0) return null;
   const end = Math.max(m.end_ms, ...m.probe.map((s) => s.to_ms), ...events.map((e) => e.t_ms), 1);

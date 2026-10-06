@@ -355,6 +355,16 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 		return "Back-upbeleid van cluster " + name + " gewijzigd" + changeSummary(e.Changes)
 	case "backup.watch_updated":
 		return "Lijst ook bewaken van Proxmox-koppeling " + name + " gewijzigd" + changeSummary(e.Changes)
+	case "backup.sandbox_created":
+		return fmt.Sprintf("Back-upcontrole van %s: back-up teruggezet als sandbox-VM %s op %s", str(p, "hostname"), num(p["vmid"]), str(p, "host"))
+	case "backup.sandbox_destroyed":
+		return fmt.Sprintf("Sandbox-VM %s van de back-upcontrole van %s verwijderd", num(p["vmid"]), str(p, "hostname"))
+	case "backup.sandbox_destroy_failed":
+		return fmt.Sprintf("Sandbox-VM %s van de back-upcontrole van %s niet te verwijderen", num(p["vmid"]), str(p, "hostname")) + colon(str(p, "error"))
+	case "backup.sandbox_connection_refused":
+		return "Tweede agentverbinding van " + or(str(p, "hostname"), name) + " geweigerd tijdens een back-upcontrole" + prefixed(" vanaf ", str(p, "remote"))
+	case "backup.verify_finished":
+		return "Back-upcontrole van " + str(p, "hostname") + colon(str(p, "summary"))
 	case "drift.detected":
 		return fmt.Sprintf("Drift op %s: %s", name, count(p["count"], "afwijking", "afwijkingen"))
 	case "drift.changed":
