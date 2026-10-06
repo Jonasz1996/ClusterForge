@@ -44,6 +44,7 @@ func toAPITemplate(t *templates.Template) gen.Template {
 	out := gen.Template{
 		Name: t.Name, Version: t.Version, Title: t.Title, Description: strings.TrimSpace(t.Description),
 		ClusterType: gen.ClusterType(t.ClusterType), Params: []gen.TemplateParam{}, Roles: []gen.TemplateRole{},
+		Services: []gen.TemplateService{},
 	}
 	for _, p := range t.Params {
 		out.Params = append(out.Params, gen.TemplateParam{
@@ -59,6 +60,21 @@ func toAPITemplate(t *templates.Template) gen.Template {
 			tr.Count = nullable.NewNullableWithValue(n)
 		}
 		out.Roles = append(out.Roles, tr)
+	}
+	for _, sv := range t.Services {
+		ts := gen.TemplateService{
+			Name: sv.Name, Kind: gen.ServiceKind(sv.Kind), DependsOn: append([]string{}, sv.DependsOn...),
+			Unit: nullable.NewNullNullable[string](), Port: nullable.NewNullNullable[int](), PortParam: nullable.NewNullNullable[string](),
+		}
+		if sv.Unit != "" {
+			ts.Unit = nullable.NewNullableWithValue(sv.Unit)
+		}
+		if p := sv.PortParam(); p != "" {
+			ts.PortParam = nullable.NewNullableWithValue(p)
+		} else if p := sv.FixedPort(); p > 0 {
+			ts.Port = nullable.NewNullableWithValue(p)
+		}
+		out.Services = append(out.Services, ts)
 	}
 	return out
 }

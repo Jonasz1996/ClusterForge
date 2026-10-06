@@ -4,6 +4,7 @@ import Link from "next/link";
 import { QueryState, tableClass, tdClass, thClass } from "@/components/inventory/bits";
 import { Badge, Card, PageHeader } from "@/components/ui";
 import { paramTypes, useTemplates, type Template } from "@/lib/deploy";
+import { kindLabel } from "@/lib/deps";
 import { typeLabel, useIsAdmin } from "@/lib/inventory";
 
 export default function TemplatesPage() {
@@ -58,6 +59,14 @@ function TemplateCard({ t, isAdmin }: { t: Template; isAdmin: boolean }) {
         <dd>{typeLabel(t.cluster_type)}</dd>
         <dt className="text-slate-500">Rollen</dt>
         <dd>{roles}</dd>
+        {t.services.length > 0 && (
+          <>
+            <dt className="text-slate-500">Diensten</dt>
+            <dd>
+              <Services t={t} />
+            </dd>
+          </>
+        )}
       </dl>
       <div className="mt-4 overflow-x-auto">
         <table className={tableClass}>
@@ -98,5 +107,35 @@ function TemplateCard({ t, isAdmin }: { t: Template; isAdmin: boolean }) {
         </table>
       </div>
     </Card>
+  );
+}
+
+// Services toont de diensten die een uitrol in de afhankelijkheidsgraaf zet,
+// met unit, poort en waarvan ze afhangen.
+function Services({ t }: { t: Template }) {
+  return (
+    <ul className="space-y-1">
+      {t.services.map((s) => {
+        const param = s.port_param ? t.params.find((p) => p.name === s.port_param) : undefined;
+        const port = s.port ? `poort ${s.port}` : param ? `instelbare poort${param.default ? `, standaard ${param.default}` : ""}` : null;
+        return (
+          <li key={s.name}>
+            <span className="font-medium">{s.name}</span>
+            <span className="text-slate-500">
+              {" · "}
+              {kindLabel(s.kind)}
+              {s.unit && (
+                <>
+                  {" · "}
+                  <code className="text-xs">{s.unit}</code>
+                </>
+              )}
+              {port && ` · ${port}`}
+              {s.depends_on.length > 0 && ` · hangt af van ${s.depends_on.join(" en ")}`}
+            </span>
+          </li>
+        );
+      })}
+    </ul>
   );
 }

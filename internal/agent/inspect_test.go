@@ -180,66 +180,82 @@ func TestInspectWithoutDpkg(t *testing.T) {
 	}
 }
 
-// TestApplyInspectConsistent past elke stap van de ingebouwde templates toe,
-// inspecteert daarna en eist dat Compare niets vindt. Zo lopen apply en de
-// driftcontrole nooit uit elkaar.
+// TestApplyInspectConsistent past de stappen van elke versie van de
+// ingebouwde templates een voor een toe, en eist na elke stap dat inspect en
+// Compare over de stappen tot dan niets vinden. Een tweede keer apply
+// verandert niets meer. Zo lopen apply en de driftcontrole nooit uit
+// elkaar.
 func TestApplyInspectConsistent(t *testing.T) {
 	key := []byte("sleutel")
-	for _, tpl := range templates.BuiltinRegistry().All() {
-		t.Run(tpl.Name+"-"+tpl.Version, func(t *testing.T) {
-			a, h := applyAgent(t)
-			steps := renderBuiltin(t, tpl)
-			for _, s := range steps {
-				if res := a.apply(context.Background(), []protocol.Step{s.Step}); !res.OK {
-					t.Fatalf("%s: %+v", s.Title, res)
-				}
+	for _, latest := range templates.BuiltinRegistry().All() {
+		for _, v := range templates.BuiltinRegistry().Versions(latest.Name) {
+			tpl, _ := templates.Get(latest.Name, v)
+			for _, role := range tpl.Roles {
+				t.Run(tpl.Name+"-"+tpl.Version+"-"+role.Name, func(t *testing.T) {
+					consistent(t, key, tpl, role.Name, tpl == latest)
+				})
 			}
-			cmp := inspectAndCompare(t, a, key, steps)
-			if len(cmp.Findings) != 0 {
-				t.Fatalf("afwijkingen direct na apply: %+v", cmp.Findings)
-			}
-			for _, u := range cmp.Unchecked {
-				if !strings.HasPrefix(u.Step, "command:") {
-					t.Errorf("niet gecontroleerd: %+v", u)
-				}
-			}
-			if tpl.Name != "keepalived-nginx" {
-				return
-			}
+		}
+	}
+}
 
-			// Drie wijzigingen met de hand geven vier afwijkingen.
-			conf := filepath.Join(a.Root, "etc/keepalived/keepalived.conf")
-			if err := os.WriteFile(conf, []byte("vrrp_instance VI_1 {}\n"), 0o640); err != nil {
-				t.Fatal(err)
-			}
-			if err := os.Chmod(filepath.Join(a.Root, "var/www/html/index.html"), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			h.SetUnit("nginx", agenttest.Unit{})
-			cmp = inspectAndCompare(t, a, key, steps)
-			want := []string{
-				"file:/var/www/html/index.html:mode",
-				"service:nginx:enabled",
-				"service:nginx:active",
-				"file:/etc/keepalived/keepalived.conf:content",
-			}
-			if got := drift.Keys(cmp.Findings); !reflect.DeepEqual(got, want) {
-				t.Fatalf("afwijkingen:\n%q\nwil\n%q", got, want)
-			}
-			c := cmp.Findings[3]
-			if c.ModTime == nil || !strings.HasSuffix(c.Detail, "bytes in plaats van "+thousandsOf(len(steps[3].File.Content))) {
-				t.Fatalf("inhoud: %+v", c)
-			}
-			// Een tweede wijziging van hetzelfde bestand geeft een andere
-			// vingerafdruk, met dezelfde sleutel.
-			if err := os.WriteFile(conf, []byte("vrrp_instance VI_2 {}\n"), 0o640); err != nil {
-				t.Fatal(err)
-			}
-			again := inspectAndCompare(t, a, key, steps)
-			if again.Findings[3].Key != c.Key || again.Findings[3].Fingerprint == c.Fingerprint {
-				t.Fatalf("vingerafdruk: %+v %+v", c, again.Findings[3])
-			}
-		})
+func consistent(t *testing.T, key []byte, tpl *templates.Template, role string, latest bool) {
+	a, h := applyAgent(t)
+	steps := renderBuiltin(t, tpl, role)
+	for i, s := range steps {
+		if res := a.apply(context.Background(), []protocol.Step{s.Step}); !res.OK {
+			t.Fatalf("%s: %+v", s.Title, res)
+		}
+		if cmp := inspectAndCompare(t, a, key, steps[:i+1]); len(cmp.Findings) != 0 {
+			t.Fatalf("afwijkingen direct na stap %d (%s): %+v", i+1, s.Title, cmp.Findings)
+		}
+	}
+	for _, s := range steps {
+		if res := a.apply(context.Background(), []protocol.Step{s.Step}); !res.OK || res.Steps[0].Changed {
+			t.Fatalf("tweede keer %s: %+v", s.Title, res)
+		}
+	}
+	cmp := inspectAndCompare(t, a, key, steps)
+	for _, u := range cmp.Unchecked {
+		if !strings.HasPrefix(u.Step, "command:") {
+			t.Errorf("niet gecontroleerd: %+v", u)
+		}
+	}
+	if tpl.Name != "keepalived-nginx" || !latest {
+		return
+	}
+
+	// Drie wijzigingen met de hand geven vier afwijkingen.
+	conf := filepath.Join(a.Root, "etc/keepalived/keepalived.conf")
+	if err := os.WriteFile(conf, []byte("vrrp_instance VI_1 {}\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filepath.Join(a.Root, "var/www/html/index.html"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h.SetUnit("nginx", agenttest.Unit{})
+	cmp = inspectAndCompare(t, a, key, steps)
+	want := []string{
+		"file:/var/www/html/index.html:mode",
+		"service:nginx:enabled",
+		"service:nginx:active",
+		"file:/etc/keepalived/keepalived.conf:content",
+	}
+	if got := drift.Keys(cmp.Findings); !reflect.DeepEqual(got, want) {
+		t.Fatalf("afwijkingen:\n%q\nwil\n%q", got, want)
+	}
+	c := cmp.Findings[3]
+	if c.ModTime == nil || !strings.HasSuffix(c.Detail, "bytes in plaats van "+thousandsOf(len(steps[3].File.Content))) {
+		t.Fatalf("inhoud: %+v", c)
+	}
+	// Een tweede wijziging van hetzelfde bestand geeft een andere
+	// vingerafdruk, met dezelfde sleutel.
+	if err := os.WriteFile(conf, []byte("vrrp_instance VI_2 {}\n"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	again := inspectAndCompare(t, a, key, steps)
+	if again.Findings[3].Key != c.Key || again.Findings[3].Fingerprint == c.Fingerprint {
+		t.Fatalf("vingerafdruk: %+v %+v", c, again.Findings[3])
 	}
 }
 
@@ -251,14 +267,22 @@ func thousandsOf(n int) string {
 	return s
 }
 
-// sampleParams zijn ingevulde parameters per ingebouwde template.
+// sampleParams zijn ingevulde parameters per ingebouwde template; de rest
+// komt uit de standaardwaarden.
 var sampleParams = map[string]map[string]any{
 	"keepalived-nginx": {"vip": "10.0.20.100", "vrid": 51},
+	"docker":           {},
+	"cron":             {"vip": "10.0.20.100", "vrid": 52},
+	"generic":          {"vip": "10.0.20.100", "vrid": 53, "image": "ghcr.io/jonas/app:1.4.2", "port": 8080, "container_port": 3000},
 }
 
-func renderBuiltin(t *testing.T, tpl *templates.Template) []templates.Step {
+func renderBuiltin(t *testing.T, tpl *templates.Template, role string) []templates.Step {
 	t.Helper()
-	params, err := tpl.Validate(sampleParams[tpl.Name])
+	sample, ok := sampleParams[tpl.Name]
+	if !ok {
+		t.Fatalf("zet voorbeeldparameters voor %s in sampleParams", tpl.Name)
+	}
+	params, err := tpl.Validate(sample)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -266,8 +290,8 @@ func renderBuiltin(t *testing.T, tpl *templates.Template) []templates.Step {
 		Params:  params,
 		Cluster: templates.ClusterInfo{Name: "Web", Slug: "web", Environment: "prod"},
 		Nodes: []templates.NodeInfo{
-			{Hostname: "web-01", Role: tpl.Roles[0].Name, Index: 1, Address: "10.0.20.11", Prefix: 24, Interface: "eth0"},
-			{Hostname: "web-02", Role: tpl.Roles[0].Name, Index: 2, Address: "10.0.20.12", Prefix: 24, Interface: "eth0"},
+			{Hostname: "web-01", Role: role, Index: 1, Address: "10.0.20.11", Prefix: 24, Interface: "eth0"},
+			{Hostname: "web-02", Role: role, Index: 2, Address: "10.0.20.12", Prefix: 24, Interface: "eth0"},
 		},
 	}
 	c.Node = &c.Nodes[0]

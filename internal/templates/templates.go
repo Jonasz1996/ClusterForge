@@ -24,33 +24,85 @@ import (
 
 // Template is een geladen clustertemplate.
 type Template struct {
-	Name        string    `yaml:"name"`
-	Version     string    `yaml:"version"`
-	Title       string    `yaml:"title"`
-	Description string    `yaml:"description"`
-	ClusterType string    `yaml:"cluster_type"`
-	Params      []Param   `yaml:"params"`
-	Roles       []Role    `yaml:"roles"`
-	Checks      []any     `yaml:"checks"`
-	Services    []Service `yaml:"services"`
+	Name        string        `yaml:"name"`
+	Version     string        `yaml:"version"`
+	Title       string        `yaml:"title"`
+	Description string        `yaml:"description"`
+	ClusterType string        `yaml:"cluster_type"`
+	Params      []Param       `yaml:"params"`
+	Roles       []Role        `yaml:"roles"`
+	Checks      []any         `yaml:"checks"`
+	Services    []ServiceSpec `yaml:"services"`
+	// Failback zegt dat het VIP terugkeert naar de node met de hoogste
+	// prioriteit zodra die weer gezond is (keepalived met preempt). Een
+	// failovertest verwacht dat dan standaard.
+	Failback bool `yaml:"failback"`
 
 	files *template.Template
 }
 
-// Service is een dienst die een uitrol in de afhankelijkheidsgraaf zet. De
-// soort komt uit de vaste lijst van internal/deps; een test daar controleert
-// de ingebouwde templates.
-type Service struct {
-	Name string `yaml:"name" json:"name"`
-	Kind string `yaml:"kind" json:"kind"`
+// ServiceSpec is een dienst zoals hij in template.yaml staat. De soort komt
+// uit de vaste lijst van internal/deps; een test daar controleert de
+// ingebouwde templates.
+type ServiceSpec struct {
+	Name string `yaml:"name"`
+	Kind string `yaml:"kind"`
 	// Unit is de systemd-unit zonder .service; leeg als de dienst er geen
 	// heeft.
-	Unit string `yaml:"unit" json:"unit,omitempty"`
-	Port int    `yaml:"port" json:"port,omitempty"`
+	Unit string `yaml:"unit"`
+	// Port is de hoofdpoort: een getal, of een int-parameter zoals
+	// "{{ .params.port }}".
+	Port any `yaml:"port"`
 	// DependsOn zijn de diensten uit dezelfde template waarvan deze afhangt,
 	// met Strength hard (standaard) of soft.
-	DependsOn []string `yaml:"depends_on" json:"depends_on,omitempty"`
-	Strength  string   `yaml:"strength" json:"strength,omitempty"`
+	DependsOn []string `yaml:"depends_on"`
+	Strength  string   `yaml:"strength"`
+}
+
+// Service is een dienst die een uitrol in de afhankelijkheidsgraaf zet, met
+// de poort ingevuld.
+type Service struct {
+	Name      string
+	Kind      string
+	Unit      string
+	Port      int
+	DependsOn []string
+	Strength  string
+}
+
+var portParamRe = regexp.MustCompile(`^\{\{\s*\.params\.([a-z0-9_]+)\s*\}\}$`)
+
+// FixedPort is de poort als die vastligt in de template, anders 0.
+func (s ServiceSpec) FixedPort() int {
+	n, _ := s.Port.(int)
+	return n
+}
+
+// PortParam is de parameter met de poort, of "" als die vastligt.
+func (s ServiceSpec) PortParam() string {
+	str, _ := s.Port.(string)
+	if m := portParamRe.FindStringSubmatch(str); m != nil {
+		return m[1]
+	}
+	return ""
+}
+
+// RenderServices geeft de diensten met de poort uit de ingevulde
+// parameters.
+func (t *Template) RenderServices(params map[string]any) ([]Service, error) {
+	out := make([]Service, 0, len(t.Services))
+	for _, s := range t.Services {
+		port := s.FixedPort()
+		if name := s.PortParam(); name != "" {
+			n, ok := params[name].(int)
+			if !ok || n < 1 || n > 65535 {
+				return nil, fmt.Errorf("dienst %s: parameter %s is geen poort", s.Name, name)
+			}
+			port = n
+		}
+		out = append(out, Service{Name: s.Name, Kind: s.Kind, Unit: s.Unit, Port: port, DependsOn: s.DependsOn, Strength: s.Strength})
+	}
+	return out, nil
 }
 
 // Role is een groep gelijke nodes, zoals de webservers.
@@ -162,8 +214,8 @@ func (t *Template) checkServices() error {
 			return fmt.Errorf("dienst %s: kind is verplicht", s.Name)
 		case s.Unit != "" && !unitRe.MatchString(s.Unit):
 			return fmt.Errorf("dienst %s: ongeldige unit %q", s.Name, s.Unit)
-		case s.Port < 0 || s.Port > 65535:
-			return fmt.Errorf("dienst %s: poort %d bestaat niet", s.Name, s.Port)
+		case !t.validPort(s):
+			return fmt.Errorf("dienst %s: port is een poortnummer of een int-parameter zoals \"{{ .params.port }}\"", s.Name)
 		case s.Strength != "" && s.Strength != "hard" && s.Strength != "soft":
 			return fmt.Errorf("dienst %s: strength is hard of soft", s.Name)
 		case s.Strength != "" && len(s.DependsOn) == 0:
@@ -183,6 +235,21 @@ func (t *Template) checkServices() error {
 		}
 	}
 	return nil
+}
+
+// validPort is true voor een vaste poort tot 65535 of één int-parameter.
+func (t *Template) validPort(s ServiceSpec) bool {
+	switch p := s.Port.(type) {
+	case nil:
+		return true
+	case int:
+		return p >= 0 && p <= 65535
+	case string:
+		name := s.PortParam()
+		i := slices.IndexFunc(t.Params, func(p Param) bool { return p.Name == name })
+		return i >= 0 && t.Params[i].Type == "int"
+	}
+	return false
 }
 
 // --- renderen ---
@@ -591,6 +658,9 @@ func (t *Template) selfTest() error {
 		}
 	}
 	c.Node = nil
-	_, err = t.RenderChecks(c)
+	if _, err := t.RenderChecks(c); err != nil {
+		return err
+	}
+	_, err = t.RenderServices(params)
 	return err
 }

@@ -1,10 +1,15 @@
 package templates
 
 import (
+	"encoding/json"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"testing/fstest"
+	"time"
+
+	"github.com/Jonasz1996/clusterforge/pkg/protocol"
 )
 
 func keepalivedNginx(t *testing.T) *Template {
@@ -151,6 +156,10 @@ roles:
 		"dubbele dienst":   {base + "      - package: { names: [x] }\nservices:\n  - { name: a, kind: web }\n  - { name: a, kind: vip }\n", nil, "twee keer"},
 		"sterkte":          {base + "      - package: { names: [x] }\nservices:\n  - { name: a, kind: web, depends_on: [b], strength: sterk }\n  - { name: b, kind: vip }\n", nil, "hard of soft"},
 		"zonder soort":     {base + "      - package: { names: [x] }\nservices:\n  - { name: a }\n", nil, "kind"},
+		"poort te groot":   {base + "      - package: { names: [x] }\nservices:\n  - { name: a, kind: web, port: 70000 }\n", nil, "port"},
+		"poort onbekend":   {base + "      - package: { names: [x] }\nservices:\n  - { name: a, kind: web, port: \"{{ .params.p }}\" }\n", nil, "port"},
+		"poort als tekst":  {strings.Replace(base, "type: int, label: N, default: 1", "type: string, label: N, default: \"1\"", 1) + "      - package: { names: [x] }\nservices:\n  - { name: a, kind: web, port: \"{{ .params.n }}\" }\n", nil, "port"},
+		"poort met tekst":  {base + "      - package: { names: [x] }\nservices:\n  - { name: a, kind: web, port: \"80{{ .params.n }}\" }\n", nil, "port"},
 	} {
 		fsys := fstest.MapFS{"template.yaml": {Data: []byte(tc.yaml)}}
 		for p, c := range tc.files {
@@ -181,5 +190,179 @@ func TestSize(t *testing.T) {
 	}
 	if FormatSize(1536<<20) != "1536M" || FormatSize(2<<30) != "2G" {
 		t.Fatal(FormatSize(1536<<20), FormatSize(2<<30))
+	}
+}
+
+// render rendert de stappen van de eerste rol voor de eerste van twee nodes.
+func render(t *testing.T, tpl *Template, in map[string]any) ([]Step, Context) {
+	t.Helper()
+	params, err := tpl.Validate(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	role := tpl.Roles[0].Name
+	c := Context{
+		Params:  params,
+		Cluster: ClusterInfo{Name: "Taken", Slug: "taken", Environment: "prod"},
+		Nodes: []NodeInfo{
+			{Hostname: "taken-01", Role: role, Index: 1, Address: "10.0.30.11", Prefix: 24, Interface: "eth0"},
+			{Hostname: "taken-02", Role: role, Index: 2, Address: "10.0.30.12", Prefix: 24, Interface: "eth0"},
+		},
+	}
+	c.Node = &c.Nodes[0]
+	steps, err := tpl.Steps(role, c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return steps, c
+}
+
+func titles(steps []Step) string {
+	var out []string
+	for _, s := range steps {
+		out = append(out, s.Title)
+	}
+	return strings.Join(out, "; ")
+}
+
+func TestBuiltinList(t *testing.T) {
+	var names []string
+	for _, tpl := range Builtin() {
+		names = append(names, tpl.Name+" "+tpl.Version)
+	}
+	if got := strings.Join(names, ", "); got != "cron 1.0.0, docker 1.0.0, generic 1.0.0, keepalived-nginx 1.1.0" {
+		t.Fatalf("ingebouwde templates: %s", got)
+	}
+}
+
+func TestRenderDocker(t *testing.T) {
+	tpl, _ := Latest("docker")
+	steps, c := render(t, tpl, map[string]any{"log_max_size": "100M", "node_count": 1})
+	if got := titles(steps); got != "pakketten: docker.io, docker-compose; bestand /etc/docker/daemon.json; service docker; map /opt/stacks" {
+		t.Fatalf("stappen: %s", got)
+	}
+	var daemon struct {
+		LogDriver   string            `json:"log-driver"`
+		LogOpts     map[string]string `json:"log-opts"`
+		LiveRestore bool              `json:"live-restore"`
+	}
+	if err := json.Unmarshal([]byte(steps[1].File.Content), &daemon); err != nil {
+		t.Fatalf("daemon.json: %v\n%s", err, steps[1].File.Content)
+	}
+	if daemon.LogDriver != "json-file" || daemon.LogOpts["max-size"] != "100M" || daemon.LogOpts["max-file"] != "3" || !daemon.LiveRestore {
+		t.Fatalf("daemon.json: %+v", daemon)
+	}
+	if len(steps[1].Notify) != 1 || steps[1].Notify[0] != (protocol.ServiceStep{Name: "docker", State: "restarted"}) {
+		t.Fatalf("notify: %+v", steps[1].Notify)
+	}
+	if counts, _ := tpl.Counts(c); counts[0] != 1 || tpl.Failback {
+		t.Fatalf("één node zonder VIP: %v %v", counts, tpl.Failback)
+	}
+	svcs, err := tpl.RenderServices(c.Params)
+	if err != nil || len(svcs) != 1 || !reflect.DeepEqual(svcs[0], Service{Name: "docker", Kind: "container", Unit: "docker"}) {
+		t.Fatalf("diensten: %+v %v", svcs, err)
+	}
+}
+
+func TestRenderCron(t *testing.T) {
+	tpl, _ := Latest("cron")
+	steps, c := render(t, tpl, map[string]any{"vip": "10.0.30.100", "vrid": 61, "auth_pass": "geheim12"})
+	if got := titles(steps); got != "pakketten: cron, keepalived; bestand /usr/local/bin/cf-leader; service cron; bestand /etc/keepalived/keepalived.conf; service keepalived" {
+		t.Fatalf("stappen: %s", got)
+	}
+	leader := steps[1].File
+	if leader.Mode != "0755" || !strings.HasPrefix(leader.Content, "#!/bin/sh\n") ||
+		!strings.Contains(leader.Content, `grep -qF " inet 10.0.30.100/"`) || !strings.Contains(leader.Content, `exec "$@"`) {
+		t.Fatalf("cf-leader:\n%+v", leader)
+	}
+	conf := steps[3].File.Content
+	for _, want := range []string{"chk_cron", "is-active --quiet cron", "virtual_router_id 61", "priority 150", "unicast_peer {\n        10.0.30.12\n    }", "10.0.30.100/24 dev eth0"} {
+		if !strings.Contains(conf, want) {
+			t.Errorf("keepalived.conf mist %q:\n%s", want, conf)
+		}
+	}
+	c.Node = nil
+	checks, err := tpl.RenderChecks(c)
+	if err != nil || len(checks) != 1 || checks[0].VIPOwned == nil || checks[0].VIPOwned.VIP != "10.0.30.100" || !tpl.Failback {
+		t.Fatalf("checks: %+v %v", checks, err)
+	}
+	svcs, _ := tpl.RenderServices(c.Params)
+	if len(svcs) != 2 || svcs[0].Unit != "cron" || svcs[0].Kind != "cron" || svcs[0].DependsOn[0] != "keepalived" || svcs[0].Strength != "hard" {
+		t.Fatalf("diensten: %+v", svcs)
+	}
+}
+
+func TestRenderGeneric(t *testing.T) {
+	tpl, _ := Latest("generic")
+	steps, c := render(t, tpl, map[string]any{
+		"vip": "10.0.30.100", "vrid": 62, "auth_pass": "geheim12", "image": "ghcr.io/jonas/app:1.4.2", "port": 8080, "container_port": 3000,
+		"health_path": "/health",
+	})
+	if got := titles(steps); got != "pakketten: docker.io, keepalived; bestand /etc/docker/daemon.json; service docker; map /etc/cf-app; "+
+		"bestand /etc/systemd/system/cf-app.service; service cf-app; bestand /etc/keepalived/keepalived.conf; service keepalived" {
+		t.Fatalf("stappen: %s", got)
+	}
+	unit := steps[4]
+	for _, want := range []string{
+		"Requires=docker.service",
+		"ExecStartPre=-/usr/bin/docker pull ghcr.io/jonas/app:1.4.2\n",
+		"ExecStart=/usr/bin/docker run --rm --name cf-app --env-file /etc/cf-app/app.env -p 8080:3000 ghcr.io/jonas/app:1.4.2\n",
+		"Restart=always",
+		"WantedBy=multi-user.target",
+	} {
+		if !strings.Contains(unit.File.Content, want) {
+			t.Errorf("cf-app.service mist %q:\n%s", want, unit.File.Content)
+		}
+	}
+	if len(unit.Notify) != 1 || unit.Notify[0] != (protocol.ServiceStep{Name: "cf-app", State: "restarted"}) {
+		t.Fatalf("notify: %+v", unit.Notify)
+	}
+	if conf := steps[6].File.Content; !strings.Contains(conf, "is-active --quiet cf-app") || !strings.Contains(conf, "chk_app\n    }") {
+		t.Fatalf("keepalived.conf:\n%s", conf)
+	}
+	c.Node = nil
+	checks, err := tpl.RenderChecks(c)
+	if err != nil || len(checks) != 2 || checks[1].HTTP.URL != "http://10.0.30.100:8080/health" || checks[1].Within() != 2*time.Minute {
+		t.Fatalf("checks: %+v %v", checks, err)
+	}
+	svcs, err := tpl.RenderServices(c.Params)
+	if err != nil || len(svcs) != 3 || svcs[0].Name != "app" || svcs[0].Unit != "cf-app" || svcs[0].Port != 8080 ||
+		strings.Join(svcs[0].DependsOn, ",") != "docker,keepalived" {
+		t.Fatalf("diensten: %+v %v", svcs, err)
+	}
+	if tpl.Services[0].PortParam() != "port" || tpl.Services[0].FixedPort() != 0 {
+		t.Fatalf("poort van app: %+v", tpl.Services[0])
+	}
+
+	// Standaard: nginx:stable op poort 80.
+	steps, _ = render(t, tpl, map[string]any{"vip": "10.0.30.100", "vrid": 62})
+	if !strings.Contains(steps[4].File.Content, "-p 80:80 nginx:stable\n") {
+		t.Fatalf("standaard:\n%s", steps[4].File.Content)
+	}
+
+	// Een image of pad dat iets anders in de unit of de controle zet, komt
+	// niet door de validatie.
+	for _, bad := range []map[string]any{
+		{"image": "nginx:stable --privileged"},
+		{"image": "nginx:stable\nExecStartPre=/bin/sh -c id"},
+		{"image": "nginx:$(id)"},
+		{"image": "nginx:`id`"},
+		{"image": "nginx;id"},
+		{"image": "Nginx"},
+		{"image": "-v/:/host nginx"},
+		{"health_path": "/ok?x=1"},
+		{"health_path": "ok"},
+		{"health_path": "/a b"},
+	} {
+		bad["vip"] = "10.0.30.100"
+		var fe FieldError
+		if _, err := tpl.Validate(bad); !errors.As(err, &fe) || (fe.Field != "image" && fe.Field != "health_path") {
+			t.Errorf("%v aanvaard: %v", bad, err)
+		}
+	}
+	for _, good := range []string{"nginx", "registry.local:5000/team/app:v2", "ghcr.io/jonas/app@sha256:" + strings.Repeat("ab", 32)} {
+		if _, err := tpl.Validate(map[string]any{"vip": "10.0.30.100", "image": good}); err != nil {
+			t.Errorf("%s geweigerd: %v", good, err)
+		}
 	}
 }
