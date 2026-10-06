@@ -1,0 +1,73 @@
+name: docker
+version: 1.0.0
+title: Docker-hosts
+description: >-
+  Een of meer servers met Docker Engine en Docker Compose uit Debian, klaar
+  voor je eigen containers en compose-stacks in /opt/stacks. ClusterForge
+  beheert de installatie en /etc/docker/daemon.json, met logrotatie zodat
+  containerlogs de schijf niet vullen. Wat er in de containers draait,
+  beheer je zelf.
+cluster_type: docker
+
+params:
+  - name: node_count
+    type: int
+    label: Aantal nodes
+    default: 2
+    min: 1
+    max: 10
+  - name: log_max_size
+    type: size
+    label: Grootte van een containerlog
+    help: Daarna begint Docker een nieuw logbestand.
+    default: 50M
+    min: 1M
+    max: 1G
+  - name: log_max_files
+    type: int
+    label: Logbestanden per container
+    help: Zoveel logbestanden houdt Docker per container; het oudste valt weg.
+    default: 3
+    min: 1
+    max: 20
+  - name: cpu
+    type: int
+    label: vCPU per node
+    default: 2
+    min: 1
+    max: 32
+  - name: memory
+    type: size
+    label: Geheugen per node
+    default: 4G
+    min: 1G
+    max: 128G
+  - name: disk
+    type: size
+    label: Schijf per node
+    default: 40G
+    min: 10G
+    max: 2T
+
+roles:
+  - name: docker
+    count: "{{ .params.node_count }}"
+    vm:
+      cpu: "{{ .params.cpu }}"
+      memory: "{{ .params.memory }}"
+      disk: "{{ .params.disk }}"
+    steps:
+      - package: { names: [docker.io, docker-compose] }
+      # Een nieuwe daemon.json geldt na een herstart van Docker. Met
+      # live-restore blijven de containers daarbij draaien.
+      - file:
+          path: /etc/docker/daemon.json
+          template: daemon.json.tmpl
+          notify: [service:docker:restart]
+      - service: { name: docker, enabled: true, state: started }
+      - directory: { path: /opt/stacks, mode: "0750" }
+
+# De Docker-daemon zelf; containers en stacks voeg je met de hand toe aan de
+# graaf.
+services:
+  - { name: docker, kind: container, unit: docker }

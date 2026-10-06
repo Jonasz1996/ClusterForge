@@ -575,8 +575,9 @@ func (t clusterTemplate) probe(vip string) Probe {
 	return DefaultProbe
 }
 
-// templateOf leest de template van een cluster. keepalived-nginx gebruikt
-// preempt met prioriteit 150 en 140, dus daar komt het VIP terug.
+// templateOf leest de template van een cluster. Templates met failback,
+// zoals keepalived-nginx, gebruiken preempt met prioriteit 150 en 140, dus
+// daar komt het VIP terug.
 func (s *Service) templateOf(c store.Cluster) clusterTemplate {
 	var spec struct {
 		Template struct{ Name, Version string } `json:"template"`
@@ -586,11 +587,12 @@ func (s *Service) templateOf(c store.Cluster) clusterTemplate {
 	if c.TemplateName == nil || json.Unmarshal(c.Spec, &spec) != nil {
 		return clusterTemplate{}
 	}
-	out := clusterTemplate{failback: spec.Template.Name == "keepalived-nginx"}
+	out := clusterTemplate{}
 	tpl, ok := s.Templates.Get(spec.Template.Name, spec.Template.Version)
 	if !ok {
 		return out
 	}
+	out.failback = tpl.Failback
 	if spec.Cluster == (templates.ClusterInfo{}) {
 		spec.Cluster = templates.ClusterInfo{Name: c.Name, Slug: c.Slug, Environment: string(c.Environment)}
 	}

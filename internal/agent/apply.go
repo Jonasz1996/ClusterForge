@@ -54,7 +54,7 @@ func (a *Agent) applyStep(ctx context.Context, s protocol.Step) (bool, []string,
 	case "package":
 		return a.applyPackage(ctx, s.Package)
 	case "file":
-		return a.applyFile(s.File)
+		return a.applyFile(ctx, s.File)
 	case "service":
 		return a.applyService(ctx, s.Service)
 	case "user":
@@ -185,7 +185,24 @@ func ownedBy(fi fs.FileInfo, uid, gid int) bool {
 	return (uid < 0 || u == uid) && (gid < 0 || g == gid)
 }
 
-func (a *Agent) applyFile(f *protocol.FileStep) (bool, []string, error) {
+// unitDir is de map met de eigen systemd-units van de beheerder; een
+// template zet daar zijn units, zoals cf-app.service.
+const unitDir = "/etc/systemd/system/"
+
+// isUnitFile is true voor een unit of een drop-in onder /etc/systemd/system.
+// systemd leest die pas na daemon-reload opnieuw.
+func isUnitFile(p string) bool {
+	if !strings.HasPrefix(p, unitDir) {
+		return false
+	}
+	switch filepath.Ext(p) {
+	case ".service", ".socket", ".timer", ".path", ".mount", ".target", ".conf":
+		return true
+	}
+	return false
+}
+
+func (a *Agent) applyFile(ctx context.Context, f *protocol.FileStep) (bool, []string, error) {
 	path, err := a.path(f.Path)
 	if err != nil {
 		return false, nil, err
@@ -226,7 +243,17 @@ func (a *Agent) applyFile(f *protocol.FileStep) (bool, []string, error) {
 	if rerr != nil {
 		verb = "aangemaakt"
 	}
-	return true, []string{fmt.Sprintf("%s: %s (%d regels)", f.Path, verb, strings.Count(f.Content, "\n"))}, nil
+	lines := []string{fmt.Sprintf("%s: %s (%d regels)", f.Path, verb, strings.Count(f.Content, "\n"))}
+	// Een gewijzigde unit geldt pas als systemd haar opnieuw leest; een
+	// herstart daarna gebruikt dan de nieuwe versie.
+	if isUnitFile(f.Path) {
+		out, err := a.exec(ctx, "systemctl", "daemon-reload")
+		if err != nil {
+			return true, append(lines, outputLines(out)...), fmt.Errorf("systemctl daemon-reload: %w", err)
+		}
+		lines = append(lines, "systemctl daemon-reload")
+	}
+	return true, lines, nil
 }
 
 func (a *Agent) applyService(ctx context.Context, s *protocol.ServiceStep) (bool, []string, error) {

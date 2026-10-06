@@ -1,11 +1,13 @@
-name: keepalived-nginx
-version: 1.1.0
-title: Nginx met keepalived
+name: cron
+version: 1.0.0
+title: Cron-cluster
 description: >-
-  Twee of meer webservers met Nginx achter één virtueel IP-adres. Keepalived
-  geeft het VIP aan de node met de hoogste prioriteit; valt die node of Nginx
-  erop uit, dan neemt de volgende het binnen enkele seconden over.
-cluster_type: keepalived
+  Twee of meer servers die samen je geplande taken draaien, elke taak op één
+  node tegelijk. Keepalived geeft het VIP aan de node met de hoogste
+  prioriteit waarop cron draait, en cf-leader voert een taak alleen uit op de
+  node die het VIP heeft. Valt die node of cron erop uit, dan neemt de
+  volgende het binnen enkele seconden over.
+cluster_type: cron
 # Keepalived met preempt: het VIP keert terug naar de eerste node zodra die
 # weer gezond is.
 failback: true
@@ -14,7 +16,7 @@ params:
   - name: vip
     type: ipv4
     label: VIP
-    help: Het adres waarop de website bereikbaar wordt. Het moet vrij zijn en in hetzelfde netwerk liggen als de nodes.
+    help: Wie het VIP heeft, draait de taken. Het moet vrij zijn en in hetzelfde netwerk liggen als de nodes.
   - name: node_count
     type: int
     label: Aantal nodes
@@ -31,19 +33,19 @@ params:
   - name: cpu
     type: int
     label: vCPU per node
-    default: 2
+    default: 1
     min: 1
     max: 16
   - name: memory
     type: size
     label: Geheugen per node
-    default: 2G
+    default: 1G
     min: 512M
     max: 64G
   - name: disk
     type: size
     label: Schijf per node
-    default: 20G
+    default: 10G
     min: 8G
     max: 1T
   - name: auth_pass
@@ -53,18 +55,19 @@ params:
     length: 8
 
 roles:
-  - name: web
+  - name: cron
     count: "{{ .params.node_count }}"
     vm:
       cpu: "{{ .params.cpu }}"
       memory: "{{ .params.memory }}"
       disk: "{{ .params.disk }}"
     steps:
-      - package: { names: [keepalived, nginx] }
+      - package: { names: [cron, keepalived] }
       - file:
-          path: /var/www/html/index.html
-          template: index.html.tmpl
-      - service: { name: nginx, enabled: true, state: started }
+          path: /usr/local/bin/cf-leader
+          template: cf-leader.tmpl
+          mode: "0755"
+      - service: { name: cron, enabled: true, state: started }
       - file:
           path: /etc/keepalived/keepalived.conf
           template: keepalived.conf.tmpl
@@ -74,11 +77,9 @@ roles:
 
 checks:
   - vip_owned: { vip: "{{ .params.vip }}", within: 60s }
-  - http: { url: "http://{{ .params.vip }}/", expect: 200, within: 60s }
 
-# Een uitrol zet deze diensten in de afhankelijkheidsgraaf. Zonder nginx
-# geeft keepalived het VIP af (chk_nginx), maar de website hangt van het VIP
-# af: zonder keepalived is ze niet bereikbaar.
+# Zonder cron geeft keepalived het VIP af (chk_cron). Zonder keepalived heeft
+# geen node het VIP, en draait cf-leader nergens een taak.
 services:
-  - { name: nginx, kind: web, unit: nginx, port: 80, depends_on: [keepalived], strength: hard }
+  - { name: cron, kind: cron, unit: cron, depends_on: [keepalived], strength: hard }
   - { name: keepalived, kind: vip, unit: keepalived }

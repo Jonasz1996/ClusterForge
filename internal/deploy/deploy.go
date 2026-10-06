@@ -337,7 +337,11 @@ func (s *Service) Request(ctx context.Context, actor events.Actor, req Request) 
 			return err
 		}
 		// De diensten van de template komen meteen in de afhankelijkheidsgraaf.
-		if err := deps.FromTemplateTx(ctx, q, s.ev, actor, c.ID, c.Name, tpl.Services); err != nil {
+		services, err := tpl.RenderServices(p.Params)
+		if err != nil {
+			return err
+		}
+		if err := deps.FromTemplateTx(ctx, q, s.ev, actor, c.ID, c.Name, services); err != nil {
 			return err
 		}
 		names := make([]string, 0, len(secretValues))

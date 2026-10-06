@@ -302,6 +302,10 @@ func (h *Host) apt(args []string) ([]byte, error) {
 }
 
 func (h *Host) systemctl(args []string) ([]byte, error) {
+	if len(args) == 1 && args[0] == "daemon-reload" {
+		h.daemonReload()
+		return nil, nil
+	}
 	if len(args) < 2 {
 		return nil, errors.New("systemctl zonder unit")
 	}
@@ -345,6 +349,19 @@ func (h *Host) systemctl(args []string) ([]byte, error) {
 		return nil, fmt.Errorf("systemctl %s", verb)
 	}
 	return nil, nil
+}
+
+// daemonReload laadt de units uit /etc/systemd/system die systemd nog niet
+// kende, zoals systemctl daemon-reload: disabled en gestopt. Zonder reload
+// bestaat een nieuwe unit voor systemctl niet.
+func (h *Host) daemonReload() {
+	files, _ := filepath.Glob(filepath.Join(h.Root, "etc/systemd/system/*.service"))
+	for _, f := range files {
+		name := strings.TrimSuffix(filepath.Base(f), ".service")
+		if _, ok := h.units[name]; !ok {
+			h.units[name] = &Unit{}
+		}
+	}
 }
 
 func (h *Host) keepalivedConf() string {

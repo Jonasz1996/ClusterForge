@@ -1,0 +1,8 @@
+{
+  "log-driver": "json-file",
+  "log-opts": {
+    "max-size": "{{ .params.log_max_size }}",
+    "max-file": "{{ .params.log_max_files }}"
+  },
+  "live-restore": true
+}

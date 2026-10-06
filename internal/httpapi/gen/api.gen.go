@@ -2210,7 +2210,7 @@ type FailoverMeasurements struct {
 
 // FailoverOptions defines model for FailoverOptions.
 type FailoverOptions struct {
-	// DefaultFailback Aan voor clusters uit keepalived-nginx, dat preempt gebruikt
+	// DefaultFailback Aan voor clusters uit een template met failback (keepalived met preempt), zoals keepalived-nginx
 	DefaultFailback bool `json:"default_failback"`
 
 	// LastTestedAt De laatste test met PASS, WARNING of FAIL
@@ -3012,8 +3012,11 @@ type Template struct {
 	Name        string          `json:"name"`
 	Params      []TemplateParam `json:"params"`
 	Roles       []TemplateRole  `json:"roles"`
-	Title       string          `json:"title"`
-	Version     string          `json:"version"`
+
+	// Services De diensten die een uitrol in de afhankelijkheidsgraaf zet
+	Services []TemplateService `json:"services"`
+	Title    string            `json:"title"`
+	Version  string            `json:"version"`
 }
 
 // TemplateParam defines model for TemplateParam.
@@ -3041,6 +3044,25 @@ type TemplateRole struct {
 	// CountParam De parameter met het aantal nodes
 	CountParam nullable.Nullable[string] `json:"count_param"`
 	Name       string                    `json:"name"`
+}
+
+// TemplateService defines model for TemplateService.
+type TemplateService struct {
+	// DependsOn Diensten uit dezelfde template waarvan deze afhangt
+	DependsOn []string `json:"depends_on"`
+
+	// Kind De soort van een dienst; een vaste lijst in internal/deps
+	Kind ServiceKind `json:"kind"`
+	Name string      `json:"name"`
+
+	// Port Vaste hoofdpoort
+	Port nullable.Nullable[int] `json:"port"`
+
+	// PortParam De parameter met de hoofdpoort
+	PortParam nullable.Nullable[string] `json:"port_param"`
+
+	// Unit De systemd-unit zonder .service
+	Unit nullable.Nullable[string] `json:"unit"`
 }
 
 // TestRun defines model for TestRun.

@@ -1816,7 +1816,7 @@ export interface components {
         FailoverOptions: {
             scenarios: components["schemas"]["FailoverScenarioOption"][];
             vips: components["schemas"]["FailoverVIPOption"][];
-            /** @description Aan voor clusters uit keepalived-nginx, dat preempt gebruikt */
+            /** @description Aan voor clusters uit een template met failback (keepalived met preempt), zoals keepalived-nginx */
             default_failback: boolean;
             /** @description Prodcluster: een test start alleen met de hand, met de slug als bevestiging en tweestapsverificatie, en is niet te plannen */
             prod: boolean;
@@ -3010,6 +3010,20 @@ export interface components {
             cluster_type: components["schemas"]["ClusterType"];
             params: components["schemas"]["TemplateParam"][];
             roles: components["schemas"]["TemplateRole"][];
+            /** @description De diensten die een uitrol in de afhankelijkheidsgraaf zet */
+            services: components["schemas"]["TemplateService"][];
+        };
+        TemplateService: {
+            name: string;
+            kind: components["schemas"]["ServiceKind"];
+            /** @description De systemd-unit zonder .service */
+            unit: string | null;
+            /** @description Vaste hoofdpoort */
+            port: number | null;
+            /** @description De parameter met de hoofdpoort */
+            port_param: string | null;
+            /** @description Diensten uit dezelfde template waarvan deze afhangt */
+            depends_on: string[];
         };
         DeployCluster: {
             name: string;

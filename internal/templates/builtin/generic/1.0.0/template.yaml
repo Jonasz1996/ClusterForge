@@ -1,0 +1,123 @@
+name: generic
+version: 1.0.0
+title: Eigen applicatie
+description: >-
+  Je eigen applicatie als container-image op twee of meer servers achter één
+  VIP. Elke node draait de container als systemd-dienst cf-app met Docker;
+  keepalived geeft het VIP aan de node met de hoogste prioriteit waarop de
+  applicatie draait. Een nieuwe image-tag rolt ClusterForge node voor node
+  uit.
+cluster_type: generic
+# Keepalived met preempt: het VIP keert terug naar de eerste node zodra die
+# weer gezond is.
+failback: true
+
+params:
+  - name: vip
+    type: ipv4
+    label: VIP
+    help: Het adres waarop de applicatie bereikbaar wordt. Het moet vrij zijn en in hetzelfde netwerk liggen als de nodes.
+  - name: image
+    type: string
+    label: Container-image
+    help: Zoals ghcr.io/jonas/app:1.4.2 of nginx:stable. Een registry met wachtwoord kan nog niet.
+    default: nginx:stable
+    # Alleen de tekens van een image-referentie: geen spatie, geen
+    # aanhalingsteken en geen $, zodat de waarde niets anders in de unit
+    # kan zetten.
+    pattern: '[a-z0-9]+([._-][a-z0-9]+)*(:[0-9]{1,5})?(/[a-z0-9]+([._-][a-z0-9]+)*)*(:[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(@sha256:[a-f0-9]{64})?'
+  - name: port
+    type: int
+    label: Poort
+    help: De poort op het VIP en op elke node.
+    default: 80
+    min: 1
+    max: 65535
+  - name: container_port
+    type: int
+    label: Poort in de container
+    default: 80
+    min: 1
+    max: 65535
+  - name: health_path
+    type: string
+    label: Pad voor de controle
+    help: Na de uitrol moet http://VIP:poort met dit pad 200 geven.
+    default: /
+    pattern: '/[A-Za-z0-9._~/-]*'
+  - name: node_count
+    type: int
+    label: Aantal nodes
+    default: 2
+    min: 2
+    max: 5
+  - name: vrid
+    type: int
+    label: VRRP-id
+    help: Uniek per keepalived-groep in hetzelfde netwerk. Leeg laten kiest een vrij nummer.
+    optional: true
+    min: 1
+    max: 255
+  - name: cpu
+    type: int
+    label: vCPU per node
+    default: 2
+    min: 1
+    max: 32
+  - name: memory
+    type: size
+    label: Geheugen per node
+    default: 2G
+    min: 1G
+    max: 128G
+  - name: disk
+    type: size
+    label: Schijf per node
+    default: 20G
+    min: 10G
+    max: 2T
+  - name: auth_pass
+    type: secret
+    label: VRRP-wachtwoord
+    help: Leeg laten maakt er een. Keepalived gebruikt hoogstens 8 tekens.
+    length: 8
+
+roles:
+  - name: app
+    count: "{{ .params.node_count }}"
+    vm:
+      cpu: "{{ .params.cpu }}"
+      memory: "{{ .params.memory }}"
+      disk: "{{ .params.disk }}"
+    steps:
+      - package: { names: [docker.io, keepalived] }
+      - file:
+          path: /etc/docker/daemon.json
+          template: daemon.json.tmpl
+          notify: [service:docker:restart]
+      - service: { name: docker, enabled: true, state: started }
+      # Instellingen van de applicatie zet je per node in app.env; die
+      # beheert ClusterForge niet.
+      - directory: { path: /etc/cf-app, mode: "0750" }
+      - file:
+          path: /etc/systemd/system/cf-app.service
+          template: cf-app.service.tmpl
+          notify: [service:cf-app:restart]
+      - service: { name: cf-app, enabled: true, state: started }
+      - file:
+          path: /etc/keepalived/keepalived.conf
+          template: keepalived.conf.tmpl
+          mode: "0640"
+          notify: [service:keepalived:reload]
+      - service: { name: keepalived, enabled: true, state: started }
+
+checks:
+  - vip_owned: { vip: "{{ .params.vip }}", within: 60s }
+  - http: { url: "http://{{ .params.vip }}:{{ .params.port }}{{ .params.health_path }}", expect: 200, within: 120s }
+
+# Zonder cf-app geeft keepalived het VIP af (chk_app). De applicatie draait
+# in Docker en is alleen via het VIP bereikbaar.
+services:
+  - { name: app, kind: app, unit: cf-app, port: "{{ .params.port }}", depends_on: [docker, keepalived], strength: hard }
+  - { name: docker, kind: container, unit: docker }
+  - { name: keepalived, kind: vip, unit: keepalived }

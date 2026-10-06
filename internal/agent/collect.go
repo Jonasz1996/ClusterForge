@@ -23,6 +23,8 @@ var WatchedServices = []string{
 	"ssh", "keepalived", "nginx", "apache2", "haproxy", "docker", "containerd", "postgresql", "mariadb", "mysql",
 	"redis-server", "memcached", "rabbitmq-server", "php8.1-fpm", "php8.2-fpm", "php8.3-fpm", "php8.4-fpm",
 	"cron", "qemu-guest-agent", "pve-cluster", "pveproxy", "cf-agent",
+	// De container van de template generic.
+	"cf-app",
 }
 
 // WatchedPatterns zijn units met een variabel deel. postgresql.service is op

@@ -2102,7 +2102,7 @@ components:
       properties:
         scenarios: { type: array, items: { $ref: "#/components/schemas/FailoverScenarioOption" } }
         vips: { type: array, items: { $ref: "#/components/schemas/FailoverVIPOption" } }
-        default_failback: { type: boolean, description: "Aan voor clusters uit keepalived-nginx, dat preempt gebruikt" }
+        default_failback: { type: boolean, description: "Aan voor clusters uit een template met failback (keepalived met preempt), zoals keepalived-nginx" }
         prod:
           type: boolean
           description: >-
@@ -3340,7 +3340,7 @@ components:
         groups: { type: array, items: { $ref: "#/components/schemas/ImpactGroup" }, description: Per groep de ergste impact, prod bovenaan }
     Template:
       type: object
-      required: [name, version, title, description, cluster_type, params, roles]
+      required: [name, version, title, description, cluster_type, params, roles, services]
       properties:
         name: { type: string }
         version: { type: string }
@@ -3349,6 +3349,17 @@ components:
         cluster_type: { $ref: "#/components/schemas/ClusterType" }
         params: { type: array, items: { $ref: "#/components/schemas/TemplateParam" } }
         roles: { type: array, items: { $ref: "#/components/schemas/TemplateRole" } }
+        services: { type: array, items: { $ref: "#/components/schemas/TemplateService" }, description: De diensten die een uitrol in de afhankelijkheidsgraaf zet }
+    TemplateService:
+      type: object
+      required: [name, kind, unit, port, port_param, depends_on]
+      properties:
+        name: { type: string }
+        kind: { $ref: "#/components/schemas/ServiceKind" }
+        unit: { type: string, nullable: true, description: De systemd-unit zonder .service }
+        port: { type: integer, nullable: true, description: Vaste hoofdpoort }
+        port_param: { type: string, nullable: true, description: De parameter met de hoofdpoort, als die niet vastligt }
+        depends_on: { type: array, items: { type: string }, description: Diensten uit dezelfde template waarvan deze afhangt }
     DeployCluster:
       type: object
       required: [name, slug, environment]

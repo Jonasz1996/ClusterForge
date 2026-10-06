@@ -135,3 +135,44 @@ func TestApplyCommand(t *testing.T) {
 		t.Fatalf("uitvoeren: %+v %v", res, h.Calls())
 	}
 }
+
+// Een nieuwe of gewijzigde unit leest systemd pas na daemon-reload; zonder
+// reload bestaat cf-app niet voor systemctl.
+func TestApplyUnitFileReloads(t *testing.T) {
+	a, h := applyAgent(t)
+	unit := protocol.Step{File: &protocol.FileStep{Path: "/etc/systemd/system/cf-app.service", Content: "[Service]\nExecStart=/bin/true\n"}}
+	start := protocol.Step{Service: &protocol.ServiceStep{Name: "cf-app", Enabled: yes(), State: "started"}}
+	if res := a.apply(context.Background(), []protocol.Step{start}); res.OK {
+		t.Fatalf("cf-app zonder unit: %+v", res)
+	}
+	reloads := func() int {
+		n := 0
+		for _, c := range h.Calls() {
+			if c == "systemctl daemon-reload" {
+				n++
+			}
+		}
+		return n
+	}
+	res := a.apply(context.Background(), []protocol.Step{unit, start})
+	if !res.OK || !slices.Contains(res.Steps[0].Output, "systemctl daemon-reload") || reloads() != 1 {
+		t.Fatalf("nieuwe unit: %+v %v", res, h.Calls())
+	}
+	if u, _ := h.Unit("cf-app"); !u.Enabled || !u.Active {
+		t.Fatalf("cf-app: %+v", u)
+	}
+	// Ongewijzigd: geen reload. Een gewone file ook niet, een drop-in wel.
+	res = a.apply(context.Background(), []protocol.Step{
+		unit,
+		{File: &protocol.FileStep{Path: "/etc/docker/daemon.json", Content: "{}\n"}},
+		{File: &protocol.FileStep{Path: "/etc/systemd/system/cf-app.service.d/limiet.conf", Content: "[Service]\nMemoryMax=1G\n"}},
+	})
+	if !res.OK || res.Steps[0].Changed || reloads() != 2 || slices.Contains(res.Steps[1].Output, "systemctl daemon-reload") {
+		t.Fatalf("tweede keer: %+v %v", res, h.Calls())
+	}
+	h.Fail("systemctl daemon-reload", "Failed to reload daemon: Access denied\n")
+	unit.File.Content += "Restart=always\n"
+	if res := a.apply(context.Background(), []protocol.Step{unit}); res.OK || !strings.Contains(res.Error, "daemon-reload") {
+		t.Fatalf("mislukte reload: %+v", res)
+	}
+}

@@ -30,6 +30,7 @@ Het technisch ontwerp staat in [docs/design/mvp-fase-1.md](docs/design/mvp-fase-
 | 10. Drift herstellen | Gekozen afwijkingen opnieuw toepassen, node voor node met de VIP-eigenaar als laatste en een gezondheidscontrole na elke node; op prod met de slug en tweestapsverificatie | klaar |
 | 11. Planning en prod | Failovertests en back-upcontroles gepland in een testvenster, de VM hard uitzetten in lab en test, en failovertests op prod met de hand met de slug en tweestapsverificatie | klaar |
 | 12. Impact bij acties | Per dienst de opgeslagen status met een regel in het logboek bij elke verandering, "geraakt door" in de clusterlijst, en in de bevestigingsvensters welke bekende diensten down of verminderd raken | klaar |
+| 13. Meer templates | Docker-hosts, Cron-cluster en Eigen applicatie (een container achter een VIP), met hun diensten meteen in de graaf | klaar |
 
 ## Draaien met Docker Compose
 
@@ -183,7 +184,7 @@ Wil je de isolatie één keer met eigen ogen zien: open tijdens een controle in 
 
 ## Clusters uitrollen
 
-Een template beschrijft een volledig cluster: hoeveel VM's, hoe groot, welke software erop komt en hoe ClusterForge achteraf controleert dat het werkt. De eerste template, Nginx met keepalived, zet twee tot vijf webservers achter één VIP. De templates zitten in de server ingebouwd; bij Templates zie je ze met hun parameters.
+Een template beschrijft een volledig cluster: hoeveel VM's, hoe groot, welke software erop komt en hoe ClusterForge achteraf controleert dat het werkt. De templates zitten in de server ingebouwd; bij Templates zie je ze met hun parameters en de diensten die ze in de graaf zetten. Er zijn er vier, beschreven onder [De templates](#de-templates).
 
 Wat je nodig hebt:
 
@@ -197,17 +198,34 @@ Wat je nodig hebt:
    Het script haalt het cloud-image van Debian, zet er qemu-guest-agent en cf-agent in met `virt-customize` (uit `libguestfs-tools`, dat het zo nodig installeert) en maakt VM-template 9000. Met `--vmid`, `--storage`, `--bridge` en `--name` kies je iets anders, en `--replace` vervangt een eerdere template. Op gedeelde storage (Ceph, NFS) verdeelt ClusterForge de VM's over de hosts; op lokale storage komen ze allemaal op de host van de template.
 3. De nieuwe VM's moeten ClusterForge kunnen bereiken: het webadres om zich aan te melden, en poort 4222 voor NATS.
 
-Klik bij Clusters op "Cluster uitrollen", kies de template en vul de naam, de parameters (bij Nginx met keepalived het VIP), de golden image en het netwerk in. Onderaan zie je meteen welke nodes er komen, met hun adres en Proxmox-host; een fout staat bij het veld. Na "Uitrollen" loopt de taak:
+Klik bij Clusters op "Cluster uitrollen", kies de template en vul de naam, de parameters (zoals het VIP), de golden image en het netwerk in. Onderaan zie je meteen welke nodes er komen, met hun adres en Proxmox-host; een fout staat bij het veld. Na "Uitrollen" loopt de taak:
 
 1. Per node de VM klonen, cores, geheugen, netwerk en cloud-init instellen, de schijf vergroten en starten.
 2. De agents aanmelden: wachten op de guest agent, via de guest agent een eenmalig aanmeldbestand in de VM zetten (`/etc/clusterforge/enroll.json`) en wachten tot cf-agent zich meldt.
 3. Per node de stappen van de template: pakketten, bestanden en services. Elke stap meldt of hij iets veranderde.
-4. Controleren: een node heeft het VIP en `http://<VIP>/` antwoordt.
+4. Controleren: een node heeft het VIP, en bij Nginx met keepalived en Eigen applicatie antwoordt het VIP over HTTP.
 5. De nodes worden actief en tellen mee voor de status van het cluster.
 
 Loopt een stap mis, dan staat bij de taak waarom. Los het op en klik op "Opnieuw proberen"; de taak gaat verder bij de stap die misliep. Wil je het cluster niet meer, verwijder dan het cluster en de nodes, en de VM's in Proxmox; ClusterForge ruimt in deze versie niets vanzelf op. Geheimen van een template, zoals het VRRP-wachtwoord, staan versleuteld met `CF_MASTER_KEY` in de database en nooit in de taak of het logboek.
 
 Een eigen golden image kan ook: installeer cf-agent erin met `agent.sh --server https://clusterforge.example --no-enroll`. De agent meldt zich dan aan zodra ClusterForge het aanmeldbestand in de nieuwe VM zet. Zorg ook voor cloud-init en qemu-guest-agent, en maak `/etc/machine-id` leeg voor je er een template van maakt.
+
+### De templates
+
+Alle templates installeren hun software uit Debian 13, beheren alleen wat in hun stappen staat, en gebruiken geen commando's: elke stap is daardoor ook in de driftcontrole te zien. De drie met een VIP geven het met keepalived aan de node met de hoogste prioriteit waarop de bewaakte dienst draait, en na herstel keert het terug naar de eerste node.
+
+- **Nginx met keepalived** (`keepalived-nginx`). Twee tot vijf webservers met Nginx achter één VIP. Je eigen site zet je in `/var/www/html`.
+- **Docker-hosts** (`docker`). Een tot tien servers met `docker.io` en `docker-compose` (Compose v2, als `docker compose`) en een eigen `/etc/docker/daemon.json` met logrotatie (standaard 3 bestanden van 50 MB per container) en `live-restore`, zodat containers blijven draaien als Docker herstart. Je stacks zet je in `/opt/stacks`; welke containers er draaien, beheer je zelf, en die tellen niet mee voor drift. Er is geen VIP.
+- **Cron-cluster** (`cron`). Twee tot vijf servers met cron en keepalived; de node met het VIP draait de taken. Zet op elke node dezelfde taken, met `cf-leader` ervoor, bijvoorbeeld in `/etc/cron.d/taken`:
+
+  ```
+  */5 * * * * root /usr/local/bin/cf-leader /usr/local/bin/opruimen.sh
+  ```
+
+  `cf-leader` voert het commando alleen uit als deze node het VIP heeft, en doet anders niets. Valt de node of cron uit, dan draaien de taken binnen enkele seconden op de volgende. Bij een split-brain hebben twee nodes het VIP en kan een taak dubbel draaien; de status van het cluster toont dat als split-brain. Je taken zelf beheert ClusterForge niet.
+- **Eigen applicatie** (`generic`). Een container-image, zoals `ghcr.io/jonas/app:1.4.2`, op twee tot vijf servers achter één VIP. Elke node draait hem als systemd-dienst `cf-app` met `docker run`, met de poort op het VIP en de node naar de poort in de container. Instellingen zet je per node als `NAAM=waarde` in `/etc/cf-app/app.env` (alleen voor root leesbaar); daarna `systemctl restart cf-app`. Na de uitrol moet `http://<VIP>:<poort><pad>` 200 geven. Een image uit een registry met wachtwoord kan nog niet. Kan een node de image niet ophalen, dan start de container met de image die er al staat. Deze template heeft een agent van deze versie nodig, die `cf-app` volgt en systemd de nieuwe unit laat lezen; werk daarom eerst je golden image bij.
+
+Een uitrol zet de diensten van de template meteen in de [afhankelijkheidsgraaf](#afhankelijkheden): docker als container, cron met keepalived, en app met docker en keepalived, met de poort die je koos.
 
 ### Gewenste staat
 
@@ -235,7 +253,7 @@ Drift kan alleen met een agent van deze versie of nieuwer. Een oudere agent staa
 
 ## Failovertests
 
-Een failovertest bewijst dat een VIP echt verhuist als de node die het heeft uitvalt. Op de pagina van een cluster staat de kaart Failovertests. Een beheerder voegt er een test toe: het scenario (keepalived stoppen op de eigenaar, nginx of haproxy stoppen op de eigenaar, of de VM van de eigenaar hard uitzetten via Proxmox), het VIP, binnen hoeveel seconden een andere node moet overnemen (standaard 5 s voor keepalived en 10 s voor een dienst of een VM), of het VIP daarna terug moet naar de oorspronkelijke node (standaard aan bij keepalived-nginx, dat preempt gebruikt) en de probe: een HTTP-pad met de verwachte status of een TCP-poort op het VIP. Scenario's die op dit cluster niet kunnen, staan grijs met de reden.
+Een failovertest bewijst dat een VIP echt verhuist als de node die het heeft uitvalt. Op de pagina van een cluster staat de kaart Failovertests. Een beheerder voegt er een test toe: het scenario (keepalived stoppen op de eigenaar, nginx of haproxy stoppen op de eigenaar, of de VM van de eigenaar hard uitzetten via Proxmox), het VIP, binnen hoeveel seconden een andere node moet overnemen (standaard 5 s voor keepalived en 10 s voor een dienst of een VM), of het VIP daarna terug moet naar de oorspronkelijke node (standaard aan bij de templates met keepalived, die preempt gebruiken) en de probe: een HTTP-pad met de verwachte status of een TCP-poort op het VIP. Scenario's die op dit cluster niet kunnen, staan grijs met de reden.
 
 Nu testen toont eerst wat er gaat gebeuren, bijvoorbeeld: "keepalived wordt gestopt op web01, nu eigenaar van 10.0.30.100. Verwacht: een andere node neemt binnen 5 s over. Lukt dat niet, dan is 10.0.30.100 hoogstens 20 s onbereikbaar; daarna zet ClusterForge keepalived weer aan." Daarna doet de server een strenge voorcontrole zonder uitweg: het cluster gezond, geen database op de nodes (een VIP dat naar een replica verhuist, kan schrijfacties laten mislukken), verse heartbeats, precies één eigenaar per VIP, een agent die deploystappen kan uitvoeren, de dienst draait, een reservenode met keepalived, geen andere taak in het cluster, geen andere test in heel ClusterForge en een probe die drie keer slaagt. Faalt er één, dan start de test niet en staan de controles in het venster.
 
@@ -259,7 +277,7 @@ Bij Afhankelijkheden zie je welke diensten je draait en welke dienst van welke a
 
 Diensten komen op drie manieren in de graaf:
 
-- **Uit een template.** Een cluster dat je uitrolt met Nginx met keepalived 1.1.0 krijgt nginx en keepalived, met nginx die hard afhangt van keepalived. Bestaande clusters uit die template kregen ze één keer bij de update.
+- **Uit een template.** Een cluster dat je uitrolt met Nginx met keepalived 1.1.0 krijgt nginx en keepalived, met nginx die hard afhangt van keepalived. Bestaande clusters uit die template kregen ze één keer bij de update. De andere templates zetten hun diensten er ook meteen in, zie [De templates](#de-templates).
 - **Met de hand.** Een beheerder voegt bij Afhankelijkheden of op de pagina van een cluster diensten, externe diensten en afhankelijkheden toe. Zo komen ook met de hand gebouwde clusters en de verbanden tussen clusters erin.
 - **Als voorstel.** Ziet een agent een bekende unit draaien op een actieve node van een cluster (nginx, apache2, haproxy, keepalived, mariadb, mysql, postgresql, redis-server, memcached, rabbitmq-server, php-fpm of docker), dan verschijnt die dienst binnen vijf minuten bij Voorstellen. Bevestig hem of negeer hem; een genegeerde dienst komt niet terug.
 
@@ -294,7 +312,7 @@ Kan geen andere node een VIP overnemen (geen actieve, online node waarop keepali
 
 Een node zonder agent kun je alleen in en uit onderhoud zetten; de VIP's haal je dan zelf weg.
 
-De agent voert alleen vaste soorten commando's uit: facts verzamelen, de toestand lezen voor de driftcontrole, keepalived uit- en aanzetten voor onderhoud, keepalived, nginx of haproxy stoppen en starten voor een failovertest, herstarten en afsluiten met `systemctl`, en de stappen van een template (pakketten met apt, bestanden, services, gebruikers, mappen en commando's). Omdat hij als root bestanden schrijft, kan wie de server beheert alles op de nodes; bescherm de server en `CF_MASTER_KEY` daarom als een beheerwachtwoord. Hij onthoudt het onderhoud en het laatste herstartcommando in `/var/lib/clusterforge/agent-state.json`, zodat hij na een herstart niet nog eens herstart. Een agent van voor deze versie kan geen commando's uitvoeren; trek hem in en installeer hem opnieuw.
+De agent voert alleen vaste soorten commando's uit: facts verzamelen, de toestand lezen voor de driftcontrole, keepalived uit- en aanzetten voor onderhoud, keepalived, nginx of haproxy stoppen en starten voor een failovertest, herstarten en afsluiten met `systemctl`, en de stappen van een template (pakketten met apt, bestanden, services, gebruikers, mappen en commando's). Na een gewijzigde unit onder `/etc/systemd/system` doet hij `systemctl daemon-reload`. Omdat hij als root bestanden schrijft, kan wie de server beheert alles op de nodes; bescherm de server en `CF_MASTER_KEY` daarom als een beheerwachtwoord. Hij onthoudt het onderhoud en het laatste herstartcommando in `/var/lib/clusterforge/agent-state.json`, zodat hij na een herstart niet nog eens herstart. Een agent van voor deze versie kan geen commando's uitvoeren; trek hem in en installeer hem opnieuw.
 
 ## Taken
 
@@ -330,7 +348,7 @@ Open http://localhost:3000.
 | `cf-agent` voor amd64 en arm64 (in `bin/agents`, voor `make dev-server`) | `make agent` |
 | Container-image | `make docker` |
 
-De ingebouwde templates staan in `internal/templates/builtin/<naam>/<versie>/`. Een uitgebrachte versie verander je niet meer, want clusters kunnen ze gebruiken: kopieer de map naar een nieuwe versie, pas die aan en zet hem in de lijst `released` in `internal/templates/registry_test.go`. De test faalt als een uitgebrachte versie verdwijnt of een nieuwe er niet in staat.
+De ingebouwde templates staan in `internal/templates/builtin/<naam>/<versie>/`. Wat een uitgebrachte versie op de nodes zet, verander je niet meer, want clusters kunnen ze gebruiken: kopieer de map naar een nieuwe versie, pas die aan en zet hem in de lijst `released` in `internal/templates/registry_test.go`. De test faalt als een uitgebrachte versie verdwijnt of een nieuwe er niet in staat.
 
 ### Indeling
 

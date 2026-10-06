@@ -6,6 +6,9 @@ description: >-
   geeft het VIP aan de node met de hoogste prioriteit; valt die node of Nginx
   erop uit, dan neemt de volgende het binnen enkele seconden over.
 cluster_type: keepalived
+# Keepalived met preempt: het VIP keert terug naar de eerste node zodra die
+# weer gezond is.
+failback: true
 
 params:
   - name: vip
