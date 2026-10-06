@@ -32,7 +32,7 @@ export function Modal({
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className={`max-h-full w-full ${wide ? "max-w-3xl" : "max-w-md"} overflow-y-auto rounded-lg bg-white p-5 text-left shadow-xl dark:bg-slate-900`}
+        className={`max-h-full w-full ${wide ? "max-w-3xl" : "max-w-md"} overflow-y-auto rounded-lg bg-white p-5 text-left whitespace-normal shadow-xl dark:bg-slate-900`}
       >
         <h2 className="mb-4 text-base font-semibold">{title}</h2>
         {children}
