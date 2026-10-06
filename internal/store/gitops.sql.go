@@ -74,6 +74,64 @@ func (q *Queries) CreateGitRepo(ctx context.Context, arg CreateGitRepoParams) (G
 	return i, err
 }
 
+const decideGitChange = `-- name: DecideGitChange :one
+UPDATE git_changes
+SET status = $1, revision = $2, job_id = $3, reason = $4,
+    decided_by = $5, decided_at = now(), updated_at = now()
+WHERE id = $6 AND status = 'pending'
+RETURNING id, repo_id, cluster_id, slug, path, kind, commit_sha, commit_message, commit_author, commit_verified, commit_url, committed_at, blob_sha, base_revision, spec, metadata, plan, status, job_id, decided_by, decided_at, reason, created_at, updated_at, revision
+`
+
+type DecideGitChangeParams struct {
+	Status    string
+	Revision  *int32
+	JobID     *uuid.UUID
+	Reason    string
+	DecidedBy *uuid.UUID
+	ID        uuid.UUID
+}
+
+// Goedkeuren (applying met een taak, of meteen applied) of afwijzen.
+func (q *Queries) DecideGitChange(ctx context.Context, arg DecideGitChangeParams) (GitChange, error) {
+	row := q.db.QueryRow(ctx, decideGitChange,
+		arg.Status,
+		arg.Revision,
+		arg.JobID,
+		arg.Reason,
+		arg.DecidedBy,
+		arg.ID,
+	)
+	var i GitChange
+	err := row.Scan(
+		&i.ID,
+		&i.RepoID,
+		&i.ClusterID,
+		&i.Slug,
+		&i.Path,
+		&i.Kind,
+		&i.CommitSha,
+		&i.CommitMessage,
+		&i.CommitAuthor,
+		&i.CommitVerified,
+		&i.CommitUrl,
+		&i.CommittedAt,
+		&i.BlobSha,
+		&i.BaseRevision,
+		&i.Spec,
+		&i.Metadata,
+		&i.Plan,
+		&i.Status,
+		&i.JobID,
+		&i.DecidedBy,
+		&i.DecidedAt,
+		&i.Reason,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Revision,
+	)
+	return i, err
+}
+
 const deleteGitRepo = `-- name: DeleteGitRepo :execrows
 DELETE FROM git_repos WHERE id = $1
 `
@@ -86,8 +144,54 @@ func (q *Queries) DeleteGitRepo(ctx context.Context, id uuid.UUID) (int64, error
 	return result.RowsAffected(), nil
 }
 
+const finishGitChange = `-- name: FinishGitChange :one
+UPDATE git_changes SET status = $1, reason = $2, updated_at = now()
+WHERE job_id = $3 AND status = 'applying'
+RETURNING id, repo_id, cluster_id, slug, path, kind, commit_sha, commit_message, commit_author, commit_verified, commit_url, committed_at, blob_sha, base_revision, spec, metadata, plan, status, job_id, decided_by, decided_at, reason, created_at, updated_at, revision
+`
+
+type FinishGitChangeParams struct {
+	Status string
+	Reason string
+	JobID  *uuid.UUID
+}
+
+// Na de taak: applied of failed.
+func (q *Queries) FinishGitChange(ctx context.Context, arg FinishGitChangeParams) (GitChange, error) {
+	row := q.db.QueryRow(ctx, finishGitChange, arg.Status, arg.Reason, arg.JobID)
+	var i GitChange
+	err := row.Scan(
+		&i.ID,
+		&i.RepoID,
+		&i.ClusterID,
+		&i.Slug,
+		&i.Path,
+		&i.Kind,
+		&i.CommitSha,
+		&i.CommitMessage,
+		&i.CommitAuthor,
+		&i.CommitVerified,
+		&i.CommitUrl,
+		&i.CommittedAt,
+		&i.BlobSha,
+		&i.BaseRevision,
+		&i.Spec,
+		&i.Metadata,
+		&i.Plan,
+		&i.Status,
+		&i.JobID,
+		&i.DecidedBy,
+		&i.DecidedAt,
+		&i.Reason,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Revision,
+	)
+	return i, err
+}
+
 const getGitChange = `-- name: GetGitChange :one
-SELECT g.id, g.repo_id, g.cluster_id, g.slug, g.path, g.kind, g.commit_sha, g.commit_message, g.commit_author, g.commit_verified, g.commit_url, g.committed_at, g.blob_sha, g.base_revision, g.spec, g.metadata, g.plan, g.status, g.job_id, g.decided_by, g.decided_at, g.reason, g.created_at, g.updated_at, c.name AS cluster_name, c.environment AS cluster_environment, u.username AS decided_by_name
+SELECT g.id, g.repo_id, g.cluster_id, g.slug, g.path, g.kind, g.commit_sha, g.commit_message, g.commit_author, g.commit_verified, g.commit_url, g.committed_at, g.blob_sha, g.base_revision, g.spec, g.metadata, g.plan, g.status, g.job_id, g.decided_by, g.decided_at, g.reason, g.created_at, g.updated_at, g.revision, c.name AS cluster_name, c.environment AS cluster_environment, u.username AS decided_by_name
 FROM git_changes g
 LEFT JOIN clusters c ON c.id = g.cluster_id
 LEFT JOIN users u ON u.id = g.decided_by
@@ -119,6 +223,7 @@ type GetGitChangeRow struct {
 	Reason             string
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
+	Revision           *int32
 	ClusterName        *string
 	ClusterEnvironment NullEnvironment
 	DecidedByName      *string
@@ -152,6 +257,7 @@ func (q *Queries) GetGitChange(ctx context.Context, id uuid.UUID) (GetGitChangeR
 		&i.Reason,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Revision,
 		&i.ClusterName,
 		&i.ClusterEnvironment,
 		&i.DecidedByName,
@@ -189,7 +295,7 @@ func (q *Queries) GetGitRepo(ctx context.Context) (GitRepo, error) {
 }
 
 const getPendingGitChange = `-- name: GetPendingGitChange :one
-SELECT id, repo_id, cluster_id, slug, path, kind, commit_sha, commit_message, commit_author, commit_verified, commit_url, committed_at, blob_sha, base_revision, spec, metadata, plan, status, job_id, decided_by, decided_at, reason, created_at, updated_at FROM git_changes WHERE slug = $1 AND status = 'pending'
+SELECT id, repo_id, cluster_id, slug, path, kind, commit_sha, commit_message, commit_author, commit_verified, commit_url, committed_at, blob_sha, base_revision, spec, metadata, plan, status, job_id, decided_by, decided_at, reason, created_at, updated_at, revision FROM git_changes WHERE slug = $1 AND status = 'pending'
 `
 
 func (q *Queries) GetPendingGitChange(ctx context.Context, slug string) (GitChange, error) {
@@ -220,6 +326,7 @@ func (q *Queries) GetPendingGitChange(ctx context.Context, slug string) (GitChan
 		&i.Reason,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Revision,
 	)
 	return i, err
 }
@@ -229,7 +336,7 @@ INSERT INTO git_changes (repo_id, cluster_id, slug, path, kind, commit_sha, comm
                          commit_verified, commit_url, committed_at, blob_sha, base_revision, spec, metadata, plan)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8,
         $9, $10, $11, $12, $13, $14, $15, $16)
-RETURNING id, repo_id, cluster_id, slug, path, kind, commit_sha, commit_message, commit_author, commit_verified, commit_url, committed_at, blob_sha, base_revision, spec, metadata, plan, status, job_id, decided_by, decided_at, reason, created_at, updated_at
+RETURNING id, repo_id, cluster_id, slug, path, kind, commit_sha, commit_message, commit_author, commit_verified, commit_url, committed_at, blob_sha, base_revision, spec, metadata, plan, status, job_id, decided_by, decided_at, reason, created_at, updated_at, revision
 `
 
 type InsertGitChangeParams struct {
@@ -296,12 +403,13 @@ func (q *Queries) InsertGitChange(ctx context.Context, arg InsertGitChangeParams
 		&i.Reason,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Revision,
 	)
 	return i, err
 }
 
 const listGitChanges = `-- name: ListGitChanges :many
-SELECT g.id, g.repo_id, g.cluster_id, g.slug, g.path, g.kind, g.commit_sha, g.commit_message, g.commit_author, g.commit_verified, g.commit_url, g.committed_at, g.blob_sha, g.base_revision, g.spec, g.metadata, g.plan, g.status, g.job_id, g.decided_by, g.decided_at, g.reason, g.created_at, g.updated_at, c.name AS cluster_name, c.environment AS cluster_environment, u.username AS decided_by_name
+SELECT g.id, g.repo_id, g.cluster_id, g.slug, g.path, g.kind, g.commit_sha, g.commit_message, g.commit_author, g.commit_verified, g.commit_url, g.committed_at, g.blob_sha, g.base_revision, g.spec, g.metadata, g.plan, g.status, g.job_id, g.decided_by, g.decided_at, g.reason, g.created_at, g.updated_at, g.revision, c.name AS cluster_name, c.environment AS cluster_environment, u.username AS decided_by_name
 FROM git_changes g
 LEFT JOIN clusters c ON c.id = g.cluster_id
 LEFT JOIN users u ON u.id = g.decided_by
@@ -342,6 +450,7 @@ type ListGitChangesRow struct {
 	Reason             string
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
+	Revision           *int32
 	ClusterName        *string
 	ClusterEnvironment NullEnvironment
 	DecidedByName      *string
@@ -382,6 +491,7 @@ func (q *Queries) ListGitChanges(ctx context.Context, arg ListGitChangesParams) 
 			&i.Reason,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Revision,
 			&i.ClusterName,
 			&i.ClusterEnvironment,
 			&i.DecidedByName,
@@ -397,8 +507,8 @@ func (q *Queries) ListGitChanges(ctx context.Context, arg ListGitChangesParams) 
 }
 
 const listGitClusters = `-- name: ListGitClusters :many
-SELECT id, slug, name, description, environment, tags, type, spec, spec_revision, template_name,
-       template_version, git_repo_id
+SELECT id, slug, name, description, environment, tags, type, spec, spec_revision, applied_revision,
+       template_name, template_version, git_repo_id
 FROM clusters
 ORDER BY slug
 `
@@ -413,6 +523,7 @@ type ListGitClustersRow struct {
 	Type            string
 	Spec            []byte
 	SpecRevision    int32
+	AppliedRevision int32
 	TemplateName    *string
 	TemplateVersion *string
 	GitRepoID       *uuid.UUID
@@ -439,6 +550,7 @@ func (q *Queries) ListGitClusters(ctx context.Context) ([]ListGitClustersRow, er
 			&i.Type,
 			&i.Spec,
 			&i.SpecRevision,
+			&i.AppliedRevision,
 			&i.TemplateName,
 			&i.TemplateVersion,
 			&i.GitRepoID,
@@ -453,8 +565,59 @@ func (q *Queries) ListGitClusters(ctx context.Context) ([]ListGitClustersRow, er
 	return items, nil
 }
 
+const listLatestGitChanges = `-- name: ListLatestGitChanges :many
+SELECT DISTINCT ON (slug) id, repo_id, cluster_id, slug, path, kind, commit_sha, commit_message, commit_author, commit_verified, commit_url, committed_at, blob_sha, base_revision, spec, metadata, plan, status, job_id, decided_by, decided_at, reason, created_at, updated_at, revision FROM git_changes ORDER BY slug, created_at DESC, id
+`
+
+// De nieuwste wijziging per slug, ongeacht haar status.
+func (q *Queries) ListLatestGitChanges(ctx context.Context) ([]GitChange, error) {
+	rows, err := q.db.Query(ctx, listLatestGitChanges)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []GitChange{}
+	for rows.Next() {
+		var i GitChange
+		if err := rows.Scan(
+			&i.ID,
+			&i.RepoID,
+			&i.ClusterID,
+			&i.Slug,
+			&i.Path,
+			&i.Kind,
+			&i.CommitSha,
+			&i.CommitMessage,
+			&i.CommitAuthor,
+			&i.CommitVerified,
+			&i.CommitUrl,
+			&i.CommittedAt,
+			&i.BlobSha,
+			&i.BaseRevision,
+			&i.Spec,
+			&i.Metadata,
+			&i.Plan,
+			&i.Status,
+			&i.JobID,
+			&i.DecidedBy,
+			&i.DecidedAt,
+			&i.Reason,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Revision,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPendingGitChanges = `-- name: ListPendingGitChanges :many
-SELECT id, repo_id, cluster_id, slug, path, kind, commit_sha, commit_message, commit_author, commit_verified, commit_url, committed_at, blob_sha, base_revision, spec, metadata, plan, status, job_id, decided_by, decided_at, reason, created_at, updated_at FROM git_changes WHERE status = 'pending' ORDER BY slug
+SELECT id, repo_id, cluster_id, slug, path, kind, commit_sha, commit_message, commit_author, commit_verified, commit_url, committed_at, blob_sha, base_revision, spec, metadata, plan, status, job_id, decided_by, decided_at, reason, created_at, updated_at, revision FROM git_changes WHERE status = 'pending' ORDER BY slug
 `
 
 func (q *Queries) ListPendingGitChanges(ctx context.Context) ([]GitChange, error) {
@@ -491,6 +654,7 @@ func (q *Queries) ListPendingGitChanges(ctx context.Context) ([]GitChange, error
 			&i.Reason,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Revision,
 		); err != nil {
 			return nil, err
 		}
@@ -500,6 +664,43 @@ func (q *Queries) ListPendingGitChanges(ctx context.Context) ([]GitChange, error
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockGitChange = `-- name: LockGitChange :one
+SELECT id, repo_id, cluster_id, slug, path, kind, commit_sha, commit_message, commit_author, commit_verified, commit_url, committed_at, blob_sha, base_revision, spec, metadata, plan, status, job_id, decided_by, decided_at, reason, created_at, updated_at, revision FROM git_changes WHERE id = $1 FOR UPDATE
+`
+
+func (q *Queries) LockGitChange(ctx context.Context, id uuid.UUID) (GitChange, error) {
+	row := q.db.QueryRow(ctx, lockGitChange, id)
+	var i GitChange
+	err := row.Scan(
+		&i.ID,
+		&i.RepoID,
+		&i.ClusterID,
+		&i.Slug,
+		&i.Path,
+		&i.Kind,
+		&i.CommitSha,
+		&i.CommitMessage,
+		&i.CommitAuthor,
+		&i.CommitVerified,
+		&i.CommitUrl,
+		&i.CommittedAt,
+		&i.BlobSha,
+		&i.BaseRevision,
+		&i.Spec,
+		&i.Metadata,
+		&i.Plan,
+		&i.Status,
+		&i.JobID,
+		&i.DecidedBy,
+		&i.DecidedAt,
+		&i.Reason,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Revision,
+	)
+	return i, err
 }
 
 const lockGitRepo = `-- name: LockGitRepo :one
@@ -608,7 +809,7 @@ func (q *Queries) SetGitScan(ctx context.Context, arg SetGitScanParams) error {
 const supersedeGitChange = `-- name: SupersedeGitChange :one
 UPDATE git_changes SET status = 'superseded', reason = $1, updated_at = now()
 WHERE id = $2 AND status = 'pending'
-RETURNING id, repo_id, cluster_id, slug, path, kind, commit_sha, commit_message, commit_author, commit_verified, commit_url, committed_at, blob_sha, base_revision, spec, metadata, plan, status, job_id, decided_by, decided_at, reason, created_at, updated_at
+RETURNING id, repo_id, cluster_id, slug, path, kind, commit_sha, commit_message, commit_author, commit_verified, commit_url, committed_at, blob_sha, base_revision, spec, metadata, plan, status, job_id, decided_by, decided_at, reason, created_at, updated_at, revision
 `
 
 type SupersedeGitChangeParams struct {
@@ -644,6 +845,7 @@ func (q *Queries) SupersedeGitChange(ctx context.Context, arg SupersedeGitChange
 		&i.Reason,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Revision,
 	)
 	return i, err
 }

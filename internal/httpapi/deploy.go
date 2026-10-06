@@ -14,6 +14,7 @@ import (
 
 	"github.com/Jonasz1996/clusterforge/internal/deploy"
 	"github.com/Jonasz1996/clusterforge/internal/events"
+	"github.com/Jonasz1996/clusterforge/internal/gitops"
 	"github.com/Jonasz1996/clusterforge/internal/httpapi/gen"
 	"github.com/Jonasz1996/clusterforge/internal/inventory"
 	"github.com/Jonasz1996/clusterforge/internal/jobs"
@@ -233,11 +234,21 @@ func (s *Server) ListSpecRevisions(w http.ResponseWriter, r *http.Request, id uu
 		}
 		out.Params = append(out.Params, sp)
 	}
+	// Een commit linkt naar de gekoppelde repository, als die er nog is.
+	commitURL := func(string) string { return "" }
+	if repo, err := s.q.GetGitRepo(r.Context()); err == nil {
+		commitURL = func(sha string) string {
+			return gitops.WebURL(repo.ApiUrl) + "/" + repo.Owner + "/" + repo.Name + "/commit/" + sha
+		}
+	}
 	for _, rev := range h.Revisions {
 		item := gen.SpecRevision{
-			Revision: rev.Revision, Source: gen.SpecRevisionSource(rev.Source), CreatedAt: rev.CreatedAt,
+			Revision: rev.Revision, Source: gen.SpecRevisionSource(rev.Source), CommitSha: nullableOf(rev.CommitSha), CreatedAt: rev.CreatedAt,
 			CreatedBy: nullable.NewNullNullable[gen.AuditRef](), Template: rev.Template, TemplateVersion: rev.TemplateVersion,
 			Nodes: rev.Nodes, Changes: []gen.SpecChange{},
+		}
+		if rev.CommitSha != nil {
+			item.CommitUrl = commitURL(*rev.CommitSha)
 		}
 		// Een verwijderde gebruiker laat created_by leeg.
 		if rev.CreatedBy != nil && rev.CreatedByName != nil {

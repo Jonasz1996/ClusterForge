@@ -39,8 +39,10 @@ type HistoryParam struct {
 
 // Revision is één versie van de spec.
 type Revision struct {
-	Revision        int
-	Source          string
+	Revision int
+	Source   string
+	// CommitSha is de commit bij bron git.
+	CommitSha       *string
 	CreatedAt       time.Time
 	CreatedBy       *uuid.UUID
 	CreatedByName   *string
@@ -103,7 +105,7 @@ func (s *Service) History(ctx context.Context, clusterID uuid.UUID) (History, er
 	for i, r := range revs {
 		_ = json.Unmarshal(r.Spec, &specs[i])
 		rev := Revision{
-			Revision: int(r.Revision), Source: r.Source, CreatedAt: r.CreatedAt, CreatedBy: r.CreatedBy, CreatedByName: r.CreatedByName,
+			Revision: int(r.Revision), Source: r.Source, CommitSha: r.CommitSha, CreatedAt: r.CreatedAt, CreatedBy: r.CreatedBy, CreatedByName: r.CreatedByName,
 			Template: specs[i].Template.Name, TemplateVersion: specs[i].Template.Version, Nodes: []string{}, Changes: []Change{},
 		}
 		for _, n := range specs[i].Nodes {

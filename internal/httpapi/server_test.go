@@ -146,7 +146,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	ro.Gate.Poll, ro.Retry, ro.Fresh = 20*time.Millisecond, 50*time.Millisecond, 2*time.Second
 	ro.ReadyTimeout, ro.SettleTimeout, ro.CheckTimeout = 5*time.Second, 5*time.Second, 2*time.Second
 	// De GitOps-lus loopt niet vanzelf; een test start hem of roept Sync aan.
-	git := gitops.NewService(pool, ev, log, box, dep)
+	git := gitops.NewService(pool, ev, log, box, dep, ro)
 	git.Interval = 0
 	var wg sync.WaitGroup
 	wg.Add(2)

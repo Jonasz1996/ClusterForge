@@ -1488,6 +1488,80 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/gitops/changes/{changeId}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                changeId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Een wachtende wijziging goedkeuren en toepassen (admin)
+         * @description Schrijft in één transactie een spec-revisie met bron git en de commit,
+         *     werkt naam, beschrijving, omgeving en tags bij en zet cluster.apply in
+         *     de wachtrij. Verandert er op geen node een stap, dan is de wijziging
+         *     meteen toegepast (200, zonder taak). Op prod vraagt het
+         *     tweestapsverificatie en de slug. 409 bij een verouderd plan
+         *     (plan_changed), een bezet clusterslot (busy) of een wijziging die in
+         *     deze versie nog niet kan (not_supported).
+         */
+        post: operations["approveGitChange"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/gitops/changes/{changeId}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                changeId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Een wachtende wijziging afwijzen met een reden (admin)
+         * @description Het bestand blijft afgewezen tot een nieuwe commit het wijzigt.
+         */
+        post: operations["rejectGitChange"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/clusters/{clusterId}/git/reapply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * De huidige revisie opnieuw toepassen (admin)
+         * @description Alleen als applied_revision achterloopt, zoals na een mislukte
+         *     toepassing: een nieuwe cluster.apply met alle stappen, behalve wat
+         *     genegeerd wordt. Op prod vraagt het tweestapsverificatie en de slug.
+         */
+        post: operations["reapplyClusterGit"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/clusters/{clusterId}/git/export": {
         parameters: {
             query?: never;
@@ -2284,6 +2358,10 @@ export interface components {
             revision: number;
             /** @enum {string} */
             source: "ui" | "api" | "git";
+            /** @description De commit bij bron git */
+            commit_sha: string | null;
+            /** @description De commit op GitHub, of leeg */
+            commit_url: string;
             /** Format: date-time */
             created_at: string;
             created_by: components["schemas"]["AuditRef"] | null;
@@ -2421,6 +2499,8 @@ export interface components {
             template_version: string | null;
             /** @description Revisie van de gewenste staat; 0 zonder spec */
             spec_revision: number;
+            /** @description De revisie die op alle nodes staat; lager dan spec_revision na een mislukte toepassing */
+            applied_revision: number;
             /** Format: uuid */
             id: string;
             /** @description Korte unieke naam, bijvoorbeeld webcluster-prod */
@@ -3342,12 +3422,15 @@ export interface components {
             message: string;
         };
         /**
-         * @description in_sync: gelijk aan het cluster; pending: een wijziging wacht; invalid:
-         *     fouten; new: een nieuw cluster; unlinked: het cluster bestaat maar is
-         *     niet gekoppeld; missing: het bestand van een gekoppeld cluster ontbreekt
+         * @description in_sync: gelijk aan het cluster; pending: een wijziging wacht; applying:
+         *     een goedgekeurde wijziging wordt toegepast; not_applied: gelijk aan de
+         *     spec, maar die staat niet op alle nodes; rejected: deze inhoud is
+         *     afgewezen; invalid: fouten; new: een nieuw cluster; unlinked: het
+         *     cluster bestaat maar is niet gekoppeld; missing: het bestand van een
+         *     gekoppeld cluster ontbreekt
          * @enum {string}
          */
-        GitFileState: "in_sync" | "pending" | "invalid" | "new" | "unlinked" | "missing";
+        GitFileState: "in_sync" | "pending" | "applying" | "not_applied" | "rejected" | "invalid" | "new" | "unlinked" | "missing";
         GitFile: {
             path: string;
             slug: string;
@@ -3358,7 +3441,7 @@ export interface components {
             errors: components["schemas"]["GitFieldError"][];
             /**
              * Format: uuid
-             * @description De wachtende wijziging
+             * @description De wachtende, afgewezen, lopende of mislukte wijziging
              */
             change_id: string | null;
             /** @description De commit waarin de server deze inhoud voor het eerst zag */
@@ -3385,6 +3468,8 @@ export interface components {
             status: components["schemas"]["GitChangeStatus"];
             commit: components["schemas"]["GitCommit"];
             base_revision: number;
+            /** @description De spec-revisie die de goedkeuring maakte */
+            revision: number | null;
             /** @description Zoals: node_count van 2 naar 3; keepalived.conf op 2 nodes, 1 nieuwe node */
             summary: string;
             /** Format: uuid */
@@ -3392,6 +3477,7 @@ export interface components {
             decided_by: string | null;
             /** Format: date-time */
             decided_at: string | null;
+            /** @description De reden van afwijzen of vervallen, of de fout van de taak */
             reason: string;
             /** Format: date-time */
             created_at: string;
@@ -3399,10 +3485,32 @@ export interface components {
             updated_at: string;
         };
         GitChangeDetail: components["schemas"]["GitChange"] & {
+            /** @description Het cluster is of wordt prod: goedkeuren vraagt de slug */
+            needs_confirmation: boolean;
+            /** @description Een eerdere revisie is niet op alle nodes toegepast, dus goedkeuren past alle stappen opnieuw toe */
+            full_apply: boolean;
+            /** @description Waarom goedkeuren in deze versie nog niet kan; leeg als het kan */
+            blocked: string;
             plan: components["schemas"]["GitPlan"];
             /** @description Uit de laatste driftcontrole, wat op de nodes al afwijkt en overschreven wordt */
             local: string[];
             file_url: string;
+        };
+        GitApproveInput: {
+            /** @description Op prod de slug van het cluster */
+            confirm?: string;
+        };
+        GitRejectInput: {
+            reason: string;
+        };
+        GitReapplyInput: {
+            /** @description Op prod de slug van het cluster */
+            confirm?: string;
+        };
+        GitDecision: {
+            change: components["schemas"]["GitChange"];
+            /** @description null als er op geen node iets verandert */
+            job: components["schemas"]["Job"] | null;
         };
         GitFieldChange: {
             field: string;
@@ -6063,6 +6171,106 @@ export interface operations {
             };
             401: components["responses"]["Error"];
             404: components["responses"]["Error"];
+        };
+    };
+    approveGitChange: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                changeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["GitApproveInput"];
+            };
+        };
+        responses: {
+            /** @description Toegepast zonder taak */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitDecision"];
+                };
+            };
+            /** @description Goedgekeurd; de taak past de wijziging toe */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitDecision"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    rejectGitChange: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                changeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GitRejectInput"];
+            };
+        };
+        responses: {
+            /** @description Afgewezen */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitChange"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    reapplyClusterGit: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["GitReapplyInput"];
+            };
+        };
+        responses: {
+            /** @description In de wachtrij */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Job"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
         };
     };
     exportClusterGit: {

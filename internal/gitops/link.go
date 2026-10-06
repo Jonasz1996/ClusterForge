@@ -31,7 +31,8 @@ func (s *Service) exportOf(ctx context.Context, clusterID uuid.UUID) (store.Clus
 	}
 	cl := s.clusterOf(ctx, store.ListGitClustersRow{
 		ID: c.ID, Slug: c.Slug, Name: c.Name, Description: c.Description, Environment: c.Environment, Tags: c.Tags, Type: c.Type,
-		Spec: c.Spec, SpecRevision: c.SpecRevision, TemplateName: c.TemplateName, TemplateVersion: c.TemplateVersion, GitRepoID: c.GitRepoID,
+		Spec: c.Spec, SpecRevision: c.SpecRevision, AppliedRevision: c.AppliedRevision, TemplateName: c.TemplateName, TemplateVersion: c.TemplateVersion,
+		GitRepoID: c.GitRepoID,
 	})
 	if cl.Spec == nil {
 		return c, nil, nil, &ConflictError{Code: "not_template", Msg: "alleen een cluster uit een ingebouwde template kan in Git"}

@@ -27,6 +27,8 @@ type Cluster struct {
 	Tags        []string
 	Linked      bool
 	Revision    int
+	// Applied is de revisie die op alle nodes staat.
+	Applied int
 	// Spec is nil voor een cluster dat niet uit een template komt.
 	Spec *deploy.Spec
 }

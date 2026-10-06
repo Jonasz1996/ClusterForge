@@ -616,6 +616,10 @@ func (r *runCtx) activate(ctx context.Context, st *jobs.Step) error {
 				return err
 			}
 		}
+		// De gewenste staat staat nu op alle nodes.
+		if err := q.MarkSpecApplied(ctx, r.p.ClusterID); err != nil {
+			return err
+		}
 		return r.s.ev.Write(ctx, q, events.Event{
 			Actor: r.actor, SubjectType: "cluster", SubjectID: r.p.ClusterID.String(), ClusterID: &r.p.ClusterID,
 			Action: "cluster.deployed",

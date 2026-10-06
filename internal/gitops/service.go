@@ -20,6 +20,7 @@ import (
 
 	"github.com/Jonasz1996/clusterforge/internal/deploy"
 	"github.com/Jonasz1996/clusterforge/internal/events"
+	"github.com/Jonasz1996/clusterforge/internal/rollout"
 	"github.com/Jonasz1996/clusterforge/internal/secrets"
 	"github.com/Jonasz1996/clusterforge/internal/store"
 	"github.com/Jonasz1996/clusterforge/internal/templates"
@@ -52,7 +53,8 @@ func (e *ConflictError) Error() string { return e.Msg }
 const lockID = 4242003
 
 // Service leest de gekoppelde repository, valideert de clusterbestanden en
-// plant wijzigingen. Er gaat niets naar een node.
+// plant wijzigingen. Pas na de goedkeuring van een admin gaat een wijziging
+// naar de nodes.
 type Service struct {
 	pool *pgxpool.Pool
 	q    *store.Queries
@@ -60,6 +62,7 @@ type Service struct {
 	log  *slog.Logger
 	box  *secrets.Box
 	dep  *deploy.Service
+	ro   *rollout.Service
 
 	// Interval is de tijd tussen twee polls; 0 laat Run niet pollen, alleen
 	// op Kick reageren.
@@ -81,14 +84,18 @@ type Service struct {
 	l2 map[string][]FieldError
 }
 
-func NewService(pool *pgxpool.Pool, ev *events.Writer, log *slog.Logger, box *secrets.Box, dep *deploy.Service) *Service {
-	return &Service{
-		pool: pool, q: store.New(pool), ev: ev, log: log, box: box, dep: dep,
+// NewService maakt de service. Een goedgekeurde wijziging gaat met ro als
+// cluster.apply naar de nodes.
+func NewService(pool *pgxpool.Pool, ev *events.Writer, log *slog.Logger, box *secrets.Box, dep *deploy.Service, ro *rollout.Service) *Service {
+	s := &Service{
+		pool: pool, q: store.New(pool), ev: ev, log: log, box: box, dep: dep, ro: ro,
 		Interval:  time.Minute,
 		NewSource: func(c Config) (Source, error) { return NewGitHub(c) },
 		kick:      make(chan struct{}, 1),
 		blobs:     map[string][]byte{}, l2: map[string][]FieldError{},
 	}
+	ro.OnFinished(s.finished)
+	return s
 }
 
 // Enabled is false zonder masterkey.
@@ -415,7 +422,8 @@ type FileEntry struct {
 	Path    string `json:"path"`
 	Slug    string `json:"slug"`
 	BlobSHA string `json:"blob_sha,omitempty"`
-	// State is in_sync, pending, invalid, new, unlinked of missing.
+	// State is in_sync, pending, applying, not_applied, rejected, invalid,
+	// new, unlinked of missing.
 	State       string       `json:"state"`
 	ClusterID   *uuid.UUID   `json:"cluster_id,omitempty"`
 	ClusterName string       `json:"cluster_name,omitempty"`

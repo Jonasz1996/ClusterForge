@@ -421,3 +421,13 @@ func (p *Param) sample() any {
 	}
 	return "voorbeeld"
 }
+
+// NewSecret maakt een waarde voor een geheime parameter, zoals bij een
+// uitrol zonder ingevuld geheim.
+func (t *Template) NewSecret(name string) (string, error) {
+	p, ok := t.Param(name)
+	if !ok || p.Type != "secret" {
+		return "", fmt.Errorf("%s is geen geheim van %s %s", name, t.Name, t.Version)
+	}
+	return randomSecret(p.Length), nil
+}

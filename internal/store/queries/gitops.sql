@@ -41,8 +41,8 @@ UPDATE git_repos SET last_error = @last_error, last_sync_at = @last_sync_at WHER
 -- name: ListGitClusters :many
 -- De clusters die bij een scan horen: alle clusters met hun slug, of ze
 -- uit een template komen en of ze gekoppeld zijn.
-SELECT id, slug, name, description, environment, tags, type, spec, spec_revision, template_name,
-       template_version, git_repo_id
+SELECT id, slug, name, description, environment, tags, type, spec, spec_revision, applied_revision,
+       template_name, template_version, git_repo_id
 FROM clusters
 ORDER BY slug;
 
@@ -93,3 +93,24 @@ WHERE g.id = $1;
 
 -- name: CountPendingGitChanges :one
 SELECT count(*)::int FROM git_changes WHERE status = 'pending';
+
+-- name: LockGitChange :one
+SELECT * FROM git_changes WHERE id = $1 FOR UPDATE;
+
+-- name: DecideGitChange :one
+-- Goedkeuren (applying met een taak, of meteen applied) of afwijzen.
+UPDATE git_changes
+SET status = @status, revision = sqlc.narg('revision'), job_id = sqlc.narg('job_id'), reason = @reason,
+    decided_by = @decided_by, decided_at = now(), updated_at = now()
+WHERE id = @id AND status = 'pending'
+RETURNING *;
+
+-- name: FinishGitChange :one
+-- Na de taak: applied of failed.
+UPDATE git_changes SET status = @status, reason = @reason, updated_at = now()
+WHERE job_id = @job_id AND status = 'applying'
+RETURNING *;
+
+-- name: ListLatestGitChanges :many
+-- De nieuwste wijziging per slug, ongeacht haar status.
+SELECT DISTINCT ON (slug) * FROM git_changes ORDER BY slug, created_at DESC, id;

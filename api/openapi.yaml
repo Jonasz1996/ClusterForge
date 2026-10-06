@@ -1674,6 +1674,86 @@ paths:
               schema: { $ref: "#/components/schemas/GitChangeDetail" }
         "401": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /gitops/changes/{changeId}/approve:
+    parameters:
+      - { name: changeId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: approveGitChange
+      summary: Een wachtende wijziging goedkeuren en toepassen (admin)
+      description: |
+        Schrijft in één transactie een spec-revisie met bron git en de commit,
+        werkt naam, beschrijving, omgeving en tags bij en zet cluster.apply in
+        de wachtrij. Verandert er op geen node een stap, dan is de wijziging
+        meteen toegepast (200, zonder taak). Op prod vraagt het
+        tweestapsverificatie en de slug. 409 bij een verouderd plan
+        (plan_changed), een bezet clusterslot (busy) of een wijziging die in
+        deze versie nog niet kan (not_supported).
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GitApproveInput" }
+      responses:
+        "200":
+          description: Toegepast zonder taak
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GitDecision" }
+        "202":
+          description: Goedgekeurd; de taak past de wijziging toe
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GitDecision" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /gitops/changes/{changeId}/reject:
+    parameters:
+      - { name: changeId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: rejectGitChange
+      summary: Een wachtende wijziging afwijzen met een reden (admin)
+      description: Het bestand blijft afgewezen tot een nieuwe commit het wijzigt.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GitRejectInput" }
+      responses:
+        "200":
+          description: Afgewezen
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GitChange" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /clusters/{clusterId}/git/reapply:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: reapplyClusterGit
+      summary: De huidige revisie opnieuw toepassen (admin)
+      description: |
+        Alleen als applied_revision achterloopt, zoals na een mislukte
+        toepassing: een nieuwe cluster.apply met alle stappen, behalve wat
+        genegeerd wordt. Op prod vraagt het tweestapsverificatie en de slug.
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/GitReapplyInput" }
+      responses:
+        "202":
+          description: In de wachtrij
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
   /clusters/{clusterId}/git/export:
     parameters:
       - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -2553,10 +2633,12 @@ components:
         secret: { type: boolean }
     SpecRevision:
       type: object
-      required: [revision, source, created_at, created_by, template, template_version, nodes, changes]
+      required: [revision, source, commit_sha, commit_url, created_at, created_by, template, template_version, nodes, changes]
       properties:
         revision: { type: integer }
         source: { type: string, enum: [ui, api, git] }
+        commit_sha: { type: string, nullable: true, description: De commit bij bron git }
+        commit_url: { type: string, description: "De commit op GitHub, of leeg" }
         created_at: { type: string, format: date-time }
         created_by:
           allOf: [{ $ref: "#/components/schemas/AuditRef" }]
@@ -2741,11 +2823,12 @@ components:
       enum: [unknown, healthy, degraded, down, split_brain]
     Cluster:
       type: object
-      required: [id, slug, name, description, type, environment, status, status_reason, status_since, tags, git_repo_url, git_managed, template_name, template_version, spec_revision, created_at, updated_at]
+      required: [id, slug, name, description, type, environment, status, status_reason, status_since, tags, git_repo_url, git_managed, template_name, template_version, spec_revision, applied_revision, created_at, updated_at]
       properties:
         template_name: { type: string, nullable: true, description: De template waaruit het cluster is uitgerold }
         template_version: { type: string, nullable: true }
         spec_revision: { type: integer, description: Revisie van de gewenste staat; 0 zonder spec }
+        applied_revision: { type: integer, description: "De revisie die op alle nodes staat; lager dan spec_revision na een mislukte toepassing" }
         id: { type: string, format: uuid }
         slug: { type: string, description: "Korte unieke naam, bijvoorbeeld webcluster-prod" }
         name: { type: string }
@@ -3659,10 +3742,13 @@ components:
     GitFileState:
       type: string
       description: |
-        in_sync: gelijk aan het cluster; pending: een wijziging wacht; invalid:
-        fouten; new: een nieuw cluster; unlinked: het cluster bestaat maar is
-        niet gekoppeld; missing: het bestand van een gekoppeld cluster ontbreekt
-      enum: [in_sync, pending, invalid, new, unlinked, missing]
+        in_sync: gelijk aan het cluster; pending: een wijziging wacht; applying:
+        een goedgekeurde wijziging wordt toegepast; not_applied: gelijk aan de
+        spec, maar die staat niet op alle nodes; rejected: deze inhoud is
+        afgewezen; invalid: fouten; new: een nieuw cluster; unlinked: het
+        cluster bestaat maar is niet gekoppeld; missing: het bestand van een
+        gekoppeld cluster ontbreekt
+      enum: [in_sync, pending, applying, not_applied, rejected, invalid, new, unlinked, missing]
     GitFile:
       type: object
       required: [path, slug, state, cluster_id, cluster_name, errors, change_id, commit, secret, url]
@@ -3673,7 +3759,7 @@ components:
         cluster_id: { type: string, format: uuid, nullable: true }
         cluster_name: { type: string }
         errors: { type: array, items: { $ref: "#/components/schemas/GitFieldError" } }
-        change_id: { type: string, format: uuid, nullable: true, description: De wachtende wijziging }
+        change_id: { type: string, format: uuid, nullable: true, description: "De wachtende, afgewezen, lopende of mislukte wijziging" }
         commit: { type: string, description: De commit waarin de server deze inhoud voor het eerst zag }
         secret: { type: boolean, description: Er stond een geheim in; de inhoud wordt niet bewaard }
         url: { type: string, description: Het bestand op de website }
@@ -3682,7 +3768,7 @@ components:
       enum: [pending, applying, applied, failed, rejected, superseded]
     GitChange:
       type: object
-      required: [id, cluster_id, cluster_name, cluster_environment, slug, path, kind, status, commit, base_revision, summary, job_id, decided_by, decided_at, reason, created_at, updated_at]
+      required: [id, cluster_id, cluster_name, cluster_environment, slug, path, kind, status, commit, base_revision, revision, summary, job_id, decided_by, decided_at, reason, created_at, updated_at]
       properties:
         id: { type: string, format: uuid }
         cluster_id: { type: string, format: uuid, nullable: true }
@@ -3694,25 +3780,53 @@ components:
         status: { $ref: "#/components/schemas/GitChangeStatus" }
         commit: { $ref: "#/components/schemas/GitCommit" }
         base_revision: { type: integer }
+        revision: { type: integer, nullable: true, description: De spec-revisie die de goedkeuring maakte }
         summary: { type: string, description: "Zoals: node_count van 2 naar 3; keepalived.conf op 2 nodes, 1 nieuwe node" }
         job_id: { type: string, format: uuid, nullable: true }
         decided_by: { type: string, nullable: true }
         decided_at: { type: string, format: date-time, nullable: true }
-        reason: { type: string }
+        reason: { type: string, description: "De reden van afwijzen of vervallen, of de fout van de taak" }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
     GitChangeDetail:
       allOf:
         - $ref: "#/components/schemas/GitChange"
         - type: object
-          required: [plan, local, file_url]
+          required: [plan, local, file_url, needs_confirmation, full_apply, blocked]
           properties:
+            needs_confirmation: { type: boolean, description: "Het cluster is of wordt prod: goedkeuren vraagt de slug" }
+            full_apply:
+              type: boolean
+              description: Een eerdere revisie is niet op alle nodes toegepast, dus goedkeuren past alle stappen opnieuw toe
+            blocked: { type: string, description: "Waarom goedkeuren in deze versie nog niet kan; leeg als het kan" }
             plan: { $ref: "#/components/schemas/GitPlan" }
             local:
               type: array
               items: { type: string }
               description: Uit de laatste driftcontrole, wat op de nodes al afwijkt en overschreven wordt
             file_url: { type: string }
+    GitApproveInput:
+      type: object
+      properties:
+        confirm: { type: string, description: Op prod de slug van het cluster }
+    GitRejectInput:
+      type: object
+      required: [reason]
+      properties:
+        reason: { type: string, maxLength: 500 }
+    GitReapplyInput:
+      type: object
+      properties:
+        confirm: { type: string, description: Op prod de slug van het cluster }
+    GitDecision:
+      type: object
+      required: [change, job]
+      properties:
+        change: { $ref: "#/components/schemas/GitChange" }
+        job:
+          allOf: [{ $ref: "#/components/schemas/Job" }]
+          nullable: true
+          description: null als er op geen node iets verandert
     GitFieldChange:
       type: object
       required: [field, label, from, to]

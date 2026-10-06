@@ -409,7 +409,8 @@ func (q *Queries) NodeJobBusy(ctx context.Context, arg NodeJobBusyParams) (bool,
 
 const setBaselineSpec = `-- name: SetBaselineSpec :one
 UPDATE clusters
-SET spec = $1, spec_revision = spec_revision + 1, template_name = NULL, template_version = NULL, updated_at = now()
+SET spec = $1, spec_revision = spec_revision + 1, applied_revision = spec_revision + 1,
+    template_name = NULL, template_version = NULL, updated_at = now()
 WHERE id = $2 AND template_name IS NULL
 RETURNING spec_revision
 `
@@ -419,7 +420,8 @@ type SetBaselineSpecParams struct {
 	ID   uuid.UUID
 }
 
-// Een baseline is de gewenste staat van een cluster zonder template.
+// Een baseline is de gewenste staat van een cluster zonder template. Ze
+// beschrijft wat er al op de nodes staat, dus ze is meteen toegepast.
 func (q *Queries) SetBaselineSpec(ctx context.Context, arg SetBaselineSpecParams) (int32, error) {
 	row := q.db.QueryRow(ctx, setBaselineSpec, arg.Spec, arg.ID)
 	var spec_revision int32

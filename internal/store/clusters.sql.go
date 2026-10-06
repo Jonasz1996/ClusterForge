@@ -37,7 +37,7 @@ func (q *Queries) ClearClusterOwners(ctx context.Context, clusterID uuid.UUID) e
 const createCluster = `-- name: CreateCluster :one
 INSERT INTO clusters (slug, name, description, type, environment, git_repo_url, tags)
 VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, slug, name, description, type, environment, git_repo_url, tags, status, spec, spec_revision, template_name, template_version, created_at, updated_at, status_reason, status_since, git_repo_id
+RETURNING id, slug, name, description, type, environment, git_repo_url, tags, status, spec, spec_revision, template_name, template_version, created_at, updated_at, status_reason, status_since, git_repo_id, applied_revision
 `
 
 type CreateClusterParams struct {
@@ -80,6 +80,7 @@ func (q *Queries) CreateCluster(ctx context.Context, arg CreateClusterParams) (C
 		&i.StatusReason,
 		&i.StatusSince,
 		&i.GitRepoID,
+		&i.AppliedRevision,
 	)
 	return i, err
 }
@@ -97,7 +98,7 @@ func (q *Queries) DeleteCluster(ctx context.Context, id uuid.UUID) (int64, error
 }
 
 const getCluster = `-- name: GetCluster :one
-SELECT id, slug, name, description, type, environment, git_repo_url, tags, status, spec, spec_revision, template_name, template_version, created_at, updated_at, status_reason, status_since, git_repo_id FROM clusters WHERE id = $1
+SELECT id, slug, name, description, type, environment, git_repo_url, tags, status, spec, spec_revision, template_name, template_version, created_at, updated_at, status_reason, status_since, git_repo_id, applied_revision FROM clusters WHERE id = $1
 `
 
 func (q *Queries) GetCluster(ctx context.Context, id uuid.UUID) (Cluster, error) {
@@ -122,6 +123,7 @@ func (q *Queries) GetCluster(ctx context.Context, id uuid.UUID) (Cluster, error)
 		&i.StatusReason,
 		&i.StatusSince,
 		&i.GitRepoID,
+		&i.AppliedRevision,
 	)
 	return i, err
 }
@@ -159,7 +161,7 @@ func (q *Queries) ListClusterOwners(ctx context.Context, clusterID uuid.UUID) ([
 }
 
 const listClusters = `-- name: ListClusters :many
-SELECT c.id, c.slug, c.name, c.description, c.type, c.environment, c.git_repo_url, c.tags, c.status, c.spec, c.spec_revision, c.template_name, c.template_version, c.created_at, c.updated_at, c.status_reason, c.status_since, c.git_repo_id,
+SELECT c.id, c.slug, c.name, c.description, c.type, c.environment, c.git_repo_url, c.tags, c.status, c.spec, c.spec_revision, c.template_name, c.template_version, c.created_at, c.updated_at, c.status_reason, c.status_since, c.git_repo_id, c.applied_revision,
        (SELECT count(*) FROM nodes n WHERE n.cluster_id = c.id)::int AS node_count,
        (SELECT count(*) FROM vips v WHERE v.cluster_id = c.id)::int AS vip_count,
        (SELECT count(*) FROM nodes n JOIN drift_checks d ON d.node_id = n.id
@@ -212,6 +214,7 @@ func (q *Queries) ListClusters(ctx context.Context) ([]ListClustersRow, error) {
 			&i.Cluster.StatusReason,
 			&i.Cluster.StatusSince,
 			&i.Cluster.GitRepoID,
+			&i.Cluster.AppliedRevision,
 			&i.NodeCount,
 			&i.VipCount,
 			&i.DriftNodes,
@@ -229,7 +232,7 @@ func (q *Queries) ListClusters(ctx context.Context) ([]ListClustersRow, error) {
 }
 
 const lockCluster = `-- name: LockCluster :one
-SELECT id, slug, name, description, type, environment, git_repo_url, tags, status, spec, spec_revision, template_name, template_version, created_at, updated_at, status_reason, status_since, git_repo_id FROM clusters WHERE id = $1 FOR UPDATE
+SELECT id, slug, name, description, type, environment, git_repo_url, tags, status, spec, spec_revision, template_name, template_version, created_at, updated_at, status_reason, status_since, git_repo_id, applied_revision FROM clusters WHERE id = $1 FOR UPDATE
 `
 
 func (q *Queries) LockCluster(ctx context.Context, id uuid.UUID) (Cluster, error) {
@@ -254,6 +257,7 @@ func (q *Queries) LockCluster(ctx context.Context, id uuid.UUID) (Cluster, error
 		&i.StatusReason,
 		&i.StatusSince,
 		&i.GitRepoID,
+		&i.AppliedRevision,
 	)
 	return i, err
 }
@@ -272,7 +276,7 @@ UPDATE clusters
 SET slug = $2, name = $3, description = $4, type = $5, environment = $6,
     git_repo_url = $7, tags = $8, updated_at = now()
 WHERE id = $1
-RETURNING id, slug, name, description, type, environment, git_repo_url, tags, status, spec, spec_revision, template_name, template_version, created_at, updated_at, status_reason, status_since, git_repo_id
+RETURNING id, slug, name, description, type, environment, git_repo_url, tags, status, spec, spec_revision, template_name, template_version, created_at, updated_at, status_reason, status_since, git_repo_id, applied_revision
 `
 
 type UpdateClusterParams struct {
@@ -317,6 +321,7 @@ func (q *Queries) UpdateCluster(ctx context.Context, arg UpdateClusterParams) (C
 		&i.StatusReason,
 		&i.StatusSince,
 		&i.GitRepoID,
+		&i.AppliedRevision,
 	)
 	return i, err
 }

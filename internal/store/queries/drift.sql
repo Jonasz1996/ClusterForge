@@ -73,9 +73,11 @@ RETURNING *;
 DELETE FROM drift_ignores WHERE id = $1;
 
 -- name: SetBaselineSpec :one
--- Een baseline is de gewenste staat van een cluster zonder template.
+-- Een baseline is de gewenste staat van een cluster zonder template. Ze
+-- beschrijft wat er al op de nodes staat, dus ze is meteen toegepast.
 UPDATE clusters
-SET spec = @spec, spec_revision = spec_revision + 1, template_name = NULL, template_version = NULL, updated_at = now()
+SET spec = @spec, spec_revision = spec_revision + 1, applied_revision = spec_revision + 1,
+    template_name = NULL, template_version = NULL, updated_at = now()
 WHERE id = @id AND template_name IS NULL
 RETURNING spec_revision;
 

@@ -123,7 +123,13 @@ type gitChange struct {
 		} `json:"nodes"`
 		Unchanged []string `json:"unchanged"`
 	} `json:"plan"`
-	Local []string `json:"local"`
+	Local             []string `json:"local"`
+	Revision          *int     `json:"revision"`
+	JobID             *string  `json:"job_id"`
+	DecidedBy         *string  `json:"decided_by"`
+	NeedsConfirmation bool     `json:"needs_confirmation"`
+	FullApply         bool     `json:"full_apply"`
+	Blocked           string   `json:"blocked"`
 }
 
 func (c *client) gitFiles() map[string]gitFile {
