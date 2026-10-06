@@ -1773,6 +1773,8 @@ export interface components {
             vip_address: string;
             /** @description De node die het VIP nu heeft */
             vip_owner: string | null;
+            /** Format: uuid */
+            vip_owner_id: string | null;
             name: string;
             scenario: components["schemas"]["FailoverScenario"];
             service: string;
@@ -2259,6 +2261,10 @@ export interface components {
             node_count: number;
             vip_count: number;
             drift: components["schemas"]["ClusterDriftSummary"];
+            /** @description De ergste doorgegeven uitval op de bevestigde diensten van dit cluster, langs bekende afhankelijkheden van buiten; uitval binnen het cluster zegt de status al */
+            impact: components["schemas"]["ServiceImpact"];
+            /** @description De clusters, nodes of extern waar die uitval begint, zoals db-prod */
+            impacted_by: string[];
             /** @description De VIP's met hun huidige eigenaar */
             vips: components["schemas"]["VipOwner"][];
         };

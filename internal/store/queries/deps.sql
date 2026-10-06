@@ -63,3 +63,40 @@ RETURNING *;
 
 -- name: ListDepClusters :many
 SELECT id, name, slug, environment, type, status, status_reason FROM clusters ORDER BY name;
+
+-- name: SetServiceStatus :exec
+-- deps.Evaluate schrijft de status en impact; updated_at blijft staan, want
+-- die zegt wanneer iemand de dienst wijzigde.
+UPDATE services
+SET status = @status, status_reason = @status_reason, impact = @impact, impact_reason = @impact_reason,
+    impact_cause_id = @impact_cause_id, impact_since = @impact_since
+WHERE id = @id;
+
+-- name: ListClusterImpacts :many
+-- Per cluster de doorgegeven uitval op zijn bevestigde diensten, met de groep
+-- waar ze begint. Uitval binnen het cluster zelf telt niet: dat zegt de
+-- status van het cluster al.
+SELECT s.cluster_id::uuid AS cluster_id, s.impact,
+       coalesce(cc.name, cn.hostname, 'extern')::text AS cause_group
+FROM services s
+JOIN services cause ON cause.id = s.impact_cause_id
+LEFT JOIN clusters cc ON cc.id = cause.cluster_id
+LEFT JOIN nodes cn ON cn.id = cause.node_id
+WHERE s.state = 'confirmed' AND s.impact <> 'none' AND s.cluster_id IS NOT NULL
+  AND cause.cluster_id IS DISTINCT FROM s.cluster_id
+ORDER BY 1, 3;
+
+-- name: ListIncomingDependencies :many
+-- De pijlen van buiten naar de diensten van een cluster of een losse node:
+-- die verdwijnen met het cluster of de node, en komen in het event.
+SELECT d.id, d.strength, d.source, p.name AS provider, c.name AS consumer,
+       coalesce(cc.name, cn.hostname, 'extern')::text AS consumer_scope
+FROM service_dependencies d
+JOIN services p ON p.id = d.to_service_id
+JOIN services c ON c.id = d.from_service_id
+LEFT JOIN clusters cc ON cc.id = c.cluster_id
+LEFT JOIN nodes cn ON cn.id = c.node_id
+WHERE (p.cluster_id = sqlc.narg('cluster_id')::uuid OR p.node_id = sqlc.narg('node_id')::uuid)
+  AND (c.cluster_id IS DISTINCT FROM p.cluster_id OR c.node_id IS DISTINCT FROM p.node_id)
+  AND d.state = 'confirmed' AND c.state = 'confirmed'
+ORDER BY consumer_scope, c.name, p.name;

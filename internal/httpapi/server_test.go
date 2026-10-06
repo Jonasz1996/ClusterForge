@@ -138,6 +138,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	fo.Proxmox, fo.BootTimeout = pve, 8*time.Second
 	// De resolver draait niet vanzelf; een test roept Resolve aan.
 	dps := deps.NewService(pool, ev, log)
+	eval.After = dps.Evaluate
 	ro := rollout.NewService(pool, ev, log, runner, bus, dep, drf)
 	ro.Changed = eval.Kick
 	ro.Gate.Poll, ro.Retry, ro.Fresh = 20*time.Millisecond, 50*time.Millisecond, 2*time.Second

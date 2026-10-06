@@ -229,6 +229,26 @@ func (g *Graph) Effect(id uuid.UUID) Effect {
 	return Effect{Impact: ImpactNone}
 }
 
+// ImpactText zegt waar de doorgegeven uitval op een dienst vandaan komt,
+// zoals "mariadb in db-prod is down, via php8.2-fpm", met het pad van de
+// oorzaak naar de dienst in namen zoals de dienst ze ziet. Zonder uitval is
+// alles leeg.
+func (g *Graph) ImpactText(id uuid.UUID) (string, []string) {
+	e := g.Effect(id)
+	if e.Impact == ImpactNone {
+		return "", []string{}
+	}
+	path := make([]string, 0, len(e.Path))
+	for _, p := range e.Path {
+		path = append(path, g.labelFrom(id, p))
+	}
+	reason := g.labelFrom(id, e.Cause) + " is down"
+	if len(path) > 2 {
+		reason += ", via " + strings.Join(path[1:len(path)-1], " en ")
+	}
+	return reason, path
+}
+
 // Providers zijn de pijlen waarmee een dienst van andere afhangt, en
 // Consumers de pijlen van de diensten die van hem afhangen.
 func (g *Graph) Providers(id uuid.UUID) []Dep { return g.providers[id] }

@@ -7,6 +7,7 @@ import { ClusterForm } from "@/components/inventory/ClusterForm";
 import { Empty, EnvBadge, QueryState, StatusBadge, Tags, tableClass, tdClass, thClass } from "@/components/inventory/bits";
 import { Button, Card, Input, PageHeader, Select } from "@/components/ui";
 import { BackupBadge } from "@/components/backups/Backups";
+import { ImpactBadge } from "@/components/deps/ImpactList";
 import { DriftBadge } from "@/components/drift/Drift";
 import { useBackups } from "@/lib/backups";
 import { environments, typeLabel, useClusters, useCreateCluster, useIsAdmin } from "@/lib/inventory";
@@ -116,6 +117,7 @@ export default function ClustersPage() {
                       <td className={tdClass}>
                         <span className="flex flex-wrap gap-1">
                           <StatusBadge status={c.status} reason={c.status_reason} />
+                          <ImpactBadge impact={c.impact} by={c.impacted_by} />
                           <DriftBadge drift={c.drift} href={`/clusters/detail?id=${c.id}`} />
                           <BackupBadge freshness={backupOf.get(c.id)} />
                         </span>

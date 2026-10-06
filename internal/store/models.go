@@ -520,20 +520,26 @@ type ServerSecret struct {
 }
 
 type Service struct {
-	ID          uuid.UUID
-	ClusterID   *uuid.UUID
-	NodeID      *uuid.UUID
-	Name        string
-	Kind        string
-	Unit        string
-	Port        *int32
-	Address     string
-	Description string
-	Source      string
-	State       string
-	LastSeenAt  *time.Time
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
+	ID            uuid.UUID
+	ClusterID     *uuid.UUID
+	NodeID        *uuid.UUID
+	Name          string
+	Kind          string
+	Unit          string
+	Port          *int32
+	Address       string
+	Description   string
+	Source        string
+	State         string
+	LastSeenAt    *time.Time
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
+	Status        *string
+	StatusReason  string
+	Impact        string
+	ImpactReason  string
+	ImpactCauseID *uuid.UUID
+	ImpactSince   *time.Time
 }
 
 type ServiceDependency struct {

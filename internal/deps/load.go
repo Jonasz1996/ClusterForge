@@ -7,31 +7,39 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/Jonasz1996/clusterforge/internal/status"
+	"github.com/Jonasz1996/clusterforge/internal/store"
 )
 
 // Load leest de wereld uit de database en rekent de graaf uit. De status
 // wordt bij het lezen uitgerekend, uit dezelfde heartbeats als de
 // statusregels.
 func (s *Service) Load(ctx context.Context) (*Graph, error) {
-	clusters, err := s.q.ListDepClusters(ctx)
+	g, _, err := s.load(ctx, s.q)
+	return g, err
+}
+
+// load leest met q, ook binnen een transactie, en geeft de rijen van de
+// diensten erbij.
+func (s *Service) load(ctx context.Context, q *store.Queries) (*Graph, []store.Service, error) {
+	clusters, err := q.ListDepClusters(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	vips, err := s.q.ListAllVIPs(ctx)
+	vips, err := q.ListAllVIPs(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	nodes, err := s.q.ListNodeStatusInputs(ctx)
+	nodes, err := q.ListNodeStatusInputs(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	services, err := s.q.ListServices(ctx)
+	services, err := q.ListServices(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	deps, err := s.q.ListServiceDependencies(ctx)
+	deps, err := q.ListServiceDependencies(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	now := s.Now()
 	var w World
@@ -74,5 +82,5 @@ func (s *Service) Load(ctx context.Context) (*Graph, error) {
 			ID: d.ID, From: d.FromServiceID, To: d.ToServiceID, Strength: d.Strength, Source: d.Source, State: d.State, Note: d.Note,
 		})
 	}
-	return Build(w), nil
+	return Build(w), services, nil
 }

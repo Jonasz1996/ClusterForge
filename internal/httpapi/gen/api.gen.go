@@ -1653,8 +1653,14 @@ type ClusterListItem struct {
 	Environment Environment         `json:"environment"`
 	GitRepoUrl  string              `json:"git_repo_url"`
 	Id          openapi_types.UUID  `json:"id"`
-	Name        string              `json:"name"`
-	NodeCount   int                 `json:"node_count"`
+
+	// Impact De ergste doorgegeven uitval op de bevestigde diensten van dit cluster, langs bekende afhankelijkheden van buiten; uitval binnen het cluster zegt de status al
+	Impact ServiceImpact `json:"impact"`
+
+	// ImpactedBy De clusters, nodes of extern waar die uitval begint, zoals db-prod
+	ImpactedBy []string `json:"impacted_by"`
+	Name       string   `json:"name"`
+	NodeCount  int      `json:"node_count"`
 
 	// Slug Korte unieke naam, bijvoorbeeld webcluster-prod
 	Slug string `json:"slug"`
@@ -2294,7 +2300,8 @@ type FailoverTest struct {
 	VipId      openapi_types.UUID `json:"vip_id"`
 
 	// VipOwner De node die het VIP nu heeft
-	VipOwner nullable.Nullable[string] `json:"vip_owner"`
+	VipOwner   nullable.Nullable[string]             `json:"vip_owner"`
+	VipOwnerId nullable.Nullable[openapi_types.UUID] `json:"vip_owner_id"`
 }
 
 // FailoverTestInput defines model for FailoverTestInput.

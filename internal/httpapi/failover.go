@@ -348,7 +348,7 @@ func toAPITest(row store.ListFailoverTestsRow, last *gen.TestRun) gen.FailoverTe
 	_ = json.Unmarshal(t.Probe, &probe)
 	return gen.FailoverTest{
 		Id: t.ID, ClusterId: t.ClusterID, VipId: t.VipID, VipAddress: row.VipAddress.String(), VipOwner: nullableOf(row.VipOwnerHostname),
-		Name: t.Name, Scenario: gen.FailoverScenario(t.Scenario), Service: t.Service, Description: failover.Describe(t.Scenario, t.Service),
+		VipOwnerId: nullableOf(row.VipOwnerID), Name: t.Name, Scenario: gen.FailoverScenario(t.Scenario), Service: t.Service, Description: failover.Describe(t.Scenario, t.Service),
 		MaxTakeoverSeconds: int(t.MaxTakeoverSeconds), ExpectFailback: t.ExpectFailback, Probe: toAPIProbe(probe),
 		Scheduled: t.Scheduled, NextRunAt: nullableOf(t.NextRunAt), LastRun: nullableOf(last), CreatedAt: t.CreatedAt, UpdatedAt: t.UpdatedAt,
 	}

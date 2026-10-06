@@ -29,6 +29,7 @@ Het technisch ontwerp staat in [docs/design/mvp-fase-1.md](docs/design/mvp-fase-
 | 9. Diensten en afhankelijkheden | Welke dienst van welke andere afhangt, over clusters heen; voorstellen uit de agents en "Wat raakt uitval?" | klaar |
 | 10. Drift herstellen | Gekozen afwijkingen opnieuw toepassen, node voor node met de VIP-eigenaar als laatste en een gezondheidscontrole na elke node; op prod met de slug en tweestapsverificatie | klaar |
 | 11. Planning en prod | Failovertests en back-upcontroles gepland in een testvenster, de VM hard uitzetten in lab en test, en failovertests op prod met de hand met de slug en tweestapsverificatie | klaar |
+| 12. Impact bij acties | Per dienst de opgeslagen status met een regel in het logboek bij elke verandering, "geraakt door" in de clusterlijst, en in de bevestigingsvensters welke bekende diensten down of verminderd raken | klaar |
 
 ## Draaien met Docker Compose
 
@@ -267,6 +268,16 @@ Elke dienst heeft een eigen status uit de heartbeats: gezond als zijn unit op al
 Klik op een dienst voor zijn instanties per node, wat hij gebruikt en wie hem gebruikt, en de knop Wat raakt uitval?. Die dimt alles wat niet geraakt wordt en toont per cluster welke diensten down of verminderd zouden raken, met prod bovenaan. Met Alleen clusters zie je de clusters met samengevoegde pijlen, en op een smal scherm een lijst per cluster. Het gaat altijd om bekende afhankelijkheden: wat niet in de graaf staat, telt niet mee, en de graaf houdt nooit een actie tegen. ClusterForge voert voor afhankelijkheden niets uit op de nodes.
 
 Redis, memcached, rabbitmq, apache2, php-fpm en PostgreSQL-instanties ziet alleen een agent van deze versie of nieuwer. Zet hem erop met `--upgrade` (zie [Agent installeren](#agent-installeren-op-een-node)); met een oudere agent blijven die diensten onbekend.
+
+### Impact bij acties
+
+ClusterForge rekent na elke statusronde de status van elke dienst en de doorgegeven uitval opnieuw uit en bewaart ze. Verandert de status of de impact van een bevestigde dienst, dan komt er één regel in het logboek onder Afhankelijkheden, zoals "nginx in web-prod down door een afhankelijkheid: mariadb in db-prod is down, via php8.2-fpm", en bij herstel nog één. Een nieuwe dienst krijgt zijn eerste status zonder regel.
+
+- **Geraakt door.** In het overzicht en de clusterlijst staat naast de status van een cluster "geraakt door db-prod" als een dienst van buiten uitval doorgeeft. De status van het cluster zelf verandert daar niet door.
+- **Bevestigingsvensters.** Onderhoud, herstarten en afsluiten van een node, Nu testen bij een failovertest en het herstelplan van drift tonen welke bekende diensten down of verminderd raken als die node wegvalt. Een tweede node waarop de dienst draait of die het VIP kan overnemen, telt mee.
+- **Verwijderen.** Het venster voor het verwijderen van een cluster of een losse node noemt de diensten van buiten die ervan afhangen. Die afhankelijkheden verdwijnen mee en staan daarna in de regel van het verwijderen in het logboek.
+
+Ook hier gaat het om bekende afhankelijkheden: de vensters houden niets tegen, en een lege lijst betekent alleen dat ClusterForge geen afhankelijkheid kent.
 
 ## Onderhoud, herstarten en afsluiten
 

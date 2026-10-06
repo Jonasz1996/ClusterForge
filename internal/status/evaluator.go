@@ -37,6 +37,10 @@ type Evaluator struct {
 	// VIPGrace is hoe lang een VIP op meerdere of geen nodes mag staan voor
 	// het telt; zie status.VIPGrace.
 	VIPGrace time.Duration
+	// After rekent verder na de commit van elke ronde, zoals de status van
+	// de diensten. Een fout wordt alleen gelogd: de status van nodes en
+	// clusters en de VIP-eigenaar staan dan al vast. Zet hem voor Run.
+	After func(context.Context) error
 
 	mu sync.Mutex
 	// unsettled is per VIP sinds wanneer het niet op precies één node staat.
@@ -80,12 +84,25 @@ func (e *Evaluator) Run(ctx context.Context) {
 
 var systemActor = events.System()
 
-// Evaluate berekent alles één keer en slaat de wijzigingen op.
+// Evaluate berekent alles één keer en slaat de wijzigingen op. Daarna, na
+// de commit, draait After.
 func (e *Evaluator) Evaluate(ctx context.Context) error {
 	now := e.Now()
 	if now.Sub(e.started) < e.Warmup {
 		return nil
 	}
+	if err := e.evaluate(ctx, now); err != nil {
+		return err
+	}
+	if e.After != nil {
+		if err := e.After(ctx); err != nil && ctx.Err() == nil {
+			e.log.Error("status van diensten berekenen mislukt", "err", err)
+		}
+	}
+	return nil
+}
+
+func (e *Evaluator) evaluate(ctx context.Context, now time.Time) error {
 	return pgx.BeginFunc(ctx, e.pool, func(tx pgx.Tx) error {
 		q := store.New(tx)
 		// Eén evaluator tegelijk, ook als er ooit twee servers draaien.

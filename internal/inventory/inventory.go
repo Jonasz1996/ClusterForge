@@ -224,15 +224,38 @@ func (s *Service) DeleteCluster(ctx context.Context, actor events.Actor, id uuid
 		if err != nil {
 			return err
 		}
+		payload := map[string]any{"slug": cur.Slug, "name": cur.Name}
+		if err := usedBy(ctx, q, payload, &id, nil); err != nil {
+			return err
+		}
 		if _, err := q.DeleteCluster(ctx, id); err != nil {
 			return err
 		}
 		// Geen cluster_id op het event: dat zou naar een verwijderd cluster wijzen.
 		return s.ev.Write(ctx, q, events.Event{
 			Actor: actor, SubjectType: "cluster", SubjectID: id.String(),
-			Action: "cluster.deleted", Payload: map[string]any{"slug": cur.Slug, "name": cur.Name},
+			Action: "cluster.deleted", Payload: payload,
 		})
 	})
+}
+
+// usedBy zet in de payload de bevestigde afhankelijkheden van buiten op de
+// diensten van het cluster of de losse node. Die verdwijnen met de
+// cascade; zo blijft er een spoor in het logboek.
+func usedBy(ctx context.Context, q *store.Queries, payload map[string]any, clusterID, nodeID *uuid.UUID) error {
+	rows, err := q.ListIncomingDependencies(ctx, store.ListIncomingDependenciesParams{ClusterID: clusterID, NodeID: nodeID})
+	if err != nil || len(rows) == 0 {
+		return err
+	}
+	deps := make([]map[string]any, 0, len(rows))
+	for _, d := range rows {
+		deps = append(deps, map[string]any{
+			"id": d.ID.String(), "consumer": d.Consumer, "consumer_scope": d.ConsumerScope, "provider": d.Provider,
+			"strength": d.Strength, "source": d.Source,
+		})
+	}
+	payload["used_by"] = deps
+	return nil
 }
 
 func clusterFields(c store.Cluster, owners []store.ListClusterOwnersRow) ClusterFields {
@@ -344,12 +367,16 @@ func (s *Service) DeleteNode(ctx context.Context, actor events.Actor, id uuid.UU
 		} else if !errors.Is(err, pgx.ErrNoRows) {
 			return err
 		}
+		payload := map[string]any{"hostname": cur.Hostname}
+		if err := usedBy(ctx, q, payload, nil, &id); err != nil {
+			return err
+		}
 		if _, err := q.DeleteNode(ctx, id); err != nil {
 			return err
 		}
 		return s.ev.Write(ctx, q, events.Event{
 			Actor: actor, SubjectType: "node", SubjectID: id.String(), ClusterID: cur.ClusterID,
-			Action: "node.deleted", Payload: map[string]any{"hostname": cur.Hostname},
+			Action: "node.deleted", Payload: payload,
 		})
 	})
 	if err == nil && agentKey != "" && s.Disconnect != nil {

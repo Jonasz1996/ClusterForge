@@ -195,6 +195,10 @@ func serve() error {
 	for _, kind := range []string{deploy.Kind, lifecycle.KindNodeAction, proxmox.KindVMAction, failover.KindTest, failover.KindRestore} {
 		runner.OnFinished(kind, recheck)
 	}
+	// De status en impact van de diensten rekenen na elke ronde van de
+	// evaluator, na diens commit.
+	dps := deps.NewService(pool, ev, log)
+	eval.After = dps.Evaluate
 	go hub.Run(ctx)
 	go eval.Run(ctx)
 	go ingest.Run(ctx)
@@ -202,7 +206,6 @@ func serve() error {
 	go bk.Run(ctx)
 	go drf.Run(ctx)
 	go sched.Run(ctx)
-	dps := deps.NewService(pool, ev, log)
 	go dps.Run(ctx)
 	jobsDone := make(chan struct{})
 	go func() {
