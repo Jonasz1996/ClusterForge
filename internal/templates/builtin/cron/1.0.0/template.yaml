@@ -16,6 +16,7 @@ params:
   - name: vip
     type: ipv4
     label: VIP
+    immutable: true
     help: Wie het VIP heeft, draait de taken. Het moet vrij zijn en in hetzelfde netwerk liggen als de nodes.
   - name: node_count
     type: int
@@ -26,6 +27,7 @@ params:
   - name: vrid
     type: int
     label: VRRP-id
+    immutable: true
     help: Uniek per keepalived-groep in hetzelfde netwerk. Leeg laten kiest een vrij nummer.
     optional: true
     min: 1

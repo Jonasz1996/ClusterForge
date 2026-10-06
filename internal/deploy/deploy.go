@@ -202,7 +202,7 @@ type PlannedNode struct {
 // Plan controleert een aanvraag en zegt wat een uitrol zou maken, zonder
 // iets te maken.
 func (s *Service) Plan(ctx context.Context, req Request) (Plan, error) {
-	_, p, err := s.plan(ctx, req)
+	_, p, err := s.planVersion(ctx, req, "", true)
 	if err != nil {
 		return Plan{}, err
 	}
@@ -217,11 +217,23 @@ func (s *Service) Plan(ctx context.Context, req Request) (Plan, error) {
 }
 
 func (s *Service) plan(ctx context.Context, req Request) (*templates.Template, *params, error) {
+	return s.planVersion(ctx, req, "", true)
+}
+
+// planVersion controleert een aanvraag voor een templateversie; leeg is de
+// nieuwste. Zonder needServer mag het adres van ClusterForge ontbreken.
+func (s *Service) planVersion(ctx context.Context, req Request, version string, needServer bool) (*templates.Template, *params, error) {
 	if s.box == nil {
 		return nil, nil, invalid("", "de server heeft geen masterkey (CF_MASTER_KEY); die is nodig voor Proxmox en voor de geheimen van een cluster")
 	}
 	tpl, ok := s.Templates.Latest(req.Template)
+	if version != "" {
+		tpl, ok = s.Templates.Get(req.Template, version)
+	}
 	if !ok {
+		if version != "" {
+			return nil, nil, invalid("template", "onbekende template %s %s", req.Template, version)
+		}
 		return nil, nil, invalid("template", "onbekende template %q", req.Template)
 	}
 	values, err := tpl.Validate(req.Params)
@@ -239,8 +251,10 @@ func (s *Service) plan(ctx context.Context, req Request) (*templates.Template, *
 	if err := s.checkCluster(ctx, p.Cluster); err != nil {
 		return nil, nil, err
 	}
-	if p.ServerURL, err = serverURL(req.ServerURL); err != nil {
-		return nil, nil, err
+	if needServer || req.ServerURL != "" {
+		if p.ServerURL, err = serverURL(req.ServerURL); err != nil {
+			return nil, nil, err
+		}
 	}
 	if err := s.checkTarget(ctx, &req.Target, p); err != nil {
 		return nil, nil, err

@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -82,7 +83,7 @@ func (s *Server) ListClusters(w http.ResponseWriter, r *http.Request) {
 		c := toAPICluster(row.Cluster)
 		items = append(items, gen.ClusterListItem{
 			Id: c.Id, Slug: c.Slug, Name: c.Name, Description: c.Description, Type: c.Type,
-			Environment: c.Environment, GitRepoUrl: c.GitRepoUrl, Tags: c.Tags,
+			Environment: c.Environment, GitRepoUrl: c.GitRepoUrl, GitManaged: c.GitManaged, Tags: c.Tags,
 			Status: c.Status, StatusReason: c.StatusReason, StatusSince: c.StatusSince,
 			TemplateName: c.TemplateName, TemplateVersion: c.TemplateVersion, SpecRevision: c.SpecRevision,
 			CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt,
@@ -188,7 +189,7 @@ func (s *Server) writeClusterDetail(w http.ResponseWriter, r *http.Request, stat
 	base := toAPICluster(c)
 	d := gen.ClusterDetail{
 		Id: base.Id, Slug: base.Slug, Name: base.Name, Description: base.Description, Type: base.Type,
-		Environment: base.Environment, GitRepoUrl: base.GitRepoUrl, Tags: base.Tags,
+		Environment: base.Environment, GitRepoUrl: base.GitRepoUrl, GitManaged: base.GitManaged, Tags: base.Tags,
 		Status: base.Status, StatusReason: base.StatusReason, StatusSince: base.StatusSince,
 		TemplateName: base.TemplateName, TemplateVersion: base.TemplateVersion, SpecRevision: base.SpecRevision,
 		CreatedAt: base.CreatedAt, UpdatedAt: base.UpdatedAt,
@@ -211,7 +212,7 @@ func (s *Server) writeClusterDetail(w http.ResponseWriter, r *http.Request, stat
 func toAPICluster(c store.Cluster) gen.Cluster {
 	return gen.Cluster{
 		Id: c.ID, Slug: c.Slug, Name: c.Name, Description: c.Description, Type: gen.ClusterType(c.Type),
-		Environment: gen.Environment(c.Environment), GitRepoUrl: c.GitRepoUrl, Tags: nonNil(c.Tags),
+		Environment: gen.Environment(c.Environment), GitRepoUrl: c.GitRepoUrl, GitManaged: c.GitRepoID != nil, Tags: nonNil(c.Tags),
 		Status: gen.Status(c.Status), StatusReason: c.StatusReason, StatusSince: nullableOf(c.StatusSince),
 		TemplateName: nullableOf(c.TemplateName), TemplateVersion: nullableOf(c.TemplateVersion),
 		SpecRevision: int(c.SpecRevision), CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt,
@@ -504,7 +505,7 @@ func (s *Server) inventoryError(w http.ResponseWriter, r *http.Request, err erro
 	case errors.As(err, &ve):
 		writeError(w, http.StatusBadRequest, "validation", ve.Msg)
 	case errors.As(err, &ce):
-		writeError(w, http.StatusConflict, "conflict", ce.Msg)
+		writeError(w, http.StatusConflict, cmp.Or(ce.Code, "conflict"), ce.Msg)
 	case errors.Is(err, inventory.ErrNotFound):
 		writeError(w, http.StatusNotFound, "not_found", "niet gevonden")
 	default:

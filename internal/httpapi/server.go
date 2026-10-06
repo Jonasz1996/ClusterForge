@@ -22,6 +22,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/drift"
 	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/failover"
+	"github.com/Jonasz1996/clusterforge/internal/gitops"
 	"github.com/Jonasz1996/clusterforge/internal/httpapi/gen"
 	"github.com/Jonasz1996/clusterforge/internal/inventory"
 	"github.com/Jonasz1996/clusterforge/internal/jobs"
@@ -56,6 +57,7 @@ type Server struct {
 	failover     *failover.Service
 	deps         *deps.Service
 	rollout      *rollout.Service
+	git          *gitops.Service
 	version      string
 	loginLimiter *ipLimiter
 	// enrollLimiter remt het raden van enrollmenttokens.
@@ -91,6 +93,8 @@ type Deps struct {
 	Deps *deps.Service
 	// Rollout past wijzigingen toe met cluster.apply, zoals herstel.
 	Rollout *rollout.Service
+	// GitOps leest clusters uit een Git-repository en plant wijzigingen.
+	GitOps  *gitops.Service
 	Version string
 }
 
@@ -120,6 +124,7 @@ func New(d Deps) *Server {
 		failover: d.Failover,
 		deps:     d.Deps,
 		rollout:  d.Rollout,
+		git:      d.GitOps,
 		version:  d.Version,
 		// 10 pogingen direct, daarna één per 6 seconden per IP-adres.
 		loginLimiter:  newIPLimiter(6*time.Second, 10),

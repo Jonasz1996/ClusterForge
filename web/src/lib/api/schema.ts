@@ -1371,6 +1371,188 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/gitops/repo": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * De koppeling met Git en de stand van de laatste synchronisatie
+         * @description Ook voor viewers. Het token komt nooit terug.
+         */
+        get: operations["getGitRepo"];
+        /**
+         * De koppeling maken of wijzigen (admin)
+         * @description Leest eerst de kop van de branch; lukt dat niet, dan wordt er niets
+         *     opgeslagen. Een leeg token laat het opgeslagen token staan. Na het
+         *     opslaan leest de server de repository meteen.
+         */
+        put: operations["saveGitRepo"];
+        post?: never;
+        /** De koppeling verwijderen (admin); alle clusters worden ontkoppeld */
+        delete: operations["deleteGitRepo"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/gitops/repo/probe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Token, branch en map testen zonder op te slaan (admin) */
+        post: operations["probeGitRepo"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/gitops/sync": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Nu synchroniseren (admin)
+         * @description Leest de repository opnieuw, ook als de kop niet veranderde, en controleert elk bestand opnieuw.
+         */
+        post: operations["syncGit"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/gitops/files": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** De clusterbestanden uit de laatste scan, met hun toestand en fouten */
+        get: operations["listGitFiles"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/gitops/changes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Wijzigingen uit Git, eerst wat wacht of loopt */
+        get: operations["listGitChanges"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/gitops/changes/{changeId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                changeId: string;
+            };
+            cookie?: never;
+        };
+        /** Eén wijziging met commit, plan, diffs en lokale afwijkingen */
+        get: operations["getGitChange"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/clusters/{clusterId}/git/export": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Het cluster als cluster.yaml, zonder geheimen
+         * @description Alleen voor een cluster uit een ingebouwde template. Ook voor viewers.
+         */
+        get: operations["exportClusterGit"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/clusters/{clusterId}/git/link": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Het cluster aan zijn bestand in Git koppelen (admin)
+         * @description Lukt alleen als het bestand in de repository gelijk is aan de export;
+         *     anders 409 met code git_mismatch en de diff. Daarna is Git de bron
+         *     van waarheid en geven wijzigingen aan wat uit Git komt 409.
+         */
+        post: operations["linkClusterGit"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/clusters/{clusterId}/git/unlink": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Het cluster van Git ontkoppelen (admin); een wachtende wijziging vervalt */
+        post: operations["unlinkClusterGit"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -1383,6 +1565,8 @@ export interface components {
             field?: string;
             /** @description Bij precheck_failed de controles van de voorcontrole */
             checks?: components["schemas"]["TestRunCheck"][];
+            /** @description Bij git_mismatch het verschil tussen het bestand in Git en de export */
+            diff?: string;
         };
         Health: {
             /** @enum {string} */
@@ -2252,6 +2436,8 @@ export interface components {
             status_since: string | null;
             tags: string[];
             git_repo_url: string;
+            /** @description Komt uit Git; naam, omgeving, tags, nodes en VIP's wijzigen dan in cluster.yaml */
+            git_managed: boolean;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
@@ -2796,6 +2982,8 @@ export interface components {
             help: string;
             /** @description Mag leeg blijven; een secret wordt dan gegenereerd */
             optional: boolean;
+            /** @description Ligt vast na de uitrol */
+            immutable: boolean;
             default: string | null;
             min: string | null;
             max: string | null;
@@ -3083,6 +3271,200 @@ export interface components {
             job: components["schemas"]["Job"];
             /** Format: uuid */
             cluster_id: string;
+        };
+        GitCommit: {
+            sha: string;
+            message: string;
+            author: string;
+            /** Format: date-time */
+            date: string;
+            /** @description Of GitHub de handtekening van de commit geldig vindt */
+            verified: boolean;
+            /** @description De commit op de website */
+            url: string;
+        };
+        GitRepo: {
+            /** Format: uuid */
+            id: string;
+            api_url: string;
+            /** @description eigenaar/naam */
+            repository: string;
+            branch: string;
+            /** @description De map met een map per cluster */
+            path: string;
+            /** @description De repository op de website */
+            web_url: string;
+            /** @description De laatste commit die de server zag */
+            head: components["schemas"]["GitCommit"] | null;
+            /** Format: date-time */
+            last_sync_at: string | null;
+            /** @description Waarom de laatste synchronisatie mislukte; leeg als ze lukte */
+            last_error: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        GitRepoStatus: {
+            /** @description Zonder CF_MASTER_KEY staat GitOps uit */
+            enabled: boolean;
+            repo: components["schemas"]["GitRepo"] | null;
+            /** @description Tijd tussen twee keer lezen */
+            interval_seconds: number;
+            /** @description Wijzigingen die wachten op goedkeuring */
+            pending_changes: number;
+        };
+        GitRepoInput: {
+            /** @description Standaard https://api.github.com */
+            api_url?: string;
+            /** @description eigenaar/naam, of de link naar de repository */
+            repository: string;
+            /** @description Standaard main */
+            branch?: string;
+            /** @description Standaard clusters */
+            path?: string;
+            /**
+             * Format: password
+             * @description Fine-grained token met alleen Contents: read; leeg laat het opgeslagen token staan
+             */
+            token?: string;
+        };
+        GitProbe: {
+            head: components["schemas"]["GitCommit"];
+            /** @description De gevonden clusterbestanden */
+            files: string[];
+        };
+        GitFieldError: {
+            /** @description Zoals params.vip of cluster.name */
+            field: string;
+            /** @description De regel in het bestand; 0 als die niet bekend is */
+            line: number;
+            message: string;
+        };
+        /**
+         * @description in_sync: gelijk aan het cluster; pending: een wijziging wacht; invalid:
+         *     fouten; new: een nieuw cluster; unlinked: het cluster bestaat maar is
+         *     niet gekoppeld; missing: het bestand van een gekoppeld cluster ontbreekt
+         * @enum {string}
+         */
+        GitFileState: "in_sync" | "pending" | "invalid" | "new" | "unlinked" | "missing";
+        GitFile: {
+            path: string;
+            slug: string;
+            state: components["schemas"]["GitFileState"];
+            /** Format: uuid */
+            cluster_id: string | null;
+            cluster_name: string;
+            errors: components["schemas"]["GitFieldError"][];
+            /**
+             * Format: uuid
+             * @description De wachtende wijziging
+             */
+            change_id: string | null;
+            /** @description De commit waarin de server deze inhoud voor het eerst zag */
+            commit: string;
+            /** @description Er stond een geheim in; de inhoud wordt niet bewaard */
+            secret: boolean;
+            /** @description Het bestand op de website */
+            url: string;
+        };
+        /** @enum {string} */
+        GitChangeStatus: "pending" | "applying" | "applied" | "failed" | "rejected" | "superseded";
+        GitChange: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            cluster_id: string | null;
+            /** @description De naam nu */
+            cluster_name: string;
+            cluster_environment: components["schemas"]["Environment"];
+            slug: string;
+            path: string;
+            /** @enum {string} */
+            kind: "create" | "update";
+            status: components["schemas"]["GitChangeStatus"];
+            commit: components["schemas"]["GitCommit"];
+            base_revision: number;
+            /** @description Zoals: node_count van 2 naar 3; keepalived.conf op 2 nodes, 1 nieuwe node */
+            summary: string;
+            /** Format: uuid */
+            job_id: string | null;
+            decided_by: string | null;
+            /** Format: date-time */
+            decided_at: string | null;
+            reason: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        GitChangeDetail: components["schemas"]["GitChange"] & {
+            plan: components["schemas"]["GitPlan"];
+            /** @description Uit de laatste driftcontrole, wat op de nodes al afwijkt en overschreven wordt */
+            local: string[];
+            file_url: string;
+        };
+        GitFieldChange: {
+            field: string;
+            label: string;
+            from: string;
+            to: string;
+        };
+        GitPlanNewNode: {
+            hostname: string;
+            role: string;
+            address: string;
+            prefix: number;
+            host: string;
+            vm: {
+                cpu: number;
+                memory_mib: number;
+                disk_gib: number;
+            };
+        };
+        GitStepChange: {
+            /** @description Zoals file:/var/www/html/index.html */
+            step: string;
+            ids: string[];
+            title: string;
+            /** @enum {string} */
+            change: "added" | "changed" | "removed";
+            summary: string;
+            /** @description Unified diff; geheimen staan er als [geheim] in */
+            diff?: string;
+        };
+        GitPlanNode: {
+            /** Format: uuid */
+            node_id: string;
+            hostname: string;
+            new: boolean;
+            /** @description De VIP's die deze node nu heeft */
+            vips: string[];
+            steps: components["schemas"]["GitStepChange"][];
+        };
+        GitPlan: {
+            /** @enum {string} */
+            kind: "create" | "update";
+            summary: string;
+            base_revision: number;
+            template: {
+                name: string;
+                /** @description Leeg bij een nieuw cluster */
+                from: string;
+                to: string;
+            };
+            metadata: components["schemas"]["GitFieldChange"][];
+            params: components["schemas"]["GitFieldChange"][];
+            new_nodes: components["schemas"]["GitPlanNewNode"][];
+            /** @description In de volgorde van toepassen; de VIP-eigenaar als laatste */
+            nodes: components["schemas"]["GitPlanNode"][];
+            unchanged: string[];
+            warnings: string[];
+            /** @description Geen gerenderde stap verandert */
+            no_steps: boolean;
+            vip?: string;
+            vrid?: number;
+            proxmox?: string;
         };
     };
     responses: {
@@ -5490,6 +5872,274 @@ export interface operations {
             400: components["responses"]["Error"];
             401: components["responses"]["Error"];
             404: components["responses"]["Error"];
+        };
+    };
+    getGitRepo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitRepoStatus"];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    saveGitRepo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GitRepoInput"];
+            };
+        };
+        responses: {
+            /** @description Opgeslagen */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitRepoStatus"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+        };
+    };
+    deleteGitRepo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Verwijderd */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    probeGitRepo: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GitRepoInput"];
+            };
+        };
+        responses: {
+            /** @description De kop van de branch en de clusterbestanden */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitProbe"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+        };
+    };
+    syncGit: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Aangestoten */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    listGitFiles: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["GitFile"][];
+                    };
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    listGitChanges: {
+        parameters: {
+            query?: {
+                status?: components["schemas"]["GitChangeStatus"];
+                cluster_id?: string;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["GitChange"][];
+                    };
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    getGitChange: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                changeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GitChangeDetail"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    exportClusterGit: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Het bestand */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/yaml": string;
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    linkClusterGit: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Gekoppeld */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Cluster"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    unlinkClusterGit: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Ontkoppeld */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Cluster"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
         };
     };
 }

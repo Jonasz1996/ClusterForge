@@ -115,6 +115,9 @@ func (f *VIPFields) normalize() error {
 	return nil
 }
 
+// NormalizeTags controleert tags zoals bij een cluster of node.
+func NormalizeTags(in []string) ([]string, error) { return normalizeTags(in) }
+
 // normalizeTags zet tags in kleine letters en haalt dubbele en lege weg; de
 // volgorde blijft zoals opgegeven.
 func normalizeTags(in []string) ([]string, error) {

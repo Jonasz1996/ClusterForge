@@ -468,6 +468,141 @@ func (e FailoverScenario) Valid() bool {
 	}
 }
 
+// Defines values for GitChangeKind.
+const (
+	GitChangeKindCreate GitChangeKind = "create"
+	GitChangeKindUpdate GitChangeKind = "update"
+)
+
+// Valid indicates whether the value is a known member of the GitChangeKind enum.
+func (e GitChangeKind) Valid() bool {
+	switch e {
+	case GitChangeKindCreate:
+		return true
+	case GitChangeKindUpdate:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GitChangeDetailKind.
+const (
+	GitChangeDetailKindCreate GitChangeDetailKind = "create"
+	GitChangeDetailKindUpdate GitChangeDetailKind = "update"
+)
+
+// Valid indicates whether the value is a known member of the GitChangeDetailKind enum.
+func (e GitChangeDetailKind) Valid() bool {
+	switch e {
+	case GitChangeDetailKindCreate:
+		return true
+	case GitChangeDetailKindUpdate:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GitChangeStatus.
+const (
+	GitChangeStatusApplied    GitChangeStatus = "applied"
+	GitChangeStatusApplying   GitChangeStatus = "applying"
+	GitChangeStatusFailed     GitChangeStatus = "failed"
+	GitChangeStatusPending    GitChangeStatus = "pending"
+	GitChangeStatusRejected   GitChangeStatus = "rejected"
+	GitChangeStatusSuperseded GitChangeStatus = "superseded"
+)
+
+// Valid indicates whether the value is a known member of the GitChangeStatus enum.
+func (e GitChangeStatus) Valid() bool {
+	switch e {
+	case GitChangeStatusApplied:
+		return true
+	case GitChangeStatusApplying:
+		return true
+	case GitChangeStatusFailed:
+		return true
+	case GitChangeStatusPending:
+		return true
+	case GitChangeStatusRejected:
+		return true
+	case GitChangeStatusSuperseded:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GitFileState.
+const (
+	GitFileStateInSync   GitFileState = "in_sync"
+	GitFileStateInvalid  GitFileState = "invalid"
+	GitFileStateMissing  GitFileState = "missing"
+	GitFileStateNew      GitFileState = "new"
+	GitFileStatePending  GitFileState = "pending"
+	GitFileStateUnlinked GitFileState = "unlinked"
+)
+
+// Valid indicates whether the value is a known member of the GitFileState enum.
+func (e GitFileState) Valid() bool {
+	switch e {
+	case GitFileStateInSync:
+		return true
+	case GitFileStateInvalid:
+		return true
+	case GitFileStateMissing:
+		return true
+	case GitFileStateNew:
+		return true
+	case GitFileStatePending:
+		return true
+	case GitFileStateUnlinked:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GitPlanKind.
+const (
+	GitPlanKindCreate GitPlanKind = "create"
+	GitPlanKindUpdate GitPlanKind = "update"
+)
+
+// Valid indicates whether the value is a known member of the GitPlanKind enum.
+func (e GitPlanKind) Valid() bool {
+	switch e {
+	case GitPlanKindCreate:
+		return true
+	case GitPlanKindUpdate:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GitStepChangeChange.
+const (
+	Added   GitStepChangeChange = "added"
+	Changed GitStepChangeChange = "changed"
+	Removed GitStepChangeChange = "removed"
+)
+
+// Valid indicates whether the value is a known member of the GitStepChangeChange enum.
+func (e GitStepChangeChange) Valid() bool {
+	switch e {
+	case Added:
+		return true
+	case Changed:
+		return true
+	case Removed:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for GuestType.
 const (
 	Lxc  GuestType = "lxc"
@@ -1557,12 +1692,15 @@ type ChangePasswordRequest struct {
 
 // Cluster defines model for Cluster.
 type Cluster struct {
-	CreatedAt   time.Time          `json:"created_at"`
-	Description string             `json:"description"`
-	Environment Environment        `json:"environment"`
-	GitRepoUrl  string             `json:"git_repo_url"`
-	Id          openapi_types.UUID `json:"id"`
-	Name        string             `json:"name"`
+	CreatedAt   time.Time   `json:"created_at"`
+	Description string      `json:"description"`
+	Environment Environment `json:"environment"`
+
+	// GitManaged Komt uit Git; naam, omgeving, tags, nodes en VIP's wijzigen dan in cluster.yaml
+	GitManaged bool               `json:"git_managed"`
+	GitRepoUrl string             `json:"git_repo_url"`
+	Id         openapi_types.UUID `json:"id"`
+	Name       string             `json:"name"`
 
 	// Slug Korte unieke naam, bijvoorbeeld webcluster-prod
 	Slug string `json:"slug"`
@@ -1588,14 +1726,17 @@ type Cluster struct {
 
 // ClusterDetail defines model for ClusterDetail.
 type ClusterDetail struct {
-	CreatedAt   time.Time          `json:"created_at"`
-	Description string             `json:"description"`
-	Environment Environment        `json:"environment"`
-	GitRepoUrl  string             `json:"git_repo_url"`
-	Id          openapi_types.UUID `json:"id"`
-	Name        string             `json:"name"`
-	Nodes       []Node             `json:"nodes"`
-	Owners      []UserRef          `json:"owners"`
+	CreatedAt   time.Time   `json:"created_at"`
+	Description string      `json:"description"`
+	Environment Environment `json:"environment"`
+
+	// GitManaged Komt uit Git; naam, omgeving, tags, nodes en VIP's wijzigen dan in cluster.yaml
+	GitManaged bool               `json:"git_managed"`
+	GitRepoUrl string             `json:"git_repo_url"`
+	Id         openapi_types.UUID `json:"id"`
+	Name       string             `json:"name"`
+	Nodes      []Node             `json:"nodes"`
+	Owners     []UserRef          `json:"owners"`
 
 	// Slug Korte unieke naam, bijvoorbeeld webcluster-prod
 	Slug string `json:"slug"`
@@ -1651,8 +1792,11 @@ type ClusterListItem struct {
 	Description string              `json:"description"`
 	Drift       ClusterDriftSummary `json:"drift"`
 	Environment Environment         `json:"environment"`
-	GitRepoUrl  string              `json:"git_repo_url"`
-	Id          openapi_types.UUID  `json:"id"`
+
+	// GitManaged Komt uit Git; naam, omgeving, tags, nodes en VIP's wijzigen dan in cluster.yaml
+	GitManaged bool               `json:"git_managed"`
+	GitRepoUrl string             `json:"git_repo_url"`
+	Id         openapi_types.UUID `json:"id"`
 
 	// Impact De ergste doorgegeven uitval op de bevestigde diensten van dit cluster, langs bekende afhankelijkheden van buiten; uitval binnen het cluster zegt de status al
 	Impact ServiceImpact `json:"impact"`
@@ -2101,6 +2245,9 @@ type Error struct {
 	// Code Stabiele foutcode, bijvoorbeeld invalid_credentials of totp_required
 	Code string `json:"code"`
 
+	// Diff Bij git_mismatch het verschil tussen het bestand in Git en de export
+	Diff *string `json:"diff,omitempty"`
+
 	// Field Het veld met de fout, zoals params.vip, als de fout bij één veld hoort
 	Field   *string `json:"field,omitempty"`
 	Message string  `json:"message"`
@@ -2343,6 +2490,267 @@ type FailoverVIPOption struct {
 	// Probe Een HTTP-pad met de verwachte status, of een TCP-poort. De host is altijd het VIP.
 	Probe FailoverProbe `json:"probe"`
 }
+
+// GitChange defines model for GitChange.
+type GitChange struct {
+	BaseRevision       int                                   `json:"base_revision"`
+	ClusterEnvironment Environment                           `json:"cluster_environment"`
+	ClusterId          nullable.Nullable[openapi_types.UUID] `json:"cluster_id"`
+
+	// ClusterName De naam nu
+	ClusterName string                                `json:"cluster_name"`
+	Commit      GitCommit                             `json:"commit"`
+	CreatedAt   time.Time                             `json:"created_at"`
+	DecidedAt   nullable.Nullable[time.Time]          `json:"decided_at"`
+	DecidedBy   nullable.Nullable[string]             `json:"decided_by"`
+	Id          openapi_types.UUID                    `json:"id"`
+	JobId       nullable.Nullable[openapi_types.UUID] `json:"job_id"`
+	Kind        GitChangeKind                         `json:"kind"`
+	Path        string                                `json:"path"`
+	Reason      string                                `json:"reason"`
+	Slug        string                                `json:"slug"`
+	Status      GitChangeStatus                       `json:"status"`
+
+	// Summary Zoals: node_count van 2 naar 3; keepalived.conf op 2 nodes, 1 nieuwe node
+	Summary   string    `json:"summary"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// GitChangeKind defines model for GitChange.Kind.
+type GitChangeKind string
+
+// GitChangeDetail defines model for GitChangeDetail.
+type GitChangeDetail struct {
+	BaseRevision       int                                   `json:"base_revision"`
+	ClusterEnvironment Environment                           `json:"cluster_environment"`
+	ClusterId          nullable.Nullable[openapi_types.UUID] `json:"cluster_id"`
+
+	// ClusterName De naam nu
+	ClusterName string                                `json:"cluster_name"`
+	Commit      GitCommit                             `json:"commit"`
+	CreatedAt   time.Time                             `json:"created_at"`
+	DecidedAt   nullable.Nullable[time.Time]          `json:"decided_at"`
+	DecidedBy   nullable.Nullable[string]             `json:"decided_by"`
+	FileUrl     string                                `json:"file_url"`
+	Id          openapi_types.UUID                    `json:"id"`
+	JobId       nullable.Nullable[openapi_types.UUID] `json:"job_id"`
+	Kind        GitChangeDetailKind                   `json:"kind"`
+
+	// Local Uit de laatste driftcontrole, wat op de nodes al afwijkt en overschreven wordt
+	Local  []string        `json:"local"`
+	Path   string          `json:"path"`
+	Plan   GitPlan         `json:"plan"`
+	Reason string          `json:"reason"`
+	Slug   string          `json:"slug"`
+	Status GitChangeStatus `json:"status"`
+
+	// Summary Zoals: node_count van 2 naar 3; keepalived.conf op 2 nodes, 1 nieuwe node
+	Summary   string    `json:"summary"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// GitChangeDetailKind defines model for GitChangeDetail.Kind.
+type GitChangeDetailKind string
+
+// GitChangeStatus defines model for GitChangeStatus.
+type GitChangeStatus string
+
+// GitCommit defines model for GitCommit.
+type GitCommit struct {
+	Author  string    `json:"author"`
+	Date    time.Time `json:"date"`
+	Message string    `json:"message"`
+	Sha     string    `json:"sha"`
+
+	// Url De commit op de website
+	Url string `json:"url"`
+
+	// Verified Of GitHub de handtekening van de commit geldig vindt
+	Verified bool `json:"verified"`
+}
+
+// GitFieldChange defines model for GitFieldChange.
+type GitFieldChange struct {
+	Field string `json:"field"`
+	From  string `json:"from"`
+	Label string `json:"label"`
+	To    string `json:"to"`
+}
+
+// GitFieldError defines model for GitFieldError.
+type GitFieldError struct {
+	// Field Zoals params.vip of cluster.name
+	Field string `json:"field"`
+
+	// Line De regel in het bestand; 0 als die niet bekend is
+	Line    int    `json:"line"`
+	Message string `json:"message"`
+}
+
+// GitFile defines model for GitFile.
+type GitFile struct {
+	// ChangeId De wachtende wijziging
+	ChangeId    nullable.Nullable[openapi_types.UUID] `json:"change_id"`
+	ClusterId   nullable.Nullable[openapi_types.UUID] `json:"cluster_id"`
+	ClusterName string                                `json:"cluster_name"`
+
+	// Commit De commit waarin de server deze inhoud voor het eerst zag
+	Commit string          `json:"commit"`
+	Errors []GitFieldError `json:"errors"`
+	Path   string          `json:"path"`
+
+	// Secret Er stond een geheim in; de inhoud wordt niet bewaard
+	Secret bool   `json:"secret"`
+	Slug   string `json:"slug"`
+
+	// State in_sync: gelijk aan het cluster; pending: een wijziging wacht; invalid:
+	// fouten; new: een nieuw cluster; unlinked: het cluster bestaat maar is
+	// niet gekoppeld; missing: het bestand van een gekoppeld cluster ontbreekt
+	State GitFileState `json:"state"`
+
+	// Url Het bestand op de website
+	Url string `json:"url"`
+}
+
+// GitFileState in_sync: gelijk aan het cluster; pending: een wijziging wacht; invalid:
+// fouten; new: een nieuw cluster; unlinked: het cluster bestaat maar is
+// niet gekoppeld; missing: het bestand van een gekoppeld cluster ontbreekt
+type GitFileState string
+
+// GitPlan defines model for GitPlan.
+type GitPlan struct {
+	BaseRevision int              `json:"base_revision"`
+	Kind         GitPlanKind      `json:"kind"`
+	Metadata     []GitFieldChange `json:"metadata"`
+	NewNodes     []GitPlanNewNode `json:"new_nodes"`
+
+	// NoSteps Geen gerenderde stap verandert
+	NoSteps bool `json:"no_steps"`
+
+	// Nodes In de volgorde van toepassen; de VIP-eigenaar als laatste
+	Nodes    []GitPlanNode    `json:"nodes"`
+	Params   []GitFieldChange `json:"params"`
+	Proxmox  *string          `json:"proxmox,omitempty"`
+	Summary  string           `json:"summary"`
+	Template struct {
+		// From Leeg bij een nieuw cluster
+		From string `json:"from"`
+		Name string `json:"name"`
+		To   string `json:"to"`
+	} `json:"template"`
+	Unchanged []string `json:"unchanged"`
+	Vip       *string  `json:"vip,omitempty"`
+	Vrid      *int     `json:"vrid,omitempty"`
+	Warnings  []string `json:"warnings"`
+}
+
+// GitPlanKind defines model for GitPlan.Kind.
+type GitPlanKind string
+
+// GitPlanNewNode defines model for GitPlanNewNode.
+type GitPlanNewNode struct {
+	Address  string `json:"address"`
+	Host     string `json:"host"`
+	Hostname string `json:"hostname"`
+	Prefix   int    `json:"prefix"`
+	Role     string `json:"role"`
+	Vm       struct {
+		Cpu       int `json:"cpu"`
+		DiskGib   int `json:"disk_gib"`
+		MemoryMib int `json:"memory_mib"`
+	} `json:"vm"`
+}
+
+// GitPlanNode defines model for GitPlanNode.
+type GitPlanNode struct {
+	Hostname string             `json:"hostname"`
+	New      bool               `json:"new"`
+	NodeId   openapi_types.UUID `json:"node_id"`
+	Steps    []GitStepChange    `json:"steps"`
+
+	// Vips De VIP's die deze node nu heeft
+	Vips []string `json:"vips"`
+}
+
+// GitProbe defines model for GitProbe.
+type GitProbe struct {
+	// Files De gevonden clusterbestanden
+	Files []string  `json:"files"`
+	Head  GitCommit `json:"head"`
+}
+
+// GitRepo defines model for GitRepo.
+type GitRepo struct {
+	ApiUrl    string    `json:"api_url"`
+	Branch    string    `json:"branch"`
+	CreatedAt time.Time `json:"created_at"`
+
+	// Head De laatste commit die de server zag
+	Head nullable.Nullable[GitCommit] `json:"head"`
+	Id   openapi_types.UUID           `json:"id"`
+
+	// LastError Waarom de laatste synchronisatie mislukte; leeg als ze lukte
+	LastError  string                       `json:"last_error"`
+	LastSyncAt nullable.Nullable[time.Time] `json:"last_sync_at"`
+
+	// Path De map met een map per cluster
+	Path string `json:"path"`
+
+	// Repository eigenaar/naam
+	Repository string    `json:"repository"`
+	UpdatedAt  time.Time `json:"updated_at"`
+
+	// WebUrl De repository op de website
+	WebUrl string `json:"web_url"`
+}
+
+// GitRepoInput defines model for GitRepoInput.
+type GitRepoInput struct {
+	// ApiUrl Standaard https://api.github.com
+	ApiUrl *string `json:"api_url,omitempty"`
+
+	// Branch Standaard main
+	Branch *string `json:"branch,omitempty"`
+
+	// Path Standaard clusters
+	Path *string `json:"path,omitempty"`
+
+	// Repository eigenaar/naam, of de link naar de repository
+	Repository string `json:"repository"`
+
+	// Token Fine-grained token met alleen Contents: read; leeg laat het opgeslagen token staan
+	Token *string `json:"token,omitempty"`
+}
+
+// GitRepoStatus defines model for GitRepoStatus.
+type GitRepoStatus struct {
+	// Enabled Zonder CF_MASTER_KEY staat GitOps uit
+	Enabled bool `json:"enabled"`
+
+	// IntervalSeconds Tijd tussen twee keer lezen
+	IntervalSeconds int `json:"interval_seconds"`
+
+	// PendingChanges Wijzigingen die wachten op goedkeuring
+	PendingChanges int                        `json:"pending_changes"`
+	Repo           nullable.Nullable[GitRepo] `json:"repo"`
+}
+
+// GitStepChange defines model for GitStepChange.
+type GitStepChange struct {
+	Change GitStepChangeChange `json:"change"`
+
+	// Diff Unified diff; geheimen staan er als [geheim] in
+	Diff *string  `json:"diff,omitempty"`
+	Ids  []string `json:"ids"`
+
+	// Step Zoals file:/var/www/html/index.html
+	Step    string `json:"step"`
+	Summary string `json:"summary"`
+	Title   string `json:"title"`
+}
+
+// GitStepChangeChange defines model for GitStepChange.Change.
+type GitStepChangeChange string
 
 // GuestType defines model for GuestType.
 type GuestType string
@@ -3023,10 +3431,13 @@ type Template struct {
 type TemplateParam struct {
 	Default nullable.Nullable[string] `json:"default"`
 	Help    string                    `json:"help"`
-	Label   string                    `json:"label"`
-	Max     nullable.Nullable[string] `json:"max"`
-	Min     nullable.Nullable[string] `json:"min"`
-	Name    string                    `json:"name"`
+
+	// Immutable Ligt vast na de uitrol
+	Immutable bool                      `json:"immutable"`
+	Label     string                    `json:"label"`
+	Max       nullable.Nullable[string] `json:"max"`
+	Min       nullable.Nullable[string] `json:"min"`
+	Name      string                    `json:"name"`
 
 	// Optional Mag leeg blijven; een secret wordt dan gegenereerd
 	Optional bool              `json:"optional"`
@@ -3352,6 +3763,13 @@ type ListEventsParams struct {
 	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// ListGitChangesParams defines parameters for ListGitChanges.
+type ListGitChangesParams struct {
+	Status    *GitChangeStatus    `form:"status,omitempty" json:"status,omitempty"`
+	ClusterId *openapi_types.UUID `form:"cluster_id,omitempty" json:"cluster_id,omitempty"`
+	Limit     *int                `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
 // GetImpactParams defines parameters for GetImpact.
 type GetImpactParams struct {
 	ServiceId *openapi_types.UUID `form:"service_id,omitempty" json:"service_id,omitempty"`
@@ -3448,6 +3866,12 @@ type UpdateFailoverTestJSONRequestBody = FailoverTestInput
 
 // StartFailoverTestJSONRequestBody defines body for StartFailoverTest for application/json ContentType.
 type StartFailoverTestJSONRequestBody = FailoverStartInput
+
+// SaveGitRepoJSONRequestBody defines body for SaveGitRepo for application/json ContentType.
+type SaveGitRepoJSONRequestBody = GitRepoInput
+
+// ProbeGitRepoJSONRequestBody defines body for ProbeGitRepo for application/json ContentType.
+type ProbeGitRepoJSONRequestBody = GitRepoInput
 
 // CreateNodeJSONRequestBody defines body for CreateNode for application/json ContentType.
 type CreateNodeJSONRequestBody = NodeInput
@@ -3574,6 +3998,15 @@ type ServerInterface interface {
 	// CreateFailoverTest Nieuwe failovertest (admin)
 	// (POST /clusters/{clusterId}/failover-tests)
 	CreateFailoverTest(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
+	// ExportClusterGit Het cluster als cluster.yaml, zonder geheimen
+	// (GET /clusters/{clusterId}/git/export)
+	ExportClusterGit(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
+	// LinkClusterGit Het cluster aan zijn bestand in Git koppelen (admin)
+	// (POST /clusters/{clusterId}/git/link)
+	LinkClusterGit(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
+	// UnlinkClusterGit Het cluster van Git ontkoppelen (admin); een wachtende wijziging vervalt
+	// (POST /clusters/{clusterId}/git/unlink)
+	UnlinkClusterGit(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
 	// GetClusterMetrics Grafieken van een cluster, met een lijn per node
 	// (GET /clusters/{clusterId}/metrics)
 	GetClusterMetrics(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params GetClusterMetricsParams)
@@ -3631,6 +4064,30 @@ type ServerInterface interface {
 	// StartFailoverTest Nu testen (admin)
 	// (POST /failover-tests/{testId}/runs)
 	StartFailoverTest(w http.ResponseWriter, r *http.Request, testId openapi_types.UUID)
+	// ListGitChanges Wijzigingen uit Git, eerst wat wacht of loopt
+	// (GET /gitops/changes)
+	ListGitChanges(w http.ResponseWriter, r *http.Request, params ListGitChangesParams)
+	// GetGitChange Eén wijziging met commit, plan, diffs en lokale afwijkingen
+	// (GET /gitops/changes/{changeId})
+	GetGitChange(w http.ResponseWriter, r *http.Request, changeId openapi_types.UUID)
+	// ListGitFiles De clusterbestanden uit de laatste scan, met hun toestand en fouten
+	// (GET /gitops/files)
+	ListGitFiles(w http.ResponseWriter, r *http.Request)
+	// DeleteGitRepo De koppeling verwijderen (admin); alle clusters worden ontkoppeld
+	// (DELETE /gitops/repo)
+	DeleteGitRepo(w http.ResponseWriter, r *http.Request)
+	// GetGitRepo De koppeling met Git en de stand van de laatste synchronisatie
+	// (GET /gitops/repo)
+	GetGitRepo(w http.ResponseWriter, r *http.Request)
+	// SaveGitRepo De koppeling maken of wijzigen (admin)
+	// (PUT /gitops/repo)
+	SaveGitRepo(w http.ResponseWriter, r *http.Request)
+	// ProbeGitRepo Token, branch en map testen zonder op te slaan (admin)
+	// (POST /gitops/repo/probe)
+	ProbeGitRepo(w http.ResponseWriter, r *http.Request)
+	// SyncGit Nu synchroniseren (admin)
+	// (POST /gitops/sync)
+	SyncGit(w http.ResponseWriter, r *http.Request)
 	// GetHealth Gezondheid van de server en de database
 	// (GET /health)
 	GetHealth(w http.ResponseWriter, r *http.Request)
@@ -3934,6 +4391,24 @@ func (_ Unimplemented) CreateFailoverTest(w http.ResponseWriter, r *http.Request
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// ExportClusterGit Het cluster als cluster.yaml, zonder geheimen
+// (GET /clusters/{clusterId}/git/export)
+func (_ Unimplemented) ExportClusterGit(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// LinkClusterGit Het cluster aan zijn bestand in Git koppelen (admin)
+// (POST /clusters/{clusterId}/git/link)
+func (_ Unimplemented) LinkClusterGit(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// UnlinkClusterGit Het cluster van Git ontkoppelen (admin); een wachtende wijziging vervalt
+// (POST /clusters/{clusterId}/git/unlink)
+func (_ Unimplemented) UnlinkClusterGit(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // GetClusterMetrics Grafieken van een cluster, met een lijn per node
 // (GET /clusters/{clusterId}/metrics)
 func (_ Unimplemented) GetClusterMetrics(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params GetClusterMetricsParams) {
@@ -4045,6 +4520,54 @@ func (_ Unimplemented) ListFailoverTestRuns(w http.ResponseWriter, r *http.Reque
 // StartFailoverTest Nu testen (admin)
 // (POST /failover-tests/{testId}/runs)
 func (_ Unimplemented) StartFailoverTest(w http.ResponseWriter, r *http.Request, testId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListGitChanges Wijzigingen uit Git, eerst wat wacht of loopt
+// (GET /gitops/changes)
+func (_ Unimplemented) ListGitChanges(w http.ResponseWriter, r *http.Request, params ListGitChangesParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetGitChange Eén wijziging met commit, plan, diffs en lokale afwijkingen
+// (GET /gitops/changes/{changeId})
+func (_ Unimplemented) GetGitChange(w http.ResponseWriter, r *http.Request, changeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListGitFiles De clusterbestanden uit de laatste scan, met hun toestand en fouten
+// (GET /gitops/files)
+func (_ Unimplemented) ListGitFiles(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// DeleteGitRepo De koppeling verwijderen (admin); alle clusters worden ontkoppeld
+// (DELETE /gitops/repo)
+func (_ Unimplemented) DeleteGitRepo(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetGitRepo De koppeling met Git en de stand van de laatste synchronisatie
+// (GET /gitops/repo)
+func (_ Unimplemented) GetGitRepo(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SaveGitRepo De koppeling maken of wijzigen (admin)
+// (PUT /gitops/repo)
+func (_ Unimplemented) SaveGitRepo(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ProbeGitRepo Token, branch en map testen zonder op te slaan (admin)
+// (POST /gitops/repo/probe)
+func (_ Unimplemented) ProbeGitRepo(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SyncGit Nu synchroniseren (admin)
+// (POST /gitops/sync)
+func (_ Unimplemented) SyncGit(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -5161,6 +5684,84 @@ func (siw *ServerInterfaceWrapper) CreateFailoverTest(w http.ResponseWriter, r *
 	handler.ServeHTTP(w, r)
 }
 
+// ExportClusterGit operation middleware
+func (siw *ServerInterfaceWrapper) ExportClusterGit(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ExportClusterGit(w, r, clusterId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// LinkClusterGit operation middleware
+func (siw *ServerInterfaceWrapper) LinkClusterGit(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.LinkClusterGit(w, r, clusterId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UnlinkClusterGit operation middleware
+func (siw *ServerInterfaceWrapper) UnlinkClusterGit(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UnlinkClusterGit(w, r, clusterId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetClusterMetrics operation middleware
 func (siw *ServerInterfaceWrapper) GetClusterMetrics(w http.ResponseWriter, r *http.Request) {
 
@@ -5668,6 +6269,175 @@ func (siw *ServerInterfaceWrapper) StartFailoverTest(w http.ResponseWriter, r *h
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.StartFailoverTest(w, r, testId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListGitChanges operation middleware
+func (siw *ServerInterfaceWrapper) ListGitChanges(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListGitChangesParams
+
+	// ------------- Optional query parameter "status" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "status", r.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "status"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "status", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cluster_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cluster_id", r.URL.Query(), &params.ClusterId, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cluster_id"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cluster_id", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListGitChanges(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetGitChange operation middleware
+func (siw *ServerInterfaceWrapper) GetGitChange(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "changeId" -------------
+	var changeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "changeId", chi.URLParam(r, "changeId"), &changeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "changeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetGitChange(w, r, changeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListGitFiles operation middleware
+func (siw *ServerInterfaceWrapper) ListGitFiles(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListGitFiles(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteGitRepo operation middleware
+func (siw *ServerInterfaceWrapper) DeleteGitRepo(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteGitRepo(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetGitRepo operation middleware
+func (siw *ServerInterfaceWrapper) GetGitRepo(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetGitRepo(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SaveGitRepo operation middleware
+func (siw *ServerInterfaceWrapper) SaveGitRepo(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SaveGitRepo(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ProbeGitRepo operation middleware
+func (siw *ServerInterfaceWrapper) ProbeGitRepo(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ProbeGitRepo(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SyncGit operation middleware
+func (siw *ServerInterfaceWrapper) SyncGit(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SyncGit(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -7162,6 +7932,39 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/impact", wrapper.GetImpact)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/gitops/repo", wrapper.DeleteGitRepo)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/gitops/repo", wrapper.GetGitRepo)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/gitops/repo", wrapper.SaveGitRepo)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/gitops/repo/probe", wrapper.ProbeGitRepo)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/gitops/sync", wrapper.SyncGit)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/gitops/files", wrapper.ListGitFiles)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/gitops/changes", wrapper.ListGitChanges)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/gitops/changes/{changeId}", wrapper.GetGitChange)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/clusters/{clusterId}/git/export", wrapper.ExportClusterGit)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/clusters/{clusterId}/git/link", wrapper.LinkClusterGit)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/clusters/{clusterId}/git/unlink", wrapper.UnlinkClusterGit)
 	})
 
 	return r

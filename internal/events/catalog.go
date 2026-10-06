@@ -17,6 +17,7 @@ const (
 	CategoryDrift     Category = "drift"
 	CategoryFailover  Category = "failover"
 	CategoryDeps      Category = "dependencies"
+	CategoryGitOps    Category = "gitops"
 	CategoryStatus    Category = "status"
 )
 
@@ -35,6 +36,7 @@ var Categories = []struct {
 	{CategoryDrift, "Drift"},
 	{CategoryFailover, "Failovertests"},
 	{CategoryDeps, "Afhankelijkheden"},
+	{CategoryGitOps, "GitOps"},
 	{CategoryStatus, "Status"},
 }
 
@@ -143,6 +145,19 @@ var Known = map[string]Spec{
 	"dependency.updated":     {CategoryDeps, "Afhankelijkheid gewijzigd"},
 	"dependency.deleted":     {CategoryDeps, "Afhankelijkheid verwijderd"},
 	"service.status_changed": {CategoryDeps, "Status van dienst gewijzigd"},
+
+	"gitops.repo_connected":    {CategoryGitOps, "Git-repository gekoppeld"},
+	"gitops.repo_updated":      {CategoryGitOps, "Koppeling met Git gewijzigd"},
+	"gitops.repo_disconnected": {CategoryGitOps, "Git-repository ontkoppeld"},
+	"gitops.commit_seen":       {CategoryGitOps, "Nieuwe commit gezien"},
+	"gitops.sync_failed":       {CategoryGitOps, "Lezen uit Git mislukt"},
+	"gitops.sync_recovered":    {CategoryGitOps, "Lezen uit Git lukt weer"},
+	"gitops.file_invalid":      {CategoryGitOps, "Clusterbestand ongeldig"},
+	"gitops.file_missing":      {CategoryGitOps, "Clusterbestand ontbreekt"},
+	"gitops.change_planned":    {CategoryGitOps, "Wijziging uit Git gepland"},
+	"gitops.change_superseded": {CategoryGitOps, "Wijziging uit Git vervangen"},
+	"cluster.git_linked":       {CategoryGitOps, "Cluster aan Git gekoppeld"},
+	"cluster.git_unlinked":     {CategoryGitOps, "Cluster van Git ontkoppeld"},
 
 	"node.status_changed":    {CategoryStatus, "Status van node gewijzigd"},
 	"cluster.status_changed": {CategoryStatus, "Status van cluster gewijzigd"},
