@@ -214,8 +214,17 @@ func (s *Service) UpdateCluster(ctx context.Context, actor events.Actor, id uuid
 		after.OwnerIDs = slices.Clone(before.OwnerIDs)
 		change(&after)
 		after.OwnerIDs = dedupe(after.OwnerIDs)
+		// Een ongewijzigd Git-adres wordt niet opnieuw gecontroleerd: GitOps
+		// zet er de link naar het bestand in, in tests en make dev over http.
+		keepURL := after.GitRepoURL == before.GitRepoURL
+		if keepURL {
+			after.GitRepoURL = ""
+		}
 		if err := after.normalize(); err != nil {
 			return err
+		}
+		if keepURL {
+			after.GitRepoURL = before.GitRepoURL
 		}
 		d := diff(before, after)
 		c = cur
