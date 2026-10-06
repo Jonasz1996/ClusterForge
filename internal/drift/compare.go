@@ -221,6 +221,21 @@ func stepID(s protocol.Step) (string, string) {
 	return "stap", "Stap"
 }
 
+// StepIDs geeft de stappen zoals afwijkingen ze noemen (Finding.Step) die
+// een stap van de template dekt. Een pakketstap met meer namen geeft per
+// pakket een afwijking, dus ook per pakket een id.
+func StepIDs(s templates.Step) []string {
+	if s.Package != nil {
+		out := make([]string, len(s.Package.Names))
+		for i, n := range s.Package.Names {
+			out[i] = "package:" + n
+		}
+		return out
+	}
+	id, _ := stepID(s.Step)
+	return []string{id}
+}
+
 // add zet een afwijking erbij met haar sleutel en vingerafdruk. observed is
 // de waargenomen waarde.
 func (c *comparer) add(f Finding, observed string) {

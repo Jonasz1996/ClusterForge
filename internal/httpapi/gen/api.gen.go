@@ -2765,6 +2765,79 @@ type ProxmoxStorage struct {
 	Type    string `json:"type"`
 }
 
+// RemediationChoice defines model for RemediationChoice.
+type RemediationChoice struct {
+	NodeId openapi_types.UUID      `json:"node_id"`
+	Steps  []RemediationStepChoice `json:"steps"`
+}
+
+// RemediationInput defines model for RemediationInput.
+type RemediationInput struct {
+	// Confirm Op prod de slug van het cluster
+	Confirm *string             `json:"confirm,omitempty"`
+	Nodes   []RemediationChoice `json:"nodes"`
+
+	// Preview Alleen het plan tonen, zonder iets te starten
+	Preview *bool `json:"preview,omitempty"`
+}
+
+// RemediationPlan defines model for RemediationPlan.
+type RemediationPlan struct {
+	Cluster     string             `json:"cluster"`
+	ClusterId   openapi_types.UUID `json:"cluster_id"`
+	Environment Environment        `json:"environment"`
+
+	// NeedsConfirmation Op prod moet de slug ingetikt worden
+	NeedsConfirmation bool `json:"needs_confirmation"`
+
+	// Nodes In de volgorde van de taak
+	Nodes []RemediationPlanNode `json:"nodes"`
+
+	// Notes Wat er hoogstens kan gebeuren, in gewone zinnen
+	Notes    []string `json:"notes"`
+	Revision int      `json:"revision"`
+	Slug     string   `json:"slug"`
+	Template string   `json:"template"`
+	Version  string   `json:"version"`
+}
+
+// RemediationPlanNode defines model for RemediationPlanNode.
+type RemediationPlanNode struct {
+	Hostname string `json:"hostname"`
+
+	// Ignored Genegeerde stappen die blijven zoals ze zijn
+	Ignored []string              `json:"ignored"`
+	NodeId  openapi_types.UUID    `json:"node_id"`
+	Steps   []RemediationPlanStep `json:"steps"`
+
+	// Vips De VIP's die de node nu heeft; zo'n node komt als laatste
+	Vips []string `json:"vips"`
+}
+
+// RemediationPlanStep defines model for RemediationPlanStep.
+type RemediationPlanStep struct {
+	// Action Wat er gebeurt, zoals: bestand /etc/keepalived/keepalived.conf overschrijven, daarna keepalived herladen
+	Action string `json:"action"`
+	Step   string `json:"step"`
+	Title  string `json:"title"`
+}
+
+// RemediationResult defines model for RemediationResult.
+type RemediationResult struct {
+	// Job null bij preview
+	Job  nullable.Nullable[Job] `json:"job"`
+	Plan RemediationPlan        `json:"plan"`
+}
+
+// RemediationStepChoice defines model for RemediationStepChoice.
+type RemediationStepChoice struct {
+	// Fingerprints De vingerafdrukken van de afwijkingen van die stap die getoond werden
+	Fingerprints []string `json:"fingerprints"`
+
+	// Step De stap, zoals file:/etc/keepalived/keepalived.conf
+	Step string `json:"step"`
+}
+
 // Role defines model for Role.
 type Role string
 
@@ -3278,6 +3351,9 @@ type CaptureBaselineJSONRequestBody = BaselineInput
 // CreateDriftIgnoreJSONRequestBody defines body for CreateDriftIgnore for application/json ContentType.
 type CreateDriftIgnoreJSONRequestBody = DriftIgnoreInput
 
+// RemediateClusterDriftJSONRequestBody defines body for RemediateClusterDrift for application/json ContentType.
+type RemediateClusterDriftJSONRequestBody = RemediationInput
+
 // CreateFailoverTestJSONRequestBody defines body for CreateFailoverTest for application/json ContentType.
 type CreateFailoverTestJSONRequestBody = FailoverTestInput
 
@@ -3418,6 +3494,9 @@ type ServerInterface interface {
 	// CreateDriftIgnore Een stap negeren op één node of het hele cluster (admin)
 	// (POST /clusters/{clusterId}/drift/ignores)
 	CreateDriftIgnore(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
+	// RemediateClusterDrift Gekozen afwijkingen herstellen met cluster.apply (admin)
+	// (POST /clusters/{clusterId}/drift/remediate)
+	RemediateClusterDrift(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
 	// ListFailoverTests Failovertests van een cluster met hun laatste run
 	// (GET /clusters/{clusterId}/failover-tests)
 	ListFailoverTests(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
@@ -3763,6 +3842,12 @@ func (_ Unimplemented) ListDriftIgnores(w http.ResponseWriter, r *http.Request, 
 // CreateDriftIgnore Een stap negeren op één node of het hele cluster (admin)
 // (POST /clusters/{clusterId}/drift/ignores)
 func (_ Unimplemented) CreateDriftIgnore(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RemediateClusterDrift Gekozen afwijkingen herstellen met cluster.apply (admin)
+// (POST /clusters/{clusterId}/drift/remediate)
+func (_ Unimplemented) RemediateClusterDrift(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -4918,6 +5003,32 @@ func (siw *ServerInterfaceWrapper) CreateDriftIgnore(w http.ResponseWriter, r *h
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CreateDriftIgnore(w, r, clusterId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RemediateClusterDrift operation middleware
+func (siw *ServerInterfaceWrapper) RemediateClusterDrift(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RemediateClusterDrift(w, r, clusterId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -6875,6 +6986,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/clusters/{clusterId}/drift/baseline", wrapper.CaptureBaseline)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/clusters/{clusterId}/drift/remediate", wrapper.RemediateClusterDrift)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/clusters/{clusterId}/drift/ignores", wrapper.ListDriftIgnores)

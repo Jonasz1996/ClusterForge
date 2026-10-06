@@ -826,6 +826,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/clusters/{clusterId}/drift/remediate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Gekozen afwijkingen herstellen met cluster.apply (admin)
+         * @description Alleen voor een cluster uit een template met een kloppend lidmaatschap. Per node de gekozen stappen met de vingerafdrukken die getoond werden; is er intussen iets veranderd, dan is het 409 drift_changed. Met preview alleen het plan, in de volgorde van de taak met de VIP-eigenaar als laatste. Op prod moet confirm gelijk zijn aan de slug (anders 409 needs_confirmation) en moet de gebruiker tweestapsverificatie aan hebben (anders 403 totp_required).
+         */
+        post: operations["remediateClusterDrift"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/clusters/{clusterId}/drift/ignores": {
         parameters: {
             query?: never;
@@ -1948,6 +1970,61 @@ export interface components {
             ignored: boolean;
             /** Format: uuid */
             ignore_id: string | null;
+        };
+        RemediationInput: {
+            nodes: components["schemas"]["RemediationChoice"][];
+            /** @description Op prod de slug van het cluster */
+            confirm?: string;
+            /** @description Alleen het plan tonen, zonder iets te starten */
+            preview?: boolean;
+        };
+        RemediationChoice: {
+            /** Format: uuid */
+            node_id: string;
+            steps: components["schemas"]["RemediationStepChoice"][];
+        };
+        RemediationStepChoice: {
+            /** @description De stap, zoals file:/etc/keepalived/keepalived.conf */
+            step: string;
+            /** @description De vingerafdrukken van de afwijkingen van die stap die getoond werden */
+            fingerprints: string[];
+        };
+        RemediationResult: {
+            plan: components["schemas"]["RemediationPlan"];
+            /** @description null bij preview */
+            job: components["schemas"]["Job"] | null;
+        };
+        RemediationPlan: {
+            /** Format: uuid */
+            cluster_id: string;
+            cluster: string;
+            slug: string;
+            environment: components["schemas"]["Environment"];
+            template: string;
+            version: string;
+            revision: number;
+            /** @description Op prod moet de slug ingetikt worden */
+            needs_confirmation: boolean;
+            /** @description In de volgorde van de taak */
+            nodes: components["schemas"]["RemediationPlanNode"][];
+            /** @description Wat er hoogstens kan gebeuren, in gewone zinnen */
+            notes: string[];
+        };
+        RemediationPlanNode: {
+            /** Format: uuid */
+            node_id: string;
+            hostname: string;
+            /** @description De VIP's die de node nu heeft; zo'n node komt als laatste */
+            vips: string[];
+            steps: components["schemas"]["RemediationPlanStep"][];
+            /** @description Genegeerde stappen die blijven zoals ze zijn */
+            ignored: string[];
+        };
+        RemediationPlanStep: {
+            step: string;
+            title: string;
+            /** @description Wat er gebeurt, zoals: bestand /etc/keepalived/keepalived.conf overschrijven, daarna keepalived herladen */
+            action: string;
         };
         DriftUnchecked: {
             step: string;
@@ -4404,6 +4481,46 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BaselineResult"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    remediateClusterDrift: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RemediationInput"];
+            };
+        };
+        responses: {
+            /** @description Het plan, bij preview */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RemediationResult"];
+                };
+            };
+            /** @description De taak staat in de wachtrij */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RemediationResult"];
                 };
             };
             400: components["responses"]["Error"];

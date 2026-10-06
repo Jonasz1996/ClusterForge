@@ -377,6 +377,13 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 	case "drift.changed":
 		return fmt.Sprintf("Drift op %s veranderd: nu %s", name, count(p["count"], "afwijking", "afwijkingen"))
 	case "drift.resolved":
+		if str(p, "job_id") != "" {
+			s := "Drift op " + name + " hersteld met een taak"
+			if d, ok := p["duration_seconds"].(float64); ok {
+				s += ", na " + duration(time.Duration(d)*time.Second)
+			}
+			return s
+		}
 		if d, ok := p["duration_seconds"].(float64); ok {
 			return fmt.Sprintf("Drift op %s verdwenen na %s", name, duration(time.Duration(d)*time.Second))
 		}
@@ -390,6 +397,9 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 		return "Negeerregel van cluster " + name + " opgeheven: " + str(p, "key") + prefixed(" op ", str(p, "node"))
 	case "drift.baseline_set":
 		return fmt.Sprintf("Baseline van cluster %s vastgelegd voor %s (revisie %s)", name, list(p["nodes"]), num(p["revision"]))
+	case "drift.remediation_requested":
+		nodes, _ := p["nodes"].([]any)
+		return fmt.Sprintf("Herstel van drift aangevraagd in cluster %s: %s op %s", name, count(p["steps"], "stap", "stappen"), enList(nodes))
 	case "failover_test.created":
 		return "Failovertest " + name + " aangemaakt" + paren(str(p, "scenario"))
 	case "failover_test.updated":

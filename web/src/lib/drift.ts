@@ -15,6 +15,8 @@ export type BaselineResult = components["schemas"]["BaselineResult"];
 export type BaselineItem = components["schemas"]["BaselineItem"];
 export type DriftIgnore = components["schemas"]["DriftIgnore"];
 export type DriftIgnoreInput = components["schemas"]["DriftIgnoreInput"];
+export type RemediationInput = components["schemas"]["RemediationInput"];
+export type RemediationPlan = components["schemas"]["RemediationPlan"];
 
 type Tone = "slate" | "green" | "amber" | "red" | "blue";
 
@@ -114,5 +116,18 @@ export function useDeleteDriftIgnore() {
   return useMutation({
     mutationFn: async (id: string) => unwrap(await api.DELETE("/drift-ignores/{ignoreId}", { params: { path: { ignoreId: id } } })),
     onSuccess: refresh,
+  });
+}
+
+// useRemediate vraagt een herstel aan, of met preview alleen het plan. Een
+// gestart herstel is een taak; de drift ververst als die klaar is.
+export function useRemediate(clusterId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: RemediationInput) =>
+      unwrap(await api.POST("/clusters/{clusterId}/drift/remediate", { params: { path: { clusterId } }, body })),
+    onSuccess: (_, body) => {
+      if (!body.preview) void qc.invalidateQueries({ queryKey: ["jobs"] });
+    },
   });
 }

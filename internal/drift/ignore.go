@@ -1,11 +1,14 @@
 package drift
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/Jonasz1996/clusterforge/internal/store"
 )
 
 // Ignore is een negeerregel. Hij geldt voor een hele stap, want herstel past
@@ -88,4 +91,23 @@ func activeKeys(findings []Finding) []string {
 		}
 	}
 	return keys
+}
+
+// IgnoredSteps geeft welke van deze stappen (Finding.Step) een negeerregel
+// van nu op de node dekt. Herstel past zo'n stap nooit toe.
+func (s *Service) IgnoredSteps(ctx context.Context, clusterID, nodeID uuid.UUID, steps []string) ([]string, error) {
+	rows, err := s.q.ListActiveDriftIgnores(ctx, store.ListActiveDriftIgnoresParams{ClusterID: clusterID, NodeID: &nodeID, Now: s.Now()})
+	if err != nil {
+		return nil, err
+	}
+	out := []string{}
+	for _, step := range steps {
+		for _, r := range rows {
+			if (Ignore{ID: r.ID, NodeID: r.NodeID, Key: r.Key}).Matches(Finding{Step: step}) {
+				out = append(out, step)
+				break
+			}
+		}
+	}
+	return out, nil
 }
