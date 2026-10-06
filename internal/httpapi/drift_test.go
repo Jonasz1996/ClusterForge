@@ -20,11 +20,19 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/drift"
 	"github.com/Jonasz1996/clusterforge/internal/proxmox/pvefake"
 	"github.com/Jonasz1996/clusterforge/internal/store"
+	"github.com/Jonasz1996/clusterforge/internal/templates"
 )
 
 // deployWeb rolt keepalived-nginx uit op twee nagespeelde VM's en wacht tot
 // het cluster gezond is. Het geeft de machines, het cluster en de node-id's
 // per hostname.
+// kaLatest is de versie van keepalived-nginx waarmee een nieuwe uitrol
+// gebeurt.
+func kaLatest() string {
+	t, _ := templates.Latest("keepalived-nginx")
+	return t.Version
+}
+
 func deployWeb(t *testing.T, e *testEnv, c *client) (*fleet, string, map[string]string) {
 	t.Helper()
 	pve, srv, fp := newPVE(t)
@@ -147,7 +155,7 @@ func TestDrift(t *testing.T) {
 	// Nog nooit gecontroleerd.
 	var rep driftReport
 	if s := c.do("GET", driftURL, nil, &rep); s != 200 || rep.Source == nil || rep.Source.Kind != "template" ||
-		rep.Source.Template != "keepalived-nginx" || rep.Source.TemplateVersion != "1.0.0" || rep.Source.SpecRevision != 1 ||
+		rep.Source.Template != "keepalived-nginx" || rep.Source.TemplateVersion != kaLatest() || rep.Source.SpecRevision != 1 ||
 		len(rep.Notes) != 0 || len(rep.Nodes) != 2 {
 		t.Fatalf("drift voor de eerste controle: %d %+v", s, rep)
 	}
@@ -413,7 +421,7 @@ func TestDrift(t *testing.T) {
 		// Eén per node, niet per controle.
 		t.Fatalf("mislukte controles: %v", ev)
 	}
-	setVersion("1.0.0")
+	setVersion(kaLatest())
 
 	// Alles terug zoals de template het wil: in orde, met drift.resolved.
 	for _, st := range steps {

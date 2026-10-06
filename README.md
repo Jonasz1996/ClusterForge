@@ -26,6 +26,7 @@ Het technisch ontwerp staat in [docs/design/mvp-fase-1.md](docs/design/mvp-fase-
 | 6. Baseline en negeren | Een baseline als gewenste staat voor clusters zonder template, en afwijkingen bewust negeren met een reden | klaar |
 | 7. Failovertest | Met de hand keepalived of nginx stoppen op de VIP-eigenaar in lab en test, meten hoe snel een andere node overneemt, en alles weer herstellen | klaar |
 | 8. Back-upcontrole | Een back-up terugzetten als tijdelijke VM met afgesloten netwerk, opstarten, controleren via de guest agent en altijd weer verwijderen | klaar |
+| 9. Diensten en afhankelijkheden | Welke dienst van welke andere afhangt, over clusters heen; voorstellen uit de agents en "Wat raakt uitval?" | klaar |
 
 ## Draaien met Docker Compose
 
@@ -233,6 +234,22 @@ De test zelf is een taak met vijf stappen. ClusterForge stopt de dienst op de ei
 
 De dienst komt altijd terug: na de meting, bij een fout, bij Afbreken, bij een nette stop van de server en na een crash, als de taak verder gaat. Lukt het herstel toch niet, dan staat bovenaan het cluster een rode balk "Failovertest niet volledig hersteld" met de knop Opnieuw herstellen. Op prod kan een failovertest nog niet; dat komt later, met de hand en met een extra bevestiging. Elke test en run komt in het logboek, met het run-id bij elke regel en het stop- en startcommando aan de agent.
 
+## Afhankelijkheden
+
+Bij Afhankelijkheden zie je welke diensten je draait en welke dienst van welke andere afhangt, over alle clusters heen. Een dienst hoort bij een cluster, bij een losse node zonder cluster, of is extern met een adres en een poort, zoals een NFS-server op 10.0.0.60:2049. Een pijl loopt van de afnemer naar de leverancier: php8.2-fpm in web-prod hangt af van mariadb in db-prod. Bij een harde afhankelijkheid is de afnemer down als de leverancier uitvalt, bij een zachte werkt hij verminderd.
+
+Diensten komen op drie manieren in de graaf:
+
+- **Uit een template.** Een cluster dat je uitrolt met Nginx met keepalived 1.1.0 krijgt nginx en keepalived, met nginx die hard afhangt van keepalived. Bestaande clusters uit die template kregen ze één keer bij de update.
+- **Met de hand.** Een beheerder voegt bij Afhankelijkheden of op de pagina van een cluster diensten, externe diensten en afhankelijkheden toe. Zo komen ook met de hand gebouwde clusters en de verbanden tussen clusters erin.
+- **Als voorstel.** Ziet een agent een bekende unit draaien op een actieve node van een cluster (nginx, apache2, haproxy, keepalived, mariadb, mysql, postgresql, redis-server, memcached, rabbitmq-server, php-fpm of docker), dan verschijnt die dienst binnen vijf minuten bij Voorstellen. Bevestig hem of negeer hem; een genegeerde dienst komt niet terug.
+
+Elke dienst heeft een eigen status uit de heartbeats: gezond als zijn unit op alle actieve nodes van het cluster draait, verminderd als hij op een deel draait, down als hij nergens draait, en onbekend zonder unit, zonder agent of als extern. Valt een dienst uit, dan krijgen de diensten die er hard van afhangen een rode rand en die er zacht van afhangen een oranje, en kleurt de pijl naar de oorzaak rood. De graaf ververst zich vanzelf; een uitval staat er binnen een halve minuut in.
+
+Klik op een dienst voor zijn instanties per node, wat hij gebruikt en wie hem gebruikt, en de knop Wat raakt uitval?. Die dimt alles wat niet geraakt wordt en toont per cluster welke diensten down of verminderd zouden raken, met prod bovenaan. Met Alleen clusters zie je de clusters met samengevoegde pijlen, en op een smal scherm een lijst per cluster. Het gaat altijd om bekende afhankelijkheden: wat niet in de graaf staat, telt niet mee, en de graaf houdt nooit een actie tegen. ClusterForge voert voor afhankelijkheden niets uit op de nodes.
+
+Redis, memcached, rabbitmq, apache2, php-fpm en PostgreSQL-instanties ziet alleen een agent van deze versie of nieuwer. Zet hem erop met `--upgrade` (zie [Agent installeren](#agent-installeren-op-een-node)); met een oudere agent blijven die diensten onbekend.
+
 ## Onderhoud, herstarten en afsluiten
 
 Bij elke node staat de kaart Beheer:
@@ -314,6 +331,7 @@ internal/backups/          versheid van de Proxmox-back-ups per VM, de back-upco
 internal/drift/            driftcontrole: vergelijken met de gewenste staat, de scanner en het rapport
 internal/health/           wachten op verse heartbeats: een node klaar, de VIP's op hun plaats
 internal/failover/         failovertests: voorcontrole, storing, meting, herstel en het rapport
+internal/deps/             diensten en afhankelijkheden: graaf, status, doorgeven, impact en voorstellen
 pkg/protocol/              berichten tussen server en agent
 internal/webui/            ingebedde webinterface
 migrations/                goose SQL-migraties

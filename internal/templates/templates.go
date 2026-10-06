@@ -24,20 +24,33 @@ import (
 
 // Template is een geladen clustertemplate.
 type Template struct {
-	Name        string  `yaml:"name"`
-	Version     string  `yaml:"version"`
-	Title       string  `yaml:"title"`
-	Description string  `yaml:"description"`
-	ClusterType string  `yaml:"cluster_type"`
-	Params      []Param `yaml:"params"`
-	Roles       []Role  `yaml:"roles"`
-	Checks      []any   `yaml:"checks"`
-	Services    []struct {
-		Name string `yaml:"name" json:"name"`
-		Kind string `yaml:"kind" json:"kind"`
-	} `yaml:"services"`
+	Name        string    `yaml:"name"`
+	Version     string    `yaml:"version"`
+	Title       string    `yaml:"title"`
+	Description string    `yaml:"description"`
+	ClusterType string    `yaml:"cluster_type"`
+	Params      []Param   `yaml:"params"`
+	Roles       []Role    `yaml:"roles"`
+	Checks      []any     `yaml:"checks"`
+	Services    []Service `yaml:"services"`
 
 	files *template.Template
+}
+
+// Service is een dienst die een uitrol in de afhankelijkheidsgraaf zet. De
+// soort komt uit de vaste lijst van internal/deps; een test daar controleert
+// de ingebouwde templates.
+type Service struct {
+	Name string `yaml:"name" json:"name"`
+	Kind string `yaml:"kind" json:"kind"`
+	// Unit is de systemd-unit zonder .service; leeg als de dienst er geen
+	// heeft.
+	Unit string `yaml:"unit" json:"unit,omitempty"`
+	Port int    `yaml:"port" json:"port,omitempty"`
+	// DependsOn zijn de diensten uit dezelfde template waarvan deze afhangt,
+	// met Strength hard (standaard) of soft.
+	DependsOn []string `yaml:"depends_on" json:"depends_on,omitempty"`
+	Strength  string   `yaml:"strength" json:"strength,omitempty"`
 }
 
 // Role is een groep gelijke nodes, zoals de webservers.
@@ -100,6 +113,9 @@ func Parse(fsys fs.FS) (*Template, error) {
 		}
 		roles[r.Name] = true
 	}
+	if err := t.checkServices(); err != nil {
+		return nil, err
+	}
 	if err := t.checkUnsafe(); err != nil {
 		return nil, err
 	}
@@ -126,6 +142,47 @@ func Parse(fsys fs.FS) (*Template, error) {
 		return nil, err
 	}
 	return &t, nil
+}
+
+var unitRe = regexp.MustCompile(`^[A-Za-z0-9@._:-]{1,63}$`)
+
+// checkServices controleert de diensten: unieke namen, en depends_on wijst
+// naar een andere dienst uit dezelfde template.
+func (t *Template) checkServices() error {
+	names := map[string]bool{}
+	for _, s := range t.Services {
+		if !unitRe.MatchString(s.Name) || names[s.Name] {
+			return fmt.Errorf("dienst %q: de naam ontbreekt, is ongeldig of staat er twee keer in", s.Name)
+		}
+		names[s.Name] = true
+	}
+	for _, s := range t.Services {
+		switch {
+		case s.Kind == "":
+			return fmt.Errorf("dienst %s: kind is verplicht", s.Name)
+		case s.Unit != "" && !unitRe.MatchString(s.Unit):
+			return fmt.Errorf("dienst %s: ongeldige unit %q", s.Name, s.Unit)
+		case s.Port < 0 || s.Port > 65535:
+			return fmt.Errorf("dienst %s: poort %d bestaat niet", s.Name, s.Port)
+		case s.Strength != "" && s.Strength != "hard" && s.Strength != "soft":
+			return fmt.Errorf("dienst %s: strength is hard of soft", s.Name)
+		case s.Strength != "" && len(s.DependsOn) == 0:
+			return fmt.Errorf("dienst %s: strength zonder depends_on", s.Name)
+		}
+		seen := map[string]bool{}
+		for _, d := range s.DependsOn {
+			switch {
+			case d == s.Name:
+				return fmt.Errorf("dienst %s hangt van zichzelf af", s.Name)
+			case !names[d]:
+				return fmt.Errorf("dienst %s hangt af van %q, maar die dienst staat niet in de template", s.Name, d)
+			case seen[d]:
+				return fmt.Errorf("dienst %s noemt %s twee keer in depends_on", s.Name, d)
+			}
+			seen[d] = true
+		}
+	}
+	return nil
 }
 
 // --- renderen ---

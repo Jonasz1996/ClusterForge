@@ -20,9 +20,17 @@ import (
 // WatchedServices zijn de systemd-units die de agent volgt. Units die niet
 // bestaan, verschijnen niet in de facts.
 var WatchedServices = []string{
-	"ssh", "keepalived", "nginx", "haproxy", "docker", "containerd", "postgresql", "mariadb", "mysql",
+	"ssh", "keepalived", "nginx", "apache2", "haproxy", "docker", "containerd", "postgresql", "mariadb", "mysql",
+	"redis-server", "memcached", "rabbitmq-server", "php8.1-fpm", "php8.2-fpm", "php8.3-fpm", "php8.4-fpm",
 	"cron", "qemu-guest-agent", "pve-cluster", "pveproxy", "cf-agent",
 }
+
+// WatchedPatterns zijn units met een variabel deel. postgresql.service is op
+// Debian en Ubuntu een overkoepelende unit die altijd active staat; de
+// instantie, zoals postgresql@16-main, zegt of de database draait. systemctl
+// show vindt via een patroon alleen geladen units, en dat is een instantie
+// zodra ze enabled is of draait.
+var WatchedPatterns = []string{"postgresql@*-main.service"}
 
 // realFilesystems zijn de bestandssysteemtypes die in de facts komen.
 var realFilesystems = []string{"ext2", "ext3", "ext4", "xfs", "btrfs", "zfs", "f2fs", "vfat", "ntfs3", "bcachefs"}
@@ -257,11 +265,11 @@ func (c *Collector) services(ctx context.Context) []protocol.Service {
 }
 
 func unitNames() []string {
-	out := make([]string, len(WatchedServices))
-	for i, s := range WatchedServices {
-		out[i] = s + ".service"
+	out := make([]string, 0, len(WatchedServices)+len(WatchedPatterns))
+	for _, s := range WatchedServices {
+		out = append(out, s+".service")
 	}
-	return out
+	return append(out, WatchedPatterns...)
 }
 
 func parseSystemctlShow(out []byte) []protocol.Service {

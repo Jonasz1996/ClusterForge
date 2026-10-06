@@ -15,6 +15,7 @@ const nav: NavItem[] = [
   { href: "/clusters", label: "Clusters" },
   { href: "/nodes", label: "Nodes" },
   { href: "/monitoring", label: "Monitoring" },
+  { href: "/afhankelijkheden", label: "Afhankelijkheden" },
   { href: "/proxmox", label: "Proxmox" },
   { href: "/back-ups", label: "Back-ups" },
   { href: "/taken", label: "Taken" },
@@ -80,7 +81,8 @@ export default function AppLayout({ children }: { children: ReactNode }) {
             Uitloggen
           </Button>
         </header>
-        <main className="mx-auto w-full max-w-5xl flex-1 px-6 py-8">{children}</main>
+        {/* De graaf van Afhankelijkheden krijgt de volle breedte. */}
+        <main className={`mx-auto w-full flex-1 px-6 py-8 ${pathname.startsWith("/afhankelijkheden") ? "max-w-[100rem]" : "max-w-5xl"}`}>{children}</main>
       </div>
     </div>
   );

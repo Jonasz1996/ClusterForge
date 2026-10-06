@@ -179,31 +179,88 @@ func (e ClusterDriftSummaryStatus) Valid() bool {
 
 // Defines values for ClusterType.
 const (
-	Cron         ClusterType = "cron"
-	Docker       ClusterType = "docker"
-	Generic      ClusterType = "generic"
-	Keepalived   ClusterType = "keepalived"
-	MariadbHa    ClusterType = "mariadb_ha"
-	Nginx        ClusterType = "nginx"
-	PostgresqlHa ClusterType = "postgresql_ha"
+	ClusterTypeCron         ClusterType = "cron"
+	ClusterTypeDocker       ClusterType = "docker"
+	ClusterTypeGeneric      ClusterType = "generic"
+	ClusterTypeKeepalived   ClusterType = "keepalived"
+	ClusterTypeMariadbHa    ClusterType = "mariadb_ha"
+	ClusterTypeNginx        ClusterType = "nginx"
+	ClusterTypePostgresqlHa ClusterType = "postgresql_ha"
 )
 
 // Valid indicates whether the value is a known member of the ClusterType enum.
 func (e ClusterType) Valid() bool {
 	switch e {
-	case Cron:
+	case ClusterTypeCron:
 		return true
-	case Docker:
+	case ClusterTypeDocker:
 		return true
-	case Generic:
+	case ClusterTypeGeneric:
 		return true
-	case Keepalived:
+	case ClusterTypeKeepalived:
 		return true
-	case MariadbHa:
+	case ClusterTypeMariadbHa:
 		return true
-	case Nginx:
+	case ClusterTypeNginx:
 		return true
-	case PostgresqlHa:
+	case ClusterTypePostgresqlHa:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DepGroupKind.
+const (
+	DepGroupKindCluster  DepGroupKind = "cluster"
+	DepGroupKindExternal DepGroupKind = "external"
+	DepGroupKindNode     DepGroupKind = "node"
+)
+
+// Valid indicates whether the value is a known member of the DepGroupKind enum.
+func (e DepGroupKind) Valid() bool {
+	switch e {
+	case DepGroupKindCluster:
+		return true
+	case DepGroupKindExternal:
+		return true
+	case DepGroupKindNode:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DependencyGraphLevel.
+const (
+	DependencyGraphLevelCluster DependencyGraphLevel = "cluster"
+	DependencyGraphLevelService DependencyGraphLevel = "service"
+)
+
+// Valid indicates whether the value is a known member of the DependencyGraphLevel enum.
+func (e DependencyGraphLevel) Valid() bool {
+	switch e {
+	case DependencyGraphLevelCluster:
+		return true
+	case DependencyGraphLevelService:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DependencyStrength.
+const (
+	Hard DependencyStrength = "hard"
+	Soft DependencyStrength = "soft"
+)
+
+// Valid indicates whether the value is a known member of the DependencyStrength enum.
+func (e DependencyStrength) Valid() bool {
+	switch e {
+	case Hard:
+		return true
+	case Soft:
 		return true
 	default:
 		return false
@@ -462,6 +519,27 @@ func (e HealthStatus) Valid() bool {
 	}
 }
 
+// Defines values for ImpactTargetKind.
+const (
+	ImpactTargetKindCluster ImpactTargetKind = "cluster"
+	ImpactTargetKindNode    ImpactTargetKind = "node"
+	ImpactTargetKindService ImpactTargetKind = "service"
+)
+
+// Valid indicates whether the value is a known member of the ImpactTargetKind enum.
+func (e ImpactTargetKind) Valid() bool {
+	switch e {
+	case ImpactTargetKindCluster:
+		return true
+	case ImpactTargetKindNode:
+		return true
+	case ImpactTargetKindService:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for JobStatus.
 const (
 	JobStatusCanceled  JobStatus = "canceled"
@@ -633,6 +711,144 @@ func (e Role) Valid() bool {
 	}
 }
 
+// Defines values for ServiceImpact.
+const (
+	ServiceImpactDegraded ServiceImpact = "degraded"
+	ServiceImpactDown     ServiceImpact = "down"
+	ServiceImpactNone     ServiceImpact = "none"
+)
+
+// Valid indicates whether the value is a known member of the ServiceImpact enum.
+func (e ServiceImpact) Valid() bool {
+	switch e {
+	case ServiceImpactDegraded:
+		return true
+	case ServiceImpactDown:
+		return true
+	case ServiceImpactNone:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ServiceKind.
+const (
+	ServiceKindApp       ServiceKind = "app"
+	ServiceKindCache     ServiceKind = "cache"
+	ServiceKindContainer ServiceKind = "container"
+	ServiceKindCron      ServiceKind = "cron"
+	ServiceKindDatabase  ServiceKind = "database"
+	ServiceKindDns       ServiceKind = "dns"
+	ServiceKindExternal  ServiceKind = "external"
+	ServiceKindLb        ServiceKind = "lb"
+	ServiceKindOther     ServiceKind = "other"
+	ServiceKindQueue     ServiceKind = "queue"
+	ServiceKindStorage   ServiceKind = "storage"
+	ServiceKindVip       ServiceKind = "vip"
+	ServiceKindWeb       ServiceKind = "web"
+)
+
+// Valid indicates whether the value is a known member of the ServiceKind enum.
+func (e ServiceKind) Valid() bool {
+	switch e {
+	case ServiceKindApp:
+		return true
+	case ServiceKindCache:
+		return true
+	case ServiceKindContainer:
+		return true
+	case ServiceKindCron:
+		return true
+	case ServiceKindDatabase:
+		return true
+	case ServiceKindDns:
+		return true
+	case ServiceKindExternal:
+		return true
+	case ServiceKindLb:
+		return true
+	case ServiceKindOther:
+		return true
+	case ServiceKindQueue:
+		return true
+	case ServiceKindStorage:
+		return true
+	case ServiceKindVip:
+		return true
+	case ServiceKindWeb:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ServiceSource.
+const (
+	ServiceSourceDiscovered ServiceSource = "discovered"
+	ServiceSourceManual     ServiceSource = "manual"
+	ServiceSourceTemplate   ServiceSource = "template"
+)
+
+// Valid indicates whether the value is a known member of the ServiceSource enum.
+func (e ServiceSource) Valid() bool {
+	switch e {
+	case ServiceSourceDiscovered:
+		return true
+	case ServiceSourceManual:
+		return true
+	case ServiceSourceTemplate:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ServiceState.
+const (
+	Confirmed ServiceState = "confirmed"
+	Ignored   ServiceState = "ignored"
+	Suggested ServiceState = "suggested"
+)
+
+// Valid indicates whether the value is a known member of the ServiceState enum.
+func (e ServiceState) Valid() bool {
+	switch e {
+	case Confirmed:
+		return true
+	case Ignored:
+		return true
+	case Suggested:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ServiceStatus.
+const (
+	ServiceStatusDegraded ServiceStatus = "degraded"
+	ServiceStatusDown     ServiceStatus = "down"
+	ServiceStatusHealthy  ServiceStatus = "healthy"
+	ServiceStatusUnknown  ServiceStatus = "unknown"
+)
+
+// Valid indicates whether the value is a known member of the ServiceStatus enum.
+func (e ServiceStatus) Valid() bool {
+	switch e {
+	case ServiceStatusDegraded:
+		return true
+	case ServiceStatusDown:
+		return true
+	case ServiceStatusHealthy:
+		return true
+	case ServiceStatusUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for SpecRevisionSource.
 const (
 	Api SpecRevisionSource = "api"
@@ -734,16 +950,16 @@ func (e TestRunKind) Valid() bool {
 
 // Defines values for TestRunTrigger.
 const (
-	Manual   TestRunTrigger = "manual"
-	Schedule TestRunTrigger = "schedule"
+	TestRunTriggerManual   TestRunTrigger = "manual"
+	TestRunTriggerSchedule TestRunTrigger = "schedule"
 )
 
 // Valid indicates whether the value is a known member of the TestRunTrigger enum.
 func (e TestRunTrigger) Valid() bool {
 	switch e {
-	case Manual:
+	case TestRunTriggerManual:
 		return true
-	case Schedule:
+	case TestRunTriggerSchedule:
 		return true
 	default:
 		return false
@@ -903,6 +1119,24 @@ func (e ExportAuditParamsActorType) Valid() bool {
 	case ExportAuditParamsActorTypeSystem:
 		return true
 	case ExportAuditParamsActorTypeUser:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetDependencyGraphParamsLevel.
+const (
+	GetDependencyGraphParamsLevelCluster GetDependencyGraphParamsLevel = "cluster"
+	GetDependencyGraphParamsLevelService GetDependencyGraphParamsLevel = "service"
+)
+
+// Valid indicates whether the value is a known member of the GetDependencyGraphParamsLevel enum.
+func (e GetDependencyGraphParamsLevel) Valid() bool {
+	switch e {
+	case GetDependencyGraphParamsLevelCluster:
+		return true
+	case GetDependencyGraphParamsLevelService:
 		return true
 	default:
 		return false
@@ -1449,6 +1683,139 @@ type ClusterPatch struct {
 // ClusterType defines model for ClusterType.
 type ClusterType string
 
+// DepEdge defines model for DepEdge.
+type DepEdge struct {
+	// Affected Uitval bereikte de afnemer langs deze pijl
+	Affected bool `json:"affected"`
+
+	// Count Hoeveel pijlen samengevoegd zijn; 1 per dienst
+	Count int `json:"count"`
+
+	// From De afnemer (dienst-id
+	From string `json:"from"`
+
+	// Id Het id van de afhankelijkheid; bij level=cluster <van>|<naar>
+	Id       string             `json:"id"`
+	Note     string             `json:"note"`
+	Source   ServiceSource      `json:"source"`
+	State    ServiceState       `json:"state"`
+	Strength DependencyStrength `json:"strength"`
+
+	// To De leverancier
+	To string `json:"to"`
+}
+
+// DepGroup defines model for DepGroup.
+type DepGroup struct {
+	ClusterId   nullable.Nullable[openapi_types.UUID] `json:"cluster_id"`
+	Environment nullable.Nullable[Environment]        `json:"environment"`
+
+	// Id cluster:<id>, node:<id> of external
+	Id string `json:"id"`
+
+	// Impact Wat een afhankelijkheid doet; none zonder uitval
+	Impact ServiceImpact `json:"impact"`
+
+	// ImpactedBy De groepen waar doorgegeven uitval vandaan komt
+	ImpactedBy []string                              `json:"impacted_by"`
+	Kind       DepGroupKind                          `json:"kind"`
+	Name       string                                `json:"name"`
+	NodeId     nullable.Nullable[openapi_types.UUID] `json:"node_id"`
+
+	// Status Berekend uit heartbeats, metrics en VIP's (zie internal/status).
+	// unknown betekent: geen agent of nog geen gegevens.
+	Status       Status `json:"status"`
+	StatusReason string `json:"status_reason"`
+
+	// Suggestions Voorgestelde diensten in deze groep
+	Suggestions int `json:"suggestions"`
+}
+
+// DepGroupKind defines model for DepGroup.Kind.
+type DepGroupKind string
+
+// DepInstance defines model for DepInstance.
+type DepInstance struct {
+	Hostname string             `json:"hostname"`
+	NodeId   openapi_types.UUID `json:"node_id"`
+	Running  bool               `json:"running"`
+
+	// State ActiveState van de unit; leeg zonder verse heartbeat
+	State string `json:"state"`
+}
+
+// DepService defines model for DepService.
+type DepService struct {
+	Address     string                                `json:"address"`
+	CauseId     nullable.Nullable[openapi_types.UUID] `json:"cause_id"`
+	ClusterId   nullable.Nullable[openapi_types.UUID] `json:"cluster_id"`
+	CreatedAt   time.Time                             `json:"created_at"`
+	Description string                                `json:"description"`
+	GroupId     string                                `json:"group_id"`
+	Id          openapi_types.UUID                    `json:"id"`
+
+	// Impact Wat een afhankelijkheid doet; none zonder uitval
+	Impact ServiceImpact `json:"impact"`
+
+	// ImpactPath Van de oorzaak naar deze dienst
+	ImpactPath []string `json:"impact_path"`
+
+	// ImpactReason Zoals: mariadb in db-prod is down, via php8.2-fpm
+	ImpactReason string        `json:"impact_reason"`
+	Instances    []DepInstance `json:"instances"`
+
+	// Kind De soort van een dienst; een vaste lijst in internal/deps
+	Kind ServiceKind `json:"kind"`
+
+	// LastSeenAt Wanneer de resolver de unit het laatst zag
+	LastSeenAt nullable.Nullable[time.Time]          `json:"last_seen_at"`
+	Name       string                                `json:"name"`
+	NodeId     nullable.Nullable[openapi_types.UUID] `json:"node_id"`
+	Port       nullable.Nullable[int]                `json:"port"`
+	Source     ServiceSource                         `json:"source"`
+	State      ServiceState                          `json:"state"`
+
+	// Status De eigen status uit de heartbeats; unknown zonder unit, zonder instanties of extern
+	Status       ServiceStatus `json:"status"`
+	StatusReason string        `json:"status_reason"`
+	Unit         string        `json:"unit"`
+	UpdatedAt    time.Time     `json:"updated_at"`
+}
+
+// DependencyGraph defines model for DependencyGraph.
+type DependencyGraph struct {
+	Edges    []DepEdge            `json:"edges"`
+	Groups   []DepGroup           `json:"groups"`
+	Level    DependencyGraphLevel `json:"level"`
+	Services []DepService         `json:"services"`
+
+	// Suggestions Voorgestelde diensten binnen het filter
+	Suggestions int `json:"suggestions"`
+}
+
+// DependencyGraphLevel defines model for DependencyGraph.Level.
+type DependencyGraphLevel string
+
+// DependencyInput defines model for DependencyInput.
+type DependencyInput struct {
+	// FromServiceId De afnemer
+	FromServiceId openapi_types.UUID  `json:"from_service_id"`
+	Note          *string             `json:"note,omitempty"`
+	Strength      *DependencyStrength `json:"strength,omitempty"`
+
+	// ToServiceId De leverancier
+	ToServiceId openapi_types.UUID `json:"to_service_id"`
+}
+
+// DependencyPatch defines model for DependencyPatch.
+type DependencyPatch struct {
+	Note     *string             `json:"note,omitempty"`
+	Strength *DependencyStrength `json:"strength,omitempty"`
+}
+
+// DependencyStrength defines model for DependencyStrength.
+type DependencyStrength string
+
 // DeployCluster defines model for DeployCluster.
 type DeployCluster struct {
 	Description *string     `json:"description,omitempty"`
@@ -1956,6 +2323,63 @@ type HeartbeatStatus struct {
 	UptimeSeconds int64             `json:"uptime_seconds"`
 }
 
+// Impact defines model for Impact.
+type Impact struct {
+	// Groups Per groep de ergste impact
+	Groups []ImpactGroup `json:"groups"`
+	Items  []ImpactItem  `json:"items"`
+	Target struct {
+		Id   openapi_types.UUID `json:"id"`
+		Kind ImpactTargetKind   `json:"kind"`
+
+		// Name Zoals: mariadb in db-prod
+		Name string `json:"name"`
+	} `json:"target"`
+}
+
+// ImpactTargetKind defines model for Impact.Target.Kind.
+type ImpactTargetKind string
+
+// ImpactGroup defines model for ImpactGroup.
+type ImpactGroup struct {
+	Count       int                            `json:"count"`
+	Environment nullable.Nullable[Environment] `json:"environment"`
+	GroupId     string                         `json:"group_id"`
+
+	// Impact Wat een afhankelijkheid doet; none zonder uitval
+	Impact ServiceImpact `json:"impact"`
+	Name   string        `json:"name"`
+}
+
+// ImpactItem defines model for ImpactItem.
+type ImpactItem struct {
+	// DependencyId De laatste pijl van het pad
+	DependencyId nullable.Nullable[openapi_types.UUID] `json:"dependency_id"`
+
+	// Direct Geraakt door de storing zelf
+	Direct      bool                           `json:"direct"`
+	Environment nullable.Nullable[Environment] `json:"environment"`
+	GroupId     string                         `json:"group_id"`
+	GroupName   string                         `json:"group_name"`
+
+	// Impact Wat een afhankelijkheid doet; none zonder uitval
+	Impact ServiceImpact `json:"impact"`
+
+	// Kind De soort van een dienst; een vaste lijst in internal/deps
+	Kind ServiceKind `json:"kind"`
+	Name string      `json:"name"`
+
+	// Path Van de oorzaak naar deze dienst
+	Path []string `json:"path"`
+
+	// Reason Zoals: hangt hard af van mariadb in db-prod · handmatig
+	Reason    string             `json:"reason"`
+	ServiceId openapi_types.UUID `json:"service_id"`
+
+	// Source De bron van die pijl
+	Source nullable.Nullable[ServiceSource] `json:"source"`
+}
+
 // Job defines model for Job.
 type Job struct {
 	Attempts        int                                   `json:"attempts"`
@@ -2357,6 +2781,51 @@ type ServerInfo struct {
 	Version        string `json:"version"`
 }
 
+// ServiceImpact Wat een afhankelijkheid doet; none zonder uitval
+type ServiceImpact string
+
+// ServiceInput defines model for ServiceInput.
+type ServiceInput struct {
+	// Address Alleen extern
+	Address     *string             `json:"address,omitempty"`
+	ClusterId   *openapi_types.UUID `json:"cluster_id,omitempty"`
+	Description *string             `json:"description,omitempty"`
+
+	// Kind De soort van een dienst; een vaste lijst in internal/deps
+	Kind ServiceKind `json:"kind"`
+	Name string      `json:"name"`
+
+	// NodeId Een losse node zonder cluster
+	NodeId *openapi_types.UUID `json:"node_id,omitempty"`
+	Port   *int                `json:"port,omitempty"`
+	Unit   *string             `json:"unit,omitempty"`
+}
+
+// ServiceKind De soort van een dienst; een vaste lijst in internal/deps
+type ServiceKind string
+
+// ServicePatch defines model for ServicePatch.
+type ServicePatch struct {
+	Address     *string `json:"address,omitempty"`
+	Description *string `json:"description,omitempty"`
+
+	// Kind De soort van een dienst; een vaste lijst in internal/deps
+	Kind  *ServiceKind           `json:"kind,omitempty"`
+	Name  *string                `json:"name,omitempty"`
+	Port  nullable.Nullable[int] `json:"port,omitempty"`
+	State *ServiceState          `json:"state,omitempty"`
+	Unit  *string                `json:"unit,omitempty"`
+}
+
+// ServiceSource defines model for ServiceSource.
+type ServiceSource string
+
+// ServiceState defines model for ServiceState.
+type ServiceState string
+
+// ServiceStatus De eigen status uit de heartbeats; unknown zonder unit, zonder instanties of extern
+type ServiceStatus string
+
 // SpecChange defines model for SpecChange.
 type SpecChange struct {
 	From  string `json:"from"`
@@ -2718,9 +3187,35 @@ type GetClusterMetricsParams struct {
 	Range *MetricsRange `form:"range,omitempty" json:"range,omitempty"`
 }
 
+// GetDependencyGraphParams defines parameters for GetDependencyGraph.
+type GetDependencyGraphParams struct {
+	// ClusterId Dat cluster plus zijn directe buren
+	ClusterId *openapi_types.UUID `form:"cluster_id,omitempty" json:"cluster_id,omitempty"`
+
+	// Environment De clusters van die omgeving plus hun directe buren
+	Environment *Environment `form:"environment,omitempty" json:"environment,omitempty"`
+
+	// IncludeSuggested Ook voorgestelde diensten
+	IncludeSuggested *bool `form:"include_suggested,omitempty" json:"include_suggested,omitempty"`
+
+	// IncludeIgnored Ook genegeerde diensten
+	IncludeIgnored *bool                          `form:"include_ignored,omitempty" json:"include_ignored,omitempty"`
+	Level          *GetDependencyGraphParamsLevel `form:"level,omitempty" json:"level,omitempty"`
+}
+
+// GetDependencyGraphParamsLevel defines parameters for GetDependencyGraph.
+type GetDependencyGraphParamsLevel string
+
 // ListEventsParams defines parameters for ListEvents.
 type ListEventsParams struct {
 	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// GetImpactParams defines parameters for GetImpact.
+type GetImpactParams struct {
+	ServiceId *openapi_types.UUID `form:"service_id,omitempty" json:"service_id,omitempty"`
+	ClusterId *openapi_types.UUID `form:"cluster_id,omitempty" json:"cluster_id,omitempty"`
+	NodeId    *openapi_types.UUID `form:"node_id,omitempty" json:"node_id,omitempty"`
 }
 
 // ListJobsParams defines parameters for ListJobs.
@@ -2789,6 +3284,12 @@ type CreateFailoverTestJSONRequestBody = FailoverTestInput
 // CreateVipJSONRequestBody defines body for CreateVip for application/json ContentType.
 type CreateVipJSONRequestBody = VipInput
 
+// CreateDependencyJSONRequestBody defines body for CreateDependency for application/json ContentType.
+type CreateDependencyJSONRequestBody = DependencyInput
+
+// UpdateDependencyJSONRequestBody defines body for UpdateDependency for application/json ContentType.
+type UpdateDependencyJSONRequestBody = DependencyPatch
+
 // DeployClusterJSONRequestBody defines body for DeployCluster for application/json ContentType.
 type DeployClusterJSONRequestBody = DeployInput
 
@@ -2827,6 +3328,12 @@ type SetBackupWatchJSONRequestBody = BackupWatchInput
 
 // VmActionJSONRequestBody defines body for VmAction for application/json ContentType.
 type VmActionJSONRequestBody = VmActionInput
+
+// CreateServiceJSONRequestBody defines body for CreateService for application/json ContentType.
+type CreateServiceJSONRequestBody = ServiceInput
+
+// UpdateServiceJSONRequestBody defines body for UpdateService for application/json ContentType.
+type UpdateServiceJSONRequestBody = ServicePatch
 
 // UpdateVipJSONRequestBody defines body for UpdateVip for application/json ContentType.
 type UpdateVipJSONRequestBody = VipPatch
@@ -2926,6 +3433,18 @@ type ServerInterface interface {
 	// CreateVip VIP toevoegen aan een cluster (admin)
 	// (POST /clusters/{clusterId}/vips)
 	CreateVip(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
+	// CreateDependency Vastleggen dat een dienst van een andere afhangt (admin)
+	// (POST /dependencies)
+	CreateDependency(w http.ResponseWriter, r *http.Request)
+	// DeleteDependency Een afhankelijkheid verwijderen (admin)
+	// (DELETE /dependencies/{dependencyId})
+	DeleteDependency(w http.ResponseWriter, r *http.Request, dependencyId openapi_types.UUID)
+	// UpdateDependency Sterkte of notitie van een afhankelijkheid wijzigen (admin)
+	// (PATCH /dependencies/{dependencyId})
+	UpdateDependency(w http.ResponseWriter, r *http.Request, dependencyId openapi_types.UUID)
+	// GetDependencyGraph De afhankelijkheidsgraaf in één aanroep
+	// (GET /dependency-graph)
+	GetDependencyGraph(w http.ResponseWriter, r *http.Request, params GetDependencyGraphParams)
 	// DeployCluster Een nieuw cluster uitrollen uit een template (admin)
 	// (POST /deployments)
 	DeployCluster(w http.ResponseWriter, r *http.Request)
@@ -2965,6 +3484,9 @@ type ServerInterface interface {
 	// GetHealth Gezondheid van de server en de database
 	// (GET /health)
 	GetHealth(w http.ResponseWriter, r *http.Request)
+	// GetImpact Wat raakt uitval van een dienst, cluster of node
+	// (GET /impact)
+	GetImpact(w http.ResponseWriter, r *http.Request, params GetImpactParams)
 	// GetInfo Instellingen van de server die de webinterface nodig heeft
 	// (GET /info)
 	GetInfo(w http.ResponseWriter, r *http.Request)
@@ -3049,6 +3571,15 @@ type ServerInterface interface {
 	// ListVmSnapshots Snapshots van een VM of container, rechtstreeks uit Proxmox
 	// (GET /proxmox/{proxmoxId}/vms/{vmid}/snapshots)
 	ListVmSnapshots(w http.ResponseWriter, r *http.Request, proxmoxId openapi_types.UUID, vmid int)
+	// CreateService Een dienst aanmaken in een cluster, op een losse node of extern (admin)
+	// (POST /services)
+	CreateService(w http.ResponseWriter, r *http.Request)
+	// DeleteService Een dienst met zijn pijlen verwijderen (admin)
+	// (DELETE /services/{serviceId})
+	DeleteService(w http.ResponseWriter, r *http.Request, serviceId openapi_types.UUID)
+	// UpdateService Een dienst wijzigen, of een voorstel bevestigen, negeren of terugzetten (admin)
+	// (PATCH /services/{serviceId})
+	UpdateService(w http.ResponseWriter, r *http.Request, serviceId openapi_types.UUID)
 	// Stream Live wijzigingen als Server-Sent Events
 	// (GET /stream)
 	Stream(w http.ResponseWriter, r *http.Request)
@@ -3265,6 +3796,30 @@ func (_ Unimplemented) CreateVip(w http.ResponseWriter, r *http.Request, cluster
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// CreateDependency Vastleggen dat een dienst van een andere afhangt (admin)
+// (POST /dependencies)
+func (_ Unimplemented) CreateDependency(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// DeleteDependency Een afhankelijkheid verwijderen (admin)
+// (DELETE /dependencies/{dependencyId})
+func (_ Unimplemented) DeleteDependency(w http.ResponseWriter, r *http.Request, dependencyId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// UpdateDependency Sterkte of notitie van een afhankelijkheid wijzigen (admin)
+// (PATCH /dependencies/{dependencyId})
+func (_ Unimplemented) UpdateDependency(w http.ResponseWriter, r *http.Request, dependencyId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetDependencyGraph De afhankelijkheidsgraaf in één aanroep
+// (GET /dependency-graph)
+func (_ Unimplemented) GetDependencyGraph(w http.ResponseWriter, r *http.Request, params GetDependencyGraphParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // DeployCluster Een nieuw cluster uitrollen uit een template (admin)
 // (POST /deployments)
 func (_ Unimplemented) DeployCluster(w http.ResponseWriter, r *http.Request) {
@@ -3340,6 +3895,12 @@ func (_ Unimplemented) StartFailoverTest(w http.ResponseWriter, r *http.Request,
 // GetHealth Gezondheid van de server en de database
 // (GET /health)
 func (_ Unimplemented) GetHealth(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetImpact Wat raakt uitval van een dienst, cluster of node
+// (GET /impact)
+func (_ Unimplemented) GetImpact(w http.ResponseWriter, r *http.Request, params GetImpactParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -3508,6 +4069,24 @@ func (_ Unimplemented) VmAction(w http.ResponseWriter, r *http.Request, proxmoxI
 // ListVmSnapshots Snapshots van een VM of container, rechtstreeks uit Proxmox
 // (GET /proxmox/{proxmoxId}/vms/{vmid}/snapshots)
 func (_ Unimplemented) ListVmSnapshots(w http.ResponseWriter, r *http.Request, proxmoxId openapi_types.UUID, vmid int) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CreateService Een dienst aanmaken in een cluster, op een losse node of extern (admin)
+// (POST /services)
+func (_ Unimplemented) CreateService(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// DeleteService Een dienst met zijn pijlen verwijderen (admin)
+// (DELETE /services/{serviceId})
+func (_ Unimplemented) DeleteService(w http.ResponseWriter, r *http.Request, serviceId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// UpdateService Een dienst wijzigen, of een voorstel bevestigen, negeren of terugzetten (admin)
+// (PATCH /services/{serviceId})
+func (_ Unimplemented) UpdateService(w http.ResponseWriter, r *http.Request, serviceId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -4494,6 +5073,157 @@ func (siw *ServerInterfaceWrapper) CreateVip(w http.ResponseWriter, r *http.Requ
 	handler.ServeHTTP(w, r)
 }
 
+// CreateDependency operation middleware
+func (siw *ServerInterfaceWrapper) CreateDependency(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateDependency(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteDependency operation middleware
+func (siw *ServerInterfaceWrapper) DeleteDependency(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "dependencyId" -------------
+	var dependencyId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "dependencyId", chi.URLParam(r, "dependencyId"), &dependencyId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "dependencyId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteDependency(w, r, dependencyId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateDependency operation middleware
+func (siw *ServerInterfaceWrapper) UpdateDependency(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "dependencyId" -------------
+	var dependencyId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "dependencyId", chi.URLParam(r, "dependencyId"), &dependencyId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "dependencyId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateDependency(w, r, dependencyId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetDependencyGraph operation middleware
+func (siw *ServerInterfaceWrapper) GetDependencyGraph(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetDependencyGraphParams
+
+	// ------------- Optional query parameter "cluster_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cluster_id", r.URL.Query(), &params.ClusterId, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cluster_id"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cluster_id", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "environment" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "environment", r.URL.Query(), &params.Environment, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "environment"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "environment", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "include_suggested" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "include_suggested", r.URL.Query(), &params.IncludeSuggested, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "include_suggested"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "include_suggested", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "include_ignored" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "include_ignored", r.URL.Query(), &params.IncludeIgnored, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "include_ignored"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "include_ignored", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "level" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "level", r.URL.Query(), &params.Level, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "level"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "level", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetDependencyGraph(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // DeployCluster operation middleware
 func (siw *ServerInterfaceWrapper) DeployCluster(w http.ResponseWriter, r *http.Request) {
 
@@ -4770,6 +5500,65 @@ func (siw *ServerInterfaceWrapper) GetHealth(w http.ResponseWriter, r *http.Requ
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetHealth(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetImpact operation middleware
+func (siw *ServerInterfaceWrapper) GetImpact(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetImpactParams
+
+	// ------------- Optional query parameter "service_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "service_id", r.URL.Query(), &params.ServiceId, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "service_id"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "service_id", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cluster_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cluster_id", r.URL.Query(), &params.ClusterId, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cluster_id"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cluster_id", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "node_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "node_id", r.URL.Query(), &params.NodeId, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "node_id"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "node_id", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetImpact(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -5515,6 +6304,72 @@ func (siw *ServerInterfaceWrapper) ListVmSnapshots(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
+// CreateService operation middleware
+func (siw *ServerInterfaceWrapper) CreateService(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateService(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteService operation middleware
+func (siw *ServerInterfaceWrapper) DeleteService(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "serviceId" -------------
+	var serviceId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "serviceId", chi.URLParam(r, "serviceId"), &serviceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "serviceId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteService(w, r, serviceId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateService operation middleware
+func (siw *ServerInterfaceWrapper) UpdateService(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "serviceId" -------------
+	var serviceId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "serviceId", chi.URLParam(r, "serviceId"), &serviceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "serviceId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateService(w, r, serviceId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // Stream operation middleware
 func (siw *ServerInterfaceWrapper) Stream(w http.ResponseWriter, r *http.Request) {
 
@@ -6098,6 +6953,30 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/deployments/plan", wrapper.PlanDeployment)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/dependency-graph", wrapper.GetDependencyGraph)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/services", wrapper.CreateService)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/services/{serviceId}", wrapper.DeleteService)
+	})
+	r.Group(func(r chi.Router) {
+		r.Patch(options.BaseURL+"/services/{serviceId}", wrapper.UpdateService)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/dependencies", wrapper.CreateDependency)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/dependencies/{dependencyId}", wrapper.DeleteDependency)
+	})
+	r.Group(func(r chi.Router) {
+		r.Patch(options.BaseURL+"/dependencies/{dependencyId}", wrapper.UpdateDependency)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/impact", wrapper.GetImpact)
 	})
 
 	return r

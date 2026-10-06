@@ -23,6 +23,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Jonasz1996/clusterforge/internal/agents"
+	"github.com/Jonasz1996/clusterforge/internal/deps"
 	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/inventory"
 	"github.com/Jonasz1996/clusterforge/internal/jobs"
@@ -333,6 +334,10 @@ func (s *Service) Request(ctx context.Context, actor events.Actor, req Request) 
 			},
 		})
 		if err != nil {
+			return err
+		}
+		// De diensten van de template komen meteen in de afhankelijkheidsgraaf.
+		if err := deps.FromTemplateTx(ctx, q, s.ev, actor, c.ID, c.Name, tpl.Services); err != nil {
 			return err
 		}
 		names := make([]string, 0, len(secretValues))

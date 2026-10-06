@@ -138,6 +138,13 @@ func subjectName(r store.ListAuditRow, p map[string]any, n names, e Entry) (stri
 		return or(str(p, "test"), str(p, "name")), false
 	case "test_run":
 		return str(p, "name"), false
+	case "service":
+		if m, ok := p["name"].(map[string]any); ok {
+			return text(m["to"]), false
+		}
+		return or(str(p, "service"), str(p, "name")), false
+	case "dependency":
+		return str(p, "consumer") + " → " + str(p, "provider"), false
 	case "audit":
 		return events.Lookup(r.SubjectID).Label, false
 	}
@@ -399,6 +406,56 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 		return s
 	case "failover.finished":
 		return "Failovertest " + str(p, "name") + colon(str(p, "summary"))
+	case "service.created":
+		kind := paren(or(kindLabels[str(p, "kind")], str(p, "kind")))
+		switch {
+		case str(p, "source") == "discovered":
+			hosts, _ := p["hosts"].([]any)
+			return "Dienst " + name + kind + " voorgesteld in " + str(p, "scope") + prefixed(" op ", enList(hosts))
+		case str(p, "address") != "":
+			return "Externe dienst " + name + paren(str(p, "address")+prefixed(":", num(p["port"])))
+		case str(p, "source") == "template":
+			return "Dienst " + name + kind + " uit de template in " + str(p, "scope")
+		}
+		return "Dienst " + name + kind + " toegevoegd aan " + str(p, "scope")
+	case "service.updated":
+		where := serviceIn(name, str(p, "scope"))
+		if len(e.Changes) == 1 && e.Changes[0].Field == "state" {
+			switch m, _ := p["state"].(map[string]any); text(m["to"]) {
+			case "confirmed":
+				return "Dienst " + where + " bevestigd"
+			case "ignored":
+				return "Dienst " + where + " genegeerd"
+			case "suggested":
+				return "Dienst " + where + " teruggezet als voorstel"
+			}
+		}
+		return "Dienst " + where + " gewijzigd" + changeSummary(e.Changes)
+	case "service.deleted":
+		s := "Dienst " + serviceIn(name, str(p, "scope")) + " verwijderd"
+		if arrows, _ := p["dependencies"].([]any); len(arrows) > 0 {
+			s += " met " + count(float64(len(arrows)), "afhankelijkheid", "afhankelijkheden")
+		}
+		if kept, _ := p["kept"].(bool); kept {
+			s += "; hij blijft als genegeerd staan, zodat hij niet opnieuw voorgesteld wordt"
+		}
+		return s
+	case "dependency.created":
+		how := " hangt nu hard af van "
+		if str(p, "strength") == "soft" {
+			how = " hangt nu zacht af van "
+		}
+		s := serviceIn(str(p, "consumer"), str(p, "consumer_scope")) + how + serviceIn(str(p, "provider"), str(p, "provider_scope"))
+		if str(p, "source") == "template" {
+			s += " (uit de template)"
+		}
+		return s
+	case "dependency.updated":
+		return "Afhankelijkheid van " + serviceIn(str(p, "consumer"), str(p, "consumer_scope")) + " op " +
+			serviceIn(str(p, "provider"), str(p, "provider_scope")) + " gewijzigd" + changeSummary(e.Changes)
+	case "dependency.deleted":
+		return "Afhankelijkheid van " + serviceIn(str(p, "consumer"), str(p, "consumer_scope")) + " op " +
+			serviceIn(str(p, "provider"), str(p, "provider_scope")) + " verwijderd"
 	}
 	if strings.HasPrefix(r.Action, "job.") {
 		return spec.Label + ": " + name
@@ -407,6 +464,30 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 		return spec.Label + ": " + name
 	}
 	return spec.Label
+}
+
+// serviceIn noemt een dienst met zijn cluster of node: "nginx in web-prod",
+// of "nfs (extern)".
+func serviceIn(name, scope string) string {
+	switch scope {
+	case "":
+		return name
+	case "extern":
+		return name + " (extern)"
+	}
+	return name + " in " + scope
+}
+
+// enList maakt van ["a", "b", "c"] "a, b en c".
+func enList(xs []any) string {
+	out := make([]string, 0, len(xs))
+	for _, x := range xs {
+		out = append(out, text(x))
+	}
+	if len(out) <= 1 {
+		return strings.Join(out, "")
+	}
+	return strings.Join(out[:len(out)-1], ", ") + " en " + out[len(out)-1]
 }
 
 // backupOf noemt de VM van een back-upevent: de node, of de VM zelf als
@@ -450,6 +531,9 @@ var fieldLabels = map[string][][2]string{
 	"proxmox": {{"name", "Naam"}, {"api_url", "API-adres"}, {"token_id", "Token-id"}, {"token_secret", "Token-secret"}, {"tls_fingerprint", "TLS-vingerafdruk"}},
 	"failover_test": {{"name", "Naam"}, {"vip", "VIP"}, {"scenario", "Scenario"}, {"max_takeover_seconds", "Verwachting in seconden"},
 		{"expect_failback", "Terug naar de oorspronkelijke node"}, {"probe", "Probe"}},
+	"service": {{"name", "Naam"}, {"kind", "Soort"}, {"unit", "Unit"}, {"port", "Poort"}, {"address", "Adres"},
+		{"description", "Omschrijving"}, {"state", "Staat"}},
+	"dependency":            {{"strength", "Sterkte"}, {"note", "Notitie"}},
 	"backup.policy_updated": {{"max_age_hours", "Maximale leeftijd in uren"}},
 	"backup.watch_updated":  {{"watch", "Ook bewaken"}},
 }
@@ -500,6 +584,12 @@ var (
 	statusLabels = map[string]string{"healthy": "gezond", "degraded": "verminderd", "down": "down",
 		"split_brain": "split-brain", "unknown": "onbekend"}
 	vmLabels = map[string]string{"running": "draait", "stopped": "uit", "paused": "gepauzeerd", "suspended": "gepauzeerd"}
+	// kindLabels zijn de soorten diensten uit internal/deps.
+	kindLabels = map[string]string{"web": "web", "lb": "loadbalancer", "vip": "VIP", "database": "database", "cache": "cache",
+		"queue": "wachtrij", "storage": "opslag", "dns": "DNS", "cron": "cron", "container": "containers", "app": "applicatie",
+		"external": "extern", "other": "overig"}
+	stateLabels    = map[string]string{"confirmed": "bevestigd", "suggested": "voorstel", "ignored": "genegeerd"}
+	strengthLabels = map[string]string{"hard": "hard", "soft": "zacht"}
 )
 
 func lifecycle(s string) string { return or(lifecycleLabels[s], s) }
@@ -515,6 +605,12 @@ func value(field string, v any, n names) string {
 		return or(typeLabels[fmt.Sprint(v)], text(v))
 	case "lifecycle":
 		return lifecycle(text(v))
+	case "kind":
+		return or(kindLabels[text(v)], text(v))
+	case "state":
+		return or(stateLabels[text(v)], text(v))
+	case "strength":
+		return or(strengthLabels[text(v)], text(v))
 	case "cluster_id":
 		if id := text(v); id != "" {
 			return or(n.byID[id], "verwijderd cluster")

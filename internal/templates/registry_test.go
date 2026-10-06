@@ -11,7 +11,7 @@ import (
 // versie die hier staat, mag nooit uit builtin/ verdwijnen. Voeg een nieuwe
 // versie toe zodra ze uitgebracht is.
 var released = map[string][]string{
-	"keepalived-nginx": {"1.0.0"},
+	"keepalived-nginx": {"1.0.0", "1.1.0"},
 }
 
 func TestReleasedVersionsStay(t *testing.T) {
