@@ -71,6 +71,7 @@ var classes = map[string]Class{
 	"incident.reopened": ClassInfo, "incident.note_updated": ClassInfo,
 
 	"assistant.settings_updated": ClassInfo, "assistant.asked": ClassInfo, "assistant.budget_reached": ClassInfo,
+	"risk.grade_changed": ClassInfo, "risk.accepted": ClassInfo, "risk.acceptance_removed": ClassInfo,
 }
 
 // HasClass is true als de action een klasse heeft.

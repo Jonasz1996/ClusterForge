@@ -710,19 +710,19 @@ func (e ImpactTargetKind) Valid() bool {
 
 // Defines values for IncidentSeverity.
 const (
-	Critical IncidentSeverity = "critical"
-	High     IncidentSeverity = "high"
-	Low      IncidentSeverity = "low"
+	IncidentSeverityCritical IncidentSeverity = "critical"
+	IncidentSeverityHigh     IncidentSeverity = "high"
+	IncidentSeverityLow      IncidentSeverity = "low"
 )
 
 // Valid indicates whether the value is a known member of the IncidentSeverity enum.
 func (e IncidentSeverity) Valid() bool {
 	switch e {
-	case Critical:
+	case IncidentSeverityCritical:
 		return true
-	case High:
+	case IncidentSeverityHigh:
 		return true
-	case Low:
+	case IncidentSeverityLow:
 		return true
 	default:
 		return false
@@ -1005,6 +1005,66 @@ func (e NodeLifecycle) Valid() bool {
 	case NodeLifecycleMaintenance:
 		return true
 	case NodeLifecycleProvisioning:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RiskCardId.
+const (
+	RiskCardIdAvailability  RiskCardId = "availability"
+	RiskCardIdBackups       RiskCardId = "backups"
+	RiskCardIdCapacity      RiskCardId = "capacity"
+	RiskCardIdConfiguration RiskCardId = "configuration"
+	RiskCardIdMaintenance   RiskCardId = "maintenance"
+	RiskCardIdPlatform      RiskCardId = "platform"
+	RiskCardIdRecovery      RiskCardId = "recovery"
+	RiskCardIdRedundancy    RiskCardId = "redundancy"
+)
+
+// Valid indicates whether the value is a known member of the RiskCardId enum.
+func (e RiskCardId) Valid() bool {
+	switch e {
+	case RiskCardIdAvailability:
+		return true
+	case RiskCardIdBackups:
+		return true
+	case RiskCardIdCapacity:
+		return true
+	case RiskCardIdConfiguration:
+		return true
+	case RiskCardIdMaintenance:
+		return true
+	case RiskCardIdPlatform:
+		return true
+	case RiskCardIdRecovery:
+		return true
+	case RiskCardIdRedundancy:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RiskSeverity.
+const (
+	RiskSeverityCritical RiskSeverity = "critical"
+	RiskSeverityHigh     RiskSeverity = "high"
+	RiskSeverityLow      RiskSeverity = "low"
+	RiskSeverityMedium   RiskSeverity = "medium"
+)
+
+// Valid indicates whether the value is a known member of the RiskSeverity enum.
+func (e RiskSeverity) Valid() bool {
+	switch e {
+	case RiskSeverityCritical:
+		return true
+	case RiskSeverityHigh:
+		return true
+	case RiskSeverityLow:
+		return true
+	case RiskSeverityMedium:
 		return true
 	default:
 		return false
@@ -2209,9 +2269,12 @@ type ClusterListItem struct {
 	Environment     Environment         `json:"environment"`
 
 	// GitManaged Komt uit Git; naam, omgeving, tags, nodes en VIP's wijzigen dan in cluster.yaml
-	GitManaged bool               `json:"git_managed"`
-	GitRepoUrl string             `json:"git_repo_url"`
-	Id         openapi_types.UUID `json:"id"`
+	GitManaged bool   `json:"git_managed"`
+	GitRepoUrl string `json:"git_repo_url"`
+
+	// Grade Het cijfer van A tot F; leeg zonder score
+	Grade string             `json:"grade"`
+	Id    openapi_types.UUID `json:"id"`
 
 	// Impact De ergste doorgegeven uitval op de bevestigde diensten van dit cluster, langs bekende afhankelijkheden van buiten; uitval binnen het cluster zegt de status al
 	Impact ServiceImpact `json:"impact"`
@@ -2220,6 +2283,9 @@ type ClusterListItem struct {
 	ImpactedBy []string `json:"impacted_by"`
 	Name       string   `json:"name"`
 	NodeCount  int      `json:"node_count"`
+
+	// Score De health score; leeg zolang ze niet berekend is
+	Score nullable.Nullable[int] `json:"score"`
 
 	// Slug Korte unieke naam, bijvoorbeeld webcluster-prod
 	Slug string `json:"slug"`
@@ -2257,6 +2323,19 @@ type ClusterPatch struct {
 	Slug        *string               `json:"slug,omitempty"`
 	Tags        *[]string             `json:"tags,omitempty"`
 	Type        *ClusterType          `json:"type,omitempty"`
+}
+
+// ClusterRisk defines model for ClusterRisk.
+type ClusterRisk struct {
+	Cap   *RiskCap   `json:"cap,omitempty"`
+	Cards []RiskCard `json:"cards"`
+
+	// ComputedAt Leeg als de score nog niet berekend is
+	ComputedAt nullable.Nullable[time.Time] `json:"computed_at"`
+
+	// Grade A tot F; leeg zonder score
+	Grade string                 `json:"grade"`
+	Score nullable.Nullable[int] `json:"score"`
 }
 
 // ClusterType defines model for ClusterType.
@@ -4006,6 +4085,147 @@ type RemediationStepChoice struct {
 	Step string `json:"step"`
 }
 
+// RiskAcceptance defines model for RiskAcceptance.
+type RiskAcceptance struct {
+	At        time.Time                    `json:"at"`
+	By        string                       `json:"by"`
+	ExpiresAt nullable.Nullable[time.Time] `json:"expires_at"`
+	Id        openapi_types.UUID           `json:"id"`
+	Reason    string                       `json:"reason"`
+}
+
+// RiskAcceptanceInput defines model for RiskAcceptanceInput.
+type RiskAcceptanceInput struct {
+	Check string `json:"check"`
+
+	// ExpiresAt Leeg is zonder einddatum; hoogstens twee jaar
+	ExpiresAt   nullable.Nullable[time.Time] `json:"expires_at,omitempty"`
+	Reason      string                       `json:"reason"`
+	SubjectId   openapi_types.UUID           `json:"subject_id"`
+	SubjectType string                       `json:"subject_type"`
+}
+
+// RiskCap defines model for RiskCap.
+type RiskCap struct {
+	Max    int    `json:"max"`
+	Reason string `json:"reason"`
+}
+
+// RiskCard defines model for RiskCard.
+type RiskCard struct {
+	Findings []RiskFinding `json:"findings"`
+	Id       RiskCardId    `json:"id"`
+	Note     *string       `json:"note,omitempty"`
+
+	// Score Leeg als de kaart onbekend is; dan telt ze niet mee
+	Score  nullable.Nullable[int] `json:"score"`
+	Weight int                    `json:"weight"`
+}
+
+// RiskCardId defines model for RiskCardId.
+type RiskCardId string
+
+// RiskClusterRef defines model for RiskClusterRef.
+type RiskClusterRef struct {
+	Environment Environment        `json:"environment"`
+	Id          openapi_types.UUID `json:"id"`
+	Name        string             `json:"name"`
+}
+
+// RiskClusterScore defines model for RiskClusterScore.
+type RiskClusterScore struct {
+	Environment Environment            `json:"environment"`
+	Grade       string                 `json:"grade"`
+	Id          openapi_types.UUID     `json:"id"`
+	Name        string                 `json:"name"`
+	Score       nullable.Nullable[int] `json:"score"`
+}
+
+// RiskFinding defines model for RiskFinding.
+type RiskFinding struct {
+	Accepted *RiskAcceptance `json:"accepted,omitempty"`
+	Card     RiskCardId      `json:"card"`
+
+	// Check Het id uit de catalogus
+	Check string `json:"check"`
+
+	// FleetGain Hoeveel de score van het geheel stijgt als ze opgelost is
+	FleetGain float32 `json:"fleet_gain"`
+
+	// Gain Hoeveel de score van het cluster (of de kaart Platform) stijgt als ze opgelost is
+	Gain float32 `json:"gain"`
+
+	// Link Het scherm waar je het oplost
+	Link string `json:"link"`
+
+	// Points Wat de bevinding van haar kaart aftrekt; 0 als ze geaccepteerd is
+	Points   int          `json:"points"`
+	Severity RiskSeverity `json:"severity"`
+	Subject  RiskSubject  `json:"subject"`
+	Text     string       `json:"text"`
+}
+
+// RiskHistory defines model for RiskHistory.
+type RiskHistory struct {
+	Points []RiskPoint `json:"points"`
+}
+
+// RiskOverview defines model for RiskOverview.
+type RiskOverview struct {
+	Clusters   []RiskClusterScore           `json:"clusters"`
+	ComputedAt nullable.Nullable[time.Time] `json:"computed_at"`
+	Findings   []RiskPlacedFinding          `json:"findings"`
+	Grade      string                       `json:"grade"`
+	Platform   nullable.Nullable[RiskCard]  `json:"platform"`
+	Score      nullable.Nullable[int]       `json:"score"`
+}
+
+// RiskPlacedFinding defines model for RiskPlacedFinding.
+type RiskPlacedFinding struct {
+	Accepted *RiskAcceptance `json:"accepted,omitempty"`
+	Card     RiskCardId      `json:"card"`
+
+	// Check Het id uit de catalogus
+	Check string `json:"check"`
+
+	// Cluster Leeg voor de kaart Platform
+	Cluster nullable.Nullable[RiskClusterRef] `json:"cluster"`
+
+	// FleetGain Hoeveel de score van het geheel stijgt als ze opgelost is
+	FleetGain float32 `json:"fleet_gain"`
+
+	// Gain Hoeveel de score van het cluster (of de kaart Platform) stijgt als ze opgelost is
+	Gain float32 `json:"gain"`
+
+	// Link Het scherm waar je het oplost
+	Link string `json:"link"`
+
+	// Points Wat de bevinding van haar kaart aftrekt; 0 als ze geaccepteerd is
+	Points   int          `json:"points"`
+	Severity RiskSeverity `json:"severity"`
+	Subject  RiskSubject  `json:"subject"`
+	Text     string       `json:"text"`
+}
+
+// RiskPoint defines model for RiskPoint.
+type RiskPoint struct {
+	Day   openapi_types.Date     `json:"day"`
+	Grade string                 `json:"grade"`
+	Score nullable.Nullable[int] `json:"score"`
+}
+
+// RiskSeverity defines model for RiskSeverity.
+type RiskSeverity string
+
+// RiskSubject defines model for RiskSubject.
+type RiskSubject struct {
+	Id   openapi_types.UUID `json:"id"`
+	Name string             `json:"name"`
+
+	// Type cluster, node, vip, failover_test, test_run, dependency, drift_ignore, git_change, user of proxmox
+	Type string `json:"type"`
+}
+
 // Role defines model for Role.
 type Role string
 
@@ -4679,6 +4899,13 @@ type ProbeProxmoxJSONBody struct {
 	ApiUrl string `json:"api_url"`
 }
 
+// GetRiskHistoryParams defines parameters for GetRiskHistory.
+type GetRiskHistoryParams struct {
+	// Cluster Een cluster; zonder is het het geheel
+	Cluster *openapi_types.UUID `form:"cluster,omitempty" json:"cluster,omitempty"`
+	Days    *int                `form:"days,omitempty" json:"days,omitempty"`
+}
+
 // ListTestRunsParams defines parameters for ListTestRuns.
 type ListTestRunsParams struct {
 	Kind      *ListTestRunsParamsKind `form:"kind,omitempty" json:"kind,omitempty"`
@@ -4807,6 +5034,9 @@ type SetBackupWatchJSONRequestBody = BackupWatchInput
 
 // VmActionJSONRequestBody defines body for VmAction for application/json ContentType.
 type VmActionJSONRequestBody = VmActionInput
+
+// AcceptRiskFindingJSONRequestBody defines body for AcceptRiskFinding for application/json ContentType.
+type AcceptRiskFindingJSONRequestBody = RiskAcceptanceInput
 
 // CreateServiceJSONRequestBody defines body for CreateService for application/json ContentType.
 type CreateServiceJSONRequestBody = ServiceInput
@@ -4951,6 +5181,9 @@ type ServerInterface interface {
 	// GetClusterMetrics Grafieken van een cluster, met een lijn per node
 	// (GET /clusters/{clusterId}/metrics)
 	GetClusterMetrics(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params GetClusterMetricsParams)
+	// GetClusterRisk De zeven scorekaarten van een cluster met hun bevindingen
+	// (GET /clusters/{clusterId}/risk)
+	GetClusterRisk(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
 	// ListSpecRevisions De gewenste staat van een cluster uit een template, met elke revisie en wat ze veranderde
 	// (GET /clusters/{clusterId}/spec-revisions)
 	ListSpecRevisions(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
@@ -5143,6 +5376,18 @@ type ServerInterface interface {
 	// ListVmSnapshots Snapshots van een VM of container, rechtstreeks uit Proxmox
 	// (GET /proxmox/{proxmoxId}/vms/{vmid}/snapshots)
 	ListVmSnapshots(w http.ResponseWriter, r *http.Request, proxmoxId openapi_types.UUID, vmid int)
+	// GetRisk De health score van het geheel, de kaart Platform en alle bevindingen
+	// (GET /risk)
+	GetRisk(w http.ResponseWriter, r *http.Request)
+	// AcceptRiskFinding Een bevinding accepteren met een reden en eventueel een einddatum (admin)
+	// (POST /risk/acceptances)
+	AcceptRiskFinding(w http.ResponseWriter, r *http.Request)
+	// DeleteRiskAcceptance Een acceptatie intrekken (admin)
+	// (DELETE /risk/acceptances/{acceptanceId})
+	DeleteRiskAcceptance(w http.ResponseWriter, r *http.Request, acceptanceId openapi_types.UUID)
+	// GetRiskHistory De trend van de score, één punt per dag en vandaag de huidige
+	// (GET /risk/history)
+	GetRiskHistory(w http.ResponseWriter, r *http.Request, params GetRiskHistoryParams)
 	// CreateService Een dienst aanmaken in een cluster, op een losse node of extern (admin)
 	// (POST /services)
 	CreateService(w http.ResponseWriter, r *http.Request)
@@ -5443,6 +5688,12 @@ func (_ Unimplemented) UnlinkClusterGit(w http.ResponseWriter, r *http.Request, 
 // GetClusterMetrics Grafieken van een cluster, met een lijn per node
 // (GET /clusters/{clusterId}/metrics)
 func (_ Unimplemented) GetClusterMetrics(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params GetClusterMetricsParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetClusterRisk De zeven scorekaarten van een cluster met hun bevindingen
+// (GET /clusters/{clusterId}/risk)
+func (_ Unimplemented) GetClusterRisk(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -5827,6 +6078,30 @@ func (_ Unimplemented) VmAction(w http.ResponseWriter, r *http.Request, proxmoxI
 // ListVmSnapshots Snapshots van een VM of container, rechtstreeks uit Proxmox
 // (GET /proxmox/{proxmoxId}/vms/{vmid}/snapshots)
 func (_ Unimplemented) ListVmSnapshots(w http.ResponseWriter, r *http.Request, proxmoxId openapi_types.UUID, vmid int) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetRisk De health score van het geheel, de kaart Platform en alle bevindingen
+// (GET /risk)
+func (_ Unimplemented) GetRisk(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// AcceptRiskFinding Een bevinding accepteren met een reden en eventueel een einddatum (admin)
+// (POST /risk/acceptances)
+func (_ Unimplemented) AcceptRiskFinding(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// DeleteRiskAcceptance Een acceptatie intrekken (admin)
+// (DELETE /risk/acceptances/{acceptanceId})
+func (_ Unimplemented) DeleteRiskAcceptance(w http.ResponseWriter, r *http.Request, acceptanceId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetRiskHistory De trend van de score, één punt per dag en vandaag de huidige
+// (GET /risk/history)
+func (_ Unimplemented) GetRiskHistory(w http.ResponseWriter, r *http.Request, params GetRiskHistoryParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -7188,6 +7463,32 @@ func (siw *ServerInterfaceWrapper) GetClusterMetrics(w http.ResponseWriter, r *h
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetClusterMetrics(w, r, clusterId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetClusterRisk operation middleware
+func (siw *ServerInterfaceWrapper) GetClusterRisk(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetClusterRisk(w, r, clusterId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -9120,6 +9421,106 @@ func (siw *ServerInterfaceWrapper) ListVmSnapshots(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
+// GetRisk operation middleware
+func (siw *ServerInterfaceWrapper) GetRisk(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetRisk(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AcceptRiskFinding operation middleware
+func (siw *ServerInterfaceWrapper) AcceptRiskFinding(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AcceptRiskFinding(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteRiskAcceptance operation middleware
+func (siw *ServerInterfaceWrapper) DeleteRiskAcceptance(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "acceptanceId" -------------
+	var acceptanceId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "acceptanceId", chi.URLParam(r, "acceptanceId"), &acceptanceId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "acceptanceId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteRiskAcceptance(w, r, acceptanceId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetRiskHistory operation middleware
+func (siw *ServerInterfaceWrapper) GetRiskHistory(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetRiskHistoryParams
+
+	// ------------- Optional query parameter "cluster" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cluster", r.URL.Query(), &params.Cluster, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cluster"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cluster", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "days" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "days", r.URL.Query(), &params.Days, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "days"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "days", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetRiskHistory(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // CreateService operation middleware
 func (siw *ServerInterfaceWrapper) CreateService(w http.ResponseWriter, r *http.Request) {
 
@@ -9886,6 +10287,21 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/assistant/conversations/{conversationId}/messages", wrapper.AskAssistant)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/risk", wrapper.GetRisk)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/risk/history", wrapper.GetRiskHistory)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/risk/acceptances", wrapper.AcceptRiskFinding)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/risk/acceptances/{acceptanceId}", wrapper.DeleteRiskAcceptance)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/clusters/{clusterId}/risk", wrapper.GetClusterRisk)
 	})
 
 	return r

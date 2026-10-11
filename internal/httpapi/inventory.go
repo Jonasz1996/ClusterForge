@@ -72,6 +72,11 @@ func (s *Server) ListClusters(w http.ResponseWriter, r *http.Request) {
 			impactedBy[im.ClusterID] = append(by, im.CauseGroup)
 		}
 	}
+	grades, err := s.risk.Grades(r.Context())
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
 	items := make([]gen.ClusterListItem, 0, len(rows))
 	now := time.Now()
 	for _, row := range rows {
@@ -90,6 +95,7 @@ func (s *Server) ListClusters(w http.ResponseWriter, r *http.Request) {
 			NodeCount: int(row.NodeCount), VipCount: int(row.VipCount),
 			Vips: nonNil(vips[row.Cluster.ID]), Drift: clusterDrift(row, now),
 			Impact: imp, ImpactedBy: nonNil(impactedBy[id]),
+			Score: nullableOf(grades[id].Score), Grade: grades[id].Grade,
 		})
 	}
 	writeJSON(w, http.StatusOK, list[gen.ClusterListItem]{items})

@@ -1940,6 +1940,103 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/risk": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * De health score van het geheel, de kaart Platform en alle bevindingen
+         * @description De bevindingen staan gesorteerd op wat het oplossen oplevert voor de
+         *     score van het geheel; geaccepteerde bevindingen achteraan. Voor een
+         *     viewer staat bij een beheerder zonder tweestapsverificatie geen naam.
+         */
+        get: operations["getRisk"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/risk/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** De trend van de score, één punt per dag en vandaag de huidige */
+        get: operations["getRiskHistory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/risk/acceptances": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Een bevinding accepteren met een reden en eventueel een einddatum (admin)
+         * @description Een geaccepteerde bevinding kost geen punten maar blijft zichtbaar. De score rekent meteen opnieuw.
+         */
+        post: operations["acceptRiskFinding"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/risk/acceptances/{acceptanceId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                acceptanceId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Een acceptatie intrekken (admin) */
+        delete: operations["deleteRiskAcceptance"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/clusters/{clusterId}/risk": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        /** De zeven scorekaarten van een cluster met hun bevindingen */
+        get: operations["getClusterRisk"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -3146,7 +3243,121 @@ export interface components {
             /** Format: date-time */
             updated_at: string;
         };
+        /** @enum {string} */
+        RiskSeverity: "low" | "medium" | "high" | "critical";
+        /** @enum {string} */
+        RiskCardId: "availability" | "backups" | "recovery" | "redundancy" | "configuration" | "maintenance" | "capacity" | "platform";
+        RiskSubject: {
+            /** @description cluster, node, vip, failover_test, test_run, dependency, drift_ignore, git_change, user of proxmox */
+            type: string;
+            /** Format: uuid */
+            id: string;
+            name: string;
+        };
+        RiskAcceptance: {
+            /** Format: uuid */
+            id: string;
+            reason: string;
+            /** Format: date-time */
+            expires_at: string | null;
+            by: string;
+            /** Format: date-time */
+            at: string;
+        };
+        RiskFinding: {
+            /** @description Het id uit de catalogus */
+            check: string;
+            card: components["schemas"]["RiskCardId"];
+            severity: components["schemas"]["RiskSeverity"];
+            subject: components["schemas"]["RiskSubject"];
+            text: string;
+            /** @description Het scherm waar je het oplost */
+            link: string;
+            /** @description Wat de bevinding van haar kaart aftrekt; 0 als ze geaccepteerd is */
+            points: number;
+            /** @description Hoeveel de score van het cluster (of de kaart Platform) stijgt als ze opgelost is */
+            gain: number;
+            /** @description Hoeveel de score van het geheel stijgt als ze opgelost is */
+            fleet_gain: number;
+            accepted?: components["schemas"]["RiskAcceptance"];
+        };
+        RiskCard: {
+            id: components["schemas"]["RiskCardId"];
+            weight: number;
+            /** @description Leeg als de kaart onbekend is; dan telt ze niet mee */
+            score: number | null;
+            note?: string;
+            findings: components["schemas"]["RiskFinding"][];
+        };
+        RiskCap: {
+            max: number;
+            reason: string;
+        };
+        ClusterRisk: {
+            score: number | null;
+            /** @description A tot F; leeg zonder score */
+            grade: string;
+            cap?: components["schemas"]["RiskCap"];
+            cards: components["schemas"]["RiskCard"][];
+            /**
+             * Format: date-time
+             * @description Leeg als de score nog niet berekend is
+             */
+            computed_at: string | null;
+        };
+        RiskClusterRef: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            environment: components["schemas"]["Environment"];
+        };
+        RiskPlacedFinding: components["schemas"]["RiskFinding"] & {
+            /** @description Leeg voor de kaart Platform */
+            cluster: components["schemas"]["RiskClusterRef"] | null;
+        };
+        RiskClusterScore: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            environment: components["schemas"]["Environment"];
+            score: number | null;
+            grade: string;
+        };
+        RiskOverview: {
+            score: number | null;
+            grade: string;
+            /** Format: date-time */
+            computed_at: string | null;
+            platform: components["schemas"]["RiskCard"] | null;
+            clusters: components["schemas"]["RiskClusterScore"][];
+            findings: components["schemas"]["RiskPlacedFinding"][];
+        };
+        RiskPoint: {
+            /** Format: date */
+            day: string;
+            score: number | null;
+            grade: string;
+        };
+        RiskHistory: {
+            points: components["schemas"]["RiskPoint"][];
+        };
+        RiskAcceptanceInput: {
+            check: string;
+            subject_type: string;
+            /** Format: uuid */
+            subject_id: string;
+            reason: string;
+            /**
+             * Format: date-time
+             * @description Leeg is zonder einddatum; hoogstens twee jaar
+             */
+            expires_at?: string | null;
+        };
         ClusterListItem: components["schemas"]["Cluster"] & {
+            /** @description De health score; leeg zolang ze niet berekend is */
+            score: number | null;
+            /** @description Het cijfer van A tot F; leeg zonder score */
+            grade: string;
             node_count: number;
             vip_count: number;
             drift: components["schemas"]["ClusterDriftSummary"];
@@ -7530,6 +7741,126 @@ export interface operations {
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];
             429: components["responses"]["Error"];
+        };
+    };
+    getRisk: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RiskOverview"];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    getRiskHistory: {
+        parameters: {
+            query?: {
+                /** @description Een cluster; zonder is het het geheel */
+                cluster?: string;
+                days?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RiskHistory"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+        };
+    };
+    acceptRiskFinding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RiskAcceptanceInput"];
+            };
+        };
+        responses: {
+            /** @description Geaccepteerd */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    deleteRiskAcceptance: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                acceptanceId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Ingetrokken */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    getClusterRisk: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClusterRisk"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
         };
     };
 }

@@ -31,6 +31,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/live"
 	"github.com/Jonasz1996/clusterforge/internal/metrics"
 	"github.com/Jonasz1996/clusterforge/internal/proxmox"
+	"github.com/Jonasz1996/clusterforge/internal/risk"
 	"github.com/Jonasz1996/clusterforge/internal/rollout"
 	"github.com/Jonasz1996/clusterforge/internal/store"
 	"github.com/Jonasz1996/clusterforge/internal/webui"
@@ -60,6 +61,7 @@ type Server struct {
 	rollout      *rollout.Service
 	git          *gitops.Service
 	assistant    *assistant.Service
+	risk         *risk.Service
 	version      string
 	loginLimiter *ipLimiter
 	// enrollLimiter remt het raden van enrollmenttokens.
@@ -100,7 +102,9 @@ type Deps struct {
 	// Assistant beantwoordt vragen met de Anthropic API; de server geeft
 	// hem zijn tools.
 	Assistant *assistant.Service
-	Version   string
+	// Risk rekent de health score.
+	Risk    *risk.Service
+	Version string
 }
 
 func New(d Deps) *Server {
@@ -136,6 +140,7 @@ func New(d Deps) *Server {
 		enrollLimiter: newIPLimiter(6*time.Second, 20),
 		throttle:      events.NewThrottle(ev),
 		assistant:     d.Assistant,
+		risk:          d.Risk,
 	}
 	s.assistant.Tools = s.assistantTools()
 	return s

@@ -156,6 +156,10 @@ func subjectName(r store.ListAuditRow, p map[string]any, n names, e Entry) (stri
 		return events.Lookup(r.SubjectID).Label, false
 	case "incident":
 		return "#" + num(p["number"]), false
+	case "fleet":
+		return "ClusterForge", false
+	case "risk_acceptance":
+		return str(p, "subject_name"), false
 	}
 	return r.SubjectID, false
 }
@@ -344,6 +348,25 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 			s += fmt.Sprintf(" met %s (%s)", count(float64(len(tools)), "tool", "tools"), list(tools))
 		}
 		return s + ", " + dollars(p["cost_usd"]) + paren(str(p, "model"))
+	case "risk.grade_changed":
+		var reasons []string
+		xs, _ := p["reasons"].([]any)
+		for _, x := range xs {
+			reasons = append(reasons, text(x))
+		}
+		s := fmt.Sprintf("Cijfer van %s van %s naar %s (score %s)", name, or(from, "geen"), to, num(p["score"]))
+		if len(reasons) > 0 {
+			s += ": " + strings.Join(reasons, "; ")
+		}
+		return s
+	case "risk.accepted":
+		s := "Bevinding geaccepteerd: " + or(str(p, "text"), str(p, "label"))
+		if d := day(str(p, "expires_at")); d != "" {
+			s += ", tot " + d
+		}
+		return s + ". Reden: " + str(p, "reason")
+	case "risk.acceptance_removed":
+		return "Acceptatie ingetrokken: " + str(p, "label") + " bij " + str(p, "subject_name")
 	case "assistant.budget_reached":
 		return fmt.Sprintf("Maandbudget van de assistent op: %s van %s", dollars(p["spent_usd"]), dollars(p["budget_usd"]))
 	case "vip.owner_changed":

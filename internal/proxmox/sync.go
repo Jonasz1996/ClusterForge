@@ -180,6 +180,12 @@ func (s *Service) save(ctx context.Context, conn store.ProxmoxConnection, v Vers
 		if err := q.SetProxmoxSyncResult(ctx, store.SetProxmoxSyncResultParams{ID: conn.ID, PveVersion: v.Version}); err != nil {
 			return err
 		}
+		// De vervaldatum van het certificaat, voor de kaart Platform.
+		if !v.CertNotAfter.IsZero() {
+			if err := q.SetProxmoxCertNotAfter(ctx, store.SetProxmoxCertNotAfterParams{ID: conn.ID, CertNotAfter: &v.CertNotAfter}); err != nil {
+				return err
+			}
+		}
 		if conn.LastError != "" {
 			s.log.Info("Proxmox-sync werkt weer", "proxmox", conn.Name)
 			if err := s.ev.Write(ctx, q, events.Event{

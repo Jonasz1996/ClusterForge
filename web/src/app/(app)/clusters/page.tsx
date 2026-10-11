@@ -9,6 +9,7 @@ import { Button, Card, Input, PageHeader, Select } from "@/components/ui";
 import { BackupBadge } from "@/components/backups/Backups";
 import { ImpactBadge } from "@/components/deps/ImpactList";
 import { DriftBadge } from "@/components/drift/Drift";
+import { GradeBadge } from "@/components/risk/Risk";
 import { useBackups } from "@/lib/backups";
 import { environments, typeLabel, useClusters, useCreateCluster, useIsAdmin } from "@/lib/inventory";
 
@@ -70,8 +71,7 @@ export default function ClustersPage() {
       <QueryState q={clusters}>
         {clusters.data?.length === 0 ? (
           <Empty>
-            Nog geen clusters.{" "}
-            {isAdmin ? "Maak er een aan met de knop hierboven." : "Een beheerder kan er een aanmaken."}
+            Nog geen clusters. {isAdmin ? "Maak er een aan met de knop hierboven." : "Een beheerder kan er een aanmaken."}
           </Empty>
         ) : (
           <>
@@ -109,7 +109,10 @@ export default function ClustersPage() {
                   {filtered.map((c) => (
                     <tr key={c.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/50">
                       <td className={tdClass}>
-                        <Link href={`/clusters/detail?id=${c.id}`} className="font-medium text-brand-700 hover:underline dark:text-sky-300">
+                        <Link
+                          href={`/clusters/detail?id=${c.id}`}
+                          className="font-medium text-brand-700 hover:underline dark:text-sky-300"
+                        >
                           {c.name}
                         </Link>
                         <div className="text-xs text-slate-500">{c.slug}</div>
@@ -117,6 +120,7 @@ export default function ClustersPage() {
                       <td className={tdClass}>
                         <span className="flex flex-wrap gap-1">
                           <StatusBadge status={c.status} reason={c.status_reason} />
+                          <GradeBadge score={c.score} grade={c.grade} />
                           <ImpactBadge impact={c.impact} by={c.impacted_by} />
                           <DriftBadge drift={c.drift} href={`/clusters/detail?id=${c.id}`} />
                           <BackupBadge freshness={backupOf.get(c.id)} />

@@ -42,6 +42,7 @@ Het technisch ontwerp staat in [docs/design/mvp-fase-1.md](docs/design/mvp-fase-
 | 2. Incidenten | Statusovergangen die bij elkaar horen, als één storing met een begin, een einde, een ernst en wat er geraakt was; pagina Incidenten en een kaart op het overzicht | klaar |
 | 3. What Broke: tijdlijn en oorzaak | Per incident het eerste symptoom en een gerangschikte lijst waarschijnlijke oorzaken met de redenen, uit één tijdlijn van logboek, journaal en metrics; 'Wat is er veranderd' per cluster en een tijdlijn per cluster en node | klaar |
 | 4. AI-assistent | Vragen over de fleet in het Nederlands met de Anthropic API, met tools die alleen lezen, de kosten per antwoord, een maandbudget en een vraagknop op clusters, nodes en incidenten | klaar |
+| 5. Health score en scorekaarten | Per cluster en voor het geheel een score van 0 tot 100 met een cijfer A tot F, uit zeven scorekaarten en de kaart Platform; per bevinding de reden, een link om ze op te lossen en wat het oplevert, accepteren met een reden, en een trend over 30 dagen | klaar |
 
 ## Draaien met Docker Compose
 
@@ -506,6 +507,34 @@ De analyse rekent opnieuw zolang het incident open is en tot een uur na het eind
 
 **Wat is er veranderd.** Een cluster heeft een kaart met de veranderingen van de laatste 24 uur. De volledige tijdlijn van een cluster of node, met filters op periode en klasse, staat bij Tijdlijn; de kaart Wijzigingen van een node linkt ernaar. Een viewer ziet de tijdlijn ook, maar nooit iets uit de beveiliging en bij een SSH-login geen IP-adres.
 
+## Gezondheid
+
+De status zegt hoe het nu gaat. De health score zegt hoe kwetsbaar een cluster is: een cluster kan gezond zijn terwijl beide nodes op dezelfde Proxmox-host draaien, de laatste back-up twee dagen oud is en de failovertest al maanden niet liep. Elk cluster krijgt een score van 0 tot 100 en een cijfer: A vanaf 90, B vanaf 80, C vanaf 70, D vanaf 60, E vanaf 50, anders F. Het zijn vaste regels zonder AI, met de reden bij elke bevinding.
+
+**Waar.** Het overzicht toont de score van het geheel met de trend over 30 dagen, het cijfer per cluster en de drie bevindingen die het meeste opleveren; de rest klapt open. De clusterlijst heeft een cijferbadge naast de status. Een cluster heeft een kaart Gezondheid met de zeven scorekaarten. Elke bevinding heeft een link Oplossen naar het scherm waar je het doet, en wat de score stijgt als je het oplost.
+
+**De zeven kaarten.** Elke kaart begint op 100 en verliest punten per bevinding: laag 5, middel 10, hoog 20, kritiek 40, nooit onder 0. Op prod is een bevinding vaak een stap ernstiger, op lab een stap milder.
+
+| Kaart | Weegt | Wat telt |
+| --- | --- | --- |
+| Beschikbaarheid | 25 % | nu down, split-brain of verminderd; de beschikbaarheid over 30 dagen (onder 99,9 %); veel incidenten; een VIP dat vaak van eigenaar wisselt (tests niet meegerekend) |
+| Back-ups | 20 % | een node zonder back-up of met een te oude, volgens het back-upbeleid; een mislukte verificatie in Proxmox Backup Server; een back-upcontrole in de sandbox die mislukte, waarschuwde, nooit gebeurde of langer dan 30 dagen geleden is |
+| Herstelbaarheid | 15 % | een VIP zonder failovertest; een test die nooit liep, mislukte, zijn doel niet haalde of langer dan 30 dagen geleden is; een test die niet hersteld is |
+| Redundantie | 15 % | alle nodes op dezelfde Proxmox-host, of de nodes van een VIP; maar één node (niet op lab); een node die langer dan een dag in onderhoud staat; een prod-dienst die hard afhangt van een dienst op lab of test |
+| Configuratie | 10 % | geen gewenste staat; drift, zwaarder naarmate ze langer duurt; een regel die alle drift negeert; een revisie die al een uur niet toegepast is; een mislukte Git-wijziging |
+| Onderhoud en beveiliging | 10 % | open beveiligingsupdates, zwaarder na 3 en 14 dagen; pakketlijsten die 14 dagen niet ververst zijn; een herstart nodig; een besturingssysteem dat end-of-life is of binnen 90 dagen wordt; een certificaat op de node dat binnen 30 dagen verloopt; een verouderde agent |
+| Capaciteit | 5 % | een schijf boven 85 % of 95 %; een schijf die volgens de trend van 7 dagen binnen 14 dagen vol is; CPU of geheugen met een p95 boven 90 % over 7 dagen; veel swap; meer dan 1000 netwerkfouten in 7 dagen |
+
+Een kaart zonder gegevens is onbekend en telt niet mee; de kaart zegt waarom, bijvoorbeeld 'Zonder VIP is er geen failovertest'. De trend, CPU en geheugen komen uit VictoriaMetrics; zonder VictoriaMetrics telt bij Capaciteit alleen de schijfbezetting.
+
+**Plafonds.** Een cluster dat nu down is of een split-brain heeft, krijgt hoogstens 40. Een prod-cluster zonder enige back-up krijgt hoogstens 60.
+
+**Het geheel.** De score van het geheel is voor 80 % het gewogen gemiddelde van de clusters (prod telt 3 keer, test 1 keer, lab half) en voor 20 % de kaart Platform. Die kaart gaat over ClusterForge zelf: een beheerder zonder tweestapsverificatie, een Proxmox-koppeling die niet te lezen is, en het certificaat van Proxmox dat binnen 30 dagen verloopt. Een viewer ziet dat een beheerder geen tweestapsverificatie heeft, maar niet welke.
+
+**Accepteren.** Een bevinding die je bewust laat staan, zoals een labcluster op één host, accepteer je met een reden en eventueel een einddatum van hoogstens twee jaar. Ze kost dan geen punten meer, maar blijft grijs in de lijst staan met de reden, tot wanneer en door wie. Alleen beheerders accepteren of trekken in; beide komen in het logboek.
+
+**Wanneer.** De score rekent elke minuut opnieuw, en meteen als een incident opent, verandert of sluit, en na een acceptatie. De eerste twee minuten na een herstart wacht ze, zodat de agents eerst opnieuw verbinden. Elke dag vlak na middernacht legt de planner een momentopname vast voor de trend. Verandert het cijfer van een cluster of van het geheel en blijft dat tien minuten zo, dan komt er een regel in het logboek met de belangrijkste redenen. De score leest alleen: ze start geen tests en blokkeert geen acties.
+
 ## Assistent
 
 Bij Assistent stel je vragen over de fleet in gewone taal, zoals 'Waarom lag web-prod gisteravond plat?' of 'Wat veranderde er deze week op db-01?'. De assistent zoekt het antwoord op met dezelfde gegevens als de webinterface en antwoordt in het Nederlands, met links naar de schermen. Op een cluster, node of incident start de knop "Vraag de assistent" een gesprek over dat onderwerp.
@@ -538,7 +567,7 @@ Een vraag kost meestal enkele centen; een vraag die veel tools nodig heeft meer.
 
 **Wie.** Standaard alleen beheerders. Zet je 'Ook viewers mogen vragen stellen' aan, dan kunnen viewers het ook, met hun eigen rechten: ze zien via de assistent niets wat ze in de webinterface niet zien, zoals een IP-adres bij een SSH-login. Iedereen ziet zijn eigen gesprekken; een beheerder ziet die van iedereen. Een gesprek blijft 365 dagen na de laatste vraag staan, of tot je het verwijdert.
 
-**Wat de assistent kan.** Alleen lezen. Hij heeft vijftien tools: het overzicht van de fleet, een cluster, een node, de tijdlijn, de wijzigingen, incidenten zoeken, een incident met de analyse van What Broke, metrics, drift, back-ups, failovertests, taken, Git-wijzigingen en de impact van een storing. Hij kan niets starten, stoppen, herstarten, toepassen of wijzigen; een tool roept dezelfde leesopdrachten aan als de webinterface, met de rechten van wie de vraag stelt. Raadt hij iets aan, dan linkt hij naar het scherm waar jij het doet.
+**Wat de assistent kan.** Alleen lezen. Hij heeft zestien tools: het overzicht van de fleet, een cluster, een node, de tijdlijn, de wijzigingen, incidenten zoeken, een incident met de analyse van What Broke, metrics, drift, back-ups, failovertests, taken, Git-wijzigingen, de impact van een storing en de health score. Hij kan niets starten, stoppen, herstarten, toepassen of wijzigen; een tool roept dezelfde leesopdrachten aan als de webinterface, met de rechten van wie de vraag stelt. Raadt hij iets aan, dan linkt hij naar het scherm waar jij het doet.
 
 **Wat naar Anthropic gaat.** Je vraag, de gebruikersnaam en rol, de tijd, en wat de tools lezen: namen, statussen, adressen, tijdlijnen, journaalregels, pakketnamen, metrics, Git-commits en taken van de fleet. Geheimen gaan nooit mee: geen wachtwoorden, tokens, sleutels, vingerafdrukken, sessies en geen inhoud van bestanden. Commitberichten en journaalregels zijn tekst van buiten ClusterForge; de assistent behandelt ze als gegevens en volgt geen instructies die erin staan.
 
@@ -587,6 +616,7 @@ internal/journal/          het wijzigingsjournaal: zinnen, verschillen in de fac
 internal/incidents/        incidenten: overgangen groeperen, ernst, openen en sluiten na elke statusronde
 internal/whatbroke/        What Broke: de tijdlijn uit logboek en journaal, en de analyse van elk incident
 internal/assistant/        de AI-assistent: instellingen, gesprekken, de lus met de Anthropic API, kosten en budget
+internal/risk/             de health score: de zeven scorekaarten, de kaart Platform, acceptaties en de trend
 internal/metrics/          metrics naar VictoriaMetrics schrijven en de grafieken opvragen
 internal/status/           statusregels voor nodes en clusters, VIP-eigenaars
 internal/live/             live updates naar de webinterface (Server-Sent Events)

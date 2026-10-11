@@ -2102,6 +2102,82 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
         "429": { $ref: "#/components/responses/Error" }
+  /risk:
+    get:
+      operationId: getRisk
+      summary: De health score van het geheel, de kaart Platform en alle bevindingen
+      description: |
+        De bevindingen staan gesorteerd op wat het oplossen oplevert voor de
+        score van het geheel; geaccepteerde bevindingen achteraan. Voor een
+        viewer staat bij een beheerder zonder tweestapsverificatie geen naam.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RiskOverview" }
+        "401": { $ref: "#/components/responses/Error" }
+  /risk/history:
+    get:
+      operationId: getRiskHistory
+      summary: De trend van de score, één punt per dag en vandaag de huidige
+      parameters:
+        - name: cluster
+          in: query
+          description: Een cluster; zonder is het het geheel
+          schema: { type: string, format: uuid }
+        - name: days
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 365, default: 30 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RiskHistory" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+  /risk/acceptances:
+    post:
+      operationId: acceptRiskFinding
+      summary: Een bevinding accepteren met een reden en eventueel een einddatum (admin)
+      description: Een geaccepteerde bevinding kost geen punten maar blijft zichtbaar. De score rekent meteen opnieuw.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RiskAcceptanceInput" }
+      responses:
+        "204": { description: Geaccepteerd }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /risk/acceptances/{acceptanceId}:
+    parameters:
+      - { name: acceptanceId, in: path, required: true, schema: { type: string, format: uuid } }
+    delete:
+      operationId: deleteRiskAcceptance
+      summary: Een acceptatie intrekken (admin)
+      responses:
+        "204": { description: Ingetrokken }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /clusters/{clusterId}/risk:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getClusterRisk
+      summary: De zeven scorekaarten van een cluster met hun bevindingen
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ClusterRisk" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
 components:
   securitySchemes:
     session:
@@ -3536,12 +3612,143 @@ components:
         git_managed: { type: boolean, description: "Komt uit Git; naam, omgeving, tags, nodes en VIP's wijzigen dan in cluster.yaml" }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    RiskSeverity:
+      type: string
+      enum: [low, medium, high, critical]
+    RiskCardId:
+      type: string
+      enum: [availability, backups, recovery, redundancy, configuration, maintenance, capacity, platform]
+    RiskSubject:
+      type: object
+      required: [type, id, name]
+      properties:
+        type: { type: string, description: "cluster, node, vip, failover_test, test_run, dependency, drift_ignore, git_change, user of proxmox" }
+        id: { type: string, format: uuid }
+        name: { type: string }
+    RiskAcceptance:
+      type: object
+      required: [id, reason, expires_at, by, at]
+      properties:
+        id: { type: string, format: uuid }
+        reason: { type: string }
+        expires_at: { type: string, format: date-time, nullable: true }
+        by: { type: string }
+        at: { type: string, format: date-time }
+    RiskFinding:
+      type: object
+      required: [check, card, severity, subject, text, link, points, gain, fleet_gain]
+      properties:
+        check: { type: string, description: Het id uit de catalogus, zoals redundancy.same_host }
+        card: { $ref: "#/components/schemas/RiskCardId" }
+        severity: { $ref: "#/components/schemas/RiskSeverity" }
+        subject: { $ref: "#/components/schemas/RiskSubject" }
+        text: { type: string }
+        link: { type: string, description: Het scherm waar je het oplost }
+        points: { type: integer, description: Wat de bevinding van haar kaart aftrekt; 0 als ze geaccepteerd is }
+        gain: { type: number, description: Hoeveel de score van het cluster (of de kaart Platform) stijgt als ze opgelost is }
+        fleet_gain: { type: number, description: Hoeveel de score van het geheel stijgt als ze opgelost is }
+        accepted: { $ref: "#/components/schemas/RiskAcceptance" }
+    RiskCard:
+      type: object
+      required: [id, weight, score, findings]
+      properties:
+        id: { $ref: "#/components/schemas/RiskCardId" }
+        weight: { type: integer }
+        score: { type: integer, nullable: true, description: Leeg als de kaart onbekend is; dan telt ze niet mee }
+        note: { type: string }
+        findings:
+          type: array
+          items: { $ref: "#/components/schemas/RiskFinding" }
+    RiskCap:
+      type: object
+      required: [max, reason]
+      properties:
+        max: { type: integer }
+        reason: { type: string }
+    ClusterRisk:
+      type: object
+      required: [score, grade, cards, computed_at]
+      properties:
+        score: { type: integer, nullable: true }
+        grade: { type: string, description: A tot F; leeg zonder score }
+        cap: { $ref: "#/components/schemas/RiskCap" }
+        cards:
+          type: array
+          items: { $ref: "#/components/schemas/RiskCard" }
+        computed_at: { type: string, format: date-time, nullable: true, description: Leeg als de score nog niet berekend is }
+    RiskClusterRef:
+      type: object
+      required: [id, name, environment]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        environment: { $ref: "#/components/schemas/Environment" }
+    RiskPlacedFinding:
+      allOf:
+        - $ref: "#/components/schemas/RiskFinding"
+        - type: object
+          required: [cluster]
+          properties:
+            cluster:
+              description: Leeg voor de kaart Platform
+              nullable: true
+              allOf: [{ $ref: "#/components/schemas/RiskClusterRef" }]
+    RiskClusterScore:
+      type: object
+      required: [id, name, environment, score, grade]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        environment: { $ref: "#/components/schemas/Environment" }
+        score: { type: integer, nullable: true }
+        grade: { type: string }
+    RiskOverview:
+      type: object
+      required: [score, grade, computed_at, platform, clusters, findings]
+      properties:
+        score: { type: integer, nullable: true }
+        grade: { type: string }
+        computed_at: { type: string, format: date-time, nullable: true }
+        platform:
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/RiskCard" }]
+        clusters:
+          type: array
+          items: { $ref: "#/components/schemas/RiskClusterScore" }
+        findings:
+          type: array
+          items: { $ref: "#/components/schemas/RiskPlacedFinding" }
+    RiskPoint:
+      type: object
+      required: [day, score, grade]
+      properties:
+        day: { type: string, format: date }
+        score: { type: integer, nullable: true }
+        grade: { type: string }
+    RiskHistory:
+      type: object
+      required: [points]
+      properties:
+        points:
+          type: array
+          items: { $ref: "#/components/schemas/RiskPoint" }
+    RiskAcceptanceInput:
+      type: object
+      required: [check, subject_type, subject_id, reason]
+      properties:
+        check: { type: string }
+        subject_type: { type: string }
+        subject_id: { type: string, format: uuid }
+        reason: { type: string, minLength: 3, maxLength: 500 }
+        expires_at: { type: string, format: date-time, nullable: true, description: Leeg is zonder einddatum; hoogstens twee jaar }
     ClusterListItem:
       allOf:
         - $ref: "#/components/schemas/Cluster"
         - type: object
-          required: [node_count, vip_count, vips, drift, impact, impacted_by]
+          required: [node_count, vip_count, vips, drift, impact, impacted_by, score, grade]
           properties:
+            score: { type: integer, nullable: true, description: De health score; leeg zolang ze niet berekend is }
+            grade: { type: string, description: Het cijfer van A tot F; leeg zonder score }
             node_count: { type: integer }
             vip_count: { type: integer }
             drift: { $ref: "#/components/schemas/ClusterDriftSummary" }

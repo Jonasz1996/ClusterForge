@@ -18,6 +18,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/Jonasz1996/clusterforge/pkg/protocol"
@@ -117,6 +118,9 @@ func (f *flag) UnmarshalJSON(b []byte) error {
 type Version struct {
 	Version string `json:"version"`
 	Release string `json:"release"`
+	// CertNotAfter is de vervaldatum van het certificaat van Proxmox; nul
+	// zonder TLS.
+	CertNotAfter time.Time `json:"-"`
 }
 
 // Resource is één regel uit /cluster/resources. Welke velden gevuld zijn,
@@ -243,6 +247,9 @@ type Client struct {
 	base  string
 	auth  string
 	httpc *http.Client
+	// certNotAfter is de vervaldatum van het certificaat bij het laatste
+	// antwoord, in Unix-seconden; 0 zonder TLS.
+	certNotAfter atomic.Int64
 }
 
 // Config beschrijft een verbinding.
@@ -420,7 +427,13 @@ func Probe(ctx context.Context, rawURL string) (ProbeResult, error) {
 
 func (c *Client) Version(ctx context.Context) (Version, error) {
 	var v Version
-	return v, c.do(ctx, http.MethodGet, "/version", nil, &v)
+	if err := c.do(ctx, http.MethodGet, "/version", nil, &v); err != nil {
+		return v, err
+	}
+	if t := c.certNotAfter.Load(); t != 0 {
+		v.CertNotAfter = time.Unix(t, 0)
+	}
+	return v, nil
 }
 
 func (c *Client) Resources(ctx context.Context) ([]Resource, error) {
@@ -750,6 +763,9 @@ func (c *Client) do(ctx context.Context, method, path string, form url.Values, o
 		return fmt.Errorf("geen verbinding met Proxmox: %w", err)
 	}
 	defer func() { _ = resp.Body.Close() }()
+	if resp.TLS != nil && len(resp.TLS.PeerCertificates) > 0 {
+		c.certNotAfter.Store(resp.TLS.PeerCertificates[0].NotAfter.Unix())
+	}
 	data, err := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
 	if err != nil {
 		return err

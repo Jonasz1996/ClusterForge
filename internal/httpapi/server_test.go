@@ -39,6 +39,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/live"
 	"github.com/Jonasz1996/clusterforge/internal/metrics"
 	"github.com/Jonasz1996/clusterforge/internal/proxmox"
+	"github.com/Jonasz1996/clusterforge/internal/risk"
 	"github.com/Jonasz1996/clusterforge/internal/rollout"
 	"github.com/Jonasz1996/clusterforge/internal/secrets"
 	"github.com/Jonasz1996/clusterforge/internal/status"
@@ -73,6 +74,7 @@ type testEnv struct {
 	ana     *whatbroke.Analyzer
 	conns   *testConns
 	asst    *assistant.Service
+	risk    *risk.Service
 
 	// De runner heeft een eigen context, zodat een test hem kan herstarten.
 	runCtx     context.Context
@@ -166,6 +168,8 @@ func newTestEnv(t *testing.T) *testEnv {
 	git.Interval = 0
 	// De assistent praat met een nagespeelde API die een test zelf zet.
 	asst := assistant.NewService(pool, ev, log, box)
+	// De health score rekent niet vanzelf; een test roept Compute aan.
+	rsk := risk.NewService(pool, ev, log, metrics.NewClient(vm.srv.URL), bk)
 	var wg sync.WaitGroup
 	wg.Add(3)
 	go func() { defer wg.Done(); hub.Run(runCtx) }()
@@ -178,12 +182,12 @@ func newTestEnv(t *testing.T) *testEnv {
 	api := New(Deps{
 		Config: cfg, Log: log, Pool: pool, Auth: a, Bus: bus, Hub: hub, Proxmox: pve, Jobs: runner, Lifecycle: life,
 		Deploy: dep, Backups: bk, Drift: drf, Failover: fo, Deps: dps, Rollout: ro, GitOps: git, Assistant: asst,
-		Version: "test",
+		Risk: rsk, Version: "test",
 	})
 	srv := httptest.NewServer(api.Handler())
 	t.Cleanup(srv.Close)
 	e := &testEnv{t: t, srv: srv, auth: a, pool: pool, api: api, bus: bus, eval: eval, vm: vm, pve: pve, jobs: runner, life: life, deploy: dep,
-		backups: bk, drift: drf, fo: fo, deps: dps, ro: ro, git: git, det: det, ana: ana, conns: conns, asst: asst, runCtx: runCtx}
+		backups: bk, drift: drf, fo: fo, deps: dps, ro: ro, git: git, det: det, ana: ana, conns: conns, asst: asst, risk: rsk, runCtx: runCtx}
 	e.startRunner()
 	t.Cleanup(func() {
 		stop()
@@ -245,6 +249,9 @@ type fakeVM struct {
 	mu      sync.Mutex
 	lines   []string
 	queries []string
+	// instant geeft het resultaat van een instant query, als JSON-lijst;
+	// zonder is het leeg.
+	instant func(query string) string
 }
 
 func newFakeVM(t *testing.T) *fakeVM {
@@ -264,6 +271,15 @@ func newFakeVM(t *testing.T) *fakeVM {
 			start := r.URL.Query().Get("start")
 			_, _ = fmt.Fprintf(w, `{"status":"success","data":{"resultType":"matrix","result":[`+
 				`{"metric":{"node":"web01","device":"eth0","mountpoint":"/"},"values":[[%s,"1.5"]]}]}}`, start)
+		case "/api/v1/query":
+			vm.mu.Lock()
+			f := vm.instant
+			vm.mu.Unlock()
+			result := "[]"
+			if f != nil {
+				result = f(r.URL.Query().Get("query"))
+			}
+			_, _ = fmt.Fprintf(w, `{"status":"success","data":{"resultType":"vector","result":%s}}`, result)
 		default:
 			http.NotFound(w, r)
 		}
