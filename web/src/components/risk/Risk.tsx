@@ -102,7 +102,7 @@ function computedLine(at: string | null | undefined) {
 
 // FindingItem is één bevinding met de ernst, de link om ze op te lossen, wat
 // oplossen oplevert en Accepteren of Intrekken.
-function FindingItem({
+export function FindingItem({
   f,
   gain,
   cluster,
@@ -176,7 +176,7 @@ function FindingItem({
 
 // AcceptDialog legt vast dat een bevinding bewust blijft staan. Ze kost dan
 // geen punten meer, maar blijft grijs zichtbaar.
-function AcceptDialog({ f, onClose }: { f: RiskFinding; onClose: () => void }) {
+export function AcceptDialog({ f, onClose }: { f: RiskFinding; onClose: () => void }) {
   const accept = useAcceptFinding();
   const [reason, setReason] = useState("");
   const [until, setUntil] = useState("");
@@ -279,7 +279,10 @@ export function FleetRiskCard({ isAdmin }: { isAdmin: boolean }) {
           </div>
           <p className="text-xs text-slate-500">
             {computedLine(d.computed_at)}
-            {d.platform?.score !== undefined && d.platform?.score !== null && <> Platform: {d.platform.score} van 100.</>}
+            {d.platform?.score !== undefined && d.platform?.score !== null && <> Platform: {d.platform.score} van 100.</>}{" "}
+            <Link href="/risico" className="text-brand-600 hover:underline dark:text-sky-300">
+              Alle bevindingen, SPOF&apos;s en wat-als
+            </Link>
           </p>
           {d.computed_at && open.length === 0 && (
             <p className="text-sm text-slate-500">Geen open bevindingen. Alles staat zoals het hoort.</p>

@@ -2018,6 +2018,94 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/risk/components": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * De onderdelen die in de wat-als kunnen uitvallen
+         * @description Proxmox-hosts, storage, bridges, clusters, nodes en bevestigde diensten.
+         */
+        get: operations["listRiskComponents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/risk/what-if": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rekenen wat er gebeurt als onderdelen tegelijk uitvallen
+         * @description Rekent alleen en raakt niets aan; daarom mogen ook viewers het. Per
+         *     cluster de voorspelde status met de echte statusregels, eerst en na de
+         *     herstart door Proxmox HA, de VM's die uitvallen of herstarten, de
+         *     diensten die geraakt worden, en of ClusterForge zelf uitvalt.
+         */
+        post: operations["riskWhatIf"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/risk/spof": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * De single points of failure
+         * @description De wat-als voor elke host, storage, bridge en node apart, alsof de rest
+         *     gezond is. Een onderdeel staat erin als zijn uitval een prod-cluster of
+         *     een bevestigde prod-dienst down maakt, ook nadat HA herstart wat het
+         *     kan. De meeste uitval eerst.
+         */
+        get: operations["listRiskSPOFs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/self-location": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Op welke VM of container ClusterForge zelf draait */
+        get: operations["getSelfLocation"];
+        /**
+         * De VM van ClusterForge zelf invullen (admin)
+         * @description Een ingevulde VM wint van wat ClusterForge zelf vindt, tot je haar weghaalt.
+         */
+        put: operations["setSelfLocation"];
+        post?: never;
+        /** De ingevulde VM weghalen, zodat ClusterForge zelf zoekt (admin) */
+        delete: operations["deleteSelfLocation"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/clusters/{clusterId}/risk": {
         parameters: {
             query?: never;
@@ -3248,7 +3336,7 @@ export interface components {
         /** @enum {string} */
         RiskCardId: "availability" | "backups" | "recovery" | "redundancy" | "configuration" | "maintenance" | "capacity" | "platform";
         RiskSubject: {
-            /** @description cluster, node, vip, failover_test, test_run, dependency, drift_ignore, git_change, user of proxmox */
+            /** @description cluster, node, vip, failover_test, test_run, dependency, drift_ignore, git_change, user, proxmox, component (een SPOF) of self */
             type: string;
             /** Format: uuid */
             id: string;
@@ -3340,6 +3428,142 @@ export interface components {
         };
         RiskHistory: {
             points: components["schemas"]["RiskPoint"][];
+        };
+        /** @enum {string} */
+        RiskComponentKind: "host" | "storage" | "bridge" | "cluster" | "node" | "service";
+        RiskComponent: {
+            /** @description Herkent het onderdeel, zoals host:<koppeling>:pve1 */
+            key: string;
+            kind: components["schemas"]["RiskComponentKind"];
+            /** @description Zoals pve1, local-lvm op pve1 of ceph (gedeeld) */
+            name: string;
+            /** @description De Proxmox-koppeling */
+            group: string;
+        };
+        RiskComponentList: {
+            components: components["schemas"]["RiskComponent"][];
+        };
+        RiskWhatIfInput: {
+            components: string[];
+        };
+        RiskGuestOutcome: {
+            connection: string;
+            vmid: number;
+            name: string;
+            host: string;
+            /** Format: uuid */
+            node_id: string | null;
+            hostname: string;
+            /**
+             * @description down, restarted (HA start hem op restart_host) of partial (een netwerkkaart valt weg, de VM draait door)
+             * @enum {string}
+             */
+            outcome: "down" | "restarted" | "partial";
+            reason: string;
+            restart_host: string;
+            /** @description Geen node in ClusterForge */
+            unknown: boolean;
+        };
+        RiskPrediction: {
+            status: components["schemas"]["Status"];
+            reason: string;
+        };
+        RiskClusterOutcome: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            environment: components["schemas"]["Environment"];
+            before: components["schemas"]["RiskPrediction"];
+            during: components["schemas"]["RiskPrediction"];
+            /** @description Na de herstart door HA; leeg als HA in dit cluster niets herstart */
+            after_ha: components["schemas"]["RiskPrediction"] | null;
+            nodes_down: string[];
+        };
+        RiskServiceOutcome: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            group: string;
+            /** @description lab */
+            environment: string;
+            impact: components["schemas"]["ServiceImpact"];
+            direct: boolean;
+            reason: string;
+            /** @description Werkt weer zodra HA de VM's herstart heeft */
+            recovers: boolean;
+        };
+        RiskSelfOutcome: {
+            name: string;
+            /** @enum {string} */
+            outcome: "down" | "restarted";
+            reason: string;
+            restart_host: string;
+        };
+        RiskWhatIf: {
+            components: components["schemas"]["RiskComponent"][];
+            guests: components["schemas"]["RiskGuestOutcome"][];
+            clusters: components["schemas"]["RiskClusterOutcome"][];
+            services: components["schemas"]["RiskServiceOutcome"][];
+            /** @description Leeg als ClusterForge zelf blijft draaien of niet bekend is waar hij draait */
+            self: components["schemas"]["RiskSelfOutcome"] | null;
+            notes: string[];
+        };
+        RiskSPOFCluster: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            reason: string;
+        };
+        RiskSPOFService: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            group: string;
+            reason: string;
+        };
+        RiskSPOF: {
+            component: components["schemas"]["RiskComponent"];
+            /** @description De prod-clusters die down gaan */
+            clusters: components["schemas"]["RiskSPOFCluster"][];
+            /** @description De bevestigde prod-diensten die down gaan */
+            services: components["schemas"]["RiskSPOFService"][];
+            /** @description Hoeveel clusters en diensten in alle omgevingen down gaan */
+            down: number;
+            /** @description ClusterForge zelf valt ook uit */
+            self: boolean;
+        };
+        RiskSPOFList: {
+            spofs: components["schemas"]["RiskSPOF"][];
+        };
+        SelfGuest: {
+            /** Format: uuid */
+            connection_id: string;
+            connection: string;
+            vmid: number;
+            name: string;
+            host: string;
+            /** @enum {string} */
+            type: "qemu" | "lxc";
+        };
+        SelfLocation: {
+            /**
+             * @description auto: gevonden aan een adres; manual: ingevuld; none: niet gevonden
+             * @enum {string}
+             */
+            source: "auto" | "manual" | "none";
+            guest: components["schemas"]["SelfGuest"] | null;
+            /** @description Ook gevuld als de ingevulde VM niet meer in Proxmox staat */
+            vmid?: number | null;
+            matched_on: string;
+            /** @description Waarom hij niet gevonden is */
+            note: string;
+            /** @description De VM's en containers om uit te kiezen */
+            guests: components["schemas"]["SelfGuest"][];
+        };
+        SelfLocationInput: {
+            /** Format: uuid */
+            connection_id: string;
+            vmid: number;
         };
         RiskAcceptanceInput: {
             check: string;
@@ -7837,6 +8061,141 @@ export interface operations {
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
+        };
+    };
+    listRiskComponents: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RiskComponentList"];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    riskWhatIf: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RiskWhatIfInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RiskWhatIf"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+        };
+    };
+    listRiskSPOFs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RiskSPOFList"];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    getSelfLocation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SelfLocation"];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    setSelfLocation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SelfLocationInput"];
+            };
+        };
+        responses: {
+            /** @description Bewaard */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    deleteSelfLocation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Weggehaald */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
         };
     };
     getClusterRisk: {

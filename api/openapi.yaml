@@ -2164,6 +2164,89 @@ paths:
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /risk/components:
+    get:
+      operationId: listRiskComponents
+      summary: De onderdelen die in de wat-als kunnen uitvallen
+      description: Proxmox-hosts, storage, bridges, clusters, nodes en bevestigde diensten.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RiskComponentList" }
+        "401": { $ref: "#/components/responses/Error" }
+  /risk/what-if:
+    post:
+      operationId: riskWhatIf
+      summary: Rekenen wat er gebeurt als onderdelen tegelijk uitvallen
+      description: |
+        Rekent alleen en raakt niets aan; daarom mogen ook viewers het. Per
+        cluster de voorspelde status met de echte statusregels, eerst en na de
+        herstart door Proxmox HA, de VM's die uitvallen of herstarten, de
+        diensten die geraakt worden, en of ClusterForge zelf uitvalt.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RiskWhatIfInput" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RiskWhatIf" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+  /risk/spof:
+    get:
+      operationId: listRiskSPOFs
+      summary: De single points of failure
+      description: |
+        De wat-als voor elke host, storage, bridge en node apart, alsof de rest
+        gezond is. Een onderdeel staat erin als zijn uitval een prod-cluster of
+        een bevestigde prod-dienst down maakt, ook nadat HA herstart wat het
+        kan. De meeste uitval eerst.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RiskSPOFList" }
+        "401": { $ref: "#/components/responses/Error" }
+  /self-location:
+    get:
+      operationId: getSelfLocation
+      summary: Op welke VM of container ClusterForge zelf draait
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SelfLocation" }
+        "401": { $ref: "#/components/responses/Error" }
+    put:
+      operationId: setSelfLocation
+      summary: De VM van ClusterForge zelf invullen (admin)
+      description: Een ingevulde VM wint van wat ClusterForge zelf vindt, tot je haar weghaalt.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SelfLocationInput" }
+      responses:
+        "204": { description: Bewaard }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteSelfLocation
+      summary: De ingevulde VM weghalen, zodat ClusterForge zelf zoekt (admin)
+      responses:
+        "204": { description: Weggehaald }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
   /clusters/{clusterId}/risk:
     parameters:
       - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -3622,7 +3705,7 @@ components:
       type: object
       required: [type, id, name]
       properties:
-        type: { type: string, description: "cluster, node, vip, failover_test, test_run, dependency, drift_ignore, git_change, user of proxmox" }
+        type: { type: string, description: "cluster, node, vip, failover_test, test_run, dependency, drift_ignore, git_change, user, proxmox, component (een SPOF) of self" }
         id: { type: string, format: uuid }
         name: { type: string }
     RiskAcceptance:
@@ -3732,6 +3815,179 @@ components:
         points:
           type: array
           items: { $ref: "#/components/schemas/RiskPoint" }
+    RiskComponentKind:
+      type: string
+      enum: [host, storage, bridge, cluster, node, service]
+    RiskComponent:
+      type: object
+      required: [key, kind, name, group]
+      properties:
+        key: { type: string, description: "Herkent het onderdeel, zoals host:<koppeling>:pve1" }
+        kind: { $ref: "#/components/schemas/RiskComponentKind" }
+        name: { type: string, description: "Zoals pve1, local-lvm op pve1 of ceph (gedeeld)" }
+        group: { type: string, description: De Proxmox-koppeling, het cluster van een node, de groep van een dienst of de omgeving van een cluster }
+    RiskComponentList:
+      type: object
+      required: [components]
+      properties:
+        components:
+          type: array
+          items: { $ref: "#/components/schemas/RiskComponent" }
+    RiskWhatIfInput:
+      type: object
+      required: [components]
+      properties:
+        components:
+          type: array
+          minItems: 1
+          maxItems: 20
+          items: { type: string }
+    RiskGuestOutcome:
+      type: object
+      required: [connection, vmid, name, host, node_id, hostname, outcome, reason, restart_host, unknown]
+      properties:
+        connection: { type: string }
+        vmid: { type: integer }
+        name: { type: string }
+        host: { type: string }
+        node_id: { type: string, format: uuid, nullable: true }
+        hostname: { type: string }
+        outcome:
+          type: string
+          enum: [down, restarted, partial]
+          description: down, restarted (HA start hem op restart_host) of partial (een netwerkkaart valt weg, de VM draait door)
+        reason: { type: string }
+        restart_host: { type: string }
+        unknown: { type: boolean, description: Geen node in ClusterForge }
+    RiskPrediction:
+      type: object
+      required: [status, reason]
+      properties:
+        status: { $ref: "#/components/schemas/Status" }
+        reason: { type: string }
+    RiskClusterOutcome:
+      type: object
+      required: [id, name, environment, before, during, after_ha, nodes_down]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        environment: { $ref: "#/components/schemas/Environment" }
+        before: { $ref: "#/components/schemas/RiskPrediction" }
+        during: { $ref: "#/components/schemas/RiskPrediction" }
+        after_ha:
+          description: Na de herstart door HA; leeg als HA in dit cluster niets herstart
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/RiskPrediction" }]
+        nodes_down: { type: array, items: { type: string } }
+    RiskServiceOutcome:
+      type: object
+      required: [id, name, group, environment, impact, direct, reason, recovers]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        group: { type: string }
+        environment: { type: string, description: lab, test, prod of leeg }
+        impact: { $ref: "#/components/schemas/ServiceImpact" }
+        direct: { type: boolean }
+        reason: { type: string }
+        recovers: { type: boolean, description: Werkt weer zodra HA de VM's herstart heeft }
+    RiskSelfOutcome:
+      type: object
+      required: [name, outcome, reason, restart_host]
+      properties:
+        name: { type: string }
+        outcome: { type: string, enum: [down, restarted] }
+        reason: { type: string }
+        restart_host: { type: string }
+    RiskWhatIf:
+      type: object
+      required: [components, guests, clusters, services, self, notes]
+      properties:
+        components:
+          type: array
+          items: { $ref: "#/components/schemas/RiskComponent" }
+        guests:
+          type: array
+          items: { $ref: "#/components/schemas/RiskGuestOutcome" }
+        clusters:
+          type: array
+          items: { $ref: "#/components/schemas/RiskClusterOutcome" }
+        services:
+          type: array
+          items: { $ref: "#/components/schemas/RiskServiceOutcome" }
+        self:
+          description: Leeg als ClusterForge zelf blijft draaien of niet bekend is waar hij draait
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/RiskSelfOutcome" }]
+        notes: { type: array, items: { type: string } }
+    RiskSPOFCluster:
+      type: object
+      required: [id, name, reason]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        reason: { type: string }
+    RiskSPOFService:
+      type: object
+      required: [id, name, group, reason]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        group: { type: string }
+        reason: { type: string }
+    RiskSPOF:
+      type: object
+      required: [component, clusters, services, down, self]
+      properties:
+        component: { $ref: "#/components/schemas/RiskComponent" }
+        clusters:
+          type: array
+          description: De prod-clusters die down gaan
+          items: { $ref: "#/components/schemas/RiskSPOFCluster" }
+        services:
+          type: array
+          description: De bevestigde prod-diensten die down gaan
+          items: { $ref: "#/components/schemas/RiskSPOFService" }
+        down: { type: integer, description: Hoeveel clusters en diensten in alle omgevingen down gaan }
+        self: { type: boolean, description: ClusterForge zelf valt ook uit }
+    RiskSPOFList:
+      type: object
+      required: [spofs]
+      properties:
+        spofs:
+          type: array
+          items: { $ref: "#/components/schemas/RiskSPOF" }
+    SelfGuest:
+      type: object
+      required: [connection_id, connection, vmid, name, host, type]
+      properties:
+        connection_id: { type: string, format: uuid }
+        connection: { type: string }
+        vmid: { type: integer }
+        name: { type: string }
+        host: { type: string }
+        type: { type: string, enum: [qemu, lxc] }
+    SelfLocation:
+      type: object
+      required: [source, guest, matched_on, note, guests]
+      properties:
+        source: { type: string, enum: [auto, manual, none], description: "auto: gevonden aan een adres; manual: ingevuld; none: niet gevonden" }
+        guest:
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/SelfGuest" }]
+        vmid: { type: integer, nullable: true, description: Ook gevuld als de ingevulde VM niet meer in Proxmox staat }
+        matched_on: { type: string }
+        note: { type: string, description: Waarom hij niet gevonden is }
+        guests:
+          type: array
+          description: De VM's en containers om uit te kiezen
+          items: { $ref: "#/components/schemas/SelfGuest" }
+    SelfLocationInput:
+      type: object
+      required: [connection_id, vmid]
+      properties:
+        connection_id: { type: string, format: uuid }
+        vmid: { type: integer, minimum: 100, maximum: 999999999 }
     RiskAcceptanceInput:
       type: object
       required: [check, subject_type, subject_id, reason]

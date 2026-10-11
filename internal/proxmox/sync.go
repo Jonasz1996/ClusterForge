@@ -16,12 +16,14 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/store"
 )
 
-// Run synchroniseert alle verbindingen tot ctx stopt.
+// Run synchroniseert alle verbindingen tot ctx stopt, en leest daarna de
+// configuraties van VM's die aan de beurt zijn.
 func (s *Service) Run(ctx context.Context) {
 	t := time.NewTicker(s.Interval)
 	defer t.Stop()
 	for {
 		s.SyncAll(ctx)
+		s.ReadConfigsAll(ctx)
 		select {
 		case <-ctx.Done():
 			return

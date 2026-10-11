@@ -45,6 +45,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/status"
 	"github.com/Jonasz1996/clusterforge/internal/store"
 	"github.com/Jonasz1996/clusterforge/internal/store/storetest"
+	"github.com/Jonasz1996/clusterforge/internal/topo"
 	"github.com/Jonasz1996/clusterforge/internal/whatbroke"
 	"github.com/Jonasz1996/clusterforge/pkg/protocol"
 )
@@ -75,6 +76,7 @@ type testEnv struct {
 	conns   *testConns
 	asst    *assistant.Service
 	risk    *risk.Service
+	topo    *topo.Service
 
 	// De runner heeft een eigen context, zodat een test hem kan herstarten.
 	runCtx     context.Context
@@ -170,6 +172,10 @@ func newTestEnv(t *testing.T) *testEnv {
 	asst := assistant.NewService(pool, ev, log, box)
 	// De health score rekent niet vanzelf; een test roept Compute aan.
 	rsk := risk.NewService(pool, ev, log, metrics.NewClient(vm.srv.URL), bk)
+	// De eigen adressen van de server zet een test zelf.
+	tp := topo.NewService(pool, ev, log, "")
+	tp.Own = func(context.Context, []string) topo.Own { return topo.Own{} }
+	rsk.Topo, rsk.Deps = tp, dps
 	var wg sync.WaitGroup
 	wg.Add(3)
 	go func() { defer wg.Done(); hub.Run(runCtx) }()
@@ -182,12 +188,12 @@ func newTestEnv(t *testing.T) *testEnv {
 	api := New(Deps{
 		Config: cfg, Log: log, Pool: pool, Auth: a, Bus: bus, Hub: hub, Proxmox: pve, Jobs: runner, Lifecycle: life,
 		Deploy: dep, Backups: bk, Drift: drf, Failover: fo, Deps: dps, Rollout: ro, GitOps: git, Assistant: asst,
-		Risk: rsk, Version: "test",
+		Risk: rsk, Topo: tp, Version: "test",
 	})
 	srv := httptest.NewServer(api.Handler())
 	t.Cleanup(srv.Close)
 	e := &testEnv{t: t, srv: srv, auth: a, pool: pool, api: api, bus: bus, eval: eval, vm: vm, pve: pve, jobs: runner, life: life, deploy: dep,
-		backups: bk, drift: drf, fo: fo, deps: dps, ro: ro, git: git, det: det, ana: ana, conns: conns, asst: asst, risk: rsk, runCtx: runCtx}
+		backups: bk, drift: drf, fo: fo, deps: dps, ro: ro, git: git, det: det, ana: ana, conns: conns, asst: asst, risk: rsk, topo: tp, runCtx: runCtx}
 	e.startRunner()
 	t.Cleanup(func() {
 		stop()

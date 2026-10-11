@@ -313,6 +313,58 @@ func TestImpactOfNode(t *testing.T) {
 	}
 }
 
+func TestImpactOfOutage(t *testing.T) {
+	b := voorbeeld(t)
+	b.cluster("dns", "prod", status.Healthy)
+	b.node("dns01", "dns", "bind9=active")
+	b.node("dns02", "dns", "bind9=active")
+	b.node("dns03", "dns")
+	b.svc("dns", "bind9", "dns", "bind9")
+	b.svc("dns", "zone", "dns", "")
+	g := b.build()
+
+	// Beide webnodes en beide databasenodes tegelijk, zoals een host met
+	// alle vier erop.
+	got := b.hits(g.ImpactOf(Outage{Nodes: []uuid.UUID{b.id("web02"), b.id("db01"), b.id("web01"), b.id("db02")}}))
+	want := strings.Join([]string{
+		"db-prod/mariadb down: mariadb draait op geen andere node",
+		"web-prod/keepalived down: geen andere node kan VIP 10.0.20.10 overnemen",
+		"web-prod/nginx down: nginx draait op geen andere node",
+		"web-prod/php8.2-fpm down: php8.2-fpm draait op geen andere node",
+		"app-test/app degraded: hangt zacht af van mariadb in db-prod · handmatig",
+	}, "\n")
+	if got != want {
+		t.Fatalf("vier nodes:\n%s\nwil\n%s", got, want)
+	}
+	// Twee van de drie DNS-nodes: bind9 draait alleen nog niet op dns03.
+	got = b.hits(g.ImpactOf(Outage{Nodes: []uuid.UUID{b.id("dns01"), b.id("dns02")}}))
+	if got != "dns/bind9 down: bind9 draait op geen andere node" {
+		t.Fatalf("dns01 en dns02:\n%s", got)
+	}
+	got = b.hits(g.ImpactOf(Outage{Nodes: []uuid.UUID{b.id("dns01"), b.id("dns02"), b.id("dns03")}}))
+	want = strings.Join([]string{
+		"dns/bind9 down: bind9 draait op geen andere node",
+		"dns/zone down: dns01, dns02 en dns03 zijn alle actieve nodes van dns",
+	}, "\n")
+	if got != want {
+		t.Fatalf("heel dns:\n%s", got)
+	}
+	// Eén node geeft dezelfde tekst als Impact, en een gekozen dienst staat
+	// er zelf niet in.
+	if a, o := b.hits(g.Impact(Target{Node: b.ptr("web01")})), b.hits(g.ImpactOf(Outage{Nodes: []uuid.UUID{b.id("web01")}})); a != o {
+		t.Fatalf("één node:\n%s\n%s", a, o)
+	}
+	got = b.hits(g.ImpactOf(Outage{Services: []uuid.UUID{b.id("db-prod/mariadb")}, Nodes: []uuid.UUID{b.id("app01")}}))
+	want = strings.Join([]string{
+		"web-prod/nginx down: via php8.2-fpm",
+		"web-prod/php8.2-fpm down: hangt hard af van mariadb in db-prod · handmatig",
+		"app-test/app down: app draait op geen andere node",
+	}, "\n")
+	if got != want {
+		t.Fatalf("dienst en node:\n%s", got)
+	}
+}
+
 func TestImpactOfCluster(t *testing.T) {
 	b := voorbeeld(t)
 	g := b.build()

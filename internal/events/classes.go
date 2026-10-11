@@ -39,6 +39,7 @@ var classes = map[string]Class{
 	"proxmox.created": ClassInfo, "proxmox.updated": ClassInfo, "proxmox.deleted": ClassInfo,
 	"proxmox.sync_requested": ClassInfo, "proxmox.sync_failed": ClassSymptom, "proxmox.sync_recovered": ClassInfo,
 	"proxmox.host_offline": ClassChange, "proxmox.host_online": ClassInfo,
+	"proxmox.self_location_set": ClassInfo, "proxmox.self_location_cleared": ClassInfo,
 	"vm.status_changed": ClassChange, "vm.moved": ClassChange, "vm.missing": ClassChange,
 
 	"backup.fresh": ClassInfo, "backup.stale": ClassInfo, "backup.missing": ClassInfo,

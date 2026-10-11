@@ -2,6 +2,7 @@ package risk
 
 import (
 	"fmt"
+	"maps"
 	"math"
 	"slices"
 	"strconv"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/Jonasz1996/clusterforge/internal/backups"
 	"github.com/Jonasz1996/clusterforge/pkg/protocol"
 )
 
@@ -385,7 +387,11 @@ func redundancy(in ClusterInput, now time.Time) part {
 			allSame = false
 		}
 	}
+	// flagged zijn de hosts waarover al een bevinding staat; een SPOF op
+	// dezelfde host zou die herhalen.
+	flagged := map[string]bool{}
 	if allSame {
+		flagged[linked[0].Host] = true
 		names := make([]string, len(linked))
 		for i, n := range linked {
 			names[i] = n.Hostname
@@ -405,6 +411,7 @@ func redundancy(in ClusterInput, now time.Time) part {
 				names = append(names, name[c])
 			}
 			if same {
+				flagged[h] = true
 				p.add("redundancy.vip_same_host", bump(Medium, eb, High), Subject{"vip", v.ID, v.Address},
 					fmt.Sprintf("De nodes van VIP %s (%s) draaien %s op %s", v.Address, list(names), allOf(len(names)), h), link)
 			}
@@ -430,11 +437,40 @@ func redundancy(in ClusterInput, now time.Time) part {
 			p.add("redundancy.maintenance", Low, nodeSubject(n), n.Hostname+" staat al "+days(age)+" "+what, nodeLink(n.ID))
 		}
 	}
+	if in.Env == "prod" {
+		// Staat er al een bevinding over een host, dan voegt een SPOF op
+		// zijn lokale storage of bridges niets toe: spreiden lost alles op.
+		covered := maps.Clone(flagged)
+		for _, sp := range in.SPOFs {
+			if sp.Kind == KindHost && !flagged[sp.Host] {
+				p.add("redundancy.spof", High, Subject{"component", sp.ID, sp.Name}, spofText(in, sp), spofLink(sp.Key))
+				covered[sp.Host] = true
+			}
+		}
+		for _, sp := range in.SPOFs {
+			if sp.Kind == KindHost || (sp.Kind == KindNode && len(nodes) == 1) || (sp.Host != "" && covered[sp.Host]) {
+				continue
+			}
+			p.add("redundancy.spof", High, Subject{"component", sp.ID, sp.Name}, spofText(in, sp), spofLink(sp.Key))
+		}
+	}
 	for _, d := range in.NonProdDeps {
 		p.add("redundancy.nonprod_dependency", High, Subject{"dependency", d.ID, d.From + " → " + d.To},
 			fmt.Sprintf("%s hangt af van %s in %s, een %s-cluster", d.From, d.To, d.ToCluster, d.ToEnv), "/afhankelijkheden")
 	}
 	return p
+}
+
+// spofText zegt wat er down gaat als het onderdeel uitvalt.
+func spofText(in ClusterInput, sp SPOFInput) string {
+	text := "Valt " + spofSubject(sp) + " uit, dan "
+	switch {
+	case sp.ClusterDown:
+		return text + "is " + in.Name + " down"
+	case len(sp.Services) == 1:
+		return text + "is de dienst " + sp.Services[0] + " down"
+	}
+	return text + "zijn de diensten " + list(sp.Services) + " down"
 }
 
 // --- Configuratie ---
@@ -672,10 +708,28 @@ func PlatformCard(in PlatformInput, acc map[Key]Acceptance, now time.Time) Card 
 			}
 		}
 	}
+	if s := in.Self; s != nil {
+		subj := Subject{"self", s.ID, s.Name}
+		switch {
+		case !s.Found:
+			p.add("platform.self_unknown", Low, Subject{"self", uuid.Nil, "ClusterForge"},
+				"Niet bekend op welke VM ClusterForge draait, dus de wat-als ziet niet wanneer hij zelf uitvalt", "/instellingen#waar-clusterforge-draait")
+		case !s.BackupsRead:
+		case s.Latest == nil:
+			p.add("platform.self_backup", High, subj, "De VM van ClusterForge, "+s.Name+", heeft geen back-up", "/backups")
+		case now.Sub(*s.Latest) > selfBackupMaxAge:
+			p.add("platform.self_backup", Medium, subj, "De nieuwste back-up van de VM van ClusterForge, "+s.Name+", is "+
+				days(now.Sub(*s.Latest))+" oud; het beleid is "+strconv.Itoa(backups.DefaultMaxAgeHours)+" uur", "/backups")
+		}
+	}
 	card := builder{acc: acc}.card(Platform, p)
 	res := finish([]Card{card}, nil)
 	return res.Cards[0]
 }
+
+// selfBackupMaxAge is hoe oud de back-up van ClusterForge zelf mag zijn:
+// het standaardbeleid.
+const selfBackupMaxAge = time.Duration(backups.DefaultMaxAgeHours) * time.Hour
 
 // --- Tekst ---
 
