@@ -104,10 +104,18 @@ func (d *Detector) world(ctx context.Context, q *store.Queries, now time.Time) (
 
 	env := map[uuid.UUID]string{}
 	running := map[uuid.UUID]*uuid.UUID{}
+	// Een failovertest of rampoefening die loopt of net klaar was, verklaart
+	// de uitval; een rampoefening in elk cluster dat ze mat.
 	for _, r := range runs {
-		if r.Kind == "failover.test" && r.ClusterID != nil && (r.FinishedAt == nil || now.Sub(*r.FinishedAt) <= testTail) {
-			id := r.ID
+		if (r.Kind != "failover.test" && r.Kind != "disaster.run") || (r.FinishedAt != nil && now.Sub(*r.FinishedAt) > testTail) {
+			continue
+		}
+		id := r.ID
+		if r.ClusterID != nil {
 			running[*r.ClusterID] = &id
+		}
+		for _, c := range r.ClusterIds {
+			running[c] = &id
 		}
 	}
 	nodeHost := map[uuid.UUID]string{}

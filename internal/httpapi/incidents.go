@@ -25,7 +25,8 @@ import (
 var incidentHistory = slices.Concat(
 	events.Actions(events.CategoryStatus),
 	events.Actions(events.CategoryIncident),
-	[]string{"service.status_changed", "failover.fault_injected", "failover.fault_cleared", "failover.finished", "backup.verify_finished"},
+	[]string{"service.status_changed", "failover.fault_injected", "failover.fault_cleared", "failover.finished", "backup.verify_finished",
+		"disaster.started", "disaster.fault_injected", "disaster.fault_cleared", "disaster.finished"},
 )
 
 // historyLimit is het grootste aantal regels in de geschiedenis van een

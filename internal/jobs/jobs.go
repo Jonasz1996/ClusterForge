@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"runtime/debug"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -53,6 +54,10 @@ type Spec struct {
 	NodeID    *uuid.UUID
 	ProxmoxID *uuid.UUID
 	Actor     events.Actor
+	// Clusters zijn andere clusters waarvan de taak het slot ook houdt, zoals
+	// bij een rampoefening die meer clusters raakt. Alleen met
+	// EnqueueForCluster.
+	Clusters []uuid.UUID
 
 	// clusterSlot zet EnqueueForCluster: de taak houdt het slot van zijn
 	// cluster tot hij klaar is.
@@ -174,9 +179,17 @@ func (r *Runner) EnqueueTx(ctx context.Context, q *store.Queries, s Spec) (store
 			requestedBy = &id
 		}
 	}
+	slots := []uuid.UUID{}
+	if s.clusterSlot {
+		for _, id := range s.Clusters {
+			if (s.ClusterID == nil || id != *s.ClusterID) && !slices.Contains(slots, id) {
+				slots = append(slots, id)
+			}
+		}
+	}
 	j, err := q.CreateJob(ctx, store.CreateJobParams{
 		Kind: s.Kind, Title: s.Title, Params: params, ClusterID: s.ClusterID, NodeID: s.NodeID,
-		ProxmoxID: s.ProxmoxID, RequestedBy: requestedBy, ClusterSlot: s.clusterSlot,
+		ProxmoxID: s.ProxmoxID, RequestedBy: requestedBy, ClusterSlot: s.clusterSlot, SlotClusters: slots,
 	})
 	if err != nil {
 		return store.Job{}, err
@@ -206,33 +219,55 @@ func (r *Runner) EnqueueForCluster(ctx context.Context, s Spec) (store.Job, erro
 }
 
 // EnqueueForClusterTx is EnqueueForCluster binnen een transactie van de
-// aanroeper. De clusterrij blijft vergrendeld tot de commit.
+// aanroeper. De clusterrijen blijven vergrendeld tot de commit.
 func (r *Runner) EnqueueForClusterTx(ctx context.Context, q *store.Queries, s Spec) (store.Job, error) {
 	s.clusterSlot = true
-	if s.ClusterID != nil {
-		if err := lockSlot(ctx, q, *s.ClusterID, uuid.Nil); err != nil {
-			return store.Job{}, err
-		}
+	if err := lockSlots(ctx, q, slotClusters(s.ClusterID, s.Clusters), uuid.Nil); err != nil {
+		return store.Job{}, err
 	}
 	return r.EnqueueTx(ctx, q, s)
 }
 
-// lockSlot vergrendelt de clusterrij tot de commit en geeft een BusyError
-// als er in het cluster al een andere schrijvende taak dan self wacht of
-// loopt.
-func lockSlot(ctx context.Context, q *store.Queries, clusterID, self uuid.UUID) error {
-	name, err := q.LockClusterForJob(ctx, clusterID)
-	if err != nil {
-		return err
+// slotClusters zijn alle clusters van een taak, gesorteerd op id: zo
+// vergrendelen twee aanvragen ze in dezelfde volgorde en wachten ze nooit
+// op elkaar in een kring.
+func slotClusters(own *uuid.UUID, more []uuid.UUID) []uuid.UUID {
+	var out []uuid.UUID
+	if own != nil {
+		out = append(out, *own)
 	}
-	busy, err := q.GetClusterSlotJob(ctx, clusterID)
-	switch {
-	case errors.Is(err, pgx.ErrNoRows) || err == nil && busy.ID == self:
-		return nil
-	case err != nil:
-		return err
+	for _, id := range more {
+		if !slices.Contains(out, id) {
+			out = append(out, id)
+		}
 	}
-	return BusyError{Cluster: name, JobID: busy.ID, Title: busy.Title}
+	slices.SortFunc(out, func(a, b uuid.UUID) int { return strings.Compare(a.String(), b.String()) })
+	return out
+}
+
+// lockSlots vergrendelt de clusterrijen tot de commit en geeft een
+// BusyError als er in een van de clusters al een andere schrijvende taak dan
+// self wacht of loopt.
+func lockSlots(ctx context.Context, q *store.Queries, clusters []uuid.UUID, self uuid.UUID) error {
+	names := make([]string, len(clusters))
+	for i, id := range clusters {
+		name, err := q.LockClusterForJob(ctx, id)
+		if err != nil {
+			return err
+		}
+		names[i] = name
+	}
+	for i, id := range clusters {
+		busy, err := q.GetClusterSlotJob(ctx, id)
+		switch {
+		case errors.Is(err, pgx.ErrNoRows) || err == nil && busy.ID == self:
+			continue
+		case err != nil:
+			return err
+		}
+		return BusyError{Cluster: names[i], JobID: busy.ID, Title: busy.Title}
+	}
+	return nil
 }
 
 // Retryable geeft aan dat een mislukte taak van deze soort opnieuw kan
@@ -256,8 +291,8 @@ func (r *Runner) Retry(ctx context.Context, id uuid.UUID, actor events.Actor) (s
 			return ErrNotFound
 		case err != nil:
 			return err
-		case cur.Job.ClusterSlot && cur.Job.ClusterID != nil:
-			if err := lockSlot(ctx, q, *cur.Job.ClusterID, id); err != nil {
+		case cur.Job.ClusterSlot:
+			if err := lockSlots(ctx, q, slotClusters(cur.Job.ClusterID, cur.Job.SlotClusters), id); err != nil {
 				return err
 			}
 		}

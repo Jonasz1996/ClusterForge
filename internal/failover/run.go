@@ -356,7 +356,7 @@ func (r *testRun) measure(ctx context.Context, st *jobs.Step, injectedAt time.Ti
 	window := min(2*def.expect()+10*time.Second, s.MaxWindow)
 	deadline := injectedAt.Add(window)
 	m := Measurement{WindowMS: window.Milliseconds()}
-	pl := newProbeLog(injectedAt, def.VIP)
+	pl := NewProbeLog(injectedAt, def.VIP)
 	st.Logf("meten: %s elke %d ms opvragen (%s), hoogstens %s", def.VIP, s.ProbeInterval.Milliseconds(), def.Probe, seconds(window))
 	_ = st.Flush(ctx)
 	vips := r.plan.TargetVIPs
@@ -376,7 +376,7 @@ func (r *testRun) measure(ctx context.Context, st *jobs.Step, injectedAt time.Ti
 		if ctx.Err() != nil {
 			break
 		}
-		pl.add(at, err)
+		pl.Add(at, err)
 		end = time.Now()
 		if !m.TakenOver && time.Since(lastLook) >= s.Gate.Poll {
 			lastLook = time.Now()
@@ -389,7 +389,7 @@ func (r *testRun) measure(ctx context.Context, st *jobs.Step, injectedAt time.Ti
 				_ = st.Flush(ctx)
 			}
 		}
-		if m.TakenOver && pl.recovered() {
+		if m.TakenOver && pl.Recovered() {
 			break
 		}
 		select {
@@ -402,10 +402,10 @@ func (r *testRun) measure(ctx context.Context, st *jobs.Step, injectedAt time.Ti
 		end = time.Now()
 	}
 	m.EndMS = end.Sub(injectedAt).Milliseconds()
-	m.Recovered = pl.recovered()
-	m.DowntimeMS = pl.downtime(end).Milliseconds()
+	m.Recovered = pl.Recovered()
+	m.DowntimeMS = pl.Downtime(end).Milliseconds()
 	var probeEvents []TimelineEvent
-	m.Probe, probeEvents = pl.finish(end)
+	m.Probe, probeEvents = pl.Finish(end)
 	m.Timeline = sortTimeline(append(probeEvents, takeover...))
 	switch {
 	case m.Canceled:
@@ -539,7 +539,7 @@ func (r *testRun) returnStep(ctx context.Context, st *jobs.Step, ret *returnStat
 	ctx, cancel := context.WithTimeoutCause(ctx, timeout, errReturnTimeout)
 	defer cancel()
 	since := r.clearedAt
-	pl := newProbeLog(r.injectedAt, def.VIP)
+	pl := NewProbeLog(r.injectedAt, def.VIP)
 	pctx, pstop := context.WithCancel(ctx)
 	var wg sync.WaitGroup
 	wg.Add(1)
@@ -604,7 +604,7 @@ func (r *testRun) returnStep(ctx context.Context, st *jobs.Step, ret *returnStat
 	_ = st.Flush(ctx)
 
 	// Het VIP moet daarna ook echt antwoorden.
-	if err := waitFor(ctx, s.ProbeInterval, pl.recovered); err != nil {
+	if err := waitFor(ctx, s.ProbeInterval, pl.Recovered); err != nil {
 		if errors.Is(context.Cause(ctx), errReturnTimeout) {
 			return fmt.Errorf("na de terugkeer antwoordt %s niet op %s", def.VIP, def.Probe)
 		}
@@ -612,10 +612,10 @@ func (r *testRun) returnStep(ctx context.Context, st *jobs.Step, ret *returnStat
 	}
 	stop()
 	end := time.Now()
-	ret.FailbackMS = pl.downtime(end).Milliseconds()
+	ret.FailbackMS = pl.Downtime(end).Milliseconds()
 	ret.EndMS = ms(end)
 	var probeEvents []TimelineEvent
-	ret.Probe, probeEvents = pl.finish(end)
+	ret.Probe, probeEvents = pl.Finish(end)
 	for i := range probeEvents {
 		if probeEvents[i].Kind == "down" {
 			probeEvents[i].Text += " bij de terugkeer"
@@ -642,7 +642,7 @@ func waitFor(ctx context.Context, every time.Duration, ok func() bool) error {
 	return nil
 }
 
-func (s *Service) probeLoop(ctx context.Context, def Definition, pl *probeLog) {
+func (s *Service) probeLoop(ctx context.Context, def Definition, pl *ProbeLog) {
 	t := time.NewTicker(s.ProbeInterval)
 	defer t.Stop()
 	for {
@@ -651,7 +651,7 @@ func (s *Service) probeLoop(ctx context.Context, def Definition, pl *probeLog) {
 		if ctx.Err() != nil {
 			return
 		}
-		pl.add(at, err)
+		pl.Add(at, err)
 		select {
 		case <-ctx.Done():
 			return
@@ -1066,87 +1066,6 @@ func (s *Service) runRestore(ctx context.Context, j *jobs.Job) error {
 		st.Logf("de run telt nu als hersteld")
 		return s.q.SetTestRunRestored(ctx, store.SetTestRunRestoredParams{ID: run.ID, Summary: run.Summary + " Daarna opnieuw hersteld."})
 	})
-}
-
-// probeLog houdt de uitkomsten van de probe bij, in ms na de storing.
-type probeLog struct {
-	mu        sync.Mutex
-	start     time.Time
-	vip       string
-	segs      []Segment
-	events    []TimelineEvent
-	firstFail time.Time
-	down      bool
-	okRun     int
-	okStart   time.Time
-}
-
-func newProbeLog(start time.Time, vip string) *probeLog { return &probeLog{start: start, vip: vip} }
-
-func (p *probeLog) ms(t time.Time) int64 { return t.Sub(p.start).Milliseconds() }
-
-func (p *probeLog) add(at time.Time, err error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	ok, ms := err == nil, p.ms(at)
-	if n := len(p.segs); n > 0 {
-		p.segs[n-1].ToMS = ms
-		if p.segs[n-1].OK != ok {
-			p.segs = append(p.segs, Segment{FromMS: ms, ToMS: ms, OK: ok})
-		}
-	} else {
-		p.segs = append(p.segs, Segment{FromMS: ms, ToMS: ms, OK: ok})
-	}
-	if !ok {
-		if !p.down {
-			p.down = true
-			p.events = append(p.events, TimelineEvent{TMS: ms, Kind: "down", Text: p.vip + " onbereikbaar: " + short(err.Error())})
-		}
-		if p.firstFail.IsZero() {
-			p.firstFail = at
-		}
-		p.okRun = 0
-		return
-	}
-	if p.okRun == 0 {
-		p.okStart = at
-	}
-	p.okRun++
-	if p.down && p.okRun == 3 {
-		p.down = false
-		p.events = append(p.events, TimelineEvent{TMS: p.ms(p.okStart), Kind: "up", Text: p.vip + " weer bereikbaar"})
-	}
-}
-
-// recovered: de probe slaagde drie keer op rij na de laatste fout.
-func (p *probeLog) recovered() bool {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.okRun >= 3
-}
-
-// downtime loopt van de eerste fout tot de eerste van de drie goede op rij,
-// of tot end als het VIP niet terugkwam.
-func (p *probeLog) downtime(end time.Time) time.Duration {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	switch {
-	case p.firstFail.IsZero():
-		return 0
-	case p.okRun >= 3:
-		return p.okStart.Sub(p.firstFail)
-	}
-	return end.Sub(p.firstFail)
-}
-
-// finish sluit het laatste stuk af op end.
-func (p *probeLog) finish(end time.Time) ([]Segment, []TimelineEvent) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if n := len(p.segs); n > 0 {
-		p.segs[n-1].ToMS = max(p.segs[n-1].ToMS, p.ms(end))
-	}
-	return slices.Clone(p.segs), slices.Clone(p.events)
 }
 
 // upper zet de eerste letter in hoofdletter.

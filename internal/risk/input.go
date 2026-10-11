@@ -177,7 +177,9 @@ type FailoverInput struct {
 
 // RunInput is een afgeronde testrun.
 type RunInput struct {
-	ID       uuid.UUID
+	ID uuid.UUID
+	// Kind is failover.test of disaster.run.
+	Kind     string
 	Name     string
 	Result   string
 	Summary  string

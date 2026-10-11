@@ -12,6 +12,7 @@ import { NodeForm } from "@/components/inventory/NodeForm";
 import { SpecCard } from "@/components/inventory/SpecCard";
 import { ClusterDepsCard } from "@/components/deps/ClusterDeps";
 import { ClusterDocsCard } from "@/components/docs/ClusterDocsCard";
+import { DisasterCard } from "@/components/disaster/Disaster";
 import { ClusterDriftCard } from "@/components/drift/Drift";
 import { FailoverBanner, FailoverCard } from "@/components/failover/Failover";
 import { GitCard } from "@/components/gitops/GitCard";
@@ -159,6 +160,7 @@ function ClusterDetailInner() {
           <VipsCard c={cluster.data} isAdmin={isAdmin} />
           <ClusterDepsCard clusterId={id} isAdmin={isAdmin} />
           <FailoverCard clusterId={id} isAdmin={isAdmin} />
+          <DisasterCard clusterId={id} isAdmin={isAdmin} />
           <ClusterBackupsCard clusterId={id} isAdmin={isAdmin} />
           <ClusterDocsCard clusterId={id} />
           {(jobs.data?.length ?? 0) > 0 && (

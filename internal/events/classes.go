@@ -55,6 +55,9 @@ var classes = map[string]Class{
 
 	"failover_test.created": ClassInfo, "failover_test.updated": ClassInfo, "failover_test.deleted": ClassInfo,
 	"failover.fault_injected": ClassChange, "failover.fault_cleared": ClassChange, "failover.finished": ClassInfo,
+	"disaster_scenario.created": ClassInfo, "disaster_scenario.updated": ClassInfo, "disaster_scenario.deleted": ClassInfo,
+	"disaster.started": ClassInfo, "disaster.fault_injected": ClassChange, "disaster.fault_cleared": ClassChange,
+	"disaster.finished": ClassInfo,
 
 	"service.created": ClassInfo, "service.updated": ClassInfo, "service.deleted": ClassInfo,
 	"dependency.created": ClassInfo, "dependency.updated": ClassInfo, "dependency.deleted": ClassInfo,

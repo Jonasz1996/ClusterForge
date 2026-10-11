@@ -20,6 +20,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/config"
 	"github.com/Jonasz1996/clusterforge/internal/deploy"
 	"github.com/Jonasz1996/clusterforge/internal/deps"
+	"github.com/Jonasz1996/clusterforge/internal/disaster"
 	"github.com/Jonasz1996/clusterforge/internal/docs"
 	"github.com/Jonasz1996/clusterforge/internal/drift"
 	"github.com/Jonasz1996/clusterforge/internal/events"
@@ -59,6 +60,7 @@ type Server struct {
 	backups      *backups.Service
 	drift        *drift.Service
 	failover     *failover.Service
+	disaster     *disaster.Service
 	deps         *deps.Service
 	rollout      *rollout.Service
 	git          *gitops.Service
@@ -97,6 +99,8 @@ type Deps struct {
 	Drift *drift.Service
 	// Failover voert failovertests uit.
 	Failover *failover.Service
+	// Disaster voert rampoefeningen uit.
+	Disaster *disaster.Service
 	// Deps beheert diensten en afhankelijkheden.
 	Deps *deps.Service
 	// Rollout past wijzigingen toe met cluster.apply, zoals herstel.
@@ -139,6 +143,7 @@ func New(d Deps) *Server {
 		backups:  d.Backups,
 		drift:    d.Drift,
 		failover: d.Failover,
+		disaster: d.Disaster,
 		deps:     d.Deps,
 		rollout:  d.Rollout,
 		git:      d.GitOps,

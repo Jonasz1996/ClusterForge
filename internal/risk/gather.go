@@ -168,7 +168,7 @@ func (s *Service) gather(ctx context.Context, now time.Time) (world, error) {
 		}
 		for _, r := range unrestored {
 			if r.ClusterID == c.ID {
-				in.Unrestored = append(in.Unrestored, RunInput{ID: r.ID, Name: r.Name, Finished: r.Finished})
+				in.Unrestored = append(in.Unrestored, RunInput{ID: r.ID, Kind: r.Kind, Name: r.Name, Finished: r.Finished})
 			}
 		}
 		if c.Environment == "prod" {

@@ -306,6 +306,120 @@ func (e DeployTargetNetwork) Valid() bool {
 	}
 }
 
+// Defines values for DisasterClusterPlanRole.
+const (
+	DisasterClusterPlanRoleDependent DisasterClusterPlanRole = "dependent"
+	DisasterClusterPlanRoleTarget    DisasterClusterPlanRole = "target"
+)
+
+// Valid indicates whether the value is a known member of the DisasterClusterPlanRole enum.
+func (e DisasterClusterPlanRole) Valid() bool {
+	switch e {
+	case DisasterClusterPlanRoleDependent:
+		return true
+	case DisasterClusterPlanRoleTarget:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DisasterClusterResultMatch.
+const (
+	DisasterClusterResultMatchAsPredicted   DisasterClusterResultMatch = "as_predicted"
+	DisasterClusterResultMatchMilder        DisasterClusterResultMatch = "milder"
+	DisasterClusterResultMatchNotRecovered  DisasterClusterResultMatch = "not_recovered"
+	DisasterClusterResultMatchStayedHealthy DisasterClusterResultMatch = "stayed_healthy"
+	DisasterClusterResultMatchUnexpected    DisasterClusterResultMatch = "unexpected"
+	DisasterClusterResultMatchUnknown       DisasterClusterResultMatch = "unknown"
+)
+
+// Valid indicates whether the value is a known member of the DisasterClusterResultMatch enum.
+func (e DisasterClusterResultMatch) Valid() bool {
+	switch e {
+	case DisasterClusterResultMatchAsPredicted:
+		return true
+	case DisasterClusterResultMatchMilder:
+		return true
+	case DisasterClusterResultMatchNotRecovered:
+		return true
+	case DisasterClusterResultMatchStayedHealthy:
+		return true
+	case DisasterClusterResultMatchUnexpected:
+		return true
+	case DisasterClusterResultMatchUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DisasterClusterResultRole.
+const (
+	DisasterClusterResultRoleDependent DisasterClusterResultRole = "dependent"
+	DisasterClusterResultRoleTarget    DisasterClusterResultRole = "target"
+)
+
+// Valid indicates whether the value is a known member of the DisasterClusterResultRole enum.
+func (e DisasterClusterResultRole) Valid() bool {
+	switch e {
+	case DisasterClusterResultRoleDependent:
+		return true
+	case DisasterClusterResultRoleTarget:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DisasterKind.
+const (
+	HostDown    DisasterKind = "host_down"
+	ServiceDown DisasterKind = "service_down"
+	VipLoss     DisasterKind = "vip_loss"
+)
+
+// Valid indicates whether the value is a known member of the DisasterKind enum.
+func (e DisasterKind) Valid() bool {
+	switch e {
+	case HostDown:
+		return true
+	case ServiceDown:
+		return true
+	case VipLoss:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DisasterPredictionStatus.
+const (
+	DisasterPredictionStatusDegraded   DisasterPredictionStatus = "degraded"
+	DisasterPredictionStatusDown       DisasterPredictionStatus = "down"
+	DisasterPredictionStatusHealthy    DisasterPredictionStatus = "healthy"
+	DisasterPredictionStatusSplitBrain DisasterPredictionStatus = "split_brain"
+	DisasterPredictionStatusUnknown    DisasterPredictionStatus = "unknown"
+)
+
+// Valid indicates whether the value is a known member of the DisasterPredictionStatus enum.
+func (e DisasterPredictionStatus) Valid() bool {
+	switch e {
+	case DisasterPredictionStatusDegraded:
+		return true
+	case DisasterPredictionStatusDown:
+		return true
+	case DisasterPredictionStatusHealthy:
+		return true
+	case DisasterPredictionStatusSplitBrain:
+		return true
+	case DisasterPredictionStatusUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for DocScope.
 const (
 	DocScopeCluster  DocScope = "cluster"
@@ -1620,24 +1734,6 @@ func (e TemplateParamType) Valid() bool {
 	}
 }
 
-// Defines values for TestRunKind.
-const (
-	TestRunKindBackupVerify TestRunKind = "backup.verify"
-	TestRunKindFailoverTest TestRunKind = "failover.test"
-)
-
-// Valid indicates whether the value is a known member of the TestRunKind enum.
-func (e TestRunKind) Valid() bool {
-	switch e {
-	case TestRunKindBackupVerify:
-		return true
-	case TestRunKindFailoverTest:
-		return true
-	default:
-		return false
-	}
-}
-
 // Defines values for TestRunTrigger.
 const (
 	TestRunTriggerManual   TestRunTrigger = "manual"
@@ -1686,6 +1782,27 @@ func (e TestRunEventKind) Valid() bool {
 	case TestRunEventKindTakeover:
 		return true
 	case TestRunEventKindUp:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TestRunKind.
+const (
+	TestRunKindBackupVerify TestRunKind = "backup.verify"
+	TestRunKindDisasterRun  TestRunKind = "disaster.run"
+	TestRunKindFailoverTest TestRunKind = "failover.test"
+)
+
+// Valid indicates whether the value is a known member of the TestRunKind enum.
+func (e TestRunKind) Valid() bool {
+	switch e {
+	case TestRunKindBackupVerify:
+		return true
+	case TestRunKindDisasterRun:
+		return true
+	case TestRunKindFailoverTest:
 		return true
 	default:
 		return false
@@ -1914,24 +2031,6 @@ func (e GetMapParamsLayer) Valid() bool {
 	case GetMapParamsLayerNetwork:
 		return true
 	case GetMapParamsLayerPhysical:
-		return true
-	default:
-		return false
-	}
-}
-
-// Defines values for ListTestRunsParamsKind.
-const (
-	ListTestRunsParamsKindBackupVerify ListTestRunsParamsKind = "backup.verify"
-	ListTestRunsParamsKindFailoverTest ListTestRunsParamsKind = "failover.test"
-)
-
-// Valid indicates whether the value is a known member of the ListTestRunsParamsKind enum.
-func (e ListTestRunsParamsKind) Valid() bool {
-	switch e {
-	case ListTestRunsParamsKindBackupVerify:
-		return true
-	case ListTestRunsParamsKindFailoverTest:
 		return true
 	default:
 		return false
@@ -2913,6 +3012,255 @@ type DeployTarget struct {
 
 // DeployTargetNetwork defines model for DeployTarget.Network.
 type DeployTargetNetwork string
+
+// DisasterClusterPlan defines model for DisasterClusterPlan.
+type DisasterClusterPlan struct {
+	// Before De status bij de start
+	Before      string             `json:"before"`
+	Environment string             `json:"environment"`
+	Id          openapi_types.UUID `json:"id"`
+	Name        string             `json:"name"`
+	Predicted   DisasterPrediction `json:"predicted"`
+
+	// Role target: een node krijgt de storing; dependent: hangt ervan af
+	Role DisasterClusterPlanRole `json:"role"`
+	Slug string                  `json:"slug"`
+	Vips []DisasterVIP           `json:"vips"`
+}
+
+// DisasterClusterPlanRole target: een node krijgt de storing; dependent: hangt ervan af
+type DisasterClusterPlanRole string
+
+// DisasterClusterResult defines model for DisasterClusterResult.
+type DisasterClusterResult struct {
+	Before      string             `json:"before"`
+	Environment string             `json:"environment"`
+	Id          openapi_types.UUID `json:"id"`
+
+	// LongestMs De langste onderbreking op een VIP tijdens de storing
+	LongestMs int64                      `json:"longest_ms"`
+	Match     DisasterClusterResultMatch `json:"match"`
+	Measured  DisasterPrediction         `json:"measured"`
+	Name      string                     `json:"name"`
+	Predicted DisasterPrediction         `json:"predicted"`
+
+	// RecoveredMs Hoe lang na het terugzetten het cluster weer gezond was
+	RecoveredMs nullable.Nullable[int64]  `json:"recovered_ms"`
+	Role        DisasterClusterResultRole `json:"role"`
+
+	// Slow Het herstel duurde langer dan verwacht
+	Slow bool   `json:"slow"`
+	Slug string `json:"slug"`
+}
+
+// DisasterClusterResultMatch defines model for DisasterClusterResult.Match.
+type DisasterClusterResultMatch string
+
+// DisasterClusterResultRole defines model for DisasterClusterResult.Role.
+type DisasterClusterResultRole string
+
+// DisasterHost defines model for DisasterHost.
+type DisasterHost struct {
+	Connection   string             `json:"connection"`
+	ConnectionId openapi_types.UUID `json:"connection_id"`
+	Host         string             `json:"host"`
+}
+
+// DisasterHostOption defines model for DisasterHostOption.
+type DisasterHostOption struct {
+	Connection   string             `json:"connection"`
+	ConnectionId openapi_types.UUID `json:"connection_id"`
+	Host         string             `json:"host"`
+
+	// Nodes De VM's van dit cluster op de host
+	Nodes []string `json:"nodes"`
+
+	// Others Gekoppelde VM's van andere clusters op de host
+	Others []string `json:"others"`
+}
+
+// DisasterKind defines model for DisasterKind.
+type DisasterKind string
+
+// DisasterKindOption defines model for DisasterKindOption.
+type DisasterKindOption struct {
+	Available bool `json:"available"`
+
+	// FaultSeconds Standaardduur van de storing
+	FaultSeconds int          `json:"fault_seconds"`
+	Key          DisasterKind `json:"key"`
+	Label        string       `json:"label"`
+
+	// MinFaultSeconds De kortste storing; bij host_down langer, omdat een node na een harde stop pas na 90 s zonder heartbeat down is
+	MinFaultSeconds int `json:"min_fault_seconds"`
+
+	// Reason Waarom niet
+	Reason string `json:"reason"`
+
+	// RecoverySeconds Standaard verwachte hersteltijd
+	RecoverySeconds int `json:"recovery_seconds"`
+}
+
+// DisasterOptions defines model for DisasterOptions.
+type DisasterOptions struct {
+	// Allowed false op prod
+	Allowed bool                 `json:"allowed"`
+	Hosts   []DisasterHostOption `json:"hosts"`
+	Kinds   []DisasterKindOption `json:"kinds"`
+	Reason  string               `json:"reason"`
+	Slug    string               `json:"slug"`
+	Units   []string             `json:"units"`
+	Vips    []string             `json:"vips"`
+}
+
+// DisasterPrediction defines model for DisasterPrediction.
+type DisasterPrediction struct {
+	Reason string                   `json:"reason"`
+	Status DisasterPredictionStatus `json:"status"`
+}
+
+// DisasterPredictionStatus defines model for DisasterPrediction.Status.
+type DisasterPredictionStatus string
+
+// DisasterPreview defines model for DisasterPreview.
+type DisasterPreview struct {
+	Checks   []TestRunCheck        `json:"checks"`
+	Clusters []DisasterClusterPlan `json:"clusters"`
+
+	// Confirm De slugs om in te tikken
+	Confirm     []string `json:"confirm"`
+	Description string   `json:"description"`
+
+	// Notes Wat de voorspelling onzeker maakt
+	Notes []string `json:"notes"`
+
+	// Ok Of de voorcontrole slaagt
+	Ok bool `json:"ok"`
+
+	// Skipped Draaiende VM's op de host die niet in ClusterForge staan en aan blijven
+	Skipped []string         `json:"skipped"`
+	Targets []DisasterTarget `json:"targets"`
+}
+
+// DisasterReport defines model for DisasterReport.
+type DisasterReport struct {
+	// ClearMs Wanneer alles weer gestart was
+	ClearMs nullable.Nullable[int64] `json:"clear_ms"`
+
+	// Clusters Voorspeld tegen gemeten; tijdens de run de voorspelling met measured leeg
+	Clusters         []DisasterClusterResult `json:"clusters"`
+	Description      string                  `json:"description"`
+	EndMs            int64                   `json:"end_ms"`
+	ExpectRecoveryMs int64                   `json:"expect_recovery_ms"`
+	FaultMs          int64                   `json:"fault_ms"`
+	Kind             DisasterKind            `json:"kind"`
+	Name             string                  `json:"name"`
+	Notes            []string                `json:"notes"`
+
+	// RecoveryMs Van het terugzetten tot elk cluster weer gezond was
+	RecoveryMs nullable.Nullable[int64] `json:"recovery_ms"`
+	ScenarioId openapi_types.UUID       `json:"scenario_id"`
+
+	// ShortOutageMs Een kortere onderbreking telt als overname
+	ShortOutageMs int64                  `json:"short_outage_ms"`
+	Skipped       []string               `json:"skipped"`
+	TargetResults []DisasterTargetResult `json:"target_results"`
+	Targets       []DisasterTarget       `json:"targets"`
+
+	// TotalMs Van de storing tot elk cluster weer gezond was
+	TotalMs nullable.Nullable[int64] `json:"total_ms"`
+	Unit    string                   `json:"unit"`
+	Vips    []DisasterVIPResult      `json:"vips"`
+}
+
+// DisasterRunInput defines model for DisasterRunInput.
+type DisasterRunInput struct {
+	// Confirm De slug van elk geraakt cluster
+	Confirm []string `json:"confirm"`
+}
+
+// DisasterScenario defines model for DisasterScenario.
+type DisasterScenario struct {
+	ClusterId   openapi_types.UUID `json:"cluster_id"`
+	CreatedAt   time.Time          `json:"created_at"`
+	Description string             `json:"description"`
+
+	// FaultSeconds Hoe lang de storing duurt
+	FaultSeconds int `json:"fault_seconds"`
+
+	// Host Alleen bij host_down
+	Host    nullable.Nullable[DisasterHost] `json:"host"`
+	Id      openapi_types.UUID              `json:"id"`
+	Kind    DisasterKind                    `json:"kind"`
+	LastRun nullable.Nullable[TestRun]      `json:"last_run"`
+	Name    string                          `json:"name"`
+
+	// RecoverySeconds Hoe snel na het terugzetten alles weer gezond moet zijn
+	RecoverySeconds int `json:"recovery_seconds"`
+
+	// Unit Bij service_down de dienst
+	Unit      string    `json:"unit"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// DisasterScenarioInput defines model for DisasterScenarioInput.
+type DisasterScenarioInput struct {
+	// ConnectionId Bij host_down
+	ConnectionId *openapi_types.UUID `json:"connection_id,omitempty"`
+	FaultSeconds int                 `json:"fault_seconds"`
+
+	// Host Bij host_down de naam van de Proxmox-host
+	Host            *string      `json:"host,omitempty"`
+	Kind            DisasterKind `json:"kind"`
+	Name            string       `json:"name"`
+	RecoverySeconds int          `json:"recovery_seconds"`
+
+	// Unit Bij service_down
+	Unit *string `json:"unit,omitempty"`
+}
+
+// DisasterScenarioList defines model for DisasterScenarioList.
+type DisasterScenarioList struct {
+	Items   []DisasterScenario `json:"items"`
+	Options DisasterOptions    `json:"options"`
+}
+
+// DisasterTarget defines model for DisasterTarget.
+type DisasterTarget struct {
+	Cluster   string             `json:"cluster"`
+	ClusterId openapi_types.UUID `json:"cluster_id"`
+	Hostname  string             `json:"hostname"`
+	NodeId    openapi_types.UUID `json:"node_id"`
+
+	// Unit Leeg bij een VM die hard uitgaat
+	Unit string                 `json:"unit"`
+	Vmid nullable.Nullable[int] `json:"vmid"`
+}
+
+// DisasterTargetResult defines model for DisasterTargetResult.
+type DisasterTargetResult struct {
+	Error    string             `json:"error"`
+	Hostname string             `json:"hostname"`
+	NodeId   openapi_types.UUID `json:"node_id"`
+}
+
+// DisasterVIP defines model for DisasterVIP.
+type DisasterVIP struct {
+	Address string `json:"address"`
+
+	// Probe Een HTTP-pad met de verwachte status, of een TCP-poort. De host is altijd het VIP.
+	Probe FailoverProbe `json:"probe"`
+}
+
+// DisasterVIPResult defines model for DisasterVIPResult.
+type DisasterVIPResult struct {
+	Address   string             `json:"address"`
+	ClusterId openapi_types.UUID `json:"cluster_id"`
+
+	// Probe Een HTTP-pad met de verwachte status, of een TCP-poort. De host is altijd het VIP.
+	Probe    FailoverProbe    `json:"probe"`
+	Segments []TestRunSegment `json:"segments"`
+}
 
 // Doc defines model for Doc.
 type Doc struct {
@@ -5373,7 +5721,10 @@ type TestRun struct {
 
 	// Definition Alleen bij failover.test
 	Definition nullable.Nullable[FailoverDefinition] `json:"definition"`
-	FinishedAt nullable.Nullable[time.Time]          `json:"finished_at"`
+
+	// Disaster Alleen bij disaster.run
+	Disaster   nullable.Nullable[DisasterReport] `json:"disaster"`
+	FinishedAt nullable.Nullable[time.Time]      `json:"finished_at"`
 
 	// Hostname De node die de storing kreeg, of waarvan de back-up gecontroleerd werd
 	Hostname  string                                `json:"hostname"`
@@ -5399,9 +5750,6 @@ type TestRun struct {
 	Timeline []TestRunEvent                        `json:"timeline"`
 	Trigger  TestRunTrigger                        `json:"trigger"`
 }
-
-// TestRunKind defines model for TestRun.Kind.
-type TestRunKind string
 
 // TestRunTrigger defines model for TestRun.Trigger.
 type TestRunTrigger string
@@ -5429,6 +5777,9 @@ type TestRunEvent struct {
 
 // TestRunEventKind defines model for TestRunEvent.Kind.
 type TestRunEventKind string
+
+// TestRunKind defines model for TestRunKind.
+type TestRunKind string
 
 // TestRunList defines model for TestRunList.
 type TestRunList struct {
@@ -5899,15 +6250,12 @@ type GetRiskHistoryParams struct {
 
 // ListTestRunsParams defines parameters for ListTestRuns.
 type ListTestRunsParams struct {
-	Kind      *ListTestRunsParamsKind `form:"kind,omitempty" json:"kind,omitempty"`
-	ClusterId *openapi_types.UUID     `form:"cluster_id,omitempty" json:"cluster_id,omitempty"`
-	NodeId    *openapi_types.UUID     `form:"node_id,omitempty" json:"node_id,omitempty"`
-	Result    *TestRunResult          `form:"result,omitempty" json:"result,omitempty"`
-	Limit     *int                    `form:"limit,omitempty" json:"limit,omitempty"`
+	Kind      *TestRunKind        `form:"kind,omitempty" json:"kind,omitempty"`
+	ClusterId *openapi_types.UUID `form:"cluster_id,omitempty" json:"cluster_id,omitempty"`
+	NodeId    *openapi_types.UUID `form:"node_id,omitempty" json:"node_id,omitempty"`
+	Result    *TestRunResult      `form:"result,omitempty" json:"result,omitempty"`
+	Limit     *int                `form:"limit,omitempty" json:"limit,omitempty"`
 }
-
-// ListTestRunsParamsKind defines parameters for ListTestRuns.
-type ListTestRunsParamsKind string
 
 // EnrollAgentJSONRequestBody defines body for EnrollAgent for application/json ContentType.
 type EnrollAgentJSONRequestBody = EnrollRequest
@@ -5945,6 +6293,9 @@ type UpdateClusterJSONRequestBody = ClusterPatch
 // UpdateBackupPolicyJSONRequestBody defines body for UpdateBackupPolicy for application/json ContentType.
 type UpdateBackupPolicyJSONRequestBody = BackupPolicyInput
 
+// CreateDisasterScenarioJSONRequestBody defines body for CreateDisasterScenario for application/json ContentType.
+type CreateDisasterScenarioJSONRequestBody = DisasterScenarioInput
+
 // CaptureBaselineJSONRequestBody defines body for CaptureBaseline for application/json ContentType.
 type CaptureBaselineJSONRequestBody = BaselineInput
 
@@ -5974,6 +6325,12 @@ type DeployClusterJSONRequestBody = DeployInput
 
 // PlanDeploymentJSONRequestBody defines body for PlanDeployment for application/json ContentType.
 type PlanDeploymentJSONRequestBody = DeployInput
+
+// UpdateDisasterScenarioJSONRequestBody defines body for UpdateDisasterScenario for application/json ContentType.
+type UpdateDisasterScenarioJSONRequestBody = DisasterScenarioInput
+
+// RunDisasterScenarioJSONRequestBody defines body for RunDisasterScenario for application/json ContentType.
+type RunDisasterScenarioJSONRequestBody = DisasterRunInput
 
 // SaveDocsTargetJSONRequestBody defines body for SaveDocsTarget for application/json ContentType.
 type SaveDocsTargetJSONRequestBody = DocsTargetInput
@@ -6145,6 +6502,12 @@ type ServerInterface interface {
 	// ListClusterChanges Het wijzigingsjournaal van alle nodes van een cluster, nieuwste eerst
 	// (GET /clusters/{clusterId}/changes)
 	ListClusterChanges(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params ListClusterChangesParams)
+	// ListDisasterScenarios Rampoefeningen van een cluster met hun laatste run
+	// (GET /clusters/{clusterId}/disaster-scenarios)
+	ListDisasterScenarios(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
+	// CreateDisasterScenario Nieuwe rampoefening (admin), alleen in lab en test
+	// (POST /clusters/{clusterId}/disaster-scenarios)
+	CreateDisasterScenario(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
 	// GetClusterDrift Drift van een cluster per node, met waarmee vergeleken wordt
 	// (GET /clusters/{clusterId}/drift)
 	GetClusterDrift(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
@@ -6214,6 +6577,18 @@ type ServerInterface interface {
 	// PlanDeployment Controleren wat een uitrol zou maken (admin)
 	// (POST /deployments/plan)
 	PlanDeployment(w http.ResponseWriter, r *http.Request)
+	// DeleteDisasterScenario Een rampoefening verwijderen (admin); de runs blijven als geschiedenis
+	// (DELETE /disaster-scenarios/{scenarioId})
+	DeleteDisasterScenario(w http.ResponseWriter, r *http.Request, scenarioId openapi_types.UUID)
+	// UpdateDisasterScenario Een rampoefening wijzigen (admin); oude runs houden hun definitie
+	// (PUT /disaster-scenarios/{scenarioId})
+	UpdateDisasterScenario(w http.ResponseWriter, r *http.Request, scenarioId openapi_types.UUID)
+	// PreviewDisasterScenario Voorcontrole en voorspelling, zonder iets te doen
+	// (GET /disaster-scenarios/{scenarioId}/preview)
+	PreviewDisasterScenario(w http.ResponseWriter, r *http.Request, scenarioId openapi_types.UUID)
+	// RunDisasterScenario Rampoefening starten (admin)
+	// (POST /disaster-scenarios/{scenarioId}/run)
+	RunDisasterScenario(w http.ResponseWriter, r *http.Request, scenarioId openapi_types.UUID)
 	// ListDocs Alle documenten van de documentatie met hun nieuwste versie
 	// (GET /docs)
 	ListDocs(w http.ResponseWriter, r *http.Request)
@@ -6475,7 +6850,7 @@ type ServerInterface interface {
 	// ListTemplates De clustertemplates in deze server
 	// (GET /templates)
 	ListTemplates(w http.ResponseWriter, r *http.Request)
-	// ListTestRuns Runs van failovertests en back-upcontroles, nieuwste eerst
+	// ListTestRuns Runs van failovertests, back-upcontroles en rampoefeningen, nieuwste eerst
 	// (GET /test-runs)
 	ListTestRuns(w http.ResponseWriter, r *http.Request, params ListTestRunsParams)
 	// GetTestRun Het rapport van één run
@@ -6685,6 +7060,18 @@ func (_ Unimplemented) ListClusterChanges(w http.ResponseWriter, r *http.Request
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// ListDisasterScenarios Rampoefeningen van een cluster met hun laatste run
+// (GET /clusters/{clusterId}/disaster-scenarios)
+func (_ Unimplemented) ListDisasterScenarios(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CreateDisasterScenario Nieuwe rampoefening (admin), alleen in lab en test
+// (POST /clusters/{clusterId}/disaster-scenarios)
+func (_ Unimplemented) CreateDisasterScenario(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // GetClusterDrift Drift van een cluster per node, met waarmee vergeleken wordt
 // (GET /clusters/{clusterId}/drift)
 func (_ Unimplemented) GetClusterDrift(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
@@ -6820,6 +7207,30 @@ func (_ Unimplemented) DeployCluster(w http.ResponseWriter, r *http.Request) {
 // PlanDeployment Controleren wat een uitrol zou maken (admin)
 // (POST /deployments/plan)
 func (_ Unimplemented) PlanDeployment(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// DeleteDisasterScenario Een rampoefening verwijderen (admin); de runs blijven als geschiedenis
+// (DELETE /disaster-scenarios/{scenarioId})
+func (_ Unimplemented) DeleteDisasterScenario(w http.ResponseWriter, r *http.Request, scenarioId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// UpdateDisasterScenario Een rampoefening wijzigen (admin); oude runs houden hun definitie
+// (PUT /disaster-scenarios/{scenarioId})
+func (_ Unimplemented) UpdateDisasterScenario(w http.ResponseWriter, r *http.Request, scenarioId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// PreviewDisasterScenario Voorcontrole en voorspelling, zonder iets te doen
+// (GET /disaster-scenarios/{scenarioId}/preview)
+func (_ Unimplemented) PreviewDisasterScenario(w http.ResponseWriter, r *http.Request, scenarioId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RunDisasterScenario Rampoefening starten (admin)
+// (POST /disaster-scenarios/{scenarioId}/run)
+func (_ Unimplemented) RunDisasterScenario(w http.ResponseWriter, r *http.Request, scenarioId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -7345,7 +7756,7 @@ func (_ Unimplemented) ListTemplates(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// ListTestRuns Runs van failovertests en back-upcontroles, nieuwste eerst
+// ListTestRuns Runs van failovertests, back-upcontroles en rampoefeningen, nieuwste eerst
 // (GET /test-runs)
 func (_ Unimplemented) ListTestRuns(w http.ResponseWriter, r *http.Request, params ListTestRunsParams) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -8302,6 +8713,58 @@ func (siw *ServerInterfaceWrapper) ListClusterChanges(w http.ResponseWriter, r *
 	handler.ServeHTTP(w, r)
 }
 
+// ListDisasterScenarios operation middleware
+func (siw *ServerInterfaceWrapper) ListDisasterScenarios(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListDisasterScenarios(w, r, clusterId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateDisasterScenario operation middleware
+func (siw *ServerInterfaceWrapper) CreateDisasterScenario(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateDisasterScenario(w, r, clusterId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetClusterDrift operation middleware
 func (siw *ServerInterfaceWrapper) GetClusterDrift(w http.ResponseWriter, r *http.Request) {
 
@@ -9024,6 +9487,110 @@ func (siw *ServerInterfaceWrapper) PlanDeployment(w http.ResponseWriter, r *http
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.PlanDeployment(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteDisasterScenario operation middleware
+func (siw *ServerInterfaceWrapper) DeleteDisasterScenario(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "scenarioId" -------------
+	var scenarioId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "scenarioId", chi.URLParam(r, "scenarioId"), &scenarioId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "scenarioId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteDisasterScenario(w, r, scenarioId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateDisasterScenario operation middleware
+func (siw *ServerInterfaceWrapper) UpdateDisasterScenario(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "scenarioId" -------------
+	var scenarioId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "scenarioId", chi.URLParam(r, "scenarioId"), &scenarioId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "scenarioId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateDisasterScenario(w, r, scenarioId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PreviewDisasterScenario operation middleware
+func (siw *ServerInterfaceWrapper) PreviewDisasterScenario(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "scenarioId" -------------
+	var scenarioId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "scenarioId", chi.URLParam(r, "scenarioId"), &scenarioId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "scenarioId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PreviewDisasterScenario(w, r, scenarioId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RunDisasterScenario operation middleware
+func (siw *ServerInterfaceWrapper) RunDisasterScenario(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "scenarioId" -------------
+	var scenarioId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "scenarioId", chi.URLParam(r, "scenarioId"), &scenarioId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "scenarioId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RunDisasterScenario(w, r, scenarioId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -11931,6 +12498,24 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/failover-tests/{testId}/runs", wrapper.StartFailoverTest)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/clusters/{clusterId}/disaster-scenarios", wrapper.ListDisasterScenarios)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/clusters/{clusterId}/disaster-scenarios", wrapper.CreateDisasterScenario)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/disaster-scenarios/{scenarioId}", wrapper.DeleteDisasterScenario)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/disaster-scenarios/{scenarioId}", wrapper.UpdateDisasterScenario)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/disaster-scenarios/{scenarioId}/preview", wrapper.PreviewDisasterScenario)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/disaster-scenarios/{scenarioId}/run", wrapper.RunDisasterScenario)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/test-runs", wrapper.ListTestRuns)

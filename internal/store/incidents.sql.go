@@ -393,13 +393,13 @@ func (q *Queries) ListIncidentSubjectsOf(ctx context.Context, ids []uuid.UUID) (
 }
 
 const listIncidentTestRuns = `-- name: ListIncidentTestRuns :many
-SELECT r.id, r.kind, r.cluster_id, coalesce(c.name, '')::text AS cluster_name, r.hostname,
+SELECT r.id, r.kind, r.cluster_id, r.cluster_ids, coalesce(c.name, '')::text AS cluster_name, r.hostname,
        coalesce(r.result, '')::text AS result, r.summary, r.created_at, r.finished_at,
        (r.trigger = 'schedule' AND r.result IN ('fail', 'error') AND r.finished_at >= $1::timestamptz)::boolean AS failed
 FROM test_runs r
 LEFT JOIN clusters c ON c.id = r.cluster_id
 WHERE (r.trigger = 'schedule' AND r.result IN ('fail', 'error') AND r.finished_at >= $1::timestamptz)
-   OR (r.kind = 'failover.test' AND (r.finished_at IS NULL OR r.finished_at >= $2::timestamptz))
+   OR (r.kind IN ('failover.test', 'disaster.run') AND (r.finished_at IS NULL OR r.finished_at >= $2::timestamptz))
 `
 
 type ListIncidentTestRunsParams struct {
@@ -411,6 +411,7 @@ type ListIncidentTestRunsRow struct {
 	ID          uuid.UUID
 	Kind        string
 	ClusterID   *uuid.UUID
+	ClusterIds  []uuid.UUID
 	ClusterName string
 	Hostname    string
 	Result      string
@@ -420,8 +421,8 @@ type ListIncidentTestRunsRow struct {
 	Failed      bool
 }
 
-// Geplande tests die mislukten sinds @failed_since, en failovertests die
-// lopen of na @running_since klaar waren.
+// Geplande tests die mislukten sinds @failed_since, en failovertests en
+// rampoefeningen die lopen of na @running_since klaar waren.
 func (q *Queries) ListIncidentTestRuns(ctx context.Context, arg ListIncidentTestRunsParams) ([]ListIncidentTestRunsRow, error) {
 	rows, err := q.db.Query(ctx, listIncidentTestRuns, arg.FailedSince, arg.RunningSince)
 	if err != nil {
@@ -435,6 +436,7 @@ func (q *Queries) ListIncidentTestRuns(ctx context.Context, arg ListIncidentTest
 			&i.ID,
 			&i.Kind,
 			&i.ClusterID,
+			&i.ClusterIds,
 			&i.ClusterName,
 			&i.Hostname,
 			&i.Result,

@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 import { HistoryCard } from "@/components/audit/AuditList";
 import { BackupReport } from "@/components/backups/Verify";
+import { DisasterReportView } from "@/components/disaster/Disaster";
 import { Checks, expectation, RunBadge } from "@/components/failover/Failover";
 import { QueryState } from "@/components/inventory/bits";
 import { Steps } from "@/components/jobs/Steps";
@@ -20,6 +21,7 @@ import {
   type TestRun,
   type TestRunEvent,
 } from "@/lib/failover";
+import { stillDown as disasterStillDown } from "@/lib/disaster";
 import { useIsAdmin } from "@/lib/inventory";
 import { jobActive, useCancelJob, useJob } from "@/lib/proxmox";
 
@@ -45,6 +47,7 @@ function TestRunInner() {
   const restore = useRestoreTestRun();
   if (id === "") return <Alert>Geen testrun opgegeven.</Alert>;
   const isBackup = run.data?.kind === "backup.verify";
+  const disaster = run.data?.disaster ?? null;
   const skipped = run.data?.result === "skipped";
   const vm = run.data?.definition?.scenario === "vm_hard_stop";
 
@@ -69,7 +72,9 @@ function TestRunInner() {
             title={
               isBackup
                 ? `Back-upcontrole: ${run.data.hostname || run.data.cluster_name}`
-                : `Failovertest: ${run.data.definition?.name ?? ""}`
+                : disaster
+                  ? `Rampoefening: ${disaster.name}`
+                  : `Failovertest: ${run.data.definition?.name ?? ""}`
             }
             description={
               <span className="inline-flex flex-wrap items-center gap-2">
@@ -92,7 +97,13 @@ function TestRunInner() {
                       onClick={() => {
                         const question = isBackup
                           ? "Controle afbreken? ClusterForge zet de sandbox-VM uit en verwijdert hem."
-                          : vm
+                          : disaster
+                            ? disaster.kind === "host_down"
+                              ? "Rampoefening afbreken? ClusterForge start de VM's meteen weer."
+                              : disaster.kind === "vip_loss"
+                                ? "Rampoefening afbreken? ClusterForge start keepalived meteen weer."
+                                : `Rampoefening afbreken? ClusterForge zet ${disaster.unit || "de dienst"} meteen weer aan.`
+                            : vm
                             ? "Test afbreken? ClusterForge start de VM meteen weer."
                             : `Test afbreken? ClusterForge zet ${run.data?.definition?.unit || "de dienst"} meteen weer aan.`;
                         if (window.confirm(question)) cancel.mutate(job.data!.id);
@@ -112,7 +123,8 @@ function TestRunInner() {
           />
           {!isBackup && run.data.restored === false && (
             <Alert>
-              Niet volledig hersteld: {stillDown(run.data.definition, run.data.hostname)}.
+              Niet volledig hersteld:{" "}
+              {disaster ? disasterStillDown(disaster) : stillDown(run.data.definition, run.data.hostname)}.
             </Alert>
           )}
           {restore.error && <Alert>{restore.error.message}</Alert>}
@@ -134,6 +146,11 @@ function TestRunInner() {
             </>
           ) : isBackup ? (
             <BackupReport run={run.data} isAdmin={isAdmin} />
+          ) : disaster ? (
+            <>
+              <DisasterReportView run={run.data} d={disaster} />
+              {run.data.checks.length > 0 && <Precheck checks={run.data.checks} />}
+            </>
           ) : (
             run.data.definition &&
             run.data.measurements && (

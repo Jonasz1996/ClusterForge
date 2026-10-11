@@ -10,6 +10,7 @@ import (
 	"github.com/oapi-codegen/nullable"
 
 	"github.com/Jonasz1996/clusterforge/internal/backups"
+	"github.com/Jonasz1996/clusterforge/internal/disaster"
 	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/failover"
 	"github.com/Jonasz1996/clusterforge/internal/httpapi/gen"
@@ -256,7 +257,11 @@ func (s *Server) RestoreTestRun(w http.ResponseWriter, r *http.Request, id uuid.
 	if !ok {
 		return
 	}
-	j, err := s.failover.StartRestore(r.Context(), events.User(p.User.ID), id)
+	restore := s.failover.StartRestore
+	if run, err := s.q.GetTestRun(r.Context(), id); err == nil && run.TestRun.Kind == disaster.KindRun {
+		restore = s.disaster.StartRestore
+	}
+	j, err := restore(r.Context(), events.User(p.User.ID), id)
 	if s.failoverError(w, r, err) {
 		return
 	}
@@ -364,6 +369,7 @@ func toAPIRun(run store.TestRun, jobStatus store.NullJobStatus, requestedBy *str
 		CreatedAt: run.CreatedAt, FinishedAt: nullableOf(run.FinishedAt),
 		Measurements: nullable.NewNullNullable[gen.FailoverMeasurements](),
 		Definition:   nullable.NewNullNullable[gen.FailoverDefinition](), Backup: nullable.NewNullNullable[gen.BackupVerifyReport](),
+		Disaster: nullable.NewNullNullable[gen.DisasterReport](),
 	}
 	if jobStatus.Valid {
 		out.JobStatus = nullable.NewNullableWithValue(gen.JobStatus(jobStatus.JobStatus))
@@ -387,6 +393,8 @@ func toAPIRun(run store.TestRun, jobStatus store.NullJobStatus, requestedBy *str
 		failoverReport(run, &out)
 	case backups.KindVerify:
 		out.Backup = nullable.NewNullableWithValue(backupReport(run, nil))
+	case disaster.KindRun:
+		disasterReport(run, &out)
 	}
 	return out
 }

@@ -9,6 +9,7 @@ import { ProdConfirm, prodConfirmed, useProdTotp } from "@/components/ProdConfir
 import { Empty } from "@/components/inventory/bits";
 import { Alert, Badge, Button, Card, Field, Input, Label, Select, cx } from "@/components/ui";
 import { ApiError } from "@/lib/api/client";
+import { stillDown as disasterStillDown } from "@/lib/disaster";
 import {
   confirmText,
   longAgo,
@@ -76,10 +77,12 @@ function UnrestoredRow({ run, isAdmin }: { run: TestRun; isAdmin: boolean }) {
     >
       <div>
         <p className="font-medium">
-          Failovertest niet volledig hersteld: {stillDown(run.definition, run.hostname)}.
+          {run.disaster
+            ? `Rampoefening niet volledig hersteld: ${disasterStillDown(run.disaster)}.`
+            : `Failovertest niet volledig hersteld: ${stillDown(run.definition, run.hostname)}.`}
         </p>
         <p className="mt-0.5">
-          {run.definition?.name ?? "Failovertest"}, {fmt.format(new Date(run.created_at))}.{" "}
+          {run.disaster?.name ?? run.definition?.name ?? "Failovertest"}, {fmt.format(new Date(run.created_at))}.{" "}
           <Link href={reportHref(run.id)} className="underline">
             Rapport bekijken
           </Link>

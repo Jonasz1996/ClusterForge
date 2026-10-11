@@ -388,13 +388,14 @@ func (q *Queries) ListLiveSandboxes(ctx context.Context) ([]ListLiveSandboxesRow
 }
 
 const listTestRunsFiltered = `-- name: ListTestRunsFiltered :many
-SELECT r.id, r.kind, r.trigger, r.cluster_id, r.test_id, r.node_id, r.hostname, r.job_id, r.definition, r.result, r.restored, r.summary, r.checks, r.timeline, r.measurements, r.requested_by, r.created_at, r.finished_at, j.status AS job_status, u.username AS requested_by_name, c.name AS cluster_name
+SELECT r.id, r.kind, r.trigger, r.cluster_id, r.test_id, r.node_id, r.hostname, r.job_id, r.definition, r.result, r.restored, r.summary, r.checks, r.timeline, r.measurements, r.requested_by, r.created_at, r.finished_at, r.scenario_id, r.cluster_ids, j.status AS job_status, u.username AS requested_by_name, c.name AS cluster_name
 FROM test_runs r
 LEFT JOIN jobs j ON j.id = r.job_id
 LEFT JOIN users u ON u.id = r.requested_by
 LEFT JOIN clusters c ON c.id = r.cluster_id
 WHERE ($1::text IS NULL OR r.kind = $1)
-  AND ($2::uuid IS NULL OR r.cluster_id = $2)
+  AND ($2::uuid IS NULL OR r.cluster_id = $2
+       OR $2::uuid = ANY(r.cluster_ids))
   AND ($3::uuid IS NULL OR r.node_id = $3)
   AND ($4::text IS NULL OR r.result = $4)
 ORDER BY r.created_at DESC
@@ -451,6 +452,8 @@ func (q *Queries) ListTestRunsFiltered(ctx context.Context, arg ListTestRunsFilt
 			&i.TestRun.RequestedBy,
 			&i.TestRun.CreatedAt,
 			&i.TestRun.FinishedAt,
+			&i.TestRun.ScenarioID,
+			&i.TestRun.ClusterIds,
 			&i.JobStatus,
 			&i.RequestedByName,
 			&i.ClusterName,
