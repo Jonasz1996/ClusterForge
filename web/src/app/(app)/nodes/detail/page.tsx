@@ -13,6 +13,7 @@ import { InstallAgent } from "@/components/inventory/InstallAgent";
 import { NodeForm } from "@/components/inventory/NodeForm";
 import { NodeLifecycleCard } from "@/components/inventory/NodeLifecycleCard";
 import { NodeProxmoxCard } from "@/components/proxmox/NodeProxmoxCard";
+import { NodeChangesCard } from "@/components/journal/Changes";
 import {
   AgentBadge,
   ago,
@@ -181,6 +182,7 @@ function NodeDetailInner() {
           )}
 
           {runtime.data?.facts && <FactsView facts={runtime.data.facts} runtime={runtime.data} />}
+          {node.data.agent && <NodeChangesCard nodeId={id} />}
           <HistoryCard filter={{ node: id }} isAdmin={isAdmin} />
         </div>
       )}
@@ -295,7 +297,19 @@ function FactsView({ facts: f, runtime }: { facts: Facts; runtime: NodeRuntime }
             <dt className={dtClass}>Besturingssysteem</dt>
             <dd>{f.os.pretty_name || `${f.os.id} ${f.os.version_id}`}</dd>
             <dt className={dtClass}>Kernel</dt>
-            <dd className="font-mono text-xs">{f.kernel}</dd>
+            <dd>
+              <span className="font-mono text-xs">{f.kernel}</span>
+              {f.reboot_required && (
+                <span className="ml-2">
+                  <Badge tone="amber">herstart nodig</Badge>
+                  {f.kernel_installed && f.kernel_installed !== f.kernel && (
+                    <span className="ml-1 text-xs text-slate-500">
+                      geïnstalleerd: <span className="font-mono">{f.kernel_installed}</span>
+                    </span>
+                  )}
+                </span>
+              )}
+            </dd>
             <dt className={dtClass}>Architectuur</dt>
             <dd>{f.arch}</dd>
             <dt className={dtClass}>Virtualisatie</dt>
@@ -335,7 +349,10 @@ function FactsView({ facts: f, runtime }: { facts: Facts; runtime: NodeRuntime }
               {(f.upgrades.packages?.length ?? 0) > 0 && (
                 <p className="text-xs leading-relaxed text-slate-500">{f.upgrades.packages!.join(", ")}</p>
               )}
-              <p className="text-xs text-slate-500">Volgens de laatste apt update op de node.</p>
+              <p className="text-xs text-slate-500">
+                Volgens de laatste apt update op de node
+                {f.apt_updated_at ? `, ${fmt.format(new Date(f.apt_updated_at))}` : ""}.
+              </p>
             </div>
           ) : (
             <p className="text-sm text-slate-500">Geen apt op deze node.</p>
@@ -381,13 +398,38 @@ function FactsView({ facts: f, runtime }: { facts: Facts; runtime: NodeRuntime }
               <tr key={i.name}>
                 <td className={tdClass}>
                   {i.name}
-                  <div className="font-mono text-[11px] text-slate-400">{i.mac}</div>
+                  {i.kind && (
+                    <span className="ml-1.5 text-xs text-slate-500">
+                      {i.kind}
+                      {i.vlan_id ? ` ${i.vlan_id}` : ""}
+                      {i.master ? ` in ${i.master}` : ""}
+                    </span>
+                  )}
+                  <div className="font-mono text-[11px] text-slate-400">
+                    {i.mac}
+                    {i.mtu && i.mtu !== 1500 ? ` · mtu ${i.mtu}` : ""}
+                  </div>
                 </td>
                 <td className={`${tdClass} font-mono text-xs`}>{i.addresses?.length ? i.addresses.join(", ") : "–"}</td>
                 <td className={`${tdClass} text-right`}>{!i.up && <Badge>down</Badge>}</td>
               </tr>
             ))}
           </Table>
+          {(f.default_gateway || (f.dns?.length ?? 0) > 0) && (
+            <p className="mt-3 text-xs text-slate-500">
+              {f.default_gateway && (
+                <>
+                  Gateway <span className="font-mono">{f.default_gateway}</span>
+                </>
+              )}
+              {f.default_gateway && (f.dns?.length ?? 0) > 0 && " · "}
+              {(f.dns?.length ?? 0) > 0 && (
+                <>
+                  DNS <span className="font-mono">{f.dns!.join(", ")}</span>
+                </>
+              )}
+            </p>
+          )}
         </Card>
 
         <Card title="Opslag">

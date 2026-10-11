@@ -350,6 +350,10 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 		return "Proxmox " + name + " niet bereikbaar" + colon(str(p, "error"))
 	case "proxmox.sync_recovered":
 		return "Proxmox " + name + " weer bereikbaar"
+	case "proxmox.host_offline":
+		return "Host " + str(p, "host") + " van Proxmox " + name + " is offline"
+	case "proxmox.host_online":
+		return "Host " + str(p, "host") + " van Proxmox " + name + " is weer online"
 	case "vm.status_changed":
 		return fmt.Sprintf("VM %s van %s gaat van %s naar %s", num(p["vmid"]), str(p, "hostname"), vmStatus(from), vmStatus(to))
 	case "vm.moved":

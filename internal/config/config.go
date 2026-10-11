@@ -70,6 +70,9 @@ type Config struct {
 	// back-upcontroles draaien, op de klok van de tijdzone van de server
 	// (CF_TEST_WINDOW, standaard "zo 03:00-05:00"; de tijdzone komt uit TZ).
 	TestWindow planner.Window
+	// JournalLogins bewaart SSH-logins in het journaal
+	// (CF_JOURNAL_SSH_LOGINS, standaard aan).
+	JournalLogins bool
 }
 
 func FromEnv() (Config, error) {
@@ -77,6 +80,7 @@ func FromEnv() (Config, error) {
 		DatabaseURL:        os.Getenv("CF_DATABASE_URL"),
 		Listen:             envOr("CF_LISTEN", ":8080"),
 		SecureCookies:      true,
+		JournalLogins:      true,
 		SessionTTL:         12 * time.Hour,
 		DriftInterval:      15 * time.Minute,
 		SandboxBootTimeout: 10 * time.Minute,
@@ -117,6 +121,13 @@ func FromEnv() (Config, error) {
 			return c, fmt.Errorf("CF_TRUST_PROXY_HEADERS: %w", err)
 		}
 		c.TrustProxyHeaders = b
+	}
+	if v := os.Getenv("CF_JOURNAL_SSH_LOGINS"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return c, fmt.Errorf("CF_JOURNAL_SSH_LOGINS: %w", err)
+		}
+		c.JournalLogins = b
 	}
 	if v := os.Getenv("CF_SESSION_TTL"); v != "" {
 		d, err := time.ParseDuration(v)

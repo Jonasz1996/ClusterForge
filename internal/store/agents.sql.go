@@ -214,7 +214,7 @@ func (q *Queries) GetNodeFacts(ctx context.Context, nodeID uuid.UUID) (NodeFact,
 }
 
 const getNodeStatus = `-- name: GetNodeStatus :one
-SELECT node_id, heartbeat_at, uptime_seconds, load1, load5, load15, addresses, services, disk_used_ratio, disk_used_mount FROM node_status WHERE node_id = $1
+SELECT node_id, heartbeat_at, uptime_seconds, load1, load5, load15, addresses, services, disk_used_ratio, disk_used_mount, clock_offset_ms FROM node_status WHERE node_id = $1
 `
 
 func (q *Queries) GetNodeStatus(ctx context.Context, nodeID uuid.UUID) (NodeStatus, error) {
@@ -231,6 +231,7 @@ func (q *Queries) GetNodeStatus(ctx context.Context, nodeID uuid.UUID) (NodeStat
 		&i.Services,
 		&i.DiskUsedRatio,
 		&i.DiskUsedMount,
+		&i.ClockOffsetMs,
 	)
 	return i, err
 }
@@ -491,12 +492,12 @@ func (q *Queries) UpsertNodeFacts(ctx context.Context, arg UpsertNodeFactsParams
 }
 
 const upsertNodeStatus = `-- name: UpsertNodeStatus :exec
-INSERT INTO node_status (node_id, heartbeat_at, uptime_seconds, load1, load5, load15, addresses, services)
-VALUES ($1, now(), $2, $3, $4, $5, $6, $7)
+INSERT INTO node_status (node_id, heartbeat_at, uptime_seconds, load1, load5, load15, addresses, services, clock_offset_ms)
+VALUES ($1, now(), $2, $3, $4, $5, $6, $7, $8)
 ON CONFLICT (node_id) DO UPDATE
 SET heartbeat_at = now(), uptime_seconds = EXCLUDED.uptime_seconds, load1 = EXCLUDED.load1,
     load5 = EXCLUDED.load5, load15 = EXCLUDED.load15, addresses = EXCLUDED.addresses,
-    services = EXCLUDED.services
+    services = EXCLUDED.services, clock_offset_ms = EXCLUDED.clock_offset_ms
 `
 
 type UpsertNodeStatusParams struct {
@@ -507,6 +508,7 @@ type UpsertNodeStatusParams struct {
 	Load15        float64
 	Addresses     []string
 	Services      []byte
+	ClockOffsetMs int32
 }
 
 func (q *Queries) UpsertNodeStatus(ctx context.Context, arg UpsertNodeStatusParams) error {
@@ -518,6 +520,7 @@ func (q *Queries) UpsertNodeStatus(ctx context.Context, arg UpsertNodeStatusPara
 		arg.Load15,
 		arg.Addresses,
 		arg.Services,
+		arg.ClockOffsetMs,
 	)
 	return err
 }

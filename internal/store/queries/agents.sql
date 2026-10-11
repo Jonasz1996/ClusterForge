@@ -59,12 +59,12 @@ UPDATE agents SET last_seen_at = now(), version = $2, protocol_version = $3
 WHERE node_id = $1 AND revoked_at IS NULL;
 
 -- name: UpsertNodeStatus :exec
-INSERT INTO node_status (node_id, heartbeat_at, uptime_seconds, load1, load5, load15, addresses, services)
-VALUES ($1, now(), $2, $3, $4, $5, $6, $7)
+INSERT INTO node_status (node_id, heartbeat_at, uptime_seconds, load1, load5, load15, addresses, services, clock_offset_ms)
+VALUES ($1, now(), $2, $3, $4, $5, $6, $7, $8)
 ON CONFLICT (node_id) DO UPDATE
 SET heartbeat_at = now(), uptime_seconds = EXCLUDED.uptime_seconds, load1 = EXCLUDED.load1,
     load5 = EXCLUDED.load5, load15 = EXCLUDED.load15, addresses = EXCLUDED.addresses,
-    services = EXCLUDED.services;
+    services = EXCLUDED.services, clock_offset_ms = EXCLUDED.clock_offset_ms;
 
 -- name: GetNodeStatus :one
 SELECT * FROM node_status WHERE node_id = $1;

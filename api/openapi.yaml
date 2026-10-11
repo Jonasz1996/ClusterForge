@@ -490,6 +490,47 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "502": { $ref: "#/components/responses/Error" }
         "503": { $ref: "#/components/responses/Error" }
+  /nodes/{nodeId}/changes:
+    parameters:
+      - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+      - $ref: "#/components/parameters/ChangesFrom"
+      - $ref: "#/components/parameters/ChangesTo"
+      - $ref: "#/components/parameters/ChangesKind"
+      - $ref: "#/components/parameters/ChangesLimit"
+    get:
+      operationId: listNodeChanges
+      summary: Het wijzigingsjournaal van een node, nieuwste eerst
+      description: |
+        Wat er op de node veranderde, uit de agent, de server, Proxmox en
+        ClusterForge zelf. Een viewer ziet bij een SSH-login geen IP-adres.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NodeChanges" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /clusters/{clusterId}/changes:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+      - $ref: "#/components/parameters/ChangesFrom"
+      - $ref: "#/components/parameters/ChangesTo"
+      - $ref: "#/components/parameters/ChangesKind"
+      - $ref: "#/components/parameters/ChangesLimit"
+    get:
+      operationId: listClusterChanges
+      summary: Het wijzigingsjournaal van alle nodes van een cluster, nieuwste eerst
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NodeChanges" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
   /clusters/{clusterId}/metrics:
     parameters:
       - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -1813,6 +1854,25 @@ components:
       in: cookie
       name: cf_session
   parameters:
+    ChangesFrom:
+      name: from
+      in: query
+      description: Vanaf dit tijdstip; standaard 7 dagen geleden
+      schema: { type: string, format: date-time }
+    ChangesTo:
+      name: to
+      in: query
+      description: Tot (niet tot en met) dit tijdstip; standaard nu
+      schema: { type: string, format: date-time }
+    ChangesKind:
+      name: kind
+      in: query
+      description: Alleen deze soorten, met komma's, zoals package,service
+      schema: { type: string }
+    ChangesLimit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 1000, default: 200 }
     AuditBefore:
       name: before
       in: query
@@ -3016,6 +3076,40 @@ components:
         enrolled_at: { type: string, format: date-time }
         last_seen_at: { type: string, format: date-time, nullable: true }
         connection: { $ref: "#/components/schemas/AgentConnection" }
+    NodeChanges:
+      type: object
+      required: [changes, has_more, agents_too_old]
+      properties:
+        changes: { type: array, items: { $ref: "#/components/schemas/NodeChange" } }
+        has_more: { type: boolean, description: Er zijn meer regels in de periode dan limit }
+        agents_too_old:
+          type: array
+          description: Nodes waarvan de agent nog geen journaal stuurt; van hen komen alleen regels van de server en Proxmox
+          items: { $ref: "#/components/schemas/ChangesNode" }
+    ChangesNode:
+      type: object
+      required: [node_id, hostname]
+      properties:
+        node_id: { type: string, format: uuid }
+        hostname: { type: string }
+    NodeChange:
+      type: object
+      required: [id, node_id, hostname, ts, observed_at, source, kind, subject, action, summary, detail, job_id]
+      properties:
+        id: { type: integer, format: int64 }
+        node_id: { type: string, format: uuid }
+        hostname: { type: string }
+        ts: { type: string, format: date-time, description: Tijd op de node, gecorrigeerd voor de klokafwijking }
+        observed_at: { type: string, format: date-time }
+        source: { type: string, enum: [agent, server, proxmox, clusterforge] }
+        kind:
+          type: string
+          description: package, service, file, boot, login, oom, network, facts, vm, agent, user of command
+        subject: { type: string }
+        action: { type: string }
+        summary: { type: string }
+        detail: { type: object, additionalProperties: { type: string } }
+        job_id: { type: string, format: uuid, nullable: true }
     NodeRuntime:
       type: object
       required: [facts, collected_at, changed_at, heartbeat]
@@ -3071,6 +3165,11 @@ components:
               mac: { type: string }
               up: { type: boolean }
               addresses: { type: array, nullable: true, items: { type: string } }
+              kind: { type: string, description: "Vanaf protocol 5: physical, vlan, bridge, bond, veth, wireguard, tun, dummy of other" }
+              parent: { type: string }
+              master: { type: string }
+              vlan_id: { type: integer }
+              mtu: { type: integer }
         filesystems:
           type: array
           nullable: true
@@ -3107,6 +3206,20 @@ components:
           properties:
             active: { type: string }
             vips: { type: array, nullable: true, items: { type: string } }
+            instances:
+              type: array
+              description: Vanaf protocol 5
+              items:
+                type: object
+                required: [name, interface, vrid, vips]
+                properties:
+                  name: { type: string }
+                  interface: { type: string }
+                  vrid: { type: integer }
+                  state: { type: string }
+                  priority: { type: integer }
+                  peers: { type: array, items: { type: string } }
+                  vips: { type: array, nullable: true, items: { type: string } }
         upgrades:
           type: object
           nullable: true
@@ -3115,6 +3228,43 @@ components:
             total: { type: integer }
             security: { type: integer }
             packages: { type: array, nullable: true, items: { type: string } }
+        routes:
+          type: array
+          description: Vanaf protocol 5
+          items:
+            type: object
+            required: [dest, interface]
+            properties:
+              dest: { type: string }
+              gateway: { type: string }
+              interface: { type: string }
+              metric: { type: integer }
+        default_gateway: { type: string }
+        dns: { type: array, items: { type: string } }
+        listeners:
+          type: array
+          items:
+            type: object
+            required: [proto, addr, port]
+            properties:
+              proto: { type: string }
+              addr: { type: string }
+              port: { type: integer }
+              unit: { type: string }
+        reboot_required: { type: boolean }
+        kernel_installed: { type: string }
+        apt_updated_at: { type: string, format: date-time }
+        certificates:
+          type: array
+          items:
+            type: object
+            required: [path, subject, issuer, not_after]
+            properties:
+              path: { type: string }
+              subject: { type: string }
+              dns_names: { type: array, items: { type: string } }
+              issuer: { type: string }
+              not_after: { type: string, format: date-time }
     EnrollmentToken:
       type: object
       required: [id, description, node_id, node_hostname, cluster_id, cluster_name, max_uses, uses, expires_at, created_at, created_by]

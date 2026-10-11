@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"math"
 	"net/netip"
 	"reflect"
 	"slices"
@@ -31,40 +32,65 @@ func (b *Bus) subscribe() error {
 	if _, err := b.nc.Subscribe("cf.node.*."+protocol.SubjectMetrics, b.onMetrics); err != nil {
 		return err
 	}
+	if _, err := b.nc.Subscribe("cf.node.*."+protocol.SubjectEvents, b.onEvents); err != nil {
+		return err
+	}
 	return b.nc.Flush()
 }
 
-// decode leest een envelop van een agent. De node-id komt uit het subject; de
-// rechten in NATS zorgen dat een agent alleen onder zijn eigen node publiceert.
-func decode(m *nats.Msg, wantType string, body any) (uuid.UUID, error) {
+// envelopeOf leest de envelop van een agent. De node-id komt uit het
+// subject; de rechten in NATS zorgen dat een agent alleen onder zijn eigen
+// node publiceert.
+func envelopeOf(m *nats.Msg) (uuid.UUID, protocol.Envelope, error) {
+	var env protocol.Envelope
 	id, _, ok := protocol.ParseSubject(m.Subject)
 	if !ok {
-		return uuid.Nil, errors.New("ongeldig subject")
+		return uuid.Nil, env, errors.New("ongeldig subject")
 	}
 	nodeID, err := uuid.Parse(id)
 	if err != nil {
-		return uuid.Nil, err
+		return uuid.Nil, env, err
 	}
-	var env protocol.Envelope
 	if err := json.Unmarshal(m.Data, &env); err != nil {
-		return uuid.Nil, err
+		return uuid.Nil, env, err
+	}
+	return nodeID, env, nil
+}
+
+// decode leest een envelop van het verwachte type en geeft ook het tijdstip
+// waarop de agent hem maakte.
+func decode(m *nats.Msg, wantType string, body any) (uuid.UUID, time.Time, error) {
+	nodeID, env, err := envelopeOf(m)
+	if err != nil {
+		return uuid.Nil, time.Time{}, err
 	}
 	if env.Type != wantType {
-		return uuid.Nil, errors.New("onverwacht berichttype " + env.Type)
+		return uuid.Nil, time.Time{}, errors.New("onverwacht berichttype " + env.Type)
 	}
-	return nodeID, json.Unmarshal(env.Body, body)
+	return nodeID, env.TS, json.Unmarshal(env.Body, body)
+}
+
+// clockOffset is de tijd van de agent min die van de server, in
+// milliseconden. Zonder tijd in de envelop is het nul.
+func clockOffset(sent, received time.Time) int32 {
+	if sent.IsZero() {
+		return 0
+	}
+	ms := sent.Sub(received).Milliseconds()
+	return int32(max(min(ms, math.MaxInt32), math.MinInt32))
 }
 
 func (b *Bus) onHeartbeat(m *nats.Msg) {
+	received := time.Now()
 	var hb protocol.Heartbeat
-	nodeID, err := decode(m, protocol.TypeHeartbeat, &hb)
+	nodeID, sent, err := decode(m, protocol.TypeHeartbeat, &hb)
 	if err != nil {
 		b.log.Warn("ongeldige heartbeat", "subject", m.Subject, "err", err)
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if err := b.handleHeartbeat(ctx, nodeID, hb); err != nil {
+	if err := b.handleHeartbeat(ctx, nodeID, hb, clockOffset(sent, received)); err != nil {
 		b.log.Error("heartbeat verwerken mislukt", "node", nodeID, "err", err)
 		return
 	}
@@ -77,7 +103,7 @@ func (b *Bus) changed() {
 	}
 }
 
-func (b *Bus) handleHeartbeat(ctx context.Context, nodeID uuid.UUID, hb protocol.Heartbeat) error {
+func (b *Bus) handleHeartbeat(ctx context.Context, nodeID uuid.UUID, hb protocol.Heartbeat, offset int32) error {
 	addrs := normalizeAddrs(hb.Addresses)
 	services, err := json.Marshal(nonNilMap(hb.Services))
 	if err != nil {
@@ -85,18 +111,30 @@ func (b *Bus) handleHeartbeat(ctx context.Context, nodeID uuid.UUID, hb protocol
 	}
 	return pgx.BeginFunc(ctx, b.pool, func(tx pgx.Tx) error {
 		q := store.New(tx)
-		err := q.TouchAgent(ctx, store.TouchAgentParams{
-			NodeID: nodeID, Version: limit(hb.AgentVersion, 64), ProtocolVersion: int32(hb.ProtocolVersion),
+		prev, err := q.GetHeartbeatPrevious(ctx, nodeID)
+		known := err == nil
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		version := limit(hb.AgentVersion, 64)
+		err = q.TouchAgent(ctx, store.TouchAgentParams{
+			NodeID: nodeID, Version: version, ProtocolVersion: int32(hb.ProtocolVersion),
 		})
 		if err != nil {
 			return err
 		}
 		// De VIP-eigenaar en de status berekent internal/status hieruit.
-		return q.UpsertNodeStatus(ctx, store.UpsertNodeStatusParams{
+		if err := q.UpsertNodeStatus(ctx, store.UpsertNodeStatusParams{
 			NodeID: nodeID, UptimeSeconds: hb.UptimeSeconds,
 			Load1: hb.Load[0], Load5: hb.Load[1], Load15: hb.Load[2],
-			Addresses: addrs, Services: services,
-		})
+			Addresses: addrs, Services: services, ClockOffsetMs: offset,
+		}); err != nil {
+			return err
+		}
+		if !known {
+			return nil
+		}
+		return b.heartbeatChanges(ctx, q, nodeID, prev, hb, version)
 	})
 }
 
@@ -113,7 +151,7 @@ func (b *Bus) onFacts(m *nats.Msg) {
 		_ = m.Respond(data)
 	}
 	var f protocol.Facts
-	nodeID, err := decode(m, protocol.TypeFacts, &f)
+	nodeID, _, err := decode(m, protocol.TypeFacts, &f)
 	if err != nil {
 		b.log.Warn("ongeldige facts", "subject", m.Subject, "err", err)
 		reply(err)
@@ -135,7 +173,7 @@ func (b *Bus) onMetrics(m *nats.Msg) {
 		return
 	}
 	var batch protocol.Metrics
-	nodeID, err := decode(m, protocol.TypeMetrics, &batch)
+	nodeID, _, err := decode(m, protocol.TypeMetrics, &batch)
 	if err != nil {
 		b.log.Warn("ongeldige metrics", "subject", m.Subject, "err", err)
 		return
@@ -185,6 +223,11 @@ func (b *Bus) handleFacts(ctx context.Context, nodeID uuid.UUID, f protocol.Fact
 		node, err := q.GetNode(ctx, nodeID)
 		if err != nil {
 			return err
+		}
+		if !first {
+			if err := b.factsChanges(ctx, q, node.Node, old, f); err != nil {
+				return err
+			}
 		}
 		return b.ev.Write(ctx, q, events.Event{
 			Actor: events.Actor{Type: store.ActorTypeAgent, ID: nodeID.String()}, SubjectType: "node",
