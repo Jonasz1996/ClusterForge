@@ -813,6 +813,30 @@ func (e NodeAction) Valid() bool {
 	}
 }
 
+// Defines values for NodeChangeSource.
+const (
+	NodeChangeSourceAgent        NodeChangeSource = "agent"
+	NodeChangeSourceClusterforge NodeChangeSource = "clusterforge"
+	NodeChangeSourceProxmox      NodeChangeSource = "proxmox"
+	NodeChangeSourceServer       NodeChangeSource = "server"
+)
+
+// Valid indicates whether the value is a known member of the NodeChangeSource enum.
+func (e NodeChangeSource) Valid() bool {
+	switch e {
+	case NodeChangeSourceAgent:
+		return true
+	case NodeChangeSourceClusterforge:
+		return true
+	case NodeChangeSourceProxmox:
+		return true
+	case NodeChangeSourceServer:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for NodeLifecycle.
 const (
 	NodeLifecycleActive         NodeLifecycle = "active"
@@ -1709,6 +1733,12 @@ type ChangePasswordRequest struct {
 	NewPassword     string `json:"new_password"`
 }
 
+// ChangesNode defines model for ChangesNode.
+type ChangesNode struct {
+	Hostname string             `json:"hostname"`
+	NodeId   openapi_types.UUID `json:"node_id"`
+}
+
 // Cluster defines model for Cluster.
 type Cluster struct {
 	// AppliedRevision De revisie die op alle nodes staat; lager dan spec_revision na een mislukte toepassing
@@ -2296,10 +2326,20 @@ type EventActorType string
 
 // Facts Zoals de agent ze verzamelt; zie pkg/protocol
 type Facts struct {
-	Arch     string    `json:"arch"`
-	BootTime time.Time `json:"boot_time"`
-	Cpus     int       `json:"cpus"`
-	Docker   nullable.Nullable[struct {
+	AptUpdatedAt *time.Time `json:"apt_updated_at,omitempty"`
+	Arch         string     `json:"arch"`
+	BootTime     time.Time  `json:"boot_time"`
+	Certificates *[]struct {
+		DnsNames *[]string `json:"dns_names,omitempty"`
+		Issuer   string    `json:"issuer"`
+		NotAfter time.Time `json:"not_after"`
+		Path     string    `json:"path"`
+		Subject  string    `json:"subject"`
+	} `json:"certificates,omitempty"`
+	Cpus           int       `json:"cpus"`
+	DefaultGateway *string   `json:"default_gateway,omitempty"`
+	Dns            *[]string `json:"dns,omitempty"`
+	Docker         nullable.Nullable[struct {
 		Containers int    `json:"containers"`
 		Version    string `json:"version"`
 	}] `json:"docker"`
@@ -2313,15 +2353,40 @@ type Facts struct {
 	Hostname   string `json:"hostname"`
 	Interfaces nullable.Nullable[[]struct {
 		Addresses nullable.Nullable[[]string] `json:"addresses"`
-		Mac       string                      `json:"mac"`
-		Name      string                      `json:"name"`
-		Up        bool                        `json:"up"`
+
+		// Kind Vanaf protocol 5: physical, vlan, bridge, bond, veth, wireguard, tun, dummy of other
+		Kind   *string `json:"kind,omitempty"`
+		Mac    string  `json:"mac"`
+		Master *string `json:"master,omitempty"`
+		Mtu    *int    `json:"mtu,omitempty"`
+		Name   string  `json:"name"`
+		Parent *string `json:"parent,omitempty"`
+		Up     bool    `json:"up"`
+		VlanId *int    `json:"vlan_id,omitempty"`
 	}] `json:"interfaces"`
 	Keepalived nullable.Nullable[struct {
-		Active string                      `json:"active"`
-		Vips   nullable.Nullable[[]string] `json:"vips"`
+		Active string `json:"active"`
+
+		// Instances Vanaf protocol 5
+		Instances *[]struct {
+			Interface string                      `json:"interface"`
+			Name      string                      `json:"name"`
+			Peers     *[]string                   `json:"peers,omitempty"`
+			Priority  *int                        `json:"priority,omitempty"`
+			State     *string                     `json:"state,omitempty"`
+			Vips      nullable.Nullable[[]string] `json:"vips"`
+			Vrid      int                         `json:"vrid"`
+		} `json:"instances,omitempty"`
+		Vips nullable.Nullable[[]string] `json:"vips"`
 	}] `json:"keepalived"`
-	Kernel      string `json:"kernel"`
+	Kernel          string  `json:"kernel"`
+	KernelInstalled *string `json:"kernel_installed,omitempty"`
+	Listeners       *[]struct {
+		Addr  string  `json:"addr"`
+		Port  int     `json:"port"`
+		Proto string  `json:"proto"`
+		Unit  *string `json:"unit,omitempty"`
+	} `json:"listeners,omitempty"`
 	MachineId   string `json:"machine_id"`
 	MemoryBytes int64  `json:"memory_bytes"`
 	Os          struct {
@@ -2331,7 +2396,16 @@ type Facts struct {
 		VersionId  string `json:"version_id"`
 	} `json:"os"`
 	PrimaryAddress string `json:"primary_address"`
-	Services       nullable.Nullable[[]struct {
+	RebootRequired *bool  `json:"reboot_required,omitempty"`
+
+	// Routes Vanaf protocol 5
+	Routes *[]struct {
+		Dest      string  `json:"dest"`
+		Gateway   *string `json:"gateway,omitempty"`
+		Interface string  `json:"interface"`
+		Metric    *int    `json:"metric,omitempty"`
+	} `json:"routes,omitempty"`
+	Services nullable.Nullable[[]struct {
 		Active  string `json:"active"`
 		Enabled string `json:"enabled"`
 		Name    string `json:"name"`
@@ -3108,6 +3182,39 @@ type NodeBackups struct {
 	Item    nullable.Nullable[BackupItem] `json:"item"`
 }
 
+// NodeChange defines model for NodeChange.
+type NodeChange struct {
+	Action   string                                `json:"action"`
+	Detail   map[string]string                     `json:"detail"`
+	Hostname string                                `json:"hostname"`
+	Id       int64                                 `json:"id"`
+	JobId    nullable.Nullable[openapi_types.UUID] `json:"job_id"`
+
+	// Kind package, service, file, boot, login, oom, network, facts, vm, agent, user of command
+	Kind       string             `json:"kind"`
+	NodeId     openapi_types.UUID `json:"node_id"`
+	ObservedAt time.Time          `json:"observed_at"`
+	Source     NodeChangeSource   `json:"source"`
+	Subject    string             `json:"subject"`
+	Summary    string             `json:"summary"`
+
+	// Ts Tijd op de node
+	Ts time.Time `json:"ts"`
+}
+
+// NodeChangeSource defines model for NodeChange.Source.
+type NodeChangeSource string
+
+// NodeChanges defines model for NodeChanges.
+type NodeChanges struct {
+	// AgentsTooOld Nodes waarvan de agent nog geen journaal stuurt; van hen komen alleen regels van de server en Proxmox
+	AgentsTooOld []ChangesNode `json:"agents_too_old"`
+	Changes      []NodeChange  `json:"changes"`
+
+	// HasMore Er zijn meer regels in de periode dan limit
+	HasMore bool `json:"has_more"`
+}
+
 // NodeInput defines model for NodeInput.
 type NodeInput struct {
 	ClusterId   nullable.Nullable[openapi_types.UUID] `json:"cluster_id,omitempty"`
@@ -3764,6 +3871,18 @@ type AuditTo = time.Time
 // AuditUser defines model for AuditUser.
 type AuditUser = openapi_types.UUID
 
+// ChangesFrom defines model for ChangesFrom.
+type ChangesFrom = time.Time
+
+// ChangesKind defines model for ChangesKind.
+type ChangesKind = string
+
+// ChangesLimit defines model for ChangesLimit.
+type ChangesLimit = int
+
+// ChangesTo defines model for ChangesTo.
+type ChangesTo = time.Time
+
 // ListAuditParams defines parameters for ListAudit.
 type ListAuditParams struct {
 	// Before Alleen regels met een kleiner id (de volgende pagina)
@@ -3826,6 +3945,19 @@ type ExportAuditParams struct {
 // ExportAuditParamsActorType defines parameters for ExportAudit.
 type ExportAuditParamsActorType string
 
+// ListClusterChangesParams defines parameters for ListClusterChanges.
+type ListClusterChangesParams struct {
+	// From Vanaf dit tijdstip; standaard 7 dagen geleden
+	From *ChangesFrom `form:"from,omitempty" json:"from,omitempty"`
+
+	// To Tot (niet tot en met) dit tijdstip; standaard nu
+	To *ChangesTo `form:"to,omitempty" json:"to,omitempty"`
+
+	// Kind Alleen deze soorten, met komma's, zoals package,service
+	Kind  *ChangesKind  `form:"kind,omitempty" json:"kind,omitempty"`
+	Limit *ChangesLimit `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
 // GetClusterMetricsParams defines parameters for GetClusterMetrics.
 type GetClusterMetricsParams struct {
 	Range *MetricsRange `form:"range,omitempty" json:"range,omitempty"`
@@ -3875,6 +4007,19 @@ type ListJobsParams struct {
 	ClusterId *openapi_types.UUID `form:"cluster_id,omitempty" json:"cluster_id,omitempty"`
 	ProxmoxId *openapi_types.UUID `form:"proxmox_id,omitempty" json:"proxmox_id,omitempty"`
 	Limit     *int                `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// ListNodeChangesParams defines parameters for ListNodeChanges.
+type ListNodeChangesParams struct {
+	// From Vanaf dit tijdstip; standaard 7 dagen geleden
+	From *ChangesFrom `form:"from,omitempty" json:"from,omitempty"`
+
+	// To Tot (niet tot en met) dit tijdstip; standaard nu
+	To *ChangesTo `form:"to,omitempty" json:"to,omitempty"`
+
+	// Kind Alleen deze soorten, met komma's, zoals package,service
+	Kind  *ChangesKind  `form:"kind,omitempty" json:"kind,omitempty"`
+	Limit *ChangesLimit `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
 // GetNodeMetricsParams defines parameters for GetNodeMetrics.
@@ -4075,6 +4220,9 @@ type ServerInterface interface {
 	// UpdateBackupPolicy Back-upbeleid van een cluster wijzigen (admin)
 	// (PUT /clusters/{clusterId}/backup-policy)
 	UpdateBackupPolicy(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
+	// ListClusterChanges Het wijzigingsjournaal van alle nodes van een cluster, nieuwste eerst
+	// (GET /clusters/{clusterId}/changes)
+	ListClusterChanges(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params ListClusterChangesParams)
 	// GetClusterDrift Drift van een cluster per node, met waarmee vergeleken wordt
 	// (GET /clusters/{clusterId}/drift)
 	GetClusterDrift(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
@@ -4243,6 +4391,9 @@ type ServerInterface interface {
 	// VerifyNodeBackup Back-up controleren in een sandbox (admin)
 	// (POST /nodes/{nodeId}/backups/verify)
 	VerifyNodeBackup(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// ListNodeChanges Het wijzigingsjournaal van een node, nieuwste eerst
+	// (GET /nodes/{nodeId}/changes)
+	ListNodeChanges(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID, params ListNodeChangesParams)
 	// GetNodeDrift Drift van één node
 	// (GET /nodes/{nodeId}/drift)
 	GetNodeDrift(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
@@ -4450,6 +4601,12 @@ func (_ Unimplemented) GetBackupPolicy(w http.ResponseWriter, r *http.Request, c
 // UpdateBackupPolicy Back-upbeleid van een cluster wijzigen (admin)
 // (PUT /clusters/{clusterId}/backup-policy)
 func (_ Unimplemented) UpdateBackupPolicy(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListClusterChanges Het wijzigingsjournaal van alle nodes van een cluster, nieuwste eerst
+// (GET /clusters/{clusterId}/changes)
+func (_ Unimplemented) ListClusterChanges(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params ListClusterChangesParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -4786,6 +4943,12 @@ func (_ Unimplemented) GetNodeBackups(w http.ResponseWriter, r *http.Request, no
 // VerifyNodeBackup Back-up controleren in een sandbox (admin)
 // (POST /nodes/{nodeId}/backups/verify)
 func (_ Unimplemented) VerifyNodeBackup(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListNodeChanges Het wijzigingsjournaal van een node, nieuwste eerst
+// (GET /nodes/{nodeId}/changes)
+func (_ Unimplemented) ListNodeChanges(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID, params ListNodeChangesParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -5595,6 +5758,87 @@ func (siw *ServerInterfaceWrapper) UpdateBackupPolicy(w http.ResponseWriter, r *
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.UpdateBackupPolicy(w, r, clusterId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListClusterChanges operation middleware
+func (siw *ServerInterfaceWrapper) ListClusterChanges(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListClusterChangesParams
+
+	// ------------- Optional query parameter "from" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "from", r.URL.Query(), &params.From, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "from"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "from", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "to" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "to", r.URL.Query(), &params.To, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "to"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "to", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "kind" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "kind", r.URL.Query(), &params.Kind, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "kind"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "kind", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListClusterChanges(w, r, clusterId, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -7074,6 +7318,87 @@ func (siw *ServerInterfaceWrapper) VerifyNodeBackup(w http.ResponseWriter, r *ht
 	handler.ServeHTTP(w, r)
 }
 
+// ListNodeChanges operation middleware
+func (siw *ServerInterfaceWrapper) ListNodeChanges(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListNodeChangesParams
+
+	// ------------- Optional query parameter "from" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "from", r.URL.Query(), &params.From, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "from"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "from", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "to" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "to", r.URL.Query(), &params.To, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "to"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "to", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "kind" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "kind", r.URL.Query(), &params.Kind, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "kind"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "kind", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListNodeChanges(w, r, nodeId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetNodeDrift operation middleware
 func (siw *ServerInterfaceWrapper) GetNodeDrift(w http.ResponseWriter, r *http.Request) {
 
@@ -7958,6 +8283,12 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/nodes/{nodeId}/metrics", wrapper.GetNodeMetrics)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/nodes/{nodeId}/changes", wrapper.ListNodeChanges)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/clusters/{clusterId}/changes", wrapper.ListClusterChanges)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/clusters/{clusterId}/metrics", wrapper.GetClusterMetrics)

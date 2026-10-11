@@ -63,6 +63,9 @@ func (b *Bus) Command(ctx context.Context, nodeID uuid.UUID, cmd protocol.Comman
 	if err := json.Unmarshal(env.Body, &res); err != nil {
 		return protocol.Result{}, fmt.Errorf("ongeldig antwoord van de agent: %w", err)
 	}
+	if changes(cmd.Action) {
+		b.recordCommand(ctx, nodeID, cmd, res)
+	}
 	return res, nil
 }
 

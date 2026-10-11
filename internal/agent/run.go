@@ -9,6 +9,9 @@ import (
 	"log/slog"
 	"net"
 	"net/url"
+	"path/filepath"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -38,8 +41,24 @@ type Agent struct {
 	// Root is de bestandssysteemwortel voor deploystappen; leeg is "/".
 	// Tests gebruiken een map.
 	Root string
+	// Journal is het wijzigingsjournaal; nil maakt er een met de standaard
+	// paden.
+	Journal *Journal
+	// JournalInterval, ConnsSample en ConnsInterval; nul gebruikt de
+	// standaard uit protocol.
+	JournalInterval time.Duration
+	ConnsSample     time.Duration
+	ConnsInterval   time.Duration
+	// AddressPoll is hoe vaak de agent naar zijn adressen kijkt; bij een
+	// wijziging stuurt hij meteen een heartbeat. Nul is één seconde.
+	AddressPoll time.Duration
 
-	nc        *nats.Conn
+	nc    *nats.Conn
+	conns ConnTracker
+	// hbMu bewaakt lastAddrs en lastHB.
+	hbMu      sync.Mutex
+	lastAddrs string
+	lastHB    time.Time
 	factsNow  chan struct{}
 	connected chan struct{}
 	// stateMu bewaakt StatePath; zie updateState.
@@ -62,6 +81,21 @@ func (a *Agent) Connect() error {
 	}
 	if a.Collector.PrimaryAddress == nil {
 		a.Collector.PrimaryAddress = func() string { return outboundAddress(a.Config.NatsURL) }
+	}
+	if a.Journal == nil {
+		// Tests geven de agent een eigen wortel en een nep-systemctl; het
+		// journaal leest dan daar.
+		root := a.Root
+		if root == "" {
+			root = a.Collector.Root
+		}
+		a.Journal = &Journal{Root: root, Run: a.Collector.Run, Log: a.Log}
+		if a.StatePath != "" {
+			a.Journal.Path = filepath.Join(filepath.Dir(a.StatePath), "journal.json")
+		}
+	}
+	if a.Collector.OnUnits == nil {
+		a.Collector.OnUnits = a.Journal.ObserveUnits
 	}
 	a.factsNow = make(chan struct{}, 1)
 	a.connected = make(chan struct{}, 1)
@@ -135,9 +169,13 @@ func (a *Agent) Run(ctx context.Context) error {
 
 	go a.factsLoop(ctx, factsEvery)
 	go a.metricsLoop(ctx, metricsEvery)
+	go a.journalLoop(ctx, or(a.JournalInterval, protocol.JournalInterval))
+	go a.connsLoop(ctx, or(a.ConnsSample, protocol.ConnsSample), or(a.ConnsInterval, protocol.ConnsInterval))
 
 	t := time.NewTicker(hbEvery)
 	defer t.Stop()
+	addr := time.NewTicker(or(a.AddressPoll, time.Second))
+	defer addr.Stop()
 	a.sendHeartbeat(ctx)
 	for {
 		select {
@@ -147,8 +185,36 @@ func (a *Agent) Run(ctx context.Context) error {
 			a.sendHeartbeat(ctx)
 		case <-t.C:
 			a.sendHeartbeat(ctx)
+		case <-addr.C:
+			// Een VIP die komt of gaat, staat zo binnen een seconde in de
+			// server in plaats van bij de volgende heartbeat.
+			if a.addressesChanged() {
+				a.sendHeartbeat(ctx)
+			}
 		}
 	}
+}
+
+func (a *Agent) addresses() []string {
+	if a.Collector.Addresses != nil {
+		return a.Collector.Addresses()
+	}
+	return hostAddresses()
+}
+
+func addrKey(addrs []string) string {
+	s := slices.Clone(addrs)
+	slices.Sort(s)
+	return strings.Join(s, ",")
+}
+
+// addressesChanged is true als de adressen anders zijn dan in de laatste
+// heartbeat, hoogstens één keer per seconde.
+func (a *Agent) addressesChanged() bool {
+	key := addrKey(a.addresses())
+	a.hbMu.Lock()
+	defer a.hbMu.Unlock()
+	return key != a.lastAddrs && time.Since(a.lastHB) >= time.Second
 }
 
 func (a *Agent) sendHeartbeat(ctx context.Context) {
@@ -158,6 +224,94 @@ func (a *Agent) sendHeartbeat(ctx context.Context) {
 	hb := a.Collector.Heartbeat(ctx, a.Version)
 	if err := a.publish(protocol.SubjectHeartbeat, protocol.TypeHeartbeat, hb); err != nil {
 		a.Log.Warn("heartbeat sturen mislukt", "err", err)
+		return
+	}
+	a.hbMu.Lock()
+	a.lastAddrs, a.lastHB = addrKey(hb.Addresses), time.Now()
+	a.hbMu.Unlock()
+}
+
+// journalLoop leest het journaal en stuurt wat er wacht, bij elke interval
+// en na een (her)verbinding.
+func (a *Agent) journalLoop(ctx context.Context, every time.Duration) {
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for {
+		if err := a.Journal.Collect(ctx); err != nil {
+			a.Log.Warn("journaal bewaren mislukt", "err", err)
+		}
+		if err := a.sendChanges(ctx); err != nil {
+			if errors.Is(err, nats.ErrNoResponders) {
+				a.Log.Debug("de server neemt het journaal nog niet aan", "err", err)
+			} else {
+				a.Log.Warn("journaal sturen mislukt", "err", err)
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+		}
+	}
+}
+
+// sendChanges stuurt de wachtende regels in porties van MaxChanges, elk als
+// request; pas na de Ack vergeet de agent ze.
+func (a *Agent) sendChanges(ctx context.Context) error {
+	for ctx.Err() == nil {
+		if !a.nc.IsConnected() {
+			return nil
+		}
+		batch := a.Journal.Next()
+		if len(batch.Entries) == 0 {
+			return nil
+		}
+		data, err := envelope(protocol.TypeChanges, batch)
+		if err != nil {
+			return err
+		}
+		rctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		msg, err := a.nc.RequestWithContext(rctx, protocol.Subject(a.Config.NodeID, protocol.SubjectEvents), data)
+		cancel()
+		if err != nil {
+			return err
+		}
+		var ack protocol.Ack
+		if err := json.Unmarshal(msg.Data, &ack); err != nil {
+			return err
+		}
+		if !ack.OK {
+			return errors.New("server: " + ack.Error)
+		}
+		if err := a.Journal.Sent(batch); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// connsLoop bekijkt de verbindingen elke sample en stuurt elke interval een
+// samenvatting. Een samenvatting die niet weg kan, vervalt.
+func (a *Agent) connsLoop(ctx context.Context, sample, every time.Duration) {
+	st := time.NewTicker(sample)
+	defer st.Stop()
+	send := time.NewTicker(every)
+	defer send.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-st.C:
+			a.Collector.SampleConns(&a.conns, now)
+		case now := <-send.C:
+			c, ok := a.conns.Take(now)
+			if !ok || !a.nc.IsConnected() {
+				continue
+			}
+			if err := a.publish(protocol.SubjectEvents, protocol.TypeConns, c); err != nil {
+				a.Log.Warn("verbindingen sturen mislukt", "err", err)
+			}
+		}
 	}
 }
 

@@ -413,6 +413,64 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/nodes/{nodeId}/changes": {
+        parameters: {
+            query?: {
+                /** @description Vanaf dit tijdstip; standaard 7 dagen geleden */
+                from?: components["parameters"]["ChangesFrom"];
+                /** @description Tot (niet tot en met) dit tijdstip; standaard nu */
+                to?: components["parameters"]["ChangesTo"];
+                /** @description Alleen deze soorten, met komma's, zoals package,service */
+                kind?: components["parameters"]["ChangesKind"];
+                limit?: components["parameters"]["ChangesLimit"];
+            };
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Het wijzigingsjournaal van een node, nieuwste eerst
+         * @description Wat er op de node veranderde, uit de agent, de server, Proxmox en
+         *     ClusterForge zelf. Een viewer ziet bij een SSH-login geen IP-adres.
+         */
+        get: operations["listNodeChanges"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/clusters/{clusterId}/changes": {
+        parameters: {
+            query?: {
+                /** @description Vanaf dit tijdstip; standaard 7 dagen geleden */
+                from?: components["parameters"]["ChangesFrom"];
+                /** @description Tot (niet tot en met) dit tijdstip; standaard nu */
+                to?: components["parameters"]["ChangesTo"];
+                /** @description Alleen deze soorten, met komma's, zoals package,service */
+                kind?: components["parameters"]["ChangesKind"];
+                limit?: components["parameters"]["ChangesLimit"];
+            };
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        /** Het wijzigingsjournaal van alle nodes van een cluster, nieuwste eerst */
+        get: operations["listClusterChanges"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/clusters/{clusterId}/metrics": {
         parameters: {
             query?: {
@@ -2672,6 +2730,44 @@ export interface components {
             last_seen_at: string | null;
             connection: components["schemas"]["AgentConnection"];
         };
+        NodeChanges: {
+            changes: components["schemas"]["NodeChange"][];
+            /** @description Er zijn meer regels in de periode dan limit */
+            has_more: boolean;
+            /** @description Nodes waarvan de agent nog geen journaal stuurt; van hen komen alleen regels van de server en Proxmox */
+            agents_too_old: components["schemas"]["ChangesNode"][];
+        };
+        ChangesNode: {
+            /** Format: uuid */
+            node_id: string;
+            hostname: string;
+        };
+        NodeChange: {
+            /** Format: int64 */
+            id: number;
+            /** Format: uuid */
+            node_id: string;
+            hostname: string;
+            /**
+             * Format: date-time
+             * @description Tijd op de node
+             */
+            ts: string;
+            /** Format: date-time */
+            observed_at: string;
+            /** @enum {string} */
+            source: "agent" | "server" | "proxmox" | "clusterforge";
+            /** @description package, service, file, boot, login, oom, network, facts, vm, agent, user of command */
+            kind: string;
+            subject: string;
+            action: string;
+            summary: string;
+            detail: {
+                [key: string]: string;
+            };
+            /** Format: uuid */
+            job_id: string | null;
+        };
         NodeRuntime: {
             facts: components["schemas"]["Facts"] | null;
             /** Format: date-time */
@@ -2717,6 +2813,12 @@ export interface components {
                 mac: string;
                 up: boolean;
                 addresses: string[] | null;
+                /** @description Vanaf protocol 5: physical, vlan, bridge, bond, veth, wireguard, tun, dummy of other */
+                kind?: string;
+                parent?: string;
+                master?: string;
+                vlan_id?: number;
+                mtu?: number;
             }[] | null;
             filesystems: {
                 mount: string;
@@ -2739,12 +2841,49 @@ export interface components {
             keepalived: {
                 active: string;
                 vips: string[] | null;
+                /** @description Vanaf protocol 5 */
+                instances?: {
+                    name: string;
+                    interface: string;
+                    vrid: number;
+                    state?: string;
+                    priority?: number;
+                    peers?: string[];
+                    vips: string[] | null;
+                }[];
             } | null;
             upgrades: {
                 total: number;
                 security: number;
                 packages: string[] | null;
             } | null;
+            /** @description Vanaf protocol 5 */
+            routes?: {
+                dest: string;
+                gateway?: string;
+                interface: string;
+                metric?: number;
+            }[];
+            default_gateway?: string;
+            dns?: string[];
+            listeners?: {
+                proto: string;
+                addr: string;
+                port: number;
+                unit?: string;
+            }[];
+            reboot_required?: boolean;
+            kernel_installed?: string;
+            /** Format: date-time */
+            apt_updated_at?: string;
+            certificates?: {
+                path: string;
+                subject: string;
+                dns_names?: string[];
+                issuer: string;
+                /** Format: date-time */
+                not_after: string;
+            }[];
         };
         EnrollmentToken: {
             /** Format: uuid */
@@ -3602,6 +3741,13 @@ export interface components {
         };
     };
     parameters: {
+        /** @description Vanaf dit tijdstip; standaard 7 dagen geleden */
+        ChangesFrom: string;
+        /** @description Tot (niet tot en met) dit tijdstip; standaard nu */
+        ChangesTo: string;
+        /** @description Alleen deze soorten, met komma's, zoals package,service */
+        ChangesKind: string;
+        ChangesLimit: number;
         /** @description Alleen regels met een kleiner id (de volgende pagina) */
         AuditBefore: number;
         /** @description Vanaf dit tijdstip */
@@ -4401,6 +4547,72 @@ export interface operations {
             404: components["responses"]["Error"];
             502: components["responses"]["Error"];
             503: components["responses"]["Error"];
+        };
+    };
+    listNodeChanges: {
+        parameters: {
+            query?: {
+                /** @description Vanaf dit tijdstip; standaard 7 dagen geleden */
+                from?: components["parameters"]["ChangesFrom"];
+                /** @description Tot (niet tot en met) dit tijdstip; standaard nu */
+                to?: components["parameters"]["ChangesTo"];
+                /** @description Alleen deze soorten, met komma's, zoals package,service */
+                kind?: components["parameters"]["ChangesKind"];
+                limit?: components["parameters"]["ChangesLimit"];
+            };
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NodeChanges"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    listClusterChanges: {
+        parameters: {
+            query?: {
+                /** @description Vanaf dit tijdstip; standaard 7 dagen geleden */
+                from?: components["parameters"]["ChangesFrom"];
+                /** @description Tot (niet tot en met) dit tijdstip; standaard nu */
+                to?: components["parameters"]["ChangesTo"];
+                /** @description Alleen deze soorten, met komma's, zoals package,service */
+                kind?: components["parameters"]["ChangesKind"];
+                limit?: components["parameters"]["ChangesLimit"];
+            };
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NodeChanges"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
         };
     };
     getClusterMetrics: {

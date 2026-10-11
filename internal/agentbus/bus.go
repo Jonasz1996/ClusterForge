@@ -58,6 +58,10 @@ type Bus struct {
 	// geweigerd wordt; Connections telt die niet mee.
 	authedMu sync.Mutex
 	authed   map[string]map[string]struct{}
+
+	// started is wanneer deze server begon; een onderbreking van daarvoor
+	// komt door de server zelf.
+	started time.Time
 }
 
 // Hooks geven berichten van agents door aan de rest van de server. Elk veld
@@ -95,7 +99,7 @@ func Start(ctx context.Context, listen string, pool *pgxpool.Pool, ev *events.Wr
 	b := &Bus{
 		log: log, pool: pool, q: q, ev: ev, hooks: hooks, fingerprint: fingerprint,
 		internalToken: hex.EncodeToString(tok), refused: map[uuid.UUID]time.Time{},
-		authed: map[string]map[string]struct{}{},
+		authed: map[string]map[string]struct{}{}, started: time.Now(),
 	}
 
 	tlsConfig := &tls.Config{Certificates: []tls.Certificate{cert}, MinVersion: tls.VersionTLS12}
@@ -253,7 +257,9 @@ func (b *Bus) Check(c server.ClientAuthentication) bool {
 			b.log.Warn("NATS-verbindingen opzoeken mislukt", "err", err)
 		}
 	}
+	last := b.lastHeartbeat(ctx, agent.NodeID)
 	c.RegisterUser(&server.User{Username: agent.NodeID.String(), Permissions: agentPermissions(agent.NodeID)})
+	go b.noteReconnect(agent.NodeID, last)
 	return true
 }
 

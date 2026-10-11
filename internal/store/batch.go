@@ -18,6 +18,140 @@ var (
 	ErrBatchAlreadyClosed = errors.New("batch already closed")
 )
 
+const insertNodeChanges = `-- name: InsertNodeChanges :batchexec
+INSERT INTO node_changes (node_id, cluster_id, ts, source, kind, subject, action, summary, detail, job_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+ON CONFLICT ON CONSTRAINT node_changes_unique DO NOTHING
+`
+
+type InsertNodeChangesBatchResults struct {
+	br     pgx.BatchResults
+	tot    int
+	closed bool
+}
+
+type InsertNodeChangesParams struct {
+	NodeID    uuid.UUID
+	ClusterID *uuid.UUID
+	Ts        time.Time
+	Source    string
+	Kind      string
+	Subject   string
+	Action    string
+	Summary   string
+	Detail    []byte
+	JobID     *uuid.UUID
+}
+
+// Een regel die er al is (zelfde node, soort, onderwerp, tijd en actie),
+// wordt overgeslagen; een agent stuurt na een onderbreking soms opnieuw.
+func (q *Queries) InsertNodeChanges(ctx context.Context, arg []InsertNodeChangesParams) *InsertNodeChangesBatchResults {
+	batch := &pgx.Batch{}
+	for _, a := range arg {
+		vals := []interface{}{
+			a.NodeID,
+			a.ClusterID,
+			a.Ts,
+			a.Source,
+			a.Kind,
+			a.Subject,
+			a.Action,
+			a.Summary,
+			a.Detail,
+			a.JobID,
+		}
+		batch.Queue(insertNodeChanges, vals...)
+	}
+	br := q.db.SendBatch(ctx, batch)
+	return &InsertNodeChangesBatchResults{br, len(arg), false}
+}
+
+func (b *InsertNodeChangesBatchResults) Exec(f func(int, error)) {
+	defer b.br.Close()
+	for t := 0; t < b.tot; t++ {
+		if b.closed {
+			if f != nil {
+				f(t, ErrBatchAlreadyClosed)
+			}
+			continue
+		}
+		_, err := b.br.Exec()
+		if f != nil {
+			f(t, err)
+		}
+	}
+}
+
+func (b *InsertNodeChangesBatchResults) Close() error {
+	b.closed = true
+	return b.br.Close()
+}
+
+const upsertObservedConnections = `-- name: UpsertObservedConnections :batchexec
+INSERT INTO observed_connections (node_id, unit, direction, peer_addr, peer_port, local_port, first_seen, last_seen, samples)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $7, $8)
+ON CONFLICT (node_id, unit, direction, peer_addr, peer_port, local_port) DO UPDATE
+SET last_seen = greatest(observed_connections.last_seen, EXCLUDED.last_seen),
+    samples = observed_connections.samples + EXCLUDED.samples
+`
+
+type UpsertObservedConnectionsBatchResults struct {
+	br     pgx.BatchResults
+	tot    int
+	closed bool
+}
+
+type UpsertObservedConnectionsParams struct {
+	NodeID    uuid.UUID
+	Unit      string
+	Direction string
+	PeerAddr  string
+	PeerPort  int32
+	LocalPort int32
+	FirstSeen time.Time
+	Samples   int64
+}
+
+func (q *Queries) UpsertObservedConnections(ctx context.Context, arg []UpsertObservedConnectionsParams) *UpsertObservedConnectionsBatchResults {
+	batch := &pgx.Batch{}
+	for _, a := range arg {
+		vals := []interface{}{
+			a.NodeID,
+			a.Unit,
+			a.Direction,
+			a.PeerAddr,
+			a.PeerPort,
+			a.LocalPort,
+			a.FirstSeen,
+			a.Samples,
+		}
+		batch.Queue(upsertObservedConnections, vals...)
+	}
+	br := q.db.SendBatch(ctx, batch)
+	return &UpsertObservedConnectionsBatchResults{br, len(arg), false}
+}
+
+func (b *UpsertObservedConnectionsBatchResults) Exec(f func(int, error)) {
+	defer b.br.Close()
+	for t := 0; t < b.tot; t++ {
+		if b.closed {
+			if f != nil {
+				f(t, ErrBatchAlreadyClosed)
+			}
+			continue
+		}
+		_, err := b.br.Exec()
+		if f != nil {
+			f(t, err)
+		}
+	}
+}
+
+func (b *UpsertObservedConnectionsBatchResults) Close() error {
+	b.closed = true
+	return b.br.Close()
+}
+
 const upsertProxmoxBackup = `-- name: UpsertProxmoxBackup :batchexec
 INSERT INTO proxmox_backups (connection_id, volid, storage, pve_node, vmid, guest_type, ctime, size_bytes, format,
                              notes, protected, verify_state, synced_at)
@@ -160,6 +294,72 @@ func (b *UpsertProxmoxResourceBatchResults) Exec(f func(int, error)) {
 }
 
 func (b *UpsertProxmoxResourceBatchResults) Close() error {
+	b.closed = true
+	return b.br.Close()
+}
+
+const upsertProxmoxTask = `-- name: UpsertProxmoxTask :batchexec
+INSERT INTO proxmox_tasks (connection_id, upid, pve_node, type, vmid, username, exitstatus, started_at, ended_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+ON CONFLICT (connection_id, upid) DO UPDATE
+SET exitstatus = EXCLUDED.exitstatus, ended_at = EXCLUDED.ended_at
+`
+
+type UpsertProxmoxTaskBatchResults struct {
+	br     pgx.BatchResults
+	tot    int
+	closed bool
+}
+
+type UpsertProxmoxTaskParams struct {
+	ConnectionID uuid.UUID
+	Upid         string
+	PveNode      string
+	Type         string
+	Vmid         *int32
+	Username     string
+	Exitstatus   string
+	StartedAt    time.Time
+	EndedAt      *time.Time
+}
+
+func (q *Queries) UpsertProxmoxTask(ctx context.Context, arg []UpsertProxmoxTaskParams) *UpsertProxmoxTaskBatchResults {
+	batch := &pgx.Batch{}
+	for _, a := range arg {
+		vals := []interface{}{
+			a.ConnectionID,
+			a.Upid,
+			a.PveNode,
+			a.Type,
+			a.Vmid,
+			a.Username,
+			a.Exitstatus,
+			a.StartedAt,
+			a.EndedAt,
+		}
+		batch.Queue(upsertProxmoxTask, vals...)
+	}
+	br := q.db.SendBatch(ctx, batch)
+	return &UpsertProxmoxTaskBatchResults{br, len(arg), false}
+}
+
+func (b *UpsertProxmoxTaskBatchResults) Exec(f func(int, error)) {
+	defer b.br.Close()
+	for t := 0; t < b.tot; t++ {
+		if b.closed {
+			if f != nil {
+				f(t, ErrBatchAlreadyClosed)
+			}
+			continue
+		}
+		_, err := b.br.Exec()
+		if f != nil {
+			f(t, err)
+		}
+	}
+}
+
+func (b *UpsertProxmoxTaskBatchResults) Close() error {
 	b.closed = true
 	return b.br.Close()
 }

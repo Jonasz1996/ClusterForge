@@ -105,6 +105,8 @@ var Known = map[string]Spec{
 	"proxmox.sync_requested": {CategoryProxmox, "Proxmox-sync gevraagd"},
 	"proxmox.sync_failed":    {CategoryProxmox, "Proxmox niet bereikbaar"},
 	"proxmox.sync_recovered": {CategoryProxmox, "Proxmox weer bereikbaar"},
+	"proxmox.host_offline":   {CategoryProxmox, "Proxmox-host offline"},
+	"proxmox.host_online":    {CategoryProxmox, "Proxmox-host weer online"},
 	"vm.status_changed":      {CategoryProxmox, "Status van VM gewijzigd"},
 	"vm.moved":               {CategoryProxmox, "VM verhuisd"},
 	"vm.missing":             {CategoryProxmox, "VM verdwenen uit Proxmox"},

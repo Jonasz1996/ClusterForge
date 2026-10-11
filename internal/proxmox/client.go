@@ -28,6 +28,9 @@ import (
 type API interface {
 	Version(ctx context.Context) (Version, error)
 	Resources(ctx context.Context) ([]Resource, error)
+	// Tasks geeft de recente taken van het hele cluster, ook die van
+	// gebruikers in de Proxmox-webinterface. Daarvoor volstaat Sys.Audit.
+	Tasks(ctx context.Context) ([]Task, error)
 	// Power voert start, stop, shutdown of reboot uit en geeft het id van de
 	// Proxmox-taak terug.
 	Power(ctx context.Context, g Guest, action string) (string, error)
@@ -423,6 +426,33 @@ func (c *Client) Version(ctx context.Context) (Version, error) {
 func (c *Client) Resources(ctx context.Context) ([]Resource, error) {
 	var out []Resource
 	return out, c.do(ctx, http.MethodGet, "/cluster/resources", nil, &out)
+}
+
+// Task is één taak uit /cluster/tasks. Een taak die nog loopt, heeft geen
+// eindtijd en geen status.
+type Task struct {
+	UPID      string `json:"upid"`
+	Node      string `json:"node"`
+	Type      string `json:"type"`
+	ID        string `json:"id"`
+	User      string `json:"user"`
+	StartTime int64  `json:"starttime"`
+	EndTime   int64  `json:"endtime"`
+	Status    string `json:"status"`
+}
+
+// VMID geeft het VMID van de taak, of 0 als ze niet over één gast gaat.
+func (t Task) VMID() int {
+	n, err := strconv.Atoi(t.ID)
+	if err != nil || n <= 0 {
+		return 0
+	}
+	return n
+}
+
+func (c *Client) Tasks(ctx context.Context) ([]Task, error) {
+	var out []Task
+	return out, c.do(ctx, http.MethodGet, "/cluster/tasks", nil, &out)
 }
 
 // powerActions zijn de toegestane statusacties.

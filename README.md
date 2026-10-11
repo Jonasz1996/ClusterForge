@@ -36,6 +36,10 @@ Het technisch ontwerp staat in [docs/design/mvp-fase-1.md](docs/design/mvp-fase-
 | 16. Diepe back-upcontrole | In de teruggezette sandbox controleert cf-agent verify of de services van de node draaien, hun poorten luisteren, de HTTP-controles van de template slagen en PostgreSQL of MariaDB antwoordt | klaar |
 | 17. Omhoog schalen en nieuwe clusters uit Git | Een hogere node_count maakt na goedkeuring de nieuwe VM's, meldt hun agents aan en past eerst de bestaande nodes toe, zodat geen node met een onbekende peer start; een nieuw bestand wordt na goedkeuring een uitrol met spec-revisie 1 en bron Git | klaar |
 
+| Fase 3 | Inhoud | Status |
+| --- | --- | --- |
+| 1. Wijzigingsjournaal | Per node wat er veranderde, ook buiten ClusterForge om: pakketten, diensten, bestanden, herstarts, SSH-logins, geheugentekort, netwerk en Proxmox-taken, elk met een Nederlandse zin | klaar |
+
 ## Draaien met Docker Compose
 
 Stap voor stap in een Debian-container op Proxmox: [docs/install-proxmox-lxc.md](docs/install-proxmox-lxc.md).
@@ -430,6 +434,23 @@ Elke regel draagt zijn herkomst: het IP-adres, de sessie (regels met dezelfde se
 
 Regels kunnen niet gewijzigd of verwijderd worden, ook niet met `TRUNCATE` in de database. Een mislukte login bewaart de gebruiker en de reden, maar nooit wat er in het naamveld getypt werd: dat is soms een wachtwoord.
 
+## Wijzigingen per node
+
+De pagina van een node heeft een kaart Wijzigingen: wat er op die machine veranderde, nieuwste eerst, met een filter op soort en periode. Elke regel zegt hoe ClusterForge het weet: gezien door de agent, afgeleid door de server, uit Proxmox, of gedaan door ClusterForge zelf (met een link naar de taak).
+
+- **De agent** (vanaf cf-agent met protocol 5) leest elke 30 seconden:
+  - `/var/log/apt/history.log` en `/var/log/dpkg.log`: welk pakket van welke naar welke versie ging, en wie apt startte;
+  - de systemd-units uit de heartbeat: een dienst die faalt, stopt, start of door systemd herstart wordt;
+  - mtime, grootte, rechten en eigenaar van een vaste lijst onder `/etc` (keepalived, nginx, haproxy, MySQL, PostgreSQL, Redis, Apache, PHP, systemd-units, netwerk, `hosts`, `resolv.conf`, `fstab`, cron, sysctl, `sshd_config`, Docker) en `/opt/stacks`. Nooit de inhoud en geen hash;
+  - een herstart aan een nieuwe boot-id, met de oude en nieuwe kernel;
+  - SSH-logins (gebruiker, bron-IP en methode, nooit commando's) en de OOM-killer uit journald.
+- **De server** ziet zelf een nieuwe agentversie, een onderbreking van de verbinding, en uit de facts de OS-versie, het aantal updates, interfaces, adressen (zonder de VIP's van keepalived), gateway, DNS, routes, luisterende poorten en de instellingen van keepalived. Voor een agent van voor het journaal leidt hij ook diensten en herstarts uit de heartbeats en facts af.
+- **Proxmox**: de sync leest `/cluster/tasks`. Een VM die iemand in de Proxmox-webinterface stopt, migreert of terugzet, komt bij de node van die VM. Een Proxmox-host die offline of weer online gaat, komt in het logboek.
+
+De agent bewaart wat hij nog moet sturen in `/var/lib/clusterforge/journal.json`, tot zeven dagen en 2000 regels, en stuurt het na een onderbreking alsnog. De tijden komen van de node en worden gecorrigeerd voor het verschil met de klok van de server. Een viewer ziet het IP-adres van een login niet. Het journaal wordt na 180 dagen opgeruimd, de Proxmox-taken en verbindingen na 30 dagen. Staat er een amberkleurige melding "Agent te oud voor het journaal", werk cf-agent dan bij met het commando eronder; de aanmelding blijft staan.
+
+De facts tonen nu ook of een herstart nodig is (met de geïnstalleerde kernel), wanneer apt de lijsten voor het laatst bijwerkte, de soort, VLAN en MTU van elke interface, en de gateway en DNS-servers.
+
 ## Ontwikkelen
 
 Nodig: Go 1.26, Node 22 met pnpm, Docker.
@@ -470,7 +491,8 @@ internal/inventory/        clusters, nodes en VIP's: validatie en wijzigingen me
 internal/agents/           enrollmenttokens, aanmelden en intrekken van agents
 internal/agentbus/         ingebedde NATS-server: authenticatie per node, heartbeats en facts
 internal/agentdist/        installatiescript en downloads van cf-agent
-internal/agent/            code van cf-agent zelf: aanmelden, verbinden, facts en metrics verzamelen
+internal/agent/            code van cf-agent zelf: aanmelden, verbinden, facts, metrics en het journaal verzamelen
+internal/journal/          het wijzigingsjournaal: zinnen, verschillen in de facts en opruimen
 internal/metrics/          metrics naar VictoriaMetrics schrijven en de grafieken opvragen
 internal/status/           statusregels voor nodes en clusters, VIP-eigenaars
 internal/live/             live updates naar de webinterface (Server-Sent Events)

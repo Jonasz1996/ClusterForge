@@ -51,6 +51,30 @@ type Collector struct {
 	// Interfaces geeft de netwerkinterfaces voor de facts; nil leest ze van
 	// het systeem.
 	Interfaces func() []protocol.Interface
+	// OnUnits krijgt de units van elke heartbeat, voor het journaal. Mag
+	// nil zijn.
+	OnUnits func([]UnitInfo)
+}
+
+// UnitInfo is wat systemctl show over een gevolgde unit zegt.
+type UnitInfo struct {
+	Name    string
+	Active  string
+	Enabled string
+	Result  string
+	// NRestarts telt de automatische herstarts door systemd.
+	NRestarts int
+	// ActiveEnter en InactiveEnter zijn monotone tijden in microseconden
+	// sinds de boot.
+	ActiveEnter   uint64
+	InactiveEnter uint64
+}
+
+func (u UnitInfo) snap() unitSnap {
+	return unitSnap{
+		Active: u.Active, Enabled: u.Enabled, Result: u.Result, NRestarts: u.NRestarts,
+		ActiveEnter: u.ActiveEnter, InactiveEnter: u.InactiveEnter,
+	}
 }
 
 func (c *Collector) path(p string) string {
@@ -110,8 +134,12 @@ func (c *Collector) Heartbeat(ctx context.Context, version string) protocol.Hear
 			hb.Load[i], _ = strconv.ParseFloat(f[i], 64)
 		}
 	}
-	for _, s := range c.services(ctx) {
-		hb.Services[s.Name] = s.Active
+	units := c.units(ctx)
+	for _, u := range units {
+		hb.Services[u.Name] = u.Active
+	}
+	if c.OnUnits != nil && units != nil {
+		c.OnUnits(units)
 	}
 	return hb
 }
@@ -146,6 +174,9 @@ func (c *Collector) Facts(ctx context.Context) protocol.Facts {
 	f.Docker = c.docker(ctx)
 	f.Keepalived = c.keepalived(f.Services)
 	f.Upgrades = c.upgrades(ctx)
+	c.netFacts(&f)
+	c.maintenanceFacts(&f)
+	f.Certificates = c.certificates()
 	return f
 }
 
@@ -258,12 +289,29 @@ func unescapeMount(s string) string {
 
 // services leest de toestand van WatchedServices in één systemctl-aanroep.
 func (c *Collector) services(ctx context.Context) []protocol.Service {
-	args := append([]string{"show", "--property=Id,LoadState,ActiveState,UnitFileState"}, unitNames()...)
+	units := c.units(ctx)
+	if units == nil {
+		return nil
+	}
+	out := make([]protocol.Service, len(units))
+	for i, u := range units {
+		out[i] = protocol.Service{Name: u.Name, Active: u.Active, Enabled: u.Enabled}
+	}
+	return out
+}
+
+// unitProperties zijn de velden die de agent van elke unit leest. Een
+// oudere systemd die er een niet kent, laat hem weg.
+const unitProperties = "Id,LoadState,ActiveState,UnitFileState,Result,NRestarts," +
+	"ActiveEnterTimestampMonotonic,InactiveEnterTimestampMonotonic"
+
+func (c *Collector) units(ctx context.Context) []UnitInfo {
+	args := append([]string{"show", "--property=" + unitProperties}, unitNames()...)
 	out, err := c.run(ctx, "systemctl", args...)
 	if err != nil && len(out) == 0 {
 		return nil
 	}
-	return parseSystemctlShow(out)
+	return parseUnits(out)
 }
 
 func unitNames() []string {
@@ -276,6 +324,14 @@ func unitNames() []string {
 
 func parseSystemctlShow(out []byte) []protocol.Service {
 	var res []protocol.Service
+	for _, u := range parseUnits(out) {
+		res = append(res, protocol.Service{Name: u.Name, Active: u.Active, Enabled: u.Enabled})
+	}
+	return res
+}
+
+func parseUnits(out []byte) []UnitInfo {
+	res := []UnitInfo{}
 	for block := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n\n") {
 		kv := map[string]string{}
 		for line := range strings.SplitSeq(block, "\n") {
@@ -286,9 +342,14 @@ func parseSystemctlShow(out []byte) []protocol.Service {
 		if kv["Id"] == "" || kv["LoadState"] == "not-found" {
 			continue
 		}
-		res = append(res, protocol.Service{
+		u := UnitInfo{
 			Name: strings.TrimSuffix(kv["Id"], ".service"), Active: kv["ActiveState"], Enabled: kv["UnitFileState"],
-		})
+			Result: kv["Result"],
+		}
+		u.NRestarts, _ = strconv.Atoi(kv["NRestarts"])
+		u.ActiveEnter, _ = strconv.ParseUint(kv["ActiveEnterTimestampMonotonic"], 10, 64)
+		u.InactiveEnter, _ = strconv.ParseUint(kv["InactiveEnterTimestampMonotonic"], 10, 64)
+		res = append(res, u)
 	}
 	return res
 }
@@ -311,7 +372,7 @@ func (c *Collector) keepalived(services []protocol.Service) *protocol.Keepalived
 	if conf == "" && i < 0 {
 		return nil
 	}
-	k := &protocol.Keepalived{VIPs: parseKeepalivedVIPs(conf)}
+	k := &protocol.Keepalived{VIPs: parseKeepalivedVIPs(conf), Instances: parseKeepalivedInstances(conf)}
 	if i >= 0 {
 		k.Active = services[i].Active
 	}

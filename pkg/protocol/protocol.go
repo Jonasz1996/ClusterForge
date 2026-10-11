@@ -10,7 +10,7 @@ import (
 
 // Version is de protocolversie. Een agent meldt die bij elke heartbeat, zodat
 // de server geen berichten stuurt die de agent niet kent.
-const Version = 4
+const Version = 5
 
 // CommandsSince is de eerste protocolversie met commando's.
 const CommandsSince = 2
@@ -24,6 +24,12 @@ const ApplySince = 3
 // apply.steps.
 const InspectSince = 4
 
+// JournalSince is de eerste protocolversie die een wijzigingsjournaal en
+// verbindingen stuurt, en de netwerkfacts, keepalived-instanties en
+// onderhoudsfacts meldt. Een oudere agent stuurt die niet; de server neemt
+// dan zelf waar wat hij uit heartbeats en facts kan halen.
+const JournalSince = 5
+
 // Berichttypes.
 const (
 	TypeHeartbeat = "heartbeat"
@@ -32,6 +38,9 @@ const (
 	TypeAck       = "ack"
 	TypeCommand   = "command"
 	TypeResult    = "command_result"
+	// TypeChanges en TypeConns gaan op het subject events.
+	TypeChanges = "changes"
+	TypeConns   = "conns"
 )
 
 // Envelope is de buitenkant van elk bericht.
@@ -49,8 +58,10 @@ const (
 	SubjectHeartbeat = "hb"
 	SubjectFacts     = "facts"
 	SubjectMetrics   = "metrics"
-	SubjectEvents    = "events"
-	SubjectCommands  = "cmd"
+	// SubjectEvents draagt het wijzigingsjournaal (een request met Ack) en
+	// de verbindingen (publish).
+	SubjectEvents   = "events"
+	SubjectCommands = "cmd"
 )
 
 func NodePrefix(nodeID string) string { return "cf.node." + nodeID }
@@ -126,6 +137,54 @@ type Facts struct {
 	Docker         *Docker      `json:"docker"`
 	Keepalived     *Keepalived  `json:"keepalived"`
 	Upgrades       *Upgrades    `json:"upgrades"`
+
+	// Vanaf protocol 5. Bij een oudere agent zijn ze leeg.
+
+	// Routes zijn de IPv4- en IPv6-routes uit de hoofdtabel.
+	Routes []Route `json:"routes,omitempty"`
+	// DefaultGateway is de gateway van de standaardroute (IPv4).
+	DefaultGateway string `json:"default_gateway,omitempty"`
+	// DNS zijn de nameservers uit /etc/resolv.conf.
+	DNS []string `json:"dns,omitempty"`
+	// Listeners zijn de poorten waarop iets luistert, zonder de tijdelijke
+	// poorten.
+	Listeners []Listener `json:"listeners,omitempty"`
+	// RebootRequired is true als /run/reboot-required bestaat of een
+	// nieuwere kernel geïnstalleerd is dan er draait.
+	RebootRequired bool `json:"reboot_required,omitempty"`
+	// KernelInstalled is de nieuwste kernel in /boot.
+	KernelInstalled string `json:"kernel_installed,omitempty"`
+	// AptUpdatedAt is wanneer de pakketlijsten het laatst ververst zijn.
+	AptUpdatedAt time.Time `json:"apt_updated_at,omitzero"`
+	// Certificates zijn de servercertificaten op de vaste plekken, zonder
+	// CA's. Alleen onderwerp, namen en vervaldatum; nooit een sleutel.
+	Certificates []Certificate `json:"certificates,omitempty"`
+}
+
+type Route struct {
+	// Dest is het netwerk met prefix, zoals 10.0.20.0/24 of 0.0.0.0/0.
+	Dest      string `json:"dest"`
+	Gateway   string `json:"gateway,omitempty"`
+	Interface string `json:"interface"`
+	Metric    int    `json:"metric,omitempty"`
+}
+
+type Listener struct {
+	// Proto is tcp of udp.
+	Proto string `json:"proto"`
+	Addr  string `json:"addr"`
+	Port  int    `json:"port"`
+	// Unit is de systemd-unit van het proces, zonder .service; leeg als
+	// het niet te zien is.
+	Unit string `json:"unit,omitempty"`
+}
+
+type Certificate struct {
+	Path     string    `json:"path"`
+	Subject  string    `json:"subject"`
+	DNSNames []string  `json:"dns_names,omitempty"`
+	Issuer   string    `json:"issuer"`
+	NotAfter time.Time `json:"not_after"`
 }
 
 type OSInfo struct {
@@ -136,10 +195,23 @@ type OSInfo struct {
 }
 
 type Interface struct {
-	Name      string   `json:"name"`
-	MAC       string   `json:"mac"`
-	Up        bool     `json:"up"`
+	Name string `json:"name"`
+	MAC  string `json:"mac"`
+	Up   bool   `json:"up"`
+	// Addresses hebben een prefix, zoals 10.0.20.11/24.
 	Addresses []string `json:"addresses"`
+
+	// Vanaf protocol 5.
+
+	// Kind is physical, vlan, bridge, bond, veth, wireguard, tun, dummy of
+	// other.
+	Kind string `json:"kind,omitempty"`
+	// Parent is bij een VLAN de onderliggende interface.
+	Parent string `json:"parent,omitempty"`
+	// Master is de bridge of bond waarin deze interface zit.
+	Master string `json:"master,omitempty"`
+	VLANID int    `json:"vlan_id,omitempty"`
+	MTU    int    `json:"mtu,omitempty"`
 }
 
 type Filesystem struct {
@@ -165,6 +237,20 @@ type Docker struct {
 type Keepalived struct {
 	Active string   `json:"active"`
 	VIPs   []string `json:"vips"`
+	// Instances zijn de vrrp_instance-blokken; vanaf protocol 5.
+	Instances []VRRPInstance `json:"instances,omitempty"`
+}
+
+type VRRPInstance struct {
+	Name      string `json:"name"`
+	Interface string `json:"interface"`
+	VRID      int    `json:"vrid"`
+	// State is de begintoestand uit de configuratie (MASTER of BACKUP).
+	State    string `json:"state,omitempty"`
+	Priority int    `json:"priority,omitempty"`
+	// Peers zijn de unicast_peer-adressen; leeg bij multicast.
+	Peers []string `json:"peers,omitempty"`
+	VIPs  []string `json:"vips"`
 }
 
 type Upgrades struct {
@@ -433,7 +519,99 @@ func (f Facts) Stable() Facts {
 		d.Containers = 0
 		out.Docker = &d
 	}
+	out.AptUpdatedAt = time.Time{}
 	return out
+}
+
+// Het wijzigingsjournaal. De agent leest wat er op de node veranderde en
+// stuurt het als Changes, als request op cf.node.<id>.events; na de Ack
+// vergeet hij wat verstuurd is. Hij stuurt nooit de inhoud van een bestand,
+// een hash, een commandoregel of een wachtwoord.
+const (
+	// MaxChanges is het grootste aantal regels per bericht.
+	MaxChanges = 500
+	// JournalMaxAge is hoe ver de agent na een onderbreking teruggaat.
+	JournalMaxAge = 7 * 24 * time.Hour
+	// JournalInterval is hoe vaak de agent kijkt en stuurt.
+	JournalInterval = 30 * time.Second
+)
+
+// Soorten wijzigingen uit de agent.
+const (
+	ChangePackage = "package"
+	ChangeBoot    = "boot"
+	ChangeService = "service"
+	ChangeFile    = "file"
+	ChangeLogin   = "login"
+	ChangeOOM     = "oom"
+)
+
+// Change is één wijziging op de node. TS is de tijd op de node; de server
+// corrigeert hem voor de klokafwijking.
+type Change struct {
+	TS   time.Time `json:"ts"`
+	Kind string    `json:"kind"`
+	// Subject is het pakket, de unit, het pad, de gebruiker of het proces.
+	Subject string `json:"subject"`
+	// Action hangt af van de soort:
+	//   package: install, upgrade, downgrade, remove, purge
+	//   boot:    boot
+	//   service: started, stopped, failed, restarted, auto_restarted
+	//   file:    created, modified, deleted, mode, owner
+	//   login:   ssh
+	//   oom:     killed
+	Action string `json:"action"`
+	// From en To zijn de oude en nieuwe versie, kernel, mode of eigenaar.
+	From string `json:"from,omitempty"`
+	To   string `json:"to,omitempty"`
+	// By is wie het deed: de gebruiker achter apt of sudo, of
+	// unattended-upgrades; bij een login de gebruiker.
+	By string `json:"by,omitempty"`
+	// Detail zijn een paar vaste velden, zoals het bron-IP en de methode
+	// van een login, het Result van een unit of het programma (apt-get).
+	Detail map[string]string `json:"detail,omitempty"`
+}
+
+// Changes is één bericht uit het journaal. Truncated is true als de agent
+// regels moest laten vallen, omdat er meer waren dan hij bewaart.
+type Changes struct {
+	Entries   []Change `json:"entries"`
+	Truncated bool     `json:"truncated,omitempty"`
+}
+
+// Verbindingen. De agent kijkt elke ConnsSample naar de gevestigde
+// TCP-verbindingen en stuurt elke ConnsInterval een samenvatting. Geen
+// PID's, commandoregels of inhoud; van een inkomende verbinding alleen de
+// afzender als die in een privénetwerk zit.
+const (
+	ConnsSample   = time.Minute
+	ConnsInterval = 5 * time.Minute
+	MaxConns      = 500
+)
+
+type Conns struct {
+	Since time.Time `json:"since"`
+	Until time.Time `json:"until"`
+	Out   []ConnOut `json:"out"`
+	In    []ConnIn  `json:"in"`
+}
+
+// ConnOut is een uitgaande verbinding van Unit naar Addr:Port. Count is in
+// hoeveel steekproeven ze gezien is, opgeteld over de verbindingen.
+type ConnOut struct {
+	Unit  string `json:"unit,omitempty"`
+	Addr  string `json:"addr"`
+	Port  int    `json:"port"`
+	Count int    `json:"count"`
+}
+
+// ConnIn is een inkomende verbinding op een eigen poort. Peer is leeg
+// tenzij de afzender een privé-adres heeft.
+type ConnIn struct {
+	Unit  string `json:"unit,omitempty"`
+	Port  int    `json:"port"`
+	Peer  string `json:"peer,omitempty"`
+	Count int    `json:"count"`
 }
 
 // De diepe back-upcontrole. ClusterForge start cf-agent verify via de QEMU

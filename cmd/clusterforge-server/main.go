@@ -38,6 +38,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/gitops"
 	"github.com/Jonasz1996/clusterforge/internal/httpapi"
 	"github.com/Jonasz1996/clusterforge/internal/jobs"
+	"github.com/Jonasz1996/clusterforge/internal/journal"
 	"github.com/Jonasz1996/clusterforge/internal/lifecycle"
 	"github.com/Jonasz1996/clusterforge/internal/live"
 	"github.com/Jonasz1996/clusterforge/internal/metrics"
@@ -188,7 +189,8 @@ func serve() error {
 	// het testslot vrijkomt, kijkt de planner meteen of er een wacht.
 	sched := planner.NewScheduler(pool, log,
 		planner.Task{Name: "failovertests", Tick: fo.RunScheduled},
-		planner.Task{Name: "back-upcontroles", Tick: bk.RunScheduled})
+		planner.Task{Name: "back-upcontroles", Tick: bk.RunScheduled},
+		planner.Task{Name: "journaal opruimen", Tick: journal.NewPruner(q).Tick})
 	for _, kind := range []string{failover.KindTest, backups.KindVerify} {
 		runner.OnFinished(kind, func(context.Context, store.Job) { sched.Kick() })
 	}

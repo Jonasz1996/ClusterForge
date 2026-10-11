@@ -488,6 +488,21 @@ type Node struct {
 	PveVmid      *int32
 }
 
+type NodeChange struct {
+	ID         int64
+	NodeID     uuid.UUID
+	ClusterID  *uuid.UUID
+	Ts         time.Time
+	ObservedAt time.Time
+	Source     string
+	Kind       string
+	Subject    string
+	Action     string
+	Summary    string
+	Detail     []byte
+	JobID      *uuid.UUID
+}
+
 type NodeFact struct {
 	NodeID      uuid.UUID
 	Hash        string
@@ -507,6 +522,19 @@ type NodeStatus struct {
 	Services      []byte
 	DiskUsedRatio float64
 	DiskUsedMount string
+	ClockOffsetMs int32
+}
+
+type ObservedConnection struct {
+	NodeID    uuid.UUID
+	Unit      string
+	Direction string
+	PeerAddr  string
+	PeerPort  int32
+	LocalPort int32
+	FirstSeen time.Time
+	LastSeen  time.Time
+	Samples   int64
 }
 
 type ProxmoxBackup struct {
@@ -554,6 +582,18 @@ type ProxmoxResource struct {
 	Template     bool
 	Data         []byte
 	SyncedAt     time.Time
+}
+
+type ProxmoxTask struct {
+	ConnectionID uuid.UUID
+	Upid         string
+	PveNode      string
+	Type         string
+	Vmid         *int32
+	Username     string
+	Exitstatus   string
+	StartedAt    time.Time
+	EndedAt      *time.Time
 }
 
 type Secret struct {

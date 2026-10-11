@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -118,6 +119,10 @@ func (b Backup) volume() map[string]any {
 type task struct {
 	upid     string
 	node     string
+	kind     string
+	vmid     int
+	user     string
+	start    time.Time
 	done     time.Time
 	exit     string
 	log      []string
@@ -392,6 +397,7 @@ func (s *Server) Handler() http.Handler {
 		ok(w, map[string]string{"version": "8.4.1", "release": "8.4", "repoid": "fake"})
 	})
 	mux.HandleFunc("GET "+p+"/cluster/resources", s.resources)
+	mux.HandleFunc("GET "+p+"/cluster/tasks", s.clusterTasks)
 	mux.HandleFunc("POST "+p+"/nodes/{node}/{type}/{vmid}/status/{action}", s.power)
 	mux.HandleFunc("POST "+p+"/nodes/{node}/{type}/{vmid}/snapshot", s.snapshot)
 	mux.HandleFunc("GET "+p+"/nodes/{node}/{type}/{vmid}/snapshot", s.snapshots)
@@ -522,8 +528,12 @@ func (s *Server) guest(w http.ResponseWriter, r *http.Request) *Guest {
 // newTask start een taak die na TaskDuration klaar is en dan apply uitvoert.
 func (s *Server) newTask(node, kind string, vmid int, apply func(), log ...string) string {
 	s.seq++
-	upid := fmt.Sprintf("UPID:%s:%08X:%08X:%08X:%s:%d:clusterforge@pve!cf:", node, 1000+s.seq, s.seq, time.Now().Unix(), kind, vmid)
-	t := &task{upid: upid, node: node, done: time.Now().Add(s.taskDuration), exit: "OK", apply: apply, log: log}
+	user := "clusterforge@pve!cf"
+	upid := fmt.Sprintf("UPID:%s:%08X:%08X:%08X:%s:%d:%s:", node, 1000+s.seq, s.seq, time.Now().Unix(), kind, vmid, user)
+	t := &task{
+		upid: upid, node: node, kind: kind, vmid: vmid, user: user, start: time.Now(),
+		done: time.Now().Add(s.taskDuration), exit: "OK", apply: apply, log: log,
+	}
 	for k, msg := range s.fail {
 		if strings.Contains(kind, k) {
 			t.exit, t.apply = msg, nil
@@ -534,6 +544,49 @@ func (s *Server) newTask(node, kind string, vmid int, apply func(), log ...strin
 	s.tasks[upid] = t
 	s.finishTasks()
 	return upid
+}
+
+// UserTask speelt een taak na die een gebruiker in de Proxmox-webinterface
+// startte, zoals root@pam die VM vmid stopt; ze is meteen klaar met exit.
+// Is status een toestand van de VM, dan krijgt die hem.
+func (s *Server) UserTask(node, kind string, vmid int, user, exit, status string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.seq++
+	now := time.Now()
+	upid := fmt.Sprintf("UPID:%s:%08X:%08X:%08X:%s:%d:%s:", node, 1000+s.seq, s.seq, now.Unix(), kind, vmid, user)
+	s.tasks[upid] = &task{upid: upid, node: node, kind: kind, vmid: vmid, user: user, start: now, done: now, exit: exit, finished: true}
+	if status != "" {
+		for _, g := range s.guests {
+			if g.VMID == vmid {
+				g.Status = status
+			}
+		}
+	}
+	return upid
+}
+
+// clusterTasks geeft alle taken, nieuwste eerst, zoals /cluster/tasks.
+func (s *Server) clusterTasks(w http.ResponseWriter, _ *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.finishTasks()
+	out := []map[string]any{}
+	for _, t := range s.tasks {
+		m := map[string]any{"upid": t.upid, "node": t.node, "type": t.kind, "user": t.user, "starttime": t.start.Unix()}
+		if t.vmid > 0 {
+			m["id"] = strconv.Itoa(t.vmid)
+		} else {
+			m["id"] = ""
+		}
+		if t.finished || t.stopped {
+			m["endtime"] = t.done.Unix()
+			m["status"] = t.exit
+		}
+		out = append(out, m)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i]["starttime"].(int64) > out[j]["starttime"].(int64) })
+	ok(w, out)
 }
 
 func (s *Server) finishTasks() {
