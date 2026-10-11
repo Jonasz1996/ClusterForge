@@ -58,6 +58,7 @@ var classes = map[string]Class{
 	"disaster_scenario.created": ClassInfo, "disaster_scenario.updated": ClassInfo, "disaster_scenario.deleted": ClassInfo,
 	"disaster.started": ClassInfo, "disaster.fault_injected": ClassChange, "disaster.fault_cleared": ClassChange,
 	"disaster.finished": ClassInfo,
+	"dr.started":        ClassInfo, "dr.aborted": ClassInfo, "dr.finished": ClassInfo, "cluster.recovery_targets_updated": ClassInfo,
 
 	"service.created": ClassInfo, "service.updated": ClassInfo, "service.deleted": ClassInfo,
 	"dependency.created": ClassInfo, "dependency.updated": ClassInfo, "dependency.deleted": ClassInfo,

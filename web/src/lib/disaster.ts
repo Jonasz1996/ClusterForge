@@ -20,6 +20,10 @@ export type DisasterStepAction = components["schemas"]["DisasterStepAction"];
 export type DisasterStepOn = components["schemas"]["DisasterStepOn"];
 export type DisasterPlannedStep = components["schemas"]["DisasterPlannedStep"];
 export type DisasterNodeOption = components["schemas"]["DisasterNodeOption"];
+export type DRPlan = components["schemas"]["DRPlan"];
+export type DRReport = components["schemas"]["DRReport"];
+export type DRSchedule = components["schemas"]["DRSchedule"];
+export type RecoveryTargets = components["schemas"]["RecoveryTargets"];
 
 type Tone = "slate" | "green" | "amber" | "red" | "blue";
 
@@ -130,6 +134,38 @@ export function useRunDisaster() {
       unwrap(await api.POST("/disaster-scenarios/{scenarioId}/run", { params: { path: { scenarioId: id } }, body: { confirm } })),
     onSuccess: refresh,
   });
+}
+
+// useSetRecoveryTargets zet de RTO- en RPO-doelen van een cluster; null is
+// de standaard van de omgeving.
+export function useSetRecoveryTargets(clusterId: string) {
+  const refresh = useRefresh();
+  return useMutation({
+    mutationFn: async (body: { rto_minutes: number | null; rpo_hours: number | null }) =>
+      unwrap(await api.PUT("/clusters/{clusterId}/recovery-targets", { params: { path: { clusterId } }, body })),
+    onSuccess: refresh,
+  });
+}
+
+export const scheduleLabels: Record<DRSchedule, string> = {
+  "": "Alleen met de hand",
+  weekly: "Elke week",
+  monthly: "Elke maand",
+};
+
+// minutesText toont een doel in minuten als "60 min" of "2 u".
+export function minutesText(m: number) {
+  return m >= 60 && m % 60 === 0 ? `${m / 60} u` : `${m} min`;
+}
+
+// targetsText beschrijft de doelen van een cluster.
+export function targetsText(t: RecoveryTargets) {
+  if (t.rto_minutes === 0 && t.rpo_hours === 0) return "geen RTO- of RPO-doel";
+  const parts = [
+    t.rto_minutes ? `RTO-doel ${minutesText(t.rto_minutes)}` : "geen RTO-doel",
+    t.rpo_hours ? `RPO-doel ${t.rpo_hours} u` : "geen RPO-doel",
+  ];
+  return parts.join(", ");
 }
 
 // targetNames zijn de nodes die de storing krijgen, met de VM erbij.

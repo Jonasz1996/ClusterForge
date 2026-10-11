@@ -1350,6 +1350,25 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/clusters/{clusterId}/recovery-targets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** De RTO- en RPO-doelen van een cluster zetten (admin) */
+        put: operations["setRecoveryTargets"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/proxmox/{proxmoxId}/backup-watch": {
         parameters: {
             query?: never;
@@ -3263,7 +3282,7 @@ export interface components {
             description: string;
         };
         /** @enum {string} */
-        TestRunKind: "failover.test" | "backup.verify" | "disaster.run";
+        TestRunKind: "failover.test" | "backup.verify" | "disaster.run" | "dr.rehearsal";
         TestRun: {
             /** Format: uuid */
             id: string;
@@ -3297,6 +3316,8 @@ export interface components {
             backup: components["schemas"]["BackupVerifyReport"] | null;
             /** @description Alleen bij disaster.run */
             disaster: components["schemas"]["DisasterReport"] | null;
+            /** @description Alleen bij dr.rehearsal */
+            rehearsal: components["schemas"]["DRReport"] | null;
             /** @description Gebruikersnaam van wie de run vroeg */
             requested_by: string | null;
             /** Format: date-time */
@@ -3305,7 +3326,149 @@ export interface components {
             finished_at: string | null;
         };
         /** @enum {string} */
-        DisasterKind: "host_down" | "service_down" | "vip_loss" | "sequence";
+        DisasterKind: "host_down" | "service_down" | "vip_loss" | "sequence" | "dr_rehearsal";
+        /**
+         * @description Leeg: alleen met de hand; weekly: elke week in het testvenster; monthly: in het eerste testvenster van de maand
+         * @enum {string}
+         */
+        DRSchedule: "" | "weekly" | "monthly";
+        RecoveryTargets: {
+            /** @description Hoe lang herstel uit de back-ups mag duren; 0 is geen doel */
+            rto_minutes: number;
+            /** @description Hoe oud de gegevens na herstel mogen zijn; 0 is geen doel */
+            rpo_hours: number;
+            /** @description De standaard van de omgeving: prod 60, lab en test 0 */
+            default_rto_minutes: number;
+            /** @description De standaard van de omgeving: prod 26, lab en test 0 */
+            default_rpo_hours: number;
+            /** @description Het cluster heeft eigen doelen */
+            custom: boolean;
+        };
+        RecoveryTargetsInput: {
+            /** @description Leeg: de standaard van de omgeving; 0: geen doel */
+            rto_minutes: number | null;
+            /** @description Leeg: de standaard van de omgeving; 0: geen doel */
+            rpo_hours: number | null;
+        };
+        DRPlanNode: {
+            /** Format: uuid */
+            node_id: string;
+            hostname: string;
+            source_vmid: number;
+            volid: string;
+            /** Format: date-time */
+            backup_time: string;
+            backup_storage: string;
+            /** Format: int64 */
+            size_bytes: number;
+            /**
+             * Format: int64
+             * @description Wat de VM volgens de config uit de back-up vraagt
+             */
+            memory_bytes: number;
+            /** Format: int64 */
+            disk_bytes: number;
+            /** @description Het adres van de node; de andere nodes bereiken hem daarop */
+            address: string;
+        };
+        DRPlan: {
+            cluster_name: string;
+            environment: string;
+            bridge: string;
+            connection: string;
+            /** @description De Proxmox-host waarop alle sandboxes komen; leeg als er geen past */
+            host: string;
+            storage: string;
+            nodes: components["schemas"]["DRPlanNode"][];
+            vips: components["schemas"]["DisasterVIP"][];
+            /** @description 0 is geen doel */
+            rto_target_minutes: number;
+            /** @description 0 is geen doel */
+            rpo_target_hours: number;
+            /**
+             * Format: double
+             * @description De leeftijd van de oudste back-up nu
+             */
+            rpo_seconds: number;
+            /**
+             * Format: double
+             * @description Hoe ver de back-ups van de nodes uit elkaar liggen
+             */
+            spread_seconds: number;
+            /** @description De commando's die de bridge op de host afsluiten */
+            fix: string[];
+        };
+        DRReportNode: {
+            /** Format: uuid */
+            node_id: string;
+            hostname: string;
+            source_vmid: number;
+            sandbox_vmid: number | null;
+            volid: string;
+            /** Format: date-time */
+            backup_time: string;
+            /** Format: double */
+            restore_seconds: number | null;
+            /** Format: double */
+            boot_seconds: number | null;
+            /** @description De adressen die cf-agent in de sandbox meldde */
+            addresses: string[];
+            agent_version: string;
+            destroyed: boolean;
+        };
+        DRReportVIP: {
+            address: string;
+            /** @description De nodes die het VIP in de sandbox hadden */
+            holders: string[];
+            /** @description false als geen node zijn adressen kon melden */
+            checked: boolean;
+            probe: string;
+            probe_ok: boolean | null;
+        };
+        DRReport: {
+            /** Format: uuid */
+            scenario_id: string;
+            name: string;
+            cluster_name: string;
+            environment: string;
+            bridge: string;
+            connection: string;
+            host: string;
+            storage: string;
+            /** @description De commando's die de bridge afsluiten */
+            fix: string[];
+            rto_target_minutes: number;
+            rpo_target_hours: number;
+            /**
+             * Format: double
+             * @description Van de start van het terugzetten tot alle controles slaagden; leeg als het cluster niet werkend terugkwam
+             */
+            rto_seconds: number | null;
+            /**
+             * Format: double
+             * @description De leeftijd van de oudste back-up bij de start van het terugzetten
+             */
+            rpo_seconds: number | null;
+            /** @description Leeg zonder doel of zonder meting */
+            rto_met: boolean | null;
+            rpo_met: boolean | null;
+            /** Format: double */
+            restore_seconds: number | null;
+            /** Format: double */
+            boot_seconds: number | null;
+            /** Format: double */
+            check_seconds: number | null;
+            /** Format: double */
+            cleanup_seconds: number | null;
+            /** Format: double */
+            total_seconds: number | null;
+            nodes: components["schemas"]["DRReportNode"][];
+            vips: components["schemas"]["DRReportVIP"][];
+            /** Format: date-time */
+            destroyed_at: string | null;
+            /** @description Waarom de bewaking de repetitie afbrak */
+            aborted: string;
+        };
         /** @enum {string} */
         DisasterStepAction: "vrrp_block" | "link_down" | "port_block" | "netem" | "disk_fill" | "service_stop";
         /**
@@ -3386,6 +3549,15 @@ export interface components {
             fault_seconds: number;
             /** @description Hoe snel na het terugzetten alles weer gezond moet zijn */
             recovery_seconds: number;
+            /** @description Bij dr_rehearsal de afgesloten bridge */
+            bridge: string;
+            schedule: components["schemas"]["DRSchedule"];
+            schedule_label: string;
+            /**
+             * Format: date-time
+             * @description De volgende geplande DR-repetitie
+             */
+            next_run_at: string | null;
             last_run: components["schemas"]["TestRun"] | null;
             /** Format: date-time */
             created_at: string;
@@ -3406,8 +3578,13 @@ export interface components {
             unit?: string;
             /** @description Bij sequence; aan het einde van de storing heft ClusterForge alles op */
             steps?: components["schemas"]["DisasterStep"][];
+            /** @description 20 tot 600; bij dr_rehearsal genegeerd */
             fault_seconds: number;
+            /** @description 10 tot 1800; bij dr_rehearsal genegeerd */
             recovery_seconds: number;
+            /** @description Bij dr_rehearsal de afgesloten bridge; leeg is vmbr99 */
+            bridge?: string;
+            schedule?: components["schemas"]["DRSchedule"];
         };
         DisasterKindOption: {
             key: components["schemas"]["DisasterKind"];
@@ -3456,7 +3633,7 @@ export interface components {
             reason: string;
         };
         DisasterOptions: {
-            /** @description false op prod */
+            /** @description false op prod: dan kan alleen de DR-repetitie */
             allowed: boolean;
             reason: string;
             slug: string;
@@ -3467,6 +3644,9 @@ export interface components {
             /** @description Voor de stappen van een reeks */
             nodes: components["schemas"]["DisasterNodeOption"][];
             actions: components["schemas"]["DisasterActionOption"][];
+            targets: components["schemas"]["RecoveryTargets"];
+            /** @description Het testvenster, zoals zondag van 03:00 tot 05:00 */
+            window: string;
         };
         DisasterScenarioList: {
             items: components["schemas"]["DisasterScenario"][];
@@ -3527,6 +3707,8 @@ export interface components {
             notes: string[];
             /** @description De slugs om in te tikken */
             confirm: string[];
+            /** @description Bij dr_rehearsal wat er teruggaat en waar */
+            rehearsal: components["schemas"]["DRPlan"] | null;
         };
         DisasterTargetResult: {
             /** Format: uuid */
@@ -8166,6 +8348,36 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BackupPolicy"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    setRecoveryTargets: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecoveryTargetsInput"];
+            };
+        };
+        responses: {
+            /** @description Gezet */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecoveryTargets"];
                 };
             };
             400: components["responses"]["Error"];

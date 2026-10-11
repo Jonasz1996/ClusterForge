@@ -9,8 +9,12 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"os/exec"
+	"slices"
+	"strconv"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -28,6 +32,12 @@ func TestReadVerifyRequest(t *testing.T) {
 		{`{"http":[{"url":"http://localhost/"}]}`, "alleen http://127.0.0.1"},
 		{`{"http":[{"url":"http://u:p@127.0.0.1/"}]}`, "alleen http://127.0.0.1"},
 		{`{"http":[{"url":"http://127.0.0.1/","expect":42}]}`, "ongeldige statuscode"},
+		{`{"probes":[{"name":"vip","host":"web02","port":80}]}`, "geen IP-adres"},
+		{`{"probes":[{"name":"vip","host":"0.0.0.0","port":80}]}`, "geen IP-adres"},
+		{`{"probes":[{"name":"vip","host":"10.0.0.1","port":0}]}`, "ongeldige poort"},
+		{`{"probes":[{"name":"vip","host":"10.0.0.1","port":80,"path":"x"}]}`, "ongeldig pad"},
+		{`{"probes":[{"name":"vip","host":"10.0.0.1","port":80,"path":"/a b"}]}`, "ongeldig pad"},
+		{`{"probes":[{"name":"web02","host":"10.0.0.2","port":22,"path":"/","reach":true}]}`, "alleen bereikbaarheid"},
 	} {
 		if _, err := ReadVerifyRequest(strings.NewReader(tc.in)); err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%s: %v", tc.in, err)
@@ -287,6 +297,90 @@ func TestVerifyLimit(t *testing.T) {
 	}
 	if c := res.Checks[0]; c.Status != "fail" {
 		t.Fatalf("na de limiet: %+v", res.Checks)
+	}
+}
+
+// TestVerifyProbes: in een sandbox meldt verify zijn adressen en doet hij
+// de probes van de DR-repetitie; buiten een sandbox weigert hij die.
+func TestVerifyProbes(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/gezond" {
+			w.WriteHeader(http.StatusServiceUnavailable)
+		}
+	}))
+	defer srv.Close()
+	// Het VIP en web02 zijn hier de testserver; 10.0.30.13 antwoordt niet.
+	_, port, _ := net.SplitHostPort(srv.Listener.Addr().String())
+	var dialed []string
+	dial := func(ctx context.Context, network, address string) (net.Conn, error) {
+		dialed = append(dialed, address)
+		host, _, _ := net.SplitHostPort(address)
+		switch host {
+		case "10.0.30.13":
+			return nil, errors.New("no route to host")
+		case "10.0.30.14":
+			return nil, &net.OpError{Op: "dial", Net: network, Err: os.NewSyscallError("connect", syscall.ECONNREFUSED)}
+		}
+		var d net.Dialer
+		return d.DialContext(ctx, network, srv.Listener.Addr().String())
+	}
+	root := t.TempDir()
+	addrs := func() ([]net.Addr, error) {
+		return []net.Addr{
+			&net.IPNet{IP: net.ParseIP("127.0.0.1"), Mask: net.CIDRMask(8, 32)},
+			&net.IPNet{IP: net.ParseIP("10.0.30.11"), Mask: net.CIDRMask(24, 32)},
+			&net.IPNet{IP: net.ParseIP("10.0.30.100"), Mask: net.CIDRMask(32, 32)},
+			&net.IPNet{IP: net.ParseIP("fe80::1"), Mask: net.CIDRMask(64, 128)},
+		}, nil
+	}
+	v := &Verifier{Exec: (&fakeSystem{}).exec, Root: root, Dial: dial, Addrs: addrs, BootWait: time.Millisecond,
+		Settle: 50 * time.Millisecond, Retry: 10 * time.Millisecond}
+	p, _ := strconv.Atoi(port)
+	req := protocol.VerifyRequest{Addresses: true, Probes: []protocol.VerifyProbe{
+		{Name: "VIP 10.0.30.100", Host: "10.0.30.100", Port: p, Path: "/gezond"},
+		{Name: "web02", Host: "10.0.30.12", Port: p, Path: "/stuk"},
+		{Name: "web03", Host: "10.0.30.13", Port: 22, Reach: true},
+		{Name: "web04", Host: "10.0.30.14", Port: 22, Reach: true},
+		{Name: "web04 tcp", Host: "10.0.30.14", Port: 22},
+	}}
+	if err := normalize(&req); err != nil {
+		t.Fatal(err)
+	}
+
+	// Buiten een sandbox: wel de adressen, geen enkele verbinding.
+	res := v.Verify(context.Background(), req)
+	if strings.Join(res.Addresses, " ") != "10.0.30.100 10.0.30.11" || len(dialed) != 0 {
+		t.Fatalf("buiten een sandbox: %v, gebeld %v", res.Addresses, dialed)
+	}
+	for _, c := range res.Checks[1:] {
+		if c.Kind != "probe" || c.Status != protocol.VerifyFail || !strings.Contains(c.Detail, "alleen in een sandbox") {
+			t.Fatalf("probe buiten een sandbox: %+v", c)
+		}
+	}
+
+	writeFile(t, root, "sys/class/dmi/id/product_serial", "cf-sandbox\n")
+	res = v.Verify(context.Background(), req)
+	got := map[string]protocol.VerifyCheck{}
+	for _, c := range res.Checks {
+		got[c.Name] = c
+	}
+	if c := got["VIP 10.0.30.100"]; c.Status != protocol.VerifyOK || !strings.Contains(c.Detail, "http://10.0.30.100:"+port+"/gezond gaf 200") {
+		t.Errorf("VIP: %+v", c)
+	}
+	if c := got["web02"]; c.Status != protocol.VerifyFail || !strings.Contains(c.Detail, "gaf 503 in plaats van 200") {
+		t.Errorf("web02: %+v", c)
+	}
+	if c := got["web03"]; c.Status != protocol.VerifyFail || !strings.Contains(c.Detail, "geen verbinding met 10.0.30.13:22") {
+		t.Errorf("web03: %+v", c)
+	}
+	if c := got["web04"]; c.Status != protocol.VerifyOK || !strings.Contains(c.Detail, "weigert de verbinding, maar de machine is bereikbaar") {
+		t.Errorf("web04: %+v", c)
+	}
+	if c := got["web04 tcp"]; c.Status != protocol.VerifyFail {
+		t.Errorf("web04 zonder reach: %+v", c)
+	}
+	if !slices.Contains(dialed, "10.0.30.100:"+port) || !slices.Contains(dialed, "10.0.30.13:22") {
+		t.Errorf("gebeld: %v", dialed)
 	}
 }
 

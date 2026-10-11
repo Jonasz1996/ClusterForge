@@ -7,6 +7,7 @@ package store
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -24,7 +25,7 @@ func (q *Queries) DeleteDisasterScenario(ctx context.Context, id uuid.UUID) (int
 }
 
 const getDisasterScenario = `-- name: GetDisasterScenario :one
-SELECT id, cluster_id, name, kind, params, expect, created_by, created_at, updated_at FROM disaster_scenarios WHERE id = $1
+SELECT id, cluster_id, name, kind, params, expect, created_by, created_at, updated_at, schedule, next_run_at FROM disaster_scenarios WHERE id = $1
 `
 
 func (q *Queries) GetDisasterScenario(ctx context.Context, id uuid.UUID) (DisasterScenario, error) {
@@ -40,6 +41,8 @@ func (q *Queries) GetDisasterScenario(ctx context.Context, id uuid.UUID) (Disast
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Schedule,
+		&i.NextRunAt,
 	)
 	return i, err
 }
@@ -95,9 +98,9 @@ func (q *Queries) InsertDisasterRun(ctx context.Context, arg InsertDisasterRunPa
 }
 
 const insertDisasterScenario = `-- name: InsertDisasterScenario :one
-INSERT INTO disaster_scenarios (cluster_id, name, kind, params, expect, created_by)
-VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, cluster_id, name, kind, params, expect, created_by, created_at, updated_at
+INSERT INTO disaster_scenarios (cluster_id, name, kind, params, expect, schedule, next_run_at, created_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+RETURNING id, cluster_id, name, kind, params, expect, created_by, created_at, updated_at, schedule, next_run_at
 `
 
 type InsertDisasterScenarioParams struct {
@@ -106,6 +109,8 @@ type InsertDisasterScenarioParams struct {
 	Kind      string
 	Params    []byte
 	Expect    []byte
+	Schedule  string
+	NextRunAt *time.Time
 	CreatedBy *uuid.UUID
 }
 
@@ -116,6 +121,8 @@ func (q *Queries) InsertDisasterScenario(ctx context.Context, arg InsertDisaster
 		arg.Kind,
 		arg.Params,
 		arg.Expect,
+		arg.Schedule,
+		arg.NextRunAt,
 		arg.CreatedBy,
 	)
 	var i DisasterScenario
@@ -129,6 +136,8 @@ func (q *Queries) InsertDisasterScenario(ctx context.Context, arg InsertDisaster
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Schedule,
+		&i.NextRunAt,
 	)
 	return i, err
 }
@@ -250,7 +259,7 @@ func (q *Queries) ListDisasterClusters(ctx context.Context, ids []uuid.UUID) ([]
 }
 
 const listDisasterScenarios = `-- name: ListDisasterScenarios :many
-SELECT id, cluster_id, name, kind, params, expect, created_by, created_at, updated_at FROM disaster_scenarios WHERE cluster_id = $1 ORDER BY created_at, id
+SELECT id, cluster_id, name, kind, params, expect, created_by, created_at, updated_at, schedule, next_run_at FROM disaster_scenarios WHERE cluster_id = $1 ORDER BY created_at, id
 `
 
 func (q *Queries) ListDisasterScenarios(ctx context.Context, clusterID uuid.UUID) ([]DisasterScenario, error) {
@@ -272,6 +281,8 @@ func (q *Queries) ListDisasterScenarios(ctx context.Context, clusterID uuid.UUID
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Schedule,
+			&i.NextRunAt,
 		); err != nil {
 			return nil, err
 		}
@@ -333,17 +344,20 @@ func (q *Queries) ListFaultFacts(ctx context.Context, clusterID *uuid.UUID) ([]L
 
 const updateDisasterScenario = `-- name: UpdateDisasterScenario :one
 UPDATE disaster_scenarios
-SET name = $1, kind = $2, params = $3, expect = $4, updated_at = now()
-WHERE id = $5
-RETURNING id, cluster_id, name, kind, params, expect, created_by, created_at, updated_at
+SET name = $1, kind = $2, params = $3, expect = $4, schedule = $5, next_run_at = $6,
+    updated_at = now()
+WHERE id = $7
+RETURNING id, cluster_id, name, kind, params, expect, created_by, created_at, updated_at, schedule, next_run_at
 `
 
 type UpdateDisasterScenarioParams struct {
-	Name   string
-	Kind   string
-	Params []byte
-	Expect []byte
-	ID     uuid.UUID
+	Name      string
+	Kind      string
+	Params    []byte
+	Expect    []byte
+	Schedule  string
+	NextRunAt *time.Time
+	ID        uuid.UUID
 }
 
 func (q *Queries) UpdateDisasterScenario(ctx context.Context, arg UpdateDisasterScenarioParams) (DisasterScenario, error) {
@@ -352,6 +366,8 @@ func (q *Queries) UpdateDisasterScenario(ctx context.Context, arg UpdateDisaster
 		arg.Kind,
 		arg.Params,
 		arg.Expect,
+		arg.Schedule,
+		arg.NextRunAt,
 		arg.ID,
 	)
 	var i DisasterScenario
@@ -365,6 +381,8 @@ func (q *Queries) UpdateDisasterScenario(ctx context.Context, arg UpdateDisaster
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Schedule,
+		&i.NextRunAt,
 	)
 	return i, err
 }

@@ -385,7 +385,7 @@ const bigTones: Record<string, string> = {
   blue: "bg-brand-50 text-brand-700 dark:bg-slate-800 dark:text-brand-500",
 };
 
-function BigResult({ run }: { run: TestRun }) {
+export function BigResult({ run }: { run: TestRun }) {
   const r = run.result ? runResults[run.result] : { label: run.job_status === "queued" ? "WACHT" : "LOOPT", tone: "blue" };
   return (
     <span className={cx("inline-flex rounded-md px-4 py-2 text-lg font-semibold tracking-wide", bigTones[r.tone])}>{r.label}</span>

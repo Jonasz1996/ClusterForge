@@ -50,6 +50,7 @@ Het technisch ontwerp staat in [docs/design/mvp-fase-1.md](docs/design/mvp-fase-
 | 10. Documentatie naar GitHub | De documentatie in een eigen GitHub-repository met een eigen token: na elke nieuwe versie één commit met alleen de gewijzigde bestanden, zonder commit als er niets veranderde; nooit in de branch die GitOps leest | klaar |
 | 11. Rampoefeningen | In lab en test met opzet een Proxmox-host, een dienst op alle nodes of een VIP laten uitvallen; vooraf de voorspelling van de wat-als, tijdens de storing meten op de VIP's en de status van elk geraakt en afhankelijk cluster, en een rapport met voorspeld tegen gemeten; daarna altijd alles terugzetten. Pagina Tests met alle runs | klaar |
 | 12. Storingen met dodemansknop | Een rampoefening als reeks van tot vijf stappen: VRRP blokkeren, een interface down, een TCP-poort dicht, vertraging of pakketverlies, een schijf vullen of een dienst stoppen, op de VIP-houder, de andere nodes, alle nodes of één node. De agent zet elke storing met een lease die de server verlengt en heft hem zelf op als ClusterForge wegvalt, na de bovengrens en na een herstart | klaar |
+| 13. DR-repetitie | Een heel cluster terugzetten uit de back-ups, ook op prod: alle nodes tegelijk als sandbox op één host aan een afgesloten bridge, controleren dat het VIP één houder heeft en antwoordt, RTO en RPO meten tegen de doelen per cluster, en daarna alles weer verwijderen; met de hand of elke week of maand in het testvenster | klaar |
 
 ## Draaien met Docker Compose
 
@@ -87,7 +88,7 @@ Agents verbinden zelf naar de server, op poort 4222 (NATS met TLS). Die poort mo
 | `CF_DRIFT_INTERVAL` | `15m` | Hoe vaak de server elke node op drift controleert; `0` zet dat uit (Nu controleren blijft werken), anders minstens `1m` |
 | `CF_SANDBOX_STORAGE` | (leeg) | Proxmox-storage voor de tijdelijke VM van een back-upcontrole; leeg kiest per host de storage voor VM-schijven met de meeste vrije ruimte |
 | `CF_SANDBOX_BOOT_TIMEOUT` | `10m` | Hoe lang een teruggezette VM mag doen over opstarten tot de guest agent antwoordt; tussen `30s` en `1h` |
-| `CF_TEST_WINDOW` | `zo 03:00-05:00` | Het testvenster voor geplande failovertests en back-upcontroles: dagen (`ma` tot `zo`, met komma's, of `dagelijks`) en de tijden, op de klok van `TZ` |
+| `CF_TEST_WINDOW` | `zo 03:00-05:00` | Het testvenster voor geplande failovertests, back-upcontroles en DR-repetities: dagen (`ma` tot `zo`, met komma's, of `dagelijks`) en de tijden, op de klok van `TZ` |
 | `CF_JOURNAL_SSH_LOGINS` | `true` | Bewaar SSH-logins (gebruiker, bron-IP en methode) in het journaal van de nodes; `false` laat ze weg |
 | `CF_DOCS_USERNAMES` | `true` | Zet in de documentatie bij elke revisie wie hem maakte; `false` laat de gebruikersnamen weg |
 | `TZ` | `Europe/Brussels` in Docker Compose | Tijdzone van de server; het testvenster volgt zomer- en wintertijd |
@@ -399,18 +400,19 @@ Het testvenster volgt de klok, ook bij zomer- en wintertijd: "elke 7 dagen om 04
 
 ### Rampoefeningen
 
-Een failovertest laat één node uitvallen; een rampoefening laat iets groters wegvallen en kijkt wat de rest doet. Op de pagina van een cluster in lab of test staat daarvoor de kaart Rampoefeningen. Een beheerder kiest wat er uitvalt:
+Een failovertest laat één node uitvallen; een rampoefening laat iets groters wegvallen en kijkt wat de rest doet. Op de pagina van een cluster staat daarvoor de kaart Rampoefeningen. Een beheerder kiest wat er uitvalt:
 
 - **Proxmox-host valt uit**: alle gekoppelde VM's op die host gaan tegelijk hard uit. De host zelf blijft aan. De storing duurt minstens 100 s, omdat een node pas na 90 s zonder heartbeat down is; standaard 2 minuten, met 10 minuten om weer gezond te worden, want de VM's moeten opstarten.
 - **Dienst valt weg op alle nodes**: een dienst van de failovertest, of hier ook PostgreSQL of MariaDB, stopt op elke node van het cluster. Standaard 1 minuut, met 2 minuten voor het herstel.
 - **VIP valt weg**: keepalived stopt op alle nodes, zodat het VIP geen houder heeft.
 - **Reeks van storingen**: tot vijf stappen na elkaar, zie [hieronder](#reeksen-van-storingen).
+- **DR-repetitie**: het hele cluster terugzetten uit de back-ups, in sandboxes, zie [hieronder](#dr-repetitie). Dat raakt het echte cluster niet en kan als enige ook op prod.
 
 Nu oefenen toont eerst de voorspelling van de [wat-als](#wat-als): per cluster dat geraakt wordt of er volgens de bekende afhankelijkheden van afhangt, de status nu en de voorspelde status met de reden, en wat de voorspelling onzeker maakt. Daarna de voorcontrole: alleen nodes in lab- en testclusters vallen uit, geen prodcluster hangt ervan af, elk geraakt cluster is gezond met verse heartbeats, in geen van die clusters loopt een taak, er loopt geen andere test, de probes op elk VIP slagen drie keer, en ClusterForge draait zelf niet op wat uitvalt. Bij een host komen daar bij: de host is online, geen VM erop staat onder Proxmox HA en op geen ervan draait docker; staan er VM's op die ClusterForge niet kent terwijl hij niet weet waar hij zelf draait, dan start de oefening niet. Ter bevestiging tik je de slug in van elk cluster dat uitvalt.
 
 De oefening is een taak met vijf stappen: Voorcontrole, Storing en meten, Herstellen, Herstel controleren en Rapport. Ze neemt het clusterslot van elk cluster dat uitvalt, zodat daar intussen niets anders loopt, en het testslot. Tijdens de storing vraagt de server elk VIP elke kwart seconde op en leest hij de status van elk cluster en van zijn bevestigde diensten. Een onderbreking korter dan 10 s telt als overname, niet als uitval. Het rapport zet per cluster voorspeld en gemeten naast elkaar (zoals voorspeld, milder, bleef gezond, erger dan voorspeld of niet hersteld), met hoe lang elk VIP onbereikbaar was, wanneer elk cluster weer gezond was en een tijdlijn per VIP. De uitslag is bijvoorbeeld "PASS: 2 clusters gedroegen zich zoals voorspeld, alles hersteld na 6 s", "WARNING: App bleef gezond, maar zou down worden" of "FAIL: App ging onverwacht down". Verminderd is bij een cluster dat alleen afhangt niet te zien en telt dan als zoals voorspeld.
 
-Alles komt terug, zoals bij de failovertest: na de meting, bij een fout, bij Afbreken, bij een nette stop van de server en na een crash. Lukt het herstel niet, dan staat er een rode balk bij elk gemeten cluster met Opnieuw herstellen, en een bevinding bij Herstelbaarheid in de health score. Een incident tijdens de oefening staat als veroorzaakt door een test. Op prod kan een rampoefening niet, ook niet met de hand.
+Alles komt terug, zoals bij de failovertest: na de meting, bij een fout, bij Afbreken, bij een nette stop van de server en na een crash. Lukt het herstel niet, dan staat er een rode balk bij elk gemeten cluster met Opnieuw herstellen, en een bevinding bij Herstelbaarheid in de health score. Een incident tijdens de oefening staat als veroorzaakt door een test. Op prod kan alleen de DR-repetitie; de andere rampoefeningen niet, ook niet met de hand.
 
 Alle runs van failovertests, rampoefeningen en back-upcontroles staan op de pagina Tests, met filters op soort en uitkomst.
 
@@ -432,6 +434,38 @@ Een stap blijft aan tot het einde van de storing; daarna heft ClusterForge alles
 De dodemansknop: de agent zet elke storing met een lease van 30 s die de server elke 10 s verlengt. Valt de server weg, crasht hij of verliest de node het contact, dan heft de agent de storing zelf op zodra de lease afloopt. Elke storing heeft daarnaast een harde bovengrens van 10 minuten. De agent bewaart zijn storingen in `faults.json` naast zijn state, heft ze op bij elke start, en `cf-agent-fault-clear.service` doet dat bij het opstarten van de machine al voor het netwerk opkomt, ook als de agent zelf niet start. Met de hand: `sudo cf-agent fault-clear`.
 
 Interface down op de interface waarover de agent met ClusterForge praat, snijdt de node af: dan kan ClusterForge niet verlengen en niet opheffen. Zo'n stap heeft geen lease maar alleen een bovengrens van 2 minuten, telt vanaf de stap tot het einde van de storing, en mag alleen in de laatste 2 minuten van de storing vallen; daarna volgt er op die node geen stap meer. De agent zet de interface na die tijd zelf weer aan, ook na een herstart.
+
+#### DR-repetitie
+
+Een back-upcontrole bewijst dat één VM terugkomt; een DR-repetitie bewijst dat het hele cluster terugkomt, zoals na een echte ramp. ClusterForge zet van elke node de nieuwste back-up tegelijk terug als sandbox, allemaal op één Proxmox-host en alleen aan een afgesloten bridge: daar zien de nodes elkaar, maar niets anders. Daarna controleert het of het cluster werkt en meet het hoe lang dat duurde. Het echte cluster blijft draaien en ClusterForge raakt het niet aan; daarom kan de DR-repetitie ook op prod. Kies op de kaart Rampoefeningen "DR-repetitie", met de bridge (standaard `vmbr99`) en eventueel een planning.
+
+**De afgesloten bridge** maak je één keer, als root op de host waar de repetitie draait. De voorcontrole noemt die host en geeft deze commando's met de goede namen:
+
+```sh
+pvesh create /nodes/pve1/network --iface vmbr99 --type bridge --autostart 1 --comments 'ClusterForge DR-repetitie: afgesloten'
+pvesh set /nodes/pve1/network
+```
+
+Afgesloten betekent: geen poorten en geen adres. Hangt de bridge aan een netwerkkaart of heeft ze een adres, dan start de repetitie niet, en de voorcontrole en het rapport geven het commando dat dat weghaalt. Hangt er een andere VM aan, ook een achtergebleven sandbox van een eerdere repetitie (die heeft dezelfde adressen), dan start ze ook niet. Het netwerk van de host leest ClusterForge met `Sys.Audit`, dat al in de rol staat. Verder zijn de pool `cf-sandbox` van de [back-upcontrole](#back-ups-controleren) nodig en, op Proxmox VE 9, de rol ClusterForgeSandbox van de [diepe controle](#diepe-controle-met-cf-agent-verify).
+
+De voorcontrole eist verder: alle nodes in dezelfde Proxmox-koppeling, elk gekoppeld aan een VM (geen container) met een back-up; een host die alle back-ups kan lezen, het geheugen van alle VM's samen plus 1 GB vrij heeft en een storage die daarna onder 85 % blijft; geen andere test; en geen split-brain in het echte cluster. Liggen de back-ups van de nodes meer dan een uur uit elkaar, dan komt er een waarschuwing, want de gegevens passen dan misschien niet bij elkaar.
+
+De repetitie is een taak met zes stappen:
+
+1. **Voorcontrole**, opnieuw, want er kan intussen een nieuwere back-up zijn.
+2. **Terugzetten**: alle back-ups tegelijk, elk onder een nieuw VMID in pool `cf-sandbox`. Hier begint de RTO.
+3. **Afsluiten**: elke netwerkkaart komt, nog losgekoppeld, aan de afgesloten bridge met het MAC-adres van de bron, zodat het besturingssysteem zijn eigen netwerkconfig vindt. VLAN-tags en trunks gaan eraf, want de bridge heeft geen poorten. Opstarten bij boot en de bescherming gaan uit, de VM krijgt de tag en het serienummer `cf-sandbox`. ClusterForge leest de config terug, kijkt nog een keer of de bridge afgesloten is en zet dan pas de kaarten aan.
+4. **Starten**: alle VM's, en wachten tot elke guest agent antwoordt.
+5. **Controleren**: in elke sandbox de [diepe controle](#diepe-controle-met-cf-agent-verify) met cf-agent, die ook zijn adressen meldt. Daaruit volgt wie elk VIP heeft; keepalived krijgt daar anderhalve minuut voor. Precies één houder is goed, twee is split-brain in de sandbox. Vanaf een node zonder VIP vraagt cf-agent dan het VIP op met de probe van de failovertest (HTTP op poort 80, of de TCP-poort) en kijkt hij of elke andere node antwoordt (poort 22; ook een geweigerde verbinding telt als antwoord). Slaagt alles, dan stopt de RTO.
+6. **Opruimen**: alle sandboxes hard uit en verwijderd, altijd, ook na een fout of Afbreken.
+
+Zolang de sandboxes kunnen draaien, bewaakt ClusterForge het echte cluster elke 2 seconden. Komt er een tweede agentverbinding met de sleutel van een node, verhuist een echt VIP naar een andere node of krijgt het cluster split-brain, dan zet het alle sandboxes meteen hard uit, breekt het de repetitie af met ERROR en schrijft het dat in het logboek.
+
+**RTO en RPO.** De RTO is de tijd van de start van het terugzetten tot alle controles geslaagd zijn; de RPO is hoe oud de oudste back-up was bij die start. Prod heeft standaard als doel een RTO van 60 minuten en een RPO van 26 uur (een dagelijkse back-up met wat speling); lab en test hebben geen doel. Een admin past de doelen per cluster aan in het formulier van de DR-repetitie; 0 is geen doel. De uitslag is bijvoorbeeld "PASS: Web op vmbr99: het cluster kwam werkend terug. RTO 7 min 12 s (doel 1 u). RPO 6 u (doel 26 u). VIP 10.0.20.100 bij web-01, HTTP antwoordt. 2 sandbox-VM's verwijderd om 04:21." Haalt de repetitie een doel niet, dan wordt het WARNING; komt het cluster niet werkend terug, dan FAIL. Het rapport toont per node de back-up, het sandbox-VMID, de tijden en de adressen, per VIP de houder en de probe, en de stappen met hun log.
+
+**Planning.** Elke week in het testvenster, of in het eerste testvenster van elke maand. Loopt er een andere test, dan wacht de repetitie, zoals bij de [failovertest](#planning). Faalt de voorcontrole van een geplande repetitie, dan komt er een run met ERROR en de commando's in het rapport, zonder taak, en schuift de planning door naar de volgende keer.
+
+De adressen en de probes kent cf-agent vanaf protocol 7. Met een oudere agent in de back-up slaagt de repetitie hoogstens met een waarschuwing, omdat het VIP en de verbindingen niet gecontroleerd zijn; de drie stappen om dat te regelen staan bij de [diepe controle](#diepe-controle-met-cf-agent-verify).
 
 ## Afhankelijkheden
 

@@ -326,25 +326,27 @@ type BackupWatch struct {
 }
 
 type Cluster struct {
-	ID              uuid.UUID
-	Slug            string
-	Name            string
-	Description     string
-	Type            string
-	Environment     Environment
-	GitRepoUrl      string
-	Tags            []string
-	Status          string
-	Spec            []byte
-	SpecRevision    int32
-	TemplateName    *string
-	TemplateVersion *string
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
-	StatusReason    string
-	StatusSince     *time.Time
-	GitRepoID       *uuid.UUID
-	AppliedRevision int32
+	ID               uuid.UUID
+	Slug             string
+	Name             string
+	Description      string
+	Type             string
+	Environment      Environment
+	GitRepoUrl       string
+	Tags             []string
+	Status           string
+	Spec             []byte
+	SpecRevision     int32
+	TemplateName     *string
+	TemplateVersion  *string
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+	StatusReason     string
+	StatusSince      *time.Time
+	GitRepoID        *uuid.UUID
+	AppliedRevision  int32
+	RtoTargetMinutes *int32
+	RpoTargetHours   *int32
 }
 
 type ClusterOwner struct {
@@ -372,6 +374,8 @@ type DisasterScenario struct {
 	CreatedBy *uuid.UUID
 	CreatedAt time.Time
 	UpdatedAt time.Time
+	Schedule  string
+	NextRunAt *time.Time
 }
 
 type DocSnapshot struct {

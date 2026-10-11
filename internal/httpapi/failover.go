@@ -369,7 +369,7 @@ func toAPIRun(run store.TestRun, jobStatus store.NullJobStatus, requestedBy *str
 		CreatedAt: run.CreatedAt, FinishedAt: nullableOf(run.FinishedAt),
 		Measurements: nullable.NewNullNullable[gen.FailoverMeasurements](),
 		Definition:   nullable.NewNullNullable[gen.FailoverDefinition](), Backup: nullable.NewNullNullable[gen.BackupVerifyReport](),
-		Disaster: nullable.NewNullNullable[gen.DisasterReport](),
+		Disaster: nullable.NewNullNullable[gen.DisasterReport](), Rehearsal: nullable.NewNullNullable[gen.DRReport](),
 	}
 	if jobStatus.Valid {
 		out.JobStatus = nullable.NewNullableWithValue(gen.JobStatus(jobStatus.JobStatus))
@@ -395,6 +395,8 @@ func toAPIRun(run store.TestRun, jobStatus store.NullJobStatus, requestedBy *str
 		out.Backup = nullable.NewNullableWithValue(backupReport(run, nil))
 	case disaster.KindRun:
 		disasterReport(run, &out)
+	case backups.KindRehearsal:
+		rehearsalReport(run, &out)
 	}
 	return out
 }

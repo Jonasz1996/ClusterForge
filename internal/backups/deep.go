@@ -154,60 +154,16 @@ func (v *verify) deep(ctx context.Context, st *jobs.Step) {
 		v.addCheck(Check{Name: nameVerify, Warning: true, Detail: "de aanvraag voor cf-agent verify is niet te maken: " + err.Error()})
 		return
 	}
-	body, err := json.Marshal(req)
-	if err != nil {
-		v.addCheck(Check{Name: nameVerify, Warning: true, Detail: err.Error()})
-		return
-	}
 	st.Logf("cf-agent verify: %s", describe(req))
 	_ = st.Flush(ctx)
-	vm, err := s.guard(ctx, v.sb.ID)
-	if err != nil {
-		v.addCheck(Check{Name: nameVerify, Warning: true, Detail: err.Error()})
-		return
+	res, d, problem := s.agentVerify(ctx, v.sb.ID, req, st, "")
+	if res.AgentVersion != "" {
+		v.m.AgentVersion = res.AgentVersion
 	}
-	t0 := s.Now()
-	pid, err := vm.runVerify(ctx, body)
-	if err != nil {
+	if problem != nil {
 		if ctx.Err() == nil {
-			v.addCheck(startProblem(err))
+			v.addCheck(*problem)
 		}
-		return
-	}
-	st.Logf("cf-agent verify loopt in de sandbox (pid %d)", pid)
-	_ = st.Flush(ctx)
-	wait := s.VerifyWait
-	if wait == 0 {
-		wait = protocol.VerifyLimit + 30*time.Second
-	}
-	var status proxmox.ExecStatus
-	for {
-		sctx, cancel := context.WithTimeout(ctx, s.AgentTimeout)
-		status, err = vm.execStatus(sctx, pid)
-		cancel()
-		if err == nil && bool(status.Exited) {
-			break
-		}
-		if ctx.Err() != nil {
-			return
-		}
-		if s.Now().Sub(t0) > wait {
-			v.addCheck(Check{Name: nameVerify, Warning: true, Detail: "cf-agent verify gaf na " + duration(wait) + " geen antwoord"})
-			return
-		}
-		if err := sleep(ctx, s.Poll); err != nil {
-			return
-		}
-	}
-	d := s.Now().Sub(t0)
-	var res protocol.VerifyResult
-	if jerr := json.Unmarshal([]byte(status.OutData), &res); jerr != nil || res.ProtocolVersion == 0 {
-		v.addCheck(tooOld(status))
-		return
-	}
-	v.m.AgentVersion = res.AgentVersion
-	if res.Error != "" {
-		v.addCheck(Check{Name: nameVerify, Warning: true, Detail: "cf-agent " + res.AgentVersion + " weigerde de aanvraag: " + res.Error})
 		return
 	}
 	failed := 0
@@ -232,6 +188,59 @@ func (v *verify) deep(ctx context.Context, st *jobs.Step) {
 	st.Logf("cf-agent %s antwoordde na %s: %s, %d mislukt", res.AgentVersion, duration(d),
 		count(len(res.Checks), "controle", "controles"), failed)
 	v.event(fmt.Sprintf("cf-agent verify klaar: %s", count(len(res.Checks), "controle", "controles")))
+}
+
+// agentVerify start cf-agent verify in een sandbox en wacht op het
+// antwoord. Lukt dat niet, dan zegt problem waarom, als waarschuwing: de
+// sandbox is dan nog steeds teruggezet en gestart. prefix staat voor elke
+// regel in het log.
+func (s *Service) agentVerify(ctx context.Context, sbID uuid.UUID, req protocol.VerifyRequest, st *jobs.Step, prefix string) (res protocol.VerifyResult, d time.Duration, problem *Check) {
+	fail := func(c Check) (protocol.VerifyResult, time.Duration, *Check) { return res, d, &c }
+	body, err := json.Marshal(req)
+	if err != nil {
+		return fail(Check{Name: nameVerify, Warning: true, Detail: err.Error()})
+	}
+	vm, err := s.guard(ctx, sbID)
+	if err != nil {
+		return fail(Check{Name: nameVerify, Warning: true, Detail: err.Error()})
+	}
+	t0 := s.Now()
+	pid, err := vm.runVerify(ctx, body)
+	if err != nil {
+		return fail(startProblem(err))
+	}
+	st.Logf("%scf-agent verify loopt in de sandbox (pid %d)", prefix, pid)
+	_ = st.Flush(ctx)
+	wait := s.VerifyWait
+	if wait == 0 {
+		wait = protocol.VerifyLimit + 30*time.Second
+	}
+	var status proxmox.ExecStatus
+	for {
+		sctx, cancel := context.WithTimeout(ctx, s.AgentTimeout)
+		status, err = vm.execStatus(sctx, pid)
+		cancel()
+		if err == nil && bool(status.Exited) {
+			break
+		}
+		if ctx.Err() != nil {
+			return fail(Check{Name: nameVerify, Warning: true, Detail: context.Cause(ctx).Error()})
+		}
+		if s.Now().Sub(t0) > wait {
+			return fail(Check{Name: nameVerify, Warning: true, Detail: "cf-agent verify gaf na " + duration(wait) + " geen antwoord"})
+		}
+		if err := sleep(ctx, s.Poll); err != nil {
+			return fail(Check{Name: nameVerify, Warning: true, Detail: err.Error()})
+		}
+	}
+	d = s.Now().Sub(t0)
+	if jerr := json.Unmarshal([]byte(status.OutData), &res); jerr != nil || res.ProtocolVersion == 0 {
+		return fail(tooOld(status))
+	}
+	if res.Error != "" {
+		return fail(Check{Name: nameVerify, Warning: true, Detail: "cf-agent " + res.AgentVersion + " weigerde de aanvraag: " + res.Error})
+	}
+	return res, d, nil
 }
 
 // deepCheck zet een controle van de agent om naar het rapport.

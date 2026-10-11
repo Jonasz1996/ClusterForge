@@ -54,6 +54,8 @@ func (s *Service) EnableVerify(runner *jobs.Runner, conns Connections) {
 	// Niet Retryable: een nieuwe controle start vanuit de actuele toestand.
 	runner.Register(KindVerify, s.runVerify)
 	runner.OnFinished(KindVerify, s.verifyFinished)
+	runner.Register(KindRehearsal, s.runRehearsal)
+	runner.OnFinished(KindRehearsal, s.rehearsalFinished)
 }
 
 // Definition is de invoer van een controle, in test_runs.definition.

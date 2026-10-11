@@ -13,6 +13,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/Jonasz1996/clusterforge/internal/backups"
 	"github.com/Jonasz1996/clusterforge/internal/deps"
 	"github.com/Jonasz1996/clusterforge/internal/failover"
 	"github.com/Jonasz1996/clusterforge/internal/health"
@@ -124,6 +125,8 @@ type Preview struct {
 	// Confirm zijn de slugs die een admin intikt: van elk cluster met een
 	// node die de storing krijgt.
 	Confirm []string
+	// Rehearsal is bij een DR-repetitie het plan van de back-upcontrole.
+	Rehearsal *backups.RehearsalPlan
 }
 
 // Preview doet de voorcontrole en voorspelt wat er gebeurt.
@@ -135,7 +138,11 @@ func (s *Service) Preview(ctx context.Context, id uuid.UUID) (Preview, error) {
 	if err != nil {
 		return Preview{}, err
 	}
-	return s.plan(ctx, Decode(row), uuid.Nil)
+	sc := Decode(row)
+	if sc.Kind == DRRehearsal {
+		return s.previewRehearsal(ctx, sc)
+	}
+	return s.plan(ctx, sc, uuid.Nil)
 }
 
 // rank ordent statussen van gezond naar slecht; onbekend telt niet.

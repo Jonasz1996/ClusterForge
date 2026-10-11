@@ -231,6 +231,27 @@ func (e ClusterType) Valid() bool {
 	}
 }
 
+// Defines values for DRSchedule.
+const (
+	DRScheduleEmpty   DRSchedule = ""
+	DRScheduleMonthly DRSchedule = "monthly"
+	DRScheduleWeekly  DRSchedule = "weekly"
+)
+
+// Valid indicates whether the value is a known member of the DRSchedule enum.
+func (e DRSchedule) Valid() bool {
+	switch e {
+	case DRScheduleEmpty:
+		return true
+	case DRScheduleMonthly:
+		return true
+	case DRScheduleWeekly:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for DepGroupKind.
 const (
 	DepGroupKindCluster  DepGroupKind = "cluster"
@@ -374,22 +395,25 @@ func (e DisasterClusterResultRole) Valid() bool {
 
 // Defines values for DisasterKind.
 const (
-	HostDown    DisasterKind = "host_down"
-	Sequence    DisasterKind = "sequence"
-	ServiceDown DisasterKind = "service_down"
-	VipLoss     DisasterKind = "vip_loss"
+	DisasterKindDrRehearsal DisasterKind = "dr_rehearsal"
+	DisasterKindHostDown    DisasterKind = "host_down"
+	DisasterKindSequence    DisasterKind = "sequence"
+	DisasterKindServiceDown DisasterKind = "service_down"
+	DisasterKindVipLoss     DisasterKind = "vip_loss"
 )
 
 // Valid indicates whether the value is a known member of the DisasterKind enum.
 func (e DisasterKind) Valid() bool {
 	switch e {
-	case HostDown:
+	case DisasterKindDrRehearsal:
 		return true
-	case Sequence:
+	case DisasterKindHostDown:
 		return true
-	case ServiceDown:
+	case DisasterKindSequence:
 		return true
-	case VipLoss:
+	case DisasterKindServiceDown:
+		return true
+	case DisasterKindVipLoss:
 		return true
 	default:
 		return false
@@ -1849,6 +1873,7 @@ func (e TestRunEventKind) Valid() bool {
 const (
 	TestRunKindBackupVerify TestRunKind = "backup.verify"
 	TestRunKindDisasterRun  TestRunKind = "disaster.run"
+	TestRunKindDrRehearsal  TestRunKind = "dr.rehearsal"
 	TestRunKindFailoverTest TestRunKind = "failover.test"
 )
 
@@ -1858,6 +1883,8 @@ func (e TestRunKind) Valid() bool {
 	case TestRunKindBackupVerify:
 		return true
 	case TestRunKindDisasterRun:
+		return true
+	case TestRunKindDrRehearsal:
 		return true
 	case TestRunKindFailoverTest:
 		return true
@@ -2827,6 +2854,121 @@ type ClusterRisk struct {
 // ClusterType defines model for ClusterType.
 type ClusterType string
 
+// DRPlan defines model for DRPlan.
+type DRPlan struct {
+	Bridge      string `json:"bridge"`
+	ClusterName string `json:"cluster_name"`
+	Connection  string `json:"connection"`
+	Environment string `json:"environment"`
+
+	// Fix De commando's die de bridge op de host afsluiten
+	Fix []string `json:"fix"`
+
+	// Host De Proxmox-host waarop alle sandboxes komen; leeg als er geen past
+	Host  string       `json:"host"`
+	Nodes []DRPlanNode `json:"nodes"`
+
+	// RpoSeconds De leeftijd van de oudste back-up nu
+	RpoSeconds float64 `json:"rpo_seconds"`
+
+	// RpoTargetHours 0 is geen doel
+	RpoTargetHours int `json:"rpo_target_hours"`
+
+	// RtoTargetMinutes 0 is geen doel
+	RtoTargetMinutes int `json:"rto_target_minutes"`
+
+	// SpreadSeconds Hoe ver de back-ups van de nodes uit elkaar liggen
+	SpreadSeconds float64       `json:"spread_seconds"`
+	Storage       string        `json:"storage"`
+	Vips          []DisasterVIP `json:"vips"`
+}
+
+// DRPlanNode defines model for DRPlanNode.
+type DRPlanNode struct {
+	// Address Het adres van de node; de andere nodes bereiken hem daarop
+	Address       string    `json:"address"`
+	BackupStorage string    `json:"backup_storage"`
+	BackupTime    time.Time `json:"backup_time"`
+	DiskBytes     int64     `json:"disk_bytes"`
+	Hostname      string    `json:"hostname"`
+
+	// MemoryBytes Wat de VM volgens de config uit de back-up vraagt
+	MemoryBytes int64              `json:"memory_bytes"`
+	NodeId      openapi_types.UUID `json:"node_id"`
+	SizeBytes   int64              `json:"size_bytes"`
+	SourceVmid  int                `json:"source_vmid"`
+	Volid       string             `json:"volid"`
+}
+
+// DRReport defines model for DRReport.
+type DRReport struct {
+	// Aborted Waarom de bewaking de repetitie afbrak
+	Aborted        string                       `json:"aborted"`
+	BootSeconds    nullable.Nullable[float64]   `json:"boot_seconds"`
+	Bridge         string                       `json:"bridge"`
+	CheckSeconds   nullable.Nullable[float64]   `json:"check_seconds"`
+	CleanupSeconds nullable.Nullable[float64]   `json:"cleanup_seconds"`
+	ClusterName    string                       `json:"cluster_name"`
+	Connection     string                       `json:"connection"`
+	DestroyedAt    nullable.Nullable[time.Time] `json:"destroyed_at"`
+	Environment    string                       `json:"environment"`
+
+	// Fix De commando's die de bridge afsluiten
+	Fix            []string                   `json:"fix"`
+	Host           string                     `json:"host"`
+	Name           string                     `json:"name"`
+	Nodes          []DRReportNode             `json:"nodes"`
+	RestoreSeconds nullable.Nullable[float64] `json:"restore_seconds"`
+	RpoMet         nullable.Nullable[bool]    `json:"rpo_met"`
+
+	// RpoSeconds De leeftijd van de oudste back-up bij de start van het terugzetten
+	RpoSeconds     nullable.Nullable[float64] `json:"rpo_seconds"`
+	RpoTargetHours int                        `json:"rpo_target_hours"`
+
+	// RtoMet Leeg zonder doel of zonder meting
+	RtoMet nullable.Nullable[bool] `json:"rto_met"`
+
+	// RtoSeconds Van de start van het terugzetten tot alle controles slaagden; leeg als het cluster niet werkend terugkwam
+	RtoSeconds       nullable.Nullable[float64] `json:"rto_seconds"`
+	RtoTargetMinutes int                        `json:"rto_target_minutes"`
+	ScenarioId       openapi_types.UUID         `json:"scenario_id"`
+	Storage          string                     `json:"storage"`
+	TotalSeconds     nullable.Nullable[float64] `json:"total_seconds"`
+	Vips             []DRReportVIP              `json:"vips"`
+}
+
+// DRReportNode defines model for DRReportNode.
+type DRReportNode struct {
+	// Addresses De adressen die cf-agent in de sandbox meldde
+	Addresses      []string                   `json:"addresses"`
+	AgentVersion   string                     `json:"agent_version"`
+	BackupTime     time.Time                  `json:"backup_time"`
+	BootSeconds    nullable.Nullable[float64] `json:"boot_seconds"`
+	Destroyed      bool                       `json:"destroyed"`
+	Hostname       string                     `json:"hostname"`
+	NodeId         openapi_types.UUID         `json:"node_id"`
+	RestoreSeconds nullable.Nullable[float64] `json:"restore_seconds"`
+	SandboxVmid    nullable.Nullable[int]     `json:"sandbox_vmid"`
+	SourceVmid     int                        `json:"source_vmid"`
+	Volid          string                     `json:"volid"`
+}
+
+// DRReportVIP defines model for DRReportVIP.
+type DRReportVIP struct {
+	Address string `json:"address"`
+
+	// Checked false als geen node zijn adressen kon melden
+	Checked bool `json:"checked"`
+
+	// Holders De nodes die het VIP in de sandbox hadden
+	Holders []string                `json:"holders"`
+	Probe   string                  `json:"probe"`
+	ProbeOk nullable.Nullable[bool] `json:"probe_ok"`
+}
+
+// DRSchedule Leeg: alleen met de hand; weekly: elke week in het testvenster; monthly: in het eerste testvenster van de maand
+type DRSchedule string
+
 // DepEdge defines model for DepEdge.
 type DepEdge struct {
 	// Affected Uitval bereikte de afnemer langs deze pijl
@@ -3192,17 +3334,21 @@ type DisasterNodeOption struct {
 type DisasterOptions struct {
 	Actions []DisasterActionOption `json:"actions"`
 
-	// Allowed false op prod
+	// Allowed false op prod: dan kan alleen de DR-repetitie
 	Allowed bool                 `json:"allowed"`
 	Hosts   []DisasterHostOption `json:"hosts"`
 	Kinds   []DisasterKindOption `json:"kinds"`
 
 	// Nodes Voor de stappen van een reeks
-	Nodes  []DisasterNodeOption `json:"nodes"`
-	Reason string               `json:"reason"`
-	Slug   string               `json:"slug"`
-	Units  []string             `json:"units"`
-	Vips   []string             `json:"vips"`
+	Nodes   []DisasterNodeOption `json:"nodes"`
+	Reason  string               `json:"reason"`
+	Slug    string               `json:"slug"`
+	Targets RecoveryTargets      `json:"targets"`
+	Units   []string             `json:"units"`
+	Vips    []string             `json:"vips"`
+
+	// Window Het testvenster, zoals zondag van 03:00 tot 05:00
+	Window string `json:"window"`
 }
 
 // DisasterPlannedStep defines model for DisasterPlannedStep.
@@ -3249,6 +3395,9 @@ type DisasterPreview struct {
 
 	// Ok Of de voorcontrole slaagt
 	Ok bool `json:"ok"`
+
+	// Rehearsal Bij dr_rehearsal wat er teruggaat en waar
+	Rehearsal nullable.Nullable[DRPlan] `json:"rehearsal"`
 
 	// Skipped Draaiende VM's op de host die niet in ClusterForge staan en aan blijven
 	Skipped []string `json:"skipped"`
@@ -3300,6 +3449,8 @@ type DisasterRunInput struct {
 
 // DisasterScenario defines model for DisasterScenario.
 type DisasterScenario struct {
+	// Bridge Bij dr_rehearsal de afgesloten bridge
+	Bridge      string             `json:"bridge"`
 	ClusterId   openapi_types.UUID `json:"cluster_id"`
 	CreatedAt   time.Time          `json:"created_at"`
 	Description string             `json:"description"`
@@ -3314,8 +3465,15 @@ type DisasterScenario struct {
 	LastRun nullable.Nullable[TestRun]      `json:"last_run"`
 	Name    string                          `json:"name"`
 
+	// NextRunAt De volgende geplande DR-repetitie
+	NextRunAt nullable.Nullable[time.Time] `json:"next_run_at"`
+
 	// RecoverySeconds Hoe snel na het terugzetten alles weer gezond moet zijn
 	RecoverySeconds int `json:"recovery_seconds"`
+
+	// Schedule Leeg: alleen met de hand; weekly: elke week in het testvenster; monthly: in het eerste testvenster van de maand
+	Schedule      DRSchedule `json:"schedule"`
+	ScheduleLabel string     `json:"schedule_label"`
 
 	// Steps Bij sequence de stappen
 	Steps []DisasterStep `json:"steps"`
@@ -3327,15 +3485,25 @@ type DisasterScenario struct {
 
 // DisasterScenarioInput defines model for DisasterScenarioInput.
 type DisasterScenarioInput struct {
+	// Bridge Bij dr_rehearsal de afgesloten bridge; leeg is vmbr99
+	Bridge *string `json:"bridge,omitempty"`
+
 	// ConnectionId Bij host_down
 	ConnectionId *openapi_types.UUID `json:"connection_id,omitempty"`
-	FaultSeconds int                 `json:"fault_seconds"`
+
+	// FaultSeconds 20 tot 600; bij dr_rehearsal genegeerd
+	FaultSeconds int `json:"fault_seconds"`
 
 	// Host Bij host_down de naam van de Proxmox-host
-	Host            *string      `json:"host,omitempty"`
-	Kind            DisasterKind `json:"kind"`
-	Name            string       `json:"name"`
-	RecoverySeconds int          `json:"recovery_seconds"`
+	Host *string      `json:"host,omitempty"`
+	Kind DisasterKind `json:"kind"`
+	Name string       `json:"name"`
+
+	// RecoverySeconds 10 tot 1800; bij dr_rehearsal genegeerd
+	RecoverySeconds int `json:"recovery_seconds"`
+
+	// Schedule Leeg: alleen met de hand; weekly: elke week in het testvenster; monthly: in het eerste testvenster van de maand
+	Schedule *DRSchedule `json:"schedule,omitempty"`
 
 	// Steps Bij sequence; aan het einde van de storing heft ClusterForge alles op
 	Steps *[]DisasterStep `json:"steps,omitempty"`
@@ -5277,6 +5445,33 @@ type ProxmoxStorage struct {
 	Type    string `json:"type"`
 }
 
+// RecoveryTargets defines model for RecoveryTargets.
+type RecoveryTargets struct {
+	// Custom Het cluster heeft eigen doelen
+	Custom bool `json:"custom"`
+
+	// DefaultRpoHours De standaard van de omgeving: prod 26, lab en test 0
+	DefaultRpoHours int `json:"default_rpo_hours"`
+
+	// DefaultRtoMinutes De standaard van de omgeving: prod 60, lab en test 0
+	DefaultRtoMinutes int `json:"default_rto_minutes"`
+
+	// RpoHours Hoe oud de gegevens na herstel mogen zijn; 0 is geen doel
+	RpoHours int `json:"rpo_hours"`
+
+	// RtoMinutes Hoe lang herstel uit de back-ups mag duren; 0 is geen doel
+	RtoMinutes int `json:"rto_minutes"`
+}
+
+// RecoveryTargetsInput defines model for RecoveryTargetsInput.
+type RecoveryTargetsInput struct {
+	// RpoHours Leeg: de standaard van de omgeving; 0: geen doel
+	RpoHours nullable.Nullable[int] `json:"rpo_hours"`
+
+	// RtoMinutes Leeg: de standaard van de omgeving; 0: geen doel
+	RtoMinutes nullable.Nullable[int] `json:"rto_minutes"`
+}
+
 // RemediationChoice defines model for RemediationChoice.
 type RemediationChoice struct {
 	NodeId openapi_types.UUID      `json:"node_id"`
@@ -5911,6 +6106,9 @@ type TestRun struct {
 	Measurements nullable.Nullable[FailoverMeasurements] `json:"measurements"`
 	NodeId       nullable.Nullable[openapi_types.UUID]   `json:"node_id"`
 
+	// Rehearsal Alleen bij dr.rehearsal
+	Rehearsal nullable.Nullable[DRReport] `json:"rehearsal"`
+
 	// RequestedBy Gebruikersnaam van wie de run vroeg
 	RequestedBy nullable.Nullable[string] `json:"requested_by"`
 
@@ -6485,6 +6683,9 @@ type CreateFailoverTestJSONRequestBody = FailoverTestInput
 // ReapplyClusterGitJSONRequestBody defines body for ReapplyClusterGit for application/json ContentType.
 type ReapplyClusterGitJSONRequestBody = GitReapplyInput
 
+// SetRecoveryTargetsJSONRequestBody defines body for SetRecoveryTargets for application/json ContentType.
+type SetRecoveryTargetsJSONRequestBody = RecoveryTargetsInput
+
 // CreateVipJSONRequestBody defines body for CreateVip for application/json ContentType.
 type CreateVipJSONRequestBody = VipInput
 
@@ -6721,6 +6922,9 @@ type ServerInterface interface {
 	// GetClusterMetrics Grafieken van een cluster, met een lijn per node
 	// (GET /clusters/{clusterId}/metrics)
 	GetClusterMetrics(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params GetClusterMetricsParams)
+	// SetRecoveryTargets De RTO- en RPO-doelen van een cluster zetten (admin)
+	// (PUT /clusters/{clusterId}/recovery-targets)
+	SetRecoveryTargets(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
 	// GetClusterRisk De zeven scorekaarten van een cluster met hun bevindingen
 	// (GET /clusters/{clusterId}/risk)
 	GetClusterRisk(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
@@ -7321,6 +7525,12 @@ func (_ Unimplemented) UnlinkClusterGit(w http.ResponseWriter, r *http.Request, 
 // GetClusterMetrics Grafieken van een cluster, met een lijn per node
 // (GET /clusters/{clusterId}/metrics)
 func (_ Unimplemented) GetClusterMetrics(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params GetClusterMetricsParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SetRecoveryTargets De RTO- en RPO-doelen van een cluster zetten (admin)
+// (PUT /clusters/{clusterId}/recovery-targets)
+func (_ Unimplemented) SetRecoveryTargets(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -9310,6 +9520,32 @@ func (siw *ServerInterfaceWrapper) GetClusterMetrics(w http.ResponseWriter, r *h
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetClusterMetrics(w, r, clusterId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetRecoveryTargets operation middleware
+func (siw *ServerInterfaceWrapper) SetRecoveryTargets(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetRecoveryTargets(w, r, clusterId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -12714,6 +12950,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Put(options.BaseURL+"/clusters/{clusterId}/backup-policy", wrapper.UpdateBackupPolicy)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/clusters/{clusterId}/recovery-targets", wrapper.SetRecoveryTargets)
 	})
 	r.Group(func(r chi.Router) {
 		r.Put(options.BaseURL+"/proxmox/{proxmoxId}/backup-watch", wrapper.SetBackupWatch)

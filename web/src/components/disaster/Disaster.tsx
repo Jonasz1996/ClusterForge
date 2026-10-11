@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent, type ReactNode } from "react";
 import { Modal } from "@/components/Modal";
+import { RehearsalStart } from "@/components/disaster/Rehearsal";
 import { Checks, reportHref, RunBadge } from "@/components/failover/Failover";
 import { Empty, tableClass, tdClass, thClass } from "@/components/inventory/bits";
 import { Alert, Badge, Button, Card, Field, Input, Select, cx } from "@/components/ui";
@@ -15,13 +16,16 @@ import {
   matchLabels,
   onLabels,
   roleLabels,
+  scheduleLabels,
   statusLabels,
   targetNames,
+  targetsText,
   useCreateDisasterScenario,
   useDeleteDisasterScenario,
   useDisasterPreview,
   useDisasterScenarios,
   useRunDisaster,
+  useSetRecoveryTargets,
   useUpdateDisasterScenario,
   type DisasterClusterPlan,
   type DisasterKind,
@@ -34,6 +38,7 @@ import {
   type DisasterScenarioInput,
   type DisasterStep,
   type DisasterStepAction,
+  type DRSchedule,
 } from "@/lib/disaster";
 import { list, probeText, seconds, type TestRun } from "@/lib/failover";
 
@@ -48,13 +53,14 @@ export function DisasterCard({ clusterId, isAdmin }: { clusterId: string; isAdmi
   const [starting, setStarting] = useState<DisasterScenario | null>(null);
   if (!q.data) return null;
   const { items, options } = q.data;
-  const canCreate = options.allowed && options.kinds.some((k) => k.available);
+  // Op prod kan alleen de DR-repetitie; die raakt het echte cluster niet.
+  const canCreate = options.kinds.some((k) => k.available);
   return (
     <Card
       title={
         <span className="flex flex-wrap items-center justify-between gap-2">
           <span>Rampoefeningen</span>
-          {isAdmin && options.allowed && (
+          {isAdmin && (options.allowed || canCreate) && (
             <Button
               variant="secondary"
               disabled={!canCreate}
@@ -67,23 +73,37 @@ export function DisasterCard({ clusterId, isAdmin }: { clusterId: string; isAdmi
         </span>
       }
     >
-      {!options.allowed ? (
+      {items.length === 0 && !options.allowed ? (
         <Empty>
           {options.reason}.{" "}
           <Link href="/risico" className={linkClass}>
             Naar Risico
           </Link>
+          {canCreate && (
+            <span className="mt-2 block">
+              Wel kan een DR-repetitie: die zet het hele cluster terug uit de back-ups in afgesloten sandboxes, meet RTO en RPO
+              tegen de doelen ({targetsText(options.targets)}) en verwijdert daarna alles. Het echte cluster merkt er niets van.
+            </span>
+          )}
         </Empty>
       ) : items.length === 0 ? (
         <Empty>
           Nog geen rampoefeningen. Een rampoefening laat in lab of test echt iets uitvallen: een hele Proxmox-host, een dienst op
           alle nodes, het VIP of een reeks storingen na elkaar. ClusterForge meet elk geraakt cluster, vergelijkt dat met de
-          voorspelling van Wat als en zet daarna alles weer aan.
+          voorspelling van Wat als en zet daarna alles weer aan. Een DR-repetitie zet het hele cluster terug uit de back-ups, in
+          afgesloten sandboxes, en meet RTO en RPO.
         </Empty>
       ) : (
         <ul className="divide-y divide-slate-100 dark:divide-slate-800">
           {items.map((s) => (
-            <ScenarioRow key={s.id} s={s} isAdmin={isAdmin} onEdit={() => setForm(s)} onStart={() => setStarting(s)} />
+            <ScenarioRow
+              key={s.id}
+              s={s}
+              options={options}
+              isAdmin={isAdmin}
+              onEdit={() => setForm(s)}
+              onStart={() => setStarting(s)}
+            />
           ))}
         </ul>
       )}
@@ -97,23 +117,32 @@ export function DisasterCard({ clusterId, isAdmin }: { clusterId: string; isAdmi
           />
         </Modal>
       )}
-      {starting && <StartDialog s={starting} onClose={() => setStarting(null)} />}
+      {starting &&
+        (starting.kind === "dr_rehearsal" ? (
+          <RehearsalStart s={starting} onClose={() => setStarting(null)} />
+        ) : (
+          <StartDialog s={starting} onClose={() => setStarting(null)} />
+        ))}
     </Card>
   );
 }
 
 function ScenarioRow({
   s,
+  options,
   isAdmin,
   onEdit,
   onStart,
 }: {
   s: DisasterScenario;
+  options: DisasterOptions;
   isAdmin: boolean;
   onEdit: () => void;
   onStart: () => void;
 }) {
   const running = s.last_run && !s.last_run.result;
+  const dr = s.kind === "dr_rehearsal";
+  const live = !dr && !options.allowed;
   return (
     <li className="py-3 first:pt-0 last:pb-0">
       <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
@@ -123,7 +152,14 @@ function ScenarioRow({
             {s.description}
             {s.host && <span className="text-slate-500"> ({s.host.connection})</span>}
           </p>
-          <p className="text-xs text-slate-500">{expectText(s)}</p>
+          <p className="text-xs text-slate-500">
+            {dr
+              ? `${s.schedule_label[0]?.toUpperCase()}${s.schedule_label.slice(1)}${
+                  s.next_run_at ? `, volgende ${fmt.format(new Date(s.next_run_at))}` : ""
+                } · ${targetsText(options.targets)}`
+              : expectText(s)}
+          </p>
+          {live && <p className="text-xs text-amber-700 dark:text-amber-400">{options.reason}.</p>}
           <p className="flex flex-wrap items-center gap-2 text-xs">
             {s.last_run ? (
               <>
@@ -143,8 +179,8 @@ function ScenarioRow({
             <Button variant="secondary" onClick={onEdit}>
               Bewerken
             </Button>
-            <Button disabled={!!running} onClick={onStart}>
-              {running ? "Loopt…" : "Voorspellen en starten"}
+            <Button disabled={!!running || live} onClick={onStart}>
+              {running ? "Loopt…" : dr ? "Voorcontrole en starten" : "Voorspellen en starten"}
             </Button>
           </div>
         )}
@@ -356,13 +392,22 @@ function DisasterForm({
   const [name, setName] = useState(initial?.name ?? "");
   const [nameTouched, setNameTouched] = useState(!!initial);
   const [error, setError] = useState<{ message: string; field?: string } | null>(null);
-  const busy = create.isPending || update.isPending || remove.isPending;
+  // De DR-repetitie: bridge, planning en de doelen van het cluster.
+  const targets = useSetRecoveryTargets(clusterId);
+  const t = options.targets;
+  const [bridge, setBridge] = useState(initial?.bridge || "vmbr99");
+  const [schedule, setSchedule] = useState<DRSchedule>(initial?.schedule ?? "");
+  const [rto, setRto] = useState(t.custom ? String(t.rto_minutes) : "");
+  const [rpo, setRpo] = useState(t.custom ? String(t.rpo_hours) : "");
+  const busy = create.isPending || update.isPending || remove.isPending || targets.isPending;
   const hostOpt = options.hosts.find((h) => hostKey(h.connection_id, h.host) === host);
 
   const defaultName = () => {
     if (kind === "host_down") return `${hostOpt?.host ?? "Proxmox-host"} valt uit`;
     if (kind === "service_down") return `${unit} valt weg`;
     if (kind === "sequence") return `Reeks van ${steps.length} ${steps.length === 1 ? "stap" : "stappen"}`;
+    if (kind === "dr_rehearsal")
+      return schedule === "" ? "DR-repetitie" : `DR-repetitie, ${scheduleLabels[schedule].toLowerCase()}`;
     return "VIP valt weg";
   };
   const shownName = nameTouched ? name : defaultName();
@@ -384,16 +429,23 @@ function DisasterForm({
     // een foutmelding met wat hier staat.
     const sorted = [...steps].sort((a, b) => a.at_seconds - b.at_seconds);
     if (kind === "sequence") setSteps(sorted);
+    const dr = kind === "dr_rehearsal";
     const body: DisasterScenarioInput = {
       name: shownName.trim(),
       kind,
-      fault_seconds: Number(fault),
-      recovery_seconds: Number(recovery),
+      fault_seconds: dr ? 0 : Number(fault),
+      recovery_seconds: dr ? 0 : Number(recovery),
       ...(kind === "host_down" && hostOpt ? { connection_id: hostOpt.connection_id, host: hostOpt.host } : {}),
       ...(kind === "service_down" ? { unit } : {}),
       ...(kind === "sequence" ? { steps: sorted.map(cleanStep) } : {}),
+      ...(dr ? { bridge: bridge.trim(), schedule } : {}),
     };
     try {
+      // De doelen horen bij het cluster, niet bij het scenario; leeg is de
+      // standaard van de omgeving.
+      const want = { rto_minutes: rto.trim() === "" ? null : Number(rto), rpo_hours: rpo.trim() === "" ? null : Number(rpo) };
+      const have = { rto_minutes: t.custom ? t.rto_minutes : null, rpo_hours: t.custom ? t.rpo_hours : null };
+      if (dr && (want.rto_minutes !== have.rto_minutes || want.rpo_hours !== have.rpo_hours)) await targets.mutateAsync(want);
       if (initial) await update.mutateAsync({ id: initial.id, body });
       else await create.mutateAsync(body);
       onDone();
@@ -450,6 +502,67 @@ function DisasterForm({
         <StepsEditor steps={steps} setSteps={setSteps} options={options} fault={Number(fault) || 0} error={fieldError("steps")} />
       )}
 
+      {kind === "dr_rehearsal" && (
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field
+            label="Afgesloten bridge"
+            htmlFor="dr-bridge"
+            hint="Een Linux-bridge zonder poorten en zonder adres op de Proxmox-host. Bestaat ze niet, dan geeft de voorcontrole de commando's."
+          >
+            <Input id="dr-bridge" required maxLength={15} value={bridge} onChange={(e) => setBridge(e.target.value)} />
+            {fieldError("bridge")}
+          </Field>
+          <Field
+            label="Planning"
+            htmlFor="dr-schedule"
+            hint={`In het testvenster: ${options.window}. Elke maand is het eerste venster van de maand.`}
+          >
+            <Select id="dr-schedule" value={schedule} onChange={(e) => setSchedule(e.target.value as DRSchedule)}>
+              {Object.entries(scheduleLabels).map(([k, label]) => (
+                <option key={k} value={k}>
+                  {label}
+                </option>
+              ))}
+            </Select>
+            {fieldError("schedule")}
+          </Field>
+          <Field
+            label="RTO-doel van het cluster, in minuten"
+            htmlFor="dr-rto"
+            hint={`Hoe lang herstel uit de back-ups mag duren. Leeg is de standaard (${
+              t.default_rto_minutes ? `${t.default_rto_minutes} min` : "geen doel"
+            }); 0 is geen doel.`}
+          >
+            <Input
+              id="dr-rto"
+              type="number"
+              min={0}
+              max={10080}
+              placeholder={String(t.default_rto_minutes)}
+              value={rto}
+              onChange={(e) => setRto(e.target.value)}
+            />
+          </Field>
+          <Field
+            label="RPO-doel van het cluster, in uren"
+            htmlFor="dr-rpo"
+            hint={`Hoe oud de gegevens na herstel mogen zijn. Leeg is de standaard (${
+              t.default_rpo_hours ? `${t.default_rpo_hours} u` : "geen doel"
+            }); 0 is geen doel.`}
+          >
+            <Input
+              id="dr-rpo"
+              type="number"
+              min={0}
+              max={8760}
+              placeholder={String(t.default_rpo_hours)}
+              value={rpo}
+              onChange={(e) => setRpo(e.target.value)}
+            />
+          </Field>
+        </div>
+      )}
+
       <div className="grid gap-4 sm:grid-cols-2">
         {kind === "host_down" && (
           <Field label="Proxmox-host" htmlFor="dr-host">
@@ -482,50 +595,54 @@ function DisasterForm({
             {fieldError("unit")}
           </Field>
         )}
-        <Field
-          label="Duur van de storing in seconden"
-          htmlFor="dr-fault"
-          hint={
-            kind === "host_down"
-              ? `Minstens ${kindOpt?.min_fault_seconds ?? 100} s: na een harde stop is een node pas na 90 s zonder heartbeat down.`
-              : kind === "sequence"
-                ? `Tussen ${kindOpt?.min_fault_seconds ?? 20} en 600 s. Elke stap blijft aan tot het einde; dan heft ClusterForge alles op.`
-                : `Tussen ${kindOpt?.min_fault_seconds ?? 20} en 600 s.`
-          }
-        >
-          <Input
-            id="dr-fault"
-            type="number"
-            min={kindOpt?.min_fault_seconds ?? 20}
-            max={600}
-            required
-            value={fault}
-            onChange={(e) => {
-              setFault(e.target.value);
-              setTouched(true);
-            }}
-          />
-          {fieldError("fault_seconds")}
-        </Field>
-        <Field
-          label="Weer gezond binnen, in seconden"
-          htmlFor="dr-recovery"
-          hint="Na het terugzetten. Duurt het langer, dan is de uitslag een waarschuwing."
-        >
-          <Input
-            id="dr-recovery"
-            type="number"
-            min={10}
-            max={1800}
-            required
-            value={recovery}
-            onChange={(e) => {
-              setRecovery(e.target.value);
-              setTouched(true);
-            }}
-          />
-          {fieldError("recovery_seconds")}
-        </Field>
+        {kind !== "dr_rehearsal" && (
+          <>
+            <Field
+              label="Duur van de storing in seconden"
+              htmlFor="dr-fault"
+              hint={
+                kind === "host_down"
+                  ? `Minstens ${kindOpt?.min_fault_seconds ?? 100} s: na een harde stop is een node pas na 90 s zonder heartbeat down.`
+                  : kind === "sequence"
+                    ? `Tussen ${kindOpt?.min_fault_seconds ?? 20} en 600 s. Elke stap blijft aan tot het einde; dan heft ClusterForge alles op.`
+                    : `Tussen ${kindOpt?.min_fault_seconds ?? 20} en 600 s.`
+              }
+            >
+              <Input
+                id="dr-fault"
+                type="number"
+                min={kindOpt?.min_fault_seconds ?? 20}
+                max={600}
+                required
+                value={fault}
+                onChange={(e) => {
+                  setFault(e.target.value);
+                  setTouched(true);
+                }}
+              />
+              {fieldError("fault_seconds")}
+            </Field>
+            <Field
+              label="Weer gezond binnen, in seconden"
+              htmlFor="dr-recovery"
+              hint="Na het terugzetten. Duurt het langer, dan is de uitslag een waarschuwing."
+            >
+              <Input
+                id="dr-recovery"
+                type="number"
+                min={10}
+                max={1800}
+                required
+                value={recovery}
+                onChange={(e) => {
+                  setRecovery(e.target.value);
+                  setTouched(true);
+                }}
+              />
+              {fieldError("recovery_seconds")}
+            </Field>
+          </>
+        )}
         <Field label="Naam" htmlFor="dr-name">
           <Input
             id="dr-name"
@@ -581,6 +698,8 @@ const kindHint: Record<DisasterKind, string> = {
   vip_loss: "keepalived stopt op alle nodes, zodat geen node het VIP heeft.",
   sequence:
     "Tot vijf storingen na elkaar op gekozen nodes: VRRP blokkeren, een interface down, een poort dicht, vertraging, een volle schijf of een dienst stoppen. Valt ClusterForge weg, dan heft de agent ze zelf op.",
+  dr_rehearsal:
+    "Elke node komt terug uit zijn nieuwste back-up, als sandbox aan een afgesloten bridge. ClusterForge controleert of het cluster werkt, meet RTO en RPO en verwijdert daarna alles. Het echte cluster merkt er niets van, dus dit kan ook op prod.",
 };
 
 const maxSteps = 5;

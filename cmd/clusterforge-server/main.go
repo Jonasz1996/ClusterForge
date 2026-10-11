@@ -202,20 +202,26 @@ func serve() error {
 	// De health score rekent elke minuut; de planner legt elke dag een
 	// momentopname vast voor de trend.
 	rsk := risk.NewService(pool, ev, log, metrics.NewClient(cfg.VictoriaMetricsURL), bk)
-	// Geplande failovertests en back-upcontroles; als een test klaar is en
-	// het testslot vrijkomt, kijkt de planner meteen of er een wacht.
+	// Geplande failovertests, back-upcontroles en DR-repetities; als een
+	// test klaar is en het testslot vrijkomt, kijkt de planner meteen of er
+	// een wacht.
+	var dis *disaster.Service
 	sched := planner.NewScheduler(pool, log,
 		planner.Task{Name: "failovertests", Tick: fo.RunScheduled},
 		planner.Task{Name: "back-upcontroles", Tick: bk.RunScheduled},
+		planner.Task{Name: "DR-repetities", Tick: func(ctx context.Context, now time.Time) error { return dis.RunScheduled(ctx, now) }},
 		planner.Task{Name: "journaal opruimen", Tick: journal.NewPruner(q).Tick},
 		planner.Task{Name: "gesprekken opruimen", Tick: asst.Prune},
 		planner.Task{Name: "health score vastleggen", Tick: func(ctx context.Context, now time.Time) error { return rsk.Snapshot(ctx, now) }})
 	// Rampoefeningen in lab en test; de wat-als voorspelt, de meting kijkt
 	// of het klopte.
-	dis := disaster.NewService(pool, ev, log, runner, bus)
+	dis = disaster.NewService(pool, ev, log, runner, bus)
 	dis.Changed, dis.Probes = eval.Kick, fo.ProbeFor
 	dis.Proxmox, dis.World = pve, rsk.World
-	for _, kind := range []string{failover.KindTest, backups.KindVerify, disaster.KindRun} {
+	// De DR-repetitie draait als back-upcontrole van een heel cluster, ook
+	// gepland in het testvenster.
+	dis.Backups, dis.Window = bk, cfg.TestWindow
+	for _, kind := range []string{failover.KindTest, backups.KindVerify, disaster.KindRun, backups.KindRehearsal} {
 		runner.OnFinished(kind, func(context.Context, store.Job) { sched.Kick() })
 	}
 	ro := rollout.NewService(pool, ev, log, runner, bus, dep, drf)

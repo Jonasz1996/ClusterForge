@@ -245,6 +245,13 @@ func isolationProblems(cfg map[string]string) []string {
 			out = append(out, k+" heeft geen link_down=1")
 		}
 	}
+	return append(out, sandboxProblems(cfg)...)
+}
+
+// sandboxProblems zijn de voorwaarden van een sandbox buiten zijn
+// netwerkkaarten.
+func sandboxProblems(cfg map[string]string) []string {
+	var out []string
 	if bad := notIsolatable(cfg); len(bad) > 0 {
 		out = append(out, "sleutels buiten de allowlist: "+strings.Join(bad, ", "))
 	}

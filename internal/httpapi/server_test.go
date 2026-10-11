@@ -148,7 +148,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	dep.HTTPGet = func(context.Context, string) (int, error) { return http.StatusOK, nil }
 	bk := backups.NewService(pool, ev, log, pve)
 	bk.Poll, bk.ConnPoll, bk.BootTimeout, bk.NoAgentWait = 20*time.Millisecond, 20*time.Millisecond, 3*time.Second, 100*time.Millisecond
-	bk.AgentTimeout, bk.LockWait = 2*time.Second, time.Second
+	bk.AgentTimeout, bk.LockWait, bk.VIPWait = 2*time.Second, time.Second, 3*time.Second
 	bk.Running = dep.Running
 	conns := &testConns{bus: bus}
 	bk.EnableVerify(runner, conns)
@@ -195,6 +195,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	dis.ProbeInterval, dis.StatusPoll, dis.Gate.Poll, dis.Retry = 20*time.Millisecond, 50*time.Millisecond, 20*time.Millisecond, 50*time.Millisecond
 	dis.ShortOutage, dis.Fresh, dis.EmergencyTimeout = 500*time.Millisecond, 2*time.Second, 3*time.Second
 	dis.ReturnTimeout, dis.BootTimeout = 8*time.Second, 8*time.Second
+	dis.Backups = bk
 	// De documentatie schrijft niet vanzelf; een test roept GenerateAll aan.
 	dcs := docs.NewService(pool, log)
 	dcs.Deploy, dcs.GitOps, dcs.Backups, dcs.Risk, dcs.Box, dcs.Events = dep, git, bk, rsk, box, ev

@@ -139,10 +139,15 @@ func (s *Server) PreviewDisasterScenario(w http.ResponseWriter, r *http.Request,
 	out := gen.DisasterPreview{
 		Ok: p.OK, Checks: make([]gen.TestRunCheck, 0, len(p.Checks)), Description: p.Description,
 		Targets: toAPITargets(p.Targets), Steps: toAPIPlannedSteps(p.Steps, nil), Clusters: make([]gen.DisasterClusterPlan, 0, len(p.Clusters)),
-		Skipped: orEmpty(p.Skipped), Notes: orEmpty(p.Notes), Confirm: orEmpty(p.Confirm),
+		Skipped: orEmpty(p.Skipped), Notes: orEmpty(p.Notes), Confirm: orEmpty(p.Confirm), Rehearsal: nullable.NewNullNullable[gen.DRPlan](),
 	}
 	for _, c := range p.Checks {
 		out.Checks = append(out.Checks, gen.TestRunCheck{Name: c.Name, Ok: c.OK, Detail: c.Detail})
+	}
+	if p.Rehearsal != nil {
+		// De DR-repetitie kent waarschuwingen en codes.
+		out.Checks = toAPIChecks(p.Rehearsal.Checks)
+		out.Rehearsal = nullable.NewNullableWithValue(toAPIRehearsalPlan(*p.Rehearsal))
 	}
 	for _, c := range p.Clusters {
 		out.Clusters = append(out.Clusters, gen.DisasterClusterPlan{
@@ -178,6 +183,10 @@ func fromAPIDisasterInput(in gen.DisasterScenarioInput) disaster.Input {
 	}
 	if in.Unit != nil {
 		out.Unit = *in.Unit
+	}
+	out.Bridge = deref(in.Bridge)
+	if in.Schedule != nil {
+		out.Schedule = string(*in.Schedule)
 	}
 	if in.Steps != nil {
 		for _, st := range *in.Steps {
@@ -239,6 +248,7 @@ func toAPIDisasterOptions(o disaster.Options) gen.DisasterOptions {
 		Allowed: o.Allowed, Reason: o.Reason, Slug: o.Slug, Kinds: make([]gen.DisasterKindOption, 0, len(o.Kinds)),
 		Hosts: make([]gen.DisasterHostOption, 0, len(o.Hosts)), Units: orEmpty(o.Units), Vips: orEmpty(o.VIPs),
 		Nodes: make([]gen.DisasterNodeOption, 0, len(o.Nodes)), Actions: make([]gen.DisasterActionOption, 0, len(o.Actions)),
+		Targets: toAPIRecoveryTargets(o.Targets), Window: o.Window,
 	}
 	for _, n := range o.Nodes {
 		out.Nodes = append(out.Nodes, gen.DisasterNodeOption{
@@ -268,7 +278,8 @@ func toAPIScenario(sc disaster.Scenario, last *gen.TestRun, conns map[uuid.UUID]
 		Id: sc.ID, ClusterId: sc.ClusterID, Name: sc.Name, Kind: gen.DisasterKind(sc.Kind), Description: disaster.Describe(sc.Kind, sc.P),
 		Host: nullable.NewNullNullable[gen.DisasterHost](), Unit: sc.P.Unit, Steps: make([]gen.DisasterStep, 0, len(sc.P.Steps)),
 		FaultSeconds: sc.E.FaultSeconds, RecoverySeconds: sc.E.RecoverySeconds, LastRun: nullableOf(last), CreatedAt: sc.CreatedAt,
-		UpdatedAt: sc.UpdatedAt,
+		UpdatedAt: sc.UpdatedAt, Bridge: sc.P.Bridge, Schedule: gen.DRSchedule(sc.Schedule), ScheduleLabel: disaster.ScheduleLabel(sc.Schedule),
+		NextRunAt: nullableOf(sc.NextRunAt),
 	}
 	for _, st := range sc.P.Steps {
 		out.Steps = append(out.Steps, toAPIStep(st))
