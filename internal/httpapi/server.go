@@ -20,6 +20,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/config"
 	"github.com/Jonasz1996/clusterforge/internal/deploy"
 	"github.com/Jonasz1996/clusterforge/internal/deps"
+	"github.com/Jonasz1996/clusterforge/internal/docs"
 	"github.com/Jonasz1996/clusterforge/internal/drift"
 	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/failover"
@@ -64,6 +65,7 @@ type Server struct {
 	assistant    *assistant.Service
 	risk         *risk.Service
 	topo         *topo.Service
+	docs         *docs.Service
 	version      string
 	loginLimiter *ipLimiter
 	// enrollLimiter remt het raden van enrollmenttokens.
@@ -107,7 +109,9 @@ type Deps struct {
 	// Risk rekent de health score.
 	Risk *risk.Service
 	// Topo leest de infrastructuur voor de wat-als.
-	Topo    *topo.Service
+	Topo *topo.Service
+	// Docs schrijft en bewaart de documentatie.
+	Docs    *docs.Service
 	Version string
 }
 
@@ -146,6 +150,7 @@ func New(d Deps) *Server {
 		assistant:     d.Assistant,
 		risk:          d.Risk,
 		topo:          d.Topo,
+		docs:          d.Docs,
 	}
 	s.assistant.Tools = s.assistantTools()
 	return s

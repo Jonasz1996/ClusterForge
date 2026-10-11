@@ -29,6 +29,7 @@ export function useLiveUpdates(enabled: boolean) {
         void qc.invalidateQueries({ queryKey: ["incidents"] });
         void qc.invalidateQueries({ queryKey: ["risk"] });
         void qc.invalidateQueries({ queryKey: ["map"] });
+        void qc.invalidateQueries({ queryKey: ["docs"] });
       }, 300);
     };
     es.addEventListener("change", onChange);

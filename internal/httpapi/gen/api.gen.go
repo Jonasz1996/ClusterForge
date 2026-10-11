@@ -306,6 +306,42 @@ func (e DeployTargetNetwork) Valid() bool {
 	}
 }
 
+// Defines values for DocScope.
+const (
+	DocScopeCluster  DocScope = "cluster"
+	DocScopeOverview DocScope = "overview"
+)
+
+// Valid indicates whether the value is a known member of the DocScope enum.
+func (e DocScope) Valid() bool {
+	switch e {
+	case DocScopeCluster:
+		return true
+	case DocScopeOverview:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DocMetaScope.
+const (
+	DocMetaScopeCluster  DocMetaScope = "cluster"
+	DocMetaScopeOverview DocMetaScope = "overview"
+)
+
+// Valid indicates whether the value is a known member of the DocMetaScope enum.
+func (e DocMetaScope) Valid() bool {
+	switch e {
+	case DocMetaScopeCluster:
+		return true
+	case DocMetaScopeOverview:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for DriftFindingAspect.
 const (
 	DriftFindingAspectActive    DriftFindingAspect = "active"
@@ -2857,6 +2893,103 @@ type DeployTarget struct {
 // DeployTargetNetwork defines model for DeployTarget.Network.
 type DeployTargetNetwork string
 
+// Doc defines model for Doc.
+type Doc struct {
+	Cause string `json:"cause"`
+
+	// CauseText Waarom deze versie geschreven werd, zoals Na: Cluster uitgerold
+	CauseText   string              `json:"cause_text"`
+	ClusterId   *openapi_types.UUID `json:"cluster_id,omitempty"`
+	ClusterName *string             `json:"cluster_name,omitempty"`
+
+	// Content De Markdown
+	Content     string     `json:"content"`
+	GeneratedAt *time.Time `json:"generated_at,omitempty"`
+	Kind        string     `json:"kind"`
+	Path        string     `json:"path"`
+	Scope       DocScope   `json:"scope"`
+	Sha256      string     `json:"sha256"`
+	Title       string     `json:"title"`
+
+	// Version Leeg als het document nog niet bewaard is
+	Version *int64 `json:"version,omitempty"`
+}
+
+// DocScope defines model for Doc.Scope.
+type DocScope string
+
+// DocClusterIndex defines model for DocClusterIndex.
+type DocClusterIndex struct {
+	// ChangedAt De nieuwste versie van een van zijn documenten
+	ChangedAt   *time.Time         `json:"changed_at,omitempty"`
+	Docs        []DocMeta          `json:"docs"`
+	Environment string             `json:"environment"`
+	Id          openapi_types.UUID `json:"id"`
+	Name        string             `json:"name"`
+
+	// QueuedUntil Wanneer een wijziging in de documentatie komt
+	QueuedUntil *time.Time `json:"queued_until,omitempty"`
+	Slug        string     `json:"slug"`
+}
+
+// DocDiff defines model for DocDiff.
+type DocDiff struct {
+	// Changed Het aantal gewijzigde regels; -1 als de versies te groot zijn om te vergelijken
+	Changed int    `json:"changed"`
+	Diff    string `json:"diff"`
+	From    int64  `json:"from"`
+	To      int64  `json:"to"`
+}
+
+// DocGenerateResult defines model for DocGenerateResult.
+type DocGenerateResult struct {
+	// Changed Hoeveel documenten een nieuwe versie kregen
+	Changed int `json:"changed"`
+}
+
+// DocHistory defines model for DocHistory.
+type DocHistory struct {
+	// Keep Hoeveel versies per document bewaard blijven
+	Keep     int          `json:"keep"`
+	Versions []DocVersion `json:"versions"`
+}
+
+// DocIndex defines model for DocIndex.
+type DocIndex struct {
+	Clusters []DocClusterIndex `json:"clusters"`
+	Overview DocMeta           `json:"overview"`
+
+	// QueuedUntil Wanneer een wijziging in het overzicht komt
+	QueuedUntil *time.Time `json:"queued_until,omitempty"`
+}
+
+// DocMeta defines model for DocMeta.
+type DocMeta struct {
+	ClusterId   *openapi_types.UUID `json:"cluster_id,omitempty"`
+	GeneratedAt *time.Time          `json:"generated_at,omitempty"`
+	Kind        string              `json:"kind"`
+
+	// Path Waar het in de zip staat, zoals clusters/web/netwerk.md
+	Path  string       `json:"path"`
+	Scope DocMetaScope `json:"scope"`
+	Title string       `json:"title"`
+
+	// Version De nieuwste bewaarde versie; leeg als er nog geen is
+	Version *int64 `json:"version,omitempty"`
+}
+
+// DocMetaScope defines model for DocMeta.Scope.
+type DocMetaScope string
+
+// DocVersion defines model for DocVersion.
+type DocVersion struct {
+	Cause       string    `json:"cause"`
+	CauseText   string    `json:"cause_text"`
+	GeneratedAt time.Time `json:"generated_at"`
+	Id          int64     `json:"id"`
+	Sha256      string    `json:"sha256"`
+}
+
 // DriftFinding defines model for DriftFinding.
 type DriftFinding struct {
 	Actual   string             `json:"actual"`
@@ -5358,6 +5491,15 @@ type ChangesLimit = int
 // ChangesTo defines model for ChangesTo.
 type ChangesTo = time.Time
 
+// DocClusterParam defines model for DocClusterParam.
+type DocClusterParam = openapi_types.UUID
+
+// DocKindParam defines model for DocKindParam.
+type DocKindParam = string
+
+// DocScopeParam defines model for DocScopeParam.
+type DocScopeParam = string
+
 // MetricsFrom defines model for MetricsFrom.
 type MetricsFrom = time.Time
 
@@ -5502,6 +5644,29 @@ type GetDependencyGraphParams struct {
 
 // GetDependencyGraphParamsLevel defines parameters for GetDependencyGraph.
 type GetDependencyGraphParamsLevel string
+
+// GetDocParams defines parameters for GetDoc.
+type GetDocParams struct {
+	// Cluster Het cluster; verplicht bij scope cluster
+	Cluster *DocClusterParam `form:"cluster,omitempty" json:"cluster,omitempty"`
+
+	// Version Een bewaarde versie uit de geschiedenis
+	Version *int64 `form:"version,omitempty" json:"version,omitempty"`
+}
+
+// GetDocDiffParams defines parameters for GetDocDiff.
+type GetDocDiffParams struct {
+	// Cluster Het cluster; verplicht bij scope cluster
+	Cluster *DocClusterParam `form:"cluster,omitempty" json:"cluster,omitempty"`
+	From    int64            `form:"from" json:"from"`
+	To      int64            `form:"to" json:"to"`
+}
+
+// GetDocHistoryParams defines parameters for GetDocHistory.
+type GetDocHistoryParams struct {
+	// Cluster Het cluster; verplicht bij scope cluster
+	Cluster *DocClusterParam `form:"cluster,omitempty" json:"cluster,omitempty"`
+}
 
 // ListEventsParams defines parameters for ListEvents.
 type ListEventsParams struct {
@@ -5919,6 +6084,24 @@ type ServerInterface interface {
 	// PlanDeployment Controleren wat een uitrol zou maken (admin)
 	// (POST /deployments/plan)
 	PlanDeployment(w http.ResponseWriter, r *http.Request)
+	// ListDocs Alle documenten van de documentatie met hun nieuwste versie
+	// (GET /docs)
+	ListDocs(w http.ResponseWriter, r *http.Request)
+	// DownloadDocs Alle documenten als zip met Markdown
+	// (GET /docs/download)
+	DownloadDocs(w http.ResponseWriter, r *http.Request)
+	// GenerateDocs De documentatie nu opnieuw schrijven (admin)
+	// (POST /docs/generate)
+	GenerateDocs(w http.ResponseWriter, r *http.Request)
+	// GetDoc Eén document als Markdown, de nieuwste versie of een oudere
+	// (GET /docs/{scope}/{kind})
+	GetDoc(w http.ResponseWriter, r *http.Request, scope DocScopeParam, kind DocKindParam, params GetDocParams)
+	// GetDocDiff Wat er tussen twee versies van een document veranderde, als unified diff
+	// (GET /docs/{scope}/{kind}/diff)
+	GetDocDiff(w http.ResponseWriter, r *http.Request, scope DocScopeParam, kind DocKindParam, params GetDocDiffParams)
+	// GetDocHistory De bewaarde versies van een document, nieuwste eerst
+	// (GET /docs/{scope}/{kind}/history)
+	GetDocHistory(w http.ResponseWriter, r *http.Request, scope DocScopeParam, kind DocKindParam, params GetDocHistoryParams)
 	// DeleteDriftIgnore Een negeerregel opheffen (admin)
 	// (DELETE /drift-ignores/{ignoreId})
 	DeleteDriftIgnore(w http.ResponseWriter, r *http.Request, ignoreId openapi_types.UUID)
@@ -6492,6 +6675,42 @@ func (_ Unimplemented) DeployCluster(w http.ResponseWriter, r *http.Request) {
 // PlanDeployment Controleren wat een uitrol zou maken (admin)
 // (POST /deployments/plan)
 func (_ Unimplemented) PlanDeployment(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListDocs Alle documenten van de documentatie met hun nieuwste versie
+// (GET /docs)
+func (_ Unimplemented) ListDocs(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// DownloadDocs Alle documenten als zip met Markdown
+// (GET /docs/download)
+func (_ Unimplemented) DownloadDocs(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GenerateDocs De documentatie nu opnieuw schrijven (admin)
+// (POST /docs/generate)
+func (_ Unimplemented) GenerateDocs(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetDoc Eén document als Markdown, de nieuwste versie of een oudere
+// (GET /docs/{scope}/{kind})
+func (_ Unimplemented) GetDoc(w http.ResponseWriter, r *http.Request, scope DocScopeParam, kind DocKindParam, params GetDocParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetDocDiff Wat er tussen twee versies van een document veranderde, als unified diff
+// (GET /docs/{scope}/{kind}/diff)
+func (_ Unimplemented) GetDocDiff(w http.ResponseWriter, r *http.Request, scope DocScopeParam, kind DocKindParam, params GetDocDiffParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetDocHistory De bewaarde versies van een document, nieuwste eerst
+// (GET /docs/{scope}/{kind}/history)
+func (_ Unimplemented) GetDocHistory(w http.ResponseWriter, r *http.Request, scope DocScopeParam, kind DocKindParam, params GetDocHistoryParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -8630,6 +8849,240 @@ func (siw *ServerInterfaceWrapper) PlanDeployment(w http.ResponseWriter, r *http
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.PlanDeployment(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListDocs operation middleware
+func (siw *ServerInterfaceWrapper) ListDocs(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListDocs(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DownloadDocs operation middleware
+func (siw *ServerInterfaceWrapper) DownloadDocs(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DownloadDocs(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GenerateDocs operation middleware
+func (siw *ServerInterfaceWrapper) GenerateDocs(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GenerateDocs(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetDoc operation middleware
+func (siw *ServerInterfaceWrapper) GetDoc(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "scope" -------------
+	var scope DocScopeParam
+
+	err = runtime.BindStyledParameterWithOptions("simple", "scope", chi.URLParam(r, "scope"), &scope, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "scope", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "kind" -------------
+	var kind DocKindParam
+
+	err = runtime.BindStyledParameterWithOptions("simple", "kind", chi.URLParam(r, "kind"), &kind, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "kind", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetDocParams
+
+	// ------------- Optional query parameter "cluster" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cluster", r.URL.Query(), &params.Cluster, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cluster"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cluster", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "version" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "version", r.URL.Query(), &params.Version, runtime.BindQueryParameterOptions{Type: "integer", Format: "int64"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "version"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "version", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetDoc(w, r, scope, kind, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetDocDiff operation middleware
+func (siw *ServerInterfaceWrapper) GetDocDiff(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "scope" -------------
+	var scope DocScopeParam
+
+	err = runtime.BindStyledParameterWithOptions("simple", "scope", chi.URLParam(r, "scope"), &scope, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "scope", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "kind" -------------
+	var kind DocKindParam
+
+	err = runtime.BindStyledParameterWithOptions("simple", "kind", chi.URLParam(r, "kind"), &kind, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "kind", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetDocDiffParams
+
+	// ------------- Optional query parameter "cluster" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cluster", r.URL.Query(), &params.Cluster, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cluster"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cluster", Err: err})
+		}
+		return
+	}
+
+	// ------------- Required query parameter "from" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "from", r.URL.Query(), &params.From, runtime.BindQueryParameterOptions{Type: "integer", Format: "int64"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "from"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "from", Err: err})
+		}
+		return
+	}
+
+	// ------------- Required query parameter "to" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "to", r.URL.Query(), &params.To, runtime.BindQueryParameterOptions{Type: "integer", Format: "int64"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "to"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "to", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetDocDiff(w, r, scope, kind, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetDocHistory operation middleware
+func (siw *ServerInterfaceWrapper) GetDocHistory(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "scope" -------------
+	var scope DocScopeParam
+
+	err = runtime.BindStyledParameterWithOptions("simple", "scope", chi.URLParam(r, "scope"), &scope, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "scope", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "kind" -------------
+	var kind DocKindParam
+
+	err = runtime.BindStyledParameterWithOptions("simple", "kind", chi.URLParam(r, "kind"), &kind, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "kind", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetDocHistoryParams
+
+	// ------------- Optional query parameter "cluster" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cluster", r.URL.Query(), &params.Cluster, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cluster"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cluster", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetDocHistory(w, r, scope, kind, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -11428,6 +11881,24 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/clusters/{clusterId}/risk", wrapper.GetClusterRisk)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/docs", wrapper.ListDocs)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/docs/download", wrapper.DownloadDocs)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/docs/generate", wrapper.GenerateDocs)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/docs/{scope}/{kind}", wrapper.GetDoc)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/docs/{scope}/{kind}/history", wrapper.GetDocHistory)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/docs/{scope}/{kind}/diff", wrapper.GetDocDiff)
 	})
 
 	return r

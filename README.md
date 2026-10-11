@@ -46,6 +46,7 @@ Het technisch ontwerp staat in [docs/design/mvp-fase-1.md](docs/design/mvp-fase-
 | 6. Wat-als en SPOF's | Kies wat er uitvalt (een Proxmox-host, storage, bridge, node, dienst of cluster) en zie per cluster de voorspelde status, welke VM's Proxmox HA herstart en welke diensten geraakt worden; de onderdelen die alleen al productie down leggen, als bevinding in de score; en of ClusterForge zelf meegaat | klaar |
 | 7. Infrastructuurkaart | Een kaart op `/kaart` met drie lagen: fysiek (hosts, VM's en storage), netwerk (bridges, VLAN's, subnetten, gateways, VIP's en VRRP-peers) en diensten; met filters, een detailpaneel en de wat-als of een incident als overlay. Het netwerk van de Proxmox-hosts wordt gelezen, en een VM met het MAC-adres van een node wordt een koppelvoorstel | klaar |
 | 8. Verbindingen en ontdekte afhankelijkheden | De TCP-verbindingen die de agents zien, per node en als voorgestelde afhankelijkheden met het aantal verbindingen als bewijs; een onbekende bestemming wordt een voorgestelde externe dienst, en op de kaart staat bij elke pijl hoe vaak de agents hem zagen | klaar |
+| 9. Auto-documentatie | Per cluster vijf hoofdstukken (architectuur, netwerk met diagram, configuratie, herstel en runbooks) en een overzicht, als Markdown uit wat er draait; tien minuten na een wijziging en elke nacht bijgewerkt, met de geschiedenis en wat er veranderde, downloaden als zip en afdrukken; zonder geheimen | klaar |
 
 ## Draaien met Docker Compose
 
@@ -85,6 +86,7 @@ Agents verbinden zelf naar de server, op poort 4222 (NATS met TLS). Die poort mo
 | `CF_SANDBOX_BOOT_TIMEOUT` | `10m` | Hoe lang een teruggezette VM mag doen over opstarten tot de guest agent antwoordt; tussen `30s` en `1h` |
 | `CF_TEST_WINDOW` | `zo 03:00-05:00` | Het testvenster voor geplande failovertests en back-upcontroles: dagen (`ma` tot `zo`, met komma's, of `dagelijks`) en de tijden, op de klok van `TZ` |
 | `CF_JOURNAL_SSH_LOGINS` | `true` | Bewaar SSH-logins (gebruiker, bron-IP en methode) in het journaal van de nodes; `false` laat ze weg |
+| `CF_DOCS_USERNAMES` | `true` | Zet in de documentatie bij elke revisie wie hem maakte; `false` laat de gebruikersnamen weg |
 | `TZ` | `Europe/Brussels` in Docker Compose | Tijdzone van de server; het testvenster volgt zomer- en wintertijd |
 
 ### Commando's
@@ -590,6 +592,22 @@ Filter op omgeving of cluster; dan blijft alleen staan wat bij die nodes hoort. 
 
 Vanuit de wat-als (Op de kaart tonen) en vanuit een incident (Wat het raakte, op de kaart) opent de kaart met een overlay: wat uitvalt, down of verminderd is of door HA herstart wordt, krijgt een rand in die kleur, en de rest wordt gedimd. Op de kaart staan alleen nodes die aan een VM gekoppeld zijn (fysiek) of die een agent hebben (netwerk); wat ontbreekt, staat erboven.
 
+## Documentatie
+
+Bij Documentatie staat wat ClusterForge zelf over de clusters schrijft, uit wat het al weet: de specificatie, de inventory, de facts van de agents, Proxmox, de afhankelijkheden, de back-ups, de tests en de wat-als. Er is een overzicht met alle clusters, de afhankelijkheden tussen clusters als diagram, de Proxmox-hosts met hun storage en bridges, de single points of failure en de open bevindingen. Elk cluster heeft vijf hoofdstukken:
+
+- **Architectuur.** Wat het cluster doet, de nodes met hun VM en host, de VIP's met de volgorde waarin keepalived ze geeft, en de diensten met hun afhankelijkheden als diagram.
+- **Netwerk.** Subnet, gateway, DNS, bridge en VLAN, een diagram van de nodes per host met de VIP's, de adressen per interface met MAC-adres, bridge en VLAN uit Proxmox, en de poorten.
+- **Configuratie.** De template met zijn parameters, de bestanden die ClusterForge op elke node zet, `cluster.yaml` zoals het in Git zou staan, en de revisies met wat er veranderde.
+- **Herstel.** De back-ups per node met hun versheid, de back-upcontroles met de hersteltijd, de failovertests met wat ze maten, en per node en per host wat er uitvalt volgens de wat-als.
+- **Runbooks.** Onderhoud, herstarten en afsluiten zoals ClusterForge het doet, het VIP met de hand verplaatsen, een VM terugzetten uit zijn nieuwste back-up met de echte `qmrestore`-regel, een node vervangen en wat te doen als een host uitvalt.
+
+Tien minuten na een wijziging die een cluster raakt, zoals een uitrol, een gewijzigde specificatie of een node in onderhoud, schrijft ClusterForge de documenten van dat cluster opnieuw; een reeks wijzigingen geeft zo één nieuwe versie. Elke nacht om 06:00 schrijft het alles opnieuw, bijvoorbeeld voor nieuwe back-ups, en met Nu bijwerken hoeft een beheerder niet te wachten. Een document krijgt alleen een nieuwe versie als de tekst veranderde; de laatste 50 versies blijven bewaard. Bij Geschiedenis zie je wanneer en waarom elke versie kwam, open je een oudere en zie je wat er veranderde.
+
+Downloaden geeft een zip met Markdown: `README.md` en `clusters/<slug>/<hoofdstuk>.md`, met links tussen de bestanden, zodat het in een Git-repository of wiki goed staat. De diagrammen zijn Mermaid; GitHub tekent ze. Afdrukken drukt het open document af zonder menu en knoppen. Ook een viewer leest en downloadt de documentatie.
+
+Geheimen staan er nooit in: een geheime parameter staat er als `[geheim]`, en ook in de bestanden die ClusterForge op een node zet, staat elk geheim als `[geheim]`. Wat er echt op een node staat, en een hash daarvan, komt er niet in; dat vergelijkt de driftcontrole. Met `CF_DOCS_USERNAMES=false` staat bij de revisies niet wie ze maakte.
+
 ## Assistent
 
 Bij Assistent stel je vragen over de fleet in gewone taal, zoals 'Waarom lag web-prod gisteravond plat?' of 'Wat veranderde er deze week op db-01?'. De assistent zoekt het antwoord op met dezelfde gegevens als de webinterface en antwoordt in het Nederlands, met links naar de schermen. Op een cluster, node of incident start de knop "Vraag de assistent" een gesprek over dat onderwerp.
@@ -622,7 +640,7 @@ Een vraag kost meestal enkele centen; een vraag die veel tools nodig heeft meer.
 
 **Wie.** Standaard alleen beheerders. Zet je 'Ook viewers mogen vragen stellen' aan, dan kunnen viewers het ook, met hun eigen rechten: ze zien via de assistent niets wat ze in de webinterface niet zien, zoals een IP-adres bij een SSH-login. Iedereen ziet zijn eigen gesprekken; een beheerder ziet die van iedereen. Een gesprek blijft 365 dagen na de laatste vraag staan, of tot je het verwijdert.
 
-**Wat de assistent kan.** Alleen lezen. Hij heeft achttien tools: het overzicht van de fleet, een cluster, een node, de tijdlijn, de wijzigingen, incidenten zoeken, een incident met de analyse van What Broke, metrics, drift, back-ups, failovertests, taken, Git-wijzigingen, de impact van een storing, de health score, de wat-als met de single points of failure en de kaart, ook met de verbindingen tussen diensten. Hij kan niets starten, stoppen, herstarten, toepassen of wijzigen; een tool roept dezelfde leesopdrachten aan als de webinterface, met de rechten van wie de vraag stelt. Raadt hij iets aan, dan linkt hij naar het scherm waar jij het doet.
+**Wat de assistent kan.** Alleen lezen. Hij heeft negentien tools: het overzicht van de fleet, een cluster, een node, de tijdlijn, de wijzigingen, incidenten zoeken, een incident met de analyse van What Broke, metrics, drift, back-ups, failovertests, taken, Git-wijzigingen, de impact van een storing, de health score, de wat-als met de single points of failure, de kaart, ook met de verbindingen tussen diensten, en de documentatie, zonder de inhoud van bestanden en `cluster.yaml`. Hij kan niets starten, stoppen, herstarten, toepassen of wijzigen; een tool roept dezelfde leesopdrachten aan als de webinterface, met de rechten van wie de vraag stelt. Raadt hij iets aan, dan linkt hij naar het scherm waar jij het doet.
 
 **Wat naar Anthropic gaat.** Je vraag, de gebruikersnaam en rol, de tijd, en wat de tools lezen: namen, statussen, adressen, tijdlijnen, journaalregels, pakketnamen, metrics, Git-commits en taken van de fleet. Geheimen gaan nooit mee: geen wachtwoorden, tokens, sleutels, vingerafdrukken, sessies en geen inhoud van bestanden. Commitberichten en journaalregels zijn tekst van buiten ClusterForge; de assistent behandelt ze als gegevens en volgt geen instructies die erin staan.
 
@@ -672,6 +690,7 @@ internal/incidents/        incidenten: overgangen groeperen, ernst, openen en sl
 internal/whatbroke/        What Broke: de tijdlijn uit logboek en journaal, en de analyse van elk incident
 internal/assistant/        de AI-assistent: instellingen, gesprekken, de lus met de Anthropic API, kosten en budget
 internal/risk/             de health score: de zeven scorekaarten, de kaart Platform, acceptaties en de trend; de wat-als en de SPOF's
+internal/docs/             de documentatie: Markdown en Mermaid uit wat ClusterForge weet, de versies, bijwerken na een wijziging en de zip
 internal/topo/             één model van hosts, storage, bridges en VM's met hun schijven en netwerkkaarten, waar ClusterForge zelf draait, en de lagen van de kaart
 internal/metrics/          metrics naar VictoriaMetrics schrijven en de grafieken opvragen
 internal/status/           statusregels voor nodes en clusters, VIP-eigenaars

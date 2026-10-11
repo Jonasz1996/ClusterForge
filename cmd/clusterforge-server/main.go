@@ -33,6 +33,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/config"
 	"github.com/Jonasz1996/clusterforge/internal/deploy"
 	"github.com/Jonasz1996/clusterforge/internal/deps"
+	"github.com/Jonasz1996/clusterforge/internal/docs"
 	"github.com/Jonasz1996/clusterforge/internal/drift"
 	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/failover"
@@ -245,6 +246,11 @@ func serve() error {
 	for _, kind := range []string{deploy.Kind, rollout.Kind} {
 		runner.OnFinished(kind, func(context.Context, store.Job) { git.Kick(false) })
 	}
+	// De documentatie schrijft zichzelf opnieuw tien minuten na een
+	// wijziging en elke nacht.
+	dcs := docs.NewService(pool, log)
+	dcs.Deploy, dcs.GitOps, dcs.Backups, dcs.Risk = dep, git, bk, rsk
+	dcs.Opts = docs.Opts{Usernames: cfg.DocsUsernames}
 	go hub.Run(ctx)
 	go eval.Run(ctx)
 	go ingest.Run(ctx)
@@ -255,6 +261,7 @@ func serve() error {
 	go dps.Run(ctx)
 	go analyzer.Run(ctx)
 	go rsk.Run(ctx)
+	go dcs.Run(ctx)
 	if git.Enabled() {
 		go git.Run(ctx)
 	}
@@ -271,7 +278,7 @@ func serve() error {
 		Handler: httpapi.New(httpapi.Deps{
 			Config: cfg, Log: log, Pool: pool, Auth: authSvc, Bus: bus, Hub: hub, Proxmox: pve, Jobs: runner,
 			Lifecycle: life, Deploy: dep, Backups: bk, Drift: drf, Failover: fo, Deps: dps, Rollout: ro, GitOps: git,
-			Assistant: asst, Risk: rsk, Topo: tp, Version: version,
+			Assistant: asst, Risk: rsk, Topo: tp, Docs: dcs, Version: version,
 		}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,

@@ -20,6 +20,7 @@ const nav: NavItem[] = [
   { href: "/assistent", label: "Assistent" },
   { href: "/afhankelijkheden", label: "Afhankelijkheden" },
   { href: "/kaart", label: "Kaart" },
+  { href: "/documentatie", label: "Documentatie" },
   { href: "/proxmox", label: "Proxmox" },
   { href: "/back-ups", label: "Back-ups" },
   { href: "/taken", label: "Taken" },
@@ -46,7 +47,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex min-h-screen flex-col md:flex-row">
-      <aside className="border-b border-slate-200 bg-white md:w-60 md:shrink-0 md:border-r md:border-b-0 dark:border-slate-800 dark:bg-slate-900">
+      <aside className="print:hidden border-b border-slate-200 bg-white md:w-60 md:shrink-0 md:border-r md:border-b-0 dark:border-slate-800 dark:bg-slate-900">
         <div className="px-5 py-4 text-lg font-semibold tracking-tight">ClusterForge</div>
         <nav className="flex gap-1 overflow-x-auto px-3 pb-3 md:flex-col md:overflow-visible">
           {nav
@@ -80,7 +81,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
         </nav>
       </aside>
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center justify-end gap-3 border-b border-slate-200 bg-white px-6 py-3 dark:border-slate-800 dark:bg-slate-900">
+        <header className="print:hidden flex items-center justify-end gap-3 border-b border-slate-200 bg-white px-6 py-3 dark:border-slate-800 dark:bg-slate-900">
           <span className="text-sm text-slate-600 dark:text-slate-400">
             {me.data.user.username} <span className="text-slate-400">· {me.data.user.role}</span>
           </span>
@@ -90,7 +91,13 @@ export default function AppLayout({ children }: { children: ReactNode }) {
         </header>
         {/* De graaf van Afhankelijkheden krijgt de volle breedte. */}
         <main
-          className={`mx-auto w-full flex-1 px-6 py-8 ${pathname.startsWith("/afhankelijkheden") ? "max-w-[100rem]" : "max-w-5xl"}`}
+          className={`mx-auto w-full flex-1 px-6 py-8 print:max-w-none print:p-0 ${
+            pathname.startsWith("/afhankelijkheden")
+              ? "max-w-[100rem]"
+              : pathname.startsWith("/documentatie")
+                ? "max-w-6xl"
+                : "max-w-5xl"
+          }`}
         >
           {children}
         </main>
