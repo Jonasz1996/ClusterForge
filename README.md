@@ -52,6 +52,7 @@ Het technisch ontwerp staat in [docs/design/mvp-fase-1.md](docs/design/mvp-fase-
 | 12. Storingen met dodemansknop | Een rampoefening als reeks van tot vijf stappen: VRRP blokkeren, een interface down, een TCP-poort dicht, vertraging of pakketverlies, een schijf vullen of een dienst stoppen, op de VIP-houder, de andere nodes, alle nodes of één node. De agent zet elke storing met een lease die de server verlengt en heft hem zelf op als ClusterForge wegvalt, na de bovengrens en na een herstart | klaar |
 | 13. DR-repetitie | Een heel cluster terugzetten uit de back-ups, ook op prod: alle nodes tegelijk als sandbox op één host aan een afgesloten bridge, controleren dat het VIP één houder heeft en antwoordt, RTO en RPO meten tegen de doelen per cluster, en daarna alles weer verwijderen; met de hand of elke week of maand in het testvenster | klaar |
 | 14. Herstelbaarheid in documentatie en rapport | De gemeten RTO en RPO met datum en doel in het hoofdstuk Herstel, de runbooks met de gemeten hersteltijden, de DR-repetitie in de kaart Herstelbaarheid, en het rapport Herstelbaarheid per maand op `/rapporten`, af te drukken als PDF en elke eerste van de maand bewaard | klaar |
+| 15. Assistent bij incidenten, risico en documentatie | Analyseer op een incident geeft in het kort wat er gebeurde, de waarschijnlijke oorzaak met bewijs, wat je nog moet controleren en wat je kunt doen, bewaard bij het incident met model en datum; Leg uit bij een bevinding van de health score en bij een SPOF; een samenvatting 'In het kort' bovenaan de documentatie van een cluster; en automatisch analyseren van nieuwe prod-incidenten, standaard uit | klaar |
 
 ## Draaien met Docker Compose
 
@@ -571,7 +572,7 @@ Wat bij elkaar hoort, komt in hetzelfde incident: een node bij het incident van 
 
 De ernst volgt uit de omgeving: op prod is down of split-brain kritiek en verminderd hoog, al het andere is laag. Een incident wordt alleen erger, nooit minder erg. Wat gebeurt terwijl een failovertest van ClusterForge in hetzelfde cluster loopt (of tot twee minuten erna), krijgt de markering 'door een failovertest' en is standaard verborgen.
 
-Bij Incidenten staan de open incidenten bovenaan, daarna de opgeloste, met filters op periode en status en de waarschijnlijke oorzaak in één regel. Een incident toont wat er misging (zie What Broke hieronder), wat er geraakt was (met de eerste, ergste en laatste status en van wanneer tot wanneer), de grafieken rond het eerste symptoom, de tijdlijn en een notitie. Het overzicht heeft een kaart Open incidenten. Iedereen ziet incidenten; alleen een beheerder schrijft de notitie, en een viewer ziet in de tijdlijn geen IP-adres. Openen, erger worden, sluiten, heropenen en de notitie staan ook in het logboek, onder de soort Incidenten.
+Bij Incidenten staan de open incidenten bovenaan, daarna de opgeloste, met filters op periode en status en de waarschijnlijke oorzaak in één regel. Een incident toont wat er misging (zie What Broke hieronder), de analyse van de [assistent](#analyseren-uitleggen-en-samenvatten) als die er is, wat er geraakt was (met de eerste, ergste en laatste status en van wanneer tot wanneer), de grafieken rond het eerste symptoom, de tijdlijn en een notitie. Het overzicht heeft een kaart Open incidenten. Iedereen ziet incidenten; alleen een beheerder schrijft de notitie, en een viewer ziet in de tijdlijn geen IP-adres. Openen, erger worden, sluiten, heropenen en de notitie staan ook in het logboek, onder de soort Incidenten.
 
 Een VIP-wissel en de statuswissel van een dienst staan nu ook bij de nodes zelf in het logboek, niet alleen bij het cluster.
 
@@ -681,6 +682,8 @@ Bij Documentatie staat wat ClusterForge zelf over de clusters schrijft, uit wat 
 
 Tien minuten na een wijziging die een cluster raakt, zoals een uitrol, een gewijzigde specificatie of een node in onderhoud, schrijft ClusterForge de documenten van dat cluster opnieuw; een reeks wijzigingen geeft zo één nieuwe versie. Elke nacht om 06:00 schrijft het alles opnieuw, bijvoorbeeld voor nieuwe back-ups, en met Nu bijwerken hoeft een beheerder niet te wachten. Een document krijgt alleen een nieuwe versie als de tekst veranderde; de laatste 50 versies blijven bewaard. Bij Geschiedenis zie je wanneer en waarom elke versie kwam, open je een oudere en zie je wat er veranderde.
 
+Een beheerder kan bovenaan het hoofdstuk Architectuur een samenvatting 'In het kort' laten schrijven door de [assistent](#analyseren-uitleggen-en-samenvatten).
+
 Downloaden geeft een zip met Markdown: `README.md` en `clusters/<slug>/<hoofdstuk>.md`, met links tussen de bestanden, zodat het in een Git-repository of wiki goed staat. De diagrammen zijn Mermaid; GitHub tekent ze. Afdrukken drukt het open document af zonder menu en knoppen. Ook een viewer leest en downloadt de documentatie.
 
 Geheimen staan er nooit in: een geheime parameter staat er als `[geheim]`, en ook in de bestanden die ClusterForge op een node zet, staat elk geheim als `[geheim]`. Wat er echt op een node staat, en een hash daarvan, komt er niet in; dat vergelijkt de driftcontrole. Met `CF_DOCS_USERNAMES=false` staat bij de revisies niet wie ze maakte.
@@ -747,6 +750,16 @@ Een vraag kost meestal enkele centen; een vraag die veel tools nodig heeft meer.
 
 **Wat naar Anthropic gaat.** Je vraag, de gebruikersnaam en rol, de tijd, en wat de tools lezen: namen, statussen, adressen, tijdlijnen, journaalregels, pakketnamen, metrics, Git-commits en taken van de fleet. Geheimen gaan nooit mee: geen wachtwoorden, tokens, sleutels, vingerafdrukken, sessies en geen inhoud van bestanden. Commitberichten en journaalregels zijn tekst van buiten ClusterForge; de assistent behandelt ze als gegevens en volgt geen instructies die erin staan.
 
+### Analyseren, uitleggen en samenvatten
+
+Naast vragen beantwoorden doet de assistent drie vaste opdrachten. Elk antwoord komt live binnen en is ook een gesprek bij Assistent, met het label Analyse, Uitleg of Samenvatting. Het telt mee voor het budget en de grenzen hierboven, en wie het vroeg, kan erin doorvragen.
+
+- **Analyseer, op een incident.** De assistent leest het incident, de analyse van What Broke, de tijdlijn en de geschiedenis, kijkt met de tools verder waar dat helpt (metrics, wijzigingen op de nodes, impact, eerdere incidenten) en schrijft vier delen: In het kort, Waarschijnlijke oorzaak met het bewijs en hoe zeker dat is, Nog te controleren, en Wat je kunt doen met links naar de schermen. Het resultaat staat daarna bij het incident, met het model, de datum, wie het vroeg en de kosten, en in het logboek. Opnieuw analyseren vervangt het; weigert het model of loopt er iets mis, dan blijft de vorige analyse staan. De analyse leest met de rechten van wie ze vraagt: die van een beheerder ziet een viewer niet, en een viewer kan ze ook niet vervangen.
+- **Leg uit, bij een bevinding of een SPOF.** Bij elke bevinding van de [health score](#gezondheid) en bij elke single point of failure op Risico legt de assistent in een venster uit wat het betekent, waarom het in jouw fleet telt en hoe je het oplost. Een viewer krijgt de uitleg zonder wat hij in de webinterface niet ziet.
+- **In het kort, in de documentatie.** Een beheerder laat in het hoofdstuk Architectuur van een cluster een samenvatting van een paar alinea's schrijven uit de vijf hoofdstukken. Ze staat bovenaan het hoofdstuk met het model en de datum, gaat mee in de zip en naar GitHub, en blijft staan tot je een nieuwe vraagt of haar weghaalt. Links, afbeeldingen, HTML en tabellen haalt ClusterForge eruit; bij twijfel gelden de hoofdstukken zelf.
+
+**Automatisch analyseren.** Standaard uit. Zet een beheerder bij Instellingen, Assistent 'Nieuwe prod-incidenten met ernst hoog of kritiek automatisch analyseren' aan, dan analyseert ClusterForge zo'n incident twee minuten nadat het ontdekt is, zodat de tijdlijn en de metrics van het begin er zijn. Alleen incidenten die een prod-cluster raken en niet door een test komen, elk één keer, hoogstens tien per dag en binnen het maandbudget. Zo'n analyse leest met de rechten van een beheerder, staat bij het incident als automatisch, en het gesprek staat bij de gesprekken van iedereen zonder gebruiker.
+
 ## Ontwikkelen
 
 Nodig: Go 1.26, Node 22 met pnpm, Docker.
@@ -791,7 +804,7 @@ internal/agent/            code van cf-agent zelf: aanmelden, verbinden, facts, 
 internal/journal/          het wijzigingsjournaal: zinnen, verschillen in de facts en opruimen
 internal/incidents/        incidenten: overgangen groeperen, ernst, openen en sluiten na elke statusronde
 internal/whatbroke/        What Broke: de tijdlijn uit logboek en journaal, en de analyse van elk incident
-internal/assistant/        de AI-assistent: instellingen, gesprekken, de lus met de Anthropic API, kosten en budget
+internal/assistant/        de AI-assistent: instellingen, gesprekken, de lus met de Anthropic API, kosten en budget, analyses van incidenten, uitleg en samenvattingen
 internal/risk/             de health score: de zeven scorekaarten, de kaart Platform, acceptaties en de trend; de wat-als en de SPOF's
 internal/docs/             de documentatie: Markdown en Mermaid uit wat ClusterForge weet, de versies, bijwerken na een wijziging, de zip en de export naar GitHub
 internal/reports/          het rapport Herstelbaarheid per maand en de maandelijkse momentopname

@@ -200,6 +200,7 @@ var Known = map[string]Spec{
 	"incident.resolved":     {CategoryIncident, "Incident opgelost"},
 	"incident.reopened":     {CategoryIncident, "Incident opnieuw geopend"},
 	"incident.note_updated": {CategoryIncident, "Notitie bij incident bijgewerkt"},
+	"incident.analyzed":     {CategoryIncident, "Incident geanalyseerd door de assistent"},
 
 	"assistant.settings_updated": {CategoryAssistant, "Instellingen van de assistent gewijzigd"},
 	"assistant.asked":            {CategoryAssistant, "Vraag aan de assistent"},
@@ -215,6 +216,8 @@ var Known = map[string]Spec{
 	"docs.published":           {CategoryDocs, "Documentatie naar GitHub geschreven"},
 	"docs.publish_failed":      {CategoryDocs, "Documentatie naar GitHub schrijven mislukt"},
 	"docs.publish_recovered":   {CategoryDocs, "Documentatie naar GitHub schrijven lukt weer"},
+	"docs.summary_updated":     {CategoryDocs, "Samenvatting van de documentatie geschreven door de assistent"},
+	"docs.summary_removed":     {CategoryDocs, "Samenvatting van de documentatie weggehaald"},
 }
 
 // Lookup geeft de spec van een action. Een onbekende action (uit een nieuwere

@@ -39,14 +39,16 @@ func (s *Server) assistantError(w http.ResponseWriter, r *http.Request, err erro
 		writeError(w, http.StatusTooManyRequests, "limit", le.Msg)
 	case errors.Is(err, assistant.ErrNotFound):
 		writeError(w, http.StatusNotFound, "not_found", err.Error())
-	case errors.Is(err, assistant.ErrForbidden):
+	case errors.Is(err, assistant.ErrForbidden), errors.Is(err, assistant.ErrAdminAnalysis):
 		writeError(w, http.StatusForbidden, "forbidden", err.Error())
 	case errors.Is(err, assistant.ErrUnavailable):
 		writeError(w, http.StatusConflict, "unavailable", err.Error())
 	case errors.Is(err, assistant.ErrDisabled):
 		writeError(w, http.StatusConflict, "disabled", err.Error())
-	case errors.Is(err, assistant.ErrBusy):
+	case errors.Is(err, assistant.ErrBusy), errors.Is(err, assistant.ErrRunning):
 		writeError(w, http.StatusConflict, "busy", err.Error())
+	case errors.Is(err, assistant.ErrIncidentNotFound):
+		writeError(w, http.StatusNotFound, "not_found", err.Error())
 	default:
 		s.internalError(w, r, err)
 	}
@@ -64,7 +66,7 @@ func (s *Server) assistantSettings(ctx context.Context, c assistant.Caller) (gen
 	}
 	out := gen.AssistantSettings{
 		Available: s.assistant.Available(), CanUse: can, Reason: reason, Enabled: st.Enabled, HasKey: st.HasKey,
-		Model: st.Model, MonthlyBudgetUsd: st.MonthlyBudgetUSD, ViewerAccess: st.ViewerAccess,
+		Model: st.Model, MonthlyBudgetUsd: st.MonthlyBudgetUSD, ViewerAccess: st.ViewerAccess, AutoAnalyze: st.AutoAnalyze,
 		Models: make([]gen.AssistantModel, len(assistant.Models)), UpdatedAt: nullableOf(st.UpdatedAt),
 		UpdatedBy: nullableOf[string](nil),
 	}
@@ -99,7 +101,7 @@ func (s *Server) SaveAssistantSettings(w http.ResponseWriter, r *http.Request) {
 	}
 	in := assistant.SettingsInput{
 		Enabled: req.Enabled, APIKey: deref(req.ApiKey), Model: req.Model, MonthlyBudgetUSD: req.MonthlyBudgetUsd,
-		ViewerAccess: req.ViewerAccess,
+		ViewerAccess: req.ViewerAccess, AutoAnalyze: deref(req.AutoAnalyze),
 	}
 	if s.assistantError(w, r, s.assistant.Validate(r.Context(), in)) {
 		return
@@ -155,8 +157,8 @@ func (s *Server) GetAssistantUsage(w http.ResponseWriter, r *http.Request) {
 
 func toAPIConversation(c assistant.Conversation) gen.AssistantConversation {
 	return gen.AssistantConversation{
-		Id: c.ID, Title: c.Title, Username: c.Username, SubjectType: c.SubjectType, SubjectId: nullableOf(c.SubjectID),
-		CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt, CostUsd: float32(c.CostUSD),
+		Id: c.ID, Title: c.Title, Username: c.Username, Kind: gen.AssistantConversationKind(c.Kind), SubjectType: c.SubjectType,
+		SubjectId: nullableOf(c.SubjectID), CreatedAt: c.CreatedAt, UpdatedAt: c.UpdatedAt, CostUsd: float32(c.CostUSD), CanAsk: c.CanAsk,
 	}
 }
 
@@ -229,6 +231,12 @@ func (s *Server) AskAssistant(w http.ResponseWriter, r *http.Request, id uuid.UU
 	if s.assistantError(w, r, err) {
 		return
 	}
+	s.streamTurn(w, r, turn)
+}
+
+// streamTurn stuurt het antwoord op een vraag als text/event-stream terug,
+// terwijl het binnenkomt.
+func (s *Server) streamTurn(w http.ResponseWriter, r *http.Request, turn *assistant.Turn) {
 	rc := http.NewResponseController(w)
 	// Een antwoord met tools duurt langer dan de schrijftimeout van de server.
 	_ = rc.SetWriteDeadline(time.Now().Add(askTimeout + time.Minute))
@@ -266,6 +274,7 @@ func (s *Server) AskAssistant(w http.ResponseWriter, r *http.Request, id uuid.UU
 			data = map[string]any{
 				"models": nonNil(d.Models), "input_tokens": d.Tokens.Input, "output_tokens": d.Tokens.Output,
 				"cache_read_tokens": d.Tokens.CacheRead, "cache_write_tokens": d.Tokens.CacheWrite, "cost_usd": d.CostUSD, "note": d.Note,
+				"conversation_id": d.ConversationID,
 			}
 		}
 		b, _ := json.Marshal(data)

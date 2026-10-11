@@ -2098,6 +2098,32 @@ paths:
               schema: { $ref: "#/components/schemas/IncidentDetail" }
         "401": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /incidents/{incidentId}/analyze:
+    parameters:
+      - { name: incidentId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: analyzeIncident
+      summary: Het incident laten analyseren door de assistent; het resultaat stroomt als server-sent events
+      description: |
+        Voor wie de assistent mag gebruiken. Het model krijgt het incident,
+        de analyse van What Broke, de tijdlijn en de geschiedenis, en kijkt
+        met de tools verder. Het resultaat heeft vier kopjes (In het kort,
+        Waarschijnlijke oorzaak, Nog te controleren, Wat je kunt doen) en
+        komt bij het incident, met model en datum. Het telt mee voor het
+        budget. Het laatste event, done, noemt het gesprek
+        (conversation_id) waarin je verder kunt vragen.
+      responses:
+        "200":
+          description: De stroom van het antwoord, met dezelfde events als askAssistant
+          content:
+            text/event-stream:
+              schema: { type: string }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
   /incidents/{incidentId}/note:
     parameters:
       - { name: incidentId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -2258,6 +2284,32 @@ paths:
       responses:
         "200":
           description: De stroom van het antwoord
+          content:
+            text/event-stream:
+              schema: { type: string }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+  /assistant/explain:
+    post:
+      operationId: explainRisk
+      summary: Een bevinding van de health score of een SPOF laten uitleggen; het antwoord stroomt als server-sent events
+      description: |
+        Voor wie de assistent mag gebruiken. De uitleg komt in een nieuw
+        gesprek, zodat je erop kunt doorvragen; het laatste event, done,
+        noemt het (conversation_id). Een bevinding of SPOF die er niet
+        (meer) is, geeft 404.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AssistantExplainInput" }
+      responses:
+        "200":
+          description: De stroom van het antwoord, met dezelfde events als askAssistant
           content:
             text/event-stream:
               schema: { type: string }
@@ -2605,6 +2657,40 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
+  /docs/summary:
+    post:
+      operationId: summarizeDocs
+      summary: De samenvatting 'In het kort' van een cluster laten schrijven (admin); het antwoord stroomt als server-sent events
+      description: |
+        De assistent leest de hoofdstukken van het cluster en schrijft een
+        korte samenvatting. Die komt bovenaan het hoofdstuk Architectuur,
+        met model en datum, en de documentatie wordt meteen opnieuw
+        geschreven. Links, afbeeldingen en HTML gaan eruit, omdat de
+        documentatie ook naar GitHub kan gaan.
+      parameters:
+        - { name: cluster, in: query, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: De stroom van het antwoord, met dezelfde events als askAssistant
+          content:
+            text/event-stream:
+              schema: { type: string }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteDocSummary
+      summary: De samenvatting 'In het kort' van een cluster weghalen (admin)
+      parameters:
+        - { name: cluster, in: query, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "204": { description: Weggehaald }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
   /docs/{scope}/{kind}:
     parameters:
       - { $ref: "#/components/parameters/DocScopeParam" }
@@ -2832,7 +2918,7 @@ components:
         generated_at: { type: string, format: date-time }
     DocClusterIndex:
       type: object
-      required: [id, name, slug, environment, docs]
+      required: [id, name, slug, environment, docs, summary]
       properties:
         id: { type: string, format: uuid }
         name: { type: string }
@@ -2841,6 +2927,17 @@ components:
         docs: { type: array, items: { $ref: "#/components/schemas/DocMeta" } }
         changed_at: { type: string, format: date-time, description: De nieuwste versie van een van zijn documenten }
         queued_until: { type: string, format: date-time, description: Wanneer een wijziging in de documentatie komt }
+        summary:
+          allOf: [{ $ref: "#/components/schemas/DocSummaryMeta" }]
+          nullable: true
+          description: De samenvatting 'In het kort' van de assistent; null zonder
+    DocSummaryMeta:
+      type: object
+      required: [at, model, by]
+      properties:
+        at: { type: string, format: date-time }
+        model: { type: string }
+        by: { type: string, description: Wie haar vroeg; leeg als die gebruiker weg is }
     DocIndex:
       type: object
       required: [overview, clusters]
@@ -4441,7 +4538,7 @@ components:
         has_more: { type: boolean }
     IncidentDetail:
       type: object
-      required: [incident, history, history_more, analysis, timeline, timeline_more]
+      required: [incident, history, history_more, analysis, timeline, timeline_more, ai]
       properties:
         incident: { $ref: "#/components/schemas/Incident" }
         analysis:
@@ -4465,6 +4562,28 @@ components:
         history_more:
           type: boolean
           description: Er waren meer regels dan getoond
+        ai:
+          allOf: [{ $ref: "#/components/schemas/IncidentAI" }]
+          nullable: true
+          description: De analyse van de assistent; null zolang er geen is
+    IncidentAI:
+      type: object
+      required: [text, hidden, model, at, by, automatic, cost_usd, conversation_id]
+      properties:
+        text: { type: string, nullable: true, description: "Markdown met vier kopjes; null als hidden" }
+        hidden:
+          type: boolean
+          description: De analyse las met de rechten van een beheerder; een viewer ziet de tekst niet
+        model: { type: string, description: "Het model dat antwoordde; met een fallback meer, gescheiden door een komma" }
+        at: { type: string, format: date-time }
+        by: { type: string, nullable: true, description: Wie haar vroeg; null als ze automatisch was }
+        automatic: { type: boolean }
+        cost_usd: { type: number }
+        conversation_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Het gesprek met de tools; alleen voor wie het mag openen
     TimelineEntry:
       type: object
       required: [id, ts, from, to, delay, class, source, kind, action, summary, node_id, hostname, cluster_id, cluster, subject, job_id, job, link, detail]
@@ -4591,7 +4710,7 @@ components:
         output_usd: { type: number, description: Dollar per miljoen tokens uitvoer }
     AssistantSettings:
       type: object
-      required: [available, can_use, reason, enabled, has_key, model, models, monthly_budget_usd, viewer_access, updated_at, updated_by]
+      required: [available, can_use, reason, enabled, has_key, model, models, monthly_budget_usd, viewer_access, auto_analyze, updated_at, updated_by]
       properties:
         available: { type: boolean, description: False zonder CF_MASTER_KEY }
         can_use: { type: boolean, description: Of jij de assistent nu kunt gebruiken }
@@ -4604,6 +4723,9 @@ components:
           items: { $ref: "#/components/schemas/AssistantModel" }
         monthly_budget_usd: { type: integer }
         viewer_access: { type: boolean }
+        auto_analyze:
+          type: boolean
+          description: Nieuwe prod-incidenten met ernst hoog of kritiek automatisch analyseren, hoogstens tien per dag
         updated_at: { type: string, format: date-time, nullable: true }
         updated_by: { type: string, nullable: true, description: Gebruikersnaam }
     AssistantSettingsInput:
@@ -4615,6 +4737,7 @@ components:
         model: { type: string }
         monthly_budget_usd: { type: integer }
         viewer_access: { type: boolean }
+        auto_analyze: { type: boolean, default: false }
         password: { type: string, maxLength: 1024, description: Je wachtwoord, als je geen tweestapsverificatie hebt }
         totp_code: { type: string, maxLength: 10, description: Je code, als je tweestapsverificatie hebt }
     AssistantKeyTest:
@@ -4654,11 +4777,16 @@ components:
         subject_id: { type: string, format: uuid }
     AssistantConversation:
       type: object
-      required: [id, username, title, subject_type, subject_id, created_at, updated_at, cost_usd]
+      required: [id, username, title, kind, subject_type, subject_id, created_at, updated_at, cost_usd, can_ask]
       properties:
         id: { type: string, format: uuid }
-        username: { type: string }
+        username: { type: string, description: Leeg voor een gesprek van ClusterForge zelf, zoals een automatische analyse }
         title: { type: string, description: Het begin van de eerste vraag; leeg zolang er geen is }
+        kind:
+          type: string
+          enum: [chat, analysis, explain, summary]
+          description: Een gewone vraag, of een analyse, uitleg of samenvatting
+        can_ask: { type: boolean, description: Of jij in dit gesprek verder kunt vragen; alleen in je eigen gesprekken }
         subject_type: { type: string, description: cluster, node, incident of leeg }
         subject_id: { type: string, format: uuid, nullable: true }
         created_at: { type: string, format: date-time }
@@ -4704,6 +4832,14 @@ components:
         cache_write_tokens: { type: integer }
         cost_usd: { type: number }
         note: { type: string, description: Waarom het antwoord onvolledig is; meestal leeg }
+    AssistantExplainInput:
+      type: object
+      description: Een bevinding (check, subject_type en subject_id, zoals in de health score) of een SPOF (de sleutel van het onderdeel)
+      properties:
+        check: { type: string, maxLength: 100 }
+        subject_type: { type: string, maxLength: 40 }
+        subject_id: { type: string, format: uuid }
+        spof: { type: string, maxLength: 300, description: De sleutel van het onderdeel uit de SPOF-lijst }
     AssistantQuestion:
       type: object
       required: [question]

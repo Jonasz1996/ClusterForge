@@ -18,17 +18,30 @@ import (
 // Conversation is een gesprek, met de vragen en antwoorden als het
 // gesprek zelf gevraagd is.
 type Conversation struct {
-	ID          uuid.UUID
-	UserID      uuid.UUID
+	ID uuid.UUID
+	// UserID is nil voor een gesprek van ClusterForge zelf.
+	UserID      *uuid.UUID
 	Username    string
 	Title       string
+	Kind        string
 	SubjectType string
 	SubjectID   *uuid.UUID
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
 	CostUSD     float64
-	Turns       []TurnView
+	// CanAsk is true als wie het gesprek opvraagt er verder in mag vragen:
+	// alleen in zijn eigen gesprekken.
+	CanAsk bool
+	Turns  []TurnView
 }
+
+// De soorten gesprekken: een vraag van een gebruiker, of een vaste opdracht.
+const (
+	KindChat     = "chat"
+	KindAnalysis = "analysis"
+	KindExplain  = "explain"
+	KindSummary  = "summary"
+)
 
 // TurnView is één vraag met wat erop volgde, zoals de webinterface hem
 // toont.
@@ -62,7 +75,7 @@ func (s *Service) Create(ctx context.Context, c Caller, subjectType string, subj
 	if _, _, err := s.access(ctx, c); err != nil {
 		return Conversation{}, err
 	}
-	args := store.CreateConversationParams{UserID: c.userID(), SubjectType: subjectType, SubjectID: subjectID}
+	args := store.CreateConversationParams{UserID: c.user(), SubjectType: subjectType, SubjectID: subjectID, Kind: KindChat}
 	switch subjectType {
 	case "":
 		args.SubjectID = nil
@@ -84,8 +97,8 @@ func (s *Service) Create(ctx context.Context, c Caller, subjectType string, subj
 		return Conversation{}, err
 	}
 	return Conversation{
-		ID: r.ID, UserID: r.UserID, Username: c.Principal.User.Username, Title: r.Title, SubjectType: r.SubjectType,
-		SubjectID: r.SubjectID, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
+		ID: r.ID, UserID: r.UserID, Username: c.Principal.User.Username, Title: r.Title, Kind: r.Kind, SubjectType: r.SubjectType,
+		SubjectID: r.SubjectID, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt, CanAsk: true,
 	}, nil
 }
 
@@ -119,7 +132,7 @@ func (s *Service) subject(ctx context.Context, conv store.GetConversationRow) st
 // iedereen vragen.
 func (s *Service) List(ctx context.Context, c Caller, everyone bool) ([]Conversation, error) {
 	rows, err := s.q.ListConversations(ctx, store.ListConversationsParams{
-		Everyone: everyone && c.admin(), UserID: c.userID(), Lim: 200,
+		Everyone: everyone && c.admin(), UserID: c.user(), Lim: 200,
 	})
 	if err != nil {
 		return nil, err
@@ -127,8 +140,9 @@ func (s *Service) List(ctx context.Context, c Caller, everyone bool) ([]Conversa
 	out := make([]Conversation, len(rows))
 	for i, r := range rows {
 		out[i] = Conversation{
-			ID: r.ID, UserID: r.UserID, Username: r.Username, Title: r.Title, SubjectType: r.SubjectType, SubjectID: r.SubjectID,
-			CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt, CostUSD: USD(r.CostMicrousd),
+			ID: r.ID, UserID: r.UserID, Username: r.Username, Title: r.Title, Kind: r.Kind, SubjectType: r.SubjectType,
+			SubjectID: r.SubjectID, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt, CostUSD: USD(r.CostMicrousd),
+			CanAsk: c.owns(r.UserID),
 		}
 	}
 	return out, nil
@@ -137,7 +151,7 @@ func (s *Service) List(ctx context.Context, c Caller, everyone bool) ([]Conversa
 // own geeft een gesprek dat c mag zien: zijn eigen, of elk voor een admin.
 func (s *Service) own(ctx context.Context, c Caller, id uuid.UUID) (store.GetConversationRow, error) {
 	r, err := s.q.GetConversation(ctx, id)
-	if errors.Is(err, pgx.ErrNoRows) || (err == nil && r.UserID != c.userID() && !c.admin()) {
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !c.owns(r.UserID) && !c.admin()) {
 		return r, ErrNotFound
 	}
 	return r, err
@@ -154,8 +168,8 @@ func (s *Service) Get(ctx context.Context, c Caller, id uuid.UUID) (Conversation
 		return Conversation{}, err
 	}
 	conv := Conversation{
-		ID: r.ID, UserID: r.UserID, Username: r.Username, Title: r.Title, SubjectType: r.SubjectType, SubjectID: r.SubjectID,
-		CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt, Turns: s.turns(rows),
+		ID: r.ID, UserID: r.UserID, Username: r.Username, Title: r.Title, Kind: r.Kind, SubjectType: r.SubjectType,
+		SubjectID: r.SubjectID, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt, CanAsk: c.owns(r.UserID), Turns: s.turns(rows),
 	}
 	for _, t := range conv.Turns {
 		conv.CostUSD += t.CostUSD

@@ -76,6 +76,7 @@ type Service struct {
 
 	mu      sync.Mutex
 	running map[uuid.UUID]bool
+	wg      sync.WaitGroup
 }
 
 func NewService(pool *pgxpool.Pool, ev *events.Writer, log *slog.Logger, box *secrets.Box) *Service {
@@ -87,13 +88,45 @@ func NewService(pool *pgxpool.Pool, ev *events.Writer, log *slog.Logger, box *se
 func (s *Service) Available() bool { return s.box != nil }
 
 // Caller is wie de vraag stelt. Principal gaat mee naar de tools, die met
-// zijn rechten lezen.
+// zijn rechten lezen. System is ClusterForge zelf, zoals bij een
+// automatische analyse: dat leest met de rechten van een beheerder en heeft
+// geen gebruiker.
 type Caller struct {
 	Principal auth.Principal
+	System    bool
+}
+
+// SystemCaller is ClusterForge zelf.
+func SystemCaller() Caller {
+	return Caller{System: true, Principal: auth.Principal{User: store.User{Username: "ClusterForge", Role: store.UserRoleAdmin}}}
 }
 
 func (c Caller) userID() uuid.UUID { return c.Principal.User.ID }
-func (c Caller) admin() bool       { return c.Principal.User.Role == store.UserRoleAdmin }
+func (c Caller) admin() bool       { return c.System || c.Principal.User.Role == store.UserRoleAdmin }
+
+// user is de gebruiker voor de database; nil voor ClusterForge zelf.
+func (c Caller) user() *uuid.UUID {
+	if c.System {
+		return nil
+	}
+	return ptr(c.userID())
+}
+
+// actor is wie in het logboek staat.
+func (c Caller) actor() events.Actor {
+	if c.System {
+		return events.System()
+	}
+	return events.User(c.userID())
+}
+
+// owns zegt of een gesprek van c is.
+func (c Caller) owns(user *uuid.UUID) bool {
+	if c.System {
+		return user == nil
+	}
+	return user != nil && *user == c.userID()
+}
 
 // Settings zijn de instellingen zonder de sleutel.
 type Settings struct {
@@ -102,6 +135,7 @@ type Settings struct {
 	Model            string
 	MonthlyBudgetUSD int
 	ViewerAccess     bool
+	AutoAnalyze      bool
 	UpdatedAt        *time.Time
 	UpdatedBy        *uuid.UUID
 }
@@ -113,6 +147,7 @@ type SettingsInput struct {
 	Model            string
 	MonthlyBudgetUSD int
 	ViewerAccess     bool
+	AutoAnalyze      bool
 }
 
 func (s *Service) current(ctx context.Context) (*store.AssistantSetting, error) {
@@ -137,7 +172,7 @@ func (s *Service) Settings(ctx context.Context) (Settings, error) {
 	}
 	return Settings{
 		Enabled: cur.Enabled, HasKey: len(cur.ApiKeyEnc) > 0, Model: cur.Model, MonthlyBudgetUSD: int(cur.MonthlyBudgetUsd),
-		ViewerAccess: cur.ViewerAccess, UpdatedAt: &cur.UpdatedAt, UpdatedBy: cur.UpdatedBy,
+		ViewerAccess: cur.ViewerAccess, AutoAnalyze: cur.AutoAnalyze, UpdatedAt: &cur.UpdatedAt, UpdatedBy: cur.UpdatedBy,
 	}, nil
 }
 
@@ -223,18 +258,19 @@ func (s *Service) Save(ctx context.Context, actor events.Actor, by uuid.UUID, in
 		change("model", cur.Model, in.Model)
 		change("monthly_budget_usd", int(cur.MonthlyBudgetUsd), in.MonthlyBudgetUSD)
 		change("viewer_access", cur.ViewerAccess, in.ViewerAccess)
+		change("auto_analyze", cur.AutoAnalyze, in.AutoAnalyze)
 		if in.APIKey != "" {
 			diff["key_changed"] = true
 		}
 		if isNew {
 			_, err = q.CreateAssistantSettings(ctx, store.CreateAssistantSettingsParams{
 				ID: cur.ID, Enabled: in.Enabled, ApiKeyEnc: enc, KeyID: keyID, Model: in.Model,
-				MonthlyBudgetUsd: int32(in.MonthlyBudgetUSD), ViewerAccess: in.ViewerAccess, UpdatedBy: &by,
+				MonthlyBudgetUsd: int32(in.MonthlyBudgetUSD), ViewerAccess: in.ViewerAccess, AutoAnalyze: in.AutoAnalyze, UpdatedBy: &by,
 			})
 		} else {
 			_, err = q.UpdateAssistantSettings(ctx, store.UpdateAssistantSettingsParams{
 				ID: cur.ID, Enabled: in.Enabled, ApiKeyEnc: enc, KeyID: keyID, Model: in.Model,
-				MonthlyBudgetUsd: int32(in.MonthlyBudgetUSD), ViewerAccess: in.ViewerAccess, UpdatedBy: &by,
+				MonthlyBudgetUsd: int32(in.MonthlyBudgetUSD), ViewerAccess: in.ViewerAccess, AutoAnalyze: in.AutoAnalyze, UpdatedBy: &by,
 			})
 		}
 		if err != nil || len(diff) == 0 {
@@ -350,12 +386,14 @@ func (s *Service) MonthUsage(ctx context.Context, c Caller) (Usage, error) {
 // logboek.
 func (s *Service) checkLimits(ctx context.Context, c Caller, cur *store.AssistantSetting) error {
 	now := s.Now()
-	n, err := s.q.CountQuestionsSince(ctx, store.CountQuestionsSinceParams{UserID: ptr(c.userID()), Since: now.Add(-time.Hour)})
-	if err != nil {
-		return err
-	}
-	if n >= MaxQuestionsPerHour {
-		return LimitError{fmt.Sprintf("Je stelde het afgelopen uur al %d vragen; dat is het maximum. Probeer het straks opnieuw.", MaxQuestionsPerHour)}
+	if !c.System {
+		n, err := s.q.CountQuestionsSince(ctx, store.CountQuestionsSinceParams{UserID: c.user(), Since: now.Add(-time.Hour)})
+		if err != nil {
+			return err
+		}
+		if n >= MaxQuestionsPerHour {
+			return LimitError{fmt.Sprintf("Je stelde het afgelopen uur al %d vragen; dat is het maximum. Probeer het straks opnieuw.", MaxQuestionsPerHour)}
+		}
 	}
 	since := monthStart(now)
 	spent, err := s.q.AssistantCostSince(ctx, since)

@@ -1949,6 +1949,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/incidents/{incidentId}/analyze": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                incidentId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Het incident laten analyseren door de assistent; het resultaat stroomt als server-sent events
+         * @description Voor wie de assistent mag gebruiken. Het model krijgt het incident,
+         *     de analyse van What Broke, de tijdlijn en de geschiedenis, en kijkt
+         *     met de tools verder. Het resultaat heeft vier kopjes (In het kort,
+         *     Waarschijnlijke oorzaak, Nog te controleren, Wat je kunt doen) en
+         *     komt bij het incident, met model en datum. Het telt mee voor het
+         *     budget. Het laatste event, done, noemt het gesprek
+         *     (conversation_id) waarin je verder kunt vragen.
+         */
+        post: operations["analyzeIncident"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/incidents/{incidentId}/note": {
         parameters: {
             query?: never;
@@ -2086,6 +2114,29 @@ export interface paths {
          *     gewone JSON-fout.
          */
         post: operations["askAssistant"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/assistant/explain": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Een bevinding van de health score of een SPOF laten uitleggen; het antwoord stroomt als server-sent events
+         * @description Voor wie de assistent mag gebruiken. De uitleg komt in een nieuw
+         *     gesprek, zodat je erop kunt doorvragen; het laatste event, done,
+         *     noemt het (conversation_id). Een bevinding of SPOF die er niet
+         *     (meer) is, geeft 404.
+         */
+        post: operations["explainRisk"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2491,6 +2542,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/docs/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * De samenvatting 'In het kort' van een cluster laten schrijven (admin); het antwoord stroomt als server-sent events
+         * @description De assistent leest de hoofdstukken van het cluster en schrijft een
+         *     korte samenvatting. Die komt bovenaan het hoofdstuk Architectuur,
+         *     met model en datum, en de documentatie wordt meteen opnieuw
+         *     geschreven. Links, afbeeldingen en HTML gaan eruit, omdat de
+         *     documentatie ook naar GitHub kan gaan.
+         */
+        post: operations["summarizeDocs"];
+        /** De samenvatting 'In het kort' van een cluster weghalen (admin) */
+        delete: operations["deleteDocSummary"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/docs/{scope}/{kind}": {
         parameters: {
             query?: never;
@@ -2624,6 +2700,15 @@ export interface components {
              * @description Wanneer een wijziging in de documentatie komt
              */
             queued_until?: string;
+            /** @description De samenvatting 'In het kort' van de assistent; null zonder */
+            summary: components["schemas"]["DocSummaryMeta"] | null;
+        };
+        DocSummaryMeta: {
+            /** Format: date-time */
+            at: string;
+            model: string;
+            /** @description Wie haar vroeg; leeg als die gebruiker weg is */
+            by: string;
         };
         DocIndex: {
             overview: components["schemas"]["DocMeta"];
@@ -4236,6 +4321,27 @@ export interface components {
             history: components["schemas"]["AuditEntry"][];
             /** @description Er waren meer regels dan getoond */
             history_more: boolean;
+            /** @description De analyse van de assistent; null zolang er geen is */
+            ai: components["schemas"]["IncidentAI"] | null;
+        };
+        IncidentAI: {
+            /** @description Markdown met vier kopjes; null als hidden */
+            text: string | null;
+            /** @description De analyse las met de rechten van een beheerder; een viewer ziet de tekst niet */
+            hidden: boolean;
+            /** @description Het model dat antwoordde; met een fallback meer, gescheiden door een komma */
+            model: string;
+            /** Format: date-time */
+            at: string;
+            /** @description Wie haar vroeg; null als ze automatisch was */
+            by: string | null;
+            automatic: boolean;
+            cost_usd: number;
+            /**
+             * Format: uuid
+             * @description Het gesprek met de tools; alleen voor wie het mag openen
+             */
+            conversation_id: string | null;
         };
         TimelineEntry: {
             /** @description e en een event-id, c en een journaal-id, of m voor een afwijking in de metrics */
@@ -4367,6 +4473,8 @@ export interface components {
             models: components["schemas"]["AssistantModel"][];
             monthly_budget_usd: number;
             viewer_access: boolean;
+            /** @description Nieuwe prod-incidenten met ernst hoog of kritiek automatisch analyseren, hoogstens tien per dag */
+            auto_analyze: boolean;
             /** Format: date-time */
             updated_at: string | null;
             /** @description Gebruikersnaam */
@@ -4379,6 +4487,8 @@ export interface components {
             model: string;
             monthly_budget_usd: number;
             viewer_access: boolean;
+            /** @default false */
+            auto_analyze: boolean;
             /** @description Je wachtwoord */
             password?: string;
             /** @description Je code */
@@ -4417,9 +4527,17 @@ export interface components {
         AssistantConversation: {
             /** Format: uuid */
             id: string;
+            /** @description Leeg voor een gesprek van ClusterForge zelf */
             username: string;
             /** @description Het begin van de eerste vraag; leeg zolang er geen is */
             title: string;
+            /**
+             * @description Een gewone vraag, of een analyse, uitleg of samenvatting
+             * @enum {string}
+             */
+            kind: "chat" | "analysis" | "explain" | "summary";
+            /** @description Of jij in dit gesprek verder kunt vragen; alleen in je eigen gesprekken */
+            can_ask: boolean;
             /** @description cluster */
             subject_type: string;
             /** Format: uuid */
@@ -4456,6 +4574,15 @@ export interface components {
             cost_usd: number;
             /** @description Waarom het antwoord onvolledig is; meestal leeg */
             note: string;
+        };
+        /** @description Een bevinding (check, subject_type en subject_id, zoals in de health score) of een SPOF (de sleutel van het onderdeel) */
+        AssistantExplainInput: {
+            check?: string;
+            subject_type?: string;
+            /** Format: uuid */
+            subject_id?: string;
+            /** @description De sleutel van het onderdeel uit de SPOF-lijst */
+            spof?: string;
         };
         AssistantQuestion: {
             question: string;
@@ -9373,6 +9500,34 @@ export interface operations {
             404: components["responses"]["Error"];
         };
     };
+    analyzeIncident: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                incidentId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description De stroom van het antwoord, met dezelfde events als askAssistant */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string;
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            429: components["responses"]["Error"];
+        };
+    };
     setIncidentNote: {
         parameters: {
             query?: never;
@@ -9615,6 +9770,36 @@ export interface operations {
         };
         responses: {
             /** @description De stroom van het antwoord */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string;
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            429: components["responses"]["Error"];
+        };
+    };
+    explainRisk: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AssistantExplainInput"];
+            };
+        };
+        responses: {
+            /** @description De stroom van het antwoord, met dezelfde events als askAssistant */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -10164,6 +10349,57 @@ export interface operations {
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];
+        };
+    };
+    summarizeDocs: {
+        parameters: {
+            query: {
+                cluster: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description De stroom van het antwoord, met dezelfde events als askAssistant */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string;
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            429: components["responses"]["Error"];
+        };
+    };
+    deleteDocSummary: {
+        parameters: {
+            query: {
+                cluster: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Weggehaald */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
         };
     };
     getDoc: {

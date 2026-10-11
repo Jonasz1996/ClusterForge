@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useMemo, useState } from "react";
 import { EnvBadge, QueryState } from "@/components/inventory/bits";
+import { DocSummaryButtons } from "@/components/docs/DocSummary";
 import { Diff } from "@/components/gitops/bits";
 import { Markdown, parse, slug } from "@/components/Markdown";
 import { Alert, Badge, Button, cx, PageHeader, Select } from "@/components/ui";
@@ -22,6 +23,7 @@ import {
   useGenerateDocs,
   type DocIndex,
   type DocRef,
+  type DocSummaryMeta,
 } from "@/lib/docs";
 import { useIsAdmin } from "@/lib/inventory";
 
@@ -114,6 +116,7 @@ function DocsInner() {
               env={cluster?.environment}
               version={versionParam}
               queuedUntil={cluster ? cluster.queued_until : index.data.queued_until}
+              summary={isAdmin ? (cluster?.summary ?? null) : undefined}
               onOpen={open}
             />
           </div>
@@ -258,6 +261,7 @@ function DocView({
   env,
   version,
   queuedUntil,
+  summary,
   onOpen,
 }: {
   docRef: DocRef;
@@ -266,6 +270,9 @@ function DocView({
   env?: string;
   version?: number;
   queuedUntil?: string;
+  // De samenvatting 'In het kort', of null als er geen is; undefined voor
+  // wie ze niet mag laten schrijven.
+  summary?: DocSummaryMeta | null;
   onOpen: (slug: string | null, kind: string, version?: number) => void;
 }) {
   const doc = useDoc(docRef, version);
@@ -333,7 +340,10 @@ function DocView({
               )}
             </p>
           </div>
-          <div className="flex gap-2 print:hidden">
+          <div className="flex flex-wrap gap-2 print:hidden">
+            {summary !== undefined && docRef.scope === "cluster" && docRef.kind === "architectuur" && !old && docRef.cluster && (
+              <DocSummaryButtons cluster={docRef.cluster} name={clusterName ?? ""} summary={summary} />
+            )}
             {old && (
               <Button variant="secondary" onClick={() => onOpen(clusterSlug, docRef.kind)}>
                 Nieuwste versie

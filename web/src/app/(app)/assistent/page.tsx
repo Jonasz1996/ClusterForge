@@ -5,14 +5,13 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 import { Markdown } from "@/components/Markdown";
+import { Answer, LiveAnswer, Meta, ToolList, useStream } from "@/components/assistant/parts";
 import { ago, QueryState } from "@/components/inventory/bits";
 import { Alert, Badge, Button, cx, PageHeader, Textarea } from "@/components/ui";
-import { ApiError } from "@/lib/api/client";
 import {
   ask,
   dollars,
-  modelLabel,
-  tokens,
+  kindLabels,
   useAssistantSettings,
   useAssistantUsage,
   useConversation,
@@ -21,7 +20,6 @@ import {
   useDeleteConversation,
   type AssistantSettings,
   type Conversation,
-  type StreamEvent,
   type Subject,
   type Turn,
 } from "@/lib/assistant";
@@ -174,7 +172,7 @@ function ConversationList({ items, selected, showUser }: { items: Conversation[]
           >
             <span className="line-clamp-2 font-medium">{c.title || "Nieuw gesprek"}</span>
             <span className="mt-0.5 block text-xs text-slate-500">
-              {showUser && `${c.username} · `}
+              {showUser && `${c.username || "automatisch"} · `}
               {ago(c.updated_at)}
               {c.cost_usd > 0 && ` · ${dollars(c.cost_usd)}`}
             </span>
@@ -207,28 +205,17 @@ function Welcome({ canUse, onAsk }: { canUse: boolean; onAsk: () => void }) {
   );
 }
 
-// Live is het antwoord dat nu binnenkomt.
-type Live = {
-  question: string;
-  text: string;
-  tools: { name: string; label: string }[];
-  error: string;
-  done?: Extract<StreamEvent, { type: "done" }>;
-};
-
 function Chat({ id, settings }: { id: string; settings: AssistantSettings }) {
   const q = useConversation(id);
   const qc = useQueryClient();
   const del = useDeleteConversation();
   const router = useRouter();
   const [question, setQuestion] = useState("");
-  const [live, setLive] = useState<Live | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const busy = live !== null && !live.done && !live.error;
+  const [asked, setAsked] = useState("");
+  const stream = useStream();
+  const { live, busy } = stream;
   const bottom = useRef<HTMLDivElement>(null);
-  const abort = useRef<AbortController | null>(null);
 
-  useEffect(() => () => abort.current?.abort(), []);
   useEffect(() => {
     bottom.current?.scrollIntoView({ block: "end", behavior: "smooth" });
   }, [live?.text, live?.tools.length, q.data?.turns.length]);
@@ -237,32 +224,15 @@ function Chat({ id, settings }: { id: string; settings: AssistantSettings }) {
     e?.preventDefault();
     const text = question.trim();
     if (!text || busy) return;
-    setError(null);
     setQuestion("");
-    const state: Live = { question: text, text: "", tools: [], error: "" };
-    setLive(state);
-    abort.current = new AbortController();
-    try {
-      await ask(
-        id,
-        text,
-        (ev) => {
-          if (ev.type === "text") state.text += ev.text;
-          else if (ev.type === "tool") state.tools = [...state.tools, { name: ev.name, label: ev.label }];
-          else if (ev.type === "error") state.error = ev.message;
-          else if (ev.type === "done") state.done = ev;
-          setLive({ ...state });
-        },
-        abort.current.signal,
-      );
-      await qc.invalidateQueries({ queryKey: ["assistant"] });
-      setLive(null);
-    } catch (err) {
-      if (err instanceof DOMException && err.name === "AbortError") return;
-      setLive(null);
+    setAsked(text);
+    const res = await stream.run((onEvent, signal) => ask(id, text, onEvent, signal));
+    if (!res) {
       setQuestion(text);
-      setError(err instanceof ApiError ? err.message : "De vraag kon niet verstuurd worden.");
+      return;
     }
+    await qc.invalidateQueries({ queryKey: ["assistant"] });
+    stream.reset();
   };
 
   const onKey = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -279,9 +249,12 @@ function Chat({ id, settings }: { id: string; settings: AssistantSettings }) {
         <div className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="min-w-0">
-              <h2 className="truncate text-base font-semibold">{conv.title || "Nieuw gesprek"}</h2>
+              <h2 className="flex items-center gap-2 text-base font-semibold">
+                {kindLabels[conv.kind] && <Badge tone="blue">{kindLabels[conv.kind]}</Badge>}
+                <span className="truncate">{conv.title || "Nieuw gesprek"}</span>
+              </h2>
               <p className="text-xs text-slate-500">
-                {conv.username} · begonnen {auditTimeFmt.format(new Date(conv.created_at))}
+                {conv.username || "automatisch"} · begonnen {auditTimeFmt.format(new Date(conv.created_at))}
                 {conv.cost_usd > 0 && ` · ${dollars(conv.cost_usd)}`}
               </p>
             </div>
@@ -299,9 +272,22 @@ function Chat({ id, settings }: { id: string; settings: AssistantSettings }) {
           {q.data.turns.map((t, i) => (
             <TurnView key={i} turn={t} settings={settings} />
           ))}
-          {live && <LiveView live={live} settings={settings} />}
-          {error && <Alert>{error}</Alert>}
-          {settings.can_use ? (
+          {live && (
+            <div className="space-y-2">
+              <Question text={asked} />
+              <Answer>
+                <LiveAnswer live={live} catalog={settings.models} />
+              </Answer>
+            </div>
+          )}
+          {stream.error && <Alert>{stream.error}</Alert>}
+          {!conv.can_ask ? (
+            <p className="text-sm text-slate-500">
+              {conv.username
+                ? `Dit gesprek is van ${conv.username}; alleen die kan er verder in vragen.`
+                : "Dit gesprek begon ClusterForge zelf; je kunt er niet verder in vragen."}
+            </p>
+          ) : settings.can_use ? (
             <form onSubmit={send} className="space-y-2">
               <Textarea
                 rows={3}
@@ -337,61 +323,6 @@ function Question({ text }: { text: string }) {
   );
 }
 
-function ToolList({ tools, running }: { tools: { label: string; error?: boolean }[]; running?: boolean }) {
-  if (tools.length === 0) return null;
-  return (
-    <ul className="space-y-0.5 text-xs text-slate-500">
-      {tools.map((t, i) => (
-        <li key={i} className="flex items-center gap-1.5">
-          <span
-            className={cx(
-              "inline-block h-1.5 w-1.5 shrink-0 rounded-full",
-              t.error ? "bg-red-500" : running && i === tools.length - 1 ? "animate-pulse bg-brand-500" : "bg-slate-400",
-            )}
-          />
-          {t.label}
-          {running && i === tools.length - 1 && "…"}
-          {t.error && <Badge tone="red">mislukt</Badge>}
-        </li>
-      ))}
-    </ul>
-  );
-}
-
-function Meta({
-  models,
-  input,
-  output,
-  cacheRead,
-  cost,
-  settings,
-}: {
-  models: string[];
-  input: number;
-  output: number;
-  cacheRead: number;
-  cost: number;
-  settings: AssistantSettings;
-}) {
-  if (models.length === 0 && cost === 0) return null;
-  return (
-    <p className="text-xs text-slate-500">
-      {models.map((m) => modelLabel(m, settings.models)).join(", ")}
-      {" · "}
-      {tokens(input + cacheRead)} tokens in{cacheRead > 0 && ` (${tokens(cacheRead)} uit de cache)`}, {tokens(output)} uit ·{" "}
-      {dollars(cost)}
-    </p>
-  );
-}
-
-function Answer({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="space-y-2 rounded-lg border border-slate-200 bg-white px-4 py-3 dark:border-slate-800 dark:bg-slate-900">
-      {children}
-    </div>
-  );
-}
-
 function TurnView({ turn, settings }: { turn: Turn; settings: AssistantSettings }) {
   return (
     <div className="space-y-2">
@@ -406,37 +337,8 @@ function TurnView({ turn, settings }: { turn: Turn; settings: AssistantSettings 
           output={turn.output_tokens}
           cacheRead={turn.cache_read_tokens}
           cost={turn.cost_usd}
-          settings={settings}
+          catalog={settings.models}
         />
-      </Answer>
-    </div>
-  );
-}
-
-function LiveView({ live, settings }: { live: Live; settings: AssistantSettings }) {
-  const running = !live.done && !live.error;
-  return (
-    <div className="space-y-2">
-      <Question text={live.question} />
-      <Answer>
-        <ToolList tools={live.tools} running={running && live.text === ""} />
-        {live.text ? (
-          <Markdown text={live.text} />
-        ) : (
-          running && <p className="animate-pulse text-sm text-slate-500">{live.tools.length === 0 ? "Denkt na…" : "Leest…"}</p>
-        )}
-        {live.error && <Alert>{live.error}</Alert>}
-        {live.done?.note && <Alert kind="info">{live.done.note}</Alert>}
-        {live.done && (
-          <Meta
-            models={live.done.models}
-            input={live.done.input_tokens}
-            output={live.done.output_tokens}
-            cacheRead={live.done.cache_read_tokens}
-            cost={live.done.cost_usd}
-            settings={settings}
-          />
-        )}
       </Answer>
     </div>
   );

@@ -83,10 +83,27 @@ func (q *Queries) CountQuestionsSince(ctx context.Context, arg CountQuestionsSin
 	return count, err
 }
 
+const countSystemConversationsSince = `-- name: CountSystemConversationsSince :one
+SELECT count(*) FROM assistant_conversations WHERE user_id IS NULL AND kind = $1 AND created_at >= $2
+`
+
+type CountSystemConversationsSinceParams struct {
+	Kind  string
+	Since time.Time
+}
+
+// Hoeveel opdrachten ClusterForge zelf gaf, zoals automatische analyses.
+func (q *Queries) CountSystemConversationsSince(ctx context.Context, arg CountSystemConversationsSinceParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countSystemConversationsSince, arg.Kind, arg.Since)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createAssistantSettings = `-- name: CreateAssistantSettings :one
-INSERT INTO assistant_settings (id, enabled, api_key_enc, key_id, model, monthly_budget_usd, viewer_access, updated_by)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-RETURNING id, enabled, api_key_enc, key_id, model, monthly_budget_usd, viewer_access, updated_by, updated_at
+INSERT INTO assistant_settings (id, enabled, api_key_enc, key_id, model, monthly_budget_usd, viewer_access, auto_analyze, updated_by)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+RETURNING id, enabled, api_key_enc, key_id, model, monthly_budget_usd, viewer_access, updated_by, updated_at, auto_analyze
 `
 
 type CreateAssistantSettingsParams struct {
@@ -97,6 +114,7 @@ type CreateAssistantSettingsParams struct {
 	Model            string
 	MonthlyBudgetUsd int32
 	ViewerAccess     bool
+	AutoAnalyze      bool
 	UpdatedBy        *uuid.UUID
 }
 
@@ -109,6 +127,7 @@ func (q *Queries) CreateAssistantSettings(ctx context.Context, arg CreateAssista
 		arg.Model,
 		arg.MonthlyBudgetUsd,
 		arg.ViewerAccess,
+		arg.AutoAnalyze,
 		arg.UpdatedBy,
 	)
 	var i AssistantSetting
@@ -122,22 +141,24 @@ func (q *Queries) CreateAssistantSettings(ctx context.Context, arg CreateAssista
 		&i.ViewerAccess,
 		&i.UpdatedBy,
 		&i.UpdatedAt,
+		&i.AutoAnalyze,
 	)
 	return i, err
 }
 
 const createConversation = `-- name: CreateConversation :one
-INSERT INTO assistant_conversations (user_id, title, subject_type, subject_id, incident_id)
-VALUES ($1, $2, $3, $4, $5)
-RETURNING id, user_id, title, subject_type, subject_id, incident_id, created_at, updated_at
+INSERT INTO assistant_conversations (user_id, title, subject_type, subject_id, incident_id, kind)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING id, user_id, title, subject_type, subject_id, incident_id, created_at, updated_at, kind
 `
 
 type CreateConversationParams struct {
-	UserID      uuid.UUID
+	UserID      *uuid.UUID
 	Title       string
 	SubjectType string
 	SubjectID   *uuid.UUID
 	IncidentID  *uuid.UUID
+	Kind        string
 }
 
 func (q *Queries) CreateConversation(ctx context.Context, arg CreateConversationParams) (AssistantConversation, error) {
@@ -147,6 +168,7 @@ func (q *Queries) CreateConversation(ctx context.Context, arg CreateConversation
 		arg.SubjectType,
 		arg.SubjectID,
 		arg.IncidentID,
+		arg.Kind,
 	)
 	var i AssistantConversation
 	err := row.Scan(
@@ -158,6 +180,7 @@ func (q *Queries) CreateConversation(ctx context.Context, arg CreateConversation
 		&i.IncidentID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Kind,
 	)
 	return i, err
 }
@@ -191,7 +214,7 @@ func (q *Queries) EventSince(ctx context.Context, arg EventSinceParams) (bool, e
 }
 
 const getAssistantSettings = `-- name: GetAssistantSettings :one
-SELECT id, enabled, api_key_enc, key_id, model, monthly_budget_usd, viewer_access, updated_by, updated_at FROM assistant_settings LIMIT 1
+SELECT id, enabled, api_key_enc, key_id, model, monthly_budget_usd, viewer_access, updated_by, updated_at, auto_analyze FROM assistant_settings LIMIT 1
 `
 
 func (q *Queries) GetAssistantSettings(ctx context.Context) (AssistantSetting, error) {
@@ -207,29 +230,32 @@ func (q *Queries) GetAssistantSettings(ctx context.Context) (AssistantSetting, e
 		&i.ViewerAccess,
 		&i.UpdatedBy,
 		&i.UpdatedAt,
+		&i.AutoAnalyze,
 	)
 	return i, err
 }
 
 const getConversation = `-- name: GetConversation :one
-SELECT c.id, c.user_id, c.title, c.subject_type, c.subject_id, c.incident_id, c.created_at, c.updated_at, u.username
+SELECT c.id, c.user_id, c.title, c.subject_type, c.subject_id, c.incident_id, c.created_at, c.updated_at, c.kind, coalesce(u.username, '')::text AS username
 FROM assistant_conversations c
-JOIN users u ON u.id = c.user_id
+LEFT JOIN users u ON u.id = c.user_id
 WHERE c.id = $1
 `
 
 type GetConversationRow struct {
 	ID          uuid.UUID
-	UserID      uuid.UUID
+	UserID      *uuid.UUID
 	Title       string
 	SubjectType string
 	SubjectID   *uuid.UUID
 	IncidentID  *uuid.UUID
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
+	Kind        string
 	Username    string
 }
 
+// Een gesprek zonder gebruiker is van ClusterForge zelf; de naam is dan leeg.
 func (q *Queries) GetConversation(ctx context.Context, id uuid.UUID) (GetConversationRow, error) {
 	row := q.db.QueryRow(ctx, getConversation, id)
 	var i GetConversationRow
@@ -242,6 +268,7 @@ func (q *Queries) GetConversation(ctx context.Context, id uuid.UUID) (GetConvers
 		&i.IncidentID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Kind,
 		&i.Username,
 	)
 	return i, err
@@ -319,6 +346,50 @@ func (q *Queries) InsertAssistantMessage(ctx context.Context, arg InsertAssistan
 	return i, err
 }
 
+const listAutoAnalyzeCandidates = `-- name: ListAutoAnalyzeCandidates :many
+SELECT i.id, i.number FROM incidents i
+WHERE i.severity IN ('high', 'critical') AND NOT i.caused_by_test
+  AND i.detected_at >= $1 AND i.detected_at <= $2
+  AND i.ai_at IS NULL AND i.analysis IS NOT NULL
+  AND EXISTS (SELECT 1 FROM incident_subjects s JOIN clusters c ON c.id = s.cluster_id
+              WHERE s.incident_id = i.id AND c.environment = 'prod')
+  AND NOT EXISTS (SELECT 1 FROM assistant_conversations a WHERE a.incident_id = i.id AND a.user_id IS NULL)
+ORDER BY i.detected_at
+`
+
+type ListAutoAnalyzeCandidatesParams struct {
+	Since time.Time
+	Until time.Time
+}
+
+type ListAutoAnalyzeCandidatesRow struct {
+	ID     uuid.UUID
+	Number int32
+}
+
+// Nieuwe incidenten die de assistent automatisch analyseert: ernst hoog of
+// kritiek, niet door een test, met een prod-cluster erin, de analyse van
+// What Broke al klaar, en nog nooit automatisch geprobeerd.
+func (q *Queries) ListAutoAnalyzeCandidates(ctx context.Context, arg ListAutoAnalyzeCandidatesParams) ([]ListAutoAnalyzeCandidatesRow, error) {
+	rows, err := q.db.Query(ctx, listAutoAnalyzeCandidates, arg.Since, arg.Until)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAutoAnalyzeCandidatesRow{}
+	for rows.Next() {
+		var i ListAutoAnalyzeCandidatesRow
+		if err := rows.Scan(&i.ID, &i.Number); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listConversationMessages = `-- name: ListConversationMessages :many
 SELECT id, conversation_id, seq, role, content, text, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_microusd, stop_reason, user_id, created_at FROM assistant_messages WHERE conversation_id = $1 ORDER BY seq
 `
@@ -360,10 +431,10 @@ func (q *Queries) ListConversationMessages(ctx context.Context, conversationID u
 }
 
 const listConversations = `-- name: ListConversations :many
-SELECT c.id, c.user_id, c.title, c.subject_type, c.subject_id, c.incident_id, c.created_at, c.updated_at, u.username,
+SELECT c.id, c.user_id, c.title, c.subject_type, c.subject_id, c.incident_id, c.created_at, c.updated_at, c.kind, coalesce(u.username, '')::text AS username,
        coalesce((SELECT sum(m.cost_microusd) FROM assistant_messages m WHERE m.conversation_id = c.id), 0)::bigint AS cost_microusd
 FROM assistant_conversations c
-JOIN users u ON u.id = c.user_id
+LEFT JOIN users u ON u.id = c.user_id
 WHERE $1::boolean OR c.user_id = $2
 ORDER BY c.updated_at DESC
 LIMIT $3
@@ -371,19 +442,20 @@ LIMIT $3
 
 type ListConversationsParams struct {
 	Everyone bool
-	UserID   uuid.UUID
+	UserID   *uuid.UUID
 	Lim      int32
 }
 
 type ListConversationsRow struct {
 	ID           uuid.UUID
-	UserID       uuid.UUID
+	UserID       *uuid.UUID
 	Title        string
 	SubjectType  string
 	SubjectID    *uuid.UUID
 	IncidentID   *uuid.UUID
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
+	Kind         string
 	Username     string
 	CostMicrousd int64
 }
@@ -408,6 +480,7 @@ func (q *Queries) ListConversations(ctx context.Context, arg ListConversationsPa
 			&i.IncidentID,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Kind,
 			&i.Username,
 			&i.CostMicrousd,
 		); err != nil {
@@ -433,6 +506,40 @@ func (q *Queries) PruneConversations(ctx context.Context, before time.Time) (int
 	return result.RowsAffected(), nil
 }
 
+const setIncidentAI = `-- name: SetIncidentAI :exec
+UPDATE incidents
+SET ai_analysis = $1, ai_model = $2, ai_at = $3, ai_by = $4, ai_automatic = $5, ai_scope = $6,
+    ai_conversation_id = $7, ai_cost_microusd = $8
+WHERE id = $9
+`
+
+type SetIncidentAIParams struct {
+	AiAnalysis       *string
+	AiModel          string
+	AiAt             *time.Time
+	AiBy             *uuid.UUID
+	AiAutomatic      bool
+	AiScope          string
+	AiConversationID *uuid.UUID
+	AiCostMicrousd   int64
+	ID               uuid.UUID
+}
+
+func (q *Queries) SetIncidentAI(ctx context.Context, arg SetIncidentAIParams) error {
+	_, err := q.db.Exec(ctx, setIncidentAI,
+		arg.AiAnalysis,
+		arg.AiModel,
+		arg.AiAt,
+		arg.AiBy,
+		arg.AiAutomatic,
+		arg.AiScope,
+		arg.AiConversationID,
+		arg.AiCostMicrousd,
+		arg.ID,
+	)
+	return err
+}
+
 const touchConversation = `-- name: TouchConversation :exec
 UPDATE assistant_conversations
 SET updated_at = now(), title = CASE WHEN title = '' THEN $1 ELSE title END
@@ -452,10 +559,10 @@ func (q *Queries) TouchConversation(ctx context.Context, arg TouchConversationPa
 const updateAssistantSettings = `-- name: UpdateAssistantSettings :one
 UPDATE assistant_settings
 SET enabled = $1, api_key_enc = $2, key_id = $3, model = $4,
-    monthly_budget_usd = $5, viewer_access = $6, updated_by = $7,
+    monthly_budget_usd = $5, viewer_access = $6, auto_analyze = $7, updated_by = $8,
     updated_at = now()
-WHERE id = $8
-RETURNING id, enabled, api_key_enc, key_id, model, monthly_budget_usd, viewer_access, updated_by, updated_at
+WHERE id = $9
+RETURNING id, enabled, api_key_enc, key_id, model, monthly_budget_usd, viewer_access, updated_by, updated_at, auto_analyze
 `
 
 type UpdateAssistantSettingsParams struct {
@@ -465,6 +572,7 @@ type UpdateAssistantSettingsParams struct {
 	Model            string
 	MonthlyBudgetUsd int32
 	ViewerAccess     bool
+	AutoAnalyze      bool
 	UpdatedBy        *uuid.UUID
 	ID               uuid.UUID
 }
@@ -477,6 +585,7 @@ func (q *Queries) UpdateAssistantSettings(ctx context.Context, arg UpdateAssista
 		arg.Model,
 		arg.MonthlyBudgetUsd,
 		arg.ViewerAccess,
+		arg.AutoAnalyze,
 		arg.UpdatedBy,
 		arg.ID,
 	)
@@ -491,6 +600,7 @@ func (q *Queries) UpdateAssistantSettings(ctx context.Context, arg UpdateAssista
 		&i.ViewerAccess,
 		&i.UpdatedBy,
 		&i.UpdatedAt,
+		&i.AutoAnalyze,
 	)
 	return i, err
 }

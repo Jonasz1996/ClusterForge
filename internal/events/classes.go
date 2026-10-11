@@ -74,12 +74,13 @@ var classes = map[string]Class{
 	"node.status_changed": ClassSymptom, "cluster.status_changed": ClassSymptom, "vip.owner_changed": ClassSymptom,
 
 	"incident.opened": ClassInfo, "incident.escalated": ClassInfo, "incident.resolved": ClassInfo,
-	"incident.reopened": ClassInfo, "incident.note_updated": ClassInfo,
+	"incident.reopened": ClassInfo, "incident.note_updated": ClassInfo, "incident.analyzed": ClassInfo,
 
 	"assistant.settings_updated": ClassInfo, "assistant.asked": ClassInfo, "assistant.budget_reached": ClassInfo,
 	"risk.grade_changed": ClassInfo, "risk.accepted": ClassInfo, "risk.acceptance_removed": ClassInfo,
 	"docs.target_connected": ClassInfo, "docs.target_updated": ClassInfo, "docs.target_disconnected": ClassInfo,
 	"docs.published": ClassInfo, "docs.publish_failed": ClassInfo, "docs.publish_recovered": ClassInfo,
+	"docs.summary_updated": ClassInfo, "docs.summary_removed": ClassInfo,
 }
 
 // HasClass is true als de action een klasse heeft.

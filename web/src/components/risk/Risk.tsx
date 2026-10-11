@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useState, type FormEvent } from "react";
+import { ExplainButton } from "@/components/assistant/ExplainButton";
 import { Modal } from "@/components/Modal";
 import { Alert, Badge, Button, Card, Field, Input, Textarea, cx } from "@/components/ui";
 import { ApiError } from "@/lib/api/client";
@@ -154,6 +155,7 @@ export function FindingItem({
             Oplossen
           </Link>
         )}
+        <ExplainButton input={{ check: f.check, subject_type: f.subject.type, subject_id: f.subject.id }} title={f.text} />
         {isAdmin && !a && (
           <button type="button" className="text-xs text-slate-500 hover:underline" onClick={() => onAccept(f)}>
             Accepteren

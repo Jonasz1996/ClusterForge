@@ -128,3 +128,23 @@ func TestTurns(t *testing.T) {
 		t.Fatalf("opmerkingen = %q, %q, %q", got[1].Note, got[2].Note, got[3].Note)
 	}
 }
+
+func TestAnalysisText(t *testing.T) {
+	full := "## In het kort\nWeb was 4 minuten verminderd.\n\n## Waarschijnlijke oorzaak\nDe upgrade.\n\n" +
+		"## Nog te controleren\n- de logs\n\n## Wat je kunt doen\n- [terugdraaien](/nodes/detail?id=1)"
+	if got := AnalysisText("Ik kijk eerst naar de metrics.\n\n" + full); got != full {
+		t.Fatalf("zonder inleiding: %q", got)
+	}
+	if got := AnalysisText("  " + full + "\n"); got != full {
+		t.Fatalf("getrimd: %q", got)
+	}
+	if got := AnalysisText("Geen kopjes."); got != "Geen kopjes." {
+		t.Fatal(got)
+	}
+	if m := MissingHeadings(full); len(m) != 0 {
+		t.Fatal(m)
+	}
+	if m := MissingHeadings("## In het kort\nx\n## Wat je kunt doen\ny"); strings.Join(m, ",") != "Waarschijnlijke oorzaak,Nog te controleren" {
+		t.Fatal(m)
+	}
+}

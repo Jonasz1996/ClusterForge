@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
 import { AskButton } from "@/components/assistant/AskButton";
+import { IncidentAnalysisCard } from "@/components/assistant/IncidentAnalysis";
 import { IncidentState, SeverityBadge } from "@/components/incidents/Incidents";
 import { formatDuration, QueryState, tableClass, tdClass, thClass } from "@/components/inventory/bits";
 import { Alert, Badge, Button, Card, PageHeader, Textarea } from "@/components/ui";
@@ -66,6 +67,7 @@ function IncidentInner() {
           />
           <Facts inc={q.data.incident} />
           <AnalysisCard analysis={q.data.analysis} />
+          <IncidentAnalysisCard key={q.data.incident.id} id={q.data.incident.id} ai={q.data.ai} />
           <Subjects items={q.data.incident.subjects} />
           {q.data.analysis && <Charts inc={q.data.incident} analysis={q.data.analysis} timeline={q.data.timeline} />}
           <TimelineCard
