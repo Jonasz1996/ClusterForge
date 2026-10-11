@@ -10,11 +10,13 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/oapi-codegen/nullable"
 
 	"github.com/Jonasz1996/clusterforge/internal/audit"
 	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/httpapi/gen"
 	"github.com/Jonasz1996/clusterforge/internal/store"
+	"github.com/Jonasz1996/clusterforge/internal/whatbroke"
 )
 
 // incidentHistory zijn de actions in de geschiedenis van een incident: wat
@@ -124,11 +126,24 @@ func (s *Server) GetIncident(w http.ResponseWriter, r *http.Request, id uuid.UUI
 		}
 	}
 	slices.Reverse(history)
+	analysis := whatbroke.Decode(row)
+	timeline, timelineMore, err := s.incidentTimeline(ctx, row, analysis)
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	var stored *incidentAnalysis
+	if analysis != nil {
+		stored = &incidentAnalysis{Analysis: analysis, AnalyzedAt: row.AnalyzedAt}
+	}
 	writeJSON(w, http.StatusOK, struct {
-		Incident    gen.Incident  `json:"incident"`
-		History     []audit.Entry `json:"history"`
-		HistoryMore bool          `json:"history_more"`
-	}{inc, history, next != nil})
+		Incident     gen.Incident      `json:"incident"`
+		History      []audit.Entry     `json:"history"`
+		HistoryMore  bool              `json:"history_more"`
+		Analysis     *incidentAnalysis `json:"analysis"`
+		Timeline     []whatbroke.Entry `json:"timeline"`
+		TimelineMore bool              `json:"timeline_more"`
+	}{inc, history, next != nil, stored, s.redactEntries(r, timeline), timelineMore})
 }
 
 func (s *Server) SetIncidentNote(w http.ResponseWriter, r *http.Request, id uuid.UUID) {
@@ -208,6 +223,10 @@ func (s *Server) incidents(r *http.Request, rows []store.Incident) ([]gen.Incide
 			Status: gen.IncidentStatus(row.Status), StartedAt: row.StartedAt, DetectedAt: row.DetectedAt,
 			ResolvedAt: nullableOf(row.ResolvedAt), CausedByTest: row.CausedByTest, TestRunId: nullableOf(row.TestRunID),
 			Note: row.Note, UpdatedAt: row.UpdatedAt, Subjects: []gen.IncidentSubject{},
+			Cause: nullable.NewNullNullable[gen.IncidentTopCause](),
+		}
+		if c := whatbroke.Decode(row).TopCause(); c != nil {
+			out[i].Cause = nullable.NewNullableWithValue(gen.IncidentTopCause{Summary: c.Summary, Level: gen.IncidentTopCauseLevel(c.Level)})
 		}
 		byID[row.ID] = &out[i]
 	}

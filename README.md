@@ -40,6 +40,7 @@ Het technisch ontwerp staat in [docs/design/mvp-fase-1.md](docs/design/mvp-fase-
 | --- | --- | --- |
 | 1. Wijzigingsjournaal | Per node wat er veranderde, ook buiten ClusterForge om: pakketten, diensten, bestanden, herstarts, SSH-logins, geheugentekort, netwerk en Proxmox-taken, elk met een Nederlandse zin | klaar |
 | 2. Incidenten | Statusovergangen die bij elkaar horen, als één storing met een begin, een einde, een ernst en wat er geraakt was; pagina Incidenten en een kaart op het overzicht | klaar |
+| 3. What Broke: tijdlijn en oorzaak | Per incident het eerste symptoom en een gerangschikte lijst waarschijnlijke oorzaken met de redenen, uit één tijdlijn van logboek, journaal en metrics; 'Wat is er veranderd' per cluster en een tijdlijn per cluster en node | klaar |
 
 ## Draaien met Docker Compose
 
@@ -466,9 +467,43 @@ Wat bij elkaar hoort, komt in hetzelfde incident: een node bij het incident van 
 
 De ernst volgt uit de omgeving: op prod is down of split-brain kritiek en verminderd hoog, al het andere is laag. Een incident wordt alleen erger, nooit minder erg. Wat gebeurt terwijl een failovertest van ClusterForge in hetzelfde cluster loopt (of tot twee minuten erna), krijgt de markering 'door een failovertest' en is standaard verborgen.
 
-Bij Incidenten staan de open incidenten bovenaan, daarna de opgeloste, met filters op periode en status. Een incident toont wat er geraakt was (met de eerste, ergste en laatste status en van wanneer tot wanneer), een notitie en de geschiedenis: de statusovergangen, VIP-wissels en tests over wat geraakt was, van vijf minuten voor het begin tot het einde. Het overzicht heeft een kaart Open incidenten. Iedereen ziet incidenten; alleen een beheerder schrijft de notitie, en een viewer ziet in de geschiedenis geen IP-adres of sessie. Openen, erger worden, sluiten, heropenen en de notitie staan ook in het logboek, onder de soort Incidenten.
+Bij Incidenten staan de open incidenten bovenaan, daarna de opgeloste, met filters op periode en status en de waarschijnlijke oorzaak in één regel. Een incident toont wat er misging (zie What Broke hieronder), wat er geraakt was (met de eerste, ergste en laatste status en van wanneer tot wanneer), de grafieken rond het eerste symptoom, de tijdlijn en een notitie. Het overzicht heeft een kaart Open incidenten. Iedereen ziet incidenten; alleen een beheerder schrijft de notitie, en een viewer ziet in de tijdlijn geen IP-adres. Openen, erger worden, sluiten, heropenen en de notitie staan ook in het logboek, onder de soort Incidenten.
 
 Een VIP-wissel en de statuswissel van een dienst staan nu ook bij de nodes zelf in het logboek, niet alleen bij het cluster.
+
+## What Broke
+
+Bij elk incident zet ClusterForge op een rij wat er eerst misging, wat er vlak ervoor veranderde en wat daarvan de waarschijnlijke oorzaak is. Dat zijn vaste regels zonder AI: dezelfde gegevens geven altijd hetzelfde rapport, met de redenen erbij.
+
+**De tijdlijn** voegt het logboek en het journaal van de nodes samen, met de afwijkingen in de metrics erbij. Elke regel is een verandering (die oorzaak kan zijn), een symptoom (wat er misging) of informatie. Een moment dat ClusterForge pas later ziet, krijgt een venster 'waarschijnlijk tussen': een node gaat pas na 90 s zonder heartbeat op down, Proxmox wordt elke 20 s gelezen, en drift elk kwartier.
+
+**De analyse:**
+
+1. **Eerste symptoom.** Het vroegste symptoom in wat geraakt was, rond het begin van het incident: een dienst die faalde in het journaal, een node of cluster dat slechter werd, een VIP zonder eigenaar.
+2. **Kandidaten.** Elke verandering van twee uur voor het eerste symptoom tot een minuut erna, plus een OOM-kill en een afwijking in de metrics van het kwartier ervoor.
+3. **Score.** Elke kandidaat krijgt een score uit:
+   - de plaats: de node die misging telt het zwaarst, dan hetzelfde cluster, een cluster waar het van afhangt en dezelfde Proxmox-host, en elders het minst;
+   - de tijd: elke tien minuten ervoor telt half zo zwaar;
+   - de soort: een Git-wijziging, uitrol, pakketupdate of VM-actie het zwaarst, dan een taak, een gewijzigd bestand, een herstart en een SSH-login.
+4. **Verbanden.** Vaste verbanden geven een bonus en een zin in het rapport:
+   - het bijgewerkte pakket hoort bij de dienst die faalt (nginx bij nginx.service, mariadb-server bij mysql);
+   - het gewijzigde bestand hoort bij die dienst (/etc/nginx/ bij nginx);
+   - de OOM-killer trof het proces van de dienst;
+   - de VM stopte in Proxmox voordat de node down ging;
+   - de Proxmox-host ging offline voordat de VM's erop down gingen;
+   - de schijf liep vol voordat de dienst faalde;
+   - de VIP-eigenaar herstartte vlak voor het VIP geen eigenaar meer had;
+   - de wijziging mislukte.
+5. **Groeperen.** Regels van dezelfde taak zijn één oorzaak, met de Git-commit als die er is. Pakketten of bestanden op dezelfde node binnen twee minuten zijn één update.
+6. **Uitkomst.** Hoogstens vijf oorzaken, elk waarschijnlijk, mogelijk of zwak verband, met de redenen. Veranderde er niets, dan zegt het rapport dat: 'ClusterForge zag in de twee uur ervoor geen verandering. De afwijkingen in de metrics staan hieronder; de oorzaak ligt waarschijnlijk buiten de nodes.'
+
+Bijvoorbeeld: 'Waarschijnlijke oorzaak: nginx bijgewerkt van 1.26.0 naar 1.26.3 op web-01, 40 s voor het eerste symptoom', met als reden 'nginx op web-01 faalde 40 s na deze update van nginx'.
+
+De afwijkingen in de metrics vergelijken het kwartier voor het eerste symptoom met de twee uur daarvoor, met vaste drempels: CPU boven 90 % en 30 punten hoger dan gemiddeld, geheugen boven 95 %, een schijf die boven 95 % komt, en netwerkfouten. Zonder VictoriaMetrics staat in het rapport dat de metrics niet te lezen waren.
+
+De analyse rekent opnieuw zolang het incident open is en tot een uur na het einde, bijvoorbeeld als een journaal na een herverbinding binnenkomt. Daarna ligt ze vast. Ze leest alleen, neemt nooit het clusterslot en stuurt geen commando's.
+
+**Wat is er veranderd.** Een cluster heeft een kaart met de veranderingen van de laatste 24 uur. De volledige tijdlijn van een cluster of node, met filters op periode en klasse, staat bij Tijdlijn; de kaart Wijzigingen van een node linkt ernaar. Een viewer ziet de tijdlijn ook, maar nooit iets uit de beveiliging en bij een SSH-login geen IP-adres.
 
 ## Ontwikkelen
 
@@ -513,6 +548,7 @@ internal/agentdist/        installatiescript en downloads van cf-agent
 internal/agent/            code van cf-agent zelf: aanmelden, verbinden, facts, metrics en het journaal verzamelen
 internal/journal/          het wijzigingsjournaal: zinnen, verschillen in de facts en opruimen
 internal/incidents/        incidenten: overgangen groeperen, ernst, openen en sluiten na elke statusronde
+internal/whatbroke/        What Broke: de tijdlijn uit logboek en journaal, en de analyse van elk incident
 internal/metrics/          metrics naar VictoriaMetrics schrijven en de grafieken opvragen
 internal/status/           statusregels voor nodes en clusters, VIP-eigenaars
 internal/live/             live updates naar de webinterface (Server-Sent Events)

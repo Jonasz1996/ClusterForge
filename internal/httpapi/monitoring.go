@@ -22,7 +22,7 @@ func (s *Server) GetNodeMetrics(w http.ResponseWriter, r *http.Request, id uuid.
 		s.internalError(w, r, err)
 		return
 	}
-	s.writeMetrics(w, r, metrics.NodePanels, metrics.NodeSelector(id), params.Range)
+	s.writeMetrics(w, r, metrics.NodePanels, metrics.NodeSelector(id), params.Range, params.From, params.To)
 }
 
 func (s *Server) GetClusterMetrics(w http.ResponseWriter, r *http.Request, id uuid.UUID, params gen.GetClusterMetricsParams) {
@@ -33,10 +33,13 @@ func (s *Server) GetClusterMetrics(w http.ResponseWriter, r *http.Request, id uu
 		s.internalError(w, r, err)
 		return
 	}
-	s.writeMetrics(w, r, metrics.ClusterPanels, metrics.ClusterSelector(id), params.Range)
+	s.writeMetrics(w, r, metrics.ClusterPanels, metrics.ClusterSelector(id), params.Range, params.From, params.To)
 }
 
-func (s *Server) writeMetrics(w http.ResponseWriter, r *http.Request, panels []metrics.Panel, selector string, rng *gen.MetricsRange) {
+// writeMetrics geeft de panelen over een periode tot nu, of over een vast
+// venster met from en to, zoals dat van een incident.
+func (s *Server) writeMetrics(w http.ResponseWriter, r *http.Request, panels []metrics.Panel, selector string, rng *gen.MetricsRange,
+	from, to *time.Time) {
 	name := gen.MetricsRange("1h")
 	if rng != nil {
 		name = *rng
@@ -46,9 +49,31 @@ func (s *Server) writeMetrics(w http.ResponseWriter, r *http.Request, panels []m
 		writeError(w, http.StatusBadRequest, "bad_request", "onbekende periode")
 		return
 	}
+	if (from == nil) != (to == nil) {
+		writeError(w, http.StatusBadRequest, "bad_request", "geef from en to allebei, of geen van beide")
+		return
+	}
+	if from != nil && (!from.Before(*to) || to.Sub(*from) > metrics.MaxWindow) {
+		writeError(w, http.StatusBadRequest, "bad_request", "from moet voor to liggen, hoogstens 7 dagen ervoor")
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 	defer cancel()
-	res, err := s.metrics.Query(ctx, panels, selector, d, time.Now())
+	var res metrics.Result
+	var err error
+	if from != nil {
+		// De kleinste periode die het venster dekt, voor de as.
+		name = "7d"
+		for _, n := range []gen.MetricsRange{"1h", "6h", "24h"} {
+			if to.Sub(*from) <= metrics.Ranges[string(n)] {
+				name = n
+				break
+			}
+		}
+		res, err = s.metrics.QueryWindow(ctx, panels, selector, *from, *to)
+	} else {
+		res, err = s.metrics.Query(ctx, panels, selector, d, time.Now())
+	}
 	switch {
 	case errors.Is(err, metrics.ErrDisabled):
 		writeError(w, http.StatusServiceUnavailable, "metrics_disabled", "er is geen VictoriaMetrics ingesteld (CF_VICTORIAMETRICS_URL)")

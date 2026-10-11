@@ -29,6 +29,9 @@ type Detector struct {
 	Rules Rules
 	// Now is de klok; tests zetten hem vooruit.
 	Now func() time.Time
+	// Changed wordt aangeroepen na een ronde die een incident opende,
+	// bijwerkte of sloot, na de commit.
+	Changed func()
 }
 
 func NewDetector(pool *pgxpool.Pool, ev *events.Writer, log *slog.Logger) *Detector {
@@ -38,7 +41,8 @@ func NewDetector(pool *pgxpool.Pool, ev *events.Writer, log *slog.Logger) *Detec
 // Detect kijkt één keer wat er misgaat en werkt de incidenten bij. Hij
 // draait na elke ronde van de evaluator.
 func (d *Detector) Detect(ctx context.Context) error {
-	return pgx.BeginFunc(ctx, d.pool, func(tx pgx.Tx) error {
+	changed := false
+	err := pgx.BeginFunc(ctx, d.pool, func(tx pgx.Tx) error {
 		if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", statusLock); err != nil {
 			return err
 		}
@@ -54,9 +58,11 @@ func (d *Detector) Detect(ctx context.Context) error {
 		}
 		incs, evs := Step(d.Rules, w, incs, now)
 		for _, inc := range incs {
-			if err := save(ctx, q, inc); err != nil {
+			c, err := save(ctx, q, inc)
+			if err != nil {
 				return err
 			}
+			changed = changed || c
 		}
 		for _, e := range evs {
 			if err := d.write(ctx, q, e, now); err != nil {
@@ -65,6 +71,10 @@ func (d *Detector) Detect(ctx context.Context) error {
 		}
 		return nil
 	})
+	if err == nil && changed && d.Changed != nil {
+		d.Changed()
+	}
+	return err
 }
 
 func (d *Detector) world(ctx context.Context, q *store.Queries, now time.Time) (World, error) {
@@ -262,11 +272,13 @@ func load(ctx context.Context, q *store.Queries, since time.Time) ([]*Incident, 
 	return out, nil
 }
 
-func save(ctx context.Context, q *store.Queries, inc *Incident) error {
+// save schrijft wat er aan een incident veranderde, en zegt of dat iets was.
+func save(ctx context.Context, q *store.Queries, inc *Incident) (bool, error) {
 	status := "resolved"
 	if inc.Open {
 		status = "open"
 	}
+	changed := inc.ID == uuid.Nil || inc.dirty
 	switch {
 	case inc.ID == uuid.Nil:
 		row, err := q.CreateIncident(ctx, store.CreateIncidentParams{
@@ -274,7 +286,7 @@ func save(ctx context.Context, q *store.Queries, inc *Incident) error {
 			CausedByTest: inc.CausedByTest, TestRunID: inc.TestRunID,
 		})
 		if err != nil {
-			return err
+			return false, err
 		}
 		inc.ID, inc.Number = row.ID, row.Number
 		if inc.Open {
@@ -285,7 +297,7 @@ func save(ctx context.Context, q *store.Queries, inc *Incident) error {
 		if err := q.UpdateIncidentState(ctx, store.UpdateIncidentStateParams{
 			ID: inc.ID, Severity: inc.Severity, Status: status, ResolvedAt: inc.ResolvedAt, StartedAt: inc.StartedAt,
 		}); err != nil {
-			return err
+			return false, err
 		}
 	}
 	inc.dirty = false
@@ -293,15 +305,16 @@ func save(ctx context.Context, q *store.Queries, inc *Incident) error {
 		if !s.dirty {
 			continue
 		}
+		changed = true
 		if err := q.UpsertIncidentSubject(ctx, store.UpsertIncidentSubjectParams{
 			IncidentID: inc.ID, SubjectType: s.Type, SubjectID: s.ID, Name: s.Name, ClusterID: s.ClusterID,
 			FirstStatus: s.First, WorstStatus: s.Worst, LastStatus: s.Last, Reason: s.Reason, Since: s.Since, Until: s.Until,
 		}); err != nil {
-			return err
+			return false, err
 		}
 		s.dirty = false
 	}
-	return nil
+	return changed, nil
 }
 
 func (d *Detector) write(ctx context.Context, q *store.Queries, e Event, now time.Time) error {
