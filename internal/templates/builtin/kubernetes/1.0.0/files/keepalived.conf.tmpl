@@ -1,0 +1,44 @@
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}). Wijzigingen hier
+# worden bij de volgende uitrol overschreven.
+
+global_defs {
+    router_id {{ .node.hostname }}
+    enable_script_security
+    script_user root
+}
+
+# Antwoordt de Kubernetes-API hier niet meer, dan geeft deze server het VIP
+# af aan een andere.
+vrrp_script chk_k3s {
+    script "/etc/keepalived/check-k3s.sh"
+    interval 3
+    timeout 5
+    fall 2
+    rise 2
+}
+
+vrrp_instance VI_{{ .params.vrid }} {
+    state BACKUP
+    interface {{ .node.interface }}
+    virtual_router_id {{ .params.vrid }}
+    priority {{ sub 160 (mul .node.index 10) }}
+    advert_int 1
+{{- if .peers }}
+    unicast_src_ip {{ .node.address }}
+    unicast_peer {
+{{- range .peers }}
+        {{ .address }}
+{{- end }}
+    }
+{{- end }}
+    authentication {
+        auth_type PASS
+        auth_pass {{ .params.auth_pass }}
+    }
+    virtual_ipaddress {
+        {{ .params.vip }}/{{ .node.prefix }} dev {{ .node.interface }}
+    }
+    track_script {
+        chk_k3s
+    }
+}

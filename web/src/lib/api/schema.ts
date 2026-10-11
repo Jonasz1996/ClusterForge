@@ -4622,7 +4622,7 @@ export interface components {
             username: string;
         };
         /** @enum {string} */
-        ClusterType: "keepalived" | "nginx" | "docker" | "cron" | "postgresql_ha" | "mariadb_ha" | "generic";
+        ClusterType: "keepalived" | "nginx" | "docker" | "cron" | "postgresql_ha" | "mariadb_ha" | "generic" | "kubernetes";
         /** @enum {string} */
         Environment: "lab" | "test" | "prod";
         /** @enum {string} */
@@ -5654,6 +5654,8 @@ export interface components {
             default: string | null;
             min: string | null;
             max: string | null;
+            /** @description De toegestane waarden van een int; leeg is alles tussen min en max */
+            choices: number[];
         };
         TemplateRole: {
             name: string;

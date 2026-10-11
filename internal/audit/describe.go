@@ -968,7 +968,7 @@ func changes(subjectType string, p map[string]any, n names) []Change {
 var (
 	envLabels  = map[string]string{"lab": "Lab", "test": "Test", "prod": "Productie"}
 	typeLabels = map[string]string{"keepalived": "Keepalived", "nginx": "Nginx", "docker": "Docker", "cron": "Cron",
-		"postgresql_ha": "PostgreSQL HA", "mariadb_ha": "MariaDB HA", "generic": "Algemeen"}
+		"postgresql_ha": "PostgreSQL HA", "mariadb_ha": "MariaDB HA", "generic": "Algemeen", "kubernetes": "Kubernetes"}
 	lifecycleLabels = map[string]string{"provisioning": "wordt opgezet", "active": "actief", "maintenance": "onderhoud",
 		"draining": "draining", "decommissioned": "uit dienst"}
 	statusLabels = map[string]string{"healthy": "gezond", "degraded": "verminderd", "down": "down",

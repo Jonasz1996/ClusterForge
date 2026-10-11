@@ -109,7 +109,10 @@ func (t *Template) RenderServices(params map[string]any) ([]Service, error) {
 type Role struct {
 	Name  string `yaml:"name"`
 	Count string `yaml:"count"`
-	VM    struct {
+	// Min is het kleinste aantal nodes; standaard 1. Met 0 mag een rol leeg
+	// blijven, zoals de workers van een Kubernetes-cluster.
+	Min *int `yaml:"min"`
+	VM  struct {
 		CPU    string `yaml:"cpu"`
 		Memory string `yaml:"memory"`
 		Disk   string `yaml:"disk"`
@@ -158,12 +161,19 @@ func Parse(fsys fs.FS) (*Template, error) {
 		seen[p.Name] = true
 	}
 	roles := map[string]bool{}
-	for _, r := range t.Roles {
+	for i, r := range t.Roles {
 		// De rol komt in hostnames (<slug>-<rol>-01), dus kort.
 		if !roleRe.MatchString(r.Name) || roles[r.Name] {
 			return nil, fmt.Errorf("ongeldige of dubbele rol %q (kleine letters, cijfers en streepjes, hoogstens 16 tekens)", r.Name)
 		}
 		roles[r.Name] = true
+		if r.Min != nil && (*r.Min < 0 || *r.Min > 1) {
+			return nil, fmt.Errorf("rol %s: min is 0 of 1", r.Name)
+		}
+		// Eén rol moet altijd nodes hebben, anders kan een cluster leeg zijn.
+		if i == 0 && r.minCount() == 0 {
+			return nil, fmt.Errorf("rol %s: de eerste rol heeft minstens één node", r.Name)
+		}
 	}
 	if err := t.checkServices(); err != nil {
 		return nil, err
@@ -392,12 +402,19 @@ func (t *Template) Counts(c Context) ([]int, error) {
 			return nil, fmt.Errorf("rol %s: count: %w", r.Name, err)
 		}
 		n, err := strconv.Atoi(strings.TrimSpace(s))
-		if err != nil || n < 1 || n > 20 {
-			return nil, fmt.Errorf("rol %s: ongeldig aantal %q (1 tot 20)", r.Name, s)
+		if err != nil || n < r.minCount() || n > 20 {
+			return nil, fmt.Errorf("rol %s: ongeldig aantal %q (%d tot 20)", r.Name, s, r.minCount())
 		}
 		out[i] = n
 	}
 	return out, nil
+}
+
+func (r Role) minCount() int {
+	if r.Min != nil {
+		return *r.Min
+	}
+	return 1
 }
 
 // VMShape is de vorm van een nieuwe VM.
@@ -640,7 +657,9 @@ func (t *Template) selfTest() error {
 		return err
 	}
 	for i, r := range t.Roles {
-		for n := 1; n <= counts[i]; n++ {
+		// Een rol die standaard leeg is, krijgt toch een node, zodat haar
+		// stappen ook getest worden.
+		for n := 1; n <= max(counts[i], 1); n++ {
 			c.Nodes = append(c.Nodes, NodeInfo{
 				Hostname: fmt.Sprintf("voorbeeld-%s-%02d", r.Name, n), Role: r.Name, Index: n,
 				Address: fmt.Sprintf("192.0.2.%d", len(c.Nodes)+10), Prefix: 24, Interface: "eth0",
@@ -651,10 +670,13 @@ func (t *Template) selfTest() error {
 		if _, err := t.VM(r.Name, c); err != nil {
 			return err
 		}
-		node := slices.IndexFunc(c.Nodes, func(n NodeInfo) bool { return n.Role == r.Name })
-		c.Node = &c.Nodes[node]
-		if _, err := t.Steps(r.Name, c); err != nil {
-			return fmt.Errorf("rol %s: %w", r.Name, err)
+	}
+	// Elke node, want een sjabloon kan per index iets anders doen, zoals de
+	// eerste server die het cluster begint.
+	for i := range c.Nodes {
+		c.Node = &c.Nodes[i]
+		if _, err := t.Steps(c.Node.Role, c); err != nil {
+			return fmt.Errorf("rol %s, node %d: %w", c.Node.Role, c.Node.Index, err)
 		}
 	}
 	c.Node = nil

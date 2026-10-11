@@ -83,7 +83,7 @@ func TestClusterCRUD(t *testing.T) {
 	}
 	for _, bad := range []map[string]any{
 		{"slug": "Web Prod", "name": "x", "type": "keepalived", "environment": "prod"},
-		{"slug": "ok", "name": "x", "type": "kubernetes", "environment": "prod"},
+		{"slug": "ok", "name": "x", "type": "swarm", "environment": "prod"},
 		{"slug": "ok", "name": "x", "type": "nginx", "environment": "staging"},
 		{"slug": "ok", "name": "x", "type": "nginx", "environment": "lab", "git_repo_url": "file:///etc"},
 	} {

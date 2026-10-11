@@ -206,6 +206,17 @@ func consistent(t *testing.T, key []byte, tpl *templates.Template, role string, 
 		if res := a.apply(context.Background(), []protocol.Step{s.Step}); !res.OK {
 			t.Fatalf("%s: %+v", s.Title, res)
 		}
+		// De simulator voert geen echte scripts uit; een commando met
+		// creates maakt dat pad op een echte node zelf.
+		if c := s.Command; c != nil && c.Creates != "" {
+			p := filepath.Join(a.Root, c.Creates)
+			if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(p, nil, 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
 		if cmp := inspectAndCompare(t, a, key, steps[:i+1]); len(cmp.Findings) != 0 {
 			t.Fatalf("afwijkingen direct na stap %d (%s): %+v", i+1, s.Title, cmp.Findings)
 		}
@@ -274,6 +285,7 @@ var sampleParams = map[string]map[string]any{
 	"docker":           {},
 	"cron":             {"vip": "10.0.20.100", "vrid": 52},
 	"generic":          {"vip": "10.0.20.100", "vrid": 53, "image": "ghcr.io/jonas/app:1.4.2", "port": 8080, "container_port": 3000},
+	"kubernetes":       {"vip": "10.0.20.100", "vrid": 54},
 }
 
 func renderBuiltin(t *testing.T, tpl *templates.Template, role string) []templates.Step {
