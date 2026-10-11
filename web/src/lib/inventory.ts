@@ -40,6 +40,7 @@ export const clusterTypes: { value: ClusterType; label: string }[] = [
   { value: "postgresql_ha", label: "PostgreSQL HA" },
   { value: "mariadb_ha", label: "MariaDB HA" },
   { value: "generic", label: "Algemeen" },
+  { value: "kubernetes", label: "Kubernetes" },
 ];
 
 export const environments: { value: Environment; label: string; tone: "green" | "amber" | "red" }[] = [

@@ -238,7 +238,7 @@ function DeployInner() {
               }}
             />
           </FieldRow>
-          <FieldRow error={fieldError} field="cluster.slug" label="Slug" hint={`De nodes heten ${form.slug || "<slug>"}-01, ${form.slug || "<slug>"}-02, …`}>
+          <FieldRow error={fieldError} field="cluster.slug" label="Slug" hint={slugHint(form.slug || "<slug>", template)}>
             <Input
               id={fieldId("cluster.slug")}
               className={bad("cluster.slug")}
@@ -465,8 +465,25 @@ function FieldRow({
 }
 
 function paramHint(p: TemplateParam) {
-  const range = p.min && p.max ? `Van ${p.min} tot ${p.max}.` : p.min ? `Minstens ${p.min}.` : p.max ? `Hoogstens ${p.max}.` : "";
+  const range =
+    p.choices.length > 0
+      ? ""
+      : p.min && p.max
+        ? `Van ${p.min} tot ${p.max}.`
+        : p.min
+          ? `Minstens ${p.min}.`
+          : p.max
+            ? `Hoogstens ${p.max}.`
+            : "";
   return [p.help, range].filter(Boolean).join(" ") || undefined;
+}
+
+// slugHint toont hoe de nodes gaan heten; met meer dan één rol staat de rol
+// in de naam, zoals leren-server-01 en leren-worker-01.
+function slugHint(slug: string, t: Template | undefined) {
+  const roles = t?.roles ?? [];
+  if (roles.length > 1) return `De nodes heten ${roles.map((r) => `${slug}-${r.name}-01`).join(", ")}, …`;
+  return `De nodes heten ${slug}-01, ${slug}-02, …`;
 }
 
 function ParamInput({ p, value, onChange, className }: { p: TemplateParam; value: string; onChange: (v: string) => void; className?: string }) {
@@ -480,6 +497,16 @@ function ParamInput({ p, value, onChange, className }: { p: TemplateParam; value
         </label>
       );
     case "int":
+      if (p.choices.length > 0)
+        return (
+          <Select id={id} className={className} value={value} onChange={(e) => onChange(e.target.value)}>
+            {p.choices.map((c) => (
+              <option key={c} value={String(c)}>
+                {c}
+              </option>
+            ))}
+          </Select>
+        );
       return (
         <Input
           id={id}

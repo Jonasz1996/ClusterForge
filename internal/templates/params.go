@@ -23,6 +23,9 @@ type Param struct {
 	Min      any    `yaml:"min"`
 	Max      any    `yaml:"max"`
 	Pattern  string `yaml:"pattern"`
+	// Choices zijn de toegestane waarden van een int, zoals 1, 3 of 5
+	// servers; leeg is alles tussen min en max.
+	Choices []int `yaml:"choices"`
 	// Length is de lengte van een gegenereerd secret.
 	Length int `yaml:"length"`
 	// Immutable zegt dat de waarde na de uitrol vastligt, zoals het VIP:
@@ -66,6 +69,19 @@ func (p *Param) check() error {
 		}
 		if p.Default != nil {
 			return fmt.Errorf("een secret heeft geen standaardwaarde")
+		}
+	}
+	if len(p.Choices) > 0 {
+		if p.Type != "int" {
+			return fmt.Errorf("choices kan alleen bij een int")
+		}
+		for i, c := range p.Choices {
+			if _, err := p.normalize(c, true); err != nil {
+				return fmt.Errorf("choices: %d: %w", c, err)
+			}
+			if slices.Contains(p.Choices[:i], c) {
+				return fmt.Errorf("choices: %d staat er twee keer in", c)
+			}
 		}
 	}
 	for what, v := range map[string]any{"min": p.Min, "max": p.Max} {
@@ -167,6 +183,15 @@ func (t *Template) VMParams() []string {
 		}
 	}
 	return out
+}
+
+// MemoryParam is de parameter met het geheugen van de VM's van de eerste
+// rol, of "" als dat vastligt.
+func (t *Template) MemoryParam() string {
+	if m := paramRefRe.FindStringSubmatch(t.Roles[0].VM.Memory); m != nil {
+		return m[1]
+	}
+	return ""
 }
 
 // CountParam is de parameter waaruit het aantal nodes van een rol komt, of
@@ -272,6 +297,9 @@ func (p *Param) normalize(v any, bounds bool) (any, error) {
 					return nil, fmt.Errorf("hoogstens %d", hi)
 				}
 			}
+			if len(p.Choices) > 0 && !slices.Contains(p.Choices, n) {
+				return nil, fmt.Errorf("kies %s", choiceText(p.Choices))
+			}
 		}
 		return n, nil
 	case "bool":
@@ -331,6 +359,18 @@ func (p *Param) normalize(v any, bounds bool) (any, error) {
 		return s, nil
 	}
 	return nil, fmt.Errorf("onbekend type %q", p.Type)
+}
+
+// choiceText is "1, 3 of 5".
+func choiceText(cs []int) string {
+	parts := make([]string, len(cs))
+	for i, c := range cs {
+		parts[i] = strconv.Itoa(c)
+	}
+	if len(parts) == 1 {
+		return parts[0]
+	}
+	return strings.Join(parts[:len(parts)-1], ", ") + " of " + parts[len(parts)-1]
 }
 
 func toInt(v any) (int, error) {
@@ -400,6 +440,9 @@ func (p *Param) sample() any {
 	}
 	switch p.Type {
 	case "int":
+		if len(p.Choices) > 0 {
+			return p.Choices[0]
+		}
 		if p.Min != nil {
 			n, _ := toInt(p.Min)
 			return n

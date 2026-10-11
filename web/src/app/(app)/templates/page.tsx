@@ -90,7 +90,8 @@ function TemplateCard({ t, isAdmin }: { t: Template; isAdmin: boolean }) {
                 <td className={tdClass}>
                   {paramTypes[p.type]}
                   {p.immutable && <div className="text-xs text-slate-500">ligt vast na de uitrol</div>}
-                  {(p.min || p.max) && (
+                  {p.choices.length > 0 && <div className="text-xs text-slate-500">{p.choices.join(", ")}</div>}
+                  {p.choices.length === 0 && (p.min || p.max) && (
                     <div className="text-xs text-slate-500">
                       {p.min && `min ${p.min}`}
                       {p.min && p.max && ", "}

@@ -1,0 +1,24 @@
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}). Wijzigingen hier
+# worden bij de volgende uitrol overschreven.
+#
+# Instellingen van k3s op deze server; zie https://docs.k3s.io/cli/server.
+token: "{{ .params.token }}"
+node-ip: {{ .node.address }}
+flannel-iface: {{ .node.interface }}
+# Het VIP staat in het certificaat van de API, zodat kubectl er veilig mee
+# praat.
+tls-san:
+  - {{ .params.vip }}
+{{- if eq .node.index 1 }}
+# Deze server begint het cluster, met etcd als database, ook als hij de
+# enige is: dan werken snapshots meteen en kunnen er later servers bij.
+cluster-init: true
+{{- else }}
+# Deze server meldt zich aan bij het cluster via het VIP.
+server: https://{{ .params.vip }}:6443
+{{- end }}
+write-kubeconfig-mode: "0600"
+# Elke twaalf uur een snapshot van etcd, de laatste vijf blijven bewaard in
+# /var/lib/rancher/k3s/server/db/snapshots.
+etcd-snapshot-schedule-cron: "0 */12 * * *"
+etcd-snapshot-retention: 5

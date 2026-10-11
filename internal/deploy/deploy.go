@@ -682,7 +682,15 @@ func (s *Service) placeNodes(ctx context.Context, p *params) error {
 	}
 	for _, h := range online {
 		if need[h.Name] > h.FreeMem {
-			return invalid("params.memory", "op %s is maar %d MB geheugen vrij; de nieuwe VM's vragen %d MB",
+			// Het veld met het geheugen van de eerste rol, zoals memory of
+			// server_memory.
+			field := "params.memory"
+			if tpl, ok := s.Templates.Get(p.Template, p.Version); ok {
+				if name := tpl.MemoryParam(); name != "" {
+					field = "params." + name
+				}
+			}
+			return invalid(field, "op %s is maar %d MB geheugen vrij; de nieuwe VM's vragen %d MB",
 				h.Name, h.FreeMem>>20, need[h.Name]>>20)
 		}
 	}

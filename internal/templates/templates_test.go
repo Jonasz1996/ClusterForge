@@ -142,24 +142,29 @@ roles:
 		files map[string]string
 		err   string
 	}{
-		"onbekend veld":    {base + "      - package: { names: [x], versie: 2 }\n", nil, "versie"},
-		"twee soorten":     {base + "      - { package: { names: [x] }, service: { name: x } }\n", nil, "precies één"},
-		"sjabloon weg":     {base + "      - file: { path: /x, template: x.tmpl }\n", nil, "bestaat niet"},
-		"onbekende waarde": {base + "      - file: { path: /x, content: \"{{ .params.m }}\" }\n", nil, "map has no entry"},
-		"sjabloonfout":     {base + "      - file: { path: /x, template: x.tmpl }\n", map[string]string{"files/x.tmpl": "{{ .node.ip }}"}, "map has no entry"},
-		"notify":           {base + "      - file: { path: /x, content: x, notify: [nginx] }\n", nil, "notify"},
-		"parametertype":    {strings.Replace(base, "type: int", "type: getal", 1) + "      - package: { names: [x] }\n", nil, "onbekend type"},
-		"default te groot": {strings.Replace(base, "default: 1", "default: 1, max: 0", 1) + "      - package: { names: [x] }\n", nil, ""},
-		"yaml-veld":        {base + "      - package: { names: [x] }\nkleur: rood\n", nil, "kleur"},
-		"depends_on weg":   {base + "      - package: { names: [x] }\nservices:\n  - { name: a, kind: web, depends_on: [b] }\n", nil, "staat niet in de template"},
-		"op zichzelf":      {base + "      - package: { names: [x] }\nservices:\n  - { name: a, kind: web, depends_on: [a] }\n", nil, "van zichzelf"},
-		"dubbele dienst":   {base + "      - package: { names: [x] }\nservices:\n  - { name: a, kind: web }\n  - { name: a, kind: vip }\n", nil, "twee keer"},
-		"sterkte":          {base + "      - package: { names: [x] }\nservices:\n  - { name: a, kind: web, depends_on: [b], strength: sterk }\n  - { name: b, kind: vip }\n", nil, "hard of soft"},
-		"zonder soort":     {base + "      - package: { names: [x] }\nservices:\n  - { name: a }\n", nil, "kind"},
-		"poort te groot":   {base + "      - package: { names: [x] }\nservices:\n  - { name: a, kind: web, port: 70000 }\n", nil, "port"},
-		"poort onbekend":   {base + "      - package: { names: [x] }\nservices:\n  - { name: a, kind: web, port: \"{{ .params.p }}\" }\n", nil, "port"},
-		"poort als tekst":  {strings.Replace(base, "type: int, label: N, default: 1", "type: string, label: N, default: \"1\"", 1) + "      - package: { names: [x] }\nservices:\n  - { name: a, kind: web, port: \"{{ .params.n }}\" }\n", nil, "port"},
-		"poort met tekst":  {base + "      - package: { names: [x] }\nservices:\n  - { name: a, kind: web, port: \"80{{ .params.n }}\" }\n", nil, "port"},
+		"onbekend veld":        {base + "      - package: { names: [x], versie: 2 }\n", nil, "versie"},
+		"twee soorten":         {base + "      - { package: { names: [x] }, service: { name: x } }\n", nil, "precies één"},
+		"sjabloon weg":         {base + "      - file: { path: /x, template: x.tmpl }\n", nil, "bestaat niet"},
+		"onbekende waarde":     {base + "      - file: { path: /x, content: \"{{ .params.m }}\" }\n", nil, "map has no entry"},
+		"sjabloonfout":         {base + "      - file: { path: /x, template: x.tmpl }\n", map[string]string{"files/x.tmpl": "{{ .node.ip }}"}, "map has no entry"},
+		"notify":               {base + "      - file: { path: /x, content: x, notify: [nginx] }\n", nil, "notify"},
+		"parametertype":        {strings.Replace(base, "type: int", "type: getal", 1) + "      - package: { names: [x] }\n", nil, "onbekend type"},
+		"default te groot":     {strings.Replace(base, "default: 1", "default: 1, max: 0", 1) + "      - package: { names: [x] }\n", nil, ""},
+		"yaml-veld":            {base + "      - package: { names: [x] }\nkleur: rood\n", nil, "kleur"},
+		"depends_on weg":       {base + "      - package: { names: [x] }\nservices:\n  - { name: a, kind: web, depends_on: [b] }\n", nil, "staat niet in de template"},
+		"op zichzelf":          {base + "      - package: { names: [x] }\nservices:\n  - { name: a, kind: web, depends_on: [a] }\n", nil, "van zichzelf"},
+		"dubbele dienst":       {base + "      - package: { names: [x] }\nservices:\n  - { name: a, kind: web }\n  - { name: a, kind: vip }\n", nil, "twee keer"},
+		"sterkte":              {base + "      - package: { names: [x] }\nservices:\n  - { name: a, kind: web, depends_on: [b], strength: sterk }\n  - { name: b, kind: vip }\n", nil, "hard of soft"},
+		"zonder soort":         {base + "      - package: { names: [x] }\nservices:\n  - { name: a }\n", nil, "kind"},
+		"poort te groot":       {base + "      - package: { names: [x] }\nservices:\n  - { name: a, kind: web, port: 70000 }\n", nil, "port"},
+		"poort onbekend":       {base + "      - package: { names: [x] }\nservices:\n  - { name: a, kind: web, port: \"{{ .params.p }}\" }\n", nil, "port"},
+		"poort als tekst":      {strings.Replace(base, "type: int, label: N, default: 1", "type: string, label: N, default: \"1\"", 1) + "      - package: { names: [x] }\nservices:\n  - { name: a, kind: web, port: \"{{ .params.n }}\" }\n", nil, "port"},
+		"poort met tekst":      {base + "      - package: { names: [x] }\nservices:\n  - { name: a, kind: web, port: \"80{{ .params.n }}\" }\n", nil, "port"},
+		"keuze bij tekst":      {strings.Replace(base, "type: int, label: N, default: 1", "type: string, label: N, default: \"1\", choices: [1]", 1) + "      - package: { names: [x] }\n", nil, "alleen bij een int"},
+		"default buiten keuze": {strings.Replace(base, "default: 1", "default: 2, choices: [1, 3]", 1) + "      - package: { names: [x] }\n", nil, "kies 1 of 3"},
+		"dubbele keuze":        {strings.Replace(base, "default: 1", "default: 1, choices: [1, 1]", 1) + "      - package: { names: [x] }\n", nil, "twee keer"},
+		"eerste rol leeg":      {strings.Replace(base, "  - name: app\n", "  - name: app\n    min: 0\n", 1) + "      - package: { names: [x] }\n", nil, "eerste rol"},
+		"min te groot":         {strings.Replace(base, "  - name: app\n", "  - name: app\n    min: 2\n", 1) + "      - package: { names: [x] }\n", nil, "min is 0 of 1"},
 	} {
 		fsys := fstest.MapFS{"template.yaml": {Data: []byte(tc.yaml)}}
 		for p, c := range tc.files {
@@ -230,7 +235,7 @@ func TestBuiltinList(t *testing.T) {
 	for _, tpl := range Builtin() {
 		names = append(names, tpl.Name+" "+tpl.Version)
 	}
-	if got := strings.Join(names, ", "); got != "cron 1.0.0, docker 1.0.0, generic 1.0.0, keepalived-nginx 1.1.0" {
+	if got := strings.Join(names, ", "); got != "cron 1.0.0, docker 1.0.0, generic 1.0.0, keepalived-nginx 1.1.0, kubernetes 1.0.0" {
 		t.Fatalf("ingebouwde templates: %s", got)
 	}
 }

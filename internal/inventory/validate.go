@@ -13,7 +13,7 @@ import (
 
 // ClusterTypes zijn de clustertypes die de webinterface en de API kennen. De
 // database slaat het type als tekst op, zodat een nieuw type geen migratie vraagt.
-var ClusterTypes = []string{"keepalived", "nginx", "docker", "cron", "postgresql_ha", "mariadb_ha", "generic"}
+var ClusterTypes = []string{"keepalived", "nginx", "docker", "cron", "postgresql_ha", "mariadb_ha", "generic", "kubernetes"}
 
 const maxTags = 20
 

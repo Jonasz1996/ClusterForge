@@ -1,6 +1,6 @@
 # ClusterForge
 
-Eén webinterface om traditionele Linux HA-clusters (Proxmox, Debian/Ubuntu, Keepalived, gedeelde databases, Docker, cronclusters) te beheren, monitoren, deployen en onderhouden. Geen Kubernetes-kloon.
+Eén webinterface om traditionele Linux HA-clusters (Proxmox, Debian/Ubuntu, Keepalived, gedeelde databases, Docker, cronclusters) en Kubernetes-clusters met k3s te beheren, monitoren, deployen en onderhouden. Geen Kubernetes-kloon: voor Kubernetes rolt ClusterForge k3s uit en beheert het.
 
 Het technisch ontwerp staat in [docs/design/mvp-fase-1.md](docs/design/mvp-fase-1.md).
 
@@ -53,6 +53,10 @@ Het technisch ontwerp staat in [docs/design/mvp-fase-1.md](docs/design/mvp-fase-
 | 13. DR-repetitie | Een heel cluster terugzetten uit de back-ups, ook op prod: alle nodes tegelijk als sandbox op één host aan een afgesloten bridge, controleren dat het VIP één houder heeft en antwoordt, RTO en RPO meten tegen de doelen per cluster, en daarna alles weer verwijderen; met de hand of elke week of maand in het testvenster | klaar |
 | 14. Herstelbaarheid in documentatie en rapport | De gemeten RTO en RPO met datum en doel in het hoofdstuk Herstel, de runbooks met de gemeten hersteltijden, de DR-repetitie in de kaart Herstelbaarheid, en het rapport Herstelbaarheid per maand op `/rapporten`, af te drukken als PDF en elke eerste van de maand bewaard | klaar |
 | 15. Assistent bij incidenten, risico en documentatie | Analyseer op een incident geeft in het kort wat er gebeurde, de waarschijnlijke oorzaak met bewijs, wat je nog moet controleren en wat je kunt doen, bewaard bij het incident met model en datum; Leg uit bij een bevinding van de health score en bij een SPOF; een samenvatting 'In het kort' bovenaan de documentatie van een cluster; en automatisch analyseren van nieuwe prod-incidenten, standaard uit | klaar |
+
+| Fase 4: Kubernetes | Inhoud | Status |
+| --- | --- | --- |
+| 1. Template Kubernetes (k3s) | Een Kubernetes-cluster uitrollen met k3s op Debian-VM's: één, drie of vijf servers met etcd, nul tot tien workers, en één VIP met keepalived voor kubectl en de apps; Traefik, ServiceLB, local-path en metrics-server zitten erin | klaar |
 
 ## Draaien met Docker Compose
 
@@ -242,7 +246,7 @@ De nieuwe agent herkent een sandbox aan het SMBIOS-serienummer `cf-sandbox`. Sta
 
 ## Clusters uitrollen
 
-Een template beschrijft een volledig cluster: hoeveel VM's, hoe groot, welke software erop komt en hoe ClusterForge achteraf controleert dat het werkt. De templates zitten in de server ingebouwd; bij Templates zie je ze met hun parameters en de diensten die ze in de graaf zetten. Er zijn er vier, beschreven onder [De templates](#de-templates).
+Een template beschrijft een volledig cluster: hoeveel VM's, hoe groot, welke software erop komt en hoe ClusterForge achteraf controleert dat het werkt. De templates zitten in de server ingebouwd; bij Templates zie je ze met hun parameters en de diensten die ze in de graaf zetten. Er zijn er vijf, beschreven onder [De templates](#de-templates).
 
 Wat je nodig hebt:
 
@@ -254,14 +258,14 @@ Wat je nodig hebt:
    ```
 
    Het script haalt het cloud-image van Debian, zet er qemu-guest-agent en cf-agent in met `virt-customize` (uit `libguestfs-tools`, dat het zo nodig installeert) en maakt VM-template 9000. Met `--vmid`, `--storage`, `--bridge` en `--name` kies je iets anders, en `--replace` vervangt een eerdere template. Op gedeelde storage (Ceph, NFS) verdeelt ClusterForge de VM's over de hosts; op lokale storage komen ze allemaal op de host van de template.
-3. De nieuwe VM's moeten ClusterForge kunnen bereiken: het webadres om zich aan te melden, en poort 4222 voor NATS.
+3. De nieuwe VM's moeten ClusterForge kunnen bereiken: het webadres om zich aan te melden, en poort 4222 voor NATS. Voor Kubernetes hebben ze ook internet nodig, voor k3s van GitHub en de images van je apps.
 
 Klik bij Clusters op "Cluster uitrollen", kies de template en vul de naam, de parameters (zoals het VIP), de golden image en het netwerk in. Onderaan zie je meteen welke nodes er komen, met hun adres en Proxmox-host; een fout staat bij het veld. Na "Uitrollen" loopt de taak:
 
 1. Per node de VM klonen, cores, geheugen, netwerk en cloud-init instellen, de schijf vergroten en starten.
 2. De agents aanmelden: wachten op de guest agent, via de guest agent een eenmalig aanmeldbestand in de VM zetten (`/etc/clusterforge/enroll.json`) en wachten tot cf-agent zich meldt.
 3. Per node de stappen van de template: pakketten, bestanden en services. Elke stap meldt of hij iets veranderde.
-4. Controleren: een node heeft het VIP, en bij Nginx met keepalived en Eigen applicatie antwoordt het VIP over HTTP.
+4. Controleren: een node heeft het VIP, bij Nginx met keepalived en Eigen applicatie antwoordt het VIP over HTTP, en bij Kubernetes geeft Traefik 404 op het VIP.
 5. De nodes worden actief en tellen mee voor de status van het cluster.
 
 Loopt een stap mis, dan staat bij de taak waarom. Los het op en klik op "Opnieuw proberen"; de taak gaat verder bij de stap die misliep. Wil je het cluster niet meer, verwijder dan het cluster en de nodes, en de VM's in Proxmox; ClusterForge ruimt in deze versie niets vanzelf op. Geheimen van een template, zoals het VRRP-wachtwoord, staan versleuteld met `CF_MASTER_KEY` in de database en nooit in de taak of het logboek.
@@ -270,7 +274,7 @@ Een eigen golden image kan ook: installeer cf-agent erin met `agent.sh --server 
 
 ### De templates
 
-Alle templates installeren hun software uit Debian 13, beheren alleen wat in hun stappen staat, en gebruiken geen commando's: elke stap is daardoor ook in de driftcontrole te zien. De drie met een VIP geven het met keepalived aan de node met de hoogste prioriteit waarop de bewaakte dienst draait, en na herstel keert het terug naar de eerste node.
+Alle templates behalve Kubernetes installeren hun software uit Debian 13, beheren alleen wat in hun stappen staat, en gebruiken geen commando's: elke stap is daardoor ook in de driftcontrole te zien. De vier met een VIP geven het met keepalived aan de node met de hoogste prioriteit waarop de bewaakte dienst draait, en na herstel keert het terug naar de eerste node.
 
 - **Nginx met keepalived** (`keepalived-nginx`). Twee tot vijf webservers met Nginx achter één VIP. Je eigen site zet je in `/var/www/html`.
 - **Docker-hosts** (`docker`). Een tot tien servers met `docker.io` en `docker-compose` (Compose v2, als `docker compose`) en een eigen `/etc/docker/daemon.json` met logrotatie (standaard 3 bestanden van 50 MB per container) en `live-restore`, zodat containers blijven draaien als Docker herstart. Je stacks zet je in `/opt/stacks`; welke containers er draaien, beheer je zelf, en die tellen niet mee voor drift. Er is geen VIP.
@@ -282,6 +286,8 @@ Alle templates installeren hun software uit Debian 13, beheren alleen wat in hun
 
   `cf-leader` voert het commando alleen uit als deze node het VIP heeft, en doet anders niets. Valt de node of cron uit, dan draaien de taken binnen enkele seconden op de volgende. Bij een split-brain hebben twee nodes het VIP en kan een taak dubbel draaien; de status van het cluster toont dat als split-brain. Je taken zelf beheert ClusterForge niet.
 - **Eigen applicatie** (`generic`). Een container-image, zoals `ghcr.io/jonas/app:1.4.2`, op twee tot vijf servers achter één VIP. Elke node draait hem als systemd-dienst `cf-app` met `docker run`, met de poort op het VIP en de node naar de poort in de container. Instellingen zet je per node als `NAAM=waarde` in `/etc/cf-app/app.env` (alleen voor root leesbaar); daarna `systemctl restart cf-app`. Na de uitrol moet `http://<VIP>:<poort><pad>` 200 geven. Een image uit een registry met wachtwoord kan nog niet. Kan een node de image niet ophalen, dan start de container met de image die er al staat. Deze template heeft een agent van deze versie nodig, die `cf-app` volgt en systemd de nieuwe unit laat lezen; werk daarom eerst je golden image bij.
+
+- **Kubernetes (k3s)** (`kubernetes`). Een Kubernetes-cluster met k3s; zie [Kubernetes](#kubernetes).
 
 Een uitrol zet de diensten van de template meteen in de [afhankelijkheidsgraaf](#afhankelijkheden): docker als container, cron met keepalived, en app met docker en keepalived, met de poort die je koos.
 
@@ -379,6 +385,30 @@ Elke beslissing staat in het logboek met de commit en de auteur: goedgekeurd, af
 ### Lezen
 
 De server vraagt GitHub elke minuut alleen of de branch veranderde (met een ETag, dus zonder kosten als er niets nieuws is) en leest daarna alleen de bestanden die veranderden. Nu synchroniseren leest meteen opnieuw. Lukt het lezen niet, bijvoorbeeld door een verlopen token, dan staat de fout bij de koppeling en in het logboek, en blijft alles zoals het was.
+
+## Kubernetes
+
+ClusterForge rolt Kubernetes-clusters uit met [k3s](https://docs.k3s.io): echt Kubernetes in één programma, met alles wat een cluster nodig heeft erin. Er valt niets te kiezen. Het ontwerp van deze fase staat in [docs/design/kubernetes.md](docs/design/kubernetes.md).
+
+Kies bij "Cluster uitrollen" de template Kubernetes (k3s) en vul een vrij VIP in. Standaard krijg je de vorm om te leren: één server en twee workers (samen 6 vCPU, 12 GB geheugen en 110 GB schijf). Met drie servers overleeft het cluster het uitvallen van één; een even aantal kan niet, omdat etcd een meerderheid nodig heeft.
+
+- **Servers** (`<slug>-server-01`, …) draaien de API, de scheduler en etcd, de database van het cluster. etcd staat ook met één server aan, zodat er meteen snapshots zijn: elke twaalf uur, de laatste vijf in `/var/lib/rancher/k3s/server/db/snapshots`.
+- **Workers** (`<slug>-worker-01`, …) draaien je apps. Zonder workers draaien ze op de servers.
+- **Het VIP** staat met keepalived op een server waarvan de API antwoordt. `kubectl` praat ermee op poort 6443, en Traefik beantwoordt er je apps op poort 80 en 443.
+- **In het cluster** zitten containerd, Flannel voor het netwerk tussen de nodes, CoreDNS, Traefik als ingress, ServiceLB voor Services van type LoadBalancer, local-path voor volumes op de schijf van een node, metrics-server voor `kubectl top`, en de Helm-controller.
+
+De template installeert een vaste k3s-versie (template 1.0.0: v1.35.9+k3s1) van de GitHub-release en controleert de SHA-256 met het controlebestand van die release. De instellingen staan in `/etc/rancher/k3s/config.yaml` (alleen voor root leesbaar, want het jointoken staat erin), en de driftcontrole kijkt mee. Het jointoken maakt ClusterForge zelf en bewaart het versleuteld, zoals elk geheim van een template.
+
+Kubernetes draait op VM's, niet in LXC-containers: daar vraagt het een privileged container met extra instellingen, en zo'n opstelling breekt geregeld.
+
+Na de uitrol werkt `kubectl` op elke server als root:
+
+```sh
+sudo kubectl get nodes -o wide
+sudo kubectl get pods -A
+```
+
+Een pagina Kubernetes in de webinterface, om het cluster te beheren en Kubernetes te leren, volgt in de volgende mijlpalen.
 
 ## Failovertests
 

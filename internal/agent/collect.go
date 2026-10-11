@@ -25,6 +25,8 @@ var WatchedServices = []string{
 	"cron", "qemu-guest-agent", "pve-cluster", "pveproxy", "cf-agent",
 	// De container van de template generic.
 	"cf-app",
+	// Kubernetes: k3s op een server, k3s-agent op een worker.
+	"k3s", "k3s-agent",
 }
 
 // WatchedPatterns zijn units met een variabel deel. postgresql.service is op

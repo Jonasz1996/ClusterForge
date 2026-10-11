@@ -4899,7 +4899,7 @@ components:
         username: { type: string }
     ClusterType:
       type: string
-      enum: [keepalived, nginx, docker, cron, postgresql_ha, mariadb_ha, generic]
+      enum: [keepalived, nginx, docker, cron, postgresql_ha, mariadb_ha, generic, kubernetes]
     Environment:
       type: string
       enum: [lab, test, prod]
@@ -6023,7 +6023,7 @@ components:
       enum: [string, int, bool, ipv4, cidr, size, secret]
     TemplateParam:
       type: object
-      required: [name, type, label, help, optional, immutable, default, min, max]
+      required: [name, type, label, help, optional, immutable, default, min, max, choices]
       properties:
         name: { type: string }
         type: { $ref: "#/components/schemas/TemplateParamType" }
@@ -6034,6 +6034,10 @@ components:
         default: { type: string, nullable: true }
         min: { type: string, nullable: true }
         max: { type: string, nullable: true }
+        choices:
+          type: array
+          items: { type: integer }
+          description: De toegestane waarden van een int; leeg is alles tussen min en max
     TemplateRole:
       type: object
       required: [name, count, count_param]

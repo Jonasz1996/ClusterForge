@@ -51,6 +51,7 @@ func toAPITemplate(t *templates.Template) gen.Template {
 		out.Params = append(out.Params, gen.TemplateParam{
 			Name: p.Name, Type: gen.TemplateParamType(p.Type), Label: p.Label, Help: p.Help,
 			Optional: p.Optional || p.Type == "secret", Immutable: p.Immutable, Default: str(p.Default), Min: str(p.Min), Max: str(p.Max),
+			Choices: append([]int{}, p.Choices...),
 		})
 	}
 	for _, role := range t.Roles {

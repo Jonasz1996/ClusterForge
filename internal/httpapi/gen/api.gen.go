@@ -228,6 +228,7 @@ const (
 	ClusterTypeDocker       ClusterType = "docker"
 	ClusterTypeGeneric      ClusterType = "generic"
 	ClusterTypeKeepalived   ClusterType = "keepalived"
+	ClusterTypeKubernetes   ClusterType = "kubernetes"
 	ClusterTypeMariadbHa    ClusterType = "mariadb_ha"
 	ClusterTypeNginx        ClusterType = "nginx"
 	ClusterTypePostgresqlHa ClusterType = "postgresql_ha"
@@ -243,6 +244,8 @@ func (e ClusterType) Valid() bool {
 	case ClusterTypeGeneric:
 		return true
 	case ClusterTypeKeepalived:
+		return true
+	case ClusterTypeKubernetes:
 		return true
 	case ClusterTypeMariadbHa:
 		return true
@@ -6228,6 +6231,8 @@ type Template struct {
 
 // TemplateParam defines model for TemplateParam.
 type TemplateParam struct {
+	// Choices De toegestane waarden van een int; leeg is alles tussen min en max
+	Choices []int                     `json:"choices"`
 	Default nullable.Nullable[string] `json:"default"`
 	Help    string                    `json:"help"`
 

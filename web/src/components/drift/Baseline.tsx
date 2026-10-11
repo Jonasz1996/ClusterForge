@@ -31,6 +31,7 @@ const typeDefaults: Record<ClusterDetail["type"], BaselineItems> = {
   postgresql_ha: { packages: [], services: ["postgresql"], files: [] },
   mariadb_ha: { packages: [], services: ["mariadb"], files: [] },
   generic: { packages: [], services: [], files: [] },
+  kubernetes: { packages: [], services: ["k3s"], files: ["/etc/rancher/k3s/config.yaml"] },
 };
 
 // Waarom een node nu niet vast te leggen is, of null.
