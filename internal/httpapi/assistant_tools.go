@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/Jonasz1996/clusterforge/internal/assistant"
+	"github.com/Jonasz1996/clusterforge/internal/docs"
 	"github.com/Jonasz1996/clusterforge/internal/httpapi/gen"
 	"github.com/Jonasz1996/clusterforge/internal/risk"
 	"github.com/Jonasz1996/clusterforge/internal/topo"
@@ -1283,7 +1284,88 @@ func (s *Server) assistantTools() []assistant.Tool {
 				return toolMap(m), nil
 			},
 		},
+		{
+			Name: "documentatie",
+			Description: "De documentatie die ClusterForge zelf schrijft, als Markdown. hoofdstuk overzicht (met cluster leeg): " +
+				"alle clusters, de afhankelijkheden tussen clusters, de Proxmox-hosts, de single points of failure en de open " +
+				"bevindingen. Per cluster: architectuur (nodes, VIP's, diensten en afhankelijkheden), netwerk (subnet, " +
+				"adressen, bridges, VLAN's en poorten), configuratie (template, parameters zonder geheimen, revisies), " +
+				"herstel (back-ups, controles, failovertests en wat er uitvalt) en runbooks (onderhoud, VIP verplaatsen, " +
+				"terugzetten uit back-up, uitval van een host). Goed voor een vraag als 'hoe zet ik web-01 terug'.",
+			Properties: map[string]any{
+				"cluster":   strProp(clusterDesc),
+				"hoofdstuk": enum("Welk document", "overzicht", "architectuur", "netwerk", "configuratie", "herstel", "runbooks"),
+			},
+			Required: []string{"cluster", "hoofdstuk"},
+			Label: func(in map[string]any) string {
+				if arg(in, "hoofdstuk") == "overzicht" {
+					return "Documentatie lezen: overzicht"
+				}
+				return "Documentatie lezen: " + arg(in, "hoofdstuk") + of(in)
+			},
+			Run: func(ctx context.Context, c assistant.Caller, raw json.RawMessage) (any, error) {
+				var in struct {
+					Cluster   string `json:"cluster"`
+					Hoofdstuk string `json:"hoofdstuk"`
+				}
+				if err := assistant.Decode(raw, &in); err != nil {
+					return nil, err
+				}
+				scope := docs.ScopeCluster
+				var clusterID *uuid.UUID
+				switch {
+				case in.Hoofdstuk == docs.KindOverview:
+					scope = docs.ScopeOverview
+				case strings.TrimSpace(in.Cluster) == "":
+					return nil, assistant.ToolError{Msg: "vul een cluster in, of kies hoofdstuk overzicht"}
+				default:
+					id, err := s.findCluster(ctx, c, in.Cluster)
+					if err != nil {
+						return nil, err
+					}
+					clusterID = &id
+				}
+				if !docs.Valid(scope, in.Hoofdstuk) {
+					return nil, assistant.ToolError{Msg: "onbekend hoofdstuk"}
+				}
+				var d gen.Doc
+				if err := s.view(ctx, c, func(w http.ResponseWriter, r *http.Request) {
+					s.GetDoc(w, r, scope, in.Hoofdstuk, gen.GetDocParams{Cluster: clusterID})
+				}, &d); err != nil {
+					return nil, err
+				}
+				return compact(map[string]any{
+					"document": d.Path, "versie": d.Version, "geschreven_op": d.GeneratedAt, "markdown": withoutFileContents(d.Content),
+				}), nil
+			},
+		},
 	}
+}
+
+// withoutFileContents haalt de inhoud van de beheerde bestanden en van
+// cluster.yaml uit de configuratie: die is lang, de tool drift zegt wat er
+// op een node afwijkt, en cluster.yaml noemt de SSH-sleutels.
+func withoutFileContents(md string) string {
+	var out []string
+	inFiles, fence := false, ""
+	for _, l := range strings.Split(md, "\n") {
+		if strings.HasPrefix(l, "## ") {
+			inFiles = l == "## Beheerde bestanden" || l == "## cluster.yaml"
+		}
+		if fence != "" {
+			if strings.TrimSpace(l) == fence {
+				fence = ""
+			}
+			continue
+		}
+		if inFiles && strings.HasPrefix(l, "```") {
+			fence = l[:len(l)-len(strings.TrimLeft(l, "`"))]
+			out = append(out, "(inhoud weggelaten)")
+			continue
+		}
+		out = append(out, l)
+	}
+	return strings.Join(out, "\n")
 }
 
 // toolConnections geeft de pijlen waarvoor de agents verbindingen zagen,

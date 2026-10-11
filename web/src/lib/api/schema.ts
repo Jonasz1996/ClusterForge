@@ -2254,10 +2254,236 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/docs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Alle documenten van de documentatie met hun nieuwste versie
+         * @description Het overzicht en per cluster vijf hoofdstukken. Ook voor viewers.
+         */
+        get: operations["listDocs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/docs/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Alle documenten als zip met Markdown
+         * @description De nieuwste versie van elk document, met de mappen zoals ze in Git
+         *     zouden staan: README.md en clusters/<slug>/<hoofdstuk>.md. Zonder
+         *     geheimen. Ook voor viewers.
+         */
+        get: operations["downloadDocs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/docs/generate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * De documentatie nu opnieuw schrijven (admin)
+         * @description Bewaart alleen documenten waarvan de inhoud veranderde.
+         */
+        post: operations["generateDocs"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/docs/{scope}/{kind}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description overview of cluster */
+                scope: components["parameters"]["DocScopeParam"];
+                /** @description overzicht bij scope overview; architectuur, netwerk, configuratie, herstel of runbooks bij een cluster */
+                kind: components["parameters"]["DocKindParam"];
+            };
+            cookie?: never;
+        };
+        /**
+         * Eén document als Markdown, de nieuwste versie of een oudere
+         * @description Is er nog geen versie bewaard, dan schrijft de server het document
+         *     zonder het te bewaren; version is dan leeg. Ook voor viewers.
+         */
+        get: operations["getDoc"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/docs/{scope}/{kind}/history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description overview of cluster */
+                scope: components["parameters"]["DocScopeParam"];
+                /** @description overzicht bij scope overview; architectuur, netwerk, configuratie, herstel of runbooks bij een cluster */
+                kind: components["parameters"]["DocKindParam"];
+            };
+            cookie?: never;
+        };
+        /** De bewaarde versies van een document, nieuwste eerst */
+        get: operations["getDocHistory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/docs/{scope}/{kind}/diff": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description overview of cluster */
+                scope: components["parameters"]["DocScopeParam"];
+                /** @description overzicht bij scope overview; architectuur, netwerk, configuratie, herstel of runbooks bij een cluster */
+                kind: components["parameters"]["DocKindParam"];
+            };
+            cookie?: never;
+        };
+        /** Wat er tussen twee versies van een document veranderde, als unified diff */
+        get: operations["getDocDiff"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        DocMeta: {
+            /** @enum {string} */
+            scope: "overview" | "cluster";
+            kind: string;
+            title: string;
+            /** @description Waar het in de zip staat, zoals clusters/web/netwerk.md */
+            path: string;
+            /** Format: uuid */
+            cluster_id?: string;
+            /**
+             * Format: int64
+             * @description De nieuwste bewaarde versie; leeg als er nog geen is
+             */
+            version?: number;
+            /** Format: date-time */
+            generated_at?: string;
+        };
+        DocClusterIndex: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            slug: string;
+            environment: string;
+            docs: components["schemas"]["DocMeta"][];
+            /**
+             * Format: date-time
+             * @description De nieuwste versie van een van zijn documenten
+             */
+            changed_at?: string;
+            /**
+             * Format: date-time
+             * @description Wanneer een wijziging in de documentatie komt
+             */
+            queued_until?: string;
+        };
+        DocIndex: {
+            overview: components["schemas"]["DocMeta"];
+            clusters: components["schemas"]["DocClusterIndex"][];
+            /**
+             * Format: date-time
+             * @description Wanneer een wijziging in het overzicht komt
+             */
+            queued_until?: string;
+        };
+        Doc: {
+            /** @enum {string} */
+            scope: "overview" | "cluster";
+            kind: string;
+            title: string;
+            path: string;
+            /** Format: uuid */
+            cluster_id?: string;
+            cluster_name?: string;
+            /**
+             * Format: int64
+             * @description Leeg als het document nog niet bewaard is
+             */
+            version?: number;
+            /** Format: date-time */
+            generated_at?: string;
+            /** @description De Markdown */
+            content: string;
+            sha256: string;
+            cause: string;
+            /** @description Waarom deze versie geschreven werd, zoals Na: Cluster uitgerold */
+            cause_text: string;
+        };
+        DocVersion: {
+            /** Format: int64 */
+            id: number;
+            /** Format: date-time */
+            generated_at: string;
+            sha256: string;
+            cause: string;
+            cause_text: string;
+        };
+        DocHistory: {
+            versions: components["schemas"]["DocVersion"][];
+            /** @description Hoeveel versies per document bewaard blijven */
+            keep: number;
+        };
+        DocDiff: {
+            /** Format: int64 */
+            from: number;
+            /** Format: int64 */
+            to: number;
+            diff: string;
+            /** @description Het aantal gewijzigde regels; -1 als de versies te groot zijn om te vergelijken */
+            changed: number;
+        };
+        DocGenerateResult: {
+            /** @description Hoeveel documenten een nieuwe versie kregen */
+            changed: number;
+        };
         Error: {
             /** @description Stabiele foutcode, bijvoorbeeld invalid_credentials of totp_required */
             code: string;
@@ -5070,6 +5296,12 @@ export interface components {
         };
     };
     parameters: {
+        /** @description overview of cluster */
+        DocScopeParam: string;
+        /** @description overzicht bij scope overview; architectuur, netwerk, configuratie, herstel of runbooks bij een cluster */
+        DocKindParam: string;
+        /** @description Het cluster; verplicht bij scope cluster */
+        DocClusterParam: string;
         /** @description Vanaf dit tijdstip; standaard 24 uur geleden */
         TimelineFrom: string;
         /** @description Tot (niet tot en met) dit tijdstip; standaard nu */
@@ -8703,6 +8935,167 @@ export interface operations {
                     "application/json": components["schemas"]["ClusterRisk"];
                 };
             };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    listDocs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocIndex"];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    downloadDocs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description De zip */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/zip": string;
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    generateDocs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocGenerateResult"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+        };
+    };
+    getDoc: {
+        parameters: {
+            query?: {
+                /** @description Het cluster; verplicht bij scope cluster */
+                cluster?: components["parameters"]["DocClusterParam"];
+                /** @description Een bewaarde versie uit de geschiedenis */
+                version?: number;
+            };
+            header?: never;
+            path: {
+                /** @description overview of cluster */
+                scope: components["parameters"]["DocScopeParam"];
+                /** @description overzicht bij scope overview; architectuur, netwerk, configuratie, herstel of runbooks bij een cluster */
+                kind: components["parameters"]["DocKindParam"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Doc"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    getDocHistory: {
+        parameters: {
+            query?: {
+                /** @description Het cluster; verplicht bij scope cluster */
+                cluster?: components["parameters"]["DocClusterParam"];
+            };
+            header?: never;
+            path: {
+                /** @description overview of cluster */
+                scope: components["parameters"]["DocScopeParam"];
+                /** @description overzicht bij scope overview; architectuur, netwerk, configuratie, herstel of runbooks bij een cluster */
+                kind: components["parameters"]["DocKindParam"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocHistory"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    getDocDiff: {
+        parameters: {
+            query: {
+                /** @description Het cluster; verplicht bij scope cluster */
+                cluster?: components["parameters"]["DocClusterParam"];
+                from: number;
+                to: number;
+            };
+            header?: never;
+            path: {
+                /** @description overview of cluster */
+                scope: components["parameters"]["DocScopeParam"];
+                /** @description overzicht bij scope overview; architectuur, netwerk, configuratie, herstel of runbooks bij een cluster */
+                kind: components["parameters"]["DocKindParam"];
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocDiff"];
+                };
+            };
+            400: components["responses"]["Error"];
             401: components["responses"]["Error"];
             404: components["responses"]["Error"];
         };

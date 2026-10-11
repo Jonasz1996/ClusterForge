@@ -1,0 +1,86 @@
+-- name: ListDocClusters :many
+SELECT c.id, c.slug, c.name, c.description, c.type, c.environment::text AS environment, c.tags, c.status,
+       c.spec, c.spec_revision, c.applied_revision, (c.git_repo_id IS NOT NULL)::boolean AS git_linked
+FROM clusters c
+ORDER BY lower(c.name), c.id;
+
+-- name: ListDocNodes :many
+-- De nodes van alle clusters met hun facts en of ze een agent hebben.
+SELECT n.id, n.cluster_id::uuid AS cluster_id, n.hostname, n.role, n.description, n.lifecycle::text AS lifecycle,
+       coalesce(host(n.primary_ip), '')::text AS primary_ip, n.proxmox_id, n.pve_vmid, f.facts,
+       EXISTS (SELECT 1 FROM agents a WHERE a.node_id = n.id AND a.revoked_at IS NULL)::boolean AS has_agent
+FROM nodes n
+LEFT JOIN node_facts f ON f.node_id = n.id
+WHERE n.cluster_id IS NOT NULL
+ORDER BY n.hostname, n.id;
+
+-- name: ListDocVIPs :many
+SELECT v.cluster_id, host(v.address)::text AS address, v.interface, v.vrid, v.description
+FROM vips v
+ORDER BY v.address, v.id;
+
+-- name: ListDocFailoverTests :many
+-- De failovertests met hun laatste afgeronde run.
+SELECT t.cluster_id, t.name, t.scenario, t.service, t.max_takeover_seconds, t.expect_failback, t.scheduled,
+       host(v.address)::text AS vip,
+       coalesce(lr.result, '')::text AS run_result, coalesce(lr.summary, '')::text AS run_summary,
+       lr.finished_at AS run_finished, lr.measurements AS run_measurements
+FROM failover_tests t
+JOIN vips v ON v.id = t.vip_id
+LEFT JOIN LATERAL (
+    SELECT r.result, r.summary, r.finished_at, r.measurements FROM test_runs r
+    WHERE r.test_id = t.id AND r.result IN ('pass', 'warning', 'fail', 'error') AND r.finished_at IS NOT NULL
+    ORDER BY r.finished_at DESC
+    LIMIT 1
+) lr ON true
+ORDER BY t.name, t.id;
+
+-- name: ListDocEvents :many
+-- De events na @after, met het cluster van hun node als het event zelf
+-- geen cluster heeft. De documentatie zet daarmee de clusters in de rij.
+SELECT e.id, e.action, coalesce(e.cluster_id, n.cluster_id) AS cluster_id
+FROM events e
+LEFT JOIN nodes n ON n.id::text = e.node_ref
+WHERE e.id > @after
+ORDER BY e.id
+LIMIT @lim;
+
+-- name: MaxEventID :one
+SELECT coalesce(max(id), 0)::bigint FROM events;
+
+-- name: LatestDocSnapshots :many
+-- De nieuwste versie van elk document, zonder inhoud.
+SELECT DISTINCT ON (s.scope, s.kind, s.cluster_id) s.id, s.scope, s.cluster_id, s.kind, s.sha256, s.generated_at, s.cause
+FROM doc_snapshots s
+ORDER BY s.scope, s.kind, s.cluster_id, s.id DESC;
+
+-- name: GetLatestDocSnapshot :one
+SELECT * FROM doc_snapshots
+WHERE scope = @scope AND kind = @kind AND cluster_id IS NOT DISTINCT FROM sqlc.narg(cluster_id)::uuid
+ORDER BY id DESC
+LIMIT 1;
+
+-- name: GetDocSnapshot :one
+SELECT * FROM doc_snapshots WHERE id = @id;
+
+-- name: ListDocHistory :many
+-- De versies van één document, nieuwste eerst.
+SELECT id, sha256, generated_at, cause
+FROM doc_snapshots
+WHERE scope = @scope AND kind = @kind AND cluster_id IS NOT DISTINCT FROM sqlc.narg(cluster_id)::uuid
+ORDER BY id DESC;
+
+-- name: InsertDocSnapshot :one
+INSERT INTO doc_snapshots (scope, cluster_id, kind, content, sha256, cause, generated_at)
+VALUES (@scope, sqlc.narg(cluster_id), @kind, @content, @sha256, @cause, @generated_at)
+RETURNING id;
+
+-- name: PruneDocSnapshots :exec
+-- Houdt de nieuwste @keep versies van één document.
+DELETE FROM doc_snapshots d
+WHERE d.scope = @scope AND d.kind = @kind AND d.cluster_id IS NOT DISTINCT FROM sqlc.narg(cluster_id)::uuid
+  AND d.id < (SELECT coalesce(min(k.id), 0) FROM (
+      SELECT s.id FROM doc_snapshots s
+      WHERE s.scope = @scope AND s.kind = @kind AND s.cluster_id IS NOT DISTINCT FROM sqlc.narg(cluster_id)::uuid
+      ORDER BY s.id DESC
+      LIMIT @keep) k);

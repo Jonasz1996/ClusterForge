@@ -73,6 +73,9 @@ type Config struct {
 	// JournalLogins bewaart SSH-logins in het journaal
 	// (CF_JOURNAL_SSH_LOGINS, standaard aan).
 	JournalLogins bool
+	// DocsUsernames zet bij elke revisie in de documentatie wie hem maakte
+	// (CF_DOCS_USERNAMES, standaard aan).
+	DocsUsernames bool
 }
 
 func FromEnv() (Config, error) {
@@ -81,6 +84,7 @@ func FromEnv() (Config, error) {
 		Listen:             envOr("CF_LISTEN", ":8080"),
 		SecureCookies:      true,
 		JournalLogins:      true,
+		DocsUsernames:      true,
 		SessionTTL:         12 * time.Hour,
 		DriftInterval:      15 * time.Minute,
 		SandboxBootTimeout: 10 * time.Minute,
@@ -128,6 +132,13 @@ func FromEnv() (Config, error) {
 			return c, fmt.Errorf("CF_JOURNAL_SSH_LOGINS: %w", err)
 		}
 		c.JournalLogins = b
+	}
+	if v := os.Getenv("CF_DOCS_USERNAMES"); v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return c, fmt.Errorf("CF_DOCS_USERNAMES: %w", err)
+		}
+		c.DocsUsernames = b
 	}
 	if v := os.Getenv("CF_SESSION_TTL"); v != "" {
 		d, err := time.ParseDuration(v)

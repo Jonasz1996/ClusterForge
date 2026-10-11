@@ -11,6 +11,7 @@ import { ConfirmDelete } from "@/components/inventory/ConfirmDelete";
 import { NodeForm } from "@/components/inventory/NodeForm";
 import { SpecCard } from "@/components/inventory/SpecCard";
 import { ClusterDepsCard } from "@/components/deps/ClusterDeps";
+import { ClusterDocsCard } from "@/components/docs/ClusterDocsCard";
 import { ClusterDriftCard } from "@/components/drift/Drift";
 import { FailoverBanner, FailoverCard } from "@/components/failover/Failover";
 import { GitCard } from "@/components/gitops/GitCard";
@@ -159,6 +160,7 @@ function ClusterDetailInner() {
           <ClusterDepsCard clusterId={id} isAdmin={isAdmin} />
           <FailoverCard clusterId={id} isAdmin={isAdmin} />
           <ClusterBackupsCard clusterId={id} isAdmin={isAdmin} />
+          <ClusterDocsCard clusterId={id} />
           {(jobs.data?.length ?? 0) > 0 && (
             <Card title="Taken">
               <JobList jobs={jobs.data!} />

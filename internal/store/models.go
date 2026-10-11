@@ -362,6 +362,17 @@ type ClusterSpecRevision struct {
 	CommitSha *string
 }
 
+type DocSnapshot struct {
+	ID          int64
+	Scope       string
+	ClusterID   *uuid.UUID
+	Kind        string
+	Content     string
+	Sha256      string
+	GeneratedAt time.Time
+	Cause       string
+}
+
 type DriftCheck struct {
 	NodeID          uuid.UUID
 	Status          string
