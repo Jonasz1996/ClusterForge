@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState, type ReactNode } from "react";
 import { HistoryCard } from "@/components/audit/AuditList";
 import { NodeBackupsCard } from "@/components/backups/Backups";
+import { NodeConnectionsCard } from "@/components/deps/NodeConnectionsCard";
 import { NodeDriftCard } from "@/components/drift/Drift";
 import { MetricsPanels } from "@/components/charts/MetricsPanels";
 import { JobList } from "@/components/jobs/JobList";
@@ -187,6 +188,7 @@ function NodeDetailInner() {
           )}
 
           {runtime.data?.facts && <FactsView facts={runtime.data.facts} runtime={runtime.data} />}
+          {isAdmin && node.data.agent && <NodeConnectionsCard nodeId={id} />}
           {node.data.agent && <NodeChangesCard nodeId={id} />}
           <HistoryCard filter={{ node: id }} isAdmin={isAdmin} />
         </div>

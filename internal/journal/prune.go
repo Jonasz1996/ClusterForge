@@ -11,6 +11,9 @@ import (
 const (
 	TaskRetention       = 30 * 24 * time.Hour
 	ConnectionRetention = 30 * 24 * time.Hour
+	// ConnectionHourRetention is hoe lang de verbindingen per uur blijven:
+	// het bewijs kijkt 24 uur terug.
+	ConnectionHourRetention = 48 * time.Hour
 )
 
 // Pruner ruimt het journaal, de Proxmox-taken en de verbindingen op. Hij
@@ -41,6 +44,9 @@ func (p *Pruner) Tick(ctx context.Context, now time.Time) error {
 		return err
 	}
 	if _, err := p.q.PruneObservedConnections(ctx, now.Add(-ConnectionRetention)); err != nil {
+		return err
+	}
+	if _, err := p.q.PruneConnectionHours(ctx, now.Add(-ConnectionHourRetention)); err != nil {
 		return err
 	}
 	p.last = now

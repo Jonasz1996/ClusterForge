@@ -50,7 +50,7 @@ type Filter struct {
 	// Environment toont de clusters van die omgeving plus hun directe buren.
 	Environment string
 	// Suggested toont ook voorgestelde diensten en pijlen, Ignored ook de
-	// genegeerde diensten.
+	// genegeerde diensten en pijlen.
 	Suggested bool
 	Ignored   bool
 }
@@ -86,8 +86,7 @@ func (g *Graph) Select(f Filter) ([]Svc, []Dep) {
 		}
 	}
 	edge := func(d Dep) bool {
-		return (d.State == StateConfirmed || (f.Suggested && d.State == StateSuggested)) &&
-			f.shows(g.svc[d.From].State) && f.shows(g.svc[d.To].State)
+		return f.shows(d.State) && f.shows(g.svc[d.From].State) && f.shows(g.svc[d.To].State)
 	}
 	if f.ClusterID != nil || f.Environment != "" {
 		buren := map[uuid.UUID]bool{}

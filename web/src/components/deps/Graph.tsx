@@ -18,7 +18,7 @@ import "@xyflow/react/dist/style.css";
 import { useEffect, useMemo } from "react";
 import { cx } from "@/components/ui";
 import { envInfo } from "@/lib/inventory";
-import { kindLabel, serviceStatuses, topology, visibleEdges, type DepGraph, type DepGroup, type DepService } from "@/lib/deps";
+import { kindLabel, serviceStatuses, timesSeen, topology, visibleEdges, type DepGraph, type DepGroup, type DepService } from "@/lib/deps";
 
 // De graaf: clusters zijn vakken, diensten kaartjes, en een pijl loopt van
 // afnemer naar leverancier, van links naar rechts. De layout wordt alleen
@@ -241,7 +241,10 @@ function Inner({ graph, internal, selected, highlight, onSelect, fitKey }: Graph
           target: e.to,
           zIndex: 2,
           animated: false,
-          label: graph.level === "cluster" && e.count > 1 ? String(e.count) : undefined,
+          // Ingeklapt het aantal pijlen; met verbindingen hoe vaak de agents
+          // ze de afgelopen 24 uur zagen.
+          label: graph.level === "cluster" && e.count > 1 ? String(e.count) : e.observed ? timesSeen(e.observed.count) : undefined,
+          labelStyle: e.observed ? { fontSize: 10, fill: "#64748b" } : undefined,
           markerEnd: { type: MarkerType.ArrowClosed, color, width: 16, height: 16 },
           style: {
             stroke: color,

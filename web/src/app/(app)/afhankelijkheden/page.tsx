@@ -18,8 +18,11 @@ import {
   strengthLabel,
   useDepGraph,
   useImpact,
+  timesSeen,
+  useUpdateDependency,
   useUpdateService,
   visibleEdges,
+  type DepEdge,
   type DepGraph,
   type DepGroup,
   type DepService,
@@ -109,6 +112,7 @@ function DependenciesInner() {
     setSelected(id);
   };
   const clusterName = clusterId ? graph.data?.groups.find((g) => g.cluster_id === clusterId)?.name : undefined;
+  const suggestionCount = (graph.data?.suggestions ?? 0) + (graph.data?.suggested_dependencies ?? 0);
 
   return (
     <div className="space-y-5">
@@ -149,9 +153,9 @@ function DependenciesInner() {
           }} className="hidden sm:inline-flex" />
         <Toggle label="Interne afhankelijkheden" checked={internal} onChange={setInternal} className="hidden sm:inline-flex" />
         <Toggle label="Voorstellen tonen" checked={showSuggested} onChange={setShowSuggested} />
-        {(graph.data?.suggestions ?? 0) > 0 && (
+        {suggestionCount > 0 && (
           <button type="button" className="text-brand-700 hover:underline dark:text-sky-300" onClick={() => setTab("voorstellen")}>
-            {graph.data!.suggestions === 1 ? "1 voorstel" : `${graph.data!.suggestions} voorstellen`}
+            {suggestionCount === 1 ? "1 voorstel" : `${suggestionCount} voorstellen`}
           </button>
         )}
       </div>
@@ -395,32 +399,43 @@ function ListView({
 }
 
 // Suggestions is de tab Voorstellen: wat de agents zagen en nog niet
-// bevestigd is, en wat genegeerd werd.
+// bevestigd is, en wat genegeerd werd. Diensten komen uit de units die
+// draaien, afhankelijkheden uit de verbindingen tussen diensten.
 function Suggestions({ environment, clusterId, isAdmin }: { environment: Environment | ""; clusterId: string; isAdmin: boolean }) {
   const graph = useDepGraph({
     ...(clusterId ? { cluster_id: clusterId } : {}),
     ...(environment ? { environment } : {}),
     include_suggested: true,
     include_ignored: true,
+    include_connections: true,
   });
   const idx = useMemo(() => indexGraph(graph.data), [graph.data]);
   const update = useUpdateService();
-  const err = update.error instanceof Error ? update.error.message : null;
+  const updateDep = useUpdateDependency();
+  const failed = update.error ?? updateDep.error;
+  const err = failed instanceof Error ? failed.message : null;
+  const busy = update.isPending || updateDep.isPending;
   const all = graph.data?.services ?? [];
   const suggested = all.filter((s) => s.state === "suggested" && (!clusterId || s.cluster_id === clusterId));
   const ignored = all.filter((s) => s.state === "ignored" && (!clusterId || s.cluster_id === clusterId));
+  const edges = graph.data?.edges ?? [];
+  const suggestedDeps = edges.filter((e) => e.state === "suggested");
+  const ignoredDeps = edges.filter((e) => e.state === "ignored");
   const groupName = (s: DepService) => idx.groups.get(s.group_id)?.name ?? "";
+  const arrow = (e: DepEdge) => `${label(idx, e.from)} → ${label(idx, e.to)}`;
 
   return (
     <QueryState q={graph}>
       <div className="space-y-6">
         {err && <Alert>{err}</Alert>}
+        <p className="text-sm text-slate-600 dark:text-slate-400">
+          ClusterForge stelt een dienst voor als een agent een bekende unit ziet draaien, en een afhankelijkheid als een dienst
+          verbindingen maakt met een andere. Een voorstel telt pas mee na bevestigen.
+        </p>
         <section>
-          <p className="mb-3 text-sm text-slate-600 dark:text-slate-400">
-            ClusterForge stelt een dienst voor als een agent een bekende unit ziet draaien. Een voorstel telt pas mee na bevestigen.
-          </p>
+          <h2 className="mb-2 font-semibold">Diensten</h2>
           {suggested.length === 0 ? (
-            <Empty>Geen voorstellen.</Empty>
+            <Empty>Geen voorgestelde diensten.</Empty>
           ) : (
             <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
               <table className={tableClass}>
@@ -439,12 +454,14 @@ function Suggestions({ environment, clusterId, isAdmin }: { environment: Environ
                       <td className={cx(tdClass, "font-medium")}>{s.name}</td>
                       <td className={tdClass}>{kindLabel(s.kind)}</td>
                       <td className={tdClass}>{groupName(s)}</td>
-                      <td className={cx(tdClass, "text-slate-500")}>{instancesText(s) || "nu niet"}</td>
+                      <td className={cx(tdClass, "text-slate-500")}>
+                        {s.address ? `door ${consumersOf(idx, s.id)}` : instancesText(s) || "nu niet"}
+                      </td>
                       {isAdmin && (
                         <td className={cx(tdClass, "text-right whitespace-nowrap")}>
                           <Button
                             className="px-2.5 py-1"
-                            disabled={update.isPending}
+                            disabled={busy}
                             onClick={() => update.mutate({ id: s.id, body: { state: "confirmed" } })}
                           >
                             Bevestigen
@@ -452,7 +469,7 @@ function Suggestions({ environment, clusterId, isAdmin }: { environment: Environ
                           <Button
                             variant="secondary"
                             className="px-2.5 py-1"
-                            disabled={update.isPending}
+                            disabled={busy}
                             onClick={() => update.mutate({ id: s.id, body: { state: "ignored" } })}
                           >
                             Negeren
@@ -466,10 +483,30 @@ function Suggestions({ environment, clusterId, isAdmin }: { environment: Environ
             </div>
           )}
         </section>
-        {ignored.length > 0 && (
+        <section>
+          <h2 className="mb-2 font-semibold">Afhankelijkheden</h2>
+          {suggestedDeps.length === 0 ? (
+            <Empty>Geen voorgestelde afhankelijkheden.</Empty>
+          ) : (
+            <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200 bg-white text-sm dark:divide-slate-800 dark:border-slate-800 dark:bg-slate-900">
+              {suggestedDeps.map((e) => (
+                <DepSuggestion
+                  key={e.id}
+                  e={e}
+                  idx={idx}
+                  arrow={arrow(e)}
+                  isAdmin={isAdmin}
+                  busy={busy}
+                  onState={(state) => updateDep.mutate({ id: e.id, body: { state } })}
+                />
+              ))}
+            </ul>
+          )}
+        </section>
+        {(ignored.length > 0 || ignoredDeps.length > 0) && (
           <section>
             <h2 className="mb-2 font-semibold">Genegeerd</h2>
-            <p className="mb-3 text-sm text-slate-600 dark:text-slate-400">Deze diensten tellen niet mee en worden niet opnieuw voorgesteld.</p>
+            <p className="mb-3 text-sm text-slate-600 dark:text-slate-400">Deze diensten en afhankelijkheden tellen niet mee en worden niet opnieuw voorgesteld.</p>
             <ul className="divide-y divide-slate-100 rounded-lg border border-slate-200 bg-white text-sm dark:divide-slate-800 dark:border-slate-800 dark:bg-slate-900">
               {ignored.map((s) => (
                 <li key={s.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
@@ -484,8 +521,26 @@ function Suggestions({ environment, clusterId, isAdmin }: { environment: Environ
                     <Button
                       variant="secondary"
                       className="px-2.5 py-1"
-                      disabled={update.isPending}
+                      disabled={busy}
                       onClick={() => update.mutate({ id: s.id, body: { state: s.source === "discovered" ? "suggested" : "confirmed" } })}
+                    >
+                      Terugzetten
+                    </Button>
+                  )}
+                </li>
+              ))}
+              {ignoredDeps.map((e) => (
+                <li key={e.id} className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
+                  <span>
+                    <span className="font-medium">{arrow(e)}</span>
+                    <span className="text-slate-500"> · afhankelijkheid · {sources[e.source]}</span>
+                  </span>
+                  {isAdmin && (
+                    <Button
+                      variant="secondary"
+                      className="px-2.5 py-1"
+                      disabled={busy}
+                      onClick={() => updateDep.mutate({ id: e.id, body: { state: e.source === "discovered" ? "suggested" : "confirmed" } })}
                     >
                       Terugzetten
                     </Button>
@@ -497,5 +552,72 @@ function Suggestions({ environment, clusterId, isAdmin }: { environment: Environ
         )}
       </div>
     </QueryState>
+  );
+}
+
+// consumersOf noemt wie een externe dienst gebruikt, voor een voorgestelde
+// externe dienst die uit verbindingen kwam.
+function consumersOf(idx: Index, id: string) {
+  const names = (idx.consumers.get(id) ?? []).map((e) => label(idx, e.from));
+  return names.length ? names.join(", ") : "niemand meer";
+}
+
+// DepSuggestion is één voorgestelde afhankelijkheid met het bewijs: wat de
+// agents de afgelopen 24 uur zagen, per node en adres.
+function DepSuggestion({
+  e,
+  idx,
+  arrow,
+  isAdmin,
+  busy,
+  onState,
+}: {
+  e: DepEdge;
+  idx: Index;
+  arrow: string;
+  isAdmin: boolean;
+  busy: boolean;
+  onState: (state: "confirmed" | "ignored") => void;
+}) {
+  const ends = [e.from, e.to].map((id) => idx.services.get(id)).filter((s) => s?.state === "suggested");
+  const ignoredEnd = [e.from, e.to].map((id) => idx.services.get(id)).find((s) => s?.state === "ignored");
+  const obs = e.observed;
+  return (
+    <li className="space-y-1.5 px-3 py-2.5">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <span className="font-medium">{arrow}</span>
+        {isAdmin && (
+          <span className="flex shrink-0 gap-2">
+            <Button className="px-2.5 py-1" disabled={busy || !!ignoredEnd} onClick={() => onState("confirmed")}>
+              Bevestigen
+            </Button>
+            <Button variant="secondary" className="px-2.5 py-1" disabled={busy} onClick={() => onState("ignored")}>
+              Negeren
+            </Button>
+          </span>
+        )}
+      </div>
+      <p className="text-slate-600 dark:text-slate-400">
+        {obs ? obs.text : "De agents zagen deze verbinding de afgelopen 24 uur niet meer."}
+      </p>
+      {obs && obs.lines.length > 1 && (
+        <ul className="space-y-0.5 text-xs text-slate-500">
+          {obs.lines.map((l) => (
+            <li key={`${l.node_id}-${l.unit}-${l.addr}-${l.port}`}>
+              {l.unit} op {l.hostname} naar {l.addr.includes(":") ? `[${l.addr}]` : l.addr}:{l.port} · {timesSeen(l.count)}
+            </li>
+          ))}
+        </ul>
+      )}
+      {ignoredEnd ? (
+        <p className="text-xs text-amber-700 dark:text-amber-300">{ignoredEnd.name} is genegeerd; zet die dienst eerst terug om dit te bevestigen.</p>
+      ) : (
+        ends.length > 0 && (
+          <p className="text-xs text-slate-500">
+            Bevestigen bevestigt ook {ends.map((s) => s!.name).join(" en ")}, want {ends.length === 1 ? "die is" : "die zijn"} nog een voorstel.
+          </p>
+        )
+      )}
+    </li>
   );
 }

@@ -152,6 +152,9 @@ func newTestEnv(t *testing.T) *testEnv {
 	fo.Proxmox, fo.BootTimeout = pve, 8*time.Second
 	// De resolver draait niet vanzelf; een test roept Resolve aan.
 	dps := deps.NewService(pool, ev, log)
+	// ClusterForge zelf staat in de tests op 192.0.2.5, met NATS en de
+	// webinterface.
+	dps.Self = func(context.Context) deps.Skip { return deps.SelfSkip([]string{"192.0.2.5"}, []int{4222, 8080}) }
 	// De detector heeft korte tijden, zodat een test een incident ziet
 	// sluiten.
 	det := incidents.NewDetector(pool, ev, log)

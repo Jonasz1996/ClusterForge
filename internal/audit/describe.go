@@ -519,6 +519,8 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 	case "service.created":
 		kind := paren(or(kindLabels[str(p, "kind")], str(p, "kind")))
 		switch {
+		case str(p, "source") == "discovered" && str(p, "address") != "":
+			return "Externe dienst " + name + kind + " voorgesteld" + colon(str(p, "evidence"))
 		case str(p, "source") == "discovered":
 			hosts, _ := p["hosts"].([]any)
 			return "Dienst " + name + kind + " voorgesteld in " + str(p, "scope") + prefixed(" op ", enList(hosts))
@@ -555,14 +557,31 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 		if str(p, "strength") == "soft" {
 			how = " hangt nu zacht af van "
 		}
+		if str(p, "source") == "discovered" {
+			s := "Voorstel: " + serviceIn(str(p, "consumer"), str(p, "consumer_scope")) + " hangt af van " + serviceIn(str(p, "provider"), str(p, "provider_scope"))
+			if n, ok := p["connections"].(float64); ok {
+				s += ", uit " + dotted(int64(n)) + " " + map[bool]string{true: "verbinding", false: "verbindingen"}[n == 1] + " in de afgelopen 24 uur"
+			}
+			return s
+		}
 		s := serviceIn(str(p, "consumer"), str(p, "consumer_scope")) + how + serviceIn(str(p, "provider"), str(p, "provider_scope"))
 		if str(p, "source") == "template" {
 			s += " (uit de template)"
 		}
 		return s
 	case "dependency.updated":
-		return "Afhankelijkheid van " + serviceIn(str(p, "consumer"), str(p, "consumer_scope")) + " op " +
-			serviceIn(str(p, "provider"), str(p, "provider_scope")) + " gewijzigd" + changeSummary(e.Changes)
+		arrow := "Afhankelijkheid van " + serviceIn(str(p, "consumer"), str(p, "consumer_scope")) + " op " + serviceIn(str(p, "provider"), str(p, "provider_scope"))
+		if len(e.Changes) == 1 && e.Changes[0].Field == "state" {
+			switch m, _ := p["state"].(map[string]any); text(m["to"]) {
+			case "confirmed":
+				return arrow + " bevestigd"
+			case "ignored":
+				return arrow + " genegeerd"
+			case "suggested":
+				return arrow + " teruggezet als voorstel"
+			}
+		}
+		return arrow + " gewijzigd" + changeSummary(e.Changes)
 	case "dependency.deleted":
 		return "Afhankelijkheid van " + serviceIn(str(p, "consumer"), str(p, "consumer_scope")) + " op " +
 			serviceIn(str(p, "provider"), str(p, "provider_scope")) + " verwijderd"
@@ -770,7 +789,7 @@ var fieldLabels = map[string][][2]string{
 		{"expect_failback", "Terug naar de oorspronkelijke node"}, {"probe", "Probe"}, {"scheduled", "Gepland in het testvenster"}},
 	"service": {{"name", "Naam"}, {"kind", "Soort"}, {"unit", "Unit"}, {"port", "Poort"}, {"address", "Adres"},
 		{"description", "Omschrijving"}, {"state", "Staat"}},
-	"dependency":            {{"strength", "Sterkte"}, {"note", "Notitie"}},
+	"dependency":            {{"strength", "Sterkte"}, {"note", "Notitie"}, {"state", "Staat"}},
 	"backup.policy_updated": {{"max_age_hours", "Maximale leeftijd in uren"}, {"verify_enabled", "Geplande back-upcontrole"}},
 	"backup.watch_updated":  {{"watch", "Ook bewaken"}},
 	"gitops.repo_updated": {{"repo", "Repository"}, {"branch", "Branch"}, {"path", "Map"}, {"api_url", "API-adres"},
@@ -911,6 +930,19 @@ func num(v any) string { return text(v) }
 func dollars(v any) string {
 	f, _ := v.(float64)
 	return "$" + strings.Replace(strconv.FormatFloat(f, 'f', 2, 64), ".", ",", 1)
+}
+
+// dotted schrijft 1240 als 1.240.
+func dotted(n int64) string {
+	s := strconv.FormatInt(n, 10)
+	var b strings.Builder
+	for i, r := range s {
+		if i > 0 && (len(s)-i)%3 == 0 {
+			b.WriteByte('.')
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }
 
 // count geeft "1 afwijking" of "4 afwijkingen".

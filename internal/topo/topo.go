@@ -318,6 +318,10 @@ func (s *Service) Load(ctx context.Context) (Model, error) {
 	return m, nil
 }
 
+// OwnIPs geeft de IP-adressen van deze server en die waarmee de nodes hem
+// bereiken.
+func (s *Service) OwnIPs(ctx context.Context) []string { return s.ownAddresses(ctx).IPs }
+
 // ownAddresses geeft de eigen adressen, hoogstens elke ownTTL opnieuw
 // opgezocht, of meteen als de hints veranderden.
 func (s *Service) ownAddresses(ctx context.Context) Own {

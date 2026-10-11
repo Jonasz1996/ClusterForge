@@ -42,7 +42,8 @@ type proposal struct {
 }
 
 // Resolve maakt van bekende units op de actieve nodes van een cluster
-// voorgestelde diensten. Hoort een unit in dat cluster al bij een dienst, in
+// voorgestelde diensten, en van de verbindingen die de agents zien
+// voorgestelde afhankelijkheden (discover). Hoort een unit in dat cluster al bij een dienst, in
 // welke staat ook, dan komt er geen voorstel en schuift alleen last_seen_at
 // op. Elk voorstel is een eigen savepoint: één rij die niet lukt, houdt de
 // rest niet tegen.
@@ -94,7 +95,9 @@ func (s *Service) Resolve(ctx context.Context) error {
 			s.log.Error("voorstellen voor cluster mislukt", "cluster", c.Name, "err", err)
 		}
 	}
-	return nil
+	// Daarna de afhankelijkheden uit de verbindingen, zodat een dienst die
+	// net voorgesteld is meteen als afnemer of leverancier meetelt.
+	return s.discover(ctx)
 }
 
 func (s *Service) resolveCluster(ctx context.Context, c store.ListDepClustersRow, props []proposal, now time.Time) error {

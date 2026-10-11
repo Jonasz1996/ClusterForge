@@ -369,6 +369,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/nodes/{nodeId}/connections": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * De TCP-verbindingen die de agent de afgelopen 24 uur zag (admin)
+         * @description Uitgaand per unit, adres en poort, met waar het heen gaat. Inkomend per
+         *     eigen poort; de afzender staat er alleen bij als het een node is, alle
+         *     andere adressen zijn samengeteld.
+         */
+        get: operations["getNodeConnections"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/nodes/{nodeId}/actions": {
         parameters: {
             query?: never;
@@ -1489,7 +1513,10 @@ export interface paths {
         delete: operations["deleteDependency"];
         options?: never;
         head?: never;
-        /** Sterkte of notitie van een afhankelijkheid wijzigen (admin) */
+        /**
+         * Sterkte of notitie van een afhankelijkheid wijzigen, of een voorstel bevestigen, negeren of terugzetten (admin)
+         * @description Bevestigen bevestigt ook een voorgestelde dienst aan een van beide kanten. Is een van beide genegeerd, dan antwoordt de server 409.
+         */
         patch: operations["updateDependency"];
         trace?: never;
     };
@@ -4531,6 +4558,96 @@ export interface components {
             affected: boolean;
             /** @description Hoeveel pijlen samengevoegd zijn; 1 per dienst */
             count: number;
+            /** @description Met include_connections wat de agents de afgelopen 24 uur zagen; null zonder, of als ze niets zagen */
+            observed: components["schemas"]["DepObserved"] | null;
+        };
+        DepObserved: {
+            /**
+             * Format: int64
+             * @description Hoe vaak een agent de verbindingen zag in de afgelopen 24 uur: hij kijkt elke minuut
+             */
+            count: number;
+            /** Format: date-time */
+            first_seen: string;
+            /** Format: date-time */
+            last_seen: string;
+            /** @description Het bewijs in woorden, zoals 'php8.2-fpm op web-01 → mariadb in db-prod: 1.240 verbindingen gezien naar 10.0.30.100:3306 in de afgelopen 24 uur' */
+            text: string;
+            /** @description Per unit, node en adres; hoogstens 10 */
+            lines: components["schemas"]["DepObservedLine"][];
+        };
+        DepObservedLine: {
+            /** Format: uuid */
+            node_id: string;
+            hostname: string;
+            unit: string;
+            addr: string;
+            port: number;
+            /** Format: int64 */
+            count: number;
+            /** Format: date-time */
+            last_seen: string;
+        };
+        NodeConnections: {
+            /** @description De agent meldt verbindingen (protocol 5 of nieuwer) */
+            supported: boolean;
+            out: components["schemas"]["NodeConnOut"][];
+            in: components["schemas"]["NodeConnIn"][];
+        };
+        NodeConnOut: {
+            /** @description Leeg als de agent de unit niet zag */
+            unit: string;
+            addr: string;
+            port: number;
+            /**
+             * Format: int64
+             * @description Hoe vaak gezien in de afgelopen 24 uur
+             */
+            count: number;
+            /** Format: date-time */
+            first_seen: string;
+            /** Format: date-time */
+            last_seen: string;
+            /**
+             * @description Een dienst; een node of VIP zonder dienst op die poort; ClusterForge zelf; of een onbekend adres
+             * @enum {string}
+             */
+            dest: "service" | "node" | "vip" | "clusterforge" | "unknown";
+            /** @description Zoals 'mariadb in db-prod', 'web-02' of 'VIP van db-prod' */
+            dest_label: string;
+            /**
+             * Format: uuid
+             * @description De dienst die de verbinding maakte
+             */
+            from_service_id: string | null;
+            /** Format: uuid */
+            service_id: string | null;
+            /** Format: uuid */
+            node_id: string | null;
+            /** Format: uuid */
+            cluster_id: string | null;
+            /**
+             * Format: uuid
+             * @description De pijl tussen de twee diensten, als die er is
+             */
+            dependency_id: string | null;
+            dependency_state: components["schemas"]["ServiceState"] | null;
+        };
+        NodeConnIn: {
+            unit: string;
+            port: number;
+            /**
+             * Format: uuid
+             * @description De afzender als het een node is; null voor alle andere adressen samen
+             */
+            peer_node_id: string | null;
+            peer_hostname: string;
+            /** Format: int64 */
+            count: number;
+            /** Format: date-time */
+            first_seen: string;
+            /** Format: date-time */
+            last_seen: string;
         };
         DependencyGraph: {
             /** @enum {string} */
@@ -4540,6 +4657,8 @@ export interface components {
             edges: components["schemas"]["DepEdge"][];
             /** @description Voorgestelde diensten binnen het filter */
             suggestions: number;
+            /** @description Voorgestelde afhankelijkheden binnen het filter */
+            suggested_dependencies: number;
         };
         ServiceInput: {
             /** Format: uuid */
@@ -4583,6 +4702,7 @@ export interface components {
         DependencyPatch: {
             strength?: components["schemas"]["DependencyStrength"];
             note?: string;
+            state?: components["schemas"]["ServiceState"];
         };
         ImpactItem: {
             /** Format: uuid */
@@ -5707,6 +5827,31 @@ export interface operations {
                 };
             };
             401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    getNodeConnections: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NodeConnections"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
             404: components["responses"]["Error"];
         };
     };
@@ -7314,8 +7459,10 @@ export interface operations {
                 environment?: components["schemas"]["Environment"];
                 /** @description Ook voorgestelde diensten */
                 include_suggested?: boolean;
-                /** @description Ook genegeerde diensten */
+                /** @description Ook genegeerde diensten en pijlen, om ze terug te zetten */
                 include_ignored?: boolean;
+                /** @description Per pijl wat de agents de afgelopen 24 uur zagen (observed) */
+                include_connections?: boolean;
                 level?: "service" | "cluster";
             };
             header?: never;
@@ -7498,6 +7645,7 @@ export interface operations {
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
         };
     };
     getImpact: {

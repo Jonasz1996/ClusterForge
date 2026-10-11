@@ -87,6 +87,70 @@ func (b *InsertNodeChangesBatchResults) Close() error {
 	return b.br.Close()
 }
 
+const upsertConnectionHours = `-- name: UpsertConnectionHours :batchexec
+INSERT INTO observed_connection_hours (node_id, unit, direction, peer_addr, peer_port, local_port, hour, samples)
+VALUES ($1, $2, $3, $4, $5, $6, date_trunc('hour', $8::timestamptz), $7)
+ON CONFLICT (node_id, unit, direction, peer_addr, peer_port, local_port, hour) DO UPDATE
+SET samples = observed_connection_hours.samples + EXCLUDED.samples
+`
+
+type UpsertConnectionHoursBatchResults struct {
+	br     pgx.BatchResults
+	tot    int
+	closed bool
+}
+
+type UpsertConnectionHoursParams struct {
+	NodeID    uuid.UUID
+	Unit      string
+	Direction string
+	PeerAddr  string
+	PeerPort  int32
+	LocalPort int32
+	Samples   int64
+	Seen      time.Time
+}
+
+func (q *Queries) UpsertConnectionHours(ctx context.Context, arg []UpsertConnectionHoursParams) *UpsertConnectionHoursBatchResults {
+	batch := &pgx.Batch{}
+	for _, a := range arg {
+		vals := []interface{}{
+			a.NodeID,
+			a.Unit,
+			a.Direction,
+			a.PeerAddr,
+			a.PeerPort,
+			a.LocalPort,
+			a.Samples,
+			a.Seen,
+		}
+		batch.Queue(upsertConnectionHours, vals...)
+	}
+	br := q.db.SendBatch(ctx, batch)
+	return &UpsertConnectionHoursBatchResults{br, len(arg), false}
+}
+
+func (b *UpsertConnectionHoursBatchResults) Exec(f func(int, error)) {
+	defer b.br.Close()
+	for t := 0; t < b.tot; t++ {
+		if b.closed {
+			if f != nil {
+				f(t, ErrBatchAlreadyClosed)
+			}
+			continue
+		}
+		_, err := b.br.Exec()
+		if f != nil {
+			f(t, err)
+		}
+	}
+}
+
+func (b *UpsertConnectionHoursBatchResults) Close() error {
+	b.closed = true
+	return b.br.Close()
+}
+
 const upsertObservedConnections = `-- name: UpsertObservedConnections :batchexec
 INSERT INTO observed_connections (node_id, unit, direction, peer_addr, peer_port, local_port, first_seen, last_seen, samples)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $7, $8)

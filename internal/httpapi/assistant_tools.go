@@ -2,11 +2,13 @@ package httpapi
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
 	"math"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -1232,10 +1234,12 @@ func (s *Server) assistantTools() []assistant.Tool {
 			Description: "De infrastructuurkaart als lijst. laag fysiek: per Proxmox-host de VM's met hun cluster en status, " +
 				"en de storage waarop hun schijven staan; gedeelde storage hoort bij geen host. laag netwerk: de subnetten " +
 				"met hun VLAN en nodes, de bridges van de hosts met hun poorten, de gateways, de VIP's met hun huidige " +
-				"eigenaar en de VRRP-peers. Met een cluster alleen wat bij dat cluster hoort. Welke dienst van welke " +
-				"afhangt, geeft de tool impact.",
+				"eigenaar en de VRRP-peers. laag verbindingen: welke dienst met welke praat volgens de TCP-verbindingen " +
+				"die de agents de afgelopen 24 uur zagen, met de staat van de afhankelijkheid (bevestigd, voorstel of " +
+				"genegeerd) en het bewijs. Met een cluster alleen wat bij dat cluster hoort. Wat uitval van een dienst " +
+				"raakt, geeft de tool impact.",
 			Properties: map[string]any{
-				"laag":    enum("Welke laag", "fysiek", "netwerk"),
+				"laag":    enum("Welke laag", "fysiek", "netwerk", "verbindingen"),
 				"cluster": strProp(clusterDesc),
 			},
 			Required: []string{"laag", "cluster"},
@@ -1248,20 +1252,29 @@ func (s *Server) assistantTools() []assistant.Tool {
 				if err := assistant.Decode(raw, &in); err != nil {
 					return nil, err
 				}
-				p := gen.GetMapParams{Layer: gen.GetMapParamsLayerPhysical}
-				switch in.Laag {
-				case "fysiek":
-				case "netwerk":
-					p.Layer = gen.GetMapParamsLayerNetwork
-				default:
-					return nil, assistant.ToolError{Msg: "laag moet fysiek of netwerk zijn"}
-				}
+				var clusterID *uuid.UUID
 				if strings.TrimSpace(in.Cluster) != "" {
 					id, err := s.findCluster(ctx, c, in.Cluster)
 					if err != nil {
 						return nil, err
 					}
-					p.ClusterId = &id
+					clusterID = &id
+				}
+				p := gen.GetMapParams{Layer: gen.GetMapParamsLayerPhysical, ClusterId: clusterID}
+				switch in.Laag {
+				case "fysiek":
+				case "netwerk":
+					p.Layer = gen.GetMapParamsLayerNetwork
+				case "verbindingen":
+					yes := true
+					dp := gen.GetDependencyGraphParams{ClusterId: clusterID, IncludeSuggested: &yes, IncludeIgnored: &yes, IncludeConnections: &yes}
+					var g gen.DependencyGraph
+					if err := s.view(ctx, c, func(w http.ResponseWriter, r *http.Request) { s.GetDependencyGraph(w, r, dp) }, &g); err != nil {
+						return nil, err
+					}
+					return toolConnections(g), nil
+				default:
+					return nil, assistant.ToolError{Msg: "laag moet fysiek, netwerk of verbindingen zijn"}
 				}
 				var m topo.Map
 				if err := s.view(ctx, c, func(w http.ResponseWriter, r *http.Request) { s.GetMap(w, r, p) }, &m); err != nil {
@@ -1271,6 +1284,33 @@ func (s *Server) assistantTools() []assistant.Tool {
 			},
 		},
 	}
+}
+
+// toolConnections geeft de pijlen waarvoor de agents verbindingen zagen,
+// met hun staat en het bewijs, de drukste eerst.
+func toolConnections(g gen.DependencyGraph) any {
+	states := map[gen.ServiceState]string{gen.Confirmed: "bevestigd", gen.Suggested: "voorstel", gen.Ignored: "genegeerd"}
+	var seen []gen.DepEdge
+	for _, e := range g.Edges {
+		if e.Observed.IsSpecified() && !e.Observed.IsNull() {
+			seen = append(seen, e)
+		}
+	}
+	slices.SortFunc(seen, func(a, b gen.DepEdge) int { return cmp.Compare(b.Observed.MustGet().Count, a.Observed.MustGet().Count) })
+	lines := make([]any, 0, len(seen))
+	for _, e := range seen {
+		lines = append(lines, map[string]any{"staat": states[e.State], "bewijs": e.Observed.MustGet().Text})
+	}
+	out := map[string]any{"laag": "verbindingen"}
+	if len(lines) == 0 {
+		out["opmerking"] = "de agents zagen de afgelopen 24 uur geen verbindingen tussen diensten; daarvoor is agent 0.5 " +
+			"(protocol 5) nodig, en de afnemer moet een dienst zijn"
+		return out
+	}
+	if g.SuggestedDependencies > 0 {
+		out["voorstellen"] = g.SuggestedDependencies
+	}
+	return withList(out, "verbindingen", lines, false, false)
 }
 
 // toolMap schrijft een laag van de kaart als lijst: elk element met zijn

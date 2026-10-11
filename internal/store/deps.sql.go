@@ -640,19 +640,25 @@ func (q *Queries) UpdateService(ctx context.Context, arg UpdateServiceParams) (S
 }
 
 const updateServiceDependency = `-- name: UpdateServiceDependency :one
-UPDATE service_dependencies SET strength = $1, note = $2, updated_at = now()
-WHERE id = $3
+UPDATE service_dependencies SET strength = $1, note = $2, state = $3, updated_at = now()
+WHERE id = $4
 RETURNING id, from_service_id, to_service_id, strength, source, state, note, created_at, updated_at
 `
 
 type UpdateServiceDependencyParams struct {
 	Strength string
 	Note     string
+	State    string
 	ID       uuid.UUID
 }
 
 func (q *Queries) UpdateServiceDependency(ctx context.Context, arg UpdateServiceDependencyParams) (ServiceDependency, error) {
-	row := q.db.QueryRow(ctx, updateServiceDependency, arg.Strength, arg.Note, arg.ID)
+	row := q.db.QueryRow(ctx, updateServiceDependency,
+		arg.Strength,
+		arg.Note,
+		arg.State,
+		arg.ID,
+	)
 	var i ServiceDependency
 	err := row.Scan(
 		&i.ID,

@@ -116,8 +116,9 @@ func (b *Bus) handleChanges(ctx context.Context, nodeID uuid.UUID, c protocol.Ch
 // SetJournalLogins zet het bewaren van SSH-logins uit de agents aan of uit.
 func (b *Bus) SetJournalLogins(on bool) { b.noLogins = !on }
 
-// handleConns telt de verbindingen bij. Van een inkomende verbinding blijft
-// de afzender alleen staan als het een bekende node is.
+// handleConns telt de verbindingen bij, in totaal en per uur. Van een
+// inkomende verbinding blijft de afzender alleen staan als het een bekende
+// node is.
 func (b *Bus) handleConns(ctx context.Context, nodeID uuid.UUID, c protocol.Conns, received time.Time) error {
 	known, err := b.q.ListKnownNodeAddresses(ctx)
 	if err != nil {
@@ -160,18 +161,25 @@ func (b *Bus) handleConns(ctx context.Context, nodeID uuid.UUID, c protocol.Conn
 		return nil
 	}
 	params := make([]store.UpsertObservedConnectionsParams, 0, len(sum))
+	hours := make([]store.UpsertConnectionHoursParams, 0, len(sum))
 	for k, n := range sum {
 		params = append(params, store.UpsertObservedConnectionsParams{
 			NodeID: nodeID, Unit: k.unit, Direction: k.dir, PeerAddr: k.addr, PeerPort: int32(k.peerPort),
 			LocalPort: int32(k.local), FirstSeen: received, Samples: n,
 		})
+		hours = append(hours, store.UpsertConnectionHoursParams{
+			NodeID: nodeID, Unit: k.unit, Direction: k.dir, PeerAddr: k.addr, PeerPort: int32(k.peerPort),
+			LocalPort: int32(k.local), Seen: received, Samples: n,
+		})
 	}
 	var batchErr error
-	b.q.UpsertObservedConnections(ctx, params).Exec(func(_ int, err error) {
+	keep := func(_ int, err error) {
 		if err != nil && batchErr == nil {
 			batchErr = err
 		}
-	})
+	}
+	b.q.UpsertObservedConnections(ctx, params).Exec(keep)
+	b.q.UpsertConnectionHours(ctx, hours).Exec(keep)
 	return batchErr
 }
 

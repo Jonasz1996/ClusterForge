@@ -46,7 +46,11 @@ const lagen: { id: Laag; label: string; hint: string }[] = [
     label: "Netwerk",
     hint: "Bridges en VLAN's van de hosts, de subnetten met hun nodes, de gateways en de VIP's met hun huidige eigenaar.",
   },
-  { id: "diensten", label: "Diensten", hint: "De afhankelijkheden tussen diensten, zoals op Afhankelijkheden." },
+  {
+    id: "diensten",
+    label: "Diensten",
+    hint: "De afhankelijkheden tussen diensten, zoals op Afhankelijkheden. Het getal op een lijn is hoe vaak de agents de afgelopen 24 uur een verbinding zagen.",
+  },
 ];
 
 export default function MapPage() {
@@ -101,7 +105,10 @@ function MapInner() {
   const filter = { ...(environment ? { environment } : {}), ...(clusterId ? { cluster_id: clusterId } : {}) };
   const layer = laag === "netwerk" ? "network" : "physical";
   const map = useMap(layer, filter, laag !== "diensten");
-  const deps = useDepGraph({ ...filter, level: "service", include_suggested: true }, laag === "diensten");
+  const deps = useDepGraph(
+    { ...filter, level: "service", include_suggested: true, include_connections: true },
+    laag === "diensten",
+  );
   const clusters = useClusters();
   const links = useNodeLinks();
   const whatIf = useWhatIf(incidentId ? [] : onderdelen);
