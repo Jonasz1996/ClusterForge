@@ -118,6 +118,9 @@ var Known = map[string]Spec{
 	"vm.status_changed":             {CategoryProxmox, "Status van VM gewijzigd"},
 	"vm.moved":                      {CategoryProxmox, "VM verhuisd"},
 	"vm.missing":                    {CategoryProxmox, "VM verdwenen uit Proxmox"},
+	"node.link_proposed":            {CategoryProxmox, "Koppeling van node aan VM voorgesteld"},
+	"node.link_confirmed":           {CategoryProxmox, "Voorgestelde koppeling bevestigd"},
+	"node.link_ignored":             {CategoryProxmox, "Voorgestelde koppeling genegeerd"},
 
 	"backup.fresh":                      {CategoryBackups, "Back-up weer vers"},
 	"backup.stale":                      {CategoryBackups, "Back-up te oud"},

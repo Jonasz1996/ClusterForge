@@ -770,22 +770,22 @@ func (e IncidentCauseLevel) Valid() bool {
 
 // Defines values for IncidentFindingMetric.
 const (
-	Cpu           IncidentFindingMetric = "cpu"
-	Disk          IncidentFindingMetric = "disk"
-	Memory        IncidentFindingMetric = "memory"
-	NetworkErrors IncidentFindingMetric = "network_errors"
+	IncidentFindingMetricCpu           IncidentFindingMetric = "cpu"
+	IncidentFindingMetricDisk          IncidentFindingMetric = "disk"
+	IncidentFindingMetricMemory        IncidentFindingMetric = "memory"
+	IncidentFindingMetricNetworkErrors IncidentFindingMetric = "network_errors"
 )
 
 // Valid indicates whether the value is a known member of the IncidentFindingMetric enum.
 func (e IncidentFindingMetric) Valid() bool {
 	switch e {
-	case Cpu:
+	case IncidentFindingMetricCpu:
 		return true
-	case Disk:
+	case IncidentFindingMetricDisk:
 		return true
-	case Memory:
+	case IncidentFindingMetricMemory:
 		return true
-	case NetworkErrors:
+	case IncidentFindingMetricNetworkErrors:
 		return true
 	default:
 		return false
@@ -855,6 +855,90 @@ func (e JobStatus) Valid() bool {
 	case JobStatusRunning:
 		return true
 	case JobStatusSucceeded:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MapEdgeKind.
+const (
+	MapEdgeKindDisk    MapEdgeKind = "disk"
+	MapEdgeKindGateway MapEdgeKind = "gateway"
+	MapEdgeKindMember  MapEdgeKind = "member"
+	MapEdgeKindOwner   MapEdgeKind = "owner"
+	MapEdgeKindUplink  MapEdgeKind = "uplink"
+	MapEdgeKindVrrp    MapEdgeKind = "vrrp"
+)
+
+// Valid indicates whether the value is a known member of the MapEdgeKind enum.
+func (e MapEdgeKind) Valid() bool {
+	switch e {
+	case MapEdgeKindDisk:
+		return true
+	case MapEdgeKindGateway:
+		return true
+	case MapEdgeKindMember:
+		return true
+	case MapEdgeKindOwner:
+		return true
+	case MapEdgeKindUplink:
+		return true
+	case MapEdgeKindVrrp:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MapItemKind.
+const (
+	MapItemKindBridge  MapItemKind = "bridge"
+	MapItemKindGateway MapItemKind = "gateway"
+	MapItemKindGuest   MapItemKind = "guest"
+	MapItemKindHost    MapItemKind = "host"
+	MapItemKindNode    MapItemKind = "node"
+	MapItemKindStorage MapItemKind = "storage"
+	MapItemKindSubnet  MapItemKind = "subnet"
+	MapItemKindVip     MapItemKind = "vip"
+)
+
+// Valid indicates whether the value is a known member of the MapItemKind enum.
+func (e MapItemKind) Valid() bool {
+	switch e {
+	case MapItemKindBridge:
+		return true
+	case MapItemKindGateway:
+		return true
+	case MapItemKindGuest:
+		return true
+	case MapItemKindHost:
+		return true
+	case MapItemKindNode:
+		return true
+	case MapItemKindStorage:
+		return true
+	case MapItemKindSubnet:
+		return true
+	case MapItemKindVip:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for MapLayerLayer.
+const (
+	MapLayerLayerNetwork  MapLayerLayer = "network"
+	MapLayerLayerPhysical MapLayerLayer = "physical"
+)
+
+// Valid indicates whether the value is a known member of the MapLayerLayer enum.
+func (e MapLayerLayer) Valid() bool {
+	switch e {
+	case MapLayerLayerNetwork:
+		return true
+	case MapLayerLayerPhysical:
 		return true
 	default:
 		return false
@@ -1011,6 +1095,24 @@ func (e NodeLifecycle) Valid() bool {
 	}
 }
 
+// Defines values for NodeLinkGuestType.
+const (
+	NodeLinkGuestTypeLxc  NodeLinkGuestType = "lxc"
+	NodeLinkGuestTypeQemu NodeLinkGuestType = "qemu"
+)
+
+// Valid indicates whether the value is a known member of the NodeLinkGuestType enum.
+func (e NodeLinkGuestType) Valid() bool {
+	switch e {
+	case NodeLinkGuestTypeLxc:
+		return true
+	case NodeLinkGuestTypeQemu:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for RiskCardId.
 const (
 	RiskCardIdAvailability  RiskCardId = "availability"
@@ -1092,6 +1194,24 @@ func (e RiskGuestOutcomeOutcome) Valid() bool {
 	case RiskGuestOutcomeOutcomePartial:
 		return true
 	case RiskGuestOutcomeOutcomeRestarted:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RiskNodeOutcomeOutcome.
+const (
+	RiskNodeOutcomeOutcomeDown      RiskNodeOutcomeOutcome = "down"
+	RiskNodeOutcomeOutcomeRestarted RiskNodeOutcomeOutcome = "restarted"
+)
+
+// Valid indicates whether the value is a known member of the RiskNodeOutcomeOutcome enum.
+func (e RiskNodeOutcomeOutcome) Valid() bool {
+	switch e {
+	case RiskNodeOutcomeOutcomeDown:
+		return true
+	case RiskNodeOutcomeOutcomeRestarted:
 		return true
 	default:
 		return false
@@ -1692,6 +1812,24 @@ func (e ListIncidentsParamsStatus) Valid() bool {
 	case ListIncidentsParamsStatusOpen:
 		return true
 	case ListIncidentsParamsStatusResolved:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetMapParamsLayer.
+const (
+	GetMapParamsLayerNetwork  GetMapParamsLayer = "network"
+	GetMapParamsLayerPhysical GetMapParamsLayer = "physical"
+)
+
+// Valid indicates whether the value is a known member of the GetMapParamsLayer enum.
+func (e GetMapParamsLayer) Valid() bool {
+	switch e {
+	case GetMapParamsLayerNetwork:
+		return true
+	case GetMapParamsLayerPhysical:
 		return true
 	default:
 		return false
@@ -3482,6 +3620,39 @@ type HeartbeatStatus struct {
 	UptimeSeconds int64             `json:"uptime_seconds"`
 }
 
+// HostInterface defines model for HostInterface.
+type HostInterface struct {
+	Active   bool                   `json:"active"`
+	Cidr     string                 `json:"cidr"`
+	Cidr6    string                 `json:"cidr6"`
+	Comments string                 `json:"comments"`
+	Gateway  string                 `json:"gateway"`
+	Gateway6 string                 `json:"gateway6"`
+	Iface    string                 `json:"iface"`
+	Mtu      nullable.Nullable[int] `json:"mtu"`
+	Ports    []string               `json:"ports"`
+
+	// Type bridge, bond, eth, vlan, alias, OVSBridge, OVSBond, OVSPort, OVSIntPort of unknown
+	Type          string                 `json:"type"`
+	VlanAware     bool                   `json:"vlan_aware"`
+	VlanId        nullable.Nullable[int] `json:"vlan_id"`
+	VlanRawDevice string                 `json:"vlan_raw_device"`
+}
+
+// HostNetwork defines model for HostNetwork.
+type HostNetwork struct {
+	// Error De fout van de laatste keer lezen; de interfaces zijn dan van daarvoor
+	Error      string          `json:"error"`
+	Host       string          `json:"host"`
+	Interfaces []HostInterface `json:"interfaces"`
+	ReadAt     time.Time       `json:"read_at"`
+}
+
+// HostNetworkList defines model for HostNetworkList.
+type HostNetworkList struct {
+	Hosts []HostNetwork `json:"hosts"`
+}
+
 // Impact defines model for Impact.
 type Impact struct {
 	// Groups Per groep de ergste impact
@@ -3772,6 +3943,74 @@ type LoginRequest struct {
 	Username string  `json:"username"`
 }
 
+// MapEdge defines model for MapEdge.
+type MapEdge struct {
+	From string `json:"from"`
+	Id   string `json:"id"`
+
+	// Kind disk: een gast naar de storage van zijn schijven; member: een
+	// subnet naar een node; uplink: een bridge naar een subnet; gateway;
+	// owner: een VIP naar zijn eigenaar; vrrp: keepalived-peers
+	Kind  MapEdgeKind `json:"kind"`
+	Label string      `json:"label"`
+	To    string      `json:"to"`
+}
+
+// MapEdgeKind disk: een gast naar de storage van zijn schijven; member: een
+// subnet naar een node; uplink: een bridge naar een subnet; gateway;
+// owner: een VIP naar zijn eigenaar; vrrp: keepalived-peers
+type MapEdgeKind string
+
+// MapItem defines model for MapItem.
+type MapItem struct {
+	Cluster   string                                `json:"cluster"`
+	ClusterId nullable.Nullable[openapi_types.UUID] `json:"cluster_id"`
+
+	// Detail Eén regel onder de naam
+	Detail      string `json:"detail"`
+	Environment string `json:"environment"`
+	Facts       []struct {
+		Label string `json:"label"`
+		Value string `json:"value"`
+	} `json:"facts"`
+
+	// Id Zoals host:<koppeling>:pve1, storage:<koppeling>:ceph,
+	// storage:<koppeling>:local-lvm@pve1, bridge:<koppeling>:pve1:vmbr0,
+	// guest:<koppeling>:101, node:<id>, subnet:10.0.20.0/24,
+	// gateway:10.0.20.1 of vip:<id>; dezelfde sleutels als de wat-als
+	Id   string      `json:"id"`
+	Kind MapItemKind `json:"kind"`
+
+	// Link Het scherm van dit onderdeel
+	Link   string                                `json:"link"`
+	Name   string                                `json:"name"`
+	NodeId nullable.Nullable[openapi_types.UUID] `json:"node_id"`
+
+	// Parent De host waarin hij getekend wordt; leeg staat hij los
+	Parent string `json:"parent"`
+
+	// Self De VM waarop ClusterForge zelf draait
+	Self bool `json:"self"`
+
+	// Status Berekend uit heartbeats, metrics en VIP's (zie internal/status).
+	// unknown betekent: geen agent of nog geen gegevens.
+	Status Status `json:"status"`
+}
+
+// MapItemKind defines model for MapItem.Kind.
+type MapItemKind string
+
+// MapLayer defines model for MapLayer.
+type MapLayer struct {
+	Edges []MapEdge     `json:"edges"`
+	Items []MapItem     `json:"items"`
+	Layer MapLayerLayer `json:"layer"`
+	Notes []string      `json:"notes"`
+}
+
+// MapLayerLayer defines model for MapLayer.Layer.
+type MapLayerLayer string
+
 // Me defines model for Me.
 type Me struct {
 	CsrfToken        string    `json:"csrf_token"`
@@ -3941,6 +4180,31 @@ type NodeInput struct {
 
 // NodeLifecycle defines model for NodeLifecycle.
 type NodeLifecycle string
+
+// NodeLink defines model for NodeLink.
+type NodeLink struct {
+	Cluster      string                                `json:"cluster"`
+	ClusterId    nullable.Nullable[openapi_types.UUID] `json:"cluster_id"`
+	Connection   string                                `json:"connection"`
+	ConnectionId openapi_types.UUID                    `json:"connection_id"`
+	CreatedAt    time.Time                             `json:"created_at"`
+	Guest        string                                `json:"guest"`
+	GuestType    NodeLinkGuestType                     `json:"guest_type"`
+	Host         string                                `json:"host"`
+	Hostname     string                                `json:"hostname"`
+	Id           openapi_types.UUID                    `json:"id"`
+	Mac          string                                `json:"mac"`
+	NodeId       openapi_types.UUID                    `json:"node_id"`
+	Vmid         int                                   `json:"vmid"`
+}
+
+// NodeLinkGuestType defines model for NodeLink.GuestType.
+type NodeLinkGuestType string
+
+// NodeLinkList defines model for NodeLinkList.
+type NodeLinkList struct {
+	Items []NodeLink `json:"items"`
+}
 
 // NodePatch defines model for NodePatch.
 type NodePatch struct {
@@ -4308,11 +4572,14 @@ type RiskFinding struct {
 
 // RiskGuestOutcome defines model for RiskGuestOutcome.
 type RiskGuestOutcome struct {
-	Connection string                                `json:"connection"`
-	Host       string                                `json:"host"`
-	Hostname   string                                `json:"hostname"`
-	Name       string                                `json:"name"`
-	NodeId     nullable.Nullable[openapi_types.UUID] `json:"node_id"`
+	Connection string `json:"connection"`
+	Host       string `json:"host"`
+	Hostname   string `json:"hostname"`
+
+	// Key De sleutel van de gast op de kaart, zoals guest:<koppeling>:101
+	Key    string                                `json:"key"`
+	Name   string                                `json:"name"`
+	NodeId nullable.Nullable[openapi_types.UUID] `json:"node_id"`
 
 	// Outcome down, restarted (HA start hem op restart_host) of partial (een netwerkkaart valt weg, de VM draait door)
 	Outcome     RiskGuestOutcomeOutcome `json:"outcome"`
@@ -4331,6 +4598,18 @@ type RiskGuestOutcomeOutcome string
 type RiskHistory struct {
 	Points []RiskPoint `json:"points"`
 }
+
+// RiskNodeOutcome defines model for RiskNodeOutcome.
+type RiskNodeOutcome struct {
+	Hostname string             `json:"hostname"`
+	Id       openapi_types.UUID `json:"id"`
+
+	// Outcome restarted als HA zijn VM herstart
+	Outcome RiskNodeOutcomeOutcome `json:"outcome"`
+}
+
+// RiskNodeOutcomeOutcome restarted als HA zijn VM herstart
+type RiskNodeOutcomeOutcome string
 
 // RiskOverview defines model for RiskOverview.
 type RiskOverview struct {
@@ -4467,7 +4746,10 @@ type RiskWhatIf struct {
 	Clusters   []RiskClusterOutcome `json:"clusters"`
 	Components []RiskComponent      `json:"components"`
 	Guests     []RiskGuestOutcome   `json:"guests"`
-	Notes      []string             `json:"notes"`
+
+	// Nodes De nodes die uitvallen
+	Nodes []RiskNodeOutcome `json:"nodes"`
+	Notes []string          `json:"notes"`
 
 	// Self Leeg als ClusterForge zelf blijft draaien of niet bekend is waar hij draait
 	Self     nullable.Nullable[RiskSelfOutcome] `json:"self"`
@@ -5150,6 +5432,16 @@ type ListJobsParams struct {
 	Limit     *int                `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// GetMapParams defines parameters for GetMap.
+type GetMapParams struct {
+	Layer       GetMapParamsLayer   `form:"layer" json:"layer"`
+	Environment *Environment        `form:"environment,omitempty" json:"environment,omitempty"`
+	ClusterId   *openapi_types.UUID `form:"cluster_id,omitempty" json:"cluster_id,omitempty"`
+}
+
+// GetMapParamsLayer defines parameters for GetMap.
+type GetMapParamsLayer string
+
 // ListNodeChangesParams defines parameters for ListNodeChanges.
 type ListNodeChangesParams struct {
 	// From Vanaf dit tijdstip; standaard 7 dagen geleden
@@ -5600,6 +5892,18 @@ type ServerInterface interface {
 	// RetryJob Een mislukte uitrol opnieuw proberen vanaf de mislukte stap (admin)
 	// (POST /jobs/{jobId}/retry)
 	RetryJob(w http.ResponseWriter, r *http.Request, jobId openapi_types.UUID)
+	// GetMap Een laag van de infrastructuurkaart
+	// (GET /map)
+	GetMap(w http.ResponseWriter, r *http.Request, params GetMapParams)
+	// ListNodeLinks Voorstellen om een node aan een VM te koppelen
+	// (GET /node-links)
+	ListNodeLinks(w http.ResponseWriter, r *http.Request)
+	// ConfirmNodeLink Een koppelvoorstel bevestigen; de node hangt dan aan de VM (admin)
+	// (POST /node-links/{linkId}/confirm)
+	ConfirmNodeLink(w http.ResponseWriter, r *http.Request, linkId openapi_types.UUID)
+	// IgnoreNodeLink Een koppelvoorstel negeren; het komt niet terug (admin)
+	// (POST /node-links/{linkId}/ignore)
+	IgnoreNodeLink(w http.ResponseWriter, r *http.Request, linkId openapi_types.UUID)
 	// ListNodes Alle nodes, met hun cluster
 	// (GET /nodes)
 	ListNodes(w http.ResponseWriter, r *http.Request)
@@ -5663,6 +5967,9 @@ type ServerInterface interface {
 	// SetBackupWatch De lijst "ook bewaken" van een koppeling vervangen (admin)
 	// (PUT /proxmox/{proxmoxId}/backup-watch)
 	SetBackupWatch(w http.ResponseWriter, r *http.Request, proxmoxId openapi_types.UUID)
+	// GetProxmoxNetwork Het netwerk van elke host, elke 10 minuten gelezen
+	// (GET /proxmox/{proxmoxId}/network)
+	GetProxmoxNetwork(w http.ResponseWriter, r *http.Request, proxmoxId openapi_types.UUID)
 	// GetProxmoxResources Hosts, VM's, containers en storage uit de laatste sync
 	// (GET /proxmox/{proxmoxId}/resources)
 	GetProxmoxResources(w http.ResponseWriter, r *http.Request, proxmoxId openapi_types.UUID)
@@ -6248,6 +6555,30 @@ func (_ Unimplemented) RetryJob(w http.ResponseWriter, r *http.Request, jobId op
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// GetMap Een laag van de infrastructuurkaart
+// (GET /map)
+func (_ Unimplemented) GetMap(w http.ResponseWriter, r *http.Request, params GetMapParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListNodeLinks Voorstellen om een node aan een VM te koppelen
+// (GET /node-links)
+func (_ Unimplemented) ListNodeLinks(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ConfirmNodeLink Een koppelvoorstel bevestigen; de node hangt dan aan de VM (admin)
+// (POST /node-links/{linkId}/confirm)
+func (_ Unimplemented) ConfirmNodeLink(w http.ResponseWriter, r *http.Request, linkId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// IgnoreNodeLink Een koppelvoorstel negeren; het komt niet terug (admin)
+// (POST /node-links/{linkId}/ignore)
+func (_ Unimplemented) IgnoreNodeLink(w http.ResponseWriter, r *http.Request, linkId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // ListNodes Alle nodes, met hun cluster
 // (GET /nodes)
 func (_ Unimplemented) ListNodes(w http.ResponseWriter, r *http.Request) {
@@ -6371,6 +6702,12 @@ func (_ Unimplemented) UpdateProxmox(w http.ResponseWriter, r *http.Request, pro
 // SetBackupWatch De lijst "ook bewaken" van een koppeling vervangen (admin)
 // (PUT /proxmox/{proxmoxId}/backup-watch)
 func (_ Unimplemented) SetBackupWatch(w http.ResponseWriter, r *http.Request, proxmoxId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetProxmoxNetwork Het netwerk van elke host, elke 10 minuten gelezen
+// (GET /proxmox/{proxmoxId}/network)
+func (_ Unimplemented) GetProxmoxNetwork(w http.ResponseWriter, r *http.Request, proxmoxId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -9014,6 +9351,131 @@ func (siw *ServerInterfaceWrapper) RetryJob(w http.ResponseWriter, r *http.Reque
 	handler.ServeHTTP(w, r)
 }
 
+// GetMap operation middleware
+func (siw *ServerInterfaceWrapper) GetMap(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetMapParams
+
+	// ------------- Required query parameter "layer" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "layer", r.URL.Query(), &params.Layer, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "layer"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "layer", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "environment" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "environment", r.URL.Query(), &params.Environment, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "environment"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "environment", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cluster_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cluster_id", r.URL.Query(), &params.ClusterId, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cluster_id"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cluster_id", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetMap(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListNodeLinks operation middleware
+func (siw *ServerInterfaceWrapper) ListNodeLinks(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListNodeLinks(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ConfirmNodeLink operation middleware
+func (siw *ServerInterfaceWrapper) ConfirmNodeLink(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "linkId" -------------
+	var linkId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "linkId", chi.URLParam(r, "linkId"), &linkId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "linkId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ConfirmNodeLink(w, r, linkId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// IgnoreNodeLink operation middleware
+func (siw *ServerInterfaceWrapper) IgnoreNodeLink(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "linkId" -------------
+	var linkId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "linkId", chi.URLParam(r, "linkId"), &linkId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "linkId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.IgnoreNodeLink(w, r, linkId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListNodes operation middleware
 func (siw *ServerInterfaceWrapper) ListNodes(w http.ResponseWriter, r *http.Request) {
 
@@ -9643,6 +10105,32 @@ func (siw *ServerInterfaceWrapper) SetBackupWatch(w http.ResponseWriter, r *http
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.SetBackupWatch(w, r, proxmoxId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetProxmoxNetwork operation middleware
+func (siw *ServerInterfaceWrapper) GetProxmoxNetwork(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "proxmoxId" -------------
+	var proxmoxId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "proxmoxId", chi.URLParam(r, "proxmoxId"), &proxmoxId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "proxmoxId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetProxmoxNetwork(w, r, proxmoxId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -10516,6 +11004,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Get(options.BaseURL+"/proxmox/{proxmoxId}/resources", wrapper.GetProxmoxResources)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/proxmox/{proxmoxId}/network", wrapper.GetProxmoxNetwork)
+	})
+	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/proxmox/{proxmoxId}/vms/{vmid}/actions", wrapper.VmAction)
 	})
 	r.Group(func(r chi.Router) {
@@ -10754,6 +11245,18 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Put(options.BaseURL+"/self-location", wrapper.SetSelfLocation)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/map", wrapper.GetMap)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/node-links", wrapper.ListNodeLinks)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/node-links/{linkId}/confirm", wrapper.ConfirmNodeLink)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/node-links/{linkId}/ignore", wrapper.IgnoreNodeLink)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/clusters/{clusterId}/risk", wrapper.GetClusterRisk)

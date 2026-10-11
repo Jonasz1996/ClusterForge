@@ -6,6 +6,8 @@ import { JobList } from "@/components/jobs/JobList";
 import { ago, Empty, formatBytes, formatDuration, QueryState, Tags, tableClass, tdClass, thClass } from "@/components/inventory/bits";
 import { ConnectionForm } from "@/components/proxmox/ConnectionForm";
 import { GuestActions, type ActionResult } from "@/components/proxmox/GuestActions";
+import { HostNetworkCard } from "@/components/proxmox/HostNetworkCard";
+import { NodeLinkProposals } from "@/components/proxmox/NodeLinkProposals";
 import { Alert, Badge, Button, Card, Input, PageHeader, Select, cx } from "@/components/ui";
 import { useCreateNode, useIsAdmin, useNodes, useUpdateNode, type Node } from "@/lib/inventory";
 import {
@@ -62,6 +64,7 @@ export default function ProxmoxPage() {
           />
         </Card>
       )}
+      <NodeLinkProposals isAdmin={isAdmin} />
       <QueryState q={conns}>
         {conns.data && conns.data.items.length === 0 && !adding && (
           <Empty>
@@ -176,6 +179,7 @@ function ConnectionSection({ conn, isAdmin }: { conn: ProxmoxConnection; isAdmin
             <Hosts hosts={res.data.hosts} />
             <Guests conn={conn} guests={res.data.guests} hosts={onlineHosts} isAdmin={isAdmin} onResult={setResult} />
             {res.data.storages.length > 0 && <Storages storages={res.data.storages} />}
+            <HostNetworkCard connectionId={conn.id} />
           </>
         )}
       </QueryState>

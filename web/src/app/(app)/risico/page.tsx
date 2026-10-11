@@ -395,6 +395,13 @@ function WhatIfResult({ r, stale }: { r: RiskWhatIf; stale: boolean }) {
   const nothing = r.guests.length === 0 && r.clusters.length === 0 && r.services.length === 0 && !r.self;
   return (
     <div className={cx("space-y-4", stale && "opacity-60")} aria-busy={stale}>
+      {!nothing && (
+        <div className="text-right text-sm">
+          <Link href={`/kaart?${new URLSearchParams(r.components.map((c) => ["onderdeel", c.key]))}`} className={linkClass}>
+            Op de kaart tonen →
+          </Link>
+        </div>
+      )}
       {r.self && (
         <Alert kind={r.self.outcome === "down" ? "error" : "info"}>
           {r.self.outcome === "down" ? (

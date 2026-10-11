@@ -30,7 +30,24 @@ type Model struct {
 	Hosts       []Host
 	Storages    []Storage
 	Guests      []Guest
+	// HostIfaces is het netwerk van de hosts, zoals Proxmox het geeft.
+	HostIfaces []HostIface
+	// NetworkRead is per host wanneer zijn netwerk het laatst gelezen is.
+	NetworkRead map[HostRef]time.Time
 	Self        Self
+}
+
+// HostRef wijst een host aan.
+type HostRef struct {
+	Conn uuid.UUID
+	Name string
+}
+
+// HostIface is een interface van een host.
+type HostIface struct {
+	Conn uuid.UUID
+	Host string
+	proxmox.HostIface
 }
 
 // Connection is een Proxmox-koppeling. Read is false als de laatste sync
@@ -58,6 +75,9 @@ type Storage struct {
 	Host   string
 	Shared bool
 	Type   string
+	// Active is false als Proxmox de storage op deze host niet kan
+	// gebruiken.
+	Active bool
 }
 
 // Guest is een VM (qemu) of container (lxc).
@@ -118,6 +138,17 @@ func (m Model) ConnName(id uuid.UUID) string {
 	return ""
 }
 
+// ifacesOf geeft de interfaces van een host.
+func (m Model) ifacesOf(conn uuid.UUID, host string) []HostIface {
+	var out []HostIface
+	for _, i := range m.HostIfaces {
+		if i.Conn == conn && i.Host == host {
+			out = append(out, i)
+		}
+	}
+	return out
+}
+
 // Shared is true als een storage van de koppeling gedeeld is.
 func (m Model) Shared(conn uuid.UUID, name string) bool {
 	for _, s := range m.Storages {
@@ -138,19 +169,26 @@ func (m Model) Guest(conn uuid.UUID, vmid int) (Guest, bool) {
 	return Guest{}, false
 }
 
-// Bridge is een bridge op een host, met de gasten die eraan hangen. Tot het
-// netwerk van de hosts gelezen wordt (mijlpaal 7), komen bridges alleen uit
-// de netwerkkaarten van de gasten.
+// Bridge is een bridge op een host. Ze komen uit het netwerk van de host en
+// uit de netwerkkaarten van de gasten, voor het geval het netwerk van een
+// host nog niet gelezen is.
 type Bridge struct {
 	Conn uuid.UUID
 	Host string
 	Name string
 }
 
-// Bridges geeft de bridges per host die een gast gebruikt.
+// Bridges geeft de bridges per host.
 func (m Model) Bridges() []Bridge {
 	seen := map[Bridge]bool{}
 	var out []Bridge
+	for _, i := range m.HostIfaces {
+		b := Bridge{i.Conn, i.Host, i.Iface}
+		if i.Bridge() && !seen[b] {
+			seen[b] = true
+			out = append(out, b)
+		}
+	}
 	for _, g := range m.Guests {
 		if g.Config == nil || g.Template {
 			continue
@@ -232,7 +270,8 @@ func (s *Service) Load(ctx context.Context) (Model, error) {
 		case "node":
 			m.Hosts = append(m.Hosts, Host{Conn: r.ConnectionID, Name: r.PveNode, Online: r.Status == "online", MaxMem: d.MaxMem, Mem: d.Mem})
 		case "storage":
-			m.Storages = append(m.Storages, Storage{Conn: r.ConnectionID, Name: r.Name, Host: r.PveNode, Shared: d.Shared == 1, Type: d.Plugin})
+			m.Storages = append(m.Storages, Storage{Conn: r.ConnectionID, Name: r.Name, Host: r.PveNode, Shared: d.Shared == 1, Type: d.Plugin,
+				Active: r.Status == "available"})
 		case "qemu", "lxc":
 			if r.Vmid == nil {
 				continue
@@ -248,6 +287,23 @@ func (s *Service) Load(ctx context.Context) (Model, error) {
 				g.Config = c
 			}
 			m.Guests = append(m.Guests, g)
+		}
+	}
+	nets, err := s.q.ListHostNetworks(ctx)
+	if err != nil {
+		return m, err
+	}
+	for _, n := range nets {
+		m.HostIfaces = append(m.HostIfaces, HostIface{Conn: n.ConnectionID, Host: n.PveNode, HostIface: proxmox.HostIfaceFrom(n)})
+	}
+	reads, err := s.q.ListAllHostNetworkReads(ctx)
+	if err != nil {
+		return m, err
+	}
+	m.NetworkRead = map[HostRef]time.Time{}
+	for _, r := range reads {
+		if r.Error == "" || len(m.ifacesOf(r.ConnectionID, r.PveNode)) > 0 {
+			m.NetworkRead[HostRef{r.ConnectionID, r.PveNode}] = r.ReadAt
 		}
 	}
 	manual, err := s.q.GetSelfLocation(ctx)
@@ -334,3 +390,31 @@ func (s *Service) ClearSelf(ctx context.Context, actor events.Actor) error {
 		})
 	})
 }
+
+// De sleutels van onderdelen, gedeeld door de wat-als en de kaart.
+
+// HostKey is de sleutel van een Proxmox-host.
+func HostKey(conn uuid.UUID, host string) string { return "host:" + conn.String() + ":" + host }
+
+// StorageKey is de sleutel van een storage: gedeeld één voor de hele
+// koppeling, lokaal per host.
+func StorageKey(conn uuid.UUID, name, host string, shared bool) string {
+	if shared {
+		return "storage:" + conn.String() + ":" + name
+	}
+	return "storage:" + conn.String() + ":" + name + "@" + host
+}
+
+// BridgeKey is de sleutel van een bridge op een host.
+func BridgeKey(conn uuid.UUID, host, bridge string) string {
+	return "bridge:" + conn.String() + ":" + host + ":" + bridge
+}
+
+// GuestKey is de sleutel van een VM of container.
+func GuestKey(conn uuid.UUID, vmid int) string { return "guest:" + conn.String() + ":" + itoa(vmid) }
+
+// NodeKey, ClusterKey en ServiceKey zijn de sleutels van wat ClusterForge
+// zelf kent.
+func NodeKey(id uuid.UUID) string    { return "node:" + id.String() }
+func ClusterKey(id uuid.UUID) string { return "cluster:" + id.String() }
+func ServiceKey(id uuid.UUID) string { return "service:" + id.String() }

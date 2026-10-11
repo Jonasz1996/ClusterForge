@@ -585,6 +585,18 @@ type NodeFact struct {
 	ChangedAt   time.Time
 }
 
+type NodeLinkProposal struct {
+	ID           uuid.UUID
+	ConnectionID uuid.UUID
+	Vmid         int32
+	NodeID       uuid.UUID
+	Mac          string
+	State        string
+	CreatedAt    time.Time
+	DecidedAt    *time.Time
+	DecidedBy    *uuid.UUID
+}
+
 type NodeStatus struct {
 	NodeID        uuid.UUID
 	HeartbeatAt   time.Time
@@ -655,6 +667,31 @@ type ProxmoxGuestConfig struct {
 	Addresses    []string
 	Error        string
 	ReadAt       time.Time
+}
+
+type ProxmoxHostNetwork struct {
+	ConnectionID  uuid.UUID
+	PveNode       string
+	Iface         string
+	Type          string
+	Active        bool
+	Ports         []string
+	VlanID        *int32
+	VlanRawDevice string
+	Cidr          string
+	Cidr6         string
+	Gateway       string
+	Gateway6      string
+	VlanAware     bool
+	Mtu           *int32
+	Comments      string
+}
+
+type ProxmoxHostNetworkRead struct {
+	ConnectionID uuid.UUID
+	PveNode      string
+	ReadAt       time.Time
+	Error        string
 }
 
 type ProxmoxResource struct {

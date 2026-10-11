@@ -69,9 +69,9 @@ func (w WhatIfWorld) Components() []Component {
 	for _, s := range m.Storages {
 		c := Component{Kind: KindStorage, Group: m.ConnName(s.Conn), conn: s.Conn, name: s.Name, shared: m.Shared(s.Conn, s.Name)}
 		if c.shared {
-			c.Key, c.Name = "storage:"+s.Conn.String()+":"+s.Name, s.Name+" (gedeeld)"
+			c.Key, c.Name = topo.StorageKey(s.Conn, s.Name, "", true), s.Name+" (gedeeld)"
 		} else {
-			c.Key, c.Name, c.host = "storage:"+s.Conn.String()+":"+s.Name+"@"+s.Host, s.Name+" op "+s.Host, s.Host
+			c.Key, c.Name, c.host = topo.StorageKey(s.Conn, s.Name, s.Host, false), s.Name+" op "+s.Host, s.Host
 		}
 		if !seen[c.Key] {
 			seen[c.Key] = true
@@ -80,13 +80,13 @@ func (w WhatIfWorld) Components() []Component {
 	}
 	for _, b := range m.Bridges() {
 		out = append(out, Component{
-			Key: "bridge:" + b.Conn.String() + ":" + b.Host + ":" + b.Name, Kind: KindBridge, Name: b.Name + " op " + b.Host,
+			Key: topo.BridgeKey(b.Conn, b.Host, b.Name), Kind: KindBridge, Name: b.Name + " op " + b.Host,
 			Group: m.ConnName(b.Conn), conn: b.Conn, host: b.Host, name: b.Name,
 		})
 	}
 	if g := w.Graph; g != nil {
 		for _, c := range g.Clusters {
-			out = append(out, Component{Key: "cluster:" + c.ID.String(), Kind: KindCluster, Name: c.Name, Group: c.Environment, id: c.ID})
+			out = append(out, Component{Key: topo.ClusterKey(c.ID), Kind: KindCluster, Name: c.Name, Group: c.Environment, id: c.ID})
 		}
 		for _, n := range g.Nodes {
 			group := "zonder cluster"
@@ -95,13 +95,13 @@ func (w WhatIfWorld) Components() []Component {
 					group = c.Name
 				}
 			}
-			out = append(out, Component{Key: "node:" + n.ID.String(), Kind: KindNode, Name: n.Hostname, Group: group, id: n.ID})
+			out = append(out, Component{Key: topo.NodeKey(n.ID), Kind: KindNode, Name: n.Hostname, Group: group, id: n.ID})
 		}
 		for _, s := range g.Services {
 			if s.State != deps.StateConfirmed || s.External() {
 				continue
 			}
-			out = append(out, Component{Key: "service:" + s.ID.String(), Kind: KindService, Name: s.Name, Group: g.GroupOf(s).Name, id: s.ID})
+			out = append(out, Component{Key: topo.ServiceKey(s.ID), Kind: KindService, Name: s.Name, Group: g.GroupOf(s).Name, id: s.ID})
 		}
 	}
 	slices.SortStableFunc(out, func(a, b Component) int {
@@ -111,7 +111,7 @@ func (w WhatIfWorld) Components() []Component {
 	return out
 }
 
-func hostKey(conn uuid.UUID, host string) string { return "host:" + conn.String() + ":" + host }
+func hostKey(conn uuid.UUID, host string) string { return topo.HostKey(conn, host) }
 
 // UnknownComponentError noemt een onderdeel dat niet bestaat.
 type UnknownComponentError struct{ Key string }
@@ -120,6 +120,8 @@ func (e UnknownComponentError) Error() string { return "onbekend onderdeel: " + 
 
 // GuestOutcome is wat er met een VM of container gebeurt.
 type GuestOutcome struct {
+	// Key is de sleutel van de gast op de kaart.
+	Key        string     `json:"key"`
 	Connection string     `json:"connection"`
 	VMID       int        `json:"vmid"`
 	Name       string     `json:"name"`
@@ -136,6 +138,13 @@ type GuestOutcome struct {
 	Unknown bool `json:"unknown"`
 
 	conn uuid.UUID
+}
+
+// NodeOutcome is een node die uitvalt.
+type NodeOutcome struct {
+	ID       uuid.UUID `json:"id"`
+	Hostname string    `json:"hostname"`
+	Outcome  string    `json:"outcome"`
 }
 
 // Prediction is een voorspelde status met de reden.
@@ -188,12 +197,15 @@ type SelfOutcome struct {
 
 // WhatIf is de uitkomst van de wat-als.
 type WhatIf struct {
-	Components []Component      `json:"components"`
-	Guests     []GuestOutcome   `json:"guests"`
-	Clusters   []ClusterOutcome `json:"clusters"`
-	Services   []ServiceOutcome `json:"services"`
-	Self       *SelfOutcome     `json:"self"`
-	Notes      []string         `json:"notes"`
+	Components []Component    `json:"components"`
+	Guests     []GuestOutcome `json:"guests"`
+	// Nodes zijn de nodes die uitvallen: down blijft weg, restarted komt
+	// terug als HA zijn VM herstart.
+	Nodes    []NodeOutcome    `json:"nodes"`
+	Clusters []ClusterOutcome `json:"clusters"`
+	Services []ServiceOutcome `json:"services"`
+	Self     *SelfOutcome     `json:"self"`
+	Notes    []string         `json:"notes"`
 }
 
 // Resolve zoekt de onderdelen bij hun sleutels.
@@ -230,7 +242,7 @@ func (w WhatIfWorld) Run(comps []Component, baseline bool) WhatIf {
 
 // run rekent met g, die bij baseline al gezond gemaakt is.
 func (w WhatIfWorld) run(comps []Component, baseline bool, g *deps.Graph) WhatIf {
-	out := WhatIf{Components: comps, Guests: []GuestOutcome{}, Clusters: []ClusterOutcome{}, Services: []ServiceOutcome{}, Notes: []string{}}
+	out := WhatIf{Components: comps, Guests: []GuestOutcome{}, Nodes: []NodeOutcome{}, Clusters: []ClusterOutcome{}, Services: []ServiceOutcome{}, Notes: []string{}}
 	m := w.Topo
 	hosts := map[string]bool{}
 	type stKey struct {
@@ -329,7 +341,7 @@ func (w WhatIfWorld) run(comps []Component, baseline bool, g *deps.Graph) WhatIf
 			continue
 		}
 		o := GuestOutcome{
-			Connection: m.ConnName(gu.Conn), VMID: gu.VMID, Name: gu.Name, Host: gu.Host, NodeID: gu.NodeID, Hostname: gu.Hostname,
+			Key: topo.GuestKey(gu.Conn, gu.VMID), Connection: m.ConnName(gu.Conn), VMID: gu.VMID, Name: gu.Name, Host: gu.Host, NodeID: gu.NodeID, Hostname: gu.Hostname,
 			Outcome: "down", Reason: strings.Join(reasons, "; "), Unknown: gu.NodeID == nil, conn: gu.Conn,
 		}
 		if len(reasons) == 0 {
@@ -364,6 +376,20 @@ func (w WhatIfWorld) run(comps []Component, baseline bool, g *deps.Graph) WhatIf
 				}
 			}
 		}
+		for id := range during {
+			n, ok := g.Node(id)
+			if !ok {
+				continue
+			}
+			o := NodeOutcome{ID: id, Hostname: n.Hostname, Outcome: "restarted"}
+			if _, gone := after[id]; gone {
+				o.Outcome = "down"
+			}
+			out.Nodes = append(out.Nodes, o)
+		}
+		slices.SortFunc(out.Nodes, func(a, b NodeOutcome) int {
+			return cmp.Or(cmp.Compare(a.Hostname, b.Hostname), cmp.Compare(a.ID.String(), b.ID.String()))
+		})
 		out.Clusters = w.predictClusters(g, during, after, baseline)
 		out.Services = servicesHit(g, outage, during, after)
 	}

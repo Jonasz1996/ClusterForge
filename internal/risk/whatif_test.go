@@ -196,6 +196,16 @@ func TestWhatIfHost(t *testing.T) {
 	if got := guests(r); got != want {
 		t.Fatalf("gasten:\n%s\nwil\n%s", got, want)
 	}
+	var nodes []string
+	for _, n := range r.Nodes {
+		nodes = append(nodes, n.Hostname+" "+n.Outcome)
+	}
+	if got := strings.Join(nodes, ", "); got != "app01 down, db01 restarted, web01 down, web02 down" {
+		t.Fatalf("nodes: %s", got)
+	}
+	if r.Guests[0].Key != topo.GuestKey(l.conn, 101) {
+		t.Fatalf("sleutel van de gast: %s", r.Guests[0].Key)
+	}
 	want = strings.Join([]string{
 		"web-prod healthy→down: alle nodes zijn down",
 		"db-prod healthy→degraded→healthy: ",

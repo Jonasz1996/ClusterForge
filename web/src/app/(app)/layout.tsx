@@ -19,6 +19,7 @@ const nav: NavItem[] = [
   { href: "/risico", label: "Risico" },
   { href: "/assistent", label: "Assistent" },
   { href: "/afhankelijkheden", label: "Afhankelijkheden" },
+  { href: "/kaart", label: "Kaart" },
   { href: "/proxmox", label: "Proxmox" },
   { href: "/back-ups", label: "Back-ups" },
   { href: "/taken", label: "Taken" },

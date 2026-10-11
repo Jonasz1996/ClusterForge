@@ -25,6 +25,9 @@ type Host struct {
 	MaxMem int64
 	CPU    float64
 	Mem    int64
+	// Network is wat GET /nodes/{node}/network geeft, zoals
+	// {"iface": "vmbr0", "type": "bridge", "bridge_ports": "eno1"}.
+	Network []map[string]any
 }
 
 type Guest struct {
@@ -411,6 +414,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET "+p+"/nodes/{node}/{type}/{vmid}/config", s.config)
 	mux.HandleFunc("POST "+p+"/nodes/{node}/{type}/{vmid}/config", s.setConfig)
 	mux.HandleFunc("GET "+p+"/nodes/{node}/lxc/{vmid}/interfaces", s.interfaces)
+	mux.HandleFunc("GET "+p+"/nodes/{node}/network", s.network)
 	mux.HandleFunc("PUT "+p+"/nodes/{node}/{type}/{vmid}/resize", s.resize)
 	mux.HandleFunc("POST "+p+"/nodes/{node}/{type}/{vmid}/agent/ping", s.agentPing)
 	mux.HandleFunc("POST "+p+"/nodes/{node}/{type}/{vmid}/agent/file-write", s.fileWrite)
@@ -877,6 +881,38 @@ func (s *Server) config(w http.ResponseWriter, r *http.Request) {
 
 // interfaces geeft lo en de interfaces uit Inet, met het MAC-adres uit de
 // configuratie; alleen voor een draaiende container.
+func (s *Server) network(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, h := range s.hosts {
+		if h.Name != r.PathValue("node") {
+			continue
+		}
+		if !h.Online {
+			fail(w, 595, "no route to host")
+			return
+		}
+		out := h.Network
+		if out == nil {
+			out = []map[string]any{}
+		}
+		ok(w, out)
+		return
+	}
+	fail(w, http.StatusInternalServerError, "no such node")
+}
+
+// SetHostNetwork vervangt het netwerk van een host.
+func (s *Server) SetHostNetwork(name string, network []map[string]any) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, h := range s.hosts {
+		if h.Name == name {
+			h.Network = network
+		}
+	}
+}
+
 func (s *Server) interfaces(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

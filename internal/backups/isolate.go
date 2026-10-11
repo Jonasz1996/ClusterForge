@@ -95,36 +95,6 @@ func diskOnStorage(v string) bool {
 	return storageVolume.MatchString(vol) && !strings.HasPrefix(vol, "/")
 }
 
-// option leest een optie uit een Proxmox-eigenschap, zoals size uit
-// "local-lvm:vm-1-disk-0,size=32G"; de eerste waarde zonder naam heet def.
-func option(v, name, def string) (string, bool) {
-	for i, part := range strings.Split(v, ",") {
-		k, val, found := strings.Cut(part, "=")
-		if !found {
-			if i == 0 && name == def {
-				return part, true
-			}
-			continue
-		}
-		if k == name {
-			return val, true
-		}
-	}
-	return "", false
-}
-
-// setOption zet of vervangt één optie in een Proxmox-eigenschap.
-func setOption(v, name, value string) string {
-	parts := strings.Split(v, ",")
-	for i, part := range parts {
-		if k, _, found := strings.Cut(part, "="); found && k == name {
-			parts[i] = name + "=" + value
-			return strings.Join(parts, ",")
-		}
-	}
-	return v + "," + name + "=" + value
-}
-
 // diskBytes telt de grootte van de schijven in een configuratie: wat het
 // terugzetten op de sandbox-storage nodig heeft.
 func diskBytes(cfg map[string]string) int64 {
@@ -133,7 +103,7 @@ func diskBytes(cfg map[string]string) int64 {
 		if !diskKey(k) || strings.Contains(v, "media=cdrom") {
 			continue
 		}
-		if size, ok := option(v, "size", ""); ok {
+		if size, ok := proxmox.OptionOr(v, "size", ""); ok {
 			total += parseSize(size)
 		}
 	}
@@ -176,7 +146,7 @@ func memoryBytes(cfg map[string]string) int64 {
 	if !ok {
 		return defaultMemoryMB << 20
 	}
-	if cur, found := option(v, "current", "current"); found {
+	if cur, found := proxmox.OptionOr(v, "current", "current"); found {
 		v = cur
 	}
 	mb, err := strconv.ParseInt(v, 10, 64)
@@ -193,7 +163,7 @@ func hasAgent(cfg map[string]string) bool {
 	if !ok {
 		return false
 	}
-	on, _ := option(v, "enabled", "enabled")
+	on, _ := proxmox.OptionOr(v, "enabled", "enabled")
 	return on == "1"
 }
 
@@ -211,7 +181,7 @@ func isolation(cfg map[string]string, description string) map[string]string {
 		v := cfg[k]
 		switch {
 		case netKey(k):
-			out[k] = setOption(v, "link_down", "1")
+			out[k] = proxmox.SetOption(v, "link_down", "1")
 		case diskKey(k) && strings.Contains(v, "media=cdrom") && !strings.Contains(v, "cloudinit"):
 			// Een ISO van de bron staat misschien niet op deze host; zonder
 			// ISO start de VM gewoon van zijn schijf.
@@ -246,16 +216,16 @@ func withSerial(smbios, serial string) string {
 	if smbios == "" {
 		return "serial=" + serial
 	}
-	if b64, _ := option(smbios, "base64", ""); b64 == "1" {
+	if b64, _ := proxmox.OptionOr(smbios, "base64", ""); b64 == "1" {
 		serial = base64.StdEncoding.EncodeToString([]byte(serial))
 	}
-	return setOption(smbios, "serial", serial)
+	return proxmox.SetOption(smbios, "serial", serial)
 }
 
 // serialOf leest het serienummer uit smbios1.
 func serialOf(smbios string) string {
-	v, _ := option(smbios, "serial", "")
-	if b64, _ := option(smbios, "base64", ""); b64 == "1" {
+	v, _ := proxmox.OptionOr(smbios, "serial", "")
+	if b64, _ := proxmox.OptionOr(smbios, "base64", ""); b64 == "1" {
 		if d, err := base64.StdEncoding.DecodeString(v); err == nil {
 			return string(d)
 		}
@@ -271,7 +241,7 @@ func isolationProblems(cfg map[string]string) []string {
 		if !netKey(k) {
 			continue
 		}
-		if v, _ := option(cfg[k], "link_down", ""); v != "1" {
+		if v, _ := proxmox.OptionOr(cfg[k], "link_down", ""); v != "1" {
 			out = append(out, k+" heeft geen link_down=1")
 		}
 	}

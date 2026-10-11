@@ -468,6 +468,53 @@ function FactsView({ facts: f, runtime }: { facts: Facts; runtime: NodeRuntime }
           </Table>
         </Card>
       </div>
+
+      {((f.routes?.length ?? 0) > 0 || (f.listeners?.length ?? 0) > 0) && (
+        <div className="grid gap-6 lg:grid-cols-2">
+          {(f.routes?.length ?? 0) > 0 && (
+            <Card title="Routes">
+              <Table head={["Bestemming", "Via", "Interface"]}>
+                {f.routes!.map((r, i) => (
+                  <tr key={i}>
+                    <td className={tdClass}>
+                      {r.dest === "0.0.0.0/0" ? "standaard" : <span className="font-mono text-xs">{r.dest}</span>}
+                    </td>
+                    <td className={tdClass}>
+                      {r.gateway ? <span className="font-mono text-xs">{r.gateway}</span> : "rechtstreeks"}
+                    </td>
+                    <td className={tdClass}>
+                      {r.interface}
+                      {r.metric ? <span className="text-xs text-slate-500"> · metric {r.metric}</span> : null}
+                    </td>
+                  </tr>
+                ))}
+              </Table>
+            </Card>
+          )}
+          {(f.listeners?.length ?? 0) > 0 && (
+            <Card title="Luisterende poorten">
+              <Table head={["Poort", "Adres", "Unit"]}>
+                {f.listeners!.map((l, i) => (
+                  <tr key={i}>
+                    <td className={`${tdClass} tabular-nums`}>
+                      {l.port}
+                      <span className="text-xs text-slate-500"> {l.proto}</span>
+                    </td>
+                    <td className={tdClass}>
+                      {l.addr === "0.0.0.0" || l.addr === "::" ? (
+                        "alle adressen"
+                      ) : (
+                        <span className="font-mono text-xs">{l.addr}</span>
+                      )}
+                    </td>
+                    <td className={tdClass}>{l.unit || <span className="text-slate-400">–</span>}</td>
+                  </tr>
+                ))}
+              </Table>
+            </Card>
+          )}
+        </div>
+      )}
     </div>
   );
 }
