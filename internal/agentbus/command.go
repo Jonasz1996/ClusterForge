@@ -71,10 +71,12 @@ func (b *Bus) Command(ctx context.Context, nodeID uuid.UUID, cmd protocol.Comman
 
 // changes is true voor een commando dat iets op de node verandert. Lezen,
 // zoals facts.collect, komt niet in het logboek; een nieuw leescommando
-// hoort hier bij. Een onbekend commando telt als wijziging.
+// hoort hier bij. Een onbekend commando telt als wijziging. Het verlengen
+// van een storing verandert niets en komt elke paar seconden; het aanzetten
+// en opheffen staan wel in het logboek.
 func changes(action string) bool {
 	switch action {
-	case protocol.CmdFactsCollect, protocol.CmdInspect:
+	case protocol.CmdFactsCollect, protocol.CmdInspect, protocol.CmdFaultRenew:
 		return false
 	}
 	return true
@@ -98,6 +100,12 @@ func (b *Bus) logCommand(ctx context.Context, nodeID uuid.UUID, cmd protocol.Com
 	}
 	if len(cmd.Steps) > 0 {
 		p["steps"] = SummarizeSteps(cmd.Steps, b.fpKey)
+	}
+	if cmd.Fault != nil {
+		p["fault"] = cmd.Fault
+	}
+	if len(cmd.FaultIDs) > 0 {
+		p["fault_ids"] = cmd.FaultIDs
 	}
 	return b.ev.Write(ctx, nil, events.Event{
 		Actor: events.System(), SubjectType: "node", SubjectID: nodeID.String(), ClusterID: ref.ClusterID,

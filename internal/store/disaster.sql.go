@@ -283,6 +283,54 @@ func (q *Queries) ListDisasterScenarios(ctx context.Context, clusterID uuid.UUID
 	return items, nil
 }
 
+const listFaultFacts = `-- name: ListFaultFacts :many
+SELECT f.node_id,
+       coalesce(f.facts -> 'interfaces', '[]'::jsonb)::jsonb AS interfaces,
+       coalesce(f.facts ->> 'primary_address', '')::text AS primary_address,
+       coalesce(f.facts -> 'tools', 'null'::jsonb)::jsonb AS tools,
+       coalesce(f.facts -> 'faults', '[]'::jsonb)::jsonb AS faults
+FROM node_facts f
+JOIN nodes n ON n.id = f.node_id
+WHERE n.cluster_id = $1
+`
+
+type ListFaultFactsRow struct {
+	NodeID         uuid.UUID
+	Interfaces     []byte
+	PrimaryAddress string
+	Tools          []byte
+	Faults         []byte
+}
+
+// Wat een reeks van storingen per node uit de laatste facts nodig heeft: de
+// interfaces, het adres waarmee de agent ClusterForge bereikt, nft en tc,
+// en de storingen die nu actief zijn.
+func (q *Queries) ListFaultFacts(ctx context.Context, clusterID *uuid.UUID) ([]ListFaultFactsRow, error) {
+	rows, err := q.db.Query(ctx, listFaultFacts, clusterID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListFaultFactsRow{}
+	for rows.Next() {
+		var i ListFaultFactsRow
+		if err := rows.Scan(
+			&i.NodeID,
+			&i.Interfaces,
+			&i.PrimaryAddress,
+			&i.Tools,
+			&i.Faults,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const updateDisasterScenario = `-- name: UpdateDisasterScenario :one
 UPDATE disaster_scenarios
 SET name = $1, kind = $2, params = $3, expect = $4, updated_at = now()

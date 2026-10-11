@@ -31,6 +31,9 @@ func (p groupProber) Probe(_ context.Context, vip string, pr failover.Probe) err
 	if u, ok := h.Unit("nginx"); pr.HTTP != nil && (!ok || !u.Active) {
 		return errors.New("connection refused")
 	}
+	if pr.HTTP != nil && h.Blocked(80) || pr.TCP != nil && h.Blocked(pr.TCP.Port) {
+		return errors.New("i/o timeout")
+	}
 	return nil
 }
 

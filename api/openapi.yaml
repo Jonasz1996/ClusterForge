@@ -3542,7 +3542,55 @@ components:
         requested_by: { type: string, nullable: true, description: Gebruikersnaam van wie de run vroeg }
         created_at: { type: string, format: date-time }
         finished_at: { type: string, format: date-time, nullable: true }
-    DisasterKind: { type: string, enum: [host_down, service_down, vip_loss] }
+    DisasterKind: { type: string, enum: [host_down, service_down, vip_loss, sequence] }
+    DisasterStepAction: { type: string, enum: [vrrp_block, link_down, port_block, netem, disk_fill, service_stop] }
+    DisasterStepOn:
+      type: string
+      enum: [owner, others, all, node]
+      description: "owner: de node met het VIP bij de start; others: alle andere actieve nodes"
+    DisasterStep:
+      type: object
+      required: [at_seconds, action, on]
+      properties:
+        at_seconds: { type: integer, minimum: 0, description: Seconden na de start van de storing }
+        action: { $ref: "#/components/schemas/DisasterStepAction" }
+        on: { $ref: "#/components/schemas/DisasterStepOn" }
+        node_id: { type: string, format: uuid, description: Bij on node }
+        hostname: { type: string, description: Bij on node; alleen in antwoorden }
+        interface: { type: string, description: Bij link_down en netem }
+        port: { type: integer, description: Bij port_block }
+        delay_ms: { type: integer, description: Bij netem, tot 2000 }
+        loss_percent: { type: integer, description: Bij netem, tot 50 }
+        fill_percent: { type: integer, description: Bij disk_fill, van 50 tot 95 }
+        unit: { type: string, description: Bij service_stop }
+    DisasterStepNode:
+      type: object
+      required: [node_id, hostname, cut_off]
+      properties:
+        node_id: { type: string, format: uuid }
+        hostname: { type: string }
+        cut_off:
+          type: boolean
+          description: >-
+            link_down op de interface naar ClusterForge: alleen de bovengrens
+            telt, want ClusterForge kan niet verlengen of opheffen
+    DisasterPlannedStep:
+      type: object
+      required: [step, at_seconds, action, on, unit, text, nodes, ran_ms, results]
+      properties:
+        step: { type: integer, description: Nummer van de stap, vanaf 1 }
+        at_seconds: { type: integer }
+        action: { $ref: "#/components/schemas/DisasterStepAction" }
+        on: { $ref: "#/components/schemas/DisasterStepOn" }
+        unit: { type: string, description: Bij service_stop de dienst }
+        text: { type: string }
+        nodes: { type: array, items: { $ref: "#/components/schemas/DisasterStepNode" } }
+        ran_ms:
+          type: integer
+          format: int64
+          nullable: true
+          description: Wanneer de stap liep, in ms na de start van de storing; leeg als hij niet liep
+        results: { type: array, items: { $ref: "#/components/schemas/DisasterTargetResult" } }
     DisasterHost:
       type: object
       required: [connection_id, connection, host]
@@ -3552,7 +3600,7 @@ components:
         host: { type: string }
     DisasterScenario:
       type: object
-      required: [id, cluster_id, name, kind, description, host, unit, fault_seconds, recovery_seconds, last_run, created_at, updated_at]
+      required: [id, cluster_id, name, kind, description, host, unit, steps, fault_seconds, recovery_seconds, last_run, created_at, updated_at]
       properties:
         id: { type: string, format: uuid }
         cluster_id: { type: string, format: uuid }
@@ -3564,6 +3612,7 @@ components:
           nullable: true
           description: Alleen bij host_down
         unit: { type: string, description: Bij service_down de dienst }
+        steps: { type: array, items: { $ref: "#/components/schemas/DisasterStep" }, description: Bij sequence de stappen }
         fault_seconds: { type: integer, description: Hoe lang de storing duurt }
         recovery_seconds: { type: integer, description: Hoe snel na het terugzetten alles weer gezond moet zijn }
         last_run:
@@ -3580,6 +3629,11 @@ components:
         connection_id: { type: string, format: uuid, description: Bij host_down }
         host: { type: string, description: Bij host_down de naam van de Proxmox-host }
         unit: { type: string, description: Bij service_down }
+        steps:
+          type: array
+          maxItems: 5
+          items: { $ref: "#/components/schemas/DisasterStep" }
+          description: Bij sequence; aan het einde van de storing heft ClusterForge alles op
         fault_seconds: { type: integer, minimum: 20, maximum: 600 }
         recovery_seconds: { type: integer, minimum: 10, maximum: 1800 }
     DisasterKindOption:
@@ -3606,9 +3660,30 @@ components:
         host: { type: string }
         nodes: { type: array, items: { type: string }, description: De VM's van dit cluster op de host }
         others: { type: array, items: { type: string }, description: Gekoppelde VM's van andere clusters op de host }
+    DisasterNodeOption:
+      type: object
+      required: [id, hostname, owner, faults, nft, tc, interfaces, primary, units]
+      properties:
+        id: { type: string, format: uuid }
+        hostname: { type: string }
+        owner: { type: boolean, description: De node heeft nu het VIP }
+        faults: { type: boolean, description: De agent kent storingen (protocol 6) }
+        nft: { type: boolean }
+        tc: { type: boolean }
+        interfaces: { type: array, items: { type: string } }
+        primary: { type: string, description: De interface naar ClusterForge; leeg als dat niet bekend is }
+        units: { type: array, items: { type: string }, description: Diensten die een stap hier kan stoppen }
+    DisasterActionOption:
+      type: object
+      required: [key, label, available, reason]
+      properties:
+        key: { $ref: "#/components/schemas/DisasterStepAction" }
+        label: { type: string }
+        available: { type: boolean }
+        reason: { type: string, description: Waarom niet, als available false is }
     DisasterOptions:
       type: object
-      required: [allowed, reason, slug, kinds, hosts, units, vips]
+      required: [allowed, reason, slug, kinds, hosts, units, vips, nodes, actions]
       properties:
         allowed: { type: boolean, description: false op prod }
         reason: { type: string }
@@ -3617,6 +3692,8 @@ components:
         hosts: { type: array, items: { $ref: "#/components/schemas/DisasterHostOption" } }
         units: { type: array, items: { type: string } }
         vips: { type: array, items: { type: string } }
+        nodes: { type: array, items: { $ref: "#/components/schemas/DisasterNodeOption" }, description: Voor de stappen van een reeks }
+        actions: { type: array, items: { $ref: "#/components/schemas/DisasterActionOption" } }
     DisasterScenarioList:
       type: object
       required: [items, options]
@@ -3664,12 +3741,13 @@ components:
         vips: { type: array, items: { $ref: "#/components/schemas/DisasterVIP" } }
     DisasterPreview:
       type: object
-      required: [ok, checks, description, targets, clusters, skipped, notes, confirm]
+      required: [ok, checks, description, targets, steps, clusters, skipped, notes, confirm]
       properties:
         ok: { type: boolean, description: Of de voorcontrole slaagt }
         checks: { type: array, items: { $ref: "#/components/schemas/TestRunCheck" } }
         description: { type: string }
         targets: { type: array, items: { $ref: "#/components/schemas/DisasterTarget" } }
+        steps: { type: array, items: { $ref: "#/components/schemas/DisasterPlannedStep" }, description: Bij sequence }
         clusters: { type: array, items: { $ref: "#/components/schemas/DisasterClusterPlan" } }
         skipped: { type: array, items: { type: string }, description: Draaiende VM's op de host die niet in ClusterForge staan en aan blijven }
         notes: { type: array, items: { type: string }, description: Wat de voorspelling onzeker maakt }
@@ -3708,7 +3786,7 @@ components:
     DisasterReport:
       type: object
       required: [scenario_id, name, kind, description, unit, fault_ms, expect_recovery_ms, short_outage_ms, clear_ms, recovery_ms,
-        total_ms, end_ms, targets, target_results, clusters, vips, skipped, notes]
+        total_ms, end_ms, targets, target_results, steps, clusters, vips, skipped, notes]
       properties:
         scenario_id: { type: string, format: uuid }
         name: { type: string }
@@ -3724,6 +3802,7 @@ components:
         end_ms: { type: integer, format: int64 }
         targets: { type: array, items: { $ref: "#/components/schemas/DisasterTarget" } }
         target_results: { type: array, items: { $ref: "#/components/schemas/DisasterTargetResult" } }
+        steps: { type: array, items: { $ref: "#/components/schemas/DisasterPlannedStep" }, description: Bij sequence, met wat elke stap deed }
         clusters:
           type: array
           description: Voorspeld tegen gemeten; tijdens de run de voorspelling met measured leeg

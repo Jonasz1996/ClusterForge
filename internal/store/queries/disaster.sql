@@ -53,3 +53,16 @@ LEFT JOIN LATERAL (
     LIMIT 1
 ) w ON true
 WHERE c.id = ANY(@ids::uuid[]);
+
+-- name: ListFaultFacts :many
+-- Wat een reeks van storingen per node uit de laatste facts nodig heeft: de
+-- interfaces, het adres waarmee de agent ClusterForge bereikt, nft en tc,
+-- en de storingen die nu actief zijn.
+SELECT f.node_id,
+       coalesce(f.facts -> 'interfaces', '[]'::jsonb)::jsonb AS interfaces,
+       coalesce(f.facts ->> 'primary_address', '')::text AS primary_address,
+       coalesce(f.facts -> 'tools', 'null'::jsonb)::jsonb AS tools,
+       coalesce(f.facts -> 'faults', '[]'::jsonb)::jsonb AS faults
+FROM node_facts f
+JOIN nodes n ON n.id = f.node_id
+WHERE n.cluster_id = @cluster_id;

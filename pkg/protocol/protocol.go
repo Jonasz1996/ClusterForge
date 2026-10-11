@@ -10,7 +10,7 @@ import (
 
 // Version is de protocolversie. Een agent meldt die bij elke heartbeat, zodat
 // de server geen berichten stuurt die de agent niet kent.
-const Version = 5
+const Version = 6
 
 // CommandsSince is de eerste protocolversie met commando's.
 const CommandsSince = 2
@@ -29,6 +29,11 @@ const InspectSince = 4
 // onderhoudsfacts meldt. Een oudere agent stuurt die niet; de server neemt
 // dan zelf waar wat hij uit heartbeats en facts kan halen.
 const JournalSince = 5
+
+// FaultsSince is de eerste protocolversie die storingen kan injecteren
+// (fault.inject, fault.renew en fault.clear) en in de facts meldt welke
+// gereedschappen ervoor op de node staan.
+const FaultsSince = 6
 
 // Berichttypes.
 const (
@@ -159,6 +164,20 @@ type Facts struct {
 	// Certificates zijn de servercertificaten op de vaste plekken, zonder
 	// CA's. Alleen onderwerp, namen en vervaldatum; nooit een sleutel.
 	Certificates []Certificate `json:"certificates,omitempty"`
+
+	// Vanaf protocol 6.
+
+	// Tools zegt welke gereedschappen voor storingen op de node staan.
+	Tools *Tools `json:"tools,omitempty"`
+	// Faults zijn de storingen die nu actief zijn, met hun id.
+	Faults []string `json:"faults,omitempty"`
+}
+
+// Tools zijn de gereedschappen die storingsinjectie nodig heeft: nft voor
+// vrrp_block en port_block, tc voor netem. ip is er altijd.
+type Tools struct {
+	Nft bool `json:"nft"`
+	Tc  bool `json:"tc"`
 }
 
 type Route struct {
@@ -282,6 +301,16 @@ const (
 	// veranderen: dpkg-query, systemctl show, id en stat, nooit apt-get, een
 	// ander systemctl-werkwoord of sh.
 	CmdInspect = "state.inspect"
+	// CmdFaultInject zet de storing in Fault aan. De agent schrijft haar eerst
+	// naar zijn state en draait haar zelf terug als de lease of de
+	// bovengrens verloopt, ook na een herstart.
+	CmdFaultInject = "fault.inject"
+	// CmdFaultRenew verlengt de lease van de storingen in FaultIDs. Een id
+	// dat de agent niet (meer) kent, staat in de fout.
+	CmdFaultRenew = "fault.renew"
+	// CmdFaultClear draait de storingen in FaultIDs terug; leeg is alles.
+	// Een onbekend id is geen fout.
+	CmdFaultClear = "fault.clear"
 )
 
 // Command is een opdracht van de server. De server stuurt het als request op
@@ -299,6 +328,63 @@ type Command struct {
 	Steps []Step `json:"steps,omitempty"`
 	// Inspect zijn de stappen van CmdInspect.
 	Inspect []InspectStep `json:"inspect,omitempty"`
+	// Fault is de storing van CmdFaultInject.
+	Fault *Fault `json:"fault,omitempty"`
+	// FaultIDs zijn de storingen van CmdFaultRenew en CmdFaultClear.
+	FaultIDs []string `json:"fault_ids,omitempty"`
+}
+
+// Soorten storing. Er is geen vrije interface, regel of commando: de agent
+// kent alleen deze, met vaste grenzen.
+const (
+	// FaultLinkDown zet een interface down (ip link set dev X down).
+	FaultLinkDown = "link_down"
+	// FaultVRRPBlock laat VRRP (IP-protocol 112) in en uit vallen, met een
+	// eigen nft-tabel.
+	FaultVRRPBlock = "vrrp_block"
+	// FaultPortBlock laat inkomend TCP-verkeer op één poort vallen, behalve
+	// van de node zelf.
+	FaultPortBlock = "port_block"
+	// FaultNetem geeft een interface vertraging of pakketverlies met tc.
+	FaultNetem = "netem"
+	// FaultDiskFill vult de schijf met de state van de agent tot een
+	// percentage met één bestand.
+	FaultDiskFill = "disk_fill"
+)
+
+// Grenzen van storingen; de agent weigert alles daarbuiten.
+const (
+	// FaultLease is hoe lang een storing blijft zonder fault.renew.
+	FaultLease = 30 * time.Second
+	// FaultMax is de harde bovengrens van elke storing.
+	FaultMax = 10 * time.Minute
+	// FaultMaxCutOff is de bovengrens van link_down op de interface waarover
+	// de agent met de server praat: de server kan dan niet verlengen of
+	// opheffen, dus geldt alleen deze grens.
+	FaultMaxCutOff  = 2 * time.Minute
+	NetemMaxDelayMS = 2000
+	NetemMaxLoss    = 50
+	DiskFillMax     = 95
+)
+
+// Fault is een storing. ID is uniek per storing op deze node; de server
+// gebruikt het om te verlengen en op te heffen.
+type Fault struct {
+	ID   string `json:"id"`
+	Kind string `json:"kind"`
+	// Interface bij link_down en netem.
+	Interface string `json:"interface,omitempty"`
+	// Port bij port_block.
+	Port int `json:"port,omitempty"`
+	// DelayMS en LossPercent bij netem.
+	DelayMS     int `json:"delay_ms,omitempty"`
+	LossPercent int `json:"loss_percent,omitempty"`
+	// FillPercent bij disk_fill.
+	FillPercent int `json:"fill_percent,omitempty"`
+	// LeaseSeconds: zonder verlenging zo lang; nul is FaultLease.
+	LeaseSeconds int `json:"lease_seconds,omitempty"`
+	// MaxSeconds is de bovengrens, hoe vaak er ook verlengd wordt.
+	MaxSeconds int `json:"max_seconds"`
 }
 
 // Result is het antwoord van de agent op een commando.

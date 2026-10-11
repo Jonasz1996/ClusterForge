@@ -115,8 +115,13 @@ func TestInstallUpgrade(t *testing.T) {
 	if _, err := os.Stat(bin + ".new"); err == nil {
 		t.Fatal("tijdelijke binary blijft staan")
 	}
-	if b, _ := os.ReadFile(e.systemctls); string(b) != "restart cf-agent\n" {
+	if b, _ := os.ReadFile(e.systemctls); string(b) != "daemon-reload\nenable cf-agent-fault-clear\nrestart cf-agent\n" {
 		t.Fatalf("systemctl: %q", b)
+	}
+	// De oneshot-unit die achtergebleven storingen terugdraait, komt erbij.
+	if b, err := os.ReadFile(filepath.Join(e.root, "etc/systemd/system/cf-agent-fault-clear.service")); err != nil ||
+		!strings.Contains(string(b), "ExecStart=/usr/local/bin/cf-agent fault-clear") || !strings.Contains(string(b), "Before=network-pre.target cf-agent.service") {
+		t.Fatalf("fault-clear-unit: %v %s", err, b)
 	}
 	if _, err := os.Stat(filepath.Join(e.root, "etc/systemd/system/cf-agent.service")); err == nil {
 		t.Fatal("upgrade hoort de unit niet te herschrijven")

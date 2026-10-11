@@ -49,6 +49,7 @@ Het technisch ontwerp staat in [docs/design/mvp-fase-1.md](docs/design/mvp-fase-
 | 9. Auto-documentatie | Per cluster vijf hoofdstukken (architectuur, netwerk met diagram, configuratie, herstel en runbooks) en een overzicht, als Markdown uit wat er draait; tien minuten na een wijziging en elke nacht bijgewerkt, met de geschiedenis en wat er veranderde, downloaden als zip en afdrukken; zonder geheimen | klaar |
 | 10. Documentatie naar GitHub | De documentatie in een eigen GitHub-repository met een eigen token: na elke nieuwe versie één commit met alleen de gewijzigde bestanden, zonder commit als er niets veranderde; nooit in de branch die GitOps leest | klaar |
 | 11. Rampoefeningen | In lab en test met opzet een Proxmox-host, een dienst op alle nodes of een VIP laten uitvallen; vooraf de voorspelling van de wat-als, tijdens de storing meten op de VIP's en de status van elk geraakt en afhankelijk cluster, en een rapport met voorspeld tegen gemeten; daarna altijd alles terugzetten. Pagina Tests met alle runs | klaar |
+| 12. Storingen met dodemansknop | Een rampoefening als reeks van tot vijf stappen: VRRP blokkeren, een interface down, een TCP-poort dicht, vertraging of pakketverlies, een schijf vullen of een dienst stoppen, op de VIP-houder, de andere nodes, alle nodes of één node. De agent zet elke storing met een lease die de server verlengt en heft hem zelf op als ClusterForge wegvalt, na de bovengrens en na een herstart | klaar |
 
 ## Draaien met Docker Compose
 
@@ -116,6 +117,7 @@ Het script downloadt `cf-agent` van je eigen server, controleert de checksum, me
 cf-agent enroll -server URL -token cfe_...      meldt deze machine aan (doet het installatiescript)
 cf-agent run                                    verbindt met ClusterForge (zo start systemd hem)
 cf-agent facts                                  toont de facts van deze machine
+cf-agent fault-clear                            heft achtergebleven storingen van een rampoefening op
 cf-agent version                                toont de versie
 ```
 
@@ -127,7 +129,7 @@ Een nieuwere agent zet je erop zonder opnieuw aan te melden:
 curl -fsSL https://clusterforge.example/install/agent.sh | sudo sh -s -- --server https://clusterforge.example --upgrade
 ```
 
-Het script controleert de checksum, vervangt alleen de binary en herstart `cf-agent`; `agent.json` blijft staan. Mislukt de download of de checksum, dan blijft de oude agent draaien.
+Het script controleert de checksum, vervangt alleen de binary en herstart `cf-agent`; `agent.json` blijft staan. Mislukt de download of de checksum, dan blijft de oude agent draaien. Sinds de storingen van [rampoefeningen](#reeksen-van-storingen) zet het script ook `cf-agent-fault-clear.service` neer, die bij elke start van de machine achtergebleven storingen opheft voordat het netwerk opkomt. Voor een reeks heeft de node `nft` (pakket `nftables`) en `tc` (pakket `iproute2`) nodig.
 
 ## Monitoring
 
@@ -402,6 +404,7 @@ Een failovertest laat één node uitvallen; een rampoefening laat iets groters w
 - **Proxmox-host valt uit**: alle gekoppelde VM's op die host gaan tegelijk hard uit. De host zelf blijft aan. De storing duurt minstens 100 s, omdat een node pas na 90 s zonder heartbeat down is; standaard 2 minuten, met 10 minuten om weer gezond te worden, want de VM's moeten opstarten.
 - **Dienst valt weg op alle nodes**: een dienst van de failovertest, of hier ook PostgreSQL of MariaDB, stopt op elke node van het cluster. Standaard 1 minuut, met 2 minuten voor het herstel.
 - **VIP valt weg**: keepalived stopt op alle nodes, zodat het VIP geen houder heeft.
+- **Reeks van storingen**: tot vijf stappen na elkaar, zie [hieronder](#reeksen-van-storingen).
 
 Nu oefenen toont eerst de voorspelling van de [wat-als](#wat-als): per cluster dat geraakt wordt of er volgens de bekende afhankelijkheden van afhangt, de status nu en de voorspelde status met de reden, en wat de voorspelling onzeker maakt. Daarna de voorcontrole: alleen nodes in lab- en testclusters vallen uit, geen prodcluster hangt ervan af, elk geraakt cluster is gezond met verse heartbeats, in geen van die clusters loopt een taak, er loopt geen andere test, de probes op elk VIP slagen drie keer, en ClusterForge draait zelf niet op wat uitvalt. Bij een host komen daar bij: de host is online, geen VM erop staat onder Proxmox HA en op geen ervan draait docker; staan er VM's op die ClusterForge niet kent terwijl hij niet weet waar hij zelf draait, dan start de oefening niet. Ter bevestiging tik je de slug in van elk cluster dat uitvalt.
 
@@ -410,6 +413,25 @@ De oefening is een taak met vijf stappen: Voorcontrole, Storing en meten, Herste
 Alles komt terug, zoals bij de failovertest: na de meting, bij een fout, bij Afbreken, bij een nette stop van de server en na een crash. Lukt het herstel niet, dan staat er een rode balk bij elk gemeten cluster met Opnieuw herstellen, en een bevinding bij Herstelbaarheid in de health score. Een incident tijdens de oefening staat als veroorzaakt door een test. Op prod kan een rampoefening niet, ook niet met de hand.
 
 Alle runs van failovertests, rampoefeningen en back-upcontroles staan op de pagina Tests, met filters op soort en uitkomst.
+
+#### Reeksen van storingen
+
+Een reeks bootst na wat echt misgaat: geen nette uitval, maar een netwerk dat hapert, een poort die dichtvalt of twee nodes die elkaar niet meer horen. Elke stap heeft een tijdstip (seconden na de start van de storing), wat er gebeurt en op welke nodes: de VIP-houder (de node die bij de start het VIP heeft), de andere nodes, alle nodes of één gekozen node. Wat er kan:
+
+| Stap | Wat de agent doet |
+| --- | --- |
+| VRRP blokkeren | nftables laat geen VRRP meer door, in en uit. Op alle nodes geeft dat split-brain: elke node neemt het VIP |
+| Interface down | `ip link set dev … down` op de gekozen interface |
+| TCP-poort dicht | nftables gooit binnenkomend TCP-verkeer op die poort weg, behalve van de node zelf |
+| Vertraging of pakketverlies | `tc qdisc … netem` op de interface, tot 2000 ms en 50 % |
+| Schijf vullen | een bestand dat de schijf tot 50 à 95 % vult |
+| Dienst stoppen | `systemctl stop` van keepalived of een dienst van de failovertest |
+
+Een stap blijft aan tot het einde van de storing; daarna heft ClusterForge alles op en start hij de gestopte diensten. De voorspelling rekent de reeks stap voor stap na: wie het VIP krijgt, of de probe het nog haalt en welke status het cluster dan heeft. De voorcontrole kijkt daarnaast of elke agent storingen kent (protocol 6), of `nft` en `tc` er zijn, en of er nog een storing van een eerdere oefening aanstaat.
+
+De dodemansknop: de agent zet elke storing met een lease van 30 s die de server elke 10 s verlengt. Valt de server weg, crasht hij of verliest de node het contact, dan heft de agent de storing zelf op zodra de lease afloopt. Elke storing heeft daarnaast een harde bovengrens van 10 minuten. De agent bewaart zijn storingen in `faults.json` naast zijn state, heft ze op bij elke start, en `cf-agent-fault-clear.service` doet dat bij het opstarten van de machine al voor het netwerk opkomt, ook als de agent zelf niet start. Met de hand: `sudo cf-agent fault-clear`.
+
+Interface down op de interface waarover de agent met ClusterForge praat, snijdt de node af: dan kan ClusterForge niet verlengen en niet opheffen. Zo'n stap heeft geen lease maar alleen een bovengrens van 2 minuten, telt vanaf de stap tot het einde van de storing, en mag alleen in de laatste 2 minuten van de storing vallen; daarna volgt er op die node geen stap meer. De agent zet de interface na die tijd zelf weer aan, ook na een herstart.
 
 ## Afhankelijkheden
 

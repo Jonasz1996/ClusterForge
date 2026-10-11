@@ -15,6 +15,11 @@ export type DisasterClusterPlan = components["schemas"]["DisasterClusterPlan"];
 export type DisasterClusterResult = components["schemas"]["DisasterClusterResult"];
 export type DisasterReport = components["schemas"]["DisasterReport"];
 export type DisasterTarget = components["schemas"]["DisasterTarget"];
+export type DisasterStep = components["schemas"]["DisasterStep"];
+export type DisasterStepAction = components["schemas"]["DisasterStepAction"];
+export type DisasterStepOn = components["schemas"]["DisasterStepOn"];
+export type DisasterPlannedStep = components["schemas"]["DisasterPlannedStep"];
+export type DisasterNodeOption = components["schemas"]["DisasterNodeOption"];
 
 type Tone = "slate" | "green" | "amber" | "red" | "blue";
 
@@ -39,6 +44,19 @@ export const roleLabels: Record<DisasterClusterPlan["role"], string> = {
   target: "valt uit",
   dependent: "hangt ervan af",
 };
+
+// onLabels zeggen op welke nodes een stap van een reeks werkt.
+export const onLabels: Record<DisasterStepOn, string> = {
+  owner: "de VIP-houder",
+  others: "de andere nodes",
+  all: "alle nodes",
+  node: "één node",
+};
+
+// faultMaxSeconds is de harde bovengrens van een storing in de agent;
+// cutOffMaxSeconds die van link_down op de interface naar ClusterForge.
+export const faultMaxSeconds = 600;
+export const cutOffMaxSeconds = 120;
 
 const keys = {
   scenarios: (clusterId: string) => ["clusters", clusterId, "disaster"] as const,
@@ -121,9 +139,16 @@ export function targetNames(targets: DisasterTarget[]) {
 
 // stillDown zegt wat er mogelijk nog uit staat als het herstel niet lukte;
 // hetzelfde als de server.
-export function stillDown(d: Pick<DisasterReport, "kind" | "unit" | "targets"> | null | undefined) {
+export function stillDown(d: Pick<DisasterReport, "kind" | "unit" | "targets" | "steps"> | null | undefined) {
   const names = list((d?.targets ?? []).map((t) => t.hostname));
   if (d?.kind === "host_down") return `de VM's van ${names} staan mogelijk nog uit`;
+  if (d?.kind === "sequence") {
+    const units = d.steps
+      .filter((s) => s.action === "service_stop")
+      .flatMap((s) => s.nodes.map((n) => `${s.unit} op ${n.hostname}`));
+    const msg = `storingen van de reeks staan mogelijk nog aan op ${names} (de agent heft ze uiterlijk na ${faultMaxSeconds} s zelf op)`;
+    return units.length ? `${msg} en ${list([...new Set(units)])} staat mogelijk nog stil` : msg;
+  }
   return `${d?.unit || "de dienst"} staat mogelijk nog uit op ${names}`;
 }
 

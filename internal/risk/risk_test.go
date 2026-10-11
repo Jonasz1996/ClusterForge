@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/Jonasz1996/clusterforge/pkg/protocol"
 )
 
 var now = time.Date(2026, 10, 11, 12, 0, 0, 0, time.UTC)
@@ -28,7 +30,7 @@ func healthy() ClusterInput {
 	node := func(id uuid.UUID, name, host string) NodeInput {
 		return NodeInput{
 			ID: id, Hostname: name, Lifecycle: "active", Host: host, HasFacts: true,
-			OSID: "debian", OSVersion: "13", OSName: "Debian GNU/Linux 13 (trixie)", ProtocolVersion: 5,
+			OSID: "debian", OSVersion: "13", OSName: "Debian GNU/Linux 13 (trixie)", ProtocolVersion: protocol.Version,
 			Filesystems: []FSInput{{Mount: "/", Size: 20 << 30, Used: 5 << 30}},
 			Metrics:     &NodeMetrics{CPUP95: fptr(30), MemoryP95: fptr(50), SwapAvg: fptr(0), NetErrors: fptr(0)},
 		}
