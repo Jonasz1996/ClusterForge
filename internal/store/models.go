@@ -438,6 +438,35 @@ type GitRepo struct {
 	ServerUrl  string
 }
 
+type Incident struct {
+	ID           uuid.UUID
+	Number       int32
+	Title        string
+	Severity     string
+	Status       string
+	StartedAt    time.Time
+	DetectedAt   time.Time
+	ResolvedAt   *time.Time
+	CausedByTest bool
+	TestRunID    *uuid.UUID
+	Note         string
+	UpdatedAt    time.Time
+}
+
+type IncidentSubject struct {
+	IncidentID  uuid.UUID
+	SubjectType string
+	SubjectID   uuid.UUID
+	Name        string
+	ClusterID   *uuid.UUID
+	FirstStatus string
+	WorstStatus string
+	LastStatus  string
+	Reason      string
+	Since       time.Time
+	Until       *time.Time
+}
+
 type Job struct {
 	ID              uuid.UUID
 	Kind            string

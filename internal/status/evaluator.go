@@ -96,7 +96,7 @@ func (e *Evaluator) Evaluate(ctx context.Context) error {
 	}
 	if e.After != nil {
 		if err := e.After(ctx); err != nil && ctx.Err() == nil {
-			e.log.Error("status van diensten berekenen mislukt", "err", err)
+			e.log.Error("diensten en incidenten berekenen mislukt", "err", err)
 		}
 	}
 	return nil
@@ -261,7 +261,16 @@ func (e *Evaluator) saveVIPOwner(ctx context.Context, q *store.Queries, v store.
 		return err
 	}
 	cid := v.ClusterID
-	payload := map[string]any{"address": v.Address.String(), "from": v.OwnerNodeID, "to": owner, "owner_hostname": nil}
+	// node_ids zet de wissel ook in de tijdlijn van beide nodes.
+	nodeIDs := []string{}
+	for _, id := range []*uuid.UUID{v.OwnerNodeID, owner} {
+		if id != nil {
+			nodeIDs = append(nodeIDs, id.String())
+		}
+	}
+	payload := map[string]any{
+		"address": v.Address.String(), "from": v.OwnerNodeID, "to": owner, "owner_hostname": nil, "node_ids": nodeIDs,
+	}
 	if owner != nil {
 		payload["owner_hostname"] = hostnames[*owner]
 	}

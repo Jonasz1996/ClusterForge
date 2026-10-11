@@ -1,0 +1,333 @@
+package incidents
+
+import (
+	"context"
+	"log/slog"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/Jonasz1996/clusterforge/internal/events"
+	"github.com/Jonasz1996/clusterforge/internal/store"
+)
+
+// statusLock is de advisory lock van de evaluator: de detector rekent na
+// diens commit, en nooit tegelijk met een volgende ronde.
+const statusLock = 4242001
+
+// testTail is hoe lang na het einde van een failovertest een overgang nog
+// door de test komt: de nodes hebben even nodig om te herstellen.
+const testTail = 2 * time.Minute
+
+// Detector opent, groepeert en sluit incidenten.
+type Detector struct {
+	pool  *pgxpool.Pool
+	ev    *events.Writer
+	log   *slog.Logger
+	Rules Rules
+	// Now is de klok; tests zetten hem vooruit.
+	Now func() time.Time
+}
+
+func NewDetector(pool *pgxpool.Pool, ev *events.Writer, log *slog.Logger) *Detector {
+	return &Detector{pool: pool, ev: ev, log: log, Rules: DefaultRules, Now: time.Now}
+}
+
+// Detect kijkt één keer wat er misgaat en werkt de incidenten bij. Hij
+// draait na elke ronde van de evaluator.
+func (d *Detector) Detect(ctx context.Context) error {
+	return pgx.BeginFunc(ctx, d.pool, func(tx pgx.Tx) error {
+		if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock($1)", statusLock); err != nil {
+			return err
+		}
+		q := store.New(tx)
+		now := d.Now()
+		w, err := d.world(ctx, q, now)
+		if err != nil {
+			return err
+		}
+		incs, err := load(ctx, q, now.Add(-d.Rules.Reopen))
+		if err != nil {
+			return err
+		}
+		incs, evs := Step(d.Rules, w, incs, now)
+		for _, inc := range incs {
+			if err := save(ctx, q, inc); err != nil {
+				return err
+			}
+		}
+		for _, e := range evs {
+			if err := d.write(ctx, q, e, now); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+func (d *Detector) world(ctx context.Context, q *store.Queries, now time.Time) (World, error) {
+	w := World{Hosts: map[Key][]string{}, Related: map[[2]uuid.UUID]bool{}, Status: map[Key]string{}}
+	clusters, err := q.ListIncidentClusters(ctx)
+	if err != nil {
+		return w, err
+	}
+	nodes, err := q.ListIncidentNodes(ctx)
+	if err != nil {
+		return w, err
+	}
+	services, err := q.ListIncidentServices(ctx)
+	if err != nil {
+		return w, err
+	}
+	runs, err := q.ListIncidentTestRuns(ctx, store.ListIncidentTestRunsParams{
+		FailedSince: now.Add(-d.Rules.Reopen), RunningSince: now.Add(-testTail),
+	})
+	if err != nil {
+		return w, err
+	}
+	deps, err := q.ListClusterDependencies(ctx)
+	if err != nil {
+		return w, err
+	}
+
+	env := map[uuid.UUID]string{}
+	running := map[uuid.UUID]*uuid.UUID{}
+	for _, r := range runs {
+		if r.Kind == "failover.test" && r.ClusterID != nil && (r.FinishedAt == nil || now.Sub(*r.FinishedAt) <= testTail) {
+			id := r.ID
+			running[*r.ClusterID] = &id
+		}
+	}
+	nodeHost := map[uuid.UUID]string{}
+	for _, n := range nodes {
+		k := Key{SubjectNode, n.ID}
+		w.Status[k] = n.Status
+		if n.Host != "" {
+			nodeHost[n.ID] = n.Host
+			w.Hosts[k] = []string{n.Host}
+			if n.ClusterID != nil {
+				ck := Key{SubjectCluster, *n.ClusterID}
+				w.Hosts[ck] = appendNew(w.Hosts[ck], n.Host)
+			}
+		}
+	}
+	for _, c := range clusters {
+		k := Key{SubjectCluster, c.ID}
+		env[c.ID] = c.Environment
+		w.Status[k] = c.Status
+		if !bad(c.Status) {
+			continue
+		}
+		id := c.ID
+		w.Problems = append(w.Problems, Problem{
+			Key: k, Name: c.Name, ClusterID: &id, Env: c.Environment, Status: c.Status, Reason: c.StatusReason,
+			Since: or(c.StatusSince, now), Primary: true, TestRun: running[c.ID],
+		})
+	}
+	for _, n := range nodes {
+		if n.Lifecycle != store.NodeLifecycleActive {
+			continue
+		}
+		p := Problem{
+			Key: Key{SubjectNode, n.ID}, Name: n.Hostname, ClusterID: n.ClusterID, Status: n.Status, Reason: n.StatusReason,
+			Since: or(n.StatusSince, now),
+		}
+		switch {
+		case n.ClusterID == nil && n.Status == "down":
+			p.Primary = true
+		case n.ClusterID != nil && (n.Status == "down" || n.Status == "degraded"):
+			p.Env, p.TestRun = env[*n.ClusterID], running[*n.ClusterID]
+		default:
+			continue
+		}
+		w.Problems = append(w.Problems, p)
+	}
+	for _, s := range services {
+		k := Key{SubjectService, s.ID}
+		w.Status[k] = s.Status
+		switch {
+		case s.NodeID != nil && nodeHost[*s.NodeID] != "":
+			w.Hosts[k] = []string{nodeHost[*s.NodeID]}
+		case s.ClusterID != nil:
+			w.Hosts[k] = w.Hosts[Key{SubjectCluster, *s.ClusterID}]
+		}
+		if s.Status != "down" {
+			continue
+		}
+		p := Problem{Key: k, Name: s.Name, ClusterID: s.ClusterID, Status: s.Status, Reason: s.StatusReason, Since: now, Primary: true}
+		if s.ClusterID != nil {
+			p.Env, p.TestRun = env[*s.ClusterID], running[*s.ClusterID]
+		}
+		w.Problems = append(w.Problems, p)
+	}
+	for _, r := range runs {
+		if !r.Failed || r.FinishedAt == nil {
+			continue
+		}
+		k := Key{SubjectTestRun, r.ID}
+		name := "Geplande back-upcontrole van " + r.Hostname
+		if r.Kind == "failover.test" {
+			name = "Geplande failovertest op " + r.ClusterName
+		}
+		p := Problem{Key: k, Name: name, ClusterID: r.ClusterID, Status: r.Result, Reason: clip(r.Summary, 300),
+			Since: *r.FinishedAt, Primary: true, Point: true}
+		if r.ClusterID != nil {
+			p.Env = env[*r.ClusterID]
+			w.Hosts[k] = w.Hosts[Key{SubjectCluster, *r.ClusterID}]
+		}
+		w.Problems = append(w.Problems, p)
+	}
+
+	// Clusters die via de graaf van elkaar afhangen, ook over een tussenstap.
+	next := map[uuid.UUID][]uuid.UUID{}
+	for _, dep := range deps {
+		if dep.FromCluster != nil && dep.ToCluster != nil {
+			next[*dep.FromCluster] = append(next[*dep.FromCluster], *dep.ToCluster)
+		}
+	}
+	for from := range next {
+		todo, seen := []uuid.UUID{from}, map[uuid.UUID]bool{from: true}
+		for len(todo) > 0 {
+			c := todo[0]
+			todo = todo[1:]
+			for _, to := range next[c] {
+				if !seen[to] {
+					seen[to] = true
+					todo = append(todo, to)
+					w.Related[[2]uuid.UUID{from, to}], w.Related[[2]uuid.UUID{to, from}] = true, true
+				}
+			}
+		}
+	}
+	return w, nil
+}
+
+func bad(status string) bool {
+	return status == "degraded" || status == "down" || status == "split_brain"
+}
+
+func or(t *time.Time, def time.Time) time.Time {
+	if t == nil {
+		return def
+	}
+	return *t
+}
+
+func appendNew(s []string, v string) []string {
+	for _, x := range s {
+		if x == v {
+			return s
+		}
+	}
+	return append(s, v)
+}
+
+func clip(s string, n int) string {
+	if r := []rune(s); len(r) > n {
+		return string(r[:n]) + "…"
+	}
+	return s
+}
+
+func load(ctx context.Context, q *store.Queries, since time.Time) ([]*Incident, error) {
+	rows, err := q.ListDetectorIncidents(ctx, since)
+	if err != nil || len(rows) == 0 {
+		return nil, err
+	}
+	ids := make([]uuid.UUID, len(rows))
+	byID := map[uuid.UUID]*Incident{}
+	out := make([]*Incident, len(rows))
+	for i, r := range rows {
+		ids[i] = r.ID
+		out[i] = &Incident{
+			ID: r.ID, Number: r.Number, Title: r.Title, Severity: r.Severity, Open: r.Status == "open",
+			StartedAt: r.StartedAt, DetectedAt: r.DetectedAt, ResolvedAt: r.ResolvedAt, CausedByTest: r.CausedByTest,
+			TestRunID: r.TestRunID,
+		}
+		byID[r.ID] = out[i]
+	}
+	subjects, err := q.ListIncidentSubjectsOf(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	for _, s := range subjects {
+		inc := byID[s.IncidentID]
+		inc.Subjects = append(inc.Subjects, &Subject{
+			Key: Key{s.SubjectType, s.SubjectID}, Name: s.Name, ClusterID: s.ClusterID, First: s.FirstStatus,
+			Worst: s.WorstStatus, Last: s.LastStatus, Reason: s.Reason, Since: s.Since, Until: s.Until,
+		})
+	}
+	return out, nil
+}
+
+func save(ctx context.Context, q *store.Queries, inc *Incident) error {
+	status := "resolved"
+	if inc.Open {
+		status = "open"
+	}
+	switch {
+	case inc.ID == uuid.Nil:
+		row, err := q.CreateIncident(ctx, store.CreateIncidentParams{
+			Title: inc.Title, Severity: inc.Severity, StartedAt: inc.StartedAt, DetectedAt: inc.DetectedAt,
+			CausedByTest: inc.CausedByTest, TestRunID: inc.TestRunID,
+		})
+		if err != nil {
+			return err
+		}
+		inc.ID, inc.Number = row.ID, row.Number
+		if inc.Open {
+			break
+		}
+		fallthrough
+	case inc.dirty:
+		if err := q.UpdateIncidentState(ctx, store.UpdateIncidentStateParams{
+			ID: inc.ID, Severity: inc.Severity, Status: status, ResolvedAt: inc.ResolvedAt, StartedAt: inc.StartedAt,
+		}); err != nil {
+			return err
+		}
+	}
+	inc.dirty = false
+	for _, s := range inc.Subjects {
+		if !s.dirty {
+			continue
+		}
+		if err := q.UpsertIncidentSubject(ctx, store.UpsertIncidentSubjectParams{
+			IncidentID: inc.ID, SubjectType: s.Type, SubjectID: s.ID, Name: s.Name, ClusterID: s.ClusterID,
+			FirstStatus: s.First, WorstStatus: s.Worst, LastStatus: s.Last, Reason: s.Reason, Since: s.Since, Until: s.Until,
+		}); err != nil {
+			return err
+		}
+		s.dirty = false
+	}
+	return nil
+}
+
+func (d *Detector) write(ctx context.Context, q *store.Queries, e Event, now time.Time) error {
+	inc := e.Incident
+	p := map[string]any{"number": inc.Number, "title": inc.Title, "severity": inc.Severity}
+	switch e.Action {
+	case "incident.opened":
+		names := make([]string, 0, len(inc.Subjects))
+		for _, s := range inc.Subjects {
+			names = append(names, s.Name)
+		}
+		p["subjects"], p["caused_by_test"] = names, inc.CausedByTest
+	case "incident.escalated":
+		p["from"] = e.From
+	case "incident.resolved":
+		p["duration_seconds"] = int(now.Sub(inc.StartedAt).Seconds())
+	}
+	var cluster *uuid.UUID
+	for _, s := range inc.Subjects {
+		if s.ClusterID != nil {
+			cluster = s.ClusterID
+			break
+		}
+	}
+	return d.ev.Write(ctx, q, events.Event{
+		Actor: events.System(), SubjectType: "incident", SubjectID: inc.ID.String(), ClusterID: cluster,
+		Action: e.Action, Payload: p,
+	})
+}

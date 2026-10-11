@@ -90,6 +90,8 @@ export function subjectHref(e: AuditEntry): string | null {
       return e.cluster && !e.cluster.deleted ? `/clusters/detail?id=${e.cluster.id}` : null;
     case "test_run":
       return `/tests/detail?id=${e.subject.id}`;
+    case "incident":
+      return `/incidenten/detail?id=${e.subject.id}`;
   }
   return null;
 }

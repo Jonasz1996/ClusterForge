@@ -153,9 +153,13 @@ func subjectName(r store.ListAuditRow, p map[string]any, n names, e Entry) (stri
 		return or(str(p, "name"), str(p, "slug")), false
 	case "audit":
 		return events.Lookup(r.SubjectID).Label, false
+	case "incident":
+		return "#" + num(p["number"]), false
 	}
 	return r.SubjectID, false
 }
+
+var severities = map[string]string{"low": "laag", "high": "hoog", "critical": "kritiek"}
 
 var reauthWhat = map[string]string{
 	"password_change": "wachtwoord wijzigen",
@@ -307,6 +311,25 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 		return fmt.Sprintf("%s van %s naar %s", name, status(from), status(to)) + colon(str(p, "reason"))
 	case "cluster.status_changed":
 		return fmt.Sprintf("Cluster %s van %s naar %s", name, status(from), status(to)) + colon(str(p, "reason"))
+	case "incident.opened":
+		s := fmt.Sprintf("Incident %s geopend: %s (%s)", name, str(p, "title"), or(severities[str(p, "severity")], str(p, "severity")))
+		if b, _ := p["caused_by_test"].(bool); b {
+			s += ", door een test"
+		}
+		return s
+	case "incident.escalated":
+		return fmt.Sprintf("Incident %s is nu %s (was %s): %s", name, or(severities[str(p, "severity")], str(p, "severity")),
+			or(severities[from], from), str(p, "title"))
+	case "incident.resolved":
+		secs, _ := p["duration_seconds"].(float64)
+		return fmt.Sprintf("Incident %s opgelost na %s: %s", name, duration(time.Duration(secs)*time.Second), str(p, "title"))
+	case "incident.reopened":
+		return fmt.Sprintf("Incident %s opnieuw geopend: %s", name, str(p, "title"))
+	case "incident.note_updated":
+		if p["empty"] == true {
+			return "Notitie bij incident " + name + " gewist"
+		}
+		return "Notitie bij incident " + name + " bijgewerkt"
 	case "vip.owner_changed":
 		old, owner := n.byID[from], str(p, "owner_hostname")
 		switch {

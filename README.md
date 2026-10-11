@@ -39,6 +39,7 @@ Het technisch ontwerp staat in [docs/design/mvp-fase-1.md](docs/design/mvp-fase-
 | Fase 3 | Inhoud | Status |
 | --- | --- | --- |
 | 1. Wijzigingsjournaal | Per node wat er veranderde, ook buiten ClusterForge om: pakketten, diensten, bestanden, herstarts, SSH-logins, geheugentekort, netwerk en Proxmox-taken, elk met een Nederlandse zin | klaar |
+| 2. Incidenten | Statusovergangen die bij elkaar horen, als één storing met een begin, een einde, een ernst en wat er geraakt was; pagina Incidenten en een kaart op het overzicht | klaar |
 
 ## Draaien met Docker Compose
 
@@ -452,6 +453,23 @@ De agent bewaart wat hij nog moet sturen in `/var/lib/clusterforge/journal.json`
 
 De facts tonen nu ook of een herstart nodig is (met de geïnstalleerde kernel), wanneer apt de lijsten voor het laatst bijwerkte, de soort, VLAN en MTU van elke interface, en de gateway en DNS-servers.
 
+## Incidenten
+
+Gaat er iets mis, dan maakt ClusterForge er een incident van: één storing met een begin, een einde, een ernst en wat er geraakt was. Een incident gaat open bij:
+
+- een cluster dat verminderd, down of in split-brain gaat;
+- een node zonder cluster die down gaat;
+- een bevestigde dienst met afnemers (zie Afhankelijkheden) die down gaat;
+- een geplande failovertest of back-upcontrole die mislukt of een fout geeft.
+
+Wat bij elkaar hoort, komt in hetzelfde incident: een node bij het incident van zijn cluster, een dienst of mislukte test bij dat van zijn cluster zolang het cluster nog misgaat, en een andere overgang die binnen tien minuten na het begin valt en verwant is (hetzelfde cluster, een cluster dat via de afhankelijkheden van het andere afhangt, of een node op dezelfde Proxmox-host). Een incident sluit als alles vijf minuten gezond is, en gaat weer open als dezelfde storing binnen een kwartier terugkomt. Een node in onderhoud geeft geen incident.
+
+De ernst volgt uit de omgeving: op prod is down of split-brain kritiek en verminderd hoog, al het andere is laag. Een incident wordt alleen erger, nooit minder erg. Wat gebeurt terwijl een failovertest van ClusterForge in hetzelfde cluster loopt (of tot twee minuten erna), krijgt de markering 'door een failovertest' en is standaard verborgen.
+
+Bij Incidenten staan de open incidenten bovenaan, daarna de opgeloste, met filters op periode en status. Een incident toont wat er geraakt was (met de eerste, ergste en laatste status en van wanneer tot wanneer), een notitie en de geschiedenis: de statusovergangen, VIP-wissels en tests over wat geraakt was, van vijf minuten voor het begin tot het einde. Het overzicht heeft een kaart Open incidenten. Iedereen ziet incidenten; alleen een beheerder schrijft de notitie, en een viewer ziet in de geschiedenis geen IP-adres of sessie. Openen, erger worden, sluiten, heropenen en de notitie staan ook in het logboek, onder de soort Incidenten.
+
+Een VIP-wissel en de statuswissel van een dienst staan nu ook bij de nodes zelf in het logboek, niet alleen bij het cluster.
+
 ## Ontwikkelen
 
 Nodig: Go 1.26, Node 22 met pnpm, Docker.
@@ -494,6 +512,7 @@ internal/agentbus/         ingebedde NATS-server: authenticatie per node, heartb
 internal/agentdist/        installatiescript en downloads van cf-agent
 internal/agent/            code van cf-agent zelf: aanmelden, verbinden, facts, metrics en het journaal verzamelen
 internal/journal/          het wijzigingsjournaal: zinnen, verschillen in de facts en opruimen
+internal/incidents/        incidenten: overgangen groeperen, ernst, openen en sluiten na elke statusronde
 internal/metrics/          metrics naar VictoriaMetrics schrijven en de grafieken opvragen
 internal/status/           statusregels voor nodes en clusters, VIP-eigenaars
 internal/live/             live updates naar de webinterface (Server-Sent Events)

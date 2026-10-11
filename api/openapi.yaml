@@ -1847,6 +1847,67 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
+  /incidents:
+    get:
+      operationId: listIncidents
+      summary: Incidenten, open eerst, daarna de afgesloten die in de periode begonnen
+      description: |
+        Incidenten door een failovertest van ClusterForge zijn standaard
+        verborgen; `include_tests` toont ze.
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [open, resolved] } }
+        - { name: cluster, in: query, description: Alleen incidenten die dit cluster raakten, schema: { type: string, format: uuid } }
+        - { name: from, in: query, description: Begonnen vanaf; standaard 30 dagen geleden, schema: { type: string, format: date-time } }
+        - { name: to, in: query, description: Begonnen voor; standaard nu, schema: { type: string, format: date-time } }
+        - { name: include_tests, in: query, schema: { type: boolean, default: false } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 500, default: 100 } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/IncidentList" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+  /incidents/{incidentId}:
+    parameters:
+      - { name: incidentId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getIncident
+      summary: Eén incident, met wat er geraakt was en de statusovergangen in die periode
+      description: |
+        De geschiedenis komt uit het logboek, maar alleen statusovergangen,
+        incidenten en tests over de geraakte clusters, nodes en diensten.
+        Een viewer ziet ze zonder IP-adres en sessie.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/IncidentDetail" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /incidents/{incidentId}/note:
+    parameters:
+      - { name: incidentId, in: path, required: true, schema: { type: string, format: uuid } }
+    put:
+      operationId: setIncidentNote
+      summary: De notitie bij een incident (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/IncidentNote" }
+      responses:
+        "200":
+          description: Opgeslagen
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Incident" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
 components:
   securitySchemes:
     session:
@@ -2831,6 +2892,75 @@ components:
           type: array
           items: { $ref: "#/components/schemas/AuditChange" }
         payload: { type: object, additionalProperties: true }
+    IncidentSubject:
+      type: object
+      required: [type, id, name, cluster_id, first_status, worst_status, last_status, reason, since, until, present]
+      properties:
+        type: { type: string, enum: [cluster, node, service, test_run] }
+        id: { type: string, format: uuid }
+        name: { type: string }
+        cluster_id: { type: string, format: uuid, nullable: true }
+        first_status: { type: string }
+        worst_status: { type: string }
+        last_status:
+          type: string
+          description: De status nu, of toen het weer goed was
+        reason: { type: string }
+        since: { type: string, format: date-time }
+        until:
+          type: string
+          format: date-time
+          nullable: true
+          description: Wanneer het weer goed was; null zolang het nog misgaat
+        present:
+          type: boolean
+          description: Of het onderwerp nog bestaat
+    Incident:
+      type: object
+      required: [id, number, title, severity, status, started_at, detected_at, resolved_at, caused_by_test, test_run_id, note, updated_at, subjects]
+      properties:
+        id: { type: string, format: uuid }
+        number: { type: integer }
+        title: { type: string }
+        severity: { type: string, enum: [low, high, critical] }
+        status: { type: string, enum: [open, resolved] }
+        started_at: { type: string, format: date-time }
+        detected_at: { type: string, format: date-time }
+        resolved_at: { type: string, format: date-time, nullable: true }
+        caused_by_test:
+          type: boolean
+          description: Tijdens een failovertest van ClusterForge in hetzelfde cluster
+        test_run_id: { type: string, format: uuid, nullable: true }
+        note: { type: string }
+        updated_at: { type: string, format: date-time }
+        subjects:
+          type: array
+          items: { $ref: "#/components/schemas/IncidentSubject" }
+    IncidentList:
+      type: object
+      required: [items, has_more]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/Incident" }
+        has_more: { type: boolean }
+    IncidentDetail:
+      type: object
+      required: [incident, history, history_more]
+      properties:
+        incident: { $ref: "#/components/schemas/Incident" }
+        history:
+          type: array
+          description: Statusovergangen, incidenten en tests over wat geraakt was, oudste eerst
+          items: { $ref: "#/components/schemas/AuditEntry" }
+        history_more:
+          type: boolean
+          description: Er waren meer regels dan getoond
+    IncidentNote:
+      type: object
+      required: [note]
+      properties:
+        note: { type: string, maxLength: 10000 }
     AuditPage:
       type: object
       required: [items, next_before]

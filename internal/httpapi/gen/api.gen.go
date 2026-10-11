@@ -687,6 +687,69 @@ func (e ImpactTargetKind) Valid() bool {
 	}
 }
 
+// Defines values for IncidentSeverity.
+const (
+	Critical IncidentSeverity = "critical"
+	High     IncidentSeverity = "high"
+	Low      IncidentSeverity = "low"
+)
+
+// Valid indicates whether the value is a known member of the IncidentSeverity enum.
+func (e IncidentSeverity) Valid() bool {
+	switch e {
+	case Critical:
+		return true
+	case High:
+		return true
+	case Low:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for IncidentStatus.
+const (
+	IncidentStatusOpen     IncidentStatus = "open"
+	IncidentStatusResolved IncidentStatus = "resolved"
+)
+
+// Valid indicates whether the value is a known member of the IncidentStatus enum.
+func (e IncidentStatus) Valid() bool {
+	switch e {
+	case IncidentStatusOpen:
+		return true
+	case IncidentStatusResolved:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for IncidentSubjectType.
+const (
+	IncidentSubjectTypeCluster IncidentSubjectType = "cluster"
+	IncidentSubjectTypeNode    IncidentSubjectType = "node"
+	IncidentSubjectTypeService IncidentSubjectType = "service"
+	IncidentSubjectTypeTestRun IncidentSubjectType = "test_run"
+)
+
+// Valid indicates whether the value is a known member of the IncidentSubjectType enum.
+func (e IncidentSubjectType) Valid() bool {
+	switch e {
+	case IncidentSubjectTypeCluster:
+		return true
+	case IncidentSubjectTypeNode:
+		return true
+	case IncidentSubjectTypeService:
+		return true
+	case IncidentSubjectTypeTestRun:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for JobStatus.
 const (
 	JobStatusCanceled  JobStatus = "canceled"
@@ -1308,6 +1371,24 @@ func (e GetDependencyGraphParamsLevel) Valid() bool {
 	case GetDependencyGraphParamsLevelCluster:
 		return true
 	case GetDependencyGraphParamsLevelService:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ListIncidentsParamsStatus.
+const (
+	ListIncidentsParamsStatusOpen     ListIncidentsParamsStatus = "open"
+	ListIncidentsParamsStatusResolved ListIncidentsParamsStatus = "resolved"
+)
+
+// Valid indicates whether the value is a known member of the ListIncidentsParamsStatus enum.
+func (e ListIncidentsParamsStatus) Valid() bool {
+	switch e {
+	case ListIncidentsParamsStatusOpen:
+		return true
+	case ListIncidentsParamsStatusResolved:
 		return true
 	default:
 		return false
@@ -2992,6 +3073,75 @@ type ImpactItem struct {
 	Source nullable.Nullable[ServiceSource] `json:"source"`
 }
 
+// Incident defines model for Incident.
+type Incident struct {
+	// CausedByTest Tijdens een failovertest van ClusterForge in hetzelfde cluster
+	CausedByTest bool                                  `json:"caused_by_test"`
+	DetectedAt   time.Time                             `json:"detected_at"`
+	Id           openapi_types.UUID                    `json:"id"`
+	Note         string                                `json:"note"`
+	Number       int                                   `json:"number"`
+	ResolvedAt   nullable.Nullable[time.Time]          `json:"resolved_at"`
+	Severity     IncidentSeverity                      `json:"severity"`
+	StartedAt    time.Time                             `json:"started_at"`
+	Status       IncidentStatus                        `json:"status"`
+	Subjects     []IncidentSubject                     `json:"subjects"`
+	TestRunId    nullable.Nullable[openapi_types.UUID] `json:"test_run_id"`
+	Title        string                                `json:"title"`
+	UpdatedAt    time.Time                             `json:"updated_at"`
+}
+
+// IncidentSeverity defines model for Incident.Severity.
+type IncidentSeverity string
+
+// IncidentStatus defines model for Incident.Status.
+type IncidentStatus string
+
+// IncidentDetail defines model for IncidentDetail.
+type IncidentDetail struct {
+	// History Statusovergangen, incidenten en tests over wat geraakt was, oudste eerst
+	History []AuditEntry `json:"history"`
+
+	// HistoryMore Er waren meer regels dan getoond
+	HistoryMore bool     `json:"history_more"`
+	Incident    Incident `json:"incident"`
+}
+
+// IncidentList defines model for IncidentList.
+type IncidentList struct {
+	HasMore bool       `json:"has_more"`
+	Items   []Incident `json:"items"`
+}
+
+// IncidentNote defines model for IncidentNote.
+type IncidentNote struct {
+	Note string `json:"note"`
+}
+
+// IncidentSubject defines model for IncidentSubject.
+type IncidentSubject struct {
+	ClusterId   nullable.Nullable[openapi_types.UUID] `json:"cluster_id"`
+	FirstStatus string                                `json:"first_status"`
+	Id          openapi_types.UUID                    `json:"id"`
+
+	// LastStatus De status nu, of toen het weer goed was
+	LastStatus string `json:"last_status"`
+	Name       string `json:"name"`
+
+	// Present Of het onderwerp nog bestaat
+	Present bool                `json:"present"`
+	Reason  string              `json:"reason"`
+	Since   time.Time           `json:"since"`
+	Type    IncidentSubjectType `json:"type"`
+
+	// Until Wanneer het weer goed was; null zolang het nog misgaat
+	Until       nullable.Nullable[time.Time] `json:"until"`
+	WorstStatus string                       `json:"worst_status"`
+}
+
+// IncidentSubjectType defines model for IncidentSubject.Type.
+type IncidentSubjectType string
+
 // Job defines model for Job.
 type Job struct {
 	Attempts        int                                   `json:"attempts"`
@@ -4001,6 +4151,25 @@ type GetImpactParams struct {
 	NodeId    *openapi_types.UUID `form:"node_id,omitempty" json:"node_id,omitempty"`
 }
 
+// ListIncidentsParams defines parameters for ListIncidents.
+type ListIncidentsParams struct {
+	Status *ListIncidentsParamsStatus `form:"status,omitempty" json:"status,omitempty"`
+
+	// Cluster Alleen incidenten die dit cluster raakten
+	Cluster *openapi_types.UUID `form:"cluster,omitempty" json:"cluster,omitempty"`
+
+	// From Begonnen vanaf; standaard 30 dagen geleden
+	From *time.Time `form:"from,omitempty" json:"from,omitempty"`
+
+	// To Begonnen voor; standaard nu
+	To           *time.Time `form:"to,omitempty" json:"to,omitempty"`
+	IncludeTests *bool      `form:"include_tests,omitempty" json:"include_tests,omitempty"`
+	Limit        *int       `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// ListIncidentsParamsStatus defines parameters for ListIncidents.
+type ListIncidentsParamsStatus string
+
 // ListJobsParams defines parameters for ListJobs.
 type ListJobsParams struct {
 	NodeId    *openapi_types.UUID `form:"node_id,omitempty" json:"node_id,omitempty"`
@@ -4118,6 +4287,9 @@ type SaveGitRepoJSONRequestBody = GitRepoInput
 
 // ProbeGitRepoJSONRequestBody defines body for ProbeGitRepo for application/json ContentType.
 type ProbeGitRepoJSONRequestBody = GitRepoInput
+
+// SetIncidentNoteJSONRequestBody defines body for SetIncidentNote for application/json ContentType.
+type SetIncidentNoteJSONRequestBody = IncidentNote
 
 // CreateNodeJSONRequestBody defines body for CreateNode for application/json ContentType.
 type CreateNodeJSONRequestBody = NodeInput
@@ -4352,6 +4524,15 @@ type ServerInterface interface {
 	// GetImpact Wat raakt uitval van een dienst, cluster of node
 	// (GET /impact)
 	GetImpact(w http.ResponseWriter, r *http.Request, params GetImpactParams)
+	// ListIncidents Incidenten, open eerst, daarna de afgesloten die in de periode begonnen
+	// (GET /incidents)
+	ListIncidents(w http.ResponseWriter, r *http.Request, params ListIncidentsParams)
+	// GetIncident Eén incident, met wat er geraakt was en de statusovergangen in die periode
+	// (GET /incidents/{incidentId})
+	GetIncident(w http.ResponseWriter, r *http.Request, incidentId openapi_types.UUID)
+	// SetIncidentNote De notitie bij een incident (admin)
+	// (PUT /incidents/{incidentId}/note)
+	SetIncidentNote(w http.ResponseWriter, r *http.Request, incidentId openapi_types.UUID)
 	// GetInfo Instellingen van de server die de webinterface nodig heeft
 	// (GET /info)
 	GetInfo(w http.ResponseWriter, r *http.Request)
@@ -4865,6 +5046,24 @@ func (_ Unimplemented) GetHealth(w http.ResponseWriter, r *http.Request) {
 // GetImpact Wat raakt uitval van een dienst, cluster of node
 // (GET /impact)
 func (_ Unimplemented) GetImpact(w http.ResponseWriter, r *http.Request, params GetImpactParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListIncidents Incidenten, open eerst, daarna de afgesloten die in de periode begonnen
+// (GET /incidents)
+func (_ Unimplemented) ListIncidents(w http.ResponseWriter, r *http.Request, params ListIncidentsParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetIncident Eén incident, met wat er geraakt was en de statusovergangen in die periode
+// (GET /incidents/{incidentId})
+func (_ Unimplemented) GetIncident(w http.ResponseWriter, r *http.Request, incidentId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SetIncidentNote De notitie bij een incident (admin)
+// (PUT /incidents/{incidentId}/note)
+func (_ Unimplemented) SetIncidentNote(w http.ResponseWriter, r *http.Request, incidentId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -6970,6 +7169,156 @@ func (siw *ServerInterfaceWrapper) GetImpact(w http.ResponseWriter, r *http.Requ
 	handler.ServeHTTP(w, r)
 }
 
+// ListIncidents operation middleware
+func (siw *ServerInterfaceWrapper) ListIncidents(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListIncidentsParams
+
+	// ------------- Optional query parameter "status" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "status", r.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "status"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "status", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cluster" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cluster", r.URL.Query(), &params.Cluster, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cluster"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cluster", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "from" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "from", r.URL.Query(), &params.From, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "from"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "from", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "to" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "to", r.URL.Query(), &params.To, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "to"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "to", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "include_tests" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "include_tests", r.URL.Query(), &params.IncludeTests, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "include_tests"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "include_tests", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListIncidents(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetIncident operation middleware
+func (siw *ServerInterfaceWrapper) GetIncident(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "incidentId" -------------
+	var incidentId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "incidentId", chi.URLParam(r, "incidentId"), &incidentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "incidentId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetIncident(w, r, incidentId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetIncidentNote operation middleware
+func (siw *ServerInterfaceWrapper) SetIncidentNote(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "incidentId" -------------
+	var incidentId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "incidentId", chi.URLParam(r, "incidentId"), &incidentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "incidentId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetIncidentNote(w, r, incidentId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetInfo operation middleware
 func (siw *ServerInterfaceWrapper) GetInfo(w http.ResponseWriter, r *http.Request) {
 
@@ -8511,6 +8860,15 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/clusters/{clusterId}/git/unlink", wrapper.UnlinkClusterGit)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/incidents", wrapper.ListIncidents)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/incidents/{incidentId}", wrapper.GetIncident)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/incidents/{incidentId}/note", wrapper.SetIncidentNote)
 	})
 
 	return r

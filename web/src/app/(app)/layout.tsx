@@ -15,6 +15,7 @@ const nav: NavItem[] = [
   { href: "/clusters", label: "Clusters" },
   { href: "/nodes", label: "Nodes" },
   { href: "/monitoring", label: "Monitoring" },
+  { href: "/incidenten", label: "Incidenten" },
   { href: "/afhankelijkheden", label: "Afhankelijkheden" },
   { href: "/proxmox", label: "Proxmox" },
   { href: "/back-ups", label: "Back-ups" },

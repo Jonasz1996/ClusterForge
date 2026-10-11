@@ -67,10 +67,19 @@ func (s *Service) saveStatus(ctx context.Context, q *store.Queries, g *Graph, ro
 	if sv.External() {
 		scope = "extern"
 	}
+	// node_ids zet de overgang ook in de tijdlijn van de nodes waarop de
+	// dienst draait.
+	nodeIDs := []string{}
+	for _, in := range own.Instances {
+		nodeIDs = append(nodeIDs, in.NodeID.String())
+	}
+	if len(nodeIDs) == 0 && row.NodeID != nil {
+		nodeIDs = append(nodeIDs, row.NodeID.String())
+	}
 	payload := map[string]any{
 		"name": row.Name, "kind": row.Kind, "scope": scope,
 		"from": *row.Status, "to": st, "reason": own.Reason,
-		"impact_from": row.Impact, "impact": next.Impact, "impact_reason": reason, "path": path,
+		"impact_from": row.Impact, "impact": next.Impact, "impact_reason": reason, "path": path, "node_ids": nodeIDs,
 	}
 	if e.Impact != ImpactNone {
 		payload["cause"], payload["cause_id"] = g.labelFrom(row.ID, e.Cause), e.Cause.String()
