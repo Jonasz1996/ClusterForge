@@ -132,12 +132,12 @@ Een nieuwe ingebouwde template `kubernetes`, clustertype `kubernetes`, met twee 
 | `server` | 1, 3 of 5 (standaard 1) | k3s als server, keepalived voor het VIP |
 | `worker` | 0 tot 10 (standaard 2) | k3s als agent |
 
-Parameters: het VIP (verplicht, vast na de uitrol), het aantal servers en workers, de maten per rol, en het jointoken als `secret` dat ClusterForge zelf maakt. De k3s-versie hoort bij de templateversie: `kubernetes 1.0.0` installeert één vaste k3s-versie, met de downloadlink en de SHA-256 uit de release in de template. Een nieuwere k3s is een nieuwe templateversie, en upgraden is overstappen naar die versie (mijlpaal 11).
+Parameters: het VIP (verplicht, vast na de uitrol), het aantal servers en workers, de maten per rol, en het jointoken als `secret` dat ClusterForge zelf maakt. De k3s-versie hoort bij de templateversie: `kubernetes 1.0.0` installeert één vaste k3s-versie (v1.35.9+k3s1). Het installatiescript in de template controleert de SHA-256 met het controlebestand van dezelfde release, zoals het officiële installatiescript van k3s. Een nieuwere k3s is een nieuwe templateversie, en upgraden is overstappen naar die versie (mijlpaal 11).
 
 Stappen per node, in deze volgorde:
 
 1. `curl` en `ca-certificates` installeren.
-2. De k3s-binary downloaden van de GitHub-release, de SHA-256 controleren en pas daarna op zijn plek zetten. Een command-stap met `unless`, zodat de stap niets doet als de juiste versie er al staat.
+2. De k3s-binary downloaden van de GitHub-release, de SHA-256 controleren en pas daarna op zijn plek zetten. Het script zet daarna een merkteken met de versie, en de command-stap heeft dat als `creates`. Zo doet de stap niets als de juiste versie er al staat, en ziet ook de driftcontrole het.
 3. `/etc/rancher/k3s/config.yaml` (modus 0600): de rol, `node-ip`, het token, `tls-san` met het VIP, en voor de eerste server `cluster-init`. Elke andere node meldt zich aan via `https://VIP:6443`.
 4. De systemd-unit `k3s.service` of `k3s-agent.service`, met `modprobe` van `br_netfilter` en `overlay` vooraf, en starten. De unit is van type `notify`, dus de stap wacht tot k3s klaar is.
 5. Op servers: keepalived met een controle of de API op die node antwoordt, en `kubectl` als link naar k3s.
@@ -333,7 +333,7 @@ Elke keuze is ingevuld met een aanbeveling, en het ontwerp volgt overal de aanbe
 | Ingress en load balancer? | Traefik en ServiceLB uit k3s | Een eigen keuze installeren | Werkt meteen, en het VIP is ook het adres van de apps. |
 | Opslag? | local-path uit k3s | Longhorn, NFS of Ceph | Genoeg om te leren. Een volume zit aan één node vast, en dat is meteen een les. Longhorn kan later als app. |
 | Hoe krijgt Jonas `kubectl` op zijn pc? | Een ServiceAccount per gebruiker met een token dat verloopt | Een clientcertificaat per gebruiker | Een certificaat is in Kubernetes niet in te trekken. Een ServiceAccount verwijderen wel, en dan werkt het token meteen niet meer. |
-| Waar hoort de k3s-versie bij? | Bij de templateversie | Een vrije parameter | Eén versie met één gecontroleerde SHA-256 per templateversie, en upgraden is de bestaande overstap naar een nieuwere templateversie. |
+| Waar hoort de k3s-versie bij? | Bij de templateversie | Een vrije parameter | Eén geteste versie per templateversie, en upgraden is de bestaande overstap naar een nieuwere templateversie. |
 
 ## Vragen aan Jonas
 
