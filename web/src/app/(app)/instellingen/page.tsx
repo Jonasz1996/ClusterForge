@@ -4,6 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import QRCode from "qrcode";
 import { useState, type FormEvent } from "react";
 import { AssistantSettingsCard } from "@/components/assistant/AssistantSettings";
+import { DocsTargetCard } from "@/components/docs/DocsTargetCard";
 import { SelfLocationCard } from "@/components/risk/SelfLocationCard";
 import { Alert, Button, Card, Input, Label } from "@/components/ui";
 import { api, ApiError, unwrap } from "@/lib/api/client";
@@ -18,6 +19,9 @@ export default function SettingsPage() {
       <TotpCard />
       <PasswordCard />
       <AssistantSettingsCard isAdmin={isAdmin} />
+      <div id="documentatie-github" className="scroll-mt-6">
+        <DocsTargetCard isAdmin={isAdmin} />
+      </div>
       <SelfLocationCard isAdmin={isAdmin} />
     </div>
   );

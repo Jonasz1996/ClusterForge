@@ -7,9 +7,13 @@ import (
 	"strconv"
 
 	"github.com/google/uuid"
+	"github.com/oapi-codegen/nullable"
 
 	"github.com/Jonasz1996/clusterforge/internal/docs"
+	"github.com/Jonasz1996/clusterforge/internal/events"
+	"github.com/Jonasz1996/clusterforge/internal/gitops"
 	"github.com/Jonasz1996/clusterforge/internal/httpapi/gen"
+	"github.com/Jonasz1996/clusterforge/internal/store"
 )
 
 func docMeta(m docs.Meta) gen.DocMeta {
@@ -132,4 +136,131 @@ func (s *Server) GetDocDiff(w http.ResponseWriter, r *http.Request, scope gen.Do
 		return
 	}
 	writeJSON(w, http.StatusOK, gen.DocDiff{From: params.From, To: params.To, Diff: diff, Changed: changed})
+}
+
+// GetDocsTarget toont de GitHub-koppeling van de documentatie. Ook voor
+// viewers; het token komt nooit terug.
+func (s *Server) GetDocsTarget(w http.ResponseWriter, r *http.Request) {
+	s.writeDocsTarget(w, r)
+}
+
+func (s *Server) writeDocsTarget(w http.ResponseWriter, r *http.Request) {
+	out := gen.DocsTargetStatus{Enabled: s.docs.Enabled(), Target: nullable.NewNullNullable[gen.DocsTarget]()}
+	t, err := s.docs.Target(r.Context())
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	if t != nil {
+		out.Target = nullable.NewNullableWithValue(toAPIDocsTarget(*t))
+		out.Pending = s.docs.Pending() && t.Enabled
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func toAPIDocsTarget(t store.DocsTarget) gen.DocsTarget {
+	out := gen.DocsTarget{
+		ApiUrl: t.ApiUrl, Repository: t.Owner + "/" + t.Name, Branch: t.Branch, Path: t.Path, WebUrl: docs.RepoURL(t),
+		FolderUrl: docs.FolderURL(t), Enabled: t.Enabled, LastCommit: nullable.NewNullNullable[gen.DocsCommit](),
+		LastCheckedAt: nullableOf(t.LastCheckedAt), LastAttemptAt: nullableOf(t.LastAttemptAt), LastError: t.LastError,
+		CreatedAt: t.CreatedAt, UpdatedAt: t.UpdatedAt,
+	}
+	if t.LastCommitSha != "" && t.LastPublishedAt != nil {
+		out.LastCommit = nullable.NewNullableWithValue(gen.DocsCommit{
+			Sha: t.LastCommitSha, Url: t.LastCommitUrl, At: *t.LastPublishedAt, Files: int(t.LastCommitFiles),
+		})
+	}
+	return out
+}
+
+func docsTargetInput(in gen.DocsTargetInput) docs.TargetInput {
+	owner, name := gitops.SplitRepository(in.Repository)
+	return docs.TargetInput{
+		APIURL: deref(in.ApiUrl), Owner: owner, Name: name, Branch: deref(in.Branch), Path: in.Path, Token: deref(in.Token),
+		Enabled: in.Enabled,
+	}
+}
+
+func (s *Server) SaveDocsTarget(w http.ResponseWriter, r *http.Request) {
+	p, ok := requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	var in gen.DocsTargetInput
+	if !decode(w, r, &in) {
+		return
+	}
+	if _, err := s.docs.SaveTarget(r.Context(), events.User(p.User.ID), docsTargetInput(in)); err != nil {
+		s.docsTargetError(w, r, err)
+		return
+	}
+	s.writeDocsTarget(w, r)
+}
+
+func (s *Server) DeleteDocsTarget(w http.ResponseWriter, r *http.Request) {
+	p, ok := requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	if err := s.docs.DeleteTarget(r.Context(), events.User(p.User.ID)); err != nil {
+		s.docsTargetError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Server) TestDocsTarget(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireAdmin(w, r); !ok {
+		return
+	}
+	var in gen.DocsTargetInput
+	if !decode(w, r, &in) {
+		return
+	}
+	pr, err := s.docs.TestTarget(r.Context(), docsTargetInput(in))
+	if err != nil {
+		s.docsTargetError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, gen.DocsTargetProbe{BranchExists: pr.BranchExists, Head: pr.Head, Files: pr.Files})
+}
+
+// PublishDocs schrijft de documentatie nu naar GitHub en wacht op de
+// uitkomst.
+func (s *Server) PublishDocs(w http.ResponseWriter, r *http.Request) {
+	if _, ok := requireAdmin(w, r); !ok {
+		return
+	}
+	res, err := s.docs.Publish(r.Context(), docs.PublishManual)
+	if err != nil {
+		s.docsTargetError(w, r, err)
+		return
+	}
+	out := gen.DocsPublishResult{Commit: nullable.NewNullNullable[gen.DocsCommit](), Files: []gen.DocsFileChange{}}
+	if res.SHA != "" {
+		out.Commit = nullable.NewNullableWithValue(gen.DocsCommit{Sha: res.SHA, Url: res.URL, At: s.docs.Now(), Files: len(res.Changes)})
+	}
+	for _, c := range res.Changes {
+		out.Files = append(out.Files, gen.DocsFileChange{Path: c.Path, Change: gen.DocsFileChangeChange(c.Kind)})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) docsTargetError(w http.ResponseWriter, r *http.Request, err error) {
+	var ve docs.ValidationError
+	var pe *docs.PublishError
+	switch {
+	case errors.As(err, &ve):
+		writeJSON(w, http.StatusBadRequest, gen.Error{Code: "validation", Message: ve.Msg, Field: optional(ve.Field)})
+	case errors.As(err, &pe):
+		writeError(w, http.StatusConflict, "publish_failed", pe.Msg)
+	case errors.Is(err, docs.ErrNoMasterKey):
+		writeError(w, http.StatusBadRequest, "no_master_key", err.Error())
+	case errors.Is(err, docs.ErrBusy):
+		writeError(w, http.StatusConflict, "busy", err.Error())
+	case errors.Is(err, docs.ErrNoTarget), errors.Is(err, docs.ErrNotFound):
+		writeError(w, http.StatusNotFound, "not_found", docs.ErrNoTarget.Error())
+	default:
+		s.internalError(w, r, err)
+	}
 }

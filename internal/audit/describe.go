@@ -64,7 +64,7 @@ func describe(r store.ListAuditRow, n names) Entry {
 		e.Changes = changes(r.SubjectType, p, n)
 	}
 	if r.Action == "backup.policy_updated" || r.Action == "backup.watch_updated" || r.Action == "gitops.repo_updated" ||
-		r.Action == "assistant.settings_updated" {
+		r.Action == "assistant.settings_updated" || r.Action == "docs.target_updated" {
 		e.Changes = changes(r.Action, p, n)
 	}
 	e.Summary = summary(r, p, n, e, spec)
@@ -148,6 +148,11 @@ func subjectName(r store.ListAuditRow, p map[string]any, n names, e Entry) (stri
 		return str(p, "consumer") + " → " + str(p, "provider"), false
 	case "git_repo":
 		return str(p, "repo"), false
+	case "docs_target":
+		if m, ok := p["repo"].(map[string]any); ok {
+			return text(m["to"]), false
+		}
+		return or(str(p, "repo"), str(p, "repo_name")), false
 	case "git_file":
 		return r.SubjectID, false
 	case "git_change":
@@ -600,6 +605,28 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 			s += "; " + count(n, "cluster", "clusters") + " niet meer vanuit Git beheerd"
 		}
 		return s
+	case "docs.target_connected":
+		return "Documentatie naar GitHub-repository " + str(p, "repo") + paren("branch "+str(p, "branch")+", map "+or(str(p, "path"), "de hoofdmap"))
+	case "docs.target_updated":
+		if len(e.Changes) == 1 && e.Changes[0].Field == "token_changed" {
+			return "Token van de documentatie-export vervangen"
+		}
+		return "Koppeling van de documentatie met GitHub gewijzigd" + changeSummary(e.Changes)
+	case "docs.target_disconnected":
+		return "Documentatie niet meer naar " + name + " geschreven; wat er al staat, blijft in de repository"
+	case "docs.published":
+		docs, _ := p["documents"].([]any)
+		var names []string
+		for _, d := range docs {
+			names = append(names, text(d))
+		}
+		n, _ := p["files"].(float64)
+		return fmt.Sprintf("Documentatie naar %s geschreven: commit %s met %s", name, shortSHA(str(p, "sha")), count(n, "bestand", "bestanden")) +
+			paren(strings.Join(names, ", "))
+	case "docs.publish_failed":
+		return "Documentatie naar " + name + " schrijven mislukt" + colon(str(p, "error"))
+	case "docs.publish_recovered":
+		return "Documentatie naar " + name + " schrijven lukt weer"
 	case "gitops.commit_seen":
 		return fmt.Sprintf("Nieuwe commit %s %q van %s", shortSHA(str(p, "sha")), str(p, "message"), str(p, "author")) + verifiedText(p)
 	case "gitops.sync_failed":
@@ -794,6 +821,8 @@ var fieldLabels = map[string][][2]string{
 	"backup.watch_updated":  {{"watch", "Ook bewaken"}},
 	"gitops.repo_updated": {{"repo", "Repository"}, {"branch", "Branch"}, {"path", "Map"}, {"api_url", "API-adres"},
 		{"server_url", "Adres van ClusterForge"}, {"token_changed", "Token"}},
+	"docs.target_updated": {{"repo", "Repository"}, {"branch", "Branch"}, {"path", "Map"}, {"api_url", "API-adres"},
+		{"enabled", "Automatisch publiceren"}, {"token_changed", "Token"}},
 	"assistant.settings_updated": {{"enabled", "Aan"}, {"model", "Model"}, {"monthly_budget_usd", "Maandbudget in dollar"},
 		{"viewer_access", "Ook voor viewers"}, {"key_changed", "API-sleutel"}},
 }

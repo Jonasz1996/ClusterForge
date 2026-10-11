@@ -47,6 +47,7 @@ Het technisch ontwerp staat in [docs/design/mvp-fase-1.md](docs/design/mvp-fase-
 | 7. Infrastructuurkaart | Een kaart op `/kaart` met drie lagen: fysiek (hosts, VM's en storage), netwerk (bridges, VLAN's, subnetten, gateways, VIP's en VRRP-peers) en diensten; met filters, een detailpaneel en de wat-als of een incident als overlay. Het netwerk van de Proxmox-hosts wordt gelezen, en een VM met het MAC-adres van een node wordt een koppelvoorstel | klaar |
 | 8. Verbindingen en ontdekte afhankelijkheden | De TCP-verbindingen die de agents zien, per node en als voorgestelde afhankelijkheden met het aantal verbindingen als bewijs; een onbekende bestemming wordt een voorgestelde externe dienst, en op de kaart staat bij elke pijl hoe vaak de agents hem zagen | klaar |
 | 9. Auto-documentatie | Per cluster vijf hoofdstukken (architectuur, netwerk met diagram, configuratie, herstel en runbooks) en een overzicht, als Markdown uit wat er draait; tien minuten na een wijziging en elke nacht bijgewerkt, met de geschiedenis en wat er veranderde, downloaden als zip en afdrukken; zonder geheimen | klaar |
+| 10. Documentatie naar GitHub | De documentatie in een eigen GitHub-repository met een eigen token: na elke nieuwe versie één commit met alleen de gewijzigde bestanden, zonder commit als er niets veranderde; nooit in de branch die GitOps leest | klaar |
 
 ## Draaien met Docker Compose
 
@@ -304,7 +305,7 @@ Drift kan alleen met een agent van deze versie of nieuwer. Een oudere agent staa
 
 ## GitOps
 
-Een cluster uit een ingebouwde template kun je beschrijven in een GitHub-repository: per cluster een bestand `clusters/<slug>/cluster.yaml`. ClusterForge leest de repository elke minuut, controleert elk bestand en toont voor een wijziging wat ze op elke node zou doen. Pas als een beheerder het plan goedkeurt, verandert er iets op de nodes. ClusterForge schrijft zelf nooit naar Git.
+Een cluster uit een ingebouwde template kun je beschrijven in een GitHub-repository: per cluster een bestand `clusters/<slug>/cluster.yaml`. ClusterForge leest de repository elke minuut, controleert elk bestand en toont voor een wijziging wat ze op elke node zou doen. Pas als een beheerder het plan goedkeurt, verandert er iets op de nodes. GitOps schrijft nooit naar Git. De documentatie-export schrijft alleen in de map en branch die je zelf instelt, met een eigen token (zie [Naar GitHub](#naar-github)).
 
 Zo begin je:
 
@@ -608,6 +609,18 @@ Downloaden geeft een zip met Markdown: `README.md` en `clusters/<slug>/<hoofdstu
 
 Geheimen staan er nooit in: een geheime parameter staat er als `[geheim]`, en ook in de bestanden die ClusterForge op een node zet, staat elk geheim als `[geheim]`. Wat er echt op een node staat, en een hash daarvan, komt er niet in; dat vergelijkt de driftcontrole. Met `CF_DOCS_USERNAMES=false` staat bij de revisies niet wie ze maakte.
 
+### Naar GitHub
+
+ClusterForge kan de documentatie ook in een eigen GitHub-repository zetten, met dezelfde bestanden als in de zip. Zo begin je:
+
+1. Maak op GitHub een private repository, bijvoorbeeld `clusterforge-docs`, en vink "Add a README file" aan: in een lege repository kan ClusterForge niet schrijven.
+2. Maak een fine-grained token (Settings → Developer settings → Fine-grained tokens) met alleen die repository en alleen Contents: Read and write.
+3. Vul bij Instellingen → Documentatie naar GitHub de repository, de branch (standaard `main`), de map (standaard `docs`, leeg is de hoofdmap) en het token in. Testen leest de branch en maakt een losse blob die bij geen enkele commit hoort; zo blijkt zonder iets te veranderen of het token mag schrijven. Het token wordt versleuteld met `CF_MASTER_KEY` bewaard en komt nooit terug uit de API; zonder masterkey staat de export uit.
+
+Na het opslaan publiceert ClusterForge meteen, en daarna telkens als een document een nieuwe versie krijgt: tien minuten na een wijziging, en elke nacht. Elke ronde is één commit met alleen de bestanden die veranderden, met als auteur ClusterForge en als bericht bijvoorbeeld "Documentatie bijgewerkt: overzicht, web-prod" met elk bestand eronder. Is er niets veranderd, dan komt er geen commit. De branch wordt bijgewerkt zonder force; pushte iemand intussen, dan bouwt ClusterForge de commit opnieuw op de nieuwe kop. Bestaat de branch nog niet, dan maakt ClusterForge hem met alleen de documentatie.
+
+ClusterForge schrijft alleen in die branch en die map. Een bestand dat je zelf in de map zet, blijft staan; de documenten van een cluster dat verwijderd is, gaan weg. De repository en branch die GitOps leest, worden geweigerd (een andere branch in dezelfde repository mag), zodat een commit van de documentatie nooit een GitOps-plan start en het GitOps-token alleen-lezen blijft. Mislukt een ronde, bijvoorbeeld omdat het token verlopen is, dan staat de fout bij de koppeling en in het logboek, en probeert ClusterForge het om de vijf minuten opnieuw. Met Pauzeren publiceert het alleen nog met Nu publiceren; Verwijderen laat staan wat al in de repository staat.
+
 ## Assistent
 
 Bij Assistent stel je vragen over de fleet in gewone taal, zoals 'Waarom lag web-prod gisteravond plat?' of 'Wat veranderde er deze week op db-01?'. De assistent zoekt het antwoord op met dezelfde gegevens als de webinterface en antwoordt in het Nederlands, met links naar de schermen. Op een cluster, node of incident start de knop "Vraag de assistent" een gesprek over dat onderwerp.
@@ -690,7 +703,7 @@ internal/incidents/        incidenten: overgangen groeperen, ernst, openen en sl
 internal/whatbroke/        What Broke: de tijdlijn uit logboek en journaal, en de analyse van elk incident
 internal/assistant/        de AI-assistent: instellingen, gesprekken, de lus met de Anthropic API, kosten en budget
 internal/risk/             de health score: de zeven scorekaarten, de kaart Platform, acceptaties en de trend; de wat-als en de SPOF's
-internal/docs/             de documentatie: Markdown en Mermaid uit wat ClusterForge weet, de versies, bijwerken na een wijziging en de zip
+internal/docs/             de documentatie: Markdown en Mermaid uit wat ClusterForge weet, de versies, bijwerken na een wijziging, de zip en de export naar GitHub
 internal/topo/             één model van hosts, storage, bridges en VM's met hun schijven en netwerkkaarten, waar ClusterForge zelf draait, en de lagen van de kaart
 internal/metrics/          metrics naar VictoriaMetrics schrijven en de grafieken opvragen
 internal/status/           statusregels voor nodes en clusters, VIP-eigenaars
@@ -706,7 +719,7 @@ internal/backups/          versheid van de Proxmox-back-ups per VM, de back-upco
 internal/drift/            driftcontrole: vergelijken met de gewenste staat, de scanner en het rapport
 internal/health/           wachten op verse heartbeats: een node klaar, de VIP's op hun plaats
 internal/failover/         failovertests: voorcontrole, storing, meting, herstel en het rapport
-internal/gitops/           GitOps: de repository lezen, clusterbestanden controleren, plannen en koppelen; ghfake/ is een nep-GitHub
+internal/gitops/           GitOps: de repository lezen, clusterbestanden controleren, plannen en koppelen; ghfake/ is een nep-GitHub die ook schrijft
 internal/deps/             diensten en afhankelijkheden: graaf, status, doorgeven, impact, voorstellen en verbindingen
 internal/rollout/          cluster.apply: wijzigingen node voor node toepassen, zoals drift herstellen
 internal/planner/          het testvenster, zomer- en wintertijd, en wanneer een geplande run start of overgeslagen wordt

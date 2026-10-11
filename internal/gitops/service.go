@@ -265,6 +265,22 @@ func (s *Service) Probe(ctx context.Context, in RepoInput) (Probe, error) {
 	return p, nil
 }
 
+// notDocs weigert de branch waar de documentatie-export in schrijft: een
+// commit van de documentatie mag nooit een plan starten.
+func (s *Service) notDocs(ctx context.Context, in RepoInput) error {
+	t, err := s.q.GetDocsTarget(ctx)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if SameBranch(t.ApiUrl, t.Owner, t.Name, t.Branch, in.APIURL, in.Owner, in.Name, in.Branch) {
+		return ValidationError{"branch", "de documentatie-export schrijft in deze repository en branch; kies voor GitOps een andere repository of branch"}
+	}
+	return nil
+}
+
 // upstream maakt van een fout van GitHub een fout die de gebruiker kan
 // oplossen.
 func upstream(err error) error {
@@ -285,6 +301,9 @@ func (s *Service) Save(ctx context.Context, actor events.Actor, in RepoInput) (s
 	}
 	token, err := s.token(in, cur)
 	if err != nil {
+		return store.GitRepo{}, err
+	}
+	if err := s.notDocs(ctx, in); err != nil {
 		return store.GitRepo{}, err
 	}
 	src, err := s.NewSource(Config{APIURL: in.APIURL, Owner: in.Owner, Name: in.Name, Branch: in.Branch, Token: token})
