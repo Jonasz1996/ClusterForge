@@ -12,6 +12,7 @@ import {
   serviceStatuses,
   sources,
   strengthLabel,
+  timesSeen,
   useDeleteDependency,
   useDeleteService,
   useImpact,
@@ -250,6 +251,8 @@ function EdgeList({
                   <span className="text-xs text-slate-500">
                     {" "}
                     · {strengthLabel(e.strength)} · {sources[e.source]}
+                    {e.state === "suggested" && " · voorstel"}
+                    {e.observed && ` · ${timesSeen(e.observed.count)} gezien in 24 uur`}
                     {e.note && ` · ${e.note}`}
                   </span>
                 </span>

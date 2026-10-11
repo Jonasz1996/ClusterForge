@@ -219,6 +219,12 @@ func serve() error {
 	// De wat-als en de SPOF's lezen de infrastructuur uit de Proxmox-sync en
 	// de afhankelijkheden.
 	tp := topo.NewService(pool, ev, log, cfg.NATSAdvertise)
+	// Verbindingen naar NATS en de webinterface worden nooit een
+	// afhankelijkheid.
+	dps.Self = func(ctx context.Context) deps.Skip {
+		urls, _ := q.ListGitServerURLs(ctx)
+		return deps.SelfSkip(tp.OwnIPs(ctx), deps.Ports(append([]string{cfg.Listen, cfg.NATSListen, cfg.NATSAdvertise}, urls...)...))
+	}
 	rsk.Topo, rsk.Deps = tp, dps
 	det := incidents.NewDetector(pool, ev, log)
 	eval.After = func(ctx context.Context) error {

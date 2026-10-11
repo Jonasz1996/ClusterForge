@@ -623,6 +623,17 @@ type ObservedConnection struct {
 	Samples   int64
 }
 
+type ObservedConnectionHour struct {
+	NodeID    uuid.UUID
+	Unit      string
+	Direction string
+	PeerAddr  string
+	PeerPort  int32
+	LocalPort int32
+	Hour      time.Time
+	Samples   int64
+}
+
 type ProxmoxBackup struct {
 	ConnectionID uuid.UUID
 	Volid        string

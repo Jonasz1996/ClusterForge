@@ -16,6 +16,8 @@ export type ServiceSource = components["schemas"]["ServiceSource"];
 export type ServiceInput = components["schemas"]["ServiceInput"];
 export type ServicePatch = components["schemas"]["ServicePatch"];
 export type DependencyInput = components["schemas"]["DependencyInput"];
+export type DependencyPatch = components["schemas"]["DependencyPatch"];
+export type DepObserved = components["schemas"]["DepObserved"];
 export type Impact = components["schemas"]["Impact"];
 export type ImpactItem = components["schemas"]["ImpactItem"];
 export type GraphFilter = NonNullable<operations["getDependencyGraph"]["parameters"]["query"]>;
@@ -130,11 +132,14 @@ export function useCreateDependency() {
   });
 }
 
+// useUpdateDependency wijzigt een pijl, of bevestigt, negeert of zet een
+// voorstel terug. Bevestigen bevestigt ook een voorgestelde dienst aan een
+// van beide kanten.
 export function useUpdateDependency() {
   const refresh = useRefresh();
   return useMutation({
-    mutationFn: async ({ id, strength, note }: { id: string; strength?: "hard" | "soft"; note?: string }) =>
-      unwrap(await api.PATCH("/dependencies/{dependencyId}", { params: { path: { dependencyId: id } }, body: { strength, note } })),
+    mutationFn: async ({ id, body }: { id: string; body: DependencyPatch }) =>
+      unwrap(await api.PATCH("/dependencies/{dependencyId}", { params: { path: { dependencyId: id } }, body })),
     onSuccess: refresh,
   });
 }
@@ -178,6 +183,11 @@ export function label(idx: Index, id: string, fromGroup?: string) {
   if (!s) return "onbekende dienst";
   if (s.group_id === fromGroup) return s.name;
   return `${s.name} in ${idx.groups.get(s.group_id)?.name ?? "?"}`;
+}
+
+// timesSeen schrijft een telling als "1.240×".
+export function timesSeen(n: number) {
+  return `${n.toLocaleString("nl-NL")}×`;
 }
 
 // instancesText zegt waar een dienst draait: "op web01 en web02".

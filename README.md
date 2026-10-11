@@ -45,6 +45,7 @@ Het technisch ontwerp staat in [docs/design/mvp-fase-1.md](docs/design/mvp-fase-
 | 5. Health score en scorekaarten | Per cluster en voor het geheel een score van 0 tot 100 met een cijfer A tot F, uit zeven scorekaarten en de kaart Platform; per bevinding de reden, een link om ze op te lossen en wat het oplevert, accepteren met een reden, en een trend over 30 dagen | klaar |
 | 6. Wat-als en SPOF's | Kies wat er uitvalt (een Proxmox-host, storage, bridge, node, dienst of cluster) en zie per cluster de voorspelde status, welke VM's Proxmox HA herstart en welke diensten geraakt worden; de onderdelen die alleen al productie down leggen, als bevinding in de score; en of ClusterForge zelf meegaat | klaar |
 | 7. Infrastructuurkaart | Een kaart op `/kaart` met drie lagen: fysiek (hosts, VM's en storage), netwerk (bridges, VLAN's, subnetten, gateways, VIP's en VRRP-peers) en diensten; met filters, een detailpaneel en de wat-als of een incident als overlay. Het netwerk van de Proxmox-hosts wordt gelezen, en een VM met het MAC-adres van een node wordt een koppelvoorstel | klaar |
+| 8. Verbindingen en ontdekte afhankelijkheden | De TCP-verbindingen die de agents zien, per node en als voorgestelde afhankelijkheden met het aantal verbindingen als bewijs; een onbekende bestemming wordt een voorgestelde externe dienst, en op de kaart staat bij elke pijl hoe vaak de agents hem zagen | klaar |
 
 ## Draaien met Docker Compose
 
@@ -400,11 +401,27 @@ Diensten komen op drie manieren in de graaf:
 - **Met de hand.** Een beheerder voegt bij Afhankelijkheden of op de pagina van een cluster diensten, externe diensten en afhankelijkheden toe. Zo komen ook met de hand gebouwde clusters en de verbanden tussen clusters erin.
 - **Als voorstel.** Ziet een agent een bekende unit draaien op een actieve node van een cluster (nginx, apache2, haproxy, keepalived, mariadb, mysql, postgresql, redis-server, memcached, rabbitmq-server, php-fpm of docker), dan verschijnt die dienst binnen vijf minuten bij Voorstellen. Bevestig hem of negeer hem; een genegeerde dienst komt niet terug.
 
+Ook afhankelijkheden komen als voorstel, uit de verbindingen die de agents zien (zie [Verbindingen](#verbindingen)).
+
 Elke dienst heeft een eigen status uit de heartbeats: gezond als zijn unit op alle actieve nodes van het cluster draait, verminderd als hij op een deel draait, down als hij nergens draait, en onbekend zonder unit, zonder agent of als extern. Valt een dienst uit, dan krijgen de diensten die er hard van afhangen een rode rand en die er zacht van afhangen een oranje, en kleurt de pijl naar de oorzaak rood. De graaf ververst zich vanzelf; een uitval staat er binnen een halve minuut in.
 
 Klik op een dienst voor zijn instanties per node, wat hij gebruikt en wie hem gebruikt, en de knop Wat raakt uitval?. Die dimt alles wat niet geraakt wordt en toont per cluster welke diensten down of verminderd zouden raken, met prod bovenaan. Met Alleen clusters zie je de clusters met samengevoegde pijlen, en op een smal scherm een lijst per cluster. Het gaat altijd om bekende afhankelijkheden: wat niet in de graaf staat, telt niet mee, en de graaf houdt nooit een actie tegen. ClusterForge voert voor afhankelijkheden niets uit op de nodes.
 
 Redis, memcached, rabbitmq, apache2, php-fpm en PostgreSQL-instanties ziet alleen een agent van deze versie of nieuwer. Zet hem erop met `--upgrade` (zie [Agent installeren](#agent-installeren-op-een-node)); met een oudere agent blijven die diensten onbekend.
+
+### Verbindingen
+
+Een agent met protocol 5 kijkt elke minuut naar de gevestigde TCP-verbindingen in `/proc/net/tcp` en `tcp6`, met de systemd-unit van het proces. Elke vijf minuten stuurt hij een samenvatting: uitgaand per unit, adres en poort, en inkomend per eigen poort. Geen PID's, commandoregels of inhoud. Van een inkomende verbinding blijft de afzender alleen bewaard als het een node is; alle andere adressen worden per poort samengeteld, want bij een publieke webserver zijn dat persoonsgegevens.
+
+Elke vijf minuten zet ClusterForge de verbindingen van de afgelopen 24 uur om naar voorstellen:
+
+- **Naar een bekende dienst.** Maakt de unit van een dienst verbindingen naar het adres van een node of een VIP, en draait daar een dienst op die poort, dan wordt dat een voorgestelde afhankelijkheid. De dienst op die poort is een dienst met die poort, of de dienst van de unit die er op die poort luistert. Het bewijs staat erbij, zoals "php8.2-fpm op web-01 → mariadb in db-prod: 1.240 verbindingen gezien naar 10.0.30.100:3306 in de afgelopen 24 uur". De agent kijkt elke minuut, dus een verbinding die een uur openstaat, telt 60 keer. Een verbinding naar een externe dienst met dat adres en die poort telt ook.
+- **Naar een onbekend adres.** Komt een bestemming minstens een uur lang terug, dan wordt ze eerst een voorgestelde externe dienst, zoals 203.0.113.7:443, met een voorgestelde afhankelijkheid ernaartoe. Hoogstens twintig nieuwe per ronde.
+- **Nooit.** Verbindingen van cf-agent, naar NATS en de webinterface van ClusterForge zelf, van een unit die geen dienst is (zoals apt), en naar een node of VIP zonder dienst op die poort.
+
+Bij Afhankelijkheden → Voorstellen staan de voorgestelde afhankelijkheden onder de diensten, elk met het bewijs per node en adres. Bevestigen maakt de pijl echt; was de dienst aan een van beide kanten nog een voorstel, dan wordt die ook bevestigd. Negeren laat de pijl als genegeerd staan, zodat hij niet terugkomt, en Terugzetten maakt er weer een voorstel van. Een pijl die al bestaat, met de hand of uit een template, wordt nooit nog eens voorgesteld.
+
+Op de pagina van een node staat voor een beheerder de kaart Verbindingen: uitgaand met waar het heen gaat (een dienst, een node, een VIP, ClusterForge zelf of een onbekend adres) en of er al een afhankelijkheid is, en inkomend per poort met de afzender als het een node is. Op de kaart staat in de laag Diensten bij elke pijl hoe vaak de agents een verbinding zagen. De verbindingen worden na 30 dagen opgeruimd, de tellingen per uur na twee dagen.
 
 ### Impact bij acties
 
@@ -567,7 +584,7 @@ Bij Kaart zie je hoe alles aan elkaar hangt, in drie lagen:
 
 - **Fysiek.** Per Proxmox-host de VM's en containers met hun status, en de lokale storage. Gedeelde storage staat onder de hosts, met een lijn van elke VM naar de storage van zijn schijven. Een VM die een node is, krijgt de kleur van zijn cluster; de VM van ClusterForge zelf heeft het label CF.
 - **Netwerk.** De subnetten met hun VLAN en de nodes erin, de bridges van de hosts met hun poorten (zoals `bond0 (eno1, eno2)`), de gateways, de VIP's met een lijn naar hun huidige eigenaar, en een stippellijn tussen VRRP-peers. Subnetten komen uit de adressen die de agents melden; een bridge hoort bij een subnet als de host er een adres in heeft, of als een node met dat netwerk via zijn netwerkkaart aan die bridge hangt.
-- **Diensten.** De graaf van [Afhankelijkheden](#afhankelijkheden), met de voorstellen als stippellijn.
+- **Diensten.** De graaf van [Afhankelijkheden](#afhankelijkheden), met de voorstellen als stippellijn en bij elke pijl hoe vaak de agents de afgelopen 24 uur een verbinding zagen (zie [Verbindingen](#verbindingen)).
 
 Filter op omgeving of cluster; dan blijft alleen staan wat bij die nodes hoort. Een klik op een element opent een paneel met de details, waar het mee verbonden is, een link naar zijn pagina en "Wat als dit uitvalt?". Op een smal scherm wordt de kaart een lijst.
 
@@ -605,7 +622,7 @@ Een vraag kost meestal enkele centen; een vraag die veel tools nodig heeft meer.
 
 **Wie.** Standaard alleen beheerders. Zet je 'Ook viewers mogen vragen stellen' aan, dan kunnen viewers het ook, met hun eigen rechten: ze zien via de assistent niets wat ze in de webinterface niet zien, zoals een IP-adres bij een SSH-login. Iedereen ziet zijn eigen gesprekken; een beheerder ziet die van iedereen. Een gesprek blijft 365 dagen na de laatste vraag staan, of tot je het verwijdert.
 
-**Wat de assistent kan.** Alleen lezen. Hij heeft achttien tools: het overzicht van de fleet, een cluster, een node, de tijdlijn, de wijzigingen, incidenten zoeken, een incident met de analyse van What Broke, metrics, drift, back-ups, failovertests, taken, Git-wijzigingen, de impact van een storing, de health score, de wat-als met de single points of failure en de kaart. Hij kan niets starten, stoppen, herstarten, toepassen of wijzigen; een tool roept dezelfde leesopdrachten aan als de webinterface, met de rechten van wie de vraag stelt. Raadt hij iets aan, dan linkt hij naar het scherm waar jij het doet.
+**Wat de assistent kan.** Alleen lezen. Hij heeft achttien tools: het overzicht van de fleet, een cluster, een node, de tijdlijn, de wijzigingen, incidenten zoeken, een incident met de analyse van What Broke, metrics, drift, back-ups, failovertests, taken, Git-wijzigingen, de impact van een storing, de health score, de wat-als met de single points of failure en de kaart, ook met de verbindingen tussen diensten. Hij kan niets starten, stoppen, herstarten, toepassen of wijzigen; een tool roept dezelfde leesopdrachten aan als de webinterface, met de rechten van wie de vraag stelt. Raadt hij iets aan, dan linkt hij naar het scherm waar jij het doet.
 
 **Wat naar Anthropic gaat.** Je vraag, de gebruikersnaam en rol, de tijd, en wat de tools lezen: namen, statussen, adressen, tijdlijnen, journaalregels, pakketnamen, metrics, Git-commits en taken van de fleet. Geheimen gaan nooit mee: geen wachtwoorden, tokens, sleutels, vingerafdrukken, sessies en geen inhoud van bestanden. Commitberichten en journaalregels zijn tekst van buiten ClusterForge; de assistent behandelt ze als gegevens en volgt geen instructies die erin staan.
 
@@ -671,7 +688,7 @@ internal/drift/            driftcontrole: vergelijken met de gewenste staat, de 
 internal/health/           wachten op verse heartbeats: een node klaar, de VIP's op hun plaats
 internal/failover/         failovertests: voorcontrole, storing, meting, herstel en het rapport
 internal/gitops/           GitOps: de repository lezen, clusterbestanden controleren, plannen en koppelen; ghfake/ is een nep-GitHub
-internal/deps/             diensten en afhankelijkheden: graaf, status, doorgeven, impact en voorstellen
+internal/deps/             diensten en afhankelijkheden: graaf, status, doorgeven, impact, voorstellen en verbindingen
 internal/rollout/          cluster.apply: wijzigingen node voor node toepassen, zoals drift herstellen
 internal/planner/          het testvenster, zomer- en wintertijd, en wanneer een geplande run start of overgeslagen wordt
 pkg/protocol/              berichten tussen server en agent

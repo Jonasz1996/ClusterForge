@@ -31,10 +31,24 @@ func (s *Server) GetDependencyGraph(w http.ResponseWriter, r *http.Request, para
 	}
 	svcs, ds := g.Select(f)
 	out := gen.DependencyGraph{Level: level, Groups: []gen.DepGroup{}, Services: []gen.DepService{}, Edges: []gen.DepEdge{}}
+	var observed map[[2]uuid.UUID]deps.Seen
+	if deref(params.IncludeConnections) && level == gen.DependencyGraphLevelService {
+		seen, err := s.deps.Observe(r.Context(), g)
+		if err != nil {
+			s.internalError(w, r, err)
+			return
+		}
+		observed = map[[2]uuid.UUID]deps.Seen{}
+		for _, sn := range seen {
+			if sn.To != nil {
+				observed[[2]uuid.UUID{sn.From.ID, sn.To.ID}] = sn
+			}
+		}
+	}
 
 	// Het voorstellen-tellertje telt binnen het filter, ook als de
 	// voorstellen niet getoond worden.
-	withSuggested, _ := g.Select(deps.Filter{ClusterID: f.ClusterID, Environment: f.Environment, Suggested: true})
+	withSuggested, suggestedDeps := g.Select(deps.Filter{ClusterID: f.ClusterID, Environment: f.Environment, Suggested: true})
 	suggestions := map[string]int{}
 	for _, sv := range g.Services {
 		if sv.State == deps.StateSuggested {
@@ -44,6 +58,11 @@ func (s *Server) GetDependencyGraph(w http.ResponseWriter, r *http.Request, para
 	for _, sv := range withSuggested {
 		if sv.State == deps.StateSuggested {
 			out.Suggestions++
+		}
+	}
+	for _, d := range suggestedDeps {
+		if d.State == deps.StateSuggested {
+			out.SuggestedDependencies++
 		}
 	}
 
@@ -74,11 +93,16 @@ func (s *Server) GetDependencyGraph(w http.ResponseWriter, r *http.Request, para
 			out.Edges = append(out.Edges, gen.DepEdge{
 				Id: e.From + "|" + e.To, From: e.From, To: e.To, Strength: gen.DependencyStrength(e.Strength),
 				Source: gen.ServiceSourceManual, State: gen.Confirmed, Affected: e.Affected, Count: e.Count, Note: "",
+				Observed: nullable.NewNullNullable[gen.DepObserved](),
 			})
 		}
 	} else {
 		for _, d := range ds {
-			out.Edges = append(out.Edges, depEdge(g, d))
+			e := depEdge(g, d)
+			if sn, ok := observed[[2]uuid.UUID{d.From, d.To}]; ok {
+				e.Observed = nullable.NewNullableWithValue(depObserved(g, sn))
+			}
+			out.Edges = append(out.Edges, e)
 		}
 	}
 	slices.SortFunc(out.Groups, func(a, b gen.DepGroup) int {
@@ -135,7 +159,25 @@ func depEdge(g *deps.Graph, d deps.Dep) gen.DepEdge {
 	return gen.DepEdge{
 		Id: d.ID.String(), From: d.From.String(), To: d.To.String(), Strength: gen.DependencyStrength(d.Strength),
 		Source: gen.ServiceSource(d.Source), State: gen.ServiceState(d.State), Note: d.Note, Affected: g.Affected(d), Count: 1,
+		Observed: nullable.NewNullNullable[gen.DepObserved](),
 	}
+}
+
+// maxObservedLines is hoeveel verbindingen een pijl hoogstens als bewijs
+// meegeeft.
+const maxObservedLines = 10
+
+func depObserved(g *deps.Graph, sn deps.Seen) gen.DepObserved {
+	out := gen.DepObserved{Count: sn.Recent, FirstSeen: sn.FirstSeen, LastSeen: sn.LastSeen, Text: g.Text(sn), Lines: []gen.DepObservedLine{}}
+	for i, l := range sn.Lines {
+		if i == maxObservedLines {
+			break
+		}
+		out.Lines = append(out.Lines, gen.DepObservedLine{
+			NodeId: l.NodeID, Hostname: l.Hostname, Unit: l.Unit, Addr: l.Addr, Port: l.Port, Count: l.Recent, LastSeen: l.LastSeen,
+		})
+	}
+	return out
 }
 
 func (s *Server) GetImpact(w http.ResponseWriter, r *http.Request, params gen.GetImpactParams) {
@@ -323,12 +365,16 @@ func (s *Server) UpdateDependency(w http.ResponseWriter, r *http.Request, id uui
 	if !decode(w, r, &req) {
 		return
 	}
-	var strength *string
+	patch := deps.DependencyPatch{Note: req.Note}
 	if req.Strength != nil {
 		st := string(*req.Strength)
-		strength = &st
+		patch.Strength = &st
 	}
-	_, err := s.deps.UpdateDependency(r.Context(), events.User(p.User.ID), id, strength, req.Note)
+	if req.State != nil {
+		st := string(*req.State)
+		patch.State = &st
+	}
+	_, err := s.deps.UpdateDependency(r.Context(), events.User(p.User.ID), id, patch)
 	if s.depsError(w, r, err) {
 		return
 	}

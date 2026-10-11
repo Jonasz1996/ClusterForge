@@ -898,7 +898,7 @@ func toolInputs(cluster, node, job string) map[string][]string {
 		"git":         {fmt.Sprintf(`{"cluster":%q,"status":"alle"}`, cluster), `{"cluster":"","status":"pending"}`},
 		"gezondheid":  {`{"cluster":""}`, fmt.Sprintf(`{"cluster":%q}`, cluster)},
 		"wat_als":     {fmt.Sprintf(`{"soort":"node","naam":%q}`, node), fmt.Sprintf(`{"soort":"cluster","naam":%q}`, cluster), `{"soort":"spof","naam":""}`},
-		"kaart":       {`{"laag":"fysiek","cluster":""}`, fmt.Sprintf(`{"laag":"netwerk","cluster":%q}`, cluster)},
+		"kaart":       {`{"laag":"fysiek","cluster":""}`, fmt.Sprintf(`{"laag":"netwerk","cluster":%q}`, cluster), `{"laag":"verbindingen","cluster":""}`},
 		"impact": {
 			fmt.Sprintf(`{"dienst":"","cluster":%q,"node":""}`, cluster), fmt.Sprintf(`{"dienst":"","cluster":"","node":%q}`, node),
 			`{"dienst":"nginx","cluster":"","node":""}`,

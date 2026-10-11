@@ -158,8 +158,9 @@ func TestHandleConns(t *testing.T) {
 			{Unit: "nginx.service", Port: 80, Peer: "203.0.113.9", Count: 7},
 		},
 	}
+	now := time.Now()
 	for range 2 {
-		if err := b.handleConns(ctx, node.ID, c, time.Now()); err != nil {
+		if err := b.handleConns(ctx, node.ID, c, now); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -185,6 +186,14 @@ func TestHandleConns(t *testing.T) {
 	}
 	if !slices.Equal(got, want) {
 		t.Fatalf("verbindingen:\n %q\n wilde %q", got, want)
+	}
+	// Per uur dezelfde tellingen, voor het bewijs van de afgelopen 24 uur.
+	var hours, samples int64
+	if err := b.pool.QueryRow(ctx, `SELECT count(*), sum(samples) FROM observed_connection_hours WHERE node_id = $1`, node.ID).Scan(&hours, &samples); err != nil {
+		t.Fatal(err)
+	}
+	if hours != 3 || samples != 32 {
+		t.Fatalf("per uur: %d rijen, %d keer gezien", hours, samples)
 	}
 }
 

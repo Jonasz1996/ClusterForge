@@ -50,7 +50,7 @@ VALUES (@from_service_id, @to_service_id, @strength, @source, @state, @note)
 RETURNING *;
 
 -- name: UpdateServiceDependency :one
-UPDATE service_dependencies SET strength = @strength, note = @note, updated_at = now()
+UPDATE service_dependencies SET strength = @strength, note = @note, state = @state, updated_at = now()
 WHERE id = @id
 RETURNING *;
 

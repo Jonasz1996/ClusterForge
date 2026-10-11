@@ -1068,6 +1068,33 @@ func (e NodeChangeSource) Valid() bool {
 	}
 }
 
+// Defines values for NodeConnOutDest.
+const (
+	NodeConnOutDestClusterforge NodeConnOutDest = "clusterforge"
+	NodeConnOutDestNode         NodeConnOutDest = "node"
+	NodeConnOutDestService      NodeConnOutDest = "service"
+	NodeConnOutDestUnknown      NodeConnOutDest = "unknown"
+	NodeConnOutDestVip          NodeConnOutDest = "vip"
+)
+
+// Valid indicates whether the value is a known member of the NodeConnOutDest enum.
+func (e NodeConnOutDest) Valid() bool {
+	switch e {
+	case NodeConnOutDestClusterforge:
+		return true
+	case NodeConnOutDestNode:
+		return true
+	case NodeConnOutDestService:
+		return true
+	case NodeConnOutDestUnknown:
+		return true
+	case NodeConnOutDestVip:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for NodeLifecycle.
 const (
 	NodeLifecycleActive         NodeLifecycle = "active"
@@ -2599,11 +2626,14 @@ type DepEdge struct {
 	From string `json:"from"`
 
 	// Id Het id van de afhankelijkheid; bij level=cluster <van>|<naar>
-	Id       string             `json:"id"`
-	Note     string             `json:"note"`
-	Source   ServiceSource      `json:"source"`
-	State    ServiceState       `json:"state"`
-	Strength DependencyStrength `json:"strength"`
+	Id   string `json:"id"`
+	Note string `json:"note"`
+
+	// Observed Met include_connections wat de agents de afgelopen 24 uur zagen; null zonder, of als ze niets zagen
+	Observed nullable.Nullable[DepObserved] `json:"observed"`
+	Source   ServiceSource                  `json:"source"`
+	State    ServiceState                   `json:"state"`
+	Strength DependencyStrength             `json:"strength"`
 
 	// To De leverancier
 	To string `json:"to"`
@@ -2646,6 +2676,31 @@ type DepInstance struct {
 
 	// State ActiveState van de unit; leeg zonder verse heartbeat
 	State string `json:"state"`
+}
+
+// DepObserved defines model for DepObserved.
+type DepObserved struct {
+	// Count Hoe vaak een agent de verbindingen zag in de afgelopen 24 uur: hij kijkt elke minuut
+	Count     int64     `json:"count"`
+	FirstSeen time.Time `json:"first_seen"`
+	LastSeen  time.Time `json:"last_seen"`
+
+	// Lines Per unit, node en adres; hoogstens 10
+	Lines []DepObservedLine `json:"lines"`
+
+	// Text Het bewijs in woorden, zoals 'php8.2-fpm op web-01 → mariadb in db-prod: 1.240 verbindingen gezien naar 10.0.30.100:3306 in de afgelopen 24 uur'
+	Text string `json:"text"`
+}
+
+// DepObservedLine defines model for DepObservedLine.
+type DepObservedLine struct {
+	Addr     string             `json:"addr"`
+	Count    int64              `json:"count"`
+	Hostname string             `json:"hostname"`
+	LastSeen time.Time          `json:"last_seen"`
+	NodeId   openapi_types.UUID `json:"node_id"`
+	Port     int                `json:"port"`
+	Unit     string             `json:"unit"`
 }
 
 // DepService defines model for DepService.
@@ -2693,6 +2748,9 @@ type DependencyGraph struct {
 	Level    DependencyGraphLevel `json:"level"`
 	Services []DepService         `json:"services"`
 
+	// SuggestedDependencies Voorgestelde afhankelijkheden binnen het filter
+	SuggestedDependencies int `json:"suggested_dependencies"`
+
 	// Suggestions Voorgestelde diensten binnen het filter
 	Suggestions int `json:"suggestions"`
 }
@@ -2714,6 +2772,7 @@ type DependencyInput struct {
 // DependencyPatch defines model for DependencyPatch.
 type DependencyPatch struct {
 	Note     *string             `json:"note,omitempty"`
+	State    *ServiceState       `json:"state,omitempty"`
 	Strength *DependencyStrength `json:"strength,omitempty"`
 }
 
@@ -4164,6 +4223,61 @@ type NodeChanges struct {
 	HasMore bool `json:"has_more"`
 }
 
+// NodeConnIn defines model for NodeConnIn.
+type NodeConnIn struct {
+	Count        int64     `json:"count"`
+	FirstSeen    time.Time `json:"first_seen"`
+	LastSeen     time.Time `json:"last_seen"`
+	PeerHostname string    `json:"peer_hostname"`
+
+	// PeerNodeId De afzender als het een node is; null voor alle andere adressen samen
+	PeerNodeId nullable.Nullable[openapi_types.UUID] `json:"peer_node_id"`
+	Port       int                                   `json:"port"`
+	Unit       string                                `json:"unit"`
+}
+
+// NodeConnOut defines model for NodeConnOut.
+type NodeConnOut struct {
+	Addr      string                                `json:"addr"`
+	ClusterId nullable.Nullable[openapi_types.UUID] `json:"cluster_id"`
+
+	// Count Hoe vaak gezien in de afgelopen 24 uur
+	Count int64 `json:"count"`
+
+	// DependencyId De pijl tussen de twee diensten, als die er is
+	DependencyId    nullable.Nullable[openapi_types.UUID] `json:"dependency_id"`
+	DependencyState nullable.Nullable[ServiceState]       `json:"dependency_state"`
+
+	// Dest Een dienst; een node of VIP zonder dienst op die poort; ClusterForge zelf; of een onbekend adres
+	Dest NodeConnOutDest `json:"dest"`
+
+	// DestLabel Zoals 'mariadb in db-prod', 'web-02' of 'VIP van db-prod'
+	DestLabel string    `json:"dest_label"`
+	FirstSeen time.Time `json:"first_seen"`
+
+	// FromServiceId De dienst die de verbinding maakte
+	FromServiceId nullable.Nullable[openapi_types.UUID] `json:"from_service_id"`
+	LastSeen      time.Time                             `json:"last_seen"`
+	NodeId        nullable.Nullable[openapi_types.UUID] `json:"node_id"`
+	Port          int                                   `json:"port"`
+	ServiceId     nullable.Nullable[openapi_types.UUID] `json:"service_id"`
+
+	// Unit Leeg als de agent de unit niet zag
+	Unit string `json:"unit"`
+}
+
+// NodeConnOutDest Een dienst; een node of VIP zonder dienst op die poort; ClusterForge zelf; of een onbekend adres
+type NodeConnOutDest string
+
+// NodeConnections defines model for NodeConnections.
+type NodeConnections struct {
+	In  []NodeConnIn  `json:"in"`
+	Out []NodeConnOut `json:"out"`
+
+	// Supported De agent meldt verbindingen (protocol 5 of nieuwer)
+	Supported bool `json:"supported"`
+}
+
 // NodeInput defines model for NodeInput.
 type NodeInput struct {
 	ClusterId   nullable.Nullable[openapi_types.UUID] `json:"cluster_id,omitempty"`
@@ -5378,9 +5492,12 @@ type GetDependencyGraphParams struct {
 	// IncludeSuggested Ook voorgestelde diensten
 	IncludeSuggested *bool `form:"include_suggested,omitempty" json:"include_suggested,omitempty"`
 
-	// IncludeIgnored Ook genegeerde diensten
-	IncludeIgnored *bool                          `form:"include_ignored,omitempty" json:"include_ignored,omitempty"`
-	Level          *GetDependencyGraphParamsLevel `form:"level,omitempty" json:"level,omitempty"`
+	// IncludeIgnored Ook genegeerde diensten en pijlen, om ze terug te zetten
+	IncludeIgnored *bool `form:"include_ignored,omitempty" json:"include_ignored,omitempty"`
+
+	// IncludeConnections Per pijl wat de agents de afgelopen 24 uur zagen (observed)
+	IncludeConnections *bool                          `form:"include_connections,omitempty" json:"include_connections,omitempty"`
+	Level              *GetDependencyGraphParamsLevel `form:"level,omitempty" json:"level,omitempty"`
 }
 
 // GetDependencyGraphParamsLevel defines parameters for GetDependencyGraph.
@@ -5790,7 +5907,7 @@ type ServerInterface interface {
 	// DeleteDependency Een afhankelijkheid verwijderen (admin)
 	// (DELETE /dependencies/{dependencyId})
 	DeleteDependency(w http.ResponseWriter, r *http.Request, dependencyId openapi_types.UUID)
-	// UpdateDependency Sterkte of notitie van een afhankelijkheid wijzigen (admin)
+	// UpdateDependency Sterkte of notitie van een afhankelijkheid wijzigen, of een voorstel bevestigen, negeren of terugzetten (admin)
 	// (PATCH /dependencies/{dependencyId})
 	UpdateDependency(w http.ResponseWriter, r *http.Request, dependencyId openapi_types.UUID)
 	// GetDependencyGraph De afhankelijkheidsgraaf in één aanroep
@@ -5931,6 +6048,9 @@ type ServerInterface interface {
 	// ListNodeChanges Het wijzigingsjournaal van een node, nieuwste eerst
 	// (GET /nodes/{nodeId}/changes)
 	ListNodeChanges(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID, params ListNodeChangesParams)
+	// GetNodeConnections De TCP-verbindingen die de agent de afgelopen 24 uur zag (admin)
+	// (GET /nodes/{nodeId}/connections)
+	GetNodeConnections(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
 	// GetNodeDrift Drift van één node
 	// (GET /nodes/{nodeId}/drift)
 	GetNodeDrift(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
@@ -6351,7 +6471,7 @@ func (_ Unimplemented) DeleteDependency(w http.ResponseWriter, r *http.Request, 
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
-// UpdateDependency Sterkte of notitie van een afhankelijkheid wijzigen (admin)
+// UpdateDependency Sterkte of notitie van een afhankelijkheid wijzigen, of een voorstel bevestigen, negeren of terugzetten (admin)
 // (PATCH /dependencies/{dependencyId})
 func (_ Unimplemented) UpdateDependency(w http.ResponseWriter, r *http.Request, dependencyId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
@@ -6630,6 +6750,12 @@ func (_ Unimplemented) VerifyNodeBackup(w http.ResponseWriter, r *http.Request, 
 // ListNodeChanges Het wijzigingsjournaal van een node, nieuwste eerst
 // (GET /nodes/{nodeId}/changes)
 func (_ Unimplemented) ListNodeChanges(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID, params ListNodeChangesParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetNodeConnections De TCP-verbindingen die de agent de afgelopen 24 uur zag (admin)
+// (GET /nodes/{nodeId}/connections)
+func (_ Unimplemented) GetNodeConnections(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -8448,6 +8574,19 @@ func (siw *ServerInterfaceWrapper) GetDependencyGraph(w http.ResponseWriter, r *
 		return
 	}
 
+	// ------------- Optional query parameter "include_connections" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "include_connections", r.URL.Query(), &params.IncludeConnections, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "include_connections"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "include_connections", Err: err})
+		}
+		return
+	}
+
 	// ------------- Optional query parameter "level" -------------
 
 	err = runtime.BindQueryParameterWithOptions("form", true, false, "level", r.URL.Query(), &params.Level, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
@@ -9741,6 +9880,32 @@ func (siw *ServerInterfaceWrapper) ListNodeChanges(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
+// GetNodeConnections operation middleware
+func (siw *ServerInterfaceWrapper) GetNodeConnections(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetNodeConnections(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetNodeDrift operation middleware
 func (siw *ServerInterfaceWrapper) GetNodeDrift(w http.ResponseWriter, r *http.Request) {
 
@@ -10936,6 +11101,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/nodes/{nodeId}/facts", wrapper.GetNodeFacts)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/nodes/{nodeId}/connections", wrapper.GetNodeConnections)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/nodes/{nodeId}/actions", wrapper.NodeAction)

@@ -30,6 +30,9 @@ type Service struct {
 	// Interval is hoe vaak de resolver voorstellen zoekt.
 	Interval time.Duration
 	Now      func() time.Time
+	// Self geeft de bestemmingen die ClusterForge zelf zijn: NATS en de
+	// webinterface. Zonder Self valt alleen de agent zelf weg.
+	Self func(ctx context.Context) Skip
 }
 
 func NewService(pool *pgxpool.Pool, ev *events.Writer, log *slog.Logger) *Service {
@@ -430,8 +433,18 @@ func (s *Service) CreateDependency(ctx context.Context, actor events.Actor, in D
 	return out, err
 }
 
-// UpdateDependency wijzigt de sterkte of de notitie.
-func (s *Service) UpdateDependency(ctx context.Context, actor events.Actor, id uuid.UUID, strength, note *string) (store.ServiceDependency, error) {
+// DependencyPatch wijzigt een pijl; nil laat een veld staan. Met State
+// bevestigt, negeert of zet je een voorstel terug.
+type DependencyPatch struct {
+	Strength *string
+	Note     *string
+	State    *string
+}
+
+// UpdateDependency wijzigt de sterkte, de notitie of de staat. Bevestigen
+// bevestigt ook een voorgestelde dienst aan een van beide kanten, zodat de
+// pijl meteen in de graaf staat; een genegeerde dienst moet eerst terug.
+func (s *Service) UpdateDependency(ctx context.Context, actor events.Actor, id uuid.UUID, p DependencyPatch) (store.ServiceDependency, error) {
 	var out store.ServiceDependency
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q := store.New(tx)
@@ -442,24 +455,38 @@ func (s *Service) UpdateDependency(ctx context.Context, actor events.Actor, id u
 		if err != nil {
 			return err
 		}
-		st, nt := cur.Strength, cur.Note
-		set(&st, strength)
-		set(&nt, note)
-		if err := checkDep(&st, &nt); err != nil {
+		type depFields struct {
+			Strength string `event:"strength"`
+			Note     string `event:"note"`
+			State    string `event:"state"`
+		}
+		before := depFields{cur.Strength, cur.Note, cur.State}
+		after := before
+		set(&after.Strength, p.Strength)
+		set(&after.Note, p.Note)
+		set(&after.State, p.State)
+		if err := checkDep(&after.Strength, &after.Note); err != nil {
 			return err
 		}
-		d := diff(struct {
-			Strength string `event:"strength"`
-			Note     string `event:"note"`
-		}{cur.Strength, cur.Note}, struct {
-			Strength string `event:"strength"`
-			Note     string `event:"note"`
-		}{st, nt})
+		switch {
+		case after.State != StateConfirmed && after.State != StateSuggested && after.State != StateIgnored:
+			return &FieldError{Field: "state", Message: "kies bevestigd, voorstel of genegeerd"}
+		case after.State == StateSuggested && before.State != StateSuggested && cur.Source != SourceDiscovered:
+			return &FieldError{Field: "state", Message: "alleen een ontdekte afhankelijkheid kan weer een voorstel worden"}
+		}
+		d := diff(before, after)
 		out = cur
 		if len(d) == 0 {
 			return nil
 		}
-		if out, err = q.UpdateServiceDependency(ctx, store.UpdateServiceDependencyParams{ID: id, Strength: st, Note: nt}); err != nil {
+		if after.State == StateConfirmed && before.State != StateConfirmed {
+			if err := s.confirmEnds(ctx, q, actor, cur); err != nil {
+				return err
+			}
+		}
+		if out, err = q.UpdateServiceDependency(ctx, store.UpdateServiceDependencyParams{
+			ID: id, Strength: after.Strength, Note: after.Note, State: after.State,
+		}); err != nil {
 			return err
 		}
 		payload, cluster, err := s.depPayload(ctx, q, out)
@@ -472,6 +499,39 @@ func (s *Service) UpdateDependency(ctx context.Context, actor events.Actor, id u
 		return s.ev.Write(ctx, q, depEvent(actor, out, cluster, "dependency.updated", payload))
 	})
 	return out, err
+}
+
+// confirmEnds bevestigt de voorgestelde diensten aan beide kanten van een
+// pijl die bevestigd wordt. Een genegeerde dienst houdt het tegen.
+func (s *Service) confirmEnds(ctx context.Context, q *store.Queries, actor events.Actor, d store.ServiceDependency) error {
+	for _, sid := range []uuid.UUID{d.FromServiceID, d.ToServiceID} {
+		svc, err := q.LockService(ctx, sid)
+		if err != nil {
+			return err
+		}
+		switch svc.State {
+		case StateIgnored:
+			return &ConflictError{Message: svc.Name + " is genegeerd; zet die dienst eerst terug"}
+		case StateSuggested:
+			upd, err := q.UpdateService(ctx, store.UpdateServiceParams{
+				ID: svc.ID, Name: svc.Name, Kind: svc.Kind, Unit: svc.Unit, Port: svc.Port, Address: svc.Address,
+				Description: svc.Description, Source: svc.Source, State: StateConfirmed,
+			})
+			if err != nil {
+				return err
+			}
+			payload := map[string]any{
+				"state": map[string]any{"from": StateSuggested, "to": StateConfirmed}, "service": upd.Name, "scope": scopeName(ctx, q, upd),
+			}
+			if upd.NodeID != nil {
+				payload["node_id"] = upd.NodeID.String()
+			}
+			if err := s.ev.Write(ctx, q, serviceEvent(actor, upd, "service.updated", payload)); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // DeleteDependency verwijdert een pijl.

@@ -448,6 +448,25 @@ paths:
               schema: { $ref: "#/components/schemas/NodeRuntime" }
         "401": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /nodes/{nodeId}/connections:
+    parameters:
+      - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getNodeConnections
+      summary: De TCP-verbindingen die de agent de afgelopen 24 uur zag (admin)
+      description: |
+        Uitgaand per unit, adres en poort, met waar het heen gaat. Inkomend per
+        eigen poort; de afzender staat er alleen bij als het een node is, alle
+        andere adressen zijn samengeteld.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NodeConnections" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
   /nodes/{nodeId}/actions:
     parameters:
       - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -1525,7 +1544,8 @@ paths:
         - { name: cluster_id, in: query, required: false, description: Dat cluster plus zijn directe buren, schema: { type: string, format: uuid } }
         - { name: environment, in: query, required: false, description: De clusters van die omgeving plus hun directe buren, schema: { $ref: "#/components/schemas/Environment" } }
         - { name: include_suggested, in: query, required: false, description: Ook voorgestelde diensten, schema: { type: boolean } }
-        - { name: include_ignored, in: query, required: false, description: Ook genegeerde diensten, om ze terug te zetten, schema: { type: boolean } }
+        - { name: include_ignored, in: query, required: false, description: "Ook genegeerde diensten en pijlen, om ze terug te zetten", schema: { type: boolean } }
+        - { name: include_connections, in: query, required: false, description: Per pijl wat de agents de afgelopen 24 uur zagen (observed), schema: { type: boolean } }
         - { name: level, in: query, required: false, schema: { type: string, enum: [service, cluster] } }
       responses:
         "200":
@@ -1609,7 +1629,8 @@ paths:
       - { name: dependencyId, in: path, required: true, schema: { type: string, format: uuid } }
     patch:
       operationId: updateDependency
-      summary: Sterkte of notitie van een afhankelijkheid wijzigen (admin)
+      summary: Sterkte of notitie van een afhankelijkheid wijzigen, of een voorstel bevestigen, negeren of terugzetten (admin)
+      description: Bevestigen bevestigt ook een voorgestelde dienst aan een van beide kanten. Is een van beide genegeerd, dan antwoordt de server 409.
       requestBody:
         required: true
         content:
@@ -1625,6 +1646,7 @@ paths:
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
     delete:
       operationId: deleteDependency
       summary: Een afhankelijkheid verwijderen (admin)
@@ -4951,7 +4973,7 @@ components:
         updated_at: { type: string, format: date-time }
     DepEdge:
       type: object
-      required: [id, from, to, strength, source, state, note, affected, count]
+      required: [id, from, to, strength, source, state, note, affected, count, observed]
       properties:
         id: { type: string, description: "Het id van de afhankelijkheid; bij level=cluster <van>|<naar>" }
         from: { type: string, description: De afnemer (dienst-id, of groep-id bij level=cluster) }
@@ -4962,15 +4984,79 @@ components:
         note: { type: string }
         affected: { type: boolean, description: Uitval bereikte de afnemer langs deze pijl }
         count: { type: integer, description: Hoeveel pijlen samengevoegd zijn; 1 per dienst }
+        observed:
+          description: Met include_connections wat de agents de afgelopen 24 uur zagen; null zonder, of als ze niets zagen
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/DepObserved" }]
+    DepObserved:
+      type: object
+      required: [count, first_seen, last_seen, text, lines]
+      properties:
+        count: { type: integer, format: int64, description: "Hoe vaak een agent de verbindingen zag in de afgelopen 24 uur: hij kijkt elke minuut" }
+        first_seen: { type: string, format: date-time }
+        last_seen: { type: string, format: date-time }
+        text: { type: string, description: "Het bewijs in woorden, zoals 'php8.2-fpm op web-01 → mariadb in db-prod: 1.240 verbindingen gezien naar 10.0.30.100:3306 in de afgelopen 24 uur'" }
+        lines: { type: array, items: { $ref: "#/components/schemas/DepObservedLine" }, description: "Per unit, node en adres; hoogstens 10" }
+    DepObservedLine:
+      type: object
+      required: [node_id, hostname, unit, addr, port, count, last_seen]
+      properties:
+        node_id: { type: string, format: uuid }
+        hostname: { type: string }
+        unit: { type: string }
+        addr: { type: string }
+        port: { type: integer }
+        count: { type: integer, format: int64 }
+        last_seen: { type: string, format: date-time }
+    NodeConnections:
+      type: object
+      required: [supported, out, in]
+      properties:
+        supported: { type: boolean, description: De agent meldt verbindingen (protocol 5 of nieuwer) }
+        out: { type: array, items: { $ref: "#/components/schemas/NodeConnOut" } }
+        in: { type: array, items: { $ref: "#/components/schemas/NodeConnIn" } }
+    NodeConnOut:
+      type: object
+      required: [unit, addr, port, count, first_seen, last_seen, dest, dest_label, from_service_id, service_id, node_id, cluster_id, dependency_id, dependency_state]
+      properties:
+        unit: { type: string, description: Leeg als de agent de unit niet zag }
+        addr: { type: string }
+        port: { type: integer }
+        count: { type: integer, format: int64, description: Hoe vaak gezien in de afgelopen 24 uur }
+        first_seen: { type: string, format: date-time }
+        last_seen: { type: string, format: date-time }
+        dest:
+          type: string
+          enum: [service, node, vip, clusterforge, unknown]
+          description: "Een dienst; een node of VIP zonder dienst op die poort; ClusterForge zelf; of een onbekend adres"
+        dest_label: { type: string, description: "Zoals 'mariadb in db-prod', 'web-02' of 'VIP van db-prod'" }
+        from_service_id: { type: string, format: uuid, nullable: true, description: De dienst die de verbinding maakte }
+        service_id: { type: string, format: uuid, nullable: true }
+        node_id: { type: string, format: uuid, nullable: true }
+        cluster_id: { type: string, format: uuid, nullable: true }
+        dependency_id: { type: string, format: uuid, nullable: true, description: "De pijl tussen de twee diensten, als die er is" }
+        dependency_state: { nullable: true, allOf: [{ $ref: "#/components/schemas/ServiceState" }] }
+    NodeConnIn:
+      type: object
+      required: [unit, port, peer_node_id, peer_hostname, count, first_seen, last_seen]
+      properties:
+        unit: { type: string }
+        port: { type: integer }
+        peer_node_id: { type: string, format: uuid, nullable: true, description: De afzender als het een node is; null voor alle andere adressen samen }
+        peer_hostname: { type: string }
+        count: { type: integer, format: int64 }
+        first_seen: { type: string, format: date-time }
+        last_seen: { type: string, format: date-time }
     DependencyGraph:
       type: object
-      required: [level, groups, services, edges, suggestions]
+      required: [level, groups, services, edges, suggestions, suggested_dependencies]
       properties:
         level: { type: string, enum: [service, cluster] }
         groups: { type: array, items: { $ref: "#/components/schemas/DepGroup" } }
         services: { type: array, items: { $ref: "#/components/schemas/DepService" } }
         edges: { type: array, items: { $ref: "#/components/schemas/DepEdge" } }
         suggestions: { type: integer, description: Voorgestelde diensten binnen het filter }
+        suggested_dependencies: { type: integer, description: Voorgestelde afhankelijkheden binnen het filter }
     ServiceInput:
       type: object
       required: [name, kind]
@@ -5006,6 +5092,7 @@ components:
       properties:
         strength: { $ref: "#/components/schemas/DependencyStrength" }
         note: { type: string }
+        state: { $ref: "#/components/schemas/ServiceState" }
     ImpactItem:
       type: object
       required: [service_id, name, kind, group_id, group_name, environment, impact, direct, reason, path, dependency_id, source]
