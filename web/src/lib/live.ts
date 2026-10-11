@@ -28,6 +28,7 @@ export function useLiveUpdates(enabled: boolean) {
         void qc.invalidateQueries({ queryKey: ["gitops"] });
         void qc.invalidateQueries({ queryKey: ["incidents"] });
         void qc.invalidateQueries({ queryKey: ["risk"] });
+        void qc.invalidateQueries({ queryKey: ["map"] });
       }, 300);
     };
     es.addEventListener("change", onChange);

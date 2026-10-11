@@ -16,6 +16,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/assistant"
 	"github.com/Jonasz1996/clusterforge/internal/httpapi/gen"
 	"github.com/Jonasz1996/clusterforge/internal/risk"
+	"github.com/Jonasz1996/clusterforge/internal/topo"
 )
 
 // De tools van de assistent lezen via de GET-handlers van de API, in het
@@ -1226,7 +1227,90 @@ func (s *Server) assistantTools() []assistant.Tool {
 				return compact(ww.Run([]risk.Component{comp}, false)), nil
 			},
 		},
+		{
+			Name: "kaart",
+			Description: "De infrastructuurkaart als lijst. laag fysiek: per Proxmox-host de VM's met hun cluster en status, " +
+				"en de storage waarop hun schijven staan; gedeelde storage hoort bij geen host. laag netwerk: de subnetten " +
+				"met hun VLAN en nodes, de bridges van de hosts met hun poorten, de gateways, de VIP's met hun huidige " +
+				"eigenaar en de VRRP-peers. Met een cluster alleen wat bij dat cluster hoort. Welke dienst van welke " +
+				"afhangt, geeft de tool impact.",
+			Properties: map[string]any{
+				"laag":    enum("Welke laag", "fysiek", "netwerk"),
+				"cluster": strProp(clusterDesc),
+			},
+			Required: []string{"laag", "cluster"},
+			Label:    func(in map[string]any) string { return "Kaart" + of(in) + " bekijken" },
+			Run: func(ctx context.Context, c assistant.Caller, raw json.RawMessage) (any, error) {
+				var in struct {
+					Laag    string `json:"laag"`
+					Cluster string `json:"cluster"`
+				}
+				if err := assistant.Decode(raw, &in); err != nil {
+					return nil, err
+				}
+				p := gen.GetMapParams{Layer: gen.GetMapParamsLayerPhysical}
+				switch in.Laag {
+				case "fysiek":
+				case "netwerk":
+					p.Layer = gen.GetMapParamsLayerNetwork
+				default:
+					return nil, assistant.ToolError{Msg: "laag moet fysiek of netwerk zijn"}
+				}
+				if strings.TrimSpace(in.Cluster) != "" {
+					id, err := s.findCluster(ctx, c, in.Cluster)
+					if err != nil {
+						return nil, err
+					}
+					p.ClusterId = &id
+				}
+				var m topo.Map
+				if err := s.view(ctx, c, func(w http.ResponseWriter, r *http.Request) { s.GetMap(w, r, p) }, &m); err != nil {
+					return nil, err
+				}
+				return toolMap(m), nil
+			},
+		},
 	}
+}
+
+// toolMap schrijft een laag van de kaart als lijst: elk element met zijn
+// plaats en details als zinnen, en de lijnen met namen in plaats van ids.
+func toolMap(m topo.Map) any {
+	names := map[string]string{}
+	for _, it := range m.Items {
+		names[it.ID] = it.Name
+	}
+	items := make([]any, 0, len(m.Items))
+	for _, it := range m.Items {
+		facts := make([]string, 0, len(it.Facts))
+		for _, f := range it.Facts {
+			facts = append(facts, f.Label+": "+f.Value)
+		}
+		items = append(items, compact(map[string]any{
+			"soort": it.Kind, "naam": it.Name, "in": names[it.Parent], "status": it.Status, "detail": it.Detail,
+			"cluster": it.Cluster, "omgeving": it.Environment, "clusterforge_zelf": it.Self, "link": it.Link, "details": facts,
+		}))
+	}
+	edges := make([]any, 0, len(m.Edges))
+	for _, e := range m.Edges {
+		line := names[e.From] + " → " + names[e.To] + " (" + e.Kind
+		if e.Label != "" {
+			line += ", " + e.Label
+		}
+		edges = append(edges, line+")")
+	}
+	out := map[string]any{"laag": m.Layer}
+	if len(m.Notes) > 0 {
+		out["opmerkingen"] = m.Notes
+	}
+	if len(items) == 0 {
+		out["opmerking"] = "de kaart is leeg; koppel Proxmox of meld agents aan"
+		return out
+	}
+	kept, dropped := fit(edges, listBudget/4, false)
+	out["lijnen"] = kept
+	out = withList(out, "elementen", items, false, dropped > 0)
+	return out
 }
 
 // componentKinds zijn de soorten van de tool wat_als.

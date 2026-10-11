@@ -24,6 +24,8 @@ func (s *Service) Run(ctx context.Context) {
 	for {
 		s.SyncAll(ctx)
 		s.ReadConfigsAll(ctx)
+		s.ReadNetworksAll(ctx)
+		s.ProposeLinks(ctx)
 		select {
 		case <-ctx.Done():
 			return

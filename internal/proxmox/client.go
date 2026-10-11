@@ -50,6 +50,9 @@ type API interface {
 	// Interfaces geeft de interfaces met hun adressen van een draaiende
 	// container.
 	Interfaces(ctx context.Context, g Guest) ([]GuestInterface, error)
+	// HostNetwork geeft de interfaces van een host: bridges, bonds, VLAN's
+	// en poorten.
+	HostNetwork(ctx context.Context, node string) ([]map[string]any, error)
 	// SetConfig wijzigt de configuratie; het taak-id is leeg als Proxmox
 	// het meteen deed.
 	SetConfig(ctx context.Context, g Guest, form url.Values) (string, error)

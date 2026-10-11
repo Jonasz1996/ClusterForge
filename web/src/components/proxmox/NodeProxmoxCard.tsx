@@ -6,6 +6,7 @@ import { formatDuration } from "@/components/inventory/bits";
 import { GuestActions, type ActionResult } from "@/components/proxmox/GuestActions";
 import { Alert, Badge, Button, Card, Select } from "@/components/ui";
 import { useUpdateNode, type Node } from "@/lib/inventory";
+import { useDecideNodeLink, useNodeLinks } from "@/lib/map";
 import { useProxmoxConnections, useProxmoxResources, useVmSnapshots, vmStatusInfo } from "@/lib/proxmox";
 
 const dlClass = "grid grid-cols-[9rem_1fr] gap-x-4 gap-y-2.5 text-sm";
@@ -125,11 +126,15 @@ export function NodeProxmoxCard({ node, isAdmin }: { node: Node; isAdmin: boolea
   );
 }
 
-// LinkCard laat een beheerder een node aan een VM koppelen.
+// LinkCard laat een beheerder een node aan een VM koppelen. Heeft een VM
+// hetzelfde MAC-adres, dan staat dat voorstel bovenaan.
 function LinkCard({ node }: { node: Node }) {
   const conns = useProxmoxConnections();
+  const links = useNodeLinks();
+  const decide = useDecideNodeLink();
+  const proposal = links.data?.find((l) => l.node_id === node.id);
   const [connId, setConnId] = useState("");
-  const first = conns.data?.items[0]?.id ?? "";
+  const first = proposal?.connection_id ?? conns.data?.items[0]?.id ?? "";
   const active = connId || first;
   const res = useProxmoxResources(active);
   const update = useUpdateNode();
@@ -138,14 +143,46 @@ function LinkCard({ node }: { node: Node }) {
 
   if (!conns.data || conns.data.items.length === 0) return null;
   const free = (res.data?.guests ?? []).filter((g) => !g.node_id && !g.template);
-  const suggestion = free.find((g) => g.name.toLowerCase() === node.hostname.toLowerCase().split(".")[0]);
+  const suggestion =
+    (proposal && active === proposal.connection_id ? free.find((g) => g.vmid === proposal.vmid) : undefined) ??
+    free.find((g) => g.name.toLowerCase() === node.hostname.toLowerCase().split(".")[0]);
   const chosen = vmid || (suggestion ? String(suggestion.vmid) : "");
+  const decideError = decide.error instanceof Error ? decide.error.message : null;
 
   return (
     <Card title="Proxmox">
-      <p className="mb-3 text-sm text-slate-600 dark:text-slate-400">
-        Is deze node een VM of container in Proxmox? Koppel hem, dan zie je de VM hier en kun je hem starten, stoppen of migreren.
-      </p>
+      {proposal ? (
+        <div className="mb-4 rounded-md border border-sky-200 bg-sky-50 p-3 text-sm dark:border-sky-900 dark:bg-sky-950/40">
+          <p>
+            Deze node lijkt {proposal.guest_type === "lxc" ? "container" : "VM"} {proposal.vmid}
+            {proposal.guest && ` (${proposal.guest})`} op {proposal.host} te zijn: die heeft hetzelfde MAC-adres,{" "}
+            <span className="font-mono text-xs">{proposal.mac}</span>.
+          </p>
+          {decideError && <p className="mt-2 text-red-700 dark:text-red-300">{decideError}</p>}
+          <div className="mt-2 flex gap-2">
+            <Button
+              className="px-2.5 py-1"
+              disabled={decide.isPending}
+              onClick={() => decide.mutate({ id: proposal.id, confirm: true })}
+            >
+              Bevestigen
+            </Button>
+            <Button
+              variant="secondary"
+              className="px-2.5 py-1"
+              disabled={decide.isPending}
+              onClick={() => decide.mutate({ id: proposal.id, confirm: false })}
+            >
+              Negeren
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <p className="mb-3 text-sm text-slate-600 dark:text-slate-400">
+          Is deze node een VM of container in Proxmox? Koppel hem, dan zie je de VM hier en kun je hem starten, stoppen of
+          migreren.
+        </p>
+      )}
       {error && (
         <div className="mb-3">
           <Alert>{error}</Alert>

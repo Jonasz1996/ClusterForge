@@ -44,6 +44,7 @@ Het technisch ontwerp staat in [docs/design/mvp-fase-1.md](docs/design/mvp-fase-
 | 4. AI-assistent | Vragen over de fleet in het Nederlands met de Anthropic API, met tools die alleen lezen, de kosten per antwoord, een maandbudget en een vraagknop op clusters, nodes en incidenten | klaar |
 | 5. Health score en scorekaarten | Per cluster en voor het geheel een score van 0 tot 100 met een cijfer A tot F, uit zeven scorekaarten en de kaart Platform; per bevinding de reden, een link om ze op te lossen en wat het oplevert, accepteren met een reden, en een trend over 30 dagen | klaar |
 | 6. Wat-als en SPOF's | Kies wat er uitvalt (een Proxmox-host, storage, bridge, node, dienst of cluster) en zie per cluster de voorspelde status, welke VM's Proxmox HA herstart en welke diensten geraakt worden; de onderdelen die alleen al productie down leggen, als bevinding in de score; en of ClusterForge zelf meegaat | klaar |
+| 7. Infrastructuurkaart | Een kaart op `/kaart` met drie lagen: fysiek (hosts, VM's en storage), netwerk (bridges, VLAN's, subnetten, gateways, VIP's en VRRP-peers) en diensten; met filters, een detailpaneel en de wat-als of een incident als overlay. Het netwerk van de Proxmox-hosts wordt gelezen, en een VM met het MAC-adres van een node wordt een koppelvoorstel | klaar |
 
 ## Draaien met Docker Compose
 
@@ -161,6 +162,10 @@ Is je Proxmox een cluster, dan is één koppeling genoeg: ClusterForge ziet via 
 Elke 20 seconden haalt ClusterForge de stand op. Bij Proxmox zie je de hosts met hun belasting, alle VM's en containers en de storage. Een VM koppel je aan een node met "Koppelen" (of maak er meteen een node van), waarna de node zijn VM-status, host en acties toont. Start, afsluiten, hard uitzetten, herstarten, snapshot maken en live migreren naar een andere host doe je vanaf de node of vanuit het overzicht; viewers kunnen alleen kijken. Verandert een gekoppelde VM buiten ClusterForge om (gestart, gestopt, verhuisd of verdwenen), dan komt dat in het logboek.
 
 Wil je ook de CPU, het geheugen en de schijven van de Proxmox-hosts zelf in grafieken, zet dan ook daar de agent op.
+
+Elke 10 minuten leest ClusterForge ook het netwerk van elke online host: bridges met hun poorten, bonds, VLAN-interfaces, adressen en de gateway. Je ziet het bij Proxmox onder Netwerk, per host, en op de [kaart](#kaart). Daar is geen extra recht voor nodig (`Sys.Audit`); SDN-zones leest ClusterForge niet.
+
+**Koppelvoorstellen.** Heeft een VM of container hetzelfde MAC-adres als een node met een agent die nog aan geen VM hangt, dan stelt ClusterForge voor om ze te koppelen. Het voorstel staat bovenaan bij Proxmox en bij de node; een beheerder bevestigt of negeert het. Bevestigen koppelt de node aan de VM, net als Koppelen; een genegeerd voorstel komt niet terug. Templates en de sandbox-pool tellen niet mee.
 
 ## Back-ups
 
@@ -548,13 +553,25 @@ Bij Risico staan drie tabbladen: alle bevindingen van de health score, de single
 - welke diensten down of verminderd raken, ook via bekende afhankelijkheden, en welke terugkomen zodra HA de VM's herstart heeft;
 - of ClusterForge zelf uitvalt.
 
-De voorspelling gaat uit van de laatste Proxmox-sync, de status van de nodes en de bekende afhankelijkheden. Wat ze onzeker maakt, staat erbij: een VM waarvan de configuratie nog niet gelezen is, een koppeling die bij de laatste sync niet te lezen was, en dat HA-groepen en voorkeurshosts niet bekend zijn. Bridges komen voorlopig uit de netwerkkaarten van de VM's.
+De voorspelling gaat uit van de laatste Proxmox-sync, de status van de nodes en de bekende afhankelijkheden. Wat ze onzeker maakt, staat erbij: een VM waarvan de configuratie nog niet gelezen is, een koppeling die bij de laatste sync niet te lezen was, en dat HA-groepen en voorkeurshosts niet bekend zijn. Bridges komen uit het netwerk van de hosts en uit de netwerkkaarten van de VM's. Op de [kaart](#kaart) zie je de uitkomst ook: Op de kaart tonen kleurt wat uitvalt.
 
 **SPOF's.** Een single point of failure is een host, storage, bridge of node waarvan de uitval alleen al een prod-cluster of een bevestigde prod-dienst down legt, ook nadat HA herstart wat het kan. ClusterForge rekent elk onderdeel apart, alsof de rest gezond is, en zet de onderdelen die het meeste down leggen bovenaan. Elk staat ook als bevinding Hoog op de kaart Redundantie van het cluster, met een link naar de wat-als; staan de nodes al allemaal op dezelfde host, dan komt er niet nog eens een bevinding voor die host bij.
 
 **Configuratie van de VM's.** Daarvoor leest ClusterForge elke 10 minuten de configuratie van de VM's en containers: de schijven met hun storage, de netwerkkaarten met hun bridge en VLAN, en de vaste IP-adressen. Daar zijn geen extra Proxmox-rechten voor nodig (`VM.Audit`). Templates en de sandbox-pool slaat hij over.
 
 **Waar ClusterForge zelf draait.** ClusterForge zoekt zijn eigen VM of container aan zijn MAC-adres en, als dat niet uniek is, aan zijn IP-adres. In Docker ziet hij zijn eigen MAC niet; dan zoekt hij aan het adres uit `CF_NATS_ADVERTISE` en het adres bij de Git-koppeling, tegen de vaste IP's van de VM's en de adressen van draaiende containers. Vindt hij het niet, kies de VM dan bij Instellingen onder "Waar ClusterForge draait".
+
+## Kaart
+
+Bij Kaart zie je hoe alles aan elkaar hangt, in drie lagen:
+
+- **Fysiek.** Per Proxmox-host de VM's en containers met hun status, en de lokale storage. Gedeelde storage staat onder de hosts, met een lijn van elke VM naar de storage van zijn schijven. Een VM die een node is, krijgt de kleur van zijn cluster; de VM van ClusterForge zelf heeft het label CF.
+- **Netwerk.** De subnetten met hun VLAN en de nodes erin, de bridges van de hosts met hun poorten (zoals `bond0 (eno1, eno2)`), de gateways, de VIP's met een lijn naar hun huidige eigenaar, en een stippellijn tussen VRRP-peers. Subnetten komen uit de adressen die de agents melden; een bridge hoort bij een subnet als de host er een adres in heeft, of als een node met dat netwerk via zijn netwerkkaart aan die bridge hangt.
+- **Diensten.** De graaf van [Afhankelijkheden](#afhankelijkheden), met de voorstellen als stippellijn.
+
+Filter op omgeving of cluster; dan blijft alleen staan wat bij die nodes hoort. Een klik op een element opent een paneel met de details, waar het mee verbonden is, een link naar zijn pagina en "Wat als dit uitvalt?". Op een smal scherm wordt de kaart een lijst.
+
+Vanuit de wat-als (Op de kaart tonen) en vanuit een incident (Wat het raakte, op de kaart) opent de kaart met een overlay: wat uitvalt, down of verminderd is of door HA herstart wordt, krijgt een rand in die kleur, en de rest wordt gedimd. Op de kaart staan alleen nodes die aan een VM gekoppeld zijn (fysiek) of die een agent hebben (netwerk); wat ontbreekt, staat erboven.
 
 ## Assistent
 
@@ -588,7 +605,7 @@ Een vraag kost meestal enkele centen; een vraag die veel tools nodig heeft meer.
 
 **Wie.** Standaard alleen beheerders. Zet je 'Ook viewers mogen vragen stellen' aan, dan kunnen viewers het ook, met hun eigen rechten: ze zien via de assistent niets wat ze in de webinterface niet zien, zoals een IP-adres bij een SSH-login. Iedereen ziet zijn eigen gesprekken; een beheerder ziet die van iedereen. Een gesprek blijft 365 dagen na de laatste vraag staan, of tot je het verwijdert.
 
-**Wat de assistent kan.** Alleen lezen. Hij heeft zeventien tools: het overzicht van de fleet, een cluster, een node, de tijdlijn, de wijzigingen, incidenten zoeken, een incident met de analyse van What Broke, metrics, drift, back-ups, failovertests, taken, Git-wijzigingen, de impact van een storing, de health score en de wat-als met de single points of failure. Hij kan niets starten, stoppen, herstarten, toepassen of wijzigen; een tool roept dezelfde leesopdrachten aan als de webinterface, met de rechten van wie de vraag stelt. Raadt hij iets aan, dan linkt hij naar het scherm waar jij het doet.
+**Wat de assistent kan.** Alleen lezen. Hij heeft achttien tools: het overzicht van de fleet, een cluster, een node, de tijdlijn, de wijzigingen, incidenten zoeken, een incident met de analyse van What Broke, metrics, drift, back-ups, failovertests, taken, Git-wijzigingen, de impact van een storing, de health score, de wat-als met de single points of failure en de kaart. Hij kan niets starten, stoppen, herstarten, toepassen of wijzigen; een tool roept dezelfde leesopdrachten aan als de webinterface, met de rechten van wie de vraag stelt. Raadt hij iets aan, dan linkt hij naar het scherm waar jij het doet.
 
 **Wat naar Anthropic gaat.** Je vraag, de gebruikersnaam en rol, de tijd, en wat de tools lezen: namen, statussen, adressen, tijdlijnen, journaalregels, pakketnamen, metrics, Git-commits en taken van de fleet. Geheimen gaan nooit mee: geen wachtwoorden, tokens, sleutels, vingerafdrukken, sessies en geen inhoud van bestanden. Commitberichten en journaalregels zijn tekst van buiten ClusterForge; de assistent behandelt ze als gegevens en volgt geen instructies die erin staan.
 
@@ -638,11 +655,11 @@ internal/incidents/        incidenten: overgangen groeperen, ernst, openen en sl
 internal/whatbroke/        What Broke: de tijdlijn uit logboek en journaal, en de analyse van elk incident
 internal/assistant/        de AI-assistent: instellingen, gesprekken, de lus met de Anthropic API, kosten en budget
 internal/risk/             de health score: de zeven scorekaarten, de kaart Platform, acceptaties en de trend; de wat-als en de SPOF's
-internal/topo/             één model van hosts, storage, bridges en VM's met hun schijven en netwerkkaarten, en waar ClusterForge zelf draait
+internal/topo/             één model van hosts, storage, bridges en VM's met hun schijven en netwerkkaarten, waar ClusterForge zelf draait, en de lagen van de kaart
 internal/metrics/          metrics naar VictoriaMetrics schrijven en de grafieken opvragen
 internal/status/           statusregels voor nodes en clusters, VIP-eigenaars
 internal/live/             live updates naar de webinterface (Server-Sent Events)
-internal/proxmox/          Proxmox-API: koppelingen, sync elke 20 s en VM-acties; pvefake/ is een nep-Proxmox voor tests
+internal/proxmox/          Proxmox-API: koppelingen, sync elke 20 s, VM-acties, het netwerk van de hosts en koppelvoorstellen; pvefake/ is een nep-Proxmox voor tests
 internal/jobs/             taken op de achtergrond met stappen, logboek en annuleren
 internal/lifecycle/        acties op nodes via de agent: onderhoud, herstarten, afsluiten
 internal/secrets/          versleutelen van geheimen met de masterkey

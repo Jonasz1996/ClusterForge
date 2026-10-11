@@ -149,6 +149,12 @@ function Facts({ inc }: { inc: Incident }) {
             <span>Loopt nog. Het sluit als alles vijf minuten gezond is.</span>
           )}
         </dd>
+        <dt className={dtClass}>Kaart</dt>
+        <dd>
+          <Link href={`/kaart?incident=${inc.id}`} className={linkClass}>
+            Wat het raakte, op de kaart
+          </Link>
+        </dd>
         {inc.test_run_id && (
           <>
             <dt className={dtClass}>Test</dt>

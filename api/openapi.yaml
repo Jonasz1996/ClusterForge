@@ -829,6 +829,20 @@ paths:
               schema: { $ref: "#/components/schemas/ProxmoxResources" }
         "401": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /proxmox/{proxmoxId}/network:
+    parameters:
+      - { name: proxmoxId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getProxmoxNetwork
+      summary: Het netwerk van elke host, elke 10 minuten gelezen
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HostNetworkList" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
   /proxmox/{proxmoxId}/vms/{vmid}/actions:
     parameters:
       - { name: proxmoxId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -2247,6 +2261,66 @@ paths:
         "204": { description: Weggehaald }
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
+  /map:
+    get:
+      operationId: getMap
+      summary: Een laag van de infrastructuurkaart
+      description: |
+        physical: per Proxmox-host de VM's, containers en storage, met een lijn
+        van elke gast naar de storage van zijn schijven. network: de subnetten
+        met hun nodes, de bridges van de hosts met hun VLAN's, de gateways, de
+        VIP's met hun eigenaar en de VRRP-peers. Alleen lezen. De laag Diensten
+        is de afhankelijkheidsgraaf (/dependency-graph).
+      parameters:
+        - { name: layer, in: query, required: true, schema: { type: string, enum: [physical, network] } }
+        - { name: environment, in: query, schema: { $ref: "#/components/schemas/Environment" } }
+        - { name: cluster_id, in: query, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/MapLayer" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+  /node-links:
+    get:
+      operationId: listNodeLinks
+      summary: Voorstellen om een node aan een VM te koppelen
+      description: |
+        Een VM of container in Proxmox die geen node is, met hetzelfde
+        MAC-adres als een interface van een node met een agent en zonder VM.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NodeLinkList" }
+        "401": { $ref: "#/components/responses/Error" }
+  /node-links/{linkId}/confirm:
+    parameters:
+      - { name: linkId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: confirmNodeLink
+      summary: Een koppelvoorstel bevestigen; de node hangt dan aan de VM (admin)
+      responses:
+        "204": { description: Gekoppeld }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /node-links/{linkId}/ignore:
+    parameters:
+      - { name: linkId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: ignoreNodeLink
+      summary: Een koppelvoorstel negeren; het komt niet terug (admin)
+      responses:
+        "204": { description: Genegeerd }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
   /clusters/{clusterId}/risk:
     parameters:
       - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -3844,8 +3918,9 @@ components:
           items: { type: string }
     RiskGuestOutcome:
       type: object
-      required: [connection, vmid, name, host, node_id, hostname, outcome, reason, restart_host, unknown]
+      required: [key, connection, vmid, name, host, node_id, hostname, outcome, reason, restart_host, unknown]
       properties:
+        key: { type: string, description: "De sleutel van de gast op de kaart, zoals guest:<koppeling>:101" }
         connection: { type: string }
         vmid: { type: integer }
         name: { type: string }
@@ -3859,6 +3934,16 @@ components:
         reason: { type: string }
         restart_host: { type: string }
         unknown: { type: boolean, description: Geen node in ClusterForge }
+    RiskNodeOutcome:
+      type: object
+      required: [id, hostname, outcome]
+      properties:
+        id: { type: string, format: uuid }
+        hostname: { type: string }
+        outcome:
+          type: string
+          enum: [down, restarted]
+          description: restarted als HA zijn VM herstart
     RiskPrediction:
       type: object
       required: [status, reason]
@@ -3901,7 +3986,7 @@ components:
         restart_host: { type: string }
     RiskWhatIf:
       type: object
-      required: [components, guests, clusters, services, self, notes]
+      required: [components, guests, nodes, clusters, services, self, notes]
       properties:
         components:
           type: array
@@ -3909,6 +3994,10 @@ components:
         guests:
           type: array
           items: { $ref: "#/components/schemas/RiskGuestOutcome" }
+        nodes:
+          type: array
+          description: De nodes die uitvallen
+          items: { $ref: "#/components/schemas/RiskNodeOutcome" }
         clusters:
           type: array
           items: { $ref: "#/components/schemas/RiskClusterOutcome" }
@@ -3982,6 +4071,123 @@ components:
           type: array
           description: De VM's en containers om uit te kiezen
           items: { $ref: "#/components/schemas/SelfGuest" }
+    MapLayer:
+      type: object
+      required: [layer, items, edges, notes]
+      properties:
+        layer: { type: string, enum: [physical, network] }
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/MapItem" }
+        edges:
+          type: array
+          items: { $ref: "#/components/schemas/MapEdge" }
+        notes:
+          type: array
+          items: { type: string }
+    MapItem:
+      type: object
+      required: [id, kind, name, parent, status, detail, node_id, cluster_id, cluster, environment, self, link, facts]
+      properties:
+        id:
+          type: string
+          description: |
+            Zoals host:<koppeling>:pve1, storage:<koppeling>:ceph,
+            storage:<koppeling>:local-lvm@pve1, bridge:<koppeling>:pve1:vmbr0,
+            guest:<koppeling>:101, node:<id>, subnet:10.0.20.0/24,
+            gateway:10.0.20.1 of vip:<id>; dezelfde sleutels als de wat-als
+        kind: { type: string, enum: [host, storage, guest, subnet, gateway, node, vip, bridge] }
+        name: { type: string }
+        parent: { type: string, description: De host waarin hij getekend wordt; leeg staat hij los }
+        status: { $ref: "#/components/schemas/Status" }
+        detail: { type: string, description: Eén regel onder de naam }
+        node_id: { type: string, format: uuid, nullable: true }
+        cluster_id: { type: string, format: uuid, nullable: true }
+        cluster: { type: string }
+        environment: { type: string }
+        self: { type: boolean, description: De VM waarop ClusterForge zelf draait }
+        link: { type: string, description: Het scherm van dit onderdeel }
+        facts:
+          type: array
+          items:
+            type: object
+            required: [label, value]
+            properties:
+              label: { type: string }
+              value: { type: string }
+    MapEdge:
+      type: object
+      required: [id, from, to, kind, label]
+      properties:
+        id: { type: string }
+        from: { type: string }
+        to: { type: string }
+        kind:
+          type: string
+          enum: [disk, member, uplink, gateway, owner, vrrp]
+          description: |
+            disk: een gast naar de storage van zijn schijven; member: een
+            subnet naar een node; uplink: een bridge naar een subnet; gateway;
+            owner: een VIP naar zijn eigenaar; vrrp: keepalived-peers
+        label: { type: string }
+    HostNetworkList:
+      type: object
+      required: [hosts]
+      properties:
+        hosts:
+          type: array
+          items: { $ref: "#/components/schemas/HostNetwork" }
+    HostNetwork:
+      type: object
+      required: [host, read_at, error, interfaces]
+      properties:
+        host: { type: string }
+        read_at: { type: string, format: date-time }
+        error: { type: string, description: De fout van de laatste keer lezen; de interfaces zijn dan van daarvoor }
+        interfaces:
+          type: array
+          items: { $ref: "#/components/schemas/HostInterface" }
+    HostInterface:
+      type: object
+      required: [iface, type, active, ports, vlan_id, vlan_raw_device, cidr, cidr6, gateway, gateway6, vlan_aware, mtu, comments]
+      properties:
+        iface: { type: string }
+        type: { type: string, description: "bridge, bond, eth, vlan, alias, OVSBridge, OVSBond, OVSPort, OVSIntPort of unknown" }
+        active: { type: boolean }
+        ports: { type: array, items: { type: string } }
+        vlan_id: { type: integer, nullable: true }
+        vlan_raw_device: { type: string }
+        cidr: { type: string }
+        cidr6: { type: string }
+        gateway: { type: string }
+        gateway6: { type: string }
+        vlan_aware: { type: boolean }
+        mtu: { type: integer, nullable: true }
+        comments: { type: string }
+    NodeLinkList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/NodeLink" }
+    NodeLink:
+      type: object
+      required: [id, connection_id, connection, vmid, guest, guest_type, host, node_id, hostname, cluster_id, cluster, mac, created_at]
+      properties:
+        id: { type: string, format: uuid }
+        connection_id: { type: string, format: uuid }
+        connection: { type: string }
+        vmid: { type: integer }
+        guest: { type: string }
+        guest_type: { type: string, enum: [qemu, lxc] }
+        host: { type: string }
+        node_id: { type: string, format: uuid }
+        hostname: { type: string }
+        cluster_id: { type: string, format: uuid, nullable: true }
+        cluster: { type: string }
+        mac: { type: string }
+        created_at: { type: string, format: date-time }
     SelfLocationInput:
       type: object
       required: [connection_id, vmid]

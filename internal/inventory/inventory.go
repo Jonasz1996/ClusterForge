@@ -362,60 +362,69 @@ func (s *Service) CreateNodeTx(ctx context.Context, q *store.Queries, actor even
 func (s *Service) UpdateNode(ctx context.Context, actor events.Actor, id uuid.UUID, change func(*NodeFields)) (store.Node, error) {
 	var n store.Node
 	err := s.tx(ctx, func(q *store.Queries) error {
-		cur, err := q.LockNode(ctx, id)
-		if err != nil {
-			return err
-		}
-		before := nodeFields(cur)
-		after := before
-		after.Tags = slices.Clone(before.Tags)
-		change(&after)
-		if err := after.normalize(); err != nil {
-			return err
-		}
-		d := diff(before, after)
-		n = cur
-		if len(d) == 0 {
-			return nil
-		}
-		if _, moved := d["cluster_id"]; moved {
-			for _, id := range []*uuid.UUID{before.ClusterID, after.ClusterID} {
-				if linked, err := linkedCluster(ctx, q, id); err != nil || linked {
-					return cmp.Or(err, gitManaged("Welke nodes erin zitten"))
-				}
-			}
-		}
-		if _, changed := d["primary_ip"]; changed {
-			if linked, err := linkedCluster(ctx, q, before.ClusterID); err != nil || linked {
-				return cmp.Or(err, gitManaged("Het adres van een node"))
-			}
-		}
-		if _, changed := d["proxmox"]; changed {
-			if err := notSandbox(ctx, q, after.Proxmox); err != nil {
-				return err
-			}
-		}
-		proxmoxID, vmid := after.Proxmox.columns()
-		n, err = q.UpdateNode(ctx, store.UpdateNodeParams{
-			ID: id, ClusterID: after.ClusterID, Hostname: after.Hostname, Role: after.Role,
-			Description: after.Description, Lifecycle: after.Lifecycle, PrimaryIp: parseIP(after.PrimaryIP),
-			Tags: after.Tags, ProxmoxID: proxmoxID, PveVmid: vmid,
-		})
-		if err != nil {
-			return err
-		}
-		// Bij een verhuizing hoort het event bij het oude cluster als de node
-		// eruit gehaald wordt, en anders bij het nieuwe.
-		clusterID := after.ClusterID
-		if clusterID == nil {
-			clusterID = before.ClusterID
-		}
-		return s.ev.Write(ctx, q, events.Event{
-			Actor: actor, SubjectType: "node", SubjectID: id.String(), ClusterID: clusterID,
-			Action: "node.updated", Payload: d,
-		})
+		var err error
+		n, err = s.UpdateNodeTx(ctx, q, actor, id, change)
+		return err
 	})
 	return n, err
+}
+
+// UpdateNodeTx wijzigt een node binnen de transactie van de aanroeper. Een
+// databasefout is nog niet vertaald; Translate doet dat.
+func (s *Service) UpdateNodeTx(ctx context.Context, q *store.Queries, actor events.Actor, id uuid.UUID, change func(*NodeFields)) (store.Node, error) {
+	var n store.Node
+	cur, err := q.LockNode(ctx, id)
+	if err != nil {
+		return n, err
+	}
+	before := nodeFields(cur)
+	after := before
+	after.Tags = slices.Clone(before.Tags)
+	change(&after)
+	if err := after.normalize(); err != nil {
+		return n, err
+	}
+	d := diff(before, after)
+	n = cur
+	if len(d) == 0 {
+		return n, nil
+	}
+	if _, moved := d["cluster_id"]; moved {
+		for _, id := range []*uuid.UUID{before.ClusterID, after.ClusterID} {
+			if linked, err := linkedCluster(ctx, q, id); err != nil || linked {
+				return n, cmp.Or(err, gitManaged("Welke nodes erin zitten"))
+			}
+		}
+	}
+	if _, changed := d["primary_ip"]; changed {
+		if linked, err := linkedCluster(ctx, q, before.ClusterID); err != nil || linked {
+			return n, cmp.Or(err, gitManaged("Het adres van een node"))
+		}
+	}
+	if _, changed := d["proxmox"]; changed {
+		if err := notSandbox(ctx, q, after.Proxmox); err != nil {
+			return n, err
+		}
+	}
+	proxmoxID, vmid := after.Proxmox.columns()
+	n, err = q.UpdateNode(ctx, store.UpdateNodeParams{
+		ID: id, ClusterID: after.ClusterID, Hostname: after.Hostname, Role: after.Role,
+		Description: after.Description, Lifecycle: after.Lifecycle, PrimaryIp: parseIP(after.PrimaryIP),
+		Tags: after.Tags, ProxmoxID: proxmoxID, PveVmid: vmid,
+	})
+	if err != nil {
+		return n, err
+	}
+	// Bij een verhuizing hoort het event bij het oude cluster als de node
+	// eruit gehaald wordt, en anders bij het nieuwe.
+	clusterID := after.ClusterID
+	if clusterID == nil {
+		clusterID = before.ClusterID
+	}
+	return n, s.ev.Write(ctx, q, events.Event{
+		Actor: actor, SubjectType: "node", SubjectID: id.String(), ClusterID: clusterID,
+		Action: "node.updated", Payload: d,
+	})
 }
 
 // DeleteNode verwijdert een node; zijn agent verdwijnt mee en wordt

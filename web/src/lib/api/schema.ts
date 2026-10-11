@@ -765,6 +765,25 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/proxmox/{proxmoxId}/network": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proxmoxId: string;
+            };
+            cookie?: never;
+        };
+        /** Het netwerk van elke host, elke 10 minuten gelezen */
+        get: operations["getProxmoxNetwork"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/proxmox/{proxmoxId}/vms/{vmid}/actions": {
         parameters: {
             query?: never;
@@ -2101,6 +2120,89 @@ export interface paths {
         post?: never;
         /** De ingevulde VM weghalen, zodat ClusterForge zelf zoekt (admin) */
         delete: operations["deleteSelfLocation"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/map": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Een laag van de infrastructuurkaart
+         * @description physical: per Proxmox-host de VM's, containers en storage, met een lijn
+         *     van elke gast naar de storage van zijn schijven. network: de subnetten
+         *     met hun nodes, de bridges van de hosts met hun VLAN's, de gateways, de
+         *     VIP's met hun eigenaar en de VRRP-peers. Alleen lezen. De laag Diensten
+         *     is de afhankelijkheidsgraaf (/dependency-graph).
+         */
+        get: operations["getMap"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/node-links": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Voorstellen om een node aan een VM te koppelen
+         * @description Een VM of container in Proxmox die geen node is, met hetzelfde
+         *     MAC-adres als een interface van een node met een agent en zonder VM.
+         */
+        get: operations["listNodeLinks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/node-links/{linkId}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                linkId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Een koppelvoorstel bevestigen; de node hangt dan aan de VM (admin) */
+        post: operations["confirmNodeLink"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/node-links/{linkId}/ignore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                linkId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Een koppelvoorstel negeren; het komt niet terug (admin) */
+        post: operations["ignoreNodeLink"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -3447,6 +3549,8 @@ export interface components {
             components: string[];
         };
         RiskGuestOutcome: {
+            /** @description De sleutel van de gast op de kaart, zoals guest:<koppeling>:101 */
+            key: string;
             connection: string;
             vmid: number;
             name: string;
@@ -3463,6 +3567,16 @@ export interface components {
             restart_host: string;
             /** @description Geen node in ClusterForge */
             unknown: boolean;
+        };
+        RiskNodeOutcome: {
+            /** Format: uuid */
+            id: string;
+            hostname: string;
+            /**
+             * @description restarted als HA zijn VM herstart
+             * @enum {string}
+             */
+            outcome: "down" | "restarted";
         };
         RiskPrediction: {
             status: components["schemas"]["Status"];
@@ -3502,6 +3616,8 @@ export interface components {
         RiskWhatIf: {
             components: components["schemas"]["RiskComponent"][];
             guests: components["schemas"]["RiskGuestOutcome"][];
+            /** @description De nodes die uitvallen */
+            nodes: components["schemas"]["RiskNodeOutcome"][];
             clusters: components["schemas"]["RiskClusterOutcome"][];
             services: components["schemas"]["RiskServiceOutcome"][];
             /** @description Leeg als ClusterForge zelf blijft draaien of niet bekend is waar hij draait */
@@ -3559,6 +3675,108 @@ export interface components {
             note: string;
             /** @description De VM's en containers om uit te kiezen */
             guests: components["schemas"]["SelfGuest"][];
+        };
+        MapLayer: {
+            /** @enum {string} */
+            layer: "physical" | "network";
+            items: components["schemas"]["MapItem"][];
+            edges: components["schemas"]["MapEdge"][];
+            notes: string[];
+        };
+        MapItem: {
+            /**
+             * @description Zoals host:<koppeling>:pve1, storage:<koppeling>:ceph,
+             *     storage:<koppeling>:local-lvm@pve1, bridge:<koppeling>:pve1:vmbr0,
+             *     guest:<koppeling>:101, node:<id>, subnet:10.0.20.0/24,
+             *     gateway:10.0.20.1 of vip:<id>; dezelfde sleutels als de wat-als
+             */
+            id: string;
+            /** @enum {string} */
+            kind: "host" | "storage" | "guest" | "subnet" | "gateway" | "node" | "vip" | "bridge";
+            name: string;
+            /** @description De host waarin hij getekend wordt; leeg staat hij los */
+            parent: string;
+            status: components["schemas"]["Status"];
+            /** @description Eén regel onder de naam */
+            detail: string;
+            /** Format: uuid */
+            node_id: string | null;
+            /** Format: uuid */
+            cluster_id: string | null;
+            cluster: string;
+            environment: string;
+            /** @description De VM waarop ClusterForge zelf draait */
+            self: boolean;
+            /** @description Het scherm van dit onderdeel */
+            link: string;
+            facts: {
+                label: string;
+                value: string;
+            }[];
+        };
+        MapEdge: {
+            id: string;
+            from: string;
+            to: string;
+            /**
+             * @description disk: een gast naar de storage van zijn schijven; member: een
+             *     subnet naar een node; uplink: een bridge naar een subnet; gateway;
+             *     owner: een VIP naar zijn eigenaar; vrrp: keepalived-peers
+             * @enum {string}
+             */
+            kind: "disk" | "member" | "uplink" | "gateway" | "owner" | "vrrp";
+            label: string;
+        };
+        HostNetworkList: {
+            hosts: components["schemas"]["HostNetwork"][];
+        };
+        HostNetwork: {
+            host: string;
+            /** Format: date-time */
+            read_at: string;
+            /** @description De fout van de laatste keer lezen; de interfaces zijn dan van daarvoor */
+            error: string;
+            interfaces: components["schemas"]["HostInterface"][];
+        };
+        HostInterface: {
+            iface: string;
+            /** @description bridge, bond, eth, vlan, alias, OVSBridge, OVSBond, OVSPort, OVSIntPort of unknown */
+            type: string;
+            active: boolean;
+            ports: string[];
+            vlan_id: number | null;
+            vlan_raw_device: string;
+            cidr: string;
+            cidr6: string;
+            gateway: string;
+            gateway6: string;
+            vlan_aware: boolean;
+            mtu: number | null;
+            comments: string;
+        };
+        NodeLinkList: {
+            items: components["schemas"]["NodeLink"][];
+        };
+        NodeLink: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            connection_id: string;
+            connection: string;
+            vmid: number;
+            guest: string;
+            /** @enum {string} */
+            guest_type: "qemu" | "lxc";
+            host: string;
+            /** Format: uuid */
+            node_id: string;
+            hostname: string;
+            /** Format: uuid */
+            cluster_id: string | null;
+            cluster: string;
+            mac: string;
+            /** Format: date-time */
+            created_at: string;
         };
         SelfLocationInput: {
             /** Format: uuid */
@@ -6097,6 +6315,30 @@ export interface operations {
             404: components["responses"]["Error"];
         };
     };
+    getProxmoxNetwork: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                proxmoxId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HostNetworkList"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
     vmAction: {
         parameters: {
             query?: never;
@@ -8196,6 +8438,101 @@ export interface operations {
             };
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
+        };
+    };
+    getMap: {
+        parameters: {
+            query: {
+                layer: "physical" | "network";
+                environment?: components["schemas"]["Environment"];
+                cluster_id?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MapLayer"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+        };
+    };
+    listNodeLinks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NodeLinkList"];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    confirmNodeLink: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                linkId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Gekoppeld */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    ignoreNodeLink: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                linkId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Genegeerd */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
         };
     };
     getClusterRisk: {

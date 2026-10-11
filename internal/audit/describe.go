@@ -420,6 +420,14 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 		return "Host " + str(p, "host") + " van Proxmox " + name + " is offline"
 	case "proxmox.host_online":
 		return "Host " + str(p, "host") + " van Proxmox " + name + " is weer online"
+	case "node.link_proposed":
+		return fmt.Sprintf("Voorstel: node %s is VM %s (%s) op %s, zelfde MAC-adres %s", name, num(p["vmid"]),
+			or(str(p, "guest"), "?"), or(str(p, "host"), "?"), str(p, "mac"))
+	case "node.link_confirmed":
+		return fmt.Sprintf("Node %s gekoppeld aan VM %s (%s) op %s, voorstel bevestigd", name, num(p["vmid"]),
+			or(str(p, "guest"), "?"), or(str(p, "host"), "?"))
+	case "node.link_ignored":
+		return fmt.Sprintf("Voorstel om node %s aan VM %s (%s) te koppelen genegeerd", name, num(p["vmid"]), or(str(p, "guest"), "?"))
 	case "vm.status_changed":
 		return fmt.Sprintf("VM %s van %s gaat van %s naar %s", num(p["vmid"]), str(p, "hostname"), vmStatus(from), vmStatus(to))
 	case "vm.moved":

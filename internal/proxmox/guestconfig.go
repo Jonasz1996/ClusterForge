@@ -136,13 +136,38 @@ func cfgBool(v any) bool {
 
 // Option leest een optie uit een Proxmox-eigenschap, zoals bridge uit
 // "virtio=BC:24:11:00:00:01,bridge=vmbr0".
-func Option(v, name string) (string, bool) {
-	for _, part := range strings.Split(v, ",") {
-		if k, val, found := strings.Cut(part, "="); found && k == name {
+func Option(v, name string) (string, bool) { return OptionOr(v, name, "") }
+
+// OptionOr leest een optie zoals Option, maar de eerste waarde zonder naam
+// heet def: size uit "local-lvm:vm-1-disk-0,size=32G", of current uit
+// "current,serial=x" met def "current". De sandbox van de back-upcontrole en
+// de kaart lezen dezelfde eigenschappen hiermee.
+func OptionOr(v, name, def string) (string, bool) {
+	for i, part := range strings.Split(v, ",") {
+		k, val, found := strings.Cut(part, "=")
+		if !found {
+			if i == 0 && def != "" && name == def {
+				return part, true
+			}
+			continue
+		}
+		if k == name {
 			return val, true
 		}
 	}
 	return "", false
+}
+
+// SetOption zet of vervangt één optie in een Proxmox-eigenschap.
+func SetOption(v, name, value string) string {
+	parts := strings.Split(v, ",")
+	for i, part := range parts {
+		if k, _, found := strings.Cut(part, "="); found && k == name {
+			parts[i] = name + "=" + value
+			return strings.Join(parts, ",")
+		}
+	}
+	return v + "," + name + "=" + value
 }
 
 func parseDisk(key, v string) (Disk, bool) {
