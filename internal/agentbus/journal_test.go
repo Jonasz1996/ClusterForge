@@ -118,6 +118,23 @@ func TestHandleChanges(t *testing.T) {
 	if got[3].Source != "server" {
 		t.Errorf("overgelopen: %+v", got[3])
 	}
+
+	// Met CF_JOURNAL_SSH_LOGINS=false komen er geen logins meer bij.
+	b.SetJournalLogins(false)
+	c = protocol.Changes{Entries: []protocol.Change{
+		{TS: nodeTime.Add(-time.Minute), Kind: protocol.ChangeLogin, Subject: "jonas", Action: "login"},
+		{TS: nodeTime.Add(-time.Minute), Kind: protocol.ChangeBoot, Subject: "boot", Action: "boot"},
+	}}
+	if err := b.handleChanges(ctx, node.ID, c, offset, received); err != nil {
+		t.Fatal(err)
+	}
+	keys = nil
+	for _, r := range changesOf(t, b, node.ID) {
+		keys = append(keys, r.Kind+":"+r.Subject)
+	}
+	if slices.Contains(keys, "login:jonas") || !slices.Contains(keys, "boot:boot") {
+		t.Fatalf("zonder logins: %v", keys)
+	}
 }
 
 func TestHandleConns(t *testing.T) {

@@ -77,6 +77,7 @@ Agents verbinden zelf naar de server, op poort 4222 (NATS met TLS). Die poort mo
 | `CF_SANDBOX_STORAGE` | (leeg) | Proxmox-storage voor de tijdelijke VM van een back-upcontrole; leeg kiest per host de storage voor VM-schijven met de meeste vrije ruimte |
 | `CF_SANDBOX_BOOT_TIMEOUT` | `10m` | Hoe lang een teruggezette VM mag doen over opstarten tot de guest agent antwoordt; tussen `30s` en `1h` |
 | `CF_TEST_WINDOW` | `zo 03:00-05:00` | Het testvenster voor geplande failovertests en back-upcontroles: dagen (`ma` tot `zo`, met komma's, of `dagelijks`) en de tijden, op de klok van `TZ` |
+| `CF_JOURNAL_SSH_LOGINS` | `true` | Bewaar SSH-logins (gebruiker, bron-IP en methode) in het journaal van de nodes; `false` laat ze weg |
 | `TZ` | `Europe/Brussels` in Docker Compose | Tijdzone van de server; het testvenster volgt zomer- en wintertijd |
 
 ### Commando's
@@ -447,7 +448,7 @@ De pagina van een node heeft een kaart Wijzigingen: wat er op die machine verand
 - **De server** ziet zelf een nieuwe agentversie, een onderbreking van de verbinding, en uit de facts de OS-versie, het aantal updates, interfaces, adressen (zonder de VIP's van keepalived), gateway, DNS, routes, luisterende poorten en de instellingen van keepalived. Voor een agent van voor het journaal leidt hij ook diensten en herstarts uit de heartbeats en facts af.
 - **Proxmox**: de sync leest `/cluster/tasks`. Een VM die iemand in de Proxmox-webinterface stopt, migreert of terugzet, komt bij de node van die VM. Een Proxmox-host die offline of weer online gaat, komt in het logboek.
 
-De agent bewaart wat hij nog moet sturen in `/var/lib/clusterforge/journal.json`, tot zeven dagen en 2000 regels, en stuurt het na een onderbreking alsnog. De tijden komen van de node en worden gecorrigeerd voor het verschil met de klok van de server. Een viewer ziet het IP-adres van een login niet. Het journaal wordt na 180 dagen opgeruimd, de Proxmox-taken en verbindingen na 30 dagen. Staat er een amberkleurige melding "Agent te oud voor het journaal", werk cf-agent dan bij met het commando eronder; de aanmelding blijft staan.
+De agent bewaart wat hij nog moet sturen in `/var/lib/clusterforge/journal.json`, tot zeven dagen en 2000 regels, en stuurt het na een onderbreking alsnog. De tijden komen van de node en worden gecorrigeerd voor het verschil met de klok van de server. Een viewer ziet het IP-adres van een login niet, en met `CF_JOURNAL_SSH_LOGINS=false` bewaart de server geen logins. Het journaal wordt na 180 dagen opgeruimd, de Proxmox-taken en verbindingen na 30 dagen. Staat er een amberkleurige melding "Agent te oud voor het journaal", werk cf-agent dan bij met het commando eronder; de aanmelding blijft staan.
 
 De facts tonen nu ook of een herstart nodig is (met de geïnstalleerde kernel), wanneer apt de lijsten voor het laatst bijwerkte, de soort, VLAN en MTU van elke interface, en de gateway en DNS-servers.
 

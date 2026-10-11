@@ -148,6 +148,7 @@ func serve() error {
 	}
 	defer bus.Close()
 	bus.SetFingerprintKey(box.Derive(secrets.PurposeFile))
+	bus.SetJournalLogins(cfg.JournalLogins)
 	hub := live.NewHub(pool, log)
 	runner := jobs.NewRunner(pool, ev, log)
 	pve := proxmox.NewService(pool, ev, log, box, runner)

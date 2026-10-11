@@ -88,7 +88,7 @@ func (b *Bus) handleChanges(ctx context.Context, nodeID uuid.UUID, c protocol.Ch
 		}
 		entries := make([]journal.Entry, 0, len(c.Entries)+1)
 		for _, ch := range c.Entries {
-			if !journal.AgentKinds[ch.Kind] || ch.Action == "" || ch.TS.IsZero() {
+			if !journal.AgentKinds[ch.Kind] || ch.Action == "" || ch.TS.IsZero() || (b.noLogins && ch.Kind == journal.KindLogin) {
 				continue
 			}
 			ts := ch.TS.Add(-offset)
@@ -112,6 +112,9 @@ func (b *Bus) handleChanges(ctx context.Context, nodeID uuid.UUID, c protocol.Ch
 		return journal.Record(ctx, q, entries...)
 	})
 }
+
+// SetJournalLogins zet het bewaren van SSH-logins uit de agents aan of uit.
+func (b *Bus) SetJournalLogins(on bool) { b.noLogins = !on }
 
 // handleConns telt de verbindingen bij. Van een inkomende verbinding blijft
 // de afzender alleen staan als het een bekende node is.

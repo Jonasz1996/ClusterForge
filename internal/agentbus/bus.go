@@ -62,6 +62,8 @@ type Bus struct {
 	// started is wanneer deze server begon; een onderbreking van daarvoor
 	// komt door de server zelf.
 	started time.Time
+	// noLogins laat SSH-logins uit het journaal van de agents weg.
+	noLogins bool
 }
 
 // Hooks geven berichten van agents door aan de rest van de server. Elk veld
