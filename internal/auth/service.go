@@ -343,6 +343,34 @@ func (s *Service) DisableTOTP(ctx context.Context, p Principal, password, code s
 	})
 }
 
+// Confirm bevestigt een gevoelige wijziging door wie al ingelogd is: met
+// tweestapsverificatie de code, anders het wachtwoord. Een gestolen sessie
+// alleen is dan niet genoeg. what zegt welke wijziging, voor het logboek.
+func (s *Service) Confirm(ctx context.Context, p Principal, password, code, what string) error {
+	user, err := s.q.GetUserByID(ctx, p.User.ID)
+	if err != nil {
+		return err
+	}
+	if user.TotpEnabledAt != nil && user.TotpSecret != nil {
+		if err := s.useTOTP(ctx, user, code); err != nil {
+			if errors.Is(err, ErrInvalidTOTP) {
+				s.reauthFailed(ctx, user, what, "bad_totp")
+			}
+			return err
+		}
+		return nil
+	}
+	ok, err := VerifyPassword(password, user.PasswordHash)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		s.reauthFailed(ctx, user, what, "bad_password")
+		return ErrInvalidCredentials
+	}
+	return nil
+}
+
 // reauthFailed legt vast dat een ingelogde gebruiker zijn wachtwoord of code
 // fout invulde bij een gevoelige wijziging. what zegt welke.
 func (s *Service) reauthFailed(ctx context.Context, user store.User, what, reason string) {

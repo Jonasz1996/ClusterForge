@@ -441,6 +441,20 @@ func TestDeploy(t *testing.T) {
 	if leaks != 0 || strings.Contains(logs, "geheim12") {
 		t.Fatalf("auth_pass staat %d keer in de database of in het log", leaks)
 	}
+	// De tools van de assistent geven geen geheimen door: niet de auth_pass,
+	// het token of de vingerafdruk van Proxmox en niet de SSH-sleutel.
+	var jobID string
+	_ = e.pool.QueryRow(context.Background(), `SELECT id FROM jobs WHERE cluster_id = $1 ORDER BY created_at LIMIT 1`, res.ClusterID).Scan(&jobID)
+	for tool, out := range e.runTools(t, "admin", toolInputs("Web", "web-01", jobID)) {
+		for _, secret := range []string{"geheim12", "geheim-secret", fp, "AAAAC3NzaC1lZDI1NTE5AAAAIGJvbmFzIGtleQ"} {
+			if strings.Contains(out, secret) {
+				t.Errorf("tool %s geeft %q door", tool, secret)
+			}
+		}
+		if strings.Contains(out, "FOUT") && tool != "incident" {
+			t.Errorf("%s: %s", tool, out)
+		}
+	}
 
 	// De gewenste staat uit clusters.spec geeft precies de bestanden die de
 	// uitrol op de nodes zette.

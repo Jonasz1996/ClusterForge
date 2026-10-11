@@ -243,6 +243,47 @@ type Agent struct {
 	RevokedAt       *time.Time
 }
 
+type AssistantConversation struct {
+	ID          uuid.UUID
+	UserID      uuid.UUID
+	Title       string
+	SubjectType string
+	SubjectID   *uuid.UUID
+	IncidentID  *uuid.UUID
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+}
+
+type AssistantMessage struct {
+	ID               int64
+	ConversationID   uuid.UUID
+	Seq              int32
+	Role             string
+	Content          []byte
+	Text             string
+	Model            string
+	InputTokens      int32
+	OutputTokens     int32
+	CacheReadTokens  int32
+	CacheWriteTokens int32
+	CostMicrousd     int64
+	StopReason       string
+	UserID           *uuid.UUID
+	CreatedAt        time.Time
+}
+
+type AssistantSetting struct {
+	ID               uuid.UUID
+	Enabled          bool
+	ApiKeyEnc        []byte
+	KeyID            string
+	Model            string
+	MonthlyBudgetUsd int32
+	ViewerAccess     bool
+	UpdatedBy        *uuid.UUID
+	UpdatedAt        time.Time
+}
+
 type BackupPolicy struct {
 	ClusterID     uuid.UUID
 	MaxAgeHours   int32

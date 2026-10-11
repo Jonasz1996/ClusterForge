@@ -1954,6 +1954,154 @@ paths:
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /assistant/settings:
+    get:
+      operationId: getAssistantSettings
+      summary: De instellingen van de assistent en of jij hem kunt gebruiken
+      description: Voor iedereen. De API-sleutel komt nooit terug.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AssistantSettings" }
+        "401": { $ref: "#/components/responses/Error" }
+    put:
+      operationId: saveAssistantSettings
+      summary: De instellingen opslaan (admin)
+      description: |
+        Vraagt opnieuw bevestiging: met tweestapsverificatie de code, anders
+        het wachtwoord. Een lege sleutel laat de opgeslagen sleutel staan.
+        Zonder CF_MASTER_KEY kan de assistent niet aan.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AssistantSettingsInput" }
+      responses:
+        "200":
+          description: Opgeslagen
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AssistantSettings" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /assistant/settings/test:
+    post:
+      operationId: testAssistantKey
+      summary: Eén kleine vraag met de sleutel en het model, zonder iets op te slaan (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AssistantKeyTest" }
+      responses:
+        "200":
+          description: De uitkomst; ook een fout van de Anthropic API staat hierin
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AssistantKeyTestResult" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /assistant/usage:
+    get:
+      operationId: getAssistantUsage
+      summary: Het verbruik van deze maand; per gebruiker alleen voor admins
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AssistantUsage" }
+        "401": { $ref: "#/components/responses/Error" }
+  /assistant/conversations:
+    get:
+      operationId: listAssistantConversations
+      summary: Je gesprekken, nieuwste eerst
+      parameters:
+        - name: all
+          in: query
+          description: Ook die van anderen (admin)
+          schema: { type: boolean, default: false }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AssistantConversationList" }
+        "401": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createAssistantConversation
+      summary: Een nieuw gesprek, eventueel over een cluster, node of incident
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AssistantConversationInput" }
+      responses:
+        "201":
+          description: Aangemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AssistantConversation" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /assistant/conversations/{conversationId}:
+    parameters:
+      - { name: conversationId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getAssistantConversation
+      summary: Een gesprek met zijn vragen en antwoorden (de vrager of een admin)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AssistantConversationDetail" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteAssistantConversation
+      summary: Een gesprek wissen (de vrager of een admin)
+      responses:
+        "204": { description: Gewist }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /assistant/conversations/{conversationId}/messages:
+    parameters:
+      - { name: conversationId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: askAssistant
+      summary: Een vraag stellen; het antwoord stroomt als server-sent events
+      description: |
+        Alleen in je eigen gesprek. De events zijn text (een stuk van het
+        antwoord, {"text"}), tool (een tool die loopt, {"name", "label"}),
+        error ({"message"}) en als laatste done (tokens, kosten en model).
+        Fouten voor het antwoord begint, zoals een leeg budget, komen als
+        gewone JSON-fout.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AssistantQuestion" }
+      responses:
+        "200":
+          description: De stroom van het antwoord
+          content:
+            text/event-stream:
+              schema: { type: string }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
 components:
   securitySchemes:
     session:
@@ -3171,6 +3319,134 @@ components:
           type: string
           format: date-time
           description: Wanneer de analyse voor het laatst veranderde
+    AssistantModel:
+      type: object
+      required: [id, label, input_usd, output_usd]
+      properties:
+        id: { type: string }
+        label: { type: string }
+        input_usd: { type: number, description: Dollar per miljoen tokens invoer }
+        output_usd: { type: number, description: Dollar per miljoen tokens uitvoer }
+    AssistantSettings:
+      type: object
+      required: [available, can_use, reason, enabled, has_key, model, models, monthly_budget_usd, viewer_access, updated_at, updated_by]
+      properties:
+        available: { type: boolean, description: False zonder CF_MASTER_KEY }
+        can_use: { type: boolean, description: Of jij de assistent nu kunt gebruiken }
+        reason: { type: string, description: Waarom niet; leeg als het kan }
+        enabled: { type: boolean }
+        has_key: { type: boolean }
+        model: { type: string }
+        models:
+          type: array
+          items: { $ref: "#/components/schemas/AssistantModel" }
+        monthly_budget_usd: { type: integer }
+        viewer_access: { type: boolean }
+        updated_at: { type: string, format: date-time, nullable: true }
+        updated_by: { type: string, nullable: true, description: Gebruikersnaam }
+    AssistantSettingsInput:
+      type: object
+      required: [enabled, model, monthly_budget_usd, viewer_access]
+      properties:
+        enabled: { type: boolean }
+        api_key: { type: string, maxLength: 300, description: Leeg laat de opgeslagen sleutel staan }
+        model: { type: string }
+        monthly_budget_usd: { type: integer }
+        viewer_access: { type: boolean }
+        password: { type: string, maxLength: 1024, description: Je wachtwoord, als je geen tweestapsverificatie hebt }
+        totp_code: { type: string, maxLength: 10, description: Je code, als je tweestapsverificatie hebt }
+    AssistantKeyTest:
+      type: object
+      required: [model]
+      properties:
+        api_key: { type: string, maxLength: 300, description: Leeg test de opgeslagen sleutel }
+        model: { type: string }
+    AssistantKeyTestResult:
+      type: object
+      required: [ok, model, message]
+      properties:
+        ok: { type: boolean }
+        model: { type: string, description: Het model dat antwoordde }
+        message: { type: string, description: Wat er misging; leeg als het werkte }
+    AssistantUsage:
+      type: object
+      required: [since, spent_usd, budget_usd, users]
+      properties:
+        since: { type: string, format: date-time }
+        spent_usd: { type: number }
+        budget_usd: { type: integer }
+        users:
+          type: array
+          description: Per gebruiker; leeg voor een viewer
+          items:
+            type: object
+            required: [username, questions, cost_usd]
+            properties:
+              username: { type: string }
+              questions: { type: integer }
+              cost_usd: { type: number }
+    AssistantConversationInput:
+      type: object
+      properties:
+        subject_type: { type: string, enum: [cluster, node, incident] }
+        subject_id: { type: string, format: uuid }
+    AssistantConversation:
+      type: object
+      required: [id, username, title, subject_type, subject_id, created_at, updated_at, cost_usd]
+      properties:
+        id: { type: string, format: uuid }
+        username: { type: string }
+        title: { type: string, description: Het begin van de eerste vraag; leeg zolang er geen is }
+        subject_type: { type: string, description: cluster, node, incident of leeg }
+        subject_id: { type: string, format: uuid, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        cost_usd: { type: number }
+    AssistantConversationList:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/AssistantConversation" }
+    AssistantConversationDetail:
+      type: object
+      required: [conversation, turns]
+      properties:
+        conversation: { $ref: "#/components/schemas/AssistantConversation" }
+        turns:
+          type: array
+          items: { $ref: "#/components/schemas/AssistantTurn" }
+    AssistantTurn:
+      type: object
+      required: [question, asked_at, answer, tools, models, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd, note]
+      properties:
+        question: { type: string }
+        asked_at: { type: string, format: date-time }
+        answer: { type: string, description: Markdown }
+        tools:
+          type: array
+          items:
+            type: object
+            required: [name, label, error]
+            properties:
+              name: { type: string }
+              label: { type: string }
+              error: { type: boolean }
+        models:
+          type: array
+          items: { type: string }
+        input_tokens: { type: integer }
+        output_tokens: { type: integer }
+        cache_read_tokens: { type: integer }
+        cache_write_tokens: { type: integer }
+        cost_usd: { type: number }
+        note: { type: string, description: Waarom het antwoord onvolledig is; meestal leeg }
+    AssistantQuestion:
+      type: object
+      required: [question]
+      properties:
+        question: { type: string, maxLength: 4000 }
     IncidentNote:
       type: object
       required: [note]

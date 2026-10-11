@@ -29,6 +29,7 @@ import {
   tdClass,
   thClass,
 } from "@/components/inventory/bits";
+import { AskButton } from "@/components/assistant/AskButton";
 import { Alert, Button, Card, Input, PageHeader, Select } from "@/components/ui";
 import {
   grafanaLink,
@@ -93,16 +94,20 @@ function ClusterDetailInner() {
               </span>
             }
             actions={
-              isAdmin &&
               !editing && (
                 <>
-                  <Button variant="secondary" onClick={() => setEditing(true)}>
-                    Bewerken
-                  </Button>
-                  {!cluster.data.git_managed && (
-                    <Button variant="danger" disabled={remove.isPending} onClick={() => setDeleting(true)}>
-                      Verwijderen
-                    </Button>
+                  <AskButton subject="cluster" id={id} />
+                  {isAdmin && (
+                    <>
+                      <Button variant="secondary" onClick={() => setEditing(true)}>
+                        Bewerken
+                      </Button>
+                      {!cluster.data.git_managed && (
+                        <Button variant="danger" disabled={remove.isPending} onClick={() => setDeleting(true)}>
+                          Verwijderen
+                        </Button>
+                      )}
+                    </>
                   )}
                 </>
               )

@@ -13,6 +13,7 @@ import (
 
 	"github.com/Jonasz1996/clusterforge/internal/agentdist"
 	"github.com/Jonasz1996/clusterforge/internal/agents"
+	"github.com/Jonasz1996/clusterforge/internal/assistant"
 	"github.com/Jonasz1996/clusterforge/internal/audit"
 	"github.com/Jonasz1996/clusterforge/internal/auth"
 	"github.com/Jonasz1996/clusterforge/internal/backups"
@@ -58,6 +59,7 @@ type Server struct {
 	deps         *deps.Service
 	rollout      *rollout.Service
 	git          *gitops.Service
+	assistant    *assistant.Service
 	version      string
 	loginLimiter *ipLimiter
 	// enrollLimiter remt het raden van enrollmenttokens.
@@ -94,15 +96,18 @@ type Deps struct {
 	// Rollout past wijzigingen toe met cluster.apply, zoals herstel.
 	Rollout *rollout.Service
 	// GitOps leest clusters uit een Git-repository en plant wijzigingen.
-	GitOps  *gitops.Service
-	Version string
+	GitOps *gitops.Service
+	// Assistant beantwoordt vragen met de Anthropic API; de server geeft
+	// hem zijn tools.
+	Assistant *assistant.Service
+	Version   string
 }
 
 func New(d Deps) *Server {
 	ev := events.NewWriter(store.New(d.Pool), d.Log)
 	inv := inventory.NewService(d.Pool, ev)
 	inv.Disconnect = d.Bus.Disconnect
-	return &Server{
+	s := &Server{
 		cfg:      d.Config,
 		log:      d.Log,
 		pool:     d.Pool,
@@ -130,7 +135,10 @@ func New(d Deps) *Server {
 		loginLimiter:  newIPLimiter(6*time.Second, 10),
 		enrollLimiter: newIPLimiter(6*time.Second, 20),
 		throttle:      events.NewThrottle(ev),
+		assistant:     d.Assistant,
 	}
+	s.assistant.Tools = s.assistantTools()
+	return s
 }
 
 func (s *Server) Handler() http.Handler {

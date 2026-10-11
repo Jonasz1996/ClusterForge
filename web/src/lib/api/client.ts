@@ -14,6 +14,12 @@ export function setCsrfToken(token: string | null) {
   csrfToken = token;
 }
 
+// getCsrfToken is voor een request buiten de client om, zoals de stroom van
+// de assistent.
+export function getCsrfToken() {
+  return csrfToken;
+}
+
 const csrfMiddleware: Middleware = {
   onRequest({ request }) {
     if (csrfToken && !["GET", "HEAD", "OPTIONS"].includes(request.method)) {

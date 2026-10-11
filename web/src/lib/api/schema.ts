@@ -1816,6 +1816,130 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/assistant/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * De instellingen van de assistent en of jij hem kunt gebruiken
+         * @description Voor iedereen. De API-sleutel komt nooit terug.
+         */
+        get: operations["getAssistantSettings"];
+        /**
+         * De instellingen opslaan (admin)
+         * @description Vraagt opnieuw bevestiging: met tweestapsverificatie de code, anders
+         *     het wachtwoord. Een lege sleutel laat de opgeslagen sleutel staan.
+         *     Zonder CF_MASTER_KEY kan de assistent niet aan.
+         */
+        put: operations["saveAssistantSettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/assistant/settings/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Eén kleine vraag met de sleutel en het model, zonder iets op te slaan (admin) */
+        post: operations["testAssistantKey"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/assistant/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Het verbruik van deze maand; per gebruiker alleen voor admins */
+        get: operations["getAssistantUsage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/assistant/conversations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Je gesprekken, nieuwste eerst */
+        get: operations["listAssistantConversations"];
+        put?: never;
+        /** Een nieuw gesprek, eventueel over een cluster, node of incident */
+        post: operations["createAssistantConversation"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/assistant/conversations/{conversationId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversationId: string;
+            };
+            cookie?: never;
+        };
+        /** Een gesprek met zijn vragen en antwoorden (de vrager of een admin) */
+        get: operations["getAssistantConversation"];
+        put?: never;
+        post?: never;
+        /** Een gesprek wissen (de vrager of een admin) */
+        delete: operations["deleteAssistantConversation"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/assistant/conversations/{conversationId}/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversationId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Een vraag stellen; het antwoord stroomt als server-sent events
+         * @description Alleen in je eigen gesprek. De events zijn text (een stuk van het
+         *     antwoord, {"text"}), tool (een tool die loopt, {"name", "label"}),
+         *     error ({"message"}) en als laatste done (tokens, kosten en model).
+         *     Fouten voor het antwoord begint, zoals een leeg budget, komen als
+         *     gewone JSON-fout.
+         */
+        post: operations["askAssistant"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2831,6 +2955,120 @@ export interface components {
              * @description Wanneer de analyse voor het laatst veranderde
              */
             analyzed_at: string;
+        };
+        AssistantModel: {
+            id: string;
+            label: string;
+            /** @description Dollar per miljoen tokens invoer */
+            input_usd: number;
+            /** @description Dollar per miljoen tokens uitvoer */
+            output_usd: number;
+        };
+        AssistantSettings: {
+            /** @description False zonder CF_MASTER_KEY */
+            available: boolean;
+            /** @description Of jij de assistent nu kunt gebruiken */
+            can_use: boolean;
+            /** @description Waarom niet; leeg als het kan */
+            reason: string;
+            enabled: boolean;
+            has_key: boolean;
+            model: string;
+            models: components["schemas"]["AssistantModel"][];
+            monthly_budget_usd: number;
+            viewer_access: boolean;
+            /** Format: date-time */
+            updated_at: string | null;
+            /** @description Gebruikersnaam */
+            updated_by: string | null;
+        };
+        AssistantSettingsInput: {
+            enabled: boolean;
+            /** @description Leeg laat de opgeslagen sleutel staan */
+            api_key?: string;
+            model: string;
+            monthly_budget_usd: number;
+            viewer_access: boolean;
+            /** @description Je wachtwoord */
+            password?: string;
+            /** @description Je code */
+            totp_code?: string;
+        };
+        AssistantKeyTest: {
+            /** @description Leeg test de opgeslagen sleutel */
+            api_key?: string;
+            model: string;
+        };
+        AssistantKeyTestResult: {
+            ok: boolean;
+            /** @description Het model dat antwoordde */
+            model: string;
+            /** @description Wat er misging; leeg als het werkte */
+            message: string;
+        };
+        AssistantUsage: {
+            /** Format: date-time */
+            since: string;
+            spent_usd: number;
+            budget_usd: number;
+            /** @description Per gebruiker; leeg voor een viewer */
+            users: {
+                username: string;
+                questions: number;
+                cost_usd: number;
+            }[];
+        };
+        AssistantConversationInput: {
+            /** @enum {string} */
+            subject_type?: "cluster" | "node" | "incident";
+            /** Format: uuid */
+            subject_id?: string;
+        };
+        AssistantConversation: {
+            /** Format: uuid */
+            id: string;
+            username: string;
+            /** @description Het begin van de eerste vraag; leeg zolang er geen is */
+            title: string;
+            /** @description cluster */
+            subject_type: string;
+            /** Format: uuid */
+            subject_id: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            cost_usd: number;
+        };
+        AssistantConversationList: {
+            items: components["schemas"]["AssistantConversation"][];
+        };
+        AssistantConversationDetail: {
+            conversation: components["schemas"]["AssistantConversation"];
+            turns: components["schemas"]["AssistantTurn"][];
+        };
+        AssistantTurn: {
+            question: string;
+            /** Format: date-time */
+            asked_at: string;
+            /** @description Markdown */
+            answer: string;
+            tools: {
+                name: string;
+                label: string;
+                error: boolean;
+            }[];
+            models: string[];
+            input_tokens: number;
+            output_tokens: number;
+            cache_read_tokens: number;
+            cache_write_tokens: number;
+            cost_usd: number;
+            /** @description Waarom het antwoord onvolledig is; meestal leeg */
+            note: string;
+        };
+        AssistantQuestion: {
+            question: string;
         };
         IncidentNote: {
             note: string;
@@ -7064,6 +7302,234 @@ export interface operations {
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
+        };
+    };
+    getAssistantSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssistantSettings"];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    saveAssistantSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AssistantSettingsInput"];
+            };
+        };
+        responses: {
+            /** @description Opgeslagen */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssistantSettings"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    testAssistantKey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AssistantKeyTest"];
+            };
+        };
+        responses: {
+            /** @description De uitkomst; ook een fout van de Anthropic API staat hierin */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssistantKeyTestResult"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    getAssistantUsage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssistantUsage"];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    listAssistantConversations: {
+        parameters: {
+            query?: {
+                /** @description Ook die van anderen (admin) */
+                all?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssistantConversationList"];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    createAssistantConversation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AssistantConversationInput"];
+            };
+        };
+        responses: {
+            /** @description Aangemaakt */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssistantConversation"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    getAssistantConversation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversationId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssistantConversationDetail"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    deleteAssistantConversation: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversationId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Gewist */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    askAssistant: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                conversationId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AssistantQuestion"];
+            };
+        };
+        responses: {
+            /** @description De stroom van het antwoord */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string;
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            429: components["responses"]["Error"];
         };
     };
 }

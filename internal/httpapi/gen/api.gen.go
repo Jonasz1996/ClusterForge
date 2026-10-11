@@ -36,6 +36,27 @@ func (e AgentConnection) Valid() bool {
 	}
 }
 
+// Defines values for AssistantConversationInputSubjectType.
+const (
+	AssistantConversationInputSubjectTypeCluster  AssistantConversationInputSubjectType = "cluster"
+	AssistantConversationInputSubjectTypeIncident AssistantConversationInputSubjectType = "incident"
+	AssistantConversationInputSubjectTypeNode     AssistantConversationInputSubjectType = "node"
+)
+
+// Valid indicates whether the value is a known member of the AssistantConversationInputSubjectType enum.
+func (e AssistantConversationInputSubjectType) Valid() bool {
+	switch e {
+	case AssistantConversationInputSubjectTypeCluster:
+		return true
+	case AssistantConversationInputSubjectTypeIncident:
+		return true
+	case AssistantConversationInputSubjectTypeNode:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AuditEntryActorType.
 const (
 	AuditEntryActorTypeAgent  AuditEntryActorType = "agent"
@@ -1541,6 +1562,150 @@ type AgentSummary struct {
 	Id         openapi_types.UUID           `json:"id"`
 	LastSeenAt nullable.Nullable[time.Time] `json:"last_seen_at"`
 	Version    string                       `json:"version"`
+}
+
+// AssistantConversation defines model for AssistantConversation.
+type AssistantConversation struct {
+	CostUsd   float32                               `json:"cost_usd"`
+	CreatedAt time.Time                             `json:"created_at"`
+	Id        openapi_types.UUID                    `json:"id"`
+	SubjectId nullable.Nullable[openapi_types.UUID] `json:"subject_id"`
+
+	// SubjectType cluster
+	SubjectType string `json:"subject_type"`
+
+	// Title Het begin van de eerste vraag; leeg zolang er geen is
+	Title     string    `json:"title"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Username  string    `json:"username"`
+}
+
+// AssistantConversationDetail defines model for AssistantConversationDetail.
+type AssistantConversationDetail struct {
+	Conversation AssistantConversation `json:"conversation"`
+	Turns        []AssistantTurn       `json:"turns"`
+}
+
+// AssistantConversationInput defines model for AssistantConversationInput.
+type AssistantConversationInput struct {
+	SubjectId   *openapi_types.UUID                    `json:"subject_id,omitempty"`
+	SubjectType *AssistantConversationInputSubjectType `json:"subject_type,omitempty"`
+}
+
+// AssistantConversationInputSubjectType defines model for AssistantConversationInput.SubjectType.
+type AssistantConversationInputSubjectType string
+
+// AssistantConversationList defines model for AssistantConversationList.
+type AssistantConversationList struct {
+	Items []AssistantConversation `json:"items"`
+}
+
+// AssistantKeyTest defines model for AssistantKeyTest.
+type AssistantKeyTest struct {
+	// ApiKey Leeg test de opgeslagen sleutel
+	ApiKey *string `json:"api_key,omitempty"`
+	Model  string  `json:"model"`
+}
+
+// AssistantKeyTestResult defines model for AssistantKeyTestResult.
+type AssistantKeyTestResult struct {
+	// Message Wat er misging; leeg als het werkte
+	Message string `json:"message"`
+
+	// Model Het model dat antwoordde
+	Model string `json:"model"`
+	Ok    bool   `json:"ok"`
+}
+
+// AssistantModel defines model for AssistantModel.
+type AssistantModel struct {
+	Id string `json:"id"`
+
+	// InputUsd Dollar per miljoen tokens invoer
+	InputUsd float32 `json:"input_usd"`
+	Label    string  `json:"label"`
+
+	// OutputUsd Dollar per miljoen tokens uitvoer
+	OutputUsd float32 `json:"output_usd"`
+}
+
+// AssistantQuestion defines model for AssistantQuestion.
+type AssistantQuestion struct {
+	Question string `json:"question"`
+}
+
+// AssistantSettings defines model for AssistantSettings.
+type AssistantSettings struct {
+	// Available False zonder CF_MASTER_KEY
+	Available bool `json:"available"`
+
+	// CanUse Of jij de assistent nu kunt gebruiken
+	CanUse           bool             `json:"can_use"`
+	Enabled          bool             `json:"enabled"`
+	HasKey           bool             `json:"has_key"`
+	Model            string           `json:"model"`
+	Models           []AssistantModel `json:"models"`
+	MonthlyBudgetUsd int              `json:"monthly_budget_usd"`
+
+	// Reason Waarom niet; leeg als het kan
+	Reason    string                       `json:"reason"`
+	UpdatedAt nullable.Nullable[time.Time] `json:"updated_at"`
+
+	// UpdatedBy Gebruikersnaam
+	UpdatedBy    nullable.Nullable[string] `json:"updated_by"`
+	ViewerAccess bool                      `json:"viewer_access"`
+}
+
+// AssistantSettingsInput defines model for AssistantSettingsInput.
+type AssistantSettingsInput struct {
+	// ApiKey Leeg laat de opgeslagen sleutel staan
+	ApiKey           *string `json:"api_key,omitempty"`
+	Enabled          bool    `json:"enabled"`
+	Model            string  `json:"model"`
+	MonthlyBudgetUsd int     `json:"monthly_budget_usd"`
+
+	// Password Je wachtwoord
+	Password *string `json:"password,omitempty"`
+
+	// TotpCode Je code
+	TotpCode     *string `json:"totp_code,omitempty"`
+	ViewerAccess bool    `json:"viewer_access"`
+}
+
+// AssistantTurn defines model for AssistantTurn.
+type AssistantTurn struct {
+	// Answer Markdown
+	Answer           string    `json:"answer"`
+	AskedAt          time.Time `json:"asked_at"`
+	CacheReadTokens  int       `json:"cache_read_tokens"`
+	CacheWriteTokens int       `json:"cache_write_tokens"`
+	CostUsd          float32   `json:"cost_usd"`
+	InputTokens      int       `json:"input_tokens"`
+	Models           []string  `json:"models"`
+
+	// Note Waarom het antwoord onvolledig is; meestal leeg
+	Note         string `json:"note"`
+	OutputTokens int    `json:"output_tokens"`
+	Question     string `json:"question"`
+	Tools        []struct {
+		Error bool   `json:"error"`
+		Label string `json:"label"`
+		Name  string `json:"name"`
+	} `json:"tools"`
+}
+
+// AssistantUsage defines model for AssistantUsage.
+type AssistantUsage struct {
+	BudgetUsd int       `json:"budget_usd"`
+	Since     time.Time `json:"since"`
+	SpentUsd  float32   `json:"spent_usd"`
+
+	// Users Per gebruiker; leeg voor een viewer
+	Users []struct {
+		CostUsd   float32 `json:"cost_usd"`
+		Questions int     `json:"questions"`
+		Username  string  `json:"username"`
+	} `json:"users"`
 }
 
 // AuditChange Eén gewijzigd veld; een lege waarde betekent geen waarde.
@@ -4302,6 +4467,12 @@ type TimelineLimit = int
 // TimelineTo defines model for TimelineTo.
 type TimelineTo = time.Time
 
+// ListAssistantConversationsParams defines parameters for ListAssistantConversations.
+type ListAssistantConversationsParams struct {
+	// All Ook die van anderen (admin)
+	All *bool `form:"all,omitempty" json:"all,omitempty"`
+}
+
 // ListAuditParams defines parameters for ListAudit.
 type ListAuditParams struct {
 	// Before Alleen regels met een kleiner id (de volgende pagina)
@@ -4523,6 +4694,18 @@ type ListTestRunsParamsKind string
 // EnrollAgentJSONRequestBody defines body for EnrollAgent for application/json ContentType.
 type EnrollAgentJSONRequestBody = EnrollRequest
 
+// CreateAssistantConversationJSONRequestBody defines body for CreateAssistantConversation for application/json ContentType.
+type CreateAssistantConversationJSONRequestBody = AssistantConversationInput
+
+// AskAssistantJSONRequestBody defines body for AskAssistant for application/json ContentType.
+type AskAssistantJSONRequestBody = AssistantQuestion
+
+// SaveAssistantSettingsJSONRequestBody defines body for SaveAssistantSettings for application/json ContentType.
+type SaveAssistantSettingsJSONRequestBody = AssistantSettingsInput
+
+// TestAssistantKeyJSONRequestBody defines body for TestAssistantKey for application/json ContentType.
+type TestAssistantKeyJSONRequestBody = AssistantKeyTest
+
 // LoginJSONRequestBody defines body for Login for application/json ContentType.
 type LoginJSONRequestBody = LoginRequest
 
@@ -4642,6 +4825,33 @@ type ServerInterface interface {
 	// RevokeAgent Agent intrekken (admin); de verbinding wordt meteen verbroken
 	// (POST /agents/{agentId}/revoke)
 	RevokeAgent(w http.ResponseWriter, r *http.Request, agentId openapi_types.UUID)
+	// ListAssistantConversations Je gesprekken, nieuwste eerst
+	// (GET /assistant/conversations)
+	ListAssistantConversations(w http.ResponseWriter, r *http.Request, params ListAssistantConversationsParams)
+	// CreateAssistantConversation Een nieuw gesprek, eventueel over een cluster, node of incident
+	// (POST /assistant/conversations)
+	CreateAssistantConversation(w http.ResponseWriter, r *http.Request)
+	// DeleteAssistantConversation Een gesprek wissen (de vrager of een admin)
+	// (DELETE /assistant/conversations/{conversationId})
+	DeleteAssistantConversation(w http.ResponseWriter, r *http.Request, conversationId openapi_types.UUID)
+	// GetAssistantConversation Een gesprek met zijn vragen en antwoorden (de vrager of een admin)
+	// (GET /assistant/conversations/{conversationId})
+	GetAssistantConversation(w http.ResponseWriter, r *http.Request, conversationId openapi_types.UUID)
+	// AskAssistant Een vraag stellen; het antwoord stroomt als server-sent events
+	// (POST /assistant/conversations/{conversationId}/messages)
+	AskAssistant(w http.ResponseWriter, r *http.Request, conversationId openapi_types.UUID)
+	// GetAssistantSettings De instellingen van de assistent en of jij hem kunt gebruiken
+	// (GET /assistant/settings)
+	GetAssistantSettings(w http.ResponseWriter, r *http.Request)
+	// SaveAssistantSettings De instellingen opslaan (admin)
+	// (PUT /assistant/settings)
+	SaveAssistantSettings(w http.ResponseWriter, r *http.Request)
+	// TestAssistantKey Eén kleine vraag met de sleutel en het model, zonder iets op te slaan (admin)
+	// (POST /assistant/settings/test)
+	TestAssistantKey(w http.ResponseWriter, r *http.Request)
+	// GetAssistantUsage Het verbruik van deze maand; per gebruiker alleen voor admins
+	// (GET /assistant/usage)
+	GetAssistantUsage(w http.ResponseWriter, r *http.Request)
 	// ListAudit Het logboek, nieuwste eerst, met een zin per regel (alleen admin)
 	// (GET /audit)
 	ListAudit(w http.ResponseWriter, r *http.Request, params ListAuditParams)
@@ -4981,6 +5191,60 @@ func (_ Unimplemented) EnrollAgent(w http.ResponseWriter, r *http.Request) {
 // RevokeAgent Agent intrekken (admin); de verbinding wordt meteen verbroken
 // (POST /agents/{agentId}/revoke)
 func (_ Unimplemented) RevokeAgent(w http.ResponseWriter, r *http.Request, agentId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListAssistantConversations Je gesprekken, nieuwste eerst
+// (GET /assistant/conversations)
+func (_ Unimplemented) ListAssistantConversations(w http.ResponseWriter, r *http.Request, params ListAssistantConversationsParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CreateAssistantConversation Een nieuw gesprek, eventueel over een cluster, node of incident
+// (POST /assistant/conversations)
+func (_ Unimplemented) CreateAssistantConversation(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// DeleteAssistantConversation Een gesprek wissen (de vrager of een admin)
+// (DELETE /assistant/conversations/{conversationId})
+func (_ Unimplemented) DeleteAssistantConversation(w http.ResponseWriter, r *http.Request, conversationId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetAssistantConversation Een gesprek met zijn vragen en antwoorden (de vrager of een admin)
+// (GET /assistant/conversations/{conversationId})
+func (_ Unimplemented) GetAssistantConversation(w http.ResponseWriter, r *http.Request, conversationId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// AskAssistant Een vraag stellen; het antwoord stroomt als server-sent events
+// (POST /assistant/conversations/{conversationId}/messages)
+func (_ Unimplemented) AskAssistant(w http.ResponseWriter, r *http.Request, conversationId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetAssistantSettings De instellingen van de assistent en of jij hem kunt gebruiken
+// (GET /assistant/settings)
+func (_ Unimplemented) GetAssistantSettings(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SaveAssistantSettings De instellingen opslaan (admin)
+// (PUT /assistant/settings)
+func (_ Unimplemented) SaveAssistantSettings(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// TestAssistantKey Eén kleine vraag met de sleutel en het model, zonder iets op te slaan (admin)
+// (POST /assistant/settings/test)
+func (_ Unimplemented) TestAssistantKey(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetAssistantUsage Het verbruik van deze maand; per gebruiker alleen voor admins
+// (GET /assistant/usage)
+func (_ Unimplemented) GetAssistantUsage(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -5672,6 +5936,187 @@ func (siw *ServerInterfaceWrapper) RevokeAgent(w http.ResponseWriter, r *http.Re
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RevokeAgent(w, r, agentId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListAssistantConversations operation middleware
+func (siw *ServerInterfaceWrapper) ListAssistantConversations(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListAssistantConversationsParams
+
+	// ------------- Optional query parameter "all" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "all", r.URL.Query(), &params.All, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "all"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "all", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListAssistantConversations(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateAssistantConversation operation middleware
+func (siw *ServerInterfaceWrapper) CreateAssistantConversation(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateAssistantConversation(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteAssistantConversation operation middleware
+func (siw *ServerInterfaceWrapper) DeleteAssistantConversation(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "conversationId" -------------
+	var conversationId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "conversationId", chi.URLParam(r, "conversationId"), &conversationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "conversationId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteAssistantConversation(w, r, conversationId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetAssistantConversation operation middleware
+func (siw *ServerInterfaceWrapper) GetAssistantConversation(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "conversationId" -------------
+	var conversationId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "conversationId", chi.URLParam(r, "conversationId"), &conversationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "conversationId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetAssistantConversation(w, r, conversationId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AskAssistant operation middleware
+func (siw *ServerInterfaceWrapper) AskAssistant(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "conversationId" -------------
+	var conversationId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "conversationId", chi.URLParam(r, "conversationId"), &conversationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "conversationId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AskAssistant(w, r, conversationId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetAssistantSettings operation middleware
+func (siw *ServerInterfaceWrapper) GetAssistantSettings(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetAssistantSettings(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SaveAssistantSettings operation middleware
+func (siw *ServerInterfaceWrapper) SaveAssistantSettings(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SaveAssistantSettings(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// TestAssistantKey operation middleware
+func (siw *ServerInterfaceWrapper) TestAssistantKey(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.TestAssistantKey(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetAssistantUsage operation middleware
+func (siw *ServerInterfaceWrapper) GetAssistantUsage(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetAssistantUsage(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -9414,6 +9859,33 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Put(options.BaseURL+"/incidents/{incidentId}/note", wrapper.SetIncidentNote)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/assistant/settings", wrapper.GetAssistantSettings)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/assistant/settings", wrapper.SaveAssistantSettings)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/assistant/settings/test", wrapper.TestAssistantKey)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/assistant/usage", wrapper.GetAssistantUsage)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/assistant/conversations", wrapper.ListAssistantConversations)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/assistant/conversations", wrapper.CreateAssistantConversation)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/assistant/conversations/{conversationId}", wrapper.DeleteAssistantConversation)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/assistant/conversations/{conversationId}", wrapper.GetAssistantConversation)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/assistant/conversations/{conversationId}/messages", wrapper.AskAssistant)
 	})
 
 	return r
