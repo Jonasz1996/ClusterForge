@@ -29,6 +29,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/config"
 	"github.com/Jonasz1996/clusterforge/internal/deploy"
 	"github.com/Jonasz1996/clusterforge/internal/deps"
+	"github.com/Jonasz1996/clusterforge/internal/disaster"
 	"github.com/Jonasz1996/clusterforge/internal/docs"
 	"github.com/Jonasz1996/clusterforge/internal/drift"
 	"github.com/Jonasz1996/clusterforge/internal/events"
@@ -69,16 +70,19 @@ type testEnv struct {
 	backups *backups.Service
 	drift   *drift.Service
 	fo      *failover.Service
-	deps    *deps.Service
-	ro      *rollout.Service
-	git     *gitops.Service
-	det     *incidents.Detector
-	ana     *whatbroke.Analyzer
-	conns   *testConns
-	asst    *assistant.Service
-	risk    *risk.Service
-	topo    *topo.Service
-	docs    *docs.Service
+	dis     *disaster.Service
+	// evalClock is hoe ver de klok van de evaluator vooruit staat.
+	evalClock *atomic.Int64
+	deps      *deps.Service
+	ro        *rollout.Service
+	git       *gitops.Service
+	det       *incidents.Detector
+	ana       *whatbroke.Analyzer
+	conns     *testConns
+	asst      *assistant.Service
+	risk      *risk.Service
+	topo      *topo.Service
+	docs      *docs.Service
 
 	// De runner heeft een eigen context, zodat een test hem kan herstarten.
 	runCtx     context.Context
@@ -102,6 +106,10 @@ func newTestEnv(t *testing.T) *testEnv {
 	eval := status.NewEvaluator(pool, ev, log)
 	// Heartbeats komen hier elke 100 ms; een wissel duurt dus veel korter.
 	eval.Warmup, eval.VIPGrace = 0, time.Second
+	// Een test zet de klok van de evaluator vooruit, zodat een node zonder
+	// heartbeat down is zonder 90 s te wachten.
+	evalClock := new(atomic.Int64)
+	eval.Now = func() time.Time { return time.Now().Add(time.Duration(evalClock.Load())) }
 	ingest := metrics.NewIngester(vm.srv.URL, q, log)
 	bus, err := agentbus.Start(ctx, "127.0.0.1:0", pool, ev, log, agentbus.Hooks{
 		Metrics: func(ctx context.Context, nodeID uuid.UUID, m protocol.Metrics) error {
@@ -181,6 +189,12 @@ func newTestEnv(t *testing.T) *testEnv {
 	tp := topo.NewService(pool, ev, log, "")
 	tp.Own = func(context.Context, []string) topo.Own { return topo.Own{} }
 	rsk.Topo, rsk.Deps = tp, dps
+	// Rampoefeningen met korte tijden; een test zet de probe zelf.
+	dis := disaster.NewService(pool, ev, log, runner, bus)
+	dis.Changed, dis.Probes, dis.Proxmox, dis.World = eval.Kick, fo.ProbeFor, pve, rsk.World
+	dis.ProbeInterval, dis.StatusPoll, dis.Gate.Poll, dis.Retry = 20*time.Millisecond, 50*time.Millisecond, 20*time.Millisecond, 50*time.Millisecond
+	dis.ShortOutage, dis.Fresh, dis.EmergencyTimeout = 500*time.Millisecond, 2*time.Second, 3*time.Second
+	dis.ReturnTimeout, dis.BootTimeout = 8*time.Second, 8*time.Second
 	// De documentatie schrijft niet vanzelf; een test roept GenerateAll aan.
 	dcs := docs.NewService(pool, log)
 	dcs.Deploy, dcs.GitOps, dcs.Backups, dcs.Risk, dcs.Box, dcs.Events = dep, git, bk, rsk, box, ev
@@ -196,13 +210,13 @@ func newTestEnv(t *testing.T) *testEnv {
 	}
 	api := New(Deps{
 		Config: cfg, Log: log, Pool: pool, Auth: a, Bus: bus, Hub: hub, Proxmox: pve, Jobs: runner, Lifecycle: life,
-		Deploy: dep, Backups: bk, Drift: drf, Failover: fo, Deps: dps, Rollout: ro, GitOps: git, Assistant: asst,
+		Deploy: dep, Backups: bk, Drift: drf, Failover: fo, Disaster: dis, Deps: dps, Rollout: ro, GitOps: git, Assistant: asst,
 		Risk: rsk, Topo: tp, Docs: dcs, Version: "test",
 	})
 	srv := httptest.NewServer(api.Handler())
 	t.Cleanup(srv.Close)
 	e := &testEnv{t: t, srv: srv, auth: a, pool: pool, api: api, bus: bus, eval: eval, vm: vm, pve: pve, jobs: runner, life: life, deploy: dep,
-		backups: bk, drift: drf, fo: fo, deps: dps, ro: ro, git: git, det: det, ana: ana, conns: conns, asst: asst, risk: rsk, topo: tp, docs: dcs, runCtx: runCtx}
+		backups: bk, drift: drf, fo: fo, dis: dis, evalClock: evalClock, deps: dps, ro: ro, git: git, det: det, ana: ana, conns: conns, asst: asst, risk: rsk, topo: tp, docs: dcs, runCtx: runCtx}
 	e.startRunner()
 	t.Cleanup(func() {
 		stop()

@@ -311,10 +311,23 @@ func backupsCard(in ClusterInput, now time.Time) part {
 // --- Herstelbaarheid ---
 
 func recovery(in ClusterInput, now time.Time) part {
+	var p part
+	// Een rampoefening die niet hersteld is, telt ook bij een cluster zonder
+	// VIP.
+	for _, r := range in.Unrestored {
+		what := "Failovertest"
+		if r.Kind == "disaster.run" {
+			what = "Rampoefening"
+		}
+		p.add("recovery.unrestored", High, Subject{"test_run", r.ID, r.Name},
+			what+" '"+r.Name+"' van "+date(r.Finished)+" is niet hersteld", "/tests/detail?id="+r.ID.String())
+	}
 	if len(in.VIPs) == 0 {
+		if len(p.findings) > 0 {
+			return p
+		}
 		return part{unknown: true, note: "Zonder VIP is er geen failovertest; deze kaart telt dan niet mee."}
 	}
-	var p part
 	eb := envBump(in.Env)
 	link := clusterLink(in.ID)
 	for _, v := range in.VIPs {
@@ -353,10 +366,6 @@ func recovery(in ClusterInput, now time.Time) part {
 					"Laatste failovertest '"+t.Name+"' is "+days(age)+" geleden", link)
 			}
 		}
-	}
-	for _, r := range in.Unrestored {
-		p.add("recovery.unrestored", High, Subject{"test_run", r.ID, r.Name},
-			"Failovertest '"+r.Name+"' van "+date(r.Finished)+" is niet hersteld", "/tests/detail?id="+r.ID.String())
 	}
 	return p
 }

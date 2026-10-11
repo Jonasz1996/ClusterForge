@@ -1,6 +1,6 @@
 -- name: CreateJob :one
-INSERT INTO jobs (kind, title, params, cluster_id, node_id, proxmox_id, requested_by, cluster_slot)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+INSERT INTO jobs (kind, title, params, cluster_id, node_id, proxmox_id, requested_by, cluster_slot, slot_clusters)
+VALUES (@kind, @title, @params, @cluster_id, @node_id, @proxmox_id, @requested_by, @cluster_slot, coalesce(@slot_clusters::uuid[], '{}'))
 RETURNING *;
 
 -- name: LockClusterForJob :one
@@ -10,10 +10,11 @@ SELECT name FROM clusters WHERE id = $1 FOR UPDATE;
 
 -- name: GetClusterSlotJob :one
 -- De wachtende of lopende schrijvende taak in een cluster, ook een taak op
--- een node van dat cluster.
+-- een node van dat cluster of een die het cluster in slot_clusters houdt.
 SELECT j.id, j.title FROM jobs j
 WHERE j.cluster_slot AND j.status IN ('queued', 'running')
-  AND (j.cluster_id = @cluster_id::uuid OR j.node_id IN (SELECT n.id FROM nodes n WHERE n.cluster_id = @cluster_id::uuid))
+  AND (j.cluster_id = @cluster_id::uuid OR @cluster_id::uuid = ANY(j.slot_clusters)
+       OR j.node_id IN (SELECT n.id FROM nodes n WHERE n.cluster_id = @cluster_id::uuid))
 ORDER BY j.created_at
 LIMIT 1;
 

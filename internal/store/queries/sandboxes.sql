@@ -67,7 +67,8 @@ LEFT JOIN jobs j ON j.id = r.job_id
 LEFT JOIN users u ON u.id = r.requested_by
 LEFT JOIN clusters c ON c.id = r.cluster_id
 WHERE (sqlc.narg('kind')::text IS NULL OR r.kind = sqlc.narg('kind'))
-  AND (sqlc.narg('cluster_id')::uuid IS NULL OR r.cluster_id = sqlc.narg('cluster_id'))
+  AND (sqlc.narg('cluster_id')::uuid IS NULL OR r.cluster_id = sqlc.narg('cluster_id')
+       OR sqlc.narg('cluster_id')::uuid = ANY(r.cluster_ids))
   AND (sqlc.narg('node_id')::uuid IS NULL OR r.node_id = sqlc.narg('node_id'))
   AND (sqlc.narg('result')::text IS NULL OR r.result = sqlc.narg('result'))
 ORDER BY r.created_at DESC

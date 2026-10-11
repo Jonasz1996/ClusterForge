@@ -1247,12 +1247,120 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
+  /clusters/{clusterId}/disaster-scenarios:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: listDisasterScenarios
+      summary: Rampoefeningen van een cluster met hun laatste run
+      description: >-
+        Met wat het formulier nodig heeft: welke soorten hier kunnen en
+        waarom niet, de Proxmox-hosts met een node van dit cluster en de
+        diensten die kunnen wegvallen.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DisasterScenarioList" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createDisasterScenario
+      summary: Nieuwe rampoefening (admin), alleen in lab en test
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DisasterScenarioInput" }
+      responses:
+        "201":
+          description: Aangemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DisasterScenario" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /disaster-scenarios/{scenarioId}:
+    parameters:
+      - { name: scenarioId, in: path, required: true, schema: { type: string, format: uuid } }
+    put:
+      operationId: updateDisasterScenario
+      summary: Een rampoefening wijzigen (admin); oude runs houden hun definitie
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DisasterScenarioInput" }
+      responses:
+        "200":
+          description: Gewijzigd
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DisasterScenario" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteDisasterScenario
+      summary: Een rampoefening verwijderen (admin); de runs blijven als geschiedenis
+      responses:
+        "204": { description: Verwijderd }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /disaster-scenarios/{scenarioId}/preview:
+    parameters:
+      - { name: scenarioId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: previewDisasterScenario
+      summary: Voorcontrole en voorspelling, zonder iets te doen
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DisasterPreview" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /disaster-scenarios/{scenarioId}/run:
+    parameters:
+      - { name: scenarioId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: runDisasterScenario
+      summary: Rampoefening starten (admin)
+      description: >-
+        Doet de voorcontrole synchroon en zet de run en de taak in één
+        transactie in de wachtrij, door het clusterslot van elk geraakt
+        cluster en het testslot. confirm bevat de slug van elk cluster met
+        een node die de storing krijgt (anders 409 needs_confirmation). 409
+        precheck_failed met de controles, of busy.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DisasterRunInput" }
+      responses:
+        "202":
+          description: In de wachtrij
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TestRun" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
   /test-runs:
     get:
       operationId: listTestRuns
-      summary: Runs van failovertests en back-upcontroles, nieuwste eerst
+      summary: Runs van failovertests, back-upcontroles en rampoefeningen, nieuwste eerst
+      description: Met cluster_id ook de rampoefeningen die dat cluster maten.
       parameters:
-        - { name: kind, in: query, required: false, schema: { type: string, enum: [failover.test, backup.verify] } }
+        - { name: kind, in: query, required: false, schema: { $ref: "#/components/schemas/TestRunKind" } }
         - { name: cluster_id, in: query, required: false, schema: { type: string, format: uuid } }
         - { name: node_id, in: query, required: false, schema: { type: string, format: uuid } }
         - { name: result, in: query, required: false, schema: { $ref: "#/components/schemas/TestRunResult" } }
@@ -1286,8 +1394,8 @@ paths:
       operationId: restoreTestRun
       summary: Opnieuw herstellen (admin)
       description: >-
-        Voor een failoverrun met restored false: een taak door het
-        clusterslot die de dienst start en de terugkeer controleert.
+        Voor een failoverrun of rampoefening met restored false: een taak
+        door het clusterslot die alles start en de terugkeer controleert.
       responses:
         "202":
           description: In de wachtrij
@@ -3389,13 +3497,14 @@ components:
         expect_failback: { type: boolean }
         probe: { $ref: "#/components/schemas/FailoverProbe" }
         description: { type: string }
+    TestRunKind: { type: string, enum: [failover.test, backup.verify, disaster.run] }
     TestRun:
       type: object
       required: [id, kind, trigger, cluster_id, cluster_name, test_id, node_id, hostname, job_id, job_status, result, restored,
-        summary, checks, timeline, measurements, definition, backup, requested_by, created_at, finished_at]
+        summary, checks, timeline, measurements, definition, backup, disaster, requested_by, created_at, finished_at]
       properties:
         id: { type: string, format: uuid }
-        kind: { type: string, enum: [failover.test, backup.verify] }
+        kind: { $ref: "#/components/schemas/TestRunKind" }
         trigger: { type: string, enum: [manual, schedule] }
         cluster_id: { type: string, format: uuid, nullable: true }
         cluster_name: { type: string }
@@ -3426,9 +3535,202 @@ components:
           allOf: [{ $ref: "#/components/schemas/BackupVerifyReport" }]
           nullable: true
           description: Alleen bij backup.verify
+        disaster:
+          allOf: [{ $ref: "#/components/schemas/DisasterReport" }]
+          nullable: true
+          description: Alleen bij disaster.run
         requested_by: { type: string, nullable: true, description: Gebruikersnaam van wie de run vroeg }
         created_at: { type: string, format: date-time }
         finished_at: { type: string, format: date-time, nullable: true }
+    DisasterKind: { type: string, enum: [host_down, service_down, vip_loss] }
+    DisasterHost:
+      type: object
+      required: [connection_id, connection, host]
+      properties:
+        connection_id: { type: string, format: uuid }
+        connection: { type: string }
+        host: { type: string }
+    DisasterScenario:
+      type: object
+      required: [id, cluster_id, name, kind, description, host, unit, fault_seconds, recovery_seconds, last_run, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        cluster_id: { type: string, format: uuid }
+        name: { type: string }
+        kind: { $ref: "#/components/schemas/DisasterKind" }
+        description: { type: string }
+        host:
+          allOf: [{ $ref: "#/components/schemas/DisasterHost" }]
+          nullable: true
+          description: Alleen bij host_down
+        unit: { type: string, description: Bij service_down de dienst }
+        fault_seconds: { type: integer, description: Hoe lang de storing duurt }
+        recovery_seconds: { type: integer, description: Hoe snel na het terugzetten alles weer gezond moet zijn }
+        last_run:
+          allOf: [{ $ref: "#/components/schemas/TestRun" }]
+          nullable: true
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    DisasterScenarioInput:
+      type: object
+      required: [name, kind, fault_seconds, recovery_seconds]
+      properties:
+        name: { type: string }
+        kind: { $ref: "#/components/schemas/DisasterKind" }
+        connection_id: { type: string, format: uuid, description: Bij host_down }
+        host: { type: string, description: Bij host_down de naam van de Proxmox-host }
+        unit: { type: string, description: Bij service_down }
+        fault_seconds: { type: integer, minimum: 20, maximum: 600 }
+        recovery_seconds: { type: integer, minimum: 10, maximum: 1800 }
+    DisasterKindOption:
+      type: object
+      required: [key, label, available, reason, fault_seconds, min_fault_seconds, recovery_seconds]
+      properties:
+        key: { $ref: "#/components/schemas/DisasterKind" }
+        label: { type: string }
+        available: { type: boolean }
+        reason: { type: string, description: Waarom niet, als available false is }
+        fault_seconds: { type: integer, description: Standaardduur van de storing }
+        min_fault_seconds:
+          type: integer
+          description: >-
+            De kortste storing; bij host_down langer, omdat een node na een
+            harde stop pas na 90 s zonder heartbeat down is
+        recovery_seconds: { type: integer, description: Standaard verwachte hersteltijd }
+    DisasterHostOption:
+      type: object
+      required: [connection_id, connection, host, nodes, others]
+      properties:
+        connection_id: { type: string, format: uuid }
+        connection: { type: string }
+        host: { type: string }
+        nodes: { type: array, items: { type: string }, description: De VM's van dit cluster op de host }
+        others: { type: array, items: { type: string }, description: Gekoppelde VM's van andere clusters op de host }
+    DisasterOptions:
+      type: object
+      required: [allowed, reason, slug, kinds, hosts, units, vips]
+      properties:
+        allowed: { type: boolean, description: false op prod }
+        reason: { type: string }
+        slug: { type: string }
+        kinds: { type: array, items: { $ref: "#/components/schemas/DisasterKindOption" } }
+        hosts: { type: array, items: { $ref: "#/components/schemas/DisasterHostOption" } }
+        units: { type: array, items: { type: string } }
+        vips: { type: array, items: { type: string } }
+    DisasterScenarioList:
+      type: object
+      required: [items, options]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/DisasterScenario" } }
+        options: { $ref: "#/components/schemas/DisasterOptions" }
+    DisasterRunInput:
+      type: object
+      required: [confirm]
+      properties:
+        confirm: { type: array, items: { type: string }, description: De slug van elk geraakt cluster }
+    DisasterTarget:
+      type: object
+      required: [node_id, hostname, cluster_id, cluster, unit, vmid]
+      properties:
+        node_id: { type: string, format: uuid }
+        hostname: { type: string }
+        cluster_id: { type: string, format: uuid }
+        cluster: { type: string }
+        unit: { type: string, description: Leeg bij een VM die hard uitgaat }
+        vmid: { type: integer, nullable: true }
+    DisasterPrediction:
+      type: object
+      required: [status, reason]
+      properties:
+        status: { type: string, enum: [healthy, degraded, down, split_brain, unknown] }
+        reason: { type: string }
+    DisasterVIP:
+      type: object
+      required: [address, probe]
+      properties:
+        address: { type: string }
+        probe: { $ref: "#/components/schemas/FailoverProbe" }
+    DisasterClusterPlan:
+      type: object
+      required: [id, name, slug, environment, role, before, predicted, vips]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        slug: { type: string }
+        environment: { type: string }
+        role: { type: string, enum: [target, dependent], description: "target: een node krijgt de storing; dependent: hangt ervan af" }
+        before: { type: string, description: De status bij de start }
+        predicted: { $ref: "#/components/schemas/DisasterPrediction" }
+        vips: { type: array, items: { $ref: "#/components/schemas/DisasterVIP" } }
+    DisasterPreview:
+      type: object
+      required: [ok, checks, description, targets, clusters, skipped, notes, confirm]
+      properties:
+        ok: { type: boolean, description: Of de voorcontrole slaagt }
+        checks: { type: array, items: { $ref: "#/components/schemas/TestRunCheck" } }
+        description: { type: string }
+        targets: { type: array, items: { $ref: "#/components/schemas/DisasterTarget" } }
+        clusters: { type: array, items: { $ref: "#/components/schemas/DisasterClusterPlan" } }
+        skipped: { type: array, items: { type: string }, description: Draaiende VM's op de host die niet in ClusterForge staan en aan blijven }
+        notes: { type: array, items: { type: string }, description: Wat de voorspelling onzeker maakt }
+        confirm: { type: array, items: { type: string }, description: De slugs om in te tikken }
+    DisasterTargetResult:
+      type: object
+      required: [node_id, hostname, error]
+      properties:
+        node_id: { type: string, format: uuid }
+        hostname: { type: string }
+        error: { type: string }
+    DisasterClusterResult:
+      type: object
+      required: [id, name, slug, environment, role, before, predicted, measured, longest_ms, recovered_ms, match, slow]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        slug: { type: string }
+        environment: { type: string }
+        role: { type: string, enum: [target, dependent] }
+        before: { type: string }
+        predicted: { $ref: "#/components/schemas/DisasterPrediction" }
+        measured: { $ref: "#/components/schemas/DisasterPrediction" }
+        longest_ms: { type: integer, format: int64, description: De langste onderbreking op een VIP tijdens de storing }
+        recovered_ms: { type: integer, format: int64, nullable: true, description: Hoe lang na het terugzetten het cluster weer gezond was }
+        match: { type: string, enum: [as_predicted, unexpected, milder, stayed_healthy, not_recovered, unknown] }
+        slow: { type: boolean, description: Het herstel duurde langer dan verwacht }
+    DisasterVIPResult:
+      type: object
+      required: [cluster_id, address, probe, segments]
+      properties:
+        cluster_id: { type: string, format: uuid }
+        address: { type: string }
+        probe: { $ref: "#/components/schemas/FailoverProbe" }
+        segments: { type: array, items: { $ref: "#/components/schemas/TestRunSegment" } }
+    DisasterReport:
+      type: object
+      required: [scenario_id, name, kind, description, unit, fault_ms, expect_recovery_ms, short_outage_ms, clear_ms, recovery_ms,
+        total_ms, end_ms, targets, target_results, clusters, vips, skipped, notes]
+      properties:
+        scenario_id: { type: string, format: uuid }
+        name: { type: string }
+        kind: { $ref: "#/components/schemas/DisasterKind" }
+        description: { type: string }
+        unit: { type: string }
+        fault_ms: { type: integer, format: int64 }
+        expect_recovery_ms: { type: integer, format: int64 }
+        short_outage_ms: { type: integer, format: int64, description: Een kortere onderbreking telt als overname, niet als uitval }
+        clear_ms: { type: integer, format: int64, nullable: true, description: Wanneer alles weer gestart was, na de storing }
+        recovery_ms: { type: integer, format: int64, nullable: true, description: Van het terugzetten tot elk cluster weer gezond was }
+        total_ms: { type: integer, format: int64, nullable: true, description: Van de storing tot elk cluster weer gezond was }
+        end_ms: { type: integer, format: int64 }
+        targets: { type: array, items: { $ref: "#/components/schemas/DisasterTarget" } }
+        target_results: { type: array, items: { $ref: "#/components/schemas/DisasterTargetResult" } }
+        clusters:
+          type: array
+          description: Voorspeld tegen gemeten; tijdens de run de voorspelling met measured leeg
+          items: { $ref: "#/components/schemas/DisasterClusterResult" }
+        vips: { type: array, items: { $ref: "#/components/schemas/DisasterVIPResult" } }
+        skipped: { type: array, items: { type: string } }
+        notes: { type: array, items: { type: string } }
     TestRunList:
       type: object
       required: [items]

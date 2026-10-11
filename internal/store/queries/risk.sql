@@ -89,12 +89,17 @@ LEFT JOIN LATERAL (
 ORDER BY t.name;
 
 -- name: ListRiskUnrestoredRuns :many
-SELECT r.id, r.cluster_id::uuid AS cluster_id, coalesce(t.name, r.hostname)::text AS name,
+-- Failovertests en rampoefeningen die niet hersteld zijn, per cluster dat
+-- ze raakten.
+SELECT r.id, cl.cluster_id::uuid AS cluster_id, r.kind,
+       coalesce(t.name, d.name, r.definition->>'name', r.hostname)::text AS name,
        coalesce(r.finished_at, r.created_at)::timestamptz AS finished
 FROM test_runs r
+CROSS JOIN LATERAL (SELECT DISTINCT x AS cluster_id FROM unnest(array_append(r.cluster_ids, r.cluster_id)) AS x WHERE x IS NOT NULL) cl
 LEFT JOIN failover_tests t ON t.id = r.test_id
-WHERE r.restored = false AND r.kind = 'failover.test' AND r.cluster_id IS NOT NULL
-ORDER BY r.created_at;
+LEFT JOIN disaster_scenarios d ON d.id = r.scenario_id
+WHERE r.restored = false AND r.kind IN ('failover.test', 'disaster.run')
+ORDER BY r.created_at, cl.cluster_id;
 
 -- name: ListNonProdDependencies :many
 -- Harde afhankelijkheden van een prod-dienst op een dienst in een lab- of

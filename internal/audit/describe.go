@@ -139,6 +139,11 @@ func subjectName(r store.ListAuditRow, p map[string]any, n names, e Entry) (stri
 		return or(str(p, "test"), str(p, "name")), false
 	case "test_run":
 		return str(p, "name"), false
+	case "disaster_scenario":
+		if m, ok := p["name"].(map[string]any); ok {
+			return text(m["to"]), false
+		}
+		return or(str(p, "scenario"), str(p, "name")), false
 	case "service":
 		if m, ok := p["name"].(map[string]any); ok {
 			return text(m["to"]), false
@@ -521,6 +526,26 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 			return "Geplande failovertest " + str(p, "name") + colon(str(p, "summary"))
 		}
 		return "Failovertest " + str(p, "name") + colon(str(p, "summary"))
+	case "disaster_scenario.created":
+		return "Rampoefening " + name + " aangemaakt in cluster " + str(p, "cluster") + colon(str(p, "description"))
+	case "disaster_scenario.updated":
+		return "Rampoefening " + name + " gewijzigd" + changeSummary(e.Changes)
+	case "disaster_scenario.deleted":
+		return "Rampoefening " + name + " verwijderd"
+	case "disaster.started":
+		clusters, _ := p["clusters"].([]any)
+		return "Rampoefening " + str(p, "name") + " gestart" + colon(str(p, "description")) + prefixed("; gemeten: ", enList(clusters))
+	case "disaster.fault_injected":
+		return "Rampoefening " + str(p, "name") + ": " + str(p, "description")
+	case "disaster.fault_cleared":
+		targets, _ := p["targets"].([]any)
+		s := "Rampoefening " + str(p, "name") + ": alles weer gestart op " + enList(targets)
+		if b, _ := p["restore"].(bool); b {
+			s += " (opnieuw herstellen)"
+		}
+		return s
+	case "disaster.finished":
+		return "Rampoefening " + str(p, "name") + colon(str(p, "summary"))
 	case "service.created":
 		kind := paren(or(kindLabels[str(p, "kind")], str(p, "kind")))
 		switch {
@@ -814,6 +839,8 @@ var fieldLabels = map[string][][2]string{
 	"proxmox": {{"name", "Naam"}, {"api_url", "API-adres"}, {"token_id", "Token-id"}, {"token_secret", "Token-secret"}, {"tls_fingerprint", "TLS-vingerafdruk"}},
 	"failover_test": {{"name", "Naam"}, {"vip", "VIP"}, {"scenario", "Scenario"}, {"max_takeover_seconds", "Verwachting in seconden"},
 		{"expect_failback", "Terug naar de oorspronkelijke node"}, {"probe", "Probe"}, {"scheduled", "Gepland in het testvenster"}},
+	"disaster_scenario": {{"name", "Naam"}, {"description", "Wat er uitvalt"}, {"fault_seconds", "Duur van de storing in seconden"},
+		{"recovery_seconds", "Verwachte hersteltijd in seconden"}},
 	"service": {{"name", "Naam"}, {"kind", "Soort"}, {"unit", "Unit"}, {"port", "Poort"}, {"address", "Adres"},
 		{"description", "Omschrijving"}, {"state", "Staat"}},
 	"dependency":            {{"strength", "Sterkte"}, {"note", "Notitie"}, {"state", "Staat"}},

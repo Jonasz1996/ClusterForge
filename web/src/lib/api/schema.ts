@@ -1125,6 +1125,90 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/clusters/{clusterId}/disaster-scenarios": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Rampoefeningen van een cluster met hun laatste run
+         * @description Met wat het formulier nodig heeft: welke soorten hier kunnen en waarom niet, de Proxmox-hosts met een node van dit cluster en de diensten die kunnen wegvallen.
+         */
+        get: operations["listDisasterScenarios"];
+        put?: never;
+        /** Nieuwe rampoefening (admin), alleen in lab en test */
+        post: operations["createDisasterScenario"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/disaster-scenarios/{scenarioId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scenarioId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** Een rampoefening wijzigen (admin); oude runs houden hun definitie */
+        put: operations["updateDisasterScenario"];
+        post?: never;
+        /** Een rampoefening verwijderen (admin); de runs blijven als geschiedenis */
+        delete: operations["deleteDisasterScenario"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/disaster-scenarios/{scenarioId}/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scenarioId: string;
+            };
+            cookie?: never;
+        };
+        /** Voorcontrole en voorspelling, zonder iets te doen */
+        get: operations["previewDisasterScenario"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/disaster-scenarios/{scenarioId}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scenarioId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rampoefening starten (admin)
+         * @description Doet de voorcontrole synchroon en zet de run en de taak in één transactie in de wachtrij, door het clusterslot van elk geraakt cluster en het testslot. confirm bevat de slug van elk cluster met een node die de storing krijgt (anders 409 needs_confirmation). 409 precheck_failed met de controles, of busy.
+         */
+        post: operations["runDisasterScenario"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/test-runs": {
         parameters: {
             query?: never;
@@ -1132,7 +1216,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Runs van failovertests en back-upcontroles, nieuwste eerst */
+        /**
+         * Runs van failovertests, back-upcontroles en rampoefeningen, nieuwste eerst
+         * @description Met cluster_id ook de rampoefeningen die dat cluster maten.
+         */
         get: operations["listTestRuns"];
         put?: never;
         post?: never;
@@ -1174,7 +1261,7 @@ export interface paths {
         put?: never;
         /**
          * Opnieuw herstellen (admin)
-         * @description Voor een failoverrun met restored false: een taak door het clusterslot die de dienst start en de terugkeer controleert.
+         * @description Voor een failoverrun of rampoefening met restored false: een taak door het clusterslot die alles start en de terugkeer controleert.
          */
         post: operations["restoreTestRun"];
         delete?: never;
@@ -3175,11 +3262,12 @@ export interface components {
             probe: components["schemas"]["FailoverProbe"];
             description: string;
         };
+        /** @enum {string} */
+        TestRunKind: "failover.test" | "backup.verify" | "disaster.run";
         TestRun: {
             /** Format: uuid */
             id: string;
-            /** @enum {string} */
-            kind: "failover.test" | "backup.verify";
+            kind: components["schemas"]["TestRunKind"];
             /** @enum {string} */
             trigger: "manual" | "schedule";
             /** Format: uuid */
@@ -3207,12 +3295,230 @@ export interface components {
             definition: components["schemas"]["FailoverDefinition"] | null;
             /** @description Alleen bij backup.verify */
             backup: components["schemas"]["BackupVerifyReport"] | null;
+            /** @description Alleen bij disaster.run */
+            disaster: components["schemas"]["DisasterReport"] | null;
             /** @description Gebruikersnaam van wie de run vroeg */
             requested_by: string | null;
             /** Format: date-time */
             created_at: string;
             /** Format: date-time */
             finished_at: string | null;
+        };
+        /** @enum {string} */
+        DisasterKind: "host_down" | "service_down" | "vip_loss";
+        DisasterHost: {
+            /** Format: uuid */
+            connection_id: string;
+            connection: string;
+            host: string;
+        };
+        DisasterScenario: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            cluster_id: string;
+            name: string;
+            kind: components["schemas"]["DisasterKind"];
+            description: string;
+            /** @description Alleen bij host_down */
+            host: components["schemas"]["DisasterHost"] | null;
+            /** @description Bij service_down de dienst */
+            unit: string;
+            /** @description Hoe lang de storing duurt */
+            fault_seconds: number;
+            /** @description Hoe snel na het terugzetten alles weer gezond moet zijn */
+            recovery_seconds: number;
+            last_run: components["schemas"]["TestRun"] | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        DisasterScenarioInput: {
+            name: string;
+            kind: components["schemas"]["DisasterKind"];
+            /**
+             * Format: uuid
+             * @description Bij host_down
+             */
+            connection_id?: string;
+            /** @description Bij host_down de naam van de Proxmox-host */
+            host?: string;
+            /** @description Bij service_down */
+            unit?: string;
+            fault_seconds: number;
+            recovery_seconds: number;
+        };
+        DisasterKindOption: {
+            key: components["schemas"]["DisasterKind"];
+            label: string;
+            available: boolean;
+            /** @description Waarom niet */
+            reason: string;
+            /** @description Standaardduur van de storing */
+            fault_seconds: number;
+            /** @description De kortste storing; bij host_down langer, omdat een node na een harde stop pas na 90 s zonder heartbeat down is */
+            min_fault_seconds: number;
+            /** @description Standaard verwachte hersteltijd */
+            recovery_seconds: number;
+        };
+        DisasterHostOption: {
+            /** Format: uuid */
+            connection_id: string;
+            connection: string;
+            host: string;
+            /** @description De VM's van dit cluster op de host */
+            nodes: string[];
+            /** @description Gekoppelde VM's van andere clusters op de host */
+            others: string[];
+        };
+        DisasterOptions: {
+            /** @description false op prod */
+            allowed: boolean;
+            reason: string;
+            slug: string;
+            kinds: components["schemas"]["DisasterKindOption"][];
+            hosts: components["schemas"]["DisasterHostOption"][];
+            units: string[];
+            vips: string[];
+        };
+        DisasterScenarioList: {
+            items: components["schemas"]["DisasterScenario"][];
+            options: components["schemas"]["DisasterOptions"];
+        };
+        DisasterRunInput: {
+            /** @description De slug van elk geraakt cluster */
+            confirm: string[];
+        };
+        DisasterTarget: {
+            /** Format: uuid */
+            node_id: string;
+            hostname: string;
+            /** Format: uuid */
+            cluster_id: string;
+            cluster: string;
+            /** @description Leeg bij een VM die hard uitgaat */
+            unit: string;
+            vmid: number | null;
+        };
+        DisasterPrediction: {
+            /** @enum {string} */
+            status: "healthy" | "degraded" | "down" | "split_brain" | "unknown";
+            reason: string;
+        };
+        DisasterVIP: {
+            address: string;
+            probe: components["schemas"]["FailoverProbe"];
+        };
+        DisasterClusterPlan: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            slug: string;
+            environment: string;
+            /**
+             * @description target: een node krijgt de storing; dependent: hangt ervan af
+             * @enum {string}
+             */
+            role: "target" | "dependent";
+            /** @description De status bij de start */
+            before: string;
+            predicted: components["schemas"]["DisasterPrediction"];
+            vips: components["schemas"]["DisasterVIP"][];
+        };
+        DisasterPreview: {
+            /** @description Of de voorcontrole slaagt */
+            ok: boolean;
+            checks: components["schemas"]["TestRunCheck"][];
+            description: string;
+            targets: components["schemas"]["DisasterTarget"][];
+            clusters: components["schemas"]["DisasterClusterPlan"][];
+            /** @description Draaiende VM's op de host die niet in ClusterForge staan en aan blijven */
+            skipped: string[];
+            /** @description Wat de voorspelling onzeker maakt */
+            notes: string[];
+            /** @description De slugs om in te tikken */
+            confirm: string[];
+        };
+        DisasterTargetResult: {
+            /** Format: uuid */
+            node_id: string;
+            hostname: string;
+            error: string;
+        };
+        DisasterClusterResult: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            slug: string;
+            environment: string;
+            /** @enum {string} */
+            role: "target" | "dependent";
+            before: string;
+            predicted: components["schemas"]["DisasterPrediction"];
+            measured: components["schemas"]["DisasterPrediction"];
+            /**
+             * Format: int64
+             * @description De langste onderbreking op een VIP tijdens de storing
+             */
+            longest_ms: number;
+            /**
+             * Format: int64
+             * @description Hoe lang na het terugzetten het cluster weer gezond was
+             */
+            recovered_ms: number | null;
+            /** @enum {string} */
+            match: "as_predicted" | "unexpected" | "milder" | "stayed_healthy" | "not_recovered" | "unknown";
+            /** @description Het herstel duurde langer dan verwacht */
+            slow: boolean;
+        };
+        DisasterVIPResult: {
+            /** Format: uuid */
+            cluster_id: string;
+            address: string;
+            probe: components["schemas"]["FailoverProbe"];
+            segments: components["schemas"]["TestRunSegment"][];
+        };
+        DisasterReport: {
+            /** Format: uuid */
+            scenario_id: string;
+            name: string;
+            kind: components["schemas"]["DisasterKind"];
+            description: string;
+            unit: string;
+            /** Format: int64 */
+            fault_ms: number;
+            /** Format: int64 */
+            expect_recovery_ms: number;
+            /**
+             * Format: int64
+             * @description Een kortere onderbreking telt als overname
+             */
+            short_outage_ms: number;
+            /**
+             * Format: int64
+             * @description Wanneer alles weer gestart was
+             */
+            clear_ms: number | null;
+            /**
+             * Format: int64
+             * @description Van het terugzetten tot elk cluster weer gezond was
+             */
+            recovery_ms: number | null;
+            /**
+             * Format: int64
+             * @description Van de storing tot elk cluster weer gezond was
+             */
+            total_ms: number | null;
+            /** Format: int64 */
+            end_ms: number;
+            targets: components["schemas"]["DisasterTarget"][];
+            target_results: components["schemas"]["DisasterTargetResult"][];
+            /** @description Voorspeld tegen gemeten; tijdens de run de voorspelling met measured leeg */
+            clusters: components["schemas"]["DisasterClusterResult"][];
+            vips: components["schemas"]["DisasterVIPResult"][];
+            skipped: string[];
+            notes: string[];
         };
         TestRunList: {
             items: components["schemas"]["TestRun"][];
@@ -7411,10 +7717,172 @@ export interface operations {
             409: components["responses"]["Error"];
         };
     };
+    listDisasterScenarios: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DisasterScenarioList"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    createDisasterScenario: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DisasterScenarioInput"];
+            };
+        };
+        responses: {
+            /** @description Aangemaakt */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DisasterScenario"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    updateDisasterScenario: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scenarioId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DisasterScenarioInput"];
+            };
+        };
+        responses: {
+            /** @description Gewijzigd */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DisasterScenario"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    deleteDisasterScenario: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scenarioId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Verwijderd */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    previewDisasterScenario: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scenarioId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DisasterPreview"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    runDisasterScenario: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scenarioId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DisasterRunInput"];
+            };
+        };
+        responses: {
+            /** @description In de wachtrij */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TestRun"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
     listTestRuns: {
         parameters: {
             query?: {
-                kind?: "failover.test" | "backup.verify";
+                kind?: components["schemas"]["TestRunKind"];
                 cluster_id?: string;
                 node_id?: string;
                 result?: components["schemas"]["TestRunResult"];

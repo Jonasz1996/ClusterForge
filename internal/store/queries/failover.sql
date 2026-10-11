@@ -79,9 +79,10 @@ ORDER BY r.test_id, r.created_at DESC;
 
 -- name: ListUnrestoredRuns :many
 -- Runs waarvan het herstel niet lukte; ze geven een rode balk bij het
--- cluster tot iemand ze opnieuw herstelt.
+-- cluster tot iemand ze opnieuw herstelt. Een rampoefening staat bij elk
+-- cluster dat ze mat.
 SELECT * FROM test_runs
-WHERE cluster_id = @cluster_id AND restored = false
+WHERE (cluster_id = @cluster_id OR @cluster_id::uuid = ANY(cluster_ids)) AND restored = false
 ORDER BY created_at DESC;
 
 -- name: SetTestRunJob :exec
@@ -118,14 +119,14 @@ ORDER BY n.hostname;
 -- name: GetTestSlotJob :one
 -- De invasieve test die nu wacht of loopt, over heel ClusterForge.
 SELECT id, title FROM jobs
-WHERE kind IN ('backup.verify', 'failover.test') AND status IN ('queued', 'running')
+WHERE kind IN ('backup.verify', 'failover.test', 'disaster.run') AND status IN ('queued', 'running')
 ORDER BY created_at LIMIT 1;
 
 -- name: GetTestSlotReleasedAt :one
 -- Wanneer de laatste invasieve test klaar was; een geplande run die daarop
 -- wachtte, is niet te laat.
 SELECT coalesce(max(finished_at), 'epoch'::timestamptz)::timestamptz AS released_at FROM jobs
-WHERE kind IN ('backup.verify', 'failover.test') AND status NOT IN ('queued', 'running');
+WHERE kind IN ('backup.verify', 'failover.test', 'disaster.run') AND status NOT IN ('queued', 'running');
 
 -- name: LastTestedAt :one
 -- Wanneer een cluster het laatst echt getest of gecontroleerd is; epoch als

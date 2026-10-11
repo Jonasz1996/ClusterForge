@@ -153,6 +153,14 @@ var Known = map[string]Spec{
 	"failover.fault_cleared":  {CategoryFailover, "Storing van een failovertest opgeheven"},
 	"failover.finished":       {CategoryFailover, "Failovertest klaar"},
 
+	"disaster_scenario.created": {CategoryFailover, "Rampoefening aangemaakt"},
+	"disaster_scenario.updated": {CategoryFailover, "Rampoefening gewijzigd"},
+	"disaster_scenario.deleted": {CategoryFailover, "Rampoefening verwijderd"},
+	"disaster.started":          {CategoryFailover, "Rampoefening gestart"},
+	"disaster.fault_injected":   {CategoryFailover, "Storing van een rampoefening veroorzaakt"},
+	"disaster.fault_cleared":    {CategoryFailover, "Storing van een rampoefening opgeheven"},
+	"disaster.finished":         {CategoryFailover, "Rampoefening klaar"},
+
 	"service.created":        {CategoryDeps, "Dienst toegevoegd"},
 	"service.updated":        {CategoryDeps, "Dienst gewijzigd"},
 	"service.deleted":        {CategoryDeps, "Dienst verwijderd"},

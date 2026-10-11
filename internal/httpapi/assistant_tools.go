@@ -952,9 +952,9 @@ func (s *Server) assistantTools() []assistant.Tool {
 				p := gen.ListTestRunsParams{Limit: ptr(30)}
 				switch in.Soort {
 				case "failover":
-					p.Kind = ptr(gen.ListTestRunsParamsKindFailoverTest)
+					p.Kind = ptr(gen.TestRunKindFailoverTest)
 				case "back-up":
-					p.Kind = ptr(gen.ListTestRunsParamsKindBackupVerify)
+					p.Kind = ptr(gen.TestRunKindBackupVerify)
 				}
 				if in.Uitkomst != "" && in.Uitkomst != "alle" {
 					p.Result = ptr(gen.TestRunResult(in.Uitkomst))

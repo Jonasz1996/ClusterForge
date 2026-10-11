@@ -33,6 +33,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/config"
 	"github.com/Jonasz1996/clusterforge/internal/deploy"
 	"github.com/Jonasz1996/clusterforge/internal/deps"
+	"github.com/Jonasz1996/clusterforge/internal/disaster"
 	"github.com/Jonasz1996/clusterforge/internal/docs"
 	"github.com/Jonasz1996/clusterforge/internal/drift"
 	"github.com/Jonasz1996/clusterforge/internal/events"
@@ -178,14 +179,17 @@ func serve() error {
 	bk.EnableVerify(runner, bus)
 	drf := drift.NewService(pool, ev, log, bus, dep, box.Derive(secrets.PurposeFile))
 	drf.Interval = cfg.DriftInterval
-	// Na een uitrol, een node- of VM-actie meteen opnieuw kijken.
+	// Na een uitrol, een node- of VM-actie meteen opnieuw kijken; na een
+	// rampoefening in elk cluster dat ze raakte.
 	recheck := func(ctx context.Context, j store.Job) {
 		switch {
 		case j.NodeID != nil:
 			drf.KickNode(*j.NodeID)
 		case j.ClusterID != nil:
-			if err := drf.Kick(ctx, j.ClusterID); err != nil {
-				log.Warn("driftcontrole na taak plannen mislukt", "job", j.ID, "err", err)
+			for _, id := range append([]uuid.UUID{*j.ClusterID}, j.SlotClusters...) {
+				if err := drf.Kick(ctx, &id); err != nil {
+					log.Warn("driftcontrole na taak plannen mislukt", "job", j.ID, "err", err)
+				}
 			}
 		}
 	}
@@ -206,12 +210,18 @@ func serve() error {
 		planner.Task{Name: "journaal opruimen", Tick: journal.NewPruner(q).Tick},
 		planner.Task{Name: "gesprekken opruimen", Tick: asst.Prune},
 		planner.Task{Name: "health score vastleggen", Tick: func(ctx context.Context, now time.Time) error { return rsk.Snapshot(ctx, now) }})
-	for _, kind := range []string{failover.KindTest, backups.KindVerify} {
+	// Rampoefeningen in lab en test; de wat-als voorspelt, de meting kijkt
+	// of het klopte.
+	dis := disaster.NewService(pool, ev, log, runner, bus)
+	dis.Changed, dis.Probes = eval.Kick, fo.ProbeFor
+	dis.Proxmox, dis.World = pve, rsk.World
+	for _, kind := range []string{failover.KindTest, backups.KindVerify, disaster.KindRun} {
 		runner.OnFinished(kind, func(context.Context, store.Job) { sched.Kick() })
 	}
 	ro := rollout.NewService(pool, ev, log, runner, bus, dep, drf)
 	ro.Changed = eval.Kick
-	for _, kind := range []string{deploy.Kind, lifecycle.KindNodeAction, proxmox.KindVMAction, failover.KindTest, failover.KindRestore} {
+	for _, kind := range []string{deploy.Kind, lifecycle.KindNodeAction, proxmox.KindVMAction, failover.KindTest, failover.KindRestore,
+		disaster.KindRun, disaster.KindRestore} {
 		runner.OnFinished(kind, recheck)
 	}
 	// De status en impact van de diensten, en daarna de incidenten, rekenen
@@ -277,8 +287,8 @@ func serve() error {
 		Addr: cfg.Listen,
 		Handler: httpapi.New(httpapi.Deps{
 			Config: cfg, Log: log, Pool: pool, Auth: authSvc, Bus: bus, Hub: hub, Proxmox: pve, Jobs: runner,
-			Lifecycle: life, Deploy: dep, Backups: bk, Drift: drf, Failover: fo, Deps: dps, Rollout: ro, GitOps: git,
-			Assistant: asst, Risk: rsk, Topo: tp, Docs: dcs, Version: version,
+			Lifecycle: life, Deploy: dep, Backups: bk, Drift: drf, Failover: fo, Disaster: dis, Deps: dps, Rollout: ro,
+			GitOps: git, Assistant: asst, Risk: rsk, Topo: tp, Docs: dcs, Version: version,
 		}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,

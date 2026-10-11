@@ -30,7 +30,7 @@ UPDATE test_runs
 SET result = $1, restored = $2, summary = $3, checks = $4,
     timeline = $5, measurements = $6, finished_at = now()
 WHERE id = $7 AND result IS NULL
-RETURNING id, kind, trigger, cluster_id, test_id, node_id, hostname, job_id, definition, result, restored, summary, checks, timeline, measurements, requested_by, created_at, finished_at
+RETURNING id, kind, trigger, cluster_id, test_id, node_id, hostname, job_id, definition, result, restored, summary, checks, timeline, measurements, requested_by, created_at, finished_at, scenario_id, cluster_ids
 `
 
 type FinishTestRunParams struct {
@@ -74,6 +74,8 @@ func (q *Queries) FinishTestRun(ctx context.Context, arg FinishTestRunParams) (T
 		&i.RequestedBy,
 		&i.CreatedAt,
 		&i.FinishedAt,
+		&i.ScenarioID,
+		&i.ClusterIds,
 	)
 	return i, err
 }
@@ -114,7 +116,7 @@ func (q *Queries) GetFailoverTest(ctx context.Context, id uuid.UUID) (GetFailove
 }
 
 const getTestRun = `-- name: GetTestRun :one
-SELECT r.id, r.kind, r.trigger, r.cluster_id, r.test_id, r.node_id, r.hostname, r.job_id, r.definition, r.result, r.restored, r.summary, r.checks, r.timeline, r.measurements, r.requested_by, r.created_at, r.finished_at, j.status AS job_status, u.username AS requested_by_name, c.name AS cluster_name
+SELECT r.id, r.kind, r.trigger, r.cluster_id, r.test_id, r.node_id, r.hostname, r.job_id, r.definition, r.result, r.restored, r.summary, r.checks, r.timeline, r.measurements, r.requested_by, r.created_at, r.finished_at, r.scenario_id, r.cluster_ids, j.status AS job_status, u.username AS requested_by_name, c.name AS cluster_name
 FROM test_runs r
 LEFT JOIN jobs j ON j.id = r.job_id
 LEFT JOIN users u ON u.id = r.requested_by
@@ -151,6 +153,8 @@ func (q *Queries) GetTestRun(ctx context.Context, id uuid.UUID) (GetTestRunRow, 
 		&i.TestRun.RequestedBy,
 		&i.TestRun.CreatedAt,
 		&i.TestRun.FinishedAt,
+		&i.TestRun.ScenarioID,
+		&i.TestRun.ClusterIds,
 		&i.JobStatus,
 		&i.RequestedByName,
 		&i.ClusterName,
@@ -159,7 +163,7 @@ func (q *Queries) GetTestRun(ctx context.Context, id uuid.UUID) (GetTestRunRow, 
 }
 
 const getTestRunByJob = `-- name: GetTestRunByJob :one
-SELECT id, kind, trigger, cluster_id, test_id, node_id, hostname, job_id, definition, result, restored, summary, checks, timeline, measurements, requested_by, created_at, finished_at FROM test_runs WHERE job_id = $1
+SELECT id, kind, trigger, cluster_id, test_id, node_id, hostname, job_id, definition, result, restored, summary, checks, timeline, measurements, requested_by, created_at, finished_at, scenario_id, cluster_ids FROM test_runs WHERE job_id = $1
 `
 
 func (q *Queries) GetTestRunByJob(ctx context.Context, jobID *uuid.UUID) (TestRun, error) {
@@ -184,13 +188,15 @@ func (q *Queries) GetTestRunByJob(ctx context.Context, jobID *uuid.UUID) (TestRu
 		&i.RequestedBy,
 		&i.CreatedAt,
 		&i.FinishedAt,
+		&i.ScenarioID,
+		&i.ClusterIds,
 	)
 	return i, err
 }
 
 const getTestSlotJob = `-- name: GetTestSlotJob :one
 SELECT id, title FROM jobs
-WHERE kind IN ('backup.verify', 'failover.test') AND status IN ('queued', 'running')
+WHERE kind IN ('backup.verify', 'failover.test', 'disaster.run') AND status IN ('queued', 'running')
 ORDER BY created_at LIMIT 1
 `
 
@@ -209,7 +215,7 @@ func (q *Queries) GetTestSlotJob(ctx context.Context) (GetTestSlotJobRow, error)
 
 const getTestSlotReleasedAt = `-- name: GetTestSlotReleasedAt :one
 SELECT coalesce(max(finished_at), 'epoch'::timestamptz)::timestamptz AS released_at FROM jobs
-WHERE kind IN ('backup.verify', 'failover.test') AND status NOT IN ('queued', 'running')
+WHERE kind IN ('backup.verify', 'failover.test', 'disaster.run') AND status NOT IN ('queued', 'running')
 `
 
 // Wanneer de laatste invasieve test klaar was; een geplande run die daarop
@@ -280,7 +286,7 @@ func (q *Queries) InsertFailoverTest(ctx context.Context, arg InsertFailoverTest
 const insertTestRun = `-- name: InsertTestRun :one
 INSERT INTO test_runs (kind, trigger, cluster_id, test_id, node_id, hostname, job_id, definition, checks, requested_by)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-RETURNING id, kind, trigger, cluster_id, test_id, node_id, hostname, job_id, definition, result, restored, summary, checks, timeline, measurements, requested_by, created_at, finished_at
+RETURNING id, kind, trigger, cluster_id, test_id, node_id, hostname, job_id, definition, result, restored, summary, checks, timeline, measurements, requested_by, created_at, finished_at, scenario_id, cluster_ids
 `
 
 type InsertTestRunParams struct {
@@ -329,6 +335,8 @@ func (q *Queries) InsertTestRun(ctx context.Context, arg InsertTestRunParams) (T
 		&i.RequestedBy,
 		&i.CreatedAt,
 		&i.FinishedAt,
+		&i.ScenarioID,
+		&i.ClusterIds,
 	)
 	return i, err
 }
@@ -354,7 +362,7 @@ func (q *Queries) LastTestedAt(ctx context.Context, arg LastTestedAtParams) (tim
 }
 
 const latestTestRuns = `-- name: LatestTestRuns :many
-SELECT DISTINCT ON (r.test_id) r.id, r.kind, r.trigger, r.cluster_id, r.test_id, r.node_id, r.hostname, r.job_id, r.definition, r.result, r.restored, r.summary, r.checks, r.timeline, r.measurements, r.requested_by, r.created_at, r.finished_at, j.status AS job_status
+SELECT DISTINCT ON (r.test_id) r.id, r.kind, r.trigger, r.cluster_id, r.test_id, r.node_id, r.hostname, r.job_id, r.definition, r.result, r.restored, r.summary, r.checks, r.timeline, r.measurements, r.requested_by, r.created_at, r.finished_at, r.scenario_id, r.cluster_ids, j.status AS job_status
 FROM test_runs r
 LEFT JOIN jobs j ON j.id = r.job_id
 WHERE r.cluster_id = $1 AND r.test_id IS NOT NULL
@@ -395,6 +403,8 @@ func (q *Queries) LatestTestRuns(ctx context.Context, clusterID *uuid.UUID) ([]L
 			&i.TestRun.RequestedBy,
 			&i.TestRun.CreatedAt,
 			&i.TestRun.FinishedAt,
+			&i.TestRun.ScenarioID,
+			&i.TestRun.ClusterIds,
 			&i.JobStatus,
 		); err != nil {
 			return nil, err
@@ -578,7 +588,7 @@ func (q *Queries) ListFailoverTests(ctx context.Context, clusterID uuid.UUID) ([
 }
 
 const listTestRuns = `-- name: ListTestRuns :many
-SELECT r.id, r.kind, r.trigger, r.cluster_id, r.test_id, r.node_id, r.hostname, r.job_id, r.definition, r.result, r.restored, r.summary, r.checks, r.timeline, r.measurements, r.requested_by, r.created_at, r.finished_at, j.status AS job_status, u.username AS requested_by_name
+SELECT r.id, r.kind, r.trigger, r.cluster_id, r.test_id, r.node_id, r.hostname, r.job_id, r.definition, r.result, r.restored, r.summary, r.checks, r.timeline, r.measurements, r.requested_by, r.created_at, r.finished_at, r.scenario_id, r.cluster_ids, j.status AS job_status, u.username AS requested_by_name
 FROM test_runs r
 LEFT JOIN jobs j ON j.id = r.job_id
 LEFT JOIN users u ON u.id = r.requested_by
@@ -627,6 +637,8 @@ func (q *Queries) ListTestRuns(ctx context.Context, arg ListTestRunsParams) ([]L
 			&i.TestRun.RequestedBy,
 			&i.TestRun.CreatedAt,
 			&i.TestRun.FinishedAt,
+			&i.TestRun.ScenarioID,
+			&i.TestRun.ClusterIds,
 			&i.JobStatus,
 			&i.RequestedByName,
 		); err != nil {
@@ -641,13 +653,14 @@ func (q *Queries) ListTestRuns(ctx context.Context, arg ListTestRunsParams) ([]L
 }
 
 const listUnrestoredRuns = `-- name: ListUnrestoredRuns :many
-SELECT id, kind, trigger, cluster_id, test_id, node_id, hostname, job_id, definition, result, restored, summary, checks, timeline, measurements, requested_by, created_at, finished_at FROM test_runs
-WHERE cluster_id = $1 AND restored = false
+SELECT id, kind, trigger, cluster_id, test_id, node_id, hostname, job_id, definition, result, restored, summary, checks, timeline, measurements, requested_by, created_at, finished_at, scenario_id, cluster_ids FROM test_runs
+WHERE (cluster_id = $1 OR $1::uuid = ANY(cluster_ids)) AND restored = false
 ORDER BY created_at DESC
 `
 
 // Runs waarvan het herstel niet lukte; ze geven een rode balk bij het
-// cluster tot iemand ze opnieuw herstelt.
+// cluster tot iemand ze opnieuw herstelt. Een rampoefening staat bij elk
+// cluster dat ze mat.
 func (q *Queries) ListUnrestoredRuns(ctx context.Context, clusterID *uuid.UUID) ([]TestRun, error) {
 	rows, err := q.db.Query(ctx, listUnrestoredRuns, clusterID)
 	if err != nil {
@@ -676,6 +689,8 @@ func (q *Queries) ListUnrestoredRuns(ctx context.Context, clusterID *uuid.UUID) 
 			&i.RequestedBy,
 			&i.CreatedAt,
 			&i.FinishedAt,
+			&i.ScenarioID,
+			&i.ClusterIds,
 		); err != nil {
 			return nil, err
 		}

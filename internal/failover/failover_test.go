@@ -136,7 +136,7 @@ func TestProbeLog(t *testing.T) {
 	start := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
 	at := func(ms int) time.Time { return start.Add(time.Duration(ms) * time.Millisecond) }
 	fail := errors.New("connection refused")
-	pl := newProbeLog(start, "10.0.20.10")
+	pl := NewProbeLog(start, "10.0.20.10")
 	for _, s := range []struct {
 		ms int
 		ok bool
@@ -145,19 +145,19 @@ func TestProbeLog(t *testing.T) {
 		if !s.ok {
 			err = fail
 		}
-		pl.add(at(s.ms), err)
-		if s.ms == 1500 && pl.recovered() {
+		pl.Add(at(s.ms), err)
+		if s.ms == 1500 && pl.Recovered() {
 			t.Fatal("hersteld na twee goede")
 		}
 	}
-	if !pl.recovered() {
+	if !pl.Recovered() {
 		t.Fatal("niet hersteld na drie goede")
 	}
 	// Van de eerste fout (250) tot de eerste van de drie goede (1250).
-	if d := pl.downtime(at(2000)); d != time.Second {
+	if d := pl.Downtime(at(2000)); d != time.Second {
 		t.Fatalf("onderbreking %s", d)
 	}
-	segs, events := pl.finish(at(2000))
+	segs, events := pl.Finish(at(2000))
 	want := []Segment{{0, 250, true}, {250, 750, false}, {750, 1000, true}, {1000, 1250, false}, {1250, 2000, true}}
 	if len(segs) != len(want) {
 		t.Fatalf("stukken %+v", segs)
@@ -173,15 +173,15 @@ func TestProbeLog(t *testing.T) {
 	}
 
 	// Komt het VIP niet terug, dan loopt de onderbreking tot het einde.
-	pl = newProbeLog(start, "10.0.20.10")
-	pl.add(at(100), fail)
-	if d := pl.downtime(at(5000)); d != 4900*time.Millisecond {
+	pl = NewProbeLog(start, "10.0.20.10")
+	pl.Add(at(100), fail)
+	if d := pl.Downtime(at(5000)); d != 4900*time.Millisecond {
 		t.Fatalf("zonder herstel: %s", d)
 	}
 	// Zonder fout is er geen onderbreking.
-	pl = newProbeLog(start, "10.0.20.10")
-	pl.add(at(0), nil)
-	if pl.downtime(at(100)) != 0 {
+	pl = NewProbeLog(start, "10.0.20.10")
+	pl.Add(at(0), nil)
+	if pl.Downtime(at(100)) != 0 {
 		t.Fatal("onderbreking zonder fout")
 	}
 }

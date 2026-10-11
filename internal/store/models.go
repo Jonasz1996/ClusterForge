@@ -362,6 +362,18 @@ type ClusterSpecRevision struct {
 	CommitSha *string
 }
 
+type DisasterScenario struct {
+	ID        uuid.UUID
+	ClusterID uuid.UUID
+	Name      string
+	Kind      string
+	Params    []byte
+	Expect    []byte
+	CreatedBy *uuid.UUID
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
 type DocSnapshot struct {
 	ID          int64
 	Scope       string
@@ -562,6 +574,7 @@ type Job struct {
 	FinishedAt      *time.Time
 	HeartbeatAt     *time.Time
 	ClusterSlot     bool
+	SlotClusters    []uuid.UUID
 }
 
 type JobStep struct {
@@ -882,6 +895,8 @@ type TestRun struct {
 	RequestedBy  *uuid.UUID
 	CreatedAt    time.Time
 	FinishedAt   *time.Time
+	ScenarioID   *uuid.UUID
+	ClusterIds   []uuid.UUID
 }
 
 type User struct {

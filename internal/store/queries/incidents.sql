@@ -27,15 +27,15 @@ JOIN services t ON t.id = d.to_service_id
 WHERE d.state = 'confirmed' AND f.cluster_id IS NOT NULL AND t.cluster_id IS NOT NULL AND f.cluster_id <> t.cluster_id;
 
 -- name: ListIncidentTestRuns :many
--- Geplande tests die mislukten sinds @failed_since, en failovertests die
--- lopen of na @running_since klaar waren.
-SELECT r.id, r.kind, r.cluster_id, coalesce(c.name, '')::text AS cluster_name, r.hostname,
+-- Geplande tests die mislukten sinds @failed_since, en failovertests en
+-- rampoefeningen die lopen of na @running_since klaar waren.
+SELECT r.id, r.kind, r.cluster_id, r.cluster_ids, coalesce(c.name, '')::text AS cluster_name, r.hostname,
        coalesce(r.result, '')::text AS result, r.summary, r.created_at, r.finished_at,
        (r.trigger = 'schedule' AND r.result IN ('fail', 'error') AND r.finished_at >= @failed_since::timestamptz)::boolean AS failed
 FROM test_runs r
 LEFT JOIN clusters c ON c.id = r.cluster_id
 WHERE (r.trigger = 'schedule' AND r.result IN ('fail', 'error') AND r.finished_at >= @failed_since::timestamptz)
-   OR (r.kind = 'failover.test' AND (r.finished_at IS NULL OR r.finished_at >= @running_since::timestamptz));
+   OR (r.kind IN ('failover.test', 'disaster.run') AND (r.finished_at IS NULL OR r.finished_at >= @running_since::timestamptz));
 
 -- name: ListDetectorIncidents :many
 -- De open incidenten en die sinds @since afgesloten werden.

@@ -57,9 +57,9 @@ const (
 // nooit een andere unit dan deze of keepalived.
 var Units = []string{"nginx", "haproxy"}
 
-// databases zijn de diensten waaraan een databasenode te herkennen is. Een
+// Databases zijn de diensten waaraan een databasenode te herkennen is. Een
 // VIP dat naar een replica verhuist, kan schrijfacties laten mislukken.
-var databases = []string{"postgresql", "mariadb", "mysql"}
+var Databases = []string{"postgresql", "mariadb", "mysql"}
 
 // Scenario is een soort storing met zijn standaardverwachting.
 type Scenario struct {
@@ -538,7 +538,7 @@ func databasesOn(nodes []store.ListFailoverNodesRow) []string {
 	var out []string
 	for _, n := range nodes {
 		st := health.ServiceStates(n.Services)
-		for _, db := range databases {
+		for _, db := range Databases {
 			if st[db] == "active" {
 				out = append(out, db+" op "+n.Hostname)
 			}
@@ -574,6 +574,10 @@ func (t clusterTemplate) probe(vip string) Probe {
 	}
 	return DefaultProbe
 }
+
+// ProbeFor is de probe die een test op dit VIP standaard gebruikt: de
+// http-controle van de template, of anders de startpagina.
+func (s *Service) ProbeFor(c store.Cluster, vip string) Probe { return s.templateOf(c).probe(vip) }
 
 // templateOf leest de template van een cluster. Templates met failback,
 // zoals keepalived-nginx, gebruiken preempt met prioriteit 150 en 140, dus
@@ -991,6 +995,9 @@ func (s *Service) StartRestore(ctx context.Context, actor events.Actor, runID uu
 	}
 	return j, nil
 }
+
+// Seconds schrijft een duur als "3,4 s", "20 s" of "3 min".
+func Seconds(d time.Duration) string { return seconds(d) }
 
 // seconds schrijft een duur als "3,4 s", "20 s" of "3 min".
 func seconds(d time.Duration) string {
