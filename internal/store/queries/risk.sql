@@ -88,6 +88,20 @@ LEFT JOIN LATERAL (
 ) lr ON true
 ORDER BY t.name;
 
+-- name: ListRiskRehearsals :many
+-- De DR-repetities met hun laatste afgeronde run.
+SELECT s.id, s.cluster_id, s.name,
+       coalesce(lr.id, '00000000-0000-0000-0000-000000000000')::uuid AS run_id, lr.result AS run_result, coalesce(lr.summary, '')::text AS run_summary, lr.finished_at AS run_finished
+FROM disaster_scenarios s
+LEFT JOIN LATERAL (
+    SELECT r.id, r.result, r.summary, r.finished_at FROM test_runs r
+    WHERE r.scenario_id = s.id AND r.kind = 'dr.rehearsal' AND r.result IN ('pass', 'warning', 'fail', 'error') AND r.finished_at IS NOT NULL
+    ORDER BY r.finished_at DESC
+    LIMIT 1
+) lr ON true
+WHERE s.kind = 'dr_rehearsal'
+ORDER BY s.name, s.id;
+
 -- name: ListRiskUnrestoredRuns :many
 -- Failovertests en rampoefeningen die niet hersteld zijn, per cluster dat
 -- ze raakten.

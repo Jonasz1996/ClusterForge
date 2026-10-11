@@ -41,6 +41,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/live"
 	"github.com/Jonasz1996/clusterforge/internal/metrics"
 	"github.com/Jonasz1996/clusterforge/internal/proxmox"
+	"github.com/Jonasz1996/clusterforge/internal/reports"
 	"github.com/Jonasz1996/clusterforge/internal/risk"
 	"github.com/Jonasz1996/clusterforge/internal/rollout"
 	"github.com/Jonasz1996/clusterforge/internal/secrets"
@@ -83,6 +84,7 @@ type testEnv struct {
 	risk      *risk.Service
 	topo      *topo.Service
 	docs      *docs.Service
+	reports   *reports.Service
 
 	// De runner heeft een eigen context, zodat een test hem kan herstarten.
 	runCtx     context.Context
@@ -200,6 +202,8 @@ func newTestEnv(t *testing.T) *testEnv {
 	dcs := docs.NewService(pool, log)
 	dcs.Deploy, dcs.GitOps, dcs.Backups, dcs.Risk, dcs.Box, dcs.Events = dep, git, bk, rsk, box, ev
 	dcs.Opts = docs.Opts{Usernames: true}
+	rep := reports.NewService(pool, log)
+	rep.Backups, rep.Risk = bk, rsk
 	var wg sync.WaitGroup
 	wg.Add(3)
 	go func() { defer wg.Done(); hub.Run(runCtx) }()
@@ -212,12 +216,12 @@ func newTestEnv(t *testing.T) *testEnv {
 	api := New(Deps{
 		Config: cfg, Log: log, Pool: pool, Auth: a, Bus: bus, Hub: hub, Proxmox: pve, Jobs: runner, Lifecycle: life,
 		Deploy: dep, Backups: bk, Drift: drf, Failover: fo, Disaster: dis, Deps: dps, Rollout: ro, GitOps: git, Assistant: asst,
-		Risk: rsk, Topo: tp, Docs: dcs, Version: "test",
+		Risk: rsk, Topo: tp, Docs: dcs, Reports: rep, Version: "test",
 	})
 	srv := httptest.NewServer(api.Handler())
 	t.Cleanup(srv.Close)
 	e := &testEnv{t: t, srv: srv, auth: a, pool: pool, api: api, bus: bus, eval: eval, vm: vm, pve: pve, jobs: runner, life: life, deploy: dep,
-		backups: bk, drift: drf, fo: fo, dis: dis, evalClock: evalClock, deps: dps, ro: ro, git: git, det: det, ana: ana, conns: conns, asst: asst, risk: rsk, topo: tp, docs: dcs, runCtx: runCtx}
+		backups: bk, drift: drf, fo: fo, dis: dis, evalClock: evalClock, deps: dps, ro: ro, git: git, det: det, ana: ana, conns: conns, asst: asst, risk: rsk, topo: tp, docs: dcs, reports: rep, runCtx: runCtx}
 	e.startRunner()
 	t.Cleanup(func() {
 		stop()

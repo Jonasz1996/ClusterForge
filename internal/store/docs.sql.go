@@ -235,24 +235,27 @@ func (q *Queries) LatestDocSnapshots(ctx context.Context) ([]LatestDocSnapshotsR
 
 const listDocClusters = `-- name: ListDocClusters :many
 SELECT c.id, c.slug, c.name, c.description, c.type, c.environment::text AS environment, c.tags, c.status,
-       c.spec, c.spec_revision, c.applied_revision, (c.git_repo_id IS NOT NULL)::boolean AS git_linked
+       c.spec, c.spec_revision, c.applied_revision, (c.git_repo_id IS NOT NULL)::boolean AS git_linked,
+       c.rto_target_minutes, c.rpo_target_hours
 FROM clusters c
 ORDER BY lower(c.name), c.id
 `
 
 type ListDocClustersRow struct {
-	ID              uuid.UUID
-	Slug            string
-	Name            string
-	Description     string
-	Type            string
-	Environment     string
-	Tags            []string
-	Status          string
-	Spec            []byte
-	SpecRevision    int32
-	AppliedRevision int32
-	GitLinked       bool
+	ID               uuid.UUID
+	Slug             string
+	Name             string
+	Description      string
+	Type             string
+	Environment      string
+	Tags             []string
+	Status           string
+	Spec             []byte
+	SpecRevision     int32
+	AppliedRevision  int32
+	GitLinked        bool
+	RtoTargetMinutes *int32
+	RpoTargetHours   *int32
 }
 
 func (q *Queries) ListDocClusters(ctx context.Context) ([]ListDocClustersRow, error) {
@@ -277,6 +280,8 @@ func (q *Queries) ListDocClusters(ctx context.Context) ([]ListDocClustersRow, er
 			&i.SpecRevision,
 			&i.AppliedRevision,
 			&i.GitLinked,
+			&i.RtoTargetMinutes,
+			&i.RpoTargetHours,
 		); err != nil {
 			return nil, err
 		}
@@ -441,6 +446,55 @@ func (q *Queries) ListDocHistory(ctx context.Context, arg ListDocHistoryParams) 
 	return items, nil
 }
 
+const listDocMeasuredRehearsals = `-- name: ListDocMeasuredRehearsals :many
+SELECT DISTINCT ON (r.cluster_id) r.cluster_id::uuid AS cluster_id, r.id, r.result::text AS result, r.summary,
+       r.finished_at::timestamptz AS finished_at, r.definition, r.measurements
+FROM test_runs r
+WHERE r.kind = 'dr.rehearsal' AND r.cluster_id IS NOT NULL AND r.finished_at IS NOT NULL
+  AND r.result IN ('pass', 'warning') AND r.measurements ? 'rto_seconds'
+ORDER BY r.cluster_id, r.finished_at DESC, r.id
+`
+
+type ListDocMeasuredRehearsalsRow struct {
+	ClusterID    uuid.UUID
+	ID           uuid.UUID
+	Result       string
+	Summary      string
+	FinishedAt   time.Time
+	Definition   []byte
+	Measurements []byte
+}
+
+// Per cluster de laatste DR-repetitie die de RTO mat: het cluster kwam
+// werkend terug.
+func (q *Queries) ListDocMeasuredRehearsals(ctx context.Context) ([]ListDocMeasuredRehearsalsRow, error) {
+	rows, err := q.db.Query(ctx, listDocMeasuredRehearsals)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDocMeasuredRehearsalsRow{}
+	for rows.Next() {
+		var i ListDocMeasuredRehearsalsRow
+		if err := rows.Scan(
+			&i.ClusterID,
+			&i.ID,
+			&i.Result,
+			&i.Summary,
+			&i.FinishedAt,
+			&i.Definition,
+			&i.Measurements,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listDocNodes = `-- name: ListDocNodes :many
 SELECT n.id, n.cluster_id::uuid AS cluster_id, n.hostname, n.role, n.description, n.lifecycle::text AS lifecycle,
        coalesce(host(n.primary_ip), '')::text AS primary_ip, n.proxmox_id, n.pve_vmid, f.facts,
@@ -487,6 +541,93 @@ func (q *Queries) ListDocNodes(ctx context.Context) ([]ListDocNodesRow, error) {
 			&i.PveVmid,
 			&i.Facts,
 			&i.HasAgent,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDocRehearsalScenarios = `-- name: ListDocRehearsalScenarios :many
+SELECT s.cluster_id, s.name, s.schedule, s.params
+FROM disaster_scenarios s
+WHERE s.kind = 'dr_rehearsal'
+ORDER BY s.name, s.id
+`
+
+type ListDocRehearsalScenariosRow struct {
+	ClusterID uuid.UUID
+	Name      string
+	Schedule  string
+	Params    []byte
+}
+
+func (q *Queries) ListDocRehearsalScenarios(ctx context.Context) ([]ListDocRehearsalScenariosRow, error) {
+	rows, err := q.db.Query(ctx, listDocRehearsalScenarios)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDocRehearsalScenariosRow{}
+	for rows.Next() {
+		var i ListDocRehearsalScenariosRow
+		if err := rows.Scan(
+			&i.ClusterID,
+			&i.Name,
+			&i.Schedule,
+			&i.Params,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDocRehearsals = `-- name: ListDocRehearsals :many
+SELECT DISTINCT ON (r.cluster_id) r.cluster_id::uuid AS cluster_id, r.id, r.result::text AS result, r.summary,
+       r.finished_at::timestamptz AS finished_at, r.definition, r.measurements
+FROM test_runs r
+WHERE r.kind = 'dr.rehearsal' AND r.cluster_id IS NOT NULL AND r.finished_at IS NOT NULL
+  AND r.result IN ('pass', 'warning', 'fail', 'error')
+ORDER BY r.cluster_id, r.finished_at DESC, r.id
+`
+
+type ListDocRehearsalsRow struct {
+	ClusterID    uuid.UUID
+	ID           uuid.UUID
+	Result       string
+	Summary      string
+	FinishedAt   time.Time
+	Definition   []byte
+	Measurements []byte
+}
+
+// Per cluster de laatste afgeronde DR-repetitie.
+func (q *Queries) ListDocRehearsals(ctx context.Context) ([]ListDocRehearsalsRow, error) {
+	rows, err := q.db.Query(ctx, listDocRehearsals)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDocRehearsalsRow{}
+	for rows.Next() {
+		var i ListDocRehearsalsRow
+		if err := rows.Scan(
+			&i.ClusterID,
+			&i.ID,
+			&i.Result,
+			&i.Summary,
+			&i.FinishedAt,
+			&i.Definition,
+			&i.Measurements,
 		); err != nil {
 			return nil, err
 		}

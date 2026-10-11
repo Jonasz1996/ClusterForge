@@ -33,6 +33,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/live"
 	"github.com/Jonasz1996/clusterforge/internal/metrics"
 	"github.com/Jonasz1996/clusterforge/internal/proxmox"
+	"github.com/Jonasz1996/clusterforge/internal/reports"
 	"github.com/Jonasz1996/clusterforge/internal/risk"
 	"github.com/Jonasz1996/clusterforge/internal/rollout"
 	"github.com/Jonasz1996/clusterforge/internal/store"
@@ -68,6 +69,7 @@ type Server struct {
 	risk         *risk.Service
 	topo         *topo.Service
 	docs         *docs.Service
+	reports      *reports.Service
 	version      string
 	loginLimiter *ipLimiter
 	// enrollLimiter remt het raden van enrollmenttokens.
@@ -115,7 +117,9 @@ type Deps struct {
 	// Topo leest de infrastructuur voor de wat-als.
 	Topo *topo.Service
 	// Docs schrijft en bewaart de documentatie.
-	Docs    *docs.Service
+	Docs *docs.Service
+	// Reports maakt de rapporten op /rapporten.
+	Reports *reports.Service
 	Version string
 }
 
@@ -156,6 +160,7 @@ func New(d Deps) *Server {
 		risk:          d.Risk,
 		topo:          d.Topo,
 		docs:          d.Docs,
+		reports:       d.Reports,
 	}
 	s.assistant.Tools = s.assistantTools()
 	return s

@@ -146,3 +146,69 @@ func TestEscape(t *testing.T) {
 		t.Fatalf("cell = %q", got)
 	}
 }
+
+func TestRecoveryDR(t *testing.T) {
+	o := Opts{Loc: time.UTC}
+	f := fleet()
+	c := &f.Clusters[0]
+	c.DR = DR{RTOMinutes: 60, RPOHours: 26, Default: true}
+	contains := func(doc string, want ...string) {
+		t.Helper()
+		for _, w := range want {
+			if !strings.Contains(doc, w) {
+				t.Errorf("mist %q in\n%s", w, doc)
+			}
+		}
+	}
+	contains(recovery(c, o),
+		"Er is nog geen DR-repetitie gedaan, dus de hersteltijd (RTO) en het gegevensverlies (RPO) van het hele cluster zijn niet gemeten.",
+		"Het doel is een RTO van hoogstens 60 minuten en een RPO van hoogstens 26 uur (de standaard voor prod).",
+		"Er is geen DR-repetitie ingesteld.")
+	contains(runbooks(c, o), "Hoe lang dat duurt, meet de DR-repetitie; voor dit cluster heeft die nog geen hersteltijd gemeten.")
+
+	at := time.Date(2026, 11, 3, 3, 20, 0, 0, time.UTC)
+	run := &DRRun{
+		ID: uuid.New(), Name: "Web DR", Result: "pass", Summary: "Het hele cluster kwam terug", At: at,
+		Proxmox: "Thuislab", Host: "pve1", Storage: "local-lvm", Bridge: "vmbr99",
+		RTO: ptr(12*time.Minute + 4*time.Second), RPO: ptr(5*time.Hour + 12*time.Minute),
+		Nodes: []DRNode{
+			{Hostname: "web-01", SourceVMID: 201, SandboxVMID: 9901, BackupTime: at.Add(-5 * time.Hour), Restore: ptr(3*time.Minute + 10*time.Second), Boot: ptr(41 * time.Second)},
+			{Hostname: "web-02", SourceVMID: 202, SandboxVMID: 9902, BackupTime: at.Add(-5*time.Hour - 12*time.Minute)},
+		},
+		VIPs: []DRVIP{{Address: "10.0.20.100", Holders: []string{"web-01"}, Checked: true, Probe: "HTTP / geeft 200", ProbeOK: ptr(true)}},
+	}
+	c.DR.Last, c.DR.Measured = run, run
+	c.DR.Scenarios = []DRScenario{{Name: "Web DR", Schedule: "monthly", Bridge: "vmbr99"}, {Name: "Met de hand", Bridge: "vmbr98"}}
+	contains(recovery(c, o),
+		"Gemeten in de sandbox op 3 november 2026, met de DR-repetitie 'Web DR'.",
+		"| **RTO**, hersteltijd | 12 min 4 s | hoogstens 60 minuten | ja |",
+		"| **RPO**, gegevensverlies | 5 u 12 min | hoogstens 26 uur | ja |",
+		"op pve1 (Thuislab) en storage `local-lvm`, met de netwerkkaarten aan de afgesloten bridge `vmbr99`.",
+		"| **web-01** | VM 201 | 2 november 2026 om 22:20 | 3 min 10 s | 41 s |",
+		"| **web-02** | VM 202 | 2 november 2026 om 22:08 | niet gemeten | niet gemeten |",
+		"`10.0.20.100` had in de sandbox één houder, web-01, en de probe (HTTP / geeft 200) slaagde.",
+		"'Web DR' op de afgesloten bridge `vmbr99`: in het eerste testvenster van elke maand (zondag 03:00-05:00).",
+		"'Met de hand' op de afgesloten bridge `vmbr98`: alleen met de hand.")
+	contains(runbooks(c, o),
+		"qmrestore pbs:backup/vm/1 201 --force 1 --storage local-lvm",
+		"qmrestore pbs:backup/vm/2 202 --force 1 --storage local-lvm",
+		"Moet het hele cluster terug, voer dan de commando's van alle nodes tegelijk uit. Controleer daarna of elk VIP precies één houder heeft. "+
+			"Zo deed de DR-repetitie het op 3 november 2026 in de sandbox: na 12 min 4 s werkte het hele cluster weer.",
+		"In de DR-repetitie van 3 november 2026 duurde terugzetten 3 min 10 s en opstarten 41 s.")
+
+	// Een strenger doel, en daarna een mislukte repetitie.
+	c.DR.RPOHours, c.DR.Default = 4, false
+	c.DR.Last = &DRRun{ID: uuid.New(), Name: "Web DR", Result: "fail", Summary: "web-02 startte niet in de sandbox.", At: at.AddDate(0, 0, 7)}
+	got := recovery(c, o)
+	contains(got,
+		"Het doel is een RTO van hoogstens 60 minuten en een RPO van hoogstens 4 uur.",
+		"| **RPO**, gegevensverlies | 5 u 12 min | hoogstens 4 uur | **nee** |",
+		"De laatste repetitie, 'Web DR' op 10 november 2026, is mislukt. web-02 startte niet in de sandbox.")
+	if strings.Contains(got, "de standaard voor prod") {
+		t.Error("een eigen doel heet de standaard")
+	}
+	c.DR.Measured = nil
+	contains(recovery(c, o), "Er is nog geen DR-repetitie geslaagd, dus de hersteltijd (RTO) van het hele cluster is niet gemeten.")
+	c.DR.RTOMinutes, c.DR.RPOHours = 0, 0
+	contains(recovery(c, o), "Dit cluster heeft geen doel voor de hersteltijd (RTO) en het gegevensverlies (RPO).")
+}

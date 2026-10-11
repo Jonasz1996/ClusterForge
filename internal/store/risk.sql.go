@@ -690,6 +690,59 @@ func (q *Queries) ListRiskProxmox(ctx context.Context) ([]ListRiskProxmoxRow, er
 	return items, nil
 }
 
+const listRiskRehearsals = `-- name: ListRiskRehearsals :many
+SELECT s.id, s.cluster_id, s.name,
+       coalesce(lr.id, '00000000-0000-0000-0000-000000000000')::uuid AS run_id, lr.result AS run_result, coalesce(lr.summary, '')::text AS run_summary, lr.finished_at AS run_finished
+FROM disaster_scenarios s
+LEFT JOIN LATERAL (
+    SELECT r.id, r.result, r.summary, r.finished_at FROM test_runs r
+    WHERE r.scenario_id = s.id AND r.kind = 'dr.rehearsal' AND r.result IN ('pass', 'warning', 'fail', 'error') AND r.finished_at IS NOT NULL
+    ORDER BY r.finished_at DESC
+    LIMIT 1
+) lr ON true
+WHERE s.kind = 'dr_rehearsal'
+ORDER BY s.name, s.id
+`
+
+type ListRiskRehearsalsRow struct {
+	ID          uuid.UUID
+	ClusterID   uuid.UUID
+	Name        string
+	RunID       uuid.UUID
+	RunResult   *string
+	RunSummary  string
+	RunFinished *time.Time
+}
+
+// De DR-repetities met hun laatste afgeronde run.
+func (q *Queries) ListRiskRehearsals(ctx context.Context) ([]ListRiskRehearsalsRow, error) {
+	rows, err := q.db.Query(ctx, listRiskRehearsals)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListRiskRehearsalsRow{}
+	for rows.Next() {
+		var i ListRiskRehearsalsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ClusterID,
+			&i.Name,
+			&i.RunID,
+			&i.RunResult,
+			&i.RunSummary,
+			&i.RunFinished,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRiskScores = `-- name: ListRiskScores :many
 SELECT subject_type, subject_id, score, grade, result, computed_at, announced_grade, grade_since FROM risk_scores
 `

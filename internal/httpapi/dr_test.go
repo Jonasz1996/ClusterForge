@@ -9,12 +9,15 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/Jonasz1996/clusterforge/internal/agent"
 	"github.com/Jonasz1996/clusterforge/internal/agent/agenttest"
@@ -444,6 +447,43 @@ func TestDRRehearsal(t *testing.T) {
 		}
 		if !slices.Equal(actions, []string{"dr.started", "dr.finished"}) {
 			t.Fatalf("events: %v", actions)
+		}
+
+		// De documentatie noemt de meting met datum en doel; het runbook
+		// zet de echte VM's terug op hun storage.
+		maanden := []string{"januari", "februari", "maart", "april", "mei", "juni", "juli", "augustus", "september", "oktober", "november", "december"}
+		today := time.Now()
+		date := fmt.Sprintf("%d %s %d", today.Day(), maanden[today.Month()-1], today.Year())
+		var herstel, runbooks testDoc
+		c.do("GET", "/api/v1/docs/cluster/herstel?cluster="+clusterID, nil, &herstel)
+		for _, w := range []string{
+			"Gemeten in de sandbox op " + date + ", met de DR-repetitie 'DR Web'. Het doel is een RTO van hoogstens 60 minuten en een RPO van hoogstens 26 uur (de standaard voor prod).",
+			"| **RPO**, gegevensverlies | 6 u | hoogstens 26 uur | ja |",
+			"op pve1 (Thuislab) en storage `ceph`, met de netwerkkaarten aan de afgesloten bridge `vmbr99`.",
+			"`10.0.20.100` had in de sandbox één houder, web-01, en de probe (HTTP / geeft 200) slaagde.",
+			"'DR Web' op de afgesloten bridge `vmbr99`: alleen met de hand.",
+		} {
+			if !strings.Contains(herstel.Content, w) {
+				t.Errorf("herstel mist %q:\n%s", w, herstel.Content)
+			}
+		}
+		if !regexp.MustCompile(`\| \*\*RTO\*\*, hersteltijd \| [0-9,]+ s \| hoogstens 60 minuten \| ja \|`).MatchString(herstel.Content) {
+			t.Errorf("herstel zonder gemeten RTO:\n%s", herstel.Content)
+		}
+		// Zoals elke tien minuten: Proxmox geeft de configuratie van de VM's.
+		if err := e.pve.ReadConfigs(ctx, uuid.MustParse(conn.ID)); err != nil {
+			t.Fatal(err)
+		}
+		c.do("GET", "/api/v1/docs/cluster/runbooks?cluster="+clusterID, nil, &runbooks)
+		for h, vmid := range src {
+			if !regexp.MustCompile(fmt.Sprintf(`qmrestore \S+ %d --force 1 --storage ceph`, vmid)).MatchString(runbooks.Content) {
+				t.Errorf("runbook zonder terugzetten van %s (VM %d):\n%s", h, vmid, runbooks.Content)
+			}
+		}
+		for _, w := range []string{"Zo deed de DR-repetitie het op " + date + " in de sandbox: na ", "In de DR-repetitie van " + date + " duurde terugzetten "} {
+			if !strings.Contains(runbooks.Content, w) {
+				t.Errorf("runbook mist %q", w)
+			}
 		}
 	})
 

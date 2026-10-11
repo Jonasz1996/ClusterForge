@@ -8,6 +8,7 @@ import (
 	"net/netip"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -33,9 +34,13 @@ type world struct {
 	nodes    []store.ListDocNodesRow
 	vips     []store.ListDocVIPsRow
 	failover []store.ListDocFailoverTestsRow
-	backups  map[uuid.UUID]backups.Item
-	grades   map[uuid.UUID]risk.ClusterScore
-	overview risk.Overview
+	// De DR-repetities per cluster: de laatste, de laatste gemeten en de
+	// scenario's.
+	drLast, drMeasured map[uuid.UUID]*DRRun
+	drScenarios        []store.ListDocRehearsalScenariosRow
+	backups            map[uuid.UUID]backups.Item
+	grades             map[uuid.UUID]risk.ClusterScore
+	overview           risk.Overview
 }
 
 // Gather leest alles voor de documentatie. Ze leest alleen.
@@ -87,6 +92,23 @@ func (s *Service) read(ctx context.Context) (*world, []store.ListDocClustersRow,
 		return nil, nil, err
 	}
 	if w.failover, err = s.q.ListDocFailoverTests(ctx); err != nil {
+		return nil, nil, err
+	}
+	if w.drLast, err = rehearsalRuns(s.q.ListDocRehearsals(ctx)); err != nil {
+		return nil, nil, err
+	}
+	measured, err := s.q.ListDocMeasuredRehearsals(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	same := make([]store.ListDocRehearsalsRow, len(measured))
+	for i, r := range measured {
+		same[i] = store.ListDocRehearsalsRow(r)
+	}
+	if w.drMeasured, err = rehearsalRuns(same, nil); err != nil {
+		return nil, nil, err
+	}
+	if w.drScenarios, err = s.q.ListDocRehearsalScenarios(ctx); err != nil {
 		return nil, nil, err
 	}
 	if w.what, err = s.Risk.World(ctx); err != nil {
@@ -256,6 +278,18 @@ func (s *Service) cluster(ctx context.Context, w *world, r store.ListDocClusters
 		if t.ClusterID == r.ID {
 			c.Failover = append(c.Failover, failoverOf(t))
 		}
+	}
+	c.DR = DR{Default: r.RtoTargetMinutes == nil && r.RpoTargetHours == nil, Last: w.drLast[r.ID], Measured: w.drMeasured[r.ID]}
+	c.DR.RTOMinutes, c.DR.RPOHours = backups.Targets(store.Environment(r.Environment), r.RtoTargetMinutes, r.RpoTargetHours)
+	for _, sc := range w.drScenarios {
+		if sc.ClusterID != r.ID {
+			continue
+		}
+		var p struct {
+			Bridge string `json:"bridge"`
+		}
+		_ = json.Unmarshal(sc.Params, &p)
+		c.DR.Scenarios = append(c.DR.Scenarios, DRScenario{Name: sc.Name, Schedule: sc.Schedule, Bridge: or(p.Bridge, backups.DefaultBridge)})
 	}
 	c.Outages = outagesOf(w.what, &c)
 	return c, nil
@@ -503,6 +537,50 @@ func failoverOf(t store.ListDocFailoverTestsRow) FailoverTest {
 		out.Last = r
 	}
 	return out
+}
+
+// rehearsalRuns leest de runs van de DR-repetitie, één per cluster.
+func rehearsalRuns(rows []store.ListDocRehearsalsRow, err error) (map[uuid.UUID]*DRRun, error) {
+	if err != nil {
+		return nil, err
+	}
+	out := map[uuid.UUID]*DRRun{}
+	for _, r := range rows {
+		var d backups.RehearsalDefinition
+		var m backups.RehearsalMeasurements
+		if err := json.Unmarshal(r.Definition, &d); err != nil {
+			return nil, err
+		}
+		if len(r.Measurements) > 0 {
+			if err := json.Unmarshal(r.Measurements, &m); err != nil {
+				return nil, err
+			}
+		}
+		run := &DRRun{
+			ID: r.ID, Name: d.Name, Result: r.Result, Summary: r.Summary, At: r.FinishedAt,
+			Proxmox: d.ConnectionName, Host: or(m.Host, d.Host), Storage: or(m.Storage, d.Storage), Bridge: or(m.Bridge, d.Bridge),
+			RTO: secs(m.RTOSeconds), RPO: secs(m.RPOSeconds),
+		}
+		for _, n := range m.Nodes {
+			run.Nodes = append(run.Nodes, DRNode{
+				Hostname: n.Hostname, SourceVMID: n.SourceVMID, SandboxVMID: n.SandboxVMID, BackupTime: n.BackupTime,
+				Restore: secs(n.RestoreSeconds), Boot: secs(n.BootSeconds),
+			})
+		}
+		for _, v := range m.VIPs {
+			run.VIPs = append(run.VIPs, DRVIP{Address: v.Address, Holders: v.Holders, Checked: v.Checked, Probe: v.Probe, ProbeOK: v.ProbeOK})
+		}
+		out[r.ClusterID] = run
+	}
+	return out, nil
+}
+
+func secs(f *float64) *time.Duration {
+	if f == nil {
+		return nil
+	}
+	d := time.Duration(*f * float64(time.Second))
+	return &d
 }
 
 // failoverDescribe zegt wat een failovertest doet; dezelfde zinnen als

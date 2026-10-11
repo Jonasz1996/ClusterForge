@@ -52,6 +52,8 @@ type ClusterInput struct {
 	FailoverTests []FailoverInput
 	// Unrestored zijn de tests die niet hersteld zijn.
 	Unrestored []RunInput
+	// Rehearsals zijn de DR-repetities van het cluster.
+	Rehearsals []RehearsalInput
 
 	// Redundantie.
 	NonProdDeps []DepInput
@@ -172,6 +174,13 @@ type FailoverInput struct {
 	ID      uuid.UUID
 	Name    string
 	VIPID   uuid.UUID
+	LastRun *RunInput
+}
+
+// RehearsalInput is een DR-repetitie met haar laatste afgeronde run.
+type RehearsalInput struct {
+	ID      uuid.UUID
+	Name    string
 	LastRun *RunInput
 }
 

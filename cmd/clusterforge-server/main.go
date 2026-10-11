@@ -48,6 +48,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/metrics"
 	"github.com/Jonasz1996/clusterforge/internal/planner"
 	"github.com/Jonasz1996/clusterforge/internal/proxmox"
+	"github.com/Jonasz1996/clusterforge/internal/reports"
 	"github.com/Jonasz1996/clusterforge/internal/risk"
 	"github.com/Jonasz1996/clusterforge/internal/rollout"
 	"github.com/Jonasz1996/clusterforge/internal/secrets"
@@ -202,6 +203,10 @@ func serve() error {
 	// De health score rekent elke minuut; de planner legt elke dag een
 	// momentopname vast voor de trend.
 	rsk := risk.NewService(pool, ev, log, metrics.NewClient(cfg.VictoriaMetricsURL), bk)
+	// Het rapport Herstelbaarheid; de planner bewaart elke eerste van de
+	// maand dat van de maand ervoor.
+	rep := reports.NewService(pool, log)
+	rep.Backups, rep.Risk = bk, rsk
 	// Geplande failovertests, back-upcontroles en DR-repetities; als een
 	// test klaar is en het testslot vrijkomt, kijkt de planner meteen of er
 	// een wacht.
@@ -212,7 +217,8 @@ func serve() error {
 		planner.Task{Name: "DR-repetities", Tick: func(ctx context.Context, now time.Time) error { return dis.RunScheduled(ctx, now) }},
 		planner.Task{Name: "journaal opruimen", Tick: journal.NewPruner(q).Tick},
 		planner.Task{Name: "gesprekken opruimen", Tick: asst.Prune},
-		planner.Task{Name: "health score vastleggen", Tick: func(ctx context.Context, now time.Time) error { return rsk.Snapshot(ctx, now) }})
+		planner.Task{Name: "health score vastleggen", Tick: func(ctx context.Context, now time.Time) error { return rsk.Snapshot(ctx, now) }},
+		planner.Task{Name: "rapport Herstelbaarheid bewaren", Tick: rep.Save})
 	// Rampoefeningen in lab en test; de wat-als voorspelt, de meting kijkt
 	// of het klopte.
 	dis = disaster.NewService(pool, ev, log, runner, bus)
@@ -294,7 +300,7 @@ func serve() error {
 		Handler: httpapi.New(httpapi.Deps{
 			Config: cfg, Log: log, Pool: pool, Auth: authSvc, Bus: bus, Hub: hub, Proxmox: pve, Jobs: runner,
 			Lifecycle: life, Deploy: dep, Backups: bk, Drift: drf, Failover: fo, Disaster: dis, Deps: dps, Rollout: ro,
-			GitOps: git, Assistant: asst, Risk: rsk, Topo: tp, Docs: dcs, Version: version,
+			GitOps: git, Assistant: asst, Risk: rsk, Topo: tp, Docs: dcs, Reports: rep, Version: version,
 		}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,

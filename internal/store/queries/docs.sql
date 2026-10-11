@@ -1,6 +1,7 @@
 -- name: ListDocClusters :many
 SELECT c.id, c.slug, c.name, c.description, c.type, c.environment::text AS environment, c.tags, c.status,
-       c.spec, c.spec_revision, c.applied_revision, (c.git_repo_id IS NOT NULL)::boolean AS git_linked
+       c.spec, c.spec_revision, c.applied_revision, (c.git_repo_id IS NOT NULL)::boolean AS git_linked,
+       c.rto_target_minutes, c.rpo_target_hours
 FROM clusters c
 ORDER BY lower(c.name), c.id;
 
@@ -34,6 +35,31 @@ LEFT JOIN LATERAL (
     LIMIT 1
 ) lr ON true
 ORDER BY t.name, t.id;
+
+-- name: ListDocRehearsals :many
+-- Per cluster de laatste afgeronde DR-repetitie.
+SELECT DISTINCT ON (r.cluster_id) r.cluster_id::uuid AS cluster_id, r.id, r.result::text AS result, r.summary,
+       r.finished_at::timestamptz AS finished_at, r.definition, r.measurements
+FROM test_runs r
+WHERE r.kind = 'dr.rehearsal' AND r.cluster_id IS NOT NULL AND r.finished_at IS NOT NULL
+  AND r.result IN ('pass', 'warning', 'fail', 'error')
+ORDER BY r.cluster_id, r.finished_at DESC, r.id;
+
+-- name: ListDocMeasuredRehearsals :many
+-- Per cluster de laatste DR-repetitie die de RTO mat: het cluster kwam
+-- werkend terug.
+SELECT DISTINCT ON (r.cluster_id) r.cluster_id::uuid AS cluster_id, r.id, r.result::text AS result, r.summary,
+       r.finished_at::timestamptz AS finished_at, r.definition, r.measurements
+FROM test_runs r
+WHERE r.kind = 'dr.rehearsal' AND r.cluster_id IS NOT NULL AND r.finished_at IS NOT NULL
+  AND r.result IN ('pass', 'warning') AND r.measurements ? 'rto_seconds'
+ORDER BY r.cluster_id, r.finished_at DESC, r.id;
+
+-- name: ListDocRehearsalScenarios :many
+SELECT s.cluster_id, s.name, s.schedule, s.params
+FROM disaster_scenarios s
+WHERE s.kind = 'dr_rehearsal'
+ORDER BY s.name, s.id;
 
 -- name: ListDocEvents :many
 -- De events na @after, met het cluster van hun node als het event zelf

@@ -5445,6 +5445,117 @@ type ProxmoxStorage struct {
 	Type    string `json:"type"`
 }
 
+// RecoveryReport defines model for RecoveryReport.
+type RecoveryReport struct {
+	Clusters    []RecoveryReportCluster `json:"clusters"`
+	From        time.Time               `json:"from"`
+	GeneratedAt time.Time               `json:"generated_at"`
+
+	// Month JJJJ-MM
+	Month string `json:"month"`
+
+	// Running De maand was nog niet voorbij toen het rapport gemaakt werd
+	Running bool `json:"running"`
+
+	// Saved Het rapport dat de planner op de eerste van de maand bewaarde
+	Saved bool `json:"saved"`
+
+	// SavedMonths De maanden met een bewaard rapport, nieuwste eerst
+	SavedMonths []string `json:"saved_months"`
+
+	// To Het begin van de volgende maand
+	To time.Time `json:"to"`
+}
+
+// RecoveryReportBackup defines model for RecoveryReportBackup.
+type RecoveryReportBackup struct {
+	Connection string `json:"connection"`
+	Count      int    `json:"count"`
+
+	// Freshness ok: de nieuwste back-up is jonger dan de maximale leeftijd. stale: ze
+	// is ouder. missing: Proxmox heeft geen back-up. unknown: de back-ups
+	// van de koppeling zijn niet te lezen.
+	Freshness        BackupFreshness `json:"freshness"`
+	LastVerification nullable.Nullable[struct {
+		FinishedAt      nullable.Nullable[time.Time] `json:"finished_at"`
+		RecoverySeconds nullable.Nullable[float32]   `json:"recovery_seconds"`
+		Result          string                       `json:"result"`
+		RunId           openapi_types.UUID           `json:"run_id"`
+	}] `json:"last_verification"`
+	Node    string                       `json:"node"`
+	Size    int64                        `json:"size"`
+	Storage string                       `json:"storage"`
+	Time    nullable.Nullable[time.Time] `json:"time"`
+	Vmid    int                          `json:"vmid"`
+}
+
+// RecoveryReportCluster defines model for RecoveryReportCluster.
+type RecoveryReportCluster struct {
+	Backups []RecoveryReportBackup `json:"backups"`
+
+	// Dr De laatste DR-repetitie tot het einde van de maand die de RTO mat
+	Dr          nullable.Nullable[RecoveryReportMeasured] `json:"dr"`
+	Environment Environment                               `json:"environment"`
+
+	// Grade Leeg zonder score
+	Grade string               `json:"grade"`
+	Id    openapi_types.UUID   `json:"id"`
+	Name  string               `json:"name"`
+	Risks []RecoveryReportRisk `json:"risks"`
+
+	// RpoTargetHours 0 is geen doel
+	RpoTargetHours int `json:"rpo_target_hours"`
+
+	// RtoTargetMinutes 0 is geen doel
+	RtoTargetMinutes int `json:"rto_target_minutes"`
+
+	// Runs De afgeronde tests van de maand, oudste eerst
+	Runs  []RecoveryReportRun    `json:"runs"`
+	Score nullable.Nullable[int] `json:"score"`
+	Slug  string                 `json:"slug"`
+}
+
+// RecoveryReportMeasured defines model for RecoveryReportMeasured.
+type RecoveryReportMeasured struct {
+	FinishedAt time.Time                  `json:"finished_at"`
+	Name       string                     `json:"name"`
+	Result     TestRunResult              `json:"result"`
+	RpoMet     nullable.Nullable[bool]    `json:"rpo_met"`
+	RpoSeconds nullable.Nullable[float32] `json:"rpo_seconds"`
+
+	// RtoMet Leeg zonder doel
+	RtoMet     nullable.Nullable[bool]    `json:"rto_met"`
+	RtoSeconds nullable.Nullable[float32] `json:"rto_seconds"`
+	RunId      openapi_types.UUID         `json:"run_id"`
+}
+
+// RecoveryReportRisk defines model for RecoveryReportRisk.
+type RecoveryReportRisk struct {
+	Card     RiskCardId   `json:"card"`
+	Check    string       `json:"check"`
+	Points   int          `json:"points"`
+	Severity RiskSeverity `json:"severity"`
+	Text     string       `json:"text"`
+}
+
+// RecoveryReportRun defines model for RecoveryReportRun.
+type RecoveryReportRun struct {
+	DowntimeMs nullable.Nullable[int64] `json:"downtime_ms"`
+	FinishedAt time.Time                `json:"finished_at"`
+	Id         openapi_types.UUID       `json:"id"`
+	Kind       TestRunKind              `json:"kind"`
+	Name       string                   `json:"name"`
+
+	// RecoverySeconds Back-upcontrole
+	RecoverySeconds nullable.Nullable[float32] `json:"recovery_seconds"`
+	Result          TestRunResult              `json:"result"`
+	RpoSeconds      nullable.Nullable[float32] `json:"rpo_seconds"`
+	RtoSeconds      nullable.Nullable[float32] `json:"rto_seconds"`
+	Summary         string                     `json:"summary"`
+	TakeoverMs      nullable.Nullable[int64]   `json:"takeover_ms"`
+	Trigger         string                     `json:"trigger"`
+}
+
 // RecoveryTargets defines model for RecoveryTargets.
 type RecoveryTargets struct {
 	// Custom Het cluster heeft eigen doelen
@@ -6613,6 +6724,12 @@ type ProbeProxmoxJSONBody struct {
 	ApiUrl string `json:"api_url"`
 }
 
+// GetRecoveryReportParams defines parameters for GetRecoveryReport.
+type GetRecoveryReportParams struct {
+	// Month JJJJ-MM; zonder is het deze maand
+	Month *string `form:"month,omitempty" json:"month,omitempty"`
+}
+
 // GetRiskHistoryParams defines parameters for GetRiskHistory.
 type GetRiskHistoryParams struct {
 	// Cluster Een cluster; zonder is het het geheel
@@ -7183,6 +7300,9 @@ type ServerInterface interface {
 	// ListVmSnapshots Snapshots van een VM of container, rechtstreeks uit Proxmox
 	// (GET /proxmox/{proxmoxId}/vms/{vmid}/snapshots)
 	ListVmSnapshots(w http.ResponseWriter, r *http.Request, proxmoxId openapi_types.UUID, vmid int)
+	// GetRecoveryReport Het rapport Herstelbaarheid van een maand
+	// (GET /reports/recovery)
+	GetRecoveryReport(w http.ResponseWriter, r *http.Request, params GetRecoveryReportParams)
 	// GetRisk De health score van het geheel, de kaart Platform en alle bevindingen
 	// (GET /risk)
 	GetRisk(w http.ResponseWriter, r *http.Request)
@@ -8047,6 +8167,12 @@ func (_ Unimplemented) VmAction(w http.ResponseWriter, r *http.Request, proxmoxI
 // ListVmSnapshots Snapshots van een VM of container, rechtstreeks uit Proxmox
 // (GET /proxmox/{proxmoxId}/vms/{vmid}/snapshots)
 func (_ Unimplemented) ListVmSnapshots(w http.ResponseWriter, r *http.Request, proxmoxId openapi_types.UUID, vmid int) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetRecoveryReport Het rapport Herstelbaarheid van een maand
+// (GET /reports/recovery)
+func (_ Unimplemented) GetRecoveryReport(w http.ResponseWriter, r *http.Request, params GetRecoveryReportParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -12102,6 +12228,39 @@ func (siw *ServerInterfaceWrapper) ListVmSnapshots(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
+// GetRecoveryReport operation middleware
+func (siw *ServerInterfaceWrapper) GetRecoveryReport(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetRecoveryReportParams
+
+	// ------------- Optional query parameter "month" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "month", r.URL.Query(), &params.Month, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "month"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "month", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetRecoveryReport(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetRisk operation middleware
 func (siw *ServerInterfaceWrapper) GetRisk(w http.ResponseWriter, r *http.Request) {
 
@@ -13157,6 +13316,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/docs/{scope}/{kind}/diff", wrapper.GetDocDiff)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/reports/recovery", wrapper.GetRecoveryReport)
 	})
 
 	return r
