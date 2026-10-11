@@ -129,7 +129,7 @@ func TestDisasterFaults(t *testing.T) {
 		!slices.Equal(n.Units, []string{"keepalived", "nginx"}) || o.Nodes[1].Owner {
 		t.Fatalf("nodes: %+v", o.Nodes)
 	}
-	if len(o.Kinds) != 4 || o.Kinds[3].Key != "sequence" || !o.Kinds[3].Available || len(o.Actions) != 6 ||
+	if len(o.Kinds) != 5 || o.Kinds[3].Key != "sequence" || !o.Kinds[3].Available || len(o.Actions) != 6 ||
 		slices.ContainsFunc(o.Actions, func(a struct {
 			Key       string `json:"key"`
 			Available bool   `json:"available"`
