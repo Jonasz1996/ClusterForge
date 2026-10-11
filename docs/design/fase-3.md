@@ -196,15 +196,15 @@ What Broke bestaat uit drie lagen. Het wijzigingsjournaal legt vast wat er op el
 **Het wijzigingsjournaal.** De tabel `node_changes` krijgt één regel per verandering, met een Nederlandse zin, het tijdstip op de node en de bron. Er zijn drie bronnen van buitenaf, en ClusterForge zelf.
 
 - **De agent (protocol 5).** De agent stuurt zijn wijzigingen op het subject `cf.node.<id>.events`, dat al in het protocol staat en dat de NATS-rechten van de agent al toelaten (`pkg/protocol/protocol.go:52`). Hij leest:
-  - pakketten uit `/var/log/dpkg.log`: installeren, bijwerken met oude en nieuwe versie, en verwijderen. Uit `/var/log/apt/history.log` komt welke gebruiker het commando gaf;
+  - pakketten uit `/var/log/apt/history.log`: installeren, bijwerken met oude en nieuwe versie, en verwijderen, met de gebruiker die apt startte. Wat zonder apt via `dpkg` ging, komt uit `/var/log/dpkg.log`;
   - een herstart, aan een nieuwe `boot_id`, met de nieuwe kernel als die anders is;
-  - per gevolgde dienst een herstart of een mislukking, uit `NRestarts`, `Result` en `ActiveEnterTimestamp` van `systemctl show`, dat hij bij elke heartbeat toch al aanroept;
-  - bestanden: mtime, grootte, mode en eigenaar van een vaste lijst onder `/etc` (keepalived, nginx, haproxy, mysql, postgresql, redis, systemd-units, netwerk, `hosts`, `resolv.conf`, `fstab`, cron, sysctl en `sshd_config`), plus de paden uit de template of baseline van het cluster. Nooit de inhoud, en ook geen hash;
+  - per gevolgde dienst een start, stop, herstart of mislukking, uit `NRestarts`, `Result` en de monotone tijden van `systemctl show`, dat hij bij elke heartbeat toch al aanroept;
+  - bestanden: mtime, grootte, mode en eigenaar van een vaste lijst onder `/etc` (keepalived, nginx, haproxy, mysql, postgresql, redis, apache2, php, systemd-units, netwerk, `hosts`, `resolv.conf`, `fstab`, cron, sysctl, `sshd_config` en docker), plus `/opt/stacks` en de vaste paden van de templates. Nooit de inhoud, en ook geen hash. Meer dan vijf wijzigingen onder één map tegelijk worden één regel;
   - SSH-logins uit journald: gebruiker, bron-IP en methode, zonder commando's;
   - OOM-kills uit de kernellog: welk proces.
 
-  De agent bewaart een cursor in `/var/lib/cf-agent/journal.json` en stuurt na een herverbinding wat er sindsdien gebeurde, met een maximum van zeven dagen en 500 regels. De server ontdubbelt op node, soort, sleutel en tijdstip.
-- **De server zelf.** Dit werkt ook met agents op protocol 4. Uit de heartbeats komen diensten die van toestand wisselen, met 15 s debounce. Uit de facts komen oude en nieuwe waarden van kernel, OS-versie, boottijd en het aantal openstaande updates; nu bewaart `node.facts_changed` alleen de namen van de sleutels (`internal/agentbus/handlers.go:189-193`). Verder het verbinden en wegvallen van de agent en een nieuwe agentversie. De klokafwijking van de node komt uit het tijdstip in de envelope, dat de server nu negeert.
+  De agent bewaart zijn posities en de regels die nog weg moeten in `/var/lib/clusterforge/journal.json`, naast `agent-state.json`: tot zeven dagen en 2000 regels. Hij stuurt ze in porties van 500 als request en vergeet ze pas na de ack, dus na een herverbinding komt alsnog wat er sindsdien gebeurde. De server ontdubbelt op node, soort, sleutel, tijdstip en actie.
+- **De server zelf.** Dit werkt ook met agents op protocol 4. Voor een agent op protocol 4 komen uit de heartbeats de diensten die van toestand wisselen (een dienst die alleen aan het starten is, telt niet), en uit de facts de herstarts. Uit de facts komen oude en nieuwe waarden van OS-versie, het aantal openstaande updates en het netwerk (interfaces, adressen zonder de VIP's van keepalived, gateway, DNS, routes, luisterende poorten en de keepalived-instanties); nu bewaart `node.facts_changed` alleen de namen van de sleutels (`internal/agentbus/handlers.go:189-193`). Verder het verbinden en wegvallen van de agent en een nieuwe agentversie. De klokafwijking van de node komt uit het tijdstip in de envelope, dat de server nu negeert.
 - **Proxmox.** De sync leest naast `/cluster/resources` ook `/cluster/tasks` in `proxmox_tasks`: UPID, host, soort, VMID, gebruiker, start, einde en exitstatus. Een VM die `root@pam` in de Proxmox-webinterface stopte, een migratie of een mislukte vzdump wordt zo een regel bij de node van die VM. Een Proxmox-host die offline of weer online gaat, geeft `proxmox.host_offline` en `proxmox.host_online`; nu geeft alleen een gekoppelde gast een event (`internal/proxmox/sync.go:175-212`).
 
 Wat ClusterForge zelf op een node verandert, komt er ook in. `ApplySteps` schrijft per stap die iets aanpaste een regel met bron `clusterforge` en de `job_id`. Vandaag staat dat alleen als tekst in de staplog (`internal/deploy/render.go:228-270`). Zo staat in het journaal naast elkaar wat ClusterForge deed en wat er met de hand gebeurde.
@@ -725,11 +725,11 @@ Een simulatie bewijst zo niet alleen dat herstel werkt, maar ook of de afhankeli
 | `vrrp_block` | VRRP-verkeer (IP-protocol 112) laten vallen met een eigen nft-tabel `cf_fault` |
 | `port_block` | inkomend verkeer op één TCP-poort laten vallen |
 | `netem` | vertraging (ms) of pakketverlies (%) op een interface met tc |
-| `disk_fill` | een bestand onder `/var/lib/cf-agent` aanmaken tot een schijf op een gekozen percentage staat, hoogstens 95 % |
+| `disk_fill` | een bestand onder `/var/lib/clusterforge` aanmaken tot een schijf op een gekozen percentage staat, hoogstens 95 % |
 
 **De dodemansknop.** Een storing kan de agent van de server afsnijden. Daarom ruimt de agent haar zelf op:
 
-- Hij schrijft de storing naar `/var/lib/cf-agent/faults.json` voordat hij haar toepast.
+- Hij schrijft de storing naar `/var/lib/clusterforge/faults.json` voordat hij haar toepast.
 - Elke storing heeft een lease van 30 s die de server verlengt zolang hij meet, en een harde bovengrens van hoogstens 10 minuten. Stopt het verlengen, omdat de server uitvalt of de verbinding weg is, dan draait de agent de storing zelf terug.
 - Bij `link_down` op de interface waarover de agent praat, kan de server niet verlengen. Daar geldt alleen de bovengrens, en die is hoogstens 2 minuten.
 - Bij elke start draait de agent achtergebleven storingen terug. Een oneshot-unit `cf-agent-fault-clear.service`, die `install.sh` plaatst, doet dat bij het opstarten, ook als de agent zelf niet start.
@@ -819,7 +819,7 @@ Protocol 6 brengt:
 - Live storingen alleen in lab en test, nooit gepland, en nooit op een host met een prod-node, de VM van ClusterForge of een HA-VM. Prod krijgt alleen de voorspelling en de DR-repetitie.
 - De agent voert alleen de vijf vaste storingen uit, met grenzen. Er is geen vrije interface, regel of commando.
   - `link_down` mag niet op `lo`.
-  - `disk_fill` gaat hoogstens tot 95 % en schrijft alleen onder `/var/lib/cf-agent`.
+  - `disk_fill` gaat hoogstens tot 95 % en schrijft alleen onder `/var/lib/clusterforge`.
   - `netem` gaat hoogstens tot 2000 ms en 50 %.
 - De DR-repetitie raakt alleen VM's in de pool `cf-sandbox` en het register. Alleen het pakket `backups` mag Restore en Destroy aanroepen (`internal/backups/callers_test.go:17-20`), en dat blijft zo.
 
@@ -892,7 +892,7 @@ De vragen staan in de volgorde waarin de mijlpalen ze nodig hebben. Zolang een a
 
 - [ ] Mag het journaal SSH-logins bewaren (gebruiker, bron-IP, methode)? (vanaf mijlpaal 1)
 
-  Standaard zolang je niet antwoordt: ja, 180 dagen, zonder commando's. Een instelling zet het uit.
+  Standaard zolang je niet antwoordt: ja, 180 dagen, zonder commando's; een viewer ziet het IP-adres niet. `CF_JOURNAL_SSH_LOGINS=false` zet het uit.
 
 - [ ] Mag ClusterForge uitgaand naar `api.anthropic.com`, en wil je de assistent met je eigen API-sleutel? Welk maandbudget? (vanaf mijlpaal 4)
 
