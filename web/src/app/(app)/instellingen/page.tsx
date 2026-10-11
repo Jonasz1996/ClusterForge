@@ -3,16 +3,20 @@
 import { useQueryClient } from "@tanstack/react-query";
 import QRCode from "qrcode";
 import { useState, type FormEvent } from "react";
+import { AssistantSettingsCard } from "@/components/assistant/AssistantSettings";
 import { Alert, Button, Card, Input, Label } from "@/components/ui";
 import { api, ApiError, unwrap } from "@/lib/api/client";
 import { meQueryKey, useMe } from "@/lib/auth";
+import { useIsAdmin } from "@/lib/inventory";
 
 export default function SettingsPage() {
+  const isAdmin = useIsAdmin();
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-semibold tracking-tight">Instellingen</h1>
       <TotpCard />
       <PasswordCard />
+      <AssistantSettingsCard isAdmin={isAdmin} />
     </div>
   );
 }
@@ -93,8 +97,8 @@ function TotpCard() {
         {!enabled && !setup && (
           <>
             <p className="text-sm text-slate-600 dark:text-slate-400">
-              Gebruik een authenticator-app zoals Aegis, 2FAS of 1Password. ClusterForge kan al je servers
-              aansturen; een tweede factor is sterk aangeraden.
+              Gebruik een authenticator-app zoals Aegis, 2FAS of 1Password. ClusterForge kan al je servers aansturen; een tweede
+              factor is sterk aangeraden.
             </p>
             <Button onClick={begin} disabled={busy}>
               Instellen

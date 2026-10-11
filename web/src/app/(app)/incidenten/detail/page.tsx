@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
+import { AskButton } from "@/components/assistant/AskButton";
 import { IncidentState, SeverityBadge } from "@/components/incidents/Incidents";
 import { formatDuration, QueryState, tableClass, tdClass, thClass } from "@/components/inventory/bits";
 import { Alert, Badge, Button, Card, PageHeader, Textarea } from "@/components/ui";
@@ -61,6 +62,7 @@ function IncidentInner() {
                 {q.data.incident.caused_by_test && <Badge tone="blue">door een failovertest</Badge>}
               </span>
             }
+            actions={<AskButton subject="incident" id={q.data.incident.id} />}
           />
           <Facts inc={q.data.incident} />
           <AnalysisCard analysis={q.data.analysis} />

@@ -41,6 +41,7 @@ Het technisch ontwerp staat in [docs/design/mvp-fase-1.md](docs/design/mvp-fase-
 | 1. Wijzigingsjournaal | Per node wat er veranderde, ook buiten ClusterForge om: pakketten, diensten, bestanden, herstarts, SSH-logins, geheugentekort, netwerk en Proxmox-taken, elk met een Nederlandse zin | klaar |
 | 2. Incidenten | Statusovergangen die bij elkaar horen, als één storing met een begin, een einde, een ernst en wat er geraakt was; pagina Incidenten en een kaart op het overzicht | klaar |
 | 3. What Broke: tijdlijn en oorzaak | Per incident het eerste symptoom en een gerangschikte lijst waarschijnlijke oorzaken met de redenen, uit één tijdlijn van logboek, journaal en metrics; 'Wat is er veranderd' per cluster en een tijdlijn per cluster en node | klaar |
+| 4. AI-assistent | Vragen over de fleet in het Nederlands met de Anthropic API, met tools die alleen lezen, de kosten per antwoord, een maandbudget en een vraagknop op clusters, nodes en incidenten | klaar |
 
 ## Draaien met Docker Compose
 
@@ -505,6 +506,42 @@ De analyse rekent opnieuw zolang het incident open is en tot een uur na het eind
 
 **Wat is er veranderd.** Een cluster heeft een kaart met de veranderingen van de laatste 24 uur. De volledige tijdlijn van een cluster of node, met filters op periode en klasse, staat bij Tijdlijn; de kaart Wijzigingen van een node linkt ernaar. Een viewer ziet de tijdlijn ook, maar nooit iets uit de beveiliging en bij een SSH-login geen IP-adres.
 
+## Assistent
+
+Bij Assistent stel je vragen over de fleet in gewone taal, zoals 'Waarom lag web-prod gisteravond plat?' of 'Wat veranderde er deze week op db-01?'. De assistent zoekt het antwoord op met dezelfde gegevens als de webinterface en antwoordt in het Nederlands, met links naar de schermen. Op een cluster, node of incident start de knop "Vraag de assistent" een gesprek over dat onderwerp.
+
+**Aanzetten.** De assistent gebruikt de Anthropic API met je eigen API-sleutel; zonder sleutel staat hij uit.
+
+1. Zorg dat `CF_MASTER_KEY` gezet is: de API-sleutel wordt daarmee versleuteld en komt nooit terug uit de API.
+2. Maak een API-sleutel op [console.anthropic.com](https://console.anthropic.com) (Settings, API Keys).
+3. Ga naar Instellingen, Assistent. Plak de sleutel, kies een model en een maandbudget, zet de assistent aan en bevestig met je wachtwoord of je TOTP-code.
+4. Klik op Testen: ClusterForge stelt een korte vraag zonder gegevens van de fleet en toont het model dat antwoordde.
+
+De server moet `api.anthropic.com` op poort 443 kunnen bereiken. Elke wijziging komt in het logboek, zonder de sleutel.
+
+**Modellen en kosten.** Je kiest Claude Opus 5.5 (standaard), Claude Sonnet 5.5 of Claude Haiku 5.5. Bij elk antwoord staan het model, de tokens en de kosten in dollar; Instellingen toont wat deze maand gebruikt is. De prijzen per miljoen tokens:
+
+| Model | Invoer | Uitvoer |
+| --- | --- | --- |
+| Claude Opus 5.5 | $4 | $20 |
+| Claude Sonnet 5.5 | $2 | $10 |
+| Claude Haiku 5.5 | $0,10 | $0,50 |
+
+Een vraag kost meestal enkele centen; een vraag die veel tools nodig heeft meer. Weigert Opus of Sonnet een vraag, dan probeert de API een ander model en staat dat model bij het antwoord.
+
+**Grenzen.**
+
+- Het maandbudget is standaard $20. Is het op, dan stelt niemand meer een vraag tot de volgende maand of tot een beheerder het verhoogt; een antwoord dat al loopt, gaat nog door.
+- Iemand stelt hoogstens 30 vragen per uur, met elk hoogstens 4000 tekens.
+- Per vraag mag het model 12 keer tools gebruiken; daarna stopt het en vraagt de assistent om een gerichtere vraag.
+- Eén gesprek beantwoordt één vraag tegelijk.
+
+**Wie.** Standaard alleen beheerders. Zet je 'Ook viewers mogen vragen stellen' aan, dan kunnen viewers het ook, met hun eigen rechten: ze zien via de assistent niets wat ze in de webinterface niet zien, zoals een IP-adres bij een SSH-login. Iedereen ziet zijn eigen gesprekken; een beheerder ziet die van iedereen. Een gesprek blijft 365 dagen na de laatste vraag staan, of tot je het verwijdert.
+
+**Wat de assistent kan.** Alleen lezen. Hij heeft vijftien tools: het overzicht van de fleet, een cluster, een node, de tijdlijn, de wijzigingen, incidenten zoeken, een incident met de analyse van What Broke, metrics, drift, back-ups, failovertests, taken, Git-wijzigingen en de impact van een storing. Hij kan niets starten, stoppen, herstarten, toepassen of wijzigen; een tool roept dezelfde leesopdrachten aan als de webinterface, met de rechten van wie de vraag stelt. Raadt hij iets aan, dan linkt hij naar het scherm waar jij het doet.
+
+**Wat naar Anthropic gaat.** Je vraag, de gebruikersnaam en rol, de tijd, en wat de tools lezen: namen, statussen, tijdlijnen, journaalregels, metrics, Git-commits en taken van de fleet. Geheimen gaan nooit mee: geen wachtwoorden, tokens, sleutels, vingerafdrukken, sessies, IP- of MAC-adressen en geen inhoud van bestanden. Commitberichten en journaalregels zijn tekst van buiten ClusterForge; de assistent behandelt ze als gegevens en volgt geen instructies die erin staan.
+
 ## Ontwikkelen
 
 Nodig: Go 1.26, Node 22 met pnpm, Docker.
@@ -549,6 +586,7 @@ internal/agent/            code van cf-agent zelf: aanmelden, verbinden, facts, 
 internal/journal/          het wijzigingsjournaal: zinnen, verschillen in de facts en opruimen
 internal/incidents/        incidenten: overgangen groeperen, ernst, openen en sluiten na elke statusronde
 internal/whatbroke/        What Broke: de tijdlijn uit logboek en journaal, en de analyse van elk incident
+internal/assistant/        de AI-assistent: instellingen, gesprekken, de lus met de Anthropic API, kosten en budget
 internal/metrics/          metrics naar VictoriaMetrics schrijven en de grafieken opvragen
 internal/status/           statusregels voor nodes en clusters, VIP-eigenaars
 internal/live/             live updates naar de webinterface (Server-Sent Events)

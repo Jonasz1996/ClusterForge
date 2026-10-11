@@ -29,6 +29,7 @@ import {
   tdClass,
   thClass,
 } from "@/components/inventory/bits";
+import { AskButton } from "@/components/assistant/AskButton";
 import { Alert, Badge, Button, Card, PageHeader } from "@/components/ui";
 import {
   grafanaLink,
@@ -97,15 +98,19 @@ function NodeDetailInner() {
               </span>
             }
             actions={
-              isAdmin &&
               !editing && (
                 <>
-                  <Button variant="secondary" onClick={() => setEditing(true)}>
-                    Bewerken
-                  </Button>
-                  <Button variant="danger" disabled={remove.isPending} onClick={() => setDeleting(true)}>
-                    Verwijderen
-                  </Button>
+                  <AskButton subject="node" id={id} />
+                  {isAdmin && (
+                    <>
+                      <Button variant="secondary" onClick={() => setEditing(true)}>
+                        Bewerken
+                      </Button>
+                      <Button variant="danger" disabled={remove.isPending} onClick={() => setDeleting(true)}>
+                        Verwijderen
+                      </Button>
+                    </>
+                  )}
                 </>
               )
             }
@@ -208,8 +213,8 @@ function AgentCard({ node, runtime, isAdmin }: { node: Node; runtime?: NodeRunti
         ) : (
           <div className="space-y-3 text-sm">
             <p className="text-slate-600 dark:text-slate-400">
-              Op deze node draait nog geen agent. Met de agent zie je hier het besturingssysteem, de services, updates
-              en wie de VIP heeft.
+              Op deze node draait nog geen agent. Met de agent zie je hier het besturingssysteem, de services, updates en wie de
+              VIP heeft.
             </p>
             {isAdmin && <Button onClick={() => setInstalling(true)}>Agent installeren</Button>}
           </div>
@@ -381,7 +386,10 @@ function FactsView({ facts: f, runtime }: { facts: Facts; runtime: NodeRuntime }
             {f.services!.map((s) => {
               const active = hbServices[s.name] ?? s.active;
               return (
-                <span key={s.name} className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 px-2 py-1 text-sm dark:border-slate-700">
+                <span
+                  key={s.name}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 px-2 py-1 text-sm dark:border-slate-700"
+                >
                   {s.name}
                   <Badge tone={active === "active" ? "green" : active === "failed" ? "red" : "slate"}>{active}</Badge>
                 </span>
