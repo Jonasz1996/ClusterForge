@@ -29,13 +29,14 @@ func (s Scope) empty() bool {
 // MaxEntries is het grootste aantal regels in één tijdlijn.
 const MaxEntries = 1000
 
-// timelineActions zijn alle actions behalve de beveiliging: een viewer mag
-// de tijdlijn zien, en een login op de webinterface is nooit de oorzaak van
-// een storing.
+// timelineActions zijn alle actions behalve de beveiliging en de
+// assistent: een viewer mag de tijdlijn zien, en een login op de
+// webinterface of een vraag aan de assistent is nooit de oorzaak van een
+// storing.
 var timelineActions = func() []string {
 	var out []string
 	for _, c := range events.Categories {
-		if c.Key != events.CategorySecurity {
+		if c.Key != events.CategorySecurity && c.Key != events.CategoryAssistant {
 			out = append(out, events.Actions(c.Key)...)
 		}
 	}

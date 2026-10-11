@@ -27,6 +27,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/Jonasz1996/clusterforge/internal/agentbus"
+	"github.com/Jonasz1996/clusterforge/internal/assistant"
 	"github.com/Jonasz1996/clusterforge/internal/auth"
 	"github.com/Jonasz1996/clusterforge/internal/backups"
 	"github.com/Jonasz1996/clusterforge/internal/config"
@@ -188,12 +189,16 @@ func serve() error {
 	fo := failover.NewService(pool, ev, log, runner, bus)
 	fo.Changed = eval.Kick
 	fo.Proxmox, fo.Window = pve, cfg.TestWindow
+	// De assistent; zonder masterkey kan hij niet aan en zeggen de
+	// instellingen waarom.
+	asst := assistant.NewService(pool, ev, log, box)
 	// Geplande failovertests en back-upcontroles; als een test klaar is en
 	// het testslot vrijkomt, kijkt de planner meteen of er een wacht.
 	sched := planner.NewScheduler(pool, log,
 		planner.Task{Name: "failovertests", Tick: fo.RunScheduled},
 		planner.Task{Name: "back-upcontroles", Tick: bk.RunScheduled},
-		planner.Task{Name: "journaal opruimen", Tick: journal.NewPruner(q).Tick})
+		planner.Task{Name: "journaal opruimen", Tick: journal.NewPruner(q).Tick},
+		planner.Task{Name: "gesprekken opruimen", Tick: asst.Prune})
 	for _, kind := range []string{failover.KindTest, backups.KindVerify} {
 		runner.OnFinished(kind, func(context.Context, store.Job) { sched.Kick() })
 	}
@@ -244,7 +249,7 @@ func serve() error {
 		Handler: httpapi.New(httpapi.Deps{
 			Config: cfg, Log: log, Pool: pool, Auth: authSvc, Bus: bus, Hub: hub, Proxmox: pve, Jobs: runner,
 			Lifecycle: life, Deploy: dep, Backups: bk, Drift: drf, Failover: fo, Deps: dps, Rollout: ro, GitOps: git,
-			Version: version,
+			Assistant: asst, Version: version,
 		}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,

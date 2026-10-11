@@ -23,6 +23,7 @@ import (
 	"github.com/pquerna/otp/totp"
 
 	"github.com/Jonasz1996/clusterforge/internal/agentbus"
+	"github.com/Jonasz1996/clusterforge/internal/assistant"
 	"github.com/Jonasz1996/clusterforge/internal/auth"
 	"github.com/Jonasz1996/clusterforge/internal/backups"
 	"github.com/Jonasz1996/clusterforge/internal/config"
@@ -71,6 +72,7 @@ type testEnv struct {
 	det     *incidents.Detector
 	ana     *whatbroke.Analyzer
 	conns   *testConns
+	asst    *assistant.Service
 
 	// De runner heeft een eigen context, zodat een test hem kan herstarten.
 	runCtx     context.Context
@@ -162,6 +164,8 @@ func newTestEnv(t *testing.T) *testEnv {
 	// De GitOps-lus loopt niet vanzelf; een test start hem of roept Sync aan.
 	git := gitops.NewService(pool, ev, log, box, dep, ro)
 	git.Interval = 0
+	// De assistent praat met een nagespeelde API die een test zelf zet.
+	asst := assistant.NewService(pool, ev, log, box)
 	var wg sync.WaitGroup
 	wg.Add(3)
 	go func() { defer wg.Done(); hub.Run(runCtx) }()
@@ -173,13 +177,13 @@ func newTestEnv(t *testing.T) *testEnv {
 	}
 	api := New(Deps{
 		Config: cfg, Log: log, Pool: pool, Auth: a, Bus: bus, Hub: hub, Proxmox: pve, Jobs: runner, Lifecycle: life,
-		Deploy: dep, Backups: bk, Drift: drf, Failover: fo, Deps: dps, Rollout: ro, GitOps: git,
+		Deploy: dep, Backups: bk, Drift: drf, Failover: fo, Deps: dps, Rollout: ro, GitOps: git, Assistant: asst,
 		Version: "test",
 	})
 	srv := httptest.NewServer(api.Handler())
 	t.Cleanup(srv.Close)
 	e := &testEnv{t: t, srv: srv, auth: a, pool: pool, api: api, bus: bus, eval: eval, vm: vm, pve: pve, jobs: runner, life: life, deploy: dep,
-		backups: bk, drift: drf, fo: fo, deps: dps, ro: ro, git: git, det: det, ana: ana, conns: conns, runCtx: runCtx}
+		backups: bk, drift: drf, fo: fo, deps: dps, ro: ro, git: git, det: det, ana: ana, conns: conns, asst: asst, runCtx: runCtx}
 	e.startRunner()
 	t.Cleanup(func() {
 		stop()

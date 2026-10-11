@@ -63,7 +63,8 @@ func describe(r store.ListAuditRow, n names) Entry {
 	if strings.HasSuffix(r.Action, ".updated") {
 		e.Changes = changes(r.SubjectType, p, n)
 	}
-	if r.Action == "backup.policy_updated" || r.Action == "backup.watch_updated" || r.Action == "gitops.repo_updated" {
+	if r.Action == "backup.policy_updated" || r.Action == "backup.watch_updated" || r.Action == "gitops.repo_updated" ||
+		r.Action == "assistant.settings_updated" {
 		e.Changes = changes(r.Action, p, n)
 	}
 	e.Summary = summary(r, p, n, e, spec)
@@ -165,6 +166,7 @@ var reauthWhat = map[string]string{
 	"password_change": "wachtwoord wijzigen",
 	"totp_enable":     "tweestapsverificatie aanzetten",
 	"totp_disable":    "tweestapsverificatie uitzetten",
+	"assistant":       "instellingen van de assistent",
 }
 
 var enrollReasons = map[string]string{
@@ -330,6 +332,20 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 			return "Notitie bij incident " + name + " gewist"
 		}
 		return "Notitie bij incident " + name + " bijgewerkt"
+	case "assistant.settings_updated":
+		if len(e.Changes) == 1 && e.Changes[0].Field == "key_changed" {
+			return "API-sleutel van de assistent vervangen"
+		}
+		return "Instellingen van de assistent gewijzigd" + changeSummary(e.Changes)
+	case "assistant.asked":
+		tools, _ := p["tools"].([]any)
+		s := "Vraag aan de assistent"
+		if len(tools) > 0 {
+			s += fmt.Sprintf(" met %s (%s)", count(float64(len(tools)), "tool", "tools"), list(tools))
+		}
+		return s + ", " + dollars(p["cost_usd"]) + paren(str(p, "model"))
+	case "assistant.budget_reached":
+		return fmt.Sprintf("Maandbudget van de assistent op: %s van %s", dollars(p["spent_usd"]), dollars(p["budget_usd"]))
 	case "vip.owner_changed":
 		old, owner := n.byID[from], str(p, "owner_hostname")
 		switch {
@@ -724,6 +740,8 @@ var fieldLabels = map[string][][2]string{
 	"backup.watch_updated":  {{"watch", "Ook bewaken"}},
 	"gitops.repo_updated": {{"repo", "Repository"}, {"branch", "Branch"}, {"path", "Map"}, {"api_url", "API-adres"},
 		{"server_url", "Adres van ClusterForge"}, {"token_changed", "Token"}},
+	"assistant.settings_updated": {{"enabled", "Aan"}, {"model", "Model"}, {"monthly_budget_usd", "Maandbudget in dollar"},
+		{"viewer_access", "Ook voor viewers"}, {"key_changed", "API-sleutel"}},
 }
 
 func changes(subjectType string, p map[string]any, n names) []Change {
@@ -741,7 +759,7 @@ func changes(subjectType string, p map[string]any, n names) []Change {
 			case "token_secret":
 				// Van een geheim staat alleen dat het veranderde.
 				out = append(out, Change{Field: field, Label: label, To: text(v)})
-			case "token_changed":
+			case "token_changed", "key_changed":
 				out = append(out, Change{Field: field, Label: label, To: "vervangen"})
 			}
 			return
@@ -853,6 +871,12 @@ func list(v any) string {
 }
 
 func num(v any) string { return text(v) }
+
+// dollars schrijft een bedrag zoals $0,12.
+func dollars(v any) string {
+	f, _ := v.(float64)
+	return "$" + strings.Replace(strconv.FormatFloat(f, 'f', 2, 64), ".", ",", 1)
+}
 
 // count geeft "1 afwijking" of "4 afwijkingen".
 func count(v any, one, many string) string {
