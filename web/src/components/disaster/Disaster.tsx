@@ -2,16 +2,18 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useState, type FormEvent } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
 import { Modal } from "@/components/Modal";
 import { Checks, reportHref, RunBadge } from "@/components/failover/Failover";
 import { Empty, tableClass, tdClass, thClass } from "@/components/inventory/bits";
 import { Alert, Badge, Button, Card, Field, Input, Select, cx } from "@/components/ui";
 import { ApiError } from "@/lib/api/client";
 import {
+  cutOffMaxSeconds,
   duration,
   expectText,
   matchLabels,
+  onLabels,
   roleLabels,
   statusLabels,
   targetNames,
@@ -23,11 +25,15 @@ import {
   useUpdateDisasterScenario,
   type DisasterClusterPlan,
   type DisasterKind,
+  type DisasterNodeOption,
   type DisasterOptions,
+  type DisasterPlannedStep,
   type DisasterPrediction,
   type DisasterReport,
   type DisasterScenario,
   type DisasterScenarioInput,
+  type DisasterStep,
+  type DisasterStepAction,
 } from "@/lib/disaster";
 import { list, probeText, seconds, type TestRun } from "@/lib/failover";
 
@@ -71,8 +77,8 @@ export function DisasterCard({ clusterId, isAdmin }: { clusterId: string; isAdmi
       ) : items.length === 0 ? (
         <Empty>
           Nog geen rampoefeningen. Een rampoefening laat in lab of test echt iets uitvallen: een hele Proxmox-host, een dienst op
-          alle nodes of het VIP. ClusterForge meet elk geraakt cluster, vergelijkt dat met de voorspelling van Wat als en zet
-          daarna alles weer aan.
+          alle nodes, het VIP of een reeks storingen na elkaar. ClusterForge meet elk geraakt cluster, vergelijkt dat met de
+          voorspelling van Wat als en zet daarna alles weer aan.
         </Empty>
       ) : (
         <ul className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -228,9 +234,13 @@ function StartDialog({ s, onClose }: { s: DisasterScenario; onClose: () => void 
         {p && (
           <>
             <p>
-              {p.description}: {list(targetNames(p.targets)) || "niets"}. De storing duurt {duration(s.fault_seconds)}; daarna zet
-              ClusterForge alles weer aan en verwacht het elk cluster binnen {duration(s.recovery_seconds)} weer gezond.
+              {s.kind === "sequence"
+                ? `Een reeks van ${p.steps.length} ${p.steps.length === 1 ? "stap" : "stappen"} op ${list(targetNames(p.targets)) || "niets"}`
+                : `${p.description}: ${list(targetNames(p.targets)) || "niets"}`}
+              . De storing duurt {duration(s.fault_seconds)}; daarna zet ClusterForge alles weer aan en verwacht het elk cluster
+              binnen {duration(s.recovery_seconds)} weer gezond.
             </p>
+            {p.steps.length > 0 && <StepList steps={p.steps} />}
             <div>
               <h3 className="mb-2 font-medium">Wat de wat-als voorspelt</h3>
               <PredictionTable clusters={p.clusters} />
@@ -339,6 +349,7 @@ function DisasterForm({
         : "",
   );
   const [unit, setUnit] = useState(initial?.unit || options.units[0] || "nginx");
+  const [steps, setSteps] = useState<DisasterStep[]>(initial?.steps.length ? initial.steps : []);
   const [fault, setFault] = useState(String(initial?.fault_seconds ?? kindOpt?.fault_seconds ?? 60));
   const [recovery, setRecovery] = useState(String(initial?.recovery_seconds ?? kindOpt?.recovery_seconds ?? 120));
   const [touched, setTouched] = useState(!!initial);
@@ -351,6 +362,7 @@ function DisasterForm({
   const defaultName = () => {
     if (kind === "host_down") return `${hostOpt?.host ?? "Proxmox-host"} valt uit`;
     if (kind === "service_down") return `${unit} valt weg`;
+    if (kind === "sequence") return `Reeks van ${steps.length} ${steps.length === 1 ? "stap" : "stappen"}`;
     return "VIP valt weg";
   };
   const shownName = nameTouched ? name : defaultName();
@@ -362,11 +374,16 @@ function DisasterForm({
       setFault(String(opt.fault_seconds));
       setRecovery(String(opt.recovery_seconds));
     }
+    if (key === "sequence" && steps.length === 0) setSteps([newStep(options, 0)]);
   }
 
   async function submit(e: FormEvent) {
     e.preventDefault();
     setError(null);
+    // De server zet de stappen op volgorde van tijd; dan klopt "stap 2" in
+    // een foutmelding met wat hier staat.
+    const sorted = [...steps].sort((a, b) => a.at_seconds - b.at_seconds);
+    if (kind === "sequence") setSteps(sorted);
     const body: DisasterScenarioInput = {
       name: shownName.trim(),
       kind,
@@ -374,6 +391,7 @@ function DisasterForm({
       recovery_seconds: Number(recovery),
       ...(kind === "host_down" && hostOpt ? { connection_id: hostOpt.connection_id, host: hostOpt.host } : {}),
       ...(kind === "service_down" ? { unit } : {}),
+      ...(kind === "sequence" ? { steps: sorted.map(cleanStep) } : {}),
     };
     try {
       if (initial) await update.mutateAsync({ id: initial.id, body });
@@ -428,6 +446,10 @@ function DisasterForm({
         {fieldError("kind")}
       </fieldset>
 
+      {kind === "sequence" && (
+        <StepsEditor steps={steps} setSteps={setSteps} options={options} fault={Number(fault) || 0} error={fieldError("steps")} />
+      )}
+
       <div className="grid gap-4 sm:grid-cols-2">
         {kind === "host_down" && (
           <Field label="Proxmox-host" htmlFor="dr-host">
@@ -466,7 +488,9 @@ function DisasterForm({
           hint={
             kind === "host_down"
               ? `Minstens ${kindOpt?.min_fault_seconds ?? 100} s: na een harde stop is een node pas na 90 s zonder heartbeat down.`
-              : `Tussen ${kindOpt?.min_fault_seconds ?? 20} en 600 s.`
+              : kind === "sequence"
+                ? `Tussen ${kindOpt?.min_fault_seconds ?? 20} en 600 s. Elke stap blijft aan tot het einde; dan heft ClusterForge alles op.`
+                : `Tussen ${kindOpt?.min_fault_seconds ?? 20} en 600 s.`
           }
         >
           <Input
@@ -555,7 +579,342 @@ const kindHint: Record<DisasterKind, string> = {
     "Alle gekoppelde VM's op één Proxmox-host gaan tegelijk hard uit, zoals bij een stroomonderbreking. De host zelf blijft aan.",
   service_down: "Eén dienst stopt op alle nodes van dit cluster tegelijk.",
   vip_loss: "keepalived stopt op alle nodes, zodat geen node het VIP heeft.",
+  sequence:
+    "Tot vijf storingen na elkaar op gekozen nodes: VRRP blokkeren, een interface down, een poort dicht, vertraging, een volle schijf of een dienst stoppen. Valt ClusterForge weg, dan heft de agent ze zelf op.",
 };
+
+const maxSteps = 5;
+
+// stepNodes zijn de nodes waar een stap nu op zou werken.
+function stepNodes(st: DisasterStep, nodes: DisasterNodeOption[]) {
+  switch (st.on) {
+    case "owner":
+      return nodes.filter((n) => n.owner);
+    case "others":
+      return nodes.some((n) => n.owner) ? nodes.filter((n) => !n.owner) : [];
+    case "all":
+      return nodes;
+    case "node":
+      return nodes.filter((n) => n.id === st.node_id);
+  }
+}
+
+// stepInterfaces zijn de interfaces die alle nodes van een stap hebben; die
+// naar ClusterForge achteraan.
+function stepInterfaces(st: DisasterStep, nodes: DisasterNodeOption[]) {
+  const ns = stepNodes(st, nodes);
+  const all = [...new Set(ns.flatMap((n) => n.interfaces))];
+  const common = all.filter((i) => ns.every((n) => n.interfaces.includes(i)));
+  const out = common.length ? common : all;
+  const mgmt = (i: string) => ns.some((n) => n.primary === i);
+  return [...out.filter((i) => !mgmt(i)), ...out.filter(mgmt)];
+}
+
+function stepUnits(st: DisasterStep, nodes: DisasterNodeOption[]) {
+  return [...new Set(stepNodes(st, nodes).flatMap((n) => n.units))];
+}
+
+// withDefaults vult de velden van de actie in die nog leeg zijn.
+function withDefaults(st: DisasterStep, nodes: DisasterNodeOption[]): DisasterStep {
+  const out = { ...st };
+  if ((st.action === "link_down" || st.action === "netem") && !st.interface) out.interface = stepInterfaces(st, nodes)[0] ?? "";
+  if (st.action === "netem" && !st.delay_ms && !st.loss_percent) out.delay_ms = 200;
+  if (st.action === "port_block" && !st.port) out.port = 80;
+  if (st.action === "disk_fill" && !st.fill_percent) out.fill_percent = 90;
+  if (st.action === "service_stop" && !st.unit) out.unit = stepUnits(st, nodes)[0] ?? "keepalived";
+  return out;
+}
+
+function newStep(options: DisasterOptions, at: number): DisasterStep {
+  const action = options.actions.find((a) => a.available)?.key ?? "vrrp_block";
+  const on = options.nodes.some((n) => n.owner) ? "owner" : "all";
+  return withDefaults({ at_seconds: at, action, on }, options.nodes);
+}
+
+// cleanStep stuurt alleen de velden die bij de actie horen.
+function cleanStep(st: DisasterStep): DisasterStep {
+  const out: DisasterStep = { at_seconds: st.at_seconds, action: st.action, on: st.on };
+  if (st.on === "node") out.node_id = st.node_id;
+  if (st.action === "link_down" || st.action === "netem") out.interface = st.interface;
+  if (st.action === "netem") {
+    out.delay_ms = st.delay_ms ?? 0;
+    out.loss_percent = st.loss_percent ?? 0;
+  }
+  if (st.action === "port_block") out.port = st.port;
+  if (st.action === "disk_fill") out.fill_percent = st.fill_percent;
+  if (st.action === "service_stop") out.unit = st.unit;
+  return out;
+}
+
+// StepsEditor bewerkt de stappen van een reeks. Een actie die de nodes niet
+// kunnen, staat grijs met de reden erbij.
+function StepsEditor({
+  steps,
+  setSteps,
+  options,
+  fault,
+  error,
+}: {
+  steps: DisasterStep[];
+  setSteps: (s: DisasterStep[]) => void;
+  options: DisasterOptions;
+  fault: number;
+  error: ReactNode;
+}) {
+  const nodes = options.nodes;
+  const hasOwner = nodes.some((n) => n.owner);
+  const change = (i: number, patch: Partial<DisasterStep>, reset = false) => {
+    const cur = steps[i]!;
+    const next: DisasterStep = reset
+      ? { at_seconds: cur.at_seconds, action: cur.action, on: cur.on, node_id: cur.node_id, ...patch }
+      : { ...cur, ...patch };
+    setSteps(steps.map((s, j) => (j === i ? withDefaults(next, nodes) : s)));
+  };
+  return (
+    <fieldset>
+      <legend className="mb-1 text-sm font-medium text-slate-700 dark:text-slate-300">Stappen</legend>
+      <p className="mb-2 text-xs text-slate-500">
+        Elke stap begint zoveel seconden na de start van de storing en blijft aan tot het einde. De VIP-houder is de node die bij
+        de start het VIP heeft.
+      </p>
+      <ol className="space-y-3">
+        {steps.map((st, i) => {
+          const id = `dr-step-${i}`;
+          const targets = stepNodes(st, nodes);
+          const cut =
+            st.action === "link_down"
+              ? targets.filter((n) => !n.primary || n.primary === st.interface).map((n) => n.hostname)
+              : [];
+          const ifaces = stepInterfaces(st, nodes);
+          const units = stepUnits(st, nodes);
+          return (
+            <li key={i} className="rounded-md border border-slate-200 p-3 dark:border-slate-800">
+              <div className="mb-2 flex items-center justify-between gap-2">
+                <span className="text-sm font-medium">Stap {i + 1}</span>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  disabled={steps.length === 1}
+                  onClick={() => setSteps(steps.filter((_, j) => j !== i))}
+                >
+                  Weghalen
+                </Button>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-[7rem_1fr_1fr]">
+                <Field label="Na seconden" htmlFor={`${id}-at`}>
+                  <Input
+                    id={`${id}-at`}
+                    type="number"
+                    min={0}
+                    max={Math.max(0, fault - 1)}
+                    required
+                    value={String(st.at_seconds)}
+                    onChange={(e) => change(i, { at_seconds: Number(e.target.value) })}
+                  />
+                </Field>
+                <Field label="Wat" htmlFor={`${id}-action`}>
+                  <Select
+                    id={`${id}-action`}
+                    value={st.action}
+                    onChange={(e) => change(i, { action: e.target.value as DisasterStepAction }, true)}
+                  >
+                    {options.actions.map((a) => (
+                      <option key={a.key} value={a.key} disabled={!a.available && a.key !== st.action}>
+                        {a.available ? a.label : `${a.label} (kan niet: ${a.reason})`}
+                      </option>
+                    ))}
+                  </Select>
+                </Field>
+                <Field label="Op" htmlFor={`${id}-on`}>
+                  <Select
+                    id={`${id}-on`}
+                    value={st.on}
+                    onChange={(e) => {
+                      const on = e.target.value as DisasterStep["on"];
+                      change(i, {
+                        on,
+                        node_id: on === "node" ? (st.node_id ?? nodes[0]?.id) : undefined,
+                        interface: "",
+                        unit: "",
+                      });
+                    }}
+                  >
+                    {(Object.keys(onLabels) as DisasterStep["on"][]).map((on) => {
+                      const off = (on === "owner" || on === "others") && !hasOwner;
+                      return (
+                        <option key={on} value={on} disabled={off && on !== st.on}>
+                          {onLabels[on]}
+                          {off ? " (geen node heeft nu het VIP)" : ""}
+                        </option>
+                      );
+                    })}
+                  </Select>
+                </Field>
+              </div>
+              {(st.on === "node" || st.action !== "vrrp_block") && (
+                <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                  {st.on === "node" && (
+                    <Field label="Node" htmlFor={`${id}-node`}>
+                      <Select
+                        id={`${id}-node`}
+                        value={st.node_id ?? ""}
+                        onChange={(e) => change(i, { node_id: e.target.value, interface: "", unit: "" })}
+                      >
+                        {nodes.map((n) => (
+                          <option key={n.id} value={n.id}>
+                            {n.hostname}
+                            {n.owner ? " (VIP-houder)" : ""}
+                          </option>
+                        ))}
+                      </Select>
+                    </Field>
+                  )}
+                  {(st.action === "link_down" || st.action === "netem") && (
+                    <Field label="Interface" htmlFor={`${id}-iface`}>
+                      <Select
+                        id={`${id}-iface`}
+                        value={st.interface ?? ""}
+                        onChange={(e) => change(i, { interface: e.target.value })}
+                      >
+                        {(ifaces.includes(st.interface ?? "") || !st.interface ? ifaces : [st.interface!, ...ifaces]).map((x) => (
+                          <option key={x} value={x}>
+                            {x}
+                            {targets.some((n) => n.primary === x) ? " (naar ClusterForge)" : ""}
+                          </option>
+                        ))}
+                        {ifaces.length === 0 && !st.interface && <option value="">Geen interface bekend</option>}
+                      </Select>
+                    </Field>
+                  )}
+                  {st.action === "netem" && (
+                    <>
+                      <Field label="Vertraging in ms" htmlFor={`${id}-delay`}>
+                        <Input
+                          id={`${id}-delay`}
+                          type="number"
+                          min={0}
+                          max={2000}
+                          value={String(st.delay_ms ?? 0)}
+                          onChange={(e) => change(i, { delay_ms: Number(e.target.value) })}
+                        />
+                      </Field>
+                      <Field label="Pakketverlies in %" htmlFor={`${id}-loss`}>
+                        <Input
+                          id={`${id}-loss`}
+                          type="number"
+                          min={0}
+                          max={50}
+                          value={String(st.loss_percent ?? 0)}
+                          onChange={(e) => change(i, { loss_percent: Number(e.target.value) })}
+                        />
+                      </Field>
+                    </>
+                  )}
+                  {st.action === "port_block" && (
+                    <Field label="TCP-poort" htmlFor={`${id}-port`}>
+                      <Input
+                        id={`${id}-port`}
+                        type="number"
+                        min={1}
+                        max={65535}
+                        value={String(st.port ?? "")}
+                        onChange={(e) => change(i, { port: Number(e.target.value) })}
+                      />
+                    </Field>
+                  )}
+                  {st.action === "disk_fill" && (
+                    <Field label="Schijf vullen tot %" htmlFor={`${id}-fill`}>
+                      <Input
+                        id={`${id}-fill`}
+                        type="number"
+                        min={50}
+                        max={95}
+                        value={String(st.fill_percent ?? "")}
+                        onChange={(e) => change(i, { fill_percent: Number(e.target.value) })}
+                      />
+                    </Field>
+                  )}
+                  {st.action === "service_stop" && (
+                    <Field label="Dienst" htmlFor={`${id}-unit`}>
+                      <Select id={`${id}-unit`} value={st.unit ?? ""} onChange={(e) => change(i, { unit: e.target.value })}>
+                        {(units.includes(st.unit ?? "") || !st.unit ? units : [st.unit!, ...units]).map((u) => (
+                          <option key={u} value={u}>
+                            {u}
+                          </option>
+                        ))}
+                        {units.length === 0 && !st.unit && <option value="">Geen dienst om te stoppen</option>}
+                      </Select>
+                    </Field>
+                  )}
+                </div>
+              )}
+              <p className="mt-2 text-xs text-slate-500">
+                {targets.length ? `Raakt ${list(targets.map((n) => n.hostname))}.` : "Raakt nu geen enkele node."}
+              </p>
+              {cut.length > 0 && (
+                <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
+                  Via {st.interface} praat de agent op {list(cut)} met ClusterForge (of dat is niet bekend). ClusterForge kan deze
+                  storing daar niet verlengen of opheffen: de agent zet {st.interface} zelf weer aan, hoogstens {cutOffMaxSeconds}{" "}
+                  s na de stap en ook na een herstart. Daarom moet de stap in de laatste {cutOffMaxSeconds} s van de storing
+                  vallen en volgt er op die node geen stap meer.
+                </p>
+              )}
+            </li>
+          );
+        })}
+      </ol>
+      <div className="mt-2">
+        <Button
+          type="button"
+          variant="secondary"
+          disabled={steps.length >= maxSteps}
+          title={steps.length >= maxSteps ? `Een reeks heeft hoogstens ${maxSteps} stappen` : undefined}
+          onClick={() => {
+            const last = steps.reduce((m, s) => Math.max(m, s.at_seconds), -10);
+            setSteps([...steps, newStep(options, Math.min(Math.max(0, fault - 1), last + 10))]);
+          }}
+        >
+          Stap toevoegen
+        </Button>
+      </div>
+      {error}
+    </fieldset>
+  );
+}
+
+// StepList toont de stappen van een reeks met de nodes die ze raken; in
+// het rapport ook wanneer ze liepen en wat niet lukte.
+function StepList({ steps, report = false }: { steps: DisasterPlannedStep[]; report?: boolean }) {
+  return (
+    <ol className="space-y-1.5 text-sm">
+      {steps.map((st) => (
+        <li key={st.step} className="grid grid-cols-[3.5rem_1fr] gap-2">
+          <span className="text-right text-slate-500 tabular-nums">{st.at_seconds} s</span>
+          <span>
+            {st.text}
+            <span className="block text-xs text-slate-500">
+              {st.nodes.length ? list(st.nodes.map((n) => n.hostname)) : "geen node"}
+              {report && (st.ran_ms !== null ? ` · liep na ${seconds(st.ran_ms)}` : " · liep niet")}
+            </span>
+            {st.nodes.some((n) => n.cut_off) && (
+              <span className="block text-xs text-amber-700 dark:text-amber-400">
+                Interface naar ClusterForge op {list(st.nodes.filter((n) => n.cut_off).map((n) => n.hostname))}: de agent zet hem
+                na hoogstens {cutOffMaxSeconds} s zelf weer aan.
+              </span>
+            )}
+            {st.results
+              .filter((r) => r.error)
+              .map((r) => (
+                <span key={r.node_id} className="block text-xs text-red-700 dark:text-red-300">
+                  {r.hostname}: {r.error}
+                </span>
+              ))}
+          </span>
+        </li>
+      ))}
+    </ol>
+  );
+}
 
 // DisasterReportView is het rapport van een rampoefening: voorspeld tegen
 // gemeten per cluster, de probe per VIP en de tijdlijn.
@@ -566,7 +925,11 @@ export function DisasterReportView({ run, d }: { run: TestRun; d: DisasterReport
         <dl className="grid gap-x-4 gap-y-2.5 text-sm sm:grid-cols-[9rem_1fr]">
           <dt className="text-slate-500">Storing</dt>
           <dd>
-            {d.description}: {list(targetNames(d.targets)) || "niets"}
+            {d.kind === "sequence" ? (
+              <StepList steps={d.steps} report />
+            ) : (
+              `${d.description}: ${list(targetNames(d.targets)) || "niets"}`
+            )}
             {d.skipped.length > 0 && <span className="block text-xs text-slate-500">Bleven aan: {list(d.skipped)}</span>}
           </dd>
           <dt className="text-slate-500">Verwacht</dt>

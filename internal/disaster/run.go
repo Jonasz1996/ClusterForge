@@ -187,11 +187,13 @@ type Measurement struct {
 // vast voor de commando's de deur uitgaan; een hervatte stap stuurt de
 // storing dus nooit opnieuw.
 type measureState struct {
-	InjectedAt  time.Time      `json:"injected_at"`
-	Injected    []TargetResult `json:"injected,omitempty"`
-	InjectError string         `json:"inject_error,omitempty"`
-	Interrupted bool           `json:"interrupted,omitempty"`
-	Measurement *Measurement   `json:"measurement,omitempty"`
+	InjectedAt time.Time      `json:"injected_at"`
+	Injected   []TargetResult `json:"injected,omitempty"`
+	// Steps is bij een reeks wat elke stap deed, met het tijdstip.
+	Steps       []StepResult `json:"steps,omitempty"`
+	InjectError string       `json:"inject_error,omitempty"`
+	Interrupted bool         `json:"interrupted,omitempty"`
+	Measurement *Measurement `json:"measurement,omitempty"`
 }
 
 type restoreState struct {
@@ -241,12 +243,10 @@ func (s *Service) loadRun(ctx context.Context, j *jobs.Job) (store.TestRun, Defi
 	if err := json.Unmarshal(row.TestRun.Definition, &def); err != nil {
 		return store.TestRun{}, Definition{}, err
 	}
-	// Alleen de vaste units gaan ooit naar een agent, ook als de definitie
-	// anders zegt.
-	for _, t := range def.Targets {
-		if t.VM == nil && t.Unit != "keepalived" && !slices.Contains(Units, t.Unit) {
-			return store.TestRun{}, Definition{}, fmt.Errorf("onbekende dienst %q", t.Unit)
-		}
+	// Alleen de vaste units en storingen gaan ooit naar een agent, ook als
+	// de definitie anders zegt.
+	if err := def.check(); err != nil {
+		return store.TestRun{}, Definition{}, err
 	}
 	return row.TestRun, def, nil
 }
@@ -353,6 +353,12 @@ func (r *disasterRun) precheck(ctx context.Context, st *jobs.Step, pre *precheck
 		DisasterScenario: store.DisasterScenario{ID: r.def.ScenarioID, ClusterID: r.def.ClusterID, Name: r.def.Name, Kind: r.def.Kind},
 		P:                r.def.Params, E: r.def.Expect,
 	}
+	if r.def.Kind == Sequence {
+		sc.P.Steps = make([]Step, len(r.def.Steps))
+		for i, ps := range r.def.Steps {
+			sc.P.Steps[i] = ps.Step
+		}
+	}
 	p, err := r.s.plan(ctx, sc, r.j.ID)
 	if ctx.Err() != nil {
 		return context.Cause(ctx)
@@ -375,6 +381,8 @@ func (r *disasterRun) precheck(ctx context.Context, st *jobs.Step, pre *precheck
 		pre.Skipped = strings.Join(failed, "; ")
 	case targetKey(p.Targets) != targetKey(r.def.Targets):
 		pre.Skipped = "de doelen veranderden sinds de start: nu " + list(targetNames(p.Targets)) + ", bij de start " + list(targetNames(r.def.Targets))
+	case stepsKey(p.Steps) != stepsKey(r.def.Steps):
+		pre.Skipped = "de nodes van de stappen veranderden sinds de start, bijvoorbeeld omdat het VIP verhuisde"
 	}
 	if pre.Skipped != "" {
 		st.Logf("de rampoefening start niet; er verandert niets")
@@ -423,6 +431,9 @@ func (r *disasterRun) measureStep(ctx context.Context, st *jobs.Step, ms *measur
 	if err := st.SetState(ctx, ms); err != nil {
 		ms.InjectedAt = time.Time{}
 		return err
+	}
+	if r.def.Kind == Sequence {
+		return r.measureSequence(ctx, st, ms)
 	}
 	st.Logf("%s", faultText(r.def))
 	_ = st.Flush(ctx)
@@ -679,6 +690,9 @@ func (r *disasterRun) restore(ctx context.Context, st *jobs.Step) error {
 		if t.VM != nil {
 			return "", r.s.startVM(ctx, st, t)
 		}
+		if r.def.Kind == Sequence {
+			return "", r.s.clearNode(ctx, st, r.def, r.run.ID, t, r.run.ID.String()+"-clear-"+t.NodeID.String(), r.reason(), 3)
+		}
 		return "", r.s.apply(ctx, st, t.NodeID, r.run.ID.String()+"-clear-"+t.NodeID.String(), r.reason(), t.Unit, "started", 3)
 	})
 	if failed := failedTargets(res); len(failed) > 0 {
@@ -702,15 +716,6 @@ func (s *Service) hardLimit(def Definition) time.Duration {
 		limit = s.BootTimeout
 	}
 	return max(limit, def.Expect.recovery()+30*time.Second)
-}
-
-// readyUnits zijn de units die na het herstel weer moeten draaien. Na een
-// harde stop is een verse heartbeat genoeg.
-func readyUnits(t Target) []string {
-	if t.Unit == "" {
-		return nil
-	}
-	return []string{t.Unit}
 }
 
 // recoverStep wacht tot elk doel weer draait en elk VIP van een geraakt
@@ -755,7 +760,7 @@ func (r *disasterRun) recoverStep(ctx context.Context, st *jobs.Step, rec *recov
 
 	// 1. Elk doel draait weer, met twee verse heartbeats.
 	for _, t := range def.Targets {
-		if err := s.Gate.NodeReady(wctx, t.NodeID, r.clearedAt, readyUnits(t), progress); err != nil {
+		if err := s.Gate.NodeReady(wctx, t.NodeID, r.clearedAt, def.readyUnits(t), progress); err != nil {
 			return failed(err)
 		}
 	}
@@ -913,6 +918,12 @@ func serviceCommand(id, reason, unit, state string) protocol.Command {
 // apply stuurt één service-stap. Een agent die even weg is, krijgt nog een
 // kans als attempts dat toelaat; de stap is idempotent.
 func (s *Service) apply(ctx context.Context, st *jobs.Step, nodeID uuid.UUID, id, reason, unit, state string, attempts int) error {
+	return s.command(ctx, st, nodeID, func() protocol.Command { return serviceCommand(id, reason, unit, state) }, attempts)
+}
+
+// command stuurt een commando tot attempts keer, zolang de agent niet te
+// bereiken is, en schrijft de uitvoer in de stap.
+func (s *Service) command(ctx context.Context, st *jobs.Step, nodeID uuid.UUID, cmd func() protocol.Command, attempts int) error {
 	var res protocol.Result
 	var err error
 	for attempt := range attempts {
@@ -924,7 +935,7 @@ func (s *Service) apply(ctx context.Context, st *jobs.Step, nodeID uuid.UUID, id
 			}
 		}
 		cctx, cancel := context.WithTimeout(ctx, time.Minute)
-		res, err = s.bus.Command(cctx, nodeID, serviceCommand(id, reason, unit, state))
+		res, err = s.bus.Command(cctx, nodeID, cmd())
 		cancel()
 		if err == nil || ctx.Err() != nil {
 			break
@@ -959,6 +970,9 @@ func (r *disasterRun) emergency() {
 			}
 			return r.s.Proxmox.PowerVM(ctx, t.VM.ConnectionID, t.VM.VMID, "start")
 		}
+		if r.def.Kind == Sequence {
+			return "", r.s.emergencyClear(ctx, r.def, r.run.ID, t, r.reason()+" (noodherstel)")
+		}
 		res, err := r.s.bus.Command(ctx, t.NodeID, serviceCommand(r.run.ID.String()+"-clear-"+t.NodeID.String(), r.reason()+" (noodherstel)", t.Unit, "started"))
 		if err == nil && !res.OK {
 			err = errors.New(res.Error)
@@ -989,14 +1003,19 @@ func faultText(def Definition) string {
 	switch def.Kind {
 	case HostDown:
 		return def.Params.Host + " valt uit: " + names + " hard uitgezet"
+	case Sequence:
+		return fmt.Sprintf("reeks van %d stappen op %s", len(def.Steps), names)
 	}
 	return def.Unit + " gestopt op " + names
 }
 
 func clearText(def Definition) string {
 	names := list(targetNames(def.Targets))
-	if def.Kind == HostDown {
+	switch def.Kind {
+	case HostDown:
 		return names + " weer gestart"
+	case Sequence:
+		return "alle storingen van de reeks opgeheven op " + names
 	}
 	return def.Unit + " weer gestart op " + names
 }
@@ -1004,8 +1023,22 @@ func clearText(def Definition) string {
 // StillDown zegt wat er mogelijk nog uit staat als het herstel niet lukte.
 func StillDown(def Definition) string {
 	names := list(targetNames(def.Targets))
-	if def.Kind == HostDown {
+	switch def.Kind {
+	case HostDown:
 		return "de VM's van " + names + " staan mogelijk nog uit"
+	case Sequence:
+		msg := "storingen van de reeks staan mogelijk nog aan op " + names +
+			fmt.Sprintf(" (de agent heft ze uiterlijk na %d s zelf op)", int(protocol.FaultMax.Seconds()))
+		var units []string
+		for _, t := range def.Targets {
+			for _, u := range def.stoppedUnits(t.NodeID) {
+				units = append(units, u+" op "+t.Hostname)
+			}
+		}
+		if len(units) > 0 {
+			msg += " en " + list(uniq(units)) + " staat mogelijk nog stil"
+		}
+		return msg
 	}
 	return def.Unit + " staat mogelijk nog uit op " + names
 }
@@ -1118,7 +1151,11 @@ func (s *Service) runRestore(ctx context.Context, j *jobs.Job) error {
 			if t.VM != nil {
 				return "", s.startVM(ctx, st, t)
 			}
-			return "", s.apply(ctx, st, t.NodeID, j.ID.String()+"-clear-"+t.NodeID.String(), "rampoefening "+def.Name+" opnieuw herstellen", t.Unit, "started", 3)
+			reason := "rampoefening " + def.Name + " opnieuw herstellen"
+			if def.Kind == Sequence {
+				return "", s.clearNode(ctx, st, def, run.ID, t, j.ID.String()+"-clear-"+t.NodeID.String(), reason, 3)
+			}
+			return "", s.apply(ctx, st, t.NodeID, j.ID.String()+"-clear-"+t.NodeID.String(), reason, t.Unit, "started", 3)
 		})
 		if failed := failedTargets(res); len(failed) > 0 {
 			return errors.New(strings.Join(failed, "; "))
@@ -1144,7 +1181,7 @@ func (s *Service) runRestore(ctx context.Context, j *jobs.Job) error {
 			_ = st.Flush(ctx)
 		}
 		for _, t := range def.Targets {
-			if err := s.Gate.NodeReady(ctx, t.NodeID, rs.ClearedAt, readyUnits(t), progress); err != nil {
+			if err := s.Gate.NodeReady(ctx, t.NodeID, rs.ClearedAt, def.readyUnits(t), progress); err != nil {
 				return err
 			}
 		}

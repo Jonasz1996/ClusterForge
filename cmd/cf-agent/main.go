@@ -30,6 +30,9 @@ Gebruik:
   cf-agent run       verbindt met ClusterForge (zo start systemd hem); nog niet
                      aangemeld, dan wacht hij op /etc/clusterforge/enroll.json
   cf-agent facts     toont de facts van deze machine
+  cf-agent fault-clear
+                     draait achtergebleven storingen van een rampoefening terug;
+                     cf-agent-fault-clear.service doet dit bij elke start
   cf-agent verify -  leest een controle-aanvraag (JSON) van stdin en schrijft het
                      resultaat naar stdout; de back-upcontrole start dit in een
                      teruggezette sandbox
@@ -50,6 +53,8 @@ func main() {
 		err = run(os.Args[2:], log)
 	case "verify":
 		os.Exit(verify(os.Args[2:]))
+	case "fault-clear":
+		err = faultClear(os.Args[2:], log)
 	case "facts":
 		f := (&agent.Collector{}).Facts(context.Background())
 		enc := json.NewEncoder(os.Stdout)
@@ -80,6 +85,25 @@ func verify(args []string) int {
 	defer cancel()
 	v := &agent.Verifier{Version: version}
 	return v.Main(ctx, os.Stdin, os.Stdout)
+}
+
+// faultClear draait de storingen in de state terug, ook als de agent niet
+// start. Zonder state is er niets te doen.
+func faultClear(args []string, log *slog.Logger) error {
+	fl := flag.NewFlagSet("fault-clear", flag.ExitOnError)
+	statePath := fl.String("state", agent.DefaultStatePath, "bestand waarin de agent onderhoud en herstarts onthoudt; de storingen staan ernaast")
+	_ = fl.Parse(args)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	f := agent.NewFaults(*statePath, nil, log)
+	res := f.ClearAll(ctx)
+	for _, line := range res.Output {
+		fmt.Println(line)
+	}
+	if !res.OK {
+		return errors.New(res.Error)
+	}
+	return nil
 }
 
 func enroll(args []string) error {

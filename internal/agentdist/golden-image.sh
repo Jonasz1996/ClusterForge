@@ -127,6 +127,23 @@ User=root
 WantedBy=multi-user.target
 UNIT
 
+	cat >"$TMP/cf-agent-fault-clear.service" <<'UNIT'
+[Unit]
+Description=ClusterForge: achtergebleven storingen van een rampoefening terugdraaien
+Documentation=https://github.com/Jonasz1996/ClusterForge
+DefaultDependencies=no
+After=local-fs.target
+Before=network-pre.target cf-agent.service
+Wants=network-pre.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/cf-agent fault-clear
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+
 	echo "==> image aanpassen: qemu-guest-agent en cf-agent $AGENT_VERSION erin"
 	# De guest agent start vanzelf zodra Proxmox zijn apparaat aanbiedt; cf-agent
 	# wacht na het opstarten op /etc/clusterforge/enroll.json.
@@ -137,7 +154,8 @@ UNIT
 		--upload "$TMP/cf-agent:/usr/local/bin/cf-agent" \
 		--chmod 0755:/usr/local/bin/cf-agent \
 		--upload "$TMP/cf-agent.service:/etc/systemd/system/cf-agent.service" \
-		--run-command 'systemctl enable cf-agent.service' \
+		--upload "$TMP/cf-agent-fault-clear.service:/etc/systemd/system/cf-agent-fault-clear.service" \
+		--run-command 'systemctl enable cf-agent.service cf-agent-fault-clear.service' \
 		--run-command 'rm -f /etc/clusterforge/agent.json /etc/clusterforge/enroll.json /var/lib/dbus/machine-id' \
 		--truncate /etc/machine-id
 

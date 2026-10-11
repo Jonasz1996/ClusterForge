@@ -14,6 +14,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/httpapi/gen"
 	"github.com/Jonasz1996/clusterforge/internal/store"
+	"github.com/Jonasz1996/clusterforge/pkg/protocol"
 )
 
 func (s *Server) ListDisasterScenarios(w http.ResponseWriter, r *http.Request, id uuid.UUID) {
@@ -137,7 +138,7 @@ func (s *Server) PreviewDisasterScenario(w http.ResponseWriter, r *http.Request,
 	}
 	out := gen.DisasterPreview{
 		Ok: p.OK, Checks: make([]gen.TestRunCheck, 0, len(p.Checks)), Description: p.Description,
-		Targets: toAPITargets(p.Targets), Clusters: make([]gen.DisasterClusterPlan, 0, len(p.Clusters)),
+		Targets: toAPITargets(p.Targets), Steps: toAPIPlannedSteps(p.Steps, nil), Clusters: make([]gen.DisasterClusterPlan, 0, len(p.Clusters)),
 		Skipped: orEmpty(p.Skipped), Notes: orEmpty(p.Notes), Confirm: orEmpty(p.Confirm),
 	}
 	for _, c := range p.Checks {
@@ -178,6 +179,58 @@ func fromAPIDisasterInput(in gen.DisasterScenarioInput) disaster.Input {
 	if in.Unit != nil {
 		out.Unit = *in.Unit
 	}
+	if in.Steps != nil {
+		for _, st := range *in.Steps {
+			out.Steps = append(out.Steps, disaster.Step{
+				AtSeconds: st.AtSeconds, Action: string(st.Action), On: string(st.On), NodeID: st.NodeId, Interface: deref(st.Interface),
+				Port: deref(st.Port), DelayMS: deref(st.DelayMs), LossPercent: deref(st.LossPercent), FillPercent: deref(st.FillPercent),
+				Unit: deref(st.Unit),
+			})
+		}
+	}
+	return out
+}
+
+// ptrIf geeft een pointer naar v, of nil bij de nulwaarde.
+func ptrIf[T comparable](v T) *T {
+	var zero T
+	if v == zero {
+		return nil
+	}
+	return &v
+}
+
+func toAPIStep(st disaster.Step) gen.DisasterStep {
+	return gen.DisasterStep{
+		AtSeconds: st.AtSeconds, Action: gen.DisasterStepAction(st.Action), On: gen.DisasterStepOn(st.On), NodeId: st.NodeID,
+		Hostname: ptrIf(st.Hostname), Interface: ptrIf(st.Interface), Port: ptrIf(st.Port), DelayMs: ptrIf(st.DelayMS),
+		LossPercent: ptrIf(st.LossPercent), FillPercent: ptrIf(st.FillPercent), Unit: ptrIf(st.Unit),
+	}
+}
+
+// toAPIPlannedSteps zet de stappen van een reeks om, met wat elke stap deed
+// als de run al liep.
+func toAPIPlannedSteps(steps []disaster.PlannedStep, ran []disaster.StepResult) []gen.DisasterPlannedStep {
+	out := make([]gen.DisasterPlannedStep, 0, len(steps))
+	for i, ps := range steps {
+		ap := gen.DisasterPlannedStep{
+			Step: i + 1, AtSeconds: ps.AtSeconds, Action: gen.DisasterStepAction(ps.Action), On: gen.DisasterStepOn(ps.On), Unit: ps.Unit, Text: ps.Text,
+			Nodes: make([]gen.DisasterStepNode, 0, len(ps.Nodes)), RanMs: nullable.NewNullNullable[int64](), Results: []gen.DisasterTargetResult{},
+		}
+		for _, n := range ps.Nodes {
+			ap.Nodes = append(ap.Nodes, gen.DisasterStepNode{NodeId: n.NodeID, Hostname: n.Hostname, CutOff: n.CutOff})
+		}
+		for _, r := range ran {
+			if r.Step != i+1 {
+				continue
+			}
+			ap.RanMs = nullable.NewNullableWithValue(r.AtMS)
+			for _, t := range r.Targets {
+				ap.Results = append(ap.Results, gen.DisasterTargetResult{NodeId: t.NodeID, Hostname: t.Hostname, Error: t.Error})
+			}
+		}
+		out = append(out, ap)
+	}
 	return out
 }
 
@@ -185,6 +238,16 @@ func toAPIDisasterOptions(o disaster.Options) gen.DisasterOptions {
 	out := gen.DisasterOptions{
 		Allowed: o.Allowed, Reason: o.Reason, Slug: o.Slug, Kinds: make([]gen.DisasterKindOption, 0, len(o.Kinds)),
 		Hosts: make([]gen.DisasterHostOption, 0, len(o.Hosts)), Units: orEmpty(o.Units), Vips: orEmpty(o.VIPs),
+		Nodes: make([]gen.DisasterNodeOption, 0, len(o.Nodes)), Actions: make([]gen.DisasterActionOption, 0, len(o.Actions)),
+	}
+	for _, n := range o.Nodes {
+		out.Nodes = append(out.Nodes, gen.DisasterNodeOption{
+			Id: n.ID, Hostname: n.Hostname, Owner: n.Owner, Faults: n.Protocol >= protocol.FaultsSince, Nft: n.Nft, Tc: n.Tc,
+			Interfaces: orEmpty(n.Interfaces), Primary: n.Primary, Units: orEmpty(n.Units),
+		})
+	}
+	for _, a := range o.Actions {
+		out.Actions = append(out.Actions, gen.DisasterActionOption{Key: gen.DisasterStepAction(a.Key), Label: a.Label, Available: a.Available, Reason: a.Reason})
 	}
 	for _, k := range o.Kinds {
 		out.Kinds = append(out.Kinds, gen.DisasterKindOption{
@@ -203,8 +266,12 @@ func toAPIDisasterOptions(o disaster.Options) gen.DisasterOptions {
 func toAPIScenario(sc disaster.Scenario, last *gen.TestRun, conns map[uuid.UUID]string) gen.DisasterScenario {
 	out := gen.DisasterScenario{
 		Id: sc.ID, ClusterId: sc.ClusterID, Name: sc.Name, Kind: gen.DisasterKind(sc.Kind), Description: disaster.Describe(sc.Kind, sc.P),
-		Host: nullable.NewNullNullable[gen.DisasterHost](), Unit: sc.P.Unit, FaultSeconds: sc.E.FaultSeconds,
-		RecoverySeconds: sc.E.RecoverySeconds, LastRun: nullableOf(last), CreatedAt: sc.CreatedAt, UpdatedAt: sc.UpdatedAt,
+		Host: nullable.NewNullNullable[gen.DisasterHost](), Unit: sc.P.Unit, Steps: make([]gen.DisasterStep, 0, len(sc.P.Steps)),
+		FaultSeconds: sc.E.FaultSeconds, RecoverySeconds: sc.E.RecoverySeconds, LastRun: nullableOf(last), CreatedAt: sc.CreatedAt,
+		UpdatedAt: sc.UpdatedAt,
+	}
+	for _, st := range sc.P.Steps {
+		out.Steps = append(out.Steps, toAPIStep(st))
 	}
 	if sc.Kind == disaster.HostDown && sc.P.ConnectionID != nil {
 		out.Host = nullable.NewNullableWithValue(gen.DisasterHost{
@@ -260,6 +327,7 @@ func disasterReport(run store.TestRun, out *gen.TestRun) {
 		FaultMs: m.FaultMS, ExpectRecoveryMs: m.ExpectRecoveryMS, ShortOutageMs: m.ShortOutageMS,
 		ClearMs: nullableOf(m.ClearMS), RecoveryMs: nullableOf(m.RecoveryMS), TotalMs: nullableOf(m.TotalMS), EndMs: m.EndMS,
 		Targets: toAPITargets(def.Targets), TargetResults: make([]gen.DisasterTargetResult, 0, len(m.Targets)),
+		Steps:    toAPIPlannedSteps(def.Steps, m.Steps),
 		Clusters: []gen.DisasterClusterResult{}, Vips: make([]gen.DisasterVIPResult, 0, len(m.VIPs)),
 		Skipped: orEmpty(def.Skipped), Notes: orEmpty(def.Notes),
 	}

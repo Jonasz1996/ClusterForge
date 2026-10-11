@@ -190,6 +190,21 @@ func (a *Agent) handleCommand(data []byte) protocol.Result {
 		}
 	case protocol.CmdReboot, protocol.CmdShutdown:
 		res = a.power(cmd)
+	case protocol.CmdFaultInject:
+		a.initFaults()
+		if cmd.Fault == nil {
+			res = failed(nil, "geen storing in het commando")
+			break
+		}
+		res = a.faults.Inject(ctx, *cmd.Fault)
+		a.signal(a.factsNow)
+	case protocol.CmdFaultRenew:
+		a.initFaults()
+		res = a.faults.Renew(cmd.FaultIDs)
+	case protocol.CmdFaultClear:
+		a.initFaults()
+		res = a.faults.Clear(ctx, cmd.FaultIDs)
+		a.signal(a.factsNow)
 	default:
 		res = failed(nil, "onbekend commando "+cmd.Action)
 	}

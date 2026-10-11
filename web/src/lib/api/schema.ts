@@ -3305,7 +3305,63 @@ export interface components {
             finished_at: string | null;
         };
         /** @enum {string} */
-        DisasterKind: "host_down" | "service_down" | "vip_loss";
+        DisasterKind: "host_down" | "service_down" | "vip_loss" | "sequence";
+        /** @enum {string} */
+        DisasterStepAction: "vrrp_block" | "link_down" | "port_block" | "netem" | "disk_fill" | "service_stop";
+        /**
+         * @description owner: de node met het VIP bij de start; others: alle andere actieve nodes
+         * @enum {string}
+         */
+        DisasterStepOn: "owner" | "others" | "all" | "node";
+        DisasterStep: {
+            /** @description Seconden na de start van de storing */
+            at_seconds: number;
+            action: components["schemas"]["DisasterStepAction"];
+            on: components["schemas"]["DisasterStepOn"];
+            /**
+             * Format: uuid
+             * @description Bij on node
+             */
+            node_id?: string;
+            /** @description Bij on node; alleen in antwoorden */
+            hostname?: string;
+            /** @description Bij link_down en netem */
+            interface?: string;
+            /** @description Bij port_block */
+            port?: number;
+            /** @description Bij netem */
+            delay_ms?: number;
+            /** @description Bij netem */
+            loss_percent?: number;
+            /** @description Bij disk_fill */
+            fill_percent?: number;
+            /** @description Bij service_stop */
+            unit?: string;
+        };
+        DisasterStepNode: {
+            /** Format: uuid */
+            node_id: string;
+            hostname: string;
+            /** @description link_down op de interface naar ClusterForge: alleen de bovengrens telt, want ClusterForge kan niet verlengen of opheffen */
+            cut_off: boolean;
+        };
+        DisasterPlannedStep: {
+            /** @description Nummer van de stap */
+            step: number;
+            at_seconds: number;
+            action: components["schemas"]["DisasterStepAction"];
+            on: components["schemas"]["DisasterStepOn"];
+            /** @description Bij service_stop de dienst */
+            unit: string;
+            text: string;
+            nodes: components["schemas"]["DisasterStepNode"][];
+            /**
+             * Format: int64
+             * @description Wanneer de stap liep, in ms na de start van de storing; leeg als hij niet liep
+             */
+            ran_ms: number | null;
+            results: components["schemas"]["DisasterTargetResult"][];
+        };
         DisasterHost: {
             /** Format: uuid */
             connection_id: string;
@@ -3324,6 +3380,8 @@ export interface components {
             host: components["schemas"]["DisasterHost"] | null;
             /** @description Bij service_down de dienst */
             unit: string;
+            /** @description Bij sequence de stappen */
+            steps: components["schemas"]["DisasterStep"][];
             /** @description Hoe lang de storing duurt */
             fault_seconds: number;
             /** @description Hoe snel na het terugzetten alles weer gezond moet zijn */
@@ -3346,6 +3404,8 @@ export interface components {
             host?: string;
             /** @description Bij service_down */
             unit?: string;
+            /** @description Bij sequence; aan het einde van de storing heft ClusterForge alles op */
+            steps?: components["schemas"]["DisasterStep"][];
             fault_seconds: number;
             recovery_seconds: number;
         };
@@ -3372,6 +3432,29 @@ export interface components {
             /** @description Gekoppelde VM's van andere clusters op de host */
             others: string[];
         };
+        DisasterNodeOption: {
+            /** Format: uuid */
+            id: string;
+            hostname: string;
+            /** @description De node heeft nu het VIP */
+            owner: boolean;
+            /** @description De agent kent storingen (protocol 6) */
+            faults: boolean;
+            nft: boolean;
+            tc: boolean;
+            interfaces: string[];
+            /** @description De interface naar ClusterForge; leeg als dat niet bekend is */
+            primary: string;
+            /** @description Diensten die een stap hier kan stoppen */
+            units: string[];
+        };
+        DisasterActionOption: {
+            key: components["schemas"]["DisasterStepAction"];
+            label: string;
+            available: boolean;
+            /** @description Waarom niet */
+            reason: string;
+        };
         DisasterOptions: {
             /** @description false op prod */
             allowed: boolean;
@@ -3381,6 +3464,9 @@ export interface components {
             hosts: components["schemas"]["DisasterHostOption"][];
             units: string[];
             vips: string[];
+            /** @description Voor de stappen van een reeks */
+            nodes: components["schemas"]["DisasterNodeOption"][];
+            actions: components["schemas"]["DisasterActionOption"][];
         };
         DisasterScenarioList: {
             items: components["schemas"]["DisasterScenario"][];
@@ -3432,6 +3518,8 @@ export interface components {
             checks: components["schemas"]["TestRunCheck"][];
             description: string;
             targets: components["schemas"]["DisasterTarget"][];
+            /** @description Bij sequence */
+            steps: components["schemas"]["DisasterPlannedStep"][];
             clusters: components["schemas"]["DisasterClusterPlan"][];
             /** @description Draaiende VM's op de host die niet in ClusterForge staan en aan blijven */
             skipped: string[];
@@ -3514,6 +3602,8 @@ export interface components {
             end_ms: number;
             targets: components["schemas"]["DisasterTarget"][];
             target_results: components["schemas"]["DisasterTargetResult"][];
+            /** @description Bij sequence */
+            steps: components["schemas"]["DisasterPlannedStep"][];
             /** @description Voorspeld tegen gemeten; tijdens de run de voorspelling met measured leeg */
             clusters: components["schemas"]["DisasterClusterResult"][];
             vips: components["schemas"]["DisasterVIPResult"][];

@@ -13,6 +13,10 @@
 # Met --upgrade in plaats van --token wordt een aangemelde agent bijgewerkt
 # naar de versie van de server: nieuwe binary na een checksumcontrole, de
 # aanmelding in /etc/clusterforge/agent.json blijft, en de service herstart.
+#
+# Beide plaatsen cf-agent-fault-clear.service: die draait bij het opstarten
+# de storingen van een rampoefening terug die nog in de state staan, ook als
+# de agent zelf niet start.
 set -eu
 
 SERVER=""
@@ -82,12 +86,37 @@ if [ "$EXPECTED" != "$ACTUAL" ]; then
 	exit 1
 fi
 
+# fault_clear_unit plaatst de oneshot-unit die bij elke start achtergebleven
+# storingen terugdraait, voor het netwerk en de agent.
+fault_clear_unit() {
+	install -d "$ROOT/etc/systemd/system"
+	cat >"$ROOT/etc/systemd/system/cf-agent-fault-clear.service" <<'UNIT'
+[Unit]
+Description=ClusterForge: achtergebleven storingen van een rampoefening terugdraaien
+Documentation=https://github.com/Jonasz1996/ClusterForge
+DefaultDependencies=no
+After=local-fs.target
+Before=network-pre.target cf-agent.service
+Wants=network-pre.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/cf-agent fault-clear
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+}
+
 if [ "$UPGRADE" = 1 ]; then
 	OLD="$("$BIN" version 2>/dev/null || echo onbekend)"
 	# Eerst naast de oude zetten en dan in één keer vervangen, zodat er nooit
 	# een halve binary staat.
 	install -m 0755 "$TMP/cf-agent" "$BIN.new"
 	mv -f "$BIN.new" "$BIN"
+	fault_clear_unit
+	systemctl daemon-reload
+	systemctl enable cf-agent-fault-clear >/dev/null 2>&1
 	systemctl restart cf-agent
 	echo "klaar: cf-agent bijgewerkt van $OLD naar $("$BIN" version); de aanmelding is gebleven"
 	exit 0
@@ -115,7 +144,9 @@ User=root
 WantedBy=multi-user.target
 UNIT
 
+fault_clear_unit
 systemctl daemon-reload
+systemctl enable cf-agent-fault-clear >/dev/null 2>&1
 if [ "$NO_ENROLL" = 1 ]; then
 	systemctl enable cf-agent >/dev/null 2>&1
 	echo "klaar: cf-agent is geïnstalleerd maar niet aangemeld; hij wacht op /etc/clusterforge/enroll.json"

@@ -210,8 +210,41 @@ func commandText(p map[string]any) string {
 			}
 		}
 		return fmt.Sprintf("%d stappen toepassen", len(steps))
+	case "fault.inject":
+		f, _ := p["fault"].(map[string]any)
+		return "storing aanzetten: " + faultText(f) + fmt.Sprintf(", hoogstens %s s", num(f["max_seconds"]))
+	case "fault.clear":
+		ids, _ := p["fault_ids"].([]any)
+		if len(ids) == 0 {
+			return "alle storingen opheffen"
+		}
+		return "storingen opheffen"
 	}
 	return str(p, "command")
+}
+
+// faultText beschrijft een storing van fault.inject.
+func faultText(f map[string]any) string {
+	switch str(f, "kind") {
+	case "link_down":
+		return "interface " + str(f, "interface") + " down"
+	case "vrrp_block":
+		return "VRRP blokkeren"
+	case "port_block":
+		return "TCP-poort " + num(f["port"]) + " blokkeren"
+	case "netem":
+		var parts []string
+		if d := num(f["delay_ms"]); d != "" && d != "0" {
+			parts = append(parts, d+" ms vertraging")
+		}
+		if l := num(f["loss_percent"]); l != "" && l != "0" {
+			parts = append(parts, l+" % verlies")
+		}
+		return str(f, "interface") + " " + strings.Join(parts, " en ")
+	case "disk_fill":
+		return "schijf vullen tot " + num(f["fill_percent"]) + " %"
+	}
+	return str(f, "kind")
 }
 
 func stepText(st map[string]any) string {

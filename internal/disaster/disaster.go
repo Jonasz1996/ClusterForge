@@ -32,6 +32,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/status"
 	"github.com/Jonasz1996/clusterforge/internal/store"
 	"github.com/Jonasz1996/clusterforge/internal/topo"
+	"github.com/Jonasz1996/clusterforge/pkg/protocol"
 )
 
 // Soorten rampoefening.
@@ -44,6 +45,10 @@ const (
 	// VIPLoss stopt keepalived op alle nodes, zodat het VIP geen houder
 	// heeft.
 	VIPLoss = "vip_loss"
+	// Sequence is een reeks van hoogstens vijf storingen met een tijdstip:
+	// de vaste storingen van de agent (protocol 6) en een dienst stoppen.
+	// Aan het einde van de storing heft ClusterForge ze allemaal op.
+	Sequence = "sequence"
 )
 
 // Soorten taak.
@@ -72,6 +77,7 @@ var Kinds = []Kind{
 	{HostDown, "Proxmox-host valt uit", 120, 600},
 	{ServiceDown, "Dienst valt weg op alle nodes", 60, 120},
 	{VIPLoss, "VIP valt weg", 60, 120},
+	{Sequence, "Reeks van storingen", 90, 120},
 }
 
 func kindOf(key string) (Kind, bool) {
@@ -112,6 +118,8 @@ type Params struct {
 	Host         string     `json:"host,omitempty"`
 	// Unit is bij service_down de dienst.
 	Unit string `json:"unit,omitempty"`
+	// Steps zijn bij sequence de stappen, op volgorde van tijdstip.
+	Steps []Step `json:"steps,omitempty"`
 }
 
 // Expect is de verwachting: hoe lang de storing duurt en hoe snel na het
@@ -133,6 +141,8 @@ func Describe(kind string, p Params) string {
 		return p.Unit + " stoppen op alle nodes"
 	case VIPLoss:
 		return "keepalived stoppen op alle nodes, zodat het VIP geen houder heeft"
+	case Sequence:
+		return describeSteps(p.Steps)
 	}
 	return kind
 }
@@ -194,6 +204,10 @@ type Service struct {
 	// EmergencyTimeout is hoe lang het noodherstel bij een stop van de
 	// server mag duren.
 	EmergencyTimeout time.Duration
+	// Lease is hoe lang een storing van een reeks blijft zonder verlenging,
+	// RenewInterval hoe vaak de server verlengt zolang hij meet.
+	Lease         time.Duration
+	RenewInterval time.Duration
 	// Changed wordt aangeroepen na een run; mag nil zijn.
 	Changed func()
 }
@@ -204,8 +218,8 @@ func NewService(pool *pgxpool.Pool, ev *events.Writer, log *slog.Logger, runner 
 		Gate: health.NewGate(pool), Prober: failover.NetProber{Timeout: 400 * time.Millisecond},
 		ProbeInterval: 250 * time.Millisecond, StatusPoll: 2 * time.Second, ShortOutage: 10 * time.Second,
 		Fresh: status.HeartbeatLate, Retry: 5 * time.Second, ReturnTimeout: 3 * time.Minute, BootTimeout: 15 * time.Minute,
-		EmergencyTimeout: 10 * time.Second,
-		Probes:           func(store.Cluster, string) failover.Probe { return failover.DefaultProbe },
+		EmergencyTimeout: 10 * time.Second, Lease: protocol.FaultLease, RenewInterval: 10 * time.Second,
+		Probes: func(store.Cluster, string) failover.Probe { return failover.DefaultProbe },
 	}
 	// Geen van beide is Retryable: een nieuwe poging is een nieuwe taak.
 	runner.Register(KindRun, s.runDisaster)
@@ -227,12 +241,13 @@ type Input struct {
 	ConnectionID    *uuid.UUID
 	Host            string
 	Unit            string
+	Steps           []Step
 	FaultSeconds    int
 	RecoverySeconds int
 }
 
 func (in *Input) params() Params {
-	return Params{ConnectionID: in.ConnectionID, Host: in.Host, Unit: in.Unit}
+	return Params{ConnectionID: in.ConnectionID, Host: in.Host, Unit: in.Unit, Steps: in.Steps}
 }
 
 func fieldErr(field, msg string) error { return &failover.FieldError{Field: field, Message: msg} }
@@ -247,10 +262,13 @@ func (in *Input) validate(o Options) error {
 		return fieldErr("name", "de naam is te lang (hoogstens 200 tekens)")
 	}
 	if _, ok := kindOf(in.Kind); !ok {
-		return fieldErr("kind", "kies een Proxmox-host die uitvalt, een dienst die wegvalt of een VIP dat wegvalt")
+		return fieldErr("kind", "kies een Proxmox-host die uitvalt, een dienst die wegvalt, een VIP dat wegvalt of een reeks van storingen")
 	}
 	if !o.Allowed {
 		return fieldErr("kind", o.Reason)
+	}
+	if in.Kind != Sequence {
+		in.Steps = nil
 	}
 	switch in.Kind {
 	case HostDown:
@@ -271,6 +289,8 @@ func (in *Input) validate(o Options) error {
 		}
 	case VIPLoss:
 		in.ConnectionID, in.Host, in.Unit = nil, "", ""
+	case Sequence:
+		in.ConnectionID, in.Host, in.Unit = nil, "", ""
 	}
 	if in.Kind == HostDown && in.FaultSeconds < MinHostDownSeconds {
 		return fieldErr("fault_seconds", fmt.Sprintf("na een harde stop is een node pas na %d s zonder heartbeat down; laat de storing minstens %d seconden duren",
@@ -281,6 +301,13 @@ func (in *Input) validate(o Options) error {
 	}
 	if in.RecoverySeconds < MinRecoverySeconds || in.RecoverySeconds > MaxRecoverySeconds {
 		return fieldErr("recovery_seconds", fmt.Sprintf("de verwachte hersteltijd ligt tussen %d en %d seconden", MinRecoverySeconds, MaxRecoverySeconds))
+	}
+	if in.Kind == Sequence {
+		steps, err := validateSteps(in.Steps, in.FaultSeconds, o)
+		if err != nil {
+			return err
+		}
+		in.Steps = steps
 	}
 	return nil
 }
@@ -324,6 +351,9 @@ type Options struct {
 	// Units zijn de diensten die service_down hier kan stoppen.
 	Units []string
 	VIPs  []string
+	// Nodes en Actions zijn er voor de stappen van een reeks.
+	Nodes   []NodeOption
+	Actions []ActionOption
 }
 
 // Options zegt welke rampoefeningen dit cluster nu kan.
@@ -363,13 +393,24 @@ func (s *Service) Options(ctx context.Context, clusterID uuid.UUID) (Options, er
 		}
 	}
 	slices.SortFunc(out.Units, func(a, b string) int { return cmp.Compare(slices.Index(Units, a), slices.Index(Units, b)) })
+	var m topo.Model
 	if s.World != nil {
 		if w, err := s.World(ctx); err == nil {
 			out.Hosts = hostOptions(w.Topo, nodes)
+			m = w.Topo
 		} else {
 			s.log.Warn("hosts voor rampoefeningen lezen", "err", err)
 		}
 	}
+	fns, err := s.faultNodes(ctx, clusterID, out.VIPs, m)
+	if err != nil {
+		return Options{}, err
+	}
+	out.Nodes = make([]NodeOption, 0, len(fns))
+	for _, n := range fns {
+		out.Nodes = append(out.Nodes, n.NodeOption)
+	}
+	out.Actions = actionOptions(fns)
 	for _, k := range Kinds {
 		o := KindOption{Kind: k, Available: true}
 		switch {
@@ -385,6 +426,10 @@ func (s *Service) Options(ctx context.Context, clusterID uuid.UUID) (Options, er
 			o.Available, o.Reason = false, "dit cluster heeft geen VIP"
 		case k.Key == VIPLoss && !keepalived:
 			o.Available, o.Reason = false, "op geen enkele node staat keepalived"
+		case k.Key == Sequence && len(out.Nodes) == 0:
+			o.Available, o.Reason = false, "geen actieve node van dit cluster heeft een agent"
+		case k.Key == Sequence && !slices.ContainsFunc(out.Actions, func(a ActionOption) bool { return a.Available }):
+			o.Available, o.Reason = false, "geen enkele storing kan hier; zie de redenen per stap"
 		}
 		out.Kinds = append(out.Kinds, o)
 	}

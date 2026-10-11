@@ -2,6 +2,7 @@ package agent
 
 import (
 	"io/fs"
+	"os"
 	"syscall"
 )
 
@@ -23,4 +24,17 @@ func fileOwner(fi fs.FileInfo) (uid, gid int, ok bool) {
 		return 0, 0, false
 	}
 	return int(st.Uid), int(st.Gid), true
+}
+
+// allocate maakt een bestand van n bytes dat echt ruimte inneemt.
+func allocate(path string, n int64) error {
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	if err := syscall.Fallocate(int(f.Fd()), 0, 0, n); err != nil { //nolint:gosec // een fd past in int
+		_ = f.Close()
+		return writeZeros(path, n)
+	}
+	return f.Close()
 }

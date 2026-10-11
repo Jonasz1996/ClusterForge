@@ -16,6 +16,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Jonasz1996/clusterforge/pkg/protocol"
 )
 
 // Unit is de toestand van een systemd-unit. Failed: de unit startte niet.
@@ -51,6 +53,12 @@ type Host struct {
 	calls    []string
 	fail     map[string]*failure
 	journal  map[string]string
+
+	// De storingen van de agent: de nft-tabel cf_fault, interfaces die down
+	// staan en de root-qdisc per interface.
+	nft      string
+	linkDown map[string]bool
+	qdisc    map[string]string
 }
 
 type failure struct {
@@ -62,8 +70,61 @@ func NewHost(root, address string) *Host {
 	return &Host{
 		Root: root, Address: address, Interface: "eth0",
 		packages: map[string]bool{}, versions: map[string]string{}, units: map[string]*Unit{}, users: map[string]bool{"root": true},
-		fail: map[string]*failure{},
+		fail: map[string]*failure{}, linkDown: map[string]bool{}, qdisc: map[string]string{},
 	}
+}
+
+// Interfaces is wat de agent in zijn facts zet: de netwerkkaart met het
+// eigen adres.
+func (h *Host) Interfaces() []protocol.Interface {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return []protocol.Interface{{Name: h.Interface, Up: !h.linkDown[h.Interface], Addresses: []string{h.Address + "/24"}, Kind: "physical"}}
+}
+
+// VRRPBlocked is true als de tabel cf_fault VRRP laat vallen.
+func (h *Host) VRRPBlocked() bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.vrrpBlocked()
+}
+
+func (h *Host) vrrpBlocked() bool { return strings.Contains(h.nft, "meta l4proto 112 drop") }
+
+var dportRe = regexp.MustCompile(`tcp dport (\d+) drop`)
+
+// Blocked is true als de tabel cf_fault inkomend verkeer op de poort laat
+// vallen.
+func (h *Host) Blocked(port int) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for _, m := range dportRe.FindAllStringSubmatch(h.nft, -1) {
+		if m[1] == strconv.Itoa(port) {
+			return true
+		}
+	}
+	return false
+}
+
+// LinkDown is true als de interface down staat.
+func (h *Host) LinkDown(iface string) bool {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.linkDown[iface]
+}
+
+// Qdisc is de root-qdisc van een interface.
+func (h *Host) Qdisc(iface string) string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return cmpOr(h.qdisc[iface], "noqueue")
+}
+
+func cmpOr(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
 }
 
 // Fail laat het eerstvolgende commando dat met prefix begint mislukken met
@@ -108,6 +169,13 @@ func (h *Host) Addresses() []string {
 	h.mu.Lock()
 	g := h.group
 	h.mu.Unlock()
+	h.mu.Lock()
+	down := h.linkDown[h.Interface]
+	h.mu.Unlock()
+	if down {
+		// Zonder netwerk is er niets te bereiken.
+		return nil
+	}
 	out := []string{h.Address}
 	if g != nil {
 		out = append(out, g.held(h)...)
@@ -118,7 +186,7 @@ func (h *Host) Addresses() []string {
 // queries zijn commando's die niets veranderen; ze komen niet in Calls.
 var queries = []string{
 	"systemctl show", "systemctl --failed", "systemctl is-system-running", "dpkg-query", "id ", "journalctl", "apt-get -s",
-	"systemd-detect-virt", "docker ",
+	"systemd-detect-virt", "docker ", "tc qdisc show",
 }
 
 func (h *Host) record(call string) {
@@ -149,7 +217,7 @@ func (h *Host) Exec(_ context.Context, name string, args ...string) ([]byte, err
 	out, err := h.exec(name, args)
 	g := h.group
 	h.mu.Unlock()
-	if g != nil && name == "systemctl" {
+	if g != nil && (name == "systemctl" || name == "nft" || name == "ip") {
 		g.update()
 	}
 	return out, err
@@ -180,8 +248,67 @@ func (h *Host) exec(name string, args []string) ([]byte, error) {
 		return nil, nil
 	case "sh":
 		return nil, nil
+	case "nft":
+		return h.nftExec(args)
+	case "ip":
+		// ip link set dev <x> up|down
+		if len(args) != 5 || args[0] != "link" || args[1] != "set" || args[2] != "dev" || (args[4] != "up" && args[4] != "down") {
+			return nil, fmt.Errorf("ip %s", strings.Join(args, " "))
+		}
+		if args[3] != h.Interface {
+			return []byte("Cannot find device \"" + args[3] + "\"\n"), errors.New("exit status 1")
+		}
+		h.linkDown[args[3]] = args[4] == "down"
+		return nil, nil
+	case "tc":
+		return h.tc(args)
 	}
 	return nil, fmt.Errorf("onbekend commando %s", name)
+}
+
+// nftExec speelt nft -f <script> en nft delete table inet cf_fault na.
+func (h *Host) nftExec(args []string) ([]byte, error) {
+	switch {
+	case len(args) == 2 && args[0] == "-f":
+		b, err := os.ReadFile(args[1])
+		if err != nil {
+			return []byte(err.Error() + "\n"), errors.New("exit status 1")
+		}
+		h.nft = string(b)
+		return nil, nil
+	case strings.Join(args, " ") == "delete table inet cf_fault":
+		if h.nft == "" {
+			return []byte("Error: Could not process rule: No such file or directory\ndelete table inet cf_fault\n"), errors.New("exit status 1")
+		}
+		h.nft = ""
+		return nil, nil
+	}
+	return nil, fmt.Errorf("nft %s", strings.Join(args, " "))
+}
+
+// tc speelt tc qdisc show, replace en del op de root na.
+func (h *Host) tc(args []string) ([]byte, error) {
+	if len(args) < 5 || args[0] != "qdisc" || args[2] != "dev" || args[4] != "root" {
+		return nil, fmt.Errorf("tc %s", strings.Join(args, " "))
+	}
+	dev := args[3]
+	if dev != h.Interface {
+		return []byte("Cannot find device \"" + dev + "\"\n"), errors.New("exit status 1")
+	}
+	switch args[1] {
+	case "show":
+		return []byte(fmt.Sprintf("qdisc %s 0: root refcnt 2\n", cmpOr(h.qdisc[dev], "noqueue"))), nil
+	case "replace":
+		if len(args) < 6 {
+			return nil, errors.New("tc qdisc replace zonder qdisc")
+		}
+		h.qdisc[dev] = args[5]
+		return nil, nil
+	case "del":
+		delete(h.qdisc, dev)
+		return nil, nil
+	}
+	return nil, fmt.Errorf("tc %s", strings.Join(args, " "))
 }
 
 // dpkgQuery speelt dpkg-query -W -f=... namen... na, met de escapes \t en
@@ -457,17 +584,23 @@ func (h *Host) unicast() (src string, peers []string, ok bool) {
 	return src, strings.Fields(m[1]), true
 }
 
-// vrrpPeer is wat een draaiende keepalived over unicast weet.
+// vrrpPeer is wat een draaiende keepalived over unicast weet. blocked: de
+// machine laat VRRP in en uit vallen.
 type vrrpPeer struct {
 	unicast bool
 	src     string
 	peers   []string
+	blocked bool
 }
 
 // hears zegt of h de adverts van o ontvangt. Met unicast stuurt o alleen
 // naar zijn peers, en neemt h alleen adverts aan van zijn peers. Kent een
-// van beide de ander niet, dan hoort h niets en wordt hij zelf MASTER.
+// van beide de ander niet, of blokkeert een van beide VRRP, dan hoort h
+// niets en wordt hij zelf MASTER.
 func hears(h, o vrrpPeer) bool {
+	if h.blocked || o.blocked {
+		return false
+	}
 	if !h.unicast || !o.unicast {
 		return true
 	}
@@ -525,13 +658,18 @@ func (g *Group) update() {
 		if t := h.units[tracked]; tracked != "" && (t == nil || !t.Active) {
 			running = false
 		}
+		// Zonder netwerk hoort niemand de machine.
+		if h.linkDown[h.Interface] {
+			running = false
+		}
 		src, peers, uni := h.unicast()
+		blocked := h.vrrpBlocked()
 		h.mu.Unlock()
 		if !running {
 			continue
 		}
 		eligible[h] = vips
-		peer[h] = vrrpPeer{unicast: uni, src: src, peers: peers}
+		peer[h] = vrrpPeer{unicast: uni, src: src, peers: peers, blocked: blocked}
 		for _, v := range vips {
 			if _, ok := want[v]; !ok || prio > best[v] {
 				want[v], best[v] = h, prio

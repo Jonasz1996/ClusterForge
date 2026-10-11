@@ -177,7 +177,21 @@ func (c *Collector) Facts(ctx context.Context) protocol.Facts {
 	c.netFacts(&f)
 	c.maintenanceFacts(&f)
 	f.Certificates = c.certificates()
+	f.Tools = c.tools()
 	return f
+}
+
+// tools zegt of nft en tc er zijn, voor storingsinjectie.
+func (c *Collector) tools() *protocol.Tools {
+	has := func(name string) bool {
+		for _, dir := range []string{"/usr/sbin", "/sbin", "/usr/bin", "/bin"} {
+			if fi, err := os.Stat(c.path(filepath.Join(dir, name))); err == nil && !fi.IsDir() {
+				return true
+			}
+		}
+		return false
+	}
+	return &protocol.Tools{Nft: has("nft"), Tc: has("tc")}
 }
 
 func (c *Collector) osRelease() protocol.OSInfo {

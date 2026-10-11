@@ -60,16 +60,18 @@ type Measurements struct {
 	ClearMS *int64 `json:"clear_ms,omitempty"`
 	// RecoveryMS loopt van het terugzetten tot elk cluster weer gezond was,
 	// TotalMS van de storing tot dan.
-	RecoveryMS *int64          `json:"recovery_ms,omitempty"`
-	TotalMS    *int64          `json:"total_ms,omitempty"`
-	EndMS      int64           `json:"end_ms"`
-	Targets    []TargetResult  `json:"targets"`
-	Clusters   []ClusterResult `json:"clusters"`
-	VIPs       []VIPResult     `json:"vips"`
-	Injected   bool            `json:"injected"`
-	Canceled   bool            `json:"canceled,omitempty"`
-	Notes      []string        `json:"notes,omitempty"`
-	Skipped    []string        `json:"skipped,omitempty"`
+	RecoveryMS *int64         `json:"recovery_ms,omitempty"`
+	TotalMS    *int64         `json:"total_ms,omitempty"`
+	EndMS      int64          `json:"end_ms"`
+	Targets    []TargetResult `json:"targets"`
+	// Steps is bij een reeks wat elke stap deed.
+	Steps    []StepResult    `json:"steps,omitempty"`
+	Clusters []ClusterResult `json:"clusters"`
+	VIPs     []VIPResult     `json:"vips"`
+	Injected bool            `json:"injected"`
+	Canceled bool            `json:"canceled,omitempty"`
+	Notes    []string        `json:"notes,omitempty"`
+	Skipped  []string        `json:"skipped,omitempty"`
 }
 
 // outcome is alles waaruit het rapport volgt.
@@ -276,7 +278,8 @@ func (r *disasterRun) report(o outcome, rows []ClusterResult) ([]failover.Timeli
 		meas.Clusters = []ClusterResult{}
 	}
 	timeline := []failover.TimelineEvent{}
-	if o.injected && o.injectErr == "" {
+	// Bij een reeks staat elke stap al in de tijdlijn van de meting.
+	if o.injected && o.injectErr == "" && def.Kind != Sequence {
 		timeline = append(timeline, failover.TimelineEvent{TMS: 0, Kind: "fault", Text: faultText(def)})
 	}
 	vips := map[string]*VIPResult{}
@@ -345,6 +348,7 @@ func (r *disasterRun) finish(ctx context.Context, o outcome) error {
 				var ms measureState
 				if js.Name == stepMeasure && json.Unmarshal(js.State, &ms) == nil && len(ms.Injected) > 0 {
 					meas.Targets = ms.Injected
+					meas.Steps = ms.Steps
 				}
 			}
 		}

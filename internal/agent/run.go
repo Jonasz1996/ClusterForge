@@ -63,6 +63,7 @@ type Agent struct {
 	connected chan struct{}
 	// stateMu bewaakt StatePath; zie updateState.
 	stateMu sync.Mutex
+	faults  *Faults
 }
 
 // Connect verbindt met NATS. Is de server nog niet bereikbaar, dan blijft de
@@ -97,6 +98,7 @@ func (a *Agent) Connect() error {
 	if a.Collector.OnUnits == nil {
 		a.Collector.OnUnits = a.Journal.ObserveUnits
 	}
+	a.initFaults()
 	a.factsNow = make(chan struct{}, 1)
 	a.connected = make(chan struct{}, 1)
 	a.nc, err = nats.Connect(a.Config.NatsURL,
@@ -167,6 +169,13 @@ func (a *Agent) Run(ctx context.Context) error {
 		factsEvery = protocol.FactsInterval
 	}
 
+	// Storingen die er nog staan, bijvoorbeeld na een crash, gaan eerst weg.
+	if res := a.faults.ClearAll(ctx); !res.OK {
+		a.Log.Error("achtergebleven storingen terugdraaien mislukt", "err", res.Error)
+	} else if len(res.Output) > 0 {
+		a.Log.Warn("achtergebleven storingen teruggedraaid", "output", strings.Join(res.Output, "; "))
+	}
+	go a.faultLoop(ctx)
 	go a.factsLoop(ctx, factsEvery)
 	go a.metricsLoop(ctx, metricsEvery)
 	go a.journalLoop(ctx, or(a.JournalInterval, protocol.JournalInterval))
@@ -362,6 +371,7 @@ func (a *Agent) sendFacts(ctx context.Context) error {
 		return errors.New("niet verbonden")
 	}
 	f := a.Collector.Facts(ctx)
+	f.Faults = a.faults.Active()
 	data, err := envelope(protocol.TypeFacts, f)
 	if err != nil {
 		return err

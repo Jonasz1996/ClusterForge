@@ -375,6 +375,7 @@ func (e DisasterClusterResultRole) Valid() bool {
 // Defines values for DisasterKind.
 const (
 	HostDown    DisasterKind = "host_down"
+	Sequence    DisasterKind = "sequence"
 	ServiceDown DisasterKind = "service_down"
 	VipLoss     DisasterKind = "vip_loss"
 )
@@ -383,6 +384,8 @@ const (
 func (e DisasterKind) Valid() bool {
 	switch e {
 	case HostDown:
+		return true
+	case Sequence:
 		return true
 	case ServiceDown:
 		return true
@@ -414,6 +417,60 @@ func (e DisasterPredictionStatus) Valid() bool {
 	case DisasterPredictionStatusSplitBrain:
 		return true
 	case DisasterPredictionStatusUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DisasterStepAction.
+const (
+	DisasterStepActionDiskFill    DisasterStepAction = "disk_fill"
+	DisasterStepActionLinkDown    DisasterStepAction = "link_down"
+	DisasterStepActionNetem       DisasterStepAction = "netem"
+	DisasterStepActionPortBlock   DisasterStepAction = "port_block"
+	DisasterStepActionServiceStop DisasterStepAction = "service_stop"
+	DisasterStepActionVrrpBlock   DisasterStepAction = "vrrp_block"
+)
+
+// Valid indicates whether the value is a known member of the DisasterStepAction enum.
+func (e DisasterStepAction) Valid() bool {
+	switch e {
+	case DisasterStepActionDiskFill:
+		return true
+	case DisasterStepActionLinkDown:
+		return true
+	case DisasterStepActionNetem:
+		return true
+	case DisasterStepActionPortBlock:
+		return true
+	case DisasterStepActionServiceStop:
+		return true
+	case DisasterStepActionVrrpBlock:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DisasterStepOn.
+const (
+	DisasterStepOnAll    DisasterStepOn = "all"
+	DisasterStepOnNode   DisasterStepOn = "node"
+	DisasterStepOnOthers DisasterStepOn = "others"
+	DisasterStepOnOwner  DisasterStepOn = "owner"
+)
+
+// Valid indicates whether the value is a known member of the DisasterStepOn enum.
+func (e DisasterStepOn) Valid() bool {
+	switch e {
+	case DisasterStepOnAll:
+		return true
+	case DisasterStepOnNode:
+		return true
+	case DisasterStepOnOthers:
+		return true
+	case DisasterStepOnOwner:
 		return true
 	default:
 		return false
@@ -641,19 +698,19 @@ func (e EventActorType) Valid() bool {
 
 // Defines values for FailoverScenario.
 const (
-	KeepalivedStop FailoverScenario = "keepalived_stop"
-	ServiceStop    FailoverScenario = "service_stop"
-	VmHardStop     FailoverScenario = "vm_hard_stop"
+	FailoverScenarioKeepalivedStop FailoverScenario = "keepalived_stop"
+	FailoverScenarioServiceStop    FailoverScenario = "service_stop"
+	FailoverScenarioVmHardStop     FailoverScenario = "vm_hard_stop"
 )
 
 // Valid indicates whether the value is a known member of the FailoverScenario enum.
 func (e FailoverScenario) Valid() bool {
 	switch e {
-	case KeepalivedStop:
+	case FailoverScenarioKeepalivedStop:
 		return true
-	case ServiceStop:
+	case FailoverScenarioServiceStop:
 		return true
-	case VmHardStop:
+	case FailoverScenarioVmHardStop:
 		return true
 	default:
 		return false
@@ -3013,6 +3070,16 @@ type DeployTarget struct {
 // DeployTargetNetwork defines model for DeployTarget.Network.
 type DeployTargetNetwork string
 
+// DisasterActionOption defines model for DisasterActionOption.
+type DisasterActionOption struct {
+	Available bool               `json:"available"`
+	Key       DisasterStepAction `json:"key"`
+	Label     string             `json:"label"`
+
+	// Reason Waarom niet
+	Reason string `json:"reason"`
+}
+
 // DisasterClusterPlan defines model for DisasterClusterPlan.
 type DisasterClusterPlan struct {
 	// Before De status bij de start
@@ -3101,16 +3168,62 @@ type DisasterKindOption struct {
 	RecoverySeconds int `json:"recovery_seconds"`
 }
 
+// DisasterNodeOption defines model for DisasterNodeOption.
+type DisasterNodeOption struct {
+	// Faults De agent kent storingen (protocol 6)
+	Faults     bool               `json:"faults"`
+	Hostname   string             `json:"hostname"`
+	Id         openapi_types.UUID `json:"id"`
+	Interfaces []string           `json:"interfaces"`
+	Nft        bool               `json:"nft"`
+
+	// Owner De node heeft nu het VIP
+	Owner bool `json:"owner"`
+
+	// Primary De interface naar ClusterForge; leeg als dat niet bekend is
+	Primary string `json:"primary"`
+	Tc      bool   `json:"tc"`
+
+	// Units Diensten die een stap hier kan stoppen
+	Units []string `json:"units"`
+}
+
 // DisasterOptions defines model for DisasterOptions.
 type DisasterOptions struct {
+	Actions []DisasterActionOption `json:"actions"`
+
 	// Allowed false op prod
 	Allowed bool                 `json:"allowed"`
 	Hosts   []DisasterHostOption `json:"hosts"`
 	Kinds   []DisasterKindOption `json:"kinds"`
-	Reason  string               `json:"reason"`
-	Slug    string               `json:"slug"`
-	Units   []string             `json:"units"`
-	Vips    []string             `json:"vips"`
+
+	// Nodes Voor de stappen van een reeks
+	Nodes  []DisasterNodeOption `json:"nodes"`
+	Reason string               `json:"reason"`
+	Slug   string               `json:"slug"`
+	Units  []string             `json:"units"`
+	Vips   []string             `json:"vips"`
+}
+
+// DisasterPlannedStep defines model for DisasterPlannedStep.
+type DisasterPlannedStep struct {
+	Action    DisasterStepAction `json:"action"`
+	AtSeconds int                `json:"at_seconds"`
+	Nodes     []DisasterStepNode `json:"nodes"`
+
+	// On owner: de node met het VIP bij de start; others: alle andere actieve nodes
+	On DisasterStepOn `json:"on"`
+
+	// RanMs Wanneer de stap liep, in ms na de start van de storing; leeg als hij niet liep
+	RanMs   nullable.Nullable[int64] `json:"ran_ms"`
+	Results []DisasterTargetResult   `json:"results"`
+
+	// Step Nummer van de stap
+	Step int    `json:"step"`
+	Text string `json:"text"`
+
+	// Unit Bij service_stop de dienst
+	Unit string `json:"unit"`
 }
 
 // DisasterPrediction defines model for DisasterPrediction.
@@ -3138,8 +3251,11 @@ type DisasterPreview struct {
 	Ok bool `json:"ok"`
 
 	// Skipped Draaiende VM's op de host die niet in ClusterForge staan en aan blijven
-	Skipped []string         `json:"skipped"`
-	Targets []DisasterTarget `json:"targets"`
+	Skipped []string `json:"skipped"`
+
+	// Steps Bij sequence
+	Steps   []DisasterPlannedStep `json:"steps"`
+	Targets []DisasterTarget      `json:"targets"`
 }
 
 // DisasterReport defines model for DisasterReport.
@@ -3162,8 +3278,11 @@ type DisasterReport struct {
 	ScenarioId openapi_types.UUID       `json:"scenario_id"`
 
 	// ShortOutageMs Een kortere onderbreking telt als overname
-	ShortOutageMs int64                  `json:"short_outage_ms"`
-	Skipped       []string               `json:"skipped"`
+	ShortOutageMs int64    `json:"short_outage_ms"`
+	Skipped       []string `json:"skipped"`
+
+	// Steps Bij sequence
+	Steps         []DisasterPlannedStep  `json:"steps"`
 	TargetResults []DisasterTargetResult `json:"target_results"`
 	Targets       []DisasterTarget       `json:"targets"`
 
@@ -3198,6 +3317,9 @@ type DisasterScenario struct {
 	// RecoverySeconds Hoe snel na het terugzetten alles weer gezond moet zijn
 	RecoverySeconds int `json:"recovery_seconds"`
 
+	// Steps Bij sequence de stappen
+	Steps []DisasterStep `json:"steps"`
+
 	// Unit Bij service_down de dienst
 	Unit      string    `json:"unit"`
 	UpdatedAt time.Time `json:"updated_at"`
@@ -3215,6 +3337,9 @@ type DisasterScenarioInput struct {
 	Name            string       `json:"name"`
 	RecoverySeconds int          `json:"recovery_seconds"`
 
+	// Steps Bij sequence; aan het einde van de storing heft ClusterForge alles op
+	Steps *[]DisasterStep `json:"steps,omitempty"`
+
 	// Unit Bij service_down
 	Unit *string `json:"unit,omitempty"`
 }
@@ -3224,6 +3349,55 @@ type DisasterScenarioList struct {
 	Items   []DisasterScenario `json:"items"`
 	Options DisasterOptions    `json:"options"`
 }
+
+// DisasterStep defines model for DisasterStep.
+type DisasterStep struct {
+	Action DisasterStepAction `json:"action"`
+
+	// AtSeconds Seconden na de start van de storing
+	AtSeconds int `json:"at_seconds"`
+
+	// DelayMs Bij netem
+	DelayMs *int `json:"delay_ms,omitempty"`
+
+	// FillPercent Bij disk_fill
+	FillPercent *int `json:"fill_percent,omitempty"`
+
+	// Hostname Bij on node; alleen in antwoorden
+	Hostname *string `json:"hostname,omitempty"`
+
+	// Interface Bij link_down en netem
+	Interface *string `json:"interface,omitempty"`
+
+	// LossPercent Bij netem
+	LossPercent *int `json:"loss_percent,omitempty"`
+
+	// NodeId Bij on node
+	NodeId *openapi_types.UUID `json:"node_id,omitempty"`
+
+	// On owner: de node met het VIP bij de start; others: alle andere actieve nodes
+	On DisasterStepOn `json:"on"`
+
+	// Port Bij port_block
+	Port *int `json:"port,omitempty"`
+
+	// Unit Bij service_stop
+	Unit *string `json:"unit,omitempty"`
+}
+
+// DisasterStepAction defines model for DisasterStepAction.
+type DisasterStepAction string
+
+// DisasterStepNode defines model for DisasterStepNode.
+type DisasterStepNode struct {
+	// CutOff link_down op de interface naar ClusterForge: alleen de bovengrens telt, want ClusterForge kan niet verlengen of opheffen
+	CutOff   bool               `json:"cut_off"`
+	Hostname string             `json:"hostname"`
+	NodeId   openapi_types.UUID `json:"node_id"`
+}
+
+// DisasterStepOn owner: de node met het VIP bij de start; others: alle andere actieve nodes
+type DisasterStepOn string
 
 // DisasterTarget defines model for DisasterTarget.
 type DisasterTarget struct {

@@ -80,8 +80,11 @@ type Definition struct {
 	Description string    `json:"description"`
 	Params      Params    `json:"params"`
 	Expect      Expect    `json:"expect"`
-	// Unit is wat stopt en weer start; leeg bij host_down.
-	Unit     string        `json:"unit,omitempty"`
+	// Unit is wat stopt en weer start; leeg bij host_down en sequence.
+	Unit string `json:"unit,omitempty"`
+	// Steps zijn bij sequence de stappen met hun nodes. Targets zijn dan
+	// alle nodes die een stap raakt.
+	Steps    []PlannedStep `json:"steps,omitempty"`
 	Targets  []Target      `json:"targets"`
 	Clusters []ClusterPlan `json:"clusters"`
 	// Skipped zijn draaiende VM's op de host die niet in ClusterForge staan;
@@ -206,11 +209,14 @@ func (s *Service) plan(ctx context.Context, sc Scenario, self uuid.UUID) (Previe
 	// 1. De doelen.
 	nodes := map[uuid.UUID]store.ListFailoverNodesRow{}
 	var loose []string
+	var seq *seqPlan
 	switch sc.Kind {
 	case HostDown:
 		loose, err = s.hostTargets(ctx, &p, sc, w, add)
 	case ServiceDown, VIPLoss:
 		err = s.nodeTargets(ctx, &p, c, w.Topo, nodes, add)
+	case Sequence:
+		seq, err = s.seqTargets(ctx, &p, sc, c, w.Topo, add)
 	default:
 		return p, fmt.Errorf("onbekende soort %q", sc.Kind)
 	}
@@ -226,7 +232,13 @@ func (s *Service) plan(ctx context.Context, sc Scenario, self uuid.UUID) (Previe
 	for _, t := range p.Targets {
 		targets[t.ClusterID] = true
 	}
-	pred, notes := predict(w, sc, c, targets)
+	var pred map[uuid.UUID]Prediction
+	var notes []string
+	if seq != nil {
+		pred, notes = predictSequence(w, c, p.Definition, seq)
+	} else {
+		pred, notes = predict(w, sc, c, targets)
+	}
 	p.Notes = append(p.Notes, notes...)
 	measured := map[uuid.UUID]string{}
 	for id := range targets {
@@ -308,6 +320,8 @@ func noTargets(sc Scenario) string {
 		return "op " + sc.P.Host + " draait geen gekoppelde VM"
 	case ServiceDown:
 		return "geen actieve node van dit cluster heeft " + sc.P.Unit
+	case Sequence:
+		return "geen stap raakt een actieve node met een agent"
 	}
 	return "geen actieve node van dit cluster heeft keepalived"
 }
