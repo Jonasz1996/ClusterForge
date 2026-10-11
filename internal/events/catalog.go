@@ -21,6 +21,7 @@ const (
 	CategoryStatus    Category = "status"
 	CategoryIncident  Category = "incidents"
 	CategoryAssistant Category = "assistant"
+	CategoryRisk      Category = "risk"
 )
 
 // Categories staan in de volgorde van het filter in de webinterface.
@@ -42,6 +43,7 @@ var Categories = []struct {
 	{CategoryStatus, "Status"},
 	{CategoryIncident, "Incidenten"},
 	{CategoryAssistant, "Assistent"},
+	{CategoryRisk, "Gezondheid"},
 }
 
 // Spec beschrijft een action: zijn soort en een korte Nederlandse omschrijving
@@ -183,6 +185,10 @@ var Known = map[string]Spec{
 	"assistant.settings_updated": {CategoryAssistant, "Instellingen van de assistent gewijzigd"},
 	"assistant.asked":            {CategoryAssistant, "Vraag aan de assistent"},
 	"assistant.budget_reached":   {CategoryAssistant, "Maandbudget van de assistent op"},
+
+	"risk.grade_changed":      {CategoryRisk, "Cijfer van de health score gewijzigd"},
+	"risk.accepted":           {CategoryRisk, "Bevinding geaccepteerd"},
+	"risk.acceptance_removed": {CategoryRisk, "Acceptatie ingetrokken"},
 }
 
 // Lookup geeft de spec van een action. Een onbekende action (uit een nieuwere

@@ -15,6 +15,7 @@ import (
 
 	"github.com/Jonasz1996/clusterforge/internal/assistant"
 	"github.com/Jonasz1996/clusterforge/internal/httpapi/gen"
+	"github.com/Jonasz1996/clusterforge/internal/risk"
 )
 
 // De tools van de assistent lezen via de GET-handlers van de API, in het
@@ -1126,6 +1127,61 @@ func (s *Server) assistantTools() []assistant.Tool {
 					out = map[string]any{}
 				}
 				return withList(out, "diensten", items, false, false), nil
+			},
+		},
+		{
+			Name: "gezondheid",
+			Description: "De health score van 0 tot 100 met een cijfer A tot F. Zonder cluster: de score van het geheel, per " +
+				"cluster score en cijfer, en alle bevindingen gesorteerd op wat oplossen voor het geheel oplevert " +
+				"(fleet_gain), met de kaart Platform. Met een cluster: zijn zeven kaarten (beschikbaarheid, back-ups, " +
+				"herstelbaarheid, redundantie, configuratie, onderhoud, capaciteit) met hun bevindingen, punten en gain. " +
+				"Een geaccepteerde bevinding kost geen punten; een kaart zonder score is onbekend en telt niet mee.",
+			Properties: map[string]any{"cluster": strProp(clusterDesc)},
+			Required:   []string{"cluster"},
+			Label:      func(in map[string]any) string { return "Health score" + of(in) + " bekijken" },
+			Run: func(ctx context.Context, c assistant.Caller, raw json.RawMessage) (any, error) {
+				var in struct {
+					Cluster string `json:"cluster"`
+				}
+				if err := assistant.Decode(raw, &in); err != nil {
+					return nil, err
+				}
+				if strings.TrimSpace(in.Cluster) == "" {
+					var ov risk.Overview
+					if err := s.view(ctx, c, s.GetRisk, &ov); err != nil {
+						return nil, err
+					}
+					if ov.ComputedAt == nil {
+						return map[string]any{"opmerking": "de health score is nog niet berekend; dat gebeurt enkele minuten na de start"}, nil
+					}
+					findings := make([]any, len(ov.Findings))
+					for i, f := range ov.Findings {
+						m, _ := compact(f, "subject").(map[string]any)
+						if m != nil && f.Cluster != nil {
+							m["cluster"] = f.Cluster.Name
+						}
+						findings[i] = m
+					}
+					out := map[string]any{
+						"score": ov.Score, "grade": ov.Grade, "computed_at": ov.ComputedAt, "clusters": compactAll(ov.Clusters),
+					}
+					if ov.Platform != nil {
+						out["platform_score"] = ov.Platform.Score
+					}
+					return withList(out, "bevindingen", findings, false, false), nil
+				}
+				id, err := s.findCluster(ctx, c, in.Cluster)
+				if err != nil {
+					return nil, err
+				}
+				var cr clusterRisk
+				if err := s.view(ctx, c, func(w http.ResponseWriter, r *http.Request) { s.GetClusterRisk(w, r, id) }, &cr); err != nil {
+					return nil, err
+				}
+				if cr.ComputedAt == nil {
+					return map[string]any{"opmerking": "de health score van dit cluster is nog niet berekend"}, nil
+				}
+				return compact(cr), nil
 			},
 		},
 	}

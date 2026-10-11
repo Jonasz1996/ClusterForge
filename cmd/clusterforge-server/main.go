@@ -46,6 +46,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/metrics"
 	"github.com/Jonasz1996/clusterforge/internal/planner"
 	"github.com/Jonasz1996/clusterforge/internal/proxmox"
+	"github.com/Jonasz1996/clusterforge/internal/risk"
 	"github.com/Jonasz1996/clusterforge/internal/rollout"
 	"github.com/Jonasz1996/clusterforge/internal/secrets"
 	"github.com/Jonasz1996/clusterforge/internal/status"
@@ -192,13 +193,17 @@ func serve() error {
 	// De assistent; zonder masterkey kan hij niet aan en zeggen de
 	// instellingen waarom.
 	asst := assistant.NewService(pool, ev, log, box)
+	// De health score rekent elke minuut; de planner legt elke dag een
+	// momentopname vast voor de trend.
+	rsk := risk.NewService(pool, ev, log, metrics.NewClient(cfg.VictoriaMetricsURL), bk)
 	// Geplande failovertests en back-upcontroles; als een test klaar is en
 	// het testslot vrijkomt, kijkt de planner meteen of er een wacht.
 	sched := planner.NewScheduler(pool, log,
 		planner.Task{Name: "failovertests", Tick: fo.RunScheduled},
 		planner.Task{Name: "back-upcontroles", Tick: bk.RunScheduled},
 		planner.Task{Name: "journaal opruimen", Tick: journal.NewPruner(q).Tick},
-		planner.Task{Name: "gesprekken opruimen", Tick: asst.Prune})
+		planner.Task{Name: "gesprekken opruimen", Tick: asst.Prune},
+		planner.Task{Name: "health score vastleggen", Tick: func(ctx context.Context, now time.Time) error { return rsk.Snapshot(ctx, now) }})
 	for _, kind := range []string{failover.KindTest, backups.KindVerify} {
 		runner.OnFinished(kind, func(context.Context, store.Job) { sched.Kick() })
 	}
@@ -217,7 +222,12 @@ func serve() error {
 	// What Broke rekent de oorzaak van elk incident, meteen als de detector
 	// iets veranderde en daarna elke 30 s tot een uur na het einde.
 	analyzer := whatbroke.NewAnalyzer(pool, metrics.NewClient(cfg.VictoriaMetricsURL), log)
-	det.Changed = analyzer.Kick
+	// De health score rekent ook meteen als een incident opende,
+	// veranderde of sloot.
+	det.Changed = func() {
+		analyzer.Kick()
+		rsk.Kick()
+	}
 	// GitOps leest de gekoppelde repository elke minuut; na een uitrol of
 	// toepassing kijkt het meteen of een plan verouderd is.
 	git := gitops.NewService(pool, ev, log, box, dep, ro)
@@ -233,6 +243,7 @@ func serve() error {
 	go sched.Run(ctx)
 	go dps.Run(ctx)
 	go analyzer.Run(ctx)
+	go rsk.Run(ctx)
 	if git.Enabled() {
 		go git.Run(ctx)
 	}
@@ -249,7 +260,7 @@ func serve() error {
 		Handler: httpapi.New(httpapi.Deps{
 			Config: cfg, Log: log, Pool: pool, Auth: authSvc, Bus: bus, Hub: hub, Proxmox: pve, Jobs: runner,
 			Lifecycle: life, Deploy: dep, Backups: bk, Drift: drf, Failover: fo, Deps: dps, Rollout: ro, GitOps: git,
-			Assistant: asst, Version: version,
+			Assistant: asst, Risk: rsk, Version: version,
 		}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,

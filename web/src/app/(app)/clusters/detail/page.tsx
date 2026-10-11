@@ -50,6 +50,7 @@ import {
 } from "@/lib/inventory";
 import { useJobs } from "@/lib/proxmox";
 import { RecentChangesCard } from "@/components/whatbroke/WhatBroke";
+import { ClusterGrade, ClusterRiskCard } from "@/components/risk/Risk";
 
 export default function ClusterDetailPage() {
   return (
@@ -87,6 +88,7 @@ function ClusterDetailInner() {
             description={
               <span className="inline-flex flex-wrap items-center gap-2">
                 <StatusBadge status={cluster.data.status} reason={cluster.data.status_reason} />
+                <ClusterGrade clusterId={id} />
                 <EnvBadge env={cluster.data.environment} />
                 <span>{typeLabel(cluster.data.type)}</span>
                 <span className="text-slate-400">·</span>
@@ -149,6 +151,7 @@ function ClusterDetailInner() {
 
           <NodesCard c={cluster.data} isAdmin={isAdmin} />
           <RecentChangesCard kind="cluster" id={id} />
+          <ClusterRiskCard clusterId={id} isAdmin={isAdmin} />
           <ClusterDriftCard clusterId={id} isAdmin={isAdmin} />
           {cluster.data.template_name && <SpecCard clusterId={id} />}
           {cluster.data.template_name && <GitCard c={cluster.data} isAdmin={isAdmin} />}

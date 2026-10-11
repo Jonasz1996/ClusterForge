@@ -5,6 +5,7 @@ import Link from "next/link";
 import { AuditList } from "@/components/audit/AuditList";
 import { OpenIncidentsCard } from "@/components/incidents/Incidents";
 import { ClusterHealth } from "@/components/monitoring/ClusterHealth";
+import { FleetRiskCard } from "@/components/risk/Risk";
 import { Alert, Card } from "@/components/ui";
 import { api } from "@/lib/api/client";
 import { useAuditRecent } from "@/lib/audit";
@@ -86,6 +87,8 @@ export default function OverviewPage() {
       </div>
 
       <OpenIncidentsCard />
+
+      <FleetRiskCard isAdmin={isAdmin} />
 
       {clusters.data && clusters.data.length > 0 && (
         <section className="space-y-3">

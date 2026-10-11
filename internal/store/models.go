@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type ActorType string
@@ -642,6 +643,7 @@ type ProxmoxConnection struct {
 	BackupCheckedAt *time.Time
 	BackupError     string
 	NotBackedUp     []byte
+	CertNotAfter    *time.Time
 }
 
 type ProxmoxResource struct {
@@ -667,6 +669,38 @@ type ProxmoxTask struct {
 	Exitstatus   string
 	StartedAt    time.Time
 	EndedAt      *time.Time
+}
+
+type RiskAcceptance struct {
+	ID          uuid.UUID
+	Check       string
+	SubjectType string
+	SubjectID   uuid.UUID
+	SubjectName string
+	Reason      string
+	ExpiresAt   *time.Time
+	CreatedBy   *uuid.UUID
+	CreatedAt   time.Time
+}
+
+type RiskScore struct {
+	SubjectType    string
+	SubjectID      uuid.UUID
+	Score          *int32
+	Grade          string
+	Result         []byte
+	ComputedAt     time.Time
+	AnnouncedGrade string
+	GradeSince     time.Time
+}
+
+type RiskSnapshot struct {
+	Day         pgtype.Date
+	SubjectType string
+	SubjectID   uuid.UUID
+	Score       *int32
+	Grade       string
+	Cards       []byte
 }
 
 type Secret struct {

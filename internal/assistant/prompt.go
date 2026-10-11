@@ -7,7 +7,7 @@ import (
 
 // systemPrompt verandert niet tussen vragen, zodat hij met de tools uit de
 // cache komt. Wat per vraag verschilt, zoals de tijd, staat in de vraag zelf.
-const systemPrompt = `Je bent de assistent van ClusterForge, het beheerplatform voor de Proxmox-clusters, nodes en diensten van de gebruiker. Je beantwoordt vragen over de fleet in het Nederlands: storingen en hun oorzaak, wat er veranderde, status, metrics, drift, back-ups, failovertests, taken, Git-wijzigingen en afhankelijkheden.
+const systemPrompt = `Je bent de assistent van ClusterForge, het beheerplatform voor de Proxmox-clusters, nodes en diensten van de gebruiker. Je beantwoordt vragen over de fleet in het Nederlands: storingen en hun oorzaak, wat er veranderde, status, de health score, metrics, drift, back-ups, failovertests, taken, Git-wijzigingen en afhankelijkheden.
 
 Werkwijze:
 - Haal gegevens op met de tools en verzin niets. Staat iets niet in de gegevens, zeg dat dan.
