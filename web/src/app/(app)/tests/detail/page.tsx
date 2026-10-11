@@ -6,6 +6,7 @@ import { Suspense } from "react";
 import { HistoryCard } from "@/components/audit/AuditList";
 import { BackupReport } from "@/components/backups/Verify";
 import { DisasterReportView } from "@/components/disaster/Disaster";
+import { RehearsalReportView } from "@/components/disaster/Rehearsal";
 import { Checks, expectation, RunBadge } from "@/components/failover/Failover";
 import { QueryState } from "@/components/inventory/bits";
 import { Steps } from "@/components/jobs/Steps";
@@ -48,6 +49,7 @@ function TestRunInner() {
   if (id === "") return <Alert>Geen testrun opgegeven.</Alert>;
   const isBackup = run.data?.kind === "backup.verify";
   const disaster = run.data?.disaster ?? null;
+  const rehearsal = run.data?.rehearsal ?? null;
   const skipped = run.data?.result === "skipped";
   const vm = run.data?.definition?.scenario === "vm_hard_stop";
 
@@ -74,13 +76,15 @@ function TestRunInner() {
                 ? `Back-upcontrole: ${run.data.hostname || run.data.cluster_name}`
                 : disaster
                   ? `Rampoefening: ${disaster.name}`
-                  : `Failovertest: ${run.data.definition?.name ?? ""}`
+                  : rehearsal
+                    ? `DR-repetitie: ${rehearsal.name || rehearsal.cluster_name}`
+                    : `Failovertest: ${run.data.definition?.name ?? ""}`
             }
             description={
               <span className="inline-flex flex-wrap items-center gap-2">
                 <RunBadge run={run.data} />
                 {job.data?.cancel_requested && jobActive(job.data.status) && (
-                  <span>{isBackup ? "wordt afgebroken en opgeruimd…" : "wordt afgebroken en hersteld…"}</span>
+                  <span>{isBackup || rehearsal ? "wordt afgebroken en opgeruimd…" : "wordt afgebroken en hersteld…"}</span>
                 )}
                 <span>{fmt.format(new Date(run.data.created_at))}</span>
                 {run.data.trigger === "schedule" && <span className="text-slate-400">· gepland in het testvenster</span>}
@@ -97,6 +101,8 @@ function TestRunInner() {
                       onClick={() => {
                         const question = isBackup
                           ? "Controle afbreken? ClusterForge zet de sandbox-VM uit en verwijdert hem."
+                          : rehearsal
+                            ? "DR-repetitie afbreken? ClusterForge zet de sandbox-VM's uit en verwijdert ze; het echte cluster merkt er niets van."
                           : disaster
                             ? disaster.kind === "host_down"
                               ? "Rampoefening afbreken? ClusterForge start de VM's meteen weer."
@@ -146,6 +152,8 @@ function TestRunInner() {
             </>
           ) : isBackup ? (
             <BackupReport run={run.data} isAdmin={isAdmin} />
+          ) : rehearsal ? (
+            <RehearsalReportView run={run.data} d={rehearsal} />
           ) : disaster ? (
             <>
               <DisasterReportView run={run.data} d={disaster} />

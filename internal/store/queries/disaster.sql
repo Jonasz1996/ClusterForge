@@ -5,13 +5,14 @@ SELECT * FROM disaster_scenarios WHERE cluster_id = @cluster_id ORDER BY created
 SELECT * FROM disaster_scenarios WHERE id = @id;
 
 -- name: InsertDisasterScenario :one
-INSERT INTO disaster_scenarios (cluster_id, name, kind, params, expect, created_by)
-VALUES (@cluster_id, @name, @kind, @params, @expect, @created_by)
+INSERT INTO disaster_scenarios (cluster_id, name, kind, params, expect, schedule, next_run_at, created_by)
+VALUES (@cluster_id, @name, @kind, @params, @expect, @schedule, @next_run_at, @created_by)
 RETURNING *;
 
 -- name: UpdateDisasterScenario :one
 UPDATE disaster_scenarios
-SET name = @name, kind = @kind, params = @params, expect = @expect, updated_at = now()
+SET name = @name, kind = @kind, params = @params, expect = @expect, schedule = @schedule, next_run_at = @next_run_at,
+    updated_at = now()
 WHERE id = @id
 RETURNING *;
 

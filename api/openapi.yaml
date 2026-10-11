@@ -1486,6 +1486,27 @@ paths:
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /clusters/{clusterId}/recovery-targets:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+    put:
+      operationId: setRecoveryTargets
+      summary: De RTO- en RPO-doelen van een cluster zetten (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RecoveryTargetsInput" }
+      responses:
+        "200":
+          description: Gezet
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecoveryTargets" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
   /proxmox/{proxmoxId}/backup-watch:
     parameters:
       - { name: proxmoxId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -3497,11 +3518,11 @@ components:
         expect_failback: { type: boolean }
         probe: { $ref: "#/components/schemas/FailoverProbe" }
         description: { type: string }
-    TestRunKind: { type: string, enum: [failover.test, backup.verify, disaster.run] }
+    TestRunKind: { type: string, enum: [failover.test, backup.verify, disaster.run, dr.rehearsal] }
     TestRun:
       type: object
       required: [id, kind, trigger, cluster_id, cluster_name, test_id, node_id, hostname, job_id, job_status, result, restored,
-        summary, checks, timeline, measurements, definition, backup, disaster, requested_by, created_at, finished_at]
+        summary, checks, timeline, measurements, definition, backup, disaster, rehearsal, requested_by, created_at, finished_at]
       properties:
         id: { type: string, format: uuid }
         kind: { $ref: "#/components/schemas/TestRunKind" }
@@ -3539,10 +3560,123 @@ components:
           allOf: [{ $ref: "#/components/schemas/DisasterReport" }]
           nullable: true
           description: Alleen bij disaster.run
+        rehearsal:
+          allOf: [{ $ref: "#/components/schemas/DRReport" }]
+          nullable: true
+          description: Alleen bij dr.rehearsal
         requested_by: { type: string, nullable: true, description: Gebruikersnaam van wie de run vroeg }
         created_at: { type: string, format: date-time }
         finished_at: { type: string, format: date-time, nullable: true }
-    DisasterKind: { type: string, enum: [host_down, service_down, vip_loss, sequence] }
+    DisasterKind: { type: string, enum: [host_down, service_down, vip_loss, sequence, dr_rehearsal] }
+    DRSchedule:
+      type: string
+      enum: ["", weekly, monthly]
+      description: "Leeg: alleen met de hand; weekly: elke week in het testvenster; monthly: in het eerste testvenster van de maand"
+    RecoveryTargets:
+      type: object
+      required: [rto_minutes, rpo_hours, default_rto_minutes, default_rpo_hours, custom]
+      properties:
+        rto_minutes: { type: integer, description: "Hoe lang herstel uit de back-ups mag duren; 0 is geen doel" }
+        rpo_hours: { type: integer, description: "Hoe oud de gegevens na herstel mogen zijn; 0 is geen doel" }
+        default_rto_minutes: { type: integer, description: "De standaard van de omgeving: prod 60, lab en test 0" }
+        default_rpo_hours: { type: integer, description: "De standaard van de omgeving: prod 26, lab en test 0" }
+        custom: { type: boolean, description: Het cluster heeft eigen doelen }
+    RecoveryTargetsInput:
+      type: object
+      required: [rto_minutes, rpo_hours]
+      properties:
+        rto_minutes: { type: integer, nullable: true, minimum: 0, maximum: 10080, description: "Leeg: de standaard van de omgeving; 0: geen doel" }
+        rpo_hours: { type: integer, nullable: true, minimum: 0, maximum: 8760, description: "Leeg: de standaard van de omgeving; 0: geen doel" }
+    DRPlanNode:
+      type: object
+      required: [node_id, hostname, source_vmid, volid, backup_time, backup_storage, size_bytes, memory_bytes, disk_bytes, address]
+      properties:
+        node_id: { type: string, format: uuid }
+        hostname: { type: string }
+        source_vmid: { type: integer }
+        volid: { type: string }
+        backup_time: { type: string, format: date-time }
+        backup_storage: { type: string }
+        size_bytes: { type: integer, format: int64 }
+        memory_bytes: { type: integer, format: int64, description: Wat de VM volgens de config uit de back-up vraagt }
+        disk_bytes: { type: integer, format: int64 }
+        address: { type: string, description: Het adres van de node; de andere nodes bereiken hem daarop }
+    DRPlan:
+      type: object
+      required: [cluster_name, environment, bridge, connection, host, storage, nodes, vips, rto_target_minutes, rpo_target_hours,
+        rpo_seconds, spread_seconds, fix]
+      properties:
+        cluster_name: { type: string }
+        environment: { type: string }
+        bridge: { type: string }
+        connection: { type: string }
+        host: { type: string, description: De Proxmox-host waarop alle sandboxes komen; leeg als er geen past }
+        storage: { type: string }
+        nodes: { type: array, items: { $ref: "#/components/schemas/DRPlanNode" } }
+        vips: { type: array, items: { $ref: "#/components/schemas/DisasterVIP" } }
+        rto_target_minutes: { type: integer, description: 0 is geen doel }
+        rpo_target_hours: { type: integer, description: 0 is geen doel }
+        rpo_seconds: { type: number, format: double, description: De leeftijd van de oudste back-up nu }
+        spread_seconds: { type: number, format: double, description: Hoe ver de back-ups van de nodes uit elkaar liggen }
+        fix: { type: array, items: { type: string }, description: De commando's die de bridge op de host afsluiten, als die niet klopt }
+    DRReportNode:
+      type: object
+      required: [node_id, hostname, source_vmid, sandbox_vmid, volid, backup_time, restore_seconds, boot_seconds, addresses, agent_version, destroyed]
+      properties:
+        node_id: { type: string, format: uuid }
+        hostname: { type: string }
+        source_vmid: { type: integer }
+        sandbox_vmid: { type: integer, nullable: true }
+        volid: { type: string }
+        backup_time: { type: string, format: date-time }
+        restore_seconds: { type: number, format: double, nullable: true }
+        boot_seconds: { type: number, format: double, nullable: true }
+        addresses: { type: array, items: { type: string }, description: De adressen die cf-agent in de sandbox meldde }
+        agent_version: { type: string }
+        destroyed: { type: boolean }
+    DRReportVIP:
+      type: object
+      required: [address, holders, checked, probe, probe_ok]
+      properties:
+        address: { type: string }
+        holders: { type: array, items: { type: string }, description: De nodes die het VIP in de sandbox hadden }
+        checked: { type: boolean, description: false als geen node zijn adressen kon melden }
+        probe: { type: string }
+        probe_ok: { type: boolean, nullable: true }
+    DRReport:
+      type: object
+      required: [scenario_id, name, cluster_name, environment, bridge, connection, host, storage, fix, rto_target_minutes, rpo_target_hours,
+        rto_seconds, rpo_seconds, rto_met, rpo_met, restore_seconds, boot_seconds, check_seconds, cleanup_seconds, total_seconds, nodes,
+        vips, destroyed_at, aborted]
+      properties:
+        scenario_id: { type: string, format: uuid }
+        name: { type: string }
+        cluster_name: { type: string }
+        environment: { type: string }
+        bridge: { type: string }
+        connection: { type: string }
+        host: { type: string }
+        storage: { type: string }
+        fix: { type: array, items: { type: string }, description: De commando's die de bridge afsluiten, als de voorcontrole daarop faalde }
+        rto_target_minutes: { type: integer }
+        rpo_target_hours: { type: integer }
+        rto_seconds:
+          type: number
+          format: double
+          nullable: true
+          description: Van de start van het terugzetten tot alle controles slaagden; leeg als het cluster niet werkend terugkwam
+        rpo_seconds: { type: number, format: double, nullable: true, description: De leeftijd van de oudste back-up bij de start van het terugzetten }
+        rto_met: { type: boolean, nullable: true, description: Leeg zonder doel of zonder meting }
+        rpo_met: { type: boolean, nullable: true }
+        restore_seconds: { type: number, format: double, nullable: true }
+        boot_seconds: { type: number, format: double, nullable: true }
+        check_seconds: { type: number, format: double, nullable: true }
+        cleanup_seconds: { type: number, format: double, nullable: true }
+        total_seconds: { type: number, format: double, nullable: true }
+        nodes: { type: array, items: { $ref: "#/components/schemas/DRReportNode" } }
+        vips: { type: array, items: { $ref: "#/components/schemas/DRReportVIP" } }
+        destroyed_at: { type: string, format: date-time, nullable: true }
+        aborted: { type: string, description: Waarom de bewaking de repetitie afbrak, of leeg }
     DisasterStepAction: { type: string, enum: [vrrp_block, link_down, port_block, netem, disk_fill, service_stop] }
     DisasterStepOn:
       type: string
@@ -3600,7 +3734,8 @@ components:
         host: { type: string }
     DisasterScenario:
       type: object
-      required: [id, cluster_id, name, kind, description, host, unit, steps, fault_seconds, recovery_seconds, last_run, created_at, updated_at]
+      required: [id, cluster_id, name, kind, description, host, unit, steps, fault_seconds, recovery_seconds, bridge, schedule, schedule_label,
+        next_run_at, last_run, created_at, updated_at]
       properties:
         id: { type: string, format: uuid }
         cluster_id: { type: string, format: uuid }
@@ -3615,6 +3750,10 @@ components:
         steps: { type: array, items: { $ref: "#/components/schemas/DisasterStep" }, description: Bij sequence de stappen }
         fault_seconds: { type: integer, description: Hoe lang de storing duurt }
         recovery_seconds: { type: integer, description: Hoe snel na het terugzetten alles weer gezond moet zijn }
+        bridge: { type: string, description: Bij dr_rehearsal de afgesloten bridge }
+        schedule: { $ref: "#/components/schemas/DRSchedule" }
+        schedule_label: { type: string }
+        next_run_at: { type: string, format: date-time, nullable: true, description: De volgende geplande DR-repetitie }
         last_run:
           allOf: [{ $ref: "#/components/schemas/TestRun" }]
           nullable: true
@@ -3634,8 +3773,10 @@ components:
           maxItems: 5
           items: { $ref: "#/components/schemas/DisasterStep" }
           description: Bij sequence; aan het einde van de storing heft ClusterForge alles op
-        fault_seconds: { type: integer, minimum: 20, maximum: 600 }
-        recovery_seconds: { type: integer, minimum: 10, maximum: 1800 }
+        fault_seconds: { type: integer, minimum: 0, maximum: 600, description: "20 tot 600; bij dr_rehearsal genegeerd" }
+        recovery_seconds: { type: integer, minimum: 0, maximum: 1800, description: "10 tot 1800; bij dr_rehearsal genegeerd" }
+        bridge: { type: string, description: "Bij dr_rehearsal de afgesloten bridge; leeg is vmbr99" }
+        schedule: { $ref: "#/components/schemas/DRSchedule" }
     DisasterKindOption:
       type: object
       required: [key, label, available, reason, fault_seconds, min_fault_seconds, recovery_seconds]
@@ -3683,9 +3824,9 @@ components:
         reason: { type: string, description: Waarom niet, als available false is }
     DisasterOptions:
       type: object
-      required: [allowed, reason, slug, kinds, hosts, units, vips, nodes, actions]
+      required: [allowed, reason, slug, kinds, hosts, units, vips, nodes, actions, targets, window]
       properties:
-        allowed: { type: boolean, description: false op prod }
+        allowed: { type: boolean, description: "false op prod: dan kan alleen de DR-repetitie" }
         reason: { type: string }
         slug: { type: string }
         kinds: { type: array, items: { $ref: "#/components/schemas/DisasterKindOption" } }
@@ -3694,6 +3835,8 @@ components:
         vips: { type: array, items: { type: string } }
         nodes: { type: array, items: { $ref: "#/components/schemas/DisasterNodeOption" }, description: Voor de stappen van een reeks }
         actions: { type: array, items: { $ref: "#/components/schemas/DisasterActionOption" } }
+        targets: { $ref: "#/components/schemas/RecoveryTargets" }
+        window: { type: string, description: "Het testvenster, zoals zondag van 03:00 tot 05:00" }
     DisasterScenarioList:
       type: object
       required: [items, options]
@@ -3741,7 +3884,7 @@ components:
         vips: { type: array, items: { $ref: "#/components/schemas/DisasterVIP" } }
     DisasterPreview:
       type: object
-      required: [ok, checks, description, targets, steps, clusters, skipped, notes, confirm]
+      required: [ok, checks, description, targets, steps, clusters, skipped, notes, confirm, rehearsal]
       properties:
         ok: { type: boolean, description: Of de voorcontrole slaagt }
         checks: { type: array, items: { $ref: "#/components/schemas/TestRunCheck" } }
@@ -3752,6 +3895,10 @@ components:
         skipped: { type: array, items: { type: string }, description: Draaiende VM's op de host die niet in ClusterForge staan en aan blijven }
         notes: { type: array, items: { type: string }, description: Wat de voorspelling onzeker maakt }
         confirm: { type: array, items: { type: string }, description: De slugs om in te tikken }
+        rehearsal:
+          allOf: [{ $ref: "#/components/schemas/DRPlan" }]
+          nullable: true
+          description: Bij dr_rehearsal wat er teruggaat en waar
     DisasterTargetResult:
       type: object
       required: [node_id, hostname, error]

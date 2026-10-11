@@ -116,6 +116,13 @@ type Service struct {
 	// VerifyWait is hoe lang de controle op cf-agent verify wacht; nul is
 	// de limiet van de agent plus 30 s.
 	VerifyWait time.Duration
+	// RehearsalLimit is de limiet van een DR-repetitie, opruimen niet
+	// meegeteld. Korter dan MaxSandboxAge, zodat de opruimer de sandboxes
+	// van een lopende repetitie niet weghaalt.
+	RehearsalLimit time.Duration
+	// VIPWait is hoe lang de DR-repetitie na de controles wacht tot elk VIP
+	// in de sandbox een houder heeft.
+	VIPWait time.Duration
 
 	runner    *jobs.Runner
 	conns     Connections
@@ -135,6 +142,7 @@ func NewService(pool *pgxpool.Pool, ev *events.Writer, log *slog.Logger, pve *pr
 		BootTimeout: 10 * time.Minute, NoAgentWait: 30 * time.Second, AgentTimeout: time.Minute,
 		Poll: 3 * time.Second, ConnPoll: 2 * time.Second, LockWait: 10 * time.Minute,
 		CleanEvery: 5 * time.Minute, MaxSandboxAge: 3 * time.Hour, JobLimit: 2 * time.Hour, Window: planner.DefaultWindow,
+		RehearsalLimit: 150 * time.Minute, VIPWait: 90 * time.Second,
 		sbLocks: map[uuid.UUID]*sync.Mutex{}, cleanKick: make(chan struct{}, 1),
 		kick: make(chan struct{}, 1),
 	}

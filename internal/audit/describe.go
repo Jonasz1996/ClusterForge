@@ -494,10 +494,20 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 	case "backup.watch_updated":
 		return "Lijst ook bewaken van Proxmox-koppeling " + name + " gewijzigd" + changeSummary(e.Changes)
 	case "backup.sandbox_created":
+		if str(p, "kind") == "dr.rehearsal" {
+			return fmt.Sprintf("DR-repetitie van %s: %s teruggezet als sandbox-VM %s op %s", str(p, "cluster"), str(p, "hostname"), num(p["vmid"]), str(p, "host"))
+		}
 		return fmt.Sprintf("Back-upcontrole van %s: back-up teruggezet als sandbox-VM %s op %s", str(p, "hostname"), num(p["vmid"]), str(p, "host"))
 	case "backup.sandbox_destroyed":
+		if str(p, "kind") == "dr.rehearsal" {
+			return fmt.Sprintf("Sandbox-VM %s van %s uit de DR-repetitie van %s verwijderd", num(p["vmid"]), str(p, "hostname"), str(p, "cluster"))
+		}
 		return fmt.Sprintf("Sandbox-VM %s van de back-upcontrole van %s verwijderd", num(p["vmid"]), str(p, "hostname"))
 	case "backup.sandbox_destroy_failed":
+		if str(p, "kind") == "dr.rehearsal" {
+			return fmt.Sprintf("Sandbox-VM %s van %s uit de DR-repetitie van %s niet te verwijderen", num(p["vmid"]), str(p, "hostname"),
+				str(p, "cluster")) + colon(str(p, "error"))
+		}
 		return fmt.Sprintf("Sandbox-VM %s van de back-upcontrole van %s niet te verwijderen", num(p["vmid"]), str(p, "hostname")) + colon(str(p, "error"))
 	case "backup.sandbox_connection_refused":
 		return "Tweede agentverbinding van " + or(str(p, "hostname"), name) + " geweigerd tijdens een back-upcontrole" + prefixed(" vanaf ", str(p, "remote"))
@@ -579,6 +589,22 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 		return s
 	case "disaster.finished":
 		return "Rampoefening " + str(p, "name") + colon(str(p, "summary"))
+	case "dr.started":
+		what := "DR-repetitie "
+		if str(p, "trigger") == "schedule" {
+			what = "Geplande DR-repetitie "
+		}
+		return what + str(p, "name") + " gestart: " + count(p["nodes"], "node", "nodes") + " van " + str(p, "cluster") +
+			" terugzetten op " + str(p, "bridge") + prefixed(" op ", str(p, "host"))
+	case "dr.aborted":
+		return "DR-repetitie " + str(p, "name") + " afgebroken, alle sandboxes hard uitgezet" + colon(str(p, "reason"))
+	case "dr.finished":
+		if str(p, "trigger") == "schedule" {
+			return "Geplande DR-repetitie " + str(p, "name") + colon(str(p, "summary"))
+		}
+		return "DR-repetitie " + str(p, "name") + colon(str(p, "summary"))
+	case "cluster.recovery_targets_updated":
+		return "RTO- en RPO-doelen van cluster " + name + " gewijzigd" + changeSummary(e.Changes)
 	case "service.created":
 		kind := paren(or(kindLabels[str(p, "kind")], str(p, "kind")))
 		switch {

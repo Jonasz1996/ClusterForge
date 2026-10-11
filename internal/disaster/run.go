@@ -48,6 +48,9 @@ func (s *Service) Start(ctx context.Context, actor events.Actor, id uuid.UUID, c
 		return store.TestRun{}, err
 	}
 	sc := Decode(row)
+	if sc.Kind == DRRehearsal {
+		return s.startRehearsal(ctx, actor, sc)
+	}
 	p, err := s.plan(ctx, sc, uuid.Nil)
 	if err != nil {
 		return store.TestRun{}, err

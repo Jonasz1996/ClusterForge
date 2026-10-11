@@ -19,6 +19,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/Jonasz1996/clusterforge/pkg/protocol"
@@ -47,6 +48,8 @@ type Verifier struct {
 	// opstarten; Settle is hoe lang een poort of adres nog niet hoeft te
 	// antwoorden; Retry is de pauze tussen twee pogingen.
 	BootWait, Settle, Retry time.Duration
+	// Addrs geeft de adressen van de machine; nil leest de interfaces.
+	Addrs func() ([]net.Addr, error)
 }
 
 const (
@@ -54,6 +57,7 @@ const (
 	maxVerifyServices = 64
 	maxVerifyTCP      = 32
 	maxVerifyHTTP     = 16
+	maxVerifyProbes   = 16
 )
 
 var (
@@ -89,6 +93,8 @@ func normalize(req *protocol.VerifyRequest) error {
 		return fmt.Errorf("hoogstens %d poorten", maxVerifyTCP)
 	case len(req.HTTP) > maxVerifyHTTP:
 		return fmt.Errorf("hoogstens %d adressen", maxVerifyHTTP)
+	case len(req.Probes) > maxVerifyProbes:
+		return fmt.Errorf("hoogstens %d probes", maxVerifyProbes)
 	}
 	var services []string
 	for _, s := range req.Services {
@@ -126,6 +132,34 @@ func normalize(req *protocol.VerifyRequest) error {
 		}
 		if h.Expect < 100 || h.Expect > 599 {
 			return fmt.Errorf("adres %s: ongeldige statuscode %d", h.URL, h.Expect)
+		}
+	}
+	for i := range req.Probes {
+		p := &req.Probes[i]
+		ip := net.ParseIP(p.Host)
+		switch {
+		case ip == nil || ip.IsUnspecified() || ip.IsMulticast():
+			return fmt.Errorf("probe %q: %q is geen IP-adres", p.Name, p.Host)
+		case p.Port < 1 || p.Port > 65535:
+			return fmt.Errorf("probe %q: ongeldige poort %d", p.Name, p.Port)
+		case len(p.Name) > 100:
+			return fmt.Errorf("probe %q: de naam is te lang", p.Name[:20])
+		}
+		p.Host = ip.String()
+		if p.Reach && p.Path != "" {
+			return fmt.Errorf("probe %q: alleen bereikbaarheid gaat niet met een pad", p.Name)
+		}
+		if p.Path == "" {
+			continue
+		}
+		if !strings.HasPrefix(p.Path, "/") || strings.ContainsAny(p.Path, " \t\r\n#") || len(p.Path) > 1024 {
+			return fmt.Errorf("probe %q: ongeldig pad %q", p.Name, p.Path)
+		}
+		if p.Expect == 0 {
+			p.Expect = http.StatusOK
+		}
+		if p.Expect < 100 || p.Expect > 599 {
+			return fmt.Errorf("probe %q: ongeldige statuscode %d", p.Name, p.Expect)
 		}
 	}
 	return nil
@@ -179,6 +213,20 @@ func (v *Verifier) Verify(ctx context.Context, req protocol.VerifyRequest) proto
 	}
 	if req.MariaDB {
 		add(v.mariadb(ctx))
+	}
+	if req.Addresses {
+		res.Addresses = v.addresses()
+	}
+	if len(req.Probes) > 0 {
+		sandbox := InSandbox(v.Root)
+		for _, p := range req.Probes {
+			if !sandbox {
+				add(protocol.VerifyCheck{Kind: "probe", Name: p.Name, Status: protocol.VerifyFail,
+					Detail: "geweigerd: probes naar andere adressen alleen in een sandbox (serienummer " + protocol.SandboxSerial + ")"})
+				continue
+			}
+			add(v.probe(ctx, p))
+		}
 	}
 	res.Seconds = math.Round(time.Since(start).Seconds()*10) / 10
 	return res
@@ -445,6 +493,115 @@ func (v *Verifier) http(ctx context.Context, h protocol.VerifyHTTP) protocol.Ver
 		c.Status, c.Detail = protocol.VerifyFail, fmt.Sprintf("gaf %d in plaats van %d", status, h.Expect)
 	}
 	return c
+}
+
+// probe maakt in de sandbox een verbinding met het VIP of een andere node:
+// een HTTP GET met een pad, anders alleen TCP. Zolang Settle loopt, probeert
+// hij opnieuw, want keepalived en de diensten kunnen nog opstarten.
+func (v *Verifier) probe(ctx context.Context, p protocol.VerifyProbe) protocol.VerifyCheck {
+	addr := net.JoinHostPort(p.Host, strconv.Itoa(p.Port))
+	c := protocol.VerifyCheck{Kind: "probe", Name: p.Name}
+	ctx, cancel := v.check(ctx)
+	defer cancel()
+	dial := func(ctx context.Context, network, address string) (net.Conn, error) {
+		if address != addr {
+			return nil, fmt.Errorf("de probe verbindt alleen met %s", addr)
+		}
+		if v.Dial != nil {
+			return v.Dial(ctx, network, address)
+		}
+		var d net.Dialer
+		return d.DialContext(ctx, network, address)
+	}
+	if p.Path == "" {
+		refused := false
+		err := v.retry(ctx, func(ctx context.Context) error {
+			dctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+			defer cancel()
+			conn, err := dial(dctx, "tcp", addr)
+			if err == nil {
+				_ = conn.Close()
+			}
+			if p.Reach && errors.Is(err, syscall.ECONNREFUSED) {
+				refused = true
+				return nil
+			}
+			return err
+		})
+		switch {
+		case err != nil:
+			c.Status, c.Detail = protocol.VerifyFail, fmt.Sprintf("geen verbinding met %s: %v", addr, err)
+		case refused:
+			c.Status, c.Detail = protocol.VerifyOK, fmt.Sprintf("%s antwoordt: poort %d weigert de verbinding, maar de machine is bereikbaar", p.Host, p.Port)
+		default:
+			c.Status, c.Detail = protocol.VerifyOK, addr+" neemt verbindingen aan"
+		}
+		return c
+	}
+	client := &http.Client{
+		Timeout:       10 * time.Second,
+		Transport:     &http.Transport{Proxy: nil, DialContext: dial, DisableKeepAlives: true},
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
+	target := "http://" + addr + p.Path
+	var status int
+	err := v.retry(ctx, func(ctx context.Context) error {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, target, nil)
+		if err != nil {
+			return err
+		}
+		resp, err := client.Do(req)
+		if err != nil {
+			return err
+		}
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
+		_ = resp.Body.Close()
+		status = resp.StatusCode
+		if status != p.Expect {
+			return fmt.Errorf("gaf %d in plaats van %d", status, p.Expect)
+		}
+		return nil
+	})
+	switch {
+	case err == nil:
+		c.Status, c.Detail = protocol.VerifyOK, fmt.Sprintf("%s gaf %d", target, status)
+	case status != 0:
+		c.Status, c.Detail = protocol.VerifyFail, fmt.Sprintf("%s gaf %d in plaats van %d", target, status, p.Expect)
+	default:
+		c.Status, c.Detail = protocol.VerifyFail, fmt.Sprintf("geen antwoord van %s: %v", target, err)
+	}
+	return c
+}
+
+// addresses zijn de adressen van de machine zonder loopback en link-local,
+// zonder prefix en gesorteerd.
+func (v *Verifier) addresses() []string {
+	addrs := v.Addrs
+	if addrs == nil {
+		addrs = net.InterfaceAddrs
+	}
+	list, err := addrs()
+	if err != nil {
+		return []string{}
+	}
+	out := []string{}
+	for _, a := range list {
+		var ip net.IP
+		switch x := a.(type) {
+		case *net.IPNet:
+			ip = x.IP
+		case *net.IPAddr:
+			ip = x.IP
+		}
+		if ip == nil || ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsUnspecified() {
+			continue
+		}
+		if s := ip.String(); !slices.Contains(out, s) {
+			out = append(out, s)
+		}
+	}
+	slices.Sort(out)
+	return out
 }
 
 // unreachable zegt waarom loopback niet antwoordt. Luistert de dienst wel

@@ -203,6 +203,10 @@ type destroyOpts struct {
 	lockWait time.Duration
 	actor    events.Actor
 	step     *jobs.Step
+	// own: de stap krijgt alleen eigen regels. Het takenlog van Proxmox
+	// vervangt het hele log van de stap, en dat wist bij meer sandboxes
+	// in één stap de regels van de vorige.
+	own bool
 }
 
 // destroySandbox ruimt een sandbox op langs de bewaakte weg: protection eraf,
@@ -230,6 +234,10 @@ func (s *Service) destroySandbox(ctx context.Context, id uuid.UUID, o destroyOpt
 		return s.destroyFailed(ctx, vm.sb, err, o)
 	}
 	sb := vm.sb
+	taskStep := o.step
+	if o.own {
+		taskStep = nil
+	}
 
 	waited := time.Duration(0)
 	for vm.res.Lock != "" {
@@ -262,7 +270,7 @@ func (s *Service) destroySandbox(ctx context.Context, id uuid.UUID, o destroyOpt
 		logf("protection uitzetten")
 		upid, err := vm.configure(ctx, url.Values{"protection": {"0"}})
 		if err == nil && upid != "" {
-			err = s.pve.WaitTask(ctx, vm.api, upid, o.step)
+			err = s.pve.WaitTask(ctx, vm.api, upid, taskStep)
 		}
 		if err != nil {
 			return s.destroyFailed(ctx, sb, fmt.Errorf("protection uitzetten: %w", err), o)
@@ -272,7 +280,7 @@ func (s *Service) destroySandbox(ctx context.Context, id uuid.UUID, o destroyOpt
 		logf("VM %d hard stoppen", sb.Vmid)
 		upid, err := vm.power(ctx, "stop")
 		if err == nil {
-			err = s.pve.WaitTask(ctx, vm.api, upid, o.step)
+			err = s.pve.WaitTask(ctx, vm.api, upid, taskStep)
 		}
 		if err != nil {
 			return s.destroyFailed(ctx, sb, fmt.Errorf("stoppen: %w", err), o)
@@ -281,7 +289,7 @@ func (s *Service) destroySandbox(ctx context.Context, id uuid.UUID, o destroyOpt
 	logf("VM %d verwijderen (purge)", sb.Vmid)
 	upid, err := vm.api.Destroy(ctx, vm.guest())
 	if err == nil {
-		err = s.pve.WaitTask(ctx, vm.api, upid, o.step)
+		err = s.pve.WaitTask(ctx, vm.api, upid, taskStep)
 	}
 	if err != nil {
 		return s.destroyFailed(ctx, sb, fmt.Errorf("verwijderen: %w", err), o)
@@ -360,6 +368,15 @@ func (s *Service) sandboxEvent(ctx context.Context, q *store.Queries, sb store.B
 		if run, err := q.GetTestRun(ctx, *sb.RunID); err == nil {
 			e.SubjectType, e.SubjectID, e.ClusterID = "test_run", sb.RunID.String(), run.TestRun.ClusterID
 			p["hostname"] = run.TestRun.Hostname
+			if run.TestRun.Kind == KindRehearsal {
+				// Een DR-repetitie heeft een sandbox per node.
+				p["kind"], p["cluster"] = run.TestRun.Kind, deref(run.ClusterName)
+				if sb.SourceNodeID != nil {
+					if n, err := q.GetNode(ctx, *sb.SourceNodeID); err == nil {
+						p["hostname"] = n.Node.Hostname
+					}
+				}
+			}
 		}
 	}
 	return s.ev.Write(ctx, q, e)

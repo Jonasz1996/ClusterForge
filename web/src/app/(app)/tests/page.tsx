@@ -17,6 +17,7 @@ const kinds: Record<Kind, string> = {
   "failover.test": "Failovertest",
   "disaster.run": "Rampoefening",
   "backup.verify": "Back-upcontrole",
+  "dr.rehearsal": "DR-repetitie",
 };
 
 const fmt = new Intl.DateTimeFormat("nl-BE", { dateStyle: "medium", timeStyle: "short" });
@@ -43,7 +44,7 @@ function TestsInner() {
     <div className="space-y-6">
       <PageHeader
         title="Tests"
-        description="Elke failovertest, rampoefening en back-upcontrole met zijn uitkomst. Nieuwste eerst; klik een run voor het rapport."
+        description="Elke failovertest, rampoefening, DR-repetitie en back-upcontrole met zijn uitkomst. Nieuwste eerst; klik een run voor het rapport."
       />
       <div className="flex flex-wrap items-center gap-3">
         <Select aria-label="Soort" className="w-48" value={kind} onChange={(e) => setKind(e.target.value as Kind | "")}>
@@ -130,6 +131,7 @@ function RunTable({ runs, empty }: { runs: TestRun[]; empty: string }) {
 // what is de naam van de test, of de node waarvan de back-up gecontroleerd werd.
 function what(r: TestRun) {
   if (r.disaster) return r.disaster.name;
+  if (r.rehearsal) return r.rehearsal.name;
   if (r.definition) return r.definition.name;
   return r.hostname || "Back-up";
 }

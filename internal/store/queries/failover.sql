@@ -119,14 +119,14 @@ ORDER BY n.hostname;
 -- name: GetTestSlotJob :one
 -- De invasieve test die nu wacht of loopt, over heel ClusterForge.
 SELECT id, title FROM jobs
-WHERE kind IN ('backup.verify', 'failover.test', 'disaster.run') AND status IN ('queued', 'running')
+WHERE kind IN ('backup.verify', 'failover.test', 'disaster.run', 'dr.rehearsal') AND status IN ('queued', 'running')
 ORDER BY created_at LIMIT 1;
 
 -- name: GetTestSlotReleasedAt :one
 -- Wanneer de laatste invasieve test klaar was; een geplande run die daarop
 -- wachtte, is niet te laat.
 SELECT coalesce(max(finished_at), 'epoch'::timestamptz)::timestamptz AS released_at FROM jobs
-WHERE kind IN ('backup.verify', 'failover.test', 'disaster.run') AND status NOT IN ('queued', 'running');
+WHERE kind IN ('backup.verify', 'failover.test', 'disaster.run', 'dr.rehearsal') AND status NOT IN ('queued', 'running');
 
 -- name: LastTestedAt :one
 -- Wanneer een cluster het laatst echt getest of gecontroleerd is; epoch als

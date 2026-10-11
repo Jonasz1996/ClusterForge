@@ -196,7 +196,7 @@ func (q *Queries) GetTestRunByJob(ctx context.Context, jobID *uuid.UUID) (TestRu
 
 const getTestSlotJob = `-- name: GetTestSlotJob :one
 SELECT id, title FROM jobs
-WHERE kind IN ('backup.verify', 'failover.test', 'disaster.run') AND status IN ('queued', 'running')
+WHERE kind IN ('backup.verify', 'failover.test', 'disaster.run', 'dr.rehearsal') AND status IN ('queued', 'running')
 ORDER BY created_at LIMIT 1
 `
 
@@ -215,7 +215,7 @@ func (q *Queries) GetTestSlotJob(ctx context.Context) (GetTestSlotJobRow, error)
 
 const getTestSlotReleasedAt = `-- name: GetTestSlotReleasedAt :one
 SELECT coalesce(max(finished_at), 'epoch'::timestamptz)::timestamptz AS released_at FROM jobs
-WHERE kind IN ('backup.verify', 'failover.test', 'disaster.run') AND status NOT IN ('queued', 'running')
+WHERE kind IN ('backup.verify', 'failover.test', 'disaster.run', 'dr.rehearsal') AND status NOT IN ('queued', 'running')
 `
 
 // Wanneer de laatste invasieve test klaar was; een geplande run die daarop

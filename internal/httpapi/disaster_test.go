@@ -297,7 +297,8 @@ func TestDisaster(t *testing.T) {
 		t.Fatalf("lijst: %d", s)
 	}
 	o := list.Options
-	if !o.Allowed || o.Slug != "lb" || len(o.Kinds) != 4 || !o.Kinds[0].Available || o.Kinds[0].Key != "host_down" || o.Kinds[3].Key != "sequence" ||
+	if !o.Allowed || o.Slug != "lb" || len(o.Kinds) != 5 || !o.Kinds[0].Available || o.Kinds[0].Key != "host_down" || o.Kinds[3].Key != "sequence" ||
+		o.Kinds[4].Key != "dr_rehearsal" || !o.Kinds[4].Available ||
 		!slices.Equal(o.Units, []string{"nginx"}) || !slices.Equal(o.Vips, []string{failoverVIP}) || len(list.Items) != 0 {
 		t.Fatalf("opties: %+v", o)
 	}

@@ -10,7 +10,7 @@ import (
 
 // Version is de protocolversie. Een agent meldt die bij elke heartbeat, zodat
 // de server geen berichten stuurt die de agent niet kent.
-const Version = 6
+const Version = 7
 
 // CommandsSince is de eerste protocolversie met commando's.
 const CommandsSince = 2
@@ -34,6 +34,12 @@ const JournalSince = 5
 // (fault.inject, fault.renew en fault.clear) en in de facts meldt welke
 // gereedschappen ervoor op de node staan.
 const FaultsSince = 6
+
+// RehearsalSince is de eerste protocolversie waarvan cf-agent verify zijn
+// adressen meldt en probes naar het VIP en de andere nodes doet, voor de
+// DR-repetitie. Een agent met protocol 6 kent ze niet en laat de velden
+// zonder fout weg.
+const RehearsalSince = 7
 
 // Berichttypes.
 const (
@@ -732,6 +738,27 @@ type VerifyRequest struct {
 	// PostgreSQL en MariaDB vragen de vaste databasecontroles.
 	PostgreSQL bool `json:"postgresql,omitempty"`
 	MariaDB    bool `json:"mariadb,omitempty"`
+	// Addresses vraagt de adressen van de machine, zonder loopback: de
+	// DR-repetitie leidt eruit af wie het VIP heeft. Vanaf protocol 7.
+	Addresses bool `json:"addresses,omitempty"`
+	// Probes zijn verbindingen naar het VIP en de andere nodes in het
+	// afgesloten netwerk van de DR-repetitie. De agent doet ze alleen in een
+	// sandbox (serienummer cf-sandbox). Vanaf protocol 7.
+	Probes []VerifyProbe `json:"probes,omitempty"`
+}
+
+// VerifyProbe is een verbinding vanuit de sandbox naar een ander adres. Met
+// Path een HTTP GET op Port, anders alleen een TCP-verbinding.
+type VerifyProbe struct {
+	// Name is wat het rapport toont, zoals "VIP 10.0.30.100" of "web02".
+	Name   string `json:"name"`
+	Host   string `json:"host"`
+	Port   int    `json:"port"`
+	Path   string `json:"path,omitempty"`
+	Expect int    `json:"expect,omitempty"`
+	// Reach vraagt alleen of het adres antwoordt: een geweigerde
+	// TCP-verbinding telt ook, want dan antwoordde de machine. Zonder Path.
+	Reach bool `json:"reach,omitempty"`
 }
 
 type VerifyTCP struct {
@@ -755,6 +782,9 @@ type VerifyResult struct {
 	AgentVersion    string        `json:"agent_version"`
 	Error           string        `json:"error,omitempty"`
 	Checks          []VerifyCheck `json:"checks"`
+	// Addresses zijn de adressen van de machine, zonder loopback en
+	// link-local, als de aanvraag erom vroeg.
+	Addresses []string `json:"addresses,omitempty"`
 	// Seconds is hoe lang alles samen duurde.
 	Seconds float64 `json:"seconds"`
 }
@@ -768,7 +798,7 @@ const (
 
 // VerifyCheck is één controle in de sandbox.
 type VerifyCheck struct {
-	// Kind is service, units, tcp, http, postgresql of mariadb.
+	// Kind is service, units, tcp, http, postgresql, mariadb of probe.
 	Kind string `json:"kind"`
 	// Name is de unit, de poort of het adres.
 	Name   string `json:"name"`

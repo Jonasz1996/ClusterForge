@@ -23,10 +23,12 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Jonasz1996/clusterforge/internal/backups"
 	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/failover"
 	"github.com/Jonasz1996/clusterforge/internal/health"
 	"github.com/Jonasz1996/clusterforge/internal/jobs"
+	"github.com/Jonasz1996/clusterforge/internal/planner"
 	"github.com/Jonasz1996/clusterforge/internal/proxmox"
 	"github.com/Jonasz1996/clusterforge/internal/risk"
 	"github.com/Jonasz1996/clusterforge/internal/status"
@@ -78,6 +80,7 @@ var Kinds = []Kind{
 	{ServiceDown, "Dienst valt weg op alle nodes", 60, 120},
 	{VIPLoss, "VIP valt weg", 60, 120},
 	{Sequence, "Reeks van storingen", 90, 120},
+	{DRRehearsal, "DR-repetitie: cluster terugzetten uit de back-ups", 0, 0},
 }
 
 func kindOf(key string) (Kind, bool) {
@@ -120,6 +123,8 @@ type Params struct {
 	Unit string `json:"unit,omitempty"`
 	// Steps zijn bij sequence de stappen, op volgorde van tijdstip.
 	Steps []Step `json:"steps,omitempty"`
+	// Bridge is bij dr_rehearsal de afgesloten bridge.
+	Bridge string `json:"bridge,omitempty"`
 }
 
 // Expect is de verwachting: hoe lang de storing duurt en hoe snel na het
@@ -143,6 +148,9 @@ func Describe(kind string, p Params) string {
 		return "keepalived stoppen op alle nodes, zodat het VIP geen houder heeft"
 	case Sequence:
 		return describeSteps(p.Steps)
+	case DRRehearsal:
+		return "elke node terugzetten uit zijn nieuwste back-up, op de afgesloten bridge " + or(p.Bridge, backups.DefaultBridge) +
+			"; het echte cluster blijft draaien"
 	}
 	return kind
 }
@@ -210,6 +218,10 @@ type Service struct {
 	RenewInterval time.Duration
 	// Changed wordt aangeroepen na een run; mag nil zijn.
 	Changed func()
+	// Backups voert de DR-repetitie uit; nil zonder Proxmox-koppeling.
+	Backups *backups.Service
+	// Window is het testvenster van de geplande DR-repetities.
+	Window planner.Window
 }
 
 func NewService(pool *pgxpool.Pool, ev *events.Writer, log *slog.Logger, runner *jobs.Runner, bus failover.Commander) *Service {
@@ -219,7 +231,7 @@ func NewService(pool *pgxpool.Pool, ev *events.Writer, log *slog.Logger, runner 
 		ProbeInterval: 250 * time.Millisecond, StatusPoll: 2 * time.Second, ShortOutage: 10 * time.Second,
 		Fresh: status.HeartbeatLate, Retry: 5 * time.Second, ReturnTimeout: 3 * time.Minute, BootTimeout: 15 * time.Minute,
 		EmergencyTimeout: 10 * time.Second, Lease: protocol.FaultLease, RenewInterval: 10 * time.Second,
-		Probes: func(store.Cluster, string) failover.Probe { return failover.DefaultProbe },
+		Probes: func(store.Cluster, string) failover.Probe { return failover.DefaultProbe }, Window: planner.DefaultWindow,
 	}
 	// Geen van beide is Retryable: een nieuwe poging is een nieuwe taak.
 	runner.Register(KindRun, s.runDisaster)
@@ -244,10 +256,13 @@ type Input struct {
 	Steps           []Step
 	FaultSeconds    int
 	RecoverySeconds int
+	// Bridge en Schedule zijn er alleen bij dr_rehearsal.
+	Bridge   string
+	Schedule string
 }
 
 func (in *Input) params() Params {
-	return Params{ConnectionID: in.ConnectionID, Host: in.Host, Unit: in.Unit, Steps: in.Steps}
+	return Params{ConnectionID: in.ConnectionID, Host: in.Host, Unit: in.Unit, Steps: in.Steps, Bridge: in.Bridge}
 }
 
 func fieldErr(field, msg string) error { return &failover.FieldError{Field: field, Message: msg} }
@@ -262,11 +277,15 @@ func (in *Input) validate(o Options) error {
 		return fieldErr("name", "de naam is te lang (hoogstens 200 tekens)")
 	}
 	if _, ok := kindOf(in.Kind); !ok {
-		return fieldErr("kind", "kies een Proxmox-host die uitvalt, een dienst die wegvalt, een VIP dat wegvalt of een reeks van storingen")
+		return fieldErr("kind", "kies een Proxmox-host die uitvalt, een dienst die wegvalt, een VIP dat wegvalt, een reeks van storingen of een DR-repetitie")
+	}
+	if in.Kind == DRRehearsal {
+		return in.validateRehearsal(o)
 	}
 	if !o.Allowed {
 		return fieldErr("kind", o.Reason)
 	}
+	in.Bridge, in.Schedule = "", ""
 	if in.Kind != Sequence {
 		in.Steps = nil
 	}
@@ -308,6 +327,29 @@ func (in *Input) validate(o Options) error {
 			return err
 		}
 		in.Steps = steps
+	}
+	return nil
+}
+
+// validateRehearsal controleert een DR-repetitie: alleen de bridge en de
+// planning; een storing en hersteltijd heeft ze niet.
+func (in *Input) validateRehearsal(o Options) error {
+	if i := slices.IndexFunc(o.Kinds, func(k KindOption) bool { return k.Key == DRRehearsal }); i >= 0 && !o.Kinds[i].Available {
+		return fieldErr("kind", o.Kinds[i].Reason)
+	}
+	in.ConnectionID, in.Host, in.Unit, in.Steps = nil, "", "", nil
+	in.FaultSeconds, in.RecoverySeconds = 0, 0
+	in.Bridge = strings.TrimSpace(in.Bridge)
+	if in.Bridge == "" {
+		in.Bridge = backups.DefaultBridge
+	}
+	if err := backups.ValidBridge(in.Bridge); err != nil {
+		return fieldErr("bridge", err.Error())
+	}
+	switch in.Schedule {
+	case "", Weekly, Monthly:
+	default:
+		return fieldErr("schedule", "kies geen planning, elke week of elke maand")
 	}
 	return nil
 }
@@ -354,6 +396,27 @@ type Options struct {
 	// Nodes en Actions zijn er voor de stappen van een reeks.
 	Nodes   []NodeOption
 	Actions []ActionOption
+	// Targets zijn de RTO- en RPO-doelen van het cluster voor de
+	// DR-repetitie; Window is het testvenster van de planning.
+	Targets RecoveryTargets
+	Window  string
+}
+
+// RecoveryTargets zijn de doelen van een cluster: wat geldt, en wat de
+// standaard van de omgeving is. Custom is true als het cluster eigen doelen
+// heeft. Nul is geen doel.
+type RecoveryTargets struct {
+	RTOMinutes, RPOHours               int
+	DefaultRTOMinutes, DefaultRPOHours int
+	Custom                             bool
+}
+
+// TargetsOf zijn de doelen van een cluster.
+func TargetsOf(c store.Cluster) RecoveryTargets {
+	t := RecoveryTargets{Custom: c.RtoTargetMinutes != nil || c.RpoTargetHours != nil}
+	t.RTOMinutes, t.RPOHours = backups.Targets(c.Environment, c.RtoTargetMinutes, c.RpoTargetHours)
+	t.DefaultRTOMinutes, t.DefaultRPOHours = backups.Targets(c.Environment, nil, nil)
+	return t
 }
 
 // Options zegt welke rampoefeningen dit cluster nu kan.
@@ -373,7 +436,10 @@ func (s *Service) Options(ctx context.Context, clusterID uuid.UUID) (Options, er
 	if err != nil {
 		return Options{}, err
 	}
-	out := Options{Allowed: c.Environment != store.EnvironmentProd, Slug: c.Slug, Hosts: []HostOption{}, Units: []string{}, VIPs: []string{}}
+	out := Options{
+		Allowed: c.Environment != store.EnvironmentProd, Slug: c.Slug, Hosts: []HostOption{}, Units: []string{}, VIPs: []string{},
+		Targets: TargetsOf(c), Window: s.Window.String(),
+	}
 	if !out.Allowed {
 		out.Reason = msgProd
 	}
@@ -414,6 +480,10 @@ func (s *Service) Options(ctx context.Context, clusterID uuid.UUID) (Options, er
 	for _, k := range Kinds {
 		o := KindOption{Kind: k, Available: true}
 		switch {
+		case k.Key == DRRehearsal && s.Backups == nil:
+			o.Available, o.Reason = false, msgNoBackups
+		case k.Key == DRRehearsal:
+			// Raakt het echte cluster niet, dus ook op prod.
 		case !out.Allowed:
 			o.Available, o.Reason = false, msgProd
 		case k.Key == HostDown && s.Proxmox == nil:
@@ -495,10 +565,14 @@ func Decode(row store.DisasterScenario) Scenario {
 }
 
 func (s *Service) payload(c store.Cluster, in Input) map[string]any {
-	return map[string]any{
+	p := map[string]any{
 		"name": in.Name, "cluster": c.Name, "kind": in.Kind, "description": Describe(in.Kind, in.params()),
 		"fault_seconds": in.FaultSeconds, "recovery_seconds": in.RecoverySeconds,
 	}
+	if in.Kind == DRRehearsal {
+		p["schedule"] = ScheduleLabel(in.Schedule)
+	}
+	return p
 }
 
 // Create maakt een scenario.
@@ -522,6 +596,7 @@ func (s *Service) Create(ctx context.Context, actor events.Actor, clusterID uuid
 		var err error
 		out, err = q.InsertDisasterScenario(ctx, store.InsertDisasterScenarioParams{
 			ClusterID: clusterID, Name: in.Name, Kind: in.Kind, Params: params, Expect: expect, CreatedBy: userOf(actor),
+			Schedule: in.Schedule, NextRunAt: nextRehearsal(s.Window, in.Schedule, nil, time.Now()),
 		})
 		if err != nil {
 			return err
@@ -557,7 +632,14 @@ func (s *Service) Update(ctx context.Context, actor events.Actor, id uuid.UUID, 
 	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q := store.New(tx)
 		var err error
-		out, err = q.UpdateDisasterScenario(ctx, store.UpdateDisasterScenarioParams{ID: id, Name: in.Name, Kind: in.Kind, Params: params, Expect: expect})
+		// Een ongewijzigde planning houdt haar volgende run.
+		next := cur.NextRunAt
+		if in.Schedule != cur.Schedule || cur.Kind != in.Kind || next == nil {
+			next = nextRehearsal(s.Window, in.Schedule, nil, time.Now())
+		}
+		out, err = q.UpdateDisasterScenario(ctx, store.UpdateDisasterScenarioParams{
+			ID: id, Name: in.Name, Kind: in.Kind, Params: params, Expect: expect, Schedule: in.Schedule, NextRunAt: next,
+		})
 		if errors.Is(err, pgx.ErrNoRows) {
 			return ErrNotFound
 		}
@@ -575,6 +657,9 @@ func (s *Service) Update(ctx context.Context, actor events.Actor, id uuid.UUID, 
 		diff("description", Describe(old.Kind, old.P), Describe(in.Kind, in.params()))
 		diff("fault_seconds", old.E.FaultSeconds, in.FaultSeconds)
 		diff("recovery_seconds", old.E.RecoverySeconds, in.RecoverySeconds)
+		if in.Kind == DRRehearsal || old.Kind == DRRehearsal {
+			diff("schedule", ScheduleLabel(old.Schedule), ScheduleLabel(in.Schedule))
+		}
 		if len(payload) == 0 {
 			return nil
 		}
