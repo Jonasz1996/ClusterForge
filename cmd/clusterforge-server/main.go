@@ -37,6 +37,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/failover"
 	"github.com/Jonasz1996/clusterforge/internal/gitops"
 	"github.com/Jonasz1996/clusterforge/internal/httpapi"
+	"github.com/Jonasz1996/clusterforge/internal/incidents"
 	"github.com/Jonasz1996/clusterforge/internal/jobs"
 	"github.com/Jonasz1996/clusterforge/internal/journal"
 	"github.com/Jonasz1996/clusterforge/internal/lifecycle"
@@ -200,10 +201,13 @@ func serve() error {
 	for _, kind := range []string{deploy.Kind, lifecycle.KindNodeAction, proxmox.KindVMAction, failover.KindTest, failover.KindRestore} {
 		runner.OnFinished(kind, recheck)
 	}
-	// De status en impact van de diensten rekenen na elke ronde van de
-	// evaluator, na diens commit.
+	// De status en impact van de diensten, en daarna de incidenten, rekenen
+	// na elke ronde van de evaluator, na diens commit.
 	dps := deps.NewService(pool, ev, log)
-	eval.After = dps.Evaluate
+	det := incidents.NewDetector(pool, ev, log)
+	eval.After = func(ctx context.Context) error {
+		return errors.Join(dps.Evaluate(ctx), det.Detect(ctx))
+	}
 	// GitOps leest de gekoppelde repository elke minuut; na een uitrol of
 	// toepassing kijkt het meteen of een plan verouderd is.
 	git := gitops.NewService(pool, ev, log, box, dep, ro)

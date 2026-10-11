@@ -1685,6 +1685,70 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/incidents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Incidenten, open eerst, daarna de afgesloten die in de periode begonnen
+         * @description Incidenten door een failovertest van ClusterForge zijn standaard
+         *     verborgen; `include_tests` toont ze.
+         */
+        get: operations["listIncidents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/incidents/{incidentId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                incidentId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Eén incident, met wat er geraakt was en de statusovergangen in die periode
+         * @description De geschiedenis komt uit het logboek, maar alleen statusovergangen,
+         *     incidenten en tests over de geraakte clusters, nodes en diensten.
+         *     Een viewer ziet ze zonder IP-adres en sessie.
+         */
+        get: operations["getIncident"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/incidents/{incidentId}/note": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                incidentId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** De notitie bij een incident (admin) */
+        put: operations["setIncidentNote"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2516,6 +2580,67 @@ export interface components {
             payload: {
                 [key: string]: unknown;
             };
+        };
+        IncidentSubject: {
+            /** @enum {string} */
+            type: "cluster" | "node" | "service" | "test_run";
+            /** Format: uuid */
+            id: string;
+            name: string;
+            /** Format: uuid */
+            cluster_id: string | null;
+            first_status: string;
+            worst_status: string;
+            /** @description De status nu, of toen het weer goed was */
+            last_status: string;
+            reason: string;
+            /** Format: date-time */
+            since: string;
+            /**
+             * Format: date-time
+             * @description Wanneer het weer goed was; null zolang het nog misgaat
+             */
+            until: string | null;
+            /** @description Of het onderwerp nog bestaat */
+            present: boolean;
+        };
+        Incident: {
+            /** Format: uuid */
+            id: string;
+            number: number;
+            title: string;
+            /** @enum {string} */
+            severity: "low" | "high" | "critical";
+            /** @enum {string} */
+            status: "open" | "resolved";
+            /** Format: date-time */
+            started_at: string;
+            /** Format: date-time */
+            detected_at: string;
+            /** Format: date-time */
+            resolved_at: string | null;
+            /** @description Tijdens een failovertest van ClusterForge in hetzelfde cluster */
+            caused_by_test: boolean;
+            /** Format: uuid */
+            test_run_id: string | null;
+            note: string;
+            /** Format: date-time */
+            updated_at: string;
+            subjects: components["schemas"]["IncidentSubject"][];
+        };
+        IncidentList: {
+            items: components["schemas"]["Incident"][];
+            has_more: boolean;
+        };
+        IncidentDetail: {
+            incident: components["schemas"]["Incident"];
+            /** @description Statusovergangen, incidenten en tests over wat geraakt was, oudste eerst */
+            history: components["schemas"]["AuditEntry"][];
+            /** @description Er waren meer regels dan getoond */
+            history_more: boolean;
+        };
+        IncidentNote: {
+            note: string;
         };
         AuditPage: {
             items: components["schemas"]["AuditEntry"][];
@@ -6575,6 +6700,92 @@ export interface operations {
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];
+        };
+    };
+    listIncidents: {
+        parameters: {
+            query?: {
+                status?: "open" | "resolved";
+                /** @description Alleen incidenten die dit cluster raakten */
+                cluster?: string;
+                /** @description Begonnen vanaf; standaard 30 dagen geleden */
+                from?: string;
+                /** @description Begonnen voor; standaard nu */
+                to?: string;
+                include_tests?: boolean;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IncidentList"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+        };
+    };
+    getIncident: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                incidentId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["IncidentDetail"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    setIncidentNote: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                incidentId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["IncidentNote"];
+            };
+        };
+        responses: {
+            /** @description Opgeslagen */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Incident"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
         };
     };
 }

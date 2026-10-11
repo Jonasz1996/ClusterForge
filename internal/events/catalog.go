@@ -19,6 +19,7 @@ const (
 	CategoryDeps      Category = "dependencies"
 	CategoryGitOps    Category = "gitops"
 	CategoryStatus    Category = "status"
+	CategoryIncident  Category = "incidents"
 )
 
 // Categories staan in de volgorde van het filter in de webinterface.
@@ -38,6 +39,7 @@ var Categories = []struct {
 	{CategoryDeps, "Afhankelijkheden"},
 	{CategoryGitOps, "GitOps"},
 	{CategoryStatus, "Status"},
+	{CategoryIncident, "Incidenten"},
 }
 
 // Spec beschrijft een action: zijn soort en een korte Nederlandse omschrijving
@@ -169,6 +171,12 @@ var Known = map[string]Spec{
 	"node.status_changed":    {CategoryStatus, "Status van node gewijzigd"},
 	"cluster.status_changed": {CategoryStatus, "Status van cluster gewijzigd"},
 	"vip.owner_changed":      {CategoryStatus, "VIP verhuisd"},
+
+	"incident.opened":       {CategoryIncident, "Incident geopend"},
+	"incident.escalated":    {CategoryIncident, "Incident erger geworden"},
+	"incident.resolved":     {CategoryIncident, "Incident opgelost"},
+	"incident.reopened":     {CategoryIncident, "Incident opnieuw geopend"},
+	"incident.note_updated": {CategoryIncident, "Notitie bij incident bijgewerkt"},
 }
 
 // Lookup geeft de spec van een action. Een onbekende action (uit een nieuwere

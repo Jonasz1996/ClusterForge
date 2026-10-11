@@ -3,6 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { AuditList } from "@/components/audit/AuditList";
+import { OpenIncidentsCard } from "@/components/incidents/Incidents";
 import { ClusterHealth } from "@/components/monitoring/ClusterHealth";
 import { Alert, Card } from "@/components/ui";
 import { api } from "@/lib/api/client";
@@ -83,6 +84,8 @@ export default function OverviewPage() {
         <Stat label="Server" value={health.data?.status === "ok" ? "Gezond" : health.isLoading ? "…" : "Probleem"} />
         <Stat label="Database" value={health.data?.database === "ok" ? "Bereikbaar" : health.isLoading ? "…" : "Onbereikbaar"} />
       </div>
+
+      <OpenIncidentsCard />
 
       {clusters.data && clusters.data.length > 0 && (
         <section className="space-y-3">

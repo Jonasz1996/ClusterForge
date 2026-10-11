@@ -48,8 +48,15 @@ WHERE (sqlc.narg('before_id')::bigint IS NULL OR e.id < sqlc.narg('before_id')::
   AND (sqlc.narg('cluster_id')::text IS NULL
        OR e.cluster_id::text = sqlc.narg('cluster_id')::text
        OR (e.subject_type = 'cluster' AND e.subject_id = sqlc.narg('cluster_id')::text))
-  AND (sqlc.narg('node_id')::text IS NULL OR e.node_ref = sqlc.narg('node_id')::text)
+  AND (sqlc.narg('node_id')::text IS NULL OR e.node_ref = sqlc.narg('node_id')::text
+       OR e.payload->'node_ids' @> to_jsonb(sqlc.narg('node_id')::text))
   AND (sqlc.narg('job_id')::text IS NULL OR e.job_ref = sqlc.narg('job_id')::text)
+  -- any_of: over een van deze clusters, nodes of onderwerpen.
+  AND (sqlc.narg('any_of')::text[] IS NULL
+       OR e.cluster_id::text = ANY(sqlc.narg('any_of')::text[])
+       OR e.subject_id = ANY(sqlc.narg('any_of')::text[])
+       OR e.node_ref = ANY(sqlc.narg('any_of')::text[])
+       OR e.payload->'node_ids' ?| sqlc.narg('any_of')::text[])
   AND (sqlc.narg('actions')::text[] IS NULL OR e.action = ANY(sqlc.narg('actions')::text[]))
   AND (sqlc.narg('pattern')::text IS NULL
        OR e.action ILIKE sqlc.narg('pattern')::text

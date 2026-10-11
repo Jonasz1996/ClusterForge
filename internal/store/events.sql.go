@@ -96,20 +96,27 @@ WHERE ($1::bigint IS NULL OR e.id < $1::bigint)
   AND ($6::text IS NULL
        OR e.cluster_id::text = $6::text
        OR (e.subject_type = 'cluster' AND e.subject_id = $6::text))
-  AND ($7::text IS NULL OR e.node_ref = $7::text)
+  AND ($7::text IS NULL OR e.node_ref = $7::text
+       OR e.payload->'node_ids' @> to_jsonb($7::text))
   AND ($8::text IS NULL OR e.job_ref = $8::text)
-  AND ($9::text[] IS NULL OR e.action = ANY($9::text[]))
-  AND ($10::text IS NULL
-       OR e.action ILIKE $10::text
-       OR e.payload::text ILIKE $10::text
-       OR au.username ILIKE $10::text
-       OR c.name ILIKE $10::text
-       OR n.hostname ILIKE $10::text
-       OR agn.hostname ILIKE $10::text
-       OR an.hostname ILIKE $10::text
-       OR j.title ILIKE $10::text)
+  -- any_of: over een van deze clusters, nodes of onderwerpen.
+  AND ($9::text[] IS NULL
+       OR e.cluster_id::text = ANY($9::text[])
+       OR e.subject_id = ANY($9::text[])
+       OR e.node_ref = ANY($9::text[])
+       OR e.payload->'node_ids' ?| $9::text[])
+  AND ($10::text[] IS NULL OR e.action = ANY($10::text[]))
+  AND ($11::text IS NULL
+       OR e.action ILIKE $11::text
+       OR e.payload::text ILIKE $11::text
+       OR au.username ILIKE $11::text
+       OR c.name ILIKE $11::text
+       OR n.hostname ILIKE $11::text
+       OR agn.hostname ILIKE $11::text
+       OR an.hostname ILIKE $11::text
+       OR j.title ILIKE $11::text)
 ORDER BY e.id DESC
-LIMIT $11
+LIMIT $12
 `
 
 type ListAuditParams struct {
@@ -121,6 +128,7 @@ type ListAuditParams struct {
 	ClusterID *string
 	NodeID    *string
 	JobID     *string
+	AnyOf     []string
 	Actions   []string
 	Pattern   *string
 	Lim       int32
@@ -163,6 +171,7 @@ func (q *Queries) ListAudit(ctx context.Context, arg ListAuditParams) ([]ListAud
 		arg.ClusterID,
 		arg.NodeID,
 		arg.JobID,
+		arg.AnyOf,
 		arg.Actions,
 		arg.Pattern,
 		arg.Lim,

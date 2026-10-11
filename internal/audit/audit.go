@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"slices"
 	"strings"
 	"time"
 
@@ -38,6 +39,10 @@ type Filter struct {
 	Job      *uuid.UUID
 	Category events.Category
 	Query    string
+	// AnyOf geeft regels over een van deze clusters, nodes of onderwerpen.
+	AnyOf []uuid.UUID
+	// Actions beperkt tot deze actions, naast Category.
+	Actions []string
 }
 
 type Actor struct {
@@ -169,6 +174,19 @@ func params(f Filter, limit int) store.ListAuditParams {
 		p.Actions = events.Actions(f.Category)
 		if p.Actions == nil {
 			p.Actions = []string{}
+		}
+	}
+	if f.Actions != nil {
+		if p.Actions == nil {
+			p.Actions = f.Actions
+		} else {
+			p.Actions = slices.DeleteFunc(p.Actions, func(a string) bool { return !slices.Contains(f.Actions, a) })
+		}
+	}
+	if f.AnyOf != nil {
+		p.AnyOf = make([]string, len(f.AnyOf))
+		for i, id := range f.AnyOf {
+			p.AnyOf[i] = id.String()
 		}
 	}
 	if q := strings.TrimSpace(f.Query); q != "" {
