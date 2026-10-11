@@ -2397,6 +2397,85 @@ paths:
               schema: { $ref: "#/components/schemas/DocGenerateResult" }
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
+  /docs/target:
+    get:
+      operationId: getDocsTarget
+      summary: De GitHub-repository van de documentatie en de laatste publicatie
+      description: Ook voor viewers. Het token komt nooit terug.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DocsTargetStatus" }
+        "401": { $ref: "#/components/responses/Error" }
+    put:
+      operationId: saveDocsTarget
+      summary: De koppeling maken of wijzigen (admin)
+      description: |
+        Leest eerst de branch en test met een losse blob of het token mag
+        schrijven; lukt dat niet, dan wordt er niets opgeslagen. Een leeg
+        token laat het opgeslagen token staan. De repository en branch van
+        GitOps worden geweigerd. Na het opslaan publiceert de server meteen.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DocsTargetInput" }
+      responses:
+        "200":
+          description: Opgeslagen
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DocsTargetStatus" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteDocsTarget
+      summary: De koppeling verwijderen (admin); wat al in de repository staat, blijft daar
+      responses:
+        "204": { description: Verwijderd }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /docs/target/test:
+    post:
+      operationId: testDocsTarget
+      summary: Token, repository en branch testen zonder op te slaan (admin)
+      description: Maakt een losse blob die bij geen enkele commit hoort; zo blijkt of het token mag schrijven.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DocsTargetInput" }
+      responses:
+        "200":
+          description: De branch en de documenten die er al staan
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DocsTargetProbe" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /docs/publish:
+    post:
+      operationId: publishDocs
+      summary: De documentatie nu naar GitHub schrijven (admin)
+      description: |
+        Eén commit met alleen de bestanden die veranderden; zonder verschil
+        geen commit. Werkt ook als automatisch publiceren uit staat.
+      responses:
+        "200":
+          description: De commit, of geen als alles al gelijk was
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DocsPublishResult" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
   /docs/{scope}/{kind}:
     parameters:
       - { $ref: "#/components/parameters/DocScopeParam" }
@@ -2660,6 +2739,81 @@ components:
       required: [changed]
       properties:
         changed: { type: integer, description: Hoeveel documenten een nieuwe versie kregen }
+    DocsCommit:
+      type: object
+      required: [sha, url, at, files]
+      properties:
+        sha: { type: string }
+        url: { type: string, description: De commit op de website }
+        at: { type: string, format: date-time }
+        files: { type: integer, description: Hoeveel bestanden de commit veranderde }
+    DocsTarget:
+      type: object
+      required: [api_url, repository, branch, path, web_url, folder_url, enabled, last_commit, last_checked_at, last_attempt_at, last_error, created_at, updated_at]
+      properties:
+        api_url: { type: string }
+        repository: { type: string, description: "eigenaar/naam" }
+        branch: { type: string }
+        path: { type: string, description: De map in de repository; leeg is de hoofdmap }
+        web_url: { type: string, description: De repository op de website }
+        folder_url: { type: string, description: De map op de branch op de website }
+        enabled: { type: boolean, description: Automatisch publiceren na een wijziging en elke nacht }
+        last_commit:
+          description: De laatste commit van ClusterForge
+          allOf: [{ $ref: "#/components/schemas/DocsCommit" }]
+          nullable: true
+        last_checked_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: De laatste keer dat de repository gelijk was aan de documentatie
+        last_attempt_at: { type: string, format: date-time, nullable: true }
+        last_error: { type: string, description: Waarom de laatste poging mislukte; leeg als ze lukte }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    DocsTargetStatus:
+      type: object
+      required: [enabled, target, pending]
+      properties:
+        enabled: { type: boolean, description: Zonder CF_MASTER_KEY staat de export uit }
+        target:
+          allOf: [{ $ref: "#/components/schemas/DocsTarget" }]
+          nullable: true
+        pending: { type: boolean, description: Er wacht een publicatie, bijvoorbeeld na een fout }
+    DocsTargetInput:
+      type: object
+      required: [repository]
+      properties:
+        api_url: { type: string, description: "Standaard https://api.github.com" }
+        repository: { type: string, description: "eigenaar/naam, of de link naar de repository" }
+        branch: { type: string, description: Standaard main }
+        path: { type: string, description: "Standaard docs; leeg is de hoofdmap van de repository" }
+        token:
+          type: string
+          format: password
+          description: "Fine-grained token met alleen Contents: Read and write op deze repository; leeg laat het opgeslagen token staan"
+        enabled: { type: boolean, description: Automatisch publiceren; standaard aan }
+    DocsTargetProbe:
+      type: object
+      required: [branch_exists, head, files]
+      properties:
+        branch_exists: { type: boolean, description: Zo niet, dan maakt ClusterForge de branch bij de eerste publicatie }
+        head: { type: string, description: De kop van de branch; leeg als die nog niet bestaat }
+        files: { type: integer, description: Hoeveel documenten van ClusterForge er al in de map staan }
+    DocsFileChange:
+      type: object
+      required: [path, change]
+      properties:
+        path: { type: string }
+        change: { type: string, enum: [added, modified, deleted] }
+    DocsPublishResult:
+      type: object
+      required: [commit, files]
+      properties:
+        commit:
+          allOf: [{ $ref: "#/components/schemas/DocsCommit" }]
+          nullable: true
+        files: { type: array, items: { $ref: "#/components/schemas/DocsFileChange" } }
     Error:
       type: object
       required: [code, message]

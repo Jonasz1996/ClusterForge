@@ -84,3 +84,45 @@ WHERE d.scope = @scope AND d.kind = @kind AND d.cluster_id IS NOT DISTINCT FROM 
       WHERE s.scope = @scope AND s.kind = @kind AND s.cluster_id IS NOT DISTINCT FROM sqlc.narg(cluster_id)::uuid
       ORDER BY s.id DESC
       LIMIT @keep) k);
+
+-- name: GetDocsTarget :one
+SELECT * FROM docs_targets LIMIT 1;
+
+-- name: LockDocsTarget :one
+SELECT * FROM docs_targets LIMIT 1 FOR UPDATE;
+
+-- name: CreateDocsTarget :one
+INSERT INTO docs_targets (id, api_url, owner, name, branch, path, token_enc, key_id, enabled)
+VALUES (@id, @api_url, @owner, @name, @branch, @path, @token_enc, @key_id, @enabled)
+RETURNING *;
+
+-- name: UpdateDocsTarget :one
+-- Een andere repository, branch of map begint opnieuw: de laatste commit
+-- en fout horen bij de oude bestemming.
+UPDATE docs_targets SET
+    api_url = @api_url, owner = @owner, name = @name, branch = @branch, path = @path,
+    token_enc = @token_enc, key_id = @key_id, enabled = @enabled,
+    last_commit_sha = CASE WHEN @reset::boolean THEN '' ELSE last_commit_sha END,
+    last_commit_url = CASE WHEN @reset::boolean THEN '' ELSE last_commit_url END,
+    last_commit_files = CASE WHEN @reset::boolean THEN 0 ELSE last_commit_files END,
+    last_published_at = CASE WHEN @reset::boolean THEN NULL ELSE last_published_at END,
+    last_checked_at = CASE WHEN @reset::boolean THEN NULL ELSE last_checked_at END,
+    last_error = CASE WHEN @reset::boolean THEN '' ELSE last_error END,
+    updated_at = now()
+WHERE id = @id
+RETURNING *;
+
+-- name: DeleteDocsTarget :execrows
+DELETE FROM docs_targets WHERE id = @id;
+
+-- name: SetDocsPublished :exec
+UPDATE docs_targets SET
+    last_commit_sha = @sha, last_commit_url = @url, last_commit_files = @files, last_published_at = @at,
+    last_checked_at = @at, last_attempt_at = @at, last_error = ''
+WHERE id = @id;
+
+-- name: SetDocsChecked :exec
+UPDATE docs_targets SET last_checked_at = @at, last_attempt_at = @at, last_error = '' WHERE id = @id;
+
+-- name: SetDocsPublishError :exec
+UPDATE docs_targets SET last_attempt_at = @at, last_error = @last_error WHERE id = @id;

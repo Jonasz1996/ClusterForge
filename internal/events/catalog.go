@@ -22,6 +22,7 @@ const (
 	CategoryIncident  Category = "incidents"
 	CategoryAssistant Category = "assistant"
 	CategoryRisk      Category = "risk"
+	CategoryDocs      Category = "docs"
 )
 
 // Categories staan in de volgorde van het filter in de webinterface.
@@ -44,6 +45,7 @@ var Categories = []struct {
 	{CategoryIncident, "Incidenten"},
 	{CategoryAssistant, "Assistent"},
 	{CategoryRisk, "Gezondheid"},
+	{CategoryDocs, "Documentatie"},
 }
 
 // Spec beschrijft een action: zijn soort en een korte Nederlandse omschrijving
@@ -194,6 +196,13 @@ var Known = map[string]Spec{
 	"risk.grade_changed":      {CategoryRisk, "Cijfer van de health score gewijzigd"},
 	"risk.accepted":           {CategoryRisk, "Bevinding geaccepteerd"},
 	"risk.acceptance_removed": {CategoryRisk, "Acceptatie ingetrokken"},
+
+	"docs.target_connected":    {CategoryDocs, "GitHub-repository voor de documentatie gekoppeld"},
+	"docs.target_updated":      {CategoryDocs, "Koppeling van de documentatie met GitHub gewijzigd"},
+	"docs.target_disconnected": {CategoryDocs, "GitHub-repository voor de documentatie ontkoppeld"},
+	"docs.published":           {CategoryDocs, "Documentatie naar GitHub geschreven"},
+	"docs.publish_failed":      {CategoryDocs, "Documentatie naar GitHub schrijven mislukt"},
+	"docs.publish_recovered":   {CategoryDocs, "Documentatie naar GitHub schrijven lukt weer"},
 }
 
 // Lookup geeft de spec van een action. Een onbekende action (uit een nieuwere

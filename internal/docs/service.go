@@ -24,6 +24,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/gitops"
 	"github.com/Jonasz1996/clusterforge/internal/risk"
+	"github.com/Jonasz1996/clusterforge/internal/secrets"
 	"github.com/Jonasz1996/clusterforge/internal/store"
 )
 
@@ -56,6 +57,10 @@ type Service struct {
 	GitOps  *gitops.Service
 	Backups *backups.Service
 	Risk    *risk.Service
+	// Box versleutelt het token van de GitHub-koppeling; zonder masterkey
+	// is hij nil en staat de export uit.
+	Box    *secrets.Box
+	Events *events.Writer
 
 	Opts Opts
 	// Now is de klok; tests zetten hem vooruit.
@@ -70,6 +75,8 @@ type Service struct {
 	// NightHour is het uur waarop alles elke nacht opnieuw geschreven wordt,
 	// op de klok van Opts.Loc.
 	NightHour int
+	// RetryAfter is hoe lang de export na een fout wacht.
+	RetryAfter time.Duration
 
 	mu     sync.Mutex
 	cursor int64
@@ -78,6 +85,10 @@ type Service struct {
 	queued    map[uuid.UUID]mark
 	lastNight string
 	kick      chan struct{}
+	// gen telt wat er te publiceren valt, published tot waar dat gelukt is;
+	// failedAt is de laatste mislukte poging.
+	gen, published uint64
+	failedAt       time.Time
 }
 
 type mark struct {
@@ -88,7 +99,7 @@ type mark struct {
 func NewService(pool *pgxpool.Pool, log *slog.Logger) *Service {
 	return &Service{
 		pool: pool, q: store.New(pool), log: log, Now: time.Now, Settle: 10 * time.Minute, Interval: 30 * time.Second,
-		Warmup: time.Minute, NightHour: 6, queued: map[uuid.UUID]mark{}, kick: make(chan struct{}, 1),
+		Warmup: time.Minute, NightHour: 6, RetryAfter: 5 * time.Minute, queued: map[uuid.UUID]mark{}, kick: make(chan struct{}, 1),
 	}
 }
 
@@ -119,6 +130,10 @@ func (s *Service) Run(ctx context.Context) {
 		s.log.Warn("documentatie schrijven mislukt", "err", err)
 	}
 	s.markNight(s.Now())
+	// Bij de start vergelijkt de export Git met de documentatie, ook als er
+	// niets veranderde.
+	s.markDirty()
+	s.maybePublish(ctx)
 	t := time.NewTicker(s.Interval)
 	defer t.Stop()
 	for {
@@ -147,8 +162,14 @@ func (s *Service) markNight(now time.Time) {
 
 // Tick leest de nieuwe events, zet de clusters die ze raken in de rij, en
 // schrijft wat lang genoeg wacht. Na NightHour schrijft ze één keer per dag
-// alles.
+// alles. Daarna publiceert ze naar GitHub als er iets veranderde.
 func (s *Service) Tick(ctx context.Context) error {
+	err := s.tick(ctx)
+	s.maybePublish(ctx)
+	return err
+}
+
+func (s *Service) tick(ctx context.Context) error {
 	now := s.Now()
 	if err := s.poll(ctx, now); err != nil {
 		return err
@@ -165,6 +186,8 @@ func (s *Service) Tick(ctx context.Context) error {
 		s.mu.Lock()
 		s.lastNight = day
 		s.mu.Unlock()
+		// Elke nacht vergelijkt de export Git opnieuw met de documentatie.
+		s.markDirty()
 		return nil
 	}
 	due := map[uuid.UUID]string{}
@@ -195,7 +218,7 @@ var quiet = map[string]bool{
 	"proxmox.sync_requested": true, "proxmox.sync_failed": true, "proxmox.sync_recovered": true,
 }
 
-var quietPrefixes = []string{"auth.", "user.", "audit.", "job.", "assistant.", "incident.", "drift.", "enrollment_token."}
+var quietPrefixes = []string{"auth.", "user.", "audit.", "job.", "assistant.", "incident.", "drift.", "enrollment_token.", "docs."}
 
 // overviewOnly raken alleen het overzicht.
 var overviewOnly = map[string]bool{
@@ -364,6 +387,7 @@ func (s *Service) save(ctx context.Context, now time.Time, docs []Rendered, caus
 			changed++
 		}
 		if changed > 0 {
+			s.markDirty()
 			// De webinterface laadt de documentatie opnieuw.
 			if _, err := tx.Exec(ctx, `SELECT pg_notify('cf_events', '{"docs":true}')`); err != nil {
 				return err

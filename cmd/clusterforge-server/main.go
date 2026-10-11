@@ -249,7 +249,7 @@ func serve() error {
 	// De documentatie schrijft zichzelf opnieuw tien minuten na een
 	// wijziging en elke nacht.
 	dcs := docs.NewService(pool, log)
-	dcs.Deploy, dcs.GitOps, dcs.Backups, dcs.Risk = dep, git, bk, rsk
+	dcs.Deploy, dcs.GitOps, dcs.Backups, dcs.Risk, dcs.Box, dcs.Events = dep, git, bk, rsk, box, ev
 	dcs.Opts = docs.Opts{Usernames: cfg.DocsUsernames}
 	go hub.Run(ctx)
 	go eval.Run(ctx)

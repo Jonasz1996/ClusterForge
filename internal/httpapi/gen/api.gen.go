@@ -342,6 +342,27 @@ func (e DocMetaScope) Valid() bool {
 	}
 }
 
+// Defines values for DocsFileChangeChange.
+const (
+	DocsFileChangeChangeAdded    DocsFileChangeChange = "added"
+	DocsFileChangeChangeDeleted  DocsFileChangeChange = "deleted"
+	DocsFileChangeChangeModified DocsFileChangeChange = "modified"
+)
+
+// Valid indicates whether the value is a known member of the DocsFileChangeChange enum.
+func (e DocsFileChangeChange) Valid() bool {
+	switch e {
+	case DocsFileChangeChangeAdded:
+		return true
+	case DocsFileChangeChangeDeleted:
+		return true
+	case DocsFileChangeChangeModified:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for DriftFindingAspect.
 const (
 	DriftFindingAspectActive    DriftFindingAspect = "active"
@@ -650,19 +671,19 @@ func (e GitPlanKind) Valid() bool {
 
 // Defines values for GitStepChangeChange.
 const (
-	Added   GitStepChangeChange = "added"
-	Changed GitStepChangeChange = "changed"
-	Removed GitStepChangeChange = "removed"
+	GitStepChangeChangeAdded   GitStepChangeChange = "added"
+	GitStepChangeChangeChanged GitStepChangeChange = "changed"
+	GitStepChangeChangeRemoved GitStepChangeChange = "removed"
 )
 
 // Valid indicates whether the value is a known member of the GitStepChangeChange enum.
 func (e GitStepChangeChange) Valid() bool {
 	switch e {
-	case Added:
+	case GitStepChangeChangeAdded:
 		return true
-	case Changed:
+	case GitStepChangeChangeChanged:
 		return true
-	case Removed:
+	case GitStepChangeChangeRemoved:
 		return true
 	default:
 		return false
@@ -2988,6 +3009,109 @@ type DocVersion struct {
 	GeneratedAt time.Time `json:"generated_at"`
 	Id          int64     `json:"id"`
 	Sha256      string    `json:"sha256"`
+}
+
+// DocsCommit defines model for DocsCommit.
+type DocsCommit struct {
+	At time.Time `json:"at"`
+
+	// Files Hoeveel bestanden de commit veranderde
+	Files int    `json:"files"`
+	Sha   string `json:"sha"`
+
+	// Url De commit op de website
+	Url string `json:"url"`
+}
+
+// DocsFileChange defines model for DocsFileChange.
+type DocsFileChange struct {
+	Change DocsFileChangeChange `json:"change"`
+	Path   string               `json:"path"`
+}
+
+// DocsFileChangeChange defines model for DocsFileChange.Change.
+type DocsFileChangeChange string
+
+// DocsPublishResult defines model for DocsPublishResult.
+type DocsPublishResult struct {
+	Commit nullable.Nullable[DocsCommit] `json:"commit"`
+	Files  []DocsFileChange              `json:"files"`
+}
+
+// DocsTarget defines model for DocsTarget.
+type DocsTarget struct {
+	ApiUrl    string    `json:"api_url"`
+	Branch    string    `json:"branch"`
+	CreatedAt time.Time `json:"created_at"`
+
+	// Enabled Automatisch publiceren na een wijziging en elke nacht
+	Enabled bool `json:"enabled"`
+
+	// FolderUrl De map op de branch op de website
+	FolderUrl     string                       `json:"folder_url"`
+	LastAttemptAt nullable.Nullable[time.Time] `json:"last_attempt_at"`
+
+	// LastCheckedAt De laatste keer dat de repository gelijk was aan de documentatie
+	LastCheckedAt nullable.Nullable[time.Time] `json:"last_checked_at"`
+
+	// LastCommit De laatste commit van ClusterForge
+	LastCommit nullable.Nullable[DocsCommit] `json:"last_commit"`
+
+	// LastError Waarom de laatste poging mislukte; leeg als ze lukte
+	LastError string `json:"last_error"`
+
+	// Path De map in de repository; leeg is de hoofdmap
+	Path string `json:"path"`
+
+	// Repository eigenaar/naam
+	Repository string    `json:"repository"`
+	UpdatedAt  time.Time `json:"updated_at"`
+
+	// WebUrl De repository op de website
+	WebUrl string `json:"web_url"`
+}
+
+// DocsTargetInput defines model for DocsTargetInput.
+type DocsTargetInput struct {
+	// ApiUrl Standaard https://api.github.com
+	ApiUrl *string `json:"api_url,omitempty"`
+
+	// Branch Standaard main
+	Branch *string `json:"branch,omitempty"`
+
+	// Enabled Automatisch publiceren; standaard aan
+	Enabled *bool `json:"enabled,omitempty"`
+
+	// Path Standaard docs; leeg is de hoofdmap van de repository
+	Path *string `json:"path,omitempty"`
+
+	// Repository eigenaar/naam, of de link naar de repository
+	Repository string `json:"repository"`
+
+	// Token Fine-grained token met alleen Contents: Read and write op deze repository; leeg laat het opgeslagen token staan
+	Token *string `json:"token,omitempty"`
+}
+
+// DocsTargetProbe defines model for DocsTargetProbe.
+type DocsTargetProbe struct {
+	// BranchExists Zo niet
+	BranchExists bool `json:"branch_exists"`
+
+	// Files Hoeveel documenten van ClusterForge er al in de map staan
+	Files int `json:"files"`
+
+	// Head De kop van de branch; leeg als die nog niet bestaat
+	Head string `json:"head"`
+}
+
+// DocsTargetStatus defines model for DocsTargetStatus.
+type DocsTargetStatus struct {
+	// Enabled Zonder CF_MASTER_KEY staat de export uit
+	Enabled bool `json:"enabled"`
+
+	// Pending Er wacht een publicatie
+	Pending bool                          `json:"pending"`
+	Target  nullable.Nullable[DocsTarget] `json:"target"`
 }
 
 // DriftFinding defines model for DriftFinding.
@@ -5851,6 +5975,12 @@ type DeployClusterJSONRequestBody = DeployInput
 // PlanDeploymentJSONRequestBody defines body for PlanDeployment for application/json ContentType.
 type PlanDeploymentJSONRequestBody = DeployInput
 
+// SaveDocsTargetJSONRequestBody defines body for SaveDocsTarget for application/json ContentType.
+type SaveDocsTargetJSONRequestBody = DocsTargetInput
+
+// TestDocsTargetJSONRequestBody defines body for TestDocsTarget for application/json ContentType.
+type TestDocsTargetJSONRequestBody = DocsTargetInput
+
 // CreateEnrollmentTokenJSONRequestBody defines body for CreateEnrollmentToken for application/json ContentType.
 type CreateEnrollmentTokenJSONRequestBody = EnrollmentTokenInput
 
@@ -6093,6 +6223,21 @@ type ServerInterface interface {
 	// GenerateDocs De documentatie nu opnieuw schrijven (admin)
 	// (POST /docs/generate)
 	GenerateDocs(w http.ResponseWriter, r *http.Request)
+	// PublishDocs De documentatie nu naar GitHub schrijven (admin)
+	// (POST /docs/publish)
+	PublishDocs(w http.ResponseWriter, r *http.Request)
+	// DeleteDocsTarget De koppeling verwijderen (admin); wat al in de repository staat, blijft daar
+	// (DELETE /docs/target)
+	DeleteDocsTarget(w http.ResponseWriter, r *http.Request)
+	// GetDocsTarget De GitHub-repository van de documentatie en de laatste publicatie
+	// (GET /docs/target)
+	GetDocsTarget(w http.ResponseWriter, r *http.Request)
+	// SaveDocsTarget De koppeling maken of wijzigen (admin)
+	// (PUT /docs/target)
+	SaveDocsTarget(w http.ResponseWriter, r *http.Request)
+	// TestDocsTarget Token, repository en branch testen zonder op te slaan (admin)
+	// (POST /docs/target/test)
+	TestDocsTarget(w http.ResponseWriter, r *http.Request)
 	// GetDoc Eén document als Markdown, de nieuwste versie of een oudere
 	// (GET /docs/{scope}/{kind})
 	GetDoc(w http.ResponseWriter, r *http.Request, scope DocScopeParam, kind DocKindParam, params GetDocParams)
@@ -6693,6 +6838,36 @@ func (_ Unimplemented) DownloadDocs(w http.ResponseWriter, r *http.Request) {
 // GenerateDocs De documentatie nu opnieuw schrijven (admin)
 // (POST /docs/generate)
 func (_ Unimplemented) GenerateDocs(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// PublishDocs De documentatie nu naar GitHub schrijven (admin)
+// (POST /docs/publish)
+func (_ Unimplemented) PublishDocs(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// DeleteDocsTarget De koppeling verwijderen (admin); wat al in de repository staat, blijft daar
+// (DELETE /docs/target)
+func (_ Unimplemented) DeleteDocsTarget(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetDocsTarget De GitHub-repository van de documentatie en de laatste publicatie
+// (GET /docs/target)
+func (_ Unimplemented) GetDocsTarget(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SaveDocsTarget De koppeling maken of wijzigen (admin)
+// (PUT /docs/target)
+func (_ Unimplemented) SaveDocsTarget(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// TestDocsTarget Token, repository en branch testen zonder op te slaan (admin)
+// (POST /docs/target/test)
+func (_ Unimplemented) TestDocsTarget(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -8891,6 +9066,76 @@ func (siw *ServerInterfaceWrapper) GenerateDocs(w http.ResponseWriter, r *http.R
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GenerateDocs(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PublishDocs operation middleware
+func (siw *ServerInterfaceWrapper) PublishDocs(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PublishDocs(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteDocsTarget operation middleware
+func (siw *ServerInterfaceWrapper) DeleteDocsTarget(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteDocsTarget(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetDocsTarget operation middleware
+func (siw *ServerInterfaceWrapper) GetDocsTarget(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetDocsTarget(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SaveDocsTarget operation middleware
+func (siw *ServerInterfaceWrapper) SaveDocsTarget(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SaveDocsTarget(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// TestDocsTarget operation middleware
+func (siw *ServerInterfaceWrapper) TestDocsTarget(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.TestDocsTarget(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -11890,6 +12135,21 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/docs/generate", wrapper.GenerateDocs)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/docs/target", wrapper.DeleteDocsTarget)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/docs/target", wrapper.GetDocsTarget)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/docs/target", wrapper.SaveDocsTarget)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/docs/target/test", wrapper.TestDocsTarget)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/docs/publish", wrapper.PublishDocs)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/docs/{scope}/{kind}", wrapper.GetDoc)

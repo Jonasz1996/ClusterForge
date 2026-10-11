@@ -183,7 +183,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	rsk.Topo, rsk.Deps = tp, dps
 	// De documentatie schrijft niet vanzelf; een test roept GenerateAll aan.
 	dcs := docs.NewService(pool, log)
-	dcs.Deploy, dcs.GitOps, dcs.Backups, dcs.Risk = dep, git, bk, rsk
+	dcs.Deploy, dcs.GitOps, dcs.Backups, dcs.Risk, dcs.Box, dcs.Events = dep, git, bk, rsk, box, ev
 	dcs.Opts = docs.Opts{Usernames: true}
 	var wg sync.WaitGroup
 	wg.Add(3)

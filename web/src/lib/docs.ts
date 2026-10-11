@@ -9,6 +9,9 @@ export type DocMeta = components["schemas"]["DocMeta"];
 export type DocClusterIndex = components["schemas"]["DocClusterIndex"];
 export type Doc = components["schemas"]["Doc"];
 export type DocVersion = components["schemas"]["DocVersion"];
+export type DocsTarget = components["schemas"]["DocsTarget"];
+export type DocsTargetInput = components["schemas"]["DocsTargetInput"];
+export type DocsPublishResult = components["schemas"]["DocsPublishResult"];
 
 export type DocScope = "overview" | "cluster";
 
@@ -77,6 +80,46 @@ export function useGenerateDocs() {
   return useMutation({
     mutationFn: async () => unwrap(await api.POST("/docs/generate")),
     onSuccess: () => qc.invalidateQueries({ queryKey: ["docs"] }),
+  });
+}
+
+export function useDocsTarget() {
+  return useQuery({
+    queryKey: ["docs", "target"],
+    queryFn: async () => unwrap(await api.GET("/docs/target")),
+    // Een publicatie loopt op de achtergrond; zo verschijnt de commit vanzelf.
+    refetchInterval: 15_000,
+  });
+}
+
+export function useSaveDocsTarget() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: DocsTargetInput) => unwrap(await api.PUT("/docs/target", { body })),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["docs", "target"] }),
+  });
+}
+
+export function useTestDocsTarget() {
+  return useMutation({
+    mutationFn: async (body: DocsTargetInput) => unwrap(await api.POST("/docs/target/test", { body })),
+  });
+}
+
+export function useDeleteDocsTarget() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () => unwrap(await api.DELETE("/docs/target")),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["docs", "target"] }),
+  });
+}
+
+export function usePublishDocs() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () => unwrap(await api.POST("/docs/publish")),
+    // Ook na een fout: de koppeling toont dan de melding.
+    onSettled: () => qc.invalidateQueries({ queryKey: ["docs", "target"] }),
   });
 }
 

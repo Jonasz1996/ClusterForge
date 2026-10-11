@@ -2316,6 +2316,75 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/docs/target": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * De GitHub-repository van de documentatie en de laatste publicatie
+         * @description Ook voor viewers. Het token komt nooit terug.
+         */
+        get: operations["getDocsTarget"];
+        /**
+         * De koppeling maken of wijzigen (admin)
+         * @description Leest eerst de branch en test met een losse blob of het token mag
+         *     schrijven; lukt dat niet, dan wordt er niets opgeslagen. Een leeg
+         *     token laat het opgeslagen token staan. De repository en branch van
+         *     GitOps worden geweigerd. Na het opslaan publiceert de server meteen.
+         */
+        put: operations["saveDocsTarget"];
+        post?: never;
+        /** De koppeling verwijderen (admin); wat al in de repository staat, blijft daar */
+        delete: operations["deleteDocsTarget"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/docs/target/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Token, repository en branch testen zonder op te slaan (admin)
+         * @description Maakt een losse blob die bij geen enkele commit hoort; zo blijkt of het token mag schrijven.
+         */
+        post: operations["testDocsTarget"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/docs/publish": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * De documentatie nu naar GitHub schrijven (admin)
+         * @description Eén commit met alleen de bestanden die veranderden; zonder verschil
+         *     geen commit. Werkt ook als automatisch publiceren uit staat.
+         */
+        post: operations["publishDocs"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/docs/{scope}/{kind}": {
         parameters: {
             query?: never;
@@ -2483,6 +2552,85 @@ export interface components {
         DocGenerateResult: {
             /** @description Hoeveel documenten een nieuwe versie kregen */
             changed: number;
+        };
+        DocsCommit: {
+            sha: string;
+            /** @description De commit op de website */
+            url: string;
+            /** Format: date-time */
+            at: string;
+            /** @description Hoeveel bestanden de commit veranderde */
+            files: number;
+        };
+        DocsTarget: {
+            api_url: string;
+            /** @description eigenaar/naam */
+            repository: string;
+            branch: string;
+            /** @description De map in de repository; leeg is de hoofdmap */
+            path: string;
+            /** @description De repository op de website */
+            web_url: string;
+            /** @description De map op de branch op de website */
+            folder_url: string;
+            /** @description Automatisch publiceren na een wijziging en elke nacht */
+            enabled: boolean;
+            /** @description De laatste commit van ClusterForge */
+            last_commit: components["schemas"]["DocsCommit"] | null;
+            /**
+             * Format: date-time
+             * @description De laatste keer dat de repository gelijk was aan de documentatie
+             */
+            last_checked_at: string | null;
+            /** Format: date-time */
+            last_attempt_at: string | null;
+            /** @description Waarom de laatste poging mislukte; leeg als ze lukte */
+            last_error: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        DocsTargetStatus: {
+            /** @description Zonder CF_MASTER_KEY staat de export uit */
+            enabled: boolean;
+            target: components["schemas"]["DocsTarget"] | null;
+            /** @description Er wacht een publicatie */
+            pending: boolean;
+        };
+        DocsTargetInput: {
+            /** @description Standaard https://api.github.com */
+            api_url?: string;
+            /** @description eigenaar/naam, of de link naar de repository */
+            repository: string;
+            /** @description Standaard main */
+            branch?: string;
+            /** @description Standaard docs; leeg is de hoofdmap van de repository */
+            path?: string;
+            /**
+             * Format: password
+             * @description Fine-grained token met alleen Contents: Read and write op deze repository; leeg laat het opgeslagen token staan
+             */
+            token?: string;
+            /** @description Automatisch publiceren; standaard aan */
+            enabled?: boolean;
+        };
+        DocsTargetProbe: {
+            /** @description Zo niet */
+            branch_exists: boolean;
+            /** @description De kop van de branch; leeg als die nog niet bestaat */
+            head: string;
+            /** @description Hoeveel documenten van ClusterForge er al in de map staan */
+            files: number;
+        };
+        DocsFileChange: {
+            path: string;
+            /** @enum {string} */
+            change: "added" | "modified" | "deleted";
+        };
+        DocsPublishResult: {
+            commit: components["schemas"]["DocsCommit"] | null;
+            files: components["schemas"]["DocsFileChange"][];
         };
         Error: {
             /** @description Stabiele foutcode, bijvoorbeeld invalid_credentials of totp_required */
@@ -9001,6 +9149,127 @@ export interface operations {
             };
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
+        };
+    };
+    getDocsTarget: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocsTargetStatus"];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    saveDocsTarget: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DocsTargetInput"];
+            };
+        };
+        responses: {
+            /** @description Opgeslagen */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocsTargetStatus"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+        };
+    };
+    deleteDocsTarget: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Verwijderd */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    testDocsTarget: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DocsTargetInput"];
+            };
+        };
+        responses: {
+            /** @description De branch en de documenten die er al staan */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocsTargetProbe"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+        };
+    };
+    publishDocs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description De commit, of geen als alles al gelijk was */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DocsPublishResult"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
         };
     };
     getDoc: {

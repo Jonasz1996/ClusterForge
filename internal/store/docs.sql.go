@@ -12,6 +12,72 @@ import (
 	"github.com/google/uuid"
 )
 
+const createDocsTarget = `-- name: CreateDocsTarget :one
+INSERT INTO docs_targets (id, api_url, owner, name, branch, path, token_enc, key_id, enabled)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+RETURNING id, api_url, owner, name, branch, path, token_enc, key_id, enabled, last_commit_sha, last_commit_url, last_commit_files, last_published_at, last_checked_at, last_attempt_at, last_error, created_at, updated_at
+`
+
+type CreateDocsTargetParams struct {
+	ID       uuid.UUID
+	ApiUrl   string
+	Owner    string
+	Name     string
+	Branch   string
+	Path     string
+	TokenEnc []byte
+	KeyID    string
+	Enabled  bool
+}
+
+func (q *Queries) CreateDocsTarget(ctx context.Context, arg CreateDocsTargetParams) (DocsTarget, error) {
+	row := q.db.QueryRow(ctx, createDocsTarget,
+		arg.ID,
+		arg.ApiUrl,
+		arg.Owner,
+		arg.Name,
+		arg.Branch,
+		arg.Path,
+		arg.TokenEnc,
+		arg.KeyID,
+		arg.Enabled,
+	)
+	var i DocsTarget
+	err := row.Scan(
+		&i.ID,
+		&i.ApiUrl,
+		&i.Owner,
+		&i.Name,
+		&i.Branch,
+		&i.Path,
+		&i.TokenEnc,
+		&i.KeyID,
+		&i.Enabled,
+		&i.LastCommitSha,
+		&i.LastCommitUrl,
+		&i.LastCommitFiles,
+		&i.LastPublishedAt,
+		&i.LastCheckedAt,
+		&i.LastAttemptAt,
+		&i.LastError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const deleteDocsTarget = `-- name: DeleteDocsTarget :execrows
+DELETE FROM docs_targets WHERE id = $1
+`
+
+func (q *Queries) DeleteDocsTarget(ctx context.Context, id uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteDocsTarget, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const getDocSnapshot = `-- name: GetDocSnapshot :one
 SELECT id, scope, cluster_id, kind, content, sha256, generated_at, cause FROM doc_snapshots WHERE id = $1
 `
@@ -28,6 +94,36 @@ func (q *Queries) GetDocSnapshot(ctx context.Context, id int64) (DocSnapshot, er
 		&i.Sha256,
 		&i.GeneratedAt,
 		&i.Cause,
+	)
+	return i, err
+}
+
+const getDocsTarget = `-- name: GetDocsTarget :one
+SELECT id, api_url, owner, name, branch, path, token_enc, key_id, enabled, last_commit_sha, last_commit_url, last_commit_files, last_published_at, last_checked_at, last_attempt_at, last_error, created_at, updated_at FROM docs_targets LIMIT 1
+`
+
+func (q *Queries) GetDocsTarget(ctx context.Context) (DocsTarget, error) {
+	row := q.db.QueryRow(ctx, getDocsTarget)
+	var i DocsTarget
+	err := row.Scan(
+		&i.ID,
+		&i.ApiUrl,
+		&i.Owner,
+		&i.Name,
+		&i.Branch,
+		&i.Path,
+		&i.TokenEnc,
+		&i.KeyID,
+		&i.Enabled,
+		&i.LastCommitSha,
+		&i.LastCommitUrl,
+		&i.LastCommitFiles,
+		&i.LastPublishedAt,
+		&i.LastCheckedAt,
+		&i.LastAttemptAt,
+		&i.LastError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -442,6 +538,36 @@ func (q *Queries) ListDocVIPs(ctx context.Context) ([]ListDocVIPsRow, error) {
 	return items, nil
 }
 
+const lockDocsTarget = `-- name: LockDocsTarget :one
+SELECT id, api_url, owner, name, branch, path, token_enc, key_id, enabled, last_commit_sha, last_commit_url, last_commit_files, last_published_at, last_checked_at, last_attempt_at, last_error, created_at, updated_at FROM docs_targets LIMIT 1 FOR UPDATE
+`
+
+func (q *Queries) LockDocsTarget(ctx context.Context) (DocsTarget, error) {
+	row := q.db.QueryRow(ctx, lockDocsTarget)
+	var i DocsTarget
+	err := row.Scan(
+		&i.ID,
+		&i.ApiUrl,
+		&i.Owner,
+		&i.Name,
+		&i.Branch,
+		&i.Path,
+		&i.TokenEnc,
+		&i.KeyID,
+		&i.Enabled,
+		&i.LastCommitSha,
+		&i.LastCommitUrl,
+		&i.LastCommitFiles,
+		&i.LastPublishedAt,
+		&i.LastCheckedAt,
+		&i.LastAttemptAt,
+		&i.LastError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const maxEventID = `-- name: MaxEventID :one
 SELECT coalesce(max(id), 0)::bigint FROM events
 `
@@ -479,4 +605,126 @@ func (q *Queries) PruneDocSnapshots(ctx context.Context, arg PruneDocSnapshotsPa
 		arg.Keep,
 	)
 	return err
+}
+
+const setDocsChecked = `-- name: SetDocsChecked :exec
+UPDATE docs_targets SET last_checked_at = $1, last_attempt_at = $1, last_error = '' WHERE id = $2
+`
+
+type SetDocsCheckedParams struct {
+	At *time.Time
+	ID uuid.UUID
+}
+
+func (q *Queries) SetDocsChecked(ctx context.Context, arg SetDocsCheckedParams) error {
+	_, err := q.db.Exec(ctx, setDocsChecked, arg.At, arg.ID)
+	return err
+}
+
+const setDocsPublishError = `-- name: SetDocsPublishError :exec
+UPDATE docs_targets SET last_attempt_at = $1, last_error = $2 WHERE id = $3
+`
+
+type SetDocsPublishErrorParams struct {
+	At        *time.Time
+	LastError string
+	ID        uuid.UUID
+}
+
+func (q *Queries) SetDocsPublishError(ctx context.Context, arg SetDocsPublishErrorParams) error {
+	_, err := q.db.Exec(ctx, setDocsPublishError, arg.At, arg.LastError, arg.ID)
+	return err
+}
+
+const setDocsPublished = `-- name: SetDocsPublished :exec
+UPDATE docs_targets SET
+    last_commit_sha = $1, last_commit_url = $2, last_commit_files = $3, last_published_at = $4,
+    last_checked_at = $4, last_attempt_at = $4, last_error = ''
+WHERE id = $5
+`
+
+type SetDocsPublishedParams struct {
+	Sha   string
+	Url   string
+	Files int32
+	At    *time.Time
+	ID    uuid.UUID
+}
+
+func (q *Queries) SetDocsPublished(ctx context.Context, arg SetDocsPublishedParams) error {
+	_, err := q.db.Exec(ctx, setDocsPublished,
+		arg.Sha,
+		arg.Url,
+		arg.Files,
+		arg.At,
+		arg.ID,
+	)
+	return err
+}
+
+const updateDocsTarget = `-- name: UpdateDocsTarget :one
+UPDATE docs_targets SET
+    api_url = $1, owner = $2, name = $3, branch = $4, path = $5,
+    token_enc = $6, key_id = $7, enabled = $8,
+    last_commit_sha = CASE WHEN $9::boolean THEN '' ELSE last_commit_sha END,
+    last_commit_url = CASE WHEN $9::boolean THEN '' ELSE last_commit_url END,
+    last_commit_files = CASE WHEN $9::boolean THEN 0 ELSE last_commit_files END,
+    last_published_at = CASE WHEN $9::boolean THEN NULL ELSE last_published_at END,
+    last_checked_at = CASE WHEN $9::boolean THEN NULL ELSE last_checked_at END,
+    last_error = CASE WHEN $9::boolean THEN '' ELSE last_error END,
+    updated_at = now()
+WHERE id = $10
+RETURNING id, api_url, owner, name, branch, path, token_enc, key_id, enabled, last_commit_sha, last_commit_url, last_commit_files, last_published_at, last_checked_at, last_attempt_at, last_error, created_at, updated_at
+`
+
+type UpdateDocsTargetParams struct {
+	ApiUrl   string
+	Owner    string
+	Name     string
+	Branch   string
+	Path     string
+	TokenEnc []byte
+	KeyID    string
+	Enabled  bool
+	Reset    bool
+	ID       uuid.UUID
+}
+
+// Een andere repository, branch of map begint opnieuw: de laatste commit
+// en fout horen bij de oude bestemming.
+func (q *Queries) UpdateDocsTarget(ctx context.Context, arg UpdateDocsTargetParams) (DocsTarget, error) {
+	row := q.db.QueryRow(ctx, updateDocsTarget,
+		arg.ApiUrl,
+		arg.Owner,
+		arg.Name,
+		arg.Branch,
+		arg.Path,
+		arg.TokenEnc,
+		arg.KeyID,
+		arg.Enabled,
+		arg.Reset,
+		arg.ID,
+	)
+	var i DocsTarget
+	err := row.Scan(
+		&i.ID,
+		&i.ApiUrl,
+		&i.Owner,
+		&i.Name,
+		&i.Branch,
+		&i.Path,
+		&i.TokenEnc,
+		&i.KeyID,
+		&i.Enabled,
+		&i.LastCommitSha,
+		&i.LastCommitUrl,
+		&i.LastCommitFiles,
+		&i.LastPublishedAt,
+		&i.LastCheckedAt,
+		&i.LastAttemptAt,
+		&i.LastError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }

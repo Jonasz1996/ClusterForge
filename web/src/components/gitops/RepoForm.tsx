@@ -143,7 +143,10 @@ export function TokenHelp() {
       <ol className="mt-2 list-decimal space-y-1 pl-5 text-slate-600 dark:text-slate-400">
         <li>Ga naar Settings → Developer settings → Personal access tokens → Fine-grained tokens en kies Generate new token.</li>
         <li>Kies bij Repository access &ldquo;Only select repositories&rdquo; en alleen de repository met je clusters.</li>
-        <li>Zet bij Permissions alleen Contents op Read-only. ClusterForge schrijft nooit naar Git.</li>
+        <li>
+          Zet bij Permissions alleen Contents op Read-only. GitOps schrijft nooit naar Git. De documentatie-export schrijft alleen in de
+          map en branch die je zelf instelt bij Instellingen, met een eigen token.
+        </li>
         <li>Kopieer het token en plak het hieronder; het wordt versleuteld bewaard.</li>
       </ol>
       <p className="mt-2 text-slate-600 dark:text-slate-400">

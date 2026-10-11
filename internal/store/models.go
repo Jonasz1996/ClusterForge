@@ -373,6 +373,27 @@ type DocSnapshot struct {
 	Cause       string
 }
 
+type DocsTarget struct {
+	ID              uuid.UUID
+	ApiUrl          string
+	Owner           string
+	Name            string
+	Branch          string
+	Path            string
+	TokenEnc        []byte
+	KeyID           string
+	Enabled         bool
+	LastCommitSha   string
+	LastCommitUrl   string
+	LastCommitFiles int32
+	LastPublishedAt *time.Time
+	LastCheckedAt   *time.Time
+	LastAttemptAt   *time.Time
+	LastError       string
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+}
+
 type DriftCheck struct {
 	NodeID          uuid.UUID
 	Status          string

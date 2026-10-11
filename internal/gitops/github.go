@@ -64,6 +64,18 @@ func CheckRepo(owner, name, branch string) error {
 	return nil
 }
 
+// SameBranch zegt of twee koppelingen dezelfde branch van dezelfde
+// repository zijn. Eigenaar en naam tellen zonder hoofdletters, zoals op
+// GitHub.
+func SameBranch(api1, owner1, name1, branch1, api2, owner2, name2, branch2 string) bool {
+	a, err1 := NormalizeAPIURL(api1)
+	b, err2 := NormalizeAPIURL(api2)
+	if err1 != nil || err2 != nil {
+		a, b = api1, api2
+	}
+	return strings.EqualFold(a, b) && strings.EqualFold(owner1, owner2) && strings.EqualFold(name1, name2) && branch1 == branch2
+}
+
 // SplitRepository leest eigenaar/naam, ook uit een link zoals
 // https://github.com/eigenaar/naam of git@github.com:eigenaar/naam.git.
 func SplitRepository(s string) (owner, name string) {

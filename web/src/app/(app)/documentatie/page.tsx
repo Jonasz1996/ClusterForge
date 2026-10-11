@@ -18,6 +18,7 @@ import {
   useDocDiff,
   useDocHistory,
   useDocIndex,
+  useDocsTarget,
   useGenerateDocs,
   type DocIndex,
   type DocRef,
@@ -90,6 +91,7 @@ function DocsInner() {
           }
         />
       </div>
+      <GitLine isAdmin={isAdmin} />
       {generate.isError && <Alert>{generate.error.message}</Alert>}
       {generated !== null && (
         <Alert kind="success">
@@ -118,6 +120,43 @@ function DocsInner() {
         )}
       </QueryState>
     </div>
+  );
+}
+
+// GitLine zegt of en waar de documentatie in GitHub staat.
+function GitLine({ isAdmin }: { isAdmin: boolean }) {
+  const q = useDocsTarget();
+  const t = q.data?.target;
+  if (!q.data?.enabled || (!t && !isAdmin)) return null;
+  const settings = (
+    <Link href="/instellingen#documentatie-github" className="text-brand-700 hover:underline dark:text-sky-300">
+      {t ? "Instellingen" : "Naar GitHub schrijven instellen"}
+    </Link>
+  );
+  if (!t) return <p className="text-sm print:hidden">{settings}</p>;
+  return (
+    <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-slate-600 print:hidden dark:text-slate-400">
+      <span>
+        In GitHub:{" "}
+        <a href={t.folder_url} target="_blank" rel="noreferrer" className="text-brand-700 hover:underline dark:text-sky-300">
+          {t.repository}
+          {t.path ? `/${t.path}` : ""}
+        </a>{" "}
+        op {t.branch}
+      </span>
+      {t.last_commit && (
+        <span>
+          · laatste commit{" "}
+          <a href={t.last_commit.url} target="_blank" rel="noreferrer" className="font-mono text-xs hover:underline">
+            {t.last_commit.sha.slice(0, 7)}
+          </a>{" "}
+          op {formatWhen(t.last_commit.at)}
+        </span>
+      )}
+      {!t.enabled && <Badge tone="amber">Gepauzeerd</Badge>}
+      {t.last_error && <Badge tone="red">Schrijven mislukt</Badge>}
+      <span>· {settings}</span>
+    </p>
   );
 }
 
