@@ -61,6 +61,7 @@ type Cluster struct {
 	OlderRevisions int
 	Backup         BackupPolicy
 	Failover       []FailoverTest
+	DR             DR
 	// Outages is wat de wat-als voorspelt bij uitval van elke node en
 	// elke host met een node van dit cluster.
 	Outages []Outage
@@ -257,6 +258,53 @@ type FailoverTest struct {
 	ExpectFailback         bool
 	Scheduled              bool
 	Last                   *TestRun
+}
+
+// DR is wat de documentatie weet van de DR-repetitie van een cluster.
+type DR struct {
+	// RTOMinutes en RPOHours zijn de doelen nu; 0 is geen doel. Default is
+	// true als beide de standaard van de omgeving zijn.
+	RTOMinutes, RPOHours int
+	Default              bool
+	Scenarios            []DRScenario
+	// Last is de laatste afgeronde repetitie, Measured de laatste die de
+	// RTO mat; meestal is dat dezelfde.
+	Last, Measured *DRRun
+}
+
+type DRScenario struct {
+	Name, Schedule, Bridge string
+}
+
+// DRRun is een afgeronde DR-repetitie.
+type DRRun struct {
+	ID                     uuid.UUID
+	Name                   string
+	Result, Summary        string
+	At                     time.Time
+	Proxmox, Host, Storage string
+	Bridge                 string
+	// RTO en RPO zijn nil als ze niet gemeten zijn.
+	RTO, RPO *time.Duration
+	Nodes    []DRNode
+	VIPs     []DRVIP
+}
+
+type DRNode struct {
+	Hostname      string
+	SourceVMID    int
+	SandboxVMID   int
+	BackupTime    time.Time
+	Restore, Boot *time.Duration
+}
+
+type DRVIP struct {
+	Address string
+	Holders []string
+	// Checked is false als geen node zijn adressen kon melden.
+	Checked bool
+	Probe   string
+	ProbeOK *bool
 }
 
 type TestRun struct {

@@ -51,6 +51,7 @@ Het technisch ontwerp staat in [docs/design/mvp-fase-1.md](docs/design/mvp-fase-
 | 11. Rampoefeningen | In lab en test met opzet een Proxmox-host, een dienst op alle nodes of een VIP laten uitvallen; vooraf de voorspelling van de wat-als, tijdens de storing meten op de VIP's en de status van elk geraakt en afhankelijk cluster, en een rapport met voorspeld tegen gemeten; daarna altijd alles terugzetten. Pagina Tests met alle runs | klaar |
 | 12. Storingen met dodemansknop | Een rampoefening als reeks van tot vijf stappen: VRRP blokkeren, een interface down, een TCP-poort dicht, vertraging of pakketverlies, een schijf vullen of een dienst stoppen, op de VIP-houder, de andere nodes, alle nodes of één node. De agent zet elke storing met een lease die de server verlengt en heft hem zelf op als ClusterForge wegvalt, na de bovengrens en na een herstart | klaar |
 | 13. DR-repetitie | Een heel cluster terugzetten uit de back-ups, ook op prod: alle nodes tegelijk als sandbox op één host aan een afgesloten bridge, controleren dat het VIP één houder heeft en antwoordt, RTO en RPO meten tegen de doelen per cluster, en daarna alles weer verwijderen; met de hand of elke week of maand in het testvenster | klaar |
+| 14. Herstelbaarheid in documentatie en rapport | De gemeten RTO en RPO met datum en doel in het hoofdstuk Herstel, de runbooks met de gemeten hersteltijden, de DR-repetitie in de kaart Herstelbaarheid, en het rapport Herstelbaarheid per maand op `/rapporten`, af te drukken als PDF en elke eerste van de maand bewaard | klaar |
 
 ## Draaien met Docker Compose
 
@@ -465,6 +466,8 @@ Zolang de sandboxes kunnen draaien, bewaakt ClusterForge het echte cluster elke 
 
 **Planning.** Elke week in het testvenster, of in het eerste testvenster van elke maand. Loopt er een andere test, dan wacht de repetitie, zoals bij de [failovertest](#planning). Faalt de voorcontrole van een geplande repetitie, dan komt er een run met ERROR en de commando's in het rapport, zonder taak, en schuift de planning door naar de volgende keer.
 
+**Na de repetitie.** De documentatie van het cluster zegt in het hoofdstuk Herstel waar de getallen vandaan komen, bijvoorbeeld "Gemeten in de sandbox op 3 november 2026, met de DR-repetitie 'DR Web'", met een tabel van RTO en RPO tegen de doelen, per node hoe lang terugzetten en opstarten duurden, en wie het VIP had. Een mislukte repetitie daarna staat eronder, met haar uitslag. Het runbook "Terugzetten uit back-up" noemt dezelfde hersteltijden bij de `qmrestore`-regels. De uitslag telt mee in de kaart Herstelbaarheid van de [health score](#gezondheid) en staat in het [rapport Herstelbaarheid](#rapporten).
+
 De adressen en de probes kent cf-agent vanaf protocol 7. Met een oudere agent in de back-up slaagt de repetitie hoogstens met een waarschuwing, omdat het VIP en de verbindingen niet gecontroleerd zijn; de drie stappen om dat te regelen staan bij de [diepe controle](#diepe-controle-met-cf-agent-verify).
 
 ## Afhankelijkheden
@@ -618,7 +621,7 @@ De status zegt hoe het nu gaat. De health score zegt hoe kwetsbaar een cluster i
 | --- | --- | --- |
 | Beschikbaarheid | 25 % | nu down, split-brain of verminderd; de beschikbaarheid over 30 dagen (onder 99,9 %); veel incidenten; een VIP dat vaak van eigenaar wisselt (tests niet meegerekend) |
 | Back-ups | 20 % | een node zonder back-up of met een te oude, volgens het back-upbeleid; een mislukte verificatie in Proxmox Backup Server; een back-upcontrole in de sandbox die mislukte, waarschuwde, nooit gebeurde of langer dan 30 dagen geleden is |
-| Herstelbaarheid | 15 % | een VIP zonder failovertest; een test die nooit liep, mislukte, zijn doel niet haalde of langer dan 30 dagen geleden is; een test die niet hersteld is |
+| Herstelbaarheid | 15 % | een VIP zonder failovertest; een test die nooit liep, mislukte, zijn doel niet haalde of langer dan 30 dagen geleden is; een test die niet hersteld is; een DR-repetitie die nooit liep, mislukte, haar doel niet haalde of langer dan 45 dagen geleden is |
 | Redundantie | 15 % | alle nodes op dezelfde Proxmox-host, of de nodes van een VIP; maar één node (niet op lab); een node die langer dan een dag in onderhoud staat; een prod-dienst die hard afhangt van een dienst op lab of test; een [single point of failure](#wat-als): een host, storage, bridge of node waarvan de uitval alleen al het prod-cluster of een bevestigde prod-dienst down legt |
 | Configuratie | 10 % | geen gewenste staat; drift, zwaarder naarmate ze langer duurt; een regel die alle drift negeert; een revisie die al een uur niet toegepast is; een mislukte Git-wijziging |
 | Onderhoud en beveiliging | 10 % | open beveiligingsupdates, zwaarder na 3 en 14 dagen; pakketlijsten die 14 dagen niet ververst zijn; een herstart nodig; een besturingssysteem dat end-of-life is of binnen 90 dagen wordt; een certificaat op de node dat binnen 30 dagen verloopt; een verouderde agent |
@@ -673,8 +676,8 @@ Bij Documentatie staat wat ClusterForge zelf over de clusters schrijft, uit wat 
 - **Architectuur.** Wat het cluster doet, de nodes met hun VM en host, de VIP's met de volgorde waarin keepalived ze geeft, en de diensten met hun afhankelijkheden als diagram.
 - **Netwerk.** Subnet, gateway, DNS, bridge en VLAN, een diagram van de nodes per host met de VIP's, de adressen per interface met MAC-adres, bridge en VLAN uit Proxmox, en de poorten.
 - **Configuratie.** De template met zijn parameters, de bestanden die ClusterForge op elke node zet, `cluster.yaml` zoals het in Git zou staan, en de revisies met wat er veranderde.
-- **Herstel.** De back-ups per node met hun versheid, de back-upcontroles met de hersteltijd, de failovertests met wat ze maten, en per node en per host wat er uitvalt volgens de wat-als.
-- **Runbooks.** Onderhoud, herstarten en afsluiten zoals ClusterForge het doet, het VIP met de hand verplaatsen, een VM terugzetten uit zijn nieuwste back-up met de echte `qmrestore`-regel, een node vervangen en wat te doen als een host uitvalt.
+- **Herstel.** De back-ups per node met hun versheid, de back-upcontroles met de hersteltijd, de failovertests met wat ze maten, de DR-repetitie met de gemeten RTO en RPO tegen de doelen, en per node en per host wat er uitvalt volgens de wat-als.
+- **Runbooks.** Onderhoud, herstarten en afsluiten zoals ClusterForge het doet, het VIP met de hand verplaatsen, een VM of het hele cluster terugzetten uit de nieuwste back-ups met de echte `qmrestore`-regels en de hersteltijden uit de DR-repetitie, een node vervangen en wat te doen als een host uitvalt.
 
 Tien minuten na een wijziging die een cluster raakt, zoals een uitrol, een gewijzigde specificatie of een node in onderhoud, schrijft ClusterForge de documenten van dat cluster opnieuw; een reeks wijzigingen geeft zo één nieuwe versie. Elke nacht om 06:00 schrijft het alles opnieuw, bijvoorbeeld voor nieuwe back-ups, en met Nu bijwerken hoeft een beheerder niet te wachten. Een document krijgt alleen een nieuwe versie als de tekst veranderde; de laatste 50 versies blijven bewaard. Bij Geschiedenis zie je wanneer en waarom elke versie kwam, open je een oudere en zie je wat er veranderde.
 
@@ -693,6 +696,20 @@ ClusterForge kan de documentatie ook in een eigen GitHub-repository zetten, met 
 Na het opslaan publiceert ClusterForge meteen, en daarna telkens als een document een nieuwe versie krijgt: tien minuten na een wijziging, en elke nacht. Elke ronde is één commit met alleen de bestanden die veranderden, met als auteur ClusterForge en als bericht bijvoorbeeld "Documentatie bijgewerkt: overzicht, web-prod" met elk bestand eronder. Is er niets veranderd, dan komt er geen commit. De branch wordt bijgewerkt zonder force; pushte iemand intussen, dan bouwt ClusterForge de commit opnieuw op de nieuwe kop. Bestaat de branch nog niet, dan maakt ClusterForge hem met alleen de documentatie.
 
 ClusterForge schrijft alleen in die branch en die map. Een bestand dat je zelf in de map zet, blijft staan; de documenten van een cluster dat verwijderd is, gaan weg. De repository en branch die GitOps leest, worden geweigerd (een andere branch in dezelfde repository mag), zodat een commit van de documentatie nooit een GitOps-plan start en het GitOps-token alleen-lezen blijft. Mislukt een ronde, bijvoorbeeld omdat het token verlopen is, dan staat de fout bij de koppeling en in het logboek, en probeert ClusterForge het om de vijf minuten opnieuw. Met Pauzeren publiceert het alleen nog met Nu publiceren; Verwijderen laat staan wat al in de repository staat.
+
+## Rapporten
+
+Bij Rapporten staat het rapport Herstelbaarheid, per maand. Het zet per cluster bij elkaar wat er over herstel bekend is, prod eerst:
+
+- een samenvatting van alle clusters: hoeveel back-ups vers zijn, hoeveel back-upcontroles, failovertests, rampoefeningen en DR-repetities er die maand waren en hoeveel daarvan slaagden, en RTO en RPO tegen de doelen;
+- per cluster de RTO en RPO van de laatste DR-repetitie tot het einde van de maand die het cluster werkend terugkreeg, met datum en doel;
+- de nieuwste back-up van elke VM met haar stand en de laatste back-upcontrole met de hersteltijd;
+- alle tests van de maand met hun uitslag en wat ze maten;
+- de open bevindingen op de kaarten Back-ups, Herstelbaarheid en Redundantie van de [health score](#gezondheid); een geaccepteerde bevinding staat er niet in.
+
+Afdrukken drukt het rapport af zonder menu en knoppen, met elk cluster op een eigen pagina; kies in de browser "Opslaan als PDF" voor een PDF. Ook in donkere modus is de afdruk licht.
+
+Elke eerste van de maand bewaart de planner het rapport van de maand ervoor. Stond de server toen uit, dan doet hij het in de eerste zeven dagen alsnog; een maand waarin nog geen cluster bestond, slaat hij over. Een bewaard rapport verandert niet meer en zegt dus hoe de back-ups, de doelen en de risico's er toen voor stonden; in de keuzelijst staat het als "(bewaard)". Voor de lopende maand en voor een oudere maand zonder bewaard rapport rekent ClusterForge het rapport bij het openen: de tests komen dan uit de geschiedenis, maar de back-ups, de doelen en de risico's zijn die van nu, en dat staat erboven. Ook een viewer leest de rapporten; via de API is het `GET /api/v1/reports/recovery?month=2026-11`.
 
 ## Assistent
 
@@ -777,6 +794,7 @@ internal/whatbroke/        What Broke: de tijdlijn uit logboek en journaal, en d
 internal/assistant/        de AI-assistent: instellingen, gesprekken, de lus met de Anthropic API, kosten en budget
 internal/risk/             de health score: de zeven scorekaarten, de kaart Platform, acceptaties en de trend; de wat-als en de SPOF's
 internal/docs/             de documentatie: Markdown en Mermaid uit wat ClusterForge weet, de versies, bijwerken na een wijziging, de zip en de export naar GitHub
+internal/reports/          het rapport Herstelbaarheid per maand en de maandelijkse momentopname
 internal/topo/             één model van hosts, storage, bridges en VM's met hun schijven en netwerkkaarten, waar ClusterForge zelf draait, en de lagen van de kaart
 internal/metrics/          metrics naar VictoriaMetrics schrijven en de grafieken opvragen
 internal/status/           statusregels voor nodes en clusters, VIP-eigenaars

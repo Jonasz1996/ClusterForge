@@ -2668,6 +2668,30 @@ paths:
         "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /reports/recovery:
+    get:
+      operationId: getRecoveryReport
+      summary: Het rapport Herstelbaarheid van een maand
+      description: |
+        Per cluster de nieuwste back-ups, de controles, failovertests,
+        rampoefeningen en DR-repetities van de maand, RTO en RPO tegen de
+        doelen en de open risico's op de kaarten Back-ups, Herstelbaarheid
+        en Redundantie. Een maand met een bewaard rapport geeft dat rapport;
+        anders rekent ClusterForge het nu, met de back-ups, doelen en
+        risico's van nu. Ook voor viewers.
+      parameters:
+        - name: month
+          in: query
+          description: JJJJ-MM; zonder is het deze maand
+          schema: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$' }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecoveryReport" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
 components:
   securitySchemes:
     session:
@@ -3518,6 +3542,114 @@ components:
         expect_failback: { type: boolean }
         probe: { $ref: "#/components/schemas/FailoverProbe" }
         description: { type: string }
+    RecoveryReport:
+      type: object
+      required: [month, from, to, generated_at, saved, running, clusters, saved_months]
+      properties:
+        month: { type: string, description: JJJJ-MM }
+        from: { type: string, format: date-time }
+        to:
+          type: string
+          format: date-time
+          description: Het begin van de volgende maand
+        generated_at: { type: string, format: date-time }
+        saved:
+          type: boolean
+          description: Het rapport dat de planner op de eerste van de maand bewaarde
+        running:
+          type: boolean
+          description: De maand was nog niet voorbij toen het rapport gemaakt werd
+        clusters:
+          type: array
+          items: { $ref: "#/components/schemas/RecoveryReportCluster" }
+        saved_months:
+          type: array
+          description: De maanden met een bewaard rapport, nieuwste eerst
+          items: { type: string }
+    RecoveryReportCluster:
+      type: object
+      required: [id, name, slug, environment, grade, score, rto_target_minutes, rpo_target_hours, backups, runs, dr, risks]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        slug: { type: string }
+        environment: { $ref: "#/components/schemas/Environment" }
+        grade: { type: string, description: Leeg zonder score }
+        score: { type: integer, nullable: true }
+        rto_target_minutes: { type: integer, description: 0 is geen doel }
+        rpo_target_hours: { type: integer, description: 0 is geen doel }
+        backups:
+          type: array
+          items: { $ref: "#/components/schemas/RecoveryReportBackup" }
+        runs:
+          type: array
+          description: De afgeronde tests van de maand, oudste eerst
+          items: { $ref: "#/components/schemas/RecoveryReportRun" }
+        dr:
+          description: De laatste DR-repetitie tot het einde van de maand die de RTO mat
+          allOf: [{ $ref: "#/components/schemas/RecoveryReportMeasured" }]
+          nullable: true
+        risks:
+          type: array
+          items: { $ref: "#/components/schemas/RecoveryReportRisk" }
+    RecoveryReportBackup:
+      type: object
+      required: [node, connection, vmid, time, storage, size, count, freshness, last_verification]
+      properties:
+        node: { type: string }
+        connection: { type: string }
+        vmid: { type: integer }
+        time: { type: string, format: date-time, nullable: true }
+        storage: { type: string }
+        size: { type: integer, format: int64 }
+        count: { type: integer }
+        freshness: { $ref: "#/components/schemas/BackupFreshness" }
+        last_verification:
+          type: object
+          nullable: true
+          required: [run_id, result, finished_at, recovery_seconds]
+          properties:
+            run_id: { type: string, format: uuid }
+            result: { type: string }
+            finished_at: { type: string, format: date-time, nullable: true }
+            recovery_seconds: { type: number, nullable: true }
+    RecoveryReportRun:
+      type: object
+      required: [id, kind, name, trigger, result, summary, finished_at, recovery_seconds, takeover_ms, downtime_ms, rto_seconds, rpo_seconds]
+      properties:
+        id: { type: string, format: uuid }
+        kind: { $ref: "#/components/schemas/TestRunKind" }
+        name: { type: string }
+        trigger: { type: string }
+        result: { $ref: "#/components/schemas/TestRunResult" }
+        summary: { type: string }
+        finished_at: { type: string, format: date-time }
+        recovery_seconds: { type: number, nullable: true, description: Back-upcontrole, terugzetten plus opstarten }
+        takeover_ms: { type: integer, format: int64, nullable: true }
+        downtime_ms: { type: integer, format: int64, nullable: true }
+        rto_seconds: { type: number, nullable: true }
+        rpo_seconds: { type: number, nullable: true }
+    RecoveryReportMeasured:
+      type: object
+      required: [run_id, name, result, finished_at, rto_seconds, rpo_seconds, rto_met, rpo_met]
+      properties:
+        run_id: { type: string, format: uuid }
+        name: { type: string }
+        result: { $ref: "#/components/schemas/TestRunResult" }
+        finished_at: { type: string, format: date-time }
+        rto_seconds: { type: number, nullable: true }
+        rpo_seconds: { type: number, nullable: true }
+        rto_met: { type: boolean, nullable: true, description: Leeg zonder doel }
+        rpo_met: { type: boolean, nullable: true }
+    RecoveryReportRisk:
+      type: object
+      required: [check, card, severity, text, points]
+      properties:
+        check: { type: string }
+        card: { $ref: "#/components/schemas/RiskCardId" }
+        severity: { $ref: "#/components/schemas/RiskSeverity" }
+        text: { type: string }
+        points: { type: integer }
     TestRunKind: { type: string, enum: [failover.test, backup.verify, disaster.run, dr.rehearsal] }
     TestRun:
       type: object

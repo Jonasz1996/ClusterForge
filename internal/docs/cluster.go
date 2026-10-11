@@ -785,7 +785,7 @@ func recovery(c *Cluster, o Opts) string {
 	}
 
 	d.h2("DR-repetitie")
-	d.p("Er is nog geen DR-repetitie gedaan, dus de hersteltijd (RTO) en het gegevensverlies (RPO) van het hele cluster zijn niet gemeten.")
+	drSection(d, c, o)
 
 	d.h2("Wat er uitvalt")
 	if len(c.Outages) == 0 {
@@ -799,6 +799,143 @@ func recovery(c *Cluster, o Opts) string {
 	}
 	d.table([]string{"Uitval van", esc(c.Name), "Ook geraakt"}, rows)
 	return d.String()
+}
+
+var scheduleText = map[string]string{"weekly": "elke week", "monthly": "in het eerste testvenster van elke maand"}
+
+// drSection schrijft wat de DR-repetitie van het cluster mat, met datum en
+// doel, en wanneer ze draait.
+func drSection(d *doc, c *Cluster, o Opts) {
+	dr := c.DR
+	if m := dr.Measured; m != nil {
+		d.p("Gemeten in de sandbox op "+o.dateText(m.At)+", met de DR-repetitie "+quoted(m.Name)+".", drGoals(dr))
+		d.table([]string{"", "Gemeten", "Doel", "Gehaald"}, [][]string{
+			{"**RTO**, hersteltijd", durationOr(m.RTO), goalText(dr.RTOMinutes, "minuut", "minuten"), metText(m.RTO, time.Duration(dr.RTOMinutes)*time.Minute)},
+			{"**RPO**, gegevensverlies", durationOr(m.RPO), goalText(dr.RPOHours, "uur", "uur"), metText(m.RPO, time.Duration(dr.RPOHours)*time.Hour)},
+		})
+		d.p("De RTO loopt van de start van het terugzetten tot alle controles in de sandbox slaagden. De RPO is hoe oud de oudste back-up toen was.",
+			"Alle nodes kwamen tegelijk terug uit hun nieuwste back-up, op "+esc(m.Host)+" ("+esc(m.Proxmox)+") en storage "+code(m.Storage)+
+				", met de netwerkkaarten aan de afgesloten bridge "+code(m.Bridge)+".")
+		var rows [][]string
+		for _, n := range m.Nodes {
+			rows = append(rows, []string{"**" + esc(n.Hostname) + "**", "VM " + strconv.Itoa(n.SourceVMID), o.timeText(n.BackupTime), durationOr(n.Restore), durationOr(n.Boot)})
+		}
+		if len(rows) > 0 {
+			d.table([]string{"Node", "Bron", "Back-up van", "Terugzetten", "Opstarten"}, rows)
+		}
+		var vips []string
+		for _, v := range m.VIPs {
+			vips = append(vips, drVIPText(v))
+		}
+		d.p(vips...)
+		if m.Result == "warning" {
+			d.p("De repetitie gaf een waarschuwing: " + esc(m.Summary))
+		}
+	} else {
+		text := "Er is nog geen DR-repetitie gedaan, dus de hersteltijd (RTO) en het gegevensverlies (RPO) van het hele cluster zijn niet gemeten."
+		if dr.Last != nil {
+			text = "Er is nog geen DR-repetitie geslaagd, dus de hersteltijd (RTO) van het hele cluster is niet gemeten."
+		}
+		d.p(text, drGoals(dr))
+	}
+	if l := dr.Last; l != nil && (dr.Measured == nil || l.ID != dr.Measured.ID) {
+		d.p("De laatste repetitie, "+quoted(l.Name)+" op "+o.dateText(l.At)+", is "+or(resultText[l.Result], l.Result)+".", esc(l.Summary))
+	}
+	if len(dr.Scenarios) == 0 {
+		d.p("Er is geen DR-repetitie ingesteld. Die voeg je toe op de pagina van het cluster, bij Rampoefeningen.")
+		return
+	}
+	var lines []string
+	for _, sc := range dr.Scenarios {
+		when := "alleen met de hand"
+		if t, ok := scheduleText[sc.Schedule]; ok {
+			when = t + " in het testvenster (" + esc(c.Backup.Window) + ")"
+			if sc.Schedule == "monthly" {
+				when = t + " (" + esc(c.Backup.Window) + ")"
+			}
+		}
+		lines = append(lines, quoted(sc.Name)+" op de afgesloten bridge "+code(sc.Bridge)+": "+when+".")
+	}
+	d.p("De DR-repetities van dit cluster:")
+	d.bullets(lines)
+}
+
+// drGoals zegt welke doelen het cluster heeft.
+func drGoals(dr DR) string {
+	rto, rpo := dr.RTOMinutes > 0, dr.RPOHours > 0
+	var s string
+	switch {
+	case !rto && !rpo:
+		return "Dit cluster heeft geen doel voor de hersteltijd (RTO) en het gegevensverlies (RPO)."
+	case !rpo:
+		s = "Het doel is een RTO van hoogstens " + plural(dr.RTOMinutes, "minuut", "minuten") + "; voor de RPO is er geen doel"
+	case !rto:
+		s = "Het doel is een RPO van hoogstens " + plural(dr.RPOHours, "uur", "uur") + "; voor de RTO is er geen doel"
+	default:
+		s = "Het doel is een RTO van hoogstens " + plural(dr.RTOMinutes, "minuut", "minuten") + " en een RPO van hoogstens " + plural(dr.RPOHours, "uur", "uur")
+	}
+	if dr.Default {
+		s += " (de standaard voor prod)"
+	}
+	return s + "."
+}
+
+func goalText(n int, one, many string) string {
+	if n == 0 {
+		return "geen doel"
+	}
+	return "hoogstens " + plural(n, one, many)
+}
+
+func metText(v *time.Duration, goal time.Duration) string {
+	switch {
+	case v == nil || goal == 0:
+		return ""
+	case *v <= goal:
+		return "ja"
+	}
+	return "**nee**"
+}
+
+func durationOr(v *time.Duration) string {
+	if v == nil {
+		return "niet gemeten"
+	}
+	return duration(*v)
+}
+
+func quoted(s string) string { return "'" + esc(s) + "'" }
+
+// drVIPText zegt wie het VIP in de sandbox had en of het antwoordde.
+func drVIPText(v DRVIP) string {
+	s := code(v.Address)
+	if !v.Checked {
+		return s + " is niet gecontroleerd: geen node in de sandbox kon zijn adressen melden."
+	}
+	var holders []string
+	for _, h := range v.Holders {
+		holders = append(holders, esc(h))
+	}
+	switch len(holders) {
+	case 0:
+		s += " had in de sandbox geen houder"
+	case 1:
+		s += " had in de sandbox één houder, " + holders[0]
+	default:
+		s += " had in de sandbox meer dan één houder: " + list(holders)
+	}
+	probe := ""
+	if v.Probe != "" {
+		probe = " (" + esc(v.Probe) + ")"
+	}
+	switch {
+	case v.ProbeOK == nil:
+	case *v.ProbeOK:
+		s += ", en de probe" + probe + " slaagde"
+	default:
+		s += ", maar de probe" + probe + " faalde"
+	}
+	return s + "."
 }
 
 func measuredText(r *TestRun) string {
@@ -943,6 +1080,18 @@ func runbooks(c *Cluster, o Opts) string {
 	d.h2("Terugzetten uit back-up")
 	d.p("Twijfel je aan een back-up, controleer hem dan eerst bij Back-ups met **Controleren**: dat zet hem terug in een afgesloten sandbox. " +
 		"Na het terugzetten meldt de agent uit de back-up zich weer; kijk daarna bij de node naar Drift voor wat er sinds de back-up veranderde.")
+	if len(c.Nodes) > 1 {
+		whole := "Moet het hele cluster terug, voer dan de commando's van alle nodes tegelijk uit."
+		if keepalived {
+			whole += " Controleer daarna of elk VIP precies één houder heeft."
+		}
+		if m := c.DR.Measured; m != nil && m.RTO != nil {
+			whole += " Zo deed de DR-repetitie het op " + o.dateText(m.At) + " in de sandbox: na " + duration(*m.RTO) + " werkte het hele cluster weer."
+		} else {
+			whole += " Hoe lang dat duurt, meet de DR-repetitie; voor dit cluster heeft die nog geen hersteltijd gemeten."
+		}
+		d.p(whole)
+	}
 	for _, n := range c.Nodes {
 		d.h3(esc(n.Hostname))
 		restoreSteps(d, c, n, o)
@@ -1047,7 +1196,27 @@ func restoreSteps(d *doc, c *Cluster, n Node, o Opts) {
 		cmds = "qm stop " + id + "\nqmrestore " + b.Volid + " " + id + " --force 1 --storage " + storage + "\nqm start " + id
 	}
 	d.code("sh", cmds)
-	d.p(code("--force 1")+" overschrijft de VM die er nu staat.", note)
+	d.p(code("--force 1")+" overschrijft de VM die er nu staat.", note, drNodeText(c, n, o))
+}
+
+// drNodeText zegt hoe lang terugzetten en opstarten van de node in de
+// laatste gemeten DR-repetitie duurden.
+func drNodeText(c *Cluster, n Node, o Opts) string {
+	m := c.DR.Measured
+	if m == nil {
+		return ""
+	}
+	for _, dn := range m.Nodes {
+		if dn.Hostname != n.Hostname || dn.Restore == nil {
+			continue
+		}
+		s := "In de DR-repetitie van " + o.dateText(m.At) + " duurde terugzetten " + duration(*dn.Restore)
+		if dn.Boot != nil {
+			s += " en opstarten " + duration(*dn.Boot)
+		}
+		return s + "."
+	}
+	return ""
 }
 
 // restoreStorage is de storage waarop de schijven terugkomen: die van de

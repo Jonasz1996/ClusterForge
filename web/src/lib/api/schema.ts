@@ -2561,6 +2561,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/reports/recovery": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Het rapport Herstelbaarheid van een maand
+         * @description Per cluster de nieuwste back-ups, de controles, failovertests,
+         *     rampoefeningen en DR-repetities van de maand, RTO en RPO tegen de
+         *     doelen en de open risico's op de kaarten Back-ups, Herstelbaarheid
+         *     en Redundantie. Een maand met een bewaard rapport geeft dat rapport;
+         *     anders rekent ClusterForge het nu, met de back-ups, doelen en
+         *     risico's van nu. Ook voor viewers.
+         */
+        get: operations["getRecoveryReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -3280,6 +3305,105 @@ export interface components {
             expect_failback: boolean;
             probe: components["schemas"]["FailoverProbe"];
             description: string;
+        };
+        RecoveryReport: {
+            /** @description JJJJ-MM */
+            month: string;
+            /** Format: date-time */
+            from: string;
+            /**
+             * Format: date-time
+             * @description Het begin van de volgende maand
+             */
+            to: string;
+            /** Format: date-time */
+            generated_at: string;
+            /** @description Het rapport dat de planner op de eerste van de maand bewaarde */
+            saved: boolean;
+            /** @description De maand was nog niet voorbij toen het rapport gemaakt werd */
+            running: boolean;
+            clusters: components["schemas"]["RecoveryReportCluster"][];
+            /** @description De maanden met een bewaard rapport, nieuwste eerst */
+            saved_months: string[];
+        };
+        RecoveryReportCluster: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            slug: string;
+            environment: components["schemas"]["Environment"];
+            /** @description Leeg zonder score */
+            grade: string;
+            score: number | null;
+            /** @description 0 is geen doel */
+            rto_target_minutes: number;
+            /** @description 0 is geen doel */
+            rpo_target_hours: number;
+            backups: components["schemas"]["RecoveryReportBackup"][];
+            /** @description De afgeronde tests van de maand, oudste eerst */
+            runs: components["schemas"]["RecoveryReportRun"][];
+            /** @description De laatste DR-repetitie tot het einde van de maand die de RTO mat */
+            dr: components["schemas"]["RecoveryReportMeasured"] | null;
+            risks: components["schemas"]["RecoveryReportRisk"][];
+        };
+        RecoveryReportBackup: {
+            node: string;
+            connection: string;
+            vmid: number;
+            /** Format: date-time */
+            time: string | null;
+            storage: string;
+            /** Format: int64 */
+            size: number;
+            count: number;
+            freshness: components["schemas"]["BackupFreshness"];
+            last_verification: {
+                /** Format: uuid */
+                run_id: string;
+                result: string;
+                /** Format: date-time */
+                finished_at: string | null;
+                recovery_seconds: number | null;
+            } | null;
+        };
+        RecoveryReportRun: {
+            /** Format: uuid */
+            id: string;
+            kind: components["schemas"]["TestRunKind"];
+            name: string;
+            trigger: string;
+            result: components["schemas"]["TestRunResult"];
+            summary: string;
+            /** Format: date-time */
+            finished_at: string;
+            /** @description Back-upcontrole */
+            recovery_seconds: number | null;
+            /** Format: int64 */
+            takeover_ms: number | null;
+            /** Format: int64 */
+            downtime_ms: number | null;
+            rto_seconds: number | null;
+            rpo_seconds: number | null;
+        };
+        RecoveryReportMeasured: {
+            /** Format: uuid */
+            run_id: string;
+            name: string;
+            result: components["schemas"]["TestRunResult"];
+            /** Format: date-time */
+            finished_at: string;
+            rto_seconds: number | null;
+            rpo_seconds: number | null;
+            /** @description Leeg zonder doel */
+            rto_met: boolean | null;
+            rpo_met: boolean | null;
+        };
+        RecoveryReportRisk: {
+            check: string;
+            card: components["schemas"]["RiskCardId"];
+            severity: components["schemas"]["RiskSeverity"];
+            text: string;
+            points: number;
         };
         /** @enum {string} */
         TestRunKind: "failover.test" | "backup.verify" | "disaster.run" | "dr.rehearsal";
@@ -10137,6 +10261,31 @@ export interface operations {
             400: components["responses"]["Error"];
             401: components["responses"]["Error"];
             404: components["responses"]["Error"];
+        };
+    };
+    getRecoveryReport: {
+        parameters: {
+            query?: {
+                /** @description JJJJ-MM; zonder is het deze maand */
+                month?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecoveryReport"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
         };
     };
 }

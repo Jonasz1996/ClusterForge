@@ -9,10 +9,21 @@
   --color-brand-700: oklch(0.45 0.14 250);
 }
 
-@custom-variant dark (@media (prefers-color-scheme: dark));
+/* Donker alleen op het scherm: afgedrukt is alles licht, ook in donkere modus. */
+@custom-variant dark (@media screen and (prefers-color-scheme: dark));
 
 html {
   color-scheme: light dark;
+}
+
+@media print {
+  html {
+    color-scheme: light;
+  }
+}
+
+@page {
+  margin: 15mm;
 }
 
 /* uPlot-legende in de stijl van de rest van de interface. */
@@ -28,7 +39,7 @@ html {
 .cf-chart .u-legend th {
   font-weight: 500;
 }
-@media (prefers-color-scheme: dark) {
+@media screen and (prefers-color-scheme: dark) {
   .cf-chart .u-legend {
     color: var(--color-slate-400);
   }

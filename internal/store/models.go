@@ -779,6 +779,12 @@ type ProxmoxTask struct {
 	EndedAt      *time.Time
 }
 
+type RecoveryReport struct {
+	Month       pgtype.Date
+	Report      []byte
+	GeneratedAt time.Time
+}
+
 type RiskAcceptance struct {
 	ID          uuid.UUID
 	Check       string

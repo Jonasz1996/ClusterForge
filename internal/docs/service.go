@@ -211,7 +211,7 @@ var quiet = map[string]bool{
 	"service.status_changed": true, "vm.status_changed": true, "node.link_proposed": true, "node.link_ignored": true,
 	"backup.sandbox_created": true, "backup.sandbox_destroyed": true, "backup.sandbox_destroy_failed": true,
 	"backup.sandbox_connection_refused": true, "backup.inventory_failed": true, "backup.inventory_recovered": true,
-	"failover.fault_injected": true, "failover.fault_cleared": true,
+	"failover.fault_injected": true, "failover.fault_cleared": true, "dr.started": true, "dr.aborted": true,
 	"gitops.commit_seen": true, "gitops.sync_failed": true, "gitops.sync_recovered": true, "gitops.change_planned": true,
 	"gitops.change_superseded": true, "gitops.change_approved": true, "gitops.change_rejected": true, "gitops.file_invalid": true,
 	"gitops.file_missing": true, "gitops.reapply_requested": true,

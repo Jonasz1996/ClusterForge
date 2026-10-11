@@ -484,3 +484,44 @@ func TestCatalog(t *testing.T) {
 		}
 	}
 }
+
+func TestRehearsalChecks(t *testing.T) {
+	in := healthy()
+	in.VIPs, in.FailoverTests = nil, nil
+	if c := card(Score(in, nil, now), Recovery); c.Score != nil {
+		t.Errorf("zonder VIP en zonder DR-repetitie telt de kaart: %+v", c)
+	}
+	in.Rehearsals = []RehearsalInput{{ID: uuid.New(), Name: "Web DR"}}
+	if f := find(t, Score(in, nil, now), "recovery.dr_never_run"); f.Severity != Medium || f.Text != "DR-repetitie 'Web DR' liep nog nooit" {
+		t.Errorf("nooit: %+v", f)
+	}
+	run := &RunInput{ID: uuid.New(), Kind: "dr.rehearsal", Name: "Web DR", Result: "pass", Finished: now.Add(-10 * day)}
+	in.Rehearsals[0].LastRun = run
+	if c := card(Score(in, nil, now), Recovery); c.Score == nil || *c.Score != 100 || len(c.Findings) != 0 {
+		t.Errorf("geslaagd zonder VIP: %+v", c)
+	}
+	run.Result, run.Summary = "fail", "web-02 startte niet in de sandbox"
+	f := find(t, Score(in, nil, now), "recovery.dr_failed")
+	if f.Severity != High || f.Text != "DR-repetitie 'Web DR' mislukte op "+date(run.Finished)+": web-02 startte niet in de sandbox" ||
+		f.Link != "/tests/detail?id="+run.ID.String() {
+		t.Errorf("mislukt: %+v", f)
+	}
+	run.Result, run.Summary = "warning", "RPO 30 u boven het doel van 26 u"
+	if f := find(t, Score(in, nil, now), "recovery.dr_goal_missed"); f.Severity != Medium || !strings.HasSuffix(f.Text, ": RPO 30 u boven het doel van 26 u") {
+		t.Errorf("doel niet gehaald: %+v", f)
+	}
+	run.Result = "pass"
+	for _, c := range []struct {
+		age time.Duration
+		sev Severity
+	}{{50 * day, Medium}, {100 * day, High}} {
+		run.Finished = now.Add(-c.age)
+		if f := find(t, Score(in, nil, now), "recovery.dr_stale"); f.Severity != c.sev || f.Text != "Laatste DR-repetitie 'Web DR' is "+days(c.age)+" geleden" {
+			t.Errorf("%v oud: %+v", c.age, f)
+		}
+	}
+	in.Env = "lab"
+	if f := find(t, Score(in, nil, now), "recovery.dr_stale"); f.Severity != Low {
+		t.Errorf("lab, 100 dagen: %+v", f)
+	}
+}

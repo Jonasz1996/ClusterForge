@@ -72,6 +72,10 @@ func (s *Service) gather(ctx context.Context, now time.Time) (world, error) {
 	if err != nil {
 		return w, err
 	}
+	rehearsals, err := q.ListRiskRehearsals(ctx)
+	if err != nil {
+		return w, err
+	}
 	deps, err := q.ListNonProdDependencies(ctx)
 	if err != nil {
 		return w, err
@@ -170,6 +174,16 @@ func (s *Service) gather(ctx context.Context, now time.Time) (world, error) {
 			if r.ClusterID == c.ID {
 				in.Unrestored = append(in.Unrestored, RunInput{ID: r.ID, Kind: r.Kind, Name: r.Name, Finished: r.Finished})
 			}
+		}
+		for _, t := range rehearsals {
+			if t.ClusterID != c.ID {
+				continue
+			}
+			ri := RehearsalInput{ID: t.ID, Name: t.Name}
+			if t.RunResult != nil && t.RunFinished != nil {
+				ri.LastRun = &RunInput{ID: t.RunID, Kind: "dr.rehearsal", Name: t.Name, Result: *t.RunResult, Summary: t.RunSummary, Finished: *t.RunFinished}
+			}
+			in.Rehearsals = append(in.Rehearsals, ri)
 		}
 		if c.Environment == "prod" {
 			for _, d := range deps {

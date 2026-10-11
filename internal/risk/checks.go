@@ -312,8 +312,8 @@ func backupsCard(in ClusterInput, now time.Time) part {
 
 func recovery(in ClusterInput, now time.Time) part {
 	var p part
-	// Een rampoefening die niet hersteld is, telt ook bij een cluster zonder
-	// VIP.
+	// Een rampoefening die niet hersteld is en een DR-repetitie tellen ook
+	// bij een cluster zonder VIP.
 	for _, r := range in.Unrestored {
 		what := "Failovertest"
 		if r.Kind == "disaster.run" {
@@ -322,14 +322,15 @@ func recovery(in ClusterInput, now time.Time) part {
 		p.add("recovery.unrestored", High, Subject{"test_run", r.ID, r.Name},
 			what+" '"+r.Name+"' van "+date(r.Finished)+" is niet hersteld", "/tests/detail?id="+r.ID.String())
 	}
+	eb := envBump(in.Env)
+	link := clusterLink(in.ID)
+	rehearsals(&p, in, now, eb, link)
 	if len(in.VIPs) == 0 {
-		if len(p.findings) > 0 {
+		if len(p.findings) > 0 || len(in.Rehearsals) > 0 {
 			return p
 		}
 		return part{unknown: true, note: "Zonder VIP is er geen failovertest; deze kaart telt dan niet mee."}
 	}
-	eb := envBump(in.Env)
-	link := clusterLink(in.ID)
 	for _, v := range in.VIPs {
 		var tests []FailoverInput
 		for _, t := range in.FailoverTests {
@@ -368,6 +369,42 @@ func recovery(in ClusterInput, now time.Time) part {
 		}
 	}
 	return p
+}
+
+// Een DR-repetitie draait meestal maandelijks; pas daarna is ze oud.
+const (
+	drStale   = 45 * day
+	drVeryOld = 90 * day
+)
+
+// rehearsals zijn de bevindingen over de DR-repetities: de laatste uitslag
+// en hoe oud die is.
+func rehearsals(p *part, in ClusterInput, now time.Time, eb int, link string) {
+	for _, t := range in.Rehearsals {
+		s := Subject{"disaster_scenario", t.ID, t.Name}
+		r := t.LastRun
+		if r == nil {
+			p.add("recovery.dr_never_run", bump(Low, eb, Medium), s, "DR-repetitie '"+t.Name+"' liep nog nooit", link)
+			continue
+		}
+		runLink := "/tests/detail?id=" + r.ID.String()
+		switch r.Result {
+		case "fail", "error":
+			p.add("recovery.dr_failed", bump(Medium, eb, High), s,
+				withReason("DR-repetitie '"+t.Name+"' mislukte op "+date(r.Finished), r.Summary), runLink)
+		case "warning":
+			p.add("recovery.dr_goal_missed", bump(Low, eb, Medium), s,
+				withReason("DR-repetitie '"+t.Name+"' haalde haar doel niet", r.Summary), runLink)
+		}
+		switch age := now.Sub(r.Finished); {
+		case age > drVeryOld:
+			p.add("recovery.dr_stale", bump(Medium, eb, High), s,
+				"Laatste DR-repetitie '"+t.Name+"' is "+days(age)+" geleden", link)
+		case age > drStale:
+			p.add("recovery.dr_stale", bump(Low, eb, Medium), s,
+				"Laatste DR-repetitie '"+t.Name+"' is "+days(age)+" geleden", link)
+		}
+	}
 }
 
 // --- Redundantie ---

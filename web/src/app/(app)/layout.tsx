@@ -21,6 +21,7 @@ const nav: NavItem[] = [
   { href: "/afhankelijkheden", label: "Afhankelijkheden" },
   { href: "/kaart", label: "Kaart" },
   { href: "/documentatie", label: "Documentatie" },
+  { href: "/rapporten", label: "Rapporten" },
   { href: "/proxmox", label: "Proxmox" },
   { href: "/back-ups", label: "Back-ups" },
   { href: "/tests", label: "Tests" },
@@ -95,7 +96,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
           className={`mx-auto w-full flex-1 px-6 py-8 print:max-w-none print:p-0 ${
             pathname.startsWith("/afhankelijkheden")
               ? "max-w-[100rem]"
-              : pathname.startsWith("/documentatie")
+              : pathname.startsWith("/documentatie") || pathname.startsWith("/rapporten")
                 ? "max-w-6xl"
                 : "max-w-5xl"
           }`}
