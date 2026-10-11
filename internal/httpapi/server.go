@@ -34,6 +34,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/risk"
 	"github.com/Jonasz1996/clusterforge/internal/rollout"
 	"github.com/Jonasz1996/clusterforge/internal/store"
+	"github.com/Jonasz1996/clusterforge/internal/topo"
 	"github.com/Jonasz1996/clusterforge/internal/webui"
 )
 
@@ -62,6 +63,7 @@ type Server struct {
 	git          *gitops.Service
 	assistant    *assistant.Service
 	risk         *risk.Service
+	topo         *topo.Service
 	version      string
 	loginLimiter *ipLimiter
 	// enrollLimiter remt het raden van enrollmenttokens.
@@ -103,7 +105,9 @@ type Deps struct {
 	// hem zijn tools.
 	Assistant *assistant.Service
 	// Risk rekent de health score.
-	Risk    *risk.Service
+	Risk *risk.Service
+	// Topo leest de infrastructuur voor de wat-als.
+	Topo    *topo.Service
 	Version string
 }
 
@@ -141,6 +145,7 @@ func New(d Deps) *Server {
 		throttle:      events.NewThrottle(ev),
 		assistant:     d.Assistant,
 		risk:          d.Risk,
+		topo:          d.Topo,
 	}
 	s.assistant.Tools = s.assistantTools()
 	return s

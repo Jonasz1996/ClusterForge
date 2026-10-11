@@ -51,6 +51,9 @@ type Guest struct {
 	// HAState is de toestand bij Proxmox HA, zoals "started"; leeg als HA
 	// de VM niet beheert.
 	HAState string
+	// Inet is per interface van een draaiende container het adres dat
+	// GET .../interfaces geeft, zoals "eth0": "192.168.1.5/24".
+	Inet map[string]string
 	// Hostname, OS en Filesystems zijn wat de guest agent meldt; leeg
 	// geeft de naam van de VM, Debian 13 en één bestandssysteem.
 	Hostname    string
@@ -355,6 +358,7 @@ func (s *Server) Guest(vmid int) (Guest, bool) {
 			c := *g
 			c.Snapshots = slices.Clone(g.Snapshots)
 			c.Config = maps.Clone(g.Config)
+			c.Inet = maps.Clone(g.Inet)
 			c.Files = maps.Clone(g.Files)
 			return c, true
 		}
@@ -406,6 +410,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST "+p+"/nodes/{node}/{type}/{vmid}/clone", s.clone)
 	mux.HandleFunc("GET "+p+"/nodes/{node}/{type}/{vmid}/config", s.config)
 	mux.HandleFunc("POST "+p+"/nodes/{node}/{type}/{vmid}/config", s.setConfig)
+	mux.HandleFunc("GET "+p+"/nodes/{node}/lxc/{vmid}/interfaces", s.interfaces)
 	mux.HandleFunc("PUT "+p+"/nodes/{node}/{type}/{vmid}/resize", s.resize)
 	mux.HandleFunc("POST "+p+"/nodes/{node}/{type}/{vmid}/agent/ping", s.agentPing)
 	mux.HandleFunc("POST "+p+"/nodes/{node}/{type}/{vmid}/agent/file-write", s.fileWrite)
@@ -866,6 +871,46 @@ func (s *Server) config(w http.ResponseWriter, r *http.Request) {
 	}
 	if g.Template {
 		out["template"] = 1
+	}
+	ok(w, out)
+}
+
+// interfaces geeft lo en de interfaces uit Inet, met het MAC-adres uit de
+// configuratie; alleen voor een draaiende container.
+func (s *Server) interfaces(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.finishTasks()
+	vmid, _ := strconv.Atoi(r.PathValue("vmid"))
+	g, found := s.guestByID(vmid)
+	if !found || g.Type != "lxc" || g.Node != r.PathValue("node") {
+		fail(w, http.StatusInternalServerError, "no such container")
+		return
+	}
+	if g.Status != "running" {
+		fail(w, http.StatusInternalServerError, "container not running")
+		return
+	}
+	out := []map[string]string{{"name": "lo", "hwaddr": "00:00:00:00:00:00", "inet": "127.0.0.1/8", "inet6": "::1/128"}}
+	hw := map[string]string{}
+	for k, v := range g.Config {
+		if !strings.HasPrefix(k, "net") {
+			continue
+		}
+		var name, mac string
+		for _, part := range strings.Split(v, ",") {
+			key, val, _ := strings.Cut(part, "=")
+			switch key {
+			case "name":
+				name = val
+			case "hwaddr":
+				mac = strings.ToLower(val)
+			}
+		}
+		hw[name] = mac
+	}
+	for _, name := range slices.Sorted(maps.Keys(g.Inet)) {
+		out = append(out, map[string]string{"name": name, "hwaddr": hw[name], "inet": g.Inet[name]})
 	}
 	ok(w, out)
 }

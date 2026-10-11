@@ -635,16 +635,16 @@ func (e GitStepChangeChange) Valid() bool {
 
 // Defines values for GuestType.
 const (
-	Lxc  GuestType = "lxc"
-	Qemu GuestType = "qemu"
+	GuestTypeLxc  GuestType = "lxc"
+	GuestTypeQemu GuestType = "qemu"
 )
 
 // Valid indicates whether the value is a known member of the GuestType enum.
 func (e GuestType) Valid() bool {
 	switch e {
-	case Lxc:
+	case GuestTypeLxc:
 		return true
-	case Qemu:
+	case GuestTypeQemu:
 		return true
 	default:
 		return false
@@ -1047,6 +1047,75 @@ func (e RiskCardId) Valid() bool {
 	}
 }
 
+// Defines values for RiskComponentKind.
+const (
+	RiskComponentKindBridge  RiskComponentKind = "bridge"
+	RiskComponentKindCluster RiskComponentKind = "cluster"
+	RiskComponentKindHost    RiskComponentKind = "host"
+	RiskComponentKindNode    RiskComponentKind = "node"
+	RiskComponentKindService RiskComponentKind = "service"
+	RiskComponentKindStorage RiskComponentKind = "storage"
+)
+
+// Valid indicates whether the value is a known member of the RiskComponentKind enum.
+func (e RiskComponentKind) Valid() bool {
+	switch e {
+	case RiskComponentKindBridge:
+		return true
+	case RiskComponentKindCluster:
+		return true
+	case RiskComponentKindHost:
+		return true
+	case RiskComponentKindNode:
+		return true
+	case RiskComponentKindService:
+		return true
+	case RiskComponentKindStorage:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RiskGuestOutcomeOutcome.
+const (
+	RiskGuestOutcomeOutcomeDown      RiskGuestOutcomeOutcome = "down"
+	RiskGuestOutcomeOutcomePartial   RiskGuestOutcomeOutcome = "partial"
+	RiskGuestOutcomeOutcomeRestarted RiskGuestOutcomeOutcome = "restarted"
+)
+
+// Valid indicates whether the value is a known member of the RiskGuestOutcomeOutcome enum.
+func (e RiskGuestOutcomeOutcome) Valid() bool {
+	switch e {
+	case RiskGuestOutcomeOutcomeDown:
+		return true
+	case RiskGuestOutcomeOutcomePartial:
+		return true
+	case RiskGuestOutcomeOutcomeRestarted:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for RiskSelfOutcomeOutcome.
+const (
+	RiskSelfOutcomeOutcomeDown      RiskSelfOutcomeOutcome = "down"
+	RiskSelfOutcomeOutcomeRestarted RiskSelfOutcomeOutcome = "restarted"
+)
+
+// Valid indicates whether the value is a known member of the RiskSelfOutcomeOutcome enum.
+func (e RiskSelfOutcomeOutcome) Valid() bool {
+	switch e {
+	case RiskSelfOutcomeOutcomeDown:
+		return true
+	case RiskSelfOutcomeOutcomeRestarted:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for RiskSeverity.
 const (
 	RiskSeverityCritical RiskSeverity = "critical"
@@ -1083,6 +1152,45 @@ func (e Role) Valid() bool {
 	case Admin:
 		return true
 	case Viewer:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SelfGuestType.
+const (
+	SelfGuestTypeLxc  SelfGuestType = "lxc"
+	SelfGuestTypeQemu SelfGuestType = "qemu"
+)
+
+// Valid indicates whether the value is a known member of the SelfGuestType enum.
+func (e SelfGuestType) Valid() bool {
+	switch e {
+	case SelfGuestTypeLxc:
+		return true
+	case SelfGuestTypeQemu:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SelfLocationSource.
+const (
+	SelfLocationSourceAuto   SelfLocationSource = "auto"
+	SelfLocationSourceManual SelfLocationSource = "manual"
+	SelfLocationSourceNone   SelfLocationSource = "none"
+)
+
+// Valid indicates whether the value is a known member of the SelfLocationSource enum.
+func (e SelfLocationSource) Valid() bool {
+	switch e {
+	case SelfLocationSourceAuto:
+		return true
+	case SelfLocationSourceManual:
+		return true
+	case SelfLocationSourceNone:
 		return true
 	default:
 		return false
@@ -4125,6 +4233,18 @@ type RiskCard struct {
 // RiskCardId defines model for RiskCardId.
 type RiskCardId string
 
+// RiskClusterOutcome defines model for RiskClusterOutcome.
+type RiskClusterOutcome struct {
+	// AfterHa Na de herstart door HA; leeg als HA in dit cluster niets herstart
+	AfterHa     nullable.Nullable[RiskPrediction] `json:"after_ha"`
+	Before      RiskPrediction                    `json:"before"`
+	During      RiskPrediction                    `json:"during"`
+	Environment Environment                       `json:"environment"`
+	Id          openapi_types.UUID                `json:"id"`
+	Name        string                            `json:"name"`
+	NodesDown   []string                          `json:"nodes_down"`
+}
+
 // RiskClusterRef defines model for RiskClusterRef.
 type RiskClusterRef struct {
 	Environment Environment        `json:"environment"`
@@ -4139,6 +4259,27 @@ type RiskClusterScore struct {
 	Id          openapi_types.UUID     `json:"id"`
 	Name        string                 `json:"name"`
 	Score       nullable.Nullable[int] `json:"score"`
+}
+
+// RiskComponent defines model for RiskComponent.
+type RiskComponent struct {
+	// Group De Proxmox-koppeling
+	Group string `json:"group"`
+
+	// Key Herkent het onderdeel, zoals host:<koppeling>:pve1
+	Key  string            `json:"key"`
+	Kind RiskComponentKind `json:"kind"`
+
+	// Name Zoals pve1, local-lvm op pve1 of ceph (gedeeld)
+	Name string `json:"name"`
+}
+
+// RiskComponentKind defines model for RiskComponentKind.
+type RiskComponentKind string
+
+// RiskComponentList defines model for RiskComponentList.
+type RiskComponentList struct {
+	Components []RiskComponent `json:"components"`
 }
 
 // RiskFinding defines model for RiskFinding.
@@ -4164,6 +4305,27 @@ type RiskFinding struct {
 	Subject  RiskSubject  `json:"subject"`
 	Text     string       `json:"text"`
 }
+
+// RiskGuestOutcome defines model for RiskGuestOutcome.
+type RiskGuestOutcome struct {
+	Connection string                                `json:"connection"`
+	Host       string                                `json:"host"`
+	Hostname   string                                `json:"hostname"`
+	Name       string                                `json:"name"`
+	NodeId     nullable.Nullable[openapi_types.UUID] `json:"node_id"`
+
+	// Outcome down, restarted (HA start hem op restart_host) of partial (een netwerkkaart valt weg, de VM draait door)
+	Outcome     RiskGuestOutcomeOutcome `json:"outcome"`
+	Reason      string                  `json:"reason"`
+	RestartHost string                  `json:"restart_host"`
+
+	// Unknown Geen node in ClusterForge
+	Unknown bool `json:"unknown"`
+	Vmid    int  `json:"vmid"`
+}
+
+// RiskGuestOutcomeOutcome down, restarted (HA start hem op restart_host) of partial (een netwerkkaart valt weg, de VM draait door)
+type RiskGuestOutcomeOutcome string
 
 // RiskHistory defines model for RiskHistory.
 type RiskHistory struct {
@@ -4214,6 +4376,80 @@ type RiskPoint struct {
 	Score nullable.Nullable[int] `json:"score"`
 }
 
+// RiskPrediction defines model for RiskPrediction.
+type RiskPrediction struct {
+	Reason string `json:"reason"`
+
+	// Status Berekend uit heartbeats, metrics en VIP's (zie internal/status).
+	// unknown betekent: geen agent of nog geen gegevens.
+	Status Status `json:"status"`
+}
+
+// RiskSPOF defines model for RiskSPOF.
+type RiskSPOF struct {
+	// Clusters De prod-clusters die down gaan
+	Clusters  []RiskSPOFCluster `json:"clusters"`
+	Component RiskComponent     `json:"component"`
+
+	// Down Hoeveel clusters en diensten in alle omgevingen down gaan
+	Down int `json:"down"`
+
+	// Self ClusterForge zelf valt ook uit
+	Self bool `json:"self"`
+
+	// Services De bevestigde prod-diensten die down gaan
+	Services []RiskSPOFService `json:"services"`
+}
+
+// RiskSPOFCluster defines model for RiskSPOFCluster.
+type RiskSPOFCluster struct {
+	Id     openapi_types.UUID `json:"id"`
+	Name   string             `json:"name"`
+	Reason string             `json:"reason"`
+}
+
+// RiskSPOFList defines model for RiskSPOFList.
+type RiskSPOFList struct {
+	Spofs []RiskSPOF `json:"spofs"`
+}
+
+// RiskSPOFService defines model for RiskSPOFService.
+type RiskSPOFService struct {
+	Group  string             `json:"group"`
+	Id     openapi_types.UUID `json:"id"`
+	Name   string             `json:"name"`
+	Reason string             `json:"reason"`
+}
+
+// RiskSelfOutcome defines model for RiskSelfOutcome.
+type RiskSelfOutcome struct {
+	Name        string                 `json:"name"`
+	Outcome     RiskSelfOutcomeOutcome `json:"outcome"`
+	Reason      string                 `json:"reason"`
+	RestartHost string                 `json:"restart_host"`
+}
+
+// RiskSelfOutcomeOutcome defines model for RiskSelfOutcome.Outcome.
+type RiskSelfOutcomeOutcome string
+
+// RiskServiceOutcome defines model for RiskServiceOutcome.
+type RiskServiceOutcome struct {
+	Direct bool `json:"direct"`
+
+	// Environment lab
+	Environment string             `json:"environment"`
+	Group       string             `json:"group"`
+	Id          openapi_types.UUID `json:"id"`
+
+	// Impact Wat een afhankelijkheid doet; none zonder uitval
+	Impact ServiceImpact `json:"impact"`
+	Name   string        `json:"name"`
+	Reason string        `json:"reason"`
+
+	// Recovers Werkt weer zodra HA de VM's herstart heeft
+	Recovers bool `json:"recovers"`
+}
+
 // RiskSeverity defines model for RiskSeverity.
 type RiskSeverity string
 
@@ -4222,12 +4458,69 @@ type RiskSubject struct {
 	Id   openapi_types.UUID `json:"id"`
 	Name string             `json:"name"`
 
-	// Type cluster, node, vip, failover_test, test_run, dependency, drift_ignore, git_change, user of proxmox
+	// Type cluster, node, vip, failover_test, test_run, dependency, drift_ignore, git_change, user, proxmox, component (een SPOF) of self
 	Type string `json:"type"`
+}
+
+// RiskWhatIf defines model for RiskWhatIf.
+type RiskWhatIf struct {
+	Clusters   []RiskClusterOutcome `json:"clusters"`
+	Components []RiskComponent      `json:"components"`
+	Guests     []RiskGuestOutcome   `json:"guests"`
+	Notes      []string             `json:"notes"`
+
+	// Self Leeg als ClusterForge zelf blijft draaien of niet bekend is waar hij draait
+	Self     nullable.Nullable[RiskSelfOutcome] `json:"self"`
+	Services []RiskServiceOutcome               `json:"services"`
+}
+
+// RiskWhatIfInput defines model for RiskWhatIfInput.
+type RiskWhatIfInput struct {
+	Components []string `json:"components"`
 }
 
 // Role defines model for Role.
 type Role string
+
+// SelfGuest defines model for SelfGuest.
+type SelfGuest struct {
+	Connection   string             `json:"connection"`
+	ConnectionId openapi_types.UUID `json:"connection_id"`
+	Host         string             `json:"host"`
+	Name         string             `json:"name"`
+	Type         SelfGuestType      `json:"type"`
+	Vmid         int                `json:"vmid"`
+}
+
+// SelfGuestType defines model for SelfGuest.Type.
+type SelfGuestType string
+
+// SelfLocation defines model for SelfLocation.
+type SelfLocation struct {
+	Guest nullable.Nullable[SelfGuest] `json:"guest"`
+
+	// Guests De VM's en containers om uit te kiezen
+	Guests    []SelfGuest `json:"guests"`
+	MatchedOn string      `json:"matched_on"`
+
+	// Note Waarom hij niet gevonden is
+	Note string `json:"note"`
+
+	// Source auto: gevonden aan een adres; manual: ingevuld; none: niet gevonden
+	Source SelfLocationSource `json:"source"`
+
+	// Vmid Ook gevuld als de ingevulde VM niet meer in Proxmox staat
+	Vmid nullable.Nullable[int] `json:"vmid,omitempty"`
+}
+
+// SelfLocationSource auto: gevonden aan een adres; manual: ingevuld; none: niet gevonden
+type SelfLocationSource string
+
+// SelfLocationInput defines model for SelfLocationInput.
+type SelfLocationInput struct {
+	ConnectionId openapi_types.UUID `json:"connection_id"`
+	Vmid         int                `json:"vmid"`
+}
 
 // ServerInfo defines model for ServerInfo.
 type ServerInfo struct {
@@ -5038,6 +5331,12 @@ type VmActionJSONRequestBody = VmActionInput
 // AcceptRiskFindingJSONRequestBody defines body for AcceptRiskFinding for application/json ContentType.
 type AcceptRiskFindingJSONRequestBody = RiskAcceptanceInput
 
+// RiskWhatIfJSONRequestBody defines body for RiskWhatIf for application/json ContentType.
+type RiskWhatIfJSONRequestBody = RiskWhatIfInput
+
+// SetSelfLocationJSONRequestBody defines body for SetSelfLocation for application/json ContentType.
+type SetSelfLocationJSONRequestBody = SelfLocationInput
+
 // CreateServiceJSONRequestBody defines body for CreateService for application/json ContentType.
 type CreateServiceJSONRequestBody = ServiceInput
 
@@ -5385,9 +5684,27 @@ type ServerInterface interface {
 	// DeleteRiskAcceptance Een acceptatie intrekken (admin)
 	// (DELETE /risk/acceptances/{acceptanceId})
 	DeleteRiskAcceptance(w http.ResponseWriter, r *http.Request, acceptanceId openapi_types.UUID)
+	// ListRiskComponents De onderdelen die in de wat-als kunnen uitvallen
+	// (GET /risk/components)
+	ListRiskComponents(w http.ResponseWriter, r *http.Request)
 	// GetRiskHistory De trend van de score, één punt per dag en vandaag de huidige
 	// (GET /risk/history)
 	GetRiskHistory(w http.ResponseWriter, r *http.Request, params GetRiskHistoryParams)
+	// ListRiskSPOFs De single points of failure
+	// (GET /risk/spof)
+	ListRiskSPOFs(w http.ResponseWriter, r *http.Request)
+	// RiskWhatIf Rekenen wat er gebeurt als onderdelen tegelijk uitvallen
+	// (POST /risk/what-if)
+	RiskWhatIf(w http.ResponseWriter, r *http.Request)
+	// DeleteSelfLocation De ingevulde VM weghalen, zodat ClusterForge zelf zoekt (admin)
+	// (DELETE /self-location)
+	DeleteSelfLocation(w http.ResponseWriter, r *http.Request)
+	// GetSelfLocation Op welke VM of container ClusterForge zelf draait
+	// (GET /self-location)
+	GetSelfLocation(w http.ResponseWriter, r *http.Request)
+	// SetSelfLocation De VM van ClusterForge zelf invullen (admin)
+	// (PUT /self-location)
+	SetSelfLocation(w http.ResponseWriter, r *http.Request)
 	// CreateService Een dienst aanmaken in een cluster, op een losse node of extern (admin)
 	// (POST /services)
 	CreateService(w http.ResponseWriter, r *http.Request)
@@ -6099,9 +6416,45 @@ func (_ Unimplemented) DeleteRiskAcceptance(w http.ResponseWriter, r *http.Reque
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// ListRiskComponents De onderdelen die in de wat-als kunnen uitvallen
+// (GET /risk/components)
+func (_ Unimplemented) ListRiskComponents(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // GetRiskHistory De trend van de score, één punt per dag en vandaag de huidige
 // (GET /risk/history)
 func (_ Unimplemented) GetRiskHistory(w http.ResponseWriter, r *http.Request, params GetRiskHistoryParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListRiskSPOFs De single points of failure
+// (GET /risk/spof)
+func (_ Unimplemented) ListRiskSPOFs(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RiskWhatIf Rekenen wat er gebeurt als onderdelen tegelijk uitvallen
+// (POST /risk/what-if)
+func (_ Unimplemented) RiskWhatIf(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// DeleteSelfLocation De ingevulde VM weghalen, zodat ClusterForge zelf zoekt (admin)
+// (DELETE /self-location)
+func (_ Unimplemented) DeleteSelfLocation(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetSelfLocation Op welke VM of container ClusterForge zelf draait
+// (GET /self-location)
+func (_ Unimplemented) GetSelfLocation(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SetSelfLocation De VM van ClusterForge zelf invullen (admin)
+// (PUT /self-location)
+func (_ Unimplemented) SetSelfLocation(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -9475,6 +9828,20 @@ func (siw *ServerInterfaceWrapper) DeleteRiskAcceptance(w http.ResponseWriter, r
 	handler.ServeHTTP(w, r)
 }
 
+// ListRiskComponents operation middleware
+func (siw *ServerInterfaceWrapper) ListRiskComponents(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListRiskComponents(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetRiskHistory operation middleware
 func (siw *ServerInterfaceWrapper) GetRiskHistory(w http.ResponseWriter, r *http.Request) {
 
@@ -9512,6 +9879,76 @@ func (siw *ServerInterfaceWrapper) GetRiskHistory(w http.ResponseWriter, r *http
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetRiskHistory(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListRiskSPOFs operation middleware
+func (siw *ServerInterfaceWrapper) ListRiskSPOFs(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListRiskSPOFs(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RiskWhatIf operation middleware
+func (siw *ServerInterfaceWrapper) RiskWhatIf(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RiskWhatIf(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteSelfLocation operation middleware
+func (siw *ServerInterfaceWrapper) DeleteSelfLocation(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteSelfLocation(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetSelfLocation operation middleware
+func (siw *ServerInterfaceWrapper) GetSelfLocation(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetSelfLocation(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetSelfLocation operation middleware
+func (siw *ServerInterfaceWrapper) SetSelfLocation(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetSelfLocation(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -10299,6 +10736,24 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Delete(options.BaseURL+"/risk/acceptances/{acceptanceId}", wrapper.DeleteRiskAcceptance)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/risk/components", wrapper.ListRiskComponents)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/risk/what-if", wrapper.RiskWhatIf)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/risk/spof", wrapper.ListRiskSPOFs)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/self-location", wrapper.DeleteSelfLocation)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/self-location", wrapper.GetSelfLocation)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/self-location", wrapper.SetSelfLocation)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/clusters/{clusterId}/risk", wrapper.GetClusterRisk)

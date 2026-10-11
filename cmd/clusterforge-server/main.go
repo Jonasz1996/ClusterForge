@@ -51,6 +51,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/secrets"
 	"github.com/Jonasz1996/clusterforge/internal/status"
 	"github.com/Jonasz1996/clusterforge/internal/store"
+	"github.com/Jonasz1996/clusterforge/internal/topo"
 	"github.com/Jonasz1996/clusterforge/internal/whatbroke"
 	"github.com/Jonasz1996/clusterforge/pkg/protocol"
 )
@@ -215,6 +216,10 @@ func serve() error {
 	// De status en impact van de diensten, en daarna de incidenten, rekenen
 	// na elke ronde van de evaluator, na diens commit.
 	dps := deps.NewService(pool, ev, log)
+	// De wat-als en de SPOF's lezen de infrastructuur uit de Proxmox-sync en
+	// de afhankelijkheden.
+	tp := topo.NewService(pool, ev, log, cfg.NATSAdvertise)
+	rsk.Topo, rsk.Deps = tp, dps
 	det := incidents.NewDetector(pool, ev, log)
 	eval.After = func(ctx context.Context) error {
 		return errors.Join(dps.Evaluate(ctx), det.Detect(ctx))
@@ -260,7 +265,7 @@ func serve() error {
 		Handler: httpapi.New(httpapi.Deps{
 			Config: cfg, Log: log, Pool: pool, Auth: authSvc, Bus: bus, Hub: hub, Proxmox: pve, Jobs: runner,
 			Lifecycle: life, Deploy: dep, Backups: bk, Drift: drf, Failover: fo, Deps: dps, Rollout: ro, GitOps: git,
-			Assistant: asst, Risk: rsk, Version: version,
+			Assistant: asst, Risk: rsk, Topo: tp, Version: version,
 		}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,

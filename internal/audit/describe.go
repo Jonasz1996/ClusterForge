@@ -408,6 +408,10 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 		return "Proxmox-koppeling " + name + " verwijderd"
 	case "proxmox.sync_requested":
 		return "Proxmox-koppeling " + name + " nu ververst"
+	case "proxmox.self_location_set":
+		return fmt.Sprintf("ClusterForge draait op %s (VM %s) van Proxmox %s", or(str(p, "guest"), "?"), num(p["vmid"]), name)
+	case "proxmox.self_location_cleared":
+		return "Ingevulde VM van ClusterForge weggehaald; ClusterForge zoekt hem weer zelf"
 	case "proxmox.sync_failed":
 		return "Proxmox " + name + " niet bereikbaar" + colon(str(p, "error"))
 	case "proxmox.sync_recovered":

@@ -3,6 +3,7 @@ package risk
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strconv"
 	"time"
 
@@ -195,6 +196,14 @@ func (s *Service) gather(ctx context.Context, now time.Time) (world, error) {
 		w.clusters = append(w.clusters, in)
 	}
 
+	if s.Topo != nil && s.Deps != nil {
+		if err := s.gatherTopo(ctx, &w, nodes, vips); err != nil {
+			if ctx.Err() != nil {
+				return w, err
+			}
+			s.log.Warn("SPOF's rekenen voor de score mislukt", "err", err)
+		}
+	}
 	for _, a := range admins {
 		w.platform.AdminsWithoutTOTP = append(w.platform.AdminsWithoutTOTP, UserInput{ID: a.ID, Username: a.Username})
 	}
@@ -204,6 +213,78 @@ func (s *Service) gather(ctx context.Context, now time.Time) (world, error) {
 		})
 	}
 	return w, nil
+}
+
+// World leest wat de wat-als nodig heeft.
+func (s *Service) World(ctx context.Context) (WhatIfWorld, error) {
+	if s.Topo == nil || s.Deps == nil {
+		return WhatIfWorld{}, errors.New("de wat-als is niet ingesteld")
+	}
+	nodes, err := s.q.ListRiskNodes(ctx)
+	if err != nil {
+		return WhatIfWorld{}, err
+	}
+	vips, err := s.q.ListAllVIPs(ctx)
+	if err != nil {
+		return WhatIfWorld{}, err
+	}
+	return s.world(ctx, nodes, vips)
+}
+
+func (s *Service) world(ctx context.Context, nodes []store.ListRiskNodesRow, vips []store.ListAllVIPsRow) (WhatIfWorld, error) {
+	m, err := s.Topo.Load(ctx)
+	if err != nil {
+		return WhatIfWorld{}, err
+	}
+	g, err := s.Deps.Load(ctx)
+	if err != nil {
+		return WhatIfWorld{}, err
+	}
+	cands := map[uuid.UUID]map[string][]uuid.UUID{}
+	for _, v := range vips {
+		addr := v.Address.String()
+		if c := candidates(nodes, v.ClusterID, addr); len(c) > 0 {
+			if cands[v.ClusterID] == nil {
+				cands[v.ClusterID] = map[string][]uuid.UUID{}
+			}
+			cands[v.ClusterID][addr] = c
+		}
+	}
+	return WhatIfWorld{Topo: m, Graph: g, Candidates: cands}, nil
+}
+
+// gatherTopo zet de SPOF's bij de clusters en de VM van ClusterForge zelf
+// bij de kaart Platform.
+func (s *Service) gatherTopo(ctx context.Context, w *world, nodes []store.ListRiskNodesRow, vips []store.ListAllVIPsRow) error {
+	ww, err := s.world(ctx, nodes, vips)
+	if err != nil {
+		return err
+	}
+	byCluster := SPOFsByCluster(ww.SPOFs())
+	for i := range w.clusters {
+		w.clusters[i].SPOFs = byCluster[w.clusters[i].ID]
+	}
+	m := ww.Topo
+	if len(m.Guests) == 0 {
+		return nil
+	}
+	self := &SelfInput{Found: m.Self.Found()}
+	w.platform.Self = self
+	if !self.Found {
+		return nil
+	}
+	self.ID = uuid.NewSHA1(spofNamespace, []byte("self:"+m.Self.Conn.String()+":"+strconv.Itoa(m.Self.VMID)))
+	self.Name = "VM " + strconv.Itoa(m.Self.VMID)
+	if g, ok := m.Guest(m.Self.Conn, m.Self.VMID); ok {
+		self.Name = g.Label()
+	}
+	st, err := s.q.GetGuestBackupState(ctx, store.GetGuestBackupStateParams{ConnectionID: m.Self.Conn, Vmid: int32(m.Self.VMID)})
+	if err != nil {
+		return err
+	}
+	self.BackupsRead = st.BackupCheckedAt != nil && st.BackupError == ""
+	self.Latest = notEpoch(st.Latest)
+	return nil
 }
 
 // factsInput neemt over wat de score uit de facts nodig heeft.

@@ -47,6 +47,9 @@ type API interface {
 	// Clone maakt een volledige kopie van src met id newID op host target.
 	Clone(ctx context.Context, src Guest, newID int, name, target, storage string) (string, error)
 	Config(ctx context.Context, g Guest) (map[string]any, error)
+	// Interfaces geeft de interfaces met hun adressen van een draaiende
+	// container.
+	Interfaces(ctx context.Context, g Guest) ([]GuestInterface, error)
 	// SetConfig wijzigt de configuratie; het taak-id is leeg als Proxmox
 	// het meteen deed.
 	SetConfig(ctx context.Context, g Guest, form url.Values) (string, error)

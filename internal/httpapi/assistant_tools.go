@@ -1184,7 +1184,101 @@ func (s *Server) assistantTools() []assistant.Tool {
 				return compact(cr), nil
 			},
 		},
+		{
+			Name: "wat_als",
+			Description: "Rekent uit wat er gebeurt als een onderdeel uitvalt, zonder iets aan te raken. soort is host (een " +
+				"Proxmox-host), storage, bridge, node, dienst of cluster; naam is zijn naam, zoals pve1, local-lvm, vmbr0, " +
+				"web01 of nginx. Een storage of bridge die op meer hosts bestaat, noem je als 'local-lvm op pve1', een dienst " +
+				"die in meer clusters bestaat als 'nginx in Web'. Geeft per " +
+				"cluster de voorspelde status (eerst, en na de herstart door Proxmox HA), de VM's die uitvallen of die HA " +
+				"herstart, de geraakte diensten en of ClusterForge zelf uitvalt. Met soort spof en naam leeg: de single " +
+				"points of failure, de onderdelen waarvan de uitval alleen al prod down maakt.",
+			Properties: map[string]any{
+				"soort": enum("Wat er uitvalt, of spof voor de lijst", "host", "storage", "bridge", "node", "dienst", "cluster", "spof"),
+				"naam":  strProp("Naam van het onderdeel; leeg bij spof"),
+			},
+			Required: []string{"soort", "naam"},
+			Label: func(in map[string]any) string {
+				if arg(in, "soort") == "spof" {
+					return "Single points of failure bekijken"
+				}
+				return "Wat als " + arg(in, "naam") + " uitvalt"
+			},
+			Run: func(ctx context.Context, c assistant.Caller, raw json.RawMessage) (any, error) {
+				var in struct {
+					Soort string `json:"soort"`
+					Naam  string `json:"naam"`
+				}
+				if err := assistant.Decode(raw, &in); err != nil {
+					return nil, err
+				}
+				ww, err := s.risk.World(ctx)
+				if err != nil {
+					return nil, err
+				}
+				if in.Soort == "spof" {
+					return map[string]any{"spofs": compact(ww.SPOFs())}, nil
+				}
+				comp, err := findComponent(ww.Components(), in.Soort, in.Naam)
+				if err != nil {
+					return nil, err
+				}
+				return compact(ww.Run([]risk.Component{comp}, false)), nil
+			},
+		},
 	}
+}
+
+// componentKinds zijn de soorten van de tool wat_als.
+var componentKinds = map[string]string{
+	"host": risk.KindHost, "storage": risk.KindStorage, "bridge": risk.KindBridge, "node": risk.KindNode,
+	"dienst": risk.KindService, "cluster": risk.KindCluster,
+}
+
+// findComponent zoekt een onderdeel op soort en naam. "local-lvm" past op
+// "local-lvm op pve1" als er maar één zo heet.
+func findComponent(all []risk.Component, soort, naam string) (risk.Component, error) {
+	kind, ok := componentKinds[soort]
+	if !ok {
+		return risk.Component{}, assistant.ToolError{Msg: "soort moet host, storage, bridge, node, dienst, cluster of spof zijn"}
+	}
+	naam = strings.TrimSpace(naam)
+	group := ""
+	if n, g, found := strings.Cut(naam, " in "); found && (kind == risk.KindService || kind == risk.KindNode) {
+		naam, group = strings.TrimSpace(n), strings.TrimSpace(g)
+	}
+	var exact, loose []risk.Component
+	var names []string
+	for _, c := range all {
+		if c.Kind != kind {
+			continue
+		}
+		names = append(names, c.Name)
+		if group != "" && !strings.EqualFold(c.Group, group) {
+			continue
+		}
+		short, _, _ := strings.Cut(strings.TrimSuffix(c.Name, " (gedeeld)"), " op ")
+		switch {
+		case strings.EqualFold(c.Name, naam) || strings.EqualFold(strings.TrimSuffix(c.Name, " (gedeeld)"), naam):
+			exact = append(exact, c)
+		case strings.EqualFold(short, naam):
+			loose = append(loose, c)
+		}
+	}
+	if len(exact) == 0 {
+		exact = loose
+	}
+	switch len(exact) {
+	case 1:
+		return exact[0], nil
+	case 0:
+		return risk.Component{}, assistant.ToolError{Msg: fmt.Sprintf("geen %s %q; er zijn: %s", soort, naam, known(names))}
+	}
+	matches := make([]string, len(exact))
+	for i, c := range exact {
+		matches[i] = c.Name + " in " + c.Group
+	}
+	return risk.Component{}, assistant.ToolError{Msg: fmt.Sprintf("%q is niet eenduidig; kies uit: %s", naam, known(matches))}
 }
 
 func ptr[T any](v T) *T { return &v }

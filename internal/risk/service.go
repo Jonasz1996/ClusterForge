@@ -19,9 +19,11 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Jonasz1996/clusterforge/internal/backups"
+	"github.com/Jonasz1996/clusterforge/internal/deps"
 	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/metrics"
 	"github.com/Jonasz1996/clusterforge/internal/store"
+	"github.com/Jonasz1996/clusterforge/internal/topo"
 )
 
 const (
@@ -57,6 +59,10 @@ type Service struct {
 	Warmup time.Duration
 	// Now is de klok; tests zetten hem vooruit.
 	Now func() time.Time
+	// Topo en Deps zijn nodig voor de wat-als, de SPOF's en de back-up
+	// van ClusterForge zelf; zonder blijven die weg.
+	Topo *topo.Service
+	Deps *deps.Service
 
 	mu           sync.Mutex
 	metricsAt    time.Time

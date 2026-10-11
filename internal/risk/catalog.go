@@ -27,6 +27,7 @@ var Checks = map[string]string{
 	"redundancy.single_node":         "Maar één node",
 	"redundancy.maintenance":         "Lang in onderhoud",
 	"redundancy.nonprod_dependency":  "Prod hangt af van lab of test",
+	"redundancy.spof":                "Single point of failure",
 	"configuration.no_desired_state": "Geen gewenste staat",
 	"configuration.drift":            "Drift",
 	"configuration.ignore_all":       "Alle drift genegeerd",
@@ -50,6 +51,8 @@ var Checks = map[string]string{
 	"platform.admin_totp":          "Beheerder zonder tweestapsverificatie",
 	"platform.proxmox_unreachable": "Proxmox niet te lezen",
 	"platform.proxmox_certificate": "Certificaat van Proxmox verloopt",
+	"platform.self_backup":         "Geen verse back-up van ClusterForge zelf",
+	"platform.self_unknown":        "Niet bekend waar ClusterForge draait",
 }
 
 // CardLabels zijn de namen van de kaarten.

@@ -646,6 +646,17 @@ type ProxmoxConnection struct {
 	CertNotAfter    *time.Time
 }
 
+type ProxmoxGuestConfig struct {
+	ConnectionID uuid.UUID
+	Vmid         int32
+	Disks        []byte
+	Nets         []byte
+	Onboot       bool
+	Addresses    []string
+	Error        string
+	ReadAt       time.Time
+}
+
 type ProxmoxResource struct {
 	ConnectionID uuid.UUID
 	PveID        string
@@ -710,6 +721,14 @@ type Secret struct {
 	ValueEnc  []byte
 	KeyID     string
 	CreatedAt time.Time
+}
+
+type SelfLocation struct {
+	Singleton    bool
+	ConnectionID uuid.UUID
+	Vmid         int32
+	UpdatedAt    time.Time
+	UpdatedBy    *uuid.UUID
 }
 
 type ServerSecret struct {

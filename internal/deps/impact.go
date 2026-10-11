@@ -9,6 +9,7 @@ import (
 )
 
 // Target is wat er denkbeeldig uitvalt: precies één dienst, cluster of node.
+// Outage kan er meer tegelijk.
 type Target struct {
 	Service *uuid.UUID
 	Cluster *uuid.UUID
@@ -32,36 +33,68 @@ var sourceLabels = map[string]string{SourceTemplate: "template", SourceManual: "
 // SourceLabel is de bron in gewone woorden.
 func SourceLabel(s string) string { return or(sourceLabels[s], s) }
 
+// Outage is wat er tegelijk denkbeeldig uitvalt: diensten, clusters en
+// nodes, zoals bij een Proxmox-host die uitvalt.
+type Outage struct {
+	Services []uuid.UUID
+	Clusters []uuid.UUID
+	Nodes    []uuid.UUID
+}
+
 // Impact rekent uit wat er geraakt wordt als het doel uitvalt. Het is
 // dezelfde zoektocht als bij een echte uitval. Bij een node telt een tweede
 // gezonde instantie mee, net als de overname van het VIP. Het doel zelf staat
 // er niet in; bij een cluster of node staan zijn eigen diensten erin als
 // Direct.
 func (g *Graph) Impact(t Target) []Hit {
-	hits := map[uuid.UUID]Hit{}
-	var roots []uuid.UUID
+	var o Outage
 	switch {
 	case t.Service != nil:
-		if g.svc[*t.Service] != nil {
-			roots = append(roots, *t.Service)
-		}
+		o.Services = []uuid.UUID{*t.Service}
 	case t.Cluster != nil:
-		for _, s := range g.Services {
-			if s.State == StateConfirmed && s.ClusterID != nil && *s.ClusterID == *t.Cluster {
-				hits[s.ID] = Hit{Service: s.ID, Impact: ImpactDown, Direct: true, Reason: "valt uit met het cluster"}
-				roots = append(roots, s.ID)
-			}
-		}
+		o.Clusters = []uuid.UUID{*t.Cluster}
 	case t.Node != nil:
-		for _, h := range g.nodeOutage(*t.Node) {
-			hits[h.Service] = h
-			if h.Impact == ImpactDown {
-				roots = append(roots, h.Service)
+		o.Nodes = []uuid.UUID{*t.Node}
+	}
+	return g.ImpactOf(o)
+}
+
+// ImpactOf rekent uit wat er geraakt wordt als alles in o tegelijk uitvalt.
+// De gekozen diensten zelf staan er niet in.
+func (g *Graph) ImpactOf(o Outage) []Hit {
+	hits := map[uuid.UUID]Hit{}
+	var roots []uuid.UUID
+	chosen := map[uuid.UUID]bool{}
+	for _, id := range o.Services {
+		if g.svc[id] != nil {
+			chosen[id] = true
+			roots = append(roots, id)
+		}
+	}
+	direct := func(h Hit) {
+		if chosen[h.Service] {
+			return
+		}
+		if prev, ok := hits[h.Service]; ok && (prev.Impact == ImpactDown || h.Impact != ImpactDown) {
+			return
+		}
+		hits[h.Service] = h
+		if h.Impact == ImpactDown {
+			roots = append(roots, h.Service)
+		}
+	}
+	for _, c := range o.Clusters {
+		for _, s := range g.Services {
+			if s.State == StateConfirmed && s.ClusterID != nil && *s.ClusterID == c {
+				direct(Hit{Service: s.ID, Impact: ImpactDown, Direct: true, Reason: "valt uit met het cluster"})
 			}
 		}
 	}
+	for _, h := range g.nodeOutage(o.Nodes) {
+		direct(h)
+	}
 	for id, e := range g.propagate(roots) {
-		if t.Service != nil && id == *t.Service {
+		if chosen[id] {
 			continue
 		}
 		if prev, ok := hits[id]; ok && (prev.Impact == ImpactDown || e.Impact != ImpactDown) {
@@ -112,24 +145,35 @@ func (g *Graph) labelFrom(from, id uuid.UUID) string {
 	return s.Name + " in " + g.GroupOf(*s).Name
 }
 
-// nodeOutage zegt wat de uitval van één node rechtstreeks doet met de
-// bevestigde diensten van zijn cluster, of met die op de node zelf.
-func (g *Graph) nodeOutage(id uuid.UUID) []Hit {
-	n := g.nodes[id]
-	if n == nil {
+// nodeOutage zegt wat de uitval van een of meer nodes rechtstreeks doet met
+// de bevestigde diensten van hun clusters, of met die op de nodes zelf.
+func (g *Graph) nodeOutage(ids []uuid.UUID) []Hit {
+	failed := map[uuid.UUID]*Node{}
+	byCluster := map[uuid.UUID][]*Node{}
+	for _, id := range ids {
+		n := g.nodes[id]
+		if n == nil || failed[id] != nil {
+			continue
+		}
+		failed[id] = n
+		if n.ClusterID != nil && g.clusters[*n.ClusterID] != nil {
+			byCluster[*n.ClusterID] = append(byCluster[*n.ClusterID], n)
+		}
+	}
+	if len(failed) == 0 {
 		return nil
 	}
-	var others []*Node
-	var cluster *Cluster
-	if n.ClusterID != nil {
-		cluster = g.clusters[*n.ClusterID]
+	byHostname := func(a, b *Node) int { return cmp.Compare(a.Hostname, b.Hostname) }
+	others := map[uuid.UUID][]*Node{}
+	for cid, down := range byCluster {
+		slices.SortFunc(down, byHostname)
 		for i := range g.Nodes {
 			o := &g.Nodes[i]
-			if o.ID != id && o.Active && o.ClusterID != nil && *o.ClusterID == *n.ClusterID {
-				others = append(others, o)
+			if failed[o.ID] == nil && o.Active && o.ClusterID != nil && *o.ClusterID == cid {
+				others[cid] = append(others[cid], o)
 			}
 		}
-		slices.SortFunc(others, func(a, b *Node) int { return cmp.Compare(a.Hostname, b.Hostname) })
+		slices.SortFunc(others[cid], byHostname)
 	}
 	var out []Hit
 	add := func(s Svc, impact Impact, reason string) {
@@ -139,42 +183,62 @@ func (g *Graph) nodeOutage(id uuid.UUID) []Hit {
 		if s.State != StateConfirmed {
 			continue
 		}
-		switch {
-		case s.NodeID != nil && *s.NodeID == id:
-			add(s, ImpactDown, "draait op "+n.Hostname)
-		case cluster != nil && s.ClusterID != nil && *s.ClusterID == cluster.ID:
-			if s.Kind == "vip" && len(cluster.VIPs) > 0 {
-				g.vipOutage(s, n, cluster, others, add)
-				continue
-			}
-			if s.Unit == "" {
-				if len(others) == 0 {
-					add(s, ImpactDown, n.Hostname+" is de enige actieve node van "+cluster.Name)
-				}
-				continue
-			}
-			if _, ok := n.Units[s.Unit]; !ok {
-				continue
-			}
-			var elsewhere []string
-			for _, o := range others {
-				if o.Fresh && running(o.Units[s.Unit]) {
-					elsewhere = append(elsewhere, o.Hostname)
-				}
-			}
-			if len(elsewhere) == 0 {
-				add(s, ImpactDown, s.Unit+" draait op geen andere node")
-				continue
-			}
-			add(s, ImpactDegraded, "draait nog op "+list(elsewhere))
+		if s.NodeID != nil && failed[*s.NodeID] != nil {
+			add(s, ImpactDown, "draait op "+failed[*s.NodeID].Hostname)
+			continue
 		}
+		if s.ClusterID == nil || byCluster[*s.ClusterID] == nil {
+			continue
+		}
+		cluster, down, rest := g.clusters[*s.ClusterID], byCluster[*s.ClusterID], others[*s.ClusterID]
+		if s.Kind == "vip" && len(cluster.VIPs) > 0 {
+			g.vipOutage(s, down, cluster, rest, add)
+			continue
+		}
+		if s.Unit == "" {
+			if len(rest) == 0 {
+				add(s, ImpactDown, onlyNodes(down, cluster))
+			}
+			continue
+		}
+		if !slices.ContainsFunc(down, func(n *Node) bool { _, ok := n.Units[s.Unit]; return ok }) {
+			continue
+		}
+		var elsewhere []string
+		for _, o := range rest {
+			if o.Fresh && running(o.Units[s.Unit]) {
+				elsewhere = append(elsewhere, o.Hostname)
+			}
+		}
+		if len(elsewhere) == 0 {
+			add(s, ImpactDown, s.Unit+" draait op geen andere node")
+			continue
+		}
+		add(s, ImpactDegraded, "draait nog op "+list(elsewhere))
+	}
+	return out
+}
+
+// onlyNodes zegt dat de uitgevallen nodes de enige actieve van het cluster
+// waren.
+func onlyNodes(down []*Node, c *Cluster) string {
+	if len(down) == 1 {
+		return down[0].Hostname + " is de enige actieve node van " + c.Name
+	}
+	return list(hostnames(down)) + " zijn alle actieve nodes van " + c.Name
+}
+
+func hostnames(nodes []*Node) []string {
+	out := make([]string, len(nodes))
+	for i, n := range nodes {
+		out[i] = n.Hostname
 	}
 	return out
 }
 
 // vipOutage: neemt een andere node het VIP over, dan is de dienst alleen
 // verminderd.
-func (g *Graph) vipOutage(s Svc, n *Node, c *Cluster, others []*Node, add func(Svc, Impact, string)) {
+func (g *Graph) vipOutage(s Svc, down []*Node, c *Cluster, others []*Node, add func(Svc, Impact, string)) {
 	var standby []string
 	for _, o := range others {
 		if o.Fresh && (s.Unit == "" || running(o.Units[s.Unit])) {
@@ -183,11 +247,11 @@ func (g *Graph) vipOutage(s Svc, n *Node, c *Cluster, others []*Node, add func(S
 	}
 	var owned []string
 	for _, v := range c.VIPs {
-		if v.Owner == n.ID {
+		if slices.ContainsFunc(down, func(n *Node) bool { return v.Owner == n.ID }) {
 			owned = append(owned, v.Address)
 		}
 	}
-	_, runsHere := n.Units[s.Unit]
+	runsHere := slices.ContainsFunc(down, func(n *Node) bool { _, ok := n.Units[s.Unit]; return ok })
 	switch {
 	case len(standby) == 0 && (len(owned) > 0 || runsHere || s.Unit == ""):
 		add(s, ImpactDown, "geen andere node kan "+vipWord(owned, c)+" overnemen")

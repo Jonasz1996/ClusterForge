@@ -43,6 +43,7 @@ Het technisch ontwerp staat in [docs/design/mvp-fase-1.md](docs/design/mvp-fase-
 | 3. What Broke: tijdlijn en oorzaak | Per incident het eerste symptoom en een gerangschikte lijst waarschijnlijke oorzaken met de redenen, uit één tijdlijn van logboek, journaal en metrics; 'Wat is er veranderd' per cluster en een tijdlijn per cluster en node | klaar |
 | 4. AI-assistent | Vragen over de fleet in het Nederlands met de Anthropic API, met tools die alleen lezen, de kosten per antwoord, een maandbudget en een vraagknop op clusters, nodes en incidenten | klaar |
 | 5. Health score en scorekaarten | Per cluster en voor het geheel een score van 0 tot 100 met een cijfer A tot F, uit zeven scorekaarten en de kaart Platform; per bevinding de reden, een link om ze op te lossen en wat het oplevert, accepteren met een reden, en een trend over 30 dagen | klaar |
+| 6. Wat-als en SPOF's | Kies wat er uitvalt (een Proxmox-host, storage, bridge, node, dienst of cluster) en zie per cluster de voorspelde status, welke VM's Proxmox HA herstart en welke diensten geraakt worden; de onderdelen die alleen al productie down leggen, als bevinding in de score; en of ClusterForge zelf meegaat | klaar |
 
 ## Draaien met Docker Compose
 
@@ -520,7 +521,7 @@ De status zegt hoe het nu gaat. De health score zegt hoe kwetsbaar een cluster i
 | Beschikbaarheid | 25 % | nu down, split-brain of verminderd; de beschikbaarheid over 30 dagen (onder 99,9 %); veel incidenten; een VIP dat vaak van eigenaar wisselt (tests niet meegerekend) |
 | Back-ups | 20 % | een node zonder back-up of met een te oude, volgens het back-upbeleid; een mislukte verificatie in Proxmox Backup Server; een back-upcontrole in de sandbox die mislukte, waarschuwde, nooit gebeurde of langer dan 30 dagen geleden is |
 | Herstelbaarheid | 15 % | een VIP zonder failovertest; een test die nooit liep, mislukte, zijn doel niet haalde of langer dan 30 dagen geleden is; een test die niet hersteld is |
-| Redundantie | 15 % | alle nodes op dezelfde Proxmox-host, of de nodes van een VIP; maar één node (niet op lab); een node die langer dan een dag in onderhoud staat; een prod-dienst die hard afhangt van een dienst op lab of test |
+| Redundantie | 15 % | alle nodes op dezelfde Proxmox-host, of de nodes van een VIP; maar één node (niet op lab); een node die langer dan een dag in onderhoud staat; een prod-dienst die hard afhangt van een dienst op lab of test; een [single point of failure](#wat-als): een host, storage, bridge of node waarvan de uitval alleen al het prod-cluster of een bevestigde prod-dienst down legt |
 | Configuratie | 10 % | geen gewenste staat; drift, zwaarder naarmate ze langer duurt; een regel die alle drift negeert; een revisie die al een uur niet toegepast is; een mislukte Git-wijziging |
 | Onderhoud en beveiliging | 10 % | open beveiligingsupdates, zwaarder na 3 en 14 dagen; pakketlijsten die 14 dagen niet ververst zijn; een herstart nodig; een besturingssysteem dat end-of-life is of binnen 90 dagen wordt; een certificaat op de node dat binnen 30 dagen verloopt; een verouderde agent |
 | Capaciteit | 5 % | een schijf boven 85 % of 95 %; een schijf die volgens de trend van 7 dagen binnen 14 dagen vol is; CPU of geheugen met een p95 boven 90 % over 7 dagen; veel swap; meer dan 1000 netwerkfouten in 7 dagen |
@@ -529,11 +530,31 @@ Een kaart zonder gegevens is onbekend en telt niet mee; de kaart zegt waarom, bi
 
 **Plafonds.** Een cluster dat nu down is of een split-brain heeft, krijgt hoogstens 40. Een prod-cluster zonder enige back-up krijgt hoogstens 60.
 
-**Het geheel.** De score van het geheel is voor 80 % het gewogen gemiddelde van de clusters (prod telt 3 keer, test 1 keer, lab half) en voor 20 % de kaart Platform. Die kaart gaat over ClusterForge zelf: een beheerder zonder tweestapsverificatie, een Proxmox-koppeling die niet te lezen is, en het certificaat van Proxmox dat binnen 30 dagen verloopt. Een viewer ziet dat een beheerder geen tweestapsverificatie heeft, maar niet welke.
+**Het geheel.** De score van het geheel is voor 80 % het gewogen gemiddelde van de clusters (prod telt 3 keer, test 1 keer, lab half) en voor 20 % de kaart Platform. Die kaart gaat over ClusterForge zelf: een beheerder zonder tweestapsverificatie, een Proxmox-koppeling die niet te lezen is, het certificaat van Proxmox dat binnen 30 dagen verloopt, niet weten op welke VM ClusterForge zelf draait, en een VM van ClusterForge zonder back-up of met een back-up ouder dan 30 uur. Een viewer ziet dat een beheerder geen tweestapsverificatie heeft, maar niet welke.
 
 **Accepteren.** Een bevinding die je bewust laat staan, zoals een labcluster op één host, accepteer je met een reden en eventueel een einddatum van hoogstens twee jaar. Ze kost dan geen punten meer, maar blijft grijs in de lijst staan met de reden, tot wanneer en door wie. Alleen beheerders accepteren of trekken in; beide komen in het logboek.
 
 **Wanneer.** De score rekent elke minuut opnieuw, en meteen als een incident opent, verandert of sluit, en na een acceptatie. De eerste twee minuten na een herstart wacht ze, zodat de agents eerst opnieuw verbinden. Elke dag vlak na middernacht legt de planner een momentopname vast voor de trend. Verandert het cijfer van een cluster of van het geheel en blijft dat tien minuten zo, dan komt er een regel in het logboek met de belangrijkste redenen. De score leest alleen: ze start geen tests en blokkeert geen acties.
+
+## Wat als
+
+Bij Risico staan drie tabbladen: alle bevindingen van de health score, de single points of failure en de wat-als. De link naast de score op het overzicht brengt je er.
+
+**Wat als.** Kies wat er uitvalt: een of meer Proxmox-hosts, storages, bridges, nodes, diensten of clusters, tot 20 tegelijk. ClusterForge rekent dan uit, zonder iets te doen:
+
+- welke VM's en containers uitvallen: alles op een uitgevallen host, alles met een schijf op een uitgevallen storage, en alles waarvan de eerste of alle netwerkkaarten aan een uitgevallen bridge hangen (hangt alleen een andere kaart eraan, dan draait de VM door met minder netwerk);
+- welke daarvan Proxmox HA op een andere host herstart: alleen als de host uitvalt, de VM in HA staat, al zijn schijven op gedeelde storage staan en een andere host genoeg vrij geheugen heeft (de grootste VM's eerst, elk naar de host met het meeste vrije geheugen);
+- per cluster de status nu, bij de uitval en na de herstart door HA, met de reden, en naar welke node een VIP verhuist;
+- welke diensten down of verminderd raken, ook via bekende afhankelijkheden, en welke terugkomen zodra HA de VM's herstart heeft;
+- of ClusterForge zelf uitvalt.
+
+De voorspelling gaat uit van de laatste Proxmox-sync, de status van de nodes en de bekende afhankelijkheden. Wat ze onzeker maakt, staat erbij: een VM waarvan de configuratie nog niet gelezen is, een koppeling die bij de laatste sync niet te lezen was, en dat HA-groepen en voorkeurshosts niet bekend zijn. Bridges komen voorlopig uit de netwerkkaarten van de VM's.
+
+**SPOF's.** Een single point of failure is een host, storage, bridge of node waarvan de uitval alleen al een prod-cluster of een bevestigde prod-dienst down legt, ook nadat HA herstart wat het kan. ClusterForge rekent elk onderdeel apart, alsof de rest gezond is, en zet de onderdelen die het meeste down leggen bovenaan. Elk staat ook als bevinding Hoog op de kaart Redundantie van het cluster, met een link naar de wat-als; staan de nodes al allemaal op dezelfde host, dan komt er niet nog eens een bevinding voor die host bij.
+
+**Configuratie van de VM's.** Daarvoor leest ClusterForge elke 10 minuten de configuratie van de VM's en containers: de schijven met hun storage, de netwerkkaarten met hun bridge en VLAN, en de vaste IP-adressen. Daar zijn geen extra Proxmox-rechten voor nodig (`VM.Audit`). Templates en de sandbox-pool slaat hij over.
+
+**Waar ClusterForge zelf draait.** ClusterForge zoekt zijn eigen VM of container aan zijn MAC-adres en, als dat niet uniek is, aan zijn IP-adres. In Docker ziet hij zijn eigen MAC niet; dan zoekt hij aan het adres uit `CF_NATS_ADVERTISE` en het adres bij de Git-koppeling, tegen de vaste IP's van de VM's en de adressen van draaiende containers. Vindt hij het niet, kies de VM dan bij Instellingen onder "Waar ClusterForge draait".
 
 ## Assistent
 
@@ -567,7 +588,7 @@ Een vraag kost meestal enkele centen; een vraag die veel tools nodig heeft meer.
 
 **Wie.** Standaard alleen beheerders. Zet je 'Ook viewers mogen vragen stellen' aan, dan kunnen viewers het ook, met hun eigen rechten: ze zien via de assistent niets wat ze in de webinterface niet zien, zoals een IP-adres bij een SSH-login. Iedereen ziet zijn eigen gesprekken; een beheerder ziet die van iedereen. Een gesprek blijft 365 dagen na de laatste vraag staan, of tot je het verwijdert.
 
-**Wat de assistent kan.** Alleen lezen. Hij heeft zestien tools: het overzicht van de fleet, een cluster, een node, de tijdlijn, de wijzigingen, incidenten zoeken, een incident met de analyse van What Broke, metrics, drift, back-ups, failovertests, taken, Git-wijzigingen, de impact van een storing en de health score. Hij kan niets starten, stoppen, herstarten, toepassen of wijzigen; een tool roept dezelfde leesopdrachten aan als de webinterface, met de rechten van wie de vraag stelt. Raadt hij iets aan, dan linkt hij naar het scherm waar jij het doet.
+**Wat de assistent kan.** Alleen lezen. Hij heeft zeventien tools: het overzicht van de fleet, een cluster, een node, de tijdlijn, de wijzigingen, incidenten zoeken, een incident met de analyse van What Broke, metrics, drift, back-ups, failovertests, taken, Git-wijzigingen, de impact van een storing, de health score en de wat-als met de single points of failure. Hij kan niets starten, stoppen, herstarten, toepassen of wijzigen; een tool roept dezelfde leesopdrachten aan als de webinterface, met de rechten van wie de vraag stelt. Raadt hij iets aan, dan linkt hij naar het scherm waar jij het doet.
 
 **Wat naar Anthropic gaat.** Je vraag, de gebruikersnaam en rol, de tijd, en wat de tools lezen: namen, statussen, adressen, tijdlijnen, journaalregels, pakketnamen, metrics, Git-commits en taken van de fleet. Geheimen gaan nooit mee: geen wachtwoorden, tokens, sleutels, vingerafdrukken, sessies en geen inhoud van bestanden. Commitberichten en journaalregels zijn tekst van buiten ClusterForge; de assistent behandelt ze als gegevens en volgt geen instructies die erin staan.
 
@@ -616,7 +637,8 @@ internal/journal/          het wijzigingsjournaal: zinnen, verschillen in de fac
 internal/incidents/        incidenten: overgangen groeperen, ernst, openen en sluiten na elke statusronde
 internal/whatbroke/        What Broke: de tijdlijn uit logboek en journaal, en de analyse van elk incident
 internal/assistant/        de AI-assistent: instellingen, gesprekken, de lus met de Anthropic API, kosten en budget
-internal/risk/             de health score: de zeven scorekaarten, de kaart Platform, acceptaties en de trend
+internal/risk/             de health score: de zeven scorekaarten, de kaart Platform, acceptaties en de trend; de wat-als en de SPOF's
+internal/topo/             één model van hosts, storage, bridges en VM's met hun schijven en netwerkkaarten, en waar ClusterForge zelf draait
 internal/metrics/          metrics naar VictoriaMetrics schrijven en de grafieken opvragen
 internal/status/           statusregels voor nodes en clusters, VIP-eigenaars
 internal/live/             live updates naar de webinterface (Server-Sent Events)

@@ -55,6 +55,9 @@ type ClusterInput struct {
 
 	// Redundantie.
 	NonProdDeps []DepInput
+	// SPOFs zijn de onderdelen waarvan de uitval dit cluster of een van
+	// zijn prod-diensten down maakt.
+	SPOFs []SPOFInput
 
 	// Configuratie.
 	DesiredState    bool
@@ -219,6 +222,20 @@ type GitInput struct {
 type PlatformInput struct {
 	AdminsWithoutTOTP []UserInput
 	Proxmox           []ProxmoxInput
+	// Self is nil zonder Proxmox-koppeling.
+	Self *SelfInput
+}
+
+// SelfInput is de VM waarop ClusterForge zelf draait.
+type SelfInput struct {
+	// Found is false als niet bekend is waar ClusterForge draait.
+	Found bool
+	ID    uuid.UUID
+	Name  string
+	// BackupsRead is false als de back-ups van zijn koppeling niet te lezen
+	// zijn; dan zegt Latest niets.
+	BackupsRead bool
+	Latest      *time.Time
 }
 
 type UserInput struct {
