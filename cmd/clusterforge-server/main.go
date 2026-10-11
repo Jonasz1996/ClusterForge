@@ -43,6 +43,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/incidents"
 	"github.com/Jonasz1996/clusterforge/internal/jobs"
 	"github.com/Jonasz1996/clusterforge/internal/journal"
+	"github.com/Jonasz1996/clusterforge/internal/kube"
 	"github.com/Jonasz1996/clusterforge/internal/lifecycle"
 	"github.com/Jonasz1996/clusterforge/internal/live"
 	"github.com/Jonasz1996/clusterforge/internal/metrics"
@@ -165,6 +166,10 @@ func serve() error {
 	life.Changed = eval.Kick
 	dep := deploy.NewService(pool, ev, log, runner, box, pve, bus)
 	dep.Changed = eval.Kick
+	// Kubernetes via de kube-brug van de agents; ook de controle kube_ready
+	// na een uitrol.
+	kub := kube.NewService(pool, bus, log)
+	dep.Kube = kub
 	// Een cluster rendert alleen met de templateversie waarmee het is
 	// uitgerold; zit die niet in deze binary, dan moet de beheerder dat weten.
 	if missing, err := dep.MissingTemplates(ctx); err != nil {
@@ -285,6 +290,7 @@ func serve() error {
 	go analyzer.Run(ctx)
 	go rsk.Run(ctx)
 	go dcs.Run(ctx)
+	go kub.Run(ctx)
 	if git.Enabled() {
 		go git.Run(ctx)
 	}
@@ -301,7 +307,7 @@ func serve() error {
 		Handler: httpapi.New(httpapi.Deps{
 			Config: cfg, Log: log, Pool: pool, Auth: authSvc, Bus: bus, Hub: hub, Proxmox: pve, Jobs: runner,
 			Lifecycle: life, Deploy: dep, Backups: bk, Drift: drf, Failover: fo, Disaster: dis, Deps: dps, Rollout: ro,
-			GitOps: git, Assistant: asst, Risk: rsk, Topo: tp, Docs: dcs, Reports: rep, Version: version,
+			GitOps: git, Assistant: asst, Risk: rsk, Topo: tp, Docs: dcs, Reports: rep, Kube: kub, Version: version,
 		}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,

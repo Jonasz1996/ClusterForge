@@ -2778,6 +2778,134 @@ paths:
               schema: { $ref: "#/components/schemas/RecoveryReport" }
         "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
+  /auth/preferences:
+    put:
+      operationId: setPreferences
+      summary: Voorkeuren van de ingelogde gebruiker, zoals de leermodus van Kubernetes
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Preferences" }
+      responses:
+        "200":
+          description: Bewaard
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Preferences" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /kubernetes/clusters:
+    get:
+      operationId: listKubeClusters
+      summary: De Kubernetes-clusters met hun laatste samenvatting
+      description: |
+        ClusterForge vat elk cluster van type kubernetes elke 30 seconden
+        samen via de kube-brug van een agent. Ook voor viewers.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/KubeClusterSummary" } }
+        "401": { $ref: "#/components/responses/Error" }
+  /kubernetes/clusters/{clusterId}:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getKubeOverview
+      summary: Overzicht van een Kubernetes-cluster, live via de kube-brug
+      description: |
+        Versie, nodes, pods per status, apps, CPU en geheugen, de laatste
+        waarschuwingen en de pods die aandacht vragen. 503 met code
+        agent_too_old als de agents op de servers te oud zijn voor de
+        kube-brug, kube_unavailable als geen agent de API bereikt, en 502
+        met code kube_api bij een fout van Kubernetes zelf.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/KubeOverview" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /kubernetes/clusters/{clusterId}/nodes:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: listKubeNodes
+      summary: De Kubernetes-nodes, met de ClusterForge-node en VM erbij
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/KubeNode" } }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /kubernetes/clusters/{clusterId}/workloads:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+      - $ref: "#/components/parameters/KubeNamespace"
+      - $ref: "#/components/parameters/KubeSystem"
+    get:
+      operationId: listKubeWorkloads
+      summary: Deployments, StatefulSets, DaemonSets, CronJobs en Jobs
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/KubeWorkload" } }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /kubernetes/clusters/{clusterId}/pods:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+      - $ref: "#/components/parameters/KubeNamespace"
+      - $ref: "#/components/parameters/KubeSystem"
+      - name: node
+        in: query
+        description: Alleen de pods op deze Kubernetes-node
+        schema: { type: string }
+    get:
+      operationId: listKubePods
+      summary: De pods met status, herstarts, node en leeftijd
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/KubePod" } }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
 components:
   securitySchemes:
     session:
@@ -2785,6 +2913,16 @@ components:
       in: cookie
       name: cf_session
   parameters:
+    KubeNamespace:
+      name: namespace
+      in: query
+      description: Alleen deze namespace; zonder zijn het alle
+      schema: { type: string }
+    KubeSystem:
+      name: system
+      in: query
+      description: Ook de systeemnamespaces kube-system, kube-public en kube-node-lease; standaard niet
+      schema: { type: boolean }
     DocScopeParam:
       name: scope
       in: path
@@ -2905,6 +3043,155 @@ components:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
   schemas:
+    Preferences:
+      type: object
+      required: [kube_learning]
+      properties:
+        kube_learning: { type: boolean, description: "De leermodus in het dashboard Kubernetes: uitleg en kubectl-commando's" }
+    KubeClusterSummary:
+      type: object
+      required: [id, name, slug, environment, status, status_reason, vip, synced, api_ok, error, version, nodes_total, nodes_ready,
+        pods_total, pods_running, pods_pending, pods_problem, workloads_total, workloads_ready, synced_at, ok_at]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        slug: { type: string }
+        environment: { $ref: "#/components/schemas/Environment" }
+        status: { $ref: "#/components/schemas/Status" }
+        status_reason: { type: string }
+        vip: { type: string, nullable: true, description: Het VIP van de API en de apps }
+        synced: { type: boolean, description: false als ClusterForge het cluster nog nooit samenvatte }
+        api_ok: { type: boolean, description: De API antwoordde bij de laatste samenvatting }
+        error: { type: string, description: Waarom de laatste samenvatting mislukte }
+        version: { type: string }
+        nodes_total: { type: integer }
+        nodes_ready: { type: integer }
+        pods_total: { type: integer }
+        pods_running: { type: integer }
+        pods_pending: { type: integer }
+        pods_problem: { type: integer, description: Pods die aandacht vragen, zoals CrashLoopBackOff }
+        workloads_total: { type: integer }
+        workloads_ready: { type: integer }
+        synced_at: { type: string, format: date-time, nullable: true }
+        ok_at: { type: string, format: date-time, nullable: true, description: Wanneer de API het laatst antwoordde }
+    KubeUsage:
+      type: object
+      required: [cpu_millis, memory_bytes]
+      properties:
+        cpu_millis: { type: integer, format: int64 }
+        memory_bytes: { type: integer, format: int64 }
+    KubePodCounts:
+      type: object
+      required: [total, running, pending, succeeded, failed, problem]
+      properties:
+        total: { type: integer }
+        running: { type: integer }
+        pending: { type: integer }
+        succeeded: { type: integer }
+        failed: { type: integer }
+        problem: { type: integer, description: Pods die aandacht vragen }
+    KubeEvent:
+      type: object
+      required: [namespace, kind, name, reason, message, count, last_seen]
+      properties:
+        namespace: { type: string }
+        kind: { type: string, description: De soort van het object waar het event over gaat }
+        name: { type: string }
+        reason: { type: string }
+        message: { type: string }
+        count: { type: integer }
+        last_seen: { type: string, format: date-time }
+    KubeOverview:
+      type: object
+      required: [cluster_id, version, via, vip, nodes_total, nodes_ready, pods, workloads_total, workloads_ready, namespaces, allocatable,
+        used, warnings, problems]
+      properties:
+        cluster_id: { type: string, format: uuid }
+        version: { type: string }
+        via: { type: string, description: De node waarvan de agent de API bevroeg }
+        vip: { type: string, nullable: true }
+        nodes_total: { type: integer }
+        nodes_ready: { type: integer }
+        pods: { $ref: "#/components/schemas/KubePodCounts" }
+        workloads_total: { type: integer }
+        workloads_ready: { type: integer, description: Workloads die doen wat ze moeten }
+        namespaces: { type: array, items: { type: string } }
+        allocatable: { $ref: "#/components/schemas/KubeUsage" }
+        used:
+          allOf: [{ $ref: "#/components/schemas/KubeUsage" }]
+          nullable: true
+          description: Het gebruik volgens metrics-server; null als die niet antwoordt
+        warnings: { type: array, items: { $ref: "#/components/schemas/KubeEvent" } }
+        problems: { type: array, items: { $ref: "#/components/schemas/KubePod" } }
+    KubeNodeLink:
+      type: object
+      required: [id, hostname, agent, agent_protocol]
+      properties:
+        id: { type: string, format: uuid }
+        hostname: { type: string }
+        agent: { type: boolean }
+        agent_protocol: { type: integer }
+    KubeNode:
+      type: object
+      required: [name, roles, ready, ready_reason, unschedulable, pressure, internal_ip, kubelet_version, os_image, kernel, container_runtime,
+        arch, allocatable, used, pods, created_at, node]
+      properties:
+        name: { type: string }
+        roles: { type: array, items: { type: string } }
+        ready: { type: boolean }
+        ready_reason: { type: string, description: De reden bij de conditie Ready als de node niet Ready is }
+        unschedulable: { type: boolean, description: Cordon; er komen geen nieuwe pods op }
+        pressure: { type: array, items: { type: string }, description: Condities met een probleem, zoals DiskPressure }
+        internal_ip: { type: string }
+        kubelet_version: { type: string }
+        os_image: { type: string }
+        kernel: { type: string }
+        container_runtime: { type: string }
+        arch: { type: string }
+        allocatable: { $ref: "#/components/schemas/KubeUsage" }
+        used:
+          allOf: [{ $ref: "#/components/schemas/KubeUsage" }]
+          nullable: true
+        pods: { type: integer, description: Pods op deze node, zonder de voltooide }
+        created_at: { type: string, format: date-time }
+        node:
+          allOf: [{ $ref: "#/components/schemas/KubeNodeLink" }]
+          nullable: true
+          description: De ClusterForge-node; null als die niet te vinden is
+    KubeWorkload:
+      type: object
+      required: [kind, namespace, name, desired, ready, up_to_date, images, state, state_text, schedule, created_at, system]
+      properties:
+        kind: { type: string, enum: [Deployment, StatefulSet, DaemonSet, CronJob, Job] }
+        namespace: { type: string }
+        name: { type: string }
+        desired: { type: integer }
+        ready: { type: integer }
+        up_to_date: { type: integer }
+        images: { type: array, items: { type: string } }
+        state: { type: string, enum: [ready, rolling, degraded, stopped, failed, running, suspended, scheduled] }
+        state_text: { type: string }
+        schedule: { type: string, description: Het schema van een CronJob }
+        created_at: { type: string, format: date-time }
+        system: { type: boolean }
+    KubePod:
+      type: object
+      required: [namespace, name, node, status, problem, ready, containers, restarts, ip, images, owner_kind, owner_name, created_at, system]
+      properties:
+        namespace: { type: string }
+        name: { type: string }
+        node: { type: string }
+        status: { type: string, description: De status zoals kubectl get pods hem toont }
+        problem: { type: boolean }
+        ready: { type: integer }
+        containers: { type: integer }
+        restarts: { type: integer }
+        ip: { type: string }
+        images: { type: array, items: { type: string } }
+        owner_kind: { type: string }
+        owner_name: { type: string }
+        created_at: { type: string, format: date-time }
+        system: { type: boolean }
     DocMeta:
       type: object
       required: [scope, kind, title, path]
@@ -3102,13 +3389,14 @@ components:
       enum: [admin, viewer]
     User:
       type: object
-      required: [id, username, role, totp_enabled, created_at]
+      required: [id, username, role, totp_enabled, created_at, kube_learning]
       properties:
         id: { type: string, format: uuid }
         username: { type: string }
         role: { $ref: "#/components/schemas/Role" }
         totp_enabled: { type: boolean }
         created_at: { type: string, format: date-time }
+        kube_learning: { type: boolean, description: De leermodus in het dashboard Kubernetes staat aan }
     Me:
       type: object
       required: [user, csrf_token, session_expires_at]

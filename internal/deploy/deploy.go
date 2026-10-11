@@ -81,6 +81,15 @@ type Service struct {
 	Changed func()
 	// Templates zijn de templates die de server kent; tests zetten er andere.
 	Templates *templates.Registry
+	// Kube vraagt voor de controle kube_ready de nodes op in Kubernetes.
+	// Zonder Kube faalt die controle.
+	Kube KubeNodes
+}
+
+// KubeNodes geeft de namen uit want die geen Ready node zijn in de
+// Kubernetes-API van een cluster.
+type KubeNodes interface {
+	NotReady(ctx context.Context, clusterID uuid.UUID, want []string) ([]string, error)
 }
 
 func NewService(pool *pgxpool.Pool, ev *events.Writer, log *slog.Logger, runner *jobs.Runner, box *secrets.Box,

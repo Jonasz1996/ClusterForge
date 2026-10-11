@@ -10,7 +10,7 @@ import (
 
 // Version is de protocolversie. Een agent meldt die bij elke heartbeat, zodat
 // de server geen berichten stuurt die de agent niet kent.
-const Version = 7
+const Version = 8
 
 // CommandsSince is de eerste protocolversie met commando's.
 const CommandsSince = 2
@@ -177,6 +177,11 @@ type Facts struct {
 	Tools *Tools `json:"tools,omitempty"`
 	// Faults zijn de storingen die nu actief zijn, met hun id.
 	Faults []string `json:"faults,omitempty"`
+
+	// Vanaf protocol 8.
+
+	// Kube beschrijft k3s op de node; nil zonder k3s.
+	Kube *KubeFacts `json:"kube,omitempty"`
 }
 
 // Tools zijn de gereedschappen die storingsinjectie nodig heeft: nft voor

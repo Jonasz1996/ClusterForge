@@ -25,7 +25,7 @@ func (q *Queries) CountUsers(ctx context.Context) (int64, error) {
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (username, password_hash, role)
 VALUES ($1, $2, $3)
-RETURNING id, username, password_hash, role, totp_secret, totp_enabled_at, totp_last_step, disabled_at, created_at, updated_at
+RETURNING id, username, password_hash, role, totp_secret, totp_enabled_at, totp_last_step, disabled_at, created_at, updated_at, kube_learning
 `
 
 type CreateUserParams struct {
@@ -48,6 +48,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.DisabledAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.KubeLearning,
 	)
 	return i, err
 }
@@ -71,7 +72,7 @@ func (q *Queries) EnableTOTP(ctx context.Context, id uuid.UUID) error {
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, username, password_hash, role, totp_secret, totp_enabled_at, totp_last_step, disabled_at, created_at, updated_at FROM users WHERE id = $1
+SELECT id, username, password_hash, role, totp_secret, totp_enabled_at, totp_last_step, disabled_at, created_at, updated_at, kube_learning FROM users WHERE id = $1
 `
 
 func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
@@ -88,12 +89,13 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 		&i.DisabledAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.KubeLearning,
 	)
 	return i, err
 }
 
 const getUserByUsername = `-- name: GetUserByUsername :one
-SELECT id, username, password_hash, role, totp_secret, totp_enabled_at, totp_last_step, disabled_at, created_at, updated_at FROM users WHERE lower(username) = lower($1)
+SELECT id, username, password_hash, role, totp_secret, totp_enabled_at, totp_last_step, disabled_at, created_at, updated_at, kube_learning FROM users WHERE lower(username) = lower($1)
 `
 
 func (q *Queries) GetUserByUsername(ctx context.Context, lower string) (User, error) {
@@ -110,6 +112,7 @@ func (q *Queries) GetUserByUsername(ctx context.Context, lower string) (User, er
 		&i.DisabledAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.KubeLearning,
 	)
 	return i, err
 }

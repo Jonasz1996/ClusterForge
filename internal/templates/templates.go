@@ -606,6 +606,11 @@ type Check struct {
 		Expect int    `json:"expect"`
 		Within string `json:"within"`
 	} `json:"http,omitempty"`
+	// KubeReady wacht tot elke node van het cluster Ready is in
+	// Kubernetes, gevraagd via de kube-brug van een agent.
+	KubeReady *struct {
+		Within string `json:"within"`
+	} `json:"kube_ready,omitempty"`
 }
 
 // Within geeft hoe lang de controle mag duren.
@@ -616,6 +621,8 @@ func (c Check) Within() time.Duration {
 		s = c.VIPOwned.Within
 	case c.HTTP != nil:
 		s = c.HTTP.Within
+	case c.KubeReady != nil:
+		s = c.KubeReady.Within
 	}
 	d, err := time.ParseDuration(s)
 	if err != nil || d <= 0 {
@@ -637,8 +644,14 @@ func (t *Template) RenderChecks(c Context) ([]Check, error) {
 		if err := decodeStrict(v, &ch); err != nil {
 			return nil, fmt.Errorf("controle %d: %w", i+1, err)
 		}
-		if (ch.VIPOwned == nil) == (ch.HTTP == nil) {
-			return nil, fmt.Errorf("controle %d heeft precies één soort nodig (vip_owned of http)", i+1)
+		kinds := 0
+		for _, set := range []bool{ch.VIPOwned != nil, ch.HTTP != nil, ch.KubeReady != nil} {
+			if set {
+				kinds++
+			}
+		}
+		if kinds != 1 {
+			return nil, fmt.Errorf("controle %d heeft precies één soort nodig (vip_owned, http of kube_ready)", i+1)
 		}
 		out = append(out, ch)
 	}

@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Jonasz1996/clusterforge/internal/agent/agenttest"
+	"github.com/Jonasz1996/clusterforge/internal/kube/kubefake"
 	"github.com/Jonasz1996/clusterforge/internal/proxmox/pvefake"
 )
 
@@ -29,6 +31,23 @@ func TestDeployKubernetes(t *testing.T) {
 	})
 	pve.SetAgentDelay(100 * time.Millisecond)
 	f := newFleet(t, map[string]string{"leren-server-01": "10.0.40.11", "leren-worker-01": "10.0.40.12", "leren-worker-02": "10.0.40.13"})
+	// k3s schrijft k3s.yaml op de server; hier wijst die naar de nep-API,
+	// waar de drie nodes Ready zijn.
+	fake := kubefake.New()
+	fake.Start()
+	t.Cleanup(fake.Close)
+	fake.SeedK3s(
+		kubefake.NodeSpec{Name: "leren-server-01", IP: "10.0.40.11", Server: true},
+		kubefake.NodeSpec{Name: "leren-worker-01", IP: "10.0.40.12"},
+		kubefake.NodeSpec{Name: "leren-worker-02", IP: "10.0.40.13"},
+	)
+	f.setup = func(name string, h *agenttest.Host) {
+		if name == "leren-server-01" {
+			if err := fake.WriteKubeconfig(h.Root); err != nil {
+				t.Error(err)
+			}
+		}
+	}
 	pve.OnFileWrite(f.boot)
 	var mu sync.Mutex
 	var asked []string
@@ -131,7 +150,7 @@ func TestDeployKubernetes(t *testing.T) {
 		t.Fatalf("stappen: %v", names)
 	}
 	for _, w := range []string{"bestand /etc/rancher/k3s/config.yaml: aangepast", "service k3s: aangepast", "service k3s-agent: aangepast",
-		"10.0.40.100 staat op leren-server-01", "http://10.0.40.100/ geeft 404"} {
+		"10.0.40.100 staat op leren-server-01", "alle 3 nodes zijn Ready", "http://10.0.40.100/ geeft 404"} {
 		if !strings.Contains(logs, w) {
 			t.Errorf("log mist %q:\n%s", w, logs)
 		}

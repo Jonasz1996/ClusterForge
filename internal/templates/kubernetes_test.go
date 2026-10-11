@@ -144,7 +144,8 @@ func TestRenderKubernetes(t *testing.T) {
 	}
 
 	checks, err := tpl.RenderChecks(Context{Params: c.Params, Cluster: c.Cluster, Nodes: c.Nodes})
-	if err != nil || len(checks) != 2 || checks[0].VIPOwned.VIP != "10.0.40.100" || checks[1].HTTP.URL != "http://10.0.40.100/" || checks[1].HTTP.Expect != 404 {
+	if err != nil || len(checks) != 3 || checks[0].VIPOwned.VIP != "10.0.40.100" || checks[1].KubeReady == nil ||
+		checks[2].HTTP.URL != "http://10.0.40.100/" || checks[2].HTTP.Expect != 404 {
 		t.Fatalf("controles: %+v %v", checks, err)
 	}
 }
