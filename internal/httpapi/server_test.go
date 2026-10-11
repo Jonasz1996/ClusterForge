@@ -37,6 +37,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/gitops"
 	"github.com/Jonasz1996/clusterforge/internal/incidents"
 	"github.com/Jonasz1996/clusterforge/internal/jobs"
+	"github.com/Jonasz1996/clusterforge/internal/kube"
 	"github.com/Jonasz1996/clusterforge/internal/lifecycle"
 	"github.com/Jonasz1996/clusterforge/internal/live"
 	"github.com/Jonasz1996/clusterforge/internal/metrics"
@@ -85,6 +86,7 @@ type testEnv struct {
 	topo      *topo.Service
 	docs      *docs.Service
 	reports   *reports.Service
+	kube      *kube.Service
 
 	// De runner heeft een eigen context, zodat een test hem kan herstarten.
 	runCtx     context.Context
@@ -148,6 +150,10 @@ func newTestEnv(t *testing.T) *testEnv {
 	dep.Changed = eval.Kick
 	dep.Poll, dep.GuestAgentTimeout, dep.EnrollTimeout = 20*time.Millisecond, 5*time.Second, 8*time.Second
 	dep.HTTPGet = func(context.Context, string) (int, error) { return http.StatusOK, nil }
+	// De sync van Kubernetes loopt niet vanzelf; een test roept Sync aan.
+	kub := kube.NewService(pool, bus, log)
+	kub.Interval, kub.Timeout = 0, 5*time.Second
+	dep.Kube = kub
 	bk := backups.NewService(pool, ev, log, pve)
 	bk.Poll, bk.ConnPoll, bk.BootTimeout, bk.NoAgentWait = 20*time.Millisecond, 20*time.Millisecond, 3*time.Second, 100*time.Millisecond
 	bk.AgentTimeout, bk.LockWait, bk.VIPWait = 2*time.Second, time.Second, 3*time.Second
@@ -216,12 +222,12 @@ func newTestEnv(t *testing.T) *testEnv {
 	api := New(Deps{
 		Config: cfg, Log: log, Pool: pool, Auth: a, Bus: bus, Hub: hub, Proxmox: pve, Jobs: runner, Lifecycle: life,
 		Deploy: dep, Backups: bk, Drift: drf, Failover: fo, Disaster: dis, Deps: dps, Rollout: ro, GitOps: git, Assistant: asst,
-		Risk: rsk, Topo: tp, Docs: dcs, Reports: rep, Version: "test",
+		Risk: rsk, Topo: tp, Docs: dcs, Reports: rep, Kube: kub, Version: "test",
 	})
 	srv := httptest.NewServer(api.Handler())
 	t.Cleanup(srv.Close)
 	e := &testEnv{t: t, srv: srv, auth: a, pool: pool, api: api, bus: bus, eval: eval, vm: vm, pve: pve, jobs: runner, life: life, deploy: dep,
-		backups: bk, drift: drf, fo: fo, dis: dis, evalClock: evalClock, deps: dps, ro: ro, git: git, det: det, ana: ana, conns: conns, asst: asst, risk: rsk, topo: tp, docs: dcs, reports: rep, runCtx: runCtx}
+		backups: bk, drift: drf, fo: fo, dis: dis, evalClock: evalClock, deps: dps, ro: ro, git: git, det: det, ana: ana, conns: conns, asst: asst, risk: rsk, topo: tp, docs: dcs, reports: rep, kube: kub, runCtx: runCtx}
 	e.startRunner()
 	t.Cleanup(func() {
 		stop()

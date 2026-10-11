@@ -57,6 +57,7 @@ Het technisch ontwerp staat in [docs/design/mvp-fase-1.md](docs/design/mvp-fase-
 | Fase 4: Kubernetes | Inhoud | Status |
 | --- | --- | --- |
 | 1. Template Kubernetes (k3s) | Een Kubernetes-cluster uitrollen met k3s op Debian-VM's: één, drie of vijf servers met etcd, nul tot tien workers, en één VIP met keepalived voor kubectl en de apps; Traefik, ServiceLB, local-path en metrics-server zitten erin | klaar |
+| 2. Kube-brug en overzicht | cf-agent op een k3s-server leest de Kubernetes-API voor ClusterForge (agentprotocol 8), alleen lezen en zonder de waarden van Secrets; een pagina Kubernetes met per cluster een overzicht, de nodes gekoppeld aan de ClusterForge-nodes, de apps en de pods, met een leermodus die uitlegt wat je ziet en het kubectl-commando ernaast zet; na een uitrol wacht ClusterForge tot elke node Ready is | klaar |
 
 ## Draaien met Docker Compose
 
@@ -118,7 +119,7 @@ Maak in de webinterface bij Nodes → Agent installeren een token aan en voer he
 curl -fsSL https://clusterforge.example/install/agent.sh | sudo sh -s -- --server https://clusterforge.example --token cfe_...
 ```
 
-Het script downloadt `cf-agent` van je eigen server, controleert de checksum, meldt de node aan en start de systemd-service `cf-agent`. Bestaat er nog geen node met die hostname, dan maakt de aanmelding er een aan. De agent stuurt elke 10 seconden een heartbeat, elke 15 seconden metrics en elk kwartier (en bij elke nieuwe verbinding) zijn facts: OS, kernel, CPU, geheugen, schijven, netwerk, services, updates, Docker en Keepalived.
+Het script downloadt `cf-agent` van je eigen server, controleert de checksum, meldt de node aan en start de systemd-service `cf-agent`. Bestaat er nog geen node met die hostname, dan maakt de aanmelding er een aan. De agent stuurt elke 10 seconden een heartbeat, elke 15 seconden metrics en elk kwartier (en bij elke nieuwe verbinding) zijn facts: OS, kernel, CPU, geheugen, schijven, netwerk, services, updates, Docker, Keepalived en k3s.
 
 ```text
 cf-agent enroll -server URL -token cfe_...      meldt deze machine aan (doet het installatiescript)
@@ -408,7 +409,32 @@ sudo kubectl get nodes -o wide
 sudo kubectl get pods -A
 ```
 
-Een pagina Kubernetes in de webinterface, om het cluster te beheren en Kubernetes te leren, volgt in de volgende mijlpalen.
+Na het starten van k3s wacht de uitrol tot elke node van het cluster zich als Ready meldt in Kubernetes (hoogstens vijf minuten), en pas daarna kijkt ze of Traefik op het VIP antwoordt.
+
+### De pagina Kubernetes
+
+Onder Kubernetes staan je Kubernetes-clusters met hun versie, hoeveel nodes Ready zijn, hoeveel apps in orde zijn en hoeveel pods draaien. Klik op een cluster voor het dashboard, dat elke vijf seconden ververst:
+
+- **Overzicht**: de tellers, de CPU en het geheugen tegenover wat de nodes kunnen geven (van metrics-server), de pods met problemen, zoals CrashLoopBackOff of ImagePullBackOff, en de laatste vijf waarschuwingen (Kubernetes bewaart events een uur).
+- **Nodes**: elke Kubernetes-node met Ready of NotReady en waarom, server of agent, cordon, gebruik, het aantal pods en een link naar de node in ClusterForge. ClusterForge koppelt ze op de naam die k3s kreeg, het adres of de hostname.
+- **Apps**: de Deployments, StatefulSets, DaemonSets, CronJobs en Jobs, met hoeveel er klaar zijn en wat er mis is.
+- **Pods**: de pods zoals `kubectl get pods` ze toont, te filteren op namespace en node.
+
+De namespaces van Kubernetes zelf (`kube-system`, `kube-public`, `kube-node-lease`) staan standaard verborgen; zet Systeem tonen aan om ze te zien.
+
+De **leermodus** staat standaard aan. Hij legt op elk tabblad uit wat je ziet en geeft het `kubectl`-commando dat hetzelfde toont, om te kopiëren. Wijs een soort app of een status van een pod aan voor uitleg. Zet hem rechtsboven uit; dat blijft bewaard voor je gebruiker.
+
+Een cluster dat je zelf bouwde, werkt ook: maak een cluster van het type Kubernetes, voeg de nodes toe en zet cf-agent op minstens één server.
+
+### Hoe ClusterForge Kubernetes leest
+
+De server praat nooit zelf met de Kubernetes-API. cf-agent op een k3s-server doet het, met de beheerdersconfig `/etc/rancher/k3s/k3s.yaml` die daar al staat, en stuurt het antwoord via de bestaande verbinding (NATS) terug. Daardoor hoeft poort 6443 niet open naar ClusterForge, en verlaat geen certificaat van het cluster de server. ClusterForge kiest een server met een verse heartbeat waarvan de API antwoordt; valt die weg, dan neemt een andere het over.
+
+De agent laat alleen lezen toe, met een vaste lijst: geen exec, attach, port-forward, proxy of logs, en geen watch. Van een Secret stuurt hij de namen van de sleutels, nooit de waarden: die vervangt hij door "(verborgen, N bytes)". Hij doet hoogstens vier verzoeken tegelijk, elk hoogstens 30 seconden.
+
+Dit kan vanaf **agentprotocol 8**. Met een oudere agent toont de pagina "Agent te oud voor Kubernetes", met het commando om hem bij te werken; de aanmelding blijft staan. Werk ook je golden image bij, anders krijgen nieuwe VM's de oude agent. De andere onderdelen van ClusterForge blijven werken met een oudere agent.
+
+Elke 30 seconden vat ClusterForge elk Kubernetes-cluster samen voor de lijst. Antwoordt de API niet, dan blijft de laatste stand staan met "API niet bereikbaar" en de reden.
 
 ## Failovertests
 

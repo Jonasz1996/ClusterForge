@@ -342,9 +342,11 @@ func agentPermissions(nodeID uuid.UUID) *server.Permissions {
 		Publish: &server.SubjectPermission{Allow: []string{protocol.NodePrefix(id) + ".>"}},
 		Subscribe: &server.SubjectPermission{Allow: []string{
 			protocol.Subject(id, protocol.SubjectCommands),
+			protocol.Subject(id, protocol.SubjectKube),
 			protocol.InboxPrefix(id) + ".>",
 		}},
-		// Eén antwoord op elk commando van de server, naar diens inbox.
+		// Eén antwoord op elk commando en kube-verzoek van de server, naar
+		// diens inbox.
 		Response: &server.ResponsePermission{MaxMsgs: 1, Expires: 5 * time.Minute},
 	}
 }

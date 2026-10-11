@@ -2662,10 +2662,295 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/preferences": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Voorkeuren van de ingelogde gebruiker, zoals de leermodus van Kubernetes */
+        put: operations["setPreferences"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/kubernetes/clusters": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * De Kubernetes-clusters met hun laatste samenvatting
+         * @description ClusterForge vat elk cluster van type kubernetes elke 30 seconden
+         *     samen via de kube-brug van een agent. Ook voor viewers.
+         */
+        get: operations["listKubeClusters"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/kubernetes/clusters/{clusterId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Overzicht van een Kubernetes-cluster, live via de kube-brug
+         * @description Versie, nodes, pods per status, apps, CPU en geheugen, de laatste
+         *     waarschuwingen en de pods die aandacht vragen. 503 met code
+         *     agent_too_old als de agents op de servers te oud zijn voor de
+         *     kube-brug, kube_unavailable als geen agent de API bereikt, en 502
+         *     met code kube_api bij een fout van Kubernetes zelf.
+         */
+        get: operations["getKubeOverview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/kubernetes/clusters/{clusterId}/nodes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        /** De Kubernetes-nodes, met de ClusterForge-node en VM erbij */
+        get: operations["listKubeNodes"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/kubernetes/clusters/{clusterId}/workloads": {
+        parameters: {
+            query?: {
+                /** @description Alleen deze namespace; zonder zijn het alle */
+                namespace?: components["parameters"]["KubeNamespace"];
+                /** @description Ook de systeemnamespaces kube-system, kube-public en kube-node-lease; standaard niet */
+                system?: components["parameters"]["KubeSystem"];
+            };
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        /** Deployments, StatefulSets, DaemonSets, CronJobs en Jobs */
+        get: operations["listKubeWorkloads"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/kubernetes/clusters/{clusterId}/pods": {
+        parameters: {
+            query?: {
+                /** @description Alleen deze namespace; zonder zijn het alle */
+                namespace?: components["parameters"]["KubeNamespace"];
+                /** @description Ook de systeemnamespaces kube-system, kube-public en kube-node-lease; standaard niet */
+                system?: components["parameters"]["KubeSystem"];
+                /** @description Alleen de pods op deze Kubernetes-node */
+                node?: string;
+            };
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        /** De pods met status, herstarts, node en leeftijd */
+        get: operations["listKubePods"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        Preferences: {
+            /** @description De leermodus in het dashboard Kubernetes: uitleg en kubectl-commando's */
+            kube_learning: boolean;
+        };
+        KubeClusterSummary: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            slug: string;
+            environment: components["schemas"]["Environment"];
+            status: components["schemas"]["Status"];
+            status_reason: string;
+            /** @description Het VIP van de API en de apps */
+            vip: string | null;
+            /** @description false als ClusterForge het cluster nog nooit samenvatte */
+            synced: boolean;
+            /** @description De API antwoordde bij de laatste samenvatting */
+            api_ok: boolean;
+            /** @description Waarom de laatste samenvatting mislukte */
+            error: string;
+            version: string;
+            nodes_total: number;
+            nodes_ready: number;
+            pods_total: number;
+            pods_running: number;
+            pods_pending: number;
+            /** @description Pods die aandacht vragen */
+            pods_problem: number;
+            workloads_total: number;
+            workloads_ready: number;
+            /** Format: date-time */
+            synced_at: string | null;
+            /**
+             * Format: date-time
+             * @description Wanneer de API het laatst antwoordde
+             */
+            ok_at: string | null;
+        };
+        KubeUsage: {
+            /** Format: int64 */
+            cpu_millis: number;
+            /** Format: int64 */
+            memory_bytes: number;
+        };
+        KubePodCounts: {
+            total: number;
+            running: number;
+            pending: number;
+            succeeded: number;
+            failed: number;
+            /** @description Pods die aandacht vragen */
+            problem: number;
+        };
+        KubeEvent: {
+            namespace: string;
+            /** @description De soort van het object waar het event over gaat */
+            kind: string;
+            name: string;
+            reason: string;
+            message: string;
+            count: number;
+            /** Format: date-time */
+            last_seen: string;
+        };
+        KubeOverview: {
+            /** Format: uuid */
+            cluster_id: string;
+            version: string;
+            /** @description De node waarvan de agent de API bevroeg */
+            via: string;
+            vip: string | null;
+            nodes_total: number;
+            nodes_ready: number;
+            pods: components["schemas"]["KubePodCounts"];
+            workloads_total: number;
+            /** @description Workloads die doen wat ze moeten */
+            workloads_ready: number;
+            namespaces: string[];
+            allocatable: components["schemas"]["KubeUsage"];
+            /** @description Het gebruik volgens metrics-server; null als die niet antwoordt */
+            used: components["schemas"]["KubeUsage"] | null;
+            warnings: components["schemas"]["KubeEvent"][];
+            problems: components["schemas"]["KubePod"][];
+        };
+        KubeNodeLink: {
+            /** Format: uuid */
+            id: string;
+            hostname: string;
+            agent: boolean;
+            agent_protocol: number;
+        };
+        KubeNode: {
+            name: string;
+            roles: string[];
+            ready: boolean;
+            /** @description De reden bij de conditie Ready als de node niet Ready is */
+            ready_reason: string;
+            /** @description Cordon; er komen geen nieuwe pods op */
+            unschedulable: boolean;
+            /** @description Condities met een probleem */
+            pressure: string[];
+            internal_ip: string;
+            kubelet_version: string;
+            os_image: string;
+            kernel: string;
+            container_runtime: string;
+            arch: string;
+            allocatable: components["schemas"]["KubeUsage"];
+            used: components["schemas"]["KubeUsage"] | null;
+            /** @description Pods op deze node */
+            pods: number;
+            /** Format: date-time */
+            created_at: string;
+            /** @description De ClusterForge-node; null als die niet te vinden is */
+            node: components["schemas"]["KubeNodeLink"] | null;
+        };
+        KubeWorkload: {
+            /** @enum {string} */
+            kind: "Deployment" | "StatefulSet" | "DaemonSet" | "CronJob" | "Job";
+            namespace: string;
+            name: string;
+            desired: number;
+            ready: number;
+            up_to_date: number;
+            images: string[];
+            /** @enum {string} */
+            state: "ready" | "rolling" | "degraded" | "stopped" | "failed" | "running" | "suspended" | "scheduled";
+            state_text: string;
+            /** @description Het schema van een CronJob */
+            schedule: string;
+            /** Format: date-time */
+            created_at: string;
+            system: boolean;
+        };
+        KubePod: {
+            namespace: string;
+            name: string;
+            node: string;
+            /** @description De status zoals kubectl get pods hem toont */
+            status: string;
+            problem: boolean;
+            ready: number;
+            containers: number;
+            restarts: number;
+            ip: string;
+            images: string[];
+            owner_kind: string;
+            owner_name: string;
+            /** Format: date-time */
+            created_at: string;
+            system: boolean;
+        };
         DocMeta: {
             /** @enum {string} */
             scope: "overview" | "cluster";
@@ -2883,6 +3168,8 @@ export interface components {
             totp_enabled: boolean;
             /** Format: date-time */
             created_at: string;
+            /** @description De leermodus in het dashboard Kubernetes staat aan */
+            kube_learning: boolean;
         };
         Me: {
             user: components["schemas"]["User"];
@@ -6275,6 +6562,10 @@ export interface components {
         };
     };
     parameters: {
+        /** @description Alleen deze namespace; zonder zijn het alle */
+        KubeNamespace: string;
+        /** @description Ook de systeemnamespaces kube-system, kube-public en kube-node-lease; standaard niet */
+        KubeSystem: boolean;
         /** @description overview of cluster */
         DocScopeParam: string;
         /** @description overzicht bij scope overview; architectuur, netwerk, configuratie, herstel of runbooks bij een cluster */
@@ -10524,6 +10815,180 @@ export interface operations {
             };
             400: components["responses"]["Error"];
             401: components["responses"]["Error"];
+        };
+    };
+    setPreferences: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Preferences"];
+            };
+        };
+        responses: {
+            /** @description Bewaard */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Preferences"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+        };
+    };
+    listKubeClusters: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["KubeClusterSummary"][];
+                    };
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    getKubeOverview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KubeOverview"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    listKubeNodes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["KubeNode"][];
+                    };
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    listKubeWorkloads: {
+        parameters: {
+            query?: {
+                /** @description Alleen deze namespace; zonder zijn het alle */
+                namespace?: components["parameters"]["KubeNamespace"];
+                /** @description Ook de systeemnamespaces kube-system, kube-public en kube-node-lease; standaard niet */
+                system?: components["parameters"]["KubeSystem"];
+            };
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["KubeWorkload"][];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    listKubePods: {
+        parameters: {
+            query?: {
+                /** @description Alleen deze namespace; zonder zijn het alle */
+                namespace?: components["parameters"]["KubeNamespace"];
+                /** @description Ook de systeemnamespaces kube-system, kube-public en kube-node-lease; standaard niet */
+                system?: components["parameters"]["KubeSystem"];
+                /** @description Alleen de pods op deze Kubernetes-node */
+                node?: string;
+            };
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["KubePod"][];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+            503: components["responses"]["Error"];
         };
     };
 }

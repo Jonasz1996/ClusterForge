@@ -100,6 +100,11 @@ function ClusterDetailInner() {
             actions={
               !editing && (
                 <>
+                  {cluster.data.type === "kubernetes" && (
+                    <Button variant="secondary" onClick={() => router.push(`/kubernetes/cluster?id=${id}`)}>
+                      Kubernetes-dashboard
+                    </Button>
+                  )}
                   <AskButton subject="cluster" id={id} />
                   {isAdmin && (
                     <>

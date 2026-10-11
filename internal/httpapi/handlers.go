@@ -202,10 +202,11 @@ func (s *Server) internalError(w http.ResponseWriter, r *http.Request, err error
 
 func toAPIUser(u store.User) gen.User {
 	return gen.User{
-		Id:          u.ID,
-		Username:    u.Username,
-		Role:        gen.Role(u.Role),
-		TotpEnabled: u.TotpEnabledAt != nil,
-		CreatedAt:   u.CreatedAt,
+		Id:           u.ID,
+		Username:     u.Username,
+		Role:         gen.Role(u.Role),
+		TotpEnabled:  u.TotpEnabledAt != nil,
+		CreatedAt:    u.CreatedAt,
+		KubeLearning: u.KubeLearning,
 	}
 }

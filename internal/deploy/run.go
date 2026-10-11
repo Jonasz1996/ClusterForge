@@ -566,6 +566,31 @@ func (s *Service) Check(ctx context.Context, clusterID uuid.UUID, tpl *templates
 				return fmt.Errorf("%s geeft na %s nog geen %d; laatste antwoord: %s", ch.HTTP.URL, seconds(within), ch.HTTP.Expect, last)
 			}
 			logf("%s geeft %d", ch.HTTP.URL, ch.HTTP.Expect)
+		case ch.KubeReady != nil:
+			want := make([]string, 0, len(c.Nodes))
+			for _, n := range c.Nodes {
+				want = append(want, n.Hostname)
+			}
+			logf("wachten tot %s Ready zijn in Kubernetes", strings.Join(want, ", "))
+			flush()
+			if s.Kube == nil {
+				return errors.New("ClusterForge kan Kubernetes niet bevragen; de kube-brug ontbreekt")
+			}
+			last := ""
+			err := s.poll(ctx, within, func(ctx context.Context) (bool, error) {
+				missing, err := s.Kube.NotReady(ctx, clusterID, want)
+				switch {
+				case err != nil:
+					last = err.Error()
+				case len(missing) > 0:
+					last = "nog niet Ready: " + strings.Join(missing, ", ")
+				}
+				return err == nil && len(missing) == 0, nil
+			})
+			if err != nil {
+				return fmt.Errorf("na %s is niet elke node Ready in Kubernetes (%s); kijk op een server met sudo kubectl get nodes", seconds(within), last)
+			}
+			logf("alle %d nodes zijn Ready (na %s)", len(want), seconds(time.Since(start)))
 		}
 		flush()
 	}

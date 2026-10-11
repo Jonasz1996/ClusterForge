@@ -612,6 +612,39 @@ type JobStep struct {
 	Error      string
 }
 
+type KubeCluster struct {
+	ClusterID      uuid.UUID
+	ApiOk          bool
+	Error          string
+	Version        string
+	NodesTotal     int32
+	NodesReady     int32
+	PodsTotal      int32
+	PodsRunning    int32
+	PodsPending    int32
+	PodsProblem    int32
+	WorkloadsTotal int32
+	WorkloadsReady int32
+	ViaNodeID      *uuid.UUID
+	SyncedAt       time.Time
+	OkAt           *time.Time
+}
+
+type KubeNode struct {
+	ClusterID     uuid.UUID
+	Name          string
+	NodeID        *uuid.UUID
+	Roles         []string
+	Ready         bool
+	Unschedulable bool
+	Kubelet       string
+	InternalIp    string
+	CpuMillis     int64
+	MemoryBytes   int64
+	Pods          int32
+	CreatedAt     *time.Time
+}
+
 type Node struct {
 	ID           uuid.UUID
 	ClusterID    *uuid.UUID
@@ -939,6 +972,7 @@ type User struct {
 	DisabledAt    *time.Time
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
+	KubeLearning  bool
 }
 
 type Vip struct {

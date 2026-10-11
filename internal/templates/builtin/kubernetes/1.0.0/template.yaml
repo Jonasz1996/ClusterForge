@@ -169,6 +169,7 @@ roles:
 # ingress werken.
 checks:
   - vip_owned: { vip: "{{ .params.vip }}", within: 120s }
+  - kube_ready: { within: 300s }
   - http: { url: "http://{{ .params.vip }}/", expect: 404, within: 300s }
 
 services:

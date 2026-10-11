@@ -52,6 +52,9 @@ type Agent struct {
 	// AddressPoll is hoe vaak de agent naar zijn adressen kijkt; bij een
 	// wijziging stuurt hij meteen een heartbeat. Nul is één seconde.
 	AddressPoll time.Duration
+	// KubeletHealthz is de healthz van de kubelet; leeg is die op
+	// 127.0.0.1:10248. Tests vervangen het.
+	KubeletHealthz string
 
 	nc    *nats.Conn
 	conns ConnTracker
@@ -64,6 +67,7 @@ type Agent struct {
 	// stateMu bewaakt StatePath; zie updateState.
 	stateMu sync.Mutex
 	faults  *Faults
+	kube    *kubeBridge
 }
 
 // Connect verbindt met NATS. Is de server nog niet bereikbaar, dan blijft de
@@ -99,6 +103,7 @@ func (a *Agent) Connect() error {
 		a.Collector.OnUnits = a.Journal.ObserveUnits
 	}
 	a.initFaults()
+	a.initKube()
 	a.factsNow = make(chan struct{}, 1)
 	a.connected = make(chan struct{}, 1)
 	a.nc, err = nats.Connect(a.Config.NatsURL,
@@ -136,7 +141,10 @@ func (a *Agent) Connect() error {
 		return err
 	}
 	// Een subscription overleeft herverbindingen; nats.go zet hem zelf terug.
-	_, err = a.nc.Subscribe(protocol.Subject(a.Config.NodeID, protocol.SubjectCommands), a.onCommand)
+	if _, err = a.nc.Subscribe(protocol.Subject(a.Config.NodeID, protocol.SubjectCommands), a.onCommand); err != nil {
+		return err
+	}
+	_, err = a.nc.Subscribe(protocol.Subject(a.Config.NodeID, protocol.SubjectKube), a.onKube)
 	return err
 }
 
@@ -372,6 +380,7 @@ func (a *Agent) sendFacts(ctx context.Context) error {
 	}
 	f := a.Collector.Facts(ctx)
 	f.Faults = a.faults.Active()
+	f.Kube = a.kubeFacts(ctx, f.Hostname)
 	data, err := envelope(protocol.TypeFacts, f)
 	if err != nil {
 		return err

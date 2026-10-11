@@ -29,6 +29,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/httpapi/gen"
 	"github.com/Jonasz1996/clusterforge/internal/inventory"
 	"github.com/Jonasz1996/clusterforge/internal/jobs"
+	"github.com/Jonasz1996/clusterforge/internal/kube"
 	"github.com/Jonasz1996/clusterforge/internal/lifecycle"
 	"github.com/Jonasz1996/clusterforge/internal/live"
 	"github.com/Jonasz1996/clusterforge/internal/metrics"
@@ -70,6 +71,7 @@ type Server struct {
 	topo         *topo.Service
 	docs         *docs.Service
 	reports      *reports.Service
+	kube         *kube.Service
 	version      string
 	loginLimiter *ipLimiter
 	// enrollLimiter remt het raden van enrollmenttokens.
@@ -120,6 +122,8 @@ type Deps struct {
 	Docs *docs.Service
 	// Reports maakt de rapporten op /rapporten.
 	Reports *reports.Service
+	// Kube praat met de Kubernetes-clusters via de kube-brug.
+	Kube    *kube.Service
 	Version string
 }
 
@@ -161,6 +165,7 @@ func New(d Deps) *Server {
 		topo:          d.Topo,
 		docs:          d.Docs,
 		reports:       d.Reports,
+		kube:          d.Kube,
 	}
 	s.assistant.Tools = s.assistantTools()
 	return s
