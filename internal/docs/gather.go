@@ -38,6 +38,7 @@ type world struct {
 	// scenario's.
 	drLast, drMeasured map[uuid.UUID]*DRRun
 	drScenarios        []store.ListDocRehearsalScenariosRow
+	summaries          map[uuid.UUID]*Summary
 	backups            map[uuid.UUID]backups.Item
 	grades             map[uuid.UUID]risk.ClusterScore
 	overview           risk.Overview
@@ -110,6 +111,14 @@ func (s *Service) read(ctx context.Context) (*world, []store.ListDocClustersRow,
 	}
 	if w.drScenarios, err = s.q.ListDocRehearsalScenarios(ctx); err != nil {
 		return nil, nil, err
+	}
+	sums, err := s.q.ListDocSummaries(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	w.summaries = map[uuid.UUID]*Summary{}
+	for _, r := range sums {
+		w.summaries[r.ClusterID] = &Summary{Text: r.Text, Model: r.Model, At: r.CreatedAt, By: r.Username}
 	}
 	if w.what, err = s.Risk.World(ctx); err != nil {
 		return nil, nil, err
@@ -292,6 +301,7 @@ func (s *Service) cluster(ctx context.Context, w *world, r store.ListDocClusters
 		c.DR.Scenarios = append(c.DR.Scenarios, DRScenario{Name: sc.Name, Schedule: sc.Schedule, Bridge: or(p.Bridge, backups.DefaultBridge)})
 	}
 	c.Outages = outagesOf(w.what, &c)
+	c.Summary = w.summaries[r.ID]
 	return c, nil
 }
 

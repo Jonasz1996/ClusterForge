@@ -33,6 +33,10 @@ func (s *Server) ListDocs(w http.ResponseWriter, r *http.Request) {
 	for _, c := range idx.Clusters {
 		ci := gen.DocClusterIndex{
 			Id: c.ID, Name: c.Name, Slug: c.Slug, Environment: c.Env, Docs: []gen.DocMeta{}, ChangedAt: c.Changed, QueuedUntil: c.Queued,
+			Summary: nullable.NewNullNullable[gen.DocSummaryMeta](),
+		}
+		if sm := c.Summary; sm != nil {
+			ci.Summary = nullable.NewNullableWithValue(gen.DocSummaryMeta{At: sm.At, Model: sm.Model, By: sm.By})
 		}
 		for _, m := range c.Docs {
 			ci.Docs = append(ci.Docs, docMeta(m))

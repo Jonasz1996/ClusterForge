@@ -212,3 +212,73 @@ func TestRecoveryDR(t *testing.T) {
 	c.DR.RTOMinutes, c.DR.RPOHours = 0, 0
 	contains(recovery(c, o), "Dit cluster heeft geen doel voor de hersteltijd (RTO) en het gegevensverlies (RPO).")
 }
+
+func TestSummaryText(t *testing.T) {
+	raw := "Ik lees eerst de hoofdstukken.\r\n\r\n# In het kort\n\nWeb is de website, met **twee nodes** achter `10.0.20.100`.\n\n" +
+		"* Zie [het runbook](https://evil.example/x) en ![logo](https://evil.example/pixel.png?d=geheim).\n" +
+		"* Een <img src=x onerror=alert(1)> en <https://evil.example/a>.\n" +
+		"1) Back-ups: dagelijks, `local_lvm` op pve1_a.\n\n" +
+		"| Node | Host |\n|---|---|\n| web-01 | pve1 |\n\n```\nrm -rf /\n```\n\n---\n> Let op: één host.\n" +
+		"Een `open backtick zonder einde"
+	got := SummaryText(raw)
+	for _, want := range []string{
+		"Ik lees eerst de hoofdstukken.\n\n**In het kort**\n\nWeb is de website, met **twee nodes** achter `10.0.20.100`.",
+		"- Zie het runbook en .",
+		`- Een \<img src=x onerror=alert(1)\> en https://evil.example/a.`,
+		"1. Back-ups: dagelijks, `local_lvm` op pve1\\_a.",
+		"Node · Host\nweb-01 · pve1",
+		"rm -rf /",
+		"Let op: één host.",
+		"Een \\`open backtick zonder einde",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("mist %q in\n%s", want, got)
+		}
+	}
+	for _, bad := range []string{"](", "![", "Een <img", "pixel.png", "```", "|", "\n\n\n", "---", "\r"} {
+		if strings.Contains(got, bad) {
+			t.Errorf("bevat %q:\n%s", bad, got)
+		}
+	}
+	long := SummaryText(strings.Repeat("Een lange regel tekst.\n", 300))
+	if n := len([]rune(long)); n > MaxSummary+2 || !strings.HasSuffix(long, " …") {
+		t.Errorf("afgekapt: %d tekens, einde %q", n, long[len(long)-10:])
+	}
+	if SummaryText("  \n![x](y)\n") != "" {
+		t.Error("alleen een afbeelding geeft geen samenvatting")
+	}
+}
+
+func TestSummaryInArchitecture(t *testing.T) {
+	f := fleet()
+	f.Clusters[0].Summary = &Summary{
+		Text: SummaryText("Web is de website.\n\n- Twee nodes op twee hosts."), Model: "claude-sonnet-5-5",
+		At: time.Date(2026, 10, 11, 9, 0, 0, 0, time.UTC), By: "jonas",
+	}
+	o := Opts{Loc: time.UTC, Usernames: true}
+	arch := Chapter(&f.Clusters[0], KindArchitecture, o)
+	want := "## In het kort\n\nWeb is de website.\n\n- Twee nodes op twee hosts.\n\n" +
+		"*Samengevat door de assistent (Claude Sonnet 5.5) op 11 oktober 2026, op verzoek van jonas. Bij twijfel gelden de hoofdstukken zelf.*\n\n" +
+		"## Wat het doet"
+	if !strings.Contains(arch, want) {
+		t.Fatalf("architectuur:\n%s", arch)
+	}
+	if strings.Index(arch, "| **Omgeving**") > strings.Index(arch, "## In het kort") {
+		t.Error("de samenvatting staat voor de feiten")
+	}
+	if got := Chapter(&f.Clusters[0], KindArchitecture, Opts{Loc: time.UTC}); strings.Contains(got, "jonas") {
+		t.Error("zonder gebruikersnamen noemt de samenvatting wie haar vroeg")
+	}
+	// Bij een nieuwe samenvatting leest de assistent zijn vorige niet.
+	without := WithoutSummary(arch)
+	if strings.Contains(without, "In het kort") || strings.Contains(without, "Samengevat") || !strings.Contains(without, "## Wat het doet") ||
+		!strings.Contains(without, "| **Omgeving**") {
+		t.Fatalf("zonder samenvatting:\n%s", without)
+	}
+	if WithoutSummary("# Titel\n\nTekst\n") != "# Titel\n\nTekst\n" {
+		t.Error("zonder samenvatting verandert er niets")
+	}
+	if got := modelText("claude-opus-5-5-20261001, claude-opus-4-8"); got != "Claude Opus 5.5, Claude Opus 4.8" {
+		t.Errorf("modelText = %q", got)
+	}
+}

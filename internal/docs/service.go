@@ -41,9 +41,10 @@ const (
 
 // De oorzaken van een nieuwe versie, naast een event.
 const (
-	CauseStart  = "start"
-	CauseNight  = "nacht"
-	CauseManual = "handmatig"
+	CauseStart   = "start"
+	CauseNight   = "nacht"
+	CauseManual  = "handmatig"
+	CauseSummary = "samenvatting"
 )
 
 // Service schrijft de documentatie opnieuw na een wijziging en elke nacht,
@@ -310,6 +311,12 @@ func (s *Service) GenerateAll(ctx context.Context, cause string) (int, error) {
 	return s.generate(ctx, nil, cause)
 }
 
+// GenerateCluster schrijft de hoofdstukken van één cluster meteen opnieuw,
+// zonder de gewone wachttijd.
+func (s *Service) GenerateCluster(ctx context.Context, id uuid.UUID, cause string) (int, error) {
+	return s.generate(ctx, map[uuid.UUID]string{id: cause})
+}
+
 // generate schrijft de documenten van de clusters in due (uuid.Nil is het
 // overzicht) met hun oorzaak; nil is alles met de oorzaak in all.
 func (s *Service) generate(ctx context.Context, due map[uuid.UUID]string, all ...string) (int, error) {
@@ -449,6 +456,8 @@ type ClusterIndex struct {
 	// Changed is de nieuwste versie van een van zijn documenten.
 	Changed *time.Time
 	Queued  *time.Time
+	// Summary is de samenvatting van de assistent; nil zonder.
+	Summary *Summary
 }
 
 // Index is de lijst van alle documenten.
@@ -481,9 +490,17 @@ func (s *Service) List(ctx context.Context) (Index, error) {
 	if err != nil {
 		return Index{}, err
 	}
+	sums, err := s.q.ListDocSummaries(ctx)
+	if err != nil {
+		return Index{}, err
+	}
+	summaries := map[uuid.UUID]*Summary{}
+	for _, r := range sums {
+		summaries[r.ClusterID] = &Summary{Text: r.Text, Model: r.Model, At: r.CreatedAt, By: r.Username}
+	}
 	for _, r := range rows {
 		id := r.ID
-		ci := ClusterIndex{ID: id, Name: r.Name, Slug: r.Slug, Env: r.Environment, Queued: s.Queued(id)}
+		ci := ClusterIndex{ID: id, Name: r.Name, Slug: r.Slug, Env: r.Environment, Queued: s.Queued(id), Summary: summaries[id]}
 		for _, k := range ClusterKinds {
 			m := meta(ScopeCluster, k, r.Slug, &id)
 			if m.GeneratedAt != nil && (ci.Changed == nil || m.GeneratedAt.After(*ci.Changed)) {
@@ -612,6 +629,8 @@ func CauseText(cause string) string {
 		return "Elke nacht opnieuw"
 	case CauseManual:
 		return "Met de hand opnieuw geschreven"
+	case CauseSummary:
+		return "Samenvatting van de assistent gewijzigd"
 	}
 	if rest, ok := strings.CutPrefix(cause, "event:"); ok {
 		if _, action, ok := strings.Cut(rest, ":"); ok {

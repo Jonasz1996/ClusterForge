@@ -65,6 +65,18 @@ type Cluster struct {
 	// Outages is wat de wat-als voorspelt bij uitval van elke node en
 	// elke host met een node van dit cluster.
 	Outages []Outage
+	// Summary is de samenvatting 'In het kort' van de assistent; nil
+	// zonder.
+	Summary *Summary
+}
+
+// Summary is een samenvatting die de assistent op verzoek schreef. Text is
+// al veilig gemaakt met SummaryText.
+type Summary struct {
+	Text  string
+	Model string
+	At    time.Time
+	By    string
 }
 
 type Template struct {

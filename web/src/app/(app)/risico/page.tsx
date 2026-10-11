@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useMemo, useState, type ReactNode } from "react";
+import { ExplainButton } from "@/components/assistant/ExplainButton";
 import { Empty, EnvBadge, QueryState, StatusBadge, tableClass, tdClass, thClass } from "@/components/inventory/bits";
 import { AcceptDialog, FindingItem, GradeBadge } from "@/components/risk/Risk";
 import { Alert, Badge, Button, Card, cx, PageHeader, Select } from "@/components/ui";
@@ -231,9 +232,12 @@ function SPOFItem({ s, onOpen }: { s: RiskSPOF; onOpen: (key: string) => void })
             {s.down > prod && `, waarvan ${prod} in productie`}.
           </p>
         </div>
-        <Button variant="secondary" onClick={() => onOpen(c.key)}>
-          Bekijk in wat-als
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <ExplainButton button input={{ spof: c.key }} title={`${c.name} als single point of failure`} />
+          <Button variant="secondary" onClick={() => onOpen(c.key)}>
+            Bekijk in wat-als
+          </Button>
+        </div>
       </div>
       <ul className="mt-3 space-y-1 text-sm">
         {s.clusters.map((cl) => (

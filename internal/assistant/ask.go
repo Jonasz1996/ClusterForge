@@ -38,10 +38,11 @@ const (
 
 // Done is het verbruik van een vraag over alle rondes.
 type Done struct {
-	Models  []string
-	Tokens  Tokens
-	CostUSD float64
-	Note    string
+	ConversationID uuid.UUID
+	Models         []string
+	Tokens         Tokens
+	CostUSD        float64
+	Note           string
 }
 
 // Turn is één vraag die klaar is om te stellen: de controles zijn gedaan
@@ -54,6 +55,26 @@ type Turn struct {
 	key      string
 	history  []anthropic.BetaMessageParam
 	question string
+	// prompt is de opdracht aan het model bij een vaste opdracht, met de
+	// gegevens; question is dan wat het gesprek toont.
+	prompt string
+	effort anthropic.BetaOutputConfigEffort
+	// claims worden vrijgegeven als het antwoord klaar is.
+	claims []uuid.UUID
+	finish func(context.Context, Result) error
+}
+
+// Result is wat een vraag opleverde.
+type Result struct {
+	ConversationID uuid.UUID
+	// Text is de tekst van alle antwoorden van het model.
+	Text   string
+	Models []string
+	// CostMicro is wat de vraag kostte, in miljoensten van een dollar.
+	CostMicro int64
+	// Complete is true als het model klaar was, zonder fout, weigering of
+	// afgebroken antwoord.
+	Complete bool
 }
 
 // Prepare controleert een vraag: toegang, het gesprek, de limieten en de
@@ -71,7 +92,7 @@ func (s *Service) Prepare(ctx context.Context, c Caller, convID uuid.UUID, quest
 		return nil, err
 	}
 	conv, err := s.q.GetConversation(ctx, convID)
-	if errors.Is(err, pgx.ErrNoRows) || (err == nil && conv.UserID != c.userID()) {
+	if errors.Is(err, pgx.ErrNoRows) || (err == nil && !c.owns(conv.UserID)) {
 		return nil, ErrNotFound
 	}
 	if err != nil {
@@ -99,7 +120,10 @@ func (s *Service) Prepare(ctx context.Context, c Caller, convID uuid.UUID, quest
 	if !s.claim(convID) {
 		return nil, ErrBusy
 	}
-	return &Turn{s: s, c: c, conv: conv, model: model, key: key, history: history, question: question}, nil
+	return &Turn{
+		s: s, c: c, conv: conv, model: model, key: key, history: history, question: question,
+		effort: anthropic.BetaOutputConfigEffortMedium, claims: []uuid.UUID{convID},
+	}, nil
 }
 
 func (s *Service) claim(id uuid.UUID) bool {
@@ -145,7 +169,7 @@ func (t *Turn) params(msgs []anthropic.BetaMessageParam) anthropic.BetaMessageNe
 		Thinking: anthropic.BetaThinkingConfigParamUnion{OfAdaptive: &anthropic.BetaThinkingConfigAdaptiveParam{
 			BlockBinding: anthropic.BetaThinkingBlockBindingParam{PrefixMismatchBehavior: "drop_block"},
 		}},
-		OutputConfig: anthropic.BetaOutputConfigParam{Effort: anthropic.BetaOutputConfigEffortMedium},
+		OutputConfig: anthropic.BetaOutputConfigParam{Effort: t.effort},
 		// De groeiende geschiedenis komt in de cache, zodat een volgende
 		// ronde van dezelfde vraag haar niet opnieuw betaalt.
 		CacheControl: anthropic.NewBetaCacheControlEphemeralParam(),
@@ -162,22 +186,32 @@ func (t *Turn) params(msgs []anthropic.BetaMessageParam) anthropic.BetaMessageNe
 
 // Run stelt de vraag en stuurt het antwoord in stukken naar emit, tot het
 // model klaar is of de limiet van MaxRounds bereikt is. Elk bericht wordt
-// bewaard zoals het verstuurd of ontvangen is.
-func (t *Turn) Run(ctx context.Context, emit func(Event)) {
+// bewaard zoals het verstuurd of ontvangen is. Bij een vaste opdracht
+// bewaart finish het resultaat, als het model klaar was.
+func (t *Turn) Run(ctx context.Context, emit func(Event)) Result {
 	s := t.s
-	defer s.release(t.conv.ID)
+	defer func() {
+		for _, id := range t.claims {
+			s.release(id)
+		}
+	}()
+	res := Result{ConversationID: t.conv.ID}
 	subject := ""
-	if len(t.history) == 0 {
+	if len(t.history) == 0 && t.prompt == "" {
 		subject = s.subject(ctx, t.conv)
+	}
+	ask := t.question
+	if t.prompt != "" {
+		ask = t.prompt
 	}
 	q := anthropic.NewBetaUserMessage(
 		anthropic.NewBetaTextBlock(questionContext(s.Now(), t.c.Principal.User.Username, t.c.admin(), subject)),
-		anthropic.NewBetaTextBlock(t.question),
+		anthropic.NewBetaTextBlock(ask),
 	)
-	if err := s.save(ctx, t.conv.ID, "question", q, t.question, t.c.userID(), nil); err != nil {
+	if err := s.save(ctx, t.conv.ID, "question", q, t.question, t.c.user(), nil); err != nil {
 		s.log.ErrorContext(ctx, "vraag aan de assistent bewaren", "err", err)
 		emit(Event{Type: EventError, Text: "interne fout"})
-		return
+		return res
 	}
 	if err := s.q.TouchConversation(ctx, store.TouchConversationParams{ID: t.conv.ID, Title: title(t.question)}); err != nil {
 		s.log.WarnContext(ctx, "gesprek bijwerken", "err", err)
@@ -189,6 +223,8 @@ func (t *Turn) Run(ctx context.Context, emit func(Event)) {
 		total int64
 		used  []string
 		fail  string
+		texts []string
+		stop  string
 	)
 	for round := 1; ; round++ {
 		msg, err := t.stream(ctx, &client, msgs, emit)
@@ -204,7 +240,11 @@ func (t *Turn) Run(ctx context.Context, emit func(Event)) {
 			done.Models = append(done.Models, m)
 		}
 		p := msg.ToParam()
-		if err := s.save(ctx, t.conv.ID, "answer", p, textOf(msg), t.c.userID(), &answerMeta{
+		if txt := textOf(msg); txt != "" {
+			texts = append(texts, txt)
+		}
+		stop = string(msg.StopReason)
+		if err := s.save(ctx, t.conv.ID, "answer", p, textOf(msg), t.c.user(), &answerMeta{
 			model: string(msg.Model), tokens: u, cost: c, stop: string(msg.StopReason),
 		}); err != nil {
 			s.log.ErrorContext(ctx, "antwoord van de assistent bewaren", "err", err)
@@ -233,7 +273,7 @@ func (t *Turn) Run(ctx context.Context, emit func(Event)) {
 			results = append(results, anthropic.NewBetaToolResultBlock(tu.ID, out, isErr))
 		}
 		tr := anthropic.NewBetaUserMessage(results...)
-		if err := s.save(ctx, t.conv.ID, "tool_results", tr, "", t.c.userID(), nil); err != nil {
+		if err := s.save(ctx, t.conv.ID, "tool_results", tr, "", t.c.user(), nil); err != nil {
 			s.log.ErrorContext(ctx, "toolresultaten bewaren", "err", err)
 			fail = "interne fout"
 			break
@@ -245,6 +285,18 @@ func (t *Turn) Run(ctx context.Context, emit func(Event)) {
 		}
 	}
 	done.CostUSD = USD(total)
+	done.ConversationID = t.conv.ID
+	res.Text, res.Models, res.CostMicro = strings.Join(texts, "\n\n"), done.Models, total
+	res.Complete = fail == "" && stop == string(anthropic.BetaStopReasonEndTurn) && strings.TrimSpace(res.Text) != ""
+	if t.finish != nil && res.Complete {
+		if err := t.finish(context.WithoutCancel(ctx), res); err != nil {
+			s.log.ErrorContext(ctx, "resultaat van de assistent bewaren", "kind", t.conv.Kind, "err", err)
+			fail = "Het antwoord kon niet bewaard worden; probeer het opnieuw."
+			res.Complete = false
+		}
+	} else if t.finish != nil && fail == "" && done.Note == "" {
+		done.Note = "Het model gaf geen antwoord; er is niets bewaard."
+	}
 	if fail != "" {
 		emit(Event{Type: EventError, Text: fail})
 	}
@@ -254,15 +306,19 @@ func (t *Turn) Run(ctx context.Context, emit func(Event)) {
 		"cache_read_tokens": done.Tokens.CacheRead, "cache_write_tokens": done.Tokens.CacheWrite, "cost_usd": done.CostUSD,
 		"model": strings.Join(done.Models, ", "),
 	}
+	if t.conv.Kind != KindChat && t.conv.Kind != "" {
+		payload["kind"] = t.conv.Kind
+	}
 	if fail != "" {
 		payload["error"] = fail
 	}
 	if err := s.ev.Write(context.WithoutCancel(ctx), nil, events.Event{
-		Actor: events.User(t.c.userID()), SubjectType: "assistant_conversation", SubjectID: t.conv.ID.String(),
+		Actor: t.c.actor(), SubjectType: "assistant_conversation", SubjectID: t.conv.ID.String(),
 		Action: "assistant.asked", Payload: payload,
 	}); err != nil {
 		s.log.WarnContext(ctx, "vraag aan de assistent in het logboek zetten", "err", err)
 	}
+	return res
 }
 
 const (
@@ -316,12 +372,12 @@ type answerMeta struct {
 	stop   string
 }
 
-func (s *Service) save(ctx context.Context, conv uuid.UUID, role string, p anthropic.BetaMessageParam, text string, user uuid.UUID, m *answerMeta) error {
+func (s *Service) save(ctx context.Context, conv uuid.UUID, role string, p anthropic.BetaMessageParam, text string, user *uuid.UUID, m *answerMeta) error {
 	content, err := json.Marshal(p)
 	if err != nil {
 		return err
 	}
-	args := store.InsertAssistantMessageParams{ConversationID: conv, Role: role, Content: content, Text: text, UserID: &user}
+	args := store.InsertAssistantMessageParams{ConversationID: conv, Role: role, Content: content, Text: text, UserID: user}
 	if m != nil {
 		args.Model, args.StopReason, args.CostMicrousd = m.model, m.stop, m.cost
 		args.InputTokens, args.OutputTokens = int32(m.tokens.Input), int32(m.tokens.Output)

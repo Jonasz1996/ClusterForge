@@ -66,6 +66,18 @@ func (q *Queries) CreateDocsTarget(ctx context.Context, arg CreateDocsTargetPara
 	return i, err
 }
 
+const deleteDocSummary = `-- name: DeleteDocSummary :execrows
+DELETE FROM doc_summaries WHERE cluster_id = $1
+`
+
+func (q *Queries) DeleteDocSummary(ctx context.Context, clusterID uuid.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteDocSummary, clusterID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deleteDocsTarget = `-- name: DeleteDocsTarget :execrows
 DELETE FROM docs_targets WHERE id = $1
 `
@@ -94,6 +106,36 @@ func (q *Queries) GetDocSnapshot(ctx context.Context, id int64) (DocSnapshot, er
 		&i.Sha256,
 		&i.GeneratedAt,
 		&i.Cause,
+	)
+	return i, err
+}
+
+const getDocSummary = `-- name: GetDocSummary :one
+SELECT d.cluster_id, d.text, d.model, d.created_at, d.conversation_id, coalesce(u.username, '')::text AS username
+FROM doc_summaries d
+LEFT JOIN users u ON u.id = d.created_by
+WHERE d.cluster_id = $1
+`
+
+type GetDocSummaryRow struct {
+	ClusterID      uuid.UUID
+	Text           string
+	Model          string
+	CreatedAt      time.Time
+	ConversationID *uuid.UUID
+	Username       string
+}
+
+func (q *Queries) GetDocSummary(ctx context.Context, clusterID uuid.UUID) (GetDocSummaryRow, error) {
+	row := q.db.QueryRow(ctx, getDocSummary, clusterID)
+	var i GetDocSummaryRow
+	err := row.Scan(
+		&i.ClusterID,
+		&i.Text,
+		&i.Model,
+		&i.CreatedAt,
+		&i.ConversationID,
+		&i.Username,
 	)
 	return i, err
 }
@@ -639,6 +681,46 @@ func (q *Queries) ListDocRehearsals(ctx context.Context) ([]ListDocRehearsalsRow
 	return items, nil
 }
 
+const listDocSummaries = `-- name: ListDocSummaries :many
+SELECT d.cluster_id, d.text, d.model, d.created_at, coalesce(u.username, '')::text AS username
+FROM doc_summaries d
+LEFT JOIN users u ON u.id = d.created_by
+`
+
+type ListDocSummariesRow struct {
+	ClusterID uuid.UUID
+	Text      string
+	Model     string
+	CreatedAt time.Time
+	Username  string
+}
+
+func (q *Queries) ListDocSummaries(ctx context.Context) ([]ListDocSummariesRow, error) {
+	rows, err := q.db.Query(ctx, listDocSummaries)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDocSummariesRow{}
+	for rows.Next() {
+		var i ListDocSummariesRow
+		if err := rows.Scan(
+			&i.ClusterID,
+			&i.Text,
+			&i.Model,
+			&i.CreatedAt,
+			&i.Username,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listDocVIPs = `-- name: ListDocVIPs :many
 SELECT v.cluster_id, host(v.address)::text AS address, v.interface, v.vrid, v.description
 FROM vips v
@@ -868,4 +950,33 @@ func (q *Queries) UpdateDocsTarget(ctx context.Context, arg UpdateDocsTargetPara
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const upsertDocSummary = `-- name: UpsertDocSummary :exec
+INSERT INTO doc_summaries (cluster_id, text, model, created_by, created_at, conversation_id)
+VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (cluster_id) DO UPDATE
+SET text = excluded.text, model = excluded.model, created_by = excluded.created_by, created_at = excluded.created_at,
+    conversation_id = excluded.conversation_id
+`
+
+type UpsertDocSummaryParams struct {
+	ClusterID      uuid.UUID
+	Text           string
+	Model          string
+	CreatedBy      *uuid.UUID
+	CreatedAt      time.Time
+	ConversationID *uuid.UUID
+}
+
+func (q *Queries) UpsertDocSummary(ctx context.Context, arg UpsertDocSummaryParams) error {
+	_, err := q.db.Exec(ctx, upsertDocSummary,
+		arg.ClusterID,
+		arg.Text,
+		arg.Model,
+		arg.CreatedBy,
+		arg.CreatedAt,
+		arg.ConversationID,
+	)
+	return err
 }

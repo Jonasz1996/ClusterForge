@@ -379,6 +379,12 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 			return "Notitie bij incident " + name + " gewist"
 		}
 		return "Notitie bij incident " + name + " bijgewerkt"
+	case "incident.analyzed":
+		who := "Incident " + name + " geanalyseerd door de assistent"
+		if p["automatic"] == true {
+			who = "Incident " + name + " automatisch geanalyseerd door de assistent"
+		}
+		return who + ", " + dollars(p["cost_usd"]) + paren(str(p, "model"))
 	case "assistant.settings_updated":
 		if len(e.Changes) == 1 && e.Changes[0].Field == "key_changed" {
 			return "API-sleutel van de assistent vervangen"
@@ -386,7 +392,9 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 		return "Instellingen van de assistent gewijzigd" + changeSummary(e.Changes)
 	case "assistant.asked":
 		tools, _ := p["tools"].([]any)
-		s := "Vraag aan de assistent"
+		s := or(map[string]string{
+			"analysis": "Analyse door de assistent", "explain": "Uitleg door de assistent", "summary": "Samenvatting door de assistent",
+		}[str(p, "kind")], "Vraag aan de assistent")
 		if len(tools) > 0 {
 			s += fmt.Sprintf(" met %s (%s)", count(float64(len(tools)), "tool", "tools"), list(tools))
 		}
@@ -711,6 +719,10 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 		return "Documentatie naar " + name + " schrijven mislukt" + colon(str(p, "error"))
 	case "docs.publish_recovered":
 		return "Documentatie naar " + name + " schrijven lukt weer"
+	case "docs.summary_updated":
+		return "Samenvatting 'In het kort' van " + name + " geschreven door de assistent, " + dollars(p["cost_usd"]) + paren(str(p, "model"))
+	case "docs.summary_removed":
+		return "Samenvatting 'In het kort' van " + name + " weggehaald"
 	case "gitops.commit_seen":
 		return fmt.Sprintf("Nieuwe commit %s %q van %s", shortSHA(str(p, "sha")), str(p, "message"), str(p, "author")) + verifiedText(p)
 	case "gitops.sync_failed":
@@ -910,7 +922,7 @@ var fieldLabels = map[string][][2]string{
 	"docs.target_updated": {{"repo", "Repository"}, {"branch", "Branch"}, {"path", "Map"}, {"api_url", "API-adres"},
 		{"enabled", "Automatisch publiceren"}, {"token_changed", "Token"}},
 	"assistant.settings_updated": {{"enabled", "Aan"}, {"model", "Model"}, {"monthly_budget_usd", "Maandbudget in dollar"},
-		{"viewer_access", "Ook voor viewers"}, {"key_changed", "API-sleutel"}},
+		{"viewer_access", "Ook voor viewers"}, {"auto_analyze", "Automatisch analyseren"}, {"key_changed", "API-sleutel"}},
 }
 
 func changes(subjectType string, p map[string]any, n names) []Change {

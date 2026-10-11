@@ -9,6 +9,9 @@ export type AssistantSettingsInput = components["schemas"]["AssistantSettingsInp
 export type AssistantUsage = components["schemas"]["AssistantUsage"];
 export type Conversation = components["schemas"]["AssistantConversation"];
 export type Turn = components["schemas"]["AssistantTurn"];
+export type ConversationKind = Conversation["kind"];
+export type IncidentAI = components["schemas"]["IncidentAI"];
+export type ExplainInput = components["schemas"]["AssistantExplainInput"];
 export type Subject = "cluster" | "node" | "incident";
 
 export const settingsKey = ["assistant", "settings"] as const;
@@ -99,25 +102,63 @@ export type StreamEvent =
       cache_write_tokens: number;
       cost_usd: number;
       note: string;
+      conversation_id: string;
     };
 
 // ask stelt een vraag en geeft elk stuk van het antwoord aan onEvent terwijl
 // het binnenkomt. Een fout voor het antwoord begint, zoals het budget, is
 // een ApiError.
-export async function ask(conversationId: string, question: string, onEvent: (ev: StreamEvent) => void, signal?: AbortSignal) {
+export function ask(conversationId: string, question: string, onEvent: (ev: StreamEvent) => void, signal?: AbortSignal) {
+  return streamPost(
+    `/api/v1/assistant/conversations/${encodeURIComponent(conversationId)}/messages`,
+    { question },
+    onEvent,
+    signal,
+  );
+}
+
+// analyzeIncident laat de assistent een incident analyseren; het resultaat
+// komt bij het incident.
+export function analyzeIncident(id: string, onEvent: (ev: StreamEvent) => void, signal?: AbortSignal) {
+  return streamPost(`/api/v1/incidents/${encodeURIComponent(id)}/analyze`, {}, onEvent, signal);
+}
+
+// explainRisk laat de assistent een bevinding of een SPOF uitleggen, in een
+// nieuw gesprek.
+export function explainRisk(body: ExplainInput, onEvent: (ev: StreamEvent) => void, signal?: AbortSignal) {
+  return streamPost("/api/v1/assistant/explain", body, onEvent, signal);
+}
+
+// summarizeDocs laat de assistent de samenvatting 'In het kort' van een
+// cluster schrijven.
+export function summarizeDocs(clusterId: string, onEvent: (ev: StreamEvent) => void, signal?: AbortSignal) {
+  return streamPost(`/api/v1/docs/summary?cluster=${encodeURIComponent(clusterId)}`, {}, onEvent, signal);
+}
+
+export function useDeleteDocSummary() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (cluster: string) => unwrap(await api.DELETE("/docs/summary", { params: { query: { cluster } } })),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["docs"] }),
+  });
+}
+
+// streamPost doet een POST waarvan het antwoord als server-sent events
+// binnenkomt, en geeft elk event aan onEvent.
+async function streamPost(url: string, body: unknown, onEvent: (ev: StreamEvent) => void, signal?: AbortSignal) {
   const headers: Record<string, string> = { "Content-Type": "application/json", Accept: "text/event-stream" };
   const csrf = getCsrfToken();
   if (csrf) headers["X-CSRF-Token"] = csrf;
-  const res = await fetch(`/api/v1/assistant/conversations/${encodeURIComponent(conversationId)}/messages`, {
+  const res = await fetch(url, {
     method: "POST",
     credentials: "same-origin",
     headers,
-    body: JSON.stringify({ question }),
+    body: JSON.stringify(body),
     signal,
   });
   if (!res.ok || !res.body) {
-    const body = (await res.json().catch(() => null)) as { code?: string; message?: string } | null;
-    throw new ApiError(res.status, body?.code ?? "unknown", body?.message ?? `Onverwachte fout (${res.status})`);
+    const err = (await res.json().catch(() => null)) as { code?: string; message?: string } | null;
+    throw new ApiError(res.status, err?.code ?? "unknown", err?.message ?? `Onverwachte fout (${res.status})`);
   }
   const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
   let buf = "";
@@ -173,3 +214,11 @@ export function modelLabel(id: string, models?: { id: string; label: string }[])
 }
 
 export const subjectLabels: Record<Subject, string> = { cluster: "cluster", node: "node", incident: "incident" };
+
+// kindLabels zijn de soorten gesprekken; een gewone vraag heeft geen label.
+export const kindLabels: Record<ConversationKind, string> = {
+  chat: "",
+  analysis: "Analyse",
+  explain: "Uitleg",
+  summary: "Samenvatting",
+};

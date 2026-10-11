@@ -500,8 +500,8 @@ func (s *Service) acceptances(ctx context.Context, now time.Time) (map[Key]Accep
 	return out, nil
 }
 
-// find zoekt een bevinding in de bewaarde uitkomsten.
-func (s *Service) find(ctx context.Context, k Key) (Placed, bool, error) {
+// Find zoekt een bevinding in de bewaarde uitkomsten.
+func (s *Service) Find(ctx context.Context, k Key) (Placed, bool, error) {
 	ov, err := s.Overview(ctx)
 	if err != nil {
 		return Placed{}, false, err
@@ -531,7 +531,7 @@ func (s *Service) Accept(ctx context.Context, actor events.Actor, by *uuid.UUID,
 	case Checks[in.Check] == "":
 		return ValidationError{"onbekende controle " + in.Check}
 	}
-	f, ok, err := s.find(ctx, Key{in.Check, in.SubjectType, in.SubjectID})
+	f, ok, err := s.Find(ctx, Key{in.Check, in.SubjectType, in.SubjectID})
 	if err != nil {
 		return err
 	}

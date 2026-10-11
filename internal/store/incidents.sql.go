@@ -15,7 +15,7 @@ import (
 const createIncident = `-- name: CreateIncident :one
 INSERT INTO incidents (title, severity, status, started_at, detected_at, caused_by_test, test_run_id)
 VALUES ($1, $2, 'open', $3, $4, $5, $6)
-RETURNING id, number, title, severity, status, started_at, detected_at, resolved_at, caused_by_test, test_run_id, note, updated_at, analysis, analysis_version, analyzed_at
+RETURNING id, number, title, severity, status, started_at, detected_at, resolved_at, caused_by_test, test_run_id, note, updated_at, analysis, analysis_version, analyzed_at, ai_analysis, ai_model, ai_at, ai_by, ai_automatic, ai_scope, ai_conversation_id, ai_cost_microusd
 `
 
 type CreateIncidentParams struct {
@@ -53,12 +53,20 @@ func (q *Queries) CreateIncident(ctx context.Context, arg CreateIncidentParams) 
 		&i.Analysis,
 		&i.AnalysisVersion,
 		&i.AnalyzedAt,
+		&i.AiAnalysis,
+		&i.AiModel,
+		&i.AiAt,
+		&i.AiBy,
+		&i.AiAutomatic,
+		&i.AiScope,
+		&i.AiConversationID,
+		&i.AiCostMicrousd,
 	)
 	return i, err
 }
 
 const getIncident = `-- name: GetIncident :one
-SELECT id, number, title, severity, status, started_at, detected_at, resolved_at, caused_by_test, test_run_id, note, updated_at, analysis, analysis_version, analyzed_at FROM incidents WHERE id = $1
+SELECT id, number, title, severity, status, started_at, detected_at, resolved_at, caused_by_test, test_run_id, note, updated_at, analysis, analysis_version, analyzed_at, ai_analysis, ai_model, ai_at, ai_by, ai_automatic, ai_scope, ai_conversation_id, ai_cost_microusd FROM incidents WHERE id = $1
 `
 
 func (q *Queries) GetIncident(ctx context.Context, id uuid.UUID) (Incident, error) {
@@ -80,6 +88,14 @@ func (q *Queries) GetIncident(ctx context.Context, id uuid.UUID) (Incident, erro
 		&i.Analysis,
 		&i.AnalysisVersion,
 		&i.AnalyzedAt,
+		&i.AiAnalysis,
+		&i.AiModel,
+		&i.AiAt,
+		&i.AiBy,
+		&i.AiAutomatic,
+		&i.AiScope,
+		&i.AiConversationID,
+		&i.AiCostMicrousd,
 	)
 	return i, err
 }
@@ -119,7 +135,7 @@ func (q *Queries) ListClusterDependencies(ctx context.Context) ([]ListClusterDep
 }
 
 const listDetectorIncidents = `-- name: ListDetectorIncidents :many
-SELECT id, number, title, severity, status, started_at, detected_at, resolved_at, caused_by_test, test_run_id, note, updated_at, analysis, analysis_version, analyzed_at FROM incidents WHERE status = 'open' OR resolved_at >= $1::timestamptz ORDER BY started_at, number
+SELECT id, number, title, severity, status, started_at, detected_at, resolved_at, caused_by_test, test_run_id, note, updated_at, analysis, analysis_version, analyzed_at, ai_analysis, ai_model, ai_at, ai_by, ai_automatic, ai_scope, ai_conversation_id, ai_cost_microusd FROM incidents WHERE status = 'open' OR resolved_at >= $1::timestamptz ORDER BY started_at, number
 `
 
 // De open incidenten en die sinds @since afgesloten werden.
@@ -148,6 +164,14 @@ func (q *Queries) ListDetectorIncidents(ctx context.Context, since time.Time) ([
 			&i.Analysis,
 			&i.AnalysisVersion,
 			&i.AnalyzedAt,
+			&i.AiAnalysis,
+			&i.AiModel,
+			&i.AiAt,
+			&i.AiBy,
+			&i.AiAutomatic,
+			&i.AiScope,
+			&i.AiConversationID,
+			&i.AiCostMicrousd,
 		); err != nil {
 			return nil, err
 		}
@@ -456,7 +480,7 @@ func (q *Queries) ListIncidentTestRuns(ctx context.Context, arg ListIncidentTest
 }
 
 const listIncidents = `-- name: ListIncidents :many
-SELECT id, number, title, severity, status, started_at, detected_at, resolved_at, caused_by_test, test_run_id, note, updated_at, analysis, analysis_version, analyzed_at FROM incidents i
+SELECT id, number, title, severity, status, started_at, detected_at, resolved_at, caused_by_test, test_run_id, note, updated_at, analysis, analysis_version, analyzed_at, ai_analysis, ai_model, ai_at, ai_by, ai_automatic, ai_scope, ai_conversation_id, ai_cost_microusd FROM incidents i
 WHERE ($1::text IS NULL OR i.status = $1::text)
   AND ($2::boolean OR NOT i.caused_by_test)
   AND (i.status = 'open' OR (i.started_at >= $3 AND i.started_at < $4))
@@ -510,6 +534,14 @@ func (q *Queries) ListIncidents(ctx context.Context, arg ListIncidentsParams) ([
 			&i.Analysis,
 			&i.AnalysisVersion,
 			&i.AnalyzedAt,
+			&i.AiAnalysis,
+			&i.AiModel,
+			&i.AiAt,
+			&i.AiBy,
+			&i.AiAutomatic,
+			&i.AiScope,
+			&i.AiConversationID,
+			&i.AiCostMicrousd,
 		); err != nil {
 			return nil, err
 		}
@@ -522,7 +554,7 @@ func (q *Queries) ListIncidents(ctx context.Context, arg ListIncidentsParams) ([
 }
 
 const setIncidentNote = `-- name: SetIncidentNote :one
-UPDATE incidents SET note = $1, updated_at = now() WHERE id = $2 RETURNING id, number, title, severity, status, started_at, detected_at, resolved_at, caused_by_test, test_run_id, note, updated_at, analysis, analysis_version, analyzed_at
+UPDATE incidents SET note = $1, updated_at = now() WHERE id = $2 RETURNING id, number, title, severity, status, started_at, detected_at, resolved_at, caused_by_test, test_run_id, note, updated_at, analysis, analysis_version, analyzed_at, ai_analysis, ai_model, ai_at, ai_by, ai_automatic, ai_scope, ai_conversation_id, ai_cost_microusd
 `
 
 type SetIncidentNoteParams struct {
@@ -549,6 +581,14 @@ func (q *Queries) SetIncidentNote(ctx context.Context, arg SetIncidentNoteParams
 		&i.Analysis,
 		&i.AnalysisVersion,
 		&i.AnalyzedAt,
+		&i.AiAnalysis,
+		&i.AiModel,
+		&i.AiAt,
+		&i.AiBy,
+		&i.AiAutomatic,
+		&i.AiScope,
+		&i.AiConversationID,
+		&i.AiCostMicrousd,
 	)
 	return i, err
 }

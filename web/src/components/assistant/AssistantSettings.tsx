@@ -44,6 +44,7 @@ function SettingsForm({ s, saved, onSaved }: { s: AssistantSettings; saved: bool
   const [model, setModel] = useState(s.model);
   const [budget, setBudget] = useState(String(s.monthly_budget_usd));
   const [viewers, setViewers] = useState(s.viewer_access);
+  const [auto, setAuto] = useState(s.auto_analyze);
   const [confirm, setConfirm] = useState("");
   const totp = me.data?.user.totp_enabled ?? false;
 
@@ -57,6 +58,7 @@ function SettingsForm({ s, saved, onSaved }: { s: AssistantSettings; saved: bool
         model,
         monthly_budget_usd: parseInt(budget, 10) || 0,
         viewer_access: viewers,
+        auto_analyze: auto,
         ...(totp ? { totp_code: confirm } : { password: confirm }),
       });
       setKey("");
@@ -134,6 +136,16 @@ function SettingsForm({ s, saved, onSaved }: { s: AssistantSettings; saved: bool
                   Ook viewers mogen vragen stellen
                 </label>
               </div>
+            </div>
+            <div className="space-y-1">
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} />
+                Nieuwe prod-incidenten met ernst hoog of kritiek automatisch analyseren
+              </label>
+              <p className="pl-6 text-xs text-slate-500">
+                Hoogstens tien per dag en binnen het maandbudget, elk incident één keer. De analyse staat bij het incident, met
+                het model en de datum. Andere incidenten analyseer je zelf met de knop Analyseer.
+              </p>
             </div>
             <div className="max-w-xs">
               <Field

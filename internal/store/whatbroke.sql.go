@@ -91,7 +91,7 @@ func (q *Queries) ListChangesInScope(ctx context.Context, arg ListChangesInScope
 }
 
 const listIncidentsToAnalyze = `-- name: ListIncidentsToAnalyze :many
-SELECT id, number, title, severity, status, started_at, detected_at, resolved_at, caused_by_test, test_run_id, note, updated_at, analysis, analysis_version, analyzed_at FROM incidents
+SELECT id, number, title, severity, status, started_at, detected_at, resolved_at, caused_by_test, test_run_id, note, updated_at, analysis, analysis_version, analyzed_at, ai_analysis, ai_model, ai_at, ai_by, ai_automatic, ai_scope, ai_conversation_id, ai_cost_microusd FROM incidents
 WHERE status = 'open' OR resolved_at >= $1::timestamptz OR analyzed_at IS NULL
 ORDER BY started_at DESC
 LIMIT 50
@@ -124,6 +124,14 @@ func (q *Queries) ListIncidentsToAnalyze(ctx context.Context, since time.Time) (
 			&i.Analysis,
 			&i.AnalysisVersion,
 			&i.AnalyzedAt,
+			&i.AiAnalysis,
+			&i.AiModel,
+			&i.AiAt,
+			&i.AiBy,
+			&i.AiAutomatic,
+			&i.AiScope,
+			&i.AiConversationID,
+			&i.AiCostMicrousd,
 		); err != nil {
 			return nil, err
 		}

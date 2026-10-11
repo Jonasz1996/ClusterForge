@@ -217,6 +217,7 @@ func serve() error {
 		planner.Task{Name: "DR-repetities", Tick: func(ctx context.Context, now time.Time) error { return dis.RunScheduled(ctx, now) }},
 		planner.Task{Name: "journaal opruimen", Tick: journal.NewPruner(q).Tick},
 		planner.Task{Name: "gesprekken opruimen", Tick: asst.Prune},
+		planner.Task{Name: "incidenten automatisch analyseren", Tick: asst.AutoAnalyze},
 		planner.Task{Name: "health score vastleggen", Tick: func(ctx context.Context, now time.Time) error { return rsk.Snapshot(ctx, now) }},
 		planner.Task{Name: "rapport Herstelbaarheid bewaren", Tick: rep.Save})
 	// Rampoefeningen in lab en test; de wat-als voorspelt, de meting kijkt

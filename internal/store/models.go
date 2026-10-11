@@ -246,13 +246,14 @@ type Agent struct {
 
 type AssistantConversation struct {
 	ID          uuid.UUID
-	UserID      uuid.UUID
+	UserID      *uuid.UUID
 	Title       string
 	SubjectType string
 	SubjectID   *uuid.UUID
 	IncidentID  *uuid.UUID
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
+	Kind        string
 }
 
 type AssistantMessage struct {
@@ -283,6 +284,7 @@ type AssistantSetting struct {
 	ViewerAccess     bool
 	UpdatedBy        *uuid.UUID
 	UpdatedAt        time.Time
+	AutoAnalyze      bool
 }
 
 type BackupPolicy struct {
@@ -387,6 +389,15 @@ type DocSnapshot struct {
 	Sha256      string
 	GeneratedAt time.Time
 	Cause       string
+}
+
+type DocSummary struct {
+	ClusterID      uuid.UUID
+	Text           string
+	Model          string
+	CreatedBy      *uuid.UUID
+	CreatedAt      time.Time
+	ConversationID *uuid.UUID
 }
 
 type DocsTarget struct {
@@ -529,21 +540,29 @@ type GitRepo struct {
 }
 
 type Incident struct {
-	ID              uuid.UUID
-	Number          int32
-	Title           string
-	Severity        string
-	Status          string
-	StartedAt       time.Time
-	DetectedAt      time.Time
-	ResolvedAt      *time.Time
-	CausedByTest    bool
-	TestRunID       *uuid.UUID
-	Note            string
-	UpdatedAt       time.Time
-	Analysis        []byte
-	AnalysisVersion *int32
-	AnalyzedAt      *time.Time
+	ID               uuid.UUID
+	Number           int32
+	Title            string
+	Severity         string
+	Status           string
+	StartedAt        time.Time
+	DetectedAt       time.Time
+	ResolvedAt       *time.Time
+	CausedByTest     bool
+	TestRunID        *uuid.UUID
+	Note             string
+	UpdatedAt        time.Time
+	Analysis         []byte
+	AnalysisVersion  *int32
+	AnalyzedAt       *time.Time
+	AiAnalysis       *string
+	AiModel          string
+	AiAt             *time.Time
+	AiBy             *uuid.UUID
+	AiAutomatic      bool
+	AiScope          string
+	AiConversationID *uuid.UUID
+	AiCostMicrousd   int64
 }
 
 type IncidentSubject struct {

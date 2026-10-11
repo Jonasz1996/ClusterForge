@@ -152,3 +152,24 @@ UPDATE docs_targets SET last_checked_at = @at, last_attempt_at = @at, last_error
 
 -- name: SetDocsPublishError :exec
 UPDATE docs_targets SET last_attempt_at = @at, last_error = @last_error WHERE id = @id;
+
+-- name: ListDocSummaries :many
+SELECT d.cluster_id, d.text, d.model, d.created_at, coalesce(u.username, '')::text AS username
+FROM doc_summaries d
+LEFT JOIN users u ON u.id = d.created_by;
+
+-- name: GetDocSummary :one
+SELECT d.cluster_id, d.text, d.model, d.created_at, d.conversation_id, coalesce(u.username, '')::text AS username
+FROM doc_summaries d
+LEFT JOIN users u ON u.id = d.created_by
+WHERE d.cluster_id = $1;
+
+-- name: UpsertDocSummary :exec
+INSERT INTO doc_summaries (cluster_id, text, model, created_by, created_at, conversation_id)
+VALUES (@cluster_id, @text, @model, @created_by, @created_at, @conversation_id)
+ON CONFLICT (cluster_id) DO UPDATE
+SET text = excluded.text, model = excluded.model, created_by = excluded.created_by, created_at = excluded.created_at,
+    conversation_id = excluded.conversation_id;
+
+-- name: DeleteDocSummary :execrows
+DELETE FROM doc_summaries WHERE cluster_id = $1;

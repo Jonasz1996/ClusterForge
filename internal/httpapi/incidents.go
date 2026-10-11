@@ -138,13 +138,14 @@ func (s *Server) GetIncident(w http.ResponseWriter, r *http.Request, id uuid.UUI
 		stored = &incidentAnalysis{Analysis: analysis, AnalyzedAt: row.AnalyzedAt}
 	}
 	writeJSON(w, http.StatusOK, struct {
-		Incident     gen.Incident      `json:"incident"`
-		History      []audit.Entry     `json:"history"`
-		HistoryMore  bool              `json:"history_more"`
-		Analysis     *incidentAnalysis `json:"analysis"`
-		Timeline     []whatbroke.Entry `json:"timeline"`
-		TimelineMore bool              `json:"timeline_more"`
-	}{inc, history, next != nil, stored, s.redactEntries(r, timeline), timelineMore})
+		Incident     gen.Incident                      `json:"incident"`
+		History      []audit.Entry                     `json:"history"`
+		HistoryMore  bool                              `json:"history_more"`
+		Analysis     *incidentAnalysis                 `json:"analysis"`
+		Timeline     []whatbroke.Entry                 `json:"timeline"`
+		TimelineMore bool                              `json:"timeline_more"`
+		AI           nullable.Nullable[gen.IncidentAI] `json:"ai"`
+	}{inc, history, next != nil, stored, s.redactEntries(r, timeline), timelineMore, s.incidentAI(ctx, row)})
 }
 
 func (s *Server) SetIncidentNote(w http.ResponseWriter, r *http.Request, id uuid.UUID) {

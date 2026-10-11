@@ -36,6 +36,30 @@ func (e AgentConnection) Valid() bool {
 	}
 }
 
+// Defines values for AssistantConversationKind.
+const (
+	Analysis AssistantConversationKind = "analysis"
+	Chat     AssistantConversationKind = "chat"
+	Explain  AssistantConversationKind = "explain"
+	Summary  AssistantConversationKind = "summary"
+)
+
+// Valid indicates whether the value is a known member of the AssistantConversationKind enum.
+func (e AssistantConversationKind) Valid() bool {
+	switch e {
+	case Analysis:
+		return true
+	case Chat:
+		return true
+	case Explain:
+		return true
+	case Summary:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AssistantConversationInputSubjectType.
 const (
 	AssistantConversationInputSubjectTypeCluster  AssistantConversationInputSubjectType = "cluster"
@@ -2139,9 +2163,14 @@ type AgentSummary struct {
 
 // AssistantConversation defines model for AssistantConversation.
 type AssistantConversation struct {
-	CostUsd   float32                               `json:"cost_usd"`
-	CreatedAt time.Time                             `json:"created_at"`
-	Id        openapi_types.UUID                    `json:"id"`
+	// CanAsk Of jij in dit gesprek verder kunt vragen; alleen in je eigen gesprekken
+	CanAsk    bool               `json:"can_ask"`
+	CostUsd   float32            `json:"cost_usd"`
+	CreatedAt time.Time          `json:"created_at"`
+	Id        openapi_types.UUID `json:"id"`
+
+	// Kind Een gewone vraag, of een analyse, uitleg of samenvatting
+	Kind      AssistantConversationKind             `json:"kind"`
 	SubjectId nullable.Nullable[openapi_types.UUID] `json:"subject_id"`
 
 	// SubjectType cluster
@@ -2150,8 +2179,13 @@ type AssistantConversation struct {
 	// Title Het begin van de eerste vraag; leeg zolang er geen is
 	Title     string    `json:"title"`
 	UpdatedAt time.Time `json:"updated_at"`
-	Username  string    `json:"username"`
+
+	// Username Leeg voor een gesprek van ClusterForge zelf
+	Username string `json:"username"`
 }
+
+// AssistantConversationKind Een gewone vraag, of een analyse, uitleg of samenvatting
+type AssistantConversationKind string
 
 // AssistantConversationDetail defines model for AssistantConversationDetail.
 type AssistantConversationDetail struct {
@@ -2171,6 +2205,16 @@ type AssistantConversationInputSubjectType string
 // AssistantConversationList defines model for AssistantConversationList.
 type AssistantConversationList struct {
 	Items []AssistantConversation `json:"items"`
+}
+
+// AssistantExplainInput Een bevinding (check, subject_type en subject_id, zoals in de health score) of een SPOF (de sleutel van het onderdeel)
+type AssistantExplainInput struct {
+	Check *string `json:"check,omitempty"`
+
+	// Spof De sleutel van het onderdeel uit de SPOF-lijst
+	Spof        *string             `json:"spof,omitempty"`
+	SubjectId   *openapi_types.UUID `json:"subject_id,omitempty"`
+	SubjectType *string             `json:"subject_type,omitempty"`
 }
 
 // AssistantKeyTest defines model for AssistantKeyTest.
@@ -2209,6 +2253,9 @@ type AssistantQuestion struct {
 
 // AssistantSettings defines model for AssistantSettings.
 type AssistantSettings struct {
+	// AutoAnalyze Nieuwe prod-incidenten met ernst hoog of kritiek automatisch analyseren, hoogstens tien per dag
+	AutoAnalyze bool `json:"auto_analyze"`
+
 	// Available False zonder CF_MASTER_KEY
 	Available bool `json:"available"`
 
@@ -2233,6 +2280,7 @@ type AssistantSettings struct {
 type AssistantSettingsInput struct {
 	// ApiKey Leeg laat de opgeslagen sleutel staan
 	ApiKey           *string `json:"api_key,omitempty"`
+	AutoAnalyze      *bool   `json:"auto_analyze,omitempty"`
 	Enabled          bool    `json:"enabled"`
 	Model            string  `json:"model"`
 	MonthlyBudgetUsd int     `json:"monthly_budget_usd"`
@@ -3641,6 +3689,9 @@ type DocClusterIndex struct {
 	// QueuedUntil Wanneer een wijziging in de documentatie komt
 	QueuedUntil *time.Time `json:"queued_until,omitempty"`
 	Slug        string     `json:"slug"`
+
+	// Summary De samenvatting 'In het kort' van de assistent; null zonder
+	Summary nullable.Nullable[DocSummaryMeta] `json:"summary"`
 }
 
 // DocDiff defines model for DocDiff.
@@ -3691,6 +3742,15 @@ type DocMeta struct {
 
 // DocMetaScope defines model for DocMeta.Scope.
 type DocMetaScope string
+
+// DocSummaryMeta defines model for DocSummaryMeta.
+type DocSummaryMeta struct {
+	At time.Time `json:"at"`
+
+	// By Wie haar vroeg; leeg als die gebruiker weg is
+	By    string `json:"by"`
+	Model string `json:"model"`
+}
 
 // DocVersion defines model for DocVersion.
 type DocVersion struct {
@@ -4743,6 +4803,28 @@ type IncidentSeverity string
 // IncidentStatus defines model for Incident.Status.
 type IncidentStatus string
 
+// IncidentAI defines model for IncidentAI.
+type IncidentAI struct {
+	At        time.Time `json:"at"`
+	Automatic bool      `json:"automatic"`
+
+	// By Wie haar vroeg; null als ze automatisch was
+	By nullable.Nullable[string] `json:"by"`
+
+	// ConversationId Het gesprek met de tools; alleen voor wie het mag openen
+	ConversationId nullable.Nullable[openapi_types.UUID] `json:"conversation_id"`
+	CostUsd        float32                               `json:"cost_usd"`
+
+	// Hidden De analyse las met de rechten van een beheerder; een viewer ziet de tekst niet
+	Hidden bool `json:"hidden"`
+
+	// Model Het model dat antwoordde; met een fallback meer, gescheiden door een komma
+	Model string `json:"model"`
+
+	// Text Markdown met vier kopjes; null als hidden
+	Text nullable.Nullable[string] `json:"text"`
+}
+
 // IncidentAnalysis defines model for IncidentAnalysis.
 type IncidentAnalysis struct {
 	// AnalyzedAt Wanneer de analyse voor het laatst veranderde
@@ -4790,6 +4872,9 @@ type IncidentCauseLevel string
 
 // IncidentDetail defines model for IncidentDetail.
 type IncidentDetail struct {
+	// Ai De analyse van de assistent; null zolang er geen is
+	Ai nullable.Nullable[IncidentAI] `json:"ai"`
+
 	// Analysis Null zolang de analyse nog niet gerekend is
 	Analysis nullable.Nullable[IncidentAnalysis] `json:"analysis"`
 
@@ -6603,6 +6688,16 @@ type GetDependencyGraphParams struct {
 // GetDependencyGraphParamsLevel defines parameters for GetDependencyGraph.
 type GetDependencyGraphParamsLevel string
 
+// DeleteDocSummaryParams defines parameters for DeleteDocSummary.
+type DeleteDocSummaryParams struct {
+	Cluster openapi_types.UUID `form:"cluster" json:"cluster"`
+}
+
+// SummarizeDocsParams defines parameters for SummarizeDocs.
+type SummarizeDocsParams struct {
+	Cluster openapi_types.UUID `form:"cluster" json:"cluster"`
+}
+
 // GetDocParams defines parameters for GetDoc.
 type GetDocParams struct {
 	// Cluster Het cluster; verplicht bij scope cluster
@@ -6754,6 +6849,9 @@ type CreateAssistantConversationJSONRequestBody = AssistantConversationInput
 
 // AskAssistantJSONRequestBody defines body for AskAssistant for application/json ContentType.
 type AskAssistantJSONRequestBody = AssistantQuestion
+
+// ExplainRiskJSONRequestBody defines body for ExplainRisk for application/json ContentType.
+type ExplainRiskJSONRequestBody = AssistantExplainInput
 
 // SaveAssistantSettingsJSONRequestBody defines body for SaveAssistantSettings for application/json ContentType.
 type SaveAssistantSettingsJSONRequestBody = AssistantSettingsInput
@@ -6922,6 +7020,9 @@ type ServerInterface interface {
 	// AskAssistant Een vraag stellen; het antwoord stroomt als server-sent events
 	// (POST /assistant/conversations/{conversationId}/messages)
 	AskAssistant(w http.ResponseWriter, r *http.Request, conversationId openapi_types.UUID)
+	// ExplainRisk Een bevinding van de health score of een SPOF laten uitleggen; het antwoord stroomt als server-sent events
+	// (POST /assistant/explain)
+	ExplainRisk(w http.ResponseWriter, r *http.Request)
 	// GetAssistantSettings De instellingen van de assistent en of jij hem kunt gebruiken
 	// (GET /assistant/settings)
 	GetAssistantSettings(w http.ResponseWriter, r *http.Request)
@@ -7096,6 +7197,12 @@ type ServerInterface interface {
 	// PublishDocs De documentatie nu naar GitHub schrijven (admin)
 	// (POST /docs/publish)
 	PublishDocs(w http.ResponseWriter, r *http.Request)
+	// DeleteDocSummary De samenvatting 'In het kort' van een cluster weghalen (admin)
+	// (DELETE /docs/summary)
+	DeleteDocSummary(w http.ResponseWriter, r *http.Request, params DeleteDocSummaryParams)
+	// SummarizeDocs De samenvatting 'In het kort' van een cluster laten schrijven (admin); het antwoord stroomt als server-sent events
+	// (POST /docs/summary)
+	SummarizeDocs(w http.ResponseWriter, r *http.Request, params SummarizeDocsParams)
 	// DeleteDocsTarget De koppeling verwijderen (admin); wat al in de repository staat, blijft daar
 	// (DELETE /docs/target)
 	DeleteDocsTarget(w http.ResponseWriter, r *http.Request)
@@ -7189,6 +7296,9 @@ type ServerInterface interface {
 	// GetIncident Eén incident, met wat er geraakt was en de statusovergangen in die periode
 	// (GET /incidents/{incidentId})
 	GetIncident(w http.ResponseWriter, r *http.Request, incidentId openapi_types.UUID)
+	// AnalyzeIncident Het incident laten analyseren door de assistent; het resultaat stroomt als server-sent events
+	// (POST /incidents/{incidentId}/analyze)
+	AnalyzeIncident(w http.ResponseWriter, r *http.Request, incidentId openapi_types.UUID)
 	// SetIncidentNote De notitie bij een incident (admin)
 	// (PUT /incidents/{incidentId}/note)
 	SetIncidentNote(w http.ResponseWriter, r *http.Request, incidentId openapi_types.UUID)
@@ -7411,6 +7521,12 @@ func (_ Unimplemented) GetAssistantConversation(w http.ResponseWriter, r *http.R
 // AskAssistant Een vraag stellen; het antwoord stroomt als server-sent events
 // (POST /assistant/conversations/{conversationId}/messages)
 func (_ Unimplemented) AskAssistant(w http.ResponseWriter, r *http.Request, conversationId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ExplainRisk Een bevinding van de health score of een SPOF laten uitleggen; het antwoord stroomt als server-sent events
+// (POST /assistant/explain)
+func (_ Unimplemented) ExplainRisk(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -7762,6 +7878,18 @@ func (_ Unimplemented) PublishDocs(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// DeleteDocSummary De samenvatting 'In het kort' van een cluster weghalen (admin)
+// (DELETE /docs/summary)
+func (_ Unimplemented) DeleteDocSummary(w http.ResponseWriter, r *http.Request, params DeleteDocSummaryParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SummarizeDocs De samenvatting 'In het kort' van een cluster laten schrijven (admin); het antwoord stroomt als server-sent events
+// (POST /docs/summary)
+func (_ Unimplemented) SummarizeDocs(w http.ResponseWriter, r *http.Request, params SummarizeDocsParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // DeleteDocsTarget De koppeling verwijderen (admin); wat al in de repository staat, blijft daar
 // (DELETE /docs/target)
 func (_ Unimplemented) DeleteDocsTarget(w http.ResponseWriter, r *http.Request) {
@@ -7945,6 +8073,12 @@ func (_ Unimplemented) ListIncidents(w http.ResponseWriter, r *http.Request, par
 // GetIncident Eén incident, met wat er geraakt was en de statusovergangen in die periode
 // (GET /incidents/{incidentId})
 func (_ Unimplemented) GetIncident(w http.ResponseWriter, r *http.Request, incidentId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// AnalyzeIncident Het incident laten analyseren door de assistent; het resultaat stroomt als server-sent events
+// (POST /incidents/{incidentId}/analyze)
+func (_ Unimplemented) AnalyzeIncident(w http.ResponseWriter, r *http.Request, incidentId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -8467,6 +8601,20 @@ func (siw *ServerInterfaceWrapper) AskAssistant(w http.ResponseWriter, r *http.R
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.AskAssistant(w, r, conversationId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ExplainRisk operation middleware
+func (siw *ServerInterfaceWrapper) ExplainRisk(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ExplainRisk(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -10192,6 +10340,72 @@ func (siw *ServerInterfaceWrapper) PublishDocs(w http.ResponseWriter, r *http.Re
 	handler.ServeHTTP(w, r)
 }
 
+// DeleteDocSummary operation middleware
+func (siw *ServerInterfaceWrapper) DeleteDocSummary(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params DeleteDocSummaryParams
+
+	// ------------- Required query parameter "cluster" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "cluster", r.URL.Query(), &params.Cluster, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cluster"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cluster", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteDocSummary(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SummarizeDocs operation middleware
+func (siw *ServerInterfaceWrapper) SummarizeDocs(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params SummarizeDocsParams
+
+	// ------------- Required query parameter "cluster" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "cluster", r.URL.Query(), &params.Cluster, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cluster"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cluster", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SummarizeDocs(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // DeleteDocsTarget operation middleware
 func (siw *ServerInterfaceWrapper) DeleteDocsTarget(w http.ResponseWriter, r *http.Request) {
 
@@ -11092,6 +11306,32 @@ func (siw *ServerInterfaceWrapper) GetIncident(w http.ResponseWriter, r *http.Re
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetIncident(w, r, incidentId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AnalyzeIncident operation middleware
+func (siw *ServerInterfaceWrapper) AnalyzeIncident(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "incidentId" -------------
+	var incidentId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "incidentId", chi.URLParam(r, "incidentId"), &incidentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "incidentId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AnalyzeIncident(w, r, incidentId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -13210,6 +13450,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Get(options.BaseURL+"/incidents/{incidentId}", wrapper.GetIncident)
 	})
 	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/incidents/{incidentId}/analyze", wrapper.AnalyzeIncident)
+	})
+	r.Group(func(r chi.Router) {
 		r.Put(options.BaseURL+"/incidents/{incidentId}/note", wrapper.SetIncidentNote)
 	})
 	r.Group(func(r chi.Router) {
@@ -13238,6 +13481,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/assistant/conversations/{conversationId}/messages", wrapper.AskAssistant)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/assistant/explain", wrapper.ExplainRisk)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/risk", wrapper.GetRisk)
@@ -13307,6 +13553,12 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/docs/publish", wrapper.PublishDocs)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/docs/summary", wrapper.DeleteDocSummary)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/docs/summary", wrapper.SummarizeDocs)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/docs/{scope}/{kind}", wrapper.GetDoc)

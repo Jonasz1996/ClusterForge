@@ -38,6 +38,15 @@ func architecture(c *Cluster, o Opts) string {
 		{"Git", git},
 		{"Tags", esc(strings.Join(c.Tags, ", "))},
 	})
+	if s := c.Summary; s != nil {
+		d.h2("In het kort")
+		d.block(s.Text)
+		credit := "Samengevat door de assistent (" + esc(modelText(s.Model)) + ") op " + o.dateText(s.At)
+		if o.Usernames && s.By != "" {
+			credit += ", op verzoek van " + esc(s.By)
+		}
+		d.p("*" + credit + ". Bij twijfel gelden de hoofdstukken zelf.*")
+	}
 
 	d.h2("Wat het doet")
 	if t := c.Template; t != nil && t.Description != "" {

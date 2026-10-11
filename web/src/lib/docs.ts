@@ -7,6 +7,7 @@ import type { components } from "./api/schema";
 export type DocIndex = components["schemas"]["DocIndex"];
 export type DocMeta = components["schemas"]["DocMeta"];
 export type DocClusterIndex = components["schemas"]["DocClusterIndex"];
+export type DocSummaryMeta = components["schemas"]["DocSummaryMeta"];
 export type Doc = components["schemas"]["Doc"];
 export type DocVersion = components["schemas"]["DocVersion"];
 export type DocsTarget = components["schemas"]["DocsTarget"];
