@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
-import { AuditList } from "@/components/audit/AuditList";
 import { IncidentState, SeverityBadge } from "@/components/incidents/Incidents";
 import { formatDuration, QueryState, tableClass, tdClass, thClass } from "@/components/inventory/bits";
 import { Alert, Badge, Button, Card, PageHeader, Textarea } from "@/components/ui";
@@ -19,6 +18,8 @@ import {
   type IncidentSubject,
 } from "@/lib/incidents";
 import { useIsAdmin } from "@/lib/inventory";
+import type { IncidentAnalysis, TimelineClass, TimelineEntry } from "@/lib/timeline";
+import { AnalysisCard, ClassFilter, TimelineList, WindowCharts } from "@/components/whatbroke/WhatBroke";
 
 export default function IncidentPage() {
   return (
@@ -62,20 +63,69 @@ function IncidentInner() {
             }
           />
           <Facts inc={q.data.incident} />
+          <AnalysisCard analysis={q.data.analysis} />
           <Subjects items={q.data.incident.subjects} />
+          {q.data.analysis && <Charts inc={q.data.incident} analysis={q.data.analysis} timeline={q.data.timeline} />}
+          <TimelineCard
+            entries={q.data.timeline}
+            more={q.data.timeline_more}
+            firstSymptom={q.data.analysis?.first_symptom.entry_id}
+          />
           <NoteCard key={q.data.incident.id} inc={q.data.incident} isAdmin={isAdmin} />
-          <Card title="Geschiedenis">
-            <p className="mb-3 text-sm text-slate-500">
-              Statusovergangen, VIP-wissels en tests over wat geraakt was, van vijf minuten voor het begin tot het einde.
-            </p>
-            <AuditList items={q.data.history} compact />
-            {q.data.history_more && (
-              <p className="mt-2 text-sm text-slate-500">Er waren meer regels dan hier staan; de eerste 200 zijn getoond.</p>
-            )}
-          </Card>
         </div>
       )}
     </QueryState>
+  );
+}
+
+// TimelineCard is de tijdlijn van het incident: wat er veranderde en wat er
+// misging, van twee uur voor het eerste symptoom tot het einde.
+function TimelineCard({ entries, more, firstSymptom }: { entries: TimelineEntry[]; more: boolean; firstSymptom?: string }) {
+  const [shown, setShown] = useState<TimelineClass[]>(["change", "symptom"]);
+  const items = entries.filter((e) => shown.includes(e.class) || e.id === firstSymptom);
+  return (
+    <Card title="Tijdlijn">
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-sm text-slate-500">
+            Het logboek, het journaal van de nodes en de afwijkingen in de metrics, oudste eerst.
+          </p>
+          <ClassFilter value={shown} onChange={setShown} />
+        </div>
+        <TimelineList entries={items} firstSymptom={firstSymptom} empty="Niets in de tijdlijn met deze filters." />
+        {more && <p className="text-sm text-slate-500">De tijdlijn had meer dan 1000 regels; de oudste ontbreken.</p>}
+      </div>
+    </Card>
+  );
+}
+
+// Charts toont de grafieken rond het eerste symptoom: van de node waar het
+// begon, anders van het geraakte cluster.
+function Charts({ inc, analysis, timeline }: { inc: Incident; analysis: IncidentAnalysis; timeline: TimelineEntry[] }) {
+  const first = analysis.first_symptom;
+  const entry = timeline.find((e) => e.id === first.entry_id);
+  const cluster = inc.subjects.find((s) => s.type === "cluster" && s.present);
+  const node = inc.subjects.find((s) => s.type === "node" && s.present);
+  let target: { kind: "node" | "cluster"; id: string; name: string } | null = null;
+  if (entry?.node_id) target = { kind: "node", id: entry.node_id, name: entry.hostname };
+  else if (node) target = { kind: "node", id: node.id, name: node.name };
+  else if (cluster) target = { kind: "cluster", id: cluster.id, name: cluster.name };
+  if (!target) return null;
+  // Van drie kwartier voor tot een kwartier na het eerste symptoom, op de
+  // minuut. Wat nog in de toekomst ligt, blijft leeg.
+  const minute = 60_000;
+  const from = Math.floor((new Date(first.from).getTime() - 45 * minute) / minute) * minute;
+  const to = Math.ceil((new Date(first.to).getTime() + 15 * minute) / minute) * minute;
+  if (to <= from) return null;
+  return (
+    <WindowCharts
+      kind={target.kind}
+      id={target.id}
+      name={target.name}
+      from={new Date(from).toISOString()}
+      to={new Date(to).toISOString()}
+      marker={first.from}
+    />
   );
 }
 

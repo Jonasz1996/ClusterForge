@@ -726,6 +726,51 @@ func (e IncidentStatus) Valid() bool {
 	}
 }
 
+// Defines values for IncidentCauseLevel.
+const (
+	IncidentCauseLevelLikely   IncidentCauseLevel = "likely"
+	IncidentCauseLevelPossible IncidentCauseLevel = "possible"
+	IncidentCauseLevelWeak     IncidentCauseLevel = "weak"
+)
+
+// Valid indicates whether the value is a known member of the IncidentCauseLevel enum.
+func (e IncidentCauseLevel) Valid() bool {
+	switch e {
+	case IncidentCauseLevelLikely:
+		return true
+	case IncidentCauseLevelPossible:
+		return true
+	case IncidentCauseLevelWeak:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for IncidentFindingMetric.
+const (
+	Cpu           IncidentFindingMetric = "cpu"
+	Disk          IncidentFindingMetric = "disk"
+	Memory        IncidentFindingMetric = "memory"
+	NetworkErrors IncidentFindingMetric = "network_errors"
+)
+
+// Valid indicates whether the value is a known member of the IncidentFindingMetric enum.
+func (e IncidentFindingMetric) Valid() bool {
+	switch e {
+	case Cpu:
+		return true
+	case Disk:
+		return true
+	case Memory:
+		return true
+	case NetworkErrors:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for IncidentSubjectType.
 const (
 	IncidentSubjectTypeCluster IncidentSubjectType = "cluster"
@@ -744,6 +789,24 @@ func (e IncidentSubjectType) Valid() bool {
 	case IncidentSubjectTypeService:
 		return true
 	case IncidentSubjectTypeTestRun:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for IncidentTopCauseLevel.
+const (
+	IncidentTopCauseLevelLikely   IncidentTopCauseLevel = "likely"
+	IncidentTopCauseLevelPossible IncidentTopCauseLevel = "possible"
+)
+
+// Valid indicates whether the value is a known member of the IncidentTopCauseLevel enum.
+func (e IncidentTopCauseLevel) Valid() bool {
+	switch e {
+	case IncidentTopCauseLevelLikely:
+		return true
+	case IncidentTopCauseLevelPossible:
 		return true
 	default:
 		return false
@@ -1260,6 +1323,57 @@ func (e TestRunResult) Valid() bool {
 	case TestRunResultSkipped:
 		return true
 	case TestRunResultWarning:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TimelineEntryClass.
+const (
+	Change  TimelineEntryClass = "change"
+	Info    TimelineEntryClass = "info"
+	Symptom TimelineEntryClass = "symptom"
+)
+
+// Valid indicates whether the value is a known member of the TimelineEntryClass enum.
+func (e TimelineEntryClass) Valid() bool {
+	switch e {
+	case Change:
+		return true
+	case Info:
+		return true
+	case Symptom:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for TimelineEntrySource.
+const (
+	TimelineEntrySourceAgent        TimelineEntrySource = "agent"
+	TimelineEntrySourceClusterforge TimelineEntrySource = "clusterforge"
+	TimelineEntrySourceLog          TimelineEntrySource = "log"
+	TimelineEntrySourceMetrics      TimelineEntrySource = "metrics"
+	TimelineEntrySourceProxmox      TimelineEntrySource = "proxmox"
+	TimelineEntrySourceServer       TimelineEntrySource = "server"
+)
+
+// Valid indicates whether the value is a known member of the TimelineEntrySource enum.
+func (e TimelineEntrySource) Valid() bool {
+	switch e {
+	case TimelineEntrySourceAgent:
+		return true
+	case TimelineEntrySourceClusterforge:
+		return true
+	case TimelineEntrySourceLog:
+		return true
+	case TimelineEntrySourceMetrics:
+		return true
+	case TimelineEntrySourceProxmox:
+		return true
+	case TimelineEntrySourceServer:
 		return true
 	default:
 		return false
@@ -3075,6 +3189,9 @@ type ImpactItem struct {
 
 // Incident defines model for Incident.
 type Incident struct {
+	// Cause De eerste oorzaak uit de analyse, als die waarschijnlijk of mogelijk is
+	Cause nullable.Nullable[IncidentTopCause] `json:"cause"`
+
 	// CausedByTest Tijdens een failovertest van ClusterForge in hetzelfde cluster
 	CausedByTest bool                                  `json:"caused_by_test"`
 	DetectedAt   time.Time                             `json:"detected_at"`
@@ -3097,20 +3214,102 @@ type IncidentSeverity string
 // IncidentStatus defines model for Incident.Status.
 type IncidentStatus string
 
+// IncidentAnalysis defines model for IncidentAnalysis.
+type IncidentAnalysis struct {
+	// AnalyzedAt Wanneer de analyse voor het laatst veranderde
+	AnalyzedAt time.Time         `json:"analyzed_at"`
+	Anomalies  []IncidentFinding `json:"anomalies"`
+	Causes     []IncidentCause   `json:"causes"`
+
+	// Changes Het aantal veranderingen in het venster, ook die te ver weg lagen
+	Changes    int    `json:"changes"`
+	Conclusion string `json:"conclusion"`
+
+	// Consumers Clusters die van een geraakt cluster afhangen en zelf niet in het incident zitten
+	Consumers []struct {
+		Id   openapi_types.UUID `json:"id"`
+		Name string             `json:"name"`
+	} `json:"consumers"`
+	FirstSymptom   IncidentMoment `json:"first_symptom"`
+	MetricsUnknown bool           `json:"metrics_unknown"`
+	Version        int            `json:"version"`
+	WindowFrom     time.Time      `json:"window_from"`
+	WindowTo       time.Time      `json:"window_to"`
+}
+
+// IncidentCause defines model for IncidentCause.
+type IncidentCause struct {
+	// Also Het aantal regels die erbij horen, zoals de andere stappen van dezelfde taak
+	Also    int    `json:"also"`
+	Cluster string `json:"cluster"`
+
+	// Commit De volledige commit bij een Git-wijziging
+	Commit   string             `json:"commit"`
+	EntryId  string             `json:"entry_id"`
+	Hostname string             `json:"hostname"`
+	Kind     string             `json:"kind"`
+	Level    IncidentCauseLevel `json:"level"`
+	Link     string             `json:"link"`
+	Reasons  []string           `json:"reasons"`
+	Score    float32            `json:"score"`
+	Summary  string             `json:"summary"`
+	Ts       time.Time          `json:"ts"`
+}
+
+// IncidentCauseLevel defines model for IncidentCause.Level.
+type IncidentCauseLevel string
+
 // IncidentDetail defines model for IncidentDetail.
 type IncidentDetail struct {
+	// Analysis Null zolang de analyse nog niet gerekend is
+	Analysis nullable.Nullable[IncidentAnalysis] `json:"analysis"`
+
 	// History Statusovergangen, incidenten en tests over wat geraakt was, oudste eerst
 	History []AuditEntry `json:"history"`
 
 	// HistoryMore Er waren meer regels dan getoond
 	HistoryMore bool     `json:"history_more"`
 	Incident    Incident `json:"incident"`
+
+	// Timeline Het logboek, het journaal en de afwijkingen in de metrics over wat
+	// geraakt was en wat eromheen ligt, van twee uur voor het eerste
+	// symptoom tot het einde, oudste eerst
+	Timeline []TimelineEntry `json:"timeline"`
+
+	// TimelineMore Er waren meer regels; de oudste ontbreken
+	TimelineMore bool `json:"timeline_more"`
 }
+
+// IncidentFinding defines model for IncidentFinding.
+type IncidentFinding struct {
+	After    float32               `json:"after"`
+	At       time.Time             `json:"at"`
+	Before   float32               `json:"before"`
+	Hostname string                `json:"hostname"`
+	Label    string                `json:"label"`
+	Metric   IncidentFindingMetric `json:"metric"`
+	NodeId   openapi_types.UUID    `json:"node_id"`
+	Summary  string                `json:"summary"`
+}
+
+// IncidentFindingMetric defines model for IncidentFinding.Metric.
+type IncidentFindingMetric string
 
 // IncidentList defines model for IncidentList.
 type IncidentList struct {
 	HasMore bool       `json:"has_more"`
 	Items   []Incident `json:"items"`
+}
+
+// IncidentMoment defines model for IncidentMoment.
+type IncidentMoment struct {
+	// EntryId Leeg als het moment uit het begin van het incident komt
+	EntryId string    `json:"entry_id"`
+	From    time.Time `json:"from"`
+	Summary string    `json:"summary"`
+	To      time.Time `json:"to"`
+	Ts      time.Time `json:"ts"`
+	Why     string    `json:"why"`
 }
 
 // IncidentNote defines model for IncidentNote.
@@ -3141,6 +3340,15 @@ type IncidentSubject struct {
 
 // IncidentSubjectType defines model for IncidentSubject.Type.
 type IncidentSubjectType string
+
+// IncidentTopCause defines model for IncidentTopCause.
+type IncidentTopCause struct {
+	Level   IncidentTopCauseLevel `json:"level"`
+	Summary string                `json:"summary"`
+}
+
+// IncidentTopCauseLevel defines model for IncidentTopCause.Level.
+type IncidentTopCauseLevel string
 
 // Job defines model for Job.
 type Job struct {
@@ -3906,6 +4114,49 @@ type TestRunSegment struct {
 	ToMs   int64 `json:"to_ms"`
 }
 
+// Timeline defines model for Timeline.
+type Timeline struct {
+	Entries []TimelineEntry `json:"entries"`
+
+	// HasMore Er waren meer regels; de oudste ontbreken
+	HasMore bool `json:"has_more"`
+}
+
+// TimelineEntry defines model for TimelineEntry.
+type TimelineEntry struct {
+	Action    string                                `json:"action"`
+	Class     TimelineEntryClass                    `json:"class"`
+	Cluster   string                                `json:"cluster"`
+	ClusterId nullable.Nullable[openapi_types.UUID] `json:"cluster_id"`
+
+	// Delay Waarom het venster er is, zoals 'een node gaat pas na 90 s zonder heartbeat op down'
+	Delay  string            `json:"delay"`
+	Detail map[string]string `json:"detail"`
+
+	// From Het begin van het venster waarin het waarschijnlijk gebeurde
+	From     time.Time `json:"from"`
+	Hostname string    `json:"hostname"`
+
+	// Id e en een event-id, c en een journaal-id, of m voor een afwijking in de metrics
+	Id      string                                `json:"id"`
+	Job     string                                `json:"job"`
+	JobId   nullable.Nullable[openapi_types.UUID] `json:"job_id"`
+	Kind    string                                `json:"kind"`
+	Link    string                                `json:"link"`
+	NodeId  nullable.Nullable[openapi_types.UUID] `json:"node_id"`
+	Source  TimelineEntrySource                   `json:"source"`
+	Subject string                                `json:"subject"`
+	Summary string                                `json:"summary"`
+	To      time.Time                             `json:"to"`
+	Ts      time.Time                             `json:"ts"`
+}
+
+// TimelineEntryClass defines model for TimelineEntry.Class.
+type TimelineEntryClass string
+
+// TimelineEntrySource defines model for TimelineEntry.Source.
+type TimelineEntrySource string
+
 // TotpCodeRequest defines model for TotpCodeRequest.
 type TotpCodeRequest struct {
 	Code string `json:"code"`
@@ -4033,6 +4284,24 @@ type ChangesLimit = int
 // ChangesTo defines model for ChangesTo.
 type ChangesTo = time.Time
 
+// MetricsFrom defines model for MetricsFrom.
+type MetricsFrom = time.Time
+
+// MetricsTo defines model for MetricsTo.
+type MetricsTo = time.Time
+
+// TimelineClass defines model for TimelineClass.
+type TimelineClass = string
+
+// TimelineFrom defines model for TimelineFrom.
+type TimelineFrom = time.Time
+
+// TimelineLimit defines model for TimelineLimit.
+type TimelineLimit = int
+
+// TimelineTo defines model for TimelineTo.
+type TimelineTo = time.Time
+
 // ListAuditParams defines parameters for ListAudit.
 type ListAuditParams struct {
 	// Before Alleen regels met een kleiner id (de volgende pagina)
@@ -4111,6 +4380,25 @@ type ListClusterChangesParams struct {
 // GetClusterMetricsParams defines parameters for GetClusterMetrics.
 type GetClusterMetricsParams struct {
 	Range *MetricsRange `form:"range,omitempty" json:"range,omitempty"`
+
+	// From Een vast venster in plaats van range, samen met to; hoogstens 7 dagen
+	From *MetricsFrom `form:"from,omitempty" json:"from,omitempty"`
+	To   *MetricsTo   `form:"to,omitempty" json:"to,omitempty"`
+}
+
+// GetClusterTimelineParams defines parameters for GetClusterTimeline.
+type GetClusterTimelineParams struct {
+	// From Vanaf dit tijdstip; standaard 24 uur geleden
+	From *TimelineFrom `form:"from,omitempty" json:"from,omitempty"`
+
+	// To Tot (niet tot en met) dit tijdstip; standaard nu
+	To *TimelineTo `form:"to,omitempty" json:"to,omitempty"`
+
+	// Class Alleen deze klassen, met komma's, zoals change,symptom
+	Class *TimelineClass `form:"class,omitempty" json:"class,omitempty"`
+
+	// Limit Het aantal laatste regels
+	Limit *TimelineLimit `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
 // GetDependencyGraphParams defines parameters for GetDependencyGraph.
@@ -4194,6 +4482,25 @@ type ListNodeChangesParams struct {
 // GetNodeMetricsParams defines parameters for GetNodeMetrics.
 type GetNodeMetricsParams struct {
 	Range *MetricsRange `form:"range,omitempty" json:"range,omitempty"`
+
+	// From Een vast venster in plaats van range, samen met to; hoogstens 7 dagen
+	From *MetricsFrom `form:"from,omitempty" json:"from,omitempty"`
+	To   *MetricsTo   `form:"to,omitempty" json:"to,omitempty"`
+}
+
+// GetNodeTimelineParams defines parameters for GetNodeTimeline.
+type GetNodeTimelineParams struct {
+	// From Vanaf dit tijdstip; standaard 24 uur geleden
+	From *TimelineFrom `form:"from,omitempty" json:"from,omitempty"`
+
+	// To Tot (niet tot en met) dit tijdstip; standaard nu
+	To *TimelineTo `form:"to,omitempty" json:"to,omitempty"`
+
+	// Class Alleen deze klassen, met komma's, zoals change,symptom
+	Class *TimelineClass `form:"class,omitempty" json:"class,omitempty"`
+
+	// Limit Het aantal laatste regels
+	Limit *TimelineLimit `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
 // ProbeProxmoxJSONBody defines parameters for ProbeProxmox.
@@ -4437,6 +4744,9 @@ type ServerInterface interface {
 	// ListSpecRevisions De gewenste staat van een cluster uit een template, met elke revisie en wat ze veranderde
 	// (GET /clusters/{clusterId}/spec-revisions)
 	ListSpecRevisions(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
+	// GetClusterTimeline De tijdlijn van een cluster en zijn nodes, oudste eerst
+	// (GET /clusters/{clusterId}/timeline)
+	GetClusterTimeline(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params GetClusterTimelineParams)
 	// CreateVip VIP toevoegen aan een cluster (admin)
 	// (POST /clusters/{clusterId}/vips)
 	CreateVip(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
@@ -4587,6 +4897,9 @@ type ServerInterface interface {
 	// GetNodeMetrics Grafieken van één node uit VictoriaMetrics
 	// (GET /nodes/{nodeId}/metrics)
 	GetNodeMetrics(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID, params GetNodeMetricsParams)
+	// GetNodeTimeline De tijdlijn van een node, oudste eerst
+	// (GET /nodes/{nodeId}/timeline)
+	GetNodeTimeline(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID, params GetNodeTimelineParams)
 	// ListProxmox Gekoppelde Proxmox-omgevingen
 	// (GET /proxmox)
 	ListProxmox(w http.ResponseWriter, r *http.Request)
@@ -4872,6 +5185,12 @@ func (_ Unimplemented) GetClusterMetrics(w http.ResponseWriter, r *http.Request,
 // ListSpecRevisions De gewenste staat van een cluster uit een template, met elke revisie en wat ze veranderde
 // (GET /clusters/{clusterId}/spec-revisions)
 func (_ Unimplemented) ListSpecRevisions(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetClusterTimeline De tijdlijn van een cluster en zijn nodes, oudste eerst
+// (GET /clusters/{clusterId}/timeline)
+func (_ Unimplemented) GetClusterTimeline(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params GetClusterTimelineParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -5172,6 +5491,12 @@ func (_ Unimplemented) GetNodeFacts(w http.ResponseWriter, r *http.Request, node
 // GetNodeMetrics Grafieken van één node uit VictoriaMetrics
 // (GET /nodes/{nodeId}/metrics)
 func (_ Unimplemented) GetNodeMetrics(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID, params GetNodeMetricsParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetNodeTimeline De tijdlijn van een node, oudste eerst
+// (GET /nodes/{nodeId}/timeline)
+func (_ Unimplemented) GetNodeTimeline(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID, params GetNodeTimelineParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -6390,6 +6715,32 @@ func (siw *ServerInterfaceWrapper) GetClusterMetrics(w http.ResponseWriter, r *h
 		return
 	}
 
+	// ------------- Optional query parameter "from" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "from", r.URL.Query(), &params.From, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "from"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "from", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "to" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "to", r.URL.Query(), &params.To, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "to"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "to", Err: err})
+		}
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetClusterMetrics(w, r, clusterId, params)
 	}))
@@ -6418,6 +6769,87 @@ func (siw *ServerInterfaceWrapper) ListSpecRevisions(w http.ResponseWriter, r *h
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListSpecRevisions(w, r, clusterId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetClusterTimeline operation middleware
+func (siw *ServerInterfaceWrapper) GetClusterTimeline(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetClusterTimelineParams
+
+	// ------------- Optional query parameter "from" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "from", r.URL.Query(), &params.From, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "from"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "from", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "to" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "to", r.URL.Query(), &params.To, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "to"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "to", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "class" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "class", r.URL.Query(), &params.Class, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "class"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "class", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetClusterTimeline(w, r, clusterId, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -7857,8 +8289,115 @@ func (siw *ServerInterfaceWrapper) GetNodeMetrics(w http.ResponseWriter, r *http
 		return
 	}
 
+	// ------------- Optional query parameter "from" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "from", r.URL.Query(), &params.From, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "from"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "from", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "to" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "to", r.URL.Query(), &params.To, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "to"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "to", Err: err})
+		}
+		return
+	}
+
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetNodeMetrics(w, r, nodeId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetNodeTimeline operation middleware
+func (siw *ServerInterfaceWrapper) GetNodeTimeline(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetNodeTimelineParams
+
+	// ------------- Optional query parameter "from" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "from", r.URL.Query(), &params.From, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "from"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "from", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "to" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "to", r.URL.Query(), &params.To, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "to"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "to", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "class" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "class", r.URL.Query(), &params.Class, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "class"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "class", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetNodeTimeline(w, r, nodeId, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -8638,6 +9177,12 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/clusters/{clusterId}/changes", wrapper.ListClusterChanges)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/nodes/{nodeId}/timeline", wrapper.GetNodeTimeline)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/clusters/{clusterId}/timeline", wrapper.GetClusterTimeline)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/clusters/{clusterId}/metrics", wrapper.GetClusterMetrics)

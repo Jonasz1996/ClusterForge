@@ -56,6 +56,10 @@ type PanelQuery struct {
 	Legend string
 }
 
+// diskExpr is de bezetting per bestandssysteem, zoals df hem toont.
+const diskExpr = `100 * (node_filesystem_size_bytes{$sel} - node_filesystem_free_bytes{$sel}) / ` +
+	`(node_filesystem_size_bytes{$sel} - node_filesystem_free_bytes{$sel} + node_filesystem_avail_bytes{$sel})`
+
 var NodePanels = []Panel{
 	{ID: "cpu", Title: "CPU", Unit: UnitPercent, Queries: []PanelQuery{
 		{`100 * (1 - avg(rate(node_cpu_seconds_total{$sel,mode="idle"}[$w])))`, "gebruik"},
@@ -69,7 +73,7 @@ var NodePanels = []Panel{
 		{`100 * (1 - node_memory_SwapFree_bytes{$sel} / (node_memory_SwapTotal_bytes{$sel} > 0))`, "swap"},
 	}},
 	{ID: "disk", Title: "Schijfbezetting", Unit: UnitPercent, Queries: []PanelQuery{
-		{`100 * (node_filesystem_size_bytes{$sel} - node_filesystem_free_bytes{$sel}) / (node_filesystem_size_bytes{$sel} - node_filesystem_free_bytes{$sel} + node_filesystem_avail_bytes{$sel})`, "{mountpoint}"},
+		{diskExpr, "{mountpoint}"},
 	}},
 	{ID: "diskio", Title: "Schijf-I/O", Unit: UnitBytesPerSecond, Queries: []PanelQuery{
 		{`rate(node_disk_read_bytes_total{$sel}[$w])`, "{device} lezen"},
@@ -136,14 +140,33 @@ func (c *Client) Enabled() bool { return c.url != "" }
 func NodeSelector(id uuid.UUID) string    { return `node_id="` + id.String() + `"` }
 func ClusterSelector(id uuid.UUID) string { return `cluster_id="` + id.String() + `"` }
 
-// Query voert de panelen uit voor selector over de periode rng.
+// Query voert de panelen uit voor selector over de periode rng tot nu.
 func (c *Client) Query(ctx context.Context, panels []Panel, selector string, rng time.Duration, now time.Time) (Result, error) {
+	step := stepFor(rng)
+	end := now.Truncate(step)
+	return c.query(ctx, panels, selector, end.Add(-rng), end, step)
+}
+
+// MaxWindow is het langste venster dat QueryWindow opvraagt.
+const MaxWindow = 7 * 24 * time.Hour
+
+// QueryWindow voert de panelen uit over een vast venster, zoals dat van een
+// incident van gisteren.
+func (c *Client) QueryWindow(ctx context.Context, panels []Panel, selector string, start, end time.Time) (Result, error) {
+	if !start.Before(end) || end.Sub(start) > MaxWindow {
+		return Result{}, fmt.Errorf("venster van %s tot %s", start.Format(time.RFC3339), end.Format(time.RFC3339))
+	}
+	step := stepFor(end.Sub(start))
+	start = start.Truncate(step)
+	end = start.Add((end.Sub(start) + step - 1) / step * step)
+	return c.query(ctx, panels, selector, start, end, step)
+}
+
+func (c *Client) query(ctx context.Context, panels []Panel, selector string, start, end time.Time, step time.Duration) (Result, error) {
 	if !c.Enabled() {
 		return Result{}, ErrDisabled
 	}
-	step := stepFor(rng)
-	end := now.Truncate(step)
-	start := end.Add(-rng)
+	rng := end.Sub(start)
 	window := max(2*step, time.Minute)
 	res := Result{Start: start, End: end, Step: step}
 	n := int(rng/step) + 1

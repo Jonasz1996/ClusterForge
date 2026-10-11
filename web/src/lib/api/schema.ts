@@ -396,6 +396,9 @@ export interface paths {
         parameters: {
             query?: {
                 range?: components["schemas"]["MetricsRange"];
+                /** @description Een vast venster in plaats van range, samen met to; hoogstens 7 dagen */
+                from?: components["parameters"]["MetricsFrom"];
+                to?: components["parameters"]["MetricsTo"];
             };
             header?: never;
             path: {
@@ -471,10 +474,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/nodes/{nodeId}/timeline": {
+        parameters: {
+            query?: {
+                /** @description Vanaf dit tijdstip; standaard 24 uur geleden */
+                from?: components["parameters"]["TimelineFrom"];
+                /** @description Tot (niet tot en met) dit tijdstip; standaard nu */
+                to?: components["parameters"]["TimelineTo"];
+                /** @description Alleen deze klassen, met komma's, zoals change,symptom */
+                class?: components["parameters"]["TimelineClass"];
+                /** @description Het aantal laatste regels */
+                limit?: components["parameters"]["TimelineLimit"];
+            };
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * De tijdlijn van een node, oudste eerst
+         * @description Het logboek en het journaal samen: wat er op de node en met zijn
+         *     cluster gebeurde. Nooit iets uit de beveiliging; een viewer ziet bij
+         *     een SSH-login geen IP-adres.
+         */
+        get: operations["getNodeTimeline"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/clusters/{clusterId}/timeline": {
+        parameters: {
+            query?: {
+                /** @description Vanaf dit tijdstip; standaard 24 uur geleden */
+                from?: components["parameters"]["TimelineFrom"];
+                /** @description Tot (niet tot en met) dit tijdstip; standaard nu */
+                to?: components["parameters"]["TimelineTo"];
+                /** @description Alleen deze klassen, met komma's, zoals change,symptom */
+                class?: components["parameters"]["TimelineClass"];
+                /** @description Het aantal laatste regels */
+                limit?: components["parameters"]["TimelineLimit"];
+            };
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        /** De tijdlijn van een cluster en zijn nodes, oudste eerst */
+        get: operations["getClusterTimeline"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/clusters/{clusterId}/metrics": {
         parameters: {
             query?: {
                 range?: components["schemas"]["MetricsRange"];
+                /** @description Een vast venster in plaats van range, samen met to; hoogstens 7 dagen */
+                from?: components["parameters"]["MetricsFrom"];
+                to?: components["parameters"]["MetricsTo"];
             };
             header?: never;
             path: {
@@ -2627,6 +2694,13 @@ export interface components {
             /** Format: date-time */
             updated_at: string;
             subjects: components["schemas"]["IncidentSubject"][];
+            /** @description De eerste oorzaak uit de analyse, als die waarschijnlijk of mogelijk is */
+            cause: components["schemas"]["IncidentTopCause"] | null;
+        };
+        IncidentTopCause: {
+            summary: string;
+            /** @enum {string} */
+            level: "likely" | "possible";
         };
         IncidentList: {
             items: components["schemas"]["Incident"][];
@@ -2634,10 +2708,129 @@ export interface components {
         };
         IncidentDetail: {
             incident: components["schemas"]["Incident"];
+            /** @description Null zolang de analyse nog niet gerekend is */
+            analysis: components["schemas"]["IncidentAnalysis"] | null;
+            /**
+             * @description Het logboek, het journaal en de afwijkingen in de metrics over wat
+             *     geraakt was en wat eromheen ligt, van twee uur voor het eerste
+             *     symptoom tot het einde, oudste eerst
+             */
+            timeline: components["schemas"]["TimelineEntry"][];
+            /** @description Er waren meer regels; de oudste ontbreken */
+            timeline_more: boolean;
             /** @description Statusovergangen, incidenten en tests over wat geraakt was, oudste eerst */
             history: components["schemas"]["AuditEntry"][];
             /** @description Er waren meer regels dan getoond */
             history_more: boolean;
+        };
+        TimelineEntry: {
+            /** @description e en een event-id, c en een journaal-id, of m voor een afwijking in de metrics */
+            id: string;
+            /** Format: date-time */
+            ts: string;
+            /**
+             * Format: date-time
+             * @description Het begin van het venster waarin het waarschijnlijk gebeurde
+             */
+            from: string;
+            /** Format: date-time */
+            to: string;
+            /** @description Waarom het venster er is, zoals 'een node gaat pas na 90 s zonder heartbeat op down' */
+            delay: string;
+            /** @enum {string} */
+            class: "change" | "symptom" | "info";
+            /** @enum {string} */
+            source: "log" | "agent" | "server" | "proxmox" | "clusterforge" | "metrics";
+            kind: string;
+            action: string;
+            summary: string;
+            /** Format: uuid */
+            node_id: string | null;
+            hostname: string;
+            /** Format: uuid */
+            cluster_id: string | null;
+            cluster: string;
+            subject: string;
+            /** Format: uuid */
+            job_id: string | null;
+            job: string;
+            link: string;
+            detail: {
+                [key: string]: string;
+            };
+        };
+        Timeline: {
+            entries: components["schemas"]["TimelineEntry"][];
+            /** @description Er waren meer regels; de oudste ontbreken */
+            has_more: boolean;
+        };
+        IncidentMoment: {
+            /** @description Leeg als het moment uit het begin van het incident komt */
+            entry_id: string;
+            /** Format: date-time */
+            ts: string;
+            /** Format: date-time */
+            from: string;
+            /** Format: date-time */
+            to: string;
+            summary: string;
+            why: string;
+        };
+        IncidentCause: {
+            entry_id: string;
+            /** Format: date-time */
+            ts: string;
+            /** @enum {string} */
+            level: "likely" | "possible" | "weak";
+            score: number;
+            kind: string;
+            summary: string;
+            hostname: string;
+            cluster: string;
+            link: string;
+            reasons: string[];
+            /** @description Het aantal regels die erbij horen, zoals de andere stappen van dezelfde taak */
+            also: number;
+            /** @description De volledige commit bij een Git-wijziging */
+            commit: string;
+        };
+        IncidentFinding: {
+            /** Format: uuid */
+            node_id: string;
+            hostname: string;
+            /** @enum {string} */
+            metric: "cpu" | "memory" | "disk" | "network_errors";
+            label: string;
+            before: number;
+            after: number;
+            /** Format: date-time */
+            at: string;
+            summary: string;
+        };
+        IncidentAnalysis: {
+            version: number;
+            first_symptom: components["schemas"]["IncidentMoment"];
+            /** Format: date-time */
+            window_from: string;
+            /** Format: date-time */
+            window_to: string;
+            conclusion: string;
+            causes: components["schemas"]["IncidentCause"][];
+            /** @description Het aantal veranderingen in het venster, ook die te ver weg lagen */
+            changes: number;
+            anomalies: components["schemas"]["IncidentFinding"][];
+            metrics_unknown: boolean;
+            /** @description Clusters die van een geraakt cluster afhangen en zelf niet in het incident zitten */
+            consumers: {
+                /** Format: uuid */
+                id: string;
+                name: string;
+            }[];
+            /**
+             * Format: date-time
+             * @description Wanneer de analyse voor het laatst veranderde
+             */
+            analyzed_at: string;
         };
         IncidentNote: {
             note: string;
@@ -3866,6 +4059,17 @@ export interface components {
         };
     };
     parameters: {
+        /** @description Vanaf dit tijdstip; standaard 24 uur geleden */
+        TimelineFrom: string;
+        /** @description Tot (niet tot en met) dit tijdstip; standaard nu */
+        TimelineTo: string;
+        /** @description Alleen deze klassen, met komma's, zoals change,symptom */
+        TimelineClass: string;
+        /** @description Het aantal laatste regels */
+        TimelineLimit: number;
+        /** @description Een vast venster in plaats van range, samen met to; hoogstens 7 dagen */
+        MetricsFrom: string;
+        MetricsTo: string;
         /** @description Vanaf dit tijdstip; standaard 7 dagen geleden */
         ChangesFrom: string;
         /** @description Tot (niet tot en met) dit tijdstip; standaard nu */
@@ -4650,6 +4854,9 @@ export interface operations {
         parameters: {
             query?: {
                 range?: components["schemas"]["MetricsRange"];
+                /** @description Een vast venster in plaats van range, samen met to; hoogstens 7 dagen */
+                from?: components["parameters"]["MetricsFrom"];
+                to?: components["parameters"]["MetricsTo"];
             };
             header?: never;
             path: {
@@ -4740,10 +4947,81 @@ export interface operations {
             404: components["responses"]["Error"];
         };
     };
+    getNodeTimeline: {
+        parameters: {
+            query?: {
+                /** @description Vanaf dit tijdstip; standaard 24 uur geleden */
+                from?: components["parameters"]["TimelineFrom"];
+                /** @description Tot (niet tot en met) dit tijdstip; standaard nu */
+                to?: components["parameters"]["TimelineTo"];
+                /** @description Alleen deze klassen, met komma's, zoals change,symptom */
+                class?: components["parameters"]["TimelineClass"];
+                /** @description Het aantal laatste regels */
+                limit?: components["parameters"]["TimelineLimit"];
+            };
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Timeline"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    getClusterTimeline: {
+        parameters: {
+            query?: {
+                /** @description Vanaf dit tijdstip; standaard 24 uur geleden */
+                from?: components["parameters"]["TimelineFrom"];
+                /** @description Tot (niet tot en met) dit tijdstip; standaard nu */
+                to?: components["parameters"]["TimelineTo"];
+                /** @description Alleen deze klassen, met komma's, zoals change,symptom */
+                class?: components["parameters"]["TimelineClass"];
+                /** @description Het aantal laatste regels */
+                limit?: components["parameters"]["TimelineLimit"];
+            };
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Timeline"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
     getClusterMetrics: {
         parameters: {
             query?: {
                 range?: components["schemas"]["MetricsRange"];
+                /** @description Een vast venster in plaats van range, samen met to; hoogstens 7 dagen */
+                from?: components["parameters"]["MetricsFrom"];
+                to?: components["parameters"]["MetricsTo"];
             };
             header?: never;
             path: {

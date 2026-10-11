@@ -477,6 +477,8 @@ paths:
     parameters:
       - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
       - { name: range, in: query, schema: { $ref: "#/components/schemas/MetricsRange" } }
+      - $ref: "#/components/parameters/MetricsFrom"
+      - $ref: "#/components/parameters/MetricsTo"
     get:
       operationId: getNodeMetrics
       summary: Grafieken van één node uit VictoriaMetrics
@@ -531,10 +533,54 @@ paths:
         "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /nodes/{nodeId}/timeline:
+    parameters:
+      - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+      - $ref: "#/components/parameters/TimelineFrom"
+      - $ref: "#/components/parameters/TimelineTo"
+      - $ref: "#/components/parameters/TimelineClass"
+      - $ref: "#/components/parameters/TimelineLimit"
+    get:
+      operationId: getNodeTimeline
+      summary: De tijdlijn van een node, oudste eerst
+      description: |
+        Het logboek en het journaal samen: wat er op de node en met zijn
+        cluster gebeurde. Nooit iets uit de beveiliging; een viewer ziet bij
+        een SSH-login geen IP-adres.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Timeline" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /clusters/{clusterId}/timeline:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+      - $ref: "#/components/parameters/TimelineFrom"
+      - $ref: "#/components/parameters/TimelineTo"
+      - $ref: "#/components/parameters/TimelineClass"
+      - $ref: "#/components/parameters/TimelineLimit"
+    get:
+      operationId: getClusterTimeline
+      summary: De tijdlijn van een cluster en zijn nodes, oudste eerst
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Timeline" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
   /clusters/{clusterId}/metrics:
     parameters:
       - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
       - { name: range, in: query, schema: { $ref: "#/components/schemas/MetricsRange" } }
+      - $ref: "#/components/parameters/MetricsFrom"
+      - $ref: "#/components/parameters/MetricsTo"
     get:
       operationId: getClusterMetrics
       summary: Grafieken van een cluster, met een lijn per node
@@ -1915,6 +1961,35 @@ components:
       in: cookie
       name: cf_session
   parameters:
+    TimelineFrom:
+      name: from
+      in: query
+      description: Vanaf dit tijdstip; standaard 24 uur geleden
+      schema: { type: string, format: date-time }
+    TimelineTo:
+      name: to
+      in: query
+      description: Tot (niet tot en met) dit tijdstip; standaard nu
+      schema: { type: string, format: date-time }
+    TimelineClass:
+      name: class
+      in: query
+      description: Alleen deze klassen, met komma's, zoals change,symptom
+      schema: { type: string }
+    TimelineLimit:
+      name: limit
+      in: query
+      description: Het aantal laatste regels
+      schema: { type: integer, minimum: 1, maximum: 1000, default: 200 }
+    MetricsFrom:
+      name: from
+      in: query
+      description: Een vast venster in plaats van range, samen met to; hoogstens 7 dagen
+      schema: { type: string, format: date-time }
+    MetricsTo:
+      name: to
+      in: query
+      schema: { type: string, format: date-time }
     ChangesFrom:
       name: from
       in: query
@@ -2917,7 +2992,7 @@ components:
           description: Of het onderwerp nog bestaat
     Incident:
       type: object
-      required: [id, number, title, severity, status, started_at, detected_at, resolved_at, caused_by_test, test_run_id, note, updated_at, subjects]
+      required: [id, number, title, severity, status, started_at, detected_at, resolved_at, caused_by_test, test_run_id, note, updated_at, subjects, cause]
       properties:
         id: { type: string, format: uuid }
         number: { type: integer }
@@ -2936,6 +3011,16 @@ components:
         subjects:
           type: array
           items: { $ref: "#/components/schemas/IncidentSubject" }
+        cause:
+          allOf: [{ $ref: "#/components/schemas/IncidentTopCause" }]
+          nullable: true
+          description: De eerste oorzaak uit de analyse, als die waarschijnlijk of mogelijk is
+    IncidentTopCause:
+      type: object
+      required: [summary, level]
+      properties:
+        summary: { type: string }
+        level: { type: string, enum: [likely, possible] }
     IncidentList:
       type: object
       required: [items, has_more]
@@ -2946,9 +3031,23 @@ components:
         has_more: { type: boolean }
     IncidentDetail:
       type: object
-      required: [incident, history, history_more]
+      required: [incident, history, history_more, analysis, timeline, timeline_more]
       properties:
         incident: { $ref: "#/components/schemas/Incident" }
+        analysis:
+          allOf: [{ $ref: "#/components/schemas/IncidentAnalysis" }]
+          nullable: true
+          description: Null zolang de analyse nog niet gerekend is
+        timeline:
+          type: array
+          description: |
+            Het logboek, het journaal en de afwijkingen in de metrics over wat
+            geraakt was en wat eromheen ligt, van twee uur voor het eerste
+            symptoom tot het einde, oudste eerst
+          items: { $ref: "#/components/schemas/TimelineEntry" }
+        timeline_more:
+          type: boolean
+          description: Er waren meer regels; de oudste ontbreken
         history:
           type: array
           description: Statusovergangen, incidenten en tests over wat geraakt was, oudste eerst
@@ -2956,6 +3055,122 @@ components:
         history_more:
           type: boolean
           description: Er waren meer regels dan getoond
+    TimelineEntry:
+      type: object
+      required: [id, ts, from, to, delay, class, source, kind, action, summary, node_id, hostname, cluster_id, cluster, subject, job_id, job, link, detail]
+      properties:
+        id:
+          type: string
+          description: e en een event-id, c en een journaal-id, of m voor een afwijking in de metrics
+        ts: { type: string, format: date-time }
+        from:
+          type: string
+          format: date-time
+          description: Het begin van het venster waarin het waarschijnlijk gebeurde
+        to: { type: string, format: date-time }
+        delay:
+          type: string
+          description: Waarom het venster er is, zoals 'een node gaat pas na 90 s zonder heartbeat op down'
+        class: { type: string, enum: [change, symptom, info] }
+        source: { type: string, enum: [log, agent, server, proxmox, clusterforge, metrics] }
+        kind: { type: string }
+        action: { type: string }
+        summary: { type: string }
+        node_id: { type: string, format: uuid, nullable: true }
+        hostname: { type: string }
+        cluster_id: { type: string, format: uuid, nullable: true }
+        cluster: { type: string }
+        subject: { type: string }
+        job_id: { type: string, format: uuid, nullable: true }
+        job: { type: string }
+        link: { type: string }
+        detail:
+          type: object
+          additionalProperties: { type: string }
+    Timeline:
+      type: object
+      required: [entries, has_more]
+      properties:
+        entries:
+          type: array
+          items: { $ref: "#/components/schemas/TimelineEntry" }
+        has_more:
+          type: boolean
+          description: Er waren meer regels; de oudste ontbreken
+    IncidentMoment:
+      type: object
+      required: [entry_id, ts, from, to, summary, why]
+      properties:
+        entry_id: { type: string, description: Leeg als het moment uit het begin van het incident komt }
+        ts: { type: string, format: date-time }
+        from: { type: string, format: date-time }
+        to: { type: string, format: date-time }
+        summary: { type: string }
+        why: { type: string }
+    IncidentCause:
+      type: object
+      required: [entry_id, ts, level, score, kind, summary, hostname, cluster, link, reasons, also, commit]
+      properties:
+        entry_id: { type: string }
+        ts: { type: string, format: date-time }
+        level: { type: string, enum: [likely, possible, weak] }
+        score: { type: number }
+        kind: { type: string }
+        summary: { type: string }
+        hostname: { type: string }
+        cluster: { type: string }
+        link: { type: string }
+        reasons:
+          type: array
+          items: { type: string }
+        also:
+          type: integer
+          description: Het aantal regels die erbij horen, zoals de andere stappen van dezelfde taak
+        commit: { type: string, description: De volledige commit bij een Git-wijziging }
+    IncidentFinding:
+      type: object
+      required: [node_id, hostname, metric, label, before, after, at, summary]
+      properties:
+        node_id: { type: string, format: uuid }
+        hostname: { type: string }
+        metric: { type: string, enum: [cpu, memory, disk, network_errors] }
+        label: { type: string }
+        before: { type: number }
+        after: { type: number }
+        at: { type: string, format: date-time }
+        summary: { type: string }
+    IncidentAnalysis:
+      type: object
+      required: [version, first_symptom, window_from, window_to, conclusion, causes, changes, anomalies, metrics_unknown, consumers, analyzed_at]
+      properties:
+        version: { type: integer }
+        first_symptom: { $ref: "#/components/schemas/IncidentMoment" }
+        window_from: { type: string, format: date-time }
+        window_to: { type: string, format: date-time }
+        conclusion: { type: string }
+        causes:
+          type: array
+          items: { $ref: "#/components/schemas/IncidentCause" }
+        changes:
+          type: integer
+          description: Het aantal veranderingen in het venster, ook die te ver weg lagen
+        anomalies:
+          type: array
+          items: { $ref: "#/components/schemas/IncidentFinding" }
+        metrics_unknown: { type: boolean }
+        consumers:
+          type: array
+          description: Clusters die van een geraakt cluster afhangen en zelf niet in het incident zitten
+          items:
+            type: object
+            required: [id, name]
+            properties:
+              id: { type: string, format: uuid }
+              name: { type: string }
+        analyzed_at:
+          type: string
+          format: date-time
+          description: Wanneer de analyse voor het laatst veranderde
     IncidentNote:
       type: object
       required: [note]

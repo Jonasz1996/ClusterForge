@@ -50,17 +50,21 @@ function isDark() {
 
 // TimeChart tekent lijnen op een gedeelde tijdas met uPlot. De grafiek wordt
 // alleen opnieuw opgebouwd als de lijnen veranderen; de data komt erin met
-// setData, zodat verversen de muispositie niet kwijtraakt.
+// setData, zodat verversen de muispositie niet kwijtraakt. marker is een
+// tijdstip in seconden dat als rode stippellijn verschijnt, zoals het eerste
+// symptoom van een incident.
 export function TimeChart({
   timestamps,
   series,
   unit,
   height = 180,
+  marker,
 }: {
   timestamps: number[];
   series: Series[];
   unit: Unit;
   height?: number;
+  marker?: number;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const plot = useRef<uPlot | null>(null);
@@ -98,6 +102,27 @@ export function TimeChart({
         { ...axis, values: timeTicks },
         { ...axis, size: 70, values: (_u, vals) => vals.map((v) => formatValue(v, unit)) },
       ],
+      hooks:
+        marker === undefined
+          ? {}
+          : {
+              draw: [
+                (u: uPlot) => {
+                  const x = Math.round(u.valToPos(marker, "x", true));
+                  if (x < u.bbox.left || x > u.bbox.left + u.bbox.width) return;
+                  const ctx = u.ctx;
+                  ctx.save();
+                  ctx.strokeStyle = "#dc2626";
+                  ctx.lineWidth = 1.5 * devicePixelRatio;
+                  ctx.setLineDash([4 * devicePixelRatio, 3 * devicePixelRatio]);
+                  ctx.beginPath();
+                  ctx.moveTo(x, u.bbox.top);
+                  ctx.lineTo(x, u.bbox.top + u.bbox.height);
+                  ctx.stroke();
+                  ctx.restore();
+                },
+              ],
+            },
     };
     const u = new uPlot(opts, [[], ...labels.map(() => [])], el);
     plot.current = u;
@@ -108,7 +133,7 @@ export function TimeChart({
       u.destroy();
       plot.current = null;
     };
-  }, [shape, unit, height]);
+  }, [shape, unit, height, marker]);
 
   useEffect(() => {
     plot.current?.setData(data);

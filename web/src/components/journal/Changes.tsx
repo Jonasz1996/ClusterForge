@@ -25,7 +25,7 @@ export function NodeChangesCard({ nodeId }: { nodeId: string }) {
   const hours = changePeriods.find((p) => p.value === period)?.hours ?? 24 * 7;
   const q = useNodeChanges(nodeId, kind, hours);
   const filters = (
-    <div className="flex flex-wrap gap-2">
+    <div className="flex flex-wrap items-center gap-2">
       <Select aria-label="Soort" className="w-36" value={kind} onChange={(e) => setKind(e.target.value)}>
         {changeKinds.map((k) => (
           <option key={k.value} value={k.value}>
@@ -40,6 +40,9 @@ export function NodeChangesCard({ nodeId }: { nodeId: string }) {
           </option>
         ))}
       </Select>
+      <Link href={`/tijdlijn?node=${nodeId}`} className="ml-auto text-brand-600 hover:underline dark:text-brand-500">
+        Tijdlijn met het logboek
+      </Link>
     </div>
   );
   return (
@@ -49,18 +52,15 @@ export function NodeChangesCard({ nodeId }: { nodeId: string }) {
         {(q.data?.agents_too_old.length ?? 0) > 0 && (
           <div className="space-y-2 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
             <p>
-              <span className="font-medium">Agent te oud voor het journaal.</span> Pakketten, bestanden, logins en
-              herstarts ziet ClusterForge pas na een update van cf-agent. Werk hem bij met dit commando op de node; de
-              aanmelding blijft staan.
+              <span className="font-medium">Agent te oud voor het journaal.</span> Pakketten, bestanden, logins en herstarts ziet
+              ClusterForge pas na een update van cf-agent. Werk hem bij met dit commando op de node; de aanmelding blijft staan.
             </p>
             <CopyBlock text={upgradeCommand()} />
           </div>
         )}
         {q.isError && <Alert>{q.error instanceof Error ? q.error.message : "Wijzigingen laden mislukt"}</Alert>}
         {q.data && <ChangeList items={q.data.changes} />}
-        {q.data?.has_more && (
-          <p className="text-slate-500">Er zijn meer wijzigingen; kies een kortere periode of een soort.</p>
-        )}
+        {q.data?.has_more && <p className="text-slate-500">Er zijn meer wijzigingen; kies een kortere periode of een soort.</p>}
       </div>
     </Card>
   );

@@ -49,6 +49,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/secrets"
 	"github.com/Jonasz1996/clusterforge/internal/status"
 	"github.com/Jonasz1996/clusterforge/internal/store"
+	"github.com/Jonasz1996/clusterforge/internal/whatbroke"
 	"github.com/Jonasz1996/clusterforge/pkg/protocol"
 )
 
@@ -208,6 +209,10 @@ func serve() error {
 	eval.After = func(ctx context.Context) error {
 		return errors.Join(dps.Evaluate(ctx), det.Detect(ctx))
 	}
+	// What Broke rekent de oorzaak van elk incident, meteen als de detector
+	// iets veranderde en daarna elke 30 s tot een uur na het einde.
+	analyzer := whatbroke.NewAnalyzer(pool, metrics.NewClient(cfg.VictoriaMetricsURL), log)
+	det.Changed = analyzer.Kick
 	// GitOps leest de gekoppelde repository elke minuut; na een uitrol of
 	// toepassing kijkt het meteen of een plan verouderd is.
 	git := gitops.NewService(pool, ev, log, box, dep, ro)
@@ -222,6 +227,7 @@ func serve() error {
 	go drf.Run(ctx)
 	go sched.Run(ctx)
 	go dps.Run(ctx)
+	go analyzer.Run(ctx)
 	if git.Enabled() {
 		go git.Run(ctx)
 	}

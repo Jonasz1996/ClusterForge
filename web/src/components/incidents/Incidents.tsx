@@ -60,6 +60,14 @@ export function IncidentTable({ items, empty }: { items: Incident[]; empty: stri
                   {subjectsLine(inc)}
                   {inc.caused_by_test && " · door een test"}
                 </div>
+                {inc.cause && (
+                  <div className="mt-0.5 max-w-xl text-xs break-words text-slate-600 dark:text-slate-400">
+                    <span className={inc.cause.level === "likely" ? "font-medium text-red-700 dark:text-red-300" : "font-medium"}>
+                      {inc.cause.level === "likely" ? "Waarschijnlijk:" : "Mogelijk:"}
+                    </span>{" "}
+                    {inc.cause.summary}
+                  </div>
+                )}
               </td>
               <td className={tdClass}>
                 <SeverityBadge severity={inc.severity} />

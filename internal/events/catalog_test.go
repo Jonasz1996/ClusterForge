@@ -79,3 +79,34 @@ func TestCatalogIsComplete(t *testing.T) {
 		t.Fatal("een onbekende action moet zichzelf als omschrijving krijgen")
 	}
 }
+
+func TestEveryActionHasAClass(t *testing.T) {
+	for a := range Known {
+		if !HasClass(a) {
+			t.Errorf("%s heeft geen klasse voor de tijdlijn", a)
+		}
+	}
+	for a := range classes {
+		if _, ok := Known[a]; !ok {
+			t.Errorf("%s heeft een klasse maar staat niet in de catalogus", a)
+		}
+	}
+	for _, c := range []struct {
+		action  string
+		payload map[string]any
+		want    Class
+	}{
+		{"node.status_changed", map[string]any{"to": "down"}, ClassSymptom},
+		{"node.status_changed", map[string]any{"to": "healthy"}, ClassInfo},
+		{"service.status_changed", map[string]any{"to": "healthy", "impact": "down"}, ClassSymptom},
+		{"service.status_changed", map[string]any{"to": "healthy", "impact": "none"}, ClassInfo},
+		{"vip.owner_changed", map[string]any{"to": nil}, ClassSymptom},
+		{"vip.owner_changed", map[string]any{"to": "x"}, ClassInfo},
+		{"gitops.change_failed", nil, ClassChange},
+		{"iets.nieuws", nil, ClassInfo},
+	} {
+		if got := ClassOf(c.action, c.payload); got != c.want {
+			t.Errorf("%s %v: %s, want %s", c.action, c.payload, got, c.want)
+		}
+	}
+}

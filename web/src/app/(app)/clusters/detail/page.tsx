@@ -48,6 +48,7 @@ import {
   type Vip,
 } from "@/lib/inventory";
 import { useJobs } from "@/lib/proxmox";
+import { RecentChangesCard } from "@/components/whatbroke/WhatBroke";
 
 export default function ClusterDetailPage() {
   return (
@@ -142,6 +143,7 @@ function ClusterDetailInner() {
           )}
 
           <NodesCard c={cluster.data} isAdmin={isAdmin} />
+          <RecentChangesCard kind="cluster" id={id} />
           <ClusterDriftCard clusterId={id} isAdmin={isAdmin} />
           {cluster.data.template_name && <SpecCard clusterId={id} />}
           {cluster.data.template_name && <GitCard c={cluster.data} isAdmin={isAdmin} />}
@@ -195,7 +197,10 @@ function Info({ c }: { c: ClusterDetail }) {
           ],
         ] as [string, React.ReactNode][])
       : []),
-    ["Git-repository", c.git_repo_url ? <code className="text-xs break-all">{c.git_repo_url}</code> : <span className="text-slate-400">Geen</span>],
+    [
+      "Git-repository",
+      c.git_repo_url ? <code className="text-xs break-all">{c.git_repo_url}</code> : <span className="text-slate-400">Geen</span>,
+    ],
     ["Laatst gewijzigd", fmt.format(new Date(c.updated_at))],
   ];
   return (
@@ -268,7 +273,10 @@ function NodesCard({ c, isAdmin: admin }: { c: ClusterDetail; isAdmin: boolean }
           </div>
         )}
         {mode === "existing" && (
-          <form onSubmit={attach} className="flex flex-wrap items-end gap-2 rounded-md border border-slate-200 p-4 dark:border-slate-800">
+          <form
+            onSubmit={attach}
+            className="flex flex-wrap items-end gap-2 rounded-md border border-slate-200 p-4 dark:border-slate-800"
+          >
             {error && <Alert>{error}</Alert>}
             {loose.length === 0 ? (
               <p className="text-sm text-slate-500">Er zijn geen nodes zonder cluster.</p>
@@ -311,12 +319,17 @@ function NodesCard({ c, isAdmin: admin }: { c: ClusterDetail; isAdmin: boolean }
                 {c.nodes.map((n) => (
                   <tr key={n.id}>
                     <td className={tdClass}>
-                      <Link href={`/nodes/detail?id=${n.id}`} className="font-medium text-brand-700 hover:underline dark:text-sky-300">
+                      <Link
+                        href={`/nodes/detail?id=${n.id}`}
+                        className="font-medium text-brand-700 hover:underline dark:text-sky-300"
+                      >
                         {n.hostname}
                       </Link>
                     </td>
                     <td className={tdClass}>{n.role || <span className="text-slate-400">–</span>}</td>
-                    <td className={`${tdClass} font-mono text-xs`}>{n.primary_ip ?? <span className="text-slate-400">–</span>}</td>
+                    <td className={`${tdClass} font-mono text-xs`}>
+                      {n.primary_ip ?? <span className="text-slate-400">–</span>}
+                    </td>
                     <td className={tdClass}>
                       {n.agent ? <StatusBadge status={n.status} reason={n.status_reason} /> : <AgentBadge agent={null} />}
                       {n.status !== "healthy" && n.status_reason && n.agent && (
@@ -491,10 +504,35 @@ function VipForm({
     <form onSubmit={submit} className="space-y-3">
       {error && <Alert>{error}</Alert>}
       <div className="grid gap-2 sm:grid-cols-[1fr_8rem_6rem_1fr]">
-        <Input aria-label="Adres" required placeholder="10.0.10.100" value={address} onChange={(e) => setAddress(e.target.value)} />
-        <Input aria-label="Interface" placeholder="eth0" maxLength={15} value={iface} onChange={(e) => setIface(e.target.value)} />
-        <Input aria-label="VRID" type="number" min={1} max={255} placeholder="VRID" value={vrid} onChange={(e) => setVrid(e.target.value)} />
-        <Input aria-label="Beschrijving" placeholder="Beschrijving" value={description} onChange={(e) => setDescription(e.target.value)} />
+        <Input
+          aria-label="Adres"
+          required
+          placeholder="10.0.10.100"
+          value={address}
+          onChange={(e) => setAddress(e.target.value)}
+        />
+        <Input
+          aria-label="Interface"
+          placeholder="eth0"
+          maxLength={15}
+          value={iface}
+          onChange={(e) => setIface(e.target.value)}
+        />
+        <Input
+          aria-label="VRID"
+          type="number"
+          min={1}
+          max={255}
+          placeholder="VRID"
+          value={vrid}
+          onChange={(e) => setVrid(e.target.value)}
+        />
+        <Input
+          aria-label="Beschrijving"
+          placeholder="Beschrijving"
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+        />
       </div>
       <div className="flex gap-2">
         <Button type="submit" disabled={busy}>

@@ -43,6 +43,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/status"
 	"github.com/Jonasz1996/clusterforge/internal/store"
 	"github.com/Jonasz1996/clusterforge/internal/store/storetest"
+	"github.com/Jonasz1996/clusterforge/internal/whatbroke"
 	"github.com/Jonasz1996/clusterforge/pkg/protocol"
 )
 
@@ -68,6 +69,7 @@ type testEnv struct {
 	ro      *rollout.Service
 	git     *gitops.Service
 	det     *incidents.Detector
+	ana     *whatbroke.Analyzer
 	conns   *testConns
 
 	// De runner heeft een eigen context, zodat een test hem kan herstarten.
@@ -151,6 +153,8 @@ func newTestEnv(t *testing.T) *testEnv {
 	eval.After = func(ctx context.Context) error {
 		return errors.Join(dps.Evaluate(ctx), det.Detect(ctx))
 	}
+	ana := whatbroke.NewAnalyzer(pool, metrics.NewClient(vm.srv.URL), log)
+	det.Changed = ana.Kick
 	ro := rollout.NewService(pool, ev, log, runner, bus, dep, drf)
 	ro.Changed = eval.Kick
 	ro.Gate.Poll, ro.Retry, ro.Fresh = 20*time.Millisecond, 50*time.Millisecond, 2*time.Second
@@ -159,9 +163,10 @@ func newTestEnv(t *testing.T) *testEnv {
 	git := gitops.NewService(pool, ev, log, box, dep, ro)
 	git.Interval = 0
 	var wg sync.WaitGroup
-	wg.Add(2)
+	wg.Add(3)
 	go func() { defer wg.Done(); hub.Run(runCtx) }()
 	go func() { defer wg.Done(); eval.Run(runCtx) }()
+	go func() { defer wg.Done(); ana.Run(runCtx) }()
 	cfg := config.Config{
 		SecureCookies: false, SessionTTL: time.Hour, AgentDir: t.TempDir(), VictoriaMetricsURL: vm.srv.URL,
 		GrafanaNodeURL: "https://grafana.example/d/node?var-node={hostname}",
@@ -174,7 +179,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	srv := httptest.NewServer(api.Handler())
 	t.Cleanup(srv.Close)
 	e := &testEnv{t: t, srv: srv, auth: a, pool: pool, api: api, bus: bus, eval: eval, vm: vm, pve: pve, jobs: runner, life: life, deploy: dep,
-		backups: bk, drift: drf, fo: fo, deps: dps, ro: ro, git: git, det: det, conns: conns, runCtx: runCtx}
+		backups: bk, drift: drf, fo: fo, deps: dps, ro: ro, git: git, det: det, ana: ana, conns: conns, runCtx: runCtx}
 	e.startRunner()
 	t.Cleanup(func() {
 		stop()
