@@ -375,6 +375,16 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 			return fmt.Sprintf("%s van cluster %s draait weer; %s begon het cluster met de nieuwste data", str(p, "component"), name, b)
 		}
 		return fmt.Sprintf("%s van cluster %s draait weer op %s", str(p, "component"), name, list(p["nodes"]))
+	case "cluster.database_resynced":
+		return fmt.Sprintf("%s opnieuw gesynchroniseerd in %s van cluster %s", str(p, "hostname"), str(p, "component"), name)
+	case "cluster.database_switchover":
+		s := fmt.Sprintf("%s is de primary van %s van cluster %s in plaats van %s", str(p, "to"), str(p, "component"), name, str(p, "from"))
+		if p["maintenance"] == true {
+			s += ", voor het onderhoud van " + str(p, "from")
+		}
+		return s
+	case "cluster.database_reinitialized":
+		return fmt.Sprintf("%s opnieuw opgebouwd als replica in %s van cluster %s", str(p, "hostname"), str(p, "component"), name)
 	case "cluster.database_auto_recover":
 		if p["on"] == true {
 			return fmt.Sprintf("Vanzelf opnieuw starten van %s van cluster %s aangezet", str(p, "component"), name)

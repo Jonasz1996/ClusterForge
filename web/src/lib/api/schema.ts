@@ -409,7 +409,10 @@ export interface paths {
          * @description Bij onderhoud, herstarten en afsluiten zet de agent eerst keepalived uit zodat de VIP's naar een andere node gaan.
          *     Een node van een Kubernetes-cluster wordt eerst leeggemaakt: cordon en zijn pods uitzetten. Na een herstart of na het
          *     onderhoud krijgt hij weer pods zodra hij Ready is.
-         *     Kan geen andere node een VIP overnemen, dan antwoordt de server 409 met code needs_force; met force=true gaat het toch door.
+         *     Een node met een database van ClusterForge: is hij de primary van Patroni, dan schakelt ClusterForge eerst over naar de
+         *     synchrone replica; na een herstart of na het onderhoud wacht de taak tot de node weer meedoet in de database.
+         *     Kan geen andere node een VIP overnemen, of zou de database stoppen of haar meerderheid verliezen, dan antwoordt de server
+         *     409 met code needs_force; met force=true gaat het toch door.
          */
         post: operations["nodeAction"];
         delete?: never;
@@ -2892,6 +2895,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/clusters/{clusterId}/components/{componentId}/manage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+                componentId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Beheer van een database per node (admin)
+         * @description Per datanode hoe het met de database staat en wat Beheer er kan: bij Galera opnieuw synchroniseren, bij PostgreSQL
+         *     met Patroni een replica de primary maken of opnieuw opbouwen. Bij elke actie staat waarom ze niet kan, of wat er
+         *     gebeurt. Er verandert niets.
+         */
+        get: operations["getClusterComponentManage"];
+        put?: never;
+        /**
+         * Een actie uit Beheer uitvoeren (admin); wordt een taak
+         * @description Voert de actie op de node uit als Beheer nog is wat je zag (de hash) en de actie kan. Een ander overzicht geeft 409
+         *     met code plan_stale. Op prod vraagt het tweestapsverificatie en de slug in confirm.
+         */
+        post: operations["manageClusterComponent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/clusters/{clusterId}/components/{componentId}/recover/plan": {
         parameters: {
             query?: never;
@@ -4286,6 +4319,66 @@ export interface components {
             /** @enum {string} */
             freshness: "ok" | "stale" | "missing" | "off";
             settings: components["schemas"]["ComponentBackupSettings"];
+        };
+        ComponentManage: {
+            /** Format: uuid */
+            cluster_id: string;
+            cluster_name: string;
+            slug: string;
+            prod: boolean;
+            /** @enum {string} */
+            engine: "mariadb" | "postgresql";
+            title: string;
+            /** @description Het VIP van de database; leeg zonder */
+            vip: string;
+            nodes: components["schemas"]["ComponentManageNode"][];
+            hash: string;
+        };
+        ComponentManageNode: {
+            /** Format: uuid */
+            node_id: string;
+            hostname: string;
+            index: number;
+            /** @description De agent antwoordde */
+            answered: boolean;
+            /** @description Hoe het met de database op de node staat */
+            state: string;
+            /** @description De node doet mee: Synced bij Galera, de primary of een replica die bijhoudt bij Patroni */
+            healthy: boolean;
+            /** @description Bij PostgreSQL primary of replica; leeg bij Galera */
+            role: string;
+            /** @description De synchrone replica van Patroni */
+            sync: boolean;
+            /**
+             * Format: int64
+             * @description Hoeveel WAL een replica nog niet heeft; null als Patroni het niet zegt
+             */
+            lag_bytes: number | null;
+            /** @description Een gewijzigde instelling werkt pas na een herstart van PostgreSQL */
+            pending_restart: boolean;
+            /** @description De node heeft nu het VIP van de database */
+            vip: boolean;
+            actions: components["schemas"]["ComponentManageAction"][];
+        };
+        ComponentManageAction: {
+            /** @enum {string} */
+            action: "resync" | "switchover" | "reinit";
+            title: string;
+            allowed: boolean;
+            /** @description Waarom het nu niet kan; leeg als het kan */
+            reason: string;
+            /** @description Wat er gebeurt */
+            effects: string[];
+        };
+        ComponentManageInput: {
+            /** @enum {string} */
+            action: "resync" | "switchover" | "reinit";
+            /** Format: uuid */
+            node_id: string;
+            /** @description De hash van Beheer zoals je het zag */
+            hash: string;
+            /** @description De slug van het cluster; nodig op prod */
+            confirm?: string;
         };
         ComponentRecoverPlan: {
             /** Format: uuid */
@@ -13920,6 +14013,65 @@ export interface operations {
                     "application/json": components["schemas"]["Job"];
                 };
             };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    getClusterComponentManage: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+                componentId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Beheer */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ComponentManage"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    manageClusterComponent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+                componentId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ComponentManageInput"];
+            };
+        };
+        responses: {
+            /** @description Taak aangemaakt */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Job"];
+                };
+            };
+            400: components["responses"]["Error"];
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];

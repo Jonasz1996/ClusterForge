@@ -88,8 +88,11 @@ func (a *Agent) handleDB(data []byte) protocol.DBResponse {
 		return protocol.DBResponse{Error: "de agent is te druk met andere databaseverzoeken; probeer het zo opnieuw", Servers: []protocol.DBServer{}}
 	}
 	timeout := protocol.DBTimeout
-	if req.Op == protocol.DBPosition && req.Position != nil && req.Position.Recover {
+	switch {
+	case req.Op == protocol.DBPosition && req.Position != nil && req.Position.Recover:
 		timeout = protocol.DBRecoverTimeout
+	case req.Op == protocol.DBPatroniOp:
+		timeout = protocol.DBPatroniTimeout
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
@@ -140,6 +143,8 @@ func (a *Agent) dbOp(ctx context.Context, req protocol.DBRequest) protocol.DBRes
 		res = a.dbDump(ctx, req.Engine, req.Dump)
 	case protocol.DBMigrate:
 		res = a.dbMigrate(ctx, req.Migrate)
+	case protocol.DBPatroniOp:
+		res = a.PatroniOp(ctx, req.Patroni)
 	default:
 		res = protocol.DBResponse{Error: "onbekend databaseverzoek " + req.Op, Servers: []protocol.DBServer{}}
 	}
@@ -664,8 +669,10 @@ type patroniState struct {
 	Timeline         int    `json:"timeline"`
 	ReplicationState string `json:"replication_state"`
 	SyncStandby      bool   `json:"sync_standby"`
+	PendingRestart   bool   `json:"pending_restart"`
 	Patroni          struct {
 		Scope string `json:"scope"`
+		Name  string `json:"name"`
 	} `json:"patroni"`
 }
 
@@ -686,9 +693,15 @@ func (a *Agent) patroni(ctx context.Context) *protocol.DBPatroni {
 	if err := json.Unmarshal(body, &v); err != nil {
 		return &protocol.DBPatroni{Error: fmt.Sprintf("onverwacht antwoord van Patroni (HTTP %d)", code)}
 	}
-	return &protocol.DBPatroni{
+	out := &protocol.DBPatroni{
 		Scope: v.Patroni.Scope, Role: v.role(), State: v.State, Timeline: v.Timeline, Replication: v.ReplicationState, Sync: v.SyncStandby,
+		PendingRestart: v.PendingRestart,
 	}
+	// Een oudere Patroni zegt zijn naam niet in /patroni; dan geen lag.
+	if out.Role != "primary" && v.Patroni.Name != "" {
+		out.LagBytes = a.patroniLag(ctx, v.Patroni.Name)
+	}
+	return out
 }
 
 // PatroniStatus is wat Patroni nu over deze node zegt, zoals het in de

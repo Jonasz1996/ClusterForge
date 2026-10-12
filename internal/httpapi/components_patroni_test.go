@@ -2,7 +2,9 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"maps"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -27,6 +29,8 @@ type patroniHosts struct {
 	hosts   map[string]*agenttest.Host
 	primary string
 	sync    string
+	// params zijn de instellingen van PostgreSQL in etcd.
+	params map[string]any
 }
 
 func (g *patroniHosts) after(name string, h *agenttest.Host) func(call string, err error) {
@@ -42,7 +46,93 @@ func (g *patroniHosts) after(name string, h *agenttest.Host) func(call string, e
 			touchFile(h, components.EtcdMarker("nextcloud"))
 		case call == "systemctl start patroni":
 			g.start(name, h)
+		case strings.HasPrefix(call, "systemctl reboot"):
+			g.reboot(h)
 		}
+	}
+}
+
+// reboot herstart een replica: PostgreSQL is even weg, de uptime begint
+// opnieuw, en na het opstarten houdt de replica weer bij.
+func (g *patroniHosts) reboot(h *agenttest.Host) {
+	h.Locked(func() { h.Patroni.State, h.Patroni.Replication = "stopped", "" })
+	_ = os.WriteFile(filepath.Join(h.Root, "proc/uptime"), []byte("1.00 1.00\n"), 0o644)
+	time.AfterFunc(300*time.Millisecond, func() {
+		h.Locked(func() { h.Patroni.State, h.Patroni.Replication, h.Postgres.Uptime = "running", "streaming", 0 })
+	})
+}
+
+// api speelt de acties van Patroni na: een switchover kan alleen van de
+// primary naar de synchrone replica, opnieuw opbouwen niet op de primary.
+func (g *patroniHosts) api(name string) agenttest.PatroniAPI {
+	return func(method, path string, body []byte) (int, string) {
+		switch {
+		case method == http.MethodPost && path == "/switchover":
+			var in struct{ Leader, Candidate string }
+			_ = json.Unmarshal(body, &in)
+			g.mu.Lock()
+			defer g.mu.Unlock()
+			switch {
+			case in.Leader != g.primary:
+				return http.StatusPreconditionFailed, "leader name does not match"
+			case in.Candidate != g.sync:
+				return http.StatusPreconditionFailed, "candidate name does not match with sync_standby"
+			}
+			// Eerst de oude primary weg, dan de nieuwe: nooit twee tegelijk.
+			old, next := g.hosts[in.Leader], g.hosts[in.Candidate]
+			old.Locked(func() {
+				old.Patroni.Role, old.Patroni.Replication, old.Patroni.Sync = "replica", "streaming", true
+				old.Postgres.Recovery = true
+			})
+			next.Locked(func() {
+				next.Patroni.Role, next.Patroni.Replication, next.Patroni.Sync = "primary", "", false
+				next.Postgres.Recovery = false
+			})
+			for _, h := range g.hosts {
+				h.Locked(func() {
+					if h.Patroni != nil {
+						h.Patroni.Timeline++
+					}
+				})
+			}
+			g.primary, g.sync = in.Candidate, in.Leader
+			return http.StatusOK, `Successfully switched over to "` + in.Candidate + `"`
+		case method == http.MethodPost && path == "/reinitialize":
+			g.mu.Lock()
+			primary := g.primary
+			g.mu.Unlock()
+			if name == primary {
+				return http.StatusServiceUnavailable, "I am the leader, can not reinitialize"
+			}
+			h := g.hosts[name]
+			h.Locked(func() { h.Patroni.State, h.Patroni.Replication = "creating replica", "" })
+			time.AfterFunc(200*time.Millisecond, func() {
+				h.Locked(func() { h.Patroni.State, h.Patroni.Replication, h.Postgres.Uptime = "running", "streaming", 0 })
+			})
+			return http.StatusOK, "reinitialize started"
+		case method == http.MethodPost && path == "/restart":
+			h := g.hosts[name]
+			h.Locked(func() { h.Patroni.PendingRestart = false })
+			return http.StatusOK, "restarted successfully"
+		case path == "/config":
+			g.mu.Lock()
+			defer g.mu.Unlock()
+			if g.params == nil {
+				g.params = map[string]any{"max_connections": 100}
+			}
+			if method == http.MethodPatch {
+				var in struct {
+					PostgreSQL struct {
+						Parameters map[string]any `json:"parameters"`
+					} `json:"postgresql"`
+				}
+				_ = json.Unmarshal(body, &in)
+				maps.Copy(g.params, in.PostgreSQL.Parameters)
+			}
+			b, _ := json.Marshal(map[string]any{"postgresql": map[string]any{"parameters": g.params}})
+			return http.StatusOK, string(b)
+		}
+		return http.StatusNotFound, "not found"
 	}
 }
 
@@ -64,7 +154,8 @@ func (g *patroniHosts) start(name string, h *agenttest.Host) {
 	g.mu.Unlock()
 	h.SetUnit("patroni", agenttest.Unit{Enabled: true, Active: true})
 	h.Locked(func() {
-		h.Patroni = &agenttest.Patroni{Scope: "nextcloud", Role: role, State: "running", Timeline: 1, Replication: repl, Sync: sync}
+		h.Patroni = &agenttest.Patroni{Scope: "nextcloud", Role: role, State: "running", Timeline: 1, Replication: repl, Sync: sync, Name: name}
+		h.PatroniAPI = g.api(name)
 		h.Postgres = &agenttest.Postgres{Version: "17.6 (Debian 17.6-1.pgdg13+1)", Recovery: role == "replica", MaxConnections: 100, Uptime: 5,
 			Databases: []agenttest.Database{{Name: "postgres", Size: 7 << 20}}, Roles: agenttest.PatroniRoles()}
 	})

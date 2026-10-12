@@ -61,6 +61,9 @@ type Host struct {
 	// Patroni is wat Patroni over de node zegt, voor ServePatroni; nil:
 	// Patroni draait niet.
 	Patroni *Patroni
+	// PatroniAPI speelt de acties met wachtwoord van Patroni na; nil geeft
+	// 503. Zet het met Locked terwijl de agent draait.
+	PatroniAPI PatroniAPI
 	// Network geeft de machine op een adres (ip:poort), voor een
 	// verhuizing van haar MariaDB; nil kent geen andere machines. Zet het
 	// met Locked terwijl de agent draait.
@@ -648,6 +651,10 @@ func (h *Host) systemctl(args []string) ([]byte, error) {
 	}
 	if len(args) < 2 {
 		return nil, errors.New("systemctl zonder unit")
+	}
+	if args[0] == "reboot" || args[0] == "poweroff" {
+		// Wat er bij een herstart gebeurt, speelt de test na met SetAfter.
+		return nil, nil
 	}
 	if args[0] == "show" {
 		var b strings.Builder

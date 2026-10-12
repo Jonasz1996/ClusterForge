@@ -197,6 +197,9 @@ func serve() error {
 	memory := metrics.NewClient(cfg.VictoriaMetricsURL)
 	cmps.Memory = func(ctx context.Context) (map[uuid.UUID]float64, error) { return memory.MemoryP95(ctx, time.Now()) }
 	runner.OnFinished(components.Kind, func(context.Context, store.Job) { dbs.Kick() })
+	// Onderhoud en herstarten van een node met een database: eerst
+	// overschakelen, daarna wachten tot de node weer meedoet.
+	life.DB = cmps
 	kn.Changed = eval.Kick
 	// Een cluster rendert alleen met de templateversie waarmee het is
 	// uitgerold; zit die niet in deze binary, dan moet de beheerder dat weten.

@@ -342,6 +342,66 @@ func (e ComponentDumpTrigger) Valid() bool {
 	}
 }
 
+// Defines values for ComponentManageEngine.
+const (
+	ComponentManageEngineMariadb    ComponentManageEngine = "mariadb"
+	ComponentManageEnginePostgresql ComponentManageEngine = "postgresql"
+)
+
+// Valid indicates whether the value is a known member of the ComponentManageEngine enum.
+func (e ComponentManageEngine) Valid() bool {
+	switch e {
+	case ComponentManageEngineMariadb:
+		return true
+	case ComponentManageEnginePostgresql:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ComponentManageActionAction.
+const (
+	ComponentManageActionActionReinit     ComponentManageActionAction = "reinit"
+	ComponentManageActionActionResync     ComponentManageActionAction = "resync"
+	ComponentManageActionActionSwitchover ComponentManageActionAction = "switchover"
+)
+
+// Valid indicates whether the value is a known member of the ComponentManageActionAction enum.
+func (e ComponentManageActionAction) Valid() bool {
+	switch e {
+	case ComponentManageActionActionReinit:
+		return true
+	case ComponentManageActionActionResync:
+		return true
+	case ComponentManageActionActionSwitchover:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ComponentManageInputAction.
+const (
+	ComponentManageInputActionReinit     ComponentManageInputAction = "reinit"
+	ComponentManageInputActionResync     ComponentManageInputAction = "resync"
+	ComponentManageInputActionSwitchover ComponentManageInputAction = "switchover"
+)
+
+// Valid indicates whether the value is a known member of the ComponentManageInputAction enum.
+func (e ComponentManageInputAction) Valid() bool {
+	switch e {
+	case ComponentManageInputActionReinit:
+		return true
+	case ComponentManageInputActionResync:
+		return true
+	case ComponentManageInputActionSwitchover:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ComponentTemplateEngine.
 const (
 	ComponentTemplateEngineMariadb    ComponentTemplateEngine = "mariadb"
@@ -3839,6 +3899,87 @@ type ComponentInput struct {
 
 	// VipId Het VIP van de app: keepalived zet het dan alleen op een node waarvan MariaDB mag schrijven. Niet bij PostgreSQL
 	VipId nullable.Nullable[openapi_types.UUID] `json:"vip_id,omitempty"`
+}
+
+// ComponentManage defines model for ComponentManage.
+type ComponentManage struct {
+	ClusterId   openapi_types.UUID    `json:"cluster_id"`
+	ClusterName string                `json:"cluster_name"`
+	Engine      ComponentManageEngine `json:"engine"`
+	Hash        string                `json:"hash"`
+	Nodes       []ComponentManageNode `json:"nodes"`
+	Prod        bool                  `json:"prod"`
+	Slug        string                `json:"slug"`
+	Title       string                `json:"title"`
+
+	// Vip Het VIP van de database; leeg zonder
+	Vip string `json:"vip"`
+}
+
+// ComponentManageEngine defines model for ComponentManage.Engine.
+type ComponentManageEngine string
+
+// ComponentManageAction defines model for ComponentManageAction.
+type ComponentManageAction struct {
+	Action  ComponentManageActionAction `json:"action"`
+	Allowed bool                        `json:"allowed"`
+
+	// Effects Wat er gebeurt
+	Effects []string `json:"effects"`
+
+	// Reason Waarom het nu niet kan; leeg als het kan
+	Reason string `json:"reason"`
+	Title  string `json:"title"`
+}
+
+// ComponentManageActionAction defines model for ComponentManageAction.Action.
+type ComponentManageActionAction string
+
+// ComponentManageInput defines model for ComponentManageInput.
+type ComponentManageInput struct {
+	Action ComponentManageInputAction `json:"action"`
+
+	// Confirm De slug van het cluster; nodig op prod
+	Confirm *string `json:"confirm,omitempty"`
+
+	// Hash De hash van Beheer zoals je het zag
+	Hash   string             `json:"hash"`
+	NodeId openapi_types.UUID `json:"node_id"`
+}
+
+// ComponentManageInputAction defines model for ComponentManageInput.Action.
+type ComponentManageInputAction string
+
+// ComponentManageNode defines model for ComponentManageNode.
+type ComponentManageNode struct {
+	Actions []ComponentManageAction `json:"actions"`
+
+	// Answered De agent antwoordde
+	Answered bool `json:"answered"`
+
+	// Healthy De node doet mee: Synced bij Galera, de primary of een replica die bijhoudt bij Patroni
+	Healthy  bool   `json:"healthy"`
+	Hostname string `json:"hostname"`
+	Index    int    `json:"index"`
+
+	// LagBytes Hoeveel WAL een replica nog niet heeft; null als Patroni het niet zegt
+	LagBytes nullable.Nullable[int64] `json:"lag_bytes"`
+	NodeId   openapi_types.UUID       `json:"node_id"`
+
+	// PendingRestart Een gewijzigde instelling werkt pas na een herstart van PostgreSQL
+	PendingRestart bool `json:"pending_restart"`
+
+	// Role Bij PostgreSQL primary of replica; leeg bij Galera
+	Role string `json:"role"`
+
+	// State Hoe het met de database op de node staat
+	State string `json:"state"`
+
+	// Sync De synchrone replica van Patroni
+	Sync bool `json:"sync"`
+
+	// Vip De node heeft nu het VIP van de database
+	Vip bool `json:"vip"`
 }
 
 // ComponentNode defines model for ComponentNode.
@@ -9817,6 +9958,9 @@ type CreateComponentDumpJSONRequestBody = ComponentDumpInput
 // RestoreComponentDumpJSONRequestBody defines body for RestoreComponentDump for application/json ContentType.
 type RestoreComponentDumpJSONRequestBody = ComponentRestoreInput
 
+// ManageClusterComponentJSONRequestBody defines body for ManageClusterComponent for application/json ContentType.
+type ManageClusterComponentJSONRequestBody = ComponentManageInput
+
 // RecoverClusterComponentJSONRequestBody defines body for RecoverClusterComponent for application/json ContentType.
 type RecoverClusterComponentJSONRequestBody = ComponentRecoverInput
 
@@ -10131,6 +10275,12 @@ type ServerInterface interface {
 	// RestoreComponentDump Een dump terugzetten in een nieuwe database naast de bestaande (admin); wordt een taak
 	// (POST /clusters/{clusterId}/components/{componentId}/dumps/{dumpId}/restore)
 	RestoreComponentDump(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID, dumpId openapi_types.UUID)
+	// GetClusterComponentManage Beheer van een database per node (admin)
+	// (GET /clusters/{clusterId}/components/{componentId}/manage)
+	GetClusterComponentManage(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID)
+	// ManageClusterComponent Een actie uit Beheer uitvoeren (admin); wordt een taak
+	// (POST /clusters/{clusterId}/components/{componentId}/manage)
+	ManageClusterComponent(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID)
 	// RecoverClusterComponent De database opnieuw starten (admin); wordt een taak
 	// (POST /clusters/{clusterId}/components/{componentId}/recover)
 	RecoverClusterComponent(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID)
@@ -10938,6 +11088,18 @@ func (_ Unimplemented) CreateComponentDump(w http.ResponseWriter, r *http.Reques
 // RestoreComponentDump Een dump terugzetten in een nieuwe database naast de bestaande (admin); wordt een taak
 // (POST /clusters/{clusterId}/components/{componentId}/dumps/{dumpId}/restore)
 func (_ Unimplemented) RestoreComponentDump(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID, dumpId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetClusterComponentManage Beheer van een database per node (admin)
+// (GET /clusters/{clusterId}/components/{componentId}/manage)
+func (_ Unimplemented) GetClusterComponentManage(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ManageClusterComponent Een actie uit Beheer uitvoeren (admin); wordt een taak
+// (POST /clusters/{clusterId}/components/{componentId}/manage)
+func (_ Unimplemented) ManageClusterComponent(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -13385,6 +13547,76 @@ func (siw *ServerInterfaceWrapper) RestoreComponentDump(w http.ResponseWriter, r
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RestoreComponentDump(w, r, clusterId, componentId, dumpId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetClusterComponentManage operation middleware
+func (siw *ServerInterfaceWrapper) GetClusterComponentManage(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "componentId" -------------
+	var componentId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "componentId", chi.URLParam(r, "componentId"), &componentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "componentId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetClusterComponentManage(w, r, clusterId, componentId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ManageClusterComponent operation middleware
+func (siw *ServerInterfaceWrapper) ManageClusterComponent(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "componentId" -------------
+	var componentId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "componentId", chi.URLParam(r, "componentId"), &componentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "componentId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ManageClusterComponent(w, r, clusterId, componentId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -19433,6 +19665,12 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/clusters/{clusterId}/components/{componentId}/apply", wrapper.ReapplyClusterComponent)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/clusters/{clusterId}/components/{componentId}/manage", wrapper.GetClusterComponentManage)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/clusters/{clusterId}/components/{componentId}/manage", wrapper.ManageClusterComponent)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/clusters/{clusterId}/components/{componentId}/recover/plan", wrapper.PlanRecoverClusterComponent)

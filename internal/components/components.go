@@ -174,6 +174,10 @@ func NewService(pool *pgxpool.Pool, ev *events.Writer, log *slog.Logger, runner 
 	// aan, en het cluster begint nooit twee keer.
 	runner.Retryable(Kind)
 	runner.Retryable(RecoverKind)
+	// Beheer onthoudt per stap of de actie al gestuurd is, en wacht dan
+	// verder.
+	runner.Register(ManageKind, s.runManage)
+	runner.Retryable(ManageKind)
 	// Een hervatte dump wacht verder op dezelfde; terugzetten kan niet
 	// opnieuw, want de nieuwe database staat er dan al.
 	runner.Register(DumpKind, s.runDump)

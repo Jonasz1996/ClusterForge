@@ -477,7 +477,10 @@ paths:
         Bij onderhoud, herstarten en afsluiten zet de agent eerst keepalived uit zodat de VIP's naar een andere node gaan.
         Een node van een Kubernetes-cluster wordt eerst leeggemaakt: cordon en zijn pods uitzetten. Na een herstart of na het
         onderhoud krijgt hij weer pods zodra hij Ready is.
-        Kan geen andere node een VIP overnemen, dan antwoordt de server 409 met code needs_force; met force=true gaat het toch door.
+        Een node met een database van ClusterForge: is hij de primary van Patroni, dan schakelt ClusterForge eerst over naar de
+        synchrone replica; na een herstart of na het onderhoud wacht de taak tot de node weer meedoet in de database.
+        Kan geen andere node een VIP overnemen, of zou de database stoppen of haar meerderheid verliezen, dan antwoordt de server
+        409 met code needs_force; met force=true gaat het toch door.
       requestBody:
         required: true
         content:
@@ -3033,6 +3036,49 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
+  /clusters/{clusterId}/components/{componentId}/manage:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: componentId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getClusterComponentManage
+      summary: Beheer van een database per node (admin)
+      description: |
+        Per datanode hoe het met de database staat en wat Beheer er kan: bij Galera opnieuw synchroniseren, bij PostgreSQL
+        met Patroni een replica de primary maken of opnieuw opbouwen. Bij elke actie staat waarom ze niet kan, of wat er
+        gebeurt. Er verandert niets.
+      responses:
+        "200":
+          description: Beheer
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ComponentManage" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: manageClusterComponent
+      summary: Een actie uit Beheer uitvoeren (admin); wordt een taak
+      description: |
+        Voert de actie op de node uit als Beheer nog is wat je zag (de hash) en de actie kan. Een ander overzicht geeft 409
+        met code plan_stale. Op prod vraagt het tweestapsverificatie en de slug in confirm.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ComponentManageInput" }
+      responses:
+        "202":
+          description: Taak aangemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
   /clusters/{clusterId}/components/{componentId}/recover/plan:
     parameters:
       - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -4619,6 +4665,52 @@ components:
         failed: { allOf: [{ $ref: "#/components/schemas/ComponentDump" }], nullable: true }
         freshness: { type: string, enum: [ok, stale, missing, "off"] }
         settings: { $ref: "#/components/schemas/ComponentBackupSettings" }
+    ComponentManage:
+      type: object
+      required: [cluster_id, cluster_name, slug, prod, engine, title, vip, nodes, hash]
+      properties:
+        cluster_id: { type: string, format: uuid }
+        cluster_name: { type: string }
+        slug: { type: string }
+        prod: { type: boolean }
+        engine: { type: string, enum: [mariadb, postgresql] }
+        title: { type: string }
+        vip: { type: string, description: Het VIP van de database; leeg zonder }
+        nodes: { type: array, items: { $ref: "#/components/schemas/ComponentManageNode" } }
+        hash: { type: string }
+    ComponentManageNode:
+      type: object
+      required: [node_id, hostname, index, answered, state, healthy, role, sync, lag_bytes, pending_restart, vip, actions]
+      properties:
+        node_id: { type: string, format: uuid }
+        hostname: { type: string }
+        index: { type: integer }
+        answered: { type: boolean, description: De agent antwoordde }
+        state: { type: string, description: Hoe het met de database op de node staat, in woorden }
+        healthy: { type: boolean, description: "De node doet mee: Synced bij Galera, de primary of een replica die bijhoudt bij Patroni" }
+        role: { type: string, description: "Bij PostgreSQL primary of replica; leeg bij Galera" }
+        sync: { type: boolean, description: De synchrone replica van Patroni }
+        lag_bytes: { type: integer, format: int64, nullable: true, description: Hoeveel WAL een replica nog niet heeft; null als Patroni het niet zegt }
+        pending_restart: { type: boolean, description: Een gewijzigde instelling werkt pas na een herstart van PostgreSQL }
+        vip: { type: boolean, description: De node heeft nu het VIP van de database }
+        actions: { type: array, items: { $ref: "#/components/schemas/ComponentManageAction" } }
+    ComponentManageAction:
+      type: object
+      required: [action, title, allowed, reason, effects]
+      properties:
+        action: { type: string, enum: [resync, switchover, reinit] }
+        title: { type: string }
+        allowed: { type: boolean }
+        reason: { type: string, description: Waarom het nu niet kan; leeg als het kan }
+        effects: { type: array, items: { type: string }, description: Wat er gebeurt }
+    ComponentManageInput:
+      type: object
+      required: [action, node_id, hash]
+      properties:
+        action: { type: string, enum: [resync, switchover, reinit] }
+        node_id: { type: string, format: uuid }
+        hash: { type: string, description: De hash van Beheer zoals je het zag }
+        confirm: { type: string, description: De slug van het cluster; nodig op prod }
     ComponentRecoverPlan:
       type: object
       required: [cluster_id, cluster_name, slug, prod, title, nodes, primary, begin, findings, blocked, hash]

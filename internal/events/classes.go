@@ -26,6 +26,7 @@ var classes = map[string]Class{
 	"cluster.deployed": ClassChange, "cluster.spec_changed": ClassChange, "secret.created": ClassChange,
 	"cluster.database_added": ClassInfo, "cluster.database_applied": ClassChange, "cluster.database_removed": ClassInfo,
 	"cluster.database_recovering": ClassChange, "cluster.database_recovered": ClassChange, "cluster.database_auto_recover": ClassChange,
+	"cluster.database_resynced": ClassChange, "cluster.database_switchover": ClassChange, "cluster.database_reinitialized": ClassChange,
 	"cluster.database_down": ClassSymptom, "cluster.database_up": ClassInfo, "cluster.database_node_out": ClassSymptom,
 	"cluster.database_node_back": ClassInfo,
 	"cluster.database_created":   ClassChange, "cluster.database_dropped": ClassChange, "cluster.database_password": ClassChange,
