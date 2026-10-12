@@ -80,11 +80,18 @@ type Server struct {
 	Replicas []protocol.DBReplica
 }
 
-// Database is een database met haar grootte.
+// Database is een database met haar grootte, en wie haar gebruikt.
 type Database struct {
 	Name      string
 	SizeBytes int64
 	Tables    int
+	Users     []User
+	// Shared is true als meer dan één cluster, losse node of onbekend
+	// adres de database gebruikt.
+	Shared bool
+	// LastUsed is de laatste keer dat er een client verbonden was; nil als
+	// dat in ClientWindow niet zo was.
+	LastUsed *time.Time
 }
 
 // EngineName is de naam van een engine voor mensen.
@@ -117,6 +124,14 @@ func (s *Service) Overview(ctx context.Context) ([]Group, error) {
 		k := key{d.NodeID, d.Engine}
 		dbs[k] = append(dbs[k], Database{Name: d.Name, SizeBytes: d.SizeBytes, Tables: int(d.Tables)})
 	}
+	clients, err := s.q.ListDBClients(ctx, s.Now().Add(-ClientWindow))
+	if err != nil {
+		return nil, err
+	}
+	w, err := s.loadWho(ctx)
+	if err != nil {
+		return nil, err
+	}
 	var groups []Group
 	index := map[string]int{}
 	totals := map[uuid.UUID]int{}
@@ -146,12 +161,24 @@ func (s *Service) Overview(ctx context.Context) ([]Group, error) {
 		g := &groups[i]
 		summarize(g)
 		if from := databaseSource(g); from != nil {
-			g.Databases = dbs[key{from.NodeID, g.Engine}]
+			g.Databases = slices.Clone(dbs[key{from.NodeID, g.Engine}])
 			g.DatabasesFrom = from.Hostname
 			g.DatabasesTotal = max(totals[from.NodeID], len(g.Databases))
 		}
 		if g.Databases == nil {
 			g.Databases = []Database{}
+		}
+		// De clients van alle servers van de groep, per database.
+		perDB := map[string][]store.DbClient{}
+		for _, c := range clients {
+			if c.Engine == g.Engine && slices.ContainsFunc(g.Servers, func(s Server) bool { return s.NodeID == c.NodeID }) {
+				perDB[c.DbName] = append(perDB[c.DbName], c)
+			}
+		}
+		for j := range g.Databases {
+			d := &g.Databases[j]
+			d.Users = w.users(g, perDB[d.Name])
+			d.Shared, d.LastUsed = shared(d.Users), lastUsed(d.Users)
 		}
 	}
 	return groups, nil

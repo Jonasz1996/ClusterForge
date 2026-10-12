@@ -73,6 +73,7 @@ Het technisch ontwerp staat in [docs/design/mvp-fase-1.md](docs/design/mvp-fase-
 | Fase 5: databaseclusters per app | Inhoud | Status |
 | --- | --- | --- |
 | 1. Databases lezen | cf-agent leest MariaDB en PostgreSQL op de node zelf (agentprotocol 9), alleen met vaste query's en zonder de inhoud van tabellen; een pagina Databases met per cluster een Galera-cluster, een primary met replica's of een losse server, de toestand van elke node in gewone woorden en de databases met hun grootte | klaar |
+| 2. Wie gebruikt welke database | De agent ziet elke minuut welke gebruiker vanaf welk adres met welke database verbonden is; ClusterForge koppelt de adressen aan nodes en clusters en toont per database wie haar de laatste dertig dagen gebruikte, met een waarschuwing als meer dan één cluster dat doet en of de afhankelijkheid in de graaf staat | klaar |
 
 ## Draaien met Docker Compose
 
@@ -724,6 +725,14 @@ De pagina **Databases** toont de MariaDB- en PostgreSQL-servers op je nodes, geg
 Bovenaan elk cluster staat in één zin hoe het ervoor staat, zoals "3 van 3 nodes Synced." of "Primary db1 met 2 replica's.". Daaronder de nodes met hun toestand, het aantal verbindingen en wanneer ClusterForge ze het laatst gelezen heeft, en de databases met hun grootte en het aantal tabellen. Een kijker ziet hetzelfde als een beheerder.
 
 ClusterForge leest elke node met een databaseserver elke minuut. Kan het een node niet vragen, dan blijft de laatste stand staan met de reden: agent offline, geen antwoord of agent te oud.
+
+### Wie gebruikt welke database
+
+Bij elke database staat wie haar gebruikt: per cluster de nodes die verbonden waren, met welke databasegebruiker, hoeveel verbindingen er nu zijn of wanneer de laatste was. De agent kijkt daarvoor elke minuut in `information_schema.PROCESSLIST` of `pg_stat_activity`; ClusterForge koppelt het adres van de client aan een node en zijn cluster. Wat het niet kent, staat er als onbekend adres, en een verbinding via de socket of 127.0.0.1 als "op de databasenode zelf". Omdat een cronjob niet altijd verbonden is, telt alles van de laatste dertig dagen mee.
+
+- **gedeeld**: meer dan één cluster, losse node of onbekend adres gebruikt de database. Zo'n database moet je eerst splitsen voor je ze naar de nodes van één app verhuist.
+- **niet in de afhankelijkheden**: het cluster gebruikt de database, maar de graaf bij [Afhankelijkheden](#afhankelijkheden) weet dat nog niet. ClusterForge stelt de pijl daar zelf voor uit de verbindingen die de agents zien (zie [Verbindingen](#verbindingen)); bevestig hem bij Afhankelijkheden → Voorstellen.
+- **niemand in de laatste 30 dagen**: een kandidaat om op te ruimen.
 
 ### Hoe ClusterForge de databases leest
 

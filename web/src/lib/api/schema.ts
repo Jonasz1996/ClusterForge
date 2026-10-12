@@ -3635,6 +3635,36 @@ export interface components {
             size_bytes: number;
             /** @description -1 als het aantal niet te lezen was */
             tables: number;
+            /** @description Wie de database de laatste dertig dagen gebruikte */
+            users: components["schemas"]["DatabaseUser"][];
+            /** @description Meer dan één cluster, losse node of onbekend adres gebruikt de database */
+            shared: boolean;
+            /**
+             * Format: date-time
+             * @description De laatste keer dat er een client verbonden was; null als dat in dertig dagen niet zo was
+             */
+            last_used_at: string | null;
+        };
+        DatabaseUser: {
+            key: string;
+            /** @description cluster, node (een node zonder cluster), unknown (een onbekend adres) of local (de databasenode zelf) */
+            kind: string;
+            /** Format: uuid */
+            cluster_id: string | null;
+            /** Format: uuid */
+            node_id: string | null;
+            /** @description De naam van het cluster, de hostname of het adres */
+            name: string;
+            /** @description De hostnames, of de adressen die ClusterForge niet kent */
+            nodes: string[];
+            /** @description De gebruikers in de database */
+            db_users: string[];
+            /** @description Verbindingen bij de laatste keer lezen */
+            connections: number;
+            /** Format: date-time */
+            last_seen: string;
+            /** @description De afhankelijkheid van dit cluster naar het databasecluster: confirmed, suggested, ignored, of leeg als er geen is of als het hetzelfde cluster is */
+            dependency: string;
         };
         KubeClusterSummary: {
             /** Format: uuid */

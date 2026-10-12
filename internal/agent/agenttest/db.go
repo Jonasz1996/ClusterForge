@@ -30,6 +30,15 @@ type MariaDB struct {
 	// lezen.
 	Replicas  []string
 	Databases []Database
+	Clients   []Client
+}
+
+// Client zijn Count verbindingen van een gebruiker vanaf een adres met een
+// database. Host is een IP-adres of localhost; de nagespeelde MariaDB
+// zet er zelf een poort achter, zoals in de processlist.
+type Client struct {
+	User, Host, Database string
+	Count                int
 }
 
 // Galera is de toestand van een Galera-node.
@@ -67,6 +76,8 @@ type Postgres struct {
 	Source         *PGSource
 	Replicas       []PGReplica
 	Databases      []Database
+	// Clients: Host is client_addr, leeg voor de socket.
+	Clients []Client
 }
 
 // PGSource is de WAL-ontvanger van een replica.
@@ -164,6 +175,18 @@ func (h *Host) mariaExec(args []string) ([]byte, error) {
 		for _, d := range m.Databases {
 			rows = append(rows, []string{d.Name, strconv.FormatInt(d.Size, 10), strconv.Itoa(d.Tables)})
 		}
+	case dbsql.MariaClients:
+		port := 40000
+		for _, c := range m.Clients {
+			for range c.Count {
+				host := c.Host
+				if host != "localhost" {
+					port++
+					host += ":" + strconv.Itoa(port)
+				}
+				rows = append(rows, []string{c.User, host, c.Database})
+			}
+		}
 	default:
 		return []byte("ERROR 1064 (42000): agenttest kent deze query niet: " + q + "\n"), errExit1
 	}
@@ -237,6 +260,10 @@ func (h *Host) runuser(args []string) ([]byte, error) {
 	case dbsql.PGSource:
 		if s := p.Source; s != nil && p.Recovery {
 			rows = [][]string{{s.Host, s.Status, strconv.FormatInt(s.Lag, 10)}}
+		}
+	case dbsql.PGClients:
+		for _, c := range p.Clients {
+			rows = append(rows, []string{c.User, c.Host, c.Database, strconv.Itoa(c.Count)})
 		}
 	default:
 		return []byte("ERROR:  agenttest kent deze query niet: " + q + "\n"), errExit1

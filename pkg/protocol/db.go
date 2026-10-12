@@ -51,6 +51,9 @@ const (
 	// DBMaxDatabases is het hoogste aantal databases per server in een
 	// antwoord; de rest telt alleen mee in DBServer.DatabasesTotal.
 	DBMaxDatabases = 500
+	// DBMaxClients is het hoogste aantal clients per server in een
+	// antwoord.
+	DBMaxClients = 500
 	// DBTimeout is hoe lang een verzoek op de agent mag duren.
 	DBTimeout = 30 * time.Second
 )
@@ -104,6 +107,9 @@ type DBServer struct {
 
 	Databases      []DBDatabase `json:"databases"`
 	DatabasesTotal int          `json:"databases_total"`
+	// Clients zijn de verbindingen van apps en mensen, per gebruiker,
+	// adres en database; niet die van de replicatie of van Galera zelf.
+	Clients []DBClient `json:"clients,omitempty"`
 }
 
 // DBGalera is de toestand van een Galera-node, uit SHOW GLOBAL STATUS.
@@ -162,4 +168,15 @@ type DBDatabase struct {
 	Name      string `json:"name"`
 	SizeBytes int64  `json:"size_bytes"`
 	Tables    int    `json:"tables"`
+}
+
+// DBClient zijn de verbindingen van één gebruiker vanaf één adres met één
+// database. Address is leeg voor een verbinding via de socket of via
+// loopback, dus van de node zelf; Database is leeg als de client er geen
+// koos.
+type DBClient struct {
+	User     string `json:"user"`
+	Address  string `json:"address,omitempty"`
+	Database string `json:"database,omitempty"`
+	Count    int    `json:"count"`
 }

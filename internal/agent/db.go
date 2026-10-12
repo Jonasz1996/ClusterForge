@@ -7,12 +7,15 @@ package agent
 // leest nooit een rij uit een tabel van een app.
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/netip"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -327,8 +330,70 @@ func (a *Agent) mariaStatus(ctx context.Context, u UnitInfo) protocol.DBServer {
 			addDatabase(&s, d)
 		}
 	}
+	if rows, err := a.maria(ctx, false, dbsql.MariaClients); err != nil {
+		errs = append(errs, "clients: "+dbError(err))
+	} else {
+		var cs clients
+		for _, r := range rows {
+			if len(r) >= 3 {
+				cs.add(r[0], mariaClientHost(r[1]), r[2], 1)
+			}
+		}
+		s.Clients = cs.list()
+	}
 	s.Error = strings.Join(errs, "; ")
 	return s
+}
+
+// mariaClientHost haalt de poort van HOST in de processlist: 10.0.20.186:51234
+// wordt 10.0.20.186. localhost, een verbinding via de socket, wordt leeg.
+func mariaClientHost(h string) string {
+	h = strings.TrimSpace(h)
+	if i := strings.LastIndex(h, ":"); i > 0 && strings.Trim(h[i+1:], "0123456789") == "" {
+		h = h[:i]
+	}
+	return localAddress(strings.Trim(h, "[]"))
+}
+
+// localAddress maakt van een adres van de node zelf een leeg adres.
+func localAddress(h string) string {
+	if h == "localhost" {
+		return ""
+	}
+	if ip, err := netip.ParseAddr(h); err == nil && ip.IsLoopback() {
+		return ""
+	}
+	return h
+}
+
+// clients telt verbindingen per gebruiker, adres en database.
+type clients struct {
+	index map[protocol.DBClient]int
+	out   []protocol.DBClient
+}
+
+func (c *clients) add(user, addr, db string, n int) {
+	k := protocol.DBClient{User: user, Address: addr, Database: db}
+	if i, ok := c.index[k]; ok {
+		c.out[i].Count += n
+		return
+	}
+	if len(c.out) >= protocol.DBMaxClients {
+		return
+	}
+	if c.index == nil {
+		c.index = map[protocol.DBClient]int{}
+	}
+	c.index[k] = len(c.out)
+	k.Count = n
+	c.out = append(c.out, k)
+}
+
+func (c *clients) list() []protocol.DBClient {
+	slices.SortFunc(c.out, func(a, b protocol.DBClient) int {
+		return cmp.Or(cmp.Compare(a.Database, b.Database), cmp.Compare(a.User, b.User), cmp.Compare(a.Address, b.Address))
+	})
+	return c.out
 }
 
 // mariaSourceOf leest SHOW ALL SLAVES STATUS met kolomnamen. Bij meer
@@ -491,6 +556,19 @@ func (a *Agent) pgStatus(ctx context.Context, u UnitInfo) protocol.DBServer {
 			}
 			addDatabase(&s, d)
 		}
+	}
+	if rows, err := a.psql(ctx, "", dbsql.PGClients); err != nil {
+		errs = append(errs, "clients: "+dbError(err))
+	} else {
+		var cs clients
+		for _, r := range rows {
+			if len(r) < 4 {
+				continue
+			}
+			n, _ := strconv.Atoi(r[3])
+			cs.add(r[0], localAddress(r[1]), r[2], n)
+		}
+		s.Clients = cs.list()
 	}
 	s.Error = strings.Join(errs, "; ")
 	return s

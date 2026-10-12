@@ -55,3 +55,42 @@ ORDER BY lower(coalesce(c.name, n.hostname)), d.engine, lower(n.hostname);
 
 -- name: ListDBDatabases :many
 SELECT node_id, engine, name, size_bytes, tables FROM db_databases ORDER BY name;
+
+-- name: UpsertDBClient :exec
+INSERT INTO db_clients (node_id, engine, db_name, db_user, address, connections, first_seen, last_seen)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $7)
+ON CONFLICT (node_id, engine, db_name, db_user, address) DO UPDATE
+SET connections = excluded.connections, last_seen = excluded.last_seen;
+
+-- name: IdleDBClients :exec
+-- Na een antwoord: wie er niet meer bij was, heeft nu geen verbindingen.
+UPDATE db_clients SET connections = 0
+WHERE node_id = $1 AND engine = $2 AND last_seen < sqlc.arg(seen) AND connections <> 0;
+
+-- name: ForgetDBClients :exec
+-- Wie al dertig dagen weg is, gaat eruit.
+DELETE FROM db_clients WHERE last_seen < sqlc.arg(before);
+
+-- name: ListDBClients :many
+SELECT node_id, engine, db_name, db_user, address, connections, first_seen, last_seen
+FROM db_clients
+WHERE last_seen >= sqlc.arg(since)
+ORDER BY db_name, db_user, address;
+
+-- name: ListDBNodes :many
+-- Alle nodes met hun cluster, om een adres aan een cluster te koppelen.
+SELECT n.id, n.hostname, n.cluster_id, c.name AS cluster_name
+FROM nodes n
+LEFT JOIN clusters c ON c.id = n.cluster_id;
+
+-- name: ListDBDependencies :many
+-- De afhankelijkheden naar een databasedienst, met het cluster aan beide
+-- kanten: direct van de dienst, of van zijn node.
+SELECT d.state, fs.cluster_id AS from_cluster, fn.cluster_id AS from_node_cluster,
+       ts.cluster_id AS to_cluster, tn.cluster_id AS to_node_cluster
+FROM service_dependencies d
+JOIN services fs ON fs.id = d.from_service_id
+LEFT JOIN nodes fn ON fn.id = fs.node_id
+JOIN services ts ON ts.id = d.to_service_id
+LEFT JOIN nodes tn ON tn.id = ts.node_id
+WHERE ts.kind = 'database';

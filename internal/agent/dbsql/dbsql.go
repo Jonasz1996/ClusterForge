@@ -20,6 +20,12 @@ const (
 		"ON t.TABLE_SCHEMA = s.SCHEMA_NAME AND t.TABLE_TYPE = 'BASE TABLE' " +
 		"WHERE s.SCHEMA_NAME NOT IN ('information_schema', 'mysql', 'performance_schema', 'sys') " +
 		"GROUP BY s.SCHEMA_NAME ORDER BY s.SCHEMA_NAME"
+	// MariaClients zijn de verbindingen van clients, één rij per
+	// verbinding, zonder de agent zelf, de replicatie en de threads van
+	// MariaDB en Galera.
+	MariaClients = "SELECT USER, HOST, COALESCE(DB, '') FROM information_schema.PROCESSLIST " +
+		"WHERE ID <> CONNECTION_ID() AND COMMAND NOT IN ('Daemon', 'Binlog Dump', 'Binlog Dump GTID') " +
+		"AND USER NOT IN ('system user', 'event_scheduler', 'unauthenticated user')"
 )
 
 // De query's van PostgreSQL. Ze lezen alleen instellingen, statistieken en
@@ -36,13 +42,18 @@ const (
 	PGSource = "SELECT coalesce(sender_host, ''), status, " +
 		"CASE WHEN pg_last_wal_receive_lsn() = pg_last_wal_replay_lsn() THEN 0 " +
 		"ELSE coalesce(extract(epoch FROM now() - pg_last_xact_replay_timestamp()), -1) END::bigint FROM pg_stat_wal_receiver"
+	// PGClients zijn de verbindingen van clients per gebruiker, adres en
+	// database, zonder de agent zelf en zonder walsenders en de processen
+	// van PostgreSQL.
+	PGClients = "SELECT usename, coalesce(host(client_addr), ''), coalesce(datname, ''), count(*) FROM pg_stat_activity " +
+		"WHERE backend_type = 'client backend' AND pid <> pg_backend_pid() AND usename IS NOT NULL GROUP BY 1, 2, 3 ORDER BY 1, 2, 3"
 )
 
 // All zijn alle query's die de agent ooit uitvoert. Tests en de
 // nagespeelde databases in agenttest gebruiken de lijst.
 var All = []string{
-	MariaVariables, MariaStatus, MariaSource, MariaReplicas, MariaDatabases,
-	PGInfo, PGDatabases, PGTables, PGReplicas, PGSource,
+	MariaVariables, MariaStatus, MariaSource, MariaReplicas, MariaDatabases, MariaClients,
+	PGInfo, PGDatabases, PGTables, PGReplicas, PGSource, PGClients,
 }
 
 // Scheidingstekens voor de uitvoer van psql: unit separator tussen velden,

@@ -51,6 +51,11 @@ func TestDBStatusGalera(t *testing.T) {
 			State: 4, Comment: "Synced", Ready: true, Members: []string{"10.0.20.186:3306", "10.0.20.187:3306", "10.0.20.188:3306"},
 		},
 		Databases: []agenttest.Database{{Name: "nextcloud", Size: 2 << 30, Tables: 158}, {Name: "rare\tnaam", Size: 16384, Tables: 1}},
+		Clients: []agenttest.Client{
+			{User: "nextcloud", Host: "10.0.20.187", Database: "nextcloud", Count: 2},
+			{User: "nextcloud", Host: "10.0.20.186", Database: "nextcloud", Count: 3},
+			{User: "root", Host: "localhost", Count: 1},
+		},
 	}
 	res := dbAgent(h).DBStatus(context.Background())
 	if res.Error != "" || len(res.Servers) != 1 {
@@ -69,6 +74,15 @@ func TestDBStatusGalera(t *testing.T) {
 	want := []protocol.DBDatabase{{Name: "nextcloud", SizeBytes: 2 << 30, Tables: 158}, {Name: "rare\tnaam", SizeBytes: 16384, Tables: 1}}
 	if !slices.Equal(s.Databases, want) || s.DatabasesTotal != 2 {
 		t.Errorf("databases: %+v", s.Databases)
+	}
+	// Per gebruiker, adres en database, zonder poort; de socket is leeg.
+	wantClients := []protocol.DBClient{
+		{User: "root", Count: 1},
+		{User: "nextcloud", Address: "10.0.20.186", Database: "nextcloud", Count: 3},
+		{User: "nextcloud", Address: "10.0.20.187", Database: "nextcloud", Count: 2},
+	}
+	if !slices.Equal(s.Clients, wantClients) {
+		t.Errorf("clients: %+v", s.Clients)
 	}
 	// Galera-nodes hebben geen replicatie; de agent vraagt er dan ook niet
 	// naar.
@@ -130,6 +144,11 @@ func TestDBStatusPostgresPatroni(t *testing.T) {
 			{Address: "10.0.20.188", State: "streaming", Sync: "async", Lag: 4096},
 		},
 		Databases: []agenttest.Database{{Name: "nextcloud", Size: 900 << 20, Tables: 120}, {Name: "naam=met-is", Size: 8000}},
+		Clients: []agenttest.Client{
+			{User: "nextcloud", Host: "10.0.20.190", Database: "nextcloud", Count: 4},
+			{User: "nextcloud", Host: "127.0.0.1", Database: "nextcloud", Count: 1},
+			{User: "postgres", Database: "postgres", Count: 1},
+		},
 	}
 	a := dbAgent(h)
 	a.PatroniURL = patroni.URL
@@ -154,6 +173,14 @@ func TestDBStatusPostgresPatroni(t *testing.T) {
 	want := []protocol.DBDatabase{{Name: "naam=met-is", SizeBytes: 8000, Tables: -1}, {Name: "nextcloud", SizeBytes: 900 << 20, Tables: 120}}
 	if !slices.Equal(s.Databases, want) {
 		t.Errorf("databases: %+v", s.Databases)
+	}
+	wantClients := []protocol.DBClient{
+		{User: "nextcloud", Database: "nextcloud", Count: 1},
+		{User: "nextcloud", Address: "10.0.20.190", Database: "nextcloud", Count: 4},
+		{User: "postgres", Database: "postgres", Count: 1},
+	}
+	if !slices.Equal(s.Clients, wantClients) {
+		t.Errorf("clients: %+v", s.Clients)
 	}
 	for _, c := range h.Calls() {
 		if strings.Contains(c, "naam=met-is") {
@@ -231,6 +258,21 @@ func TestHandleDB(t *testing.T) {
 	}
 }
 
+func TestMariaClientHost(t *testing.T) {
+	for in, want := range map[string]string{
+		"10.0.20.186:51234": "10.0.20.186",
+		"localhost":         "",
+		"127.0.0.1:40000":   "",
+		"[fd00::1]:3306":    "fd00::1",
+		"::1:3306":          "",
+		"nc1.lan:5555":      "nc1.lan",
+	} {
+		if got := mariaClientHost(in); got != want {
+			t.Errorf("%q: %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestShortVersion(t *testing.T) {
 	for in, want := range map[string]string{
 		"11.8.3-MariaDB-0+deb13u1":              "11.8.3",
@@ -269,14 +311,23 @@ func TestDBStatusRealPostgres(t *testing.T) {
 		return cmd.Output()
 	}
 	const db, secret = "cf_agent_dbtest", "Sup3rGeheim-rij"
-	_, _ = psql("-c", "DROP DATABASE IF EXISTS "+db)
+	_, _ = psql("-c", "DROP DATABASE IF EXISTS "+db+" WITH (FORCE)")
 	if out, err := psql("-c", "CREATE DATABASE "+db); err != nil {
 		t.Fatalf("CREATE DATABASE: %v %s", err, out)
 	}
-	t.Cleanup(func() { _, _ = psql("-c", "DROP DATABASE IF EXISTS "+db) })
+	// WITH (FORCE): de verbinding van de app kan nog open staan.
+	t.Cleanup(func() { _, _ = psql("-c", "DROP DATABASE IF EXISTS "+db+" WITH (FORCE)") })
 	if out, err := psql("-d", db, "-c", "CREATE TABLE gebruikers (naam text, wachtwoord text); INSERT INTO gebruikers VALUES ('jonas', '"+secret+"')"); err != nil {
 		t.Fatalf("tabel: %v %s", err, out)
 	}
+
+	// Een app die verbonden is met de database, zolang de test loopt.
+	app := exec.Command("psql", "-d", db, "-c", "SELECT pg_sleep(20)")
+	app.Env = env
+	if err := app.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = app.Process.Kill(); _ = app.Wait() })
 
 	a := &Agent{Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	a.Exec = func(ctx context.Context, name string, args ...string) ([]byte, error) {
@@ -293,10 +344,7 @@ func TestDBStatusRealPostgres(t *testing.T) {
 		}
 		return nil, fmt.Errorf("onbekend commando %s", name)
 	}
-	res := a.DBStatus(context.Background())
-	if len(res.Servers) != 1 {
-		t.Fatalf("antwoord: %+v", res)
-	}
+	res := realStatus(t, a, u.User.Username(), db)
 	s := res.Servers[0]
 	if !s.Running || s.Error != "" || s.Version == "" || s.Role != protocol.DBRoleStandalone || s.MaxConnections == 0 || s.UptimeSeconds <= 0 {
 		t.Errorf("server: %+v", s)
@@ -331,6 +379,12 @@ func TestDBStatusRealMariaDB(t *testing.T) {
 	}
 	t.Cleanup(func() { _, _ = maria("-e", "DROP DATABASE IF EXISTS "+db) })
 
+	app := exec.Command("docker", "exec", container, "mariadb", "-e", "SELECT SLEEP(20)", db)
+	if err := app.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = app.Process.Kill(); _ = app.Wait() })
+
 	a := &Agent{Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	a.Exec = func(ctx context.Context, name string, args ...string) ([]byte, error) {
 		switch name {
@@ -341,10 +395,7 @@ func TestDBStatusRealMariaDB(t *testing.T) {
 		}
 		return nil, fmt.Errorf("onbekend commando %s", name)
 	}
-	res := a.DBStatus(context.Background())
-	if len(res.Servers) != 1 {
-		t.Fatalf("antwoord: %+v", res)
-	}
+	res := realStatus(t, a, "root", db)
 	s := res.Servers[0]
 	if !s.Running || s.Error != "" || s.Version == "" || s.Role != protocol.DBRoleStandalone || s.Galera != nil || s.MaxConnections == 0 {
 		t.Errorf("server: %+v", s)
@@ -355,5 +406,27 @@ func TestDBStatusRealMariaDB(t *testing.T) {
 	}
 	if b, _ := json.Marshal(res); strings.Contains(string(b), secret) || strings.Contains(string(b), "jonas") {
 		t.Errorf("rijen in het antwoord: %s", b)
+	}
+}
+
+// realStatus vraagt de status tot de verbinding van de app met db erin
+// staat, met gebruiker user.
+func realStatus(t *testing.T, a *Agent, user, db string) protocol.DBResponse {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		res := a.DBStatus(context.Background())
+		if len(res.Servers) != 1 {
+			t.Fatalf("antwoord: %+v", res)
+		}
+		if slices.ContainsFunc(res.Servers[0].Clients, func(c protocol.DBClient) bool {
+			return c.User == user && c.Database == db && c.Count >= 1
+		}) {
+			return res
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("de verbinding van de app staat niet in de clients: %+v", res.Servers[0].Clients)
+		}
+		time.Sleep(200 * time.Millisecond)
 	}
 }

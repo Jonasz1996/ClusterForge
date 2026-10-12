@@ -47,6 +47,10 @@ const (
 // parallel is hoeveel nodes de sync tegelijk vraagt.
 const parallel = 8
 
+// ClientWindow is hoe lang een client meetelt na de laatste keer dat hij
+// verbonden was: lang genoeg voor een cronjob die eens per maand draait.
+const ClientWindow = 30 * 24 * time.Hour
+
 // Service leest de databases.
 type Service struct {
 	pool *pgxpool.Pool
@@ -89,6 +93,9 @@ func (s *Service) Run(ctx context.Context) {
 func (s *Service) SyncAll(ctx context.Context) error {
 	nodes, err := s.q.ListDBCandidateNodes(ctx)
 	if err != nil {
+		return err
+	}
+	if err := s.q.ForgetDBClients(ctx, s.Now().Add(-ClientWindow)); err != nil {
 		return err
 	}
 	sem := make(chan struct{}, parallel)
@@ -159,8 +166,8 @@ func (s *Service) syncNode(ctx context.Context, n store.ListDBCandidateNodesRow)
 				continue
 			}
 			engines = append(engines, srv.Engine)
-			dbs := srv.Databases
-			srv.Databases = nil
+			dbs, clients := srv.Databases, srv.Clients
+			srv.Databases, srv.Clients = nil, nil
 			st, err := json.Marshal(srv)
 			if err != nil {
 				return err
@@ -182,6 +189,22 @@ func (s *Service) syncNode(ctx context.Context, n store.ListDBCandidateNodesRow)
 				}); err != nil {
 					return err
 				}
+			}
+			// Een client zonder database zegt niet wie welke database
+			// gebruikt.
+			for _, c := range clients {
+				if c.Database == "" {
+					continue
+				}
+				if err := q.UpsertDBClient(ctx, store.UpsertDBClientParams{
+					NodeID: n.ID, Engine: srv.Engine, DbName: c.Database, DbUser: c.User, Address: c.Address,
+					Connections: int32(c.Count), FirstSeen: now,
+				}); err != nil {
+					return err
+				}
+			}
+			if err := q.IdleDBClients(ctx, store.IdleDBClientsParams{NodeID: n.ID, Engine: srv.Engine, Seen: now}); err != nil {
+				return err
 			}
 		}
 		return q.DeleteDBServersExcept(ctx, store.DeleteDBServersExceptParams{NodeID: n.ID, Engines: engines})

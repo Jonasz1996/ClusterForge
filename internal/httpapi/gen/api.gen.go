@@ -3546,11 +3546,19 @@ type DatabaseGroupKind string
 
 // DatabaseInfo defines model for DatabaseInfo.
 type DatabaseInfo struct {
-	Name      string `json:"name"`
-	SizeBytes int64  `json:"size_bytes"`
+	// LastUsedAt De laatste keer dat er een client verbonden was; null als dat in dertig dagen niet zo was
+	LastUsedAt nullable.Nullable[time.Time] `json:"last_used_at"`
+	Name       string                       `json:"name"`
+
+	// Shared Meer dan één cluster, losse node of onbekend adres gebruikt de database
+	Shared    bool  `json:"shared"`
+	SizeBytes int64 `json:"size_bytes"`
 
 	// Tables -1 als het aantal niet te lezen was
 	Tables int `json:"tables"`
+
+	// Users Wie de database de laatste dertig dagen gebruikte
+	Users []DatabaseUser `json:"users"`
 }
 
 // DatabasePatroni defines model for DatabasePatroni.
@@ -3615,6 +3623,32 @@ type DatabaseSource struct {
 	Host       string                   `json:"host"`
 	LagSeconds nullable.Nullable[int64] `json:"lag_seconds"`
 	Running    bool                     `json:"running"`
+}
+
+// DatabaseUser defines model for DatabaseUser.
+type DatabaseUser struct {
+	ClusterId nullable.Nullable[openapi_types.UUID] `json:"cluster_id"`
+
+	// Connections Verbindingen bij de laatste keer lezen
+	Connections int `json:"connections"`
+
+	// DbUsers De gebruikers in de database
+	DbUsers []string `json:"db_users"`
+
+	// Dependency De afhankelijkheid van dit cluster naar het databasecluster: confirmed, suggested, ignored, of leeg als er geen is of als het hetzelfde cluster is
+	Dependency string `json:"dependency"`
+	Key        string `json:"key"`
+
+	// Kind cluster, node (een node zonder cluster), unknown (een onbekend adres) of local (de databasenode zelf)
+	Kind     string    `json:"kind"`
+	LastSeen time.Time `json:"last_seen"`
+
+	// Name De naam van het cluster, de hostname of het adres
+	Name   string                                `json:"name"`
+	NodeId nullable.Nullable[openapi_types.UUID] `json:"node_id"`
+
+	// Nodes De hostnames, of de adressen die ClusterForge niet kent
+	Nodes []string `json:"nodes"`
 }
 
 // DepEdge defines model for DepEdge.
