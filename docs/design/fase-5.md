@@ -185,7 +185,7 @@ De agent praat met de database via de socket: als root met `unix_socket` bij Mar
 | `db.galera` | De positie (seqno) en `safe_to_bootstrap` van een node, het cluster starten op deze node, en een node opnieuw laten synchroniseren. |
 | `db.patroni` | De leden met rol en achterstand, overschakelen, herstarten en een replica opnieuw opbouwen. |
 | `db.probe` | Een schrijftest via het VIP, voor de failovertests. |
-| `keepalived.track` | Een controle van de database toevoegen aan de keepalived-instance met een gegeven VIP (zie hieronder). |
+| `db.track` | Een controle van de database toevoegen aan de keepalived-instance met een gegeven VIP, of alleen de diff tonen (zie hieronder). |
 
 Namen van databases en gebruikers controleert de agent tegen `^[a-z0-9_]{1,63}$`. Vrije SQL bestaat in de brug niet. De heartbeat krijgt een klein blok met de toestand van de database, zodat de status binnen tien seconden klopt.
 
@@ -193,10 +193,10 @@ Een agent op protocol 8 werkt door, maar het menu Databases toont dan 'agent te 
 
 ### Keepalived en `cf-agent check db`
 
-De agent krijgt een subcommando `cf-agent check db`, dat keepalived elke twee seconden aanroept. Het slaagt als de database op deze node mag schrijven: bij Galera `wsrep_local_state` 4 (Synced) in een Primary-component, bij Patroni een 200 op `/primary` van de lokale REST-API.
+De agent krijgt een subcommando `cf-agent check db`, dat keepalived elke twee seconden aanroept. Het slaagt als de database op deze node mag schrijven: bij Galera `wsrep_local_state` 4 (Synced) in een Primary-component met `wsrep_ready` aan, bij Patroni (mijlpaal 10) een 200 op `/primary` van de lokale REST-API.
 
-- **Gedeeld VIP.** Het VIP van de app krijgt `track_script { cf_db }` erbij, naast de controle van de app. Bij een cluster uit de template Nginx met keepalived komt dat in een nieuwe templateversie. Bij een zelfgebouwd cluster past `keepalived.track` de `keepalived.conf` van Jonas aan met een kleine, vaste wijziging: een `include` van `/etc/keepalived/conf.d/*.conf` en het `track_script` in de instance met dat VIP. Het plan toont de diff, met `auth_pass` gemaskeerd, en herlaadt keepalived node voor node met de VIP-eigenaar als laatste.
-- **Eigen VIP.** Een eigen `vrrp_instance` in `/etc/keepalived/conf.d/clusterforge-db.conf`, met een vrij VRRP-id en een `secret` als wachtwoord. Heeft het cluster nog geen keepalived, dan installeert het onderdeel het.
+- **Gedeeld VIP (mijlpaal 4).** Het VIP van de app krijgt `track_script { cf_db }` erbij, naast de controle van de app. Bij een zelfgebouwd cluster past `db.track` de `keepalived.conf` van Jonas aan met een kleine, vaste wijziging: een `include` van `/etc/keepalived/conf.d/*.conf` bovenaan (keepalived zoekt een script op terwijl hij leest, dus de include moet vóór de instance) en `cf_db` in het `track_script` van de instance met dat VIP. De `vrrp_script cf_db` zelf staat in `/etc/keepalived/conf.d/clusterforge-db.conf`, een gewoon bestand dat de drift kent. De agent schrijft keepalived.conf alleen als `keepalived -t` de nieuwe versie goedkeurt. Het plan toont de diff, met `auth_pass` gemaskeerd, en herlaadt keepalived node voor node met de VIP-eigenaar als laatste. Bij een cluster uit een template blokkeert het plan voorlopig, want de volgende uitrol zou keepalived.conf terugzetten; een templateversie met de controle komt later.
+- **Eigen VIP (mijlpaal 10).** Een eigen `vrrp_instance` in `/etc/keepalived/conf.d/clusterforge-db.conf`, met een vrij VRRP-id en een `secret` als wachtwoord. Heeft het cluster nog geen keepalived, dan installeert het onderdeel het. Dat komt samen met PostgreSQL, dat altijd een eigen VIP heeft; Galera kan het dan ook.
 
 Het plan controleert dat het VIP vrij is en in hetzelfde netwerk ligt als de nodes, zoals bij een uitrol.
 
@@ -376,13 +376,13 @@ De eerste echte uitrol en verhuizing gebeuren op Jonas' Proxmox. Daarom begint h
 | 1 | Databases lezen | Agentprotocol 9. Het menu Databases toont elke MariaDB en PostgreSQL met versie, rol, toestand van Galera of Patroni, en de databases met grootte. Het gedeelde cluster db1 tot db3 staat erin. Een test bevestigt dat geen wachtwoord of rij de agent verlaat. | M |
 | 2 | Wie gebruikt welke database | Per database de clusters en nodes die haar gebruiken, ook cronjobs van de laatste dertig dagen. Een database van meer dan één cluster krijgt een waarschuwing. De graaf krijgt voorstellen. | M |
 | 3 | Onderdeel MariaDB Galera | 'Database toevoegen' op een cluster met drie nodes, ook CT's, geeft drie nodes Synced. Het plan toont geheugen, schijf en hosts per node. Twee nodes kan alleen met een scheidsrechter. Drift ziet een gewijzigde `99-clusterforge-galera.cnf`. | L |
-| 4 | VIP voor de database | Een gedeeld VIP volgt de app en Galera: stopt MariaDB op de VIP-eigenaar, dan gaat het VIP binnen enkele seconden naar een andere node. Een eigen VIP werkt ook. Het plan toont de diff van een zelfgebouwde `keepalived.conf`. | M |
+| 4 | VIP voor de database | Een gedeeld VIP volgt de app en Galera: stopt MariaDB op de VIP-eigenaar, dan gaat het VIP binnen enkele seconden naar een andere node. Het plan toont de diff van een zelfgebouwde `keepalived.conf`. Een eigen VIP komt in mijlpaal 10. | M |
 | 5 | Opkomen na een herstart | Een node die herstart, sluit vanzelf weer aan. Na een volledige uitval start ClusterForge het cluster zelf zodra alle datanodes terug zijn, op de node met de nieuwste data; ontbreekt er een, dan wacht het en vraagt het Jonas. In CI herstarten drie echte MariaDB-containers één voor één en allemaal tegelijk, en niets gaat verloren. | M |
 | 6 | Databases en gebruikers | Een database met gebruiker aanmaken toont één keer het wachtwoord en de instellingen. Gebruikers en rechten staan in de lijst. Weghalen vraagt de naam. | M |
 | 7 | Back-ups van databases | Elke nacht een dump per database, zeven dagen bewaard, met de leeftijd bij Back-ups. 'Dump nu' werkt, en terugzetten naast de bestaande database werkt. | M |
 | 8 | Verhuizen: plan en proef | Het plan voor Nextcloud toont grootte, versies, clients en waarschuwingen. De proefverhuizing importeert een kopie terwijl de app doorwerkt, meet de duur en ruimt op. Een nieuw cluster uit 'Cluster uitrollen' kan de database meteen krijgen, om er een app naartoe te verhuizen. | M |
 | 9 | Verhuizen: uitvoeren | Een database verhuist met onderhoud, dump en import, gelijke aantallen per tabel, dezelfde gebruiker en hetzelfde wachtwoord, en de oude database op slot. Een afwijking stopt de taak zonder verlies. | L |
-| 10 | PostgreSQL met Patroni | Drie nodes met één primary en twee replica's, een eigen VIP dat de primary volgt, en verhuizen naar PostgreSQL werkt. Stopt de primary, dan staat het VIP binnen een halve minuut op de nieuwe. | L |
+| 10 | PostgreSQL met Patroni | Drie nodes met één primary en twee replica's, een eigen VIP dat de primary volgt (en een eigen VIP voor Galera, als Jonas dat liever heeft), en verhuizen naar PostgreSQL werkt. Stopt de primary, dan staat het VIP binnen een halve minuut op de nieuwe. | L |
 | 11 | Beheer | Het cluster met de hand opnieuw starten na een volledige uitval kiest de juiste node. Een node opnieuw synchroniseren, overschakelen, een kleinere update node voor node en onderhoud met wachten op Synced werken. | L |
 | 12 | Status, incidenten en metrics | Een Galera-node die wegvalt, maakt het cluster verminderd en geeft een incident. Grafieken per node en cluster. | M |
 | 13 | Failovertests met database | Een failovertest op het Nextcloud-cluster meet hoe lang schrijven via het VIP niet lukte, en dat er niets verloren ging. Een test 'alles herstarten' meet hoe lang het duurt tot alles weer Synced is. De wat-als kent de meerderheid. | M |
