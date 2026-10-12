@@ -129,6 +129,18 @@ type Service struct {
 	// Fresh is hoe oud de laatste heartbeat van een agent mag zijn.
 	Fresh time.Duration
 	Now   func() time.Time
+
+	// De bewaking (watch.go): WatchInterval is hoe vaak ClusterForge kijkt,
+	// nul zet het uit. RecoverGrace is hoe lang de database of een node weg
+	// moet zijn voor ClusterForge hem vanzelf opnieuw start, HungAfter hoe
+	// lang MariaDB mag blijven starten, NodeOutAfter na hoeveel tijd een
+	// node die niet meedoet in het logboek komt, en AutoBackoff hoe lang
+	// ClusterForge na een eigen poging wacht voor hij het weer probeert.
+	WatchInterval time.Duration
+	RecoverGrace  time.Duration
+	HungAfter     time.Duration
+	NodeOutAfter  time.Duration
+	AutoBackoff   time.Duration
 }
 
 func NewService(pool *pgxpool.Pool, ev *events.Writer, log *slog.Logger, runner *jobs.Runner, bus Bus, dep *deploy.Service) *Service {
@@ -136,11 +148,15 @@ func NewService(pool *pgxpool.Pool, ev *events.Writer, log *slog.Logger, runner 
 		pool: pool, q: store.New(pool), ev: ev, log: log, jobs: runner, bus: bus, dep: dep,
 		Poll: 3 * time.Second, GateTimeout: 30 * time.Minute, VIPTimeout: 2 * time.Minute, Timeout: 15 * time.Second, Retry: 10 * time.Second,
 		Fresh: 2 * time.Minute, Now: time.Now,
+		WatchInterval: 20 * time.Second, RecoverGrace: 90 * time.Second, HungAfter: 15 * time.Minute, NodeOutAfter: 5 * time.Minute,
+		AutoBackoff: 30 * time.Minute,
 	}
 	runner.Register(Kind, s.run)
+	runner.Register(RecoverKind, s.runRecover)
 	// Elke stap kan opnieuw: een node die al meedoet, sluit niet opnieuw
 	// aan, en het cluster begint nooit twee keer.
 	runner.Retryable(Kind)
+	runner.Retryable(RecoverKind)
 	return s
 }
 
@@ -259,6 +275,31 @@ type Component struct {
 	JobError  string
 	CreatedAt time.Time
 	UpdatedAt time.Time
+	// AutoRecover: na een volledige uitval vanzelf opnieuw beginnen.
+	AutoRecover bool
+	// DownSince is sinds wanneer de database weg is, met de reden; nil
+	// zolang ze draait.
+	DownSince  *time.Time
+	DownReason string
+	// NodesOut zijn de nodes die niet meedoen terwijl het cluster draait.
+	NodesOut []NodeOut
+	// Recovery is de laatste taak die de database opnieuw startte; nil als
+	// er nog geen was.
+	Recovery *Recovery
+}
+
+// NodeOut is een node die niet meedoet, met sinds wanneer en waarom.
+type NodeOut struct {
+	Hostname string
+	Since    time.Time
+	Reason   string
+}
+
+// Recovery is de laatste taak die de database opnieuw startte.
+type Recovery struct {
+	JobID  uuid.UUID
+	Status string
+	Error  string
 }
 
 // ComponentVIP is het VIP van een onderdeel, voor het scherm.
@@ -285,6 +326,9 @@ func (s *Service) List(ctx context.Context, clusterID uuid.UUID) ([]Component, e
 		c, err := view(r.ClusterComponent)
 		if err != nil {
 			return nil, err
+		}
+		if r.ClusterComponent.RecoverJobID != nil && r.RecoverStatus.Valid {
+			c.Recovery = &Recovery{JobID: *r.ClusterComponent.RecoverJobID, Status: string(r.RecoverStatus.JobStatus), Error: deref(r.RecoverError)}
 		}
 		if c.VIP != nil {
 			for _, v := range vips {
@@ -321,6 +365,14 @@ func view(r store.ClusterComponent) (Component, error) {
 	c := Component{
 		ID: r.ID, ClusterID: r.ClusterID, Engine: r.Engine, Template: spec.Template.Name, Version: spec.Template.Version,
 		Revision: int(r.Revision), Params: spec.Params, Nodes: spec.order(), JobID: r.JobID, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
+		AutoRecover: r.AutoRecover, DownSince: r.DownSince, DownReason: r.DownReason, NodesOut: []NodeOut{},
+	}
+	out := map[string]nodeOut{}
+	_ = json.Unmarshal(r.NodesOut, &out)
+	for _, n := range spec.order() {
+		if o, ok := out[n.NodeID.String()]; ok {
+			c.NodesOut = append(c.NodesOut, NodeOut{Hostname: o.Hostname, Since: o.Since, Reason: o.Reason})
+		}
 	}
 	if r.AppliedRevision != nil {
 		v := int(*r.AppliedRevision)

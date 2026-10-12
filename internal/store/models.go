@@ -361,6 +361,12 @@ type ClusterComponent struct {
 	JobID           *uuid.UUID
 	CreatedAt       time.Time
 	UpdatedAt       time.Time
+	AutoRecover     bool
+	DownSince       *time.Time
+	DownReason      string
+	NodesOut        []byte
+	AutoRecoveredAt *time.Time
+	RecoverJobID    *uuid.UUID
 }
 
 type ClusterComponentRevision struct {

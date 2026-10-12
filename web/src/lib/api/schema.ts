@@ -2841,7 +2841,13 @@ export interface paths {
         delete: operations["removeClusterComponent"];
         options?: never;
         head?: never;
-        patch?: never;
+        /**
+         * Vanzelf opnieuw starten aan- of uitzetten (admin)
+         * @description Met auto_recover begint ClusterForge een Galera-cluster na een volledige uitval vanzelf opnieuw, zodra alle datanodes
+         *     antwoorden en MariaDB nergens meer draait of start, op de node met de nieuwste data. Ook een node die niet startte
+         *     terwijl het cluster draait, start het dan opnieuw. Standaard aan.
+         */
+        patch: operations["updateClusterComponent"];
         trace?: never;
     };
     "/clusters/{clusterId}/components/{componentId}/apply": {
@@ -2863,6 +2869,57 @@ export interface paths {
          *     daar, node voor node. Op prod vraagt het tweestapsverificatie en de slug in confirm.
          */
         post: operations["reapplyClusterComponent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/clusters/{clusterId}/components/{componentId}/recover/plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+                componentId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Bekijken wat opnieuw starten zou doen (admin)
+         * @description Per datanode hoe het met MariaDB staat en tot welke transactie hij de data heeft (seqno), en welke node het cluster
+         *     begint: die met de nieuwste data. Na een crash staat de positie alleen in InnoDB; de taak leest haar dan eerst. Er
+         *     verandert niets.
+         */
+        post: operations["planRecoverClusterComponent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/clusters/{clusterId}/components/{componentId}/recover": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+                componentId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * De database opnieuw starten (admin); wordt een taak
+         * @description Doet wat het plan met deze hash zei: draait het cluster nog op een node, dan sluiten de andere daar aan; anders
+         *     begint de node met de nieuwste data het cluster en sluiten de andere een voor een aan. Een node die niet antwoordde,
+         *     doet niet mee. Een ander plan geeft 409 met code plan_stale. Op prod vraagt het tweestapsverificatie en de slug in
+         *     confirm.
+         */
+        post: operations["recoverClusterComponent"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3686,6 +3743,83 @@ export interface components {
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+            /** @description Na een volledige uitval vanzelf opnieuw beginnen */
+            auto_recover: boolean;
+            /**
+             * Format: date-time
+             * @description Sinds wanneer geen enkele node in een Primary component zit; null zolang de database draait
+             */
+            down_since: string | null;
+            /** @description Waarom de database weg is, per node */
+            down_reason: string;
+            /** @description De nodes die niet meedoen terwijl het cluster draait */
+            nodes_out: components["schemas"]["ComponentNodeOut"][];
+            /** @description De laatste taak die de database opnieuw startte; null als er nog geen was */
+            recovery: components["schemas"]["ComponentRecovery"] | null;
+        };
+        ComponentNodeOut: {
+            hostname: string;
+            /** Format: date-time */
+            since: string;
+            reason: string;
+        };
+        ComponentRecovery: {
+            /** Format: uuid */
+            job_id: string;
+            /** @description queued, running, succeeded, failed of canceled */
+            status: string;
+            error: string;
+        };
+        ComponentUpdateInput: {
+            auto_recover: boolean;
+        };
+        ComponentRecoverInput: {
+            /** @description De hash van het plan dat je zag */
+            hash: string;
+            /** @description De slug van het cluster; nodig op prod */
+            confirm?: string;
+        };
+        ComponentRecoverPlan: {
+            /** Format: uuid */
+            cluster_id: string;
+            cluster_name: string;
+            slug: string;
+            prod: boolean;
+            title: string;
+            nodes: components["schemas"]["ComponentRecoverNode"][];
+            /** @description De node die al in een Primary component zit; leeg als de database helemaal weg is */
+            primary: string;
+            /** @description De node die het cluster begint; leeg als het cluster draait of als dat pas na het lezen van de posities vastligt */
+            begin: string;
+            findings: components["schemas"]["ComponentFinding"][];
+            blocked: boolean;
+            hash: string;
+        };
+        ComponentRecoverNode: {
+            /** Format: uuid */
+            node_id: string;
+            hostname: string;
+            index: number;
+            /** @description De agent antwoordde */
+            answered: boolean;
+            /** @description Hoe het met MariaDB staat */
+            state: string;
+            /** @description Wat systemd over mariadb zegt: active, activating, failed of inactive */
+            active: string;
+            running: boolean;
+            /** @description De geschiedenis van het cluster */
+            uuid: string;
+            /**
+             * Format: int64
+             * @description De laatste transactie; -1 als die onbekend is
+             */
+            seqno: number;
+            /** @description De node stopte als laatste */
+            safe_to_bootstrap: boolean;
+            /** @description Waar de positie vandaan komt: running, grastate of recovery */
+            from: string;
+            /** @description begin, join, none (doet al mee), skip (antwoordt niet) of later (na het lezen van de posities) */
+            action: string;
         };
         ComponentVIP: {
             /** Format: uuid */
@@ -12926,6 +13060,37 @@ export interface operations {
             409: components["responses"]["Error"];
         };
     };
+    updateClusterComponent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+                componentId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ComponentUpdateInput"];
+            };
+        };
+        responses: {
+            /** @description Het onderdeel */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClusterComponent"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
     reapplyClusterComponent: {
         parameters: {
             query?: never;
@@ -12951,6 +13116,65 @@ export interface operations {
                     "application/json": components["schemas"]["Job"];
                 };
             };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    planRecoverClusterComponent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+                componentId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Het plan */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ComponentRecoverPlan"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    recoverClusterComponent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+                componentId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ComponentRecoverInput"];
+            };
+        };
+        responses: {
+            /** @description Taak aangemaakt */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Job"];
+                };
+            };
+            400: components["responses"]["Error"];
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];

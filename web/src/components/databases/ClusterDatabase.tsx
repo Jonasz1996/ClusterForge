@@ -8,11 +8,18 @@ import { ProdConfirm, prodConfirmed, useProdTotp } from "@/components/ProdConfir
 import { QueryState, tableClass, tdClass, thClass } from "@/components/inventory/bits";
 import { Alert, Badge, Button, Card } from "@/components/ui";
 import {
+  positionFrom,
+  recoverAction,
+  recovering,
   roleLabel,
+  sinceFmt,
   stateInfo,
   useClusterComponents,
   useReapplyComponent,
+  useRecoverComponent,
+  useRecoverPlan,
   useRemoveComponent,
+  useSetAutoRecover,
   type ClusterComponent,
 } from "@/lib/components";
 import type { ClusterDetail } from "@/lib/inventory";
@@ -61,8 +68,13 @@ function Component({ c, comp, isAdmin }: { c: ClusterDetail; comp: ClusterCompon
   const st = stateInfo[comp.state] ?? { label: comp.state, tone: "slate" as const };
   const busy = comp.state === "installing" || comp.state === "applying";
   const [reapply, setReapply] = useState(false);
+  const [recover, setRecover] = useState(false);
   const remove = useRemoveComponent(c.id);
+  const auto = useSetAutoRecover(c.id);
+  const rec = recovering(comp);
+  const applied = comp.applied_revision !== null;
   const settings = Object.entries(comp.params);
+  const out = new Map(comp.nodes_out.map((o) => [o.hostname, o]));
   return (
     <div className="space-y-3 text-sm">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -81,12 +93,43 @@ function Component({ c, comp, isAdmin }: { c: ClusterDetail; comp: ClusterCompon
                 Weghalen
               </Button>
             )}
-            <Button variant="secondary" disabled={busy} onClick={() => setReapply(true)}>
+            {applied && (
+              <Button variant="secondary" disabled={busy || rec} onClick={() => setRecover(true)}>
+                Opnieuw starten
+              </Button>
+            )}
+            <Button variant="secondary" disabled={busy || rec} onClick={() => setReapply(true)}>
               Opnieuw toepassen
             </Button>
           </span>
         )}
       </div>
+      {comp.down_since !== null && !rec && (
+        <Alert>
+          De database draait niet sinds {sinceFmt.format(new Date(comp.down_since))}: {comp.down_reason}.{" "}
+          {comp.auto_recover
+            ? "ClusterForge start haar vanzelf opnieuw op de node met de nieuwste data, zodra alle datanodes antwoorden en MariaDB nergens meer start. Ontbreekt er een node, kies dan zelf Opnieuw starten."
+            : "Vanzelf opnieuw starten staat uit; kies Opnieuw starten."}
+        </Alert>
+      )}
+      {comp.recovery && rec && (
+        <Alert kind="info">
+          ClusterForge start de database opnieuw.{" "}
+          <Link href={`/taken/detail?id=${comp.recovery.job_id}`} className="underline">
+            Bekijk het logboek
+          </Link>
+          .
+        </Alert>
+      )}
+      {comp.recovery && comp.recovery.status === "failed" && comp.down_since !== null && (
+        <Alert>
+          Opnieuw starten mislukte{comp.recovery.error && `: ${comp.recovery.error}`}.{" "}
+          <Link href={`/taken/detail?id=${comp.recovery.job_id}`} className="underline">
+            Bekijk het logboek
+          </Link>
+          .
+        </Alert>
+      )}
       {comp.job_id && (
         <p className="text-slate-500">
           {busy ? "Bezig: " : "Laatste taak: "}
@@ -110,19 +153,36 @@ function Component({ c, comp, isAdmin }: { c: ClusterDetail; comp: ClusterCompon
             <tr>
               <th className={thClass}>Node</th>
               <th className={thClass}>Rol</th>
+              {applied && <th className={thClass}>Doet mee</th>}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-            {comp.nodes.map((n) => (
-              <tr key={n.node_id}>
-                <td className={tdClass}>
-                  <Link href={`/nodes/detail?id=${n.node_id}`} className="font-medium hover:underline">
-                    {n.hostname}
-                  </Link>
-                </td>
-                <td className={tdClass}>{roleLabel[n.role] ?? n.role}</td>
-              </tr>
-            ))}
+            {comp.nodes.map((n) => {
+              const o = out.get(n.hostname);
+              return (
+                <tr key={n.node_id}>
+                  <td className={tdClass}>
+                    <Link href={`/nodes/detail?id=${n.node_id}`} className="font-medium hover:underline">
+                      {n.hostname}
+                    </Link>
+                  </td>
+                  <td className={tdClass}>{roleLabel[n.role] ?? n.role}</td>
+                  {applied && (
+                    <td className={tdClass}>
+                      {n.role !== "data" || comp.down_since !== null ? (
+                        <span className="text-slate-500">–</span>
+                      ) : o ? (
+                        <span className="text-amber-700 dark:text-amber-300">
+                          nee, sinds {sinceFmt.format(new Date(o.since))}: {o.reason}
+                        </span>
+                      ) : (
+                        "ja"
+                      )}
+                    </td>
+                  )}
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -145,8 +205,122 @@ function Component({ c, comp, isAdmin }: { c: ClusterDetail; comp: ClusterCompon
           .
         </p>
       )}
+      {applied && (
+        <label className="flex items-start gap-2">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={comp.auto_recover}
+            disabled={!isAdmin || auto.isPending}
+            onChange={(e) => auto.mutate({ id: comp.id, on: e.target.checked })}
+          />
+          <span>
+            Vanzelf opnieuw starten na een volledige uitval
+            <span className="block text-slate-500">
+              ClusterForge wacht tot alle datanodes er zijn en MariaDB nergens meer start, en begint het cluster dan op de node
+              met de nieuwste data. Een node die niet startte terwijl het cluster draait, start het daar opnieuw. Is MariaDB
+              overal met de hand gestopt, dan blijft ze uit.
+            </span>
+          </span>
+        </label>
+      )}
+      {auto.isError && <Alert>{auto.error.message}</Alert>}
       {reapply && <ReapplyDialog c={c} comp={comp} onClose={() => setReapply(false)} />}
+      {recover && <RecoverDialog c={c} comp={comp} onClose={() => setRecover(false)} />}
     </div>
+  );
+}
+
+function RecoverDialog({ c, comp, onClose }: { c: ClusterDetail; comp: ClusterComponent; onClose: () => void }) {
+  const plan = useRecoverPlan(c.id, comp.id);
+  const recover = useRecoverComponent(c.id);
+  const router = useRouter();
+  const totp = useProdTotp();
+  const [confirm, setConfirm] = useState("");
+  const prod = c.environment === "prod";
+  const p = plan.data;
+  return (
+    <Modal title={`${comp.title} opnieuw starten`} onClose={onClose} wide>
+      <div className="space-y-4 text-sm">
+        <QueryState q={plan}>
+          {p && (
+            <>
+              <p>
+                {p.primary
+                  ? `De database draait nog op ${p.primary}. De andere nodes sluiten daar aan, een voor een; het cluster begint niet opnieuw.`
+                  : p.begin
+                    ? `${p.begin} heeft de nieuwste data en begint het cluster; daarna sluiten de andere nodes een voor een aan en halen ze wat ze missen. Er gaat geen transactie verloren.`
+                    : "ClusterForge leest eerst de positie van elke node en begint het cluster op de node met de nieuwste data; daarna sluiten de andere een voor een aan."}
+              </p>
+              <div className="overflow-x-auto">
+                <table className={tableClass}>
+                  <thead>
+                    <tr>
+                      <th className={thClass}>Node</th>
+                      <th className={thClass}>Seqno</th>
+                      <th className={thClass}>Wat er gebeurt</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                    {p.nodes.map((n) => (
+                      <tr key={n.node_id}>
+                        <td className={tdClass}>
+                          <span className="font-medium">{n.hostname}</span>
+                          <span className="block text-slate-500">{n.state}</span>
+                        </td>
+                        <td className={tdClass}>
+                          {n.seqno >= 0 ? (
+                            <span title={positionFrom[n.from] ?? n.from}>
+                              {n.seqno}
+                              {n.safe_to_bootstrap && <span className="text-slate-500"> (stopte laatst)</span>}
+                            </span>
+                          ) : (
+                            <span className="text-slate-500">onbekend</span>
+                          )}
+                        </td>
+                        <td className={tdClass}>
+                          {n.action === "begin" ? (
+                            <Badge tone="blue">{recoverAction[n.action]}</Badge>
+                          ) : n.action === "skip" ? (
+                            <Badge tone="amber">{recoverAction[n.action]}</Badge>
+                          ) : (
+                            (recoverAction[n.action] ?? n.action)
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              {p.findings.map((f) => (
+                <Alert key={f.code + f.hostname} kind={f.level === "blocked" ? "error" : "info"}>
+                  {f.message}
+                </Alert>
+              ))}
+              {prod && <ProdConfirm slug={c.slug} value={confirm} onChange={setConfirm} />}
+            </>
+          )}
+        </QueryState>
+        {recover.isError && <Alert>{recover.error.message}</Alert>}
+        <div className="flex justify-end gap-2">
+          <Button variant="secondary" onClick={onClose}>
+            Annuleren
+          </Button>
+          <Button
+            disabled={!p || p.blocked || recover.isPending || (prod && !prodConfirmed(c.slug, confirm, totp))}
+            onClick={async () => {
+              if (!p) return;
+              const j = await recover
+                .mutateAsync({ id: comp.id, hash: p.hash, confirm: prod ? confirm : undefined })
+                .catch(() => null);
+              if (j) router.push(`/taken/detail?id=${j.id}`);
+            }}
+          >
+            {recover.isPending ? "Bezig…" : "Opnieuw starten"}
+          </Button>
+        </div>
+      </div>
+    </Modal>
   );
 }
 

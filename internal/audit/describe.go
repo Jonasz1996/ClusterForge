@@ -349,6 +349,37 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 	case "cluster.database_removed":
 		return fmt.Sprintf("%s van cluster %s weggehaald uit ClusterForge; op %s blijft staan wat al geïnstalleerd was", str(p, "component"), name,
 			list(p["nodes"]))
+	case "cluster.database_down":
+		return fmt.Sprintf("%s van cluster %s is weg", str(p, "component"), name) + colon(str(p, "reason"))
+	case "cluster.database_up":
+		s := fmt.Sprintf("%s van cluster %s draait weer", str(p, "component"), name)
+		if secs, ok := p["seconds"].(float64); ok {
+			s += ", na " + duration(time.Duration(secs)*time.Second)
+		}
+		return s
+	case "cluster.database_node_out":
+		return fmt.Sprintf("%s doet niet mee in %s van cluster %s", str(p, "hostname"), str(p, "component"), name) + colon(str(p, "reason"))
+	case "cluster.database_node_back":
+		return fmt.Sprintf("%s doet weer mee in %s van cluster %s", str(p, "hostname"), str(p, "component"), name)
+	case "cluster.database_recovering":
+		s := fmt.Sprintf("%s van cluster %s opnieuw gestart", str(p, "component"), name)
+		if p["auto"] == true {
+			s = fmt.Sprintf("ClusterForge startte %s van cluster %s vanzelf opnieuw", str(p, "component"), name) + colon(str(p, "reason"))
+		}
+		if skip := list(p["skip"]); skip != "" {
+			s += "; zonder " + skip
+		}
+		return s
+	case "cluster.database_recovered":
+		if b := str(p, "begin"); b != "" {
+			return fmt.Sprintf("%s van cluster %s draait weer; %s begon het cluster met de nieuwste data", str(p, "component"), name, b)
+		}
+		return fmt.Sprintf("%s van cluster %s draait weer op %s", str(p, "component"), name, list(p["nodes"]))
+	case "cluster.database_auto_recover":
+		if p["on"] == true {
+			return fmt.Sprintf("Vanzelf opnieuw starten van %s van cluster %s aangezet", str(p, "component"), name)
+		}
+		return fmt.Sprintf("Vanzelf opnieuw starten van %s van cluster %s uitgezet", str(p, "component"), name)
 	case "cluster.deployed":
 		return fmt.Sprintf("Cluster %s uitgerold uit %s %s met %s nodes", name, str(p, "template"), str(p, "version"), num(p["nodes"]))
 	case "node.created":

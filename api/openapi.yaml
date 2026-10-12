@@ -2962,6 +2962,28 @@ paths:
     parameters:
       - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
       - { name: componentId, in: path, required: true, schema: { type: string, format: uuid } }
+    patch:
+      operationId: updateClusterComponent
+      summary: Vanzelf opnieuw starten aan- of uitzetten (admin)
+      description: |
+        Met auto_recover begint ClusterForge een Galera-cluster na een volledige uitval vanzelf opnieuw, zodra alle datanodes
+        antwoorden en MariaDB nergens meer draait of start, op de node met de nieuwste data. Ook een node die niet startte
+        terwijl het cluster draait, start het dan opnieuw. Standaard aan.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ComponentUpdateInput" }
+      responses:
+        "200":
+          description: Het onderdeel
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ClusterComponent" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
     delete:
       operationId: removeClusterComponent
       summary: Een database die nooit gelukt is uit ClusterForge halen (admin)
@@ -2996,6 +3018,55 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Job" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /clusters/{clusterId}/components/{componentId}/recover/plan:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: componentId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: planRecoverClusterComponent
+      summary: Bekijken wat opnieuw starten zou doen (admin)
+      description: |
+        Per datanode hoe het met MariaDB staat en tot welke transactie hij de data heeft (seqno), en welke node het cluster
+        begint: die met de nieuwste data. Na een crash staat de positie alleen in InnoDB; de taak leest haar dan eerst. Er
+        verandert niets.
+      responses:
+        "200":
+          description: Het plan
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ComponentRecoverPlan" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /clusters/{clusterId}/components/{componentId}/recover:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: componentId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: recoverClusterComponent
+      summary: De database opnieuw starten (admin); wordt een taak
+      description: |
+        Doet wat het plan met deze hash zei: draait het cluster nog op een node, dan sluiten de andere daar aan; anders
+        begint de node met de nieuwste data het cluster en sluiten de andere een voor een aan. Een node die niet antwoordde,
+        doet niet mee. Een ander plan geeft 409 met code plan_stale. Op prod vraagt het tweestapsverificatie en de slug in
+        confirm.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ComponentRecoverInput" }
+      responses:
+        "202":
+          description: Taak aangemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+        "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
@@ -3933,7 +4004,8 @@ components:
         kube_learning: { type: boolean, description: "De leermodus in het dashboard Kubernetes: uitleg en kubectl-commando's" }
     ClusterComponent:
       type: object
-      required: [id, cluster_id, engine, template, version, title, revision, applied_revision, params, nodes, vip, state, job_id, job_error, created_at, updated_at]
+      required: [id, cluster_id, engine, template, version, title, revision, applied_revision, params, nodes, vip, state, job_id, job_error, created_at, updated_at,
+        auto_recover, down_since, down_reason, nodes_out, recovery]
       properties:
         id: { type: string, format: uuid }
         cluster_id: { type: string, format: uuid }
@@ -3954,6 +4026,74 @@ components:
         job_error: { type: string, description: Waarom die taak mislukte }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+        auto_recover: { type: boolean, description: Na een volledige uitval vanzelf opnieuw beginnen }
+        down_since:
+          type: string
+          format: date-time
+          nullable: true
+          description: Sinds wanneer geen enkele node in een Primary component zit; null zolang de database draait
+        down_reason: { type: string, description: "Waarom de database weg is, per node" }
+        nodes_out: { type: array, items: { $ref: "#/components/schemas/ComponentNodeOut" }, description: De nodes die niet meedoen terwijl het cluster draait }
+        recovery:
+          allOf: [{ $ref: "#/components/schemas/ComponentRecovery" }]
+          nullable: true
+          description: De laatste taak die de database opnieuw startte; null als er nog geen was
+    ComponentNodeOut:
+      type: object
+      required: [hostname, since, reason]
+      properties:
+        hostname: { type: string }
+        since: { type: string, format: date-time }
+        reason: { type: string }
+    ComponentRecovery:
+      type: object
+      required: [job_id, status, error]
+      properties:
+        job_id: { type: string, format: uuid }
+        status: { type: string, description: "queued, running, succeeded, failed of canceled" }
+        error: { type: string }
+    ComponentUpdateInput:
+      type: object
+      required: [auto_recover]
+      properties:
+        auto_recover: { type: boolean }
+    ComponentRecoverInput:
+      type: object
+      required: [hash]
+      properties:
+        hash: { type: string, description: De hash van het plan dat je zag }
+        confirm: { type: string, description: De slug van het cluster; nodig op prod }
+    ComponentRecoverPlan:
+      type: object
+      required: [cluster_id, cluster_name, slug, prod, title, nodes, primary, begin, findings, blocked, hash]
+      properties:
+        cluster_id: { type: string, format: uuid }
+        cluster_name: { type: string }
+        slug: { type: string }
+        prod: { type: boolean }
+        title: { type: string }
+        nodes: { type: array, items: { $ref: "#/components/schemas/ComponentRecoverNode" } }
+        primary: { type: string, description: De node die al in een Primary component zit; leeg als de database helemaal weg is }
+        begin: { type: string, description: De node die het cluster begint; leeg als het cluster draait of als dat pas na het lezen van de posities vastligt }
+        findings: { type: array, items: { $ref: "#/components/schemas/ComponentFinding" } }
+        blocked: { type: boolean }
+        hash: { type: string }
+    ComponentRecoverNode:
+      type: object
+      required: [node_id, hostname, index, answered, state, active, running, uuid, seqno, safe_to_bootstrap, from, action]
+      properties:
+        node_id: { type: string, format: uuid }
+        hostname: { type: string }
+        index: { type: integer }
+        answered: { type: boolean, description: De agent antwoordde }
+        state: { type: string, description: Hoe het met MariaDB staat, in woorden }
+        active: { type: string, description: "Wat systemd over mariadb zegt: active, activating, failed of inactive" }
+        running: { type: boolean }
+        uuid: { type: string, description: De geschiedenis van het cluster }
+        seqno: { type: integer, format: int64, description: De laatste transactie; -1 als die onbekend is }
+        safe_to_bootstrap: { type: boolean, description: De node stopte als laatste }
+        from: { type: string, description: "Waar de positie vandaan komt: running, grastate of recovery" }
+        action: { type: string, description: "begin, join, none (doet al mee), skip (antwoordt niet) of later (na het lezen van de posities)" }
     ComponentVIP:
       type: object
       required: [id, address, nodes, owner]

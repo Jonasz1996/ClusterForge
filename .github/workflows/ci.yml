@@ -53,6 +53,21 @@ jobs:
           CF_TEST_MARIADB: ${{ job.services.mariadb.id }}
         run: go test -p 1 -race ./...
 
+  galera:
+    name: Echte Galera
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      # Drie MariaDB-containers in een Galera-cluster: welke node na een
+      # uitval de nieuwste data heeft, en dat er niets verloren gaat.
+      - name: Opnieuw beginnen na een uitval
+        env:
+          CF_TEST_GALERA_DOCKER: "1"
+        run: go test -count=1 -timeout 20m -v -run TestRealGaleraRestart ./internal/galera/
+
   web:
     name: Webinterface
     runs-on: ubuntu-latest

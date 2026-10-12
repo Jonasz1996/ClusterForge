@@ -320,6 +320,7 @@ func serve() error {
 	go dcs.Run(ctx)
 	go kub.Run(ctx)
 	go dbs.Run(ctx)
+	go cmps.Run(ctx)
 	if git.Enabled() {
 		go git.Run(ctx)
 	}

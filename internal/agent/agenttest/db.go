@@ -31,6 +31,9 @@ type MariaDB struct {
 	Replicas  []string
 	Databases []Database
 	Clients   []Client
+	// Recovered is wat galera_recovery vindt als MariaDB stilstaat, zoals
+	// uuid:seqno; leeg laat galera_recovery mislukken.
+	Recovered string
 }
 
 // Client zijn Count verbindingen van een gebruiker vanaf een adres met een
@@ -54,6 +57,8 @@ type Galera struct {
 	Ready   bool
 	// Members zijn de adressen in wsrep_incoming_addresses, als host:poort.
 	Members []string
+	// Seqno is wsrep_last_committed.
+	Seqno int64
 }
 
 // MariaSource is de replicatie van een MariaDB-replica.
@@ -156,6 +161,14 @@ func (h *Host) mariaExec(args []string) ([]byte, error) {
 				[]string{"wsrep_local_state", strconv.Itoa(g.State)}, []string{"wsrep_local_state_comment", g.Comment},
 				[]string{"wsrep_ready", onOff(g.Ready)})
 		}
+	case dbsql.MariaPosition:
+		if g := m.Galera; g != nil {
+			rows = [][]string{
+				{"wsrep_cluster_size", strconv.Itoa(g.Size)}, {"wsrep_cluster_state_uuid", g.UUID}, {"wsrep_cluster_status", g.Status},
+				{"wsrep_last_committed", strconv.FormatInt(g.Seqno, 10)}, {"wsrep_local_state", strconv.Itoa(g.State)},
+				{"wsrep_local_state_comment", g.Comment}, {"wsrep_ready", onOff(g.Ready)},
+			}
+		}
 	case dbsql.MariaSource:
 		if s := m.Source; s != nil {
 			yes := map[bool]string{true: "Yes", false: "No"}
@@ -209,6 +222,21 @@ func (h *Host) mariaExec(args []string) ([]byte, error) {
 		b.WriteByte('\n')
 	}
 	return []byte(b.String()), nil
+}
+
+// galeraRecovery speelt galera_recovery na: alleen als MariaDB stilstaat.
+func (h *Host) galeraRecovery() ([]byte, error) {
+	m := h.MariaDB
+	if m == nil {
+		return []byte("sh: 1: galera_recovery: not found\n"), errors.New("exit status 127")
+	}
+	if u := h.units["mariadb"]; !m.Down || u != nil && (u.Active || u.Activating) {
+		return []byte("WSREP: Failed to start mysqld for wsrep recovery: the data directory is in use\n"), errExit1
+	}
+	if m.Recovered == "" {
+		return []byte("WSREP: Failed to recover position: InnoDB has no position\n"), errExit1
+	}
+	return []byte("WSREP: Recovered position " + m.Recovered + "\n--wsrep_start_position=" + m.Recovered + "\n"), nil
 }
 
 // runuser speelt runuser -u postgres -- psql -XAtq -F <fs> -R <rs> [-d db]

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -71,12 +72,15 @@ type componentView struct {
 
 // galeraHosts speelt drie Debian 13-nodes na waarop apt MariaDB kan
 // installeren, galera_new_cluster een cluster begint en een herstart van
-// MariaDB erbij aansluit, zoals Galera dat doet.
+// MariaDB erbij aansluit, zoals Galera dat doet. Een stop van MariaDB
+// schrijft de positie in grastate.dat.
 type galeraHosts struct {
 	mu      sync.Mutex
 	hosts   map[string]*agenttest.Host
 	members []string
 }
+
+const galeraUUID = "5c3a1e0e-0000-11f0-9a3b-7e1c2d3f4a5b"
 
 func (g *galeraHosts) after(name string, h *agenttest.Host) func(call string, err error) {
 	return func(call string, err error) {
@@ -92,6 +96,10 @@ func (g *galeraHosts) after(name string, h *agenttest.Host) func(call string, er
 			g.join(name, h, true)
 		case strings.HasPrefix(call, "sh -c systemctl restart mariadb && touch "):
 			g.join(name, h, false)
+		case call == "systemctl restart mariadb":
+			g.restart(name, h)
+		case call == "systemctl stop mariadb":
+			g.leave(name, h)
 		}
 	}
 }
@@ -106,6 +114,16 @@ func (g *galeraHosts) join(name string, h *agenttest.Host, first bool) {
 	if !slices.Contains(g.members, name) {
 		g.members = append(g.members, name)
 	}
+	h.Locked(func() { h.MariaDB.Down = false })
+	h.SetUnit("mariadb", agenttest.Unit{Enabled: true, Active: true})
+	g.update()
+	p := filepath.Join(h.Root, components.Marker("nextcloud"))
+	_ = os.MkdirAll(filepath.Dir(p), 0o755)
+	_ = os.WriteFile(p, nil, 0o644)
+}
+
+// update geeft elk lid de toestand van het cluster; g.mu is vast.
+func (g *galeraHosts) update() {
 	var addrs []string
 	for _, m := range g.members {
 		addrs = append(addrs, g.hosts[m].Address+":3306")
@@ -114,14 +132,85 @@ func (g *galeraHosts) join(name string, h *agenttest.Host, first bool) {
 		mh := g.hosts[m]
 		mh.Locked(func() {
 			mh.MariaDB.Galera = &agenttest.Galera{
-				ClusterName: "nextcloud", UUID: "5c3a1e0e-0000-11f0-9a3b-7e1c2d3f4a5b", Status: "Primary", Size: len(g.members),
+				ClusterName: "nextcloud", UUID: galeraUUID, Status: "Primary", Size: len(g.members),
 				State: 4, Comment: "Synced", Ready: true, Members: addrs,
 			}
 		})
 	}
-	p := filepath.Join(h.Root, components.Marker("nextcloud"))
+}
+
+// restart sluit een node die niet meedoet aan bij het cluster; zonder
+// cluster startt hij niet, zoals Galera zonder Primary component.
+func (g *galeraHosts) restart(name string, h *agenttest.Host) {
+	g.mu.Lock()
+	member, alive := slices.Contains(g.members, name), len(g.members) > 0
+	g.mu.Unlock()
+	switch {
+	case member:
+	case alive:
+		g.join(name, h, false)
+	default:
+		h.SetUnit("mariadb", agenttest.Unit{Enabled: true, Failed: true})
+	}
+}
+
+// leave stopt MariaDB gewoon: de node verlaat het cluster en schrijft zijn
+// positie; de laatste mag het cluster weer beginnen.
+func (g *galeraHosts) leave(name string, h *agenttest.Host) {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	last := len(g.members) == 1 && g.members[0] == name
+	g.members = slices.DeleteFunc(g.members, func(m string) bool { return m == name })
+	var seqno int64
+	member := false
+	h.Locked(func() {
+		if h.MariaDB.Galera != nil {
+			seqno, member = h.MariaDB.Galera.Seqno, true
+		}
+		h.MariaDB.Down, h.MariaDB.Galera = true, nil
+	})
+	// Een node die nog niet meedeed, heeft geen positie om te schrijven.
+	if member {
+		writeGrastate(h, seqno, last)
+	}
+	g.update()
+}
+
+// crash laat alle nodes tegelijk uitvallen en zo opstarten: MariaDB
+// draait nergens, unit is de toestand van mariadb erna, en seqnos de
+// positie per node. Met clean stopten ze gewoon en staat de positie in
+// grastate.dat; anders vindt alleen galera_recovery haar.
+func (g *galeraHosts) crash(unit agenttest.Unit, clean bool, safe string, seqnos map[string]int64) {
+	g.mu.Lock()
+	g.members = nil
+	g.mu.Unlock()
+	for name, h := range g.hosts {
+		seqno, ok := seqnos[name]
+		if !ok {
+			continue
+		}
+		h.Locked(func() {
+			h.MariaDB.Down, h.MariaDB.Galera = true, nil
+			h.MariaDB.Recovered = galeraUUID + ":" + strconv.FormatInt(seqno, 10)
+		})
+		h.SetUnit("mariadb", unit)
+		if clean {
+			writeGrastate(h, seqno, name == safe)
+		} else {
+			writeGrastate(h, -1, false)
+		}
+	}
+}
+
+func writeGrastate(h *agenttest.Host, seqno int64, safe bool) {
+	s := "0"
+	if safe {
+		s = "1"
+	}
+	p := filepath.Join(h.Root, "var/lib/mysql/grastate.dat")
 	_ = os.MkdirAll(filepath.Dir(p), 0o755)
-	_ = os.WriteFile(p, nil, 0o644)
+	_ = os.WriteFile(p, []byte("# GALERA saved state\nversion: 2.1\nuuid:    "+galeraUUID+"\nseqno:   "+strconv.FormatInt(seqno, 10)+
+		"\nsafe_to_bootstrap: "+s+"\n"), 0o660)
 }
 
 // TestClusterComponent is de acceptatie van mijlpaal 3 van fase 5: op
