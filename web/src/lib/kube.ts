@@ -29,6 +29,10 @@ export type KubeDrainPod = components["schemas"]["KubeDrainPod"];
 export type KubeApplyInput = components["schemas"]["KubeApplyInput"];
 export type KubeApplyResult = components["schemas"]["KubeApplyResult"];
 export type KubeApplyObject = components["schemas"]["KubeApplyObject"];
+export type KubeLessonSummary = components["schemas"]["KubeLessonSummary"];
+export type KubeLesson = components["schemas"]["KubeLesson"];
+export type KubeLessonStep = components["schemas"]["KubeLessonStep"];
+export type KubeLessonLink = components["schemas"]["KubeLessonLink"];
 type Job = components["schemas"]["Job"];
 
 type Tone = "slate" | "green" | "amber" | "red" | "blue";
@@ -51,6 +55,8 @@ const keys = {
   logs: (id: string, ns: string, pod: string, o: LogOptions) => ["kube", id, "logs", ns, pod, o] as const,
   revisions: (id: string, ns: string, name: string) => ["kube", id, "revisions", ns, name] as const,
   drainPlan: (id: string, node: string, force: boolean) => ["kube", id, "drain-plan", node, force] as const,
+  lessons: (id: string) => ["kube", id, "lessons"] as const,
+  lesson: (id: string, lesson: string) => ["kube", id, "lessons", lesson] as const,
 };
 
 // scope is de query van een tabblad met een namespace en het vinkje
@@ -355,6 +361,68 @@ export function useKubeApply(id: string) {
     onSettled: (_r, _e, body) => {
       if (!body.preview) void qc.invalidateQueries({ queryKey: ["kube", id] });
     },
+  });
+}
+
+// useKubeLessons is de voortgang in elke les, uit de database.
+export function useKubeLessons(id: string) {
+  return useQuery({
+    queryKey: keys.lessons(id),
+    queryFn: async () =>
+      unwrap(await api.GET("/kubernetes/clusters/{clusterId}/lessons", { params: { path: { clusterId: id } } })).items,
+    enabled: id !== "",
+  });
+}
+
+function checkLesson(id: string, lesson: string, answers: Record<string, string>) {
+  return api.POST("/kubernetes/clusters/{clusterId}/lessons/{lesson}/check", {
+    params: { path: { clusterId: id, lesson } },
+    body: { answers },
+  });
+}
+
+// useKubeLesson bekijkt een les: elke vijf seconden controleert ClusterForge
+// de opdracht die aan de beurt is, zodat je ziet dat het gelukt is zonder
+// iets aan te klikken. Is er een opdracht af, dan klopt de lijst niet meer.
+export function useKubeLesson(id: string, lesson: string) {
+  const qc = useQueryClient();
+  return useQuery({
+    queryKey: keys.lesson(id, lesson),
+    queryFn: async () => {
+      const l = unwrap(await checkLesson(id, lesson, {}));
+      const old = qc.getQueryData<KubeLesson>(keys.lesson(id, lesson));
+      if (old && old.done !== l.done) void qc.invalidateQueries({ queryKey: keys.lessons(id), exact: true });
+      return l;
+    },
+    enabled: id !== "" && lesson !== "",
+    // Een les die af is of nu niet kan, verandert niet vanzelf.
+    refetchInterval: (q) => (q.state.data?.finished_at || q.state.data?.unavailable ? false : kubeInterval),
+    retry: false,
+  });
+}
+
+// useKubeLessonAnswer stuurt een antwoord op een vraag, of bevestigt een
+// leesopdracht.
+export function useKubeLessonAnswer(id: string, lesson: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (answers: Record<string, string>) => unwrap(await checkLesson(id, lesson, answers)),
+    onSuccess: (l) => {
+      qc.setQueryData(keys.lesson(id, lesson), l);
+      void qc.invalidateQueries({ queryKey: keys.lessons(id), exact: true });
+    },
+  });
+}
+
+// useKubeLessonReset begint een les opnieuw; het cluster blijft zoals het is.
+export function useKubeLessonReset(id: string, lesson: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () =>
+      unwrap(
+        await api.DELETE("/kubernetes/clusters/{clusterId}/lessons/{lesson}", { params: { path: { clusterId: id, lesson } } }),
+      ),
+    onSettled: () => qc.invalidateQueries({ queryKey: keys.lessons(id) }),
   });
 }
 

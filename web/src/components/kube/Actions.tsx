@@ -60,11 +60,14 @@ export function KubeActions({
   clusterId,
   target,
   layout = "buttons",
+  names,
   onDone,
 }: {
   clusterId: string;
   target: ActionTarget;
   layout?: "buttons" | "menu";
+  // names geeft een knop een andere naam, zoals Opruimen voor weghalen.
+  names?: Partial<Record<KubeActionName, string>>;
   onDone: (d: ActionDone) => void;
 }) {
   const isAdmin = useIsAdmin();
@@ -83,7 +86,7 @@ export function KubeActions({
         <span className="flex flex-wrap gap-2">
           {target.actions.map((a) => (
             <Button key={a} variant={a === "delete" ? "secondary-danger" : "secondary"} onClick={() => setOpen(a)}>
-              {labels[a]}
+              {names?.[a] ?? labels[a]}
             </Button>
           ))}
         </span>
@@ -106,7 +109,7 @@ export function KubeActions({
                   a === "delete" && "text-red-700 dark:text-red-300",
                 )}
               >
-                {labels[a]}…
+                {names?.[a] ?? labels[a]}…
               </button>
             ))}
           </div>

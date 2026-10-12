@@ -1182,7 +1182,7 @@ type Checked = { yaml: string; namespace: string; force: boolean; result: KubeAp
 // alleen voor precies die YAML: verandert er iets, dan moet het opnieuw.
 // taken zijn de objecten met velden van een ander programma, uit de
 // controle zonder overnemen, zodat je ziet wat je overneemt.
-function useApplyFlow(clusterId: string, yaml: string, namespace: string) {
+export function useApplyFlow(clusterId: string, yaml: string, namespace: string) {
   const preview = useKubeApply(clusterId);
   const apply = useKubeApply(clusterId);
   const [checked, setChecked] = useState<Checked | null>(null);
@@ -1273,7 +1273,7 @@ function managerHelp(m: string) {
   return "";
 }
 
-function ApplyPanel({
+export function ApplyPanel({
   clusterId,
   flow,
   yaml,

@@ -3052,6 +3052,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/kubernetes/clusters/{clusterId}/lessons": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * De lessen Kubernetes met je voortgang op dit cluster
+         * @description Alleen uit de database: hoeveel opdrachten van elke les af zijn. Of een les kan, hangt af van het aantal nodes uit
+         *     de laatste sync. Elke gebruiker heeft zijn eigen voortgang.
+         */
+        get: operations["listKubeLessons"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/kubernetes/clusters/{clusterId}/lessons/{lesson}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+                lesson: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Een les opnieuw beginnen; wat er op het cluster staat, blijft */
+        delete: operations["resetKubeLesson"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/kubernetes/clusters/{clusterId}/lessons/{lesson}/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+                lesson: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Een les bekijken en de opdracht die aan de beurt is controleren op het cluster
+         * @description De opdrachten zijn op volgorde. ClusterForge controleert de eerste die niet af is, alleen lezend; lukt die, dan
+         *     is de volgende meteen aan de beurt. answers zijn antwoorden op vragen en de bevestiging van een leesopdracht,
+         *     per opdracht. Kan het cluster niet gelezen worden, dan staat dat in problem en blijft de opdracht aan de beurt.
+         */
+        post: operations["checkKubeLesson"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/kubernetes/clusters/{clusterId}/revisions": {
         parameters: {
             query: {
@@ -3374,6 +3442,86 @@ export interface components {
             /** @description Onwaar bij preview */
             applied: boolean;
             objects: components["schemas"]["KubeApplyObject"][];
+        };
+        KubeLessonSummary: {
+            id: string;
+            number: number;
+            title: string;
+            summary: string;
+            /** @description Het aantal opdrachten */
+            steps: number;
+            /** @description Hoeveel opdrachten af zijn */
+            done: number;
+            /** @description Waarom de les nu niet kan; leeg als ze kan */
+            unavailable: string;
+            /** Format: date-time */
+            started_at: string | null;
+            /** Format: date-time */
+            finished_at: string | null;
+        };
+        /** @description Waar je de opdracht doet, een tabblad, een object of een webadres */
+        KubeLessonLink: {
+            label: string;
+            /** @description Een tabblad van het cluster, zoals apps; leeg bij een object of webadres */
+            tab: string;
+            namespace: string;
+            system: boolean;
+            ref: components["schemas"]["KubeRef"] | null;
+            url: string;
+        };
+        KubeLessonStep: {
+            id: string;
+            title: string;
+            /**
+             * @description Iets doen dat ClusterForge controleert, een vraag, of lezen en zelf bevestigen
+             * @enum {string}
+             */
+            kind: "do" | "quiz" | "read";
+            /** @enum {string} */
+            state: "done" | "current" | "locked";
+            /** @description Alinea's; code staat tussen backticks */
+            text: string[];
+            /** @description Hoe het in ClusterForge kan */
+            web: string;
+            kubectl: string[];
+            /** @description YAML om toe te passen; leeg als er geen is */
+            yaml: string;
+            question: string;
+            /** @description Wat de controle zag: wat er nog ontbreekt, of bij een afgeronde opdracht wat er staat */
+            detail: string;
+            /** @description Het goede antwoord op een vraag */
+            answer: string;
+            /** @description Het antwoord van daarnet klopt niet */
+            wrong: boolean;
+            /** @description De knop bij een leesopdracht */
+            done_label: string;
+            /** Format: date-time */
+            done_at: string | null;
+            link: components["schemas"]["KubeLessonLink"] | null;
+        };
+        KubeLesson: {
+            id: string;
+            number: number;
+            title: string;
+            summary: string;
+            intro: string[];
+            /** @description Staat er als de les af is */
+            outro: string[];
+            steps: components["schemas"]["KubeLessonStep"][];
+            done: number;
+            unavailable: string;
+            /** Format: date-time */
+            started_at: string | null;
+            /** Format: date-time */
+            finished_at: string | null;
+            /** @description Waarom het cluster niet te lezen was; leeg als het lukte */
+            problem: string;
+        };
+        KubeLessonCheckInput: {
+            /** @description Per opdracht een antwoord op een vraag, of iets niet-leegs om een leesopdracht af te ronden */
+            answers?: {
+                [key: string]: string;
+            };
         };
         KubeResourceType: {
             group: string;
@@ -11984,6 +12132,85 @@ export interface operations {
             409: components["responses"]["Error"];
             502: components["responses"]["Error"];
             503: components["responses"]["Error"];
+        };
+    };
+    listKubeLessons: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["KubeLessonSummary"][];
+                    };
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    resetKubeLesson: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+                lesson: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Opnieuw begonnen */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    checkKubeLesson: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+                lesson: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["KubeLessonCheckInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KubeLesson"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
         };
     };
     listKubeRevisions: {

@@ -62,3 +62,24 @@ ORDER BY k.name;
 
 -- name: SetUserKubeLearning :exec
 UPDATE users SET kube_learning = $2, updated_at = now() WHERE id = $1;
+
+-- name: ListKubeLessonSteps :many
+-- De voortgang van een gebruiker in de lessen van een cluster.
+SELECT * FROM kube_lesson_steps
+WHERE cluster_id = $1 AND user_id = $2
+ORDER BY lesson, started_at, step;
+
+-- name: StartKubeLessonStep :one
+-- Een opdracht is aan de beurt. Bestaat de rij al, dan blijft wat er toen
+-- gezien werd staan.
+INSERT INTO kube_lesson_steps (cluster_id, user_id, lesson, step, data)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (cluster_id, user_id, lesson, step) DO UPDATE SET lesson = EXCLUDED.lesson
+RETURNING *;
+
+-- name: FinishKubeLessonStep :exec
+UPDATE kube_lesson_steps SET done_at = now(), data = $5, answer = $6
+WHERE cluster_id = $1 AND user_id = $2 AND lesson = $3 AND step = $4 AND done_at IS NULL;
+
+-- name: ResetKubeLesson :exec
+DELETE FROM kube_lesson_steps WHERE cluster_id = $1 AND user_id = $2 AND lesson = $3;

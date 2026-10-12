@@ -61,6 +61,7 @@ Het technisch ontwerp staat in [docs/design/mvp-fase-1.md](docs/design/mvp-fase-
 | 3. Details, logs en gebeurtenissen | Een pod, app, node of ander object openen: de toestand in gewone woorden, de keten van Deployment tot de VM op de Proxmox-host en van Service en Ingress, de containers, condities, events en YAML; de logs van een container, ook van de vorige na een herstart; tabbladen Netwerk, Opslag, Configuratie, Gebeurtenissen en Alles, met de soorten van geïnstalleerde apps zoals IngressRoute van Traefik | klaar |
 | 4. Acties | Een app schalen, herstarten of terugdraaien naar een vorige versie, een object weghalen, een node op cordon zetten, weer pods geven of leegmaken; alles in het logboek, op prod met de slug en tweestapsverificatie; een herstart of onderhoud van een node via ClusterForge maakt hem in Kubernetes eerst leeg en geeft hem daarna weer pods | klaar |
 | 5. Apps uitrollen | Een tabblad Toepassen met drie manieren: een formulier Nieuwe app dat een Deployment, Service en Ingress maakt met de YAML ernaast, een Helm-chart via de Helm-controller van k3s, of eigen YAML met voorbeelden; Controleren is een dry-run met het verschil per object en de fouten bij het veld, pas Toepassen verandert iets; een webadres onder nip.io wijst zonder eigen DNS naar het VIP | klaar |
+| 6. Lessen | Een tabblad Lessen met acht lessen, van je cluster verkennen tot een node in onderhoud; elke opdracht kan in ClusterForge of met kubectl, en ClusterForge kijkt op het cluster of ze gelukt is; de voortgang blijft per gebruiker bewaard, en Opruimen haalt de namespace leren weg | klaar |
 
 ## Draaien met Docker Compose
 
@@ -482,6 +483,27 @@ Beheert een ander programma een veld dat je YAML anders zet, dan toont Controler
 Het webadres is standaard `<app>.<VIP>.nip.io`. nip.io is een publieke DNS-dienst die elke naam met een IP-adres erin naar dat adres laat wijzen. Zo werkt het zonder eigen DNS, als je pc internet heeft. Wil je eigen namen, zet dan in je DNS een wildcard zoals `*.leren.lab` naar het VIP en vul `app.leren.lab` in.
 
 Toepassen staat in het logboek met de soort en naam van wat nieuw of anders is, nooit met de inhoud. Op een prodcluster vraagt het de slug en tweestapsverificatie; controleren kan zonder. ClusterForge toont nooit de waarden van een Secret, ook niet in het verschil.
+
+### Lessen
+
+Op het tabblad **Lessen** leer je Kubernetes op je eigen cluster. Elke les heeft een paar opdrachten, op volgorde:
+
+1. **Je cluster verkennen**: hoeveel nodes, welke een server is, waar CoreDNS en Traefik draaien.
+2. **Je eerste app**: de namespace `leren`, een Deployment met nginx, en de pod die ontstaat.
+3. **Schalen en zelfherstel**: naar drie pods, op hoeveel nodes ze staan, en een pod weghalen die terugkomt.
+4. **Bereikbaar maken**: een Service, een Ingress onder `web.<VIP>.nip.io`, en de app in je browser.
+5. **Een nieuwe versie**: nginx 1.29 uitrollen, het versienummer, en terugdraaien.
+6. **Configuratie en geheimen**: een ConfigMap en een Secret als omgevingsvariabelen van web.
+7. **Opslag die blijft**: een volume, een app die erin schrijft, herstarten, en de node waaraan het volume vastzit.
+8. **Een node in onderhoud**: cordon, leegmaken en terugzetten. Daarvoor heeft het cluster minstens twee nodes nodig.
+
+Les 9 (een node erbij) en les 10 (een server valt uit) komen als je in ClusterForge nodes aan een Kubernetes-cluster kunt toevoegen.
+
+Bij elke opdracht staat wat ze je leert, hoe het in ClusterForge kan en welk `kubectl`-commando hetzelfde doet. Waar YAML bij hoort, controleer en pas je die meteen toe, zoals op het tabblad Toepassen. Zolang een opdracht aan de beurt is, kijkt ClusterForge elke vijf seconden op het cluster of ze gelukt is, en zegt wat het ziet, zoals "Er draait nog 1 pod van web op leren-worker-02". Het kijkt alleen; het verandert zelf niets. Een vraag beantwoord je in het vak eronder; een fout antwoord geeft een hint.
+
+ClusterForge kijkt naar het resultaat, niet naar hoe je het deed: `kubectl create deployment` telt net zo goed als de YAML. Lessen bouwen op elkaar voort, maar je kunt ze in elke volgorde openen; mist er iets uit een eerdere les, dan zegt de opdracht dat.
+
+De voortgang blijft per gebruiker en per cluster bewaard. Ook een viewer kan de lessen volgen, met kubectl of met een beheerder die toepast. Met **Opnieuw beginnen** wis je je voortgang in een les; wat er op het cluster staat, blijft. Ben je klaar, dan haalt **Opruimen** onder de lijst de namespace `leren` weg, met alles wat de lessen maakten, ook de volumes. Je voortgang blijft dan staan.
 
 ### Hoe ClusterForge Kubernetes leest
 
