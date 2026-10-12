@@ -745,6 +745,19 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 			s += ", ook zonder eigenaar"
 		}
 		return s
+	case "kube.applied":
+		var parts []string
+		if c := list(p["created"]); c != "" {
+			parts = append(parts, "nieuw "+c)
+		}
+		if u := list(p["updated"]); u != "" {
+			parts = append(parts, "anders "+u)
+		}
+		s := "Toegepast in Kubernetes: " + strings.Join(parts, "; ")
+		if p["force"] == true {
+			s += ", velden van een ander programma overgenomen"
+		}
+		return s
 	case "gitops.commit_seen":
 		return fmt.Sprintf("Nieuwe commit %s %q van %s", shortSHA(str(p, "sha")), str(p, "message"), str(p, "author")) + verifiedText(p)
 	case "gitops.sync_failed":

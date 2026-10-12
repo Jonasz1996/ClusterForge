@@ -10,7 +10,7 @@ import { ago, formatBytes } from "@/components/inventory/bits";
 import { formatCPU, objectHref, percent, useKubeLearning, type KubeEvent, type KubeRef, type KubeUsage } from "@/lib/kube";
 
 // sentence maakt van een foutmelding van de server een zin.
-function sentence(msg: string) {
+export function sentence(msg: string) {
   const s = msg.charAt(0).toUpperCase() + msg.slice(1);
   return /[.!?]$/.test(s) ? s : `${s}.`;
 }

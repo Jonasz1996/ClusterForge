@@ -1203,6 +1203,33 @@ func (e KubeActionName) Valid() bool {
 	}
 }
 
+// Defines values for KubeApplyObjectAction.
+const (
+	KubeApplyObjectActionCreate    KubeApplyObjectAction = "create"
+	KubeApplyObjectActionFailed    KubeApplyObjectAction = "failed"
+	KubeApplyObjectActionSkipped   KubeApplyObjectAction = "skipped"
+	KubeApplyObjectActionUnchanged KubeApplyObjectAction = "unchanged"
+	KubeApplyObjectActionUpdate    KubeApplyObjectAction = "update"
+)
+
+// Valid indicates whether the value is a known member of the KubeApplyObjectAction enum.
+func (e KubeApplyObjectAction) Valid() bool {
+	switch e {
+	case KubeApplyObjectActionCreate:
+		return true
+	case KubeApplyObjectActionFailed:
+		return true
+	case KubeApplyObjectActionSkipped:
+		return true
+	case KubeApplyObjectActionUnchanged:
+		return true
+	case KubeApplyObjectActionUpdate:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for KubeChainLinkRole.
 const (
 	KubeChainLinkRoleBackend      KubeChainLinkRole = "backend"
@@ -5252,6 +5279,62 @@ type KubeActionResult struct {
 	Message string `json:"message"`
 }
 
+// KubeApplyInput defines model for KubeApplyInput.
+type KubeApplyInput struct {
+	// Confirm De slug van het cluster; nodig op prod
+	Confirm *string `json:"confirm,omitempty"`
+
+	// Force Velden overnemen die een ander programma beheert
+	Force *bool `json:"force,omitempty"`
+
+	// Namespace De namespace van objecten zonder namespace; standaard default
+	Namespace *string `json:"namespace,omitempty"`
+
+	// Preview Alleen controleren met een dry-run
+	Preview *bool `json:"preview,omitempty"`
+
+	// Yaml Eén of meer objecten, gescheiden door ---; hoogstens 50 objecten en 512 kB
+	Yaml string `json:"yaml"`
+}
+
+// KubeApplyObject defines model for KubeApplyObject.
+type KubeApplyObject struct {
+	// Action Nieuw, anders, hetzelfde, mislukt, of niet toegepast omdat een object ervoor faalde
+	Action     KubeApplyObjectAction `json:"action"`
+	ApiVersion string                `json:"api_version"`
+	Conflicts  []KubeFieldConflict   `json:"conflicts"`
+
+	// Diff Unified diff van de YAML, zonder status en wat Kubernetes zelf invult
+	Diff string `json:"diff"`
+
+	// Doc Het nummer van het YAML-document
+	Doc       int              `json:"doc"`
+	Errors    []KubeFieldError `json:"errors"`
+	Kind      string           `json:"kind"`
+	Name      string           `json:"name"`
+	Namespace string           `json:"namespace"`
+	Note      string           `json:"note"`
+
+	// Ref Null als het cluster de soort niet kent
+	Ref nullable.Nullable[KubeRef] `json:"ref"`
+}
+
+// KubeApplyObjectAction Nieuw, anders, hetzelfde, mislukt, of niet toegepast omdat een object ervoor faalde
+type KubeApplyObjectAction string
+
+// KubeApplyResult defines model for KubeApplyResult.
+type KubeApplyResult struct {
+	// Applied Onwaar bij preview
+	Applied bool `json:"applied"`
+
+	// Changed Hoeveel objecten nieuw of anders zijn
+	Changed int               `json:"changed"`
+	Objects []KubeApplyObject `json:"objects"`
+
+	// Ok Geen object faalde
+	Ok bool `json:"ok"`
+}
+
 // KubeChainLink Een schakel in de keten van een object
 type KubeChainLink struct {
 	Kind string `json:"kind"`
@@ -5434,6 +5517,21 @@ type KubeEvent struct {
 
 	// Type Normal of Warning
 	Type string `json:"type"`
+}
+
+// KubeFieldConflict defines model for KubeFieldConflict.
+type KubeFieldConflict struct {
+	Field string `json:"field"`
+
+	// Manager Het programma dat het veld beheert, zoals kubectl-client-side-apply
+	Manager string `json:"manager"`
+}
+
+// KubeFieldError defines model for KubeFieldError.
+type KubeFieldError struct {
+	// Field Het veld, zoals spec.template.spec.containers[0].image; leeg als de fout niet bij een veld hoort
+	Field   string `json:"field"`
+	Message string `json:"message"`
 }
 
 // KubeIngress defines model for KubeIngress.
@@ -7840,6 +7938,9 @@ type SetIncidentNoteJSONRequestBody = IncidentNote
 // KubeActionJSONRequestBody defines body for KubeAction for application/json ContentType.
 type KubeActionJSONRequestBody = KubeActionInput
 
+// ApplyKubeJSONRequestBody defines body for ApplyKube for application/json ContentType.
+type ApplyKubeJSONRequestBody = KubeApplyInput
+
 // DrainKubeNodeJSONRequestBody defines body for DrainKubeNode for application/json ContentType.
 type DrainKubeNodeJSONRequestBody = KubeDrainInput
 
@@ -8220,6 +8321,9 @@ type ServerInterface interface {
 	// KubeAction Een object schalen, herstarten, terugdraaien of weghalen, of een node op cordon zetten of weer pods geven (admin)
 	// (POST /kubernetes/clusters/{clusterId}/actions)
 	KubeAction(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
+	// ApplyKube YAML toepassen met server-side apply, of eerst controleren (admin)
+	// (POST /kubernetes/clusters/{clusterId}/apply)
+	ApplyKube(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
 	// GetKubeConfig De ConfigMaps, en de Secrets met alleen de sleutels
 	// (GET /kubernetes/clusters/{clusterId}/config)
 	GetKubeConfig(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params GetKubeConfigParams)
@@ -9081,6 +9185,12 @@ func (_ Unimplemented) GetKubeOverview(w http.ResponseWriter, r *http.Request, c
 // KubeAction Een object schalen, herstarten, terugdraaien of weghalen, of een node op cordon zetten of weer pods geven (admin)
 // (POST /kubernetes/clusters/{clusterId}/actions)
 func (_ Unimplemented) KubeAction(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ApplyKube YAML toepassen met server-side apply, of eerst controleren (admin)
+// (POST /kubernetes/clusters/{clusterId}/apply)
+func (_ Unimplemented) ApplyKube(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -12655,6 +12765,32 @@ func (siw *ServerInterfaceWrapper) KubeAction(w http.ResponseWriter, r *http.Req
 	handler.ServeHTTP(w, r)
 }
 
+// ApplyKube operation middleware
+func (siw *ServerInterfaceWrapper) ApplyKube(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ApplyKube(w, r, clusterId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetKubeConfig operation middleware
 func (siw *ServerInterfaceWrapper) GetKubeConfig(w http.ResponseWriter, r *http.Request) {
 
@@ -15524,6 +15660,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/kubernetes/clusters/{clusterId}/actions", wrapper.KubeAction)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/kubernetes/clusters/{clusterId}/apply", wrapper.ApplyKube)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/kubernetes/clusters/{clusterId}/revisions", wrapper.ListKubeRevisions)

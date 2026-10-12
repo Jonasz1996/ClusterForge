@@ -60,6 +60,7 @@ Het technisch ontwerp staat in [docs/design/mvp-fase-1.md](docs/design/mvp-fase-
 | 2. Kube-brug en overzicht | cf-agent op een k3s-server leest de Kubernetes-API voor ClusterForge (agentprotocol 8), alleen lezen en zonder de waarden van Secrets; een pagina Kubernetes met per cluster een overzicht, de nodes gekoppeld aan de ClusterForge-nodes, de apps en de pods, met een leermodus die uitlegt wat je ziet en het kubectl-commando ernaast zet; na een uitrol wacht ClusterForge tot elke node Ready is | klaar |
 | 3. Details, logs en gebeurtenissen | Een pod, app, node of ander object openen: de toestand in gewone woorden, de keten van Deployment tot de VM op de Proxmox-host en van Service en Ingress, de containers, condities, events en YAML; de logs van een container, ook van de vorige na een herstart; tabbladen Netwerk, Opslag, Configuratie, Gebeurtenissen en Alles, met de soorten van geïnstalleerde apps zoals IngressRoute van Traefik | klaar |
 | 4. Acties | Een app schalen, herstarten of terugdraaien naar een vorige versie, een object weghalen, een node op cordon zetten, weer pods geven of leegmaken; alles in het logboek, op prod met de slug en tweestapsverificatie; een herstart of onderhoud van een node via ClusterForge maakt hem in Kubernetes eerst leeg en geeft hem daarna weer pods | klaar |
+| 5. Apps uitrollen | Een tabblad Toepassen met drie manieren: een formulier Nieuwe app dat een Deployment, Service en Ingress maakt met de YAML ernaast, een Helm-chart via de Helm-controller van k3s, of eigen YAML met voorbeelden; Controleren is een dry-run met het verschil per object en de fouten bij het veld, pas Toepassen verandert iets; een webadres onder nip.io wijst zonder eigen DNS naar het VIP | klaar |
 
 ## Draaien met Docker Compose
 
@@ -457,11 +458,36 @@ De **leermodus** staat standaard aan. Hij legt op elk tabblad uit wat je ziet en
 
 Een cluster dat je zelf bouwde, werkt ook: maak een cluster van het type Kubernetes, voeg de nodes toe en zet cf-agent op minstens één server.
 
+### Apps uitrollen
+
+Op het tabblad **Toepassen** zet een beheerder een app op, op drie manieren:
+
+- **Nieuwe app**: een formulier met naam, namespace, image, poort, aantal pods, omgevingsvariabelen, een volume en een webadres. Ernaast staat de YAML die het maakt: een Deployment, een Service en een Ingress, met een volume ook een PersistentVolumeClaim, en een Namespace als die nog niet bestaat. In de leermodus staat bij elk object wat het doet. Voorbeeld: whoami vult het in met een kleine webserver die toont welke pod antwoordt.
+- **Helm-chart**: repository, chart, versie en values. ClusterForge maakt er een HelmChart van in `kube-system`, en de Helm-controller van k3s installeert de chart in de namespace die je kiest, met een Job `helm-install-<naam>`. Voorbeeld: podinfo.
+- **Eigen YAML**: één of meer objecten, gescheiden door `---`, zoals voor `kubectl apply -f`. Of begin met een voorbeeld: whoami, nginx, Uptime Kuma met een volume, of PostgreSQL als StatefulSet met een Secret.
+
+Alle drie gaan langs dezelfde weg:
+
+1. **Controleren** stuurt elk object als dry-run naar de API. Kubernetes keurt alles zoals bij echt toepassen, maar bewaart niets. Je ziet per object of het nieuw, anders of hetzelfde is, met het verschil tegenover wat er nu draait.
+   - Een fout staat bij het veld, zoals `spec.template.spec.containers[0].ports[0].containerPort`, en in het formulier bij het invulvak.
+   - Een fout in de YAML zelf geeft de regel.
+   - Ook de values van een Helm-chart moeten geldige YAML zijn.
+2. **Toepassen** kan pas na een controle zonder fouten, en alleen als er iets verandert.
+   - Namespaces gaan eerst.
+   - Faalt een object, dan stopt ClusterForge en zegt het wat wel en niet is toegepast.
+   - Nog eens toepassen geeft "Geen verschil".
+
+Beheert een ander programma een veld dat je YAML anders zet, dan toont Controleren dat conflict en welk programma het veld heeft. Dat gebeurt bijvoorbeeld als je het object eerder met een gewone `kubectl apply` maakte. Met **Velden overnemen** wordt ClusterForge de eigenaar; Controleren toont dan wat er verandert, en de knop wordt Toepassen en overnemen.
+
+Het webadres is standaard `<app>.<VIP>.nip.io`. nip.io is een publieke DNS-dienst die elke naam met een IP-adres erin naar dat adres laat wijzen. Zo werkt het zonder eigen DNS, als je pc internet heeft. Wil je eigen namen, zet dan in je DNS een wildcard zoals `*.leren.lab` naar het VIP en vul `app.leren.lab` in.
+
+Toepassen staat in het logboek met de soort en naam van wat nieuw of anders is, nooit met de inhoud. Op een prodcluster vraagt het de slug en tweestapsverificatie; controleren kan zonder. ClusterForge toont nooit de waarden van een Secret, ook niet in het verschil.
+
 ### Hoe ClusterForge Kubernetes leest
 
 De server praat nooit zelf met de Kubernetes-API. cf-agent op een k3s-server doet het, met de beheerdersconfig `/etc/rancher/k3s/k3s.yaml` die daar al staat, en stuurt het antwoord via de bestaande verbinding (NATS) terug. Daardoor hoeft poort 6443 niet open naar ClusterForge, en verlaat geen certificaat van het cluster de server. ClusterForge kiest een server met een verse heartbeat waarvan de API antwoordt; valt die weg, dan neemt een andere het over.
 
-De agent laat alleen lezen toe, met een vaste lijst: geen exec, attach, port-forward of proxy, en geen watch. Schrijven kan alleen voor de acties hierboven: een patch op Deployments, StatefulSets, ReplicaSets, DaemonSets en nodes, een eviction van een pod, en het weghalen van één object, nooit van `default` of de namespaces van Kubernetes zelf. Een patch staat in Kubernetes op naam van `clusterforge` (de fieldManager). Van een log haalt hij alleen de laatste regels, hoogstens 5000 en 2 MB, zonder te blijven volgen; het dashboard vraagt hem elke vijf seconden opnieuw. Van een Secret stuurt hij de namen van de sleutels, nooit de waarden: die vervangt hij door "(verborgen, N bytes)". Hij doet hoogstens vier verzoeken tegelijk, elk hoogstens 30 seconden.
+De agent laat alleen lezen toe, met een vaste lijst: geen exec, attach, port-forward of proxy, en geen watch. Schrijven kan alleen voor de acties hierboven: een patch op Deployments, StatefulSets, ReplicaSets, DaemonSets en nodes, een eviction van een pod, en het weghalen van één object, nooit van `default` of de namespaces van Kubernetes zelf. Voor Toepassen doet de agent een server-side apply van één object tegelijk, met een dry-run bij Controleren; dat kan elk object zijn, zoals bij `kubectl apply`, en daarom kan alleen een beheerder het. Een patch of apply staat in Kubernetes op naam van `clusterforge` (de fieldManager). Van een log haalt hij alleen de laatste regels, hoogstens 5000 en 2 MB, zonder te blijven volgen; het dashboard vraagt hem elke vijf seconden opnieuw. Van een Secret stuurt hij de namen van de sleutels, nooit de waarden: die vervangt hij door "(verborgen, N bytes)". Hij doet hoogstens vier verzoeken tegelijk, elk hoogstens 30 seconden.
 
 Dit kan vanaf **agentprotocol 8**. Met een oudere agent toont de pagina "Agent te oud voor Kubernetes", met het commando om hem bij te werken; de aanmelding blijft staan. Werk ook je golden image bij, anders krijgen nieuwe VM's de oude agent. De andere onderdelen van ClusterForge blijven werken met een oudere agent.
 

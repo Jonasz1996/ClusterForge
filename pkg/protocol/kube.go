@@ -44,6 +44,10 @@ const (
 	// PodDisruptionBudget geldt. Path is
 	// /api/v1/namespaces/<ns>/pods/<naam>/eviction; de agent maakt de body.
 	KubeEvict = "evict"
+	// KubeApply doet server-side apply van één object, zoals kubectl apply
+	// --server-side. Body is het object als JSON. Een veld dat een ander
+	// programma beheert, neemt hij alleen over met force=true.
+	KubeApply = "apply"
 )
 
 // Soorten patch bij KubePatch.
@@ -70,9 +74,11 @@ type KubeRequest struct {
 	// Query zijn de queryparameters. Bij lezen kent de agent alleen
 	// labelSelector, fieldSelector, limit en continue; bij logs container,
 	// previous, tailLines en timestamps; bij patch dryRun; bij delete
-	// propagationPolicy, gracePeriodSeconds en dryRun.
+	// propagationPolicy, gracePeriodSeconds en dryRun; bij apply dryRun en
+	// force.
 	Query map[string]string `json:"query,omitempty"`
-	// Body is de patch bij KubePatch, en PatchType zijn soort.
+	// Body is de patch bij KubePatch, met PatchType als soort, en het object
+	// bij KubeApply.
 	Body      json.RawMessage `json:"body,omitempty"`
 	PatchType string          `json:"patch_type,omitempty"`
 	// Deadline: na dit tijdstip weigert de agent het verzoek.
@@ -90,6 +96,10 @@ type KubeResponse struct {
 	Body  json.RawMessage `json:"body,omitempty"`
 	Gzip  []byte          `json:"gzip,omitempty"`
 	Error string          `json:"error,omitempty"`
+	// Same is bij KubeApply true als het object al zo stond. De agent
+	// vergelijkt het object van voor en na, met de waarden van een Secret,
+	// voordat hij die weghaalt.
+	Same bool `json:"same,omitempty"`
 }
 
 // Grenzen van de kube-brug. Een NATS-bericht is hoogstens 1 MiB, en Gzip
@@ -110,7 +120,8 @@ const (
 	// KubeMaxLogBytes hoeveel bytes log de agent hoogstens leest.
 	KubeMaxLogLines = 5000
 	KubeMaxLogBytes = 2 << 20
-	// KubeMaxPatch is de grootste patch die de agent doorstuurt.
+	// KubeMaxPatch is de grootste patch, of het grootste object bij apply,
+	// die de agent doorstuurt.
 	KubeMaxPatch = 256 << 10
 )
 

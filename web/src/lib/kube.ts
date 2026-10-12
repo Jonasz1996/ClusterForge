@@ -26,6 +26,9 @@ export type KubeActionInput = components["schemas"]["KubeActionInput"];
 export type KubeRevision = components["schemas"]["KubeRevision"];
 export type KubeDrainPlan = components["schemas"]["KubeDrainPlan"];
 export type KubeDrainPod = components["schemas"]["KubeDrainPod"];
+export type KubeApplyInput = components["schemas"]["KubeApplyInput"];
+export type KubeApplyResult = components["schemas"]["KubeApplyResult"];
+export type KubeApplyObject = components["schemas"]["KubeApplyObject"];
 type Job = components["schemas"]["Job"];
 
 type Tone = "slate" | "green" | "amber" | "red" | "blue";
@@ -338,6 +341,19 @@ export function useKubeDrain(id: string) {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["jobs"] });
       void qc.invalidateQueries({ queryKey: ["kube", id] });
+    },
+  });
+}
+
+// useKubeApply controleert YAML met een dry-run (preview) of past hem toe.
+// Na toepassen leest het dashboard alles opnieuw.
+export function useKubeApply(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: KubeApplyInput) =>
+      unwrap(await api.POST("/kubernetes/clusters/{clusterId}/apply", { params: { path: { clusterId: id } }, body })),
+    onSettled: (_r, _e, body) => {
+      if (!body.preview) void qc.invalidateQueries({ queryKey: ["kube", id] });
     },
   });
 }
