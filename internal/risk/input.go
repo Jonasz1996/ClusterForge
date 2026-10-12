@@ -75,6 +75,51 @@ type ClusterInput struct {
 
 	// Capaciteit: MetricsRead is false zonder VictoriaMetrics.
 	MetricsRead bool
+
+	// Kube is wat de kaart Kubernetes nodig heeft; nil bij een ander
+	// clustertype.
+	Kube *KubeInput
+}
+
+// KubeInput is wat de sync laatst van een Kubernetes-cluster zag.
+type KubeInput struct {
+	// Synced is false als de sync het cluster nog nooit las.
+	Synced bool
+	// Version is de versie van de API-server, zoals v1.35.9+k3s1.
+	Version string
+	Nodes   []KubeNodeInput
+	// SnapshotsRead is false als de lijst van de etcd-snapshots nog nooit
+	// of laatst niet te lezen was. NewestSnapshot is de nieuwste die klaar
+	// is; nil als er geen is.
+	SnapshotsRead  bool
+	NewestSnapshot *time.Time
+	Apps           []KubeAppInput
+}
+
+// KubeNodeInput is een node in Kubernetes. NodeID is de ClusterForge-node,
+// als die gekoppeld is.
+type KubeNodeInput struct {
+	Name   string
+	NodeID *uuid.UUID
+	Server bool
+	Ready  bool
+}
+
+// KubeAppInput is een Deployment, StatefulSet of DaemonSet.
+type KubeAppInput struct {
+	ID                    uuid.UUID
+	Namespace, Kind, Name string
+	// System is true in een namespace van Kubernetes zelf.
+	System  bool
+	Desired int
+	Images  []string
+	Trouble string
+	// Restarts telt de herstarts van de containers van de huidige pods,
+	// RestartedAt wanneer een container het laatst stopte.
+	Restarts    int
+	RestartedAt *time.Time
+	// NoMemoryLimit zijn de containers zonder geheugenlimiet.
+	NoMemoryLimit []string
 }
 
 // Transition is een statusovergang.

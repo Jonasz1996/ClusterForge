@@ -390,6 +390,65 @@ func (q *Queries) ListKubeAccessToRemove(ctx context.Context, clusterID uuid.UUI
 	return items, nil
 }
 
+const listKubeAppFacts = `-- name: ListKubeAppFacts :many
+SELECT id, cluster_id, namespace, kind, name, system, desired, ready, images, trouble, status, restarts, restarted_at, no_memory_limit
+FROM kube_workloads
+ORDER BY cluster_id, namespace, name, kind
+`
+
+type ListKubeAppFactsRow struct {
+	ID            uuid.UUID
+	ClusterID     uuid.UUID
+	Namespace     string
+	Kind          string
+	Name          string
+	System        bool
+	Desired       int32
+	Ready         int32
+	Images        []string
+	Trouble       string
+	Status        string
+	Restarts      int32
+	RestartedAt   *time.Time
+	NoMemoryLimit []string
+}
+
+// De apps van alle clusters, voor de score en de documentatie.
+func (q *Queries) ListKubeAppFacts(ctx context.Context) ([]ListKubeAppFactsRow, error) {
+	rows, err := q.db.Query(ctx, listKubeAppFacts)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListKubeAppFactsRow{}
+	for rows.Next() {
+		var i ListKubeAppFactsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ClusterID,
+			&i.Namespace,
+			&i.Kind,
+			&i.Name,
+			&i.System,
+			&i.Desired,
+			&i.Ready,
+			&i.Images,
+			&i.Trouble,
+			&i.Status,
+			&i.Restarts,
+			&i.RestartedAt,
+			&i.NoMemoryLimit,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listKubeApps = `-- name: ListKubeApps :many
 SELECT id, cluster_id, namespace, kind, name, desired, ready, up_to_date, trouble, short_since, status, status_reason, status_since
 FROM kube_workloads
@@ -687,6 +746,71 @@ func (q *Queries) ListKubeEventsInScope(ctx context.Context, arg ListKubeEventsI
 	return items, nil
 }
 
+const listKubeFacts = `-- name: ListKubeFacts :many
+SELECT c.id AS cluster_id, (k.cluster_id IS NOT NULL)::boolean AS synced, coalesce(k.api_ok, false)::boolean AS api_ok,
+       coalesce(k.version, '')::text AS version, k.synced_at, k.ok_at, k.snapshots_at,
+       coalesce(k.snapshots_error, '')::text AS snapshots_error,
+       coalesce((SELECT max(s.taken_at) FROM kube_snapshots s WHERE s.cluster_id = c.id AND s.ready), 'epoch')::timestamptz AS newest_snapshot,
+       (SELECT count(*) FROM kube_snapshots s WHERE s.cluster_id = c.id AND s.ready)::int AS snapshots,
+       k.inventory, k.inventory_at, coalesce(k.inventory_error, '')::text AS inventory_error
+FROM clusters c
+LEFT JOIN kube_clusters k ON k.cluster_id = c.id
+WHERE c.type = 'kubernetes'
+ORDER BY c.id
+`
+
+type ListKubeFactsRow struct {
+	ClusterID      uuid.UUID
+	Synced         bool
+	ApiOk          bool
+	Version        string
+	SyncedAt       *time.Time
+	OkAt           *time.Time
+	SnapshotsAt    *time.Time
+	SnapshotsError string
+	NewestSnapshot time.Time
+	Snapshots      int32
+	Inventory      []byte
+	InventoryAt    *time.Time
+	InventoryError string
+}
+
+// Per Kubernetes-cluster wat de sync laatst zag, voor de score en de
+// documentatie, met de nieuwste etcd-snapshot die klaar is.
+func (q *Queries) ListKubeFacts(ctx context.Context) ([]ListKubeFactsRow, error) {
+	rows, err := q.db.Query(ctx, listKubeFacts)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListKubeFactsRow{}
+	for rows.Next() {
+		var i ListKubeFactsRow
+		if err := rows.Scan(
+			&i.ClusterID,
+			&i.Synced,
+			&i.ApiOk,
+			&i.Version,
+			&i.SyncedAt,
+			&i.OkAt,
+			&i.SnapshotsAt,
+			&i.SnapshotsError,
+			&i.NewestSnapshot,
+			&i.Snapshots,
+			&i.Inventory,
+			&i.InventoryAt,
+			&i.InventoryError,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listKubeLessonSteps = `-- name: ListKubeLessonSteps :many
 SELECT cluster_id, user_id, lesson, step, started_at, done_at, data, answer FROM kube_lesson_steps
 WHERE cluster_id = $1 AND user_id = $2
@@ -717,6 +841,63 @@ func (q *Queries) ListKubeLessonSteps(ctx context.Context, arg ListKubeLessonSte
 			&i.DoneAt,
 			&i.Data,
 			&i.Answer,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listKubeNodeFacts = `-- name: ListKubeNodeFacts :many
+SELECT k.cluster_id, k.name, k.node_id, coalesce(n.hostname, '')::text AS hostname, k.roles, k.ready, k.unschedulable, k.kubelet,
+       k.internal_ip, k.cpu_millis, k.memory_bytes, k.pods
+FROM kube_nodes k
+LEFT JOIN nodes n ON n.id = k.node_id
+ORDER BY k.cluster_id, k.name
+`
+
+type ListKubeNodeFactsRow struct {
+	ClusterID     uuid.UUID
+	Name          string
+	NodeID        *uuid.UUID
+	Hostname      string
+	Roles         []string
+	Ready         bool
+	Unschedulable bool
+	Kubelet       string
+	InternalIp    string
+	CpuMillis     int64
+	MemoryBytes   int64
+	Pods          int32
+}
+
+// De Kubernetes-nodes van alle clusters, met hun ClusterForge-node.
+func (q *Queries) ListKubeNodeFacts(ctx context.Context) ([]ListKubeNodeFactsRow, error) {
+	rows, err := q.db.Query(ctx, listKubeNodeFacts)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListKubeNodeFactsRow{}
+	for rows.Next() {
+		var i ListKubeNodeFactsRow
+		if err := rows.Scan(
+			&i.ClusterID,
+			&i.Name,
+			&i.NodeID,
+			&i.Hostname,
+			&i.Roles,
+			&i.Ready,
+			&i.Unschedulable,
+			&i.Kubelet,
+			&i.InternalIp,
+			&i.CpuMillis,
+			&i.MemoryBytes,
+			&i.Pods,
 		); err != nil {
 			return nil, err
 		}
@@ -1173,6 +1354,35 @@ func (q *Queries) SetKubeAppStatus(ctx context.Context, arg SetKubeAppStatusPara
 	return err
 }
 
+const setKubeInventory = `-- name: SetKubeInventory :exec
+UPDATE kube_clusters SET inventory = $1, inventory_at = now(), inventory_error = '' WHERE cluster_id = $2
+`
+
+type SetKubeInventoryParams struct {
+	Inventory []byte
+	ClusterID uuid.UUID
+}
+
+// Bewaart de namespaces, webadressen en opslag van een cluster.
+func (q *Queries) SetKubeInventory(ctx context.Context, arg SetKubeInventoryParams) error {
+	_, err := q.db.Exec(ctx, setKubeInventory, arg.Inventory, arg.ClusterID)
+	return err
+}
+
+const setKubeInventoryError = `-- name: SetKubeInventoryError :exec
+UPDATE kube_clusters SET inventory_error = $1 WHERE cluster_id = $2
+`
+
+type SetKubeInventoryErrorParams struct {
+	InventoryError string
+	ClusterID      uuid.UUID
+}
+
+func (q *Queries) SetKubeInventoryError(ctx context.Context, arg SetKubeInventoryErrorParams) error {
+	_, err := q.db.Exec(ctx, setKubeInventoryError, arg.InventoryError, arg.ClusterID)
+	return err
+}
+
 const setKubeSnapshotsRead = `-- name: SetKubeSnapshotsRead :exec
 UPDATE kube_clusters
 SET snapshots_at = CASE WHEN $2::text = '' THEN now() ELSE snapshots_at END, snapshots_error = $2::text
@@ -1295,29 +1505,34 @@ func (q *Queries) UpsertKubeEvent(ctx context.Context, arg UpsertKubeEventParams
 }
 
 const upsertKubeWorkload = `-- name: UpsertKubeWorkload :exec
-INSERT INTO kube_workloads (cluster_id, namespace, kind, name, system, desired, ready, up_to_date, images, trouble, short_since, seen_at)
+INSERT INTO kube_workloads (cluster_id, namespace, kind, name, system, desired, ready, up_to_date, images, trouble, short_since, seen_at,
+                            restarts, restarted_at, no_memory_limit)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-        CASE WHEN $11::boolean THEN now() END, $12::timestamptz)
+        CASE WHEN $11::boolean THEN now() END, $12::timestamptz, $13, $14, $15)
 ON CONFLICT (cluster_id, namespace, kind, name) DO UPDATE
 SET system = EXCLUDED.system, desired = EXCLUDED.desired, ready = EXCLUDED.ready, up_to_date = EXCLUDED.up_to_date,
     images = EXCLUDED.images, trouble = EXCLUDED.trouble,
     short_since = CASE WHEN $11::boolean THEN coalesce(kube_workloads.short_since, now()) END,
-    seen_at = EXCLUDED.seen_at
+    seen_at = EXCLUDED.seen_at, restarts = EXCLUDED.restarts, restarted_at = EXCLUDED.restarted_at,
+    no_memory_limit = EXCLUDED.no_memory_limit
 `
 
 type UpsertKubeWorkloadParams struct {
-	ClusterID uuid.UUID
-	Namespace string
-	Kind      string
-	Name      string
-	System    bool
-	Desired   int32
-	Ready     int32
-	UpToDate  int32
-	Images    []string
-	Trouble   string
-	Short     bool
-	SeenAt    time.Time
+	ClusterID     uuid.UUID
+	Namespace     string
+	Kind          string
+	Name          string
+	System        bool
+	Desired       int32
+	Ready         int32
+	UpToDate      int32
+	Images        []string
+	Trouble       string
+	Short         bool
+	SeenAt        time.Time
+	Restarts      int32
+	RestartedAt   *time.Time
+	NoMemoryLimit []string
 }
 
 // Bewaart een app. short_since blijft staan zolang de app niet in orde is.
@@ -1335,6 +1550,9 @@ func (q *Queries) UpsertKubeWorkload(ctx context.Context, arg UpsertKubeWorkload
 		arg.Trouble,
 		arg.Short,
 		arg.SeenAt,
+		arg.Restarts,
+		arg.RestartedAt,
+		arg.NoMemoryLimit,
 	)
 	return err
 }

@@ -15,6 +15,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/backups"
 	"github.com/Jonasz1996/clusterforge/internal/deploy"
 	"github.com/Jonasz1996/clusterforge/internal/deps"
+	"github.com/Jonasz1996/clusterforge/internal/kube"
 	"github.com/Jonasz1996/clusterforge/internal/risk"
 	"github.com/Jonasz1996/clusterforge/internal/store"
 	"github.com/Jonasz1996/clusterforge/internal/templates"
@@ -42,6 +43,10 @@ type world struct {
 	backups            map[uuid.UUID]backups.Item
 	grades             map[uuid.UUID]risk.ClusterScore
 	overview           risk.Overview
+	// Wat de sync laatst van de Kubernetes-clusters zag.
+	kubeFacts map[uuid.UUID]store.ListKubeFactsRow
+	kubeNodes []store.ListKubeNodeFactsRow
+	kubeApps  []store.ListKubeAppFactsRow
 }
 
 // Gather leest alles voor de documentatie. Ze leest alleen.
@@ -110,6 +115,20 @@ func (s *Service) read(ctx context.Context) (*world, []store.ListDocClustersRow,
 		return nil, nil, err
 	}
 	if w.drScenarios, err = s.q.ListDocRehearsalScenarios(ctx); err != nil {
+		return nil, nil, err
+	}
+	facts, err := s.q.ListKubeFacts(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	w.kubeFacts = map[uuid.UUID]store.ListKubeFactsRow{}
+	for _, f := range facts {
+		w.kubeFacts[f.ClusterID] = f
+	}
+	if w.kubeNodes, err = s.q.ListKubeNodeFacts(ctx); err != nil {
+		return nil, nil, err
+	}
+	if w.kubeApps, err = s.q.ListKubeAppFacts(ctx); err != nil {
 		return nil, nil, err
 	}
 	sums, err := s.q.ListDocSummaries(ctx)
@@ -185,6 +204,7 @@ func (s *Service) cluster(ctx context.Context, w *world, r store.ListDocClusters
 		}
 	}
 	var keepalived = map[uuid.UUID]*protocol.Keepalived{}
+	initHost := ""
 	for _, row := range w.nodes {
 		if row.ClusterID != r.ID {
 			continue
@@ -205,6 +225,9 @@ func (s *Service) cluster(ctx context.Context, w *world, r store.ListDocClusters
 		if len(row.Facts) > 0 && json.Unmarshal(row.Facts, &facts) == nil {
 			factsOf(&n, facts)
 			keepalived[row.ID] = facts.Keepalived
+			if facts.Kube != nil && facts.Kube.Init {
+				initHost = row.Hostname
+			}
 		}
 		if g, ok := guests[row.ID]; ok {
 			n.Guest = guestOf(m, g)
@@ -302,6 +325,9 @@ func (s *Service) cluster(ctx context.Context, w *world, r store.ListDocClusters
 	}
 	c.Outages = outagesOf(w.what, &c)
 	c.Summary = w.summaries[r.ID]
+	if f, ok := w.kubeFacts[r.ID]; ok {
+		c.Kube = s.kubeOf(w, f, tpl, initHost)
+	}
 	return c, nil
 }
 
@@ -809,3 +835,58 @@ func linkEndOf(g *deps.Graph, e End) LinkEnd {
 
 // ErrNotFound betekent dat het cluster of document niet bestaat.
 var ErrNotFound = errors.New("niet gevonden")
+
+// kubeOf zet wat de sync van een Kubernetes-cluster zag om voor de
+// documentatie. Wat elke minuut verandert, zoals Ready of het aantal
+// herstarts, staat er niet in: de documentatie beschrijft het cluster, niet
+// zijn toestand van nu.
+func (s *Service) kubeOf(w *world, f store.ListKubeFactsRow, tpl *templates.Template, initHost string) *Kube {
+	k := &Kube{Synced: f.Synced, Version: f.Version, Init: initHost, Snapshots: int(f.Snapshots)}
+	if tpl != nil {
+		k.TemplateK3s = tpl.KubeVersion()
+		if next := s.Deploy.Templates.KubeNext(tpl.Name, tpl.Version); next != nil {
+			k.NextVersion, k.NextK3s = next.Version, next.KubeVersion()
+		}
+	}
+	var newest []kube.Snapshot
+	if f.NewestSnapshot.After(time.Unix(0, 0)) {
+		t := f.NewestSnapshot
+		newest = []kube.Snapshot{{Ready: true, TakenAt: &t}}
+	}
+	readErr := f.SnapshotsError
+	if f.SnapshotsAt == nil && readErr == "" {
+		readErr = "nog niet gelezen"
+	}
+	k.Fresh = kube.Fresh(newest, readErr, s.Now())
+	if len(f.Inventory) > 0 {
+		var inv kube.Inventory
+		if json.Unmarshal(f.Inventory, &inv) == nil {
+			k.Inventory = &inv
+		}
+	}
+	for _, n := range w.kubeNodes {
+		if n.ClusterID == f.ClusterID {
+			k.Nodes = append(k.Nodes, KubeNode{
+				Name: n.Name, Hostname: n.Hostname, Server: slices.Contains(n.Roles, "control-plane"), Kubelet: n.Kubelet, IP: n.InternalIp,
+				CPUMillis: n.CpuMillis, MemoryBytes: n.MemoryBytes,
+			})
+		}
+	}
+	slices.SortStableFunc(k.Nodes, func(a, b KubeNode) int {
+		if a.Server != b.Server {
+			if a.Server {
+				return -1
+			}
+			return 1
+		}
+		return cmp.Compare(a.Name, b.Name)
+	})
+	for _, a := range w.kubeApps {
+		if a.ClusterID == f.ClusterID {
+			k.Apps = append(k.Apps, KubeApp{
+				Namespace: a.Namespace, Kind: a.Kind, Name: a.Name, System: a.System, Desired: int(a.Desired), Images: a.Images,
+			})
+		}
+	}
+	return k
+}

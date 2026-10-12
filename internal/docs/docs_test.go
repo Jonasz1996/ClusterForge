@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/Jonasz1996/clusterforge/internal/kube"
 )
 
 func ptr[T any](v T) *T { return &v }
@@ -280,5 +282,111 @@ func TestSummaryInArchitecture(t *testing.T) {
 	}
 	if got := modelText("claude-opus-5-5-20261001, claude-opus-4-8"); got != "Claude Opus 5.5, Claude Opus 4.8" {
 		t.Errorf("modelText = %q", got)
+	}
+}
+
+// kubeCluster is het cluster Leren: één server, twee workers, een app met
+// een Ingress en een volume op local-path.
+func kubeCluster(env string) Cluster {
+	return Cluster{
+		ID: uuid.MustParse("77777777-7777-7777-7777-777777777777"), Name: "Leren", Slug: "leren", Env: env, Type: "kubernetes",
+		Template: &Template{Name: "kubernetes", Version: "1.0.0", Available: true},
+		VIPs:     []VIP{{Address: "10.0.40.100"}},
+		Kube: &Kube{
+			Synced: true, Version: "v1.35.9+k3s1", TemplateK3s: "v1.35.9+k3s1", NextVersion: "1.1.0", NextK3s: "v1.36.5+k3s1",
+			Init: "leren-server-01", Snapshots: 5, Fresh: "ok",
+			Nodes: []KubeNode{
+				{Name: "leren-server-01", Hostname: "leren-server-01", Server: true, Kubelet: "v1.35.9+k3s1", IP: "10.0.40.11", CPUMillis: 2000, MemoryBytes: 4 << 30},
+				{Name: "leren-worker-01", Hostname: "leren-worker-01", Kubelet: "v1.35.9+k3s1", IP: "10.0.40.12", CPUMillis: 1500},
+			},
+			Apps: []KubeApp{
+				{Namespace: "demo", Kind: "Deployment", Name: "web", Desired: 2, Images: []string{"nginx:1.29"}},
+				{Namespace: "kube-system", Kind: "Deployment", Name: "traefik", System: true, Desired: 1},
+				{Namespace: "kube-system", Kind: "Deployment", Name: "coredns", System: true, Desired: 1},
+			},
+			Inventory: &kube.Inventory{
+				Namespaces: []string{"clusterforge", "default", "demo", "kube-system"},
+				Addresses: []kube.InventoryAddress{
+					{Namespace: "demo", Kind: "Ingress", Name: "web", URL: "http://web.10.0.40.100.nip.io/", Host: "web.10.0.40.100.nip.io", Path: "/", Service: "web", Port: "80"},
+					{Namespace: "kube-system", Kind: "Service", Name: "traefik", URL: "http://10.0.40.11/", Text: "LoadBalancer op 10.0.40.11, poorten 80, 443"},
+				},
+				Volumes: []kube.InventoryVolume{{Namespace: "demo", Name: "data", Class: "local-path", Size: "1Gi", Phase: "Bound", Node: "leren-worker-01",
+					Path: "/var/lib/rancher/k3s/storage/pvc-1_demo_data", UsedBy: []string{"web-5d9c-x"}}},
+				DefaultClass: "local-path",
+			},
+		},
+	}
+}
+
+func TestKubernetesChapter(t *testing.T) {
+	c := kubeCluster("lab")
+	if got := Kinds(c.Type); strings.Join(got, ",") != "architectuur,kubernetes,netwerk,configuratie,herstel,runbooks" {
+		t.Fatalf("hoofdstukken: %v", got)
+	}
+	if !Valid(ScopeCluster, KindKubernetes) || len(Kinds("web")) != 5 {
+		t.Fatal("kubernetes is een hoofdstuk van een cluster, alleen bij Kubernetes")
+	}
+	md := Chapter(&c, KindKubernetes, Opts{Loc: time.UTC})
+	for _, want := range []string{
+		"# Leren: kubernetes",
+		"[Architectuur](architectuur.md) · **Kubernetes** · [Netwerk](netwerk.md)",
+		"| **Versie** | k3s `v1.35.9` |",
+		"| **Ondersteuning** | Kubernetes 1.35 krijgt updates tot februari 2027 |",
+		"| **Bijwerken** | naar k3s `v1.36.5` met `kubernetes` 1.1.0; zie hieronder |",
+		"| **API** | `https://10.0.40.100:6443`, via het VIP |",
+		"| **leren-server-01** | server | leren-server-01 | 10.0.40.11 | `v1.35.9` | 2 cores | 4,0 GB |",
+		"| **leren-worker-01** | worker | leren-worker-01 | 10.0.40.12 | `v1.35.9` | 1,5 cores | – |",
+		"Eigen namespaces: `demo`.",
+		"Van Kubernetes en ClusterForge: `clusterforge` (de kubeconfigs van ClusterForge), `default` en `kube-system`.",
+		"| **demo/web** | Deployment | 2 | `nginx:1.29` |",
+		"Van k3s zelf, in `kube-system`: `coredns` en `traefik`.",
+		"| `http://web.10.0.40.100.nip.io/` | Ingress demo/web | Service `web`, poort 80 |",
+		"| **demo/data** | local-path | 1Gi | op leren-worker-01 in `/var/lib/rancher/k3s/storage/pvc-1_demo_data` | web-5d9c-x |",
+		"Een claim zonder klasse krijgt `local-path`.",
+		"Er zijn er 5; de nieuwste is minder dan een dag oud.",
+		"Alleen een snapshot op leren-server-01 kan terug",
+		"Met één server is die server het cluster",
+		"**Bijwerken naar k3s v1.36.5…**",
+		"ClusterForge werkt de nodes één voor één bij, eerst leren-server-01, dan leren-worker-01.",
+		"Kies in ClusterForge bij Kubernetes, tabblad Snapshots, **Terugzetten** bij een snapshot op leren-server-01.",
+		"--cluster-reset-restore-path=/var/lib/rancher/k3s/server/db/snapshots/<bestand>",
+	} {
+		if !strings.Contains(md, want) {
+			t.Errorf("mist %q in:\n%s", want, md)
+		}
+	}
+	if strings.Contains(md, "**5.**") {
+		t.Error("met één server is er geen stap voor de andere servers")
+	}
+
+	// Op prod met drie servers: geen Terugzetten, wel de stap voor de
+	// andere servers.
+	c = kubeCluster("prod")
+	c.GitLinked = true
+	c.Kube.Nodes = append(c.Kube.Nodes,
+		KubeNode{Name: "leren-server-02", Hostname: "leren-server-02", Server: true}, KubeNode{Name: "leren-server-03", Hostname: "leren-server-03", Server: true})
+	md = Chapter(&c, KindKubernetes, Opts{Loc: time.UTC})
+	for _, want := range []string{
+		"Op prod zet ClusterForge geen snapshot terug",
+		"**5.** Zet op leren-server-02 en leren-server-03 de database opzij",
+		"Een server van 3 mag uitvallen",
+		"Dit cluster volgt Git: verander het aantal nodes in `leren-cluster.yaml`",
+	} {
+		if !strings.Contains(md, want) {
+			t.Errorf("prod: mist %q in:\n%s", want, md)
+		}
+	}
+	rb := Chapter(&c, KindRunbooks, Opts{Loc: time.UTC})
+	if !strings.Contains(rb, "[Kubernetes](kubernetes.md#een-node-vervangen)") || strings.Contains(rb, "Een node uit een cluster halen kan ClusterForge nog niet") ||
+		!strings.Contains(rb, "maakt ClusterForge de node eerst leeg in Kubernetes") {
+		t.Errorf("runbooks:\n%s", rb)
+	}
+	// Een ander cluster heeft geen hoofdstuk Kubernetes.
+	f := fleet()
+	if Chapter(&f.Clusters[0], KindKubernetes, Opts{}) != "" || len(RenderCluster(&f.Clusters[0], Opts{})) != 5 {
+		t.Error("hoofdstuk Kubernetes bij een ander cluster")
+	}
+	if n := len(RenderCluster(&c, Opts{})); n != 6 {
+		t.Errorf("hoofdstukken van Leren: %d", n)
 	}
 }

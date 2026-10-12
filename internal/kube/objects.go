@@ -121,8 +121,17 @@ func (n Node) Pressure() []string {
 }
 
 type Container struct {
-	Name  string `json:"name"`
-	Image string `json:"image"`
+	Name      string `json:"name"`
+	Image     string `json:"image"`
+	Resources struct {
+		Limits map[string]any `json:"limits"`
+	} `json:"resources"`
+}
+
+// MemoryLimit zegt of de container een geheugenlimiet heeft.
+func (c Container) MemoryLimit() bool {
+	_, ok := c.Resources.Limits["memory"]
+	return ok
 }
 
 type ContainerState struct {

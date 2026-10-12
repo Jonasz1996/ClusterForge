@@ -104,6 +104,9 @@ type PodSpec struct {
 	EmptyDir bool
 	// Created is wanneer de pod ontstond; leeg laat de tijd weg.
 	Created time.Time
+	// Memory is de geheugenlimiet van de container, zoals 256Mi; leeg is
+	// zonder.
+	Memory string
 }
 
 // Pod maakt een pod met één container.
@@ -152,7 +155,11 @@ func Pod(p PodSpec) map[string]any {
 		"conditions":        []any{map[string]any{"type": "Ready", "status": cond}},
 		"containerStatuses": []any{cs},
 	}
-	spec := map[string]any{"nodeName": p.Node, "containers": []any{map[string]any{"name": "main", "image": p.Image}}}
+	container := map[string]any{"name": "main", "image": p.Image}
+	if p.Memory != "" {
+		container["resources"] = map[string]any{"limits": map[string]any{"memory": p.Memory}}
+	}
+	spec := map[string]any{"nodeName": p.Node, "containers": []any{container}}
 	var volumes []any
 	if p.Claim != "" {
 		volumes = append(volumes, map[string]any{"name": "data", "persistentVolumeClaim": map[string]any{"claimName": p.Claim}})

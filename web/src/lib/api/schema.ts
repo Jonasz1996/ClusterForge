@@ -2646,7 +2646,7 @@ export interface paths {
             path: {
                 /** @description overview of cluster */
                 scope: components["parameters"]["DocScopeParam"];
-                /** @description overzicht bij scope overview; architectuur, netwerk, configuratie, herstel of runbooks bij een cluster */
+                /** @description overzicht bij scope overview; architectuur, netwerk, configuratie, herstel of runbooks bij een cluster, en kubernetes bij een Kubernetes-cluster */
                 kind: components["parameters"]["DocKindParam"];
             };
             cookie?: never;
@@ -2672,7 +2672,7 @@ export interface paths {
             path: {
                 /** @description overview of cluster */
                 scope: components["parameters"]["DocScopeParam"];
-                /** @description overzicht bij scope overview; architectuur, netwerk, configuratie, herstel of runbooks bij een cluster */
+                /** @description overzicht bij scope overview; architectuur, netwerk, configuratie, herstel of runbooks bij een cluster, en kubernetes bij een Kubernetes-cluster */
                 kind: components["parameters"]["DocKindParam"];
             };
             cookie?: never;
@@ -2694,7 +2694,7 @@ export interface paths {
             path: {
                 /** @description overview of cluster */
                 scope: components["parameters"]["DocScopeParam"];
-                /** @description overzicht bij scope overview; architectuur, netwerk, configuratie, herstel of runbooks bij een cluster */
+                /** @description overzicht bij scope overview; architectuur, netwerk, configuratie, herstel of runbooks bij een cluster, en kubernetes bij een Kubernetes-cluster */
                 kind: components["parameters"]["DocKindParam"];
             };
             cookie?: never;
@@ -6248,9 +6248,9 @@ export interface components {
         /** @enum {string} */
         RiskSeverity: "low" | "medium" | "high" | "critical";
         /** @enum {string} */
-        RiskCardId: "availability" | "backups" | "recovery" | "redundancy" | "configuration" | "maintenance" | "capacity" | "platform";
+        RiskCardId: "availability" | "backups" | "recovery" | "redundancy" | "configuration" | "maintenance" | "capacity" | "kubernetes" | "platform";
         RiskSubject: {
-            /** @description cluster, node, vip, failover_test, test_run, dependency, drift_ignore, git_change, user, proxmox, component (een SPOF) of self */
+            /** @description cluster, node, vip, failover_test, test_run, dependency, drift_ignore, git_change, user, proxmox, component (een SPOF), self, kube_app (een app in Kubernetes) of kube_node (een node in Kubernetes zonder ClusterForge-node) */
             type: string;
             /** Format: uuid */
             id: string;
@@ -7926,7 +7926,7 @@ export interface components {
         KubeResource: string;
         /** @description overview of cluster */
         DocScopeParam: string;
-        /** @description overzicht bij scope overview; architectuur, netwerk, configuratie, herstel of runbooks bij een cluster */
+        /** @description overzicht bij scope overview; architectuur, netwerk, configuratie, herstel of runbooks bij een cluster, en kubernetes bij een Kubernetes-cluster */
         DocKindParam: string;
         /** @description Het cluster; verplicht bij scope cluster */
         DocClusterParam: string;
@@ -12165,7 +12165,7 @@ export interface operations {
             path: {
                 /** @description overview of cluster */
                 scope: components["parameters"]["DocScopeParam"];
-                /** @description overzicht bij scope overview; architectuur, netwerk, configuratie, herstel of runbooks bij een cluster */
+                /** @description overzicht bij scope overview; architectuur, netwerk, configuratie, herstel of runbooks bij een cluster, en kubernetes bij een Kubernetes-cluster */
                 kind: components["parameters"]["DocKindParam"];
             };
             cookie?: never;
@@ -12196,7 +12196,7 @@ export interface operations {
             path: {
                 /** @description overview of cluster */
                 scope: components["parameters"]["DocScopeParam"];
-                /** @description overzicht bij scope overview; architectuur, netwerk, configuratie, herstel of runbooks bij een cluster */
+                /** @description overzicht bij scope overview; architectuur, netwerk, configuratie, herstel of runbooks bij een cluster, en kubernetes bij een Kubernetes-cluster */
                 kind: components["parameters"]["DocKindParam"];
             };
             cookie?: never;
@@ -12229,7 +12229,7 @@ export interface operations {
             path: {
                 /** @description overview of cluster */
                 scope: components["parameters"]["DocScopeParam"];
-                /** @description overzicht bij scope overview; architectuur, netwerk, configuratie, herstel of runbooks bij een cluster */
+                /** @description overzicht bij scope overview; architectuur, netwerk, configuratie, herstel of runbooks bij een cluster, en kubernetes bij een Kubernetes-cluster */
                 kind: components["parameters"]["DocKindParam"];
             };
             cookie?: never;

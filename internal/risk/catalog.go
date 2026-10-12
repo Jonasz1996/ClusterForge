@@ -52,6 +52,16 @@ var Checks = map[string]string{
 	"capacity.swap":           "Veel swap",
 	"capacity.network_errors": "Netwerkfouten",
 
+	"kubernetes.single_server":    "Eén Kubernetes-server op prod",
+	"kubernetes.snapshot_missing": "Geen etcd-snapshot",
+	"kubernetes.snapshot_stale":   "etcd-snapshot te oud",
+	"kubernetes.node_not_ready":   "Node NotReady",
+	"kubernetes.restarts":         "Pods blijven herstarten",
+	"kubernetes.single_pod":       "App op prod met één pod",
+	"kubernetes.latest_image":     "Image zonder vaste versie",
+	"kubernetes.memory_limit":     "Pods zonder geheugenlimiet",
+	"kubernetes.version_eol":      "k3s zonder updates",
+
 	"platform.admin_totp":          "Beheerder zonder tweestapsverificatie",
 	"platform.proxmox_unreachable": "Proxmox niet te lezen",
 	"platform.proxmox_certificate": "Certificaat van Proxmox verloopt",
@@ -62,5 +72,6 @@ var Checks = map[string]string{
 // CardLabels zijn de namen van de kaarten.
 var CardLabels = map[CardID]string{
 	Availability: "Beschikbaarheid", Backups: "Back-ups", Recovery: "Herstelbaarheid", Redundancy: "Redundantie",
-	Configuration: "Configuratie", Maintenance: "Onderhoud en beveiliging", Capacity: "Capaciteit", Platform: "Platform",
+	Configuration: "Configuratie", Maintenance: "Onderhoud en beveiliging", Capacity: "Capaciteit", Kubernetes: "Kubernetes",
+	Platform: "Platform",
 }

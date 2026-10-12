@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -503,7 +504,7 @@ func (s *Service) List(ctx context.Context) (Index, error) {
 	for _, r := range rows {
 		id := r.ID
 		ci := ClusterIndex{ID: id, Name: r.Name, Slug: r.Slug, Env: r.Environment, Queued: s.Queued(id), Summary: summaries[id]}
-		for _, k := range ClusterKinds {
+		for _, k := range Kinds(r.Type) {
 			m := meta(ScopeCluster, k, r.Slug, &id)
 			if m.GeneratedAt != nil && (ci.Changed == nil || m.GeneratedAt.After(*ci.Changed)) {
 				ci.Changed = m.GeneratedAt
@@ -550,6 +551,10 @@ func (s *Service) Get(ctx context.Context, scope, kind string, cluster *uuid.UUI
 		}
 		if err != nil {
 			return Doc{}, err
+		}
+		// Het hoofdstuk Kubernetes is er alleen bij een Kubernetes-cluster.
+		if !slices.Contains(Kinds(c.Type), kind) {
+			return Doc{}, ErrNotFound
 		}
 		slug, name = c.Slug, c.Name
 	}

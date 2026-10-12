@@ -58,17 +58,20 @@ const (
 	Configuration CardID = "configuration"
 	Maintenance   CardID = "maintenance"
 	Capacity      CardID = "capacity"
+	Kubernetes    CardID = "kubernetes"
 	Platform      CardID = "platform"
 )
 
 // Weights zijn de gewichten van de kaarten van een cluster, in de volgorde
-// waarin ze getoond worden.
+// waarin ze getoond worden. De kaart Kubernetes heeft alleen een
+// Kubernetes-cluster; het totaal is het gewogen gemiddelde, dus de andere
+// kaarten wegen daar samen iets minder.
 var Weights = []struct {
 	Card   CardID
 	Weight int
 }{
 	{Availability, 25}, {Backups, 20}, {Recovery, 15}, {Redundancy, 15},
-	{Configuration, 10}, {Maintenance, 10}, {Capacity, 5},
+	{Configuration, 10}, {Maintenance, 10}, {Capacity, 5}, {Kubernetes, 15},
 }
 
 // Subject is waar een bevinding over gaat. Een acceptatie hoort bij een

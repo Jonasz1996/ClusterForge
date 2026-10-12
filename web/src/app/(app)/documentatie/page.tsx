@@ -21,6 +21,7 @@ import {
   useDocIndex,
   useDocsTarget,
   useGenerateDocs,
+  type DocClusterIndex,
   type DocIndex,
   type DocRef,
   type DocSummaryMeta,
@@ -28,6 +29,13 @@ import {
 import { useIsAdmin } from "@/lib/inventory";
 
 const chapters = ["architectuur", "netwerk", "configuratie", "herstel", "runbooks"];
+
+// chaptersOf zijn de hoofdstukken van een cluster, zoals de server ze
+// noemt: een Kubernetes-cluster heeft er een meer.
+function chaptersOf(c: DocClusterIndex | null | undefined) {
+  const kinds = c?.docs.map((d) => d.kind) ?? [];
+  return kinds.length > 0 ? kinds : chapters;
+}
 
 export default function DocsPage() {
   return (
@@ -55,7 +63,7 @@ function DocsInner() {
   const ref: DocRef | null = !index.data
     ? null
     : cluster
-      ? { scope: "cluster", kind: chapters.includes(kindParam) ? kindParam : "architectuur", cluster: cluster.id }
+      ? { scope: "cluster", kind: chaptersOf(cluster).includes(kindParam) ? kindParam : "architectuur", cluster: cluster.id }
       : { scope: "overview", kind: "overzicht" };
 
   const open = (s: string | null, kind: string, version?: number) => {
@@ -111,6 +119,7 @@ function DocsInner() {
             <DocView
               key={`${ref.scope}/${ref.kind}/${ref.cluster ?? ""}`}
               docRef={ref}
+              chapters={chaptersOf(cluster)}
               slug={cluster?.slug ?? null}
               clusterName={cluster?.name}
               env={cluster?.environment}
@@ -196,7 +205,7 @@ function Tree({
         <option value="overzicht">Overzicht</option>
         {index.clusters.map((c) => (
           <optgroup key={c.id} label={c.name}>
-            {chapters.map((k) => (
+            {chaptersOf(c).map((k) => (
               <option key={k} value={`${c.id}|${k}`}>
                 {c.name}: {kindLabels[k].toLowerCase()}
               </option>
@@ -225,13 +234,15 @@ function Tree({
                   </Link>
                   {here && (
                     <ul className="mt-0.5 ml-3 border-l border-slate-200 pl-2 dark:border-slate-800">
-                      {chapters.slice(1).map((k) => (
-                        <li key={k}>
-                          <Link href={docHref(c.slug, k)} className={item(current.kind === k)}>
-                            {kindLabels[k]}
-                          </Link>
-                        </li>
-                      ))}
+                      {chaptersOf(c)
+                        .slice(1)
+                        .map((k) => (
+                          <li key={k}>
+                            <Link href={docHref(c.slug, k)} className={item(current.kind === k)}>
+                              {kindLabels[k]}
+                            </Link>
+                          </li>
+                        ))}
                     </ul>
                   )}
                 </li>
@@ -256,6 +267,7 @@ function body(content: string) {
 
 function DocView({
   docRef,
+  chapters,
   slug: clusterSlug,
   clusterName,
   env,
@@ -265,6 +277,7 @@ function DocView({
   onOpen,
 }: {
   docRef: DocRef;
+  chapters: string[];
   slug: string | null;
   clusterName?: string;
   env?: string;

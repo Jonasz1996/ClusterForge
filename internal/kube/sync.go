@@ -88,8 +88,9 @@ func ErrorKind(err error) string {
 // kube_events. Een app met een andere image dan bij de vorige sync is een
 // uitrol, en komt in het logboek. Elke MetricsInterval gaan CPU en geheugen
 // uit metrics-server naar Metrics. De ServiceAccounts van verlopen en
-// ingetrokken kubeconfigs gaan weg, en elke SnapshotInterval komen de
-// etcd-snapshots in kube_snapshots. Daarna rekent de status opnieuw.
+// ingetrokken kubeconfigs gaan weg, elke SnapshotInterval komen de
+// etcd-snapshots in kube_snapshots en elke InventoryInterval de namespaces,
+// webadressen en opslag in kube_clusters. Daarna rekent de status opnieuw.
 func (s *Service) Sync(ctx context.Context, clusterID uuid.UUID) error {
 	err := s.sync(ctx, clusterID)
 	if s.Changed != nil {
@@ -200,6 +201,7 @@ func (s *Service) sync(ctx context.Context, clusterID uuid.UUID) error {
 	}
 	s.cleanAccess(ctx, clusterID)
 	s.syncSnapshots(ctx, clusterID)
+	s.syncInventory(ctx, clusterID)
 	return nil
 }
 
@@ -249,10 +251,12 @@ func (s *Service) saveApps(ctx context.Context, q *store.Queries, clusterID uuid
 		}
 		short, trouble := w.Health(pods)
 		images := nonNil(w.Images())
+		restarts, restartedAt := w.Restarts(pods)
 		if err := q.UpsertKubeWorkload(ctx, store.UpsertKubeWorkloadParams{
 			ClusterID: clusterID, Namespace: w.Metadata.Namespace, Kind: w.Kind, Name: w.Metadata.Name, System: IsSystem(w.Metadata.Namespace),
 			Desired: int32(w.Desired()), Ready: int32(w.ReadyPods()), UpToDate: int32(w.UpToDate()), Images: images,
-			Trouble: clip(trouble, 300), Short: short, SeenAt: seen,
+			Trouble: clip(trouble, 300), Short: short, SeenAt: seen, Restarts: int32(restarts), RestartedAt: restartedAt,
+			NoMemoryLimit: w.NoMemoryLimit(pods),
 		}); err != nil {
 			return err
 		}
