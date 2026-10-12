@@ -3,6 +3,7 @@ package kubefake
 import (
 	"encoding/base64"
 	"fmt"
+	"strconv"
 	"time"
 )
 
@@ -93,6 +94,8 @@ type PodSpec struct {
 	Init string
 	// Claim is een PersistentVolumeClaim die de pod als volume data heeft.
 	Claim string
+	// EmptyDir geeft de pod een volume cache in een emptyDir.
+	EmptyDir bool
 }
 
 // Pod maakt een pod met één container.
@@ -139,8 +142,15 @@ func Pod(p PodSpec) map[string]any {
 		"containerStatuses": []any{cs},
 	}
 	spec := map[string]any{"nodeName": p.Node, "containers": []any{map[string]any{"name": "main", "image": p.Image}}}
+	var volumes []any
 	if p.Claim != "" {
-		spec["volumes"] = []any{map[string]any{"name": "data", "persistentVolumeClaim": map[string]any{"claimName": p.Claim}}}
+		volumes = append(volumes, map[string]any{"name": "data", "persistentVolumeClaim": map[string]any{"claimName": p.Claim}})
+	}
+	if p.EmptyDir {
+		volumes = append(volumes, map[string]any{"name": "cache", "emptyDir": map[string]any{}})
+	}
+	if volumes != nil {
+		spec["volumes"] = volumes
 	}
 	if p.Init != "" {
 		spec["initContainers"] = []any{map[string]any{"name": p.Init, "image": "docker.io/library/busybox:1.37"}}
@@ -327,6 +337,31 @@ func ReplicaSet(namespace, name, deployment string, replicas int) map[string]any
 			"ownerReferences": []any{map[string]any{"apiVersion": "apps/v1", "kind": "Deployment", "name": deployment, "uid": "owner-" + deployment, "controller": true}},
 		},
 		"spec":   map[string]any{"replicas": replicas, "selector": map[string]any{"matchLabels": map[string]any{"app": deployment}}},
+		"status": map[string]any{"replicas": replicas, "readyReplicas": replicas},
+	}
+}
+
+// Revision maakt de ReplicaSet van één versie van een Deployment, zoals
+// de Deployment-controller hem maakt: met de hash in de naam en de labels,
+// en het versienummer in een annotatie.
+func Revision(namespace, deployment, hash string, revision, replicas int, image string) map[string]any {
+	labels := map[string]any{"app": deployment, "pod-template-hash": hash}
+	return map[string]any{
+		"apiVersion": "apps/v1", "kind": "ReplicaSet",
+		"metadata": map[string]any{
+			"name": deployment + "-" + hash, "namespace": namespace, "labels": labels,
+			"annotations": map[string]any{"deployment.kubernetes.io/revision": strconv.Itoa(revision)},
+			"ownerReferences": []any{map[string]any{
+				"apiVersion": "apps/v1", "kind": "Deployment", "name": deployment, "uid": "owner-" + deployment, "controller": true,
+			}},
+		},
+		"spec": map[string]any{
+			"replicas": replicas, "selector": map[string]any{"matchLabels": labels},
+			"template": map[string]any{
+				"metadata": map[string]any{"labels": labels},
+				"spec":     map[string]any{"containers": []any{map[string]any{"name": deployment, "image": image}}},
+			},
+		},
 		"status": map[string]any{"replicas": replicas, "readyReplicas": replicas},
 	}
 }

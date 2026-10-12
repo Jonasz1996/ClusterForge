@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Suspense } from "react";
+import { Suspense, useState } from "react";
+import { DoneAlert, KubeActions, workloadActions, type ActionDone } from "@/components/kube/Actions";
 import {
   EventList,
   KubeError,
@@ -18,7 +19,7 @@ import {
 import { AllTab, ConfigTab, EventsTab, NetworkTab, StorageTab } from "@/components/kube/Resources";
 import { Empty, formatBytes, tableClass, tdClass, thClass } from "@/components/inventory/bits";
 import { Alert, Badge, Card, cx, PageHeader, Select } from "@/components/ui";
-import { useCluster } from "@/lib/inventory";
+import { useCluster, useIsAdmin } from "@/lib/inventory";
 import {
   age,
   formatCPU,
@@ -336,14 +337,22 @@ function NodesTab({ id, onPods }: { id: string; onPods: (node: string) => void }
   const first = nodes.data?.[0]?.name ?? "<node>";
   return (
     <div className="space-y-4">
-      <Learn commands={[kubectl("get nodes -o wide"), kubectl(`describe node ${first}`)]}>
+      <Learn
+        commands={[
+          kubectl("get nodes -o wide"),
+          kubectl(`describe node ${first}`),
+          kubectl(`drain ${first} --ignore-daemonsets --delete-emptydir-data`),
+          kubectl(`uncordon ${first}`),
+        ]}
+      >
         <p>
           Een <strong>server</strong> draait het brein van Kubernetes: de API, de planner die pods aan nodes geeft, en etcd met de
           toestand van het cluster. Een <strong>agent</strong> draait alleen pods. In k3s draaien servers ook gewone pods.
         </p>
         <p>
           <strong>Ready</strong> betekent dat de kubelet, het programma op de node dat de containers start, zich op tijd meldt.
-          Een node in <strong>cordon</strong> krijgt geen nieuwe pods, bijvoorbeeld voor onderhoud.
+          Een node in <strong>cordon</strong> krijgt geen nieuwe pods, bijvoorbeeld voor onderhoud. <strong>Leegmaken</strong> zet
+          hem op cordon en verhuist ook de pods die er al draaien naar andere nodes.
         </p>
       </Learn>
       {nodes.isError && <KubeError error={nodes.error} />}
@@ -354,100 +363,122 @@ function NodesTab({ id, onPods }: { id: string; onPods: (node: string) => void }
 }
 
 function NodeTable({ id, nodes, onPods }: { id: string; nodes: KubeNode[]; onPods: (node: string) => void }) {
+  const isAdmin = useIsAdmin();
+  const [done, setDone] = useState<ActionDone | null>(null);
   return (
-    <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
-      <table className={tableClass}>
-        <thead className="border-b border-slate-200 dark:border-slate-800">
-          <tr>
-            <th className={thClass}>Node</th>
-            <th className={thClass}>Status</th>
-            <th className={thClass}>Rol</th>
-            <th className={thClass}>Adres</th>
-            <th className={`${thClass} min-w-48`}>Gebruik</th>
-            <th className={`${thClass} text-right`}>Pods</th>
-            <th className={thClass}>Leeftijd</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-          {nodes.map((n) => (
-            <tr key={n.name}>
-              <td className={tdClass}>
-                <div className="font-medium">
-                  <ObjectLink clusterId={id} objRef={refOf("Node", "", n.name)}>
-                    {n.name}
-                  </ObjectLink>
-                </div>
-                <div className="text-xs text-slate-500">
-                  {n.node ? (
-                    <Link href={`/nodes/detail?id=${n.node.id}`} className="text-brand-700 hover:underline dark:text-sky-300">
-                      node in ClusterForge
-                    </Link>
-                  ) : (
-                    <span title="Geen ClusterForge-node met dit adres of deze naam">niet in ClusterForge</span>
-                  )}
-                  {n.node && !n.node.agent && " · geen agent"}
-                </div>
-              </td>
-              <td className={tdClass}>
-                <span className="flex flex-wrap gap-1">
-                  <span title={n.ready ? undefined : n.ready_reason}>
-                    <Badge tone={n.ready ? "green" : "red"}>{n.ready ? "Ready" : "NotReady"}</Badge>
-                  </span>
-                  {n.unschedulable && (
-                    <Term help="Cordon: er komen geen nieuwe pods op deze node.">
-                      <Badge tone="amber">cordon</Badge>
-                    </Term>
-                  )}
-                  {n.pressure.map((c) => (
-                    <Badge key={c} tone="amber">
-                      {c}
-                    </Badge>
-                  ))}
-                </span>
-                {!n.ready && n.ready_reason && (
-                  <div className="mt-1 text-xs text-red-700 dark:text-red-300">{n.ready_reason}</div>
-                )}
-              </td>
-              <td className={tdClass}>
-                <Term help={n.roles.length ? `Rollen: ${n.roles.join(", ")}` : "Geen rollen: een gewone worker"}>
-                  {roleLabel(n.roles)}
-                </Term>
-                <div className="text-xs text-slate-500">{n.kubelet_version}</div>
-              </td>
-              <td className={`${tdClass} whitespace-nowrap`}>{n.internal_ip}</td>
-              <td className={tdClass}>
-                <div className="space-y-2">
-                  <UsageBar label="CPU" used={n.used?.cpu_millis ?? null} total={n.allocatable.cpu_millis} format={formatCPU} />
-                  <UsageBar
-                    label="Geheugen"
-                    used={n.used?.memory_bytes ?? null}
-                    total={n.allocatable.memory_bytes}
-                    format={formatBytes}
-                  />
-                </div>
-              </td>
-              <td className={`${tdClass} text-right`}>
-                <button
-                  type="button"
-                  className="text-brand-700 tabular-nums hover:underline dark:text-sky-300"
-                  onClick={() => onPods(n.name)}
-                >
-                  {n.pods}
-                </button>
-              </td>
-              <td className={`${tdClass} text-slate-500`} title={n.created_at}>
-                {age(n.created_at)}
-              </td>
+    <div className="space-y-3">
+      <DoneAlert done={done} onClose={() => setDone(null)} />
+      <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+        <table className={tableClass}>
+          <thead className="border-b border-slate-200 dark:border-slate-800">
+            <tr>
+              <th className={thClass}>Node</th>
+              <th className={thClass}>Status</th>
+              <th className={thClass}>Rol</th>
+              <th className={thClass}>Adres</th>
+              <th className={`${thClass} min-w-48`}>Gebruik</th>
+              <th className={`${thClass} text-right`}>Pods</th>
+              <th className={thClass}>Leeftijd</th>
+              {isAdmin && <th className={thClass} aria-label="Acties" />}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+            {nodes.map((n) => (
+              <tr key={n.name}>
+                <td className={tdClass}>
+                  <div className="font-medium">
+                    <ObjectLink clusterId={id} objRef={refOf("Node", "", n.name)}>
+                      {n.name}
+                    </ObjectLink>
+                  </div>
+                  <div className="text-xs text-slate-500">
+                    {n.node ? (
+                      <Link href={`/nodes/detail?id=${n.node.id}`} className="text-brand-700 hover:underline dark:text-sky-300">
+                        node in ClusterForge
+                      </Link>
+                    ) : (
+                      <span title="Geen ClusterForge-node met dit adres of deze naam">niet in ClusterForge</span>
+                    )}
+                    {n.node && !n.node.agent && " · geen agent"}
+                  </div>
+                </td>
+                <td className={tdClass}>
+                  <span className="flex flex-wrap gap-1">
+                    <span title={n.ready ? undefined : n.ready_reason}>
+                      <Badge tone={n.ready ? "green" : "red"}>{n.ready ? "Ready" : "NotReady"}</Badge>
+                    </span>
+                    {n.unschedulable && (
+                      <Term help="Cordon: er komen geen nieuwe pods op deze node.">
+                        <Badge tone="amber">cordon</Badge>
+                      </Term>
+                    )}
+                    {n.pressure.map((c) => (
+                      <Badge key={c} tone="amber">
+                        {c}
+                      </Badge>
+                    ))}
+                  </span>
+                  {!n.ready && n.ready_reason && (
+                    <div className="mt-1 text-xs text-red-700 dark:text-red-300">{n.ready_reason}</div>
+                  )}
+                </td>
+                <td className={tdClass}>
+                  <Term help={n.roles.length ? `Rollen: ${n.roles.join(", ")}` : "Geen rollen: een gewone worker"}>
+                    {roleLabel(n.roles)}
+                  </Term>
+                  <div className="text-xs text-slate-500">{n.kubelet_version}</div>
+                </td>
+                <td className={`${tdClass} whitespace-nowrap`}>{n.internal_ip}</td>
+                <td className={tdClass}>
+                  <div className="space-y-2">
+                    <UsageBar label="CPU" used={n.used?.cpu_millis ?? null} total={n.allocatable.cpu_millis} format={formatCPU} />
+                    <UsageBar
+                      label="Geheugen"
+                      used={n.used?.memory_bytes ?? null}
+                      total={n.allocatable.memory_bytes}
+                      format={formatBytes}
+                    />
+                  </div>
+                </td>
+                <td className={`${tdClass} text-right`}>
+                  <button
+                    type="button"
+                    className="text-brand-700 tabular-nums hover:underline dark:text-sky-300"
+                    onClick={() => onPods(n.name)}
+                  >
+                    {n.pods}
+                  </button>
+                </td>
+                <td className={`${tdClass} text-slate-500`} title={n.created_at}>
+                  {age(n.created_at)}
+                </td>
+                {isAdmin && (
+                  <td className={`${tdClass} text-right`}>
+                    <KubeActions
+                      clusterId={id}
+                      layout="menu"
+                      target={{
+                        kind: "Node",
+                        ref: refOf("Node", "", n.name),
+                        actions: n.unschedulable ? ["uncordon", "drain"] : ["cordon", "drain"],
+                      }}
+                      onDone={setDone}
+                    />
+                  </td>
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
 
 function AppsTab({ id, namespace, system }: { id: string; namespace: string; system: boolean }) {
   const workloads = useKubeWorkloads(id, namespace, system);
+  const isAdmin = useIsAdmin();
+  const [done, setDone] = useState<ActionDone | null>(null);
   return (
     <div className="space-y-4">
       <Learn commands={[kubectl(`get deployments,statefulsets,daemonsets,cronjobs ${nsFlag(namespace)}`)]}>
@@ -455,7 +486,14 @@ function AppsTab({ id, namespace, system }: { id: string; namespace: string; sys
           Je laat een app draaien door Kubernetes te vertellen hoe hij eruitziet: welk image, hoeveel kopieën (replica&apos;s).
           Kubernetes maakt de pods en houdt het aantal op peil. Wijs een soort aan voor meer uitleg.
         </p>
+        {isAdmin && (
+          <p>
+            Met <strong>Acties</strong> schaal je een app, herstart je zijn pods of ga je terug naar een vorige versie. Weghalen
+            doe je op de pagina van de app zelf.
+          </p>
+        )}
       </Learn>
+      <DoneAlert done={done} onClose={() => setDone(null)} />
       {workloads.isError && <KubeError error={workloads.error} />}
       {workloads.data &&
         (workloads.data.length === 0 ? (
@@ -474,6 +512,7 @@ function AppsTab({ id, namespace, system }: { id: string; namespace: string; sys
                   <th className={`${thClass} text-right`}>Klaar</th>
                   <th className={thClass}>Image</th>
                   <th className={thClass}>Leeftijd</th>
+                  {isAdmin && <th className={thClass} aria-label="Acties" />}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -504,6 +543,21 @@ function AppsTab({ id, namespace, system }: { id: string; namespace: string; sys
                       <td className={`${tdClass} text-slate-500`} title={w.created_at}>
                         {age(w.created_at)}
                       </td>
+                      {isAdmin && (
+                        <td className={`${tdClass} text-right`}>
+                          <KubeActions
+                            clusterId={id}
+                            layout="menu"
+                            target={{
+                              kind: w.kind,
+                              ref: refOf(w.kind, w.namespace, w.name),
+                              actions: workloadActions(w.kind),
+                              replicas: w.desired,
+                            }}
+                            onDone={setDone}
+                          />
+                        </td>
+                      )}
                     </tr>
                   );
                 })}
@@ -526,6 +580,7 @@ function PodsTab({ id, namespace, system, node }: { id: string; namespace: strin
           kubectl(`get pods ${nsFlag(namespace)} -o wide${node ? ` --field-selector spec.nodeName=${node}` : ""}`),
           kubectl(`describe pod ${example}`),
           kubectl(`logs ${example}`),
+          kubectl(`delete pod ${example}`),
         ]}
       >
         <p>
@@ -535,6 +590,10 @@ function PodsTab({ id, namespace, system, node }: { id: string; namespace: strin
         <p>
           <strong>Klaar</strong> zegt hoeveel containers klaar zijn voor verkeer. <strong>Herstarts</strong> die blijven oplopen,
           wijzen op een container die crasht. Wijs een status aan voor uitleg.
+        </p>
+        <p>
+          Een pod <strong>weghalen</strong> is de gewone manier om hem opnieuw te laten starten: zijn eigenaar, zoals een
+          ReplicaSet, maakt meteen een nieuwe.
         </p>
       </Learn>
       {pods.isError && <KubeError error={pods.error} />}
@@ -552,62 +611,83 @@ function PodsTab({ id, namespace, system, node }: { id: string; namespace: strin
 }
 
 function PodTable({ id, pods }: { id: string; pods: KubePod[] }) {
+  const isAdmin = useIsAdmin();
+  const [done, setDone] = useState<ActionDone | null>(null);
   return (
-    <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
-      <table className={tableClass}>
-        <thead className="border-b border-slate-200 dark:border-slate-800">
-          <tr>
-            <th className={thClass}>Pod</th>
-            <th className={thClass}>Status</th>
-            <th className={`${thClass} text-right`}>Klaar</th>
-            <th className={`${thClass} text-right`}>Herstarts</th>
-            <th className={thClass}>Node</th>
-            <th className={thClass}>IP</th>
-            <th className={thClass}>Leeftijd</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-          {pods.map((p) => (
-            <tr key={`${p.namespace}/${p.name}`}>
-              <td className={tdClass}>
-                <div className="min-w-56 font-medium break-all">
-                  <ObjectLink clusterId={id} objRef={refOf("Pod", p.namespace, p.name)}>
-                    {p.name}
-                  </ObjectLink>
-                </div>
-                <div className="text-xs text-slate-500">
-                  {p.namespace}
-                  {p.owner_kind && ` · van ${p.owner_kind} ${p.owner_name}`}
-                </div>
-              </td>
-              <td className={tdClass}>
-                <Term help={podStatusHelp[p.status] ?? p.status}>
-                  <Badge tone={podTone(p)}>{p.status}</Badge>
-                </Term>
-              </td>
-              <td className={`${tdClass} text-right tabular-nums`}>
-                {p.ready}/{p.containers}
-              </td>
-              <td className={cx(tdClass, "text-right tabular-nums", p.restarts > 0 && "text-amber-700 dark:text-amber-300")}>
-                {p.restarts}
-              </td>
-              <td className={`${tdClass} whitespace-nowrap`}>
-                {p.node ? (
-                  <ObjectLink clusterId={id} objRef={refOf("Node", "", p.node)}>
-                    {p.node}
-                  </ObjectLink>
-                ) : (
-                  "–"
-                )}
-              </td>
-              <td className={`${tdClass} whitespace-nowrap font-mono text-xs`}>{p.ip || "–"}</td>
-              <td className={`${tdClass} text-slate-500`} title={p.created_at}>
-                {age(p.created_at)}
-              </td>
+    <div className="space-y-3">
+      <DoneAlert done={done} onClose={() => setDone(null)} />
+      <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+        <table className={tableClass}>
+          <thead className="border-b border-slate-200 dark:border-slate-800">
+            <tr>
+              <th className={thClass}>Pod</th>
+              <th className={thClass}>Status</th>
+              <th className={`${thClass} text-right`}>Klaar</th>
+              <th className={`${thClass} text-right`}>Herstarts</th>
+              <th className={thClass}>Node</th>
+              <th className={thClass}>IP</th>
+              <th className={thClass}>Leeftijd</th>
+              {isAdmin && <th className={thClass} aria-label="Acties" />}
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+            {pods.map((p) => (
+              <tr key={`${p.namespace}/${p.name}`}>
+                <td className={tdClass}>
+                  <div className="min-w-56 font-medium break-all">
+                    <ObjectLink clusterId={id} objRef={refOf("Pod", p.namespace, p.name)}>
+                      {p.name}
+                    </ObjectLink>
+                  </div>
+                  <div className="text-xs text-slate-500">
+                    {p.namespace}
+                    {p.owner_kind && ` · van ${p.owner_kind} ${p.owner_name}`}
+                  </div>
+                </td>
+                <td className={tdClass}>
+                  <Term help={podStatusHelp[p.status] ?? p.status}>
+                    <Badge tone={podTone(p)}>{p.status}</Badge>
+                  </Term>
+                </td>
+                <td className={`${tdClass} text-right tabular-nums`}>
+                  {p.ready}/{p.containers}
+                </td>
+                <td className={cx(tdClass, "text-right tabular-nums", p.restarts > 0 && "text-amber-700 dark:text-amber-300")}>
+                  {p.restarts}
+                </td>
+                <td className={`${tdClass} whitespace-nowrap`}>
+                  {p.node ? (
+                    <ObjectLink clusterId={id} objRef={refOf("Node", "", p.node)}>
+                      {p.node}
+                    </ObjectLink>
+                  ) : (
+                    "–"
+                  )}
+                </td>
+                <td className={`${tdClass} whitespace-nowrap font-mono text-xs`}>{p.ip || "–"}</td>
+                <td className={`${tdClass} text-slate-500`} title={p.created_at}>
+                  {age(p.created_at)}
+                </td>
+                {isAdmin && (
+                  <td className={`${tdClass} text-right`}>
+                    <KubeActions
+                      clusterId={id}
+                      layout="menu"
+                      target={{
+                        kind: "Pod",
+                        ref: refOf("Pod", p.namespace, p.name),
+                        actions: ["delete"],
+                        owner: p.owner_kind ? { kind: p.owner_kind, name: p.owner_name } : null,
+                      }}
+                      onDone={setDone}
+                    />
+                  </td>
+                )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

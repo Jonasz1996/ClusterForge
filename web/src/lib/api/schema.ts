@@ -407,6 +407,8 @@ export interface paths {
         /**
          * Een node herstarten, afsluiten, in of uit onderhoud zetten of zijn facts verzamelen (admin); wordt een taak
          * @description Bij onderhoud, herstarten en afsluiten zet de agent eerst keepalived uit zodat de VIP's naar een andere node gaan.
+         *     Een node van een Kubernetes-cluster wordt eerst leeggemaakt: cordon en zijn pods uitzetten. Na een herstart of na het
+         *     onderhoud krijgt hij weer pods zodra hij Ready is.
          *     Kan geen andere node een VIP overnemen, dan antwoordt de server 409 met code needs_force; met force=true gaat het toch door.
          */
         post: operations["nodeAction"];
@@ -3001,6 +3003,76 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/kubernetes/clusters/{clusterId}/actions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Een object schalen, herstarten, terugdraaien of weghalen, of een node op cordon zetten of weer pods geven (admin)
+         * @description Elke actie die iets verandert, staat in het logboek. Op prod vraagt ze tweestapsverificatie en de slug in confirm.
+         *     Een actie die bij het object niet kan, geeft 409 met code conflict en de reden.
+         */
+        post: operations["kubeAction"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/kubernetes/clusters/{clusterId}/revisions": {
+        parameters: {
+            query: {
+                namespace: string;
+                /** @description De naam van de Deployment */
+                name: string;
+            };
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        /** De versies van een Deployment, de nieuwste eerst, om naar terug te gaan */
+        get: operations["listKubeRevisions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/kubernetes/clusters/{clusterId}/drain": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Een node leegmaken, zoals kubectl drain (admin); wordt een taak
+         * @description Met preview=true komt alleen het plan terug: welke pods uitgezet worden, welke blijven en welke het tegenhouden.
+         *     Houden pods het tegen, dan antwoordt de server 409 met code needs_force; met force=true gaan ze toch weg.
+         *     Op prod vraagt het tweestapsverificatie en de slug in confirm.
+         */
+        post: operations["drainKubeNode"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -3160,6 +3232,71 @@ export interface components {
             /** @description Het object als YAML, zonder managedFields en zonder secretwaarden */
             yaml: string;
             pod: components["schemas"]["KubePodDetail"] | null;
+            /** @description De acties die bij dit object kunnen; alleen een beheerder voert ze uit */
+            actions: components["schemas"]["KubeActionName"][];
+            /** @description Hoeveel pods het object vraagt, als je het kunt schalen */
+            replicas: number | null;
+        };
+        /** @enum {string} */
+        KubeActionName: "scale" | "restart" | "rollback" | "delete" | "cordon" | "uncordon" | "drain";
+        KubeActionInput: {
+            /** @enum {string} */
+            action: "scale" | "restart" | "rollback" | "delete" | "cordon" | "uncordon";
+            ref: components["schemas"]["KubeRef"];
+            /** @description Het nieuwe aantal pods bij scale */
+            replicas?: number;
+            /**
+             * Format: int64
+             * @description De versie bij rollback; zonder is het de vorige
+             */
+            revision?: number;
+            /** @description De slug van het cluster; nodig op prod */
+            confirm?: string;
+        };
+        KubeActionResult: {
+            /** @description Wat er gebeurde en wat Kubernetes nu doet */
+            message: string;
+            /** @description Onwaar als het object al zo stond */
+            changed: boolean;
+        };
+        KubeRevision: {
+            /** Format: int64 */
+            revision: number;
+            replicaset: string;
+            images: string[];
+            /** Format: date-time */
+            created_at: string;
+            /** @description Hoeveel pods deze versie nu vraagt */
+            replicas: number;
+            current: boolean;
+            /** @description De annotatie kubernetes.io/change-cause; leeg als niemand ze zette */
+            change_cause: string;
+        };
+        KubeDrainInput: {
+            /** @description De naam van de node in Kubernetes */
+            node: string;
+            /** @description Alleen het plan tonen */
+            preview?: boolean;
+            /** @description Ook pods zonder eigenaar en met emptyDir uitzetten; die zijn dan weg */
+            force?: boolean;
+            /** @description De slug van het cluster; nodig op prod */
+            confirm?: string;
+        };
+        KubeDrainPod: {
+            namespace: string;
+            name: string;
+            owner_kind: string;
+            owner_name: string;
+            /** @description Waarom de pod blijft of tegenhoudt, of waarop je moet letten */
+            reason: string;
+        };
+        KubeDrainPlan: {
+            node: string;
+            /** @description De node stond al op cordon */
+            cordoned: boolean;
+            evict: components["schemas"]["KubeDrainPod"][];
+            skip: components["schemas"]["KubeDrainPod"][];
+            blocked: components["schemas"]["KubeDrainPod"][];
         };
         KubeResourceType: {
             group: string;
@@ -11702,6 +11839,114 @@ export interface operations {
             400: components["responses"]["Error"];
             401: components["responses"]["Error"];
             404: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    kubeAction: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["KubeActionInput"];
+            };
+        };
+        responses: {
+            /** @description Uitgevoerd */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KubeActionResult"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    listKubeRevisions: {
+        parameters: {
+            query: {
+                namespace: string;
+                /** @description De naam van de Deployment */
+                name: string;
+            };
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["KubeRevision"][];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    drainKubeNode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["KubeDrainInput"];
+            };
+        };
+        responses: {
+            /** @description Het plan */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KubeDrainPlan"];
+                };
+            };
+            /** @description Taak aangemaakt */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Job"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
             502: components["responses"]["Error"];
             503: components["responses"]["Error"];
         };

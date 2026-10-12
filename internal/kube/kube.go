@@ -22,6 +22,8 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Jonasz1996/clusterforge/internal/agentbus"
+	"github.com/Jonasz1996/clusterforge/internal/events"
+	"github.com/Jonasz1996/clusterforge/internal/jobs"
 	"github.com/Jonasz1996/clusterforge/internal/status"
 	"github.com/Jonasz1996/clusterforge/internal/store"
 	"github.com/Jonasz1996/clusterforge/pkg/protocol"
@@ -82,6 +84,13 @@ type Service struct {
 	// Interval van de sync; nul zet hem uit.
 	Interval time.Duration
 	Now      func() time.Time
+	// DrainTimeout is hoe lang leegmaken mag duren; DrainRetry hoe lang het
+	// wacht als een PodDisruptionBudget een pod tegenhoudt, en DrainPoll hoe
+	// vaak het kijkt of de pods weg zijn.
+	DrainTimeout, DrainRetry, DrainPoll time.Duration
+
+	jobs *jobs.Runner
+	ev   *events.Writer
 
 	mu    sync.Mutex
 	cache map[string]cached
@@ -100,6 +109,7 @@ type cached struct {
 func NewService(pool *pgxpool.Pool, bus Requester, log *slog.Logger) *Service {
 	return &Service{
 		pool: pool, q: store.New(pool), bus: bus, log: log, Timeout: 30 * time.Second, Interval: 30 * time.Second, Now: time.Now,
+		DrainTimeout: 5 * time.Minute, DrainRetry: 5 * time.Second, DrainPoll: 2 * time.Second,
 		cache: map[string]cached{}, last: map[uuid.UUID]uuid.UUID{}, discovery: map[uuid.UUID]discovered{},
 	}
 }
@@ -214,6 +224,12 @@ func (s *Service) request(ctx context.Context, clusterID uuid.UUID, op, path str
 			continue
 		case err != nil:
 			return nil, uuid.Nil, err
+		case res.Status == 0 && strings.HasPrefix(res.Error, "onbekend kube-verzoek"):
+			// Een agent van voor dit soort verzoek; een andere kan het
+			// misschien wel.
+			last = &UnavailableError{TooOld: true, Msg: "de agent op " + n.Hostname +
+				" kent dit verzoek nog niet; werk hem bij met het installatiescript en --upgrade"}
+			continue
 		case res.Status == 0:
 			// De agent stuurde het verzoek niet door: geen kubeconfig, of
 			// de API op die node antwoordt niet. Een andere server kan

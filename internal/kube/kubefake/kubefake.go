@@ -3,8 +3,9 @@
 // eist een clientcertificaat, net als k3s, en schrijft een kubeconfig in het
 // formaat van /etc/rancher/k3s/k3s.yaml. Hij kent discovery, /version,
 // /readyz, en get en list van de gewone soorten objecten met label- en
-// fieldselectors en pagina's. Elk verzoek wordt onthouden, zodat een test
-// kan nagaan wat er nooit aankwam.
+// fieldselectors en pagina's, patch, delete en eviction met
+// PodDisruptionBudgets. Elk verzoek wordt onthouden, zodat een test kan
+// nagaan wat er nooit aankwam.
 package kubefake
 
 import (
@@ -337,11 +338,18 @@ func (s *Server) Handler() http.Handler {
 		s.mu.Lock()
 		s.requests = append(s.requests, req)
 		s.mu.Unlock()
-		if r.Method != http.MethodGet {
-			status(w, http.StatusMethodNotAllowed, "MethodNotAllowed", "methode "+r.Method+" kent kubefake nog niet")
-			return
+		switch r.Method {
+		case http.MethodGet:
+			s.get(w, r)
+		case http.MethodPatch:
+			s.patch(w, r)
+		case http.MethodDelete:
+			s.remove(w, r)
+		case http.MethodPost:
+			s.post(w, r)
+		default:
+			status(w, http.StatusMethodNotAllowed, "MethodNotAllowed", "methode "+r.Method+" kent kubefake niet")
 		}
-		s.get(w, r)
 	})
 }
 

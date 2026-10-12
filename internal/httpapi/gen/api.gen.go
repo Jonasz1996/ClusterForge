@@ -1140,6 +1140,69 @@ func (e JobStatus) Valid() bool {
 	}
 }
 
+// Defines values for KubeActionInputAction.
+const (
+	KubeActionInputActionCordon   KubeActionInputAction = "cordon"
+	KubeActionInputActionDelete   KubeActionInputAction = "delete"
+	KubeActionInputActionRestart  KubeActionInputAction = "restart"
+	KubeActionInputActionRollback KubeActionInputAction = "rollback"
+	KubeActionInputActionScale    KubeActionInputAction = "scale"
+	KubeActionInputActionUncordon KubeActionInputAction = "uncordon"
+)
+
+// Valid indicates whether the value is a known member of the KubeActionInputAction enum.
+func (e KubeActionInputAction) Valid() bool {
+	switch e {
+	case KubeActionInputActionCordon:
+		return true
+	case KubeActionInputActionDelete:
+		return true
+	case KubeActionInputActionRestart:
+		return true
+	case KubeActionInputActionRollback:
+		return true
+	case KubeActionInputActionScale:
+		return true
+	case KubeActionInputActionUncordon:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for KubeActionName.
+const (
+	KubeActionNameCordon   KubeActionName = "cordon"
+	KubeActionNameDelete   KubeActionName = "delete"
+	KubeActionNameDrain    KubeActionName = "drain"
+	KubeActionNameRestart  KubeActionName = "restart"
+	KubeActionNameRollback KubeActionName = "rollback"
+	KubeActionNameScale    KubeActionName = "scale"
+	KubeActionNameUncordon KubeActionName = "uncordon"
+)
+
+// Valid indicates whether the value is a known member of the KubeActionName enum.
+func (e KubeActionName) Valid() bool {
+	switch e {
+	case KubeActionNameCordon:
+		return true
+	case KubeActionNameDelete:
+		return true
+	case KubeActionNameDrain:
+		return true
+	case KubeActionNameRestart:
+		return true
+	case KubeActionNameRollback:
+		return true
+	case KubeActionNameScale:
+		return true
+	case KubeActionNameUncordon:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for KubeChainLinkRole.
 const (
 	KubeChainLinkRoleBackend      KubeChainLinkRole = "backend"
@@ -5157,6 +5220,38 @@ type JobStep struct {
 	Status     JobStatus                    `json:"status"`
 }
 
+// KubeActionInput defines model for KubeActionInput.
+type KubeActionInput struct {
+	Action KubeActionInputAction `json:"action"`
+
+	// Confirm De slug van het cluster; nodig op prod
+	Confirm *string `json:"confirm,omitempty"`
+
+	// Ref Wijst een object in Kubernetes aan
+	Ref KubeRef `json:"ref"`
+
+	// Replicas Het nieuwe aantal pods bij scale
+	Replicas *int `json:"replicas,omitempty"`
+
+	// Revision De versie bij rollback; zonder is het de vorige
+	Revision *int64 `json:"revision,omitempty"`
+}
+
+// KubeActionInputAction defines model for KubeActionInput.Action.
+type KubeActionInputAction string
+
+// KubeActionName defines model for KubeActionName.
+type KubeActionName string
+
+// KubeActionResult defines model for KubeActionResult.
+type KubeActionResult struct {
+	// Changed Onwaar als het object al zo stond
+	Changed bool `json:"changed"`
+
+	// Message Wat er gebeurde en wat Kubernetes nu doet
+	Message string `json:"message"`
+}
+
 // KubeChainLink Een schakel in de keten van een object
 type KubeChainLink struct {
 	Kind string `json:"kind"`
@@ -5281,6 +5376,43 @@ type KubeContainer struct {
 // KubeContainerState defines model for KubeContainer.State.
 type KubeContainerState string
 
+// KubeDrainInput defines model for KubeDrainInput.
+type KubeDrainInput struct {
+	// Confirm De slug van het cluster; nodig op prod
+	Confirm *string `json:"confirm,omitempty"`
+
+	// Force Ook pods zonder eigenaar en met emptyDir uitzetten; die zijn dan weg
+	Force *bool `json:"force,omitempty"`
+
+	// Node De naam van de node in Kubernetes
+	Node string `json:"node"`
+
+	// Preview Alleen het plan tonen
+	Preview *bool `json:"preview,omitempty"`
+}
+
+// KubeDrainPlan defines model for KubeDrainPlan.
+type KubeDrainPlan struct {
+	Blocked []KubeDrainPod `json:"blocked"`
+
+	// Cordoned De node stond al op cordon
+	Cordoned bool           `json:"cordoned"`
+	Evict    []KubeDrainPod `json:"evict"`
+	Node     string         `json:"node"`
+	Skip     []KubeDrainPod `json:"skip"`
+}
+
+// KubeDrainPod defines model for KubeDrainPod.
+type KubeDrainPod struct {
+	Name      string `json:"name"`
+	Namespace string `json:"namespace"`
+	OwnerKind string `json:"owner_kind"`
+	OwnerName string `json:"owner_name"`
+
+	// Reason Waarom de pod blijft of tegenhoudt, of waarop je moet letten
+	Reason string `json:"reason"`
+}
+
 // KubeEvent defines model for KubeEvent.
 type KubeEvent struct {
 	Count     int                          `json:"count"`
@@ -5379,6 +5511,8 @@ type KubeNodeLink struct {
 
 // KubeObject defines model for KubeObject.
 type KubeObject struct {
+	// Actions De acties die bij dit object kunnen; alleen een beheerder voert ze uit
+	Actions     []KubeActionName                 `json:"actions"`
 	Annotations map[string]string                `json:"annotations"`
 	ApiVersion  string                           `json:"api_version"`
 	Chain       []KubeChainLink                  `json:"chain"`
@@ -5392,6 +5526,9 @@ type KubeObject struct {
 
 	// Ref Wijst een object in Kubernetes aan
 	Ref KubeRef `json:"ref"`
+
+	// Replicas Hoeveel pods het object vraagt, als je het kunt schalen
+	Replicas nullable.Nullable[int] `json:"replicas"`
 
 	// Summary De toestand in gewone woorden
 	Summary string `json:"summary"`
@@ -5495,6 +5632,20 @@ type KubeResourceType struct {
 	Namespaced bool   `json:"namespaced"`
 	Resource   string `json:"resource"`
 	Version    string `json:"version"`
+}
+
+// KubeRevision defines model for KubeRevision.
+type KubeRevision struct {
+	// ChangeCause De annotatie kubernetes.io/change-cause; leeg als niemand ze zette
+	ChangeCause string    `json:"change_cause"`
+	CreatedAt   time.Time `json:"created_at"`
+	Current     bool      `json:"current"`
+	Images      []string  `json:"images"`
+
+	// Replicas Hoeveel pods deze versie nu vraagt
+	Replicas   int    `json:"replicas"`
+	Replicaset string `json:"replicaset"`
+	Revision   int64  `json:"revision"`
 }
 
 // KubeSecret defines model for KubeSecret.
@@ -7472,6 +7623,14 @@ type ListKubePodsParams struct {
 	Node *string `form:"node,omitempty" json:"node,omitempty"`
 }
 
+// ListKubeRevisionsParams defines parameters for ListKubeRevisions.
+type ListKubeRevisionsParams struct {
+	Namespace string `form:"namespace" json:"namespace"`
+
+	// Name De naam van de Deployment
+	Name string `form:"name" json:"name"`
+}
+
 // GetKubeStorageParams defines parameters for GetKubeStorage.
 type GetKubeStorageParams struct {
 	// Namespace Alleen deze namespace; zonder zijn het alle
@@ -7677,6 +7836,12 @@ type ProbeGitRepoJSONRequestBody = GitRepoInput
 
 // SetIncidentNoteJSONRequestBody defines body for SetIncidentNote for application/json ContentType.
 type SetIncidentNoteJSONRequestBody = IncidentNote
+
+// KubeActionJSONRequestBody defines body for KubeAction for application/json ContentType.
+type KubeActionJSONRequestBody = KubeActionInput
+
+// DrainKubeNodeJSONRequestBody defines body for DrainKubeNode for application/json ContentType.
+type DrainKubeNodeJSONRequestBody = KubeDrainInput
 
 // CreateNodeJSONRequestBody defines body for CreateNode for application/json ContentType.
 type CreateNodeJSONRequestBody = NodeInput
@@ -8052,9 +8217,15 @@ type ServerInterface interface {
 	// GetKubeOverview Overzicht van een Kubernetes-cluster, live via de kube-brug
 	// (GET /kubernetes/clusters/{clusterId})
 	GetKubeOverview(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
+	// KubeAction Een object schalen, herstarten, terugdraaien of weghalen, of een node op cordon zetten of weer pods geven (admin)
+	// (POST /kubernetes/clusters/{clusterId}/actions)
+	KubeAction(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
 	// GetKubeConfig De ConfigMaps, en de Secrets met alleen de sleutels
 	// (GET /kubernetes/clusters/{clusterId}/config)
 	GetKubeConfig(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params GetKubeConfigParams)
+	// DrainKubeNode Een node leegmaken, zoals kubectl drain (admin); wordt een taak
+	// (POST /kubernetes/clusters/{clusterId}/drain)
+	DrainKubeNode(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
 	// ListKubeEvents De events, waarschuwingen eerst en dan de nieuwste; hoogstens 300
 	// (GET /kubernetes/clusters/{clusterId}/events)
 	ListKubeEvents(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params ListKubeEventsParams)
@@ -8079,6 +8250,9 @@ type ServerInterface interface {
 	// ListKubeResources De soorten objecten die het cluster kent, ook van geïnstalleerde apps
 	// (GET /kubernetes/clusters/{clusterId}/resources)
 	ListKubeResources(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
+	// ListKubeRevisions De versies van een Deployment, de nieuwste eerst, om naar terug te gaan
+	// (GET /kubernetes/clusters/{clusterId}/revisions)
+	ListKubeRevisions(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params ListKubeRevisionsParams)
 	// GetKubeStorage De PersistentVolumeClaims, volumes en StorageClasses
 	// (GET /kubernetes/clusters/{clusterId}/storage)
 	GetKubeStorage(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params GetKubeStorageParams)
@@ -8904,9 +9078,21 @@ func (_ Unimplemented) GetKubeOverview(w http.ResponseWriter, r *http.Request, c
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// KubeAction Een object schalen, herstarten, terugdraaien of weghalen, of een node op cordon zetten of weer pods geven (admin)
+// (POST /kubernetes/clusters/{clusterId}/actions)
+func (_ Unimplemented) KubeAction(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // GetKubeConfig De ConfigMaps, en de Secrets met alleen de sleutels
 // (GET /kubernetes/clusters/{clusterId}/config)
 func (_ Unimplemented) GetKubeConfig(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params GetKubeConfigParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// DrainKubeNode Een node leegmaken, zoals kubectl drain (admin); wordt een taak
+// (POST /kubernetes/clusters/{clusterId}/drain)
+func (_ Unimplemented) DrainKubeNode(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -8955,6 +9141,12 @@ func (_ Unimplemented) ListKubePods(w http.ResponseWriter, r *http.Request, clus
 // ListKubeResources De soorten objecten die het cluster kent, ook van geïnstalleerde apps
 // (GET /kubernetes/clusters/{clusterId}/resources)
 func (_ Unimplemented) ListKubeResources(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListKubeRevisions De versies van een Deployment, de nieuwste eerst, om naar terug te gaan
+// (GET /kubernetes/clusters/{clusterId}/revisions)
+func (_ Unimplemented) ListKubeRevisions(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params ListKubeRevisionsParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -12437,6 +12629,32 @@ func (siw *ServerInterfaceWrapper) GetKubeOverview(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
+// KubeAction operation middleware
+func (siw *ServerInterfaceWrapper) KubeAction(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.KubeAction(w, r, clusterId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetKubeConfig operation middleware
 func (siw *ServerInterfaceWrapper) GetKubeConfig(w http.ResponseWriter, r *http.Request) {
 
@@ -12483,6 +12701,32 @@ func (siw *ServerInterfaceWrapper) GetKubeConfig(w http.ResponseWriter, r *http.
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetKubeConfig(w, r, clusterId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DrainKubeNode operation middleware
+func (siw *ServerInterfaceWrapper) DrainKubeNode(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DrainKubeNode(w, r, clusterId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -13021,6 +13265,61 @@ func (siw *ServerInterfaceWrapper) ListKubeResources(w http.ResponseWriter, r *h
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListKubeResources(w, r, clusterId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListKubeRevisions operation middleware
+func (siw *ServerInterfaceWrapper) ListKubeRevisions(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListKubeRevisionsParams
+
+	// ------------- Required query parameter "namespace" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "namespace", r.URL.Query(), &params.Namespace, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "namespace"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "namespace", Err: err})
+		}
+		return
+	}
+
+	// ------------- Required query parameter "name" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "name", r.URL.Query(), &params.Name, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "name"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListKubeRevisions(w, r, clusterId, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -15222,6 +15521,15 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/kubernetes/clusters/{clusterId}/logs", wrapper.GetKubeLogs)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/kubernetes/clusters/{clusterId}/actions", wrapper.KubeAction)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/kubernetes/clusters/{clusterId}/revisions", wrapper.ListKubeRevisions)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/kubernetes/clusters/{clusterId}/drain", wrapper.DrainKubeNode)
 	})
 
 	return r

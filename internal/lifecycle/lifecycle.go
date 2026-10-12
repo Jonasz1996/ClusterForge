@@ -22,6 +22,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/health"
 	"github.com/Jonasz1996/clusterforge/internal/jobs"
+	"github.com/Jonasz1996/clusterforge/internal/kube"
 	"github.com/Jonasz1996/clusterforge/internal/status"
 	"github.com/Jonasz1996/clusterforge/internal/store"
 	"github.com/Jonasz1996/clusterforge/pkg/protocol"
@@ -97,6 +98,12 @@ type Service struct {
 	// Changed wordt aangeroepen na een wijziging van de lifecycle, zodat de
 	// status meteen opnieuw berekend wordt. Mag nil zijn.
 	Changed func()
+	// Kube maakt een node van een Kubernetes-cluster leeg voor onderhoud
+	// of een herstart, en geeft hem daarna weer pods. Mag nil zijn.
+	Kube *kube.Service
+	// KubeReadyTimeout is hoe lang een taak na de herstart wacht tot de
+	// node Ready is in Kubernetes.
+	KubeReadyTimeout time.Duration
 }
 
 func NewService(pool *pgxpool.Pool, ev *events.Writer, log *slog.Logger, runner *jobs.Runner, bus Commander) *Service {
@@ -104,7 +111,7 @@ func NewService(pool *pgxpool.Pool, ev *events.Writer, log *slog.Logger, runner 
 		pool: pool, q: store.New(pool), ev: ev, log: log, jobs: runner, bus: bus,
 		Poll: 2 * time.Second, MoveTimeout: 2 * time.Minute, BootTimeout: 15 * time.Minute,
 		OffTimeout: 10 * time.Minute, OffAfter: 3 * protocol.HeartbeatInterval, ReadyTimeout: 3 * time.Minute,
-		PowerDelay: 3, Offline: status.HeartbeatDown, Stale: status.HeartbeatLate,
+		PowerDelay: 3, Offline: status.HeartbeatDown, Stale: status.HeartbeatLate, KubeReadyTimeout: 5 * time.Minute,
 	}
 	runner.Register(KindNodeAction, s.run)
 	return s
@@ -141,6 +148,12 @@ type params struct {
 	// CommandID is de basis voor de id's van de commando's, zodat een
 	// herhaald commando na een hervatting als hetzelfde herkend wordt.
 	CommandID string `json:"command_id"`
+	// KubeNode is de naam van de node in Kubernetes: de taak maakt hem
+	// eerst leeg en geeft hem na afloop weer pods.
+	KubeNode string `json:"kube_node,omitempty"`
+	// KubeNote zegt waarom een node van een Kubernetes-cluster niet
+	// leeggemaakt wordt, zoals een API die niet antwoordt.
+	KubeNote string `json:"kube_note,omitempty"`
 }
 
 var titles = map[string]string{
@@ -247,6 +260,13 @@ func (s *Service) RequestAction(ctx context.Context, actor events.Actor, nodeID 
 			return store.Job{}, err
 		}
 	}
+	// Een node van een Kubernetes-cluster gaat eerst leeg. Is de node al
+	// weg, dan heeft leegmaken geen zin: zijn pods stoppen niet netjes.
+	if (p.UseAgent && req.Action != ActionRefreshFacts) || req.Action == ActionActivate {
+		if p.KubeNode, p.KubeNote, err = s.kubeNode(ctx, rt.ClusterID, nodeID); err != nil {
+			return store.Job{}, err
+		}
+	}
 	spec := jobs.Spec{
 		Kind: KindNodeAction, Title: title + ": " + rt.Hostname, Params: p,
 		NodeID: &nodeID, ClusterID: rt.ClusterID, Actor: actor,
@@ -266,6 +286,30 @@ func (s *Service) RequestAction(ctx context.Context, actor events.Actor, nodeID 
 		return store.Job{}, ConflictError{busy.Error()}
 	}
 	return j, err
+}
+
+// kubeNode zoekt de naam in Kubernetes van een node van een
+// Kubernetes-cluster. Antwoordt de API niet, dan zegt note waarom de node
+// niet leeggemaakt wordt; een herstart moet dan toch kunnen.
+func (s *Service) kubeNode(ctx context.Context, clusterID *uuid.UUID, nodeID uuid.UUID) (name, note string, err error) {
+	if s.Kube == nil || clusterID == nil {
+		return "", "", nil
+	}
+	if _, err := s.Kube.Cluster(ctx, *clusterID); errors.Is(err, kube.ErrNotKubernetes) {
+		return "", "", nil
+	} else if err != nil {
+		return "", "", err
+	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	name, err = s.Kube.NodeNameOf(ctx, *clusterID, nodeID)
+	switch {
+	case err != nil:
+		return "", "Kubernetes antwoordde niet (" + err.Error() + "); de node wordt niet eerst leeggemaakt", nil
+	case name == "":
+		return "", "Kubernetes kent deze node niet; er is niets leeg te maken", nil
+	}
+	return name, "", nil
 }
 
 // heldVIPs zijn de adressen van het cluster die deze node nu heeft.
@@ -334,7 +378,11 @@ func (s *Service) run(ctx context.Context, j *jobs.Job) error {
 			return err
 		})
 	case ActionMaintenance:
+		if err := r.kubeDrain(ctx); err != nil {
+			return err
+		}
 		if err := r.drain(ctx); err != nil {
+			r.kubeUndo(ctx)
 			return err
 		}
 		return r.lifecycleStep(ctx, "Node in onderhoud zetten", store.NodeLifecycleMaintenance)
@@ -342,9 +390,16 @@ func (s *Service) run(ctx context.Context, j *jobs.Job) error {
 		if err := r.undrain(ctx); err != nil {
 			return err
 		}
+		if err := r.kubeRelease(ctx); err != nil {
+			return err
+		}
 		return r.lifecycleStep(ctx, "Node weer actief maken", store.NodeLifecycleActive)
 	case ActionReboot, ActionShutdown:
+		if err := r.kubeDrain(ctx); err != nil {
+			return err
+		}
 		if err := r.drain(ctx); err != nil {
+			r.kubeUndo(ctx)
 			return err
 		}
 		if p.Previous != store.NodeLifecycleMaintenance {
@@ -364,6 +419,9 @@ func (s *Service) run(ctx context.Context, j *jobs.Job) error {
 			return nil
 		}
 		if err := r.undrain(ctx); err != nil {
+			return err
+		}
+		if err := r.kubeRelease(ctx); err != nil {
 			return err
 		}
 		back := p.Previous
@@ -591,6 +649,102 @@ func (r *runCtx) undrain(ctx context.Context) error {
 			}
 			return true, nil
 		})
+	})
+}
+
+const kubeDrainStep = "Kubernetes: node leegmaken"
+
+// kubeDrain maakt een node van een Kubernetes-cluster leeg: cordon met de
+// annotatie van ClusterForge, en zijn pods uitzetten. Lukt dat niet, dan
+// krijgt hij weer pods en stopt de taak.
+func (r *runCtx) kubeDrain(ctx context.Context) error {
+	switch {
+	case r.p.KubeNode != "" && r.j.ClusterID != nil && r.s.Kube != nil:
+	case r.p.KubeNote != "":
+		return r.j.Step(ctx, kubeDrainStep, func(_ context.Context, st *jobs.Step) error {
+			st.Logf("%s", r.p.KubeNote)
+			return nil
+		})
+	default:
+		return nil
+	}
+	return r.j.Step(ctx, kubeDrainStep, func(ctx context.Context, st *jobs.Step) error {
+		_, err := r.s.Kube.Drain(ctx, *r.j.ClusterID, r.p.KubeNode, kube.DrainOptions{Maintenance: true}, func(line string) {
+			st.Logf("%s", line)
+			_ = st.Flush(ctx)
+		})
+		if err != nil && !jobs.Interrupted(ctx) {
+			r.kubeRollback(ctx, st)
+		}
+		return err
+	})
+}
+
+// kubeUndo geeft de node weer pods als een latere stap voor de herstart
+// mislukt.
+func (r *runCtx) kubeUndo(ctx context.Context) {
+	if r.p.KubeNode == "" || r.j.ClusterID == nil || r.s.Kube == nil || jobs.Interrupted(ctx) {
+		return
+	}
+	_ = r.j.Step(ctx, "Kubernetes: node weer pods geven", func(ctx context.Context, st *jobs.Step) error {
+		r.kubeRollback(ctx, st)
+		return nil
+	})
+}
+
+func (r *runCtx) kubeRollback(ctx context.Context, st *jobs.Step) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
+	defer cancel()
+	switch released, err := r.s.Kube.Release(ctx, *r.j.ClusterID, r.p.KubeNode); {
+	case err != nil:
+		st.Logf("terugdraaien mislukt: %v; haal de cordon weg met Uncordon op het tabblad Nodes", err)
+	case released:
+		st.Logf("terugdraaien: %s krijgt weer pods", r.p.KubeNode)
+	}
+	_ = st.Flush(ctx)
+}
+
+// kubeRelease wacht tot de node Ready is in Kubernetes en haalt dan de
+// cordon weg die ClusterForge zette. Een cordon die iemand zelf zette,
+// blijft.
+func (r *runCtx) kubeRelease(ctx context.Context) error {
+	if r.p.KubeNode == "" || r.j.ClusterID == nil || r.s.Kube == nil {
+		return nil
+	}
+	node, clusterID := r.p.KubeNode, *r.j.ClusterID
+	return r.j.Step(ctx, "Kubernetes: node weer pods geven", func(ctx context.Context, st *jobs.Step) error {
+		wctx, cancel := context.WithTimeoutCause(ctx, r.s.KubeReadyTimeout, fmt.Errorf(
+			"%s is niet Ready in Kubernetes; kijk op de node met journalctl -u k3s of journalctl -u k3s-agent. Hij blijft op cordon", node))
+		defer cancel()
+		said := ""
+		err := r.poll(wctx, func(ctx context.Context) (bool, error) {
+			ready, err := r.s.Kube.NodeReady(ctx, clusterID, node)
+			if err != nil {
+				// Na een herstart van de enige server is de API er even
+				// niet; blijven wachten.
+				if msg := err.Error(); msg != said {
+					said = msg
+					st.Logf("wachten op Kubernetes: %s", msg)
+					_ = st.Flush(ctx)
+				}
+				return false, nil
+			}
+			return ready, nil
+		})
+		if err != nil {
+			return err
+		}
+		st.Logf("%s is Ready in Kubernetes", node)
+		released, err := r.s.Kube.Release(ctx, clusterID, node)
+		if err != nil {
+			return err
+		}
+		if released {
+			st.Logf("%s krijgt weer nieuwe pods", node)
+		} else {
+			st.Logf("%s blijft op cordon: die zette iemand zelf. Haal hem weg met Uncordon op het tabblad Nodes", node)
+		}
+		return nil
 	})
 }
 

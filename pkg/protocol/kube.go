@@ -33,7 +33,30 @@ const (
 	// KubeLogs leest de laatste regels van een container in een pod, ook
 	// van de vorige als hij herstartte. Body is de tekst als JSON-string.
 	KubeLogs = "logs"
+	// KubePatch wijzigt een app of node met een merge patch of een JSON
+	// patch: schalen, herstarten, terugdraaien, cordon en uncordon. Alleen
+	// Deployments, StatefulSets, ReplicaSets, DaemonSets en nodes, en de
+	// subresource scale.
+	KubePatch = "patch"
+	// KubeDelete haalt één object weg.
+	KubeDelete = "delete"
+	// KubeEvict zet één pod uit via de Eviction-API, zodat een
+	// PodDisruptionBudget geldt. Path is
+	// /api/v1/namespaces/<ns>/pods/<naam>/eviction; de agent maakt de body.
+	KubeEvict = "evict"
 )
+
+// Soorten patch bij KubePatch.
+const (
+	// KubeMergePatch is een JSON merge patch (RFC 7386).
+	KubeMergePatch = "merge"
+	// KubeJSONPatch is een JSON patch (RFC 6902), zoals voor terugdraaien:
+	// het hele podtemplate vervangen.
+	KubeJSONPatch = "json"
+)
+
+// KubeFieldManager is de naam waaronder ClusterForge in managedFields staat.
+const KubeFieldManager = "clusterforge"
 
 // KubeRequest is een verzoek aan de Kubernetes-API via de agent. De server
 // stuurt het als request op cf.node.<id>.kube; de agent antwoordt met een
@@ -46,8 +69,12 @@ type KubeRequest struct {
 	Path string `json:"path"`
 	// Query zijn de queryparameters. Bij lezen kent de agent alleen
 	// labelSelector, fieldSelector, limit en continue; bij logs container,
-	// previous, tailLines en timestamps.
+	// previous, tailLines en timestamps; bij patch dryRun; bij delete
+	// propagationPolicy, gracePeriodSeconds en dryRun.
 	Query map[string]string `json:"query,omitempty"`
+	// Body is de patch bij KubePatch, en PatchType zijn soort.
+	Body      json.RawMessage `json:"body,omitempty"`
+	PatchType string          `json:"patch_type,omitempty"`
 	// Deadline: na dit tijdstip weigert de agent het verzoek.
 	Deadline time.Time `json:"deadline"`
 }
@@ -83,6 +110,8 @@ const (
 	// KubeMaxLogBytes hoeveel bytes log de agent hoogstens leest.
 	KubeMaxLogLines = 5000
 	KubeMaxLogBytes = 2 << 20
+	// KubeMaxPatch is de grootste patch die de agent doorstuurt.
+	KubeMaxPatch = 256 << 10
 )
 
 // KubeLogTrimmed staat voor een log waarvan de agent de oudste regels

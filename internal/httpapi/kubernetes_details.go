@@ -345,7 +345,13 @@ func (s *Server) GetKubeObject(w http.ResponseWriter, r *http.Request, clusterID
 		Ref: toAPIKubeRef(d.Ref), ApiVersion: d.APIVersion, Kind: d.Kind, Uid: d.Meta.UID, CreatedAt: d.Meta.CreationTimestamp,
 		Labels: map[string]string{}, Annotations: map[string]string{}, Summary: d.Summary, Problem: d.Problem,
 		Conditions: []gen.KubeCondition{}, Chain: []gen.KubeChainLink{}, Events: s.kubeEvents(ctx, clusterID, d.Events), Yaml: d.YAML,
-		Pod: nullable.NewNullNullable[gen.KubePodDetail](),
+		Pod: nullable.NewNullNullable[gen.KubePodDetail](), Actions: []gen.KubeActionName{}, Replicas: nullable.NewNullNullable[int](),
+	}
+	for _, a := range d.Actions {
+		out.Actions = append(out.Actions, gen.KubeActionName(a))
+	}
+	if d.Replicas != nil {
+		out.Replicas = nullable.NewNullableWithValue(*d.Replicas)
 	}
 	for k, v := range d.Meta.Labels {
 		out.Labels[k] = v

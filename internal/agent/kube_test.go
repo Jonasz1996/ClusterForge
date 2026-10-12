@@ -76,7 +76,12 @@ func kubeRead(t *testing.T, a *Agent, path string, query map[string]string) prot
 
 func kubeDo(t *testing.T, a *Agent, op, path string, query map[string]string) protocol.KubeResponse {
 	t.Helper()
-	body, err := json.Marshal(protocol.KubeRequest{ID: "k1", Op: op, Path: path, Query: query})
+	return kubeSend(t, a, protocol.KubeRequest{ID: "k1", Op: op, Path: path, Query: query})
+}
+
+func kubeSend(t *testing.T, a *Agent, req protocol.KubeRequest) protocol.KubeResponse {
+	t.Helper()
+	body, err := json.Marshal(req)
 	if err != nil {
 		t.Fatal(err)
 	}
