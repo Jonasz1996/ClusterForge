@@ -112,8 +112,24 @@ func (s *Service) run(ctx context.Context, j *jobs.Job) error {
 			return err
 		}
 	}
+	if r.spec.VIP != nil {
+		nodes, err := s.vipOrder(ctx, r.spec)
+		if err != nil {
+			return err
+		}
+		for _, n := range nodes {
+			if err := j.Step(ctx, fmt.Sprintf("%s: VIP %s", n.Hostname, r.spec.VIP.Address), func(ctx context.Context, st *jobs.Step) error {
+				return s.applyVIP(ctx, j, st, r, n)
+			}); err != nil {
+				return err
+			}
+		}
+	}
 	return j.Step(ctx, "Controleren", func(ctx context.Context, st *jobs.Step) error {
 		if err := s.verify(ctx, st, r.spec); err != nil {
+			return err
+		}
+		if err := s.verifyVIP(ctx, st, r.spec); err != nil {
 			return err
 		}
 		if err := s.finish(ctx, actor, j, r, p.Revision); err != nil {
@@ -382,7 +398,7 @@ func (s *Service) finish(ctx context.Context, actor events.Actor, j *jobs.Job, r
 			Actor: actor, SubjectType: "cluster", SubjectID: clusterID.String(), ClusterID: &clusterID, Action: "cluster.database_applied",
 			Payload: map[string]any{
 				"name": r.spec.Cluster.Name, "engine": comp.Engine, "component": r.tpl.Title, "version": r.tpl.Version, "revision": revision,
-				"nodes": r.spec.hosts(RoleData), "arbiter": r.spec.hosts(RoleArbiter), "first": first, "job_id": j.ID, "title": j.Title,
+				"nodes": r.spec.hosts(RoleData), "arbiter": r.spec.hosts(RoleArbiter), "vip": r.spec.vipAddress(), "first": first, "job_id": j.ID, "title": j.Title,
 			},
 		})
 	})

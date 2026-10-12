@@ -24,6 +24,18 @@ const (
 	// hun grootte. Alleen catalogus- en statusgegevens, nooit een rij uit
 	// een tabel.
 	DBStatus = "status"
+	// DBTrack laat keepalived de database bewaken in de vrrp_instance met
+	// een VIP: een include van /etc/keepalived/conf.d en track_script
+	// cf_db. Zonder Apply alleen de diff.
+	DBTrack = "track"
+)
+
+// DBTrackScript is de vrrp_script die ClusterForge in
+// DBTrackFile zet; hij roept DBCheckCommand aan.
+const (
+	DBTrackScript  = "cf_db"
+	DBTrackFile    = "/etc/keepalived/conf.d/clusterforge-db.conf"
+	DBCheckCommand = "/usr/local/bin/cf-agent check db"
 )
 
 // Engines.
@@ -66,6 +78,28 @@ type DBRequest struct {
 	Op string `json:"op"`
 	// Deadline: na dit tijdstip weigert de agent het verzoek.
 	Deadline time.Time `json:"deadline"`
+	// Track hoort bij DBTrack.
+	Track *DBTrackRequest `json:"track,omitempty"`
+}
+
+// DBTrackRequest zegt welk VIP keepalived met de database moet bewaken.
+type DBTrackRequest struct {
+	VIP string `json:"vip"`
+	// Apply schrijft de nieuwe keepalived.conf, na keepalived -t; anders
+	// alleen de diff.
+	Apply bool `json:"apply"`
+}
+
+// DBTrackResult is het antwoord op DBTrack.
+type DBTrackResult struct {
+	// Instance is de vrrp_instance met het VIP.
+	Instance string `json:"instance"`
+	// Changed: er moest iets veranderen (zonder Apply), of het is
+	// veranderd (met Apply).
+	Changed bool `json:"changed"`
+	// Diff is de unified diff van keepalived.conf, met auth_pass
+	// gemaskeerd; leeg als er niets verandert.
+	Diff string `json:"diff,omitempty"`
 }
 
 // DBResponse is het antwoord op een DBRequest. Error zegt waarom het
@@ -76,6 +110,8 @@ type DBResponse struct {
 	// Servers zijn de databaseservers op de node, bij DBStatus. Leeg als er
 	// geen MariaDB of PostgreSQL op staat.
 	Servers []DBServer `json:"servers"`
+	// Track is het antwoord op DBTrack.
+	Track *DBTrackResult `json:"track,omitempty"`
 }
 
 // DBServer is één MariaDB of PostgreSQL op een node.

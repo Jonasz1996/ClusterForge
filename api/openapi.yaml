@@ -3933,7 +3933,7 @@ components:
         kube_learning: { type: boolean, description: "De leermodus in het dashboard Kubernetes: uitleg en kubectl-commando's" }
     ClusterComponent:
       type: object
-      required: [id, cluster_id, engine, template, version, title, revision, applied_revision, params, nodes, state, job_id, job_error, created_at, updated_at]
+      required: [id, cluster_id, engine, template, version, title, revision, applied_revision, params, nodes, vip, state, job_id, job_error, created_at, updated_at]
       properties:
         id: { type: string, format: uuid }
         cluster_id: { type: string, format: uuid }
@@ -3945,11 +3945,30 @@ components:
         applied_revision: { type: integer, nullable: true, description: De laatste revisie die helemaal lukte; null tot de eerste uitrol klaar is }
         params: { type: object, additionalProperties: true, description: De instellingen zonder geheimen }
         nodes: { type: array, items: { $ref: "#/components/schemas/ComponentNode" } }
+        vip:
+          allOf: [{ $ref: "#/components/schemas/ComponentVIP" }]
+          nullable: true
+          description: Het VIP van de app dat de database volgt; null zonder
         state: { type: string, description: "installing, applying, ready of failed" }
         job_id: { type: string, format: uuid, nullable: true, description: De laatste taak die het onderdeel toepaste }
         job_error: { type: string, description: Waarom die taak mislukte }
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
+    ComponentVIP:
+      type: object
+      required: [id, address, nodes, owner]
+      properties:
+        id: { type: string, format: uuid }
+        address: { type: string }
+        nodes: { type: array, items: { type: string }, description: De nodes van de database die het VIP in keepalived hebben }
+        owner: { type: string, description: De node die het VIP nu heeft; leeg als niemand }
+    ComponentPlanVIP:
+      type: object
+      required: [id, address, owner]
+      properties:
+        id: { type: string, format: uuid }
+        address: { type: string }
+        owner: { type: string, description: De node die het VIP nu heeft; leeg als niemand }
     ComponentNode:
       type: object
       required: [node_id, hostname, role, index]
@@ -3966,6 +3985,11 @@ components:
         nodes: { type: array, items: { type: string, format: uuid }, description: "De datanodes op volgorde; de eerste begint het cluster" }
         arbiter: { type: string, format: uuid, nullable: true, description: "Een node die alleen meestemt (garbd); nodig bij twee datanodes" }
         settings: { type: object, additionalProperties: true, description: "buffer_pool en max_connections; wat ontbreekt, krijgt de standaard" }
+        vip_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: "Het VIP van de app: keepalived zet het dan alleen op een node waarvan de database mag schrijven"
     ComponentApplyInput:
       allOf:
         - { $ref: "#/components/schemas/ComponentInput" }
@@ -3980,7 +4004,7 @@ components:
         confirm: { type: string, description: De slug van het cluster; nodig op prod }
     ComponentPlan:
       type: object
-      required: [cluster_id, cluster_name, slug, prod, engine, template, version, title, params, nodes, findings, blocked, hash]
+      required: [cluster_id, cluster_name, slug, prod, engine, template, version, title, params, nodes, vip, findings, blocked, hash]
       properties:
         cluster_id: { type: string, format: uuid }
         cluster_name: { type: string }
@@ -3992,13 +4016,16 @@ components:
         title: { type: string }
         params: { type: object, additionalProperties: true, description: "De instellingen met de standaarden; een geheim als [geheim]" }
         nodes: { type: array, items: { $ref: "#/components/schemas/ComponentPlanNode" } }
+        vip:
+          allOf: [{ $ref: "#/components/schemas/ComponentPlanVIP" }]
+          nullable: true
         findings: { type: array, items: { $ref: "#/components/schemas/ComponentFinding" } }
         blocked: { type: boolean, description: "Iets houdt het tegen; uitrollen kan niet" }
         hash: { type: string }
     ComponentPlanNode:
       type: object
       required: [node_id, hostname, role, index, address, os, pve_type, pve_node, vmid, memory_bytes, memory_used_pct, need_bytes, free_after_pct,
-                 disk_free_bytes, disk_mount, existing, steps]
+                 disk_free_bytes, disk_mount, existing, steps, vip_instance, vip_diff]
       properties:
         node_id: { type: string, format: uuid }
         hostname: { type: string }
@@ -4017,6 +4044,8 @@ components:
         disk_mount: { type: string }
         existing: { type: string, description: Wat er al aan MariaDB draait }
         steps: { type: array, items: { type: string } }
+        vip_instance: { type: string, description: De vrrp_instance met het VIP; leeg als het VIP niet op deze node staat }
+        vip_diff: { type: string, description: "Wat ClusterForge in keepalived.conf verandert, als unified diff zonder auth_pass; leeg als er niets verandert" }
     ComponentTemplate:
       type: object
       required: [engine, name, version, title, description, params]

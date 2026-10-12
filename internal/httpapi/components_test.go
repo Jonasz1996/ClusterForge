@@ -32,6 +32,8 @@ type componentPlanView struct {
 		NeedBytes   int64    `json:"need_bytes"`
 		DiskMount   string   `json:"disk_mount"`
 		Steps       []string `json:"steps"`
+		VIPInstance string   `json:"vip_instance"`
+		VIPDiff     string   `json:"vip_diff"`
 	} `json:"nodes"`
 	Findings []struct {
 		Level    string `json:"level"`
@@ -166,7 +168,8 @@ func TestClusterComponent(t *testing.T) {
 	if s := c.do("POST", base+"/plan", in, &plan); s != http.StatusOK {
 		t.Fatalf("plan: %d", s)
 	}
-	if plan.Blocked || len(plan.codes()) != 0 || plan.Slug != "nextcloud" || !plan.Prod || plan.Title != "MariaDB Galera" || len(plan.Nodes) != 3 {
+	// Nextcloud heeft hier geen VIP; dat zegt het plan.
+	if plan.Blocked || !slices.Equal(plan.codes(), []string{"warning:no_vip"}) || plan.Slug != "nextcloud" || !plan.Prod || plan.Title != "MariaDB Galera" || len(plan.Nodes) != 3 {
 		t.Fatalf("plan: %+v", plan)
 	}
 	for i, n := range plan.Nodes {

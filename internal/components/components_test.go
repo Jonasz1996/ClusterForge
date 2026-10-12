@@ -225,3 +225,34 @@ func slicesIndex[T any](s []T, f func(T) bool) int {
 	}
 	return -1
 }
+
+// TestVIPSteps: het bestand met cf_db, en de vrrp_instance met het VIP uit
+// de facts.
+func TestVIPSteps(t *testing.T) {
+	steps := vipSteps("nextcloud", "10.0.20.185")
+	if len(steps) != 2 || steps[0].Directory == nil || steps[0].Directory.Path != "/etc/keepalived/conf.d" || steps[1].File == nil ||
+		steps[1].File.Path != protocol.DBTrackFile || steps[1].File.Mode != "0644" {
+		t.Fatalf("stappen: %+v", steps)
+	}
+	conf := steps[1].File.Content
+	for _, want := range []string{"cluster nextcloud", "vrrp_script cf_db {", `script "/usr/local/bin/cf-agent check db"`, "fall 2", "user root"} {
+		if !strings.Contains(conf, want) {
+			t.Errorf("%q ontbreekt:\n%s", want, conf)
+		}
+	}
+	f := &protocol.Facts{Keepalived: &protocol.Keepalived{Active: "active", Instances: []protocol.VRRPInstance{
+		{Name: "VI_WEB", VIPs: []string{"10.0.20.100"}}, {Name: "VI_1", VIPs: []string{"10.0.20.185"}},
+	}}}
+	if inst, ok := hasInstance(f, "10.0.20.185"); !ok || inst != "VI_1" {
+		t.Errorf("VI_1: %q %v", inst, ok)
+	}
+	if _, ok := hasInstance(f, "10.0.20.180"); ok {
+		t.Error(".180 staat er niet in")
+	}
+	if _, ok := hasInstance(&protocol.Facts{}, "10.0.20.185"); ok {
+		t.Error("zonder keepalived")
+	}
+	if got := vipTitles("nextcloud", "10.0.20.185", ""); got[2] != "keepalived.conf: track_script cf_db in de vrrp_instance met 10.0.20.185" {
+		t.Errorf("titels: %v", got)
+	}
+}

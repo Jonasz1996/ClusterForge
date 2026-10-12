@@ -3281,6 +3281,9 @@ type ClusterComponent struct {
 	Title     string    `json:"title"`
 	UpdatedAt time.Time `json:"updated_at"`
 	Version   string    `json:"version"`
+
+	// Vip Het VIP van de app dat de database volgt; null zonder
+	Vip nullable.Nullable[ComponentVIP] `json:"vip"`
 }
 
 // ClusterDetail defines model for ClusterDetail.
@@ -3448,6 +3451,9 @@ type ComponentApplyInput struct {
 
 	// Settings buffer_pool en max_connections; wat ontbreekt, krijgt de standaard
 	Settings *map[string]interface{} `json:"settings,omitempty"`
+
+	// VipId Het VIP van de app: keepalived zet het dan alleen op een node waarvan de database mag schrijven
+	VipId nullable.Nullable[openapi_types.UUID] `json:"vip_id,omitempty"`
 }
 
 // ComponentFinding defines model for ComponentFinding.
@@ -3477,6 +3483,9 @@ type ComponentInput struct {
 
 	// Settings buffer_pool en max_connections; wat ontbreekt, krijgt de standaard
 	Settings *map[string]interface{} `json:"settings,omitempty"`
+
+	// VipId Het VIP van de app: keepalived zet het dan alleen op een node waarvan de database mag schrijven
+	VipId nullable.Nullable[openapi_types.UUID] `json:"vip_id,omitempty"`
 }
 
 // ComponentNode defines model for ComponentNode.
@@ -3501,12 +3510,13 @@ type ComponentPlan struct {
 	Nodes       []ComponentPlanNode `json:"nodes"`
 
 	// Params De instellingen met de standaarden; een geheim als [geheim]
-	Params   map[string]interface{} `json:"params"`
-	Prod     bool                   `json:"prod"`
-	Slug     string                 `json:"slug"`
-	Template string                 `json:"template"`
-	Title    string                 `json:"title"`
-	Version  string                 `json:"version"`
+	Params   map[string]interface{}              `json:"params"`
+	Prod     bool                                `json:"prod"`
+	Slug     string                              `json:"slug"`
+	Template string                              `json:"template"`
+	Title    string                              `json:"title"`
+	Version  string                              `json:"version"`
+	Vip      nullable.Nullable[ComponentPlanVIP] `json:"vip"`
 }
 
 // ComponentPlanNode defines model for ComponentPlanNode.
@@ -3539,7 +3549,22 @@ type ComponentPlanNode struct {
 	PveType string   `json:"pve_type"`
 	Role    string   `json:"role"`
 	Steps   []string `json:"steps"`
-	Vmid    int      `json:"vmid"`
+
+	// VipDiff Wat ClusterForge in keepalived.conf verandert, als unified diff zonder auth_pass; leeg als er niets verandert
+	VipDiff string `json:"vip_diff"`
+
+	// VipInstance De vrrp_instance met het VIP; leeg als het VIP niet op deze node staat
+	VipInstance string `json:"vip_instance"`
+	Vmid        int    `json:"vmid"`
+}
+
+// ComponentPlanVIP defines model for ComponentPlanVIP.
+type ComponentPlanVIP struct {
+	Address string             `json:"address"`
+	Id      openapi_types.UUID `json:"id"`
+
+	// Owner De node die het VIP nu heeft; leeg als niemand
+	Owner string `json:"owner"`
 }
 
 // ComponentReapplyInput defines model for ComponentReapplyInput.
@@ -3560,6 +3585,18 @@ type ComponentTemplate struct {
 
 // ComponentTemplateEngine defines model for ComponentTemplate.Engine.
 type ComponentTemplateEngine string
+
+// ComponentVIP defines model for ComponentVIP.
+type ComponentVIP struct {
+	Address string             `json:"address"`
+	Id      openapi_types.UUID `json:"id"`
+
+	// Nodes De nodes van de database die het VIP in keepalived hebben
+	Nodes []string `json:"nodes"`
+
+	// Owner De node die het VIP nu heeft; leeg als niemand
+	Owner string `json:"owner"`
+}
 
 // DRPlan defines model for DRPlan.
 type DRPlan struct {

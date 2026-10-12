@@ -96,6 +96,8 @@ func (a *Agent) handleDB(data []byte) protocol.DBResponse {
 	switch req.Op {
 	case protocol.DBStatus:
 		res = a.DBStatus(ctx)
+	case protocol.DBTrack:
+		res = a.dbTrack(ctx, req.Track)
 	default:
 		res = protocol.DBResponse{Error: "onbekend databaseverzoek " + req.Op, Servers: []protocol.DBServer{}}
 	}

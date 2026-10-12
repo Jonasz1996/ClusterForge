@@ -109,6 +109,16 @@ func parseKeepalivedInstances(conf string) []protocol.VRRPInstance {
 						inst.Peers = append(inst.Peers, p.words[0])
 					}
 				}
+			case "track_script":
+				// Een regel per script, of track_script { a b } op één
+				// regel; een gewicht (weight -20) hoort bij het script.
+				for _, p := range ch.children {
+					for _, w := range p.words {
+						if w != "weight" && strings.TrimLeft(w, "-+0123456789") != "" {
+							inst.TrackScripts = append(inst.TrackScripts, w)
+						}
+					}
+				}
 			case "virtual_ipaddress", "virtual_ipaddress_excluded":
 				for _, p := range ch.children {
 					if len(p.words) == 0 {

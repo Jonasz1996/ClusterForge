@@ -100,11 +100,16 @@ type Database struct {
 }
 
 // Locked voert fn uit onder het slot van de host, om de databases te
-// wijzigen terwijl de agent draait.
+// wijzigen terwijl de agent draait. Daarna kijkt keepalived opnieuw, want
+// een track_script cf_db hangt af van de database.
 func (h *Host) Locked(fn func()) {
 	h.mu.Lock()
-	defer h.mu.Unlock()
 	fn()
+	g := h.group
+	h.mu.Unlock()
+	if g != nil {
+		g.update()
+	}
 }
 
 var errExit1 = errors.New("exit status 1")

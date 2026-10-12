@@ -106,3 +106,61 @@ func TestGroupUnicast(t *testing.T) {
 		t.Fatalf("multicast: %v %v", got, g.Splits())
 	}
 }
+
+// TestGroupTrackDB: met track_script cf_db staat het VIP alleen op een
+// node waarvan MariaDB mag schrijven; het script staat in conf.d.
+func TestGroupTrackDB(t *testing.T) {
+	const a, b = "10.0.20.11", "10.0.20.12"
+	g := &Group{}
+	h1, h2 := machine(t, g, a), machine(t, g, b)
+	galera := func() *MariaDB {
+		return &MariaDB{Galera: &Galera{Status: "Primary", State: 4, Comment: "Synced", Ready: true}}
+	}
+	h1.MariaDB, h2.MariaDB = galera(), galera()
+	for _, h := range []*Host{h1, h2} {
+		p := filepath.Join(h.Root, "etc/keepalived/conf.d/clusterforge-db.conf")
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte("vrrp_script cf_db {\n    script \"/usr/local/bin/cf-agent check db\"\n}\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tracked := func(src string, prio int, peer string) string {
+		return "include /etc/keepalived/conf.d/*.conf\n" +
+			strings.Replace(conf(src, prio, peer), "    virtual_ipaddress {", "    track_script {\n        cf_db\n    }\n    virtual_ipaddress {", 1)
+	}
+	h1.setConf(t, tracked(a, 150, b))
+	h2.setConf(t, tracked(b, 140, a))
+	if got := holders(h1, h2); !slices.Equal(got, []string{a}) {
+		t.Fatalf("gezond: %v", got)
+	}
+	h1.Locked(func() { h1.MariaDB.Galera.State, h1.MariaDB.Galera.Comment = 2, "Donor/Desynced" })
+	if got := holders(h1, h2); !slices.Equal(got, []string{b}) {
+		t.Fatalf("nc1 Donor: %v", got)
+	}
+	h1.Locked(func() { h1.MariaDB.Galera.State = 4 })
+	if got := holders(h1, h2); !slices.Equal(got, []string{a}) {
+		t.Fatalf("nc1 terug: %v", got)
+	}
+	h1.SetUnit("mariadb", Unit{Enabled: true})
+	if got := holders(h1, h2); !slices.Equal(got, []string{b}) {
+		t.Fatalf("mariadb gestopt: %v", got)
+	}
+
+	// keepalived -t: het script moet vóór de instance staan.
+	p := filepath.Join(h1.Root, "etc/keepalived/test.conf")
+	for c, ok := range map[string]bool{
+		tracked(a, 150, b): true,
+		strings.TrimPrefix(tracked(a, 150, b), "include /etc/keepalived/conf.d/*.conf\n") + "include /etc/keepalived/conf.d/*.conf\n": false,
+		conf(a, 150, b) + "}\n": false,
+	} {
+		if err := os.WriteFile(p, []byte(c), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		out, err := h1.Exec(t.Context(), "keepalived", "-t", "-f", p)
+		if (err == nil) != ok {
+			t.Errorf("keepalived -t: %v %s\n%s", err, out, c)
+		}
+	}
+}

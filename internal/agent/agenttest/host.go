@@ -293,6 +293,10 @@ func (h *Host) exec(name string, args []string) ([]byte, error) {
 		}
 	case "mariadb", "mysql":
 		return h.mariaExec(args)
+	case "keepalived":
+		if len(args) == 3 && args[0] == "-t" && args[1] == "-f" {
+			return h.keepalivedTest(args[2])
+		}
 	case "runuser":
 		return h.runuser(args)
 	}
@@ -586,12 +590,89 @@ func (h *Host) daemonReload() {
 	}
 }
 
+// keepalivedConf is keepalived.conf met elk bestand van een include op
+// zijn plaats, zoals keepalived ze leest.
 func (h *Host) keepalivedConf() string {
-	b, err := os.ReadFile(filepath.Join(h.Root, "etc/keepalived/keepalived.conf"))
-	if err != nil {
+	return h.readKeepalived(filepath.Join(h.Root, "etc/keepalived/keepalived.conf"), 0)
+}
+
+func (h *Host) readKeepalived(p string, depth int) string {
+	b, err := os.ReadFile(p)
+	if err != nil || depth > 4 {
 		return ""
 	}
-	return string(b)
+	var out strings.Builder
+	for line := range strings.SplitSeq(string(b), "\n") {
+		if f := strings.Fields(line); len(f) == 2 && f[0] == "include" && filepath.IsAbs(f[1]) {
+			files, _ := filepath.Glob(filepath.Join(h.Root, f[1]))
+			for _, inc := range files {
+				out.WriteString(h.readKeepalived(inc, depth+1))
+			}
+			continue
+		}
+		out.WriteString(line + "\n")
+	}
+	return out.String()
+}
+
+// keepalivedTest speelt keepalived -t -f <bestand> na: elke track_script
+// moet een vrrp_script zijn die eerder in de configuratie staat, want
+// keepalived zoekt hem op terwijl hij leest.
+func (h *Host) keepalivedTest(p string) ([]byte, error) {
+	if _, err := os.Stat(p); err != nil {
+		return []byte("Configuration file '" + p + "' does not exist\n"), errExit1
+	}
+	conf := h.readKeepalived(p, 0)
+	var words []string
+	for line := range strings.SplitSeq(conf, "\n") {
+		if i := strings.IndexAny(line, "#!"); i >= 0 {
+			line = line[:i]
+		}
+		line = strings.NewReplacer("{", " { ", "}", " } ").Replace(line)
+		words = append(words, strings.Fields(line)...)
+	}
+	defined := map[string]bool{}
+	depth, track := 0, -1
+	for i, w := range words {
+		switch {
+		case w == "{":
+			depth++
+			if i > 0 && words[i-1] == "track_script" {
+				track = depth
+			}
+		case w == "}":
+			if depth == track {
+				track = -1
+			}
+			depth--
+			if depth < 0 {
+				return []byte("Configuration error: unexpected '}'\n"), errExit1
+			}
+		case w == "vrrp_script" && i+1 < len(words):
+			defined[words[i+1]] = true
+		case track == depth && w != "weight" && strings.Trim(w, "-0123456789") != "":
+			if !defined[w] {
+				return []byte("track script " + w + " not found, ignoring...\n"), errExit1
+			}
+		}
+	}
+	if depth != 0 {
+		return []byte("Configuration error: missing '}'\n"), errExit1
+	}
+	return nil, nil
+}
+
+// mariaWritable is cf-agent check db: MariaDB antwoordt, is Synced in een
+// Primary component en wsrep_ready staat aan. De aanroeper heeft het slot.
+func (h *Host) mariaWritable() bool {
+	m := h.MariaDB
+	if u := h.units["mariadb"]; u != nil && !u.Active {
+		return false
+	}
+	if m == nil || m.Down || m.Galera == nil {
+		return false
+	}
+	return m.Galera.State == 4 && m.Galera.Status == "Primary" && m.Galera.Ready
 }
 
 var (
@@ -601,11 +682,14 @@ var (
 	vipBlockRe = regexp.MustCompile(`(?s)virtual_ipaddress\s*\{([^}]*)\}`)
 	trackRe    = regexp.MustCompile(`(?s)track_script\s*\{[^}]*\}`)
 	isActiveRe = regexp.MustCompile(`is-active\s+--quiet\s+([\w@.-]+)`)
+	cfDBRe     = regexp.MustCompile(`\bcf_db\b`)
+	checkDBRe  = regexp.MustCompile(`(?s)vrrp_script\s+cf_db\s*\{[^}]*cf-agent check db`)
 )
 
-// vrrp leest prioriteit en VIP's uit de keepalived-configuratie, en de unit
-// die een track_script met systemctl is-active bewaakt.
-func (h *Host) vrrp() (priority int, vips []string, tracked string) {
+// vrrp leest prioriteit en VIP's uit de keepalived-configuratie, de unit
+// die een track_script met systemctl is-active bewaakt, en db als een
+// track_script cf_db (cf-agent check db) de database bewaakt.
+func (h *Host) vrrp() (priority int, vips []string, tracked string, db bool) {
 	conf := h.keepalivedConf()
 	if m := priorityRe.FindStringSubmatch(conf); m != nil {
 		priority, _ = strconv.Atoi(m[1])
@@ -622,7 +706,10 @@ func (h *Host) vrrp() (priority int, vips []string, tracked string) {
 			tracked = strings.TrimSuffix(m[1], ".service")
 		}
 	}
-	return priority, vips, tracked
+	for _, t := range trackRe.FindAllString(conf, -1) {
+		db = db || cfDBRe.MatchString(t) && checkDBRe.MatchString(conf)
+	}
+	return priority, vips, tracked, db
 }
 
 // unicast leest het eigen adres en de peers van een keepalived-configuratie
@@ -665,7 +752,8 @@ func hears(h, o vrrpPeer) bool {
 
 // Group is een L2-netwerk met keepalived: een VIP staat op de machine met de
 // hoogste prioriteit waarop keepalived draait. Bewaakt een track_script een
-// unit die niet draait, dan staat de machine in FAULT en krijgt ze geen VIP.
+// unit die niet draait, of cf_db een MariaDB die niet mag schrijven, dan
+// staat de machine in FAULT en krijgt ze geen VIP.
 // Met unicast_peer hoort een machine alleen de peers die elkaar kennen; een
 // machine die de houder niet hoort, neemt het VIP er ook bij (split-brain).
 type Group struct {
@@ -710,8 +798,11 @@ func (g *Group) update() {
 		h.mu.Lock()
 		u := h.units["keepalived"]
 		running := u != nil && u.Active
-		prio, vips, tracked := h.vrrp()
+		prio, vips, tracked, db := h.vrrp()
 		if t := h.units[tracked]; tracked != "" && (t == nil || !t.Active) {
+			running = false
+		}
+		if db && !h.mariaWritable() {
 			running = false
 		}
 		// Zonder netwerk hoort niemand de machine.
