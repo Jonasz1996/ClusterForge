@@ -367,7 +367,7 @@ func (a *Agent) migratePull(ctx context.Context, req *protocol.DBMigrateRequest)
 	if err := a.needMaria(ctx); err != nil {
 		return err
 	}
-	exists, _, _, err := a.dumpInfo(ctx, req.Target)
+	exists, _, _, err := a.dumpInfo(ctx, protocol.DBMariaDB, req.Target)
 	if err != nil {
 		return err
 	}
@@ -497,7 +497,7 @@ func (a *Agent) pipeDump(ctx context.Context, client []string, db, target string
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	pr, pw := io.Pipe()
-	scan := &dumpScan{progress: progress}
+	scan := newDumpScan(protocol.DBMariaDB, progress)
 	var dumpFailed atomic.Bool
 	dumpErr := make(chan error, 1)
 	go func() {

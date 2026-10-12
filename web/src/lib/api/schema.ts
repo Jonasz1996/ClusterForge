@@ -2955,15 +2955,18 @@ export interface paths {
         };
         /**
          * De databases en gebruikers in de database van een cluster
-         * @description ClusterForge leest ze op de datanode met het VIP, of anders de eerste die Synced is: de databases met grootte, tabellen
-         *     en verbindingen op die node, en de gebruikers met hun hosts en rechten, zonder wachtwoord of hash. Ook voor viewers.
+         * @description ClusterForge leest ze bij MariaDB op de datanode met het VIP, of anders de eerste die Synced is, en bij PostgreSQL op
+         *     de primary van Patroni: de databases met grootte, tabellen en verbindingen op die node, en de gebruikers met hun hosts
+         *     en rechten, zonder wachtwoord of hash. Bij PostgreSQL heeft een gebruiker geen hosts; pg_hba laat de nodes en het VIP
+         *     binnen. Ook voor viewers.
          */
         get: operations["listComponentDatabases"];
         put?: never;
         /**
          * Een database met een eigen gebruiker aanmaken (admin)
-         * @description De gebruiker krijgt alle rechten op de database en mag inloggen vanaf elke node en elk VIP van het cluster. Het
-         *     wachtwoord staat één keer in het antwoord; ClusterForge bewaart het niet. Bestaat de database of de gebruiker al, dan 409.
+         * @description De gebruiker krijgt alle rechten op de database en mag inloggen vanaf elke node en elk VIP van het cluster; bij
+         *     PostgreSQL wordt hij de eigenaar van de database. Het wachtwoord staat één keer in het antwoord; ClusterForge bewaart
+         *     het niet. Bestaat de database of de gebruiker al, dan 409.
          */
         post: operations["createComponentDatabase"];
         delete?: never;
@@ -3065,8 +3068,8 @@ export interface paths {
         put?: never;
         /**
          * Meteen een dump van een database maken (admin); wordt een taak
-         * @description De dump komt op een datanode zonder het VIP die Synced is. Loopt er al een dump of terugzetten van deze database,
-         *     dan 409.
+         * @description Bij MariaDB komt de dump op een datanode zonder het VIP die Synced is, bij PostgreSQL op de primary. Loopt er al een
+         *     dump of terugzetten van deze database, dan 409.
          */
         post: operations["createComponentDump"];
         delete?: never;
@@ -3091,7 +3094,8 @@ export interface paths {
         /**
          * Een dump terugzetten in een nieuwe database naast de bestaande (admin); wordt een taak
          * @description Standaard heet de nieuwe database <database>_herstel_<datum van de dump>. De bestaande database blijft zoals ze is.
-         *     Mislukt het, dan haalt de agent de nieuwe database weer weg.
+         *     Mislukt het, dan haalt de agent de nieuwe database weer weg. Bij PostgreSQL zet de agent met de dump hem over het
+         *     netwerk terug op de primary, met een tijdelijke beheerder die ClusterForge daar maakt en daarna weghaalt.
          */
         post: operations["restoreComponentDump"];
         delete?: never;
@@ -4106,12 +4110,14 @@ export interface components {
             confirm?: string;
         };
         ComponentDatabases: {
-            /** @description De datanode waarvan ClusterForge las */
+            /** @enum {string} */
+            engine: "mariadb" | "postgresql";
+            /** @description De datanode waarvan ClusterForge las; bij PostgreSQL de primary */
             node: string;
             /** @description Waar een app verbindt; het VIP van de database, of de eerste datanode */
             address: string;
             port: number;
-            /** @description De adressen waarvandaan een nieuwe gebruiker mag inloggen; alle nodes en VIP's van het cluster */
+            /** @description De adressen waarvandaan een nieuwe gebruiker mag inloggen; alle nodes en VIP's van het cluster. Leeg bij PostgreSQL, waar pg_hba dat bepaalt */
             hosts: string[];
             databases: components["schemas"]["ComponentDatabase"][];
             users: components["schemas"]["ComponentDatabaseUser"][];
@@ -4130,7 +4136,7 @@ export interface components {
         ComponentDatabaseUser: {
             name: string;
             hosts: string[];
-            /** @description Een gebruiker van MariaDB zelf, zoals root */
+            /** @description Een gebruiker van de database zelf, zoals root of postgres, of een tijdelijke beheerder van ClusterForge om een dump terug te zetten */
             system: boolean;
             /** @description Rechten op alle databases */
             global: string[];
@@ -4138,7 +4144,7 @@ export interface components {
         };
         ComponentDatabaseGrant: {
             database: string;
-            /** @description Alle rechten op deze database */
+            /** @description Alle rechten op deze database; bij PostgreSQL de eigenaar */
             all: boolean;
             privileges: string[];
         };

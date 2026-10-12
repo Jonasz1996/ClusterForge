@@ -25,7 +25,7 @@ func (s *Server) ListComponentDatabases(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 	out := gen.ComponentDatabases{
-		Node: l.Node, Address: l.Address, Port: l.Port, Hosts: nonNil(l.Hosts),
+		Engine: gen.ComponentDatabasesEngine(l.Engine), Node: l.Node, Address: l.Address, Port: l.Port, Hosts: nonNil(l.Hosts),
 		Databases: make([]gen.ComponentDatabase, 0, len(l.Databases)), Users: make([]gen.ComponentDatabaseUser, 0, len(l.Users)),
 	}
 	for _, d := range l.Databases {

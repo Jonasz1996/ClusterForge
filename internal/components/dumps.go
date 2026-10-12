@@ -1,9 +1,13 @@
 package components
 
 // Back-ups van de databases. Elke nacht maakt ClusterForge van elke
-// database van een onderdeel een dump, op een datanode zonder het VIP,
-// zodat de node die schrijft geen extra last krijgt. De dump blijft op die
-// node, in protocol.DBDumpDir, en gaat mee in de Proxmox-back-up ervan.
+// database van een onderdeel een dump. Bij MariaDB op een datanode zonder
+// het VIP, zodat de node die schrijft geen extra last krijgt. Bij
+// PostgreSQL op de primary: een lange pg_dump op een replica breekt
+// PostgreSQL af zodra de primary iets opruimt dat de dump nog leest (na
+// max_standby_streaming_delay, standaard 30 seconden), en langer laten
+// wachten houdt een failover op. De dump blijft op die node, in
+// protocol.DBDumpDir, en gaat mee in de Proxmox-back-up ervan.
 // Na elke ronde haalt ClusterForge op elke datanode de dumps weg die
 // ouder zijn dan het aantal dagen dat ze blijven, behalve de nieuwste
 // goede per database.
@@ -12,11 +16,16 @@ package components
 // dan de helft kleiner dan de vorige goede, of mist er een tabel, dan is
 // hij verdacht: hij blijft staan, maar telt niet als nieuwste goede.
 // Terugzetten gaat in een nieuwe database naast de bestaande,
-// <naam>_herstel_<datum>, zodat Jonas eerst kan kijken.
+// <naam>_herstel_<datum>, zodat Jonas eerst kan kijken. Bij PostgreSQL
+// staat de dump niet altijd op de primary, waar terugzetten moet; dan
+// maakt ClusterForge op de primary een tijdelijke beheerder, waarmee de
+// agent met de dump over het netwerk terugzet, en haalt hem daarna weg.
 
 import (
 	"cmp"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"regexp"
@@ -60,6 +69,10 @@ const (
 )
 
 var backupAtRe = regexp.MustCompile(`^([01][0-9]|2[0-3]):([0-5][0-9])$`)
+
+// tempRoleRe zijn de tijdelijke beheerders in PostgreSQL waarmee een agent
+// een dump terugzet op de primary.
+var tempRoleRe = regexp.MustCompile(protocol.DBTempRolePattern)
 
 // BackupSettings is wanneer de nachtelijke dump komt en hoe lang hij
 // blijft.
@@ -116,6 +129,15 @@ type restoreParams struct {
 	ComponentID uuid.UUID `json:"component_id"`
 	DumpID      uuid.UUID `json:"dump_id"`
 	Target      string    `json:"target"`
+}
+
+// restoreState is wat de stap van terugzetten onthoudt, zodat een hervatte
+// taak verder wacht: wanneer het begon, en bij PostgreSQL de tijdelijke
+// beheerder en de primary. Het wachtwoord staat er nooit in.
+type restoreState struct {
+	At      time.Time `json:"at"`
+	Role    string    `json:"role,omitempty"`
+	Primary string    `json:"primary,omitempty"`
 }
 
 // dumpPick is wat de eerste stap van een dump koos.
@@ -182,7 +204,7 @@ func (s *Service) Dumps(ctx context.Context, clusterID, id uuid.UUID) (DumpOverv
 	if err != nil {
 		return DumpOverview{}, err
 	}
-	if err := mariaOnly(r, "Dumps"); err != nil {
+	if err := dbEngine(r, "Dumps"); err != nil {
 		return DumpOverview{}, err
 	}
 	all, err := s.DatabaseBackups(ctx)
@@ -291,7 +313,7 @@ func (s *Service) SetBackup(ctx context.Context, actor events.Actor, clusterID, 
 		if err != nil {
 			return err
 		}
-		if err := mariaOnly(r, "Dumps"); err != nil {
+		if err := dbEngine(r, "Dumps"); err != nil {
 			return err
 		}
 		c, err := q.GetCluster(ctx, clusterID)
@@ -322,8 +344,7 @@ func (s *Service) RunBackups(ctx context.Context, now time.Time) error {
 		return err
 	}
 	for _, r := range rows {
-		// Dumps van PostgreSQL komen in een volgende stap.
-		if !r.BackupOn || r.Engine != protocol.DBMariaDB {
+		if !r.BackupOn {
 			continue
 		}
 		if r.BackupNextAt == nil || now.Before(*r.BackupNextAt) {
@@ -354,7 +375,11 @@ func (s *Service) RunBackups(ctx context.Context, now time.Time) error {
 
 // DumpNow maakt meteen een dump van één database.
 func (s *Service) DumpNow(ctx context.Context, actor events.Actor, clusterID, id uuid.UUID, database string) (store.Job, error) {
-	if err := dbsql.CheckDatabase(database); err != nil {
+	r, err := s.get(ctx, s.q, clusterID, id, false)
+	if err != nil {
+		return store.Job{}, err
+	}
+	if err := dbsql.CheckDatabaseOf(r.Engine, database); err != nil {
 		return store.Job{}, &InvalidError{"database", err.Error()}
 	}
 	return s.enqueueDump(ctx, actor, clusterID, id, dumpParams{ComponentID: id, Databases: []string{database}, Trigger: TriggerManual})
@@ -365,7 +390,7 @@ func (s *Service) enqueueDump(ctx context.Context, actor events.Actor, clusterID
 	if err != nil {
 		return store.Job{}, err
 	}
-	if err := mariaOnly(r, "Dumps"); err != nil {
+	if err := dbEngine(r, "Dumps"); err != nil {
 		return store.Job{}, err
 	}
 	if r.AppliedRevision == nil {
@@ -396,7 +421,7 @@ func (s *Service) RestoreDump(ctx context.Context, actor events.Actor, clusterID
 	if err != nil {
 		return store.Job{}, "", err
 	}
-	if err := mariaOnly(r, "Dumps"); err != nil {
+	if err := dbEngine(r, "Dumps"); err != nil {
 		return store.Job{}, "", err
 	}
 	d, err := s.q.GetDBDump(ctx, dumpID)
@@ -417,7 +442,7 @@ func (s *Service) RestoreDump(ctx context.Context, actor events.Actor, clusterID
 	if target == "" {
 		target = RestoreName(d.Database, d.StartedAt)
 	}
-	if err := dbsql.CheckDatabase(target); err != nil {
+	if err := dbsql.CheckDatabaseOf(r.Engine, target); err != nil {
 		return store.Job{}, "", &InvalidError{"target", err.Error()}
 	}
 	if target == d.Database {
@@ -449,9 +474,9 @@ func RestoreName(database string, at time.Time) string {
 	return database[:min(len(database), 63-len(suffix))] + suffix
 }
 
-// dumpReq stuurt een DBDump naar een node.
-func (s *Service) dumpReq(ctx context.Context, n Node, req protocol.DBDumpRequest) (*protocol.DBDumpResult, error) {
-	res, err := s.dbRequest(ctx, dbTarget{node: n}, protocol.DBRequest{Op: protocol.DBDump, Dump: &req})
+// dumpReq stuurt een DBDump voor engine naar een node.
+func (s *Service) dumpReq(ctx context.Context, n Node, engine string, req protocol.DBDumpRequest) (*protocol.DBDumpResult, error) {
+	res, err := s.dbRequest(ctx, dbTarget{node: n, engine: engine}, protocol.DBRequest{Op: protocol.DBDump, Dump: &req})
 	if err != nil {
 		return nil, err
 	}
@@ -479,10 +504,17 @@ func (s *Service) vipOwner(ctx context.Context, clusterID uuid.UUID, spec Spec) 
 	return "", nil
 }
 
-// dumpNode kiest de node voor de dumps: een Synced datanode zonder het
-// VIP, liefst die van de vorige dump. Is alleen de node met het VIP
-// Synced, dan die, met de reden.
+// dumpNode kiest de node voor de dumps: bij PostgreSQL de primary, bij
+// MariaDB een Synced datanode zonder het VIP, liefst die van de vorige
+// dump. Is alleen de node met het VIP Synced, dan die, met de reden.
 func (s *Service) dumpNode(ctx context.Context, comp store.ClusterComponent, spec Spec) (Node, string, error) {
+	if comp.Engine == protocol.DBPostgreSQL {
+		p, err := s.pgPrimary(ctx, comp.ClusterID, spec)
+		if err != nil {
+			return Node{}, "", err
+		}
+		return p.node, p.node.Hostname + " is de primary; daar leest pg_dump zonder dat een replica hem afbreekt", nil
+	}
 	owner, err := s.vipOwner(ctx, comp.ClusterID, spec)
 	if err != nil {
 		return Node{}, "", err
@@ -575,11 +607,11 @@ func (s *Service) runDump(ctx context.Context, j *jobs.Job) error {
 				return err
 			}
 			for _, sv := range res.Servers {
-				if sv.Engine != protocol.DBMariaDB {
+				if sv.Engine != comp.Engine {
 					continue
 				}
 				for _, d := range sv.Databases {
-					if !restoredCopy(d.Name) && dbsql.CheckDatabase(d.Name) == nil {
+					if !restoredCopy(d.Name) && dbsql.CheckDatabaseOf(comp.Engine, d.Name) == nil {
 						pick.Databases = append(pick.Databases, d.Name)
 					}
 				}
@@ -633,7 +665,7 @@ type dumpStepState struct {
 func (s *Service) dumpOne(ctx context.Context, j *jobs.Job, st *jobs.Step, comp store.ClusterComponent, n Node, db, trigger string) error {
 	var state dumpStepState
 	if !st.State(&state) {
-		res, err := s.dumpReq(ctx, n, protocol.DBDumpRequest{Action: protocol.DBDumpStart, Database: db})
+		res, err := s.dumpReq(ctx, n, comp.Engine, protocol.DBDumpRequest{Action: protocol.DBDumpStart, Database: db})
 		if err != nil {
 			return err
 		}
@@ -653,7 +685,7 @@ func (s *Service) dumpOne(ctx context.Context, j *jobs.Job, st *jobs.Step, comp 
 	deadline := s.Now().Add(protocol.DBDumpTimeout + time.Hour)
 	reported := int64(0)
 	for {
-		res, err := s.dumpReq(ctx, n, protocol.DBDumpRequest{Action: protocol.DBDumpList})
+		res, err := s.dumpReq(ctx, n, comp.Engine, protocol.DBDumpRequest{Action: protocol.DBDumpList})
 		switch {
 		case err != nil && ctx.Err() != nil:
 			return err
@@ -702,7 +734,11 @@ func (s *Service) finishDumpFile(ctx context.Context, comp store.ClusterComponen
 	case f.Error != "":
 		status, msg = store.DbDumpStatusFailed, f.Error
 	case !f.Complete:
-		status, msg = store.DbDumpStatusFailed, "de dump is niet compleet: de laatste regel van mariadb-dump ontbreekt"
+		tool := "mariadb-dump"
+		if comp.Engine == protocol.DBPostgreSQL {
+			tool = "pg_dump"
+		}
+		status, msg = store.DbDumpStatusFailed, "de dump is niet compleet: de laatste regel van "+tool+" ontbreekt"
 	case f.Tables < f.TablesExpected:
 		status, msg = store.DbDumpStatusSuspect, fmt.Sprintf("er staan %d van de %d tabellen in", f.Tables, f.TablesExpected)
 	default:
@@ -783,7 +819,17 @@ func (s *Service) pruneDumps(ctx context.Context, st *jobs.Step, comp store.Clus
 			newest[d.Database] = d
 		}
 	}
+	// Een agent die Engine niet kent, zou bij PostgreSQL de dumps van
+	// MariaDB opruimen; die komt pas na een update aan de beurt.
+	agents, err := s.agentProtocols(ctx, comp.ClusterID)
+	if err != nil {
+		return err
+	}
 	for _, n := range dataNodes(spec, nil) {
+		if comp.Engine == protocol.DBPostgreSQL && agents[n.NodeID] < protocol.DBPGSince {
+			st.Logf("%s: niet opgeruimd: de agent heeft protocol %d; werk hem bij met het installatiescript en --upgrade", n.Hostname, agents[n.NodeID])
+			continue
+		}
 		keep := []string{}
 		for _, d := range newest {
 			if d.Hostname == n.Hostname {
@@ -791,7 +837,7 @@ func (s *Service) pruneDumps(ctx context.Context, st *jobs.Step, comp store.Clus
 			}
 		}
 		slices.Sort(keep)
-		res, err := s.dumpReq(ctx, n, protocol.DBDumpRequest{Action: protocol.DBDumpPrune, KeepDays: int(comp.BackupKeepDays), Keep: keep})
+		res, err := s.dumpReq(ctx, n, comp.Engine, protocol.DBDumpRequest{Action: protocol.DBDumpPrune, KeepDays: int(comp.BackupKeepDays), Keep: keep})
 		if err != nil {
 			if ctx.Err() != nil {
 				return err
@@ -828,6 +874,22 @@ func (s *Service) pruneDumps(ctx context.Context, st *jobs.Step, comp store.Clus
 	return nil
 }
 
+// agentProtocols is per node van een cluster het protocol van zijn agent;
+// 0 zonder agent.
+func (s *Service) agentProtocols(ctx context.Context, clusterID uuid.UUID) (map[uuid.UUID]int, error) {
+	cands, err := s.q.ListComponentCandidates(ctx, &clusterID)
+	if err != nil {
+		return nil, err
+	}
+	out := map[uuid.UUID]int{}
+	for _, c := range cands {
+		if c.HasAgent {
+			out[c.ID] = int(c.AgentProtocol)
+		}
+	}
+	return out, nil
+}
+
 // failDumpsOf zet de dumps van een taak die stopte op mislukt. De agent
 // kan de dump nog afmaken; de volgende keer opruimen ziet hem dan.
 func (s *Service) failDumpsOf(ctx context.Context, j store.Job) {
@@ -859,28 +921,45 @@ func (s *Service) runRestore(ctx context.Context, j *jobs.Job) error {
 		return errors.New("de node " + d.Hostname + " met deze dump bestaat niet meer")
 	}
 	n := Node{NodeID: *d.NodeID, Hostname: d.Hostname}
+	pg := comp.Engine == protocol.DBPostgreSQL
 	return j.Step(ctx, fmt.Sprintf("%s terugzetten als %s op %s", d.File, p.Target, d.Hostname), func(ctx context.Context, st *jobs.Step) error {
-		var started struct {
-			At time.Time `json:"at"`
-		}
-		if !st.State(&started) {
-			if _, err := s.dumpReq(ctx, n, protocol.DBDumpRequest{
-				Action: protocol.DBDumpRestore, Database: d.Database, File: d.File, Target: p.Target,
-			}); err != nil {
+		var state restoreState
+		if !st.State(&state) {
+			req := protocol.DBDumpRequest{Action: protocol.DBDumpRestore, Database: d.Database, File: d.File, Target: p.Target}
+			if pg {
+				role, primary, err := s.restoreLogin(ctx, st, comp, n, &req)
+				if err != nil {
+					if ctx.Err() != nil {
+						return err
+					}
+					return s.restoreEvent(ctx, j, comp, d, p.Target, err.Error())
+				}
+				state.Role, state.Primary = role, primary
+			}
+			if _, err := s.dumpReq(ctx, n, comp.Engine, req); err != nil {
 				if ctx.Err() != nil {
 					return err
 				}
+				s.dropRestoreLogin(ctx, st, comp, state.Role)
 				return s.restoreEvent(ctx, j, comp, d, p.Target, err.Error())
 			}
-			started.At = s.Now()
-			st.Logf("Database %s gemaakt; de dump loopt erin.", p.Target)
-			if err := st.SetState(ctx, started); err != nil {
+			state.At = s.Now()
+			if pg {
+				st.Logf("Database %s gemaakt op %s; de dump loopt erin vanaf %s.", p.Target, state.Primary, d.Hostname)
+			} else {
+				st.Logf("Database %s gemaakt; de dump loopt erin.", p.Target)
+			}
+			if err := st.SetState(ctx, state); err != nil {
 				return err
 			}
 		}
+		done := func(msg string) error {
+			s.dropRestoreLogin(ctx, st, comp, state.Role)
+			return s.restoreEvent(ctx, j, comp, d, p.Target, msg)
+		}
 		reported := int64(0)
 		for {
-			res, err := s.dumpReq(ctx, n, protocol.DBDumpRequest{Action: protocol.DBDumpList})
+			res, err := s.dumpReq(ctx, n, comp.Engine, protocol.DBDumpRequest{Action: protocol.DBDumpList})
 			switch {
 			case err != nil && ctx.Err() != nil:
 				return err
@@ -900,14 +979,18 @@ func (s *Service) runRestore(ctx context.Context, j *jobs.Job) error {
 					}
 				}
 				if i < 0 {
-					return s.restoreEvent(ctx, j, comp, d, p.Target, "de agent op "+d.Hostname+" weet niets van dit terugzetten; startte hij opnieuw? "+
-						"Kijk bij Databases en gebruikers of "+p.Target+" er staat, haal de database weg en probeer het opnieuw")
+					return done("de agent op " + d.Hostname + " weet niets van dit terugzetten; startte hij opnieuw? " +
+						"Kijk bij Databases en gebruikers of " + p.Target + " er staat, haal de database weg en probeer het opnieuw")
 				}
 				if r := res.Restores[i]; r.Error != "" {
-					return s.restoreEvent(ctx, j, comp, d, p.Target, r.Error)
+					return done(r.Error)
 				}
-				st.Logf("Klaar. %s staat naast %s; kijk erin als root op %s met: mariadb %s", p.Target, d.Database, d.Hostname, p.Target)
-				return s.restoreEvent(ctx, j, comp, d, p.Target, "")
+				if pg {
+					st.Logf("Klaar. %s staat naast %s; kijk erin als root op %s met: runuser -u postgres -- psql %s", p.Target, d.Database, state.Primary, p.Target)
+				} else {
+					st.Logf("Klaar. %s staat naast %s; kijk erin als root op %s met: mariadb %s", p.Target, d.Database, d.Hostname, p.Target)
+				}
+				return done("")
 			}
 			select {
 			case <-ctx.Done():
@@ -916,6 +999,71 @@ func (s *Service) runRestore(ctx context.Context, j *jobs.Job) error {
 			}
 		}
 	})
+}
+
+// restoreLogin maakt op de primary van PostgreSQL een tijdelijke beheerder
+// en zet hem in req, zodat de agent op n de dump daar terugzet. Het
+// wachtwoord gaat alleen naar de twee agents; ClusterForge bewaart het
+// niet.
+func (s *Service) restoreLogin(ctx context.Context, st *jobs.Step, comp store.ClusterComponent, n Node, req *protocol.DBDumpRequest) (string, string, error) {
+	spec, err := s.appliedSpec(ctx, comp)
+	if err != nil {
+		return "", "", err
+	}
+	agents, err := s.agentProtocols(ctx, comp.ClusterID)
+	if err != nil {
+		return "", "", err
+	}
+	if err := pgAgent(pgNode{node: n, protocol: agents[n.NodeID]}); err != nil {
+		return "", "", err
+	}
+	p, err := s.pgPrimary(ctx, comp.ClusterID, spec)
+	if err != nil {
+		return "", "", err
+	}
+	if p.address == "" {
+		return "", "", &ConflictError{"de primary " + p.node.Hostname + " heeft geen adres"}
+	}
+	b := make([]byte, 8)
+	_, _ = rand.Read(b)
+	role, pw := "cf_herstel_"+hex.EncodeToString(b), rand.Text()
+	if _, err := s.dbRequest(ctx, dbTarget{node: p.node, engine: protocol.DBPostgreSQL}, protocol.DBRequest{
+		Op: protocol.DBEnsure, Ensure: &protocol.DBEnsureRequest{User: role, Password: pw, Restore: true},
+	}); err != nil {
+		return "", "", err
+	}
+	st.Logf("Tijdelijke beheerder %s gemaakt op de primary %s; hij vervalt na %d uur.", role, p.node.Hostname, int(protocol.DBTempRoleTTL.Hours()))
+	req.Primary, req.User, req.Password = p.address, role, pw
+	return role, p.node.Hostname, nil
+}
+
+// dropRestoreLogin haalt de tijdelijke beheerder weg, op de primary van nu.
+// Lukt dat niet, dan vervalt hij vanzelf en ruimt het volgende terugzetten
+// hem op.
+func (s *Service) dropRestoreLogin(ctx context.Context, st *jobs.Step, comp store.ClusterComponent, role string) {
+	if role == "" {
+		return
+	}
+	err := func() error {
+		spec, err := s.appliedSpec(ctx, comp)
+		if err != nil {
+			return err
+		}
+		p, err := s.pgPrimary(ctx, comp.ClusterID, spec)
+		if err != nil {
+			return err
+		}
+		_, err = s.dbRequest(ctx, dbTarget{node: p.node, engine: protocol.DBPostgreSQL}, protocol.DBRequest{
+			Op: protocol.DBDrop, Drop: &protocol.DBDropRequest{User: role},
+		})
+		return err
+	}()
+	if err != nil {
+		st.Logf("De tijdelijke beheerder %s weghalen mislukte: %v. Hij vervalt na %d uur; het volgende terugzetten ruimt hem op.",
+			role, err, int(protocol.DBTempRoleTTL.Hours()))
+		return
+	}
+	st.Logf("Tijdelijke beheerder %s weggehaald.", role)
 }
 
 // restoreEvent schrijft hoe het terugzetten afliep; met msg mislukte het.

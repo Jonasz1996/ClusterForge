@@ -288,6 +288,10 @@ func (h *Host) ExecStdin(_ context.Context, stdin []byte, name string, args ...s
 	switch name {
 	case "mariadb", "mysql":
 		out, err = h.mariaWrite(string(stdin))
+	case "runuser":
+		out, err = h.pgLocal(args, string(stdin))
+	case "psql":
+		out, err = h.pgRemoteWrite(args, string(stdin))
 	default:
 		out, err = []byte("agenttest: "+name+" leest geen stdin\n"), errors.New("exit status 127")
 	}
@@ -336,6 +340,10 @@ func (h *Host) Stream(_ context.Context, in io.Reader, out io.Writer, name strin
 		}
 	case "mariadb", "mysql":
 		err = h.mariaRestore(args, data)
+	case "runuser":
+		dump, err = h.pgDump(args)
+	case "psql":
+		err = h.pgRestore(args, data)
 	default:
 		err = errors.New("agenttest: " + name + " kent geen stroom")
 	}
@@ -421,6 +429,8 @@ func (h *Host) exec(name string, args []string) ([]byte, error) {
 		}
 	case "runuser":
 		return h.runuser(args)
+	case "psql":
+		return h.pgRemoteQuery(args)
 	case "galera_recovery":
 		return h.galeraRecovery()
 	}

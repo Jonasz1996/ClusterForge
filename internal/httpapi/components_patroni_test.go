@@ -66,8 +66,26 @@ func (g *patroniHosts) start(name string, h *agenttest.Host) {
 	h.Locked(func() {
 		h.Patroni = &agenttest.Patroni{Scope: "nextcloud", Role: role, State: "running", Timeline: 1, Replication: repl, Sync: sync}
 		h.Postgres = &agenttest.Postgres{Version: "17.6 (Debian 17.6-1.pgdg13+1)", Recovery: role == "replica", MaxConnections: 100, Uptime: 5,
-			Databases: []agenttest.Database{{Name: "postgres", Size: 7 << 20}}}
+			Databases: []agenttest.Database{{Name: "postgres", Size: 7 << 20}}, Roles: agenttest.PatroniRoles()}
 	})
+}
+
+// replicate speelt de replicatie na: de andere nodes met PostgreSQL krijgen
+// de gebruikers en databases van from.
+func (g *patroniHosts) replicate(from string) {
+	src := g.hosts[from]
+	var roles []agenttest.PGRole
+	var dbs []agenttest.Database
+	src.Locked(func() { roles, dbs = slices.Clone(src.Postgres.Roles), slices.Clone(src.Postgres.Databases) })
+	for name, h := range g.hosts {
+		if name != from {
+			h.Locked(func() {
+				if h.Postgres != nil {
+					h.Postgres.Roles, h.Postgres.Databases = slices.Clone(roles), slices.Clone(dbs)
+				}
+			})
+		}
+	}
 }
 
 // failover laat de primary hard uitvallen en maakt to de nieuwe primary,
@@ -134,10 +152,23 @@ func TestClusterComponentPatroni(t *testing.T) {
 			g.hosts[name] = h
 			h.SetAfter(g.after(name, h))
 			ag.Exec, ag.Root, ag.Collector.Run, ag.Collector.Addresses = h.Exec, root, h.Exec, h.Addresses
+			ag.ExecStdin, ag.Stream, ag.DumpDir = h.ExecStdin, h.Stream, filepath.Join(root, "var/backups/clusterforge-db")
 			ag.Collector.Interfaces, ag.Collector.PrimaryAddress = h.Interfaces, func() string { return ip }
 			ag.PatroniURL = h.ServePatroni(t)
 			group.Join(h)
 		})
+	}
+	// PostgreSQL op de andere nodes is bereikbaar op poort 5432.
+	network := func(addr string) *agenttest.Host {
+		for i, name := range []string{"nc1", "nc2", "nc3"} {
+			if addr == fmt.Sprintf("10.0.20.%d:5432", 186+i) {
+				return g.hosts[name]
+			}
+		}
+		return nil
+	}
+	for _, h := range g.hosts {
+		h.Locked(func() { h.Network = network })
 	}
 	eventually(t, "facts van de drie nodes", func() bool {
 		var n int
@@ -337,12 +368,74 @@ func TestClusterComponentPatroni(t *testing.T) {
 		t.Fatalf("dienst postgresql: %q %v", kind, err)
 	}
 
-	// Databases, dumps en opnieuw starten zijn er voor PostgreSQL nog niet.
-	for _, path := range []string{"/databases", "/dumps"} {
-		if s := c.do("GET", base+"/"+compID+path, nil, &ae); s != http.StatusConflict || !strings.Contains(ae.Message, "PostgreSQL") {
-			t.Errorf("%s: %d %+v", path, s, ae)
+	// Databases en gebruikers: ClusterForge leest en schrijft op de primary
+	// nc1, en een app verbindt met het eigen VIP op poort 5432. Gebruikers
+	// hebben geen hosts; pg_hba laat de nodes en het VIP binnen.
+	dbURL := base + "/" + compID + "/databases"
+	var dl componentDatabasesView
+	if s := c.do("GET", dbURL, nil, &dl); s != http.StatusOK || dl.Engine != "postgresql" || dl.Node != "nc1" || dl.Address != "10.0.20.190" ||
+		dl.Port != 5432 || len(dl.Hosts) != 0 || len(dl.Databases) != 0 {
+		t.Fatalf("databases: %d %+v", s, dl)
+	}
+	if _, users := dl.names(); !slices.Equal(users, []string{"cf_replicatie*", "cf_rewind*", "postgres*"}) {
+		t.Fatalf("gebruikers: %v", users)
+	}
+	for name, want := range map[string]string{"postgres": "van PostgreSQL zelf", "template1": "van PostgreSQL zelf"} {
+		if s := c.do("POST", dbURL, map[string]any{"name": name}, &ae); s != http.StatusBadRequest || !strings.Contains(ae.Message, want) {
+			t.Errorf("%s: %d %+v", name, s, ae)
 		}
 	}
+	if s := c.do("POST", dbURL, map[string]any{"name": "nextcloud", "user": "pg_nextcloud"}, &ae); s != http.StatusBadRequest || !strings.Contains(ae.Message, "pg_") {
+		t.Errorf("pg_nextcloud: %d %+v", s, ae)
+	}
+	var created struct {
+		User     string   `json:"user"`
+		Password string   `json:"password"`
+		Hosts    []string `json:"hosts"`
+		Address  string   `json:"address"`
+		Port     int      `json:"port"`
+		Node     string   `json:"node"`
+	}
+	if s := c.do("POST", dbURL, map[string]any{"name": "nextcloud"}, &created); s != http.StatusCreated || created.User != "nextcloud" || len(created.Password) < 16 ||
+		len(created.Hosts) != 0 || created.Address != "10.0.20.190" || created.Port != 5432 || created.Node != "nc1" {
+		t.Fatalf("nieuwe database: %d %+v", s, created)
+	}
+	nc1 := g.hosts["nc1"]
+	nc1.Locked(func() {
+		p := nc1.Postgres
+		i := slices.IndexFunc(p.Roles, func(r agenttest.PGRole) bool { return r.Name == "nextcloud" })
+		j := slices.IndexFunc(p.Databases, func(d agenttest.Database) bool { return d.Name == "nextcloud" })
+		if i < 0 || j < 0 || !p.Roles[i].LogsIn(created.Password, time.Now()) || p.Roles[i].Super || p.Databases[j].Owner != "nextcloud" {
+			t.Fatalf("op nc1: %+v", p)
+		}
+		// Wat Nextcloud bij de installatie maakt.
+		p.Databases[j].Tables, p.Databases[j].Size = 12, 40<<20
+	})
+	c.do("GET", dbURL, nil, &dl)
+	if dbs, users := dl.names(); !slices.Equal(dbs, []string{"nextcloud(nextcloud)"}) || !slices.Equal(users, []string{"nextcloud", "cf_replicatie*", "cf_rewind*", "postgres*"}) ||
+		!dl.Users[0].Databases[0].All {
+		t.Fatalf("na het aanmaken: %v %v %+v", dbs, users, dl.Users[0])
+	}
+	if s := c.do("POST", base+"/"+compID+"/users/postgres/password", nil, &ae); s != http.StatusBadRequest ||
+		!strings.Contains(ae.Message, "Patroni zelf") {
+		t.Errorf("wachtwoord van postgres: %d %+v", s, ae)
+	}
+
+	// Een dump komt op de primary.
+	dumpsURL := base + "/" + compID + "/dumps"
+	if s := c.do("POST", dumpsURL, map[string]any{"database": "nextcloud"}, &j); s != http.StatusAccepted {
+		t.Fatalf("dump: %d", s)
+	}
+	if j = waitJobLong(t, c, j.ID); j.Status != "succeeded" || !strings.Contains(strings.Join(j.Steps[0].Log, "\n"), "nc1 is de primary") {
+		t.Fatalf("dump: %s %s %+v", j.Status, j.Error, j.Steps)
+	}
+	var dv componentDumpsView
+	c.do("GET", dumpsURL, nil, &dv)
+	if len(dv.Dumps) != 1 || dv.Dumps[0].Node != "nc1" || dv.Dumps[0].Status != "ok" || dv.Dumps[0].Tables != 12 || !strings.HasSuffix(dv.Dumps[0].File, ".pgsql.zst") ||
+		dv.freshness() != "nextcloud=ok" {
+		t.Fatalf("dumps: %+v", dv)
+	}
+	g.replicate("nc1")
 
 	// De drift ziet een met de hand aangepast bestand in conf.d.
 	driftURL := "/api/v1/clusters/" + nc.ID + "/drift"
@@ -361,4 +454,46 @@ func TestClusterComponentPatroni(t *testing.T) {
 	// mee.
 	g.failover("nc2")
 	eventually(t, "het VIP op nc2", func() bool { return owner("nc2") })
+
+	// Terugzetten na de failover: de dump staat op nc1, maar schrijven kan
+	// alleen op de nieuwe primary nc2. ClusterForge maakt daar een
+	// tijdelijke beheerder, de agent op nc1 zet de dump ermee terug over het
+	// netwerk, en daarna is de beheerder weer weg.
+	var started struct {
+		Job    job    `json:"job"`
+		Target string `json:"target"`
+	}
+	if s := c.do("POST", dumpsURL+"/"+dv.Dumps[0].ID+"/restore", nil, &started); s != http.StatusAccepted || !strings.HasPrefix(started.Target, "nextcloud_herstel_") {
+		t.Fatalf("terugzetten: %d %+v", s, started)
+	}
+	j = waitJobLong(t, c, started.Job.ID)
+	log := strings.Join(j.Steps[0].Log, "\n")
+	if j.Status != "succeeded" || !regexp.MustCompile(`Tijdelijke beheerder cf_herstel_[0-9a-f]{16} gemaakt op de primary nc2`).MatchString(log) ||
+		!strings.Contains(log, "weggehaald") || !strings.Contains(log, "runuser -u postgres -- psql "+started.Target) {
+		t.Fatalf("terugzetten: %s %s\n%s", j.Status, j.Error, log)
+	}
+	nc2 := g.hosts["nc2"]
+	nc2.Locked(func() {
+		p := nc2.Postgres
+		i := slices.IndexFunc(p.Databases, func(d agenttest.Database) bool { return d.Name == started.Target })
+		if i < 0 || p.Databases[i].Tables != 12 || p.Databases[i].Owner != "nextcloud" {
+			t.Fatalf("op nc2: %+v", p.Databases)
+		}
+		if slices.ContainsFunc(p.Roles, func(r agenttest.PGRole) bool { return strings.HasPrefix(r.Name, "cf_herstel_") }) {
+			t.Errorf("de tijdelijke beheerder staat er nog: %+v", p.Roles)
+		}
+	})
+	if !slices.ContainsFunc(nc1.Calls(), func(c string) bool {
+		return strings.HasPrefix(c, "psql -X -q -v ON_ERROR_STOP=1 -d host=10.0.20.187 port=5432 dbname="+started.Target)
+	}) {
+		t.Errorf("aanroepen op nc1: %q", nc1.Calls())
+	}
+	// Het wachtwoord van de beheerder staat nergens in ClusterForge.
+	var state, jobParams string
+	if err := e.pool.QueryRow(ctx, "SELECT s.state::text, j.params::text FROM job_steps s JOIN jobs j ON j.id = s.job_id WHERE s.job_id = $1", started.Job.ID).Scan(&state, &jobParams); err != nil {
+		t.Fatal(err)
+	}
+	if !regexp.MustCompile(`^\{"at": "[^"]+", "role": "cf_herstel_[0-9a-f]{16}", "primary": "nc2"\}$`).MatchString(state) || strings.Contains(jobParams, "password") {
+		t.Errorf("staat van de taak: %s, %s", state, jobParams)
+	}
 }

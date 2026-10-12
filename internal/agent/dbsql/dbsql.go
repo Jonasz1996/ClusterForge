@@ -68,6 +68,7 @@ var All = []string{
 	MariaVariables, MariaStatus, MariaPosition, MariaSource, MariaReplicas, MariaDatabases, MariaClients,
 	MariaUsers, MariaUserGrants, MariaSchemaGrants,
 	PGInfo, PGDatabases, PGTables, PGReplicas, PGSource, PGClients,
+	PGRoles, PGDatabaseGrants, PGDumpTables,
 }
 
 // Scheidingstekens voor de uitvoer van psql: unit separator tussen velden,

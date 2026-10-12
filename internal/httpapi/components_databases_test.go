@@ -98,6 +98,7 @@ func newGaleraLab(t *testing.T) galeraLab {
 }
 
 type componentDatabasesView struct {
+	Engine    string   `json:"engine"`
 	Node      string   `json:"node"`
 	Address   string   `json:"address"`
 	Port      int      `json:"port"`
