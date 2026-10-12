@@ -2875,6 +2875,27 @@ paths:
         "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
+  /databases:
+    get:
+      operationId: listDatabases
+      summary: De MariaDB- en PostgreSQL-servers die de agents melden
+      description: |
+        ClusterForge vraagt elke minuut elke node met een databaseserver naar
+        zijn status, via agentprotocol 9. De servers staan gegroepeerd per
+        cluster en engine, zoals een Galera-cluster of een primary met zijn
+        replica's. Alleen catalogus- en statusgegevens, nooit een rij uit een
+        tabel. Ook voor viewers.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/DatabaseGroup" } }
+        "401": { $ref: "#/components/responses/Error" }
   /kubernetes/clusters:
     get:
       operationId: listKubeClusters
@@ -3785,6 +3806,107 @@ components:
       required: [kube_learning]
       properties:
         kube_learning: { type: boolean, description: "De leermodus in het dashboard Kubernetes: uitleg en kubectl-commando's" }
+    DatabaseGroup:
+      type: object
+      description: Eén databasecluster, de servers van één engine in één cluster, of één losse node.
+      required: [key, cluster_id, cluster_name, cluster_slug, cluster_environment, engine, kind, health, summary, version, servers,
+        databases, databases_from, databases_total]
+      properties:
+        key: { type: string, description: "Uniek per groep, voor de webinterface" }
+        cluster_id: { type: string, format: uuid, nullable: true }
+        cluster_name: { type: string }
+        cluster_slug: { type: string }
+        cluster_environment:
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/Environment" }]
+        engine: { type: string, enum: [mariadb, postgresql] }
+        kind:
+          type: string
+          enum: [galera, patroni, replication, single]
+          description: Galera, PostgreSQL met Patroni, een primary met replica's, of losse servers
+        health: { type: string, enum: [ok, warning, down, unknown] }
+        summary: { type: string, description: In één zin hoe het ervoor staat }
+        version: { type: string, description: "De versie, of meer versies met komma's" }
+        servers: { type: array, items: { $ref: "#/components/schemas/DatabaseServer" } }
+        databases: { type: array, items: { $ref: "#/components/schemas/DatabaseInfo" } }
+        databases_from: { type: string, description: De node waarvan de lijst met databases komt }
+        databases_total: { type: integer, description: Het aantal databases; de lijst toont er hoogstens 500 }
+    DatabaseServer:
+      type: object
+      required: [node_id, hostname, unit, active, running, version, role, read_only, connections, max_connections, state, ok, error,
+        error_kind, synced_at, ok_at, galera, patroni, source, replicas]
+      properties:
+        node_id: { type: string, format: uuid }
+        hostname: { type: string }
+        unit: { type: string, description: "De systemd-unit, zoals mariadb, postgresql@17-main of patroni" }
+        active: { type: string, description: Wat systemd over die unit zegt }
+        running: { type: boolean, description: De server antwoordde via de socket }
+        version: { type: string }
+        role: { type: string, description: "member (Galera), primary, replica of standalone; leeg als onbekend" }
+        read_only: { type: boolean }
+        connections: { type: integer }
+        max_connections: { type: integer }
+        state: { type: string, description: "In een paar woorden, zoals Synced of replica van 10.0.20.186" }
+        ok: { type: boolean }
+        error: { type: string }
+        error_kind:
+          type: string
+          description: "Waarom ClusterForge het de agent niet kon vragen: old_agent, offline, no_answer of agent; leeg als hij antwoordde"
+        synced_at: { type: string, format: date-time }
+        ok_at: { type: string, format: date-time, nullable: true, description: Wanneer de agent het laatst antwoordde }
+        galera:
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/DatabaseGalera" }]
+        patroni:
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/DatabasePatroni" }]
+        source:
+          nullable: true
+          description: De replicatie van een replica
+          allOf: [{ $ref: "#/components/schemas/DatabaseSource" }]
+        replicas: { type: array, items: { $ref: "#/components/schemas/DatabaseReplica" } }
+    DatabaseGalera:
+      type: object
+      required: [cluster_name, cluster_status, cluster_size, state, ready, members]
+      properties:
+        cluster_name: { type: string }
+        cluster_status: { type: string, description: "Primary, Non-Primary of Disconnected" }
+        cluster_size: { type: integer }
+        state: { type: string, description: "Synced, Donor/Desynced, Joining en zo" }
+        ready: { type: boolean }
+        members: { type: array, items: { type: string } }
+    DatabasePatroni:
+      type: object
+      required: [scope, role, state, timeline, error]
+      properties:
+        scope: { type: string }
+        role: { type: string }
+        state: { type: string }
+        timeline: { type: integer }
+        error: { type: string }
+    DatabaseSource:
+      type: object
+      required: [host, running, lag_seconds, error]
+      properties:
+        host: { type: string }
+        running: { type: boolean }
+        lag_seconds: { type: integer, format: int64, nullable: true }
+        error: { type: string }
+    DatabaseReplica:
+      type: object
+      required: [address, state, sync, lag_bytes]
+      properties:
+        address: { type: string }
+        state: { type: string }
+        sync: { type: string }
+        lag_bytes: { type: integer, format: int64 }
+    DatabaseInfo:
+      type: object
+      required: [name, size_bytes, tables]
+      properties:
+        name: { type: string }
+        size_bytes: { type: integer, format: int64 }
+        tables: { type: integer, description: "-1 als het aantal niet te lezen was" }
     KubeClusterSummary:
       type: object
       required: [id, name, slug, environment, status, status_reason, vip, synced, api_ok, error, version, nodes_total, nodes_ready,

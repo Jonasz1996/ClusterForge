@@ -70,6 +70,10 @@ Het technisch ontwerp staat in [docs/design/mvp-fase-1.md](docs/design/mvp-fase-
 | 12. Score en documentatie | Een scorekaart Kubernetes bij de health score: een node die NotReady is, één server op prod, geen of een te oude etcd-snapshot, een k3s zonder updates, een app die blijft herstarten, en apps op prod met één pod, met een image zonder vaste versie of zonder geheugenlimiet; een hoofdstuk Kubernetes in de documentatie met de versie, nodes, namespaces, apps, webadressen, opslag en snapshots, en de runbooks voor een node vervangen, bijwerken en etcd terugzetten | klaar |
 | 13. Assistent voor Kubernetes | Drie tools voor de assistent, alleen lezend: een cluster live, een object met zijn events, keten en YAML, en de laatste 200 logregels van een pod; Leg uit bij elk object en elke waarschuwing, zoals 'Waarom start deze pod niet?'; Ik zit vast bij elke opdracht van een les, met een hint zonder het antwoord; wachtwoorden en tokens in logs en YAML worden gemaskeerd, en de waarden van Secrets komen nooit bij de assistent | klaar |
 
+| Fase 5: databaseclusters per app | Inhoud | Status |
+| --- | --- | --- |
+| 1. Databases lezen | cf-agent leest MariaDB en PostgreSQL op de node zelf (agentprotocol 9), alleen met vaste query's en zonder de inhoud van tabellen; een pagina Databases met per cluster een Galera-cluster, een primary met replica's of een losse server, de toestand van elke node in gewone woorden en de databases met hun grootte | klaar |
+
 ## Draaien met Docker Compose
 
 Stap voor stap in een Debian-container op Proxmox: [docs/install-proxmox-lxc.md](docs/install-proxmox-lxc.md).
@@ -707,6 +711,31 @@ Voor snapshots doet de agent op een server alleen dit: `k3s etcd-snapshot save` 
 Dit kan vanaf **agentprotocol 8**. Met een oudere agent toont de pagina "Agent te oud voor Kubernetes", met het commando om hem bij te werken; de aanmelding blijft staan. Werk ook je golden image bij, anders krijgen nieuwe VM's de oude agent. De andere onderdelen van ClusterForge blijven werken met een oudere agent.
 
 Elke 30 seconden vat ClusterForge elk Kubernetes-cluster samen voor de lijst, de status, de apps, de waarschuwingen en de score, en elke vijf minuten leest het de etcd-snapshots en de namespaces, webadressen en opslag voor de documentatie. Antwoordt de API niet, dan blijft de laatste stand staan met "API niet bereikbaar" en de reden.
+
+## Databases
+
+De pagina **Databases** toont de MariaDB- en PostgreSQL-servers op je nodes, gegroepeerd per cluster en engine. ClusterForge herkent:
+
+- een **Galera-cluster** (MariaDB): per node of hij Synced is, en of het cluster een Primary-component heeft;
+- **PostgreSQL met Patroni**: de rol van elke node volgens Patroni en de timeline;
+- een **primary met replica's**: de bron van elke replica en hoeveel seconden hij achterloopt;
+- een **losse server**.
+
+Bovenaan elk cluster staat in één zin hoe het ervoor staat, zoals "3 van 3 nodes Synced." of "Primary db1 met 2 replica's.". Daaronder de nodes met hun toestand, het aantal verbindingen en wanneer ClusterForge ze het laatst gelezen heeft, en de databases met hun grootte en het aantal tabellen. Een kijker ziet hetzelfde als een beheerder.
+
+ClusterForge leest elke node met een databaseserver elke minuut. Kan het een node niet vragen, dan blijft de laatste stand staan met de reden: agent offline, geen antwoord of agent te oud.
+
+### Hoe ClusterForge de databases leest
+
+cf-agent doet het op de node zelf, als root via de socket: `mariadb` voor MariaDB en `psql` als de gebruiker postgres voor PostgreSQL, en de REST-API van Patroni op `127.0.0.1:8008`. Er is dus geen databasegebruiker of wachtwoord voor ClusterForge nodig en poort 3306 of 5432 hoeft niet open. De agent stelt alleen vaste query's op de systeemtabellen, zoals `SHOW GLOBAL STATUS` en `pg_stat_replication`; hij leest nooit de inhoud van een tabel en neemt geen SQL van de server aan. Hij doet hoogstens twee verzoeken tegelijk, elk hoogstens 30 seconden, en telt de tabellen van hoogstens 100 databases.
+
+Dit kan vanaf **agentprotocol 9**. Met een oudere agent toont de pagina het commando om hem bij te werken:
+
+```sh
+curl -fsSL https://clusterforge.example/install/agent.sh | sudo sh -s -- --server https://clusterforge.example --upgrade
+```
+
+Bouw ook je golden image opnieuw met `golden-image.sh --replace`, anders krijgen nieuwe VM's de oude agent. De rest van ClusterForge blijft werken met een oudere agent. Het plan voor de hele fase staat in [docs/design/fase-5.md](docs/design/fase-5.md) (PR #57).
 
 ## Failovertests
 

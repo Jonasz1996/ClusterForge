@@ -31,6 +31,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/auth"
 	"github.com/Jonasz1996/clusterforge/internal/backups"
 	"github.com/Jonasz1996/clusterforge/internal/config"
+	"github.com/Jonasz1996/clusterforge/internal/databases"
 	"github.com/Jonasz1996/clusterforge/internal/deploy"
 	"github.com/Jonasz1996/clusterforge/internal/deps"
 	"github.com/Jonasz1996/clusterforge/internal/disaster"
@@ -182,6 +183,8 @@ func serve() error {
 	kinv := inventory.NewService(pool, ev)
 	kinv.Disconnect = bus.Disconnect
 	kn := kubenodes.NewService(pool, ev, runner, kub, pve, kinv, dep)
+	// De MariaDB- en PostgreSQL-servers op de nodes, via agentprotocol 9.
+	dbs := databases.NewService(pool, bus, log)
 	kn.Changed = eval.Kick
 	// Een cluster rendert alleen met de templateversie waarmee het is
 	// uitgerold; zit die niet in deze binary, dan moet de beheerder dat weten.
@@ -306,6 +309,7 @@ func serve() error {
 	go rsk.Run(ctx)
 	go dcs.Run(ctx)
 	go kub.Run(ctx)
+	go dbs.Run(ctx)
 	if git.Enabled() {
 		go git.Run(ctx)
 	}
@@ -322,7 +326,7 @@ func serve() error {
 		Handler: httpapi.New(httpapi.Deps{
 			Config: cfg, Log: log, Pool: pool, Auth: authSvc, Bus: bus, Hub: hub, Proxmox: pve, Jobs: runner,
 			Lifecycle: life, Deploy: dep, Backups: bk, Drift: drf, Failover: fo, Disaster: dis, Deps: dps, Rollout: ro,
-			GitOps: git, Assistant: asst, Risk: rsk, Topo: tp, Docs: dcs, Reports: rep, Kube: kub, KubeNodes: kn,
+			GitOps: git, Assistant: asst, Risk: rsk, Topo: tp, Docs: dcs, Reports: rep, Kube: kub, KubeNodes: kn, Databases: dbs,
 			Version: version,
 		}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,

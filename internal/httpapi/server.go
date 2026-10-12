@@ -18,6 +18,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/auth"
 	"github.com/Jonasz1996/clusterforge/internal/backups"
 	"github.com/Jonasz1996/clusterforge/internal/config"
+	"github.com/Jonasz1996/clusterforge/internal/databases"
 	"github.com/Jonasz1996/clusterforge/internal/deploy"
 	"github.com/Jonasz1996/clusterforge/internal/deps"
 	"github.com/Jonasz1996/clusterforge/internal/disaster"
@@ -74,6 +75,7 @@ type Server struct {
 	docs         *docs.Service
 	reports      *reports.Service
 	kube         *kube.Service
+	databases    *databases.Service
 	kubeNodes    *kubenodes.Service
 	lessons      *kubelessons.Engine
 	version      string
@@ -130,6 +132,8 @@ type Deps struct {
 	Kube *kube.Service
 	// KubeNodes haalt workers weg uit een Kubernetes-cluster.
 	KubeNodes *kubenodes.Service
+	// Databases leest de MariaDB- en PostgreSQL-servers op de nodes.
+	Databases *databases.Service
 	Version   string
 }
 
@@ -172,6 +176,7 @@ func New(d Deps) *Server {
 		docs:          d.Docs,
 		reports:       d.Reports,
 		kube:          d.Kube,
+		databases:     d.Databases,
 		kubeNodes:     d.KubeNodes,
 	}
 	s.assistant.Tools = append(s.assistantTools(), s.kubeTools()...)

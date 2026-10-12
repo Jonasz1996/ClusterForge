@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -46,6 +47,10 @@ type Host struct {
 	// K3s speelt het commando k3s na, met de argumenten; nil kent het
 	// niet. Het draait onder het slot van de host.
 	K3s func(args []string) ([]byte, error)
+	// MariaDB en Postgres zijn de databases op de machine; nil heeft er
+	// geen. Wijzig ze met Locked terwijl de agent draait.
+	MariaDB  *MariaDB
+	Postgres *Postgres
 
 	mu       sync.Mutex
 	after    func(call string, err error)
@@ -282,6 +287,10 @@ func (h *Host) exec(name string, args []string) ([]byte, error) {
 		if h.K3s != nil {
 			return h.K3s(args)
 		}
+	case "mariadb", "mysql":
+		return h.mariaExec(args)
+	case "runuser":
+		return h.runuser(args)
 	}
 	return nil, fmt.Errorf("onbekend commando %s", name)
 }
@@ -494,7 +503,21 @@ func (h *Host) systemctl(args []string) ([]byte, error) {
 	}
 	if args[0] == "show" {
 		var b strings.Builder
-		units := slices.DeleteFunc(slices.Clone(args[1:]), func(a string) bool { return strings.HasPrefix(a, "--") })
+		var units []string
+		for _, a := range args[1:] {
+			switch {
+			case strings.HasPrefix(a, "--"):
+			case strings.Contains(a, "*"):
+				// Een patroon vindt alleen geladen units, zoals bij systemd.
+				for _, name := range slices.Sorted(maps.Keys(h.units)) {
+					if ok, _ := path.Match(a, name+".service"); ok {
+						units = append(units, name)
+					}
+				}
+			default:
+				units = append(units, a)
+			}
+		}
 		for _, name := range units {
 			name = strings.TrimSuffix(name, ".service")
 			if len(units) > 1 {

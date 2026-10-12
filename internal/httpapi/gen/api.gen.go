@@ -279,6 +279,72 @@ func (e DRSchedule) Valid() bool {
 	}
 }
 
+// Defines values for DatabaseGroupEngine.
+const (
+	Mariadb    DatabaseGroupEngine = "mariadb"
+	Postgresql DatabaseGroupEngine = "postgresql"
+)
+
+// Valid indicates whether the value is a known member of the DatabaseGroupEngine enum.
+func (e DatabaseGroupEngine) Valid() bool {
+	switch e {
+	case Mariadb:
+		return true
+	case Postgresql:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DatabaseGroupHealth.
+const (
+	DatabaseGroupHealthDown    DatabaseGroupHealth = "down"
+	DatabaseGroupHealthOk      DatabaseGroupHealth = "ok"
+	DatabaseGroupHealthUnknown DatabaseGroupHealth = "unknown"
+	DatabaseGroupHealthWarning DatabaseGroupHealth = "warning"
+)
+
+// Valid indicates whether the value is a known member of the DatabaseGroupHealth enum.
+func (e DatabaseGroupHealth) Valid() bool {
+	switch e {
+	case DatabaseGroupHealthDown:
+		return true
+	case DatabaseGroupHealthOk:
+		return true
+	case DatabaseGroupHealthUnknown:
+		return true
+	case DatabaseGroupHealthWarning:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DatabaseGroupKind.
+const (
+	Galera      DatabaseGroupKind = "galera"
+	Patroni     DatabaseGroupKind = "patroni"
+	Replication DatabaseGroupKind = "replication"
+	Single      DatabaseGroupKind = "single"
+)
+
+// Valid indicates whether the value is a known member of the DatabaseGroupKind enum.
+func (e DatabaseGroupKind) Valid() bool {
+	switch e {
+	case Galera:
+		return true
+	case Patroni:
+		return true
+	case Replication:
+		return true
+	case Single:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for DepGroupKind.
 const (
 	DepGroupKindCluster  DepGroupKind = "cluster"
@@ -3424,6 +3490,132 @@ type DRReportVIP struct {
 
 // DRSchedule Leeg: alleen met de hand; weekly: elke week in het testvenster; monthly: in het eerste testvenster van de maand
 type DRSchedule string
+
+// DatabaseGalera defines model for DatabaseGalera.
+type DatabaseGalera struct {
+	ClusterName string `json:"cluster_name"`
+	ClusterSize int    `json:"cluster_size"`
+
+	// ClusterStatus Primary, Non-Primary of Disconnected
+	ClusterStatus string   `json:"cluster_status"`
+	Members       []string `json:"members"`
+	Ready         bool     `json:"ready"`
+
+	// State Synced, Donor/Desynced, Joining en zo
+	State string `json:"state"`
+}
+
+// DatabaseGroup Eén databasecluster, de servers van één engine in één cluster, of één losse node.
+type DatabaseGroup struct {
+	ClusterEnvironment nullable.Nullable[Environment]        `json:"cluster_environment"`
+	ClusterId          nullable.Nullable[openapi_types.UUID] `json:"cluster_id"`
+	ClusterName        string                                `json:"cluster_name"`
+	ClusterSlug        string                                `json:"cluster_slug"`
+	Databases          []DatabaseInfo                        `json:"databases"`
+
+	// DatabasesFrom De node waarvan de lijst met databases komt
+	DatabasesFrom string `json:"databases_from"`
+
+	// DatabasesTotal Het aantal databases; de lijst toont er hoogstens 500
+	DatabasesTotal int                 `json:"databases_total"`
+	Engine         DatabaseGroupEngine `json:"engine"`
+	Health         DatabaseGroupHealth `json:"health"`
+
+	// Key Uniek per groep, voor de webinterface
+	Key string `json:"key"`
+
+	// Kind Galera, PostgreSQL met Patroni, een primary met replica's, of losse servers
+	Kind    DatabaseGroupKind `json:"kind"`
+	Servers []DatabaseServer  `json:"servers"`
+
+	// Summary In één zin hoe het ervoor staat
+	Summary string `json:"summary"`
+
+	// Version De versie, of meer versies met komma's
+	Version string `json:"version"`
+}
+
+// DatabaseGroupEngine defines model for DatabaseGroup.Engine.
+type DatabaseGroupEngine string
+
+// DatabaseGroupHealth defines model for DatabaseGroup.Health.
+type DatabaseGroupHealth string
+
+// DatabaseGroupKind Galera, PostgreSQL met Patroni, een primary met replica's, of losse servers
+type DatabaseGroupKind string
+
+// DatabaseInfo defines model for DatabaseInfo.
+type DatabaseInfo struct {
+	Name      string `json:"name"`
+	SizeBytes int64  `json:"size_bytes"`
+
+	// Tables -1 als het aantal niet te lezen was
+	Tables int `json:"tables"`
+}
+
+// DatabasePatroni defines model for DatabasePatroni.
+type DatabasePatroni struct {
+	Error    string `json:"error"`
+	Role     string `json:"role"`
+	Scope    string `json:"scope"`
+	State    string `json:"state"`
+	Timeline int    `json:"timeline"`
+}
+
+// DatabaseReplica defines model for DatabaseReplica.
+type DatabaseReplica struct {
+	Address  string `json:"address"`
+	LagBytes int64  `json:"lag_bytes"`
+	State    string `json:"state"`
+	Sync     string `json:"sync"`
+}
+
+// DatabaseServer defines model for DatabaseServer.
+type DatabaseServer struct {
+	// Active Wat systemd over die unit zegt
+	Active      string `json:"active"`
+	Connections int    `json:"connections"`
+	Error       string `json:"error"`
+
+	// ErrorKind Waarom ClusterForge het de agent niet kon vragen: old_agent, offline, no_answer of agent; leeg als hij antwoordde
+	ErrorKind      string                            `json:"error_kind"`
+	Galera         nullable.Nullable[DatabaseGalera] `json:"galera"`
+	Hostname       string                            `json:"hostname"`
+	MaxConnections int                               `json:"max_connections"`
+	NodeId         openapi_types.UUID                `json:"node_id"`
+	Ok             bool                              `json:"ok"`
+
+	// OkAt Wanneer de agent het laatst antwoordde
+	OkAt     nullable.Nullable[time.Time]       `json:"ok_at"`
+	Patroni  nullable.Nullable[DatabasePatroni] `json:"patroni"`
+	ReadOnly bool                               `json:"read_only"`
+	Replicas []DatabaseReplica                  `json:"replicas"`
+
+	// Role member (Galera), primary, replica of standalone; leeg als onbekend
+	Role string `json:"role"`
+
+	// Running De server antwoordde via de socket
+	Running bool `json:"running"`
+
+	// Source De replicatie van een replica
+	Source nullable.Nullable[DatabaseSource] `json:"source"`
+
+	// State In een paar woorden, zoals Synced of replica van 10.0.20.186
+	State    string    `json:"state"`
+	SyncedAt time.Time `json:"synced_at"`
+
+	// Unit De systemd-unit, zoals mariadb, postgresql@17-main of patroni
+	Unit    string `json:"unit"`
+	Version string `json:"version"`
+}
+
+// DatabaseSource defines model for DatabaseSource.
+type DatabaseSource struct {
+	Error      string                   `json:"error"`
+	Host       string                   `json:"host"`
+	LagSeconds nullable.Nullable[int64] `json:"lag_seconds"`
+	Running    bool                     `json:"running"`
+}
 
 // DepEdge defines model for DepEdge.
 type DepEdge struct {
@@ -8846,6 +9038,9 @@ type ServerInterface interface {
 	// CreateVip VIP toevoegen aan een cluster (admin)
 	// (POST /clusters/{clusterId}/vips)
 	CreateVip(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
+	// ListDatabases De MariaDB- en PostgreSQL-servers die de agents melden
+	// (GET /databases)
+	ListDatabases(w http.ResponseWriter, r *http.Request)
 	// CreateDependency Vastleggen dat een dienst van een andere afhangt (admin)
 	// (POST /dependencies)
 	CreateDependency(w http.ResponseWriter, r *http.Request)
@@ -9602,6 +9797,12 @@ func (_ Unimplemented) GetClusterTimeline(w http.ResponseWriter, r *http.Request
 // CreateVip VIP toevoegen aan een cluster (admin)
 // (POST /clusters/{clusterId}/vips)
 func (_ Unimplemented) CreateVip(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListDatabases De MariaDB- en PostgreSQL-servers die de agents melden
+// (GET /databases)
+func (_ Unimplemented) ListDatabases(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -12090,6 +12291,20 @@ func (siw *ServerInterfaceWrapper) CreateVip(w http.ResponseWriter, r *http.Requ
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CreateVip(w, r, clusterId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListDatabases operation middleware
+func (siw *ServerInterfaceWrapper) ListDatabases(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListDatabases(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -17052,6 +17267,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Put(options.BaseURL+"/auth/preferences", wrapper.SetPreferences)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/databases", wrapper.ListDatabases)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/kubernetes/clusters", wrapper.ListKubeClusters)

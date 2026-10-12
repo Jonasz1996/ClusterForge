@@ -366,6 +366,30 @@ type ClusterSpecRevision struct {
 	CommitSha *string
 }
 
+type DbDatabase struct {
+	NodeID    uuid.UUID
+	Engine    string
+	Name      string
+	SizeBytes int64
+	Tables    int32
+}
+
+type DbServer struct {
+	NodeID         uuid.UUID
+	Engine         string
+	Unit           string
+	Active         string
+	Running        bool
+	Version        string
+	Role           string
+	Status         []byte
+	DatabasesTotal int32
+	Error          string
+	ErrorKind      string
+	SyncedAt       time.Time
+	OkAt           *time.Time
+}
+
 type DisasterScenario struct {
 	ID        uuid.UUID
 	ClusterID uuid.UUID
