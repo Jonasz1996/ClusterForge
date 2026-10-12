@@ -42,7 +42,31 @@ const (
 	// DBDrop haalt een database of gebruiker weg, alleen als Confirm de naam
 	// is.
 	DBDrop = "drop"
+	// DBDump maakt een dump van een database, toont de dumps op de node,
+	// ruimt oude op, of zet een dump terug in een nieuwe database. Maken en
+	// terugzetten lopen op de achtergrond; DBDumpList toont de voortgang.
+	DBDump = "dump"
 )
+
+// Wat een DBDump doet.
+const (
+	DBDumpStart   = "start"
+	DBDumpList    = "list"
+	DBDumpPrune   = "prune"
+	DBDumpRestore = "restore"
+)
+
+// DBDumpDir is de map met de dumps, een map per database, alles met modus
+// 0700 en 0600 van root. De Proxmox-back-up van de node neemt hem mee.
+const DBDumpDir = "/var/backups/clusterforge-db"
+
+// DBDumpPattern is de naam van een dump: database, datum en tijd in UTC,
+// met zstd gecomprimeerd. Naast elke dump staat een bestand met dezelfde
+// naam en .json erachter, met wat de agent erover weet.
+const DBDumpPattern = `^([a-z0-9_]{1,63})-([0-9]{8}-[0-9]{6})\.sql\.zst$`
+
+// DBDumpTimeout is hoe lang een dump of het terugzetten ervan mag duren.
+const DBDumpTimeout = 12 * time.Hour
 
 // Waar de positie van een Galera-node vandaan komt.
 const (
@@ -113,6 +137,78 @@ type DBRequest struct {
 	// Ensure hoort bij DBEnsure, Drop bij DBDrop.
 	Ensure *DBEnsureRequest `json:"ensure,omitempty"`
 	Drop   *DBDropRequest   `json:"drop,omitempty"`
+	// Dump hoort bij DBDump.
+	Dump *DBDumpRequest `json:"dump,omitempty"`
+}
+
+// DBDumpRequest zegt wat een DBDump doet.
+type DBDumpRequest struct {
+	// Action is DBDumpStart, DBDumpList, DBDumpPrune of DBDumpRestore.
+	Action string `json:"action"`
+	// Database: waarvan een dump komt (start), uit welke map (restore), of
+	// welke map opgeruimd wordt (prune; leeg is alle).
+	Database string `json:"database,omitempty"`
+	// File is de dump die terugkomt, in de map van Database.
+	File string `json:"file,omitempty"`
+	// Target is de nieuwe database waarin de dump terugkomt; ze mag nog
+	// niet bestaan.
+	Target string `json:"target,omitempty"`
+	// KeepDays: prune haalt dumps weg die ouder zijn, behalve die in Keep.
+	// Zonder Keep blijft de nieuwste complete dump per database staan.
+	KeepDays int      `json:"keep_days,omitempty"`
+	Keep     []string `json:"keep"`
+}
+
+// DBDumpResult is het antwoord op een DBDump.
+type DBDumpResult struct {
+	// Dumps zijn de dumps op de node, de oudste eerst, ook die mislukten.
+	Dumps []DBDumpFile `json:"dumps"`
+	// Running is de dump of het terugzetten dat nu loopt; de agent doet er
+	// één tegelijk.
+	Running *DBDumpRun `json:"running,omitempty"`
+	// Restores zijn de keren terugzetten sinds de agent startte.
+	Restores []DBDumpRun `json:"restores,omitempty"`
+	// Started is de dump die DBDumpStart begon.
+	Started string `json:"started,omitempty"`
+	// Removed zijn de dumps die DBDumpPrune weghaalde.
+	Removed []string `json:"removed,omitempty"`
+}
+
+// DBDumpFile is een dump op de node.
+type DBDumpFile struct {
+	Database string `json:"database"`
+	File     string `json:"file"`
+	// SizeBytes is de grootte op schijf, RawBytes die van de SQL.
+	SizeBytes int64 `json:"size_bytes"`
+	RawBytes  int64 `json:"raw_bytes"`
+	// Tables zijn de tabellen in de dump, TablesExpected die in de database
+	// toen de dump begon.
+	Tables         int `json:"tables"`
+	TablesExpected int `json:"tables_expected"`
+	// Complete: de dump eindigt met de regel die mariadb-dump als laatste
+	// schrijft.
+	Complete bool      `json:"complete"`
+	Started  time.Time `json:"started"`
+	Finished time.Time `json:"finished"`
+	// Error zegt waarom de dump mislukte; er is dan geen bestand.
+	Error string `json:"error,omitempty"`
+}
+
+// DBDumpRun is een dump of het terugzetten ervan.
+type DBDumpRun struct {
+	// Action is DBDumpStart of DBDumpRestore.
+	Action   string    `json:"action"`
+	Database string    `json:"database"`
+	File     string    `json:"file"`
+	Target   string    `json:"target,omitempty"`
+	Started  time.Time `json:"started"`
+	Finished time.Time `json:"finished,omitzero"`
+	// Bytes is wat er al is: SQL geschreven bij een dump, gelezen van de
+	// dump bij terugzetten. Total is wat er ongeveer komt; 0 als dat
+	// onbekend is.
+	Bytes int64  `json:"bytes"`
+	Total int64  `json:"total"`
+	Error string `json:"error,omitempty"`
 }
 
 // DBEnsureRequest zegt wat er in MariaDB moet zijn. Namen voldoen aan
@@ -222,6 +318,8 @@ type DBResponse struct {
 	Position *DBPositionResult `json:"position,omitempty"`
 	// Users is het antwoord op DBUsers.
 	Users []DBUser `json:"users,omitempty"`
+	// Dump is het antwoord op DBDump.
+	Dump *DBDumpResult `json:"dump,omitempty"`
 }
 
 // DBServer is één MariaDB of PostgreSQL op een node.

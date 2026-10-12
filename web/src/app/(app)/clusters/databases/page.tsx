@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { Suspense, useState, type ReactNode } from "react";
 import { Modal } from "@/components/Modal";
 import { ProdConfirm, prodConfirmed, useProdTotp } from "@/components/ProdConfirm";
+import { DumpsCard } from "@/components/databases/Dumps";
 import { CopyBlock } from "@/components/inventory/InstallAgent";
 import { formatBytes, QueryState, tableClass, tdClass, thClass } from "@/components/inventory/bits";
 import { Alert, Badge, Button, Card, Field, Input, PageHeader } from "@/components/ui";
@@ -60,7 +61,10 @@ function Inner() {
             ) : comp.applied_revision === null ? (
               <Alert>Deze database is nog nooit helemaal uitgerold; pas haar eerst toe.</Alert>
             ) : (
-              <Lists c={cluster.data} comp={comp} isAdmin={isAdmin} />
+              <>
+                <Lists c={cluster.data} comp={comp} isAdmin={isAdmin} />
+                <DumpsCard clusterId={id} comp={comp} isAdmin={isAdmin} />
+              </>
             )}
           </div>
         )}

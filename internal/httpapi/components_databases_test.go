@@ -7,7 +7,9 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/Jonasz1996/clusterforge/internal/agent"
 	"github.com/Jonasz1996/clusterforge/internal/agent/agenttest"
@@ -24,6 +26,12 @@ type galeraLab struct {
 	ids     map[string]string
 	base    string
 	cid     string
+	// addrs zijn de adressen die de agents melden, om een VIP op een node
+	// te zetten; dumpDirs de mappen met hun dumps.
+	addrs    map[string]*addrs
+	dumpDirs map[string]string
+	// days zet de klok van de agents zoveel dagen vooruit.
+	days *atomic.Int64
 }
 
 func newGaleraLab(t *testing.T) galeraLab {
@@ -36,6 +44,8 @@ func newGaleraLab(t *testing.T) galeraLab {
 	}
 	g := &galeraHosts{hosts: map[string]*agenttest.Host{}}
 	ids := map[string]string{}
+	as, dirs := map[string]*addrs{}, map[string]string{}
+	days := &atomic.Int64{}
 	for i, name := range []string{"nc1", "nc2", "nc3"} {
 		ip := "10.0.20.18" + string(rune('6'+i))
 		var n node
@@ -43,13 +53,22 @@ func newGaleraLab(t *testing.T) galeraLab {
 			t.Fatalf("node %s: %d", name, s)
 		}
 		ids[name] = n.ID
-		startAgentWith(t, e, c, n.ID, strings.Repeat(string(rune('a'+i)), 32), &addrs{}, func(ag *agent.Agent, root string) {
+		as[name] = &addrs{}
+		// Elke dump krijgt een eigen naam: de klok van de agent loopt per
+		// keer kijken een seconde verder.
+		var tick atomic.Int64
+		startAgentWith(t, e, c, n.ID, strings.Repeat(string(rune('a'+i)), 32), as[name], func(ag *agent.Agent, root string) {
 			writeFile(t, filepath.Join(root, "etc/os-release"), "ID=debian\nVERSION_ID=\"13\"\nPRETTY_NAME=\"Debian GNU/Linux 13 (trixie)\"\n", 0o644)
 			writeFile(t, filepath.Join(root, "proc/meminfo"), "MemTotal: 4194304 kB\nMemAvailable: 2097152 kB\n", 0o644)
 			h := agenttest.NewHost(root, ip)
 			g.hosts[name] = h
 			h.SetAfter(g.after(name, h))
-			ag.Exec, ag.ExecStdin, ag.Root, ag.Collector.Run = h.Exec, h.ExecStdin, root, h.Exec
+			ag.Exec, ag.ExecStdin, ag.Stream, ag.Root, ag.Collector.Run = h.Exec, h.ExecStdin, h.Stream, root, h.Exec
+			dirs[name] = filepath.Join(root, "var/backups/clusterforge-db")
+			ag.DumpDir = dirs[name]
+			ag.Now = func() time.Time {
+				return time.Now().AddDate(0, 0, int(days.Load())).Add(time.Duration(tick.Add(1)) * time.Second)
+			}
 			ag.Collector.Interfaces, ag.Collector.PrimaryAddress = h.Interfaces, func() string { return ip }
 		})
 	}
@@ -74,7 +93,7 @@ func newGaleraLab(t *testing.T) galeraLab {
 	}
 	var comps list[componentView]
 	c.do("GET", base, nil, &comps)
-	return galeraLab{e: e, c: c, cluster: nc, g: g, ids: ids, base: base, cid: comps.Items[0].ID}
+	return galeraLab{e: e, c: c, cluster: nc, g: g, ids: ids, base: base, cid: comps.Items[0].ID, addrs: as, dumpDirs: dirs, days: days}
 }
 
 type componentDatabasesView struct {

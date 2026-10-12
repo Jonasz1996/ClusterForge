@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
 	"os"
 	"path"
@@ -292,6 +293,55 @@ func (h *Host) ExecStdin(_ context.Context, stdin []byte, name string, args ...s
 		g.update()
 	}
 	return out, err
+}
+
+// Stream speelt mariadb-dump en het terugzetten van een dump na, met
+// stdin en stdout als stroom. In Calls staat het commando zonder de
+// invoer; Fail geldt ook hier.
+func (h *Host) Stream(_ context.Context, in io.Reader, out io.Writer, name string, args ...string) error {
+	var data []byte
+	if in != nil {
+		var err error
+		if data, err = io.ReadAll(in); err != nil {
+			return err
+		}
+	}
+	h.mu.Lock()
+	call := strings.TrimSpace(name + " " + strings.Join(args, " "))
+	h.record(call)
+	for prefix, f := range h.fail {
+		if strings.HasPrefix(call, prefix) {
+			if f.times--; f.times <= 0 {
+				delete(h.fail, prefix)
+			}
+			h.mu.Unlock()
+			return errors.New(name + ": " + strings.TrimSpace(f.output))
+		}
+	}
+	var dump []byte
+	var err error
+	switch name {
+	case "mariadb-dump", "mysqldump":
+		dump, err = h.mariaDump(args)
+	case "mariadb", "mysql":
+		err = h.mariaRestore(args, data)
+	default:
+		err = errors.New("agenttest: " + name + " kent geen stroom")
+	}
+	g, after := h.group, h.after
+	h.mu.Unlock()
+	if dump != nil {
+		if _, werr := out.Write(dump); werr != nil {
+			return werr
+		}
+	}
+	if after != nil {
+		after(call, err)
+	}
+	if g != nil {
+		g.update()
+	}
+	return err
 }
 
 // Stdins geeft de invoer van elke ExecStdin, in volgorde.

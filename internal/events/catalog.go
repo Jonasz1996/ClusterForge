@@ -149,6 +149,12 @@ var Known = map[string]Spec{
 	"backup.sandbox_destroy_failed":     {CategoryBackups, "Sandbox niet te verwijderen"},
 	"backup.sandbox_connection_refused": {CategoryBackups, "Tweede agentverbinding geweigerd tijdens een back-upcontrole"},
 	"backup.verify_finished":            {CategoryBackups, "Back-upcontrole klaar"},
+	"backup.db_dumped":                  {CategoryBackups, "Dump van database gemaakt"},
+	"backup.db_dump_suspect":            {CategoryBackups, "Dump van database verdacht"},
+	"backup.db_dump_failed":             {CategoryBackups, "Dump van database mislukt"},
+	"backup.db_restored":                {CategoryBackups, "Dump teruggezet in een nieuwe database"},
+	"backup.db_restore_failed":          {CategoryBackups, "Dump terugzetten mislukt"},
+	"backup.db_settings":                {CategoryBackups, "Nachtelijke dump van databases ingesteld"},
 
 	"drift.detected":              {CategoryDrift, "Drift gevonden"},
 	"drift.changed":               {CategoryDrift, "Drift veranderd"},

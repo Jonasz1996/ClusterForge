@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
 	"net"
 	"net/url"
@@ -42,6 +43,16 @@ type Agent struct {
 	// MariaDB; het geeft stdout en stderr samen terug. nil gebruikt exec,
 	// tenzij Exec vervangen is.
 	ExecStdin func(ctx context.Context, stdin []byte, name string, args ...string) ([]byte, error)
+	// Stream voert een programma uit met in op stdin (mag nil zijn) en
+	// stdout naar out, voor een dump en het terugzetten ervan; de fout
+	// heeft de laatste regel van stderr. nil gebruikt exec, tenzij Exec
+	// vervangen is.
+	Stream func(ctx context.Context, in io.Reader, out io.Writer, name string, args ...string) error
+	// DumpDir is de map met de dumps van de databases; leeg is
+	// protocol.DBDumpDir. Tests gebruiken een map.
+	DumpDir string
+	// Now geeft de tijd voor de naam van een dump; nil is time.Now.
+	Now func() time.Time
 	// Root is de bestandssysteemwortel voor deploystappen; leeg is "/".
 	// Tests gebruiken een map.
 	Root string

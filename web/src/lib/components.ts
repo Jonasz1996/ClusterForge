@@ -17,6 +17,10 @@ export type ComponentDatabase = components["schemas"]["ComponentDatabase"];
 export type ComponentDatabaseUser = components["schemas"]["ComponentDatabaseUser"];
 export type ComponentDatabaseCreated = components["schemas"]["ComponentDatabaseCreated"];
 export type ComponentUserPassword = components["schemas"]["ComponentUserPassword"];
+export type ComponentDumps = components["schemas"]["ComponentDumps"];
+export type ComponentDump = components["schemas"]["ComponentDump"];
+export type ComponentBackupSettings = components["schemas"]["ComponentBackupSettings"];
+export type DatabaseBackup = components["schemas"]["DatabaseBackup"];
 
 type Tone = "slate" | "green" | "amber" | "red" | "blue";
 
@@ -255,3 +259,89 @@ export function connectionText(c: { address: string; port: number; database?: st
     `Wachtwoord: ${c.password}`,
   ].join("\n");
 }
+
+// useComponentDumps leest de dumps zoals ClusterForge ze kent; zolang er
+// een dump of terugzetten loopt, vaker.
+export function useComponentDumps(clusterId: string, componentId: string) {
+  return useQuery({
+    queryKey: ["clusters", clusterId, "components", componentId, "dumps"],
+    queryFn: async () =>
+      unwrap(
+        await api.GET("/clusters/{clusterId}/components/{componentId}/dumps", {
+          params: { path: { clusterId, componentId } },
+        }),
+      ),
+    enabled: clusterId !== "" && componentId !== "",
+    refetchInterval: (q) => (q.state.data?.active ? 3_000 : 60_000),
+  });
+}
+
+export function useDumpNow(clusterId: string, componentId: string) {
+  const invalidate = useInvalidate(clusterId);
+  return useMutation({
+    mutationFn: async (database: string) =>
+      unwrap(
+        await api.POST("/clusters/{clusterId}/components/{componentId}/dumps", {
+          params: { path: { clusterId, componentId } },
+          body: { database },
+        }),
+      ),
+    onSuccess: invalidate,
+  });
+}
+
+export function useRestoreDump(clusterId: string, componentId: string) {
+  const invalidate = useInvalidate(clusterId);
+  return useMutation({
+    mutationFn: async ({ dumpId, target }: { dumpId: string; target?: string }) =>
+      unwrap(
+        await api.POST("/clusters/{clusterId}/components/{componentId}/dumps/{dumpId}/restore", {
+          params: { path: { clusterId, componentId, dumpId } },
+          body: { target: target || undefined },
+        }),
+      ),
+    onSuccess: invalidate,
+  });
+}
+
+export function useSetBackup(clusterId: string, componentId: string) {
+  const invalidate = useInvalidate(clusterId);
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: { on: boolean; at: string; keep_days: number }) =>
+      unwrap(
+        await api.PUT("/clusters/{clusterId}/components/{componentId}/backup", {
+          params: { path: { clusterId, componentId } },
+          body,
+        }),
+      ),
+    onSuccess: () => {
+      invalidate();
+      void qc.invalidateQueries({ queryKey: ["backups", "databases"] });
+    },
+  });
+}
+
+// useDatabaseBackups is per database van een cluster de nieuwste dump,
+// voor Back-ups.
+export function useDatabaseBackups() {
+  return useQuery({
+    queryKey: ["backups", "databases"],
+    queryFn: async () => unwrap(await api.GET("/backups/databases")),
+    refetchInterval: 60_000,
+  });
+}
+
+export const dumpStatus: Record<string, { label: string; tone: Tone }> = {
+  running: { label: "bezig", tone: "blue" },
+  ok: { label: "goed", tone: "green" },
+  suspect: { label: "verdacht", tone: "amber" },
+  failed: { label: "mislukt", tone: "red" },
+};
+
+export const dumpFreshness: Record<string, { label: string; tone: Tone }> = {
+  ok: { label: "vers", tone: "green" },
+  stale: { label: "te oud", tone: "amber" },
+  missing: { label: "geen dump", tone: "red" },
+  off: { label: "uit", tone: "slate" },
+};

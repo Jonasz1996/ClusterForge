@@ -39,6 +39,8 @@ type MariaDB struct {
 	// Users zijn de gebruikers met hun rechten. De opdrachten van de agent
 	// via stdin passen ze aan, net als Databases.
 	Users []MariaUser
+	// DumpIncomplete laat mariadb-dump stoppen zonder de slotregel.
+	DumpIncomplete bool
 }
 
 // MariaUser is een gebruiker op één host. Password is het wachtwoord in
@@ -260,7 +262,15 @@ func (h *Host) mariaExec(args []string) ([]byte, error) {
 			}
 		}
 	default:
-		return []byte("ERROR 1064 (42000): agenttest kent deze query niet: " + q + "\n"), errExit1
+		r := dumpInfoRe.FindStringSubmatch(q)
+		if r == nil {
+			return []byte("ERROR 1064 (42000): agenttest kent deze query niet: " + q + "\n"), errExit1
+		}
+		rows = [][]string{{"0", "0", "0"}}
+		if i := slices.IndexFunc(m.Databases, func(d Database) bool { return d.Name == r[1] }); i >= 0 {
+			d := m.Databases[i]
+			rows = [][]string{{"1", strconv.Itoa(d.Tables), strconv.FormatInt(d.Size, 10)}}
+		}
 	}
 	if header {
 		return nil, errors.New("agenttest: kolomnamen alleen bij SHOW ALL SLAVES STATUS")
@@ -287,7 +297,10 @@ var (
 	alterUserRe  = regexp.MustCompile(`^ALTER USER '([^']*)'@'([^']*)' IDENTIFIED BY '([^']*)';$`)
 	grantRe      = regexp.MustCompile("^GRANT ALL PRIVILEGES ON `([^`]+)`\\.\\* TO '([^']*)'@'([^']*)';$")
 	dropDBRe     = regexp.MustCompile("^DROP DATABASE IF EXISTS `([^`]+)`;$")
-	dropUserRe   = regexp.MustCompile(`^DROP USER IF EXISTS '([^']*)'@'([^']*)';$`)
+	newDBRe      = regexp.MustCompile("^CREATE DATABASE `([^`]+)` CHARACTER SET utf8mb4;$")
+	// dumpInfoRe is de query uit dbsql.DumpInfo.
+	dumpInfoRe = regexp.MustCompile(`^SELECT \(SELECT COUNT\(\*\) FROM information_schema\.SCHEMATA WHERE SCHEMA_NAME = '([a-z0-9_]+)'\)`)
+	dropUserRe = regexp.MustCompile(`^DROP USER IF EXISTS '([^']*)'@'([^']*)';$`)
 )
 
 // mariaWrite speelt mariadb --batch met opdrachten op stdin na, een per
@@ -337,6 +350,13 @@ func (h *Host) mariaWrite(stdin string) ([]byte, error) {
 				m.Users[j].Grants = map[string][]string{}
 			}
 			m.Users[j].Grants[r[1]] = slices.Clone(AllPrivileges)
+		case newDBRe.MatchString(line):
+			name := newDBRe.FindStringSubmatch(line)[1]
+			if slices.ContainsFunc(m.Databases, func(d Database) bool { return d.Name == name }) {
+				return fail("1007 (HY000)", fmt.Sprintf("Can't create database '%s'; database exists", name))
+			}
+			m.Databases = append(m.Databases, Database{Name: name})
+			slices.SortFunc(m.Databases, func(a, b Database) int { return strings.Compare(a.Name, b.Name) })
 		case dropDBRe.MatchString(line):
 			name := dropDBRe.FindStringSubmatch(line)[1]
 			m.Databases = slices.DeleteFunc(m.Databases, func(d Database) bool { return d.Name == name })
@@ -435,4 +455,53 @@ func (h *Host) runuser(args []string) ([]byte, error) {
 		recs[i] = strings.Join(r, dbsql.PGFieldSep)
 	}
 	return []byte(strings.Join(recs, dbsql.PGRecordSep) + "\n"), nil
+}
+
+// mariaDump speelt mariadb-dump <database> na: per tabel de kop die
+// mariadb-dump schrijft met een rij, opvulling naar de grootte van de
+// database (hoogstens 256 KiB), en de slotregel.
+func (h *Host) mariaDump(args []string) ([]byte, error) {
+	m := h.MariaDB
+	if m == nil || m.Down {
+		return nil, errors.New("mariadb-dump: Got error: 2002: \"Can't connect to local server through socket '/run/mysqld/mysqld.sock' (2)\" when trying to connect")
+	}
+	db := args[len(args)-1]
+	i := slices.IndexFunc(m.Databases, func(d Database) bool { return d.Name == db })
+	if i < 0 {
+		return nil, fmt.Errorf("mariadb-dump: Got error: 1049: \"Unknown database '%s'\" when selecting the database", db)
+	}
+	d := m.Databases[i]
+	var b strings.Builder
+	fmt.Fprintf(&b, "-- MariaDB dump 10.19-%s, for debian-linux-gnu (x86_64)\n--\n-- Host: localhost    Database: %s\n", m.Version, db)
+	for t := range d.Tables {
+		fmt.Fprintf(&b, "\n--\n-- Table structure for table `t%d`\n--\n\nDROP TABLE IF EXISTS `t%d`;\n", t+1, t+1)
+		fmt.Fprintf(&b, "CREATE TABLE `t%d` (`id` int NOT NULL, PRIMARY KEY (`id`));\nINSERT INTO `t%d` VALUES (1);\n", t+1, t+1)
+	}
+	if pad := min(d.Size/4096, 256<<10); pad > 0 {
+		fmt.Fprintf(&b, "-- %s\n", strings.Repeat("x", int(pad)))
+	}
+	if !m.DumpIncomplete {
+		b.WriteString("\n-- Dump completed on 2026-10-12  2:00:00\n")
+	}
+	return []byte(b.String()), nil
+}
+
+// mariaRestore speelt mariadb <database> met een dump op stdin na: de
+// database krijgt de tabellen uit de dump.
+func (h *Host) mariaRestore(args []string, dump []byte) error {
+	m := h.MariaDB
+	if m == nil || m.Down {
+		return errors.New("ERROR 2002 (HY000): Can't connect to local server through socket '/run/mysqld/mysqld.sock' (2)")
+	}
+	if g := m.Galera; g != nil && (g.Status != "Primary" || g.State != 4 || !g.Ready) {
+		return errors.New("ERROR 1047 (08S01) at line 1: WSREP has not yet prepared node for application use")
+	}
+	db := args[len(args)-1]
+	i := slices.IndexFunc(m.Databases, func(d Database) bool { return d.Name == db })
+	if i < 0 {
+		return fmt.Errorf("ERROR 1049 (42000): Unknown database '%s'", db)
+	}
+	m.Databases[i].Tables = strings.Count(string(dump), "-- Table structure for table `")
+	m.Databases[i].Size = int64(len(dump))
+	return nil
 }

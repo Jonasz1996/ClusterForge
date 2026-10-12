@@ -867,6 +867,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/backups/databases": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Per database van een cluster de nieuwste dump en hoe vers die is */
+        get: operations["listDatabaseBackups"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/nodes/{nodeId}/backups": {
         parameters: {
             query?: never;
@@ -3029,6 +3046,80 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/clusters/{clusterId}/components/{componentId}/dumps": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+                componentId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * De dumps van de databases van een cluster, met de instellingen van de nachtelijke dump
+         * @description Per database de nieuwste goede dump en hoe vers die is, en alle dumps die ClusterForge kent, de nieuwste eerst. De
+         *     dumps staan op de nodes in /var/backups/clusterforge-db; ClusterForge vraagt de agents hier niets. Ook voor viewers.
+         */
+        get: operations["listComponentDumps"];
+        put?: never;
+        /**
+         * Meteen een dump van een database maken (admin); wordt een taak
+         * @description De dump komt op een datanode zonder het VIP die Synced is. Loopt er al een dump of terugzetten van deze database,
+         *     dan 409.
+         */
+        post: operations["createComponentDump"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/clusters/{clusterId}/components/{componentId}/dumps/{dumpId}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+                componentId: string;
+                dumpId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Een dump terugzetten in een nieuwe database naast de bestaande (admin); wordt een taak
+         * @description Standaard heet de nieuwe database <database>_herstel_<datum van de dump>. De bestaande database blijft zoals ze is.
+         *     Mislukt het, dan haalt de agent de nieuwe database weer weg.
+         */
+        post: operations["restoreComponentDump"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/clusters/{clusterId}/components/{componentId}/backup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+                componentId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** De nachtelijke dump van de databases van een cluster instellen (admin) */
+        put: operations["setComponentBackup"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/databases": {
         parameters: {
             query?: never;
@@ -3950,6 +4041,113 @@ export interface components {
         ComponentConfirmInput: {
             /** @description De slug van het cluster; nodig op prod */
             confirm?: string;
+        };
+        ComponentBackupSettings: {
+            /** @description Elke dag een dump van elke database */
+            on: boolean;
+            /**
+             * @description Wanneer, als uu:mm in de tijdzone van de server
+             * @example 02:00
+             */
+            at: string;
+            /** @description Zoveel dagen blijft een dump staan */
+            keep_days: number;
+            /**
+             * Format: date-time
+             * @description De volgende nachtelijke dump
+             */
+            readonly next_at?: string | null;
+        };
+        ComponentDump: {
+            /** Format: uuid */
+            id: string;
+            database: string;
+            /** @description De node waarop de dump staat */
+            node: string;
+            /** @description De naam in /var/backups/clusterforge-db/<database>/ */
+            file: string;
+            /** @enum {string} */
+            trigger: "schedule" | "manual";
+            /**
+             * @description suspect: compleet, maar meer dan de helft kleiner dan de vorige goede, of er mist een tabel
+             * @enum {string}
+             */
+            status: "running" | "ok" | "suspect" | "failed";
+            /** Format: date-time */
+            started_at: string;
+            /** Format: date-time */
+            finished_at: string | null;
+            /**
+             * Format: int64
+             * @description Op schijf
+             */
+            size_bytes: number;
+            /**
+             * Format: int64
+             * @description De SQL
+             */
+            raw_bytes: number;
+            tables: number;
+            tables_expected: number;
+            /** @description Waarom de dump mislukte of verdacht is */
+            message: string;
+            /** Format: uuid */
+            job_id: string | null;
+            /** @description De standaardnaam als je deze dump terugzet: <database>_herstel_<datum van de dump> */
+            restore_name: string;
+        };
+        ComponentDatabaseDumps: {
+            database: string;
+            /** @description De nieuwste goede dump */
+            latest: components["schemas"]["ComponentDump"] | null;
+            /** @description De laatste poging, als die na de nieuwste goede mislukte of verdacht was */
+            failed: components["schemas"]["ComponentDump"] | null;
+            /**
+             * @description stale: de nieuwste goede dump is ouder dan 26 uur; off: de nachtelijke dump staat uit
+             * @enum {string}
+             */
+            freshness: "ok" | "stale" | "missing" | "off";
+        };
+        ComponentDumps: {
+            settings: components["schemas"]["ComponentBackupSettings"];
+            databases: components["schemas"]["ComponentDatabaseDumps"][];
+            dumps: components["schemas"]["ComponentDump"][];
+            /** @description Een dump of terugzetten dat wacht of loopt */
+            active: components["schemas"]["ComponentDumpJob"] | null;
+        };
+        ComponentDumpJob: {
+            /** Format: uuid */
+            job_id: string;
+            kind: string;
+            title: string;
+        };
+        ComponentDumpInput: {
+            database: string;
+        };
+        ComponentRestoreInput: {
+            /** @description De nieuwe database; standaard <database>_herstel_<datum van de dump> */
+            target?: string;
+        };
+        ComponentRestoreStarted: {
+            job: components["schemas"]["Job"];
+            target: string;
+        };
+        DatabaseBackups: {
+            items: components["schemas"]["DatabaseBackup"][];
+        };
+        DatabaseBackup: {
+            /** Format: uuid */
+            cluster_id: string;
+            cluster_name: string;
+            /** Format: uuid */
+            component_id: string;
+            engine: string;
+            database: string;
+            latest: components["schemas"]["ComponentDump"] | null;
+            failed: components["schemas"]["ComponentDump"] | null;
+            /** @enum {string} */
+            freshness: "ok" | "stale" | "missing" | "off";
+            settings: components["schemas"]["ComponentBackupSettings"];
         };
         ComponentRecoverPlan: {
             /** Format: uuid */
@@ -10222,6 +10420,27 @@ export interface operations {
             401: components["responses"]["Error"];
         };
     };
+    listDatabaseBackups: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DatabaseBackups"];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
     getNodeBackups: {
         parameters: {
             query?: never;
@@ -13504,6 +13723,127 @@ export interface operations {
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];
+        };
+    };
+    listComponentDumps: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+                componentId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ComponentDumps"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    createComponentDump: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+                componentId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ComponentDumpInput"];
+            };
+        };
+        responses: {
+            /** @description Taak aangemaakt */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Job"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    restoreComponentDump: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+                componentId: string;
+                dumpId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ComponentRestoreInput"];
+            };
+        };
+        responses: {
+            /** @description Taak aangemaakt */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ComponentRestoreStarted"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    setComponentBackup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+                componentId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ComponentBackupSettings"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ComponentBackupSettings"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
         };
     };
     listDatabases: {

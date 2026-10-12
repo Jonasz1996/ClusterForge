@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState, type ReactNode } from "react";
 import { BackupTable, FreshnessBadge, Latest } from "@/components/backups/Backups";
 import { SandboxesCard, verifiable, VerifyHistory } from "@/components/backups/Verify";
+import { DatabaseBackupsCard } from "@/components/databases/Dumps";
 import { reportHref } from "@/components/failover/Failover";
 import { SnapshotsCard } from "@/components/kube/Snapshots";
 import { ago, Empty, QueryState } from "@/components/inventory/bits";
@@ -78,6 +79,8 @@ export default function BackupsPage() {
           </>
         )}
       </QueryState>
+      {/* De dumps van de databases staan op de nodes, ook zonder Proxmox. */}
+      <DatabaseBackupsCard />
       {/* k3s bewaart zijn eigen snapshots, ook zonder Proxmox. */}
       <SnapshotsCard />
     </div>

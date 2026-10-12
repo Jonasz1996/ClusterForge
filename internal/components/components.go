@@ -127,6 +127,9 @@ type Service struct {
 	VIPTimeout  time.Duration
 	// Timeout is hoe lang een databaseverzoek aan een agent mag duren.
 	Timeout time.Duration
+	// DumpPoll is hoe vaak ClusterForge vraagt hoe ver een dump of het
+	// terugzetten ervan is.
+	DumpPoll time.Duration
 	// Retry is de wachttijd tussen pogingen als een agent even weg is.
 	Retry time.Duration
 	// Fresh is hoe oud de laatste heartbeat van een agent mag zijn.
@@ -149,7 +152,7 @@ type Service struct {
 func NewService(pool *pgxpool.Pool, ev *events.Writer, log *slog.Logger, runner *jobs.Runner, bus Bus, dep *deploy.Service) *Service {
 	s := &Service{
 		pool: pool, q: store.New(pool), ev: ev, log: log, jobs: runner, bus: bus, dep: dep,
-		Poll: 3 * time.Second, GateTimeout: 30 * time.Minute, VIPTimeout: 2 * time.Minute, Timeout: 15 * time.Second, Retry: 10 * time.Second,
+		Poll: 3 * time.Second, GateTimeout: 30 * time.Minute, VIPTimeout: 2 * time.Minute, Timeout: 15 * time.Second, Retry: 10 * time.Second, DumpPoll: 5 * time.Second,
 		Fresh: 2 * time.Minute, Now: time.Now,
 		WatchInterval: 20 * time.Second, RecoverGrace: 90 * time.Second, HungAfter: 15 * time.Minute, NodeOutAfter: 5 * time.Minute,
 		AutoBackoff: 30 * time.Minute,
@@ -160,6 +163,12 @@ func NewService(pool *pgxpool.Pool, ev *events.Writer, log *slog.Logger, runner 
 	// aan, en het cluster begint nooit twee keer.
 	runner.Retryable(Kind)
 	runner.Retryable(RecoverKind)
+	// Een hervatte dump wacht verder op dezelfde; terugzetten kan niet
+	// opnieuw, want de nieuwe database staat er dan al.
+	runner.Register(DumpKind, s.runDump)
+	runner.Register(RestoreKind, s.runRestore)
+	runner.Retryable(DumpKind)
+	runner.OnFinished(DumpKind, s.failDumpsOf)
 	return s
 }
 

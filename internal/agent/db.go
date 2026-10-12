@@ -43,7 +43,8 @@ const (
 var dbUnits = []string{"mariadb.service", "mysql.service", "postgresql.service", "patroni.service", "postgresql@*.service"}
 
 type dbState struct {
-	sem chan struct{}
+	sem   chan struct{}
+	dumps dumpState
 }
 
 func (a *Agent) initDB() {
@@ -110,6 +111,8 @@ func (a *Agent) handleDB(data []byte) protocol.DBResponse {
 		res = a.dbEnsure(ctx, req.Ensure)
 	case protocol.DBDrop:
 		res = a.dbDrop(ctx, req.Drop)
+	case protocol.DBDump:
+		res = a.dbDump(ctx, req.Dump)
 	default:
 		res = protocol.DBResponse{Error: "onbekend databaseverzoek " + req.Op, Servers: []protocol.DBServer{}}
 	}
