@@ -160,14 +160,16 @@ function DriftCard({
               <span className="mt-0.5 block text-sm font-normal text-slate-500">
                 {src.kind === "baseline"
                   ? `Baseline van ${src.baseline_at ? timeFmt.format(new Date(src.baseline_at)) : "onbekende datum"}, revisie ${src.spec_revision}`
-                  : `Template ${src.template} ${src.template_version}, spec-revisie ${src.spec_revision}`}
+                  : src.kind === "component"
+                    ? `De database van ClusterForge, revisie ${src.spec_revision}`
+                    : `Template ${src.template} ${src.template_version}, spec-revisie ${src.spec_revision}`}
                 {lastText}
               </span>
             )}
           </span>
           {isAdmin && src && (
             <span className="flex flex-wrap gap-2">
-              {src.kind === "baseline" && scope === "cluster" && (
+              {src.kind !== "template" && scope === "cluster" && (
                 <Button variant="secondary" onClick={() => setWizard("")}>
                   Baseline vastleggen
                 </Button>
@@ -272,6 +274,7 @@ function NodeDetail({
   const [ignoring, setIgnoring] = useState<string | null>(null);
   const groups = groupBy(n.findings);
   const baseline = source?.kind === "baseline";
+  const component = source?.kind === "component";
   const anyIgnored = n.findings.some((f) => f.ignored);
   return (
     <div className="space-y-3 text-sm">
@@ -296,12 +299,15 @@ function NodeDetail({
       {n.status === "none" &&
         (baseline ? (
           <p className="text-slate-500">Deze node heeft nog geen baseline, dus er is niets om mee te vergelijken.</p>
+        ) : component ? (
+          <p className="text-slate-500">Deze node heeft geen database van ClusterForge, dus er is niets om mee te vergelijken.</p>
         ) : (
           <p className="text-slate-500">Deze node staat niet in de specificatie van het cluster, dus er is niets om mee te vergelijken.</p>
         ))}
       {n.status === "in_sync" && (
         <p className="text-slate-500">
-          Alles op deze node is {baseline ? "zoals vastgelegd in de baseline" : "zoals de template het wil"}
+          Alles op deze node is{" "}
+          {baseline ? "zoals vastgelegd in de baseline" : component ? "zoals ClusterForge de database zette" : "zoals de template het wil"}
           {anyIgnored && ", op de genegeerde afwijkingen na"}.
         </p>
       )}

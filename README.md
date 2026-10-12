@@ -74,6 +74,7 @@ Het technisch ontwerp staat in [docs/design/mvp-fase-1.md](docs/design/mvp-fase-
 | --- | --- | --- |
 | 1. Databases lezen | cf-agent leest MariaDB en PostgreSQL op de node zelf (agentprotocol 9), alleen met vaste query's en zonder de inhoud van tabellen; een pagina Databases met per cluster een Galera-cluster, een primary met replica's of een losse server, de toestand van elke node in gewone woorden en de databases met hun grootte | klaar |
 | 2. Wie gebruikt welke database | De agent ziet elke minuut welke gebruiker vanaf welk adres met welke database verbonden is; ClusterForge koppelt de adressen aan nodes en clusters en toont per database wie haar de laatste dertig dagen gebruikte, met een waarschuwing als meer dan één cluster dat doet en of de afhankelijkheid in de graaf staat | klaar |
+| 3. Galera als onderdeel | Database toevoegen op een cluster dat er al is, ook met CT's: een plan per node met systeem, geheugen (met het `pct set`-commando als het krap wordt), schijf en Proxmox-host, en blokkades zoals twee nodes zonder scheidsrechter; daarna zet ClusterForge MariaDB Galera node voor node op en wacht na elke node tot hij Synced is; MariaDB komt in de graaf en de drift ziet een met de hand aangepaste configuratie | klaar |
 
 ## Draaien met Docker Compose
 
@@ -733,6 +734,33 @@ Bij elke database staat wie haar gebruikt: per cluster de nodes die verbonden wa
 - **gedeeld**: meer dan één cluster, losse node of onbekend adres gebruikt de database. Zo'n database moet je eerst splitsen voor je ze naar de nodes van één app verhuist.
 - **niet in de afhankelijkheden**: het cluster gebruikt de database, maar de graaf bij [Afhankelijkheden](#afhankelijkheden) weet dat nog niet. ClusterForge stelt de pijl daar zelf voor uit de verbindingen die de agents zien (zie [Verbindingen](#verbindingen)); bevestig hem bij Afhankelijkheden → Voorstellen.
 - **niemand in de laatste 30 dagen**: een kandidaat om op te ruimen.
+
+### Een database op de nodes van een cluster
+
+Op de pagina van een cluster staat de kaart **Database**. Database toevoegen zet MariaDB Galera op nodes van dat cluster zelf, zodat de app haar database naast zich heeft en er geen firewallregel tussen zit. Het werkt met VM's en CT's, op Debian 12 (MariaDB 10.11) en Debian 13 (MariaDB 11.8); alle nodes hebben dezelfde Debian.
+
+Kies de nodes, standaard alle actieve nodes van het cluster, en eventueel de buffer pool en het maximum aantal verbindingen. ClusterForge toont meteen een plan, per node:
+
+- het systeem, het geheugen met hoeveel er nu gebruikt wordt (het 95e percentiel van de laatste week) en hoeveel er na MariaDB vrij blijft;
+- de vrije schijf onder `/var/lib/mysql`;
+- de Proxmox-host en de VM of CT, als de node gekoppeld is;
+- de stappen die ClusterForge op de node zet.
+
+Wat niet kan, blokkeert, met de reden: minder dan twee nodes, **twee nodes zonder scheidsrechter** (valt er één weg, dan heeft de andere geen meerderheid en stopt de database), een agent die offline of te oud is, een andere Debian dan 12 of 13, een poort (3306, 4444, 4567 of 4568) die al bezet is, MySQL, een Galera-cluster of een MariaDB met eigen databases die al op de node staat (verhuis die eerst), of minder dan 2 GB vrije schijf. Een waarschuwing laat je wel door: een even aantal stemmen, twee van de drie stemmen op dezelfde Proxmox-host, een lege MariaDB die al draait (ClusterForge neemt haar over), krap geheugen of minder dan 10 GB vrije schijf. Bij krap geheugen staat het commando erbij, zoals `pct set 186 --memory 5632`.
+
+Met twee nodes kies je een derde node van het cluster als **scheidsrechter**: hij krijgt alleen `garbd`, stemt mee en heeft geen data.
+
+Database toevoegen doet het plan dat je zag; is er intussen iets veranderd, dan toont ClusterForge het nieuwe plan. Op prod tik je de slug in. Daarna is het een taak met een stap per node:
+
+1. De eerste node installeert `mariadb-server`, `mariadb-backup` en `galera-4`, schrijft `/etc/mysql/mariadb.conf.d/99-clusterforge-galera.cnf` en begint het cluster met `galera_new_cluster`. ClusterForge doet dat alleen als geen andere gekozen node al in een cluster met deze naam zit, zodat er nooit twee clusters met dezelfde naam ontstaan.
+2. Elke volgende node sluit aan: MariaDB herstart met de nieuwe configuratie en haalt alle data bij een node die al meedoet (SST met `mariabackup`). ClusterForge wacht tot hij Synced is in een cluster met het verwachte aantal leden, en gaat pas dan naar de volgende.
+3. Controleren: alle nodes Synced, in hetzelfde cluster, met evenveel leden als stemmen. Dan komt MariaDB in de graaf bij [Afhankelijkheden](#afhankelijkheden).
+
+De naam van het Galera-cluster is de slug van het cluster. SST gebruikt de gebruiker `mysql` via de socket, die MariaDB zelf aanmaakt, dus er staat geen wachtwoord op de nodes. Elke node heeft een merkteken `/var/lib/clusterforge/galera-<slug>`; zonder doet hij nog niet mee.
+
+Daarna kent de drift de database: een met de hand aangepaste `99-clusterforge-galera.cnf` valt op, ook op een cluster zonder template of baseline. **Opnieuw toepassen** zet alles terug, node voor node; alleen op een node waar iets veranderde, herstart MariaDB, en ClusterForge wacht tot hij weer Synced is. Mislukt de taak, dan blijft staan wat al klaar was; los het op en kies Opnieuw toepassen. **Weghalen** kan zolang de database nooit helemaal gelukt is, en haalt haar alleen uit ClusterForge, niet van de nodes.
+
+De app verbindt nog met haar oude database; verhuizen komt in een volgende mijlpaal, net als een VIP voor de database en het vanzelf opkomen na een herstart van alle nodes.
 
 ### Hoe ClusterForge de databases leest
 

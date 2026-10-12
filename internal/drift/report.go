@@ -59,10 +59,32 @@ func (s *Service) Report(ctx context.Context, clusterID uuid.UUID, nodeID *uuid.
 	if err != nil {
 		return rep, err
 	}
+	comps, err := s.q.ListClusterComponents(ctx, clusterID)
+	if err != nil {
+		return rep, err
+	}
+	var applied []store.ClusterComponent
+	for _, r := range comps {
+		if r.ClusterComponent.AppliedRevision != nil {
+			applied = append(applied, r.ClusterComponent)
+		}
+	}
+	alsoDatabase := func() {
+		if len(applied) > 0 {
+			rep.Notes = append(rep.Notes, "De nodes van de database worden ook vergeleken met wat ClusterForge daar voor de database zette.")
+		}
+	}
 	if c.TemplateName == nil {
 		b, err := ParseBaseline(c.Spec)
 		if err != nil || b == nil {
-			return rep, nil
+			if len(applied) == 0 {
+				return rep, nil
+			}
+			// Alleen de database: de nodes ervan hebben een gewenste staat.
+			rep.Source = &Source{Kind: "component", Revision: int(*applied[0].AppliedRevision)}
+			rep.Notes = append(rep.Notes, "Dit cluster heeft geen template of baseline; alleen de nodes van de database worden vergeleken, "+
+				"met wat ClusterForge daar voor de database zette.")
+			return rep, s.nodeReports(ctx, &rep, clusterID, nodeID)
 		}
 		rep.Source = &Source{Kind: "baseline", Revision: int(c.SpecRevision), Items: &b.Items}
 		if t, err := s.q.GetSpecRevisionTime(ctx, store.GetSpecRevisionTimeParams{ClusterID: clusterID, Revision: c.SpecRevision}); err == nil {
@@ -71,6 +93,7 @@ func (s *Service) Report(ctx context.Context, clusterID uuid.UUID, nodeID *uuid.
 		if err := s.baselineNotes(ctx, &rep, clusterID, b); err != nil {
 			return rep, err
 		}
+		alsoDatabase()
 		return rep, s.nodeReports(ctx, &rep, clusterID, nodeID)
 	}
 	rep.Source = &Source{Kind: "template", Template: *c.TemplateName, Version: deref(c.TemplateVersion), Revision: int(c.SpecRevision)}
@@ -90,6 +113,7 @@ func (s *Service) Report(ctx context.Context, clusterID uuid.UUID, nodeID *uuid.
 			rep.Notes = append(rep.Notes, d.Membership...)
 		}
 	}
+	alsoDatabase()
 	return rep, s.nodeReports(ctx, &rep, clusterID, nodeID)
 }
 

@@ -1,13 +1,14 @@
 -- name: ListDriftNodes :many
--- De nodes van clusters met een gewenste staat (een template of een
--- baseline), met wat de scanner moet
+-- De nodes van clusters met een gewenste staat (een template, een
+-- baseline of een toegepast onderdeel), met wat de scanner moet
 -- weten om te beslissen of hij ze controleert. Zonder cluster_id alle.
 SELECT n.id, n.hostname, n.cluster_id, n.lifecycle,
        coalesce(a.protocol_version, 0)::int AS agent_protocol,
        (a.id IS NOT NULL)::boolean AS has_agent,
        s.heartbeat_at
 FROM nodes n
-JOIN clusters c ON c.id = n.cluster_id AND (c.template_name IS NOT NULL OR c.spec->>'kind' = 'baseline')
+JOIN clusters c ON c.id = n.cluster_id AND (c.template_name IS NOT NULL OR c.spec->>'kind' = 'baseline'
+    OR EXISTS (SELECT 1 FROM cluster_components cc WHERE cc.cluster_id = c.id AND cc.applied_revision IS NOT NULL))
 LEFT JOIN agents a ON a.node_id = n.id AND a.revoked_at IS NULL
 LEFT JOIN node_status s ON s.node_id = n.id
 WHERE (sqlc.narg('cluster_id')::uuid IS NULL OR n.cluster_id = sqlc.narg('cluster_id'))

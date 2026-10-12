@@ -1,0 +1,81 @@
+name: mariadb-galera
+version: 1.0.0
+title: MariaDB Galera
+description: >-
+  MariaDB als Galera-cluster op de nodes van een bestaand cluster. Elke node
+  heeft alle data en kan schrijven; zolang een meerderheid van de nodes
+  elkaar ziet, blijft de database werken. De versie is die van Debian op de
+  nodes: MariaDB 10.11 op Debian 12, MariaDB 11.8 op Debian 13. Met twee
+  nodes komt er een scheidsrechter (garbd) bij, die meestemt maar geen data
+  heeft.
+cluster_type: component
+
+params:
+  - name: buffer_pool
+    type: size
+    label: Buffer pool
+    help: Het geheugen van InnoDB voor data en indexen, per node. Reken er ongeveer 300 MB bij voor de rest van MariaDB.
+    default: 256M
+    min: 128M
+    max: 256G
+  - name: max_connections
+    type: int
+    label: Maximaal aantal verbindingen
+    default: 200
+    min: 20
+    max: 5000
+
+# MariaDB in het overzicht van de afhankelijkheden, zodat een app er een
+# pijl naartoe kan krijgen.
+services:
+  - name: mariadb
+    kind: database
+    unit: mariadb
+    port: 3306
+
+roles:
+  # De datanodes, op volgorde: de eerste begint het cluster, de andere halen
+  # alle data bij een node die al meedoet (SST). ClusterForge past ze een
+  # voor een toe en wacht na elke node tot hij Synced is.
+  - name: data
+    count: "3"
+    steps:
+      - package: { names: [mariadb-server, mariadb-backup, galera-4, socat] }
+      - directory: { path: /var/lib/clusterforge, mode: "0755" }
+      - file:
+          path: /etc/mysql/mariadb.conf.d/99-clusterforge-galera.cnf
+          template: galera.cnf.tmpl
+          mode: "0644"
+      # Aansluiten bij het cluster: MariaDB herstarten met de configuratie
+      # hierboven. De eerste node van een nieuw cluster begint het in plaats
+      # daarvan met galera_new_cluster; dat beslist ClusterForge bij de
+      # uitrol, nooit deze stap, zodat een tweede cluster met dezelfde naam
+      # onmogelijk is. Het merkteken zegt dat de node meedoet.
+      - command:
+          title: bij het Galera-cluster aansluiten
+          run: systemctl restart mariadb && touch /var/lib/clusterforge/galera-{{ .cluster.slug }}
+          creates: /var/lib/clusterforge/galera-{{ .cluster.slug }}
+      - service: { name: mariadb, enabled: true, state: started }
+      # De gebruiker voor SST: mysql@localhost via de socket, zonder
+      # wachtwoord. MariaDB maakt hem zelf bij het installeren; deze stap is
+      # er voor een installatie waar hij ontbreekt. Galera neemt hem mee naar
+      # de andere nodes.
+      - command:
+          title: SST-gebruiker mysql via de socket
+          run: >-
+            mariadb -e "CREATE USER IF NOT EXISTS 'mysql'@'localhost' IDENTIFIED VIA unix_socket;
+            GRANT RELOAD, PROCESS, LOCK TABLES, BINLOG MONITOR ON *.* TO 'mysql'@'localhost'"
+          unless: mariadb -N -B -e "SHOW GRANTS FOR 'mysql'@'localhost'" | grep -Eq 'ALL PRIVILEGES|RELOAD'
+  # De scheidsrechter stemt mee zonder data, zodat twee datanodes een
+  # meerderheid hebben als er één wegvalt.
+  - name: arbiter
+    count: "1"
+    min: 0
+    steps:
+      - package: { names: [galera-arbitrator-4] }
+      - file:
+          path: /etc/default/garb
+          template: garb.tmpl
+          mode: "0644"
+          notify: [service:garb:restart]
+      - service: { name: garb, enabled: true, state: started }

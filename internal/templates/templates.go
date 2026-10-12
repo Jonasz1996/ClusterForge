@@ -44,6 +44,12 @@ type Template struct {
 	files *template.Template
 }
 
+// ComponentType is het cluster_type van een onderdeel: stappen die op de
+// nodes van een bestaand cluster komen, zoals de database van fase 5, en
+// geen VM's. Onderdelen staan in hun eigen register, niet bij de templates
+// om een cluster mee uit te rollen.
+const ComponentType = "component"
+
 // KubeInfo is de Kubernetes van een templateversie.
 type KubeInfo struct {
 	// Version is de k3s-release, zoals v1.36.5+k3s1. Een node draait haar
@@ -509,6 +515,8 @@ type stepSpec struct {
 type commandSpec struct {
 	protocol.CommandStep
 	Notify []string `json:"notify"`
+	// Title zegt in plan en logboek wat het commando doet.
+	Title string `json:"title"`
 }
 
 type fileSpec struct {
@@ -568,6 +576,9 @@ func (t *Template) Steps(role string, c Context) ([]Step, error) {
 			return nil, fmt.Errorf("stap %d heeft precies één soort nodig (package, file, service, user, directory of command)", i+1)
 		}
 		s.Title = title(s.Step)
+		if c := spec.Command; c != nil && c.Title != "" {
+			s.Title = c.Title
+		}
 		out = append(out, s)
 	}
 	return out, nil
@@ -705,7 +716,14 @@ func (t *Template) selfTest() error {
 			})
 		}
 	}
+	// Een onderdeel komt op nodes die er al zijn en heeft geen VM's.
 	for _, r := range t.Roles {
+		if t.ClusterType == ComponentType {
+			if r.VM.CPU != "" || r.VM.Memory != "" || r.VM.Disk != "" {
+				return fmt.Errorf("rol %s: een onderdeel heeft geen vm", r.Name)
+			}
+			continue
+		}
 		if _, err := t.VM(r.Name, c); err != nil {
 			return err
 		}

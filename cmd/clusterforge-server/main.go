@@ -30,6 +30,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/assistant"
 	"github.com/Jonasz1996/clusterforge/internal/auth"
 	"github.com/Jonasz1996/clusterforge/internal/backups"
+	"github.com/Jonasz1996/clusterforge/internal/components"
 	"github.com/Jonasz1996/clusterforge/internal/config"
 	"github.com/Jonasz1996/clusterforge/internal/databases"
 	"github.com/Jonasz1996/clusterforge/internal/deploy"
@@ -185,6 +186,14 @@ func serve() error {
 	kn := kubenodes.NewService(pool, ev, runner, kub, pve, kinv, dep)
 	// De MariaDB- en PostgreSQL-servers op de nodes, via agentprotocol 9.
 	dbs := databases.NewService(pool, bus, log)
+	// Een database als onderdeel van een cluster: MariaDB Galera op de
+	// nodes die er al zijn, met het geheugengebruik uit VictoriaMetrics in
+	// het plan.
+	cmps := components.NewService(pool, ev, log, runner, bus, dep)
+	cmps.Changed = eval.Kick
+	memory := metrics.NewClient(cfg.VictoriaMetricsURL)
+	cmps.Memory = func(ctx context.Context) (map[uuid.UUID]float64, error) { return memory.MemoryP95(ctx, time.Now()) }
+	runner.OnFinished(components.Kind, func(context.Context, store.Job) { dbs.Kick() })
 	kn.Changed = eval.Kick
 	// Een cluster rendert alleen met de templateversie waarmee het is
 	// uitgerold; zit die niet in deze binary, dan moet de beheerder dat weten.
@@ -201,6 +210,7 @@ func serve() error {
 	bk.EnableVerify(runner, bus)
 	drf := drift.NewService(pool, ev, log, bus, dep, box.Derive(secrets.PurposeFile))
 	drf.Interval = cfg.DriftInterval
+	drf.Components = cmps
 	// Na een uitrol, een node- of VM-actie meteen opnieuw kijken; na een
 	// rampoefening in elk cluster dat ze raakte.
 	recheck := func(ctx context.Context, j store.Job) {
@@ -257,7 +267,7 @@ func serve() error {
 	// Een node die een nieuwe k3s krijgt, gaat eerst leeg.
 	ro.Kube = kub
 	for _, kind := range []string{deploy.Kind, lifecycle.KindNodeAction, proxmox.KindVMAction, failover.KindTest, failover.KindRestore,
-		disaster.KindRun, disaster.KindRestore} {
+		disaster.KindRun, disaster.KindRestore, components.Kind} {
 		runner.OnFinished(kind, recheck)
 	}
 	// De status en impact van de diensten, en daarna de incidenten, rekenen
@@ -327,7 +337,7 @@ func serve() error {
 			Config: cfg, Log: log, Pool: pool, Auth: authSvc, Bus: bus, Hub: hub, Proxmox: pve, Jobs: runner,
 			Lifecycle: life, Deploy: dep, Backups: bk, Drift: drf, Failover: fo, Disaster: dis, Deps: dps, Rollout: ro,
 			GitOps: git, Assistant: asst, Risk: rsk, Topo: tp, Docs: dcs, Reports: rep, Kube: kub, KubeNodes: kn, Databases: dbs,
-			Version: version,
+			Components: cmps, Version: version,
 		}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,

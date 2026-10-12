@@ -2875,6 +2875,131 @@ paths:
         "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
+  /component-templates:
+    get:
+      operationId: listComponentTemplates
+      summary: De databases die ClusterForge op de nodes van een cluster kan zetten, met hun instellingen
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/ComponentTemplate" } }
+        "401": { $ref: "#/components/responses/Error" }
+  /clusters/{clusterId}/components:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: listClusterComponents
+      summary: De onderdelen van een cluster, zoals zijn database
+      description: |
+        Een onderdeel is een gewenste staat op de nodes van een cluster dat er al is, naast een template of baseline. In
+        fase 5 is dat de database: MariaDB Galera. Ook voor viewers; geheimen staan er niet in.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/ClusterComponent" } }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: addClusterComponent
+      summary: Een database toevoegen (admin); wordt een taak
+      description: |
+        Rolt het plan uit dat POST .../components/plan gaf, als de hash nog klopt en niets het tegenhoudt: de nodes een voor
+        een, met na elke node wachten tot hij Synced is. Een ander plan geeft 409 met code plan_stale. Op prod vraagt het
+        tweestapsverificatie en de slug in confirm.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ComponentApplyInput" }
+      responses:
+        "202":
+          description: Taak aangemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /clusters/{clusterId}/components/plan:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: planClusterComponent
+      summary: Bekijken wat een database toevoegen zou doen (admin)
+      description: |
+        Per node het geheugen, de schijf, de Proxmox-host, wat er al draait en de stappen, met de bevindingen die het
+        tegenhouden of waarvoor gewaarschuwd wordt. Er verandert niets.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ComponentInput" }
+      responses:
+        "200":
+          description: Het plan
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ComponentPlan" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /clusters/{clusterId}/components/{componentId}:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: componentId, in: path, required: true, schema: { type: string, format: uuid } }
+    delete:
+      operationId: removeClusterComponent
+      summary: Een database die nooit gelukt is uit ClusterForge halen (admin)
+      description: |
+        Alleen zolang de database nog nooit helemaal uitgerold is, zodat een nieuwe poging met andere nodes kan. Op de nodes
+        verandert niets. Een draaiende database geeft 409.
+      responses:
+        "204": { description: Weggehaald }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /clusters/{clusterId}/components/{componentId}/apply:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: componentId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: reapplyClusterComponent
+      summary: Een database opnieuw toepassen (admin); wordt een taak
+      description: |
+        Past de huidige revisie opnieuw toe, bijvoorbeeld na een mislukte uitrol of als de driftcontrole een gewijzigd
+        bestand ziet. Een node die al meedoet, sluit niet opnieuw aan; is zijn configuratie veranderd, dan herstart MariaDB
+        daar, node voor node. Op prod vraagt het tweestapsverificatie en de slug in confirm.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ComponentReapplyInput" }
+      responses:
+        "202":
+          description: Taak aangemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
   /databases:
     get:
       operationId: listDatabases
@@ -3806,6 +3931,112 @@ components:
       required: [kube_learning]
       properties:
         kube_learning: { type: boolean, description: "De leermodus in het dashboard Kubernetes: uitleg en kubectl-commando's" }
+    ClusterComponent:
+      type: object
+      required: [id, cluster_id, engine, template, version, title, revision, applied_revision, params, nodes, state, job_id, job_error, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        cluster_id: { type: string, format: uuid }
+        engine: { type: string, description: mariadb of postgresql }
+        template: { type: string, description: "Het onderdeel, zoals mariadb-galera" }
+        version: { type: string }
+        title: { type: string }
+        revision: { type: integer }
+        applied_revision: { type: integer, nullable: true, description: De laatste revisie die helemaal lukte; null tot de eerste uitrol klaar is }
+        params: { type: object, additionalProperties: true, description: De instellingen zonder geheimen }
+        nodes: { type: array, items: { $ref: "#/components/schemas/ComponentNode" } }
+        state: { type: string, description: "installing, applying, ready of failed" }
+        job_id: { type: string, format: uuid, nullable: true, description: De laatste taak die het onderdeel toepaste }
+        job_error: { type: string, description: Waarom die taak mislukte }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    ComponentNode:
+      type: object
+      required: [node_id, hostname, role, index]
+      properties:
+        node_id: { type: string, format: uuid }
+        hostname: { type: string }
+        role: { type: string, description: "data of arbiter" }
+        index: { type: integer }
+    ComponentInput:
+      type: object
+      required: [engine, nodes]
+      properties:
+        engine: { type: string, description: mariadb; postgresql volgt later }
+        nodes: { type: array, items: { type: string, format: uuid }, description: "De datanodes op volgorde; de eerste begint het cluster" }
+        arbiter: { type: string, format: uuid, nullable: true, description: "Een node die alleen meestemt (garbd); nodig bij twee datanodes" }
+        settings: { type: object, additionalProperties: true, description: "buffer_pool en max_connections; wat ontbreekt, krijgt de standaard" }
+    ComponentApplyInput:
+      allOf:
+        - { $ref: "#/components/schemas/ComponentInput" }
+        - type: object
+          required: [hash]
+          properties:
+            hash: { type: string, description: De hash van het plan dat je zag }
+            confirm: { type: string, description: De slug van het cluster; nodig op prod }
+    ComponentReapplyInput:
+      type: object
+      properties:
+        confirm: { type: string, description: De slug van het cluster; nodig op prod }
+    ComponentPlan:
+      type: object
+      required: [cluster_id, cluster_name, slug, prod, engine, template, version, title, params, nodes, findings, blocked, hash]
+      properties:
+        cluster_id: { type: string, format: uuid }
+        cluster_name: { type: string }
+        slug: { type: string }
+        prod: { type: boolean }
+        engine: { type: string }
+        template: { type: string }
+        version: { type: string }
+        title: { type: string }
+        params: { type: object, additionalProperties: true, description: "De instellingen met de standaarden; een geheim als [geheim]" }
+        nodes: { type: array, items: { $ref: "#/components/schemas/ComponentPlanNode" } }
+        findings: { type: array, items: { $ref: "#/components/schemas/ComponentFinding" } }
+        blocked: { type: boolean, description: "Iets houdt het tegen; uitrollen kan niet" }
+        hash: { type: string }
+    ComponentPlanNode:
+      type: object
+      required: [node_id, hostname, role, index, address, os, pve_type, pve_node, vmid, memory_bytes, memory_used_pct, need_bytes, free_after_pct,
+                 disk_free_bytes, disk_mount, existing, steps]
+      properties:
+        node_id: { type: string, format: uuid }
+        hostname: { type: string }
+        role: { type: string }
+        index: { type: integer }
+        address: { type: string }
+        os: { type: string }
+        pve_type: { type: string, description: "lxc, qemu, of leeg als ClusterForge de node niet in Proxmox kent" }
+        pve_node: { type: string, description: De Proxmox-host }
+        vmid: { type: integer }
+        memory_bytes: { type: integer, format: int64 }
+        memory_used_pct: { type: number, nullable: true, description: "Hoogstens gebruikt in zeven dagen (p95); null zonder metingen" }
+        need_bytes: { type: integer, format: int64, description: De buffer pool plus ongeveer 300 MB }
+        free_after_pct: { type: number, nullable: true, description: Wat er daarna overblijft; null zonder metingen }
+        disk_free_bytes: { type: integer, format: int64, nullable: true }
+        disk_mount: { type: string }
+        existing: { type: string, description: Wat er al aan MariaDB draait }
+        steps: { type: array, items: { type: string } }
+    ComponentTemplate:
+      type: object
+      required: [engine, name, version, title, description, params]
+      properties:
+        engine: { type: string, enum: [mariadb, postgresql] }
+        name: { type: string }
+        version: { type: string }
+        title: { type: string }
+        description: { type: string }
+        params: { type: array, items: { $ref: "#/components/schemas/TemplateParam" } }
+    ComponentFinding:
+      type: object
+      required: [level, code, node_id, hostname, message, command]
+      properties:
+        level: { type: string, description: "blocked of warning" }
+        code: { type: string }
+        node_id: { type: string, format: uuid, nullable: true }
+        hostname: { type: string }
+        message: { type: string }
+        command: { type: string, description: Een commando dat het oplost; leeg als er geen is }
     DatabaseGroup:
       type: object
       description: Eén databasecluster, de servers van één engine in één cluster, of één losse node.
@@ -5166,8 +5397,8 @@ components:
       type: object
       required: [kind, template, template_version, spec_revision, baseline_at, items]
       properties:
-        kind: { type: string, enum: [template, baseline] }
-        template: { type: string, description: Leeg bij een baseline }
+        kind: { type: string, enum: [template, baseline, component] }
+        template: { type: string, description: Leeg bij een baseline of alleen een onderdeel }
         template_version: { type: string }
         spec_revision: { type: integer }
         baseline_at: { type: string, format: date-time, nullable: true, description: Wanneer de baseline het laatst is vastgelegd }

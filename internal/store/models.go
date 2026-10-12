@@ -351,6 +351,26 @@ type Cluster struct {
 	RpoTargetHours   *int32
 }
 
+type ClusterComponent struct {
+	ID              uuid.UUID
+	ClusterID       uuid.UUID
+	Engine          string
+	Spec            []byte
+	Revision        int32
+	AppliedRevision *int32
+	JobID           *uuid.UUID
+	CreatedAt       time.Time
+	UpdatedAt       time.Time
+}
+
+type ClusterComponentRevision struct {
+	ComponentID uuid.UUID
+	Revision    int32
+	Spec        []byte
+	CreatedBy   *uuid.UUID
+	CreatedAt   time.Time
+}
+
 type ClusterOwner struct {
 	ClusterID uuid.UUID
 	UserID    uuid.UUID

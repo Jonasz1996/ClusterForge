@@ -258,6 +258,24 @@ func (e ClusterType) Valid() bool {
 	}
 }
 
+// Defines values for ComponentTemplateEngine.
+const (
+	ComponentTemplateEngineMariadb    ComponentTemplateEngine = "mariadb"
+	ComponentTemplateEnginePostgresql ComponentTemplateEngine = "postgresql"
+)
+
+// Valid indicates whether the value is a known member of the ComponentTemplateEngine enum.
+func (e ComponentTemplateEngine) Valid() bool {
+	switch e {
+	case ComponentTemplateEngineMariadb:
+		return true
+	case ComponentTemplateEnginePostgresql:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for DRSchedule.
 const (
 	DRScheduleEmpty   DRSchedule = ""
@@ -281,16 +299,16 @@ func (e DRSchedule) Valid() bool {
 
 // Defines values for DatabaseGroupEngine.
 const (
-	Mariadb    DatabaseGroupEngine = "mariadb"
-	Postgresql DatabaseGroupEngine = "postgresql"
+	DatabaseGroupEngineMariadb    DatabaseGroupEngine = "mariadb"
+	DatabaseGroupEnginePostgresql DatabaseGroupEngine = "postgresql"
 )
 
 // Valid indicates whether the value is a known member of the DatabaseGroupEngine enum.
 func (e DatabaseGroupEngine) Valid() bool {
 	switch e {
-	case Mariadb:
+	case DatabaseGroupEngineMariadb:
 		return true
-	case Postgresql:
+	case DatabaseGroupEnginePostgresql:
 		return true
 	default:
 		return false
@@ -755,14 +773,17 @@ func (e DriftNodeStatus) Valid() bool {
 
 // Defines values for DriftSourceKind.
 const (
-	DriftSourceKindBaseline DriftSourceKind = "baseline"
-	DriftSourceKindTemplate DriftSourceKind = "template"
+	DriftSourceKindBaseline  DriftSourceKind = "baseline"
+	DriftSourceKindComponent DriftSourceKind = "component"
+	DriftSourceKindTemplate  DriftSourceKind = "template"
 )
 
 // Valid indicates whether the value is a known member of the DriftSourceKind enum.
 func (e DriftSourceKind) Valid() bool {
 	switch e {
 	case DriftSourceKindBaseline:
+		return true
+	case DriftSourceKindComponent:
 		return true
 	case DriftSourceKindTemplate:
 		return true
@@ -3230,6 +3251,38 @@ type Cluster struct {
 	UpdatedAt       time.Time                 `json:"updated_at"`
 }
 
+// ClusterComponent defines model for ClusterComponent.
+type ClusterComponent struct {
+	// AppliedRevision De laatste revisie die helemaal lukte; null tot de eerste uitrol klaar is
+	AppliedRevision nullable.Nullable[int] `json:"applied_revision"`
+	ClusterId       openapi_types.UUID     `json:"cluster_id"`
+	CreatedAt       time.Time              `json:"created_at"`
+
+	// Engine mariadb of postgresql
+	Engine string             `json:"engine"`
+	Id     openapi_types.UUID `json:"id"`
+
+	// JobError Waarom die taak mislukte
+	JobError string `json:"job_error"`
+
+	// JobId De laatste taak die het onderdeel toepaste
+	JobId nullable.Nullable[openapi_types.UUID] `json:"job_id"`
+	Nodes []ComponentNode                       `json:"nodes"`
+
+	// Params De instellingen zonder geheimen
+	Params   map[string]interface{} `json:"params"`
+	Revision int                    `json:"revision"`
+
+	// State installing, applying, ready of failed
+	State string `json:"state"`
+
+	// Template Het onderdeel, zoals mariadb-galera
+	Template  string    `json:"template"`
+	Title     string    `json:"title"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Version   string    `json:"version"`
+}
+
 // ClusterDetail defines model for ClusterDetail.
 type ClusterDetail struct {
 	// AppliedRevision De revisie die op alle nodes staat; lager dan spec_revision na een mislukte toepassing
@@ -3375,6 +3428,138 @@ type ClusterRisk struct {
 
 // ClusterType defines model for ClusterType.
 type ClusterType string
+
+// ComponentApplyInput defines model for ComponentApplyInput.
+type ComponentApplyInput struct {
+	// Arbiter Een node die alleen meestemt (garbd); nodig bij twee datanodes
+	Arbiter nullable.Nullable[openapi_types.UUID] `json:"arbiter,omitempty"`
+
+	// Confirm De slug van het cluster; nodig op prod
+	Confirm *string `json:"confirm,omitempty"`
+
+	// Engine mariadb; postgresql volgt later
+	Engine string `json:"engine"`
+
+	// Hash De hash van het plan dat je zag
+	Hash string `json:"hash"`
+
+	// Nodes De datanodes op volgorde; de eerste begint het cluster
+	Nodes []openapi_types.UUID `json:"nodes"`
+
+	// Settings buffer_pool en max_connections; wat ontbreekt, krijgt de standaard
+	Settings *map[string]interface{} `json:"settings,omitempty"`
+}
+
+// ComponentFinding defines model for ComponentFinding.
+type ComponentFinding struct {
+	Code string `json:"code"`
+
+	// Command Een commando dat het oplost; leeg als er geen is
+	Command  string `json:"command"`
+	Hostname string `json:"hostname"`
+
+	// Level blocked of warning
+	Level   string                                `json:"level"`
+	Message string                                `json:"message"`
+	NodeId  nullable.Nullable[openapi_types.UUID] `json:"node_id"`
+}
+
+// ComponentInput defines model for ComponentInput.
+type ComponentInput struct {
+	// Arbiter Een node die alleen meestemt (garbd); nodig bij twee datanodes
+	Arbiter nullable.Nullable[openapi_types.UUID] `json:"arbiter,omitempty"`
+
+	// Engine mariadb; postgresql volgt later
+	Engine string `json:"engine"`
+
+	// Nodes De datanodes op volgorde; de eerste begint het cluster
+	Nodes []openapi_types.UUID `json:"nodes"`
+
+	// Settings buffer_pool en max_connections; wat ontbreekt, krijgt de standaard
+	Settings *map[string]interface{} `json:"settings,omitempty"`
+}
+
+// ComponentNode defines model for ComponentNode.
+type ComponentNode struct {
+	Hostname string             `json:"hostname"`
+	Index    int                `json:"index"`
+	NodeId   openapi_types.UUID `json:"node_id"`
+
+	// Role data of arbiter
+	Role string `json:"role"`
+}
+
+// ComponentPlan defines model for ComponentPlan.
+type ComponentPlan struct {
+	// Blocked Iets houdt het tegen; uitrollen kan niet
+	Blocked     bool                `json:"blocked"`
+	ClusterId   openapi_types.UUID  `json:"cluster_id"`
+	ClusterName string              `json:"cluster_name"`
+	Engine      string              `json:"engine"`
+	Findings    []ComponentFinding  `json:"findings"`
+	Hash        string              `json:"hash"`
+	Nodes       []ComponentPlanNode `json:"nodes"`
+
+	// Params De instellingen met de standaarden; een geheim als [geheim]
+	Params   map[string]interface{} `json:"params"`
+	Prod     bool                   `json:"prod"`
+	Slug     string                 `json:"slug"`
+	Template string                 `json:"template"`
+	Title    string                 `json:"title"`
+	Version  string                 `json:"version"`
+}
+
+// ComponentPlanNode defines model for ComponentPlanNode.
+type ComponentPlanNode struct {
+	Address       string                   `json:"address"`
+	DiskFreeBytes nullable.Nullable[int64] `json:"disk_free_bytes"`
+	DiskMount     string                   `json:"disk_mount"`
+
+	// Existing Wat er al aan MariaDB draait
+	Existing string `json:"existing"`
+
+	// FreeAfterPct Wat er daarna overblijft; null zonder metingen
+	FreeAfterPct nullable.Nullable[float32] `json:"free_after_pct"`
+	Hostname     string                     `json:"hostname"`
+	Index        int                        `json:"index"`
+	MemoryBytes  int64                      `json:"memory_bytes"`
+
+	// MemoryUsedPct Hoogstens gebruikt in zeven dagen (p95); null zonder metingen
+	MemoryUsedPct nullable.Nullable[float32] `json:"memory_used_pct"`
+
+	// NeedBytes De buffer pool plus ongeveer 300 MB
+	NeedBytes int64              `json:"need_bytes"`
+	NodeId    openapi_types.UUID `json:"node_id"`
+	Os        string             `json:"os"`
+
+	// PveNode De Proxmox-host
+	PveNode string `json:"pve_node"`
+
+	// PveType lxc, qemu, of leeg als ClusterForge de node niet in Proxmox kent
+	PveType string   `json:"pve_type"`
+	Role    string   `json:"role"`
+	Steps   []string `json:"steps"`
+	Vmid    int      `json:"vmid"`
+}
+
+// ComponentReapplyInput defines model for ComponentReapplyInput.
+type ComponentReapplyInput struct {
+	// Confirm De slug van het cluster; nodig op prod
+	Confirm *string `json:"confirm,omitempty"`
+}
+
+// ComponentTemplate defines model for ComponentTemplate.
+type ComponentTemplate struct {
+	Description string                  `json:"description"`
+	Engine      ComponentTemplateEngine `json:"engine"`
+	Name        string                  `json:"name"`
+	Params      []TemplateParam         `json:"params"`
+	Title       string                  `json:"title"`
+	Version     string                  `json:"version"`
+}
+
+// ComponentTemplateEngine defines model for ComponentTemplate.Engine.
+type ComponentTemplateEngine string
 
 // DRPlan defines model for DRPlan.
 type DRPlan struct {
@@ -4604,7 +4789,7 @@ type DriftSource struct {
 	Kind         DriftSourceKind                  `json:"kind"`
 	SpecRevision int                              `json:"spec_revision"`
 
-	// Template Leeg bij een baseline
+	// Template Leeg bij een baseline of alleen een onderdeel
 	Template        string `json:"template"`
 	TemplateVersion string `json:"template_version"`
 }
@@ -8755,6 +8940,15 @@ type UpdateClusterJSONRequestBody = ClusterPatch
 // UpdateBackupPolicyJSONRequestBody defines body for UpdateBackupPolicy for application/json ContentType.
 type UpdateBackupPolicyJSONRequestBody = BackupPolicyInput
 
+// AddClusterComponentJSONRequestBody defines body for AddClusterComponent for application/json ContentType.
+type AddClusterComponentJSONRequestBody = ComponentApplyInput
+
+// PlanClusterComponentJSONRequestBody defines body for PlanClusterComponent for application/json ContentType.
+type PlanClusterComponentJSONRequestBody = ComponentInput
+
+// ReapplyClusterComponentJSONRequestBody defines body for ReapplyClusterComponent for application/json ContentType.
+type ReapplyClusterComponentJSONRequestBody = ComponentReapplyInput
+
 // CreateDisasterScenarioJSONRequestBody defines body for CreateDisasterScenario for application/json ContentType.
 type CreateDisasterScenarioJSONRequestBody = DisasterScenarioInput
 
@@ -9003,6 +9197,21 @@ type ServerInterface interface {
 	// ListClusterChanges Het wijzigingsjournaal van alle nodes van een cluster, nieuwste eerst
 	// (GET /clusters/{clusterId}/changes)
 	ListClusterChanges(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params ListClusterChangesParams)
+	// ListClusterComponents De onderdelen van een cluster, zoals zijn database
+	// (GET /clusters/{clusterId}/components)
+	ListClusterComponents(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
+	// AddClusterComponent Een database toevoegen (admin); wordt een taak
+	// (POST /clusters/{clusterId}/components)
+	AddClusterComponent(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
+	// PlanClusterComponent Bekijken wat een database toevoegen zou doen (admin)
+	// (POST /clusters/{clusterId}/components/plan)
+	PlanClusterComponent(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
+	// RemoveClusterComponent Een database die nooit gelukt is uit ClusterForge halen (admin)
+	// (DELETE /clusters/{clusterId}/components/{componentId})
+	RemoveClusterComponent(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID)
+	// ReapplyClusterComponent Een database opnieuw toepassen (admin); wordt een taak
+	// (POST /clusters/{clusterId}/components/{componentId}/apply)
+	ReapplyClusterComponent(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID)
 	// ListDisasterScenarios Rampoefeningen van een cluster met hun laatste run
 	// (GET /clusters/{clusterId}/disaster-scenarios)
 	ListDisasterScenarios(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
@@ -9072,6 +9281,9 @@ type ServerInterface interface {
 	// CreateVip VIP toevoegen aan een cluster (admin)
 	// (POST /clusters/{clusterId}/vips)
 	CreateVip(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
+	// ListComponentTemplates De databases die ClusterForge op de nodes van een cluster kan zetten, met hun instellingen
+	// (GET /component-templates)
+	ListComponentTemplates(w http.ResponseWriter, r *http.Request)
 	// ListDatabases De MariaDB- en PostgreSQL-servers die de agents melden
 	// (GET /databases)
 	ListDatabases(w http.ResponseWriter, r *http.Request)
@@ -9696,6 +9908,36 @@ func (_ Unimplemented) ListClusterChanges(w http.ResponseWriter, r *http.Request
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// ListClusterComponents De onderdelen van een cluster, zoals zijn database
+// (GET /clusters/{clusterId}/components)
+func (_ Unimplemented) ListClusterComponents(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// AddClusterComponent Een database toevoegen (admin); wordt een taak
+// (POST /clusters/{clusterId}/components)
+func (_ Unimplemented) AddClusterComponent(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// PlanClusterComponent Bekijken wat een database toevoegen zou doen (admin)
+// (POST /clusters/{clusterId}/components/plan)
+func (_ Unimplemented) PlanClusterComponent(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RemoveClusterComponent Een database die nooit gelukt is uit ClusterForge halen (admin)
+// (DELETE /clusters/{clusterId}/components/{componentId})
+func (_ Unimplemented) RemoveClusterComponent(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ReapplyClusterComponent Een database opnieuw toepassen (admin); wordt een taak
+// (POST /clusters/{clusterId}/components/{componentId}/apply)
+func (_ Unimplemented) ReapplyClusterComponent(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // ListDisasterScenarios Rampoefeningen van een cluster met hun laatste run
 // (GET /clusters/{clusterId}/disaster-scenarios)
 func (_ Unimplemented) ListDisasterScenarios(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
@@ -9831,6 +10073,12 @@ func (_ Unimplemented) GetClusterTimeline(w http.ResponseWriter, r *http.Request
 // CreateVip VIP toevoegen aan een cluster (admin)
 // (POST /clusters/{clusterId}/vips)
 func (_ Unimplemented) CreateVip(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListComponentTemplates De databases die ClusterForge op de nodes van een cluster kan zetten, met hun instellingen
+// (GET /component-templates)
+func (_ Unimplemented) ListComponentTemplates(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -11623,6 +11871,154 @@ func (siw *ServerInterfaceWrapper) ListClusterChanges(w http.ResponseWriter, r *
 	handler.ServeHTTP(w, r)
 }
 
+// ListClusterComponents operation middleware
+func (siw *ServerInterfaceWrapper) ListClusterComponents(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListClusterComponents(w, r, clusterId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AddClusterComponent operation middleware
+func (siw *ServerInterfaceWrapper) AddClusterComponent(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AddClusterComponent(w, r, clusterId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PlanClusterComponent operation middleware
+func (siw *ServerInterfaceWrapper) PlanClusterComponent(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PlanClusterComponent(w, r, clusterId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RemoveClusterComponent operation middleware
+func (siw *ServerInterfaceWrapper) RemoveClusterComponent(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "componentId" -------------
+	var componentId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "componentId", chi.URLParam(r, "componentId"), &componentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "componentId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RemoveClusterComponent(w, r, clusterId, componentId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ReapplyClusterComponent operation middleware
+func (siw *ServerInterfaceWrapper) ReapplyClusterComponent(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "componentId" -------------
+	var componentId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "componentId", chi.URLParam(r, "componentId"), &componentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "componentId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ReapplyClusterComponent(w, r, clusterId, componentId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListDisasterScenarios operation middleware
 func (siw *ServerInterfaceWrapper) ListDisasterScenarios(w http.ResponseWriter, r *http.Request) {
 
@@ -12325,6 +12721,20 @@ func (siw *ServerInterfaceWrapper) CreateVip(w http.ResponseWriter, r *http.Requ
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CreateVip(w, r, clusterId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListComponentTemplates operation middleware
+func (siw *ServerInterfaceWrapper) ListComponentTemplates(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListComponentTemplates(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -17301,6 +17711,24 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Put(options.BaseURL+"/auth/preferences", wrapper.SetPreferences)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/component-templates", wrapper.ListComponentTemplates)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/clusters/{clusterId}/components", wrapper.ListClusterComponents)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/clusters/{clusterId}/components", wrapper.AddClusterComponent)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/clusters/{clusterId}/components/plan", wrapper.PlanClusterComponent)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/clusters/{clusterId}/components/{componentId}", wrapper.RemoveClusterComponent)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/clusters/{clusterId}/components/{componentId}/apply", wrapper.ReapplyClusterComponent)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/databases", wrapper.ListDatabases)

@@ -24,6 +24,7 @@ var classes = map[string]Class{
 
 	"cluster.created": ClassInfo, "cluster.updated": ClassChange, "cluster.deleted": ClassInfo,
 	"cluster.deployed": ClassChange, "cluster.spec_changed": ClassChange, "secret.created": ClassChange,
+	"cluster.database_added": ClassInfo, "cluster.database_applied": ClassChange, "cluster.database_removed": ClassInfo,
 	"node.created": ClassInfo, "node.updated": ClassChange, "node.deleted": ClassInfo,
 	"vip.created": ClassChange, "vip.updated": ClassChange, "vip.deleted": ClassChange,
 

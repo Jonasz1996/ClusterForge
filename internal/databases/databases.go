@@ -62,10 +62,24 @@ type Service struct {
 	// Timeout is hoe lang een node mag doen over zijn antwoord.
 	Timeout time.Duration
 	Now     func() time.Time
+
+	kick chan struct{}
 }
 
 func NewService(pool *pgxpool.Pool, bus Requester, log *slog.Logger) *Service {
-	return &Service{pool: pool, q: store.New(pool), bus: bus, log: log, Interval: time.Minute, Timeout: protocol.DBTimeout, Now: time.Now}
+	return &Service{
+		pool: pool, q: store.New(pool), bus: bus, log: log, Interval: time.Minute, Timeout: protocol.DBTimeout, Now: time.Now,
+		kick: make(chan struct{}, 1),
+	}
+}
+
+// Kick laat Run meteen opnieuw lezen, bijvoorbeeld na het uitrollen van een
+// database.
+func (s *Service) Kick() {
+	select {
+	case s.kick <- struct{}{}:
+	default:
+	}
 }
 
 // Run leest de databases elke Interval, tot ctx afloopt.
@@ -83,6 +97,7 @@ func (s *Service) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
+		case <-s.kick:
 		}
 	}
 }
