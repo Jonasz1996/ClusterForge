@@ -1824,6 +1824,7 @@ const (
 	RiskCardIdBackups       RiskCardId = "backups"
 	RiskCardIdCapacity      RiskCardId = "capacity"
 	RiskCardIdConfiguration RiskCardId = "configuration"
+	RiskCardIdKubernetes    RiskCardId = "kubernetes"
 	RiskCardIdMaintenance   RiskCardId = "maintenance"
 	RiskCardIdPlatform      RiskCardId = "platform"
 	RiskCardIdRecovery      RiskCardId = "recovery"
@@ -1840,6 +1841,8 @@ func (e RiskCardId) Valid() bool {
 	case RiskCardIdCapacity:
 		return true
 	case RiskCardIdConfiguration:
+		return true
+	case RiskCardIdKubernetes:
 		return true
 	case RiskCardIdMaintenance:
 		return true
@@ -7426,7 +7429,7 @@ type RiskSubject struct {
 	Id   openapi_types.UUID `json:"id"`
 	Name string             `json:"name"`
 
-	// Type cluster, node, vip, failover_test, test_run, dependency, drift_ignore, git_change, user, proxmox, component (een SPOF) of self
+	// Type cluster, node, vip, failover_test, test_run, dependency, drift_ignore, git_change, user, proxmox, component (een SPOF), self, kube_app (een app in Kubernetes) of kube_node (een node in Kubernetes zonder ClusterForge-node)
 	Type string `json:"type"`
 }
 

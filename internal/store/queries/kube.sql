@@ -91,14 +91,16 @@ SELECT namespace, kind, name, images FROM kube_workloads WHERE cluster_id = $1;
 
 -- name: UpsertKubeWorkload :exec
 -- Bewaart een app. short_since blijft staan zolang de app niet in orde is.
-INSERT INTO kube_workloads (cluster_id, namespace, kind, name, system, desired, ready, up_to_date, images, trouble, short_since, seen_at)
+INSERT INTO kube_workloads (cluster_id, namespace, kind, name, system, desired, ready, up_to_date, images, trouble, short_since, seen_at,
+                            restarts, restarted_at, no_memory_limit)
 VALUES (@cluster_id, @namespace, @kind, @name, @system, @desired, @ready, @up_to_date, @images, @trouble,
-        CASE WHEN @short::boolean THEN now() END, @seen_at::timestamptz)
+        CASE WHEN @short::boolean THEN now() END, @seen_at::timestamptz, @restarts, @restarted_at, @no_memory_limit)
 ON CONFLICT (cluster_id, namespace, kind, name) DO UPDATE
 SET system = EXCLUDED.system, desired = EXCLUDED.desired, ready = EXCLUDED.ready, up_to_date = EXCLUDED.up_to_date,
     images = EXCLUDED.images, trouble = EXCLUDED.trouble,
     short_since = CASE WHEN @short::boolean THEN coalesce(kube_workloads.short_since, now()) END,
-    seen_at = EXCLUDED.seen_at;
+    seen_at = EXCLUDED.seen_at, restarts = EXCLUDED.restarts, restarted_at = EXCLUDED.restarted_at,
+    no_memory_limit = EXCLUDED.no_memory_limit;
 
 -- name: DeleteGoneKubeWorkloads :exec
 -- Haalt de apps weg die de sync van @seen_at niet meer zag.
@@ -245,3 +247,38 @@ FROM clusters c
 LEFT JOIN kube_clusters k ON k.cluster_id = c.id
 WHERE c.type = 'kubernetes'
 ORDER BY lower(c.name);
+
+-- name: SetKubeInventory :exec
+-- Bewaart de namespaces, webadressen en opslag van een cluster.
+UPDATE kube_clusters SET inventory = @inventory, inventory_at = now(), inventory_error = '' WHERE cluster_id = @cluster_id;
+
+-- name: SetKubeInventoryError :exec
+UPDATE kube_clusters SET inventory_error = @inventory_error WHERE cluster_id = @cluster_id;
+
+-- name: ListKubeFacts :many
+-- Per Kubernetes-cluster wat de sync laatst zag, voor de score en de
+-- documentatie, met de nieuwste etcd-snapshot die klaar is.
+SELECT c.id AS cluster_id, (k.cluster_id IS NOT NULL)::boolean AS synced, coalesce(k.api_ok, false)::boolean AS api_ok,
+       coalesce(k.version, '')::text AS version, k.synced_at, k.ok_at, k.snapshots_at,
+       coalesce(k.snapshots_error, '')::text AS snapshots_error,
+       coalesce((SELECT max(s.taken_at) FROM kube_snapshots s WHERE s.cluster_id = c.id AND s.ready), 'epoch')::timestamptz AS newest_snapshot,
+       (SELECT count(*) FROM kube_snapshots s WHERE s.cluster_id = c.id AND s.ready)::int AS snapshots,
+       k.inventory, k.inventory_at, coalesce(k.inventory_error, '')::text AS inventory_error
+FROM clusters c
+LEFT JOIN kube_clusters k ON k.cluster_id = c.id
+WHERE c.type = 'kubernetes'
+ORDER BY c.id;
+
+-- name: ListKubeNodeFacts :many
+-- De Kubernetes-nodes van alle clusters, met hun ClusterForge-node.
+SELECT k.cluster_id, k.name, k.node_id, coalesce(n.hostname, '')::text AS hostname, k.roles, k.ready, k.unschedulable, k.kubelet,
+       k.internal_ip, k.cpu_millis, k.memory_bytes, k.pods
+FROM kube_nodes k
+LEFT JOIN nodes n ON n.id = k.node_id
+ORDER BY k.cluster_id, k.name;
+
+-- name: ListKubeAppFacts :many
+-- De apps van alle clusters, voor de score en de documentatie.
+SELECT id, cluster_id, namespace, kind, name, system, desired, ready, images, trouble, status, restarts, restarted_at, no_memory_limit
+FROM kube_workloads
+ORDER BY cluster_id, namespace, name, kind;

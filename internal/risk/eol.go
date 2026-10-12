@@ -45,3 +45,34 @@ func EOL(id, version string) (time.Time, bool) {
 	// Tot het einde van die dag.
 	return t.Add(24*time.Hour - time.Second), true
 }
+
+// kubeEOL is per minorversie van Kubernetes de dag waarop er geen patches
+// meer komen, volgens de releasekalender op kubernetes.io; k3s volgt die.
+// Voor 1.35 en 1.36 is het de verwachte dag: veertien maanden na de
+// release, zoals bij de versies ervoor. Een nieuwe versie komt erbij in een
+// nieuwe versie van ClusterForge, met een test.
+var kubeEOL = map[string]string{
+	"1.30": "2025-06-28", "1.31": "2025-10-28", "1.32": "2026-02-28", "1.33": "2026-06-28", "1.34": "2026-10-27",
+	"1.35": "2027-02-28", "1.36": "2027-06-28",
+}
+
+// KubeEOL geeft de minorversie en het einde van haar ondersteuning bij een
+// versie zoals v1.35.9+k3s1, of false als ClusterForge haar niet kent.
+func KubeEOL(version string) (minor string, end time.Time, ok bool) {
+	v := strings.TrimPrefix(version, "v")
+	major, rest, found := strings.Cut(v, ".")
+	if !found {
+		return "", time.Time{}, false
+	}
+	m, _, _ := strings.Cut(rest, ".")
+	minor = major + "." + m
+	day, ok := kubeEOL[minor]
+	if !ok {
+		return minor, time.Time{}, false
+	}
+	t, err := time.Parse(time.DateOnly, day)
+	if err != nil {
+		return minor, time.Time{}, false
+	}
+	return minor, t.Add(24*time.Hour - time.Second), true
+}

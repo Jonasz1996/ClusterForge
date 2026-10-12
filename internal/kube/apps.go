@@ -71,6 +71,53 @@ func (w Workload) Health(pods []Pod) (short bool, trouble string) {
 	return w.ReadyPods() < desired || (st == WorkloadRolling && len(problems) > 0), trouble
 }
 
+// pods zijn de pods van de app.
+func (w Workload) pods(pods []Pod) []Pod {
+	var out []Pod
+	for _, p := range pods {
+		if p.Metadata.Namespace != w.Metadata.Namespace {
+			continue
+		}
+		if k, n := WorkloadOf(p.Metadata); k == w.Kind && n == w.Metadata.Name {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// Restarts telt hoe vaak de containers van de pods van de app herstartten,
+// met wanneer een container het laatst stopte. Een nieuwe pod begint weer
+// bij nul, dus dit zegt iets over de pods die er nu zijn.
+func (w Workload) Restarts(pods []Pod) (n int, last *time.Time) {
+	for _, p := range w.pods(pods) {
+		for _, c := range p.Status.ContainerStatuses {
+			n += c.RestartCount
+			if t := c.LastState.Terminated; c.RestartCount > 0 && t != nil && !t.FinishedAt.IsZero() && (last == nil || t.FinishedAt.After(*last)) {
+				at := t.FinishedAt
+				last = &at
+			}
+		}
+	}
+	return n, last
+}
+
+// NoMemoryLimit zijn de containers zonder geheugenlimiet. Zijn er pods, dan
+// tellen die, want een LimitRange in de namespace kan er een invullen;
+// anders het sjabloon van de app.
+func (w Workload) NoMemoryLimit(pods []Pod) []string {
+	containers := w.Spec.Template.Spec.Containers
+	if ps := w.pods(pods); len(ps) > 0 {
+		containers = ps[0].Spec.Containers
+	}
+	out := []string{}
+	for _, c := range containers {
+		if !c.MemoryLimit() && !slices.Contains(out, c.Name) {
+			out = append(out, c.Name)
+		}
+	}
+	return out
+}
+
 // imagesChanged geeft de images die anders zijn dan voorheen, als 'oud' en
 // 'nieuw'; ok is false als er niets veranderde.
 func imagesChanged(before, after []string) (from, to []string, ok bool) {

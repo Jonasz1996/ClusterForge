@@ -4,6 +4,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/Jonasz1996/clusterforge/internal/kube"
 )
 
 // Fleet is alles waaruit de documentatie geschreven wordt. Gather vult het
@@ -68,6 +70,50 @@ type Cluster struct {
 	// Summary is de samenvatting 'In het kort' van de assistent; nil
 	// zonder.
 	Summary *Summary
+	// Kube is wat de sync laatst van een Kubernetes-cluster zag; nil bij
+	// een ander clustertype.
+	Kube *Kube
+}
+
+// Kube is een Kubernetes-cluster zoals de sync het laatst zag.
+type Kube struct {
+	// Synced is false als ClusterForge het cluster nog nooit las.
+	Synced bool
+	// Version is de versie van de API-server, zoals v1.35.9+k3s1.
+	Version string
+	// TemplateK3s is de k3s van de templateversie, NextVersion en NextK3s
+	// de versie waarnaar het cluster kan bijwerken; leeg zonder.
+	TemplateK3s, NextVersion, NextK3s string
+	// Init is de server die het cluster begon; leeg als geen agent het
+	// meldt.
+	Init  string
+	Nodes []KubeNode
+	Apps  []KubeApp
+	// Inventory is nil als de namespaces, webadressen en opslag nog nooit
+	// gelezen werden.
+	Inventory *kube.Inventory
+	// Snapshots telt de etcd-snapshots die klaar zijn; Fresh is ok, stale,
+	// none of unknown, zoals kube.Fresh.
+	Snapshots int
+	Fresh     string
+}
+
+// KubeNode is een node in Kubernetes, met de ClusterForge-node als die
+// gekoppeld is.
+type KubeNode struct {
+	Name, Hostname string
+	Server         bool
+	Kubelet, IP    string
+	CPUMillis      int64
+	MemoryBytes    int64
+}
+
+// KubeApp is een Deployment, StatefulSet of DaemonSet.
+type KubeApp struct {
+	Namespace, Kind, Name string
+	System                bool
+	Desired               int
+	Images                []string
 }
 
 // Summary is een samenvatting die de assistent op verzoek schreef. Text is

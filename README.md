@@ -67,6 +67,7 @@ Het technisch ontwerp staat in [docs/design/mvp-fase-1.md](docs/design/mvp-fase-
 | 9. kubectl op je eigen pc | Een kubeconfig per gebruiker voor kubectl, k9s, Headlamp of Lens, met een eigen ServiceAccount en een token dat verloopt; beheerder of alleen lezen, intrekken werkt meteen, en verlopen kubeconfigs ruimt ClusterForge op | klaar |
 | 10. etcd-snapshots | Een tabblad Snapshots met de snapshots die k3s van zijn database maakt, per server, en hun stand bij Back-ups; Snapshot nu; in lab en test het hele cluster terugzetten naar een snapshot als taak die stap voor stap doet wat k3s beschrijft; op prod een runbook met de commando's | klaar |
 | 11. Bijwerken | Template 1.1.0 met k3s 1.36; op het overzicht welke k3s elke node draait en Bijwerken naar de volgende versie, één minorversie per keer en nooit terug; de uitrol gaat node voor node, eerst de servers, maakt elke node eerst leeg, wacht tot hij Ready is met de nieuwe versie en stopt bij de eerste node die niet terugkomt | klaar |
+| 12. Score en documentatie | Een scorekaart Kubernetes bij de health score: een node die NotReady is, één server op prod, geen of een te oude etcd-snapshot, een k3s zonder updates, een app die blijft herstarten, en apps op prod met één pod, met een image zonder vaste versie of zonder geheugenlimiet; een hoofdstuk Kubernetes in de documentatie met de versie, nodes, namespaces, apps, webadressen, opslag en snapshots, en de runbooks voor een node vervangen, bijwerken en etcd terugzetten | klaar |
 
 ## Draaien met Docker Compose
 
@@ -660,6 +661,28 @@ Komt een node niet terug, dan stopt de taak daar en blijft die node op cordon; d
 
 Met één server antwoordt de API van het cluster even niet terwijl k3s daar herstart, en is het VIP even weg; apps die al draaien, blijven draaien. Met drie servers neemt een andere server het VIP over. Volgt het cluster Git, dan zet je in `cluster.yaml` de versie van de template op de nieuwe en keur je de wijziging goed; de uitrol is dezelfde.
 
+### Score en documentatie
+
+Een Kubernetes-cluster krijgt bij de [health score](#gezondheid) een achtste kaart, **Kubernetes**, met deze bevindingen:
+
+| Bevinding | Ernst | Wanneer |
+| --- | --- | --- |
+| Node NotReady | middel, op prod hoog | een node die Kubernetes niet Ready noemt; na vijf minuten zet Kubernetes zijn pods elders |
+| Eén server | middel | een prod-cluster met één server: valt die uit, dan antwoordt de API niet en start niets opnieuw |
+| Geen etcd-snapshot | hoog, op prod kritiek | ClusterForge las de snapshots en er is er geen die klaar is |
+| Snapshot te oud | middel, op prod hoog | de nieuwste snapshot is ouder dan een dag; k3s maakt er normaal elke twaalf uur een |
+| Versie zonder updates | hoog, of laag binnen 90 dagen | de Kubernetes-minor van k3s krijgt geen updates meer |
+| Blijft herstarten | middel, op prod hoog | een app met een pod in CrashLoopBackOff, of met minstens drie herstarts van zijn huidige pods en de laatste in het afgelopen etmaal |
+| Eén pod | laag | apps op prod met `replicas: 1` (geen DaemonSet) |
+| Image zonder vaste versie | laag | apps met een image op `:latest` of zonder tag; een digest (`@sha256:…`) is vast |
+| Geen geheugenlimiet | laag | apps met een container zonder `resources.limits.memory` |
+
+De laatste drie tellen alleen de eigen apps, niet die van k3s in `kube-system`, en zijn één bevinding per cluster met de namen erin, zodat tien apps zonder limiet de score niet laten kelderen. Oplossen opent het overzicht van het cluster, het tabblad Nodes, Snapshots of Apps, of de app zelf. Een bevinding over een app of node accepteer je zoals elke andere; een node die niet in ClusterForge staat, krijgt een vast id uit het cluster en zijn naam. Zolang ClusterForge het cluster niet kon lezen, is de kaart onbekend.
+
+In de [documentatie](#documentatie) krijgt het cluster een hoofdstuk **Kubernetes**, na Architectuur: de k3s-versie en tot wanneer ze updates krijgt, de nieuwere template als die er is, de API via het VIP, de nodes met rol, ClusterForge-node, adres, k3s-versie, CPU en geheugen, de eigen namespaces, de apps met soort, aantal pods en images, de webadressen (elke regel van een Ingress, en Services met een adres buiten het cluster), de opslag met klasse, grootte, node, map en de pods die hem gebruiken, en de etcd-snapshots. Daarna de runbooks: een worker of server vervangen, bijwerken met de volgorde van de nodes, en etcd terugzetten met de commando's stap voor stap. Het hoofdstuk Runbooks zegt dat onderhoud, herstarten en afsluiten een node eerst leegmaken, en verwijst voor een node vervangen naar dit hoofdstuk.
+
+Wat elke minuut verandert, zoals Ready en het aantal herstarts, staat er niet in: dat staat in ClusterForge, en zo krijgt het hoofdstuk alleen een nieuwe versie als er echt iets veranderde. De namespaces, webadressen en opslag leest ClusterForge elke vijf minuten; na een uitrol, Toepassen of een andere wijziging aan het cluster schrijft het de documentatie opnieuw, zoals bij elk cluster. Secrets staan er niet in.
+
 ### Hoe ClusterForge Kubernetes leest
 
 De server praat nooit zelf met de Kubernetes-API. cf-agent op een k3s-server doet het, met de beheerdersconfig `/etc/rancher/k3s/k3s.yaml` die daar al staat, en stuurt het antwoord via de bestaande verbinding (NATS) terug. Daardoor hoeft poort 6443 niet open naar ClusterForge, en verlaat geen certificaat van het cluster de server. ClusterForge kiest een server met een verse heartbeat waarvan de API antwoordt; valt die weg, dan neemt een andere het over.
@@ -670,7 +693,7 @@ Voor snapshots doet de agent op een server alleen dit: `k3s etcd-snapshot save` 
 
 Dit kan vanaf **agentprotocol 8**. Met een oudere agent toont de pagina "Agent te oud voor Kubernetes", met het commando om hem bij te werken; de aanmelding blijft staan. Werk ook je golden image bij, anders krijgen nieuwe VM's de oude agent. De andere onderdelen van ClusterForge blijven werken met een oudere agent.
 
-Elke 30 seconden vat ClusterForge elk Kubernetes-cluster samen voor de lijst, de status, de apps en de waarschuwingen. Antwoordt de API niet, dan blijft de laatste stand staan met "API niet bereikbaar" en de reden.
+Elke 30 seconden vat ClusterForge elk Kubernetes-cluster samen voor de lijst, de status, de apps, de waarschuwingen en de score, en elke vijf minuten leest het de etcd-snapshots en de namespaces, webadressen en opslag voor de documentatie. Antwoordt de API niet, dan blijft de laatste stand staan met "API niet bereikbaar" en de reden.
 
 ## Failovertests
 
@@ -908,9 +931,9 @@ De analyse rekent opnieuw zolang het incident open is en tot een uur na het eind
 
 De status zegt hoe het nu gaat. De health score zegt hoe kwetsbaar een cluster is: een cluster kan gezond zijn terwijl beide nodes op dezelfde Proxmox-host draaien, de laatste back-up twee dagen oud is en de failovertest al maanden niet liep. Elk cluster krijgt een score van 0 tot 100 en een cijfer: A vanaf 90, B vanaf 80, C vanaf 70, D vanaf 60, E vanaf 50, anders F. Het zijn vaste regels zonder AI, met de reden bij elke bevinding.
 
-**Waar.** Het overzicht toont de score van het geheel met de trend over 30 dagen, het cijfer per cluster en de drie bevindingen die het meeste opleveren; de rest klapt open. De clusterlijst heeft een cijferbadge naast de status. Een cluster heeft een kaart Gezondheid met de zeven scorekaarten. Elke bevinding heeft een link Oplossen naar het scherm waar je het doet, en wat de score stijgt als je het oplost.
+**Waar.** Het overzicht toont de score van het geheel met de trend over 30 dagen, het cijfer per cluster en de drie bevindingen die het meeste opleveren; de rest klapt open. De clusterlijst heeft een cijferbadge naast de status. Een cluster heeft een kaart Gezondheid met de zeven scorekaarten, een Kubernetes-cluster met acht. Elke bevinding heeft een link Oplossen naar het scherm waar je het doet, en wat de score stijgt als je het oplost.
 
-**De zeven kaarten.** Elke kaart begint op 100 en verliest punten per bevinding: laag 5, middel 10, hoog 20, kritiek 40, nooit onder 0. Op prod is een bevinding vaak een stap ernstiger, op lab een stap milder.
+**De kaarten.** Elke kaart begint op 100 en verliest punten per bevinding: laag 5, middel 10, hoog 20, kritiek 40, nooit onder 0. Op prod is een bevinding vaak een stap ernstiger, op lab een stap milder.
 
 | Kaart | Weegt | Wat telt |
 | --- | --- | --- |
@@ -921,8 +944,9 @@ De status zegt hoe het nu gaat. De health score zegt hoe kwetsbaar een cluster i
 | Configuratie | 10 % | geen gewenste staat; drift, zwaarder naarmate ze langer duurt; een regel die alle drift negeert; een revisie die al een uur niet toegepast is; een mislukte Git-wijziging |
 | Onderhoud en beveiliging | 10 % | open beveiligingsupdates, zwaarder na 3 en 14 dagen; pakketlijsten die 14 dagen niet ververst zijn; een herstart nodig; een besturingssysteem dat end-of-life is of binnen 90 dagen wordt; een certificaat op de node dat binnen 30 dagen verloopt; een verouderde agent |
 | Capaciteit | 5 % | een schijf boven 85 % of 95 %; een schijf die volgens de trend van 7 dagen binnen 14 dagen vol is; CPU of geheugen met een p95 boven 90 % over 7 dagen; veel swap; meer dan 1000 netwerkfouten in 7 dagen |
+| Kubernetes | 15, alleen bij een Kubernetes-cluster | een node die NotReady is; één server op prod; geen etcd-snapshot of een die ouder is dan een dag; een k3s-versie zonder updates of die er binnen 90 dagen geen meer krijgt; een app die blijft herstarten; apps op prod met één pod, apps met een image zonder vaste versie (`:latest` of zonder tag) en apps met pods zonder geheugenlimiet, elk samen als één lage bevinding. Zie [Score en documentatie](#score-en-documentatie) |
 
-Een kaart zonder gegevens is onbekend en telt niet mee; de kaart zegt waarom, bijvoorbeeld 'Zonder VIP is er geen failovertest'. De trend, CPU en geheugen komen uit VictoriaMetrics; zonder VictoriaMetrics telt bij Capaciteit alleen de schijfbezetting.
+De score is het gewogen gemiddelde van de kaarten die iets weten; bij een Kubernetes-cluster weegt de kaart Kubernetes 15 naast de 100 van de andere, en toont elke kaart haar deel daarvan (Beschikbaarheid dan 22 %). Een kaart zonder gegevens is onbekend en telt niet mee; de kaart zegt waarom, bijvoorbeeld 'Zonder VIP is er geen failovertest'. De trend, CPU en geheugen komen uit VictoriaMetrics; zonder VictoriaMetrics telt bij Capaciteit alleen de schijfbezetting.
 
 **Plafonds.** Een cluster dat nu down is of een split-brain heeft, krijgt hoogstens 40. Een prod-cluster zonder enige back-up krijgt hoogstens 60.
 
@@ -966,9 +990,10 @@ Vanuit de wat-als (Op de kaart tonen) en vanuit een incident (Wat het raakte, op
 
 ## Documentatie
 
-Bij Documentatie staat wat ClusterForge zelf over de clusters schrijft, uit wat het al weet: de specificatie, de inventory, de facts van de agents, Proxmox, de afhankelijkheden, de back-ups, de tests en de wat-als. Er is een overzicht met alle clusters, de afhankelijkheden tussen clusters als diagram, de Proxmox-hosts met hun storage en bridges, de single points of failure en de open bevindingen. Elk cluster heeft vijf hoofdstukken:
+Bij Documentatie staat wat ClusterForge zelf over de clusters schrijft, uit wat het al weet: de specificatie, de inventory, de facts van de agents, Proxmox, de afhankelijkheden, de back-ups, de tests en de wat-als. Er is een overzicht met alle clusters, de afhankelijkheden tussen clusters als diagram, de Proxmox-hosts met hun storage en bridges, de single points of failure en de open bevindingen. Elk cluster heeft vijf hoofdstukken, een Kubernetes-cluster zes:
 
 - **Architectuur.** Wat het cluster doet, de nodes met hun VM en host, de VIP's met de volgorde waarin keepalived ze geeft, en de diensten met hun afhankelijkheden als diagram.
+- **Kubernetes.** Alleen bij een Kubernetes-cluster: de k3s-versie en tot wanneer ze updates krijgt, de nodes met hun rol, de namespaces, de apps met hun images en aantal pods, de webadressen, de opslag en de etcd-snapshots, met de runbooks voor een node vervangen, bijwerken en etcd terugzetten. Zie [Score en documentatie](#score-en-documentatie).
 - **Netwerk.** Subnet, gateway, DNS, bridge en VLAN, een diagram van de nodes per host met de VIP's, de adressen per interface met MAC-adres, bridge en VLAN uit Proxmox, en de poorten.
 - **Configuratie.** De template met zijn parameters, de bestanden die ClusterForge op elke node zet, `cluster.yaml` zoals het in Git zou staan, en de revisies met wat er veranderde.
 - **Herstel.** De back-ups per node met hun versheid, de back-upcontroles met de hersteltijd, de failovertests met wat ze maten, de DR-repetitie met de gemeten RTO en RPO tegen de doelen, en per node en per host wat er uitvalt volgens de wat-als.

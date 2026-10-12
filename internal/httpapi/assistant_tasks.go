@@ -65,7 +65,8 @@ func (s *Server) incidentAI(ctx context.Context, row store.Incident) nullable.Nu
 // cardNames zijn de scorekaarten in woorden.
 var cardNames = map[risk.CardID]string{
 	risk.Availability: "Beschikbaarheid", risk.Backups: "Back-ups", risk.Recovery: "Herstelbaarheid", risk.Redundancy: "Redundantie",
-	risk.Configuration: "Configuratie", risk.Maintenance: "Onderhoud", risk.Capacity: "Capaciteit", risk.Platform: "Platform",
+	risk.Configuration: "Configuratie", risk.Maintenance: "Onderhoud", risk.Capacity: "Capaciteit", risk.Kubernetes: "Kubernetes",
+	risk.Platform: "Platform",
 }
 
 // componentNames zijn de soorten onderdelen in een zin.
@@ -205,7 +206,7 @@ func (s *Server) SummarizeDocs(w http.ResponseWriter, r *http.Request, params ge
 		return
 	}
 	var chapters strings.Builder
-	for _, kind := range docs.ClusterKinds {
+	for _, kind := range docs.Kinds(cl.Type) {
 		d, err := s.docs.Get(ctx, docs.ScopeCluster, kind, &cl.ID, nil)
 		if err != nil {
 			s.internalError(w, r, err)

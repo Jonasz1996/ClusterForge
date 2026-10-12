@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"slices"
 	"strconv"
 	"time"
 
@@ -103,6 +104,10 @@ func (s *Service) gather(ctx context.Context, now time.Time) (world, error) {
 	if w.acc, err = s.acceptances(ctx, now); err != nil {
 		return w, err
 	}
+	kube, err := s.kubeInputs(ctx)
+	if err != nil {
+		return w, err
+	}
 	nodeMetrics, metricsRead := s.nodeMetrics(ctx, now)
 	backupsOf, verified := s.backupInputs(ctx)
 
@@ -149,7 +154,7 @@ func (s *Service) gather(ctx context.Context, now time.Time) (world, error) {
 			Nodes: perCluster[c.ID], History: hist[c.ID], Since: c.CreatedAt, Incidents: incidentCount[c.ID],
 			VIPMoves: map[uuid.UUID]int{}, Backups: backupsOf[c.ID], LastVerified: verified[c.ID],
 			DesiredState: c.DesiredState, SpecRevision: int(c.SpecRevision), AppliedRevision: int(c.AppliedRevision),
-			RevisionSince: notEpoch(c.RevisionSince), RevisionRunning: c.Busy, MetricsRead: metricsRead,
+			RevisionSince: notEpoch(c.RevisionSince), RevisionRunning: c.Busy, MetricsRead: metricsRead, Kube: kube[c.ID],
 		}
 		for _, v := range vips {
 			if v.ClusterID != c.ID {
@@ -227,6 +232,43 @@ func (s *Service) gather(ctx context.Context, now time.Time) (world, error) {
 		})
 	}
 	return w, nil
+}
+
+// kubeInputs leest per Kubernetes-cluster wat de sync laatst zag.
+func (s *Service) kubeInputs(ctx context.Context) (map[uuid.UUID]*KubeInput, error) {
+	facts, err := s.q.ListKubeFacts(ctx)
+	if err != nil {
+		return nil, err
+	}
+	nodes, err := s.q.ListKubeNodeFacts(ctx)
+	if err != nil {
+		return nil, err
+	}
+	apps, err := s.q.ListKubeAppFacts(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := map[uuid.UUID]*KubeInput{}
+	for _, f := range facts {
+		out[f.ClusterID] = &KubeInput{
+			Synced: f.Synced, Version: f.Version, SnapshotsRead: f.SnapshotsAt != nil && f.SnapshotsError == "",
+			NewestSnapshot: notEpoch(f.NewestSnapshot),
+		}
+	}
+	for _, n := range nodes {
+		if k := out[n.ClusterID]; k != nil {
+			k.Nodes = append(k.Nodes, KubeNodeInput{Name: n.Name, NodeID: n.NodeID, Server: slices.Contains(n.Roles, "control-plane"), Ready: n.Ready})
+		}
+	}
+	for _, a := range apps {
+		if k := out[a.ClusterID]; k != nil {
+			k.Apps = append(k.Apps, KubeAppInput{
+				ID: a.ID, Namespace: a.Namespace, Kind: a.Kind, Name: a.Name, System: a.System, Desired: int(a.Desired), Images: a.Images,
+				Trouble: a.Trouble, Restarts: int(a.Restarts), RestartedAt: a.RestartedAt, NoMemoryLimit: a.NoMemoryLimit,
+			})
+		}
+	}
+	return out, nil
 }
 
 // World leest wat de wat-als nodig heeft.

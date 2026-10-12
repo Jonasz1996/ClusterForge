@@ -7,6 +7,7 @@
 package docs
 
 import (
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -26,14 +27,24 @@ const (
 	KindConfiguration = "configuratie"
 	KindRecovery      = "herstel"
 	KindRunbooks      = "runbooks"
+	KindKubernetes    = "kubernetes"
 )
 
-// ClusterKinds zijn de hoofdstukken van een cluster, in hun volgorde.
+// ClusterKinds zijn de hoofdstukken van elk cluster, in hun volgorde.
 var ClusterKinds = []string{KindArchitecture, KindNetwork, KindConfiguration, KindRecovery, KindRunbooks}
+
+// Kinds zijn de hoofdstukken van een cluster van dit type: een
+// Kubernetes-cluster heeft na Architectuur het hoofdstuk Kubernetes.
+func Kinds(clusterType string) []string {
+	if clusterType != "kubernetes" {
+		return ClusterKinds
+	}
+	return []string{KindArchitecture, KindKubernetes, KindNetwork, KindConfiguration, KindRecovery, KindRunbooks}
+}
 
 var titles = map[string]string{
 	KindOverview: "Overzicht", KindArchitecture: "Architectuur", KindNetwork: "Netwerk", KindConfiguration: "Configuratie",
-	KindRecovery: "Herstel", KindRunbooks: "Runbooks",
+	KindRecovery: "Herstel", KindRunbooks: "Runbooks", KindKubernetes: "Kubernetes",
 }
 
 // Title is de titel van een soort document.
@@ -45,11 +56,7 @@ func Valid(scope, kind string) bool {
 	case ScopeOverview:
 		return kind == KindOverview
 	case ScopeCluster:
-		for _, k := range ClusterKinds {
-			if k == kind {
-				return true
-			}
-		}
+		return slices.Contains(Kinds("kubernetes"), kind)
 	}
 	return false
 }
@@ -101,8 +108,9 @@ func Render(f Fleet, o Opts) []Rendered {
 // RenderCluster schrijft de hoofdstukken van één cluster.
 func RenderCluster(c *Cluster, o Opts) []Rendered {
 	id := c.ID
-	out := make([]Rendered, 0, len(ClusterKinds))
-	for _, k := range ClusterKinds {
+	kinds := Kinds(c.Type)
+	out := make([]Rendered, 0, len(kinds))
+	for _, k := range kinds {
 		out = append(out, Rendered{Scope: ScopeCluster, Kind: k, ClusterID: &id, Slug: c.Slug, Content: Chapter(c, k, o)})
 	}
 	return out
@@ -121,6 +129,10 @@ func Chapter(c *Cluster, kind string, o Opts) string {
 		return recovery(c, o)
 	case KindRunbooks:
 		return runbooks(c, o)
+	case KindKubernetes:
+		if c.Kube != nil {
+			return kubernetes(c, o)
+		}
 	}
 	return ""
 }
@@ -129,7 +141,7 @@ func Chapter(c *Cluster, kind string, o Opts) string {
 func header(d *doc, c *Cluster, kind string) {
 	d.h1(esc(c.Name) + ": " + lower(Title(kind)))
 	nav := link("Overzicht", "../../README.md")
-	for _, k := range ClusterKinds {
+	for _, k := range Kinds(c.Type) {
 		if k == kind {
 			nav += " · **" + Title(k) + "**"
 		} else {

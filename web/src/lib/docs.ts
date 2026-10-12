@@ -25,6 +25,7 @@ export const downloadUrl = "/api/v1/docs/download";
 export const kindLabels: Record<string, string> = {
   overzicht: "Overzicht",
   architectuur: "Architectuur",
+  kubernetes: "Kubernetes",
   netwerk: "Netwerk",
   configuratie: "Configuratie",
   herstel: "Herstel",

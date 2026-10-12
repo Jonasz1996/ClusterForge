@@ -647,6 +647,9 @@ type KubeCluster struct {
 	ErrorKind      string
 	SnapshotsAt    *time.Time
 	SnapshotsError string
+	Inventory      []byte
+	InventoryAt    *time.Time
+	InventoryError string
 }
 
 type KubeEvent struct {
@@ -707,22 +710,25 @@ type KubeSnapshot struct {
 }
 
 type KubeWorkload struct {
-	ID           uuid.UUID
-	ClusterID    uuid.UUID
-	Namespace    string
-	Kind         string
-	Name         string
-	System       bool
-	Desired      int32
-	Ready        int32
-	UpToDate     int32
-	Images       []string
-	Trouble      string
-	ShortSince   *time.Time
-	Status       string
-	StatusReason string
-	StatusSince  *time.Time
-	SeenAt       time.Time
+	ID            uuid.UUID
+	ClusterID     uuid.UUID
+	Namespace     string
+	Kind          string
+	Name          string
+	System        bool
+	Desired       int32
+	Ready         int32
+	UpToDate      int32
+	Images        []string
+	Trouble       string
+	ShortSince    *time.Time
+	Status        string
+	StatusReason  string
+	StatusSince   *time.Time
+	SeenAt        time.Time
+	Restarts      int32
+	RestartedAt   *time.Time
+	NoMemoryLimit []string
 }
 
 type Node struct {

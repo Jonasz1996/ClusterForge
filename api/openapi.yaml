@@ -3617,7 +3617,7 @@ components:
       name: kind
       in: path
       required: true
-      description: overzicht bij scope overview; architectuur, netwerk, configuratie, herstel of runbooks bij een cluster
+      description: overzicht bij scope overview; architectuur, netwerk, configuratie, herstel of runbooks bij een cluster, en kubernetes bij een Kubernetes-cluster
       schema: { type: string }
     DocClusterParam:
       name: cluster
@@ -6520,12 +6520,12 @@ components:
       enum: [low, medium, high, critical]
     RiskCardId:
       type: string
-      enum: [availability, backups, recovery, redundancy, configuration, maintenance, capacity, platform]
+      enum: [availability, backups, recovery, redundancy, configuration, maintenance, capacity, kubernetes, platform]
     RiskSubject:
       type: object
       required: [type, id, name]
       properties:
-        type: { type: string, description: "cluster, node, vip, failover_test, test_run, dependency, drift_ignore, git_change, user, proxmox, component (een SPOF) of self" }
+        type: { type: string, description: "cluster, node, vip, failover_test, test_run, dependency, drift_ignore, git_change, user, proxmox, component (een SPOF), self, kube_app (een app in Kubernetes) of kube_node (een node in Kubernetes zonder ClusterForge-node)" }
         id: { type: string, format: uuid }
         name: { type: string }
     RiskAcceptance:

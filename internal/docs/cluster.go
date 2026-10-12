@@ -1058,6 +1058,10 @@ func runbooks(c *Cluster, o Opts) string {
 		d.p(list(noAgent) + " " + map[bool]string{true: "heeft", false: "hebben"}[len(noAgent) == 1] +
 			" geen agent. Die zet je alleen in en uit onderhoud; de VIP's haal je dan zelf weg.")
 	}
+	if c.Kube != nil {
+		d.p("Dit is een Kubernetes-cluster: voor onderhoud, een herstart of afsluiten maakt ClusterForge de node eerst leeg in Kubernetes (cordon en drain), " +
+			"zodat zijn pods op de andere nodes starten. Na het onderhoud krijgt hij weer pods zodra hij Ready is.")
+	}
 
 	d.h2("Een node herstarten")
 	if keepalived {
@@ -1107,6 +1111,10 @@ func runbooks(c *Cluster, o Opts) string {
 	}
 
 	d.h2("Een node vervangen")
+	if c.Kube != nil {
+		d.p("Bij een Kubernetes-cluster staat dit in het hoofdstuk " + link("Kubernetes", KindKubernetes+".md#een-node-vervangen") +
+			": een worker zet je erbij en haal je weg in ClusterForge, een server niet.")
+	}
 	var ways []string
 	ways = append(ways, "Is de VM stuk en de back-up goed, zet hem dan terug zoals hierboven. De node houdt zijn naam, adres en aanmelding.")
 	switch {
@@ -1120,7 +1128,9 @@ func runbooks(c *Cluster, o Opts) string {
 	if c.Template == nil {
 		ways = ways[:1]
 	}
-	d.bullets(ways)
+	if c.Kube == nil {
+		d.bullets(ways)
+	}
 
 	hosts := hostOutages(c)
 	if len(hosts) > 0 {

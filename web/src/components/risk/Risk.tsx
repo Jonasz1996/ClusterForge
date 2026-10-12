@@ -315,14 +315,26 @@ export function FleetRiskCard({ isAdmin }: { isAdmin: boolean }) {
   );
 }
 
-function CardPanel({ c, isAdmin, onAccept }: { c: RiskCard; isAdmin: boolean; onAccept: (f: RiskFinding) => void }) {
+// share is het deel van de score dat de kaart weegt, in procenten: de
+// gewichten tellen op tot 100, met de kaart Kubernetes erbij tot 115.
+function CardPanel({
+  c,
+  share,
+  isAdmin,
+  onAccept,
+}: {
+  c: RiskCard;
+  share: number;
+  isAdmin: boolean;
+  onAccept: (f: RiskFinding) => void;
+}) {
   const known = c.score !== null;
   return (
     <div className="rounded-md border border-slate-200 p-3 dark:border-slate-800">
       <div className="flex items-baseline justify-between gap-2">
         <h3 className="text-sm font-medium">{cardLabels[c.id]}</h3>
         <span className="text-xs text-slate-500 tabular-nums">
-          {known ? `${c.score} / 100` : "onbekend"} · weegt {c.weight}%
+          {known ? `${c.score} / 100` : "onbekend"} · weegt {share}%
         </span>
       </div>
       {known && (
@@ -356,12 +368,13 @@ function CardPanel({ c, isAdmin, onAccept }: { c: RiskCard; isAdmin: boolean; on
   );
 }
 
-// ClusterRiskCard is de health score van een cluster met de zeven kaarten.
+// ClusterRiskCard is de health score van een cluster met zijn kaarten.
 export function ClusterRiskCard({ clusterId, isAdmin }: { clusterId: string; isAdmin: boolean }) {
   const q = useClusterRisk(clusterId);
   const hist = useRiskHistory(clusterId);
   const [accepting, setAccepting] = useState<RiskFinding | null>(null);
   const d = q.data;
+  const total = d?.cards.reduce((sum, c) => sum + c.weight, 0) || 100;
   return (
     <section id="gezondheid" className="scroll-mt-4">
       <Card
@@ -388,7 +401,13 @@ export function ClusterRiskCard({ clusterId, isAdmin }: { clusterId: string; isA
             {d.cards.length > 0 && (
               <div className="grid gap-3 lg:grid-cols-2">
                 {d.cards.map((c) => (
-                  <CardPanel key={c.id} c={c} isAdmin={isAdmin} onAccept={setAccepting} />
+                  <CardPanel
+                    key={c.id}
+                    c={c}
+                    share={Math.round((c.weight * 100) / total)}
+                    isAdmin={isAdmin}
+                    onAccept={setAccepting}
+                  />
                 ))}
               </div>
             )}

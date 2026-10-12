@@ -462,12 +462,16 @@ func TestDeterministic(t *testing.T) {
 // Elke check in de broncode staat in de catalogus, en de catalogus heeft
 // geen checks die nergens gebruikt worden.
 func TestCatalog(t *testing.T) {
-	src, err := os.ReadFile("checks.go")
-	if err != nil {
-		t.Fatal(err)
+	var src []byte
+	for _, f := range []string{"checks.go", "kube.go"} {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		src = append(src, b...)
 	}
 	used := map[string]bool{}
-	for _, m := range regexp.MustCompile(`"((?:availability|backups|recovery|redundancy|configuration|maintenance|capacity|platform)\.[a-z_]+)"`).FindAllStringSubmatch(string(src), -1) {
+	for _, m := range regexp.MustCompile(`"((?:availability|backups|recovery|redundancy|configuration|maintenance|capacity|kubernetes|platform)\.[a-z_]+)"`).FindAllStringSubmatch(string(src), -1) {
 		used[m[1]] = true
 		if Checks[m[1]] == "" {
 			t.Errorf("check %s ontbreekt in de catalogus", m[1])
@@ -481,6 +485,143 @@ func TestCatalog(t *testing.T) {
 	for _, w := range Weights {
 		if CardLabels[w.Card] == "" {
 			t.Errorf("kaart %s heeft geen naam", w.Card)
+		}
+	}
+}
+
+// kubeHealthy is een gezond Kubernetes-cluster op prod: drie servers,
+// een verse snapshot, een ondersteunde k3s en een app met twee pods,
+// een vaste image en een geheugenlimiet.
+func kubeHealthy() ClusterInput {
+	in := healthy()
+	in.Name = "shop"
+	in.Kube = &KubeInput{
+		Synced: true, Version: "v1.36.5+k3s1", SnapshotsRead: true, NewestSnapshot: ago(3 * time.Hour),
+		Nodes: []KubeNodeInput{
+			{Name: "shop-server-01", Server: true, Ready: true}, {Name: "shop-server-02", Server: true, Ready: true},
+			{Name: "shop-server-03", Server: true, Ready: true}, {Name: "shop-worker-01", Ready: true},
+		},
+		Apps: []KubeAppInput{
+			{ID: uuid.New(), Namespace: "shop", Kind: "Deployment", Name: "web", Desired: 2, Images: []string{"ghcr.io/jonas/web:1.4.3"}},
+			{ID: uuid.New(), Namespace: "kube-system", Kind: "Deployment", Name: "coredns", System: true, Desired: 1,
+				Images: []string{"rancher/mirrored-coredns-coredns:1.12.3"}, NoMemoryLimit: []string{"coredns"}},
+		},
+	}
+	return in
+}
+
+func TestKubernetesCard(t *testing.T) {
+	r := Score(kubeHealthy(), nil, now)
+	if fs := findings(r); len(fs) != 0 || len(r.Cards) != 8 || r.Score == nil || *r.Score != 100 {
+		t.Fatalf("gezond: %+v", r)
+	}
+	if c := card(r, Kubernetes); c.Weight != 15 || c.Score == nil {
+		t.Fatalf("kaart: %+v", c)
+	}
+	if r := Score(healthy(), nil, now); len(r.Cards) != 7 {
+		t.Fatalf("een ander cluster heeft geen kaart Kubernetes: %+v", r.Cards)
+	}
+
+	in := kubeHealthy()
+	k := in.Kube
+	nodeID := uuid.New()
+	k.Nodes = []KubeNodeInput{{Name: "shop-server-01", Server: true, Ready: true}, {Name: "shop-worker-01", NodeID: &nodeID}}
+	k.NewestSnapshot = ago(50 * time.Hour)
+	k.Version = "v1.34.2+k3s1"
+	web := k.Apps[0]
+	web.Desired, web.Images, web.NoMemoryLimit = 1, []string{"nginx:latest", "busybox"}, []string{"web"}
+	web.Restarts, web.RestartedAt = 7, ago(time.Hour)
+	api := KubeAppInput{ID: uuid.New(), Namespace: "shop", Kind: "StatefulSet", Name: "db", Desired: 1, Images: []string{"postgres@sha256:abc"},
+		Trouble: "CrashLoopBackOff", Restarts: 2}
+	old := KubeAppInput{ID: uuid.New(), Namespace: "shop", Kind: "Deployment", Name: "oud", Desired: 3, Images: []string{"registry:5000/team/app:2.0"},
+		Restarts: 12, RestartedAt: ago(3 * day)}
+	k.Apps = []KubeAppInput{web, api, old, k.Apps[1]}
+	r = Score(in, nil, now)
+	for check, want := range map[string]struct {
+		sev  Severity
+		text string
+	}{
+		"kubernetes.node_not_ready": {High, "shop-worker-01 is NotReady in Kubernetes"},
+		"kubernetes.single_server":  {Medium, "shop heeft maar één Kubernetes-server: valt shop-server-01 uit"},
+		"kubernetes.snapshot_stale": {High, "De nieuwste etcd-snapshot van shop is 2 dagen oud"},
+		"kubernetes.version_eol":    {Medium, "shop draait Kubernetes 1.34, dat vanaf oktober 2026 geen updates meer krijgt"},
+		"kubernetes.single_pod":     {Low, "2 apps op prod met één pod: shop/web en shop/db."},
+		"kubernetes.latest_image":   {Low, "1 app gebruikt een image zonder vaste versie: shop/web (nginx:latest)."},
+		"kubernetes.memory_limit":   {Low, "1 app heeft pods zonder geheugenlimiet: shop/web."},
+	} {
+		f := find(t, r, check)
+		if f.Severity != want.sev || !strings.Contains(f.Text, want.text) || f.Card != Kubernetes {
+			t.Errorf("%s: %s %q", check, f.Severity, f.Text)
+		}
+	}
+	if f := find(t, r, "kubernetes.node_not_ready"); f.Subject.Type != "node" || f.Subject.ID != nodeID || f.Link != "/kubernetes/cluster?id="+in.ID.String()+"&tab=nodes" {
+		t.Errorf("node: %+v", f)
+	}
+	var restarts []string
+	for _, f := range findings(r) {
+		if f.Check == "kubernetes.restarts" {
+			restarts = append(restarts, f.Subject.Type+" "+f.Subject.Name+": "+f.Text)
+		}
+	}
+	if len(restarts) != 2 || !strings.Contains(restarts[1], "kube_app shop/web: shop/web blijft herstarten: 7 herstarts") ||
+		!strings.Contains(restarts[0], "shop/db blijft herstarten: 2 herstarts van de pods die er nu zijn, nu in CrashLoopBackOff") {
+		t.Errorf("herstarts: %q", restarts)
+	}
+	if f := find(t, r, "kubernetes.restarts"); f.Link != "/kubernetes/object?g=apps&id="+in.ID.String()+"&name=db&ns=shop&r=statefulsets&v=v1" {
+		t.Errorf("link: %s", f.Link)
+	}
+
+	// Lab: geen bevinding over één server of één pod, en lichter.
+	in.Env = "lab"
+	k.NewestSnapshot = nil
+	k.Version = "v1.33.1+k3s1"
+	r = Score(in, nil, now)
+	for _, c := range []string{"kubernetes.single_server", "kubernetes.single_pod"} {
+		for _, f := range findings(r) {
+			if f.Check == c {
+				t.Errorf("in lab: %+v", f)
+			}
+		}
+	}
+	if f := find(t, r, "kubernetes.snapshot_missing"); f.Severity != Medium {
+		t.Errorf("geen snapshot in lab: %+v", f)
+	}
+	if f := find(t, r, "kubernetes.version_eol"); f.Severity != High || !strings.Contains(f.Text, "sinds juni 2026 zonder updates") {
+		t.Errorf("eol: %+v", f)
+	}
+
+	// Snapshots niet te lezen: geen bevinding; nog nooit gelezen: onbekend.
+	k.SnapshotsRead = false
+	r = Score(in, nil, now)
+	for _, f := range findings(r) {
+		if strings.HasPrefix(f.Check, "kubernetes.snapshot") {
+			t.Errorf("snapshots onbekend: %+v", f)
+		}
+	}
+	k.Synced = false
+	if c := card(Score(in, nil, now), Kubernetes); c.Score != nil || c.Note == "" {
+		t.Errorf("nooit gelezen: %+v", c)
+	}
+}
+
+func TestKubeEOL(t *testing.T) {
+	for _, c := range []struct{ version, minor, want string }{
+		{"v1.35.9+k3s1", "1.35", "2027-02-28"}, {"v1.36.5+k3s1", "1.36", "2027-06-28"}, {"1.33.0", "1.33", "2026-06-28"},
+		{"v1.40.0+k3s1", "1.40", ""}, {"onzin", "", ""},
+	} {
+		minor, end, ok := KubeEOL(c.version)
+		if minor != c.minor || (c.want == "") == ok || (ok && end.Format(time.DateOnly) != c.want) {
+			t.Errorf("KubeEOL(%s) = %s %v %v", c.version, minor, end, ok)
+		}
+	}
+	for _, img := range []string{"nginx", "nginx:latest", "registry:5000/app", "ghcr.io/x/y:latest"} {
+		if !unpinned(img) {
+			t.Errorf("%s heeft geen vaste versie", img)
+		}
+	}
+	for _, img := range []string{"nginx:1.29", "registry:5000/app:2.0", "postgres@sha256:abc"} {
+		if unpinned(img) {
+			t.Errorf("%s heeft een vaste versie", img)
 		}
 	}
 }
