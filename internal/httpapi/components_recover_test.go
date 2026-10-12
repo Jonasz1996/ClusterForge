@@ -3,13 +3,11 @@ package httpapi
 import (
 	"context"
 	"net/http"
-	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
-	"github.com/Jonasz1996/clusterforge/internal/agent"
 	"github.com/Jonasz1996/clusterforge/internal/agent/agenttest"
 	"github.com/Jonasz1996/clusterforge/internal/store"
 )
@@ -75,53 +73,9 @@ const dbUnitsCall = "systemctl show --property=Id,LoadState,ActiveState,UnitFile
 // alle nodes er zijn en MariaDB nergens meer draait of start. Ontbreekt er
 // een, dan wacht het, en kan Jonas zelf opnieuw starten zonder die node.
 func TestClusterComponentRecover(t *testing.T) {
-	e, c := adminClient(t)
+	lab := newGaleraLab(t)
+	e, c, g, base, cid := lab.e, lab.c, lab.g, lab.base, lab.cid
 	ctx := context.Background()
-	var nc cluster
-	if s := c.do("POST", "/api/v1/clusters", map[string]any{"slug": "nextcloud", "name": "Nextcloud", "type": "generic", "environment": "lab"}, &nc); s != http.StatusCreated {
-		t.Fatalf("cluster: %d", s)
-	}
-	g := &galeraHosts{hosts: map[string]*agenttest.Host{}}
-	ids := map[string]string{}
-	for i, name := range []string{"nc1", "nc2", "nc3"} {
-		ip := "10.0.20.18" + string(rune('6'+i))
-		var n node
-		if s := c.do("POST", "/api/v1/nodes", map[string]any{"hostname": name, "cluster_id": nc.ID, "primary_ip": ip}, &n); s != http.StatusCreated {
-			t.Fatalf("node %s: %d", name, s)
-		}
-		ids[name] = n.ID
-		startAgentWith(t, e, c, n.ID, strings.Repeat(string(rune('a'+i)), 32), &addrs{}, func(ag *agent.Agent, root string) {
-			writeFile(t, filepath.Join(root, "etc/os-release"), "ID=debian\nVERSION_ID=\"13\"\nPRETTY_NAME=\"Debian GNU/Linux 13 (trixie)\"\n", 0o644)
-			writeFile(t, filepath.Join(root, "proc/meminfo"), "MemTotal: 4194304 kB\nMemAvailable: 2097152 kB\n", 0o644)
-			h := agenttest.NewHost(root, ip)
-			g.hosts[name] = h
-			h.SetAfter(g.after(name, h))
-			ag.Exec, ag.Root, ag.Collector.Run = h.Exec, root, h.Exec
-			ag.Collector.Interfaces, ag.Collector.PrimaryAddress = h.Interfaces, func() string { return ip }
-		})
-	}
-	eventually(t, "facts van de drie nodes", func() bool {
-		var n int
-		_ = e.pool.QueryRow(ctx, "SELECT count(*) FROM node_facts f JOIN nodes n ON n.id = f.node_id WHERE n.cluster_id = $1 AND f.facts->'os'->>'id' = 'debian'", nc.ID).Scan(&n)
-		return n == 3
-	})
-	base := "/api/v1/clusters/" + nc.ID + "/components"
-	in := map[string]any{"engine": "mariadb", "nodes": []string{ids["nc1"], ids["nc2"], ids["nc3"]}}
-	var plan componentPlanView
-	if s := c.do("POST", base+"/plan", in, &plan); s != http.StatusOK {
-		t.Fatalf("plan: %d", s)
-	}
-	in["hash"] = plan.Hash
-	var j job
-	if s := c.do("POST", base, in, &j); s != http.StatusAccepted {
-		t.Fatalf("toevoegen: %d", s)
-	}
-	if j = waitJobLong(t, c, j.ID); j.Status != "succeeded" {
-		t.Fatalf("uitrol: %s %s", j.Status, j.Error)
-	}
-	var comps list[componentView]
-	c.do("GET", base, nil, &comps)
-	cid := comps.Items[0].ID
 	health := func() componentHealthView {
 		t.Helper()
 		var l list[componentHealthView]
@@ -232,7 +186,7 @@ func TestClusterComponentRecover(t *testing.T) {
 	if len(rj) != 1 || rj[0].Title != "Database vanzelf opnieuw starten: MariaDB Galera op Nextcloud" || rj[0].RequestedBy != nil {
 		t.Fatalf("taken: %+v", rj)
 	}
-	j = waitJobLong(t, c, rj[0].ID)
+	j := waitJobLong(t, c, rj[0].ID)
 	if j.Status != "succeeded" || !slices.Equal(stepNames(j), []string{"Posities lezen", "nc2: het cluster beginnen", "nc1: aansluiten", "nc3: aansluiten", "Controleren"}) {
 		t.Fatalf("vanzelf: %s %s %v", j.Status, j.Error, stepNames(j))
 	}

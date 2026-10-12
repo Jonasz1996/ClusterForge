@@ -380,6 +380,22 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 			return fmt.Sprintf("Vanzelf opnieuw starten van %s van cluster %s aangezet", str(p, "component"), name)
 		}
 		return fmt.Sprintf("Vanzelf opnieuw starten van %s van cluster %s uitgezet", str(p, "component"), name)
+	case "cluster.database_created":
+		s := fmt.Sprintf("Database %s aangemaakt in %s van cluster %s", str(p, "database"), str(p, "component"), name)
+		if u := str(p, "user"); u != "" {
+			s += fmt.Sprintf(", met gebruiker %s vanaf %s", u, list(p["hosts"]))
+		}
+		return s
+	case "cluster.database_dropped":
+		s := fmt.Sprintf("Database %s weggehaald uit %s van cluster %s", str(p, "database"), str(p, "component"), name)
+		if t, ok := p["tables"].(float64); ok && t >= 0 {
+			s += fmt.Sprintf(" (%d tabellen)", int(t))
+		}
+		return s
+	case "cluster.database_password":
+		return fmt.Sprintf("Gebruiker %s van %s van cluster %s kreeg een nieuw wachtwoord", str(p, "user"), str(p, "component"), name)
+	case "cluster.database_user_dropped":
+		return fmt.Sprintf("Gebruiker %s weggehaald uit %s van cluster %s", str(p, "user"), str(p, "component"), name)
 	case "cluster.deployed":
 		return fmt.Sprintf("Cluster %s uitgerold uit %s %s met %s nodes", name, str(p, "template"), str(p, "version"), num(p["nodes"]))
 	case "node.created":

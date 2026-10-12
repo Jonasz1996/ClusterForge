@@ -90,7 +90,7 @@ func (g *galeraHosts) after(name string, h *agenttest.Host) func(call string, er
 		switch {
 		case strings.HasPrefix(call, "apt-get") && strings.Contains(call, " mariadb-server"):
 			h.Locked(func() {
-				h.MariaDB = &agenttest.MariaDB{Version: "11.8.3-MariaDB-0+deb13u1", MaxConnections: 151, Uptime: 5}
+				h.MariaDB = &agenttest.MariaDB{Version: "11.8.3-MariaDB-0+deb13u1", MaxConnections: 151, Uptime: 5, Users: agenttest.DebianUsers()}
 			})
 		case strings.Contains(call, "galera_new_cluster"):
 			g.join(name, h, true)

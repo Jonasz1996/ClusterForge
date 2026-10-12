@@ -66,6 +66,7 @@ type Host struct {
 	units    map[string]*Unit
 	users    map[string]bool
 	calls    []string
+	stdins   []string
 	fail     map[string]*failure
 	journal  map[string]string
 
@@ -255,6 +256,49 @@ func (h *Host) Exec(_ context.Context, name string, args ...string) ([]byte, err
 		g.update()
 	}
 	return out, err
+}
+
+// ExecStdin speelt een commando met invoer op stdin na: de opdrachten van
+// de agent aan MariaDB. In Calls staat het commando zonder de invoer, die
+// een wachtwoord kan bevatten; Stdins geeft de invoer.
+func (h *Host) ExecStdin(_ context.Context, stdin []byte, name string, args ...string) ([]byte, error) {
+	h.mu.Lock()
+	call := strings.TrimSpace(name + " " + strings.Join(args, " "))
+	h.record(call)
+	h.stdins = append(h.stdins, string(stdin))
+	for prefix, f := range h.fail {
+		if strings.HasPrefix(call, prefix) {
+			if f.times--; f.times <= 0 {
+				delete(h.fail, prefix)
+			}
+			h.mu.Unlock()
+			return []byte(f.output), errors.New("exit status 1")
+		}
+	}
+	var out []byte
+	var err error
+	switch name {
+	case "mariadb", "mysql":
+		out, err = h.mariaWrite(string(stdin))
+	default:
+		out, err = []byte("agenttest: "+name+" leest geen stdin\n"), errors.New("exit status 127")
+	}
+	g, after := h.group, h.after
+	h.mu.Unlock()
+	if after != nil {
+		after(call, err)
+	}
+	if g != nil {
+		g.update()
+	}
+	return out, err
+}
+
+// Stdins geeft de invoer van elke ExecStdin, in volgorde.
+func (h *Host) Stdins() []string {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return slices.Clone(h.stdins)
 }
 
 // exec doet het werk; de aanroeper heeft het slot.

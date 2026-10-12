@@ -1,6 +1,7 @@
 // Package dbsql bevat de vaste query's waarmee cf-agent MariaDB en
-// PostgreSQL leest. De agent voert geen andere SQL uit; de nagespeelde
-// databases in agenttest antwoorden op precies deze query's.
+// PostgreSQL leest, en de opdrachten waarmee hij een database of gebruiker
+// aanmaakt of weghaalt (write.go). De agent voert geen andere SQL uit; de
+// nagespeelde databases in agenttest antwoorden op precies deze query's.
 package dbsql
 
 // De query's van MariaDB. Ze lezen alleen variabelen, status en
@@ -32,6 +33,14 @@ const (
 		"AND USER NOT IN ('system user', 'event_scheduler', 'unauthenticated user')"
 )
 
+// De gebruikers van MariaDB en hun rechten: alleen namen, hosts en
+// rechten, nooit een wachtwoord of hash.
+const (
+	MariaUsers        = "SELECT User, Host FROM mysql.user WHERE is_role = 'N' ORDER BY User, Host"
+	MariaUserGrants   = "SELECT GRANTEE, PRIVILEGE_TYPE FROM information_schema.USER_PRIVILEGES"
+	MariaSchemaGrants = "SELECT GRANTEE, TABLE_SCHEMA, PRIVILEGE_TYPE FROM information_schema.SCHEMA_PRIVILEGES"
+)
+
 // De query's van PostgreSQL. Ze lezen alleen instellingen, statistieken en
 // de catalogus.
 const (
@@ -57,6 +66,7 @@ const (
 // nagespeelde databases in agenttest gebruiken de lijst.
 var All = []string{
 	MariaVariables, MariaStatus, MariaPosition, MariaSource, MariaReplicas, MariaDatabases, MariaClients,
+	MariaUsers, MariaUserGrants, MariaSchemaGrants,
 	PGInfo, PGDatabases, PGTables, PGReplicas, PGSource, PGClients,
 }
 

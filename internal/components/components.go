@@ -114,6 +114,9 @@ type Service struct {
 	Memory func(ctx context.Context) (map[uuid.UUID]float64, error)
 	// Changed wordt aangeroepen als een onderdeel toegepast is. Mag nil zijn.
 	Changed func()
+	// DBChanged wordt aangeroepen als er een database of gebruiker bij kwam
+	// of weg ging, zodat het menu Databases meteen klopt. Mag nil zijn.
+	DBChanged func()
 
 	// Poll is de pauze tussen twee keer kijken of een node Synced is, en
 	// GateTimeout hoe lang dat mag duren. Een nieuwe node kopieert dan alle

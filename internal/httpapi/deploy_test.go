@@ -109,7 +109,7 @@ func (f *fleet) boot(_ int, name, file, content string) {
 	ag := &agent.Agent{
 		Config: cfg, Version: "test", Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Collector: col,
 		HeartbeatInterval: 100 * time.Millisecond, MetricsInterval: time.Hour, FactsInterval: time.Hour,
-		StatePath: filepath.Join(root, "var/lib/clusterforge/agent-state.json"), Exec: h.Exec, Root: root,
+		StatePath: filepath.Join(root, "var/lib/clusterforge/agent-state.json"), Exec: h.Exec, ExecStdin: h.ExecStdin, Root: root,
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})

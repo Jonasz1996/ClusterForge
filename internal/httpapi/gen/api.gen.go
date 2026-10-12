@@ -3471,6 +3471,93 @@ type ComponentApplyInput struct {
 	VipId nullable.Nullable[openapi_types.UUID] `json:"vip_id,omitempty"`
 }
 
+// ComponentConfirmInput defines model for ComponentConfirmInput.
+type ComponentConfirmInput struct {
+	// Confirm De slug van het cluster; nodig op prod
+	Confirm *string `json:"confirm,omitempty"`
+}
+
+// ComponentDatabase defines model for ComponentDatabase.
+type ComponentDatabase struct {
+	// Connections Verbindingen op de node waarvan ClusterForge las
+	Connections int    `json:"connections"`
+	Name        string `json:"name"`
+	SizeBytes   int64  `json:"size_bytes"`
+
+	// Tables -1 als het aantal niet te lezen was
+	Tables int `json:"tables"`
+
+	// Users De gebruikers met rechten op deze database
+	Users []string `json:"users"`
+}
+
+// ComponentDatabaseCreated defines model for ComponentDatabaseCreated.
+type ComponentDatabaseCreated struct {
+	Address  string   `json:"address"`
+	Database string   `json:"database"`
+	Hosts    []string `json:"hosts"`
+	Node     string   `json:"node"`
+
+	// Password Staat alleen hier; ClusterForge bewaart het niet
+	Password string `json:"password"`
+	Port     int    `json:"port"`
+	User     string `json:"user"`
+}
+
+// ComponentDatabaseGrant defines model for ComponentDatabaseGrant.
+type ComponentDatabaseGrant struct {
+	// All Alle rechten op deze database
+	All        bool     `json:"all"`
+	Database   string   `json:"database"`
+	Privileges []string `json:"privileges"`
+}
+
+// ComponentDatabaseInput defines model for ComponentDatabaseInput.
+type ComponentDatabaseInput struct {
+	// Name 1 tot 63 kleine letters, cijfers of _
+	Name string `json:"name"`
+
+	// User De gebruiker; standaard de naam van de database
+	User *string `json:"user,omitempty"`
+}
+
+// ComponentDatabaseUser defines model for ComponentDatabaseUser.
+type ComponentDatabaseUser struct {
+	Databases []ComponentDatabaseGrant `json:"databases"`
+
+	// Global Rechten op alle databases
+	Global []string `json:"global"`
+	Hosts  []string `json:"hosts"`
+	Name   string   `json:"name"`
+
+	// System Een gebruiker van MariaDB zelf, zoals root
+	System bool `json:"system"`
+}
+
+// ComponentDatabases defines model for ComponentDatabases.
+type ComponentDatabases struct {
+	// Address Waar een app verbindt; het VIP van de database, of de eerste datanode
+	Address   string              `json:"address"`
+	Databases []ComponentDatabase `json:"databases"`
+
+	// Hosts De adressen waarvandaan een nieuwe gebruiker mag inloggen; alle nodes en VIP's van het cluster
+	Hosts []string `json:"hosts"`
+
+	// Node De datanode waarvan ClusterForge las
+	Node  string                  `json:"node"`
+	Port  int                     `json:"port"`
+	Users []ComponentDatabaseUser `json:"users"`
+}
+
+// ComponentDropInput defines model for ComponentDropInput.
+type ComponentDropInput struct {
+	// Confirm De slug van het cluster; nodig op prod
+	Confirm *string `json:"confirm,omitempty"`
+
+	// Name De naam van wat weg moet, ter bevestiging
+	Name string `json:"name"`
+}
+
 // ComponentFinding defines model for ComponentFinding.
 type ComponentFinding struct {
 	Code string `json:"code"`
@@ -3678,6 +3765,15 @@ type ComponentTemplateEngine string
 // ComponentUpdateInput defines model for ComponentUpdateInput.
 type ComponentUpdateInput struct {
 	AutoRecover bool `json:"auto_recover"`
+}
+
+// ComponentUserPassword defines model for ComponentUserPassword.
+type ComponentUserPassword struct {
+	Hosts []string `json:"hosts"`
+
+	// Password Staat alleen hier; ClusterForge bewaart het niet
+	Password string `json:"password"`
+	User     string `json:"user"`
 }
 
 // ComponentVIP defines model for ComponentVIP.
@@ -9083,8 +9179,20 @@ type UpdateClusterComponentJSONRequestBody = ComponentUpdateInput
 // ReapplyClusterComponentJSONRequestBody defines body for ReapplyClusterComponent for application/json ContentType.
 type ReapplyClusterComponentJSONRequestBody = ComponentReapplyInput
 
+// CreateComponentDatabaseJSONRequestBody defines body for CreateComponentDatabase for application/json ContentType.
+type CreateComponentDatabaseJSONRequestBody = ComponentDatabaseInput
+
+// DropComponentDatabaseJSONRequestBody defines body for DropComponentDatabase for application/json ContentType.
+type DropComponentDatabaseJSONRequestBody = ComponentDropInput
+
 // RecoverClusterComponentJSONRequestBody defines body for RecoverClusterComponent for application/json ContentType.
 type RecoverClusterComponentJSONRequestBody = ComponentRecoverInput
+
+// DropComponentUserJSONRequestBody defines body for DropComponentUser for application/json ContentType.
+type DropComponentUserJSONRequestBody = ComponentDropInput
+
+// SetComponentUserPasswordJSONRequestBody defines body for SetComponentUserPassword for application/json ContentType.
+type SetComponentUserPasswordJSONRequestBody = ComponentConfirmInput
 
 // CreateDisasterScenarioJSONRequestBody defines body for CreateDisasterScenario for application/json ContentType.
 type CreateDisasterScenarioJSONRequestBody = DisasterScenarioInput
@@ -9352,12 +9460,27 @@ type ServerInterface interface {
 	// ReapplyClusterComponent Een database opnieuw toepassen (admin); wordt een taak
 	// (POST /clusters/{clusterId}/components/{componentId}/apply)
 	ReapplyClusterComponent(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID)
+	// ListComponentDatabases De databases en gebruikers in de database van een cluster
+	// (GET /clusters/{clusterId}/components/{componentId}/databases)
+	ListComponentDatabases(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID)
+	// CreateComponentDatabase Een database met een eigen gebruiker aanmaken (admin)
+	// (POST /clusters/{clusterId}/components/{componentId}/databases)
+	CreateComponentDatabase(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID)
+	// DropComponentDatabase Een database weghalen (admin)
+	// (POST /clusters/{clusterId}/components/{componentId}/databases/{name}/drop)
+	DropComponentDatabase(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID, name string)
 	// RecoverClusterComponent De database opnieuw starten (admin); wordt een taak
 	// (POST /clusters/{clusterId}/components/{componentId}/recover)
 	RecoverClusterComponent(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID)
 	// PlanRecoverClusterComponent Bekijken wat opnieuw starten zou doen (admin)
 	// (POST /clusters/{clusterId}/components/{componentId}/recover/plan)
 	PlanRecoverClusterComponent(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID)
+	// DropComponentUser Een gebruiker op al zijn hosts weghalen (admin)
+	// (POST /clusters/{clusterId}/components/{componentId}/users/{user}/drop)
+	DropComponentUser(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID, user string)
+	// SetComponentUserPassword Een gebruiker een nieuw wachtwoord geven (admin)
+	// (POST /clusters/{clusterId}/components/{componentId}/users/{user}/password)
+	SetComponentUserPassword(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID, user string)
 	// ListDisasterScenarios Rampoefeningen van een cluster met hun laatste run
 	// (GET /clusters/{clusterId}/disaster-scenarios)
 	ListDisasterScenarios(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
@@ -10090,6 +10213,24 @@ func (_ Unimplemented) ReapplyClusterComponent(w http.ResponseWriter, r *http.Re
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// ListComponentDatabases De databases en gebruikers in de database van een cluster
+// (GET /clusters/{clusterId}/components/{componentId}/databases)
+func (_ Unimplemented) ListComponentDatabases(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CreateComponentDatabase Een database met een eigen gebruiker aanmaken (admin)
+// (POST /clusters/{clusterId}/components/{componentId}/databases)
+func (_ Unimplemented) CreateComponentDatabase(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// DropComponentDatabase Een database weghalen (admin)
+// (POST /clusters/{clusterId}/components/{componentId}/databases/{name}/drop)
+func (_ Unimplemented) DropComponentDatabase(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID, name string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // RecoverClusterComponent De database opnieuw starten (admin); wordt een taak
 // (POST /clusters/{clusterId}/components/{componentId}/recover)
 func (_ Unimplemented) RecoverClusterComponent(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID) {
@@ -10099,6 +10240,18 @@ func (_ Unimplemented) RecoverClusterComponent(w http.ResponseWriter, r *http.Re
 // PlanRecoverClusterComponent Bekijken wat opnieuw starten zou doen (admin)
 // (POST /clusters/{clusterId}/components/{componentId}/recover/plan)
 func (_ Unimplemented) PlanRecoverClusterComponent(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// DropComponentUser Een gebruiker op al zijn hosts weghalen (admin)
+// (POST /clusters/{clusterId}/components/{componentId}/users/{user}/drop)
+func (_ Unimplemented) DropComponentUser(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID, user string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SetComponentUserPassword Een gebruiker een nieuw wachtwoord geven (admin)
+// (POST /clusters/{clusterId}/components/{componentId}/users/{user}/password)
+func (_ Unimplemented) SetComponentUserPassword(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID, user string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -12218,6 +12371,120 @@ func (siw *ServerInterfaceWrapper) ReapplyClusterComponent(w http.ResponseWriter
 	handler.ServeHTTP(w, r)
 }
 
+// ListComponentDatabases operation middleware
+func (siw *ServerInterfaceWrapper) ListComponentDatabases(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "componentId" -------------
+	var componentId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "componentId", chi.URLParam(r, "componentId"), &componentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "componentId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListComponentDatabases(w, r, clusterId, componentId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateComponentDatabase operation middleware
+func (siw *ServerInterfaceWrapper) CreateComponentDatabase(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "componentId" -------------
+	var componentId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "componentId", chi.URLParam(r, "componentId"), &componentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "componentId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateComponentDatabase(w, r, clusterId, componentId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DropComponentDatabase operation middleware
+func (siw *ServerInterfaceWrapper) DropComponentDatabase(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "componentId" -------------
+	var componentId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "componentId", chi.URLParam(r, "componentId"), &componentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "componentId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "name" -------------
+	var name string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "name", chi.URLParam(r, "name"), &name, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DropComponentDatabase(w, r, clusterId, componentId, name)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // RecoverClusterComponent operation middleware
 func (siw *ServerInterfaceWrapper) RecoverClusterComponent(w http.ResponseWriter, r *http.Request) {
 
@@ -12279,6 +12546,94 @@ func (siw *ServerInterfaceWrapper) PlanRecoverClusterComponent(w http.ResponseWr
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.PlanRecoverClusterComponent(w, r, clusterId, componentId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DropComponentUser operation middleware
+func (siw *ServerInterfaceWrapper) DropComponentUser(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "componentId" -------------
+	var componentId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "componentId", chi.URLParam(r, "componentId"), &componentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "componentId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "user" -------------
+	var user string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "user", chi.URLParam(r, "user"), &user, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "user", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DropComponentUser(w, r, clusterId, componentId, user)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetComponentUserPassword operation middleware
+func (siw *ServerInterfaceWrapper) SetComponentUserPassword(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "componentId" -------------
+	var componentId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "componentId", chi.URLParam(r, "componentId"), &componentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "componentId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "user" -------------
+	var user string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "user", chi.URLParam(r, "user"), &user, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "user", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetComponentUserPassword(w, r, clusterId, componentId, user)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -18007,6 +18362,21 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/clusters/{clusterId}/components/{componentId}/recover", wrapper.RecoverClusterComponent)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/clusters/{clusterId}/components/{componentId}/databases", wrapper.ListComponentDatabases)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/clusters/{clusterId}/components/{componentId}/databases", wrapper.CreateComponentDatabase)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/clusters/{clusterId}/components/{componentId}/databases/{name}/drop", wrapper.DropComponentDatabase)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/clusters/{clusterId}/components/{componentId}/users/{user}/password", wrapper.SetComponentUserPassword)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/clusters/{clusterId}/components/{componentId}/users/{user}/drop", wrapper.DropComponentUser)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/databases", wrapper.ListDatabases)

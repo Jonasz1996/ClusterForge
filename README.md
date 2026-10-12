@@ -77,6 +77,7 @@ Het technisch ontwerp staat in [docs/design/mvp-fase-1.md](docs/design/mvp-fase-
 | 3. Galera als onderdeel | Database toevoegen op een cluster dat er al is, ook met CT's: een plan per node met systeem, geheugen (met het `pct set`-commando als het krap wordt), schijf en Proxmox-host, en blokkades zoals twee nodes zonder scheidsrechter; daarna zet ClusterForge MariaDB Galera node voor node op en wacht na elke node tot hij Synced is; MariaDB komt in de graaf en de drift ziet een met de hand aangepaste configuratie | klaar |
 | 4. Het VIP van de app voor de database | Kies bij Database toevoegen het VIP van de app; keepalived zet het dan alleen op een node waarvan MariaDB mag schrijven (`cf-agent check db`), zodat de app altijd naar één node schrijft. Het plan toont per node de diff van keepalived.conf; ClusterForge past het bestand aan na `keepalived -t`, herlaadt node voor node met de eigenaar van het VIP laatst, en blokkeert een node met het VIP maar zonder database | klaar |
 | 5. Opkomen na een herstart | ClusterForge kijkt om de 20 seconden of de database draait. Na een volledige uitval, zoals een reboot van alle nodes, begint het het Galera-cluster vanzelf opnieuw op de node met de nieuwste data (uit `grastate.dat`, of na een crash met `galera_recovery`), maar alleen als alle nodes er zijn en MariaDB nergens meer start; ontbreekt er een, dan wacht het en kies je zelf Opnieuw starten, met een plan per node. Een node die niet startte terwijl het cluster draait, start het daar opnieuw. Getest met drie echte MariaDB-containers | klaar |
+| 6. Databases en gebruikers | Bij **Databases en gebruikers** op de kaart Database staan de databases met grootte, tabellen en verbindingen, en de gebruikers met hun hosts en rechten, zonder wachtwoord. **Database aanmaken** maakt een database met een eigen gebruiker en een sterk wachtwoord dat één keer op het scherm staat, samen met wat de app nodig heeft; ClusterForge bewaart het niet. **Nieuw wachtwoord** en **Weghalen** (met de naam ter bevestiging, op prod ook de slug en tweestapsverificatie). Getest tegen een echte MariaDB 11.8 | klaar |
 
 ## Draaien met Docker Compose
 
@@ -812,9 +813,26 @@ systemctl status mariadb
 
 Wat ClusterForge aanneemt over Galera, staat in een test met drie echte MariaDB 11.8-containers (`internal/galera`, draait in de CI): na een gewone stop, een crash van eerst één en dan alle nodes, en een stroomuitval wint de juiste node en zijn daarna alle rijen er.
 
+#### Databases en gebruikers
+
+Op de kaart **Database** van een cluster opent **Databases en gebruikers** wat er in MariaDB staat. ClusterForge leest het live op de node met het VIP, of anders de eerste node die Synced is: de databases met hun grootte, tabellen en verbindingen, en de gebruikers met de adressen waarvandaan ze mogen inloggen en hun rechten per database. Wachtwoorden en hashes leest het nooit. Root, mysql en mariadb.sys zijn van MariaDB zelf; daar verandert ClusterForge niets aan.
+
+**Database aanmaken** vraagt een naam (kleine letters, cijfers en `_`) en eventueel een andere gebruiker; standaard heet de gebruiker zoals de database. ClusterForge maakt de database met utf8mb4 en een gebruiker met alle rechten op die database, en geeft hem een sterk wachtwoord. Hij mag inloggen vanaf elke node van het cluster en vanaf elk VIP: een app op de node met het VIP die naar het VIP verbindt, komt bij MariaDB binnen met het VIP als adres. Galera zet de database en de gebruiker zelf op de andere nodes.
+
+Het wachtwoord staat één keer op het scherm, met het adres, de poort, de database en de gebruiker, om in de instellingen van de app te zetten. ClusterForge bewaart het niet, ook niet in het logboek. Kwijt? Kies **Nieuw wachtwoord** bij de gebruiker; het oude werkt dan meteen niet meer, dus de app moet het nieuwe krijgen.
+
+**Weghalen** van een database of gebruiker vraagt de naam ter bevestiging, op prod ook de slug en tweestapsverificatie, net als een nieuw wachtwoord. Een database weghalen haalt alle data weg en kan niet ongedaan worden; de gebruikers houden hun rechten op die naam tot je ze ook weghaalt. Alles komt in het logboek, met de namen en zonder wachtwoord.
+
+Met de hand op een node:
+
+```sh
+mariadb -e "SELECT User, Host FROM mysql.user"
+mariadb -e "SHOW GRANTS FOR 'nextcloud'@'10.0.20.185'"
+```
+
 ### Hoe ClusterForge de databases leest
 
-cf-agent doet het op de node zelf, als root via de socket: `mariadb` voor MariaDB en `psql` als de gebruiker postgres voor PostgreSQL, en de REST-API van Patroni op `127.0.0.1:8008`. Er is dus geen databasegebruiker of wachtwoord voor ClusterForge nodig en poort 3306 of 5432 hoeft niet open. De agent stelt alleen vaste query's op de systeemtabellen, zoals `SHOW GLOBAL STATUS` en `pg_stat_replication`; hij leest nooit de inhoud van een tabel en neemt geen SQL van de server aan. Hij doet hoogstens twee verzoeken tegelijk, elk hoogstens 30 seconden, en telt de tabellen van hoogstens 100 databases.
+cf-agent doet het op de node zelf, als root via de socket: `mariadb` voor MariaDB en `psql` als de gebruiker postgres voor PostgreSQL, en de REST-API van Patroni op `127.0.0.1:8008`. Er is dus geen databasegebruiker of wachtwoord voor ClusterForge nodig en poort 3306 of 5432 hoeft niet open. De agent stelt alleen vaste query's op de systeemtabellen, zoals `SHOW GLOBAL STATUS` en `pg_stat_replication`; hij leest nooit de inhoud van een tabel en neemt geen SQL van de server aan. Een database of gebruiker aanmaken of weghalen gaat met vaste opdrachten die de agent zelf maakt, alleen met namen van kleine letters, cijfers en `_`; het wachtwoord gaat via stdin naar `mariadb`, zodat het nooit in `ps` staat, en een foutmelding komt terug zonder wachtwoord. Hij doet hoogstens twee verzoeken tegelijk, elk hoogstens 30 seconden, en telt de tabellen van hoogstens 100 databases.
 
 Dit kan vanaf **agentprotocol 9**. Met een oudere agent toont de pagina het commando om hem bij te werken:
 

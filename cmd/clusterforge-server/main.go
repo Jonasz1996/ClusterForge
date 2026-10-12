@@ -191,6 +191,7 @@ func serve() error {
 	// het plan.
 	cmps := components.NewService(pool, ev, log, runner, bus, dep)
 	cmps.Changed = eval.Kick
+	cmps.DBChanged = dbs.Kick
 	memory := metrics.NewClient(cfg.VictoriaMetricsURL)
 	cmps.Memory = func(ctx context.Context) (map[uuid.UUID]float64, error) { return memory.MemoryP95(ctx, time.Now()) }
 	runner.OnFinished(components.Kind, func(context.Context, store.Job) { dbs.Kick() })

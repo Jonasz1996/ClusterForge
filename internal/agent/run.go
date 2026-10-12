@@ -38,6 +38,10 @@ type Agent struct {
 	// Exec voert de systeemcommando's van een commando uit (systemctl); nil
 	// gebruikt exec. Tests vervangen het.
 	Exec func(ctx context.Context, name string, args ...string) ([]byte, error)
+	// ExecStdin is Exec met invoer op stdin, voor de opdrachten aan
+	// MariaDB; het geeft stdout en stderr samen terug. nil gebruikt exec,
+	// tenzij Exec vervangen is.
+	ExecStdin func(ctx context.Context, stdin []byte, name string, args ...string) ([]byte, error)
 	// Root is de bestandssysteemwortel voor deploystappen; leeg is "/".
 	// Tests gebruiken een map.
 	Root string
