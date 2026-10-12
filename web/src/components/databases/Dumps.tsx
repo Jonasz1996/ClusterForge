@@ -246,7 +246,9 @@ function SettingsDialog({
           <span>
             Elke dag een dump van elke database
             <span className="block text-xs text-slate-500">
-              Op een node zonder het VIP, zodat de node waar de app naar schrijft geen extra werk krijgt.
+              {comp.engine === "postgresql"
+                ? "Op de primary: op een replica breekt PostgreSQL een lange dump af zodra de primary iets opruimt dat de dump nog leest."
+                : "Op een node zonder het VIP, zodat de node waar de app naar schrijft geen extra werk krijgt."}
             </span>
           </span>
         </label>
@@ -325,11 +327,22 @@ function RestoreDialog({
               autoFocus
             />
           </Field>
-          <p className="text-slate-600 dark:text-slate-400">
-            Daarna staat ze bij Databases, met haar grootte en tabellen, zodat je ze kunt vergelijken; als root op een node kun je
-            erin kijken met <code>mariadb {target || dump.restore_name}</code>. Gebruikers zitten niet in een dump. Weghalen kan
-            bij Databases, met de naam.
-          </p>
+          {comp.engine === "postgresql" ? (
+            <p className="text-slate-600 dark:text-slate-400">
+              PostgreSQL schrijft alleen op de primary. ClusterForge maakt daar een tijdelijke beheerder, de agent op {dump.node}{" "}
+              zet de dump ermee over het netwerk terug, en daarna is de beheerder weer weg. De nieuwe database krijgt dezelfde
+              eigenaar als {dump.database}. Daarna staat ze bij Databases, met haar grootte en tabellen, zodat je ze kunt
+              vergelijken; als root op de primary kun je erin kijken met{" "}
+              <code>runuser -u postgres -- psql {target || dump.restore_name}</code>. Gebruikers zitten niet in een dump. Weghalen
+              kan bij Databases, met de naam.
+            </p>
+          ) : (
+            <p className="text-slate-600 dark:text-slate-400">
+              Daarna staat ze bij Databases, met haar grootte en tabellen, zodat je ze kunt vergelijken; als root op een node kun
+              je erin kijken met <code>mariadb {target || dump.restore_name}</code>. Gebruikers zitten niet in een dump. Weghalen
+              kan bij Databases, met de naam.
+            </p>
+          )}
           {restore.isError && <Alert>{restore.error.message}</Alert>}
           <div className="flex justify-end gap-2">
             <Button type="button" variant="secondary" onClick={onClose}>
@@ -378,7 +391,10 @@ export function DatabaseBackupsCard() {
                   return (
                     <tr key={`${it.component_id}/${it.database}`}>
                       <td className={tdClass}>
-                        <Link href={`/clusters/databases?id=${it.cluster_id}#dumps`} className={linkClass}>
+                        <Link
+                          href={`/clusters/databases?id=${it.cluster_id}&component=${it.component_id}#dumps`}
+                          className={linkClass}
+                        >
                           {it.cluster_name}
                         </Link>
                       </td>

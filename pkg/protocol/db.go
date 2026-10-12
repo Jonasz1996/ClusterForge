@@ -1,11 +1,20 @@
 package protocol
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // DBSince is de eerste protocolversie met databasecommando's: de agent
 // leest MariaDB en PostgreSQL op zijn eigen node via de socket, zonder
 // wachtwoord en zonder vrije SQL.
 const DBSince = 9
+
+// DBPGSince is de eerste protocolversie die Engine in een DBRequest kent:
+// gebruikers, databases en dumps van PostgreSQL. Een oudere agent leest het
+// veld niet en zou zo'n verzoek op MariaDB uitvoeren; daarom stuurt de
+// server een verzoek voor PostgreSQL alleen naar protocol 10 of later.
+const DBPGSince = 10
 
 // SubjectDB draagt de databaseverzoeken: cf.node.<id>.db. Net als de
 // kube-brug is het een eigen subject, zodat een trage database de
@@ -102,9 +111,33 @@ const (
 const DBDumpDir = "/var/backups/clusterforge-db"
 
 // DBDumpPattern is de naam van een dump: database, datum en tijd in UTC,
-// met zstd gecomprimeerd. Naast elke dump staat een bestand met dezelfde
-// naam en .json erachter, met wat de agent erover weet.
-const DBDumpPattern = `^([a-z0-9_]{1,63})-([0-9]{8}-[0-9]{6})\.sql\.zst$`
+// .sql voor MariaDB of .pgsql voor PostgreSQL, met zstd gecomprimeerd.
+// Naast elke dump staat een bestand met dezelfde naam en .json erachter,
+// met wat de agent erover weet.
+const DBDumpPattern = `^([a-z0-9_]{1,63})-([0-9]{8}-[0-9]{6})\.(sql|pgsql)\.zst$`
+
+// DBDumpEngine is de engine van een dump uit zijn naam; leeg als het geen
+// dump is.
+func DBDumpEngine(file string) string {
+	switch {
+	case strings.HasSuffix(file, ".pgsql.zst"):
+		return DBPostgreSQL
+	case strings.HasSuffix(file, ".sql.zst"):
+		return DBMariaDB
+	}
+	return ""
+}
+
+// DBTempRolePattern zijn de tijdelijke beheerders van PostgreSQL waarmee
+// een agent een dump van een andere node terugzet. Ze vervallen na
+// DBTempRoleTTL.
+const (
+	DBTempRolePattern = `^cf_herstel_[0-9a-f]{16}$`
+	DBTempRoleTTL     = 12 * time.Hour
+)
+
+// DBPGPort is de poort van PostgreSQL.
+const DBPGPort = 5432
 
 // DBDumpTimeout is hoe lang een dump of het terugzetten ervan mag duren.
 const DBDumpTimeout = 12 * time.Hour
@@ -175,6 +208,10 @@ const (
 type DBRequest struct {
 	ID string `json:"id"`
 	Op string `json:"op"`
+	// Engine is de database van DBUsers, DBEnsure, DBDrop en DBDump: leeg of
+	// DBMariaDB, of DBPostgreSQL. Een oudere agent kent het niet en doet
+	// MariaDB.
+	Engine string `json:"engine,omitempty"`
 	// Deadline: na dit tijdstip weigert de agent het verzoek.
 	Deadline time.Time `json:"deadline"`
 	// Track hoort bij DBTrack.
@@ -335,6 +372,14 @@ type DBDumpRequest struct {
 	// Zonder Keep blijft de nieuwste complete dump per database staan.
 	KeepDays int      `json:"keep_days,omitempty"`
 	Keep     []string `json:"keep"`
+	// Bij PostgreSQL zet de agent een dump terug op de primary, over het
+	// netwerk: Primary is haar adres, en User en Password zijn van een
+	// tijdelijke beheerder (DBTempRolePattern) die de server daar maakte.
+	// Het wachtwoord gaat in een bestand dat alleen root kan lezen, nooit
+	// in een argument.
+	Primary  string `json:"primary,omitempty"`
+	User     string `json:"user,omitempty"`
+	Password string `json:"password,omitempty"`
 }
 
 // DBDumpResult is het antwoord op een DBDump.
@@ -354,6 +399,8 @@ type DBDumpResult struct {
 
 // DBDumpFile is een dump op de node.
 type DBDumpFile struct {
+	// Engine is DBMariaDB of DBPostgreSQL, uit de naam van het bestand.
+	Engine   string `json:"engine,omitempty"`
 	Database string `json:"database"`
 	File     string `json:"file"`
 	// SizeBytes is de grootte op schijf, RawBytes die van de SQL.
@@ -363,8 +410,8 @@ type DBDumpFile struct {
 	// toen de dump begon.
 	Tables         int `json:"tables"`
 	TablesExpected int `json:"tables_expected"`
-	// Complete: de dump eindigt met de regel die mariadb-dump als laatste
-	// schrijft.
+	// Complete: de dump eindigt met de regel die mariadb-dump of pg_dump
+	// als laatste schrijft.
 	Complete bool      `json:"complete"`
 	Started  time.Time `json:"started"`
 	Finished time.Time `json:"finished"`
@@ -399,8 +446,13 @@ type DBEnsureRequest struct {
 	User     string   `json:"user,omitempty"`
 	Hosts    []string `json:"hosts,omitempty"`
 	Password string   `json:"password,omitempty"`
-	// Grant geeft User op elke host alle rechten op Database.
+	// Grant geeft User op elke host alle rechten op Database. Bij
+	// PostgreSQL wordt User de eigenaar van Database.
 	Grant bool `json:"grant,omitempty"`
+	// Restore maakt User, bij PostgreSQL, een tijdelijke beheerder om een
+	// dump terug te zetten: SUPERUSER, en geldig tot DBTempRoleTTL. Alleen
+	// voor een naam volgens DBTempRolePattern.
+	Restore bool `json:"restore,omitempty"`
 }
 
 // DBDropRequest haalt Database weg, of User op elke host in Hosts.

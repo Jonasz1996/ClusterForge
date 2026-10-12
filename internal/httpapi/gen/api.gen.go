@@ -282,6 +282,24 @@ func (e ComponentDatabaseDumpsFreshness) Valid() bool {
 	}
 }
 
+// Defines values for ComponentDatabasesEngine.
+const (
+	ComponentDatabasesEngineMariadb    ComponentDatabasesEngine = "mariadb"
+	ComponentDatabasesEnginePostgresql ComponentDatabasesEngine = "postgresql"
+)
+
+// Valid indicates whether the value is a known member of the ComponentDatabasesEngine enum.
+func (e ComponentDatabasesEngine) Valid() bool {
+	switch e {
+	case ComponentDatabasesEngineMariadb:
+		return true
+	case ComponentDatabasesEnginePostgresql:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ComponentDumpStatus.
 const (
 	ComponentDumpStatusFailed  ComponentDumpStatus = "failed"
@@ -3672,7 +3690,7 @@ type ComponentDatabaseDumpsFreshness string
 
 // ComponentDatabaseGrant defines model for ComponentDatabaseGrant.
 type ComponentDatabaseGrant struct {
-	// All Alle rechten op deze database
+	// All Alle rechten op deze database; bij PostgreSQL de eigenaar
 	All        bool     `json:"all"`
 	Database   string   `json:"database"`
 	Privileges []string `json:"privileges"`
@@ -3696,24 +3714,28 @@ type ComponentDatabaseUser struct {
 	Hosts  []string `json:"hosts"`
 	Name   string   `json:"name"`
 
-	// System Een gebruiker van MariaDB zelf, zoals root
+	// System Een gebruiker van de database zelf, zoals root of postgres, of een tijdelijke beheerder van ClusterForge om een dump terug te zetten
 	System bool `json:"system"`
 }
 
 // ComponentDatabases defines model for ComponentDatabases.
 type ComponentDatabases struct {
 	// Address Waar een app verbindt; het VIP van de database, of de eerste datanode
-	Address   string              `json:"address"`
-	Databases []ComponentDatabase `json:"databases"`
+	Address   string                   `json:"address"`
+	Databases []ComponentDatabase      `json:"databases"`
+	Engine    ComponentDatabasesEngine `json:"engine"`
 
-	// Hosts De adressen waarvandaan een nieuwe gebruiker mag inloggen; alle nodes en VIP's van het cluster
+	// Hosts De adressen waarvandaan een nieuwe gebruiker mag inloggen; alle nodes en VIP's van het cluster. Leeg bij PostgreSQL, waar pg_hba dat bepaalt
 	Hosts []string `json:"hosts"`
 
-	// Node De datanode waarvan ClusterForge las
+	// Node De datanode waarvan ClusterForge las; bij PostgreSQL de primary
 	Node  string                  `json:"node"`
 	Port  int                     `json:"port"`
 	Users []ComponentDatabaseUser `json:"users"`
 }
+
+// ComponentDatabasesEngine defines model for ComponentDatabases.Engine.
+type ComponentDatabasesEngine string
 
 // ComponentDropInput defines model for ComponentDropInput.
 type ComponentDropInput struct {

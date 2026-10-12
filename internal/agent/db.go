@@ -99,6 +99,28 @@ func (a *Agent) handleDB(data []byte) protocol.DBResponse {
 		defer c2()
 	}
 	var res protocol.DBResponse
+	pg := req.Engine == protocol.DBPostgreSQL
+	switch {
+	case req.Engine != "" && req.Engine != protocol.DBMariaDB && !pg:
+		res = protocol.DBResponse{Error: "onbekende database " + req.Engine, Servers: []protocol.DBServer{}}
+	case pg && req.Op == protocol.DBUsers:
+		res = a.pgUsers(ctx)
+	case pg && req.Op == protocol.DBEnsure:
+		res = a.pgEnsure(ctx, req.Ensure)
+	case pg && req.Op == protocol.DBDrop:
+		res = a.pgDrop(ctx, req.Drop)
+	default:
+		res = a.dbOp(ctx, req)
+	}
+	if res.Error != "" {
+		a.Log.Warn("databaseverzoek mislukt", "op", req.Op, "engine", req.Engine, "err", res.Error)
+	}
+	return res
+}
+
+// dbOp voert een verzoek uit dat voor MariaDB is, of voor de hele node.
+func (a *Agent) dbOp(ctx context.Context, req protocol.DBRequest) protocol.DBResponse {
+	var res protocol.DBResponse
 	switch req.Op {
 	case protocol.DBStatus:
 		res = a.DBStatus(ctx)
@@ -113,14 +135,11 @@ func (a *Agent) handleDB(data []byte) protocol.DBResponse {
 	case protocol.DBDrop:
 		res = a.dbDrop(ctx, req.Drop)
 	case protocol.DBDump:
-		res = a.dbDump(ctx, req.Dump)
+		res = a.dbDump(ctx, req.Engine, req.Dump)
 	case protocol.DBMigrate:
 		res = a.dbMigrate(ctx, req.Migrate)
 	default:
 		res = protocol.DBResponse{Error: "onbekend databaseverzoek " + req.Op, Servers: []protocol.DBServer{}}
-	}
-	if res.Error != "" {
-		a.Log.Warn("databaseverzoek mislukt", "op", req.Op, "err", res.Error)
 	}
 	return res
 }
@@ -496,6 +515,11 @@ func (a *Agent) psql(ctx context.Context, db, query string) ([][]string, error) 
 	if err != nil {
 		return nil, err
 	}
+	return psqlRows(out), nil
+}
+
+// psqlRows leest de uitvoer van psql -At met de scheidingstekens van dbsql.
+func psqlRows(out []byte) [][]string {
 	var rows [][]string
 	for rec := range strings.SplitSeq(strings.TrimSuffix(string(out), "\n"), dbsql.PGRecordSep) {
 		if rec == "" {
@@ -503,7 +527,7 @@ func (a *Agent) psql(ctx context.Context, db, query string) ([][]string, error) 
 		}
 		rows = append(rows, strings.Split(rec, dbsql.PGFieldSep))
 	}
-	return rows, nil
+	return rows
 }
 
 func (a *Agent) pgStatus(ctx context.Context, u UnitInfo) protocol.DBServer {

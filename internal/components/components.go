@@ -533,9 +533,9 @@ func (s *Service) Remove(ctx context.Context, actor events.Actor, clusterID, id 
 	return err
 }
 
-// mariaOnly houdt tegen wat er voor PostgreSQL nog niet is: databases en
-// gebruikers, dumps en verhuizen komen in het tweede deel van mijlpaal 10,
-// het beheer na een uitval doet Patroni zelf.
+// mariaOnly houdt tegen wat er voor PostgreSQL nog niet is: verhuizen naar
+// PostgreSQL komt in een volgende stap, het beheer na een uitval doet
+// Patroni zelf.
 func mariaOnly(r store.ClusterComponent, what string) error {
 	switch r.Engine {
 	case protocol.DBMariaDB:

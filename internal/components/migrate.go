@@ -445,7 +445,7 @@ func (s *Service) planMigration(ctx context.Context, source, database string, co
 	checkClients(p.Clients, opt, database, add)
 
 	// De nieuwe database.
-	t, err := s.target(ctx, opt.ClusterID, opt.ComponentID)
+	t, err := s.mariaTarget(ctx, opt.ClusterID, opt.ComponentID)
 	switch {
 	case errors.As(err, &ce):
 		add(Blocked, "target_down", nil, opt.ClusterName+": "+ce.Msg, "")

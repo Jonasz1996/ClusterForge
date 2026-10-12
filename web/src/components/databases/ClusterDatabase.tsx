@@ -80,8 +80,8 @@ function Component({ c, comp, isAdmin }: { c: ClusterDetail; comp: ClusterCompon
   // Het VIP staat er al apart.
   const settings = Object.entries(comp.params).filter(([k]) => k !== "vip");
   const out = new Map(comp.nodes_out.map((o) => [o.hostname, o]));
-  // Bij PostgreSQL zet ClusterForge nu het cluster neer; databases, dumps en
-  // opnieuw starten komen in een volgende stap.
+  // Bij PostgreSQL start Patroni de nodes zelf opnieuw; dat beheer komt in
+  // een volgende stap.
   const pg = comp.engine === "postgresql";
   return (
     <div className="space-y-3 text-sm">
@@ -96,8 +96,8 @@ function Component({ c, comp, isAdmin }: { c: ClusterDetail; comp: ClusterCompon
         </span>
         {(isAdmin || applied) && (
           <span className="flex flex-wrap gap-2">
-            {applied && !pg && (
-              <Link href={`/clusters/databases?id=${c.id}`}>
+            {applied && (
+              <Link href={`/clusters/databases?id=${c.id}&component=${comp.id}`}>
                 <Button variant="secondary">Databases en gebruikers</Button>
               </Link>
             )}

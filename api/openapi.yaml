@@ -3090,8 +3090,10 @@ paths:
       operationId: listComponentDatabases
       summary: De databases en gebruikers in de database van een cluster
       description: |
-        ClusterForge leest ze op de datanode met het VIP, of anders de eerste die Synced is: de databases met grootte, tabellen
-        en verbindingen op die node, en de gebruikers met hun hosts en rechten, zonder wachtwoord of hash. Ook voor viewers.
+        ClusterForge leest ze bij MariaDB op de datanode met het VIP, of anders de eerste die Synced is, en bij PostgreSQL op
+        de primary van Patroni: de databases met grootte, tabellen en verbindingen op die node, en de gebruikers met hun hosts
+        en rechten, zonder wachtwoord of hash. Bij PostgreSQL heeft een gebruiker geen hosts; pg_hba laat de nodes en het VIP
+        binnen. Ook voor viewers.
       responses:
         "200":
           description: OK
@@ -3105,8 +3107,9 @@ paths:
       operationId: createComponentDatabase
       summary: Een database met een eigen gebruiker aanmaken (admin)
       description: |
-        De gebruiker krijgt alle rechten op de database en mag inloggen vanaf elke node en elk VIP van het cluster. Het
-        wachtwoord staat één keer in het antwoord; ClusterForge bewaart het niet. Bestaat de database of de gebruiker al, dan 409.
+        De gebruiker krijgt alle rechten op de database en mag inloggen vanaf elke node en elk VIP van het cluster; bij
+        PostgreSQL wordt hij de eigenaar van de database. Het wachtwoord staat één keer in het antwoord; ClusterForge bewaart
+        het niet. Bestaat de database of de gebruiker al, dan 409.
       requestBody:
         required: true
         content:
@@ -3215,8 +3218,8 @@ paths:
       operationId: createComponentDump
       summary: Meteen een dump van een database maken (admin); wordt een taak
       description: |
-        De dump komt op een datanode zonder het VIP die Synced is. Loopt er al een dump of terugzetten van deze database,
-        dan 409.
+        Bij MariaDB komt de dump op een datanode zonder het VIP die Synced is, bij PostgreSQL op de primary. Loopt er al een
+        dump of terugzetten van deze database, dan 409.
       requestBody:
         required: true
         content:
@@ -3243,7 +3246,8 @@ paths:
       summary: Een dump terugzetten in een nieuwe database naast de bestaande (admin); wordt een taak
       description: |
         Standaard heet de nieuwe database <database>_herstel_<datum van de dump>. De bestaande database blijft zoals ze is.
-        Mislukt het, dan haalt de agent de nieuwe database weer weg.
+        Mislukt het, dan haalt de agent de nieuwe database weer weg. Bij PostgreSQL zet de agent met de dump hem over het
+        netwerk terug op de primary, met een tijdelijke beheerder die ClusterForge daar maakt en daarna weghaalt.
       requestBody:
         required: false
         content:
@@ -4433,15 +4437,16 @@ components:
         confirm: { type: string, description: De slug van het cluster; nodig op prod }
     ComponentDatabases:
       type: object
-      required: [node, address, port, hosts, databases, users]
+      required: [engine, node, address, port, hosts, databases, users]
       properties:
-        node: { type: string, description: De datanode waarvan ClusterForge las }
+        engine: { type: string, enum: [mariadb, postgresql] }
+        node: { type: string, description: "De datanode waarvan ClusterForge las; bij PostgreSQL de primary" }
         address: { type: string, description: "Waar een app verbindt; het VIP van de database, of de eerste datanode" }
         port: { type: integer }
         hosts:
           type: array
           items: { type: string }
-          description: De adressen waarvandaan een nieuwe gebruiker mag inloggen; alle nodes en VIP's van het cluster
+          description: "De adressen waarvandaan een nieuwe gebruiker mag inloggen; alle nodes en VIP's van het cluster. Leeg bij PostgreSQL, waar pg_hba dat bepaalt"
         databases:
           type: array
           items: { $ref: "#/components/schemas/ComponentDatabase" }
@@ -4468,7 +4473,9 @@ components:
         hosts:
           type: array
           items: { type: string }
-        system: { type: boolean, description: "Een gebruiker van MariaDB zelf, zoals root" }
+        system:
+          type: boolean
+          description: "Een gebruiker van de database zelf, zoals root of postgres, of een tijdelijke beheerder van ClusterForge om een dump terug te zetten"
         global:
           type: array
           items: { type: string }
@@ -4481,7 +4488,7 @@ components:
       required: [database, all, privileges]
       properties:
         database: { type: string }
-        all: { type: boolean, description: Alle rechten op deze database }
+        all: { type: boolean, description: "Alle rechten op deze database; bij PostgreSQL de eigenaar" }
         privileges:
           type: array
           items: { type: string }

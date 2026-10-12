@@ -147,6 +147,11 @@ type Postgres struct {
 	Databases      []Database
 	// Clients: Host is client_addr, leeg voor de socket.
 	Clients []Client
+	// Roles zijn de gebruikers met LOGIN. De opdrachten van de agent via
+	// stdin passen ze aan, net als Databases.
+	Roles []PGRole
+	// DumpIncomplete laat pg_dump stoppen zonder de slotregel.
+	DumpIncomplete bool
 }
 
 // PGSource is de WAL-ontvanger van een replica.
@@ -176,6 +181,10 @@ type Database struct {
 	NoPK                              []string
 	Engines                           map[string]string
 	Views, Routines, Triggers, Events int
+	// In PostgreSQL: de eigenaar, en de rechten per gebruiker op de
+	// database (CONNECT, CREATE, TEMPORARY).
+	Owner string
+	ACL   map[string][]string
 }
 
 // Locked voert fn uit onder het slot van de host, om de databases te
@@ -501,7 +510,10 @@ func (h *Host) runuser(args []string) ([]byte, error) {
 			rows = append(rows, []string{c.User, c.Host, c.Database, strconv.Itoa(c.Count)})
 		}
 	default:
-		return []byte("ERROR:  agenttest kent deze query niet: " + q + "\n"), errExit1
+		var ok bool
+		if rows, ok = p.pgQuery(db, q); !ok {
+			return []byte("ERROR:  agenttest kent deze query niet: " + q + "\n"), errExit1
+		}
 	}
 	if len(rows) == 0 {
 		return nil, nil

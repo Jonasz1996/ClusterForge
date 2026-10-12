@@ -809,7 +809,7 @@ func (s *Service) SwitchMove(ctx context.Context, actor events.Actor, id uuid.UU
 	if err != nil {
 		return row, err
 	}
-	t, err := s.target(ctx, m.ClusterID, m.ComponentID)
+	t, err := s.mariaTarget(ctx, m.ClusterID, m.ComponentID)
 	if err != nil {
 		return row, err
 	}
@@ -897,7 +897,7 @@ func (s *Service) CancelMove(ctx context.Context, actor events.Actor, id uuid.UU
 	if confirm != m.Database {
 		return row, &InvalidError{"confirm", "tik ter bevestiging de naam van de database in: " + m.Database}
 	}
-	t, err := s.target(ctx, m.ClusterID, m.ComponentID)
+	t, err := s.mariaTarget(ctx, m.ClusterID, m.ComponentID)
 	if err != nil {
 		return row, err
 	}

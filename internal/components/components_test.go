@@ -1,6 +1,7 @@
 package components
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -254,5 +255,28 @@ func TestVIPSteps(t *testing.T) {
 	}
 	if got := vipTitles("nextcloud", "10.0.20.185", ""); got[2] != "keepalived.conf: track_script cf_db in de vrrp_instance met 10.0.20.185" {
 		t.Errorf("titels: %v", got)
+	}
+}
+
+// Een agent zonder protocol.DBPGSince kent het veld Engine niet en zou een
+// verzoek voor PostgreSQL op MariaDB uitvoeren; ClusterForge stuurt hem er
+// geen.
+func TestPGAgent(t *testing.T) {
+	for want, p := range map[string]pgNode{
+		"protocol 9": {node: Node{Hostname: "nc1"}, protocol: protocol.DBPGSince - 1},
+		"protocol 0": {node: Node{Hostname: "nc2"}},
+		"":           {node: Node{Hostname: "nc3"}, protocol: protocol.DBPGSince},
+	} {
+		err := pgAgent(p)
+		if want == "" {
+			if err != nil {
+				t.Errorf("%s: %v", p.node.Hostname, err)
+			}
+			continue
+		}
+		var conflict *ConflictError
+		if !errors.As(err, &conflict) || !strings.Contains(err.Error(), want) || !strings.Contains(err.Error(), "--upgrade") {
+			t.Errorf("%s: %v", p.node.Hostname, err)
+		}
 	}
 }

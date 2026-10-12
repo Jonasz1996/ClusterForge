@@ -5,11 +5,15 @@ package agent
 // dump staat een .json met wat de agent erover weet: de grootte, de
 // tabellen en of hij compleet is. Maken en terugzetten lopen op de
 // achtergrond, één tegelijk; de server vraagt met list hoe ver het is. Een
-// dump gaat nooit naar de server.
+// dump gaat nooit naar de server. Dumps van MariaDB eindigen op .sql.zst,
+// die van PostgreSQL op .pgsql.zst, zodat ze naast elkaar kunnen staan.
 //
 // Terugzetten gaat altijd in een nieuwe database, zodat de bestaande blijft
 // zoals ze is. Mislukt het, dan haalt de agent die nieuwe database weer
-// weg.
+// weg. MariaDB zet de agent terug op zijn eigen node. PostgreSQL schrijft
+// alleen op de primary, en dat kan een andere node zijn dan die met de
+// dump; daarom zet de agent een dump van PostgreSQL over het netwerk terug
+// op de primary, als een tijdelijke beheerder die de server daar maakte.
 
 import (
 	"bytes"
@@ -43,6 +47,16 @@ const (
 	// en dumpEndMarker op de laatste regel.
 	dumpTableMarker = "-- Table structure for table `"
 	dumpEndMarker   = "\n-- Dump completed"
+	// pg_dump zet boven elke tabel "-- Name: <tabel>; Type: TABLE; Schema:
+	// ...", en schrijft pgDumpEndMarker aan het eind, met daarna nog de
+	// regel \unrestrict en een sleutel.
+	pgTableMarker   = "-- Name: "
+	pgTableType     = "; Type: TABLE; "
+	pgDumpEndMarker = "\n-- PostgreSQL database dump complete\n"
+	// dumpHead is hoeveel van het begin van een regel de scan bekijkt, en
+	// dumpTail hoeveel van het eind van de dump.
+	dumpHead = 512
+	dumpTail = 256
 	// dumpRestores is hoeveel keer terugzetten de agent onthoudt.
 	dumpRestores = 20
 	// dumpPartialAge is hoe oud een half geschreven dump zonder lopende
@@ -58,6 +72,13 @@ var dumpArgs = []string{
 	"--single-transaction", "--quick", "--routines", "--events", "--triggers", "--hex-blob",
 	"--default-character-set=utf8mb4",
 }
+
+// pgDumpArgs zijn de opties van pg_dump, als postgres via de socket: platte
+// SQL met de eigenaars en rechten, en een fout als een tabel na vijf
+// minuten nog op slot is in plaats van eindeloos wachten. pg_dump leest
+// altijd een consistente momentopname. De database komt erachter, zonder
+// --create, zodat de dump in een database met een andere naam terug kan.
+var pgDumpArgs = []string{"-u", "postgres", "--", "pg_dump", "--lock-wait-timeout=5min"}
 
 // dumpState is wat er op de achtergrond loopt.
 type dumpState struct {
@@ -90,23 +111,25 @@ func (a *Agent) dumpDir() string {
 	return protocol.DBDumpDir
 }
 
-func (a *Agent) dbDump(ctx context.Context, req *protocol.DBDumpRequest) protocol.DBResponse {
+// dbDump doet een dumpactie voor engine; list geeft de dumps van beide.
+func (a *Agent) dbDump(ctx context.Context, engine string, req *protocol.DBDumpRequest) protocol.DBResponse {
 	res := protocol.DBResponse{Servers: []protocol.DBServer{}}
 	if req == nil {
 		res.Error = "dump zonder inhoud"
 		return res
 	}
+	engine = cmp.Or(engine, protocol.DBMariaDB)
 	var started string
 	var removed []string
 	var err error
 	switch req.Action {
 	case protocol.DBDumpList:
 	case protocol.DBDumpStart:
-		started, err = a.dumpStart(ctx, req.Database)
+		started, err = a.dumpStart(ctx, engine, req.Database)
 	case protocol.DBDumpPrune:
-		removed, err = a.dumpPrune(req)
+		removed, err = a.dumpPrune(engine, req)
 	case protocol.DBDumpRestore:
-		err = a.dumpRestore(ctx, req)
+		err = a.dumpRestore(ctx, engine, req)
 	default:
 		err = fmt.Errorf("onbekende dumpactie %q", req.Action)
 	}
@@ -125,7 +148,10 @@ func (a *Agent) dbDump(ctx context.Context, req *protocol.DBDumpRequest) protoco
 }
 
 // dumpInfo leest of db bestaat, met haar tabellen en hun grootte.
-func (a *Agent) dumpInfo(ctx context.Context, db string) (exists bool, tables int, size int64, err error) {
+func (a *Agent) dumpInfo(ctx context.Context, engine, db string) (exists bool, tables int, size int64, err error) {
+	if engine == protocol.DBPostgreSQL {
+		return a.pgDumpInfo(ctx, db)
+	}
 	q, err := dbsql.DumpInfo(db)
 	if err != nil {
 		return false, 0, 0, err
@@ -192,15 +218,23 @@ func (a *Agent) waitDump(ctx context.Context) error {
 	}
 }
 
+// needEngine zegt waarom er op deze node niets met engine kan.
+func (a *Agent) needEngine(ctx context.Context, engine string) error {
+	if engine == protocol.DBPostgreSQL {
+		return a.needPG(ctx)
+	}
+	return a.needMaria(ctx)
+}
+
 // dumpStart begint een dump van db en geeft de naam ervan.
-func (a *Agent) dumpStart(ctx context.Context, db string) (string, error) {
-	if err := dbsql.CheckDatabase(db); err != nil {
+func (a *Agent) dumpStart(ctx context.Context, engine, db string) (string, error) {
+	if err := dbsql.CheckDatabaseOf(engine, db); err != nil {
 		return "", err
 	}
-	if err := a.needMaria(ctx); err != nil {
+	if err := a.needEngine(ctx, engine); err != nil {
 		return "", err
 	}
-	exists, tables, size, err := a.dumpInfo(ctx, db)
+	exists, tables, size, err := a.dumpInfo(ctx, engine, db)
 	if err != nil {
 		return "", err
 	}
@@ -208,8 +242,12 @@ func (a *Agent) dumpStart(ctx context.Context, db string) (string, error) {
 		return "", fmt.Errorf("de database %s bestaat niet op deze node", db)
 	}
 	now := a.now().UTC()
+	ext := ".sql.zst"
+	if engine == protocol.DBPostgreSQL {
+		ext = ".pgsql.zst"
+	}
 	run := &protocol.DBDumpRun{
-		Action: protocol.DBDumpStart, Database: db, File: fmt.Sprintf("%s-%s.sql.zst", db, now.Format("20060102-150405")),
+		Action: protocol.DBDumpStart, Database: db, File: db + "-" + now.Format("20060102-150405") + ext,
 		Started: now, Total: size,
 	}
 	dir, err := a.dumpMkdir(db)
@@ -229,7 +267,7 @@ func (a *Agent) dumpStart(ctx context.Context, db string) (string, error) {
 		st.end(func() {})
 		return "", fmt.Errorf("dump beginnen: %w", err)
 	}
-	go a.runDump(f, path, *run, tables)
+	go a.runDump(f, path, engine, *run, tables)
 	return run.File, nil
 }
 
@@ -253,11 +291,11 @@ func (a *Agent) dumpMkdir(db string) (string, error) {
 }
 
 // runDump schrijft de dump naar f, en daarna het .json-bestand ernaast.
-func (a *Agent) runDump(f *os.File, path string, run protocol.DBDumpRun, expected int) {
+func (a *Agent) runDump(f *os.File, path, engine string, run protocol.DBDumpRun, expected int) {
 	ctx, cancel := context.WithTimeout(context.Background(), protocol.DBDumpTimeout)
 	defer cancel()
 	st := a.dumps()
-	scan := &dumpScan{progress: st.progress}
+	scan := newDumpScan(engine, st.progress)
 	err := func() error {
 		zw, err := zstd.NewWriter(f)
 		if err != nil {
@@ -265,10 +303,14 @@ func (a *Agent) runDump(f *os.File, path string, run protocol.DBDumpRun, expecte
 			return err
 		}
 		w := io.MultiWriter(zw, scan)
-		args := append(slices.Clone(dumpArgs), run.Database)
-		err = a.stream(ctx, nil, w, "mariadb-dump", args...)
-		if err != nil && notInstalled(err) {
-			err = a.stream(ctx, nil, w, "mysqldump", args...)
+		if engine == protocol.DBPostgreSQL {
+			err = a.stream(ctx, nil, w, "runuser", append(slices.Clone(pgDumpArgs), run.Database)...)
+		} else {
+			args := append(slices.Clone(dumpArgs), run.Database)
+			err = a.stream(ctx, nil, w, "mariadb-dump", args...)
+			if err != nil && notInstalled(err) {
+				err = a.stream(ctx, nil, w, "mysqldump", args...)
+			}
 		}
 		if cerr := zw.Close(); err == nil {
 			err = cerr
@@ -285,7 +327,7 @@ func (a *Agent) runDump(f *os.File, path string, run protocol.DBDumpRun, expecte
 		return err
 	}()
 	meta := protocol.DBDumpFile{
-		Database: run.Database, File: run.File, RawBytes: scan.n, Tables: scan.tables, TablesExpected: expected,
+		Engine: engine, Database: run.Database, File: run.File, RawBytes: scan.n, Tables: scan.tables, TablesExpected: expected,
 		Complete: scan.complete(), Started: run.Started, Finished: a.now().UTC(),
 	}
 	if err != nil {
@@ -372,7 +414,7 @@ func (a *Agent) dumpFiles() ([]protocol.DBDumpFile, error) {
 	}
 	var out []protocol.DBDumpFile
 	for _, d := range dirs {
-		if !d.IsDir() || dbsql.CheckDatabase(d.Name()) != nil {
+		if !d.IsDir() || dbsql.CheckDatabase(d.Name()) != nil && dbsql.CheckPGDatabase(d.Name()) != nil {
 			continue
 		}
 		entries, err := os.ReadDir(filepath.Join(root, d.Name()))
@@ -384,7 +426,8 @@ func (a *Agent) dumpFiles() ([]protocol.DBDumpFile, error) {
 			if !ok || !e.Type().IsRegular() {
 				continue
 			}
-			if m := dumpFileRe.FindStringSubmatch(name); m == nil || m[1] != d.Name() {
+			engine := protocol.DBDumpEngine(name)
+			if m := dumpFileRe.FindStringSubmatch(name); m == nil || m[1] != d.Name() || dbsql.CheckDatabaseOf(engine, m[1]) != nil {
 				continue
 			}
 			f, err := readDumpMeta(filepath.Join(root, d.Name(), e.Name()))
@@ -392,7 +435,7 @@ func (a *Agent) dumpFiles() ([]protocol.DBDumpFile, error) {
 				a.Log.Warn("gegevens van een dump lezen mislukt", "file", e.Name(), "err", err)
 				continue
 			}
-			f.Database, f.File = d.Name(), name
+			f.Engine, f.Database, f.File = engine, d.Name(), name
 			if f.Error == "" {
 				fi, err := os.Stat(filepath.Join(root, d.Name(), name))
 				if err != nil {
@@ -419,16 +462,17 @@ func readDumpMeta(path string) (protocol.DBDumpFile, error) {
 	return f, json.Unmarshal(b, &f)
 }
 
-// dumpPrune haalt de dumps weg die ouder zijn dan KeepDays, behalve die in
-// Keep. Zonder Keep blijft de nieuwste complete per database staan, zodat
-// een reeks mislukte dumps nooit de laatste goede weghaalt; met Keep
-// beslist de server, die weet welke goede dump op een andere node staat.
-func (a *Agent) dumpPrune(req *protocol.DBDumpRequest) ([]string, error) {
+// dumpPrune haalt de dumps van engine weg die ouder zijn dan KeepDays,
+// behalve die in Keep. Zonder Keep blijft de nieuwste complete per database
+// staan, zodat een reeks mislukte dumps nooit de laatste goede weghaalt;
+// met Keep beslist de server, die weet welke goede dump op een andere node
+// staat. De dumps van de andere engine blijven altijd staan.
+func (a *Agent) dumpPrune(engine string, req *protocol.DBDumpRequest) ([]string, error) {
 	if req.KeepDays < 1 {
 		return nil, errors.New("bewaar dumps minstens één dag")
 	}
 	if req.Database != "" {
-		if err := dbsql.CheckDatabase(req.Database); err != nil {
+		if err := dbsql.CheckDatabaseOf(engine, req.Database); err != nil {
 			return nil, err
 		}
 	}
@@ -436,6 +480,7 @@ func (a *Agent) dumpPrune(req *protocol.DBDumpRequest) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	files = slices.DeleteFunc(files, func(f protocol.DBDumpFile) bool { return f.Engine != engine })
 	newest := map[string]string{}
 	for _, f := range files {
 		if req.Keep == nil && f.Error == "" && f.Complete {
@@ -497,17 +542,22 @@ func (a *Agent) prunePartials(running string) {
 }
 
 // dumpRestore begint het terugzetten van een dump in een nieuwe database.
-func (a *Agent) dumpRestore(ctx context.Context, req *protocol.DBDumpRequest) error {
-	if err := dbsql.CheckDatabase(req.Database); err != nil {
+func (a *Agent) dumpRestore(ctx context.Context, engine string, req *protocol.DBDumpRequest) error {
+	pg := engine == protocol.DBPostgreSQL
+	if err := dbsql.CheckDatabaseOf(engine, req.Database); err != nil {
 		return err
 	}
-	if m := dumpFileRe.FindStringSubmatch(req.File); m == nil || m[1] != req.Database {
+	if m := dumpFileRe.FindStringSubmatch(req.File); m == nil || m[1] != req.Database || protocol.DBDumpEngine(req.File) != engine {
 		return fmt.Errorf("%q is geen dump van %s", req.File, req.Database)
 	}
-	if err := dbsql.CheckDatabase(req.Target); err != nil {
+	if err := dbsql.CheckDatabaseOf(engine, req.Target); err != nil {
 		return err
 	}
-	if err := a.needMaria(ctx); err != nil {
+	if pg {
+		if err := dbsql.CheckPGLogin(req.Primary, req.User, req.Password); err != nil {
+			return err
+		}
+	} else if err := a.needMaria(ctx); err != nil {
 		return err
 	}
 	path := filepath.Join(a.dumpDir(), req.Database, req.File)
@@ -526,7 +576,24 @@ func (a *Agent) dumpRestore(ctx context.Context, req *protocol.DBDumpRequest) er
 	if err != nil {
 		return fmt.Errorf("de dump %s staat niet op deze node", req.File)
 	}
-	exists, _, _, err := a.dumpInfo(ctx, req.Target)
+	var login *pgLogin
+	if pg {
+		if login, err = newPGLogin(req.Primary, req.User, req.Password); err != nil {
+			return err
+		}
+	}
+	started := false
+	defer func() {
+		if !started {
+			login.close()
+		}
+	}()
+	var exists bool
+	if pg {
+		exists, err = a.pgRemoteExists(ctx, login, req.Target)
+	} else {
+		exists, _, _, err = a.dumpInfo(ctx, engine, req.Target)
+	}
 	if err != nil {
 		return err
 	}
@@ -541,17 +608,28 @@ func (a *Agent) dumpRestore(ctx context.Context, req *protocol.DBDumpRequest) er
 	if err := st.begin(run); err != nil {
 		return err
 	}
-	sql, _ := dbsql.CreateDatabase(req.Target)
-	if res := a.dbWrite(ctx, sql, ""); res.Error != "" {
-		st.end(func() {})
-		return fmt.Errorf("database %s maken: %s", req.Target, res.Error)
+	if pg {
+		sql, _ := dbsql.PGRestoreCreate(req.Database, req.Target)
+		if out, err := a.runStdin(ctx, []byte(sql), "psql", login.args("postgres")...); err != nil {
+			st.end(func() {})
+			return fmt.Errorf("database %s maken op %s: %s", req.Target, req.Primary, pgError(out, err, ""))
+		}
+	} else {
+		sql, _ := dbsql.CreateDatabase(req.Target)
+		if res := a.dbWrite(ctx, sql, ""); res.Error != "" {
+			st.end(func() {})
+			return fmt.Errorf("database %s maken: %s", req.Target, res.Error)
+		}
 	}
-	go a.runRestore(path, *run)
+	started = true
+	go a.runRestore(path, login, *run)
 	return nil
 }
 
-// runRestore zet de dump op path terug in run.Target.
-func (a *Agent) runRestore(path string, run protocol.DBDumpRun) {
+// runRestore zet de dump op path terug in run.Target: met login in
+// PostgreSQL op de primary, anders in de MariaDB van deze node.
+func (a *Agent) runRestore(path string, login *pgLogin, run protocol.DBDumpRun) {
+	defer login.close()
 	ctx, cancel := context.WithTimeout(context.Background(), protocol.DBDumpTimeout)
 	defer cancel()
 	st := a.dumps()
@@ -566,6 +644,12 @@ func (a *Agent) runRestore(path string, run protocol.DBDumpRun) {
 			return err
 		}
 		defer zr.Close()
+		if login != nil {
+			// Wat de tijdelijke beheerder zelf maakte, gaat daarna naar de
+			// eigenaar van de database.
+			in := io.MultiReader(zr, strings.NewReader(dbsql.PGRestoreFinish))
+			return a.stream(ctx, in, io.Discard, "psql", login.args(run.Target)...)
+		}
 		args := []string{"--batch", "--skip-print-query-on-error", run.Target}
 		err = a.stream(ctx, zr, io.Discard, "mariadb", args...)
 		if err != nil && notInstalled(err) {
@@ -577,9 +661,16 @@ func (a *Agent) runRestore(path string, run protocol.DBDumpRun) {
 		a.Log.Warn("dump terugzetten mislukt", "file", run.File, "target", run.Target, "err", err)
 		run.Error = clip(err.Error(), 500)
 		dctx, dcancel := context.WithTimeout(context.Background(), protocol.DBTimeout)
-		sql, _ := dbsql.Drop(protocol.DBDropRequest{Database: run.Target, Confirm: run.Target})
-		if res := a.dbWrite(dctx, sql, ""); res.Error != "" {
-			run.Error += "; " + run.Target + " weghalen mislukte ook: " + res.Error
+		if login != nil {
+			sql, _ := dbsql.PGDrop(protocol.DBDropRequest{Database: run.Target, Confirm: run.Target})
+			if out, err := a.runStdin(dctx, []byte(sql), "psql", login.args("postgres")...); err != nil {
+				run.Error += "; " + run.Target + " weghalen mislukte ook: " + pgError(out, err, "")
+			}
+		} else {
+			sql, _ := dbsql.Drop(protocol.DBDropRequest{Database: run.Target, Confirm: run.Target})
+			if res := a.dbWrite(dctx, sql, ""); res.Error != "" {
+				run.Error += "; " + run.Target + " weghalen mislukte ook: " + res.Error
+			}
 		}
 		dcancel()
 	}
@@ -608,17 +699,31 @@ func (c *countReader) Read(p []byte) (int, error) {
 	return n, err
 }
 
-// dumpScan telt wat mariadb-dump schrijft: de bytes, de tabellen, en of
-// de laatste regel er staat.
+// dumpScan telt wat mariadb-dump of pg_dump schrijft: de bytes, de
+// tabellen, en of de slotregel er staat.
 type dumpScan struct {
 	n        int64
 	tables   int
 	progress func(int64)
-	// head is het begin van de regel waarin de scan staat, tot de lengte
-	// van dumpTableMarker; mid: de scan is voorbij dat begin.
+	// table zegt of een regel, tot dumpHead tekens, boven een tabel staat.
+	table func(head []byte) bool
+	end   string
+	// head is het begin van de regel waarin de scan staat; mid: dat begin
+	// is al bekeken.
 	head []byte
 	mid  bool
 	tail []byte
+}
+
+func newDumpScan(engine string, progress func(int64)) *dumpScan {
+	if engine == protocol.DBPostgreSQL {
+		return &dumpScan{progress: progress, end: pgDumpEndMarker, table: func(head []byte) bool {
+			return bytes.HasPrefix(head, []byte(pgTableMarker)) && bytes.Contains(head, []byte(pgTableType))
+		}}
+	}
+	return &dumpScan{progress: progress, end: dumpEndMarker, table: func(head []byte) bool {
+		return bytes.HasPrefix(head, []byte(dumpTableMarker))
+	}}
 }
 
 func (s *dumpScan) Write(p []byte) (int, error) {
@@ -627,32 +732,25 @@ func (s *dumpScan) Write(p []byte) (int, error) {
 	if s.progress != nil {
 		s.progress(int64(n))
 	}
-	s.tail = append(s.tail, p[max(0, n-64):]...)
-	if len(s.tail) > 64 {
-		s.tail = s.tail[len(s.tail)-64:]
+	s.tail = append(s.tail, p[max(0, n-dumpTail):]...)
+	if len(s.tail) > dumpTail {
+		s.tail = s.tail[len(s.tail)-dumpTail:]
 	}
 	for len(p) > 0 {
+		i := bytes.IndexByte(p, '\n')
+		line := p
+		if i >= 0 {
+			line = p[:i]
+		}
 		if !s.mid {
-			for len(p) > 0 && len(s.head) < len(dumpTableMarker) && p[0] != '\n' {
-				s.head = append(s.head, p[0])
-				p = p[1:]
-			}
-			switch {
-			case len(s.head) == len(dumpTableMarker):
-				if string(s.head) == dumpTableMarker {
+			s.head = append(s.head, line[:min(len(line), dumpHead-len(s.head))]...)
+			if i >= 0 || len(s.head) == dumpHead {
+				if s.table(s.head) {
 					s.tables++
 				}
 				s.mid = true
-			case len(p) > 0:
-				// Een korte regel: het regeleinde staat vooraan.
-				s.head = s.head[:0]
-				p = p[1:]
-				continue
-			default:
-				return n, nil
 			}
 		}
-		i := bytes.IndexByte(p, '\n')
 		if i < 0 {
 			return n, nil
 		}
@@ -663,7 +761,7 @@ func (s *dumpScan) Write(p []byte) (int, error) {
 	return n, nil
 }
 
-func (s *dumpScan) complete() bool { return bytes.Contains(s.tail, []byte(dumpEndMarker)) }
+func (s *dumpScan) complete() bool { return bytes.Contains(s.tail, []byte(s.end)) }
 
 // stream voert een programma uit met in op stdin en stdout naar out.
 func (a *Agent) stream(ctx context.Context, in io.Reader, out io.Writer, name string, args ...string) error {

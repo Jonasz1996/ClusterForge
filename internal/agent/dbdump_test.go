@@ -22,26 +22,47 @@ import (
 )
 
 func TestDumpScan(t *testing.T) {
-	dump := "-- MariaDB dump\n--\n-- Table structure for table `a`\n--\nCREATE TABLE `a`;\n" +
+	maria := "-- MariaDB dump\n--\n-- Table structure for table `a`\n--\nCREATE TABLE `a`;\n" +
 		"-- Temporary table structure for view `v`\n" + strings.Repeat("x", 100) + "\n" +
-		"-- Table structure for table `b`\n\n-- Table structure for table `c`\n-- Dump completed on 2026-10-12  2:00:00\n"
-	for _, size := range []int{1, 2, 7, 31, 32, 64, 1000} {
-		s := &dumpScan{}
-		for p := dump; p != ""; {
-			n := min(size, len(p))
-			if _, err := s.Write([]byte(p[:n])); err != nil {
-				t.Fatal(err)
+		"-- Table structure for table `b`\n\n-- Table structure for table `c`\n" + strings.Repeat("y", 3000) +
+		"\n-- Dump completed on 2026-10-12  2:00:00\n"
+	// Zoals pg_dump 17.6 en later: na de slotregel nog \unrestrict met een
+	// sleutel van 64 tekens.
+	pg := "--\n-- PostgreSQL database dump\n--\n\n\\restrict " + strings.Repeat("k", 64) + "\n\n" +
+		"--\n-- Name: a; Type: TABLE; Schema: public; Owner: nextcloud\n--\n\nCREATE TABLE public.a (id integer);\n" +
+		"--\n-- Name: a_id_seq; Type: SEQUENCE; Schema: public; Owner: nextcloud\n--\n" +
+		"--\n-- Data for Name: a; Type: TABLE DATA; Schema: public; Owner: nextcloud\n--\n\nCOPY public.a (id) FROM stdin;\n1\n\\.\n" +
+		"--\n-- Name: " + strings.Repeat("b", 63) + "; Type: TABLE; Schema: " + strings.Repeat("s", 63) + "; Owner: " + strings.Repeat("o", 63) + "\n" +
+		"--\n-- Name: p; Type: TABLE; Schema: public; Owner: nextcloud\n" + strings.Repeat("z", 3000) +
+		"\n--\n-- PostgreSQL database dump complete\n--\n\n\\unrestrict " + strings.Repeat("k", 64) + "\n\n"
+	for _, c := range []struct {
+		engine, dump, end string
+	}{
+		{protocol.DBMariaDB, maria, "-- Dump completed on 2026-10-12  2:00:00\n"},
+		{protocol.DBPostgreSQL, pg, "-- PostgreSQL database dump complete\n--\n\n\\unrestrict " + strings.Repeat("k", 64) + "\n\n"},
+	} {
+		for _, size := range []int{1, 2, 7, 31, 32, 64, 1000, 5000} {
+			s := newDumpScan(c.engine, nil)
+			for p := c.dump; p != ""; {
+				n := min(size, len(p))
+				if _, err := s.Write([]byte(p[:n])); err != nil {
+					t.Fatal(err)
+				}
+				p = p[n:]
 			}
-			p = p[n:]
+			if s.tables != 3 || !s.complete() || s.n != int64(len(c.dump)) {
+				t.Errorf("%s in stukken van %d: %d tabellen, compleet %v, %d bytes", c.engine, size, s.tables, s.complete(), s.n)
+			}
 		}
-		if s.tables != 3 || !s.complete() || s.n != int64(len(dump)) {
-			t.Errorf("stukken van %d: %d tabellen, compleet %v, %d bytes", size, s.tables, s.complete(), s.n)
+		s := newDumpScan(c.engine, nil)
+		_, _ = s.Write([]byte(strings.TrimSuffix(c.dump, c.end)))
+		if s.complete() {
+			t.Errorf("%s: een dump zonder slotregel heet compleet", c.engine)
 		}
 	}
-	s := &dumpScan{}
-	_, _ = s.Write([]byte(strings.TrimSuffix(dump, "-- Dump completed on 2026-10-12  2:00:00\n")))
-	if s.complete() {
-		t.Error("een dump zonder slotregel heet compleet")
+	// De slotregel van de andere engine telt niet.
+	if s := newDumpScan(protocol.DBPostgreSQL, nil); func() bool { _, _ = s.Write([]byte(maria)); return s.complete() || s.tables != 0 }() {
+		t.Error("een dump van MariaDB telt als dump van PostgreSQL")
 	}
 }
 

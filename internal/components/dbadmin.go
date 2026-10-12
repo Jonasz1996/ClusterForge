@@ -1,27 +1,33 @@
 package components
 
 // Databases en gebruikers in de database van een cluster. ClusterForge
-// leest en schrijft op één datanode: die met het VIP als hij Synced is,
-// anders de eerste die Synced is. Galera zet een nieuwe database of
-// gebruiker zelf op de andere nodes.
+// leest en schrijft op één datanode. Bij MariaDB is dat die met het VIP als
+// hij Synced is, anders de eerste die Synced is; Galera zet een nieuwe
+// database of gebruiker zelf op de andere nodes. Bij PostgreSQL is het de
+// primary van Patroni, de enige die schrijft; de replica's krijgen het via
+// de replicatie.
 //
 // Een nieuwe gebruiker krijgt een sterk wachtwoord dat één keer in het
-// antwoord staat; ClusterForge bewaart het niet. Hij mag inloggen vanaf
-// elke node van het cluster en vanaf elk VIP: een app op de node met het
-// VIP die naar het VIP verbindt, komt bij MariaDB binnen met het VIP als
-// adres.
+// antwoord staat; ClusterForge bewaart het niet. In MariaDB mag hij
+// inloggen vanaf elke node van het cluster en vanaf elk VIP: een app op de
+// node met het VIP die naar het VIP verbindt, komt bij MariaDB binnen met
+// het VIP als adres. In PostgreSQL bepaalt pg_hba vanwaar: de nodes en het
+// VIP. Daar wordt hij eigenaar van zijn database, met alle rechten erop.
 
 import (
 	"cmp"
 	"context"
 	"crypto/rand"
+	"fmt"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/Jonasz1996/clusterforge/internal/agent/dbsql"
+	"github.com/Jonasz1996/clusterforge/internal/databases"
 	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/store"
 	"github.com/Jonasz1996/clusterforge/pkg/protocol"
@@ -40,6 +46,8 @@ var allPrivileges = []string{
 
 // DatabaseList is wat er in de database van een onderdeel staat.
 type DatabaseList struct {
+	// Engine is protocol.DBMariaDB of protocol.DBPostgreSQL.
+	Engine string
 	// Node is de datanode waarvan ClusterForge las.
 	Node      string
 	Databases []DatabaseInfo
@@ -48,7 +56,8 @@ type DatabaseList struct {
 	// eerste datanode.
 	Address string
 	Port    int
-	// Hosts zijn de adressen waarvandaan een nieuwe gebruiker mag inloggen.
+	// Hosts zijn de adressen waarvandaan een nieuwe gebruiker mag inloggen;
+	// leeg bij PostgreSQL, waar pg_hba dat bepaalt.
 	Hosts []string
 }
 
@@ -62,8 +71,9 @@ type DatabaseInfo struct {
 	Users       []string
 }
 
-// UserInfo is een gebruiker met al zijn hosts. System: hij is van MariaDB
-// zelf, zoals root.
+// UserInfo is een gebruiker met al zijn hosts. System: hij is van de
+// database zelf, zoals root in MariaDB of postgres, of een tijdelijke
+// beheerder van ClusterForge om een dump terug te zetten.
 type UserInfo struct {
 	Name      string
 	Hosts     []string
@@ -73,7 +83,7 @@ type UserInfo struct {
 }
 
 // UserGrant zijn de rechten van een gebruiker op een database, over al
-// zijn hosts samen. All: alle rechten.
+// zijn hosts samen. All: alle rechten; in PostgreSQL is dat de eigenaar.
 type UserGrant struct {
 	Database   string
 	All        bool
@@ -99,34 +109,80 @@ type NewPassword struct {
 	Hosts    []string
 }
 
-// dbTarget is de node waarop ClusterForge leest en schrijft.
+// dbTarget is de node waarop ClusterForge leest en schrijft, en zijn
+// database: protocol.DBMariaDB of protocol.DBPostgreSQL.
 type dbTarget struct {
 	row     store.ClusterComponent
 	spec    Spec
 	cluster store.Cluster
 	node    Node
+	engine  string
+	// address is het adres van de node, voor PostgreSQL.
+	address string
+}
+
+// dbEngine houdt tegen wat geen database van ClusterForge is.
+func dbEngine(r store.ClusterComponent, what string) error {
+	switch r.Engine {
+	case protocol.DBMariaDB, protocol.DBPostgreSQL:
+		return nil
+	}
+	return &ConflictError{what + " kan alleen bij MariaDB en PostgreSQL"}
+}
+
+// dbComponent is een onderdeel met een database die uitgerold is.
+func (s *Service) dbComponent(ctx context.Context, clusterID, id uuid.UUID) (store.ClusterComponent, error) {
+	r, err := s.get(ctx, s.q, clusterID, id, false)
+	if err != nil {
+		return r, err
+	}
+	if err := dbEngine(r, "Databases en gebruikers beheren"); err != nil {
+		return r, err
+	}
+	if r.AppliedRevision == nil {
+		return r, &ConflictError{"deze database is nog nooit helemaal uitgerold; pas haar eerst toe"}
+	}
+	return r, nil
 }
 
 // target kiest de node om op te lezen en te schrijven.
 func (s *Service) target(ctx context.Context, clusterID, id uuid.UUID) (dbTarget, error) {
-	r, err := s.get(ctx, s.q, clusterID, id, false)
+	r, err := s.dbComponent(ctx, clusterID, id)
 	if err != nil {
 		return dbTarget{}, err
 	}
-	if err := mariaOnly(r, "Databases en gebruikers beheren"); err != nil {
+	return s.targetOf(ctx, r)
+}
+
+// mariaTarget is target voor wat alleen bij MariaDB kan, zoals verhuizen.
+func (s *Service) mariaTarget(ctx context.Context, clusterID, id uuid.UUID) (dbTarget, error) {
+	r, err := s.dbComponent(ctx, clusterID, id)
+	if err != nil {
 		return dbTarget{}, err
 	}
-	if r.AppliedRevision == nil {
-		return dbTarget{}, &ConflictError{"deze database is nog nooit helemaal uitgerold; pas haar eerst toe"}
+	if err := mariaOnly(r, "Verhuizen"); err != nil {
+		return dbTarget{}, err
 	}
+	return s.targetOf(ctx, r)
+}
+
+func (s *Service) targetOf(ctx context.Context, r store.ClusterComponent) (dbTarget, error) {
 	spec, err := parseSpec(r.Spec)
 	if err != nil {
 		return dbTarget{}, err
 	}
-	c, err := s.q.GetCluster(ctx, clusterID)
+	c, err := s.q.GetCluster(ctx, r.ClusterID)
 	if err != nil {
 		return dbTarget{}, err
 	}
+	if r.Engine == protocol.DBPostgreSQL {
+		p, err := s.pgPrimary(ctx, r.ClusterID, spec)
+		if err != nil {
+			return dbTarget{}, err
+		}
+		return dbTarget{row: r, spec: spec, cluster: c, node: p.node, engine: r.Engine, address: p.address}, nil
+	}
+	clusterID := r.ClusterID
 	owner := ""
 	if spec.VIP != nil {
 		vips, err := s.q.ListVIPsByCluster(ctx, clusterID)
@@ -155,15 +211,95 @@ func (s *Service) target(ctx context.Context, clusterID, id uuid.UUID) (dbTarget
 	if best < 0 {
 		return dbTarget{}, &ConflictError{"geen enkele datanode is Synced, dus de database draait niet; " + strings.Join(why, "; ")}
 	}
-	return dbTarget{row: r, spec: spec, cluster: c, node: all[best].node}, nil
+	return dbTarget{row: r, spec: spec, cluster: c, node: all[best].node, engine: r.Engine}, nil
 }
 
-// dbRequest stuurt een databaseverzoek naar de node van t. Een fout van de
-// agent wordt een ConflictError met de naam van de node.
+// pgNode is een datanode van PostgreSQL zoals ClusterForge hem nu ziet.
+type pgNode struct {
+	node    Node
+	address string
+	// protocol is dat van de agent; 0 zonder agent.
+	protocol int
+	server   *protocol.DBServer
+	err      error
+}
+
+// pgNodes vraagt alle datanodes tegelijk hoe het met PostgreSQL staat.
+func (s *Service) pgNodes(ctx context.Context, clusterID uuid.UUID, spec Spec) ([]pgNode, error) {
+	cands, err := s.q.ListComponentCandidates(ctx, &clusterID)
+	if err != nil {
+		return nil, err
+	}
+	nodes := dataNodes(spec, nil)
+	out := make([]pgNode, len(nodes))
+	var wg sync.WaitGroup
+	for i, n := range nodes {
+		out[i].node = n
+		if j := slices.IndexFunc(cands, func(c store.ListComponentCandidatesRow) bool { return c.ID == n.NodeID }); j >= 0 {
+			out[i].address = cands[j].PrimaryIp
+			if cands[j].HasAgent {
+				out[i].protocol = int(cands[j].AgentProtocol)
+			}
+		}
+		wg.Go(func() { out[i].server, out[i].err = s.server(ctx, n.NodeID, protocol.DBPostgreSQL) })
+	}
+	wg.Wait()
+	return out, nil
+}
+
+// pgPrimary is de datanode waar PostgreSQL schrijft: de primary in Patroni.
+// Zijn agent moet protocol.DBPGSince kennen.
+func (s *Service) pgPrimary(ctx context.Context, clusterID uuid.UUID, spec Spec) (pgNode, error) {
+	nodes, err := s.pgNodes(ctx, clusterID, spec)
+	if err != nil {
+		return pgNode{}, err
+	}
+	var why []string
+	for _, p := range nodes {
+		state, ok := patroniHealthy(p.server, spec.Cluster.Slug)
+		if p.err != nil {
+			state = p.err.Error()
+		}
+		if p.err != nil || !ok || p.server.Patroni.Role != "primary" {
+			why = append(why, p.node.Hostname+": "+state)
+			continue
+		}
+		if err := pgAgent(p); err != nil {
+			return pgNode{}, err
+		}
+		return p, nil
+	}
+	return pgNode{}, &ConflictError{"geen enkele datanode is de primary van PostgreSQL, dus er kan niets geschreven worden; " + strings.Join(why, "; ")}
+}
+
+// pgAgent zegt waarom ClusterForge de agent van p niets voor PostgreSQL kan
+// vragen: een oudere agent kent het veld Engine niet en zou MariaDB nemen.
+func pgAgent(p pgNode) error {
+	if p.protocol < protocol.DBPGSince {
+		return &ConflictError{fmt.Sprintf("de agent op %s heeft protocol %d; databases, gebruikers en dumps van PostgreSQL vragen protocol %d. "+
+			"Werk hem bij met het installatiescript en --upgrade", p.node.Hostname, p.protocol, protocol.DBPGSince)}
+	}
+	return nil
+}
+
+// port is waar een app de database van t bereikt.
+func (t dbTarget) port() int {
+	if t.engine == protocol.DBPostgreSQL {
+		return protocol.DBPGPort
+	}
+	return MariaDBPort
+}
+
+// dbRequest stuurt een databaseverzoek naar de node van t, voor de
+// database van t. Een fout van de agent wordt een ConflictError met de
+// naam van de node.
 func (s *Service) dbRequest(ctx context.Context, t dbTarget, req protocol.DBRequest) (protocol.DBResponse, error) {
 	ctx, cancel := context.WithTimeout(ctx, s.Timeout)
 	defer cancel()
 	req.ID, req.Deadline = uuid.NewString(), time.Now().Add(s.Timeout)
+	if t.engine == protocol.DBPostgreSQL {
+		req.Engine = t.engine
+	}
 	res, err := s.bus.DB(ctx, t.node.NodeID, req)
 	switch {
 	case err != nil:
@@ -186,12 +322,15 @@ func (s *Service) Databases(ctx context.Context, clusterID, id uuid.UUID) (Datab
 }
 
 func (s *Service) databases(ctx context.Context, t dbTarget) (DatabaseList, error) {
-	out := DatabaseList{Node: t.node.Hostname, Databases: []DatabaseInfo{}, Users: []UserInfo{}, Port: MariaDBPort}
+	out := DatabaseList{Engine: t.engine, Node: t.node.Hostname, Databases: []DatabaseInfo{}, Users: []UserInfo{}, Port: t.port()}
 	hosts, address, err := s.userHosts(ctx, t)
 	if err != nil {
 		return out, err
 	}
-	out.Hosts, out.Address = hosts, address
+	out.Address = address
+	if t.engine != protocol.DBPostgreSQL {
+		out.Hosts = hosts
+	}
 	st, err := s.dbRequest(ctx, t, protocol.DBRequest{Op: protocol.DBStatus})
 	if err != nil {
 		return out, err
@@ -200,9 +339,9 @@ func (s *Service) databases(ctx context.Context, t dbTarget) (DatabaseList, erro
 	if err != nil {
 		return out, err
 	}
-	i := slices.IndexFunc(st.Servers, func(sv protocol.DBServer) bool { return sv.Engine == protocol.DBMariaDB })
+	i := slices.IndexFunc(st.Servers, func(sv protocol.DBServer) bool { return sv.Engine == t.engine })
 	if i < 0 {
-		return out, &ConflictError{t.node.Hostname + ": op deze node staat geen MariaDB"}
+		return out, &ConflictError{t.node.Hostname + ": op deze node staat geen " + databases.EngineName(t.engine)}
 	}
 	server := st.Servers[i]
 	conns := map[string]int{}
@@ -210,9 +349,12 @@ func (s *Service) databases(ctx context.Context, t dbTarget) (DatabaseList, erro
 		conns[c.Database] += c.Count
 	}
 	for _, d := range server.Databases {
+		if t.engine == protocol.DBPostgreSQL && slices.Contains(dbsql.PGSystemDatabases, d.Name) {
+			continue
+		}
 		out.Databases = append(out.Databases, DatabaseInfo{Name: d.Name, SizeBytes: d.SizeBytes, Tables: d.Tables, Connections: conns[d.Name], Users: []string{}})
 	}
-	out.Users = groupUsers(us.Users)
+	out.Users = groupUsers(t.engine, us.Users)
 	for i := range out.Databases {
 		d := &out.Databases[i]
 		for _, u := range out.Users {
@@ -226,16 +368,19 @@ func (s *Service) databases(ctx context.Context, t dbTarget) (DatabaseList, erro
 
 // groupUsers zet de hosts van een gebruiker bij elkaar, met de rechten van
 // alle hosts samen.
-func groupUsers(in []protocol.DBUser) []UserInfo {
+func groupUsers(engine string, in []protocol.DBUser) []UserInfo {
 	var out []UserInfo
 	for _, u := range in {
 		i := slices.IndexFunc(out, func(x UserInfo) bool { return x.Name == u.Name })
 		if i < 0 {
 			i = len(out)
-			out = append(out, UserInfo{Name: u.Name, System: slices.Contains(dbsql.SystemUsers, u.Name), Global: []string{}, Databases: []UserGrant{}})
+			system := slices.Contains(dbsql.SystemUsersOf(engine), u.Name) || engine == protocol.DBPostgreSQL && tempRoleRe.MatchString(u.Name)
+			out = append(out, UserInfo{Name: u.Name, System: system, Hosts: []string{}, Global: []string{}, Databases: []UserGrant{}})
 		}
 		x := &out[i]
-		x.Hosts = append(x.Hosts, u.Host)
+		if u.Host != "" {
+			x.Hosts = append(x.Hosts, u.Host)
+		}
 		for _, p := range u.Global {
 			if !slices.Contains(x.Global, p) {
 				x.Global = append(x.Global, p)
@@ -257,6 +402,10 @@ func groupUsers(in []protocol.DBUser) []UserInfo {
 	for i := range out {
 		for j := range out[i].Databases {
 			g := &out[i].Databases[j]
+			if engine == protocol.DBPostgreSQL {
+				g.All = slices.Contains(g.Privileges, "OWNER")
+				continue
+			}
 			g.All = !slices.ContainsFunc(allPrivileges, func(p string) bool { return !slices.Contains(g.Privileges, p) })
 		}
 		slices.SortFunc(out[i].Databases, func(a, b UserGrant) int { return cmp.Compare(a.Database, b.Database) })
@@ -324,13 +473,17 @@ func (s *Service) CreateDatabase(ctx context.Context, actor events.Actor, cluste
 	if in.User == "" {
 		in.User = in.Name
 	}
-	if err := dbsql.CheckDatabase(in.Name); err != nil {
+	r, err := s.dbComponent(ctx, clusterID, id)
+	if err != nil {
+		return CreatedDatabase{}, err
+	}
+	if err := dbsql.CheckDatabaseOf(r.Engine, in.Name); err != nil {
 		return CreatedDatabase{}, &InvalidError{"name", err.Error()}
 	}
-	if err := dbsql.CheckUser(in.User); err != nil {
+	if err := dbsql.CheckUserOf(r.Engine, in.User); err != nil {
 		return CreatedDatabase{}, &InvalidError{"user", err.Error()}
 	}
-	t, err := s.target(ctx, clusterID, id)
+	t, err := s.targetOf(ctx, r)
 	if err != nil {
 		return CreatedDatabase{}, err
 	}
@@ -344,7 +497,7 @@ func (s *Service) CreateDatabase(ctx context.Context, actor events.Actor, cluste
 	if slices.ContainsFunc(list.Users, func(u UserInfo) bool { return u.Name == in.User }) {
 		return CreatedDatabase{}, &ConflictError{"de gebruiker " + in.User + " bestaat al; kies een andere naam, of Nieuw wachtwoord bij die gebruiker"}
 	}
-	if len(list.Hosts) == 0 {
+	if len(list.Hosts) == 0 && t.engine != protocol.DBPostgreSQL {
 		return CreatedDatabase{}, &ConflictError{"geen enkele node van het cluster heeft een adres"}
 	}
 	pw := rand.Text()
@@ -354,7 +507,7 @@ func (s *Service) CreateDatabase(ctx context.Context, actor events.Actor, cluste
 		return CreatedDatabase{}, err
 	}
 	s.dbEvent(ctx, actor, t, "cluster.database_created", map[string]any{"database": in.Name, "user": in.User, "hosts": list.Hosts, "node": t.node.Hostname})
-	return CreatedDatabase{Database: in.Name, User: in.User, Password: pw, Hosts: list.Hosts, Address: list.Address, Port: MariaDBPort, Node: t.node.Hostname}, nil
+	return CreatedDatabase{Database: in.Name, User: in.User, Password: pw, Hosts: list.Hosts, Address: list.Address, Port: t.port(), Node: t.node.Hostname}, nil
 }
 
 // SetPassword geeft een gebruiker op al zijn hosts een nieuw wachtwoord.
@@ -375,10 +528,14 @@ func (s *Service) SetPassword(ctx context.Context, actor events.Actor, clusterID
 
 // user zoekt een gebruiker die ClusterForge mag veranderen.
 func (s *Service) user(ctx context.Context, clusterID, id uuid.UUID, name string) (dbTarget, UserInfo, error) {
-	if err := dbsql.CheckUser(name); err != nil {
+	r, err := s.dbComponent(ctx, clusterID, id)
+	if err != nil {
+		return dbTarget{}, UserInfo{}, err
+	}
+	if err := dbsql.CheckUserOf(r.Engine, name); err != nil {
 		return dbTarget{}, UserInfo{}, &InvalidError{"user", err.Error()}
 	}
-	t, err := s.target(ctx, clusterID, id)
+	t, err := s.targetOf(ctx, r)
 	if err != nil {
 		return t, UserInfo{}, err
 	}
@@ -386,10 +543,13 @@ func (s *Service) user(ctx context.Context, clusterID, id uuid.UUID, name string
 	if err != nil {
 		return t, UserInfo{}, err
 	}
-	users := groupUsers(us.Users)
+	users := groupUsers(t.engine, us.Users)
 	i := slices.IndexFunc(users, func(u UserInfo) bool { return u.Name == name })
-	if i < 0 {
+	switch {
+	case i < 0:
 		return t, UserInfo{}, &ConflictError{"de gebruiker " + name + " bestaat niet"}
+	case users[i].System:
+		return t, UserInfo{}, &ConflictError{name + " is een gebruiker van de database zelf of van ClusterForge"}
 	}
 	return t, users[i], nil
 }
@@ -397,13 +557,17 @@ func (s *Service) user(ctx context.Context, clusterID, id uuid.UUID, name string
 // DropDatabase haalt een database weg; confirm is de naam die de
 // gebruiker intikte.
 func (s *Service) DropDatabase(ctx context.Context, actor events.Actor, clusterID, id uuid.UUID, name, confirm string) error {
-	if err := dbsql.CheckDatabase(name); err != nil {
+	r, err := s.dbComponent(ctx, clusterID, id)
+	if err != nil {
+		return err
+	}
+	if err := dbsql.CheckDatabaseOf(r.Engine, name); err != nil {
 		return &InvalidError{"name", err.Error()}
 	}
 	if confirm != name {
 		return &InvalidError{"confirm", "tik ter bevestiging de naam van de database in: " + name}
 	}
-	t, err := s.target(ctx, clusterID, id)
+	t, err := s.targetOf(ctx, r)
 	if err != nil {
 		return err
 	}
