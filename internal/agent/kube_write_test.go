@@ -138,3 +138,82 @@ func TestKubeBridgeWriteRefuses(t *testing.T) {
 		t.Fatalf("verzoeken bij de API: %v", reqs)
 	}
 }
+
+// Server-side apply gaat door als clusterforge, zegt of het object al zo
+// stond, ook bij een Secret, en stuurt de waarden van een Secret niet terug.
+func TestKubeBridgeApply(t *testing.T) {
+	a, fake := kubeAgent(t)
+	fake.Add(kubefake.Namespace("demo"))
+	apply := func(path, body string, query map[string]string) protocol.KubeResponse {
+		t.Helper()
+		return kubeSend(t, a, protocol.KubeRequest{ID: "a", Op: protocol.KubeApply, Path: path, Body: json.RawMessage(body), Query: query})
+	}
+	const cm = "/api/v1/namespaces/demo/configmaps/web"
+	config := func(level string) string {
+		return `{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"web","namespace":"demo"},"data":{"LOG_LEVEL":"` + level + `"}}`
+	}
+	dry := map[string]string{"dryRun": "All"}
+	if res := apply(cm, config("info"), dry); res.Status != http.StatusCreated || res.Same || fake.Get("v1", "ConfigMap", "demo", "web") != nil {
+		t.Fatalf("dry-run nieuw: %+v", res)
+	}
+	if res := apply(cm, config("info"), nil); res.Status != http.StatusCreated || res.Same || fake.Get("v1", "ConfigMap", "demo", "web") == nil {
+		t.Fatalf("nieuw: %+v", res)
+	}
+	if res := apply(cm, config("info"), dry); res.Status != http.StatusOK || !res.Same {
+		t.Fatalf("hetzelfde: %+v", res)
+	}
+	if res := apply(cm, config("debug"), dry); res.Status != http.StatusOK || res.Same {
+		t.Fatalf("anders: %+v", res)
+	}
+	if reqs := fake.Requests(); !slices.Contains(reqs, "PATCH "+cm+"?dryRun=All&fieldManager=clusterforge") {
+		t.Fatalf("verzoeken: %v", reqs)
+	}
+
+	// Een Secret: dezelfde lengte, een andere waarde, en toch anders.
+	const sec = "/api/v1/namespaces/demo/secrets/login"
+	secret := func(pw string) string {
+		return `{"apiVersion":"v1","kind":"Secret","metadata":{"name":"login","namespace":"demo"},"stringData":{"wachtwoord":"` + pw + `"}}`
+	}
+	res := apply(sec, secret("geheim-1"), nil)
+	if res.Status != http.StatusCreated || strings.Contains(string(res.Body), "geheim") || !strings.Contains(string(res.Body), protocol.KubeHidden(8)) {
+		t.Fatalf("secret: %+v %s", res, res.Body)
+	}
+	if res := apply(sec, secret("geheim-2"), dry); res.Same || strings.Contains(string(res.Body), "geheim") {
+		t.Fatalf("secret anders: %+v %s", res, res.Body)
+	}
+	if res := apply(sec, secret("geheim-1"), dry); !res.Same {
+		t.Fatalf("secret hetzelfde: %+v", res)
+	}
+
+	// Een conflict geeft de oorzaak, force neemt over.
+	fake.Own("v1", "ConfigMap", "demo", "web", "kubectl-client-side-apply", ".data.LOG_LEVEL")
+	if res := apply(cm, config("warn"), nil); res.Status != http.StatusConflict || !strings.Contains(string(res.Body), "kubectl-client-side-apply") {
+		t.Fatalf("conflict: %+v %s", res, res.Body)
+	}
+	if res := apply(cm, config("warn"), map[string]string{"force": "true"}); res.Status != http.StatusOK {
+		t.Fatalf("force: %+v", res)
+	}
+
+	// Wat apply niet mag, komt nooit bij de API.
+	before := len(fake.Requests())
+	big := `{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"web"},"data":{"x":"` + strings.Repeat("a", protocol.KubeMaxPatch) + `"}}`
+	for _, req := range []protocol.KubeRequest{
+		{Op: protocol.KubeApply, Path: "/api/v1/namespaces/demo/configmaps", Body: json.RawMessage(config("info"))},
+		{Op: protocol.KubeApply, Path: "/apis/apps/v1/namespaces/demo/deployments/web/scale", Body: json.RawMessage(`{"spec":{"replicas":3}}`)},
+		{Op: protocol.KubeApply, Path: "/api/v1/namespaces/demo/pods/web-1/exec", Body: json.RawMessage(`{}`)},
+		{Op: protocol.KubeApply, Path: "/apis", Body: json.RawMessage(`{}`)},
+		{Op: protocol.KubeApply, Path: cm, Body: json.RawMessage(`[1,2]`)},
+		{Op: protocol.KubeApply, Path: cm, Body: json.RawMessage(big)},
+		{Op: protocol.KubeApply, Path: cm, Body: json.RawMessage(config("info")), Query: map[string]string{"force": "ja"}},
+		{Op: protocol.KubeApply, Path: cm, Body: json.RawMessage(config("info")), Query: map[string]string{"fieldManager": "kubectl"}},
+		{Op: protocol.KubeApply, Path: cm, Body: json.RawMessage(config("info")), Query: map[string]string{"propagationPolicy": "Orphan"}},
+	} {
+		req.ID = "x"
+		if res := kubeSend(t, a, req); res.Error == "" || res.Status != 0 {
+			t.Errorf("%s %v: %+v", req.Path, req.Query, res)
+		}
+	}
+	if reqs := fake.Requests(); len(reqs) != before {
+		t.Fatalf("verzoeken bij de API: %v", reqs[before:])
+	}
+}

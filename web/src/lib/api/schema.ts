@@ -3026,6 +3026,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/kubernetes/clusters/{clusterId}/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * YAML toepassen met server-side apply, of eerst controleren (admin)
+         * @description Eén of meer objecten in YAML, gescheiden door ---. Met preview doet de agent per object een dry-run op de API
+         *     en geeft het resultaat de fouten per veld en het verschil met wat er nu draait; er verandert niets. Zonder preview
+         *     past ClusterForge de objecten een voor een toe, namespaces eerst, en stopt bij het eerste dat faalt; dat staat in het
+         *     logboek, op prod alleen met tweestapsverificatie en de slug in confirm. Een veld dat een ander programma beheert,
+         *     neemt force over. Een fout in de YAML zelf geeft 400 met code yaml en de regel.
+         */
+        post: operations["applyKube"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/kubernetes/clusters/{clusterId}/revisions": {
         parameters: {
             query: {
@@ -3297,6 +3323,57 @@ export interface components {
             evict: components["schemas"]["KubeDrainPod"][];
             skip: components["schemas"]["KubeDrainPod"][];
             blocked: components["schemas"]["KubeDrainPod"][];
+        };
+        KubeApplyInput: {
+            /** @description Eén of meer objecten, gescheiden door ---; hoogstens 50 objecten en 512 kB */
+            yaml: string;
+            /** @description De namespace van objecten zonder namespace; standaard default */
+            namespace?: string;
+            /** @description Alleen controleren met een dry-run */
+            preview?: boolean;
+            /** @description Velden overnemen die een ander programma beheert */
+            force?: boolean;
+            /** @description De slug van het cluster; nodig op prod */
+            confirm?: string;
+        };
+        KubeFieldError: {
+            /** @description Het veld, zoals spec.template.spec.containers[0].image; leeg als de fout niet bij een veld hoort */
+            field: string;
+            message: string;
+        };
+        KubeFieldConflict: {
+            field: string;
+            /** @description Het programma dat het veld beheert, zoals kubectl-client-side-apply */
+            manager: string;
+        };
+        KubeApplyObject: {
+            /** @description Het nummer van het YAML-document */
+            doc: number;
+            api_version: string;
+            kind: string;
+            namespace: string;
+            name: string;
+            /** @description Null als het cluster de soort niet kent */
+            ref: components["schemas"]["KubeRef"] | null;
+            /**
+             * @description Nieuw, anders, hetzelfde, mislukt, of niet toegepast omdat een object ervoor faalde
+             * @enum {string}
+             */
+            action: "create" | "update" | "unchanged" | "failed" | "skipped";
+            /** @description Unified diff van de YAML, zonder status en wat Kubernetes zelf invult */
+            diff: string;
+            errors: components["schemas"]["KubeFieldError"][];
+            conflicts: components["schemas"]["KubeFieldConflict"][];
+            note: string;
+        };
+        KubeApplyResult: {
+            /** @description Geen object faalde */
+            ok: boolean;
+            /** @description Hoeveel objecten nieuw of anders zijn */
+            changed: number;
+            /** @description Onwaar bij preview */
+            applied: boolean;
+            objects: components["schemas"]["KubeApplyObject"][];
         };
         KubeResourceType: {
             group: string;
@@ -11865,6 +11942,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["KubeActionResult"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    applyKube: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["KubeApplyInput"];
+            };
+        };
+        responses: {
+            /** @description Gecontroleerd of toegepast */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KubeApplyResult"];
                 };
             };
             400: components["responses"]["Error"];

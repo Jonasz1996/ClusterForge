@@ -228,6 +228,7 @@ var Known = map[string]Spec{
 	"kube.cordoned":    {CategoryKube, "Node op cordon gezet in Kubernetes"},
 	"kube.uncordoned":  {CategoryKube, "Node krijgt weer pods in Kubernetes"},
 	"kube.drained":     {CategoryKube, "Node leeggemaakt in Kubernetes"},
+	"kube.applied":     {CategoryKube, "YAML toegepast in Kubernetes"},
 }
 
 // Lookup geeft de spec van een action. Een onbekende action (uit een nieuwere

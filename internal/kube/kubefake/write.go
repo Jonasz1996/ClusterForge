@@ -11,8 +11,9 @@ import (
 )
 
 // De schrijvende kant van de nep-API: patch (merge en JSON patch, ook op de
-// subresource scale), delete met het weghalen van wat het object bezit, en
-// eviction met PodDisruptionBudgets. dryRun=All verandert niets.
+// subresource scale), server-side apply (in apply.go), delete met het
+// weghalen van wat het object bezit, en eviction met PodDisruptionBudgets.
+// dryRun=All verandert niets.
 
 // target is wat een pad aanwijst.
 type target struct {
@@ -74,6 +75,15 @@ func (s *Server) patch(w http.ResponseWriter, r *http.Request) {
 		status(w, http.StatusBadRequest, "BadRequest", err.Error())
 		return
 	}
+	ctype, _, _ := strings.Cut(r.Header.Get("Content-Type"), ";")
+	if ctype == "application/apply-patch+yaml" {
+		if t.sub != "" {
+			status(w, http.StatusNotFound, "NotFound", "the server could not find the requested resource")
+			return
+		}
+		s.apply(w, r, t, body)
+		return
+	}
 	var patch any
 	if err := json.Unmarshal(body, &patch); err != nil {
 		status(w, http.StatusBadRequest, "BadRequest", "error decoding patch: "+err.Error())
@@ -92,7 +102,6 @@ func (s *Server) patch(w http.ResponseWriter, r *http.Request) {
 		// Een patch op scale gaat over spec.replicas van een Scale.
 		obj = scaleOf(obj)
 	}
-	ctype, _, _ := strings.Cut(r.Header.Get("Content-Type"), ";")
 	switch ctype {
 	case "application/merge-patch+json", "application/strategic-merge-patch+json":
 		m, ok := mergePatch(obj, patch).(map[string]any)

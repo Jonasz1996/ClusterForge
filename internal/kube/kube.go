@@ -60,6 +60,16 @@ type APIError struct {
 	Status  int
 	Reason  string
 	Message string
+	// Causes zijn de fouten per veld bij Invalid, of de velden in conflict
+	// bij een apply.
+	Causes []StatusCause
+}
+
+// StatusCause is één oorzaak uit details.causes van een Status.
+type StatusCause struct {
+	Reason  string `json:"reason"`
+	Message string `json:"message"`
+	Field   string `json:"field"`
 }
 
 func (e *APIError) Error() string {
@@ -265,6 +275,9 @@ func apiError(res protocol.KubeResponse) error {
 	var st struct {
 		Reason  string `json:"reason"`
 		Message string `json:"message"`
+		Details struct {
+			Causes []StatusCause `json:"causes"`
+		} `json:"details"`
 	}
 	_ = json.Unmarshal(res.Body, &st)
 	if res.Status == http.StatusNotFound {
@@ -273,7 +286,7 @@ func apiError(res protocol.KubeResponse) error {
 	if st.Message == "" {
 		st.Message = res.Error
 	}
-	return &APIError{Status: res.Status, Reason: st.Reason, Message: st.Message}
+	return &APIError{Status: res.Status, Reason: st.Reason, Message: st.Message, Causes: st.Details.Causes}
 }
 
 // maxListPages begrenst een lijst: 20 pagina's van 250 objecten.

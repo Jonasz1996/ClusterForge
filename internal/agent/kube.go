@@ -17,6 +17,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"reflect"
 	"regexp"
 	"slices"
 	"strconv"
@@ -141,6 +142,8 @@ func (a *Agent) handleKube(data []byte) protocol.KubeResponse {
 		res = b.remove(ctx, req)
 	case protocol.KubeEvict:
 		res = b.evict(ctx, req)
+	case protocol.KubeApply:
+		res = b.apply(ctx, req)
 	default:
 		res = protocol.KubeResponse{Error: "onbekend kube-verzoek " + req.Op}
 	}
@@ -374,12 +377,14 @@ var patchTypes = map[string]string{
 }
 
 // writeQuery controleert de queryparameters van een schrijvend verzoek:
-// alleen dryRun, en bij delete ook hoe en hoe snel.
+// alleen dryRun, bij delete ook hoe en hoe snel, en bij apply of het velden
+// van een ander programma mag overnemen.
 func writeQuery(op string, in map[string]string) (url.Values, error) {
 	q := url.Values{}
 	for k, v := range in {
 		switch {
 		case k == "dryRun" && v == "All":
+		case op == protocol.KubeApply && k == "force" && v == "true":
 		case op == protocol.KubeDelete && k == "propagationPolicy" && (v == "Background" || v == "Foreground" || v == "Orphan"):
 		case op == protocol.KubeDelete && k == "gracePeriodSeconds":
 			if n, err := strconv.Atoi(v); err != nil || n < 0 || n > 3600 {
@@ -473,6 +478,69 @@ func (b *kubeBridge) evict(ctx context.Context, req protocol.KubeRequest) protoc
 		return protocol.KubeResponse{Error: err.Error()}
 	}
 	return b.write(ctx, http.MethodPost, req.Path, q, body, "application/json", t)
+}
+
+// apply doet server-side apply van één object, van elke soort die de API
+// kent: YAML toepassen is beheerdersmacht, en de server laat het alleen een
+// admin doen. Nooit een lijst of een subresource. Eerst leest de agent het
+// object zoals het nu is, zodat hij kan zeggen of er iets verandert, ook
+// bij een Secret, waarvan de server de waarden niet ziet.
+func (b *kubeBridge) apply(ctx context.Context, req protocol.KubeRequest) protocol.KubeResponse {
+	t, err := parseKubePath(req.Path)
+	if err != nil {
+		return protocol.KubeResponse{Error: err.Error()}
+	}
+	if t.Resource == "" || t.Name == "" || t.Sub != "" {
+		return protocol.KubeResponse{Error: fmt.Sprintf("pad %q is geen object", req.Path)}
+	}
+	if len(req.Body) > protocol.KubeMaxPatch {
+		return protocol.KubeResponse{Error: "het object is te groot"}
+	}
+	var obj map[string]any
+	if err := json.Unmarshal(req.Body, &obj); err != nil || obj == nil {
+		return protocol.KubeResponse{Error: "het object is geen JSON-object"}
+	}
+	q, err := writeQuery(req.Op, req.Query)
+	if err != nil {
+		return protocol.KubeResponse{Error: err.Error()}
+	}
+	q.Set("fieldManager", protocol.KubeFieldManager)
+	was, before, res := b.send(ctx, http.MethodGet, req.Path, nil, nil, "")
+	if res != nil {
+		return *res
+	}
+	status, after, res := b.send(ctx, http.MethodPatch, req.Path, q, req.Body, "application/apply-patch+yaml")
+	if res != nil {
+		return *res
+	}
+	out := kubeAnswer(t, status, after)
+	if was == http.StatusOK && status == http.StatusOK {
+		out.Same = sameObject(before, after)
+	}
+	return out
+}
+
+// sameObject vergelijkt twee versies van een object, zonder de
+// boekhouding die bij elke apply verandert.
+func sameObject(a, b []byte) bool {
+	norm := func(body []byte) any {
+		var v any
+		dec := json.NewDecoder(bytes.NewReader(body))
+		dec.UseNumber()
+		if dec.Decode(&v) != nil {
+			return nil
+		}
+		if m, ok := v.(map[string]any); ok {
+			if md, ok := m["metadata"].(map[string]any); ok {
+				delete(md, "managedFields")
+				delete(md, "resourceVersion")
+				delete(md, "generation")
+			}
+		}
+		return v
+	}
+	x, y := norm(a), norm(b)
+	return x != nil && reflect.DeepEqual(x, y)
 }
 
 // write stuurt een schrijvend verzoek en filtert het antwoord, net als bij

@@ -3,8 +3,8 @@
 // eist een clientcertificaat, net als k3s, en schrijft een kubeconfig in het
 // formaat van /etc/rancher/k3s/k3s.yaml. Hij kent discovery, /version,
 // /readyz, en get en list van de gewone soorten objecten met label- en
-// fieldselectors en pagina's, patch, delete en eviction met
-// PodDisruptionBudgets. Elk verzoek wordt onthouden, zodat een test kan
+// fieldselectors en pagina's, patch, server-side apply, delete en eviction
+// met PodDisruptionBudgets. Elk verzoek wordt onthouden, zodat een test kan
 // nagaan wat er nooit aankwam.
 package kubefake
 
@@ -101,8 +101,11 @@ func KindOf(apiVersion, kind string) (Kind, bool) {
 
 // Server is de nep-API.
 type Server struct {
-	mu       sync.Mutex
-	objects  map[string]map[string]map[string]any // groupversion/resource → ns/name → object
+	mu      sync.Mutex
+	objects map[string]map[string]map[string]any // groupversion/resource → ns/name → object
+	// owners zegt per object welk programma een veld beheert, voor
+	// server-side apply: groupversion/resource/ns/name → .pad → manager.
+	owners   map[string]map[string]string
 	requests []string
 	// logs per ns/pod/container/vorige.
 	logs    map[string][]logLine
@@ -118,7 +121,8 @@ type Server struct {
 // New maakt een nep-API met eigen certificaten. Start zet hem aan.
 func New() *Server {
 	s := &Server{
-		objects: map[string]map[string]map[string]any{}, logs: map[string][]logLine{}, version: "v1.35.9+k3s1", ready: true, kubelet: true,
+		objects: map[string]map[string]map[string]any{}, owners: map[string]map[string]string{}, logs: map[string][]logLine{},
+		version: "v1.35.9+k3s1", ready: true, kubelet: true,
 	}
 	s.makeCerts()
 	return s

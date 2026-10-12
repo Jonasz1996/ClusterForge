@@ -75,9 +75,15 @@ type Outcome struct {
 // geslaagd verzoek is de cache van het cluster leeg, zodat het dashboard
 // meteen de nieuwe toestand ziet.
 func (s *Service) write(ctx context.Context, clusterID uuid.UUID, req protocol.KubeRequest) ([]byte, error) {
+	res, err := s.send(ctx, clusterID, req)
+	return res.Body, err
+}
+
+// send is write met het hele antwoord van de agent.
+func (s *Service) send(ctx context.Context, clusterID uuid.UUID, req protocol.KubeRequest) (protocol.KubeResponse, error) {
 	nodes, err := s.candidates(ctx, clusterID)
 	if err != nil {
-		return nil, err
+		return protocol.KubeResponse{}, err
 	}
 	var last error
 	for _, n := range nodes {
@@ -90,9 +96,9 @@ func (s *Service) write(ctx context.Context, clusterID uuid.UUID, req protocol.K
 			last = &UnavailableError{Msg: "de agent op " + n.Hostname + " is niet verbonden"}
 			continue
 		case errors.Is(err, agentbus.ErrNoAnswer):
-			return nil, &UnavailableError{Msg: "de agent op " + n.Hostname + " antwoordde niet op tijd; kijk of de actie toch gelukt is"}
+			return protocol.KubeResponse{}, &UnavailableError{Msg: "de agent op " + n.Hostname + " antwoordde niet op tijd; kijk of de actie toch gelukt is"}
 		case err != nil:
-			return nil, err
+			return protocol.KubeResponse{}, err
 		case res.Status == 0 && strings.HasPrefix(res.Error, "onbekend kube-verzoek"):
 			last = &UnavailableError{TooOld: true, Msg: "de agent op " + n.Hostname +
 				" kent deze actie nog niet; werk hem bij met het installatiescript en --upgrade"}
@@ -103,14 +109,14 @@ func (s *Service) write(ctx context.Context, clusterID uuid.UUID, req protocol.K
 		}
 		s.forget(clusterID)
 		if res.Status < 200 || res.Status > 299 {
-			return nil, apiError(res)
+			return protocol.KubeResponse{}, apiError(res)
 		}
 		if res.Error != "" {
-			return nil, &APIError{Status: res.Status, Message: res.Error}
+			return protocol.KubeResponse{}, &APIError{Status: res.Status, Message: res.Error}
 		}
-		return res.Body, nil
+		return res, nil
 	}
-	return nil, last
+	return protocol.KubeResponse{}, last
 }
 
 // forget leegt de cache van een cluster.

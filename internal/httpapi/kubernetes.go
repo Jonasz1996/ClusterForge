@@ -34,9 +34,12 @@ func (s *Server) kubeError(w http.ResponseWriter, r *http.Request, err error) {
 	var ae *kube.APIError
 	var ce *kube.ConflictError
 	var be *kube.BlockedError
+	var ye *kube.YAMLError
 	switch {
 	case errors.Is(err, kube.ErrNotKubernetes):
 		writeError(w, http.StatusNotFound, "not_found", "geen Kubernetes-cluster met dit id")
+	case errors.As(err, &ye):
+		writeError(w, http.StatusBadRequest, "yaml", ye.Error())
 	case errors.Is(err, kube.ErrInvalid):
 		writeError(w, http.StatusBadRequest, "validation", err.Error())
 	case errors.Is(err, kube.ErrNoPrevious):

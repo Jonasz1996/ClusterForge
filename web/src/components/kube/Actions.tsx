@@ -156,7 +156,7 @@ type DialogProps = {
 
 // useConfirm is de bevestiging op prod: de slug intikken, met
 // tweestapsverificatie aan.
-function useConfirm(clusterId: string) {
+export function useConfirm(clusterId: string) {
   const cluster = useCluster(clusterId);
   const totp = useProdTotp();
   const [value, setValue] = useState("");

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
 import { DoneAlert, KubeActions, workloadActions, type ActionDone } from "@/components/kube/Actions";
+import { applyModes, ApplyTab, type ApplyMode } from "@/components/kube/Apply";
 import {
   EventList,
   KubeError,
@@ -18,7 +19,7 @@ import {
 } from "@/components/kube/Kube";
 import { AllTab, ConfigTab, EventsTab, NetworkTab, StorageTab } from "@/components/kube/Resources";
 import { Empty, formatBytes, tableClass, tdClass, thClass } from "@/components/inventory/bits";
-import { Alert, Badge, Card, cx, PageHeader, Select } from "@/components/ui";
+import { Alert, Badge, Button, Card, cx, PageHeader, Select } from "@/components/ui";
 import { useCluster, useIsAdmin } from "@/lib/inventory";
 import {
   age,
@@ -42,12 +43,23 @@ import {
   type KubePod,
 } from "@/lib/kube";
 
-type Tab = "overzicht" | "nodes" | "apps" | "pods" | "netwerk" | "opslag" | "configuratie" | "gebeurtenissen" | "alles";
+type Tab =
+  | "overzicht"
+  | "nodes"
+  | "apps"
+  | "toepassen"
+  | "pods"
+  | "netwerk"
+  | "opslag"
+  | "configuratie"
+  | "gebeurtenissen"
+  | "alles";
 
 const tabs: { id: Tab; label: string }[] = [
   { id: "overzicht", label: "Overzicht" },
   { id: "nodes", label: "Nodes" },
   { id: "apps", label: "Apps" },
+  { id: "toepassen", label: "Toepassen" },
   { id: "pods", label: "Pods" },
   { id: "netwerk", label: "Netwerk" },
   { id: "opslag", label: "Opslag" },
@@ -90,6 +102,7 @@ function useParams() {
     node: search.get("node") ?? "",
     warnings: search.get("warnings") === "1",
     type: search.get("type") ?? "",
+    mode: applyModes.find((m) => m.id === search.get("mode"))?.id ?? ("app" as ApplyMode),
     set,
   };
 }
@@ -99,6 +112,9 @@ function KubeClusterInner() {
   const cluster = useCluster(p.id);
   const overview = useKubeOverview(p.id);
   const o = overview.data;
+  const isAdmin = useIsAdmin();
+  // Toepassen is alleen voor beheerders; de server controleert hetzelfde.
+  const shown = tabs.filter((t) => t.id !== "toepassen" || isAdmin);
 
   if (p.id === "") return <Alert>Geen cluster opgegeven.</Alert>;
 
@@ -135,11 +151,11 @@ function KubeClusterInner() {
       />
 
       <nav className="flex gap-1 overflow-x-auto border-b border-slate-200 dark:border-slate-800" aria-label="Onderdelen">
-        {tabs.map((t) => (
+        {shown.map((t) => (
           <button
             key={t.id}
             type="button"
-            onClick={() => p.set({ tab: t.id === "overzicht" ? undefined : t.id })}
+            onClick={() => p.set({ tab: t.id === "overzicht" ? undefined : t.id, mode: undefined })}
             className={cx(
               "-mb-px border-b-2 px-3 py-2 text-sm font-medium whitespace-nowrap",
               p.tab === t.id
@@ -165,7 +181,20 @@ function KubeClusterInner() {
             )}
             {p.tab === "overzicht" && <OverviewTab o={o} onTab={p.set} />}
             {p.tab === "nodes" && <NodesTab id={p.id} onPods={(node) => p.set({ tab: "pods", node })} />}
-            {p.tab === "apps" && <AppsTab id={p.id} namespace={p.namespace} system={p.system} />}
+            {p.tab === "apps" && (
+              <AppsTab
+                id={p.id}
+                namespace={p.namespace}
+                system={p.system}
+                onNew={() => p.set({ tab: "toepassen", mode: undefined })}
+              />
+            )}
+            {p.tab === "toepassen" &&
+              (isAdmin ? (
+                <ApplyTab id={p.id} o={o} mode={p.mode} onMode={(m) => p.set({ mode: m === "app" ? undefined : m })} />
+              ) : (
+                <Alert>Alleen een beheerder kan iets uitrollen.</Alert>
+              ))}
             {p.tab === "pods" && <PodsTab id={p.id} namespace={p.namespace} system={p.system} node={p.node} />}
             {p.tab === "netwerk" && <NetworkTab id={p.id} namespace={p.namespace} system={p.system} />}
             {p.tab === "opslag" && <StorageTab id={p.id} namespace={p.namespace} system={p.system} />}
@@ -475,7 +504,7 @@ function NodeTable({ id, nodes, onPods }: { id: string; nodes: KubeNode[]; onPod
   );
 }
 
-function AppsTab({ id, namespace, system }: { id: string; namespace: string; system: boolean }) {
+function AppsTab({ id, namespace, system, onNew }: { id: string; namespace: string; system: boolean; onNew: () => void }) {
   const workloads = useKubeWorkloads(id, namespace, system);
   const isAdmin = useIsAdmin();
   const [done, setDone] = useState<ActionDone | null>(null);
@@ -489,10 +518,15 @@ function AppsTab({ id, namespace, system }: { id: string; namespace: string; sys
         {isAdmin && (
           <p>
             Met <strong>Acties</strong> schaal je een app, herstart je zijn pods of ga je terug naar een vorige versie. Weghalen
-            doe je op de pagina van de app zelf.
+            doe je op de pagina van de app zelf. Een nieuwe app zet je op met <strong>Nieuwe app</strong>.
           </p>
         )}
       </Learn>
+      {isAdmin && (
+        <div className="flex justify-end">
+          <Button onClick={onNew}>Nieuwe app</Button>
+        </div>
+      )}
       <DoneAlert done={done} onClose={() => setDone(null)} />
       {workloads.isError && <KubeError error={workloads.error} />}
       {workloads.data &&
