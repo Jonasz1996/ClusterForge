@@ -39,6 +39,7 @@ export type KubeAccessInput = components["schemas"]["KubeAccessInput"];
 export type KubeAccessIssued = components["schemas"]["KubeAccessIssued"];
 export type KubeSnapshot = components["schemas"]["KubeSnapshot"];
 export type KubeSnapshots = components["schemas"]["KubeSnapshots"];
+export type KubeUpgrade = components["schemas"]["KubeUpgrade"];
 export type KubeSnapshotSaved = components["schemas"]["KubeSnapshotSaved"];
 export type KubeRestorePlan = components["schemas"]["KubeRestorePlan"];
 export type KubeSnapshotCluster = components["schemas"]["KubeSnapshotCluster"];
@@ -72,6 +73,7 @@ const keys = {
   snapshots: (id: string) => ["kube", id, "snapshots"] as const,
   restorePlan: (id: string, name: string) => ["kube", id, "restore-plan", name] as const,
   snapshotClusters: ["kube", "snapshot-clusters"] as const,
+  upgrade: (id: string) => ["kube", id, "upgrade"] as const,
 };
 
 // scope is de query van een tabblad met een namespace en het vinkje
@@ -797,3 +799,15 @@ export const serviceTypeHelp: Record<string, string> = {
   LoadBalancer: "Krijgt een adres buiten het cluster. In k3s doet ServiceLB dat met de adressen van de nodes.",
   ExternalName: "Een naam in DNS die naar iets buiten het cluster wijst.",
 };
+
+// useKubeUpgrade zegt welke k3s het cluster draait, wat de nodes melden en
+// naar welke versie het kan.
+export function useKubeUpgrade(id: string) {
+  return useQuery({
+    queryKey: keys.upgrade(id),
+    queryFn: async () =>
+      unwrap(await api.GET("/kubernetes/clusters/{clusterId}/upgrade", { params: { path: { clusterId: id } } })),
+    enabled: id !== "",
+    refetchInterval: liveInterval,
+  });
+}

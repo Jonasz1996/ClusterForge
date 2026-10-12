@@ -100,17 +100,10 @@ func TestRenderKubernetes(t *testing.T) {
 		}
 	}
 	install := files["/usr/local/lib/clusterforge/install-k3s.sh"]
-	for _, want := range []string{"VERSION='v1.35.9+k3s1'", "/v1.35.9%2Bk3s1'", "sha256sum -c -", "mv -f /usr/local/bin/k3s.new /usr/local/bin/k3s",
+	for _, want := range []string{"VERSION='v1.36.5+k3s1'", "/v1.36.5%2Bk3s1'", "sha256sum -c -", "mv -f /usr/local/bin/k3s.new /usr/local/bin/k3s",
 		`touch "/usr/local/lib/clusterforge/k3s-$VERSION"`} {
 		if !strings.Contains(install, want) {
 			t.Errorf("install-k3s.sh mist %q", want)
-		}
-	}
-	// Het merkteken in creates hoort bij de versie in het script; anders
-	// installeert elke uitrol opnieuw of nooit.
-	for _, s := range steps {
-		if s.Command != nil && s.Command.Run == "/usr/local/lib/clusterforge/install-k3s.sh" && s.Command.Creates != "/usr/local/lib/clusterforge/k3s-v1.35.9+k3s1" {
-			t.Errorf("creates van de installatie: %q", s.Command.Creates)
 		}
 	}
 	ka := files["/etc/keepalived/keepalived.conf"]
@@ -182,12 +175,108 @@ func TestKubernetesCounts(t *testing.T) {
 	if _, err := tpl.Counts(Context{Params: map[string]any{"servers": 1, "workers": -1}}); err == nil || !strings.Contains(err.Error(), "0 tot 20") {
 		t.Errorf("min bij Counts: %v", err)
 	}
-	params, err := tpl.Validate(map[string]any{"vip": "10.0.40.100"})
+	params, err := tpl.Validate(map[string]any{"vip": "10.0.40.100", "vrid": 61})
 	if err != nil {
 		t.Fatal(err)
 	}
 	counts, err := tpl.Counts(Context{Params: params})
 	if err != nil || counts[0] != 1 || counts[1] != 2 {
 		t.Fatalf("standaard: %v %v", counts, err)
+	}
+}
+
+// Elke versie van de template installeert de k3s die ze in kubernetes:
+// noemt: het script, het merkteken in creates en de herstart erna horen
+// bij elkaar, anders installeert een uitrol opnieuw, nooit, of zonder dat
+// k3s de nieuwe binary start.
+func TestKubernetesVersions(t *testing.T) {
+	r := BuiltinRegistry()
+	versions := r.Versions("kubernetes")
+	if len(versions) < 2 {
+		t.Fatalf("versies: %v", versions)
+	}
+	for _, v := range versions {
+		tpl, _ := r.Get("kubernetes", v)
+		kv := tpl.KubeVersion()
+		if _, ok := KubeMinor(kv); !ok {
+			t.Fatalf("%s: k3s %q", v, kv)
+		}
+		params, err := tpl.Validate(map[string]any{"vip": "10.0.40.100", "vrid": 61})
+		if err != nil {
+			t.Fatal(err)
+		}
+		c := Context{Params: params, Cluster: ClusterInfo{Name: "Leren", Slug: "leren", Environment: "lab"}, Nodes: []NodeInfo{
+			{Hostname: "leren-server-01", Role: "server", Index: 1, Address: "10.0.40.11", Prefix: 24, Interface: "ens18"},
+			{Hostname: "leren-worker-01", Role: "worker", Index: 1, Address: "10.0.40.12", Prefix: 24, Interface: "ens18"},
+		}}
+		for _, unit := range []string{"k3s", "k3s-agent"} {
+			host := map[string]string{"k3s": "leren-server-01", "k3s-agent": "leren-worker-01"}[unit]
+			files, steps := kubeFiles(t, tpl, c, host)
+			install := files["/usr/local/lib/clusterforge/install-k3s.sh"]
+			if !strings.Contains(install, "VERSION='"+kv+"'") || !strings.Contains(install, "/"+strings.Replace(kv, "+", "%2B", 1)+"'") {
+				t.Errorf("%s: install-k3s.sh hoort bij %s", v, kv)
+			}
+			found := false
+			for _, s := range steps {
+				if s.Command == nil || s.Command.Run != "/usr/local/lib/clusterforge/install-k3s.sh" {
+					continue
+				}
+				found = true
+				if s.Command.Creates != "/usr/local/lib/clusterforge/k3s-"+kv {
+					t.Errorf("%s: creates %q", v, s.Command.Creates)
+				}
+				// Vanaf 1.1.0 herstart k3s na een nieuwe binary; 1.0.0 was de
+				// eerste en installeerde alleen.
+				restart := len(s.Notify) == 1 && s.Notify[0].Name == unit && s.Notify[0].State == "restarted"
+				if restart != (v != "1.0.0") {
+					t.Errorf("%s op %s: notify %+v", v, host, s.Notify)
+				}
+			}
+			if !found {
+				t.Errorf("%s: geen installatie op %s", v, host)
+			}
+		}
+	}
+}
+
+func TestKubeStep(t *testing.T) {
+	mk := func(version, k3s string) *Template {
+		return &Template{Name: "kubernetes", Version: version, ClusterType: "kubernetes", Kubernetes: &KubeInfo{Version: k3s}}
+	}
+	a, b, c := mk("1.0.0", "v1.35.9+k3s1"), mk("1.1.0", "v1.36.5+k3s1"), mk("1.2.0", "v1.37.1+k3s1")
+	patch := mk("1.1.1", "v1.36.6+k3s1")
+	for _, tc := range []struct {
+		from, to *Template
+		want     string
+	}{
+		{a, b, ""}, {b, c, ""}, {b, patch, ""}, {a, a, ""},
+		{a, c, "van Kubernetes 1.35 kan een cluster alleen naar 1.36, niet meteen naar 1.37"},
+		{b, a, "kan niet terug"},
+		{patch, b, "kan niet terug"},
+	} {
+		err := KubeStep(tc.from, tc.to)
+		if (tc.want == "") != (err == nil) || (err != nil && !strings.Contains(err.Error(), tc.want)) {
+			t.Errorf("%s naar %s: %v", tc.from.Version, tc.to.Version, err)
+		}
+	}
+	if CompareKube("v1.36.5+k3s2", "v1.36.5+k3s1") <= 0 || CompareKube("v1.36.10+k3s1", "v1.36.9+k3s1") <= 0 || ShortKube("v1.36.5+k3s1") != "v1.36.5" {
+		t.Error("vergelijken")
+	}
+
+	r := &Registry{byName: map[string][]*Template{"kubernetes": {a, b, patch, c}}}
+	if n := r.KubeNext("kubernetes", "1.0.0"); n == nil || n.Version != "1.1.1" {
+		t.Fatalf("na 1.0.0: %+v", n)
+	}
+	if n := r.KubeNext("kubernetes", "1.1.1"); n == nil || n.Version != "1.2.0" {
+		t.Fatalf("na 1.1.1: %+v", n)
+	}
+	if n := r.KubeNext("kubernetes", "1.2.0"); n != nil {
+		t.Fatalf("na de nieuwste: %+v", n)
+	}
+	if got := r.Upto("kubernetes", "1.1.0").Versions("kubernetes"); len(got) != 2 || got[1] != "1.1.0" {
+		t.Fatalf("tot 1.1.0: %v", got)
+	}
+	if n := BuiltinRegistry().KubeNext("kubernetes", "1.0.0"); n == nil || n.Version != "1.1.0" {
+		t.Fatalf("ingebouwd: %+v", n)
 	}
 }

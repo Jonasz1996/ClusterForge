@@ -185,6 +185,25 @@ func (s *Server) SetVersion(v string) {
 	s.version = v
 }
 
+// SetNodeVersion zet de versie die de kubelet van een node meldt, zoals
+// k3s na een herstart met een nieuwe binary.
+func (s *Server) SetNodeVersion(name, version string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	n := s.objects["v1/nodes"]["/"+name]
+	if n == nil {
+		return
+	}
+	status, _ := n["status"].(map[string]any)
+	info, _ := status["nodeInfo"].(map[string]any)
+	if info == nil {
+		return
+	}
+	info["kubeletVersion"], info["kubeProxyVersion"] = version, version
+	s.rv++
+	n["metadata"].(map[string]any)["resourceVersion"] = strconv.Itoa(s.rv)
+}
+
 // SetReady zet wat /readyz antwoordt.
 func (s *Server) SetReady(ready bool) {
 	s.mu.Lock()

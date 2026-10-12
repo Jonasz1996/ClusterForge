@@ -15,7 +15,7 @@ var released = map[string][]string{
 	"docker":           {"1.0.0"},
 	"cron":             {"1.0.0"},
 	"generic":          {"1.0.0"},
-	"kubernetes":       {"1.0.0"},
+	"kubernetes":       {"1.0.0", "1.1.0"},
 }
 
 func TestReleasedVersionsStay(t *testing.T) {

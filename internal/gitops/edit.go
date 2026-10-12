@@ -270,7 +270,11 @@ func (s *Service) planEdit(ctx context.Context, cl *Cluster, e Edit) (*planned, 
 		return nil, err
 	}
 	if len(errs) > 0 {
-		return nil, ValidationError{Field: errs[0].Field, Msg: errs[0].Message}
+		field := errs[0].Field
+		if field == "template.version" {
+			field = "version"
+		}
+		return nil, ValidationError{Field: field, Msg: errs[0].Message}
 	}
 	return pd, nil
 }

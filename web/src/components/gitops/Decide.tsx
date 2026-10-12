@@ -171,6 +171,7 @@ export function ReapplyDialog({
   prod,
   revision,
   gitManaged,
+  kubernetes = false,
   onClose,
 }: {
   clusterId: string;
@@ -179,6 +180,7 @@ export function ReapplyDialog({
   prod: boolean;
   revision: number;
   gitManaged: boolean;
+  kubernetes?: boolean;
   onClose: () => void;
 }) {
   const router = useRouter();
@@ -191,9 +193,11 @@ export function ReapplyDialog({
     <Modal title="Opnieuw toepassen" onClose={onClose}>
       <div className="space-y-4 text-sm">
         <p>
-          Een taak past revisie {revision} van {name} opnieuw toe: op elke node alle stappen van de template, node voor node, met de
-          VIP-eigenaar als laatste. Wat genegeerd wordt, blijft zoals het is. Na elke node wacht de taak tot die gezond is; lukt dat niet, dan
-          stopt ze.
+          Een taak past revisie {revision} van {name} opnieuw toe: op elke node alle stappen van de template, node voor node,{" "}
+          {kubernetes
+            ? "eerst de servers en dan de workers. Een node die een nieuwe k3s krijgt, gaat eerst leeg."
+            : "met de VIP-eigenaar als laatste."}{" "}
+          Wat genegeerd wordt, blijft zoals het is. Na elke node wacht de taak tot die gezond is; lukt dat niet, dan stopt ze.
         </p>
         {prod && <ProdConfirm slug={slug} value={confirm} onChange={setConfirm} />}
         {err && <Alert>{err}</Alert>}

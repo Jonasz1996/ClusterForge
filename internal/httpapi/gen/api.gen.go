@@ -4924,7 +4924,8 @@ type GitPlan struct {
 	// NoSteps Geen gerenderde stap verandert
 	NoSteps bool `json:"no_steps"`
 
-	// Nodes In de volgorde van toepassen; de bestaande nodes met de VIP-eigenaar als laatste, daarna de nieuwe
+	// Nodes In de volgorde van toepassen; de bestaande nodes met de VIP-eigenaar als laatste, daarna de nieuwe. Bij
+	// Kubernetes gaan de servers voor de workers.
 	Nodes    []GitPlanNode    `json:"nodes"`
 	Params   []GitFieldChange `json:"params"`
 	Proxmox  *string          `json:"proxmox,omitempty"`
@@ -4963,7 +4964,10 @@ type GitPlanNode struct {
 	Hostname string             `json:"hostname"`
 	New      bool               `json:"new"`
 	NodeId   openapi_types.UUID `json:"node_id"`
-	Steps    []GitStepChange    `json:"steps"`
+
+	// Role De rol uit de template
+	Role  *string         `json:"role,omitempty"`
+	Steps []GitStepChange `json:"steps"`
 
 	// Vips De VIP's die deze node nu heeft
 	Vips []string `json:"vips"`
@@ -6324,6 +6328,52 @@ type KubeStorageClass struct {
 	Name        string `json:"name"`
 	Provisioner string `json:"provisioner"`
 	Reclaim     string `json:"reclaim"`
+}
+
+// KubeUpgrade defines model for KubeUpgrade.
+type KubeUpgrade struct {
+	// Behind Een eerdere toepassing mislukte: eerst Opnieuw toepassen
+	Behind bool `json:"behind"`
+
+	// Blocked Waarom bijwerken in de webinterface nu niet kan; leeg als het kan
+	Blocked string `json:"blocked"`
+
+	// GitManaged Het cluster volgt Git: bijwerken is de templateversie in cluster.yaml wijzigen
+	GitManaged bool `json:"git_managed"`
+
+	// K3s De k3s van die templateversie, zoals v1.35.9+k3s1; leeg als deze server de versie niet kent
+	K3s string `json:"k3s"`
+
+	// Next De nieuwste templateversie met een nieuwere k3s die nu kan; null als er geen is
+	Next nullable.Nullable[KubeUpgradeNext] `json:"next"`
+
+	// Nodes De servers eerst, dan op naam
+	Nodes []KubeUpgradeNode `json:"nodes"`
+
+	// NodesError Waarom de nodes nu niet te lezen waren
+	NodesError string `json:"nodes_error"`
+	Template   string `json:"template"`
+
+	// Version De templateversie van de gewenste staat
+	Version string `json:"version"`
+}
+
+// KubeUpgradeNext defines model for KubeUpgradeNext.
+type KubeUpgradeNext struct {
+	K3s     string `json:"k3s"`
+	Version string `json:"version"`
+}
+
+// KubeUpgradeNode defines model for KubeUpgradeNode.
+type KubeUpgradeNode struct {
+	// Kubelet De versie die de kubelet meldt
+	Kubelet string `json:"kubelet"`
+	Name    string `json:"name"`
+	Ready   bool   `json:"ready"`
+
+	// Server control-plane
+	Server        bool `json:"server"`
+	Unschedulable bool `json:"unschedulable"`
 }
 
 // KubeUsage defines model for KubeUsage.
@@ -9033,6 +9083,9 @@ type ServerInterface interface {
 	// GetKubeStorage De PersistentVolumeClaims, volumes en StorageClasses
 	// (GET /kubernetes/clusters/{clusterId}/storage)
 	GetKubeStorage(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params GetKubeStorageParams)
+	// GetKubeUpgrade Welke k3s het cluster draait en naar welke het kan
+	// (GET /kubernetes/clusters/{clusterId}/upgrade)
+	GetKubeUpgrade(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
 	// ListKubeWorkloads Deployments, StatefulSets, DaemonSets, CronJobs en Jobs
 	// (GET /kubernetes/clusters/{clusterId}/workloads)
 	ListKubeWorkloads(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params ListKubeWorkloadsParams)
@@ -10023,6 +10076,12 @@ func (_ Unimplemented) RestoreKubeSnapshot(w http.ResponseWriter, r *http.Reques
 // GetKubeStorage De PersistentVolumeClaims, volumes en StorageClasses
 // (GET /kubernetes/clusters/{clusterId}/storage)
 func (_ Unimplemented) GetKubeStorage(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params GetKubeStorageParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetKubeUpgrade Welke k3s het cluster draait en naar welke het kan
+// (GET /kubernetes/clusters/{clusterId}/upgrade)
+func (_ Unimplemented) GetKubeUpgrade(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -14761,6 +14820,32 @@ func (siw *ServerInterfaceWrapper) GetKubeStorage(w http.ResponseWriter, r *http
 	handler.ServeHTTP(w, r)
 }
 
+// GetKubeUpgrade operation middleware
+func (siw *ServerInterfaceWrapper) GetKubeUpgrade(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetKubeUpgrade(w, r, clusterId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListKubeWorkloads operation middleware
 func (siw *ServerInterfaceWrapper) ListKubeWorkloads(w http.ResponseWriter, r *http.Request) {
 
@@ -16969,6 +17054,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/kubernetes/clusters/{clusterId}/snapshots/restore", wrapper.RestoreKubeSnapshot)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/kubernetes/clusters/{clusterId}/upgrade", wrapper.GetKubeUpgrade)
 	})
 
 	return r

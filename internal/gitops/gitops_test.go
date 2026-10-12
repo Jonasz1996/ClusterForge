@@ -13,6 +13,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/deploy"
 	"github.com/Jonasz1996/clusterforge/internal/gitops/ghfake"
 	"github.com/Jonasz1996/clusterforge/internal/templates"
+	"github.com/Jonasz1996/clusterforge/pkg/protocol"
 )
 
 const webYAML = `clusterforge: 1
@@ -187,6 +188,31 @@ func TestDiff(t *testing.T) {
 	}
 	if d, _ := Diff("", "a\nb\n", "/dev/null", "b"); !strings.Contains(d, "@@ -0,0 +1,2 @@\n+a\n+b\n") {
 		t.Fatalf("nieuw bestand:\n%s", d)
+	}
+}
+
+// TestCompareCommand: een commando dat een ander bestand maakt, is één
+// gewijzigde stap, geen nieuwe stap naast een die weg is.
+func TestCompareCommand(t *testing.T) {
+	cmd := func(run, creates string, notify ...protocol.ServiceStep) templates.Step {
+		return templates.Step{Step: protocol.Step{Command: &protocol.CommandStep{Run: run, Creates: creates}}, Title: "commando", Notify: notify}
+	}
+	before := []templates.Step{cmd("/opt/install.sh", "/opt/v1"), cmd("ln -s /a /b", "/b")}
+	after := []templates.Step{cmd("/opt/install.sh", "/opt/v2", protocol.ServiceStep{Name: "k3s", State: "restarted"}), cmd("ln -s /a /b", "/b")}
+	got := compareSteps("web01", before, after, 1, "")
+	if len(got) != 1 || got[0].Change != "changed" || got[0].Title != "Commando /opt/install.sh" || !slices.Equal(got[0].IDs, []string{"command:/opt/v2"}) ||
+		got[0].Summary != "draait opnieuw en maakt nu /opt/v2, daarna k3s herstarten" {
+		t.Fatalf("%+v", got)
+	}
+	// Een ander commando blijft een nieuwe stap en een die weg is.
+	got = compareSteps("web01", before[:1], []templates.Step{cmd("/opt/other.sh", "/opt/v2")}, 1, "")
+	if len(got) != 2 || got[0].Change != "added" || got[1].Change != "removed" {
+		t.Fatalf("%+v", got)
+	}
+	p := &Plan{Nodes: []PlanNode{{Hostname: "web01", Steps: compareSteps("web01", before, after, 1, "")}},
+		Params: []FieldChange{{Field: "kubernetes.version", From: "v1", To: "v2"}}}
+	if s := summary(p); s != "k3s van v1 naar v2; commando install.sh op 1 node" {
+		t.Fatalf("samenvatting: %s", s)
 	}
 }
 

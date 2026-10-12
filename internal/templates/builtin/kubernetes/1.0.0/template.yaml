@@ -9,6 +9,10 @@ description: >-
   (poort 80 en 443). Begin met één server om te leren; drie servers
   overleven het uitvallen van één.
 cluster_type: kubernetes
+# De k3s die deze versie installeert; bijwerken is overstappen naar een
+# nieuwere templateversie.
+kubernetes:
+  version: v1.35.9+k3s1
 # Keepalived met preempt: het VIP keert terug naar server-01 zodra die weer
 # gezond is.
 failback: true

@@ -251,6 +251,8 @@ func serve() error {
 	}
 	ro := rollout.NewService(pool, ev, log, runner, bus, dep, drf)
 	ro.Changed = eval.Kick
+	// Een node die een nieuwe k3s krijgt, gaat eerst leeg.
+	ro.Kube = kub
 	for _, kind := range []string{deploy.Kind, lifecycle.KindNodeAction, proxmox.KindVMAction, failover.KindTest, failover.KindRestore,
 		disaster.KindRun, disaster.KindRestore} {
 		runner.OnFinished(kind, recheck)

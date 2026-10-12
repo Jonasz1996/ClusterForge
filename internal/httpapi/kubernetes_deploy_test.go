@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -26,6 +27,66 @@ type leren struct {
 	connID string
 	// request is de aanvraag voor het cluster Leren met params erbij.
 	request func(params map[string]any) map[string]any
+
+	mu sync.Mutex
+	// broken zijn de machines waar k3s na een (her)start niet opkomt.
+	broken map[string]bool
+}
+
+var installVersionRe = regexp.MustCompile(`(?m)^VERSION='([^']+)'$`)
+
+// simK3s speelt k3s na op een machine: het installatiescript zet het
+// merkteken met de versie uit het script, en een start of herstart van k3s
+// of k3s-agent laat de node in Kubernetes die versie melden, zoals de
+// kubelet na een herstart. Op een kapotte machine faalt de unit dan en
+// meldt de node de oude versie.
+func (l *leren) simK3s(t *testing.T, name string, h *agenttest.Host) {
+	var mu sync.Mutex
+	installed := ""
+	h.SetAfter(func(call string, err error) {
+		if err != nil {
+			return
+		}
+		if call == "sh -c /usr/local/lib/clusterforge/install-k3s.sh" {
+			b, err := os.ReadFile(filepath.Join(h.Root, "usr/local/lib/clusterforge/install-k3s.sh"))
+			m := installVersionRe.FindSubmatch(b)
+			if err != nil || m == nil {
+				t.Errorf("install-k3s.sh op %s zonder versie: %v", name, err)
+				return
+			}
+			mu.Lock()
+			installed = string(m[1])
+			mu.Unlock()
+			if err := os.WriteFile(filepath.Join(h.Root, "usr/local/lib/clusterforge/k3s-"+string(m[1])), nil, 0o644); err != nil {
+				t.Error(err)
+			}
+			return
+		}
+		verb, unit, ok := strings.Cut(strings.TrimPrefix(call, "systemctl "), " ")
+		if !ok || !strings.HasPrefix(call, "systemctl ") || (verb != "start" && verb != "restart") || (unit != "k3s" && unit != "k3s-agent") {
+			return
+		}
+		l.mu.Lock()
+		broken := l.broken[name]
+		l.mu.Unlock()
+		if broken {
+			h.SetUnit(unit, agenttest.Unit{Enabled: true, Failed: true})
+			return
+		}
+		mu.Lock()
+		v := installed
+		mu.Unlock()
+		if v != "" {
+			l.fake.SetNodeVersion(name, v)
+		}
+	})
+}
+
+// breakK3s laat k3s op een machine na een (her)start falen, of niet meer.
+func (l *leren) breakK3s(name string, broken bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.broken[name] = broken
 }
 
 func newLeren(t *testing.T, e *testEnv, c *client) *leren {
@@ -50,8 +111,10 @@ func newLeren(t *testing.T, e *testEnv, c *client) *leren {
 		kubefake.NodeSpec{Name: "leren-worker-01", IP: "10.0.40.12"},
 		kubefake.NodeSpec{Name: "leren-worker-02", IP: "10.0.40.13"},
 	)
+	l := &leren{pve: pve, f: f, fake: fake, broken: map[string]bool{}}
 	// Een node die er later bij komt, meldt zich Ready zodra hij opstart.
 	f.setup = func(name string, h *agenttest.Host) {
+		l.simK3s(t, name, h)
 		if name == "leren-server-01" {
 			if err := fake.WriteKubeconfig(h.Root); err != nil {
 				t.Error(err)
@@ -71,7 +134,7 @@ func newLeren(t *testing.T, e *testEnv, c *client) *leren {
 	}, &conn); s != 201 {
 		t.Fatalf("koppelen: %d", s)
 	}
-	l := &leren{pve: pve, f: f, fake: fake, connID: conn.ID}
+	l.connID = conn.ID
 	l.request = func(params map[string]any) map[string]any {
 		p := map[string]any{"vip": "10.0.40.100"}
 		for k, v := range params {

@@ -1,0 +1,8 @@
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}). Wijzigingen hier
+# worden bij de volgende uitrol overschreven.
+#
+# Instellingen van k3s op deze worker; zie https://docs.k3s.io/cli/agent.
+token: "{{ .params.token }}"
+server: https://{{ .params.vip }}:6443
+node-ip: {{ .node.address }}
+flannel-iface: {{ .node.interface }}

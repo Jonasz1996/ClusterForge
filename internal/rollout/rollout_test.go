@@ -3,6 +3,7 @@ package rollout
 import (
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -64,6 +65,51 @@ func TestOrderOwnerLast(t *testing.T) {
 	}
 	if want := []string{"web-02", "web-03", "web-01"}; !slices.Equal(got, want) {
 		t.Fatalf("volgorde %v, wil %v", got, want)
+	}
+}
+
+// Bij Kubernetes gaan de servers voor de workers, want een kubelet mag niet
+// nieuwer zijn dan de API-server; binnen elke groep komt de VIP-eigenaar
+// als laatste.
+func TestOrderKubernetes(t *testing.T) {
+	w1, s1, w2, s2 := uuid.New(), uuid.New(), uuid.New(), uuid.New()
+	nodes := map[uuid.UUID]PlanNode{
+		w1: {NodeID: w1, Hostname: "leren-worker-01", Role: "worker"},
+		s1: {NodeID: s1, Hostname: "leren-server-01", Role: "server", VIPs: []string{"10.0.40.100"}},
+		w2: {NodeID: w2, Hostname: "leren-worker-02", Role: "worker"},
+		s2: {NodeID: s2, Hostname: "leren-server-02", Role: "server"},
+	}
+	spec := []uuid.UUID{s1, s2, w1, w2}
+	names := func(ns []PlanNode) []string {
+		var out []string
+		for _, n := range ns {
+			out = append(out, n.Hostname)
+		}
+		return out
+	}
+	if got, want := names(orderPlan(true, spec, nodes)), []string{"leren-server-02", "leren-server-01", "leren-worker-01", "leren-worker-02"}; !slices.Equal(got, want) {
+		t.Fatalf("Kubernetes: %v, wil %v", got, want)
+	}
+	if got, want := names(orderPlan(false, spec, nodes)), []string{"leren-server-02", "leren-worker-01", "leren-worker-02", "leren-server-01"}; !slices.Equal(got, want) {
+		t.Fatalf("zonder Kubernetes: %v, wil %v", got, want)
+	}
+
+	k3s := templates.Step{Step: protocol.Step{Command: &protocol.CommandStep{Run: "/usr/local/lib/clusterforge/install-k3s.sh"}},
+		Notify: []protocol.ServiceStep{{Name: "k3s-agent", State: "restarted"}}}
+	keepalived := steps()[1]
+	if !restartsK3s([]templates.Step{keepalived, k3s}) || restartsK3s([]templates.Step{keepalived}) {
+		t.Fatal("restartsK3s")
+	}
+	p := Plan{Kubernetes: true, Nodes: []PlanNode{{Hostname: "leren-server-01", Services: []string{"k3s"}}}}
+	if n := kubeNotes(p, []string{"leren-server-01"}); len(n) != 2 || !strings.Contains(n[0], "eerst de servers") || !strings.Contains(n[1], "maar één server") {
+		t.Fatalf("notes: %q", n)
+	}
+	if n := kubeNotes(p, []string{"a", "b", "c"}); len(n) != 1 {
+		t.Fatalf("notes met drie servers: %q", n)
+	}
+	p.Nodes[0].Services = []string{"keepalived"}
+	if n := kubeNotes(p, []string{"leren-server-01"}); n != nil {
+		t.Fatalf("notes zonder k3s: %q", n)
 	}
 }
 

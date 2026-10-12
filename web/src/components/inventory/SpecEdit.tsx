@@ -14,22 +14,26 @@ export type SpecCluster = { id: string; name: string; slug: string; environment:
 
 // SpecEditDialog wijzigt de gewenste staat van een cluster uit een template:
 // eerst het formulier, dan het plan zoals bij een wijziging uit Git, en pas
-// bij Toepassen een nieuwe revisie en de taak. Met preset slaat het het
-// formulier over, zoals bij Worker toevoegen.
+// bij Toepassen een nieuwe revisie en de taak. Met preset of version slaat
+// het het formulier over, zoals bij Worker toevoegen of Kubernetes
+// bijwerken naar een nieuwere templateversie.
 export function SpecEditDialog({
   cluster,
   preset,
+  version,
   title = "Specificatie wijzigen",
   intro,
   onClose,
 }: {
   cluster: SpecCluster;
   preset?: Record<string, unknown>;
+  version?: string;
   title?: string;
   intro?: ReactNode;
   onClose: () => void;
 }) {
-  const [edit, setEdit] = useState<SpecEditInput | null>(preset ? { params: preset } : null);
+  const fixed = preset !== undefined || version !== undefined;
+  const [edit, setEdit] = useState<SpecEditInput | null>(fixed ? { version, params: preset ?? {} } : null);
   const [fieldError, setFieldError] = useState<ApiError | null>(null);
   return (
     <Modal title={title} onClose={onClose} wide>
@@ -50,7 +54,7 @@ export function SpecEditDialog({
             cluster={cluster}
             edit={edit}
             onBack={
-              preset
+              fixed
                 ? undefined
                 : (err) => {
                     setFieldError(err);
