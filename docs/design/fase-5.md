@@ -153,14 +153,14 @@ settings:
 backup: { at: "02:00", keep_days: 7 }
 ```
 
-De stappen staan in ingebouwde onderdelen in hetzelfde formaat als templates, `mariadb-galera` en `postgresql-patroni`, maar zonder VM's en rollen. De wachtwoorden voor de replicatie, SST en de REST-API van Patroni zijn `secret`-parameters die ClusterForge zelf maakt. Toepassen gaat met de bestaande uitroltaak, node voor node, met de gezondheidspoort na elke node. Die poort kijkt nu ook naar de database: Galera Synced met de verwachte clustergrootte, of Patroni running met een replica die bij is.
+De stappen staan in ingebouwde onderdelen in hetzelfde formaat als templates, `mariadb-galera` en `postgresql-patroni`, maar zonder VM's en rollen. De wachtwoorden voor de replicatie en de REST-API van Patroni zijn `secret`-parameters die ClusterForge zelf maakt. SST bij Galera heeft geen wachtwoord nodig: mariabackup logt in als de gebruiker `mysql` via de socket (`unix_socket`), die MariaDB zelf aanmaakt. Toepassen gaat met de bestaande uitroltaak, node voor node, met de gezondheidspoort na elke node. Die poort kijkt nu ook naar de database: Galera Synced met de verwachte clustergrootte, of Patroni running met een replica die bij is.
 
 De drift kent het onderdeel. Een met de hand aangepaste `60-galera.cnf` valt dus op, ook op een cluster met een baseline. Een nieuw cluster uit een template kan het onderdeel meteen krijgen: 'Cluster uitrollen' heeft een stap 'Database erbij', en de uitrol voegt het toe nadat de VM's klaar zijn.
 
 **MariaDB Galera.** De stappen installeren `mariadb-server`, `mariadb-backup` en `galera-4`, en schrijven `/etc/mysql/mariadb.conf.d/60-galera.cnf` met onder meer:
 
 - `wsrep_on`, de provider, `wsrep_cluster_name` (de slug) en `wsrep_cluster_address` met de adressen van de nodes;
-- `wsrep_sst_method=mariabackup` met een eigen SST-gebruiker;
+- `wsrep_sst_method=mariabackup` met `wsrep_sst_auth=mysql:`, dus via de socket en zonder wachtwoord op de node;
 - `binlog_format=ROW`, `innodb_autoinc_lock_mode=2` en de buffer pool uit het plan.
 
 De eerste node start het cluster met `galera_new_cluster`, eenmalig met een merkteken als `creates`. De andere nodes starten gewoon en halen alle data bij de eerste. Staat er al een MariaDB met eigen databases op een node, dan weigert het plan.
@@ -354,7 +354,7 @@ Na het afbouwen kan de regel van de app naar .180 weg. ClusterForge zegt welke r
 
 - **Geen vrije SQL.** De agent kent alleen de commando's hierboven, met gecontroleerde namen. Een fout in de server kan de agent dus geen willekeurige query laten uitvoeren.
 - **Geen gegevens uit tabellen.** Wat de agent terugstuurt, zijn namen, groottes, aantallen en toestanden. Een dump gaat van node naar node en komt nooit bij ClusterForge.
-- **Wachtwoorden.** Een nieuw wachtwoord staat één keer op het scherm en wordt niet bewaard. Een hash bij een verhuizing staat alleen versleuteld in de taak en verdwijnt als die klaar is. De wachtwoorden voor replicatie en SST zijn `secret`-parameters, versleuteld bewaard, gemaskeerd in plannen en drift, en op de node alleen in bestanden met modus 0600. Een wachtwoord gaat via stdin naar de database, nooit als argument dat `ps` laat zien.
+- **Wachtwoorden.** Een nieuw wachtwoord staat één keer op het scherm en wordt niet bewaard. Een hash bij een verhuizing staat alleen versleuteld in de taak en verdwijnt als die klaar is. De wachtwoorden voor replicatie zijn `secret`-parameters, versleuteld bewaard, gemaskeerd in plannen en drift, en op de node alleen in bestanden met modus 0600. Een wachtwoord gaat via stdin naar de database, nooit als argument dat `ps` laat zien.
 - **De tijdelijke gebruiker** mag alleen lezen, in één database, vanaf één adres. Een opruimtaak haalt een achtergebleven `cf_verhuizing_…` na een dag weg.
 - **Weghalen** van een database vraagt altijd de naam, en een database op het oude cluster pas na een laatste dump.
 - **Verkeer tussen de nodes** is niet versleuteld en blijft binnen het VLAN. TLS voor Galera en de replicatie staat onder 'Latere uitbreidingen'.
