@@ -160,8 +160,11 @@ type Lesson struct {
 	Steps []*Step
 	// MinNodes is hoeveel nodes de les nodig heeft.
 	MinNodes int
-	// Later: de les komt in een volgende versie, met de reden.
-	Later string
+	// MinServers is hoeveel servers de les nodig heeft.
+	MinServers int
+	// Lab: de les kan alleen op een cluster met omgeving lab, omdat ze iets
+	// stukmaakt.
+	Lab bool
 }
 
 // Lessons zijn alle lessen, op volgorde.
@@ -178,12 +181,14 @@ func Find(id string) (*Lesson, bool) {
 }
 
 // Unavailable zegt waarom een les nu niet kan, of niets als ze kan.
-func (l *Lesson) Unavailable(nodes int) string {
+func (l *Lesson) Unavailable(env Env) string {
 	switch {
-	case l.Later != "":
-		return l.Later
-	case nodes < l.MinNodes:
-		return fmt.Sprintf("Deze les heeft minstens %d nodes nodig; dit cluster heeft er %d.", l.MinNodes, nodes)
+	case l.Lab && env.Environment != "lab":
+		return fmt.Sprintf("Deze les zet een server uit en kan daarom alleen op een cluster met omgeving lab; dit cluster is %s.", env.Environment)
+	case env.Servers < l.MinServers:
+		return fmt.Sprintf("Deze les heeft minstens %d servers nodig; dit cluster heeft er %d. Zet de servers op %d op het tabblad Nodes.", l.MinServers, env.Servers, l.MinServers)
+	case env.Nodes < l.MinNodes:
+		return fmt.Sprintf("Deze les heeft minstens %d nodes nodig; dit cluster heeft er %d.", l.MinNodes, env.Nodes)
 	}
 	return ""
 }
@@ -194,8 +199,12 @@ type Env struct {
 	UserID    uuid.UUID
 	// VIP is het adres van de API en de apps.
 	VIP string
-	// Nodes is het aantal Kubernetes-nodes uit de laatste sync.
-	Nodes int
+	// Nodes is het aantal Kubernetes-nodes uit de laatste sync, en Servers
+	// hoeveel daarvan de rol control-plane hebben.
+	Nodes   int
+	Servers int
+	// Environment is de omgeving van het cluster: lab, test of prod.
+	Environment string
 }
 
 // Engine controleert de lessen.
@@ -226,7 +235,7 @@ func (e *Engine) List(ctx context.Context, env Env) ([]Summary, error) {
 	}
 	out := make([]Summary, 0, len(lessons))
 	for _, l := range lessons {
-		s := Summary{Lesson: l, Unavailable: l.Unavailable(env.Nodes)}
+		s := Summary{Lesson: l, Unavailable: l.Unavailable(env)}
 		var last time.Time
 		for _, r := range rows {
 			if r.Lesson != l.ID || !l.has(r.Step) {
@@ -305,7 +314,7 @@ func (e *Engine) Check(ctx context.Context, env Env, l *Lesson, answers map[stri
 		}
 	}
 	x := &run{ctx: ctx, kube: e.kube, env: env, data: map[string]Data{}}
-	res := Result{Summary: Summary{Lesson: l, Unavailable: l.Unavailable(env.Nodes)}}
+	res := Result{Summary: Summary{Lesson: l, Unavailable: l.Unavailable(env)}}
 	for _, r := range have {
 		var d Data
 		_ = json.Unmarshal(r.Data, &d)

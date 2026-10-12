@@ -194,7 +194,7 @@ func (s *Service) remediate(ctx context.Context, j *jobs.Job, st *jobs.Step, p P
 // apply past de stappen toe op een node die een eventueel VIP kan
 // afstaan. De stappen liggen vast voor het eerste commando de deur uitgaat.
 func (s *Service) apply(ctx context.Context, j *jobs.Job, st *jobs.Step, p Plan, n *PlanNode, ns *nodeState, ids []string, steps []templates.Step) error {
-	if err := s.takeover(ctx, p.ClusterID, n, st); err != nil {
+	if err := s.takeover(ctx, p, n, st); err != nil {
 		return err
 	}
 	if ns.AppliedAt == nil {
@@ -248,6 +248,18 @@ func (s *Service) settle(ctx context.Context, st *jobs.Step, p Plan, n *PlanNode
 	if err != nil {
 		return err
 	}
+	// Een nieuwe node die nog niet aan de beurt was, draait de software van
+	// de template nog niet; de controles wachten niet op hem.
+	waiting := map[string]bool{}
+	for _, nn := range p.NewNodes {
+		if nn.NodeID == n.NodeID {
+			continue
+		}
+		if row, err := s.q.GetNode(ctx, nn.NodeID); err == nil && row.Node.Lifecycle == store.NodeLifecycleProvisioning {
+			waiting[nn.Hostname] = true
+		}
+	}
+	c.Nodes = slices.DeleteFunc(c.Nodes, func(x templates.NodeInfo) bool { return waiting[x.Hostname] })
 	if err := s.dep.Check(ctx, p.ClusterID, d.Template, c, s.CheckTimeout, st.Logf, flush); err != nil {
 		return fmt.Errorf("controle na %s: %w; de taak stopt hier", after, err)
 	}
@@ -399,7 +411,8 @@ func (s *Service) activate(ctx context.Context, j *jobs.Job, st *jobs.Step, p Pl
 
 // takeover controleert dat een andere node de VIP's van deze node kan
 // overnemen, als hij er nu een heeft.
-func (s *Service) takeover(ctx context.Context, clusterID uuid.UUID, n *PlanNode, st *jobs.Step) error {
+func (s *Service) takeover(ctx context.Context, p Plan, n *PlanNode, st *jobs.Step) error {
+	clusterID := p.ClusterID
 	rt, err := s.q.GetNodeRuntime(ctx, n.NodeID)
 	if err != nil {
 		return err
@@ -421,12 +434,24 @@ func (s *Service) takeover(ctx context.Context, clusterID uuid.UUID, n *PlanNode
 	if err != nil {
 		return err
 	}
+	others := 0
 	for _, peer := range peers {
-		if peer.Lifecycle == store.NodeLifecycleActive && peer.HeartbeatAt != nil && time.Since(*peer.HeartbeatAt) <= s.Fresh &&
-			health.ServiceStates(peer.Services)["keepalived"] == "active" {
+		state, has := health.ServiceStates(peer.Services)["keepalived"]
+		if has && !slices.Contains(p.newIDs(), peer.ID) {
+			others++
+		}
+		if peer.Lifecycle == store.NodeLifecycleActive && peer.HeartbeatAt != nil && time.Since(*peer.HeartbeatAt) <= s.Fresh && state == "active" {
 			st.Logf("%s heeft %s; %s kan het overnemen", n.Hostname, strings.Join(held, ", "), peer.Hostname)
 			return nil
 		}
+	}
+	// Eén node met keepalived die er nodes bij krijgt, zoals een
+	// Kubernetes-cluster dat van één naar drie servers gaat: zonder deze
+	// stap kunnen de nieuwe nodes het VIP nooit delen.
+	if others == 0 && len(p.NewNodes) > 0 {
+		st.Logf("%s is de enige node met keepalived en er komen nodes bij; %s blijft op %s en valt hoogstens even weg als keepalived herlaadt",
+			n.Hostname, strings.Join(held, ", "), n.Hostname)
+		return nil
 	}
 	return fmt.Errorf("%s heeft %s en geen andere node kan het nu overnemen: er is geen actieve, online node waarop keepalived draait. Er is niets toegepast",
 		n.Hostname, strings.Join(held, ", "))

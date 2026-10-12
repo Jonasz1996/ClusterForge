@@ -1332,6 +1332,76 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/clusters/{clusterId}/spec/edit": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * De parameters van een cluster uit een template om te wijzigen
+         * @description Met hun waarden van nu, voor de huidige templateversie of voor version. Een cluster dat Git volgt,
+         *     geeft het formulier met blocked: daar is cluster.yaml de bron.
+         */
+        get: operations["getClusterSpecEdit"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/clusters/{clusterId}/spec/plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Het plan van een wijziging van de spec (admin); er verandert niets
+         * @description Hetzelfde plan als bij een wijziging uit Git: wat er per node verandert en welke nodes erbij komen.
+         *     409 met git_managed als het cluster Git volgt, no_change als er niets verandert. Minder nodes kan niet:
+         *     een worker van Kubernetes haal je weg met remove-node.
+         */
+        post: operations["planClusterSpec"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/clusters/{clusterId}/spec": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Een wijziging van de spec toepassen (admin)
+         * @description Alleen als het plan nog dezelfde hash heeft; anders 409 met plan_changed. Maakt een nieuwe revisie met bron ui
+         *     en, als er op de nodes iets verandert, een taak cluster.apply. Op prod vraagt het tweestapsverificatie en de slug.
+         */
+        post: operations["applyClusterSpec"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/clusters/{clusterId}/backup-policy": {
         parameters: {
             query?: never;
@@ -3167,6 +3237,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/kubernetes/clusters/{clusterId}/remove-node": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Een worker weghalen (admin); wordt een taak
+         * @description Leegmaken, de VM uitzetten, de node uit Kubernetes halen, de VM verwijderen en de node uit ClusterForge, met een
+         *     nieuwe revisie van de spec met één worker minder. Alleen een worker in een cluster uit een template dat geen Git volgt;
+         *     een server weghalen geeft 409. Met preview=true komt alleen het plan terug. Houden pods het leegmaken tegen, dan
+         *     antwoordt de server 409 met code needs_force. Op prod vraagt het tweestapsverificatie en de slug in confirm.
+         */
+        post: operations["removeKubeNode"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -3391,6 +3486,30 @@ export interface components {
             evict: components["schemas"]["KubeDrainPod"][];
             skip: components["schemas"]["KubeDrainPod"][];
             blocked: components["schemas"]["KubeDrainPod"][];
+        };
+        KubeRemoveNodeInput: {
+            /** @description De naam van de node in Kubernetes */
+            node: string;
+            /** @description Alleen het plan tonen */
+            preview?: boolean;
+            /** @description Ook pods zonder eigenaar en met emptyDir uitzetten; die zijn dan weg */
+            force?: boolean;
+            /** @description De slug van het cluster; nodig op prod */
+            confirm?: string;
+        };
+        KubeRemoveNodePlan: {
+            node: string;
+            /** Format: uuid */
+            node_id: string;
+            hostname: string;
+            /** @description Niet Ready: de node gaat op cordon in plaats van leeg, want zijn pods stoppen daar nooit netjes */
+            ready: boolean;
+            vmid: number;
+            /** @description De Proxmox-host van de VM */
+            host: string;
+            /** @description Het aantal workers daarna */
+            workers: number;
+            drain: components["schemas"]["KubeDrainPlan"];
         };
         KubeApplyInput: {
             /** @description Eén of meer objecten, gescheiden door ---; hoogstens 50 objecten en 512 kB */
@@ -7276,6 +7395,8 @@ export interface components {
         GitReapplyInput: {
             /** @description Op prod de slug van het cluster */
             confirm?: string;
+            /** @description Het adres van ClusterForge voor nodes die nog moeten aanmelden; leeg neemt dat van de koppeling met Git */
+            server_url?: string;
         };
         GitDecision: {
             change: components["schemas"]["GitChange"];
@@ -7343,6 +7464,56 @@ export interface components {
             vip?: string;
             vrid?: number;
             proxmox?: string;
+        };
+        SpecEditParam: {
+            param: components["schemas"]["TemplateParam"];
+            /** @description De waarde nu; null bij een geheim of een lege optionele waarde */
+            value: unknown;
+            /** @description Waarom de parameter niet te wijzigen is; leeg als het kan */
+            locked: string;
+        };
+        SpecEditForm: {
+            template: string;
+            version: string;
+            /** @description De versies van de template in deze server */
+            versions: string[];
+            params: components["schemas"]["SpecEditParam"][];
+            /** @description Waarom de spec hier niet te wijzigen is, zoals bij een cluster dat Git volgt; leeg als het kan */
+            blocked: string;
+        };
+        SpecEditInput: {
+            /** @description De templateversie; leeg houdt de huidige */
+            version?: string;
+            /** @description De parameters die veranderen; de andere houden hun waarde */
+            params: {
+                [key: string]: unknown;
+            };
+        };
+        SpecEditPlan: {
+            plan: components["schemas"]["GitPlan"];
+            /** @description Toepassen vraagt hem terug; zo gebeurt wat je zag */
+            hash: string;
+            /** @description Het cluster is prod: toepassen vraagt de slug */
+            needs_confirmation: boolean;
+            /** @description Een eerdere revisie is niet op alle nodes toegepast */
+            full_apply: boolean;
+            /** @description Waarom toepassen nu niet kan; leeg als het kan */
+            blocked: string;
+            /** @description render_failed, membership of dhcp_growth; leeg als toepassen kan */
+            blocked_code: string;
+        };
+        SpecApplyInput: components["schemas"]["SpecEditInput"] & {
+            /** @description De hash van het plan dat je bekeek */
+            hash: string;
+            /** @description Het adres van ClusterForge waar nieuwe nodes zich aanmelden; nodig als er nodes bijkomen */
+            server_url?: string;
+            /** @description Op prod de slug van het cluster */
+            confirm?: string;
+        };
+        SpecApplied: {
+            revision: number;
+            /** @description null als er op geen node iets verandert */
+            job: components["schemas"]["Job"] | null;
         };
     };
     responses: {
@@ -9645,6 +9816,106 @@ export interface operations {
             };
             401: components["responses"]["Error"];
             404: components["responses"]["Error"];
+        };
+    };
+    getClusterSpecEdit: {
+        parameters: {
+            query?: {
+                /** @description Een andere versie van de template */
+                version?: string;
+            };
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Het formulier */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpecEditForm"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    planClusterSpec: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SpecEditInput"];
+            };
+        };
+        responses: {
+            /** @description Het plan */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpecEditPlan"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    applyClusterSpec: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SpecApplyInput"];
+            };
+        };
+        responses: {
+            /** @description Toegepast; op geen node verandert iets */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpecApplied"];
+                };
+            };
+            /** @description De taak die de revisie toepast staat in de wachtrij */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpecApplied"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
         };
     };
     getBackupPolicy: {
@@ -12268,6 +12539,48 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["KubeDrainPlan"];
+                };
+            };
+            /** @description Taak aangemaakt */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Job"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    removeKubeNode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["KubeRemoveNodeInput"];
+            };
+        };
+        responses: {
+            /** @description Het plan */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KubeRemoveNodePlan"];
                 };
             };
             /** @description Taak aangemaakt */

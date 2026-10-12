@@ -36,8 +36,10 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/failover"
 	"github.com/Jonasz1996/clusterforge/internal/gitops"
 	"github.com/Jonasz1996/clusterforge/internal/incidents"
+	"github.com/Jonasz1996/clusterforge/internal/inventory"
 	"github.com/Jonasz1996/clusterforge/internal/jobs"
 	"github.com/Jonasz1996/clusterforge/internal/kube"
+	"github.com/Jonasz1996/clusterforge/internal/kubenodes"
 	"github.com/Jonasz1996/clusterforge/internal/lifecycle"
 	"github.com/Jonasz1996/clusterforge/internal/live"
 	"github.com/Jonasz1996/clusterforge/internal/metrics"
@@ -157,6 +159,11 @@ func newTestEnv(t *testing.T) *testEnv {
 	kub.EnableDrain(runner, ev)
 	dep.Kube = kub
 	life.Kube, life.KubeReadyTimeout = kub, 5*time.Second
+	kinv := inventory.NewService(pool, ev)
+	kinv.Disconnect = bus.Disconnect
+	kn := kubenodes.NewService(pool, ev, runner, kub, pve, kinv, dep)
+	kn.Changed = eval.Kick
+	kn.Poll, kn.ShutdownTimeout = 20*time.Millisecond, 2*time.Second
 	bk := backups.NewService(pool, ev, log, pve)
 	bk.Poll, bk.ConnPoll, bk.BootTimeout, bk.NoAgentWait = 20*time.Millisecond, 20*time.Millisecond, 3*time.Second, 100*time.Millisecond
 	bk.AgentTimeout, bk.LockWait, bk.VIPWait = 2*time.Second, time.Second, 3*time.Second
@@ -225,7 +232,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	api := New(Deps{
 		Config: cfg, Log: log, Pool: pool, Auth: a, Bus: bus, Hub: hub, Proxmox: pve, Jobs: runner, Lifecycle: life,
 		Deploy: dep, Backups: bk, Drift: drf, Failover: fo, Disaster: dis, Deps: dps, Rollout: ro, GitOps: git, Assistant: asst,
-		Risk: rsk, Topo: tp, Docs: dcs, Reports: rep, Kube: kub, Version: "test",
+		Risk: rsk, Topo: tp, Docs: dcs, Reports: rep, Kube: kub, KubeNodes: kn, Version: "test",
 	})
 	srv := httptest.NewServer(api.Handler())
 	t.Cleanup(srv.Close)

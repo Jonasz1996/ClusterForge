@@ -38,10 +38,11 @@ type fleet struct {
 	seq   int
 	hosts map[string]*agenttest.Host
 	stops []func()
+	halts map[string]func()
 }
 
 func newFleet(t *testing.T, addrs map[string]string) *fleet {
-	f := &fleet{t: t, addrs: addrs, hosts: map[string]*agenttest.Host{}}
+	f := &fleet{t: t, addrs: addrs, hosts: map[string]*agenttest.Host{}, halts: map[string]func(){}}
 	t.Cleanup(func() {
 		f.mu.Lock()
 		stops := slices.Clone(f.stops)
@@ -113,10 +114,22 @@ func (f *fleet) boot(_ int, name, file, content string) {
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() { defer close(done); _ = ag.Run(ctx) }()
+	stop := sync.OnceFunc(func() { cancel(); <-done })
 	f.mu.Lock()
 	f.hosts[name] = h
-	f.stops = append(f.stops, func() { cancel(); <-done })
+	f.stops = append(f.stops, stop)
+	f.halts[name] = stop
 	f.mu.Unlock()
+}
+
+// halt zet de agent van een machine stop, zoals als zijn VM uitgaat.
+func (f *fleet) halt(name string) {
+	f.mu.Lock()
+	stop := f.halts[name]
+	f.mu.Unlock()
+	if stop != nil {
+		stop()
+	}
 }
 
 type template struct {

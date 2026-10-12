@@ -23,11 +23,14 @@ type gitDecision struct {
 // koppelt het en laat de lus elke 50 ms pollen.
 func gitLinked(t *testing.T, e *testEnv, c *client, clusterID string) (*ghfake.Server, string, func(string) string) {
 	t.Helper()
+	var cl cluster
+	c.do("GET", "/api/v1/clusters/"+clusterID, nil, &cl)
+	path := "clusters/" + cl.Slug + "/cluster.yaml"
 	_, _, export := c.get("/api/v1/clusters/" + clusterID + "/git/export")
 	gh := ghfake.New("jonas", "cf-config", "github_pat_test")
 	srv := httptest.NewServer(gh)
 	t.Cleanup(srv.Close)
-	gh.Commit("Webcluster uit ClusterForge", "Jonas", map[string]string{"clusters/web/cluster.yaml": export})
+	gh.Commit(cl.Name+" uit ClusterForge", "Jonas", map[string]string{path: export})
 	in := map[string]any{"api_url": srv.URL, "repository": "jonas/cf-config", "token": "github_pat_test"}
 	if s := c.do("PUT", "/api/v1/gitops/repo", in, nil); s != 200 {
 		t.Fatalf("repository koppelen: %d", s)
@@ -37,14 +40,14 @@ func gitLinked(t *testing.T, e *testEnv, c *client, clusterID string) (*ghfake.S
 	done := make(chan struct{})
 	go func() { defer close(done); e.git.Run(ctx) }()
 	t.Cleanup(func() { stop(); <-done })
-	eventually(t, "export gelezen", func() bool { return c.gitFiles()["clusters/web/cluster.yaml"].State == "unlinked" })
+	eventually(t, "export gelezen", func() bool { return c.gitFiles()[path].State == "unlinked" })
 	if s := c.do("POST", "/api/v1/clusters/"+clusterID+"/git/link", nil, nil); s != 200 {
 		t.Fatalf("cluster koppelen: %d", s)
 	}
 	// commit zet een nieuw bestand in Git en wacht op het plan ervan.
 	commit := func(content string) string {
 		t.Helper()
-		sha := gh.Commit("Wijziging", "Jonas", map[string]string{"clusters/web/cluster.yaml": content})
+		sha := gh.Commit("Wijziging", "Jonas", map[string]string{path: content})
 		eventually(t, "plan voor "+sha[:7], func() bool {
 			cs := c.gitChanges("?status=pending")
 			return len(cs) == 1 && cs[0].Commit.SHA == sha

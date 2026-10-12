@@ -160,12 +160,14 @@ export function useRejectGitChange(changeId: string) {
   });
 }
 
-// useReapplyCluster past de huidige revisie opnieuw toe na een mislukte toepassing.
+// useReapplyCluster past de huidige revisie opnieuw toe na een mislukte
+// toepassing. serverUrl is het adres waar nodes die nog moeten aanmelden zich
+// melden, voor een cluster dat geen Git volgt.
 export function useReapplyCluster(clusterId: string) {
   const invalidate = useInvalidate();
   return useMutation({
-    mutationFn: async (confirm?: string) =>
-      unwrap(await api.POST("/clusters/{clusterId}/git/reapply", { params: { path: { clusterId } }, body: { confirm } })),
+    mutationFn: async ({ confirm, serverUrl }: { confirm?: string; serverUrl?: string }) =>
+      unwrap(await api.POST("/clusters/{clusterId}/git/reapply", { params: { path: { clusterId } }, body: { confirm, server_url: serverUrl } })),
     onSuccess: invalidate,
   });
 }

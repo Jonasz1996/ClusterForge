@@ -148,7 +148,7 @@ func TestKubernetesLessons(t *testing.T) {
 	}
 	sums := list(c)
 	if len(sums) != 10 || sums["verkennen"].Number != 1 || sums["verkennen"].Steps != 4 || sums["onderhoud"].Unavailable != "" ||
-		sums["node-erbij"].Unavailable == "" || sums["server-valt-uit"].Unavailable == "" {
+		sums["node-erbij"].Unavailable != "" || !strings.Contains(sums["server-valt-uit"].Unavailable, "minstens 3 servers nodig; dit cluster heeft er 1") {
 		t.Fatalf("lessen: %+v", sums)
 	}
 
@@ -431,11 +431,7 @@ func TestKubernetesLessons(t *testing.T) {
 		t.Fatal("web is weg")
 	}
 
-	// Een les die later komt, een onbekende les, en geen Kubernetes.
-	l = check("node-erbij", nil)
-	if l.Unavailable == "" || len(l.Steps) != 0 || l.FinishedAt != nil {
-		t.Fatalf("les 9: %+v", l)
-	}
+	// Een onbekende les, en geen Kubernetes.
 	if s := c.do("POST", base+"/lessons/bestaat-niet/check", map[string]any{}, nil); s != http.StatusNotFound {
 		t.Fatalf("onbekende les: %d", s)
 	}
@@ -461,6 +457,77 @@ func TestKubernetesLessons(t *testing.T) {
 	}
 	if list(c)["verkennen"].Done != 4 {
 		t.Fatal("de viewer haalde de voortgang van de admin weg")
+	}
+
+	// Les 9: een node erbij, en pods die erop komen.
+	l = check("node-erbij", nil)
+	want(l, "toevoegen:current", "pods:locked", "weghalen:locked")
+	detail(l, "Er is nog geen node bij gekomen; je cluster heeft er 2.")
+	const extra = "leren-worker-02"
+	fake.Add(kubefake.Node(kubefake.NodeSpec{Name: extra, IP: "10.0.40.13", NotReady: true}))
+	changed()
+	l = check("node-erbij", nil)
+	detail(l, extra+" is erbij, maar nog niet Ready")
+	fake.Add(kubefake.Node(kubefake.NodeSpec{Name: extra, IP: "10.0.40.13"}))
+	changed()
+	l = check("node-erbij", nil)
+	want(l, "toevoegen:done", "pods:current", "weghalen:locked")
+	if l.Steps[0].Detail != extra+" is erbij en Ready. Je cluster heeft nu 3 nodes." || l.current().Title != "Zet pods op "+extra {
+		t.Fatalf("les 9: %+v", l.Steps[:2])
+	}
+	detail(l, "Nog geen pod van web op "+extra)
+	fake.Add(webPod("web-5d9c-f", extra))
+	changed()
+	l = check("node-erbij", nil)
+	want(l, "toevoegen:done", "pods:done", "weghalen:current")
+	if !strings.HasPrefix(l.Steps[1].Detail, "1 pod van web draait op "+extra+".") ||
+		!slices.Equal(l.current().Kubectl, []string{"sudo kubectl drain " + extra + " --ignore-daemonsets --delete-emptydir-data", "sudo kubectl delete node " + extra}) {
+		t.Fatalf("les 9: %+v", l.Steps[1:])
+	}
+	l = check("node-erbij", map[string]string{"weghalen": "Gelezen"})
+	want(l, "toevoegen:done", "pods:done", "weghalen:done")
+
+	// Les 10 kan pas met drie servers: de meerderheid, een server uit, en
+	// weer aan.
+	server2, server3 := "leren-server-02", "leren-server-03"
+	fake.Add(kubefake.Node(kubefake.NodeSpec{Name: server2, IP: "10.0.40.14", Server: true}), kubefake.Node(kubefake.NodeSpec{Name: server3, IP: "10.0.40.15", Server: true}))
+	changed()
+	if err := e.kube.Sync(ctx, uuid.MustParse(cl.ID)); err != nil {
+		t.Fatal(err)
+	}
+	if u := list(c)["server-valt-uit"].Unavailable; u != "" {
+		t.Fatalf("les 10 met drie servers: %q", u)
+	}
+	l = check("server-valt-uit", map[string]string{"meerderheid": "2"})
+	want(l, "meerderheid:current", "uitzetten:locked", "api:locked", "aanzetten:locked")
+	detail(l, "klopt niet")
+	l = check("server-valt-uit", map[string]string{"meerderheid": "één"})
+	want(l, "meerderheid:done", "uitzetten:current", "api:locked", "aanzetten:locked")
+	if l.Steps[0].Detail != "Juist: met 3 servers is de meerderheid 2, dus er mag er 1 uitvallen." ||
+		!strings.Contains(l.current().Text[0], "bijvoorbeeld `"+server+"`") || !strings.Contains(l.current().Text[1], "Stond het VIP 10.0.40.100 op") {
+		t.Fatalf("les 10: %+v", l.Steps[:2])
+	}
+	detail(l, "Alle servers zijn nog Ready.")
+	fake.Add(kubefake.Node(kubefake.NodeSpec{Name: server2, IP: "10.0.40.14", Server: true, NotReady: true}))
+	changed()
+	l = check("server-valt-uit", map[string]string{"api": "3"})
+	want(l, "meerderheid:done", "uitzetten:done", "api:current", "aanzetten:locked")
+	detail(l, "klopt niet")
+	if l.Steps[1].Detail != server2+" is NotReady, en de API antwoordt nog: 2 van de 3 servers draaien." || !strings.Contains(l.current().Text[1], "De pods op "+server2) {
+		t.Fatalf("les 10: %+v", l.Steps[1:3])
+	}
+	l = check("server-valt-uit", map[string]string{"api": "twee"})
+	want(l, "meerderheid:done", "uitzetten:done", "api:done", "aanzetten:current")
+	detail(l, server2+" is nog NotReady.")
+	if l.current().Title != "Zet "+server2+" weer aan" {
+		t.Fatalf("aanzetten: %+v", l.current())
+	}
+	fake.Add(kubefake.Node(kubefake.NodeSpec{Name: server2, IP: "10.0.40.14", Server: true}))
+	changed()
+	l = check("server-valt-uit", nil)
+	want(l, "meerderheid:done", "uitzetten:done", "api:done", "aanzetten:done")
+	if l.FinishedAt == nil || l.Steps[3].Detail != server2+" is weer Ready." {
+		t.Fatalf("les 10 af: %+v", l)
 	}
 
 	// Zonder agent kan het cluster niet gelezen worden: de les blijft

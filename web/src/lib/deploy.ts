@@ -72,3 +72,52 @@ export function useSpecHistory(clusterId: string, enabled = true) {
     enabled,
   });
 }
+
+export type SpecEditForm = components["schemas"]["SpecEditForm"];
+export type SpecEditInput = components["schemas"]["SpecEditInput"];
+export type SpecEditPlan = components["schemas"]["SpecEditPlan"];
+export type SpecApplyInput = components["schemas"]["SpecApplyInput"];
+
+// useSpecEditForm geeft de parameters van een cluster om te wijzigen, met
+// hun waarden van nu; version kiest een andere versie van de template.
+export function useSpecEditForm(clusterId: string, version = "", enabled = true) {
+  return useQuery({
+    queryKey: ["clusters", clusterId, "spec-edit", version],
+    queryFn: async () =>
+      unwrap(
+        await api.GET("/clusters/{clusterId}/spec/edit", {
+          params: { path: { clusterId }, query: version ? { version } : {} },
+        }),
+      ),
+    enabled: enabled && clusterId !== "",
+    retry: false,
+  });
+}
+
+// useSpecPlan plant een wijziging van de spec; er verandert nog niets.
+export function useSpecPlan(clusterId: string, edit: SpecEditInput | null) {
+  return useQuery({
+    queryKey: ["spec-plan", clusterId, edit],
+    queryFn: async () =>
+      unwrap(await api.POST("/clusters/{clusterId}/spec/plan", { params: { path: { clusterId } }, body: edit! })),
+    enabled: clusterId !== "" && edit !== null,
+    retry: false,
+    staleTime: Infinity,
+  });
+}
+
+// useApplySpec past een geplande wijziging toe: een nieuwe revisie en, als
+// er op de nodes iets verandert, een taak.
+export function useApplySpec(clusterId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: SpecApplyInput) =>
+      unwrap(await api.POST("/clusters/{clusterId}/spec", { params: { path: { clusterId } }, body })),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["jobs"] });
+      void qc.invalidateQueries({ queryKey: ["clusters"] });
+      void qc.invalidateQueries({ queryKey: ["nodes"] });
+      void qc.invalidateQueries({ queryKey: ["kube", clusterId] });
+    },
+  });
+}

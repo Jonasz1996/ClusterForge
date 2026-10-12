@@ -439,27 +439,50 @@ func (s *Service) DeleteNode(ctx context.Context, actor events.Actor, id uuid.UU
 		if linked, err := linkedCluster(ctx, q, cur.ClusterID); err != nil || linked {
 			return cmp.Or(err, gitManaged("Welke nodes erin zitten"))
 		}
-		if a, err := q.GetActiveAgentByNode(ctx, id); err == nil {
-			agentKey = a.NkeyPublic
-		} else if !errors.Is(err, pgx.ErrNoRows) {
-			return err
-		}
-		payload := map[string]any{"hostname": cur.Hostname}
-		if err := usedBy(ctx, q, payload, nil, &id); err != nil {
-			return err
-		}
-		if _, err := q.DeleteNode(ctx, id); err != nil {
-			return err
-		}
-		return s.ev.Write(ctx, q, events.Event{
-			Actor: actor, SubjectType: "node", SubjectID: id.String(), ClusterID: cur.ClusterID,
-			Action: "node.deleted", Payload: payload,
-		})
+		agentKey, err = s.DeleteNodeTx(ctx, q, actor, id, nil)
+		return err
 	})
+	s.Disconnected(agentKey, err)
+	return err
+}
+
+// DeleteNodeTx verwijdert een node in een transactie, ook van een cluster
+// dat Git volgt; de aanroeper zorgt dat de spec klopt. Het geeft de sleutel
+// van zijn agent, die na de commit met Disconnected losgekoppeld wordt.
+// extra komt in de payload van node.deleted.
+func (s *Service) DeleteNodeTx(ctx context.Context, q *store.Queries, actor events.Actor, id uuid.UUID, extra map[string]any) (string, error) {
+	cur, err := q.LockNode(ctx, id)
+	if err != nil {
+		return "", err
+	}
+	agentKey := ""
+	if a, err := q.GetActiveAgentByNode(ctx, id); err == nil {
+		agentKey = a.NkeyPublic
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return "", err
+	}
+	payload := map[string]any{"hostname": cur.Hostname}
+	for k, v := range extra {
+		payload[k] = v
+	}
+	if err := usedBy(ctx, q, payload, nil, &id); err != nil {
+		return "", err
+	}
+	if _, err := q.DeleteNode(ctx, id); err != nil {
+		return "", err
+	}
+	return agentKey, s.ev.Write(ctx, q, events.Event{
+		Actor: actor, SubjectType: "node", SubjectID: id.String(), ClusterID: cur.ClusterID,
+		Action: "node.deleted", Payload: payload,
+	})
+}
+
+// Disconnected koppelt de agent van een verwijderde node los als de
+// transactie gelukt is.
+func (s *Service) Disconnected(agentKey string, err error) {
 	if err == nil && agentKey != "" && s.Disconnect != nil {
 		s.Disconnect(agentKey)
 	}
-	return err
 }
 
 func nodeFields(n store.Node) NodeFields {

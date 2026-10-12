@@ -31,6 +31,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/jobs"
 	"github.com/Jonasz1996/clusterforge/internal/kube"
 	"github.com/Jonasz1996/clusterforge/internal/kubelessons"
+	"github.com/Jonasz1996/clusterforge/internal/kubenodes"
 	"github.com/Jonasz1996/clusterforge/internal/lifecycle"
 	"github.com/Jonasz1996/clusterforge/internal/live"
 	"github.com/Jonasz1996/clusterforge/internal/metrics"
@@ -73,6 +74,7 @@ type Server struct {
 	docs         *docs.Service
 	reports      *reports.Service
 	kube         *kube.Service
+	kubeNodes    *kubenodes.Service
 	lessons      *kubelessons.Engine
 	version      string
 	loginLimiter *ipLimiter
@@ -125,8 +127,10 @@ type Deps struct {
 	// Reports maakt de rapporten op /rapporten.
 	Reports *reports.Service
 	// Kube praat met de Kubernetes-clusters via de kube-brug.
-	Kube    *kube.Service
-	Version string
+	Kube *kube.Service
+	// KubeNodes haalt workers weg uit een Kubernetes-cluster.
+	KubeNodes *kubenodes.Service
+	Version   string
 }
 
 func New(d Deps) *Server {
@@ -168,6 +172,7 @@ func New(d Deps) *Server {
 		docs:          d.Docs,
 		reports:       d.Reports,
 		kube:          d.Kube,
+		kubeNodes:     d.KubeNodes,
 	}
 	s.assistant.Tools = s.assistantTools()
 	s.lessons = kubelessons.New(s.kube, s.q)

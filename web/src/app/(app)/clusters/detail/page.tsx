@@ -160,7 +160,7 @@ function ClusterDetailInner() {
           <RecentChangesCard kind="cluster" id={id} />
           <ClusterRiskCard clusterId={id} isAdmin={isAdmin} />
           <ClusterDriftCard clusterId={id} isAdmin={isAdmin} />
-          {cluster.data.template_name && <SpecCard clusterId={id} />}
+          {cluster.data.template_name && <SpecCard cluster={cluster.data} isAdmin={isAdmin} />}
           {cluster.data.template_name && <GitCard c={cluster.data} isAdmin={isAdmin} />}
           <VipsCard c={cluster.data} isAdmin={isAdmin} />
           <ClusterDepsCard clusterId={id} isAdmin={isAdmin} />

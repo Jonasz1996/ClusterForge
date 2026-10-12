@@ -35,24 +35,28 @@ func (s *Server) ListTemplates(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, list[gen.Template]{items})
 }
 
-func toAPITemplate(t *templates.Template) gen.Template {
+func toAPIParam(p templates.Param) gen.TemplateParam {
 	str := func(v any) nullable.Nullable[string] {
 		if v == nil {
 			return nullable.NewNullNullable[string]()
 		}
 		return nullable.NewNullableWithValue(fmt.Sprint(v))
 	}
+	return gen.TemplateParam{
+		Name: p.Name, Type: gen.TemplateParamType(p.Type), Label: p.Label, Help: p.Help,
+		Optional: p.Optional || p.Type == "secret", Immutable: p.Immutable, Default: str(p.Default), Min: str(p.Min), Max: str(p.Max),
+		Choices: append([]int{}, p.Choices...),
+	}
+}
+
+func toAPITemplate(t *templates.Template) gen.Template {
 	out := gen.Template{
 		Name: t.Name, Version: t.Version, Title: t.Title, Description: strings.TrimSpace(t.Description),
 		ClusterType: gen.ClusterType(t.ClusterType), Params: []gen.TemplateParam{}, Roles: []gen.TemplateRole{},
 		Services: []gen.TemplateService{},
 	}
 	for _, p := range t.Params {
-		out.Params = append(out.Params, gen.TemplateParam{
-			Name: p.Name, Type: gen.TemplateParamType(p.Type), Label: p.Label, Help: p.Help,
-			Optional: p.Optional || p.Type == "secret", Immutable: p.Immutable, Default: str(p.Default), Min: str(p.Min), Max: str(p.Max),
-			Choices: append([]int{}, p.Choices...),
-		})
+		out.Params = append(out.Params, toAPIParam(p))
 	}
 	for _, role := range t.Roles {
 		tr := gen.TemplateRole{Name: role.Name, Count: nullable.NewNullNullable[int](), CountParam: nullable.NewNullNullable[string]()}

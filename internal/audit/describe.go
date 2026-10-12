@@ -745,6 +745,12 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 			s += ", ook zonder eigenaar"
 		}
 		return s
+	case "kube.node_removed":
+		s := fmt.Sprintf("Worker %s weggehaald: leeggemaakt, uit Kubernetes en VM %s verwijderd", str(p, "node"), num(p["vmid"]))
+		if r := num(p["revision"]); r != "" && r != "0" {
+			s += "; revisie " + r + " van de specificatie"
+		}
+		return s
 	case "kube.applied":
 		var parts []string
 		if c := list(p["created"]); c != "" {

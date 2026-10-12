@@ -170,6 +170,7 @@ export function ReapplyDialog({
   slug,
   prod,
   revision,
+  gitManaged,
   onClose,
 }: {
   clusterId: string;
@@ -177,6 +178,7 @@ export function ReapplyDialog({
   slug: string;
   prod: boolean;
   revision: number;
+  gitManaged: boolean;
   onClose: () => void;
 }) {
   const router = useRouter();
@@ -202,7 +204,13 @@ export function ReapplyDialog({
           <Button
             type="button"
             disabled={!ok || reapply.isPending}
-            onClick={() => reapply.mutate(prod ? confirm : undefined, { onSuccess: (j) => router.push(`/taken/detail?id=${j.id}`) })}
+            onClick={() =>
+              reapply.mutate(
+                // Zonder Git melden nieuwe nodes zich aan op het adres van deze pagina.
+                { confirm: prod ? confirm : undefined, serverUrl: gitManaged ? undefined : window.location.origin },
+                { onSuccess: (j) => router.push(`/taken/detail?id=${j.id}`) },
+              )
+            }
           >
             {reapply.isPending ? "Starten…" : "Opnieuw toepassen"}
           </Button>

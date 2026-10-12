@@ -26,6 +26,7 @@ export type KubeActionInput = components["schemas"]["KubeActionInput"];
 export type KubeRevision = components["schemas"]["KubeRevision"];
 export type KubeDrainPlan = components["schemas"]["KubeDrainPlan"];
 export type KubeDrainPod = components["schemas"]["KubeDrainPod"];
+export type KubeRemoveNodePlan = components["schemas"]["KubeRemoveNodePlan"];
 export type KubeApplyInput = components["schemas"]["KubeApplyInput"];
 export type KubeApplyResult = components["schemas"]["KubeApplyResult"];
 export type KubeApplyObject = components["schemas"]["KubeApplyObject"];
@@ -55,6 +56,7 @@ const keys = {
   logs: (id: string, ns: string, pod: string, o: LogOptions) => ["kube", id, "logs", ns, pod, o] as const,
   revisions: (id: string, ns: string, name: string) => ["kube", id, "revisions", ns, name] as const,
   drainPlan: (id: string, node: string, force: boolean) => ["kube", id, "drain-plan", node, force] as const,
+  removePlan: (id: string, node: string, force: boolean) => ["kube", id, "remove-plan", node, force] as const,
   lessons: (id: string) => ["kube", id, "lessons"] as const,
   lesson: (id: string, lesson: string) => ["kube", id, "lessons", lesson] as const,
 };
@@ -340,6 +342,43 @@ export function useKubeDrain(id: string) {
     mutationFn: async (body: { node: string; force: boolean; confirm?: string }) =>
       unwrap(
         await api.POST("/kubernetes/clusters/{clusterId}/drain", {
+          params: { path: { clusterId: id } },
+          body: { node: body.node, force: body.force || undefined, confirm: body.confirm },
+        }),
+      ) as Job,
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["jobs"] });
+      void qc.invalidateQueries({ queryKey: ["kube", id] });
+    },
+  });
+}
+
+// useKubeRemovePlan toont wat een worker weghalen zou doen: welke pods
+// verhuizen en welke VM verdwijnt. Er verandert niets.
+export function useKubeRemovePlan(id: string, node: string, force: boolean, enabled = true) {
+  return useQuery({
+    queryKey: keys.removePlan(id, node, force),
+    queryFn: async () =>
+      unwrap(
+        await api.POST("/kubernetes/clusters/{clusterId}/remove-node", {
+          params: { path: { clusterId: id } },
+          body: { node, preview: true, force: force || undefined },
+        }),
+      ) as KubeRemoveNodePlan,
+    enabled: enabled && id !== "" && node !== "",
+    refetchInterval: kubeInterval,
+    placeholderData: keepPreviousData,
+    retry: false,
+  });
+}
+
+// useKubeRemoveNode start het weghalen van een worker als taak.
+export function useKubeRemoveNode(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: { node: string; force: boolean; confirm?: string }) =>
+      unwrap(
+        await api.POST("/kubernetes/clusters/{clusterId}/remove-node", {
           params: { path: { clusterId: id } },
           body: { node: body.node, force: body.force || undefined, confirm: body.confirm },
         }),

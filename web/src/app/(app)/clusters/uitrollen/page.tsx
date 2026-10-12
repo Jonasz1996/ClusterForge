@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react";
 import { slugify } from "@/components/inventory/ClusterForm";
 import { CopyBlock } from "@/components/inventory/InstallAgent";
+import { fieldId, ParamInput, paramHint } from "@/components/inventory/ParamInput";
 import { QueryState, tableClass, tdClass, thClass } from "@/components/inventory/bits";
 import { Alert, Button, Card, cx, Input, Label, PageHeader, Select, Textarea } from "@/components/ui";
 import { ApiError } from "@/lib/api/client";
@@ -108,9 +109,6 @@ function useDebounced<T>(value: T, ms: number) {
   }, [value, ms]);
   return v;
 }
-
-// fieldId is het id van het invoerveld bij een veld uit een foutmelding.
-const fieldId = (field: string) => `f-${field}`;
 
 function DeployInner() {
   const search = useSearchParams();
@@ -464,85 +462,12 @@ function FieldRow({
   );
 }
 
-function paramHint(p: TemplateParam) {
-  const range =
-    p.choices.length > 0
-      ? ""
-      : p.min && p.max
-        ? `Van ${p.min} tot ${p.max}.`
-        : p.min
-          ? `Minstens ${p.min}.`
-          : p.max
-            ? `Hoogstens ${p.max}.`
-            : "";
-  return [p.help, range].filter(Boolean).join(" ") || undefined;
-}
-
 // slugHint toont hoe de nodes gaan heten; met meer dan één rol staat de rol
 // in de naam, zoals leren-server-01 en leren-worker-01.
 function slugHint(slug: string, t: Template | undefined) {
   const roles = t?.roles ?? [];
   if (roles.length > 1) return `De nodes heten ${roles.map((r) => `${slug}-${r.name}-01`).join(", ")}, …`;
   return `De nodes heten ${slug}-01, ${slug}-02, …`;
-}
-
-function ParamInput({ p, value, onChange, className }: { p: TemplateParam; value: string; onChange: (v: string) => void; className?: string }) {
-  const id = fieldId(`params.${p.name}`);
-  switch (p.type) {
-    case "bool":
-      return (
-        <label className="inline-flex items-center gap-2 text-sm">
-          <input id={id} type="checkbox" checked={value === "true"} onChange={(e) => onChange(e.target.checked ? "true" : "false")} />
-          Aan
-        </label>
-      );
-    case "int":
-      if (p.choices.length > 0)
-        return (
-          <Select id={id} className={className} value={value} onChange={(e) => onChange(e.target.value)}>
-            {p.choices.map((c) => (
-              <option key={c} value={String(c)}>
-                {c}
-              </option>
-            ))}
-          </Select>
-        );
-      return (
-        <Input
-          id={id}
-          className={className}
-          type="number"
-          min={p.min ?? undefined}
-          max={p.max ?? undefined}
-          required={!p.optional}
-          placeholder={p.optional ? "automatisch" : undefined}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-        />
-      );
-    case "secret":
-      return (
-        <Input
-          id={id}
-          className={cx("font-mono", className)}
-          autoComplete="off"
-          placeholder="wordt gegenereerd"
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-        />
-      );
-    default:
-      return (
-        <Input
-          id={id}
-          className={className}
-          required={!p.optional && p.default === null}
-          placeholder={p.type === "ipv4" ? "10.0.20.100" : p.type === "size" ? "2G" : p.type === "cidr" ? "10.0.20.0/24" : undefined}
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-        />
-      );
-  }
 }
 
 function Preview({

@@ -383,7 +383,7 @@ func (s *Server) ReapplyClusterGit(w http.ResponseWriter, r *http.Request, id uu
 	if c.AppliedRevision < c.SpecRevision && !confirmProd(w, p, c.Environment == store.EnvironmentProd, c.Slug, in.Confirm, "opnieuw toepassen") {
 		return
 	}
-	j, err := s.git.Reapply(ctx, events.User(p.User.ID), id)
+	j, err := s.git.Reapply(ctx, events.User(p.User.ID), id, deref(in.ServerUrl))
 	if err != nil {
 		s.gitError(w, r, err)
 		return

@@ -99,45 +99,47 @@ type gitFile struct {
 	} `json:"errors"`
 }
 
+type gitPlan struct {
+	BaseRevision int `json:"base_revision"`
+	Metadata     []struct {
+		Field, From, To string
+	} `json:"metadata"`
+	NewNodes []struct {
+		Hostname string `json:"hostname"`
+		Address  string `json:"address"`
+	} `json:"new_nodes"`
+	Nodes []struct {
+		Hostname string   `json:"hostname"`
+		New      bool     `json:"new"`
+		VIPs     []string `json:"vips"`
+		Steps    []struct {
+			Step   string `json:"step"`
+			Change string `json:"change"`
+			Diff   string `json:"diff"`
+		} `json:"steps"`
+	} `json:"nodes"`
+	Unchanged []string `json:"unchanged"`
+}
+
 type gitChange struct {
-	ID          string    `json:"id"`
-	ClusterID   *string   `json:"cluster_id"`
-	Slug        string    `json:"slug"`
-	Status      string    `json:"status"`
-	Kind        string    `json:"kind"`
-	ClusterName string    `json:"cluster_name"`
-	Summary     string    `json:"summary"`
-	Reason      string    `json:"reason"`
-	Commit      gitCommit `json:"commit"`
-	Plan        struct {
-		BaseRevision int `json:"base_revision"`
-		Metadata     []struct {
-			Field, From, To string
-		} `json:"metadata"`
-		NewNodes []struct {
-			Hostname string `json:"hostname"`
-			Address  string `json:"address"`
-		} `json:"new_nodes"`
-		Nodes []struct {
-			Hostname string   `json:"hostname"`
-			New      bool     `json:"new"`
-			VIPs     []string `json:"vips"`
-			Steps    []struct {
-				Step   string `json:"step"`
-				Change string `json:"change"`
-				Diff   string `json:"diff"`
-			} `json:"steps"`
-		} `json:"nodes"`
-		Unchanged []string `json:"unchanged"`
-	} `json:"plan"`
-	Local             []string `json:"local"`
-	Revision          *int     `json:"revision"`
-	JobID             *string  `json:"job_id"`
-	DecidedBy         *string  `json:"decided_by"`
-	NeedsConfirmation bool     `json:"needs_confirmation"`
-	FullApply         bool     `json:"full_apply"`
-	Blocked           string   `json:"blocked"`
-	BlockedCode       string   `json:"blocked_code"`
+	ID                string    `json:"id"`
+	ClusterID         *string   `json:"cluster_id"`
+	Slug              string    `json:"slug"`
+	Status            string    `json:"status"`
+	Kind              string    `json:"kind"`
+	ClusterName       string    `json:"cluster_name"`
+	Summary           string    `json:"summary"`
+	Reason            string    `json:"reason"`
+	Commit            gitCommit `json:"commit"`
+	Plan              gitPlan   `json:"plan"`
+	Local             []string  `json:"local"`
+	Revision          *int      `json:"revision"`
+	JobID             *string   `json:"job_id"`
+	DecidedBy         *string   `json:"decided_by"`
+	NeedsConfirmation bool      `json:"needs_confirmation"`
+	FullApply         bool      `json:"full_apply"`
+	Blocked           string    `json:"blocked"`
+	BlockedCode       string    `json:"blocked_code"`
 }
 
 func (c *client) gitFiles() map[string]gitFile {
