@@ -128,6 +128,76 @@ func (s *Server) ReapplyClusterComponent(w http.ResponseWriter, r *http.Request,
 	writeJSON(w, http.StatusAccepted, toAPIJob(j, &p.User.Username))
 }
 
+// UpdateClusterComponent zet vanzelf opnieuw starten aan of uit.
+func (s *Server) UpdateClusterComponent(w http.ResponseWriter, r *http.Request, clusterID, componentID uuid.UUID) {
+	p, ok := requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	var in gen.ComponentUpdateInput
+	if !decode(w, r, &in) {
+		return
+	}
+	ctx := r.Context()
+	if err := s.components.SetAutoRecover(ctx, events.User(p.User.ID), clusterID, componentID, in.AutoRecover); err != nil {
+		s.componentError(w, r, err)
+		return
+	}
+	list, err := s.components.List(ctx, clusterID)
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	for _, c := range list {
+		if c.ID == componentID {
+			writeJSON(w, http.StatusOK, toAPIComponent(c))
+			return
+		}
+	}
+	s.componentError(w, r, components.ErrNotFound)
+}
+
+// PlanRecoverClusterComponent toont wat opnieuw starten zou doen.
+func (s *Server) PlanRecoverClusterComponent(w http.ResponseWriter, r *http.Request, clusterID, componentID uuid.UUID) {
+	if _, ok := requireAdmin(w, r); !ok {
+		return
+	}
+	p, err := s.components.RecoverPlan(r.Context(), clusterID, componentID)
+	if err != nil {
+		s.componentError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, toAPIRecoverPlan(p))
+}
+
+// RecoverClusterComponent start de database opnieuw volgens het plan met
+// deze hash.
+func (s *Server) RecoverClusterComponent(w http.ResponseWriter, r *http.Request, clusterID, componentID uuid.UUID) {
+	p, ok := requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	var in gen.ComponentRecoverInput
+	if !decode(w, r, &in) {
+		return
+	}
+	ctx := r.Context()
+	c, err := s.q.GetCluster(ctx, clusterID)
+	if err != nil {
+		s.componentError(w, r, err)
+		return
+	}
+	if !confirmProd(w, p, c.Environment == store.EnvironmentProd, c.Slug, in.Confirm, "een database opnieuw starten") {
+		return
+	}
+	j, err := s.components.Recover(ctx, events.User(p.User.ID), clusterID, componentID, in.Hash)
+	if err != nil {
+		s.componentError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, toAPIJob(j, &p.User.Username))
+}
+
 // RemoveClusterComponent haalt een database die nooit gelukt is uit
 // ClusterForge.
 func (s *Server) RemoveClusterComponent(w http.ResponseWriter, r *http.Request, clusterID, componentID uuid.UUID) {
@@ -189,6 +259,35 @@ func toAPIComponent(c components.Component) gen.ClusterComponent {
 		vip = &gen.ComponentVIP{Id: v.ID, Address: v.Address, Nodes: nonNil(v.Nodes), Owner: v.Owner}
 	}
 	out.Vip = nullableOf(vip)
+	out.AutoRecover, out.DownSince, out.DownReason = c.AutoRecover, nullableOf(c.DownSince), c.DownReason
+	out.NodesOut = make([]gen.ComponentNodeOut, 0, len(c.NodesOut))
+	for _, n := range c.NodesOut {
+		out.NodesOut = append(out.NodesOut, gen.ComponentNodeOut{Hostname: n.Hostname, Since: n.Since, Reason: n.Reason})
+	}
+	var rec *gen.ComponentRecovery
+	if v := c.Recovery; v != nil {
+		rec = &gen.ComponentRecovery{JobId: v.JobID, Status: v.Status, Error: v.Error}
+	}
+	out.Recovery = nullableOf(rec)
+	return out
+}
+
+func toAPIRecoverPlan(p components.RecoverPlan) gen.ComponentRecoverPlan {
+	out := gen.ComponentRecoverPlan{
+		ClusterId: p.ClusterID, ClusterName: p.ClusterName, Slug: p.Slug, Prod: p.Prod, Title: p.Title, Primary: p.Primary, Begin: p.Begin,
+		Blocked: p.Blocked, Hash: p.Hash, Nodes: make([]gen.ComponentRecoverNode, 0, len(p.Nodes)), Findings: make([]gen.ComponentFinding, 0, len(p.Findings)),
+	}
+	for _, n := range p.Nodes {
+		out.Nodes = append(out.Nodes, gen.ComponentRecoverNode{
+			NodeId: n.NodeID, Hostname: n.Hostname, Index: n.Index, Answered: n.Answered, State: n.State, Active: n.Active, Running: n.Running,
+			Uuid: n.UUID, Seqno: n.Seqno, SafeToBootstrap: n.SafeToBootstrap, From: n.From, Action: n.Action,
+		})
+	}
+	for _, f := range p.Findings {
+		out.Findings = append(out.Findings, gen.ComponentFinding{
+			Level: f.Level, Code: f.Code, NodeId: nullableOf(f.NodeID), Hostname: f.Hostname, Message: f.Message, Command: f.Command,
+		})
+	}
 	return out
 }
 

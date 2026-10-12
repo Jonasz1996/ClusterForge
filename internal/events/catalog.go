@@ -89,6 +89,9 @@ var Known = map[string]Spec{
 	"cluster.database_added":           {CategoryInventory, "Database toegevoegd aan cluster"},
 	"cluster.database_applied":         {CategoryInventory, "Database van cluster uitgerold"},
 	"cluster.database_removed":         {CategoryInventory, "Database weggehaald uit ClusterForge"},
+	"cluster.database_recovering":      {CategoryInventory, "Database van cluster opnieuw gestart"},
+	"cluster.database_recovered":       {CategoryInventory, "Database van cluster draait weer na opnieuw starten"},
+	"cluster.database_auto_recover":    {CategoryInventory, "Vanzelf opnieuw starten van database gewijzigd"},
 	"node.created":                     {CategoryInventory, "Node toegevoegd"},
 	"node.updated":                     {CategoryInventory, "Node gewijzigd"},
 	"node.deleted":                     {CategoryInventory, "Node verwijderd"},
@@ -199,6 +202,11 @@ var Known = map[string]Spec{
 	"node.status_changed":    {CategoryStatus, "Status van node gewijzigd"},
 	"cluster.status_changed": {CategoryStatus, "Status van cluster gewijzigd"},
 	"vip.owner_changed":      {CategoryStatus, "VIP verhuisd"},
+
+	"cluster.database_down":      {CategoryStatus, "Database van cluster weg"},
+	"cluster.database_up":        {CategoryStatus, "Database van cluster draait weer"},
+	"cluster.database_node_out":  {CategoryStatus, "Databasenode doet niet mee"},
+	"cluster.database_node_back": {CategoryStatus, "Databasenode doet weer mee"},
 
 	"incident.opened":       {CategoryIncident, "Incident geopend"},
 	"incident.escalated":    {CategoryIncident, "Incident erger geworden"},

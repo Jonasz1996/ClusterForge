@@ -1,8 +1,10 @@
 -- name: ListClusterComponents :many
 -- De onderdelen van een cluster met de laatste taak die ze toepaste.
-SELECT sqlc.embed(cc), j.status AS job_status, j.error AS job_error, j.finished_at AS job_finished_at
+SELECT sqlc.embed(cc), j.status AS job_status, j.error AS job_error, j.finished_at AS job_finished_at,
+       rj.status AS recover_status, rj.error AS recover_error
 FROM cluster_components cc
 LEFT JOIN jobs j ON j.id = cc.job_id
+LEFT JOIN jobs rj ON rj.id = cc.recover_job_id
 WHERE cc.cluster_id = $1
 ORDER BY cc.engine;
 
@@ -59,3 +61,25 @@ LEFT JOIN proxmox_connections pc ON pc.id = n.proxmox_id
 LEFT JOIN proxmox_resources r ON r.connection_id = n.proxmox_id AND r.vmid = n.pve_vmid AND r.type IN ('qemu', 'lxc')
 WHERE n.cluster_id = $1
 ORDER BY lower(n.hostname);
+
+-- name: ListWatchedComponents :many
+-- De toegepaste onderdelen met MariaDB, voor de bewaking.
+SELECT cc.*, c.name AS cluster_name, c.slug AS cluster_slug
+FROM cluster_components cc
+JOIN clusters c ON c.id = cc.cluster_id
+WHERE cc.applied_revision IS NOT NULL AND cc.engine = 'mariadb'
+ORDER BY c.name;
+
+-- name: SetClusterComponentHealth :exec
+UPDATE cluster_components
+SET down_since = @down_since, down_reason = @down_reason, nodes_out = @nodes_out
+WHERE id = @id;
+
+-- name: SetClusterComponentAutoRecover :exec
+UPDATE cluster_components SET auto_recover = @auto_recover, updated_at = now() WHERE id = @id;
+
+-- name: SetClusterComponentAutoRecovered :exec
+UPDATE cluster_components SET auto_recovered_at = @at WHERE id = @id;
+
+-- name: SetClusterComponentRecoverJob :exec
+UPDATE cluster_components SET recover_job_id = @job_id WHERE id = @id;

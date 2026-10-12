@@ -74,6 +74,8 @@ const (
 	syncDelay = 20 * time.Second
 	// driftDelay is de interval van de driftcontrole.
 	driftDelay = 15 * time.Minute
+	// dbWatchDelay is de interval van de bewaking van de databases.
+	dbWatchDelay = 20 * time.Second
 )
 
 // FromEvent maakt een regel van een event uit het logboek.
@@ -122,6 +124,10 @@ func FromEvent(e audit.Entry) Entry {
 		rolledOut(&en, payloadText(e.Payload["at"]))
 	case "kube.app_status_changed":
 		en.From, en.Delay = e.Ts.Add(-statusDelay), "de status van een app komt uit de sync van elke 30 s"
+	case "cluster.database_down", "cluster.database_up", "cluster.database_node_back":
+		en.From, en.Delay = e.Ts.Add(-dbWatchDelay), "de databases worden elke 20 s bekeken"
+	case "cluster.database_node_out":
+		en.From, en.Delay = e.Ts.Add(-5*time.Minute-dbWatchDelay), "een databasenode komt pas na 5 minuten in het logboek"
 	}
 	if !e.Subject.Deleted {
 		en.Link = eventLink(e)
@@ -162,7 +168,8 @@ func eventKind(action string) string {
 	case prefix == "backup":
 		return "backup"
 	case action == "node.status_changed" || action == "cluster.status_changed" || action == "vip.owner_changed" ||
-		action == "service.status_changed" || action == "kube.app_status_changed":
+		action == "service.status_changed" || action == "kube.app_status_changed" || action == "cluster.database_down" ||
+		action == "cluster.database_up" || action == "cluster.database_node_out" || action == "cluster.database_node_back":
 		return "status"
 	case prefix == "incident":
 		return "incident"

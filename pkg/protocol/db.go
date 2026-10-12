@@ -28,6 +28,20 @@ const (
 	// een VIP: een include van /etc/keepalived/conf.d en track_script
 	// cf_db. Zonder Apply alleen de diff.
 	DBTrack = "track"
+	// DBPosition leest waar een Galera-node staat: draait MariaDB, in welke
+	// component, en tot welke transactie heeft hij de data. Met Recover
+	// haalt de agent de positie na een crash uit InnoDB (galera_recovery).
+	DBPosition = "position"
+)
+
+// Waar de positie van een Galera-node vandaan komt.
+const (
+	// DBFromRunning: wsrep_last_committed van een MariaDB die draait.
+	DBFromRunning = "running"
+	// DBFromGrastate: grastate.dat, na een gewone stop.
+	DBFromGrastate = "grastate"
+	// DBFromRecovery: galera_recovery, na een crash.
+	DBFromRecovery = "recovery"
 )
 
 // DBTrackScript is de vrrp_script die ClusterForge in
@@ -68,6 +82,10 @@ const (
 	DBMaxClients = 500
 	// DBTimeout is hoe lang een verzoek op de agent mag duren.
 	DBTimeout = 30 * time.Second
+	// DBRecoverTimeout is hoe lang een DBPosition met Recover mag duren:
+	// galera_recovery start mariadbd even zonder netwerk, en InnoDB kan na
+	// een crash lang bezig zijn.
+	DBRecoverTimeout = 10 * time.Minute
 )
 
 // DBRequest is een verzoek aan de databases op een node. De server stuurt
@@ -80,6 +98,36 @@ type DBRequest struct {
 	Deadline time.Time `json:"deadline"`
 	// Track hoort bij DBTrack.
 	Track *DBTrackRequest `json:"track,omitempty"`
+	// Position hoort bij DBPosition.
+	Position *DBPositionRequest `json:"position,omitempty"`
+}
+
+// DBPositionRequest: Recover laat de agent galera_recovery draaien als
+// MariaDB stilstaat en grastate.dat geen seqno heeft. Zonder Recover is
+// de positie dan onbekend.
+type DBPositionRequest struct {
+	Recover bool `json:"recover"`
+}
+
+// DBPositionResult is waar een Galera-node staat.
+type DBPositionResult struct {
+	// Unit is de unit van MariaDB en Active wat systemd erover zegt:
+	// active, activating (hij start of wacht op de andere nodes), failed
+	// of inactive.
+	Unit   string `json:"unit"`
+	Active string `json:"active"`
+	// Running: MariaDB antwoordt via de socket, en Galera is zijn toestand.
+	Running bool      `json:"running"`
+	Galera  *DBGalera `json:"galera,omitempty"`
+	// UUID en Seqno zijn de positie: de geschiedenis van het cluster en de
+	// laatste transactie. Seqno is -1 als ze onbekend is; Error zegt dan
+	// waarom.
+	UUID            string `json:"uuid"`
+	Seqno           int64  `json:"seqno"`
+	SafeToBootstrap bool   `json:"safe_to_bootstrap"`
+	// From is DBFromRunning, DBFromGrastate of DBFromRecovery.
+	From  string `json:"from,omitempty"`
+	Error string `json:"error,omitempty"`
 }
 
 // DBTrackRequest zegt welk VIP keepalived met de database moet bewaken.
@@ -112,6 +160,8 @@ type DBResponse struct {
 	Servers []DBServer `json:"servers"`
 	// Track is het antwoord op DBTrack.
 	Track *DBTrackResult `json:"track,omitempty"`
+	// Position is het antwoord op DBPosition.
+	Position *DBPositionResult `json:"position,omitempty"`
 }
 
 // DBServer is één MariaDB of PostgreSQL op een node.

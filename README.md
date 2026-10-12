@@ -76,6 +76,7 @@ Het technisch ontwerp staat in [docs/design/mvp-fase-1.md](docs/design/mvp-fase-
 | 2. Wie gebruikt welke database | De agent ziet elke minuut welke gebruiker vanaf welk adres met welke database verbonden is; ClusterForge koppelt de adressen aan nodes en clusters en toont per database wie haar de laatste dertig dagen gebruikte, met een waarschuwing als meer dan één cluster dat doet en of de afhankelijkheid in de graaf staat | klaar |
 | 3. Galera als onderdeel | Database toevoegen op een cluster dat er al is, ook met CT's: een plan per node met systeem, geheugen (met het `pct set`-commando als het krap wordt), schijf en Proxmox-host, en blokkades zoals twee nodes zonder scheidsrechter; daarna zet ClusterForge MariaDB Galera node voor node op en wacht na elke node tot hij Synced is; MariaDB komt in de graaf en de drift ziet een met de hand aangepaste configuratie | klaar |
 | 4. Het VIP van de app voor de database | Kies bij Database toevoegen het VIP van de app; keepalived zet het dan alleen op een node waarvan MariaDB mag schrijven (`cf-agent check db`), zodat de app altijd naar één node schrijft. Het plan toont per node de diff van keepalived.conf; ClusterForge past het bestand aan na `keepalived -t`, herlaadt node voor node met de eigenaar van het VIP laatst, en blokkeert een node met het VIP maar zonder database | klaar |
+| 5. Opkomen na een herstart | ClusterForge kijkt om de 20 seconden of de database draait. Na een volledige uitval, zoals een reboot van alle nodes, begint het het Galera-cluster vanzelf opnieuw op de node met de nieuwste data (uit `grastate.dat`, of na een crash met `galera_recovery`), maar alleen als alle nodes er zijn en MariaDB nergens meer start; ontbreekt er een, dan wacht het en kies je zelf Opnieuw starten, met een plan per node. Een node die niet startte terwijl het cluster draait, start het daar opnieuw. Getest met drie echte MariaDB-containers | klaar |
 
 ## Draaien met Docker Compose
 
@@ -761,7 +762,7 @@ De naam van het Galera-cluster is de slug van het cluster. SST gebruikt de gebru
 
 Daarna kent de drift de database: een met de hand aangepaste `99-clusterforge-galera.cnf` valt op, ook op een cluster zonder template of baseline. **Opnieuw toepassen** zet alles terug, node voor node; alleen op een node waar iets veranderde, herstart MariaDB, en ClusterForge wacht tot hij weer Synced is. Mislukt de taak, dan blijft staan wat al klaar was; los het op en kies Opnieuw toepassen. **Weghalen** kan zolang de database nooit helemaal gelukt is, en haalt haar alleen uit ClusterForge, niet van de nodes.
 
-De app verbindt nog met haar oude database; verhuizen komt in een volgende mijlpaal, net als het vanzelf opkomen na een herstart van alle nodes.
+De app verbindt nog met haar oude database; verhuizen komt in een volgende mijlpaal.
 
 #### Het VIP van de app
 
@@ -783,6 +784,33 @@ Zelf controleren op een node:
 cf-agent check db; echo $?          # 0 = deze node mag het VIP hebben
 journalctl -u keepalived | grep cf_db
 ```
+
+#### Na een herstart
+
+Valt één node uit, dan draait de database verder op de andere; komt hij terug, dan sluit MariaDB vanzelf weer aan en haalt hij wat hij miste. Vallen alle nodes tegelijk weg, zoals bij een stroomuitval, dan vindt Galera zijn cluster zelf terug zodra ze allemaal weer starten. Maar na een gewone stop van alle nodes, zoals een herstart van de Proxmox-host, of als de nodes ver na elkaar opstarten, begint Galera niet vanzelf: elke node wacht op een cluster dat er niet is, geeft het op, en MariaDB staat op `failed`. Dan moet de node met de nieuwste data het cluster beginnen.
+
+ClusterForge doet dat. Het vraagt om de 20 seconden elke datanode waar hij staat en begint het cluster vanzelf opnieuw als:
+
+- alle datanodes antwoorden, want een node die ontbreekt kan de nieuwste data hebben;
+- MariaDB op geen enkele node nog draait of start, want dan kan Galera het nog zelf; hangt een node langer dan 15 minuten in starten, dan wacht ClusterForge niet meer;
+- MariaDB ergens niet startte (`failed`): is hij overal gewoon gestopt, dan deed iemand dat met opzet en blijft hij uit;
+- de database al anderhalve minuut weg is, en ClusterForge het niet al het laatste halfuur probeerde.
+
+De taak **Database vanzelf opnieuw starten** leest dan per node tot welke transactie hij de data heeft: na een gewone stop staat dat in `/var/lib/mysql/grastate.dat`, na een crash alleen in InnoDB, en dan haalt `galera_recovery` het eruit. De node met de hoogste seqno begint het cluster (bij gelijke stand die als laatste stopte, dan de eerste); hij krijgt `safe_to_bootstrap: 1` en `galera_new_cluster`. Daarna start MariaDB op de andere nodes, een voor een, en ClusterForge wacht telkens tot de node Synced is; ze halen wat ze missen bij de eerste. Zo gaat er geen transactie verloren. Heeft de database het VIP van de app, dan controleert de taak ook dat het weer op één datanode staat. Een node die niet startte terwijl het cluster draait, start ClusterForge na anderhalve minuut op dezelfde manier opnieuw; geen enkele node begint dan een cluster.
+
+Ontbreekt er een node, dan wacht ClusterForge, en zegt de kaart **Database** waarom. Met **Opnieuw starten** zie je per node hoe het ermee staat, zijn seqno en wat er gaat gebeuren, met een waarschuwing dat een node die niet meedoet zijn nieuwere data verliest als hij later aansluit. Bevestig je, dan begint ClusterForge zonder die node; op prod tik je de slug in. Opnieuw starten werkt ook als het cluster nog draait: de nodes die er niet bij zijn, sluiten dan aan.
+
+Op de kaart staat ook welke node niet meedoet en sinds wanneer, en de schakelaar **Vanzelf opnieuw starten na een volledige uitval**, standaard aan. In het logboek komen de uitval, een node die langer dan vijf minuten niet meedoet, het opnieuw starten (door wie, of vanzelf en waarom) en het resultaat.
+
+Zelf kijken op een node:
+
+```sh
+cat /var/lib/mysql/grastate.dat     # seqno -1 na een crash
+galera_recovery                     # alleen als MariaDB stilstaat
+systemctl status mariadb
+```
+
+Wat ClusterForge aanneemt over Galera, staat in een test met drie echte MariaDB 11.8-containers (`internal/galera`, draait in de CI): na een gewone stop, een crash van eerst één en dan alle nodes, en een stroomuitval wint de juiste node en zijn daarna alle rijen er.
 
 ### Hoe ClusterForge de databases leest
 

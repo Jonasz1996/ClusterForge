@@ -11,6 +11,10 @@ const (
 	MariaStatus = "SHOW GLOBAL STATUS WHERE Variable_name IN ('Threads_connected', 'Uptime', " +
 		"'wsrep_cluster_size', 'wsrep_cluster_status', 'wsrep_cluster_state_uuid', 'wsrep_local_state', " +
 		"'wsrep_local_state_comment', 'wsrep_ready', 'wsrep_incoming_addresses')"
+	// MariaPosition is waar een Galera-node staat: zijn toestand en de
+	// laatste transactie.
+	MariaPosition = "SHOW GLOBAL STATUS WHERE Variable_name IN ('wsrep_cluster_size', 'wsrep_cluster_status', " +
+		"'wsrep_cluster_state_uuid', 'wsrep_local_state', 'wsrep_local_state_comment', 'wsrep_ready', 'wsrep_last_committed')"
 	// MariaSource is de replicatie van een replica, met kolomnamen.
 	MariaSource = "SHOW ALL SLAVES STATUS"
 	// MariaReplicas zijn de replica's die nu de binlog van deze server lezen.
@@ -52,7 +56,7 @@ const (
 // All zijn alle query's die de agent ooit uitvoert. Tests en de
 // nagespeelde databases in agenttest gebruiken de lijst.
 var All = []string{
-	MariaVariables, MariaStatus, MariaSource, MariaReplicas, MariaDatabases, MariaClients,
+	MariaVariables, MariaStatus, MariaPosition, MariaSource, MariaReplicas, MariaDatabases, MariaClients,
 	PGInfo, PGDatabases, PGTables, PGReplicas, PGSource, PGClients,
 }
 

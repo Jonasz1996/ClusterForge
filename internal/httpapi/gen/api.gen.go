@@ -3255,8 +3255,17 @@ type Cluster struct {
 type ClusterComponent struct {
 	// AppliedRevision De laatste revisie die helemaal lukte; null tot de eerste uitrol klaar is
 	AppliedRevision nullable.Nullable[int] `json:"applied_revision"`
-	ClusterId       openapi_types.UUID     `json:"cluster_id"`
-	CreatedAt       time.Time              `json:"created_at"`
+
+	// AutoRecover Na een volledige uitval vanzelf opnieuw beginnen
+	AutoRecover bool               `json:"auto_recover"`
+	ClusterId   openapi_types.UUID `json:"cluster_id"`
+	CreatedAt   time.Time          `json:"created_at"`
+
+	// DownReason Waarom de database weg is, per node
+	DownReason string `json:"down_reason"`
+
+	// DownSince Sinds wanneer geen enkele node in een Primary component zit; null zolang de database draait
+	DownSince nullable.Nullable[time.Time] `json:"down_since"`
 
 	// Engine mariadb of postgresql
 	Engine string             `json:"engine"`
@@ -3269,9 +3278,15 @@ type ClusterComponent struct {
 	JobId nullable.Nullable[openapi_types.UUID] `json:"job_id"`
 	Nodes []ComponentNode                       `json:"nodes"`
 
+	// NodesOut De nodes die niet meedoen terwijl het cluster draait
+	NodesOut []ComponentNodeOut `json:"nodes_out"`
+
 	// Params De instellingen zonder geheimen
-	Params   map[string]interface{} `json:"params"`
-	Revision int                    `json:"revision"`
+	Params map[string]interface{} `json:"params"`
+
+	// Recovery De laatste taak die de database opnieuw startte; null als er nog geen was
+	Recovery nullable.Nullable[ComponentRecovery] `json:"recovery"`
+	Revision int                                  `json:"revision"`
 
 	// State installing, applying, ready of failed
 	State string `json:"state"`
@@ -3498,6 +3513,13 @@ type ComponentNode struct {
 	Role string `json:"role"`
 }
 
+// ComponentNodeOut defines model for ComponentNodeOut.
+type ComponentNodeOut struct {
+	Hostname string    `json:"hostname"`
+	Reason   string    `json:"reason"`
+	Since    time.Time `json:"since"`
+}
+
 // ComponentPlan defines model for ComponentPlan.
 type ComponentPlan struct {
 	// Blocked Iets houdt het tegen; uitrollen kan niet
@@ -3573,6 +3595,73 @@ type ComponentReapplyInput struct {
 	Confirm *string `json:"confirm,omitempty"`
 }
 
+// ComponentRecoverInput defines model for ComponentRecoverInput.
+type ComponentRecoverInput struct {
+	// Confirm De slug van het cluster; nodig op prod
+	Confirm *string `json:"confirm,omitempty"`
+
+	// Hash De hash van het plan dat je zag
+	Hash string `json:"hash"`
+}
+
+// ComponentRecoverNode defines model for ComponentRecoverNode.
+type ComponentRecoverNode struct {
+	// Action begin, join, none (doet al mee), skip (antwoordt niet) of later (na het lezen van de posities)
+	Action string `json:"action"`
+
+	// Active Wat systemd over mariadb zegt: active, activating, failed of inactive
+	Active string `json:"active"`
+
+	// Answered De agent antwoordde
+	Answered bool `json:"answered"`
+
+	// From Waar de positie vandaan komt: running, grastate of recovery
+	From     string             `json:"from"`
+	Hostname string             `json:"hostname"`
+	Index    int                `json:"index"`
+	NodeId   openapi_types.UUID `json:"node_id"`
+	Running  bool               `json:"running"`
+
+	// SafeToBootstrap De node stopte als laatste
+	SafeToBootstrap bool `json:"safe_to_bootstrap"`
+
+	// Seqno De laatste transactie; -1 als die onbekend is
+	Seqno int64 `json:"seqno"`
+
+	// State Hoe het met MariaDB staat
+	State string `json:"state"`
+
+	// Uuid De geschiedenis van het cluster
+	Uuid string `json:"uuid"`
+}
+
+// ComponentRecoverPlan defines model for ComponentRecoverPlan.
+type ComponentRecoverPlan struct {
+	// Begin De node die het cluster begint; leeg als het cluster draait of als dat pas na het lezen van de posities vastligt
+	Begin       string                 `json:"begin"`
+	Blocked     bool                   `json:"blocked"`
+	ClusterId   openapi_types.UUID     `json:"cluster_id"`
+	ClusterName string                 `json:"cluster_name"`
+	Findings    []ComponentFinding     `json:"findings"`
+	Hash        string                 `json:"hash"`
+	Nodes       []ComponentRecoverNode `json:"nodes"`
+
+	// Primary De node die al in een Primary component zit; leeg als de database helemaal weg is
+	Primary string `json:"primary"`
+	Prod    bool   `json:"prod"`
+	Slug    string `json:"slug"`
+	Title   string `json:"title"`
+}
+
+// ComponentRecovery defines model for ComponentRecovery.
+type ComponentRecovery struct {
+	Error string             `json:"error"`
+	JobId openapi_types.UUID `json:"job_id"`
+
+	// Status queued, running, succeeded, failed of canceled
+	Status string `json:"status"`
+}
+
 // ComponentTemplate defines model for ComponentTemplate.
 type ComponentTemplate struct {
 	Description string                  `json:"description"`
@@ -3585,6 +3674,11 @@ type ComponentTemplate struct {
 
 // ComponentTemplateEngine defines model for ComponentTemplate.Engine.
 type ComponentTemplateEngine string
+
+// ComponentUpdateInput defines model for ComponentUpdateInput.
+type ComponentUpdateInput struct {
+	AutoRecover bool `json:"auto_recover"`
+}
 
 // ComponentVIP defines model for ComponentVIP.
 type ComponentVIP struct {
@@ -8983,8 +9077,14 @@ type AddClusterComponentJSONRequestBody = ComponentApplyInput
 // PlanClusterComponentJSONRequestBody defines body for PlanClusterComponent for application/json ContentType.
 type PlanClusterComponentJSONRequestBody = ComponentInput
 
+// UpdateClusterComponentJSONRequestBody defines body for UpdateClusterComponent for application/json ContentType.
+type UpdateClusterComponentJSONRequestBody = ComponentUpdateInput
+
 // ReapplyClusterComponentJSONRequestBody defines body for ReapplyClusterComponent for application/json ContentType.
 type ReapplyClusterComponentJSONRequestBody = ComponentReapplyInput
+
+// RecoverClusterComponentJSONRequestBody defines body for RecoverClusterComponent for application/json ContentType.
+type RecoverClusterComponentJSONRequestBody = ComponentRecoverInput
 
 // CreateDisasterScenarioJSONRequestBody defines body for CreateDisasterScenario for application/json ContentType.
 type CreateDisasterScenarioJSONRequestBody = DisasterScenarioInput
@@ -9246,9 +9346,18 @@ type ServerInterface interface {
 	// RemoveClusterComponent Een database die nooit gelukt is uit ClusterForge halen (admin)
 	// (DELETE /clusters/{clusterId}/components/{componentId})
 	RemoveClusterComponent(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID)
+	// UpdateClusterComponent Vanzelf opnieuw starten aan- of uitzetten (admin)
+	// (PATCH /clusters/{clusterId}/components/{componentId})
+	UpdateClusterComponent(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID)
 	// ReapplyClusterComponent Een database opnieuw toepassen (admin); wordt een taak
 	// (POST /clusters/{clusterId}/components/{componentId}/apply)
 	ReapplyClusterComponent(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID)
+	// RecoverClusterComponent De database opnieuw starten (admin); wordt een taak
+	// (POST /clusters/{clusterId}/components/{componentId}/recover)
+	RecoverClusterComponent(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID)
+	// PlanRecoverClusterComponent Bekijken wat opnieuw starten zou doen (admin)
+	// (POST /clusters/{clusterId}/components/{componentId}/recover/plan)
+	PlanRecoverClusterComponent(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID)
 	// ListDisasterScenarios Rampoefeningen van een cluster met hun laatste run
 	// (GET /clusters/{clusterId}/disaster-scenarios)
 	ListDisasterScenarios(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
@@ -9969,9 +10078,27 @@ func (_ Unimplemented) RemoveClusterComponent(w http.ResponseWriter, r *http.Req
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// UpdateClusterComponent Vanzelf opnieuw starten aan- of uitzetten (admin)
+// (PATCH /clusters/{clusterId}/components/{componentId})
+func (_ Unimplemented) UpdateClusterComponent(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // ReapplyClusterComponent Een database opnieuw toepassen (admin); wordt een taak
 // (POST /clusters/{clusterId}/components/{componentId}/apply)
 func (_ Unimplemented) ReapplyClusterComponent(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RecoverClusterComponent De database opnieuw starten (admin); wordt een taak
+// (POST /clusters/{clusterId}/components/{componentId}/recover)
+func (_ Unimplemented) RecoverClusterComponent(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// PlanRecoverClusterComponent Bekijken wat opnieuw starten zou doen (admin)
+// (POST /clusters/{clusterId}/components/{componentId}/recover/plan)
+func (_ Unimplemented) PlanRecoverClusterComponent(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -12021,6 +12148,41 @@ func (siw *ServerInterfaceWrapper) RemoveClusterComponent(w http.ResponseWriter,
 	handler.ServeHTTP(w, r)
 }
 
+// UpdateClusterComponent operation middleware
+func (siw *ServerInterfaceWrapper) UpdateClusterComponent(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "componentId" -------------
+	var componentId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "componentId", chi.URLParam(r, "componentId"), &componentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "componentId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateClusterComponent(w, r, clusterId, componentId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ReapplyClusterComponent operation middleware
 func (siw *ServerInterfaceWrapper) ReapplyClusterComponent(w http.ResponseWriter, r *http.Request) {
 
@@ -12047,6 +12209,76 @@ func (siw *ServerInterfaceWrapper) ReapplyClusterComponent(w http.ResponseWriter
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ReapplyClusterComponent(w, r, clusterId, componentId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RecoverClusterComponent operation middleware
+func (siw *ServerInterfaceWrapper) RecoverClusterComponent(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "componentId" -------------
+	var componentId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "componentId", chi.URLParam(r, "componentId"), &componentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "componentId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RecoverClusterComponent(w, r, clusterId, componentId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PlanRecoverClusterComponent operation middleware
+func (siw *ServerInterfaceWrapper) PlanRecoverClusterComponent(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "componentId" -------------
+	var componentId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "componentId", chi.URLParam(r, "componentId"), &componentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "componentId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PlanRecoverClusterComponent(w, r, clusterId, componentId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -17765,7 +17997,16 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Delete(options.BaseURL+"/clusters/{clusterId}/components/{componentId}", wrapper.RemoveClusterComponent)
 	})
 	r.Group(func(r chi.Router) {
+		r.Patch(options.BaseURL+"/clusters/{clusterId}/components/{componentId}", wrapper.UpdateClusterComponent)
+	})
+	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/clusters/{clusterId}/components/{componentId}/apply", wrapper.ReapplyClusterComponent)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/clusters/{clusterId}/components/{componentId}/recover/plan", wrapper.PlanRecoverClusterComponent)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/clusters/{clusterId}/components/{componentId}/recover", wrapper.RecoverClusterComponent)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/databases", wrapper.ListDatabases)

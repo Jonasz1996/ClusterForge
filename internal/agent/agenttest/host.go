@@ -22,8 +22,10 @@ import (
 )
 
 // Unit is de toestand van een systemd-unit. Failed: de unit startte niet.
+// Activating: hij start nog, zoals MariaDB die op de andere Galera-nodes
+// wacht.
 type Unit struct {
-	Enabled, Active, Failed bool
+	Enabled, Active, Failed, Activating bool
 }
 
 // Provides zegt welke units een pakket meebrengt en hoe ze na het
@@ -151,6 +153,13 @@ func (h *Host) FailTimes(prefix, output string, n int) {
 	h.fail[prefix] = &failure{output: output, times: n}
 }
 
+// Unfail haalt een storing van Fail of FailTimes weg.
+func (h *Host) Unfail(prefix string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	delete(h.fail, prefix)
+}
+
 // Calls geeft de commando's die iets veranderen, zonder de vragen.
 func (h *Host) Calls() []string {
 	h.mu.Lock()
@@ -272,6 +281,11 @@ func (h *Host) exec(name string, args []string) ([]byte, error) {
 		h.users[args[len(args)-1]] = true
 		return nil, nil
 	case "sh":
+		// cf-agent check db, als unless van een commando: lukt alleen als
+		// MariaDB hier mag schrijven.
+		if len(args) == 2 && args[1] == protocol.DBCheckCommand && !h.mariaWritable() {
+			return []byte("deze Galera-node is niet Synced\n"), errExit1
+		}
 		return nil, nil
 	case "nft":
 		return h.nftExec(args)
@@ -299,6 +313,8 @@ func (h *Host) exec(name string, args []string) ([]byte, error) {
 		}
 	case "runuser":
 		return h.runuser(args)
+	case "galera_recovery":
+		return h.galeraRecovery()
 	}
 	return nil, fmt.Errorf("onbekend commando %s", name)
 }
@@ -421,7 +437,7 @@ func (h *Host) SetJournal(unit, text string) {
 func (h *Host) Power(on bool) {
 	h.mu.Lock()
 	for _, u := range h.units {
-		u.Active = on && u.Enabled
+		u.Active, u.Activating = on && u.Enabled, false
 	}
 	g := h.group
 	h.mu.Unlock()
@@ -537,8 +553,11 @@ func (h *Host) systemctl(args []string) ([]byte, error) {
 				continue
 			}
 			active := map[bool]string{true: "active", false: "inactive"}[u.Active]
-			if u.Failed {
+			switch {
+			case u.Failed:
 				active = "failed"
+			case u.Activating:
+				active = "activating"
 			}
 			fmt.Fprintf(&b, "LoadState=loaded\nUnitFileState=%s\nActiveState=%s\n\n",
 				map[bool]string{true: "enabled", false: "disabled"}[u.Enabled], active)
@@ -551,6 +570,8 @@ func (h *Host) systemctl(args []string) ([]byte, error) {
 		switch {
 		case ok && u.Failed:
 			return []byte("failed\n"), errors.New("exit status 3")
+		case ok && u.Activating:
+			return []byte("activating\n"), errors.New("exit status 3")
 		case ok && u.Active:
 			return []byte("active\n"), nil
 		}
@@ -568,9 +589,9 @@ func (h *Host) systemctl(args []string) ([]byte, error) {
 			u.Active = false
 		}
 	case "start", "restart", "reload-or-restart":
-		u.Active, u.Failed = true, false
+		u.Active, u.Failed, u.Activating = true, false, false
 	case "stop":
-		u.Active = false
+		u.Active, u.Activating = false, false
 	default:
 		return nil, fmt.Errorf("systemctl %s", verb)
 	}

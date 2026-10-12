@@ -85,7 +85,11 @@ func (a *Agent) handleDB(data []byte) protocol.DBResponse {
 	case <-time.After(dbQueueWait):
 		return protocol.DBResponse{Error: "de agent is te druk met andere databaseverzoeken; probeer het zo opnieuw", Servers: []protocol.DBServer{}}
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), protocol.DBTimeout)
+	timeout := protocol.DBTimeout
+	if req.Op == protocol.DBPosition && req.Position != nil && req.Position.Recover {
+		timeout = protocol.DBRecoverTimeout
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	if !req.Deadline.IsZero() {
 		var c2 context.CancelFunc
@@ -98,6 +102,8 @@ func (a *Agent) handleDB(data []byte) protocol.DBResponse {
 		res = a.DBStatus(ctx)
 	case protocol.DBTrack:
 		res = a.dbTrack(ctx, req.Track)
+	case protocol.DBPosition:
+		res = a.dbPosition(ctx, req.Position)
 	default:
 		res = protocol.DBResponse{Error: "onbekend databaseverzoek " + req.Op, Servers: []protocol.DBServer{}}
 	}
@@ -280,19 +286,7 @@ func (a *Agent) mariaStatus(ctx context.Context, u UnitInfo) protocol.DBServer {
 		s.Connections, _ = strconv.Atoi(st["threads_connected"])
 		s.UptimeSeconds, _ = strconv.ParseInt(st["uptime"], 10, 64)
 		if strings.EqualFold(vars["wsrep_on"], "ON") {
-			g := &protocol.DBGalera{
-				ClusterName: vars["wsrep_cluster_name"], ClusterUUID: st["wsrep_cluster_state_uuid"],
-				ClusterStatus: st["wsrep_cluster_status"], State: st["wsrep_local_state_comment"],
-				Ready: strings.EqualFold(st["wsrep_ready"], "ON"),
-			}
-			g.ClusterSize, _ = strconv.Atoi(st["wsrep_cluster_size"])
-			g.StateCode, _ = strconv.Atoi(st["wsrep_local_state"])
-			for addr := range strings.SplitSeq(st["wsrep_incoming_addresses"], ",") {
-				if host := hostOnly(addr); host != "" && host != "AUTO" {
-					g.Members = append(g.Members, host)
-				}
-			}
-			s.Galera = g
+			s.Galera = galeraOf(vars, st)
 		}
 	}
 	if s.Galera == nil {
@@ -345,6 +339,23 @@ func (a *Agent) mariaStatus(ctx context.Context, u UnitInfo) protocol.DBServer {
 	}
 	s.Error = strings.Join(errs, "; ")
 	return s
+}
+
+// galeraOf maakt de toestand van Galera uit de variabelen en de status.
+func galeraOf(vars, st map[string]string) *protocol.DBGalera {
+	g := &protocol.DBGalera{
+		ClusterName: vars["wsrep_cluster_name"], ClusterUUID: st["wsrep_cluster_state_uuid"],
+		ClusterStatus: st["wsrep_cluster_status"], State: st["wsrep_local_state_comment"],
+		Ready: strings.EqualFold(st["wsrep_ready"], "ON"),
+	}
+	g.ClusterSize, _ = strconv.Atoi(st["wsrep_cluster_size"])
+	g.StateCode, _ = strconv.Atoi(st["wsrep_local_state"])
+	for addr := range strings.SplitSeq(st["wsrep_incoming_addresses"], ",") {
+		if host := hostOnly(addr); host != "" && host != "AUTO" {
+			g.Members = append(g.Members, host)
+		}
+	}
+	return g
 }
 
 // mariaClientHost haalt de poort van HOST in de processlist: 10.0.20.186:51234
