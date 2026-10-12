@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/oapi-codegen/nullable"
 
+	"github.com/Jonasz1996/clusterforge/internal/components"
 	"github.com/Jonasz1996/clusterforge/internal/deploy"
 	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/gitops"
@@ -124,7 +125,16 @@ func (s *Server) DeployCluster(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &in) {
 		return
 	}
-	j, clusterID, err := s.deploy.Request(r.Context(), events.User(p.User.ID), deployRequest(in))
+	var o deploy.RequestOptions
+	if in.Database != nil {
+		inTx, err := s.components.WithDeploy(in.Database.Engine)
+		if err != nil {
+			s.componentError(w, r, err)
+			return
+		}
+		o.InTx = inTx
+	}
+	j, clusterID, err := s.deploy.RequestWith(r.Context(), events.User(p.User.ID), deployRequest(in), o)
 	if err != nil {
 		s.deployError(w, r, err)
 		return
@@ -159,9 +169,12 @@ func (s *Server) deployError(w http.ResponseWriter, r *http.Request, err error) 
 	var ice inventory.ConflictError
 	var pve proxmox.ValidationError
 	var up *proxmox.UpstreamError
+	var cie *components.InvalidError
 	switch {
 	case errors.As(err, &ve):
 		writeJSON(w, http.StatusBadRequest, gen.Error{Code: "validation", Message: ve.Msg, Field: optional(ve.Field)})
+	case errors.As(err, &cie):
+		writeJSON(w, http.StatusBadRequest, gen.Error{Code: "validation", Message: cie.Msg, Field: optional(cie.Field)})
 	case errors.As(err, &ice):
 		writeJSON(w, http.StatusConflict, gen.Error{Code: "conflict", Message: ice.Msg, Field: optional("cluster.slug")})
 	case errors.As(err, &pve):

@@ -53,6 +53,18 @@ type Group struct {
 	DatabasesTotal int
 }
 
+// Key is uniek per groep: engine/<cluster> of engine/node/<node> voor een
+// losse node. Een verhuizing noemt haar bron zo.
+func (g Group) Key() string {
+	switch {
+	case g.ClusterID != nil:
+		return g.Engine + "/" + g.ClusterID.String()
+	case len(g.Servers) > 0:
+		return g.Engine + "/node/" + g.Servers[0].NodeID.String()
+	}
+	return g.Engine
+}
+
 // Server is een databaseserver op een node.
 type Server struct {
 	NodeID         uuid.UUID

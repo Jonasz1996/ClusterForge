@@ -46,7 +46,34 @@ const (
 	// ruimt oude op, of zet een dump terug in een nieuwe database. Maken en
 	// terugzetten lopen op de achtergrond; DBDumpList toont de voortgang.
 	DBDump = "dump"
+	// DBMigrate helpt een database verhuizen van een andere MariaDB naar
+	// deze node. Op de oude node: de database bekijken en een tijdelijke
+	// gebruiker die alleen de dump mag maken. Op de nieuwe node: kijken of
+	// de oude MariaDB te bereiken is, en de dump daar ophalen en meteen
+	// importeren in een nieuwe database, met de rijen per tabel geteld aan
+	// beide kanten. Dat laatste loopt op de achtergrond; DBMigrateStatus
+	// toont de voortgang.
+	DBMigrate = "migrate"
 )
+
+// Wat een DBMigrate doet.
+const (
+	// Op de oude node: catalogusgegevens van de database, zonder rijen.
+	DBMigrateInspect = "inspect"
+	// Op de oude node: de tijdelijke gebruiker aanmaken of weghalen.
+	DBMigrateGrant  = "grant"
+	DBMigrateRevoke = "revoke"
+	// Op de nieuwe node: de begroeting van de oude MariaDB lezen, zonder in
+	// te loggen.
+	DBMigrateProbe = "probe"
+	// Op de nieuwe node: de dump ophalen en importeren, en de voortgang.
+	DBMigratePull   = "pull"
+	DBMigrateStatus = "status"
+)
+
+// DBMigrateUserPrefix begint de naam van de tijdelijke gebruiker op de oude
+// MariaDB; de rest is letters en cijfers.
+const DBMigrateUserPrefix = "cf_verhuizing_"
 
 // Wat een DBDump doet.
 const (
@@ -139,6 +166,112 @@ type DBRequest struct {
 	Drop   *DBDropRequest   `json:"drop,omitempty"`
 	// Dump hoort bij DBDump.
 	Dump *DBDumpRequest `json:"dump,omitempty"`
+	// Migrate hoort bij DBMigrate.
+	Migrate *DBMigrateRequest `json:"migrate,omitempty"`
+}
+
+// DBMigrateRequest zegt wat een DBMigrate doet.
+type DBMigrateRequest struct {
+	// Action is een van de DBMigrate-acties.
+	Action string `json:"action"`
+	// Database is de database op de oude MariaDB.
+	Database string `json:"database,omitempty"`
+	// User is de tijdelijke gebruiker, Hosts de adressen van de nieuwe node
+	// waarvandaan hij mag inloggen, en Password zijn wachtwoord: 16 tot 128
+	// letters en cijfers.
+	User     string   `json:"user,omitempty"`
+	Hosts    []string `json:"hosts,omitempty"`
+	Password string   `json:"password,omitempty"`
+	// Host en Port zijn het adres van de oude MariaDB, bij probe en pull.
+	Host string `json:"host,omitempty"`
+	Port int    `json:"port,omitempty"`
+	// Target is de nieuwe database bij pull en status; ze mag nog niet
+	// bestaan en krijgt Charset en Collation van de oude.
+	Target    string `json:"target,omitempty"`
+	Charset   string `json:"charset,omitempty"`
+	Collation string `json:"collation,omitempty"`
+	// Total is ongeveer hoeveel SQL er komt, voor de voortgang; 0 als dat
+	// onbekend is.
+	Total int64 `json:"total,omitempty"`
+}
+
+// DBMigrateResult is het antwoord op een DBMigrate.
+type DBMigrateResult struct {
+	Info  *DBMigrateInfo  `json:"info,omitempty"`
+	Probe *DBMigrateReach `json:"probe,omitempty"`
+	// Run is de import van Target: bezig, of de laatste die klaar is.
+	Run *DBMigrateRun `json:"run,omitempty"`
+}
+
+// DBMigrateInfo is wat de oude MariaDB over een database weet, uit
+// information_schema.
+type DBMigrateInfo struct {
+	Exists    bool   `json:"exists"`
+	Version   string `json:"version"`
+	Charset   string `json:"charset,omitempty"`
+	Collation string `json:"collation,omitempty"`
+	// SizeBytes is de data en indexen van alle tabellen.
+	SizeBytes int64            `json:"size_bytes"`
+	Tables    []DBMigrateTable `json:"tables"`
+	Views     int              `json:"views"`
+	Routines  int              `json:"routines"`
+	Triggers  int              `json:"triggers"`
+	Events    int              `json:"events"`
+}
+
+// DBMigrateTable is een tabel, zonder de views. Rows is de schatting van
+// InnoDB, geen telling.
+type DBMigrateTable struct {
+	Name       string `json:"name"`
+	Engine     string `json:"engine"`
+	Rows       int64  `json:"rows"`
+	SizeBytes  int64  `json:"size_bytes"`
+	PrimaryKey bool   `json:"primary_key"`
+}
+
+// DBMigrateReach is wat er op het adres van de oude MariaDB antwoordde.
+type DBMigrateReach struct {
+	// Reached: er antwoordde een MariaDB of MySQL, en Version en TLS komen
+	// uit zijn begroeting.
+	Reached bool   `json:"reached"`
+	Version string `json:"version,omitempty"`
+	TLS     bool   `json:"tls"`
+	// Code is de fout die MariaDB meteen stuurde, zoals 1130 als het geen
+	// enkele gebruiker voor dit adres kent; Error de tekst, of waarom er
+	// niets antwoordde.
+	Code  int    `json:"code,omitempty"`
+	Error string `json:"error,omitempty"`
+}
+
+// DBMigrateRun is een import van een dump van de oude MariaDB.
+type DBMigrateRun struct {
+	Database string    `json:"database"`
+	Target   string    `json:"target"`
+	Host     string    `json:"host"`
+	Port     int       `json:"port"`
+	TLS      bool      `json:"tls"`
+	Started  time.Time `json:"started"`
+	// Imported is wanneer de import klaar was en het tellen begon.
+	Imported time.Time `json:"imported,omitzero"`
+	Finished time.Time `json:"finished,omitzero"`
+	// Bytes is de SQL die al binnen is, Total wat er ongeveer komt.
+	Bytes int64 `json:"bytes"`
+	Total int64 `json:"total"`
+	// Tables zijn de rijen per tabel aan beide kanten, na de import.
+	Tables []DBMigrateCount `json:"tables,omitempty"`
+	// Views, Routines, Triggers en Events staan in de nieuwe database.
+	Views    int    `json:"views"`
+	Routines int    `json:"routines"`
+	Triggers int    `json:"triggers"`
+	Events   int    `json:"events"`
+	Error    string `json:"error,omitempty"`
+}
+
+// DBMigrateCount is het aantal rijen van een tabel, oud en nieuw.
+type DBMigrateCount struct {
+	Name   string `json:"name"`
+	Source int64  `json:"source"`
+	Target int64  `json:"target"`
 }
 
 // DBDumpRequest zegt wat een DBDump doet.
@@ -320,6 +453,8 @@ type DBResponse struct {
 	Users []DBUser `json:"users,omitempty"`
 	// Dump is het antwoord op DBDump.
 	Dump *DBDumpResult `json:"dump,omitempty"`
+	// Migrate is het antwoord op DBMigrate.
+	Migrate *DBMigrateResult `json:"migrate,omitempty"`
 }
 
 // DBServer is één MariaDB of PostgreSQL op een node.

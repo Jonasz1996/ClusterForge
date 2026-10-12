@@ -112,6 +112,9 @@ type Service struct {
 	// lang 95% van de tijd niet overschreden. Mag nil zijn; het plan zegt
 	// dan dat het niet weet wat de app gebruikt.
 	Memory func(ctx context.Context) (map[uuid.UUID]float64, error)
+	// Overview geeft de databaseservers die ClusterForge ziet, voor een
+	// verhuizing. Mag nil zijn; verhuizen kan dan niet.
+	Overview func(ctx context.Context) ([]databases.Group, error)
 	// Changed wordt aangeroepen als een onderdeel toegepast is. Mag nil zijn.
 	Changed func()
 	// DBChanged wordt aangeroepen als er een database of gebruiker bij kwam
@@ -169,6 +172,13 @@ func NewService(pool *pgxpool.Pool, ev *events.Writer, log *slog.Logger, runner 
 	runner.Register(RestoreKind, s.runRestore)
 	runner.Retryable(DumpKind)
 	runner.OnFinished(DumpKind, s.failDumpsOf)
+	// Een proefverhuizing gaat na een herstart verder op dezelfde import.
+	runner.Register(MigrateTrialKind, s.runTrial)
+	runner.OnFinished(MigrateTrialKind, s.failMigrationsOf)
+	// 'Database erbij' bij Cluster uitrollen.
+	if dep != nil {
+		dep.OnFinished(s.deployFinished)
+	}
 	return s
 }
 

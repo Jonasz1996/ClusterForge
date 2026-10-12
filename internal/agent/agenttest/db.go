@@ -131,11 +131,21 @@ type PGReplica struct {
 	Lag                  int64
 }
 
-// Database is een database met haar grootte en aantal tabellen.
+// Database is een database met haar grootte en aantal tabellen, t1 tot
+// tN.
 type Database struct {
 	Name   string
 	Size   int64
 	Tables int
+	// Voor een verhuizing: de tekenset en collatie (leeg is utf8mb4 en
+	// utf8mb4_general_ci), de rijen per tabel (0 is 1), de tabellen zonder
+	// primaire sleutel, de engine per tabel (standaard InnoDB), en de
+	// andere objecten.
+	Charset, Collation                string
+	Rows                              int64
+	NoPK                              []string
+	Engines                           map[string]string
+	Views, Routines, Triggers, Events int
 }
 
 // Locked voert fn uit onder het slot van de host, om de databases te
@@ -170,6 +180,9 @@ func (h *Host) mariaExec(args []string) ([]byte, error) {
 	m := h.MariaDB
 	if m == nil || m.Down {
 		return []byte("ERROR 2002 (HY000): Can't connect to local server through socket '/run/mysqld/mysqld.sock' (2)\n"), errExit1
+	}
+	if cfg, rest, ok := clientConfig(args); ok {
+		return h.remoteExec(cfg, rest)
 	}
 	i := slices.Index(args, "-e")
 	if i < 0 || i+1 >= len(args) {
@@ -262,6 +275,13 @@ func (h *Host) mariaExec(args []string) ([]byte, error) {
 			}
 		}
 	default:
+		if mrows, failed, ok := m.migrateQuery(q); ok {
+			if failed != nil {
+				return failed, errExit1
+			}
+			rows = mrows
+			break
+		}
 		r := dumpInfoRe.FindStringSubmatch(q)
 		if r == nil {
 			return []byte("ERROR 1064 (42000): agenttest kent deze query niet: " + q + "\n"), errExit1
@@ -364,6 +384,12 @@ func (h *Host) mariaWrite(stdin string) ([]byte, error) {
 			r := dropUserRe.FindStringSubmatch(line)
 			m.Users = slices.DeleteFunc(m.Users, func(u MariaUser) bool { return u.User == r[1] && u.Host == r[2] })
 		default:
+			if out, err, ok := m.migrateWrite(line, fail); ok {
+				if err != nil {
+					return out, err
+				}
+				continue
+			}
 			return fail("1064 (42000)", "agenttest kent deze opdracht niet")
 		}
 	}
@@ -477,6 +503,7 @@ func (h *Host) mariaDump(args []string) ([]byte, error) {
 		fmt.Fprintf(&b, "\n--\n-- Table structure for table `t%d`\n--\n\nDROP TABLE IF EXISTS `t%d`;\n", t+1, t+1)
 		fmt.Fprintf(&b, "CREATE TABLE `t%d` (`id` int NOT NULL, PRIMARY KEY (`id`));\nINSERT INTO `t%d` VALUES (1);\n", t+1, t+1)
 	}
+	fmt.Fprintf(&b, "-- agenttest: rows=%d views=%d routines=%d triggers=%d events=%d\n", d.rows(), d.Views, d.Routines, d.Triggers, d.Events)
 	if pad := min(d.Size/4096, 256<<10); pad > 0 {
 		fmt.Fprintf(&b, "-- %s\n", strings.Repeat("x", int(pad)))
 	}
@@ -503,5 +530,15 @@ func (h *Host) mariaRestore(args []string, dump []byte) error {
 	}
 	m.Databases[i].Tables = strings.Count(string(dump), "-- Table structure for table `")
 	m.Databases[i].Size = int64(len(dump))
+	if r := metaRe.FindStringSubmatch(string(dump)); r != nil {
+		d := &m.Databases[i]
+		d.Rows, _ = strconv.ParseInt(r[1], 10, 64)
+		d.Views, d.Routines, d.Triggers, d.Events = atoi(r[2]), atoi(r[3]), atoi(r[4]), atoi(r[5])
+	}
 	return nil
+}
+
+func atoi(s string) int {
+	n, _ := strconv.Atoi(s)
+	return n
 }

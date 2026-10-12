@@ -48,6 +48,8 @@ const (
 	Blocked = "blocked"
 	// Warning: het kan, maar Jonas moet het weten.
 	Warning = "warning"
+	// Info: goed om te weten, zonder dat er iets moet.
+	Info = "info"
 )
 
 // Finding is een bevinding van het plan, eventueel bij een node, met een

@@ -64,6 +64,7 @@ func newGaleraLab(t *testing.T) galeraLab {
 			g.hosts[name] = h
 			h.SetAfter(g.after(name, h))
 			ag.Exec, ag.ExecStdin, ag.Stream, ag.Root, ag.Collector.Run = h.Exec, h.ExecStdin, h.Stream, root, h.Exec
+			ag.Dial = h.Dial
 			dirs[name] = filepath.Join(root, "var/backups/clusterforge-db")
 			ag.DumpDir = dirs[name]
 			ag.Now = func() time.Time {

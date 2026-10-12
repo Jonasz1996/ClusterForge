@@ -101,6 +101,91 @@ func (ns NullDbDumpStatus) Value() (driver.Value, error) {
 	return string(ns.DbDumpStatus), nil
 }
 
+type DbMigrationKind string
+
+const (
+	DbMigrationKindTrial   DbMigrationKind = "trial"
+	DbMigrationKindMigrate DbMigrationKind = "migrate"
+)
+
+func (e *DbMigrationKind) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = DbMigrationKind(s)
+	case string:
+		*e = DbMigrationKind(s)
+	default:
+		return fmt.Errorf("unsupported scan type for DbMigrationKind: %T", src)
+	}
+	return nil
+}
+
+type NullDbMigrationKind struct {
+	DbMigrationKind DbMigrationKind
+	Valid           bool // Valid is true if DbMigrationKind is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullDbMigrationKind) Scan(value interface{}) error {
+	if value == nil {
+		ns.DbMigrationKind, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.DbMigrationKind.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullDbMigrationKind) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.DbMigrationKind), nil
+}
+
+type DbMigrationStatus string
+
+const (
+	DbMigrationStatusRunning DbMigrationStatus = "running"
+	DbMigrationStatusOk      DbMigrationStatus = "ok"
+	DbMigrationStatusFailed  DbMigrationStatus = "failed"
+)
+
+func (e *DbMigrationStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = DbMigrationStatus(s)
+	case string:
+		*e = DbMigrationStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for DbMigrationStatus: %T", src)
+	}
+	return nil
+}
+
+type NullDbMigrationStatus struct {
+	DbMigrationStatus DbMigrationStatus
+	Valid             bool // Valid is true if DbMigrationStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullDbMigrationStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.DbMigrationStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.DbMigrationStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullDbMigrationStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.DbMigrationStatus), nil
+}
+
 type Environment string
 
 const (
@@ -480,6 +565,33 @@ type DbDump struct {
 	RequestedBy    *uuid.UUID
 }
 
+type DbMigration struct {
+	ID             uuid.UUID
+	Kind           DbMigrationKind
+	ComponentID    uuid.UUID
+	ClusterID      uuid.UUID
+	SourceKey      string
+	SourceName     string
+	SourceNode     string
+	SourceAddress  string
+	Database       string
+	TargetDatabase string
+	TargetNode     string
+	Status         DbMigrationStatus
+	StartedAt      time.Time
+	FinishedAt     *time.Time
+	SizeBytes      int64
+	DumpBytes      int64
+	ImportMs       *int64
+	CountMs        *int64
+	Tables         []byte
+	Objects        []byte
+	Differences    int32
+	Message        string
+	JobID          *uuid.UUID
+	RequestedBy    *uuid.UUID
+}
+
 type DbServer struct {
 	NodeID         uuid.UUID
 	Engine         string
@@ -494,6 +606,14 @@ type DbServer struct {
 	ErrorKind      string
 	SyncedAt       time.Time
 	OkAt           *time.Time
+}
+
+type DeployDatabase struct {
+	ClusterID   uuid.UUID
+	Engine      string
+	JobID       *uuid.UUID
+	RequestedBy *uuid.UUID
+	CreatedAt   time.Time
 }
 
 type DisasterScenario struct {

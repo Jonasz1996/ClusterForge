@@ -3144,6 +3144,52 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/databases/migration": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Het plan om een database naar de database van een cluster te verhuizen
+         * @description Bekijkt de database op de oude server (alleen de catalogus: grootte, tabellen met engine en primaire sleutel, views,
+         *     routines, triggers en events) en laat de importerende node van het nieuwe cluster de begroeting van de oude MariaDB
+         *     lezen, zonder in te loggen. Zonder component kiest het plan het cluster waarvan de app de database nu al gebruikt, als
+         *     dat er één is. Met de bevindingen en de vorige proeven. Er verandert niets. Ook voor viewers.
+         */
+        get: operations["getDatabaseMigration"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/databases/migration/trial": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Een proefverhuizing beginnen (admin); wordt een taak
+         * @description Maakt op de oude server een tijdelijke gebruiker die alleen deze database mag lezen, laat de nieuwe node de dump
+         *     ophalen en importeren in <database>_proef terwijl de app doorwerkt, telt de rijen aan beide kanten, haalt de kopie en
+         *     de gebruiker weer weg en bewaart hoe lang het duurde. Het wachtwoord van de tijdelijke gebruiker bewaart ClusterForge
+         *     nergens. 409 als het plan iets tegenhoudt of er al een proef van deze database loopt.
+         */
+        post: operations["startDatabaseMigrationTrial"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/kubernetes/clusters": {
         parameters: {
             query?: never;
@@ -4311,7 +4357,7 @@ export interface components {
             params: components["schemas"]["TemplateParam"][];
         };
         ComponentFinding: {
-            /** @description blocked of warning */
+            /** @description blocked, warning of info */
             level: string;
             code: string;
             /** Format: uuid */
@@ -4320,6 +4366,178 @@ export interface components {
             message: string;
             /** @description Een commando dat het oplost; leeg als er geen is */
             command: string;
+        };
+        DatabaseMigrationInput: {
+            source: string;
+            database: string;
+            /** Format: uuid */
+            component_id: string;
+        };
+        DatabaseMigrationPlan: {
+            source: components["schemas"]["DatabaseMigrationSource"];
+            database: string;
+            /** @description Wat de oude server over de database weet; null als hij niet te lezen was */
+            info: components["schemas"]["DatabaseMigrationInfo"] | null;
+            /** @description Wie de database de laatste 30 dagen gebruikte */
+            clients: components["schemas"]["DatabaseUser"][];
+            targets: components["schemas"]["DatabaseMigrationOption"][];
+            target: components["schemas"]["DatabaseMigrationTarget"] | null;
+            reach: components["schemas"]["DatabaseMigrationReach"] | null;
+            findings: components["schemas"]["ComponentFinding"][];
+            blocked: boolean;
+            runs: components["schemas"]["DatabaseMigrationRun"][];
+            /** @description Een proef of verhuizing van deze database die nu loopt */
+            active: components["schemas"]["ComponentDumpJob"] | null;
+        };
+        DatabaseMigrationSource: {
+            key: string;
+            name: string;
+            /** Format: uuid */
+            cluster_id: string | null;
+            engine: string;
+            kind: string;
+            version: string;
+            summary: string;
+            servers: string[];
+            /** @description De server waarop ClusterForge de database bekijkt en de tijdelijke gebruiker maakt; leeg als er geen is */
+            node: string;
+            /** @description Het adres waarmee de nieuwe node de oude server bereikt; leeg zolang dat niet bekeken is */
+            address: string;
+            port: number;
+            /** @description node (rechtstreeks) of vip; leeg zolang dat niet bekeken is */
+            via: string;
+        };
+        DatabaseMigrationInfo: {
+            version: string;
+            charset: string;
+            collation: string;
+            /**
+             * Format: int64
+             * @description De data en indexen van alle tabellen
+             */
+            size_bytes: number;
+            tables: number;
+            /**
+             * Format: int64
+             * @description De schatting van InnoDB
+             */
+            rows: number;
+            views: number;
+            routines: number;
+            triggers: number;
+            events: number;
+        };
+        DatabaseMigrationOption: {
+            /** Format: uuid */
+            cluster_id: string;
+            cluster_name: string;
+            /** Format: uuid */
+            component_id: string;
+            /** @description De app van dit cluster gebruikt de database nu al */
+            suggested: boolean;
+        };
+        DatabaseMigrationTarget: {
+            /** Format: uuid */
+            cluster_id: string;
+            cluster_name: string;
+            /** Format: uuid */
+            component_id: string;
+            /** @description De node die importeert */
+            node: string;
+            version: string;
+            /** @description Waar de app de database straks vindt */
+            address: string;
+            port: number;
+            /** @description Waarvandaan de tijdelijke gebruiker mag inloggen */
+            hosts: string[];
+            /** Format: int64 */
+            buffer_pool_bytes: number;
+            /**
+             * Format: int64
+             * @description Wat er al aan databases staat
+             */
+            data_bytes: number;
+            disks: components["schemas"]["DatabaseMigrationDisk"][];
+            /** @description De database staat er al */
+            exists: boolean;
+        };
+        DatabaseMigrationDisk: {
+            hostname: string;
+            mount: string;
+            /** Format: int64 */
+            free_bytes: number;
+        };
+        DatabaseMigrationReach: {
+            reached: boolean;
+            version: string;
+            tls: boolean;
+            /** @description De fout die MariaDB meteen stuurde, zoals 1130; 0 zonder */
+            code: number;
+            error: string;
+        };
+        DatabaseMigrationRun: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            kind: "trial" | "migrate";
+            /** @enum {string} */
+            status: "running" | "ok" | "failed";
+            /** Format: uuid */
+            cluster_id: string;
+            cluster_name: string;
+            /** Format: uuid */
+            component_id: string;
+            source_name: string;
+            source_node: string;
+            source_address: string;
+            database: string;
+            target_database: string;
+            target_node: string;
+            /** Format: date-time */
+            started_at: string;
+            /** Format: date-time */
+            finished_at: string | null;
+            /** Format: int64 */
+            size_bytes: number;
+            /**
+             * Format: int64
+             * @description De SQL die over het netwerk kwam
+             */
+            dump_bytes: number;
+            /**
+             * Format: int64
+             * @description Ophalen en importeren
+             */
+            import_ms: number | null;
+            /**
+             * Format: int64
+             * @description Daarna de rijen tellen aan beide kanten
+             */
+            count_ms: number | null;
+            tables: number;
+            /** Format: int64 */
+            rows_source: number;
+            /** Format: int64 */
+            rows_target: number;
+            /** @description De tabellen met een ander aantal rijen */
+            differences: components["schemas"]["DatabaseMigrationCount"][];
+            objects: components["schemas"]["DatabaseMigrationObjects"][];
+            message: string;
+            /** Format: uuid */
+            job_id: string | null;
+        };
+        DatabaseMigrationCount: {
+            name: string;
+            /** Format: int64 */
+            source: number;
+            /** Format: int64 */
+            target: number;
+        };
+        DatabaseMigrationObjects: {
+            /** @description views, routines, triggers of events */
+            kind: string;
+            source: number;
+            target: number;
         };
         /** @description Eén databasecluster, de servers van één engine in één cluster, of één losse node. */
         DatabaseGroup: {
@@ -8586,6 +8804,16 @@ export interface components {
             target: components["schemas"]["DeployTarget"];
             /** @description Het adres waarmee de nieuwe nodes ClusterForge bereiken */
             server_url: string;
+            database?: components["schemas"]["DeployDatabase"];
+        };
+        /**
+         * @description Database erbij: als de uitrol lukt, zet ClusterForge deze database op alle nodes van het nieuwe cluster, zoals
+         *     'Database toevoegen', om er een app naartoe te verhuizen. Houdt het plan haar tegen, dan staat de reden in het
+         *     logboek (cluster.database_not_added).
+         */
+        DeployDatabase: {
+            /** @description mariadb; postgresql komt later */
+            engine: string;
         };
         DeployPlanNode: {
             hostname: string;
@@ -13867,6 +14095,64 @@ export interface operations {
                 };
             };
             401: components["responses"]["Error"];
+        };
+    };
+    getDatabaseMigration: {
+        parameters: {
+            query: {
+                /** @description De sleutel van de server onder Databases, zoals mariadb/<cluster> */
+                source: string;
+                database: string;
+                /** @description De database van het nieuwe cluster */
+                component?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DatabaseMigrationPlan"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    startDatabaseMigrationTrial: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DatabaseMigrationInput"];
+            };
+        };
+        responses: {
+            /** @description Taak aangemaakt */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Job"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
         };
     };
     listKubeClusters: {

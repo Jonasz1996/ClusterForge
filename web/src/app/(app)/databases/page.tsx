@@ -121,6 +121,11 @@ function GroupCard({ g }: { g: DatabaseGroup }) {
                 <th className={`${thClass} text-right`}>Grootte</th>
                 <th className={`${thClass} text-right`}>Tabellen</th>
                 <th className={thClass}>Gebruikt door</th>
+                {g.engine === "mariadb" && (
+                  <th className={thClass}>
+                    <span className="sr-only">Verhuizen</span>
+                  </th>
+                )}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -139,6 +144,17 @@ function GroupCard({ g }: { g: DatabaseGroup }) {
                   <td className={`${tdClass} min-w-64`}>
                     <Users d={d} g={g} />
                   </td>
+                  {g.engine === "mariadb" && (
+                    <td className={`${tdClass} whitespace-nowrap text-right`}>
+                      <Link
+                        href={`/databases/verhuizen?source=${encodeURIComponent(g.key)}&db=${encodeURIComponent(d.name)}`}
+                        className="text-brand-700 hover:underline dark:text-sky-300"
+                        title="Toon wat er mee moet om deze database naar de nodes van een app te verhuizen, en doe een proef."
+                      >
+                        Verhuizen…
+                      </Link>
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>

@@ -79,6 +79,7 @@ Het technisch ontwerp staat in [docs/design/mvp-fase-1.md](docs/design/mvp-fase-
 | 5. Opkomen na een herstart | ClusterForge kijkt om de 20 seconden of de database draait. Na een volledige uitval, zoals een reboot van alle nodes, begint het het Galera-cluster vanzelf opnieuw op de node met de nieuwste data (uit `grastate.dat`, of na een crash met `galera_recovery`), maar alleen als alle nodes er zijn en MariaDB nergens meer start; ontbreekt er een, dan wacht het en kies je zelf Opnieuw starten, met een plan per node. Een node die niet startte terwijl het cluster draait, start het daar opnieuw. Getest met drie echte MariaDB-containers | klaar |
 | 6. Databases en gebruikers | Bij **Databases en gebruikers** op de kaart Database staan de databases met grootte, tabellen en verbindingen, en de gebruikers met hun hosts en rechten, zonder wachtwoord. **Database aanmaken** maakt een database met een eigen gebruiker en een sterk wachtwoord dat één keer op het scherm staat, samen met wat de app nodig heeft; ClusterForge bewaart het niet. **Nieuw wachtwoord** en **Weghalen** (met de naam ter bevestiging, op prod ook de slug en tweestapsverificatie). Getest tegen een echte MariaDB 11.8 | klaar |
 | 7. Back-ups van de databases | Elke nacht om 02:00 een dump van elke database, op een node zonder het VIP, met zstd in `/var/backups/clusterforge-db` (alleen voor root) en zeven dagen bewaard. ClusterForge controleert elke dump: compleet, alle tabellen, en niet meer dan de helft kleiner dan de vorige. Bij Back-ups en op de pagina Databases en gebruikers staat per database de leeftijd van de nieuwste goede dump. **Dump nu** voor één database, en **Terugzetten** in een nieuwe database naast de bestaande, als `<naam>_herstel_<datum>`. Getest tegen een echte MariaDB 11.8 | klaar |
+| 8. Verhuizen: plan en proef | Bij Databases **Verhuizen…** naast elke MariaDB-database: een plan met de grootte, tabellen en objecten, wie de database gebruikt, het cluster waar ze naartoe gaat en wat in de weg staat, zoals tabellen zonder primaire sleutel of MyISAM (met de commando's), een firewall tussen de nodes, te weinig schijf of een te kleine buffer pool. De **proefverhuizing** importeert een kopie als `<naam>_proef` terwijl de app doorwerkt, telt de rijen en objecten aan beide kanten, meet hoe lang het duurde en haalt de kopie weer weg. **Database erbij** bij Cluster uitrollen zet na de uitrol meteen MariaDB Galera op de nodes. Getest met een echte MariaDB 10.11 als oude server en 11.8 als nieuwe | klaar |
 
 ## Draaien met Docker Compose
 
@@ -295,6 +296,8 @@ Klik bij Clusters op "Cluster uitrollen", kies de template en vul de naam, de pa
 3. Per node de stappen van de template: pakketten, bestanden en services. Elke stap meldt of hij iets veranderde.
 4. Controleren: een node heeft het VIP, bij Nginx met keepalived en Eigen applicatie antwoordt het VIP over HTTP, en bij Kubernetes geeft Traefik 404 op het VIP.
 5. De nodes worden actief en tellen mee voor de status van het cluster.
+
+Vink je **Database erbij** aan (niet bij Kubernetes), dan zet ClusterForge na een gelukte uitrol MariaDB Galera op alle nodes van het nieuwe cluster, zoals [Database toevoegen](#een-database-op-de-nodes-van-een-cluster) dat doet, om er daarna een database naartoe te [verhuizen](#een-database-verhuizen). Galera heeft minstens drie nodes nodig; met minder, of als het plan iets anders blokkeert, komt de database er niet en staat de reden in het logboek.
 
 Loopt een stap mis, dan staat bij de taak waarom. Los het op en klik op "Opnieuw proberen"; de taak gaat verder bij de stap die misliep. Wil je het cluster niet meer, verwijder dan het cluster en de nodes, en de VM's in Proxmox; ClusterForge ruimt in deze versie niets vanzelf op. Geheimen van een template, zoals het VRRP-wachtwoord, staan versleuteld met `CF_MASTER_KEY` in de database en nooit in de taak of het logboek.
 
@@ -766,7 +769,7 @@ De naam van het Galera-cluster is de slug van het cluster. SST gebruikt de gebru
 
 Daarna kent de drift de database: een met de hand aangepaste `99-clusterforge-galera.cnf` valt op, ook op een cluster zonder template of baseline. **Opnieuw toepassen** zet alles terug, node voor node; alleen op een node waar iets veranderde, herstart MariaDB, en ClusterForge wacht tot hij weer Synced is. Mislukt de taak, dan blijft staan wat al klaar was; los het op en kies Opnieuw toepassen. **Weghalen** kan zolang de database nooit helemaal gelukt is, en haalt haar alleen uit ClusterForge, niet van de nodes.
 
-De app verbindt nog met haar oude database; verhuizen komt in een volgende mijlpaal.
+De app verbindt nog met haar oude database. Hoe je die verhuist, staat onder [Een database verhuizen](#een-database-verhuizen).
 
 #### Het VIP van de app
 
@@ -858,11 +861,51 @@ mariadb -e "CREATE DATABASE nextcloud_test"
 zstd -dc /var/backups/clusterforge-db/nextcloud/nextcloud-20261012-020000.sql.zst | mariadb nextcloud_test
 ```
 
+### Een database verhuizen
+
+Bij **Databases** staat naast elke MariaDB-database **Verhuizen…**. Dat opent het plan om haar van de oude server, zoals een gedeeld databasecluster, naar de MariaDB op de nodes van de app te brengen. Het plan verandert niets en een kijker ziet het ook.
+
+- **Van**: de grootte van de data en indexen, het aantal tabellen en rijen, de views, routines, triggers en events, de tekenset en de versie. ClusterForge leest de database op een node van de oude server die het VIP niet heeft, zodat de app er niets van merkt, en toont wie de database de laatste dertig dagen gebruikte.
+- **Naar**: de clusters met een MariaDB van ClusterForge. Gebruikt de app van een cluster de database nu al, dan staat dat cluster gekozen. Je ziet de node die importeert, zijn versie, het adres waar de app de database straks vindt, de buffer pool, de vrije schijf op elke node en of de nieuwe node de oude server echt bereikt.
+- **Controle**: wat blokkeert, wat aandacht vraagt en wat goed is om te weten.
+
+Wat blokkeert: de database bestaat niet, de oude server draait niet goed genoeg om van te lezen, een agent is te oud, het is hetzelfde cluster, de nieuwe node bereikt poort 3306 van de oude server niet (een firewall of `bind-address`; er staat bij welke poort van welke adressen open moet), MariaDB weigert de node, bijvoorbeeld na te veel mislukte verbindingen (dan staat `mariadb-admin flush-hosts` erbij), de nieuwe MariaDB is ouder dan de oude, een andere database heet al `<naam>_proef`, er loopt al een proef, of er is niet genoeg schijf voor de data plus 1 GB.
+
+Wat aandacht vraagt, laat de proef wel door:
+
+- **tabellen zonder primaire sleutel**: Galera repliceert die slecht of niet. Voor Nextcloud lost `sudo -u www-data php occ db:add-missing-primary-keys` het op; anders staat er welke tabellen het zijn.
+- **MyISAM of een andere engine dan InnoDB**: Galera repliceert alleen InnoDB. Het plan geeft per tabel de `ALTER TABLE … ENGINE=InnoDB`.
+- **ook andere apps gebruiken de database**: die moeten mee verhuizen of eerst een eigen database krijgen.
+- **de database staat er al** op het nieuwe cluster, of de oude server draait MySQL in plaats van MariaDB.
+- **krappe schijf** (minder dan twee keer de data) of **een te kleine buffer pool** voor de data die er al staat plus deze database; dan wordt de app trager tot je `innodb_buffer_pool_size` groter maakt.
+
+Goed om te weten: het verkeer gaat via het VIP van de oude server, zonder TLS, de versie gaat omhoog, of een vorige proef liet een kopie achter die de volgende proef eerst weghaalt.
+
+#### Proefverhuizing
+
+**Proefverhuizing starten** (alleen een beheerder) doet de verhuizing zonder dat de app iets merkt, om te zien of het lukt en hoe lang het duurt:
+
+1. Controle: het plan opnieuw, met dezelfde blokkades.
+2. Een kopie van een vorige proef weghalen, als die er nog is.
+3. Op de oude server maakt de agent een tijdelijke gebruiker `cf_verhuizing_<nummer>` met een willekeurig wachtwoord, die alleen mag lezen (`SELECT`, `SHOW VIEW`, en zo nodig `TRIGGER`, `EVENT` en het lezen van de routines) en alleen vanaf de adressen van de nieuwe node. De nieuwe node haalt de database met `mariadb-dump --single-transaction` en zet haar meteen in `<naam>_proef`; er komt geen bestand op schijf. Daarna haalt de agent de tijdelijke gebruiker weer weg, ook als de proef mislukt of je ze annuleert.
+4. Rijen en objecten vergelijken: ClusterForge telt de rijen van elke tabel aan beide kanten, en de views, routines, triggers en events. Een paar rijen verschil is normaal, want de app schrijft intussen verder; ontbreekt er een tabel of object, dan is de proef mislukt.
+5. `<naam>_proef` weghalen.
+
+Het verslag staat onder **Proeven**: hoe lang ophalen en importeren duurde, hoe lang het tellen duurde, hoeveel SQL over het netwerk kwam, de rijen oud en nieuw, de tabellen met een ander aantal en een mislukte stap met de reden. Zo weet je hoe lang de app straks in onderhoud moet. Het wachtwoord van de tijdelijke gebruiker bewaart ClusterForge nergens: niet in de taak, het logboek of het verslag. Het echte verhuizen, met de app in onderhoud, komt in de volgende mijlpaal.
+
+Met de hand op de oude server, om te zien of er nog een tijdelijke gebruiker staat:
+
+```sh
+mariadb -e "SELECT User, Host FROM mysql.user WHERE User LIKE 'cf\_verhuizing\_%'"
+```
+
 ### Hoe ClusterForge de databases leest
 
 cf-agent doet het op de node zelf, als root via de socket: `mariadb` voor MariaDB en `psql` als de gebruiker postgres voor PostgreSQL, en de REST-API van Patroni op `127.0.0.1:8008`. Er is dus geen databasegebruiker of wachtwoord voor ClusterForge nodig en poort 3306 of 5432 hoeft niet open. De agent stelt alleen vaste query's op de systeemtabellen, zoals `SHOW GLOBAL STATUS` en `pg_stat_replication`; hij leest nooit de inhoud van een tabel en neemt geen SQL van de server aan. Een database of gebruiker aanmaken of weghalen gaat met vaste opdrachten die de agent zelf maakt, alleen met namen van kleine letters, cijfers en `_`; het wachtwoord gaat via stdin naar `mariadb`, zodat het nooit in `ps` staat, en een foutmelding komt terug zonder wachtwoord. Hij doet hoogstens twee verzoeken tegelijk, elk hoogstens 30 seconden, en telt de tabellen van hoogstens 100 databases.
 
 Een dump en terugzetten lopen op de agent op de achtergrond, één tegelijk per node, en ClusterForge vraagt elke paar seconden hoe ver ze zijn. De agent start `mariadb-dump` (of `mysqldump`) met vaste opties en schrijft eerst naar een `.partial`-bestand dat pas na de controle zijn naam krijgt; naast elke dump staat een klein `.json`-bestand met de grootte en de controle. Terugzetten doet `CREATE DATABASE` voor een naam die nog niet bestaat en stuurt de dump door `mariadb`; de agent schrijft nooit in een database die er al was.
+
+Bij een proefverhuizing praat de nieuwe node over het netwerk met de oude server, als de tijdelijke gebruiker. Het wachtwoord staat alleen in een optiebestand in een eigen map van de agent (modus 0700), dat hij na afloop weghaalt, en dus nooit in `ps`. Kan de oude server TLS, dan gebruikt de agent het, zonder het certificaat te controleren, want dat is meestal zelfgemaakt. Een MariaDB ouder dan 11.3 kent het recht `SHOW CREATE ROUTINE` niet; dan krijgt de tijdelijke gebruiker `SELECT` op `mysql.proc` om de routines te lezen. De agent importeert één database tegelijk, en ClusterForge vraagt elke paar seconden hoe ver hij is.
 
 Dit kan vanaf **agentprotocol 9**. Met een oudere agent toont de pagina het commando om hem bij te werken:
 
