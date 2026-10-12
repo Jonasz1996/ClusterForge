@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/google/uuid"
 	"github.com/oapi-codegen/nullable"
 
 	"github.com/Jonasz1996/clusterforge/internal/components"
@@ -43,8 +44,92 @@ func (s *Server) StartDatabaseMigrationTrial(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, http.StatusAccepted, toAPIJob(j, &p.User.Username))
 }
 
+// StartDatabaseMove begint de echte verhuizing; raakt ze een prodcluster,
+// dan met de slug en tweestapsverificatie.
+func (s *Server) StartDatabaseMove(w http.ResponseWriter, r *http.Request) {
+	p, ok := requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	var in gen.DatabaseMoveInput
+	if !decode(w, r, &in) {
+		return
+	}
+	ctx := r.Context()
+	prod, slug, err := s.components.MoveProd(ctx, in.Source, in.ComponentId)
+	if err != nil {
+		s.migrationError(w, r, err)
+		return
+	}
+	if !confirmProd(w, p, prod, slug, in.Confirm, "een database verhuizen") {
+		return
+	}
+	j, err := s.components.StartMove(ctx, events.User(p.User.ID), in.Source, in.Database, in.ComponentId, in.Force != nil && *in.Force)
+	if err != nil {
+		s.migrationError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, toAPIJob(j, &p.User.Username))
+}
+
+// SwitchDatabaseMove: de app draait op de nieuwe database; de oude gaat op
+// slot.
+func (s *Server) SwitchDatabaseMove(w http.ResponseWriter, r *http.Request, id uuid.UUID) {
+	p, ok := requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	var in gen.SwitchDatabaseMoveJSONBody
+	if r.ContentLength != 0 && !decode(w, r, &in) {
+		return
+	}
+	row, err := s.components.SwitchMove(r.Context(), events.User(p.User.ID), id, in.Force != nil && *in.Force)
+	if err != nil {
+		s.migrationError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, toAPIMigrationRun(row.DbMigration, row.ClusterName))
+}
+
+// CancelDatabaseMove haalt de kopie van een verhuizing weer weg.
+func (s *Server) CancelDatabaseMove(w http.ResponseWriter, r *http.Request, id uuid.UUID) {
+	p, ok := requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	var in gen.CancelDatabaseMoveJSONBody
+	if !decode(w, r, &in) {
+		return
+	}
+	row, err := s.components.CancelMove(r.Context(), events.User(p.User.ID), id, in.Confirm)
+	if err != nil {
+		s.migrationError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, toAPIMigrationRun(row.DbMigration, row.ClusterName))
+}
+
+// LockDatabaseMove zet de oude database van een verhuisde app op slot, of
+// haalt het slot eraf.
+func (s *Server) LockDatabaseMove(w http.ResponseWriter, r *http.Request, id uuid.UUID) {
+	p, ok := requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	var in gen.LockDatabaseMoveJSONBody
+	if !decode(w, r, &in) {
+		return
+	}
+	row, err := s.components.LockMove(r.Context(), events.User(p.User.ID), id, in.Locked)
+	if err != nil {
+		s.migrationError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, toAPIMigrationRun(row.DbMigration, row.ClusterName))
+}
+
 func (s *Server) migrationError(w http.ResponseWriter, r *http.Request, err error) {
-	if errors.Is(err, components.ErrSourceNotFound) {
+	if errors.Is(err, components.ErrSourceNotFound) || errors.Is(err, components.ErrMigrationNotFound) {
 		writeError(w, http.StatusNotFound, "not_found", err.Error())
 		return
 	}
@@ -55,14 +140,26 @@ func toAPIMigrationPlan(p components.MigrationPlan) gen.DatabaseMigrationPlan {
 	src := p.Source
 	out := gen.DatabaseMigrationPlan{
 		Source: gen.DatabaseMigrationSource{
-			Key: src.Key, Name: src.Name, ClusterId: nullableOf(src.ClusterID), Engine: src.Engine, Kind: src.Kind, Version: src.Version,
-			Summary: src.Summary, Servers: nonNil(src.Servers), Address: src.Address, Port: src.Port, Via: src.Via,
+			Key: src.Key, Name: src.Name, ClusterId: nullableOf(src.ClusterID), Slug: src.Slug, Environment: src.Environment, Engine: src.Engine,
+			Kind: src.Kind, Version: src.Version, Summary: src.Summary, Servers: nonNil(src.Servers), Address: src.Address, Port: src.Port, Via: src.Via,
 		},
 		Database: p.Database, Info: nullable.NewNullNullable[gen.DatabaseMigrationInfo](),
 		Clients: make([]gen.DatabaseUser, 0, len(p.Clients)), Targets: make([]gen.DatabaseMigrationOption, 0, len(p.Targets)),
 		Target: nullable.NewNullNullable[gen.DatabaseMigrationTarget](), Reach: nullable.NewNullNullable[gen.DatabaseMigrationReach](),
 		Findings: make([]gen.ComponentFinding, 0, len(p.Findings)), Blocked: p.Blocked, Runs: make([]gen.DatabaseMigrationRun, 0, len(p.Runs)),
-		Active: nullable.NewNullNullable[gen.ComponentDumpJob](),
+		Active: nullable.NewNullNullable[gen.ComponentDumpJob](), Accounts: make([]gen.DatabaseMigrationAccount, 0, len(p.Accounts)),
+		NewHosts: nonNil(p.NewHosts), Connections: make([]gen.DatabaseMigrationConnection, 0, len(p.Connections)),
+		MoveFindings: toAPIFindings(p.MoveFindings), MoveBlocked: p.MoveBlocked,
+	}
+	for _, a := range p.Accounts {
+		out.Accounts = append(out.Accounts, gen.DatabaseMigrationAccount{
+			User: a.User, Host: a.Host, Plugin: a.Plugin, Privileges: nonNil(a.Privileges), Global: a.Global,
+		})
+	}
+	for _, c := range p.Connections {
+		out.Connections = append(out.Connections, gen.DatabaseMigrationConnection{
+			Server: c.Server, User: c.User, Address: c.Address, Hostname: c.Hostname, Count: c.Count,
+		})
 	}
 	if src.Node != nil {
 		out.Source.Node = src.Node.Hostname
@@ -88,7 +185,7 @@ func toAPIMigrationPlan(p components.MigrationPlan) gen.DatabaseMigrationPlan {
 	}
 	if t := p.Target; t != nil {
 		tg := gen.DatabaseMigrationTarget{
-			ClusterId: t.ClusterID, ClusterName: t.ClusterName, ComponentId: t.ComponentID, Node: t.Node.Hostname, Version: t.Version,
+			ClusterId: t.ClusterID, ClusterName: t.ClusterName, Slug: t.Slug, Environment: t.Environment, ComponentId: t.ComponentID, Node: t.Node.Hostname, Version: t.Version,
 			Address: t.Address, Port: t.Port, Hosts: nonNil(t.Hosts), BufferPoolBytes: t.BufferPoolBytes, DataBytes: t.DataBytes,
 			Disks: make([]gen.DatabaseMigrationDisk, 0, len(t.Disks)), Exists: t.Exists,
 		}
@@ -100,16 +197,22 @@ func toAPIMigrationPlan(p components.MigrationPlan) gen.DatabaseMigrationPlan {
 	if r := p.Reach; r != nil {
 		out.Reach = nullable.NewNullableWithValue(gen.DatabaseMigrationReach{Reached: r.Reached, Version: r.Version, Tls: r.TLS, Code: r.Code, Error: r.Error})
 	}
-	for _, f := range p.Findings {
-		out.Findings = append(out.Findings, gen.ComponentFinding{
-			Level: f.Level, Code: f.Code, NodeId: nullableOf(f.NodeID), Hostname: f.Hostname, Message: f.Message, Command: f.Command,
-		})
-	}
+	out.Findings = toAPIFindings(p.Findings)
 	for _, r := range p.Runs {
 		out.Runs = append(out.Runs, toAPIMigrationRun(r.DbMigration, r.ClusterName))
 	}
 	if a := p.Active; a != nil {
 		out.Active = nullable.NewNullableWithValue(gen.ComponentDumpJob{JobId: a.ID, Kind: a.Kind, Title: a.Title})
+	}
+	return out
+}
+
+func toAPIFindings(in []components.Finding) []gen.ComponentFinding {
+	out := make([]gen.ComponentFinding, 0, len(in))
+	for _, f := range in {
+		out = append(out, gen.ComponentFinding{
+			Level: f.Level, Code: f.Code, NodeId: nullableOf(f.NodeID), Hostname: f.Hostname, Message: f.Message, Command: f.Command,
+		})
 	}
 	return out
 }
@@ -121,6 +224,17 @@ func toAPIMigrationRun(m store.DbMigration, clusterName string) gen.DatabaseMigr
 		Database: m.Database, TargetDatabase: m.TargetDatabase, TargetNode: m.TargetNode, StartedAt: m.StartedAt, FinishedAt: nullableOf(m.FinishedAt),
 		SizeBytes: m.SizeBytes, DumpBytes: m.DumpBytes, ImportMs: nullableOf(m.ImportMs), CountMs: nullableOf(m.CountMs),
 		Differences: []gen.DatabaseMigrationCount{}, Objects: []gen.DatabaseMigrationObjects{}, Message: m.Message, JobId: nullableOf(m.JobID),
+		Stage: m.Stage, Accounts: []gen.DatabaseMigrationMovedUser{}, Force: m.Force, TargetAddress: m.TargetAddress,
+		CopiedAt: nullableOf(m.CopiedAt), SwitchedAt: nullableOf(m.SwitchedAt), Locked: m.Locked,
+	}
+	var accounts []components.MoveAccount
+	_ = json.Unmarshal(m.Accounts, &accounts)
+	for _, a := range accounts {
+		u := gen.DatabaseMigrationMovedUser{User: a.User, OldHosts: []string{}, Hosts: nonNil(a.Hosts), Privileges: nonNil(a.Privileges)}
+		for _, o := range a.Old {
+			u.OldHosts = append(u.OldHosts, o.Host)
+		}
+		out.Accounts = append(out.Accounts, u)
 	}
 	var tables []protocol.DBMigrateCount
 	_ = json.Unmarshal(m.Tables, &tables)

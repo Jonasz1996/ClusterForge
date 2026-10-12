@@ -79,6 +79,15 @@ func (a *Agent) dbMigrate(ctx context.Context, req *protocol.DBMigrateRequest) p
 		}
 	case protocol.DBMigrateStatus:
 		out.Run = a.migrateRun(req.Target)
+	case protocol.DBMigrateAccounts:
+		out.Accounts, err = a.migrateAccounts(ctx, req.Database, req.Secret)
+	case protocol.DBMigrateAdopt:
+		err = a.migrateAdopt(ctx, req.Database, req.Accounts)
+	case protocol.DBMigrateLock, protocol.DBMigrateUnlock:
+		var sql string
+		if sql, err = dbsql.MigrateLock(req.Database, req.Accounts, req.Action == protocol.DBMigrateLock); err == nil {
+			err = a.writeErr(ctx, sql, "")
+		}
 	default:
 		err = fmt.Errorf("onbekende verhuisactie %q", req.Action)
 	}
@@ -140,6 +149,59 @@ func (a *Agent) migrateInspect(ctx context.Context, db string) (*protocol.DBMigr
 		info.Tables = append(info.Tables, t)
 	}
 	return info, nil
+}
+
+// migrateAccounts leest de gebruikers met rechten op db. Zonder secret is
+// de hash leeg.
+func (a *Agent) migrateAccounts(ctx context.Context, db string, secret bool) ([]protocol.DBMigrateAccount, error) {
+	q, err := dbsql.MigrateAccounts(db, secret)
+	if err != nil {
+		return nil, err
+	}
+	if err := a.needMaria(ctx); err != nil {
+		return nil, err
+	}
+	rows, err := a.maria(ctx, false, q)
+	if err != nil {
+		return nil, err
+	}
+	out := []protocol.DBMigrateAccount{}
+	for _, r := range rows {
+		if len(r) < 7 {
+			continue
+		}
+		acc := protocol.DBMigrateAccount{
+			User: r[0], Host: r[1], Plugin: r[2], Schema: r[4], Privileges: strings.Split(r[5], ","), Global: atoi(r[6]) > 0,
+		}
+		// MariaDB vóór 10.4 en MySQL 5 zetten een leeg plugin voor een
+		// gewoon wachtwoord.
+		if acc.Plugin == "" {
+			acc.Plugin = protocol.DBMigratePlugin
+		}
+		if secret {
+			acc.Hash = r[3]
+		}
+		out = append(out, acc)
+	}
+	return out, nil
+}
+
+// migrateAdopt maakt de gebruikers met hun hash, elk in een eigen opdracht
+// zodat een fout zijn hash niet kan tonen.
+func (a *Agent) migrateAdopt(ctx context.Context, db string, accounts []protocol.DBMigrateAccount) error {
+	if len(accounts) == 0 {
+		return errors.New("geen gebruikers om te maken")
+	}
+	for _, acc := range accounts {
+		sql, err := dbsql.MigrateAdopt(db, acc)
+		if err != nil {
+			return err
+		}
+		if err := a.writeErr(ctx, sql, strings.ToUpper(acc.Hash)); err != nil {
+			return fmt.Errorf("%s@%s: %w", acc.User, acc.Host, err)
+		}
+	}
+	return nil
 }
 
 func atoi(s string) int {

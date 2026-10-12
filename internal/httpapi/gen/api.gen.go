@@ -4229,6 +4229,30 @@ type DatabaseInfo struct {
 	Users []DatabaseUser `json:"users"`
 }
 
+// DatabaseMigrationAccount defines model for DatabaseMigrationAccount.
+type DatabaseMigrationAccount struct {
+	// Global Hij heeft ook rechten op alle databases
+	Global bool   `json:"global"`
+	Host   string `json:"host"`
+
+	// Plugin Hoe hij inlogt; alleen mysql_native_password gaat mee
+	Plugin     string   `json:"plugin"`
+	Privileges []string `json:"privileges"`
+	User       string   `json:"user"`
+}
+
+// DatabaseMigrationConnection defines model for DatabaseMigrationConnection.
+type DatabaseMigrationConnection struct {
+	// Address Leeg voor een verbinding van de server zelf
+	Address string `json:"address"`
+	Count   int    `json:"count"`
+
+	// Hostname De node met dat adres, als ClusterForge hem kent
+	Hostname string `json:"hostname"`
+	Server   string `json:"server"`
+	User     string `json:"user"`
+}
+
 // DatabaseMigrationCount defines model for DatabaseMigrationCount.
 type DatabaseMigrationCount struct {
 	Name   string `json:"name"`
@@ -4268,6 +4292,17 @@ type DatabaseMigrationInput struct {
 	Source      string             `json:"source"`
 }
 
+// DatabaseMigrationMovedUser defines model for DatabaseMigrationMovedUser.
+type DatabaseMigrationMovedUser struct {
+	// Hosts Zijn hosts op het nieuwe cluster
+	Hosts []string `json:"hosts"`
+
+	// OldHosts Zijn hosts op de oude server
+	OldHosts   []string `json:"old_hosts"`
+	Privileges []string `json:"privileges"`
+	User       string   `json:"user"`
+}
+
 // DatabaseMigrationObjects defines model for DatabaseMigrationObjects.
 type DatabaseMigrationObjects struct {
 	// Kind views, routines, triggers of events
@@ -4288,22 +4323,39 @@ type DatabaseMigrationOption struct {
 
 // DatabaseMigrationPlan defines model for DatabaseMigrationPlan.
 type DatabaseMigrationPlan struct {
-	// Active Een proef of verhuizing van deze database die nu loopt
-	Active  nullable.Nullable[ComponentDumpJob] `json:"active"`
-	Blocked bool                                `json:"blocked"`
+	// Accounts De gebruikers met rechten op de database op de oude server, zonder wachtwoord of hash
+	Accounts []DatabaseMigrationAccount `json:"accounts"`
+
+	// Active Een proef of verhuizing van deze database die nu kopieert
+	Active nullable.Nullable[ComponentDumpJob] `json:"active"`
+
+	// Blocked De proef kan niet
+	Blocked bool `json:"blocked"`
 
 	// Clients Wie de database de laatste 30 dagen gebruikte
-	Clients  []DatabaseUser     `json:"clients"`
-	Database string             `json:"database"`
-	Findings []ComponentFinding `json:"findings"`
+	Clients []DatabaseUser `json:"clients"`
+
+	// Connections Wie er nu met de oude database verbonden is
+	Connections []DatabaseMigrationConnection `json:"connections"`
+	Database    string                        `json:"database"`
+	Findings    []ComponentFinding            `json:"findings"`
 
 	// Info Wat de oude server over de database weet; null als hij niet te lezen was
-	Info    nullable.Nullable[DatabaseMigrationInfo]   `json:"info"`
-	Reach   nullable.Nullable[DatabaseMigrationReach]  `json:"reach"`
-	Runs    []DatabaseMigrationRun                     `json:"runs"`
-	Source  DatabaseMigrationSource                    `json:"source"`
-	Target  nullable.Nullable[DatabaseMigrationTarget] `json:"target"`
-	Targets []DatabaseMigrationOption                  `json:"targets"`
+	Info nullable.Nullable[DatabaseMigrationInfo] `json:"info"`
+
+	// MoveBlocked De echte verhuizing kan niet
+	MoveBlocked bool `json:"move_blocked"`
+
+	// MoveFindings Wat alleen de echte verhuizing aangaat; de bevindingen in findings gelden ook, behalve die over de kopie van de proef
+	MoveFindings []ComponentFinding `json:"move_findings"`
+
+	// NewHosts Waarvandaan die gebruikers op het nieuwe cluster mogen inloggen
+	NewHosts []string                                   `json:"new_hosts"`
+	Reach    nullable.Nullable[DatabaseMigrationReach]  `json:"reach"`
+	Runs     []DatabaseMigrationRun                     `json:"runs"`
+	Source   DatabaseMigrationSource                    `json:"source"`
+	Target   nullable.Nullable[DatabaseMigrationTarget] `json:"target"`
+	Targets  []DatabaseMigrationOption                  `json:"targets"`
 }
 
 // DatabaseMigrationReach defines model for DatabaseMigrationReach.
@@ -4318,9 +4370,11 @@ type DatabaseMigrationReach struct {
 
 // DatabaseMigrationRun defines model for DatabaseMigrationRun.
 type DatabaseMigrationRun struct {
-	ClusterId   openapi_types.UUID `json:"cluster_id"`
-	ClusterName string             `json:"cluster_name"`
-	ComponentId openapi_types.UUID `json:"component_id"`
+	Accounts    []DatabaseMigrationMovedUser `json:"accounts"`
+	ClusterId   openapi_types.UUID           `json:"cluster_id"`
+	ClusterName string                       `json:"cluster_name"`
+	ComponentId openapi_types.UUID           `json:"component_id"`
+	CopiedAt    nullable.Nullable[time.Time] `json:"copied_at"`
 
 	// CountMs Daarna de rijen tellen aan beide kanten
 	CountMs  nullable.Nullable[int64] `json:"count_ms"`
@@ -4332,25 +4386,38 @@ type DatabaseMigrationRun struct {
 	// DumpBytes De SQL die over het netwerk kwam
 	DumpBytes  int64                        `json:"dump_bytes"`
 	FinishedAt nullable.Nullable[time.Time] `json:"finished_at"`
-	Id         openapi_types.UUID           `json:"id"`
+
+	// Force Verhuisd terwijl er nog verbindingen met de oude database waren
+	Force bool               `json:"force"`
+	Id    openapi_types.UUID `json:"id"`
 
 	// ImportMs Ophalen en importeren
-	ImportMs       nullable.Nullable[int64]              `json:"import_ms"`
-	JobId          nullable.Nullable[openapi_types.UUID] `json:"job_id"`
-	Kind           DatabaseMigrationRunKind              `json:"kind"`
-	Message        string                                `json:"message"`
-	Objects        []DatabaseMigrationObjects            `json:"objects"`
-	RowsSource     int64                                 `json:"rows_source"`
-	RowsTarget     int64                                 `json:"rows_target"`
-	SizeBytes      int64                                 `json:"size_bytes"`
-	SourceAddress  string                                `json:"source_address"`
-	SourceName     string                                `json:"source_name"`
-	SourceNode     string                                `json:"source_node"`
-	StartedAt      time.Time                             `json:"started_at"`
-	Status         DatabaseMigrationRunStatus            `json:"status"`
-	Tables         int                                   `json:"tables"`
-	TargetDatabase string                                `json:"target_database"`
-	TargetNode     string                                `json:"target_node"`
+	ImportMs nullable.Nullable[int64]              `json:"import_ms"`
+	JobId    nullable.Nullable[openapi_types.UUID] `json:"job_id"`
+	Kind     DatabaseMigrationRunKind              `json:"kind"`
+
+	// Locked De gebruikers van de app mogen de oude database alleen nog lezen
+	Locked        bool                       `json:"locked"`
+	Message       string                     `json:"message"`
+	Objects       []DatabaseMigrationObjects `json:"objects"`
+	RowsSource    int64                      `json:"rows_source"`
+	RowsTarget    int64                      `json:"rows_target"`
+	SizeBytes     int64                      `json:"size_bytes"`
+	SourceAddress string                     `json:"source_address"`
+	SourceName    string                     `json:"source_name"`
+	SourceNode    string                     `json:"source_node"`
+
+	// Stage Bij een verhuizing: copy (kopieert), copied (wacht op overschakelen), done of cancelled; leeg bij een proef
+	Stage      string                       `json:"stage"`
+	StartedAt  time.Time                    `json:"started_at"`
+	Status     DatabaseMigrationRunStatus   `json:"status"`
+	SwitchedAt nullable.Nullable[time.Time] `json:"switched_at"`
+	Tables     int                          `json:"tables"`
+
+	// TargetAddress Waar de app de nieuwe database vindt
+	TargetAddress  string `json:"target_address"`
+	TargetDatabase string `json:"target_database"`
+	TargetNode     string `json:"target_node"`
 }
 
 // DatabaseMigrationRunKind defines model for DatabaseMigrationRun.Kind.
@@ -4362,19 +4429,23 @@ type DatabaseMigrationRunStatus string
 // DatabaseMigrationSource defines model for DatabaseMigrationSource.
 type DatabaseMigrationSource struct {
 	// Address Het adres waarmee de nieuwe node de oude server bereikt; leeg zolang dat niet bekeken is
-	Address   string                                `json:"address"`
-	ClusterId nullable.Nullable[openapi_types.UUID] `json:"cluster_id"`
-	Engine    string                                `json:"engine"`
-	Key       string                                `json:"key"`
-	Kind      string                                `json:"kind"`
-	Name      string                                `json:"name"`
+	Address     string                                `json:"address"`
+	ClusterId   nullable.Nullable[openapi_types.UUID] `json:"cluster_id"`
+	Engine      string                                `json:"engine"`
+	Environment string                                `json:"environment"`
+	Key         string                                `json:"key"`
+	Kind        string                                `json:"kind"`
+	Name        string                                `json:"name"`
 
 	// Node De server waarop ClusterForge de database bekijkt en de tijdelijke gebruiker maakt; leeg als er geen is
 	Node    string   `json:"node"`
 	Port    int      `json:"port"`
 	Servers []string `json:"servers"`
-	Summary string   `json:"summary"`
-	Version string   `json:"version"`
+
+	// Slug Leeg bij een losse node
+	Slug    string `json:"slug"`
+	Summary string `json:"summary"`
+	Version string `json:"version"`
 
 	// Via node (rechtstreeks) of vip; leeg zolang dat niet bekeken is
 	Via string `json:"via"`
@@ -4390,8 +4461,9 @@ type DatabaseMigrationTarget struct {
 	ComponentId     openapi_types.UUID `json:"component_id"`
 
 	// DataBytes Wat er al aan databases staat
-	DataBytes int64                   `json:"data_bytes"`
-	Disks     []DatabaseMigrationDisk `json:"disks"`
+	DataBytes   int64                   `json:"data_bytes"`
+	Disks       []DatabaseMigrationDisk `json:"disks"`
+	Environment string                  `json:"environment"`
 
 	// Exists De database staat er al
 	Exists bool `json:"exists"`
@@ -4402,7 +4474,21 @@ type DatabaseMigrationTarget struct {
 	// Node De node die importeert
 	Node    string `json:"node"`
 	Port    int    `json:"port"`
+	Slug    string `json:"slug"`
 	Version string `json:"version"`
+}
+
+// DatabaseMoveInput defines model for DatabaseMoveInput.
+type DatabaseMoveInput struct {
+	ComponentId openapi_types.UUID `json:"component_id"`
+
+	// Confirm De slug, als de verhuizing een prodcluster raakt
+	Confirm  *string `json:"confirm,omitempty"`
+	Database string  `json:"database"`
+
+	// Force Toch verhuizen, ook als er nog verbindingen met de oude database zijn
+	Force  *bool  `json:"force,omitempty"`
+	Source string `json:"source"`
 }
 
 // DatabasePatroni defines model for DatabasePatroni.
@@ -9268,6 +9354,23 @@ type GetDatabaseMigrationParams struct {
 	Component *openapi_types.UUID `form:"component,omitempty" json:"component,omitempty"`
 }
 
+// CancelDatabaseMoveJSONBody defines parameters for CancelDatabaseMove.
+type CancelDatabaseMoveJSONBody struct {
+	Confirm string `json:"confirm"`
+}
+
+// LockDatabaseMoveJSONBody defines parameters for LockDatabaseMove.
+type LockDatabaseMoveJSONBody struct {
+	// Locked true: alleen nog lezen; false: de rechten van voor de verhuizing terug
+	Locked bool `json:"locked"`
+}
+
+// SwitchDatabaseMoveJSONBody defines parameters for SwitchDatabaseMove.
+type SwitchDatabaseMoveJSONBody struct {
+	// Force Toch overschakelen, ook met verbindingen naar de oude database
+	Force *bool `json:"force,omitempty"`
+}
+
 // GetDependencyGraphParams defines parameters for GetDependencyGraph.
 type GetDependencyGraphParams struct {
 	// ClusterId Dat cluster plus zijn directe buren
@@ -9688,8 +9791,20 @@ type PlanClusterSpecJSONRequestBody = SpecEditInput
 // CreateVipJSONRequestBody defines body for CreateVip for application/json ContentType.
 type CreateVipJSONRequestBody = VipInput
 
+// StartDatabaseMoveJSONRequestBody defines body for StartDatabaseMove for application/json ContentType.
+type StartDatabaseMoveJSONRequestBody = DatabaseMoveInput
+
 // StartDatabaseMigrationTrialJSONRequestBody defines body for StartDatabaseMigrationTrial for application/json ContentType.
 type StartDatabaseMigrationTrialJSONRequestBody = DatabaseMigrationInput
+
+// CancelDatabaseMoveJSONRequestBody defines body for CancelDatabaseMove for application/json ContentType.
+type CancelDatabaseMoveJSONRequestBody CancelDatabaseMoveJSONBody
+
+// LockDatabaseMoveJSONRequestBody defines body for LockDatabaseMove for application/json ContentType.
+type LockDatabaseMoveJSONRequestBody LockDatabaseMoveJSONBody
+
+// SwitchDatabaseMoveJSONRequestBody defines body for SwitchDatabaseMove for application/json ContentType.
+type SwitchDatabaseMoveJSONRequestBody SwitchDatabaseMoveJSONBody
 
 // CreateDependencyJSONRequestBody defines body for CreateDependency for application/json ContentType.
 type CreateDependencyJSONRequestBody = DependencyInput
@@ -10041,9 +10156,21 @@ type ServerInterface interface {
 	// GetDatabaseMigration Het plan om een database naar de database van een cluster te verhuizen
 	// (GET /databases/migration)
 	GetDatabaseMigration(w http.ResponseWriter, r *http.Request, params GetDatabaseMigrationParams)
+	// StartDatabaseMove Een database echt verhuizen (admin); wordt een taak
+	// (POST /databases/migration/move)
+	StartDatabaseMove(w http.ResponseWriter, r *http.Request)
 	// StartDatabaseMigrationTrial Een proefverhuizing beginnen (admin); wordt een taak
 	// (POST /databases/migration/trial)
 	StartDatabaseMigrationTrial(w http.ResponseWriter, r *http.Request)
+	// CancelDatabaseMove Een gekopieerde verhuizing annuleren (admin)
+	// (POST /databases/migrations/{id}/cancel)
+	CancelDatabaseMove(w http.ResponseWriter, r *http.Request, id openapi_types.UUID)
+	// LockDatabaseMove De oude database van een verhuisde app op slot zetten of het slot eraf halen (admin)
+	// (POST /databases/migrations/{id}/lock)
+	LockDatabaseMove(w http.ResponseWriter, r *http.Request, id openapi_types.UUID)
+	// SwitchDatabaseMove De app draait op de nieuwe database (admin)
+	// (POST /databases/migrations/{id}/switch)
+	SwitchDatabaseMove(w http.ResponseWriter, r *http.Request, id openapi_types.UUID)
 	// CreateDependency Vastleggen dat een dienst van een andere afhangt (admin)
 	// (POST /dependencies)
 	CreateDependency(w http.ResponseWriter, r *http.Request)
@@ -10929,9 +11056,33 @@ func (_ Unimplemented) GetDatabaseMigration(w http.ResponseWriter, r *http.Reque
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// StartDatabaseMove Een database echt verhuizen (admin); wordt een taak
+// (POST /databases/migration/move)
+func (_ Unimplemented) StartDatabaseMove(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // StartDatabaseMigrationTrial Een proefverhuizing beginnen (admin); wordt een taak
 // (POST /databases/migration/trial)
 func (_ Unimplemented) StartDatabaseMigrationTrial(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CancelDatabaseMove Een gekopieerde verhuizing annuleren (admin)
+// (POST /databases/migrations/{id}/cancel)
+func (_ Unimplemented) CancelDatabaseMove(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// LockDatabaseMove De oude database van een verhuisde app op slot zetten of het slot eraf halen (admin)
+// (POST /databases/migrations/{id}/lock)
+func (_ Unimplemented) LockDatabaseMove(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SwitchDatabaseMove De app draait op de nieuwe database (admin)
+// (POST /databases/migrations/{id}/switch)
+func (_ Unimplemented) SwitchDatabaseMove(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -14134,11 +14285,103 @@ func (siw *ServerInterfaceWrapper) GetDatabaseMigration(w http.ResponseWriter, r
 	handler.ServeHTTP(w, r)
 }
 
+// StartDatabaseMove operation middleware
+func (siw *ServerInterfaceWrapper) StartDatabaseMove(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StartDatabaseMove(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // StartDatabaseMigrationTrial operation middleware
 func (siw *ServerInterfaceWrapper) StartDatabaseMigrationTrial(w http.ResponseWriter, r *http.Request) {
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.StartDatabaseMigrationTrial(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CancelDatabaseMove operation middleware
+func (siw *ServerInterfaceWrapper) CancelDatabaseMove(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CancelDatabaseMove(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// LockDatabaseMove operation middleware
+func (siw *ServerInterfaceWrapper) LockDatabaseMove(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.LockDatabaseMove(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SwitchDatabaseMove operation middleware
+func (siw *ServerInterfaceWrapper) SwitchDatabaseMove(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SwitchDatabaseMove(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -19167,6 +19410,18 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/databases/migration/trial", wrapper.StartDatabaseMigrationTrial)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/databases/migration/move", wrapper.StartDatabaseMove)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/databases/migrations/{id}/switch", wrapper.SwitchDatabaseMove)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/databases/migrations/{id}/cancel", wrapper.CancelDatabaseMove)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/databases/migrations/{id}/lock", wrapper.LockDatabaseMove)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/kubernetes/clusters", wrapper.ListKubeClusters)

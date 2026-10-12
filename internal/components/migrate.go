@@ -12,7 +12,8 @@ package components
 //
 // De proef importeert in <database>_proef terwijl de app doorwerkt, telt
 // de rijen aan beide kanten, meet hoe lang het duurde en haalt de kopie
-// weer weg. Aan de oude database verandert niets.
+// weer weg. Aan de oude database verandert niets. De echte verhuizing staat
+// in move.go.
 
 import (
 	"cmp"
@@ -64,11 +65,14 @@ type MigrationSource struct {
 	Key       string
 	Name      string
 	ClusterID *uuid.UUID
-	Engine    string
-	Kind      string
-	Version   string
-	Summary   string
-	Servers   []string
+	// Slug en Environment van dat cluster; leeg bij een losse node.
+	Slug        string
+	Environment string
+	Engine      string
+	Kind        string
+	Version     string
+	Summary     string
+	Servers     []string
 	// Node is de server waarop ClusterForge de database bekijkt en de
 	// tijdelijke gebruiker maakt; nil als er geen geschikte draait.
 	Node *Node
@@ -85,6 +89,8 @@ type MigrationSource struct {
 type MigrationTarget struct {
 	ClusterID   uuid.UUID
 	ClusterName string
+	Slug        string
+	Environment string
 	ComponentID uuid.UUID
 	// Node importeert; Version is zijn MariaDB.
 	Node    Node
@@ -135,12 +141,26 @@ type MigrationPlan struct {
 	// Reach is wat de nieuwe node op het adres van de oude zag.
 	Reach    *protocol.DBMigrateReach
 	Findings []Finding
-	Blocked  bool
+	// Blocked: de proef kan niet.
+	Blocked bool
+	// Voor de echte verhuizing: de gebruikers met rechten op de database op
+	// de oude server (zonder hash), de hosts die ze op het nieuwe cluster
+	// krijgen, wie nu met de oude database verbonden is, en wat alleen de
+	// verhuizing aangaat. MoveBlocked: de verhuizing kan niet.
+	Accounts     []protocol.DBMigrateAccount
+	NewHosts     []string
+	Connections  []MigrationConnection
+	MoveFindings []Finding
+	MoveBlocked  bool
 	// Runs zijn de vorige proeven en verhuizingen, de nieuwste eerst.
 	Runs []store.ListDBMigrationsRow
-	// Active is een proef of verhuizing die nu loopt.
+	// Active is een proef of verhuizing die nu kopieert.
 	Active *ActiveJob
 }
+
+// trialOnly zijn de bevindingen die alleen de proef aangaan: haar kopie
+// <database>_proef.
+var trialOnly = []string{"trial_exists", "trial_running", "trial_leftover"}
 
 // TrialName is de database van een proef: <database>_proef, zo nodig
 // ingekort tot 63 tekens.
@@ -194,6 +214,13 @@ type migrationRoute struct {
 	Events     int      `json:"events"`
 	// Leftover: <database>_proef staat er nog van een vorige proef.
 	Leftover bool `json:"leftover"`
+	// Voor de verhuizing: de servers van de oude database die draaien, de
+	// nodes van het nieuwe cluster, waar de app de nieuwe database vindt,
+	// en de hosts van de gebruikers daar.
+	Servers       []Node   `json:"servers,omitempty"`
+	DataNodes     []Node   `json:"data_nodes,omitempty"`
+	TargetAddress string   `json:"target_address,omitempty"`
+	NewHosts      []string `json:"new_hosts,omitempty"`
 }
 
 // migrationPlan is MigrationPlan met wat de proef nodig heeft; self is de
@@ -201,7 +228,24 @@ type migrationRoute struct {
 func (s *Service) migrationPlan(ctx context.Context, source, database string, componentID *uuid.UUID, self uuid.UUID) (MigrationPlan, migrationRoute, error) {
 	p, route, err := s.planMigration(ctx, source, database, componentID, self)
 	p.Blocked = slices.ContainsFunc(p.Findings, func(f Finding) bool { return f.Level == Blocked })
+	p.MoveBlocked = len(moveBlockers(p)) > 0
 	return p, route, err
+}
+
+// moveBlockers zijn de redenen waarom de verhuizing niet kan.
+func moveBlockers(p MigrationPlan) []string {
+	var out []string
+	for _, f := range p.Findings {
+		if f.Level == Blocked && !slices.Contains(trialOnly, f.Code) {
+			out = append(out, f.Message)
+		}
+	}
+	for _, f := range p.MoveFindings {
+		if f.Level == Blocked {
+			out = append(out, f.Message)
+		}
+	}
+	return out
 }
 
 func (s *Service) planMigration(ctx context.Context, source, database string, componentID *uuid.UUID, self uuid.UUID) (MigrationPlan, migrationRoute, error) {
@@ -221,10 +265,13 @@ func (s *Service) planMigration(ctx context.Context, source, database string, co
 		return MigrationPlan{}, route, ErrSourceNotFound
 	}
 	g := groups[gi]
-	p := MigrationPlan{Database: database, Clients: []databases.User{}, Targets: []MigrationOption{}, Findings: []Finding{}}
+	p := MigrationPlan{
+		Database: database, Clients: []databases.User{}, Targets: []MigrationOption{}, Findings: []Finding{},
+		Accounts: []protocol.DBMigrateAccount{}, NewHosts: []string{}, Connections: []MigrationConnection{}, MoveFindings: []Finding{},
+	}
 	p.Source = MigrationSource{
-		Key: source, Name: g.ClusterName, ClusterID: g.ClusterID, Engine: g.Engine, Kind: g.Kind, Version: g.Version, Summary: g.Summary,
-		Port: MariaDBPort, Servers: []string{},
+		Key: source, Name: g.ClusterName, ClusterID: g.ClusterID, Slug: g.ClusterSlug, Environment: g.ClusterEnv, Engine: g.Engine, Kind: g.Kind,
+		Version: g.Version, Summary: g.Summary, Port: MariaDBPort, Servers: []string{},
 	}
 	for _, sv := range g.Servers {
 		p.Source.Servers = append(p.Source.Servers, sv.Hostname)
@@ -232,12 +279,18 @@ func (s *Service) planMigration(ctx context.Context, source, database string, co
 	if p.Source.Name == "" && len(g.Servers) > 0 {
 		p.Source.Name = g.Servers[0].Hostname
 	}
-	add := func(level, code string, n *Node, msg, command string) {
+	finding := func(level, code string, n *Node, msg, command string) Finding {
 		f := Finding{Level: level, Code: code, Message: msg, Command: command}
 		if n != nil {
 			f.NodeID, f.Hostname = &n.NodeID, n.Hostname
 		}
-		p.Findings = append(p.Findings, f)
+		return f
+	}
+	add := func(level, code string, n *Node, msg, command string) {
+		p.Findings = append(p.Findings, finding(level, code, n, msg, command))
+	}
+	addMove := func(level, code string, n *Node, msg, command string) {
+		p.MoveFindings = append(p.MoveFindings, finding(level, code, n, msg, command))
 	}
 	if i := slices.IndexFunc(g.Databases, func(d databases.Database) bool { return d.Name == database }); i >= 0 {
 		p.Clients = g.Databases[i].Users
@@ -247,9 +300,19 @@ func (s *Service) planMigration(ctx context.Context, source, database string, co
 		return p, route, err
 	}
 	p.Runs = runs
+	trialOK := false
 	for _, r := range runs {
-		if r.DbMigration.Status == store.DbMigrationStatusRunning && r.DbMigration.JobID != nil {
-			p.Active = &ActiveJob{ID: *r.DbMigration.JobID, Kind: MigrateTrialKind, Title: trialTitle(r.DbMigration.Database, p.Source.Name, r.ClusterName)}
+		m := r.DbMigration
+		switch {
+		case m.Status == store.DbMigrationStatusRunning && m.Stage == StageCopied && m.ID != self:
+			add(Blocked, "move_open", nil, fmt.Sprintf("de verhuizing van %s naar %s is gekopieerd en wacht op overschakelen; schakel over of annuleer "+
+				"haar eerst", database, r.ClusterName), "")
+		case m.Status == store.DbMigrationStatusRunning && m.JobID != nil && m.Kind == store.DbMigrationKindMigrate:
+			p.Active = &ActiveJob{ID: *m.JobID, Kind: MigrateKind, Title: moveTitle(m.Database, p.Source.Name, r.ClusterName)}
+		case m.Status == store.DbMigrationStatusRunning && m.JobID != nil:
+			p.Active = &ActiveJob{ID: *m.JobID, Kind: MigrateTrialKind, Title: trialTitle(m.Database, p.Source.Name, r.ClusterName)}
+		case m.Kind == store.DbMigrationKindTrial && m.Status == store.DbMigrationStatusOk:
+			trialOK = true
 		}
 	}
 
@@ -332,6 +395,40 @@ func (s *Service) planMigration(ctx context.Context, source, database string, co
 			plural(info.Routines, "één routine", "routines"), shortVersion(info.Version), sn.Hostname), "")
 	}
 
+	// De gebruikers van de app, en wie nu verbonden is.
+	acc, err := s.migrateReq(ctx, sn, protocol.DBMigrateRequest{Action: protocol.DBMigrateAccounts, Database: database})
+	switch {
+	case errors.As(err, &ce):
+		addMove(Blocked, "accounts_error", &sn, fmt.Sprintf("de gebruikers van %s op %s lezen lukte niet: %s. Werk de agent bij met het installatiescript "+
+			"en --upgrade als hij ouder is dan ClusterForge", database, sn.Hostname, ce.Msg), "")
+	case err != nil:
+		return p, route, err
+	default:
+		for _, a := range acc.Accounts {
+			// Het plan vraagt nooit een hash; ook als een agent er een stuurt,
+			// gaat hij niet verder.
+			a.Hash = ""
+			p.Accounts = append(p.Accounts, a)
+		}
+		checkAccounts(p.Accounts, p.Clients, database, addMove)
+	}
+	for _, sv := range g.Servers {
+		if sv.Running {
+			route.Servers = append(route.Servers, Node{NodeID: sv.NodeID, Hostname: sv.Hostname})
+		}
+	}
+	conns, unread, err := s.liveConnections(ctx, route.Servers, database)
+	if err != nil {
+		return p, route, err
+	}
+	p.Connections = conns
+	if len(unread) > 0 {
+		addMove(Info, "connections_unknown", nil, "wie er nu met "+database+" verbonden is, lukte niet op "+strings.Join(unread, ", "), "")
+	}
+	if !trialOK {
+		addMove(Info, "no_trial", nil, "er is nog geen geslaagde proef; die zegt vooraf hoe lang de app in onderhoud staat en of alles meekomt", "")
+	}
+
 	// Wie de database gebruikt.
 	if componentID == nil {
 		return p, route, nil
@@ -357,8 +454,8 @@ func (s *Service) planMigration(ctx context.Context, source, database string, co
 		return p, route, err
 	}
 	target := &MigrationTarget{
-		ClusterID: opt.ClusterID, ClusterName: opt.ClusterName, ComponentID: opt.ComponentID, Node: t.node, Port: MariaDBPort,
-		Hosts: []string{}, Disks: []MigrationDisk{},
+		ClusterID: opt.ClusterID, ClusterName: opt.ClusterName, Slug: t.cluster.Slug, Environment: string(t.cluster.Environment),
+		ComponentID: opt.ComponentID, Node: t.node, Port: MariaDBPort, Hosts: []string{}, Disks: []MigrationDisk{},
 	}
 	p.Target = target
 	cands, err := s.q.ListComponentCandidates(ctx, &opt.ClusterID)
@@ -369,8 +466,9 @@ func (s *Service) planMigration(ctx context.Context, source, database string, co
 	for _, r := range cands {
 		byID[r.ID] = r
 	}
-	if _, address, err := s.userHosts(ctx, t); err == nil {
+	if hosts, address, err := s.userHosts(ctx, t); err == nil {
 		target.Address = address
+		p.NewHosts = append(hosts, "localhost")
 	}
 	target.Hosts = nodeAddresses(byID[t.node.NodeID])
 	tg := slices.IndexFunc(groups, func(x databases.Group) bool {
@@ -483,6 +581,8 @@ func (s *Service) planMigration(ctx context.Context, source, database string, co
 	if target.Exists {
 		add(Warning, "exists", nil, fmt.Sprintf("op %s staat al een database %s. De proef gebruikt %s, maar de echte verhuizing zet de data in %s; "+
 			"haal die eerst weg als ze leeg is", opt.ClusterName, database, trial, database), "")
+		addMove(Blocked, "exists", nil, fmt.Sprintf("op %s staat al een database %s, en de verhuizing schrijft niet over een bestaande database. "+
+			"Haal haar weg bij Databases en gebruikers als ze leeg is", opt.ClusterName, database), "")
 	}
 	leftover := false
 	if trialExists {
@@ -533,6 +633,7 @@ func (s *Service) planMigration(ctx context.Context, source, database string, co
 		SourceNode: sn, Address: p.Source.Address, Port: MariaDBPort, Via: p.Source.Via, Hosts: target.Hosts, Import: t.node,
 		Target: trial, Charset: info.Charset, Collation: info.Collation, Size: info.SizeBytes,
 		Views: info.Views, Routines: info.Routines, Triggers: info.Triggers, Events: info.Events, Leftover: leftover,
+		Servers: route.Servers, DataNodes: dataNodes(t.spec, nil), TargetAddress: target.Address, NewHosts: p.NewHosts,
 	}
 	for _, tb := range info.Tables {
 		route.Tables = append(route.Tables, tb.Name)
@@ -916,7 +1017,7 @@ func (s *Service) trialSteps(ctx context.Context, j *jobs.Job, p trialParams, m 
 	}
 
 	if err := j.Step(ctx, stepTrialCompare, func(ctx context.Context, st *jobs.Step) error {
-		compareTrial(route, pull.Run, res)
+		compareTrial(route, pull.Run, res, false)
 		for _, line := range strings.Split(res.message, "\n") {
 			st.Logf("%s", line)
 		}
@@ -925,7 +1026,7 @@ func (s *Service) trialSteps(ctx context.Context, j *jobs.Job, p trialParams, m 
 		return err
 	}
 	if res.message == "" {
-		compareTrial(route, pull.Run, res)
+		compareTrial(route, pull.Run, res, false)
 	}
 
 	return j.Step(ctx, route.Target+" weghalen", func(ctx context.Context, st *jobs.Step) error {
@@ -1039,8 +1140,9 @@ func (s *Service) trialPull(ctx context.Context, j *jobs.Job, st *jobs.Step, p t
 
 // compareTrial vergelijkt de nieuwe database met de oude. Andere aantallen
 // rijen zijn bij een proef te verwachten, want de app werkt door; een
-// tabel, view, routine, trigger of event die ontbreekt niet.
-func compareTrial(route *migrationRoute, run *protocol.DBMigrateRun, res *trialResult) {
+// tabel, view, routine, trigger of event die ontbreekt niet. Bij de echte
+// verhuizing (strict) staat de app stil en moet alles gelijk zijn.
+func compareTrial(route *migrationRoute, run *protocol.DBMigrateRun, res *trialResult, strict bool) {
 	res.differences, res.failed, res.objects = 0, false, nil
 	if run == nil {
 		res.failed, res.message = true, "geen uitkomst van de import"
@@ -1081,10 +1183,16 @@ func compareTrial(route *migrationRoute, run *protocol.DBMigrateRun, res *trialR
 		res.failed = true
 		lines = append(lines, fmt.Sprintf("In de kopie staan maar %s.", strings.Join(problems, ", ")))
 	}
-	if res.differences > 0 {
+	differ := plural(res.differences, "één tabel heeft een ander aantal rijen", "tabellen hebben een ander aantal rijen")
+	switch {
+	case res.differences > 0 && strict:
+		res.failed = true
+		lines = append(lines, fmt.Sprintf("%s: %s. Dan schreef er tijdens de verhuizing nog iemand in de oude database, zoals een cronjob of een "+
+			"andere node van de app.", differ, listSome(diffs, 5)))
+	case res.differences > 0:
 		lines = append(lines, fmt.Sprintf("%s: %s. Bij een proef is dat te verwachten, want de app werkte door; bij de echte verhuizing staat ze stil en moet alles gelijk zijn.",
-			plural(res.differences, "één tabel heeft een ander aantal rijen", "tabellen hebben een ander aantal rijen"), listSome(diffs, 5)))
-	} else if !res.failed {
+			differ, listSome(diffs, 5)))
+	case !res.failed:
 		lines = append(lines, "Alle tabellen hebben aan beide kanten evenveel rijen.")
 	}
 	res.message = strings.Join(lines, "\n")

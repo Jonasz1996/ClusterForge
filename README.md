@@ -80,6 +80,7 @@ Het technisch ontwerp staat in [docs/design/mvp-fase-1.md](docs/design/mvp-fase-
 | 6. Databases en gebruikers | Bij **Databases en gebruikers** op de kaart Database staan de databases met grootte, tabellen en verbindingen, en de gebruikers met hun hosts en rechten, zonder wachtwoord. **Database aanmaken** maakt een database met een eigen gebruiker en een sterk wachtwoord dat één keer op het scherm staat, samen met wat de app nodig heeft; ClusterForge bewaart het niet. **Nieuw wachtwoord** en **Weghalen** (met de naam ter bevestiging, op prod ook de slug en tweestapsverificatie). Getest tegen een echte MariaDB 11.8 | klaar |
 | 7. Back-ups van de databases | Elke nacht om 02:00 een dump van elke database, op een node zonder het VIP, met zstd in `/var/backups/clusterforge-db` (alleen voor root) en zeven dagen bewaard. ClusterForge controleert elke dump: compleet, alle tabellen, en niet meer dan de helft kleiner dan de vorige. Bij Back-ups en op de pagina Databases en gebruikers staat per database de leeftijd van de nieuwste goede dump. **Dump nu** voor één database, en **Terugzetten** in een nieuwe database naast de bestaande, als `<naam>_herstel_<datum>`. Getest tegen een echte MariaDB 11.8 | klaar |
 | 8. Verhuizen: plan en proef | Bij Databases **Verhuizen…** naast elke MariaDB-database: een plan met de grootte, tabellen en objecten, wie de database gebruikt, het cluster waar ze naartoe gaat en wat in de weg staat, zoals tabellen zonder primaire sleutel of MyISAM (met de commando's), een firewall tussen de nodes, te weinig schijf of een te kleine buffer pool. De **proefverhuizing** importeert een kopie als `<naam>_proef` terwijl de app doorwerkt, telt de rijen en objecten aan beide kanten, meet hoe lang het duurde en haalt de kopie weer weg. **Database erbij** bij Cluster uitrollen zet na de uitrol meteen MariaDB Galera op de nodes. Getest met een echte MariaDB 10.11 als oude server en 11.8 als nieuwe | klaar |
+| 9. Verhuizen: uitvoeren | Met de app in onderhoud zet **Verhuizing starten** de database onder dezelfde naam op het nieuwe cluster, met dezelfde gebruikers en dezelfde hash van hun wachtwoord, dus de app houdt haar wachtwoord. Elke tabel moet aan beide kanten evenveel rijen hebben; wijkt er iets af, dan gaan de kopie en de nieuwe gebruikers weg en staat de app nog op de oude database. Na **De app draait op de nieuwe database** mogen de gebruikers van de app de oude database alleen nog lezen; één knop haalt het slot eraf. Getest met een echte MariaDB 10.11 als oude server en 11.8 als nieuwe | klaar |
 
 ## Draaien met Docker Compose
 
@@ -869,7 +870,7 @@ Bij **Databases** staat naast elke MariaDB-database **Verhuizen…**. Dat opent 
 - **Naar**: de clusters met een MariaDB van ClusterForge. Gebruikt de app van een cluster de database nu al, dan staat dat cluster gekozen. Je ziet de node die importeert, zijn versie, het adres waar de app de database straks vindt, de buffer pool, de vrije schijf op elke node en of de nieuwe node de oude server echt bereikt.
 - **Controle**: wat blokkeert, wat aandacht vraagt en wat goed is om te weten.
 
-Wat blokkeert: de database bestaat niet, de oude server draait niet goed genoeg om van te lezen, een agent is te oud, het is hetzelfde cluster, de nieuwe node bereikt poort 3306 van de oude server niet (een firewall of `bind-address`; er staat bij welke poort van welke adressen open moet), MariaDB weigert de node, bijvoorbeeld na te veel mislukte verbindingen (dan staat `mariadb-admin flush-hosts` erbij), de nieuwe MariaDB is ouder dan de oude, een andere database heet al `<naam>_proef`, er loopt al een proef, of er is niet genoeg schijf voor de data plus 1 GB.
+Wat blokkeert: de database bestaat niet, de oude server draait niet goed genoeg om van te lezen, een agent is te oud, het is hetzelfde cluster, de nieuwe node bereikt poort 3306 van de oude server niet (een firewall of `bind-address`; er staat bij welke poort van welke adressen open moet), MariaDB weigert de node, bijvoorbeeld na te veel mislukte verbindingen (dan staat `mariadb-admin flush-hosts` erbij), de nieuwe MariaDB is ouder dan de oude, een andere database heet al `<naam>_proef`, er loopt al een proef, een verhuizing wacht nog op overschakelen, of er is niet genoeg schijf voor de data plus 1 GB.
 
 Wat aandacht vraagt, laat de proef wel door:
 
@@ -891,7 +892,41 @@ Goed om te weten: het verkeer gaat via het VIP van de oude server, zonder TLS, d
 4. Rijen en objecten vergelijken: ClusterForge telt de rijen van elke tabel aan beide kanten, en de views, routines, triggers en events. Een paar rijen verschil is normaal, want de app schrijft intussen verder; ontbreekt er een tabel of object, dan is de proef mislukt.
 5. `<naam>_proef` weghalen.
 
-Het verslag staat onder **Proeven**: hoe lang ophalen en importeren duurde, hoe lang het tellen duurde, hoeveel SQL over het netwerk kwam, de rijen oud en nieuw, de tabellen met een ander aantal en een mislukte stap met de reden. Zo weet je hoe lang de app straks in onderhoud moet. Het wachtwoord van de tijdelijke gebruiker bewaart ClusterForge nergens: niet in de taak, het logboek of het verslag. Het echte verhuizen, met de app in onderhoud, komt in de volgende mijlpaal.
+Het verslag staat onder **Proeven en verhuizingen**: hoe lang ophalen en importeren duurde, hoe lang het tellen duurde, hoeveel SQL over het netwerk kwam, de rijen oud en nieuw, de tabellen met een ander aantal en een mislukte stap met de reden. Zo weet je hoe lang de app straks in onderhoud moet. Het wachtwoord van de tijdelijke gebruiker bewaart ClusterForge nergens: niet in de taak, het logboek of het verslag.
+
+#### Verhuizen
+
+De echte verhuizing zet de database onder dezelfde naam op het nieuwe cluster, met dezelfde gebruikers en wachtwoorden. De app staat daarvoor in onderhoud, ongeveer zo lang als de proef zei. Alles staat onder **Verhuizen** op dezelfde pagina.
+
+1. **Zet de app in onderhoud.** Voor Nextcloud, op een node van de app:
+
+   ```sh
+   sudo -u www-data php occ maintenance:mode --on
+   ```
+
+   Je ziet wie er nu met de oude database verbonden is, op elke server van het oude cluster; **Opnieuw kijken** leest het opnieuw. Is er nog iemand, dan start de verhuizing niet, tenzij je **Toch verhuizen** aanvinkt.
+
+2. **Verhuizing starten** (alleen een beheerder; raakt de verhuizing een prodcluster, dan met de slug en tweestapsverificatie). De taak gaat na een herstart van ClusterForge verder:
+   1. Controle: het plan opnieuw. Ook een database met dezelfde naam op het nieuwe cluster blokkeert, want de verhuizing schrijft niet over een bestaande database.
+   2. Onderhoud: ClusterForge wacht even tot niemand meer met de oude database verbonden is. Lukt dat niet, dan stopt de taak.
+   3. Gebruikers maken: elke gebruiker met rechten op de database en een gewoon wachtwoord (`mysql_native_password`) komt op het nieuwe cluster met dezelfde hash van zijn wachtwoord, vanaf de adressen van de nodes en VIP's van het cluster en `localhost`, met dezelfde rechten op die database. De app logt dus in met haar oude wachtwoord. Een gebruiker die via de socket of een andere plugin inlogt, gaat niet mee; dat staat in het plan.
+   4. Ophalen en importeren, zoals bij de proef, maar in de echte naam.
+   5. Vergelijken: elke tabel moet aan beide kanten evenveel rijen hebben, en alle views, routines, triggers en events moeten er zijn. Wijkt er iets af, dan stopt de taak: de nieuwe database en de gebruikers die ClusterForge maakte, gaan weg, en de app staat nog op de oude database. Zet dan het onderhoud weer uit.
+
+3. **Wijs de app naar de nieuwe database.** Het adres staat bij Verhuizen; gebruiker en wachtwoord blijven hetzelfde. Voor Nextcloud, op elke node met een eigen `config.php`:
+
+   ```sh
+   sudo -u www-data php occ config:system:set dbhost --value=10.0.20.185
+   sudo -u www-data php occ maintenance:mode --off
+   ```
+
+4. **De app draait op de nieuwe database.** ClusterForge kijkt of niemand nog met de oude database verbonden is en de app wel met de nieuwe; anders zegt het wie, en kun je toch overschakelen. Daarna zet het de oude database op slot: de gebruikers van de app houden alleen `SELECT` en `SHOW VIEW` (voor zover ze die al hadden), zodat een vergeten cronjob niet stilletjes in de oude database verder schrijft.
+
+Zolang je niet overgeschakeld hebt, kan **Annuleren**: tik de naam van de database, en ClusterForge haalt de kopie en de nieuwe gebruikers weg. Dat kan niet meer als iemand de nieuwe database al gebruikt; schakel dan over.
+
+Na de verhuizing haalt **Slot eraf halen** het slot er weer af: de gebruikers krijgen hun rechten van vóór de verhuizing terug. Terug naar de oude database gaat zo: slot eraf en de app weer naar het oude adres wijzen. Wat de app sinds het overschakelen schreef, staat dan alleen in de nieuwe database. De oude database blijft staan tot je het oude cluster afbouwt.
+
+In het logboek: `cluster.database_move_copied`, `cluster.database_move_failed`, `cluster.database_moved`, `cluster.database_move_cancelled`, `cluster.database_locked` en `cluster.database_unlocked`.
 
 Met de hand op de oude server, om te zien of er nog een tijdelijke gebruiker staat:
 
@@ -906,6 +941,8 @@ cf-agent doet het op de node zelf, als root via de socket: `mariadb` voor MariaD
 Een dump en terugzetten lopen op de agent op de achtergrond, één tegelijk per node, en ClusterForge vraagt elke paar seconden hoe ver ze zijn. De agent start `mariadb-dump` (of `mysqldump`) met vaste opties en schrijft eerst naar een `.partial`-bestand dat pas na de controle zijn naam krijgt; naast elke dump staat een klein `.json`-bestand met de grootte en de controle. Terugzetten doet `CREATE DATABASE` voor een naam die nog niet bestaat en stuurt de dump door `mariadb`; de agent schrijft nooit in een database die er al was.
 
 Bij een proefverhuizing praat de nieuwe node over het netwerk met de oude server, als de tijdelijke gebruiker. Het wachtwoord staat alleen in een optiebestand in een eigen map van de agent (modus 0700), dat hij na afloop weghaalt, en dus nooit in `ps`. Kan de oude server TLS, dan gebruikt de agent het, zonder het certificaat te controleren, want dat is meestal zelfgemaakt. Een MariaDB ouder dan 11.3 kent het recht `SHOW CREATE ROUTINE` niet; dan krijgt de tijdelijke gebruiker `SELECT` op `mysql.proc` om de routines te lezen. De agent importeert één database tegelijk, en ClusterForge vraagt elke paar seconden hoe ver hij is.
+
+Bij een verhuizing leest de agent op de oude server de gebruikers met rechten op de database uit `information_schema.SCHEMA_PRIVILEGES` en `mysql.user`, met de hash van hun wachtwoord. Die gaat via ClusterForge, alleen in het geheugen, naar de agent op de nieuwe node, die de gebruiker maakt met `IDENTIFIED VIA mysql_native_password USING '<hash>'` via stdin; een foutmelding komt terug zonder hash. ClusterForge bewaart de hash nergens: niet in de taak, het logboek, de verhuizing of de API. Het slot is een `REVOKE ALL PRIVILEGES` op de database en een `GRANT` van wat de gebruiker mag blijven lezen. De rechten van vóór de verhuizing, zonder hash, bewaart ClusterForge bij de verhuizing, zodat het slot eraf kan.
 
 Dit kan vanaf **agentprotocol 9**. Met een oudere agent toont de pagina het commando om hem bij te werken:
 

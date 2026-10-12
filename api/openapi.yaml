@@ -3350,6 +3350,116 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
+  /databases/migration/move:
+    post:
+      operationId: startDatabaseMove
+      summary: Een database echt verhuizen (admin); wordt een taak
+      description: |
+        Zet de app eerst in onderhoud. De taak kijkt of er nog iemand met de oude database verbonden is (zonder force wacht ze
+        even en stopt ze dan), maakt de gebruikers van de app op het nieuwe cluster met dezelfde hash van hun wachtwoord, laat
+        de nieuwe node de dump ophalen en importeren in dezelfde naam, en telt de rijen aan beide kanten. Alles moet gelijk
+        zijn; anders gaan de nieuwe database en de nieuwe gebruikers weer weg en blijft de app op de oude. Gelukt, dan wacht de
+        verhuizing op overschakelen. De hash bewaart ClusterForge nergens. 409 als het plan iets tegenhoudt, als er zonder force
+        nog verbindingen zijn, of als er al een proef of verhuizing van deze database loopt. Raakt de verhuizing een
+        prodcluster, dan met de slug (die van het nieuwe cluster, anders die van het oude) en tweestapsverificatie.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DatabaseMoveInput" }
+      responses:
+        "202":
+          description: Taak aangemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /databases/migrations/{id}/switch:
+    post:
+      operationId: switchDatabaseMove
+      summary: De app draait op de nieuwe database (admin)
+      description: |
+        Voor een verhuizing die gekopieerd is. Zonder force mag niemand meer met de oude database verbonden zijn en moet
+        iemand met de nieuwe verbonden zijn; anders 409 met wie. Daarna mogen de gebruikers van de app de oude database alleen
+        nog lezen (SELECT en SHOW VIEW).
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                force: { type: boolean, description: "Toch overschakelen, ook met verbindingen naar de oude database" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DatabaseMigrationRun" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /databases/migrations/{id}/cancel:
+    post:
+      operationId: cancelDatabaseMove
+      summary: Een gekopieerde verhuizing annuleren (admin)
+      description: |
+        Haalt de nieuwe database en de gebruikers die ClusterForge maakte weg van het nieuwe cluster; de app blijft op de oude
+        database. Confirm is de naam van de database. 409 als iemand de nieuwe database al gebruikt: schakel dan over.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [confirm]
+              properties:
+                confirm: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DatabaseMigrationRun" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /databases/migrations/{id}/lock:
+    post:
+      operationId: lockDatabaseMove
+      summary: De oude database van een verhuisde app op slot zetten of het slot eraf halen (admin)
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [locked]
+              properties:
+                locked: { type: boolean, description: "true: alleen nog lezen; false: de rechten van voor de verhuizing terug" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DatabaseMigrationRun" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
   /kubernetes/clusters:
     get:
       operationId: listKubeClusters
@@ -4652,9 +4762,19 @@ components:
         source: { type: string }
         database: { type: string }
         component_id: { type: string, format: uuid }
+    DatabaseMoveInput:
+      type: object
+      required: [source, database, component_id]
+      properties:
+        source: { type: string }
+        database: { type: string }
+        component_id: { type: string, format: uuid }
+        force: { type: boolean, description: "Toch verhuizen, ook als er nog verbindingen met de oude database zijn" }
+        confirm: { type: string, description: "De slug, als de verhuizing een prodcluster raakt" }
     DatabaseMigrationPlan:
       type: object
-      required: [source, database, info, clients, targets, target, reach, findings, blocked, runs, active]
+      required: [source, database, info, clients, targets, target, reach, findings, blocked, accounts, new_hosts, connections, move_findings,
+        move_blocked, runs, active]
       properties:
         source: { $ref: "#/components/schemas/DatabaseMigrationSource" }
         database: { type: string }
@@ -4671,19 +4791,53 @@ components:
           allOf: [{ $ref: "#/components/schemas/DatabaseMigrationReach" }]
           nullable: true
         findings: { type: array, items: { $ref: "#/components/schemas/ComponentFinding" } }
-        blocked: { type: boolean }
+        blocked: { type: boolean, description: De proef kan niet }
+        accounts:
+          type: array
+          items: { $ref: "#/components/schemas/DatabaseMigrationAccount" }
+          description: De gebruikers met rechten op de database op de oude server, zonder wachtwoord of hash
+        new_hosts: { type: array, items: { type: string }, description: Waarvandaan die gebruikers op het nieuwe cluster mogen inloggen }
+        connections:
+          type: array
+          items: { $ref: "#/components/schemas/DatabaseMigrationConnection" }
+          description: Wie er nu met de oude database verbonden is
+        move_findings:
+          type: array
+          items: { $ref: "#/components/schemas/ComponentFinding" }
+          description: Wat alleen de echte verhuizing aangaat; de bevindingen in findings gelden ook, behalve die over de kopie van de proef
+        move_blocked: { type: boolean, description: De echte verhuizing kan niet }
         runs: { type: array, items: { $ref: "#/components/schemas/DatabaseMigrationRun" } }
         active:
           allOf: [{ $ref: "#/components/schemas/ComponentDumpJob" }]
           nullable: true
-          description: Een proef of verhuizing van deze database die nu loopt
+          description: Een proef of verhuizing van deze database die nu kopieert
+    DatabaseMigrationAccount:
+      type: object
+      required: [user, host, plugin, privileges, global]
+      properties:
+        user: { type: string }
+        host: { type: string }
+        plugin: { type: string, description: "Hoe hij inlogt; alleen mysql_native_password gaat mee" }
+        privileges: { type: array, items: { type: string } }
+        global: { type: boolean, description: Hij heeft ook rechten op alle databases }
+    DatabaseMigrationConnection:
+      type: object
+      required: [server, user, address, hostname, count]
+      properties:
+        server: { type: string }
+        user: { type: string }
+        address: { type: string, description: Leeg voor een verbinding van de server zelf }
+        hostname: { type: string, description: "De node met dat adres, als ClusterForge hem kent" }
+        count: { type: integer }
     DatabaseMigrationSource:
       type: object
-      required: [key, name, cluster_id, engine, kind, version, summary, servers, node, address, port, via]
+      required: [key, name, cluster_id, slug, environment, engine, kind, version, summary, servers, node, address, port, via]
       properties:
         key: { type: string }
         name: { type: string }
         cluster_id: { type: string, format: uuid, nullable: true }
+        slug: { type: string, description: Leeg bij een losse node }
+        environment: { type: string }
         engine: { type: string }
         kind: { type: string }
         version: { type: string }
@@ -4717,10 +4871,13 @@ components:
         suggested: { type: boolean, description: De app van dit cluster gebruikt de database nu al }
     DatabaseMigrationTarget:
       type: object
-      required: [cluster_id, cluster_name, component_id, node, version, address, port, hosts, buffer_pool_bytes, data_bytes, disks, exists]
+      required: [cluster_id, cluster_name, slug, environment, component_id, node, version, address, port, hosts, buffer_pool_bytes, data_bytes,
+        disks, exists]
       properties:
         cluster_id: { type: string, format: uuid }
         cluster_name: { type: string }
+        slug: { type: string }
+        environment: { type: string }
         component_id: { type: string, format: uuid }
         node: { type: string, description: De node die importeert }
         version: { type: string }
@@ -4751,11 +4908,20 @@ components:
       type: object
       required: [id, kind, status, cluster_id, cluster_name, component_id, source_name, source_node, source_address, database, target_database,
         target_node, started_at, finished_at, size_bytes, dump_bytes, import_ms, count_ms, tables, rows_source, rows_target, differences,
-        objects, message, job_id]
+        objects, message, job_id, stage, accounts, force, target_address, copied_at, switched_at, locked]
       properties:
         id: { type: string, format: uuid }
         kind: { type: string, enum: [trial, migrate] }
         status: { type: string, enum: [running, ok, failed] }
+        stage:
+          type: string
+          description: "Bij een verhuizing: copy (kopieert), copied (wacht op overschakelen), done of cancelled; leeg bij een proef"
+        accounts: { type: array, items: { $ref: "#/components/schemas/DatabaseMigrationMovedUser" } }
+        force: { type: boolean, description: Verhuisd terwijl er nog verbindingen met de oude database waren }
+        target_address: { type: string, description: Waar de app de nieuwe database vindt }
+        copied_at: { type: string, format: date-time, nullable: true }
+        switched_at: { type: string, format: date-time, nullable: true }
+        locked: { type: boolean, description: De gebruikers van de app mogen de oude database alleen nog lezen }
         cluster_id: { type: string, format: uuid }
         cluster_name: { type: string }
         component_id: { type: string, format: uuid }
@@ -4781,6 +4947,14 @@ components:
         objects: { type: array, items: { $ref: "#/components/schemas/DatabaseMigrationObjects" } }
         message: { type: string }
         job_id: { type: string, format: uuid, nullable: true }
+    DatabaseMigrationMovedUser:
+      type: object
+      required: [user, old_hosts, hosts, privileges]
+      properties:
+        user: { type: string }
+        old_hosts: { type: array, items: { type: string }, description: Zijn hosts op de oude server }
+        hosts: { type: array, items: { type: string }, description: Zijn hosts op het nieuwe cluster }
+        privileges: { type: array, items: { type: string } }
     DatabaseMigrationCount:
       type: object
       required: [name, source, target]

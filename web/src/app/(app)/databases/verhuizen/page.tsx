@@ -2,11 +2,10 @@
 
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { Suspense, type ReactNode } from "react";
-import { CopyBlock } from "@/components/inventory/InstallAgent";
+import { Suspense } from "react";
+import { FindingItem, Item, MoveCard, nl, plural, seconds, sortFindings } from "@/components/databases/Move";
 import { ago, Empty, formatBytes, QueryState, tableClass, tdClass, thClass } from "@/components/inventory/bits";
-import { Alert, Badge, Button, Card, cx, Field, PageHeader, Select } from "@/components/ui";
-import type { ComponentFinding } from "@/lib/components";
+import { Alert, Badge, Button, Card, Field, PageHeader, Select } from "@/components/ui";
 import {
   engineLabel,
   kindLabel,
@@ -42,7 +41,8 @@ function MigrateInner() {
         description={
           <>
             Van {p ? p.source.name : "de oude server"} naar de MariaDB op de nodes van een app. ClusterForge toont eerst wat er
-            mee moet en wat in de weg staat; een proefverhuizing importeert een kopie terwijl de app gewoon doorwerkt. Terug naar{" "}
+            mee moet en wat in de weg staat; een proefverhuizing importeert een kopie terwijl de app gewoon doorwerkt, en de echte
+            verhuizing gebeurt met de app even in onderhoud. Terug naar{" "}
             <Link href="/databases" className="underline">
               Databases
             </Link>
@@ -57,18 +57,13 @@ function MigrateInner() {
             <TargetCard p={p} />
             <FindingsCard p={p} />
             <TrialCard p={p} loading={plan.isPlaceholderData} />
+            <MoveCard p={p} loading={plan.isPlaceholderData} refresh={() => void plan.refetch()} />
             <Runs runs={p.runs} />
           </>
         )}
       </QueryState>
     </div>
   );
-}
-
-const nl = (n: number) => n.toLocaleString("nl-BE");
-
-function plural(n: number, one: string, many: string) {
-  return `${nl(n)} ${n === 1 ? one : many}`;
 }
 
 function SourceCard({ p }: { p: MigrationPlan }) {
@@ -173,15 +168,6 @@ function SourceCard({ p }: { p: MigrationPlan }) {
   );
 }
 
-function Item({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div>
-      <dt className="text-xs font-medium uppercase tracking-wide text-slate-500">{label}</dt>
-      <dd className="mt-0.5">{children}</dd>
-    </div>
-  );
-}
-
 function TargetCard({ p }: { p: MigrationPlan }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -269,28 +255,8 @@ function TargetDetails({ t, p }: { t: MigrationTarget; p: MigrationPlan }) {
   );
 }
 
-const levelInfo: Record<string, { label: string; tone: "red" | "amber" | "slate"; box: string }> = {
-  blocked: {
-    label: "Blokkeert",
-    tone: "red",
-    box: "border-red-200 bg-red-50 text-red-900 dark:border-red-900 dark:bg-red-950 dark:text-red-200",
-  },
-  warning: {
-    label: "Let op",
-    tone: "amber",
-    box: "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200",
-  },
-  info: {
-    label: "Goed om te weten",
-    tone: "slate",
-    box: "border-slate-200 bg-slate-50 text-slate-800 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-200",
-  },
-};
-
-const levelOrder: Record<string, number> = { blocked: 0, warning: 1, info: 2 };
-
 function FindingsCard({ p }: { p: MigrationPlan }) {
-  const list = [...p.findings].sort((a, b) => (levelOrder[a.level] ?? 3) - (levelOrder[b.level] ?? 3));
+  const list = sortFindings(p.findings);
   return (
     <Card title="Controle">
       {list.length === 0 ? (
@@ -303,18 +269,6 @@ function FindingsCard({ p }: { p: MigrationPlan }) {
         </ul>
       )}
     </Card>
-  );
-}
-
-function FindingItem({ f }: { f: ComponentFinding }) {
-  const l = levelInfo[f.level] ?? levelInfo.info;
-  return (
-    <li className={cx("space-y-2 rounded border px-3 py-2", l.box)}>
-      <p>
-        <Badge tone={l.tone}>{l.label}</Badge> {f.message}
-      </p>
-      {f.command && <CopyBlock text={f.command} />}
-    </li>
   );
 }
 
@@ -337,7 +291,7 @@ function TrialCard({ p, loading }: { p: MigrationPlan; loading: boolean }) {
           wordt; na de proef is die weer weg. Kleine verschillen in rijen zijn normaal, want de app schrijft intussen verder.
         </p>
       </div>
-      {p.active && (
+      {p.active?.kind === "component.migrate_trial" && (
         <div className="mt-4">
           <Alert kind="info">
             Er loopt nu een proef: {p.active.title}.{" "}
@@ -381,19 +335,25 @@ function proefName(db: string) {
   return db.slice(0, 63 - suffix.length) + suffix;
 }
 
-function seconds(ms: number | null) {
-  if (ms === null) return "–";
-  const s = ms / 1000;
-  if (s < 60) return `${s.toLocaleString("nl-BE", { maximumFractionDigits: 1 })} s`;
-  const m = Math.floor(s / 60);
-  return `${m} min ${Math.round(s - m * 60)} s`;
-}
-
 const statusInfo: Record<MigrationRun["status"], { label: string; tone: "blue" | "green" | "red" }> = {
   running: { label: "Loopt", tone: "blue" },
   ok: { label: "Gelukt", tone: "green" },
   failed: { label: "Mislukt", tone: "red" },
 };
+
+// Een verhuizing toont waar ze is; een proef alleen haar status.
+const stageInfo: Record<string, { label: string; tone: "blue" | "green" | "red" | "amber" | "slate" }> = {
+  copy: { label: "Kopieert", tone: "blue" },
+  copied: { label: "Wacht op overschakelen", tone: "amber" },
+  done: { label: "Verhuisd", tone: "green" },
+  cancelled: { label: "Geannuleerd", tone: "slate" },
+};
+
+function runState(r: MigrationRun) {
+  if (r.kind === "migrate" && r.status !== "failed") return stageInfo[r.stage] ?? statusInfo[r.status];
+  if (r.kind === "migrate" && r.stage === "cancelled") return stageInfo.cancelled;
+  return statusInfo[r.status];
+}
 
 const objectLabel: Record<string, string> = { views: "views", routines: "routines", triggers: "triggers", events: "events" };
 
@@ -401,9 +361,9 @@ const when = new Intl.DateTimeFormat("nl-BE", { day: "numeric", month: "numeric"
 
 function Runs({ runs }: { runs: MigrationRun[] }) {
   return (
-    <Card title="Proeven">
+    <Card title="Proeven en verhuizingen">
       {runs.length === 0 ? (
-        <p className="text-sm text-slate-500">Nog geen proef van deze database.</p>
+        <p className="text-sm text-slate-500">Nog geen proef of verhuizing van deze database.</p>
       ) : (
         <div className="overflow-x-auto">
           <table className={tableClass}>
@@ -431,7 +391,8 @@ function Runs({ runs }: { runs: MigrationRun[] }) {
 }
 
 function RunRow({ r }: { r: MigrationRun }) {
-  const st = statusInfo[r.status];
+  const st = runState(r);
+  const trial = r.kind === "trial";
   const objects = r.objects.filter((o) => o.source > 0 || o.target > 0);
   return (
     <tr>
@@ -458,9 +419,12 @@ function RunRow({ r }: { r: MigrationRun }) {
         )}
       </td>
       <td className={`${tdClass} min-w-48`}>
-        <Badge tone={st.tone}>{st.label}</Badge>
-        {/* Bij een gelukte proef staat in het bericht wat de kolommen ernaast al tonen. */}
-        {r.status !== "ok" && r.message && <p className="mt-1 text-sm whitespace-pre-line">{r.message}</p>}
+        <span className="flex flex-wrap gap-1">
+          <Badge>{trial ? "Proef" : "Verhuizing"}</Badge>
+          <Badge tone={st.tone}>{st.label}</Badge>
+        </span>
+        {/* Bij een gelukte proef of kopie staat in het bericht wat de kolommen ernaast al tonen. */}
+        {r.status === "failed" && r.message && <p className="mt-1 text-sm whitespace-pre-line">{r.message}</p>}
       </td>
       <td className={`${tdClass} text-right tabular-nums`}>{seconds(r.import_ms)}</td>
       <td className={`${tdClass} text-right tabular-nums`}>{seconds(r.count_ms)}</td>
@@ -472,7 +436,8 @@ function RunRow({ r }: { r: MigrationRun }) {
             {r.differences.length > 0 && (
               <details className="mt-1">
                 <summary className="cursor-pointer text-xs text-slate-500">
-                  {plural(r.differences.length, "tabel", "tabellen")} met een ander aantal, want de app werkte door
+                  {plural(r.differences.length, "tabel", "tabellen")} met een ander aantal
+                  {trial ? ", want de app werkte door" : ""}
                 </summary>
                 <ul className="mt-1 font-mono text-xs">
                   {r.differences.map((d) => (

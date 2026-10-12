@@ -3190,6 +3190,92 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/databases/migration/move": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Een database echt verhuizen (admin); wordt een taak
+         * @description Zet de app eerst in onderhoud. De taak kijkt of er nog iemand met de oude database verbonden is (zonder force wacht ze
+         *     even en stopt ze dan), maakt de gebruikers van de app op het nieuwe cluster met dezelfde hash van hun wachtwoord, laat
+         *     de nieuwe node de dump ophalen en importeren in dezelfde naam, en telt de rijen aan beide kanten. Alles moet gelijk
+         *     zijn; anders gaan de nieuwe database en de nieuwe gebruikers weer weg en blijft de app op de oude. Gelukt, dan wacht de
+         *     verhuizing op overschakelen. De hash bewaart ClusterForge nergens. 409 als het plan iets tegenhoudt, als er zonder force
+         *     nog verbindingen zijn, of als er al een proef of verhuizing van deze database loopt. Raakt de verhuizing een
+         *     prodcluster, dan met de slug (die van het nieuwe cluster, anders die van het oude) en tweestapsverificatie.
+         */
+        post: operations["startDatabaseMove"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/databases/migrations/{id}/switch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * De app draait op de nieuwe database (admin)
+         * @description Voor een verhuizing die gekopieerd is. Zonder force mag niemand meer met de oude database verbonden zijn en moet
+         *     iemand met de nieuwe verbonden zijn; anders 409 met wie. Daarna mogen de gebruikers van de app de oude database alleen
+         *     nog lezen (SELECT en SHOW VIEW).
+         */
+        post: operations["switchDatabaseMove"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/databases/migrations/{id}/cancel": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Een gekopieerde verhuizing annuleren (admin)
+         * @description Haalt de nieuwe database en de gebruikers die ClusterForge maakte weg van het nieuwe cluster; de app blijft op de oude
+         *     database. Confirm is de naam van de database. 409 als iemand de nieuwe database al gebruikt: schakel dan over.
+         */
+        post: operations["cancelDatabaseMove"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/databases/migrations/{id}/lock": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** De oude database van een verhuisde app op slot zetten of het slot eraf halen (admin) */
+        post: operations["lockDatabaseMove"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/kubernetes/clusters": {
         parameters: {
             query?: never;
@@ -4373,6 +4459,16 @@ export interface components {
             /** Format: uuid */
             component_id: string;
         };
+        DatabaseMoveInput: {
+            source: string;
+            database: string;
+            /** Format: uuid */
+            component_id: string;
+            /** @description Toch verhuizen, ook als er nog verbindingen met de oude database zijn */
+            force?: boolean;
+            /** @description De slug, als de verhuizing een prodcluster raakt */
+            confirm?: string;
+        };
         DatabaseMigrationPlan: {
             source: components["schemas"]["DatabaseMigrationSource"];
             database: string;
@@ -4384,16 +4480,48 @@ export interface components {
             target: components["schemas"]["DatabaseMigrationTarget"] | null;
             reach: components["schemas"]["DatabaseMigrationReach"] | null;
             findings: components["schemas"]["ComponentFinding"][];
+            /** @description De proef kan niet */
             blocked: boolean;
+            /** @description De gebruikers met rechten op de database op de oude server, zonder wachtwoord of hash */
+            accounts: components["schemas"]["DatabaseMigrationAccount"][];
+            /** @description Waarvandaan die gebruikers op het nieuwe cluster mogen inloggen */
+            new_hosts: string[];
+            /** @description Wie er nu met de oude database verbonden is */
+            connections: components["schemas"]["DatabaseMigrationConnection"][];
+            /** @description Wat alleen de echte verhuizing aangaat; de bevindingen in findings gelden ook, behalve die over de kopie van de proef */
+            move_findings: components["schemas"]["ComponentFinding"][];
+            /** @description De echte verhuizing kan niet */
+            move_blocked: boolean;
             runs: components["schemas"]["DatabaseMigrationRun"][];
-            /** @description Een proef of verhuizing van deze database die nu loopt */
+            /** @description Een proef of verhuizing van deze database die nu kopieert */
             active: components["schemas"]["ComponentDumpJob"] | null;
+        };
+        DatabaseMigrationAccount: {
+            user: string;
+            host: string;
+            /** @description Hoe hij inlogt; alleen mysql_native_password gaat mee */
+            plugin: string;
+            privileges: string[];
+            /** @description Hij heeft ook rechten op alle databases */
+            global: boolean;
+        };
+        DatabaseMigrationConnection: {
+            server: string;
+            user: string;
+            /** @description Leeg voor een verbinding van de server zelf */
+            address: string;
+            /** @description De node met dat adres, als ClusterForge hem kent */
+            hostname: string;
+            count: number;
         };
         DatabaseMigrationSource: {
             key: string;
             name: string;
             /** Format: uuid */
             cluster_id: string | null;
+            /** @description Leeg bij een losse node */
+            slug: string;
+            environment: string;
             engine: string;
             kind: string;
             version: string;
@@ -4440,6 +4568,8 @@ export interface components {
             /** Format: uuid */
             cluster_id: string;
             cluster_name: string;
+            slug: string;
+            environment: string;
             /** Format: uuid */
             component_id: string;
             /** @description De node die importeert */
@@ -4482,6 +4612,19 @@ export interface components {
             kind: "trial" | "migrate";
             /** @enum {string} */
             status: "running" | "ok" | "failed";
+            /** @description Bij een verhuizing: copy (kopieert), copied (wacht op overschakelen), done of cancelled; leeg bij een proef */
+            stage: string;
+            accounts: components["schemas"]["DatabaseMigrationMovedUser"][];
+            /** @description Verhuisd terwijl er nog verbindingen met de oude database waren */
+            force: boolean;
+            /** @description Waar de app de nieuwe database vindt */
+            target_address: string;
+            /** Format: date-time */
+            copied_at: string | null;
+            /** Format: date-time */
+            switched_at: string | null;
+            /** @description De gebruikers van de app mogen de oude database alleen nog lezen */
+            locked: boolean;
             /** Format: uuid */
             cluster_id: string;
             cluster_name: string;
@@ -4525,6 +4668,14 @@ export interface components {
             message: string;
             /** Format: uuid */
             job_id: string | null;
+        };
+        DatabaseMigrationMovedUser: {
+            user: string;
+            /** @description Zijn hosts op de oude server */
+            old_hosts: string[];
+            /** @description Zijn hosts op het nieuwe cluster */
+            hosts: string[];
+            privileges: string[];
         };
         DatabaseMigrationCount: {
             name: string;
@@ -14149,6 +14300,134 @@ export interface operations {
                 };
             };
             400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    startDatabaseMove: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DatabaseMoveInput"];
+            };
+        };
+        responses: {
+            /** @description Taak aangemaakt */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Job"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    switchDatabaseMove: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    /** @description Toch overschakelen, ook met verbindingen naar de oude database */
+                    force?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DatabaseMigrationRun"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    cancelDatabaseMove: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    confirm: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DatabaseMigrationRun"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    lockDatabaseMove: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description true: alleen nog lezen; false: de rechten van voor de verhuizing terug */
+                    locked: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DatabaseMigrationRun"];
+                };
+            };
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
