@@ -22,6 +22,7 @@ import {
 } from "@/components/kube/Kube";
 import { AllTab, ConfigTab, EventsTab, NetworkTab, StorageTab } from "@/components/kube/Resources";
 import { SnapshotsTab } from "@/components/kube/Snapshots";
+import { UpgradeCard } from "@/components/kube/Upgrade";
 import { Empty, formatBytes, tableClass, tdClass, thClass } from "@/components/inventory/bits";
 import { SpecEditDialog } from "@/components/inventory/SpecEdit";
 import { Alert, Badge, Button, Card, cx, PageHeader, Select } from "@/components/ui";
@@ -363,6 +364,8 @@ function OverviewTab({ o, onTab }: { o: KubeOverview; onTab: (patch: Record<stri
           </p>
         )}
       </Card>
+
+      <UpgradeCard id={o.cluster_id} />
 
       <KubeMetrics clusterId={o.cluster_id} scope={{}} title="CPU en geheugen per namespace" />
 

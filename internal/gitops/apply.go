@@ -394,7 +394,7 @@ func (s *Service) specChanged(ctx context.Context, q *store.Queries, actor event
 // changeNode zet wat er op een node verandert om in de stappen van de
 // taak, met wat ze doen en welke services ze raken.
 func changeNode(n deploy.SpecNode, d nodeDiff) rollout.ChangeNode {
-	cn := rollout.ChangeNode{NodeID: n.NodeID, Hostname: n.Hostname}
+	cn := rollout.ChangeNode{NodeID: n.NodeID, Hostname: n.Hostname, Role: n.Role}
 	for _, sc := range d.Steps {
 		if sc.Change == "removed" {
 			continue
@@ -599,7 +599,7 @@ func (s *Service) Reapply(ctx context.Context, actor events.Actor, clusterID uui
 			grow = append(grow, deploy.NewNodeOf(n))
 			continue
 		}
-		nodes = append(nodes, rollout.ChangeNode{NodeID: n.NodeID, Hostname: n.Hostname})
+		nodes = append(nodes, rollout.ChangeNode{NodeID: n.NodeID, Hostname: n.Hostname, Role: n.Role})
 	}
 	if len(nodes) == 0 {
 		return store.Job{}, &ConflictError{Code: "not_deployed",

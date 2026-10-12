@@ -3427,6 +3427,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/kubernetes/clusters/{clusterId}/upgrade": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Welke k3s het cluster draait en naar welke het kan
+         * @description Bijwerken is overstappen naar een nieuwere versie van de template kubernetes, met de wijziging van de spec
+         *     (POST /clusters/{id}/spec met version). next is de nieuwste templateversie met een nieuwere k3s die nu kan:
+         *     Kubernetes gaat één minorversie per keer omhoog en nooit terug. De nodes komen live uit de API; lukt dat niet,
+         *     dan is nodes leeg en staat de fout in nodes_error. Een cluster dat niet uit een template komt, geeft 409.
+         */
+        get: operations["getKubeUpgrade"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -3772,6 +3797,38 @@ export interface components {
             freshness: "ok" | "stale" | "none" | "unknown";
             /** @description De servers met een agent, de eerste eerst */
             servers: components["schemas"]["KubeSnapshotServer"][];
+        };
+        KubeUpgrade: {
+            template: string;
+            /** @description De templateversie van de gewenste staat */
+            version: string;
+            /** @description De k3s van die templateversie, zoals v1.35.9+k3s1; leeg als deze server de versie niet kent */
+            k3s: string;
+            /** @description De nieuwste templateversie met een nieuwere k3s die nu kan; null als er geen is */
+            next: components["schemas"]["KubeUpgradeNext"] | null;
+            /** @description Waarom bijwerken in de webinterface nu niet kan; leeg als het kan */
+            blocked: string;
+            /** @description Een eerdere toepassing mislukte: eerst Opnieuw toepassen */
+            behind: boolean;
+            /** @description Het cluster volgt Git: bijwerken is de templateversie in cluster.yaml wijzigen */
+            git_managed: boolean;
+            /** @description De servers eerst, dan op naam */
+            nodes: components["schemas"]["KubeUpgradeNode"][];
+            /** @description Waarom de nodes nu niet te lezen waren */
+            nodes_error: string;
+        };
+        KubeUpgradeNext: {
+            version: string;
+            k3s: string;
+        };
+        KubeUpgradeNode: {
+            name: string;
+            /** @description control-plane */
+            server: boolean;
+            /** @description De versie die de kubelet meldt */
+            kubelet: string;
+            ready: boolean;
+            unschedulable: boolean;
         };
         KubeSnapshotSaved: {
             snapshot: components["schemas"]["KubeSnapshot"] | null;
@@ -7760,6 +7817,8 @@ export interface components {
             /** Format: uuid */
             node_id: string;
             hostname: string;
+            /** @description De rol uit de template */
+            role?: string;
             new: boolean;
             /** @description De VIP's die deze node nu heeft */
             vips: string[];
@@ -7779,7 +7838,10 @@ export interface components {
             metadata: components["schemas"]["GitFieldChange"][];
             params: components["schemas"]["GitFieldChange"][];
             new_nodes: components["schemas"]["GitPlanNewNode"][];
-            /** @description In de volgorde van toepassen; de bestaande nodes met de VIP-eigenaar als laatste, daarna de nieuwe */
+            /**
+             * @description In de volgorde van toepassen; de bestaande nodes met de VIP-eigenaar als laatste, daarna de nieuwe. Bij
+             *     Kubernetes gaan de servers voor de workers.
+             */
             nodes: components["schemas"]["GitPlanNode"][];
             unchanged: string[];
             warnings: string[];
@@ -13163,6 +13225,31 @@ export interface operations {
             409: components["responses"]["Error"];
             502: components["responses"]["Error"];
             503: components["responses"]["Error"];
+        };
+    };
+    getKubeUpgrade: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description De versies */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KubeUpgrade"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
         };
     };
 }

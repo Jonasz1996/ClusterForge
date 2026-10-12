@@ -14,6 +14,7 @@ import (
 
 	"github.com/Jonasz1996/clusterforge/internal/deploy"
 	"github.com/Jonasz1996/clusterforge/internal/drift"
+	"github.com/Jonasz1996/clusterforge/internal/rollout"
 	"github.com/Jonasz1996/clusterforge/internal/store"
 	"github.com/Jonasz1996/clusterforge/internal/templates"
 	"github.com/Jonasz1996/clusterforge/pkg/protocol"
@@ -72,11 +73,13 @@ type PlanNewNode struct {
 }
 
 type PlanNode struct {
-	NodeID   uuid.UUID    `json:"node_id"`
-	Hostname string       `json:"hostname"`
-	New      bool         `json:"new"`
-	VIPs     []string     `json:"vips"`
-	Steps    []StepChange `json:"steps"`
+	NodeID   uuid.UUID `json:"node_id"`
+	Hostname string    `json:"hostname"`
+	// Role is de rol uit de template, zoals server of worker.
+	Role  string       `json:"role,omitempty"`
+	New   bool         `json:"new"`
+	VIPs  []string     `json:"vips"`
+	Steps []StepChange `json:"steps"`
 }
 
 // StepChange is één stap die verandert.
@@ -170,17 +173,28 @@ func (s *Service) planChange(ctx context.Context, c *Cluster, ch *Checked, commi
 	}
 
 	p.Metadata = metadataChanges(c.metadata(), ch.Metadata)
+	oldTpl, ok := s.reg().Get(old.Template.Name, old.Template.Version)
+	if !ok {
+		oldTpl = nil
+	}
 	if old.Template.Version != newTpl.Version {
 		p.Params = append(p.Params, FieldChange{Field: "template.version", Label: "Templateversie", From: old.Template.Version, To: newTpl.Version})
+		if oldTpl != nil && newTpl.KubeVersion() != "" {
+			if err := templates.KubeStep(oldTpl, newTpl); err != nil {
+				return nil, []FieldError{{Field: "template.version", Line: ch.File.Line("template.version"), Message: err.Error()}}, nil
+			}
+			if from, to := oldTpl.KubeVersion(), newTpl.KubeVersion(); from != to {
+				p.Params = append(p.Params, FieldChange{Field: "kubernetes.version", Label: "Kubernetes (k3s)", From: from, To: to})
+				p.Warnings = append(p.Warnings, kubeWarnings(old, to)...)
+			}
+		}
 	}
 	p.Params = append(p.Params, paramChanges(newTpl, old.Params, next.Params)...)
 	if old.Cluster.Environment != next.Cluster.Environment && next.Cluster.Environment == "prod" {
 		p.Warnings = append(p.Warnings, "Het cluster gaat naar prod: daarna vraagt elke ingreep de bevestiging bij prod.")
 	}
 
-	oldTpl, ok := s.reg().Get(old.Template.Name, old.Template.Version)
-	if !ok {
-		oldTpl = nil
+	if oldTpl == nil {
 		p.Warnings = append(p.Warnings, fmt.Sprintf("%s %s zit niet in deze server; de huidige stappen zijn niet te renderen, dus het plan toont geen diffs.",
 			old.Template.Name, old.Template.Version))
 	}
@@ -204,7 +218,7 @@ func (s *Service) planChange(ctx context.Context, c *Cluster, ch *Checked, commi
 			p.Unchanged = append(p.Unchanged, n.Hostname)
 			continue
 		}
-		pn := PlanNode{NodeID: n.NodeID, Hostname: n.Hostname, New: isNew(n.NodeID), VIPs: owned[n.NodeID], Steps: d.Steps}
+		pn := PlanNode{NodeID: n.NodeID, Hostname: n.Hostname, Role: n.Role, New: isNew(n.NodeID), VIPs: owned[n.NodeID], Steps: d.Steps}
 		if pn.VIPs == nil {
 			pn.VIPs = []string{}
 		}
@@ -214,7 +228,7 @@ func (s *Service) planChange(ctx context.Context, c *Cluster, ch *Checked, commi
 		byNode[n.NodeID] = pn
 		order = append(order, n.NodeID)
 	}
-	p.Nodes = orderNodes(order, byNode)
+	p.Nodes = orderNodes(order, byNode, newTpl.ClusterType == "kubernetes")
 	for _, n := range p.Nodes {
 		for _, st := range n.Steps {
 			if st.Change == "removed" {
@@ -225,6 +239,23 @@ func (s *Service) planChange(ctx context.Context, c *Cluster, ch *Checked, commi
 	p.NoSteps = len(p.Nodes) == 0
 	p.Summary = summary(p)
 	return &planned{plan: p, next: next, diffs: diffs, isNew: isNew, newTpl: newTpl, oldTpl: oldTpl, unrendered: warnings}, nil, nil
+}
+
+// kubeWarnings zeggen wat een nieuwe k3s met de nodes doet.
+func kubeWarnings(spec deploy.Spec, to string) []string {
+	out := []string{fmt.Sprintf("Kubernetes gaat naar %s, node voor node: eerst de servers, dan de workers. Elke node gaat eerst leeg en krijgt pas weer pods "+
+		"als hij Ready is met de nieuwe versie. Komt een node niet terug, dan stopt de uitrol en blijft die node op cordon.", templates.ShortKube(to))}
+	var servers []string
+	for _, n := range spec.Nodes {
+		if n.Role == rollout.KubeServerRole {
+			servers = append(servers, n.Hostname)
+		}
+	}
+	if len(servers) == 1 {
+		out = append(out, fmt.Sprintf("Er is maar één server, %s: terwijl k3s daar herstart, antwoordt de API van het cluster even niet en is het VIP even weg. "+
+			"Apps die al draaien, blijven draaien.", servers[0]))
+	}
+	return out
 }
 
 // nodeDiff is wat er op één node verandert, met de nieuwe stappen.
@@ -298,12 +329,17 @@ func (s *Service) ownedVIPs(ctx context.Context, clusterID uuid.UUID) (map[uuid.
 // zonder VIP, dan de eigenaars, en de nieuwe nodes als laatste, elk in de
 // volgorde van de spec. Zo kennen de bestaande nodes een nieuwe peer al
 // voor hij start; andersom zou de nieuwe node de VIP-eigenaar niet horen
-// en het VIP ook nemen.
-func orderNodes(order []uuid.UUID, nodes map[uuid.UUID]PlanNode) []PlanNode {
+// en het VIP ook nemen. Bij Kubernetes gaan de bestaande servers voor de
+// bestaande workers, want een kubelet mag niet nieuwer zijn dan de
+// API-server.
+func orderNodes(order []uuid.UUID, nodes map[uuid.UUID]PlanNode, kubernetes bool) []PlanNode {
+	server := func(n PlanNode) bool { return kubernetes && n.Role == rollout.KubeServerRole }
 	out := []PlanNode{}
 	for _, group := range []func(PlanNode) bool{
-		func(n PlanNode) bool { return !n.New && len(n.VIPs) == 0 },
-		func(n PlanNode) bool { return !n.New && len(n.VIPs) > 0 },
+		func(n PlanNode) bool { return !n.New && server(n) && len(n.VIPs) == 0 },
+		func(n PlanNode) bool { return !n.New && server(n) && len(n.VIPs) > 0 },
+		func(n PlanNode) bool { return !n.New && !server(n) && len(n.VIPs) == 0 },
+		func(n PlanNode) bool { return !n.New && !server(n) && len(n.VIPs) > 0 },
 		func(n PlanNode) bool { return n.New },
 	} {
 		for _, id := range order {
@@ -345,6 +381,24 @@ func compareSteps(host string, before, after []templates.Step, revision int, com
 	}
 	oldKeys, oldSteps := keyed(before)
 	newKeys, newSteps := keyed(after)
+	// Een commando dat een ander bestand maakt, heeft een andere sleutel,
+	// maar is hetzelfde commando: dat is een wijziging, geen nieuwe stap en
+	// een die weg is.
+	moved, gone := map[string]string{}, map[string]bool{}
+	for _, nk := range newKeys {
+		ns := newSteps[nk]
+		if _, existed := oldSteps[nk]; existed || ns.Command == nil {
+			continue
+		}
+		for _, ok := range oldKeys {
+			os := oldSteps[ok]
+			_, still := newSteps[ok]
+			if !still && !gone[ok] && os.Command != nil && os.Command.Run == ns.Command.Run {
+				moved[nk], gone[ok] = ok, true
+				break
+			}
+		}
+	}
 	from := fmt.Sprintf("%s (revisie %d)", host, revision)
 	to := fmt.Sprintf("%s (commit %s)", host, short(commit))
 	if commit == "" {
@@ -355,6 +409,9 @@ func compareSteps(host string, before, after []templates.Step, revision int, com
 		ns := newSteps[k]
 		sc := StepChange{Step: strings.SplitN(k, "#", 2)[0], IDs: drift.StepIDs(ns), Title: titleOf(ns)}
 		os, existed := oldSteps[k]
+		if ok, isMoved := moved[k]; isMoved {
+			os, existed = oldSteps[ok], true
+		}
 		if !existed {
 			sc.Change, sc.Summary = "added", "nieuwe stap"
 			if ns.File != nil {
@@ -372,7 +429,7 @@ func compareSteps(host string, before, after []templates.Step, revision int, com
 		out = append(out, sc)
 	}
 	for _, k := range oldKeys {
-		if _, still := newSteps[k]; !still {
+		if _, still := newSteps[k]; !still && !gone[k] {
 			os := oldSteps[k]
 			out = append(out, StepChange{Step: strings.SplitN(k, "#", 2)[0], IDs: drift.StepIDs(os), Title: titleOf(os),
 				Change: "removed", Summary: "staat niet meer in de template"})
@@ -382,8 +439,11 @@ func compareSteps(host string, before, after []templates.Step, revision int, com
 }
 
 func titleOf(s templates.Step) string {
-	if s.Title == "" {
+	switch {
+	case s.Title == "":
 		return stepKey(s)
+	case s.Title == "commando" && s.Command != nil:
+		return "Commando " + s.Command.Run
 	}
 	return strings.ToUpper(s.Title[:1]) + s.Title[1:]
 }
@@ -433,14 +493,34 @@ func stepDiff(a, b templates.Step, from, to string) (string, string) {
 		if a.Service.State != b.Service.State {
 			parts = append(parts, fmt.Sprintf("toestand van %s naar %s", or(a.Service.State, "ongemoeid"), or(b.Service.State, "ongemoeid")))
 		}
+	case a.Command != nil && b.Command != nil:
+		if a.Command.Run != b.Command.Run {
+			parts = append(parts, "ander commando")
+		}
+		if a.Command.Creates != b.Command.Creates {
+			parts = append(parts, "draait opnieuw en maakt nu "+b.Command.Creates)
+		}
 	}
 	if len(a.Notify) != len(b.Notify) || !slices.Equal(notifyNames(a), notifyNames(b)) {
-		parts = append(parts, "andere services na een wijziging")
+		parts = append(parts, notifyChange(b))
 	}
 	if len(parts) == 0 {
 		parts = append(parts, "anders")
 	}
 	return strings.Join(parts, ", "), diff
+}
+
+// notifyChange zegt welke services een stap na een wijziging nu raakt.
+func notifyChange(s templates.Step) string {
+	if len(s.Notify) == 0 {
+		return "raakt na een wijziging geen services meer"
+	}
+	verbs := map[string]string{"restarted": "herstarten", "reloaded": "herladen", "started": "starten", "stopped": "stoppen"}
+	var out []string
+	for _, n := range s.Notify {
+		out = append(out, strings.TrimSpace(n.Name+" "+verbs[n.State]))
+	}
+	return "daarna " + strings.Join(out, ", ")
 }
 
 func notifyNames(s templates.Step) []string {
@@ -531,8 +611,11 @@ func summary(p *Plan) string {
 	var fields []string
 	for _, f := range append(slices.Clone(p.Metadata), p.Params...) {
 		name := strings.TrimPrefix(strings.TrimPrefix(f.Field, "cluster."), "params.")
-		if f.Field == "template.version" {
+		switch f.Field {
+		case "template.version":
 			name = "templateversie"
+		case "kubernetes.version":
+			name = "k3s"
 		}
 		fields = append(fields, fmt.Sprintf("%s van %s naar %s", name, orNone(f.From), orNone(f.To)))
 	}
@@ -553,6 +636,9 @@ func summary(p *Plan) string {
 			name := st.Title
 			if strings.HasPrefix(st.Step, "file:") {
 				name = path.Base(strings.TrimPrefix(st.Step, "file:"))
+			}
+			if run, isCommand := strings.CutPrefix(name, "Commando "); isCommand && strings.HasPrefix(st.Step, "command:") && strings.TrimSpace(run) != "" {
+				name = "commando " + path.Base(strings.Fields(run)[0])
 			}
 			if perStep[name] == 0 {
 				stepOrder = append(stepOrder, name)

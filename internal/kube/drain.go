@@ -261,6 +261,15 @@ func (s *Service) NodeReady(ctx context.Context, clusterID uuid.UUID, node strin
 	return n.Ready(), err
 }
 
+// ReadNode leest een node zonder cache, zoals na een herstart van k3s.
+func (s *Service) ReadNode(ctx context.Context, clusterID uuid.UUID, node string) (Node, error) {
+	if !ValidName(node) {
+		return Node{}, fmt.Errorf("%w: node %q", ErrInvalid, node)
+	}
+	s.forget(clusterID)
+	return GetInto[Node](ctx, s, clusterID, "/api/v1/nodes/"+node)
+}
+
 // Cordon zet een node op cordon: er komen geen nieuwe pods op.
 func (s *Service) Cordon(ctx context.Context, clusterID uuid.UUID, node string) error {
 	return s.setUnschedulable(ctx, clusterID, node, true, false)

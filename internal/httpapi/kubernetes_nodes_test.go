@@ -104,7 +104,7 @@ func TestKubernetesNodes(t *testing.T) {
 
 	// Het formulier: de waarden van nu, met wat vastligt.
 	var form specEditForm
-	if s := c.do("GET", base+"/spec/edit", nil, &form); s != 200 || form.Template != "kubernetes" || form.Version != "1.0.0" || form.Blocked != "" {
+	if s := c.do("GET", base+"/spec/edit", nil, &form); s != 200 || form.Template != "kubernetes" || form.Version != "1.1.0" || form.Blocked != "" {
 		t.Fatalf("formulier: %d %+v", s, form)
 	}
 	locked := map[string]string{}

@@ -25,6 +25,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/health"
 	"github.com/Jonasz1996/clusterforge/internal/jobs"
+	"github.com/Jonasz1996/clusterforge/internal/kube"
 	"github.com/Jonasz1996/clusterforge/internal/status"
 	"github.com/Jonasz1996/clusterforge/internal/store"
 	"github.com/Jonasz1996/clusterforge/internal/templates"
@@ -81,6 +82,13 @@ type Service struct {
 	// Changed wordt aangeroepen na een taak, zodat de status meteen opnieuw
 	// berekend wordt. Mag nil zijn.
 	Changed func()
+	// Kube maakt bij een Kubernetes-cluster een node leeg voor hij een
+	// nieuwe k3s krijgt, en geeft hem daarna weer pods. Zonder Kube gebeurt
+	// dat niet.
+	Kube *kube.Service
+	// KubeReadyTimeout is hoe lang de taak na het toepassen wacht tot de
+	// node Ready is met de nieuwe k3s.
+	KubeReadyTimeout time.Duration
 }
 
 func NewService(pool *pgxpool.Pool, ev *events.Writer, log *slog.Logger, runner *jobs.Runner, bus deploy.Commander,
@@ -88,7 +96,7 @@ func NewService(pool *pgxpool.Pool, ev *events.Writer, log *slog.Logger, runner 
 	s := &Service{
 		pool: pool, q: store.New(pool), ev: ev, log: log, jobs: runner, bus: bus, dep: dep, drift: drf,
 		Gate: health.NewGate(pool), ReadyTimeout: 2 * time.Minute, SettleTimeout: time.Minute,
-		Fresh: status.HeartbeatLate, Retry: 5 * time.Second,
+		Fresh: status.HeartbeatLate, Retry: 5 * time.Second, KubeReadyTimeout: 5 * time.Minute,
 	}
 	// Niet Retryable: opnieuw proberen is een nieuw herstel vanuit wat nu
 	// op de nodes staat.
@@ -157,6 +165,9 @@ type Plan struct {
 	// gebruik.
 	NewNodes  []deploy.NewNode `json:"new_nodes,omitempty"`
 	ServerURL string           `json:"server_url,omitempty"`
+	// Kubernetes: de servers gaan voor de workers, en een node die een
+	// nieuwe k3s krijgt, wordt eerst leeggemaakt.
+	Kubernetes bool `json:"kubernetes,omitempty"`
 }
 
 // newIDs zijn de ids van de nieuwe nodes.
@@ -173,10 +184,12 @@ func (p Plan) NeedsConfirmation() bool { return p.Environment == string(store.En
 
 // PlanNode is één node van de taak.
 type PlanNode struct {
-	NodeID   uuid.UUID  `json:"node_id"`
-	Hostname string     `json:"hostname"`
-	VIPs     []string   `json:"vips"`
-	Steps    []PlanStep `json:"steps"`
+	NodeID   uuid.UUID `json:"node_id"`
+	Hostname string    `json:"hostname"`
+	// Role is de rol uit de template, zoals server of worker.
+	Role  string     `json:"role,omitempty"`
+	VIPs  []string   `json:"vips"`
+	Steps []PlanStep `json:"steps"`
 	// Ignored zijn genegeerde stappen die blijven zoals ze zijn.
 	Ignored []string `json:"ignored"`
 	// Services zijn de services die het herstel herlaadt, herstart of
@@ -269,19 +282,23 @@ func (s *Service) PlanRemediation(ctx context.Context, clusterID uuid.UUID, choi
 			return Plan{}, err
 		}
 		pn.NodeID, pn.VIPs = n.ID, owned[n.ID]
+		if k := slices.IndexFunc(d.Spec.Nodes, func(sn deploy.SpecNode) bool { return sn.NodeID == n.ID }); k >= 0 {
+			pn.Role = d.Spec.Nodes[k].Role
+		}
 		byNode[n.ID] = pn
 	}
 
 	p := Plan{
 		Mode: ModeRemediate, ClusterID: c.ID, Cluster: c.Name, Slug: c.Slug, Environment: string(c.Environment),
 		Template: d.Spec.Template.Name, Version: d.Spec.Template.Version, Revision: d.Revision, Nodes: []PlanNode{},
+		Kubernetes: c.Type == "kubernetes",
 	}
 	order := make([]uuid.UUID, len(d.Spec.Nodes))
 	for i, sn := range d.Spec.Nodes {
 		order[i] = sn.NodeID
 	}
-	p.Nodes = Order(order, byNode)
-	p.Notes = notes(p)
+	p.Nodes = orderPlan(p.Kubernetes, order, byNode)
+	p.Notes = append(notes(p), kubeNotes(p, servers(d.Spec.Nodes, func(sn deploy.SpecNode) (string, string) { return sn.Hostname, sn.Role }))...)
 	return p, nil
 }
 
@@ -392,6 +409,23 @@ func Order(spec []uuid.UUID, nodes map[uuid.UUID]PlanNode) []PlanNode {
 		}
 	}
 	return out
+}
+
+// orderPlan is Order, en bij Kubernetes eerst de servers en dan de rest:
+// een kubelet mag niet nieuwer zijn dan de API-server.
+func orderPlan(kubernetes bool, spec []uuid.UUID, nodes map[uuid.UUID]PlanNode) []PlanNode {
+	if !kubernetes {
+		return Order(spec, nodes)
+	}
+	servers, rest := map[uuid.UUID]PlanNode{}, map[uuid.UUID]PlanNode{}
+	for id, n := range nodes {
+		if n.Role == KubeServerRole {
+			servers[id] = n
+		} else {
+			rest[id] = n
+		}
+	}
+	return append(Order(spec, servers), Order(spec, rest)...)
 }
 
 func title(ts templates.Step, id string) string {
@@ -557,6 +591,8 @@ func (s *Service) StartRemediation(ctx context.Context, actor events.Actor, p Pl
 type ChangeNode struct {
 	NodeID   uuid.UUID
 	Hostname string
+	// Role is de rol uit de template; bij Kubernetes gaan de servers eerst.
+	Role     string
 	Steps    []PlanStep
 	Services []string
 }
@@ -613,7 +649,7 @@ func (s *Service) PlanChange(ctx context.Context, in ChangeInput) (Plan, error) 
 		if err := nodeUsable(rows[i], ModeChange); err != nil {
 			return Plan{}, err
 		}
-		pn := PlanNode{NodeID: cn.NodeID, Hostname: cn.Hostname, VIPs: owned[cn.NodeID], Steps: cn.Steps, Ignored: []string{}, Services: cn.Services}
+		pn := PlanNode{NodeID: cn.NodeID, Hostname: cn.Hostname, Role: cn.Role, VIPs: owned[cn.NodeID], Steps: cn.Steps, Ignored: []string{}, Services: cn.Services}
 		if pn.VIPs == nil {
 			pn.VIPs = []string{}
 		}
@@ -635,10 +671,10 @@ func (s *Service) PlanChange(ctx context.Context, in ChangeInput) (Plan, error) 
 	p := Plan{
 		Mode: ModeChange, ClusterID: c.ID, Cluster: c.Name, Slug: c.Slug, Environment: string(c.Environment),
 		Template: in.Template, Version: in.Version, Revision: in.Revision, All: in.All, ChangeID: in.ChangeID, Commit: in.Commit,
-		NewNodes: in.New, ServerURL: in.ServerURL,
+		NewNodes: in.New, ServerURL: in.ServerURL, Kubernetes: c.Type == "kubernetes",
 	}
-	p.Nodes = Order(order, byNode)
-	p.Notes = notes(p)
+	p.Nodes = orderPlan(p.Kubernetes, order, byNode)
+	p.Notes = append(notes(p), kubeNotes(p, servers(in.Nodes, func(cn ChangeNode) (string, string) { return cn.Hostname, cn.Role }))...)
 	if p.All {
 		p.Notes = append(p.Notes, "Op elke node worden alle stappen van de template opnieuw toegepast, behalve wat genegeerd wordt; wat al goed staat, blijft zoals het is.")
 	}

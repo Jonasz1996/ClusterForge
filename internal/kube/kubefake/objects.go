@@ -17,6 +17,8 @@ type NodeSpec struct {
 	NotReady bool
 	// Unschedulable is een node met cordon.
 	Unschedulable bool
+	// Version is de versie van de kubelet; leeg is v1.35.9+k3s1.
+	Version string
 }
 
 // Node maakt een Node zoals k3s die meldt.
@@ -45,6 +47,10 @@ func Node(n NodeSpec) map[string]any {
 		spec["taints"] = []any{map[string]any{"key": "node.kubernetes.io/unschedulable", "effect": "NoSchedule"}}
 	}
 	res := map[string]any{"cpu": cpu, "memory": mem, "pods": "110", "ephemeral-storage": "30784420Ki"}
+	version := n.Version
+	if version == "" {
+		version = "v1.35.9+k3s1"
+	}
 	return map[string]any{
 		"apiVersion": "v1", "kind": "Node",
 		"metadata": map[string]any{"name": n.Name, "labels": labels, "annotations": map[string]any{
@@ -62,7 +68,7 @@ func Node(n NodeSpec) map[string]any {
 				cond("Ready", ready, reason, msg),
 			},
 			"nodeInfo": map[string]any{
-				"kubeletVersion": "v1.35.9+k3s1", "kubeProxyVersion": "v1.35.9+k3s1", "osImage": "Debian GNU/Linux 13 (trixie)",
+				"kubeletVersion": version, "kubeProxyVersion": version, "osImage": "Debian GNU/Linux 13 (trixie)",
 				"kernelVersion": "6.12.48+deb13-amd64", "containerRuntimeVersion": "containerd://2.1.4-k3s1",
 				"architecture": "amd64", "operatingSystem": "linux",
 			},

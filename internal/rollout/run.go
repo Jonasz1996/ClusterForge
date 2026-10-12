@@ -185,17 +185,33 @@ func (s *Service) remediate(ctx context.Context, j *jobs.Job, st *jobs.Step, p P
 		st.Logf("hervat na een onderbreking; het herstel was al begonnen, dus %s opnieuw toepassen", n.Hostname)
 	}
 
-	if err := s.apply(ctx, j, st, p, n, &ns, ids, steps); err != nil {
+	var kn *kubeNode
+	prepare := func() (err error) {
+		kn, err = s.kubePrepare(ctx, st, p, n, d, steps)
 		return err
 	}
-	return s.settle(ctx, st, p, n, d, rendered, "het herstel van "+n.Hostname, n.Hostname+" is hersteld")
+	if err := s.apply(ctx, j, st, p, n, &ns, ids, steps, prepare); err != nil {
+		return kn.stays(err)
+	}
+	if err := s.settle(ctx, st, p, n, d, rendered, "het herstel van "+n.Hostname, n.Hostname+" is hersteld"); err != nil {
+		return kn.stays(err)
+	}
+	return s.kubeFinish(ctx, st, p, kn)
 }
 
 // apply past de stappen toe op een node die een eventueel VIP kan
 // afstaan. De stappen liggen vast voor het eerste commando de deur uitgaat.
-func (s *Service) apply(ctx context.Context, j *jobs.Job, st *jobs.Step, p Plan, n *PlanNode, ns *nodeState, ids []string, steps []templates.Step) error {
+// prepare loopt daarvoor, zoals het leegmaken van een node in Kubernetes;
+// nil is niets.
+func (s *Service) apply(ctx context.Context, j *jobs.Job, st *jobs.Step, p Plan, n *PlanNode, ns *nodeState, ids []string, steps []templates.Step,
+	prepare func() error) error {
 	if err := s.takeover(ctx, p, n, st); err != nil {
 		return err
+	}
+	if prepare != nil {
+		if err := prepare(); err != nil {
+			return err
+		}
 	}
 	if ns.AppliedAt == nil {
 		now := time.Now()
@@ -328,10 +344,18 @@ func (s *Service) change(ctx context.Context, j *jobs.Job, st *jobs.Step, p Plan
 	} else {
 		st.Logf("revisie %d toepassen: alle %d stappen", p.Revision, len(steps))
 	}
-	if err := s.apply(ctx, j, st, p, n, &ns, ids, steps); err != nil {
+	var kn *kubeNode
+	prepare := func() (err error) {
+		kn, err = s.kubePrepare(ctx, st, p, n, d, steps)
 		return err
 	}
-	return s.settle(ctx, st, p, n, d, rendered, "het toepassen op "+n.Hostname, n.Hostname+" is bijgewerkt")
+	if err := s.apply(ctx, j, st, p, n, &ns, ids, steps, prepare); err != nil {
+		return kn.stays(err)
+	}
+	if err := s.settle(ctx, st, p, n, d, rendered, "het toepassen op "+n.Hostname, n.Hostname+" is bijgewerkt"); err != nil {
+		return kn.stays(err)
+	}
+	return s.kubeFinish(ctx, st, p, kn)
 }
 
 // join past alle stappen van de template toe op een nieuwe node, wacht tot
@@ -372,7 +396,7 @@ func (s *Service) join(ctx context.Context, j *jobs.Job, st *jobs.Step, p Plan, 
 		st.Logf("hervat na een onderbreking; het toepassen was al begonnen, dus %s opnieuw toepassen", n.Hostname)
 	}
 	pn := &PlanNode{NodeID: n.NodeID, Hostname: n.Hostname}
-	if err := s.apply(ctx, j, st, p, pn, &ns, ids, Select(rendered, ids)); err != nil {
+	if err := s.apply(ctx, j, st, p, pn, &ns, ids, Select(rendered, ids), nil); err != nil {
 		return err
 	}
 	if err := s.settle(ctx, st, p, pn, d, rendered, "het toepassen op "+n.Hostname, n.Hostname+" is gezond"); err != nil {
@@ -451,6 +475,12 @@ func (s *Service) takeover(ctx context.Context, p Plan, n *PlanNode, st *jobs.St
 	if others == 0 && len(p.NewNodes) > 0 {
 		st.Logf("%s is de enige node met keepalived en er komen nodes bij; %s blijft op %s en valt hoogstens even weg als keepalived herlaadt",
 			n.Hostname, strings.Join(held, ", "), n.Hostname)
+		return nil
+	}
+	// Een Kubernetes-cluster met één server heeft geen tweede houder; dat
+	// koos de beheerder bij het aantal servers.
+	if others == 0 && p.Kubernetes {
+		st.Logf("%s is de enige server; %s kan nergens heen en valt even weg als k3s of keepalived herstart", n.Hostname, strings.Join(held, ", "))
 		return nil
 	}
 	return fmt.Errorf("%s heeft %s en geen andere node kan het nu overnemen: er is geen actieve, online node waarop keepalived draait. Er is niets toegepast",

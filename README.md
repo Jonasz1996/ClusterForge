@@ -66,6 +66,7 @@ Het technisch ontwerp staat in [docs/design/mvp-fase-1.md](docs/design/mvp-fase-
 | 8. Status, incidenten en metrics | Een Kubernetes-cluster is down als de API niet antwoordt en verminderd bij een node die NotReady is of een app die niet doet wat hij moet; zo'n app opent een incident, What Broke leest de waarschuwingen van Kubernetes en ziet een nieuwe image als uitrol; CPU en geheugen per pod en node elke minuut in VictoriaMetrics, met grafieken | klaar |
 | 9. kubectl op je eigen pc | Een kubeconfig per gebruiker voor kubectl, k9s, Headlamp of Lens, met een eigen ServiceAccount en een token dat verloopt; beheerder of alleen lezen, intrekken werkt meteen, en verlopen kubeconfigs ruimt ClusterForge op | klaar |
 | 10. etcd-snapshots | Een tabblad Snapshots met de snapshots die k3s van zijn database maakt, per server, en hun stand bij Back-ups; Snapshot nu; in lab en test het hele cluster terugzetten naar een snapshot als taak die stap voor stap doet wat k3s beschrijft; op prod een runbook met de commando's | klaar |
+| 11. Bijwerken | Template 1.1.0 met k3s 1.36; op het overzicht welke k3s elke node draait en Bijwerken naar de volgende versie, één minorversie per keer en nooit terug; de uitrol gaat node voor node, eerst de servers, maakt elke node eerst leeg, wacht tot hij Ready is met de nieuwe versie en stopt bij de eerste node die niet terugkomt | klaar |
 
 ## Draaien met Docker Compose
 
@@ -412,7 +413,7 @@ Kies bij "Cluster uitrollen" de template Kubernetes (k3s) en vul een vrij VIP in
 - **Het VIP** staat met keepalived op een server waarvan de API antwoordt. `kubectl` praat ermee op poort 6443, en Traefik beantwoordt er je apps op poort 80 en 443.
 - **In het cluster** zitten containerd, Flannel voor het netwerk tussen de nodes, CoreDNS, Traefik als ingress, ServiceLB voor Services van type LoadBalancer, local-path voor volumes op de schijf van een node, metrics-server voor `kubectl top`, en de Helm-controller.
 
-De template installeert een vaste k3s-versie (template 1.0.0: v1.35.9+k3s1) van de GitHub-release en controleert de SHA-256 met het controlebestand van die release. De instellingen staan in `/etc/rancher/k3s/config.yaml` (alleen voor root leesbaar, want het jointoken staat erin), en de driftcontrole kijkt mee. Het jointoken maakt ClusterForge zelf en bewaart het versleuteld, zoals elk geheim van een template.
+De template installeert een vaste k3s-versie (template 1.0.0: v1.35.9+k3s1, 1.1.0: v1.36.5+k3s1; een nieuw cluster krijgt de nieuwste) van de GitHub-release en controleert de SHA-256 met het controlebestand van die release. De instellingen staan in `/etc/rancher/k3s/config.yaml` (alleen voor root leesbaar, want het jointoken staat erin), en de driftcontrole kijkt mee. Het jointoken maakt ClusterForge zelf en bewaart het versleuteld, zoals elk geheim van een template.
 
 Kubernetes draait op VM's, niet in LXC-containers: daar vraagt het een privileged container met extra instellingen, en zo'n opstelling breekt geregeld.
 
@@ -642,6 +643,22 @@ sudo kubectl get nodes
 ```
 
 De lijst werkt met elke agent die Kubernetes leest. Snapshot nu en Terugzetten vragen een agent van deze versie op de servers; met een oudere zegt ClusterForge welke server je moet bijwerken met het installatiescript en `--upgrade`.
+
+### Kubernetes bijwerken
+
+Elke versie van de template kubernetes installeert één vaste k3s. Bijwerken is overstappen naar een nieuwere versie van de template, met dezelfde wijziging van de specificatie als bij nodes toevoegen. Op het **Overzicht** van een cluster staat de kaart **Kubernetes-versie**: welke k3s het cluster hoort te draaien, welke versie elke node meldt (de kolom VERSION van `kubectl get nodes`), en of er een nieuwere is. Kubernetes gaat één minorversie per keer omhoog en nooit terug, dus ClusterForge biedt alleen de volgende aan; een versie die een minor overslaat of ouder is, weigert het plan.
+
+1. Maak eerst een snapshot op het tabblad Snapshots.
+2. Kies **Bijwerken naar k3s v1.36.5…** (beheerder). Je ziet het plan: per node de stappen in de volgorde van de uitrol, met de nieuwe k3s erbij. Er gebeurt nog niets.
+3. Kies Toepassen. De taak gaat node voor node, eerst de servers en dan de workers, want een kubelet mag niet nieuwer zijn dan de API-server. Per node:
+   - Leegmaken: de node gaat op cordon met de markering van ClusterForge, en zijn pods gaan via de Eviction-API naar de andere nodes, zodat een PodDisruptionBudget geldt. Lukt dat niet, dan krijgt hij weer pods en stopt de taak voor er iets veranderd is. Is er geen andere node voor de pods, dan blijven ze staan: een herstart van k3s stopt ze niet.
+   - De nieuwe binary installeren (`install-k3s.sh`, met de controle van de SHA-256) en k3s of k3s-agent herstarten.
+   - Wachten tot de node gezond is, het VIP een houder heeft, elke node Ready is en Traefik op het VIP antwoordt, en daarna tot de node Ready is met de nieuwe versie.
+   - De cordon weghalen: de node krijgt weer pods, en de volgende is aan de beurt.
+
+Komt een node niet terug, dan stopt de taak daar en blijft die node op cordon; de nodes daarna blijven ongemoeid op de oude versie. Kijk op de node met `sudo journalctl -u k3s` (een server) of `sudo journalctl -u k3s-agent` (een worker). Is het opgelost, kies dan **Opnieuw toepassen** op de pagina van het cluster: nodes die de nieuwe versie al draaien, gaan niet opnieuw leeg, en de rest volgt. Wil je de node toch eerst weer gebruiken, haal de cordon dan weg met Uncordon op het tabblad Nodes.
+
+Met één server antwoordt de API van het cluster even niet terwijl k3s daar herstart, en is het VIP even weg; apps die al draaien, blijven draaien. Met drie servers neemt een andere server het VIP over. Volgt het cluster Git, dan zet je in `cluster.yaml` de versie van de template op de nieuwe en keur je de wijziging goed; de uitrol is dezelfde.
 
 ### Hoe ClusterForge Kubernetes leest
 

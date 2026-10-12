@@ -37,8 +37,18 @@ type Template struct {
 	// prioriteit zodra die weer gezond is (keepalived met preempt). Een
 	// failovertest verwacht dat dan standaard.
 	Failback bool `yaml:"failback"`
+	// Kubernetes zegt welke Kubernetes deze versie installeert; alleen bij
+	// cluster_type kubernetes, en daar verplicht.
+	Kubernetes *KubeInfo `yaml:"kubernetes"`
 
 	files *template.Template
+}
+
+// KubeInfo is de Kubernetes van een templateversie.
+type KubeInfo struct {
+	// Version is de k3s-release, zoals v1.36.5+k3s1. Een node draait haar
+	// als de kubelet die versie meldt.
+	Version string `yaml:"version"`
 }
 
 // ServiceSpec is een dienst zoals hij in template.yaml staat. De soort komt
@@ -124,6 +134,8 @@ var (
 	nameRe    = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,62}$`)
 	roleRe    = regexp.MustCompile(`^[a-z][a-z0-9-]{0,15}$`)
 	versionRe = regexp.MustCompile(`^\d+\.\d+\.\d+$`)
+	// k3sVersionRe is een release van k3s, zoals v1.36.5+k3s1.
+	k3sVersionRe = regexp.MustCompile(`^v1\.(\d+)\.(\d+)\+k3s(\d+)$`)
 )
 
 // Parse leest een template uit een map met template.yaml en eventueel
@@ -148,6 +160,10 @@ func Parse(fsys fs.FS) (*Template, error) {
 		return nil, errors.New("title en cluster_type zijn verplicht")
 	case len(t.Roles) == 0:
 		return nil, errors.New("een template heeft minstens één rol")
+	case t.ClusterType == "kubernetes" && (t.Kubernetes == nil || !k3sVersionRe.MatchString(t.Kubernetes.Version)):
+		return nil, errors.New("een template voor Kubernetes zegt welke k3s ze installeert, zoals kubernetes: { version: v1.36.5+k3s1 }")
+	case t.ClusterType != "kubernetes" && t.Kubernetes != nil:
+		return nil, errors.New("kubernetes: hoort alleen bij cluster_type kubernetes")
 	}
 	seen := map[string]bool{}
 	for i := range t.Params {
@@ -485,7 +501,14 @@ type stepSpec struct {
 	Service   *protocol.ServiceStep   `json:"service"`
 	User      *protocol.UserStep      `json:"user"`
 	Directory *protocol.DirectoryStep `json:"directory"`
-	Command   *protocol.CommandStep   `json:"command"`
+	Command   *commandSpec            `json:"command"`
+}
+
+// commandSpec is een commando met, zoals bij een bestand, de services die
+// herstarten als het draaide; zo herstart k3s na een nieuwe binary.
+type commandSpec struct {
+	protocol.CommandStep
+	Notify []string `json:"notify"`
 }
 
 type fileSpec struct {
@@ -520,23 +543,26 @@ func (t *Template) Steps(role string, c Context) ([]Step, error) {
 		if err := decodeStrict(v, &spec); err != nil {
 			return nil, fmt.Errorf("stap %d: %w", i+1, err)
 		}
-		s := Step{Step: protocol.Step{
-			Package: spec.Package, Service: spec.Service, User: spec.User, Directory: spec.Directory, Command: spec.Command,
-		}}
+		s := Step{Step: protocol.Step{Package: spec.Package, Service: spec.Service, User: spec.User, Directory: spec.Directory}}
+		var notify []string
+		if c := spec.Command; c != nil {
+			s.Command, notify = &c.CommandStep, c.Notify
+		}
 		if f := spec.File; f != nil {
 			content, err := t.fileContent(f, data)
 			if err != nil {
 				return nil, fmt.Errorf("stap %d: %w", i+1, err)
 			}
 			s.File = &protocol.FileStep{Path: f.Path, Content: content, Mode: f.Mode, Owner: f.Owner, Group: f.Group}
-			for _, n := range f.Notify {
-				// service:keepalived:reload
-				parts := strings.Split(n, ":")
-				if len(parts) != 3 || parts[0] != "service" || notifyActions[parts[2]] == "" {
-					return nil, fmt.Errorf("stap %d: notify %q moet de vorm service:naam:reload of service:naam:restart hebben", i+1, n)
-				}
-				s.Notify = append(s.Notify, protocol.ServiceStep{Name: parts[1], State: notifyActions[parts[2]]})
+			notify = f.Notify
+		}
+		for _, n := range notify {
+			// service:keepalived:reload
+			parts := strings.Split(n, ":")
+			if len(parts) != 3 || parts[0] != "service" || notifyActions[parts[2]] == "" {
+				return nil, fmt.Errorf("stap %d: notify %q moet de vorm service:naam:reload of service:naam:restart hebben", i+1, n)
 			}
+			s.Notify = append(s.Notify, protocol.ServiceStep{Name: parts[1], State: notifyActions[parts[2]]})
 		}
 		if s.Kind() == "" {
 			return nil, fmt.Errorf("stap %d heeft precies één soort nodig (package, file, service, user, directory of command)", i+1)

@@ -117,6 +117,7 @@ export function PlanOrder({ plan: p, local = [] }: { plan: GitPlan; local?: stri
                 <span className="font-medium">
                   {i + 1}. {n.hostname}
                 </span>
+                {n.role && <Badge>{n.role}</Badge>}
                 {n.new && <Badge tone="blue">Nieuwe node</Badge>}
                 {n.vips.length > 0 && <Badge tone="amber">VIP-eigenaar</Badge>}
               </div>

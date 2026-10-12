@@ -48,6 +48,7 @@ type Host struct {
 	K3s func(args []string) ([]byte, error)
 
 	mu       sync.Mutex
+	after    func(call string, err error)
 	group    *Group
 	packages map[string]bool
 	versions map[string]string
@@ -198,6 +199,15 @@ func (h *Host) record(call string) {
 	}
 }
 
+// SetAfter laat fn na elk commando weten welk commando het was, zoals
+// "systemctl restart k3s", en zijn fout. fn draait buiten het slot, dus hij
+// mag de host veranderen, zoals een unit laten falen.
+func (h *Host) SetAfter(fn func(call string, err error)) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.after = fn
+}
+
 // Exec speelt de systeemcommando's na die de agent gebruikt.
 func (h *Host) Exec(_ context.Context, name string, args ...string) ([]byte, error) {
 	h.mu.Lock()
@@ -218,8 +228,11 @@ func (h *Host) Exec(_ context.Context, name string, args ...string) ([]byte, err
 		}
 	}
 	out, err := h.exec(name, args)
-	g := h.group
+	g, after := h.group, h.after
 	h.mu.Unlock()
+	if after != nil {
+		after(call, err)
+	}
 	if g != nil && (name == "systemctl" || name == "nft" || name == "ip") {
 		g.update()
 	}
