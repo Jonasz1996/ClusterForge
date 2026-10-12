@@ -3295,6 +3295,62 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/kubernetes/clusters/{clusterId}/access": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * De uitgegeven kubeconfigs; een admin ziet ze allemaal, een viewer de zijne
+         * @description Actieve kubeconfigs, en verlopen of ingetrokken kubeconfigs van de laatste 30 dagen, de nieuwste eerst. Het token
+         *     staat er nooit bij: ClusterForge bewaart het niet.
+         */
+        get: operations["listKubeAccess"];
+        put?: never;
+        /**
+         * Een kubeconfig voor kubectl op je eigen pc
+         * @description ClusterForge maakt een ServiceAccount in de namespace clusterforge, met de ClusterRole cluster-admin (admin) of view,
+         *     en vraagt via de agent een token dat na days dagen verloopt. De kubeconfig wijst naar het VIP op poort 6443 en komt
+         *     alleen in dit antwoord. Een viewer krijgt alleen view. Het vraagt je wachtwoord, of je code als je
+         *     tweestapsverificatie hebt; een admin-kubeconfig voor prod vraagt bovendien tweestapsverificatie en de slug in
+         *     confirm. Een agent van voor deze versie geeft 503 met code agent_too_old.
+         */
+        post: operations["issueKubeAccess"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/kubernetes/clusters/{clusterId}/access/{accessId}/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+                accessId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Een kubeconfig intrekken; een admin elke, een viewer de zijne
+         * @description Het ServiceAccount gaat weg, en dan weigert de API het token meteen. Antwoordt de API nu niet, dan is de kubeconfig
+         *     toch ingetrokken, met de fout in remove_error, en haalt ClusterForge het ServiceAccount weg zodra het cluster weer
+         *     antwoordt.
+         */
+        post: operations["revokeKubeAccess"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -3543,6 +3599,64 @@ export interface components {
             /** @description Het aantal workers daarna */
             workers: number;
             drain: components["schemas"]["KubeDrainPlan"];
+        };
+        KubeAccessInput: {
+            /** @description Waarvoor de kubeconfig is, zoals laptop */
+            name: string;
+            /**
+             * @description admin is cluster-admin, view alleen lezen en geen Secrets
+             * @enum {string}
+             */
+            role: "admin" | "view";
+            /** @description Na hoeveel dagen het token verloopt */
+            days: number;
+            /** @description Je wachtwoord */
+            password?: string;
+            /** @description Je code */
+            totp_code?: string;
+            /** @description De slug van het cluster; nodig voor admin op prod */
+            confirm?: string;
+        };
+        KubeAccess: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            cluster_id: string;
+            /** Format: uuid */
+            user_id: string;
+            /** @description Gebruikersnaam */
+            user: string;
+            name: string;
+            /** @enum {string} */
+            role: "admin" | "view";
+            /** @description Het ServiceAccount in de namespace clusterforge */
+            account: string;
+            /**
+             * @description revoking: ingetrokken, maar het ServiceAccount staat er nog omdat de API niet antwoordde
+             * @enum {string}
+             */
+            state: "active" | "expired" | "revoked" | "revoking";
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            expires_at: string;
+            /** Format: date-time */
+            revoked_at: string | null;
+            /** @description Gebruikersnaam; leeg als ClusterForge zelf introk */
+            revoked_by: string;
+            revoke_reason: string;
+            /** Format: date-time */
+            removed_at: string | null;
+            remove_error: string;
+        };
+        KubeAccessIssued: {
+            access: components["schemas"]["KubeAccess"];
+            /** @description De kubeconfig met het token; ClusterForge bewaart hem niet */
+            kubeconfig: string;
+            /** @description Zoals leren.kubeconfig */
+            filename: string;
+            /** @description Het adres van de API, zoals https://10.0.40.10:6443 */
+            server: string;
         };
         KubeApplyInput: {
             /** @description Eén of meer objecten, gescheiden door ---; hoogstens 50 objecten en 512 kB */
@@ -12676,6 +12790,93 @@ export interface operations {
             409: components["responses"]["Error"];
             502: components["responses"]["Error"];
             503: components["responses"]["Error"];
+        };
+    };
+    listKubeAccess: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description De kubeconfigs */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["KubeAccess"][];
+                    };
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    issueKubeAccess: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["KubeAccessInput"];
+            };
+        };
+        responses: {
+            /** @description Uitgegeven */
+            201: {
+                headers: {
+                    /** @description no-store */
+                    "Cache-Control"?: string;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KubeAccessIssued"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    revokeKubeAccess: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+                accessId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Ingetrokken */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KubeAccess"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
         };
     };
 }

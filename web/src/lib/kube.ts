@@ -34,6 +34,9 @@ export type KubeLessonSummary = components["schemas"]["KubeLessonSummary"];
 export type KubeLesson = components["schemas"]["KubeLesson"];
 export type KubeLessonStep = components["schemas"]["KubeLessonStep"];
 export type KubeLessonLink = components["schemas"]["KubeLessonLink"];
+export type KubeAccess = components["schemas"]["KubeAccess"];
+export type KubeAccessInput = components["schemas"]["KubeAccessInput"];
+export type KubeAccessIssued = components["schemas"]["KubeAccessIssued"];
 type Job = components["schemas"]["Job"];
 
 type Tone = "slate" | "green" | "amber" | "red" | "blue";
@@ -60,6 +63,7 @@ const keys = {
   lessons: (id: string) => ["kube", id, "lessons"] as const,
   metrics: (id: string, s: KubeMetricsScope, range: MetricsRange) => ["kube", id, "metrics", s, range] as const,
   lesson: (id: string, lesson: string) => ["kube", id, "lessons", lesson] as const,
+  access: (id: string) => ["kube", id, "access"] as const,
 };
 
 // scope is de query van een tabblad met een namespace en het vinkje
@@ -401,6 +405,43 @@ export function useKubeApply(id: string) {
     onSettled: (_r, _e, body) => {
       if (!body.preview) void qc.invalidateQueries({ queryKey: ["kube", id] });
     },
+  });
+}
+
+// useKubeAccess geeft de uitgegeven kubeconfigs: een admin ziet ze
+// allemaal, een viewer de zijne.
+export function useKubeAccess(id: string) {
+  return useQuery({
+    queryKey: keys.access(id),
+    queryFn: async () =>
+      unwrap(await api.GET("/kubernetes/clusters/{clusterId}/access", { params: { path: { clusterId: id } } })).items,
+    enabled: id !== "",
+    refetchInterval: 30_000,
+  });
+}
+
+// useIssueKubeAccess maakt een kubeconfig. Het token zit alleen in dit
+// antwoord; ClusterForge bewaart het niet.
+export function useIssueKubeAccess(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: KubeAccessInput) =>
+      unwrap(await api.POST("/kubernetes/clusters/{clusterId}/access", { params: { path: { clusterId: id } }, body })),
+    onSettled: () => void qc.invalidateQueries({ queryKey: keys.access(id) }),
+  });
+}
+
+// useRevokeKubeAccess trekt een kubeconfig in.
+export function useRevokeKubeAccess(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (accessId: string) =>
+      unwrap(
+        await api.POST("/kubernetes/clusters/{clusterId}/access/{accessId}/revoke", {
+          params: { path: { clusterId: id, accessId } },
+        }),
+      ),
+    onSettled: () => void qc.invalidateQueries({ queryKey: keys.access(id) }),
   });
 }
 

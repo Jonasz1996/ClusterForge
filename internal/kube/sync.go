@@ -87,7 +87,8 @@ func ErrorKind(err error) string {
 // kube_nodes, de apps in kube_workloads en de waarschuwingen in
 // kube_events. Een app met een andere image dan bij de vorige sync is een
 // uitrol, en komt in het logboek. Elke MetricsInterval gaan CPU en geheugen
-// uit metrics-server naar Metrics. Daarna rekent de status opnieuw.
+// uit metrics-server naar Metrics. De ServiceAccounts van verlopen en
+// ingetrokken kubeconfigs gaan weg. Daarna rekent de status opnieuw.
 func (s *Service) Sync(ctx context.Context, clusterID uuid.UUID) error {
 	err := s.sync(ctx, clusterID)
 	if s.Changed != nil {
@@ -196,6 +197,7 @@ func (s *Service) sync(ctx context.Context, clusterID uuid.UUID) error {
 			s.log.Warn("Kubernetes-metrics wegschrijven mislukt", "cluster", clusterID, "err", err)
 		}
 	}
+	s.cleanAccess(ctx, clusterID)
 	return nil
 }
 

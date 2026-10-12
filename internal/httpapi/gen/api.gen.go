@@ -1143,6 +1143,66 @@ func (e JobStatus) Valid() bool {
 	}
 }
 
+// Defines values for KubeAccessRole.
+const (
+	KubeAccessRoleAdmin KubeAccessRole = "admin"
+	KubeAccessRoleView  KubeAccessRole = "view"
+)
+
+// Valid indicates whether the value is a known member of the KubeAccessRole enum.
+func (e KubeAccessRole) Valid() bool {
+	switch e {
+	case KubeAccessRoleAdmin:
+		return true
+	case KubeAccessRoleView:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for KubeAccessState.
+const (
+	KubeAccessStateActive   KubeAccessState = "active"
+	KubeAccessStateExpired  KubeAccessState = "expired"
+	KubeAccessStateRevoked  KubeAccessState = "revoked"
+	KubeAccessStateRevoking KubeAccessState = "revoking"
+)
+
+// Valid indicates whether the value is a known member of the KubeAccessState enum.
+func (e KubeAccessState) Valid() bool {
+	switch e {
+	case KubeAccessStateActive:
+		return true
+	case KubeAccessStateExpired:
+		return true
+	case KubeAccessStateRevoked:
+		return true
+	case KubeAccessStateRevoking:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for KubeAccessInputRole.
+const (
+	KubeAccessInputRoleAdmin KubeAccessInputRole = "admin"
+	KubeAccessInputRoleView  KubeAccessInputRole = "view"
+)
+
+// Valid indicates whether the value is a known member of the KubeAccessInputRole enum.
+func (e KubeAccessInputRole) Valid() bool {
+	switch e {
+	case KubeAccessInputRoleAdmin:
+		return true
+	case KubeAccessInputRoleView:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for KubeActionInputAction.
 const (
 	KubeActionInputActionCordon   KubeActionInputAction = "cordon"
@@ -1838,16 +1898,16 @@ func (e RiskSeverity) Valid() bool {
 
 // Defines values for Role.
 const (
-	Admin  Role = "admin"
-	Viewer Role = "viewer"
+	RoleAdmin  Role = "admin"
+	RoleViewer Role = "viewer"
 )
 
 // Valid indicates whether the value is a known member of the Role enum.
 func (e Role) Valid() bool {
 	switch e {
-	case Admin:
+	case RoleAdmin:
 		return true
-	case Viewer:
+	case RoleViewer:
 		return true
 	default:
 		return false
@@ -5313,6 +5373,76 @@ type JobStep struct {
 	Status     JobStatus                    `json:"status"`
 }
 
+// KubeAccess defines model for KubeAccess.
+type KubeAccess struct {
+	// Account Het ServiceAccount in de namespace clusterforge
+	Account      string                       `json:"account"`
+	ClusterId    openapi_types.UUID           `json:"cluster_id"`
+	CreatedAt    time.Time                    `json:"created_at"`
+	ExpiresAt    time.Time                    `json:"expires_at"`
+	Id           openapi_types.UUID           `json:"id"`
+	Name         string                       `json:"name"`
+	RemoveError  string                       `json:"remove_error"`
+	RemovedAt    nullable.Nullable[time.Time] `json:"removed_at"`
+	RevokeReason string                       `json:"revoke_reason"`
+	RevokedAt    nullable.Nullable[time.Time] `json:"revoked_at"`
+
+	// RevokedBy Gebruikersnaam; leeg als ClusterForge zelf introk
+	RevokedBy string         `json:"revoked_by"`
+	Role      KubeAccessRole `json:"role"`
+
+	// State revoking: ingetrokken, maar het ServiceAccount staat er nog omdat de API niet antwoordde
+	State KubeAccessState `json:"state"`
+
+	// User Gebruikersnaam
+	User   string             `json:"user"`
+	UserId openapi_types.UUID `json:"user_id"`
+}
+
+// KubeAccessRole defines model for KubeAccess.Role.
+type KubeAccessRole string
+
+// KubeAccessState revoking: ingetrokken, maar het ServiceAccount staat er nog omdat de API niet antwoordde
+type KubeAccessState string
+
+// KubeAccessInput defines model for KubeAccessInput.
+type KubeAccessInput struct {
+	// Confirm De slug van het cluster; nodig voor admin op prod
+	Confirm *string `json:"confirm,omitempty"`
+
+	// Days Na hoeveel dagen het token verloopt
+	Days int `json:"days"`
+
+	// Name Waarvoor de kubeconfig is, zoals laptop
+	Name string `json:"name"`
+
+	// Password Je wachtwoord
+	Password *string `json:"password,omitempty"`
+
+	// Role admin is cluster-admin, view alleen lezen en geen Secrets
+	Role KubeAccessInputRole `json:"role"`
+
+	// TotpCode Je code
+	TotpCode *string `json:"totp_code,omitempty"`
+}
+
+// KubeAccessInputRole admin is cluster-admin, view alleen lezen en geen Secrets
+type KubeAccessInputRole string
+
+// KubeAccessIssued defines model for KubeAccessIssued.
+type KubeAccessIssued struct {
+	Access KubeAccess `json:"access"`
+
+	// Filename Zoals leren.kubeconfig
+	Filename string `json:"filename"`
+
+	// Kubeconfig De kubeconfig met het token; ClusterForge bewaart hem niet
+	Kubeconfig string `json:"kubeconfig"`
+
+	// Server Het adres van de API, zoals https://10.0.40.10:6443
+	Server string `json:"server"`
+}
+
 // KubeActionInput defines model for KubeActionInput.
 type KubeActionInput struct {
 	Action KubeActionInputAction `json:"action"`
@@ -8234,6 +8364,9 @@ type ProbeGitRepoJSONRequestBody = GitRepoInput
 // SetIncidentNoteJSONRequestBody defines body for SetIncidentNote for application/json ContentType.
 type SetIncidentNoteJSONRequestBody = IncidentNote
 
+// IssueKubeAccessJSONRequestBody defines body for IssueKubeAccess for application/json ContentType.
+type IssueKubeAccessJSONRequestBody = KubeAccessInput
+
 // KubeActionJSONRequestBody defines body for KubeAction for application/json ContentType.
 type KubeActionJSONRequestBody = KubeActionInput
 
@@ -8632,6 +8765,15 @@ type ServerInterface interface {
 	// GetKubeOverview Overzicht van een Kubernetes-cluster, live via de kube-brug
 	// (GET /kubernetes/clusters/{clusterId})
 	GetKubeOverview(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
+	// ListKubeAccess De uitgegeven kubeconfigs; een admin ziet ze allemaal, een viewer de zijne
+	// (GET /kubernetes/clusters/{clusterId}/access)
+	ListKubeAccess(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
+	// IssueKubeAccess Een kubeconfig voor kubectl op je eigen pc
+	// (POST /kubernetes/clusters/{clusterId}/access)
+	IssueKubeAccess(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
+	// RevokeKubeAccess Een kubeconfig intrekken; een admin elke, een viewer de zijne
+	// (POST /kubernetes/clusters/{clusterId}/access/{accessId}/revoke)
+	RevokeKubeAccess(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, accessId openapi_types.UUID)
 	// KubeAction Een object schalen, herstarten, terugdraaien of weghalen, of een node op cordon zetten of weer pods geven (admin)
 	// (POST /kubernetes/clusters/{clusterId}/actions)
 	KubeAction(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
@@ -9526,6 +9668,24 @@ func (_ Unimplemented) ListKubeClusters(w http.ResponseWriter, r *http.Request) 
 // GetKubeOverview Overzicht van een Kubernetes-cluster, live via de kube-brug
 // (GET /kubernetes/clusters/{clusterId})
 func (_ Unimplemented) GetKubeOverview(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListKubeAccess De uitgegeven kubeconfigs; een admin ziet ze allemaal, een viewer de zijne
+// (GET /kubernetes/clusters/{clusterId}/access)
+func (_ Unimplemented) ListKubeAccess(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// IssueKubeAccess Een kubeconfig voor kubectl op je eigen pc
+// (POST /kubernetes/clusters/{clusterId}/access)
+func (_ Unimplemented) IssueKubeAccess(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RevokeKubeAccess Een kubeconfig intrekken; een admin elke, een viewer de zijne
+// (POST /kubernetes/clusters/{clusterId}/access/{accessId}/revoke)
+func (_ Unimplemented) RevokeKubeAccess(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, accessId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -13210,6 +13370,93 @@ func (siw *ServerInterfaceWrapper) GetKubeOverview(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
+// ListKubeAccess operation middleware
+func (siw *ServerInterfaceWrapper) ListKubeAccess(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListKubeAccess(w, r, clusterId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// IssueKubeAccess operation middleware
+func (siw *ServerInterfaceWrapper) IssueKubeAccess(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.IssueKubeAccess(w, r, clusterId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RevokeKubeAccess operation middleware
+func (siw *ServerInterfaceWrapper) RevokeKubeAccess(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "accessId" -------------
+	var accessId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "accessId", chi.URLParam(r, "accessId"), &accessId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "accessId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RevokeKubeAccess(w, r, clusterId, accessId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // KubeAction operation middleware
 func (siw *ServerInterfaceWrapper) KubeAction(w http.ResponseWriter, r *http.Request) {
 
@@ -16380,6 +16627,15 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/kubernetes/clusters/{clusterId}/remove-node", wrapper.RemoveKubeNode)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/kubernetes/clusters/{clusterId}/access", wrapper.ListKubeAccess)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/kubernetes/clusters/{clusterId}/access", wrapper.IssueKubeAccess)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/kubernetes/clusters/{clusterId}/access/{accessId}/revoke", wrapper.RevokeKubeAccess)
 	})
 
 	return r

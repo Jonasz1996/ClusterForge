@@ -60,6 +60,7 @@ type kubeBridge struct {
 	mod    time.Time
 	size   int64
 	server string
+	ca     []byte
 	client *http.Client
 }
 
@@ -144,6 +145,8 @@ func (a *Agent) handleKube(data []byte) protocol.KubeResponse {
 		res = b.evict(ctx, req)
 	case protocol.KubeApply:
 		res = b.apply(ctx, req)
+	case protocol.KubeToken:
+		res = b.token(ctx, req)
 	default:
 		res = protocol.KubeResponse{Error: "onbekend kube-verzoek " + req.Op}
 	}
@@ -745,7 +748,7 @@ func (b *kubeBridge) load() (*http.Client, string, error) {
 		},
 		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
-	b.server, b.mod, b.size = strings.TrimRight(kc.server, "/"), st.ModTime(), st.Size()
+	b.server, b.ca, b.mod, b.size = strings.TrimRight(kc.server, "/"), kc.ca, st.ModTime(), st.Size()
 	return b.client, b.server, nil
 }
 

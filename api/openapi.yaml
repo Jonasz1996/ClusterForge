@@ -3395,6 +3395,76 @@ paths:
         "409": { $ref: "#/components/responses/Error" }
         "502": { $ref: "#/components/responses/Error" }
         "503": { $ref: "#/components/responses/Error" }
+  /kubernetes/clusters/{clusterId}/access:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: listKubeAccess
+      summary: De uitgegeven kubeconfigs; een admin ziet ze allemaal, een viewer de zijne
+      description: |
+        Actieve kubeconfigs, en verlopen of ingetrokken kubeconfigs van de laatste 30 dagen, de nieuwste eerst. Het token
+        staat er nooit bij: ClusterForge bewaart het niet.
+      responses:
+        "200":
+          description: De kubeconfigs
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/KubeAccess" } }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: issueKubeAccess
+      summary: Een kubeconfig voor kubectl op je eigen pc
+      description: |
+        ClusterForge maakt een ServiceAccount in de namespace clusterforge, met de ClusterRole cluster-admin (admin) of view,
+        en vraagt via de agent een token dat na days dagen verloopt. De kubeconfig wijst naar het VIP op poort 6443 en komt
+        alleen in dit antwoord. Een viewer krijgt alleen view. Het vraagt je wachtwoord, of je code als je
+        tweestapsverificatie hebt; een admin-kubeconfig voor prod vraagt bovendien tweestapsverificatie en de slug in
+        confirm. Een agent van voor deze versie geeft 503 met code agent_too_old.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/KubeAccessInput" }
+      responses:
+        "201":
+          description: Uitgegeven
+          headers:
+            Cache-Control: { schema: { type: string }, description: no-store }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/KubeAccessIssued" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /kubernetes/clusters/{clusterId}/access/{accessId}/revoke:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: accessId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: revokeKubeAccess
+      summary: Een kubeconfig intrekken; een admin elke, een viewer de zijne
+      description: |
+        Het ServiceAccount gaat weg, en dan weigert de API het token meteen. Antwoordt de API nu niet, dan is de kubeconfig
+        toch ingetrokken, met de fout in remove_error, en haalt ClusterForge het ServiceAccount weg zodra het cluster weer
+        antwoordt.
+      responses:
+        "200":
+          description: Ingetrokken
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/KubeAccess" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
 components:
   securitySchemes:
     session:
@@ -3780,6 +3850,47 @@ components:
         host: { type: string, description: De Proxmox-host van de VM }
         workers: { type: integer, description: Het aantal workers daarna }
         drain: { $ref: "#/components/schemas/KubeDrainPlan" }
+    KubeAccessInput:
+      type: object
+      required: [name, role, days]
+      properties:
+        name: { type: string, maxLength: 40, description: "Waarvoor de kubeconfig is, zoals laptop" }
+        role: { type: string, enum: [admin, view], description: "admin is cluster-admin, view alleen lezen en geen Secrets" }
+        days: { type: integer, minimum: 1, maximum: 30, description: Na hoeveel dagen het token verloopt }
+        password: { type: string, maxLength: 1024, description: Je wachtwoord, als je geen tweestapsverificatie hebt }
+        totp_code: { type: string, maxLength: 10, description: Je code, als je tweestapsverificatie hebt }
+        confirm: { type: string, description: De slug van het cluster; nodig voor admin op prod }
+    KubeAccess:
+      type: object
+      required: [id, cluster_id, user_id, user, name, role, account, state, created_at, expires_at, revoked_at, revoked_by,
+        revoke_reason, removed_at, remove_error]
+      properties:
+        id: { type: string, format: uuid }
+        cluster_id: { type: string, format: uuid }
+        user_id: { type: string, format: uuid }
+        user: { type: string, description: Gebruikersnaam }
+        name: { type: string }
+        role: { type: string, enum: [admin, view] }
+        account: { type: string, description: "Het ServiceAccount in de namespace clusterforge" }
+        state:
+          type: string
+          enum: [active, expired, revoked, revoking]
+          description: "revoking: ingetrokken, maar het ServiceAccount staat er nog omdat de API niet antwoordde"
+        created_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        revoked_at: { type: string, format: date-time, nullable: true }
+        revoked_by: { type: string, description: "Gebruikersnaam; leeg als ClusterForge zelf introk" }
+        revoke_reason: { type: string }
+        removed_at: { type: string, format: date-time, nullable: true }
+        remove_error: { type: string }
+    KubeAccessIssued:
+      type: object
+      required: [access, kubeconfig, filename, server]
+      properties:
+        access: { $ref: "#/components/schemas/KubeAccess" }
+        kubeconfig: { type: string, description: De kubeconfig met het token; ClusterForge bewaart hem niet }
+        filename: { type: string, description: "Zoals leren.kubeconfig" }
+        server: { type: string, description: "Het adres van de API, zoals https://10.0.40.10:6443" }
     KubeApplyInput:
       type: object
       required: [yaml]

@@ -28,6 +28,15 @@ func (q *Queries) DeleteGoneKubeWorkloads(ctx context.Context, arg DeleteGoneKub
 	return err
 }
 
+const deleteKubeAccess = `-- name: DeleteKubeAccess :exec
+DELETE FROM kube_access WHERE id = $1
+`
+
+func (q *Queries) DeleteKubeAccess(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deleteKubeAccess, id)
+	return err
+}
+
 const deleteKubeNodes = `-- name: DeleteKubeNodes :exec
 DELETE FROM kube_nodes WHERE cluster_id = $1
 `
@@ -61,6 +70,88 @@ func (q *Queries) FinishKubeLessonStep(ctx context.Context, arg FinishKubeLesson
 		arg.Answer,
 	)
 	return err
+}
+
+const getKubeAccess = `-- name: GetKubeAccess :one
+SELECT k.id, k.cluster_id, k.user_id, k.name, k.role, k.account, k.created_at, k.expires_at, k.revoked_at, k.revoked_by, k.revoke_reason, k.removed_at, k.remove_error, u.username, coalesce(b.username, '')::text AS revoked_by_name
+FROM kube_access k
+JOIN users u ON u.id = k.user_id
+LEFT JOIN users b ON b.id = k.revoked_by
+WHERE k.id = $1
+`
+
+type GetKubeAccessRow struct {
+	KubeAccess    KubeAccess
+	Username      string
+	RevokedByName string
+}
+
+func (q *Queries) GetKubeAccess(ctx context.Context, id uuid.UUID) (GetKubeAccessRow, error) {
+	row := q.db.QueryRow(ctx, getKubeAccess, id)
+	var i GetKubeAccessRow
+	err := row.Scan(
+		&i.KubeAccess.ID,
+		&i.KubeAccess.ClusterID,
+		&i.KubeAccess.UserID,
+		&i.KubeAccess.Name,
+		&i.KubeAccess.Role,
+		&i.KubeAccess.Account,
+		&i.KubeAccess.CreatedAt,
+		&i.KubeAccess.ExpiresAt,
+		&i.KubeAccess.RevokedAt,
+		&i.KubeAccess.RevokedBy,
+		&i.KubeAccess.RevokeReason,
+		&i.KubeAccess.RemovedAt,
+		&i.KubeAccess.RemoveError,
+		&i.Username,
+		&i.RevokedByName,
+	)
+	return i, err
+}
+
+const insertKubeAccess = `-- name: InsertKubeAccess :one
+INSERT INTO kube_access (id, cluster_id, user_id, name, role, account, expires_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING id, cluster_id, user_id, name, role, account, created_at, expires_at, revoked_at, revoked_by, revoke_reason, removed_at, remove_error
+`
+
+type InsertKubeAccessParams struct {
+	ID        uuid.UUID
+	ClusterID uuid.UUID
+	UserID    uuid.UUID
+	Name      string
+	Role      string
+	Account   string
+	ExpiresAt time.Time
+}
+
+func (q *Queries) InsertKubeAccess(ctx context.Context, arg InsertKubeAccessParams) (KubeAccess, error) {
+	row := q.db.QueryRow(ctx, insertKubeAccess,
+		arg.ID,
+		arg.ClusterID,
+		arg.UserID,
+		arg.Name,
+		arg.Role,
+		arg.Account,
+		arg.ExpiresAt,
+	)
+	var i KubeAccess
+	err := row.Scan(
+		&i.ID,
+		&i.ClusterID,
+		&i.UserID,
+		&i.Name,
+		&i.Role,
+		&i.Account,
+		&i.CreatedAt,
+		&i.ExpiresAt,
+		&i.RevokedAt,
+		&i.RevokedBy,
+		&i.RevokeReason,
+		&i.RemovedAt,
+		&i.RemoveError,
+	)
+	return i, err
 }
 
 const insertKubeNode = `-- name: InsertKubeNode :exec
@@ -126,6 +217,125 @@ func (q *Queries) ListAllKubeNodes(ctx context.Context) ([]ListAllKubeNodesRow, 
 			&i.Name,
 			&i.Roles,
 			&i.Ready,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listKubeAccess = `-- name: ListKubeAccess :many
+SELECT k.id, k.cluster_id, k.user_id, k.name, k.role, k.account, k.created_at, k.expires_at, k.revoked_at, k.revoked_by, k.revoke_reason, k.removed_at, k.remove_error, u.username, coalesce(b.username, '')::text AS revoked_by_name
+FROM kube_access k
+JOIN users u ON u.id = k.user_id
+LEFT JOIN users b ON b.id = k.revoked_by
+WHERE k.cluster_id = $1
+  AND ($2::uuid IS NULL OR k.user_id = $2)
+  AND (k.removed_at IS NULL OR greatest(k.expires_at, k.revoked_at) > now() - interval '30 days')
+ORDER BY k.created_at DESC
+LIMIT 200
+`
+
+type ListKubeAccessParams struct {
+	ClusterID uuid.UUID
+	UserID    *uuid.UUID
+}
+
+type ListKubeAccessRow struct {
+	KubeAccess    KubeAccess
+	Username      string
+	RevokedByName string
+}
+
+// De kubeconfigs van een cluster, de nieuwste eerst; met user_id alleen
+// die van die gebruiker. Verlopen en ingetrokken kubeconfigs blijven 30
+// dagen in de lijst.
+func (q *Queries) ListKubeAccess(ctx context.Context, arg ListKubeAccessParams) ([]ListKubeAccessRow, error) {
+	rows, err := q.db.Query(ctx, listKubeAccess, arg.ClusterID, arg.UserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListKubeAccessRow{}
+	for rows.Next() {
+		var i ListKubeAccessRow
+		if err := rows.Scan(
+			&i.KubeAccess.ID,
+			&i.KubeAccess.ClusterID,
+			&i.KubeAccess.UserID,
+			&i.KubeAccess.Name,
+			&i.KubeAccess.Role,
+			&i.KubeAccess.Account,
+			&i.KubeAccess.CreatedAt,
+			&i.KubeAccess.ExpiresAt,
+			&i.KubeAccess.RevokedAt,
+			&i.KubeAccess.RevokedBy,
+			&i.KubeAccess.RevokeReason,
+			&i.KubeAccess.RemovedAt,
+			&i.KubeAccess.RemoveError,
+			&i.Username,
+			&i.RevokedByName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listKubeAccessToRemove = `-- name: ListKubeAccessToRemove :many
+SELECT k.id, k.account, k.name, k.role, k.user_id, u.username, k.revoked_at,
+       (CASE
+            WHEN k.revoked_at IS NOT NULL OR k.expires_at <= now() THEN ''
+            WHEN u.disabled_at IS NOT NULL THEN 'de gebruiker is uitgeschakeld'
+            ELSE 'de gebruiker is geen admin meer'
+        END)::text AS reason
+FROM kube_access k
+JOIN users u ON u.id = k.user_id
+WHERE k.cluster_id = $1 AND k.removed_at IS NULL
+  AND (k.revoked_at IS NOT NULL OR k.expires_at <= now() OR u.disabled_at IS NOT NULL
+       OR (k.role = 'admin' AND u.role <> 'admin'))
+`
+
+type ListKubeAccessToRemoveRow struct {
+	ID        uuid.UUID
+	Account   string
+	Name      string
+	Role      string
+	UserID    uuid.UUID
+	Username  string
+	RevokedAt *time.Time
+	Reason    string
+}
+
+// De ServiceAccounts die weg moeten: ingetrokken of verlopen, of van een
+// gebruiker die uitgeschakeld is of geen admin meer is bij een
+// admin-kubeconfig. reason is leeg als ze al ingetrokken of verlopen zijn.
+func (q *Queries) ListKubeAccessToRemove(ctx context.Context, clusterID uuid.UUID) ([]ListKubeAccessToRemoveRow, error) {
+	rows, err := q.db.Query(ctx, listKubeAccessToRemove, clusterID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListKubeAccessToRemoveRow{}
+	for rows.Next() {
+		var i ListKubeAccessToRemoveRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Account,
+			&i.Name,
+			&i.Role,
+			&i.UserID,
+			&i.Username,
+			&i.RevokedAt,
+			&i.Reason,
 		); err != nil {
 			return nil, err
 		}
@@ -683,6 +893,40 @@ func (q *Queries) ResetKubeLesson(ctx context.Context, arg ResetKubeLessonParams
 	return err
 }
 
+const revokeKubeAccess = `-- name: RevokeKubeAccess :one
+UPDATE kube_access SET revoked_at = now(), revoked_by = $2, revoke_reason = $3
+WHERE id = $1 AND revoked_at IS NULL
+RETURNING id, cluster_id, user_id, name, role, account, created_at, expires_at, revoked_at, revoked_by, revoke_reason, removed_at, remove_error
+`
+
+type RevokeKubeAccessParams struct {
+	ID           uuid.UUID
+	RevokedBy    *uuid.UUID
+	RevokeReason string
+}
+
+// Zet een kubeconfig op ingetrokken; een tweede keer verandert niets.
+func (q *Queries) RevokeKubeAccess(ctx context.Context, arg RevokeKubeAccessParams) (KubeAccess, error) {
+	row := q.db.QueryRow(ctx, revokeKubeAccess, arg.ID, arg.RevokedBy, arg.RevokeReason)
+	var i KubeAccess
+	err := row.Scan(
+		&i.ID,
+		&i.ClusterID,
+		&i.UserID,
+		&i.Name,
+		&i.Role,
+		&i.Account,
+		&i.CreatedAt,
+		&i.ExpiresAt,
+		&i.RevokedAt,
+		&i.RevokedBy,
+		&i.RevokeReason,
+		&i.RemovedAt,
+		&i.RemoveError,
+	)
+	return i, err
+}
+
 const saveKubeCluster = `-- name: SaveKubeCluster :exec
 INSERT INTO kube_clusters (cluster_id, api_ok, error, version, nodes_total, nodes_ready, pods_total, pods_running, pods_pending,
                            pods_problem, workloads_total, workloads_ready, via_node_id, synced_at, ok_at)
@@ -741,6 +985,43 @@ type SaveKubeClusterErrorParams struct {
 // Bewaart een mislukte sync; de laatst bekende tellingen blijven staan.
 func (q *Queries) SaveKubeClusterError(ctx context.Context, arg SaveKubeClusterErrorParams) error {
 	_, err := q.db.Exec(ctx, saveKubeClusterError, arg.ClusterID, arg.Error, arg.ErrorKind)
+	return err
+}
+
+const setKubeAccessExpires = `-- name: SetKubeAccessExpires :exec
+UPDATE kube_access SET expires_at = $2 WHERE id = $1
+`
+
+type SetKubeAccessExpiresParams struct {
+	ID        uuid.UUID
+	ExpiresAt time.Time
+}
+
+func (q *Queries) SetKubeAccessExpires(ctx context.Context, arg SetKubeAccessExpiresParams) error {
+	_, err := q.db.Exec(ctx, setKubeAccessExpires, arg.ID, arg.ExpiresAt)
+	return err
+}
+
+const setKubeAccessRemoveError = `-- name: SetKubeAccessRemoveError :exec
+UPDATE kube_access SET remove_error = $2 WHERE id = $1
+`
+
+type SetKubeAccessRemoveErrorParams struct {
+	ID          uuid.UUID
+	RemoveError string
+}
+
+func (q *Queries) SetKubeAccessRemoveError(ctx context.Context, arg SetKubeAccessRemoveErrorParams) error {
+	_, err := q.db.Exec(ctx, setKubeAccessRemoveError, arg.ID, arg.RemoveError)
+	return err
+}
+
+const setKubeAccessRemoved = `-- name: SetKubeAccessRemoved :exec
+UPDATE kube_access SET removed_at = now(), remove_error = '' WHERE id = $1
+`
+
+func (q *Queries) SetKubeAccessRemoved(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, setKubeAccessRemoved, id)
 	return err
 }
 

@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"slices"
 	"strings"
@@ -146,6 +147,7 @@ type bridgeNode struct {
 	Protocol int
 	Fresh    bool
 	Kube     *protocol.KubeFacts
+	IP       *netip.Addr
 }
 
 // candidates zijn de server-nodes met een agent op protocol 8 of hoger, de
@@ -157,7 +159,7 @@ func (s *Service) candidates(ctx context.Context, clusterID uuid.UUID) ([]bridge
 	}
 	var out, old []bridgeNode
 	for _, r := range rows {
-		n := bridgeNode{ID: r.ID, Hostname: r.Hostname, Protocol: int(r.AgentProtocol)}
+		n := bridgeNode{ID: r.ID, Hostname: r.Hostname, Protocol: int(r.AgentProtocol), IP: r.PrimaryIp}
 		n.Fresh = r.HeartbeatAt != nil && s.Now().Sub(*r.HeartbeatAt) <= status.HeartbeatLate
 		if len(r.Kube) > 0 && string(r.Kube) != "null" {
 			var f protocol.KubeFacts
