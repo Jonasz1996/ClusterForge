@@ -103,10 +103,12 @@ type Server struct {
 	mu       sync.Mutex
 	objects  map[string]map[string]map[string]any // groupversion/resource → ns/name → object
 	requests []string
-	version  string
-	ready    bool
-	kubelet  bool
-	rv       int
+	// logs per ns/pod/container/vorige.
+	logs    map[string][]logLine
+	version string
+	ready   bool
+	kubelet bool
+	rv      int
 
 	ca, serverCert, serverKey, clientCert, clientKey []byte
 	srv, kubeletSrv                                  *httptest.Server
@@ -114,7 +116,9 @@ type Server struct {
 
 // New maakt een nep-API met eigen certificaten. Start zet hem aan.
 func New() *Server {
-	s := &Server{objects: map[string]map[string]map[string]any{}, version: "v1.35.9+k3s1", ready: true, kubelet: true}
+	s := &Server{
+		objects: map[string]map[string]map[string]any{}, logs: map[string][]logLine{}, version: "v1.35.9+k3s1", ready: true, kubelet: true,
+	}
 	s.makeCerts()
 	return s
 }
@@ -424,6 +428,10 @@ func (s *Server) get(w http.ResponseWriter, r *http.Request) {
 			s.object(w, k, ns, rest[1])
 			return
 		}
+		if rest[2] == "log" && k.Resource == "pods" {
+			s.podLog(w, r, ns, rest[1])
+			return
+		}
 		// exec, attach, proxy en dergelijke: kubefake antwoordt, zodat een
 		// test ziet dat zo'n verzoek hier nooit had mogen komen.
 		w.Header().Set("Content-Type", "text/plain")
@@ -505,6 +513,86 @@ func (s *Server) list(w http.ResponseWriter, r *http.Request, k Kind, ns string)
 		page = []any{}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"kind": k.Kind + "List", "apiVersion": k.GroupVersion(), "metadata": meta, "items": page})
+}
+
+type logLine struct {
+	at   time.Time
+	text string
+}
+
+// SetLog zet de log van een container, of van de vorige container als
+// previous true is. Elke regel is een seconde na de vorige, de laatste nu.
+func (s *Server) SetLog(namespace, pod, container string, previous bool, lines ...string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	end := time.Now().UTC()
+	if previous {
+		end = end.Add(-time.Minute)
+	}
+	out := make([]logLine, len(lines))
+	for i, l := range lines {
+		out[i] = logLine{at: end.Add(time.Duration(i-len(lines)+1) * time.Second), text: l}
+	}
+	s.logs[fmt.Sprintf("%s/%s/%s/%t", namespace, pod, container, previous)] = out
+}
+
+// podLog antwoordt zoals de API op pods/<naam>/log: platte tekst, met
+// container, previous, tailLines, timestamps en limitBytes.
+func (s *Server) podLog(w http.ResponseWriter, r *http.Request, ns, name string) {
+	q := r.URL.Query()
+	s.mu.Lock()
+	pod := s.objects["v1/pods"][ns+"/"+name]
+	var containers []string
+	if pod != nil {
+		spec, _ := pod["spec"].(map[string]any)
+		cs, _ := spec["containers"].([]any)
+		for _, c := range cs {
+			if m, ok := c.(map[string]any); ok {
+				n, _ := m["name"].(string)
+				containers = append(containers, n)
+			}
+		}
+	}
+	s.mu.Unlock()
+	if pod == nil {
+		status(w, http.StatusNotFound, "NotFound", fmt.Sprintf("pods %q not found", name))
+		return
+	}
+	c := q.Get("container")
+	switch {
+	case c == "" && len(containers) == 1:
+		c = containers[0]
+	case c == "":
+		status(w, http.StatusBadRequest, "BadRequest", fmt.Sprintf("a container name must be specified for pod %s, choose one of: %v", name, containers))
+		return
+	case !slices.Contains(containers, c):
+		status(w, http.StatusBadRequest, "BadRequest", fmt.Sprintf("container %s is not valid for pod %s", c, name))
+		return
+	}
+	previous := q.Get("previous") == "true"
+	s.mu.Lock()
+	lines, ok := s.logs[fmt.Sprintf("%s/%s/%s/%t", ns, name, c, previous)]
+	s.mu.Unlock()
+	if previous && !ok {
+		status(w, http.StatusBadRequest, "BadRequest", fmt.Sprintf("previous terminated container %q in pod %q not found", c, name))
+		return
+	}
+	if n, err := strconv.Atoi(q.Get("tailLines")); err == nil && n >= 0 && n < len(lines) {
+		lines = lines[len(lines)-n:]
+	}
+	var b strings.Builder
+	for _, l := range lines {
+		if q.Get("timestamps") == "true" {
+			b.WriteString(l.at.Format(time.RFC3339Nano) + " ")
+		}
+		b.WriteString(l.text + "\n")
+	}
+	out := b.String()
+	if n, err := strconv.Atoi(q.Get("limitBytes")); err == nil && n > 0 && n < len(out) {
+		out = out[:n]
+	}
+	w.Header().Set("Content-Type", "text/plain")
+	_, _ = w.Write([]byte(out))
 }
 
 // field leest een veld als metadata.name of spec.nodeName.

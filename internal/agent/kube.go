@@ -132,6 +132,8 @@ func (a *Agent) handleKube(data []byte) protocol.KubeResponse {
 	switch req.Op {
 	case protocol.KubeRead:
 		res = b.read(ctx, req)
+	case protocol.KubeLogs:
+		res = b.logs(ctx, req)
 	default:
 		res = protocol.KubeResponse{Error: "onbekend kube-verzoek " + req.Op}
 	}
@@ -273,38 +275,124 @@ func (b *kubeBridge) read(ctx context.Context, req protocol.KubeRequest) protoco
 	if err != nil {
 		return protocol.KubeResponse{Error: err.Error()}
 	}
-	return b.do(ctx, http.MethodGet, req.Path, q, t)
+	return b.do(ctx, req.Path, q, t)
+}
+
+var kubeContainer = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`)
+
+// logs leest de log van één container. Alleen
+// /api/v1/namespaces/<ns>/pods/<naam>/log mag, met hoogstens
+// KubeMaxLogLines regels. Van een grotere log dan KubeMaxLogBytes blijven
+// de nieuwste regels over.
+func (b *kubeBridge) logs(ctx context.Context, req protocol.KubeRequest) protocol.KubeResponse {
+	t, err := parseKubePath(req.Path)
+	if err != nil {
+		return protocol.KubeResponse{Error: err.Error()}
+	}
+	if t.Group != "" || t.Version != "v1" || t.Namespace == "" || t.Resource != "pods" || t.Name == "" || t.Sub != "log" {
+		return protocol.KubeResponse{Error: fmt.Sprintf("pad %q is geen log van een pod", req.Path)}
+	}
+	q := url.Values{"tailLines": {"500"}}
+	for k, v := range req.Query {
+		switch k {
+		case "container":
+			if !kubeContainer.MatchString(v) {
+				return protocol.KubeResponse{Error: "ongeldige naam van een container"}
+			}
+		case "previous", "timestamps":
+			if v != "true" && v != "false" {
+				return protocol.KubeResponse{Error: k + " moet true of false zijn"}
+			}
+		case "tailLines":
+			if n, err := strconv.Atoi(v); err != nil || n < 1 || n > protocol.KubeMaxLogLines {
+				return protocol.KubeResponse{Error: fmt.Sprintf("tailLines moet tussen 1 en %d liggen", protocol.KubeMaxLogLines)}
+			}
+		default:
+			return protocol.KubeResponse{Error: fmt.Sprintf("queryparameter %s is niet toegestaan", k)}
+		}
+		q.Set(k, v)
+	}
+	status, body, res := b.send(ctx, req.Path, q)
+	if res != nil {
+		return *res
+	}
+	if status != http.StatusOK {
+		// Een fout van de API, zoals een vorige container die er niet is,
+		// komt als JSON.
+		return kubeAnswer(t, status, body)
+	}
+	// limitBytes van de API zou de nieuwste regels afknippen; daarom
+	// knipt de agent zelf, aan het begin.
+	text, cut := body, false
+	if len(text) > protocol.KubeMaxLogBytes {
+		text, cut = text[len(text)-protocol.KubeMaxLogBytes:], true
+	}
+	for {
+		if cut {
+			if i := bytes.IndexByte(text, '\n'); i >= 0 {
+				text = text[i+1:]
+			}
+		}
+		s := string(text)
+		if cut {
+			s = protocol.KubeLogTrimmed + s
+		}
+		out, err := json.Marshal(s)
+		if err != nil {
+			return protocol.KubeResponse{Status: status, Error: err.Error()}
+		}
+		res := pack(status, out)
+		if res.Error == "" || len(text) < 4096 {
+			return res
+		}
+		// Ook gecomprimeerd te groot voor een bericht: de oudste helft
+		// valt weg.
+		text, cut = text[len(text)/2:], true
+	}
 }
 
 // do stuurt het verzoek naar de API en filtert het antwoord.
-func (b *kubeBridge) do(ctx context.Context, method, p string, q url.Values, t kubeTarget) protocol.KubeResponse {
+func (b *kubeBridge) do(ctx context.Context, p string, q url.Values, t kubeTarget) protocol.KubeResponse {
+	status, body, res := b.send(ctx, p, q)
+	if res != nil {
+		return *res
+	}
+	return kubeAnswer(t, status, body)
+}
+
+// send doet een GET op de API. Gaat het mis voordat er een antwoord is,
+// dan is res de fout voor de server.
+func (b *kubeBridge) send(ctx context.Context, p string, q url.Values) (status int, body []byte, res *protocol.KubeResponse) {
+	fail := func(msg string) (int, []byte, *protocol.KubeResponse) {
+		return 0, nil, &protocol.KubeResponse{Error: msg}
+	}
 	client, server, err := b.load()
 	if err != nil {
-		return protocol.KubeResponse{Error: err.Error()}
+		return fail(err.Error())
 	}
 	u := server + p
 	if len(q) > 0 {
 		u += "?" + q.Encode()
 	}
-	hreq, err := http.NewRequestWithContext(ctx, method, u, nil)
+	hreq, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 	if err != nil {
-		return protocol.KubeResponse{Error: err.Error()}
+		return fail(err.Error())
 	}
 	hreq.Header.Set("Accept", "application/json")
 	hreq.Header.Set("User-Agent", "cf-agent")
 	resp, err := client.Do(hreq)
 	if err != nil {
-		return protocol.KubeResponse{Error: "de Kubernetes-API op deze node antwoordt niet: " + err.Error()}
+		return fail("de Kubernetes-API op deze node antwoordt niet: " + err.Error())
 	}
 	defer func() { _ = resp.Body.Close() }()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, protocol.KubeMaxRead+1))
+	body, err = io.ReadAll(io.LimitReader(resp.Body, protocol.KubeMaxRead+1))
 	if err != nil {
-		return protocol.KubeResponse{Error: "antwoord van de API lezen mislukt: " + err.Error()}
+		return fail("antwoord van de API lezen mislukt: " + err.Error())
 	}
 	if len(body) > protocol.KubeMaxRead {
-		return protocol.KubeResponse{Error: "het antwoord van de API is groter dan 32 MB; filter op namespace of label"}
+		return fail("het antwoord van de API is groter dan 32 MB; filter op namespace of label")
 	}
-	return kubeAnswer(t, resp.StatusCode, body)
+	return resp.StatusCode, body, nil
 }
 
 // kubeAnswer maakt van het antwoord van de API een KubeResponse. Alleen
@@ -325,6 +413,12 @@ func kubeAnswer(t kubeTarget, status int, body []byte) protocol.KubeResponse {
 	if err != nil {
 		return protocol.KubeResponse{Status: status, Error: err.Error()}
 	}
+	return pack(status, out)
+}
+
+// pack zet een antwoord in een KubeResponse, gecomprimeerd als het groot
+// is.
+func pack(status int, out []byte) protocol.KubeResponse {
 	if len(out) <= protocol.KubeGzipAbove {
 		return protocol.KubeResponse{Status: status, Body: out}
 	}
@@ -531,7 +625,7 @@ func (a *Agent) kubeFacts(ctx context.Context, hostname string) *protocol.KubeFa
 	if f.Role == "server" {
 		a.initKube()
 		rctx, cancel := context.WithTimeout(ctx, 3*time.Second)
-		res := a.kube.do(rctx, http.MethodGet, "/readyz", nil, kubeTarget{Info: "/readyz"})
+		res := a.kube.do(rctx, "/readyz", nil, kubeTarget{Info: "/readyz"})
 		cancel()
 		f.APIReady = res.Status == http.StatusOK
 	}

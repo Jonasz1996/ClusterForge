@@ -2795,6 +2795,212 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/kubernetes/clusters/{clusterId}/network": {
+        parameters: {
+            query?: {
+                /** @description Alleen deze namespace; zonder zijn het alle */
+                namespace?: components["parameters"]["KubeNamespace"];
+                /** @description Ook de systeemnamespaces kube-system, kube-public en kube-node-lease; standaard niet */
+                system?: components["parameters"]["KubeSystem"];
+            };
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        /** De Services en Ingresses, met hun adressen */
+        get: operations["getKubeNetwork"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/kubernetes/clusters/{clusterId}/storage": {
+        parameters: {
+            query?: {
+                /** @description Alleen deze namespace; zonder zijn het alle */
+                namespace?: components["parameters"]["KubeNamespace"];
+                /** @description Ook de systeemnamespaces kube-system, kube-public en kube-node-lease; standaard niet */
+                system?: components["parameters"]["KubeSystem"];
+            };
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        /** De PersistentVolumeClaims, volumes en StorageClasses */
+        get: operations["getKubeStorage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/kubernetes/clusters/{clusterId}/config": {
+        parameters: {
+            query?: {
+                /** @description Alleen deze namespace; zonder zijn het alle */
+                namespace?: components["parameters"]["KubeNamespace"];
+                /** @description Ook de systeemnamespaces kube-system, kube-public en kube-node-lease; standaard niet */
+                system?: components["parameters"]["KubeSystem"];
+            };
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        /** De ConfigMaps, en de Secrets met alleen de sleutels */
+        get: operations["getKubeConfig"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/kubernetes/clusters/{clusterId}/events": {
+        parameters: {
+            query?: {
+                /** @description Alleen deze namespace; zonder zijn het alle */
+                namespace?: components["parameters"]["KubeNamespace"];
+                /** @description Ook de systeemnamespaces kube-system, kube-public en kube-node-lease; standaard niet */
+                system?: components["parameters"]["KubeSystem"];
+                /** @description Alleen waarschuwingen */
+                warnings?: boolean;
+            };
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        /** De events, waarschuwingen eerst en dan de nieuwste; hoogstens 300 */
+        get: operations["listKubeEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/kubernetes/clusters/{clusterId}/resources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        /** De soorten objecten die het cluster kent, ook van geïnstalleerde apps */
+        get: operations["listKubeResources"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/kubernetes/clusters/{clusterId}/objects": {
+        parameters: {
+            query: {
+                /** @description De API-groep, zoals apps; leeg is de kerngroep */
+                group?: components["parameters"]["KubeGroup"];
+                /** @description De versie, zoals v1 */
+                version: components["parameters"]["KubeVersion"];
+                /** @description De soort in het meervoud, zoals deployments */
+                resource: components["parameters"]["KubeResource"];
+                /** @description Alleen deze namespace; zonder zijn het alle */
+                namespace?: components["parameters"]["KubeNamespace"];
+                /** @description Ook de systeemnamespaces kube-system, kube-public en kube-node-lease; standaard niet */
+                system?: components["parameters"]["KubeSystem"];
+            };
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        /** De objecten van één soort */
+        get: operations["listKubeObjects"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/kubernetes/clusters/{clusterId}/object": {
+        parameters: {
+            query: {
+                /** @description De API-groep, zoals apps; leeg is de kerngroep */
+                group?: components["parameters"]["KubeGroup"];
+                /** @description De versie, zoals v1 */
+                version: components["parameters"]["KubeVersion"];
+                /** @description De soort in het meervoud, zoals deployments */
+                resource: components["parameters"]["KubeResource"];
+                /** @description Alleen deze namespace; zonder zijn het alle */
+                namespace?: components["parameters"]["KubeNamespace"];
+                name: string;
+            };
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        /** Eén object met toestand, keten, events en YAML, zonder secretwaarden */
+        get: operations["getKubeObject"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/kubernetes/clusters/{clusterId}/logs": {
+        parameters: {
+            query: {
+                namespace: string;
+                pod: string;
+                /** @description Nodig als de pod meer dan één container heeft */
+                container?: string;
+                /** @description De log van de container voor de laatste herstart */
+                previous?: boolean;
+                /** @description Het aantal laatste regels; standaard 500, hoogstens 5000 */
+                lines?: number;
+                /** @description Met het tijdstip voor elke regel */
+                timestamps?: boolean;
+            };
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        /** De laatste regels log van een container; ook een viewer mag ze lezen */
+        get: operations["getKubeLogs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -2825,7 +3031,7 @@ export interface components {
             pods_total: number;
             pods_running: number;
             pods_pending: number;
-            /** @description Pods die aandacht vragen */
+            /** @description Pods die aandacht vragen, zoals CrashLoopBackOff */
             pods_problem: number;
             workloads_total: number;
             workloads_ready: number;
@@ -2857,11 +3063,238 @@ export interface components {
             /** @description De soort van het object waar het event over gaat */
             kind: string;
             name: string;
+            /** @description Normal of Warning */
+            type: string;
             reason: string;
             message: string;
             count: number;
             /** Format: date-time */
+            first_seen: string | null;
+            /** Format: date-time */
             last_seen: string;
+            /** @description Wie het event meldde, zoals kubelet */
+            source: string;
+            /** @description Het object, om te openen; null als ClusterForge de soort niet kent */
+            object: components["schemas"]["KubeRef"] | null;
+        };
+        /** @description Wijst een object in Kubernetes aan */
+        KubeRef: {
+            /** @description Leeg is de kerngroep */
+            group: string;
+            version: string;
+            resource: string;
+            /** @description Leeg bij een object zonder namespace */
+            namespace: string;
+            name: string;
+        };
+        KubeCondition: {
+            type: string;
+            /** @description True, False of Unknown */
+            status: string;
+            reason: string;
+            message: string;
+            /** Format: date-time */
+            last_transition: string | null;
+        };
+        /** @description Een schakel in de keten van een object */
+        KubeChainLink: {
+            /** @enum {string} */
+            role: "owner" | "node" | "clusterforge" | "vm" | "service" | "ingress" | "pods" | "volume" | "claim" | "backend";
+            kind: string;
+            name: string;
+            ref: components["schemas"]["KubeRef"] | null;
+            /**
+             * Format: uuid
+             * @description De ClusterForge-node
+             */
+            node_id: string | null;
+            text: string;
+            /** @description Een webadres om te openen; leeg als er geen is */
+            url: string;
+        };
+        KubeContainer: {
+            name: string;
+            image: string;
+            /** @description Een init-container, die voor de andere draait */
+            init: boolean;
+            ready: boolean;
+            restarts: number;
+            /** @enum {string} */
+            state: "running" | "waiting" | "terminated" | "unknown";
+            reason: string;
+            message: string;
+            /** Format: date-time */
+            since: string | null;
+            /** @description Waarom de vorige container stopte, zoals OOMKilled of Error */
+            last_reason: string;
+            last_exit_code: number | null;
+            /** Format: date-time */
+            last_finished: string | null;
+        };
+        KubePodDetail: {
+            node: string;
+            ip: string;
+            host_ip: string;
+            qos: string;
+            containers: components["schemas"]["KubeContainer"][];
+        };
+        KubeObject: {
+            ref: components["schemas"]["KubeRef"];
+            api_version: string;
+            kind: string;
+            uid: string;
+            /** Format: date-time */
+            created_at: string;
+            labels: {
+                [key: string]: string;
+            };
+            annotations: {
+                [key: string]: string;
+            };
+            /** @description De toestand in gewone woorden */
+            summary: string;
+            problem: boolean;
+            conditions: components["schemas"]["KubeCondition"][];
+            chain: components["schemas"]["KubeChainLink"][];
+            events: components["schemas"]["KubeEvent"][];
+            /** @description Het object als YAML, zonder managedFields en zonder secretwaarden */
+            yaml: string;
+            pod: components["schemas"]["KubePodDetail"] | null;
+        };
+        KubeResourceType: {
+            group: string;
+            version: string;
+            resource: string;
+            kind: string;
+            namespaced: boolean;
+        };
+        KubeObjectSummary: {
+            namespace: string;
+            name: string;
+            /** Format: date-time */
+            created_at: string;
+            /** @description De fase of de conditie Ready; leeg als het object die niet heeft */
+            status: string;
+        };
+        KubeServicePort: {
+            name: string;
+            protocol: string;
+            port: number;
+            /** @description Een nummer of de naam van een poort in de container */
+            target_port: string;
+            /** @description Nul als er geen is */
+            node_port: number;
+        };
+        KubeService: {
+            namespace: string;
+            name: string;
+            type: string;
+            cluster_ip: string;
+            ports: components["schemas"]["KubeServicePort"][];
+            /** @description Adressen buiten het cluster, zoals van ServiceLB */
+            external: string[];
+            selector: {
+                [key: string]: string;
+            };
+            /** @description Het aantal pods dat de Service kiest */
+            pods: number;
+            url: string;
+            system: boolean;
+        };
+        KubeIngressRule: {
+            host: string;
+            path: string;
+            service: string;
+            port: string;
+            tls: boolean;
+            url: string;
+        };
+        KubeIngress: {
+            namespace: string;
+            name: string;
+            class: string;
+            rules: components["schemas"]["KubeIngressRule"][];
+            address: string[];
+            system: boolean;
+        };
+        KubeNetwork: {
+            services: components["schemas"]["KubeService"][];
+            ingresses: components["schemas"]["KubeIngress"][];
+        };
+        KubeClaim: {
+            namespace: string;
+            name: string;
+            phase: string;
+            /**
+             * Format: int64
+             * @description De grootte, of de gevraagde grootte als hij nog niet gebonden is
+             */
+            bytes: number;
+            class: string;
+            volume: string;
+            access_modes: string[];
+            /** @description De pods die de claim gebruiken */
+            used_by: string[];
+            system: boolean;
+        };
+        KubeVolume: {
+            name: string;
+            phase: string;
+            /** Format: int64 */
+            bytes: number;
+            class: string;
+            /** @description namespace/naam van de claim; leeg als er geen is */
+            claim: string;
+            /** @description Wat er met de data gebeurt als de claim weg is, zoals Delete */
+            reclaim: string;
+            /** @description De node waar het volume op staat, bij local-path */
+            node: string;
+            path: string;
+        };
+        KubeStorageClass: {
+            name: string;
+            provisioner: string;
+            default: boolean;
+            reclaim: string;
+            binding: string;
+            expansion: boolean;
+        };
+        KubeStorage: {
+            claims: components["schemas"]["KubeClaim"][];
+            volumes: components["schemas"]["KubeVolume"][];
+            classes: components["schemas"]["KubeStorageClass"][];
+        };
+        KubeConfigMap: {
+            namespace: string;
+            name: string;
+            keys: string[];
+            bytes: number;
+            /** Format: date-time */
+            created_at: string;
+            system: boolean;
+        };
+        KubeSecretKey: {
+            name: string;
+            /** @description De lengte van de waarde; de waarde zelf ziet niemand */
+            bytes: number;
+        };
+        KubeSecret: {
+            namespace: string;
+            name: string;
+            type: string;
+            keys: components["schemas"]["KubeSecretKey"][];
+            /** Format: date-time */
+            created_at: string;
+            system: boolean;
+        };
+        KubeConfig: {
+            config_maps: components["schemas"]["KubeConfigMap"][];
+            secrets: components["schemas"]["KubeSecret"][];
+        };
+        KubeLogs: {
+            text: string;
+            /** @description De log was groter dan 2 MB: de oudste regels ontbreken, vraag er minder */
+            truncated: boolean;
         };
         KubeOverview: {
             /** Format: uuid */
@@ -2898,7 +3331,7 @@ export interface components {
             ready_reason: string;
             /** @description Cordon; er komen geen nieuwe pods op */
             unschedulable: boolean;
-            /** @description Condities met een probleem */
+            /** @description Condities met een probleem, zoals DiskPressure */
             pressure: string[];
             internal_ip: string;
             kubelet_version: string;
@@ -2908,7 +3341,7 @@ export interface components {
             arch: string;
             allocatable: components["schemas"]["KubeUsage"];
             used: components["schemas"]["KubeUsage"] | null;
-            /** @description Pods op deze node */
+            /** @description Pods op deze node, zonder de voltooide */
             pods: number;
             /** Format: date-time */
             created_at: string;
@@ -6566,6 +6999,12 @@ export interface components {
         KubeNamespace: string;
         /** @description Ook de systeemnamespaces kube-system, kube-public en kube-node-lease; standaard niet */
         KubeSystem: boolean;
+        /** @description De API-groep, zoals apps; leeg is de kerngroep */
+        KubeGroup: string;
+        /** @description De versie, zoals v1 */
+        KubeVersion: string;
+        /** @description De soort in het meervoud, zoals deployments */
+        KubeResource: string;
         /** @description overview of cluster */
         DocScopeParam: string;
         /** @description overzicht bij scope overview; architectuur, netwerk, configuratie, herstel of runbooks bij een cluster */
@@ -10982,6 +11421,282 @@ export interface operations {
                     "application/json": {
                         items: components["schemas"]["KubePod"][];
                     };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    getKubeNetwork: {
+        parameters: {
+            query?: {
+                /** @description Alleen deze namespace; zonder zijn het alle */
+                namespace?: components["parameters"]["KubeNamespace"];
+                /** @description Ook de systeemnamespaces kube-system, kube-public en kube-node-lease; standaard niet */
+                system?: components["parameters"]["KubeSystem"];
+            };
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KubeNetwork"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    getKubeStorage: {
+        parameters: {
+            query?: {
+                /** @description Alleen deze namespace; zonder zijn het alle */
+                namespace?: components["parameters"]["KubeNamespace"];
+                /** @description Ook de systeemnamespaces kube-system, kube-public en kube-node-lease; standaard niet */
+                system?: components["parameters"]["KubeSystem"];
+            };
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KubeStorage"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    getKubeConfig: {
+        parameters: {
+            query?: {
+                /** @description Alleen deze namespace; zonder zijn het alle */
+                namespace?: components["parameters"]["KubeNamespace"];
+                /** @description Ook de systeemnamespaces kube-system, kube-public en kube-node-lease; standaard niet */
+                system?: components["parameters"]["KubeSystem"];
+            };
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KubeConfig"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    listKubeEvents: {
+        parameters: {
+            query?: {
+                /** @description Alleen deze namespace; zonder zijn het alle */
+                namespace?: components["parameters"]["KubeNamespace"];
+                /** @description Ook de systeemnamespaces kube-system, kube-public en kube-node-lease; standaard niet */
+                system?: components["parameters"]["KubeSystem"];
+                /** @description Alleen waarschuwingen */
+                warnings?: boolean;
+            };
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["KubeEvent"][];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    listKubeResources: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["KubeResourceType"][];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    listKubeObjects: {
+        parameters: {
+            query: {
+                /** @description De API-groep, zoals apps; leeg is de kerngroep */
+                group?: components["parameters"]["KubeGroup"];
+                /** @description De versie, zoals v1 */
+                version: components["parameters"]["KubeVersion"];
+                /** @description De soort in het meervoud, zoals deployments */
+                resource: components["parameters"]["KubeResource"];
+                /** @description Alleen deze namespace; zonder zijn het alle */
+                namespace?: components["parameters"]["KubeNamespace"];
+                /** @description Ook de systeemnamespaces kube-system, kube-public en kube-node-lease; standaard niet */
+                system?: components["parameters"]["KubeSystem"];
+            };
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["KubeObjectSummary"][];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    getKubeObject: {
+        parameters: {
+            query: {
+                /** @description De API-groep, zoals apps; leeg is de kerngroep */
+                group?: components["parameters"]["KubeGroup"];
+                /** @description De versie, zoals v1 */
+                version: components["parameters"]["KubeVersion"];
+                /** @description De soort in het meervoud, zoals deployments */
+                resource: components["parameters"]["KubeResource"];
+                /** @description Alleen deze namespace; zonder zijn het alle */
+                namespace?: components["parameters"]["KubeNamespace"];
+                name: string;
+            };
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KubeObject"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    getKubeLogs: {
+        parameters: {
+            query: {
+                namespace: string;
+                pod: string;
+                /** @description Nodig als de pod meer dan één container heeft */
+                container?: string;
+                /** @description De log van de container voor de laatste herstart */
+                previous?: boolean;
+                /** @description Het aantal laatste regels; standaard 500, hoogstens 5000 */
+                lines?: number;
+                /** @description Met het tijdstip voor elke regel */
+                timestamps?: boolean;
+            };
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KubeLogs"];
                 };
             };
             400: components["responses"]["Error"];

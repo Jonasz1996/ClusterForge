@@ -1,12 +1,13 @@
 "use client";
 
-import type { ReactNode } from "react";
+import Link from "next/link";
+import { useState, type ReactNode } from "react";
 import { upgradeCommand } from "@/components/drift/Drift";
 import { CopyBlock } from "@/components/inventory/InstallAgent";
-import { Alert, Badge, cx } from "@/components/ui";
+import { Alert, Badge, Button, cx } from "@/components/ui";
 import { ApiError } from "@/lib/api/client";
-import { formatBytes } from "@/components/inventory/bits";
-import { formatCPU, percent, useKubeLearning, type KubeUsage } from "@/lib/kube";
+import { ago, formatBytes } from "@/components/inventory/bits";
+import { formatCPU, objectHref, percent, useKubeLearning, type KubeEvent, type KubeRef, type KubeUsage } from "@/lib/kube";
 
 // sentence maakt van een foutmelding van de server een zin.
 function sentence(msg: string) {
@@ -172,5 +173,88 @@ export function Stat({
       </div>
       {note && <div className="mt-0.5 text-xs text-slate-500">{note}</div>}
     </div>
+  );
+}
+
+// CodeBlock toont YAML of een log zoals in een terminal, met een knop om te
+// kopiëren. Lange regels schuiven opzij in plaats van af te breken.
+export function CodeBlock({ text, className }: { text: string; className?: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div className="relative">
+      <pre
+        className={cx(
+          "overflow-auto rounded-md bg-slate-900 p-3 pr-24 font-mono text-xs leading-relaxed whitespace-pre text-slate-100 dark:bg-black",
+          className,
+        )}
+      >
+        <code>{text}</code>
+      </pre>
+      <Button
+        type="button"
+        variant="secondary"
+        className="absolute top-2 right-2 px-2 py-1 text-xs"
+        onClick={async () => {
+          await navigator.clipboard.writeText(text);
+          setCopied(true);
+          setTimeout(() => setCopied(false), 2000);
+        }}
+      >
+        {copied ? "Gekopieerd" : "Kopiëren"}
+      </Button>
+    </div>
+  );
+}
+
+// ObjectLink opent een object in het dashboard.
+export function ObjectLink({ clusterId, objRef, children }: { clusterId: string; objRef: KubeRef; children: ReactNode }) {
+  return (
+    <Link href={objectHref(clusterId, objRef)} className="text-brand-700 hover:underline dark:text-sky-300">
+      {children}
+    </Link>
+  );
+}
+
+// EventList toont events zoals kubectl get events, met het object om te
+// openen.
+export function EventList({
+  clusterId,
+  events,
+  showObject = true,
+}: {
+  clusterId: string;
+  events: KubeEvent[];
+  showObject?: boolean;
+}) {
+  return (
+    <ul className="divide-y divide-slate-100 text-sm dark:divide-slate-800">
+      {events.map((e, i) => {
+        const label = `${e.kind} ${e.namespace && e.object?.namespace !== "" ? `${e.namespace}/` : ""}${e.name}`;
+        return (
+          <li key={`${e.namespace}/${e.kind}/${e.name}/${e.reason}/${i}`} className="py-2">
+            <div className="flex flex-wrap items-baseline gap-2">
+              <Badge tone={e.type === "Warning" ? "amber" : "slate"}>{e.reason}</Badge>
+              {showObject && (
+                <span className="font-medium break-all">
+                  {e.object ? (
+                    <ObjectLink clusterId={clusterId} objRef={e.object}>
+                      {label}
+                    </ObjectLink>
+                  ) : (
+                    label
+                  )}
+                </span>
+              )}
+              <span className="text-xs text-slate-500">
+                {e.count > 1 ? `${e.count} keer, ` : ""}
+                {ago(e.last_seen)}
+                {e.source && ` · ${e.source}`}
+              </span>
+            </div>
+            <p className="mt-0.5 break-words text-slate-600 dark:text-slate-400">{e.message}</p>
+          </li>
+        );
+      })}
+    </ul>
   );
 }

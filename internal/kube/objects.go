@@ -134,10 +134,11 @@ type ContainerState struct {
 		StartedAt time.Time `json:"startedAt"`
 	} `json:"running"`
 	Terminated *struct {
-		Reason   string `json:"reason"`
-		Message  string `json:"message"`
-		ExitCode int    `json:"exitCode"`
-		Signal   int    `json:"signal"`
+		Reason     string    `json:"reason"`
+		Message    string    `json:"message"`
+		ExitCode   int       `json:"exitCode"`
+		Signal     int       `json:"signal"`
+		FinishedAt time.Time `json:"finishedAt"`
 	} `json:"terminated"`
 }
 
@@ -147,6 +148,7 @@ type ContainerStatus struct {
 	Ready        bool           `json:"ready"`
 	RestartCount int            `json:"restartCount"`
 	State        ContainerState `json:"state"`
+	LastState    ContainerState `json:"lastState"`
 }
 
 type Pod struct {
@@ -155,12 +157,20 @@ type Pod struct {
 		NodeName       string      `json:"nodeName"`
 		Containers     []Container `json:"containers"`
 		InitContainers []Container `json:"initContainers"`
+		Volumes        []struct {
+			Name                  string `json:"name"`
+			PersistentVolumeClaim *struct {
+				ClaimName string `json:"claimName"`
+			} `json:"persistentVolumeClaim"`
+		} `json:"volumes"`
 	} `json:"spec"`
 	Status struct {
 		Phase                 string            `json:"phase"`
 		Reason                string            `json:"reason"`
 		Message               string            `json:"message"`
 		PodIP                 string            `json:"podIP"`
+		HostIP                string            `json:"hostIP"`
+		QOSClass              string            `json:"qosClass"`
 		StartTime             *time.Time        `json:"startTime"`
 		Conditions            []Condition       `json:"conditions"`
 		ContainerStatuses     []ContainerStatus `json:"containerStatuses"`
@@ -408,13 +418,26 @@ type Event struct {
 	Reason         string     `json:"reason"`
 	Message        string     `json:"message"`
 	Count          int        `json:"count"`
+	FirstTimestamp *time.Time `json:"firstTimestamp"`
 	LastTimestamp  *time.Time `json:"lastTimestamp"`
 	EventTime      *time.Time `json:"eventTime"`
-	InvolvedObject struct {
-		Kind      string `json:"kind"`
-		Namespace string `json:"namespace"`
-		Name      string `json:"name"`
+	Source         struct {
+		Component string `json:"component"`
+		Host      string `json:"host"`
+	} `json:"source"`
+	ReportingController string `json:"reportingController"`
+	InvolvedObject      struct {
+		APIVersion string `json:"apiVersion"`
+		Kind       string `json:"kind"`
+		Namespace  string `json:"namespace"`
+		Name       string `json:"name"`
+		UID        string `json:"uid"`
 	} `json:"involvedObject"`
+}
+
+// From is wie het event meldde, zoals kubelet of deployment-controller.
+func (e Event) From() string {
+	return cmpOr(e.Source.Component, e.ReportingController)
 }
 
 // When is het laatste tijdstip van het event.

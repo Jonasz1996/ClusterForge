@@ -87,6 +87,8 @@ type Service struct {
 	cache map[string]cached
 	// last onthoudt per cluster de node die het laatst antwoordde.
 	last map[uuid.UUID]uuid.UUID
+	// discovery onthoudt per cluster de soorten objecten.
+	discovery map[uuid.UUID]discovered
 }
 
 type cached struct {
@@ -98,7 +100,7 @@ type cached struct {
 func NewService(pool *pgxpool.Pool, bus Requester, log *slog.Logger) *Service {
 	return &Service{
 		pool: pool, q: store.New(pool), bus: bus, log: log, Timeout: 30 * time.Second, Interval: 30 * time.Second, Now: time.Now,
-		cache: map[string]cached{}, last: map[uuid.UUID]uuid.UUID{},
+		cache: map[string]cached{}, last: map[uuid.UUID]uuid.UUID{}, discovery: map[uuid.UUID]discovered{},
 	}
 }
 
@@ -175,7 +177,13 @@ func (s *Service) Get(ctx context.Context, clusterID uuid.UUID, path string, que
 }
 
 func (s *Service) get(ctx context.Context, clusterID uuid.UUID, path string, query url.Values) ([]byte, uuid.UUID, error) {
-	key := clusterID.String() + " " + path + "?" + query.Encode()
+	return s.request(ctx, clusterID, protocol.KubeRead, path, query)
+}
+
+// request stuurt een kube-verzoek naar de beste server-node van het
+// cluster, en naar de volgende als die niet antwoordt.
+func (s *Service) request(ctx context.Context, clusterID uuid.UUID, op, path string, query url.Values) ([]byte, uuid.UUID, error) {
+	key := clusterID.String() + " " + op + " " + path + "?" + query.Encode()
 	s.mu.Lock()
 	if c, ok := s.cache[key]; ok && s.Now().Sub(c.at) < cacheTTL {
 		s.mu.Unlock()
@@ -195,7 +203,7 @@ func (s *Service) get(ctx context.Context, clusterID uuid.UUID, path string, que
 	var last error
 	for _, n := range nodes {
 		rctx, cancel := context.WithTimeout(ctx, s.Timeout)
-		res, err := s.bus.Kube(rctx, n.ID, protocol.KubeRequest{ID: uuid.NewString(), Op: protocol.KubeRead, Path: path, Query: q})
+		res, err := s.bus.Kube(rctx, n.ID, protocol.KubeRequest{ID: uuid.NewString(), Op: op, Path: path, Query: q})
 		cancel()
 		switch {
 		case errors.Is(err, agentbus.ErrAgentOffline):

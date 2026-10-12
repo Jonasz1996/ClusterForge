@@ -37,6 +37,8 @@ func (s *Server) kubeError(w http.ResponseWriter, r *http.Request, err error) {
 		writeError(w, http.StatusNotFound, "not_found", "geen Kubernetes-cluster met dit id")
 	case errors.Is(err, kube.ErrInvalid):
 		writeError(w, http.StatusBadRequest, "validation", err.Error())
+	case errors.Is(err, kube.ErrNoPrevious):
+		writeError(w, http.StatusNotFound, "not_found", err.Error())
 	case errors.Is(err, kube.ErrNotFound):
 		writeError(w, http.StatusNotFound, "not_found", err.Error())
 	case errors.As(err, &ue) && ue.TooOld:
@@ -141,7 +143,7 @@ func (s *Server) GetKubeOverview(w http.ResponseWriter, r *http.Request, cluster
 		},
 		WorkloadsTotal: o.Workloads, WorkloadsReady: o.WorkloadsReady, Namespaces: append([]string{}, o.Namespaces...),
 		Allocatable: kubeUsage(o.Allocatable), Used: nullable.NewNullNullable[gen.KubeUsage](),
-		Warnings: []gen.KubeEvent{}, Problems: []gen.KubePod{},
+		Problems: []gen.KubePod{},
 	}
 	for _, n := range o.Nodes {
 		if n.Ready() {
@@ -151,12 +153,7 @@ func (s *Server) GetKubeOverview(w http.ResponseWriter, r *http.Request, cluster
 	if o.Used != nil {
 		out.Used = nullable.NewNullableWithValue(kubeUsage(*o.Used))
 	}
-	for _, e := range o.Warnings {
-		out.Warnings = append(out.Warnings, gen.KubeEvent{
-			Namespace: e.Metadata.Namespace, Kind: e.InvolvedObject.Kind, Name: e.InvolvedObject.Name, Reason: e.Reason,
-			Message: e.Message, Count: max(e.Count, 1), LastSeen: e.When(),
-		})
-	}
+	out.Warnings = s.kubeEvents(ctx, clusterID, o.Warnings)
 	for _, p := range o.Problems {
 		out.Problems = append(out.Problems, toAPIKubePod(p))
 	}

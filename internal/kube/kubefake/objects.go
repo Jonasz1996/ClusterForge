@@ -1,6 +1,7 @@
 package kubefake
 
 import (
+	"encoding/base64"
 	"fmt"
 	"time"
 )
@@ -85,6 +86,13 @@ type PodSpec struct {
 	OwnerKind string
 	OwnerName string
 	IP        string
+	// LastReason is waarom de vorige container stopte, zoals Error of
+	// OOMKilled, met exitcode 1.
+	LastReason string
+	// Init is de naam van een init-container die al klaar is.
+	Init string
+	// Claim is een PersistentVolumeClaim die de pod als volume data heeft.
+	Claim string
 }
 
 // Pod maakt een pod met één container.
@@ -119,20 +127,34 @@ func Pod(p PodSpec) map[string]any {
 	if ready {
 		cond = "True"
 	}
+	cs := map[string]any{"name": "main", "image": p.Image, "ready": ready, "restartCount": p.Restarts, "state": state, "started": ready}
+	if p.LastReason != "" {
+		cs["lastState"] = map[string]any{"terminated": map[string]any{
+			"reason": p.LastReason, "exitCode": 1, "finishedAt": time.Now().UTC().Add(-2 * time.Minute).Format(time.RFC3339),
+		}}
+	}
 	status := map[string]any{
-		"phase": p.Phase, "hostIP": "", "podIP": p.IP,
-		"conditions": []any{map[string]any{"type": "Ready", "status": cond}},
-		"containerStatuses": []any{map[string]any{
-			"name": "main", "image": p.Image, "ready": ready, "restartCount": p.Restarts, "state": state, "started": ready,
-		}},
+		"phase": p.Phase, "hostIP": "", "podIP": p.IP, "qosClass": "BestEffort",
+		"conditions":        []any{map[string]any{"type": "Ready", "status": cond}},
+		"containerStatuses": []any{cs},
+	}
+	spec := map[string]any{"nodeName": p.Node, "containers": []any{map[string]any{"name": "main", "image": p.Image}}}
+	if p.Claim != "" {
+		spec["volumes"] = []any{map[string]any{"name": "data", "persistentVolumeClaim": map[string]any{"claimName": p.Claim}}}
+	}
+	if p.Init != "" {
+		spec["initContainers"] = []any{map[string]any{"name": p.Init, "image": "docker.io/library/busybox:1.37"}}
+		status["initContainerStatuses"] = []any{map[string]any{
+			"name": p.Init, "image": "docker.io/library/busybox:1.37", "ready": true, "restartCount": 0,
+			"state": map[string]any{"terminated": map[string]any{"reason": "Completed", "exitCode": 0}},
+		}}
 	}
 	if p.Phase != "Pending" || p.Node != "" {
 		status["startTime"] = time.Now().UTC().Add(-30 * time.Minute).Format(time.RFC3339)
 	}
 	return map[string]any{
 		"apiVersion": "v1", "kind": "Pod", "metadata": md,
-		"spec":   map[string]any{"nodeName": p.Node, "containers": []any{map[string]any{"name": "main", "image": p.Image}}},
-		"status": status,
+		"spec": spec, "status": status,
 	}
 }
 
@@ -142,8 +164,8 @@ func ownerAPIVersion(kind string) string {
 		return "apps/v1"
 	case "Job", "CronJob":
 		return "batch/v1"
-	case "Node":
-		return "v1"
+	case "Ingress":
+		return "networking.k8s.io/v1"
 	}
 	return "v1"
 }
@@ -273,14 +295,238 @@ func (s *Server) SeedK3s(nodes ...NodeSpec) {
 			OwnerKind: "Job", OwnerName: j,
 		}))
 	}
-	s.Add(map[string]any{
-		"apiVersion": "v1", "kind": "Service",
-		"metadata": map[string]any{"name": "kubernetes", "namespace": "default", "labels": map[string]any{"component": "apiserver"}},
-		"spec":     map[string]any{"type": "ClusterIP", "clusterIP": "10.43.0.1", "ports": []any{map[string]any{"name": "https", "port": 443, "protocol": "TCP", "targetPort": 6443}}},
-	})
+	s.Add(Service(ServiceSpec{
+		Namespace: "default", Name: "kubernetes", ClusterIP: "10.43.0.1", Ports: []ServicePort{{Name: "https", Port: 443, TargetPort: 6443}},
+	}))
+	var ips []string
+	for _, n := range nodes {
+		ips = append(ips, n.IP)
+	}
+	s.Add(Service(ServiceSpec{
+		Namespace: "kube-system", Name: "traefik", Type: "LoadBalancer", ClusterIP: "10.43.120.15", Selector: map[string]string{"app": "traefik"},
+		LoadBalancer: ips, Ports: []ServicePort{{Name: "web", Port: 80, TargetPort: 8000, NodePort: 30080}, {Name: "websecure", Port: 443, TargetPort: 8443, NodePort: 30443}},
+	}))
+	s.Add(
+		StorageClass("local-path", "rancher.io/local-path", true),
+		map[string]any{"apiVersion": "networking.k8s.io/v1", "kind": "IngressClass", "metadata": map[string]any{"name": "traefik"}, "spec": map[string]any{"controller": "traefik.io/ingress-controller"}},
+		ConfigMap("kube-system", "coredns", map[string]string{"Corefile": ".:53 {\n    errors\n    health\n    kubernetes cluster.local in-addr.arpa ip6.arpa\n    forward . /etc/resolv.conf\n}\n"}),
+	)
 	s.Add(map[string]any{
 		"apiVersion": "v1", "kind": "Secret", "type": "kubernetes.io/tls",
 		"metadata": map[string]any{"name": "k3s-serving", "namespace": "kube-system"},
 		"data":     map[string]any{"tls.crt": "LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0t", "tls.key": "LS0tLS1CRUdJTiBFQyBQUklWQVRFIEtFWS0tLS0t"},
 	})
+}
+
+// ReplicaSet maakt de ReplicaSet van een Deployment.
+func ReplicaSet(namespace, name, deployment string, replicas int) map[string]any {
+	return map[string]any{
+		"apiVersion": "apps/v1", "kind": "ReplicaSet",
+		"metadata": map[string]any{
+			"name": name, "namespace": namespace, "labels": map[string]any{"app": deployment},
+			"ownerReferences": []any{map[string]any{"apiVersion": "apps/v1", "kind": "Deployment", "name": deployment, "uid": "owner-" + deployment, "controller": true}},
+		},
+		"spec":   map[string]any{"replicas": replicas, "selector": map[string]any{"matchLabels": map[string]any{"app": deployment}}},
+		"status": map[string]any{"replicas": replicas, "readyReplicas": replicas},
+	}
+}
+
+// ServicePort is een poort van een Service.
+type ServicePort struct {
+	Name       string
+	Port       int
+	TargetPort int
+	NodePort   int
+}
+
+// ServiceSpec beschrijft een Service.
+type ServiceSpec struct {
+	Namespace string
+	Name      string
+	// Type is ClusterIP, NodePort of LoadBalancer; leeg is ClusterIP.
+	Type      string
+	ClusterIP string
+	Selector  map[string]string
+	Ports     []ServicePort
+	// LoadBalancer zijn de adressen die ServiceLB gaf.
+	LoadBalancer []string
+}
+
+// Service maakt een Service.
+func Service(sv ServiceSpec) map[string]any {
+	if sv.Type == "" {
+		sv.Type = "ClusterIP"
+	}
+	var ports []any
+	for _, p := range sv.Ports {
+		port := map[string]any{"name": p.Name, "port": p.Port, "protocol": "TCP", "targetPort": max(p.TargetPort, p.Port)}
+		if p.NodePort > 0 {
+			port["nodePort"] = p.NodePort
+		}
+		ports = append(ports, port)
+	}
+	sel := map[string]any{}
+	for k, v := range sv.Selector {
+		sel[k] = v
+	}
+	spec := map[string]any{"type": sv.Type, "clusterIP": sv.ClusterIP, "ports": ports}
+	if len(sel) > 0 {
+		spec["selector"] = sel
+	}
+	var lb []any
+	for _, ip := range sv.LoadBalancer {
+		lb = append(lb, map[string]any{"ip": ip, "ipMode": "VIP"})
+	}
+	return map[string]any{
+		"apiVersion": "v1", "kind": "Service", "metadata": map[string]any{"name": sv.Name, "namespace": sv.Namespace},
+		"spec": spec, "status": map[string]any{"loadBalancer": map[string]any{"ingress": lb}},
+	}
+}
+
+// IngressSpec beschrijft een Ingress met één regel.
+type IngressSpec struct {
+	Namespace string
+	Name      string
+	Host      string
+	Path      string
+	Service   string
+	Port      int
+	TLS       bool
+	// Address is het adres in de status, zoals Traefik het zet.
+	Address []string
+}
+
+// Ingress maakt een Ingress voor Traefik.
+func Ingress(in IngressSpec) map[string]any {
+	if in.Path == "" {
+		in.Path = "/"
+	}
+	spec := map[string]any{
+		"ingressClassName": "traefik",
+		"rules": []any{map[string]any{"host": in.Host, "http": map[string]any{"paths": []any{map[string]any{
+			"path": in.Path, "pathType": "Prefix",
+			"backend": map[string]any{"service": map[string]any{"name": in.Service, "port": map[string]any{"number": in.Port}}},
+		}}}}},
+	}
+	if in.TLS {
+		spec["tls"] = []any{map[string]any{"hosts": []any{in.Host}, "secretName": in.Name + "-tls"}}
+	}
+	var lb []any
+	for _, ip := range in.Address {
+		lb = append(lb, map[string]any{"ip": ip})
+	}
+	return map[string]any{
+		"apiVersion": "networking.k8s.io/v1", "kind": "Ingress", "metadata": map[string]any{"name": in.Name, "namespace": in.Namespace},
+		"spec": spec, "status": map[string]any{"loadBalancer": map[string]any{"ingress": lb}},
+	}
+}
+
+// VolumeSpec beschrijft een PersistentVolumeClaim met zijn volume.
+type VolumeSpec struct {
+	Namespace string
+	Claim     string
+	Volume    string
+	Size      string
+	Class     string
+	// Node is de node waar local-path het volume maakte.
+	Node string
+	// Pending: de claim wacht nog op een volume.
+	Pending bool
+}
+
+// Volume maakt een PersistentVolumeClaim en, als hij gebonden is, het
+// PersistentVolume.
+func Volume(v VolumeSpec) []any {
+	if v.Class == "" {
+		v.Class = "local-path"
+	}
+	claim := map[string]any{
+		"apiVersion": "v1", "kind": "PersistentVolumeClaim", "metadata": map[string]any{"name": v.Claim, "namespace": v.Namespace},
+		"spec": map[string]any{
+			"accessModes": []any{"ReadWriteOnce"}, "storageClassName": v.Class,
+			"resources": map[string]any{"requests": map[string]any{"storage": v.Size}},
+		},
+		"status": map[string]any{"phase": "Pending"},
+	}
+	if v.Pending {
+		return []any{claim}
+	}
+	claim["spec"].(map[string]any)["volumeName"] = v.Volume
+	claim["status"] = map[string]any{"phase": "Bound", "accessModes": []any{"ReadWriteOnce"}, "capacity": map[string]any{"storage": v.Size}}
+	pv := map[string]any{
+		"apiVersion": "v1", "kind": "PersistentVolume", "metadata": map[string]any{"name": v.Volume},
+		"spec": map[string]any{
+			"capacity": map[string]any{"storage": v.Size}, "accessModes": []any{"ReadWriteOnce"}, "storageClassName": v.Class,
+			"persistentVolumeReclaimPolicy": "Delete",
+			"claimRef":                      map[string]any{"kind": "PersistentVolumeClaim", "namespace": v.Namespace, "name": v.Claim},
+			"hostPath":                      map[string]any{"path": "/var/lib/rancher/k3s/storage/" + v.Volume + "_" + v.Namespace + "_" + v.Claim},
+			"nodeAffinity": map[string]any{"required": map[string]any{"nodeSelectorTerms": []any{map[string]any{"matchExpressions": []any{
+				map[string]any{"key": "kubernetes.io/hostname", "operator": "In", "values": []any{v.Node}},
+			}}}}},
+		},
+		"status": map[string]any{"phase": "Bound"},
+	}
+	return []any{claim, pv}
+}
+
+// StorageClass maakt een StorageClass.
+func StorageClass(name, provisioner string, isDefault bool) map[string]any {
+	md := map[string]any{"name": name}
+	if isDefault {
+		md["annotations"] = map[string]any{"storageclass.kubernetes.io/is-default-class": "true"}
+	}
+	return map[string]any{
+		"apiVersion": "storage.k8s.io/v1", "kind": "StorageClass", "metadata": md, "provisioner": provisioner,
+		"reclaimPolicy": "Delete", "volumeBindingMode": "WaitForFirstConsumer",
+	}
+}
+
+// ConfigMap maakt een ConfigMap.
+func ConfigMap(namespace, name string, data map[string]string) map[string]any {
+	d := map[string]any{}
+	for k, v := range data {
+		d[k] = v
+	}
+	return map[string]any{"apiVersion": "v1", "kind": "ConfigMap", "metadata": map[string]any{"name": name, "namespace": namespace}, "data": d}
+}
+
+// Secret maakt een Secret; de waarden gaan zoals in Kubernetes als base64.
+func Secret(namespace, name, typ string, data map[string]string) map[string]any {
+	d := map[string]any{}
+	for k, v := range data {
+		d[k] = base64.StdEncoding.EncodeToString([]byte(v))
+	}
+	if typ == "" {
+		typ = "Opaque"
+	}
+	return map[string]any{"apiVersion": "v1", "kind": "Secret", "type": typ, "metadata": map[string]any{"name": name, "namespace": namespace}, "data": d}
+}
+
+// EventSpec beschrijft een event over een object.
+type EventSpec struct {
+	Namespace string
+	Name      string
+	// Type is Normal of Warning; leeg is Normal.
+	Type    string
+	Reason  string
+	Message string
+	Count   int
+	// Het object waar het event over gaat.
+	Kind, ObjectName, UID string
+	// Ago is hoe lang geleden het event laatst gebeurde.
+	Ago time.Duration
+}
+
+// Event maakt een event.
+func Event(e EventSpec) map[string]any {
+	if e.Type == "" {
+		e.Type = "Normal"
+	}
+	last := time.Now().UTC().Add(-e.Ago).Format(time.RFC3339)
+	return map[string]any{
+		"apiVersion": "v1", "kind": "Event", "metadata": map[string]any{"name": e.Name, "namespace": e.Namespace},
+		"type": e.Type, "reason": e.Reason, "message": e.Message, "count": max(e.Count, 1),
+		"firstTimestamp": last, "lastTimestamp": last, "source": map[string]any{"component": "kubelet"},
+		"involvedObject": map[string]any{"apiVersion": ownerAPIVersion(e.Kind), "kind": e.Kind, "namespace": e.Namespace, "name": e.ObjectName, "uid": e.UID},
+	}
 }
