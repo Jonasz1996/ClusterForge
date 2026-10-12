@@ -4274,11 +4274,21 @@ type DatabaseInfo struct {
 // DatabaseMigrationAccount defines model for DatabaseMigrationAccount.
 type DatabaseMigrationAccount struct {
 	// Global Hij heeft ook rechten op alle databases
-	Global bool   `json:"global"`
-	Host   string `json:"host"`
+	Global bool `json:"global"`
 
-	// Plugin Hoe hij inlogt; alleen mysql_native_password gaat mee
-	Plugin     string   `json:"plugin"`
+	// Host Leeg bij PostgreSQL
+	Host string `json:"host"`
+
+	// MemberOf Bij PostgreSQL de rollen waarvan hij lid is
+	MemberOf []string `json:"member_of"`
+
+	// Moves De echte verhuizing neemt hem mee
+	Moves bool `json:"moves"`
+
+	// Plugin Hoe hij inlogt. MariaDB: alleen mysql_native_password gaat mee. PostgreSQL: nologin, scram-sha-256, md5, none (zonder wachtwoord) of other
+	Plugin string `json:"plugin"`
+
+	// Privileges Bij PostgreSQL OWNER, CONNECT, CREATE, TEMPORARY, en OBJECTS als hij iets in de database bezit of er rechten op heeft
 	Privileges []string `json:"privileges"`
 	User       string   `json:"user"`
 }
@@ -4311,10 +4321,17 @@ type DatabaseMigrationDisk struct {
 
 // DatabaseMigrationInfo defines model for DatabaseMigrationInfo.
 type DatabaseMigrationInfo struct {
+	// Charset Bij PostgreSQL de encoding
 	Charset   string `json:"charset"`
 	Collation string `json:"collation"`
 	Events    int    `json:"events"`
-	Routines  int    `json:"routines"`
+
+	// Extensions Bij PostgreSQL de extensies in de database
+	Extensions []string `json:"extensions"`
+
+	// Owner Bij PostgreSQL de eigenaar van de database
+	Owner    string `json:"owner"`
+	Routines int    `json:"routines"`
 
 	// Rows De schatting van InnoDB
 	Rows int64 `json:"rows"`
@@ -4336,10 +4353,13 @@ type DatabaseMigrationInput struct {
 
 // DatabaseMigrationMovedUser defines model for DatabaseMigrationMovedUser.
 type DatabaseMigrationMovedUser struct {
-	// Hosts Zijn hosts op het nieuwe cluster
+	// Hosts Zijn hosts op het nieuwe cluster; leeg bij PostgreSQL
 	Hosts []string `json:"hosts"`
 
-	// OldHosts Zijn hosts op de oude server
+	// New ClusterForge maakte hem nieuw op het nieuwe cluster: annuleren haalt hem weer weg
+	New bool `json:"new"`
+
+	// OldHosts Zijn hosts op de oude server; leeg bij PostgreSQL
 	OldHosts   []string `json:"old_hosts"`
 	Privileges []string `json:"privileges"`
 	User       string   `json:"user"`
@@ -4402,10 +4422,13 @@ type DatabaseMigrationPlan struct {
 
 // DatabaseMigrationReach defines model for DatabaseMigrationReach.
 type DatabaseMigrationReach struct {
-	// Code De fout die MariaDB meteen stuurde, zoals 1130; 0 zonder
+	// Code De fout die MariaDB meteen stuurde, zoals 1130, of bij PostgreSQL 28000 als pg_hba.conf weigert; 0 zonder
 	Code    int    `json:"code"`
 	Error   string `json:"error"`
 	Reached bool   `json:"reached"`
+
+	// Seen Bij PostgreSQL: het adres waarvan de oude server de nieuwe node ziet, als pg_hba.conf hem weigert
+	Seen    string `json:"seen"`
 	Tls     bool   `json:"tls"`
 	Version string `json:"version"`
 }

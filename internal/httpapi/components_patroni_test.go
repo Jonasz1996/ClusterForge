@@ -113,12 +113,19 @@ type componentOwnVIPPlan struct {
 	} `json:"vip"`
 }
 
-// TestClusterComponentPatroni is de acceptatie van het eerste deel van
-// mijlpaal 10 van fase 5: Nextcloud krijgt PostgreSQL met Patroni op nc1 tot
-// nc3, met een eigen VIP dat de primary volgt. De uitrol zet eerst etcd op
-// alle nodes en dan Patroni node voor node; het VIP staat daarna op de
-// primary, en gaat mee als de primary uitvalt.
-func TestClusterComponentPatroni(t *testing.T) {
+// patroniLab is Nextcloud op nc1 tot nc3 (10.0.20.186-188) met agents die
+// Patroni naspelen. nc1 en nc2 hebben het VIP van de app al in keepalived,
+// nc3 nog geen keepalived.
+type patroniLab struct {
+	e   *testEnv
+	c   *client
+	nc  cluster
+	g   *patroniHosts
+	ids map[string]string
+}
+
+func newPatroniHosts(t *testing.T) patroniLab {
+	t.Helper()
 	e, c := adminClient(t)
 	ctx := context.Background()
 	group := &agenttest.Group{Takeover: 200 * time.Millisecond}
@@ -154,7 +161,7 @@ func TestClusterComponentPatroni(t *testing.T) {
 			ag.Exec, ag.Root, ag.Collector.Run, ag.Collector.Addresses = h.Exec, root, h.Exec, h.Addresses
 			ag.ExecStdin, ag.Stream, ag.DumpDir = h.ExecStdin, h.Stream, filepath.Join(root, "var/backups/clusterforge-db")
 			ag.Collector.Interfaces, ag.Collector.PrimaryAddress = h.Interfaces, func() string { return ip }
-			ag.PatroniURL = h.ServePatroni(t)
+			ag.PatroniURL, ag.Dial = h.ServePatroni(t), h.Dial
 			group.Join(h)
 		})
 	}
@@ -175,6 +182,41 @@ func TestClusterComponentPatroni(t *testing.T) {
 		_ = e.pool.QueryRow(ctx, "SELECT count(*) FROM node_facts f JOIN nodes n ON n.id = f.node_id WHERE n.cluster_id = $1 AND f.facts->'os'->>'id' = 'debian'", nc.ID).Scan(&n)
 		return n == 3
 	})
+	return patroniLab{e: e, c: c, nc: nc, g: g, ids: ids}
+}
+
+// deploy rolt PostgreSQL met Patroni uit op de drie nodes, met het eigen
+// VIP 10.0.20.190, en geeft het id van het onderdeel. nc1 is de primary.
+func (l patroniLab) deploy(t *testing.T) string {
+	t.Helper()
+	base := "/api/v1/clusters/" + l.nc.ID + "/components"
+	in := map[string]any{"engine": "postgresql", "nodes": []string{l.ids["nc1"], l.ids["nc2"], l.ids["nc3"]}, "vip_address": "10.0.20.190"}
+	var p componentPlanView
+	if s := l.c.do("POST", base+"/plan", in, &p); s != http.StatusOK || p.Blocked {
+		t.Fatalf("plan: %d %+v", s, p)
+	}
+	in["hash"] = p.Hash
+	var j job
+	if s := l.c.do("POST", base, in, &j); s != http.StatusAccepted {
+		t.Fatalf("toevoegen: %d", s)
+	}
+	if j = waitJobLong(t, l.c, j.ID); j.Status != "succeeded" {
+		t.Fatalf("uitrol: %s %s", j.Status, j.Error)
+	}
+	var comps list[componentView]
+	l.c.do("GET", base, nil, &comps)
+	return comps.Items[0].ID
+}
+
+// TestClusterComponentPatroni is de acceptatie van het eerste deel van
+// mijlpaal 10 van fase 5: Nextcloud krijgt PostgreSQL met Patroni op nc1 tot
+// nc3, met een eigen VIP dat de primary volgt. De uitrol zet eerst etcd op
+// alle nodes en dan Patroni node voor node; het VIP staat daarna op de
+// primary, en gaat mee als de primary uitvalt.
+func TestClusterComponentPatroni(t *testing.T) {
+	lab := newPatroniHosts(t)
+	e, c, g, nc, ids := lab.e, lab.c, lab.g, lab.nc, lab.ids
+	ctx := context.Background()
 
 	// PostgreSQL staat nu bij de onderdelen, zonder het VIP als instelling.
 	var tpls list[struct {

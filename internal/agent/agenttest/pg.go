@@ -7,6 +7,7 @@ package agenttest
 
 import (
 	"bufio"
+	"cmp"
 	"crypto/hmac"
 	"crypto/pbkdf2"
 	"crypto/sha256"
@@ -27,7 +28,8 @@ import (
 )
 
 // PGRole is een gebruiker van PostgreSQL. Verifier is de SCRAM-verifier
-// die de agent stuurde; LogsIn rekent na of een wachtwoord erbij past.
+// die de agent stuurde, of een md5-hash; LogsIn rekent na of een wachtwoord
+// bij een SCRAM-verifier past.
 type PGRole struct {
 	Name                                  string
 	Super, CreateDB, CreateRole, Replicat bool
@@ -35,11 +37,32 @@ type PGRole struct {
 	// ValidUntil: na dit tijdstip komt de gebruiker niet meer binnen; nul
 	// is altijd.
 	ValidUntil time.Time
+	// NoLogin: een groep; MemberOf zijn de rollen waarvan hij lid is, en
+	// ReadOnly: default_transaction_read_only staat aan voor hem.
+	NoLogin  bool
+	MemberOf []string
+	ReadOnly bool
 }
 
 // PatroniRoles zijn de gebruikers die Patroni maakt.
 func PatroniRoles() []PGRole {
 	return []PGRole{{Name: "cf_replicatie", Replicat: true}, {Name: "cf_rewind"}, {Name: "postgres", Super: true, CreateDB: true, CreateRole: true, Replicat: true}}
+}
+
+// SCRAMVerifier is de verifier die PostgreSQL van password bewaart, met een
+// vaste salt: zoals een rol op een oude server hem al heeft.
+func SCRAMVerifier(password string) string {
+	salt := sha256.Sum256([]byte("agenttest " + password))
+	const iter = 4096
+	salted, _ := pbkdf2.Key(sha256.New, password, salt[:16], iter, sha256.Size)
+	mac := func(key []byte, msg string) []byte {
+		h := hmac.New(sha256.New, key)
+		h.Write([]byte(msg))
+		return h.Sum(nil)
+	}
+	stored := sha256.Sum256(mac(salted, "Client Key"))
+	b64 := base64.StdEncoding.EncodeToString
+	return fmt.Sprintf("SCRAM-SHA-256$%d:%s$%s:%s", iter, b64(salt[:16]), b64(stored[:]), b64(mac(salted, "Server Key")))
 }
 
 // LogsIn zegt of r met password binnenkomt via scram-sha-256.
@@ -131,7 +154,7 @@ func (p *Postgres) pgQuery(db, q string) (rows [][]string, ok bool) {
 			rows = [][]string{{"1", strconv.FormatInt(p.Databases[i].Size, 10)}}
 		}
 	default:
-		return nil, false
+		return p.pgMigrateQuery(db, q)
 	}
 	return rows, true
 }
@@ -173,7 +196,7 @@ func (p *Postgres) pgWrite(stdin, user string) ([]byte, error) {
 			if j < 0 {
 				return fail(fmt.Sprintf("role %q does not exist", r[1]))
 			}
-			p.Roles[j].Verifier = r[2]
+			p.Roles[j].Verifier, p.Roles[j].NoLogin = r[2], false
 		case pgCreateDBRe.MatchString(line):
 			r := pgCreateDBRe.FindStringSubmatch(line)
 			if r[1] != r[3] {
@@ -230,6 +253,12 @@ func (p *Postgres) pgWrite(stdin, user string) ([]byte, error) {
 				return tempRole.MatchString(r.Name) && !r.ValidUntil.IsZero() && r.ValidUntil.Before(now)
 			})
 		default:
+			if msg, ok := p.pgMigrateWrite(line); ok {
+				if msg != "" {
+					return fail(msg)
+				}
+				continue
+			}
 			return fail("agenttest kent deze opdracht niet: " + line)
 		}
 	}
@@ -317,8 +346,16 @@ func (h *Host) pgConnect(args []string) (*pgConn, []string, string) {
 		unlock()
 		return nil, nil, failed + "Connection refused"
 	}
+	if slices.Contains(p.HBADeny, h.Address) {
+		unlock()
+		return nil, nil, failed + fmt.Sprintf("FATAL:  no pg_hba.conf entry for host %q, user %q, database %q, no encryption", h.Address, cfg["user"], cfg["dbname"])
+	}
+	if password == "" {
+		unlock()
+		return nil, nil, failed + "fe_sendauth: no password supplied"
+	}
 	j := p.role(cfg["user"])
-	if j < 0 || !p.Roles[j].LogsIn(password, time.Now()) {
+	if j < 0 || p.Roles[j].NoLogin || !p.Roles[j].LogsIn(password, time.Now()) {
 		unlock()
 		return nil, nil, failed + fmt.Sprintf("FATAL:  password authentication failed for user %q", cfg["user"])
 	}
@@ -381,12 +418,34 @@ func (h *Host) pgDump(args []string) ([]byte, error) {
 	if i < 0 {
 		return nil, fmt.Errorf("pg_dump: error: connection to server on socket \"/var/run/postgresql/.s.PGSQL.5432\" failed: FATAL:  database %q does not exist", db)
 	}
-	d := p.Databases[i]
+	return []byte(p.dumpOf(p.Databases[i], true, true)), nil
+}
+
+// dumpOf is wat pg_dump van d schrijft: per tabel de kop, met de eigenaar
+// en de rechten als owner en privileges, de extensies, opvulling naar de
+// grootte van de database (hoogstens 256 KiB), en de slotregel met
+// \unrestrict.
+func (p *Postgres) dumpOf(d Database, owner, privileges bool) string {
 	key := strings.Repeat("k", 64)
 	var b strings.Builder
 	fmt.Fprintf(&b, "--\n-- PostgreSQL database dump\n--\n\n\\restrict %s\n\n-- Dumped from database version %s\n", key, p.Version)
+	for _, e := range d.Extensions {
+		fmt.Fprintf(&b, "\nCREATE EXTENSION IF NOT EXISTS %s WITH SCHEMA public;\n", e)
+	}
+	shown := "-"
+	if owner {
+		shown = cmp.Or(d.Owner, "postgres")
+	}
 	for t := range d.Tables {
-		fmt.Fprintf(&b, "\n--\n-- Name: t%d; Type: TABLE; Schema: public; Owner: %s\n--\n\nCREATE TABLE public.t%d (id integer NOT NULL);\n", t+1, d.Owner, t+1)
+		fmt.Fprintf(&b, "\n--\n-- Name: t%d; Type: TABLE; Schema: public; Owner: %s\n--\n\nCREATE TABLE public.t%d (id integer NOT NULL);\n", t+1, shown, t+1)
+		if owner {
+			fmt.Fprintf(&b, "ALTER TABLE public.t%d OWNER TO %s;\n", t+1, shown)
+		}
+		if privileges {
+			for _, g := range d.Grantees {
+				fmt.Fprintf(&b, "GRANT SELECT ON TABLE public.t%d TO %s;\n", t+1, g)
+			}
+		}
 	}
 	fmt.Fprintf(&b, "-- agenttest: rows=%d views=%d routines=%d triggers=%d events=%d\n", d.rows(), d.Views, d.Routines, d.Triggers, d.Events)
 	if pad := min(d.Size/4096, 256<<10); pad > 0 {
@@ -395,7 +454,7 @@ func (h *Host) pgDump(args []string) ([]byte, error) {
 	if !p.DumpIncomplete {
 		fmt.Fprintf(&b, "\n--\n-- PostgreSQL database dump complete\n--\n\n\\unrestrict %s\n\n", key)
 	}
-	return []byte(b.String()), nil
+	return b.String()
 }
 
 // pgRestore speelt psql -d <conninfo> met een dump en dan

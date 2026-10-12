@@ -16,6 +16,11 @@ const DBSince = 9
 // server een verzoek voor PostgreSQL alleen naar protocol 10 of later.
 const DBPGSince = 10
 
+// DBPGMigrateSince is de eerste protocolversie die een database van of naar
+// PostgreSQL verhuist (DBMigrate met Engine). Een oudere agent zou het
+// verzoek op MariaDB uitvoeren.
+const DBPGMigrateSince = 11
+
 // SubjectDB draagt de databaseverzoeken: cf.node.<id>.db. Net als de
 // kube-brug is het een eigen subject, zodat een trage database de
 // commando's op cmd niet ophoudt.
@@ -56,9 +61,10 @@ const (
 	// terugzetten lopen op de achtergrond; DBDumpList toont de voortgang.
 	DBDump = "dump"
 	// DBMigrate helpt een database verhuizen van een andere MariaDB naar
-	// deze node. Op de oude node: de database bekijken en een tijdelijke
+	// deze node, of met Engine postgresql van een andere PostgreSQL naar de
+	// primary hier. Op de oude node: de database bekijken en een tijdelijke
 	// gebruiker die alleen de dump mag maken. Op de nieuwe node: kijken of
-	// de oude MariaDB te bereiken is, en de dump daar ophalen en meteen
+	// de oude server te bereiken is, en de dump daar ophalen en meteen
 	// importeren in een nieuwe database, met de rijen per tabel geteld aan
 	// beide kanten. Dat laatste loopt op de achtergrond; DBMigrateStatus
 	// toont de voortgang.
@@ -253,7 +259,15 @@ type DBMigrateRequest struct {
 	// Secret: accounts geeft ook de hash van elk wachtwoord.
 	Secret bool `json:"secret,omitempty"`
 	// Accounts zijn de gebruikers bij adopt, lock en unlock: één per host.
+	// Bij PostgreSQL ook bij pull: hun rechten op de database zelf, die de
+	// dump niet meeneemt.
 	Accounts []DBMigrateAccount `json:"accounts,omitempty"`
+	// Bij PostgreSQL: Owner is de eigenaar van de nieuwe database bij pull,
+	// en Trial laat pg_dump de eigenaars en rechten weglaten, zodat een proef
+	// geen gebruikers op de nieuwe server nodig heeft. Charset is daar de
+	// encoding, zoals UTF8.
+	Owner string `json:"owner,omitempty"`
+	Trial bool   `json:"trial,omitempty"`
 }
 
 // DBMigrateAccount is een gebruiker op één host met zijn rechten op de
@@ -269,10 +283,19 @@ type DBMigrateAccount struct {
 	// Schema is de database zoals in de GRANT op de oude server, met \_
 	// voor _ als hij zo gegeven is; lock en unlock gebruiken hem zo.
 	Schema string `json:"schema,omitempty"`
-	// Privileges zijn zijn rechten op de database, zoals SELECT.
+	// Privileges zijn zijn rechten op de database, zoals SELECT. Bij
+	// PostgreSQL: OWNER, CONNECT, CREATE en TEMPORARY, en OBJECTS als hij
+	// objecten in de database bezit of er rechten op heeft. Host en Schema
+	// zijn daar leeg, en Plugin is nologin, scram-sha-256, md5, none
+	// (inloggen zonder wachtwoord) of other.
 	Privileges []string `json:"privileges"`
-	// Global: hij heeft ook rechten op alle databases.
+	// Global: hij heeft ook rechten op alle databases. Bij PostgreSQL: hij
+	// is superuser of mag databases, gebruikers of replicatie maken.
 	Global bool `json:"global,omitempty"`
+	// MemberOf zijn bij PostgreSQL de rollen waarvan hij lid is.
+	MemberOf []string `json:"member_of,omitempty"`
+	// Super: bij PostgreSQL een superuser; die gaat niet mee.
+	Super bool `json:"super,omitempty"`
 }
 
 // DBMigrateResult is het antwoord op een DBMigrate.
@@ -281,7 +304,8 @@ type DBMigrateResult struct {
 	Probe *DBMigrateReach `json:"probe,omitempty"`
 	// Run is de import van Target: bezig, of de laatste die klaar is.
 	Run *DBMigrateRun `json:"run,omitempty"`
-	// Accounts is het antwoord op accounts.
+	// Accounts is het antwoord op accounts; bij PostgreSQL op adopt de
+	// rollen die er nog niet waren.
 	Accounts []DBMigrateAccount `json:"accounts,omitempty"`
 }
 
@@ -299,6 +323,16 @@ type DBMigrateInfo struct {
 	Routines  int              `json:"routines"`
 	Triggers  int              `json:"triggers"`
 	Events    int              `json:"events"`
+	// Bij PostgreSQL: de eigenaar van de database en of die superuser is,
+	// de extensies, de tabellen en sequences die de eigenaar niet mag
+	// lezen (hoogstens 50), en hoeveel instellingen er met ALTER DATABASE op
+	// staan; die neemt een dump niet mee. Charset is de encoding, SizeBytes
+	// de grootte van de hele database, en Events is altijd 0.
+	Owner      string   `json:"owner,omitempty"`
+	OwnerSuper bool     `json:"owner_super,omitempty"`
+	Extensions []string `json:"extensions,omitempty"`
+	Unreadable []string `json:"unreadable,omitempty"`
+	Settings   int      `json:"settings,omitempty"`
 }
 
 // DBMigrateTable is een tabel, zonder de views. Rows is de schatting van
@@ -320,10 +354,20 @@ type DBMigrateReach struct {
 	TLS     bool   `json:"tls"`
 	// Code is de fout die MariaDB meteen stuurde, zoals 1130 als het geen
 	// enkele gebruiker voor dit adres kent; Error de tekst, of waarom er
-	// niets antwoordde.
+	// niets antwoordde. Bij PostgreSQL is Code DBMigrateNoEntry als
+	// pg_hba.conf de verbinding weigert, en 1 bij een andere fout.
 	Code  int    `json:"code,omitempty"`
 	Error string `json:"error,omitempty"`
+	// Bij PostgreSQL: Seen is het adres waarvan de oude server de nieuwe
+	// node ziet, als pg_hba.conf hem weigert; Extensions zijn de extensies
+	// die op de nieuwe node te installeren zijn.
+	Seen       string   `json:"seen,omitempty"`
+	Extensions []string `json:"extensions,omitempty"`
 }
+
+// DBMigrateNoEntry is de Code van een DBMigrateReach als pg_hba.conf van de
+// oude PostgreSQL een tijdelijke gebruiker van dit adres niet binnenlaat.
+const DBMigrateNoEntry = 28000
 
 // DBMigrateRun is een import van een dump van de oude MariaDB.
 type DBMigrateRun struct {

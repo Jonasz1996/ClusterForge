@@ -19,6 +19,12 @@ package components
 //
 // De hash van een wachtwoord gaat alleen van de oude agent via de server
 // naar de nieuwe, in het geheugen; ClusterForge bewaart hem nergens.
+//
+// Bij PostgreSQL gaan de rollen mee met hun SCRAM-verifier, ook de rollen
+// zonder inloggen die iets in de database bezitten of er rechten op hebben,
+// en wie daar lid van is. De nieuwe database krijgt dezelfde eigenaar, en
+// de dump neemt de eigenaars en rechten mee. Het slot zet
+// default_transaction_read_only op de oude database zelf, voor iedereen.
 
 import (
 	"cmp"
@@ -88,11 +94,43 @@ type MoveAccount struct {
 	Privileges []string `json:"privileges"`
 	Hosts      []string `json:"hosts"`
 	Created    []string `json:"created"`
+	// New: bij PostgreSQL maakte ClusterForge de rol nieuw; een rol heeft
+	// daar geen hosts.
+	New bool `json:"new,omitempty"`
 }
+
+// created zegt of ClusterForge iets van a nieuw maakte.
+func (a MoveAccount) created() bool { return len(a.Created) > 0 || a.New }
 
 // movable zegt of een verhuizing a kan meenemen.
 func movable(a protocol.DBMigrateAccount) bool {
 	return a.Plugin == protocol.DBMigratePlugin && dbsql.CheckAppAccount(a) == nil
+}
+
+// movablePG zegt of een verhuizing de rol a van PostgreSQL kan meenemen.
+func movablePG(a protocol.DBMigrateAccount) bool { return dbsql.CheckPGAccount(a) == nil }
+
+// Movable zegt of de echte verhuizing van een database van engine de
+// gebruiker a meeneemt.
+func Movable(engine string, a protocol.DBMigrateAccount) bool {
+	if engine == protocol.DBPostgreSQL {
+		return movablePG(a)
+	}
+	return movable(a)
+}
+
+// movePGAccounts zijn de rollen van PostgreSQL die meegaan.
+func movePGAccounts(accounts []protocol.DBMigrateAccount) []MoveAccount {
+	var out []MoveAccount
+	for _, a := range accounts {
+		if !movablePG(a) {
+			continue
+		}
+		a.Hash = ""
+		out = append(out, MoveAccount{User: a.User, Old: []protocol.DBMigrateAccount{a}, Privileges: slices.Clone(a.Privileges), Hosts: []string{},
+			Created: []string{}})
+	}
+	return out
 }
 
 // checkAccounts zegt welke gebruikers niet meegaan.
@@ -183,10 +221,10 @@ func oldAccounts(accounts []MoveAccount) []protocol.DBMigrateAccount {
 	return out
 }
 
-// liveConnections leest op elke server wie nu met database verbonden is,
-// zonder de tijdelijke gebruikers van een verhuizing. Unread zijn de
-// servers die niet antwoordden.
-func (s *Service) liveConnections(ctx context.Context, servers []Node, database string) ([]MigrationConnection, []string, error) {
+// liveConnections leest op elke server wie nu met database van engine
+// verbonden is, zonder de tijdelijke gebruikers van een verhuizing. Unread
+// zijn de servers die niet antwoordden.
+func (s *Service) liveConnections(ctx context.Context, servers []Node, engine, database string) ([]MigrationConnection, []string, error) {
 	out := []MigrationConnection{}
 	var unread []string
 	if len(servers) == 0 {
@@ -212,7 +250,7 @@ func (s *Service) liveConnections(ctx context.Context, servers []Node, database 
 			continue
 		}
 		for _, sv := range res.Servers {
-			if sv.Engine != protocol.DBMariaDB {
+			if sv.Engine != engine {
 				continue
 			}
 			for _, c := range sv.Clients {
@@ -245,7 +283,7 @@ func moveTitle(database, source, cluster string) string {
 func (s *Service) MoveProd(ctx context.Context, source string, componentID uuid.UUID) (bool, string, error) {
 	r, err := s.q.GetClusterComponent(ctx, componentID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return false, "", &InvalidError{"component", "kies een cluster met een MariaDB van ClusterForge die draait"}
+		return false, "", &InvalidError{"component", "kies een cluster met een database van ClusterForge die draait"}
 	}
 	if err != nil {
 		return false, "", err
@@ -391,7 +429,7 @@ func (s *Service) moveSteps(ctx context.Context, j *jobs.Job, p moveParams, m st
 		if plan.Target == nil || plan.Target.ComponentID != p.ComponentID {
 			return errors.New("de database van het cluster is er niet meer")
 		}
-		r.Target, r.Leftover = p.Database, false
+		r.Target, r.Leftover, r.Move = p.Database, false, true
 		*route = r
 		st.Logf("%s staat op %s: %s, %d tabellen.", p.Database, r.SourceNode.Hostname, humanBytes(r.Size), len(r.Tables))
 		st.Logf("%s haalt de dump op van %s:%d en importeert hem als %s; de app vindt de database straks op %s.", r.Import.Hostname, r.Address, r.Port,
@@ -415,7 +453,7 @@ func (s *Service) moveSteps(ctx context.Context, j *jobs.Job, p moveParams, m st
 		}
 		deadline := s.Now().Add(s.MoveDrain)
 		for {
-			conns, unread, err := s.liveConnections(ctx, route.Servers, p.Database)
+			conns, unread, err := s.liveConnections(ctx, route.Servers, route.engine(), p.Database)
 			if err != nil {
 				return err
 			}
@@ -462,8 +500,12 @@ func (s *Service) moveSteps(ctx context.Context, j *jobs.Job, p moveParams, m st
 
 	pullStep := fmt.Sprintf("%s ophalen van %s en importeren op %s", p.Database, route.SourceNode.Hostname, route.Import.Hostname)
 	var pull trialPull
+	tp := trialParams{Database: p.Database}
+	if route.pg() {
+		tp.Grants = oldAccounts(res.accounts)
+	}
 	err = j.Step(ctx, pullStep, func(ctx context.Context, st *jobs.Step) error {
-		return s.trialPull(ctx, j, st, trialParams{Database: p.Database}, route, &pull, &res.trialResult)
+		return s.trialPull(ctx, j, st, tp, route, &pull, &res.trialResult)
 	})
 	j.Done(pullStep, &pull)
 	if pull.Run != nil {
@@ -496,9 +538,12 @@ func (s *Service) moveUsers(ctx context.Context, st *jobs.Step, m store.DbMigrat
 	if st.State(us) && us.Done {
 		return nil
 	}
-	got, err := s.migrateReq(ctx, route.SourceNode, protocol.DBMigrateRequest{Action: protocol.DBMigrateAccounts, Database: database, Secret: true})
+	got, err := s.migrateReq(ctx, route.SourceNode, route.engine(), protocol.DBMigrateRequest{Action: protocol.DBMigrateAccounts, Database: database, Secret: true})
 	if err != nil {
 		return err
+	}
+	if route.pg() {
+		return s.movePGUsers(ctx, st, m, database, route, got.Accounts, us, res)
 	}
 	// De hash per gebruiker: dezelfde op al zijn hosts.
 	hashes := map[string]string{}
@@ -554,7 +599,7 @@ func (s *Service) moveUsers(ctx context.Context, st *jobs.Step, m store.DbMigrat
 			adopt = append(adopt, protocol.DBMigrateAccount{User: a.User, Host: h, Plugin: protocol.DBMigratePlugin, Hash: hash, Privileges: a.Privileges})
 		}
 	}
-	if _, err := s.migrateReq(ctx, route.Import, protocol.DBMigrateRequest{Action: protocol.DBMigrateAdopt, Database: database, Accounts: adopt}); err != nil {
+	if _, err := s.migrateReq(ctx, route.Import, route.engine(), protocol.DBMigrateRequest{Action: protocol.DBMigrateAdopt, Database: database, Accounts: adopt}); err != nil {
 		return err
 	}
 	for _, a := range us.Accounts {
@@ -564,6 +609,86 @@ func (s *Service) moveUsers(ctx context.Context, st *jobs.Step, m store.DbMigrat
 		}
 		st.Logf("Gebruiker %s op %s, met hetzelfde wachtwoord als op %s (%s), vanaf %s, met %s op %s.", a.User, route.Import.Hostname,
 			route.SourceNode.Hostname, strings.Join(old, ", "), joinHosts(a.Hosts), rightsText(a.Privileges), database)
+	}
+	us.Done = true
+	return st.SetState(ctx, us)
+}
+
+// movePGUsers maakt de rollen van PostgreSQL op de primary van het nieuwe
+// cluster, met dezelfde SCRAM-verifier als op de oude server, en maakt ze
+// lid van elkaar zoals daar. De agent zegt welke rollen er nog niet waren;
+// alleen die haalt annuleren weer weg.
+func (s *Service) movePGUsers(ctx context.Context, st *jobs.Step, m store.DbMigration, database string, route *migrationRoute,
+	got []protocol.DBMigrateAccount, us *moveUsers, res *moveResult) error {
+	var adopt []protocol.DBMigrateAccount
+	for _, a := range got {
+		if movablePG(a) {
+			adopt = append(adopt, a)
+		}
+	}
+	save := func() error {
+		raw, _ := json.Marshal(us.Accounts)
+		if err := s.q.SetDBMigrationAccounts(ctx, store.SetDBMigrationAccountsParams{ID: m.ID, Accounts: raw}); err != nil {
+			return err
+		}
+		return st.SetState(ctx, us)
+	}
+	if us.Accounts == nil {
+		us.Accounts = movePGAccounts(got)
+		if us.Accounts == nil {
+			us.Accounts = []MoveAccount{}
+		}
+		if err := save(); err != nil {
+			return err
+		}
+	}
+	if len(us.Accounts) == 0 {
+		st.Logf("Geen rol om mee te nemen. Maak de gebruiker van de app op het nieuwe cluster zelf, bij Databases en gebruikers.")
+		us.Done = true
+		return st.SetState(ctx, us)
+	}
+	res.accounts, res.adopted = us.Accounts, true
+	for _, a := range us.Accounts {
+		if !slices.ContainsFunc(adopt, func(x protocol.DBMigrateAccount) bool { return x.User == a.User }) {
+			return fmt.Errorf("%s staat niet meer met rechten in %s op %s", a.User, database, route.SourceNode.Hostname)
+		}
+	}
+	r, err := s.migrateReq(ctx, route.Import, route.engine(), protocol.DBMigrateRequest{Action: protocol.DBMigrateAdopt, Database: database, Accounts: adopt})
+	// Ook als een rol mislukte: wat er al nieuw is, haalt opruimen weg.
+	if r != nil {
+		for _, c := range r.Accounts {
+			if i := slices.IndexFunc(us.Accounts, func(a MoveAccount) bool { return a.User == c.User }); i >= 0 {
+				us.Accounts[i].New = true
+			}
+		}
+		res.accounts = us.Accounts
+		if serr := save(); serr != nil && err == nil {
+			return serr
+		}
+	}
+	if err != nil {
+		return err
+	}
+	for _, a := range us.Accounts {
+		how := "met hetzelfde wachtwoord als op " + route.SourceNode.Hostname
+		switch a.Old[0].Plugin {
+		case dbsql.PGLoginNone:
+			how = "zonder inloggen"
+		case dbsql.PGLoginNoSecret:
+			how = "zonder wachtwoord; geef hem er een bij Databases en gebruikers"
+		}
+		made := "nieuw"
+		if !a.New {
+			made = "bestond al en kreeg het wachtwoord van de oude server"
+			if a.Old[0].Plugin == dbsql.PGLoginNone {
+				made = "bestond al"
+			}
+		}
+		member := ""
+		if len(a.Old[0].MemberOf) > 0 {
+			member = ", lid van " + joinHosts(a.Old[0].MemberOf)
+		}
+		st.Logf("Rol %s op %s (%s), %s%s.", a.User, route.Import.Hostname, made, how, member)
 	}
 	us.Done = true
 	return st.SetState(ctx, us)
@@ -589,20 +714,21 @@ func nodeNames(nodes []Node) []string {
 
 // dropMoved haalt de nieuwe database en de gebruikers die ClusterForge
 // maakte weer weg van het nieuwe cluster.
-func (s *Service) dropMoved(ctx context.Context, node Node, database string, dropDB bool, accounts []MoveAccount) error {
+func (s *Service) dropMoved(ctx context.Context, node Node, engine, database string, dropDB bool, accounts []MoveAccount) error {
 	var errs []error
+	t := dbTarget{node: node, engine: engine}
 	if dropDB {
-		if _, err := s.dbRequest(ctx, dbTarget{node: node}, protocol.DBRequest{Op: protocol.DBDrop, Drop: &protocol.DBDropRequest{
+		if _, err := s.dbRequest(ctx, t, protocol.DBRequest{Op: protocol.DBDrop, Drop: &protocol.DBDropRequest{
 			Database: database, Confirm: database,
 		}}); err != nil {
 			errs = append(errs, fmt.Errorf("%s weghalen: %w", database, err))
 		}
 	}
 	for _, a := range accounts {
-		if len(a.Created) == 0 {
+		if !a.created() {
 			continue
 		}
-		if _, err := s.dbRequest(ctx, dbTarget{node: node}, protocol.DBRequest{Op: protocol.DBDrop, Drop: &protocol.DBDropRequest{
+		if _, err := s.dbRequest(ctx, t, protocol.DBRequest{Op: protocol.DBDrop, Drop: &protocol.DBDropRequest{
 			User: a.User, Hosts: a.Created, Confirm: a.User,
 		}}); err != nil {
 			errs = append(errs, fmt.Errorf("gebruiker %s weghalen: %w", a.User, err))
@@ -668,11 +794,11 @@ func (s *Service) finishMove(ctx context.Context, j *jobs.Job, m store.DbMigrati
 			gone = append(gone, "de nieuwe database "+m.Database)
 		}
 		for _, a := range res.accounts {
-			if len(a.Created) > 0 {
+			if a.created() {
 				gone = append(gone, "gebruiker "+a.User)
 			}
 		}
-		if derr := s.dropMoved(wctx, res.route.Import, m.Database, res.pulled, res.accounts); derr != nil {
+		if derr := s.dropMoved(wctx, res.route.Import, res.route.engine(), m.Database, res.pulled, res.accounts); derr != nil {
 			msg += "\nOpruimen op " + res.route.Import.Hostname + " lukte niet helemaal: " + derr.Error()
 		} else if len(gone) > 0 {
 			msg += fmt.Sprintf("\n%s weggehaald van %s.", upperFirst(joinHosts(gone)), res.route.Import.Hostname)
@@ -783,6 +909,13 @@ func (s *Service) moveSource(ctx context.Context, key string) (databases.Group, 
 	return g, &Node{NodeID: srv.NodeID, Hostname: srv.Hostname}, nil
 }
 
+// engineOfKey is de engine van de oude database, uit de sleutel van haar
+// groep onder Databases.
+func engineOfKey(key string) string {
+	engine, _, _ := strings.Cut(key, "/")
+	return cmp.Or(engine, protocol.DBMariaDB)
+}
+
 func runningServers(g databases.Group) []Node {
 	var out []Node
 	for _, sv := range g.Servers {
@@ -805,19 +938,20 @@ func (s *Service) SwitchMove(ctx context.Context, actor events.Actor, id uuid.UU
 		return row, err
 	}
 	m := row.DbMigration
+	engine := engineOfKey(m.SourceKey)
 	g, src, err := s.moveSource(ctx, m.SourceKey)
 	if err != nil {
 		return row, err
 	}
-	t, err := s.mariaTarget(ctx, m.ClusterID, m.ComponentID)
+	t, err := s.migrateTarget(ctx, m.ClusterID, m.ComponentID, engine)
 	if err != nil {
 		return row, err
 	}
-	oldConns, oldUnread, err := s.liveConnections(ctx, runningServers(g), m.Database)
+	oldConns, oldUnread, err := s.liveConnections(ctx, runningServers(g), engine, m.Database)
 	if err != nil {
 		return row, err
 	}
-	newConns, _, err := s.liveConnections(ctx, dataNodes(t.spec, nil), m.Database)
+	newConns, _, err := s.liveConnections(ctx, dataNodes(t.spec, nil), engine, m.Database)
 	if err != nil {
 		return row, err
 	}
@@ -843,14 +977,21 @@ func (s *Service) SwitchMove(ctx context.Context, actor events.Actor, id uuid.UU
 		lines = append(lines, "Toch overgeschakeld: "+strings.Join(why, "; ")+".")
 	}
 	locked := false
-	if len(old) > 0 {
-		if _, err := s.migrateReq(ctx, *src, protocol.DBMigrateRequest{Action: protocol.DBMigrateLock, Database: m.Database, Accounts: old}); err != nil {
+	switch {
+	case engine == protocol.DBPostgreSQL:
+		if _, err := s.migrateReq(ctx, *src, engine, protocol.DBMigrateRequest{Action: protocol.DBMigrateLock, Database: m.Database}); err != nil {
+			return row, fmt.Errorf("de oude database op slot zetten: %w", err)
+		}
+		locked = true
+		lines = append(lines, fmt.Sprintf("Op slot: wie nu met %s op %s verbindt, kan alleen nog lezen.", m.Database, m.SourceName))
+	case len(old) > 0:
+		if _, err := s.migrateReq(ctx, *src, engine, protocol.DBMigrateRequest{Action: protocol.DBMigrateLock, Database: m.Database, Accounts: old}); err != nil {
 			return row, fmt.Errorf("de oude database op slot zetten: %w", err)
 		}
 		locked = true
 		users := accountUsers(accounts)
 		lines = append(lines, fmt.Sprintf("Op slot: %s %s %s op %s alleen nog lezen.", joinHosts(users), mayVerb(len(users)), m.Database, m.SourceName))
-	} else {
+	default:
 		lines = append(lines, "Er was geen gebruiker om op slot te zetten.")
 	}
 	now := s.Now()
@@ -897,11 +1038,12 @@ func (s *Service) CancelMove(ctx context.Context, actor events.Actor, id uuid.UU
 	if confirm != m.Database {
 		return row, &InvalidError{"confirm", "tik ter bevestiging de naam van de database in: " + m.Database}
 	}
-	t, err := s.mariaTarget(ctx, m.ClusterID, m.ComponentID)
+	engine := engineOfKey(m.SourceKey)
+	t, err := s.migrateTarget(ctx, m.ClusterID, m.ComponentID, engine)
 	if err != nil {
 		return row, err
 	}
-	conns, unread, err := s.liveConnections(ctx, dataNodes(t.spec, nil), m.Database)
+	conns, unread, err := s.liveConnections(ctx, dataNodes(t.spec, nil), engine, m.Database)
 	if err != nil {
 		return row, err
 	}
@@ -914,7 +1056,7 @@ func (s *Service) CancelMove(ctx context.Context, actor events.Actor, id uuid.UU
 	}
 	var accounts []MoveAccount
 	_ = json.Unmarshal(m.Accounts, &accounts)
-	if err := s.dropMoved(ctx, t.node, m.Database, true, accounts); err != nil {
+	if err := s.dropMoved(ctx, t.node, engine, m.Database, true, accounts); err != nil {
 		return row, err
 	}
 	msg := m.Message + fmt.Sprintf("\nGeannuleerd: %s en de nieuwe gebruikers zijn weg van %s; de app gebruikt de oude database.", m.Database, row.ClusterName)
@@ -950,7 +1092,11 @@ func (s *Service) LockMove(ctx context.Context, actor events.Actor, id uuid.UUID
 	var accounts []MoveAccount
 	_ = json.Unmarshal(m.Accounts, &accounts)
 	old := oldAccounts(accounts)
-	if len(old) == 0 {
+	engine := engineOfKey(m.SourceKey)
+	if engine == protocol.DBPostgreSQL {
+		// Het slot staat op de database zelf.
+		old = nil
+	} else if len(old) == 0 {
 		return row, &ConflictError{"deze verhuizing nam geen gebruikers mee, dus er is niets op slot te zetten"}
 	}
 	_, src, err := s.moveSource(ctx, m.SourceKey)
@@ -961,7 +1107,7 @@ func (s *Service) LockMove(ctx context.Context, actor events.Actor, id uuid.UUID
 	if lock {
 		action = protocol.DBMigrateLock
 	}
-	if _, err := s.migrateReq(ctx, *src, protocol.DBMigrateRequest{Action: action, Database: m.Database, Accounts: old}); err != nil {
+	if _, err := s.migrateReq(ctx, *src, engine, protocol.DBMigrateRequest{Action: action, Database: m.Database, Accounts: old}); err != nil {
 		return row, err
 	}
 	upd, err := s.q.SetDBMigrationLocked(ctx, store.SetDBMigrationLockedParams{ID: m.ID, Locked: lock})

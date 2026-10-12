@@ -341,7 +341,13 @@ func (h *Host) Stream(_ context.Context, in io.Reader, out io.Writer, name strin
 	case "mariadb", "mysql":
 		err = h.mariaRestore(args, data)
 	case "runuser":
-		dump, err = h.pgDump(args)
+		if len(args) > 3 && args[3] == "psql" {
+			err = h.pgImport(args, data)
+		} else {
+			dump, err = h.pgDump(args)
+		}
+	case "pg_dump":
+		dump, err = h.pgRemoteDump(args)
 	case "psql":
 		err = h.pgRestore(args, data)
 	default:

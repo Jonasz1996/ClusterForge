@@ -4832,13 +4832,20 @@ components:
           description: Een proef of verhuizing van deze database die nu kopieert
     DatabaseMigrationAccount:
       type: object
-      required: [user, host, plugin, privileges, global]
+      required: [user, host, plugin, privileges, global, member_of, moves]
       properties:
         user: { type: string }
-        host: { type: string }
-        plugin: { type: string, description: "Hoe hij inlogt; alleen mysql_native_password gaat mee" }
-        privileges: { type: array, items: { type: string } }
-        global: { type: boolean, description: Hij heeft ook rechten op alle databases }
+        host: { type: string, description: Leeg bij PostgreSQL }
+        plugin:
+          type: string
+          description: "Hoe hij inlogt. MariaDB: alleen mysql_native_password gaat mee. PostgreSQL: nologin, scram-sha-256, md5, none (zonder wachtwoord) of other"
+        privileges:
+          type: array
+          items: { type: string }
+          description: "Bij PostgreSQL OWNER, CONNECT, CREATE, TEMPORARY, en OBJECTS als hij iets in de database bezit of er rechten op heeft"
+        global: { type: boolean, description: Hij heeft ook rechten op alle databases, of mag bij PostgreSQL databases of rollen maken }
+        member_of: { type: array, items: { type: string }, description: Bij PostgreSQL de rollen waarvan hij lid is }
+        moves: { type: boolean, description: De echte verhuizing neemt hem mee }
     DatabaseMigrationConnection:
       type: object
       required: [server, user, address, hostname, count]
@@ -4868,10 +4875,12 @@ components:
         via: { type: string, description: "node (rechtstreeks) of vip; leeg zolang dat niet bekeken is" }
     DatabaseMigrationInfo:
       type: object
-      required: [version, charset, collation, size_bytes, tables, rows, views, routines, triggers, events]
+      required: [version, charset, collation, size_bytes, tables, rows, views, routines, triggers, events, owner, extensions]
       properties:
         version: { type: string }
-        charset: { type: string }
+        owner: { type: string, description: Bij PostgreSQL de eigenaar van de database }
+        extensions: { type: array, items: { type: string }, description: Bij PostgreSQL de extensies in de database }
+        charset: { type: string, description: Bij PostgreSQL de encoding }
         collation: { type: string }
         size_bytes: { type: integer, format: int64, description: De data en indexen van alle tabellen }
         tables: { type: integer }
@@ -4916,13 +4925,14 @@ components:
         free_bytes: { type: integer, format: int64 }
     DatabaseMigrationReach:
       type: object
-      required: [reached, version, tls, code, error]
+      required: [reached, version, tls, code, error, seen]
       properties:
         reached: { type: boolean }
         version: { type: string }
         tls: { type: boolean }
-        code: { type: integer, description: "De fout die MariaDB meteen stuurde, zoals 1130; 0 zonder" }
+        code: { type: integer, description: "De fout die MariaDB meteen stuurde, zoals 1130, of bij PostgreSQL 28000 als pg_hba.conf weigert; 0 zonder" }
         error: { type: string }
+        seen: { type: string, description: "Bij PostgreSQL: het adres waarvan de oude server de nieuwe node ziet, als pg_hba.conf hem weigert" }
     DatabaseMigrationRun:
       type: object
       required: [id, kind, status, cluster_id, cluster_name, component_id, source_name, source_node, source_address, database, target_database,
@@ -4968,12 +4978,13 @@ components:
         job_id: { type: string, format: uuid, nullable: true }
     DatabaseMigrationMovedUser:
       type: object
-      required: [user, old_hosts, hosts, privileges]
+      required: [user, old_hosts, hosts, privileges, new]
       properties:
         user: { type: string }
-        old_hosts: { type: array, items: { type: string }, description: Zijn hosts op de oude server }
-        hosts: { type: array, items: { type: string }, description: Zijn hosts op het nieuwe cluster }
+        old_hosts: { type: array, items: { type: string }, description: Zijn hosts op de oude server; leeg bij PostgreSQL }
+        hosts: { type: array, items: { type: string }, description: Zijn hosts op het nieuwe cluster; leeg bij PostgreSQL }
         privileges: { type: array, items: { type: string } }
+        new: { type: boolean, description: "ClusterForge maakte hem nieuw op het nieuwe cluster: annuleren haalt hem weer weg" }
     DatabaseMigrationCount:
       type: object
       required: [name, source, target]

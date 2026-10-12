@@ -14,7 +14,6 @@ import (
 	"strings"
 
 	"github.com/Jonasz1996/clusterforge/internal/agent/dbsql"
-	"github.com/Jonasz1996/clusterforge/pkg/protocol"
 )
 
 // pgDumpInfo leest of db bestaat, met haar tabellen en haar grootte.
@@ -44,15 +43,18 @@ func (a *Agent) pgDumpInfo(ctx context.Context, db string) (exists bool, tables 
 	return true, tables, size, nil
 }
 
-// pgLogin is een tijdelijke beheerder op de primary. Het wachtwoord staat
-// in een passfile in een eigen map die alleen root kan lezen, nooit in een
-// argument of de omgeving van psql.
+// pgLogin is een tijdelijke gebruiker op een andere PostgreSQL: de
+// beheerder op de primary bij terugzetten, of de gebruiker die een
+// verhuizing leest. Het wachtwoord staat in een passfile in een eigen map
+// die alleen root kan lezen, nooit in een argument of de omgeving van psql.
 type pgLogin struct {
-	host, user, dir string
+	host      string
+	port      int
+	user, dir string
 }
 
-func newPGLogin(host, user, password string) (*pgLogin, error) {
-	dir, err := os.MkdirTemp("", "cf-herstel-")
+func newPGLogin(host string, port int, user, password string) (*pgLogin, error) {
+	dir, err := os.MkdirTemp("", "cf-pglogin-")
 	if err != nil {
 		return nil, fmt.Errorf("map voor het wachtwoord: %w", err)
 	}
@@ -60,7 +62,7 @@ func newPGLogin(host, user, password string) (*pgLogin, error) {
 		_ = os.RemoveAll(dir)
 		return nil, fmt.Errorf("wachtwoordbestand: %w", err)
 	}
-	return &pgLogin{host: host, user: user, dir: dir}, nil
+	return &pgLogin{host: host, port: port, user: user, dir: dir}, nil
 }
 
 func (l *pgLogin) close() {
@@ -69,10 +71,10 @@ func (l *pgLogin) close() {
 	}
 }
 
-// conninfo verbindt met db op de primary.
+// conninfo verbindt met db.
 func (l *pgLogin) conninfo(db string) string {
 	return fmt.Sprintf("host=%s port=%d dbname=%s user=%s passfile=%s connect_timeout=10 application_name=clusterforge",
-		l.host, protocol.DBPGPort, db, l.user, conninfoQuote(filepath.Join(l.dir, "pgpass")))
+		l.host, l.port, db, l.user, conninfoQuote(filepath.Join(l.dir, "pgpass")))
 }
 
 // args zijn de opties van psql voor opdrachten op stdin, in db, die stoppen

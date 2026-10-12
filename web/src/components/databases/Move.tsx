@@ -9,10 +9,12 @@ import { Alert, Badge, Button, Card, cx, Input } from "@/components/ui";
 import { ApiError } from "@/lib/api/client";
 import type { ComponentFinding } from "@/lib/components";
 import {
+  engineLabel,
   useCancelMove,
   useLockMove,
   useStartMove,
   useSwitchMove,
+  type DatabaseGroup,
   type MigrationPlan,
   type MigrationRun,
   type MigrationTarget,
@@ -78,6 +80,15 @@ export function FindingItem({ f }: { f: ComponentFinding }) {
   );
 }
 
+// isPG zegt of het plan een database van PostgreSQL verhuist.
+export function isPG(p: MigrationPlan) {
+  return p.source.engine === "postgresql";
+}
+
+export function engineName(p: MigrationPlan) {
+  return engineLabel[p.source.engine as DatabaseGroup["engine"]] ?? p.source.engine;
+}
+
 // De commando's van Nextcloud; voor een andere app zegt ClusterForge wat er
 // moet, zonder commando.
 function isNextcloud(p: MigrationPlan) {
@@ -140,7 +151,9 @@ function Start({ p, loading, refresh }: { p: MigrationPlan; loading: boolean; re
   const trial = lastTrial(p);
   const conns = p.connections;
   const total = conns.reduce((n, c) => n + c.count, 0);
+  const pg = isPG(p);
   const users = movingUsers(p);
+  const roles = movingRoles(p);
   const blocked = p.move_blocked;
   const ready =
     isAdmin &&
@@ -155,9 +168,10 @@ function Start({ p, loading, refresh }: { p: MigrationPlan; loading: boolean; re
     <>
       <div className="space-y-2 text-sm text-slate-700 dark:text-slate-300">
         <p>
-          De verhuizing zet {p.database} onder dezelfde naam in de MariaDB van {t ? t.cluster_name : "het nieuwe cluster"}, met
-          dezelfde gebruikers en wachtwoorden. Daarna telt ClusterForge de rijen van elke tabel aan beide kanten: alles moet
-          gelijk zijn. Wijkt er iets af, dan stopt de taak, gaat de kopie weer weg en blijft de app op de oude database.
+          De verhuizing zet {p.database} onder dezelfde naam in de {engineName(p)} van {t ? t.cluster_name : "het nieuwe cluster"}
+          , met dezelfde {pg ? "rollen, eigenaar" : "gebruikers"} en wachtwoorden. Daarna telt ClusterForge de rijen van elke
+          tabel aan beide kanten: alles moet gelijk zijn. Wijkt er iets af, dan stopt de taak, gaat de kopie weer weg en blijft de
+          app op de oude database.
         </p>
         <p>
           De app staat zolang in onderhoud
@@ -207,7 +221,13 @@ function Start({ p, loading, refresh }: { p: MigrationPlan; loading: boolean; re
       </Step>
 
       <Step n={3} title="Wie er meegaat">
-        {users.length === 0 ? (
+        {pg ? (
+          roles.length === 0 ? (
+            <p>Geen rol met iets in {p.database}; maak de gebruiker van de app op het nieuwe cluster zelf.</p>
+          ) : (
+            <RolesTable rows={roles} />
+          )
+        ) : users.length === 0 ? (
           <p>Geen gebruiker met een wachtwoord en rechten op {p.database}; maak die op het nieuwe cluster zelf.</p>
         ) : (
           <AccountsTable
@@ -216,8 +236,9 @@ function Start({ p, loading, refresh }: { p: MigrationPlan; loading: boolean; re
           />
         )}
         <p className="text-xs text-slate-500">
-          ClusterForge neemt de hash van elk wachtwoord mee van de oude server naar de nieuwe, zonder hem te bewaren. Het
-          wachtwoord zelf kent het niet.
+          {pg
+            ? "ClusterForge neemt de SCRAM-verifier van elk wachtwoord mee van de oude server naar de nieuwe, zonder hem te bewaren. Het wachtwoord zelf kent het niet. Een rol die er al is, krijgt het wachtwoord van de oude server."
+            : "ClusterForge neemt de hash van elk wachtwoord mee van de oude server naar de nieuwe, zonder hem te bewaren. Het wachtwoord zelf kent het niet."}
         </p>
       </Step>
 
@@ -278,7 +299,7 @@ function Start({ p, loading, refresh }: { p: MigrationPlan; loading: boolean; re
 function movingUsers(p: MigrationPlan) {
   const out: { user: string; hosts: string[]; privileges: string[] }[] = [];
   for (const a of p.accounts) {
-    if (a.plugin !== "mysql_native_password" || a.user.startsWith("cf_verhuizing_")) continue;
+    if (!a.moves) continue;
     let u = out.find((x) => x.user === a.user);
     if (!u) {
       u = { user: a.user, hosts: [], privileges: [] };
@@ -288,6 +309,61 @@ function movingUsers(p: MigrationPlan) {
     for (const r of a.privileges) if (!u.privileges.includes(r)) u.privileges.push(r);
   }
   return out;
+}
+
+// movingRoles zijn de rollen van PostgreSQL die meegaan.
+function movingRoles(p: MigrationPlan): RoleRow[] {
+  return p.accounts
+    .filter((a) => a.moves)
+    .map((a) => ({ user: a.user, plugin: a.plugin, memberOf: a.member_of, privileges: a.privileges, isNew: null }));
+}
+
+type RoleRow = { user: string; plugin: string; memberOf: string[]; privileges: string[]; isNew: boolean | null };
+
+const loginText: Record<string, string> = {
+  "scram-sha-256": "met wachtwoord",
+  nologin: "zonder inloggen",
+  none: "zonder wachtwoord",
+};
+
+const pgRightText: Record<string, string> = {
+  OWNER: "eigenaar",
+  OBJECTS: "objecten",
+  CONNECT: "verbinden",
+  CREATE: "schema's maken",
+  TEMPORARY: "tijdelijke tabellen",
+};
+
+function RolesTable({ rows }: { rows: RoleRow[] }) {
+  const showNew = rows.some((r) => r.isNew !== null);
+  return (
+    <div className="overflow-x-auto">
+      <table className={tableClass}>
+        <thead className="border-b border-slate-200 dark:border-slate-800">
+          <tr>
+            <th className={thClass}>Rol</th>
+            <th className={thClass}>Inloggen</th>
+            <th className={thClass}>Lid van</th>
+            <th className={thClass}>In de database</th>
+            {showNew && <th className={thClass}>Op het nieuwe cluster</th>}
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+          {rows.map((r) => (
+            <tr key={r.user}>
+              <td className={`${tdClass} font-mono`}>{r.user}</td>
+              <td className={tdClass}>{loginText[r.plugin] ?? r.plugin}</td>
+              <td className={`${tdClass} font-mono text-xs`}>{r.memberOf.join(", ") || "–"}</td>
+              <td className={tdClass}>
+                {r.privileges.length === 0 ? "via een rol" : r.privileges.map((x) => pgRightText[x] ?? x).join(", ")}
+              </td>
+              {showNew && <td className={tdClass}>{r.isNew ? "nieuw" : "bestond al"}</td>}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
 }
 
 const allRights = ["SELECT", "INSERT", "UPDATE", "DELETE", "CREATE", "DROP", "INDEX", "ALTER"];
@@ -355,6 +431,7 @@ function Copied({ p, r }: { p: MigrationPlan; r: MigrationRun }) {
   const addr = r.target_address;
   const swErr = sw.error instanceof ApiError && sw.error.status === 409 ? sw.error : null;
   const users = r.accounts.map((a) => a.user);
+  const pg = isPG(p);
   return (
     <>
       <Alert kind="success">
@@ -364,8 +441,8 @@ function Copied({ p, r }: { p: MigrationPlan; r: MigrationRun }) {
       </Alert>
       <Step n={1} title="Wijs de app naar de nieuwe database">
         <p>
-          Het adres wordt <span className="font-mono">{addr ? `${addr}:3306` : r.cluster_name}</span>. De gebruiker en het
-          wachtwoord blijven hetzelfde.
+          Het adres wordt <span className="font-mono">{addr ? `${addr}:${pg ? 5432 : 3306}` : r.cluster_name}</span>. De gebruiker
+          en het wachtwoord blijven hetzelfde.
         </p>
         {isNextcloud(p) && addr && (
           <>
@@ -380,16 +457,32 @@ function Copied({ p, r }: { p: MigrationPlan; r: MigrationRun }) {
       <Step n={3} title="Schakel over">
         <p>
           ClusterForge kijkt of niemand nog met {r.database} op {r.source_name} verbonden is en de app wel met de nieuwe. Daarna
-          {users.length > 0
-            ? ` ${users.length === 1 ? "mag" : "mogen"} ${users.join(" en ")} de oude database alleen nog lezen, zodat een vergeten cronjob daar niet stilletjes verder schrijft.`
-            : " is de verhuizing klaar."}
+          {pg
+            ? " kan wie met de oude database verbindt, daar alleen nog lezen, zodat een vergeten cronjob niet stilletjes verder schrijft."
+            : users.length > 0
+              ? ` ${users.length === 1 ? "mag" : "mogen"} ${users.join(" en ")} de oude database alleen nog lezen, zodat een vergeten cronjob daar niet stilletjes verder schrijft.`
+              : " is de verhuizing klaar."}
         </p>
-        {r.accounts.length > 0 && (
-          <AccountsTable
-            rows={r.accounts.map((a) => ({ user: a.user, oldHosts: a.old_hosts, hosts: a.hosts, privileges: a.privileges }))}
-            target={r.cluster_name}
-          />
-        )}
+        {r.accounts.length > 0 &&
+          (pg ? (
+            <RolesTable
+              rows={r.accounts.map((a) => {
+                const old = p.accounts.find((x) => x.user === a.user);
+                return {
+                  user: a.user,
+                  plugin: old?.plugin ?? "",
+                  memberOf: old?.member_of ?? [],
+                  privileges: a.privileges,
+                  isNew: a.new,
+                };
+              })}
+            />
+          ) : (
+            <AccountsTable
+              rows={r.accounts.map((a) => ({ user: a.user, oldHosts: a.old_hosts, hosts: a.hosts, privileges: a.privileges }))}
+              target={r.cluster_name}
+            />
+          ))}
         {sw.isError && (
           <Alert>
             {sw.error.message}
@@ -413,8 +506,9 @@ function Copied({ p, r }: { p: MigrationPlan; r: MigrationRun }) {
         <summary className="cursor-pointer font-medium">Annuleren</summary>
         <div className="mt-2 space-y-2 text-slate-700 dark:text-slate-300">
           <p>
-            Haalt {r.database} en de nieuwe gebruikers weg van {r.cluster_name}; de app blijft op de oude database. Dat kan alleen
-            zolang niemand de nieuwe database gebruikt. Tik de naam van de database om te bevestigen.
+            Haalt {r.database} en de {pg ? "rollen die ClusterForge nieuw maakte" : "nieuwe gebruikers"} weg van {r.cluster_name};
+            de app blijft op de oude database. Dat kan alleen zolang niemand de nieuwe database gebruikt. Tik de naam van de
+            database om te bevestigen.
           </p>
           <div className="flex flex-wrap items-center gap-2">
             <Input
@@ -446,27 +540,34 @@ function Moved({ p, r }: { p: MigrationPlan; r: MigrationRun }) {
   const isAdmin = useIsAdmin();
   const lock = useLockMove();
   const users = r.accounts.map((a) => a.user);
+  const pg = isPG(p);
+  // Bij PostgreSQL staat het slot op de database zelf, ook zonder rollen.
+  const lockable = pg || users.length > 0;
   return (
     <section className="space-y-2 rounded border border-slate-200 p-3 text-sm text-slate-700 dark:border-slate-800 dark:text-slate-300">
       <h3 className="flex flex-wrap items-center gap-2 font-semibold text-slate-900 dark:text-slate-100">
         Verhuisd naar {r.cluster_name}
         {r.switched_at && <span className="font-normal text-slate-500">op {when.format(new Date(r.switched_at))}</span>}
-        {users.length > 0 &&
+        {lockable &&
           (r.locked ? <Badge tone="green">oude database op slot</Badge> : <Badge tone="amber">oude database open</Badge>)}
       </h3>
       <p>
         De app gebruikt {r.database} op <span className="font-mono">{r.target_address || r.cluster_name}</span>.{" "}
-        {users.length === 0
-          ? "Er ging geen gebruiker mee, dus er is geen slot."
-          : r.locked
-            ? `Op ${r.source_name} ${users.length === 1 ? "mag" : "mogen"} ${users.join(" en ")} ${r.database} alleen nog lezen.`
-            : `Op ${r.source_name} ${users.length === 1 ? "kan" : "kunnen"} ${users.join(" en ")} weer in ${r.database} schrijven.`}
+        {pg
+          ? r.locked
+            ? `Op ${r.source_name} kan wie met ${r.database} verbindt, alleen nog lezen.`
+            : `Op ${r.source_name} kan iedereen weer in ${r.database} schrijven.`
+          : users.length === 0
+            ? "Er ging geen gebruiker mee, dus er is geen slot."
+            : r.locked
+              ? `Op ${r.source_name} ${users.length === 1 ? "mag" : "mogen"} ${users.join(" en ")} ${r.database} alleen nog lezen.`
+              : `Op ${r.source_name} ${users.length === 1 ? "kan" : "kunnen"} ${users.join(" en ")} weer in ${r.database} schrijven.`}
       </p>
       <p className="text-slate-500">
         Terug kan zolang de oude database bestaat: haal het slot eraf en wijs de app weer naar {p.source.address || p.source.name}
         . Wat de app sinds het overschakelen schreef, staat dan alleen in de nieuwe database.
       </p>
-      {users.length > 0 && (
+      {lockable && (
         <Button
           variant="secondary"
           disabled={!isAdmin || lock.isPending}

@@ -154,14 +154,16 @@ func (s *Service) target(ctx context.Context, clusterID, id uuid.UUID) (dbTarget
 	return s.targetOf(ctx, r)
 }
 
-// mariaTarget is target voor wat alleen bij MariaDB kan, zoals verhuizen.
-func (s *Service) mariaTarget(ctx context.Context, clusterID, id uuid.UUID) (dbTarget, error) {
+// migrateTarget is target voor een verhuizing van een database van engine:
+// de nieuwe database moet dezelfde engine hebben.
+func (s *Service) migrateTarget(ctx context.Context, clusterID, id uuid.UUID, engine string) (dbTarget, error) {
 	r, err := s.dbComponent(ctx, clusterID, id)
 	if err != nil {
 		return dbTarget{}, err
 	}
-	if err := mariaOnly(r, "Verhuizen"); err != nil {
-		return dbTarget{}, err
+	if r.Engine != engine {
+		return dbTarget{}, &ConflictError{fmt.Sprintf("dit is een database met %s, en de oude draait %s; verhuizen kan alleen naar dezelfde soort",
+			databases.EngineName(r.Engine), databases.EngineName(engine))}
 	}
 	return s.targetOf(ctx, r)
 }
@@ -283,8 +285,11 @@ func pgAgent(p pgNode) error {
 }
 
 // port is waar een app de database van t bereikt.
-func (t dbTarget) port() int {
-	if t.engine == protocol.DBPostgreSQL {
+func (t dbTarget) port() int { return enginePort(t.engine) }
+
+// enginePort is de poort van een database met engine.
+func enginePort(engine string) int {
+	if engine == protocol.DBPostgreSQL {
 		return protocol.DBPGPort
 	}
 	return MariaDBPort

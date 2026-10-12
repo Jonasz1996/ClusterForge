@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"reflect"
 	"slices"
 	"strconv"
 	"strings"
@@ -46,7 +47,7 @@ func TestParseGreeting(t *testing.T) {
 			protocol.DBMigrateReach{Reached: true, Code: 1040, Error: "Too many connections"}},
 		{"geen MariaDB", []byte("SSH-2.0-OpenSSH_9.2p1"), protocol.DBMigrateReach{Error: "x:3306 is geen MariaDB of MySQL"}},
 	} {
-		if got := parseGreeting("x:3306", tc.body); got != tc.want {
+		if got := parseGreeting("x:3306", tc.body); !reflect.DeepEqual(got, tc.want) {
 			t.Errorf("%s: %+v, wil %+v", tc.name, got, tc.want)
 		}
 	}

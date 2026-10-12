@@ -70,6 +70,15 @@ JOIN clusters c ON c.id = cc.cluster_id
 WHERE cc.applied_revision IS NOT NULL AND cc.engine = 'mariadb'
 ORDER BY c.name;
 
+-- name: ListDBComponents :many
+-- De toegepaste onderdelen met een database van deze soort, voor een
+-- verhuizing.
+SELECT cc.id, cc.cluster_id, c.name AS cluster_name
+FROM cluster_components cc
+JOIN clusters c ON c.id = cc.cluster_id
+WHERE cc.applied_revision IS NOT NULL AND cc.engine = @engine
+ORDER BY c.name;
+
 -- name: SetClusterComponentHealth :exec
 UPDATE cluster_components
 SET down_since = @down_since, down_reason = @down_reason, nodes_out = @nodes_out
