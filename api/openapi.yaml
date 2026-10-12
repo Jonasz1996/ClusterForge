@@ -3902,11 +3902,37 @@ components:
         lag_bytes: { type: integer, format: int64 }
     DatabaseInfo:
       type: object
-      required: [name, size_bytes, tables]
+      required: [name, size_bytes, tables, users, shared, last_used_at]
       properties:
         name: { type: string }
         size_bytes: { type: integer, format: int64 }
         tables: { type: integer, description: "-1 als het aantal niet te lezen was" }
+        users:
+          type: array
+          description: Wie de database de laatste dertig dagen gebruikte
+          items: { $ref: "#/components/schemas/DatabaseUser" }
+        shared: { type: boolean, description: "Meer dan één cluster, losse node of onbekend adres gebruikt de database" }
+        last_used_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: De laatste keer dat er een client verbonden was; null als dat in dertig dagen niet zo was
+    DatabaseUser:
+      type: object
+      required: [key, kind, cluster_id, node_id, name, nodes, db_users, connections, last_seen, dependency]
+      properties:
+        key: { type: string }
+        kind: { type: string, description: "cluster, node (een node zonder cluster), unknown (een onbekend adres) of local (de databasenode zelf)" }
+        cluster_id: { type: string, format: uuid, nullable: true }
+        node_id: { type: string, format: uuid, nullable: true }
+        name: { type: string, description: "De naam van het cluster, de hostname of het adres" }
+        nodes: { type: array, items: { type: string }, description: "De hostnames, of de adressen die ClusterForge niet kent" }
+        db_users: { type: array, items: { type: string }, description: "De gebruikers in de database" }
+        connections: { type: integer, description: "Verbindingen bij de laatste keer lezen" }
+        last_seen: { type: string, format: date-time }
+        dependency:
+          type: string
+          description: "De afhankelijkheid van dit cluster naar het databasecluster: confirmed, suggested, ignored, of leeg als er geen is of als het hetzelfde cluster is"
     KubeClusterSummary:
       type: object
       required: [id, name, slug, environment, status, status_reason, vip, synced, api_ok, error, version, nodes_total, nodes_ready,

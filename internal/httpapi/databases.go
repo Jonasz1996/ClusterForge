@@ -36,7 +36,7 @@ func (s *Server) ListDatabases(w http.ResponseWriter, r *http.Request) {
 			out.Servers = append(out.Servers, toAPIDatabaseServer(srv))
 		}
 		for _, d := range g.Databases {
-			out.Databases = append(out.Databases, gen.DatabaseInfo{Name: d.Name, SizeBytes: d.SizeBytes, Tables: d.Tables})
+			out.Databases = append(out.Databases, toAPIDatabaseInfo(d))
 		}
 		items = append(items, out)
 	}
@@ -68,6 +68,20 @@ func toAPIDatabaseServer(s databases.Server) gen.DatabaseServer {
 	}
 	for _, r := range s.Replicas {
 		out.Replicas = append(out.Replicas, gen.DatabaseReplica{Address: r.Address, State: r.State, Sync: r.Sync, LagBytes: r.LagBytes})
+	}
+	return out
+}
+
+func toAPIDatabaseInfo(d databases.Database) gen.DatabaseInfo {
+	out := gen.DatabaseInfo{
+		Name: d.Name, SizeBytes: d.SizeBytes, Tables: d.Tables, Shared: d.Shared, LastUsedAt: nullableOf(d.LastUsed),
+		Users: make([]gen.DatabaseUser, 0, len(d.Users)),
+	}
+	for _, u := range d.Users {
+		out.Users = append(out.Users, gen.DatabaseUser{
+			Key: u.Key(), Kind: u.Kind, ClusterId: nullableOf(u.ClusterID), NodeId: nullableOf(u.NodeID), Name: u.Name,
+			Nodes: u.Nodes, DbUsers: u.DBUsers, Connections: u.Connections, LastSeen: u.LastSeen, Dependency: u.Dependency,
+		})
 	}
 	return out
 }

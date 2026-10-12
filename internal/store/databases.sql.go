@@ -41,6 +41,33 @@ func (q *Queries) DeleteDBServersExcept(ctx context.Context, arg DeleteDBServers
 	return err
 }
 
+const forgetDBClients = `-- name: ForgetDBClients :exec
+DELETE FROM db_clients WHERE last_seen < $1
+`
+
+// Wie al dertig dagen weg is, gaat eruit.
+func (q *Queries) ForgetDBClients(ctx context.Context, before time.Time) error {
+	_, err := q.db.Exec(ctx, forgetDBClients, before)
+	return err
+}
+
+const idleDBClients = `-- name: IdleDBClients :exec
+UPDATE db_clients SET connections = 0
+WHERE node_id = $1 AND engine = $2 AND last_seen < $3 AND connections <> 0
+`
+
+type IdleDBClientsParams struct {
+	NodeID uuid.UUID
+	Engine string
+	Seen   time.Time
+}
+
+// Na een antwoord: wie er niet meer bij was, heeft nu geen verbindingen.
+func (q *Queries) IdleDBClients(ctx context.Context, arg IdleDBClientsParams) error {
+	_, err := q.db.Exec(ctx, idleDBClients, arg.NodeID, arg.Engine, arg.Seen)
+	return err
+}
+
 const insertDBDatabase = `-- name: InsertDBDatabase :exec
 INSERT INTO db_databases (node_id, engine, name, size_bytes, tables) VALUES ($1, $2, $3, $4, $5)
 `
@@ -120,6 +147,42 @@ func (q *Queries) ListDBCandidateNodes(ctx context.Context) ([]ListDBCandidateNo
 	return items, nil
 }
 
+const listDBClients = `-- name: ListDBClients :many
+SELECT node_id, engine, db_name, db_user, address, connections, first_seen, last_seen
+FROM db_clients
+WHERE last_seen >= $1
+ORDER BY db_name, db_user, address
+`
+
+func (q *Queries) ListDBClients(ctx context.Context, since time.Time) ([]DbClient, error) {
+	rows, err := q.db.Query(ctx, listDBClients, since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []DbClient{}
+	for rows.Next() {
+		var i DbClient
+		if err := rows.Scan(
+			&i.NodeID,
+			&i.Engine,
+			&i.DbName,
+			&i.DbUser,
+			&i.Address,
+			&i.Connections,
+			&i.FirstSeen,
+			&i.LastSeen,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listDBDatabases = `-- name: ListDBDatabases :many
 SELECT node_id, engine, name, size_bytes, tables FROM db_databases ORDER BY name
 `
@@ -139,6 +202,92 @@ func (q *Queries) ListDBDatabases(ctx context.Context) ([]DbDatabase, error) {
 			&i.Name,
 			&i.SizeBytes,
 			&i.Tables,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDBDependencies = `-- name: ListDBDependencies :many
+SELECT d.state, fs.cluster_id AS from_cluster, fn.cluster_id AS from_node_cluster,
+       ts.cluster_id AS to_cluster, tn.cluster_id AS to_node_cluster
+FROM service_dependencies d
+JOIN services fs ON fs.id = d.from_service_id
+LEFT JOIN nodes fn ON fn.id = fs.node_id
+JOIN services ts ON ts.id = d.to_service_id
+LEFT JOIN nodes tn ON tn.id = ts.node_id
+WHERE ts.kind = 'database'
+`
+
+type ListDBDependenciesRow struct {
+	State           string
+	FromCluster     *uuid.UUID
+	FromNodeCluster *uuid.UUID
+	ToCluster       *uuid.UUID
+	ToNodeCluster   *uuid.UUID
+}
+
+// De afhankelijkheden naar een databasedienst, met het cluster aan beide
+// kanten: direct van de dienst, of van zijn node.
+func (q *Queries) ListDBDependencies(ctx context.Context) ([]ListDBDependenciesRow, error) {
+	rows, err := q.db.Query(ctx, listDBDependencies)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDBDependenciesRow{}
+	for rows.Next() {
+		var i ListDBDependenciesRow
+		if err := rows.Scan(
+			&i.State,
+			&i.FromCluster,
+			&i.FromNodeCluster,
+			&i.ToCluster,
+			&i.ToNodeCluster,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDBNodes = `-- name: ListDBNodes :many
+SELECT n.id, n.hostname, n.cluster_id, c.name AS cluster_name
+FROM nodes n
+LEFT JOIN clusters c ON c.id = n.cluster_id
+`
+
+type ListDBNodesRow struct {
+	ID          uuid.UUID
+	Hostname    string
+	ClusterID   *uuid.UUID
+	ClusterName *string
+}
+
+// Alle nodes met hun cluster, om een adres aan een cluster te koppelen.
+func (q *Queries) ListDBNodes(ctx context.Context) ([]ListDBNodesRow, error) {
+	rows, err := q.db.Query(ctx, listDBNodes)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDBNodesRow{}
+	for rows.Next() {
+		var i ListDBNodesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Hostname,
+			&i.ClusterID,
+			&i.ClusterName,
 		); err != nil {
 			return nil, err
 		}
@@ -244,6 +393,36 @@ func (q *Queries) MarkDBServer(ctx context.Context, arg MarkDBServerParams) erro
 		arg.Error,
 		arg.ErrorKind,
 		arg.SyncedAt,
+	)
+	return err
+}
+
+const upsertDBClient = `-- name: UpsertDBClient :exec
+INSERT INTO db_clients (node_id, engine, db_name, db_user, address, connections, first_seen, last_seen)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $7)
+ON CONFLICT (node_id, engine, db_name, db_user, address) DO UPDATE
+SET connections = excluded.connections, last_seen = excluded.last_seen
+`
+
+type UpsertDBClientParams struct {
+	NodeID      uuid.UUID
+	Engine      string
+	DbName      string
+	DbUser      string
+	Address     string
+	Connections int32
+	FirstSeen   time.Time
+}
+
+func (q *Queries) UpsertDBClient(ctx context.Context, arg UpsertDBClientParams) error {
+	_, err := q.db.Exec(ctx, upsertDBClient,
+		arg.NodeID,
+		arg.Engine,
+		arg.DbName,
+		arg.DbUser,
+		arg.Address,
+		arg.Connections,
+		arg.FirstSeen,
 	)
 	return err
 }

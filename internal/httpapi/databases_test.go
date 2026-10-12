@@ -38,9 +38,20 @@ type dbGroupView struct {
 		} `json:"galera"`
 	} `json:"servers"`
 	Databases []struct {
-		Name      string `json:"name"`
-		SizeBytes int64  `json:"size_bytes"`
-		Tables    int    `json:"tables"`
+		Name       string  `json:"name"`
+		SizeBytes  int64   `json:"size_bytes"`
+		Tables     int     `json:"tables"`
+		Shared     bool    `json:"shared"`
+		LastUsedAt *string `json:"last_used_at"`
+		Users      []struct {
+			Kind        string   `json:"kind"`
+			ClusterID   *string  `json:"cluster_id"`
+			Name        string   `json:"name"`
+			Nodes       []string `json:"nodes"`
+			DBUsers     []string `json:"db_users"`
+			Connections int      `json:"connections"`
+			Dependency  string   `json:"dependency"`
+		} `json:"users"`
 	} `json:"databases"`
 }
 
@@ -156,5 +167,86 @@ func TestDatabases(t *testing.T) {
 	}
 	if g.Health != "warning" || g.Summary != "2 van 3 nodes Synced; nc3: agent te oud." {
 		t.Fatalf("nextcloud met een oude agent: %+v", g)
+	}
+}
+
+// TestDatabaseUsers is de acceptatie van mijlpaal 2 van fase 5, met de
+// opstelling van nu: een gedeeld Galera-cluster db en Nextcloud op drie
+// eigen nodes. Op de pagina Databases staat bij de database nextcloud dat
+// het cluster Nextcloud haar gebruikt, en dat die afhankelijkheid nog niet
+// in de graaf staat; tot Gitea er vanaf een onbekend adres ook mee
+// verbindt, dan is ze gedeeld.
+func TestDatabaseUsers(t *testing.T) {
+	e, c := adminClient(t)
+	ctx := context.Background()
+
+	var db, nc cluster
+	c.do("POST", "/api/v1/clusters", map[string]any{"slug": "db", "name": "db", "type": "generic", "environment": "prod"}, &db)
+	c.do("POST", "/api/v1/clusters", map[string]any{"slug": "nextcloud", "name": "Nextcloud", "type": "generic", "environment": "prod"}, &nc)
+	for i, name := range []string{"nc1", "nc2", "nc3"} {
+		body := map[string]any{"hostname": name, "cluster_id": nc.ID, "primary_ip": "10.0.20.18" + string(rune('6'+i))}
+		if s := c.do("POST", "/api/v1/nodes", body, nil); s != http.StatusCreated {
+			t.Fatalf("node %s: %d", name, s)
+		}
+	}
+	var n node
+	if s := c.do("POST", "/api/v1/nodes", map[string]any{"hostname": "db1", "cluster_id": db.ID}, &n); s != http.StatusCreated {
+		t.Fatalf("db1: %d", s)
+	}
+	var host *agenttest.Host
+	startAgentWith(t, e, c, n.ID, strings.Repeat("d", 32), &addrs{}, func(ag *agent.Agent, root string) {
+		host = agenttest.NewHost(root, "10.0.20.181")
+		ag.Exec, ag.Root, ag.Collector.Run = host.Exec, root, host.Exec
+		host.SetUnit("mariadb", agenttest.Unit{Enabled: true, Active: true})
+		host.MariaDB = &agenttest.MariaDB{
+			Version: "11.8.3-MariaDB-0+deb13u1", Connections: 9, MaxConnections: 151,
+			Galera: &agenttest.Galera{
+				ClusterName: "db", Status: "Primary", Size: 1, State: 4, Comment: "Synced", Ready: true, Members: []string{"10.0.20.181:3306"},
+			},
+			Databases: []agenttest.Database{{Name: "gitea", Size: 64 << 20, Tables: 117}, {Name: "nextcloud", Size: 2 << 30, Tables: 158}},
+			Clients: []agenttest.Client{
+				{User: "nextcloud", Host: "10.0.20.186", Database: "nextcloud", Count: 4},
+				{User: "nextcloud", Host: "10.0.20.187", Database: "nextcloud", Count: 3},
+				{User: "nextcloud", Host: "10.0.20.188", Database: "nextcloud", Count: 2},
+				{User: "root", Host: "localhost", Count: 1},
+			},
+		}
+	})
+
+	var groups list[dbGroupView]
+	eventually(t, "de database nextcloud met haar gebruikers", func() bool {
+		if err := e.dbs.SyncAll(ctx); err != nil {
+			t.Fatal(err)
+		}
+		c.do("GET", "/api/v1/databases", nil, &groups)
+		return len(groups.Items) == 1 && len(groups.Items[0].Databases) == 2 && len(groups.Items[0].Databases[1].Users) == 1
+	})
+	gitea, ncdb := groups.Items[0].Databases[0], groups.Items[0].Databases[1]
+	u := ncdb.Users[0]
+	if u.Kind != "cluster" || u.ClusterID == nil || *u.ClusterID != nc.ID || u.Name != "Nextcloud" || strings.Join(u.Nodes, ",") != "nc1,nc2,nc3" ||
+		strings.Join(u.DBUsers, ",") != "nextcloud" || u.Connections != 9 || u.Dependency != "" || ncdb.Shared || ncdb.LastUsedAt == nil {
+		t.Fatalf("nextcloud: %+v", ncdb)
+	}
+	if len(gitea.Users) != 0 || gitea.LastUsedAt != nil {
+		t.Fatalf("gitea: %+v", gitea)
+	}
+
+	// Gitea verbindt vanaf een adres dat ClusterForge niet kent, ook met
+	// nextcloud: die is nu gedeeld.
+	host.Locked(func() {
+		host.MariaDB.Clients = append(host.MariaDB.Clients,
+			agenttest.Client{User: "gitea", Host: "10.0.30.40", Database: "gitea", Count: 2},
+			agenttest.Client{User: "gitea", Host: "10.0.30.40", Database: "nextcloud", Count: 1})
+	})
+	if err := e.dbs.SyncAll(ctx); err != nil {
+		t.Fatal(err)
+	}
+	c.do("GET", "/api/v1/databases", nil, &groups)
+	gitea, ncdb = groups.Items[0].Databases[0], groups.Items[0].Databases[1]
+	if len(gitea.Users) != 1 || gitea.Users[0].Kind != "unknown" || gitea.Users[0].Name != "10.0.30.40" || gitea.Shared {
+		t.Fatalf("gitea: %+v", gitea)
+	}
+	if !ncdb.Shared || len(ncdb.Users) != 2 || ncdb.Users[1].Kind != "unknown" {
+		t.Fatalf("nextcloud gedeeld: %+v", ncdb)
 	}
 }

@@ -7,6 +7,7 @@ import type { components } from "./api/schema";
 export type DatabaseGroup = components["schemas"]["DatabaseGroup"];
 export type DatabaseServer = components["schemas"]["DatabaseServer"];
 export type DatabaseInfo = components["schemas"]["DatabaseInfo"];
+export type DatabaseUser = components["schemas"]["DatabaseUser"];
 
 type Tone = "slate" | "green" | "amber" | "red" | "blue";
 

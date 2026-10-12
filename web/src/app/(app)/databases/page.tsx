@@ -5,7 +5,16 @@ import { upgradeCommand } from "@/components/drift/Drift";
 import { ago, Empty, EnvBadge, formatBytes, QueryState, tableClass, tdClass, thClass } from "@/components/inventory/bits";
 import { CopyBlock } from "@/components/inventory/InstallAgent";
 import { Badge, Card, PageHeader } from "@/components/ui";
-import { engineLabel, healthInfo, kindLabel, useDatabases, type DatabaseGroup, type DatabaseServer } from "@/lib/databases";
+import {
+  engineLabel,
+  healthInfo,
+  kindLabel,
+  useDatabases,
+  type DatabaseGroup,
+  type DatabaseInfo,
+  type DatabaseServer,
+  type DatabaseUser,
+} from "@/lib/databases";
 
 export default function DatabasesPage() {
   const groups = useDatabases();
@@ -111,14 +120,25 @@ function GroupCard({ g }: { g: DatabaseGroup }) {
                 <th className={thClass}>Naam</th>
                 <th className={`${thClass} text-right`}>Grootte</th>
                 <th className={`${thClass} text-right`}>Tabellen</th>
+                <th className={thClass}>Gebruikt door</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {g.databases.map((d) => (
                 <tr key={d.name}>
-                  <td className={`${tdClass} font-mono text-xs`}>{d.name}</td>
+                  <td className={`${tdClass} font-mono text-xs`}>
+                    {d.name}
+                    {d.shared && (
+                      <div className="mt-1 font-sans">
+                        <Badge tone="amber">gedeeld</Badge>
+                      </div>
+                    )}
+                  </td>
                   <td className={`${tdClass} text-right tabular-nums`}>{formatBytes(d.size_bytes)}</td>
                   <td className={`${tdClass} text-right tabular-nums`}>{d.tables < 0 ? "–" : d.tables}</td>
+                  <td className={`${tdClass} min-w-64`}>
+                    <Users d={d} g={g} />
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -131,6 +151,79 @@ function GroupCard({ g }: { g: DatabaseGroup }) {
         </div>
       )}
     </Card>
+  );
+}
+
+// Users toont per cluster, losse node of adres wie de database de laatste
+// dertig dagen gebruikte.
+function Users({ d, g }: { d: DatabaseInfo; g: DatabaseGroup }) {
+  if (d.users.length === 0) {
+    return <span className="text-slate-500">niemand in de laatste 30 dagen</span>;
+  }
+  return (
+    <ul className="space-y-1.5">
+      {d.users.map((u) => (
+        <li key={u.key}>
+          <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
+            <UserName u={u} />
+            {u.kind === "cluster" && u.nodes.length > 0 && <span className="text-slate-500">{u.nodes.join(", ")}</span>}
+            <span className="text-xs text-slate-500">
+              als {u.db_users.join(", ")} · {u.connections > 0 ? `${u.connections} verbonden` : `laatst ${ago(u.last_seen)}`}
+            </span>
+            <Dependency u={u} g={g} />
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function UserName({ u }: { u: DatabaseUser }) {
+  const link = "font-medium text-brand-700 hover:underline dark:text-sky-300";
+  switch (u.kind) {
+    case "cluster":
+      return (
+        <Link href={`/clusters/detail?id=${u.cluster_id}`} className={link}>
+          {u.name}
+        </Link>
+      );
+    case "node":
+      return (
+        <Link href={`/nodes/detail?id=${u.node_id}`} className={link}>
+          {u.name}
+        </Link>
+      );
+    case "local":
+      return <span title="via de socket of 127.0.0.1">op de databasenode zelf ({u.nodes.join(", ")})</span>;
+  }
+  return (
+    <span title="Dit adres hoort bij geen enkele node in ClusterForge.">
+      onbekend adres <span className="font-mono text-xs">{u.name}</span>
+    </span>
+  );
+}
+
+// Dependency zegt of de afhankelijkheid van dat cluster naar de database
+// in de graaf staat.
+function Dependency({ u, g }: { u: DatabaseUser; g: DatabaseGroup }) {
+  if (u.kind !== "cluster" || !g.cluster_id || u.cluster_id === g.cluster_id) return null;
+  const href = "/afhankelijkheden";
+  switch (u.dependency) {
+    case "confirmed":
+      return <Badge tone="green">afhankelijkheid bevestigd</Badge>;
+    case "suggested":
+      return (
+        <Link href={href} title="Bevestig of negeer het voorstel bij Afhankelijkheden.">
+          <Badge tone="blue">afhankelijkheid voorgesteld</Badge>
+        </Link>
+      );
+    case "ignored":
+      return <Badge>afhankelijkheid genegeerd</Badge>;
+  }
+  return (
+    <Link href={href} title="Voeg de afhankelijkheid toe bij Afhankelijkheden.">
+      <Badge tone="amber">niet in de afhankelijkheden</Badge>
+    </Link>
   );
 }
 

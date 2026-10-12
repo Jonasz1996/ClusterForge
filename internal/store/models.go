@@ -366,6 +366,17 @@ type ClusterSpecRevision struct {
 	CommitSha *string
 }
 
+type DbClient struct {
+	NodeID      uuid.UUID
+	Engine      string
+	DbName      string
+	DbUser      string
+	Address     string
+	Connections int32
+	FirstSeen   time.Time
+	LastSeen    time.Time
+}
+
 type DbDatabase struct {
 	NodeID    uuid.UUID
 	Engine    string
