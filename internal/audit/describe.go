@@ -411,6 +411,35 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 			s += fmt.Sprintf("; %s met andere aantallen rijen, omdat de app doorwerkte", count(d, "tabel", "tabellen"))
 		}
 		return s
+	case "cluster.database_move_copied":
+		s := fmt.Sprintf("Verhuizing van %s van %s naar cluster %s gekopieerd: alle tabellen gelijk", str(p, "database"), str(p, "source"), name)
+		if ms, ok := p["import_ms"].(float64); ok {
+			s += ", importeren duurde " + duration(time.Duration(ms)*time.Millisecond)
+		}
+		return s + "; wacht op overschakelen"
+	case "cluster.database_move_failed":
+		return fmt.Sprintf("Verhuizing van %s van %s naar cluster %s mislukt", str(p, "database"), str(p, "source"), name) +
+			colon(strings.SplitN(str(p, "message"), "\n", 2)[0])
+	case "cluster.database_moved":
+		s := fmt.Sprintf("Database %s verhuisd van %s naar cluster %s", str(p, "database"), str(p, "source"), name)
+		if a := str(p, "address"); a != "" {
+			s += " (" + a + ")"
+		}
+		if f, _ := p["forced"].(bool); f {
+			s += ", toch overgeschakeld"
+		}
+		if l, _ := p["locked"].(bool); l {
+			s += "; de oude database staat op slot"
+		}
+		return s
+	case "cluster.database_move_cancelled":
+		return fmt.Sprintf("Verhuizing van %s van %s naar cluster %s geannuleerd; de kopie is weg", str(p, "database"), str(p, "source"), name)
+	case "cluster.database_locked":
+		return fmt.Sprintf("Oude database %s op %s op slot gezet: %s %s ze alleen nog lezen", str(p, "database"), str(p, "source"), list(p["users"]),
+			verbFor(p["users"], "mag", "mogen"))
+	case "cluster.database_unlocked":
+		return fmt.Sprintf("Slot van de oude database %s op %s gehaald: %s %s er weer in schrijven", str(p, "database"), str(p, "source"),
+			list(p["users"]), verbFor(p["users"], "mag", "mogen"))
 	case "cluster.deployed":
 		return fmt.Sprintf("Cluster %s uitgerold uit %s %s met %s nodes", name, str(p, "template"), str(p, "version"), num(p["nodes"]))
 	case "node.created":
@@ -1209,6 +1238,14 @@ func list(v any) string {
 }
 
 func num(v any) string { return text(v) }
+
+// verbFor is one bij één naam in v, anders many.
+func verbFor(v any, one, many string) string {
+	if xs, _ := v.([]any); len(xs) == 1 {
+		return one
+	}
+	return many
+}
 
 // kubeObject schrijft een object in Kubernetes als "Deployment demo/web".
 func kubeObject(p map[string]any) string {

@@ -69,7 +69,21 @@ const (
 	// Op de nieuwe node: de dump ophalen en importeren, en de voortgang.
 	DBMigratePull   = "pull"
 	DBMigrateStatus = "status"
+	// Op de oude node: de gebruikers met rechten op de database, met hun
+	// hash als Secret aan staat.
+	DBMigrateAccounts = "accounts"
+	// Op de nieuwe node: die gebruikers maken met dezelfde hash, en hun
+	// rechten op de database geven.
+	DBMigrateAdopt = "adopt"
+	// Op de oude node: de gebruikers alleen nog laten lezen, of hun rechten
+	// teruggeven.
+	DBMigrateLock   = "lock"
+	DBMigrateUnlock = "unlock"
 )
+
+// DBMigratePlugin is de enige manier van inloggen die een verhuizing
+// meeneemt: een gewoon wachtwoord, met dezelfde hash op MariaDB en MySQL.
+const DBMigratePlugin = "mysql_native_password"
 
 // DBMigrateUserPrefix begint de naam van de tijdelijke gebruiker op de oude
 // MariaDB; de rest is letters en cijfers.
@@ -193,6 +207,29 @@ type DBMigrateRequest struct {
 	// Total is ongeveer hoeveel SQL er komt, voor de voortgang; 0 als dat
 	// onbekend is.
 	Total int64 `json:"total,omitempty"`
+	// Secret: accounts geeft ook de hash van elk wachtwoord.
+	Secret bool `json:"secret,omitempty"`
+	// Accounts zijn de gebruikers bij adopt, lock en unlock: één per host.
+	Accounts []DBMigrateAccount `json:"accounts,omitempty"`
+}
+
+// DBMigrateAccount is een gebruiker op één host met zijn rechten op de
+// database die verhuist.
+type DBMigrateAccount struct {
+	User string `json:"user"`
+	Host string `json:"host"`
+	// Plugin is hoe hij inlogt, zoals mysql_native_password.
+	Plugin string `json:"plugin,omitempty"`
+	// Hash is de hash van zijn wachtwoord: alleen in het antwoord op
+	// accounts met Secret, en bij adopt. Nooit het wachtwoord zelf.
+	Hash string `json:"hash,omitempty"`
+	// Schema is de database zoals in de GRANT op de oude server, met \_
+	// voor _ als hij zo gegeven is; lock en unlock gebruiken hem zo.
+	Schema string `json:"schema,omitempty"`
+	// Privileges zijn zijn rechten op de database, zoals SELECT.
+	Privileges []string `json:"privileges"`
+	// Global: hij heeft ook rechten op alle databases.
+	Global bool `json:"global,omitempty"`
 }
 
 // DBMigrateResult is het antwoord op een DBMigrate.
@@ -201,6 +238,8 @@ type DBMigrateResult struct {
 	Probe *DBMigrateReach `json:"probe,omitempty"`
 	// Run is de import van Target: bezig, of de laatste die klaar is.
 	Run *DBMigrateRun `json:"run,omitempty"`
+	// Accounts is het antwoord op accounts.
+	Accounts []DBMigrateAccount `json:"accounts,omitempty"`
 }
 
 // DBMigrateInfo is wat de oude MariaDB over een database weet, uit

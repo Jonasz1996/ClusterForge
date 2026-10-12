@@ -6,6 +6,8 @@ package agenttest
 // test meteen ziet als de agent iets nieuws vraagt.
 
 import (
+	"crypto/sha1"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"maps"
@@ -44,13 +46,41 @@ type MariaDB struct {
 }
 
 // MariaUser is een gebruiker op één host. Password is het wachtwoord in
-// klare tekst, zodat een test kan zien welk wachtwoord hij kreeg. Grants
-// zijn de rechten per database zoals in de GRANT, met \_ voor _.
+// klare tekst, zodat een test kan zien welk wachtwoord hij kreeg; Hash is
+// de hash als hij die bij een verhuizing kreeg. Plugin is leeg voor een
+// gewoon wachtwoord. Grants zijn de rechten per database zoals in de
+// GRANT, met \_ voor _.
 type MariaUser struct {
 	User, Host string
 	Password   string
+	Hash       string
+	Plugin     string
 	Global     []string
 	Grants     map[string][]string
+}
+
+// NativeHash is de hash van mysql_native_password: * en SHA1(SHA1(pw)) in
+// hex.
+func NativeHash(password string) string {
+	a := sha1.Sum([]byte(password)) //nolint:gosec // zo rekent MariaDB
+	b := sha1.Sum(a[:])             //nolint:gosec // zo rekent MariaDB
+	return "*" + strings.ToUpper(hex.EncodeToString(b[:]))
+}
+
+// hash is de hash die MariaDB van u bewaart.
+func (u MariaUser) hash() string {
+	switch {
+	case u.Hash != "":
+		return u.Hash
+	case u.Password != "":
+		return NativeHash(u.Password)
+	}
+	return ""
+}
+
+// LogsIn zegt of u met password binnenkomt.
+func (u MariaUser) LogsIn(password string) bool {
+	return u.Plugin == "" && password != "" && u.hash() == NativeHash(password)
 }
 
 // DebianUsers zijn de gebruikers die MariaDB op Debian zelf heeft.

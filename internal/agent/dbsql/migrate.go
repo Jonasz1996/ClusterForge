@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/Jonasz1996/clusterforge/pkg/protocol"
@@ -191,4 +192,148 @@ func CountRows(db string, tables []string) ([]string, error) {
 // verdubbeld.
 func QuoteIdent(name string) string {
 	return "`" + strings.ReplaceAll(name, "`", "``") + "`"
+}
+
+// De gebruikers van een app die meeverhuizen. Hun namen en hosts komen
+// van de oude server, dus ze mogen meer dan wat ClusterForge zelf maakt,
+// maar nooit een aanhalingsteken, backslash of backtick.
+var (
+	appUserRe   = regexp.MustCompile(`^[A-Za-z0-9_.\-]{1,80}$`)
+	appHostRe   = regexp.MustCompile(`^[A-Za-z0-9.:%_\-]{1,255}$`)
+	schemaRe    = regexp.MustCompile(`^[a-z0-9_\\]{1,128}$`)
+	nativeHash  = regexp.MustCompile(`^\*[0-9A-F]{40}$`)
+	appRightSet = map[string]bool{
+		"SELECT": true, "INSERT": true, "UPDATE": true, "DELETE": true, "CREATE": true, "DROP": true, "REFERENCES": true,
+		"INDEX": true, "ALTER": true, "CREATE TEMPORARY TABLES": true, "LOCK TABLES": true, "EXECUTE": true, "CREATE VIEW": true,
+		"SHOW VIEW": true, "CREATE ROUTINE": true, "ALTER ROUTINE": true, "EVENT": true, "TRIGGER": true, "DELETE HISTORY": true,
+		"SHOW CREATE ROUTINE": true,
+	}
+)
+
+// lockedRights zijn de rechten van een app op haar oude database na de
+// verhuizing: lezen, zodat er niets verloren gaat, maar niet schrijven.
+var lockedRights = []string{"SELECT", "SHOW VIEW"}
+
+// baseRights zijn de rechten die ALL PRIVILEGES op een database op elke
+// MariaDB en MySQL geeft. Wie ze allemaal heeft, krijgt ALL PRIVILEGES:
+// een nieuwere versie geeft daar meer bij, zoals SHOW CREATE ROUTINE.
+var baseRights = []string{
+	"SELECT", "INSERT", "UPDATE", "DELETE", "CREATE", "DROP", "REFERENCES", "INDEX", "ALTER", "CREATE TEMPORARY TABLES",
+	"LOCK TABLES", "EXECUTE", "CREATE VIEW", "SHOW VIEW", "CREATE ROUTINE", "ALTER ROUTINE", "EVENT", "TRIGGER",
+}
+
+// rightsSQL zijn de rechten zoals in een GRANT.
+func rightsSQL(rights []string) string {
+	all := true
+	for _, r := range baseRights {
+		all = all && slices.Contains(rights, r)
+	}
+	if all {
+		return "ALL PRIVILEGES"
+	}
+	return strings.Join(rights, ", ")
+}
+
+// UnescapeSchema is de naam van de database achter een schema uit een
+// GRANT: \_ wordt _.
+func UnescapeSchema(schema string) string { return strings.ReplaceAll(schema, `\_`, "_") }
+
+// MigrateAccounts leest de gebruikers met rechten op db, één rij per
+// gebruiker en host: naam, host, plugin, hash (leeg zonder secret), het
+// schema zoals in de GRANT, de rechten met komma's, en hoeveel rechten op
+// alle databases hij heeft.
+func MigrateAccounts(db string, secret bool) (string, error) {
+	if err := CheckDatabase(db); err != nil {
+		return "", err
+	}
+	hash := "''"
+	if secret {
+		hash = "u.authentication_string"
+	}
+	escaped := strings.ReplaceAll(db, "_", `\\_`)
+	return fmt.Sprintf("SELECT u.User, u.Host, u.plugin, %s, s.TABLE_SCHEMA, "+
+		"GROUP_CONCAT(s.PRIVILEGE_TYPE ORDER BY s.PRIVILEGE_TYPE SEPARATOR ','), "+
+		"(SELECT COUNT(*) FROM information_schema.USER_PRIVILEGES g WHERE g.GRANTEE = s.GRANTEE AND g.PRIVILEGE_TYPE <> 'USAGE') "+
+		"FROM information_schema.SCHEMA_PRIVILEGES s JOIN mysql.user u ON s.GRANTEE = CONCAT('''', u.User, '''@''', u.Host, '''') "+
+		"WHERE s.TABLE_SCHEMA IN ('%s', '%s') "+
+		"GROUP BY u.User, u.Host, u.plugin, u.authentication_string, s.TABLE_SCHEMA, s.GRANTEE ORDER BY u.User, u.Host", hash, db, escaped), nil
+}
+
+// CheckAppAccount zegt waarom a geen gebruiker is die een verhuizing kan
+// meenemen of op slot zetten.
+func CheckAppAccount(a protocol.DBMigrateAccount) error {
+	switch {
+	case !appUserRe.MatchString(a.User):
+		return fmt.Errorf("%q is geen gebruiker die ClusterForge kan verhuizen: alleen letters, cijfers, _, . en -", a.User)
+	case strings.HasPrefix(a.User, protocol.DBMigrateUserPrefix):
+		return fmt.Errorf("%s is de tijdelijke gebruiker van een verhuizing", a.User)
+	case slices.Contains(SystemUsers, a.User):
+		return fmt.Errorf("%s is een gebruiker van MariaDB zelf", a.User)
+	case !appHostRe.MatchString(a.Host):
+		return fmt.Errorf("%q is geen host voor een gebruiker", a.Host)
+	case len(a.Privileges) == 0:
+		return fmt.Errorf("%s@%s zonder rechten", a.User, a.Host)
+	}
+	for _, p := range a.Privileges {
+		if !appRightSet[p] {
+			return fmt.Errorf("%s@%s heeft het recht %q, dat ClusterForge niet kent", a.User, a.Host, p)
+		}
+	}
+	return nil
+}
+
+// MigrateAdopt maakt a op de nieuwe server met dezelfde hash als op de
+// oude, en geeft hem zijn rechten op db. Een gebruiker die er al is,
+// houdt zijn andere rechten en krijgt het wachtwoord van de oude server.
+func MigrateAdopt(db string, a protocol.DBMigrateAccount) (string, error) {
+	if err := CheckDatabase(db); err != nil {
+		return "", err
+	}
+	if err := CheckAppAccount(a); err != nil {
+		return "", err
+	}
+	if a.Plugin != protocol.DBMigratePlugin {
+		return "", fmt.Errorf("%s logt in met %q; ClusterForge verhuist alleen gebruikers met %s", a.User, a.Plugin, protocol.DBMigratePlugin)
+	}
+	hash := strings.ToUpper(a.Hash)
+	if !nativeHash.MatchString(hash) {
+		return "", fmt.Errorf("%s@%s heeft geen hash van een wachtwoord", a.User, a.Host)
+	}
+	acc := account(a.User, a.Host)
+	var b strings.Builder
+	fmt.Fprintf(&b, "CREATE USER IF NOT EXISTS %s IDENTIFIED VIA %s USING '%s';\n", acc, protocol.DBMigratePlugin, hash)
+	fmt.Fprintf(&b, "ALTER USER %s IDENTIFIED VIA %s USING '%s';\n", acc, protocol.DBMigratePlugin, hash)
+	fmt.Fprintf(&b, "GRANT %s ON %s.* TO %s;\n", rightsSQL(a.Privileges), quoteDB(db, true), acc)
+	return b.String(), nil
+}
+
+// MigrateLock laat de gebruikers alleen nog db lezen (lock), of geeft
+// hun hun rechten terug. Op slot houdt een gebruiker van SELECT en SHOW
+// VIEW wat hij al had; wie geen van beide had, houdt niets.
+func MigrateLock(db string, accounts []protocol.DBMigrateAccount, lock bool) (string, error) {
+	if err := CheckDatabase(db); err != nil {
+		return "", err
+	}
+	if len(accounts) == 0 {
+		return "", errors.New("geen gebruikers om op slot te zetten")
+	}
+	var b strings.Builder
+	for _, a := range accounts {
+		if err := CheckAppAccount(a); err != nil {
+			return "", err
+		}
+		if !schemaRe.MatchString(a.Schema) || UnescapeSchema(a.Schema) != db {
+			return "", fmt.Errorf("%q is geen GRANT op %s", a.Schema, db)
+		}
+		rights := a.Privileges
+		if lock {
+			rights = slices.DeleteFunc(slices.Clone(lockedRights), func(r string) bool { return !slices.Contains(a.Privileges, r) })
+		}
+		acc := account(a.User, a.Host)
+		fmt.Fprintf(&b, "REVOKE ALL PRIVILEGES ON `%s`.* FROM %s;\n", a.Schema, acc)
+		if len(rights) > 0 {
+			fmt.Fprintf(&b, "GRANT %s ON `%s`.* TO %s;\n", rightsSQL(rights), a.Schema, acc)
+		}
+	}
+	return b.String(), nil
 }

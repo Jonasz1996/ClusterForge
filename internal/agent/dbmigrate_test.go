@@ -3,6 +3,7 @@ package agent
 import (
 	"bufio"
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -11,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -335,6 +337,116 @@ func TestDBMigrateRealMariaDB(t *testing.T) {
 	migrate(t, nw, pull)
 	if r := waitPull(t, nw, pull.Target); !strings.Contains(r.Error, "Access denied") {
 		t.Errorf("na revoke: %+v", r)
+	}
+}
+
+// TestDBMigrateAccountsRealMariaDB neemt de gebruikers van een app mee
+// van de oude naar de nieuwe MariaDB: dezelfde hash, dus de app logt op de
+// nieuwe in met haar oude wachtwoord, zonder dat ClusterForge het kent.
+// Daarna gaat de oude database op slot en weer open.
+func TestDBMigrateAccountsRealMariaDB(t *testing.T) {
+	dst := os.Getenv("CF_TEST_MARIADB")
+	if dst == "" {
+		t.Skip("CF_TEST_MARIADB niet gezet")
+	}
+	src := cmp.Or(os.Getenv("CF_TEST_MARIADB_SOURCE"), dst)
+	const db, pw = "cf_agent_m9", "AppWachtwoord123"
+	sql := func(container, query string) string {
+		t.Helper()
+		out, err := exec.Command("docker", "exec", container, "mariadb", "-N", "-B", "-e", query).CombinedOutput()
+		if err != nil {
+			t.Fatalf("%s: %v: %s", query, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	srcIP, dstIP := containerIP(t, src), containerIP(t, dst)
+	cleanup := func() {
+		for _, c := range []string{src, dst} {
+			sql(c, "DROP DATABASE IF EXISTS "+db+"; DROP USER IF EXISTS 'm9app'@'%', 'm9app'@'localhost', 'm9app'@'"+srcIP+"', "+
+				"'m9ro'@'%', 'm9sock'@'localhost'")
+		}
+	}
+	cleanup()
+	t.Cleanup(cleanup)
+	sql(src, "CREATE DATABASE "+db+"; CREATE TABLE "+db+".t (id int PRIMARY KEY);"+
+		"CREATE USER 'm9app'@'%' IDENTIFIED BY '"+pw+"'; CREATE USER 'm9app'@'localhost' IDENTIFIED BY '"+pw+"';"+
+		"GRANT ALL PRIVILEGES ON "+db+".* TO 'm9app'@'%'; GRANT ALL PRIVILEGES ON "+db+".* TO 'm9app'@'localhost';"+
+		"CREATE USER 'm9ro'@'%' IDENTIFIED BY 'AlleenLezen12345'; GRANT SELECT ON `cf\\_agent\\_m9`.* TO 'm9ro'@'%';"+
+		"CREATE USER 'm9sock'@'localhost' IDENTIFIED VIA unix_socket; GRANT SELECT ON "+db+".* TO 'm9sock'@'localhost'")
+	old, nw := dockerAgent(t, src), dockerAgent(t, dst)
+
+	// Zonder secret geen hash.
+	accs := migrate(t, old, protocol.DBMigrateRequest{Action: protocol.DBMigrateAccounts, Database: db}).Accounts
+	var got []string
+	for _, a := range accs {
+		got = append(got, a.User+"@"+a.Host+" "+a.Plugin+" "+a.Schema+" "+strconv.Itoa(len(a.Privileges))+" "+a.Hash)
+		if a.User == "m9app" && !slices.Contains(a.Privileges, "INSERT") {
+			t.Errorf("rechten van m9app: %v", a.Privileges)
+		}
+	}
+	if len(accs) != 4 || !strings.HasPrefix(got[0], "m9app@% mysql_native_password cf_agent_m9 ") || !strings.HasPrefix(got[1], "m9app@localhost ") ||
+		got[2] != `m9ro@% mysql_native_password cf\_agent\_m9 1 ` || got[3] != "m9sock@localhost unix_socket cf_agent_m9 1 " {
+		t.Fatalf("gebruikers: %q", got)
+	}
+
+	// Met secret de hash, zoals MariaDB hem bewaart.
+	accs = migrate(t, old, protocol.DBMigrateRequest{Action: protocol.DBMigrateAccounts, Database: db, Secret: true}).Accounts
+	want := sql(src, "SELECT authentication_string FROM mysql.user WHERE User = 'm9app' AND Host = '%'")
+	if accs[0].Hash != want || !strings.HasPrefix(want, "*") {
+		t.Fatalf("hash: %q, wil %q", accs[0].Hash, want)
+	}
+
+	// Op de nieuwe server met dezelfde hash; de app logt in met haar
+	// wachtwoord, hier vanaf de oude server.
+	app := accs[0]
+	app.Host = srcIP
+	migrate(t, nw, protocol.DBMigrateRequest{Action: protocol.DBMigrateAdopt, Database: db, Accounts: []protocol.DBMigrateAccount{app}})
+	if out, err := exec.Command("docker", "exec", src, "mariadb", "-h", dstIP, "-u", "m9app", "-p"+pw, "--skip-ssl", "-N", "-B",
+		"-e", "SELECT CURRENT_USER()").CombinedOutput(); err != nil || strings.TrimSpace(string(out)) != "m9app@"+srcIP {
+		t.Fatalf("inloggen met het oude wachtwoord: %v %s", err, out)
+	}
+	if g := sql(dst, "SHOW GRANTS FOR 'm9app'@'"+srcIP+"'"); !strings.Contains(g, "ALL PRIVILEGES ON `cf\\\\_agent\\\\_m9`.*") {
+		t.Errorf("rechten op de nieuwe: %s", g)
+	}
+	// Nog eens: hetzelfde, zonder fout.
+	migrate(t, nw, protocol.DBMigrateRequest{Action: protocol.DBMigrateAdopt, Database: db, Accounts: []protocol.DBMigrateAccount{app}})
+	// Een gebruiker die via de socket inlogt, kan niet mee; de fout toont
+	// geen hash.
+	if e := migrateErr(t, nw, protocol.DBMigrateRequest{Action: protocol.DBMigrateAdopt, Database: db, Accounts: []protocol.DBMigrateAccount{accs[3]}}); !strings.Contains(e, "unix_socket") {
+		t.Errorf("socket: %s", e)
+	}
+
+	// Op slot: alleen nog lezen, ook met \_ in de GRANT; daarna weer open.
+	// mariadb -B toont een backslash dubbel.
+	lock := protocol.DBMigrateRequest{Action: protocol.DBMigrateLock, Database: db, Accounts: accs[:3]}
+	migrate(t, old, lock)
+	migrate(t, old, lock)
+	// m9ro kon alleen lezen en krijgt er geen SHOW VIEW bij.
+	for acc, wantGrant := range map[string]string{
+		"'m9app'@'%'": "GRANT SELECT, SHOW VIEW ON `cf_agent_m9`.*", "'m9app'@'localhost'": "GRANT SELECT, SHOW VIEW ON `cf_agent_m9`.*",
+		"'m9ro'@'%'": "GRANT SELECT ON `cf\\\\_agent\\\\_m9`.*",
+	} {
+		g := sql(src, "SHOW GRANTS FOR "+acc)
+		if !strings.Contains(g, wantGrant) || strings.Contains(g, "INSERT") || strings.Contains(g, "ALL PRIVILEGES ON `cf") ||
+			acc == "'m9ro'@'%'" && strings.Contains(g, "SHOW VIEW") {
+			t.Errorf("op slot %s: %s", acc, g)
+		}
+	}
+	if out, err := exec.Command("docker", "exec", src, "mariadb", "-h", "127.0.0.1", "-u", "m9app", "-p"+pw, "--skip-ssl",
+		"-e", "INSERT INTO "+db+".t VALUES (1)").CombinedOutput(); err == nil || !strings.Contains(string(out), "denied") {
+		t.Errorf("schrijven op slot: %v %s", err, out)
+	}
+	lock.Action = protocol.DBMigrateUnlock
+	migrate(t, old, lock)
+	if g := sql(src, "SHOW GRANTS FOR 'm9app'@'%'"); !strings.Contains(g, "ALL PRIVILEGES ON `cf_agent_m9`.*") {
+		t.Errorf("weer open: %s", g)
+	}
+	if g := sql(src, "SHOW GRANTS FOR 'm9ro'@'%'"); !strings.Contains(g, "GRANT SELECT ON `cf\\\\_agent\\\\_m9`.*") || strings.Contains(g, "SHOW VIEW") {
+		t.Errorf("m9ro weer open: %s", g)
+	}
+	if out, err := exec.Command("docker", "exec", src, "mariadb", "-h", "127.0.0.1", "-u", "m9app", "-p"+pw, "--skip-ssl",
+		"-e", "INSERT INTO "+db+".t VALUES (1)").CombinedOutput(); err != nil {
+		t.Errorf("schrijven na openzetten: %v %s", err, out)
 	}
 }
 

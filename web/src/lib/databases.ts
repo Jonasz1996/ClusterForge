@@ -12,6 +12,7 @@ export type MigrationPlan = components["schemas"]["DatabaseMigrationPlan"];
 export type MigrationTarget = components["schemas"]["DatabaseMigrationTarget"];
 export type MigrationRun = components["schemas"]["DatabaseMigrationRun"];
 export type MigrationInput = components["schemas"]["DatabaseMigrationInput"];
+export type MoveInput = components["schemas"]["DatabaseMoveInput"];
 
 type Tone = "slate" | "green" | "amber" | "red" | "blue";
 
@@ -72,4 +73,39 @@ export function useStartTrial() {
       void qc.invalidateQueries({ queryKey: ["jobs"] });
     },
   });
+}
+
+// De echte verhuizing: starten, overschakelen, annuleren en het slot op de
+// oude database. Elk ververst het plan.
+function useMigrationMutation<T, R>(fn: (body: T) => Promise<R>) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: fn,
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["databases"] });
+      void qc.invalidateQueries({ queryKey: ["jobs"] });
+    },
+  });
+}
+
+export function useStartMove() {
+  return useMigrationMutation(async (body: MoveInput) => unwrap(await api.POST("/databases/migration/move", { body })));
+}
+
+export function useSwitchMove() {
+  return useMigrationMutation(async ({ id, force }: { id: string; force: boolean }) =>
+    unwrap(await api.POST("/databases/migrations/{id}/switch", { params: { path: { id } }, body: { force } })),
+  );
+}
+
+export function useCancelMove() {
+  return useMigrationMutation(async ({ id, confirm }: { id: string; confirm: string }) =>
+    unwrap(await api.POST("/databases/migrations/{id}/cancel", { params: { path: { id } }, body: { confirm } })),
+  );
+}
+
+export function useLockMove() {
+  return useMigrationMutation(async ({ id, locked }: { id: string; locked: boolean }) =>
+    unwrap(await api.POST("/databases/migrations/{id}/lock", { params: { path: { id } }, body: { locked } })),
+  );
 }

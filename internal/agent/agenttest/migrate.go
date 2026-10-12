@@ -7,10 +7,12 @@ package agenttest
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"maps"
 	"net"
 	"os"
 	"regexp"
@@ -31,6 +33,12 @@ var (
 	grantSomeRe   = regexp.MustCompile("^GRANT ([A-Z ,]+) ON `([^`]+)`\\.\\* TO '([^']*)'@'([^']*)';$")
 	grantProcRe   = regexp.MustCompile("^GRANT SELECT ON `mysql`\\.`proc` TO '([^']*)'@'([^']*)';$")
 	newDBAsRe     = regexp.MustCompile("^CREATE DATABASE `([^`]+)` CHARACTER SET ([a-z0-9_]+)(?: COLLATE ([a-z0-9_]+))?;$")
+	// De query uit dbsql.MigrateAccounts en de opdrachten uit MigrateAdopt
+	// en MigrateLock.
+	accountsRe    = regexp.MustCompile(`^SELECT u\.User, u\.Host, u\.plugin, ('{2}|u\.authentication_string), .* WHERE s\.TABLE_SCHEMA IN \('([a-z0-9_]+)', `)
+	createViaRe   = regexp.MustCompile(`^CREATE USER IF NOT EXISTS '([^']*)'@'([^']*)' IDENTIFIED VIA mysql_native_password USING '([^']*)';$`)
+	alterViaRe    = regexp.MustCompile(`^ALTER USER '([^']*)'@'([^']*)' IDENTIFIED VIA mysql_native_password USING '([^']*)';$`)
+	revokeAllOnRe = regexp.MustCompile("^REVOKE ALL PRIVILEGES ON `([^`]+)`\\.\\* FROM '([^']*)'@'([^']*)';$")
 	// metaRe is de regel die mariaDump voor mariaRestore schrijft.
 	metaRe = regexp.MustCompile(`(?m)^-- agenttest: rows=(\d+) views=(\d+) routines=(\d+) triggers=(\d+) events=(\d+)$`)
 )
@@ -102,6 +110,25 @@ func (m *MariaDB) migrateQuery(q string) (rows [][]string, failed []byte, ok boo
 			rows = append(rows, []string{n})
 		}
 		return rows, nil, true
+	case accountsRe.MatchString(q):
+		r := accountsRe.FindStringSubmatch(q)
+		secret, db := r[1] != "''", r[2]
+		users := slices.Clone(m.Users)
+		slices.SortFunc(users, func(a, b MariaUser) int { return strings.Compare(a.User+"\x00"+a.Host, b.User+"\x00"+b.Host) })
+		for _, u := range users {
+			for _, schema := range slices.Sorted(maps.Keys(u.Grants)) {
+				if strings.ReplaceAll(schema, `\_`, "_") != db || len(u.Grants[schema]) == 0 {
+					continue
+				}
+				plugin, hash := cmp.Or(u.Plugin, "mysql_native_password"), ""
+				if secret && u.Plugin == "" {
+					hash = u.hash()
+				}
+				privs := slices.Sorted(slices.Values(u.Grants[schema]))
+				rows = append(rows, []string{u.User, u.Host, plugin, hash, schema, strings.Join(privs, ","), strconv.Itoa(len(u.Global))})
+			}
+		}
+		return rows, nil, true
 	case strings.HasPrefix(q, "SELECT (SELECT COUNT(*) FROM `"):
 		var row []string
 		for _, r := range countRe.FindAllStringSubmatch(q, -1) {
@@ -128,6 +155,27 @@ func (m *MariaDB) migrateWrite(line string, fail func(code, msg string) ([]byte,
 		r := replaceUserRe.FindStringSubmatch(line)
 		m.Users = slices.DeleteFunc(m.Users, func(u MariaUser) bool { return u.User == r[1] && u.Host == r[2] })
 		m.Users = append(m.Users, MariaUser{User: r[1], Host: r[2], Password: r[3]})
+	case createViaRe.MatchString(line):
+		r := createViaRe.FindStringSubmatch(line)
+		if user(r[1], r[2]) < 0 {
+			m.Users = append(m.Users, MariaUser{User: r[1], Host: r[2], Hash: r[3]})
+		}
+	case alterViaRe.MatchString(line):
+		r := alterViaRe.FindStringSubmatch(line)
+		j := user(r[1], r[2])
+		if j < 0 {
+			out, err = fail("1396 (HY000)", fmt.Sprintf("Operation ALTER USER failed for '%s'@'%s'", r[1], r[2]))
+			return out, err, true
+		}
+		m.Users[j].Hash, m.Users[j].Password = r[3], ""
+	case revokeAllOnRe.MatchString(line):
+		r := revokeAllOnRe.FindStringSubmatch(line)
+		j := user(r[2], r[3])
+		if j < 0 || len(m.Users[j].Grants[r[1]]) == 0 {
+			out, err = fail("1141 (42000)", fmt.Sprintf("There is no such grant defined for user '%s' on host '%s'", r[2], r[3]))
+			return out, err, true
+		}
+		delete(m.Users[j].Grants, r[1])
 	case grantProcRe.MatchString(line):
 		r := grantProcRe.FindStringSubmatch(line)
 		j := user(r[1], r[2])
@@ -207,7 +255,7 @@ func (h *Host) login(cfg map[string]string) (remote *Host, unlock func(), errMsg
 		return nil, nil, fmt.Sprintf("ERROR 2002 (HY000): Can't connect to server on '%s' (111)", cfg["host"])
 	}
 	if !slices.ContainsFunc(m.Users, func(u MariaUser) bool {
-		return u.User == cfg["user"] && u.Host == h.Address && u.Password == cfg["password"]
+		return u.User == cfg["user"] && u.Host == h.Address && u.LogsIn(cfg["password"])
 	}) {
 		remote.mu.Unlock()
 		return nil, nil, fmt.Sprintf("ERROR 1045 (28000): Access denied for user '%s'@'%s' (using password: YES)", cfg["user"], h.Address)

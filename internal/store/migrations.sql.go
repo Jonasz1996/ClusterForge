@@ -12,9 +12,133 @@ import (
 	"github.com/google/uuid"
 )
 
+const cancelDBMigration = `-- name: CancelDBMigration :one
+UPDATE db_migrations
+SET stage = 'cancelled', status = 'failed', finished_at = $1, message = $2
+WHERE id = $3 AND stage = 'copied' AND status = 'running'
+RETURNING id, kind, component_id, cluster_id, source_key, source_name, source_node, source_address, database, target_database, target_node, status, started_at, finished_at, size_bytes, dump_bytes, import_ms, count_ms, tables, objects, differences, message, job_id, requested_by, stage, accounts, force, target_address, copied_at, switched_at, locked
+`
+
+type CancelDBMigrationParams struct {
+	FinishedAt *time.Time
+	Message    string
+	ID         uuid.UUID
+}
+
+// De kopie is weg; de app blijft op de oude database.
+func (q *Queries) CancelDBMigration(ctx context.Context, arg CancelDBMigrationParams) (DbMigration, error) {
+	row := q.db.QueryRow(ctx, cancelDBMigration, arg.FinishedAt, arg.Message, arg.ID)
+	var i DbMigration
+	err := row.Scan(
+		&i.ID,
+		&i.Kind,
+		&i.ComponentID,
+		&i.ClusterID,
+		&i.SourceKey,
+		&i.SourceName,
+		&i.SourceNode,
+		&i.SourceAddress,
+		&i.Database,
+		&i.TargetDatabase,
+		&i.TargetNode,
+		&i.Status,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.SizeBytes,
+		&i.DumpBytes,
+		&i.ImportMs,
+		&i.CountMs,
+		&i.Tables,
+		&i.Objects,
+		&i.Differences,
+		&i.Message,
+		&i.JobID,
+		&i.RequestedBy,
+		&i.Stage,
+		&i.Accounts,
+		&i.Force,
+		&i.TargetAddress,
+		&i.CopiedAt,
+		&i.SwitchedAt,
+		&i.Locked,
+	)
+	return i, err
+}
+
+const copiedDBMigration = `-- name: CopiedDBMigration :one
+UPDATE db_migrations
+SET stage = 'copied', copied_at = $1, dump_bytes = $2, import_ms = $3, count_ms = $4,
+    tables = $5, objects = $6, differences = $7, message = $8
+WHERE id = $9 AND stage = 'copy' AND status = 'running'
+RETURNING id, kind, component_id, cluster_id, source_key, source_name, source_node, source_address, database, target_database, target_node, status, started_at, finished_at, size_bytes, dump_bytes, import_ms, count_ms, tables, objects, differences, message, job_id, requested_by, stage, accounts, force, target_address, copied_at, switched_at, locked
+`
+
+type CopiedDBMigrationParams struct {
+	CopiedAt    *time.Time
+	DumpBytes   int64
+	ImportMs    *int64
+	CountMs     *int64
+	Tables      []byte
+	Objects     []byte
+	Differences int32
+	Message     string
+	ID          uuid.UUID
+}
+
+// De kopie van een verhuizing is klaar en klopt; ze wacht tot de app op de
+// nieuwe database draait.
+func (q *Queries) CopiedDBMigration(ctx context.Context, arg CopiedDBMigrationParams) (DbMigration, error) {
+	row := q.db.QueryRow(ctx, copiedDBMigration,
+		arg.CopiedAt,
+		arg.DumpBytes,
+		arg.ImportMs,
+		arg.CountMs,
+		arg.Tables,
+		arg.Objects,
+		arg.Differences,
+		arg.Message,
+		arg.ID,
+	)
+	var i DbMigration
+	err := row.Scan(
+		&i.ID,
+		&i.Kind,
+		&i.ComponentID,
+		&i.ClusterID,
+		&i.SourceKey,
+		&i.SourceName,
+		&i.SourceNode,
+		&i.SourceAddress,
+		&i.Database,
+		&i.TargetDatabase,
+		&i.TargetNode,
+		&i.Status,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.SizeBytes,
+		&i.DumpBytes,
+		&i.ImportMs,
+		&i.CountMs,
+		&i.Tables,
+		&i.Objects,
+		&i.Differences,
+		&i.Message,
+		&i.JobID,
+		&i.RequestedBy,
+		&i.Stage,
+		&i.Accounts,
+		&i.Force,
+		&i.TargetAddress,
+		&i.CopiedAt,
+		&i.SwitchedAt,
+		&i.Locked,
+	)
+	return i, err
+}
+
 const failRunningDBMigrations = `-- name: FailRunningDBMigrations :exec
 UPDATE db_migrations SET status = 'failed', finished_at = now(), message = $1
-WHERE job_id = $2 AND status = 'running'
+WHERE job_id = $2 AND status = 'running' AND stage IN ('', 'copy')
 `
 
 type FailRunningDBMigrationsParams struct {
@@ -22,7 +146,8 @@ type FailRunningDBMigrationsParams struct {
 	JobID   *uuid.UUID
 }
 
-// Een taak die stopte, laat geen lopende verhuizing achter.
+// Een taak die stopte, laat geen lopende proef of kopie achter. Een kopie
+// die klaar is, wacht op overschakelen en blijft lopen.
 func (q *Queries) FailRunningDBMigrations(ctx context.Context, arg FailRunningDBMigrationsParams) error {
 	_, err := q.db.Exec(ctx, failRunningDBMigrations, arg.Message, arg.JobID)
 	return err
@@ -33,7 +158,7 @@ UPDATE db_migrations
 SET status = $1, finished_at = $2, dump_bytes = $3, import_ms = $4, count_ms = $5,
     tables = $6, objects = $7, differences = $8, message = $9
 WHERE id = $10
-RETURNING id, kind, component_id, cluster_id, source_key, source_name, source_node, source_address, database, target_database, target_node, status, started_at, finished_at, size_bytes, dump_bytes, import_ms, count_ms, tables, objects, differences, message, job_id, requested_by
+RETURNING id, kind, component_id, cluster_id, source_key, source_name, source_node, source_address, database, target_database, target_node, status, started_at, finished_at, size_bytes, dump_bytes, import_ms, count_ms, tables, objects, differences, message, job_id, requested_by, stage, accounts, force, target_address, copied_at, switched_at, locked
 `
 
 type FinishDBMigrationParams struct {
@@ -88,12 +213,71 @@ func (q *Queries) FinishDBMigration(ctx context.Context, arg FinishDBMigrationPa
 		&i.Message,
 		&i.JobID,
 		&i.RequestedBy,
+		&i.Stage,
+		&i.Accounts,
+		&i.Force,
+		&i.TargetAddress,
+		&i.CopiedAt,
+		&i.SwitchedAt,
+		&i.Locked,
+	)
+	return i, err
+}
+
+const getDBMigration = `-- name: GetDBMigration :one
+SELECT m.id, m.kind, m.component_id, m.cluster_id, m.source_key, m.source_name, m.source_node, m.source_address, m.database, m.target_database, m.target_node, m.status, m.started_at, m.finished_at, m.size_bytes, m.dump_bytes, m.import_ms, m.count_ms, m.tables, m.objects, m.differences, m.message, m.job_id, m.requested_by, m.stage, m.accounts, m.force, m.target_address, m.copied_at, m.switched_at, m.locked, c.name AS cluster_name
+FROM db_migrations m
+JOIN clusters c ON c.id = m.cluster_id
+WHERE m.id = $1
+`
+
+type GetDBMigrationRow struct {
+	DbMigration DbMigration
+	ClusterName string
+}
+
+func (q *Queries) GetDBMigration(ctx context.Context, id uuid.UUID) (GetDBMigrationRow, error) {
+	row := q.db.QueryRow(ctx, getDBMigration, id)
+	var i GetDBMigrationRow
+	err := row.Scan(
+		&i.DbMigration.ID,
+		&i.DbMigration.Kind,
+		&i.DbMigration.ComponentID,
+		&i.DbMigration.ClusterID,
+		&i.DbMigration.SourceKey,
+		&i.DbMigration.SourceName,
+		&i.DbMigration.SourceNode,
+		&i.DbMigration.SourceAddress,
+		&i.DbMigration.Database,
+		&i.DbMigration.TargetDatabase,
+		&i.DbMigration.TargetNode,
+		&i.DbMigration.Status,
+		&i.DbMigration.StartedAt,
+		&i.DbMigration.FinishedAt,
+		&i.DbMigration.SizeBytes,
+		&i.DbMigration.DumpBytes,
+		&i.DbMigration.ImportMs,
+		&i.DbMigration.CountMs,
+		&i.DbMigration.Tables,
+		&i.DbMigration.Objects,
+		&i.DbMigration.Differences,
+		&i.DbMigration.Message,
+		&i.DbMigration.JobID,
+		&i.DbMigration.RequestedBy,
+		&i.DbMigration.Stage,
+		&i.DbMigration.Accounts,
+		&i.DbMigration.Force,
+		&i.DbMigration.TargetAddress,
+		&i.DbMigration.CopiedAt,
+		&i.DbMigration.SwitchedAt,
+		&i.DbMigration.Locked,
+		&i.ClusterName,
 	)
 	return i, err
 }
 
 const getDBMigrationByJob = `-- name: GetDBMigrationByJob :one
-SELECT id, kind, component_id, cluster_id, source_key, source_name, source_node, source_address, database, target_database, target_node, status, started_at, finished_at, size_bytes, dump_bytes, import_ms, count_ms, tables, objects, differences, message, job_id, requested_by FROM db_migrations WHERE job_id = $1
+SELECT id, kind, component_id, cluster_id, source_key, source_name, source_node, source_address, database, target_database, target_node, status, started_at, finished_at, size_bytes, dump_bytes, import_ms, count_ms, tables, objects, differences, message, job_id, requested_by, stage, accounts, force, target_address, copied_at, switched_at, locked FROM db_migrations WHERE job_id = $1
 `
 
 func (q *Queries) GetDBMigrationByJob(ctx context.Context, jobID *uuid.UUID) (DbMigration, error) {
@@ -124,14 +308,23 @@ func (q *Queries) GetDBMigrationByJob(ctx context.Context, jobID *uuid.UUID) (Db
 		&i.Message,
 		&i.JobID,
 		&i.RequestedBy,
+		&i.Stage,
+		&i.Accounts,
+		&i.Force,
+		&i.TargetAddress,
+		&i.CopiedAt,
+		&i.SwitchedAt,
+		&i.Locked,
 	)
 	return i, err
 }
 
 const insertDBMigration = `-- name: InsertDBMigration :one
-INSERT INTO db_migrations (kind, component_id, cluster_id, source_key, source_name, database, target_database, started_at, job_id, requested_by)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-RETURNING id, kind, component_id, cluster_id, source_key, source_name, source_node, source_address, database, target_database, target_node, status, started_at, finished_at, size_bytes, dump_bytes, import_ms, count_ms, tables, objects, differences, message, job_id, requested_by
+INSERT INTO db_migrations (kind, component_id, cluster_id, source_key, source_name, database, target_database, started_at, job_id, requested_by,
+    stage, force)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+    $11, $12)
+RETURNING id, kind, component_id, cluster_id, source_key, source_name, source_node, source_address, database, target_database, target_node, status, started_at, finished_at, size_bytes, dump_bytes, import_ms, count_ms, tables, objects, differences, message, job_id, requested_by, stage, accounts, force, target_address, copied_at, switched_at, locked
 `
 
 type InsertDBMigrationParams struct {
@@ -145,6 +338,8 @@ type InsertDBMigrationParams struct {
 	StartedAt      time.Time
 	JobID          *uuid.UUID
 	RequestedBy    *uuid.UUID
+	Stage          string
+	Force          bool
 }
 
 func (q *Queries) InsertDBMigration(ctx context.Context, arg InsertDBMigrationParams) (DbMigration, error) {
@@ -159,6 +354,8 @@ func (q *Queries) InsertDBMigration(ctx context.Context, arg InsertDBMigrationPa
 		arg.StartedAt,
 		arg.JobID,
 		arg.RequestedBy,
+		arg.Stage,
+		arg.Force,
 	)
 	var i DbMigration
 	err := row.Scan(
@@ -186,6 +383,13 @@ func (q *Queries) InsertDBMigration(ctx context.Context, arg InsertDBMigrationPa
 		&i.Message,
 		&i.JobID,
 		&i.RequestedBy,
+		&i.Stage,
+		&i.Accounts,
+		&i.Force,
+		&i.TargetAddress,
+		&i.CopiedAt,
+		&i.SwitchedAt,
+		&i.Locked,
 	)
 	return i, err
 }
@@ -212,7 +416,7 @@ func (q *Queries) InsertDeployDatabase(ctx context.Context, arg InsertDeployData
 }
 
 const latestDBMigrationTarget = `-- name: LatestDBMigrationTarget :one
-SELECT id, kind, component_id, cluster_id, source_key, source_name, source_node, source_address, database, target_database, target_node, status, started_at, finished_at, size_bytes, dump_bytes, import_ms, count_ms, tables, objects, differences, message, job_id, requested_by FROM db_migrations
+SELECT id, kind, component_id, cluster_id, source_key, source_name, source_node, source_address, database, target_database, target_node, status, started_at, finished_at, size_bytes, dump_bytes, import_ms, count_ms, tables, objects, differences, message, job_id, requested_by, stage, accounts, force, target_address, copied_at, switched_at, locked FROM db_migrations
 WHERE component_id = $1 AND target_database = $2 AND id <> $3
 ORDER BY started_at DESC
 LIMIT 1
@@ -254,12 +458,19 @@ func (q *Queries) LatestDBMigrationTarget(ctx context.Context, arg LatestDBMigra
 		&i.Message,
 		&i.JobID,
 		&i.RequestedBy,
+		&i.Stage,
+		&i.Accounts,
+		&i.Force,
+		&i.TargetAddress,
+		&i.CopiedAt,
+		&i.SwitchedAt,
+		&i.Locked,
 	)
 	return i, err
 }
 
 const listDBMigrations = `-- name: ListDBMigrations :many
-SELECT m.id, m.kind, m.component_id, m.cluster_id, m.source_key, m.source_name, m.source_node, m.source_address, m.database, m.target_database, m.target_node, m.status, m.started_at, m.finished_at, m.size_bytes, m.dump_bytes, m.import_ms, m.count_ms, m.tables, m.objects, m.differences, m.message, m.job_id, m.requested_by, c.name AS cluster_name
+SELECT m.id, m.kind, m.component_id, m.cluster_id, m.source_key, m.source_name, m.source_node, m.source_address, m.database, m.target_database, m.target_node, m.status, m.started_at, m.finished_at, m.size_bytes, m.dump_bytes, m.import_ms, m.count_ms, m.tables, m.objects, m.differences, m.message, m.job_id, m.requested_by, m.stage, m.accounts, m.force, m.target_address, m.copied_at, m.switched_at, m.locked, c.name AS cluster_name
 FROM db_migrations m
 JOIN clusters c ON c.id = m.cluster_id
 WHERE m.source_key = $1 AND m.database = $2
@@ -312,6 +523,13 @@ func (q *Queries) ListDBMigrations(ctx context.Context, arg ListDBMigrationsPara
 			&i.DbMigration.Message,
 			&i.DbMigration.JobID,
 			&i.DbMigration.RequestedBy,
+			&i.DbMigration.Stage,
+			&i.DbMigration.Accounts,
+			&i.DbMigration.Force,
+			&i.DbMigration.TargetAddress,
+			&i.DbMigration.CopiedAt,
+			&i.DbMigration.SwitchedAt,
+			&i.DbMigration.Locked,
 			&i.ClusterName,
 		); err != nil {
 			return nil, err
@@ -324,10 +542,75 @@ func (q *Queries) ListDBMigrations(ctx context.Context, arg ListDBMigrationsPara
 	return items, nil
 }
 
+const setDBMigrationAccounts = `-- name: SetDBMigrationAccounts :exec
+UPDATE db_migrations SET accounts = $1 WHERE id = $2
+`
+
+type SetDBMigrationAccountsParams struct {
+	Accounts []byte
+	ID       uuid.UUID
+}
+
+func (q *Queries) SetDBMigrationAccounts(ctx context.Context, arg SetDBMigrationAccountsParams) error {
+	_, err := q.db.Exec(ctx, setDBMigrationAccounts, arg.Accounts, arg.ID)
+	return err
+}
+
+const setDBMigrationLocked = `-- name: SetDBMigrationLocked :one
+UPDATE db_migrations SET locked = $1
+WHERE id = $2 AND stage = 'done'
+RETURNING id, kind, component_id, cluster_id, source_key, source_name, source_node, source_address, database, target_database, target_node, status, started_at, finished_at, size_bytes, dump_bytes, import_ms, count_ms, tables, objects, differences, message, job_id, requested_by, stage, accounts, force, target_address, copied_at, switched_at, locked
+`
+
+type SetDBMigrationLockedParams struct {
+	Locked bool
+	ID     uuid.UUID
+}
+
+func (q *Queries) SetDBMigrationLocked(ctx context.Context, arg SetDBMigrationLockedParams) (DbMigration, error) {
+	row := q.db.QueryRow(ctx, setDBMigrationLocked, arg.Locked, arg.ID)
+	var i DbMigration
+	err := row.Scan(
+		&i.ID,
+		&i.Kind,
+		&i.ComponentID,
+		&i.ClusterID,
+		&i.SourceKey,
+		&i.SourceName,
+		&i.SourceNode,
+		&i.SourceAddress,
+		&i.Database,
+		&i.TargetDatabase,
+		&i.TargetNode,
+		&i.Status,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.SizeBytes,
+		&i.DumpBytes,
+		&i.ImportMs,
+		&i.CountMs,
+		&i.Tables,
+		&i.Objects,
+		&i.Differences,
+		&i.Message,
+		&i.JobID,
+		&i.RequestedBy,
+		&i.Stage,
+		&i.Accounts,
+		&i.Force,
+		&i.TargetAddress,
+		&i.CopiedAt,
+		&i.SwitchedAt,
+		&i.Locked,
+	)
+	return i, err
+}
+
 const setDBMigrationRoute = `-- name: SetDBMigrationRoute :exec
 UPDATE db_migrations
-SET source_node = $1, source_address = $2, target_node = $3, size_bytes = $4
-WHERE id = $5
+SET source_node = $1, source_address = $2, target_node = $3, size_bytes = $4,
+    target_address = $5
+WHERE id = $6
 `
 
 type SetDBMigrationRouteParams struct {
@@ -335,19 +618,81 @@ type SetDBMigrationRouteParams struct {
 	SourceAddress string
 	TargetNode    string
 	SizeBytes     int64
+	TargetAddress string
 	ID            uuid.UUID
 }
 
-// Wat de controle koos: de oude server, het adres, de importerende node.
+// Wat de controle koos: de oude server, het adres, de importerende node,
+// en waar de app de nieuwe database vindt.
 func (q *Queries) SetDBMigrationRoute(ctx context.Context, arg SetDBMigrationRouteParams) error {
 	_, err := q.db.Exec(ctx, setDBMigrationRoute,
 		arg.SourceNode,
 		arg.SourceAddress,
 		arg.TargetNode,
 		arg.SizeBytes,
+		arg.TargetAddress,
 		arg.ID,
 	)
 	return err
+}
+
+const switchDBMigration = `-- name: SwitchDBMigration :one
+UPDATE db_migrations
+SET stage = 'done', status = 'ok', switched_at = $1, finished_at = $1, locked = $2, message = $3
+WHERE id = $4 AND stage = 'copied' AND status = 'running'
+RETURNING id, kind, component_id, cluster_id, source_key, source_name, source_node, source_address, database, target_database, target_node, status, started_at, finished_at, size_bytes, dump_bytes, import_ms, count_ms, tables, objects, differences, message, job_id, requested_by, stage, accounts, force, target_address, copied_at, switched_at, locked
+`
+
+type SwitchDBMigrationParams struct {
+	SwitchedAt *time.Time
+	Locked     bool
+	Message    string
+	ID         uuid.UUID
+}
+
+// De app draait op de nieuwe database.
+func (q *Queries) SwitchDBMigration(ctx context.Context, arg SwitchDBMigrationParams) (DbMigration, error) {
+	row := q.db.QueryRow(ctx, switchDBMigration,
+		arg.SwitchedAt,
+		arg.Locked,
+		arg.Message,
+		arg.ID,
+	)
+	var i DbMigration
+	err := row.Scan(
+		&i.ID,
+		&i.Kind,
+		&i.ComponentID,
+		&i.ClusterID,
+		&i.SourceKey,
+		&i.SourceName,
+		&i.SourceNode,
+		&i.SourceAddress,
+		&i.Database,
+		&i.TargetDatabase,
+		&i.TargetNode,
+		&i.Status,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.SizeBytes,
+		&i.DumpBytes,
+		&i.ImportMs,
+		&i.CountMs,
+		&i.Tables,
+		&i.Objects,
+		&i.Differences,
+		&i.Message,
+		&i.JobID,
+		&i.RequestedBy,
+		&i.Stage,
+		&i.Accounts,
+		&i.Force,
+		&i.TargetAddress,
+		&i.CopiedAt,
+		&i.SwitchedAt,
+		&i.Locked,
+	)
+	return i, err
 }
 
 const takeDeployDatabase = `-- name: TakeDeployDatabase :one

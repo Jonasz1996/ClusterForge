@@ -590,6 +590,13 @@ type DbMigration struct {
 	Message        string
 	JobID          *uuid.UUID
 	RequestedBy    *uuid.UUID
+	Stage          string
+	Accounts       []byte
+	Force          bool
+	TargetAddress  string
+	CopiedAt       *time.Time
+	SwitchedAt     *time.Time
+	Locked         bool
 }
 
 type DbServer struct {
