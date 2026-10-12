@@ -5,6 +5,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
 import { DoneAlert, KubeActions, workloadActions, type ActionDone } from "@/components/kube/Actions";
 import { applyModes, ApplyTab, type ApplyMode } from "@/components/kube/Apply";
+import { LessonsTab } from "@/components/kube/Lessons";
 import {
   EventList,
   KubeError,
@@ -53,7 +54,8 @@ type Tab =
   | "opslag"
   | "configuratie"
   | "gebeurtenissen"
-  | "alles";
+  | "alles"
+  | "lessen";
 
 const tabs: { id: Tab; label: string }[] = [
   { id: "overzicht", label: "Overzicht" },
@@ -66,6 +68,7 @@ const tabs: { id: Tab; label: string }[] = [
   { id: "configuratie", label: "Configuratie" },
   { id: "gebeurtenissen", label: "Gebeurtenissen" },
   { id: "alles", label: "Alles" },
+  { id: "lessen", label: "Lessen" },
 ];
 
 // Op deze tabbladen kies je een namespace en of het systeem meedoet.
@@ -103,6 +106,7 @@ function useParams() {
     warnings: search.get("warnings") === "1",
     type: search.get("type") ?? "",
     mode: applyModes.find((m) => m.id === search.get("mode"))?.id ?? ("app" as ApplyMode),
+    lesson: search.get("les") ?? "",
     set,
   };
 }
@@ -210,6 +214,9 @@ function KubeClusterInner() {
             )}
             {p.tab === "alles" && (
               <AllTab id={p.id} namespace={p.namespace} system={p.system} type={p.type} onType={(type) => p.set({ type })} />
+            )}
+            {p.tab === "lessen" && (
+              <LessonsTab id={p.id} lesson={p.lesson} namespaces={o.namespaces} onLesson={(les) => p.set({ les })} />
             )}
           </>
         )

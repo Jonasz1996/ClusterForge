@@ -22,6 +22,32 @@ func (q *Queries) DeleteKubeNodes(ctx context.Context, clusterID uuid.UUID) erro
 	return err
 }
 
+const finishKubeLessonStep = `-- name: FinishKubeLessonStep :exec
+UPDATE kube_lesson_steps SET done_at = now(), data = $5, answer = $6
+WHERE cluster_id = $1 AND user_id = $2 AND lesson = $3 AND step = $4 AND done_at IS NULL
+`
+
+type FinishKubeLessonStepParams struct {
+	ClusterID uuid.UUID
+	UserID    uuid.UUID
+	Lesson    string
+	Step      string
+	Data      []byte
+	Answer    string
+}
+
+func (q *Queries) FinishKubeLessonStep(ctx context.Context, arg FinishKubeLessonStepParams) error {
+	_, err := q.db.Exec(ctx, finishKubeLessonStep,
+		arg.ClusterID,
+		arg.UserID,
+		arg.Lesson,
+		arg.Step,
+		arg.Data,
+		arg.Answer,
+	)
+	return err
+}
+
 const insertKubeNode = `-- name: InsertKubeNode :exec
 INSERT INTO kube_nodes (cluster_id, name, node_id, roles, ready, unschedulable, kubelet, internal_ip, cpu_millis, memory_bytes, pods, created_at)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
@@ -214,6 +240,47 @@ func (q *Queries) ListKubeClusters(ctx context.Context) ([]ListKubeClustersRow, 
 	return items, nil
 }
 
+const listKubeLessonSteps = `-- name: ListKubeLessonSteps :many
+SELECT cluster_id, user_id, lesson, step, started_at, done_at, data, answer FROM kube_lesson_steps
+WHERE cluster_id = $1 AND user_id = $2
+ORDER BY lesson, started_at, step
+`
+
+type ListKubeLessonStepsParams struct {
+	ClusterID uuid.UUID
+	UserID    uuid.UUID
+}
+
+// De voortgang van een gebruiker in de lessen van een cluster.
+func (q *Queries) ListKubeLessonSteps(ctx context.Context, arg ListKubeLessonStepsParams) ([]KubeLessonStep, error) {
+	rows, err := q.db.Query(ctx, listKubeLessonSteps, arg.ClusterID, arg.UserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []KubeLessonStep{}
+	for rows.Next() {
+		var i KubeLessonStep
+		if err := rows.Scan(
+			&i.ClusterID,
+			&i.UserID,
+			&i.Lesson,
+			&i.Step,
+			&i.StartedAt,
+			&i.DoneAt,
+			&i.Data,
+			&i.Answer,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listKubeNodes = `-- name: ListKubeNodes :many
 SELECT k.cluster_id, k.name, k.node_id, k.roles, k.ready, k.unschedulable, k.kubelet, k.internal_ip, k.cpu_millis, k.memory_bytes, k.pods, k.created_at, n.hostname AS node_hostname
 FROM kube_nodes k
@@ -270,6 +337,21 @@ func (q *Queries) ListKubeNodes(ctx context.Context, clusterID uuid.UUID) ([]Lis
 		return nil, err
 	}
 	return items, nil
+}
+
+const resetKubeLesson = `-- name: ResetKubeLesson :exec
+DELETE FROM kube_lesson_steps WHERE cluster_id = $1 AND user_id = $2 AND lesson = $3
+`
+
+type ResetKubeLessonParams struct {
+	ClusterID uuid.UUID
+	UserID    uuid.UUID
+	Lesson    string
+}
+
+func (q *Queries) ResetKubeLesson(ctx context.Context, arg ResetKubeLessonParams) error {
+	_, err := q.db.Exec(ctx, resetKubeLesson, arg.ClusterID, arg.UserID, arg.Lesson)
+	return err
 }
 
 const saveKubeCluster = `-- name: SaveKubeCluster :exec
@@ -344,4 +426,43 @@ type SetUserKubeLearningParams struct {
 func (q *Queries) SetUserKubeLearning(ctx context.Context, arg SetUserKubeLearningParams) error {
 	_, err := q.db.Exec(ctx, setUserKubeLearning, arg.ID, arg.KubeLearning)
 	return err
+}
+
+const startKubeLessonStep = `-- name: StartKubeLessonStep :one
+INSERT INTO kube_lesson_steps (cluster_id, user_id, lesson, step, data)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (cluster_id, user_id, lesson, step) DO UPDATE SET lesson = EXCLUDED.lesson
+RETURNING cluster_id, user_id, lesson, step, started_at, done_at, data, answer
+`
+
+type StartKubeLessonStepParams struct {
+	ClusterID uuid.UUID
+	UserID    uuid.UUID
+	Lesson    string
+	Step      string
+	Data      []byte
+}
+
+// Een opdracht is aan de beurt. Bestaat de rij al, dan blijft wat er toen
+// gezien werd staan.
+func (q *Queries) StartKubeLessonStep(ctx context.Context, arg StartKubeLessonStepParams) (KubeLessonStep, error) {
+	row := q.db.QueryRow(ctx, startKubeLessonStep,
+		arg.ClusterID,
+		arg.UserID,
+		arg.Lesson,
+		arg.Step,
+		arg.Data,
+	)
+	var i KubeLessonStep
+	err := row.Scan(
+		&i.ClusterID,
+		&i.UserID,
+		&i.Lesson,
+		&i.Step,
+		&i.StartedAt,
+		&i.DoneAt,
+		&i.Data,
+		&i.Answer,
+	)
+	return i, err
 }

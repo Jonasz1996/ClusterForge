@@ -3143,6 +3143,63 @@ paths:
         "409": { $ref: "#/components/responses/Error" }
         "502": { $ref: "#/components/responses/Error" }
         "503": { $ref: "#/components/responses/Error" }
+  /kubernetes/clusters/{clusterId}/lessons:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: listKubeLessons
+      summary: De lessen Kubernetes met je voortgang op dit cluster
+      description: |
+        Alleen uit de database: hoeveel opdrachten van elke les af zijn. Of een les kan, hangt af van het aantal nodes uit
+        de laatste sync. Elke gebruiker heeft zijn eigen voortgang.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/KubeLessonSummary" } }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /kubernetes/clusters/{clusterId}/lessons/{lesson}:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: lesson, in: path, required: true, schema: { type: string } }
+    delete:
+      operationId: resetKubeLesson
+      summary: Een les opnieuw beginnen; wat er op het cluster staat, blijft
+      responses:
+        "204": { description: Opnieuw begonnen }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /kubernetes/clusters/{clusterId}/lessons/{lesson}/check:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: lesson, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: checkKubeLesson
+      summary: Een les bekijken en de opdracht die aan de beurt is controleren op het cluster
+      description: |
+        De opdrachten zijn op volgorde. ClusterForge controleert de eerste die niet af is, alleen lezend; lukt die, dan
+        is de volgende meteen aan de beurt. answers zijn antwoorden op vragen en de bevestiging van een leesopdracht,
+        per opdracht. Kan het cluster niet gelezen worden, dan staat dat in problem en blijft de opdracht aan de beurt.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/KubeLessonCheckInput" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/KubeLesson" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
   /kubernetes/clusters/{clusterId}/revisions:
     parameters:
       - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -3614,6 +3671,79 @@ components:
         changed: { type: integer, description: Hoeveel objecten nieuw of anders zijn }
         applied: { type: boolean, description: "Onwaar bij preview" }
         objects: { type: array, items: { $ref: "#/components/schemas/KubeApplyObject" } }
+    KubeLessonSummary:
+      type: object
+      required: [id, number, title, summary, steps, done, unavailable, started_at, finished_at]
+      properties:
+        id: { type: string }
+        number: { type: integer }
+        title: { type: string }
+        summary: { type: string }
+        steps: { type: integer, description: Het aantal opdrachten }
+        done: { type: integer, description: Hoeveel opdrachten af zijn }
+        unavailable: { type: string, description: "Waarom de les nu niet kan; leeg als ze kan" }
+        started_at: { type: string, format: date-time, nullable: true }
+        finished_at: { type: string, format: date-time, nullable: true }
+    KubeLessonLink:
+      type: object
+      description: Waar je de opdracht doet, een tabblad, een object of een webadres
+      required: [label, tab, namespace, system, ref, url]
+      properties:
+        label: { type: string }
+        tab: { type: string, description: "Een tabblad van het cluster, zoals apps; leeg bij een object of webadres" }
+        namespace: { type: string }
+        system: { type: boolean }
+        ref:
+          allOf: [{ $ref: "#/components/schemas/KubeRef" }]
+          nullable: true
+        url: { type: string }
+    KubeLessonStep:
+      type: object
+      required: [id, title, kind, state, text, web, kubectl, yaml, question, detail, answer, wrong, done_label, done_at, link]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        kind:
+          type: string
+          enum: [do, quiz, read]
+          description: "Iets doen dat ClusterForge controleert, een vraag, of lezen en zelf bevestigen"
+        state: { type: string, enum: [done, current, locked] }
+        text: { type: array, items: { type: string }, description: "Alinea's; code staat tussen backticks" }
+        web: { type: string, description: Hoe het in ClusterForge kan }
+        kubectl: { type: array, items: { type: string } }
+        yaml: { type: string, description: "YAML om toe te passen; leeg als er geen is" }
+        question: { type: string }
+        detail: { type: string, description: "Wat de controle zag: wat er nog ontbreekt, of bij een afgeronde opdracht wat er staat" }
+        answer: { type: string, description: Het goede antwoord op een vraag }
+        wrong: { type: boolean, description: Het antwoord van daarnet klopt niet }
+        done_label: { type: string, description: De knop bij een leesopdracht }
+        done_at: { type: string, format: date-time, nullable: true }
+        link:
+          allOf: [{ $ref: "#/components/schemas/KubeLessonLink" }]
+          nullable: true
+    KubeLesson:
+      type: object
+      required: [id, number, title, summary, intro, outro, steps, done, unavailable, started_at, finished_at, problem]
+      properties:
+        id: { type: string }
+        number: { type: integer }
+        title: { type: string }
+        summary: { type: string }
+        intro: { type: array, items: { type: string } }
+        outro: { type: array, items: { type: string }, description: Staat er als de les af is }
+        steps: { type: array, items: { $ref: "#/components/schemas/KubeLessonStep" } }
+        done: { type: integer }
+        unavailable: { type: string }
+        started_at: { type: string, format: date-time, nullable: true }
+        finished_at: { type: string, format: date-time, nullable: true }
+        problem: { type: string, description: "Waarom het cluster niet te lezen was; leeg als het lukte" }
+    KubeLessonCheckInput:
+      type: object
+      properties:
+        answers:
+          type: object
+          additionalProperties: { type: string }
+          description: Per opdracht een antwoord op een vraag, of iets niet-leegs om een leesopdracht af te ronden
     KubeResourceType:
       type: object
       required: [group, version, resource, kind, namespaced]

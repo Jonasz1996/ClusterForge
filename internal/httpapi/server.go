@@ -30,6 +30,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/inventory"
 	"github.com/Jonasz1996/clusterforge/internal/jobs"
 	"github.com/Jonasz1996/clusterforge/internal/kube"
+	"github.com/Jonasz1996/clusterforge/internal/kubelessons"
 	"github.com/Jonasz1996/clusterforge/internal/lifecycle"
 	"github.com/Jonasz1996/clusterforge/internal/live"
 	"github.com/Jonasz1996/clusterforge/internal/metrics"
@@ -72,6 +73,7 @@ type Server struct {
 	docs         *docs.Service
 	reports      *reports.Service
 	kube         *kube.Service
+	lessons      *kubelessons.Engine
 	version      string
 	loginLimiter *ipLimiter
 	// enrollLimiter remt het raden van enrollmenttokens.
@@ -168,6 +170,7 @@ func New(d Deps) *Server {
 		kube:          d.Kube,
 	}
 	s.assistant.Tools = s.assistantTools()
+	s.lessons = kubelessons.New(s.kube, s.q)
 	return s
 }
 

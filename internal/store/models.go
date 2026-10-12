@@ -630,6 +630,17 @@ type KubeCluster struct {
 	OkAt           *time.Time
 }
 
+type KubeLessonStep struct {
+	ClusterID uuid.UUID
+	UserID    uuid.UUID
+	Lesson    string
+	Step      string
+	StartedAt time.Time
+	DoneAt    *time.Time
+	Data      []byte
+	Answer    string
+}
+
 type KubeNode struct {
 	ClusterID     uuid.UUID
 	Name          string

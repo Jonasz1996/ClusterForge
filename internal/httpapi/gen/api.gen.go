@@ -1296,6 +1296,48 @@ func (e KubeContainerState) Valid() bool {
 	}
 }
 
+// Defines values for KubeLessonStepKind.
+const (
+	Do   KubeLessonStepKind = "do"
+	Quiz KubeLessonStepKind = "quiz"
+	Read KubeLessonStepKind = "read"
+)
+
+// Valid indicates whether the value is a known member of the KubeLessonStepKind enum.
+func (e KubeLessonStepKind) Valid() bool {
+	switch e {
+	case Do:
+		return true
+	case Quiz:
+		return true
+	case Read:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for KubeLessonStepState.
+const (
+	Current KubeLessonStepState = "current"
+	Done    KubeLessonStepState = "done"
+	Locked  KubeLessonStepState = "locked"
+)
+
+// Valid indicates whether the value is a known member of the KubeLessonStepState enum.
+func (e KubeLessonStepState) Valid() bool {
+	switch e {
+	case Current:
+		return true
+	case Done:
+		return true
+	case Locked:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for KubeWorkloadKind.
 const (
 	KubeWorkloadKindCronJob     KubeWorkloadKind = "CronJob"
@@ -5554,6 +5596,102 @@ type KubeIngressRule struct {
 	Url     string `json:"url"`
 }
 
+// KubeLesson defines model for KubeLesson.
+type KubeLesson struct {
+	Done       int                          `json:"done"`
+	FinishedAt nullable.Nullable[time.Time] `json:"finished_at"`
+	Id         string                       `json:"id"`
+	Intro      []string                     `json:"intro"`
+	Number     int                          `json:"number"`
+
+	// Outro Staat er als de les af is
+	Outro []string `json:"outro"`
+
+	// Problem Waarom het cluster niet te lezen was; leeg als het lukte
+	Problem     string                       `json:"problem"`
+	StartedAt   nullable.Nullable[time.Time] `json:"started_at"`
+	Steps       []KubeLessonStep             `json:"steps"`
+	Summary     string                       `json:"summary"`
+	Title       string                       `json:"title"`
+	Unavailable string                       `json:"unavailable"`
+}
+
+// KubeLessonCheckInput defines model for KubeLessonCheckInput.
+type KubeLessonCheckInput struct {
+	// Answers Per opdracht een antwoord op een vraag, of iets niet-leegs om een leesopdracht af te ronden
+	Answers *map[string]string `json:"answers,omitempty"`
+}
+
+// KubeLessonLink Waar je de opdracht doet, een tabblad, een object of een webadres
+type KubeLessonLink struct {
+	Label     string                     `json:"label"`
+	Namespace string                     `json:"namespace"`
+	Ref       nullable.Nullable[KubeRef] `json:"ref"`
+	System    bool                       `json:"system"`
+
+	// Tab Een tabblad van het cluster, zoals apps; leeg bij een object of webadres
+	Tab string `json:"tab"`
+	Url string `json:"url"`
+}
+
+// KubeLessonStep defines model for KubeLessonStep.
+type KubeLessonStep struct {
+	// Answer Het goede antwoord op een vraag
+	Answer string `json:"answer"`
+
+	// Detail Wat de controle zag: wat er nog ontbreekt, of bij een afgeronde opdracht wat er staat
+	Detail string                       `json:"detail"`
+	DoneAt nullable.Nullable[time.Time] `json:"done_at"`
+
+	// DoneLabel De knop bij een leesopdracht
+	DoneLabel string `json:"done_label"`
+	Id        string `json:"id"`
+
+	// Kind Iets doen dat ClusterForge controleert, een vraag, of lezen en zelf bevestigen
+	Kind     KubeLessonStepKind                `json:"kind"`
+	Kubectl  []string                          `json:"kubectl"`
+	Link     nullable.Nullable[KubeLessonLink] `json:"link"`
+	Question string                            `json:"question"`
+	State    KubeLessonStepState               `json:"state"`
+
+	// Text Alinea's; code staat tussen backticks
+	Text  []string `json:"text"`
+	Title string   `json:"title"`
+
+	// Web Hoe het in ClusterForge kan
+	Web string `json:"web"`
+
+	// Wrong Het antwoord van daarnet klopt niet
+	Wrong bool `json:"wrong"`
+
+	// Yaml YAML om toe te passen; leeg als er geen is
+	Yaml string `json:"yaml"`
+}
+
+// KubeLessonStepKind Iets doen dat ClusterForge controleert, een vraag, of lezen en zelf bevestigen
+type KubeLessonStepKind string
+
+// KubeLessonStepState defines model for KubeLessonStep.State.
+type KubeLessonStepState string
+
+// KubeLessonSummary defines model for KubeLessonSummary.
+type KubeLessonSummary struct {
+	// Done Hoeveel opdrachten af zijn
+	Done       int                          `json:"done"`
+	FinishedAt nullable.Nullable[time.Time] `json:"finished_at"`
+	Id         string                       `json:"id"`
+	Number     int                          `json:"number"`
+	StartedAt  nullable.Nullable[time.Time] `json:"started_at"`
+
+	// Steps Het aantal opdrachten
+	Steps   int    `json:"steps"`
+	Summary string `json:"summary"`
+	Title   string `json:"title"`
+
+	// Unavailable Waarom de les nu niet kan; leeg als ze kan
+	Unavailable string `json:"unavailable"`
+}
+
 // KubeLogs defines model for KubeLogs.
 type KubeLogs struct {
 	Text string `json:"text"`
@@ -7944,6 +8082,9 @@ type ApplyKubeJSONRequestBody = KubeApplyInput
 // DrainKubeNodeJSONRequestBody defines body for DrainKubeNode for application/json ContentType.
 type DrainKubeNodeJSONRequestBody = KubeDrainInput
 
+// CheckKubeLessonJSONRequestBody defines body for CheckKubeLesson for application/json ContentType.
+type CheckKubeLessonJSONRequestBody = KubeLessonCheckInput
+
 // CreateNodeJSONRequestBody defines body for CreateNode for application/json ContentType.
 type CreateNodeJSONRequestBody = NodeInput
 
@@ -8333,6 +8474,15 @@ type ServerInterface interface {
 	// ListKubeEvents De events, waarschuwingen eerst en dan de nieuwste; hoogstens 300
 	// (GET /kubernetes/clusters/{clusterId}/events)
 	ListKubeEvents(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params ListKubeEventsParams)
+	// ListKubeLessons De lessen Kubernetes met je voortgang op dit cluster
+	// (GET /kubernetes/clusters/{clusterId}/lessons)
+	ListKubeLessons(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
+	// ResetKubeLesson Een les opnieuw beginnen; wat er op het cluster staat, blijft
+	// (DELETE /kubernetes/clusters/{clusterId}/lessons/{lesson})
+	ResetKubeLesson(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, lesson string)
+	// CheckKubeLesson Een les bekijken en de opdracht die aan de beurt is controleren op het cluster
+	// (POST /kubernetes/clusters/{clusterId}/lessons/{lesson}/check)
+	CheckKubeLesson(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, lesson string)
 	// GetKubeLogs De laatste regels log van een container; ook een viewer mag ze lezen
 	// (GET /kubernetes/clusters/{clusterId}/logs)
 	GetKubeLogs(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params GetKubeLogsParams)
@@ -9209,6 +9359,24 @@ func (_ Unimplemented) DrainKubeNode(w http.ResponseWriter, r *http.Request, clu
 // ListKubeEvents De events, waarschuwingen eerst en dan de nieuwste; hoogstens 300
 // (GET /kubernetes/clusters/{clusterId}/events)
 func (_ Unimplemented) ListKubeEvents(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params ListKubeEventsParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListKubeLessons De lessen Kubernetes met je voortgang op dit cluster
+// (GET /kubernetes/clusters/{clusterId}/lessons)
+func (_ Unimplemented) ListKubeLessons(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ResetKubeLesson Een les opnieuw beginnen; wat er op het cluster staat, blijft
+// (DELETE /kubernetes/clusters/{clusterId}/lessons/{lesson})
+func (_ Unimplemented) ResetKubeLesson(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, lesson string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CheckKubeLesson Een les bekijken en de opdracht die aan de beurt is controleren op het cluster
+// (POST /kubernetes/clusters/{clusterId}/lessons/{lesson}/check)
+func (_ Unimplemented) CheckKubeLesson(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, lesson string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -12940,6 +13108,102 @@ func (siw *ServerInterfaceWrapper) ListKubeEvents(w http.ResponseWriter, r *http
 	handler.ServeHTTP(w, r)
 }
 
+// ListKubeLessons operation middleware
+func (siw *ServerInterfaceWrapper) ListKubeLessons(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListKubeLessons(w, r, clusterId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ResetKubeLesson operation middleware
+func (siw *ServerInterfaceWrapper) ResetKubeLesson(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "lesson" -------------
+	var lesson string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "lesson", chi.URLParam(r, "lesson"), &lesson, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "lesson", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ResetKubeLesson(w, r, clusterId, lesson)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CheckKubeLesson operation middleware
+func (siw *ServerInterfaceWrapper) CheckKubeLesson(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "lesson" -------------
+	var lesson string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "lesson", chi.URLParam(r, "lesson"), &lesson, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "lesson", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CheckKubeLesson(w, r, clusterId, lesson)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetKubeLogs operation middleware
 func (siw *ServerInterfaceWrapper) GetKubeLogs(w http.ResponseWriter, r *http.Request) {
 
@@ -15663,6 +15927,15 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/kubernetes/clusters/{clusterId}/apply", wrapper.ApplyKube)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/kubernetes/clusters/{clusterId}/lessons", wrapper.ListKubeLessons)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/kubernetes/clusters/{clusterId}/lessons/{lesson}", wrapper.ResetKubeLesson)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/kubernetes/clusters/{clusterId}/lessons/{lesson}/check", wrapper.CheckKubeLesson)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/kubernetes/clusters/{clusterId}/revisions", wrapper.ListKubeRevisions)

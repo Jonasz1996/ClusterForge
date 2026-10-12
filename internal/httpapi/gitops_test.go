@@ -291,6 +291,9 @@ params:
 		"clusters/notities.md": "geen cluster",
 	})
 	waitHead(sha)
+	// De kop staat er voor de bestanden verwerkt zijn; die komen samen, in
+	// één transactie.
+	eventually(t, "bestanden gelezen", func() bool { return len(v.gitFiles()) > 0 })
 	fs := v.gitFiles()
 	if len(fs) != 3 {
 		t.Fatalf("bestanden: %+v", fs)
