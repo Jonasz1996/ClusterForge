@@ -44,6 +44,7 @@ export const kindLabels: Record<string, string> = {
   deps: "afhankelijkheid",
   other: "overig",
   metrics: "metrics",
+  kube: "Kubernetes",
 };
 
 export const sourceLabels: Record<TimelineEntry["source"], string> = {
@@ -53,6 +54,7 @@ export const sourceLabels: Record<TimelineEntry["source"], string> = {
   proxmox: "Proxmox",
   clusterforge: "ClusterForge",
   metrics: "metrics",
+  kube: "Kubernetes",
 };
 
 export const timelinePeriods: { value: string; label: string; hours: number }[] = [

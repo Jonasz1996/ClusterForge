@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"slices"
@@ -15,6 +16,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/audit"
 	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/httpapi/gen"
+	"github.com/Jonasz1996/clusterforge/internal/incidents"
 	"github.com/Jonasz1996/clusterforge/internal/store"
 	"github.com/Jonasz1996/clusterforge/internal/whatbroke"
 )
@@ -25,8 +27,9 @@ import (
 var incidentHistory = slices.Concat(
 	events.Actions(events.CategoryStatus),
 	events.Actions(events.CategoryIncident),
-	[]string{"service.status_changed", "failover.fault_injected", "failover.fault_cleared", "failover.finished", "backup.verify_finished",
-		"disaster.started", "disaster.fault_injected", "disaster.fault_cleared", "disaster.finished", "dr.aborted", "dr.finished"},
+	[]string{"service.status_changed", "kube.app_status_changed", "kube.rolled_out", "failover.fault_injected", "failover.fault_cleared",
+		"failover.finished", "backup.verify_finished", "disaster.started", "disaster.fault_injected", "disaster.fault_cleared",
+		"disaster.finished", "dr.aborted", "dr.finished"},
 )
 
 // historyLimit is het grootste aantal regels in de geschiedenis van een
@@ -236,14 +239,45 @@ func (s *Server) incidents(r *http.Request, rows []store.Incident) ([]gen.Incide
 	if err != nil {
 		return nil, err
 	}
+	apps, err := s.incidentApps(r.Context(), subjects)
+	if err != nil {
+		return nil, err
+	}
 	for _, sub := range subjects {
 		inc := byID[sub.IncidentID]
+		app := nullable.NewNullNullable[gen.IncidentApp]()
+		if a, ok := apps[sub.SubjectID]; ok && sub.SubjectType == incidents.SubjectApp {
+			app = nullable.NewNullableWithValue(a)
+		}
 		inc.Subjects = append(inc.Subjects, gen.IncidentSubject{
 			Type: gen.IncidentSubjectType(sub.SubjectType), Id: sub.SubjectID, Name: sub.Name,
 			ClusterId: nullableOf(sub.ClusterID), FirstStatus: sub.FirstStatus, WorstStatus: sub.WorstStatus,
 			LastStatus: sub.LastStatus, Reason: sub.Reason, Since: sub.Since, Until: nullableOf(sub.Until),
-			Present: sub.Present,
+			Present: sub.Present, App: app,
 		})
+	}
+	return out, nil
+}
+
+// incidentApps zoekt op waar de geraakte apps in Kubernetes staan, voor een
+// link naar hun pagina.
+func (s *Server) incidentApps(ctx context.Context, subjects []store.ListIncidentSubjectsRow) (map[uuid.UUID]gen.IncidentApp, error) {
+	var ids []uuid.UUID
+	for _, sub := range subjects {
+		if sub.SubjectType == incidents.SubjectApp {
+			ids = append(ids, sub.SubjectID)
+		}
+	}
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	rows, err := s.q.ListKubeWorkloadsByID(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[uuid.UUID]gen.IncidentApp, len(rows))
+	for _, w := range rows {
+		out[w.ID] = gen.IncidentApp{Kind: w.Kind, Namespace: w.Namespace, Name: w.Name}
 	}
 	return out, nil
 }

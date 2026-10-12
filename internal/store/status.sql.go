@@ -76,12 +76,13 @@ func (q *Queries) ListAllVIPs(ctx context.Context) ([]ListAllVIPsRow, error) {
 }
 
 const listClusterStatuses = `-- name: ListClusterStatuses :many
-SELECT id, name, status, status_reason FROM clusters
+SELECT id, name, type, status, status_reason FROM clusters
 `
 
 type ListClusterStatusesRow struct {
 	ID           uuid.UUID
 	Name         string
+	Type         string
 	Status       string
 	StatusReason string
 }
@@ -98,6 +99,7 @@ func (q *Queries) ListClusterStatuses(ctx context.Context) ([]ListClusterStatuse
 		if err := rows.Scan(
 			&i.ID,
 			&i.Name,
+			&i.Type,
 			&i.Status,
 			&i.StatusReason,
 		); err != nil {

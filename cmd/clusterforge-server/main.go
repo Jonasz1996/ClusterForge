@@ -172,6 +172,7 @@ func serve() error {
 	// na een uitrol.
 	kub := kube.NewService(pool, bus, log)
 	kub.EnableDrain(runner, ev)
+	kub.Metrics, kub.Changed = ingest, eval.Kick
 	dep.Kube = kub
 	// Een node van een Kubernetes-cluster gaat eerst leeg voor onderhoud of
 	// een herstart.

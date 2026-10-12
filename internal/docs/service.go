@@ -209,7 +209,7 @@ func (s *Service) tick(ctx context.Context) error {
 // quiet zijn events die niets aan de documentatie veranderen.
 var quiet = map[string]bool{
 	"agent.command": true, "agent.enroll_failed": true, "node.status_changed": true, "vip.owner_changed": true,
-	"service.status_changed": true, "vm.status_changed": true, "node.link_proposed": true, "node.link_ignored": true,
+	"service.status_changed": true, "kube.app_status_changed": true, "vm.status_changed": true, "node.link_proposed": true, "node.link_ignored": true,
 	"backup.sandbox_created": true, "backup.sandbox_destroyed": true, "backup.sandbox_destroy_failed": true,
 	"backup.sandbox_connection_refused": true, "backup.inventory_failed": true, "backup.inventory_recovered": true,
 	"failover.fault_injected": true, "failover.fault_cleared": true, "dr.started": true, "dr.aborted": true,

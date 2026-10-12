@@ -26,6 +26,8 @@ const (
 	SubjectNode    = "node"
 	SubjectService = "service"
 	SubjectTestRun = "test_run"
+	// SubjectApp is een app in een Kubernetes-cluster.
+	SubjectApp = "app"
 )
 
 // Rules zijn de tijden van de detector.
@@ -340,10 +342,26 @@ func newInRound(evs []Event, inc *Incident) bool {
 
 // joinable zoekt een open incident waar p bij hoort: een node bij het
 // incident van zijn cluster, een dienst of test bij het incident van zijn
-// cluster zolang dat cluster nog misgaat (current), en verder een verwante
+// cluster zolang dat cluster nog misgaat (current), een cluster bij het
+// incident van een app erin die nog misgaat, en verder een verwante
 // overgang die binnen rules.Join na het begin valt. Een incident door een
 // test neemt alleen overgangen door een test.
 func joinable(rules Rules, w World, incs []*Incident, p Problem, current map[Key]bool) *Incident {
+	if p.ClusterID != nil && p.Type == SubjectCluster {
+		// Een app telt vanaf het moment dat hij niet meer deed wat hij
+		// moest, het cluster pas vanaf de status die de app maakt: dat
+		// kan ruim na het begin van het incident van de app zijn.
+		for _, inc := range incs {
+			if !inc.Open || inc.CausedByTest != (p.TestRun != nil) {
+				continue
+			}
+			for _, s := range inc.Subjects {
+				if s.Type == SubjectApp && s.ClusterID != nil && *s.ClusterID == *p.ClusterID && current[s.Key] {
+					return inc
+				}
+			}
+		}
+	}
 	if p.ClusterID != nil && p.Type != SubjectCluster {
 		ck := Key{SubjectCluster, *p.ClusterID}
 		for _, inc := range incs {

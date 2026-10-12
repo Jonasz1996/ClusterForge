@@ -18,7 +18,7 @@ import (
 
 // Version is de versie van de regels. Een nieuwe versie rekent elk
 // incident dat nog niet vastligt opnieuw.
-const Version = 1
+const Version = 2
 
 // Niveaus van een oorzaak.
 const (
@@ -340,6 +340,8 @@ type facts struct {
 	// diskFull is per node wanneer hij verminderd werd door een volle schijf.
 	diskFull map[uuid.UUID]time.Time
 	vipLost  []vipLoss
+	// apps zijn per app in een Kubernetes-cluster de symptomen.
+	apps map[string][]appTrouble
 }
 
 type vipLoss struct {
@@ -351,6 +353,7 @@ type vipLoss struct {
 func (r *reach) facts(entries []Entry, from time.Time) facts {
 	f := facts{
 		failing: map[uuid.UUID]map[string][]time.Time{}, down: map[uuid.UUID]time.Time{}, diskFull: map[uuid.UUID]time.Time{},
+		apps: kubeFacts(entries, from),
 	}
 	fail := func(node uuid.UUID, unit string, ts time.Time) {
 		if f.failing[node] == nil {
@@ -499,6 +502,8 @@ func subjectLabel(t string) string {
 		return "Node"
 	case "service":
 		return "Dienst"
+	case "app":
+		return "App"
 	case "test_run":
 		return "Test"
 	}
@@ -619,18 +624,20 @@ func kindWeight(e Entry) float64 {
 	if e.Source == SourceLog {
 		switch e.Action {
 		case "gitops.change_applied", "gitops.change_failed", "gitops.reapply_requested", "cluster.deployed",
-			"proxmox.host_offline", "failover.fault_injected", "vm.missing":
+			"proxmox.host_offline", "failover.fault_injected", "vm.missing", "kube.rolled_out", "kube.applied", "kube.rolled_back":
 			return 1
 		case "vm.status_changed":
 			if to := e.Detail["to"]; to == "stopped" || to == "paused" {
 				return 1
 			}
 			return 0.3
-		case "job.queued", "job.succeeded", "job.failed", "job.retried", "agent.command", "drift.remediation_requested":
+		case "job.queued", "job.succeeded", "job.failed", "job.retried", "agent.command", "drift.remediation_requested",
+			"kube.scaled", "kube.restarted", "kube.deleted", "kube.drained", "kube.node_removed":
 			return 0.9
 		case "drift.detected", "drift.changed":
 			return 0.8
-		case "vm.moved", "node.lifecycle_changed", "agent.enrolled", "agent.revoked", "failover.fault_cleared":
+		case "vm.moved", "node.lifecycle_changed", "agent.enrolled", "agent.revoked", "failover.fault_cleared", "kube.cordoned",
+			"kube.uncordoned":
 			return 0.6
 		case "cluster.spec_changed", "vip.created", "vip.updated", "vip.deleted":
 			return 0.5
@@ -740,6 +747,11 @@ func (r *reach) links(e Entry, f facts, dist float64) []string {
 			out = append(out, fmt.Sprintf("De Proxmox-host ging offline voordat %s erop down ging.", r.hostnames(hit)))
 		default:
 			out = append(out, fmt.Sprintf("De Proxmox-host ging offline voordat %d VM's erop down gingen: %s.", len(hit), r.hostnames(hit)))
+		}
+	}
+	if e.Source == SourceLog && e.Action == "kube.rolled_out" {
+		if l, ok := rolloutLink(e, f); ok {
+			out = append(out, l)
 		}
 	}
 	if stopsVM(e) && node != uuid.Nil {

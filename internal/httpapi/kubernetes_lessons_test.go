@@ -342,7 +342,7 @@ func TestKubernetesLessons(t *testing.T) {
 	fake.Add(d)
 	changed()
 	l = check("configuratie", nil)
-	detail(l, "de oude pods stoppen nog: 4 pods voor 3")
+	detail(l, "nog 1 oude pod naast de nieuwe")
 	d["status"].(map[string]any)["replicas"] = 3
 	fake.Add(d)
 	changed()

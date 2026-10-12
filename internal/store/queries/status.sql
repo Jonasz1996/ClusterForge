@@ -16,7 +16,7 @@ LEFT JOIN node_facts f ON f.node_id = n.id
 LEFT JOIN proxmox_resources r ON r.connection_id = n.proxmox_id AND r.vmid = n.pve_vmid AND r.type IN ('qemu', 'lxc');
 
 -- name: ListClusterStatuses :many
-SELECT id, name, status, status_reason FROM clusters;
+SELECT id, name, type, status, status_reason FROM clusters;
 
 -- name: ListAllVIPs :many
 SELECT id, cluster_id, address, owner_node_id FROM vips;

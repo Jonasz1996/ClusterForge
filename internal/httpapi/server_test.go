@@ -89,6 +89,7 @@ type testEnv struct {
 	docs      *docs.Service
 	reports   *reports.Service
 	kube      *kube.Service
+	ingest    *metrics.Ingester
 
 	// De runner heeft een eigen context, zodat een test hem kan herstarten.
 	runCtx     context.Context
@@ -157,6 +158,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	kub.Interval, kub.Timeout = 0, 5*time.Second
 	kub.DrainTimeout, kub.DrainRetry, kub.DrainPoll = 3*time.Second, 50*time.Millisecond, 20*time.Millisecond
 	kub.EnableDrain(runner, ev)
+	kub.Metrics, kub.Changed = ingest, eval.Kick
 	dep.Kube = kub
 	life.Kube, life.KubeReadyTimeout = kub, 5*time.Second
 	kinv := inventory.NewService(pool, ev)
@@ -237,7 +239,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	srv := httptest.NewServer(api.Handler())
 	t.Cleanup(srv.Close)
 	e := &testEnv{t: t, srv: srv, auth: a, pool: pool, api: api, bus: bus, eval: eval, vm: vm, pve: pve, jobs: runner, life: life, deploy: dep,
-		backups: bk, drift: drf, fo: fo, dis: dis, evalClock: evalClock, deps: dps, ro: ro, git: git, det: det, ana: ana, conns: conns, asst: asst, risk: rsk, topo: tp, docs: dcs, reports: rep, kube: kub, runCtx: runCtx}
+		backups: bk, drift: drf, fo: fo, dis: dis, evalClock: evalClock, deps: dps, ro: ro, git: git, det: det, ana: ana, conns: conns, asst: asst, risk: rsk, topo: tp, docs: dcs, reports: rep, kube: kub, ingest: ingest, runCtx: runCtx}
 	e.startRunner()
 	t.Cleanup(func() {
 		stop()

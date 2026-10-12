@@ -751,6 +751,11 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 			s += "; revisie " + r + " van de specificatie"
 		}
 		return s
+	case "kube.rolled_out":
+		return "Uitrol van " + str(p, "name") + " in " + str(p, "namespace") + ": image " + or(str(p, "from"), "(geen)") + " → " + str(p, "to")
+	case "kube.app_status_changed":
+		return fmt.Sprintf("App %s in %s van %s naar %s", str(p, "name"), str(p, "namespace"), status(str(p, "from")), status(str(p, "to"))) +
+			colon(str(p, "reason"))
 	case "kube.applied":
 		var parts []string
 		if c := list(p["created"]); c != "" {

@@ -628,6 +628,25 @@ type KubeCluster struct {
 	ViaNodeID      *uuid.UUID
 	SyncedAt       time.Time
 	OkAt           *time.Time
+	ErrorKind      string
+}
+
+type KubeEvent struct {
+	ID         int64
+	ClusterID  uuid.UUID
+	Key        string
+	Ts         time.Time
+	LastTs     time.Time
+	Count      int32
+	Reason     string
+	Namespace  string
+	ObjectKind string
+	ObjectName string
+	AppKind    string
+	AppName    string
+	NodeName   string
+	NodeID     *uuid.UUID
+	Message    string
 }
 
 type KubeLessonStep struct {
@@ -654,6 +673,25 @@ type KubeNode struct {
 	MemoryBytes   int64
 	Pods          int32
 	CreatedAt     *time.Time
+}
+
+type KubeWorkload struct {
+	ID           uuid.UUID
+	ClusterID    uuid.UUID
+	Namespace    string
+	Kind         string
+	Name         string
+	System       bool
+	Desired      int32
+	Ready        int32
+	UpToDate     int32
+	Images       []string
+	Trouble      string
+	ShortSince   *time.Time
+	Status       string
+	StatusReason string
+	StatusSince  *time.Time
+	SeenAt       time.Time
 }
 
 type Node struct {

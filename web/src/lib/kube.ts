@@ -4,7 +4,7 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tansta
 import { api, unwrap, type Me } from "./api/client";
 import type { components } from "./api/schema";
 import { meQueryKey, useMe } from "./auth";
-import { liveInterval } from "./inventory";
+import { liveInterval, type MetricsRange } from "./inventory";
 
 export type KubeClusterSummary = components["schemas"]["KubeClusterSummary"];
 export type KubeOverview = components["schemas"]["KubeOverview"];
@@ -58,6 +58,7 @@ const keys = {
   drainPlan: (id: string, node: string, force: boolean) => ["kube", id, "drain-plan", node, force] as const,
   removePlan: (id: string, node: string, force: boolean) => ["kube", id, "remove-plan", node, force] as const,
   lessons: (id: string) => ["kube", id, "lessons"] as const,
+  metrics: (id: string, s: KubeMetricsScope, range: MetricsRange) => ["kube", id, "metrics", s, range] as const,
   lesson: (id: string, lesson: string) => ["kube", id, "lessons", lesson] as const,
 };
 
@@ -465,6 +466,32 @@ export function useKubeLessonReset(id: string, lesson: string) {
   });
 }
 
+// KubeMetricsScope kiest de grafieken: zonder namespace per namespace voor
+// het hele cluster, anders per pod, voor een namespace, een app of één pod.
+export type KubeMetricsScope = {
+  namespace?: string;
+  kind?: "Deployment" | "StatefulSet" | "DaemonSet";
+  name?: string;
+  pod?: string;
+};
+
+// CPU en geheugen uit metrics-server; ClusterForge leest ze elke minuut.
+export function useKubeMetrics(id: string, s: KubeMetricsScope, range: MetricsRange) {
+  return useQuery({
+    queryKey: keys.metrics(id, s, range),
+    queryFn: async () =>
+      unwrap(
+        await api.GET("/kubernetes/clusters/{clusterId}/metrics", {
+          params: { path: { clusterId: id }, query: { range, ...s } },
+        }),
+      ),
+    enabled: id !== "",
+    refetchInterval: 60_000,
+    placeholderData: keepPreviousData,
+    retry: false,
+  });
+}
+
 // objectHref is de pagina van één object.
 export function objectHref(clusterId: string, ref: KubeRef) {
   const q = new URLSearchParams({ id: clusterId });
@@ -552,9 +579,10 @@ export function podTone(p: Pick<KubePod, "status" | "problem">): Tone {
   return "amber";
 }
 
-// formatCPU toont millicores als cores, zoals 1,5 cores of 250 m.
+// formatCPU toont millicores als cores, zoals 1,5 cores of 250 m; een
+// grafiek heeft ook delen van een millicore.
 export function formatCPU(millis: number) {
-  if (millis < 1000) return `${millis} m`;
+  if (millis < 1000) return `${millis.toLocaleString("nl-BE", { maximumFractionDigits: millis < 10 ? 1 : 0 })} m`;
   return `${(millis / 1000).toLocaleString("nl-BE", { maximumFractionDigits: 1 })} ${millis === 1000 ? "core" : "cores"}`;
 }
 

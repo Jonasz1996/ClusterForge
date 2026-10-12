@@ -2841,6 +2841,39 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/kubernetes/clusters/{clusterId}/metrics": {
+        parameters: {
+            query?: {
+                range?: components["schemas"]["MetricsRange"];
+                /** @description Alleen deze namespace; zonder zijn het alle */
+                namespace?: components["parameters"]["KubeNamespace"];
+                /** @description De soort van de app, samen met name */
+                kind?: "Deployment" | "StatefulSet" | "DaemonSet";
+                /** @description De naam van de app */
+                name?: string;
+                /** @description Eén pod */
+                pod?: string;
+            };
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * CPU en geheugen uit metrics-server
+         * @description Zonder namespace een lijn per namespace; met een app of een pod een
+         *     lijn per pod. De sync leest metrics-server elke minuut.
+         */
+        get: operations["getKubeMetrics"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/kubernetes/clusters/{clusterId}/pods": {
         parameters: {
             query?: {
@@ -5450,7 +5483,7 @@ export interface components {
         };
         IncidentSubject: {
             /** @enum {string} */
-            type: "cluster" | "node" | "service" | "test_run";
+            type: "cluster" | "node" | "service" | "test_run" | "app";
             /** Format: uuid */
             id: string;
             name: string;
@@ -5470,6 +5503,13 @@ export interface components {
             until: string | null;
             /** @description Of het onderwerp nog bestaat */
             present: boolean;
+            /** @description Bij een app in Kubernetes waar hij staat; null bij een ander onderwerp of een app die weg is */
+            app: components["schemas"]["IncidentApp"] | null;
+        };
+        IncidentApp: {
+            kind: string;
+            namespace: string;
+            name: string;
         };
         Incident: {
             /** Format: uuid */
@@ -5561,7 +5601,7 @@ export interface components {
             /** @enum {string} */
             class: "change" | "symptom" | "info";
             /** @enum {string} */
-            source: "log" | "agent" | "server" | "proxmox" | "clusterforge" | "metrics";
+            source: "log" | "agent" | "server" | "proxmox" | "clusterforge" | "metrics" | "kube";
             kind: string;
             action: string;
             summary: string;
@@ -6603,7 +6643,7 @@ export interface components {
             id: string;
             title: string;
             /** @enum {string} */
-            unit: "percent" | "load" | "bytes_per_second" | "celsius";
+            unit: "percent" | "load" | "bytes_per_second" | "celsius" | "millicores" | "bytes";
             series: components["schemas"]["MetricSeries"][];
         };
         MetricSeries: {
@@ -12018,6 +12058,43 @@ export interface operations {
                     "application/json": {
                         items: components["schemas"]["KubeWorkload"][];
                     };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    getKubeMetrics: {
+        parameters: {
+            query?: {
+                range?: components["schemas"]["MetricsRange"];
+                /** @description Alleen deze namespace; zonder zijn het alle */
+                namespace?: components["parameters"]["KubeNamespace"];
+                /** @description De soort van de app, samen met name */
+                kind?: "Deployment" | "StatefulSet" | "DaemonSet";
+                /** @description De naam van de app */
+                name?: string;
+                /** @description Eén pod */
+                pod?: string;
+            };
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Metrics"];
                 };
             };
             400: components["responses"]["Error"];

@@ -2958,6 +2958,34 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "502": { $ref: "#/components/responses/Error" }
         "503": { $ref: "#/components/responses/Error" }
+  /kubernetes/clusters/{clusterId}/metrics:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: range, in: query, schema: { $ref: "#/components/schemas/MetricsRange" } }
+      - $ref: "#/components/parameters/KubeNamespace"
+      - name: kind
+        in: query
+        description: De soort van de app, samen met name
+        schema: { type: string, enum: [Deployment, StatefulSet, DaemonSet] }
+      - { name: name, in: query, description: De naam van de app, samen met kind en namespace, schema: { type: string } }
+      - { name: pod, in: query, description: Eén pod, samen met namespace, schema: { type: string } }
+    get:
+      operationId: getKubeMetrics
+      summary: CPU en geheugen uit metrics-server
+      description: |
+        Zonder namespace een lijn per namespace; met een app of een pod een
+        lijn per pod. De sync leest metrics-server elke minuut.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Metrics" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
   /kubernetes/clusters/{clusterId}/pods:
     parameters:
       - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -5684,9 +5712,9 @@ components:
         payload: { type: object, additionalProperties: true }
     IncidentSubject:
       type: object
-      required: [type, id, name, cluster_id, first_status, worst_status, last_status, reason, since, until, present]
+      required: [type, id, name, cluster_id, first_status, worst_status, last_status, reason, since, until, present, app]
       properties:
-        type: { type: string, enum: [cluster, node, service, test_run] }
+        type: { type: string, enum: [cluster, node, service, test_run, app] }
         id: { type: string, format: uuid }
         name: { type: string }
         cluster_id: { type: string, format: uuid, nullable: true }
@@ -5705,6 +5733,17 @@ components:
         present:
           type: boolean
           description: Of het onderwerp nog bestaat
+        app:
+          allOf: [{ $ref: "#/components/schemas/IncidentApp" }]
+          nullable: true
+          description: Bij een app in Kubernetes waar hij staat; null bij een ander onderwerp of een app die weg is
+    IncidentApp:
+      type: object
+      required: [kind, namespace, name]
+      properties:
+        kind: { type: string }
+        namespace: { type: string }
+        name: { type: string }
     Incident:
       type: object
       required: [id, number, title, severity, status, started_at, detected_at, resolved_at, caused_by_test, test_run_id, note, updated_at, subjects, cause]
@@ -5809,7 +5848,7 @@ components:
           type: string
           description: Waarom het venster er is, zoals 'een node gaat pas na 90 s zonder heartbeat op down'
         class: { type: string, enum: [change, symptom, info] }
-        source: { type: string, enum: [log, agent, server, proxmox, clusterforge, metrics] }
+        source: { type: string, enum: [log, agent, server, proxmox, clusterforge, metrics, kube] }
         kind: { type: string }
         action: { type: string }
         summary: { type: string }
@@ -7001,7 +7040,7 @@ components:
       properties:
         id: { type: string }
         title: { type: string }
-        unit: { type: string, enum: [percent, load, bytes_per_second, celsius] }
+        unit: { type: string, enum: [percent, load, bytes_per_second, celsius, millicores, bytes] }
         series:
           type: array
           items: { $ref: "#/components/schemas/MetricSeries" }

@@ -157,6 +157,8 @@ De status van nodes en clusters wordt elke 5 seconden opnieuw berekend:
 | Split-brain | | Een VIP op twee nodes tegelijk |
 | Onbekend | Geen agent | Geen agent op de actieve nodes |
 
+Voor een Kubernetes-cluster gelden ook de regels van de API, de nodes in Kubernetes en de apps; zie [Status, incidenten en metrics](#status-incidenten-en-metrics).
+
 Een VIP mag 15 seconden op twee nodes of op geen enkele staan voordat het telt, zodat een gewone wissel geen vals split-brain geeft. Nodes in onderhoud, draining, opbouw of uit dienst tellen niet mee voor het cluster. Elke statuswissel en elke VIP-verhuis komt in het [logboek](#logboek), en de webinterface werkt live bij.
 
 Een node zonder agent of heartbeat die aan een Proxmox-VM gekoppeld is, krijgt zijn status van Proxmox: staat de VM uit, dan is de node Down met als reden "VM staat uit in Proxmox".
@@ -421,7 +423,7 @@ Na het starten van k3s wacht de uitrol tot elke node van het cluster zich als Re
 
 Onder Kubernetes staan je Kubernetes-clusters met hun versie, hoeveel nodes Ready zijn, hoeveel apps in orde zijn en hoeveel pods draaien. Klik op een cluster voor het dashboard, dat elke vijf seconden ververst:
 
-- **Overzicht**: de tellers, de CPU en het geheugen tegenover wat de nodes kunnen geven (van metrics-server), de pods met problemen, zoals CrashLoopBackOff of ImagePullBackOff, en de laatste vijf waarschuwingen (Kubernetes bewaart events een uur).
+- **Overzicht**: de tellers, de CPU en het geheugen tegenover wat de nodes kunnen geven (van metrics-server), een grafiek van CPU en geheugen per namespace, de pods met problemen, zoals CrashLoopBackOff of ImagePullBackOff, en de laatste vijf waarschuwingen (Kubernetes bewaart events een uur).
 - **Nodes**: elke Kubernetes-node met Ready of NotReady en waarom, server of agent, cordon, gebruik, het aantal pods en een link naar de node in ClusterForge. ClusterForge koppelt ze op de naam die k3s kreeg, het adres of de hostname. Een beheerder zet hier nodes bij en haalt workers weg; zie [Nodes toevoegen en weghalen](#nodes-toevoegen-en-weghalen).
 - **Apps**: de Deployments, StatefulSets, DaemonSets, CronJobs en Jobs, met hoeveel er klaar zijn en wat er mis is.
 - **Pods**: de pods zoals `kubectl get pods` ze toont, te filteren op namespace en node.
@@ -435,6 +437,7 @@ Klik op een pod, app, node, Service of ander object om het te openen. Je ziet:
 
 - de toestand in gewone woorden, zoals "CrashLoopBackOff op leren-worker-02: 0 van 1 containers klaar, 7 herstarts";
 - de keten: welke ReplicaSet en Deployment de pod maakten, op welke node hij draait, welke ClusterForge-node en welke VM op welke Proxmox-host dat is, en via welke Service en Ingress hij bereikbaar is;
+- bij een pod of app een grafiek van CPU en geheugen per pod;
 - bij een pod de containers met hun toestand en waarom de vorige stopte, en de logs: de laatste 100 tot 5000 regels, met tijdstippen als je wilt, die meeverversen. Herstartte een container, dan toont Vorige container de log van voor de herstart, waar de reden meestal staat;
 - de condities, de events van dat object, de labels en het object als YAML, zoals `kubectl get -o yaml` het toont maar zonder managedFields en zonder de waarden van Secrets.
 
@@ -528,6 +531,30 @@ ClusterForge kijkt naar het resultaat, niet naar hoe je het deed: `kubectl creat
 
 De voortgang blijft per gebruiker en per cluster bewaard. Ook een viewer kan de lessen volgen, met kubectl of met een beheerder die toepast. Met **Opnieuw beginnen** wis je je voortgang in een les; wat er op het cluster staat, blijft. Ben je klaar, dan haalt **Opruimen** onder de lijst de namespace `leren` weg, met alles wat de lessen maakten, ook de volumes. Je voortgang blijft dan staan.
 
+### Status, incidenten en metrics
+
+Een Kubernetes-cluster krijgt de gewone [status](#monitoring) van zijn nodes en VIP, met de regels van Kubernetes erbij:
+
+- **Down** als de API via geen enkele server antwoordt, 90 seconden lang (drie rondes van de sync). Is de agent te oud of draait er nergens een agent met k3s, dan weet ClusterForge het niet, en blijft de status van de nodes staan.
+- **Verminderd** als een node NotReady is (bij een server staat erbij dat etcd een lid mist), of als een app verminderd of down is. De reden noemt hoogstens drie problemen, zoals "app web in demo: de uitrol hangt (ImagePullBackOff)".
+
+**Apps.** Elke Deployment, StatefulSet en DaemonSet buiten kube-system, kube-public en kube-node-lease krijgt een eigen status. Een app doet niet wat hij moet als hij minder pods klaar heeft dan gewenst, of als een uitrol niet opschiet omdat de nieuwe pods een probleem hebben: de oude pods draaien dan nog, maar de nieuwe versie komt er nooit. Duurt dat twee minuten, dan is de app down als geen enkele pod klaar is, en anders verminderd. Een gewone uitrol of een pod die herstart, is binnen die tijd klaar. Elke wissel staat in het logboek, zoals "App web in demo van gezond naar verminderd: de uitrol hangt (ImagePullBackOff)".
+
+**Incidenten.** Een app die verminderd of down gaat, opent een [incident](#incidenten), net als een dienst. Het cluster dat erdoor verminderd raakt, komt in hetzelfde incident, en de app linkt naar zijn pagina in het dashboard.
+
+**What Broke.** ClusterForge bewaart de waarschuwingen van Kubernetes 30 dagen (Kubernetes zelf bewaart ze een uur), en ook elke container die stopte door gebrek aan geheugen (OOMKilled). Ze staan in de tijdlijn met de bron Kubernetes; BackOff, Failed, OOMKilled, FailedScheduling, Unhealthy, Evicted en FailedMount zijn symptomen. Krijgt een app een andere image, dan is dat een uitrol: een verandering in het logboek, zoals "Uitrol van web in demo: image nginx:1.29 → nginx:1.299", op het moment dat de eerste pod met de nieuwe image ontstond. Gaat de app daarna mis, dan noemt [What Broke](#what-broke) de uitrol als oorzaak, met het verband in één zin: "web in demo kan zijn image niet ophalen sinds de uitrol van image nginx:1.299 om 14:02."
+
+**Metrics.** Elke minuut leest ClusterForge CPU en geheugen uit metrics-server, dat k3s meelevert, en schrijft ze naar VictoriaMetrics:
+
+| Metric | Wat | Extra labels |
+| --- | --- | --- |
+| `kube_pod_cpu_usage_cores` | CPU van een pod, in cores | `namespace`, `pod`, `workload`, `workload_kind` |
+| `kube_pod_memory_working_set_bytes` | Geheugen van een pod (working set), in bytes | `namespace`, `pod`, `workload`, `workload_kind` |
+| `kube_node_cpu_usage_cores` | CPU van een node, in cores | |
+| `kube_node_memory_working_set_bytes` | Geheugen van een node, in bytes | |
+
+Ze hebben dezelfde labels als de metrics van een node (`job`, `instance`, `node`, `node_id`, `cluster`, `cluster_id`, `env`), met als node die waarop de pod draait. `workload` is de app van de pod, zoals de Deployment boven zijn ReplicaSet. Het overzicht toont CPU en geheugen per namespace, de pagina van een app of pod per pod. Een nieuwe agent is hiervoor niet nodig: de agent leest metrics-server zoals de rest van de API.
+
 ### Hoe ClusterForge Kubernetes leest
 
 De server praat nooit zelf met de Kubernetes-API. cf-agent op een k3s-server doet het, met de beheerdersconfig `/etc/rancher/k3s/k3s.yaml` die daar al staat, en stuurt het antwoord via de bestaande verbinding (NATS) terug. Daardoor hoeft poort 6443 niet open naar ClusterForge, en verlaat geen certificaat van het cluster de server. ClusterForge kiest een server met een verse heartbeat waarvan de API antwoordt; valt die weg, dan neemt een andere het over.
@@ -536,7 +563,7 @@ De agent laat alleen lezen toe, met een vaste lijst: geen exec, attach, port-for
 
 Dit kan vanaf **agentprotocol 8**. Met een oudere agent toont de pagina "Agent te oud voor Kubernetes", met het commando om hem bij te werken; de aanmelding blijft staan. Werk ook je golden image bij, anders krijgen nieuwe VM's de oude agent. De andere onderdelen van ClusterForge blijven werken met een oudere agent.
 
-Elke 30 seconden vat ClusterForge elk Kubernetes-cluster samen voor de lijst. Antwoordt de API niet, dan blijft de laatste stand staan met "API niet bereikbaar" en de reden.
+Elke 30 seconden vat ClusterForge elk Kubernetes-cluster samen voor de lijst, de status, de apps en de waarschuwingen. Antwoordt de API niet, dan blijft de laatste stand staan met "API niet bereikbaar" en de reden.
 
 ## Failovertests
 
@@ -724,9 +751,10 @@ Gaat er iets mis, dan maakt ClusterForge er een incident van: één storing met 
 - een cluster dat verminderd, down of in split-brain gaat;
 - een node zonder cluster die down gaat;
 - een bevestigde dienst met afnemers (zie Afhankelijkheden) die down gaat;
+- een app in een Kubernetes-cluster die verminderd of down gaat (zie [Status, incidenten en metrics](#status-incidenten-en-metrics));
 - een geplande failovertest of back-upcontrole die mislukt of een fout geeft.
 
-Wat bij elkaar hoort, komt in hetzelfde incident: een node bij het incident van zijn cluster, een dienst of mislukte test bij dat van zijn cluster zolang het cluster nog misgaat, en een andere overgang die binnen tien minuten na het begin valt en verwant is (hetzelfde cluster, een cluster dat via de afhankelijkheden van het andere afhangt, of een node op dezelfde Proxmox-host). Een incident sluit als alles vijf minuten gezond is, en gaat weer open als dezelfde storing binnen een kwartier terugkomt. Een node in onderhoud geeft geen incident.
+Wat bij elkaar hoort, komt in hetzelfde incident: een node bij het incident van zijn cluster, een dienst, app of mislukte test bij dat van zijn cluster zolang het cluster nog misgaat, een cluster bij het incident van een app erin, en een andere overgang die binnen tien minuten na het begin valt en verwant is (hetzelfde cluster, een cluster dat via de afhankelijkheden van het andere afhangt, of een node op dezelfde Proxmox-host). Een incident sluit als alles vijf minuten gezond is, en gaat weer open als dezelfde storing binnen een kwartier terugkomt. Een node in onderhoud geeft geen incident.
 
 De ernst volgt uit de omgeving: op prod is down of split-brain kritiek en verminderd hoog, al het andere is laag. Een incident wordt alleen erger, nooit minder erg. Wat gebeurt terwijl een failovertest van ClusterForge in hetzelfde cluster loopt (of tot twee minuten erna), krijgt de markering 'door een failovertest' en is standaard verborgen.
 
@@ -738,16 +766,16 @@ Een VIP-wissel en de statuswissel van een dienst staan nu ook bij de nodes zelf 
 
 Bij elk incident zet ClusterForge op een rij wat er eerst misging, wat er vlak ervoor veranderde en wat daarvan de waarschijnlijke oorzaak is. Dat zijn vaste regels zonder AI: dezelfde gegevens geven altijd hetzelfde rapport, met de redenen erbij.
 
-**De tijdlijn** voegt het logboek en het journaal van de nodes samen, met de afwijkingen in de metrics erbij. Elke regel is een verandering (die oorzaak kan zijn), een symptoom (wat er misging) of informatie. Een moment dat ClusterForge pas later ziet, krijgt een venster 'waarschijnlijk tussen': een node gaat pas na 90 s zonder heartbeat op down, Proxmox wordt elke 20 s gelezen, en drift elk kwartier.
+**De tijdlijn** voegt het logboek, het journaal van de nodes en de waarschuwingen van Kubernetes samen, met de afwijkingen in de metrics erbij. Elke regel is een verandering (die oorzaak kan zijn), een symptoom (wat er misging) of informatie. Een moment dat ClusterForge pas later ziet, krijgt een venster 'waarschijnlijk tussen': een node gaat pas na 90 s zonder heartbeat op down, Proxmox wordt elke 20 s gelezen, en drift elk kwartier.
 
 **De analyse:**
 
-1. **Eerste symptoom.** Het vroegste symptoom in wat geraakt was, rond het begin van het incident: een dienst die faalde in het journaal, een node of cluster dat slechter werd, een VIP zonder eigenaar.
+1. **Eerste symptoom.** Het vroegste symptoom in wat geraakt was, rond het begin van het incident: een dienst die faalde in het journaal, een node, cluster of app dat slechter werd, een VIP zonder eigenaar, een waarschuwing van Kubernetes.
 2. **Kandidaten.** Elke verandering van twee uur voor het eerste symptoom tot een minuut erna, plus een OOM-kill en een afwijking in de metrics van het kwartier ervoor.
 3. **Score.** Elke kandidaat krijgt een score uit:
    - de plaats: de node die misging telt het zwaarst, dan hetzelfde cluster, een cluster waar het van afhangt en dezelfde Proxmox-host, en elders het minst;
    - de tijd: elke tien minuten ervoor telt half zo zwaar;
-   - de soort: een Git-wijziging, uitrol, pakketupdate of VM-actie het zwaarst, dan een taak, een gewijzigd bestand, een herstart en een SSH-login.
+   - de soort: een Git-wijziging, uitrol (ook van een image in Kubernetes), pakketupdate of VM-actie het zwaarst, dan een taak, een gewijzigd bestand, een herstart en een SSH-login.
 4. **Verbanden.** Vaste verbanden geven een bonus en een zin in het rapport:
    - het bijgewerkte pakket hoort bij de dienst die faalt (nginx bij nginx.service, mariadb-server bij mysql);
    - het gewijzigde bestand hoort bij die dienst (/etc/nginx/ bij nginx);
@@ -756,7 +784,8 @@ Bij elk incident zet ClusterForge op een rij wat er eerst misging, wat er vlak e
    - de Proxmox-host ging offline voordat de VM's erop down gingen;
    - de schijf liep vol voordat de dienst faalde;
    - de VIP-eigenaar herstartte vlak voor het VIP geen eigenaar meer had;
-   - de wijziging mislukte.
+   - de wijziging mislukte;
+   - de app in Kubernetes ging mis na de uitrol van een nieuwe image.
 5. **Groeperen.** Regels van dezelfde taak zijn één oorzaak, met de Git-commit als die er is. Pakketten of bestanden op dezelfde node binnen twee minuten zijn één update.
 6. **Uitkomst.** Hoogstens vijf oorzaken, elk waarschijnlijk, mogelijk of zwak verband, met de redenen. Veranderde er niets, dan zegt het rapport dat: 'ClusterForge zag in de twee uur ervoor geen verandering. De afwijkingen in de metrics staan hieronder; de oorzaak ligt waarschijnlijk buiten de nodes.'
 

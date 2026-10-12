@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { Suspense, useState, type ReactNode } from "react";
 import { DoneAlert, KubeActions, type ActionDone, type ActionTarget } from "@/components/kube/Actions";
 import { CodeBlock, EventList, KubeError, Learn, LearnToggle, ObjectLink, Term } from "@/components/kube/Kube";
+import { KubeMetrics } from "@/components/kube/KubeMetrics";
 import { Logs } from "@/components/kube/Logs";
 import { ago, tableClass, tdClass, thClass } from "@/components/inventory/bits";
 import { Alert, Badge, Card, cx, PageHeader } from "@/components/ui";
@@ -19,6 +20,7 @@ import {
   useKubeObject,
   type KubeChainLink,
   type KubeContainer,
+  type KubeMetricsScope,
   type KubeObject,
   type KubeRef,
 } from "@/lib/kube";
@@ -123,7 +125,18 @@ function backHref(id: string, kind: string) {
   return `/kubernetes/cluster?id=${id}${tab ? `&tab=${tab}` : ""}`;
 }
 
+// metricsScope kiest de grafieken van een pod of app; andere soorten hebben
+// er geen.
+function metricsScope(o: KubeObject): KubeMetricsScope | null {
+  const ns = o.ref.namespace;
+  if (o.kind === "Pod") return { namespace: ns, pod: o.ref.name };
+  if (o.kind === "Deployment" || o.kind === "StatefulSet" || o.kind === "DaemonSet")
+    return { namespace: ns, kind: o.kind, name: o.ref.name };
+  return null;
+}
+
 function ObjectView({ id, o }: { id: string; o: KubeObject }) {
+  const scope = metricsScope(o);
   const what = kubectlObject(o.ref, o.kind);
   const commands = [kubectl(`get ${what} -o yaml`), kubectl(`describe ${what}`)];
   if (o.kind === "Pod") commands.push(kubectl(`logs ${o.ref.name} -n ${o.ref.namespace}`));
@@ -166,6 +179,8 @@ function ObjectView({ id, o }: { id: string; o: KubeObject }) {
           </Card>
         </>
       )}
+
+      {scope && <KubeMetrics clusterId={id} scope={scope} title="CPU en geheugen per pod" />}
 
       {o.conditions.length > 0 && (
         <Card title="Condities">

@@ -96,6 +96,8 @@ type PodSpec struct {
 	Claim string
 	// EmptyDir geeft de pod een volume cache in een emptyDir.
 	EmptyDir bool
+	// Created is wanneer de pod ontstond; leeg laat de tijd weg.
+	Created time.Time
 }
 
 // Pod maakt een pod met één container.
@@ -121,6 +123,9 @@ func Pod(p PodSpec) map[string]any {
 		labels[k] = v
 	}
 	md := map[string]any{"name": p.Name, "namespace": p.Namespace, "labels": labels}
+	if !p.Created.IsZero() {
+		md["creationTimestamp"] = p.Created.UTC().Format(time.RFC3339)
+	}
 	if p.OwnerKind != "" {
 		md["ownerReferences"] = []any{map[string]any{
 			"apiVersion": ownerAPIVersion(p.OwnerKind), "kind": p.OwnerKind, "name": p.OwnerName, "uid": "owner-" + p.OwnerName, "controller": true,
@@ -190,6 +195,9 @@ type WorkloadSpec struct {
 	// Generation en ObservedGeneration; gelijk als de uitrol klaar is.
 	Generation         int
 	ObservedGeneration int
+	// Old is het aantal oude pods van een Deployment die nog wachten op de
+	// nieuwe, zoals bij een uitrol die hangt; Ready telt ze mee.
+	Old int
 }
 
 func (w WorkloadSpec) meta() map[string]any {
@@ -220,7 +228,7 @@ func Deployment(w WorkloadSpec) map[string]any {
 			"template": w.template(), "strategy": map[string]any{"type": "RollingUpdate"},
 		},
 		"status": map[string]any{
-			"observedGeneration": w.observed(), "replicas": w.Replicas, "readyReplicas": w.Ready, "availableReplicas": w.Ready,
+			"observedGeneration": w.observed(), "replicas": w.Replicas + w.Old, "readyReplicas": w.Ready, "availableReplicas": w.Ready,
 			"updatedReplicas": w.Replicas,
 		},
 	}
@@ -251,6 +259,26 @@ func DaemonSet(w WorkloadSpec) map[string]any {
 			"observedGeneration": w.observed(), "desiredNumberScheduled": w.Replicas, "currentNumberScheduled": w.Replicas,
 			"numberReady": w.Ready, "numberAvailable": w.Ready, "updatedNumberScheduled": w.Replicas,
 		},
+	}
+}
+
+// PodMetrics maakt de meting van metrics-server voor een pod met één
+// container, met CPU en geheugen zoals Kubernetes ze schrijft: 250m en
+// 128Mi.
+func PodMetrics(namespace, name, cpu, memory string) map[string]any {
+	return map[string]any{
+		"apiVersion": "metrics.k8s.io/v1beta1", "kind": "PodMetrics",
+		"metadata":  map[string]any{"name": name, "namespace": namespace},
+		"timestamp": time.Now().UTC().Format(time.RFC3339), "window": "15s",
+		"containers": []any{map[string]any{"name": "main", "usage": map[string]any{"cpu": cpu, "memory": memory}}},
+	}
+}
+
+// NodeMetrics maakt de meting van metrics-server voor een node.
+func NodeMetrics(name, cpu, memory string) map[string]any {
+	return map[string]any{
+		"apiVersion": "metrics.k8s.io/v1beta1", "kind": "NodeMetrics", "metadata": map[string]any{"name": name},
+		"timestamp": time.Now().UTC().Format(time.RFC3339), "window": "15s", "usage": map[string]any{"cpu": cpu, "memory": memory},
 	}
 }
 

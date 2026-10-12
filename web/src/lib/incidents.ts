@@ -4,6 +4,7 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tansta
 import { api, unwrap } from "./api/client";
 import type { components } from "./api/schema";
 import { liveInterval, statuses, type Status } from "./inventory";
+import { objectHref, refOf } from "./kube";
 
 export type Incident = components["schemas"]["Incident"];
 export type IncidentSubject = components["schemas"]["IncidentSubject"];
@@ -27,6 +28,7 @@ export const subjectTypes: Record<IncidentSubject["type"], string> = {
   node: "Node",
   service: "Dienst",
   test_run: "Test",
+  app: "App",
 };
 
 // statusLabel is een status van een onderwerp in het Nederlands; een test
@@ -55,6 +57,8 @@ export function subjectHref(s: IncidentSubject): string | null {
       return s.cluster_id ? `/afhankelijkheden?cluster_id=${s.cluster_id}&dienst=${s.id}` : "/afhankelijkheden";
     case "test_run":
       return `/tests/detail?id=${s.id}`;
+    case "app":
+      return s.cluster_id && s.app ? objectHref(s.cluster_id, refOf(s.app.kind, s.app.namespace, s.app.name)) : null;
   }
   return null;
 }
