@@ -234,6 +234,10 @@ var Known = map[string]Spec{
 	"kube.app_status_changed": {CategoryKube, "Status van app in Kubernetes gewijzigd"},
 	"kube.access_issued":      {CategoryKube, "Kubeconfig voor kubectl uitgegeven"},
 	"kube.access_revoked":     {CategoryKube, "Kubeconfig voor kubectl ingetrokken"},
+
+	"kube.snapshot_saved":           {CategoryKube, "etcd-snapshot gemaakt in Kubernetes"},
+	"kube.snapshot_restored":        {CategoryKube, "etcd-snapshot teruggezet in Kubernetes"},
+	"kube.snapshot_restore_started": {CategoryKube, "Terugzetten van etcd-snapshot gestart in Kubernetes"},
 }
 
 // Lookup geeft de spec van een action. Een onbekende action (uit een nieuwere

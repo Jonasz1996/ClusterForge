@@ -21,6 +21,7 @@ import {
   UsageBar,
 } from "@/components/kube/Kube";
 import { AllTab, ConfigTab, EventsTab, NetworkTab, StorageTab } from "@/components/kube/Resources";
+import { SnapshotsTab } from "@/components/kube/Snapshots";
 import { Empty, formatBytes, tableClass, tdClass, thClass } from "@/components/inventory/bits";
 import { SpecEditDialog } from "@/components/inventory/SpecEdit";
 import { Alert, Badge, Button, Card, cx, PageHeader, Select } from "@/components/ui";
@@ -61,6 +62,7 @@ type Tab =
   | "gebeurtenissen"
   | "alles"
   | "lessen"
+  | "snapshots"
   | "kubectl";
 
 const tabs: { id: Tab; label: string }[] = [
@@ -75,6 +77,7 @@ const tabs: { id: Tab; label: string }[] = [
   { id: "gebeurtenissen", label: "Gebeurtenissen" },
   { id: "alles", label: "Alles" },
   { id: "lessen", label: "Lessen" },
+  { id: "snapshots", label: "Snapshots" },
   { id: "kubectl", label: "kubectl" },
 ];
 
@@ -161,7 +164,12 @@ function KubeClusterInner() {
         }
       />
 
-      <nav className="flex gap-1 overflow-x-auto border-b border-slate-200 dark:border-slate-800" aria-label="Onderdelen">
+      {/* Op een smal scherm schuiven de tabbladen, op een breed lopen ze door
+          op een tweede regel. */}
+      <nav
+        className="flex gap-1 overflow-x-auto border-b border-slate-200 sm:flex-wrap dark:border-slate-800"
+        aria-label="Onderdelen"
+      >
         {shown.map((t) => (
           <button
             key={t.id}
@@ -229,6 +237,7 @@ function KubeClusterInner() {
             {p.tab === "lessen" && (
               <LessonsTab id={p.id} lesson={p.lesson} namespaces={o.namespaces} onLesson={(les) => p.set({ les })} />
             )}
+            {p.tab === "snapshots" && <SnapshotsTab id={p.id} />}
             {p.tab === "kubectl" && <AccessTab id={p.id} o={o} />}
           </>
         )

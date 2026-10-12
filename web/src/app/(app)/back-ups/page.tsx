@@ -5,6 +5,7 @@ import { useState, type ReactNode } from "react";
 import { BackupTable, FreshnessBadge, Latest } from "@/components/backups/Backups";
 import { SandboxesCard, verifiable, VerifyHistory } from "@/components/backups/Verify";
 import { reportHref } from "@/components/failover/Failover";
+import { SnapshotsCard } from "@/components/kube/Snapshots";
 import { ago, Empty, QueryState } from "@/components/inventory/bits";
 import { Alert, Button, Card, Input, Label, PageHeader, Select } from "@/components/ui";
 import {
@@ -77,6 +78,8 @@ export default function BackupsPage() {
           </>
         )}
       </QueryState>
+      {/* k3s bewaart zijn eigen snapshots, ook zonder Proxmox. */}
+      <SnapshotsCard />
     </div>
   );
 }

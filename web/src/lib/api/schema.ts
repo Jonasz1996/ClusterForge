@@ -3351,6 +3351,82 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/kubernetes/snapshots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Per Kubernetes-cluster hoe het met de etcd-snapshots staat, voor Back-ups
+         * @description Zoals de sync ze laatst las (om de vijf minuten). freshness is ok als de nieuwste snapshot jonger is dan een dag,
+         *     stale als hij ouder is, none zonder snapshot, en unknown als de lijst niet te lezen is.
+         */
+        get: operations["listKubeSnapshotClusters"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/kubernetes/clusters/{clusterId}/snapshots": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * De etcd-snapshots van een cluster, per server
+         * @description ClusterForge leest ze op dat moment uit de API (ETCDSnapshotFile van k3s). Lukt dat niet, dan komt de laatst
+         *     gelezen lijst terug met de fout in error.
+         */
+        get: operations["listKubeSnapshots"];
+        put?: never;
+        /**
+         * Snapshot nu (admin)
+         * @description De agent op de server die het cluster begon doet k3s etcd-snapshot save --name clusterforge; is die er niet, dan
+         *     een andere server. snapshot is leeg als k3s hem nog niet in de API meldt. Een agent van voor deze versie geeft 503
+         *     met code agent_too_old, een fout van k3s 502 met code node_failed.
+         */
+        post: operations["saveKubeSnapshot"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/kubernetes/clusters/{clusterId}/snapshots/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Een snapshot terugzetten in lab of test (admin); wordt een taak
+         * @description Alles wat na de snapshot veranderde in Kubernetes is daarna weg. De taak maakt eerst een snapshot van nu, stopt
+         *     k3s op elke server, zet de snapshot terug op de server die het cluster begon (k3s server --cluster-reset), start k3s
+         *     daar, zet op de andere servers de database van etcd opzij en start ze, en wacht tot elke node Ready is. Alleen met
+         *     een snapshot op de server die het cluster begon. Met preview=true komt alleen het plan terug; anders is de slug in
+         *     confirm nodig. Op prod geeft het 409: daar staat het runbook in de webinterface en de README.
+         */
+        post: operations["restoreKubeSnapshot"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -3648,6 +3724,100 @@ export interface components {
             /** Format: date-time */
             removed_at: string | null;
             remove_error: string;
+        };
+        KubeSnapshot: {
+            /** @description De naam van het ETCDSnapshotFile-object */
+            name: string;
+            /** @description De bestandsnaam, zoals etcd-snapshot-leren-server-01-1760000000 */
+            file: string;
+            /** @description De server in Kubernetes waarop het bestand staat */
+            node: string;
+            /** @description Die server in ClusterForge */
+            hostname: string | null;
+            /**
+             * @description scheduled: k3s zelf, elke twaalf uur; clusterforge: Snapshot nu of vlak voor terugzetten; on_demand: met de hand
+             * @enum {string}
+             */
+            kind: "scheduled" | "clusterforge" | "on_demand";
+            /** @description Zoals file:///var/lib/rancher/k3s/server/db/snapshots/... */
+            location: string;
+            s3: boolean;
+            /** Format: int64 */
+            size_bytes: number | null;
+            /** Format: date-time */
+            taken_at: string | null;
+            ready: boolean;
+            error: string;
+            /** @description ClusterForge kan deze snapshot terugzetten */
+            restorable: boolean;
+            /** @description Waarom terugzetten niet kan; leeg als het kan */
+            restore_note: string;
+        };
+        KubeSnapshotServer: {
+            node: string;
+            hostname: string;
+            /** @description Deze server begon het cluster */
+            init: boolean;
+        };
+        KubeSnapshots: {
+            items: components["schemas"]["KubeSnapshot"][];
+            /**
+             * Format: date-time
+             * @description Wanneer de lijst laatst gelezen werd
+             */
+            read_at: string | null;
+            /** @description Waarom de lijst nu niet te lezen was */
+            error: string;
+            /** @enum {string} */
+            freshness: "ok" | "stale" | "none" | "unknown";
+            /** @description De servers met een agent, de eerste eerst */
+            servers: components["schemas"]["KubeSnapshotServer"][];
+        };
+        KubeSnapshotSaved: {
+            snapshot: components["schemas"]["KubeSnapshot"] | null;
+            /** @description De server waarop hij gemaakt is */
+            hostname: string;
+            /** @description Wat k3s schreef */
+            output: string[];
+        };
+        KubeRestoreInput: {
+            /** @description De naam van de snapshot (name uit de lijst) */
+            name: string;
+            /** @description Alleen het plan */
+            preview?: boolean;
+            /** @description De slug van het cluster; altijd nodig */
+            confirm?: string;
+        };
+        KubeRestorePlan: {
+            snapshot: components["schemas"]["KubeSnapshot"];
+            /** @description De server die het cluster begon; daar gaat de snapshot terug */
+            init: string;
+            /** @description De andere servers; die melden zich daarna opnieuw aan */
+            others: string[];
+            /** @description Het aantal andere nodes; die melden zich vanzelf weer */
+            workers: number;
+        };
+        KubeSnapshotCluster: {
+            /** Format: uuid */
+            cluster_id: string;
+            name: string;
+            slug: string;
+            environment: components["schemas"]["Environment"];
+            /** @enum {string} */
+            freshness: "ok" | "stale" | "none" | "unknown";
+            /** Format: date-time */
+            newest_at: string | null;
+            /** Format: date-time */
+            read_at: string | null;
+            error: string;
+            servers: components["schemas"]["KubeSnapshotClusterServer"][];
+        };
+        KubeSnapshotClusterServer: {
+            node: string;
+            hostname: string | null;
+            /** Format: date-time */
+            newest_at: string | null;
+            count: number;
         };
         KubeAccessIssued: {
             access: components["schemas"]["KubeAccess"];
@@ -12877,6 +13047,122 @@ export interface operations {
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
+        };
+    };
+    listKubeSnapshotClusters: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description De clusters */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["KubeSnapshotCluster"][];
+                    };
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    listKubeSnapshots: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description De snapshots */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KubeSnapshots"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    saveKubeSnapshot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Gemaakt */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KubeSnapshotSaved"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
+    restoreKubeSnapshot: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["KubeRestoreInput"];
+            };
+        };
+        responses: {
+            /** @description Het plan */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KubeRestorePlan"];
+                };
+            };
+            /** @description Taak aangemaakt */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Job"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+            503: components["responses"]["Error"];
         };
     };
 }

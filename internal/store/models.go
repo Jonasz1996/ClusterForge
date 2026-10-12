@@ -645,6 +645,8 @@ type KubeCluster struct {
 	SyncedAt       time.Time
 	OkAt           *time.Time
 	ErrorKind      string
+	SnapshotsAt    *time.Time
+	SnapshotsError string
 }
 
 type KubeEvent struct {
@@ -689,6 +691,19 @@ type KubeNode struct {
 	MemoryBytes   int64
 	Pods          int32
 	CreatedAt     *time.Time
+}
+
+type KubeSnapshot struct {
+	ClusterID uuid.UUID
+	Name      string
+	File      string
+	Node      string
+	Location  string
+	S3        bool
+	SizeBytes *int64
+	TakenAt   *time.Time
+	Ready     bool
+	Error     string
 }
 
 type KubeWorkload struct {

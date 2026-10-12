@@ -36,6 +36,7 @@ func (s *Server) kubeError(w http.ResponseWriter, r *http.Request, err error) {
 	var be *kube.BlockedError
 	var ye *kube.YAMLError
 	var ie *kube.InputError
+	var ne *kube.NodeError
 	switch {
 	case errors.Is(err, kube.ErrNotKubernetes):
 		writeError(w, http.StatusNotFound, "not_found", "geen Kubernetes-cluster met dit id")
@@ -62,6 +63,8 @@ func (s *Server) kubeError(w http.ResponseWriter, r *http.Request, err error) {
 		writeError(w, http.StatusConflict, "conflict", ae.Error())
 	case errors.As(err, &ae):
 		writeError(w, http.StatusBadGateway, "kube_api", ae.Error())
+	case errors.As(err, &ne):
+		writeError(w, http.StatusBadGateway, "node_failed", ne.Error())
 	default:
 		s.internalError(w, r, err)
 	}

@@ -124,7 +124,11 @@ func (a *Agent) handleKube(data []byte) protocol.KubeResponse {
 	case <-time.After(kubeQueueWait):
 		return protocol.KubeResponse{Error: "de agent is te druk met andere kube-verzoeken; probeer het zo opnieuw"}
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), kubeTimeout)
+	timeout := kubeTimeout
+	if req.Op == protocol.KubeSnapshot {
+		timeout = protocol.KubeSnapshotTimeout
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	if !req.Deadline.IsZero() {
 		var c2 context.CancelFunc
@@ -147,6 +151,8 @@ func (a *Agent) handleKube(data []byte) protocol.KubeResponse {
 		res = b.apply(ctx, req)
 	case protocol.KubeToken:
 		res = b.token(ctx, req)
+	case protocol.KubeSnapshot:
+		res = a.snapshot(ctx, req)
 	default:
 		res = protocol.KubeResponse{Error: "onbekend kube-verzoek " + req.Op}
 	}
@@ -819,14 +825,11 @@ func (a *Agent) kubeFacts(ctx context.Context, hostname string) *protocol.KubeFa
 	default:
 		return nil
 	}
-	if b, err := os.ReadFile(filepath.Join(root, k3sConfig)); err == nil {
-		for line := range strings.Lines(string(b)) {
-			if v, ok := strings.CutPrefix(strings.TrimSpace(line), "node-name:"); ok {
-				if v = strings.Trim(strings.TrimSpace(v), `"'`); v != "" {
-					f.NodeName = v
-				}
-			}
+	if cfg, err := readK3sConfig(root); err == nil {
+		if cfg.NodeName != "" {
+			f.NodeName = cfg.NodeName
 		}
+		f.Init = f.Role == "server" && cfg.Init
 	}
 	if out, err := a.execTimeout(ctx, 5*time.Second, "k3s", "--version"); err == nil {
 		// k3s version v1.35.9+k3s1 (0a1b2c3d)
