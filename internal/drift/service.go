@@ -68,6 +68,9 @@ type Service struct {
 	// Parallel is het aantal controles tegelijk op de achtergrond.
 	Parallel int
 	Now      func() time.Time
+	// Components geeft de stappen van de onderdelen op een node, zoals de
+	// database van fase 5. Mag nil zijn.
+	Components Components
 
 	work    chan work
 	mu      sync.Mutex
@@ -339,9 +342,48 @@ type expectation struct {
 	contents []*contentWant
 }
 
-// expected leest de gewenste staat van de node: de gerenderde template, of
-// zijn deel van de baseline.
+// Components geeft de stappen van de toegepaste onderdelen op een node,
+// gerenderd met hun toegepaste revisie; leeg als de node in geen onderdeel
+// staat.
+type Components interface {
+	NodeSteps(ctx context.Context, nodeID uuid.UUID) (steps []templates.Step, revision int, err error)
+}
+
+// noDesired is de reden om een node over te slaan zonder gewenste staat.
+const noDesired = "geen gewenste staat"
+
+// expected leest de gewenste staat van de node: de gerenderde template of
+// zijn deel van de baseline, met de stappen van de onderdelen erachter.
 func (s *Service) expected(ctx context.Context, n store.ListDriftNodesRow) expectation {
+	exp := s.expectedBase(ctx, n)
+	if s.Components == nil || exp.status == Error || (exp.skip != "" && exp.skip != noDesired) {
+		return exp
+	}
+	steps, revision, err := s.Components.NodeSteps(ctx, n.ID)
+	switch {
+	case err != nil:
+		return expectation{observation: observation{status: Error, source: "component", err: "onderdeel: " + err.Error()}}
+	case len(steps) == 0:
+		return exp
+	}
+	contents := templateContents(steps)
+	for _, c := range contents {
+		if c != nil {
+			c.label = "inhoud volgens de database van ClusterForge"
+		}
+	}
+	if exp.skip != "" || exp.status == None {
+		// Alleen het onderdeel zegt iets over deze node.
+		return expectation{observation: observation{source: "component", revision: revision}, steps: steps, contents: contents}
+	}
+	exp.steps = append(exp.steps, steps...)
+	exp.contents = append(exp.contents, contents...)
+	return exp
+}
+
+// expectedBase leest de gewenste staat van de node uit de template of de
+// baseline.
+func (s *Service) expectedBase(ctx context.Context, n store.ListDriftNodesRow) expectation {
 	c, err := s.q.GetCluster(ctx, *n.ClusterID)
 	if err != nil {
 		return expectation{observation: observation{skip: err.Error()}}
@@ -352,7 +394,7 @@ func (s *Service) expected(ctx context.Context, n store.ListDriftNodesRow) expec
 		case err != nil:
 			return expectation{observation: observation{status: Error, source: "baseline", err: "baseline: " + err.Error()}}
 		case b == nil:
-			return expectation{observation: observation{skip: "geen gewenste staat"}}
+			return expectation{observation: observation{skip: noDesired}}
 		}
 		obs := observation{source: "baseline", revision: int(c.SpecRevision)}
 		bn, ok := b.Node(n.ID)
@@ -366,7 +408,7 @@ func (s *Service) expected(ctx context.Context, n store.ListDriftNodesRow) expec
 	d, err := s.dep.Desired(ctx, *n.ClusterID)
 	switch {
 	case errors.Is(err, deploy.ErrNoSpec):
-		return expectation{observation: observation{skip: "geen gewenste staat"}}
+		return expectation{observation: observation{skip: noDesired}}
 	case err != nil:
 		return expectation{observation: observation{status: Error, source: "template", err: "gewenste staat: " + err.Error()}}
 	}

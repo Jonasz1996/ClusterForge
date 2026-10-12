@@ -338,6 +338,17 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 			str(p, "template"), str(p, "template_version")) + paren(source)
 	case "secret.created":
 		return "Geheim " + str(p, "secret_name") + " van cluster " + name + " opgeslagen"
+	case "cluster.database_added":
+		s := fmt.Sprintf("%s toegevoegd aan cluster %s op %s", str(p, "component"), name, list(p["nodes"]))
+		if a := list(p["arbiter"]); a != "" {
+			s += ", met scheidsrechter " + a
+		}
+		return s
+	case "cluster.database_applied":
+		return fmt.Sprintf("%s van cluster %s uitgerold op %s (revisie %s)", str(p, "component"), name, list(p["nodes"]), num(p["revision"]))
+	case "cluster.database_removed":
+		return fmt.Sprintf("%s van cluster %s weggehaald uit ClusterForge; op %s blijft staan wat al geïnstalleerd was", str(p, "component"), name,
+			list(p["nodes"]))
 	case "cluster.deployed":
 		return fmt.Sprintf("Cluster %s uitgerold uit %s %s met %s nodes", name, str(p, "template"), str(p, "version"), num(p["nodes"]))
 	case "node.created":

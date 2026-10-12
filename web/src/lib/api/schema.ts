@@ -2751,6 +2751,124 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/component-templates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** De databases die ClusterForge op de nodes van een cluster kan zetten, met hun instellingen */
+        get: operations["listComponentTemplates"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/clusters/{clusterId}/components": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * De onderdelen van een cluster, zoals zijn database
+         * @description Een onderdeel is een gewenste staat op de nodes van een cluster dat er al is, naast een template of baseline. In
+         *     fase 5 is dat de database: MariaDB Galera. Ook voor viewers; geheimen staan er niet in.
+         */
+        get: operations["listClusterComponents"];
+        put?: never;
+        /**
+         * Een database toevoegen (admin); wordt een taak
+         * @description Rolt het plan uit dat POST .../components/plan gaf, als de hash nog klopt en niets het tegenhoudt: de nodes een voor
+         *     een, met na elke node wachten tot hij Synced is. Een ander plan geeft 409 met code plan_stale. Op prod vraagt het
+         *     tweestapsverificatie en de slug in confirm.
+         */
+        post: operations["addClusterComponent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/clusters/{clusterId}/components/plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Bekijken wat een database toevoegen zou doen (admin)
+         * @description Per node het geheugen, de schijf, de Proxmox-host, wat er al draait en de stappen, met de bevindingen die het
+         *     tegenhouden of waarvoor gewaarschuwd wordt. Er verandert niets.
+         */
+        post: operations["planClusterComponent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/clusters/{clusterId}/components/{componentId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+                componentId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Een database die nooit gelukt is uit ClusterForge halen (admin)
+         * @description Alleen zolang de database nog nooit helemaal uitgerold is, zodat een nieuwe poging met andere nodes kan. Op de nodes
+         *     verandert niets. Een draaiende database geeft 409.
+         */
+        delete: operations["removeClusterComponent"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/clusters/{clusterId}/components/{componentId}/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+                componentId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Een database opnieuw toepassen (admin); wordt een taak
+         * @description Past de huidige revisie opnieuw toe, bijvoorbeeld na een mislukte uitrol of als de driftcontrole een gewijzigd
+         *     bestand ziet. Een node die al meedoet, sluit niet opnieuw aan; is zijn configuratie veranderd, dan herstart MariaDB
+         *     daar, node voor node. Op prod vraagt het tweestapsverificatie en de slug in confirm.
+         */
+        post: operations["reapplyClusterComponent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/databases": {
         parameters: {
             query?: never;
@@ -3533,6 +3651,143 @@ export interface components {
         Preferences: {
             /** @description De leermodus in het dashboard Kubernetes: uitleg en kubectl-commando's */
             kube_learning: boolean;
+        };
+        ClusterComponent: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            cluster_id: string;
+            /** @description mariadb of postgresql */
+            engine: string;
+            /** @description Het onderdeel, zoals mariadb-galera */
+            template: string;
+            version: string;
+            title: string;
+            revision: number;
+            /** @description De laatste revisie die helemaal lukte; null tot de eerste uitrol klaar is */
+            applied_revision: number | null;
+            /** @description De instellingen zonder geheimen */
+            params: {
+                [key: string]: unknown;
+            };
+            nodes: components["schemas"]["ComponentNode"][];
+            /** @description installing, applying, ready of failed */
+            state: string;
+            /**
+             * Format: uuid
+             * @description De laatste taak die het onderdeel toepaste
+             */
+            job_id: string | null;
+            /** @description Waarom die taak mislukte */
+            job_error: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        ComponentNode: {
+            /** Format: uuid */
+            node_id: string;
+            hostname: string;
+            /** @description data of arbiter */
+            role: string;
+            index: number;
+        };
+        ComponentInput: {
+            /** @description mariadb; postgresql volgt later */
+            engine: string;
+            /** @description De datanodes op volgorde; de eerste begint het cluster */
+            nodes: string[];
+            /**
+             * Format: uuid
+             * @description Een node die alleen meestemt (garbd); nodig bij twee datanodes
+             */
+            arbiter?: string | null;
+            /** @description buffer_pool en max_connections; wat ontbreekt, krijgt de standaard */
+            settings?: {
+                [key: string]: unknown;
+            };
+        };
+        ComponentApplyInput: components["schemas"]["ComponentInput"] & {
+            /** @description De hash van het plan dat je zag */
+            hash: string;
+            /** @description De slug van het cluster; nodig op prod */
+            confirm?: string;
+        };
+        ComponentReapplyInput: {
+            /** @description De slug van het cluster; nodig op prod */
+            confirm?: string;
+        };
+        ComponentPlan: {
+            /** Format: uuid */
+            cluster_id: string;
+            cluster_name: string;
+            slug: string;
+            prod: boolean;
+            engine: string;
+            template: string;
+            version: string;
+            title: string;
+            /** @description De instellingen met de standaarden; een geheim als [geheim] */
+            params: {
+                [key: string]: unknown;
+            };
+            nodes: components["schemas"]["ComponentPlanNode"][];
+            findings: components["schemas"]["ComponentFinding"][];
+            /** @description Iets houdt het tegen; uitrollen kan niet */
+            blocked: boolean;
+            hash: string;
+        };
+        ComponentPlanNode: {
+            /** Format: uuid */
+            node_id: string;
+            hostname: string;
+            role: string;
+            index: number;
+            address: string;
+            os: string;
+            /** @description lxc, qemu, of leeg als ClusterForge de node niet in Proxmox kent */
+            pve_type: string;
+            /** @description De Proxmox-host */
+            pve_node: string;
+            vmid: number;
+            /** Format: int64 */
+            memory_bytes: number;
+            /** @description Hoogstens gebruikt in zeven dagen (p95); null zonder metingen */
+            memory_used_pct: number | null;
+            /**
+             * Format: int64
+             * @description De buffer pool plus ongeveer 300 MB
+             */
+            need_bytes: number;
+            /** @description Wat er daarna overblijft; null zonder metingen */
+            free_after_pct: number | null;
+            /** Format: int64 */
+            disk_free_bytes: number | null;
+            disk_mount: string;
+            /** @description Wat er al aan MariaDB draait */
+            existing: string;
+            steps: string[];
+        };
+        ComponentTemplate: {
+            /** @enum {string} */
+            engine: "mariadb" | "postgresql";
+            name: string;
+            version: string;
+            title: string;
+            description: string;
+            params: components["schemas"]["TemplateParam"][];
+        };
+        ComponentFinding: {
+            /** @description blocked of warning */
+            level: string;
+            code: string;
+            /** Format: uuid */
+            node_id: string | null;
+            hostname: string;
+            message: string;
+            /** @description Een commando dat het oplost; leeg als er geen is */
+            command: string;
         };
         /** @description Eén databasecluster, de servers van één engine in één cluster, of één losse node. */
         DatabaseGroup: {
@@ -4907,8 +5162,8 @@ export interface components {
         };
         DriftSource: {
             /** @enum {string} */
-            kind: "template" | "baseline";
-            /** @description Leeg bij een baseline */
+            kind: "template" | "baseline" | "component";
+            /** @description Leeg bij een baseline of alleen een onderdeel */
             template: string;
             template_version: string;
             spec_revision: number;
@@ -12506,6 +12761,172 @@ export interface operations {
             400: components["responses"]["Error"];
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
+        };
+    };
+    listComponentTemplates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["ComponentTemplate"][];
+                    };
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    listClusterComponents: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["ClusterComponent"][];
+                    };
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    addClusterComponent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ComponentApplyInput"];
+            };
+        };
+        responses: {
+            /** @description Taak aangemaakt */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Job"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    planClusterComponent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ComponentInput"];
+            };
+        };
+        responses: {
+            /** @description Het plan */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ComponentPlan"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    removeClusterComponent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+                componentId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Weggehaald */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    reapplyClusterComponent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+                componentId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ComponentReapplyInput"];
+            };
+        };
+        responses: {
+            /** @description Taak aangemaakt */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Job"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
         };
     };
     listDatabases: {

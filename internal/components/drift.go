@@ -1,0 +1,38 @@
+package components
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/google/uuid"
+
+	"github.com/Jonasz1996/clusterforge/internal/deploy"
+	"github.com/Jonasz1996/clusterforge/internal/templates"
+)
+
+// NodeSteps geeft de stappen van de toegepaste onderdelen op een node,
+// gerenderd met de revisie die het laatst helemaal lukte, voor de
+// driftcontrole. Zo valt een met de hand aangepaste 99-clusterforge-galera.cnf op, ook
+// op een cluster zonder template.
+func (s *Service) NodeSteps(ctx context.Context, nodeID uuid.UUID) ([]templates.Step, int, error) {
+	rows, err := s.q.ListNodeComponents(ctx, nodeID)
+	if err != nil {
+		return nil, 0, err
+	}
+	var out []templates.Step
+	revision := 0
+	for _, comp := range rows {
+		rev := int(*comp.AppliedRevision)
+		r, err := s.load(ctx, jobParams{ComponentID: comp.ID, Revision: rev})
+		if err != nil {
+			return nil, 0, err
+		}
+		steps, err := deploy.RenderNode(r.tpl, r.spec.deploySpec(), r.secrets, r.states, nodeID)
+		if err != nil {
+			return nil, 0, fmt.Errorf("%s: %w", r.tpl.Title, err)
+		}
+		out = append(out, steps...)
+		revision = max(revision, rev)
+	}
+	return out, revision, nil
+}

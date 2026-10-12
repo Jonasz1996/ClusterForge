@@ -44,6 +44,30 @@ var riskQueries = map[string]string{
 		` and count_over_time(node_filesystem_avail_bytes[7d]) > 5760`,
 }
 
+// MemoryP95 geeft per node het geheugengebruik in procent dat zeven dagen
+// lang 95% van de tijd niet overschreden werd, zoals bij de risico's.
+// Zonder VictoriaMetrics geeft het ErrDisabled.
+func (c *Client) MemoryP95(ctx context.Context, now time.Time) (map[uuid.UUID]float64, error) {
+	if !c.Enabled() {
+		return nil, ErrDisabled
+	}
+	res, err := c.queryInstant(ctx, riskQueries["memory"], now)
+	if err != nil {
+		return nil, err
+	}
+	out := map[uuid.UUID]float64{}
+	for _, r := range res {
+		id, err := uuid.Parse(r.Metric["node_id"])
+		if err != nil {
+			continue
+		}
+		if v, ok := sampleValue(r.Value); ok {
+			out[id] = v
+		}
+	}
+	return out, nil
+}
+
 type instant struct {
 	Metric map[string]string `json:"metric"`
 	Value  [2]any            `json:"value"`

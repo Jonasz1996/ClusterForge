@@ -1,0 +1,687 @@
+package components
+
+import (
+	"cmp"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"maps"
+	"math"
+	"slices"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"golang.org/x/sync/errgroup"
+
+	"github.com/Jonasz1996/clusterforge/internal/deploy"
+	"github.com/Jonasz1996/clusterforge/internal/events"
+	"github.com/Jonasz1996/clusterforge/internal/jobs"
+	"github.com/Jonasz1996/clusterforge/internal/store"
+	"github.com/Jonasz1996/clusterforge/internal/templates"
+	"github.com/Jonasz1996/clusterforge/pkg/protocol"
+)
+
+// Request is wat de gebruiker kiest bij 'Database toevoegen'.
+type Request struct {
+	Engine string
+	// Nodes zijn de datanodes, op volgorde: de eerste begint het cluster.
+	Nodes []uuid.UUID
+	// Arbiter is een node die alleen meestemt; nodig bij twee datanodes.
+	Arbiter *uuid.UUID
+	// Settings zijn de parameters van het onderdeel zonder geheimen, zoals
+	// buffer_pool en max_connections; wat ontbreekt, krijgt de standaard.
+	Settings map[string]any
+}
+
+// Niveaus van een bevinding in het plan.
+const (
+	// Blocked: zo kan het niet; de knop om uit te rollen blijft uit.
+	Blocked = "blocked"
+	// Warning: het kan, maar Jonas moet het weten.
+	Warning = "warning"
+)
+
+// Finding is een bevinding van het plan, eventueel bij een node, met een
+// commando dat het oplost.
+type Finding struct {
+	Level    string
+	Code     string
+	NodeID   *uuid.UUID
+	Hostname string
+	Message  string
+	Command  string
+}
+
+// PlanNode is wat het plan over een node zegt.
+type PlanNode struct {
+	NodeID   uuid.UUID
+	Hostname string
+	Role     string
+	Index    int
+	Address  string
+	// OS is zoals Debian 13 (trixie).
+	OS string
+	// PveType is lxc of qemu, PveNode de Proxmox-host; leeg als
+	// ClusterForge de node niet in Proxmox kent.
+	PveType string
+	PveNode string
+	VMID    int
+	// MemoryBytes is het geheugen van de node, MemoryUsedPct wat er zeven
+	// dagen lang hoogstens gebruikt werd (p95), NeedBytes wat de database
+	// erbij vraagt en FreeAfterPct wat er daarna overblijft. Zonder
+	// metingen zijn de percentages nil.
+	MemoryBytes   int64
+	MemoryUsedPct *float64
+	NeedBytes     int64
+	FreeAfterPct  *float64
+	// DiskFreeBytes is de vrije ruimte op het bestandssysteem van
+	// /var/lib/mysql (DiskMount); nil zonder facts.
+	DiskFreeBytes *int64
+	DiskMount     string
+	// Existing zegt wat er al aan MariaDB op de node draait.
+	Existing string
+	// Steps zijn de stappen op deze node, in woorden.
+	Steps []string
+}
+
+// Plan is wat 'Database toevoegen' zou doen.
+type Plan struct {
+	ClusterID   uuid.UUID
+	ClusterName string
+	Slug        string
+	Prod        bool
+	Engine      string
+	Template    string
+	Version     string
+	Title       string
+	// Params zijn de instellingen met de standaarden ingevuld; een geheim
+	// staat er als plaatshouder.
+	Params   map[string]any
+	Nodes    []PlanNode
+	Findings []Finding
+	Blocked  bool
+	// Hash vat het plan samen; uitrollen kan alleen met dezelfde hash.
+	Hash string
+}
+
+// Galera-poorten: MySQL, groepscommunicatie, IST en SST.
+var galeraPorts = []int{3306, 4567, 4568, 4444}
+
+// overhead is wat MariaDB naast de buffer pool ongeveer gebruikt.
+const overhead = 300 << 20
+
+// maxData is het hoogste aantal datanodes: elke node heeft alle data, en
+// elke schrijfactie wacht op allemaal.
+const maxData = 9
+
+// Plan bekijkt wat 'Database toevoegen' zou doen. Er verandert niets.
+func (s *Service) Plan(ctx context.Context, clusterID uuid.UUID, req Request) (Plan, error) {
+	c, err := s.q.GetCluster(ctx, clusterID)
+	if err != nil {
+		return Plan{}, err
+	}
+	name, ok := Templates[req.Engine]
+	if !ok {
+		if req.Engine == protocol.DBPostgreSQL {
+			return Plan{}, &InvalidError{"engine", "PostgreSQL met Patroni komt in een volgende mijlpaal; kies voorlopig MariaDB"}
+		}
+		return Plan{}, &InvalidError{"engine", "kies mariadb"}
+	}
+	tpl, _ := registry.Latest(name)
+	for k := range req.Settings {
+		if slices.Contains(tpl.Secrets(), k) {
+			return Plan{}, &InvalidError{k, "dit wachtwoord maakt ClusterForge zelf"}
+		}
+	}
+	params, err := tpl.MaskedValues(req.Settings)
+	if err != nil {
+		var fe templates.FieldError
+		if errors.As(err, &fe) {
+			return Plan{}, &InvalidError{fe.Field, fe.Msg}
+		}
+		return Plan{}, err
+	}
+	cands, err := s.q.ListComponentCandidates(ctx, &clusterID)
+	if err != nil {
+		return Plan{}, err
+	}
+	byID := map[uuid.UUID]store.ListComponentCandidatesRow{}
+	states := map[uuid.UUID]deploy.NodeState{}
+	hostnames := map[uuid.UUID]string{}
+	for _, r := range cands {
+		byID[r.ID], states[r.ID], hostnames[r.ID] = r, nodeState(r), r.Hostname
+	}
+	spec, err := specOf(c, tpl, req, params, hostnames)
+	if err != nil {
+		return Plan{}, err
+	}
+	for _, n := range spec.Nodes {
+		if _, ok := byID[n.NodeID]; !ok {
+			return Plan{}, &InvalidError{"nodes", "die node hoort niet bij dit cluster"}
+		}
+	}
+	p := Plan{
+		ClusterID: c.ID, ClusterName: c.Name, Slug: c.Slug, Prod: c.Environment == store.EnvironmentProd, Engine: req.Engine,
+		Template: tpl.Name, Version: tpl.Version, Title: tpl.Title, Params: params,
+	}
+	add := func(level, code string, n *Node, msg, command string) {
+		f := Finding{Level: level, Code: code, Message: msg, Command: command}
+		if n != nil {
+			f.NodeID, f.Hostname = &n.NodeID, n.Hostname
+		}
+		p.Findings = append(p.Findings, f)
+	}
+
+	// Het cluster.
+	existing, err := s.q.ListClusterComponents(ctx, clusterID)
+	if err != nil {
+		return Plan{}, err
+	}
+	if slices.ContainsFunc(existing, func(r store.ListClusterComponentsRow) bool { return r.ClusterComponent.Engine == req.Engine }) {
+		add(Blocked, "exists", nil, fmt.Sprintf("%s heeft al een %s; een cluster heeft er hoogstens één", c.Name, tpl.Title), "")
+	}
+	if len(tpl.Secrets()) > 0 && !s.dep.HasMasterKey() {
+		add(Blocked, "no_master_key", nil, "de server heeft geen masterkey (CF_MASTER_KEY), dus hij kan de wachtwoorden van de database niet bewaren", "")
+	}
+	data, votes := spec.count(RoleData), len(spec.Nodes)
+	switch {
+	case data < 2:
+		add(Blocked, "too_few", nil, "een Galera-cluster heeft minstens twee nodes; met één node is er niets om op terug te vallen", "")
+	case data == 2 && req.Arbiter == nil:
+		add(Blocked, "two_without_arbiter", nil, "met twee nodes heeft geen van beide een meerderheid als de andere wegvalt, en dan stopt de database. "+
+			"Kies een derde node of een scheidsrechter", "")
+	case data > maxData:
+		add(Blocked, "too_many", nil, fmt.Sprintf("hoogstens %d nodes: elke schrijfactie wacht op alle nodes", maxData), "")
+	case votes%2 == 0:
+		add(Warning, "even", nil, fmt.Sprintf("%d stemmen is een even aantal: valt het netwerk in twee gelijke helften, dan heeft geen van beide een meerderheid en "+
+			"stopt de database. Een oneven aantal of een scheidsrechter voorkomt dat", votes), "")
+	}
+
+	// De nodes.
+	usage := s.memory(ctx)
+	status := s.statuses(ctx, spec, byID)
+	pool, _ := templates.ParseSize(fmt.Sprint(params["buffer_pool"]))
+	osVersions := map[string][]string{}
+	for i := range spec.Nodes {
+		n := &spec.Nodes[i]
+		r := byID[n.NodeID]
+		pn := PlanNode{NodeID: n.NodeID, Hostname: n.Hostname, Role: n.Role, Index: n.Index, Address: states[n.NodeID].PrimaryIP,
+			PveType: deref(r.PveType), PveNode: deref(r.PveNode)}
+		if r.PveVmid != nil {
+			pn.VMID = int(*r.PveVmid)
+		}
+		f := states[n.NodeID].Facts
+		switch {
+		case !r.HasAgent:
+			add(Blocked, "no_agent", n, "op "+n.Hostname+" draait geen agent", "")
+		case r.HeartbeatAt == nil || s.Now().Sub(*r.HeartbeatAt) > s.Fresh:
+			add(Blocked, "offline", n, "de agent op "+n.Hostname+" is niet verbonden", "")
+		case r.AgentProtocol < protocol.DBSince:
+			add(Blocked, "old_agent", n, fmt.Sprintf("de agent op %s is te oud (protocol %d); werk hem bij naar protocol %d", n.Hostname, r.AgentProtocol, protocol.DBSince), "")
+		}
+		switch r.Lifecycle {
+		case store.NodeLifecycleActive:
+		case store.NodeLifecycleDraining, store.NodeLifecycleDecommissioned:
+			add(Blocked, "lifecycle", n, fmt.Sprintf("%s staat op %s", n.Hostname, r.Lifecycle), "")
+		default:
+			add(Warning, "lifecycle", n, fmt.Sprintf("%s staat op %s, niet op actief", n.Hostname, r.Lifecycle), "")
+		}
+		if f == nil {
+			add(Blocked, "no_facts", n, "ClusterForge kent "+n.Hostname+" nog niet: de agent heeft nog geen facts gestuurd", "")
+			p.Nodes = append(p.Nodes, pn)
+			continue
+		}
+		if pn.Address == "" {
+			pn.Address = f.PrimaryAddress
+		}
+		pn.OS = cmp.Or(f.OS.PrettyName, strings.TrimSpace(f.OS.ID+" "+f.OS.VersionID))
+		if f.OS.ID != "debian" || (f.OS.VersionID != "12" && f.OS.VersionID != "13") {
+			add(Blocked, "os", n, fmt.Sprintf("ClusterForge zet %s alleen op Debian 12 of 13; %s draait %s", tpl.Title, n.Hostname, cmp.Or(pn.OS, "een onbekend systeem")), "")
+		} else {
+			osVersions[f.OS.VersionID] = append(osVersions[f.OS.VersionID], n.Hostname)
+		}
+		ports := galeraPorts
+		if n.Role == RoleArbiter {
+			ports = []int{4567}
+		}
+		for _, l := range f.Listeners {
+			ours := l.Unit == "mariadb" || n.Role == RoleArbiter && l.Unit == "garb"
+			if l.Proto == "tcp" && slices.Contains(ports, l.Port) && !ours {
+				add(Blocked, "port", n, fmt.Sprintf("op %s is poort %d al bezet door %s", n.Hostname, l.Port, cmp.Or(l.Unit, "een proces dat ClusterForge niet kent")), "")
+			}
+		}
+		if n.Role == RoleData {
+			s.checkExisting(&pn, n, f, status[n.NodeID], c.Slug, add)
+			s.checkMemory(&pn, n, r, f, int64(pool), usage, add)
+			checkDisk(&pn, n, f, add)
+		}
+		steps, err := deploy.RenderMasked(tpl, spec.deploySpec(), states, n.NodeID)
+		if err != nil {
+			add(Blocked, "render", n, n.Hostname+": "+err.Error(), "")
+		}
+		if n.Role == RoleData && n.Index == 1 && err == nil && !primaryIn(status, c.Slug) {
+			// Zo toont het plan dat de eerste node het cluster begint.
+			if b, err := bootstrap(steps, c.Slug, false); err == nil {
+				steps = b
+			}
+		}
+		for _, st := range steps {
+			pn.Steps = append(pn.Steps, st.Title)
+		}
+		p.Nodes = append(p.Nodes, pn)
+	}
+	if len(osVersions) > 1 {
+		var parts []string
+		for _, v := range slices.Sorted(maps.Keys(osVersions)) {
+			parts = append(parts, fmt.Sprintf("Debian %s op %s", v, joinHosts(osVersions[v])))
+		}
+		add(Blocked, "os_mixed", nil, "alle nodes moeten dezelfde Debian hebben, want elke Debian heeft een andere MariaDB: "+strings.Join(parts, ", "), "")
+	}
+	checkHosts(spec, byID, add)
+	p.Blocked = slices.ContainsFunc(p.Findings, func(f Finding) bool { return f.Level == Blocked })
+	p.Hash = planHash(p, spec)
+	return p, nil
+}
+
+// specOf maakt de spec uit de keuze van de gebruiker. params zijn de
+// instellingen zonder geheimen.
+func specOf(c store.Cluster, tpl *templates.Template, req Request, params map[string]any, hostnames map[uuid.UUID]string) (Spec, error) {
+	spec := Spec{
+		Template: deploy.SpecTemplate{Name: tpl.Name, Version: tpl.Version},
+		Cluster:  templates.ClusterInfo{Name: c.Name, Slug: c.Slug, Environment: string(c.Environment)},
+		Params:   map[string]any{}, Secrets: tpl.Secrets(),
+	}
+	for k, v := range params {
+		if !slices.Contains(spec.Secrets, k) {
+			spec.Params[k] = v
+		}
+	}
+	if len(req.Nodes) == 0 {
+		return spec, &InvalidError{"nodes", "kies de nodes voor de database"}
+	}
+	seen := map[uuid.UUID]bool{}
+	for _, id := range req.Nodes {
+		if seen[id] {
+			return spec, &InvalidError{"nodes", "een node staat er twee keer in"}
+		}
+		seen[id] = true
+	}
+	if req.Arbiter != nil && seen[*req.Arbiter] {
+		return spec, &InvalidError{"arbiter", "de scheidsrechter is een andere node dan de datanodes"}
+	}
+	for i, id := range req.Nodes {
+		spec.Nodes = append(spec.Nodes, Node{NodeID: id, Hostname: hostnames[id], Role: RoleData, Index: i + 1})
+	}
+	if req.Arbiter != nil {
+		spec.Nodes = append(spec.Nodes, Node{NodeID: *req.Arbiter, Hostname: hostnames[*req.Arbiter], Role: RoleArbiter, Index: 1})
+	}
+	return spec, nil
+}
+
+func (s *Service) hostnames(ctx context.Context, clusterID uuid.UUID) (map[uuid.UUID]string, error) {
+	rows, err := s.q.ListComponentCandidates(ctx, &clusterID)
+	if err != nil {
+		return nil, err
+	}
+	out := map[uuid.UUID]string{}
+	for _, r := range rows {
+		out[r.ID] = r.Hostname
+	}
+	return out, nil
+}
+
+func nodeState(r store.ListComponentCandidatesRow) deploy.NodeState {
+	st := deploy.NodeState{PrimaryIP: r.PrimaryIp}
+	if len(r.Facts) > 0 {
+		var f protocol.Facts
+		if json.Unmarshal(r.Facts, &f) == nil {
+			st.Facts = &f
+		}
+	}
+	return st
+}
+
+// memory leest het geheugengebruik uit VictoriaMetrics; zonder metingen
+// nil.
+func (s *Service) memory(ctx context.Context) map[uuid.UUID]float64 {
+	if s.Memory == nil {
+		return nil
+	}
+	m, err := s.Memory(ctx)
+	if err != nil {
+		s.log.Debug("geheugengebruik voor het plan niet te lezen", "err", err)
+		return nil
+	}
+	return m
+}
+
+// dbStatus is het antwoord van één node op de vraag naar zijn databases.
+type dbStatus struct {
+	server *protocol.DBServer
+	err    error
+}
+
+// statuses vraagt de datanodes met een verse agent op protocol 9 wat er
+// aan MariaDB draait, tegelijk.
+func (s *Service) statuses(ctx context.Context, spec Spec, byID map[uuid.UUID]store.ListComponentCandidatesRow) map[uuid.UUID]dbStatus {
+	out := map[uuid.UUID]dbStatus{}
+	var mu sync.Mutex
+	var g errgroup.Group
+	g.SetLimit(8)
+	for _, n := range spec.Nodes {
+		r := byID[n.NodeID]
+		if n.Role != RoleData || !r.HasAgent || r.AgentProtocol < protocol.DBSince || r.HeartbeatAt == nil || s.Now().Sub(*r.HeartbeatAt) > s.Fresh {
+			continue
+		}
+		g.Go(func() error {
+			srv, err := s.mariadb(ctx, n.NodeID)
+			mu.Lock()
+			out[n.NodeID] = dbStatus{srv, err}
+			mu.Unlock()
+			return nil
+		})
+	}
+	_ = g.Wait()
+	return out
+}
+
+// primaryIn is true als een van de nodes al meedoet in een Primary
+// component van het cluster slug.
+func primaryIn(status map[uuid.UUID]dbStatus, slug string) bool {
+	for _, st := range status {
+		if g := st.server; g != nil && g.Running && g.Galera != nil && g.Galera.ClusterName == slug && g.Galera.ClusterStatus == "Primary" {
+			return true
+		}
+	}
+	return false
+}
+
+// mariadb vraagt de agent naar de MariaDB op zijn node; nil als er geen
+// is.
+func (s *Service) mariadb(ctx context.Context, nodeID uuid.UUID) (*protocol.DBServer, error) {
+	ctx, cancel := context.WithTimeout(ctx, s.Timeout)
+	defer cancel()
+	res, err := s.bus.DB(ctx, nodeID, protocol.DBRequest{ID: uuid.NewString(), Op: protocol.DBStatus, Deadline: time.Now().Add(s.Timeout)})
+	if err != nil {
+		return nil, err
+	}
+	if res.Error != "" {
+		return nil, errors.New(res.Error)
+	}
+	for i := range res.Servers {
+		if res.Servers[i].Engine == protocol.DBMariaDB {
+			return &res.Servers[i], nil
+		}
+	}
+	return nil, nil
+}
+
+// checkExisting kijkt wat er al aan MariaDB of MySQL op een datanode staat.
+func (s *Service) checkExisting(pn *PlanNode, n *Node, f *protocol.Facts, st dbStatus, slug string, add func(string, string, *Node, string, string)) {
+	for _, svc := range f.Services {
+		if svc.Name == "mysql" {
+			add(Blocked, "mysql", n, "op "+n.Hostname+" staat MySQL; ClusterForge zet MariaDB er niet naast", "")
+			return
+		}
+	}
+	srv := st.server
+	switch {
+	case st.err != nil:
+		add(Blocked, "no_answer", n, fmt.Sprintf("de agent op %s zei niet welke MariaDB er draait: %v", n.Hostname, st.err), "")
+	case srv == nil:
+	case srv.Galera != nil && srv.Galera.ClusterName == slug:
+		pn.Existing = fmt.Sprintf("Galera-cluster %s, %s", srv.Galera.ClusterName, srv.Galera.State)
+		add(Blocked, "galera_exists", n, fmt.Sprintf("op %s draait al Galera-cluster %s; ClusterForge kent het niet als onderdeel. "+
+			"Haal het eerst weg of neem andere nodes", n.Hostname, slug), "")
+	case srv.Galera != nil:
+		pn.Existing = "Galera-cluster " + srv.Galera.ClusterName
+		add(Blocked, "galera_exists", n, fmt.Sprintf("op %s draait al een ander Galera-cluster (%s)", n.Hostname, srv.Galera.ClusterName), "")
+	case len(srv.Databases) > 0:
+		var names []string
+		for _, d := range srv.Databases {
+			names = append(names, d.Name)
+		}
+		pn.Existing = "MariaDB " + srv.Version + " met " + strings.Join(names, ", ")
+		add(Blocked, "mariadb_in_use", n, fmt.Sprintf("op %s staat al een MariaDB met databases (%s). ClusterForge zet er geen cluster overheen; "+
+			"verhuis ze eerst of neem andere nodes", n.Hostname, strings.Join(names, ", ")), "")
+	case srv.Running:
+		pn.Existing = "MariaDB " + srv.Version + " zonder eigen databases"
+		add(Warning, "mariadb_takeover", n, fmt.Sprintf("op %s draait al een MariaDB zonder eigen databases; ClusterForge neemt hem over en "+
+			"herstart hem als node van het cluster", n.Hostname), "")
+	default:
+		pn.Existing = "MariaDB staat erop maar draait niet"
+	}
+}
+
+// checkMemory rekent uit wat er na de database aan geheugen overblijft. Is
+// dat minder dan 15%, dan zegt het plan hoeveel de CT of VM erbij moet.
+func (s *Service) checkMemory(pn *PlanNode, n *Node, r store.ListComponentCandidatesRow, f *protocol.Facts, pool int64,
+	usage map[uuid.UUID]float64, add func(string, string, *Node, string, string)) {
+	total := int64(min(f.MemoryBytes, math.MaxInt64)) //nolint:gosec // geheugen past altijd
+	need := pool + overhead
+	pn.MemoryBytes, pn.NeedBytes = total, need
+	if total <= 0 {
+		return
+	}
+	used := int64(0)
+	pct, measured := usage[n.NodeID]
+	if measured {
+		used = int64(float64(total) * pct / 100)
+		after := float64(total-used-need) / float64(total) * 100
+		pn.MemoryUsedPct, pn.FreeAfterPct = &pct, &after
+		if after >= 15 {
+			return
+		}
+	} else if need <= total/2 {
+		return
+	}
+	// Wat de node nodig heeft om 15% over te houden, afgerond op 512 MiB.
+	want := int64(math.Ceil(float64(used+need)/0.85/float64(512<<20))) * 512
+	msg := fmt.Sprintf("%s heeft %s geheugen; de database vraagt er %s bij", n.Hostname, templates.FormatSize(total), templates.FormatSize(need))
+	if measured {
+		msg += fmt.Sprintf(" en de rest gebruikte de afgelopen zeven dagen tot %.0f%%, dus er blijft minder dan 15%% over", pct)
+	} else {
+		msg += ", meer dan de helft; ClusterForge heeft geen metingen van wat de rest gebruikt"
+	}
+	cmdline := ""
+	switch {
+	case want*(1<<20) <= total:
+	case deref(r.PveType) == "lxc" && r.PveVmid != nil:
+		cmdline = fmt.Sprintf("pct set %d --memory %d", *r.PveVmid, want)
+		msg += fmt.Sprintf(". Geef de CT %d MiB met dit commando op %s", want, cmp.Or(deref(r.PveNode), "de Proxmox-host"))
+	case deref(r.PveType) == "qemu" && r.PveVmid != nil:
+		cmdline = fmt.Sprintf("qm set %d --memory %d", *r.PveVmid, want)
+		msg += fmt.Sprintf(". Geef de VM %d MiB met dit commando op %s; zonder hotplug van geheugen telt het pas na een herstart", want,
+			cmp.Or(deref(r.PveNode), "de Proxmox-host"))
+	default:
+		msg += fmt.Sprintf(". Geef de node minstens %d MiB, of kies een kleinere buffer pool", want)
+	}
+	add(Warning, "memory", n, msg, cmdline)
+}
+
+// checkDisk kijkt hoeveel ruimte er is waar MariaDB zijn data schrijft.
+func checkDisk(pn *PlanNode, n *Node, f *protocol.Facts, add func(string, string, *Node, string, string)) {
+	var best *protocol.Filesystem
+	for i := range f.Filesystems {
+		fs := &f.Filesystems[i]
+		if under("/var/lib/mysql", fs.Mount) && (best == nil || len(fs.Mount) > len(best.Mount)) {
+			best = fs
+		}
+	}
+	if best == nil {
+		return
+	}
+	free := int64(0)
+	if best.SizeBytes > best.UsedBytes {
+		free = int64(min(best.SizeBytes-best.UsedBytes, math.MaxInt64)) //nolint:gosec // past altijd
+	}
+	pn.DiskFreeBytes, pn.DiskMount = &free, best.Mount
+	switch {
+	case free < 2<<30:
+		add(Blocked, "disk", n, fmt.Sprintf("op %s is er nog %s vrij op %s; de database heeft minstens 2G nodig", n.Hostname, templates.FormatSize(free), best.Mount), "")
+	case free < 10<<30:
+		add(Warning, "disk_low", n, fmt.Sprintf("op %s is er nog %s vrij op %s; reken de data twee keer (de database en een dump) plus de logs", n.Hostname,
+			templates.FormatSize(free), best.Mount), "")
+	}
+}
+
+// under zegt of path op het bestandssysteem van mount ligt.
+func under(path, mount string) bool {
+	return mount == "/" || path == mount || strings.HasPrefix(path, strings.TrimRight(mount, "/")+"/")
+}
+
+// checkHosts waarschuwt als het uitvallen van één Proxmox-host de
+// meerderheid meeneemt.
+func checkHosts(spec Spec, byID map[uuid.UUID]store.ListComponentCandidatesRow, add func(string, string, *Node, string, string)) {
+	votes := len(spec.Nodes)
+	byHost := map[string][]string{}
+	for _, n := range spec.order() {
+		r := byID[n.NodeID]
+		if r.PveNode == nil {
+			continue
+		}
+		key := deref(r.ProxmoxName) + "/" + *r.PveNode
+		byHost[key] = append(byHost[key], n.Hostname)
+	}
+	for _, key := range slices.Sorted(maps.Keys(byHost)) {
+		hosts := byHost[key]
+		if len(hosts) < 2 || votes-len(hosts) > votes/2 {
+			continue
+		}
+		_, node, _ := strings.Cut(key, "/")
+		add(Warning, "same_host", nil, fmt.Sprintf("%s staan op dezelfde Proxmox-host %s: valt die uit, dan is de meerderheid weg en stopt de database. "+
+			"Zet ze op verschillende hosts", joinHosts(hosts), node), "")
+	}
+}
+
+// planHash vat samen wat er zou gebeuren: de nodes met adres en rol, de
+// instellingen en de bevindingen, zonder metingen die elke minuut anders
+// kunnen zijn.
+func planHash(p Plan, spec Spec) string {
+	type node struct {
+		ID      uuid.UUID `json:"id"`
+		Role    string    `json:"role"`
+		Index   int       `json:"index"`
+		Address string    `json:"address"`
+	}
+	type finding struct {
+		Level, Code string
+		Node        *uuid.UUID
+	}
+	v := struct {
+		Cluster  uuid.UUID      `json:"cluster"`
+		Slug     string         `json:"slug"`
+		Template string         `json:"template"`
+		Version  string         `json:"version"`
+		Params   map[string]any `json:"params"`
+		Nodes    []node         `json:"nodes"`
+		Findings []finding      `json:"findings"`
+	}{Cluster: p.ClusterID, Slug: p.Slug, Template: p.Template, Version: p.Version, Params: p.Params}
+	for i, n := range spec.Nodes {
+		v.Nodes = append(v.Nodes, node{n.NodeID, n.Role, n.Index, p.Nodes[i].Address})
+	}
+	for _, f := range p.Findings {
+		v.Findings = append(v.Findings, finding{f.Level, f.Code, f.NodeID})
+	}
+	b, _ := json.Marshal(v)
+	sum := sha256.Sum256(b)
+	return hex.EncodeToString(sum[:])
+}
+
+// Add voegt de database toe en zet de uitrol in de wachtrij, als het plan
+// nog hetzelfde is als wat de gebruiker zag en niets het tegenhoudt.
+func (s *Service) Add(ctx context.Context, actor events.Actor, clusterID uuid.UUID, req Request, hash string) (store.Job, error) {
+	p, err := s.Plan(ctx, clusterID, req)
+	if err != nil {
+		return store.Job{}, err
+	}
+	if p.Hash != hash {
+		return store.Job{}, ErrStale
+	}
+	if p.Blocked {
+		for _, f := range p.Findings {
+			if f.Level == Blocked {
+				return store.Job{}, &ConflictError{f.Message}
+			}
+		}
+	}
+	c, err := s.q.GetCluster(ctx, clusterID)
+	if err != nil {
+		return store.Job{}, err
+	}
+	tpl, _ := registry.Get(p.Template, p.Version)
+	values, err := tpl.Validate(req.Settings)
+	if err != nil {
+		return store.Job{}, err
+	}
+	hostnames, err := s.hostnames(ctx, clusterID)
+	if err != nil {
+		return store.Job{}, err
+	}
+	spec, err := specOf(c, tpl, req, values, hostnames)
+	if err != nil {
+		return store.Job{}, err
+	}
+	b, err := json.Marshal(spec)
+	if err != nil {
+		return store.Job{}, err
+	}
+	var j store.Job
+	err = pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
+		q := store.New(tx)
+		comp, err := q.InsertClusterComponent(ctx, store.InsertClusterComponentParams{ClusterID: clusterID, Engine: req.Engine, Spec: b})
+		var pe *pgconn.PgError
+		if errors.As(err, &pe) && pe.Code == "23505" {
+			return &ConflictError{fmt.Sprintf("%s heeft al een %s", c.Name, tpl.Title)}
+		}
+		if err != nil {
+			return err
+		}
+		var by *uuid.UUID
+		if id, err := uuid.Parse(actor.ID); err == nil {
+			by = &id
+		}
+		if err := q.InsertClusterComponentRevision(ctx, store.InsertClusterComponentRevisionParams{
+			ComponentID: comp.ID, Revision: 1, Spec: b, CreatedBy: by,
+		}); err != nil {
+			return err
+		}
+		for _, name := range spec.Secrets {
+			if err := s.dep.AddSecretTx(ctx, q, actor, clusterID, c.Name, secretName(req.Engine, name), fmt.Sprint(values[name])); err != nil {
+				return err
+			}
+		}
+		j, err = s.jobs.EnqueueForClusterTx(ctx, q, jobs.Spec{
+			Kind: Kind, Title: fmt.Sprintf("Database toevoegen: %s op %s", tpl.Title, c.Name),
+			Params: jobParams{ComponentID: comp.ID, Revision: 1}, ClusterID: &clusterID, Actor: actor,
+		})
+		if err != nil {
+			return err
+		}
+		if err := q.SetClusterComponentJob(ctx, store.SetClusterComponentJobParams{ID: comp.ID, JobID: &j.ID}); err != nil {
+			return err
+		}
+		return s.ev.Write(ctx, q, events.Event{
+			Actor: actor, SubjectType: "cluster", SubjectID: clusterID.String(), ClusterID: &clusterID, Action: "cluster.database_added",
+			Payload: map[string]any{
+				"name": c.Name, "engine": req.Engine, "component": tpl.Title, "version": tpl.Version, "nodes": spec.hosts(RoleData),
+				"arbiter": spec.hosts(RoleArbiter), "params": spec.Params, "job_id": j.ID, "title": j.Title,
+			},
+		})
+	})
+	var busy jobs.BusyError
+	if errors.As(err, &busy) {
+		return store.Job{}, &ConflictError{busy.Error()}
+	}
+	if err == nil {
+		s.jobs.Kick()
+	}
+	return j, err
+}

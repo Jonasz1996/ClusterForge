@@ -17,6 +17,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/audit"
 	"github.com/Jonasz1996/clusterforge/internal/auth"
 	"github.com/Jonasz1996/clusterforge/internal/backups"
+	"github.com/Jonasz1996/clusterforge/internal/components"
 	"github.com/Jonasz1996/clusterforge/internal/config"
 	"github.com/Jonasz1996/clusterforge/internal/databases"
 	"github.com/Jonasz1996/clusterforge/internal/deploy"
@@ -76,6 +77,7 @@ type Server struct {
 	reports      *reports.Service
 	kube         *kube.Service
 	databases    *databases.Service
+	components   *components.Service
 	kubeNodes    *kubenodes.Service
 	lessons      *kubelessons.Engine
 	version      string
@@ -134,7 +136,9 @@ type Deps struct {
 	KubeNodes *kubenodes.Service
 	// Databases leest de MariaDB- en PostgreSQL-servers op de nodes.
 	Databases *databases.Service
-	Version   string
+	// Components zet een database op de nodes van een cluster.
+	Components *components.Service
+	Version    string
 }
 
 func New(d Deps) *Server {
@@ -177,6 +181,7 @@ func New(d Deps) *Server {
 		reports:       d.Reports,
 		kube:          d.Kube,
 		databases:     d.Databases,
+		components:    d.Components,
 		kubeNodes:     d.KubeNodes,
 	}
 	s.assistant.Tools = append(s.assistantTools(), s.kubeTools()...)

@@ -1,0 +1,6 @@
+# Beheerd door ClusterForge: de scheidsrechter van de database van cluster
+# {{ .cluster.slug }}.
+GALERA_NODES="{{ $first := true }}{{ range .nodes }}{{ if eq .role "data" }}{{ if not $first }} {{ end }}{{ .address }}:4567{{ $first = false }}{{ end }}{{ end }}"
+GALERA_GROUP="{{ .cluster.slug }}"
+GALERA_OPTIONS=""
+LOG_FILE="/var/log/garbd.log"

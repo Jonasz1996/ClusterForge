@@ -183,6 +183,15 @@ func nodeState(primaryIP string, facts []byte) NodeState {
 	return st
 }
 
+// OpenSecrets ontsleutelt geheimen van een cluster bij naam, zoals die van
+// een onderdeel. Ontbreekt er een, of de masterkey, dan is dat een fout.
+func (s *Service) OpenSecrets(ctx context.Context, clusterID uuid.UUID, names []string) (map[string]string, error) {
+	return s.openSecrets(ctx, clusterID, names)
+}
+
+// HasMasterKey zegt of de server geheimen kan bewaren en lezen.
+func (s *Service) HasMasterKey() bool { return s.box != nil }
+
 // openSecrets ontsleutelt de geheimen van een cluster.
 func (s *Service) openSecrets(ctx context.Context, clusterID uuid.UUID, names []string) (map[string]string, error) {
 	out := map[string]string{}
