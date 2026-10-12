@@ -177,11 +177,22 @@ func (r *realPatroni) render(n *realNode) (etcdConf, patroniConf []byte, env []s
 	pg["pgpass"] = filepath.Join(n.dir, "pgpass")
 	pg["parameters"].(map[string]any)["unix_socket_directories"] = filepath.Join(n.dir, "sock")
 	// Op loopback komt elke verbinding van 127.0.0.1.
-	hba := pg["pg_hba"].([]any)
-	pg["pg_hba"] = append(hba, "host replication cf_replicatie 127.0.0.1/32 scram-sha-256")
+	hba := slices.Clone(pg["pg_hba"].([]any))
 	if !slices.Contains(hba, any("host all all 127.0.0.20/32 scram-sha-256")) || !slices.Contains(hba, any("host replication cf_replicatie 127.0.0.22/32 scram-sha-256")) {
 		t.Errorf("pg_hba zonder VIP of nodes: %v", hba)
 	}
+	if !r.asPostgres {
+		// Zonder root draait PostgreSQL als de gebruiker van de test, zoals
+		// runner in de CI; peer laat die via een map binnen als postgres.
+		i := slices.Index(hba, any("local all all peer"))
+		u, err := user.Current()
+		if i < 0 || err != nil {
+			t.Fatalf("pg_hba zonder peer via de socket: %v %v", hba, err)
+		}
+		hba[i] = "local all all peer map=test"
+		pg["pg_ident"] = []any{"test " + u.Username + " postgres", "test " + u.Username + " " + u.Username}
+	}
+	pg["pg_hba"] = append(hba, "host replication cf_replicatie 127.0.0.1/32 scram-sha-256")
 	patroniConf, _ = yaml.Marshal(p)
 	// De wachtwoorden: systemd geeft ze als omgeving aan Patroni.
 	for line := range strings.SplitSeq(files["/etc/patroni/clusterforge.env"], "\n") {
