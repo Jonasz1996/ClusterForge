@@ -2926,6 +2926,109 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/clusters/{clusterId}/components/{componentId}/databases": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+                componentId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * De databases en gebruikers in de database van een cluster
+         * @description ClusterForge leest ze op de datanode met het VIP, of anders de eerste die Synced is: de databases met grootte, tabellen
+         *     en verbindingen op die node, en de gebruikers met hun hosts en rechten, zonder wachtwoord of hash. Ook voor viewers.
+         */
+        get: operations["listComponentDatabases"];
+        put?: never;
+        /**
+         * Een database met een eigen gebruiker aanmaken (admin)
+         * @description De gebruiker krijgt alle rechten op de database en mag inloggen vanaf elke node en elk VIP van het cluster. Het
+         *     wachtwoord staat één keer in het antwoord; ClusterForge bewaart het niet. Bestaat de database of de gebruiker al, dan 409.
+         */
+        post: operations["createComponentDatabase"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/clusters/{clusterId}/components/{componentId}/databases/{name}/drop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+                componentId: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Een database weghalen (admin)
+         * @description Alleen met de naam van de database in name. Op prod vraagt het tweestapsverificatie en de slug in confirm. De
+         *     gebruikers houden hun rechten op die naam; haal ze apart weg.
+         */
+        post: operations["dropComponentDatabase"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/clusters/{clusterId}/components/{componentId}/users/{user}/password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+                componentId: string;
+                user: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Een gebruiker een nieuw wachtwoord geven (admin)
+         * @description Op al zijn hosts. Het wachtwoord staat één keer in het antwoord; de app kan pas weer inloggen als het daar staat. Op
+         *     prod vraagt het tweestapsverificatie en de slug in confirm.
+         */
+        post: operations["setComponentUserPassword"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/clusters/{clusterId}/components/{componentId}/users/{user}/drop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+                componentId: string;
+                user: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Een gebruiker op al zijn hosts weghalen (admin)
+         * @description Alleen met de naam van de gebruiker in name. Op prod vraagt het tweestapsverificatie en de slug in confirm.
+         */
+        post: operations["dropComponentUser"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/databases": {
         parameters: {
             query?: never;
@@ -3776,6 +3879,75 @@ export interface components {
         ComponentRecoverInput: {
             /** @description De hash van het plan dat je zag */
             hash: string;
+            /** @description De slug van het cluster; nodig op prod */
+            confirm?: string;
+        };
+        ComponentDatabases: {
+            /** @description De datanode waarvan ClusterForge las */
+            node: string;
+            /** @description Waar een app verbindt; het VIP van de database, of de eerste datanode */
+            address: string;
+            port: number;
+            /** @description De adressen waarvandaan een nieuwe gebruiker mag inloggen; alle nodes en VIP's van het cluster */
+            hosts: string[];
+            databases: components["schemas"]["ComponentDatabase"][];
+            users: components["schemas"]["ComponentDatabaseUser"][];
+        };
+        ComponentDatabase: {
+            name: string;
+            /** Format: int64 */
+            size_bytes: number;
+            /** @description -1 als het aantal niet te lezen was */
+            tables: number;
+            /** @description Verbindingen op de node waarvan ClusterForge las */
+            connections: number;
+            /** @description De gebruikers met rechten op deze database */
+            users: string[];
+        };
+        ComponentDatabaseUser: {
+            name: string;
+            hosts: string[];
+            /** @description Een gebruiker van MariaDB zelf, zoals root */
+            system: boolean;
+            /** @description Rechten op alle databases */
+            global: string[];
+            databases: components["schemas"]["ComponentDatabaseGrant"][];
+        };
+        ComponentDatabaseGrant: {
+            database: string;
+            /** @description Alle rechten op deze database */
+            all: boolean;
+            privileges: string[];
+        };
+        ComponentDatabaseInput: {
+            /** @description 1 tot 63 kleine letters, cijfers of _ */
+            name: string;
+            /** @description De gebruiker; standaard de naam van de database */
+            user?: string;
+        };
+        ComponentDatabaseCreated: {
+            database: string;
+            user: string;
+            /** @description Staat alleen hier; ClusterForge bewaart het niet */
+            password: string;
+            hosts: string[];
+            address: string;
+            port: number;
+            node: string;
+        };
+        ComponentUserPassword: {
+            user: string;
+            /** @description Staat alleen hier; ClusterForge bewaart het niet */
+            password: string;
+            hosts: string[];
+        };
+        ComponentDropInput: {
+            /** @description De naam van wat weg moet, ter bevestiging */
+            name: string;
+            /** @description De slug van het cluster; nodig op prod */
+            confirm?: string;
+        };
+        ComponentConfirmInput: {
             /** @description De slug van het cluster; nodig op prod */
             confirm?: string;
         };
@@ -13173,6 +13345,159 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["Job"];
                 };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    listComponentDatabases: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+                componentId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ComponentDatabases"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    createComponentDatabase: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+                componentId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ComponentDatabaseInput"];
+            };
+        };
+        responses: {
+            /** @description Aangemaakt */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ComponentDatabaseCreated"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    dropComponentDatabase: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+                componentId: string;
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ComponentDropInput"];
+            };
+        };
+        responses: {
+            /** @description Weggehaald */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    setComponentUserPassword: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+                componentId: string;
+                user: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ComponentConfirmInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ComponentUserPassword"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    dropComponentUser: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+                componentId: string;
+                user: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ComponentDropInput"];
+            };
+        };
+        responses: {
+            /** @description Weggehaald */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             400: components["responses"]["Error"];
             401: components["responses"]["Error"];

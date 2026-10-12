@@ -8,6 +8,8 @@ package agenttest
 import (
 	"errors"
 	"fmt"
+	"maps"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -34,6 +36,36 @@ type MariaDB struct {
 	// Recovered is wat galera_recovery vindt als MariaDB stilstaat, zoals
 	// uuid:seqno; leeg laat galera_recovery mislukken.
 	Recovered string
+	// Users zijn de gebruikers met hun rechten. De opdrachten van de agent
+	// via stdin passen ze aan, net als Databases.
+	Users []MariaUser
+}
+
+// MariaUser is een gebruiker op één host. Password is het wachtwoord in
+// klare tekst, zodat een test kan zien welk wachtwoord hij kreeg. Grants
+// zijn de rechten per database zoals in de GRANT, met \_ voor _.
+type MariaUser struct {
+	User, Host string
+	Password   string
+	Global     []string
+	Grants     map[string][]string
+}
+
+// DebianUsers zijn de gebruikers die MariaDB op Debian zelf heeft.
+func DebianUsers() []MariaUser {
+	return []MariaUser{
+		{User: "mariadb.sys", Host: "localhost"},
+		{User: "mysql", Host: "localhost", Global: []string{"SELECT", "INSERT", "UPDATE", "DELETE", "CREATE", "DROP", "RELOAD", "SHUTDOWN"}},
+		{User: "root", Host: "localhost", Global: []string{"SELECT", "INSERT", "UPDATE", "DELETE", "CREATE", "DROP", "RELOAD", "SHUTDOWN"}},
+	}
+}
+
+// AllPrivileges zijn de rechten op een database na GRANT ALL PRIVILEGES in
+// MariaDB 11.8.
+var AllPrivileges = []string{
+	"SELECT", "INSERT", "UPDATE", "DELETE", "CREATE", "DROP", "REFERENCES", "INDEX", "ALTER", "CREATE TEMPORARY TABLES",
+	"LOCK TABLES", "EXECUTE", "CREATE VIEW", "SHOW VIEW", "CREATE ROUTINE", "ALTER ROUTINE", "EVENT", "TRIGGER",
+	"DELETE HISTORY", "SHOW CREATE ROUTINE",
 }
 
 // Client zijn Count verbindingen van een gebruiker vanaf een adres met een
@@ -205,6 +237,28 @@ func (h *Host) mariaExec(args []string) ([]byte, error) {
 				rows = append(rows, []string{c.User, host, c.Database})
 			}
 		}
+	case dbsql.MariaUsers:
+		users := slices.Clone(m.Users)
+		slices.SortFunc(users, func(a, b MariaUser) int { return strings.Compare(a.User+"@"+a.Host, b.User+"@"+b.Host) })
+		for _, u := range users {
+			rows = append(rows, []string{u.User, u.Host})
+		}
+	case dbsql.MariaUserGrants:
+		for _, u := range m.Users {
+			rows = append(rows, []string{grantee(u), "USAGE"})
+			for _, p := range u.Global {
+				rows = append(rows, []string{grantee(u), p})
+			}
+		}
+	case dbsql.MariaSchemaGrants:
+		for _, u := range m.Users {
+			dbs := slices.Sorted(maps.Keys(u.Grants))
+			for _, db := range dbs {
+				for _, p := range u.Grants[db] {
+					rows = append(rows, []string{grantee(u), db, p})
+				}
+			}
+		}
 	default:
 		return []byte("ERROR 1064 (42000): agenttest kent deze query niet: " + q + "\n"), errExit1
 	}
@@ -222,6 +276,78 @@ func (h *Host) mariaExec(args []string) ([]byte, error) {
 		b.WriteByte('\n')
 	}
 	return []byte(b.String()), nil
+}
+
+func grantee(u MariaUser) string { return "'" + u.User + "'@'" + u.Host + "'" }
+
+// De opdrachten uit dbsql.Ensure en dbsql.Drop.
+var (
+	createDBRe   = regexp.MustCompile("^CREATE DATABASE IF NOT EXISTS `([^`]+)` CHARACTER SET utf8mb4;$")
+	createUserRe = regexp.MustCompile(`^CREATE USER IF NOT EXISTS '([^']*)'@'([^']*)'(?: IDENTIFIED BY '([^']*)')?;$`)
+	alterUserRe  = regexp.MustCompile(`^ALTER USER '([^']*)'@'([^']*)' IDENTIFIED BY '([^']*)';$`)
+	grantRe      = regexp.MustCompile("^GRANT ALL PRIVILEGES ON `([^`]+)`\\.\\* TO '([^']*)'@'([^']*)';$")
+	dropDBRe     = regexp.MustCompile("^DROP DATABASE IF EXISTS `([^`]+)`;$")
+	dropUserRe   = regexp.MustCompile(`^DROP USER IF EXISTS '([^']*)'@'([^']*)';$`)
+)
+
+// mariaWrite speelt mariadb --batch met opdrachten op stdin na, een per
+// regel, tot de eerste fout. Een Galera-node die niet Synced is in een
+// Primary component weigert, zoals MariaDB.
+func (h *Host) mariaWrite(stdin string) ([]byte, error) {
+	m := h.MariaDB
+	if m == nil || m.Down {
+		return []byte("ERROR 2002 (HY000): Can't connect to local server through socket '/run/mysqld/mysqld.sock' (2)\n"), errExit1
+	}
+	if g := m.Galera; g != nil && (g.Status != "Primary" || g.State != 4 || !g.Ready) {
+		return []byte("ERROR 1047 (08S01) at line 1: WSREP has not yet prepared node for application use\n"), errExit1
+	}
+	user := func(name, host string) int {
+		return slices.IndexFunc(m.Users, func(u MariaUser) bool { return u.User == name && u.Host == host })
+	}
+	for i, line := range strings.Split(strings.TrimRight(stdin, "\n"), "\n") {
+		fail := func(code, msg string) ([]byte, error) {
+			return []byte(fmt.Sprintf("ERROR %s at line %d: %s\n", code, i+1, msg)), errExit1
+		}
+		switch {
+		case createDBRe.MatchString(line):
+			name := createDBRe.FindStringSubmatch(line)[1]
+			if !slices.ContainsFunc(m.Databases, func(d Database) bool { return d.Name == name }) {
+				m.Databases = append(m.Databases, Database{Name: name})
+				slices.SortFunc(m.Databases, func(a, b Database) int { return strings.Compare(a.Name, b.Name) })
+			}
+		case createUserRe.MatchString(line):
+			r := createUserRe.FindStringSubmatch(line)
+			if user(r[1], r[2]) < 0 {
+				m.Users = append(m.Users, MariaUser{User: r[1], Host: r[2], Password: r[3]})
+			}
+		case alterUserRe.MatchString(line):
+			r := alterUserRe.FindStringSubmatch(line)
+			j := user(r[1], r[2])
+			if j < 0 {
+				return fail("1396 (HY000)", fmt.Sprintf("Operation ALTER USER failed for '%s'@'%s'", r[1], r[2]))
+			}
+			m.Users[j].Password = r[3]
+		case grantRe.MatchString(line):
+			r := grantRe.FindStringSubmatch(line)
+			j := user(r[2], r[3])
+			if j < 0 {
+				return fail("1133 (28000)", "Can't find any matching row in the user table")
+			}
+			if m.Users[j].Grants == nil {
+				m.Users[j].Grants = map[string][]string{}
+			}
+			m.Users[j].Grants[r[1]] = slices.Clone(AllPrivileges)
+		case dropDBRe.MatchString(line):
+			name := dropDBRe.FindStringSubmatch(line)[1]
+			m.Databases = slices.DeleteFunc(m.Databases, func(d Database) bool { return d.Name == name })
+		case dropUserRe.MatchString(line):
+			r := dropUserRe.FindStringSubmatch(line)
+			m.Users = slices.DeleteFunc(m.Users, func(u MariaUser) bool { return u.User == r[1] && u.Host == r[2] })
+		default:
+			return fail("1064 (42000)", "agenttest kent deze opdracht niet")
+		}
+	}
+	return nil, nil
 }
 
 // galeraRecovery speelt galera_recovery na: alleen als MariaDB stilstaat.

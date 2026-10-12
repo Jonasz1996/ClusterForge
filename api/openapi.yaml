@@ -3071,6 +3071,117 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
+  /clusters/{clusterId}/components/{componentId}/databases:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: componentId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: listComponentDatabases
+      summary: De databases en gebruikers in de database van een cluster
+      description: |
+        ClusterForge leest ze op de datanode met het VIP, of anders de eerste die Synced is: de databases met grootte, tabellen
+        en verbindingen op die node, en de gebruikers met hun hosts en rechten, zonder wachtwoord of hash. Ook voor viewers.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ComponentDatabases" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createComponentDatabase
+      summary: Een database met een eigen gebruiker aanmaken (admin)
+      description: |
+        De gebruiker krijgt alle rechten op de database en mag inloggen vanaf elke node en elk VIP van het cluster. Het
+        wachtwoord staat één keer in het antwoord; ClusterForge bewaart het niet. Bestaat de database of de gebruiker al, dan 409.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ComponentDatabaseInput" }
+      responses:
+        "201":
+          description: Aangemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ComponentDatabaseCreated" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /clusters/{clusterId}/components/{componentId}/databases/{name}/drop:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: componentId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: name, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: dropComponentDatabase
+      summary: Een database weghalen (admin)
+      description: |
+        Alleen met de naam van de database in name. Op prod vraagt het tweestapsverificatie en de slug in confirm. De
+        gebruikers houden hun rechten op die naam; haal ze apart weg.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ComponentDropInput" }
+      responses:
+        "204": { description: Weggehaald }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /clusters/{clusterId}/components/{componentId}/users/{user}/password:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: componentId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: user, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: setComponentUserPassword
+      summary: Een gebruiker een nieuw wachtwoord geven (admin)
+      description: |
+        Op al zijn hosts. Het wachtwoord staat één keer in het antwoord; de app kan pas weer inloggen als het daar staat. Op
+        prod vraagt het tweestapsverificatie en de slug in confirm.
+      requestBody:
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ComponentConfirmInput" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ComponentUserPassword" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /clusters/{clusterId}/components/{componentId}/users/{user}/drop:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: componentId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: user, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: dropComponentUser
+      summary: Een gebruiker op al zijn hosts weghalen (admin)
+      description: Alleen met de naam van de gebruiker in name. Op prod vraagt het tweestapsverificatie en de slug in confirm.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ComponentDropInput" }
+      responses:
+        "204": { description: Weggehaald }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
   /databases:
     get:
       operationId: listDatabases
@@ -4062,6 +4173,98 @@ components:
       required: [hash]
       properties:
         hash: { type: string, description: De hash van het plan dat je zag }
+        confirm: { type: string, description: De slug van het cluster; nodig op prod }
+    ComponentDatabases:
+      type: object
+      required: [node, address, port, hosts, databases, users]
+      properties:
+        node: { type: string, description: De datanode waarvan ClusterForge las }
+        address: { type: string, description: "Waar een app verbindt; het VIP van de database, of de eerste datanode" }
+        port: { type: integer }
+        hosts:
+          type: array
+          items: { type: string }
+          description: De adressen waarvandaan een nieuwe gebruiker mag inloggen; alle nodes en VIP's van het cluster
+        databases:
+          type: array
+          items: { $ref: "#/components/schemas/ComponentDatabase" }
+        users:
+          type: array
+          items: { $ref: "#/components/schemas/ComponentDatabaseUser" }
+    ComponentDatabase:
+      type: object
+      required: [name, size_bytes, tables, connections, users]
+      properties:
+        name: { type: string }
+        size_bytes: { type: integer, format: int64 }
+        tables: { type: integer, description: -1 als het aantal niet te lezen was }
+        connections: { type: integer, description: Verbindingen op de node waarvan ClusterForge las }
+        users:
+          type: array
+          items: { type: string }
+          description: De gebruikers met rechten op deze database
+    ComponentDatabaseUser:
+      type: object
+      required: [name, hosts, system, global, databases]
+      properties:
+        name: { type: string }
+        hosts:
+          type: array
+          items: { type: string }
+        system: { type: boolean, description: "Een gebruiker van MariaDB zelf, zoals root" }
+        global:
+          type: array
+          items: { type: string }
+          description: Rechten op alle databases
+        databases:
+          type: array
+          items: { $ref: "#/components/schemas/ComponentDatabaseGrant" }
+    ComponentDatabaseGrant:
+      type: object
+      required: [database, all, privileges]
+      properties:
+        database: { type: string }
+        all: { type: boolean, description: Alle rechten op deze database }
+        privileges:
+          type: array
+          items: { type: string }
+    ComponentDatabaseInput:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, description: "1 tot 63 kleine letters, cijfers of _" }
+        user: { type: string, description: De gebruiker; standaard de naam van de database }
+    ComponentDatabaseCreated:
+      type: object
+      required: [database, user, password, hosts, address, port, node]
+      properties:
+        database: { type: string }
+        user: { type: string }
+        password: { type: string, description: Staat alleen hier; ClusterForge bewaart het niet }
+        hosts:
+          type: array
+          items: { type: string }
+        address: { type: string }
+        port: { type: integer }
+        node: { type: string }
+    ComponentUserPassword:
+      type: object
+      required: [user, password, hosts]
+      properties:
+        user: { type: string }
+        password: { type: string, description: Staat alleen hier; ClusterForge bewaart het niet }
+        hosts:
+          type: array
+          items: { type: string }
+    ComponentDropInput:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, description: "De naam van wat weg moet, ter bevestiging" }
+        confirm: { type: string, description: De slug van het cluster; nodig op prod }
+    ComponentConfirmInput:
+      type: object
+      properties:
         confirm: { type: string, description: De slug van het cluster; nodig op prod }
     ComponentRecoverPlan:
       type: object

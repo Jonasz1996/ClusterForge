@@ -12,6 +12,11 @@ export type ComponentPlanNode = components["schemas"]["ComponentPlanNode"];
 export type ComponentFinding = components["schemas"]["ComponentFinding"];
 export type ComponentRecoverPlan = components["schemas"]["ComponentRecoverPlan"];
 export type ComponentRecoverNode = components["schemas"]["ComponentRecoverNode"];
+export type ComponentDatabases = components["schemas"]["ComponentDatabases"];
+export type ComponentDatabase = components["schemas"]["ComponentDatabase"];
+export type ComponentDatabaseUser = components["schemas"]["ComponentDatabaseUser"];
+export type ComponentDatabaseCreated = components["schemas"]["ComponentDatabaseCreated"];
+export type ComponentUserPassword = components["schemas"]["ComponentUserPassword"];
 
 type Tone = "slate" | "green" | "amber" | "red" | "blue";
 
@@ -164,4 +169,89 @@ export function useSetAutoRecover(clusterId: string) {
       ),
     onSuccess: invalidate,
   });
+}
+
+// useComponentDatabases leest de databases en gebruikers live op een
+// datanode.
+export function useComponentDatabases(clusterId: string, componentId: string) {
+  return useQuery({
+    queryKey: ["clusters", clusterId, "components", componentId, "databases"],
+    queryFn: async () =>
+      unwrap(
+        await api.GET("/clusters/{clusterId}/components/{componentId}/databases", {
+          params: { path: { clusterId, componentId } },
+        }),
+      ),
+    enabled: clusterId !== "" && componentId !== "",
+    refetchInterval: 30_000,
+  });
+}
+
+// De mutaties hieronder geven een wachtwoord één keer terug; react-query
+// houdt het alleen zolang het venster open is.
+export function useCreateDatabase(clusterId: string, componentId: string) {
+  const invalidate = useInvalidate(clusterId);
+  return useMutation({
+    mutationFn: async (body: { name: string; user?: string }) =>
+      unwrap(
+        await api.POST("/clusters/{clusterId}/components/{componentId}/databases", {
+          params: { path: { clusterId, componentId } },
+          body,
+        }),
+      ),
+    onSuccess: invalidate,
+  });
+}
+
+export function useSetUserPassword(clusterId: string, componentId: string) {
+  const invalidate = useInvalidate(clusterId);
+  return useMutation({
+    mutationFn: async ({ user, confirm }: { user: string; confirm?: string }) =>
+      unwrap(
+        await api.POST("/clusters/{clusterId}/components/{componentId}/users/{user}/password", {
+          params: { path: { clusterId, componentId, user } },
+          body: { confirm },
+        }),
+      ),
+    onSuccess: invalidate,
+  });
+}
+
+export function useDropDatabase(clusterId: string, componentId: string) {
+  const invalidate = useInvalidate(clusterId);
+  return useMutation({
+    mutationFn: async ({ name, typed, confirm }: { name: string; typed: string; confirm?: string }) =>
+      unwrap(
+        await api.POST("/clusters/{clusterId}/components/{componentId}/databases/{name}/drop", {
+          params: { path: { clusterId, componentId, name } },
+          body: { name: typed, confirm },
+        }),
+      ),
+    onSuccess: invalidate,
+  });
+}
+
+export function useDropUser(clusterId: string, componentId: string) {
+  const invalidate = useInvalidate(clusterId);
+  return useMutation({
+    mutationFn: async ({ user, typed, confirm }: { user: string; typed: string; confirm?: string }) =>
+      unwrap(
+        await api.POST("/clusters/{clusterId}/components/{componentId}/users/{user}/drop", {
+          params: { path: { clusterId, componentId, user } },
+          body: { name: typed, confirm },
+        }),
+      ),
+    onSuccess: invalidate,
+  });
+}
+
+// connectionText is wat een app nodig heeft om te verbinden.
+export function connectionText(c: { address: string; port: number; database?: string; user: string; password: string }) {
+  return [
+    `Host: ${c.address}`,
+    `Poort: ${c.port}`,
+    ...(c.database ? [`Database: ${c.database}`] : []),
+    `Gebruiker: ${c.user}`,
+    `Wachtwoord: ${c.password}`,
+  ].join("\n");
 }

@@ -86,21 +86,28 @@ function Component({ c, comp, isAdmin }: { c: ClusterDetail; comp: ClusterCompon
             {comp.applied_revision !== null && comp.applied_revision !== comp.revision && `, toegepast ${comp.applied_revision}`}
           </span>
         </span>
-        {isAdmin && (
+        {(isAdmin || applied) && (
           <span className="flex flex-wrap gap-2">
-            {comp.applied_revision === null && !busy && (
+            {applied && (
+              <Link href={`/clusters/databases?id=${c.id}`}>
+                <Button variant="secondary">Databases en gebruikers</Button>
+              </Link>
+            )}
+            {isAdmin && comp.applied_revision === null && !busy && (
               <Button variant="secondary-danger" disabled={remove.isPending} onClick={() => remove.mutate(comp.id)}>
                 Weghalen
               </Button>
             )}
-            {applied && (
+            {isAdmin && applied && (
               <Button variant="secondary" disabled={busy || rec} onClick={() => setRecover(true)}>
                 Opnieuw starten
               </Button>
             )}
-            <Button variant="secondary" disabled={busy || rec} onClick={() => setReapply(true)}>
-              Opnieuw toepassen
-            </Button>
+            {isAdmin && (
+              <Button variant="secondary" disabled={busy || rec} onClick={() => setReapply(true)}>
+                Opnieuw toepassen
+              </Button>
+            )}
           </span>
         )}
       </div>

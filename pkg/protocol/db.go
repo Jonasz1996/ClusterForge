@@ -32,6 +32,16 @@ const (
 	// component, en tot welke transactie heeft hij de data. Met Recover
 	// haalt de agent de positie na een crash uit InnoDB (galera_recovery).
 	DBPosition = "position"
+	// DBUsers leest de gebruikers van MariaDB met hun hosts en rechten,
+	// zonder wachtwoord of hash.
+	DBUsers = "users"
+	// DBEnsure maakt een database, een gebruiker of een recht aan, of geeft
+	// een gebruiker een nieuw wachtwoord. Het wachtwoord gaat via stdin naar
+	// MariaDB, nooit als argument.
+	DBEnsure = "ensure"
+	// DBDrop haalt een database of gebruiker weg, alleen als Confirm de naam
+	// is.
+	DBDrop = "drop"
 )
 
 // Waar de positie van een Galera-node vandaan komt.
@@ -100,6 +110,54 @@ type DBRequest struct {
 	Track *DBTrackRequest `json:"track,omitempty"`
 	// Position hoort bij DBPosition.
 	Position *DBPositionRequest `json:"position,omitempty"`
+	// Ensure hoort bij DBEnsure, Drop bij DBDrop.
+	Ensure *DBEnsureRequest `json:"ensure,omitempty"`
+	Drop   *DBDropRequest   `json:"drop,omitempty"`
+}
+
+// DBEnsureRequest zegt wat er in MariaDB moet zijn. Namen voldoen aan
+// DBNamePattern; een host is een IP-adres, localhost of een patroon met %.
+type DBEnsureRequest struct {
+	// Database wordt aangemaakt als ze er niet is, met utf8mb4.
+	Database string `json:"database,omitempty"`
+	// User wordt aangemaakt op elke host in Hosts als hij er niet is. Met
+	// Password krijgt hij dat wachtwoord, ook als hij er al was.
+	User     string   `json:"user,omitempty"`
+	Hosts    []string `json:"hosts,omitempty"`
+	Password string   `json:"password,omitempty"`
+	// Grant geeft User op elke host alle rechten op Database.
+	Grant bool `json:"grant,omitempty"`
+}
+
+// DBDropRequest haalt Database weg, of User op elke host in Hosts.
+// Confirm is de naam die de gebruiker intikte; de agent weigert als die
+// niet gelijk is aan wat weg moet.
+type DBDropRequest struct {
+	Database string   `json:"database,omitempty"`
+	User     string   `json:"user,omitempty"`
+	Hosts    []string `json:"hosts,omitempty"`
+	Confirm  string   `json:"confirm"`
+}
+
+// DBNamePattern zijn de namen van databases en gebruikers die de agent
+// aanmaakt of weghaalt.
+const DBNamePattern = `^[a-z0-9_]{1,63}$`
+
+// DBUser is een gebruiker van MariaDB op één host, met zijn rechten.
+type DBUser struct {
+	Name string `json:"name"`
+	Host string `json:"host"`
+	// Global zijn de rechten op alle databases, zonder USAGE.
+	Global []string `json:"global,omitempty"`
+	// Databases zijn de rechten per database; een naam kan een patroon met
+	// % of _ zijn.
+	Databases []DBGrant `json:"databases,omitempty"`
+}
+
+// DBGrant zijn de rechten van een gebruiker op één database.
+type DBGrant struct {
+	Database   string   `json:"database"`
+	Privileges []string `json:"privileges"`
 }
 
 // DBPositionRequest: Recover laat de agent galera_recovery draaien als
@@ -162,6 +220,8 @@ type DBResponse struct {
 	Track *DBTrackResult `json:"track,omitempty"`
 	// Position is het antwoord op DBPosition.
 	Position *DBPositionResult `json:"position,omitempty"`
+	// Users is het antwoord op DBUsers.
+	Users []DBUser `json:"users,omitempty"`
 }
 
 // DBServer is één MariaDB of PostgreSQL op een node.
