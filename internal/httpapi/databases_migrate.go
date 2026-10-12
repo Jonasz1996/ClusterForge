@@ -153,7 +153,8 @@ func toAPIMigrationPlan(p components.MigrationPlan) gen.DatabaseMigrationPlan {
 	}
 	for _, a := range p.Accounts {
 		out.Accounts = append(out.Accounts, gen.DatabaseMigrationAccount{
-			User: a.User, Host: a.Host, Plugin: a.Plugin, Privileges: nonNil(a.Privileges), Global: a.Global,
+			User: a.User, Host: a.Host, Plugin: a.Plugin, Privileges: nonNil(a.Privileges), Global: a.Global, MemberOf: nonNil(a.MemberOf),
+			Moves: components.Movable(src.Engine, a),
 		})
 	}
 	for _, c := range p.Connections {
@@ -167,7 +168,7 @@ func toAPIMigrationPlan(p components.MigrationPlan) gen.DatabaseMigrationPlan {
 	if i := p.Info; i != nil {
 		info := gen.DatabaseMigrationInfo{
 			Version: i.Version, Charset: i.Charset, Collation: i.Collation, SizeBytes: i.SizeBytes, Tables: len(i.Tables),
-			Views: i.Views, Routines: i.Routines, Triggers: i.Triggers, Events: i.Events,
+			Views: i.Views, Routines: i.Routines, Triggers: i.Triggers, Events: i.Events, Owner: i.Owner, Extensions: nonNil(i.Extensions),
 		}
 		for _, t := range i.Tables {
 			info.Rows += t.Rows
@@ -195,7 +196,8 @@ func toAPIMigrationPlan(p components.MigrationPlan) gen.DatabaseMigrationPlan {
 		out.Target = nullable.NewNullableWithValue(tg)
 	}
 	if r := p.Reach; r != nil {
-		out.Reach = nullable.NewNullableWithValue(gen.DatabaseMigrationReach{Reached: r.Reached, Version: r.Version, Tls: r.TLS, Code: r.Code, Error: r.Error})
+		out.Reach = nullable.NewNullableWithValue(gen.DatabaseMigrationReach{Reached: r.Reached, Version: r.Version, Tls: r.TLS, Code: r.Code, Error: r.Error,
+			Seen: r.Seen})
 	}
 	out.Findings = toAPIFindings(p.Findings)
 	for _, r := range p.Runs {
@@ -230,9 +232,11 @@ func toAPIMigrationRun(m store.DbMigration, clusterName string) gen.DatabaseMigr
 	var accounts []components.MoveAccount
 	_ = json.Unmarshal(m.Accounts, &accounts)
 	for _, a := range accounts {
-		u := gen.DatabaseMigrationMovedUser{User: a.User, OldHosts: []string{}, Hosts: nonNil(a.Hosts), Privileges: nonNil(a.Privileges)}
+		u := gen.DatabaseMigrationMovedUser{User: a.User, OldHosts: []string{}, Hosts: nonNil(a.Hosts), Privileges: nonNil(a.Privileges), New: a.New}
 		for _, o := range a.Old {
-			u.OldHosts = append(u.OldHosts, o.Host)
+			if o.Host != "" {
+				u.OldHosts = append(u.OldHosts, o.Host)
+			}
 		}
 		out.Accounts = append(out.Accounts, u)
 	}

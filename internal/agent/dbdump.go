@@ -578,7 +578,7 @@ func (a *Agent) dumpRestore(ctx context.Context, engine string, req *protocol.DB
 	}
 	var login *pgLogin
 	if pg {
-		if login, err = newPGLogin(req.Primary, req.User, req.Password); err != nil {
+		if login, err = newPGLogin(req.Primary, protocol.DBPGPort, req.User, req.Password); err != nil {
 			return err
 		}
 	}

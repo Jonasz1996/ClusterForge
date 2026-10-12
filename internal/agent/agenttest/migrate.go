@@ -19,6 +19,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/Jonasz1996/clusterforge/pkg/protocol"
 )
 
 var (
@@ -294,7 +296,8 @@ func (h *Host) remoteDump(cfg map[string]string, args []string) ([]byte, error) 
 }
 
 // Dial speelt een TCP-verbinding met de MariaDB van een andere machine na:
-// ze stuurt haar begroeting met de versie, zonder TLS.
+// ze stuurt haar begroeting met de versie, zonder TLS. Op poort 5432 is
+// het de PostgreSQL van die machine.
 func (h *Host) Dial(_ context.Context, _, addr string) (net.Conn, error) {
 	h.mu.Lock()
 	network := h.Network
@@ -306,6 +309,9 @@ func (h *Host) Dial(_ context.Context, _, addr string) (net.Conn, error) {
 	refused := &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("connect: connection refused")}
 	if remote == nil {
 		return nil, refused
+	}
+	if _, port, _ := net.SplitHostPort(addr); port == strconv.Itoa(protocol.DBPGPort) {
+		return dialPG(remote)
 	}
 	remote.mu.Lock()
 	m := remote.MariaDB

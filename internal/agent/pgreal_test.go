@@ -20,13 +20,20 @@ import (
 	"github.com/Jonasz1996/clusterforge/pkg/protocol"
 )
 
-// TestPGRealPostgres doet een gebruiker met database, een dump en het
-// terugzetten met een tijdelijke beheerder tegen de echte PostgreSQL van
-// CF_TEST_DATABASE_URL, met psql en pg_dump van de machine. psql en
-// pg_dump als postgres via de socket worden de beheerder uit de URL; psql
-// met een conninfo krijgt niets uit de omgeving, zodat het wachtwoord uit
-// de passfile moet komen.
-func TestPGRealPostgres(t *testing.T) {
+// realPG is een agent waarvan psql en pg_dump als postgres via de socket
+// de beheerder uit CF_TEST_DATABASE_URL worden; psql en pg_dump met een
+// conninfo krijgen niets uit de omgeving. sql voert query's uit als de
+// beheerder, psqlAs met een andere omgeving.
+type realPG struct {
+	a           *Agent
+	host, port  string
+	base, admin []string
+	psqlAs      func(env []string, database string, sql ...string) (string, error)
+	sql         func(database string, q ...string) string
+}
+
+func newRealPG(t *testing.T) *realPG {
+	t.Helper()
 	raw := os.Getenv("CF_TEST_DATABASE_URL")
 	if raw == "" {
 		t.Skip("CF_TEST_DATABASE_URL niet gezet")
@@ -103,10 +110,6 @@ func TestPGRealPostgres(t *testing.T) {
 		return nil
 	}
 
-	suffix := make([]byte, 8)
-	_, _ = rand.Read(suffix)
-	db := "cf_t_" + hex.EncodeToString(suffix[:4])
-	user, target, tmp := db+"_app", db+"_herstel", "cf_herstel_"+hex.EncodeToString(suffix)
 	// psqlAs voert opdrachten uit als de beheerder, of met env als iemand
 	// anders, en geeft de uitvoer zonder witruimte eromheen.
 	psqlAs := func(env []string, database string, sql ...string) (string, error) {
@@ -127,6 +130,23 @@ func TestPGRealPostgres(t *testing.T) {
 		}
 		return out
 	}
+	return &realPG{a: a, host: u.Hostname(), port: port, base: base, admin: admin, psqlAs: psqlAs, sql: sql}
+}
+
+// TestPGRealPostgres doet een gebruiker met database, een dump en het
+// terugzetten met een tijdelijke beheerder tegen de echte PostgreSQL van
+// CF_TEST_DATABASE_URL, met psql en pg_dump van de machine. psql en
+// pg_dump als postgres via de socket worden de beheerder uit de URL; psql
+// met een conninfo krijgt niets uit de omgeving, zodat het wachtwoord uit
+// de passfile moet komen.
+func TestPGRealPostgres(t *testing.T) {
+	r := newRealPG(t)
+	a, base, admin, psqlAs, sql := r.a, r.base, r.admin, r.psqlAs, r.sql
+	port := r.port
+	suffix := make([]byte, 8)
+	_, _ = rand.Read(suffix)
+	db := "cf_t_" + hex.EncodeToString(suffix[:4])
+	user, target, tmp := db+"_app", db+"_herstel", "cf_herstel_"+hex.EncodeToString(suffix)
 	cleanup := func() {
 		for _, q := range []string{
 			`DROP DATABASE IF EXISTS "` + db + `" WITH (FORCE)`, `DROP DATABASE IF EXISTS "` + target + `" WITH (FORCE)`,
@@ -145,7 +165,7 @@ func TestPGRealPostgres(t *testing.T) {
 	}}); res.Error != "" {
 		t.Fatal(res.Error)
 	}
-	app := append(slices.Clone(base), "PGHOST="+u.Hostname(), "PGPORT="+port, "PGUSER="+user, "PGPASSWORD="+password)
+	app := append(slices.Clone(base), "PGHOST="+r.host, "PGPORT="+port, "PGUSER="+user, "PGPASSWORD="+password)
 	if out, err := psqlAs(app, db,
 		"CREATE TABLE files (id serial PRIMARY KEY, name text, data bytea)",
 		"CREATE TABLE log (id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY, file int REFERENCES files, at timestamptz)",

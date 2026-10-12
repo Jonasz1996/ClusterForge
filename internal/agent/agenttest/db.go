@@ -152,6 +152,12 @@ type Postgres struct {
 	Roles []PGRole
 	// DumpIncomplete laat pg_dump stoppen zonder de slotregel.
 	DumpIncomplete bool
+	// Voor een verhuizing: de adressen die pg_hba.conf niet binnenlaat, of
+	// de server TLS kan, en de extensies die te installeren zijn (nil is
+	// een gewone lijst met pgcrypto, pg_trgm en uuid-ossp).
+	HBADeny   []string
+	TLS       bool
+	Available []string
 }
 
 // PGSource is de WAL-ontvanger van een replica.
@@ -185,6 +191,15 @@ type Database struct {
 	// database (CONNECT, CREATE, TEMPORARY).
 	Owner string
 	ACL   map[string][]string
+	// Voor een verhuizing in PostgreSQL (Charset is de encoding, leeg is
+	// UTF8): de extensies, de tabellen die de eigenaar niet mag lezen, de
+	// rollen met rechten op een tabel, het aantal instellingen met ALTER
+	// DATABASE, en of default_transaction_read_only aan staat.
+	Extensions []string
+	Unreadable []string
+	Grantees   []string
+	Settings   int
+	ReadOnly   bool
 }
 
 // Locked voert fn uit onder het slot van de host, om de databases te

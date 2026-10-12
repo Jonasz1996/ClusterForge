@@ -1,14 +1,17 @@
 package components
 
 // Een database verhuizen naar de database van een cluster: in mijlpaal 8
-// van fase 5 het plan en de proefverhuizing, in mijlpaal 9 de echte.
+// van fase 5 het plan en de proefverhuizing, in mijlpaal 9 de echte, en in
+// mijlpaal 10 hetzelfde voor PostgreSQL.
 //
-// De bron is een MariaDB die ClusterForge onder Databases ziet: een cluster
-// of een losse node. Daar maakt ClusterForge een tijdelijke gebruiker die
-// alleen de dump mag maken, en de nieuwe node haalt de dump zelf op en
-// importeert hem meteen; er komt nergens een bestand. Het wachtwoord van
-// die gebruiker maakt ClusterForge per poging en bewaart het nergens; na
-// afloop is de gebruiker weg.
+// De bron is een MariaDB of PostgreSQL die ClusterForge onder Databases
+// ziet: een cluster of een losse node. Daar maakt ClusterForge een
+// tijdelijke gebruiker die alleen de dump mag maken, en de nieuwe node
+// haalt de dump zelf op en importeert hem meteen; er komt nergens een
+// bestand. Het wachtwoord van die gebruiker maakt ClusterForge per poging
+// en bewaart het nergens; na afloop is de gebruiker weg. Bij PostgreSQL is
+// hij lid van de eigenaar van de database en mag hij alleen lezen; de
+// nieuwe node is de primary in Patroni.
 //
 // De proef importeert in <database>_proef terwijl de app doorwerkt, telt
 // de rijen aan beide kanten, meet hoe lang het duurde en haalt de kopie
@@ -174,16 +177,45 @@ func trialUser(jobID uuid.UUID) string {
 	return protocol.DBMigrateUserPrefix + strings.ReplaceAll(jobID.String(), "-", "")[:16]
 }
 
-// migrateReq stuurt een DBMigrate naar een node.
-func (s *Service) migrateReq(ctx context.Context, n Node, req protocol.DBMigrateRequest) (*protocol.DBMigrateResult, error) {
-	res, err := s.dbRequest(ctx, dbTarget{node: n}, protocol.DBRequest{Op: protocol.DBMigrate, Migrate: &req})
+// migrateReq stuurt een DBMigrate voor een database van engine naar een
+// node.
+func (s *Service) migrateReq(ctx context.Context, n Node, engine string, req protocol.DBMigrateRequest) (*protocol.DBMigrateResult, error) {
+	if engine == protocol.DBPostgreSQL {
+		if err := s.pgMigrateAgent(ctx, n); err != nil {
+			return nil, err
+		}
+	}
+	res, err := s.dbRequest(ctx, dbTarget{node: n, engine: engine}, protocol.DBRequest{Op: protocol.DBMigrate, Migrate: &req})
 	if err != nil {
-		return nil, err
+		// Bij adopt van PostgreSQL staan daar de rollen die al gemaakt zijn.
+		return res.Migrate, err
 	}
 	if res.Migrate == nil {
 		return nil, &ConflictError{n.Hostname + ": de agent gaf geen antwoord over de verhuizing"}
 	}
 	return res.Migrate, nil
+}
+
+// pgMigrateAgent zegt waarom de agent op n geen database van PostgreSQL kan
+// verhuizen: een oudere agent kent het veld Engine van DBMigrate niet en
+// zou het verzoek op MariaDB uitvoeren.
+func (s *Service) pgMigrateAgent(ctx context.Context, n Node) error {
+	row, err := s.q.GetNode(ctx, n.NodeID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return &ConflictError{"ClusterForge kent de node " + n.Hostname + " niet meer"}
+	}
+	if err != nil {
+		return err
+	}
+	return pgMigrateProtocol(n.Hostname, int(deref(row.AgentProtocol)))
+}
+
+func pgMigrateProtocol(hostname string, v int) error {
+	if v < protocol.DBPGMigrateSince {
+		return &ConflictError{fmt.Sprintf("de agent op %s heeft protocol %d; een database van PostgreSQL verhuizen vraagt protocol %d. "+
+			"Werk hem bij met het installatiescript en --upgrade", hostname, v, protocol.DBPGMigrateSince)}
+	}
+	return nil
 }
 
 // MigrationPlan bekijkt hoe database van de server source naar het
@@ -195,8 +227,10 @@ func (s *Service) MigrationPlan(ctx context.Context, source, database string, co
 	return p, err
 }
 
-// migrationRoute is wat de proef uit het plan nodig heeft.
+// migrationRoute is wat de proef uit het plan nodig heeft. Engine is leeg
+// bij MariaDB, zoals in een taak van voor PostgreSQL.
 type migrationRoute struct {
+	Engine     string   `json:"engine,omitempty"`
 	SourceNode Node     `json:"source_node"`
 	Address    string   `json:"address"`
 	Port       int      `json:"port"`
@@ -221,7 +255,18 @@ type migrationRoute struct {
 	DataNodes     []Node   `json:"data_nodes,omitempty"`
 	TargetAddress string   `json:"target_address,omitempty"`
 	NewHosts      []string `json:"new_hosts,omitempty"`
+	// Bij PostgreSQL: de eigenaar van de database, en Move bij de echte
+	// verhuizing: dan krijgt de nieuwe database die eigenaar en neemt de
+	// dump de eigenaars en rechten mee.
+	Owner string `json:"owner,omitempty"`
+	Move  bool   `json:"move,omitempty"`
 }
+
+// engine is de engine van de route.
+func (r *migrationRoute) engine() string { return cmp.Or(r.Engine, protocol.DBMariaDB) }
+
+// pg zegt of de route een database van PostgreSQL verhuist.
+func (r *migrationRoute) pg() bool { return r.Engine == protocol.DBPostgreSQL }
 
 // migrationPlan is MigrationPlan met wat de proef nodig heeft; self is de
 // proef die het plan opnieuw bekijkt, of uuid.Nil.
@@ -250,8 +295,8 @@ func moveBlockers(p MigrationPlan) []string {
 
 func (s *Service) planMigration(ctx context.Context, source, database string, componentID *uuid.UUID, self uuid.UUID) (MigrationPlan, migrationRoute, error) {
 	var route migrationRoute
-	if err := dbsql.CheckDatabase(database); err != nil {
-		return MigrationPlan{}, route, &InvalidError{"database", err.Error()}
+	if dbsql.CheckDatabase(database) != nil && dbsql.CheckPGDatabase(database) != nil {
+		return MigrationPlan{}, route, &InvalidError{"database", dbsql.CheckDatabase(database).Error()}
 	}
 	if s.Overview == nil {
 		return MigrationPlan{}, route, errors.New("de server leest de databases niet")
@@ -265,13 +310,18 @@ func (s *Service) planMigration(ctx context.Context, source, database string, co
 		return MigrationPlan{}, route, ErrSourceNotFound
 	}
 	g := groups[gi]
+	if err := dbsql.CheckDatabaseOf(g.Engine, database); err != nil {
+		return MigrationPlan{}, route, &InvalidError{"database", err.Error()}
+	}
+	pg := g.Engine == protocol.DBPostgreSQL
+	port := enginePort(g.Engine)
 	p := MigrationPlan{
 		Database: database, Clients: []databases.User{}, Targets: []MigrationOption{}, Findings: []Finding{},
 		Accounts: []protocol.DBMigrateAccount{}, NewHosts: []string{}, Connections: []MigrationConnection{}, MoveFindings: []Finding{},
 	}
 	p.Source = MigrationSource{
 		Key: source, Name: g.ClusterName, ClusterID: g.ClusterID, Slug: g.ClusterSlug, Environment: g.ClusterEnv, Engine: g.Engine, Kind: g.Kind,
-		Version: g.Version, Summary: g.Summary, Port: MariaDBPort, Servers: []string{},
+		Version: g.Version, Summary: g.Summary, Port: port, Servers: []string{},
 	}
 	for _, sv := range g.Servers {
 		p.Source.Servers = append(p.Source.Servers, sv.Hostname)
@@ -316,8 +366,8 @@ func (s *Service) planMigration(ctx context.Context, source, database string, co
 		}
 	}
 
-	// De clusters met een database van ClusterForge.
-	comps, err := s.q.ListWatchedComponents(ctx)
+	// De clusters met een database van ClusterForge met dezelfde engine.
+	comps, err := s.q.ListDBComponents(ctx, g.Engine)
 	if err != nil {
 		return p, route, err
 	}
@@ -345,8 +395,8 @@ func (s *Service) planMigration(ctx context.Context, source, database string, co
 		}
 	}
 
-	if g.Engine != protocol.DBMariaDB {
-		add(Blocked, "engine", nil, fmt.Sprintf("%s verhuizen komt in een volgende mijlpaal; nu kan alleen MariaDB", databases.EngineName(g.Engine)), "")
+	if g.Engine != protocol.DBMariaDB && !pg {
+		add(Blocked, "engine", nil, fmt.Sprintf("%s verhuizen kan ClusterForge niet; alleen MariaDB en PostgreSQL", databases.EngineName(g.Engine)), "")
 		return p, route, nil
 	}
 
@@ -365,7 +415,7 @@ func (s *Service) planMigration(ctx context.Context, source, database string, co
 		add(Blocked, "old_agent", &sn, fmt.Sprintf("de agent op %s is te oud; werk hem bij met het installatiescript en --upgrade", sn.Hostname), "")
 		return p, route, nil
 	}
-	res, err := s.migrateReq(ctx, sn, protocol.DBMigrateRequest{Action: protocol.DBMigrateInspect, Database: database})
+	res, err := s.migrateReq(ctx, sn, g.Engine, protocol.DBMigrateRequest{Action: protocol.DBMigrateInspect, Database: database})
 	var ce *ConflictError
 	switch {
 	case errors.As(err, &ce):
@@ -383,12 +433,17 @@ func (s *Service) planMigration(ctx context.Context, source, database string, co
 		add(Blocked, "not_found", &sn, fmt.Sprintf("op %s staat geen database %s", sn.Hostname, database), "")
 		return p, route, nil
 	}
-	sourceMaria := strings.Contains(info.Version, "MariaDB")
-	if !sourceMaria {
+	sourceMaria := !pg && strings.Contains(info.Version, "MariaDB")
+	switch {
+	case pg:
+		checkPGSource(info, database, &sn, add)
+	case !sourceMaria:
 		add(Warning, "mysql", &sn, fmt.Sprintf("%s draait MySQL %s. MariaDB leest een dump van MySQL meestal, maar niet alles, zoals de collatie "+
 			"utf8mb4_0900_ai_ci van MySQL 8; de proef laat zien of het lukt", sn.Hostname, shortVersion(info.Version)), "")
 	}
-	checkTables(info, database, add)
+	if !pg {
+		checkTables(info, database, add)
+	}
 	if info.Routines > 0 && sourceMaria && !versionAtLeast(info.Version, 11, 3) {
 		add(Info, "routines_proc", &sn, fmt.Sprintf("%s heeft %s. MariaDB %s kent het recht SHOW CREATE ROUTINE nog niet, dus de tijdelijke "+
 			"gebruiker mag mysql.proc lezen: de definities van alle routines op %s, geen data", database,
@@ -396,7 +451,7 @@ func (s *Service) planMigration(ctx context.Context, source, database string, co
 	}
 
 	// De gebruikers van de app, en wie nu verbonden is.
-	acc, err := s.migrateReq(ctx, sn, protocol.DBMigrateRequest{Action: protocol.DBMigrateAccounts, Database: database})
+	acc, err := s.migrateReq(ctx, sn, g.Engine, protocol.DBMigrateRequest{Action: protocol.DBMigrateAccounts, Database: database})
 	switch {
 	case errors.As(err, &ce):
 		addMove(Blocked, "accounts_error", &sn, fmt.Sprintf("de gebruikers van %s op %s lezen lukte niet: %s. Werk de agent bij met het installatiescript "+
@@ -410,14 +465,18 @@ func (s *Service) planMigration(ctx context.Context, source, database string, co
 			a.Hash = ""
 			p.Accounts = append(p.Accounts, a)
 		}
-		checkAccounts(p.Accounts, p.Clients, database, addMove)
+		if pg {
+			checkPGAccounts(p.Accounts, p.Clients, database, addMove)
+		} else {
+			checkAccounts(p.Accounts, p.Clients, database, addMove)
+		}
 	}
 	for _, sv := range g.Servers {
 		if sv.Running {
 			route.Servers = append(route.Servers, Node{NodeID: sv.NodeID, Hostname: sv.Hostname})
 		}
 	}
-	conns, unread, err := s.liveConnections(ctx, route.Servers, database)
+	conns, unread, err := s.liveConnections(ctx, route.Servers, g.Engine, database)
 	if err != nil {
 		return p, route, err
 	}
@@ -439,13 +498,13 @@ func (s *Service) planMigration(ctx context.Context, source, database string, co
 			add(Blocked, "same", nil, database+" staat al in de database van dit cluster", "")
 			return p, route, nil
 		}
-		return p, route, &InvalidError{"component", "kies een cluster met een MariaDB van ClusterForge die draait"}
+		return p, route, &InvalidError{"component", fmt.Sprintf("kies een cluster met een %s van ClusterForge die draait", databases.EngineName(g.Engine))}
 	}
 	opt := p.Targets[oi]
 	checkClients(p.Clients, opt, database, add)
 
 	// De nieuwe database.
-	t, err := s.mariaTarget(ctx, opt.ClusterID, opt.ComponentID)
+	t, err := s.migrateTarget(ctx, opt.ClusterID, opt.ComponentID, g.Engine)
 	switch {
 	case errors.As(err, &ce):
 		add(Blocked, "target_down", nil, opt.ClusterName+": "+ce.Msg, "")
@@ -455,9 +514,22 @@ func (s *Service) planMigration(ctx context.Context, source, database string, co
 	}
 	target := &MigrationTarget{
 		ClusterID: opt.ClusterID, ClusterName: opt.ClusterName, Slug: t.cluster.Slug, Environment: string(t.cluster.Environment),
-		ComponentID: opt.ComponentID, Node: t.node, Port: MariaDBPort, Hosts: []string{}, Disks: []MigrationDisk{},
+		ComponentID: opt.ComponentID, Node: t.node, Port: port, Hosts: []string{}, Disks: []MigrationDisk{},
 	}
 	p.Target = target
+	if pg {
+		if err := s.pgMigrateAgent(ctx, t.node); errors.As(err, &ce) {
+			add(Blocked, "target_agent", &t.node, ce.Msg, "")
+			return p, route, nil
+		} else if err != nil {
+			return p, route, err
+		}
+		// Een rol die al op het nieuwe cluster inlogt, krijgt bij de
+		// verhuizing het wachtwoord van de oude server.
+		if us, err := s.dbRequest(ctx, t, protocol.DBRequest{Op: protocol.DBUsers}); err == nil {
+			checkPGExisting(p.Accounts, us.Users, opt.ClusterName, addMove)
+		}
+	}
 	cands, err := s.q.ListComponentCandidates(ctx, &opt.ClusterID)
 	if err != nil {
 		return p, route, err
@@ -468,11 +540,13 @@ func (s *Service) planMigration(ctx context.Context, source, database string, co
 	}
 	if hosts, address, err := s.userHosts(ctx, t); err == nil {
 		target.Address = address
-		p.NewHosts = append(hosts, "localhost")
+		if !pg {
+			p.NewHosts = append(hosts, "localhost")
+		}
 	}
 	target.Hosts = nodeAddresses(byID[t.node.NodeID])
 	tg := slices.IndexFunc(groups, func(x databases.Group) bool {
-		return x.ClusterID != nil && *x.ClusterID == opt.ClusterID && x.Engine == protocol.DBMariaDB
+		return x.ClusterID != nil && *x.ClusterID == opt.ClusterID && x.Engine == g.Engine
 	})
 	trial := TrialName(database)
 	trialExists := false
@@ -492,7 +566,10 @@ func (s *Service) planMigration(ctx context.Context, source, database string, co
 			}
 		}
 	}
-	pool, _ := templates.ParseSize(fmt.Sprint(t.spec.Params["buffer_pool"]))
+	var pool int64
+	if !pg {
+		pool, _ = templates.ParseSize(fmt.Sprint(t.spec.Params["buffer_pool"]))
+	}
 	target.BufferPoolBytes = pool
 
 	// Bereikbaarheid: eerst de server zelf, dan een VIP van het oude
@@ -508,7 +585,7 @@ func (s *Service) planMigration(ctx context.Context, source, database string, co
 	}
 	var tried []string
 	for i, a := range addrs {
-		pr, err := s.migrateReq(ctx, t.node, protocol.DBMigrateRequest{Action: protocol.DBMigrateProbe, Host: a, Port: MariaDBPort})
+		pr, err := s.migrateReq(ctx, t.node, g.Engine, protocol.DBMigrateRequest{Action: protocol.DBMigrateProbe, Host: a, Port: port, Database: database})
 		if errors.As(err, &ce) {
 			add(Blocked, "target_agent", &t.node, ce.Msg, "")
 			return p, route, nil
@@ -531,10 +608,14 @@ func (s *Service) planMigration(ctx context.Context, source, database string, co
 		}
 		break
 	}
-	if p.Reach == nil {
-		add(Blocked, "unreachable", &t.node, fmt.Sprintf("%s bereikt MariaDB op %s niet (%s). Zet in de firewall poort %d open van %s naar %s, zolang de verhuizing duurt",
-			t.node.Hostname, sn.Hostname, strings.Join(tried, "; "), MariaDBPort, joinHosts(target.Hosts), addrs[0]), "")
-	} else {
+	engineName := databases.EngineName(g.Engine)
+	switch {
+	case p.Reach == nil:
+		add(Blocked, "unreachable", &t.node, fmt.Sprintf("%s bereikt %s op %s niet (%s). Zet in de firewall poort %d open van %s naar %s, zolang de verhuizing duurt",
+			t.node.Hostname, engineName, sn.Hostname, strings.Join(tried, "; "), port, joinHosts(target.Hosts), addrs[0]), "")
+	case pg:
+		checkPGReach(&p, info, ip, sn, tried, add)
+	default:
 		if p.Source.Via == ViaVIP {
 			// Achter een VIP staat soms HAProxy; MariaDB ziet dan het adres
 			// van de node met HAProxy, niet dat van de nieuwe node.
@@ -564,6 +645,9 @@ func (s *Service) planMigration(ctx context.Context, source, database string, co
 	}
 
 	// Versies.
+	if pg && target.Version != "" {
+		checkPGVersions(info.Version, target.Version, sn, t.node, add)
+	}
 	if sourceMaria && target.Version != "" {
 		sMaj, sMin, ok1 := majorMinor(info.Version)
 		tMaj, tMin, ok2 := majorMinor(target.Version)
@@ -601,14 +685,19 @@ func (s *Service) planMigration(ctx context.Context, source, database string, co
 		}
 	}
 
-	// Schijf en geheugen op elke datanode: Galera zet de data overal.
+	// Schijf en geheugen op elke datanode: Galera en Patroni zetten de data
+	// overal.
+	dataDir, logs := "/var/lib/mysql", "de logs van MariaDB"
+	if pg {
+		dataDir, logs = "/var/lib/postgresql", "de WAL van PostgreSQL"
+	}
 	for _, n := range dataNodes(t.spec, nil) {
 		f := nodeState(byID[n.NodeID]).Facts
 		if f == nil {
 			continue
 		}
 		var pn PlanNode
-		checkDisk(&pn, &n, f, "/var/lib/mysql", func(string, string, *Node, string, string) {})
+		checkDisk(&pn, &n, f, dataDir, func(string, string, *Node, string, string) {})
 		if pn.DiskFreeBytes == nil {
 			continue
 		}
@@ -616,8 +705,8 @@ func (s *Service) planMigration(ctx context.Context, source, database string, co
 		target.Disks = append(target.Disks, MigrationDisk{Hostname: n.Hostname, Mount: pn.DiskMount, FreeBytes: free})
 		switch {
 		case free < info.SizeBytes+(1<<30):
-			add(Blocked, "disk", &n, fmt.Sprintf("op %s is er %s vrij op %s; %s is %s, plus ruimte voor de logs van MariaDB", n.Hostname,
-				humanBytes(free), pn.DiskMount, database, humanBytes(info.SizeBytes)), "")
+			add(Blocked, "disk", &n, fmt.Sprintf("op %s is er %s vrij op %s; %s is %s, plus ruimte voor %s", n.Hostname,
+				humanBytes(free), pn.DiskMount, database, humanBytes(info.SizeBytes), logs), "")
 		case free < 2*info.SizeBytes+(1<<30):
 			add(Warning, "disk_low", &n, fmt.Sprintf("op %s is er %s vrij op %s; %s is %s. Dat past, maar de dumps van elke nacht komen er ook", n.Hostname,
 				humanBytes(free), pn.DiskMount, database, humanBytes(info.SizeBytes)), "")
@@ -630,10 +719,15 @@ func (s *Service) planMigration(ctx context.Context, source, database string, co
 	}
 
 	route = migrationRoute{
-		SourceNode: sn, Address: p.Source.Address, Port: MariaDBPort, Via: p.Source.Via, Hosts: target.Hosts, Import: t.node,
+		SourceNode: sn, Address: p.Source.Address, Port: port, Via: p.Source.Via, Hosts: target.Hosts, Import: t.node, Owner: info.Owner,
 		Target: trial, Charset: info.Charset, Collation: info.Collation, Size: info.SizeBytes,
 		Views: info.Views, Routines: info.Routines, Triggers: info.Triggers, Events: info.Events, Leftover: leftover,
 		Servers: route.Servers, DataNodes: dataNodes(t.spec, nil), TargetAddress: target.Address, NewHosts: p.NewHosts,
+	}
+	if pg {
+		// pg_hba.conf van de oude server zegt vanwaar de tijdelijke
+		// gebruiker mag inloggen, niet de gebruiker zelf.
+		route.Engine, route.Hosts = protocol.DBPostgreSQL, nil
 	}
 	for _, tb := range info.Tables {
 		route.Tables = append(route.Tables, tb.Name)
@@ -836,6 +930,9 @@ type trialParams struct {
 	ComponentID uuid.UUID `json:"component_id"`
 	Source      string    `json:"source"`
 	Database    string    `json:"database"`
+	// Grants zijn bij de verhuizing van PostgreSQL de rollen met hun rechten
+	// op de database zelf; die staan niet in de dump.
+	Grants []protocol.DBMigrateAccount `json:"-"`
 }
 
 // StartTrial begint een proefverhuizing. Het plan moet een doel hebben en
@@ -983,7 +1080,7 @@ func (s *Service) trialSteps(ctx context.Context, j *jobs.Job, p trialParams, m 
 	j.Done(stepTrialCheck, route)
 
 	if err := j.Step(ctx, stepTrialCleanup, func(ctx context.Context, st *jobs.Step) error {
-		cur, err := s.migrateReq(ctx, route.Import, protocol.DBMigrateRequest{Action: protocol.DBMigrateStatus, Target: route.Target})
+		cur, err := s.migrateReq(ctx, route.Import, route.engine(), protocol.DBMigrateRequest{Action: protocol.DBMigrateStatus, Target: route.Target})
 		if err != nil {
 			return err
 		}
@@ -1043,8 +1140,12 @@ func (s *Service) trialSteps(ctx context.Context, j *jobs.Job, p trialParams, m 
 // ophalen en importeren, wacht tot hij klaar is, en haalt de gebruiker
 // weer weg. Een hervatte stap wacht verder op dezelfde import.
 func (s *Service) trialPull(ctx context.Context, j *jobs.Job, st *jobs.Step, p trialParams, route *migrationRoute, pull *trialPull, res *trialResult) error {
-	user := trialUser(j.ID)
+	user, engine := trialUser(j.ID), route.engine()
 	revoke := protocol.DBMigrateRequest{Action: protocol.DBMigrateRevoke, User: user, Hosts: route.Hosts}
+	dropUser := "DROP USER"
+	if route.pg() {
+		dropUser = "DROP ROLE"
+	}
 	granted := st.State(pull)
 	defer func() {
 		if !granted || jobs.Interrupted(ctx) {
@@ -1053,25 +1154,40 @@ func (s *Service) trialPull(ctx context.Context, j *jobs.Job, st *jobs.Step, p t
 		// Ook als iemand de taak annuleert.
 		dctx, cancel := jobs.Detach(ctx)
 		defer cancel()
-		if _, err := s.migrateReq(dctx, route.SourceNode, revoke); err != nil {
-			st.Logf("De tijdelijke gebruiker %s op %s weghalen mislukte: %v. Haal hem weg met DROP USER op %s.", user, route.SourceNode.Hostname, err, route.SourceNode.Hostname)
+		if _, err := s.migrateReq(dctx, route.SourceNode, engine, revoke); err != nil {
+			st.Logf("De tijdelijke gebruiker %s op %s weghalen mislukte: %v. Haal hem weg met %s op %s.", user, route.SourceNode.Hostname, err,
+				dropUser, route.SourceNode.Hostname)
 			return
 		}
 		st.Logf("Tijdelijke gebruiker %s op %s weggehaald.", user, route.SourceNode.Hostname)
 	}()
 	if !granted {
 		pw := rand.Text()
-		if _, err := s.migrateReq(ctx, route.SourceNode, protocol.DBMigrateRequest{
+		if _, err := s.migrateReq(ctx, route.SourceNode, engine, protocol.DBMigrateRequest{
 			Action: protocol.DBMigrateGrant, Database: p.Database, User: user, Hosts: route.Hosts, Password: pw,
 		}); err != nil {
 			return err
 		}
 		granted = true
-		st.Logf("Tijdelijke gebruiker %s op %s gemaakt, alleen om %s te lezen, vanaf %s.", user, route.SourceNode.Hostname, p.Database, joinHosts(route.Hosts))
-		r, err := s.migrateReq(ctx, route.Import, protocol.DBMigrateRequest{
+		if route.pg() {
+			st.Logf("Tijdelijke gebruiker %s op %s gemaakt: lid van %s, de eigenaar van %s, en alleen om te lezen; hij verloopt na %d uur.", user,
+				route.SourceNode.Hostname, route.Owner, p.Database, int(protocol.DBTempRoleTTL.Hours()))
+		} else {
+			st.Logf("Tijdelijke gebruiker %s op %s gemaakt, alleen om %s te lezen, vanaf %s.", user, route.SourceNode.Hostname, p.Database, joinHosts(route.Hosts))
+		}
+		pullReq := protocol.DBMigrateRequest{
 			Action: protocol.DBMigratePull, Database: p.Database, User: user, Password: pw, Host: route.Address, Port: route.Port,
 			Target: route.Target, Charset: route.Charset, Collation: route.Collation, Total: route.Size,
-		})
+		}
+		switch {
+		case route.pg() && route.Move:
+			// De eigenaars en rechten gaan mee; de rollen zijn er al.
+			pullReq.Owner, pullReq.Accounts = route.Owner, p.Grants
+		case route.pg():
+			// Een proef zonder de rollen van de app: alles is van postgres.
+			pullReq.Trial = true
+		}
+		r, err := s.migrateReq(ctx, route.Import, engine, pullReq)
 		if err != nil {
 			return err
 		}
@@ -1092,7 +1208,7 @@ func (s *Service) trialPull(ctx context.Context, j *jobs.Job, st *jobs.Step, p t
 	deadline := s.Now().Add(protocol.DBDumpTimeout + time.Hour)
 	reported, counting := int64(0), false
 	for {
-		cur, err := s.migrateReq(ctx, route.Import, protocol.DBMigrateRequest{Action: protocol.DBMigrateStatus, Target: route.Target})
+		cur, err := s.migrateReq(ctx, route.Import, engine, protocol.DBMigrateRequest{Action: protocol.DBMigrateStatus, Target: route.Target})
 		var run *protocol.DBMigrateRun
 		if err == nil {
 			run = cur.Run
@@ -1166,12 +1282,19 @@ func compareTrial(route *migrationRoute, run *protocol.DBMigrateRun, res *trialR
 		}
 	}
 	res.objects = []objectCount{
-		{"views", route.Views, run.Views}, {"routines", route.Routines, run.Routines},
-		{"triggers", route.Triggers, run.Triggers}, {"events", route.Events, run.Events},
+		{"views", route.Views, run.Views}, {"routines", route.Routines, run.Routines}, {"triggers", route.Triggers, run.Triggers},
+	}
+	if !route.pg() {
+		// PostgreSQL kent geen events.
+		res.objects = append(res.objects, objectCount{"events", route.Events, run.Events})
 	}
 	for _, o := range res.objects {
 		if o.Target < o.Source {
-			problems = append(problems, fmt.Sprintf("%d van de %d %s", o.Target, o.Source, o.Kind))
+			kind := o.Kind
+			if route.pg() && kind == "routines" {
+				kind = "functies"
+			}
+			problems = append(problems, fmt.Sprintf("%d van de %d %s", o.Target, o.Source, kind))
 		}
 	}
 	lines = append(lines, fmt.Sprintf("%d tabellen, %d rijen oud en %d nieuw.", len(run.Tables), rowsSource, rowsTarget))
@@ -1200,7 +1323,7 @@ func compareTrial(route *migrationRoute, run *protocol.DBMigrateRun, res *trialR
 
 // dropTrial haalt de kopie van een proef weg.
 func (s *Service) dropTrial(ctx context.Context, route *migrationRoute) error {
-	_, err := s.dbRequest(ctx, dbTarget{node: route.Import}, protocol.DBRequest{Op: protocol.DBDrop, Drop: &protocol.DBDropRequest{
+	_, err := s.dbRequest(ctx, dbTarget{node: route.Import, engine: route.engine()}, protocol.DBRequest{Op: protocol.DBDrop, Drop: &protocol.DBDropRequest{
 		Database: route.Target, Confirm: route.Target,
 	}})
 	if err == nil && s.DBChanged != nil {

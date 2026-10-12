@@ -279,6 +279,42 @@ func (q *Queries) ListComponentCandidates(ctx context.Context, clusterID *uuid.U
 	return items, nil
 }
 
+const listDBComponents = `-- name: ListDBComponents :many
+SELECT cc.id, cc.cluster_id, c.name AS cluster_name
+FROM cluster_components cc
+JOIN clusters c ON c.id = cc.cluster_id
+WHERE cc.applied_revision IS NOT NULL AND cc.engine = $1
+ORDER BY c.name
+`
+
+type ListDBComponentsRow struct {
+	ID          uuid.UUID
+	ClusterID   uuid.UUID
+	ClusterName string
+}
+
+// De toegepaste onderdelen met een database van deze soort, voor een
+// verhuizing.
+func (q *Queries) ListDBComponents(ctx context.Context, engine string) ([]ListDBComponentsRow, error) {
+	rows, err := q.db.Query(ctx, listDBComponents, engine)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDBComponentsRow{}
+	for rows.Next() {
+		var i ListDBComponentsRow
+		if err := rows.Scan(&i.ID, &i.ClusterID, &i.ClusterName); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listNodeComponents = `-- name: ListNodeComponents :many
 SELECT cc.id, cc.cluster_id, cc.engine, cc.spec, cc.revision, cc.applied_revision, cc.job_id, cc.created_at, cc.updated_at, cc.auto_recover, cc.down_since, cc.down_reason, cc.nodes_out, cc.auto_recovered_at, cc.recover_job_id, cc.backup_on, cc.backup_at, cc.backup_keep_days, cc.backup_next_at
 FROM cluster_components cc

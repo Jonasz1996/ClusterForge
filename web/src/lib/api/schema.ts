@@ -4517,12 +4517,18 @@ export interface components {
         };
         DatabaseMigrationAccount: {
             user: string;
+            /** @description Leeg bij PostgreSQL */
             host: string;
-            /** @description Hoe hij inlogt; alleen mysql_native_password gaat mee */
+            /** @description Hoe hij inlogt. MariaDB: alleen mysql_native_password gaat mee. PostgreSQL: nologin, scram-sha-256, md5, none (zonder wachtwoord) of other */
             plugin: string;
+            /** @description Bij PostgreSQL OWNER, CONNECT, CREATE, TEMPORARY, en OBJECTS als hij iets in de database bezit of er rechten op heeft */
             privileges: string[];
             /** @description Hij heeft ook rechten op alle databases */
             global: boolean;
+            /** @description Bij PostgreSQL de rollen waarvan hij lid is */
+            member_of: string[];
+            /** @description De echte verhuizing neemt hem mee */
+            moves: boolean;
         };
         DatabaseMigrationConnection: {
             server: string;
@@ -4556,6 +4562,11 @@ export interface components {
         };
         DatabaseMigrationInfo: {
             version: string;
+            /** @description Bij PostgreSQL de eigenaar van de database */
+            owner: string;
+            /** @description Bij PostgreSQL de extensies in de database */
+            extensions: string[];
+            /** @description Bij PostgreSQL de encoding */
             charset: string;
             collation: string;
             /**
@@ -4620,9 +4631,11 @@ export interface components {
             reached: boolean;
             version: string;
             tls: boolean;
-            /** @description De fout die MariaDB meteen stuurde, zoals 1130; 0 zonder */
+            /** @description De fout die MariaDB meteen stuurde, zoals 1130, of bij PostgreSQL 28000 als pg_hba.conf weigert; 0 zonder */
             code: number;
             error: string;
+            /** @description Bij PostgreSQL: het adres waarvan de oude server de nieuwe node ziet, als pg_hba.conf hem weigert */
+            seen: string;
         };
         DatabaseMigrationRun: {
             /** Format: uuid */
@@ -4690,11 +4703,13 @@ export interface components {
         };
         DatabaseMigrationMovedUser: {
             user: string;
-            /** @description Zijn hosts op de oude server */
+            /** @description Zijn hosts op de oude server; leeg bij PostgreSQL */
             old_hosts: string[];
-            /** @description Zijn hosts op het nieuwe cluster */
+            /** @description Zijn hosts op het nieuwe cluster; leeg bij PostgreSQL */
             hosts: string[];
             privileges: string[];
+            /** @description ClusterForge maakte hem nieuw op het nieuwe cluster: annuleren haalt hem weer weg */
+            new: boolean;
         };
         DatabaseMigrationCount: {
             name: string;

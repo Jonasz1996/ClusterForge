@@ -57,6 +57,11 @@ export default function DatabasesPage() {
   );
 }
 
+// movable zegt of ClusterForge de databases van g kan verhuizen.
+function movable(g: DatabaseGroup) {
+  return g.engine === "mariadb" || g.engine === "postgresql";
+}
+
 function GroupCard({ g }: { g: DatabaseGroup }) {
   const health = healthInfo[g.health];
   const title = (
@@ -121,7 +126,7 @@ function GroupCard({ g }: { g: DatabaseGroup }) {
                 <th className={`${thClass} text-right`}>Grootte</th>
                 <th className={`${thClass} text-right`}>Tabellen</th>
                 <th className={thClass}>Gebruikt door</th>
-                {g.engine === "mariadb" && (
+                {movable(g) && (
                   <th className={thClass}>
                     <span className="sr-only">Verhuizen</span>
                   </th>
@@ -144,7 +149,7 @@ function GroupCard({ g }: { g: DatabaseGroup }) {
                   <td className={`${tdClass} min-w-64`}>
                     <Users d={d} g={g} />
                   </td>
-                  {g.engine === "mariadb" && (
+                  {movable(g) && (
                     <td className={`${tdClass} whitespace-nowrap text-right`}>
                       <Link
                         href={`/databases/verhuizen?source=${encodeURIComponent(g.key)}&db=${encodeURIComponent(d.name)}`}

@@ -173,8 +173,8 @@ function AddForm({ c, templates, taken }: { c: ClusterDetail; templates: Compone
           {t && <p className="text-slate-600 dark:text-slate-400">{t.description}</p>}
           {pg && (
             <p className="text-slate-500">
-              Databases, gebruikers, dumps en verhuizen naar PostgreSQL komen in een volgende stap; nu zet ClusterForge het
-              cluster neer.
+              Daarna maak je databases, gebruikers en dumps bij het cluster, en verhuis je een database van een andere PostgreSQL
+              bij Databases.
             </p>
           )}
         </div>

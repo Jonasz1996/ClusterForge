@@ -489,34 +489,47 @@ func (a *Agent) runPull(req protocol.DBMigrateRequest, run protocol.DBMigrateRun
 }
 
 // pipeDump stuurt de uitvoer van mariadb-dump op de oude server direct naar
-// mariadb op deze node. Stopt de dump met een fout, dan krijgt de import
-// het einde van de invoer en is de fout van de dump de oorzaak; mislukt de
-// import eerst, dan stopt de dump. Een dump zonder slotregel is niet
-// compleet.
+// mariadb op deze node.
 func (a *Agent) pipeDump(ctx context.Context, client []string, db, target string, progress func(int64)) error {
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-	pr, pw := io.Pipe()
-	scan := newDumpScan(protocol.DBMariaDB, progress)
-	var dumpFailed atomic.Bool
-	dumpErr := make(chan error, 1)
-	go func() {
+	dump := func(ctx context.Context, w io.Writer) error {
 		args := append(slices.Clone(client), dumpArgs...)
 		args = append(args, db)
-		w := io.MultiWriter(pw, scan)
 		err := a.stream(ctx, nil, w, "mariadb-dump", args...)
 		if err != nil && notInstalled(err) {
 			err = a.stream(ctx, nil, w, "mysqldump", args...)
 		}
+		return err
+	}
+	imp := func(ctx context.Context, r io.Reader) error {
+		args := []string{"--batch", "--skip-print-query-on-error", target}
+		err := a.stream(ctx, r, io.Discard, "mariadb", args...)
+		if err != nil && notInstalled(err) {
+			err = a.stream(ctx, r, io.Discard, "mysql", args...)
+		}
+		return err
+	}
+	return pipe(ctx, protocol.DBMariaDB, dump, imp, progress)
+}
+
+// pipe stuurt wat dump schrijft direct naar imp. Stopt de dump met een
+// fout, dan krijgt de import het einde van de invoer en is de fout van de
+// dump de oorzaak; mislukt de import eerst, dan stopt de dump. Een dump
+// zonder slotregel is niet compleet.
+func pipe(ctx context.Context, engine string, dump func(context.Context, io.Writer) error, imp func(context.Context, io.Reader) error,
+	progress func(int64)) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	pr, pw := io.Pipe()
+	scan := newDumpScan(engine, progress)
+	var dumpFailed atomic.Bool
+	dumpErr := make(chan error, 1)
+	go func() {
+		err := dump(ctx, io.MultiWriter(pw, scan))
 		dumpFailed.Store(err != nil)
 		_ = pw.Close()
 		dumpErr <- err
 	}()
-	args := []string{"--batch", "--skip-print-query-on-error", target}
-	err := a.stream(ctx, pr, io.Discard, "mariadb", args...)
-	if err != nil && notInstalled(err) {
-		err = a.stream(ctx, pr, io.Discard, "mysql", args...)
-	}
+	err := imp(ctx, pr)
 	causedByDump := dumpFailed.Load()
 	if err != nil {
 		cancel()

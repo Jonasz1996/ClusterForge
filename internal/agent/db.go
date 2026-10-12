@@ -109,6 +109,8 @@ func (a *Agent) handleDB(data []byte) protocol.DBResponse {
 		res = a.pgEnsure(ctx, req.Ensure)
 	case pg && req.Op == protocol.DBDrop:
 		res = a.pgDrop(ctx, req.Drop)
+	case pg && req.Op == protocol.DBMigrate:
+		res = a.pgMigrate(ctx, req.Migrate)
 	default:
 		res = a.dbOp(ctx, req)
 	}

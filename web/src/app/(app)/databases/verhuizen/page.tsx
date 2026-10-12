@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
-import { FindingItem, Item, MoveCard, nl, plural, seconds, sortFindings } from "@/components/databases/Move";
+import { engineName, FindingItem, isPG, Item, MoveCard, nl, plural, seconds, sortFindings } from "@/components/databases/Move";
 import { ago, Empty, formatBytes, QueryState, tableClass, tdClass, thClass } from "@/components/inventory/bits";
 import { Alert, Badge, Button, Card, Field, PageHeader, Select } from "@/components/ui";
 import {
@@ -40,9 +40,9 @@ function MigrateInner() {
         title={`${db} verhuizen`}
         description={
           <>
-            Van {p ? p.source.name : "de oude server"} naar de MariaDB op de nodes van een app. ClusterForge toont eerst wat er
-            mee moet en wat in de weg staat; een proefverhuizing importeert een kopie terwijl de app gewoon doorwerkt, en de echte
-            verhuizing gebeurt met de app even in onderhoud. Terug naar{" "}
+            Van {p ? p.source.name : "de oude server"} naar de {p ? engineName(p) : "database"} op de nodes van een app.
+            ClusterForge toont eerst wat er mee moet en wat in de weg staat; een proefverhuizing importeert een kopie terwijl de
+            app gewoon doorwerkt, en de echte verhuizing gebeurt met de app even in onderhoud. Terug naar{" "}
             <Link href="/databases" className="underline">
               Databases
             </Link>
@@ -58,7 +58,7 @@ function MigrateInner() {
             <FindingsCard p={p} />
             <TrialCard p={p} loading={plan.isPlaceholderData} />
             <MoveCard p={p} loading={plan.isPlaceholderData} refresh={() => void plan.refetch()} />
-            <Runs runs={p.runs} />
+            <Runs runs={p.runs} pg={isPG(p)} />
           </>
         )}
       </QueryState>
@@ -69,12 +69,15 @@ function MigrateInner() {
 function SourceCard({ p }: { p: MigrationPlan }) {
   const s = p.source;
   const i = p.info;
+  const pg = isPG(p);
   const objects = i
     ? [
         plural(i.views, "view", "views"),
-        plural(i.routines, "routine", "routines"),
+        // Een routine heet in PostgreSQL een functie.
+        pg ? plural(i.routines, "functie", "functies") : plural(i.routines, "routine", "routines"),
         plural(i.triggers, "trigger", "triggers"),
-        plural(i.events, "event", "events"),
+        // PostgreSQL kent geen events.
+        ...(pg ? [] : [plural(i.events, "event", "events")]),
       ].join(", ")
     : "";
   return (
@@ -103,14 +106,28 @@ function SourceCard({ p }: { p: MigrationPlan }) {
         </Item>
         {i && (
           <>
-            <Item label="Grootte">{formatBytes(i.size_bytes)} aan data en indexen</Item>
+            <Item label="Grootte">
+              {formatBytes(i.size_bytes)} {pg ? "voor de hele database" : "aan data en indexen"}
+            </Item>
             <Item label="Tabellen">
               {plural(i.tables, "tabel", "tabellen")}, ongeveer {plural(i.rows, "rij", "rijen")}
             </Item>
             <Item label="Andere objecten">{objects}</Item>
-            <Item label="Tekenset">
-              {i.charset} <span className="text-slate-500">({i.collation})</span>
-            </Item>
+            {pg ? (
+              <>
+                <Item label="Eigenaar">
+                  <span className="font-mono">{i.owner || "–"}</span>
+                </Item>
+                <Item label="Encoding">{i.charset}</Item>
+                <Item label="Extensies">
+                  <span className="font-mono text-xs">{i.extensions.join(", ") || "geen"}</span>
+                </Item>
+              </>
+            ) : (
+              <Item label="Tekenset">
+                {i.charset} <span className="text-slate-500">({i.collation})</span>
+              </Item>
+            )}
             <Item label="Versie">{i.version}</Item>
           </>
         )}
@@ -182,8 +199,8 @@ function TargetCard({ p }: { p: MigrationPlan }) {
     return (
       <Card title="Naar">
         <Empty>
-          Nog geen cluster met een MariaDB van ClusterForge. Voeg er een toe met Database toevoegen bij het cluster van de app, of
-          rol een nieuw cluster uit met Database erbij. Daarna kies je het hier.
+          Nog geen cluster met een {engineName(p)} van ClusterForge. Voeg er een toe met Database toevoegen bij het cluster van de
+          app, of rol een nieuw cluster uit met Database erbij. Daarna kies je het hier.
         </Empty>
       </Card>
     );
@@ -192,7 +209,11 @@ function TargetCard({ p }: { p: MigrationPlan }) {
   return (
     <Card title="Naar">
       <div className="max-w-md">
-        <Field label="Cluster" htmlFor="target" hint="De clusters met een MariaDB van ClusterForge op hun eigen nodes.">
+        <Field
+          label="Cluster"
+          htmlFor="target"
+          hint={`De clusters met een ${engineName(p)} van ClusterForge op hun eigen nodes.`}
+        >
           <Select id="target" value={t?.component_id ?? ""} onChange={(e) => choose(e.target.value)}>
             {!t && <option value="">Kies het cluster van de app</option>}
             {p.targets.map((o) => (
@@ -211,9 +232,10 @@ function TargetCard({ p }: { p: MigrationPlan }) {
 
 function TargetDetails({ t, p }: { t: MigrationTarget; p: MigrationPlan }) {
   const r = p.reach;
+  const pg = isPG(p);
   return (
     <dl className="mt-4 grid gap-x-6 gap-y-3 text-sm sm:grid-cols-2 lg:grid-cols-3">
-      <Item label="Importeert op">
+      <Item label={pg ? "Importeert op de primary" : "Importeert op"}>
         <Link href={`/clusters/detail?id=${t.cluster_id}`} className="text-brand-700 hover:underline dark:text-sky-300">
           {t.cluster_name}
         </Link>
@@ -223,10 +245,14 @@ function TargetDetails({ t, p }: { t: MigrationTarget; p: MigrationPlan }) {
       <Item label="Adres voor de app">
         <span className="font-mono">{t.address ? `${t.address}:${t.port}` : "–"}</span>
       </Item>
-      <Item label="Buffer pool">
-        {formatBytes(t.buffer_pool_bytes)}
-        <span className="text-slate-500">, al {formatBytes(t.data_bytes)} aan databases</span>
-      </Item>
+      {pg ? (
+        <Item label="Al op het cluster">{formatBytes(t.data_bytes)} aan databases</Item>
+      ) : (
+        <Item label="Buffer pool">
+          {formatBytes(t.buffer_pool_bytes)}
+          <span className="text-slate-500">, al {formatBytes(t.data_bytes)} aan databases</span>
+        </Item>
+      )}
       <Item label="Vrije schijf">
         {t.disks.length === 0
           ? "–"
@@ -248,9 +274,20 @@ function TargetDetails({ t, p }: { t: MigrationTarget; p: MigrationPlan }) {
           <Badge tone="red">nee</Badge>
         )}
       </Item>
-      <Item label="Tijdelijke gebruiker mag van">
-        <span className="font-mono text-xs">{t.hosts.join(", ") || "–"}</span>
-      </Item>
+      {pg ? (
+        <Item label="Tijdelijke gebruiker">
+          lid van <span className="font-mono">{p.info?.owner || "de eigenaar"}</span>, alleen lezen
+          {r?.seen && (
+            <div className="text-xs text-slate-500">
+              de oude server ziet {t.node} als <span className="font-mono">{r.seen}</span>
+            </div>
+          )}
+        </Item>
+      ) : (
+        <Item label="Tijdelijke gebruiker mag van">
+          <span className="font-mono text-xs">{t.hosts.join(", ") || "–"}</span>
+        </Item>
+      )}
     </dl>
   );
 }
@@ -290,6 +327,12 @@ function TrialCard({ p, loading }: { p: MigrationPlan; loading: boolean }) {
           Op de oude server maakt de proef een tijdelijke gebruiker die alleen mag lezen, met een wachtwoord dat nergens bewaard
           wordt; na de proef is die weer weg. Kleine verschillen in rijen zijn normaal, want de app schrijft intussen verder.
         </p>
+        {isPG(p) && (
+          <p>
+            De kopie van de proef heeft geen eigenaars en rechten: de rollen van de app staan nog niet op het nieuwe cluster. De
+            echte verhuizing neemt ze mee.
+          </p>
+        )}
       </div>
       {p.active?.kind === "component.migrate_trial" && (
         <div className="mt-4">
@@ -356,10 +399,11 @@ function runState(r: MigrationRun) {
 }
 
 const objectLabel: Record<string, string> = { views: "views", routines: "routines", triggers: "triggers", events: "events" };
+const objectName = (kind: string, pg: boolean) => (pg && kind === "routines" ? "functies" : (objectLabel[kind] ?? kind));
 
 const when = new Intl.DateTimeFormat("nl-BE", { day: "numeric", month: "numeric", hour: "2-digit", minute: "2-digit" });
 
-function Runs({ runs }: { runs: MigrationRun[] }) {
+function Runs({ runs, pg }: { runs: MigrationRun[]; pg: boolean }) {
   return (
     <Card title="Proeven en verhuizingen">
       {runs.length === 0 ? (
@@ -380,7 +424,7 @@ function Runs({ runs }: { runs: MigrationRun[] }) {
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {runs.map((r) => (
-                <RunRow key={r.id} r={r} />
+                <RunRow key={r.id} r={r} pg={pg} />
               ))}
             </tbody>
           </table>
@@ -390,7 +434,7 @@ function Runs({ runs }: { runs: MigrationRun[] }) {
   );
 }
 
-function RunRow({ r }: { r: MigrationRun }) {
+function RunRow({ r, pg }: { r: MigrationRun; pg: boolean }) {
   const st = runState(r);
   const trial = r.kind === "trial";
   const objects = r.objects.filter((o) => o.source > 0 || o.target > 0);
@@ -451,9 +495,7 @@ function RunRow({ r }: { r: MigrationRun }) {
             {objects.length > 0 && (
               <div className="mt-1 text-xs text-slate-500">
                 {objects
-                  .map(
-                    (o) => `${objectLabel[o.kind] ?? o.kind} ${o.source === o.target ? o.source : `${o.source} → ${o.target}`}`,
-                  )
+                  .map((o) => `${objectName(o.kind, pg)} ${o.source === o.target ? o.source : `${o.source} → ${o.target}`}`)
                   .join(", ")}
               </div>
             )}
