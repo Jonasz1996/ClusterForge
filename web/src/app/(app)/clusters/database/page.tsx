@@ -8,11 +8,12 @@ import { Diff } from "@/components/gitops/bits";
 import { CopyBlock } from "@/components/inventory/InstallAgent";
 import { ParamInput, paramHint } from "@/components/inventory/ParamInput";
 import { formatBytes, LifecycleBadge, QueryState } from "@/components/inventory/bits";
-import { Alert, Badge, Button, Card, cx, Field, PageHeader, Select } from "@/components/ui";
+import { Alert, Badge, Button, Card, cx, Field, Input, PageHeader, Select } from "@/components/ui";
 import { ApiError } from "@/lib/api/client";
 import {
   roleLabel,
   useAddComponent,
+  useClusterComponents,
   useComponentTemplates,
   usePlanComponent,
   type ComponentFinding,
@@ -36,12 +37,13 @@ function AddDatabaseInner() {
   const id = useSearchParams().get("id") ?? "";
   const cluster = useCluster(id);
   const templates = useComponentTemplates();
+  const comps = useClusterComponents(id);
   const isAdmin = useIsAdmin();
   if (id === "") return <Alert>Geen cluster opgegeven.</Alert>;
   return (
     <QueryState q={cluster}>
       <QueryState q={templates}>
-        {cluster.data && templates.data && (
+        {cluster.data && templates.data && comps.data && (
           <div className="space-y-6">
             <PageHeader
               title="Database toevoegen"
@@ -59,7 +61,7 @@ function AddDatabaseInner() {
             {!isAdmin ? (
               <Alert>Alleen een beheerder kan een database toevoegen.</Alert>
             ) : (
-              <AddForm c={cluster.data} templates={templates.data} />
+              <AddForm c={cluster.data} templates={templates.data} taken={comps.data.map((x) => x.engine)} />
             )}
           </div>
         )}
@@ -68,7 +70,11 @@ function AddDatabaseInner() {
   );
 }
 
-type Form = { engine: string; nodes: string[]; arbiter: string; vip: string; params: Record<string, string> };
+// vip is het id van het VIP van de app, own voor een eigen VIP (met
+// vipAddress) of leeg voor geen. PostgreSQL heeft altijd een eigen VIP.
+type Form = { engine: string; nodes: string[]; arbiter: string; vip: string; vipAddress: string; params: Record<string, string> };
+
+const isPG = (engine: string) => engine === "postgresql";
 
 // defaultNodes zijn de actieve nodes van het cluster, hoogstens negen.
 function defaultNodes(c: ClusterDetail) {
@@ -89,6 +95,10 @@ function toInput(f: Form, t: ComponentTemplate | undefined): ComponentInput {
     else settings[p.name] = v;
   }
   const arbiter = f.nodes.length === 2 && f.arbiter !== "" ? f.arbiter : undefined;
+  if (isPG(f.engine) || f.vip === "own") {
+    const vip_address = f.vipAddress.trim();
+    return { engine: f.engine, nodes: f.nodes, arbiter, vip_address: vip_address === "" ? undefined : vip_address, settings };
+  }
   return { engine: f.engine, nodes: f.nodes, arbiter, vip_id: f.vip === "" ? undefined : f.vip, settings };
 }
 
@@ -96,17 +106,19 @@ function paramValue(f: Form, p: TemplateParam) {
   return f.params[p.name] ?? (p.default === null ? "" : String(p.default));
 }
 
-function AddForm({ c, templates }: { c: ClusterDetail; templates: ComponentTemplate[] }) {
+function AddForm({ c, templates, taken }: { c: ClusterDetail; templates: ComponentTemplate[]; taken: string[] }) {
   const router = useRouter();
   const plan = usePlanComponent(c.id);
   const add = useAddComponent(c.id);
   const totp = useProdTotp();
   const [form, setForm] = useState<Form>(() => ({
-    engine: templates[0]?.engine ?? "mariadb",
+    // De eerste soort die het cluster nog niet heeft.
+    engine: (templates.find((x) => !taken.includes(x.engine)) ?? templates[0])?.engine ?? "mariadb",
     nodes: defaultNodes(c),
     arbiter: "",
     // Heeft het cluster één VIP, dan is dat het VIP van de app.
     vip: c.vips.length === 1 ? c.vips[0].id : "",
+    vipAddress: "",
     params: {},
   }));
   const [confirm, setConfirm] = useState("");
@@ -138,6 +150,8 @@ function AddForm({ c, templates }: { c: ClusterDetail; templates: ComponentTempl
   const planErr = plan.error instanceof ApiError && JSON.stringify(plan.variables) === key ? plan.error : null;
   const addErr = add.error instanceof ApiError ? add.error : null;
   const others = c.nodes.filter((n) => !form.nodes.includes(n.id));
+  const pg = isPG(form.engine);
+  const own = pg || form.vip === "own";
 
   return (
     <div className="space-y-6">
@@ -157,15 +171,21 @@ function AddForm({ c, templates }: { c: ClusterDetail; templates: ComponentTempl
             </Select>
           </Field>
           {t && <p className="text-slate-600 dark:text-slate-400">{t.description}</p>}
-          <p className="text-slate-500">PostgreSQL met Patroni komt in een volgende mijlpaal.</p>
+          {pg && (
+            <p className="text-slate-500">
+              Databases, gebruikers, dumps en verhuizen naar PostgreSQL komen in een volgende stap; nu zet ClusterForge het
+              cluster neer.
+            </p>
+          )}
         </div>
       </Card>
 
       <Card title="Nodes">
         <div className="space-y-4 text-sm">
           <p className="text-slate-600 dark:text-slate-400">
-            Elke gekozen node krijgt alle data en kan schrijven. Kies er drie of meer, liefst een oneven aantal. Met twee nodes
-            komt er een scheidsrechter bij: een derde node die meestemt zonder data.
+            {pg
+              ? "Elke gekozen node krijgt alle data: één is de primary en schrijft, de andere zijn replica's die alles meteen krijgen. Kies er drie, liefst een oneven aantal. Met twee nodes komt er een scheidsrechter bij: een derde node die alleen in etcd meestemt."
+              : "Elke gekozen node krijgt alle data en kan schrijven. Kies er drie of meer, liefst een oneven aantal. Met twee nodes komt er een scheidsrechter bij: een derde node die meestemt zonder data."}
           </p>
           <ul className="space-y-1">
             {c.nodes.map((n) => (
@@ -183,7 +203,7 @@ function AddForm({ c, templates }: { c: ClusterDetail; templates: ComponentTempl
             <Field
               label="Scheidsrechter"
               htmlFor="arbiter"
-              hint="Een node van dit cluster die niet bij de twee hoort; hij krijgt garbd."
+              hint={`Een node van dit cluster die niet bij de twee hoort; hij krijgt ${pg ? "alleen etcd" : "garbd"}.`}
             >
               <Select id="arbiter" value={form.arbiter} onChange={(e) => setForm((f) => ({ ...f, arbiter: e.target.value }))}>
                 <option value="">Geen</option>
@@ -200,25 +220,45 @@ function AddForm({ c, templates }: { c: ClusterDetail; templates: ComponentTempl
 
       <Card title="VIP">
         <div className="space-y-4 text-sm">
-          <p className="text-slate-600 dark:text-slate-400">
-            De app verbindt met het VIP, zodat ze altijd naar één node schrijft. keepalived zet het VIP dan alleen op een node
-            waarvan de database mag schrijven: valt MariaDB daar uit of loopt hij achter, dan gaat het VIP naar een andere node.
-          </p>
-          {c.vips.length === 0 ? (
-            <p className="text-slate-500">
-              Dit cluster heeft geen VIP. Voeg het VIP van de app toe op de pagina van het cluster, of ga verder zonder.
+          {pg ? (
+            <p className="text-slate-600 dark:text-slate-400">
+              PostgreSQL krijgt een eigen VIP: een vrij adres in het netwerk van de nodes. keepalived zet het altijd op de
+              primary. Valt die uit, dan maakt Patroni een replica primary en gaat het VIP mee, binnen een halve minuut. De app
+              verbindt met dit VIP.
             </p>
           ) : (
-            <Field label="VIP van de app" htmlFor="vip">
+            <p className="text-slate-600 dark:text-slate-400">
+              De app verbindt met het VIP, zodat ze altijd naar één node schrijft. keepalived zet het VIP dan alleen op een node
+              waarvan de database mag schrijven: valt MariaDB daar uit of loopt hij achter, dan gaat het VIP naar een andere node.
+              Kies het VIP van de app, zodat app en database één adres delen, of een eigen VIP voor de database.
+            </p>
+          )}
+          {!pg && (
+            <Field label="VIP" htmlFor="vip">
               <Select id="vip" value={form.vip} onChange={(e) => setForm((f) => ({ ...f, vip: e.target.value }))}>
                 <option value="">Geen VIP</option>
                 {c.vips.map((v) => (
                   <option key={v.id} value={v.id}>
-                    {v.address}
-                    {v.owner_hostname && ` (nu op ${v.owner_hostname})`}
+                    {v.address} (VIP van de app{v.owner_hostname && `, nu op ${v.owner_hostname}`})
                   </option>
                 ))}
+                <option value="own">Een eigen VIP voor de database</option>
               </Select>
+            </Field>
+          )}
+          {own && (
+            <Field
+              label="Eigen VIP"
+              htmlFor="vip-address"
+              hint="Een vrij IPv4-adres in het netwerk van de nodes, zoals 10.0.20.190."
+            >
+              <Input
+                id="vip-address"
+                className="font-mono"
+                value={form.vipAddress}
+                onChange={(e) => setForm((f) => ({ ...f, vipAddress: e.target.value }))}
+                placeholder="10.0.20.190"
+              />
             </Field>
           )}
         </div>
@@ -257,10 +297,23 @@ function AddForm({ c, templates }: { c: ClusterDetail; templates: ComponentTempl
               <Alert>Dit kan nog niet: los eerst op wat hierboven rood staat.</Alert>
             ) : (
               <p>
-                ClusterForge zet {shown.title} op {shown.nodes.length} nodes, een voor een. Een node die al draait, blijft draaien
-                tot zijn beurt; dan herstart MariaDB er een keer.
-                {shown.vip &&
-                  ` Daarna komt de controle van de database in keepalived, node voor node, met ${shown.vip.owner || "de node met het VIP"} laatst; het VIP verhuist daarbij niet.`}{" "}
+                {isPG(shown.engine) ? (
+                  <>
+                    ClusterForge zet eerst etcd op alle {shown.nodes.length} nodes, en dan PostgreSQL met Patroni op de datanodes,
+                    een voor een: de eerste wordt de primary, de andere halen een kopie en worden replica. Daarna komt het eigen
+                    VIP in keepalived op elke datanode, en ClusterForge kijkt of het op de primary staat.
+                  </>
+                ) : (
+                  <>
+                    ClusterForge zet {shown.title} op {shown.nodes.length} nodes, een voor een. Een node die al draait, blijft
+                    draaien tot zijn beurt; dan herstart MariaDB er een keer.
+                    {shown.vip?.own &&
+                      " Daarna komt het eigen VIP in keepalived op elke datanode, en ClusterForge kijkt of het op een node met de database staat."}
+                    {shown.vip &&
+                      !shown.vip.own &&
+                      ` Daarna komt de controle van de database in keepalived, node voor node, met ${shown.vip.owner || "de node met het VIP"} laatst; het VIP verhuist daarbij niet.`}
+                  </>
+                )}{" "}
                 De app verbindt nog met de oude database tot je haar verhuist (een latere stap).
               </p>
             )}
@@ -304,7 +357,18 @@ function PlanView({ p }: { p: ComponentPlan }) {
   return (
     <div className="space-y-4 text-sm">
       {general.length > 0 && <Findings list={general} />}
-      {p.vip && (
+      {p.vip && p.vip.own && (
+        <p>
+          Het eigen VIP <span className="font-mono">{p.vip.address}</span> (VRRP-id {p.vip.vrid}) komt op{" "}
+          {p.nodes
+            .filter((n) => n.role === "data")
+            .map((n) => n.hostname)
+            .join(", ")}
+          . ClusterForge zet er een vrrp_instance voor in <span className="font-mono">/etc/keepalived/conf.d</span>;
+          keepalived.conf krijgt alleen een include van die map, of een nieuw bestand als er nog geen is.
+        </p>
+      )}
+      {p.vip && !p.vip.own && (
         <p>
           Het VIP <span className="font-mono">{p.vip.address}</span>
           {p.vip.owner ? ` staat nu op ${p.vip.owner} en` : ""} volgt de database op{" "}
@@ -317,12 +381,20 @@ function PlanView({ p }: { p: ComponentPlan }) {
         </p>
       )}
       {p.nodes.map((n) => (
-        <NodeBlock key={n.node_id} n={n} findings={p.findings.filter((f) => f.node_id === n.node_id)} />
+        <NodeBlock
+          key={n.node_id}
+          n={n}
+          server={isPG(p.engine) ? "PostgreSQL" : "MariaDB"}
+          findings={p.findings.filter((f) => f.node_id === n.node_id)}
+        />
       ))}
       <p className="text-slate-500">
-        {p.slug} wordt de naam van het Galera-cluster. De eerste node begint het; de andere halen alle data bij een node die al
-        meedoet. Instellingen:{" "}
+        {isPG(p.engine)
+          ? `${p.slug} wordt de naam van het Patroni-cluster. De eerste node maakt het; de andere halen een kopie bij de primary.`
+          : `${p.slug} wordt de naam van het Galera-cluster. De eerste node begint het; de andere halen alle data bij een node die al meedoet.`}{" "}
+        Instellingen:{" "}
         {Object.entries(p.params)
+          .filter(([k]) => k !== "vip")
           .map(([k, v]) => `${k} ${String(v)}`)
           .join(", ")}
         .
@@ -342,7 +414,7 @@ function Fact({ label, children }: { label: string; children: ReactNode }) {
 
 // NodeBlock is één node van het plan: wat er nu is, wat de database vraagt
 // en wat er gebeurt.
-function NodeBlock({ n, findings }: { n: ComponentPlanNode; findings: ComponentFinding[] }) {
+function NodeBlock({ n, server, findings }: { n: ComponentPlanNode; server: string; findings: ComponentFinding[] }) {
   const [open, setOpen] = useState(false);
   const [diff, setDiff] = useState(false);
   const tight = n.free_after_pct !== null && n.free_after_pct < 15;
@@ -364,7 +436,7 @@ function NodeBlock({ n, findings }: { n: ComponentPlanNode; findings: ComponentF
               {n.memory_used_pct !== null && `, ${pct(n.memory_used_pct)} in gebruik`}
               {n.need_bytes > 0 && (
                 <span className={cx("block text-slate-500", tight && "text-amber-700 dark:text-amber-300")}>
-                  + {formatBytes(n.need_bytes)} voor MariaDB
+                  + {formatBytes(n.need_bytes)} voor {server}
                   {n.free_after_pct !== null && `, daarna ${pct(n.free_after_pct)} vrij`}
                 </span>
               )}
@@ -428,11 +500,15 @@ function Findings({ list }: { list: ComponentFinding[] }) {
             "space-y-2 rounded border px-3 py-2",
             f.level === "blocked"
               ? "border-red-200 bg-red-50 text-red-900 dark:border-red-900 dark:bg-red-950 dark:text-red-200"
-              : "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200",
+              : f.level === "info"
+                ? "border-sky-200 bg-sky-50 text-sky-900 dark:border-sky-900 dark:bg-sky-950 dark:text-sky-200"
+                : "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200",
           )}
         >
           <p>
-            <Badge tone={f.level === "blocked" ? "red" : "amber"}>{f.level === "blocked" ? "Blokkeert" : "Let op"}</Badge>{" "}
+            <Badge tone={f.level === "blocked" ? "red" : f.level === "info" ? "blue" : "amber"}>
+              {f.level === "blocked" ? "Blokkeert" : f.level === "info" ? "Goed om te weten" : "Let op"}
+            </Badge>{" "}
             {f.message}
           </p>
           {f.command && <CopyBlock text={f.command} />}

@@ -423,6 +423,11 @@ func FormatSize(b int64) string {
 
 const secretAlphabet = "abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
 
+// RandomSecret is een willekeurig wachtwoord van n tekens uit letters en
+// cijfers die niet op elkaar lijken, zonder tekens die een configuratie als
+// commentaar of aanhalingsteken leest.
+func RandomSecret(n int) string { return randomSecret(n) }
+
 func randomSecret(n int) string {
 	b := make([]byte, n)
 	_, _ = rand.Read(b)

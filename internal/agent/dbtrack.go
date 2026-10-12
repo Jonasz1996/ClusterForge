@@ -26,10 +26,21 @@ const (
 )
 
 // CheckDB is cf-agent check db, dat keepalived elke twee seconden
-// aanroept: nil als MariaDB op deze node mag schrijven, dus Synced in een
-// Primary component van Galera met wsrep_ready ON. Anders zegt de fout
-// waarom niet.
-func (a *Agent) CheckDB(ctx context.Context) error {
+// aanroept: nil als de database van engine op deze node mag schrijven.
+// MariaDB (engine leeg of mariadb) moet Synced zijn in een Primary
+// component van Galera met wsrep_ready ON; PostgreSQL moet de primary van
+// Patroni zijn. Anders zegt de fout waarom niet.
+func (a *Agent) CheckDB(ctx context.Context, engine string) error {
+	switch engine {
+	case "", protocol.DBMariaDB:
+		return a.checkGalera(ctx)
+	case protocol.DBPostgreSQL:
+		return a.checkPatroni(ctx)
+	}
+	return fmt.Errorf("onbekende database %q; kies mariadb of postgresql", engine)
+}
+
+func (a *Agent) checkGalera(ctx context.Context) error {
 	rows, err := a.maria(ctx, false, dbsql.MariaStatus)
 	if err != nil {
 		return fmt.Errorf("MariaDB antwoordt niet: %s", dbError(err))
@@ -71,6 +82,9 @@ func (a *Agent) dbTrack(ctx context.Context, req *protocol.DBTrackRequest) proto
 		res.Error = err.Error()
 		return res
 	}
+	if req.Include {
+		return a.dbInclude(ctx, p, req)
+	}
 	b, err := os.ReadFile(p)
 	if errors.Is(err, fs.ErrNotExist) {
 		res.Error = keepalivedConfPath + " ontbreekt; draait keepalived op deze node?"
@@ -103,6 +117,89 @@ func (a *Agent) dbTrack(ctx context.Context, req *protocol.DBTrackRequest) proto
 		res.Track.Changed = false
 	}
 	return res
+}
+
+// dbInclude voert DBTrack met Include uit: alleen de include van conf.d
+// bovenaan keepalived.conf, voor een eigen VIP met zijn vrrp_instance in
+// conf.d. Zonder keepalived.conf komt er een met alleen die include.
+func (a *Agent) dbInclude(ctx context.Context, p string, req *protocol.DBTrackRequest) protocol.DBResponse {
+	res := protocol.DBResponse{Servers: []protocol.DBServer{}}
+	b, err := os.ReadFile(p)
+	missing := errors.Is(err, fs.ErrNotExist)
+	if err != nil && !missing {
+		res.Error = err.Error()
+		return res
+	}
+	conf := string(b)
+	next, err := addInclude(conf, req.VIP)
+	if err != nil {
+		res.Error = err.Error()
+		return res
+	}
+	diff, _ := textdiff.Diff(maskAuthPass(conf), maskAuthPass(next), keepalivedConfPath, keepalivedConfPath)
+	res.Track = &protocol.DBTrackResult{Changed: next != conf || missing, Diff: diff}
+	if !req.Apply || !res.Track.Changed {
+		return res
+	}
+	if missing {
+		// Een nieuw bestand zoals het Debian-pakket het verwacht: van root,
+		// alleen door root te schrijven.
+		if err := os.WriteFile(p+".clusterforge", nil, 0o644); err != nil {
+			res.Error = err.Error()
+			res.Track.Changed = false
+			return res
+		}
+		if err := os.Rename(p+".clusterforge", p); err != nil {
+			res.Error = err.Error()
+			res.Track.Changed = false
+			return res
+		}
+	}
+	if err := a.writeKeepalived(ctx, p, next); err != nil {
+		if missing {
+			_ = os.Remove(p)
+		}
+		res.Error = err.Error()
+		res.Track.Changed = false
+	}
+	return res
+}
+
+// addInclude zet de include van conf.d bovenaan keepalived.conf, als die er
+// nog niet staat. Het eigen VIP mag in geen vrrp_instance van conf zelf
+// staan: dan zou keepalived het twee keer beheren.
+func addInclude(conf, vip string) (string, error) {
+	if strings.TrimSpace(conf) == "" {
+		return "# Beheerd door ClusterForge: de VIP's van de database staan in /etc/keepalived/conf.d.\n" + keepalivedInclude + "\n", nil
+	}
+	lines := strings.Split(conf, "\n")
+	root, err := parseBlocks(tokenize(lines))
+	if err != nil {
+		return "", fmt.Errorf("keepalived.conf is niet te lezen: %w", err)
+	}
+	for _, b := range root.kids {
+		if len(b.name) > 1 && b.name[0] == "vrrp_instance" && hasVIP(b, vip) {
+			return "", fmt.Errorf("het VIP %s staat al in vrrp_instance %s van %s; een eigen VIP van de database moet een vrij adres zijn",
+				vip, strings.Join(b.name[1:], " "), keepalivedConfPath)
+		}
+	}
+	if included(root) {
+		return conf, nil
+	}
+	return strings.Join(insertLines(lines, 0,
+		"# ClusterForge: de VIP's en controles van de database staan in /etc/keepalived/conf.d.",
+		keepalivedInclude,
+		""), "\n"), nil
+}
+
+// included zegt of keepalived.conf conf.d al opneemt.
+func included(root *confBlock) bool {
+	for _, s := range root.stmts {
+		if len(s) == 2 && s[0].text == "include" && s[1].text == "/etc/keepalived/conf.d/*.conf" {
+			return true
+		}
+	}
+	return false
 }
 
 // writeKeepalived schrijft keepalived.conf via een tijdelijk bestand met
@@ -334,13 +431,7 @@ func addDBTrack(conf, vip string) (string, string, error) {
 		}
 	}
 
-	included := false
-	for _, s := range root.stmts {
-		if len(s) == 2 && s[0].text == "include" && s[1].text == "/etc/keepalived/conf.d/*.conf" {
-			included = true
-		}
-	}
-	if !included {
+	if !included(root) {
 		lines = insertLines(lines, 0,
 			"# ClusterForge: de controle van de database (vrrp_script "+protocol.DBTrackScript+") staat in "+protocol.DBTrackFile+".",
 			keepalivedInclude,

@@ -1,0 +1,86 @@
+# Beheerd door ClusterForge: PostgreSQL van cluster {{ .cluster.slug }} met
+# Patroni. Een wijziging hier ziet de driftcontrole; pas de instellingen aan
+# in ClusterForge. bootstrap geldt alleen bij de eerste start van het
+# cluster.
+{{- $pg := "17" }}{{ if eq .node.os_version "12" }}{{ $pg = "15" }}{{ end }}
+scope: {{ .cluster.slug }}
+namespace: /clusterforge/
+name: {{ .node.hostname }}
+
+restapi:
+  listen: 0.0.0.0:8008
+  connect_address: {{ .node.address }}:8008
+  # Lezen (GET) kan zonder wachtwoord; overschakelen en herstarten vragen
+  # het wachtwoord uit clusterforge.env.
+  authentication:
+    username: clusterforge
+
+etcd3:
+  hosts:{{ range .nodes }}
+    - {{ .address }}:2379{{ end }}
+
+bootstrap:
+  dcs:
+    # Valt de primary hard uit, dan kiest Patroni na hoogstens ttl seconden
+    # een nieuwe; netjes stoppen geeft de rol meteen door.
+    ttl: 20
+    loop_wait: 5
+    retry_timeout: 7
+    maximum_lag_on_failover: 1048576
+    # Een schrijfactie is pas bevestigd als ook een replica ze heeft, zodat
+    # een failover niets verliest. Zonder strict blijft een primary die
+    # alleen overblijft toch schrijven.
+    synchronous_mode: true
+    synchronous_mode_strict: false
+    postgresql:
+      use_pg_rewind: true
+      use_slots: true
+      parameters:
+        max_connections: {{ .params.max_connections }}
+        wal_level: replica
+        hot_standby: "on"
+        wal_log_hints: "on"
+        max_wal_senders: 10
+        max_replication_slots: 10
+        wal_keep_size: 512MB
+        password_encryption: scram-sha-256
+  initdb:
+    - encoding: UTF8
+    - locale: C.UTF-8
+    - data-checksums
+
+postgresql:
+  listen: "*:5432"
+  connect_address: {{ .node.address }}:5432
+  # Patroni praat met zijn eigen PostgreSQL via de socket, als postgres.
+  use_unix_socket: true
+  data_dir: /var/lib/postgresql/{{ $pg }}/clusterforge
+  bin_dir: /usr/lib/postgresql/{{ $pg }}/bin
+  pgpass: /var/lib/postgresql/.pgpass-clusterforge
+  authentication:
+    # De beheerder logt alleen via de socket in (peer), zonder wachtwoord.
+    superuser:
+      username: postgres
+    # De wachtwoorden staan in clusterforge.env.
+    replication:
+      username: cf_replicatie
+    rewind:
+      username: cf_rewind
+  parameters:
+    unix_socket_directories: /var/run/postgresql
+    shared_buffers: {{ pgsize .params.shared_buffers }}
+  # De nodes van het cluster en het VIP; een app op een node die het VIP
+  # zelf heeft, verbindt vanaf het VIP.
+  pg_hba:
+    - local all all peer
+    - host all all 127.0.0.1/32 scram-sha-256
+    - host all all ::1/128 scram-sha-256
+{{- range .nodes }}{{ if eq .role "data" }}
+    - host replication cf_replicatie {{ .address }}/32 scram-sha-256
+{{- end }}{{ end }}
+{{- range .nodes }}{{ if eq .role "data" }}
+    - host all all {{ .address }}/32 scram-sha-256
+{{- end }}{{ end }}
+{{- with .params.vip }}
+    - host all all {{ . }}/32 scram-sha-256
+{{- end }}

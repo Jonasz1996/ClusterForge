@@ -191,10 +191,18 @@ func TestJournal(t *testing.T) {
 	// Een agent van voor het journaal staat apart, met de vraag om bij te
 	// werken.
 	stop()
-	if _, err := e.pool.Exec(ctx, "UPDATE agents SET protocol_version = 4 WHERE node_id = $1", nodeID); err != nil {
-		t.Fatal(err)
+	// Een hartslag die de server nog verwerkte toen de agent stopte, kan de
+	// versie nog terugzetten; daarom opnieuw tot ze blijft staan.
+	var old nodeChanges
+	for range 50 {
+		if _, err := e.pool.Exec(ctx, "UPDATE agents SET protocol_version = 4 WHERE node_id = $1", nodeID); err != nil {
+			t.Fatal(err)
+		}
+		if old = c.changes(path, nil); len(old.AgentsTooOld) == 1 {
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
-	old := c.changes(path, nil)
 	if len(old.AgentsTooOld) != 1 || old.AgentsTooOld[0].Hostname != "web-01" {
 		t.Fatalf("agent te oud: %+v", old.AgentsTooOld)
 	}

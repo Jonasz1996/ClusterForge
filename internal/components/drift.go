@@ -35,7 +35,16 @@ func (s *Service) NodeSteps(ctx context.Context, nodeID uuid.UUID) ([]templates.
 		}
 		out = append(out, steps...)
 		if v := r.spec.VIP; v != nil && slices.Contains(v.Nodes, nodeID) {
-			out = append(out, vipSteps(r.spec.Cluster.Slug, v.Address)...)
+			if v.Own {
+				i := slices.IndexFunc(r.spec.Nodes, func(n Node) bool { return n.NodeID == nodeID })
+				vs, err := ownVIPSteps(r, comp.Engine, r.spec.Nodes[i])
+				if err != nil {
+					return nil, 0, fmt.Errorf("%s: VIP %s: %w", r.tpl.Title, v.Address, err)
+				}
+				out = append(out, vs...)
+			} else {
+				out = append(out, vipSteps(r.spec.Cluster.Slug, v.Address)...)
+			}
 		}
 		revision = max(revision, rev)
 	}

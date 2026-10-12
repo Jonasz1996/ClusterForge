@@ -30,6 +30,10 @@ func (s *Server) ListComponentTemplates(w http.ResponseWriter, r *http.Request) 
 			Description: strings.TrimSpace(t.Description), Params: []gen.TemplateParam{},
 		}
 		for _, p := range t.Params {
+			// Het eigen VIP kies je apart (vip_address), niet als instelling.
+			if p.Name == "vip" {
+				continue
+			}
 			out.Params = append(out.Params, toAPIParam(p))
 		}
 		items = append(items, out)
@@ -66,7 +70,7 @@ func (s *Server) PlanClusterComponent(w http.ResponseWriter, r *http.Request, cl
 	if !decode(w, r, &in) {
 		return
 	}
-	p, err := s.components.Plan(r.Context(), clusterID, componentRequest(in.Engine, in.Nodes, in.Arbiter.Get, in.VipId.Get, in.Settings))
+	p, err := s.components.Plan(r.Context(), clusterID, componentRequest(in.Engine, in.Nodes, in.Arbiter.Get, in.VipId.Get, in.VipAddress, in.Settings))
 	if err != nil {
 		s.componentError(w, r, err)
 		return
@@ -93,7 +97,7 @@ func (s *Server) AddClusterComponent(w http.ResponseWriter, r *http.Request, clu
 	if !confirmProd(w, p, c.Environment == store.EnvironmentProd, c.Slug, in.Confirm, "een database toevoegen") {
 		return
 	}
-	j, err := s.components.Add(ctx, events.User(p.User.ID), clusterID, componentRequest(in.Engine, in.Nodes, in.Arbiter.Get, in.VipId.Get, in.Settings), in.Hash)
+	j, err := s.components.Add(ctx, events.User(p.User.ID), clusterID, componentRequest(in.Engine, in.Nodes, in.Arbiter.Get, in.VipId.Get, in.VipAddress, in.Settings), in.Hash)
 	if err != nil {
 		s.componentError(w, r, err)
 		return
@@ -212,8 +216,11 @@ func (s *Server) RemoveClusterComponent(w http.ResponseWriter, r *http.Request, 
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func componentRequest(engine string, nodes []uuid.UUID, arbiter, vip func() (uuid.UUID, error), settings *map[string]any) components.Request {
+func componentRequest(engine string, nodes []uuid.UUID, arbiter, vip func() (uuid.UUID, error), vipAddress *string, settings *map[string]any) components.Request {
 	req := components.Request{Engine: engine, Nodes: nodes, Settings: map[string]any{}}
+	if vipAddress != nil {
+		req.VIPAddress = strings.TrimSpace(*vipAddress)
+	}
 	if a, err := arbiter(); err == nil {
 		req.Arbiter = &a
 	}
@@ -256,7 +263,7 @@ func toAPIComponent(c components.Component) gen.ClusterComponent {
 	}
 	var vip *gen.ComponentVIP
 	if v := c.VIP; v != nil {
-		vip = &gen.ComponentVIP{Id: v.ID, Address: v.Address, Nodes: nonNil(v.Nodes), Owner: v.Owner}
+		vip = &gen.ComponentVIP{Id: v.ID, Address: v.Address, Nodes: nonNil(v.Nodes), Owner: v.Owner, Own: v.Own, Vrid: v.VRID}
 	}
 	out.Vip = nullableOf(vip)
 	out.AutoRecover, out.DownSince, out.DownReason = c.AutoRecover, nullableOf(c.DownSince), c.DownReason
@@ -307,7 +314,7 @@ func toAPIComponentPlan(p components.Plan) gen.ComponentPlan {
 	}
 	var vip *gen.ComponentPlanVIP
 	if v := p.VIP; v != nil {
-		vip = &gen.ComponentPlanVIP{Id: v.ID, Address: v.Address, Owner: v.Owner}
+		vip = &gen.ComponentPlanVIP{Id: v.ID, Address: v.Address, Owner: v.Owner, Own: v.Own, Vrid: v.VRID}
 	}
 	out.Vip = nullableOf(vip)
 	for _, f := range p.Findings {

@@ -1,0 +1,23 @@
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}): etcd voor Patroni.
+[Unit]
+Description=etcd voor Patroni (ClusterForge, cluster {{ .cluster.slug }})
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# etcd meldt zich pas klaar als een meerderheid van de leden er is. Bij de
+# eerste uitrol starten de nodes na elkaar, dus het mag even duren.
+Type=notify
+User=etcd
+Group=etcd
+# systemd maakt /var/lib/etcd van etcd, alleen voor etcd.
+StateDirectory=etcd
+StateDirectoryMode=0700
+ExecStart=/usr/local/bin/etcd --config-file /etc/etcd/clusterforge.yml
+Restart=always
+RestartSec=5
+TimeoutStartSec=300
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

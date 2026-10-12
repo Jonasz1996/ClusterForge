@@ -30,11 +30,15 @@ import (
 )
 
 // VIP is het VIP van de database in de spec: het adres en de nodes van het
-// onderdeel die het in keepalived hebben.
+// onderdeel die het in keepalived hebben. Own is een eigen VIP met een
+// vrrp_instance van ClusterForge en VRRP-id VRID (ownvip.go); anders is
+// het het VIP van de app, en krijgt zijn vrrp_instance alleen de controle.
 type VIP struct {
 	ID      uuid.UUID   `json:"id"`
 	Address string      `json:"address"`
 	Nodes   []uuid.UUID `json:"nodes"`
+	Own     bool        `json:"own,omitempty"`
+	VRID    int         `json:"vrid,omitempty"`
 }
 
 // trackDir is de map met de vrrp_script van ClusterForge.
@@ -245,7 +249,7 @@ func vipHash(p Plan, spec Spec) string {
 		return ""
 	}
 	var b strings.Builder
-	b.WriteString(spec.VIP.ID.String() + " " + spec.VIP.Address + "\n")
+	fmt.Fprintf(&b, "%s %s %t %d\n", spec.VIP.ID, spec.VIP.Address, spec.VIP.Own, spec.VIP.VRID)
 	for _, id := range spec.VIP.Nodes {
 		b.WriteString(id.String() + "\n")
 		if pn := p.node(id); pn != nil {

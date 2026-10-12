@@ -196,6 +196,9 @@ func (s *Service) RecoverPlan(ctx context.Context, clusterID, id uuid.UUID) (Rec
 	if err != nil {
 		return RecoverPlan{}, err
 	}
+	if err := mariaOnly(r, "Opnieuw starten na een uitval"); err != nil {
+		return RecoverPlan{}, err
+	}
 	if r.AppliedRevision == nil {
 		return RecoverPlan{}, &ConflictError{"deze database is nog nooit helemaal uitgerold; pas haar eerst toe"}
 	}
@@ -351,6 +354,9 @@ func (s *Service) enqueueRecover(ctx context.Context, actor events.Actor, cluste
 		q := store.New(tx)
 		r, err := s.get(ctx, q, clusterID, id, true)
 		if err != nil {
+			return err
+		}
+		if err := mariaOnly(r, "Opnieuw starten na een uitval"); err != nil {
 			return err
 		}
 		spec, err := parseSpec(r.Spec)
@@ -695,6 +701,9 @@ func (s *Service) SetAutoRecover(ctx context.Context, actor events.Actor, cluste
 		q := store.New(tx)
 		r, err := s.get(ctx, q, clusterID, id, true)
 		if err != nil {
+			return err
+		}
+		if err := mariaOnly(r, "Vanzelf opnieuw starten"); err != nil {
 			return err
 		}
 		if r.AutoRecover == on {

@@ -46,9 +46,8 @@ const (
 	RoleArbiter = "arbiter"
 )
 
-// Templates zijn de onderdelen per engine. PostgreSQL met Patroni komt in
-// mijlpaal 9.
-var Templates = map[string]string{protocol.DBMariaDB: "mariadb-galera"}
+// Templates zijn de onderdelen per engine.
+var Templates = map[string]string{protocol.DBMariaDB: "mariadb-galera", protocol.DBPostgreSQL: "postgresql-patroni"}
 
 // De ingebouwde onderdelen staan per versie in builtin/<naam>/<versie>/,
 // zoals de templates. Een versie blijft staan zolang een cluster haar kan
@@ -337,13 +336,16 @@ type Recovery struct {
 	Error  string
 }
 
-// ComponentVIP is het VIP van een onderdeel, voor het scherm.
+// ComponentVIP is het VIP van een onderdeel, voor het scherm. Own is een
+// eigen VIP van de database, met VRRP-id VRID.
 type ComponentVIP struct {
 	ID      uuid.UUID
 	Address string
 	Nodes   []string
 	// Owner is de node die het VIP nu heeft, leeg als niemand.
 	Owner string
+	Own   bool
+	VRID  int
 }
 
 // List geeft de onderdelen van een cluster.
@@ -414,7 +416,7 @@ func view(r store.ClusterComponent) (Component, error) {
 		c.AppliedRevision = &v
 	}
 	if v := spec.VIP; v != nil {
-		c.VIP = &ComponentVIP{ID: v.ID, Address: v.Address, Nodes: []string{}}
+		c.VIP = &ComponentVIP{ID: v.ID, Address: v.Address, Nodes: []string{}, Own: v.Own, VRID: v.VRID}
 		for _, n := range spec.order() {
 			if slices.Contains(v.Nodes, n.NodeID) {
 				c.VIP.Nodes = append(c.VIP.Nodes, n.Hostname)
@@ -514,6 +516,12 @@ func (s *Service) Remove(ctx context.Context, actor events.Actor, clusterID, id 
 		if err := q.DeleteClusterComponent(ctx, r.ID); err != nil {
 			return err
 		}
+		// Een eigen VIP hoort bij de database en gaat mee weg.
+		if spec.VIP != nil && spec.VIP.Own {
+			if _, err := q.DeleteVIP(ctx, spec.VIP.ID); err != nil {
+				return err
+			}
+		}
 		if err := q.DeleteSecretsWithPrefix(ctx, store.DeleteSecretsWithPrefixParams{ClusterID: clusterID, Prefix: r.Engine + "."}); err != nil {
 			return err
 		}
@@ -523,6 +531,19 @@ func (s *Service) Remove(ctx context.Context, actor events.Actor, clusterID, id 
 		})
 	})
 	return err
+}
+
+// mariaOnly houdt tegen wat er voor PostgreSQL nog niet is: databases en
+// gebruikers, dumps en verhuizen komen in het tweede deel van mijlpaal 10,
+// het beheer na een uitval doet Patroni zelf.
+func mariaOnly(r store.ClusterComponent, what string) error {
+	switch r.Engine {
+	case protocol.DBMariaDB:
+		return nil
+	case protocol.DBPostgreSQL:
+		return &ConflictError{what + " kan bij PostgreSQL nog niet; dat komt in een volgende stap"}
+	}
+	return &ConflictError{what + " kan alleen bij MariaDB"}
 }
 
 func title(spec Spec) string {

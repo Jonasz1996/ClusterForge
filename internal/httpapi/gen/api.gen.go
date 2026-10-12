@@ -3578,13 +3578,13 @@ type ClusterType string
 
 // ComponentApplyInput defines model for ComponentApplyInput.
 type ComponentApplyInput struct {
-	// Arbiter Een node die alleen meestemt (garbd); nodig bij twee datanodes
+	// Arbiter Een node die alleen meestemt (garbd of etcd); nodig bij twee datanodes
 	Arbiter nullable.Nullable[openapi_types.UUID] `json:"arbiter,omitempty"`
 
 	// Confirm De slug van het cluster; nodig op prod
 	Confirm *string `json:"confirm,omitempty"`
 
-	// Engine mariadb; postgresql volgt later
+	// Engine mariadb of postgresql
 	Engine string `json:"engine"`
 
 	// Hash De hash van het plan dat je zag
@@ -3593,10 +3593,13 @@ type ComponentApplyInput struct {
 	// Nodes De datanodes op volgorde; de eerste begint het cluster
 	Nodes []openapi_types.UUID `json:"nodes"`
 
-	// Settings buffer_pool en max_connections; wat ontbreekt, krijgt de standaard
+	// Settings buffer_pool of shared_buffers en max_connections; wat ontbreekt, krijgt de standaard
 	Settings *map[string]interface{} `json:"settings,omitempty"`
 
-	// VipId Het VIP van de app: keepalived zet het dan alleen op een node waarvan de database mag schrijven
+	// VipAddress Een eigen VIP voor de database, met een eigen vrrp_instance van ClusterForge; het staat altijd op de node waar de database schrijft. Nodig bij PostgreSQL, bij MariaDB in plaats van vip_id
+	VipAddress *string `json:"vip_address,omitempty"`
+
+	// VipId Het VIP van de app: keepalived zet het dan alleen op een node waarvan MariaDB mag schrijven. Niet bij PostgreSQL
 	VipId nullable.Nullable[openapi_types.UUID] `json:"vip_id,omitempty"`
 }
 
@@ -3797,19 +3800,22 @@ type ComponentFinding struct {
 
 // ComponentInput defines model for ComponentInput.
 type ComponentInput struct {
-	// Arbiter Een node die alleen meestemt (garbd); nodig bij twee datanodes
+	// Arbiter Een node die alleen meestemt (garbd of etcd); nodig bij twee datanodes
 	Arbiter nullable.Nullable[openapi_types.UUID] `json:"arbiter,omitempty"`
 
-	// Engine mariadb; postgresql volgt later
+	// Engine mariadb of postgresql
 	Engine string `json:"engine"`
 
 	// Nodes De datanodes op volgorde; de eerste begint het cluster
 	Nodes []openapi_types.UUID `json:"nodes"`
 
-	// Settings buffer_pool en max_connections; wat ontbreekt, krijgt de standaard
+	// Settings buffer_pool of shared_buffers en max_connections; wat ontbreekt, krijgt de standaard
 	Settings *map[string]interface{} `json:"settings,omitempty"`
 
-	// VipId Het VIP van de app: keepalived zet het dan alleen op een node waarvan de database mag schrijven
+	// VipAddress Een eigen VIP voor de database, met een eigen vrrp_instance van ClusterForge; het staat altijd op de node waar de database schrijft. Nodig bij PostgreSQL, bij MariaDB in plaats van vip_id
+	VipAddress *string `json:"vip_address,omitempty"`
+
+	// VipId Het VIP van de app: keepalived zet het dan alleen op een node waarvan MariaDB mag schrijven. Niet bij PostgreSQL
 	VipId nullable.Nullable[openapi_types.UUID] `json:"vip_id,omitempty"`
 }
 
@@ -3892,11 +3898,19 @@ type ComponentPlanNode struct {
 
 // ComponentPlanVIP defines model for ComponentPlanVIP.
 type ComponentPlanVIP struct {
-	Address string             `json:"address"`
-	Id      openapi_types.UUID `json:"id"`
+	Address string `json:"address"`
+
+	// Id Leeg (nullen) bij een eigen VIP dat er nog niet is
+	Id openapi_types.UUID `json:"id"`
+
+	// Own Een eigen VIP dat ClusterForge maakt
+	Own bool `json:"own"`
 
 	// Owner De node die het VIP nu heeft; leeg als niemand
 	Owner string `json:"owner"`
+
+	// Vrid Het VRRP-id van een eigen VIP; 0 bij het VIP van de app
+	Vrid int `json:"vrid"`
 }
 
 // ComponentReapplyInput defines model for ComponentReapplyInput.
@@ -4019,8 +4033,14 @@ type ComponentVIP struct {
 	// Nodes De nodes van de database die het VIP in keepalived hebben
 	Nodes []string `json:"nodes"`
 
+	// Own Een eigen VIP van de database
+	Own bool `json:"own"`
+
 	// Owner De node die het VIP nu heeft; leeg als niemand
 	Owner string `json:"owner"`
+
+	// Vrid Het VRRP-id van een eigen VIP; 0 bij het VIP van de app
+	Vrid int `json:"vrid"`
 }
 
 // DRPlan defines model for DRPlan.

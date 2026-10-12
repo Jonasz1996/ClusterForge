@@ -225,13 +225,13 @@ func TestCheckDB(t *testing.T) {
 	ctx := context.Background()
 	h := agenttest.NewHost(t.TempDir(), "10.0.20.186")
 	a := trackAgent(t, h)
-	if err := a.CheckDB(ctx); err == nil || !strings.Contains(err.Error(), "antwoordt niet") {
+	if err := a.CheckDB(ctx, ""); err == nil || !strings.Contains(err.Error(), "antwoordt niet") {
 		t.Fatalf("zonder MariaDB: %v", err)
 	}
 	h.MariaDB = &agenttest.MariaDB{Version: "11.8.3-MariaDB", Galera: &agenttest.Galera{
 		ClusterName: "nextcloud", UUID: "u", Status: "Primary", Size: 3, State: 4, Comment: "Synced", Ready: true,
 	}}
-	if err := a.CheckDB(ctx); err != nil {
+	if err := a.CheckDB(ctx, ""); err != nil {
 		t.Fatalf("gezond: %v", err)
 	}
 	for _, tc := range []struct {
@@ -244,13 +244,124 @@ func TestCheckDB(t *testing.T) {
 	} {
 		g := *h.MariaDB.Galera
 		tc.change(h.MariaDB.Galera)
-		if err := a.CheckDB(ctx); err == nil || !strings.Contains(err.Error(), tc.want) {
+		if err := a.CheckDB(ctx, ""); err == nil || !strings.Contains(err.Error(), tc.want) {
 			t.Errorf("%v, verwacht %q", err, tc.want)
 		}
 		*h.MariaDB.Galera = g
 	}
 	h.MariaDB.Galera = nil
-	if err := a.CheckDB(ctx); err == nil || !strings.Contains(err.Error(), "niet Synced") {
+	if err := a.CheckDB(ctx, ""); err == nil || !strings.Contains(err.Error(), "niet Synced") {
 		t.Errorf("zonder Galera: %v", err)
+	}
+}
+
+// pgVIPConf is het bestand in conf.d met een eigen VIP voor PostgreSQL.
+const pgVIPConf = `vrrp_script cf_pg {
+    script "/usr/local/bin/cf-agent check db postgresql"
+    interval 2
+}
+
+vrrp_instance cf-nextcloud-postgresql {
+    state BACKUP
+    interface eth0
+    virtual_router_id 50
+    priority 100
+    unicast_src_ip 10.0.20.186
+    unicast_peer {
+        10.0.20.187
+    }
+    virtual_ipaddress {
+        10.0.20.190/24 dev eth0
+    }
+    track_script {
+        cf_pg
+    }
+}
+`
+
+func TestDBInclude(t *testing.T) {
+	ctx := context.Background()
+	h := agenttest.NewHost(t.TempDir(), "10.0.20.186")
+	a := trackAgent(t, h)
+	conf := filepath.Join(h.Root, "etc/keepalived/keepalived.conf")
+	writeMode(t, filepath.Join(h.Root, protocol.DBTrackPGFile), pgVIPConf, 0o600)
+
+	// Zonder keepalived.conf: het plan zegt dat er een komt, toepassen
+	// maakt er een met alleen de include.
+	res := a.dbTrack(ctx, &protocol.DBTrackRequest{VIP: "10.0.20.190", Include: true})
+	if res.Error != "" || !res.Track.Changed {
+		t.Fatalf("plan zonder keepalived.conf: %+v", res)
+	}
+	if _, err := os.Stat(conf); err == nil {
+		t.Fatal("het plan maakte keepalived.conf")
+	}
+	res = a.dbTrack(ctx, &protocol.DBTrackRequest{VIP: "10.0.20.190", Include: true, Apply: true})
+	if res.Error != "" || !res.Track.Changed {
+		t.Fatalf("nieuw: %+v", res)
+	}
+	b, _ := os.ReadFile(conf)
+	if !strings.Contains(string(b), "\ninclude /etc/keepalived/conf.d/*.conf\n") {
+		t.Fatalf("nieuwe keepalived.conf:\n%s", b)
+	}
+	// De facts volgen de include: het eigen VIP staat in de instances.
+	ka := (&Collector{Root: h.Root, Run: h.Exec}).keepalived(nil)
+	if ka == nil || len(ka.Instances) != 1 || ka.Instances[0].Name != "cf-nextcloud-postgresql" || ka.Instances[0].VRID != 50 ||
+		strings.Join(ka.Instances[0].TrackScripts, ",") != "cf_pg" || strings.Join(ka.Instances[0].VIPs, ",") != "10.0.20.190" {
+		t.Fatalf("facts: %+v", ka)
+	}
+	if res = a.dbTrack(ctx, &protocol.DBTrackRequest{VIP: "10.0.20.190", Include: true, Apply: true}); res.Error != "" || res.Track.Changed {
+		t.Fatalf("tweede keer: %+v", res)
+	}
+
+	// Met de keepalived.conf van Jonas: alleen de include erbij, bovenaan,
+	// en de VIP's van de app blijven.
+	writeMode(t, conf, ncConf, 0o640)
+	res = a.dbTrack(ctx, &protocol.DBTrackRequest{VIP: "10.0.20.190", Include: true, Apply: true})
+	if res.Error != "" || !res.Track.Changed || !strings.Contains(res.Track.Diff, "+include /etc/keepalived/conf.d/*.conf") || strings.Contains(res.Track.Diff, "geheim12") {
+		t.Fatalf("met keepalived.conf: %+v", res)
+	}
+	b, _ = os.ReadFile(conf)
+	if !strings.HasSuffix(string(b), ncConf) || strings.Count(string(b), "include ") != 1 {
+		t.Fatalf("keepalived.conf:\n%s", b)
+	}
+	ka = (&Collector{Root: h.Root, Run: h.Exec}).keepalived(nil)
+	if ka == nil || len(ka.Instances) != 2 || ka.Instances[0].Name != "VI_1" || ka.Instances[1].Name != "cf-nextcloud-postgresql" {
+		t.Fatalf("facts met beide: %+v", ka)
+	}
+
+	// Een VIP dat al in keepalived.conf staat, is geen eigen VIP.
+	if res := a.dbTrack(ctx, &protocol.DBTrackRequest{VIP: "10.0.20.185", Include: true}); !strings.Contains(res.Error, "staat al in vrrp_instance VI_1") {
+		t.Fatalf("VIP van de app: %+v", res)
+	}
+}
+
+func TestCheckPatroni(t *testing.T) {
+	ctx := context.Background()
+	h := agenttest.NewHost(t.TempDir(), "10.0.20.186")
+	a := trackAgent(t, h)
+	a.PatroniURL = h.ServePatroni(t)
+	if err := a.CheckDB(ctx, protocol.DBPostgreSQL); err == nil || !strings.Contains(err.Error(), "antwoordt niet") {
+		t.Fatalf("zonder Patroni: %v", err)
+	}
+	if s := a.PatroniStatus(ctx); !strings.Contains(s.Error, "antwoordt niet") {
+		t.Fatalf("status zonder Patroni: %+v", s)
+	}
+	h.Locked(func() {
+		h.Patroni = &agenttest.Patroni{Scope: "nextcloud", Role: "primary", State: "running", Timeline: 2}
+	})
+	if err := a.CheckDB(ctx, protocol.DBPostgreSQL); err != nil {
+		t.Fatalf("primary: %v", err)
+	}
+	h.Locked(func() {
+		h.Patroni = &agenttest.Patroni{Scope: "nextcloud", Role: "replica", State: "running", Timeline: 2, Replication: "streaming", Sync: true}
+	})
+	if err := a.CheckDB(ctx, protocol.DBPostgreSQL); err == nil || !strings.Contains(err.Error(), "replica (running)") {
+		t.Fatalf("replica: %v", err)
+	}
+	if s := a.PatroniStatus(ctx); s.Scope != "nextcloud" || s.Role != "replica" || s.Replication != "streaming" || !s.Sync || s.Timeline != 2 {
+		t.Fatalf("status van de replica: %+v", s)
+	}
+	if err := a.CheckDB(ctx, "oracle"); err == nil {
+		t.Fatal("onbekende engine")
 	}
 }

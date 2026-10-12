@@ -4645,19 +4645,23 @@ components:
         action: { type: string, description: "begin, join, none (doet al mee), skip (antwoordt niet) of later (na het lezen van de posities)" }
     ComponentVIP:
       type: object
-      required: [id, address, nodes, owner]
+      required: [id, address, nodes, owner, own, vrid]
       properties:
         id: { type: string, format: uuid }
         address: { type: string }
         nodes: { type: array, items: { type: string }, description: De nodes van de database die het VIP in keepalived hebben }
         owner: { type: string, description: De node die het VIP nu heeft; leeg als niemand }
+        own: { type: boolean, description: Een eigen VIP van de database, met een vrrp_instance van ClusterForge }
+        vrid: { type: integer, description: Het VRRP-id van een eigen VIP; 0 bij het VIP van de app }
     ComponentPlanVIP:
       type: object
-      required: [id, address, owner]
+      required: [id, address, owner, own, vrid]
       properties:
-        id: { type: string, format: uuid }
+        id: { type: string, format: uuid, description: Leeg (nullen) bij een eigen VIP dat er nog niet is }
         address: { type: string }
         owner: { type: string, description: De node die het VIP nu heeft; leeg als niemand }
+        own: { type: boolean, description: Een eigen VIP dat ClusterForge maakt }
+        vrid: { type: integer, description: Het VRRP-id van een eigen VIP; 0 bij het VIP van de app }
     ComponentNode:
       type: object
       required: [node_id, hostname, role, index]
@@ -4670,15 +4674,23 @@ components:
       type: object
       required: [engine, nodes]
       properties:
-        engine: { type: string, description: mariadb; postgresql volgt later }
+        engine: { type: string, description: mariadb of postgresql }
         nodes: { type: array, items: { type: string, format: uuid }, description: "De datanodes op volgorde; de eerste begint het cluster" }
-        arbiter: { type: string, format: uuid, nullable: true, description: "Een node die alleen meestemt (garbd); nodig bij twee datanodes" }
-        settings: { type: object, additionalProperties: true, description: "buffer_pool en max_connections; wat ontbreekt, krijgt de standaard" }
+        arbiter: { type: string, format: uuid, nullable: true, description: "Een node die alleen meestemt (garbd of etcd); nodig bij twee datanodes" }
+        settings:
+          type: object
+          additionalProperties: true
+          description: "buffer_pool of shared_buffers en max_connections; wat ontbreekt, krijgt de standaard"
         vip_id:
           type: string
           format: uuid
           nullable: true
-          description: "Het VIP van de app: keepalived zet het dan alleen op een node waarvan de database mag schrijven"
+          description: "Het VIP van de app: keepalived zet het dan alleen op een node waarvan MariaDB mag schrijven. Niet bij PostgreSQL"
+        vip_address:
+          type: string
+          description: >-
+            Een eigen VIP voor de database, met een eigen vrrp_instance van ClusterForge; het staat altijd op de node waar de database
+            schrijft. Nodig bij PostgreSQL, bij MariaDB in plaats van vip_id
     ComponentApplyInput:
       allOf:
         - { $ref: "#/components/schemas/ComponentInput" }

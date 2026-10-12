@@ -283,8 +283,8 @@ func TestClusterComponent(t *testing.T) {
 		t.Fatalf("twee nodes: %+v", two)
 	}
 	var ae apiErr
-	if s := c.do("POST", base+"/plan", map[string]any{"engine": "postgresql", "nodes": []string{ids["nc1"]}}, &ae); s != http.StatusBadRequest || ae.Code != "validation" {
-		t.Fatalf("postgresql: %d %+v", s, ae)
+	if s := c.do("POST", base+"/plan", map[string]any{"engine": "oracle", "nodes": []string{ids["nc1"]}}, &ae); s != http.StatusBadRequest || ae.Code != "validation" {
+		t.Fatalf("oracle: %d %+v", s, ae)
 	}
 	e.createUser("kijker", "een-lang-wachtwoord", store.UserRoleViewer)
 	v := e.client()
@@ -301,7 +301,7 @@ func TestClusterComponent(t *testing.T) {
 			Name string `json:"name"`
 		} `json:"params"`
 	}]
-	if s := v.do("GET", "/api/v1/component-templates", nil, &tpls); s != http.StatusOK || len(tpls.Items) != 1 || tpls.Items[0].Engine != "mariadb" ||
+	if s := v.do("GET", "/api/v1/component-templates", nil, &tpls); s != http.StatusOK || len(tpls.Items) != 2 || tpls.Items[0].Engine != "mariadb" ||
 		tpls.Items[0].Title != "MariaDB Galera" || len(tpls.Items[0].Params) != 2 {
 		t.Fatalf("onderdelen om te kiezen: %d %+v", s, tpls)
 	}

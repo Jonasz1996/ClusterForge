@@ -113,6 +113,9 @@ func (s *Service) target(ctx context.Context, clusterID, id uuid.UUID) (dbTarget
 	if err != nil {
 		return dbTarget{}, err
 	}
+	if err := mariaOnly(r, "Databases en gebruikers beheren"); err != nil {
+		return dbTarget{}, err
+	}
 	if r.AppliedRevision == nil {
 		return dbTarget{}, &ConflictError{"deze database is nog nooit helemaal uitgerold; pas haar eerst toe"}
 	}

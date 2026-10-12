@@ -40,6 +40,8 @@ type rendered struct {
 	tpl     *templates.Template
 	secrets map[string]string
 	states  map[uuid.UUID]deploy.NodeState
+	// vrrp is het wachtwoord van VRRP voor een eigen VIP.
+	vrrp string
 }
 
 func (s *Service) load(ctx context.Context, p jobParams) (*rendered, error) {
@@ -66,6 +68,10 @@ func (s *Service) load(ctx context.Context, p jobParams) (*rendered, error) {
 	for i, n := range spec.Secrets {
 		names[i] = secretName(comp.Engine, n)
 	}
+	own := spec.VIP != nil && spec.VIP.Own
+	if own {
+		names = append(names, secretName(comp.Engine, vrrpSecret))
+	}
 	opened, err := s.dep.OpenSecrets(ctx, comp.ClusterID, names)
 	if err != nil {
 		return nil, err
@@ -78,7 +84,11 @@ func (s *Service) load(ctx context.Context, p jobParams) (*rendered, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &rendered{comp: comp, spec: spec, tpl: tpl, secrets: secrets, states: states}, nil
+	r := &rendered{comp: comp, spec: spec, tpl: tpl, secrets: secrets, states: states}
+	if own {
+		r.vrrp = opened[secretName(comp.Engine, vrrpSecret)]
+	}
+	return r, nil
 }
 
 func (s *Service) run(ctx context.Context, j *jobs.Job) error {
@@ -94,6 +104,60 @@ func (s *Service) run(ctx context.Context, j *jobs.Job) error {
 	if err != nil {
 		return err
 	}
+	if r.comp.Engine == protocol.DBPostgreSQL {
+		if err := s.runPatroni(ctx, j, r); err != nil {
+			return err
+		}
+	} else if err := s.runGalera(ctx, j, r); err != nil {
+		return err
+	}
+	if r.spec.VIP != nil {
+		nodes, err := s.vipOrder(ctx, r.spec)
+		if err != nil {
+			return err
+		}
+		for _, n := range nodes {
+			if err := j.Step(ctx, fmt.Sprintf("%s: VIP %s", n.Hostname, r.spec.VIP.Address), func(ctx context.Context, st *jobs.Step) error {
+				if r.spec.VIP.Own {
+					return s.applyOwnVIP(ctx, j, st, r, n)
+				}
+				return s.applyVIP(ctx, j, st, r, n)
+			}); err != nil {
+				return err
+			}
+		}
+	}
+	return j.Step(ctx, "Controleren", func(ctx context.Context, st *jobs.Step) error {
+		if r.comp.Engine == protocol.DBPostgreSQL {
+			primary, err := s.verifyPatroni(ctx, st, r.spec)
+			if err != nil {
+				return err
+			}
+			if err := s.waitOwnVIP(ctx, st, r.spec, primary); err != nil {
+				return err
+			}
+		} else {
+			if err := s.verify(ctx, st, r.spec); err != nil {
+				return err
+			}
+			if err := s.verifyVIP(ctx, st, r.spec); err != nil {
+				return err
+			}
+		}
+		if err := s.finish(ctx, actor, j, r, p.Revision); err != nil {
+			return err
+		}
+		st.Logf("de database van %s draait op %s; revisie %d is toegepast", r.spec.Cluster.Name, joinHosts(r.spec.hosts(RoleData)), p.Revision)
+		if s.Changed != nil {
+			s.Changed()
+		}
+		return nil
+	})
+}
+
+// runGalera zet MariaDB op de nodes, een voor een: de datanodes op
+// volgnummer, daarna de scheidsrechter.
+func (s *Service) runGalera(ctx context.Context, j *jobs.Job, r *rendered) error {
 	data := r.spec.count(RoleData)
 	for _, n := range r.spec.order() {
 		name := n.Hostname + ": MariaDB"
@@ -112,35 +176,7 @@ func (s *Service) run(ctx context.Context, j *jobs.Job) error {
 			return err
 		}
 	}
-	if r.spec.VIP != nil {
-		nodes, err := s.vipOrder(ctx, r.spec)
-		if err != nil {
-			return err
-		}
-		for _, n := range nodes {
-			if err := j.Step(ctx, fmt.Sprintf("%s: VIP %s", n.Hostname, r.spec.VIP.Address), func(ctx context.Context, st *jobs.Step) error {
-				return s.applyVIP(ctx, j, st, r, n)
-			}); err != nil {
-				return err
-			}
-		}
-	}
-	return j.Step(ctx, "Controleren", func(ctx context.Context, st *jobs.Step) error {
-		if err := s.verify(ctx, st, r.spec); err != nil {
-			return err
-		}
-		if err := s.verifyVIP(ctx, st, r.spec); err != nil {
-			return err
-		}
-		if err := s.finish(ctx, actor, j, r, p.Revision); err != nil {
-			return err
-		}
-		st.Logf("de database van %s draait op %s; revisie %d is toegepast", r.spec.Cluster.Name, joinHosts(r.spec.hosts(RoleData)), p.Revision)
-		if s.Changed != nil {
-			s.Changed()
-		}
-		return nil
-	})
+	return nil
 }
 
 func options(ctx context.Context, j *jobs.Job, st *jobs.Step, n Node, suffix string, retry time.Duration) deploy.ApplyOptions {

@@ -37,6 +37,7 @@ func nodeInfo(n SpecNode, st NodeState) (templates.NodeInfo, error) {
 	if st.Facts != nil {
 		facts = *st.Facts
 	}
+	info.OSVersion = facts.OS.VersionID
 	if info.Address == "" {
 		info.Address = st.PrimaryIP
 		if info.Address == "" {

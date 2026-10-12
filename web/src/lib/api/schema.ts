@@ -4331,13 +4331,24 @@ export interface components {
             nodes: string[];
             /** @description De node die het VIP nu heeft; leeg als niemand */
             owner: string;
+            /** @description Een eigen VIP van de database */
+            own: boolean;
+            /** @description Het VRRP-id van een eigen VIP; 0 bij het VIP van de app */
+            vrid: number;
         };
         ComponentPlanVIP: {
-            /** Format: uuid */
+            /**
+             * Format: uuid
+             * @description Leeg (nullen) bij een eigen VIP dat er nog niet is
+             */
             id: string;
             address: string;
             /** @description De node die het VIP nu heeft; leeg als niemand */
             owner: string;
+            /** @description Een eigen VIP dat ClusterForge maakt */
+            own: boolean;
+            /** @description Het VRRP-id van een eigen VIP; 0 bij het VIP van de app */
+            vrid: number;
         };
         ComponentNode: {
             /** Format: uuid */
@@ -4348,24 +4359,26 @@ export interface components {
             index: number;
         };
         ComponentInput: {
-            /** @description mariadb; postgresql volgt later */
+            /** @description mariadb of postgresql */
             engine: string;
             /** @description De datanodes op volgorde; de eerste begint het cluster */
             nodes: string[];
             /**
              * Format: uuid
-             * @description Een node die alleen meestemt (garbd); nodig bij twee datanodes
+             * @description Een node die alleen meestemt (garbd of etcd); nodig bij twee datanodes
              */
             arbiter?: string | null;
-            /** @description buffer_pool en max_connections; wat ontbreekt, krijgt de standaard */
+            /** @description buffer_pool of shared_buffers en max_connections; wat ontbreekt, krijgt de standaard */
             settings?: {
                 [key: string]: unknown;
             };
             /**
              * Format: uuid
-             * @description Het VIP van de app: keepalived zet het dan alleen op een node waarvan de database mag schrijven
+             * @description Het VIP van de app: keepalived zet het dan alleen op een node waarvan MariaDB mag schrijven. Niet bij PostgreSQL
              */
             vip_id?: string | null;
+            /** @description Een eigen VIP voor de database, met een eigen vrrp_instance van ClusterForge; het staat altijd op de node waar de database schrijft. Nodig bij PostgreSQL, bij MariaDB in plaats van vip_id */
+            vip_address?: string;
         };
         ComponentApplyInput: components["schemas"]["ComponentInput"] & {
             /** @description De hash van het plan dat je zag */
