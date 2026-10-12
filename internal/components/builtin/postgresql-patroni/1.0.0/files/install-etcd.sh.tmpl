@@ -1,0 +1,43 @@
+#!/bin/sh
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}). Wijzigingen hier
+# worden bij de volgende uitrol overschreven.
+#
+# Installeert etcd uit de GitHub-release. De SHA-256 staat hieronder vast,
+# dus een ander bestand met dezelfde naam komt er niet op. Daarna zet het
+# een merkteken met de versie ernaast, waaraan ClusterForge ziet dat deze
+# versie er staat.
+set -eu
+
+VERSION='v3.5.34'
+URL="https://github.com/etcd-io/etcd/releases/download/$VERSION"
+
+case "$(uname -m)" in
+x86_64 | amd64)
+    ARCH=amd64
+    SUM=eb10a9f3c8d547c4a76c8c39ab6bcd56e95c8da6aec86d4136e433ef6d39977b
+    ;;
+aarch64 | arm64)
+    ARCH=arm64
+    SUM=e08e07095a6aa670b2c93774107abcc1fe113942b175cf3e40ecdf69787ced60
+    ;;
+*)
+    echo "etcd draait niet op een $(uname -m)-processor" >&2
+    exit 1
+    ;;
+esac
+
+NAME="etcd-$VERSION-linux-$ARCH"
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT
+echo "etcd $VERSION downloaden"
+curl -fsSL --retry 3 -o "$TMP/$NAME.tar.gz" "$URL/$NAME.tar.gz"
+echo "$SUM  $TMP/$NAME.tar.gz" | sha256sum -c -
+tar -xzf "$TMP/$NAME.tar.gz" -C "$TMP"
+# Eerst ernaast en dan hernoemen, zodat een draaiende etcd niet halverwege
+# een half bestand ziet.
+for bin in etcd etcdctl; do
+    install -m 0755 "$TMP/$NAME/$bin" "/usr/local/bin/$bin.new"
+    mv -f "/usr/local/bin/$bin.new" "/usr/local/bin/$bin"
+done
+/usr/local/bin/etcd --version | head -n 1
+touch "/usr/local/lib/clusterforge/etcd-$VERSION"

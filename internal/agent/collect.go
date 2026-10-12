@@ -386,7 +386,7 @@ func (c *Collector) docker(ctx context.Context) *protocol.Docker {
 }
 
 func (c *Collector) keepalived(services []protocol.Service) *protocol.Keepalived {
-	conf := c.read("/etc/keepalived/keepalived.conf")
+	conf := c.keepalivedConf()
 	i := slices.IndexFunc(services, func(s protocol.Service) bool { return s.Name == "keepalived" })
 	if conf == "" && i < 0 {
 		return nil
@@ -396,6 +396,30 @@ func (c *Collector) keepalived(services []protocol.Service) *protocol.Keepalived
 		k.Active = services[i].Active
 	}
 	return k
+}
+
+// keepalivedConf is keepalived.conf met de bestanden van zijn includes
+// erachter, één niveau diep, zoals de VIP's van de database in conf.d.
+func (c *Collector) keepalivedConf() string {
+	conf := c.read("/etc/keepalived/keepalived.conf")
+	var b strings.Builder
+	b.WriteString(conf)
+	n := 0
+	for _, node := range parseConfBlocks(conf) {
+		if len(node.words) != 2 || node.words[0] != "include" || !strings.HasPrefix(node.words[1], "/") {
+			continue
+		}
+		files, _ := filepath.Glob(c.path(node.words[1]))
+		for _, f := range files {
+			if n++; n > 32 {
+				break
+			}
+			if inc, err := os.ReadFile(f); err == nil {
+				b.WriteString("\n" + string(inc))
+			}
+		}
+	}
+	return b.String()
 }
 
 // parseKeepalivedVIPs haalt de adressen uit de virtual_ipaddress-blokken.

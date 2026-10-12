@@ -291,6 +291,20 @@ var funcs = template.FuncMap{
 	"sub":  func(a, b int) int { return a - b },
 	"mul":  func(a, b int) int { return a * b },
 	"join": strings.Join,
+	// pgsize schrijft een grootte zoals 256M als 256MB, de eenheid van
+	// PostgreSQL.
+	"pgsize": pgSize,
+}
+
+func pgSize(v any) string {
+	s := strings.TrimSpace(fmt.Sprint(v))
+	switch {
+	case strings.HasSuffix(s, "K"):
+		return strings.TrimSuffix(s, "K") + "kB"
+	case strings.HasSuffix(s, "M"), strings.HasSuffix(s, "G"), strings.HasSuffix(s, "T"):
+		return s + "B"
+	}
+	return s
 }
 
 // NodeInfo beschrijft een node voor de sjablonen.
@@ -301,6 +315,8 @@ type NodeInfo struct {
 	Address   string `json:"address"`
 	Prefix    int    `json:"prefix"`
 	Interface string `json:"interface"`
+	// OSVersion is VERSION_ID uit os-release, zoals 13; leeg zonder facts.
+	OSVersion string `json:"os_version,omitempty"`
 }
 
 // Context is wat een sjabloon ziet: .params, .cluster, .node, .nodes en
@@ -321,7 +337,7 @@ type ClusterInfo struct {
 func (n NodeInfo) data() map[string]any {
 	return map[string]any{
 		"hostname": n.Hostname, "role": n.Role, "index": n.Index, "address": n.Address,
-		"prefix": n.Prefix, "interface": n.Interface,
+		"prefix": n.Prefix, "interface": n.Interface, "os_version": n.OSVersion,
 	}
 }
 

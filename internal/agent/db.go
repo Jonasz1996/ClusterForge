@@ -609,38 +609,81 @@ func (a *Agent) pgStatus(ctx context.Context, u UnitInfo) protocol.DBServer {
 	return s
 }
 
-// patroni leest wat Patroni over deze node zegt.
-func (a *Agent) patroni(ctx context.Context) *protocol.DBPatroni {
+// patroniGet vraagt path aan de REST-API van Patroni op deze node, met
+// de statuscode en hoogstens 64 KiB van het antwoord.
+func (a *Agent) patroniGet(ctx context.Context, path string, timeout time.Duration) (int, []byte, error) {
 	base := a.PatroniURL
 	if base == "" {
 		base = DefaultPatroniURL
 	}
-	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/patroni", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+path, nil)
 	if err != nil {
-		return &protocol.DBPatroni{Error: err.Error()}
+		return 0, nil, err
 	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return &protocol.DBPatroni{Error: "de REST-API van Patroni op " + base + " antwoordt niet"}
+		return 0, nil, errors.New("de REST-API van Patroni op " + base + " antwoordt niet")
 	}
 	defer func() { _ = resp.Body.Close() }()
 	body, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
-	var v struct {
-		State    string `json:"state"`
-		Role     string `json:"role"`
-		Timeline int    `json:"timeline"`
-		Patroni  struct {
-			Scope string `json:"scope"`
-		} `json:"patroni"`
+	return resp.StatusCode, body, nil
+}
+
+// patroniState is wat /patroni en /primary over de node zeggen.
+type patroniState struct {
+	State            string `json:"state"`
+	Role             string `json:"role"`
+	Timeline         int    `json:"timeline"`
+	ReplicationState string `json:"replication_state"`
+	SyncStandby      bool   `json:"sync_standby"`
+	Patroni          struct {
+		Scope string `json:"scope"`
+	} `json:"patroni"`
+}
+
+func (v patroniState) role() string {
+	if v.Role == "master" {
+		return "primary"
 	}
+	return v.Role
+}
+
+// patroni leest wat Patroni over deze node zegt.
+func (a *Agent) patroni(ctx context.Context) *protocol.DBPatroni {
+	code, body, err := a.patroniGet(ctx, "/patroni", 3*time.Second)
+	if err != nil {
+		return &protocol.DBPatroni{Error: err.Error()}
+	}
+	var v patroniState
 	if err := json.Unmarshal(body, &v); err != nil {
-		return &protocol.DBPatroni{Error: fmt.Sprintf("onverwacht antwoord van Patroni (HTTP %d)", resp.StatusCode)}
+		return &protocol.DBPatroni{Error: fmt.Sprintf("onverwacht antwoord van Patroni (HTTP %d)", code)}
 	}
-	role := v.Role
-	if role == "master" {
-		role = "primary"
+	return &protocol.DBPatroni{
+		Scope: v.Patroni.Scope, Role: v.role(), State: v.State, Timeline: v.Timeline, Replication: v.ReplicationState, Sync: v.SyncStandby,
 	}
-	return &protocol.DBPatroni{Scope: v.Patroni.Scope, Role: role, State: v.State, Timeline: v.Timeline}
+}
+
+// PatroniStatus is wat Patroni nu over deze node zegt, zoals het in de
+// databasestatus komt.
+func (a *Agent) PatroniStatus(ctx context.Context) *protocol.DBPatroni {
+	return a.patroni(ctx)
+}
+
+// checkPatroni is cf-agent check db postgresql: nil als Patroni zegt dat
+// deze node de primary is en PostgreSQL draait (HTTP 200 op /primary).
+func (a *Agent) checkPatroni(ctx context.Context) error {
+	code, body, err := a.patroniGet(ctx, "/primary", 1500*time.Millisecond)
+	if err != nil {
+		return err
+	}
+	if code == http.StatusOK {
+		return nil
+	}
+	var v patroniState
+	if json.Unmarshal(body, &v) == nil && v.Role != "" {
+		return fmt.Errorf("deze node is %s (%s) in Patroni, niet de primary", v.role(), orUnknown(v.State))
+	}
+	return fmt.Errorf("volgens Patroni is deze node niet de primary (HTTP %d)", code)
 }

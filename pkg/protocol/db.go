@@ -120,11 +120,17 @@ const (
 )
 
 // DBTrackScript is de vrrp_script die ClusterForge in
-// DBTrackFile zet; hij roept DBCheckCommand aan.
+// DBTrackFile zet; hij roept DBCheckCommand aan. Voor PostgreSQL zijn dat
+// DBTrackPGScript, DBTrackPGFile en DBCheckPGCommand, met daarin ook de
+// vrrp_instance van het eigen VIP.
 const (
 	DBTrackScript  = "cf_db"
 	DBTrackFile    = "/etc/keepalived/conf.d/clusterforge-db.conf"
 	DBCheckCommand = "/usr/local/bin/cf-agent check db"
+
+	DBTrackPGScript  = "cf_pg"
+	DBTrackPGFile    = "/etc/keepalived/conf.d/clusterforge-postgresql.conf"
+	DBCheckPGCommand = "/usr/local/bin/cf-agent check db postgresql"
 )
 
 // Engines.
@@ -462,6 +468,12 @@ type DBTrackRequest struct {
 	// Apply schrijft de nieuwe keepalived.conf, na keepalived -t; anders
 	// alleen de diff.
 	Apply bool `json:"apply"`
+	// Include: alleen de include van conf.d bovenaan keepalived.conf, voor
+	// een eigen VIP met zijn vrrp_instance in conf.d. Zonder keepalived.conf
+	// maakt de agent er een met alleen die include. VIP is dan het eigen
+	// VIP, en dat mag nog in geen enkele vrrp_instance van keepalived.conf
+	// staan.
+	Include bool `json:"include,omitempty"`
 }
 
 // DBTrackResult is het antwoord op DBTrack.
@@ -555,6 +567,11 @@ type DBPatroni struct {
 	Role     string `json:"role,omitempty"`
 	State    string `json:"state,omitempty"`
 	Timeline int    `json:"timeline,omitempty"`
+	// Replication is replication_state van een replica, zoals streaming;
+	// Sync is true voor de synchrone replica. Een oudere Patroni zegt het
+	// niet.
+	Replication string `json:"replication,omitempty"`
+	Sync        bool   `json:"sync,omitempty"`
 	// Error zegt waarom de REST-API niet te lezen was.
 	Error string `json:"error,omitempty"`
 }

@@ -15,6 +15,7 @@ import {
   sinceFmt,
   stateInfo,
   useClusterComponents,
+  useComponentTemplates,
   useReapplyComponent,
   useRecoverComponent,
   useRecoverPlan,
@@ -24,18 +25,21 @@ import {
 } from "@/lib/components";
 import type { ClusterDetail } from "@/lib/inventory";
 
-// ClusterDatabaseCard toont de database die ClusterForge op de nodes van
-// dit cluster zette, of de knop om er een toe te voegen.
+// ClusterDatabaseCard toont de databases die ClusterForge op de nodes van
+// dit cluster zette, en de knop om er een toe te voegen zolang er een soort
+// ontbreekt.
 export function ClusterDatabaseCard({ c, isAdmin }: { c: ClusterDetail; isAdmin: boolean }) {
   const q = useClusterComponents(c.id);
+  const templates = useComponentTemplates();
   const list = q.data ?? [];
   const add = `/clusters/database?id=${c.id}`;
+  const missing = (templates.data ?? []).some((t) => !list.some((x) => x.engine === t.engine));
   return (
     <Card
       title={
         <span className="flex flex-wrap items-start justify-between gap-2">
           <span>Database</span>
-          {isAdmin && q.data && list.length === 0 && (
+          {isAdmin && q.data && missing && (
             <Link href={add}>
               <Button variant="secondary">Database toevoegen</Button>
             </Link>
@@ -46,8 +50,8 @@ export function ClusterDatabaseCard({ c, isAdmin }: { c: ClusterDetail; isAdmin:
       <QueryState q={q}>
         {q.data && list.length === 0 && (
           <p className="text-sm text-slate-600 dark:text-slate-400">
-            ClusterForge heeft hier geen database gezet. Met Database toevoegen komt MariaDB Galera op de nodes van dit cluster,
-            zodat de app zijn database naast zich heeft. Wat er al aan databases draait, staat bij{" "}
+            ClusterForge heeft hier geen database gezet. Met Database toevoegen komt MariaDB Galera of PostgreSQL met Patroni op
+            de nodes van dit cluster, zodat de app zijn database naast zich heeft. Wat er al aan databases draait, staat bij{" "}
             <Link href="/databases" className="underline">
               Databases
             </Link>
@@ -73,8 +77,12 @@ function Component({ c, comp, isAdmin }: { c: ClusterDetail; comp: ClusterCompon
   const auto = useSetAutoRecover(c.id);
   const rec = recovering(comp);
   const applied = comp.applied_revision !== null;
-  const settings = Object.entries(comp.params);
+  // Het VIP staat er al apart.
+  const settings = Object.entries(comp.params).filter(([k]) => k !== "vip");
   const out = new Map(comp.nodes_out.map((o) => [o.hostname, o]));
+  // Bij PostgreSQL zet ClusterForge nu het cluster neer; databases, dumps en
+  // opnieuw starten komen in een volgende stap.
+  const pg = comp.engine === "postgresql";
   return (
     <div className="space-y-3 text-sm">
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -88,7 +96,7 @@ function Component({ c, comp, isAdmin }: { c: ClusterDetail; comp: ClusterCompon
         </span>
         {(isAdmin || applied) && (
           <span className="flex flex-wrap gap-2">
-            {applied && (
+            {applied && !pg && (
               <Link href={`/clusters/databases?id=${c.id}`}>
                 <Button variant="secondary">Databases en gebruikers</Button>
               </Link>
@@ -98,7 +106,7 @@ function Component({ c, comp, isAdmin }: { c: ClusterDetail; comp: ClusterCompon
                 Weghalen
               </Button>
             )}
-            {isAdmin && applied && (
+            {isAdmin && applied && !pg && (
               <Button variant="secondary" disabled={busy || rec} onClick={() => setRecover(true)}>
                 Opnieuw starten
               </Button>
@@ -143,7 +151,10 @@ function Component({ c, comp, isAdmin }: { c: ClusterDetail; comp: ClusterCompon
           <Link href={`/taken/detail?id=${comp.job_id}`} className="underline">
             bekijk het logboek
           </Link>
-          {busy && ". ClusterForge zet de nodes een voor een op en wacht na elke node tot hij Synced is."}
+          {busy &&
+            (pg
+              ? ". ClusterForge zet eerst etcd op alle nodes, en dan Patroni node voor node; het wacht tot elke replica de primary bijhoudt."
+              : ". ClusterForge zet de nodes een voor een op en wacht na elke node tot hij Synced is.")}
         </p>
       )}
       {comp.state === "failed" && (
@@ -160,7 +171,7 @@ function Component({ c, comp, isAdmin }: { c: ClusterDetail; comp: ClusterCompon
             <tr>
               <th className={thClass}>Node</th>
               <th className={thClass}>Rol</th>
-              {applied && <th className={thClass}>Doet mee</th>}
+              {applied && !pg && <th className={thClass}>Doet mee</th>}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -174,7 +185,7 @@ function Component({ c, comp, isAdmin }: { c: ClusterDetail; comp: ClusterCompon
                     </Link>
                   </td>
                   <td className={tdClass}>{roleLabel[n.role] ?? n.role}</td>
-                  {applied && (
+                  {applied && !pg && (
                     <td className={tdClass}>
                       {n.role !== "data" || comp.down_since !== null ? (
                         <span className="text-slate-500">–</span>
@@ -193,9 +204,16 @@ function Component({ c, comp, isAdmin }: { c: ClusterDetail; comp: ClusterCompon
           </tbody>
         </table>
       </div>
-      {comp.vip && (
+      {comp.vip && pg && (
         <p className="text-slate-600 dark:text-slate-400">
-          VIP <span className="font-mono">{comp.vip.address}</span>
+          Eigen VIP <span className="font-mono">{comp.vip.address}</span>
+          {comp.vip.owner ? ` staat op ${comp.vip.owner}, de primary` : " staat op geen enkele node"}. keepalived zet het op{" "}
+          {comp.vip.nodes.join(", ")} alleen op de node die volgens Patroni de primary is; de app verbindt met dit adres.
+        </p>
+      )}
+      {comp.vip && !pg && (
+        <p className="text-slate-600 dark:text-slate-400">
+          {comp.vip.own ? "Eigen VIP" : "VIP"} <span className="font-mono">{comp.vip.address}</span>
           {comp.vip.owner ? ` staat op ${comp.vip.owner}` : " staat op geen enkele node"} en volgt de database op{" "}
           {comp.vip.nodes.join(", ")}: keepalived zet het alleen op een node waarvan MariaDB mag schrijven.
         </p>
@@ -212,7 +230,7 @@ function Component({ c, comp, isAdmin }: { c: ClusterDetail; comp: ClusterCompon
           .
         </p>
       )}
-      {applied && (
+      {applied && !pg && (
         <label className="flex items-start gap-2">
           <input
             type="checkbox"
@@ -340,11 +358,19 @@ function ReapplyDialog({ c, comp, onClose }: { c: ClusterDetail; comp: ClusterCo
   return (
     <Modal title={`${comp.title} opnieuw toepassen`} onClose={onClose}>
       <div className="space-y-4 text-sm">
-        <p>
-          ClusterForge zet de configuratie van revisie {comp.revision} terug op elke node, een voor een. Een node waarop iets
-          veranderde, herstart MariaDB en ClusterForge wacht tot hij weer Synced is voor hij verder gaat. De andere nodes blijven
-          draaien, dus de database blijft bereikbaar.
-        </p>
+        {comp.engine === "postgresql" ? (
+          <p>
+            ClusterForge zet de configuratie van revisie {comp.revision} terug op elke node: eerst etcd overal, dan Patroni node
+            voor node. Na elke node wacht het tot Patroni er weer meedoet. Herstart Patroni op de primary, dan wordt een replica
+            primary en gaat het VIP mee, dus de database blijft bereikbaar.
+          </p>
+        ) : (
+          <p>
+            ClusterForge zet de configuratie van revisie {comp.revision} terug op elke node, een voor een. Een node waarop iets
+            veranderde, herstart MariaDB en ClusterForge wacht tot hij weer Synced is voor hij verder gaat. De andere nodes
+            blijven draaien, dus de database blijft bereikbaar.
+          </p>
+        )}
         {prod && <ProdConfirm slug={c.slug} value={confirm} onChange={setConfirm} />}
         {reapply.isError && <Alert>{reapply.error.message}</Alert>}
         <div className="flex justify-end gap-2">

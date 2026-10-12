@@ -58,6 +58,9 @@ type Host struct {
 	// geen. Wijzig ze met Locked terwijl de agent draait.
 	MariaDB  *MariaDB
 	Postgres *Postgres
+	// Patroni is wat Patroni over de node zegt, voor ServePatroni; nil:
+	// Patroni draait niet.
+	Patroni *Patroni
 	// Network geeft de machine op een adres (ip:poort), voor een
 	// verhuizing van haar MariaDB; nil kent geen andere machines. Zet het
 	// met Locked terwijl de agent draait.
@@ -387,6 +390,9 @@ func (h *Host) exec(name string, args []string) ([]byte, error) {
 		// MariaDB hier mag schrijven.
 		if len(args) == 2 && args[1] == protocol.DBCheckCommand && !h.mariaWritable() {
 			return []byte("deze Galera-node is niet Synced\n"), errExit1
+		}
+		if len(args) == 2 && args[1] == protocol.DBCheckPGCommand && !h.patroniPrimary() {
+			return []byte("deze node is niet de primary in Patroni\n"), errExit1
 		}
 		return nil, nil
 	case "nft":
@@ -798,56 +804,146 @@ func (h *Host) mariaWritable() bool {
 	return m.Galera.State == 4 && m.Galera.Status == "Primary" && m.Galera.Ready
 }
 
-var (
-	srcRe      = regexp.MustCompile(`(?m)^\s*unicast_src_ip\s+(\S+)`)
-	peersRe    = regexp.MustCompile(`(?s)unicast_peer\s*\{([^}]*)\}`)
-	priorityRe = regexp.MustCompile(`(?m)^\s*priority\s+(\d+)`)
-	vipBlockRe = regexp.MustCompile(`(?s)virtual_ipaddress\s*\{([^}]*)\}`)
-	trackRe    = regexp.MustCompile(`(?s)track_script\s*\{[^}]*\}`)
-	isActiveRe = regexp.MustCompile(`is-active\s+--quiet\s+([\w@.-]+)`)
-	cfDBRe     = regexp.MustCompile(`\bcf_db\b`)
-	checkDBRe  = regexp.MustCompile(`(?s)vrrp_script\s+cf_db\s*\{[^}]*cf-agent check db`)
-)
+var isActiveRe = regexp.MustCompile(`is-active\s+--quiet\s+([\w@.-]+)`)
 
-// vrrp leest prioriteit en VIP's uit de keepalived-configuratie, de unit
-// die een track_script met systemctl is-active bewaakt, en db als een
-// track_script cf_db (cf-agent check db) de database bewaakt.
-func (h *Host) vrrp() (priority int, vips []string, tracked string, db bool) {
-	conf := h.keepalivedConf()
-	if m := priorityRe.FindStringSubmatch(conf); m != nil {
-		priority, _ = strconv.Atoi(m[1])
-	}
-	if m := vipBlockRe.FindStringSubmatch(conf); m != nil {
-		for _, f := range strings.Fields(m[1]) {
-			if ip, _, _ := strings.Cut(f, "/"); strings.Count(ip, ".") == 3 {
-				vips = append(vips, ip)
-			}
-		}
-	}
-	if trackRe.MatchString(conf) {
-		if m := isActiveRe.FindStringSubmatch(conf); m != nil {
-			tracked = strings.TrimSuffix(m[1], ".service")
-		}
-	}
-	for _, t := range trackRe.FindAllString(conf, -1) {
-		db = db || cfDBRe.MatchString(t) && checkDBRe.MatchString(conf)
-	}
-	return priority, vips, tracked, db
+// kaNode is een regel uit keepalived.conf: woorden, en eventueel een blok.
+type kaNode struct {
+	words []string
+	kids  []*kaNode
 }
 
-// unicast leest het eigen adres en de peers van een keepalived-configuratie
-// met unicast_peer; ok is false bij multicast.
-func (h *Host) unicast() (src string, peers []string, ok bool) {
-	conf := h.keepalivedConf()
-	m := peersRe.FindStringSubmatch(conf)
-	if m == nil {
-		return "", nil, false
+// parseKA leest keepalived.conf als boom; commentaar (# en !) valt weg.
+func parseKA(conf string) []*kaNode {
+	root := &kaNode{}
+	stack := []*kaNode{root}
+	var last *kaNode
+	for line := range strings.SplitSeq(conf, "\n") {
+		if i := strings.IndexAny(line, "#!"); i >= 0 {
+			line = line[:i]
+		}
+		line = strings.NewReplacer("{", " { ", "}", " } ").Replace(line)
+		var cur *kaNode
+		for _, w := range strings.Fields(line) {
+			top := stack[len(stack)-1]
+			switch w {
+			case "{":
+				owner := cur
+				if owner == nil {
+					owner = last
+				}
+				if owner == nil {
+					owner = &kaNode{}
+					top.kids = append(top.kids, owner)
+				}
+				stack = append(stack, owner)
+				cur, last = nil, nil
+			case "}":
+				if len(stack) > 1 {
+					stack = stack[:len(stack)-1]
+				}
+				cur, last = nil, nil
+			default:
+				if cur == nil {
+					cur = &kaNode{}
+					top.kids = append(top.kids, cur)
+				}
+				cur.words = append(cur.words, w)
+			}
+		}
+		if cur != nil {
+			last = cur
+		}
 	}
-	src = h.Address
-	if s := srcRe.FindStringSubmatch(conf); s != nil {
-		src = s[1]
+	return root.kids
+}
+
+// vrrpInstance is een vrrp_instance uit de keepalived-configuratie, met de
+// scripts van zijn track_script.
+type vrrpInstance struct {
+	priority int
+	vips     []string
+	scripts  []string
+	unicast  bool
+	src      string
+	peers    []string
+}
+
+// vrrpConfig leest de instances en de vrrp_scripts (naam en commando) uit
+// de keepalived-configuratie, met de includes.
+func (h *Host) vrrpConfig() ([]vrrpInstance, map[string]string) {
+	var insts []vrrpInstance
+	scripts := map[string]string{}
+	for _, n := range parseKA(h.keepalivedConf()) {
+		if len(n.words) < 2 {
+			continue
+		}
+		switch n.words[0] {
+		case "vrrp_script":
+			for _, k := range n.kids {
+				if len(k.words) > 1 && k.words[0] == "script" {
+					scripts[n.words[1]] = strings.Trim(strings.Join(k.words[1:], " "), `"'`)
+				}
+			}
+		case "vrrp_instance":
+			in := vrrpInstance{src: h.Address}
+			for _, k := range n.kids {
+				if len(k.words) == 0 {
+					continue
+				}
+				switch k.words[0] {
+				case "priority":
+					if len(k.words) > 1 {
+						in.priority, _ = strconv.Atoi(k.words[1])
+					}
+				case "virtual_ipaddress":
+					for _, v := range k.kids {
+						if ip, _, _ := strings.Cut(v.words[0], "/"); strings.Count(ip, ".") == 3 {
+							in.vips = append(in.vips, ip)
+						}
+					}
+				case "track_script":
+					for _, t := range k.kids {
+						for _, w := range t.words {
+							if w != "weight" && strings.Trim(w, "-+0123456789") != "" {
+								in.scripts = append(in.scripts, w)
+							}
+						}
+					}
+				case "unicast_src_ip":
+					if len(k.words) > 1 {
+						in.src = k.words[1]
+					}
+				case "unicast_peer":
+					in.unicast = true
+					for _, p := range k.kids {
+						in.peers = append(in.peers, p.words...)
+					}
+				}
+			}
+			insts = append(insts, in)
+		}
 	}
-	return src, strings.Fields(m[1]), true
+	return insts, scripts
+}
+
+// scriptOK zegt of een vrrp_script slaagt: cf-agent check db als de
+// database hier mag schrijven, systemctl is-active als de unit draait. Een
+// track_script zonder vrrp_script negeert keepalived. De aanroeper heeft
+// het slot.
+func (h *Host) scriptOK(script string, defined bool) bool {
+	switch {
+	case !defined:
+		return true
+	case strings.Contains(script, protocol.DBCheckPGCommand):
+		return h.patroniPrimary()
+	case strings.Contains(script, protocol.DBCheckCommand):
+		return h.mariaWritable()
+	}
+	if m := isActiveRe.FindStringSubmatch(script); m != nil {
+		u := h.units[strings.TrimSuffix(m[1], ".service")]
+		return u != nil && u.Active
+	}
+	return true
 }
 
 // vrrpPeer is wat een draaiende keepalived over unicast weet. blocked: de
@@ -916,33 +1012,42 @@ func (g *Group) update() {
 	best := map[string]int{}
 	want := map[string]*Host{}
 	eligible := map[*Host][]string{}
-	peer := map[*Host]vrrpPeer{}
+	peer := map[*Host]map[string]vrrpPeer{}
 	for _, h := range g.hosts {
 		h.mu.Lock()
 		u := h.units["keepalived"]
-		running := u != nil && u.Active
-		prio, vips, tracked, db := h.vrrp()
-		if t := h.units[tracked]; tracked != "" && (t == nil || !t.Active) {
-			running = false
-		}
-		if db && !h.mariaWritable() {
-			running = false
-		}
 		// Zonder netwerk hoort niemand de machine.
-		if h.linkDown[h.Interface] {
-			running = false
-		}
-		src, peers, uni := h.unicast()
+		running := u != nil && u.Active && !h.linkDown[h.Interface]
+		insts, scripts := h.vrrpConfig()
 		blocked := h.vrrpBlocked()
-		h.mu.Unlock()
-		if !running {
-			continue
+		type ok struct {
+			in vrrpInstance
+			up bool
 		}
-		eligible[h] = vips
-		peer[h] = vrrpPeer{unicast: uni, src: src, peers: peers, blocked: blocked}
-		for _, v := range vips {
-			if _, ok := want[v]; !ok || prio > best[v] {
-				want[v], best[v] = h, prio
+		var states []ok
+		for _, in := range insts {
+			up := running
+			for _, name := range in.scripts {
+				script, defined := scripts[name]
+				up = up && h.scriptOK(script, defined)
+			}
+			states = append(states, ok{in, up})
+		}
+		h.mu.Unlock()
+		// Een instance in FAULT krijgt geen VIP.
+		for _, st := range states {
+			if !st.up {
+				continue
+			}
+			if peer[h] == nil {
+				peer[h] = map[string]vrrpPeer{}
+			}
+			for _, v := range st.in.vips {
+				eligible[h] = append(eligible[h], v)
+				peer[h][v] = vrrpPeer{unicast: st.in.unicast, src: st.in.src, peers: st.in.peers, blocked: blocked}
+				if _, ok := want[v]; !ok || st.in.priority > best[v] {
+					want[v], best[v] = h, st.in.priority
+				}
 			}
 		}
 	}
@@ -993,7 +1098,7 @@ func (g *Group) update() {
 		}
 		addrs := []string{o.Address}
 		for h, vips := range eligible {
-			if h != o && slices.Contains(vips, v) && !hears(peer[h], peer[o]) {
+			if h != o && slices.Contains(vips, v) && !hears(peer[h][v], peer[o][v]) {
 				g.extra[v] = append(g.extra[v], h)
 				addrs = append(addrs, h.Address)
 			}

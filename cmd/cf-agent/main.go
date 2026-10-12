@@ -30,8 +30,10 @@ Gebruik:
   cf-agent run       verbindt met ClusterForge (zo start systemd hem); nog niet
                      aangemeld, dan wacht hij op /etc/clusterforge/enroll.json
   cf-agent facts     toont de facts van deze machine
-  cf-agent check db  exit 0 als MariaDB op deze node mag schrijven (Galera
-                     Synced en Primary); keepalived roept dit aan voor het VIP
+  cf-agent check db [postgresql]
+                     exit 0 als de database op deze node mag schrijven: MariaDB
+                     Synced en Primary in Galera, of PostgreSQL de primary van
+                     Patroni; keepalived roept dit aan voor het VIP
   cf-agent fault-clear
                      draait achtergebleven storingen van een rampoefening terug;
                      cf-agent-fault-clear.service doet dit bij elke start
@@ -91,17 +93,21 @@ func verify(args []string) int {
 	return v.Main(ctx, os.Stdin, os.Stdout)
 }
 
-// check is cf-agent check db: exit 0 als de database op deze node mag
-// schrijven, anders 1 met de reden op stderr. keepalived roept dit elke twee
-// seconden aan, dus het moet snel klaar zijn.
+// check is cf-agent check db [mariadb|postgresql]: exit 0 als de database
+// op deze node mag schrijven, anders 1 met de reden op stderr. keepalived
+// roept dit elke twee seconden aan, dus het moet snel klaar zijn.
 func check(args []string) int {
-	if len(args) != 1 || args[0] != "db" {
-		fmt.Fprintln(os.Stderr, "gebruik: cf-agent check db")
+	if len(args) < 1 || len(args) > 2 || args[0] != "db" {
+		fmt.Fprintln(os.Stderr, "gebruik: cf-agent check db [mariadb|postgresql]")
 		return 2
+	}
+	engine := ""
+	if len(args) == 2 {
+		engine = args[1]
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 1500*time.Millisecond)
 	defer cancel()
-	if err := (&agent.Agent{}).CheckDB(ctx); err != nil {
+	if err := (&agent.Agent{}).CheckDB(ctx, engine); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		return 1
 	}

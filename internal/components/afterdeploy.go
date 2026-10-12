@@ -24,9 +24,11 @@ import (
 // WithDeploy geeft wat de uitrol in zijn transactie doet om na afloop een
 // database met deze engine toe te voegen.
 func (s *Service) WithDeploy(engine string) (func(ctx context.Context, q *store.Queries, c store.Cluster, revision int32, j store.Job) error, error) {
-	if _, ok := Templates[engine]; !ok {
+	// PostgreSQL heeft een eigen VIP nodig, en dat kiest de uitrol (nog)
+	// niet; voeg het toe als het cluster er is.
+	if engine != protocol.DBMariaDB {
 		if engine == protocol.DBPostgreSQL {
-			return nil, &InvalidError{"database.engine", "PostgreSQL met Patroni komt in een volgende mijlpaal; kies voorlopig MariaDB"}
+			return nil, &InvalidError{"database.engine", "PostgreSQL heeft een eigen VIP nodig; voeg het toe met Database toevoegen als het cluster er is"}
 		}
 		return nil, &InvalidError{"database.engine", "kies mariadb"}
 	}

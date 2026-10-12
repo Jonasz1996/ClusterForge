@@ -608,7 +608,7 @@ func (s *Service) planMigration(ctx context.Context, source, database string, co
 			continue
 		}
 		var pn PlanNode
-		checkDisk(&pn, &n, f, func(string, string, *Node, string, string) {})
+		checkDisk(&pn, &n, f, "/var/lib/mysql", func(string, string, *Node, string, string) {})
 		if pn.DiskFreeBytes == nil {
 			continue
 		}

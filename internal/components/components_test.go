@@ -201,13 +201,13 @@ func TestHostsAndMemory(t *testing.T) {
 	r := store.ListComponentCandidatesRow{PveType: host("lxc"), PveNode: host("pve1"), PveVmid: &vmid}
 	pn := PlanNode{}
 	got = nil
-	s.checkMemory(&pn, &n, r, &protocol.Facts{MemoryBytes: 4 << 30}, 1<<30, map[uuid.UUID]float64{n.NodeID: 80}, add)
+	s.checkMemory(&pn, &n, r, &protocol.Facts{MemoryBytes: 4 << 30}, 1<<30, map[uuid.UUID]float64{n.NodeID: 80}, engines[protocol.DBMariaDB], add)
 	// (3.2G + 1.29G) / 0.85 = 5.28G, afgerond op 512 MiB is 5632 MiB.
 	if len(got) != 1 || got[0].Command != "pct set 186 --memory 5632" || pn.FreeAfterPct == nil || *pn.FreeAfterPct > -12 {
 		t.Fatalf("geheugen: %+v, over %v", got, pn.FreeAfterPct)
 	}
 	got = nil
-	s.checkMemory(&pn, &n, r, &protocol.Facts{MemoryBytes: 16 << 30}, 1<<30, map[uuid.UUID]float64{n.NodeID: 30}, add)
+	s.checkMemory(&pn, &n, r, &protocol.Facts{MemoryBytes: 16 << 30}, 1<<30, map[uuid.UUID]float64{n.NodeID: 30}, engines[protocol.DBMariaDB], add)
 	if len(got) != 0 {
 		t.Fatalf("genoeg geheugen: %+v", got)
 	}

@@ -1,0 +1,165 @@
+name: postgresql-patroni
+version: 1.0.0
+title: PostgreSQL met Patroni
+description: >-
+  PostgreSQL op de nodes van een bestaand cluster, met Patroni: één node is
+  de primary en schrijft, de andere zijn replica's die alles meteen krijgen.
+  Valt de primary uit, dan maakt Patroni een replica primary, en het eigen
+  VIP van de database gaat mee. etcd op dezelfde nodes houdt bij wie de
+  primary is. De versie is die van Debian op de nodes: PostgreSQL 15 op
+  Debian 12, PostgreSQL 17 op Debian 13. Met twee nodes komt er een
+  scheidsrechter bij, die alleen in etcd meestemt.
+cluster_type: component
+
+params:
+  - name: shared_buffers
+    type: size
+    label: Shared buffers
+    help: Het geheugen van PostgreSQL voor data en indexen, per node. Reken er ongeveer 400 MB bij voor de rest van PostgreSQL, Patroni en etcd.
+    default: 256M
+    min: 128M
+    max: 256G
+  - name: max_connections
+    type: int
+    label: Maximaal aantal verbindingen
+    default: 100
+    min: 20
+    max: 5000
+  # Het eigen VIP dat de primary volgt. ClusterForge vult het in uit de keuze
+  # bij Database toevoegen.
+  - name: vip
+    type: ipv4
+    label: VIP
+    help: Het eigen VIP van PostgreSQL; het staat altijd op de primary.
+    optional: true
+    immutable: true
+  - name: replication_password
+    type: secret
+    label: Wachtwoord van de replicatie
+    help: ClusterForge maakt het zelf.
+    length: 32
+  - name: rewind_password
+    type: secret
+    label: Wachtwoord voor pg_rewind
+    help: ClusterForge maakt het zelf.
+    length: 32
+  - name: rest_password
+    type: secret
+    label: Wachtwoord van de REST-API van Patroni
+    help: ClusterForge maakt het zelf; lezen kan zonder.
+    length: 32
+
+# PostgreSQL in het overzicht van de afhankelijkheden, zodat een app er een
+# pijl naartoe kan krijgen.
+services:
+  - name: postgresql
+    kind: database
+    unit: patroni
+    port: 5432
+
+roles:
+  # De datanodes, op volgorde. ClusterForge zet eerst etcd op alle nodes
+  # (tot en met de stap die etcd start), en daarna Patroni node voor node:
+  # de eerste maakt het cluster, de andere worden replica.
+  - name: data
+    count: "3"
+    steps:
+      - package: { names: [curl, ca-certificates] }
+      - directory: { path: /usr/local/lib/clusterforge, mode: "0755" }
+      - directory: { path: /var/lib/clusterforge, mode: "0755" }
+      # Geen leeg cluster main bij het installeren: Patroni maakt zijn eigen.
+      - directory: { path: /etc/postgresql-common/createcluster.d, mode: "0755" }
+      - file:
+          path: /etc/postgresql-common/createcluster.d/clusterforge.conf
+          content: "# Beheerd door ClusterForge: Patroni maakt het cluster, niet het pakket.\ncreate_main_cluster = false\n"
+          mode: "0644"
+      # python3-etcd is voor Patroni maar een aanrader, en de agent installeert
+      # zonder aanraders; zonder kan Patroni niet bij etcd.
+      - package: { names: [postgresql, patroni, python3-etcd] }
+      - file:
+          path: /usr/local/lib/clusterforge/drop-main.sh
+          template: drop-main.sh.tmpl
+          mode: "0755"
+      - command:
+          title: het lege cluster main van Debian weghalen
+          run: /usr/local/lib/clusterforge/drop-main.sh
+          unless: "! pg_lsclusters -h | awk '{print $2}' | grep -qx main"
+      # De map /var/lib/etcd maakt systemd voor etcd (StateDirectory).
+      - user: { name: etcd, system: true, home: /var/lib/etcd, shell: /usr/sbin/nologin }
+      - file:
+          path: /usr/local/lib/clusterforge/install-etcd.sh
+          template: install-etcd.sh.tmpl
+          mode: "0755"
+      # Het script zet na een gelukte installatie een merkteken met de
+      # versie; zo ziet ook de driftcontrole of de juiste etcd er staat.
+      - command:
+          title: etcd v3.5.34 installeren
+          run: /usr/local/lib/clusterforge/install-etcd.sh
+          creates: /usr/local/lib/clusterforge/etcd-v3.5.34
+      - directory: { path: /etc/etcd, mode: "0755" }
+      - file:
+          path: /etc/etcd/clusterforge.yml
+          template: etcd.yml.tmpl
+          mode: "0644"
+      - file:
+          path: /etc/systemd/system/etcd.service
+          template: etcd.service.tmpl
+          mode: "0644"
+      # etcd wacht bij de eerste start op een meerderheid, dus het start
+      # zonder te wachten. Tot en met deze stap doet ClusterForge alle nodes
+      # eerst; het merkteken zegt dat etcd hier gestart is.
+      - command:
+          title: etcd starten
+          run: systemctl enable etcd && systemctl start --no-block etcd && touch /var/lib/clusterforge/etcd-{{ .cluster.slug }}
+          creates: /var/lib/clusterforge/etcd-{{ .cluster.slug }}
+      - service: { name: etcd, enabled: true }
+      - directory: { path: /etc/patroni, mode: "0755" }
+      # De wachtwoorden staan apart, alleen voor root; systemd geeft ze als
+      # omgeving aan Patroni. Ze veranderen nooit.
+      - file:
+          path: /etc/patroni/clusterforge.env
+          template: patroni.env.tmpl
+          mode: "0600"
+      - file:
+          path: /etc/patroni/clusterforge.yml
+          template: patroni.yml.tmpl
+          mode: "0644"
+          notify: [service:patroni:reload]
+      - file:
+          path: /etc/systemd/system/patroni.service
+          template: patroni.service.tmpl
+          mode: "0644"
+      - service: { name: patroni, enabled: true, state: started }
+  # De scheidsrechter stemt alleen in etcd mee, zonder PostgreSQL, zodat twee
+  # datanodes een meerderheid hebben als er één wegvalt.
+  - name: arbiter
+    count: "1"
+    min: 0
+    steps:
+      - package: { names: [curl, ca-certificates] }
+      - directory: { path: /usr/local/lib/clusterforge, mode: "0755" }
+      - directory: { path: /var/lib/clusterforge, mode: "0755" }
+      # De map /var/lib/etcd maakt systemd voor etcd (StateDirectory).
+      - user: { name: etcd, system: true, home: /var/lib/etcd, shell: /usr/sbin/nologin }
+      - file:
+          path: /usr/local/lib/clusterforge/install-etcd.sh
+          template: install-etcd.sh.tmpl
+          mode: "0755"
+      - command:
+          title: etcd v3.5.34 installeren
+          run: /usr/local/lib/clusterforge/install-etcd.sh
+          creates: /usr/local/lib/clusterforge/etcd-v3.5.34
+      - directory: { path: /etc/etcd, mode: "0755" }
+      - file:
+          path: /etc/etcd/clusterforge.yml
+          template: etcd.yml.tmpl
+          mode: "0644"
+      - file:
+          path: /etc/systemd/system/etcd.service
+          template: etcd.service.tmpl
+          mode: "0644"
+      - command:
+          title: etcd starten
+          run: systemctl enable etcd && systemctl start --no-block etcd && touch /var/lib/clusterforge/etcd-{{ .cluster.slug }}
+          creates: /var/lib/clusterforge/etcd-{{ .cluster.slug }}
+      - service: { name: etcd, enabled: true }

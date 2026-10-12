@@ -182,6 +182,9 @@ func (s *Service) Dumps(ctx context.Context, clusterID, id uuid.UUID) (DumpOverv
 	if err != nil {
 		return DumpOverview{}, err
 	}
+	if err := mariaOnly(r, "Dumps"); err != nil {
+		return DumpOverview{}, err
+	}
 	all, err := s.DatabaseBackups(ctx)
 	if err != nil {
 		return DumpOverview{}, err
@@ -288,6 +291,9 @@ func (s *Service) SetBackup(ctx context.Context, actor events.Actor, clusterID, 
 		if err != nil {
 			return err
 		}
+		if err := mariaOnly(r, "Dumps"); err != nil {
+			return err
+		}
 		c, err := q.GetCluster(ctx, clusterID)
 		if err != nil {
 			return err
@@ -316,7 +322,8 @@ func (s *Service) RunBackups(ctx context.Context, now time.Time) error {
 		return err
 	}
 	for _, r := range rows {
-		if !r.BackupOn {
+		// Dumps van PostgreSQL komen in een volgende stap.
+		if !r.BackupOn || r.Engine != protocol.DBMariaDB {
 			continue
 		}
 		if r.BackupNextAt == nil || now.Before(*r.BackupNextAt) {
@@ -358,6 +365,9 @@ func (s *Service) enqueueDump(ctx context.Context, actor events.Actor, clusterID
 	if err != nil {
 		return store.Job{}, err
 	}
+	if err := mariaOnly(r, "Dumps"); err != nil {
+		return store.Job{}, err
+	}
 	if r.AppliedRevision == nil {
 		return store.Job{}, &ConflictError{"deze database is nog nooit helemaal uitgerold; pas haar eerst toe"}
 	}
@@ -384,6 +394,9 @@ func (s *Service) enqueueDump(ctx context.Context, actor events.Actor, clusterID
 func (s *Service) RestoreDump(ctx context.Context, actor events.Actor, clusterID, id, dumpID uuid.UUID, target string) (store.Job, string, error) {
 	r, err := s.get(ctx, s.q, clusterID, id, false)
 	if err != nil {
+		return store.Job{}, "", err
+	}
+	if err := mariaOnly(r, "Dumps"); err != nil {
 		return store.Job{}, "", err
 	}
 	d, err := s.q.GetDBDump(ctx, dumpID)

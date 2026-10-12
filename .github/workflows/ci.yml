@@ -79,6 +79,32 @@ jobs:
           CF_TEST_GALERA_DOCKER: "1"
         run: go test -count=1 -timeout 20m -v -run TestRealGaleraRestart ./internal/galera/
 
+  patroni:
+    name: Echte Patroni
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      # PostgreSQL staat meestal al op de runner. Patroni komt uit PyPI, en
+      # etcd met hetzelfde script als op de nodes, dus met de vaste SHA-256.
+      - name: PostgreSQL, Patroni en etcd
+        run: |
+          ls /usr/lib/postgresql/*/bin/postgres || (sudo apt-get update -q && sudo apt-get install -y -q postgresql)
+          python3 -m venv "$RUNNER_TEMP/patroni"
+          "$RUNNER_TEMP/patroni/bin/pip" install -q "patroni[etcd3]==4.1.5" "psycopg2-binary==2.9.13"
+          sudo mkdir -p /usr/local/lib/clusterforge
+          sudo sh internal/components/builtin/postgresql-patroni/1.0.0/files/install-etcd.sh.tmpl
+      # Drie nodes op loopback met de configuratie van het onderdeel: failover
+      # zonder verlies, de oude primary terug als replica, en opkomen na een
+      # uitval van alle nodes.
+      - name: Failover en opkomen na een uitval
+        env:
+          CF_TEST_PATRONI: ${{ runner.temp }}/patroni/bin/patroni
+          CF_TEST_ETCD: /usr/local/bin/etcd
+        run: go test -count=1 -timeout 20m -v -run TestRealPatroni ./internal/components/
+
   web:
     name: Webinterface
     runs-on: ubuntu-latest
