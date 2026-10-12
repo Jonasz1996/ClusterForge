@@ -2,7 +2,8 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Suspense, type ReactNode } from "react";
+import { Suspense, useState, type ReactNode } from "react";
+import { DoneAlert, KubeActions, type ActionDone, type ActionTarget } from "@/components/kube/Actions";
 import { CodeBlock, EventList, KubeError, Learn, LearnToggle, ObjectLink, Term } from "@/components/kube/Kube";
 import { Logs } from "@/components/kube/Logs";
 import { ago, tableClass, tdClass, thClass } from "@/components/inventory/bits";
@@ -41,7 +42,9 @@ function KubeObjectInner() {
     name: search.get("name") ?? "",
   };
   const cluster = useCluster(id);
-  const obj = useKubeObject(id, ref);
+  const [done, setDone] = useState<ActionDone | null>(null);
+  const deleted = done?.deleted ?? false;
+  const obj = useKubeObject(id, ref, !deleted);
   const o = obj.data;
 
   if (id === "" || ref.name === "" || ref.resource === "") return <Alert>Geen object opgegeven.</Alert>;
@@ -68,16 +71,56 @@ function KubeObjectInner() {
           ) : undefined
         }
         actions={
-          <span className="flex items-center px-2">
-            <LearnToggle />
-          </span>
+          <>
+            <span className="flex items-center px-2">
+              <LearnToggle />
+            </span>
+            {o && !deleted && <KubeActions clusterId={id} target={targetOf(o)} onDone={setDone} />}
+          </>
         }
       />
-      {obj.isLoading && <p className="text-sm text-slate-500">Laden…</p>}
-      {obj.isError && <KubeError error={obj.error} />}
-      {o && <ObjectView id={id} o={o} />}
+      {deleted && done ? (
+        <Alert kind="success">
+          {done.message}{" "}
+          <Link href={backHref(id, o?.kind ?? "")} className="font-medium underline">
+            Terug naar {cluster.data?.name ?? "het cluster"}
+          </Link>
+        </Alert>
+      ) : (
+        <>
+          <DoneAlert done={done} onClose={() => setDone(null)} />
+          {obj.isLoading && <p className="text-sm text-slate-500">Laden…</p>}
+          {obj.isError && <KubeError error={obj.error} />}
+          {o && <ObjectView id={id} o={o} />}
+        </>
+      )}
     </div>
   );
+}
+
+// targetOf geeft de acties van het object, met de eigenaar van een pod.
+function targetOf(o: KubeObject): ActionTarget {
+  const owner = o.chain.find((l) => l.role === "owner");
+  return {
+    kind: o.kind,
+    ref: o.ref,
+    actions: o.actions,
+    replicas: o.replicas,
+    owner: owner ? { kind: owner.kind, name: owner.name } : null,
+  };
+}
+
+// backHref is het tabblad waar het weggehaalde object stond.
+function backHref(id: string, kind: string) {
+  const tab =
+    kind === "Pod"
+      ? "pods"
+      : ["Deployment", "StatefulSet", "DaemonSet", "Job", "CronJob"].includes(kind)
+        ? "apps"
+        : kind === "Node"
+          ? "nodes"
+          : "";
+  return `/kubernetes/cluster?id=${id}${tab ? `&tab=${tab}` : ""}`;
 }
 
 function ObjectView({ id, o }: { id: string; o: KubeObject }) {

@@ -81,6 +81,9 @@ var classes = map[string]Class{
 	"docs.target_connected": ClassInfo, "docs.target_updated": ClassInfo, "docs.target_disconnected": ClassInfo,
 	"docs.published": ClassInfo, "docs.publish_failed": ClassInfo, "docs.publish_recovered": ClassInfo,
 	"docs.summary_updated": ClassInfo, "docs.summary_removed": ClassInfo,
+
+	"kube.scaled": ClassChange, "kube.restarted": ClassChange, "kube.rolled_back": ClassChange, "kube.deleted": ClassChange,
+	"kube.cordoned": ClassChange, "kube.uncordoned": ClassChange, "kube.drained": ClassChange,
 }
 
 // HasClass is true als de action een klasse heeft.

@@ -34,6 +34,10 @@ type ObjectDetail struct {
 	Chain      []ChainLink
 	// Pod is het object als pod, als het een pod is.
 	Pod *Pod
+	// Actions zijn de acties die bij het object kunnen, en Replicas hoeveel
+	// pods het vraagt als je het kunt schalen.
+	Actions  []string
+	Replicas *int
 }
 
 // ChainLink is een schakel in de keten van een object: zijn eigenaar, de
@@ -79,6 +83,7 @@ func (s *Service) Object(ctx context.Context, clusterID uuid.UUID, ref Ref) (Obj
 		return d, err
 	}
 	d.Summary, d.Problem = summary(o, body)
+	d.Actions, d.Replicas = ActionsFor(o.Kind, ref, body)
 
 	var wg sync.WaitGroup
 	var events []Event

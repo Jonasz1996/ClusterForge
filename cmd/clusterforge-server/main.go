@@ -169,7 +169,11 @@ func serve() error {
 	// Kubernetes via de kube-brug van de agents; ook de controle kube_ready
 	// na een uitrol.
 	kub := kube.NewService(pool, bus, log)
+	kub.EnableDrain(runner, ev)
 	dep.Kube = kub
+	// Een node van een Kubernetes-cluster gaat eerst leeg voor onderhoud of
+	// een herstart.
+	life.Kube = kub
 	// Een cluster rendert alleen met de templateversie waarmee het is
 	// uitgerold; zit die niet in deze binary, dan moet de beheerder dat weten.
 	if missing, err := dep.MissingTemplates(ctx); err != nil {

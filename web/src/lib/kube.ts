@@ -21,6 +21,12 @@ export type KubeResourceType = components["schemas"]["KubeResourceType"];
 export type KubeNetwork = components["schemas"]["KubeNetwork"];
 export type KubeStorage = components["schemas"]["KubeStorage"];
 export type KubeConfig = components["schemas"]["KubeConfig"];
+export type KubeActionName = components["schemas"]["KubeActionName"];
+export type KubeActionInput = components["schemas"]["KubeActionInput"];
+export type KubeRevision = components["schemas"]["KubeRevision"];
+export type KubeDrainPlan = components["schemas"]["KubeDrainPlan"];
+export type KubeDrainPod = components["schemas"]["KubeDrainPod"];
+type Job = components["schemas"]["Job"];
 
 type Tone = "slate" | "green" | "amber" | "red" | "blue";
 
@@ -40,6 +46,8 @@ const keys = {
     ["kube", id, "objects", g, v, r, ns, system] as const,
   object: (id: string, ref: KubeRef) => ["kube", id, "object", ref] as const,
   logs: (id: string, ns: string, pod: string, o: LogOptions) => ["kube", id, "logs", ns, pod, o] as const,
+  revisions: (id: string, ns: string, name: string) => ["kube", id, "revisions", ns, name] as const,
+  drainPlan: (id: string, node: string, force: boolean) => ["kube", id, "drain-plan", node, force] as const,
 };
 
 // scope is de query van een tabblad met een namespace en het vinkje
@@ -215,7 +223,7 @@ export function useKubeObjects(id: string, type: KubeResourceType | undefined, n
   });
 }
 
-export function useKubeObject(id: string, ref: KubeRef) {
+export function useKubeObject(id: string, ref: KubeRef, enabled = true) {
   return useQuery({
     queryKey: keys.object(id, ref),
     queryFn: async () =>
@@ -233,7 +241,7 @@ export function useKubeObject(id: string, ref: KubeRef) {
           },
         }),
       ),
-    enabled: id !== "" && ref.name !== "" && ref.resource !== "",
+    enabled: enabled && id !== "" && ref.name !== "" && ref.resource !== "",
     refetchInterval: kubeInterval,
     retry: false,
   });
@@ -266,6 +274,71 @@ export function useKubeLogs(id: string, namespace: string, pod: string, o: LogOp
     refetchInterval: follow ? kubeInterval : false,
     placeholderData: keepPreviousData,
     retry: false,
+  });
+}
+
+// useKubeAction voert een actie uit, zoals schalen of cordon. Daarna wordt
+// alles van het cluster opnieuw gelezen, zodat je het effect meteen ziet.
+export function useKubeAction(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: KubeActionInput) =>
+      unwrap(await api.POST("/kubernetes/clusters/{clusterId}/actions", { params: { path: { clusterId: id } }, body })),
+    // Niet wachten op het opnieuw lezen: na weghalen zou de pagina van het
+    // object eerst even een 404 tonen.
+    onSettled: () => void qc.invalidateQueries({ queryKey: ["kube", id] }),
+  });
+}
+
+// useKubeRevisions geeft de versies van een Deployment, de nieuwste eerst.
+export function useKubeRevisions(id: string, namespace: string, name: string, enabled = true) {
+  return useQuery({
+    queryKey: keys.revisions(id, namespace, name),
+    queryFn: async () =>
+      unwrap(
+        await api.GET("/kubernetes/clusters/{clusterId}/revisions", {
+          params: { path: { clusterId: id }, query: { namespace, name } },
+        }),
+      ).items,
+    enabled: enabled && id !== "" && name !== "",
+    retry: false,
+  });
+}
+
+// useKubeDrainPlan toont wat leegmaken met een node zou doen, zonder iets
+// te veranderen; het plan volgt de pods zolang de dialoog open is.
+export function useKubeDrainPlan(id: string, node: string, force: boolean, enabled = true) {
+  return useQuery({
+    queryKey: keys.drainPlan(id, node, force),
+    queryFn: async () =>
+      unwrap(
+        await api.POST("/kubernetes/clusters/{clusterId}/drain", {
+          params: { path: { clusterId: id } },
+          body: { node, preview: true, force: force || undefined },
+        }),
+      ) as KubeDrainPlan,
+    enabled: enabled && id !== "" && node !== "",
+    refetchInterval: kubeInterval,
+    placeholderData: keepPreviousData,
+    retry: false,
+  });
+}
+
+// useKubeDrain start het leegmaken als taak.
+export function useKubeDrain(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: { node: string; force: boolean; confirm?: string }) =>
+      unwrap(
+        await api.POST("/kubernetes/clusters/{clusterId}/drain", {
+          params: { path: { clusterId: id } },
+          body: { node: body.node, force: body.force || undefined, confirm: body.confirm },
+        }),
+      ) as Job,
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["jobs"] });
+      void qc.invalidateQueries({ queryKey: ["kube", id] });
+    },
   });
 }
 

@@ -723,6 +723,28 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 		return "Samenvatting 'In het kort' van " + name + " geschreven door de assistent, " + dollars(p["cost_usd"]) + paren(str(p, "model"))
 	case "docs.summary_removed":
 		return "Samenvatting 'In het kort' van " + name + " weggehaald"
+	case "kube.scaled":
+		return fmt.Sprintf("%s geschaald van %s naar %s", kubeObject(p), num(p["from"]), count(p["to"], "pod", "pods"))
+	case "kube.restarted":
+		return kubeObject(p) + " herstart"
+	case "kube.rolled_back":
+		s := kubeObject(p) + " teruggedraaid"
+		if from := num(p["from_revision"]); from != "" {
+			s += " van versie " + from
+		}
+		return s + " naar versie " + num(p["to_revision"]) + paren(list(p["images"]))
+	case "kube.deleted":
+		return kubeObject(p) + " weggehaald"
+	case "kube.cordoned":
+		return "Node " + str(p, "node") + " op cordon gezet in Kubernetes"
+	case "kube.uncordoned":
+		return "Node " + str(p, "node") + " krijgt weer pods in Kubernetes"
+	case "kube.drained":
+		s := fmt.Sprintf("Node %s leeggemaakt in Kubernetes: %s uitgezet", str(p, "node"), count(p["evicted"], "pod", "pods"))
+		if p["force"] == true {
+			s += ", ook zonder eigenaar"
+		}
+		return s
 	case "gitops.commit_seen":
 		return fmt.Sprintf("Nieuwe commit %s %q van %s", shortSHA(str(p, "sha")), str(p, "message"), str(p, "author")) + verifiedText(p)
 	case "gitops.sync_failed":
@@ -1052,6 +1074,15 @@ func list(v any) string {
 }
 
 func num(v any) string { return text(v) }
+
+// kubeObject schrijft een object in Kubernetes als "Deployment demo/web".
+func kubeObject(p map[string]any) string {
+	name := str(p, "name")
+	if ns := str(p, "namespace"); ns != "" {
+		name = ns + "/" + name
+	}
+	return or(str(p, "kind"), "Object") + " " + name
+}
 
 // dollars schrijft een bedrag zoals $0,12.
 func dollars(v any) string {

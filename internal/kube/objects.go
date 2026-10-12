@@ -157,12 +157,7 @@ type Pod struct {
 		NodeName       string      `json:"nodeName"`
 		Containers     []Container `json:"containers"`
 		InitContainers []Container `json:"initContainers"`
-		Volumes        []struct {
-			Name                  string `json:"name"`
-			PersistentVolumeClaim *struct {
-				ClaimName string `json:"claimName"`
-			} `json:"persistentVolumeClaim"`
-		} `json:"volumes"`
+		Volumes        []PodVolume `json:"volumes"`
 	} `json:"spec"`
 	Status struct {
 		Phase                 string            `json:"phase"`
@@ -176,6 +171,16 @@ type Pod struct {
 		ContainerStatuses     []ContainerStatus `json:"containerStatuses"`
 		InitContainerStatuses []ContainerStatus `json:"initContainerStatuses"`
 	} `json:"status"`
+}
+
+// PodVolume is een volume van een pod.
+type PodVolume struct {
+	Name                  string `json:"name"`
+	PersistentVolumeClaim *struct {
+		ClaimName string `json:"claimName"`
+	} `json:"persistentVolumeClaim"`
+	// EmptyDir is een lege map op de node die met de pod verdwijnt.
+	EmptyDir *struct{} `json:"emptyDir"`
 }
 
 // Restarts telt de herstarts van alle containers.

@@ -59,6 +59,7 @@ Het technisch ontwerp staat in [docs/design/mvp-fase-1.md](docs/design/mvp-fase-
 | 1. Template Kubernetes (k3s) | Een Kubernetes-cluster uitrollen met k3s op Debian-VM's: één, drie of vijf servers met etcd, nul tot tien workers, en één VIP met keepalived voor kubectl en de apps; Traefik, ServiceLB, local-path en metrics-server zitten erin | klaar |
 | 2. Kube-brug en overzicht | cf-agent op een k3s-server leest de Kubernetes-API voor ClusterForge (agentprotocol 8), alleen lezen en zonder de waarden van Secrets; een pagina Kubernetes met per cluster een overzicht, de nodes gekoppeld aan de ClusterForge-nodes, de apps en de pods, met een leermodus die uitlegt wat je ziet en het kubectl-commando ernaast zet; na een uitrol wacht ClusterForge tot elke node Ready is | klaar |
 | 3. Details, logs en gebeurtenissen | Een pod, app, node of ander object openen: de toestand in gewone woorden, de keten van Deployment tot de VM op de Proxmox-host en van Service en Ingress, de containers, condities, events en YAML; de logs van een container, ook van de vorige na een herstart; tabbladen Netwerk, Opslag, Configuratie, Gebeurtenissen en Alles, met de soorten van geïnstalleerde apps zoals IngressRoute van Traefik | klaar |
+| 4. Acties | Een app schalen, herstarten of terugdraaien naar een vorige versie, een object weghalen, een node op cordon zetten, weer pods geven of leegmaken; alles in het logboek, op prod met de slug en tweestapsverificatie; een herstart of onderhoud van een node via ClusterForge maakt hem in Kubernetes eerst leeg en geeft hem daarna weer pods | klaar |
 
 ## Draaien met Docker Compose
 
@@ -435,6 +436,21 @@ Klik op een pod, app, node, Service of ander object om het te openen. Je ziet:
 
 Ook een gebruiker met de rol viewer kan logs lezen.
 
+### Acties
+
+Een beheerder ziet bij een object en in de tabellen de acties die erbij passen. Elke actie opent eerst een venster dat zegt wat er gaat gebeuren, met in de leermodus het `kubectl`-commando dat hetzelfde doet:
+
+- **Schalen** (Deployment, StatefulSet): het aantal pods, van 0 tot 100. Met 0 draait de app niet, maar hij blijft bestaan.
+- **Herstarten** (Deployment, StatefulSet, DaemonSet): de pods worden een voor een vervangen, zoals `kubectl rollout restart`. Handig als een app een gewijzigde ConfigMap of Secret opnieuw moet lezen.
+- **Terugdraaien** (Deployment): kies een vorige versie met haar images; Kubernetes maakt daar een nieuwe versie van en vervangt de pods een voor een, zoals `kubectl rollout undo`.
+- **Weghalen**: op de pagina van het object, en bij een pod ook in de tabel. Het venster zegt wat er gebeurt, zoals "ReplicaSet web-7c9 maakt meteen een nieuwe pod" of dat de volumes van een StatefulSet blijven. Bij een namespace of een volume tik je de naam in. De namespace `default` en die van Kubernetes zelf kun je niet weghalen, en een node ook niet: dat doe je in ClusterForge.
+- **Cordon** en **Uncordon** (node): er komen geen nieuwe pods meer op de node, of weer wel.
+- **Leegmaken** (node): eerst toont ClusterForge welke pods weggaan, welke blijven (zoals die van een DaemonSet) en welke het tegenhouden: een pod zonder eigenaar komt nergens terug, en de gegevens in emptyDir gaan verloren. Die gaan alleen weg als je Toch doorgaan aanvinkt. Daarna is het een taak: de node gaat op cordon en elke pod wordt netjes gevraagd te vertrekken. Houdt een PodDisruptionBudget dat tegen, dan probeert ClusterForge het om de vijf seconden opnieuw, tot vijf minuten lang.
+
+Elke actie staat in het logboek, met wie ze deed. Op een prodcluster vraagt ze de slug van het cluster en moet je tweestapsverificatie aan hebben. Stond iets al zo, dan verandert er niets en schrijft ClusterForge ook niets in het logboek.
+
+Herstart je een node van een Kubernetes-cluster via ClusterForge, of zet je hem in onderhoud of uit, dan maakt ClusterForge hem in Kubernetes eerst leeg. Na een herstart wacht ClusterForge tot de node weer Ready is (hoogstens vijf minuten) en geeft hem dan weer pods; na onderhoud gebeurt dat bij Onderhoud beëindigen. Zette je de node zelf op cordon, dan blijft hij daarop staan. Antwoordt de Kubernetes-API niet, dan gaat de actie door zonder leegmaken, en staat dat bij de taak.
+
 De namespaces van Kubernetes zelf (`kube-system`, `kube-public`, `kube-node-lease`) staan standaard verborgen; zet Systeem tonen aan om ze te zien.
 
 De **leermodus** staat standaard aan. Hij legt op elk tabblad uit wat je ziet en geeft het `kubectl`-commando dat hetzelfde toont, om te kopiëren. Wijs een soort app of een status van een pod aan voor uitleg. Zet hem rechtsboven uit; dat blijft bewaard voor je gebruiker.
@@ -445,7 +461,7 @@ Een cluster dat je zelf bouwde, werkt ook: maak een cluster van het type Kuberne
 
 De server praat nooit zelf met de Kubernetes-API. cf-agent op een k3s-server doet het, met de beheerdersconfig `/etc/rancher/k3s/k3s.yaml` die daar al staat, en stuurt het antwoord via de bestaande verbinding (NATS) terug. Daardoor hoeft poort 6443 niet open naar ClusterForge, en verlaat geen certificaat van het cluster de server. ClusterForge kiest een server met een verse heartbeat waarvan de API antwoordt; valt die weg, dan neemt een andere het over.
 
-De agent laat alleen lezen toe, met een vaste lijst: geen exec, attach, port-forward of proxy, en geen watch. Van een log haalt hij alleen de laatste regels, hoogstens 5000 en 2 MB, zonder te blijven volgen; het dashboard vraagt hem elke vijf seconden opnieuw. Van een Secret stuurt hij de namen van de sleutels, nooit de waarden: die vervangt hij door "(verborgen, N bytes)". Hij doet hoogstens vier verzoeken tegelijk, elk hoogstens 30 seconden.
+De agent laat alleen lezen toe, met een vaste lijst: geen exec, attach, port-forward of proxy, en geen watch. Schrijven kan alleen voor de acties hierboven: een patch op Deployments, StatefulSets, ReplicaSets, DaemonSets en nodes, een eviction van een pod, en het weghalen van één object, nooit van `default` of de namespaces van Kubernetes zelf. Een patch staat in Kubernetes op naam van `clusterforge` (de fieldManager). Van een log haalt hij alleen de laatste regels, hoogstens 5000 en 2 MB, zonder te blijven volgen; het dashboard vraagt hem elke vijf seconden opnieuw. Van een Secret stuurt hij de namen van de sleutels, nooit de waarden: die vervangt hij door "(verborgen, N bytes)". Hij doet hoogstens vier verzoeken tegelijk, elk hoogstens 30 seconden.
 
 Dit kan vanaf **agentprotocol 8**. Met een oudere agent toont de pagina "Agent te oud voor Kubernetes", met het commando om hem bij te werken; de aanmelding blijft staan. Werk ook je golden image bij, anders krijgen nieuwe VM's de oude agent. De andere onderdelen van ClusterForge blijven werken met een oudere agent.
 

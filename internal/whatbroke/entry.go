@@ -165,7 +165,7 @@ func eventKind(action string) string {
 	case action == "node.lifecycle_changed":
 		return "lifecycle"
 	case action == "cluster.updated" || action == "cluster.deployed" || action == "cluster.spec_changed" ||
-		action == "secret.created" || action == "node.updated" || prefix == "vip":
+		action == "secret.created" || action == "node.updated" || prefix == "vip" || prefix == "kube":
 		return "config"
 	case prefix == "agent" || prefix == "enrollment_token" || action == "node.facts_changed":
 		return "agent"

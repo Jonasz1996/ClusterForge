@@ -23,6 +23,7 @@ const (
 	CategoryAssistant Category = "assistant"
 	CategoryRisk      Category = "risk"
 	CategoryDocs      Category = "docs"
+	CategoryKube      Category = "kubernetes"
 )
 
 // Categories staan in de volgorde van het filter in de webinterface.
@@ -46,6 +47,7 @@ var Categories = []struct {
 	{CategoryAssistant, "Assistent"},
 	{CategoryRisk, "Gezondheid"},
 	{CategoryDocs, "Documentatie"},
+	{CategoryKube, "Kubernetes"},
 }
 
 // Spec beschrijft een action: zijn soort en een korte Nederlandse omschrijving
@@ -218,6 +220,14 @@ var Known = map[string]Spec{
 	"docs.publish_recovered":   {CategoryDocs, "Documentatie naar GitHub schrijven lukt weer"},
 	"docs.summary_updated":     {CategoryDocs, "Samenvatting van de documentatie geschreven door de assistent"},
 	"docs.summary_removed":     {CategoryDocs, "Samenvatting van de documentatie weggehaald"},
+
+	"kube.scaled":      {CategoryKube, "App geschaald in Kubernetes"},
+	"kube.restarted":   {CategoryKube, "App herstart in Kubernetes"},
+	"kube.rolled_back": {CategoryKube, "App teruggedraaid in Kubernetes"},
+	"kube.deleted":     {CategoryKube, "Object weggehaald in Kubernetes"},
+	"kube.cordoned":    {CategoryKube, "Node op cordon gezet in Kubernetes"},
+	"kube.uncordoned":  {CategoryKube, "Node krijgt weer pods in Kubernetes"},
+	"kube.drained":     {CategoryKube, "Node leeggemaakt in Kubernetes"},
 }
 
 // Lookup geeft de spec van een action. Een onbekende action (uit een nieuwere

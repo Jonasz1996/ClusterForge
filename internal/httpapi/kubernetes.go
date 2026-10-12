@@ -32,6 +32,8 @@ func (s *Server) SetPreferences(w http.ResponseWriter, r *http.Request) {
 func (s *Server) kubeError(w http.ResponseWriter, r *http.Request, err error) {
 	var ue *kube.UnavailableError
 	var ae *kube.APIError
+	var ce *kube.ConflictError
+	var be *kube.BlockedError
 	switch {
 	case errors.Is(err, kube.ErrNotKubernetes):
 		writeError(w, http.StatusNotFound, "not_found", "geen Kubernetes-cluster met dit id")
@@ -45,6 +47,13 @@ func (s *Server) kubeError(w http.ResponseWriter, r *http.Request, err error) {
 		writeError(w, http.StatusServiceUnavailable, "agent_too_old", ue.Error())
 	case errors.As(err, &ue):
 		writeError(w, http.StatusServiceUnavailable, "kube_unavailable", ue.Error())
+	case errors.As(err, &ce):
+		writeError(w, http.StatusConflict, "conflict", ce.Error())
+	case errors.As(err, &be):
+		writeError(w, http.StatusConflict, "needs_force", be.Error())
+	case errors.As(err, &ae) && (ae.Status == http.StatusConflict || ae.Status == http.StatusUnprocessableEntity):
+		// De API weigert de wijziging zelf, zoals een veld dat niet mag.
+		writeError(w, http.StatusConflict, "conflict", ae.Error())
 	case errors.As(err, &ae):
 		writeError(w, http.StatusBadGateway, "kube_api", ae.Error())
 	default:

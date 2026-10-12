@@ -475,6 +475,8 @@ paths:
       summary: Een node herstarten, afsluiten, in of uit onderhoud zetten of zijn facts verzamelen (admin); wordt een taak
       description: |
         Bij onderhoud, herstarten en afsluiten zet de agent eerst keepalived uit zodat de VIP's naar een andere node gaan.
+        Een node van een Kubernetes-cluster wordt eerst leeggemaakt: cordon en zijn pods uitzetten. Na een herstart of na het
+        onderhoud krijgt hij weer pods zodra hij Ready is.
         Kan geen andere node een VIP overnemen, dan antwoordt de server 409 met code needs_force; met force=true gaat het toch door.
       requestBody:
         required: true
@@ -3084,6 +3086,89 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "502": { $ref: "#/components/responses/Error" }
         "503": { $ref: "#/components/responses/Error" }
+  /kubernetes/clusters/{clusterId}/actions:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: kubeAction
+      summary: Een object schalen, herstarten, terugdraaien of weghalen, of een node op cordon zetten of weer pods geven (admin)
+      description: |
+        Elke actie die iets verandert, staat in het logboek. Op prod vraagt ze tweestapsverificatie en de slug in confirm.
+        Een actie die bij het object niet kan, geeft 409 met code conflict en de reden.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/KubeActionInput" }
+      responses:
+        "200":
+          description: Uitgevoerd
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/KubeActionResult" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /kubernetes/clusters/{clusterId}/revisions:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: namespace, in: query, required: true, schema: { type: string } }
+      - { name: name, in: query, required: true, schema: { type: string }, description: De naam van de Deployment }
+    get:
+      operationId: listKubeRevisions
+      summary: De versies van een Deployment, de nieuwste eerst, om naar terug te gaan
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/KubeRevision" } }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /kubernetes/clusters/{clusterId}/drain:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: drainKubeNode
+      summary: Een node leegmaken, zoals kubectl drain (admin); wordt een taak
+      description: |
+        Met preview=true komt alleen het plan terug: welke pods uitgezet worden, welke blijven en welke het tegenhouden.
+        Houden pods het tegen, dan antwoordt de server 409 met code needs_force; met force=true gaan ze toch weg.
+        Op prod vraagt het tweestapsverificatie en de slug in confirm.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/KubeDrainInput" }
+      responses:
+        "200":
+          description: Het plan
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/KubeDrainPlan" }
+        "202":
+          description: Taak aangemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
 components:
   securitySchemes:
     session:
@@ -3365,7 +3450,8 @@ components:
         containers: { type: array, items: { $ref: "#/components/schemas/KubeContainer" } }
     KubeObject:
       type: object
-      required: [ref, api_version, kind, uid, created_at, labels, annotations, summary, problem, conditions, chain, events, yaml, pod]
+      required: [ref, api_version, kind, uid, created_at, labels, annotations, summary, problem, conditions, chain, events, yaml, pod, actions,
+        replicas]
       properties:
         ref: { $ref: "#/components/schemas/KubeRef" }
         api_version: { type: string }
@@ -3383,6 +3469,71 @@ components:
         pod:
           nullable: true
           allOf: [{ $ref: "#/components/schemas/KubePodDetail" }]
+        actions:
+          type: array
+          description: De acties die bij dit object kunnen; alleen een beheerder voert ze uit
+          items: { $ref: "#/components/schemas/KubeActionName" }
+        replicas:
+          type: integer
+          nullable: true
+          description: Hoeveel pods het object vraagt, als je het kunt schalen
+    KubeActionName:
+      type: string
+      enum: [scale, restart, rollback, delete, cordon, uncordon, drain]
+    KubeActionInput:
+      type: object
+      required: [action, ref]
+      properties:
+        action:
+          type: string
+          enum: [scale, restart, rollback, delete, cordon, uncordon]
+        ref: { $ref: "#/components/schemas/KubeRef" }
+        replicas: { type: integer, minimum: 0, maximum: 100, description: Het nieuwe aantal pods bij scale }
+        revision: { type: integer, format: int64, description: "De versie bij rollback; zonder is het de vorige" }
+        confirm: { type: string, description: De slug van het cluster; nodig op prod }
+    KubeActionResult:
+      type: object
+      required: [message, changed]
+      properties:
+        message: { type: string, description: Wat er gebeurde en wat Kubernetes nu doet }
+        changed: { type: boolean, description: "Onwaar als het object al zo stond" }
+    KubeRevision:
+      type: object
+      required: [revision, replicaset, images, created_at, replicas, current, change_cause]
+      properties:
+        revision: { type: integer, format: int64 }
+        replicaset: { type: string }
+        images: { type: array, items: { type: string } }
+        created_at: { type: string, format: date-time }
+        replicas: { type: integer, description: Hoeveel pods deze versie nu vraagt }
+        current: { type: boolean }
+        change_cause: { type: string, description: "De annotatie kubernetes.io/change-cause; leeg als niemand ze zette" }
+    KubeDrainInput:
+      type: object
+      required: [node]
+      properties:
+        node: { type: string, description: De naam van de node in Kubernetes }
+        preview: { type: boolean, description: Alleen het plan tonen }
+        force: { type: boolean, description: "Ook pods zonder eigenaar en met emptyDir uitzetten; die zijn dan weg" }
+        confirm: { type: string, description: De slug van het cluster; nodig op prod }
+    KubeDrainPod:
+      type: object
+      required: [namespace, name, owner_kind, owner_name, reason]
+      properties:
+        namespace: { type: string }
+        name: { type: string }
+        owner_kind: { type: string }
+        owner_name: { type: string }
+        reason: { type: string, description: "Waarom de pod blijft of tegenhoudt, of waarop je moet letten" }
+    KubeDrainPlan:
+      type: object
+      required: [node, cordoned, evict, skip, blocked]
+      properties:
+        node: { type: string }
+        cordoned: { type: boolean, description: De node stond al op cordon }
+        evict: { type: array, items: { $ref: "#/components/schemas/KubeDrainPod" } }
+        skip: { type: array, items: { $ref: "#/components/schemas/KubeDrainPod" } }
+        blocked: { type: array, items: { $ref: "#/components/schemas/KubeDrainPod" } }
     KubeResourceType:
       type: object
       required: [group, version, resource, kind, namespaced]

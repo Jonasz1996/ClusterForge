@@ -153,7 +153,10 @@ func newTestEnv(t *testing.T) *testEnv {
 	// De sync van Kubernetes loopt niet vanzelf; een test roept Sync aan.
 	kub := kube.NewService(pool, bus, log)
 	kub.Interval, kub.Timeout = 0, 5*time.Second
+	kub.DrainTimeout, kub.DrainRetry, kub.DrainPoll = 3*time.Second, 50*time.Millisecond, 20*time.Millisecond
+	kub.EnableDrain(runner, ev)
 	dep.Kube = kub
+	life.Kube, life.KubeReadyTimeout = kub, 5*time.Second
 	bk := backups.NewService(pool, ev, log, pve)
 	bk.Poll, bk.ConnPoll, bk.BootTimeout, bk.NoAgentWait = 20*time.Millisecond, 20*time.Millisecond, 3*time.Second, 100*time.Millisecond
 	bk.AgentTimeout, bk.LockWait, bk.VIPWait = 2*time.Second, time.Second, 3*time.Second

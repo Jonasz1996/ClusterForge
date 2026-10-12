@@ -18,6 +18,7 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -134,6 +135,12 @@ func (a *Agent) handleKube(data []byte) protocol.KubeResponse {
 		res = b.read(ctx, req)
 	case protocol.KubeLogs:
 		res = b.logs(ctx, req)
+	case protocol.KubePatch:
+		res = b.patch(ctx, req)
+	case protocol.KubeDelete:
+		res = b.remove(ctx, req)
+	case protocol.KubeEvict:
+		res = b.evict(ctx, req)
 	default:
 		res = protocol.KubeResponse{Error: "onbekend kube-verzoek " + req.Op}
 	}
@@ -312,7 +319,7 @@ func (b *kubeBridge) logs(ctx context.Context, req protocol.KubeRequest) protoco
 		}
 		q.Set(k, v)
 	}
-	status, body, res := b.send(ctx, req.Path, q)
+	status, body, res := b.send(ctx, http.MethodGet, req.Path, q, nil, "")
 	if res != nil {
 		return *res
 	}
@@ -351,18 +358,145 @@ func (b *kubeBridge) logs(ctx context.Context, req protocol.KubeRequest) protoco
 	}
 }
 
+// patchable zijn de soorten die patch mag wijzigen, met de subresources
+// die erbij mogen. Al de rest gaat later via server-side apply.
+var patchable = map[string][]string{
+	"apps/deployments":  {"", "scale"},
+	"apps/statefulsets": {"", "scale"},
+	"apps/replicasets":  {"", "scale"},
+	"apps/daemonsets":   {""},
+	"/nodes":            {""},
+}
+
+var patchTypes = map[string]string{
+	protocol.KubeMergePatch: "application/merge-patch+json",
+	protocol.KubeJSONPatch:  "application/json-patch+json",
+}
+
+// writeQuery controleert de queryparameters van een schrijvend verzoek:
+// alleen dryRun, en bij delete ook hoe en hoe snel.
+func writeQuery(op string, in map[string]string) (url.Values, error) {
+	q := url.Values{}
+	for k, v := range in {
+		switch {
+		case k == "dryRun" && v == "All":
+		case op == protocol.KubeDelete && k == "propagationPolicy" && (v == "Background" || v == "Foreground" || v == "Orphan"):
+		case op == protocol.KubeDelete && k == "gracePeriodSeconds":
+			if n, err := strconv.Atoi(v); err != nil || n < 0 || n > 3600 {
+				return nil, errors.New("gracePeriodSeconds moet tussen 0 en 3600 liggen")
+			}
+		default:
+			return nil, fmt.Errorf("queryparameter %s=%s is niet toegestaan", k, v)
+		}
+		q.Set(k, v)
+	}
+	return q, nil
+}
+
+// patch wijzigt een app of node. De body moet een JSON-object zijn bij een
+// merge patch en een lijst bij een JSON patch.
+func (b *kubeBridge) patch(ctx context.Context, req protocol.KubeRequest) protocol.KubeResponse {
+	t, err := parseKubePath(req.Path)
+	if err != nil {
+		return protocol.KubeResponse{Error: err.Error()}
+	}
+	subs, ok := patchable[t.Group+"/"+t.Resource]
+	if !ok || t.Name == "" || t.Version != "v1" || !slices.Contains(subs, t.Sub) || (t.Resource == "nodes") != (t.Namespace == "") {
+		return protocol.KubeResponse{Error: fmt.Sprintf("pad %q mag niet gewijzigd worden", req.Path)}
+	}
+	ctype, ok := patchTypes[req.PatchType]
+	if !ok {
+		return protocol.KubeResponse{Error: "onbekende soort patch " + req.PatchType}
+	}
+	if len(req.Body) > protocol.KubeMaxPatch {
+		return protocol.KubeResponse{Error: "de patch is te groot"}
+	}
+	var v any
+	if err := json.Unmarshal(req.Body, &v); err != nil {
+		return protocol.KubeResponse{Error: "de patch is geen JSON"}
+	}
+	if _, obj := v.(map[string]any); req.PatchType == protocol.KubeMergePatch && !obj {
+		return protocol.KubeResponse{Error: "een merge patch is een JSON-object"}
+	}
+	if _, list := v.([]any); req.PatchType == protocol.KubeJSONPatch && !list {
+		return protocol.KubeResponse{Error: "een JSON patch is een lijst"}
+	}
+	q, err := writeQuery(req.Op, req.Query)
+	if err != nil {
+		return protocol.KubeResponse{Error: err.Error()}
+	}
+	q.Set("fieldManager", protocol.KubeFieldManager)
+	return b.write(ctx, http.MethodPatch, req.Path, q, req.Body, ctype, t)
+}
+
+// protectedNamespaces haalt de agent nooit weg: zonder die werkt het
+// cluster niet meer.
+var protectedNamespaces = []string{"default", "kube-system", "kube-public", "kube-node-lease"}
+
+// remove haalt één object weg; nooit een hele lijst of een namespace van
+// Kubernetes zelf.
+func (b *kubeBridge) remove(ctx context.Context, req protocol.KubeRequest) protocol.KubeResponse {
+	t, err := parseKubePath(req.Path)
+	if err != nil {
+		return protocol.KubeResponse{Error: err.Error()}
+	}
+	if t.Resource == "" || t.Name == "" || t.Sub != "" ||
+		(t.Group == "" && t.Resource == "namespaces" && slices.Contains(protectedNamespaces, t.Name)) {
+		return protocol.KubeResponse{Error: fmt.Sprintf("pad %q mag niet weggehaald worden", req.Path)}
+	}
+	q, err := writeQuery(req.Op, req.Query)
+	if err != nil {
+		return protocol.KubeResponse{Error: err.Error()}
+	}
+	return b.write(ctx, http.MethodDelete, req.Path, q, nil, "", t)
+}
+
+// evict zet één pod uit. De agent maakt de Eviction zelf, zodat er niets
+// anders in kan staan dan de pod.
+func (b *kubeBridge) evict(ctx context.Context, req protocol.KubeRequest) protocol.KubeResponse {
+	t, err := parseKubePath(req.Path)
+	if err != nil {
+		return protocol.KubeResponse{Error: err.Error()}
+	}
+	if t.Group != "" || t.Version != "v1" || t.Namespace == "" || t.Resource != "pods" || t.Name == "" || t.Sub != "eviction" {
+		return protocol.KubeResponse{Error: fmt.Sprintf("pad %q is geen eviction van een pod", req.Path)}
+	}
+	q, err := writeQuery(req.Op, req.Query)
+	if err != nil {
+		return protocol.KubeResponse{Error: err.Error()}
+	}
+	body, err := json.Marshal(map[string]any{
+		"apiVersion": "policy/v1", "kind": "Eviction",
+		"metadata": map[string]any{"name": t.Name, "namespace": t.Namespace},
+	})
+	if err != nil {
+		return protocol.KubeResponse{Error: err.Error()}
+	}
+	return b.write(ctx, http.MethodPost, req.Path, q, body, "application/json", t)
+}
+
+// write stuurt een schrijvend verzoek en filtert het antwoord, net als bij
+// lezen: ook een weggehaald Secret komt zonder waarden terug.
+func (b *kubeBridge) write(ctx context.Context, method, p string, q url.Values, body []byte, ctype string, t kubeTarget) protocol.KubeResponse {
+	status, out, res := b.send(ctx, method, p, q, body, ctype)
+	if res != nil {
+		return *res
+	}
+	return kubeAnswer(t, status, out)
+}
+
 // do stuurt het verzoek naar de API en filtert het antwoord.
 func (b *kubeBridge) do(ctx context.Context, p string, q url.Values, t kubeTarget) protocol.KubeResponse {
-	status, body, res := b.send(ctx, p, q)
+	status, body, res := b.send(ctx, http.MethodGet, p, q, nil, "")
 	if res != nil {
 		return *res
 	}
 	return kubeAnswer(t, status, body)
 }
 
-// send doet een GET op de API. Gaat het mis voordat er een antwoord is,
-// dan is res de fout voor de server.
-func (b *kubeBridge) send(ctx context.Context, p string, q url.Values) (status int, body []byte, res *protocol.KubeResponse) {
+// send doet een verzoek op de API. Gaat het mis voordat er een antwoord
+// is, dan is res de fout voor de server.
+func (b *kubeBridge) send(ctx context.Context, method, p string, q url.Values, reqBody []byte, ctype string) (status int, body []byte, res *protocol.KubeResponse) {
 	fail := func(msg string) (int, []byte, *protocol.KubeResponse) {
 		return 0, nil, &protocol.KubeResponse{Error: msg}
 	}
@@ -374,9 +508,16 @@ func (b *kubeBridge) send(ctx context.Context, p string, q url.Values) (status i
 	if len(q) > 0 {
 		u += "?" + q.Encode()
 	}
-	hreq, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	var rd io.Reader
+	if reqBody != nil {
+		rd = bytes.NewReader(reqBody)
+	}
+	hreq, err := http.NewRequestWithContext(ctx, method, u, rd)
 	if err != nil {
 		return fail(err.Error())
+	}
+	if ctype != "" {
+		hreq.Header.Set("Content-Type", ctype)
 	}
 	hreq.Header.Set("Accept", "application/json")
 	hreq.Header.Set("User-Agent", "cf-agent")
