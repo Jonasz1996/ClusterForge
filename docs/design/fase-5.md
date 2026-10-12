@@ -16,12 +16,12 @@ Fase 5 laat ClusterForge dat uitrollen, de data verhuizen en de databases daarna
 | Module | Wat Jonas krijgt | Mijlpalen |
 | --- | --- | --- |
 | Zien | Een menu Databases met elke MariaDB en PostgreSQL die ClusterForge ziet, ook het huidige gedeelde cluster: versie, rol, toestand van het cluster, databases met hun grootte. Per database welke app ze gebruikt, van welke node. | 1, 2 |
-| Uitrollen | Een onderdeel Database op een bestaand cluster, ook op zijn CT's, of bij een nieuw cluster: MariaDB Galera of PostgreSQL met Patroni op dezelfde nodes als de app, met de app en de database op één VIP. Het plan telt per node het geheugen van app en database op. | 3, 4, 9 |
-| Verhuizen | Per app een geleide verhuizing van het gedeelde cluster naar het nieuwe: eerst een proef die meet hoe lang het duurt, dan een paar minuten onderhoud, een controle per tabel, en de nieuwe instellingen voor de app. De app houdt zijn gebruiker en wachtwoord. Daarna het oude cluster netjes afbouwen. | 7, 8, 13 |
-| Beheer | Databases en gebruikers aanmaken, elke nacht een dump, terugzetten, het cluster opnieuw starten na een volledige uitval, een node opnieuw laten synchroniseren, overschakelen naar een andere primary, en updates node voor node. | 5, 6, 10 |
-| Bewaken | Status, incidenten en What Broke voor databases, grafieken, failovertests die echt schrijven via het VIP, een scorekaart Database, documentatie met runbooks, en de assistent. | 11, 12, 14 |
+| Uitrollen | Een onderdeel Database op een bestaand cluster, ook op zijn CT's, of bij een nieuw cluster: MariaDB Galera of PostgreSQL met Patroni op dezelfde nodes als de app, met de app en de database op één VIP. Het plan telt per node het geheugen van app en database op. | 3, 4, 5, 10 |
+| Verhuizen | Per app een geleide verhuizing van het gedeelde cluster naar het nieuwe: eerst een proef die meet hoe lang het duurt, dan een paar minuten onderhoud, een controle per tabel, en de nieuwe instellingen voor de app. De app houdt zijn gebruiker en wachtwoord. Daarna het oude cluster netjes afbouwen. | 8, 9, 14 |
+| Beheer | Databases en gebruikers aanmaken, elke nacht een dump, terugzetten, het cluster opnieuw starten na een volledige uitval, een node opnieuw laten synchroniseren, overschakelen naar een andere primary, en updates node voor node. | 6, 7, 11 |
+| Bewaken | Status, incidenten en What Broke voor databases, grafieken, failovertests die echt schrijven via het VIP, een scorekaart Database, documentatie met runbooks, en de assistent. | 12, 13, 15 |
 
-Na mijlpaal 2 weet Jonas welke app welke database gebruikt. Na mijlpaal 4 draait MariaDB met het VIP op nc1 tot nc3, na mijlpaal 6 met back-ups, en na mijlpaal 8 is Nextcloud verhuisd. PostgreSQL volgt in mijlpaal 9.
+Na mijlpaal 2 weet Jonas welke app welke database gebruikt. Na mijlpaal 4 draait MariaDB met het VIP op nc1 tot nc3, na mijlpaal 7 met back-ups, en na mijlpaal 9 is Nextcloud verhuisd. PostgreSQL volgt in mijlpaal 10.
 
 **Uitgangspunten**
 
@@ -76,7 +76,7 @@ De app schrijft altijd via het VIP, dus naar één node. Dat voorkomt de conflic
 | pg_auto_failover | Een monitornode beslist over failover. | De monitor is zelf een enkel punt van uitval. |
 | Alleen replicatie | Streaming replication zonder automatische failover. | Overschakelen is handwerk, net als bij twee nodes zonder scheidsrechter. |
 
-etcd draait op dezelfde drie nodes. Patroni komt uit Debian. Voor etcd gebruiken we het Debian-pakket als het er is voor de versie van de nodes, en anders de binary van de GitHub-release met een vaste SHA-256, zoals k3s in fase 4. Dat zoeken we uit in mijlpaal 9.
+etcd draait op dezelfde drie nodes. Patroni komt uit Debian. Voor etcd gebruiken we het Debian-pakket als het er is voor de versie van de nodes, en anders de binary van de GitHub-release met een vaste SHA-256, zoals k3s in fase 4. Dat zoeken we uit in mijlpaal 10.
 
 ### Twee of drie nodes
 
@@ -96,6 +96,8 @@ Bij PostgreSQL kan dat niet. Er is maar één primary, en die kiest Patroni, nie
 | --- | --- | --- |
 | MariaDB Galera | Het VIP van de app (gedeeld) | Een eigen VIP |
 | PostgreSQL met Patroni | Een eigen VIP dat de primary volgt | (niet anders) |
+
+**Waarom geen HAProxy.** In Jonas' huidige opstelling verdeelt HAProxy het verkeer over de drie Galera-nodes, en zoekt een script welke PostgreSQL primary is. Dat is niet meer nodig. Bij Galera stuurt het VIP al het verkeer naar één node: schrijven op drie nodes tegelijk geeft conflicten op dezelfde rijen, dus één schrijver is veiliger, en de andere nodes staan klaar. Bij PostgreSQL volgt het eigen VIP de primary, en dat doet wat het script deed. Een HAProxy die Jonas voor andere dingen gebruikt, blijft gewoon staan.
 
 ### CT's en VM's
 
@@ -120,15 +122,15 @@ Wat ontbreekt:
 
 | Gat | Gevolg | Opgelost in |
 | --- | --- | --- |
-| Er is geen template voor MariaDB HA of PostgreSQL HA. Fase 2 schoof ze door naar een eigen spoor. | ClusterForge kan geen databasecluster bouwen. | Mijlpaal 3 en 9 |
+| Er is geen template voor MariaDB HA of PostgreSQL HA. Fase 2 schoof ze door naar een eigen spoor. | ClusterForge kan geen databasecluster bouwen. | Mijlpaal 3 en 10 |
 | Een template maakt altijd nieuwe VM's. Een cluster dat Jonas zelf bouwde, heeft alleen een baseline en geen spec (`internal/drift/report.go:63`, `internal/deploy/spec.go:15`). | Een database op nc1 tot nc3 kan niet. | Mijlpaal 3: het onderdeel, met een eigen spec naast de baseline of de template |
 | De agent kent geen databasecommando's. Verify leest alleen `SHOW DATABASES` in een sandbox (`internal/agent/verify.go:762`). | Geen status, geen gebruikers, geen dump. | Mijlpaal 1 en verder: agentprotocol 9 |
 | Verbindingen tonen poorten, geen databases. | Welke app welke database gebruikt, is niet te zien. | Mijlpaal 2 |
 | Keepalived in een zelfgebouwd cluster is met de hand ingesteld. ClusterForge leest alleen de VIP's uit de heartbeats. | Het VIP kan niet op de gezondheid van de database letten. | Mijlpaal 4 |
 | Een NATS-bericht is hoogstens 1 MiB (`internal/agentbus/bus.go:117`). | Een dump past niet door ClusterForge. | Bewust: de nieuwe node haalt de dump zelf bij de oude database |
-| Failovertests weigeren een cluster met een database (`internal/failover/service.go:703`). | Een databasecluster wordt nooit getest. | Mijlpaal 12 |
-| De clusterstatus kijkt naar nodes, VIP's en Kubernetes (`internal/status/rules.go`). | Een Galera-cluster zonder meerderheid of een PostgreSQL zonder primary is onzichtbaar. | Mijlpaal 11 |
-| Back-ups zijn alleen de Proxmox-back-ups, en de sandbox werkt niet voor CT's. | Een losse database terugzetten kan niet. | Mijlpaal 6 |
+| Failovertests weigeren een cluster met een database (`internal/failover/service.go:703`). | Een databasecluster wordt nooit getest. | Mijlpaal 13 |
+| De clusterstatus kijkt naar nodes, VIP's en Kubernetes (`internal/status/rules.go`). | Een Galera-cluster zonder meerderheid of een PostgreSQL zonder primary is onzichtbaar. | Mijlpaal 12 |
+| Back-ups zijn alleen de Proxmox-back-ups, en de sandbox werkt niet voor CT's. | Een losse database terugzetten kan niet. | Mijlpaal 7 |
 
 ## Gedeelde bouwstenen
 
@@ -163,7 +165,7 @@ De drift kent het onderdeel. Een met de hand aangepaste `60-galera.cnf` valt dus
 
 De eerste node start het cluster met `galera_new_cluster`, eenmalig met een merkteken als `creates`. De andere nodes starten gewoon en halen alle data bij de eerste. Staat er al een MariaDB met eigen databases op een node, dan weigert het plan.
 
-**PostgreSQL met Patroni (mijlpaal 9).** De stappen installeren PostgreSQL, Patroni en etcd, en halen het lege cluster `main` weg dat Debian bij de installatie maakt. Patroni krijgt `/etc/patroni/clusterforge.yml` met etcd op de drie nodes, de replicatie, `pg_hba` voor de nodes van het cluster, en `synchronous_mode` aan zonder `strict`. Zo verliest een gewone failover geen bevestigde schrijfactie, en blijft een node alleen toch schrijven.
+**PostgreSQL met Patroni (mijlpaal 10).** De stappen installeren PostgreSQL, Patroni en etcd, en halen het lege cluster `main` weg dat Debian bij de installatie maakt. Patroni krijgt `/etc/patroni/clusterforge.yml` met etcd op de drie nodes, de replicatie, `pg_hba` voor de nodes van het cluster, en `synchronous_mode` aan zonder `strict`. Zo verliest een gewone failover geen bevestigde schrijfactie, en blijft een node alleen toch schrijven.
 
 De versie is die van Debian op de nodes: MariaDB 10.11 en PostgreSQL 15 op Debian 12, MariaDB 11.8 en PostgreSQL 17 op Debian 13. Alle nodes van één database moeten dezelfde Debian-versie hebben. Het plan leest dat uit de facts.
 
@@ -275,7 +277,7 @@ De verhuizing is een taak met vaste stappen die na een herstart van de server ve
 
 ### Het oude cluster afbouwen
 
-Een verhuisde database blijft op het oude cluster staan, op slot. Is er zeven dagen geen enkele verbinding meer mee geweest, dan biedt ClusterForge 'Afbouwen' aan (mijlpaal 13):
+Een verhuisde database blijft op het oude cluster staan, op slot. Is er zeven dagen geen enkele verbinding meer mee geweest, dan biedt ClusterForge 'Afbouwen' aan (mijlpaal 14):
 
 1. een laatste dump op een node van het oude cluster, die blijft staan tot Jonas hem weghaalt;
 2. de database en haar gebruikers weghalen, na het intikken van de naam van de database, en op prod met de slug en TOTP.
@@ -284,7 +286,7 @@ Staat er geen database van een app meer op het oude cluster, dan zegt ClusterFor
 
 ## Databases en gebruikers
 
-Mijlpaal 5 geeft elk onderdeel een tabblad Databases met de databases (grootte, tabellen, verbindingen) en de gebruikers (naam, hosts, rechten per database). 'Database aanmaken' maakt een database met een eigen gebruiker en een sterk wachtwoord, met alle rechten op die database, vanaf de nodes van het cluster. Het wachtwoord staat één keer op het scherm, samen met de instellingen voor de app. ClusterForge bewaart het niet. Kwijt betekent 'Nieuw wachtwoord'.
+Mijlpaal 6 geeft elk onderdeel een tabblad Databases met de databases (grootte, tabellen, verbindingen) en de gebruikers (naam, hosts, rechten per database). 'Database aanmaken' maakt een database met een eigen gebruiker en een sterk wachtwoord, met alle rechten op die database, vanaf de nodes van het cluster. Het wachtwoord staat één keer op het scherm, samen met de instellingen voor de app. ClusterForge bewaart het niet. Kwijt betekent 'Nieuw wachtwoord'.
 
 Elke actie staat in het logboek, met de namen en zonder wachtwoord. Een database weghalen vraagt de naam, en op prod ook de slug en TOTP.
 
@@ -296,11 +298,22 @@ Elke actie staat in het logboek, met de namen en zonder wachtwoord. Een database
 - **'Dump nu'** voor een database, bijvoorbeeld voor een update van de app.
 - **Terugzetten.** Standaard naast de bestaande database, als `<naam>_herstel_<datum>`, zodat Jonas eerst kan kijken. Over de bestaande database heen kan ook, met de app in onderhoud, en op prod met de slug en TOTP.
 
+## Opkomen na een herstart
+
+Jonas' huidige opstelling kwam na een reboot alleen goed op dankzij cronjobs, en PostgreSQL vroeg na een volledige uitval handwerk. Mijlpaal 5 maakt dat de taak van ClusterForge, vóór er een database verhuist.
+
+- **Eén node herstart.** MariaDB staat aan bij het opstarten en sluit aan bij de nodes die nog draaien; wat hij miste, haalt hij bij een andere node (IST, of alles opnieuw met SST). Bij Patroni wordt de node weer replica. ClusterForge hoeft niets te doen, maar meldt het als een node niet binnen een paar minuten Synced is.
+- **Alles tegelijk down**, door een stroomstoring of een herstart van de Proxmox-host. Galera start dan niet vanzelf: geen node weet of hij de nieuwste data heeft. ClusterForge ziet dat alle datanodes terug zijn maar geen enkele meedoet. Het vraagt elke node naar zijn positie (`grastate.dat` met `seqno` en `safe_to_bootstrap`, en zo nodig `mariadbd --wsrep-recover`), start het cluster op de node met de hoogste, en daarna de andere, met de gezondheidspoort na elke node. Dat gebeurt automatisch, met een regel in het logboek, en kan per cluster uit.
+- **Een node blijft weg.** Dan start ClusterForge niets: net die node kan de nieuwste data hebben. Het cluster wordt plat gemeld, met de posities van de nodes die er wel zijn en een knop om toch te starten op de beste daarvan, na bevestiging.
+- **PostgreSQL met Patroni** komt na een volledige uitval vanzelf terug: zodra de meerderheid van etcd er is, kiest Patroni de primary, en het VIP volgt. ClusterForge controleert dat alleen.
+
+De tests: in CI herstarten drie echte MariaDB-containers één voor één, daarna allemaal tegelijk, en hard (kill) en netjes (stop); elke keer komt het cluster terug zonder verloren rij. Op Jonas' cluster komt een failovertest 'alles herstarten' in mijlpaal 13.
+
 ## Beheer
 
-Mijlpaal 10 maakt de handelingen die bij een databasecluster horen tot geleide taken, met een plan, een bevestiging en een regel in het logboek.
+Mijlpaal 11 maakt de handelingen die bij een databasecluster horen tot geleide taken, met een plan, een bevestiging en een regel in het logboek.
 
-- **Cluster opnieuw starten.** Liggen alle Galera-nodes plat, bijvoorbeeld na een stroomstoring, dan start Galera niet vanzelf. ClusterForge vraagt elke node naar zijn positie (`grastate.dat`, en zo nodig `mariadbd --wsrep-recover`), kiest de node met de hoogste, start daar het cluster en daarna de andere. Het plan toont de keuze en waarom.
+- **Cluster opnieuw starten.** Met de hand, voor als het automatisch starten uit mijlpaal 5 niet mag of wacht op een node die wegblijft. Het plan toont de positie van elke node, de keuze en waarom.
 - **Node opnieuw synchroniseren.** Een node die niet meer bij komt, gooit zijn data weg en haalt alles opnieuw bij een andere. Bij Patroni heet dat een replica opnieuw opbouwen.
 - **Overschakelen (PostgreSQL).** Een andere node primary maken, bijvoorbeeld voor onderhoud. Het VIP volgt vanzelf.
 - **Onderhoud en reboot.** Een node van een databasecluster in onderhoud zetten werkt zoals nu, met één aanvulling. Bij PostgreSQL schakelt ClusterForge eerst over als de node primary is. Na de reboot wacht ClusterForge tot de node weer Synced is of als replica bij is, voordat het 'klaar' meldt.
@@ -309,10 +322,10 @@ Mijlpaal 10 maakt de handelingen die bij een databasecluster horen tot geleide t
 
 ## Status, incidenten, failovertests en score
 
-- **Clusterstatus (mijlpaal 11).** Down als Galera geen Primary-component heeft of Patroni geen primary, of als het VIP geen database achter zich heeft. Verminderd als een node ontbreekt of niet Synced is, een replica meer dan 30 seconden achterloopt, of de scheidsrechter weg is. Een overgang wordt een incident, en What Broke krijgt de gebeurtenissen van de database erbij: een node die het cluster verlaat, een volledige synchronisatie, een failover of een herstart.
-- **Grafieken (mijlpaal 11).** Verbindingen, query's per seconde, de buffer pool, achterstand en flow control, per node en per cluster.
-- **Failovertests (mijlpaal 12).** Een cluster met een onderdeel Database krijgt wel een failovertest. Tijdens de test schrijft de agent op een andere node elke halve seconde een rij via het VIP, in een eigen kleine database `clusterforge_probe`. Het verslag zegt hoe lang schrijven niet lukte, en of er een bevestigde rij verloren ging. Bijvoorbeeld: 'Schrijven via .185 lukte weer na 9 s, er ging niets verloren.' De wat-als van fase 3 kent dan ook de meerderheid: 'Vallen nc2 en nc3 weg, dan stopt MariaDB.'
-- **Scorekaart Database (mijlpaal 14).** Bevindingen zoals:
+- **Clusterstatus (mijlpaal 12).** Down als Galera geen Primary-component heeft of Patroni geen primary, of als het VIP geen database achter zich heeft. Verminderd als een node ontbreekt of niet Synced is, een replica meer dan 30 seconden achterloopt, of de scheidsrechter weg is. Een overgang wordt een incident, en What Broke krijgt de gebeurtenissen van de database erbij: een node die het cluster verlaat, een volledige synchronisatie, een failover of een herstart.
+- **Grafieken (mijlpaal 12).** Verbindingen, query's per seconde, de buffer pool, achterstand en flow control, per node en per cluster.
+- **Failovertests (mijlpaal 13).** Een cluster met een onderdeel Database krijgt wel een failovertest. Tijdens de test schrijft de agent op een andere node elke halve seconde een rij via het VIP, in een eigen kleine database `clusterforge_probe`. Het verslag zegt hoe lang schrijven niet lukte, en of er een bevestigde rij verloren ging. Bijvoorbeeld: 'Schrijven via .185 lukte weer na 9 s, er ging niets verloren.' De wat-als van fase 3 kent dan ook de meerderheid: 'Vallen nc2 en nc3 weg, dan stopt MariaDB.'
+- **Scorekaart Database (mijlpaal 15).** Bevindingen zoals:
   - geen HA (één node, of twee zonder scheidsrechter);
   - een dump ouder dan een dag;
   - een node die niet Synced is of een replica die achterloopt;
@@ -322,8 +335,8 @@ Mijlpaal 10 maakt de handelingen die bij een databasecluster horen tot geleide t
   - een verhuisde database die na dertig dagen nog niet afgebouwd is;
   - Galera-tabellen zonder primaire sleutel;
   - geen geslaagde failovertest in negentig dagen.
-- **Documentatie (mijlpaal 14).** Een hoofdstuk Database per cluster: engine en versie, nodes en rollen, het VIP, de databases met grootte en gebruikers, de back-ups, en runbooks voor het cluster opnieuw starten, een node opnieuw synchroniseren, een dump terugzetten, overschakelen en verhuizen.
-- **Assistent (mijlpaal 14).** Twee tools die alleen lezen: `database` met de toestand van een onderdeel, en `database_clients` met wie welke database gebruikt. Leg uit bij een incident van een database. Geen wachtwoorden, hashes of rijen.
+- **Documentatie (mijlpaal 15).** Een hoofdstuk Database per cluster: engine en versie, nodes en rollen, het VIP, de databases met grootte en gebruikers, de back-ups, en runbooks voor het cluster opnieuw starten, een node opnieuw synchroniseren, een dump terugzetten, overschakelen en verhuizen.
+- **Assistent (mijlpaal 15).** Twee tools die alleen lezen: `database` met de toestand van een onderdeel, en `database_clients` met wie welke database gebruikt. Leg uit bij een incident van een database. Geen wachtwoorden, hashes of rijen.
 
 ## Firewall en netwerk
 
@@ -350,7 +363,7 @@ Na het afbouwen kan de regel van de app naar .180 weg. ClusterForge zegt welke r
 ## Testen zonder echt cluster
 
 - **Echte databases in CI.** De workflow krijgt naast PostgreSQL ook MariaDB als service. De agentcommando's draaien daartegen: status, gebruikers, aanmaken, dump en terugzetten, en een verhuizing van de ene server naar de andere met de controle per tabel en het kopiëren van een hash.
-- **Een echt Galera-cluster in CI.** Drie MariaDB-containers met de gerenderde configuratie: het cluster starten, aansluiten, een node stoppen en terug, alles stoppen en met de hoogste positie opnieuw starten.
+- **Een echt Galera-cluster in CI.** Drie MariaDB-containers met de gerenderde configuratie: het cluster starten, aansluiten, een node stoppen en terug, en alles stoppen, netjes en hard, waarna ClusterForge het cluster zelf opnieuw start op de hoogste positie.
 - **dbfake** voor Patroni en voor toestanden die in CI moeilijk na te bootsen zijn, zoals een node die als Donor blijft hangen of een replica die achterloopt. Net als `kubefake` in fase 4.
 - **De onderdelen** worden getest op de gerenderde bestanden, en `hack/` krijgt nagespeelde databaseclusters voor de schermafbeeldingen.
 
@@ -364,18 +377,19 @@ De eerste echte uitrol en verhuizing gebeuren op Jonas' Proxmox. Daarom begint h
 | 2 | Wie gebruikt welke database | Per database de clusters en nodes die haar gebruiken, ook cronjobs van de laatste dertig dagen. Een database van meer dan één cluster krijgt een waarschuwing. De graaf krijgt voorstellen. | M |
 | 3 | Onderdeel MariaDB Galera | 'Database toevoegen' op een cluster met drie nodes, ook CT's, geeft drie nodes Synced. Het plan toont geheugen, schijf en hosts per node. Twee nodes kan alleen met een scheidsrechter. Een nieuw cluster kan de database meteen krijgen. Drift ziet een gewijzigde `60-galera.cnf`. | L |
 | 4 | VIP voor de database | Een gedeeld VIP volgt de app en Galera: stopt MariaDB op de VIP-eigenaar, dan gaat het VIP binnen enkele seconden naar een andere node. Een eigen VIP werkt ook. Het plan toont de diff van een zelfgebouwde `keepalived.conf`. | M |
-| 5 | Databases en gebruikers | Een database met gebruiker aanmaken toont één keer het wachtwoord en de instellingen. Gebruikers en rechten staan in de lijst. Weghalen vraagt de naam. | M |
-| 6 | Back-ups van databases | Elke nacht een dump per database, zeven dagen bewaard, met de leeftijd bij Back-ups. 'Dump nu' werkt, en terugzetten naast de bestaande database werkt. | M |
-| 7 | Verhuizen: plan en proef | Het plan voor Nextcloud toont grootte, versies, clients en waarschuwingen. De proefverhuizing importeert een kopie terwijl de app doorwerkt, meet de duur en ruimt op. | M |
-| 8 | Verhuizen: uitvoeren | Een database verhuist met onderhoud, dump en import, gelijke aantallen per tabel, dezelfde gebruiker en hetzelfde wachtwoord, en de oude database op slot. Een afwijking stopt de taak zonder verlies. | L |
-| 9 | PostgreSQL met Patroni | Drie nodes met één primary en twee replica's, een eigen VIP dat de primary volgt, en verhuizen naar PostgreSQL werkt. Stopt de primary, dan staat het VIP binnen een halve minuut op de nieuwe. | L |
-| 10 | Beheer | Het cluster opnieuw starten na een volledige uitval kiest de juiste node. Een node opnieuw synchroniseren, overschakelen, een kleinere update node voor node en onderhoud met wachten op Synced werken. | L |
-| 11 | Status, incidenten en metrics | Een Galera-node die wegvalt, maakt het cluster verminderd en geeft een incident. Grafieken per node en cluster. | M |
-| 12 | Failovertests met database | Een failovertest op het Nextcloud-cluster meet hoe lang schrijven via het VIP niet lukte, en dat er niets verloren ging. De wat-als kent de meerderheid. | M |
-| 13 | Oude cluster afbouwen | Na zeven dagen zonder verbindingen een laatste dump en weghalen met de naam. ClusterForge meldt wanneer db1 tot db3 leeg zijn. | S |
-| 14 | Score, documentatie en assistent | De scorekaart Database, het hoofdstuk Database met runbooks, en twee tools voor de assistent die alleen lezen. | M |
+| 5 | Opkomen na een herstart | Een node die herstart, sluit vanzelf weer aan. Na een volledige uitval start ClusterForge het cluster zelf zodra alle datanodes terug zijn, op de node met de nieuwste data; ontbreekt er een, dan wacht het en vraagt het Jonas. In CI herstarten drie echte MariaDB-containers één voor één en allemaal tegelijk, en niets gaat verloren. | M |
+| 6 | Databases en gebruikers | Een database met gebruiker aanmaken toont één keer het wachtwoord en de instellingen. Gebruikers en rechten staan in de lijst. Weghalen vraagt de naam. | M |
+| 7 | Back-ups van databases | Elke nacht een dump per database, zeven dagen bewaard, met de leeftijd bij Back-ups. 'Dump nu' werkt, en terugzetten naast de bestaande database werkt. | M |
+| 8 | Verhuizen: plan en proef | Het plan voor Nextcloud toont grootte, versies, clients en waarschuwingen. De proefverhuizing importeert een kopie terwijl de app doorwerkt, meet de duur en ruimt op. | M |
+| 9 | Verhuizen: uitvoeren | Een database verhuist met onderhoud, dump en import, gelijke aantallen per tabel, dezelfde gebruiker en hetzelfde wachtwoord, en de oude database op slot. Een afwijking stopt de taak zonder verlies. | L |
+| 10 | PostgreSQL met Patroni | Drie nodes met één primary en twee replica's, een eigen VIP dat de primary volgt, en verhuizen naar PostgreSQL werkt. Stopt de primary, dan staat het VIP binnen een halve minuut op de nieuwe. | L |
+| 11 | Beheer | Het cluster met de hand opnieuw starten na een volledige uitval kiest de juiste node. Een node opnieuw synchroniseren, overschakelen, een kleinere update node voor node en onderhoud met wachten op Synced werken. | L |
+| 12 | Status, incidenten en metrics | Een Galera-node die wegvalt, maakt het cluster verminderd en geeft een incident. Grafieken per node en cluster. | M |
+| 13 | Failovertests met database | Een failovertest op het Nextcloud-cluster meet hoe lang schrijven via het VIP niet lukte, en dat er niets verloren ging. Een test 'alles herstarten' meet hoe lang het duurt tot alles weer Synced is. De wat-als kent de meerderheid. | M |
+| 14 | Oude cluster afbouwen | Na zeven dagen zonder verbindingen een laatste dump en weghalen met de naam. ClusterForge meldt wanneer db1 tot db3 leeg zijn. | S |
+| 15 | Score, documentatie en assistent | De scorekaart Database, het hoofdstuk Database met runbooks, en twee tools voor de assistent die alleen lezen. | M |
 
-**Waarom deze volgorde.** Eerst zien, zodat Jonas weet welke app welke database gebruikt voordat er iets verandert. Dan MariaDB met het VIP, want Nextcloud is de eerste app. Back-ups komen vóór de verhuizing, zodat een verhuisde database vanaf de eerste nacht een dump heeft. Na mijlpaal 8 kan Nextcloud verhuizen. PostgreSQL volgt met hetzelfde verhuizen. Beheer, bewaken, testen en afbouwen volgen als de eerste apps verhuisd zijn. Valt het einde buiten de tijd, dan blijft alle eerdere waarde staan.
+**Waarom deze volgorde.** Eerst zien, zodat Jonas weet welke app welke database gebruikt voordat er iets verandert. Dan MariaDB met het VIP, want Nextcloud is de eerste app, en meteen daarna het opkomen na een herstart, zodat een stroomstoring na de verhuizing geen handwerk vraagt. Back-ups komen vóór de verhuizing, zodat een verhuisde database vanaf de eerste nacht een dump heeft. Na mijlpaal 9 kan Nextcloud verhuizen. PostgreSQL volgt met hetzelfde verhuizen. Beheer, bewaken, testen en afbouwen volgen als de eerste apps verhuisd zijn. Valt het einde buiten de tijd, dan blijft alle eerdere waarde staan.
 
 ## Open keuzes
 
@@ -413,15 +427,15 @@ Zolang een antwoord ontbreekt, bouwen we met de standaard eronder.
 
   Standaard zolang je niet antwoordt: ja, en je werkt ze bij naar protocol 9. Zonder agent op db1 tot db3 ziet ClusterForge niet wie welke database gebruikt, en vraagt een verhuizing het wachtwoord van de app.
 
-- [ ] Hoeveel onderhoud mag een verhuizing kosten? (mijlpaal 8)
+- [ ] Hoeveel onderhoud mag een verhuizing kosten? (mijlpaal 9)
 
   Standaard zolang je niet antwoordt: een paar minuten per app, buiten de drukke uren. De proefverhuizing zegt vooraf hoe lang precies.
 
-- [ ] Met welke app begin je? (mijlpaal 7)
+- [ ] Met welke app begin je? (mijlpaal 8)
 
   Standaard zolang je niet antwoordt: Nextcloud op MariaDB, eerst met een proefverhuizing.
 
-- [ ] Zijn dumps op de node genoeg, of wil je een kopie elders? (mijlpaal 6)
+- [ ] Zijn dumps op de node genoeg, of wil je een kopie elders? (mijlpaal 7)
 
   Standaard zolang je niet antwoordt: elke nacht een dump op de node, zeven dagen, en die gaat mee in de Proxmox-back-up van de CT.
 
