@@ -88,7 +88,8 @@ func ErrorKind(err error) string {
 // kube_events. Een app met een andere image dan bij de vorige sync is een
 // uitrol, en komt in het logboek. Elke MetricsInterval gaan CPU en geheugen
 // uit metrics-server naar Metrics. De ServiceAccounts van verlopen en
-// ingetrokken kubeconfigs gaan weg. Daarna rekent de status opnieuw.
+// ingetrokken kubeconfigs gaan weg, en elke SnapshotInterval komen de
+// etcd-snapshots in kube_snapshots. Daarna rekent de status opnieuw.
 func (s *Service) Sync(ctx context.Context, clusterID uuid.UUID) error {
 	err := s.sync(ctx, clusterID)
 	if s.Changed != nil {
@@ -198,6 +199,7 @@ func (s *Service) sync(ctx context.Context, clusterID uuid.UUID) error {
 		}
 	}
 	s.cleanAccess(ctx, clusterID)
+	s.syncSnapshots(ctx, clusterID)
 	return nil
 }
 

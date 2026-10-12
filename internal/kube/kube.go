@@ -103,6 +103,12 @@ type Service struct {
 	// vaak het kijkt of de pods weg zijn.
 	DrainTimeout, DrainRetry, DrainPoll time.Duration
 
+	// SnapshotInterval is hoe vaak de sync de etcd-snapshots leest.
+	SnapshotInterval time.Duration
+	// RestorePoll is hoe vaak terugzetten kijkt of de API en de nodes er
+	// weer zijn, en RestoreWait hoe lang het daarop wacht.
+	RestorePoll, RestoreWait time.Duration
+
 	// Metrics krijgt elke MetricsInterval CPU en geheugen uit
 	// metrics-server; leeg slaat dat over.
 	Metrics MetricsSink
@@ -115,8 +121,10 @@ type Service struct {
 
 	mu    sync.Mutex
 	cache map[string]cached
-	// usageAt is per cluster wanneer de metrics laatst gelezen werden.
+	// usageAt is per cluster wanneer de metrics laatst gelezen werden, en
+	// snapAt wanneer de snapshots.
 	usageAt map[uuid.UUID]time.Time
+	snapAt  map[uuid.UUID]time.Time
 	// prunedAt is wanneer oude waarschuwingen laatst opgeruimd werden.
 	prunedAt time.Time
 	// last onthoudt per cluster de node die het laatst antwoordde.
@@ -136,7 +144,8 @@ func NewService(pool *pgxpool.Pool, bus Requester, log *slog.Logger) *Service {
 		pool: pool, q: store.New(pool), bus: bus, log: log, Timeout: 30 * time.Second, Interval: 30 * time.Second, Now: time.Now,
 		DrainTimeout: 5 * time.Minute, DrainRetry: 5 * time.Second, DrainPoll: 2 * time.Second,
 		cache: map[string]cached{}, last: map[uuid.UUID]uuid.UUID{}, discovery: map[uuid.UUID]discovered{},
-		usageAt: map[uuid.UUID]time.Time{},
+		usageAt: map[uuid.UUID]time.Time{}, snapAt: map[uuid.UUID]time.Time{}, SnapshotInterval: 5 * time.Minute,
+		RestorePoll: 5 * time.Second, RestoreWait: 5 * time.Minute,
 	}
 }
 

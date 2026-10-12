@@ -157,6 +157,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	kub := kube.NewService(pool, bus, log)
 	kub.Interval, kub.Timeout = 0, 5*time.Second
 	kub.DrainTimeout, kub.DrainRetry, kub.DrainPoll = 3*time.Second, 50*time.Millisecond, 20*time.Millisecond
+	kub.RestorePoll, kub.RestoreWait = 20*time.Millisecond, 3*time.Second
 	kub.EnableDrain(runner, ev)
 	kub.Metrics, kub.Changed = ingest, eval.Kick
 	dep.Kube = kub

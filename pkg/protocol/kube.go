@@ -53,7 +53,80 @@ const (
 	// KubeTokenRequest, of haalt dat ServiceAccount weer weg. Body van het
 	// antwoord is een KubeTokenResult.
 	KubeToken = "token"
+	// KubeSnapshot maakt een etcd-snapshot op deze server, of doet een stap
+	// van het terugzetten van een snapshot, zoals in KubeSnapshotRequest.
+	// Body van het antwoord is een KubeSnapshotResult.
+	KubeSnapshot = "snapshot"
 )
+
+// Stappen van KubeSnapshot. Terugzetten gaat zoals de documentatie van k3s
+// het beschrijft: k3s stoppen op elke server, het cluster terugzetten op
+// de server die het begon, k3s daar starten, en op de andere servers de
+// database van etcd opzij zetten en k3s starten, zodat ze zich opnieuw
+// aanmelden.
+const (
+	// KubeSnapshotCheck verandert niets: hij zegt of k3s draait en of deze
+	// server het cluster begon. Zo weet de server voor het terugzetten dat
+	// elke server mee kan.
+	KubeSnapshotCheck = "check"
+	// KubeSnapshotSave is k3s etcd-snapshot save --name Name.
+	KubeSnapshotSave = "save"
+	// KubeSnapshotStop is systemctl stop k3s.
+	KubeSnapshotStop = "stop"
+	// KubeSnapshotReset is k3s server --cluster-reset
+	// --cluster-reset-restore-path met het bestand File in
+	// KubeSnapshotDir. Alleen op de server met cluster-init, en alleen als
+	// k3s stilstaat.
+	KubeSnapshotReset = "reset"
+	// KubeSnapshotStart is systemctl start k3s.
+	KubeSnapshotStart = "start"
+	// KubeSnapshotRejoin zet de database van etcd opzij op een server die
+	// zich via server: aanmeldt, zodat hij bij de volgende start opnieuw
+	// lid wordt. De snapshots blijven. Alleen als k3s stilstaat.
+	KubeSnapshotRejoin = "rejoin"
+)
+
+// KubeSnapshotDir is de map met de snapshots van k3s, en KubeDBDir die
+// van zijn database.
+const (
+	KubeDBDir       = "/var/lib/rancher/k3s/server/db"
+	KubeSnapshotDir = KubeDBDir + "/snapshots"
+)
+
+// KubeSnapshotTimeout is hoe lang een stap van KubeSnapshot mag duren: het
+// terugzetten zelf kan minuten duren.
+const KubeSnapshotTimeout = 10 * time.Minute
+
+// KubeSnapshotNamePattern is de vorm van Name bij KubeSnapshotSave; k3s
+// zet er de node en het tijdstip achter.
+var KubeSnapshotNamePattern = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]{0,30}[a-z0-9])?$`)
+
+// KubeSnapshotFilePattern is de vorm van File bij KubeSnapshotReset: een
+// bestandsnaam zonder map.
+var KubeSnapshotFilePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,200}$`)
+
+// KubeSnapshotRequest hoort bij KubeSnapshot.
+type KubeSnapshotRequest struct {
+	Action string `json:"action"`
+	// Name bij KubeSnapshotSave.
+	Name string `json:"name,omitempty"`
+	// File bij KubeSnapshotReset.
+	File string `json:"file,omitempty"`
+}
+
+// KubeSnapshotResult is het antwoord op KubeSnapshot: de laatste regels van
+// wat k3s of systemctl schreef, en bij KubeSnapshotRejoin waar de oude
+// database nu staat.
+type KubeSnapshotResult struct {
+	Output []string `json:"output,omitempty"`
+	Moved  string   `json:"moved,omitempty"`
+	// Bij KubeSnapshotCheck: Active is wat systemctl is-active k3s zegt,
+	// Init dat cluster-init in de config staat, en Join dat server: erin
+	// staat.
+	Active string `json:"active,omitempty"`
+	Init   bool   `json:"init,omitempty"`
+	Join   bool   `json:"join,omitempty"`
+}
 
 // KubeAccessNamespace is de namespace met de ServiceAccounts van de
 // kubeconfigs die ClusterForge uitgeeft.
@@ -145,6 +218,8 @@ type KubeRequest struct {
 	PatchType string          `json:"patch_type,omitempty"`
 	// Token hoort bij KubeToken.
 	Token *KubeTokenRequest `json:"token,omitempty"`
+	// Snapshot hoort bij KubeSnapshot.
+	Snapshot *KubeSnapshotRequest `json:"snapshot,omitempty"`
 	// Deadline: na dit tijdstip weigert de agent het verzoek.
 	Deadline time.Time `json:"deadline"`
 }
@@ -208,6 +283,9 @@ type KubeFacts struct {
 	APIReady bool `json:"api_ready"`
 	// KubeletReady: de kubelet antwoordt op zijn healthz.
 	KubeletReady bool `json:"kubelet_ready"`
+	// Init: deze server begon het cluster (cluster-init in de config van
+	// k3s). Alleen daar kan een snapshot terug.
+	Init bool `json:"init,omitempty"`
 }
 
 // KubeHidden is wat de agent in een Secret zet in plaats van een waarde:

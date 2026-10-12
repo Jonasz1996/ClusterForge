@@ -761,6 +761,24 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 			day(str(p, "expires_at")))
 	case "kube.access_revoked":
 		return fmt.Sprintf("Kubeconfig %s van %s ingetrokken (%s)", str(p, "name"), str(p, "user"), accessRole(str(p, "role"))) + colon(str(p, "reason"))
+	case "kube.snapshot_saved":
+		s := "Snapshot van etcd gemaakt op " + or(str(p, "hostname"), str(p, "node"))
+		if f := str(p, "file"); f != "" {
+			s += ": " + f
+		}
+		return s
+	case "kube.snapshot_restore_started":
+		s := fmt.Sprintf("Terugzetten van snapshot %s op %s gestart", str(p, "file"), or(str(p, "hostname"), str(p, "node")))
+		if m := moment(str(p, "taken_at")); m != "" {
+			s += ", naar " + m
+		}
+		return s + "; de API van het cluster antwoordt een paar minuten niet"
+	case "kube.snapshot_restored":
+		s := fmt.Sprintf("Snapshot %s teruggezet op %s", str(p, "file"), or(str(p, "hostname"), str(p, "node")))
+		if m := moment(str(p, "taken_at")); m != "" {
+			s += "; het cluster staat weer zoals op " + m
+		}
+		return s
 	case "kube.applied":
 		var parts []string
 		if c := list(p["created"]); c != "" {
@@ -1185,6 +1203,15 @@ func day(s string) string {
 }
 
 // accessRole is de rol van een kubeconfig in woorden.
+// moment is een tijdstip als 12-10-2026 14:05, op de klok van de server.
+func moment(s string) string {
+	t, err := time.Parse(time.RFC3339Nano, s)
+	if err != nil {
+		return ""
+	}
+	return t.Local().Format("2-1-2006 15:04")
+}
+
 func accessRole(role string) string {
 	if role == "view" {
 		return "alleen lezen"

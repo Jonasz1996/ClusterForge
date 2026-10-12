@@ -46,6 +46,15 @@ func (q *Queries) DeleteKubeNodes(ctx context.Context, clusterID uuid.UUID) erro
 	return err
 }
 
+const deleteKubeSnapshots = `-- name: DeleteKubeSnapshots :exec
+DELETE FROM kube_snapshots WHERE cluster_id = $1
+`
+
+func (q *Queries) DeleteKubeSnapshots(ctx context.Context, clusterID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deleteKubeSnapshots, clusterID)
+	return err
+}
+
 const finishKubeLessonStep = `-- name: FinishKubeLessonStep :exec
 UPDATE kube_lesson_steps SET done_at = now(), data = $5, answer = $6
 WHERE cluster_id = $1 AND user_id = $2 AND lesson = $3 AND step = $4 AND done_at IS NULL
@@ -188,6 +197,40 @@ func (q *Queries) InsertKubeNode(ctx context.Context, arg InsertKubeNodeParams) 
 		arg.MemoryBytes,
 		arg.Pods,
 		arg.CreatedAt,
+	)
+	return err
+}
+
+const insertKubeSnapshot = `-- name: InsertKubeSnapshot :exec
+INSERT INTO kube_snapshots (cluster_id, name, file, node, location, s3, size_bytes, taken_at, ready, error)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+`
+
+type InsertKubeSnapshotParams struct {
+	ClusterID uuid.UUID
+	Name      string
+	File      string
+	Node      string
+	Location  string
+	S3        bool
+	SizeBytes *int64
+	TakenAt   *time.Time
+	Ready     bool
+	Error     string
+}
+
+func (q *Queries) InsertKubeSnapshot(ctx context.Context, arg InsertKubeSnapshotParams) error {
+	_, err := q.db.Exec(ctx, insertKubeSnapshot,
+		arg.ClusterID,
+		arg.Name,
+		arg.File,
+		arg.Node,
+		arg.Location,
+		arg.S3,
+		arg.SizeBytes,
+		arg.TakenAt,
+		arg.Ready,
+		arg.Error,
 	)
 	return err
 }
@@ -743,6 +786,90 @@ func (q *Queries) ListKubeNodes(ctx context.Context, clusterID uuid.UUID) ([]Lis
 	return items, nil
 }
 
+const listKubeSnapshotClusters = `-- name: ListKubeSnapshotClusters :many
+SELECT c.id, c.name, c.slug, c.environment, k.snapshots_at, coalesce(k.snapshots_error, '')::text AS snapshots_error
+FROM clusters c
+LEFT JOIN kube_clusters k ON k.cluster_id = c.id
+WHERE c.type = 'kubernetes'
+ORDER BY lower(c.name)
+`
+
+type ListKubeSnapshotClustersRow struct {
+	ID             uuid.UUID
+	Name           string
+	Slug           string
+	Environment    Environment
+	SnapshotsAt    *time.Time
+	SnapshotsError string
+}
+
+// De Kubernetes-clusters met wanneer hun snapshots laatst gelezen werden.
+func (q *Queries) ListKubeSnapshotClusters(ctx context.Context) ([]ListKubeSnapshotClustersRow, error) {
+	rows, err := q.db.Query(ctx, listKubeSnapshotClusters)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListKubeSnapshotClustersRow{}
+	for rows.Next() {
+		var i ListKubeSnapshotClustersRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Slug,
+			&i.Environment,
+			&i.SnapshotsAt,
+			&i.SnapshotsError,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listKubeSnapshots = `-- name: ListKubeSnapshots :many
+SELECT cluster_id, name, file, node, location, s3, size_bytes, taken_at, ready, error FROM kube_snapshots
+WHERE $1::uuid IS NULL OR cluster_id = $1::uuid
+ORDER BY cluster_id, taken_at DESC NULLS LAST, name
+`
+
+// De snapshots van een cluster, of van alle clusters als cluster_id leeg
+// is; de nieuwste eerst.
+func (q *Queries) ListKubeSnapshots(ctx context.Context, clusterID *uuid.UUID) ([]KubeSnapshot, error) {
+	rows, err := q.db.Query(ctx, listKubeSnapshots, clusterID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []KubeSnapshot{}
+	for rows.Next() {
+		var i KubeSnapshot
+		if err := rows.Scan(
+			&i.ClusterID,
+			&i.Name,
+			&i.File,
+			&i.Node,
+			&i.Location,
+			&i.S3,
+			&i.SizeBytes,
+			&i.TakenAt,
+			&i.Ready,
+			&i.Error,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listKubeStatusInputs = `-- name: ListKubeStatusInputs :many
 SELECT c.id AS cluster_id, (k.cluster_id IS NOT NULL)::boolean AS synced, coalesce(k.api_ok, false)::boolean AS api_ok,
        coalesce(k.error_kind, '')::text AS error_kind, coalesce(k.error, '')::text AS error, k.ok_at
@@ -1043,6 +1170,24 @@ func (q *Queries) SetKubeAppStatus(ctx context.Context, arg SetKubeAppStatusPara
 		arg.StatusSince,
 		arg.ID,
 	)
+	return err
+}
+
+const setKubeSnapshotsRead = `-- name: SetKubeSnapshotsRead :exec
+UPDATE kube_clusters
+SET snapshots_at = CASE WHEN $2::text = '' THEN now() ELSE snapshots_at END, snapshots_error = $2::text
+WHERE cluster_id = $1
+`
+
+type SetKubeSnapshotsReadParams struct {
+	ClusterID uuid.UUID
+	Error     string
+}
+
+// Zegt dat de lijst met snapshots gelezen is, of waarom dat niet lukte. Een
+// cluster dat nog nooit gesynchroniseerd is, heeft nog geen rij.
+func (q *Queries) SetKubeSnapshotsRead(ctx context.Context, arg SetKubeSnapshotsReadParams) error {
+	_, err := q.db.Exec(ctx, setKubeSnapshotsRead, arg.ClusterID, arg.Error)
 	return err
 }
 

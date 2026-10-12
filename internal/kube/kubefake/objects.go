@@ -593,3 +593,45 @@ func Event(e EventSpec) map[string]any {
 		"involvedObject": map[string]any{"apiVersion": ownerAPIVersion(e.Kind), "kind": e.Kind, "namespace": e.Namespace, "name": e.ObjectName, "uid": e.UID},
 	}
 }
+
+// SnapshotSpec beschrijft een etcd-snapshot voor SnapshotFile.
+type SnapshotSpec struct {
+	// Node is de server, File de bestandsnaam zoals
+	// etcd-snapshot-leren-server-01-1760000000.
+	Node, File string
+	Taken      time.Time
+	Size       int64
+	// S3: de snapshot staat in S3 in plaats van op de server.
+	S3 bool
+	// Error is een fout die k3s meldt; dan is hij niet klaar.
+	Error string
+}
+
+// SnapshotFile maakt een ETCDSnapshotFile zoals k3s hem voor elke snapshot
+// in de API zet.
+func SnapshotFile(sp SnapshotSpec) map[string]any {
+	spec := map[string]any{
+		"snapshotName": sp.File, "nodeName": sp.Node,
+		"location": "file:///var/lib/rancher/k3s/server/db/snapshots/" + sp.File,
+	}
+	name := "local-" + sp.File
+	if sp.S3 {
+		name = "s3-" + sp.File
+		spec["location"] = "s3://etcd/" + sp.File
+		spec["s3"] = map[string]any{"bucket": "etcd", "endpoint": "s3.example"}
+	}
+	status := map[string]any{
+		"readyToUse": sp.Error == "", "creationTime": sp.Taken.UTC().Format(time.RFC3339), "size": strconv.FormatInt(sp.Size, 10),
+	}
+	if sp.Error != "" {
+		status["error"] = map[string]any{"message": sp.Error, "time": sp.Taken.UTC().Format(time.RFC3339)}
+	}
+	return map[string]any{
+		"apiVersion": "k3s.cattle.io/v1", "kind": "ETCDSnapshotFile",
+		"metadata": map[string]any{
+			"name": name, "creationTimestamp": sp.Taken.UTC().Format(time.RFC3339),
+			"labels": map[string]any{"etcd.k3s.cattle.io/snapshot-storage-node": sp.Node},
+		},
+		"spec": spec, "status": status,
+	}
+}

@@ -1401,6 +1401,75 @@ func (e KubeLessonStepState) Valid() bool {
 	}
 }
 
+// Defines values for KubeSnapshotKind.
+const (
+	KubeSnapshotKindClusterforge KubeSnapshotKind = "clusterforge"
+	KubeSnapshotKindOnDemand     KubeSnapshotKind = "on_demand"
+	KubeSnapshotKindScheduled    KubeSnapshotKind = "scheduled"
+)
+
+// Valid indicates whether the value is a known member of the KubeSnapshotKind enum.
+func (e KubeSnapshotKind) Valid() bool {
+	switch e {
+	case KubeSnapshotKindClusterforge:
+		return true
+	case KubeSnapshotKindOnDemand:
+		return true
+	case KubeSnapshotKindScheduled:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for KubeSnapshotClusterFreshness.
+const (
+	KubeSnapshotClusterFreshnessNone    KubeSnapshotClusterFreshness = "none"
+	KubeSnapshotClusterFreshnessOk      KubeSnapshotClusterFreshness = "ok"
+	KubeSnapshotClusterFreshnessStale   KubeSnapshotClusterFreshness = "stale"
+	KubeSnapshotClusterFreshnessUnknown KubeSnapshotClusterFreshness = "unknown"
+)
+
+// Valid indicates whether the value is a known member of the KubeSnapshotClusterFreshness enum.
+func (e KubeSnapshotClusterFreshness) Valid() bool {
+	switch e {
+	case KubeSnapshotClusterFreshnessNone:
+		return true
+	case KubeSnapshotClusterFreshnessOk:
+		return true
+	case KubeSnapshotClusterFreshnessStale:
+		return true
+	case KubeSnapshotClusterFreshnessUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for KubeSnapshotsFreshness.
+const (
+	KubeSnapshotsFreshnessNone    KubeSnapshotsFreshness = "none"
+	KubeSnapshotsFreshnessOk      KubeSnapshotsFreshness = "ok"
+	KubeSnapshotsFreshnessStale   KubeSnapshotsFreshness = "stale"
+	KubeSnapshotsFreshnessUnknown KubeSnapshotsFreshness = "unknown"
+)
+
+// Valid indicates whether the value is a known member of the KubeSnapshotsFreshness enum.
+func (e KubeSnapshotsFreshness) Valid() bool {
+	switch e {
+	case KubeSnapshotsFreshnessNone:
+		return true
+	case KubeSnapshotsFreshnessOk:
+		return true
+	case KubeSnapshotsFreshnessStale:
+		return true
+	case KubeSnapshotsFreshnessUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for KubeWorkloadKind.
 const (
 	KubeWorkloadKindCronJob     KubeWorkloadKind = "CronJob"
@@ -6057,6 +6126,31 @@ type KubeResourceType struct {
 	Version    string `json:"version"`
 }
 
+// KubeRestoreInput defines model for KubeRestoreInput.
+type KubeRestoreInput struct {
+	// Confirm De slug van het cluster; altijd nodig
+	Confirm *string `json:"confirm,omitempty"`
+
+	// Name De naam van de snapshot (name uit de lijst)
+	Name string `json:"name"`
+
+	// Preview Alleen het plan
+	Preview *bool `json:"preview,omitempty"`
+}
+
+// KubeRestorePlan defines model for KubeRestorePlan.
+type KubeRestorePlan struct {
+	// Init De server die het cluster begon; daar gaat de snapshot terug
+	Init string `json:"init"`
+
+	// Others De andere servers; die melden zich daarna opnieuw aan
+	Others   []string     `json:"others"`
+	Snapshot KubeSnapshot `json:"snapshot"`
+
+	// Workers Het aantal andere nodes; die melden zich vanzelf weer
+	Workers int `json:"workers"`
+}
+
 // KubeRevision defines model for KubeRevision.
 type KubeRevision struct {
 	// ChangeCause De annotatie kubernetes.io/change-cause; leeg als niemand ze zette
@@ -6118,6 +6212,102 @@ type KubeServicePort struct {
 	// TargetPort Een nummer of de naam van een poort in de container
 	TargetPort string `json:"target_port"`
 }
+
+// KubeSnapshot defines model for KubeSnapshot.
+type KubeSnapshot struct {
+	Error string `json:"error"`
+
+	// File De bestandsnaam, zoals etcd-snapshot-leren-server-01-1760000000
+	File string `json:"file"`
+
+	// Hostname Die server in ClusterForge
+	Hostname nullable.Nullable[string] `json:"hostname"`
+
+	// Kind scheduled: k3s zelf, elke twaalf uur; clusterforge: Snapshot nu of vlak voor terugzetten; on_demand: met de hand
+	Kind KubeSnapshotKind `json:"kind"`
+
+	// Location Zoals file:///var/lib/rancher/k3s/server/db/snapshots/...
+	Location string `json:"location"`
+
+	// Name De naam van het ETCDSnapshotFile-object
+	Name string `json:"name"`
+
+	// Node De server in Kubernetes waarop het bestand staat
+	Node  string `json:"node"`
+	Ready bool   `json:"ready"`
+
+	// Restorable ClusterForge kan deze snapshot terugzetten
+	Restorable bool `json:"restorable"`
+
+	// RestoreNote Waarom terugzetten niet kan; leeg als het kan
+	RestoreNote string                       `json:"restore_note"`
+	S3          bool                         `json:"s3"`
+	SizeBytes   nullable.Nullable[int64]     `json:"size_bytes"`
+	TakenAt     nullable.Nullable[time.Time] `json:"taken_at"`
+}
+
+// KubeSnapshotKind scheduled: k3s zelf, elke twaalf uur; clusterforge: Snapshot nu of vlak voor terugzetten; on_demand: met de hand
+type KubeSnapshotKind string
+
+// KubeSnapshotCluster defines model for KubeSnapshotCluster.
+type KubeSnapshotCluster struct {
+	ClusterId   openapi_types.UUID           `json:"cluster_id"`
+	Environment Environment                  `json:"environment"`
+	Error       string                       `json:"error"`
+	Freshness   KubeSnapshotClusterFreshness `json:"freshness"`
+	Name        string                       `json:"name"`
+	NewestAt    nullable.Nullable[time.Time] `json:"newest_at"`
+	ReadAt      nullable.Nullable[time.Time] `json:"read_at"`
+	Servers     []KubeSnapshotClusterServer  `json:"servers"`
+	Slug        string                       `json:"slug"`
+}
+
+// KubeSnapshotClusterFreshness defines model for KubeSnapshotCluster.Freshness.
+type KubeSnapshotClusterFreshness string
+
+// KubeSnapshotClusterServer defines model for KubeSnapshotClusterServer.
+type KubeSnapshotClusterServer struct {
+	Count    int                          `json:"count"`
+	Hostname nullable.Nullable[string]    `json:"hostname"`
+	NewestAt nullable.Nullable[time.Time] `json:"newest_at"`
+	Node     string                       `json:"node"`
+}
+
+// KubeSnapshotSaved defines model for KubeSnapshotSaved.
+type KubeSnapshotSaved struct {
+	// Hostname De server waarop hij gemaakt is
+	Hostname string `json:"hostname"`
+
+	// Output Wat k3s schreef
+	Output   []string                        `json:"output"`
+	Snapshot nullable.Nullable[KubeSnapshot] `json:"snapshot"`
+}
+
+// KubeSnapshotServer defines model for KubeSnapshotServer.
+type KubeSnapshotServer struct {
+	Hostname string `json:"hostname"`
+
+	// Init Deze server begon het cluster
+	Init bool   `json:"init"`
+	Node string `json:"node"`
+}
+
+// KubeSnapshots defines model for KubeSnapshots.
+type KubeSnapshots struct {
+	// Error Waarom de lijst nu niet te lezen was
+	Error     string                 `json:"error"`
+	Freshness KubeSnapshotsFreshness `json:"freshness"`
+	Items     []KubeSnapshot         `json:"items"`
+
+	// ReadAt Wanneer de lijst laatst gelezen werd
+	ReadAt nullable.Nullable[time.Time] `json:"read_at"`
+
+	// Servers De servers met een agent, de eerste eerst
+	Servers []KubeSnapshotServer `json:"servers"`
+}
+
+// KubeSnapshotsFreshness defines model for KubeSnapshots.Freshness.
+type KubeSnapshotsFreshness string
 
 // KubeStorage defines model for KubeStorage.
 type KubeStorage struct {
@@ -8382,6 +8572,9 @@ type CheckKubeLessonJSONRequestBody = KubeLessonCheckInput
 // RemoveKubeNodeJSONRequestBody defines body for RemoveKubeNode for application/json ContentType.
 type RemoveKubeNodeJSONRequestBody = KubeRemoveNodeInput
 
+// RestoreKubeSnapshotJSONRequestBody defines body for RestoreKubeSnapshot for application/json ContentType.
+type RestoreKubeSnapshotJSONRequestBody = KubeRestoreInput
+
 // CreateNodeJSONRequestBody defines body for CreateNode for application/json ContentType.
 type CreateNodeJSONRequestBody = NodeInput
 
@@ -8828,12 +9021,24 @@ type ServerInterface interface {
 	// ListKubeRevisions De versies van een Deployment, de nieuwste eerst, om naar terug te gaan
 	// (GET /kubernetes/clusters/{clusterId}/revisions)
 	ListKubeRevisions(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params ListKubeRevisionsParams)
+	// ListKubeSnapshots De etcd-snapshots van een cluster, per server
+	// (GET /kubernetes/clusters/{clusterId}/snapshots)
+	ListKubeSnapshots(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
+	// SaveKubeSnapshot Snapshot nu (admin)
+	// (POST /kubernetes/clusters/{clusterId}/snapshots)
+	SaveKubeSnapshot(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
+	// RestoreKubeSnapshot Een snapshot terugzetten in lab of test (admin); wordt een taak
+	// (POST /kubernetes/clusters/{clusterId}/snapshots/restore)
+	RestoreKubeSnapshot(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
 	// GetKubeStorage De PersistentVolumeClaims, volumes en StorageClasses
 	// (GET /kubernetes/clusters/{clusterId}/storage)
 	GetKubeStorage(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params GetKubeStorageParams)
 	// ListKubeWorkloads Deployments, StatefulSets, DaemonSets, CronJobs en Jobs
 	// (GET /kubernetes/clusters/{clusterId}/workloads)
 	ListKubeWorkloads(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params ListKubeWorkloadsParams)
+	// ListKubeSnapshotClusters Per Kubernetes-cluster hoe het met de etcd-snapshots staat, voor Back-ups
+	// (GET /kubernetes/snapshots)
+	ListKubeSnapshotClusters(w http.ResponseWriter, r *http.Request)
 	// GetMap Een laag van de infrastructuurkaart
 	// (GET /map)
 	GetMap(w http.ResponseWriter, r *http.Request, params GetMapParams)
@@ -9797,6 +10002,24 @@ func (_ Unimplemented) ListKubeRevisions(w http.ResponseWriter, r *http.Request,
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// ListKubeSnapshots De etcd-snapshots van een cluster, per server
+// (GET /kubernetes/clusters/{clusterId}/snapshots)
+func (_ Unimplemented) ListKubeSnapshots(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SaveKubeSnapshot Snapshot nu (admin)
+// (POST /kubernetes/clusters/{clusterId}/snapshots)
+func (_ Unimplemented) SaveKubeSnapshot(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RestoreKubeSnapshot Een snapshot terugzetten in lab of test (admin); wordt een taak
+// (POST /kubernetes/clusters/{clusterId}/snapshots/restore)
+func (_ Unimplemented) RestoreKubeSnapshot(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // GetKubeStorage De PersistentVolumeClaims, volumes en StorageClasses
 // (GET /kubernetes/clusters/{clusterId}/storage)
 func (_ Unimplemented) GetKubeStorage(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params GetKubeStorageParams) {
@@ -9806,6 +10029,12 @@ func (_ Unimplemented) GetKubeStorage(w http.ResponseWriter, r *http.Request, cl
 // ListKubeWorkloads Deployments, StatefulSets, DaemonSets, CronJobs en Jobs
 // (GET /kubernetes/clusters/{clusterId}/workloads)
 func (_ Unimplemented) ListKubeWorkloads(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params ListKubeWorkloadsParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListKubeSnapshotClusters Per Kubernetes-cluster hoe het met de etcd-snapshots staat, voor Back-ups
+// (GET /kubernetes/snapshots)
+func (_ Unimplemented) ListKubeSnapshotClusters(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -14399,6 +14628,84 @@ func (siw *ServerInterfaceWrapper) ListKubeRevisions(w http.ResponseWriter, r *h
 	handler.ServeHTTP(w, r)
 }
 
+// ListKubeSnapshots operation middleware
+func (siw *ServerInterfaceWrapper) ListKubeSnapshots(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListKubeSnapshots(w, r, clusterId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SaveKubeSnapshot operation middleware
+func (siw *ServerInterfaceWrapper) SaveKubeSnapshot(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SaveKubeSnapshot(w, r, clusterId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RestoreKubeSnapshot operation middleware
+func (siw *ServerInterfaceWrapper) RestoreKubeSnapshot(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RestoreKubeSnapshot(w, r, clusterId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetKubeStorage operation middleware
 func (siw *ServerInterfaceWrapper) GetKubeStorage(w http.ResponseWriter, r *http.Request) {
 
@@ -14500,6 +14807,20 @@ func (siw *ServerInterfaceWrapper) ListKubeWorkloads(w http.ResponseWriter, r *h
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListKubeWorkloads(w, r, clusterId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListKubeSnapshotClusters operation middleware
+func (siw *ServerInterfaceWrapper) ListKubeSnapshotClusters(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListKubeSnapshotClusters(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -16636,6 +16957,18 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/kubernetes/clusters/{clusterId}/access/{accessId}/revoke", wrapper.RevokeKubeAccess)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/kubernetes/snapshots", wrapper.ListKubeSnapshotClusters)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/kubernetes/clusters/{clusterId}/snapshots", wrapper.ListKubeSnapshots)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/kubernetes/clusters/{clusterId}/snapshots", wrapper.SaveKubeSnapshot)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/kubernetes/clusters/{clusterId}/snapshots/restore", wrapper.RestoreKubeSnapshot)
 	})
 
 	return r

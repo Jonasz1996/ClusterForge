@@ -37,6 +37,11 @@ export type KubeLessonLink = components["schemas"]["KubeLessonLink"];
 export type KubeAccess = components["schemas"]["KubeAccess"];
 export type KubeAccessInput = components["schemas"]["KubeAccessInput"];
 export type KubeAccessIssued = components["schemas"]["KubeAccessIssued"];
+export type KubeSnapshot = components["schemas"]["KubeSnapshot"];
+export type KubeSnapshots = components["schemas"]["KubeSnapshots"];
+export type KubeSnapshotSaved = components["schemas"]["KubeSnapshotSaved"];
+export type KubeRestorePlan = components["schemas"]["KubeRestorePlan"];
+export type KubeSnapshotCluster = components["schemas"]["KubeSnapshotCluster"];
 type Job = components["schemas"]["Job"];
 
 type Tone = "slate" | "green" | "amber" | "red" | "blue";
@@ -64,6 +69,9 @@ const keys = {
   metrics: (id: string, s: KubeMetricsScope, range: MetricsRange) => ["kube", id, "metrics", s, range] as const,
   lesson: (id: string, lesson: string) => ["kube", id, "lessons", lesson] as const,
   access: (id: string) => ["kube", id, "access"] as const,
+  snapshots: (id: string) => ["kube", id, "snapshots"] as const,
+  restorePlan: (id: string, name: string) => ["kube", id, "restore-plan", name] as const,
+  snapshotClusters: ["kube", "snapshot-clusters"] as const,
 };
 
 // scope is de query van een tabblad met een namespace en het vinkje
@@ -442,6 +450,72 @@ export function useRevokeKubeAccess(id: string) {
         }),
       ),
     onSettled: () => void qc.invalidateQueries({ queryKey: keys.access(id) }),
+  });
+}
+
+// useKubeSnapshots geeft de etcd-snapshots van een cluster, zoals k3s ze
+// nu meldt.
+export function useKubeSnapshots(id: string) {
+  return useQuery({
+    queryKey: keys.snapshots(id),
+    queryFn: async () =>
+      unwrap(await api.GET("/kubernetes/clusters/{clusterId}/snapshots", { params: { path: { clusterId: id } } })),
+    enabled: id !== "",
+    refetchInterval: 30_000,
+  });
+}
+
+// useSaveKubeSnapshot is Snapshot nu.
+export function useSaveKubeSnapshot(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async () =>
+      unwrap(await api.POST("/kubernetes/clusters/{clusterId}/snapshots", { params: { path: { clusterId: id } } })),
+    onSettled: () => {
+      void qc.invalidateQueries({ queryKey: keys.snapshots(id) });
+      void qc.invalidateQueries({ queryKey: keys.snapshotClusters });
+    },
+  });
+}
+
+// useKubeRestorePlan zegt wat terugzetten zou doen; er verandert niets.
+export function useKubeRestorePlan(id: string, name: string) {
+  return useQuery({
+    queryKey: keys.restorePlan(id, name),
+    queryFn: async () =>
+      unwrap(
+        await api.POST("/kubernetes/clusters/{clusterId}/snapshots/restore", {
+          params: { path: { clusterId: id } },
+          body: { name, preview: true },
+        }),
+      ) as KubeRestorePlan,
+    enabled: id !== "" && name !== "",
+    retry: false,
+  });
+}
+
+// useRestoreKubeSnapshot zet het terugzetten als taak in de wachtrij.
+export function useRestoreKubeSnapshot(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: { name: string; confirm: string }) =>
+      unwrap(
+        await api.POST("/kubernetes/clusters/{clusterId}/snapshots/restore", { params: { path: { clusterId: id } }, body }),
+      ) as Job,
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["jobs"] });
+      void qc.invalidateQueries({ queryKey: ["kube", id] });
+    },
+  });
+}
+
+// useKubeSnapshotClusters is per Kubernetes-cluster hoe het met de
+// snapshots staat, voor Back-ups.
+export function useKubeSnapshotClusters() {
+  return useQuery({
+    queryKey: keys.snapshotClusters,
+    queryFn: async () => unwrap(await api.GET("/kubernetes/snapshots")).items,
+    refetchInterval: 60_000,
   });
 }
 

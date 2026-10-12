@@ -331,10 +331,15 @@ type drainParams struct {
 	Force bool   `json:"force,omitempty"`
 }
 
-// EnableDrain registreert de taak die een node leegmaakt.
+// EnableDrain registreert de taken die een node leegmaken en een
+// etcd-snapshot terugzetten.
 func (s *Service) EnableDrain(runner *jobs.Runner, ev *events.Writer) {
 	s.jobs, s.ev = runner, ev
 	runner.Register(KindDrain, s.runDrain)
+	runner.Register(KindRestore, s.runRestore)
+	// Een stap die lukte, slaat opnieuw proberen over; zo gaat een
+	// terugzetten dat halverwege stopte verder waar het was.
+	runner.Retryable(KindRestore)
 }
 
 // RequestDrain plant het leegmaken van een node als taak. Houden pods het

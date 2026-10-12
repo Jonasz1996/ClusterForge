@@ -65,6 +65,7 @@ Het technisch ontwerp staat in [docs/design/mvp-fase-1.md](docs/design/mvp-fase-
 | 7. Nodes toevoegen en weghalen | Op het tabblad Nodes een worker toevoegen of naar drie of vijf servers gaan, met een nieuwe revisie van de spec; een worker weghalen als taak die hem leegmaakt, uit Kubernetes haalt en de VM verwijdert; de spec van een cluster wijzigen in de webinterface; les 9 en 10 | klaar |
 | 8. Status, incidenten en metrics | Een Kubernetes-cluster is down als de API niet antwoordt en verminderd bij een node die NotReady is of een app die niet doet wat hij moet; zo'n app opent een incident, What Broke leest de waarschuwingen van Kubernetes en ziet een nieuwe image als uitrol; CPU en geheugen per pod en node elke minuut in VictoriaMetrics, met grafieken | klaar |
 | 9. kubectl op je eigen pc | Een kubeconfig per gebruiker voor kubectl, k9s, Headlamp of Lens, met een eigen ServiceAccount en een token dat verloopt; beheerder of alleen lezen, intrekken werkt meteen, en verlopen kubeconfigs ruimt ClusterForge op | klaar |
+| 10. etcd-snapshots | Een tabblad Snapshots met de snapshots die k3s van zijn database maakt, per server, en hun stand bij Back-ups; Snapshot nu; in lab en test het hele cluster terugzetten naar een snapshot als taak die stap voor stap doet wat k3s beschrijft; op prod een runbook met de commando's | klaar |
 
 ## Draaien met Docker Compose
 
@@ -196,6 +197,8 @@ Elke 10 minuten leest ClusterForge ook het netwerk van elke online host: bridges
 ClusterForge maakt zelf geen back-ups; dat blijven de back-upjobs van Proxmox (vzdump naar een storage of naar Proxmox Backup Server). Wel leest het elk kwartier welke back-ups er zijn en toont bij Back-ups per VM hoe oud de nieuwste is, op welke storage, hoe groot, en of Proxmox Backup Server hem geverifieerd heeft. Een VM is bewaakt als hij aan een node gekoppeld is, of als je hem op de pagina Back-ups bij "Ook bewaken" zet met zijn VMID en een label: zo houd je ook de container van ClusterForge zelf in het oog.
 
 Is de nieuwste back-up ouder dan de maximale leeftijd, dan staat de VM op "Te oud"; zonder back-up op "Geen back-up". De maximale leeftijd is standaard 30 uur, wat past bij een dagelijkse back-upjob. Een admin stelt hem per cluster in, onderaan de kaart Back-ups op de clusterpagina; voor VM's op de lijst "Ook bewaken" geldt de standaard. Elke wissel komt één keer in het logboek, en de clusters en nodes tonen een back-upbadge. Daaronder staan de VM's en containers die in geen enkele back-upjob van Proxmox zitten. "Nu verversen" leest de back-ups meteen opnieuw, bijvoorbeeld na een back-upjob.
+
+Van een Kubernetes-cluster staan bij Back-ups ook de etcd-snapshots die k3s zelf maakt: per cluster en per server hoe oud de nieuwste is. Zie [etcd-snapshots](#etcd-snapshots).
 
 Toont Proxmox geen enkele back-up terwijl er VM's bewaakt worden, dan meldt ClusterForge dat één keer als leesfout in plaats van elke VM op "Geen back-up" te zetten: meestal mist het API-token dan `VM.Backup`. Staat een host uit, dan blijven de back-ups op zijn lokale storage staan zoals ze laatst gelezen zijn.
 
@@ -437,6 +440,7 @@ Onder Kubernetes staan je Kubernetes-clusters met hun versie, hoeveel nodes Read
 - **Configuratie**: de ConfigMaps met hun sleutels, en de Secrets met alleen hun sleutels en hoe lang elke waarde is.
 - **Gebeurtenissen**: de events van het laatste uur, waarschuwingen eerst.
 - **Alles**: elke soort die het cluster kent, ook die van apps zoals Traefik (IngressRoute) en k3s (HelmChart), met hun objecten.
+- **Snapshots**: de etcd-snapshots die k3s maakt, per server, met Snapshot nu en terugzetten; zie [etcd-snapshots](#etcd-snapshots).
 - **kubectl**: een kubeconfig maken voor kubectl, k9s, Headlamp of Lens, en de kubeconfigs die er al zijn; zie [kubectl op je eigen pc](#kubectl-op-je-eigen-pc).
 
 Klik op een pod, app, node, Service of ander object om het te openen. Je ziet:
@@ -596,11 +600,56 @@ kubectl get clusterrolebindings -l app.kubernetes.io/managed-by=clusterforge
 
 Dit vraagt een agent van deze versie op een server; met een oudere toont het tabblad "Agent te oud" met het commando om hem bij te werken.
 
+### etcd-snapshots
+
+Alles wat je in Kubernetes maakt, staat in etcd, de database van het cluster, op elke server. k3s maakt daar zelf om 0 en 12 uur een snapshot van, op elke server, en houdt de laatste vijf in `/var/lib/rancher/k3s/server/db/snapshots`. Op het tabblad **Snapshots** zie je ze per server: wanneer, hoe groot, en of k3s hem klaar meldt. ClusterForge leest de lijst elke vijf minuten. Is de nieuwste bruikbare snapshot ouder dan een dag, dan staat er "Ouder dan een dag": dan lukt het k3s niet, en `sudo journalctl -u k3s | grep -i snapshot` op een server zegt waarom. Bij **Back-ups** staat dezelfde stand voor elk Kubernetes-cluster.
+
+- **Snapshot nu** (beheerder) maakt meteen een snapshot op de server die het cluster begon, met `k3s etcd-snapshot save --name clusterforge`. Hij heet dan `clusterforge-<server>-<tijd>` en staat in het logboek.
+- **Terugzetten** (beheerder, in lab en test) zet het hele cluster terug naar het moment van een snapshot. Je ziet eerst wat er gaat gebeuren en tikt de slug van het cluster ter bevestiging.
+
+Terugzetten is een taak die doet wat k3s beschrijft, stap voor stap:
+
+1. Elke server controleren: de agent is verbonden en kent snapshots, en de snapshot staat op de server die het cluster begon.
+2. Een snapshot van nu maken (`clusterforge-voor-terugzetten`), zodat je terug kunt naar hoe het net was.
+3. k3s stoppen op elke server. Vanaf hier antwoordt de API niet; de pods op de nodes draaien door.
+4. `k3s server --cluster-reset --cluster-reset-restore-path=…` op de server die het cluster begon. De oude database zet k3s daar in `db/etcd-old-…`.
+5. k3s starten op die server, en wachten tot de API antwoordt.
+6. Op de andere servers de database opzij zetten (`db-voor-terugzetten-<tijd>`, de snapshots blijven) en k3s starten, zodat ze zich opnieuw aanmelden.
+7. Wachten tot elke node Ready is. De workers melden zich vanzelf weer.
+
+Mislukt een stap, dan zegt de taak waarom en staat het cluster stil waar het was; **Opnieuw proberen** gaat verder bij die stap. Na het terugzetten staat elk object weer zoals op dat moment: wat daarna gemaakt is, is weg, en wat daarna weggehaald is, staat er weer, ook Secrets. De gegevens in volumes zitten niet in een snapshot en blijven zoals ze zijn; daarvoor zijn de back-ups van de VM's in Proxmox. Terwijl het loopt, is het cluster een paar minuten down. Dat kan een incident openen, dat sluit als de API terug is; het begin en het einde van het terugzetten staan in het logboek, en What Broke noemt het terugzetten als oorzaak.
+
+Alleen een snapshot op de server die het cluster begon (de eerste, met `cluster-init` in zijn config) kan terug: de andere servers melden zich daarna bij hem opnieuw aan. Omdat k3s op elke server op dezelfde momenten een snapshot maakt, is die er altijd. Een snapshot in S3 zet ClusterForge niet terug.
+
+**Op prod** zet ClusterForge niets terug: het cluster ligt dan een paar minuten stil, en alles wat na de snapshot veranderde, is weg. Het tabblad toont daar het runbook, met de namen van je servers en de nieuwste snapshot ingevuld. In lab en test staat hetzelfde onder "Met de hand terugzetten". Als root op de servers:
+
+```sh
+# 1. Op de eerste server: een snapshot van nu
+sudo k3s etcd-snapshot save --name voor-terugzetten
+# 2. Op elke server
+sudo systemctl stop k3s
+# 3. Op de eerste server: terugzetten en starten
+ls -lh /var/lib/rancher/k3s/server/db/snapshots
+sudo k3s server --cluster-reset --cluster-reset-restore-path=/var/lib/rancher/k3s/server/db/snapshots/<bestand>
+sudo systemctl start k3s
+# 4. Op elke andere server: de database opzij zetten en starten
+sudo mv /var/lib/rancher/k3s/server/db /var/lib/rancher/k3s/server/db-voor-terugzetten
+sudo mkdir -m 700 /var/lib/rancher/k3s/server/db
+sudo mv /var/lib/rancher/k3s/server/db-voor-terugzetten/snapshots /var/lib/rancher/k3s/server/db/
+sudo systemctl start k3s
+# 5. Kijken of elke node Ready is
+sudo kubectl get nodes
+```
+
+De lijst werkt met elke agent die Kubernetes leest. Snapshot nu en Terugzetten vragen een agent van deze versie op de servers; met een oudere zegt ClusterForge welke server je moet bijwerken met het installatiescript en `--upgrade`.
+
 ### Hoe ClusterForge Kubernetes leest
 
 De server praat nooit zelf met de Kubernetes-API. cf-agent op een k3s-server doet het, met de beheerdersconfig `/etc/rancher/k3s/k3s.yaml` die daar al staat, en stuurt het antwoord via de bestaande verbinding (NATS) terug. Daardoor hoeft poort 6443 niet open naar ClusterForge, en verlaat geen certificaat van het cluster de server. ClusterForge kiest een server met een verse heartbeat waarvan de API antwoordt; valt die weg, dan neemt een andere het over.
 
 De agent laat alleen lezen toe, met een vaste lijst: geen exec, attach, port-forward of proxy, en geen watch. Schrijven kan alleen voor de acties hierboven: een patch op Deployments, StatefulSets, ReplicaSets, DaemonSets en nodes, een eviction van een pod, en het weghalen van één object, nooit van `default` of de namespaces van Kubernetes zelf. Voor Toepassen doet de agent een server-side apply van één object tegelijk, met een dry-run bij Controleren; dat kan elk object zijn, zoals bij `kubectl apply`, en daarom kan alleen een beheerder het. Een patch of apply staat in Kubernetes op naam van `clusterforge` (de fieldManager). Voor een kubeconfig maakt de agent zelf het ServiceAccount en de ClusterRoleBinding, alleen in de namespace `clusterforge`, alleen met een naam die met `cf-` begint en alleen met `cluster-admin` of `view`, en vraagt hij er een token voor; het token gaat één keer naar ClusterForge en zo naar je browser. Van een log haalt hij alleen de laatste regels, hoogstens 5000 en 2 MB, zonder te blijven volgen; het dashboard vraagt hem elke vijf seconden opnieuw. Van een Secret stuurt hij de namen van de sleutels, nooit de waarden: die vervangt hij door "(verborgen, N bytes)". Hij doet hoogstens vier verzoeken tegelijk, elk hoogstens 30 seconden.
+
+Voor snapshots doet de agent op een server alleen dit: `k3s etcd-snapshot save` met een naam van ClusterForge, `systemctl stop` en `start` van k3s, `k3s server --cluster-reset` met een bestand uit de map met snapshots en alleen als k3s stilstaat op de server die het cluster begon, en op een andere server de map `db` opzij zetten als k3s stilstaat. Zo'n verzoek mag tien minuten duren.
 
 Dit kan vanaf **agentprotocol 8**. Met een oudere agent toont de pagina "Agent te oud voor Kubernetes", met het commando om hem bij te werken; de aanmelding blijft staan. Werk ook je golden image bij, anders krijgen nieuwe VM's de oude agent. De andere onderdelen van ClusterForge blijven werken met een oudere agent.
 

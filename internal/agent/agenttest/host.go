@@ -43,6 +43,9 @@ type Host struct {
 	Address string
 	// Interface is de naam van de netwerkkaart.
 	Interface string
+	// K3s speelt het commando k3s na, met de argumenten; nil kent het
+	// niet. Het draait onder het slot van de host.
+	K3s func(args []string) ([]byte, error)
 
 	mu       sync.Mutex
 	group    *Group
@@ -185,7 +188,7 @@ func (h *Host) Addresses() []string {
 
 // queries zijn commando's die niets veranderen; ze komen niet in Calls.
 var queries = []string{
-	"systemctl show", "systemctl --failed", "systemctl is-system-running", "dpkg-query", "id ", "journalctl", "apt-get -s",
+	"systemctl show", "systemctl --failed", "systemctl is-system-running", "systemctl is-active", "dpkg-query", "id ", "journalctl", "apt-get -s",
 	"systemd-detect-virt", "docker ", "tc qdisc show",
 }
 
@@ -262,6 +265,10 @@ func (h *Host) exec(name string, args []string) ([]byte, error) {
 		return nil, nil
 	case "tc":
 		return h.tc(args)
+	case "k3s":
+		if h.K3s != nil {
+			return h.K3s(args)
+		}
 	}
 	return nil, fmt.Errorf("onbekend commando %s", name)
 }
@@ -496,6 +503,15 @@ func (h *Host) systemctl(args []string) ([]byte, error) {
 	}
 	verb, name := args[0], strings.TrimSuffix(args[len(args)-1], ".service")
 	u, ok := h.units[name]
+	if verb == "is-active" {
+		switch {
+		case ok && u.Failed:
+			return []byte("failed\n"), errors.New("exit status 3")
+		case ok && u.Active:
+			return []byte("active\n"), nil
+		}
+		return []byte("inactive\n"), errors.New("exit status 3")
+	}
 	if !ok {
 		return []byte("Failed to " + verb + " " + name + ".service: Unit " + name + ".service not found.\n"), errors.New("exit status 5")
 	}

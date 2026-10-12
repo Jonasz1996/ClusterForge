@@ -216,3 +216,32 @@ UPDATE kube_access SET removed_at = now(), remove_error = '' WHERE id = $1;
 
 -- name: SetKubeAccessRemoveError :exec
 UPDATE kube_access SET remove_error = $2 WHERE id = $1;
+
+-- name: DeleteKubeSnapshots :exec
+DELETE FROM kube_snapshots WHERE cluster_id = $1;
+
+-- name: InsertKubeSnapshot :exec
+INSERT INTO kube_snapshots (cluster_id, name, file, node, location, s3, size_bytes, taken_at, ready, error)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10);
+
+-- name: SetKubeSnapshotsRead :exec
+-- Zegt dat de lijst met snapshots gelezen is, of waarom dat niet lukte. Een
+-- cluster dat nog nooit gesynchroniseerd is, heeft nog geen rij.
+UPDATE kube_clusters
+SET snapshots_at = CASE WHEN @error::text = '' THEN now() ELSE snapshots_at END, snapshots_error = @error::text
+WHERE cluster_id = $1;
+
+-- name: ListKubeSnapshots :many
+-- De snapshots van een cluster, of van alle clusters als cluster_id leeg
+-- is; de nieuwste eerst.
+SELECT * FROM kube_snapshots
+WHERE sqlc.narg(cluster_id)::uuid IS NULL OR cluster_id = sqlc.narg(cluster_id)::uuid
+ORDER BY cluster_id, taken_at DESC NULLS LAST, name;
+
+-- name: ListKubeSnapshotClusters :many
+-- De Kubernetes-clusters met wanneer hun snapshots laatst gelezen werden.
+SELECT c.id, c.name, c.slug, c.environment, k.snapshots_at, coalesce(k.snapshots_error, '')::text AS snapshots_error
+FROM clusters c
+LEFT JOIN kube_clusters k ON k.cluster_id = c.id
+WHERE c.type = 'kubernetes'
+ORDER BY lower(c.name);

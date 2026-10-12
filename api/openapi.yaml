@@ -3465,6 +3465,94 @@ paths:
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /kubernetes/snapshots:
+    get:
+      operationId: listKubeSnapshotClusters
+      summary: Per Kubernetes-cluster hoe het met de etcd-snapshots staat, voor Back-ups
+      description: |
+        Zoals de sync ze laatst las (om de vijf minuten). freshness is ok als de nieuwste snapshot jonger is dan een dag,
+        stale als hij ouder is, none zonder snapshot, en unknown als de lijst niet te lezen is.
+      responses:
+        "200":
+          description: De clusters
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/KubeSnapshotCluster" } }
+        "401": { $ref: "#/components/responses/Error" }
+  /kubernetes/clusters/{clusterId}/snapshots:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: listKubeSnapshots
+      summary: De etcd-snapshots van een cluster, per server
+      description: |
+        ClusterForge leest ze op dat moment uit de API (ETCDSnapshotFile van k3s). Lukt dat niet, dan komt de laatst
+        gelezen lijst terug met de fout in error.
+      responses:
+        "200":
+          description: De snapshots
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/KubeSnapshots" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: saveKubeSnapshot
+      summary: Snapshot nu (admin)
+      description: |
+        De agent op de server die het cluster begon doet k3s etcd-snapshot save --name clusterforge; is die er niet, dan
+        een andere server. snapshot is leeg als k3s hem nog niet in de API meldt. Een agent van voor deze versie geeft 503
+        met code agent_too_old, een fout van k3s 502 met code node_failed.
+      responses:
+        "201":
+          description: Gemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/KubeSnapshotSaved" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /kubernetes/clusters/{clusterId}/snapshots/restore:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: restoreKubeSnapshot
+      summary: Een snapshot terugzetten in lab of test (admin); wordt een taak
+      description: |
+        Alles wat na de snapshot veranderde in Kubernetes is daarna weg. De taak maakt eerst een snapshot van nu, stopt
+        k3s op elke server, zet de snapshot terug op de server die het cluster begon (k3s server --cluster-reset), start k3s
+        daar, zet op de andere servers de database van etcd opzij en start ze, en wacht tot elke node Ready is. Alleen met
+        een snapshot op de server die het cluster begon. Met preview=true komt alleen het plan terug; anders is de slug in
+        confirm nodig. Op prod geeft het 409: daar staat het runbook in de webinterface en de README.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/KubeRestoreInput" }
+      responses:
+        "200":
+          description: Het plan
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/KubeRestorePlan" }
+        "202":
+          description: Taak aangemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
 components:
   securitySchemes:
     session:
@@ -3883,6 +3971,90 @@ components:
         revoke_reason: { type: string }
         removed_at: { type: string, format: date-time, nullable: true }
         remove_error: { type: string }
+    KubeSnapshot:
+      type: object
+      required: [name, file, node, hostname, kind, location, s3, size_bytes, taken_at, ready, error, restorable, restore_note]
+      properties:
+        name: { type: string, description: De naam van het ETCDSnapshotFile-object }
+        file: { type: string, description: "De bestandsnaam, zoals etcd-snapshot-leren-server-01-1760000000" }
+        node: { type: string, description: De server in Kubernetes waarop het bestand staat }
+        hostname: { type: string, nullable: true, description: Die server in ClusterForge }
+        kind:
+          type: string
+          enum: [scheduled, clusterforge, on_demand]
+          description: "scheduled: k3s zelf, elke twaalf uur; clusterforge: Snapshot nu of vlak voor terugzetten; on_demand: met de hand"
+        location: { type: string, description: "Zoals file:///var/lib/rancher/k3s/server/db/snapshots/..." }
+        s3: { type: boolean }
+        size_bytes: { type: integer, format: int64, nullable: true }
+        taken_at: { type: string, format: date-time, nullable: true }
+        ready: { type: boolean }
+        error: { type: string }
+        restorable: { type: boolean, description: ClusterForge kan deze snapshot terugzetten }
+        restore_note: { type: string, description: Waarom terugzetten niet kan; leeg als het kan }
+    KubeSnapshotServer:
+      type: object
+      required: [node, hostname, init]
+      properties:
+        node: { type: string }
+        hostname: { type: string }
+        init: { type: boolean, description: Deze server begon het cluster }
+    KubeSnapshots:
+      type: object
+      required: [items, read_at, error, freshness, servers]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/KubeSnapshot" } }
+        read_at: { type: string, format: date-time, nullable: true, description: Wanneer de lijst laatst gelezen werd }
+        error: { type: string, description: Waarom de lijst nu niet te lezen was }
+        freshness: { type: string, enum: [ok, stale, none, unknown] }
+        servers:
+          type: array
+          description: De servers met een agent, de eerste eerst
+          items: { $ref: "#/components/schemas/KubeSnapshotServer" }
+    KubeSnapshotSaved:
+      type: object
+      required: [snapshot, hostname, output]
+      properties:
+        snapshot:
+          allOf: [{ $ref: "#/components/schemas/KubeSnapshot" }]
+          nullable: true
+        hostname: { type: string, description: De server waarop hij gemaakt is }
+        output: { type: array, items: { type: string }, description: Wat k3s schreef }
+    KubeRestoreInput:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, description: De naam van de snapshot (name uit de lijst) }
+        preview: { type: boolean, description: Alleen het plan }
+        confirm: { type: string, description: De slug van het cluster; altijd nodig }
+    KubeRestorePlan:
+      type: object
+      required: [snapshot, init, others, workers]
+      properties:
+        snapshot: { $ref: "#/components/schemas/KubeSnapshot" }
+        init: { type: string, description: De server die het cluster begon; daar gaat de snapshot terug }
+        others: { type: array, items: { type: string }, description: De andere servers; die melden zich daarna opnieuw aan }
+        workers: { type: integer, description: Het aantal andere nodes; die melden zich vanzelf weer }
+    KubeSnapshotCluster:
+      type: object
+      required: [cluster_id, name, slug, environment, freshness, newest_at, read_at, error, servers]
+      properties:
+        cluster_id: { type: string, format: uuid }
+        name: { type: string }
+        slug: { type: string }
+        environment: { $ref: "#/components/schemas/Environment" }
+        freshness: { type: string, enum: [ok, stale, none, unknown] }
+        newest_at: { type: string, format: date-time, nullable: true }
+        read_at: { type: string, format: date-time, nullable: true }
+        error: { type: string }
+        servers: { type: array, items: { $ref: "#/components/schemas/KubeSnapshotClusterServer" } }
+    KubeSnapshotClusterServer:
+      type: object
+      required: [node, hostname, newest_at, count]
+      properties:
+        node: { type: string }
+        hostname: { type: string, nullable: true }
+        newest_at: { type: string, format: date-time, nullable: true }
+        count: { type: integer }
     KubeAccessIssued:
       type: object
       required: [access, kubeconfig, filename, server]

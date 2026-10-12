@@ -217,7 +217,8 @@ var quiet = map[string]bool{
 	"gitops.change_superseded": true, "gitops.change_approved": true, "gitops.change_rejected": true, "gitops.file_invalid": true,
 	"gitops.file_missing": true, "gitops.reapply_requested": true,
 	"proxmox.sync_requested": true, "proxmox.sync_failed": true, "proxmox.sync_recovered": true,
-	"kube.access_issued": true, "kube.access_revoked": true,
+	"kube.access_issued": true, "kube.access_revoked": true, "kube.snapshot_saved": true,
+	"kube.snapshot_restore_started": true,
 }
 
 var quietPrefixes = []string{"auth.", "user.", "audit.", "job.", "assistant.", "incident.", "drift.", "enrollment_token.", "docs."}

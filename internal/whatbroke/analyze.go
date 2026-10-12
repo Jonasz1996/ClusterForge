@@ -624,7 +624,8 @@ func kindWeight(e Entry) float64 {
 	if e.Source == SourceLog {
 		switch e.Action {
 		case "gitops.change_applied", "gitops.change_failed", "gitops.reapply_requested", "cluster.deployed",
-			"proxmox.host_offline", "failover.fault_injected", "vm.missing", "kube.rolled_out", "kube.applied", "kube.rolled_back":
+			"proxmox.host_offline", "failover.fault_injected", "vm.missing", "kube.rolled_out", "kube.applied", "kube.rolled_back",
+			"kube.snapshot_restored", "kube.snapshot_restore_started":
 			return 1
 		case "vm.status_changed":
 			if to := e.Detail["to"]; to == "stopped" || to == "paused" {
