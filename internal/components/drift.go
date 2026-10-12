@@ -3,6 +3,7 @@ package components
 import (
 	"context"
 	"fmt"
+	"slices"
 
 	"github.com/google/uuid"
 
@@ -13,7 +14,8 @@ import (
 // NodeSteps geeft de stappen van de toegepaste onderdelen op een node,
 // gerenderd met de revisie die het laatst helemaal lukte, voor de
 // driftcontrole. Zo valt een met de hand aangepaste 99-clusterforge-galera.cnf op, ook
-// op een cluster zonder template.
+// op een cluster zonder template, en ook het bestand met cf_db voor het
+// VIP.
 func (s *Service) NodeSteps(ctx context.Context, nodeID uuid.UUID) ([]templates.Step, int, error) {
 	rows, err := s.q.ListNodeComponents(ctx, nodeID)
 	if err != nil {
@@ -32,6 +34,9 @@ func (s *Service) NodeSteps(ctx context.Context, nodeID uuid.UUID) ([]templates.
 			return nil, 0, fmt.Errorf("%s: %w", r.tpl.Title, err)
 		}
 		out = append(out, steps...)
+		if v := r.spec.VIP; v != nil && slices.Contains(v.Nodes, nodeID) {
+			out = append(out, vipSteps(r.spec.Cluster.Slug, v.Address)...)
+		}
 		revision = max(revision, rev)
 	}
 	return out, revision, nil

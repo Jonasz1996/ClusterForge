@@ -281,6 +281,8 @@ type VRRPInstance struct {
 	// Peers zijn de unicast_peer-adressen; leeg bij multicast.
 	Peers []string `json:"peers,omitempty"`
 	VIPs  []string `json:"vips"`
+	// TrackScripts zijn de vrrp_scripts in track_script, zoals cf_db.
+	TrackScripts []string `json:"track_scripts,omitempty"`
 }
 
 type Upgrades struct {

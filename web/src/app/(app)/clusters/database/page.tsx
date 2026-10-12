@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState, type ReactNode } from "react";
 import { ProdConfirm, prodConfirmed, useProdTotp } from "@/components/ProdConfirm";
+import { Diff } from "@/components/gitops/bits";
 import { CopyBlock } from "@/components/inventory/InstallAgent";
 import { ParamInput, paramHint } from "@/components/inventory/ParamInput";
 import { formatBytes, LifecycleBadge, QueryState } from "@/components/inventory/bits";
@@ -67,7 +68,7 @@ function AddDatabaseInner() {
   );
 }
 
-type Form = { engine: string; nodes: string[]; arbiter: string; params: Record<string, string> };
+type Form = { engine: string; nodes: string[]; arbiter: string; vip: string; params: Record<string, string> };
 
 // defaultNodes zijn de actieve nodes van het cluster, hoogstens negen.
 function defaultNodes(c: ClusterDetail) {
@@ -88,7 +89,7 @@ function toInput(f: Form, t: ComponentTemplate | undefined): ComponentInput {
     else settings[p.name] = v;
   }
   const arbiter = f.nodes.length === 2 && f.arbiter !== "" ? f.arbiter : undefined;
-  return { engine: f.engine, nodes: f.nodes, arbiter, settings };
+  return { engine: f.engine, nodes: f.nodes, arbiter, vip_id: f.vip === "" ? undefined : f.vip, settings };
 }
 
 function paramValue(f: Form, p: TemplateParam) {
@@ -104,6 +105,8 @@ function AddForm({ c, templates }: { c: ClusterDetail; templates: ComponentTempl
     engine: templates[0]?.engine ?? "mariadb",
     nodes: defaultNodes(c),
     arbiter: "",
+    // Heeft het cluster één VIP, dan is dat het VIP van de app.
+    vip: c.vips.length === 1 ? c.vips[0].id : "",
     params: {},
   }));
   const [confirm, setConfirm] = useState("");
@@ -195,6 +198,32 @@ function AddForm({ c, templates }: { c: ClusterDetail; templates: ComponentTempl
         </div>
       </Card>
 
+      <Card title="VIP">
+        <div className="space-y-4 text-sm">
+          <p className="text-slate-600 dark:text-slate-400">
+            De app verbindt met het VIP, zodat ze altijd naar één node schrijft. keepalived zet het VIP dan alleen op een node
+            waarvan de database mag schrijven: valt MariaDB daar uit of loopt hij achter, dan gaat het VIP naar een andere node.
+          </p>
+          {c.vips.length === 0 ? (
+            <p className="text-slate-500">
+              Dit cluster heeft geen VIP. Voeg het VIP van de app toe op de pagina van het cluster, of ga verder zonder.
+            </p>
+          ) : (
+            <Field label="VIP van de app" htmlFor="vip">
+              <Select id="vip" value={form.vip} onChange={(e) => setForm((f) => ({ ...f, vip: e.target.value }))}>
+                <option value="">Geen VIP</option>
+                {c.vips.map((v) => (
+                  <option key={v.id} value={v.id}>
+                    {v.address}
+                    {v.owner_hostname && ` (nu op ${v.owner_hostname})`}
+                  </option>
+                ))}
+              </Select>
+            </Field>
+          )}
+        </div>
+      </Card>
+
       {t && t.params.some((p) => p.type !== "secret") && (
         <Card title="Instellingen">
           <div className="grid gap-4 sm:grid-cols-2">
@@ -229,8 +258,10 @@ function AddForm({ c, templates }: { c: ClusterDetail; templates: ComponentTempl
             ) : (
               <p>
                 ClusterForge zet {shown.title} op {shown.nodes.length} nodes, een voor een. Een node die al draait, blijft draaien
-                tot zijn beurt; dan herstart MariaDB er een keer. De app verbindt nog met de oude database tot je haar verhuist
-                (een latere stap).
+                tot zijn beurt; dan herstart MariaDB er een keer.
+                {shown.vip &&
+                  ` Daarna komt de controle van de database in keepalived, node voor node, met ${shown.vip.owner || "de node met het VIP"} laatst; het VIP verhuist daarbij niet.`}{" "}
+                De app verbindt nog met de oude database tot je haar verhuist (een latere stap).
               </p>
             )}
             {prod && !shown.blocked && <ProdConfirm slug={c.slug} value={confirm} onChange={setConfirm} />}
@@ -273,6 +304,18 @@ function PlanView({ p }: { p: ComponentPlan }) {
   return (
     <div className="space-y-4 text-sm">
       {general.length > 0 && <Findings list={general} />}
+      {p.vip && (
+        <p>
+          Het VIP <span className="font-mono">{p.vip.address}</span>
+          {p.vip.owner ? ` staat nu op ${p.vip.owner} en` : ""} volgt de database op{" "}
+          {p.nodes
+            .filter((n) => n.vip_instance !== "")
+            .map((n) => n.hostname)
+            .join(", ")}
+          . ClusterForge zet een track_script <span className="font-mono">cf_db</span> in keepalived.conf; de rest van het bestand
+          blijft zoals het is.
+        </p>
+      )}
       {p.nodes.map((n) => (
         <NodeBlock key={n.node_id} n={n} findings={p.findings.filter((f) => f.node_id === n.node_id)} />
       ))}
@@ -301,6 +344,7 @@ function Fact({ label, children }: { label: string; children: ReactNode }) {
 // en wat er gebeurt.
 function NodeBlock({ n, findings }: { n: ComponentPlanNode; findings: ComponentFinding[] }) {
   const [open, setOpen] = useState(false);
+  const [diff, setDiff] = useState(false);
   const tight = n.free_after_pct !== null && n.free_after_pct < 15;
   return (
     <div className="space-y-3 rounded-md border border-slate-200 p-3 dark:border-slate-800">
@@ -352,9 +396,17 @@ function NodeBlock({ n, findings }: { n: ComponentPlanNode; findings: ComponentF
       </dl>
       {n.existing && <p className="text-slate-600 dark:text-slate-400">Nu: {n.existing}</p>}
       {findings.length > 0 && <Findings list={findings} />}
-      <button type="button" className="text-brand-700 hover:underline dark:text-sky-300" onClick={() => setOpen((o) => !o)}>
-        {open ? "Stappen verbergen" : `${n.steps.length} stappen`}
-      </button>
+      <div className="flex flex-wrap gap-x-4 gap-y-1">
+        <button type="button" className="text-brand-700 hover:underline dark:text-sky-300" onClick={() => setOpen((o) => !o)}>
+          {open ? "Stappen verbergen" : `${n.steps.length} stappen`}
+        </button>
+        {n.vip_diff && (
+          <button type="button" className="text-brand-700 hover:underline dark:text-sky-300" onClick={() => setDiff((o) => !o)}>
+            {diff ? "keepalived.conf verbergen" : `keepalived.conf (${n.vip_instance})`}
+          </button>
+        )}
+      </div>
+      {diff && n.vip_diff && <Diff text={n.vip_diff} />}
       {open && (
         <ol className="list-decimal space-y-0.5 pl-5 text-slate-600 dark:text-slate-400">
           {n.steps.map((s, i) => (

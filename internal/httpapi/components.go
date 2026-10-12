@@ -66,7 +66,7 @@ func (s *Server) PlanClusterComponent(w http.ResponseWriter, r *http.Request, cl
 	if !decode(w, r, &in) {
 		return
 	}
-	p, err := s.components.Plan(r.Context(), clusterID, componentRequest(in.Engine, in.Nodes, in.Arbiter.Get, in.Settings))
+	p, err := s.components.Plan(r.Context(), clusterID, componentRequest(in.Engine, in.Nodes, in.Arbiter.Get, in.VipId.Get, in.Settings))
 	if err != nil {
 		s.componentError(w, r, err)
 		return
@@ -93,7 +93,7 @@ func (s *Server) AddClusterComponent(w http.ResponseWriter, r *http.Request, clu
 	if !confirmProd(w, p, c.Environment == store.EnvironmentProd, c.Slug, in.Confirm, "een database toevoegen") {
 		return
 	}
-	j, err := s.components.Add(ctx, events.User(p.User.ID), clusterID, componentRequest(in.Engine, in.Nodes, in.Arbiter.Get, in.Settings), in.Hash)
+	j, err := s.components.Add(ctx, events.User(p.User.ID), clusterID, componentRequest(in.Engine, in.Nodes, in.Arbiter.Get, in.VipId.Get, in.Settings), in.Hash)
 	if err != nil {
 		s.componentError(w, r, err)
 		return
@@ -142,10 +142,13 @@ func (s *Server) RemoveClusterComponent(w http.ResponseWriter, r *http.Request, 
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func componentRequest(engine string, nodes []uuid.UUID, arbiter func() (uuid.UUID, error), settings *map[string]any) components.Request {
+func componentRequest(engine string, nodes []uuid.UUID, arbiter, vip func() (uuid.UUID, error), settings *map[string]any) components.Request {
 	req := components.Request{Engine: engine, Nodes: nodes, Settings: map[string]any{}}
 	if a, err := arbiter(); err == nil {
 		req.Arbiter = &a
+	}
+	if v, err := vip(); err == nil {
+		req.VIP = &v
 	}
 	if settings != nil {
 		req.Settings = *settings
@@ -181,6 +184,11 @@ func toAPIComponent(c components.Component) gen.ClusterComponent {
 	for _, n := range c.Nodes {
 		out.Nodes = append(out.Nodes, gen.ComponentNode{NodeId: n.NodeID, Hostname: n.Hostname, Role: n.Role, Index: n.Index})
 	}
+	var vip *gen.ComponentVIP
+	if v := c.VIP; v != nil {
+		vip = &gen.ComponentVIP{Id: v.ID, Address: v.Address, Nodes: nonNil(v.Nodes), Owner: v.Owner}
+	}
+	out.Vip = nullableOf(vip)
 	return out
 }
 
@@ -195,9 +203,14 @@ func toAPIComponentPlan(p components.Plan) gen.ComponentPlan {
 			NodeId: n.NodeID, Hostname: n.Hostname, Role: n.Role, Index: n.Index, Address: n.Address, Os: n.OS, PveType: n.PveType,
 			PveNode: n.PveNode, Vmid: n.VMID, MemoryBytes: n.MemoryBytes, MemoryUsedPct: nullableOf(float32Of(n.MemoryUsedPct)),
 			NeedBytes: n.NeedBytes, FreeAfterPct: nullableOf(float32Of(n.FreeAfterPct)), DiskFreeBytes: nullableOf(n.DiskFreeBytes),
-			DiskMount: n.DiskMount, Existing: n.Existing, Steps: nonNil(n.Steps),
+			DiskMount: n.DiskMount, Existing: n.Existing, Steps: nonNil(n.Steps), VipInstance: n.VIPInstance, VipDiff: n.VIPDiff,
 		})
 	}
+	var vip *gen.ComponentPlanVIP
+	if v := p.VIP; v != nil {
+		vip = &gen.ComponentPlanVIP{Id: v.ID, Address: v.Address, Owner: v.Owner}
+	}
+	out.Vip = nullableOf(vip)
 	for _, f := range p.Findings {
 		out.Findings = append(out.Findings, gen.ComponentFinding{
 			Level: f.Level, Code: f.Code, NodeId: nullableOf(f.NodeID), Hostname: f.Hostname, Message: f.Message, Command: f.Command,

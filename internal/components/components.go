@@ -117,9 +117,11 @@ type Service struct {
 
 	// Poll is de pauze tussen twee keer kijken of een node Synced is, en
 	// GateTimeout hoe lang dat mag duren. Een nieuwe node kopieert dan alle
-	// data, dus dat kan bij een grote database lang zijn.
+	// data, dus dat kan bij een grote database lang zijn. VIPTimeout is hoe
+	// lang het VIP na het herladen van keepalived weg mag zijn.
 	Poll        time.Duration
 	GateTimeout time.Duration
+	VIPTimeout  time.Duration
 	// Timeout is hoe lang een databaseverzoek aan een agent mag duren.
 	Timeout time.Duration
 	// Retry is de wachttijd tussen pogingen als een agent even weg is.
@@ -132,7 +134,7 @@ type Service struct {
 func NewService(pool *pgxpool.Pool, ev *events.Writer, log *slog.Logger, runner *jobs.Runner, bus Bus, dep *deploy.Service) *Service {
 	s := &Service{
 		pool: pool, q: store.New(pool), ev: ev, log: log, jobs: runner, bus: bus, dep: dep,
-		Poll: 3 * time.Second, GateTimeout: 30 * time.Minute, Timeout: 15 * time.Second, Retry: 10 * time.Second,
+		Poll: 3 * time.Second, GateTimeout: 30 * time.Minute, VIPTimeout: 2 * time.Minute, Timeout: 15 * time.Second, Retry: 10 * time.Second,
 		Fresh: 2 * time.Minute, Now: time.Now,
 	}
 	runner.Register(Kind, s.run)
@@ -151,6 +153,15 @@ type Spec struct {
 	Params   map[string]any        `json:"params"`
 	Secrets  []string              `json:"secrets"`
 	Nodes    []Node                `json:"nodes"`
+	// VIP is het VIP van de app dat de database volgt; nil zonder.
+	VIP *VIP `json:"vip,omitempty"`
+}
+
+func (s Spec) vipAddress() string {
+	if s.VIP == nil {
+		return ""
+	}
+	return s.VIP.Address
 }
 
 // Node is een node van een onderdeel, met zijn rol en volgnummer binnen die
@@ -240,11 +251,23 @@ type Component struct {
 	AppliedRevision *int
 	Params          map[string]any
 	Nodes           []Node
-	State           string
-	JobID           *uuid.UUID
-	JobError        string
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	// VIP is het VIP dat de database volgt, met de nodes die het in
+	// keepalived hebben en de node die het nu heeft; nil zonder.
+	VIP       *ComponentVIP
+	State     string
+	JobID     *uuid.UUID
+	JobError  string
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
+// ComponentVIP is het VIP van een onderdeel, voor het scherm.
+type ComponentVIP struct {
+	ID      uuid.UUID
+	Address string
+	Nodes   []string
+	// Owner is de node die het VIP nu heeft, leeg als niemand.
+	Owner string
 }
 
 // List geeft de onderdelen van een cluster.
@@ -253,11 +276,22 @@ func (s *Service) List(ctx context.Context, clusterID uuid.UUID) ([]Component, e
 	if err != nil {
 		return nil, err
 	}
+	vips, err := s.q.ListVIPsByCluster(ctx, clusterID)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]Component, 0, len(rows))
 	for _, r := range rows {
 		c, err := view(r.ClusterComponent)
 		if err != nil {
 			return nil, err
+		}
+		if c.VIP != nil {
+			for _, v := range vips {
+				if v.Vip.ID == c.VIP.ID {
+					c.VIP.Owner = deref(v.OwnerHostname)
+				}
+			}
 		}
 		running := r.JobStatus.Valid && (r.JobStatus.JobStatus == store.JobStatusQueued || r.JobStatus.JobStatus == store.JobStatusRunning)
 		failed := r.JobStatus.Valid && (r.JobStatus.JobStatus == store.JobStatusFailed || r.JobStatus.JobStatus == store.JobStatusCanceled)
@@ -291,6 +325,14 @@ func view(r store.ClusterComponent) (Component, error) {
 	if r.AppliedRevision != nil {
 		v := int(*r.AppliedRevision)
 		c.AppliedRevision = &v
+	}
+	if v := spec.VIP; v != nil {
+		c.VIP = &ComponentVIP{ID: v.ID, Address: v.Address, Nodes: []string{}}
+		for _, n := range spec.order() {
+			if slices.Contains(v.Nodes, n.NodeID) {
+				c.VIP.Nodes = append(c.VIP.Nodes, n.Hostname)
+			}
+		}
 	}
 	if tpl, ok := registry.Get(spec.Template.Name, spec.Template.Version); ok {
 		c.Title = tpl.Title

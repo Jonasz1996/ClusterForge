@@ -75,6 +75,7 @@ Het technisch ontwerp staat in [docs/design/mvp-fase-1.md](docs/design/mvp-fase-
 | 1. Databases lezen | cf-agent leest MariaDB en PostgreSQL op de node zelf (agentprotocol 9), alleen met vaste query's en zonder de inhoud van tabellen; een pagina Databases met per cluster een Galera-cluster, een primary met replica's of een losse server, de toestand van elke node in gewone woorden en de databases met hun grootte | klaar |
 | 2. Wie gebruikt welke database | De agent ziet elke minuut welke gebruiker vanaf welk adres met welke database verbonden is; ClusterForge koppelt de adressen aan nodes en clusters en toont per database wie haar de laatste dertig dagen gebruikte, met een waarschuwing als meer dan één cluster dat doet en of de afhankelijkheid in de graaf staat | klaar |
 | 3. Galera als onderdeel | Database toevoegen op een cluster dat er al is, ook met CT's: een plan per node met systeem, geheugen (met het `pct set`-commando als het krap wordt), schijf en Proxmox-host, en blokkades zoals twee nodes zonder scheidsrechter; daarna zet ClusterForge MariaDB Galera node voor node op en wacht na elke node tot hij Synced is; MariaDB komt in de graaf en de drift ziet een met de hand aangepaste configuratie | klaar |
+| 4. Het VIP van de app voor de database | Kies bij Database toevoegen het VIP van de app; keepalived zet het dan alleen op een node waarvan MariaDB mag schrijven (`cf-agent check db`), zodat de app altijd naar één node schrijft. Het plan toont per node de diff van keepalived.conf; ClusterForge past het bestand aan na `keepalived -t`, herlaadt node voor node met de eigenaar van het VIP laatst, en blokkeert een node met het VIP maar zonder database | klaar |
 
 ## Draaien met Docker Compose
 
@@ -760,7 +761,28 @@ De naam van het Galera-cluster is de slug van het cluster. SST gebruikt de gebru
 
 Daarna kent de drift de database: een met de hand aangepaste `99-clusterforge-galera.cnf` valt op, ook op een cluster zonder template of baseline. **Opnieuw toepassen** zet alles terug, node voor node; alleen op een node waar iets veranderde, herstart MariaDB, en ClusterForge wacht tot hij weer Synced is. Mislukt de taak, dan blijft staan wat al klaar was; los het op en kies Opnieuw toepassen. **Weghalen** kan zolang de database nooit helemaal gelukt is, en haalt haar alleen uit ClusterForge, niet van de nodes.
 
-De app verbindt nog met haar oude database; verhuizen komt in een volgende mijlpaal, net als een VIP voor de database en het vanzelf opkomen na een herstart van alle nodes.
+De app verbindt nog met haar oude database; verhuizen komt in een volgende mijlpaal, net als het vanzelf opkomen na een herstart van alle nodes.
+
+#### Het VIP van de app
+
+Kies bij Database toevoegen het VIP van de app, zoals `10.0.20.185` bij Nextcloud; heeft het cluster één VIP, dan staat dat al gekozen. De app verbindt dan met het VIP voor haar database, en keepalived zet het VIP alleen op een node waarvan MariaDB mag schrijven: Synced, in de Primary component van Galera en met `wsrep_ready` aan. Valt MariaDB op die node uit, loopt hij achter of is hij donor voor een nieuwe node, dan gaat het VIP binnen enkele seconden naar een andere node. Zo schrijft de app altijd naar één node, wat bij Galera conflicten op dezelfde rijen voorkomt, en er is geen HAProxy nodig.
+
+ClusterForge doet dat in de keepalived.conf die je zelf schreef, zonder de rest te veranderen:
+
+- in `/etc/keepalived/conf.d/clusterforge-db.conf` staat `vrrp_script cf_db`, die elke twee seconden `cf-agent check db` draait (exit 0 als MariaDB mag schrijven);
+- bovenaan keepalived.conf komt `include /etc/keepalived/conf.d/*.conf`, want keepalived moet het script kennen voor de `vrrp_instance` het noemt;
+- de `vrrp_instance` met het VIP krijgt `cf_db` in zijn `track_script`, naast wat er al stond, zoals `chk_apache`.
+
+Het plan toont per node de diff van keepalived.conf, met het wachtwoord van VRRP (`auth_pass`) verborgen. Het blokkeert als een andere node van het cluster het VIP ook in keepalived heeft maar geen database krijgt (dan zou het VIP daar kunnen belanden), als minder dan twee datanodes het VIP hebben, als keepalived ergens niet draait, of als het cluster uit een template komt: die zet keepalived.conf bij de volgende uitrol terug, dus dat komt later. Een scheidsrechter met het VIP krijgt de controle ook, zodat het VIP er nooit staat.
+
+Na de nodes krijgt elke node met het VIP een eigen stap: het bestand, de aanpassing van keepalived.conf (alleen als `keepalived -t` de nieuwe versie goedkeurt; anders verandert er niets) en `systemctl reload keepalived`, met de node die het VIP nu heeft als laatste. Na elke stap wacht ClusterForge tot het VIP weer op een node staat, en Controleren eist dat het op precies één datanode staat. Daarna ziet de drift een aangepaste `clusterforge-db.conf`, en Opnieuw toepassen zet hem terug en herlaadt keepalived alleen op die node.
+
+Zelf controleren op een node:
+
+```sh
+cf-agent check db; echo $?          # 0 = deze node mag het VIP hebben
+journalctl -u keepalived | grep cf_db
+```
 
 ### Hoe ClusterForge de databases leest
 

@@ -38,6 +38,8 @@ type Request struct {
 	// Settings zijn de parameters van het onderdeel zonder geheimen, zoals
 	// buffer_pool en max_connections; wat ontbreekt, krijgt de standaard.
 	Settings map[string]any
+	// VIP is het VIP van de app dat de database volgt; nil voor geen.
+	VIP *uuid.UUID
 }
 
 // Niveaus van een bevinding in het plan.
@@ -89,6 +91,18 @@ type PlanNode struct {
 	Existing string
 	// Steps zijn de stappen op deze node, in woorden.
 	Steps []string
+	// VIPInstance is de vrrp_instance met het VIP, VIPDiff wat
+	// ClusterForge in keepalived.conf verandert (zonder auth_pass); leeg
+	// als het VIP niet op deze node staat of er al bij hoort.
+	VIPInstance string
+	VIPDiff     string
+}
+
+// PlanVIP is het VIP dat de database volgt, met de node die het nu heeft.
+type PlanVIP struct {
+	ID      uuid.UUID
+	Address string
+	Owner   string
 }
 
 // Plan is wat 'Database toevoegen' zou doen.
@@ -105,6 +119,7 @@ type Plan struct {
 	// staat er als plaatshouder.
 	Params   map[string]any
 	Nodes    []PlanNode
+	VIP      *PlanVIP
 	Findings []Finding
 	Blocked  bool
 	// Hash vat het plan samen; uitrollen kan alleen met dezelfde hash.
@@ -123,34 +138,40 @@ const maxData = 9
 
 // Plan bekijkt wat 'Database toevoegen' zou doen. Er verandert niets.
 func (s *Service) Plan(ctx context.Context, clusterID uuid.UUID, req Request) (Plan, error) {
+	p, _, err := s.plan(ctx, clusterID, req)
+	return p, err
+}
+
+// plan is Plan met de spec erbij, zonder geheimen.
+func (s *Service) plan(ctx context.Context, clusterID uuid.UUID, req Request) (Plan, Spec, error) {
 	c, err := s.q.GetCluster(ctx, clusterID)
 	if err != nil {
-		return Plan{}, err
+		return Plan{}, Spec{}, err
 	}
 	name, ok := Templates[req.Engine]
 	if !ok {
 		if req.Engine == protocol.DBPostgreSQL {
-			return Plan{}, &InvalidError{"engine", "PostgreSQL met Patroni komt in een volgende mijlpaal; kies voorlopig MariaDB"}
+			return Plan{}, Spec{}, &InvalidError{"engine", "PostgreSQL met Patroni komt in een volgende mijlpaal; kies voorlopig MariaDB"}
 		}
-		return Plan{}, &InvalidError{"engine", "kies mariadb"}
+		return Plan{}, Spec{}, &InvalidError{"engine", "kies mariadb"}
 	}
 	tpl, _ := registry.Latest(name)
 	for k := range req.Settings {
 		if slices.Contains(tpl.Secrets(), k) {
-			return Plan{}, &InvalidError{k, "dit wachtwoord maakt ClusterForge zelf"}
+			return Plan{}, Spec{}, &InvalidError{k, "dit wachtwoord maakt ClusterForge zelf"}
 		}
 	}
 	params, err := tpl.MaskedValues(req.Settings)
 	if err != nil {
 		var fe templates.FieldError
 		if errors.As(err, &fe) {
-			return Plan{}, &InvalidError{fe.Field, fe.Msg}
+			return Plan{}, Spec{}, &InvalidError{fe.Field, fe.Msg}
 		}
-		return Plan{}, err
+		return Plan{}, Spec{}, err
 	}
 	cands, err := s.q.ListComponentCandidates(ctx, &clusterID)
 	if err != nil {
-		return Plan{}, err
+		return Plan{}, Spec{}, err
 	}
 	byID := map[uuid.UUID]store.ListComponentCandidatesRow{}
 	states := map[uuid.UUID]deploy.NodeState{}
@@ -160,11 +181,11 @@ func (s *Service) Plan(ctx context.Context, clusterID uuid.UUID, req Request) (P
 	}
 	spec, err := specOf(c, tpl, req, params, hostnames)
 	if err != nil {
-		return Plan{}, err
+		return Plan{}, Spec{}, err
 	}
 	for _, n := range spec.Nodes {
 		if _, ok := byID[n.NodeID]; !ok {
-			return Plan{}, &InvalidError{"nodes", "die node hoort niet bij dit cluster"}
+			return Plan{}, Spec{}, &InvalidError{"nodes", "die node hoort niet bij dit cluster"}
 		}
 	}
 	p := Plan{
@@ -182,7 +203,7 @@ func (s *Service) Plan(ctx context.Context, clusterID uuid.UUID, req Request) (P
 	// Het cluster.
 	existing, err := s.q.ListClusterComponents(ctx, clusterID)
 	if err != nil {
-		return Plan{}, err
+		return Plan{}, Spec{}, err
 	}
 	if slices.ContainsFunc(existing, func(r store.ListClusterComponentsRow) bool { return r.ClusterComponent.Engine == req.Engine }) {
 		add(Blocked, "exists", nil, fmt.Sprintf("%s heeft al een %s; een cluster heeft er hoogstens één", c.Name, tpl.Title), "")
@@ -285,9 +306,12 @@ func (s *Service) Plan(ctx context.Context, clusterID uuid.UUID, req Request) (P
 		add(Blocked, "os_mixed", nil, "alle nodes moeten dezelfde Debian hebben, want elke Debian heeft een andere MariaDB: "+strings.Join(parts, ", "), "")
 	}
 	checkHosts(spec, byID, add)
+	if err := s.planVIP(ctx, c, req, &p, &spec, byID, states, add); err != nil {
+		return Plan{}, Spec{}, err
+	}
 	p.Blocked = slices.ContainsFunc(p.Findings, func(f Finding) bool { return f.Level == Blocked })
 	p.Hash = planHash(p, spec)
-	return p, nil
+	return p, spec, nil
 }
 
 // specOf maakt de spec uit de keuze van de gebruiker. params zijn de
@@ -582,8 +606,9 @@ func planHash(p Plan, spec Spec) string {
 		Version  string         `json:"version"`
 		Params   map[string]any `json:"params"`
 		Nodes    []node         `json:"nodes"`
+		VIP      string         `json:"vip"`
 		Findings []finding      `json:"findings"`
-	}{Cluster: p.ClusterID, Slug: p.Slug, Template: p.Template, Version: p.Version, Params: p.Params}
+	}{Cluster: p.ClusterID, Slug: p.Slug, Template: p.Template, Version: p.Version, Params: p.Params, VIP: vipHash(p, spec)}
 	for i, n := range spec.Nodes {
 		v.Nodes = append(v.Nodes, node{n.NodeID, n.Role, n.Index, p.Nodes[i].Address})
 	}
@@ -598,7 +623,7 @@ func planHash(p Plan, spec Spec) string {
 // Add voegt de database toe en zet de uitrol in de wachtrij, als het plan
 // nog hetzelfde is als wat de gebruiker zag en niets het tegenhoudt.
 func (s *Service) Add(ctx context.Context, actor events.Actor, clusterID uuid.UUID, req Request, hash string) (store.Job, error) {
-	p, err := s.Plan(ctx, clusterID, req)
+	p, planned, err := s.plan(ctx, clusterID, req)
 	if err != nil {
 		return store.Job{}, err
 	}
@@ -629,6 +654,7 @@ func (s *Service) Add(ctx context.Context, actor events.Actor, clusterID uuid.UU
 	if err != nil {
 		return store.Job{}, err
 	}
+	spec.VIP = planned.VIP
 	b, err := json.Marshal(spec)
 	if err != nil {
 		return store.Job{}, err
@@ -672,7 +698,7 @@ func (s *Service) Add(ctx context.Context, actor events.Actor, clusterID uuid.UU
 			Actor: actor, SubjectType: "cluster", SubjectID: clusterID.String(), ClusterID: &clusterID, Action: "cluster.database_added",
 			Payload: map[string]any{
 				"name": c.Name, "engine": req.Engine, "component": tpl.Title, "version": tpl.Version, "nodes": spec.hosts(RoleData),
-				"arbiter": spec.hosts(RoleArbiter), "params": spec.Params, "job_id": j.ID, "title": j.Title,
+				"arbiter": spec.hosts(RoleArbiter), "params": spec.Params, "vip": spec.vipAddress(), "job_id": j.ID, "title": j.Title,
 			},
 		})
 	})

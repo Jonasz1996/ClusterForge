@@ -168,6 +168,10 @@ vrrp_instance VI_DB
     {
         10.0.30.100
     }
+    track_script {
+        chk_mariadb weight -20
+        cf_db
+    }
 }
 `
 	got := parseKeepalivedInstances(conf)
@@ -176,11 +180,11 @@ vrrp_instance VI_DB
 	}
 	a, b := got[0], got[1]
 	if a.Name != "VI_WEB" || a.Interface != "eth0" || a.VRID != 51 || a.State != "MASTER" || a.Priority != 150 ||
-		!slices.Equal(a.Peers, []string{"10.0.10.12", "10.0.10.13"}) || !slices.Equal(a.VIPs, []string{"10.0.10.100"}) {
+		!slices.Equal(a.Peers, []string{"10.0.10.12", "10.0.10.13"}) || !slices.Equal(a.VIPs, []string{"10.0.10.100"}) || !slices.Equal(a.TrackScripts, []string{"chk_nginx"}) {
 		t.Errorf("VI_WEB: %+v", a)
 	}
 	if b.Name != "VI_DB" || b.Interface != "vmbr0.30" || b.VRID != 52 || b.State != "BACKUP" || b.Peers != nil ||
-		!slices.Equal(b.VIPs, []string{"10.0.30.100"}) {
+		!slices.Equal(b.VIPs, []string{"10.0.30.100"}) || !slices.Equal(b.TrackScripts, []string{"chk_mariadb", "cf_db"}) {
 		t.Errorf("VI_DB: %+v", b)
 	}
 }

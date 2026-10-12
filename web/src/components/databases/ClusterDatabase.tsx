@@ -126,6 +126,13 @@ function Component({ c, comp, isAdmin }: { c: ClusterDetail; comp: ClusterCompon
           </tbody>
         </table>
       </div>
+      {comp.vip && (
+        <p className="text-slate-600 dark:text-slate-400">
+          VIP <span className="font-mono">{comp.vip.address}</span>
+          {comp.vip.owner ? ` staat op ${comp.vip.owner}` : " staat op geen enkele node"} en volgt de database op{" "}
+          {comp.vip.nodes.join(", ")}: keepalived zet het alleen op een node waarvan MariaDB mag schrijven.
+        </p>
+      )}
       {settings.length > 0 && (
         <p className="text-slate-600 dark:text-slate-400">
           Instellingen:{" "}

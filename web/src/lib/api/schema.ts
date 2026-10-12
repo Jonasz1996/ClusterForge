@@ -3671,6 +3671,8 @@ export interface components {
                 [key: string]: unknown;
             };
             nodes: components["schemas"]["ComponentNode"][];
+            /** @description Het VIP van de app dat de database volgt; null zonder */
+            vip: components["schemas"]["ComponentVIP"] | null;
             /** @description installing, applying, ready of failed */
             state: string;
             /**
@@ -3684,6 +3686,22 @@ export interface components {
             created_at: string;
             /** Format: date-time */
             updated_at: string;
+        };
+        ComponentVIP: {
+            /** Format: uuid */
+            id: string;
+            address: string;
+            /** @description De nodes van de database die het VIP in keepalived hebben */
+            nodes: string[];
+            /** @description De node die het VIP nu heeft; leeg als niemand */
+            owner: string;
+        };
+        ComponentPlanVIP: {
+            /** Format: uuid */
+            id: string;
+            address: string;
+            /** @description De node die het VIP nu heeft; leeg als niemand */
+            owner: string;
         };
         ComponentNode: {
             /** Format: uuid */
@@ -3707,6 +3725,11 @@ export interface components {
             settings?: {
                 [key: string]: unknown;
             };
+            /**
+             * Format: uuid
+             * @description Het VIP van de app: keepalived zet het dan alleen op een node waarvan de database mag schrijven
+             */
+            vip_id?: string | null;
         };
         ComponentApplyInput: components["schemas"]["ComponentInput"] & {
             /** @description De hash van het plan dat je zag */
@@ -3733,6 +3756,7 @@ export interface components {
                 [key: string]: unknown;
             };
             nodes: components["schemas"]["ComponentPlanNode"][];
+            vip: components["schemas"]["ComponentPlanVIP"] | null;
             findings: components["schemas"]["ComponentFinding"][];
             /** @description Iets houdt het tegen; uitrollen kan niet */
             blocked: boolean;
@@ -3768,6 +3792,10 @@ export interface components {
             /** @description Wat er al aan MariaDB draait */
             existing: string;
             steps: string[];
+            /** @description De vrrp_instance met het VIP; leeg als het VIP niet op deze node staat */
+            vip_instance: string;
+            /** @description Wat ClusterForge in keepalived.conf verandert, als unified diff zonder auth_pass; leeg als er niets verandert */
+            vip_diff: string;
         };
         ComponentTemplate: {
             /** @enum {string} */
