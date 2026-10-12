@@ -155,9 +155,9 @@ backup: { at: "02:00", keep_days: 7 }
 
 De stappen staan in ingebouwde onderdelen in hetzelfde formaat als templates, `mariadb-galera` en `postgresql-patroni`, maar zonder VM's en rollen. De wachtwoorden voor de replicatie en de REST-API van Patroni zijn `secret`-parameters die ClusterForge zelf maakt. SST bij Galera heeft geen wachtwoord nodig: mariabackup logt in als de gebruiker `mysql` via de socket (`unix_socket`), die MariaDB zelf aanmaakt. Toepassen gaat met de bestaande uitroltaak, node voor node, met de gezondheidspoort na elke node. Die poort kijkt nu ook naar de database: Galera Synced met de verwachte clustergrootte, of Patroni running met een replica die bij is.
 
-De drift kent het onderdeel. Een met de hand aangepaste `60-galera.cnf` valt dus op, ook op een cluster met een baseline. Een nieuw cluster uit een template kan het onderdeel meteen krijgen: 'Cluster uitrollen' heeft een stap 'Database erbij', en de uitrol voegt het toe nadat de VM's klaar zijn.
+De drift kent het onderdeel. Een met de hand aangepaste `99-clusterforge-galera.cnf` valt dus op, ook op een cluster met een baseline. Een nieuw cluster uit een template kan het onderdeel meteen krijgen: 'Cluster uitrollen' heeft een stap 'Database erbij', en de uitrol voegt het toe nadat de VM's klaar zijn.
 
-**MariaDB Galera.** De stappen installeren `mariadb-server`, `mariadb-backup` en `galera-4`, en schrijven `/etc/mysql/mariadb.conf.d/60-galera.cnf` met onder meer:
+**MariaDB Galera.** De stappen installeren `mariadb-server`, `mariadb-backup` en `galera-4`, en schrijven `/etc/mysql/mariadb.conf.d/99-clusterforge-galera.cnf` (een eigen bestand, zodat het `60-galera.cnf` van het Debian-pakket ongemoeid blijft en een update van MariaDB niets vraagt) met onder meer:
 
 - `wsrep_on`, de provider, `wsrep_cluster_name` (de slug) en `wsrep_cluster_address` met de adressen van de nodes;
 - `wsrep_sst_method=mariabackup` met `wsrep_sst_auth=mysql:`, dus via de socket en zonder wachtwoord op de node;
@@ -375,7 +375,7 @@ De eerste echte uitrol en verhuizing gebeuren op Jonas' Proxmox. Daarom begint h
 | --- | --- | --- | --- |
 | 1 | Databases lezen | Agentprotocol 9. Het menu Databases toont elke MariaDB en PostgreSQL met versie, rol, toestand van Galera of Patroni, en de databases met grootte. Het gedeelde cluster db1 tot db3 staat erin. Een test bevestigt dat geen wachtwoord of rij de agent verlaat. | M |
 | 2 | Wie gebruikt welke database | Per database de clusters en nodes die haar gebruiken, ook cronjobs van de laatste dertig dagen. Een database van meer dan één cluster krijgt een waarschuwing. De graaf krijgt voorstellen. | M |
-| 3 | Onderdeel MariaDB Galera | 'Database toevoegen' op een cluster met drie nodes, ook CT's, geeft drie nodes Synced. Het plan toont geheugen, schijf en hosts per node. Twee nodes kan alleen met een scheidsrechter. Een nieuw cluster kan de database meteen krijgen. Drift ziet een gewijzigde `60-galera.cnf`. | L |
+| 3 | Onderdeel MariaDB Galera | 'Database toevoegen' op een cluster met drie nodes, ook CT's, geeft drie nodes Synced. Het plan toont geheugen, schijf en hosts per node. Twee nodes kan alleen met een scheidsrechter. Een nieuw cluster kan de database meteen krijgen. Drift ziet een gewijzigde `99-clusterforge-galera.cnf`. | L |
 | 4 | VIP voor de database | Een gedeeld VIP volgt de app en Galera: stopt MariaDB op de VIP-eigenaar, dan gaat het VIP binnen enkele seconden naar een andere node. Een eigen VIP werkt ook. Het plan toont de diff van een zelfgebouwde `keepalived.conf`. | M |
 | 5 | Opkomen na een herstart | Een node die herstart, sluit vanzelf weer aan. Na een volledige uitval start ClusterForge het cluster zelf zodra alle datanodes terug zijn, op de node met de nieuwste data; ontbreekt er een, dan wacht het en vraagt het Jonas. In CI herstarten drie echte MariaDB-containers één voor één en allemaal tegelijk, en niets gaat verloren. | M |
 | 6 | Databases en gebruikers | Een database met gebruiker aanmaken toont één keer het wachtwoord en de instellingen. Gebruikers en rechten staan in de lijst. Weghalen vraagt de naam. | M |
