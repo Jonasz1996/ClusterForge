@@ -15,6 +15,7 @@ const nav: NavItem[] = [
   { href: "/clusters", label: "Clusters" },
   { href: "/nodes", label: "Nodes" },
   { href: "/kubernetes", label: "Kubernetes" },
+  { href: "/databases", label: "Databases" },
   { href: "/monitoring", label: "Monitoring" },
   { href: "/incidenten", label: "Incidenten" },
   { href: "/risico", label: "Risico" },

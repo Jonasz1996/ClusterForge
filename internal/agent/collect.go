@@ -27,6 +27,9 @@ var WatchedServices = []string{
 	"cf-app",
 	// Kubernetes: k3s op een server, k3s-agent op een worker.
 	"k3s", "k3s-agent",
+	// Databaseclusters: Patroni met etcd voor PostgreSQL, en garb, de
+	// scheidsrechter van Galera.
+	"patroni", "etcd", "garb",
 }
 
 // WatchedPatterns zijn units met een variabel deel. postgresql.service is op

@@ -2751,6 +2751,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/databases": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * De MariaDB- en PostgreSQL-servers die de agents melden
+         * @description ClusterForge vraagt elke minuut elke node met een databaseserver naar
+         *     zijn status, via agentprotocol 9. De servers staan gegroepeerd per
+         *     cluster en engine, zoals een Galera-cluster of een primary met zijn
+         *     replica's. Alleen catalogus- en statusgegevens, nooit een rij uit een
+         *     tabel. Ook voor viewers.
+         */
+        get: operations["listDatabases"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/kubernetes/clusters": {
         parameters: {
             query?: never;
@@ -3509,6 +3533,108 @@ export interface components {
         Preferences: {
             /** @description De leermodus in het dashboard Kubernetes: uitleg en kubectl-commando's */
             kube_learning: boolean;
+        };
+        /** @description Eén databasecluster, de servers van één engine in één cluster, of één losse node. */
+        DatabaseGroup: {
+            /** @description Uniek per groep, voor de webinterface */
+            key: string;
+            /** Format: uuid */
+            cluster_id: string | null;
+            cluster_name: string;
+            cluster_slug: string;
+            cluster_environment: components["schemas"]["Environment"] | null;
+            /** @enum {string} */
+            engine: "mariadb" | "postgresql";
+            /**
+             * @description Galera, PostgreSQL met Patroni, een primary met replica's, of losse servers
+             * @enum {string}
+             */
+            kind: "galera" | "patroni" | "replication" | "single";
+            /** @enum {string} */
+            health: "ok" | "warning" | "down" | "unknown";
+            /** @description In één zin hoe het ervoor staat */
+            summary: string;
+            /** @description De versie, of meer versies met komma's */
+            version: string;
+            servers: components["schemas"]["DatabaseServer"][];
+            databases: components["schemas"]["DatabaseInfo"][];
+            /** @description De node waarvan de lijst met databases komt */
+            databases_from: string;
+            /** @description Het aantal databases; de lijst toont er hoogstens 500 */
+            databases_total: number;
+        };
+        DatabaseServer: {
+            /** Format: uuid */
+            node_id: string;
+            hostname: string;
+            /** @description De systemd-unit, zoals mariadb, postgresql@17-main of patroni */
+            unit: string;
+            /** @description Wat systemd over die unit zegt */
+            active: string;
+            /** @description De server antwoordde via de socket */
+            running: boolean;
+            version: string;
+            /** @description member (Galera), primary, replica of standalone; leeg als onbekend */
+            role: string;
+            read_only: boolean;
+            connections: number;
+            max_connections: number;
+            /** @description In een paar woorden, zoals Synced of replica van 10.0.20.186 */
+            state: string;
+            ok: boolean;
+            error: string;
+            /** @description Waarom ClusterForge het de agent niet kon vragen: old_agent, offline, no_answer of agent; leeg als hij antwoordde */
+            error_kind: string;
+            /** Format: date-time */
+            synced_at: string;
+            /**
+             * Format: date-time
+             * @description Wanneer de agent het laatst antwoordde
+             */
+            ok_at: string | null;
+            galera: components["schemas"]["DatabaseGalera"] | null;
+            patroni: components["schemas"]["DatabasePatroni"] | null;
+            /** @description De replicatie van een replica */
+            source: components["schemas"]["DatabaseSource"] | null;
+            replicas: components["schemas"]["DatabaseReplica"][];
+        };
+        DatabaseGalera: {
+            cluster_name: string;
+            /** @description Primary, Non-Primary of Disconnected */
+            cluster_status: string;
+            cluster_size: number;
+            /** @description Synced, Donor/Desynced, Joining en zo */
+            state: string;
+            ready: boolean;
+            members: string[];
+        };
+        DatabasePatroni: {
+            scope: string;
+            role: string;
+            state: string;
+            timeline: number;
+            error: string;
+        };
+        DatabaseSource: {
+            host: string;
+            running: boolean;
+            /** Format: int64 */
+            lag_seconds: number | null;
+            error: string;
+        };
+        DatabaseReplica: {
+            address: string;
+            state: string;
+            sync: string;
+            /** Format: int64 */
+            lag_bytes: number;
+        };
+        DatabaseInfo: {
+            name: string;
+            /** Format: int64 */
+            size_bytes: number;
+            /** @description -1 als het aantal niet te lezen was */
+            tables: number;
         };
         KubeClusterSummary: {
             /** Format: uuid */
@@ -12350,6 +12476,29 @@ export interface operations {
             400: components["responses"]["Error"];
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
+        };
+    };
+    listDatabases: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["DatabaseGroup"][];
+                    };
+                };
+            };
+            401: components["responses"]["Error"];
         };
     };
     listKubeClusters: {

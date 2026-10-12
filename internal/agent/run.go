@@ -55,6 +55,9 @@ type Agent struct {
 	// KubeletHealthz is de healthz van de kubelet; leeg is die op
 	// 127.0.0.1:10248. Tests vervangen het.
 	KubeletHealthz string
+	// PatroniURL is de REST-API van Patroni; leeg is DefaultPatroniURL.
+	// Tests vervangen het.
+	PatroniURL string
 
 	nc    *nats.Conn
 	conns ConnTracker
@@ -68,6 +71,7 @@ type Agent struct {
 	stateMu sync.Mutex
 	faults  *Faults
 	kube    *kubeBridge
+	db      *dbState
 }
 
 // Connect verbindt met NATS. Is de server nog niet bereikbaar, dan blijft de
@@ -144,7 +148,10 @@ func (a *Agent) Connect() error {
 	if _, err = a.nc.Subscribe(protocol.Subject(a.Config.NodeID, protocol.SubjectCommands), a.onCommand); err != nil {
 		return err
 	}
-	_, err = a.nc.Subscribe(protocol.Subject(a.Config.NodeID, protocol.SubjectKube), a.onKube)
+	if _, err = a.nc.Subscribe(protocol.Subject(a.Config.NodeID, protocol.SubjectKube), a.onKube); err != nil {
+		return err
+	}
+	_, err = a.nc.Subscribe(protocol.Subject(a.Config.NodeID, protocol.SubjectDB), a.onDB)
 	return err
 }
 
