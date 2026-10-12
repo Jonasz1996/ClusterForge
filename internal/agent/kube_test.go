@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -70,7 +71,12 @@ func kubeAgent(t *testing.T) (*Agent, *kubefake.Server) {
 
 func kubeRead(t *testing.T, a *Agent, path string, query map[string]string) protocol.KubeResponse {
 	t.Helper()
-	body, err := json.Marshal(protocol.KubeRequest{ID: "k1", Op: protocol.KubeRead, Path: path, Query: query})
+	return kubeDo(t, a, protocol.KubeRead, path, query)
+}
+
+func kubeDo(t *testing.T, a *Agent, op, path string, query map[string]string) protocol.KubeResponse {
+	t.Helper()
+	body, err := json.Marshal(protocol.KubeRequest{ID: "k1", Op: op, Path: path, Query: query})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -359,5 +365,107 @@ func TestKubeFacts(t *testing.T) {
 	fake.SetKubelet(true)
 	if f := b.kubeFacts(ctx, "leren-worker-01"); f == nil || f.Role != "agent" || f.APIReady || !f.KubeletReady {
 		t.Fatalf("worker: %+v", f)
+	}
+}
+
+// De log van een container gaat als tekst terug, met hoogstens 5000 regels
+// en 2 MB; alleen het pad log van een pod mag.
+func TestKubeBridgeLogs(t *testing.T) {
+	a, fake := kubeAgent(t)
+	fake.Add(kubefake.Namespace("demo"),
+		kubefake.Pod(kubefake.PodSpec{Namespace: "demo", Name: "web-1", Node: "leren-worker-01", Waiting: "CrashLoopBackOff", Restarts: 3}),
+		kubefake.Pod(kubefake.PodSpec{Namespace: "demo", Name: "web-2", Node: "leren-worker-01"}))
+	fake.SetLog("demo", "web-1", "main", false, "start", "verbinden met db", "fout: db onbereikbaar")
+	fake.SetLog("demo", "web-1", "main", true, "start", "paniek: geen geheugen")
+	const path = "/api/v1/namespaces/demo/pods/web-1/log"
+
+	text := func(res protocol.KubeResponse) string {
+		t.Helper()
+		var s string
+		if res.Status != 200 || json.Unmarshal(res.Body, &s) != nil {
+			t.Fatalf("log: %+v %s", res, res.Body)
+		}
+		return s
+	}
+	if got := text(kubeDo(t, a, protocol.KubeLogs, path, nil)); got != "start\nverbinden met db\nfout: db onbereikbaar\n" {
+		t.Fatalf("log: %q", got)
+	}
+	if got := text(kubeDo(t, a, protocol.KubeLogs, path, map[string]string{"tailLines": "1", "container": "main"})); got != "fout: db onbereikbaar\n" {
+		t.Fatalf("laatste regel: %q", got)
+	}
+	if got := text(kubeDo(t, a, protocol.KubeLogs, path, map[string]string{"previous": "true"})); got != "start\npaniek: geen geheugen\n" {
+		t.Fatalf("vorige: %q", got)
+	}
+	got := text(kubeDo(t, a, protocol.KubeLogs, path, map[string]string{"timestamps": "true", "tailLines": "1"}))
+	if ts, rest, _ := strings.Cut(got, " "); rest != "fout: db onbereikbaar\n" || !strings.HasPrefix(ts, "20") {
+		t.Fatalf("met tijden: %q", got)
+	}
+	// Een fout van de API komt als JSON terug, met de status.
+	res := kubeDo(t, a, protocol.KubeLogs, "/api/v1/namespaces/demo/pods/web-2/log", map[string]string{"previous": "true"})
+	if res.Status != 400 || !strings.Contains(string(res.Body), "previous terminated container") {
+		t.Fatalf("geen vorige: %+v %s", res, res.Body)
+	}
+	limited := false
+	for _, r := range fake.Requests() {
+		if strings.HasPrefix(r, "GET "+path) && strings.Contains(r, "tailLines=500") {
+			limited = true
+		}
+	}
+	if !limited {
+		t.Fatalf("zonder grenzen gevraagd: %v", fake.Requests())
+	}
+
+	// Van een te grote log blijven de nieuwste regels over, ook als hij
+	// gecomprimeerd niet in een bericht past.
+	rnd := rand.New(rand.NewPCG(1, 2))
+	for _, c := range []struct {
+		name string
+		line func(i int) string
+	}{
+		{"herhalend", func(i int) string { return fmt.Sprintf("regel %04d %s", i, strings.Repeat("x", 990)) }},
+		{"willekeurig", func(i int) string {
+			b := make([]byte, 750)
+			for j := range b {
+				b[j] = byte(rnd.Uint32())
+			}
+			return fmt.Sprintf("regel %04d %s", i, base64.StdEncoding.EncodeToString(b))
+		}},
+	} {
+		lines := make([]string, 3000)
+		for i := range lines {
+			lines[i] = c.line(i)
+		}
+		fake.SetLog("demo", "web-2", "main", false, lines...)
+		got := text(kubeDo(t, a, protocol.KubeLogs, "/api/v1/namespaces/demo/pods/web-2/log", map[string]string{"tailLines": "5000"}))
+		rest, ok := strings.CutPrefix(got, protocol.KubeLogTrimmed)
+		if !ok || len(rest) > protocol.KubeMaxLogBytes || !strings.HasSuffix(rest, lines[2999]+"\n") || !strings.HasPrefix(rest, "regel ") {
+			t.Fatalf("%s: %d bytes, begint met %.40q", c.name, len(got), got)
+		}
+	}
+
+	before := len(fake.Requests())
+	for _, c := range []struct {
+		path  string
+		query map[string]string
+	}{
+		{"/api/v1/namespaces/demo/pods/web-1/exec", nil},
+		{"/api/v1/namespaces/demo/pods/web-1/attach", nil},
+		{"/api/v1/namespaces/demo/pods/web-1", nil},
+		{"/api/v1/namespaces/demo/secrets/db/log", nil},
+		{"/api/v1/nodes/leren-worker-01/proxy/logs", nil},
+		{"/apis/apps/v1/namespaces/demo/deployments/web/log", nil},
+		{path, map[string]string{"follow": "true"}},
+		{path, map[string]string{"tailLines": "0"}},
+		{path, map[string]string{"tailLines": "5001"}},
+		{path, map[string]string{"limitBytes": "999999999"}},
+		{path, map[string]string{"container": "../main"}},
+		{path, map[string]string{"previous": "ja"}},
+	} {
+		if res := kubeDo(t, a, protocol.KubeLogs, c.path, c.query); res.Status != 0 || res.Error == "" {
+			t.Errorf("%s %v: %+v", c.path, c.query, res)
+		}
+	}
+	if after := fake.Requests()[before:]; len(after) > 0 {
+		t.Fatalf("de API kreeg %v", after)
 	}
 }

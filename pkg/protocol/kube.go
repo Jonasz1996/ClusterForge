@@ -30,6 +30,9 @@ const (
 	// KubeRead is een GET op de API: discovery, /version, /readyz, en get of
 	// list van elk soort object, ook de status ervan.
 	KubeRead = "read"
+	// KubeLogs leest de laatste regels van een container in een pod, ook
+	// van de vorige als hij herstartte. Body is de tekst als JSON-string.
+	KubeLogs = "logs"
 )
 
 // KubeRequest is een verzoek aan de Kubernetes-API via de agent. De server
@@ -42,7 +45,8 @@ type KubeRequest struct {
 	// /api/v1/namespaces/demo/pods.
 	Path string `json:"path"`
 	// Query zijn de queryparameters. Bij lezen kent de agent alleen
-	// labelSelector, fieldSelector, limit en continue.
+	// labelSelector, fieldSelector, limit en continue; bij logs container,
+	// previous, tailLines en timestamps.
 	Query map[string]string `json:"query,omitempty"`
 	// Deadline: na dit tijdstip weigert de agent het verzoek.
 	Deadline time.Time `json:"deadline"`
@@ -75,7 +79,15 @@ const (
 	// lijst, KubeMaxPage het hoogste.
 	KubePageSize = 250
 	KubeMaxPage  = 500
+	// KubeMaxLogLines is het hoogste aantal logregels per verzoek, en
+	// KubeMaxLogBytes hoeveel bytes log de agent hoogstens leest.
+	KubeMaxLogLines = 5000
+	KubeMaxLogBytes = 2 << 20
 )
+
+// KubeLogTrimmed staat voor een log waarvan de agent de oudste regels
+// wegliet, omdat hij groter was dan KubeMaxLogBytes of dan een bericht.
+const KubeLogTrimmed = "[ClusterForge: oudere regels weggelaten, de log is te groot]\n"
 
 // KubeFacts beschrijft k3s op de node; vanaf protocol 8. Ze zijn nil als er
 // geen k3s op de node staat.

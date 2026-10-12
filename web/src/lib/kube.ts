@@ -13,6 +13,14 @@ export type KubeWorkload = components["schemas"]["KubeWorkload"];
 export type KubePod = components["schemas"]["KubePod"];
 export type KubeEvent = components["schemas"]["KubeEvent"];
 export type KubeUsage = components["schemas"]["KubeUsage"];
+export type KubeRef = components["schemas"]["KubeRef"];
+export type KubeObject = components["schemas"]["KubeObject"];
+export type KubeChainLink = components["schemas"]["KubeChainLink"];
+export type KubeContainer = components["schemas"]["KubeContainer"];
+export type KubeResourceType = components["schemas"]["KubeResourceType"];
+export type KubeNetwork = components["schemas"]["KubeNetwork"];
+export type KubeStorage = components["schemas"]["KubeStorage"];
+export type KubeConfig = components["schemas"]["KubeConfig"];
 
 type Tone = "slate" | "green" | "amber" | "red" | "blue";
 
@@ -26,7 +34,19 @@ const keys = {
   nodes: (id: string) => ["kube", id, "nodes"] as const,
   workloads: (id: string, ns: string, system: boolean) => ["kube", id, "workloads", ns, system] as const,
   pods: (id: string, ns: string, system: boolean, node: string) => ["kube", id, "pods", ns, system, node] as const,
+  list: (id: string, what: string, ns: string, system: boolean) => ["kube", id, what, ns, system] as const,
+  resources: (id: string) => ["kube", id, "resources"] as const,
+  objects: (id: string, g: string, v: string, r: string, ns: string, system: boolean) =>
+    ["kube", id, "objects", g, v, r, ns, system] as const,
+  object: (id: string, ref: KubeRef) => ["kube", id, "object", ref] as const,
+  logs: (id: string, ns: string, pod: string, o: LogOptions) => ["kube", id, "logs", ns, pod, o] as const,
 };
+
+// scope is de query van een tabblad met een namespace en het vinkje
+// Systeem tonen.
+function scope(namespace: string, system: boolean) {
+  return { namespace: namespace || undefined, system: system || undefined };
+}
 
 export function useKubeClusters() {
   return useQuery({
@@ -92,6 +112,209 @@ export function useKubePods(id: string, namespace: string, system: boolean, node
     placeholderData: keepPreviousData,
     retry: false,
   });
+}
+
+export function useKubeNetwork(id: string, namespace: string, system: boolean) {
+  return useQuery({
+    queryKey: keys.list(id, "network", namespace, system),
+    queryFn: async () =>
+      unwrap(
+        await api.GET("/kubernetes/clusters/{clusterId}/network", {
+          params: { path: { clusterId: id }, query: scope(namespace, system) },
+        }),
+      ),
+    enabled: id !== "",
+    refetchInterval: kubeInterval,
+    placeholderData: keepPreviousData,
+    retry: false,
+  });
+}
+
+export function useKubeStorage(id: string, namespace: string, system: boolean) {
+  return useQuery({
+    queryKey: keys.list(id, "storage", namespace, system),
+    queryFn: async () =>
+      unwrap(
+        await api.GET("/kubernetes/clusters/{clusterId}/storage", {
+          params: { path: { clusterId: id }, query: scope(namespace, system) },
+        }),
+      ),
+    enabled: id !== "",
+    refetchInterval: kubeInterval,
+    placeholderData: keepPreviousData,
+    retry: false,
+  });
+}
+
+export function useKubeConfig(id: string, namespace: string, system: boolean) {
+  return useQuery({
+    queryKey: keys.list(id, "config", namespace, system),
+    queryFn: async () =>
+      unwrap(
+        await api.GET("/kubernetes/clusters/{clusterId}/config", {
+          params: { path: { clusterId: id }, query: scope(namespace, system) },
+        }),
+      ),
+    enabled: id !== "",
+    refetchInterval: kubeInterval,
+    placeholderData: keepPreviousData,
+    retry: false,
+  });
+}
+
+export function useKubeEvents(id: string, namespace: string, system: boolean, warnings: boolean) {
+  return useQuery({
+    queryKey: [...keys.list(id, "events", namespace, system), warnings],
+    queryFn: async () =>
+      unwrap(
+        await api.GET("/kubernetes/clusters/{clusterId}/events", {
+          params: { path: { clusterId: id }, query: { ...scope(namespace, system), warnings: warnings || undefined } },
+        }),
+      ).items,
+    enabled: id !== "",
+    refetchInterval: kubeInterval,
+    placeholderData: keepPreviousData,
+    retry: false,
+  });
+}
+
+// De soorten veranderen zelden: alleen als je een app met eigen soorten
+// installeert.
+export function useKubeResources(id: string) {
+  return useQuery({
+    queryKey: keys.resources(id),
+    queryFn: async () =>
+      unwrap(await api.GET("/kubernetes/clusters/{clusterId}/resources", { params: { path: { clusterId: id } } })).items,
+    enabled: id !== "",
+    staleTime: 60_000,
+    retry: false,
+  });
+}
+
+export function useKubeObjects(id: string, type: KubeResourceType | undefined, namespace: string, system: boolean) {
+  return useQuery({
+    queryKey: keys.objects(id, type?.group ?? "", type?.version ?? "", type?.resource ?? "", namespace, system),
+    queryFn: async () =>
+      unwrap(
+        await api.GET("/kubernetes/clusters/{clusterId}/objects", {
+          params: {
+            path: { clusterId: id },
+            query: {
+              group: type!.group || undefined,
+              version: type!.version,
+              resource: type!.resource,
+              ...scope(type!.namespaced ? namespace : "", system),
+            },
+          },
+        }),
+      ).items,
+    enabled: id !== "" && type !== undefined,
+    refetchInterval: kubeInterval,
+    placeholderData: keepPreviousData,
+    retry: false,
+  });
+}
+
+export function useKubeObject(id: string, ref: KubeRef) {
+  return useQuery({
+    queryKey: keys.object(id, ref),
+    queryFn: async () =>
+      unwrap(
+        await api.GET("/kubernetes/clusters/{clusterId}/object", {
+          params: {
+            path: { clusterId: id },
+            query: {
+              group: ref.group || undefined,
+              version: ref.version,
+              resource: ref.resource,
+              namespace: ref.namespace || undefined,
+              name: ref.name,
+            },
+          },
+        }),
+      ),
+    enabled: id !== "" && ref.name !== "" && ref.resource !== "",
+    refetchInterval: kubeInterval,
+    retry: false,
+  });
+}
+
+export type LogOptions = { container: string; previous: boolean; lines: number; timestamps: boolean };
+
+// useKubeLogs haalt de log van een container; follow ververst hem zoals
+// kubectl logs -f, maar elke vijf seconden.
+export function useKubeLogs(id: string, namespace: string, pod: string, o: LogOptions, follow: boolean) {
+  return useQuery({
+    queryKey: keys.logs(id, namespace, pod, o),
+    queryFn: async () =>
+      unwrap(
+        await api.GET("/kubernetes/clusters/{clusterId}/logs", {
+          params: {
+            path: { clusterId: id },
+            query: {
+              namespace,
+              pod,
+              container: o.container || undefined,
+              previous: o.previous || undefined,
+              lines: o.lines,
+              timestamps: o.timestamps || undefined,
+            },
+          },
+        }),
+      ),
+    enabled: id !== "" && pod !== "",
+    refetchInterval: follow ? kubeInterval : false,
+    placeholderData: keepPreviousData,
+    retry: false,
+  });
+}
+
+// objectHref is de pagina van één object.
+export function objectHref(clusterId: string, ref: KubeRef) {
+  const q = new URLSearchParams({ id: clusterId });
+  if (ref.group) q.set("g", ref.group);
+  q.set("v", ref.version);
+  q.set("r", ref.resource);
+  if (ref.namespace) q.set("ns", ref.namespace);
+  q.set("name", ref.name);
+  return `/kubernetes/object?${q.toString()}`;
+}
+
+// De soorten die het dashboard zelf toont, met hun plaats in de API.
+const builtin: Record<string, { group: string; version: string; resource: string }> = {
+  Pod: { group: "", version: "v1", resource: "pods" },
+  Node: { group: "", version: "v1", resource: "nodes" },
+  Service: { group: "", version: "v1", resource: "services" },
+  ConfigMap: { group: "", version: "v1", resource: "configmaps" },
+  Secret: { group: "", version: "v1", resource: "secrets" },
+  PersistentVolumeClaim: { group: "", version: "v1", resource: "persistentvolumeclaims" },
+  PersistentVolume: { group: "", version: "v1", resource: "persistentvolumes" },
+  Deployment: { group: "apps", version: "v1", resource: "deployments" },
+  StatefulSet: { group: "apps", version: "v1", resource: "statefulsets" },
+  DaemonSet: { group: "apps", version: "v1", resource: "daemonsets" },
+  ReplicaSet: { group: "apps", version: "v1", resource: "replicasets" },
+  Job: { group: "batch", version: "v1", resource: "jobs" },
+  CronJob: { group: "batch", version: "v1", resource: "cronjobs" },
+  Ingress: { group: "networking.k8s.io", version: "v1", resource: "ingresses" },
+  StorageClass: { group: "storage.k8s.io", version: "v1", resource: "storageclasses" },
+};
+
+// refOf wijst een object van een bekende soort aan.
+export function refOf(kind: string, namespace: string, name: string): KubeRef {
+  const b = builtin[kind] ?? { group: "", version: "v1", resource: `${kind.toLowerCase()}s` };
+  return { ...b, namespace, name };
+}
+
+// kubectlType is hoe je de soort aan kubectl geeft: deployment, of voor
+// een soort van een app de volledige naam, zoals ingressroutes.traefik.io.
+export function kubectlType(ref: Pick<KubeRef, "group" | "resource">, kind: string) {
+  if (ref.group === "" || !ref.group.includes(".") || ref.group.endsWith(".k8s.io")) return kind.toLowerCase();
+  return `${ref.resource}.${ref.group}`;
+}
+
+// kubectlObject is soort, naam en namespace voor een kubectl-commando.
+export function kubectlObject(ref: KubeRef, kind: string) {
+  return `${kubectlType(ref, kind)} ${ref.name}${ref.namespace ? ` -n ${ref.namespace}` : ""}`;
 }
 
 // useKubeLearning geeft de leermodus van de ingelogde gebruiker en een
@@ -197,3 +420,41 @@ export function age(iso: string | null | undefined, now = Date.now()) {
 export function roleLabel(roles: string[]) {
   return roles.includes("control-plane") || roles.includes("master") ? "server" : "agent";
 }
+
+// objectHelp legt een soort object uit, op de pagina van dat object.
+export const objectHelp: Record<string, string> = {
+  Pod: "Een pod is één of meer containers die samen op een node draaien, met een eigen IP-adres. Meestal maakt een ReplicaSet of een andere app hem; verdwijnt hij, dan komt er een nieuwe.",
+  Deployment:
+    "Een Deployment houdt een aantal gelijke pods draaiend. Bij een nieuwe versie maakt hij een nieuwe ReplicaSet en vervangt hij de pods stap voor stap.",
+  ReplicaSet:
+    "Een ReplicaSet houdt een vast aantal pods van één versie draaiend. Je maakt hem zelden zelf: een Deployment doet dat, met een nieuwe per versie.",
+  StatefulSet:
+    "Een StatefulSet is zoals een Deployment, maar elke pod houdt zijn naam (web-0, web-1) en zijn eigen volume. Voor databanken.",
+  DaemonSet: "Een DaemonSet draait één pod op elke node, zoals ServiceLB van k3s of een agent voor logs.",
+  Job: "Een Job draait pods tot hun werk af is. Lukt het niet, dan probeert hij het een paar keer opnieuw.",
+  CronJob: "Een CronJob maakt volgens een schema een Job, zoals een back-up elke nacht.",
+  Node: "Een node is een machine in het cluster. De kubelet daarop start de containers van de pods die Kubernetes er neerzet.",
+  Service:
+    "Een Service geeft een groep pods één vast adres en een naam in DNS. Hij kiest de pods op hun labels en verdeelt het verkeer over de pods die klaar zijn.",
+  Ingress:
+    "Een Ingress stuurt webverkeer op hostnaam en pad naar een Service. In k3s doet Traefik dat, op poort 80 en 443 van de nodes en dus van het VIP.",
+  PersistentVolumeClaim:
+    "Een PersistentVolumeClaim vraagt opslag voor een pod, zoals 1 GiB. Kubernetes bindt hem aan een volume; met local-path is dat een map op de schijf van één node.",
+  PersistentVolume:
+    "Een PersistentVolume is echte opslag. Met local-path is het een map op één node: een pod met dit volume kan alleen op die node draaien.",
+  StorageClass: "Een StorageClass zegt hoe Kubernetes volumes maakt. In k3s is local-path de standaard: een map op de node.",
+  ConfigMap:
+    "Een ConfigMap bewaart instellingen als sleutels en waarden; een pod leest ze als omgevingsvariabelen of als bestanden.",
+  Secret:
+    "Een Secret is zoals een ConfigMap, maar voor wachtwoorden en sleutels. ClusterForge toont nooit de waarden, alleen de sleutels en hoe lang ze zijn.",
+  Namespace:
+    "Een namespace is een map voor objecten. Namen zijn uniek per namespace, en je kunt rechten en quota per namespace zetten.",
+};
+
+// serviceTypeHelp legt de soorten Services uit.
+export const serviceTypeHelp: Record<string, string> = {
+  ClusterIP: "Alleen bereikbaar binnen het cluster, op een vast intern adres en een naam in DNS.",
+  NodePort: "Ook bereikbaar op een vaste poort (30000 tot 32767) van elke node.",
+  LoadBalancer: "Krijgt een adres buiten het cluster. In k3s doet ServiceLB dat met de adressen van de nodes.",
+  ExternalName: "Een naam in DNS die naar iets buiten het cluster wijst.",
+};

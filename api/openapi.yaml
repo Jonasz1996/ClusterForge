@@ -2906,6 +2906,184 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "502": { $ref: "#/components/responses/Error" }
         "503": { $ref: "#/components/responses/Error" }
+  /kubernetes/clusters/{clusterId}/network:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+      - $ref: "#/components/parameters/KubeNamespace"
+      - $ref: "#/components/parameters/KubeSystem"
+    get:
+      operationId: getKubeNetwork
+      summary: De Services en Ingresses, met hun adressen
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KubeNetwork"
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /kubernetes/clusters/{clusterId}/storage:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+      - $ref: "#/components/parameters/KubeNamespace"
+      - $ref: "#/components/parameters/KubeSystem"
+    get:
+      operationId: getKubeStorage
+      summary: De PersistentVolumeClaims, volumes en StorageClasses
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KubeStorage"
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /kubernetes/clusters/{clusterId}/config:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+      - $ref: "#/components/parameters/KubeNamespace"
+      - $ref: "#/components/parameters/KubeSystem"
+    get:
+      operationId: getKubeConfig
+      summary: De ConfigMaps, en de Secrets met alleen de sleutels
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KubeConfig"
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /kubernetes/clusters/{clusterId}/events:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+      - $ref: "#/components/parameters/KubeNamespace"
+      - $ref: "#/components/parameters/KubeSystem"
+      - { name: warnings, in: query, description: "Alleen waarschuwingen", schema: { type: boolean } }
+    get:
+      operationId: listKubeEvents
+      summary: De events, waarschuwingen eerst en dan de nieuwste; hoogstens 300
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/KubeEvent" } }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /kubernetes/clusters/{clusterId}/resources:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: listKubeResources
+      summary: De soorten objecten die het cluster kent, ook van geïnstalleerde apps
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/KubeResourceType" } }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /kubernetes/clusters/{clusterId}/objects:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+      - $ref: "#/components/parameters/KubeGroup"
+      - $ref: "#/components/parameters/KubeVersion"
+      - $ref: "#/components/parameters/KubeResource"
+      - $ref: "#/components/parameters/KubeNamespace"
+      - $ref: "#/components/parameters/KubeSystem"
+    get:
+      operationId: listKubeObjects
+      summary: De objecten van één soort
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/KubeObjectSummary" } }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /kubernetes/clusters/{clusterId}/object:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+      - $ref: "#/components/parameters/KubeGroup"
+      - $ref: "#/components/parameters/KubeVersion"
+      - $ref: "#/components/parameters/KubeResource"
+      - $ref: "#/components/parameters/KubeNamespace"
+      - { name: name, in: query, required: true, schema: { type: string } }
+    get:
+      operationId: getKubeObject
+      summary: Eén object met toestand, keten, events en YAML, zonder secretwaarden
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KubeObject"
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
+  /kubernetes/clusters/{clusterId}/logs:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: namespace, in: query, required: true, schema: { type: string } }
+      - { name: pod, in: query, required: true, schema: { type: string } }
+      - { name: container, in: query, description: "Nodig als de pod meer dan één container heeft", schema: { type: string } }
+      - { name: previous, in: query, description: "De log van de container voor de laatste herstart", schema: { type: boolean } }
+      - { name: lines, in: query, description: "Het aantal laatste regels; standaard 500, hoogstens 5000", schema: { type: integer, minimum: 1, maximum: 5000 } }
+      - { name: timestamps, in: query, description: "Met het tijdstip voor elke regel", schema: { type: boolean } }
+    get:
+      operationId: getKubeLogs
+      summary: De laatste regels log van een container; ook een viewer mag ze lezen
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KubeLogs"
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
 components:
   securitySchemes:
     session:
@@ -2923,6 +3101,23 @@ components:
       in: query
       description: Ook de systeemnamespaces kube-system, kube-public en kube-node-lease; standaard niet
       schema: { type: boolean }
+    KubeGroup:
+      name: group
+      in: query
+      description: De API-groep, zoals apps; leeg is de kerngroep
+      schema: { type: string }
+    KubeVersion:
+      name: version
+      in: query
+      required: true
+      description: De versie, zoals v1
+      schema: { type: string }
+    KubeResource:
+      name: resource
+      in: query
+      required: true
+      description: De soort in het meervoud, zoals deployments
+      schema: { type: string }
     DocScopeParam:
       name: scope
       in: path
@@ -3069,7 +3264,7 @@ components:
         pods_total: { type: integer }
         pods_running: { type: integer }
         pods_pending: { type: integer }
-        pods_problem: { type: integer, description: Pods die aandacht vragen, zoals CrashLoopBackOff }
+        pods_problem: { type: integer, description: "Pods die aandacht vragen, zoals CrashLoopBackOff" }
         workloads_total: { type: integer }
         workloads_ready: { type: integer }
         synced_at: { type: string, format: date-time, nullable: true }
@@ -3092,15 +3287,248 @@ components:
         problem: { type: integer, description: Pods die aandacht vragen }
     KubeEvent:
       type: object
-      required: [namespace, kind, name, reason, message, count, last_seen]
+      required: [namespace, kind, name, type, reason, message, count, first_seen, last_seen, source, object]
       properties:
         namespace: { type: string }
         kind: { type: string, description: De soort van het object waar het event over gaat }
         name: { type: string }
+        type: { type: string, description: Normal of Warning }
         reason: { type: string }
         message: { type: string }
         count: { type: integer }
+        first_seen: { type: string, format: date-time, nullable: true }
         last_seen: { type: string, format: date-time }
+        source: { type: string, description: "Wie het event meldde, zoals kubelet" }
+        object:
+          description: Het object, om te openen; null als ClusterForge de soort niet kent
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/KubeRef" }]
+    KubeRef:
+      type: object
+      description: Wijst een object in Kubernetes aan
+      required: [group, version, resource, namespace, name]
+      properties:
+        group: { type: string, description: Leeg is de kerngroep }
+        version: { type: string }
+        resource: { type: string }
+        namespace: { type: string, description: Leeg bij een object zonder namespace }
+        name: { type: string }
+    KubeCondition:
+      type: object
+      required: [type, status, reason, message, last_transition]
+      properties:
+        type: { type: string }
+        status: { type: string, description: "True, False of Unknown" }
+        reason: { type: string }
+        message: { type: string }
+        last_transition: { type: string, format: date-time, nullable: true }
+    KubeChainLink:
+      type: object
+      description: Een schakel in de keten van een object
+      required: [role, kind, name, ref, node_id, text, url]
+      properties:
+        role:
+          type: string
+          enum: [owner, node, clusterforge, vm, service, ingress, pods, volume, claim, backend]
+        kind: { type: string }
+        name: { type: string }
+        ref:
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/KubeRef" }]
+        node_id: { type: string, format: uuid, nullable: true, description: De ClusterForge-node }
+        text: { type: string }
+        url: { type: string, description: Een webadres om te openen; leeg als er geen is }
+    KubeContainer:
+      type: object
+      required: [name, image, init, ready, restarts, state, reason, message, since, last_reason, last_exit_code, last_finished]
+      properties:
+        name: { type: string }
+        image: { type: string }
+        init: { type: boolean, description: "Een init-container, die voor de andere draait" }
+        ready: { type: boolean }
+        restarts: { type: integer }
+        state: { type: string, enum: [running, waiting, terminated, unknown] }
+        reason: { type: string }
+        message: { type: string }
+        since: { type: string, format: date-time, nullable: true }
+        last_reason: { type: string, description: "Waarom de vorige container stopte, zoals OOMKilled of Error" }
+        last_exit_code: { type: integer, nullable: true }
+        last_finished: { type: string, format: date-time, nullable: true }
+    KubePodDetail:
+      type: object
+      required: [node, ip, host_ip, qos, containers]
+      properties:
+        node: { type: string }
+        ip: { type: string }
+        host_ip: { type: string }
+        qos: { type: string }
+        containers: { type: array, items: { $ref: "#/components/schemas/KubeContainer" } }
+    KubeObject:
+      type: object
+      required: [ref, api_version, kind, uid, created_at, labels, annotations, summary, problem, conditions, chain, events, yaml, pod]
+      properties:
+        ref: { $ref: "#/components/schemas/KubeRef" }
+        api_version: { type: string }
+        kind: { type: string }
+        uid: { type: string }
+        created_at: { type: string, format: date-time }
+        labels: { type: object, additionalProperties: { type: string } }
+        annotations: { type: object, additionalProperties: { type: string } }
+        summary: { type: string, description: De toestand in gewone woorden }
+        problem: { type: boolean }
+        conditions: { type: array, items: { $ref: "#/components/schemas/KubeCondition" } }
+        chain: { type: array, items: { $ref: "#/components/schemas/KubeChainLink" } }
+        events: { type: array, items: { $ref: "#/components/schemas/KubeEvent" } }
+        yaml: { type: string, description: "Het object als YAML, zonder managedFields en zonder secretwaarden" }
+        pod:
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/KubePodDetail" }]
+    KubeResourceType:
+      type: object
+      required: [group, version, resource, kind, namespaced]
+      properties:
+        group: { type: string }
+        version: { type: string }
+        resource: { type: string }
+        kind: { type: string }
+        namespaced: { type: boolean }
+    KubeObjectSummary:
+      type: object
+      required: [namespace, name, created_at, status]
+      properties:
+        namespace: { type: string }
+        name: { type: string }
+        created_at: { type: string, format: date-time }
+        status: { type: string, description: De fase of de conditie Ready; leeg als het object die niet heeft }
+    KubeServicePort:
+      type: object
+      required: [name, protocol, port, target_port, node_port]
+      properties:
+        name: { type: string }
+        protocol: { type: string }
+        port: { type: integer }
+        target_port: { type: string, description: Een nummer of de naam van een poort in de container }
+        node_port: { type: integer, description: Nul als er geen is }
+    KubeService:
+      type: object
+      required: [namespace, name, type, cluster_ip, ports, external, selector, pods, url, system]
+      properties:
+        namespace: { type: string }
+        name: { type: string }
+        type: { type: string }
+        cluster_ip: { type: string }
+        ports: { type: array, items: { $ref: "#/components/schemas/KubeServicePort" } }
+        external: { type: array, items: { type: string }, description: "Adressen buiten het cluster, zoals van ServiceLB" }
+        selector: { type: object, additionalProperties: { type: string } }
+        pods: { type: integer, description: Het aantal pods dat de Service kiest }
+        url: { type: string }
+        system: { type: boolean }
+    KubeIngressRule:
+      type: object
+      required: [host, path, service, port, tls, url]
+      properties:
+        host: { type: string }
+        path: { type: string }
+        service: { type: string }
+        port: { type: string }
+        tls: { type: boolean }
+        url: { type: string }
+    KubeIngress:
+      type: object
+      required: [namespace, name, class, rules, address, system]
+      properties:
+        namespace: { type: string }
+        name: { type: string }
+        class: { type: string }
+        rules: { type: array, items: { $ref: "#/components/schemas/KubeIngressRule" } }
+        address: { type: array, items: { type: string } }
+        system: { type: boolean }
+    KubeNetwork:
+      type: object
+      required: [services, ingresses]
+      properties:
+        services: { type: array, items: { $ref: "#/components/schemas/KubeService" } }
+        ingresses: { type: array, items: { $ref: "#/components/schemas/KubeIngress" } }
+    KubeClaim:
+      type: object
+      required: [namespace, name, phase, bytes, class, volume, access_modes, used_by, system]
+      properties:
+        namespace: { type: string }
+        name: { type: string }
+        phase: { type: string }
+        bytes: { type: integer, format: int64, description: "De grootte, of de gevraagde grootte als hij nog niet gebonden is" }
+        class: { type: string }
+        volume: { type: string }
+        access_modes: { type: array, items: { type: string } }
+        used_by: { type: array, items: { type: string }, description: De pods die de claim gebruiken }
+        system: { type: boolean }
+    KubeVolume:
+      type: object
+      required: [name, phase, bytes, class, claim, reclaim, node, path]
+      properties:
+        name: { type: string }
+        phase: { type: string }
+        bytes: { type: integer, format: int64 }
+        class: { type: string }
+        claim: { type: string, description: namespace/naam van de claim; leeg als er geen is }
+        reclaim: { type: string, description: "Wat er met de data gebeurt als de claim weg is, zoals Delete" }
+        node: { type: string, description: "De node waar het volume op staat, bij local-path" }
+        path: { type: string }
+    KubeStorageClass:
+      type: object
+      required: [name, provisioner, default, reclaim, binding, expansion]
+      properties:
+        name: { type: string }
+        provisioner: { type: string }
+        default: { type: boolean }
+        reclaim: { type: string }
+        binding: { type: string }
+        expansion: { type: boolean }
+    KubeStorage:
+      type: object
+      required: [claims, volumes, classes]
+      properties:
+        claims: { type: array, items: { $ref: "#/components/schemas/KubeClaim" } }
+        volumes: { type: array, items: { $ref: "#/components/schemas/KubeVolume" } }
+        classes: { type: array, items: { $ref: "#/components/schemas/KubeStorageClass" } }
+    KubeConfigMap:
+      type: object
+      required: [namespace, name, keys, bytes, created_at, system]
+      properties:
+        namespace: { type: string }
+        name: { type: string }
+        keys: { type: array, items: { type: string } }
+        bytes: { type: integer }
+        created_at: { type: string, format: date-time }
+        system: { type: boolean }
+    KubeSecretKey:
+      type: object
+      required: [name, bytes]
+      properties:
+        name: { type: string }
+        bytes: { type: integer, description: De lengte van de waarde; de waarde zelf ziet niemand }
+    KubeSecret:
+      type: object
+      required: [namespace, name, type, keys, created_at, system]
+      properties:
+        namespace: { type: string }
+        name: { type: string }
+        type: { type: string }
+        keys: { type: array, items: { $ref: "#/components/schemas/KubeSecretKey" } }
+        created_at: { type: string, format: date-time }
+        system: { type: boolean }
+    KubeConfig:
+      type: object
+      required: [config_maps, secrets]
+      properties:
+        config_maps: { type: array, items: { $ref: "#/components/schemas/KubeConfigMap" } }
+        secrets: { type: array, items: { $ref: "#/components/schemas/KubeSecret" } }
+    KubeLogs:
+      type: object
+      required: [text, truncated]
+      properties:
+        text: { type: string }
+        truncated: { type: boolean, description: "De log was groter dan 2 MB: de oudste regels ontbreken, vraag er minder" }
     KubeOverview:
       type: object
       required: [cluster_id, version, via, vip, nodes_total, nodes_ready, pods, workloads_total, workloads_ready, namespaces, allocatable,
@@ -3141,7 +3569,7 @@ components:
         ready: { type: boolean }
         ready_reason: { type: string, description: De reden bij de conditie Ready als de node niet Ready is }
         unschedulable: { type: boolean, description: Cordon; er komen geen nieuwe pods op }
-        pressure: { type: array, items: { type: string }, description: Condities met een probleem, zoals DiskPressure }
+        pressure: { type: array, items: { type: string }, description: "Condities met een probleem, zoals DiskPressure" }
         internal_ip: { type: string }
         kubelet_version: { type: string }
         os_image: { type: string }
@@ -3152,7 +3580,7 @@ components:
         used:
           allOf: [{ $ref: "#/components/schemas/KubeUsage" }]
           nullable: true
-        pods: { type: integer, description: Pods op deze node, zonder de voltooide }
+        pods: { type: integer, description: "Pods op deze node, zonder de voltooide" }
         created_at: { type: string, format: date-time }
         node:
           allOf: [{ $ref: "#/components/schemas/KubeNodeLink" }]

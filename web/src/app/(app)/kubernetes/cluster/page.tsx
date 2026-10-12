@@ -3,8 +3,20 @@
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
-import { KubeError, Learn, LearnToggle, ReadyBadge, Stat, Term, Usage, UsageBar } from "@/components/kube/Kube";
-import { ago, Empty, formatBytes, tableClass, tdClass, thClass } from "@/components/inventory/bits";
+import {
+  EventList,
+  KubeError,
+  Learn,
+  LearnToggle,
+  ObjectLink,
+  ReadyBadge,
+  Stat,
+  Term,
+  Usage,
+  UsageBar,
+} from "@/components/kube/Kube";
+import { AllTab, ConfigTab, EventsTab, NetworkTab, StorageTab } from "@/components/kube/Resources";
+import { Empty, formatBytes, tableClass, tdClass, thClass } from "@/components/inventory/bits";
 import { Alert, Badge, Card, cx, PageHeader, Select } from "@/components/ui";
 import { useCluster } from "@/lib/inventory";
 import {
@@ -15,6 +27,7 @@ import {
   nsFlag,
   podStatusHelp,
   podTone,
+  refOf,
   roleLabel,
   stateInfo,
   systemNamespaces,
@@ -23,20 +36,27 @@ import {
   useKubeOverview,
   useKubePods,
   useKubeWorkloads,
-  type KubeEvent,
   type KubeNode,
   type KubeOverview,
   type KubePod,
 } from "@/lib/kube";
 
-type Tab = "overzicht" | "nodes" | "apps" | "pods";
+type Tab = "overzicht" | "nodes" | "apps" | "pods" | "netwerk" | "opslag" | "configuratie" | "gebeurtenissen" | "alles";
 
 const tabs: { id: Tab; label: string }[] = [
   { id: "overzicht", label: "Overzicht" },
   { id: "nodes", label: "Nodes" },
   { id: "apps", label: "Apps" },
   { id: "pods", label: "Pods" },
+  { id: "netwerk", label: "Netwerk" },
+  { id: "opslag", label: "Opslag" },
+  { id: "configuratie", label: "Configuratie" },
+  { id: "gebeurtenissen", label: "Gebeurtenissen" },
+  { id: "alles", label: "Alles" },
 ];
+
+// Op deze tabbladen kies je een namespace en of het systeem meedoet.
+const filtered: Tab[] = ["apps", "pods", "netwerk", "opslag", "configuratie", "gebeurtenissen", "alles"];
 
 export default function KubeClusterPage() {
   return (
@@ -67,6 +87,8 @@ function useParams() {
     namespace: search.get("ns") ?? "",
     system: search.get("system") === "1",
     node: search.get("node") ?? "",
+    warnings: search.get("warnings") === "1",
+    type: search.get("type") ?? "",
     set,
   };
 }
@@ -111,14 +133,14 @@ function KubeClusterInner() {
         }
       />
 
-      <nav className="flex gap-1 border-b border-slate-200 dark:border-slate-800" aria-label="Onderdelen">
+      <nav className="flex gap-1 overflow-x-auto border-b border-slate-200 dark:border-slate-800" aria-label="Onderdelen">
         {tabs.map((t) => (
           <button
             key={t.id}
             type="button"
             onClick={() => p.set({ tab: t.id === "overzicht" ? undefined : t.id })}
             className={cx(
-              "-mb-px border-b-2 px-3 py-2 text-sm font-medium",
+              "-mb-px border-b-2 px-3 py-2 text-sm font-medium whitespace-nowrap",
               p.tab === t.id
                 ? "border-brand-600 text-brand-700 dark:border-sky-400 dark:text-sky-300"
                 : "border-transparent text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100",
@@ -137,19 +159,27 @@ function KubeClusterInner() {
         o && (
           <>
             {overview.isError && <KubeError error={overview.error} />}
+            {filtered.includes(p.tab) && (
+              <Filters o={o} namespace={p.namespace} system={p.system} set={p.set} node={p.tab === "pods" ? p.node : ""} />
+            )}
             {p.tab === "overzicht" && <OverviewTab o={o} onTab={p.set} />}
             {p.tab === "nodes" && <NodesTab id={p.id} onPods={(node) => p.set({ tab: "pods", node })} />}
-            {p.tab === "apps" && (
-              <>
-                <Filters o={o} namespace={p.namespace} system={p.system} set={p.set} />
-                <AppsTab id={p.id} namespace={p.namespace} system={p.system} />
-              </>
+            {p.tab === "apps" && <AppsTab id={p.id} namespace={p.namespace} system={p.system} />}
+            {p.tab === "pods" && <PodsTab id={p.id} namespace={p.namespace} system={p.system} node={p.node} />}
+            {p.tab === "netwerk" && <NetworkTab id={p.id} namespace={p.namespace} system={p.system} />}
+            {p.tab === "opslag" && <StorageTab id={p.id} namespace={p.namespace} system={p.system} />}
+            {p.tab === "configuratie" && <ConfigTab id={p.id} namespace={p.namespace} system={p.system} />}
+            {p.tab === "gebeurtenissen" && (
+              <EventsTab
+                id={p.id}
+                namespace={p.namespace}
+                system={p.system}
+                warnings={p.warnings}
+                onWarnings={(on) => p.set({ warnings: on ? "1" : undefined })}
+              />
             )}
-            {p.tab === "pods" && (
-              <>
-                <Filters o={o} namespace={p.namespace} system={p.system} set={p.set} node={p.node} />
-                <PodsTab id={p.id} namespace={p.namespace} system={p.system} node={p.node} />
-              </>
+            {p.tab === "alles" && (
+              <AllTab id={p.id} namespace={p.namespace} system={p.system} type={p.type} onType={(type) => p.set({ type })} />
             )}
           </>
         )
@@ -280,7 +310,7 @@ function OverviewTab({ o, onTab }: { o: KubeOverview; onTab: (patch: Record<stri
         {o.problems.length === 0 ? (
           <p className="text-sm text-slate-500">Geen pods met problemen.</p>
         ) : (
-          <PodTable pods={o.problems} />
+          <PodTable id={o.cluster_id} pods={o.problems} />
         )}
       </Card>
 
@@ -294,33 +324,10 @@ function OverviewTab({ o, onTab }: { o: KubeOverview; onTab: (patch: Record<stri
         {o.warnings.length === 0 ? (
           <p className="text-sm text-slate-500">Geen waarschuwingen.</p>
         ) : (
-          <Warnings events={o.warnings} />
+          <EventList clusterId={o.cluster_id} events={o.warnings} />
         )}
       </Card>
     </div>
-  );
-}
-
-function Warnings({ events }: { events: KubeEvent[] }) {
-  return (
-    <ul className="divide-y divide-slate-100 text-sm dark:divide-slate-800">
-      {events.map((e) => (
-        <li key={`${e.namespace}/${e.kind}/${e.name}/${e.reason}`} className="py-2">
-          <div className="flex flex-wrap items-baseline gap-2">
-            <Badge tone="amber">{e.reason}</Badge>
-            <span className="font-medium">
-              {e.kind} {e.namespace ? `${e.namespace}/` : ""}
-              {e.name}
-            </span>
-            <span className="text-xs text-slate-500">
-              {e.count > 1 ? `${e.count} keer, ` : ""}
-              {ago(e.last_seen)}
-            </span>
-          </div>
-          <p className="mt-0.5 text-slate-600 dark:text-slate-400">{e.message}</p>
-        </li>
-      ))}
-    </ul>
   );
 }
 
@@ -340,12 +347,13 @@ function NodesTab({ id, onPods }: { id: string; onPods: (node: string) => void }
         </p>
       </Learn>
       {nodes.isError && <KubeError error={nodes.error} />}
-      {nodes.data && (nodes.data.length === 0 ? <Empty>Geen nodes.</Empty> : <NodeTable nodes={nodes.data} onPods={onPods} />)}
+      {nodes.data &&
+        (nodes.data.length === 0 ? <Empty>Geen nodes.</Empty> : <NodeTable id={id} nodes={nodes.data} onPods={onPods} />)}
     </div>
   );
 }
 
-function NodeTable({ nodes, onPods }: { nodes: KubeNode[]; onPods: (node: string) => void }) {
+function NodeTable({ id, nodes, onPods }: { id: string; nodes: KubeNode[]; onPods: (node: string) => void }) {
   return (
     <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
       <table className={tableClass}>
@@ -364,7 +372,11 @@ function NodeTable({ nodes, onPods }: { nodes: KubeNode[]; onPods: (node: string
           {nodes.map((n) => (
             <tr key={n.name}>
               <td className={tdClass}>
-                <div className="font-medium">{n.name}</div>
+                <div className="font-medium">
+                  <ObjectLink clusterId={id} objRef={refOf("Node", "", n.name)}>
+                    {n.name}
+                  </ObjectLink>
+                </div>
                 <div className="text-xs text-slate-500">
                   {n.node ? (
                     <Link href={`/nodes/detail?id=${n.node.id}`} className="text-brand-700 hover:underline dark:text-sky-300">
@@ -470,7 +482,11 @@ function AppsTab({ id, namespace, system }: { id: string; namespace: string; sys
                   return (
                     <tr key={`${w.kind}/${w.namespace}/${w.name}`}>
                       <td className={tdClass}>
-                        <div className="font-medium">{w.name}</div>
+                        <div className="font-medium">
+                          <ObjectLink clusterId={id} objRef={refOf(w.kind, w.namespace, w.name)}>
+                            {w.name}
+                          </ObjectLink>
+                        </div>
                         <div className="text-xs text-slate-500">{w.namespace}</div>
                       </td>
                       <td className={tdClass}>
@@ -529,13 +545,13 @@ function PodsTab({ id, namespace, system, node }: { id: string; namespace: strin
             {node ? ` op ${node}` : ""}.{!system && !namespace && " Zet Systeem tonen aan om die van Kubernetes zelf te zien."}
           </Empty>
         ) : (
-          <PodTable pods={pods.data} />
+          <PodTable id={id} pods={pods.data} />
         ))}
     </div>
   );
 }
 
-function PodTable({ pods }: { pods: KubePod[] }) {
+function PodTable({ id, pods }: { id: string; pods: KubePod[] }) {
   return (
     <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
       <table className={tableClass}>
@@ -554,7 +570,11 @@ function PodTable({ pods }: { pods: KubePod[] }) {
           {pods.map((p) => (
             <tr key={`${p.namespace}/${p.name}`}>
               <td className={tdClass}>
-                <div className="min-w-56 font-medium break-all">{p.name}</div>
+                <div className="min-w-56 font-medium break-all">
+                  <ObjectLink clusterId={id} objRef={refOf("Pod", p.namespace, p.name)}>
+                    {p.name}
+                  </ObjectLink>
+                </div>
                 <div className="text-xs text-slate-500">
                   {p.namespace}
                   {p.owner_kind && ` · van ${p.owner_kind} ${p.owner_name}`}
@@ -571,7 +591,15 @@ function PodTable({ pods }: { pods: KubePod[] }) {
               <td className={cx(tdClass, "text-right tabular-nums", p.restarts > 0 && "text-amber-700 dark:text-amber-300")}>
                 {p.restarts}
               </td>
-              <td className={`${tdClass} whitespace-nowrap`}>{p.node || "–"}</td>
+              <td className={`${tdClass} whitespace-nowrap`}>
+                {p.node ? (
+                  <ObjectLink clusterId={id} objRef={refOf("Node", "", p.node)}>
+                    {p.node}
+                  </ObjectLink>
+                ) : (
+                  "–"
+                )}
+              </td>
               <td className={`${tdClass} whitespace-nowrap font-mono text-xs`}>{p.ip || "–"}</td>
               <td className={`${tdClass} text-slate-500`} title={p.created_at}>
                 {age(p.created_at)}

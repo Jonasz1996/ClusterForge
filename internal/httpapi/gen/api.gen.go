@@ -1140,6 +1140,72 @@ func (e JobStatus) Valid() bool {
 	}
 }
 
+// Defines values for KubeChainLinkRole.
+const (
+	KubeChainLinkRoleBackend      KubeChainLinkRole = "backend"
+	KubeChainLinkRoleClaim        KubeChainLinkRole = "claim"
+	KubeChainLinkRoleClusterforge KubeChainLinkRole = "clusterforge"
+	KubeChainLinkRoleIngress      KubeChainLinkRole = "ingress"
+	KubeChainLinkRoleNode         KubeChainLinkRole = "node"
+	KubeChainLinkRoleOwner        KubeChainLinkRole = "owner"
+	KubeChainLinkRolePods         KubeChainLinkRole = "pods"
+	KubeChainLinkRoleService      KubeChainLinkRole = "service"
+	KubeChainLinkRoleVm           KubeChainLinkRole = "vm"
+	KubeChainLinkRoleVolume       KubeChainLinkRole = "volume"
+)
+
+// Valid indicates whether the value is a known member of the KubeChainLinkRole enum.
+func (e KubeChainLinkRole) Valid() bool {
+	switch e {
+	case KubeChainLinkRoleBackend:
+		return true
+	case KubeChainLinkRoleClaim:
+		return true
+	case KubeChainLinkRoleClusterforge:
+		return true
+	case KubeChainLinkRoleIngress:
+		return true
+	case KubeChainLinkRoleNode:
+		return true
+	case KubeChainLinkRoleOwner:
+		return true
+	case KubeChainLinkRolePods:
+		return true
+	case KubeChainLinkRoleService:
+		return true
+	case KubeChainLinkRoleVm:
+		return true
+	case KubeChainLinkRoleVolume:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for KubeContainerState.
+const (
+	KubeContainerStateRunning    KubeContainerState = "running"
+	KubeContainerStateTerminated KubeContainerState = "terminated"
+	KubeContainerStateUnknown    KubeContainerState = "unknown"
+	KubeContainerStateWaiting    KubeContainerState = "waiting"
+)
+
+// Valid indicates whether the value is a known member of the KubeContainerState enum.
+func (e KubeContainerState) Valid() bool {
+	switch e {
+	case KubeContainerStateRunning:
+		return true
+	case KubeContainerStateTerminated:
+		return true
+	case KubeContainerStateUnknown:
+		return true
+	case KubeContainerStateWaiting:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for KubeWorkloadKind.
 const (
 	KubeWorkloadKindCronJob     KubeWorkloadKind = "CronJob"
@@ -5091,6 +5157,41 @@ type JobStep struct {
 	Status     JobStatus                    `json:"status"`
 }
 
+// KubeChainLink Een schakel in de keten van een object
+type KubeChainLink struct {
+	Kind string `json:"kind"`
+	Name string `json:"name"`
+
+	// NodeId De ClusterForge-node
+	NodeId nullable.Nullable[openapi_types.UUID] `json:"node_id"`
+	Ref    nullable.Nullable[KubeRef]            `json:"ref"`
+	Role   KubeChainLinkRole                     `json:"role"`
+	Text   string                                `json:"text"`
+
+	// Url Een webadres om te openen; leeg als er geen is
+	Url string `json:"url"`
+}
+
+// KubeChainLinkRole defines model for KubeChainLink.Role.
+type KubeChainLinkRole string
+
+// KubeClaim defines model for KubeClaim.
+type KubeClaim struct {
+	AccessModes []string `json:"access_modes"`
+
+	// Bytes De grootte, of de gevraagde grootte als hij nog niet gebonden is
+	Bytes     int64  `json:"bytes"`
+	Class     string `json:"class"`
+	Name      string `json:"name"`
+	Namespace string `json:"namespace"`
+	Phase     string `json:"phase"`
+	System    bool   `json:"system"`
+
+	// UsedBy De pods die de claim gebruiken
+	UsedBy []string `json:"used_by"`
+	Volume string   `json:"volume"`
+}
+
 // KubeClusterSummary defines model for KubeClusterSummary.
 type KubeClusterSummary struct {
 	// ApiOk De API antwoordde bij de laatste samenvatting
@@ -5108,7 +5209,7 @@ type KubeClusterSummary struct {
 	OkAt        nullable.Nullable[time.Time] `json:"ok_at"`
 	PodsPending int                          `json:"pods_pending"`
 
-	// PodsProblem Pods die aandacht vragen
+	// PodsProblem Pods die aandacht vragen, zoals CrashLoopBackOff
 	PodsProblem int    `json:"pods_problem"`
 	PodsRunning int    `json:"pods_running"`
 	PodsTotal   int    `json:"pods_total"`
@@ -5130,9 +5231,60 @@ type KubeClusterSummary struct {
 	WorkloadsTotal int                       `json:"workloads_total"`
 }
 
+// KubeCondition defines model for KubeCondition.
+type KubeCondition struct {
+	LastTransition nullable.Nullable[time.Time] `json:"last_transition"`
+	Message        string                       `json:"message"`
+	Reason         string                       `json:"reason"`
+
+	// Status True, False of Unknown
+	Status string `json:"status"`
+	Type   string `json:"type"`
+}
+
+// KubeConfig defines model for KubeConfig.
+type KubeConfig struct {
+	ConfigMaps []KubeConfigMap `json:"config_maps"`
+	Secrets    []KubeSecret    `json:"secrets"`
+}
+
+// KubeConfigMap defines model for KubeConfigMap.
+type KubeConfigMap struct {
+	Bytes     int       `json:"bytes"`
+	CreatedAt time.Time `json:"created_at"`
+	Keys      []string  `json:"keys"`
+	Name      string    `json:"name"`
+	Namespace string    `json:"namespace"`
+	System    bool      `json:"system"`
+}
+
+// KubeContainer defines model for KubeContainer.
+type KubeContainer struct {
+	Image string `json:"image"`
+
+	// Init Een init-container, die voor de andere draait
+	Init         bool                         `json:"init"`
+	LastExitCode nullable.Nullable[int]       `json:"last_exit_code"`
+	LastFinished nullable.Nullable[time.Time] `json:"last_finished"`
+
+	// LastReason Waarom de vorige container stopte, zoals OOMKilled of Error
+	LastReason string                       `json:"last_reason"`
+	Message    string                       `json:"message"`
+	Name       string                       `json:"name"`
+	Ready      bool                         `json:"ready"`
+	Reason     string                       `json:"reason"`
+	Restarts   int                          `json:"restarts"`
+	Since      nullable.Nullable[time.Time] `json:"since"`
+	State      KubeContainerState           `json:"state"`
+}
+
+// KubeContainerState defines model for KubeContainer.State.
+type KubeContainerState string
+
 // KubeEvent defines model for KubeEvent.
 type KubeEvent struct {
-	Count int `json:"count"`
+	Count     int                          `json:"count"`
+	FirstSeen nullable.Nullable[time.Time] `json:"first_seen"`
 
 	// Kind De soort van het object waar het event over gaat
 	Kind      string    `json:"kind"`
@@ -5140,7 +5292,50 @@ type KubeEvent struct {
 	Message   string    `json:"message"`
 	Name      string    `json:"name"`
 	Namespace string    `json:"namespace"`
-	Reason    string    `json:"reason"`
+
+	// Object Het object, om te openen; null als ClusterForge de soort niet kent
+	Object nullable.Nullable[KubeRef] `json:"object"`
+	Reason string                     `json:"reason"`
+
+	// Source Wie het event meldde, zoals kubelet
+	Source string `json:"source"`
+
+	// Type Normal of Warning
+	Type string `json:"type"`
+}
+
+// KubeIngress defines model for KubeIngress.
+type KubeIngress struct {
+	Address   []string          `json:"address"`
+	Class     string            `json:"class"`
+	Name      string            `json:"name"`
+	Namespace string            `json:"namespace"`
+	Rules     []KubeIngressRule `json:"rules"`
+	System    bool              `json:"system"`
+}
+
+// KubeIngressRule defines model for KubeIngressRule.
+type KubeIngressRule struct {
+	Host    string `json:"host"`
+	Path    string `json:"path"`
+	Port    string `json:"port"`
+	Service string `json:"service"`
+	Tls     bool   `json:"tls"`
+	Url     string `json:"url"`
+}
+
+// KubeLogs defines model for KubeLogs.
+type KubeLogs struct {
+	Text string `json:"text"`
+
+	// Truncated De log was groter dan 2 MB: de oudste regels ontbreken, vraag er minder
+	Truncated bool `json:"truncated"`
+}
+
+// KubeNetwork defines model for KubeNetwork.
+type KubeNetwork struct {
+	Ingresses []KubeIngress `json:"ingresses"`
+	Services  []KubeService `json:"services"`
 }
 
 // KubeNode defines model for KubeNode.
@@ -5158,10 +5353,10 @@ type KubeNode struct {
 	Node    nullable.Nullable[KubeNodeLink] `json:"node"`
 	OsImage string                          `json:"os_image"`
 
-	// Pods Pods op deze node
+	// Pods Pods op deze node, zonder de voltooide
 	Pods int `json:"pods"`
 
-	// Pressure Condities met een probleem
+	// Pressure Condities met een probleem, zoals DiskPressure
 	Pressure []string `json:"pressure"`
 	Ready    bool     `json:"ready"`
 
@@ -5180,6 +5375,40 @@ type KubeNodeLink struct {
 	AgentProtocol int                `json:"agent_protocol"`
 	Hostname      string             `json:"hostname"`
 	Id            openapi_types.UUID `json:"id"`
+}
+
+// KubeObject defines model for KubeObject.
+type KubeObject struct {
+	Annotations map[string]string                `json:"annotations"`
+	ApiVersion  string                           `json:"api_version"`
+	Chain       []KubeChainLink                  `json:"chain"`
+	Conditions  []KubeCondition                  `json:"conditions"`
+	CreatedAt   time.Time                        `json:"created_at"`
+	Events      []KubeEvent                      `json:"events"`
+	Kind        string                           `json:"kind"`
+	Labels      map[string]string                `json:"labels"`
+	Pod         nullable.Nullable[KubePodDetail] `json:"pod"`
+	Problem     bool                             `json:"problem"`
+
+	// Ref Wijst een object in Kubernetes aan
+	Ref KubeRef `json:"ref"`
+
+	// Summary De toestand in gewone woorden
+	Summary string `json:"summary"`
+	Uid     string `json:"uid"`
+
+	// Yaml Het object als YAML, zonder managedFields en zonder secretwaarden
+	Yaml string `json:"yaml"`
+}
+
+// KubeObjectSummary defines model for KubeObjectSummary.
+type KubeObjectSummary struct {
+	CreatedAt time.Time `json:"created_at"`
+	Name      string    `json:"name"`
+	Namespace string    `json:"namespace"`
+
+	// Status De fase of de conditie Ready; leeg als het object die niet heeft
+	Status string `json:"status"`
 }
 
 // KubeOverview defines model for KubeOverview.
@@ -5238,10 +5467,123 @@ type KubePodCounts struct {
 	Total     int `json:"total"`
 }
 
+// KubePodDetail defines model for KubePodDetail.
+type KubePodDetail struct {
+	Containers []KubeContainer `json:"containers"`
+	HostIp     string          `json:"host_ip"`
+	Ip         string          `json:"ip"`
+	Node       string          `json:"node"`
+	Qos        string          `json:"qos"`
+}
+
+// KubeRef Wijst een object in Kubernetes aan
+type KubeRef struct {
+	// Group Leeg is de kerngroep
+	Group string `json:"group"`
+	Name  string `json:"name"`
+
+	// Namespace Leeg bij een object zonder namespace
+	Namespace string `json:"namespace"`
+	Resource  string `json:"resource"`
+	Version   string `json:"version"`
+}
+
+// KubeResourceType defines model for KubeResourceType.
+type KubeResourceType struct {
+	Group      string `json:"group"`
+	Kind       string `json:"kind"`
+	Namespaced bool   `json:"namespaced"`
+	Resource   string `json:"resource"`
+	Version    string `json:"version"`
+}
+
+// KubeSecret defines model for KubeSecret.
+type KubeSecret struct {
+	CreatedAt time.Time       `json:"created_at"`
+	Keys      []KubeSecretKey `json:"keys"`
+	Name      string          `json:"name"`
+	Namespace string          `json:"namespace"`
+	System    bool            `json:"system"`
+	Type      string          `json:"type"`
+}
+
+// KubeSecretKey defines model for KubeSecretKey.
+type KubeSecretKey struct {
+	// Bytes De lengte van de waarde; de waarde zelf ziet niemand
+	Bytes int    `json:"bytes"`
+	Name  string `json:"name"`
+}
+
+// KubeService defines model for KubeService.
+type KubeService struct {
+	ClusterIp string `json:"cluster_ip"`
+
+	// External Adressen buiten het cluster, zoals van ServiceLB
+	External  []string `json:"external"`
+	Name      string   `json:"name"`
+	Namespace string   `json:"namespace"`
+
+	// Pods Het aantal pods dat de Service kiest
+	Pods     int               `json:"pods"`
+	Ports    []KubeServicePort `json:"ports"`
+	Selector map[string]string `json:"selector"`
+	System   bool              `json:"system"`
+	Type     string            `json:"type"`
+	Url      string            `json:"url"`
+}
+
+// KubeServicePort defines model for KubeServicePort.
+type KubeServicePort struct {
+	Name string `json:"name"`
+
+	// NodePort Nul als er geen is
+	NodePort int    `json:"node_port"`
+	Port     int    `json:"port"`
+	Protocol string `json:"protocol"`
+
+	// TargetPort Een nummer of de naam van een poort in de container
+	TargetPort string `json:"target_port"`
+}
+
+// KubeStorage defines model for KubeStorage.
+type KubeStorage struct {
+	Claims  []KubeClaim        `json:"claims"`
+	Classes []KubeStorageClass `json:"classes"`
+	Volumes []KubeVolume       `json:"volumes"`
+}
+
+// KubeStorageClass defines model for KubeStorageClass.
+type KubeStorageClass struct {
+	Binding     string `json:"binding"`
+	Default     bool   `json:"default"`
+	Expansion   bool   `json:"expansion"`
+	Name        string `json:"name"`
+	Provisioner string `json:"provisioner"`
+	Reclaim     string `json:"reclaim"`
+}
+
 // KubeUsage defines model for KubeUsage.
 type KubeUsage struct {
 	CpuMillis   int64 `json:"cpu_millis"`
 	MemoryBytes int64 `json:"memory_bytes"`
+}
+
+// KubeVolume defines model for KubeVolume.
+type KubeVolume struct {
+	Bytes int64 `json:"bytes"`
+
+	// Claim namespace/naam van de claim; leeg als er geen is
+	Claim string `json:"claim"`
+	Class string `json:"class"`
+	Name  string `json:"name"`
+
+	// Node De node waar het volume op staat, bij local-path
+	Node  string `json:"node"`
+	Path  string `json:"path"`
+	Phase string `json:"phase"`
+
+	// Reclaim Wat er met de data gebeurt als de claim weg is, zoals Delete
+	Reclaim string `json:"reclaim"`
 }
 
 // KubeWorkload defines model for KubeWorkload.
@@ -6797,11 +7139,20 @@ type DocKindParam = string
 // DocScopeParam defines model for DocScopeParam.
 type DocScopeParam = string
 
+// KubeGroup defines model for KubeGroup.
+type KubeGroup = string
+
 // KubeNamespace defines model for KubeNamespace.
 type KubeNamespace = string
 
+// KubeResource defines model for KubeResource.
+type KubeResource = string
+
 // KubeSystem defines model for KubeSystem.
 type KubeSystem = bool
+
+// KubeVersion defines model for KubeVersion.
+type KubeVersion = string
 
 // MetricsFrom defines model for MetricsFrom.
 type MetricsFrom = time.Time
@@ -7027,6 +7378,88 @@ type ListJobsParams struct {
 	Limit     *int                `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// GetKubeConfigParams defines parameters for GetKubeConfig.
+type GetKubeConfigParams struct {
+	// Namespace Alleen deze namespace; zonder zijn het alle
+	Namespace *KubeNamespace `form:"namespace,omitempty" json:"namespace,omitempty"`
+
+	// System Ook de systeemnamespaces kube-system, kube-public en kube-node-lease; standaard niet
+	System *KubeSystem `form:"system,omitempty" json:"system,omitempty"`
+}
+
+// ListKubeEventsParams defines parameters for ListKubeEvents.
+type ListKubeEventsParams struct {
+	// Namespace Alleen deze namespace; zonder zijn het alle
+	Namespace *KubeNamespace `form:"namespace,omitempty" json:"namespace,omitempty"`
+
+	// System Ook de systeemnamespaces kube-system, kube-public en kube-node-lease; standaard niet
+	System *KubeSystem `form:"system,omitempty" json:"system,omitempty"`
+
+	// Warnings Alleen waarschuwingen
+	Warnings *bool `form:"warnings,omitempty" json:"warnings,omitempty"`
+}
+
+// GetKubeLogsParams defines parameters for GetKubeLogs.
+type GetKubeLogsParams struct {
+	Namespace string `form:"namespace" json:"namespace"`
+	Pod       string `form:"pod" json:"pod"`
+
+	// Container Nodig als de pod meer dan één container heeft
+	Container *string `form:"container,omitempty" json:"container,omitempty"`
+
+	// Previous De log van de container voor de laatste herstart
+	Previous *bool `form:"previous,omitempty" json:"previous,omitempty"`
+
+	// Lines Het aantal laatste regels; standaard 500, hoogstens 5000
+	Lines *int `form:"lines,omitempty" json:"lines,omitempty"`
+
+	// Timestamps Met het tijdstip voor elke regel
+	Timestamps *bool `form:"timestamps,omitempty" json:"timestamps,omitempty"`
+}
+
+// GetKubeNetworkParams defines parameters for GetKubeNetwork.
+type GetKubeNetworkParams struct {
+	// Namespace Alleen deze namespace; zonder zijn het alle
+	Namespace *KubeNamespace `form:"namespace,omitempty" json:"namespace,omitempty"`
+
+	// System Ook de systeemnamespaces kube-system, kube-public en kube-node-lease; standaard niet
+	System *KubeSystem `form:"system,omitempty" json:"system,omitempty"`
+}
+
+// GetKubeObjectParams defines parameters for GetKubeObject.
+type GetKubeObjectParams struct {
+	// Group De API-groep, zoals apps; leeg is de kerngroep
+	Group *KubeGroup `form:"group,omitempty" json:"group,omitempty"`
+
+	// Version De versie, zoals v1
+	Version KubeVersion `form:"version" json:"version"`
+
+	// Resource De soort in het meervoud, zoals deployments
+	Resource KubeResource `form:"resource" json:"resource"`
+
+	// Namespace Alleen deze namespace; zonder zijn het alle
+	Namespace *KubeNamespace `form:"namespace,omitempty" json:"namespace,omitempty"`
+	Name      string         `form:"name" json:"name"`
+}
+
+// ListKubeObjectsParams defines parameters for ListKubeObjects.
+type ListKubeObjectsParams struct {
+	// Group De API-groep, zoals apps; leeg is de kerngroep
+	Group *KubeGroup `form:"group,omitempty" json:"group,omitempty"`
+
+	// Version De versie, zoals v1
+	Version KubeVersion `form:"version" json:"version"`
+
+	// Resource De soort in het meervoud, zoals deployments
+	Resource KubeResource `form:"resource" json:"resource"`
+
+	// Namespace Alleen deze namespace; zonder zijn het alle
+	Namespace *KubeNamespace `form:"namespace,omitempty" json:"namespace,omitempty"`
+
+	// System Ook de systeemnamespaces kube-system, kube-public en kube-node-lease; standaard niet
+	System *KubeSystem `form:"system,omitempty" json:"system,omitempty"`
+}
+
 // ListKubePodsParams defines parameters for ListKubePods.
 type ListKubePodsParams struct {
 	// Namespace Alleen deze namespace; zonder zijn het alle
@@ -7037,6 +7470,15 @@ type ListKubePodsParams struct {
 
 	// Node Alleen de pods op deze Kubernetes-node
 	Node *string `form:"node,omitempty" json:"node,omitempty"`
+}
+
+// GetKubeStorageParams defines parameters for GetKubeStorage.
+type GetKubeStorageParams struct {
+	// Namespace Alleen deze namespace; zonder zijn het alle
+	Namespace *KubeNamespace `form:"namespace,omitempty" json:"namespace,omitempty"`
+
+	// System Ook de systeemnamespaces kube-system, kube-public en kube-node-lease; standaard niet
+	System *KubeSystem `form:"system,omitempty" json:"system,omitempty"`
 }
 
 // ListKubeWorkloadsParams defines parameters for ListKubeWorkloads.
@@ -7610,12 +8052,36 @@ type ServerInterface interface {
 	// GetKubeOverview Overzicht van een Kubernetes-cluster, live via de kube-brug
 	// (GET /kubernetes/clusters/{clusterId})
 	GetKubeOverview(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
+	// GetKubeConfig De ConfigMaps, en de Secrets met alleen de sleutels
+	// (GET /kubernetes/clusters/{clusterId}/config)
+	GetKubeConfig(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params GetKubeConfigParams)
+	// ListKubeEvents De events, waarschuwingen eerst en dan de nieuwste; hoogstens 300
+	// (GET /kubernetes/clusters/{clusterId}/events)
+	ListKubeEvents(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params ListKubeEventsParams)
+	// GetKubeLogs De laatste regels log van een container; ook een viewer mag ze lezen
+	// (GET /kubernetes/clusters/{clusterId}/logs)
+	GetKubeLogs(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params GetKubeLogsParams)
+	// GetKubeNetwork De Services en Ingresses, met hun adressen
+	// (GET /kubernetes/clusters/{clusterId}/network)
+	GetKubeNetwork(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params GetKubeNetworkParams)
 	// ListKubeNodes De Kubernetes-nodes, met de ClusterForge-node en VM erbij
 	// (GET /kubernetes/clusters/{clusterId}/nodes)
 	ListKubeNodes(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
+	// GetKubeObject Eén object met toestand, keten, events en YAML, zonder secretwaarden
+	// (GET /kubernetes/clusters/{clusterId}/object)
+	GetKubeObject(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params GetKubeObjectParams)
+	// ListKubeObjects De objecten van één soort
+	// (GET /kubernetes/clusters/{clusterId}/objects)
+	ListKubeObjects(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params ListKubeObjectsParams)
 	// ListKubePods De pods met status, herstarts, node en leeftijd
 	// (GET /kubernetes/clusters/{clusterId}/pods)
 	ListKubePods(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params ListKubePodsParams)
+	// ListKubeResources De soorten objecten die het cluster kent, ook van geïnstalleerde apps
+	// (GET /kubernetes/clusters/{clusterId}/resources)
+	ListKubeResources(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
+	// GetKubeStorage De PersistentVolumeClaims, volumes en StorageClasses
+	// (GET /kubernetes/clusters/{clusterId}/storage)
+	GetKubeStorage(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params GetKubeStorageParams)
 	// ListKubeWorkloads Deployments, StatefulSets, DaemonSets, CronJobs en Jobs
 	// (GET /kubernetes/clusters/{clusterId}/workloads)
 	ListKubeWorkloads(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params ListKubeWorkloadsParams)
@@ -8438,15 +8904,63 @@ func (_ Unimplemented) GetKubeOverview(w http.ResponseWriter, r *http.Request, c
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// GetKubeConfig De ConfigMaps, en de Secrets met alleen de sleutels
+// (GET /kubernetes/clusters/{clusterId}/config)
+func (_ Unimplemented) GetKubeConfig(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params GetKubeConfigParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListKubeEvents De events, waarschuwingen eerst en dan de nieuwste; hoogstens 300
+// (GET /kubernetes/clusters/{clusterId}/events)
+func (_ Unimplemented) ListKubeEvents(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params ListKubeEventsParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetKubeLogs De laatste regels log van een container; ook een viewer mag ze lezen
+// (GET /kubernetes/clusters/{clusterId}/logs)
+func (_ Unimplemented) GetKubeLogs(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params GetKubeLogsParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetKubeNetwork De Services en Ingresses, met hun adressen
+// (GET /kubernetes/clusters/{clusterId}/network)
+func (_ Unimplemented) GetKubeNetwork(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params GetKubeNetworkParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // ListKubeNodes De Kubernetes-nodes, met de ClusterForge-node en VM erbij
 // (GET /kubernetes/clusters/{clusterId}/nodes)
 func (_ Unimplemented) ListKubeNodes(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// GetKubeObject Eén object met toestand, keten, events en YAML, zonder secretwaarden
+// (GET /kubernetes/clusters/{clusterId}/object)
+func (_ Unimplemented) GetKubeObject(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params GetKubeObjectParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListKubeObjects De objecten van één soort
+// (GET /kubernetes/clusters/{clusterId}/objects)
+func (_ Unimplemented) ListKubeObjects(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params ListKubeObjectsParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // ListKubePods De pods met status, herstarts, node en leeftijd
 // (GET /kubernetes/clusters/{clusterId}/pods)
 func (_ Unimplemented) ListKubePods(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params ListKubePodsParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListKubeResources De soorten objecten die het cluster kent, ook van geïnstalleerde apps
+// (GET /kubernetes/clusters/{clusterId}/resources)
+func (_ Unimplemented) ListKubeResources(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetKubeStorage De PersistentVolumeClaims, volumes en StorageClasses
+// (GET /kubernetes/clusters/{clusterId}/storage)
+func (_ Unimplemented) GetKubeStorage(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params GetKubeStorageParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -11923,6 +12437,291 @@ func (siw *ServerInterfaceWrapper) GetKubeOverview(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
+// GetKubeConfig operation middleware
+func (siw *ServerInterfaceWrapper) GetKubeConfig(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetKubeConfigParams
+
+	// ------------- Optional query parameter "namespace" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "namespace", r.URL.Query(), &params.Namespace, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "namespace"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "namespace", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "system" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "system", r.URL.Query(), &params.System, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "system"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "system", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetKubeConfig(w, r, clusterId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListKubeEvents operation middleware
+func (siw *ServerInterfaceWrapper) ListKubeEvents(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListKubeEventsParams
+
+	// ------------- Optional query parameter "namespace" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "namespace", r.URL.Query(), &params.Namespace, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "namespace"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "namespace", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "system" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "system", r.URL.Query(), &params.System, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "system"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "system", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "warnings" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "warnings", r.URL.Query(), &params.Warnings, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "warnings"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "warnings", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListKubeEvents(w, r, clusterId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetKubeLogs operation middleware
+func (siw *ServerInterfaceWrapper) GetKubeLogs(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetKubeLogsParams
+
+	// ------------- Required query parameter "namespace" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "namespace", r.URL.Query(), &params.Namespace, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "namespace"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "namespace", Err: err})
+		}
+		return
+	}
+
+	// ------------- Required query parameter "pod" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "pod", r.URL.Query(), &params.Pod, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "pod"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "pod", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "container" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "container", r.URL.Query(), &params.Container, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "container"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "container", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "previous" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "previous", r.URL.Query(), &params.Previous, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "previous"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "previous", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "lines" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "lines", r.URL.Query(), &params.Lines, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "lines"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "lines", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "timestamps" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "timestamps", r.URL.Query(), &params.Timestamps, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "timestamps"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "timestamps", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetKubeLogs(w, r, clusterId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetKubeNetwork operation middleware
+func (siw *ServerInterfaceWrapper) GetKubeNetwork(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetKubeNetworkParams
+
+	// ------------- Optional query parameter "namespace" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "namespace", r.URL.Query(), &params.Namespace, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "namespace"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "namespace", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "system" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "system", r.URL.Query(), &params.System, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "system"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "system", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetKubeNetwork(w, r, clusterId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListKubeNodes operation middleware
 func (siw *ServerInterfaceWrapper) ListKubeNodes(w http.ResponseWriter, r *http.Request) {
 
@@ -11940,6 +12739,194 @@ func (siw *ServerInterfaceWrapper) ListKubeNodes(w http.ResponseWriter, r *http.
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListKubeNodes(w, r, clusterId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetKubeObject operation middleware
+func (siw *ServerInterfaceWrapper) GetKubeObject(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetKubeObjectParams
+
+	// ------------- Optional query parameter "group" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "group", r.URL.Query(), &params.Group, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "group"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "group", Err: err})
+		}
+		return
+	}
+
+	// ------------- Required query parameter "version" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "version", r.URL.Query(), &params.Version, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "version"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "version", Err: err})
+		}
+		return
+	}
+
+	// ------------- Required query parameter "resource" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "resource", r.URL.Query(), &params.Resource, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "resource"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "resource", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "namespace" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "namespace", r.URL.Query(), &params.Namespace, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "namespace"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "namespace", Err: err})
+		}
+		return
+	}
+
+	// ------------- Required query parameter "name" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "name", r.URL.Query(), &params.Name, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "name"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetKubeObject(w, r, clusterId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListKubeObjects operation middleware
+func (siw *ServerInterfaceWrapper) ListKubeObjects(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListKubeObjectsParams
+
+	// ------------- Optional query parameter "group" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "group", r.URL.Query(), &params.Group, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "group"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "group", Err: err})
+		}
+		return
+	}
+
+	// ------------- Required query parameter "version" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "version", r.URL.Query(), &params.Version, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "version"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "version", Err: err})
+		}
+		return
+	}
+
+	// ------------- Required query parameter "resource" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "resource", r.URL.Query(), &params.Resource, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "resource"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "resource", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "namespace" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "namespace", r.URL.Query(), &params.Namespace, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "namespace"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "namespace", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "system" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "system", r.URL.Query(), &params.System, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "system"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "system", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListKubeObjects(w, r, clusterId, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -12008,6 +12995,87 @@ func (siw *ServerInterfaceWrapper) ListKubePods(w http.ResponseWriter, r *http.R
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListKubePods(w, r, clusterId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListKubeResources operation middleware
+func (siw *ServerInterfaceWrapper) ListKubeResources(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListKubeResources(w, r, clusterId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetKubeStorage operation middleware
+func (siw *ServerInterfaceWrapper) GetKubeStorage(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetKubeStorageParams
+
+	// ------------- Optional query parameter "namespace" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "namespace", r.URL.Query(), &params.Namespace, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "namespace"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "namespace", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "system" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "system", r.URL.Query(), &params.System, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "system"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "system", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetKubeStorage(w, r, clusterId, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -14130,6 +15198,30 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/kubernetes/clusters/{clusterId}/pods", wrapper.ListKubePods)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/kubernetes/clusters/{clusterId}/network", wrapper.GetKubeNetwork)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/kubernetes/clusters/{clusterId}/storage", wrapper.GetKubeStorage)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/kubernetes/clusters/{clusterId}/config", wrapper.GetKubeConfig)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/kubernetes/clusters/{clusterId}/events", wrapper.ListKubeEvents)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/kubernetes/clusters/{clusterId}/resources", wrapper.ListKubeResources)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/kubernetes/clusters/{clusterId}/objects", wrapper.ListKubeObjects)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/kubernetes/clusters/{clusterId}/object", wrapper.GetKubeObject)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/kubernetes/clusters/{clusterId}/logs", wrapper.GetKubeLogs)
 	})
 
 	return r

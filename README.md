@@ -58,6 +58,7 @@ Het technisch ontwerp staat in [docs/design/mvp-fase-1.md](docs/design/mvp-fase-
 | --- | --- | --- |
 | 1. Template Kubernetes (k3s) | Een Kubernetes-cluster uitrollen met k3s op Debian-VM's: één, drie of vijf servers met etcd, nul tot tien workers, en één VIP met keepalived voor kubectl en de apps; Traefik, ServiceLB, local-path en metrics-server zitten erin | klaar |
 | 2. Kube-brug en overzicht | cf-agent op een k3s-server leest de Kubernetes-API voor ClusterForge (agentprotocol 8), alleen lezen en zonder de waarden van Secrets; een pagina Kubernetes met per cluster een overzicht, de nodes gekoppeld aan de ClusterForge-nodes, de apps en de pods, met een leermodus die uitlegt wat je ziet en het kubectl-commando ernaast zet; na een uitrol wacht ClusterForge tot elke node Ready is | klaar |
+| 3. Details, logs en gebeurtenissen | Een pod, app, node of ander object openen: de toestand in gewone woorden, de keten van Deployment tot de VM op de Proxmox-host en van Service en Ingress, de containers, condities, events en YAML; de logs van een container, ook van de vorige na een herstart; tabbladen Netwerk, Opslag, Configuratie, Gebeurtenissen en Alles, met de soorten van geïnstalleerde apps zoals IngressRoute van Traefik | klaar |
 
 ## Draaien met Docker Compose
 
@@ -419,6 +420,20 @@ Onder Kubernetes staan je Kubernetes-clusters met hun versie, hoeveel nodes Read
 - **Nodes**: elke Kubernetes-node met Ready of NotReady en waarom, server of agent, cordon, gebruik, het aantal pods en een link naar de node in ClusterForge. ClusterForge koppelt ze op de naam die k3s kreeg, het adres of de hostname.
 - **Apps**: de Deployments, StatefulSets, DaemonSets, CronJobs en Jobs, met hoeveel er klaar zijn en wat er mis is.
 - **Pods**: de pods zoals `kubectl get pods` ze toont, te filteren op namespace en node.
+- **Netwerk**: de Services met hun intern adres, poorten en hoeveel pods ze kiezen (0 is rood: dan klopt een label niet), en de Ingresses met hun webadres om te openen.
+- **Opslag**: de claims (PVC's) met wie ze gebruikt, de volumes met de node en de map waar local-path ze maakte, en de StorageClasses.
+- **Configuratie**: de ConfigMaps met hun sleutels, en de Secrets met alleen hun sleutels en hoe lang elke waarde is.
+- **Gebeurtenissen**: de events van het laatste uur, waarschuwingen eerst.
+- **Alles**: elke soort die het cluster kent, ook die van apps zoals Traefik (IngressRoute) en k3s (HelmChart), met hun objecten.
+
+Klik op een pod, app, node, Service of ander object om het te openen. Je ziet:
+
+- de toestand in gewone woorden, zoals "CrashLoopBackOff op leren-worker-02: 0 van 1 containers klaar, 7 herstarts";
+- de keten: welke ReplicaSet en Deployment de pod maakten, op welke node hij draait, welke ClusterForge-node en welke VM op welke Proxmox-host dat is, en via welke Service en Ingress hij bereikbaar is;
+- bij een pod de containers met hun toestand en waarom de vorige stopte, en de logs: de laatste 100 tot 5000 regels, met tijdstippen als je wilt, die meeverversen. Herstartte een container, dan toont Vorige container de log van voor de herstart, waar de reden meestal staat;
+- de condities, de events van dat object, de labels en het object als YAML, zoals `kubectl get -o yaml` het toont maar zonder managedFields en zonder de waarden van Secrets.
+
+Ook een gebruiker met de rol viewer kan logs lezen.
 
 De namespaces van Kubernetes zelf (`kube-system`, `kube-public`, `kube-node-lease`) staan standaard verborgen; zet Systeem tonen aan om ze te zien.
 
@@ -430,7 +445,7 @@ Een cluster dat je zelf bouwde, werkt ook: maak een cluster van het type Kuberne
 
 De server praat nooit zelf met de Kubernetes-API. cf-agent op een k3s-server doet het, met de beheerdersconfig `/etc/rancher/k3s/k3s.yaml` die daar al staat, en stuurt het antwoord via de bestaande verbinding (NATS) terug. Daardoor hoeft poort 6443 niet open naar ClusterForge, en verlaat geen certificaat van het cluster de server. ClusterForge kiest een server met een verse heartbeat waarvan de API antwoordt; valt die weg, dan neemt een andere het over.
 
-De agent laat alleen lezen toe, met een vaste lijst: geen exec, attach, port-forward, proxy of logs, en geen watch. Van een Secret stuurt hij de namen van de sleutels, nooit de waarden: die vervangt hij door "(verborgen, N bytes)". Hij doet hoogstens vier verzoeken tegelijk, elk hoogstens 30 seconden.
+De agent laat alleen lezen toe, met een vaste lijst: geen exec, attach, port-forward of proxy, en geen watch. Van een log haalt hij alleen de laatste regels, hoogstens 5000 en 2 MB, zonder te blijven volgen; het dashboard vraagt hem elke vijf seconden opnieuw. Van een Secret stuurt hij de namen van de sleutels, nooit de waarden: die vervangt hij door "(verborgen, N bytes)". Hij doet hoogstens vier verzoeken tegelijk, elk hoogstens 30 seconden.
 
 Dit kan vanaf **agentprotocol 8**. Met een oudere agent toont de pagina "Agent te oud voor Kubernetes", met het commando om hem bij te werken; de aanmelding blijft staan. Werk ook je golden image bij, anders krijgen nieuwe VM's de oude agent. De andere onderdelen van ClusterForge blijven werken met een oudere agent.
 
