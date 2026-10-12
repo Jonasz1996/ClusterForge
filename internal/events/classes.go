@@ -53,7 +53,9 @@ var classes = map[string]Class{
 	"backup.inventory_failed": ClassInfo, "backup.inventory_recovered": ClassInfo, "backup.policy_updated": ClassInfo,
 	"backup.watch_updated": ClassInfo, "backup.sandbox_created": ClassInfo, "backup.sandbox_destroyed": ClassInfo,
 	"backup.sandbox_destroy_failed": ClassInfo, "backup.sandbox_connection_refused": ClassInfo,
-	"backup.verify_finished": ClassInfo,
+	"backup.verify_finished": ClassInfo, "backup.db_dumped": ClassInfo, "backup.db_dump_suspect": ClassInfo,
+	"backup.db_dump_failed": ClassInfo, "backup.db_restored": ClassChange, "backup.db_restore_failed": ClassInfo,
+	"backup.db_settings": ClassInfo,
 
 	"drift.detected": ClassChange, "drift.changed": ClassChange, "drift.resolved": ClassInfo,
 	"drift.check_failed": ClassInfo, "drift.ignore_added": ClassInfo, "drift.ignore_removed": ClassInfo,

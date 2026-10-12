@@ -47,7 +47,8 @@ type nodeOut struct {
 	Reported bool `json:"reported"`
 }
 
-// Run bewaakt de databases elke WatchInterval, tot ctx afloopt.
+// Run bewaakt de databases elke WatchInterval, en begint de nachtelijke
+// dumps die aan de beurt zijn, tot ctx afloopt.
 func (s *Service) Run(ctx context.Context) {
 	if s.WatchInterval <= 0 {
 		return
@@ -57,6 +58,9 @@ func (s *Service) Run(ctx context.Context) {
 	for {
 		if err := s.CheckAll(ctx); err != nil && ctx.Err() == nil {
 			s.log.Warn("databases bewaken mislukt", "err", err)
+		}
+		if err := s.RunBackups(ctx, s.Now()); err != nil && ctx.Err() == nil {
+			s.log.Warn("nachtelijke dumps plannen mislukt", "err", err)
 		}
 		select {
 		case <-ctx.Done():

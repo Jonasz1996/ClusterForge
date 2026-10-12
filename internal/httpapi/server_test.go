@@ -234,7 +234,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	cmps := components.NewService(pool, ev, log, runner, bus, dep)
 	cmps.Changed = eval.Kick
 	cmps.Poll, cmps.GateTimeout, cmps.Timeout, cmps.Retry = 20*time.Millisecond, 5*time.Second, 2*time.Second, 50*time.Millisecond
-	cmps.VIPTimeout = 5 * time.Second
+	cmps.VIPTimeout, cmps.DumpPoll = 5*time.Second, 20*time.Millisecond
 	drf.Components = cmps
 	rep := reports.NewService(pool, log)
 	rep.Backups, rep.Risk = bk, rsk

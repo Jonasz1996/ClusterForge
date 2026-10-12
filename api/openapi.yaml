@@ -922,6 +922,17 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/BackupOverview" }
         "401": { $ref: "#/components/responses/Error" }
+  /backups/databases:
+    get:
+      operationId: listDatabaseBackups
+      summary: Per database van een cluster de nieuwste dump en hoe vers die is
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DatabaseBackups" }
+        "401": { $ref: "#/components/responses/Error" }
   /nodes/{nodeId}/backups:
     parameters:
       - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -3182,6 +3193,95 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
+  /clusters/{clusterId}/components/{componentId}/dumps:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: componentId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: listComponentDumps
+      summary: De dumps van de databases van een cluster, met de instellingen van de nachtelijke dump
+      description: |
+        Per database de nieuwste goede dump en hoe vers die is, en alle dumps die ClusterForge kent, de nieuwste eerst. De
+        dumps staan op de nodes in /var/backups/clusterforge-db; ClusterForge vraagt de agents hier niets. Ook voor viewers.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ComponentDumps" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createComponentDump
+      summary: Meteen een dump van een database maken (admin); wordt een taak
+      description: |
+        De dump komt op een datanode zonder het VIP die Synced is. Loopt er al een dump of terugzetten van deze database,
+        dan 409.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ComponentDumpInput" }
+      responses:
+        "202":
+          description: Taak aangemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /clusters/{clusterId}/components/{componentId}/dumps/{dumpId}/restore:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: componentId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: dumpId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: restoreComponentDump
+      summary: Een dump terugzetten in een nieuwe database naast de bestaande (admin); wordt een taak
+      description: |
+        Standaard heet de nieuwe database <database>_herstel_<datum van de dump>. De bestaande database blijft zoals ze is.
+        Mislukt het, dan haalt de agent de nieuwe database weer weg.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ComponentRestoreInput" }
+      responses:
+        "202":
+          description: Taak aangemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ComponentRestoreStarted" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /clusters/{clusterId}/components/{componentId}/backup:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: componentId, in: path, required: true, schema: { type: string, format: uuid } }
+    put:
+      operationId: setComponentBackup
+      summary: De nachtelijke dump van de databases van een cluster instellen (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ComponentBackupSettings" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ComponentBackupSettings" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
   /databases:
     get:
       operationId: listDatabases
@@ -4266,6 +4366,95 @@ components:
       type: object
       properties:
         confirm: { type: string, description: De slug van het cluster; nodig op prod }
+    ComponentBackupSettings:
+      type: object
+      required: [on, at, keep_days]
+      properties:
+        on: { type: boolean, description: Elke dag een dump van elke database }
+        at: { type: string, description: "Wanneer, als uu:mm in de tijdzone van de server", example: "02:00" }
+        keep_days: { type: integer, minimum: 1, maximum: 90, description: Zoveel dagen blijft een dump staan }
+        next_at: { type: string, format: date-time, nullable: true, readOnly: true, description: De volgende nachtelijke dump }
+    ComponentDump:
+      type: object
+      required: [id, database, node, file, trigger, status, started_at, finished_at, size_bytes, raw_bytes, tables, tables_expected, message, job_id, restore_name]
+      properties:
+        id: { type: string, format: uuid }
+        database: { type: string }
+        node: { type: string, description: De node waarop de dump staat }
+        file: { type: string, description: "De naam in /var/backups/clusterforge-db/<database>/" }
+        trigger: { type: string, enum: [schedule, manual] }
+        status:
+          type: string
+          enum: [running, ok, suspect, failed]
+          description: "suspect: compleet, maar meer dan de helft kleiner dan de vorige goede, of er mist een tabel"
+        started_at: { type: string, format: date-time }
+        finished_at: { type: string, format: date-time, nullable: true }
+        size_bytes: { type: integer, format: int64, description: Op schijf, met zstd }
+        raw_bytes: { type: integer, format: int64, description: De SQL }
+        tables: { type: integer }
+        tables_expected: { type: integer }
+        message: { type: string, description: Waarom de dump mislukte of verdacht is }
+        job_id: { type: string, format: uuid, nullable: true }
+        restore_name: { type: string, description: "De standaardnaam als je deze dump terugzet: <database>_herstel_<datum van de dump>" }
+    ComponentDatabaseDumps:
+      type: object
+      required: [database, latest, failed, freshness]
+      properties:
+        database: { type: string }
+        latest: { allOf: [{ $ref: "#/components/schemas/ComponentDump" }], nullable: true, description: De nieuwste goede dump }
+        failed: { allOf: [{ $ref: "#/components/schemas/ComponentDump" }], nullable: true, description: "De laatste poging, als die na de nieuwste goede mislukte of verdacht was" }
+        freshness:
+          type: string
+          enum: [ok, stale, missing, "off"]
+          description: "stale: de nieuwste goede dump is ouder dan 26 uur; off: de nachtelijke dump staat uit"
+    ComponentDumps:
+      type: object
+      required: [settings, databases, dumps, active]
+      properties:
+        settings: { $ref: "#/components/schemas/ComponentBackupSettings" }
+        databases: { type: array, items: { $ref: "#/components/schemas/ComponentDatabaseDumps" } }
+        dumps: { type: array, items: { $ref: "#/components/schemas/ComponentDump" } }
+        active: { allOf: [{ $ref: "#/components/schemas/ComponentDumpJob" }], nullable: true, description: Een dump of terugzetten dat wacht of loopt }
+    ComponentDumpJob:
+      type: object
+      required: [job_id, kind, title]
+      properties:
+        job_id: { type: string, format: uuid }
+        kind: { type: string }
+        title: { type: string }
+    ComponentDumpInput:
+      type: object
+      required: [database]
+      properties:
+        database: { type: string }
+    ComponentRestoreInput:
+      type: object
+      properties:
+        target: { type: string, description: "De nieuwe database; standaard <database>_herstel_<datum van de dump>" }
+    ComponentRestoreStarted:
+      type: object
+      required: [job, target]
+      properties:
+        job: { $ref: "#/components/schemas/Job" }
+        target: { type: string }
+    DatabaseBackups:
+      type: object
+      required: [items]
+      properties:
+        items: { type: array, items: { $ref: "#/components/schemas/DatabaseBackup" } }
+    DatabaseBackup:
+      type: object
+      required: [cluster_id, cluster_name, component_id, engine, database, latest, failed, freshness, settings]
+      properties:
+        cluster_id: { type: string, format: uuid }
+        cluster_name: { type: string }
+        component_id: { type: string, format: uuid }
+        engine: { type: string }
+        database: { type: string }
+        latest: { allOf: [{ $ref: "#/components/schemas/ComponentDump" }], nullable: true }
+        failed: { allOf: [{ $ref: "#/components/schemas/ComponentDump" }], nullable: true }
+        freshness: { type: string, enum: [ok, stale, missing, "off"] }
+        settings: { $ref: "#/components/schemas/ComponentBackupSettings" }
     ComponentRecoverPlan:
       type: object
       required: [cluster_id, cluster_name, slug, prod, title, nodes, primary, begin, findings, blocked, hash]

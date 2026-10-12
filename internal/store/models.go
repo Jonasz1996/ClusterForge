@@ -57,6 +57,50 @@ func (ns NullActorType) Value() (driver.Value, error) {
 	return string(ns.ActorType), nil
 }
 
+type DbDumpStatus string
+
+const (
+	DbDumpStatusRunning DbDumpStatus = "running"
+	DbDumpStatusOk      DbDumpStatus = "ok"
+	DbDumpStatusSuspect DbDumpStatus = "suspect"
+	DbDumpStatusFailed  DbDumpStatus = "failed"
+)
+
+func (e *DbDumpStatus) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = DbDumpStatus(s)
+	case string:
+		*e = DbDumpStatus(s)
+	default:
+		return fmt.Errorf("unsupported scan type for DbDumpStatus: %T", src)
+	}
+	return nil
+}
+
+type NullDbDumpStatus struct {
+	DbDumpStatus DbDumpStatus
+	Valid        bool // Valid is true if DbDumpStatus is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullDbDumpStatus) Scan(value interface{}) error {
+	if value == nil {
+		ns.DbDumpStatus, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.DbDumpStatus.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullDbDumpStatus) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.DbDumpStatus), nil
+}
+
 type Environment string
 
 const (
@@ -367,6 +411,10 @@ type ClusterComponent struct {
 	NodesOut        []byte
 	AutoRecoveredAt *time.Time
 	RecoverJobID    *uuid.UUID
+	BackupOn        bool
+	BackupAt        string
+	BackupKeepDays  int32
+	BackupNextAt    *time.Time
 }
 
 type ClusterComponentRevision struct {
@@ -409,6 +457,27 @@ type DbDatabase struct {
 	Name      string
 	SizeBytes int64
 	Tables    int32
+}
+
+type DbDump struct {
+	ID             uuid.UUID
+	ComponentID    uuid.UUID
+	ClusterID      uuid.UUID
+	NodeID         *uuid.UUID
+	Hostname       string
+	Database       string
+	File           string
+	Trigger        string
+	Status         DbDumpStatus
+	StartedAt      time.Time
+	FinishedAt     *time.Time
+	SizeBytes      int64
+	RawBytes       int64
+	Tables         int32
+	TablesExpected int32
+	Message        string
+	JobID          *uuid.UUID
+	RequestedBy    *uuid.UUID
 }
 
 type DbServer struct {

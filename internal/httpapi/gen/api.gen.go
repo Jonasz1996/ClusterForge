@@ -258,6 +258,72 @@ func (e ClusterType) Valid() bool {
 	}
 }
 
+// Defines values for ComponentDatabaseDumpsFreshness.
+const (
+	ComponentDatabaseDumpsFreshnessMissing ComponentDatabaseDumpsFreshness = "missing"
+	ComponentDatabaseDumpsFreshnessOff     ComponentDatabaseDumpsFreshness = "off"
+	ComponentDatabaseDumpsFreshnessOk      ComponentDatabaseDumpsFreshness = "ok"
+	ComponentDatabaseDumpsFreshnessStale   ComponentDatabaseDumpsFreshness = "stale"
+)
+
+// Valid indicates whether the value is a known member of the ComponentDatabaseDumpsFreshness enum.
+func (e ComponentDatabaseDumpsFreshness) Valid() bool {
+	switch e {
+	case ComponentDatabaseDumpsFreshnessMissing:
+		return true
+	case ComponentDatabaseDumpsFreshnessOff:
+		return true
+	case ComponentDatabaseDumpsFreshnessOk:
+		return true
+	case ComponentDatabaseDumpsFreshnessStale:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ComponentDumpStatus.
+const (
+	ComponentDumpStatusFailed  ComponentDumpStatus = "failed"
+	ComponentDumpStatusOk      ComponentDumpStatus = "ok"
+	ComponentDumpStatusRunning ComponentDumpStatus = "running"
+	ComponentDumpStatusSuspect ComponentDumpStatus = "suspect"
+)
+
+// Valid indicates whether the value is a known member of the ComponentDumpStatus enum.
+func (e ComponentDumpStatus) Valid() bool {
+	switch e {
+	case ComponentDumpStatusFailed:
+		return true
+	case ComponentDumpStatusOk:
+		return true
+	case ComponentDumpStatusRunning:
+		return true
+	case ComponentDumpStatusSuspect:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ComponentDumpTrigger.
+const (
+	ComponentDumpTriggerManual   ComponentDumpTrigger = "manual"
+	ComponentDumpTriggerSchedule ComponentDumpTrigger = "schedule"
+)
+
+// Valid indicates whether the value is a known member of the ComponentDumpTrigger enum.
+func (e ComponentDumpTrigger) Valid() bool {
+	switch e {
+	case ComponentDumpTriggerManual:
+		return true
+	case ComponentDumpTriggerSchedule:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ComponentTemplateEngine.
 const (
 	ComponentTemplateEngineMariadb    ComponentTemplateEngine = "mariadb"
@@ -291,6 +357,30 @@ func (e DRSchedule) Valid() bool {
 	case DRScheduleMonthly:
 		return true
 	case DRScheduleWeekly:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DatabaseBackupFreshness.
+const (
+	DatabaseBackupFreshnessMissing DatabaseBackupFreshness = "missing"
+	DatabaseBackupFreshnessOff     DatabaseBackupFreshness = "off"
+	DatabaseBackupFreshnessOk      DatabaseBackupFreshness = "ok"
+	DatabaseBackupFreshnessStale   DatabaseBackupFreshness = "stale"
+)
+
+// Valid indicates whether the value is a known member of the DatabaseBackupFreshness enum.
+func (e DatabaseBackupFreshness) Valid() bool {
+	switch e {
+	case DatabaseBackupFreshnessMissing:
+		return true
+	case DatabaseBackupFreshnessOff:
+		return true
+	case DatabaseBackupFreshnessOk:
+		return true
+	case DatabaseBackupFreshnessStale:
 		return true
 	default:
 		return false
@@ -3471,6 +3561,23 @@ type ComponentApplyInput struct {
 	VipId nullable.Nullable[openapi_types.UUID] `json:"vip_id,omitempty"`
 }
 
+// ComponentBackupSettings defines model for ComponentBackupSettings.
+type ComponentBackupSettings struct {
+	// At Wanneer, als uu:mm in de tijdzone van de server
+	//
+	// Example: 02:00
+	At string `json:"at"`
+
+	// KeepDays Zoveel dagen blijft een dump staan
+	KeepDays int `json:"keep_days"`
+
+	// NextAt De volgende nachtelijke dump
+	NextAt nullable.Nullable[time.Time] `json:"next_at,omitempty"`
+
+	// On Elke dag een dump van elke database
+	On bool `json:"on"`
+}
+
 // ComponentConfirmInput defines model for ComponentConfirmInput.
 type ComponentConfirmInput struct {
 	// Confirm De slug van het cluster; nodig op prod
@@ -3503,6 +3610,23 @@ type ComponentDatabaseCreated struct {
 	Port     int    `json:"port"`
 	User     string `json:"user"`
 }
+
+// ComponentDatabaseDumps defines model for ComponentDatabaseDumps.
+type ComponentDatabaseDumps struct {
+	Database string `json:"database"`
+
+	// Failed De laatste poging, als die na de nieuwste goede mislukte of verdacht was
+	Failed nullable.Nullable[ComponentDump] `json:"failed"`
+
+	// Freshness stale: de nieuwste goede dump is ouder dan 26 uur; off: de nachtelijke dump staat uit
+	Freshness ComponentDatabaseDumpsFreshness `json:"freshness"`
+
+	// Latest De nieuwste goede dump
+	Latest nullable.Nullable[ComponentDump] `json:"latest"`
+}
+
+// ComponentDatabaseDumpsFreshness stale: de nieuwste goede dump is ouder dan 26 uur; off: de nachtelijke dump staat uit
+type ComponentDatabaseDumpsFreshness string
 
 // ComponentDatabaseGrant defines model for ComponentDatabaseGrant.
 type ComponentDatabaseGrant struct {
@@ -3556,6 +3680,66 @@ type ComponentDropInput struct {
 
 	// Name De naam van wat weg moet, ter bevestiging
 	Name string `json:"name"`
+}
+
+// ComponentDump defines model for ComponentDump.
+type ComponentDump struct {
+	Database string `json:"database"`
+
+	// File De naam in /var/backups/clusterforge-db/<database>/
+	File       string                                `json:"file"`
+	FinishedAt nullable.Nullable[time.Time]          `json:"finished_at"`
+	Id         openapi_types.UUID                    `json:"id"`
+	JobId      nullable.Nullable[openapi_types.UUID] `json:"job_id"`
+
+	// Message Waarom de dump mislukte of verdacht is
+	Message string `json:"message"`
+
+	// Node De node waarop de dump staat
+	Node string `json:"node"`
+
+	// RawBytes De SQL
+	RawBytes int64 `json:"raw_bytes"`
+
+	// RestoreName De standaardnaam als je deze dump terugzet: <database>_herstel_<datum van de dump>
+	RestoreName string `json:"restore_name"`
+
+	// SizeBytes Op schijf
+	SizeBytes int64     `json:"size_bytes"`
+	StartedAt time.Time `json:"started_at"`
+
+	// Status suspect: compleet, maar meer dan de helft kleiner dan de vorige goede, of er mist een tabel
+	Status         ComponentDumpStatus  `json:"status"`
+	Tables         int                  `json:"tables"`
+	TablesExpected int                  `json:"tables_expected"`
+	Trigger        ComponentDumpTrigger `json:"trigger"`
+}
+
+// ComponentDumpStatus suspect: compleet, maar meer dan de helft kleiner dan de vorige goede, of er mist een tabel
+type ComponentDumpStatus string
+
+// ComponentDumpTrigger defines model for ComponentDump.Trigger.
+type ComponentDumpTrigger string
+
+// ComponentDumpInput defines model for ComponentDumpInput.
+type ComponentDumpInput struct {
+	Database string `json:"database"`
+}
+
+// ComponentDumpJob defines model for ComponentDumpJob.
+type ComponentDumpJob struct {
+	JobId openapi_types.UUID `json:"job_id"`
+	Kind  string             `json:"kind"`
+	Title string             `json:"title"`
+}
+
+// ComponentDumps defines model for ComponentDumps.
+type ComponentDumps struct {
+	// Active Een dump of terugzetten dat wacht of loopt
+	Active    nullable.Nullable[ComponentDumpJob] `json:"active"`
+	Databases []ComponentDatabaseDumps            `json:"databases"`
+	Dumps     []ComponentDump                     `json:"dumps"`
+	Settings  ComponentBackupSettings             `json:"settings"`
 }
 
 // ComponentFinding defines model for ComponentFinding.
@@ -3749,6 +3933,18 @@ type ComponentRecovery struct {
 	Status string `json:"status"`
 }
 
+// ComponentRestoreInput defines model for ComponentRestoreInput.
+type ComponentRestoreInput struct {
+	// Target De nieuwe database; standaard <database>_herstel_<datum van de dump>
+	Target *string `json:"target,omitempty"`
+}
+
+// ComponentRestoreStarted defines model for ComponentRestoreStarted.
+type ComponentRestoreStarted struct {
+	Job    Job    `json:"job"`
+	Target string `json:"target"`
+}
+
 // ComponentTemplate defines model for ComponentTemplate.
 type ComponentTemplate struct {
 	Description string                  `json:"description"`
@@ -3902,6 +4098,27 @@ type DRReportVIP struct {
 
 // DRSchedule Leeg: alleen met de hand; weekly: elke week in het testvenster; monthly: in het eerste testvenster van de maand
 type DRSchedule string
+
+// DatabaseBackup defines model for DatabaseBackup.
+type DatabaseBackup struct {
+	ClusterId   openapi_types.UUID               `json:"cluster_id"`
+	ClusterName string                           `json:"cluster_name"`
+	ComponentId openapi_types.UUID               `json:"component_id"`
+	Database    string                           `json:"database"`
+	Engine      string                           `json:"engine"`
+	Failed      nullable.Nullable[ComponentDump] `json:"failed"`
+	Freshness   DatabaseBackupFreshness          `json:"freshness"`
+	Latest      nullable.Nullable[ComponentDump] `json:"latest"`
+	Settings    ComponentBackupSettings          `json:"settings"`
+}
+
+// DatabaseBackupFreshness defines model for DatabaseBackup.Freshness.
+type DatabaseBackupFreshness string
+
+// DatabaseBackups defines model for DatabaseBackups.
+type DatabaseBackups struct {
+	Items []DatabaseBackup `json:"items"`
+}
 
 // DatabaseGalera defines model for DatabaseGalera.
 type DatabaseGalera struct {
@@ -9179,11 +9396,20 @@ type UpdateClusterComponentJSONRequestBody = ComponentUpdateInput
 // ReapplyClusterComponentJSONRequestBody defines body for ReapplyClusterComponent for application/json ContentType.
 type ReapplyClusterComponentJSONRequestBody = ComponentReapplyInput
 
+// SetComponentBackupJSONRequestBody defines body for SetComponentBackup for application/json ContentType.
+type SetComponentBackupJSONRequestBody = ComponentBackupSettings
+
 // CreateComponentDatabaseJSONRequestBody defines body for CreateComponentDatabase for application/json ContentType.
 type CreateComponentDatabaseJSONRequestBody = ComponentDatabaseInput
 
 // DropComponentDatabaseJSONRequestBody defines body for DropComponentDatabase for application/json ContentType.
 type DropComponentDatabaseJSONRequestBody = ComponentDropInput
+
+// CreateComponentDumpJSONRequestBody defines body for CreateComponentDump for application/json ContentType.
+type CreateComponentDumpJSONRequestBody = ComponentDumpInput
+
+// RestoreComponentDumpJSONRequestBody defines body for RestoreComponentDump for application/json ContentType.
+type RestoreComponentDumpJSONRequestBody = ComponentRestoreInput
 
 // RecoverClusterComponentJSONRequestBody defines body for RecoverClusterComponent for application/json ContentType.
 type RecoverClusterComponentJSONRequestBody = ComponentRecoverInput
@@ -9418,6 +9644,9 @@ type ServerInterface interface {
 	// GetBackups Back-upstand van elke bewaakte VM, per koppeling de dekking, en per cluster de slechtste stand
 	// (GET /backups)
 	GetBackups(w http.ResponseWriter, r *http.Request)
+	// ListDatabaseBackups Per database van een cluster de nieuwste dump en hoe vers die is
+	// (GET /backups/databases)
+	ListDatabaseBackups(w http.ResponseWriter, r *http.Request)
 	// ListClusters Alle clusters met aantallen nodes en VIP's
 	// (GET /clusters)
 	ListClusters(w http.ResponseWriter, r *http.Request)
@@ -9460,6 +9689,9 @@ type ServerInterface interface {
 	// ReapplyClusterComponent Een database opnieuw toepassen (admin); wordt een taak
 	// (POST /clusters/{clusterId}/components/{componentId}/apply)
 	ReapplyClusterComponent(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID)
+	// SetComponentBackup De nachtelijke dump van de databases van een cluster instellen (admin)
+	// (PUT /clusters/{clusterId}/components/{componentId}/backup)
+	SetComponentBackup(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID)
 	// ListComponentDatabases De databases en gebruikers in de database van een cluster
 	// (GET /clusters/{clusterId}/components/{componentId}/databases)
 	ListComponentDatabases(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID)
@@ -9469,6 +9701,15 @@ type ServerInterface interface {
 	// DropComponentDatabase Een database weghalen (admin)
 	// (POST /clusters/{clusterId}/components/{componentId}/databases/{name}/drop)
 	DropComponentDatabase(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID, name string)
+	// ListComponentDumps De dumps van de databases van een cluster, met de instellingen van de nachtelijke dump
+	// (GET /clusters/{clusterId}/components/{componentId}/dumps)
+	ListComponentDumps(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID)
+	// CreateComponentDump Meteen een dump van een database maken (admin); wordt een taak
+	// (POST /clusters/{clusterId}/components/{componentId}/dumps)
+	CreateComponentDump(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID)
+	// RestoreComponentDump Een dump terugzetten in een nieuwe database naast de bestaande (admin); wordt een taak
+	// (POST /clusters/{clusterId}/components/{componentId}/dumps/{dumpId}/restore)
+	RestoreComponentDump(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID, dumpId openapi_types.UUID)
 	// RecoverClusterComponent De database opnieuw starten (admin); wordt een taak
 	// (POST /clusters/{clusterId}/components/{componentId}/recover)
 	RecoverClusterComponent(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID)
@@ -10129,6 +10370,12 @@ func (_ Unimplemented) GetBackups(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// ListDatabaseBackups Per database van een cluster de nieuwste dump en hoe vers die is
+// (GET /backups/databases)
+func (_ Unimplemented) ListDatabaseBackups(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // ListClusters Alle clusters met aantallen nodes en VIP's
 // (GET /clusters)
 func (_ Unimplemented) ListClusters(w http.ResponseWriter, r *http.Request) {
@@ -10213,6 +10460,12 @@ func (_ Unimplemented) ReapplyClusterComponent(w http.ResponseWriter, r *http.Re
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// SetComponentBackup De nachtelijke dump van de databases van een cluster instellen (admin)
+// (PUT /clusters/{clusterId}/components/{componentId}/backup)
+func (_ Unimplemented) SetComponentBackup(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // ListComponentDatabases De databases en gebruikers in de database van een cluster
 // (GET /clusters/{clusterId}/components/{componentId}/databases)
 func (_ Unimplemented) ListComponentDatabases(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID) {
@@ -10228,6 +10481,24 @@ func (_ Unimplemented) CreateComponentDatabase(w http.ResponseWriter, r *http.Re
 // DropComponentDatabase Een database weghalen (admin)
 // (POST /clusters/{clusterId}/components/{componentId}/databases/{name}/drop)
 func (_ Unimplemented) DropComponentDatabase(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID, name string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListComponentDumps De dumps van de databases van een cluster, met de instellingen van de nachtelijke dump
+// (GET /clusters/{clusterId}/components/{componentId}/dumps)
+func (_ Unimplemented) ListComponentDumps(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CreateComponentDump Meteen een dump van een database maken (admin); wordt een taak
+// (POST /clusters/{clusterId}/components/{componentId}/dumps)
+func (_ Unimplemented) CreateComponentDump(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RestoreComponentDump Een dump terugzetten in een nieuwe database naast de bestaande (admin); wordt een taak
+// (POST /clusters/{clusterId}/components/{componentId}/dumps/{dumpId}/restore)
+func (_ Unimplemented) RestoreComponentDump(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID, dumpId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -11949,6 +12220,20 @@ func (siw *ServerInterfaceWrapper) GetBackups(w http.ResponseWriter, r *http.Req
 	handler.ServeHTTP(w, r)
 }
 
+// ListDatabaseBackups operation middleware
+func (siw *ServerInterfaceWrapper) ListDatabaseBackups(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListDatabaseBackups(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListClusters operation middleware
 func (siw *ServerInterfaceWrapper) ListClusters(w http.ResponseWriter, r *http.Request) {
 
@@ -12371,6 +12656,41 @@ func (siw *ServerInterfaceWrapper) ReapplyClusterComponent(w http.ResponseWriter
 	handler.ServeHTTP(w, r)
 }
 
+// SetComponentBackup operation middleware
+func (siw *ServerInterfaceWrapper) SetComponentBackup(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "componentId" -------------
+	var componentId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "componentId", chi.URLParam(r, "componentId"), &componentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "componentId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetComponentBackup(w, r, clusterId, componentId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListComponentDatabases operation middleware
 func (siw *ServerInterfaceWrapper) ListComponentDatabases(w http.ResponseWriter, r *http.Request) {
 
@@ -12476,6 +12796,120 @@ func (siw *ServerInterfaceWrapper) DropComponentDatabase(w http.ResponseWriter, 
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.DropComponentDatabase(w, r, clusterId, componentId, name)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListComponentDumps operation middleware
+func (siw *ServerInterfaceWrapper) ListComponentDumps(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "componentId" -------------
+	var componentId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "componentId", chi.URLParam(r, "componentId"), &componentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "componentId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListComponentDumps(w, r, clusterId, componentId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateComponentDump operation middleware
+func (siw *ServerInterfaceWrapper) CreateComponentDump(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "componentId" -------------
+	var componentId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "componentId", chi.URLParam(r, "componentId"), &componentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "componentId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateComponentDump(w, r, clusterId, componentId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RestoreComponentDump operation middleware
+func (siw *ServerInterfaceWrapper) RestoreComponentDump(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "componentId" -------------
+	var componentId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "componentId", chi.URLParam(r, "componentId"), &componentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "componentId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "dumpId" -------------
+	var dumpId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "dumpId", chi.URLParam(r, "dumpId"), &dumpId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "dumpId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RestoreComponentDump(w, r, clusterId, componentId, dumpId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -18010,6 +18444,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Get(options.BaseURL+"/backups", wrapper.GetBackups)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/backups/databases", wrapper.ListDatabaseBackups)
+	})
+	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/nodes/{nodeId}/backups", wrapper.GetNodeBackups)
 	})
 	r.Group(func(r chi.Router) {
@@ -18377,6 +18814,18 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/clusters/{clusterId}/components/{componentId}/users/{user}/drop", wrapper.DropComponentUser)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/clusters/{clusterId}/components/{componentId}/dumps", wrapper.ListComponentDumps)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/clusters/{clusterId}/components/{componentId}/dumps", wrapper.CreateComponentDump)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/clusters/{clusterId}/components/{componentId}/dumps/{dumpId}/restore", wrapper.RestoreComponentDump)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/clusters/{clusterId}/components/{componentId}/backup", wrapper.SetComponentBackup)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/databases", wrapper.ListDatabases)

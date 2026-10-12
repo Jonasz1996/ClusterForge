@@ -214,6 +214,7 @@ var quiet = map[string]bool{
 	"cluster.database_node_out": true, "cluster.database_node_back": true, "cluster.database_recovering": true, "cluster.database_password": true, "vm.status_changed": true, "node.link_proposed": true, "node.link_ignored": true,
 	"backup.sandbox_created": true, "backup.sandbox_destroyed": true, "backup.sandbox_destroy_failed": true,
 	"backup.sandbox_connection_refused": true, "backup.inventory_failed": true, "backup.inventory_recovered": true,
+	"backup.db_dumped": true, "backup.db_dump_suspect": true, "backup.db_dump_failed": true, "backup.db_restore_failed": true,
 	"failover.fault_injected": true, "failover.fault_cleared": true, "dr.started": true, "dr.aborted": true,
 	"gitops.commit_seen": true, "gitops.sync_failed": true, "gitops.sync_recovered": true, "gitops.change_planned": true,
 	"gitops.change_superseded": true, "gitops.change_approved": true, "gitops.change_rejected": true, "gitops.file_invalid": true,

@@ -78,6 +78,7 @@ Het technisch ontwerp staat in [docs/design/mvp-fase-1.md](docs/design/mvp-fase-
 | 4. Het VIP van de app voor de database | Kies bij Database toevoegen het VIP van de app; keepalived zet het dan alleen op een node waarvan MariaDB mag schrijven (`cf-agent check db`), zodat de app altijd naar één node schrijft. Het plan toont per node de diff van keepalived.conf; ClusterForge past het bestand aan na `keepalived -t`, herlaadt node voor node met de eigenaar van het VIP laatst, en blokkeert een node met het VIP maar zonder database | klaar |
 | 5. Opkomen na een herstart | ClusterForge kijkt om de 20 seconden of de database draait. Na een volledige uitval, zoals een reboot van alle nodes, begint het het Galera-cluster vanzelf opnieuw op de node met de nieuwste data (uit `grastate.dat`, of na een crash met `galera_recovery`), maar alleen als alle nodes er zijn en MariaDB nergens meer start; ontbreekt er een, dan wacht het en kies je zelf Opnieuw starten, met een plan per node. Een node die niet startte terwijl het cluster draait, start het daar opnieuw. Getest met drie echte MariaDB-containers | klaar |
 | 6. Databases en gebruikers | Bij **Databases en gebruikers** op de kaart Database staan de databases met grootte, tabellen en verbindingen, en de gebruikers met hun hosts en rechten, zonder wachtwoord. **Database aanmaken** maakt een database met een eigen gebruiker en een sterk wachtwoord dat één keer op het scherm staat, samen met wat de app nodig heeft; ClusterForge bewaart het niet. **Nieuw wachtwoord** en **Weghalen** (met de naam ter bevestiging, op prod ook de slug en tweestapsverificatie). Getest tegen een echte MariaDB 11.8 | klaar |
+| 7. Back-ups van de databases | Elke nacht om 02:00 een dump van elke database, op een node zonder het VIP, met zstd in `/var/backups/clusterforge-db` (alleen voor root) en zeven dagen bewaard. ClusterForge controleert elke dump: compleet, alle tabellen, en niet meer dan de helft kleiner dan de vorige. Bij Back-ups en op de pagina Databases en gebruikers staat per database de leeftijd van de nieuwste goede dump. **Dump nu** voor één database, en **Terugzetten** in een nieuwe database naast de bestaande, als `<naam>_herstel_<datum>`. Getest tegen een echte MariaDB 11.8 | klaar |
 
 ## Draaien met Docker Compose
 
@@ -209,6 +210,8 @@ Elke 10 minuten leest ClusterForge ook het netwerk van elke online host: bridges
 ClusterForge maakt zelf geen back-ups; dat blijven de back-upjobs van Proxmox (vzdump naar een storage of naar Proxmox Backup Server). Wel leest het elk kwartier welke back-ups er zijn en toont bij Back-ups per VM hoe oud de nieuwste is, op welke storage, hoe groot, en of Proxmox Backup Server hem geverifieerd heeft. Een VM is bewaakt als hij aan een node gekoppeld is, of als je hem op de pagina Back-ups bij "Ook bewaken" zet met zijn VMID en een label: zo houd je ook de container van ClusterForge zelf in het oog.
 
 Is de nieuwste back-up ouder dan de maximale leeftijd, dan staat de VM op "Te oud"; zonder back-up op "Geen back-up". De maximale leeftijd is standaard 30 uur, wat past bij een dagelijkse back-upjob. Een admin stelt hem per cluster in, onderaan de kaart Back-ups op de clusterpagina; voor VM's op de lijst "Ook bewaken" geldt de standaard. Elke wissel komt één keer in het logboek, en de clusters en nodes tonen een back-upbadge. Daaronder staan de VM's en containers die in geen enkele back-upjob van Proxmox zitten. "Nu verversen" leest de back-ups meteen opnieuw, bijvoorbeeld na een back-upjob.
+
+Van de databases die ClusterForge zelf op een cluster zette, maakt het wel elke nacht een dump; bij Back-ups staat per database hoe oud de nieuwste goede is. Zie [Dumps](#dumps).
 
 Van een Kubernetes-cluster staan bij Back-ups ook de etcd-snapshots die k3s zelf maakt: per cluster en per server hoe oud de nieuwste is. Zie [etcd-snapshots](#etcd-snapshots).
 
@@ -830,9 +833,36 @@ mariadb -e "SELECT User, Host FROM mysql.user"
 mariadb -e "SHOW GRANTS FOR 'nextcloud'@'10.0.20.185'"
 ```
 
+#### Dumps
+
+Onder Databases en gebruikers staat de kaart **Dumps**. Elke nacht om 02:00, in de tijdzone van ClusterForge en dus buiten het testvenster van zondag 03:00 tot 05:00, maakt ClusterForge een dump van elke database. Dat gebeurt op een datanode die Synced is en het VIP niet heeft, zodat de node waar de app naar schrijft geen extra werk krijgt; is er zo een niet, dan op de node met het VIP, en de taak zegt waarom. ClusterForge kiest bij voorkeur de node van de vorige dump, zodat de dumps van een database bij elkaar staan. Stond ClusterForge om 02:00 uit, dan komt de dump zodra het weer draait. Met **Instellen** kies je het uur, hoeveel dagen een dump blijft staan (1 tot 90, standaard 7) of zet je de nachtelijke dump uit.
+
+Een dump is `mariadb-dump --single-transaction` van één database, met routines, events en triggers, zonder de database te blokkeren. cf-agent comprimeert hem met zstd en schrijft hem naar `/var/backups/clusterforge-db/<database>/<database>-<datum>-<tijd>.sql.zst`; die mappen zijn 0700 en de bestanden 0600, alleen voor root. Ze gaan mee in de Proxmox-back-up van de node. Een dump gaat nooit door ClusterForge; het kent alleen de naam, de grootte en de controle.
+
+Elke dump wordt gecontroleerd:
+
+- **goed**: `mariadb-dump` eindigde met `-- Dump completed` en alle tabellen staan erin;
+- **verdacht**: compleet, maar er mist een tabel, of hij is meer dan de helft kleiner dan de vorige dump van die database; de reden staat erbij, en het logboek meldt het;
+- **mislukt**: `mariadb-dump` gaf een fout, en dan gaat het halve bestand weg, of de dump is niet af; terugzetten kan dan niet.
+
+Per database toont de kaart de leeftijd, grootte en node van de nieuwste goede dump, en een mislukte of verdachte poging daarna. Ouder dan 26 uur is **te oud**. Dezelfde lijst, voor alle clusters, staat bij [Back-ups](#back-ups). **Dump nu** maakt meteen een dump van één database, bijvoorbeeld voor een update van de app. Na elke dump haalt ClusterForge de dumps weg die ouder zijn dan de bewaartijd, maar de nieuwste goede dump van een database blijft altijd staan.
+
+**Terugzetten** bij een goede of verdachte dump zet hem in een nieuwe database naast de bestaande, standaard `<naam>_herstel_<datum van de dump>`, of een naam die je kiest. De bestaande database en de apps merken er niets van. Daarna staat de nieuwe database bij Databases, met haar grootte en tabellen, zodat je kunt vergelijken; mislukt het terugzetten, dan haalt de agent de halve database weer weg. Gebruikers zitten niet in een dump. Een kopie met de standaardnaam krijgt geen nachtelijke dump. Over de bestaande database heen terugzetten, met de app in onderhoud, komt later.
+
+Met de hand op een node:
+
+```sh
+ls -l /var/backups/clusterforge-db/nextcloud/
+zstd -dc /var/backups/clusterforge-db/nextcloud/nextcloud-20261012-020000.sql.zst | tail -n 1
+mariadb -e "CREATE DATABASE nextcloud_test"
+zstd -dc /var/backups/clusterforge-db/nextcloud/nextcloud-20261012-020000.sql.zst | mariadb nextcloud_test
+```
+
 ### Hoe ClusterForge de databases leest
 
 cf-agent doet het op de node zelf, als root via de socket: `mariadb` voor MariaDB en `psql` als de gebruiker postgres voor PostgreSQL, en de REST-API van Patroni op `127.0.0.1:8008`. Er is dus geen databasegebruiker of wachtwoord voor ClusterForge nodig en poort 3306 of 5432 hoeft niet open. De agent stelt alleen vaste query's op de systeemtabellen, zoals `SHOW GLOBAL STATUS` en `pg_stat_replication`; hij leest nooit de inhoud van een tabel en neemt geen SQL van de server aan. Een database of gebruiker aanmaken of weghalen gaat met vaste opdrachten die de agent zelf maakt, alleen met namen van kleine letters, cijfers en `_`; het wachtwoord gaat via stdin naar `mariadb`, zodat het nooit in `ps` staat, en een foutmelding komt terug zonder wachtwoord. Hij doet hoogstens twee verzoeken tegelijk, elk hoogstens 30 seconden, en telt de tabellen van hoogstens 100 databases.
+
+Een dump en terugzetten lopen op de agent op de achtergrond, één tegelijk per node, en ClusterForge vraagt elke paar seconden hoe ver ze zijn. De agent start `mariadb-dump` (of `mysqldump`) met vaste opties en schrijft eerst naar een `.partial`-bestand dat pas na de controle zijn naam krijgt; naast elke dump staat een klein `.json`-bestand met de grootte en de controle. Terugzetten doet `CREATE DATABASE` voor een naam die nog niet bestaat en stuurt de dump door `mariadb`; de agent schrijft nooit in een database die er al was.
 
 Dit kan vanaf **agentprotocol 9**. Met een oudere agent toont de pagina het commando om hem bij te werken:
 

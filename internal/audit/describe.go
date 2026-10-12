@@ -577,6 +577,21 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 		return fmt.Sprintf("Sandbox-VM %s van de back-upcontrole van %s niet te verwijderen", num(p["vmid"]), str(p, "hostname")) + colon(str(p, "error"))
 	case "backup.sandbox_connection_refused":
 		return "Tweede agentverbinding van " + or(str(p, "hostname"), name) + " geweigerd tijdens een back-upcontrole" + prefixed(" vanaf ", str(p, "remote"))
+	case "backup.db_dumped":
+		return fmt.Sprintf("Dump van %s van cluster %s op %s", str(p, "database"), name, str(p, "node")) + dumpSize(p)
+	case "backup.db_dump_suspect":
+		return fmt.Sprintf("Dump van %s van cluster %s op %s is verdacht", str(p, "database"), name, str(p, "node")) + colon(str(p, "message"))
+	case "backup.db_dump_failed":
+		return fmt.Sprintf("Dump van %s van cluster %s op %s mislukt", str(p, "database"), name, str(p, "node")) + colon(str(p, "message"))
+	case "backup.db_restored":
+		return fmt.Sprintf("Dump van %s van cluster %s teruggezet als %s op %s", str(p, "database"), name, str(p, "target"), str(p, "node"))
+	case "backup.db_restore_failed":
+		return fmt.Sprintf("Dump van %s van cluster %s terugzetten als %s mislukt", str(p, "database"), name, str(p, "target")) + colon(str(p, "message"))
+	case "backup.db_settings":
+		if on, ok := p["on"].(bool); ok && !on {
+			return "Nachtelijke dump van de databases van cluster " + name + " uitgezet"
+		}
+		return fmt.Sprintf("Nachtelijke dump van de databases van cluster %s om %s, %s bewaard", name, str(p, "at"), count(p["keep_days"], "dag", "dagen"))
 	case "backup.verify_finished":
 		if str(p, "trigger") == "schedule" {
 			return "Geplande back-upcontrole van " + str(p, "hostname") + colon(str(p, "summary"))
@@ -1296,4 +1311,19 @@ func vanaf(e Entry) string {
 		return ""
 	}
 	return " vanaf " + *e.IP
+}
+
+// dumpSize is de grootte van een dump in een beschrijving.
+func dumpSize(p map[string]any) string {
+	n, ok := p["size_bytes"].(float64)
+	if !ok || n <= 0 {
+		return ""
+	}
+	units := []string{"B", "KB", "MB", "GB", "TB"}
+	u := 0
+	for n >= 1024 && u < len(units)-1 {
+		n /= 1024
+		u++
+	}
+	return " (" + strings.Replace(fmt.Sprintf("%.1f %s", n, units[u]), ".", ",", 1) + ")"
 }

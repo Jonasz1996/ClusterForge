@@ -153,3 +153,24 @@ func Drop(req protocol.DBDropRequest) (string, error) {
 	}
 	return "", errors.New("er is niets om weg te halen")
 }
+
+// DumpInfo leest wat een dump van db moet bevatten: of de database bestaat
+// (0 of 1), hoeveel tabellen ze heeft zonder de views, en hoe groot die
+// samen zijn.
+func DumpInfo(db string) (string, error) {
+	if err := CheckDatabase(db); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("SELECT (SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = '%[1]s'), "+
+		"COUNT(*), COALESCE(SUM(DATA_LENGTH + INDEX_LENGTH), 0) FROM information_schema.TABLES "+
+		"WHERE TABLE_SCHEMA = '%[1]s' AND TABLE_TYPE <> 'VIEW'", db), nil
+}
+
+// CreateDatabase maakt een nieuwe database om een dump in terug te zetten;
+// zonder IF NOT EXISTS, zodat het mislukt als ze er al is.
+func CreateDatabase(db string) (string, error) {
+	if err := CheckDatabase(db); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("CREATE DATABASE %s CHARACTER SET utf8mb4;\n", quoteDB(db, false)), nil
+}
