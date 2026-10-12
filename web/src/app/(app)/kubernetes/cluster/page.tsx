@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
+import { AccessTab } from "@/components/kube/Access";
 import { DoneAlert, KubeActions, RemoveWorkerDialog, workloadActions, type ActionDone } from "@/components/kube/Actions";
 import { applyModes, ApplyTab, type ApplyMode } from "@/components/kube/Apply";
 import { KubeMetrics } from "@/components/kube/KubeMetrics";
@@ -59,7 +60,8 @@ type Tab =
   | "configuratie"
   | "gebeurtenissen"
   | "alles"
-  | "lessen";
+  | "lessen"
+  | "kubectl";
 
 const tabs: { id: Tab; label: string }[] = [
   { id: "overzicht", label: "Overzicht" },
@@ -73,6 +75,7 @@ const tabs: { id: Tab; label: string }[] = [
   { id: "gebeurtenissen", label: "Gebeurtenissen" },
   { id: "alles", label: "Alles" },
   { id: "lessen", label: "Lessen" },
+  { id: "kubectl", label: "kubectl" },
 ];
 
 // Op deze tabbladen kies je een namespace en of het systeem meedoet.
@@ -163,6 +166,10 @@ function KubeClusterInner() {
           <button
             key={t.id}
             type="button"
+            aria-current={p.tab === t.id ? "page" : undefined}
+            // Past niet elk tabblad op het scherm, dan schuift het gekozen
+            // tabblad in beeld.
+            ref={p.tab === t.id ? (el) => el?.scrollIntoView({ block: "nearest", inline: "nearest" }) : undefined}
             onClick={() => p.set({ tab: t.id === "overzicht" ? undefined : t.id, mode: undefined })}
             className={cx(
               "-mb-px border-b-2 px-3 py-2 text-sm font-medium whitespace-nowrap",
@@ -222,6 +229,7 @@ function KubeClusterInner() {
             {p.tab === "lessen" && (
               <LessonsTab id={p.id} lesson={p.lesson} namespaces={o.namespaces} onLesson={(les) => p.set({ les })} />
             )}
+            {p.tab === "kubectl" && <AccessTab id={p.id} o={o} />}
           </>
         )
       )}

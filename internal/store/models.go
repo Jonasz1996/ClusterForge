@@ -612,6 +612,22 @@ type JobStep struct {
 	Error      string
 }
 
+type KubeAccess struct {
+	ID           uuid.UUID
+	ClusterID    uuid.UUID
+	UserID       uuid.UUID
+	Name         string
+	Role         string
+	Account      string
+	CreatedAt    time.Time
+	ExpiresAt    time.Time
+	RevokedAt    *time.Time
+	RevokedBy    *uuid.UUID
+	RevokeReason string
+	RemovedAt    *time.Time
+	RemoveError  string
+}
+
 type KubeCluster struct {
 	ClusterID      uuid.UUID
 	ApiOk          bool

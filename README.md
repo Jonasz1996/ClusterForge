@@ -62,6 +62,9 @@ Het technisch ontwerp staat in [docs/design/mvp-fase-1.md](docs/design/mvp-fase-
 | 4. Acties | Een app schalen, herstarten of terugdraaien naar een vorige versie, een object weghalen, een node op cordon zetten, weer pods geven of leegmaken; alles in het logboek, op prod met de slug en tweestapsverificatie; een herstart of onderhoud van een node via ClusterForge maakt hem in Kubernetes eerst leeg en geeft hem daarna weer pods | klaar |
 | 5. Apps uitrollen | Een tabblad Toepassen met drie manieren: een formulier Nieuwe app dat een Deployment, Service en Ingress maakt met de YAML ernaast, een Helm-chart via de Helm-controller van k3s, of eigen YAML met voorbeelden; Controleren is een dry-run met het verschil per object en de fouten bij het veld, pas Toepassen verandert iets; een webadres onder nip.io wijst zonder eigen DNS naar het VIP | klaar |
 | 6. Lessen | Een tabblad Lessen met acht lessen, van je cluster verkennen tot een node in onderhoud; elke opdracht kan in ClusterForge of met kubectl, en ClusterForge kijkt op het cluster of ze gelukt is; de voortgang blijft per gebruiker bewaard, en Opruimen haalt de namespace leren weg | klaar |
+| 7. Nodes toevoegen en weghalen | Op het tabblad Nodes een worker toevoegen of naar drie of vijf servers gaan, met een nieuwe revisie van de spec; een worker weghalen als taak die hem leegmaakt, uit Kubernetes haalt en de VM verwijdert; de spec van een cluster wijzigen in de webinterface; les 9 en 10 | klaar |
+| 8. Status, incidenten en metrics | Een Kubernetes-cluster is down als de API niet antwoordt en verminderd bij een node die NotReady is of een app die niet doet wat hij moet; zo'n app opent een incident, What Broke leest de waarschuwingen van Kubernetes en ziet een nieuwe image als uitrol; CPU en geheugen per pod en node elke minuut in VictoriaMetrics, met grafieken | klaar |
+| 9. kubectl op je eigen pc | Een kubeconfig per gebruiker voor kubectl, k9s, Headlamp of Lens, met een eigen ServiceAccount en een token dat verloopt; beheerder of alleen lezen, intrekken werkt meteen, en verlopen kubeconfigs ruimt ClusterForge op | klaar |
 
 ## Draaien met Docker Compose
 
@@ -417,6 +420,8 @@ sudo kubectl get nodes -o wide
 sudo kubectl get pods -A
 ```
 
+Op je eigen pc gebruik je een kubeconfig uit ClusterForge; zie [kubectl op je eigen pc](#kubectl-op-je-eigen-pc).
+
 Na het starten van k3s wacht de uitrol tot elke node van het cluster zich als Ready meldt in Kubernetes (hoogstens vijf minuten), en pas daarna kijkt ze of Traefik op het VIP antwoordt.
 
 ### De pagina Kubernetes
@@ -432,6 +437,7 @@ Onder Kubernetes staan je Kubernetes-clusters met hun versie, hoeveel nodes Read
 - **Configuratie**: de ConfigMaps met hun sleutels, en de Secrets met alleen hun sleutels en hoe lang elke waarde is.
 - **Gebeurtenissen**: de events van het laatste uur, waarschuwingen eerst.
 - **Alles**: elke soort die het cluster kent, ook die van apps zoals Traefik (IngressRoute) en k3s (HelmChart), met hun objecten.
+- **kubectl**: een kubeconfig maken voor kubectl, k9s, Headlamp of Lens, en de kubeconfigs die er al zijn; zie [kubectl op je eigen pc](#kubectl-op-je-eigen-pc).
 
 Klik op een pod, app, node, Service of ander object om het te openen. Je ziet:
 
@@ -555,11 +561,46 @@ Een Kubernetes-cluster krijgt de gewone [status](#monitoring) van zijn nodes en 
 
 Ze hebben dezelfde labels als de metrics van een node (`job`, `instance`, `node`, `node_id`, `cluster`, `cluster_id`, `env`), met als node die waarop de pod draait. `workload` is de app van de pod, zoals de Deployment boven zijn ReplicaSet. Het overzicht toont CPU en geheugen per namespace, de pagina van een app of pod per pod. Een nieuwe agent is hiervoor niet nodig: de agent leest metrics-server zoals de rest van de API.
 
+### kubectl op je eigen pc
+
+Op het tabblad **kubectl** maak je een kubeconfig. Daarmee praten kubectl, [k9s](https://k9scli.io), [Headlamp](https://headlamp.dev) en [Lens](https://k8slens.dev) op je eigen pc rechtstreeks met de API van het cluster, op het VIP en poort 6443. Je pc moet dat adres kunnen bereiken.
+
+1. Geef de kubeconfig een naam (zoals laptop), kies de rechten en hoe lang hij geldt (1, 7 of 30 dagen), en bevestig met je wachtwoord, of met je code als je tweestapsverificatie hebt.
+2. Download het bestand, zoals `leren.kubeconfig`. Dat kan alleen nu: ClusterForge bewaart het token niet.
+3. Gebruik het:
+
+```sh
+mkdir -p ~/.kube
+mv ~/Downloads/leren.kubeconfig ~/.kube/
+chmod 600 ~/.kube/leren.kubeconfig
+export KUBECONFIG=~/.kube/leren.kubeconfig
+kubectl get nodes
+```
+
+In PowerShell op Windows is het `$env:KUBECONFIG = "$HOME\Downloads\leren.kubeconfig"`. k9s leest dezelfde `KUBECONFIG`; in Headlamp en Lens voeg je het bestand toe als cluster.
+
+Zo werkt het:
+
+- Elke kubeconfig krijgt een eigen ServiceAccount in de namespace `clusterforge`, zoals `cf-jonas-1a2b3c`, met een ClusterRoleBinding `clusterforge:cf-jonas-1a2b3c`. Het token erbij vraagt ClusterForge met de TokenRequest-API; het verloopt vanzelf.
+- **Beheerder** is de ClusterRole `cluster-admin`: alles, ook Secrets lezen. **Alleen lezen** is `view`: alles lezen behalve Secrets, en niets wijzigen. Een viewer krijgt alleen view. Een beheerder-kubeconfig voor een prodcluster vraagt tweestapsverificatie en de slug.
+- **Intrekken** haalt het ServiceAccount weg, en dan weigert de API het token meteen. Antwoordt de API op dat moment niet, dan staat de kubeconfig op "Wordt ingetrokken" en probeert ClusterForge het elke 30 seconden opnieuw.
+- Een verlopen kubeconfig ruimt ClusterForge op dezelfde manier op. Is de gebruiker uitgeschakeld, of geen admin meer bij een beheerder-kubeconfig, dan trekt ClusterForge hem binnen een halve minuut in.
+- Uitgeven en intrekken staan in het logboek, zonder het token. Een beheerder ziet alle kubeconfigs van het cluster, een viewer de zijne. Verlopen en ingetrokken kubeconfigs blijven 30 dagen in de lijst.
+
+Zelf kijken in het cluster:
+
+```sh
+kubectl get serviceaccounts -n clusterforge
+kubectl get clusterrolebindings -l app.kubernetes.io/managed-by=clusterforge
+```
+
+Dit vraagt een agent van deze versie op een server; met een oudere toont het tabblad "Agent te oud" met het commando om hem bij te werken.
+
 ### Hoe ClusterForge Kubernetes leest
 
 De server praat nooit zelf met de Kubernetes-API. cf-agent op een k3s-server doet het, met de beheerdersconfig `/etc/rancher/k3s/k3s.yaml` die daar al staat, en stuurt het antwoord via de bestaande verbinding (NATS) terug. Daardoor hoeft poort 6443 niet open naar ClusterForge, en verlaat geen certificaat van het cluster de server. ClusterForge kiest een server met een verse heartbeat waarvan de API antwoordt; valt die weg, dan neemt een andere het over.
 
-De agent laat alleen lezen toe, met een vaste lijst: geen exec, attach, port-forward of proxy, en geen watch. Schrijven kan alleen voor de acties hierboven: een patch op Deployments, StatefulSets, ReplicaSets, DaemonSets en nodes, een eviction van een pod, en het weghalen van één object, nooit van `default` of de namespaces van Kubernetes zelf. Voor Toepassen doet de agent een server-side apply van één object tegelijk, met een dry-run bij Controleren; dat kan elk object zijn, zoals bij `kubectl apply`, en daarom kan alleen een beheerder het. Een patch of apply staat in Kubernetes op naam van `clusterforge` (de fieldManager). Van een log haalt hij alleen de laatste regels, hoogstens 5000 en 2 MB, zonder te blijven volgen; het dashboard vraagt hem elke vijf seconden opnieuw. Van een Secret stuurt hij de namen van de sleutels, nooit de waarden: die vervangt hij door "(verborgen, N bytes)". Hij doet hoogstens vier verzoeken tegelijk, elk hoogstens 30 seconden.
+De agent laat alleen lezen toe, met een vaste lijst: geen exec, attach, port-forward of proxy, en geen watch. Schrijven kan alleen voor de acties hierboven: een patch op Deployments, StatefulSets, ReplicaSets, DaemonSets en nodes, een eviction van een pod, en het weghalen van één object, nooit van `default` of de namespaces van Kubernetes zelf. Voor Toepassen doet de agent een server-side apply van één object tegelijk, met een dry-run bij Controleren; dat kan elk object zijn, zoals bij `kubectl apply`, en daarom kan alleen een beheerder het. Een patch of apply staat in Kubernetes op naam van `clusterforge` (de fieldManager). Voor een kubeconfig maakt de agent zelf het ServiceAccount en de ClusterRoleBinding, alleen in de namespace `clusterforge`, alleen met een naam die met `cf-` begint en alleen met `cluster-admin` of `view`, en vraagt hij er een token voor; het token gaat één keer naar ClusterForge en zo naar je browser. Van een log haalt hij alleen de laatste regels, hoogstens 5000 en 2 MB, zonder te blijven volgen; het dashboard vraagt hem elke vijf seconden opnieuw. Van een Secret stuurt hij de namen van de sleutels, nooit de waarden: die vervangt hij door "(verborgen, N bytes)". Hij doet hoogstens vier verzoeken tegelijk, elk hoogstens 30 seconden.
 
 Dit kan vanaf **agentprotocol 8**. Met een oudere agent toont de pagina "Agent te oud voor Kubernetes", met het commando om hem bij te werken; de aanmelding blijft staan. Werk ook je golden image bij, anders krijgen nieuwe VM's de oude agent. De andere onderdelen van ClusterForge blijven werken met een oudere agent.
 

@@ -81,9 +81,15 @@ func (s *Service) write(ctx context.Context, clusterID uuid.UUID, req protocol.K
 
 // send is write met het hele antwoord van de agent.
 func (s *Service) send(ctx context.Context, clusterID uuid.UUID, req protocol.KubeRequest) (protocol.KubeResponse, error) {
+	res, _, err := s.sendVia(ctx, clusterID, req)
+	return res, err
+}
+
+// sendVia is send, en zegt ook welke node het verzoek doorstuurde.
+func (s *Service) sendVia(ctx context.Context, clusterID uuid.UUID, req protocol.KubeRequest) (protocol.KubeResponse, bridgeNode, error) {
 	nodes, err := s.candidates(ctx, clusterID)
 	if err != nil {
-		return protocol.KubeResponse{}, err
+		return protocol.KubeResponse{}, bridgeNode{}, err
 	}
 	var last error
 	for _, n := range nodes {
@@ -96,9 +102,9 @@ func (s *Service) send(ctx context.Context, clusterID uuid.UUID, req protocol.Ku
 			last = &UnavailableError{Msg: "de agent op " + n.Hostname + " is niet verbonden"}
 			continue
 		case errors.Is(err, agentbus.ErrNoAnswer):
-			return protocol.KubeResponse{}, &UnavailableError{Msg: "de agent op " + n.Hostname + " antwoordde niet op tijd; kijk of de actie toch gelukt is"}
+			return protocol.KubeResponse{}, n, &UnavailableError{Msg: "de agent op " + n.Hostname + " antwoordde niet op tijd; kijk of de actie toch gelukt is"}
 		case err != nil:
-			return protocol.KubeResponse{}, err
+			return protocol.KubeResponse{}, n, err
 		case res.Status == 0 && strings.HasPrefix(res.Error, "onbekend kube-verzoek"):
 			last = &UnavailableError{TooOld: true, Msg: "de agent op " + n.Hostname +
 				" kent deze actie nog niet; werk hem bij met het installatiescript en --upgrade"}
@@ -109,14 +115,14 @@ func (s *Service) send(ctx context.Context, clusterID uuid.UUID, req protocol.Ku
 		}
 		s.forget(clusterID)
 		if res.Status < 200 || res.Status > 299 {
-			return protocol.KubeResponse{}, apiError(res)
+			return protocol.KubeResponse{}, n, apiError(res)
 		}
 		if res.Error != "" {
-			return protocol.KubeResponse{}, &APIError{Status: res.Status, Message: res.Error}
+			return protocol.KubeResponse{}, n, &APIError{Status: res.Status, Message: res.Error}
 		}
-		return res, nil
+		return res, n, nil
 	}
-	return protocol.KubeResponse{}, last
+	return protocol.KubeResponse{}, bridgeNode{}, last
 }
 
 // forget leegt de cache van een cluster.

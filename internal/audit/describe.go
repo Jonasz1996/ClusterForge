@@ -756,6 +756,11 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 	case "kube.app_status_changed":
 		return fmt.Sprintf("App %s in %s van %s naar %s", str(p, "name"), str(p, "namespace"), status(str(p, "from")), status(str(p, "to"))) +
 			colon(str(p, "reason"))
+	case "kube.access_issued":
+		return fmt.Sprintf("Kubeconfig %s voor %s uitgegeven: %s, geldig tot %s", str(p, "name"), str(p, "user"), accessRole(str(p, "role")),
+			day(str(p, "expires_at")))
+	case "kube.access_revoked":
+		return fmt.Sprintf("Kubeconfig %s van %s ingetrokken (%s)", str(p, "name"), str(p, "user"), accessRole(str(p, "role"))) + colon(str(p, "reason"))
 	case "kube.applied":
 		var parts []string
 		if c := list(p["created"]); c != "" {
@@ -1177,6 +1182,14 @@ func day(s string) string {
 		return ""
 	}
 	return t.Local().Format("2-1-2006")
+}
+
+// accessRole is de rol van een kubeconfig in woorden.
+func accessRole(role string) string {
+	if role == "view" {
+		return "alleen lezen"
+	}
+	return "beheerder"
 }
 
 func colon(s string) string {

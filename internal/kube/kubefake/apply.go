@@ -251,7 +251,14 @@ func validate(kind string, o map[string]any) []cause {
 		out = append(out, cause{Reason: "FieldValueInvalid", Message: "Invalid value: " + msg, Field: f})
 	}
 	name, _ := field(o, "metadata.name")
-	if len(name) > 253 || !dns1123.MatchString(name) {
+	switch {
+	case strings.HasPrefix(kind, "ClusterRole"):
+		// Rollen en bindings hebben een padnaam, zoals
+		// system:controller:node-controller.
+		if name == "" || name == "." || name == ".." || strings.ContainsAny(name, "/%") {
+			bad("metadata.name", fmt.Sprintf("%q: may not contain '/' or '%%'", name))
+		}
+	case len(name) > 253 || !dns1123.MatchString(name):
 		bad("metadata.name", fmt.Sprintf("%q: a lowercase RFC 1123 subdomain must consist of lower case alphanumeric characters, '-' or '.', and must start and end with an alphanumeric character", name))
 	}
 	spec, _ := o["spec"].(map[string]any)

@@ -232,6 +232,8 @@ var Known = map[string]Spec{
 	"kube.node_removed":       {CategoryKube, "Worker weggehaald uit Kubernetes"},
 	"kube.rolled_out":         {CategoryKube, "Nieuwe image uitgerold in Kubernetes"},
 	"kube.app_status_changed": {CategoryKube, "Status van app in Kubernetes gewijzigd"},
+	"kube.access_issued":      {CategoryKube, "Kubeconfig voor kubectl uitgegeven"},
+	"kube.access_revoked":     {CategoryKube, "Kubeconfig voor kubectl ingetrokken"},
 }
 
 // Lookup geeft de spec van een action. Een onbekende action (uit een nieuwere

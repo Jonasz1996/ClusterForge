@@ -401,11 +401,16 @@ func kindOfKey(key string) string {
 	return ""
 }
 
-// post kent alleen de eviction van een pod.
+// post kent alleen de eviction van een pod en de TokenRequest van een
+// ServiceAccount.
 func (s *Server) post(w http.ResponseWriter, r *http.Request) {
 	t, ok := s.target(r.URL.Path)
+	if ok && t.kind.Kind == "ServiceAccount" && t.sub == "token" {
+		s.tokenRequest(w, r, t)
+		return
+	}
 	if !ok || t.kind.Kind != "Pod" || t.sub != "eviction" {
-		status(w, http.StatusMethodNotAllowed, "MethodNotAllowed", "kubefake kent POST alleen voor eviction")
+		status(w, http.StatusMethodNotAllowed, "MethodNotAllowed", "kubefake kent POST alleen voor eviction en token")
 		return
 	}
 	var ev struct {

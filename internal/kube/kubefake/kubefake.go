@@ -1,11 +1,13 @@
 // Package kubefake is een nagespeelde Kubernetes-API voor tests en de
 // ontwikkelomgeving, zoals pvefake voor Proxmox. Hij luistert met TLS en
-// eist een clientcertificaat, net als k3s, en schrijft een kubeconfig in het
-// formaat van /etc/rancher/k3s/k3s.yaml. Hij kent discovery, /version,
-// /readyz, en get en list van de gewone soorten objecten met label- en
-// fieldselectors en pagina's, patch, server-side apply, delete en eviction
-// met PodDisruptionBudgets. Elk verzoek wordt onthouden, zodat een test kan
-// nagaan wat er nooit aankwam.
+// wil een clientcertificaat of het token van een ServiceAccount, net als
+// k3s, en schrijft een kubeconfig in het formaat van
+// /etc/rancher/k3s/k3s.yaml. Hij kent discovery, /version, /readyz, en get
+// en list van de gewone soorten objecten met label- en fieldselectors en
+// pagina's, patch, server-side apply, delete, eviction met
+// PodDisruptionBudgets, en TokenRequest met de ClusterRoles cluster-admin
+// en view. Elk verzoek wordt onthouden, zodat een test kan nagaan wat er
+// nooit aankwam.
 package kubefake
 
 import (
@@ -81,6 +83,8 @@ var Kinds = []Kind{
 	{Group: "networking.k8s.io", Version: "v1", Kind: "Ingress", Resource: "ingresses", Namespaced: true, Subresources: []string{"status"}},
 	{Group: "networking.k8s.io", Version: "v1", Kind: "IngressClass", Resource: "ingressclasses"},
 	{Group: "storage.k8s.io", Version: "v1", Kind: "StorageClass", Resource: "storageclasses"},
+	{Group: "rbac.authorization.k8s.io", Version: "v1", Kind: "ClusterRole", Resource: "clusterroles"},
+	{Group: "rbac.authorization.k8s.io", Version: "v1", Kind: "ClusterRoleBinding", Resource: "clusterrolebindings"},
 	{Group: "policy", Version: "v1", Kind: "PodDisruptionBudget", Resource: "poddisruptionbudgets", Namespaced: true, Subresources: []string{"status"}},
 	{Group: "helm.cattle.io", Version: "v1", Kind: "HelmChart", Resource: "helmcharts", Namespaced: true},
 	{Group: "k3s.cattle.io", Version: "v1", Kind: "ETCDSnapshotFile", Resource: "etcdsnapshotfiles"},
@@ -108,7 +112,9 @@ type Server struct {
 	owners   map[string]map[string]string
 	requests []string
 	// logs per ns/pod/container/vorige.
-	logs    map[string][]logLine
+	logs map[string][]logLine
+	// tokens van ServiceAccounts, uit een TokenRequest.
+	tokens  map[string]saToken
 	version string
 	ready   bool
 	kubelet bool
@@ -122,6 +128,7 @@ type Server struct {
 func New() *Server {
 	s := &Server{
 		objects: map[string]map[string]map[string]any{}, owners: map[string]map[string]string{}, logs: map[string][]logLine{},
+		tokens:  map[string]saToken{},
 		version: "v1.35.9+k3s1", ready: true, kubelet: true,
 	}
 	s.makeCerts()
@@ -140,7 +147,8 @@ func (s *Server) Start() {
 	pool.AppendCertsFromPEM(s.ca)
 	// Een test met een verkeerde CA hoort geen ruis in de uitvoer te geven.
 	s.srv.Config.ErrorLog = log.New(io.Discard, "", 0)
-	s.srv.TLS = &tls.Config{Certificates: []tls.Certificate{cert}, ClientAuth: tls.RequireAndVerifyClientCert, ClientCAs: pool, MinVersion: tls.VersionTLS12}
+	// Zonder clientcertificaat moet er een token bij; zie authorize.
+	s.srv.TLS = &tls.Config{Certificates: []tls.Certificate{cert}, ClientAuth: tls.VerifyClientCertIfGiven, ClientCAs: pool, MinVersion: tls.VersionTLS12}
 	s.srv.StartTLS()
 	s.kubeletSrv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		s.mu.Lock()
@@ -342,6 +350,9 @@ func (s *Server) Handler() http.Handler {
 		s.mu.Lock()
 		s.requests = append(s.requests, req)
 		s.mu.Unlock()
+		if !s.authorize(w, r) {
+			return
+		}
 		switch r.Method {
 		case http.MethodGet:
 			s.get(w, r)

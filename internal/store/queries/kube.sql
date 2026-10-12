@@ -156,3 +156,63 @@ UPDATE kube_workloads SET status = @status, status_reason = @status_reason, stat
 
 -- name: ListKubeWorkloadsByID :many
 SELECT id, cluster_id, namespace, kind, name FROM kube_workloads WHERE id = ANY(@ids::uuid[]);
+
+-- name: InsertKubeAccess :one
+INSERT INTO kube_access (id, cluster_id, user_id, name, role, account, expires_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING *;
+
+-- name: SetKubeAccessExpires :exec
+UPDATE kube_access SET expires_at = $2 WHERE id = $1;
+
+-- name: DeleteKubeAccess :exec
+DELETE FROM kube_access WHERE id = $1;
+
+-- name: GetKubeAccess :one
+SELECT sqlc.embed(k), u.username, coalesce(b.username, '')::text AS revoked_by_name
+FROM kube_access k
+JOIN users u ON u.id = k.user_id
+LEFT JOIN users b ON b.id = k.revoked_by
+WHERE k.id = $1;
+
+-- name: ListKubeAccess :many
+-- De kubeconfigs van een cluster, de nieuwste eerst; met user_id alleen
+-- die van die gebruiker. Verlopen en ingetrokken kubeconfigs blijven 30
+-- dagen in de lijst.
+SELECT sqlc.embed(k), u.username, coalesce(b.username, '')::text AS revoked_by_name
+FROM kube_access k
+JOIN users u ON u.id = k.user_id
+LEFT JOIN users b ON b.id = k.revoked_by
+WHERE k.cluster_id = @cluster_id
+  AND (sqlc.narg(user_id)::uuid IS NULL OR k.user_id = sqlc.narg(user_id))
+  AND (k.removed_at IS NULL OR greatest(k.expires_at, k.revoked_at) > now() - interval '30 days')
+ORDER BY k.created_at DESC
+LIMIT 200;
+
+-- name: RevokeKubeAccess :one
+-- Zet een kubeconfig op ingetrokken; een tweede keer verandert niets.
+UPDATE kube_access SET revoked_at = now(), revoked_by = $2, revoke_reason = $3
+WHERE id = $1 AND revoked_at IS NULL
+RETURNING *;
+
+-- name: ListKubeAccessToRemove :many
+-- De ServiceAccounts die weg moeten: ingetrokken of verlopen, of van een
+-- gebruiker die uitgeschakeld is of geen admin meer is bij een
+-- admin-kubeconfig. reason is leeg als ze al ingetrokken of verlopen zijn.
+SELECT k.id, k.account, k.name, k.role, k.user_id, u.username, k.revoked_at,
+       (CASE
+            WHEN k.revoked_at IS NOT NULL OR k.expires_at <= now() THEN ''
+            WHEN u.disabled_at IS NOT NULL THEN 'de gebruiker is uitgeschakeld'
+            ELSE 'de gebruiker is geen admin meer'
+        END)::text AS reason
+FROM kube_access k
+JOIN users u ON u.id = k.user_id
+WHERE k.cluster_id = $1 AND k.removed_at IS NULL
+  AND (k.revoked_at IS NOT NULL OR k.expires_at <= now() OR u.disabled_at IS NOT NULL
+       OR (k.role = 'admin' AND u.role <> 'admin'));
+
+-- name: SetKubeAccessRemoved :exec
+UPDATE kube_access SET removed_at = now(), remove_error = '' WHERE id = $1;
+
+-- name: SetKubeAccessRemoveError :exec
+UPDATE kube_access SET remove_error = $2 WHERE id = $1;

@@ -48,7 +48,69 @@ const (
 	// --server-side. Body is het object als JSON. Een veld dat een ander
 	// programma beheert, neemt hij alleen over met force=true.
 	KubeApply = "apply"
+	// KubeToken geeft een token met een vervaldatum voor een eigen
+	// ServiceAccount in de namespace KubeAccessNamespace, met de rol uit
+	// KubeTokenRequest, of haalt dat ServiceAccount weer weg. Body van het
+	// antwoord is een KubeTokenResult.
+	KubeToken = "token"
 )
+
+// KubeAccessNamespace is de namespace met de ServiceAccounts van de
+// kubeconfigs die ClusterForge uitgeeft.
+const KubeAccessNamespace = "clusterforge"
+
+// Rollen van een kubeconfig, en de ClusterRole van Kubernetes die erbij
+// hoort. De agent kent alleen deze twee.
+const (
+	KubeAccessAdmin = "admin"
+	KubeAccessView  = "view"
+)
+
+// KubeAccessRoles zet een rol om in de ClusterRole van Kubernetes.
+var KubeAccessRoles = map[string]string{KubeAccessAdmin: "cluster-admin", KubeAccessView: "view"}
+
+// Grenzen van een token: hoogstens dertig dagen, minstens tien minuten,
+// zoals de API van Kubernetes ze ook eist.
+const (
+	KubeTokenMin = 10 * time.Minute
+	KubeTokenMax = 30 * 24 * time.Hour
+)
+
+// KubeAccountPattern is de vorm van de naam van zo'n ServiceAccount. De
+// agent weigert elke andere naam, zodat de server nooit een token kan
+// vragen voor een ServiceAccount van Kubernetes zelf.
+var KubeAccountPattern = regexp.MustCompile(`^cf-[a-z0-9]([-a-z0-9]{0,58}[a-z0-9])?$`)
+
+// KubeBindingName is de naam van de ClusterRoleBinding van een
+// ServiceAccount.
+func KubeBindingName(account string) string { return "clusterforge:" + account }
+
+// KubeTokenRequest hoort bij KubeToken.
+type KubeTokenRequest struct {
+	// Account is de naam van het ServiceAccount, volgens
+	// KubeAccountPattern.
+	Account string `json:"account"`
+	// Role is KubeAccessAdmin of KubeAccessView.
+	Role string `json:"role,omitempty"`
+	// Seconds is hoe lang het token geldt.
+	Seconds int64 `json:"seconds,omitempty"`
+	// Owner is wie de kubeconfig kreeg; hij komt als annotatie op het
+	// ServiceAccount, zodat kubectl get serviceaccounts toont van wie het
+	// is.
+	Owner string `json:"owner,omitempty"`
+	// Revoke haalt het ServiceAccount en zijn ClusterRoleBinding weg; dan
+	// werkt elk token ervan meteen niet meer.
+	Revoke bool `json:"revoke,omitempty"`
+}
+
+// KubeTokenResult is het antwoord op KubeToken. CA is het CA-certificaat
+// van de API als PEM, uit de kubeconfig van k3s; het is openbaar. Bij
+// Revoke zijn ze leeg.
+type KubeTokenResult struct {
+	Token   string    `json:"token,omitempty"`
+	Expires time.Time `json:"expires,omitzero"`
+	CA      []byte    `json:"ca,omitempty"`
+}
 
 // Soorten patch bij KubePatch.
 const (
@@ -81,6 +143,8 @@ type KubeRequest struct {
 	// bij KubeApply.
 	Body      json.RawMessage `json:"body,omitempty"`
 	PatchType string          `json:"patch_type,omitempty"`
+	// Token hoort bij KubeToken.
+	Token *KubeTokenRequest `json:"token,omitempty"`
 	// Deadline: na dit tijdstip weigert de agent het verzoek.
 	Deadline time.Time `json:"deadline"`
 }
