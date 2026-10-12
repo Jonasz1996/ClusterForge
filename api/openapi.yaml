@@ -3303,6 +3303,53 @@ paths:
                 properties:
                   items: { type: array, items: { $ref: "#/components/schemas/DatabaseGroup" } }
         "401": { $ref: "#/components/responses/Error" }
+  /databases/migration:
+    get:
+      operationId: getDatabaseMigration
+      summary: Het plan om een database naar de database van een cluster te verhuizen
+      description: |
+        Bekijkt de database op de oude server (alleen de catalogus: grootte, tabellen met engine en primaire sleutel, views,
+        routines, triggers en events) en laat de importerende node van het nieuwe cluster de begroeting van de oude MariaDB
+        lezen, zonder in te loggen. Zonder component kiest het plan het cluster waarvan de app de database nu al gebruikt, als
+        dat er één is. Met de bevindingen en de vorige proeven. Er verandert niets. Ook voor viewers.
+      parameters:
+        - { name: source, in: query, required: true, schema: { type: string }, description: "De sleutel van de server onder Databases, zoals mariadb/<cluster>" }
+        - { name: database, in: query, required: true, schema: { type: string } }
+        - { name: component, in: query, required: false, schema: { type: string, format: uuid }, description: De database van het nieuwe cluster }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DatabaseMigrationPlan" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /databases/migration/trial:
+    post:
+      operationId: startDatabaseMigrationTrial
+      summary: Een proefverhuizing beginnen (admin); wordt een taak
+      description: |
+        Maakt op de oude server een tijdelijke gebruiker die alleen deze database mag lezen, laat de nieuwe node de dump
+        ophalen en importeren in <database>_proef terwijl de app doorwerkt, telt de rijen aan beide kanten, haalt de kopie en
+        de gebruiker weer weg en bewaart hoe lang het duurde. Het wachtwoord van de tijdelijke gebruiker bewaart ClusterForge
+        nergens. 409 als het plan iets tegenhoudt of er al een proef van deze database loopt.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DatabaseMigrationInput" }
+      responses:
+        "202":
+          description: Taak aangemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
   /kubernetes/clusters:
     get:
       operationId: listKubeClusters
@@ -4592,12 +4639,162 @@ components:
       type: object
       required: [level, code, node_id, hostname, message, command]
       properties:
-        level: { type: string, description: "blocked of warning" }
+        level: { type: string, description: "blocked, warning of info" }
         code: { type: string }
         node_id: { type: string, format: uuid, nullable: true }
         hostname: { type: string }
         message: { type: string }
         command: { type: string, description: Een commando dat het oplost; leeg als er geen is }
+    DatabaseMigrationInput:
+      type: object
+      required: [source, database, component_id]
+      properties:
+        source: { type: string }
+        database: { type: string }
+        component_id: { type: string, format: uuid }
+    DatabaseMigrationPlan:
+      type: object
+      required: [source, database, info, clients, targets, target, reach, findings, blocked, runs, active]
+      properties:
+        source: { $ref: "#/components/schemas/DatabaseMigrationSource" }
+        database: { type: string }
+        info:
+          allOf: [{ $ref: "#/components/schemas/DatabaseMigrationInfo" }]
+          nullable: true
+          description: Wat de oude server over de database weet; null als hij niet te lezen was
+        clients: { type: array, items: { $ref: "#/components/schemas/DatabaseUser" }, description: Wie de database de laatste 30 dagen gebruikte }
+        targets: { type: array, items: { $ref: "#/components/schemas/DatabaseMigrationOption" } }
+        target:
+          allOf: [{ $ref: "#/components/schemas/DatabaseMigrationTarget" }]
+          nullable: true
+        reach:
+          allOf: [{ $ref: "#/components/schemas/DatabaseMigrationReach" }]
+          nullable: true
+        findings: { type: array, items: { $ref: "#/components/schemas/ComponentFinding" } }
+        blocked: { type: boolean }
+        runs: { type: array, items: { $ref: "#/components/schemas/DatabaseMigrationRun" } }
+        active:
+          allOf: [{ $ref: "#/components/schemas/ComponentDumpJob" }]
+          nullable: true
+          description: Een proef of verhuizing van deze database die nu loopt
+    DatabaseMigrationSource:
+      type: object
+      required: [key, name, cluster_id, engine, kind, version, summary, servers, node, address, port, via]
+      properties:
+        key: { type: string }
+        name: { type: string }
+        cluster_id: { type: string, format: uuid, nullable: true }
+        engine: { type: string }
+        kind: { type: string }
+        version: { type: string }
+        summary: { type: string }
+        servers: { type: array, items: { type: string } }
+        node: { type: string, description: De server waarop ClusterForge de database bekijkt en de tijdelijke gebruiker maakt; leeg als er geen is }
+        address: { type: string, description: Het adres waarmee de nieuwe node de oude server bereikt; leeg zolang dat niet bekeken is }
+        port: { type: integer }
+        via: { type: string, description: "node (rechtstreeks) of vip; leeg zolang dat niet bekeken is" }
+    DatabaseMigrationInfo:
+      type: object
+      required: [version, charset, collation, size_bytes, tables, rows, views, routines, triggers, events]
+      properties:
+        version: { type: string }
+        charset: { type: string }
+        collation: { type: string }
+        size_bytes: { type: integer, format: int64, description: De data en indexen van alle tabellen }
+        tables: { type: integer }
+        rows: { type: integer, format: int64, description: De schatting van InnoDB, geen telling }
+        views: { type: integer }
+        routines: { type: integer }
+        triggers: { type: integer }
+        events: { type: integer }
+    DatabaseMigrationOption:
+      type: object
+      required: [cluster_id, cluster_name, component_id, suggested]
+      properties:
+        cluster_id: { type: string, format: uuid }
+        cluster_name: { type: string }
+        component_id: { type: string, format: uuid }
+        suggested: { type: boolean, description: De app van dit cluster gebruikt de database nu al }
+    DatabaseMigrationTarget:
+      type: object
+      required: [cluster_id, cluster_name, component_id, node, version, address, port, hosts, buffer_pool_bytes, data_bytes, disks, exists]
+      properties:
+        cluster_id: { type: string, format: uuid }
+        cluster_name: { type: string }
+        component_id: { type: string, format: uuid }
+        node: { type: string, description: De node die importeert }
+        version: { type: string }
+        address: { type: string, description: Waar de app de database straks vindt }
+        port: { type: integer }
+        hosts: { type: array, items: { type: string }, description: Waarvandaan de tijdelijke gebruiker mag inloggen }
+        buffer_pool_bytes: { type: integer, format: int64 }
+        data_bytes: { type: integer, format: int64, description: Wat er al aan databases staat }
+        disks: { type: array, items: { $ref: "#/components/schemas/DatabaseMigrationDisk" } }
+        exists: { type: boolean, description: De database staat er al }
+    DatabaseMigrationDisk:
+      type: object
+      required: [hostname, mount, free_bytes]
+      properties:
+        hostname: { type: string }
+        mount: { type: string }
+        free_bytes: { type: integer, format: int64 }
+    DatabaseMigrationReach:
+      type: object
+      required: [reached, version, tls, code, error]
+      properties:
+        reached: { type: boolean }
+        version: { type: string }
+        tls: { type: boolean }
+        code: { type: integer, description: "De fout die MariaDB meteen stuurde, zoals 1130; 0 zonder" }
+        error: { type: string }
+    DatabaseMigrationRun:
+      type: object
+      required: [id, kind, status, cluster_id, cluster_name, component_id, source_name, source_node, source_address, database, target_database,
+        target_node, started_at, finished_at, size_bytes, dump_bytes, import_ms, count_ms, tables, rows_source, rows_target, differences,
+        objects, message, job_id]
+      properties:
+        id: { type: string, format: uuid }
+        kind: { type: string, enum: [trial, migrate] }
+        status: { type: string, enum: [running, ok, failed] }
+        cluster_id: { type: string, format: uuid }
+        cluster_name: { type: string }
+        component_id: { type: string, format: uuid }
+        source_name: { type: string }
+        source_node: { type: string }
+        source_address: { type: string }
+        database: { type: string }
+        target_database: { type: string }
+        target_node: { type: string }
+        started_at: { type: string, format: date-time }
+        finished_at: { type: string, format: date-time, nullable: true }
+        size_bytes: { type: integer, format: int64 }
+        dump_bytes: { type: integer, format: int64, description: De SQL die over het netwerk kwam }
+        import_ms: { type: integer, format: int64, nullable: true, description: Ophalen en importeren }
+        count_ms: { type: integer, format: int64, nullable: true, description: Daarna de rijen tellen aan beide kanten }
+        tables: { type: integer }
+        rows_source: { type: integer, format: int64 }
+        rows_target: { type: integer, format: int64 }
+        differences:
+          type: array
+          items: { $ref: "#/components/schemas/DatabaseMigrationCount" }
+          description: De tabellen met een ander aantal rijen
+        objects: { type: array, items: { $ref: "#/components/schemas/DatabaseMigrationObjects" } }
+        message: { type: string }
+        job_id: { type: string, format: uuid, nullable: true }
+    DatabaseMigrationCount:
+      type: object
+      required: [name, source, target]
+      properties:
+        name: { type: string }
+        source: { type: integer, format: int64 }
+        target: { type: integer, format: int64 }
+    DatabaseMigrationObjects:
+      type: object
+      required: [kind, source, target]
+      properties:
+        kind: { type: string, description: "views, routines, triggers of events" }
+        source: { type: integer }
+        target: { type: integer }
     DatabaseGroup:
       type: object
       description: Eén databasecluster, de servers van één engine in één cluster, of één losse node.
@@ -8915,6 +9112,16 @@ components:
           description: Waarden voor de parameters van de template
         target: { $ref: "#/components/schemas/DeployTarget" }
         server_url: { type: string, description: Het adres waarmee de nieuwe nodes ClusterForge bereiken }
+        database: { $ref: "#/components/schemas/DeployDatabase" }
+    DeployDatabase:
+      type: object
+      description: |
+        Database erbij: als de uitrol lukt, zet ClusterForge deze database op alle nodes van het nieuwe cluster, zoals
+        'Database toevoegen', om er een app naartoe te verhuizen. Houdt het plan haar tegen, dan staat de reden in het
+        logboek (cluster.database_not_added).
+      required: [engine]
+      properties:
+        engine: { type: string, description: "mariadb; postgresql komt later" }
     DeployPlanNode:
       type: object
       required: [hostname, role, address, host, cpu, memory_mib, disk_gib]

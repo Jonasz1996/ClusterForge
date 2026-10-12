@@ -43,8 +43,9 @@ const (
 var dbUnits = []string{"mariadb.service", "mysql.service", "postgresql.service", "patroni.service", "postgresql@*.service"}
 
 type dbState struct {
-	sem   chan struct{}
-	dumps dumpState
+	sem     chan struct{}
+	dumps   dumpState
+	migrate migrateState
 }
 
 func (a *Agent) initDB() {
@@ -113,6 +114,8 @@ func (a *Agent) handleDB(data []byte) protocol.DBResponse {
 		res = a.dbDrop(ctx, req.Drop)
 	case protocol.DBDump:
 		res = a.dbDump(ctx, req.Dump)
+	case protocol.DBMigrate:
+		res = a.dbMigrate(ctx, req.Migrate)
 	default:
 		res = protocol.DBResponse{Error: "onbekend databaseverzoek " + req.Op, Servers: []protocol.DBServer{}}
 	}
@@ -218,6 +221,16 @@ func (a *Agent) maria(ctx context.Context, header bool, query string) ([][]strin
 	if !header {
 		args = append([]string{"-N"}, args...)
 	}
+	return a.mariaArgs(ctx, args)
+}
+
+// mariaWith is maria zonder kopregel, met eerst de opties in pre, zoals
+// een optiebestand om met een andere server te verbinden.
+func (a *Agent) mariaWith(ctx context.Context, pre []string, query string) ([][]string, error) {
+	return a.mariaArgs(ctx, append(slices.Clone(pre), "-N", "-B", "-e", query))
+}
+
+func (a *Agent) mariaArgs(ctx context.Context, args []string) ([][]string, error) {
 	out, err := a.dbRun(ctx, "mariadb", args...)
 	if err != nil && notInstalled(err) {
 		out, err = a.dbRun(ctx, "mysql", args...)

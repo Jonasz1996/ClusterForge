@@ -58,6 +58,10 @@ type Host struct {
 	// geen. Wijzig ze met Locked terwijl de agent draait.
 	MariaDB  *MariaDB
 	Postgres *Postgres
+	// Network geeft de machine op een adres (ip:poort), voor een
+	// verhuizing van haar MariaDB; nil kent geen andere machines. Zet het
+	// met Locked terwijl de agent draait.
+	Network func(addr string) *Host
 
 	mu       sync.Mutex
 	after    func(call string, err error)
@@ -322,7 +326,11 @@ func (h *Host) Stream(_ context.Context, in io.Reader, out io.Writer, name strin
 	var err error
 	switch name {
 	case "mariadb-dump", "mysqldump":
-		dump, err = h.mariaDump(args)
+		if cfg, rest, ok := clientConfig(args); ok {
+			dump, err = h.remoteDump(cfg, rest)
+		} else {
+			dump, err = h.mariaDump(args)
+		}
 	case "mariadb", "mysql":
 		err = h.mariaRestore(args, data)
 	default:

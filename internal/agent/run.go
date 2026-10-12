@@ -48,6 +48,9 @@ type Agent struct {
 	// heeft de laatste regel van stderr. nil gebruikt exec, tenzij Exec
 	// vervangen is.
 	Stream func(ctx context.Context, in io.Reader, out io.Writer, name string, args ...string) error
+	// Dial verbindt met de oude MariaDB bij een verhuizing; nil is
+	// net.Dialer.
+	Dial func(ctx context.Context, network, addr string) (net.Conn, error)
 	// DumpDir is de map met de dumps van de databases; leeg is
 	// protocol.DBDumpDir. Tests gebruiken een map.
 	DumpDir string

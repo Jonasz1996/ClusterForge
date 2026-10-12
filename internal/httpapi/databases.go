@@ -27,11 +27,7 @@ func (s *Server) ListDatabases(w http.ResponseWriter, r *http.Request) {
 		if g.ClusterEnv != "" {
 			out.ClusterEnvironment = nullable.NewNullableWithValue(gen.Environment(g.ClusterEnv))
 		}
-		if g.ClusterID != nil {
-			out.Key = g.Engine + "/" + g.ClusterID.String()
-		} else if len(g.Servers) > 0 {
-			out.Key = g.Engine + "/node/" + g.Servers[0].NodeID.String()
-		}
+		out.Key = g.Key()
 		for _, srv := range g.Servers {
 			out.Servers = append(out.Servers, toAPIDatabaseServer(srv))
 		}

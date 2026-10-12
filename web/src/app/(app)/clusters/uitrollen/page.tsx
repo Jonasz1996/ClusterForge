@@ -42,6 +42,8 @@ type Form = {
   sshKeys: string;
   // null: het adres van deze server.
   serverUrl: string | null;
+  // database: na de uitrol MariaDB Galera op de nodes.
+  database: boolean;
 };
 
 const emptyForm: Form = {
@@ -63,6 +65,7 @@ const emptyForm: Form = {
   dns: "",
   sshKeys: "",
   serverUrl: null,
+  database: false,
 };
 
 // paramValue is de ingevulde waarde, of de standaard van de template.
@@ -98,6 +101,7 @@ function toInput(f: Form, t: Template | undefined): DeployInput {
       ssh_keys: f.sshKeys,
     },
     server_url: (f.serverUrl ?? "").trim(),
+    ...(f.database && t?.cluster_type !== "kubernetes" ? { database: { engine: "mariadb" } } : {}),
   };
 }
 
@@ -270,6 +274,28 @@ function DeployInner() {
               </FieldRow>
             ))}
           </div>
+        </Card>
+      )}
+
+      {template && template.cluster_type !== "kubernetes" && (
+        <Card title="Database">
+          <label className="inline-flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-300">
+            <input type="checkbox" id={fieldId("database")} checked={form.database} onChange={(e) => set("database", e.target.checked)} />
+            MariaDB Galera erbij, op elke node
+          </label>
+          <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">
+            Na de uitrol zet ClusterForge een databasecluster op de nodes zelf, zodat de app haar database naast zich heeft. Daarna
+            kun je bij Databases een bestaande database naar dit cluster verhuizen. Galera heeft minstens drie nodes nodig; met
+            minder komt de database er niet en zegt het logboek waarom.
+          </p>
+          {form.database && plan.data && plan.data.nodes.length < 3 && (
+            <div className="mt-3">
+              <Alert kind="info">
+                Dit cluster krijgt {plan.data.nodes.length} {plan.data.nodes.length === 1 ? "node" : "nodes"}. Kies er minstens drie,
+                of voeg de database later toe met een scheidsrechter.
+              </Alert>
+            </div>
+          )}
         </Card>
       )}
 

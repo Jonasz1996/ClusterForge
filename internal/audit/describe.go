@@ -396,6 +396,21 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 		return fmt.Sprintf("Gebruiker %s van %s van cluster %s kreeg een nieuw wachtwoord", str(p, "user"), str(p, "component"), name)
 	case "cluster.database_user_dropped":
 		return fmt.Sprintf("Gebruiker %s weggehaald uit %s van cluster %s", str(p, "user"), str(p, "component"), name)
+	case "cluster.database_not_added":
+		return fmt.Sprintf("Database van cluster %s na het uitrollen niet toegevoegd op %s", name, list(p["nodes"])) + colon(str(p, "reason"))
+	case "cluster.database_trial_ok", "cluster.database_trial_failed":
+		s := fmt.Sprintf("Proefverhuizing van %s van %s naar cluster %s", str(p, "database"), str(p, "source"), name)
+		if r.Action == "cluster.database_trial_failed" {
+			return s + " mislukt" + colon(strings.SplitN(str(p, "message"), "\n", 2)[0])
+		}
+		s += " gelukt"
+		if ms, ok := p["import_ms"].(float64); ok {
+			s += ", importeren duurde " + duration(time.Duration(ms)*time.Millisecond)
+		}
+		if d, ok := p["differences"].(float64); ok && d > 0 {
+			s += fmt.Sprintf("; %s met andere aantallen rijen, omdat de app doorwerkte", count(d, "tabel", "tabellen"))
+		}
+		return s
 	case "cluster.deployed":
 		return fmt.Sprintf("Cluster %s uitgerold uit %s %s met %s nodes", name, str(p, "template"), str(p, "version"), num(p["nodes"]))
 	case "node.created":
