@@ -224,6 +224,18 @@ func (s *Server) SetGuestConfig(vmid int, key, value string) {
 	}
 }
 
+// RenameGuest geeft een VM een andere naam, zoals iemand in de
+// webinterface van Proxmox.
+func (s *Server) RenameGuest(vmid int, name string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, g := range s.guests {
+		if g.VMID == vmid {
+			g.Name = name
+		}
+	}
+}
+
 // AddBackup zet een back-up op een storage.
 func (s *Server) AddBackup(b Backup) {
 	s.mu.Lock()

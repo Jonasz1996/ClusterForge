@@ -4839,6 +4839,9 @@ type GitProbe struct {
 type GitReapplyInput struct {
 	// Confirm Op prod de slug van het cluster
 	Confirm *string `json:"confirm,omitempty"`
+
+	// ServerUrl Het adres van ClusterForge voor nodes die nog moeten aanmelden; leeg neemt dat van de koppeling met Git
+	ServerUrl *string `json:"server_url,omitempty"`
 }
 
 // GitRejectInput defines model for GitRejectInput.
@@ -5859,6 +5862,39 @@ type KubeRef struct {
 	Namespace string `json:"namespace"`
 	Resource  string `json:"resource"`
 	Version   string `json:"version"`
+}
+
+// KubeRemoveNodeInput defines model for KubeRemoveNodeInput.
+type KubeRemoveNodeInput struct {
+	// Confirm De slug van het cluster; nodig op prod
+	Confirm *string `json:"confirm,omitempty"`
+
+	// Force Ook pods zonder eigenaar en met emptyDir uitzetten; die zijn dan weg
+	Force *bool `json:"force,omitempty"`
+
+	// Node De naam van de node in Kubernetes
+	Node string `json:"node"`
+
+	// Preview Alleen het plan tonen
+	Preview *bool `json:"preview,omitempty"`
+}
+
+// KubeRemoveNodePlan defines model for KubeRemoveNodePlan.
+type KubeRemoveNodePlan struct {
+	Drain KubeDrainPlan `json:"drain"`
+
+	// Host De Proxmox-host van de VM
+	Host     string             `json:"host"`
+	Hostname string             `json:"hostname"`
+	Node     string             `json:"node"`
+	NodeId   openapi_types.UUID `json:"node_id"`
+
+	// Ready Niet Ready: de node gaat op cordon in plaats van leeg, want zijn pods stoppen daar nooit netjes
+	Ready bool `json:"ready"`
+	Vmid  int  `json:"vmid"`
+
+	// Workers Het aantal workers daarna
+	Workers int `json:"workers"`
 }
 
 // KubeResourceType defines model for KubeResourceType.
@@ -7124,11 +7160,86 @@ type ServiceState string
 // ServiceStatus De eigen status uit de heartbeats; unknown zonder unit, zonder instanties of extern
 type ServiceStatus string
 
+// SpecApplied defines model for SpecApplied.
+type SpecApplied struct {
+	// Job null als er op geen node iets verandert
+	Job      nullable.Nullable[Job] `json:"job"`
+	Revision int                    `json:"revision"`
+}
+
+// SpecApplyInput defines model for SpecApplyInput.
+type SpecApplyInput struct {
+	// Confirm Op prod de slug van het cluster
+	Confirm *string `json:"confirm,omitempty"`
+
+	// Hash De hash van het plan dat je bekeek
+	Hash string `json:"hash"`
+
+	// Params De parameters die veranderen; de andere houden hun waarde
+	Params map[string]interface{} `json:"params"`
+
+	// ServerUrl Het adres van ClusterForge waar nieuwe nodes zich aanmelden; nodig als er nodes bijkomen
+	ServerUrl *string `json:"server_url,omitempty"`
+
+	// Version De templateversie; leeg houdt de huidige
+	Version *string `json:"version,omitempty"`
+}
+
 // SpecChange defines model for SpecChange.
 type SpecChange struct {
 	From  string `json:"from"`
 	Label string `json:"label"`
 	To    string `json:"to"`
+}
+
+// SpecEditForm defines model for SpecEditForm.
+type SpecEditForm struct {
+	// Blocked Waarom de spec hier niet te wijzigen is, zoals bij een cluster dat Git volgt; leeg als het kan
+	Blocked  string          `json:"blocked"`
+	Params   []SpecEditParam `json:"params"`
+	Template string          `json:"template"`
+	Version  string          `json:"version"`
+
+	// Versions De versies van de template in deze server
+	Versions []string `json:"versions"`
+}
+
+// SpecEditInput defines model for SpecEditInput.
+type SpecEditInput struct {
+	// Params De parameters die veranderen; de andere houden hun waarde
+	Params map[string]interface{} `json:"params"`
+
+	// Version De templateversie; leeg houdt de huidige
+	Version *string `json:"version,omitempty"`
+}
+
+// SpecEditParam defines model for SpecEditParam.
+type SpecEditParam struct {
+	// Locked Waarom de parameter niet te wijzigen is; leeg als het kan
+	Locked string        `json:"locked"`
+	Param  TemplateParam `json:"param"`
+
+	// Value De waarde nu; null bij een geheim of een lege optionele waarde
+	Value nullable.Nullable[interface{}] `json:"value"`
+}
+
+// SpecEditPlan defines model for SpecEditPlan.
+type SpecEditPlan struct {
+	// Blocked Waarom toepassen nu niet kan; leeg als het kan
+	Blocked string `json:"blocked"`
+
+	// BlockedCode render_failed, membership of dhcp_growth; leeg als toepassen kan
+	BlockedCode string `json:"blocked_code"`
+
+	// FullApply Een eerdere revisie is niet op alle nodes toegepast
+	FullApply bool `json:"full_apply"`
+
+	// Hash Toepassen vraagt hem terug; zo gebeurt wat je zag
+	Hash string `json:"hash"`
+
+	// NeedsConfirmation Het cluster is prod: toepassen vraagt de slug
+	NeedsConfirmation bool    `json:"needs_confirmation"`
+	Plan              GitPlan `json:"plan"`
 }
 
 // SpecHistory defines model for SpecHistory.
@@ -7649,6 +7760,12 @@ type GetClusterMetricsParams struct {
 	To   *MetricsTo   `form:"to,omitempty" json:"to,omitempty"`
 }
 
+// GetClusterSpecEditParams defines parameters for GetClusterSpecEdit.
+type GetClusterSpecEditParams struct {
+	// Version Een andere versie van de template
+	Version *string `form:"version,omitempty" json:"version,omitempty"`
+}
+
 // GetClusterTimelineParams defines parameters for GetClusterTimeline.
 type GetClusterTimelineParams struct {
 	// From Vanaf dit tijdstip; standaard 24 uur geleden
@@ -8022,6 +8139,12 @@ type ReapplyClusterGitJSONRequestBody = GitReapplyInput
 // SetRecoveryTargetsJSONRequestBody defines body for SetRecoveryTargets for application/json ContentType.
 type SetRecoveryTargetsJSONRequestBody = RecoveryTargetsInput
 
+// ApplyClusterSpecJSONRequestBody defines body for ApplyClusterSpec for application/json ContentType.
+type ApplyClusterSpecJSONRequestBody = SpecApplyInput
+
+// PlanClusterSpecJSONRequestBody defines body for PlanClusterSpec for application/json ContentType.
+type PlanClusterSpecJSONRequestBody = SpecEditInput
+
 // CreateVipJSONRequestBody defines body for CreateVip for application/json ContentType.
 type CreateVipJSONRequestBody = VipInput
 
@@ -8084,6 +8207,9 @@ type DrainKubeNodeJSONRequestBody = KubeDrainInput
 
 // CheckKubeLessonJSONRequestBody defines body for CheckKubeLesson for application/json ContentType.
 type CheckKubeLessonJSONRequestBody = KubeLessonCheckInput
+
+// RemoveKubeNodeJSONRequestBody defines body for RemoveKubeNode for application/json ContentType.
+type RemoveKubeNodeJSONRequestBody = KubeRemoveNodeInput
 
 // CreateNodeJSONRequestBody defines body for CreateNode for application/json ContentType.
 type CreateNodeJSONRequestBody = NodeInput
@@ -8282,9 +8408,18 @@ type ServerInterface interface {
 	// GetClusterRisk De zeven scorekaarten van een cluster met hun bevindingen
 	// (GET /clusters/{clusterId}/risk)
 	GetClusterRisk(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
+	// ApplyClusterSpec Een wijziging van de spec toepassen (admin)
+	// (POST /clusters/{clusterId}/spec)
+	ApplyClusterSpec(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
 	// ListSpecRevisions De gewenste staat van een cluster uit een template, met elke revisie en wat ze veranderde
 	// (GET /clusters/{clusterId}/spec-revisions)
 	ListSpecRevisions(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
+	// GetClusterSpecEdit De parameters van een cluster uit een template om te wijzigen
+	// (GET /clusters/{clusterId}/spec/edit)
+	GetClusterSpecEdit(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params GetClusterSpecEditParams)
+	// PlanClusterSpec Het plan van een wijziging van de spec (admin); er verandert niets
+	// (POST /clusters/{clusterId}/spec/plan)
+	PlanClusterSpec(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
 	// GetClusterTimeline De tijdlijn van een cluster en zijn nodes, oudste eerst
 	// (GET /clusters/{clusterId}/timeline)
 	GetClusterTimeline(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params GetClusterTimelineParams)
@@ -8501,6 +8636,9 @@ type ServerInterface interface {
 	// ListKubePods De pods met status, herstarts, node en leeftijd
 	// (GET /kubernetes/clusters/{clusterId}/pods)
 	ListKubePods(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params ListKubePodsParams)
+	// RemoveKubeNode Een worker weghalen (admin); wordt een taak
+	// (POST /kubernetes/clusters/{clusterId}/remove-node)
+	RemoveKubeNode(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
 	// ListKubeResources De soorten objecten die het cluster kent, ook van geïnstalleerde apps
 	// (GET /kubernetes/clusters/{clusterId}/resources)
 	ListKubeResources(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
@@ -8978,9 +9116,27 @@ func (_ Unimplemented) GetClusterRisk(w http.ResponseWriter, r *http.Request, cl
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// ApplyClusterSpec Een wijziging van de spec toepassen (admin)
+// (POST /clusters/{clusterId}/spec)
+func (_ Unimplemented) ApplyClusterSpec(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // ListSpecRevisions De gewenste staat van een cluster uit een template, met elke revisie en wat ze veranderde
 // (GET /clusters/{clusterId}/spec-revisions)
 func (_ Unimplemented) ListSpecRevisions(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetClusterSpecEdit De parameters van een cluster uit een template om te wijzigen
+// (GET /clusters/{clusterId}/spec/edit)
+func (_ Unimplemented) GetClusterSpecEdit(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params GetClusterSpecEditParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// PlanClusterSpec Het plan van een wijziging van de spec (admin); er verandert niets
+// (POST /clusters/{clusterId}/spec/plan)
+func (_ Unimplemented) PlanClusterSpec(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -9413,6 +9569,12 @@ func (_ Unimplemented) ListKubeObjects(w http.ResponseWriter, r *http.Request, c
 // ListKubePods De pods met status, herstarts, node en leeftijd
 // (GET /kubernetes/clusters/{clusterId}/pods)
 func (_ Unimplemented) ListKubePods(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params ListKubePodsParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RemoveKubeNode Een worker weghalen (admin); wordt een taak
+// (POST /kubernetes/clusters/{clusterId}/remove-node)
+func (_ Unimplemented) RemoveKubeNode(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -11191,6 +11353,32 @@ func (siw *ServerInterfaceWrapper) GetClusterRisk(w http.ResponseWriter, r *http
 	handler.ServeHTTP(w, r)
 }
 
+// ApplyClusterSpec operation middleware
+func (siw *ServerInterfaceWrapper) ApplyClusterSpec(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ApplyClusterSpec(w, r, clusterId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListSpecRevisions operation middleware
 func (siw *ServerInterfaceWrapper) ListSpecRevisions(w http.ResponseWriter, r *http.Request) {
 
@@ -11208,6 +11396,74 @@ func (siw *ServerInterfaceWrapper) ListSpecRevisions(w http.ResponseWriter, r *h
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListSpecRevisions(w, r, clusterId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetClusterSpecEdit operation middleware
+func (siw *ServerInterfaceWrapper) GetClusterSpecEdit(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetClusterSpecEditParams
+
+	// ------------- Optional query parameter "version" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "version", r.URL.Query(), &params.Version, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "version"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "version", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetClusterSpecEdit(w, r, clusterId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PlanClusterSpec operation middleware
+func (siw *ServerInterfaceWrapper) PlanClusterSpec(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PlanClusterSpec(w, r, clusterId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -13648,6 +13904,32 @@ func (siw *ServerInterfaceWrapper) ListKubePods(w http.ResponseWriter, r *http.R
 	handler.ServeHTTP(w, r)
 }
 
+// RemoveKubeNode operation middleware
+func (siw *ServerInterfaceWrapper) RemoveKubeNode(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RemoveKubeNode(w, r, clusterId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListKubeResources operation middleware
 func (siw *ServerInterfaceWrapper) ListKubeResources(w http.ResponseWriter, r *http.Request) {
 
@@ -15653,6 +15935,15 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Get(options.BaseURL+"/clusters/{clusterId}/spec-revisions", wrapper.ListSpecRevisions)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/clusters/{clusterId}/spec/edit", wrapper.GetClusterSpecEdit)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/clusters/{clusterId}/spec/plan", wrapper.PlanClusterSpec)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/clusters/{clusterId}/spec", wrapper.ApplyClusterSpec)
+	})
+	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/clusters/{clusterId}/backup-policy", wrapper.GetBackupPolicy)
 	})
 	r.Group(func(r chi.Router) {
@@ -15942,6 +16233,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/kubernetes/clusters/{clusterId}/drain", wrapper.DrainKubeNode)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/kubernetes/clusters/{clusterId}/remove-node", wrapper.RemoveKubeNode)
 	})
 
 	return r

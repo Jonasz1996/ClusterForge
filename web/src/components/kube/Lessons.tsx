@@ -69,7 +69,7 @@ function Progress({ done, total }: { done: number; total: number }) {
 }
 
 function lessonState(l: KubeLessonSummary) {
-  if (l.unavailable) return { label: "Later", tone: "slate" as const };
+  if (l.unavailable) return { label: "Kan hier niet", tone: "slate" as const };
   if (l.finished_at) return { label: "Af", tone: "green" as const };
   if (l.started_at) return { label: "Bezig", tone: "blue" as const };
   return null;

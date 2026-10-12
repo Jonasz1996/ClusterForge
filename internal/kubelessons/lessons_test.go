@@ -67,13 +67,8 @@ func TestLessonContent(t *testing.T) {
 			t.Fatalf("les %d: %+v", i+1, l)
 		}
 		ids[l.ID] = true
-		if l.Later != "" {
-			if len(l.Steps) != 0 || l.Unavailable(10) == "" {
-				t.Errorf("%s: komt later maar heeft opdrachten", l.ID)
-			}
-			continue
-		}
-		if len(l.Steps) == 0 || len(l.Intro) == 0 || len(l.Outro) == 0 || l.Unavailable(3) != "" {
+		lab := Env{Nodes: 5, Servers: 3, Environment: "lab"}
+		if len(l.Steps) == 0 || len(l.Intro) == 0 || len(l.Outro) == 0 || l.Unavailable(lab) != "" {
 			t.Errorf("%s: onvolledig", l.ID)
 		}
 		steps := map[string]bool{}
@@ -141,7 +136,18 @@ func TestLessonContent(t *testing.T) {
 	if _, ok := Find("onderhoud"); !ok {
 		t.Fatal("Find")
 	}
-	if l, _ := Find("onderhoud"); !strings.Contains(l.Unavailable(1), "minstens 2 nodes") {
-		t.Fatalf("les 8 met één node: %q", l.Unavailable(1))
+	if l, _ := Find("onderhoud"); !strings.Contains(l.Unavailable(Env{Nodes: 1, Servers: 1, Environment: "prod"}), "minstens 2 nodes") {
+		t.Fatalf("les 8 met één node: %q", l.Unavailable(Env{Nodes: 1}))
+	}
+	// Les 10 zet een server uit: alleen op lab, en met drie servers.
+	l, _ := Find("server-valt-uit")
+	for env, want := range map[Env]string{
+		{Nodes: 5, Servers: 3, Environment: "test"}: "alleen op een cluster met omgeving lab; dit cluster is test",
+		{Nodes: 5, Servers: 1, Environment: "lab"}:  "minstens 3 servers nodig; dit cluster heeft er 1",
+		{Nodes: 3, Servers: 3, Environment: "lab"}:  "",
+	} {
+		if got := l.Unavailable(env); want == "" && got != "" || !strings.Contains(got, want) {
+			t.Errorf("les 10 bij %+v: %q", env, got)
+		}
 	}
 }

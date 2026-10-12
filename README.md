@@ -300,6 +300,8 @@ Een uitrol zet de diensten van de template meteen in de [afhankelijkheidsgraaf](
 
 Elk cluster uit een template heeft een specificatie, de gewenste staat: de templateversie, de parameters, het netwerk en de nodes. Daarmee berekent ClusterForge op elk moment voor elke node opnieuw wat er hoort te staan, precies zoals bij de uitrol. Geheimen staan er niet in, alleen dat ze versleuteld opgeslagen zijn. Elke wijziging is een nieuwe revisie. Bij een cluster zie je onder Specificatie de huidige parameters en de historie, met per revisie wanneer ze gemaakt is, door wie, waarvandaan (webinterface, API of Git) en wat er veranderde. Wat niet klopt staat erboven: een node die niet meer bij het cluster hoort, een actieve node die niet in de specificatie staat, of een templateversie die deze server niet kent.
 
+Een beheerder wijzigt de specificatie van een cluster dat geen Git volgt met **Wijzigen…** op de kaart Specificatie. Je past de parameters aan, of kiest een andere templateversie; geheimen en wat na de uitrol vastligt, zoals het VIP, staan grijs. Daarna zie je hetzelfde plan als bij een wijziging uit Git (zie [GitOps](#gitops)): de velden oud en nieuw, de nodes die erbij komen met hun adres, en per node in de volgorde van toepassen welke stappen veranderen. Pas bij Toepassen komt er een revisie met bron webinterface, en een taak die het plan uitvoert, met nieuwe nodes zoals bij [omhoog schalen](#omhoog-schalen-en-nieuwe-clusters). Verandert er op geen node iets, dan geldt de revisie meteen als toegepast. Op prod vraagt Toepassen de slug en tweestapsverificatie. Minder nodes kan hier niet: daarvoor zijn de lifecycle-acties, en bij Kubernetes Weghalen op het tabblad Nodes. Volgt een cluster Git, dan is `cluster.yaml` de bron en staat Wijzigen dicht.
+
 Templates hebben een versie, en een cluster blijft op de versie waarmee het uitgerold is. Een nieuwere ClusterForge brengt nieuwe versies mee naast de oude: een nieuw cluster krijgt de nieuwste, een bestaand cluster verandert pas als iemand zijn specificatie bewust wijzigt. Mist een versie die een cluster gebruikt, bijvoorbeeld na een downgrade, dan meldt de server dat bij het starten en bij het cluster.
 
 In de commando's en paden van een template mag alleen iets komen waarvan de vorm vastligt: getallen, IP-adressen, groottes, ja of nee, strings met een pattern van alleen letters, cijfers en `. _ - : @ , + =`, de slug en omgeving van het cluster, en hostname, rol, index, adres en prefix van een node. Een template die daar iets anders gebruikt, laadt niet. Zo kan een parameter, ook een die later uit Git komt, geen eigen shellcommando op de nodes uitvoeren.
@@ -420,7 +422,7 @@ Na het starten van k3s wacht de uitrol tot elke node van het cluster zich als Re
 Onder Kubernetes staan je Kubernetes-clusters met hun versie, hoeveel nodes Ready zijn, hoeveel apps in orde zijn en hoeveel pods draaien. Klik op een cluster voor het dashboard, dat elke vijf seconden ververst:
 
 - **Overzicht**: de tellers, de CPU en het geheugen tegenover wat de nodes kunnen geven (van metrics-server), de pods met problemen, zoals CrashLoopBackOff of ImagePullBackOff, en de laatste vijf waarschuwingen (Kubernetes bewaart events een uur).
-- **Nodes**: elke Kubernetes-node met Ready of NotReady en waarom, server of agent, cordon, gebruik, het aantal pods en een link naar de node in ClusterForge. ClusterForge koppelt ze op de naam die k3s kreeg, het adres of de hostname.
+- **Nodes**: elke Kubernetes-node met Ready of NotReady en waarom, server of agent, cordon, gebruik, het aantal pods en een link naar de node in ClusterForge. ClusterForge koppelt ze op de naam die k3s kreeg, het adres of de hostname. Een beheerder zet hier nodes bij en haalt workers weg; zie [Nodes toevoegen en weghalen](#nodes-toevoegen-en-weghalen).
 - **Apps**: de Deployments, StatefulSets, DaemonSets, CronJobs en Jobs, met hoeveel er klaar zijn en wat er mis is.
 - **Pods**: de pods zoals `kubectl get pods` ze toont, te filteren op namespace en node.
 - **Netwerk**: de Services met hun intern adres, poorten en hoeveel pods ze kiezen (0 is rood: dan klopt een label niet), en de Ingresses met hun webadres om te openen.
@@ -445,7 +447,7 @@ Een beheerder ziet bij een object en in de tabellen de acties die erbij passen. 
 - **Schalen** (Deployment, StatefulSet): het aantal pods, van 0 tot 100. Met 0 draait de app niet, maar hij blijft bestaan.
 - **Herstarten** (Deployment, StatefulSet, DaemonSet): de pods worden een voor een vervangen, zoals `kubectl rollout restart`. Handig als een app een gewijzigde ConfigMap of Secret opnieuw moet lezen.
 - **Terugdraaien** (Deployment): kies een vorige versie met haar images; Kubernetes maakt daar een nieuwe versie van en vervangt de pods een voor een, zoals `kubectl rollout undo`.
-- **Weghalen**: op de pagina van het object, en bij een pod ook in de tabel. Het venster zegt wat er gebeurt, zoals "ReplicaSet web-7c9 maakt meteen een nieuwe pod" of dat de volumes van een StatefulSet blijven. Bij een namespace of een volume tik je de naam in. De namespace `default` en die van Kubernetes zelf kun je niet weghalen, en een node ook niet: dat doe je in ClusterForge.
+- **Weghalen**: op de pagina van het object, en bij een pod ook in de tabel. Het venster zegt wat er gebeurt, zoals "ReplicaSet web-7c9 maakt meteen een nieuwe pod" of dat de volumes van een StatefulSet blijven. Bij een namespace of een volume tik je de naam in. De namespace `default` en die van Kubernetes zelf kun je niet weghalen, en een node ook niet met deze actie: een worker haal je weg met Weghalen op het tabblad Nodes, zodat ook zijn VM verdwijnt.
 - **Cordon** en **Uncordon** (node): er komen geen nieuwe pods meer op de node, of weer wel.
 - **Leegmaken** (node): eerst toont ClusterForge welke pods weggaan, welke blijven (zoals die van een DaemonSet) en welke het tegenhouden: een pod zonder eigenaar komt nergens terug, en de gegevens in emptyDir gaan verloren. Die gaan alleen weg als je Toch doorgaan aanvinkt. Daarna is het een taak: de node gaat op cordon en elke pod wordt netjes gevraagd te vertrekken. Houdt een PodDisruptionBudget dat tegen, dan probeert ClusterForge het om de vijf seconden opnieuw, tot vijf minuten lang.
 
@@ -458,6 +460,27 @@ De namespaces van Kubernetes zelf (`kube-system`, `kube-public`, `kube-node-leas
 De **leermodus** staat standaard aan. Hij legt op elk tabblad uit wat je ziet en geeft het `kubectl`-commando dat hetzelfde toont, om te kopiëren. Wijs een soort app of een status van een pod aan voor uitleg. Zet hem rechtsboven uit; dat blijft bewaard voor je gebruiker.
 
 Een cluster dat je zelf bouwde, werkt ook: maak een cluster van het type Kubernetes, voeg de nodes toe en zet cf-agent op minstens één server.
+
+### Nodes toevoegen en weghalen
+
+Op het tabblad Nodes ziet een beheerder hoeveel servers en workers de specificatie vraagt, met twee knoppen:
+
+- **Worker toevoegen…** zet het aantal workers één hoger, tot tien.
+- **Servers naar 3…** (en daarna **naar 5…**) zet er servers bij. Met drie servers mag er één uitvallen, met vijf twee. Terug naar minder servers kan niet.
+
+Beide tonen eerst het plan, zoals [Wijzigen…](#gewenste-staat) op de pagina van het cluster: welke nodes erbij komen, met naam, adres en Proxmox-host, en wat er op de bestaande nodes verandert. Een worker erbij verandert niets op de andere nodes. Bij extra servers krijgt keepalived op de bestaande server de nieuwe als peers, en die stap staat in het plan. Na Toepassen loopt de taak: de VM's maken uit de golden image, de agents aanmelden, de bestaande nodes bijwerken en k3s op de nieuwe nodes installeren. Een nieuwe server sluit aan bij etcd van de eerste. De taak eindigt pas als alle nodes Ready zijn in Kubernetes. Mislukt ze, dan maakt Opnieuw toepassen op de kaart Git de nieuwe nodes af; een VM die al bestaat, wordt niet opnieuw gemaakt. Nieuwe nodes melden zich aan op het adres van de pagina waarop je toepast. Met DHCP kan dit niet, net als bij omhoog schalen uit Git.
+
+Bij een worker staat in het menu Acties **Weghalen…**. Het venster toont welke pods verhuizen en welke het tegenhouden, zoals bij Leegmaken, en welke VM op welke Proxmox-host verdwijnt. Je tikt de naam van de node in. Daarna is het een taak met vijf stappen, die bij Opnieuw proberen overslaat wat al gelukt is:
+
+1. Leegmaken. Is de node niet Ready, dan gaat hij alleen op cordon, want zijn pods stoppen daar nooit netjes.
+2. De VM uitzetten: eerst netjes, en na twee minuten hard.
+3. De node uit Kubernetes halen.
+4. De VM verwijderen, met zijn schijven.
+5. De node uit ClusterForge halen en het aantal workers in de specificatie één lager zetten, als nieuwe revisie.
+
+ClusterForge verwijdert alleen een VM die het zelf voor deze worker maakte. Voor het uitzetten en vlak voor het verwijderen kijkt het opnieuw: de node hoort nog bij dit cluster, is een worker in de specificatie, en de VM heeft dezelfde VMID en dezelfde naam in Proxmox. Het mag geen golden image, template of sandbox van een back-upcontrole zijn. Heeft de VM in Proxmox protection aan, dan weigert ClusterForge: zet het daar uit als hij weg mag, en probeer het opnieuw. Een server haal je niet weg, want etcd telt op zijn servers.
+
+Volgt het cluster Git, dan zet je het aantal nodes in `cluster.yaml`; de knoppen staan dan dicht, en Weghalen ook. Een cluster dat niet uit een template komt, beheer je zelf.
 
 ### Apps uitrollen
 
@@ -496,8 +519,8 @@ Op het tabblad **Lessen** leer je Kubernetes op je eigen cluster. Elke les heeft
 6. **Configuratie en geheimen**: een ConfigMap en een Secret als omgevingsvariabelen van web.
 7. **Opslag die blijft**: een volume, een app die erin schrijft, herstarten, en de node waaraan het volume vastzit.
 8. **Een node in onderhoud**: cordon, leegmaken en terugzetten. Daarvoor heeft het cluster minstens twee nodes nodig.
-
-Les 9 (een node erbij) en les 10 (een server valt uit) komen als je in ClusterForge nodes aan een Kubernetes-cluster kunt toevoegen.
+9. **Een node erbij**: een worker toevoegen, pods op de nieuwe node zetten, en hoe weghalen gaat.
+10. **Een server valt uit**: de meerderheid van etcd, een server hard uitzetten, zien dat de API blijft antwoorden, en hem weer aanzetten. Deze les kan alleen op een cluster met omgeving lab en minstens drie servers.
 
 Bij elke opdracht staat wat ze je leert, hoe het in ClusterForge kan en welk `kubectl`-commando hetzelfde doet. Waar YAML bij hoort, controleer en pas je die meteen toe, zoals op het tabblad Toepassen. Zolang een opdracht aan de beurt is, kijkt ClusterForge elke vijf seconden op het cluster of ze gelukt is, en zegt wat het ziet, zoals "Er draait nog 1 pod van web op leren-worker-02". Het kijkt alleen; het verandert zelf niets. Een vraag beantwoord je in het vak eronder; een fout antwoord geeft een hint.
 

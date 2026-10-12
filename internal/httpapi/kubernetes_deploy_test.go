@@ -16,11 +16,20 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/proxmox/pvefake"
 )
 
-// Een Kubernetes-cluster in de vorm Leren: één server en twee workers. De
-// server begint het cluster en krijgt het VIP, de workers melden zich aan
-// via het VIP, en Traefik antwoordt 404 op het VIP.
-func TestDeployKubernetes(t *testing.T) {
-	e, c := adminClient(t)
+// leren is een Proxmox met een golden image, machines die opstarten als
+// ClusterForge een VM maakt, en een nep-API van Kubernetes waarin elke
+// machine die opstart als node Ready is.
+type leren struct {
+	pve    *pvefake.Server
+	f      *fleet
+	fake   *kubefake.Server
+	connID string
+	// request is de aanvraag voor het cluster Leren met params erbij.
+	request func(params map[string]any) map[string]any
+}
+
+func newLeren(t *testing.T, e *testEnv, c *client) *leren {
+	t.Helper()
 	pve, srv, fp := newPVE(t)
 	pve.AddGuest(pvefake.Guest{
 		Type: "qemu", VMID: 9001, Name: "debian-13-cf", Node: "pve1", Status: "stopped", Template: true, MaxCPU: 1, MaxMem: 1 << 30,
@@ -41,14 +50,67 @@ func TestDeployKubernetes(t *testing.T) {
 		kubefake.NodeSpec{Name: "leren-worker-01", IP: "10.0.40.12"},
 		kubefake.NodeSpec{Name: "leren-worker-02", IP: "10.0.40.13"},
 	)
+	// Een node die er later bij komt, meldt zich Ready zodra hij opstart.
 	f.setup = func(name string, h *agenttest.Host) {
 		if name == "leren-server-01" {
 			if err := fake.WriteKubeconfig(h.Root); err != nil {
 				t.Error(err)
 			}
 		}
+		if fake.Get("v1", "Node", "", name) == nil {
+			fake.Add(kubefake.Node(kubefake.NodeSpec{Name: name, IP: h.Address, Server: strings.Contains(name, "-server-")}))
+		}
 	}
 	pve.OnFileWrite(f.boot)
+	// Traefik antwoordt 404 op het VIP.
+	e.deploy.HTTPGet = func(context.Context, string) (int, error) { return http.StatusNotFound, nil }
+
+	var conn pveConn
+	if s := c.do("POST", "/api/v1/proxmox", map[string]any{
+		"name": "Thuislab", "api_url": srv.URL, "token_id": "clusterforge@pve!cf", "token_secret": "geheim-secret", "tls_fingerprint": fp,
+	}, &conn); s != 201 {
+		t.Fatalf("koppelen: %d", s)
+	}
+	l := &leren{pve: pve, f: f, fake: fake, connID: conn.ID}
+	l.request = func(params map[string]any) map[string]any {
+		p := map[string]any{"vip": "10.0.40.100"}
+		for k, v := range params {
+			p[k] = v
+		}
+		return map[string]any{
+			"template": "kubernetes",
+			"cluster":  map[string]any{"name": "Leren", "slug": "leren", "environment": "lab"},
+			"params":   p,
+			"target": map[string]any{
+				"proxmox_id": conn.ID, "image_vmid": 9001, "network": "static",
+				"first_ip": "10.0.40.11/24", "gateway": "10.0.40.1", "dns": []string{"10.0.40.1"},
+			},
+			"server_url": e.srv.URL,
+		}
+	}
+	return l
+}
+
+// deploy rolt Leren uit en geeft het cluster en de taak.
+func (l *leren) deploy(t *testing.T, c *client, params map[string]any) (string, job) {
+	t.Helper()
+	var res struct {
+		Job       job    `json:"job"`
+		ClusterID string `json:"cluster_id"`
+	}
+	if s := c.do("POST", "/api/v1/deployments", l.request(params), &res); s != http.StatusAccepted {
+		t.Fatalf("uitrollen: %d", s)
+	}
+	return res.ClusterID, waitJob(t, c, res.Job.ID)
+}
+
+// Een Kubernetes-cluster in de vorm Leren: één server en twee workers. De
+// server begint het cluster en krijgt het VIP, de workers melden zich aan
+// via het VIP, en Traefik antwoordt 404 op het VIP.
+func TestDeployKubernetes(t *testing.T) {
+	e, c := adminClient(t)
+	l := newLeren(t, e, c)
+	f, request := l.f, l.request
 	var mu sync.Mutex
 	var asked []string
 	e.deploy.HTTPGet = func(_ context.Context, u string) (int, error) {
@@ -79,29 +141,6 @@ func TestDeployKubernetes(t *testing.T) {
 		t.Fatalf("template kubernetes: %+v", kt)
 	}
 
-	var conn pveConn
-	if s := c.do("POST", "/api/v1/proxmox", map[string]any{
-		"name": "Thuislab", "api_url": srv.URL, "token_id": "clusterforge@pve!cf", "token_secret": "geheim-secret", "tls_fingerprint": fp,
-	}, &conn); s != 201 {
-		t.Fatalf("koppelen: %d", s)
-	}
-	request := func(params map[string]any) map[string]any {
-		p := map[string]any{"vip": "10.0.40.100"}
-		for k, v := range params {
-			p[k] = v
-		}
-		return map[string]any{
-			"template": "kubernetes",
-			"cluster":  map[string]any{"name": "Leren", "slug": "leren", "environment": "lab"},
-			"params":   p,
-			"target": map[string]any{
-				"proxmox_id": conn.ID, "image_vmid": 9001, "network": "static",
-				"first_ip": "10.0.40.11/24", "gateway": "10.0.40.1", "dns": []string{"10.0.40.1"},
-			},
-			"server_url": e.srv.URL,
-		}
-	}
-
 	var er deployErr
 	if s := c.do("POST", "/api/v1/deployments/plan", request(map[string]any{"servers": 2}), &er); s != 400 || er.Field == nil ||
 		*er.Field != "params.servers" || !strings.Contains(er.Message, "kies 1, 3 of 5") {
@@ -125,14 +164,7 @@ func TestDeployKubernetes(t *testing.T) {
 		t.Fatalf("plan: %d %+v", s, p)
 	}
 
-	var res struct {
-		Job       job    `json:"job"`
-		ClusterID string `json:"cluster_id"`
-	}
-	if s := c.do("POST", "/api/v1/deployments", request(nil), &res); s != http.StatusAccepted {
-		t.Fatalf("uitrollen: %d", s)
-	}
-	j := waitJob(t, c, res.Job.ID)
+	clusterID, j := l.deploy(t, c, nil)
 	var names []string
 	logs := ""
 	for _, s := range j.Steps {
@@ -198,14 +230,14 @@ func TestDeployKubernetes(t *testing.T) {
 		Status string `json:"status"`
 	}
 	eventually(t, "cluster gezond", func() bool {
-		c.do("GET", "/api/v1/clusters/"+res.ClusterID, nil, &cl)
+		c.do("GET", "/api/v1/clusters/"+clusterID, nil, &cl)
 		return cl.Status == "healthy"
 	})
 	if cl.Type != "kubernetes" {
 		t.Fatalf("type: %+v", cl)
 	}
 	var dg depGraph
-	c.do("GET", "/api/v1/dependency-graph?cluster_id="+res.ClusterID, nil, &dg)
+	c.do("GET", "/api/v1/dependency-graph?cluster_id="+clusterID, nil, &dg)
 	if got := strings.Join(dg.names(), " "); got != "Leren/k3s Leren/k3s-agent Leren/keepalived" || dg.svc(t, "Leren", "k3s").Status != "healthy" ||
 		dg.svc(t, "Leren", "k3s-agent").Status != "healthy" {
 		t.Fatalf("diensten: %s %+v", got, dg)

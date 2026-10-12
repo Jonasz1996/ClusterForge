@@ -171,6 +171,7 @@ export function GitCard({ c, isAdmin }: { c: ClusterDetail; isAdmin: boolean }) 
           slug={c.slug}
           prod={c.environment === "prod"}
           revision={c.spec_revision}
+          gitManaged={c.git_managed}
           onClose={() => setReapply(false)}
         />
       )}

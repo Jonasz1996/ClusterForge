@@ -1,28 +1,42 @@
 "use client";
 
 import Link from "next/link";
-import { Badge, Card } from "@/components/ui";
+import { useState } from "react";
+import { Badge, Button, Card } from "@/components/ui";
 import { QueryState, tableClass, tdClass, thClass } from "@/components/inventory/bits";
 import { specSources, useSpecHistory, type SpecRevision } from "@/lib/deploy";
 import { CommitLink } from "@/components/gitops/bits";
+import { SpecEditDialog } from "@/components/inventory/SpecEdit";
+import type { ClusterDetail } from "@/lib/inventory";
 
 const timeFmt = new Intl.DateTimeFormat("nl-BE", { dateStyle: "medium", timeStyle: "short" });
 const none = <span className="text-slate-400">–</span>;
 
 // SpecCard toont de gewenste staat van een cluster uit een template: de
-// templateversie, de parameters, wat er niet klopt en elke revisie.
-export function SpecCard({ clusterId }: { clusterId: string }) {
+// templateversie, de parameters, wat er niet klopt en elke revisie. Een
+// beheerder wijzigt hier de spec van een cluster dat geen Git volgt.
+export function SpecCard({ cluster, isAdmin }: { cluster: ClusterDetail; isAdmin: boolean }) {
+  const clusterId = cluster.id;
   const q = useSpecHistory(clusterId);
   const h = q.data;
+  const [editing, setEditing] = useState(false);
   return (
     <Card
       title={
-        <span className="flex flex-wrap items-center gap-2">
-          Specificatie
-          {h && h.revision > 0 && <span className="text-sm font-normal text-slate-500">revisie {h.revision}</span>}
+        <span className="flex flex-wrap items-center justify-between gap-2">
+          <span className="flex flex-wrap items-center gap-2">
+            Specificatie
+            {h && h.revision > 0 && <span className="text-sm font-normal text-slate-500">revisie {h.revision}</span>}
+          </span>
+          {isAdmin && h?.template && !cluster.git_managed && (
+            <Button variant="secondary" onClick={() => setEditing(true)}>
+              Wijzigen…
+            </Button>
+          )}
         </span>
       }
     >
+      {editing && <SpecEditDialog cluster={cluster} onClose={() => setEditing(false)} />}
       <QueryState q={q}>
         {h && !h.template && <p className="text-sm text-slate-500">Dit cluster komt niet uit een template en heeft geen gewenste staat.</p>}
         {h && h.template && (

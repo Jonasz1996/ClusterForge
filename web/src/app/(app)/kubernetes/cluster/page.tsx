@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
-import { DoneAlert, KubeActions, workloadActions, type ActionDone } from "@/components/kube/Actions";
+import { DoneAlert, KubeActions, RemoveWorkerDialog, workloadActions, type ActionDone } from "@/components/kube/Actions";
 import { applyModes, ApplyTab, type ApplyMode } from "@/components/kube/Apply";
 import { LessonsTab } from "@/components/kube/Lessons";
 import {
@@ -20,7 +20,10 @@ import {
 } from "@/components/kube/Kube";
 import { AllTab, ConfigTab, EventsTab, NetworkTab, StorageTab } from "@/components/kube/Resources";
 import { Empty, formatBytes, tableClass, tdClass, thClass } from "@/components/inventory/bits";
+import { SpecEditDialog } from "@/components/inventory/SpecEdit";
 import { Alert, Badge, Button, Card, cx, PageHeader, Select } from "@/components/ui";
+import { ApiError } from "@/lib/api/client";
+import { useSpecEditForm } from "@/lib/deploy";
 import { useCluster, useIsAdmin } from "@/lib/inventory";
 import {
   age,
@@ -370,9 +373,11 @@ function OverviewTab({ o, onTab }: { o: KubeOverview; onTab: (patch: Record<stri
 
 function NodesTab({ id, onPods }: { id: string; onPods: (node: string) => void }) {
   const nodes = useKubeNodes(id);
+  const isAdmin = useIsAdmin();
   const first = nodes.data?.[0]?.name ?? "<node>";
   return (
     <div className="space-y-4">
+      {isAdmin && <NodeGrowth id={id} />}
       <Learn
         commands={[
           kubectl("get nodes -o wide"),
@@ -390,6 +395,11 @@ function NodesTab({ id, onPods }: { id: string; onPods: (node: string) => void }
           Een node in <strong>cordon</strong> krijgt geen nieuwe pods, bijvoorbeeld voor onderhoud. <strong>Leegmaken</strong> zet
           hem op cordon en verhuist ook de pods die er al draaien naar andere nodes.
         </p>
+        <p>
+          Een node erbij is een machine erbij, dus dat kan kubectl niet alleen. <strong>Worker toevoegen</strong> maakt een VM uit
+          het golden image, en k3s meldt hem met het token van het cluster aan. <strong>Weghalen</strong> bij een worker maakt hem
+          leeg, haalt hem uit Kubernetes en verwijdert de VM.
+        </p>
       </Learn>
       {nodes.isError && <KubeError error={nodes.error} />}
       {nodes.data &&
@@ -398,12 +408,111 @@ function NodesTab({ id, onPods }: { id: string; onPods: (node: string) => void }
   );
 }
 
+// NodeGrowth zet nodes bij: een worker erbij, of van 1 naar 3 en van 3 naar
+// 5 servers. Het wijzigt de specificatie, met eerst het plan, zoals op de
+// pagina van het cluster.
+function NodeGrowth({ id }: { id: string }) {
+  const cluster = useCluster(id);
+  const form = useSpecEditForm(id);
+  const [open, setOpen] = useState<"worker" | "servers" | null>(null);
+  const c = cluster.data;
+  const f = form.data;
+  if (form.error instanceof ApiError && form.error.code === "not_template") {
+    return (
+      <p className="text-sm text-slate-500">
+        Dit cluster komt niet uit een template van ClusterForge. Nodes toevoegen of weghalen doe je daarom zelf.
+      </p>
+    );
+  }
+  if (!c || !f) return null;
+  const param = (name: string) => f.params.find((p) => p.param.name === name);
+  const workers = Number(param("workers")?.value ?? 0);
+  const servers = Number(param("servers")?.value ?? 1);
+  const maxWorkers = Number(param("workers")?.param.max ?? 10);
+  const nextServers = param("servers")?.param.choices.find((n) => n > servers);
+  const workersLocked = param("workers")?.locked;
+  const serversLocked = param("servers")?.locked;
+  return (
+    <Card>
+      <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
+        <p>
+          Volgens de specificatie {servers === 1 ? "is er 1 server" : `zijn er ${servers} servers`} en{" "}
+          {workers === 1 ? "1 worker" : `${workers} workers`}.
+          {workers >= maxWorkers && ` Meer dan ${maxWorkers} workers kan niet.`}
+        </p>
+        <span className="flex flex-wrap gap-2">
+          <Button
+            variant="secondary"
+            disabled={!!f.blocked || !!workersLocked || workers >= maxWorkers}
+            title={workersLocked || undefined}
+            onClick={() => setOpen("worker")}
+          >
+            Worker toevoegen…
+          </Button>
+          {nextServers !== undefined && (
+            <Button
+              variant="secondary"
+              disabled={!!f.blocked || !!serversLocked}
+              title={serversLocked || undefined}
+              onClick={() => setOpen("servers")}
+            >
+              Servers naar {nextServers}…
+            </Button>
+          )}
+        </span>
+      </div>
+      {f.blocked && <p className="mt-2 text-xs text-slate-500">{f.blocked} Het aantal nodes zet je daar.</p>}
+      {open === "worker" && (
+        <SpecEditDialog
+          cluster={c}
+          preset={{ workers: workers + 1 }}
+          title="Worker toevoegen"
+          intro={
+            <p className="text-slate-600 dark:text-slate-400">
+              ClusterForge maakt een VM uit het golden image, installeert k3s als agent en wacht tot de node Ready is. Hieronder
+              staat het plan; er verandert pas iets als je toepast.
+            </p>
+          }
+          onClose={() => setOpen(null)}
+        />
+      )}
+      {open === "servers" && nextServers !== undefined && (
+        <SpecEditDialog
+          cluster={c}
+          preset={{ servers: nextServers }}
+          title={`Servers naar ${nextServers}`}
+          intro={
+            <p className="text-slate-600 dark:text-slate-400">
+              Met {nextServers} servers heeft het cluster {nextServers} keer etcd en de API: er mogen er {(nextServers - 1) / 2}{" "}
+              tegelijk uitvallen. ClusterForge maakt de nieuwe servers, laat ze aansluiten bij etcd en zet keepalived op alle
+              servers bij. Terug naar minder servers kan daarna niet.
+            </p>
+          }
+          onClose={() => setOpen(null)}
+        />
+      )}
+    </Card>
+  );
+}
+
 function NodeTable({ id, nodes, onPods }: { id: string; nodes: KubeNode[]; onPods: (node: string) => void }) {
   const isAdmin = useIsAdmin();
   const [done, setDone] = useState<ActionDone | null>(null);
+  const [remove, setRemove] = useState<string | null>(null);
   return (
     <div className="space-y-3">
       <DoneAlert done={done} onClose={() => setDone(null)} />
+      {remove !== null && (
+        <RemoveWorkerDialog
+          clusterId={id}
+          node={remove}
+          onClose={() => setRemove(null)}
+          onDone={(d) => {
+            setRemove(null);
+            setDone(d);
+          }}
+        />
+      )}
       <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
         <table className={tableClass}>
           <thead className="border-b border-slate-200 dark:border-slate-800">
@@ -498,6 +607,11 @@ function NodeTable({ id, nodes, onPods }: { id: string; nodes: KubeNode[]; onPod
                         ref: refOf("Node", "", n.name),
                         actions: n.unschedulable ? ["uncordon", "drain"] : ["cordon", "drain"],
                       }}
+                      extra={[
+                        roleLabel(n.roles) === "server"
+                          ? { label: "Weghalen", disabled: "Een server blijft: etcd telt op zijn servers." }
+                          : { label: "Weghalen", danger: true, onClick: () => setRemove(n.name) },
+                      ]}
                       onDone={setDone}
                     />
                   </td>

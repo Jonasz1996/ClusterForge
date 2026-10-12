@@ -420,6 +420,15 @@ func (s *Service) clusterOf(ctx context.Context, r store.ListGitClustersRow) *Cl
 	return c
 }
 
+// clusterFrom is clusterOf voor een rij uit clusters.
+func (s *Service) clusterFrom(ctx context.Context, c store.Cluster) *Cluster {
+	return s.clusterOf(ctx, store.ListGitClustersRow{
+		ID: c.ID, Slug: c.Slug, Name: c.Name, Description: c.Description, Environment: c.Environment, Tags: c.Tags, Type: c.Type,
+		Spec: c.Spec, SpecRevision: c.SpecRevision, AppliedRevision: c.AppliedRevision, TemplateName: c.TemplateName, TemplateVersion: c.TemplateVersion,
+		GitRepoID: c.GitRepoID,
+	})
+}
+
 // record legt de uitkomst van één bestand vast.
 func (s *Service) record(ctx context.Context, q *store.Queries, repo store.GitRepo, head Commit, o outcome, pend store.GitChange, prev FileEntry) (FileEntry, error) {
 	e := o.entry

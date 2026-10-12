@@ -1456,6 +1456,83 @@ paths:
               schema: { $ref: "#/components/schemas/SpecHistory" }
         "401": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /clusters/{clusterId}/spec/edit:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getClusterSpecEdit
+      summary: De parameters van een cluster uit een template om te wijzigen
+      description: |
+        Met hun waarden van nu, voor de huidige templateversie of voor version. Een cluster dat Git volgt,
+        geeft het formulier met blocked: daar is cluster.yaml de bron.
+      parameters:
+        - { name: version, in: query, schema: { type: string }, description: Een andere versie van de template }
+      responses:
+        "200":
+          description: Het formulier
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SpecEditForm" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /clusters/{clusterId}/spec/plan:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: planClusterSpec
+      summary: Het plan van een wijziging van de spec (admin); er verandert niets
+      description: |
+        Hetzelfde plan als bij een wijziging uit Git: wat er per node verandert en welke nodes erbij komen.
+        409 met git_managed als het cluster Git volgt, no_change als er niets verandert. Minder nodes kan niet:
+        een worker van Kubernetes haal je weg met remove-node.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SpecEditInput" }
+      responses:
+        "200":
+          description: Het plan
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SpecEditPlan" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /clusters/{clusterId}/spec:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: applyClusterSpec
+      summary: Een wijziging van de spec toepassen (admin)
+      description: |
+        Alleen als het plan nog dezelfde hash heeft; anders 409 met plan_changed. Maakt een nieuwe revisie met bron ui
+        en, als er op de nodes iets verandert, een taak cluster.apply. Op prod vraagt het tweestapsverificatie en de slug.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SpecApplyInput" }
+      responses:
+        "200":
+          description: Toegepast; op geen node verandert iets
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SpecApplied" }
+        "202":
+          description: De taak die de revisie toepast staat in de wachtrij
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SpecApplied" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
   /clusters/{clusterId}/backup-policy:
     parameters:
       - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -3256,6 +3333,40 @@ paths:
         "409": { $ref: "#/components/responses/Error" }
         "502": { $ref: "#/components/responses/Error" }
         "503": { $ref: "#/components/responses/Error" }
+  /kubernetes/clusters/{clusterId}/remove-node:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: removeKubeNode
+      summary: Een worker weghalen (admin); wordt een taak
+      description: |
+        Leegmaken, de VM uitzetten, de node uit Kubernetes halen, de VM verwijderen en de node uit ClusterForge, met een
+        nieuwe revisie van de spec met één worker minder. Alleen een worker in een cluster uit een template dat geen Git volgt;
+        een server weghalen geeft 409. Met preview=true komt alleen het plan terug. Houden pods het leegmaken tegen, dan
+        antwoordt de server 409 met code needs_force. Op prod vraagt het tweestapsverificatie en de slug in confirm.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/KubeRemoveNodeInput" }
+      responses:
+        "200":
+          description: Het plan
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/KubeRemoveNodePlan" }
+        "202":
+          description: Taak aangemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
 components:
   securitySchemes:
     session:
@@ -3621,6 +3732,26 @@ components:
         evict: { type: array, items: { $ref: "#/components/schemas/KubeDrainPod" } }
         skip: { type: array, items: { $ref: "#/components/schemas/KubeDrainPod" } }
         blocked: { type: array, items: { $ref: "#/components/schemas/KubeDrainPod" } }
+    KubeRemoveNodeInput:
+      type: object
+      required: [node]
+      properties:
+        node: { type: string, description: De naam van de node in Kubernetes }
+        preview: { type: boolean, description: Alleen het plan tonen }
+        force: { type: boolean, description: "Ook pods zonder eigenaar en met emptyDir uitzetten; die zijn dan weg" }
+        confirm: { type: string, description: De slug van het cluster; nodig op prod }
+    KubeRemoveNodePlan:
+      type: object
+      required: [node, node_id, hostname, ready, vmid, host, workers, drain]
+      properties:
+        node: { type: string }
+        node_id: { type: string, format: uuid }
+        hostname: { type: string }
+        ready: { type: boolean, description: "Niet Ready: de node gaat op cordon in plaats van leeg, want zijn pods stoppen daar nooit netjes" }
+        vmid: { type: integer }
+        host: { type: string, description: De Proxmox-host van de VM }
+        workers: { type: integer, description: Het aantal workers daarna }
+        drain: { $ref: "#/components/schemas/KubeDrainPlan" }
     KubeApplyInput:
       type: object
       required: [yaml]
@@ -7590,6 +7721,9 @@ components:
       type: object
       properties:
         confirm: { type: string, description: Op prod de slug van het cluster }
+        server_url:
+          type: string
+          description: Het adres van ClusterForge voor nodes die nog moeten aanmelden; leeg neemt dat van de koppeling met Git
     GitDecision:
       type: object
       required: [change, job]
@@ -7669,3 +7803,58 @@ components:
         vip: { type: string }
         vrid: { type: integer }
         proxmox: { type: string }
+    SpecEditParam:
+      type: object
+      required: [param, value, locked]
+      properties:
+        param: { $ref: "#/components/schemas/TemplateParam" }
+        value: { nullable: true, description: "De waarde nu; null bij een geheim of een lege optionele waarde" }
+        locked: { type: string, description: "Waarom de parameter niet te wijzigen is; leeg als het kan" }
+    SpecEditForm:
+      type: object
+      required: [template, version, versions, params, blocked]
+      properties:
+        template: { type: string }
+        version: { type: string }
+        versions: { type: array, items: { type: string }, description: De versies van de template in deze server }
+        params: { type: array, items: { $ref: "#/components/schemas/SpecEditParam" } }
+        blocked: { type: string, description: "Waarom de spec hier niet te wijzigen is, zoals bij een cluster dat Git volgt; leeg als het kan" }
+    SpecEditInput:
+      type: object
+      required: [params]
+      properties:
+        version: { type: string, description: De templateversie; leeg houdt de huidige }
+        params:
+          type: object
+          additionalProperties: true
+          description: De parameters die veranderen; de andere houden hun waarde
+    SpecEditPlan:
+      type: object
+      required: [plan, hash, needs_confirmation, full_apply, blocked, blocked_code]
+      properties:
+        plan: { $ref: "#/components/schemas/GitPlan" }
+        hash: { type: string, description: Toepassen vraagt hem terug; zo gebeurt wat je zag }
+        needs_confirmation: { type: boolean, description: "Het cluster is prod: toepassen vraagt de slug" }
+        full_apply: { type: boolean, description: Een eerdere revisie is niet op alle nodes toegepast, dus de taak past alle stappen opnieuw toe }
+        blocked: { type: string, description: "Waarom toepassen nu niet kan; leeg als het kan" }
+        blocked_code:
+          type: string
+          description: "render_failed, membership of dhcp_growth; leeg als toepassen kan"
+    SpecApplyInput:
+      allOf:
+        - $ref: "#/components/schemas/SpecEditInput"
+        - type: object
+          required: [hash]
+          properties:
+            hash: { type: string, description: De hash van het plan dat je bekeek }
+            server_url: { type: string, description: "Het adres van ClusterForge waar nieuwe nodes zich aanmelden; nodig als er nodes bijkomen" }
+            confirm: { type: string, description: Op prod de slug van het cluster }
+    SpecApplied:
+      type: object
+      required: [revision, job]
+      properties:
+        revision: { type: integer }
+        job:
+          allOf: [{ $ref: "#/components/schemas/Job" }]
+          nullable: true
+          description: null als er op geen node iets verandert

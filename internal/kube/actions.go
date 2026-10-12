@@ -383,7 +383,8 @@ func notFor(action, kind string, ref Ref, body []byte) error {
 				ref.Name, ow.Kind, ow.Name)}
 		}
 	case action == ActDelete && kind == "Node":
-		return &ConflictError{"een node haal je zo niet weg: k3s meldt hem meteen opnieuw aan. Maak hem leeg en zet de VM uit"}
+		return &ConflictError{"een node haal je zo niet weg: k3s meldt hem meteen opnieuw aan. Een worker haal je weg met Weghalen op het tabblad Nodes; " +
+			"dat maakt hem leeg en verwijdert ook de VM"}
 	case action == ActDelete && kind == "Namespace":
 		return &ConflictError{"namespace " + ref.Name + " is van Kubernetes zelf; zonder werkt het cluster niet"}
 	case action == ActRollback:

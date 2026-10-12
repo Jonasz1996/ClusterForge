@@ -15,6 +15,8 @@ import {
   useKubeAction,
   useKubeDrain,
   useKubeDrainPlan,
+  useKubeRemoveNode,
+  useKubeRemovePlan,
   useKubeRevisions,
   type KubeActionInput,
   type KubeActionName,
@@ -34,6 +36,10 @@ export type ActionTarget = {
 
 // ActionDone is wat er gebeurde, voor de melding boven de pagina of tabel.
 export type ActionDone = { message: string; jobId?: string; deleted?: boolean };
+
+// ExtraAction is een actie van ClusterForge zelf in het menu, zoals een
+// worker weghalen. Met disabled staat hij grijs, met de reden eronder.
+export type ExtraAction = { label: string; onClick?: () => void; danger?: boolean; disabled?: string };
 
 const labels: Record<KubeActionName, string> = {
   scale: "Schalen",
@@ -61,6 +67,7 @@ export function KubeActions({
   target,
   layout = "buttons",
   names,
+  extra = [],
   onDone,
 }: {
   clusterId: string;
@@ -68,11 +75,13 @@ export function KubeActions({
   layout?: "buttons" | "menu";
   // names geeft een knop een andere naam, zoals Opruimen voor weghalen.
   names?: Partial<Record<KubeActionName, string>>;
+  // extra komen onderaan het menu.
+  extra?: ExtraAction[];
   onDone: (d: ActionDone) => void;
 }) {
   const isAdmin = useIsAdmin();
   const [open, setOpen] = useState<KubeActionName | null>(null);
-  if (!isAdmin || target.actions.length === 0) return null;
+  if (!isAdmin || target.actions.length + extra.length === 0) return null;
   const close = () => setOpen(null);
   const done = (d: ActionDone) => {
     setOpen(null);
@@ -95,7 +104,12 @@ export function KubeActions({
           <summary className="cursor-pointer list-none rounded-md px-2 py-1 text-sm font-medium whitespace-nowrap text-slate-600 select-none hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800">
             Acties ▾
           </summary>
-          <div className="absolute right-0 z-20 mt-1 w-40 rounded-md border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-700 dark:bg-slate-900">
+          <div
+            className={cx(
+              "absolute right-0 z-20 mt-1 rounded-md border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-700 dark:bg-slate-900",
+              extra.length > 0 ? "w-56" : "w-40",
+            )}
+          >
             {target.actions.map((a) => (
               <button
                 key={a}
@@ -110,6 +124,29 @@ export function KubeActions({
                 )}
               >
                 {names?.[a] ?? labels[a]}…
+              </button>
+            ))}
+            {extra.length > 0 && target.actions.length > 0 && (
+              <div className="my-1 border-t border-slate-100 dark:border-slate-800" />
+            )}
+            {extra.map((x) => (
+              <button
+                key={x.label}
+                type="button"
+                disabled={!!x.disabled}
+                onClick={(e) => {
+                  (e.currentTarget.closest("details") as HTMLDetailsElement | null)?.removeAttribute("open");
+                  x.onClick?.();
+                }}
+                className={cx(
+                  "block w-full px-3 py-1.5 text-left text-sm",
+                  x.disabled
+                    ? "cursor-not-allowed text-slate-400 dark:text-slate-500"
+                    : "hover:bg-slate-50 dark:hover:bg-slate-800",
+                  x.danger && !x.disabled && "text-red-700 dark:text-red-300",
+                )}
+              >
+                {x.label}…{x.disabled && <span className="block text-xs text-slate-500">{x.disabled}</span>}
               </button>
             ))}
           </div>
@@ -619,6 +656,116 @@ function DrainDialog({ clusterId, target, onClose, onDone }: DialogProps) {
               </span>
             </label>
           )}
+        </>
+      )}
+    </ActionDialog>
+  );
+}
+
+// RemoveWorkerDialog haalt een worker helemaal weg: leegmaken, de VM
+// uitzetten, de node uit Kubernetes halen, de VM verwijderen en de node uit
+// ClusterForge. Eerst toont hij wat er gebeurt; er verandert niets tot je
+// bevestigt.
+export function RemoveWorkerDialog({
+  clusterId,
+  node,
+  onClose,
+  onDone,
+}: {
+  clusterId: string;
+  node: string;
+  onClose: () => void;
+  onDone: (d: ActionDone) => void;
+}) {
+  const prod = useConfirm(clusterId);
+  const [force, setForce] = useState(false);
+  const [typed, setTyped] = useState("");
+  const plan = useKubeRemovePlan(clusterId, node, force);
+  const remove = useKubeRemoveNode(clusterId);
+  const pl = plan.data;
+  const d = pl?.drain;
+  return (
+    <ActionDialog
+      title={`${node} weghalen`}
+      submit="Worker weghalen"
+      danger
+      ready={pl !== undefined && d !== undefined && d.blocked.length === 0 && typed === node}
+      pending={remove.isPending}
+      error={remove.error ?? (pl ? null : plan.error)}
+      prod={prod}
+      wide
+      onClose={onClose}
+      onSubmit={() =>
+        remove.mutate(
+          { node, force, confirm: prod.confirm },
+          {
+            onSuccess: (job) =>
+              onDone({ message: `${node} wordt weggehaald: eerst leegmaken, dan gaat de VM weg.`, jobId: job.id }),
+          },
+        )
+      }
+      commands={[
+        kubectl(`drain ${node} --ignore-daemonsets --delete-emptydir-data${force ? " --force" : ""}`),
+        kubectl(`delete node ${node}`),
+      ]}
+      learn={
+        <>
+          <p>
+            Met kubectl haal je de node alleen uit Kubernetes. De VM draait dan nog, en k3s meldt hem bij de volgende herstart
+            weer aan. Daarom zet ClusterForge eerst de VM uit en verwijdert hij hem pas als Kubernetes de node niet meer kent.
+          </p>
+          <p>Een server haal je zo niet weg: etcd telt op zijn servers om een meerderheid te houden.</p>
+        </>
+      }
+    >
+      {plan.isLoading && <p className="text-slate-500">Kijken wat er op {node} draait…</p>}
+      {pl && d && (
+        <>
+          <p>ClusterForge haalt worker {node} helemaal weg, in deze volgorde:</p>
+          <ol className="list-decimal space-y-1 pl-5">
+            <li>
+              {!pl.ready
+                ? `Op cordon. ${node} is niet Ready, dus zijn pods stoppen niet netjes; Kubernetes maakt ze op een andere node opnieuw.`
+                : d.evict.length === 0
+                  ? "Leegmaken: er draaien geen pods die weg moeten."
+                  : `Leegmaken: ${d.evict.length} ${d.evict.length === 1 ? "pod verhuist" : "pods verhuizen"} naar een andere node.`}
+            </li>
+            <li>
+              VM {pl.vmid} op {pl.host || "Proxmox"} uitzetten: eerst netjes, na twee minuten hard.
+            </li>
+            <li>De node uit Kubernetes halen.</li>
+            <li>VM {pl.vmid} verwijderen, met zijn schijven.</li>
+            <li>
+              {pl.hostname} uit ClusterForge halen. De specificatie gaat naar {pl.workers}{" "}
+              {pl.workers === 1 ? "worker" : "workers"}.
+            </li>
+          </ol>
+          <PodList title="Verhuizen" pods={d.evict} tone="blue" />
+          <PodList title="Houden het tegen" pods={d.blocked} tone="red" />
+          <PodList title="Stoppen met de node" pods={d.skip} tone="slate" />
+          {(d.blocked.length > 0 || force) && (
+            <label className="flex items-start gap-2">
+              <input type="checkbox" className="mt-0.5" checked={force} onChange={(e) => setForce(e.target.checked)} />
+              <span>
+                Toch doorgaan
+                <span className="block text-xs text-slate-500">
+                  Ook pods zonder eigenaar en pods met emptyDir gaan weg. Zonder eigenaar komen ze niet terug, en de gegevens in
+                  emptyDir zijn weg.
+                </span>
+              </span>
+            </label>
+          )}
+          <Alert>De VM en zijn schijven zijn daarna weg; dat kan niet ongedaan.</Alert>
+          <Field label={`Tik ${node} om te bevestigen`} htmlFor="kube-remove-name">
+            <Input
+              id="kube-remove-name"
+              autoComplete="off"
+              spellCheck={false}
+              className="font-mono"
+              value={typed}
+              onChange={(e) => setTyped(e.target.value.trim())}
+            />
+          </Field>
         </>
       )}
     </ActionDialog>

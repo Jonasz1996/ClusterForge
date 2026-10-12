@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/google/uuid"
@@ -12,23 +13,32 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/store"
 )
 
-// lessonEnv is het cluster, de gebruiker, het VIP en het aantal nodes uit
-// de laatste sync.
+// lessonEnv is het cluster, de gebruiker, het VIP, de omgeving en het
+// aantal nodes en servers uit de laatste sync.
 func (s *Server) lessonEnv(r *http.Request, clusterID uuid.UUID) (kubelessons.Env, error) {
 	ctx := r.Context()
 	p, _ := principalFrom(ctx)
-	if _, err := s.kube.Cluster(ctx, clusterID); err != nil {
+	c, err := s.kube.Cluster(ctx, clusterID)
+	if err != nil {
 		return kubelessons.Env{}, err
 	}
 	nodes, err := s.q.ListKubeNodes(ctx, clusterID)
 	if err != nil {
 		return kubelessons.Env{}, err
 	}
+	servers := 0
+	for _, n := range nodes {
+		if slices.Contains(n.Roles, "control-plane") || slices.Contains(n.Roles, "master") {
+			servers++
+		}
+	}
 	vips, err := s.clusterVIPs(ctx)
 	if err != nil {
 		return kubelessons.Env{}, err
 	}
-	return kubelessons.Env{ClusterID: clusterID, UserID: p.User.ID, VIP: vips[clusterID], Nodes: len(nodes)}, nil
+	return kubelessons.Env{
+		ClusterID: clusterID, UserID: p.User.ID, VIP: vips[clusterID], Nodes: len(nodes), Servers: servers, Environment: string(c.Environment),
+	}, nil
 }
 
 func nullableTimePtr(t *time.Time) nullable.Nullable[time.Time] {

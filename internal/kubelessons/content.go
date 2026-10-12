@@ -23,17 +23,7 @@ var (
 )
 
 var lessons = []*Lesson{
-	verkennen, eersteApp, schalen, bereikbaar, nieuweVersie, configuratie, opslag, onderhoud,
-	{
-		ID: "node-erbij", Number: 9, Title: "Een node erbij",
-		Summary: "Een worker toevoegen en zien dat er pods naartoe gaan.",
-		Later:   "Deze les komt zodra je in ClusterForge een node aan een Kubernetes-cluster kunt toevoegen.",
-	},
-	{
-		ID: "server-valt-uit", Number: 10, Title: "Een server valt uit",
-		Summary: "Een server hard stoppen en zien dat de API via het VIP blijft antwoorden.",
-		Later:   "Deze les komt samen met les 9. Ze is voor een lab-cluster met drie servers.",
-	},
+	verkennen, eersteApp, schalen, bereikbaar, nieuweVersie, configuratie, opslag, onderhoud, nodeErbij, serverUitval,
 }
 
 var verkennen = &Lesson{
@@ -1124,4 +1114,276 @@ var onderhoud = &Lesson{
 			},
 		},
 	},
+}
+
+var nodeErbij = &Lesson{
+	ID: "node-erbij", Number: 9, Title: "Een node erbij",
+	Summary: "Een worker toevoegen en zien dat er pods naartoe gaan.",
+	Intro: []string{
+		"Heeft je cluster te weinig ruimte, dan zet je er een node bij. Een worker draait alleen pods: hij heeft geen etcd en geen API, dus er kunnen er zoveel bij als je wilt.",
+		"Een node is een machine, dus met kubectl alleen lukt dit niet. ClusterForge maakt een VM uit het golden image en installeert k3s als agent. Die meldt zich met het token van het cluster aan bij de API op het VIP.",
+	},
+	Outro: []string{
+		"Een node erbij is een VM erbij. Kubernetes zet er zelf pods op, maar alleen nieuwe. In les 10 zie je wat er gebeurt als een server uitvalt.",
+	},
+	Steps: []*Step{
+		{
+			ID: "toevoegen", Title: "Voeg een worker toe", Kind: KindDo,
+			Text: []string{
+				"Kies op het tabblad Nodes Worker toevoegen. ClusterForge toont eerst het plan: welke VM erbij komt, met welke naam en welk adres. Na Toepassen volg je de taak: VM maken, k3s installeren en wachten tot de node Ready is.",
+				"Met kubectl zie je de node verschijnen: eerst NotReady, en Ready zodra k3s en het podnetwerk draaien.",
+				"Volgt het cluster Git, dan zet je in `cluster.yaml` het aantal workers een hoger; ClusterForge doet dan hetzelfde na je commit. Nodes toevoegen kan alleen een beheerder.",
+			},
+			Web:     "Open het tabblad Nodes en kies Worker toevoegen.",
+			Kubectl: []string{"sudo kubectl get nodes -o wide"},
+			Link:    nodesLink,
+			start: func(x *run) (Data, error) {
+				nodes, err := x.kube.Nodes(x.ctx, x.env.ClusterID)
+				if err != nil {
+					return nil, err
+				}
+				before := make([]string, 0, len(nodes))
+				for _, n := range nodes {
+					before = append(before, n.Metadata.Name)
+				}
+				return Data{"voor": before}, nil
+			},
+			check: func(x *run, d Data) (Outcome, error) {
+				nodes, err := x.kube.Nodes(x.ctx, x.env.ClusterID)
+				if err != nil {
+					return Outcome{}, err
+				}
+				before := d.Strs("voor")
+				var fresh []kube.Node
+				for _, n := range nodes {
+					if !slices.Contains(before, n.Metadata.Name) {
+						fresh = append(fresh, n)
+					}
+				}
+				slices.SortFunc(fresh, func(a, b kube.Node) int { return cmp.Compare(a.Metadata.Name, b.Metadata.Name) })
+				for _, n := range fresh {
+					if n.Ready() {
+						return Outcome{Done: true, Detail: fmt.Sprintf("%s is erbij en Ready. Je cluster heeft nu %s.", n.Metadata.Name, plural(len(nodes), "node", "nodes")),
+							Data: Data{"node": n.Metadata.Name}}, nil
+					}
+				}
+				if len(fresh) > 0 {
+					return Outcome{Detail: fmt.Sprintf("%s is erbij, maar nog niet Ready: k3s en het podnetwerk starten nog.", fresh[0].Metadata.Name)}, nil
+				}
+				return Outcome{Detail: fmt.Sprintf("Er is nog geen node bij gekomen; je cluster heeft er %d.", len(nodes))}, nil
+			},
+		},
+		{
+			ID: "pods", Title: "Zet pods op {node}", Kind: KindDo,
+			Text: []string{
+				"De nieuwe node is leeg. Kubernetes verhuist geen draaiende pods, dat zag je in les 8; alleen nieuwe pods kunnen erop komen. De planner kiest de node met de meeste ruimte, en dat is nu {node}.",
+				"Zet web op 6 pods en kijk in de kolom Node waar de nieuwe heen gaan. Heeft web er al 6 of meer, herstart hem dan: Kubernetes maakt alle pods nieuw en verdeelt ze opnieuw.",
+			},
+			Web: "Open web op het tabblad Apps en zet hem op 6 pods, of kies Herstarten.",
+			Kubectl: []string{
+				"sudo kubectl scale deployment web -n leren --replicas=6",
+				"sudo kubectl rollout restart deployment web -n leren",
+				"sudo kubectl get pods -n leren -o wide",
+			},
+			Link: &Link{Label: "Deployment web", Ref: webRef},
+			check: func(x *run, _ Data) (Outcome, error) {
+				node := x.data["toevoegen"].Str("node")
+				w, _, err := x.deployment("web")
+				if err != nil || w == nil {
+					return Outcome{Detail: noWeb}, err
+				}
+				pods, err := x.pods("web")
+				if err != nil {
+					return Outcome{}, err
+				}
+				on, starting := 0, 0
+				for _, p := range pods {
+					switch {
+					case p.Spec.NodeName != node:
+					case ready(p):
+						on++
+					default:
+						starting++
+					}
+				}
+				switch {
+				case on > 0:
+					verb := "draaien"
+					if on == 1 {
+						verb = "draait"
+					}
+					detail := fmt.Sprintf("%s van web %s op %s.", plural(on, "pod", "pods"), verb, node)
+					if others := slices.DeleteFunc(nodesOf(pods), func(n string) bool { return n == node }); len(others) > 0 {
+						detail += fmt.Sprintf(" De andere staan op %s.", and(others))
+					}
+					return Outcome{Done: true, Detail: detail}, nil
+				case starting > 0:
+					return Outcome{Detail: fmt.Sprintf("Er start een pod van web op %s; die haalt eerst het image binnen.%s", node, waitHint(pods))}, nil
+				}
+				nodes, err := x.kube.Nodes(x.ctx, x.env.ClusterID)
+				if err != nil {
+					return Outcome{}, err
+				}
+				if !slices.ContainsFunc(nodes, func(n kube.Node) bool { return n.Metadata.Name == node }) {
+					return Outcome{Done: true, Detail: fmt.Sprintf("%s is geen node meer van dit cluster; deze opdracht slaan we over.", node)}, nil
+				}
+				return Outcome{Detail: fmt.Sprintf("Nog geen pod van web op %s; de %s draaien op %s.", node, plural(len(pods), "pod", "pods"), and(nodesOf(pods)))}, nil
+			},
+		},
+		{
+			ID: "weghalen", Title: "Lees hoe weghalen gaat", Kind: KindRead,
+			Text: []string{
+				"Weghalen gaat andersom. ClusterForge maakt de node leeg zoals in les 8, zet de VM uit, haalt de node uit Kubernetes en verwijdert dan de VM. Zo verdwijnt er geen pod voor hij ergens anders draait.",
+				"Met kubectl haal je de node alleen uit Kubernetes. De VM draait dan nog, en k3s meldt hem bij de volgende herstart weer aan. Daarom doet ClusterForge het hele rijtje.",
+				"Een server haalt ClusterForge zo niet weg: dan verandert de meerderheid van etcd. Servers gaan van 1 naar 3 of 5, niet terug.",
+				"Wil je {node} houden, laat hem dan staan. Weghalen kan altijd later.",
+			},
+			Web: "Open het tabblad Nodes en kies bij {node} Weghalen.",
+			Kubectl: []string{
+				"sudo kubectl drain {node} --ignore-daemonsets --delete-emptydir-data",
+				"sudo kubectl delete node {node}",
+			},
+			Done: "Gelezen",
+			Link: nodesLink,
+		},
+	},
+}
+
+var serverUitval = &Lesson{
+	ID: "server-valt-uit", Number: 10, Title: "Een server valt uit",
+	Summary:  "Een server hard stoppen en zien dat de API via het VIP blijft antwoorden.",
+	MinNodes: 3, MinServers: 3, Lab: true,
+	Intro: []string{
+		"Met drie servers heeft je cluster drie keer etcd en drie keer de API. etcd werkt zolang de meerderheid van de servers draait, en het VIP staat altijd op een server die werkt: keepalived verhuist het binnen een paar seconden.",
+		"In deze les zet je een server hard uit, alsof de stroom uitvalt, en kijk je wat er blijft werken. Daarom kan deze les alleen op een cluster met omgeving lab.",
+	},
+	Outro: []string{
+		"Een cluster met drie servers overleeft het uitvallen van één server: de API blijft via het VIP bereikbaar, en pods van de uitgevallen node komen na vijf minuten op een andere. Vallen er twee uit, dan stopt etcd en kan niemand nog iets veranderen; de pods die draaien, draaien wel door.",
+	},
+	Steps: []*Step{
+		{
+			ID: "meerderheid", Title: "Reken de meerderheid uit", Kind: KindQuiz,
+			Text: []string{
+				"etcd legt iets pas vast als de meerderheid van de servers het heeft. Zo kunnen de twee helften van een gesplitst netwerk nooit allebei verder: maar één helft heeft de meerderheid.",
+				"Daarom kiest ClusterForge 1, 3 of 5 servers. Met 2 servers is de meerderheid ook 2, en mag er dus geen uitvallen.",
+			},
+			Web:      "Tel de servers op het tabblad Nodes.",
+			Kubectl:  []string{"sudo kubectl get nodes"},
+			Question: "Hoeveel servers mogen er bij jouw cluster tegelijk uitvallen?",
+			Hint:     "De meerderheid van 3 is 2, van 5 is 3. Wat erboven zit, mag uitvallen.",
+			Link:     nodesLink,
+			answer: func(x *run) ([]string, string, string, error) {
+				servers, _, err := x.servers()
+				if err != nil {
+					return nil, "", "", err
+				}
+				n := len(servers)
+				if n == 0 {
+					return nil, "", "Dit cluster meldt geen node met de rol control-plane; deze vraag slaan we over.", nil
+				}
+				k := (n - 1) / 2
+				verb := "mogen"
+				if k == 1 {
+					verb = "mag"
+				}
+				return []string{strconv.Itoa(k)}, fmt.Sprintf("Juist: met %d servers is de meerderheid %d, dus er %s er %d uitvallen.", n, n/2+1, verb, k), "", nil
+			},
+		},
+		{
+			ID: "uitzetten", Title: "Zet een server hard uit", Kind: KindDo,
+			Text: []string{
+				"Kies een server, bijvoorbeeld `{voorbeeld}`, en zet zijn VM hard uit: niet afsluiten, maar de stekker eruit. Kubernetes noemt hem na ongeveer 40 seconden NotReady.",
+				"Stond het VIP {vip} op die server, dan neemt een andere server het binnen een paar seconden over. ClusterForge en kubectl op je pc praten met het VIP en merken daar niets van.",
+			},
+			Web:     "Kies in het menu Nodes de node {voorbeeld}, en bij Proxmox Hard uitzetten. In Proxmox zelf heet dat Stop.",
+			Kubectl: []string{"sudo kubectl get nodes"},
+			Link:    nodesLink,
+			start: func(x *run) (Data, error) {
+				servers, _, err := x.servers()
+				if err != nil || len(servers) == 0 {
+					return Data{}, err
+				}
+				return Data{"voorbeeld": servers[0].Metadata.Name}, nil
+			},
+			check: func(x *run, _ Data) (Outcome, error) {
+				servers, down, err := x.servers()
+				if err != nil {
+					return Outcome{}, err
+				}
+				if len(down) == 0 {
+					return Outcome{Detail: "Alle servers zijn nog Ready. Na het uitzetten duurt het ongeveer 40 seconden voor Kubernetes het merkt."}, nil
+				}
+				return Outcome{Done: true, Detail: fmt.Sprintf("%s is NotReady, en de API antwoordt nog: %d van de %d servers draaien.", down[0], len(servers)-len(down), len(servers)),
+					Data: Data{"node": down[0]}}, nil
+			},
+		},
+		{
+			ID: "api", Title: "Kijk wat er nog werkt", Kind: KindQuiz,
+			Text: []string{
+				"Open het tabblad Nodes, of draai kubectl op een server die nog aan staat. Dat werkt: etcd heeft zijn meerderheid, en de API draait op elke server.",
+				"De pods op {node} blijven nog even in de lijst staan. Kubernetes wacht vijf minuten voor het ze op een andere node opnieuw maakt: een node die even weg is, komt vaak terug.",
+			},
+			Web:      "Open het tabblad Nodes.",
+			Kubectl:  []string{"sudo kubectl get nodes", "sudo kubectl get pods -A -o wide"},
+			Question: "Hoeveel servers zijn er nu Ready?",
+			Hint:     "Tel de servers met de status Ready op het tabblad Nodes.",
+			Link:     nodesLink,
+			answer: func(x *run) ([]string, string, string, error) {
+				servers, down, err := x.servers()
+				if err != nil {
+					return nil, "", "", err
+				}
+				up := len(servers) - len(down)
+				return []string{strconv.Itoa(up)}, fmt.Sprintf("Juist: %d van de %d. Dat ClusterForge dit kon nakijken, bewijst het al: de API antwoordt.", up, len(servers)), "", nil
+			},
+		},
+		{
+			ID: "aanzetten", Title: "Zet {node} weer aan", Kind: KindDo,
+			Text: []string{
+				"Start de VM weer. k3s start vanzelf, de server meldt zich aan en etcd haalt bij wat hij miste. Na ongeveer een minuut is de node weer Ready.",
+			},
+			Web:     "Kies in het menu Nodes de node {node}, en bij Proxmox Starten.",
+			Kubectl: []string{"sudo kubectl get nodes"},
+			Link:    &Link{Label: "Node {node}", Ref: &kube.Ref{Version: "v1", Resource: "nodes", Name: "{node}"}},
+			check: func(x *run, _ Data) (Outcome, error) {
+				node := x.data["uitzetten"].Str("node")
+				nodes, err := x.kube.Nodes(x.ctx, x.env.ClusterID)
+				if err != nil {
+					return Outcome{}, err
+				}
+				for _, n := range nodes {
+					if n.Metadata.Name != node {
+						continue
+					}
+					if !n.Ready() {
+						return Outcome{Detail: fmt.Sprintf("%s is nog NotReady.", node)}, nil
+					}
+					return Outcome{Done: true, Detail: fmt.Sprintf("%s is weer Ready.", node)}, nil
+				}
+				return Outcome{Done: true, Detail: fmt.Sprintf("%s is geen node meer van dit cluster.", node)}, nil
+			},
+		},
+	},
+}
+
+// servers zijn de servers op naam, en de namen van die niet Ready zijn.
+func (x *run) servers() ([]kube.Node, []string, error) {
+	nodes, err := x.kube.Nodes(x.ctx, x.env.ClusterID)
+	if err != nil {
+		return nil, nil, err
+	}
+	var servers []kube.Node
+	var down []string
+	for _, n := range nodes {
+		if !isServer(n) {
+			continue
+		}
+		servers = append(servers, n)
+		if !n.Ready() {
+			down = append(down, n.Metadata.Name)
+		}
+	}
+	slices.SortFunc(servers, func(a, b kube.Node) int { return cmp.Compare(a.Metadata.Name, b.Metadata.Name) })
+	slices.Sort(down)
+	return servers, down, nil
 }

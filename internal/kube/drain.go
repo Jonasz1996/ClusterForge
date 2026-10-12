@@ -13,6 +13,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/jobs"
 	"github.com/Jonasz1996/clusterforge/internal/store"
+	"github.com/Jonasz1996/clusterforge/pkg/protocol"
 )
 
 // KindDrain is de soort taak die een node in Kubernetes leegmaakt.
@@ -260,6 +261,41 @@ func (s *Service) NodeReady(ctx context.Context, clusterID uuid.UUID, node strin
 	return n.Ready(), err
 }
 
+// Cordon zet een node op cordon: er komen geen nieuwe pods op.
+func (s *Service) Cordon(ctx context.Context, clusterID uuid.UUID, node string) error {
+	return s.setUnschedulable(ctx, clusterID, node, true, false)
+}
+
+// DeleteNode haalt een node uit Kubernetes. Draait k3s er nog, dan meldt de
+// kubelet hem meteen opnieuw aan; de aanroeper zet de VM eerst uit. Een node
+// die er al niet meer is, is geen fout.
+func (s *Service) DeleteNode(ctx context.Context, clusterID uuid.UUID, node string) error {
+	if !ValidName(node) {
+		return fmt.Errorf("%w: node %q", ErrInvalid, node)
+	}
+	_, err := s.write(ctx, clusterID, protocol.KubeRequest{Op: protocol.KubeDelete, Path: "/api/v1/nodes/" + node})
+	if errors.Is(err, ErrNotFound) {
+		return nil
+	}
+	return err
+}
+
+// NodeGone zegt of Kubernetes een node niet meer kent, gelezen zonder cache.
+func (s *Service) NodeGone(ctx context.Context, clusterID uuid.UUID, node string) (bool, error) {
+	if !ValidName(node) {
+		return false, fmt.Errorf("%w: node %q", ErrInvalid, node)
+	}
+	s.forget(clusterID)
+	_, err := s.Get(ctx, clusterID, "/api/v1/nodes/"+node, nil)
+	switch {
+	case errors.Is(err, ErrNotFound):
+		return true, nil
+	case err != nil:
+		return false, err
+	}
+	return false, nil
+}
+
 // NodeNameOf geeft de naam in Kubernetes van een ClusterForge-node, of ""
 // als het cluster hem niet kent.
 func (s *Service) NodeNameOf(ctx context.Context, clusterID, nodeID uuid.UUID) (string, error) {
@@ -277,6 +313,16 @@ func (s *Service) NodeNameOf(ctx context.Context, clusterID, nodeID uuid.UUID) (
 		}
 	}
 	return "", nil
+}
+
+// NodeIDOf geeft de ClusterForge-node van een node in Kubernetes, of
+// uuid.Nil als ClusterForge hem niet kent.
+func (s *Service) NodeIDOf(ctx context.Context, clusterID uuid.UUID, node string) (uuid.UUID, error) {
+	id, err := s.linkedNode(ctx, clusterID, node)
+	if err != nil || id == nil {
+		return uuid.Nil, err
+	}
+	return *id, nil
 }
 
 // drainParams gaan mee met de taak.

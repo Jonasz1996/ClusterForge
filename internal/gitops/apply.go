@@ -144,11 +144,7 @@ func (s *Service) Approve(ctx context.Context, actor events.Actor, id uuid.UUID)
 
 	// Het plan moet nog kloppen: dezelfde stappen met dezelfde diffs, met
 	// de facts van nu.
-	cl := s.clusterOf(ctx, store.ListGitClustersRow{
-		ID: c.ID, Slug: c.Slug, Name: c.Name, Description: c.Description, Environment: c.Environment, Tags: c.Tags, Type: c.Type,
-		Spec: c.Spec, SpecRevision: c.SpecRevision, AppliedRevision: c.AppliedRevision, TemplateName: c.TemplateName, TemplateVersion: c.TemplateVersion,
-		GitRepoID: c.GitRepoID,
-	})
+	cl := s.clusterFrom(ctx, c)
 	if cl.Spec == nil {
 		return Decision{}, &ConflictError{Code: "not_template", Msg: "het cluster heeft geen gewenste staat uit een template"}
 	}
@@ -204,26 +200,9 @@ func (s *Service) Approve(ctx context.Context, actor events.Actor, id uuid.UUID)
 		return Decision{}, s.stale(ctx, actor, row.ID, reason, reason+"; er komt een nieuw plan, bekijk het opnieuw")
 	}
 
-	full := c.AppliedRevision < c.SpecRevision || oldTpl == nil
-	var rp *rollout.Plan
-	if !plan.NoSteps || full {
-		nodes := make([]rollout.ChangeNode, 0, len(next.Nodes))
-		var grow []deploy.NewNode
-		for _, n := range next.Nodes {
-			if isNew(n.NodeID) {
-				grow = append(grow, deploy.NewNodeOf(n))
-				continue
-			}
-			nodes = append(nodes, changeNode(n, diffs[n.NodeID]))
-		}
-		p, err := s.ro.PlanChange(ctx, rollout.ChangeInput{
-			ClusterID: c.ID, Revision: int(c.SpecRevision) + 1, Template: next.Template.Name, Version: next.Template.Version,
-			Nodes: nodes, All: full, ChangeID: &row.ID, Commit: row.CommitSha, New: grow, ServerURL: repo.ServerUrl,
-		})
-		if err := rolloutError(err); err != nil {
-			return Decision{}, err
-		}
-		rp = &p
+	rp, err := s.rolloutPlan(ctx, c, plan, &planned{next: next, diffs: diffs, isNew: isNew, oldTpl: oldTpl}, &row.ID, row.CommitSha, repo.ServerUrl)
+	if err != nil {
+		return Decision{}, err
 	}
 
 	var by *uuid.UUID
@@ -247,71 +226,16 @@ func (s *Service) Approve(ctx context.Context, actor events.Actor, id uuid.UUID)
 		if ch.Status != "pending" {
 			return &ConflictError{Code: "not_pending", Msg: "deze wijziging is intussen " + statusText[ch.Status]}
 		}
-		// Nieuwe nodes komen in de inventory, in provisioning; de spec krijgt
-		// hun echte id in plaats van het plan-id.
-		spec := row.Spec
-		if rp != nil && len(rp.NewNodes) > 0 {
-			planned := make([]uuid.UUID, len(rp.NewNodes))
-			for i, n := range rp.NewNodes {
-				planned[i] = n.NodeID
-			}
-			if err := s.dep.AddNodesTx(ctx, q, actor, c.ID, newTpl, rp.NewNodes); err != nil {
-				var ve deploy.ValidationError
-				if errors.As(err, &ve) {
-					return &ConflictError{Code: "stale", Msg: ve.Msg}
-				}
-				return err
-			}
-			withIDs := next
-			withIDs.Nodes = slices.Clone(next.Nodes)
-			for i := range withIDs.Nodes {
-				if k := slices.Index(planned, withIDs.Nodes[i].NodeID); k >= 0 {
-					withIDs.Nodes[i].NodeID = rp.NewNodes[k].NodeID
-				}
-			}
-			if spec, err = json.Marshal(withIDs); err != nil {
-				return err
-			}
-		}
-		// Een geheim dat de nieuwe templateversie erbij heeft, maakt
-		// ClusterForge zelf aan.
-		for _, name := range next.Secrets {
-			if _, err := q.GetSecret(ctx, store.GetSecretParams{ClusterID: c.ID, Name: name}); err == nil {
-				continue
-			} else if !errors.Is(err, pgx.ErrNoRows) {
-				return err
-			}
-			v, err := newTpl.NewSecret(name)
-			if err != nil {
-				return err
-			}
-			if err := s.dep.AddSecretTx(ctx, q, actor, c.ID, meta.Name, name, v); err != nil {
-				return err
-			}
-		}
-		rev, err := q.SetClusterSpec(ctx, store.SetClusterSpecParams{
-			ID: c.ID, Spec: spec, TemplateName: &next.Template.Name, TemplateVersion: &next.Template.Version,
-		})
+		src := specSource{Source: "git", By: by, Commit: &row.CommitSha, ChangeID: &row.ID}
+		rev, err := s.writeSpec(ctx, q, actor, c.ID, meta.Name, next, newTpl, rp, src)
 		if err != nil {
-			return err
-		}
-		if err := q.InsertSpecRevision(ctx, store.InsertSpecRevisionParams{
-			ClusterID: c.ID, Revision: rev, Spec: spec, Source: "git", CreatedBy: by, CommitSha: &row.CommitSha,
-		}); err != nil {
 			return err
 		}
 		if err := s.setMetadata(ctx, q, actor, cur, meta); err != nil {
 			return err
 		}
 		common := map[string]any{"slug": row.Slug, "path": row.Path, "commit": row.CommitSha, "author": row.CommitAuthor, "revision": rev}
-		err = s.ev.Write(ctx, q, events.Event{
-			Actor: actor, SubjectType: "cluster", SubjectID: c.ID.String(), ClusterID: &c.ID, Action: "cluster.spec_changed",
-			Payload: map[string]any{
-				"name": meta.Name, "revision": rev, "previous_revision": row.BaseRevision, "source": "git",
-				"template": next.Template.Name, "template_version": next.Template.Version, "commit": row.CommitSha, "change_id": row.ID,
-			},
-		})
-		if err != nil {
+		if err := s.specChanged(ctx, q, actor, c.ID, meta.Name, rev, row.BaseRevision, next, src); err != nil {
 			return err
 		}
 		if rp == nil {
@@ -352,6 +276,119 @@ func (s *Service) Approve(ctx context.Context, actor events.Actor, id uuid.UUID)
 	}
 	s.Kick(false)
 	return out, nil
+}
+
+// rolloutPlan maakt de taak die een nieuwe revisie toepast, of nil als er op
+// geen node iets verandert en alles al toegepast was. Nieuwe nodes houden
+// hun plan-id tot writeSpec ze in de inventory zet.
+func (s *Service) rolloutPlan(ctx context.Context, c store.Cluster, plan Plan, pd *planned, changeID *uuid.UUID, commit, serverURL string) (*rollout.Plan, error) {
+	full := c.AppliedRevision < c.SpecRevision || pd.oldTpl == nil
+	if plan.NoSteps && !full {
+		return nil, nil
+	}
+	nodes := make([]rollout.ChangeNode, 0, len(pd.next.Nodes))
+	var grow []deploy.NewNode
+	for _, n := range pd.next.Nodes {
+		if pd.isNew(n.NodeID) {
+			grow = append(grow, deploy.NewNodeOf(n))
+			continue
+		}
+		nodes = append(nodes, changeNode(n, pd.diffs[n.NodeID]))
+	}
+	p, err := s.ro.PlanChange(ctx, rollout.ChangeInput{
+		ClusterID: c.ID, Revision: int(c.SpecRevision) + 1, Template: pd.next.Template.Name, Version: pd.next.Template.Version,
+		Nodes: nodes, All: full, ChangeID: changeID, Commit: commit, New: grow, ServerURL: serverURL,
+	})
+	if err := rolloutError(err); err != nil {
+		return nil, err
+	}
+	return &p, nil
+}
+
+// specSource zegt waar een revisie vandaan komt: git met de commit en de
+// wijziging, of ui uit de webinterface.
+type specSource struct {
+	Source   string
+	By       *uuid.UUID
+	Commit   *string
+	ChangeID *uuid.UUID
+}
+
+// writeSpec schrijft in een transactie een nieuwe revisie van de spec. De
+// nodes die erbij komen, gaan in de inventory, in provisioning, en de spec
+// krijgt hun echte id in plaats van het plan-id; rp krijgt ze ook. Een
+// geheim dat de nieuwe templateversie erbij heeft, maakt ClusterForge zelf
+// aan. name is de naam van het cluster na de wijziging.
+func (s *Service) writeSpec(ctx context.Context, q *store.Queries, actor events.Actor, clusterID uuid.UUID, name string, next deploy.Spec,
+	tpl *templates.Template, rp *rollout.Plan, src specSource) (int32, error) {
+	spec, err := json.Marshal(next)
+	if err != nil {
+		return 0, err
+	}
+	if rp != nil && len(rp.NewNodes) > 0 {
+		planned := make([]uuid.UUID, len(rp.NewNodes))
+		for i, n := range rp.NewNodes {
+			planned[i] = n.NodeID
+		}
+		if err := s.dep.AddNodesTx(ctx, q, actor, clusterID, tpl, rp.NewNodes); err != nil {
+			var ve deploy.ValidationError
+			if errors.As(err, &ve) {
+				return 0, &ConflictError{Code: "stale", Msg: ve.Msg}
+			}
+			return 0, err
+		}
+		withIDs := next
+		withIDs.Nodes = slices.Clone(next.Nodes)
+		for i := range withIDs.Nodes {
+			if k := slices.Index(planned, withIDs.Nodes[i].NodeID); k >= 0 {
+				withIDs.Nodes[i].NodeID = rp.NewNodes[k].NodeID
+			}
+		}
+		if spec, err = json.Marshal(withIDs); err != nil {
+			return 0, err
+		}
+	}
+	for _, secret := range next.Secrets {
+		if _, err := q.GetSecret(ctx, store.GetSecretParams{ClusterID: clusterID, Name: secret}); err == nil {
+			continue
+		} else if !errors.Is(err, pgx.ErrNoRows) {
+			return 0, err
+		}
+		v, err := tpl.NewSecret(secret)
+		if err != nil {
+			return 0, err
+		}
+		if err := s.dep.AddSecretTx(ctx, q, actor, clusterID, name, secret, v); err != nil {
+			return 0, err
+		}
+	}
+	rev, err := q.SetClusterSpec(ctx, store.SetClusterSpecParams{
+		ID: clusterID, Spec: spec, TemplateName: &next.Template.Name, TemplateVersion: &next.Template.Version,
+	})
+	if err != nil {
+		return 0, err
+	}
+	return rev, q.InsertSpecRevision(ctx, store.InsertSpecRevisionParams{
+		ClusterID: clusterID, Revision: rev, Spec: spec, Source: src.Source, CreatedBy: src.By, CommitSha: src.Commit,
+	})
+}
+
+// specChanged schrijft het event cluster.spec_changed.
+func (s *Service) specChanged(ctx context.Context, q *store.Queries, actor events.Actor, clusterID uuid.UUID, name string, rev, prev int32,
+	next deploy.Spec, src specSource) error {
+	payload := map[string]any{
+		"name": name, "revision": rev, "previous_revision": prev, "source": src.Source,
+		"template": next.Template.Name, "template_version": next.Template.Version,
+	}
+	if src.Commit != nil {
+		payload["commit"] = *src.Commit
+	}
+	if src.ChangeID != nil {
+		payload["change_id"] = *src.ChangeID
+	}
+	return s.ev.Write(ctx, q, events.Event{
+		Actor: actor, SubjectType: "cluster", SubjectID: clusterID.String(), ClusterID: &clusterID, Action: "cluster.spec_changed", Payload: payload,
+	})
 }
 
 // changeNode zet wat er op een node verandert om in de stappen van de
@@ -524,8 +561,9 @@ func (s *Service) Reject(ctx context.Context, actor events.Actor, id uuid.UUID, 
 // mislukte: een nieuwe cluster.apply met alle stappen. Staan er nodes uit
 // een mislukte schaalstap nog in provisioning, dan maakt de taak hun VM als
 // die er nog niet is, meldt ze aan en neemt ze als laatste mee. Een
-// mislukte wijziging blijft mislukt.
-func (s *Service) Reapply(ctx context.Context, actor events.Actor, clusterID uuid.UUID) (store.Job, error) {
+// mislukte wijziging blijft mislukt. serverURL is het adres waarmee die
+// nodes zich aanmelden; leeg neemt dat van de koppeling met Git.
+func (s *Service) Reapply(ctx context.Context, actor events.Actor, clusterID uuid.UUID, serverURL string) (store.Job, error) {
 	c, err := s.q.GetCluster(ctx, clusterID)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return store.Job{}, ErrNotFound
@@ -567,8 +605,8 @@ func (s *Service) Reapply(ctx context.Context, actor events.Actor, clusterID uui
 		return store.Job{}, &ConflictError{Code: "not_deployed",
 			Msg: "de uitrol van dit cluster is niet afgerond; open de uitroltaak en kies daar Opnieuw proberen"}
 	}
-	serverURL := ""
-	if len(grow) > 0 {
+	serverURL = strings.TrimSpace(serverURL)
+	if len(grow) > 0 && serverURL == "" {
 		repo, err := s.current(ctx)
 		if err != nil {
 			return store.Job{}, err

@@ -96,6 +96,32 @@ type StepChange struct {
 // huidige revisie met haar eigen templateversie en de nieuwe met de hare,
 // node voor node, met plaatshouders voor de geheimen.
 func (s *Service) planUpdate(ctx context.Context, c *Cluster, ch *Checked, commit string) (*Plan, deploy.Spec, []FieldError, error) {
+	pd, errs, err := s.planChange(ctx, c, ch, commit)
+	if pd == nil {
+		return nil, deploy.Spec{}, errs, err
+	}
+	return pd.plan, pd.next, nil, nil
+}
+
+// planned is een plan met wat het toepassen ervan nodig heeft.
+type planned struct {
+	plan  *Plan
+	next  deploy.Spec
+	diffs map[uuid.UUID]nodeDiff
+	// isNew zegt of een node uit next erbij komt; zijn id is dan nog een
+	// plan-id.
+	isNew  func(uuid.UUID) bool
+	newTpl *templates.Template
+	// oldTpl is nil als de huidige templateversie niet in deze server zit.
+	oldTpl *templates.Template
+	// unrendered zegt welke nodes niet te renderen waren; zo'n plan is niet
+	// toe te passen.
+	unrendered []string
+}
+
+// planChange is planUpdate met de diffs per node erbij. commit is leeg bij
+// een wijziging uit de webinterface.
+func (s *Service) planChange(ctx context.Context, c *Cluster, ch *Checked, commit string) (*planned, []FieldError, error) {
 	old := *c.Spec
 	newTpl := ch.Template
 	p := &Plan{
@@ -105,7 +131,7 @@ func (s *Service) planUpdate(ctx context.Context, c *Cluster, ch *Checked, commi
 	}
 	inv, states, err := s.dep.Nodes(ctx, c.ID)
 	if err != nil {
-		return nil, deploy.Spec{}, nil, err
+		return nil, nil, err
 	}
 	next := old
 	next.Template = deploy.SpecTemplate{Name: newTpl.Name, Version: newTpl.Version}
@@ -125,15 +151,15 @@ func (s *Service) planUpdate(ctx context.Context, c *Cluster, ch *Checked, commi
 
 	values, err := newTpl.MaskedValues(next.Params)
 	if err != nil {
-		return nil, deploy.Spec{}, []FieldError{{Field: "params", Line: ch.File.Line("params"), Message: err.Error()}}, nil
+		return nil, []FieldError{{Field: "params", Line: ch.File.Line("params"), Message: err.Error()}}, nil
 	}
 	growth, err := s.dep.PlanGrowth(ctx, next, newTpl, values, states)
 	if err != nil {
 		var ve deploy.ValidationError
 		if errors.As(err, &ve) {
-			return nil, deploy.Spec{}, []FieldError{fileError(ch.File, ve)}, nil
+			return nil, []FieldError{fileError(ch.File, ve)}, nil
 		}
-		return nil, deploy.Spec{}, nil, err
+		return nil, nil, err
 	}
 	all := maps.Clone(states)
 	maps.Copy(all, growth.States)
@@ -160,7 +186,7 @@ func (s *Service) planUpdate(ctx context.Context, c *Cluster, ch *Checked, commi
 	}
 	owned, err := s.ownedVIPs(ctx, c.ID)
 	if err != nil {
-		return nil, deploy.Spec{}, nil, err
+		return nil, nil, err
 	}
 	isNew := func(id uuid.UUID) bool {
 		return slices.ContainsFunc(growth.Nodes, func(g deploy.SpecNode) bool { return g.NodeID == id })
@@ -198,7 +224,7 @@ func (s *Service) planUpdate(ctx context.Context, c *Cluster, ch *Checked, commi
 	}
 	p.NoSteps = len(p.Nodes) == 0
 	p.Summary = summary(p)
-	return p, next, nil, nil
+	return &planned{plan: p, next: next, diffs: diffs, isNew: isNew, newTpl: newTpl, oldTpl: oldTpl, unrendered: warnings}, nil, nil
 }
 
 // nodeDiff is wat er op één node verandert, met de nieuwe stappen.
@@ -321,6 +347,9 @@ func compareSteps(host string, before, after []templates.Step, revision int, com
 	newKeys, newSteps := keyed(after)
 	from := fmt.Sprintf("%s (revisie %d)", host, revision)
 	to := fmt.Sprintf("%s (commit %s)", host, short(commit))
+	if commit == "" {
+		to = fmt.Sprintf("%s (revisie %d)", host, revision+1)
+	}
 	out := []StepChange{}
 	for _, k := range newKeys {
 		ns := newSteps[k]
