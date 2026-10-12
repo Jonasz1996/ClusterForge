@@ -3167,6 +3167,36 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "502": { $ref: "#/components/responses/Error" }
         "503": { $ref: "#/components/responses/Error" }
+  /kubernetes/clusters/{clusterId}/explain:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: explainKubeObject
+      summary: Laat de assistent uitleggen wat er met een object is, zoals waarom een pod niet start; het antwoord stroomt als server-sent events
+      description: |
+        Voor wie de assistent mag gebruiken. De assistent leest het object met zijn events, en bij een pod de logs van nu en
+        van voor de laatste herstart, en zegt wat er mis is met het bewijs erbij. Alles alleen lezend en zonder de waarden
+        van Secrets; wachtwoorden en tokens in logs en YAML zijn vervangen door [geheim]. De uitleg komt in een nieuw
+        gesprek; het laatste event, done, noemt het (conversation_id).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/KubeRef" }
+      responses:
+        "200":
+          description: De stroom van het antwoord, met dezelfde events als askAssistant
+          content:
+            text/event-stream:
+              schema: { type: string }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
   /kubernetes/clusters/{clusterId}/logs:
     parameters:
       - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -3305,6 +3335,29 @@ paths:
         "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /kubernetes/clusters/{clusterId}/lessons/{lesson}/hint:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: lesson, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: hintKubeLesson
+      summary: Ik zit vast, een hint van de assistent bij de opdracht die aan de beurt is; het antwoord stroomt als server-sent events
+      description: |
+        Voor wie de assistent mag gebruiken. ClusterForge controleert de les eerst, zoals checkKubeLesson. De assistent
+        kijkt wat er op het cluster staat en geeft een hint die verder helpt zonder het antwoord voor te zeggen; het goede
+        antwoord op een vraag krijgt hij niet. Is er geen opdracht aan de beurt, dan 409.
+      responses:
+        "200":
+          description: De stroom van het antwoord, met dezelfde events als askAssistant
+          content:
+            text/event-stream:
+              schema: { type: string }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
   /kubernetes/clusters/{clusterId}/revisions:
     parameters:
       - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }

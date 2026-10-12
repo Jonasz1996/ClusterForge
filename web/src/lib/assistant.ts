@@ -12,6 +12,7 @@ export type Turn = components["schemas"]["AssistantTurn"];
 export type ConversationKind = Conversation["kind"];
 export type IncidentAI = components["schemas"]["IncidentAI"];
 export type ExplainInput = components["schemas"]["AssistantExplainInput"];
+type KubeRef = components["schemas"]["KubeRef"];
 export type Subject = "cluster" | "node" | "incident";
 
 export const settingsKey = ["assistant", "settings"] as const;
@@ -127,6 +128,18 @@ export function analyzeIncident(id: string, onEvent: (ev: StreamEvent) => void, 
 // nieuw gesprek.
 export function explainRisk(body: ExplainInput, onEvent: (ev: StreamEvent) => void, signal?: AbortSignal) {
   return streamPost("/api/v1/assistant/explain", body, onEvent, signal);
+}
+
+// explainKube laat de assistent uitleggen wat er met een object in
+// Kubernetes is, zoals waarom een pod niet start.
+export function explainKube(clusterId: string, ref: KubeRef, onEvent: (ev: StreamEvent) => void, signal?: AbortSignal) {
+  return streamPost(`/api/v1/kubernetes/clusters/${encodeURIComponent(clusterId)}/explain`, ref, onEvent, signal);
+}
+
+// hintLesson is Ik zit vast: een hint bij de opdracht die aan de beurt is.
+export function hintLesson(clusterId: string, lesson: string, onEvent: (ev: StreamEvent) => void, signal?: AbortSignal) {
+  const url = `/api/v1/kubernetes/clusters/${encodeURIComponent(clusterId)}/lessons/${encodeURIComponent(lesson)}/hint`;
+  return streamPost(url, {}, onEvent, signal);
 }
 
 // summarizeDocs laat de assistent de samenvatting 'In het kort' van een

@@ -3,6 +3,8 @@
 import { useEffect, type ReactNode } from "react";
 
 // Modal is een eenvoudig dialoogvenster; Escape of een klik ernaast sluit het.
+// Het neemt geen kleur of opmaak over van de plek waar het staat, zoals een
+// rode melding.
 export function Modal({
   title,
   onClose,
@@ -32,7 +34,7 @@ export function Modal({
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className={`max-h-full w-full ${wide ? "max-w-3xl" : "max-w-md"} overflow-y-auto rounded-lg bg-white p-5 text-left whitespace-normal shadow-xl dark:bg-slate-900`}
+        className={`max-h-full w-full ${wide ? "max-w-3xl" : "max-w-md"} overflow-y-auto rounded-lg bg-white p-5 text-left font-normal whitespace-normal text-slate-900 shadow-xl dark:bg-slate-900 dark:text-slate-100`}
       >
         <h2 className="mb-4 text-base font-semibold">{title}</h2>
         {children}

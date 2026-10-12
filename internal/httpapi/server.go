@@ -174,7 +174,7 @@ func New(d Deps) *Server {
 		kube:          d.Kube,
 		kubeNodes:     d.KubeNodes,
 	}
-	s.assistant.Tools = s.assistantTools()
+	s.assistant.Tools = append(s.assistantTools(), s.kubeTools()...)
 	s.lessons = kubelessons.New(s.kube, s.q)
 	return s
 }

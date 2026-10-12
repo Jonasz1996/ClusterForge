@@ -2,10 +2,12 @@
 
 import Link from "next/link";
 import { useState, type ReactNode } from "react";
+import { ExplainButton } from "@/components/assistant/ExplainButton";
 import { upgradeCommand } from "@/components/drift/Drift";
 import { CopyBlock } from "@/components/inventory/InstallAgent";
 import { Alert, Badge, Button, cx } from "@/components/ui";
 import { ApiError } from "@/lib/api/client";
+import { explainKube } from "@/lib/assistant";
 import { ago, formatBytes } from "@/components/inventory/bits";
 import { formatCPU, objectHref, percent, useKubeLearning, type KubeEvent, type KubeRef, type KubeUsage } from "@/lib/kube";
 
@@ -230,6 +232,7 @@ export function EventList({
     <ul className="divide-y divide-slate-100 text-sm dark:divide-slate-800">
       {events.map((e, i) => {
         const label = `${e.kind} ${e.namespace && e.object?.namespace !== "" ? `${e.namespace}/` : ""}${e.name}`;
+        const obj = e.object;
         return (
           <li key={`${e.namespace}/${e.kind}/${e.name}/${e.reason}/${i}`} className="py-2">
             <div className="flex flex-wrap items-baseline gap-2">
@@ -250,6 +253,12 @@ export function EventList({
                 {ago(e.last_seen)}
                 {e.source && ` · ${e.source}`}
               </span>
+              {e.type === "Warning" && obj && (
+                <ExplainButton
+                  start={(onEvent, signal) => explainKube(clusterId, obj, onEvent, signal)}
+                  title={`${e.reason} bij ${label}`}
+                />
+              )}
             </div>
             <p className="mt-0.5 break-words text-slate-600 dark:text-slate-400">{e.message}</p>
           </li>

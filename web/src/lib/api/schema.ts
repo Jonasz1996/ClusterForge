@@ -3076,6 +3076,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/kubernetes/clusters/{clusterId}/explain": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Laat de assistent uitleggen wat er met een object is, zoals waarom een pod niet start; het antwoord stroomt als server-sent events
+         * @description Voor wie de assistent mag gebruiken. De assistent leest het object met zijn events, en bij een pod de logs van nu en
+         *     van voor de laatste herstart, en zegt wat er mis is met het bewijs erbij. Alles alleen lezend en zonder de waarden
+         *     van Secrets; wachtwoorden en tokens in logs en YAML zijn vervangen door [geheim]. De uitleg komt in een nieuw
+         *     gesprek; het laatste event, done, noemt het (conversation_id).
+         */
+        post: operations["explainKubeObject"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/kubernetes/clusters/{clusterId}/logs": {
         parameters: {
             query: {
@@ -3217,6 +3242,31 @@ export interface paths {
          *     per opdracht. Kan het cluster niet gelezen worden, dan staat dat in problem en blijft de opdracht aan de beurt.
          */
         post: operations["checkKubeLesson"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/kubernetes/clusters/{clusterId}/lessons/{lesson}/hint": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+                lesson: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ik zit vast, een hint van de assistent bij de opdracht die aan de beurt is; het antwoord stroomt als server-sent events
+         * @description Voor wie de assistent mag gebruiken. ClusterForge controleert de les eerst, zoals checkKubeLesson. De assistent
+         *     kijkt wat er op het cluster staat en geeft een hint die verder helpt zonder het antwoord voor te zeggen; het goede
+         *     antwoord op een vraag krijgt hij niet. Is er geen opdracht aan de beurt, dan 409.
+         */
+        post: operations["hintKubeLesson"];
         delete?: never;
         options?: never;
         head?: never;
@@ -12724,6 +12774,40 @@ export interface operations {
             503: components["responses"]["Error"];
         };
     };
+    explainKubeObject: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["KubeRef"];
+            };
+        };
+        responses: {
+            /** @description De stroom van het antwoord, met dezelfde events als askAssistant */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string;
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            429: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+            503: components["responses"]["Error"];
+        };
+    };
     getKubeLogs: {
         parameters: {
             query: {
@@ -12905,6 +12989,35 @@ export interface operations {
             400: components["responses"]["Error"];
             401: components["responses"]["Error"];
             404: components["responses"]["Error"];
+        };
+    };
+    hintKubeLesson: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+                lesson: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description De stroom van het antwoord, met dezelfde events als askAssistant */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string;
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            429: components["responses"]["Error"];
+            503: components["responses"]["Error"];
         };
     };
     listKubeRevisions: {

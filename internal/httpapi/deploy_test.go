@@ -464,7 +464,8 @@ func TestDeploy(t *testing.T) {
 				t.Errorf("tool %s geeft %q door", tool, secret)
 			}
 		}
-		if strings.Contains(out, "FOUT") && tool != "incident" {
+		// De tools voor Kubernetes horen bij een ander soort cluster.
+		if strings.Contains(out, "FOUT") && tool != "incident" && !strings.HasPrefix(tool, "kube") {
 			t.Errorf("%s: %s", tool, out)
 		}
 	}

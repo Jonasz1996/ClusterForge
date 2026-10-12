@@ -3,12 +3,14 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useState, type ReactNode } from "react";
+import { ExplainButton } from "@/components/assistant/ExplainButton";
 import { DoneAlert, KubeActions, type ActionDone, type ActionTarget } from "@/components/kube/Actions";
 import { CodeBlock, EventList, KubeError, Learn, LearnToggle, ObjectLink, Term } from "@/components/kube/Kube";
 import { KubeMetrics } from "@/components/kube/KubeMetrics";
 import { Logs } from "@/components/kube/Logs";
 import { ago, tableClass, tdClass, thClass } from "@/components/inventory/bits";
 import { Alert, Badge, Card, cx, PageHeader } from "@/components/ui";
+import { explainKube } from "@/lib/assistant";
 import { useCluster } from "@/lib/inventory";
 import {
   age,
@@ -125,6 +127,13 @@ function backHref(id: string, kind: string) {
   return `/kubernetes/cluster?id=${id}${tab ? `&tab=${tab}` : ""}`;
 }
 
+// explainLabel is de vraag aan de assistent bij dit object.
+function explainLabel(o: KubeObject) {
+  if (o.kind === "Pod" && o.problem) return "Waarom start deze pod niet?";
+  if (o.problem) return "Wat is er mis?";
+  return "Leg uit";
+}
+
 // metricsScope kiest de grafieken van een pod of app; andere soorten hebben
 // er geen.
 function metricsScope(o: KubeObject): KubeMetricsScope | null {
@@ -151,8 +160,18 @@ function ObjectView({ id, o }: { id: string; o: KubeObject }) {
             : "border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-200",
         )}
       >
-        <span className="font-medium">{o.problem ? "Vraagt aandacht: " : "In orde: "}</span>
-        {o.summary || "geen status"}
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <span>
+            <span className="font-medium">{o.problem ? "Vraagt aandacht: " : "In orde: "}</span>
+            {o.summary || "geen status"}
+          </span>
+          <ExplainButton
+            key={`${o.ref.resource}/${o.ref.namespace}/${o.ref.name}`}
+            start={(onEvent, signal) => explainKube(id, o.ref, onEvent, signal)}
+            title={explainLabel(o)}
+            label={explainLabel(o)}
+          />
+        </div>
       </div>
 
       <Learn title={`Wat is een ${o.kind}?`} commands={commands}>
