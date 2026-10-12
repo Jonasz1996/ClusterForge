@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Jonasz1996/clusterforge/internal/agent"
 	"github.com/Jonasz1996/clusterforge/internal/agent/agenttest"
@@ -100,8 +101,23 @@ func (g *galeraHosts) after(name string, h *agenttest.Host) func(call string, er
 			g.restart(name, h)
 		case call == "systemctl stop mariadb":
 			g.leave(name, h)
+		case strings.HasPrefix(call, "sh -c rm -f /var/lib/clusterforge/galera-resync-* && systemctl stop mariadb && rm -f /var/lib/mysql/grastate.dat && "):
+			// Opnieuw synchroniseren: de node verlaat het cluster en sluit na
+			// de kopie weer aan.
+			g.leave(name, h)
+			time.AfterFunc(200*time.Millisecond, func() { g.join(name, h, false) })
+		case strings.HasPrefix(call, "systemctl reboot"):
+			g.reboot(name, h)
 		}
 	}
+}
+
+// reboot herstart de machine: MariaDB verlaat het cluster netjes, de uptime
+// begint opnieuw, en na het opstarten sluit MariaDB weer aan.
+func (g *galeraHosts) reboot(name string, h *agenttest.Host) {
+	g.leave(name, h)
+	_ = os.WriteFile(filepath.Join(h.Root, "proc/uptime"), []byte("1.00 1.00\n"), 0o644)
+	time.AfterFunc(300*time.Millisecond, func() { g.restart(name, h) })
 }
 
 // join zet de node in het cluster en maakt het merkteken, zoals touch.

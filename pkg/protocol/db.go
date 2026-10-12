@@ -21,6 +21,11 @@ const DBPGSince = 10
 // verzoek op MariaDB uitvoeren.
 const DBPGMigrateSince = 11
 
+// DBPatroniSince is de eerste protocolversie die Patroni beheert
+// (DBPatroniOp): overschakelen, een replica opnieuw opbouwen, herstarten en
+// de instellingen van PostgreSQL in etcd.
+const DBPatroniSince = 12
+
 // SubjectDB draagt de databaseverzoeken: cf.node.<id>.db. Net als de
 // kube-brug is het een eigen subject, zodat een trage database de
 // commando's op cmd niet ophoudt.
@@ -69,7 +74,65 @@ const (
 	// beide kanten. Dat laatste loopt op de achtergrond; DBMigrateStatus
 	// toont de voortgang.
 	DBMigrate = "migrate"
+	// DBPatroniOp vraagt Patroni op deze node via zijn REST-API iets te
+	// doen: overschakelen naar een andere node, deze replica opnieuw
+	// opbouwen, PostgreSQL herstarten als dat nodig is, of de instellingen
+	// van het cluster in etcd zetten. De agent leest het wachtwoord van de
+	// REST-API uit /etc/patroni/clusterforge.env.
+	DBPatroniOp = "patroni"
 )
+
+// Wat een DBPatroniOp doet.
+const (
+	// DBPatroniSwitchover maakt Candidate de primary in plaats van Leader.
+	// Patroni stopt eerst de schrijvers op de oude primary, dus er gaat
+	// niets verloren.
+	DBPatroniSwitchover = "switchover"
+	// DBPatroniReinit gooit de data van deze replica weg en haalt alles
+	// opnieuw bij de primary. Patroni weigert het op de primary.
+	DBPatroniReinit = "reinitialize"
+	// DBPatroniRestart herstart PostgreSQL op deze node via Patroni; met
+	// Pending alleen als een gewijzigde instelling dat vraagt.
+	DBPatroniRestart = "restart"
+	// DBPatroniConfig zet Parameters in de instellingen van het cluster in
+	// etcd, die voor alle nodes gelden, en geeft terug wat er nu staat.
+	DBPatroniConfig = "config"
+)
+
+// DBPatroniTimeout is hoe lang een DBPatroniOp mag duren: een switchover
+// wacht tot de nieuwe primary er is.
+const DBPatroniTimeout = 90 * time.Second
+
+// DBPatroniParameters zijn de parameters van PostgreSQL die DBPatroniConfig
+// mag zetten. Patroni neemt ze alleen uit etcd, niet uit clusterforge.yml.
+var DBPatroniParameters = []string{"max_connections"}
+
+// DBPatroniRequest zegt wat een DBPatroniOp doet.
+type DBPatroniRequest struct {
+	Action string `json:"action"`
+	// Leader en Candidate horen bij switchover: de primary nu, en de
+	// replica die het wordt.
+	Leader    string `json:"leader,omitempty"`
+	Candidate string `json:"candidate,omitempty"`
+	// Pending hoort bij restart: alleen herstarten als Patroni zegt dat het
+	// nodig is.
+	Pending bool `json:"pending,omitempty"`
+	// Parameters horen bij config, met namen uit DBPatroniParameters en
+	// gehele getallen als waarde. Leeg leest alleen.
+	Parameters map[string]string `json:"parameters,omitempty"`
+}
+
+// DBPatroniResult is het antwoord op een DBPatroniOp.
+type DBPatroniResult struct {
+	// Message is wat Patroni antwoordde.
+	Message string `json:"message,omitempty"`
+	// Changed is true als er iets veranderde: een herstart die nodig was,
+	// of een parameter met een andere waarde.
+	Changed bool `json:"changed"`
+	// Parameters zijn de parameters uit DBPatroniParameters zoals ze na
+	// config in etcd staan.
+	Parameters map[string]string `json:"parameters,omitempty"`
+}
 
 // Wat een DBMigrate doet.
 const (
@@ -231,6 +294,8 @@ type DBRequest struct {
 	Dump *DBDumpRequest `json:"dump,omitempty"`
 	// Migrate hoort bij DBMigrate.
 	Migrate *DBMigrateRequest `json:"migrate,omitempty"`
+	// Patroni hoort bij DBPatroniOp.
+	Patroni *DBPatroniRequest `json:"patroni,omitempty"`
 }
 
 // DBMigrateRequest zegt wat een DBMigrate doet.
@@ -602,6 +667,8 @@ type DBResponse struct {
 	Dump *DBDumpResult `json:"dump,omitempty"`
 	// Migrate is het antwoord op DBMigrate.
 	Migrate *DBMigrateResult `json:"migrate,omitempty"`
+	// Patroni is het antwoord op DBPatroniOp.
+	Patroni *DBPatroniResult `json:"patroni,omitempty"`
 }
 
 // DBServer is één MariaDB of PostgreSQL op een node.
@@ -668,6 +735,12 @@ type DBPatroni struct {
 	// niet.
 	Replication string `json:"replication,omitempty"`
 	Sync        bool   `json:"sync,omitempty"`
+	// PendingRestart: een gewijzigde instelling werkt pas na een herstart
+	// van PostgreSQL.
+	PendingRestart bool `json:"pending_restart,omitempty"`
+	// LagBytes is hoeveel WAL een replica nog niet afgespeeld heeft; nil
+	// op de primary, of als Patroni het niet zegt.
+	LagBytes *int64 `json:"lag_bytes,omitempty"`
 	// Error zegt waarom de REST-API niet te lezen was.
 	Error string `json:"error,omitempty"`
 }

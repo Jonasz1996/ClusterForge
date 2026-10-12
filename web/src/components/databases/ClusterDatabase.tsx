@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Modal } from "@/components/Modal";
 import { ProdConfirm, prodConfirmed, useProdTotp } from "@/components/ProdConfirm";
-import { QueryState, tableClass, tdClass, thClass } from "@/components/inventory/bits";
+import { QueryState, formatBytes, tableClass, tdClass, thClass } from "@/components/inventory/bits";
 import { Alert, Badge, Button, Card } from "@/components/ui";
 import {
   positionFrom,
@@ -15,13 +15,17 @@ import {
   sinceFmt,
   stateInfo,
   useClusterComponents,
+  useComponentManage,
   useComponentTemplates,
+  useManageComponent,
   useReapplyComponent,
   useRecoverComponent,
   useRecoverPlan,
   useRemoveComponent,
   useSetAutoRecover,
   type ClusterComponent,
+  type ComponentManageAction,
+  type ComponentManageNode,
 } from "@/lib/components";
 import type { ClusterDetail } from "@/lib/inventory";
 
@@ -73,6 +77,7 @@ function Component({ c, comp, isAdmin }: { c: ClusterDetail; comp: ClusterCompon
   const busy = comp.state === "installing" || comp.state === "applying";
   const [reapply, setReapply] = useState(false);
   const [recover, setRecover] = useState(false);
+  const [manage, setManage] = useState(false);
   const remove = useRemoveComponent(c.id);
   const auto = useSetAutoRecover(c.id);
   const rec = recovering(comp);
@@ -80,8 +85,8 @@ function Component({ c, comp, isAdmin }: { c: ClusterDetail; comp: ClusterCompon
   // Het VIP staat er al apart.
   const settings = Object.entries(comp.params).filter(([k]) => k !== "vip");
   const out = new Map(comp.nodes_out.map((o) => [o.hostname, o]));
-  // Bij PostgreSQL start Patroni de nodes zelf opnieuw; dat beheer komt in
-  // een volgende stap.
+  // Bij PostgreSQL start Patroni de nodes zelf opnieuw; Beheer kan wel
+  // overschakelen en een replica opnieuw opbouwen.
   const pg = comp.engine === "postgresql";
   return (
     <div className="space-y-3 text-sm">
@@ -104,6 +109,11 @@ function Component({ c, comp, isAdmin }: { c: ClusterDetail; comp: ClusterCompon
             {isAdmin && comp.applied_revision === null && !busy && (
               <Button variant="secondary-danger" disabled={remove.isPending} onClick={() => remove.mutate(comp.id)}>
                 Weghalen
+              </Button>
+            )}
+            {isAdmin && applied && (
+              <Button variant="secondary" disabled={busy || rec} onClick={() => setManage(true)}>
+                Beheer…
               </Button>
             )}
             {isAdmin && applied && !pg && (
@@ -252,7 +262,139 @@ function Component({ c, comp, isAdmin }: { c: ClusterDetail; comp: ClusterCompon
       {auto.isError && <Alert>{auto.error.message}</Alert>}
       {reapply && <ReapplyDialog c={c} comp={comp} onClose={() => setReapply(false)} />}
       {recover && <RecoverDialog c={c} comp={comp} onClose={() => setRecover(false)} />}
+      {manage && <ManageDialog c={c} comp={comp} onClose={() => setManage(false)} />}
     </div>
+  );
+}
+
+// ManageDialog is Beheer: per datanode hoe het ermee staat en wat er kan,
+// met bij elke actie waarom ze niet kan of wat er gebeurt.
+function ManageDialog({ c, comp, onClose }: { c: ClusterDetail; comp: ClusterComponent; onClose: () => void }) {
+  const view = useComponentManage(c.id, comp.id);
+  const run = useManageComponent(c.id);
+  const router = useRouter();
+  const totp = useProdTotp();
+  const [confirm, setConfirm] = useState("");
+  // De keuze houdt de hash van het overzicht waarop de gebruiker klikte.
+  const [pick, setPick] = useState<{ node: ComponentManageNode; action: ComponentManageAction; hash: string } | null>(null);
+  const prod = c.environment === "prod";
+  const pg = comp.engine === "postgresql";
+  const v = view.data;
+  return (
+    <Modal title={`${comp.title} beheren`} onClose={onClose} wide>
+      <div className="space-y-4 text-sm">
+        {pick ? (
+          <>
+            <p className="font-medium">
+              {pick.action.title}: {pick.node.hostname}
+            </p>
+            <ul className="list-disc space-y-1 pl-5">
+              {pick.action.effects.map((e) => (
+                <li key={e}>{e}</li>
+              ))}
+            </ul>
+            <p className="text-slate-500">ClusterForge doet het als taak; het logboek toont elke stap.</p>
+            {prod && <ProdConfirm slug={c.slug} value={confirm} onChange={setConfirm} />}
+            {run.isError && <Alert>{run.error.message}</Alert>}
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="secondary"
+                onClick={() => {
+                  setPick(null);
+                  run.reset();
+                }}
+              >
+                Terug
+              </Button>
+              <Button
+                disabled={run.isPending || (prod && !prodConfirmed(c.slug, confirm, totp))}
+                onClick={async () => {
+                  const j = await run
+                    .mutateAsync({
+                      id: comp.id,
+                      action: pick.action.action,
+                      node_id: pick.node.node_id,
+                      hash: pick.hash,
+                      confirm: prod ? confirm : undefined,
+                    })
+                    .catch(() => null);
+                  if (j) router.push(`/taken/detail?id=${j.id}`);
+                }}
+              >
+                {run.isPending ? "Bezig…" : pick.action.title}
+              </Button>
+            </div>
+          </>
+        ) : (
+          <>
+            <p>
+              {pg
+                ? "Primary maken schakelt over naar de synchrone replica, bijvoorbeeld voor onderhoud aan de primary; het VIP gaat mee. Opnieuw opbouwen gooit de data van een replica weg en kopieert alles opnieuw van de primary, voor een replica die niet meer bijkomt."
+                : "Opnieuw synchroniseren gooit de positie van een node weg; hij haalt dan alle data opnieuw bij een node die Synced is. Gebruik het voor een node die niet meer bijkomt, of waarvan de data niet klopt."}
+            </p>
+            <p className="text-slate-500">
+              Onderhoud en herstarten doe je bij de node zelf.{" "}
+              {pg
+                ? "Is de node de primary, dan schakelt ClusterForge eerst over; na de herstart wacht het tot de node weer bijhoudt."
+                : "Na de herstart wacht ClusterForge tot de node weer Synced is."}
+            </p>
+            <QueryState q={view}>
+              {v && (
+                <ul className="divide-y divide-slate-100 border-y border-slate-100 dark:divide-slate-800 dark:border-slate-800">
+                  {v.nodes.map((n) => (
+                    <li key={n.node_id} className="gap-4 py-3 sm:grid sm:grid-cols-[minmax(0,1fr)_18rem]">
+                      <div className="space-y-1">
+                        <span className="flex flex-wrap items-center gap-1">
+                          <span className="font-medium">{n.hostname}</span>
+                          {n.role === "primary" && <Badge tone="blue">primary</Badge>}
+                          {n.sync && <Badge tone="slate">synchroon</Badge>}
+                          {n.vip && <Badge tone="green">VIP</Badge>}
+                        </span>
+                        <span
+                          className={`block ${n.healthy ? "text-slate-600 dark:text-slate-300" : "text-amber-700 dark:text-amber-300"}`}
+                        >
+                          {n.state}
+                        </span>
+                        {pg && n.role !== "primary" && (
+                          <span className="block text-slate-500">
+                            achterstand: {n.lag_bytes === null ? "onbekend" : formatBytes(n.lag_bytes)}
+                          </span>
+                        )}
+                        {n.pending_restart && <span className="block text-slate-500">wacht op een herstart van PostgreSQL</span>}
+                      </div>
+                      <div className="mt-2 space-y-2 sm:mt-0">
+                        {n.actions.length === 0
+                          ? pg && <p className="text-slate-500">De primary; maak een replica primary om over te schakelen.</p>
+                          : n.actions.map((a) => (
+                              <div key={a.action}>
+                                <Button
+                                  variant="secondary"
+                                  disabled={!a.allowed}
+                                  onClick={() => {
+                                    setPick({ node: n, action: a, hash: v.hash });
+                                    run.reset();
+                                  }}
+                                >
+                                  {a.title}
+                                </Button>
+                                {!a.allowed && <span className="mt-1 block text-xs text-slate-500">{a.reason}</span>}
+                              </div>
+                            ))}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </QueryState>
+            <div className="flex justify-end">
+              <Button variant="secondary" onClick={onClose}>
+                Sluiten
+              </Button>
+            </div>
+          </>
+        )}
+      </div>
+    </Modal>
   );
 }
 

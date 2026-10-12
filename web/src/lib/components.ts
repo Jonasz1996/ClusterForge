@@ -12,6 +12,9 @@ export type ComponentPlanNode = components["schemas"]["ComponentPlanNode"];
 export type ComponentFinding = components["schemas"]["ComponentFinding"];
 export type ComponentRecoverPlan = components["schemas"]["ComponentRecoverPlan"];
 export type ComponentRecoverNode = components["schemas"]["ComponentRecoverNode"];
+export type ComponentManage = components["schemas"]["ComponentManage"];
+export type ComponentManageNode = components["schemas"]["ComponentManageNode"];
+export type ComponentManageAction = components["schemas"]["ComponentManageAction"];
 export type ComponentDatabases = components["schemas"]["ComponentDatabases"];
 export type ComponentDatabase = components["schemas"]["ComponentDatabase"];
 export type ComponentDatabaseUser = components["schemas"]["ComponentDatabaseUser"];
@@ -98,6 +101,24 @@ export function useRecoverPlan(clusterId: string, componentId: string) {
   });
 }
 
+// useComponentManage leest Beheer van een database: per datanode hoe het
+// ermee staat en wat er kan. Er verandert niets; zolang het venster open is,
+// ververst het elke vijf seconden.
+export function useComponentManage(clusterId: string, componentId: string) {
+  return useQuery({
+    queryKey: ["clusters", clusterId, "components", componentId, "manage"],
+    queryFn: async () =>
+      unwrap(
+        await api.GET("/clusters/{clusterId}/components/{componentId}/manage", {
+          params: { path: { clusterId, componentId } },
+        }),
+      ),
+    gcTime: 0,
+    refetchInterval: 5000,
+    refetchOnWindowFocus: false,
+  });
+}
+
 export function usePlanComponent(clusterId: string) {
   return useMutation({
     mutationFn: async (body: ComponentInput) =>
@@ -155,6 +176,29 @@ export function useRecoverComponent(clusterId: string) {
         await api.POST("/clusters/{clusterId}/components/{componentId}/recover", {
           params: { path: { clusterId, componentId: id } },
           body: { hash, confirm },
+        }),
+      ),
+    onSuccess: invalidate,
+  });
+}
+
+export function useManageComponent(clusterId: string) {
+  const invalidate = useInvalidate(clusterId);
+  return useMutation({
+    mutationFn: async ({
+      id,
+      ...body
+    }: {
+      id: string;
+      action: ComponentManageAction["action"];
+      node_id: string;
+      hash: string;
+      confirm?: string;
+    }) =>
+      unwrap(
+        await api.POST("/clusters/{clusterId}/components/{componentId}/manage", {
+          params: { path: { clusterId, componentId: id } },
+          body,
         }),
       ),
     onSuccess: invalidate,

@@ -18,6 +18,7 @@ package components
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -244,6 +245,15 @@ func (r *realPatroni) startPatroni(n *realNode) {
 	if r.asPostgres {
 		_ = exec.Command("chown", "postgres:postgres", p).Run()
 	}
+	// Zoals op een node: de agent leest het wachtwoord van de REST-API uit
+	// /etc/patroni/clusterforge.env, hier onder de map van de node.
+	envFile := filepath.Join(n.dir, "etc", "patroni", "clusterforge.env")
+	if err := os.MkdirAll(filepath.Dir(envFile), 0o700); err != nil {
+		r.t.Fatal(err)
+	}
+	if err := os.WriteFile(envFile, []byte(strings.Join(env, "\n")+"\n"), 0o600); err != nil {
+		r.t.Fatal(err)
+	}
 	n.patroni = r.command(n, filepath.Join(n.dir, "patroni.log"), "env", append(env, r.patroni, p)...)
 	if err := n.patroni.Start(); err != nil {
 		r.t.Fatal(err)
@@ -293,7 +303,7 @@ func (r *realPatroni) stopAll() {
 }
 
 func (r *realPatroni) agent(n *realNode) *agent.Agent {
-	return &agent.Agent{Log: slog.New(slog.NewTextHandler(io.Discard, nil)), PatroniURL: "http://" + n.ip + ":8008"}
+	return &agent.Agent{Log: slog.New(slog.NewTextHandler(io.Discard, nil)), PatroniURL: "http://" + n.ip + ":8008", Root: n.dir}
 }
 
 // state vraagt /patroni van een node; leeg als hij niet antwoordt.
@@ -440,4 +450,139 @@ func TestRealPatroni(t *testing.T) {
 			return s != nil && s.Role == "replica" && s.State == "running"
 		})
 	}
+	r.manage(next)
+}
+
+// op vraagt de agent op n iets aan Patroni, zoals de server dat doet.
+func (r *realPatroni) op(n *realNode, req protocol.DBPatroniRequest) (*protocol.DBPatroniResult, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), protocol.DBPatroniTimeout)
+	defer cancel()
+	res := r.agent(n).PatroniOp(ctx, &req)
+	if res.Error != "" {
+		return nil, errors.New(res.Error)
+	}
+	return res.Patroni, nil
+}
+
+// replicaOK wacht tot n een replica is die bijhoudt.
+func (r *realPatroni) replicaOK(n *realNode, what string) {
+	r.wait(n.name+" replica die bijhoudt "+what, 3*time.Minute, func() bool {
+		s := r.state(n)
+		return s != nil && s.Role == "replica" && s.State == "running" && s.Replication == "streaming"
+	})
+}
+
+// manage is het beheer uit mijlpaal 11 tegen echte Patroni: overschakelen,
+// een replica opnieuw opbouwen, max_connections in etcd en herstarten waar
+// dat nodig is. primary is de primary bij het begin.
+func (r *realPatroni) manage(primary *realNode) {
+	t := r.t
+	var replicas []*realNode
+	for _, n := range r.nodes {
+		if n != primary {
+			replicas = append(replicas, n)
+			r.replicaOK(n, "voor het beheer")
+		}
+	}
+
+	// Overschakelen: Patroni antwoordt als de nieuwe primary er is; de oude
+	// wordt replica zonder dat er een bevestigde rij verloren gaat. In
+	// synchronous_mode kan alleen de synchrone replica primary worden.
+	var to, other *realNode
+	r.wait("een synchrone replica voor de switchover", time.Minute, func() bool {
+		for i, n := range replicas {
+			if s := r.state(n); s != nil && s.Sync {
+				to, other = n, replicas[1-i]
+				return true
+			}
+		}
+		return false
+	})
+	if _, err := r.op(to, protocol.DBPatroniRequest{Action: protocol.DBPatroniSwitchover, Leader: primary.name, Candidate: other.name}); err == nil ||
+		!strings.Contains(err.Error(), "sync_standby") {
+		t.Errorf("switchover naar de replica die niet synchroon is: %v", err)
+	}
+	res, err := r.op(other, protocol.DBPatroniRequest{Action: protocol.DBPatroniSwitchover, Leader: primary.name, Candidate: to.name})
+	if err != nil || !res.Changed {
+		t.Fatalf("switchover van %s naar %s: %v %+v", primary.name, to.name, err, res)
+	}
+	t.Logf("switchover: %s", res.Message)
+	r.wait(to.name+" primary na de switchover", time.Minute, func() bool { return r.primary() == to })
+	r.replicaOK(primary, "na de switchover")
+	if out, err := r.psql(to, "INSERT INTO proef VALUES (1002); SELECT count(*) FROM proef"); err != nil || out != "1002" {
+		t.Fatalf("schrijven na de switchover: %v %q", err, out)
+	}
+	if _, err := r.op(to, protocol.DBPatroniRequest{Action: protocol.DBPatroniSwitchover, Leader: primary.name, Candidate: to.name}); err == nil {
+		t.Errorf("een switchover van een node die geen primary meer is, slaagde")
+	}
+
+	// De oude primary opnieuw opbouwen: de data weg en alles opnieuw van de
+	// primary. Op de primary weigert Patroni het.
+	if _, err := r.op(to, protocol.DBPatroniRequest{Action: protocol.DBPatroniReinit}); err == nil {
+		t.Errorf("reinitialize op de primary slaagde")
+	}
+	if res, err := r.op(primary, protocol.DBPatroniRequest{Action: protocol.DBPatroniReinit}); err != nil || !res.Changed {
+		t.Fatalf("reinitialize op %s: %v %+v", primary.name, err, res)
+	}
+	r.wait(primary.name+" opnieuw opgebouwd met alle rijen", 3*time.Minute, func() bool {
+		s := r.state(primary)
+		if s == nil || s.Role != "replica" || s.State != "running" || s.Replication != "streaming" {
+			return false
+		}
+		out, err := r.psql(primary, "SELECT count(*) FROM proef")
+		return err == nil && out == "1002"
+	})
+
+	// max_connections in etcd: daarna wil elke node een herstart.
+	res, err = r.op(primary, protocol.DBPatroniRequest{Action: protocol.DBPatroniConfig, Parameters: map[string]string{"max_connections": "60"}})
+	if err != nil || !res.Changed || res.Parameters["max_connections"] != "60" {
+		t.Fatalf("config: %v %+v", err, res)
+	}
+	// Een andere node ziet het pas na zijn volgende ronde in etcd.
+	r.wait(to.name+" leest max_connections 60", 30*time.Second, func() bool {
+		res, err := r.op(to, protocol.DBPatroniRequest{Action: protocol.DBPatroniConfig})
+		return err == nil && !res.Changed && res.Parameters["max_connections"] == "60"
+	})
+	if res, err := r.op(to, protocol.DBPatroniRequest{Action: protocol.DBPatroniConfig, Parameters: map[string]string{"max_connections": "60"}}); err != nil || res.Changed {
+		t.Errorf("config opnieuw: %v %+v", err, res)
+	}
+	if _, err := r.op(to, protocol.DBPatroniRequest{Action: protocol.DBPatroniConfig, Parameters: map[string]string{"shared_buffers": "1GB"}}); err == nil {
+		t.Errorf("config met shared_buffers slaagde")
+	}
+	for _, n := range r.nodes {
+		r.wait(n.name+" wil een herstart", time.Minute, func() bool {
+			s := r.state(n)
+			return s != nil && s.PendingRestart
+		})
+	}
+	// Herstarten: de replica's eerst, de primary als laatste.
+	for _, n := range append(slices.DeleteFunc(slices.Clone(r.nodes), func(x *realNode) bool { return x == to }), to) {
+		res, err := r.op(n, protocol.DBPatroniRequest{Action: protocol.DBPatroniRestart, Pending: true})
+		if err != nil || !res.Changed {
+			t.Fatalf("herstart van %s: %v %+v", n.name, err, res)
+		}
+		r.wait(n.name+" draait met max_connections 60", 2*time.Minute, func() bool {
+			s := r.state(n)
+			out, err := r.psql(n, "SHOW max_connections")
+			return s != nil && s.State == "running" && !s.PendingRestart && err == nil && out == "60"
+		})
+		if res, err := r.op(n, protocol.DBPatroniRequest{Action: protocol.DBPatroniRestart, Pending: true}); err != nil || res.Changed {
+			t.Errorf("tweede herstart van %s: %v %+v", n.name, err, res)
+		}
+	}
+	if r.primary() != to {
+		t.Errorf("de primary veranderde bij het herstarten: %v", r.primary())
+	}
+	if s := r.state(primary); s == nil || s.LagBytes == nil {
+		t.Errorf("geen lag van replica %s: %+v", primary.name, s)
+	}
+
+	// Met een verkeerd wachtwoord weigert Patroni.
+	envFile := filepath.Join(primary.dir, "etc", "patroni", "clusterforge.env")
+	good, _ := os.ReadFile(envFile)
+	_ = os.WriteFile(envFile, []byte("PATRONI_RESTAPI_PASSWORD=fout\n"), 0o600)
+	if _, err := r.op(primary, protocol.DBPatroniRequest{Action: protocol.DBPatroniReinit}); err == nil || !strings.Contains(err.Error(), "weigert het wachtwoord") {
+		t.Errorf("verkeerd wachtwoord: %v", err)
+	}
+	_ = os.WriteFile(envFile, good, 0o600)
 }

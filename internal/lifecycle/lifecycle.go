@@ -54,8 +54,8 @@ type ConflictError struct{ Msg string }
 
 func (e ConflictError) Error() string { return e.Msg }
 
-// NeedsForceError betekent dat de actie een VIP onbereikbaar kan maken; met
-// Force gaat ze toch door.
+// NeedsForceError betekent dat de actie een VIP onbereikbaar kan maken of een
+// database stillegt; met Force gaat ze toch door.
 type NeedsForceError struct{ Msg string }
 
 func (e NeedsForceError) Error() string { return e.Msg }
@@ -104,6 +104,31 @@ type Service struct {
 	// KubeReadyTimeout is hoe lang een taak na de herstart wacht tot de
 	// node Ready is in Kubernetes.
 	KubeReadyTimeout time.Duration
+	// DB schakelt bij een database van ClusterForge op de node eerst over
+	// als hij de primary is, en wacht na de herstart tot hij weer meedoet.
+	// Mag nil zijn.
+	DB DB
+}
+
+// NodeDatabase is een database van ClusterForge op een node.
+type NodeDatabase struct {
+	ID     uuid.UUID `json:"id"`
+	Engine string    `json:"engine"`
+	Title  string    `json:"title"`
+}
+
+// DB is wat een node-actie met de databases van ClusterForge op de node
+// doet; components.Service doet het in het echt.
+type DB interface {
+	// NodeDB zoekt de databases op de node, zoals MariaDB en PostgreSQL op
+	// dezelfde nodes. risk is niet leeg als de actie een database stillegt
+	// of het VIP van een database zonder node laat.
+	NodeDB(ctx context.Context, nodeID uuid.UUID, action string) (dbs []NodeDatabase, risk string, err error)
+	// LeaveDB schakelt over als de node de primary is; met force gaat het
+	// ook door als dat niet kan.
+	LeaveDB(ctx context.Context, st *jobs.Step, actor events.Actor, j *jobs.Job, componentID, nodeID uuid.UUID, force bool) error
+	// RejoinDB wacht tot de node weer meedoet in de database.
+	RejoinDB(ctx context.Context, st *jobs.Step, componentID, nodeID uuid.UUID) error
 }
 
 func NewService(pool *pgxpool.Pool, ev *events.Writer, log *slog.Logger, runner *jobs.Runner, bus Commander) *Service {
@@ -154,6 +179,9 @@ type params struct {
 	// KubeNote zegt waarom een node van een Kubernetes-cluster niet
 	// leeggemaakt wordt, zoals een API die niet antwoordt.
 	KubeNote string `json:"kube_note,omitempty"`
+	// DBs zijn de databases van ClusterForge op de node: de taak schakelt
+	// eerst over en wacht na de herstart tot de node weer meedoet.
+	DBs []NodeDatabase `json:"dbs,omitempty"`
 }
 
 var titles = map[string]string{
@@ -259,6 +287,17 @@ func (s *Service) RequestAction(ctx context.Context, actor events.Actor, nodeID 
 		if err := s.checkTakeover(ctx, *rt.ClusterID, nodeID, p.VIPs); err != nil {
 			return store.Job{}, err
 		}
+	}
+	// Een node met een database: eerst kijken of de database het overleeft.
+	if s.DB != nil && p.UseAgent && req.Action != ActionRefreshFacts {
+		dbs, risk, err := s.DB.NodeDB(ctx, nodeID, req.Action)
+		if err != nil {
+			return store.Job{}, err
+		}
+		if risk != "" && !req.Force {
+			return store.Job{}, NeedsForceError{risk}
+		}
+		p.DBs = dbs
 	}
 	// Een node van een Kubernetes-cluster gaat eerst leeg. Is de node al
 	// weg, dan heeft leegmaken geen zin: zijn pods stoppen niet netjes.
@@ -378,6 +417,9 @@ func (s *Service) run(ctx context.Context, j *jobs.Job) error {
 			return err
 		})
 	case ActionMaintenance:
+		if err := r.dbLeave(ctx); err != nil {
+			return err
+		}
 		if err := r.kubeDrain(ctx); err != nil {
 			return err
 		}
@@ -387,6 +429,9 @@ func (s *Service) run(ctx context.Context, j *jobs.Job) error {
 		}
 		return r.lifecycleStep(ctx, "Node in onderhoud zetten", store.NodeLifecycleMaintenance)
 	case ActionActivate:
+		if err := r.dbRejoin(ctx); err != nil {
+			return err
+		}
 		if err := r.undrain(ctx); err != nil {
 			return err
 		}
@@ -395,6 +440,9 @@ func (s *Service) run(ctx context.Context, j *jobs.Job) error {
 		}
 		return r.lifecycleStep(ctx, "Node weer actief maken", store.NodeLifecycleActive)
 	case ActionReboot, ActionShutdown:
+		if err := r.dbLeave(ctx); err != nil {
+			return err
+		}
 		if err := r.kubeDrain(ctx); err != nil {
 			return err
 		}
@@ -413,6 +461,9 @@ func (s *Service) run(ctx context.Context, j *jobs.Job) error {
 			return r.powerOff(ctx)
 		}
 		if err := r.reboot(ctx); err != nil {
+			return err
+		}
+		if err := r.dbRejoin(ctx); err != nil {
 			return err
 		}
 		if p.Previous == store.NodeLifecycleMaintenance {
@@ -650,6 +701,41 @@ func (r *runCtx) undrain(ctx context.Context) error {
 			return true, nil
 		})
 	})
+}
+
+// dbLeave schakelt bij PostgreSQL eerst over als de node de primary is,
+// zodat het VIP van de database meegaat voor keepalived uitgaat.
+func (r *runCtx) dbLeave(ctx context.Context) error {
+	if r.s.DB == nil {
+		return nil
+	}
+	for _, db := range r.p.DBs {
+		if db.Engine != protocol.DBPostgreSQL {
+			continue
+		}
+		if err := r.j.Step(ctx, db.Title+": overschakelen als "+r.p.Hostname+" de primary is", func(ctx context.Context, st *jobs.Step) error {
+			return r.s.DB.LeaveDB(ctx, st, r.actor, r.j, db.ID, r.node, r.p.Force)
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// dbRejoin wacht tot de node weer meedoet in elke database, voor hij weer
+// meetelt.
+func (r *runCtx) dbRejoin(ctx context.Context) error {
+	if r.s.DB == nil {
+		return nil
+	}
+	for _, db := range r.p.DBs {
+		if err := r.j.Step(ctx, db.Title+": wachten tot "+r.p.Hostname+" weer meedoet", func(ctx context.Context, st *jobs.Step) error {
+			return r.s.DB.RejoinDB(ctx, st, db.ID, r.node)
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 const kubeDrainStep = "Kubernetes: node leegmaken"

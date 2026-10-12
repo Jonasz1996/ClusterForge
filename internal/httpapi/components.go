@@ -202,6 +202,69 @@ func (s *Server) RecoverClusterComponent(w http.ResponseWriter, r *http.Request,
 	writeJSON(w, http.StatusAccepted, toAPIJob(j, &p.User.Username))
 }
 
+// GetClusterComponentManage toont Beheer van een database per node.
+func (s *Server) GetClusterComponentManage(w http.ResponseWriter, r *http.Request, clusterID, componentID uuid.UUID) {
+	if _, ok := requireAdmin(w, r); !ok {
+		return
+	}
+	v, err := s.components.Manage(r.Context(), clusterID, componentID)
+	if err != nil {
+		s.componentError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, toAPIManage(v))
+}
+
+// ManageClusterComponent voert een actie uit Beheer uit, als het overzicht
+// nog is wat de gebruiker zag.
+func (s *Server) ManageClusterComponent(w http.ResponseWriter, r *http.Request, clusterID, componentID uuid.UUID) {
+	p, ok := requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	var in gen.ComponentManageInput
+	if !decode(w, r, &in) {
+		return
+	}
+	ctx := r.Context()
+	c, err := s.q.GetCluster(ctx, clusterID)
+	if err != nil {
+		s.componentError(w, r, err)
+		return
+	}
+	if !confirmProd(w, p, c.Environment == store.EnvironmentProd, c.Slug, in.Confirm, "een database beheren") {
+		return
+	}
+	j, err := s.components.ManageAct(ctx, events.User(p.User.ID), clusterID, componentID, components.ManageInput{
+		Action: string(in.Action), NodeID: in.NodeId, Hash: in.Hash,
+	})
+	if err != nil {
+		s.componentError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, toAPIJob(j, &p.User.Username))
+}
+
+func toAPIManage(v components.ManageView) gen.ComponentManage {
+	out := gen.ComponentManage{
+		ClusterId: v.ClusterID, ClusterName: v.ClusterName, Slug: v.Slug, Prod: v.Prod, Engine: gen.ComponentManageEngine(v.Engine), Title: v.Title,
+		Vip: v.VIP, Hash: v.Hash, Nodes: make([]gen.ComponentManageNode, 0, len(v.Nodes)),
+	}
+	for _, n := range v.Nodes {
+		node := gen.ComponentManageNode{
+			NodeId: n.NodeID, Hostname: n.Hostname, Index: n.Index, Answered: n.Answered, State: n.State, Healthy: n.Healthy, Role: n.Role,
+			Sync: n.Sync, LagBytes: nullableOf(n.LagBytes), PendingRestart: n.PendingRestart, Vip: n.VIP, Actions: make([]gen.ComponentManageAction, 0, len(n.Actions)),
+		}
+		for _, a := range n.Actions {
+			node.Actions = append(node.Actions, gen.ComponentManageAction{
+				Action: gen.ComponentManageActionAction(a.Action), Title: a.Title, Allowed: a.Allowed, Reason: a.Reason, Effects: nonNil(a.Effects),
+			})
+		}
+		out.Nodes = append(out.Nodes, node)
+	}
+	return out
+}
+
 // RemoveClusterComponent haalt een database die nooit gelukt is uit
 // ClusterForge.
 func (s *Server) RemoveClusterComponent(w http.ResponseWriter, r *http.Request, clusterID, componentID uuid.UUID) {
