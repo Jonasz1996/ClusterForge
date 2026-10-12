@@ -71,7 +71,7 @@ export type Live = {
   done?: Extract<StreamEvent, { type: "done" }>;
 };
 
-type Start = (onEvent: (ev: StreamEvent) => void, signal: AbortSignal) => Promise<void>;
+export type Start = (onEvent: (ev: StreamEvent) => void, signal: AbortSignal) => Promise<void>;
 
 // useStream volgt een antwoord van de assistent terwijl het binnenkomt. run
 // geeft het antwoord terug als het klaar is, of null als het niet begon;

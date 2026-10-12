@@ -6,13 +6,28 @@ import { useState } from "react";
 import { Modal } from "@/components/Modal";
 import { Alert, Button } from "@/components/ui";
 import { explainRisk, useAssistantSettings, type ExplainInput } from "@/lib/assistant";
-import { Answer, LiveAnswer, useStream } from "./parts";
+import { Answer, LiveAnswer, useStream, type Start } from "./parts";
 
-// ExplainButton laat de assistent een bevinding of een SPOF uitleggen: wat
-// het betekent, waarom het telt in deze fleet en hoe je het oplost. De
-// uitleg komt live binnen in een venster en is een gesprek waarin je kunt
-// doorvragen. Hij staat er alleen als de assistent voor jou aan staat.
-export function ExplainButton({ input, title, button = false }: { input: ExplainInput; title: string; button?: boolean }) {
+// ExplainButton laat de assistent iets uitleggen: een bevinding of een SPOF
+// (input), of met start iets anders, zoals een object in Kubernetes of een
+// hint bij een les. De uitleg komt live binnen in een venster en is een
+// gesprek waarin je kunt doorvragen. Hij staat er alleen als de assistent
+// voor jou aan staat.
+export function ExplainButton({
+  input,
+  start,
+  title,
+  label = "Leg uit",
+  heading = "Uitleg",
+  button = false,
+}: {
+  input?: ExplainInput;
+  start?: Start;
+  title: string;
+  label?: string;
+  heading?: string;
+  button?: boolean;
+}) {
   const settings = useAssistantSettings();
   const qc = useQueryClient();
   const stream = useStream();
@@ -24,7 +39,7 @@ export function ExplainButton({ input, title, button = false }: { input: Explain
     // Een tweede klik toont dezelfde uitleg weer.
     if (stream.live) return;
     void stream
-      .run((onEvent, signal) => explainRisk(input, onEvent, signal), "De uitleg kon niet beginnen.")
+      .run(start ?? ((onEvent, signal) => explainRisk(input ?? {}, onEvent, signal)), "De uitleg kon niet beginnen.")
       .then((res) => res && qc.invalidateQueries({ queryKey: ["assistant"] }));
   };
   const conv = stream.live?.done?.conversation_id;
@@ -33,15 +48,15 @@ export function ExplainButton({ input, title, button = false }: { input: Explain
     <>
       {button ? (
         <Button variant="secondary" onClick={show}>
-          Leg uit
+          {label}
         </Button>
       ) : (
         <button type="button" className="text-xs text-brand-600 hover:underline dark:text-sky-300" onClick={show}>
-          Leg uit
+          {label}
         </button>
       )}
       {open && (
-        <Modal title={`Uitleg: ${title.length > 90 ? title.slice(0, 89) + "…" : title}`} onClose={() => setOpen(false)} wide>
+        <Modal title={`${heading}: ${title.length > 90 ? title.slice(0, 89) + "…" : title}`} onClose={() => setOpen(false)} wide>
           <div className="space-y-3">
             {stream.live && (
               <Answer>

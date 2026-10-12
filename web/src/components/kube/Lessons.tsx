@@ -2,10 +2,12 @@
 
 import Link from "next/link";
 import { useState, type FormEvent, type ReactNode } from "react";
+import { ExplainButton } from "@/components/assistant/ExplainButton";
 import { DoneAlert, KubeActions, type ActionDone } from "@/components/kube/Actions";
 import { ApplyPanel, useApplyFlow } from "@/components/kube/Apply";
 import { CodeBlock, KubeError } from "@/components/kube/Kube";
 import { Alert, Badge, Button, Card, Input, cx } from "@/components/ui";
+import { hintLesson } from "@/lib/assistant";
 import { useIsAdmin } from "@/lib/inventory";
 import {
   objectHref,
@@ -406,6 +408,16 @@ function CurrentStep({
           {answer.isError && <KubeError error={answer.error} />}
         </div>
       )}
+
+      {/* Alleen als de assistent voor jou aan staat; per opdracht een nieuwe hint. */}
+      <ExplainButton
+        key={`${lesson.id}/${step.id}`}
+        start={(onEvent, signal) => hintLesson(id, lesson.id, onEvent, signal)}
+        title={step.title}
+        label="Ik zit vast"
+        heading="Hint"
+        button
+      />
     </div>
   );
 }

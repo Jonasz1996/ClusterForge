@@ -8619,6 +8619,9 @@ type ApplyKubeJSONRequestBody = KubeApplyInput
 // DrainKubeNodeJSONRequestBody defines body for DrainKubeNode for application/json ContentType.
 type DrainKubeNodeJSONRequestBody = KubeDrainInput
 
+// ExplainKubeObjectJSONRequestBody defines body for ExplainKubeObject for application/json ContentType.
+type ExplainKubeObjectJSONRequestBody = KubeRef
+
 // CheckKubeLessonJSONRequestBody defines body for CheckKubeLesson for application/json ContentType.
 type CheckKubeLessonJSONRequestBody = KubeLessonCheckInput
 
@@ -9035,6 +9038,9 @@ type ServerInterface interface {
 	// ListKubeEvents De events, waarschuwingen eerst en dan de nieuwste; hoogstens 300
 	// (GET /kubernetes/clusters/{clusterId}/events)
 	ListKubeEvents(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params ListKubeEventsParams)
+	// ExplainKubeObject Laat de assistent uitleggen wat er met een object is, zoals waarom een pod niet start; het antwoord stroomt als server-sent events
+	// (POST /kubernetes/clusters/{clusterId}/explain)
+	ExplainKubeObject(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
 	// ListKubeLessons De lessen Kubernetes met je voortgang op dit cluster
 	// (GET /kubernetes/clusters/{clusterId}/lessons)
 	ListKubeLessons(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
@@ -9044,6 +9050,9 @@ type ServerInterface interface {
 	// CheckKubeLesson Een les bekijken en de opdracht die aan de beurt is controleren op het cluster
 	// (POST /kubernetes/clusters/{clusterId}/lessons/{lesson}/check)
 	CheckKubeLesson(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, lesson string)
+	// HintKubeLesson Ik zit vast, een hint van de assistent bij de opdracht die aan de beurt is; het antwoord stroomt als server-sent events
+	// (POST /kubernetes/clusters/{clusterId}/lessons/{lesson}/hint)
+	HintKubeLesson(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, lesson string)
 	// GetKubeLogs De laatste regels log van een container; ook een viewer mag ze lezen
 	// (GET /kubernetes/clusters/{clusterId}/logs)
 	GetKubeLogs(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params GetKubeLogsParams)
@@ -9980,6 +9989,12 @@ func (_ Unimplemented) ListKubeEvents(w http.ResponseWriter, r *http.Request, cl
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// ExplainKubeObject Laat de assistent uitleggen wat er met een object is, zoals waarom een pod niet start; het antwoord stroomt als server-sent events
+// (POST /kubernetes/clusters/{clusterId}/explain)
+func (_ Unimplemented) ExplainKubeObject(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // ListKubeLessons De lessen Kubernetes met je voortgang op dit cluster
 // (GET /kubernetes/clusters/{clusterId}/lessons)
 func (_ Unimplemented) ListKubeLessons(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
@@ -9995,6 +10010,12 @@ func (_ Unimplemented) ResetKubeLesson(w http.ResponseWriter, r *http.Request, c
 // CheckKubeLesson Een les bekijken en de opdracht die aan de beurt is controleren op het cluster
 // (POST /kubernetes/clusters/{clusterId}/lessons/{lesson}/check)
 func (_ Unimplemented) CheckKubeLesson(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, lesson string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// HintKubeLesson Ik zit vast, een hint van de assistent bij de opdracht die aan de beurt is; het antwoord stroomt als server-sent events
+// (POST /kubernetes/clusters/{clusterId}/lessons/{lesson}/hint)
+func (_ Unimplemented) HintKubeLesson(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, lesson string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -13949,6 +13970,32 @@ func (siw *ServerInterfaceWrapper) ListKubeEvents(w http.ResponseWriter, r *http
 	handler.ServeHTTP(w, r)
 }
 
+// ExplainKubeObject operation middleware
+func (siw *ServerInterfaceWrapper) ExplainKubeObject(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ExplainKubeObject(w, r, clusterId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListKubeLessons operation middleware
 func (siw *ServerInterfaceWrapper) ListKubeLessons(w http.ResponseWriter, r *http.Request) {
 
@@ -14036,6 +14083,41 @@ func (siw *ServerInterfaceWrapper) CheckKubeLesson(w http.ResponseWriter, r *htt
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CheckKubeLesson(w, r, clusterId, lesson)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// HintKubeLesson operation middleware
+func (siw *ServerInterfaceWrapper) HintKubeLesson(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "lesson" -------------
+	var lesson string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "lesson", chi.URLParam(r, "lesson"), &lesson, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "lesson", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.HintKubeLesson(w, r, clusterId, lesson)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -17011,6 +17093,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Get(options.BaseURL+"/kubernetes/clusters/{clusterId}/object", wrapper.GetKubeObject)
 	})
 	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/kubernetes/clusters/{clusterId}/explain", wrapper.ExplainKubeObject)
+	})
+	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/kubernetes/clusters/{clusterId}/logs", wrapper.GetKubeLogs)
 	})
 	r.Group(func(r chi.Router) {
@@ -17027,6 +17112,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/kubernetes/clusters/{clusterId}/lessons/{lesson}/check", wrapper.CheckKubeLesson)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/kubernetes/clusters/{clusterId}/lessons/{lesson}/hint", wrapper.HintKubeLesson)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/kubernetes/clusters/{clusterId}/revisions", wrapper.ListKubeRevisions)
