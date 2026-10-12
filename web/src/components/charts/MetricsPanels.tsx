@@ -1,9 +1,10 @@
 "use client";
 
+import type { UseQueryResult } from "@tanstack/react-query";
 import { useState } from "react";
 import { Alert, Card, cx } from "@/components/ui";
 import { ApiError } from "@/lib/api/client";
-import { metricsRanges, useMetrics, type MetricsRange } from "@/lib/inventory";
+import { metricsRanges, useMetrics, type Metrics, type MetricsRange } from "@/lib/inventory";
 import { TimeChart } from "./TimeChart";
 
 // MetricsPanels toont de grafieken van een node of cluster, met een keuze van
@@ -11,12 +12,32 @@ import { TimeChart } from "./TimeChart";
 export function MetricsPanels({ kind, id, actions }: { kind: "node" | "cluster"; id: string; actions?: React.ReactNode }) {
   const [range, setRange] = useState<MetricsRange>("1h");
   const q = useMetrics(kind, id, range);
+  return <MetricsView q={q} range={range} onRange={setRange} actions={actions} />;
+}
+
+// MetricsView toont grafieken die al opgehaald worden, met de keuze van de
+// periode; empty staat in een grafiek zonder punten.
+export function MetricsView({
+  q,
+  range,
+  onRange,
+  title = "Grafieken",
+  actions,
+  empty = "Nog geen gegevens in deze periode.",
+}: {
+  q: UseQueryResult<Metrics>;
+  range: MetricsRange;
+  onRange: (r: MetricsRange) => void;
+  title?: string;
+  actions?: React.ReactNode;
+  empty?: React.ReactNode;
+}) {
   const disabled = q.error instanceof ApiError && q.error.code === "metrics_disabled";
 
   return (
     <section className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h2 className="text-lg font-semibold">Grafieken</h2>
+        <h2 className="text-lg font-semibold">{title}</h2>
         <div className="flex items-center gap-3">
           {actions}
           {!disabled && (
@@ -25,7 +46,7 @@ export function MetricsPanels({ kind, id, actions }: { kind: "node" | "cluster";
                 <button
                   key={r.value}
                   type="button"
-                  onClick={() => setRange(r.value)}
+                  onClick={() => onRange(r.value)}
                   aria-pressed={range === r.value}
                   className={cx(
                     "rounded px-2.5 py-1 text-xs font-medium",
@@ -58,7 +79,7 @@ export function MetricsPanels({ kind, id, actions }: { kind: "node" | "cluster";
                 {p.series.some((s) => s.values.some((v) => v !== null)) ? (
                   <TimeChart timestamps={q.data.timestamps} series={p.series} unit={p.unit} />
                 ) : (
-                  <p className="py-8 text-center text-sm text-slate-500">Nog geen gegevens in deze periode.</p>
+                  <p className="py-8 text-center text-sm text-slate-500">{empty}</p>
                 )}
               </Card>
             ))}

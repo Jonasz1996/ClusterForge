@@ -43,7 +43,8 @@ var timelineActions = func() []string {
 	return out
 }()
 
-// Timeline voegt het logboek en het journaal over sc samen, van from tot to.
+// Timeline voegt het logboek, het journaal en de waarschuwingen uit
+// Kubernetes over sc samen, van from tot to.
 // Het geeft de laatste limit regels, oudste eerst, en of er meer waren.
 func Timeline(ctx context.Context, q *store.Queries, au *audit.Service, sc Scope, from, to time.Time, limit int) ([]Entry, bool, error) {
 	if limit <= 0 || limit > MaxEntries {
@@ -63,13 +64,22 @@ func Timeline(ctx context.Context, q *store.Queries, au *audit.Service, sc Scope
 	if err != nil {
 		return nil, false, err
 	}
-	more := next != nil || len(changes) > limit
-	out := make([]Entry, 0, len(logged)+len(changes))
+	warnings, err := q.ListKubeEventsInScope(ctx, store.ListKubeEventsInScopeParams{
+		ClusterIds: orEmpty(sc.Clusters), NodeIds: orEmpty(sc.Nodes), Since: from, Until: to, Lim: int32(limit + 1),
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	more := next != nil || len(changes) > limit || len(warnings) > limit
+	out := make([]Entry, 0, len(logged)+len(changes)+len(warnings))
 	for _, e := range logged {
 		out = append(out, FromEvent(e))
 	}
 	for _, c := range changes {
 		out = append(out, FromChange(c))
+	}
+	for _, w := range warnings {
+		out = append(out, FromKubeEvent(w))
 	}
 	Sort(out)
 	if len(out) > limit {

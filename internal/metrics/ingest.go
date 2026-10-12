@@ -90,12 +90,18 @@ func (i *Ingester) Ingest(ctx context.Context, nodeID uuid.UUID, m protocol.Metr
 	}
 	var buf bytes.Buffer
 	writeLines(&buf, prefix, m.Samples, now)
+	i.queue(buf.Bytes())
+	return nil
+}
+
+// queue zet regels klaar voor de volgende flush.
+func (i *Ingester) queue(lines []byte) {
 	i.mu.Lock()
-	if len(i.pending)+buf.Len() > maxPending {
+	if len(i.pending)+len(lines) > maxPending {
 		// VictoriaMetrics is al een tijd onbereikbaar; de oude data vervalt.
 		i.pending = nil
 	}
-	i.pending = append(i.pending, buf.Bytes()...)
+	i.pending = append(i.pending, lines...)
 	full := len(i.pending) >= flushBytes
 	i.mu.Unlock()
 	if full {
@@ -104,7 +110,6 @@ func (i *Ingester) Ingest(ctx context.Context, nodeID uuid.UUID, m protocol.Metr
 		default:
 		}
 	}
-	return nil
 }
 
 // nodeLabels geeft de opgemaakte serverlabels van een node, uit een cache.

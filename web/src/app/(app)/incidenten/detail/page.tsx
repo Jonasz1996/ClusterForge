@@ -92,7 +92,8 @@ function TimelineCard({ entries, more, firstSymptom }: { entries: TimelineEntry[
       <div className="space-y-3">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="text-sm text-slate-500">
-            Het logboek, het journaal van de nodes en de afwijkingen in de metrics, oudste eerst.
+            Het logboek, het journaal van de nodes, de waarschuwingen van Kubernetes en de afwijkingen in de metrics, oudste
+            eerst.
           </p>
           <ClassFilter value={shown} onChange={setShown} />
         </div>

@@ -18,6 +18,12 @@ WHERE s.state = 'confirmed' AND EXISTS (
     WHERE d.to_service_id = s.id AND d.state = 'confirmed' AND c.state = 'confirmed'
 );
 
+-- name: ListIncidentApps :many
+-- De apps van de Kubernetes-clusters buiten de systeemnamespaces.
+SELECT id, cluster_id, namespace, kind, name, status, status_reason, status_since
+FROM kube_workloads
+WHERE NOT system;
+
 -- name: ListClusterDependencies :many
 -- Welke clusters van welke afhangen, via bevestigde afhankelijkheden.
 SELECT DISTINCT f.cluster_id AS from_cluster, t.cluster_id AS to_cluster
@@ -86,6 +92,7 @@ SELECT s.*,
             WHEN 'cluster' THEN EXISTS (SELECT 1 FROM clusters WHERE id = s.subject_id)
             WHEN 'node' THEN EXISTS (SELECT 1 FROM nodes WHERE id = s.subject_id)
             WHEN 'service' THEN EXISTS (SELECT 1 FROM services WHERE id = s.subject_id)
+            WHEN 'app' THEN EXISTS (SELECT 1 FROM kube_workloads WHERE id = s.subject_id)
             ELSE EXISTS (SELECT 1 FROM test_runs WHERE id = s.subject_id)
         END)::boolean AS present
 FROM incident_subjects s

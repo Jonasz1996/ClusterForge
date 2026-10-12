@@ -1073,6 +1073,7 @@ func (e IncidentFindingMetric) Valid() bool {
 
 // Defines values for IncidentSubjectType.
 const (
+	IncidentSubjectTypeApp     IncidentSubjectType = "app"
 	IncidentSubjectTypeCluster IncidentSubjectType = "cluster"
 	IncidentSubjectTypeNode    IncidentSubjectType = "node"
 	IncidentSubjectTypeService IncidentSubjectType = "service"
@@ -1082,6 +1083,8 @@ const (
 // Valid indicates whether the value is a known member of the IncidentSubjectType enum.
 func (e IncidentSubjectType) Valid() bool {
 	switch e {
+	case IncidentSubjectTypeApp:
+		return true
 	case IncidentSubjectTypeCluster:
 		return true
 	case IncidentSubjectTypeNode:
@@ -1487,20 +1490,26 @@ func (e MapLayerLayer) Valid() bool {
 
 // Defines values for MetricPanelUnit.
 const (
+	Bytes          MetricPanelUnit = "bytes"
 	BytesPerSecond MetricPanelUnit = "bytes_per_second"
 	Celsius        MetricPanelUnit = "celsius"
 	Load           MetricPanelUnit = "load"
+	Millicores     MetricPanelUnit = "millicores"
 	Percent        MetricPanelUnit = "percent"
 )
 
 // Valid indicates whether the value is a known member of the MetricPanelUnit enum.
 func (e MetricPanelUnit) Valid() bool {
 	switch e {
+	case Bytes:
+		return true
 	case BytesPerSecond:
 		return true
 	case Celsius:
 		return true
 	case Load:
+		return true
+	case Millicores:
 		return true
 	case Percent:
 		return true
@@ -2236,6 +2245,7 @@ func (e TimelineEntryClass) Valid() bool {
 const (
 	TimelineEntrySourceAgent        TimelineEntrySource = "agent"
 	TimelineEntrySourceClusterforge TimelineEntrySource = "clusterforge"
+	TimelineEntrySourceKube         TimelineEntrySource = "kube"
 	TimelineEntrySourceLog          TimelineEntrySource = "log"
 	TimelineEntrySourceMetrics      TimelineEntrySource = "metrics"
 	TimelineEntrySourceProxmox      TimelineEntrySource = "proxmox"
@@ -2248,6 +2258,8 @@ func (e TimelineEntrySource) Valid() bool {
 	case TimelineEntrySourceAgent:
 		return true
 	case TimelineEntrySourceClusterforge:
+		return true
+	case TimelineEntrySourceKube:
 		return true
 	case TimelineEntrySourceLog:
 		return true
@@ -5115,6 +5127,13 @@ type IncidentAnalysis struct {
 	WindowTo       time.Time      `json:"window_to"`
 }
 
+// IncidentApp defines model for IncidentApp.
+type IncidentApp struct {
+	Kind      string `json:"kind"`
+	Name      string `json:"name"`
+	Namespace string `json:"namespace"`
+}
+
 // IncidentCause defines model for IncidentCause.
 type IncidentCause struct {
 	// Also Het aantal regels die erbij horen, zoals de andere stappen van dezelfde taak
@@ -5200,6 +5219,8 @@ type IncidentNote struct {
 
 // IncidentSubject defines model for IncidentSubject.
 type IncidentSubject struct {
+	// App Bij een app in Kubernetes waar hij staat; null bij een ander onderwerp of een app die weg is
+	App         nullable.Nullable[IncidentApp]        `json:"app"`
 	ClusterId   nullable.Nullable[openapi_types.UUID] `json:"cluster_id"`
 	FirstStatus string                                `json:"first_status"`
 	Id          openapi_types.UUID                    `json:"id"`
@@ -7921,6 +7942,23 @@ type GetKubeLogsParams struct {
 	Timestamps *bool `form:"timestamps,omitempty" json:"timestamps,omitempty"`
 }
 
+// GetKubeMetricsParams defines parameters for GetKubeMetrics.
+type GetKubeMetricsParams struct {
+	Range *MetricsRange `form:"range,omitempty" json:"range,omitempty"`
+
+	// Namespace Alleen deze namespace; zonder zijn het alle
+	Namespace *KubeNamespace `form:"namespace,omitempty" json:"namespace,omitempty"`
+
+	// Kind De soort van de app, samen met name
+	Kind *string `form:"kind,omitempty" json:"kind,omitempty"`
+
+	// Name De naam van de app
+	Name *string `form:"name,omitempty" json:"name,omitempty"`
+
+	// Pod Eén pod
+	Pod *string `form:"pod,omitempty" json:"pod,omitempty"`
+}
+
 // GetKubeNetworkParams defines parameters for GetKubeNetwork.
 type GetKubeNetworkParams struct {
 	// Namespace Alleen deze namespace; zonder zijn het alle
@@ -8621,6 +8659,9 @@ type ServerInterface interface {
 	// GetKubeLogs De laatste regels log van een container; ook een viewer mag ze lezen
 	// (GET /kubernetes/clusters/{clusterId}/logs)
 	GetKubeLogs(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params GetKubeLogsParams)
+	// GetKubeMetrics CPU en geheugen uit metrics-server
+	// (GET /kubernetes/clusters/{clusterId}/metrics)
+	GetKubeMetrics(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params GetKubeMetricsParams)
 	// GetKubeNetwork De Services en Ingresses, met hun adressen
 	// (GET /kubernetes/clusters/{clusterId}/network)
 	GetKubeNetwork(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params GetKubeNetworkParams)
@@ -9539,6 +9580,12 @@ func (_ Unimplemented) CheckKubeLesson(w http.ResponseWriter, r *http.Request, c
 // GetKubeLogs De laatste regels log van een container; ook een viewer mag ze lezen
 // (GET /kubernetes/clusters/{clusterId}/logs)
 func (_ Unimplemented) GetKubeLogs(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params GetKubeLogsParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetKubeMetrics CPU en geheugen uit metrics-server
+// (GET /kubernetes/clusters/{clusterId}/metrics)
+func (_ Unimplemented) GetKubeMetrics(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params GetKubeMetricsParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -13567,6 +13614,100 @@ func (siw *ServerInterfaceWrapper) GetKubeLogs(w http.ResponseWriter, r *http.Re
 	handler.ServeHTTP(w, r)
 }
 
+// GetKubeMetrics operation middleware
+func (siw *ServerInterfaceWrapper) GetKubeMetrics(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetKubeMetricsParams
+
+	// ------------- Optional query parameter "range" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "range", r.URL.Query(), &params.Range, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "range"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "range", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "namespace" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "namespace", r.URL.Query(), &params.Namespace, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "namespace"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "namespace", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "kind" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "kind", r.URL.Query(), &params.Kind, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "kind"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "kind", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "name" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "name", r.URL.Query(), &params.Name, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "name"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "name", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "pod" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "pod", r.URL.Query(), &params.Pod, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "pod"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "pod", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetKubeMetrics(w, r, clusterId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetKubeNetwork operation middleware
 func (siw *ServerInterfaceWrapper) GetKubeNetwork(w http.ResponseWriter, r *http.Request) {
 
@@ -16185,6 +16326,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/kubernetes/clusters/{clusterId}/workloads", wrapper.ListKubeWorkloads)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/kubernetes/clusters/{clusterId}/metrics", wrapper.GetKubeMetrics)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/kubernetes/clusters/{clusterId}/pods", wrapper.ListKubePods)

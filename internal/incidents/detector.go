@@ -91,6 +91,10 @@ func (d *Detector) world(ctx context.Context, q *store.Queries, now time.Time) (
 	if err != nil {
 		return w, err
 	}
+	apps, err := q.ListIncidentApps(ctx)
+	if err != nil {
+		return w, err
+	}
 	runs, err := q.ListIncidentTestRuns(ctx, store.ListIncidentTestRunsParams{
 		FailedSince: now.Add(-d.Rules.Reopen), RunningSince: now.Add(-testTail),
 	})
@@ -179,6 +183,21 @@ func (d *Detector) world(ctx context.Context, q *store.Queries, now time.Time) (
 			p.Env, p.TestRun = env[*s.ClusterID], running[*s.ClusterID]
 		}
 		w.Problems = append(w.Problems, p)
+	}
+	// Een app die verminderd of down is, kan zelf een incident openen, net
+	// als een dienst; het cluster komt erbij.
+	for _, a := range apps {
+		k := Key{SubjectApp, a.ID}
+		w.Status[k] = a.Status
+		w.Hosts[k] = w.Hosts[Key{SubjectCluster, a.ClusterID}]
+		if !bad(a.Status) {
+			continue
+		}
+		cid := a.ClusterID
+		w.Problems = append(w.Problems, Problem{
+			Key: k, Name: a.Name + " in " + a.Namespace, ClusterID: &cid, Env: env[a.ClusterID], Status: a.Status,
+			Reason: a.StatusReason, Since: or(a.StatusSince, now), Primary: true, TestRun: running[a.ClusterID],
+		})
 	}
 	for _, r := range runs {
 		if !r.Failed || r.FinishedAt == nil {

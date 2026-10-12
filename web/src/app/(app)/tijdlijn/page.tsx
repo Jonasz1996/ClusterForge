@@ -75,7 +75,7 @@ function TimelineView({
         title={`Tijdlijn${name ? ` van ${name}` : ""}`}
         description={
           kind === "cluster"
-            ? "Alles wat er met het cluster en zijn nodes gebeurde: het logboek en het journaal van de nodes samen, nieuwste eerst. Veranderingen kunnen oorzaak zijn, symptomen zijn wat er misging."
+            ? "Alles wat er met het cluster en zijn nodes gebeurde: het logboek, het journaal van de nodes en bij Kubernetes de waarschuwingen samen, nieuwste eerst. Veranderingen kunnen oorzaak zijn, symptomen zijn wat er misging."
             : "Alles wat er met de node gebeurde: het logboek en zijn journaal samen, nieuwste eerst. Veranderingen kunnen oorzaak zijn, symptomen zijn wat er misging."
         }
       />

@@ -14,6 +14,7 @@ import (
 
 	"github.com/Jonasz1996/clusterforge/internal/journal"
 	"github.com/Jonasz1996/clusterforge/internal/store"
+	"github.com/Jonasz1996/clusterforge/internal/whatbroke"
 )
 
 type timelineEntry struct {
@@ -193,7 +194,7 @@ func TestWhatBroke(t *testing.T) {
 		return v.do("GET", "/api/v1/incidents/"+inc.ID.String(), nil, &d) == http.StatusOK && d.Analysis != nil
 	})
 	a := d.Analysis
-	if a.Version != 1 || a.AnalyzedAt == nil || len(a.Causes) == 0 || !strings.HasPrefix(a.FirstSymptom.Summary, "nginx.service mislukt") {
+	if a.Version != whatbroke.Version || a.AnalyzedAt == nil || len(a.Causes) == 0 || !strings.HasPrefix(a.FirstSymptom.Summary, "nginx.service mislukt") {
 		t.Fatalf("analyse = %+v", a)
 	}
 	top := a.Causes[0]

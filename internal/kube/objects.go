@@ -405,6 +405,8 @@ func (w Workload) State() (string, string) {
 		return WorkloadStopped, "geschaald naar 0"
 	case w.UpToDate() < desired:
 		return WorkloadRolling, fmt.Sprintf("%d van %d pods bijgewerkt", w.UpToDate(), desired)
+	case w.rollingOver():
+		return WorkloadRolling, "nog " + count(w.Status.Replicas-w.Status.UpdatedReplicas, "oude pod", "oude pods") + " naast de nieuwe"
 	case ready < desired:
 		return WorkloadDegraded, fmt.Sprintf("%d van %d pods klaar", ready, desired)
 	}
@@ -454,6 +456,23 @@ func (e Event) When() time.Time {
 		return *e.EventTime
 	}
 	return e.Metadata.CreationTimestamp
+}
+
+// Cores leest een CPU-hoeveelheid in cores, zonder af te ronden:
+// metrics-server meet in nanocores, en een rustige pod gebruikt minder dan
+// een millicore.
+func Cores(q string) float64 {
+	for _, s := range []struct {
+		suffix string
+		div    float64
+	}{{"n", 1e9}, {"u", 1e6}, {"m", 1e3}} {
+		if v, ok := strings.CutSuffix(q, s.suffix); ok {
+			f, _ := strconv.ParseFloat(v, 64)
+			return f / s.div
+		}
+	}
+	f, _ := strconv.ParseFloat(q, 64)
+	return f
 }
 
 // MilliCPU leest een CPU-hoeveelheid zoals 2, 1500m of 250000000n.

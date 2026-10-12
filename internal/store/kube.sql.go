@@ -13,6 +13,21 @@ import (
 	"github.com/google/uuid"
 )
 
+const deleteGoneKubeWorkloads = `-- name: DeleteGoneKubeWorkloads :exec
+DELETE FROM kube_workloads WHERE cluster_id = $1 AND seen_at <> $2::timestamptz
+`
+
+type DeleteGoneKubeWorkloadsParams struct {
+	ClusterID uuid.UUID
+	SeenAt    time.Time
+}
+
+// Haalt de apps weg die de sync van @seen_at niet meer zag.
+func (q *Queries) DeleteGoneKubeWorkloads(ctx context.Context, arg DeleteGoneKubeWorkloadsParams) error {
+	_, err := q.db.Exec(ctx, deleteGoneKubeWorkloads, arg.ClusterID, arg.SeenAt)
+	return err
+}
+
 const deleteKubeNodes = `-- name: DeleteKubeNodes :exec
 DELETE FROM kube_nodes WHERE cluster_id = $1
 `
@@ -84,6 +99,100 @@ func (q *Queries) InsertKubeNode(ctx context.Context, arg InsertKubeNodeParams) 
 		arg.CreatedAt,
 	)
 	return err
+}
+
+const listAllKubeNodes = `-- name: ListAllKubeNodes :many
+SELECT cluster_id, name, roles, ready FROM kube_nodes ORDER BY cluster_id, name
+`
+
+type ListAllKubeNodesRow struct {
+	ClusterID uuid.UUID
+	Name      string
+	Roles     []string
+	Ready     bool
+}
+
+func (q *Queries) ListAllKubeNodes(ctx context.Context) ([]ListAllKubeNodesRow, error) {
+	rows, err := q.db.Query(ctx, listAllKubeNodes)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAllKubeNodesRow{}
+	for rows.Next() {
+		var i ListAllKubeNodesRow
+		if err := rows.Scan(
+			&i.ClusterID,
+			&i.Name,
+			&i.Roles,
+			&i.Ready,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listKubeApps = `-- name: ListKubeApps :many
+SELECT id, cluster_id, namespace, kind, name, desired, ready, up_to_date, trouble, short_since, status, status_reason, status_since
+FROM kube_workloads
+WHERE NOT system
+ORDER BY cluster_id, namespace, name, kind
+`
+
+type ListKubeAppsRow struct {
+	ID           uuid.UUID
+	ClusterID    uuid.UUID
+	Namespace    string
+	Kind         string
+	Name         string
+	Desired      int32
+	Ready        int32
+	UpToDate     int32
+	Trouble      string
+	ShortSince   *time.Time
+	Status       string
+	StatusReason string
+	StatusSince  *time.Time
+}
+
+// De apps buiten de systeemnamespaces, voor hun status.
+func (q *Queries) ListKubeApps(ctx context.Context) ([]ListKubeAppsRow, error) {
+	rows, err := q.db.Query(ctx, listKubeApps)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListKubeAppsRow{}
+	for rows.Next() {
+		var i ListKubeAppsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ClusterID,
+			&i.Namespace,
+			&i.Kind,
+			&i.Name,
+			&i.Desired,
+			&i.Ready,
+			&i.UpToDate,
+			&i.Trouble,
+			&i.ShortSince,
+			&i.Status,
+			&i.StatusReason,
+			&i.StatusSince,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listKubeBridgeNodes = `-- name: ListKubeBridgeNodes :many
@@ -240,6 +349,91 @@ func (q *Queries) ListKubeClusters(ctx context.Context) ([]ListKubeClustersRow, 
 	return items, nil
 }
 
+const listKubeEventsInScope = `-- name: ListKubeEventsInScope :many
+SELECT e.id, e.cluster_id, e.key, e.ts, e.last_ts, e.count, e.reason, e.namespace, e.object_kind, e.object_name, e.app_kind, e.app_name, e.node_name, e.node_id, e.message, coalesce(n.hostname, '')::text AS hostname, c.name AS cluster_name
+FROM kube_events e
+JOIN clusters c ON c.id = e.cluster_id
+LEFT JOIN nodes n ON n.id = e.node_id
+WHERE (e.cluster_id = ANY($1::uuid[]) OR e.node_id = ANY($2::uuid[]))
+  AND e.ts >= $3 AND e.ts < $4
+ORDER BY e.ts DESC, e.id DESC
+LIMIT $5
+`
+
+type ListKubeEventsInScopeParams struct {
+	ClusterIds []uuid.UUID
+	NodeIds    []uuid.UUID
+	Since      time.Time
+	Until      time.Time
+	Lim        int32
+}
+
+type ListKubeEventsInScopeRow struct {
+	ID          int64
+	ClusterID   uuid.UUID
+	Key         string
+	Ts          time.Time
+	LastTs      time.Time
+	Count       int32
+	Reason      string
+	Namespace   string
+	ObjectKind  string
+	ObjectName  string
+	AppKind     string
+	AppName     string
+	NodeName    string
+	NodeID      *uuid.UUID
+	Message     string
+	Hostname    string
+	ClusterName string
+}
+
+// De waarschuwingen van de clusters, of op de nodes, die tussen @since en
+// @until begonnen, de nieuwste eerst.
+func (q *Queries) ListKubeEventsInScope(ctx context.Context, arg ListKubeEventsInScopeParams) ([]ListKubeEventsInScopeRow, error) {
+	rows, err := q.db.Query(ctx, listKubeEventsInScope,
+		arg.ClusterIds,
+		arg.NodeIds,
+		arg.Since,
+		arg.Until,
+		arg.Lim,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListKubeEventsInScopeRow{}
+	for rows.Next() {
+		var i ListKubeEventsInScopeRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ClusterID,
+			&i.Key,
+			&i.Ts,
+			&i.LastTs,
+			&i.Count,
+			&i.Reason,
+			&i.Namespace,
+			&i.ObjectKind,
+			&i.ObjectName,
+			&i.AppKind,
+			&i.AppName,
+			&i.NodeName,
+			&i.NodeID,
+			&i.Message,
+			&i.Hostname,
+			&i.ClusterName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listKubeLessonSteps = `-- name: ListKubeLessonSteps :many
 SELECT cluster_id, user_id, lesson, step, started_at, done_at, data, answer FROM kube_lesson_steps
 WHERE cluster_id = $1 AND user_id = $2
@@ -339,6 +533,141 @@ func (q *Queries) ListKubeNodes(ctx context.Context, clusterID uuid.UUID) ([]Lis
 	return items, nil
 }
 
+const listKubeStatusInputs = `-- name: ListKubeStatusInputs :many
+SELECT c.id AS cluster_id, (k.cluster_id IS NOT NULL)::boolean AS synced, coalesce(k.api_ok, false)::boolean AS api_ok,
+       coalesce(k.error_kind, '')::text AS error_kind, coalesce(k.error, '')::text AS error, k.ok_at
+FROM clusters c
+LEFT JOIN kube_clusters k ON k.cluster_id = c.id
+WHERE c.type = 'kubernetes'
+`
+
+type ListKubeStatusInputsRow struct {
+	ClusterID uuid.UUID
+	Synced    bool
+	ApiOk     bool
+	ErrorKind string
+	Error     string
+	OkAt      *time.Time
+}
+
+// Per Kubernetes-cluster wat de sync laatst zag, voor de clusterstatus.
+func (q *Queries) ListKubeStatusInputs(ctx context.Context) ([]ListKubeStatusInputsRow, error) {
+	rows, err := q.db.Query(ctx, listKubeStatusInputs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListKubeStatusInputsRow{}
+	for rows.Next() {
+		var i ListKubeStatusInputsRow
+		if err := rows.Scan(
+			&i.ClusterID,
+			&i.Synced,
+			&i.ApiOk,
+			&i.ErrorKind,
+			&i.Error,
+			&i.OkAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listKubeWorkloadImages = `-- name: ListKubeWorkloadImages :many
+SELECT namespace, kind, name, images FROM kube_workloads WHERE cluster_id = $1
+`
+
+type ListKubeWorkloadImagesRow struct {
+	Namespace string
+	Kind      string
+	Name      string
+	Images    []string
+}
+
+// De apps van een cluster zoals de vorige sync ze zag, om een uitrol met
+// een nieuwe image te herkennen.
+func (q *Queries) ListKubeWorkloadImages(ctx context.Context, clusterID uuid.UUID) ([]ListKubeWorkloadImagesRow, error) {
+	rows, err := q.db.Query(ctx, listKubeWorkloadImages, clusterID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListKubeWorkloadImagesRow{}
+	for rows.Next() {
+		var i ListKubeWorkloadImagesRow
+		if err := rows.Scan(
+			&i.Namespace,
+			&i.Kind,
+			&i.Name,
+			&i.Images,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listKubeWorkloadsByID = `-- name: ListKubeWorkloadsByID :many
+SELECT id, cluster_id, namespace, kind, name FROM kube_workloads WHERE id = ANY($1::uuid[])
+`
+
+type ListKubeWorkloadsByIDRow struct {
+	ID        uuid.UUID
+	ClusterID uuid.UUID
+	Namespace string
+	Kind      string
+	Name      string
+}
+
+func (q *Queries) ListKubeWorkloadsByID(ctx context.Context, ids []uuid.UUID) ([]ListKubeWorkloadsByIDRow, error) {
+	rows, err := q.db.Query(ctx, listKubeWorkloadsByID, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListKubeWorkloadsByIDRow{}
+	for rows.Next() {
+		var i ListKubeWorkloadsByIDRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ClusterID,
+			&i.Namespace,
+			&i.Kind,
+			&i.Name,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const pruneKubeEvents = `-- name: PruneKubeEvents :execrows
+DELETE FROM kube_events WHERE id IN (
+    SELECT o.id FROM kube_events o WHERE o.last_ts < $1::timestamptz ORDER BY o.last_ts LIMIT 10000
+)
+`
+
+func (q *Queries) PruneKubeEvents(ctx context.Context, before time.Time) (int64, error) {
+	result, err := q.db.Exec(ctx, pruneKubeEvents, before)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const resetKubeLesson = `-- name: ResetKubeLesson :exec
 DELETE FROM kube_lesson_steps WHERE cluster_id = $1 AND user_id = $2 AND lesson = $3
 `
@@ -359,7 +688,7 @@ INSERT INTO kube_clusters (cluster_id, api_ok, error, version, nodes_total, node
                            pods_problem, workloads_total, workloads_ready, via_node_id, synced_at, ok_at)
 VALUES ($1, true, '', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, now(), now())
 ON CONFLICT (cluster_id) DO UPDATE
-SET api_ok = true, error = '', version = EXCLUDED.version, nodes_total = EXCLUDED.nodes_total, nodes_ready = EXCLUDED.nodes_ready,
+SET api_ok = true, error = '', error_kind = '', version = EXCLUDED.version, nodes_total = EXCLUDED.nodes_total, nodes_ready = EXCLUDED.nodes_ready,
     pods_total = EXCLUDED.pods_total, pods_running = EXCLUDED.pods_running, pods_pending = EXCLUDED.pods_pending,
     pods_problem = EXCLUDED.pods_problem, workloads_total = EXCLUDED.workloads_total, workloads_ready = EXCLUDED.workloads_ready,
     via_node_id = EXCLUDED.via_node_id, synced_at = now(), ok_at = now()
@@ -398,19 +727,41 @@ func (q *Queries) SaveKubeCluster(ctx context.Context, arg SaveKubeClusterParams
 }
 
 const saveKubeClusterError = `-- name: SaveKubeClusterError :exec
-INSERT INTO kube_clusters (cluster_id, api_ok, error, synced_at)
-VALUES ($1, false, $2, now())
-ON CONFLICT (cluster_id) DO UPDATE SET api_ok = false, error = EXCLUDED.error, synced_at = now()
+INSERT INTO kube_clusters (cluster_id, api_ok, error, error_kind, synced_at)
+VALUES ($1, false, $2, $3, now())
+ON CONFLICT (cluster_id) DO UPDATE SET api_ok = false, error = EXCLUDED.error, error_kind = EXCLUDED.error_kind, synced_at = now()
 `
 
 type SaveKubeClusterErrorParams struct {
 	ClusterID uuid.UUID
 	Error     string
+	ErrorKind string
 }
 
 // Bewaart een mislukte sync; de laatst bekende tellingen blijven staan.
 func (q *Queries) SaveKubeClusterError(ctx context.Context, arg SaveKubeClusterErrorParams) error {
-	_, err := q.db.Exec(ctx, saveKubeClusterError, arg.ClusterID, arg.Error)
+	_, err := q.db.Exec(ctx, saveKubeClusterError, arg.ClusterID, arg.Error, arg.ErrorKind)
+	return err
+}
+
+const setKubeAppStatus = `-- name: SetKubeAppStatus :exec
+UPDATE kube_workloads SET status = $1, status_reason = $2, status_since = $3 WHERE id = $4
+`
+
+type SetKubeAppStatusParams struct {
+	Status       string
+	StatusReason string
+	StatusSince  *time.Time
+	ID           uuid.UUID
+}
+
+func (q *Queries) SetKubeAppStatus(ctx context.Context, arg SetKubeAppStatusParams) error {
+	_, err := q.db.Exec(ctx, setKubeAppStatus,
+		arg.Status,
+		arg.StatusReason,
+		arg.StatusSince,
+		arg.ID,
+	)
 	return err
 }
 
@@ -465,4 +816,99 @@ func (q *Queries) StartKubeLessonStep(ctx context.Context, arg StartKubeLessonSt
 		&i.Answer,
 	)
 	return i, err
+}
+
+const upsertKubeEvent = `-- name: UpsertKubeEvent :exec
+INSERT INTO kube_events (cluster_id, key, ts, last_ts, count, reason, namespace, object_kind, object_name, app_kind, app_name,
+                         node_name, node_id, message)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
+        $12, $13, $14)
+ON CONFLICT (cluster_id, key) DO UPDATE
+SET last_ts = greatest(kube_events.last_ts, EXCLUDED.last_ts), count = greatest(kube_events.count, EXCLUDED.count),
+    message = EXCLUDED.message, node_id = coalesce(kube_events.node_id, EXCLUDED.node_id)
+WHERE kube_events.last_ts < EXCLUDED.last_ts OR kube_events.count < EXCLUDED.count
+`
+
+type UpsertKubeEventParams struct {
+	ClusterID  uuid.UUID
+	Key        string
+	Ts         time.Time
+	LastTs     time.Time
+	Count      int32
+	Reason     string
+	Namespace  string
+	ObjectKind string
+	ObjectName string
+	AppKind    string
+	AppName    string
+	NodeName   string
+	NodeID     *uuid.UUID
+	Message    string
+}
+
+// Bewaart een waarschuwing. Komt ze terug, dan telt Kubernetes op in
+// hetzelfde event; hier gaan de telling en het laatste tijdstip mee.
+func (q *Queries) UpsertKubeEvent(ctx context.Context, arg UpsertKubeEventParams) error {
+	_, err := q.db.Exec(ctx, upsertKubeEvent,
+		arg.ClusterID,
+		arg.Key,
+		arg.Ts,
+		arg.LastTs,
+		arg.Count,
+		arg.Reason,
+		arg.Namespace,
+		arg.ObjectKind,
+		arg.ObjectName,
+		arg.AppKind,
+		arg.AppName,
+		arg.NodeName,
+		arg.NodeID,
+		arg.Message,
+	)
+	return err
+}
+
+const upsertKubeWorkload = `-- name: UpsertKubeWorkload :exec
+INSERT INTO kube_workloads (cluster_id, namespace, kind, name, system, desired, ready, up_to_date, images, trouble, short_since, seen_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+        CASE WHEN $11::boolean THEN now() END, $12::timestamptz)
+ON CONFLICT (cluster_id, namespace, kind, name) DO UPDATE
+SET system = EXCLUDED.system, desired = EXCLUDED.desired, ready = EXCLUDED.ready, up_to_date = EXCLUDED.up_to_date,
+    images = EXCLUDED.images, trouble = EXCLUDED.trouble,
+    short_since = CASE WHEN $11::boolean THEN coalesce(kube_workloads.short_since, now()) END,
+    seen_at = EXCLUDED.seen_at
+`
+
+type UpsertKubeWorkloadParams struct {
+	ClusterID uuid.UUID
+	Namespace string
+	Kind      string
+	Name      string
+	System    bool
+	Desired   int32
+	Ready     int32
+	UpToDate  int32
+	Images    []string
+	Trouble   string
+	Short     bool
+	SeenAt    time.Time
+}
+
+// Bewaart een app. short_since blijft staan zolang de app niet in orde is.
+func (q *Queries) UpsertKubeWorkload(ctx context.Context, arg UpsertKubeWorkloadParams) error {
+	_, err := q.db.Exec(ctx, upsertKubeWorkload,
+		arg.ClusterID,
+		arg.Namespace,
+		arg.Kind,
+		arg.Name,
+		arg.System,
+		arg.Desired,
+		arg.Ready,
+		arg.UpToDate,
+		arg.Images,
+		arg.Trouble,
+		arg.Short,
+		arg.SeenAt,
+	)
+	return err
 }

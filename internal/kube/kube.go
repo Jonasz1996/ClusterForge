@@ -50,7 +50,10 @@ type UnavailableError struct {
 	// TooOld is true als er alleen agents zijn met een protocol van voor
 	// de kube-brug.
 	TooOld bool
-	Msg    string
+	// NoAgent is true als geen server-node een agent met k3s heeft: dan is
+	// er niemand om het te vragen.
+	NoAgent bool
+	Msg     string
 }
 
 func (e *UnavailableError) Error() string { return e.Msg }
@@ -99,11 +102,22 @@ type Service struct {
 	// vaak het kijkt of de pods weg zijn.
 	DrainTimeout, DrainRetry, DrainPoll time.Duration
 
+	// Metrics krijgt elke MetricsInterval CPU en geheugen uit
+	// metrics-server; leeg slaat dat over.
+	Metrics MetricsSink
+	// Changed wordt na elke sync aangeroepen, zodat de status meteen
+	// opnieuw rekent.
+	Changed func()
+
 	jobs *jobs.Runner
 	ev   *events.Writer
 
 	mu    sync.Mutex
 	cache map[string]cached
+	// usageAt is per cluster wanneer de metrics laatst gelezen werden.
+	usageAt map[uuid.UUID]time.Time
+	// prunedAt is wanneer oude waarschuwingen laatst opgeruimd werden.
+	prunedAt time.Time
 	// last onthoudt per cluster de node die het laatst antwoordde.
 	last map[uuid.UUID]uuid.UUID
 	// discovery onthoudt per cluster de soorten objecten.
@@ -121,6 +135,7 @@ func NewService(pool *pgxpool.Pool, bus Requester, log *slog.Logger) *Service {
 		pool: pool, q: store.New(pool), bus: bus, log: log, Timeout: 30 * time.Second, Interval: 30 * time.Second, Now: time.Now,
 		DrainTimeout: 5 * time.Minute, DrainRetry: 5 * time.Second, DrainPoll: 2 * time.Second,
 		cache: map[string]cached{}, last: map[uuid.UUID]uuid.UUID{}, discovery: map[uuid.UUID]discovered{},
+		usageAt: map[uuid.UUID]time.Time{},
 	}
 }
 
@@ -184,7 +199,7 @@ func (s *Service) candidates(ctx context.Context, clusterID uuid.UUID) ([]bridge
 				"de agent op %s is te oud voor Kubernetes (protocol %d, nodig is %d); werk hem bij met het installatiescript en --upgrade",
 				strings.Join(names, ", "), old[0].Protocol, protocol.KubeSince)}
 		}
-		return nil, &UnavailableError{Msg: "geen server-node van dit cluster heeft een agent met k3s; zet cf-agent op een k3s-server"}
+		return nil, &UnavailableError{NoAgent: true, Msg: "geen server-node van dit cluster heeft een agent met k3s; zet cf-agent op een k3s-server"}
 	}
 	return out, nil
 }

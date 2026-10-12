@@ -183,6 +183,53 @@ func (q *Queries) ListDetectorIncidents(ctx context.Context, since time.Time) ([
 	return items, nil
 }
 
+const listIncidentApps = `-- name: ListIncidentApps :many
+SELECT id, cluster_id, namespace, kind, name, status, status_reason, status_since
+FROM kube_workloads
+WHERE NOT system
+`
+
+type ListIncidentAppsRow struct {
+	ID           uuid.UUID
+	ClusterID    uuid.UUID
+	Namespace    string
+	Kind         string
+	Name         string
+	Status       string
+	StatusReason string
+	StatusSince  *time.Time
+}
+
+// De apps van de Kubernetes-clusters buiten de systeemnamespaces.
+func (q *Queries) ListIncidentApps(ctx context.Context) ([]ListIncidentAppsRow, error) {
+	rows, err := q.db.Query(ctx, listIncidentApps)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListIncidentAppsRow{}
+	for rows.Next() {
+		var i ListIncidentAppsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ClusterID,
+			&i.Namespace,
+			&i.Kind,
+			&i.Name,
+			&i.Status,
+			&i.StatusReason,
+			&i.StatusSince,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listIncidentClusters = `-- name: ListIncidentClusters :many
 SELECT id, name, environment::text AS environment, status, status_reason, status_since FROM clusters
 `
@@ -324,6 +371,7 @@ SELECT s.incident_id, s.subject_type, s.subject_id, s.name, s.cluster_id, s.firs
             WHEN 'cluster' THEN EXISTS (SELECT 1 FROM clusters WHERE id = s.subject_id)
             WHEN 'node' THEN EXISTS (SELECT 1 FROM nodes WHERE id = s.subject_id)
             WHEN 'service' THEN EXISTS (SELECT 1 FROM services WHERE id = s.subject_id)
+            WHEN 'app' THEN EXISTS (SELECT 1 FROM kube_workloads WHERE id = s.subject_id)
             ELSE EXISTS (SELECT 1 FROM test_runs WHERE id = s.subject_id)
         END)::boolean AS present
 FROM incident_subjects s

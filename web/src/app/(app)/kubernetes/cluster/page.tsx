@@ -5,6 +5,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
 import { DoneAlert, KubeActions, RemoveWorkerDialog, workloadActions, type ActionDone } from "@/components/kube/Actions";
 import { applyModes, ApplyTab, type ApplyMode } from "@/components/kube/Apply";
+import { KubeMetrics } from "@/components/kube/KubeMetrics";
 import { LessonsTab } from "@/components/kube/Lessons";
 import {
   EventList,
@@ -345,6 +346,8 @@ function OverviewTab({ o, onTab }: { o: KubeOverview; onTab: (patch: Record<stri
           </p>
         )}
       </Card>
+
+      <KubeMetrics clusterId={o.cluster_id} scope={{}} title="CPU en geheugen per namespace" />
 
       <Card title="Pods met problemen">
         {o.problems.length === 0 ? (

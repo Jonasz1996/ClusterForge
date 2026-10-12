@@ -121,6 +121,10 @@ func (e *Evaluator) evaluate(ctx context.Context, now time.Time) error {
 		if err != nil {
 			return err
 		}
+		kube, err := e.kube(ctx, q, now)
+		if err != nil {
+			return err
+		}
 		perCluster := map[uuid.UUID][]ClusterNode{}
 		hostnames := map[uuid.UUID]string{}
 		for _, n := range nodes {
@@ -166,7 +170,11 @@ func (e *Evaluator) evaluate(ctx context.Context, now time.Time) error {
 				holders[v.ID] = Settle(holders[v.ID], v.OwnerNodeID, e.unsettledFor(v.ID, len(holders[v.ID]) == 1, now), e.VIPGrace)
 			}
 			res := ClusterWith(perCluster[c.ID], cv, holders)
-			if err := e.saveCluster(ctx, q, c, res.Result); err != nil {
+			result := res.Result
+			if in, ok := kube[c.ID]; ok && c.Type == "kubernetes" {
+				result = Kube(result, *in, now)
+			}
+			if err := e.saveCluster(ctx, q, c, result); err != nil {
 				return err
 			}
 			for _, v := range vipsPerCluster[c.ID] {
@@ -177,6 +185,84 @@ func (e *Evaluator) evaluate(ctx context.Context, now time.Time) error {
 		}
 		e.forget(seen)
 		return nil
+	})
+}
+
+// kube leest per Kubernetes-cluster wat de sync laatst zag, en geeft elke
+// app zijn status. Antwoordt de API niet, dan blijven de apps staan zoals
+// ze waren: wat de sync laatst zag, is niet meer actueel.
+func (e *Evaluator) kube(ctx context.Context, q *store.Queries, now time.Time) (map[uuid.UUID]*KubeInput, error) {
+	rows, err := q.ListKubeStatusInputs(ctx)
+	if err != nil || len(rows) == 0 {
+		return nil, err
+	}
+	out := make(map[uuid.UUID]*KubeInput, len(rows))
+	for _, r := range rows {
+		out[r.ClusterID] = &KubeInput{Synced: r.Synced, APIOk: r.ApiOk, ErrorKind: r.ErrorKind, Error: r.Error, OKAt: r.OkAt}
+	}
+	nodes, err := q.ListAllKubeNodes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, n := range nodes {
+		if in := out[n.ClusterID]; in != nil {
+			in.Nodes = append(in.Nodes, KubeNode{Name: n.Name, Roles: n.Roles, Ready: n.Ready})
+		}
+	}
+	apps, err := q.ListKubeApps(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, a := range apps {
+		in := out[a.ClusterID]
+		if in == nil || !in.APIOk {
+			continue
+		}
+		app := App{
+			Namespace: a.Namespace, Kind: a.Kind, Name: a.Name, Desired: int(a.Desired), Ready: int(a.Ready), Trouble: a.Trouble,
+			ShortSince: a.ShortSince,
+		}
+		res := AppStatus(app, now)
+		in.Apps = append(in.Apps, AppResult{app, res})
+		if err := e.saveApp(ctx, q, a, res, now); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+// saveApp bewaart de status van een app. Wordt hij verminderd of down, dan
+// telt hij vanaf het moment dat hij niet meer deed wat hij moest. De eerste
+// status van een app geeft geen event, net als bij een dienst.
+func (e *Evaluator) saveApp(ctx context.Context, q *store.Queries, a store.ListKubeAppsRow, res Result, now time.Time) error {
+	if string(res.Status) == a.Status && res.Reason == a.StatusReason {
+		return nil
+	}
+	since := &now
+	switch {
+	case string(res.Status) == a.Status:
+		since = a.StatusSince
+	case a.Status == string(Healthy) || a.Status == string(Unknown):
+		if res.Status != Healthy && a.ShortSince != nil {
+			since = a.ShortSince
+		}
+	}
+	if err := q.SetKubeAppStatus(ctx, store.SetKubeAppStatusParams{
+		ID: a.ID, Status: string(res.Status), StatusReason: res.Reason, StatusSince: since,
+	}); err != nil {
+		return err
+	}
+	if string(res.Status) == a.Status || a.Status == string(Unknown) {
+		return nil
+	}
+	id := a.ClusterID
+	return e.ev.Write(ctx, q, events.Event{
+		Actor: systemActor, SubjectType: "cluster", SubjectID: id.String(), ClusterID: &id,
+		Action: "kube.app_status_changed",
+		Payload: map[string]any{
+			"app_id": a.ID.String(), "kind": a.Kind, "namespace": a.Namespace, "name": a.Name,
+			"from": a.Status, "to": res.Status, "reason": res.Reason,
+		},
 	})
 }
 

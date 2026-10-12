@@ -97,7 +97,7 @@ func FromEvent(e audit.Entry) Entry {
 			en.JobID, en.Job = &id, e.Job.Name
 		}
 	}
-	for _, k := range []string{"from", "to", "reason", "host", "address", "commit", "name", "impact"} {
+	for _, k := range []string{"from", "to", "reason", "host", "address", "commit", "name", "impact", "namespace", "kind"} {
 		if v := payloadText(e.Payload[k]); v != "" {
 			en.Detail[k] = v
 		}
@@ -118,6 +118,10 @@ func FromEvent(e audit.Entry) Entry {
 		en.From, en.Delay = e.Ts.Add(-syncDelay), "Proxmox wordt elke 20 s gelezen"
 	case "drift.detected", "drift.changed":
 		en.From, en.Delay = e.Ts.Add(-driftDelay), "drift wordt elk kwartier gecontroleerd"
+	case "kube.rolled_out":
+		rolledOut(&en, payloadText(e.Payload["at"]))
+	case "kube.app_status_changed":
+		en.From, en.Delay = e.Ts.Add(-statusDelay), "de status van een app komt uit de sync van elke 30 s"
 	}
 	if !e.Subject.Deleted {
 		en.Link = eventLink(e)
@@ -158,7 +162,7 @@ func eventKind(action string) string {
 	case prefix == "backup":
 		return "backup"
 	case action == "node.status_changed" || action == "cluster.status_changed" || action == "vip.owner_changed" ||
-		action == "service.status_changed":
+		action == "service.status_changed" || action == "kube.app_status_changed":
 		return "status"
 	case prefix == "incident":
 		return "incident"

@@ -5,6 +5,7 @@ import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 import { formatBytes } from "@/components/inventory/bits";
 import type { MetricPanel } from "@/lib/inventory";
+import { formatCPU } from "@/lib/kube";
 
 type Unit = MetricPanel["unit"];
 type Series = MetricPanel["series"][number];
@@ -39,6 +40,10 @@ export function formatValue(v: number, unit: Unit) {
       return `${formatBytes(v)}/s`;
     case "celsius":
       return `${v.toLocaleString("nl-BE", { maximumFractionDigits: 0 })} °C`;
+    case "millicores":
+      return formatCPU(v);
+    case "bytes":
+      return formatBytes(v);
     default:
       return v.toLocaleString("nl-BE", { maximumFractionDigits: 2 });
   }

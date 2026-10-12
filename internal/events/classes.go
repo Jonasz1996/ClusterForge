@@ -84,7 +84,7 @@ var classes = map[string]Class{
 
 	"kube.scaled": ClassChange, "kube.restarted": ClassChange, "kube.rolled_back": ClassChange, "kube.deleted": ClassChange,
 	"kube.cordoned": ClassChange, "kube.uncordoned": ClassChange, "kube.drained": ClassChange, "kube.applied": ClassChange,
-	"kube.node_removed": ClassChange,
+	"kube.node_removed": ClassChange, "kube.rolled_out": ClassChange, "kube.app_status_changed": ClassSymptom,
 }
 
 // HasClass is true als de action een klasse heeft.
@@ -103,7 +103,7 @@ func ClassOf(action string, payload map[string]any) Class {
 	}
 	to, _ := payload["to"].(string)
 	switch action {
-	case "node.status_changed", "cluster.status_changed":
+	case "node.status_changed", "cluster.status_changed", "kube.app_status_changed":
 		if !Bad(to) {
 			return ClassInfo
 		}

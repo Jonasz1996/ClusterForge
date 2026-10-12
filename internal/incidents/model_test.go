@@ -237,3 +237,25 @@ func TestServiceJoinsClusterIncident(t *testing.T) {
 		t.Fatalf("nginx: %v", got)
 	}
 }
+
+// Een app die al minuten hangt, maakt het cluster pas verminderd als zijn
+// status wisselt: het cluster hoort bij het incident van de app. Een
+// tweede app later in hetzelfde cluster ook.
+func TestClusterJoinsAppIncident(t *testing.T) {
+	s := newSim(t)
+	s.rules.Join = 10 * time.Second
+	leren, web, api := uuid.New(), uuid.New(), uuid.New()
+	app := func(id uuid.UUID, name string, since time.Time) Problem {
+		return Problem{Key: Key{SubjectApp, id}, Name: name, ClusterID: &leren, Env: "lab", Status: "degraded", Since: since, Primary: true}
+	}
+	got := s.step(t0, app(web, "web in demo", t0.Add(-3*time.Minute)), cluster(leren, "Leren", "lab", "degraded", t0))
+	if !slices.Equal(got, []string{"incident.opened App web in demo is verminderd"}) || len(s.incs) != 1 || len(s.incs[0].Subjects) != 2 ||
+		!s.incs[0].StartedAt.Equal(t0.Add(-3*time.Minute)) {
+		t.Fatalf("app en cluster: %v, %d incidenten", got, len(s.incs))
+	}
+	got = s.step(t0.Add(time.Hour), app(web, "web in demo", t0.Add(-3*time.Minute)), cluster(leren, "Leren", "lab", "degraded", t0),
+		app(api, "api in demo", t0.Add(time.Hour)))
+	if len(got) != 0 || len(s.incs) != 1 || len(s.incs[0].Subjects) != 3 {
+		t.Fatalf("tweede app: %v, %d incidenten", got, len(s.incs))
+	}
+}

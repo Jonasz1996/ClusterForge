@@ -221,15 +221,17 @@ var Known = map[string]Spec{
 	"docs.summary_updated":     {CategoryDocs, "Samenvatting van de documentatie geschreven door de assistent"},
 	"docs.summary_removed":     {CategoryDocs, "Samenvatting van de documentatie weggehaald"},
 
-	"kube.scaled":       {CategoryKube, "App geschaald in Kubernetes"},
-	"kube.restarted":    {CategoryKube, "App herstart in Kubernetes"},
-	"kube.rolled_back":  {CategoryKube, "App teruggedraaid in Kubernetes"},
-	"kube.deleted":      {CategoryKube, "Object weggehaald in Kubernetes"},
-	"kube.cordoned":     {CategoryKube, "Node op cordon gezet in Kubernetes"},
-	"kube.uncordoned":   {CategoryKube, "Node krijgt weer pods in Kubernetes"},
-	"kube.drained":      {CategoryKube, "Node leeggemaakt in Kubernetes"},
-	"kube.applied":      {CategoryKube, "YAML toegepast in Kubernetes"},
-	"kube.node_removed": {CategoryKube, "Worker weggehaald uit Kubernetes"},
+	"kube.scaled":             {CategoryKube, "App geschaald in Kubernetes"},
+	"kube.restarted":          {CategoryKube, "App herstart in Kubernetes"},
+	"kube.rolled_back":        {CategoryKube, "App teruggedraaid in Kubernetes"},
+	"kube.deleted":            {CategoryKube, "Object weggehaald in Kubernetes"},
+	"kube.cordoned":           {CategoryKube, "Node op cordon gezet in Kubernetes"},
+	"kube.uncordoned":         {CategoryKube, "Node krijgt weer pods in Kubernetes"},
+	"kube.drained":            {CategoryKube, "Node leeggemaakt in Kubernetes"},
+	"kube.applied":            {CategoryKube, "YAML toegepast in Kubernetes"},
+	"kube.node_removed":       {CategoryKube, "Worker weggehaald uit Kubernetes"},
+	"kube.rolled_out":         {CategoryKube, "Nieuwe image uitgerold in Kubernetes"},
+	"kube.app_status_changed": {CategoryKube, "Status van app in Kubernetes gewijzigd"},
 }
 
 // Lookup geeft de spec van een action. Een onbekende action (uit een nieuwere
