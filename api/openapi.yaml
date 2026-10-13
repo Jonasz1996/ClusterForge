@@ -3079,6 +3079,105 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
+  /clusters/{clusterId}/components/{componentId}/settings/plan:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: componentId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: planClusterComponentSettings
+      summary: Bekijken wat nieuwe instellingen van een database doen (admin)
+      description: |
+        De instellingen die na de uitrol nog kunnen veranderen, met hun waarde nu, en wat de nieuwe waarden in settings
+        doen: wat verandert, de volgorde van de nodes (de schrijver als laatste), het geheugen per node en wat er gebeurt.
+        Zonder settings is het alleen het overzicht. Er verandert niets.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ComponentSettingsPlanInput" }
+      responses:
+        "200":
+          description: Het plan
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ComponentSettingsPlan" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /clusters/{clusterId}/components/{componentId}/settings:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: componentId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: changeClusterComponentSettings
+      summary: De instellingen van een database wijzigen (admin); wordt een taak
+      description: |
+        Maakt een nieuwe revisie met de nieuwe instellingen en past ze node voor node toe, met de schrijver als laatste: bij
+        Galera herstart MariaDB op elke node en wacht ClusterForge tot hij weer Synced is; bij PostgreSQL komt
+        max_connections in etcd en herstart PostgreSQL node voor node, de primary als laatste. Een ander plan geeft 409 met
+        code plan_stale. Op prod vraagt het tweestapsverificatie en de slug in confirm.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ComponentSettingsInput" }
+      responses:
+        "202":
+          description: Taak aangemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /clusters/{clusterId}/components/{componentId}/upgrade:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: componentId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getClusterComponentUpgrade
+      summary: Bekijken wat bijwerken van een database doet (admin)
+      description: |
+        Per node de versie die nu draait en de pakketten van de database met een nieuwere versie volgens de laatste apt
+        update, de volgorde (de schrijver als laatste) en wat er gebeurt. Er verandert niets.
+      responses:
+        "200":
+          description: Het plan
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ComponentUpgradePlan" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: upgradeClusterComponent
+      summary: Een database bijwerken naar een kleinere versie (admin); wordt een taak
+      description: |
+        Node voor node, de schrijver als laatste: apt-get update, alleen de pakketten van de database bijwerken binnen de
+        versie van Debian, en als er iets veranderde de database daar herstarten en wachten tot de node weer meedoet. Bij
+        PostgreSQL schakelt ClusterForge eerst over als de node de primary is. Een ander plan geeft 409 met code
+        plan_stale. Op prod vraagt het tweestapsverificatie en de slug in confirm.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ComponentUpgradeInput" }
+      responses:
+        "202":
+          description: Taak aangemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
   /clusters/{clusterId}/components/{componentId}/recover/plan:
     parameters:
       - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -4710,6 +4809,110 @@ components:
         action: { type: string, enum: [resync, switchover, reinit] }
         node_id: { type: string, format: uuid }
         hash: { type: string, description: De hash van Beheer zoals je het zag }
+        confirm: { type: string, description: De slug van het cluster; nodig op prod }
+    ComponentSettingsPlanInput:
+      type: object
+      properties:
+        settings:
+          type: object
+          additionalProperties: true
+          description: De nieuwe waarden, zoals buffer_pool of shared_buffers en max_connections; wat ontbreekt, blijft
+    ComponentSettingsInput:
+      type: object
+      required: [hash]
+      properties:
+        settings:
+          type: object
+          additionalProperties: true
+          description: Dezelfde waarden als in het plan
+        hash: { type: string, description: De hash van het plan zoals je het zag }
+        confirm: { type: string, description: De slug van het cluster; nodig op prod }
+    ComponentSettingsPlan:
+      type: object
+      required: [cluster_id, cluster_name, slug, prod, engine, title, revision, params, changes, nodes, effects, findings, blocked, hash]
+      properties:
+        cluster_id: { type: string, format: uuid }
+        cluster_name: { type: string }
+        slug: { type: string }
+        prod: { type: boolean }
+        engine: { type: string, enum: [mariadb, postgresql] }
+        title: { type: string }
+        revision: { type: integer, description: De revisie nu; de nieuwe instellingen worden de volgende }
+        params: { type: array, items: { $ref: "#/components/schemas/ComponentSettingParam" } }
+        changes: { type: array, items: { $ref: "#/components/schemas/ComponentSettingChange" } }
+        nodes: { type: array, items: { $ref: "#/components/schemas/ComponentSettingsNode" }, description: De datanodes op de volgorde van toepassen }
+        effects: { type: array, items: { type: string }, description: Wat er gebeurt }
+        findings: { type: array, items: { $ref: "#/components/schemas/ComponentFinding" } }
+        blocked: { type: boolean }
+        hash: { type: string }
+    ComponentSettingParam:
+      type: object
+      required: [name, label, help, type, value, min, max]
+      properties:
+        name: { type: string }
+        label: { type: string }
+        help: { type: string }
+        type: { type: string, description: "size, int, string of bool" }
+        value: { type: string, description: De waarde nu, als tekst zoals 1G of 200 }
+        min: { type: string }
+        max: { type: string }
+    ComponentSettingChange:
+      type: object
+      required: [name, label, from, to]
+      properties:
+        name: { type: string }
+        label: { type: string }
+        from: { type: string }
+        to: { type: string }
+    ComponentSettingsNode:
+      type: object
+      required: [node_id, hostname, state, healthy, writer, memory_bytes, memory_used_pct, free_after_pct]
+      properties:
+        node_id: { type: string, format: uuid }
+        hostname: { type: string }
+        state: { type: string }
+        healthy: { type: boolean }
+        writer: { type: boolean, description: "De schrijver: de node met het VIP bij Galera, de primary bij PostgreSQL" }
+        memory_bytes: { type: integer, format: int64 }
+        memory_used_pct: { type: number, format: double, nullable: true, description: Wat de node de laatste zeven dagen tot gebruikte, de database meegerekend }
+        free_after_pct: { type: number, format: double, nullable: true, description: Wat er met de nieuwe instellingen vrij blijft }
+    ComponentUpgradePlan:
+      type: object
+      required: [cluster_id, cluster_name, slug, prod, engine, title, nodes, effects, findings, blocked, hash]
+      properties:
+        cluster_id: { type: string, format: uuid }
+        cluster_name: { type: string }
+        slug: { type: string }
+        prod: { type: boolean }
+        engine: { type: string, enum: [mariadb, postgresql] }
+        title: { type: string }
+        nodes: { type: array, items: { $ref: "#/components/schemas/ComponentUpgradeNode" }, description: De nodes op de volgorde van bijwerken }
+        effects: { type: array, items: { type: string }, description: Wat er gebeurt }
+        findings: { type: array, items: { $ref: "#/components/schemas/ComponentFinding" } }
+        blocked: { type: boolean }
+        hash: { type: string }
+    ComponentUpgradeNode:
+      type: object
+      required: [node_id, hostname, role, state, healthy, writer, version, packages, skip]
+      properties:
+        node_id: { type: string, format: uuid }
+        hostname: { type: string }
+        role: { type: string, enum: [data, arbiter] }
+        state: { type: string }
+        healthy: { type: boolean }
+        writer: { type: boolean }
+        version: { type: string, description: De versie die nu draait; leeg bij een scheidsrechter }
+        packages:
+          type: array
+          items: { type: string }
+          nullable: true
+          description: Pakketten van de database met een nieuwere versie volgens de laatste apt update; null als de agent het niet zei
+        skip: { type: boolean, description: "Er is niets bij te werken, zoals op de scheidsrechter van PostgreSQL" }
+    ComponentUpgradeInput:
+      type: object
+      required: [hash]
+      properties:
+        hash: { type: string, description: De hash van het plan zoals je het zag }
         confirm: { type: string, description: De slug van het cluster; nodig op prod }
     ComponentRecoverPlan:
       type: object

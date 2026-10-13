@@ -2925,6 +2925,88 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/clusters/{clusterId}/components/{componentId}/settings/plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+                componentId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Bekijken wat nieuwe instellingen van een database doen (admin)
+         * @description De instellingen die na de uitrol nog kunnen veranderen, met hun waarde nu, en wat de nieuwe waarden in settings
+         *     doen: wat verandert, de volgorde van de nodes (de schrijver als laatste), het geheugen per node en wat er gebeurt.
+         *     Zonder settings is het alleen het overzicht. Er verandert niets.
+         */
+        post: operations["planClusterComponentSettings"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/clusters/{clusterId}/components/{componentId}/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+                componentId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * De instellingen van een database wijzigen (admin); wordt een taak
+         * @description Maakt een nieuwe revisie met de nieuwe instellingen en past ze node voor node toe, met de schrijver als laatste: bij
+         *     Galera herstart MariaDB op elke node en wacht ClusterForge tot hij weer Synced is; bij PostgreSQL komt
+         *     max_connections in etcd en herstart PostgreSQL node voor node, de primary als laatste. Een ander plan geeft 409 met
+         *     code plan_stale. Op prod vraagt het tweestapsverificatie en de slug in confirm.
+         */
+        post: operations["changeClusterComponentSettings"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/clusters/{clusterId}/components/{componentId}/upgrade": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+                componentId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Bekijken wat bijwerken van een database doet (admin)
+         * @description Per node de versie die nu draait en de pakketten van de database met een nieuwere versie volgens de laatste apt
+         *     update, de volgorde (de schrijver als laatste) en wat er gebeurt. Er verandert niets.
+         */
+        get: operations["getClusterComponentUpgrade"];
+        put?: never;
+        /**
+         * Een database bijwerken naar een kleinere versie (admin); wordt een taak
+         * @description Node voor node, de schrijver als laatste: apt-get update, alleen de pakketten van de database bijwerken binnen de
+         *     versie van Debian, en als er iets veranderde de database daar herstarten en wachten tot de node weer meedoet. Bij
+         *     PostgreSQL schakelt ClusterForge eerst over als de node de primary is. Een ander plan geeft 409 met code
+         *     plan_stale. Op prod vraagt het tweestapsverificatie en de slug in confirm.
+         */
+        post: operations["upgradeClusterComponent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/clusters/{clusterId}/components/{componentId}/recover/plan": {
         parameters: {
             query?: never;
@@ -4376,6 +4458,120 @@ export interface components {
             /** Format: uuid */
             node_id: string;
             /** @description De hash van Beheer zoals je het zag */
+            hash: string;
+            /** @description De slug van het cluster; nodig op prod */
+            confirm?: string;
+        };
+        ComponentSettingsPlanInput: {
+            /** @description De nieuwe waarden, zoals buffer_pool of shared_buffers en max_connections; wat ontbreekt, blijft */
+            settings?: {
+                [key: string]: unknown;
+            };
+        };
+        ComponentSettingsInput: {
+            /** @description Dezelfde waarden als in het plan */
+            settings?: {
+                [key: string]: unknown;
+            };
+            /** @description De hash van het plan zoals je het zag */
+            hash: string;
+            /** @description De slug van het cluster; nodig op prod */
+            confirm?: string;
+        };
+        ComponentSettingsPlan: {
+            /** Format: uuid */
+            cluster_id: string;
+            cluster_name: string;
+            slug: string;
+            prod: boolean;
+            /** @enum {string} */
+            engine: "mariadb" | "postgresql";
+            title: string;
+            /** @description De revisie nu; de nieuwe instellingen worden de volgende */
+            revision: number;
+            params: components["schemas"]["ComponentSettingParam"][];
+            changes: components["schemas"]["ComponentSettingChange"][];
+            /** @description De datanodes op de volgorde van toepassen */
+            nodes: components["schemas"]["ComponentSettingsNode"][];
+            /** @description Wat er gebeurt */
+            effects: string[];
+            findings: components["schemas"]["ComponentFinding"][];
+            blocked: boolean;
+            hash: string;
+        };
+        ComponentSettingParam: {
+            name: string;
+            label: string;
+            help: string;
+            /** @description size, int, string of bool */
+            type: string;
+            /** @description De waarde nu */
+            value: string;
+            min: string;
+            max: string;
+        };
+        ComponentSettingChange: {
+            name: string;
+            label: string;
+            from: string;
+            to: string;
+        };
+        ComponentSettingsNode: {
+            /** Format: uuid */
+            node_id: string;
+            hostname: string;
+            state: string;
+            healthy: boolean;
+            /** @description De schrijver: de node met het VIP bij Galera, de primary bij PostgreSQL */
+            writer: boolean;
+            /** Format: int64 */
+            memory_bytes: number;
+            /**
+             * Format: double
+             * @description Wat de node de laatste zeven dagen tot gebruikte
+             */
+            memory_used_pct: number | null;
+            /**
+             * Format: double
+             * @description Wat er met de nieuwe instellingen vrij blijft
+             */
+            free_after_pct: number | null;
+        };
+        ComponentUpgradePlan: {
+            /** Format: uuid */
+            cluster_id: string;
+            cluster_name: string;
+            slug: string;
+            prod: boolean;
+            /** @enum {string} */
+            engine: "mariadb" | "postgresql";
+            title: string;
+            /** @description De nodes op de volgorde van bijwerken */
+            nodes: components["schemas"]["ComponentUpgradeNode"][];
+            /** @description Wat er gebeurt */
+            effects: string[];
+            findings: components["schemas"]["ComponentFinding"][];
+            blocked: boolean;
+            hash: string;
+        };
+        ComponentUpgradeNode: {
+            /** Format: uuid */
+            node_id: string;
+            hostname: string;
+            /** @enum {string} */
+            role: "data" | "arbiter";
+            state: string;
+            healthy: boolean;
+            writer: boolean;
+            /** @description De versie die nu draait; leeg bij een scheidsrechter */
+            version: string;
+            /** @description Pakketten van de database met een nieuwere versie volgens de laatste apt update; null als de agent het niet zei */
+            packages: string[] | null;
+            /** @description Er is niets bij te werken, zoals op de scheidsrechter van PostgreSQL */
+            skip: boolean;
+        };
+        ComponentUpgradeInput: {
+            /** @description De hash van het plan zoals je het zag */
             hash: string;
             /** @description De slug van het cluster; nodig op prod */
             confirm?: string;
@@ -14059,6 +14255,129 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["ComponentManageInput"];
+            };
+        };
+        responses: {
+            /** @description Taak aangemaakt */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Job"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    planClusterComponentSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+                componentId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ComponentSettingsPlanInput"];
+            };
+        };
+        responses: {
+            /** @description Het plan */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ComponentSettingsPlan"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    changeClusterComponentSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+                componentId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ComponentSettingsInput"];
+            };
+        };
+        responses: {
+            /** @description Taak aangemaakt */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Job"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    getClusterComponentUpgrade: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+                componentId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Het plan */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ComponentUpgradePlan"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    upgradeClusterComponent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+                componentId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ComponentUpgradeInput"];
             };
         };
         responses: {

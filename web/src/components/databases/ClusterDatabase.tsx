@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { SettingsDialog, UpgradeDialog } from "@/components/databases/ComponentChanges";
 import { Modal } from "@/components/Modal";
 import { ProdConfirm, prodConfirmed, useProdTotp } from "@/components/ProdConfirm";
 import { QueryState, formatBytes, tableClass, tdClass, thClass } from "@/components/inventory/bits";
@@ -78,6 +79,8 @@ function Component({ c, comp, isAdmin }: { c: ClusterDetail; comp: ClusterCompon
   const [reapply, setReapply] = useState(false);
   const [recover, setRecover] = useState(false);
   const [manage, setManage] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [upgrade, setUpgrade] = useState(false);
   const remove = useRemoveComponent(c.id);
   const auto = useSetAutoRecover(c.id);
   const rec = recovering(comp);
@@ -114,6 +117,16 @@ function Component({ c, comp, isAdmin }: { c: ClusterDetail; comp: ClusterCompon
             {isAdmin && applied && (
               <Button variant="secondary" disabled={busy || rec} onClick={() => setManage(true)}>
                 Beheer…
+              </Button>
+            )}
+            {isAdmin && applied && (
+              <Button variant="secondary" disabled={busy || rec} onClick={() => setSettingsOpen(true)}>
+                Instellingen…
+              </Button>
+            )}
+            {isAdmin && applied && (
+              <Button variant="secondary" disabled={busy || rec} onClick={() => setUpgrade(true)}>
+                Bijwerken…
               </Button>
             )}
             {isAdmin && applied && !pg && (
@@ -263,6 +276,8 @@ function Component({ c, comp, isAdmin }: { c: ClusterDetail; comp: ClusterCompon
       {reapply && <ReapplyDialog c={c} comp={comp} onClose={() => setReapply(false)} />}
       {recover && <RecoverDialog c={c} comp={comp} onClose={() => setRecover(false)} />}
       {manage && <ManageDialog c={c} comp={comp} onClose={() => setManage(false)} />}
+      {settingsOpen && <SettingsDialog c={c} comp={comp} onClose={() => setSettingsOpen(false)} />}
+      {upgrade && <UpgradeDialog c={c} comp={comp} onClose={() => setUpgrade(false)} />}
     </div>
   );
 }
@@ -504,7 +519,8 @@ function ReapplyDialog({ c, comp, onClose }: { c: ClusterDetail; comp: ClusterCo
           <p>
             ClusterForge zet de configuratie van revisie {comp.revision} terug op elke node: eerst etcd overal, dan Patroni node
             voor node. Na elke node wacht het tot Patroni er weer meedoet. Herstart Patroni op de primary, dan wordt een replica
-            primary en gaat het VIP mee, dus de database blijft bereikbaar.
+            primary en gaat het VIP mee, dus de database blijft bereikbaar. Wacht een instelling nog op een herstart van
+            PostgreSQL, dan doet ClusterForge die daarna node voor node, de primary als laatste.
           </p>
         ) : (
           <p>

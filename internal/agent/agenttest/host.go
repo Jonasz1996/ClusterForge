@@ -68,6 +68,11 @@ type Host struct {
 	// verhuizing van haar MariaDB; nil kent geen andere machines. Zet het
 	// met Locked terwijl de agent draait.
 	Network func(addr string) *Host
+	// Shell speelt sh -c na voor een commando dat de test kent; met
+	// handled false doet de host het, en die laat elk ander commando
+	// lukken. Het draait buiten het slot van de host, dus het mag de host
+	// veranderen. Zet het voor de agent start.
+	Shell func(cmd string) (handled bool, out []byte, err error)
 
 	mu       sync.Mutex
 	after    func(call string, err error)
@@ -256,6 +261,17 @@ func (h *Host) Exec(_ context.Context, name string, args ...string) ([]byte, err
 			h.mu.Unlock()
 			return []byte(f.output), errors.New("exit status 1")
 		}
+	}
+	if name == "sh" && len(args) == 2 && args[0] == "-c" && h.Shell != nil {
+		shell, after := h.Shell, h.after
+		h.mu.Unlock()
+		if handled, out, err := shell(args[1]); handled {
+			if after != nil {
+				after(call, err)
+			}
+			return out, err
+		}
+		h.mu.Lock()
 	}
 	out, err := h.exec(name, args)
 	g, after := h.group, h.after

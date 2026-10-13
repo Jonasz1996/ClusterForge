@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -29,8 +30,10 @@ type patroniHosts struct {
 	hosts   map[string]*agenttest.Host
 	primary string
 	sync    string
-	// params zijn de instellingen van PostgreSQL in etcd.
-	params map[string]any
+	// params zijn de instellingen van PostgreSQL in etcd; restarts de
+	// nodes die Patroni herstartte, op volgorde.
+	params   map[string]any
+	restarts []string
 }
 
 func (g *patroniHosts) after(name string, h *agenttest.Host) func(call string, err error) {
@@ -46,6 +49,14 @@ func (g *patroniHosts) after(name string, h *agenttest.Host) func(call string, e
 			touchFile(h, components.EtcdMarker("nextcloud"))
 		case call == "systemctl start patroni":
 			g.start(name, h)
+		case call == "systemctl reload-or-restart patroni":
+			// Een nieuwe configuratie, zoals shared_buffers: Patroni leest
+			// haar, en PostgreSQL wacht op een herstart.
+			h.Locked(func() {
+				if h.Patroni != nil {
+					h.Patroni.PendingRestart = true
+				}
+			})
 		case strings.HasPrefix(call, "systemctl reboot"):
 			g.reboot(h)
 		}
@@ -111,8 +122,17 @@ func (g *patroniHosts) api(name string) agenttest.PatroniAPI {
 			})
 			return http.StatusOK, "reinitialize started"
 		case method == http.MethodPost && path == "/restart":
+			// Patroni antwoordt pas als PostgreSQL opnieuw draait, met de
+			// instellingen uit etcd.
+			g.mu.Lock()
+			g.restarts = append(g.restarts, name)
+			maxConn := 100
+			if v, ok := g.params["max_connections"]; ok {
+				maxConn = atoiAny(v)
+			}
+			g.mu.Unlock()
 			h := g.hosts[name]
-			h.Locked(func() { h.Patroni.PendingRestart = false })
+			h.Locked(func() { h.Patroni.PendingRestart, h.Postgres.Uptime, h.Postgres.MaxConnections = false, 0, maxConn })
 			return http.StatusOK, "restarted successfully"
 		case path == "/config":
 			g.mu.Lock()
@@ -127,6 +147,19 @@ func (g *patroniHosts) api(name string) agenttest.PatroniAPI {
 					} `json:"postgresql"`
 				}
 				_ = json.Unmarshal(body, &in)
+				changed := false
+				for k, v := range in.PostgreSQL.Parameters {
+					changed = changed || fmt.Sprint(g.params[k]) != fmt.Sprint(v)
+				}
+				if changed {
+					for _, h := range g.hosts {
+						h.Locked(func() {
+							if h.Patroni != nil {
+								h.Patroni.PendingRestart = true
+							}
+						})
+					}
+				}
 				maps.Copy(g.params, in.PostgreSQL.Parameters)
 			}
 			b, _ := json.Marshal(map[string]any{"postgresql": map[string]any{"parameters": g.params}})
@@ -134,6 +167,12 @@ func (g *patroniHosts) api(name string) agenttest.PatroniAPI {
 		}
 		return http.StatusNotFound, "not found"
 	}
+}
+
+// atoiAny leest een getal uit JSON, als getal of als tekst.
+func atoiAny(v any) int {
+	n, _ := strconv.Atoi(fmt.Sprint(v))
+	return n
 }
 
 func touchFile(h *agenttest.Host, p string) {

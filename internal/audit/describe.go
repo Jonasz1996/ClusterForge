@@ -382,7 +382,33 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 		if p["maintenance"] == true {
 			s += ", voor het onderhoud van " + str(p, "from")
 		}
+		if p["update"] == true {
+			s += ", voor het bijwerken van " + str(p, "from")
+		}
 		return s
+	case "cluster.database_settings":
+		var parts []string
+		changes, _ := p["changes"].([]any)
+		for _, c := range changes {
+			ch, _ := c.(map[string]any)
+			parts = append(parts, fmt.Sprintf("%s van %s naar %s", strings.ToLower(str(ch, "label")), str(ch, "from"), str(ch, "to")))
+		}
+		return fmt.Sprintf("Instellingen van %s van cluster %s gewijzigd (revisie %s)", str(p, "component"), name, num(p["revision"])) + colon(strings.Join(parts, ", "))
+	case "cluster.database_updated":
+		var parts []string
+		nodes, _ := p["nodes"].([]any)
+		for _, x := range nodes {
+			n, _ := x.(map[string]any)
+			if from, to := str(n, "from"), str(n, "to"); n["updated"] == true && from != "" && to != "" && from != to {
+				parts = append(parts, fmt.Sprintf("%s van %s naar %s", str(n, "hostname"), from, to))
+			} else if n["updated"] == true {
+				parts = append(parts, str(n, "hostname"))
+			}
+		}
+		if len(parts) == 0 {
+			return fmt.Sprintf("%s van cluster %s nagekeken; er was geen nieuwere versie", str(p, "component"), name)
+		}
+		return fmt.Sprintf("%s van cluster %s bijgewerkt", str(p, "component"), name) + colon(strings.Join(parts, ", "))
 	case "cluster.database_reinitialized":
 		return fmt.Sprintf("%s opnieuw opgebouwd als replica in %s van cluster %s", str(p, "hostname"), str(p, "component"), name)
 	case "cluster.database_auto_recover":

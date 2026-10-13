@@ -562,3 +562,19 @@ func (q *Queries) SetClusterComponentRecoverJob(ctx context.Context, arg SetClus
 	_, err := q.db.Exec(ctx, setClusterComponentRecoverJob, arg.JobID, arg.ID)
 	return err
 }
+
+const setClusterComponentSpec = `-- name: SetClusterComponentSpec :exec
+UPDATE cluster_components SET spec = $1, revision = $2, updated_at = now() WHERE id = $3
+`
+
+type SetClusterComponentSpecParams struct {
+	Spec     []byte
+	Revision int32
+	ID       uuid.UUID
+}
+
+// Een nieuwe revisie van de spec, zoals andere instellingen.
+func (q *Queries) SetClusterComponentSpec(ctx context.Context, arg SetClusterComponentSpecParams) error {
+	_, err := q.db.Exec(ctx, setClusterComponentSpec, arg.Spec, arg.Revision, arg.ID)
+	return err
+}

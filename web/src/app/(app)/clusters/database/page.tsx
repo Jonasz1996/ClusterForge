@@ -5,10 +5,10 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useEffect, useState, type ReactNode } from "react";
 import { ProdConfirm, prodConfirmed, useProdTotp } from "@/components/ProdConfirm";
 import { Diff } from "@/components/gitops/bits";
-import { CopyBlock } from "@/components/inventory/InstallAgent";
+import { Findings } from "@/components/databases/Findings";
 import { ParamInput, paramHint } from "@/components/inventory/ParamInput";
 import { formatBytes, LifecycleBadge, QueryState } from "@/components/inventory/bits";
-import { Alert, Badge, Button, Card, cx, Field, Input, PageHeader, Select } from "@/components/ui";
+import { Alert, Button, Card, cx, Field, Input, PageHeader, Select } from "@/components/ui";
 import { ApiError } from "@/lib/api/client";
 import {
   roleLabel,
@@ -487,33 +487,5 @@ function NodeBlock({ n, server, findings }: { n: ComponentPlanNode; server: stri
         </ol>
       )}
     </div>
-  );
-}
-
-function Findings({ list }: { list: ComponentFinding[] }) {
-  return (
-    <ul className="space-y-2">
-      {list.map((f, i) => (
-        <li
-          key={i}
-          className={cx(
-            "space-y-2 rounded border px-3 py-2",
-            f.level === "blocked"
-              ? "border-red-200 bg-red-50 text-red-900 dark:border-red-900 dark:bg-red-950 dark:text-red-200"
-              : f.level === "info"
-                ? "border-sky-200 bg-sky-50 text-sky-900 dark:border-sky-900 dark:bg-sky-950 dark:text-sky-200"
-                : "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200",
-          )}
-        >
-          <p>
-            <Badge tone={f.level === "blocked" ? "red" : f.level === "info" ? "blue" : "amber"}>
-              {f.level === "blocked" ? "Blokkeert" : f.level === "info" ? "Goed om te weten" : "Let op"}
-            </Badge>{" "}
-            {f.message}
-          </p>
-          {f.command && <CopyBlock text={f.command} />}
-        </li>
-      ))}
-    </ul>
   );
 }

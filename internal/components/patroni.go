@@ -115,7 +115,13 @@ func (s *Service) runPatroni(ctx context.Context, j *jobs.Job, r *rendered) erro
 			return err
 		}
 	}
-	return nil
+	if r.revision <= 1 && !r.restart {
+		// De eerste revisie: Patroni nam de instellingen mee bij het begin.
+		// Dat hangt af van de taak, niet van wat er al toegepast is, zodat
+		// een hervatte taak dezelfde stappen heeft.
+		return nil
+	}
+	return s.patroniSettings(ctx, j, r, r.restart)
 }
 
 // patroniHealthy zegt of Patroni op een node meedoet in het cluster slug:

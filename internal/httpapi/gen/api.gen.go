@@ -402,6 +402,24 @@ func (e ComponentManageInputAction) Valid() bool {
 	}
 }
 
+// Defines values for ComponentSettingsPlanEngine.
+const (
+	ComponentSettingsPlanEngineMariadb    ComponentSettingsPlanEngine = "mariadb"
+	ComponentSettingsPlanEnginePostgresql ComponentSettingsPlanEngine = "postgresql"
+)
+
+// Valid indicates whether the value is a known member of the ComponentSettingsPlanEngine enum.
+func (e ComponentSettingsPlanEngine) Valid() bool {
+	switch e {
+	case ComponentSettingsPlanEngineMariadb:
+		return true
+	case ComponentSettingsPlanEnginePostgresql:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ComponentTemplateEngine.
 const (
 	ComponentTemplateEngineMariadb    ComponentTemplateEngine = "mariadb"
@@ -414,6 +432,42 @@ func (e ComponentTemplateEngine) Valid() bool {
 	case ComponentTemplateEngineMariadb:
 		return true
 	case ComponentTemplateEnginePostgresql:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ComponentUpgradeNodeRole.
+const (
+	Arbiter ComponentUpgradeNodeRole = "arbiter"
+	Data    ComponentUpgradeNodeRole = "data"
+)
+
+// Valid indicates whether the value is a known member of the ComponentUpgradeNodeRole enum.
+func (e ComponentUpgradeNodeRole) Valid() bool {
+	switch e {
+	case Arbiter:
+		return true
+	case Data:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ComponentUpgradePlanEngine.
+const (
+	ComponentUpgradePlanEngineMariadb    ComponentUpgradePlanEngine = "mariadb"
+	ComponentUpgradePlanEnginePostgresql ComponentUpgradePlanEngine = "postgresql"
+)
+
+// Valid indicates whether the value is a known member of the ComponentUpgradePlanEngine enum.
+func (e ComponentUpgradePlanEngine) Valid() bool {
+	switch e {
+	case ComponentUpgradePlanEngineMariadb:
+		return true
+	case ComponentUpgradePlanEnginePostgresql:
 		return true
 	default:
 		return false
@@ -4161,6 +4215,91 @@ type ComponentRestoreStarted struct {
 	Target string `json:"target"`
 }
 
+// ComponentSettingChange defines model for ComponentSettingChange.
+type ComponentSettingChange struct {
+	From  string `json:"from"`
+	Label string `json:"label"`
+	Name  string `json:"name"`
+	To    string `json:"to"`
+}
+
+// ComponentSettingParam defines model for ComponentSettingParam.
+type ComponentSettingParam struct {
+	Help  string `json:"help"`
+	Label string `json:"label"`
+	Max   string `json:"max"`
+	Min   string `json:"min"`
+	Name  string `json:"name"`
+
+	// Type size, int, string of bool
+	Type string `json:"type"`
+
+	// Value De waarde nu
+	Value string `json:"value"`
+}
+
+// ComponentSettingsInput defines model for ComponentSettingsInput.
+type ComponentSettingsInput struct {
+	// Confirm De slug van het cluster; nodig op prod
+	Confirm *string `json:"confirm,omitempty"`
+
+	// Hash De hash van het plan zoals je het zag
+	Hash string `json:"hash"`
+
+	// Settings Dezelfde waarden als in het plan
+	Settings *map[string]interface{} `json:"settings,omitempty"`
+}
+
+// ComponentSettingsNode defines model for ComponentSettingsNode.
+type ComponentSettingsNode struct {
+	// FreeAfterPct Wat er met de nieuwe instellingen vrij blijft
+	FreeAfterPct nullable.Nullable[float64] `json:"free_after_pct"`
+	Healthy      bool                       `json:"healthy"`
+	Hostname     string                     `json:"hostname"`
+	MemoryBytes  int64                      `json:"memory_bytes"`
+
+	// MemoryUsedPct Wat de node de laatste zeven dagen tot gebruikte
+	MemoryUsedPct nullable.Nullable[float64] `json:"memory_used_pct"`
+	NodeId        openapi_types.UUID         `json:"node_id"`
+	State         string                     `json:"state"`
+
+	// Writer De schrijver: de node met het VIP bij Galera, de primary bij PostgreSQL
+	Writer bool `json:"writer"`
+}
+
+// ComponentSettingsPlan defines model for ComponentSettingsPlan.
+type ComponentSettingsPlan struct {
+	Blocked     bool                     `json:"blocked"`
+	Changes     []ComponentSettingChange `json:"changes"`
+	ClusterId   openapi_types.UUID       `json:"cluster_id"`
+	ClusterName string                   `json:"cluster_name"`
+
+	// Effects Wat er gebeurt
+	Effects  []string                    `json:"effects"`
+	Engine   ComponentSettingsPlanEngine `json:"engine"`
+	Findings []ComponentFinding          `json:"findings"`
+	Hash     string                      `json:"hash"`
+
+	// Nodes De datanodes op de volgorde van toepassen
+	Nodes  []ComponentSettingsNode `json:"nodes"`
+	Params []ComponentSettingParam `json:"params"`
+	Prod   bool                    `json:"prod"`
+
+	// Revision De revisie nu; de nieuwe instellingen worden de volgende
+	Revision int    `json:"revision"`
+	Slug     string `json:"slug"`
+	Title    string `json:"title"`
+}
+
+// ComponentSettingsPlanEngine defines model for ComponentSettingsPlan.Engine.
+type ComponentSettingsPlanEngine string
+
+// ComponentSettingsPlanInput defines model for ComponentSettingsPlanInput.
+type ComponentSettingsPlanInput struct {
+	// Settings De nieuwe waarden, zoals buffer_pool of shared_buffers en max_connections; wat ontbreekt, blijft
+	Settings *map[string]interface{} `json:"settings,omitempty"`
+}
+
 // ComponentTemplate defines model for ComponentTemplate.
 type ComponentTemplate struct {
 	Description string                  `json:"description"`
@@ -4178,6 +4317,59 @@ type ComponentTemplateEngine string
 type ComponentUpdateInput struct {
 	AutoRecover bool `json:"auto_recover"`
 }
+
+// ComponentUpgradeInput defines model for ComponentUpgradeInput.
+type ComponentUpgradeInput struct {
+	// Confirm De slug van het cluster; nodig op prod
+	Confirm *string `json:"confirm,omitempty"`
+
+	// Hash De hash van het plan zoals je het zag
+	Hash string `json:"hash"`
+}
+
+// ComponentUpgradeNode defines model for ComponentUpgradeNode.
+type ComponentUpgradeNode struct {
+	Healthy  bool               `json:"healthy"`
+	Hostname string             `json:"hostname"`
+	NodeId   openapi_types.UUID `json:"node_id"`
+
+	// Packages Pakketten van de database met een nieuwere versie volgens de laatste apt update; null als de agent het niet zei
+	Packages nullable.Nullable[[]string] `json:"packages"`
+	Role     ComponentUpgradeNodeRole    `json:"role"`
+
+	// Skip Er is niets bij te werken, zoals op de scheidsrechter van PostgreSQL
+	Skip  bool   `json:"skip"`
+	State string `json:"state"`
+
+	// Version De versie die nu draait; leeg bij een scheidsrechter
+	Version string `json:"version"`
+	Writer  bool   `json:"writer"`
+}
+
+// ComponentUpgradeNodeRole defines model for ComponentUpgradeNode.Role.
+type ComponentUpgradeNodeRole string
+
+// ComponentUpgradePlan defines model for ComponentUpgradePlan.
+type ComponentUpgradePlan struct {
+	Blocked     bool               `json:"blocked"`
+	ClusterId   openapi_types.UUID `json:"cluster_id"`
+	ClusterName string             `json:"cluster_name"`
+
+	// Effects Wat er gebeurt
+	Effects  []string                   `json:"effects"`
+	Engine   ComponentUpgradePlanEngine `json:"engine"`
+	Findings []ComponentFinding         `json:"findings"`
+	Hash     string                     `json:"hash"`
+
+	// Nodes De nodes op de volgorde van bijwerken
+	Nodes []ComponentUpgradeNode `json:"nodes"`
+	Prod  bool                   `json:"prod"`
+	Slug  string                 `json:"slug"`
+	Title string                 `json:"title"`
+}
+
+// ComponentUpgradePlanEngine defines model for ComponentUpgradePlan.Engine.
+type ComponentUpgradePlanEngine string
 
 // ComponentUserPassword defines model for ComponentUserPassword.
 type ComponentUserPassword struct {
@@ -9964,6 +10156,15 @@ type ManageClusterComponentJSONRequestBody = ComponentManageInput
 // RecoverClusterComponentJSONRequestBody defines body for RecoverClusterComponent for application/json ContentType.
 type RecoverClusterComponentJSONRequestBody = ComponentRecoverInput
 
+// ChangeClusterComponentSettingsJSONRequestBody defines body for ChangeClusterComponentSettings for application/json ContentType.
+type ChangeClusterComponentSettingsJSONRequestBody = ComponentSettingsInput
+
+// PlanClusterComponentSettingsJSONRequestBody defines body for PlanClusterComponentSettings for application/json ContentType.
+type PlanClusterComponentSettingsJSONRequestBody = ComponentSettingsPlanInput
+
+// UpgradeClusterComponentJSONRequestBody defines body for UpgradeClusterComponent for application/json ContentType.
+type UpgradeClusterComponentJSONRequestBody = ComponentUpgradeInput
+
 // DropComponentUserJSONRequestBody defines body for DropComponentUser for application/json ContentType.
 type DropComponentUserJSONRequestBody = ComponentDropInput
 
@@ -10287,6 +10488,18 @@ type ServerInterface interface {
 	// PlanRecoverClusterComponent Bekijken wat opnieuw starten zou doen (admin)
 	// (POST /clusters/{clusterId}/components/{componentId}/recover/plan)
 	PlanRecoverClusterComponent(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID)
+	// ChangeClusterComponentSettings De instellingen van een database wijzigen (admin); wordt een taak
+	// (POST /clusters/{clusterId}/components/{componentId}/settings)
+	ChangeClusterComponentSettings(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID)
+	// PlanClusterComponentSettings Bekijken wat nieuwe instellingen van een database doen (admin)
+	// (POST /clusters/{clusterId}/components/{componentId}/settings/plan)
+	PlanClusterComponentSettings(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID)
+	// GetClusterComponentUpgrade Bekijken wat bijwerken van een database doet (admin)
+	// (GET /clusters/{clusterId}/components/{componentId}/upgrade)
+	GetClusterComponentUpgrade(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID)
+	// UpgradeClusterComponent Een database bijwerken naar een kleinere versie (admin); wordt een taak
+	// (POST /clusters/{clusterId}/components/{componentId}/upgrade)
+	UpgradeClusterComponent(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID)
 	// DropComponentUser Een gebruiker op al zijn hosts weghalen (admin)
 	// (POST /clusters/{clusterId}/components/{componentId}/users/{user}/drop)
 	DropComponentUser(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID, user string)
@@ -11112,6 +11325,30 @@ func (_ Unimplemented) RecoverClusterComponent(w http.ResponseWriter, r *http.Re
 // PlanRecoverClusterComponent Bekijken wat opnieuw starten zou doen (admin)
 // (POST /clusters/{clusterId}/components/{componentId}/recover/plan)
 func (_ Unimplemented) PlanRecoverClusterComponent(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ChangeClusterComponentSettings De instellingen van een database wijzigen (admin); wordt een taak
+// (POST /clusters/{clusterId}/components/{componentId}/settings)
+func (_ Unimplemented) ChangeClusterComponentSettings(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// PlanClusterComponentSettings Bekijken wat nieuwe instellingen van een database doen (admin)
+// (POST /clusters/{clusterId}/components/{componentId}/settings/plan)
+func (_ Unimplemented) PlanClusterComponentSettings(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetClusterComponentUpgrade Bekijken wat bijwerken van een database doet (admin)
+// (GET /clusters/{clusterId}/components/{componentId}/upgrade)
+func (_ Unimplemented) GetClusterComponentUpgrade(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// UpgradeClusterComponent Een database bijwerken naar een kleinere versie (admin); wordt een taak
+// (POST /clusters/{clusterId}/components/{componentId}/upgrade)
+func (_ Unimplemented) UpgradeClusterComponent(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -13687,6 +13924,146 @@ func (siw *ServerInterfaceWrapper) PlanRecoverClusterComponent(w http.ResponseWr
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.PlanRecoverClusterComponent(w, r, clusterId, componentId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ChangeClusterComponentSettings operation middleware
+func (siw *ServerInterfaceWrapper) ChangeClusterComponentSettings(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "componentId" -------------
+	var componentId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "componentId", chi.URLParam(r, "componentId"), &componentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "componentId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ChangeClusterComponentSettings(w, r, clusterId, componentId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PlanClusterComponentSettings operation middleware
+func (siw *ServerInterfaceWrapper) PlanClusterComponentSettings(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "componentId" -------------
+	var componentId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "componentId", chi.URLParam(r, "componentId"), &componentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "componentId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PlanClusterComponentSettings(w, r, clusterId, componentId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetClusterComponentUpgrade operation middleware
+func (siw *ServerInterfaceWrapper) GetClusterComponentUpgrade(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "componentId" -------------
+	var componentId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "componentId", chi.URLParam(r, "componentId"), &componentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "componentId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetClusterComponentUpgrade(w, r, clusterId, componentId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpgradeClusterComponent operation middleware
+func (siw *ServerInterfaceWrapper) UpgradeClusterComponent(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "componentId" -------------
+	var componentId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "componentId", chi.URLParam(r, "componentId"), &componentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "componentId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpgradeClusterComponent(w, r, clusterId, componentId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -19671,6 +20048,18 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/clusters/{clusterId}/components/{componentId}/manage", wrapper.ManageClusterComponent)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/clusters/{clusterId}/components/{componentId}/settings/plan", wrapper.PlanClusterComponentSettings)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/clusters/{clusterId}/components/{componentId}/settings", wrapper.ChangeClusterComponentSettings)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/clusters/{clusterId}/components/{componentId}/upgrade", wrapper.GetClusterComponentUpgrade)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/clusters/{clusterId}/components/{componentId}/upgrade", wrapper.UpgradeClusterComponent)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/clusters/{clusterId}/components/{componentId}/recover/plan", wrapper.PlanRecoverClusterComponent)

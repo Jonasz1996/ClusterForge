@@ -95,6 +95,8 @@ var Known = map[string]Spec{
 	"cluster.database_resynced":        {CategoryInventory, "Node van database opnieuw gesynchroniseerd"},
 	"cluster.database_switchover":      {CategoryInventory, "Andere primary van PostgreSQL"},
 	"cluster.database_reinitialized":   {CategoryInventory, "Replica van PostgreSQL opnieuw opgebouwd"},
+	"cluster.database_settings":        {CategoryInventory, "Instellingen van database gewijzigd"},
+	"cluster.database_updated":         {CategoryInventory, "Database bijgewerkt"},
 	"cluster.database_created":         {CategoryInventory, "Database met gebruiker aangemaakt"},
 	"cluster.database_dropped":         {CategoryInventory, "Database weggehaald"},
 	"cluster.database_password":        {CategoryInventory, "Nieuw wachtwoord voor databasegebruiker"},
