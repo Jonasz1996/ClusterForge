@@ -6,9 +6,11 @@ import { Findings } from "@/components/databases/Findings";
 import { formatBytes, QueryState, tableClass, tdClass, thClass } from "@/components/inventory/bits";
 import { Modal } from "@/components/Modal";
 import { ProdConfirm, prodConfirmed, useProdTotp } from "@/components/ProdConfirm";
-import { Alert, Badge, Button, Input } from "@/components/ui";
+import { Alert, Badge, Button, Input, Select } from "@/components/ui";
 import {
   useChangeSettings,
+  useJoinComponent,
+  useJoinPlan,
   useSettingsPlan,
   useUpgradeComponent,
   useUpgradePlan,
@@ -272,6 +274,141 @@ export function UpgradeDialog({ c, comp, onClose }: { c: ClusterDetail; comp: Cl
             }}
           >
             {upgrade.isPending ? "Bezig…" : "Bijwerken"}
+          </Button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+// JoinDialog voegt een node van het cluster toe aan de database, ook een CT
+// die Jonas zelf maakte. De andere nodes herstarten daarbij niet.
+export function JoinDialog({ c, comp, onClose }: { c: ClusterDetail; comp: ClusterComponent; onClose: () => void }) {
+  const router = useRouter();
+  const totp = useProdTotp();
+  const [confirm, setConfirm] = useState("");
+  const [nodeId, setNodeId] = useState("");
+  const plan = useJoinPlan(c.id, comp.id, nodeId);
+  const join = useJoinComponent(c.id);
+  const prod = c.environment === "prod";
+  const pg = comp.engine === "postgresql";
+  const p = plan.data;
+  const n = p?.node ?? null;
+  const findings = p?.findings.filter((f) => f.code !== "choose") ?? [];
+  return (
+    <Modal title={`Node toevoegen aan ${comp.title}`} onClose={onClose} wide>
+      <div className="space-y-4 text-sm">
+        <p>
+          {pg
+            ? "De nieuwe node wordt eerst lid van etcd en daarna een replica die alle data van de primary kopieert. Patroni op de andere nodes herlaadt alleen; PostgreSQL herstart daar niet."
+            : "De nieuwe node krijgt MariaDB en haalt alle data bij een node die meedoet. De andere nodes krijgen hem in hun configuratie, maar MariaDB herstart daar niet."}{" "}
+          Een node die je zelf maakte, zoals een CT, staat hier zodra de agent erop draait.
+        </p>
+        <QueryState q={plan}>
+          {p && (
+            <>
+              {p.candidates.length > 0 && (
+                <div>
+                  <label htmlFor="join-node" className="mb-1 block font-medium text-slate-700 dark:text-slate-300">
+                    Node
+                  </label>
+                  <Select id="join-node" value={nodeId} onChange={(e) => setNodeId(e.target.value)}>
+                    <option value="">Kies een node</option>
+                    {p.candidates.map((x) => (
+                      <option key={x.node_id} value={x.node_id}>
+                        {x.hostname}
+                      </option>
+                    ))}
+                  </Select>
+                </div>
+              )}
+              {n && (
+                <div className="rounded border border-slate-200 p-3 dark:border-slate-700">
+                  <p className="font-medium">
+                    {n.hostname} <span className="font-normal text-slate-500">{n.address}</span>
+                  </p>
+                  <p className="text-slate-600 dark:text-slate-400">
+                    {[
+                      n.os,
+                      n.pve_type === "lxc" ? `CT ${n.vmid}` : n.pve_type === "qemu" ? `VM ${n.vmid}` : "",
+                      n.memory_bytes > 0
+                        ? `${formatBytes(n.memory_bytes)} geheugen, de database vraagt ${formatBytes(n.need_bytes)}`
+                        : "",
+                      n.disk_free_bytes !== null ? `${formatBytes(n.disk_free_bytes)} vrij op ${n.disk_mount}` : "",
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </p>
+                  <details className="mt-2">
+                    <summary className="cursor-pointer text-slate-600 dark:text-slate-400">
+                      Stappen op {n.hostname} ({n.steps.length})
+                    </summary>
+                    <ol className="mt-1 list-decimal pl-5">
+                      {n.steps.map((s, i) => (
+                        <li key={i}>{s}</li>
+                      ))}
+                    </ol>
+                  </details>
+                </div>
+              )}
+              {n && (
+                <div>
+                  <p className="font-medium text-slate-700 dark:text-slate-300">Wat er op de andere nodes verandert</p>
+                  <ul className="divide-y divide-slate-100 dark:divide-slate-800">
+                    {p.members.map((m) => (
+                      <li key={m.node_id} className="py-2 sm:grid sm:grid-cols-[12rem_1fr] sm:gap-4">
+                        <div>
+                          <span className="font-medium">{m.hostname}</span>{" "}
+                          {m.writer && <Badge tone="blue">{pg ? "primary" : "VIP"}</Badge>}
+                          {m.role === "arbiter" && <Badge tone="slate">scheidsrechter</Badge>}
+                          <span className={`block ${m.healthy ? "text-slate-500" : "text-amber-700 dark:text-amber-300"}`}>
+                            {m.state}
+                          </span>
+                        </div>
+                        {m.changes.length === 0 ? (
+                          <p className="text-slate-500">niets</p>
+                        ) : (
+                          <ul className="mt-1 [overflow-wrap:anywhere] sm:mt-0">
+                            {m.changes.map((x) => (
+                              <li key={x}>{x}</li>
+                            ))}
+                          </ul>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {n && (
+                <ul className="list-disc space-y-1 pl-5">
+                  {p.effects.map((e) => (
+                    <li key={e}>{e}</li>
+                  ))}
+                </ul>
+              )}
+              {findings.length > 0 && <Findings list={findings} />}
+              {n && prod && <ProdConfirm slug={c.slug} value={confirm} onChange={setConfirm} />}
+            </>
+          )}
+        </QueryState>
+        {join.isError && <Alert>{join.error.message}</Alert>}
+        <div className="flex justify-end gap-2">
+          <Button variant="secondary" onClick={onClose}>
+            Annuleren
+          </Button>
+          <Button
+            disabled={
+              !p || !n || plan.isFetching || p.blocked || join.isPending || (prod && !prodConfirmed(c.slug, confirm, totp))
+            }
+            onClick={async () => {
+              if (!p || !n) return;
+              const j = await join
+                .mutateAsync({ id: comp.id, nodeId: n.node_id, hash: p.hash, confirm: prod ? confirm : undefined })
+                .catch(() => null);
+              if (j) router.push(`/taken/detail?id=${j.id}`);
+            }}
+          >
+            {join.isPending ? "Bezig…" : "Toevoegen"}
           </Button>
         </div>
       </div>

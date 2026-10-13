@@ -10,6 +10,11 @@ package galera
 // Een container start mariadbd zoals de unit van Debian dat doet: heeft
 // grastate.dat geen seqno, dan haalt galera_recovery eerst de positie uit
 // InnoDB en krijgt mariadbd die als --wsrep_start_position.
+//
+// TestRealGaleraJoin voegt een vierde node toe zoals Node toevoegen: alleen
+// de nieuwe node kent alle vier de adressen, de andere draaien door met hun
+// oude configuratie, en de nieuwe haalt alle data met mariabackup terwijl
+// er geschreven wordt.
 
 import (
 	"fmt"
@@ -29,6 +34,8 @@ type dockerGalera struct {
 	prefix string
 	conf   string
 	names  []string
+	// confs is de configuratie van een node die een eigen heeft.
+	confs map[int]string
 }
 
 func newDockerGalera(t *testing.T) *dockerGalera {
@@ -39,18 +46,33 @@ func newDockerGalera(t *testing.T) *dockerGalera {
 	for i := 1; i <= 3; i++ {
 		g.names = append(g.names, fmt.Sprintf("%s-%d", g.prefix, i))
 	}
-	g.conf = filepath.Join(t.TempDir(), "galera.cnf")
-	// Dezelfde instellingen als 99-clusterforge-galera.cnf.
-	conf := "[mysqld]\nbinlog_format = ROW\ndefault_storage_engine = InnoDB\ninnodb_autoinc_lock_mode = 2\nbind-address = 0.0.0.0\n\n" +
-		"[galera]\nwsrep_on = ON\nwsrep_provider = /usr/lib/galera/libgalera_smm.so\nwsrep_cluster_name = cftest\n" +
-		"wsrep_cluster_address = gcomm://" + strings.Join(g.names, ",") + "\nwsrep_sst_method = mariabackup\nwsrep_sst_auth = mysql:\n"
-	if err := os.WriteFile(g.conf, []byte(conf), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	g.conf = g.writeConf("galera.cnf")
 	g.cleanup()
 	t.Cleanup(g.cleanup)
 	g.docker("network", "create", g.prefix)
 	return g
+}
+
+// writeConf schrijft de instellingen van 99-clusterforge-galera.cnf met de
+// nodes die er nu zijn.
+func (g *dockerGalera) writeConf(name string) string {
+	g.t.Helper()
+	p := filepath.Join(g.t.TempDir(), name)
+	conf := "[mysqld]\nbinlog_format = ROW\ndefault_storage_engine = InnoDB\ninnodb_autoinc_lock_mode = 2\nbind-address = 0.0.0.0\n\n" +
+		"[galera]\nwsrep_on = ON\nwsrep_provider = /usr/lib/galera/libgalera_smm.so\nwsrep_cluster_name = cftest\n" +
+		"wsrep_cluster_address = gcomm://" + strings.Join(g.names, ",") + "\nwsrep_sst_method = mariabackup\nwsrep_sst_auth = mysql:\n"
+	if err := os.WriteFile(p, []byte(conf), 0o644); err != nil {
+		g.t.Fatal(err)
+	}
+	return p
+}
+
+// confOf is de configuratie van node i.
+func (g *dockerGalera) confOf(i int) string {
+	if c, ok := g.confs[i]; ok {
+		return c
+	}
+	return g.conf
 }
 
 func (g *dockerGalera) cleanup() {
@@ -72,7 +94,7 @@ func (g *dockerGalera) docker(args ...string) string {
 // van node i, terwijl de node zelf stilstaat.
 func (g *dockerGalera) onVolume(i int, cmd ...string) string {
 	g.t.Helper()
-	return g.docker(append([]string{"run", "--rm", "-v", g.names[i] + ":/var/lib/mysql", "-v", g.conf + ":/etc/mysql/conf.d/galera.cnf:ro", galeraImage}, cmd...)...)
+	return g.docker(append([]string{"run", "--rm", "-v", g.names[i] + ":/var/lib/mysql", "-v", g.confOf(i) + ":/etc/mysql/conf.d/galera.cnf:ro", galeraImage}, cmd...)...)
 }
 
 // position leest de positie van een node die stilstaat, zoals de agent:
@@ -101,7 +123,7 @@ func (g *dockerGalera) start(i int, newCluster bool) {
 	name := g.names[i]
 	_ = exec.Command("docker", "rm", "-f", name).Run()
 	args := []string{"run", "-d", "--name", name, "--hostname", name, "--network", g.prefix, "-v", name + ":/var/lib/mysql",
-		"-v", g.conf + ":/etc/mysql/conf.d/galera.cnf:ro", "-e", "MARIADB_ALLOW_EMPTY_ROOT_PASSWORD=1", galeraImage,
+		"-v", g.confOf(i) + ":/etc/mysql/conf.d/galera.cnf:ro", "-e", "MARIADB_ALLOW_EMPTY_ROOT_PASSWORD=1", galeraImage,
 		"--wsrep_node_name=" + name, "--wsrep_node_address=" + name}
 	if out, err := exec.Command("docker", "run", "--rm", "-v", name+":/var/lib/mysql", galeraImage, "cat", GrastateFile).Output(); err == nil {
 		if p, err := ParseGrastate(string(out)); err == nil && p.Seqno < 0 {
@@ -310,4 +332,64 @@ func TestRealGaleraRestart(t *testing.T) {
 		best, _ := g.choose()
 		g.restart(best, 6)
 	})
+}
+
+func TestRealGaleraJoin(t *testing.T) {
+	g := newDockerGalera(t)
+	g.up()
+	uptime := func(i int) int {
+		n, _ := strconv.Atoi(g.sql(i, "SELECT variable_value FROM information_schema.global_status WHERE variable_name = 'UPTIME'"))
+		return n
+	}
+	before := uptime(0)
+
+	// Er wordt geschreven terwijl de nieuwe node aansluit.
+	stop := make(chan struct{})
+	done := make(chan int)
+	first := g.names[0]
+	go func() {
+		n := 0
+		for {
+			select {
+			case <-stop:
+				done <- n
+				return
+			default:
+			}
+			if exec.Command("docker", "exec", first, "mariadb", "-e", "INSERT INTO cf.t (v) VALUES ('tijdens')").Run() == nil {
+				n++
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+	}()
+
+	// Alleen de nieuwe node kent alle vier de adressen.
+	g.names = append(g.names, fmt.Sprintf("%s-%d", g.prefix, 4))
+	g.confs = map[int]string{3: g.writeConf("galera4.cnf")}
+	start := time.Now()
+	g.start(3, false)
+	g.synced(4, 0, 1, 2, 3)
+	t.Logf("de vierde node Synced na %s", time.Since(start).Round(100*time.Millisecond))
+	close(stop)
+	written := <-done
+	if written == 0 {
+		t.Fatal("er werd niets geschreven tijdens het aansluiten")
+	}
+	want := strconv.Itoa(2 + written)
+	for i := range g.names {
+		g.synced(4, i)
+		if got := g.sql(i, "SELECT count(*) FROM cf.t"); got != want {
+			t.Errorf("%s heeft %s rijen, verwacht %s", g.names[i], got, want)
+		}
+	}
+	// De nodes die er al waren, herstartten niet.
+	if after := uptime(0); after < before {
+		t.Errorf("%s herstartte: uptime %d, eerder %d", g.names[0], after, before)
+	}
+	// Ook na een herstart van een oude node met zijn oude configuratie doet
+	// hij weer mee: hij vindt het cluster via de nodes die hij kent.
+	g.stop(1)
+	g.synced(3, 0, 3)
+	g.start(1, false)
+	g.synced(4, 0, 1, 2, 3)
 }

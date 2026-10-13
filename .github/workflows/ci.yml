@@ -73,11 +73,12 @@ jobs:
         with:
           go-version-file: go.mod
       # Drie MariaDB-containers in een Galera-cluster: welke node na een
-      # uitval de nieuwste data heeft, en dat er niets verloren gaat.
-      - name: Opnieuw beginnen na een uitval
+      # uitval de nieuwste data heeft, dat er niets verloren gaat, en dat
+      # een vierde node aansluit terwijl er geschreven wordt.
+      - name: Opnieuw beginnen na een uitval en een node toevoegen
         env:
           CF_TEST_GALERA_DOCKER: "1"
-        run: go test -count=1 -timeout 20m -v -run TestRealGaleraRestart ./internal/galera/
+        run: go test -count=1 -timeout 20m -v -run TestRealGalera ./internal/galera/
 
   patroni:
     name: Echte Patroni
@@ -99,7 +100,7 @@ jobs:
       # Drie nodes op loopback met de configuratie van het onderdeel: failover
       # zonder verlies, de oude primary terug als replica, en opkomen na een
       # uitval van alle nodes.
-      - name: Failover en opkomen na een uitval
+      - name: Failover, opkomen na een uitval en een node toevoegen
         env:
           CF_TEST_PATRONI: ${{ runner.temp }}/patroni/bin/patroni
           CF_TEST_ETCD: /usr/local/bin/etcd

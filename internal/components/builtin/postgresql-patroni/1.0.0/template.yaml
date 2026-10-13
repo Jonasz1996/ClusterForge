@@ -33,6 +33,16 @@ params:
     help: Het eigen VIP van PostgreSQL; het staat altijd op de primary.
     optional: true
     immutable: true
+  # De nodes die later bij de database kwamen, zoals "nc4". Hun etcd sluit
+  # aan bij de leden die er al zijn, in plaats van een nieuw cluster te
+  # beginnen. ClusterForge vult het in bij Node toevoegen.
+  - name: etcd_joined
+    type: string
+    label: Later toegevoegd aan etcd
+    help: ClusterForge vult dit zelf in.
+    optional: true
+    immutable: true
+    pattern: "[A-Za-z0-9][A-Za-z0-9._-]*( [A-Za-z0-9][A-Za-z0-9._-]*)*"
   - name: replication_password
     type: secret
     label: Wachtwoord van de replicatie

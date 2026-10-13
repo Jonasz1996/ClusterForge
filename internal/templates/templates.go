@@ -291,6 +291,8 @@ var funcs = template.FuncMap{
 	"sub":  func(a, b int) int { return a - b },
 	"mul":  func(a, b int) int { return a * b },
 	"join": strings.Join,
+	// fields splitst tekst op spaties, zoals "nc4 nc5".
+	"fields": strings.Fields,
 	// pgsize schrijft een grootte zoals 256M als 256MB, de eenheid van
 	// PostgreSQL.
 	"pgsize": pgSize,

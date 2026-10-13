@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
-import { SettingsDialog, UpgradeDialog } from "@/components/databases/ComponentChanges";
+import { JoinDialog, SettingsDialog, UpgradeDialog } from "@/components/databases/ComponentChanges";
 import { Modal } from "@/components/Modal";
 import { ProdConfirm, prodConfirmed, useProdTotp } from "@/components/ProdConfirm";
 import { QueryState, formatBytes, tableClass, tdClass, thClass } from "@/components/inventory/bits";
@@ -81,12 +81,15 @@ function Component({ c, comp, isAdmin }: { c: ClusterDetail; comp: ClusterCompon
   const [manage, setManage] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [upgrade, setUpgrade] = useState(false);
+  const [joinOpen, setJoinOpen] = useState(false);
   const remove = useRemoveComponent(c.id);
   const auto = useSetAutoRecover(c.id);
   const rec = recovering(comp);
   const applied = comp.applied_revision !== null;
   // Het VIP staat er al apart.
-  const settings = Object.entries(comp.params).filter(([k]) => k !== "vip");
+  // Het VIP staat hieronder; welke nodes later bij etcd kwamen, houdt
+  // ClusterForge zelf bij.
+  const settings = Object.entries(comp.params).filter(([k, v]) => k !== "vip" && k !== "etcd_joined" && v !== null);
   const out = new Map(comp.nodes_out.map((o) => [o.hostname, o]));
   // Bij PostgreSQL start Patroni de nodes zelf opnieuw; Beheer kan wel
   // overschakelen en een replica opnieuw opbouwen.
@@ -127,6 +130,11 @@ function Component({ c, comp, isAdmin }: { c: ClusterDetail; comp: ClusterCompon
             {isAdmin && applied && (
               <Button variant="secondary" disabled={busy || rec} onClick={() => setUpgrade(true)}>
                 Bijwerken…
+              </Button>
+            )}
+            {isAdmin && applied && (
+              <Button variant="secondary" disabled={busy || rec} onClick={() => setJoinOpen(true)}>
+                Node toevoegen…
               </Button>
             )}
             {isAdmin && applied && !pg && (
@@ -278,6 +286,7 @@ function Component({ c, comp, isAdmin }: { c: ClusterDetail; comp: ClusterCompon
       {manage && <ManageDialog c={c} comp={comp} onClose={() => setManage(false)} />}
       {settingsOpen && <SettingsDialog c={c} comp={comp} onClose={() => setSettingsOpen(false)} />}
       {upgrade && <UpgradeDialog c={c} comp={comp} onClose={() => setUpgrade(false)} />}
+      {joinOpen && <JoinDialog c={c} comp={comp} onClose={() => setJoinOpen(false)} />}
     </div>
   );
 }

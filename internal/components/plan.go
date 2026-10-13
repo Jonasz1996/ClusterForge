@@ -276,59 +276,13 @@ func (s *Service) plan(ctx context.Context, clusterID uuid.UUID, req Request) (P
 	osVersions := map[string][]string{}
 	for i := range spec.Nodes {
 		n := &spec.Nodes[i]
-		r := byID[n.NodeID]
-		pn := PlanNode{NodeID: n.NodeID, Hostname: n.Hostname, Role: n.Role, Index: n.Index, Address: states[n.NodeID].PrimaryIP,
-			PveType: deref(r.PveType), PveNode: deref(r.PveNode)}
-		if r.PveVmid != nil {
-			pn.VMID = int(*r.PveVmid)
-		}
-		f := states[n.NodeID].Facts
-		switch {
-		case !r.HasAgent:
-			add(Blocked, "no_agent", n, "op "+n.Hostname+" draait geen agent", "")
-		case r.HeartbeatAt == nil || s.Now().Sub(*r.HeartbeatAt) > s.Fresh:
-			add(Blocked, "offline", n, "de agent op "+n.Hostname+" is niet verbonden", "")
-		case r.AgentProtocol < protocol.DBSince:
-			add(Blocked, "old_agent", n, fmt.Sprintf("de agent op %s is te oud (protocol %d); werk hem bij naar protocol %d", n.Hostname, r.AgentProtocol, protocol.DBSince), "")
-		}
-		switch r.Lifecycle {
-		case store.NodeLifecycleActive:
-		case store.NodeLifecycleDraining, store.NodeLifecycleDecommissioned:
-			add(Blocked, "lifecycle", n, fmt.Sprintf("%s staat op %s", n.Hostname, r.Lifecycle), "")
-		default:
-			add(Warning, "lifecycle", n, fmt.Sprintf("%s staat op %s, niet op actief", n.Hostname, r.Lifecycle), "")
-		}
-		if f == nil {
-			add(Blocked, "no_facts", n, "ClusterForge kent "+n.Hostname+" nog niet: de agent heeft nog geen facts gestuurd", "")
+		pn, osVersion, ok := s.checkNode(n, byID[n.NodeID], states[n.NodeID], status[n.NodeID], req.Engine, c.Slug, tpl.Title, int64(pool), usage, add)
+		if !ok {
 			p.Nodes = append(p.Nodes, pn)
 			continue
 		}
-		if pn.Address == "" {
-			pn.Address = f.PrimaryAddress
-		}
-		pn.OS = cmp.Or(f.OS.PrettyName, strings.TrimSpace(f.OS.ID+" "+f.OS.VersionID))
-		if f.OS.ID != "debian" || (f.OS.VersionID != "12" && f.OS.VersionID != "13") {
-			add(Blocked, "os", n, fmt.Sprintf("ClusterForge zet %s alleen op Debian 12 of 13; %s draait %s", tpl.Title, n.Hostname, cmp.Or(pn.OS, "een onbekend systeem")), "")
-		} else {
-			osVersions[f.OS.VersionID] = append(osVersions[f.OS.VersionID], n.Hostname)
-		}
-		ports, units := e.ports, e.units
-		if n.Role == RoleArbiter {
-			ports, units = e.arbiterPorts, e.arbiterUnits
-		}
-		for _, l := range f.Listeners {
-			if l.Proto == "tcp" && slices.Contains(ports, l.Port) && !ours(l.Unit, units) {
-				add(Blocked, "port", n, fmt.Sprintf("op %s is poort %d al bezet door %s", n.Hostname, l.Port, cmp.Or(l.Unit, "een proces dat ClusterForge niet kent")), "")
-			}
-		}
-		if n.Role == RoleData {
-			if req.Engine == protocol.DBPostgreSQL {
-				checkExistingPG(&pn, n, status[n.NodeID], c.Slug, add)
-			} else {
-				s.checkExisting(&pn, n, f, status[n.NodeID], c.Slug, add)
-			}
-			s.checkMemory(&pn, n, r, f, int64(pool), usage, e, add)
-			checkDisk(&pn, n, f, e.dataDir, add)
+		if osVersion != "" {
+			osVersions[osVersion] = append(osVersions[osVersion], n.Hostname)
 		}
 		steps, err := deploy.RenderMasked(tpl, spec.deploySpec(), states, n.NodeID)
 		if err != nil {
@@ -383,6 +337,8 @@ func requestSettings(tpl *templates.Template, req Request) (map[string]any, erro
 			return nil, &InvalidError{k, "dit wachtwoord maakt ClusterForge zelf"}
 		case k == vipParam:
 			return nil, &InvalidError{k, "het eigen VIP kies je bij vip_address"}
+		case k == joinedParam:
+			return nil, &InvalidError{k, "dit houdt ClusterForge zelf bij"}
 		}
 		out[k] = v
 	}
@@ -541,6 +497,69 @@ func (s *Service) server(ctx context.Context, nodeID uuid.UUID, engine string) (
 		}
 	}
 	return nil, nil
+}
+
+// checkNode controleert een node voor de database: de agent, de toestand
+// in ClusterForge, het systeem, de poorten, wat er al draait, het geheugen
+// en de schijf. Het geeft wat het plan over de node zegt en de versie van
+// Debian, leeg als het geen Debian 12 of 13 is; ok is false zolang de agent
+// geen facts stuurde.
+func (s *Service) checkNode(n *Node, r store.ListComponentCandidatesRow, st deploy.NodeState, status dbStatus, engineName, slug, title string,
+	pool int64, usage map[uuid.UUID]float64, add func(string, string, *Node, string, string)) (pn PlanNode, osVersion string, ok bool) {
+	e := engines[engineName]
+	pn = PlanNode{NodeID: n.NodeID, Hostname: n.Hostname, Role: n.Role, Index: n.Index, Address: st.PrimaryIP,
+		PveType: deref(r.PveType), PveNode: deref(r.PveNode)}
+	if r.PveVmid != nil {
+		pn.VMID = int(*r.PveVmid)
+	}
+	f := st.Facts
+	switch {
+	case !r.HasAgent:
+		add(Blocked, "no_agent", n, "op "+n.Hostname+" draait geen agent", "")
+	case r.HeartbeatAt == nil || s.Now().Sub(*r.HeartbeatAt) > s.Fresh:
+		add(Blocked, "offline", n, "de agent op "+n.Hostname+" is niet verbonden", "")
+	case r.AgentProtocol < protocol.DBSince:
+		add(Blocked, "old_agent", n, fmt.Sprintf("de agent op %s is te oud (protocol %d); werk hem bij naar protocol %d", n.Hostname, r.AgentProtocol, protocol.DBSince), "")
+	}
+	switch r.Lifecycle {
+	case store.NodeLifecycleActive:
+	case store.NodeLifecycleDraining, store.NodeLifecycleDecommissioned:
+		add(Blocked, "lifecycle", n, fmt.Sprintf("%s staat op %s", n.Hostname, r.Lifecycle), "")
+	default:
+		add(Warning, "lifecycle", n, fmt.Sprintf("%s staat op %s, niet op actief", n.Hostname, r.Lifecycle), "")
+	}
+	if f == nil {
+		add(Blocked, "no_facts", n, "ClusterForge kent "+n.Hostname+" nog niet: de agent heeft nog geen facts gestuurd", "")
+		return pn, "", false
+	}
+	if pn.Address == "" {
+		pn.Address = f.PrimaryAddress
+	}
+	pn.OS = cmp.Or(f.OS.PrettyName, strings.TrimSpace(f.OS.ID+" "+f.OS.VersionID))
+	if f.OS.ID != "debian" || (f.OS.VersionID != "12" && f.OS.VersionID != "13") {
+		add(Blocked, "os", n, fmt.Sprintf("ClusterForge zet %s alleen op Debian 12 of 13; %s draait %s", title, n.Hostname, cmp.Or(pn.OS, "een onbekend systeem")), "")
+	} else {
+		osVersion = f.OS.VersionID
+	}
+	ports, units := e.ports, e.units
+	if n.Role == RoleArbiter {
+		ports, units = e.arbiterPorts, e.arbiterUnits
+	}
+	for _, l := range f.Listeners {
+		if l.Proto == "tcp" && slices.Contains(ports, l.Port) && !ours(l.Unit, units) {
+			add(Blocked, "port", n, fmt.Sprintf("op %s is poort %d al bezet door %s", n.Hostname, l.Port, cmp.Or(l.Unit, "een proces dat ClusterForge niet kent")), "")
+		}
+	}
+	if n.Role == RoleData {
+		if engineName == protocol.DBPostgreSQL {
+			checkExistingPG(&pn, n, status, slug, add)
+		} else {
+			s.checkExisting(&pn, n, f, status, slug, add)
+		}
+		s.checkMemory(&pn, n, r, f, pool, usage, e, add)
+		checkDisk(&pn, n, f, e.dataDir, add)
+	}
+	return pn, osVersion, true
 }
 
 // checkExisting kijkt wat er al aan MariaDB of MySQL op een datanode staat.

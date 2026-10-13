@@ -3007,6 +3007,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/clusters/{clusterId}/components/{componentId}/join/plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+                componentId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Bekijken wat het toevoegen van een node aan een database doet (admin)
+         * @description De nodes van het cluster die nog niet bij de database horen, en voor de gekozen node wat er gebeurt: de controles
+         *     op de nieuwe node (agent, Debian, poorten, geheugen, schijf), wat er op de andere nodes verandert (geen ervan
+         *     herstart de database), het VIP en het aantal stemmen daarna. Zonder node_id zijn het alleen de kandidaten. Er
+         *     verandert niets.
+         */
+        post: operations["planClusterComponentJoin"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/clusters/{clusterId}/components/{componentId}/join": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+                componentId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Een node toevoegen aan een database (admin); wordt een taak
+         * @description Maakt een nieuwe revisie met de node erbij en past die toe. Bij Galera haalt de nieuwe node alle data bij een node
+         *     die meedoet; bij PostgreSQL wordt hij eerst lid van etcd en dan een replica. De andere nodes herstarten niet. Een
+         *     ander plan geeft 409 met code plan_stale. Op prod vraagt het tweestapsverificatie en de slug in confirm.
+         */
+        post: operations["joinClusterComponent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/clusters/{clusterId}/components/{componentId}/recover/plan": {
         parameters: {
             query?: never;
@@ -4575,6 +4626,67 @@ export interface components {
             hash: string;
             /** @description De slug van het cluster; nodig op prod */
             confirm?: string;
+        };
+        ComponentJoinPlanInput: {
+            /**
+             * Format: uuid
+             * @description De node die bij de database komt; zonder alleen de kandidaten
+             */
+            node_id?: string;
+        };
+        ComponentJoinInput: {
+            /** Format: uuid */
+            node_id: string;
+            /** @description De hash van het plan zoals je het zag */
+            hash: string;
+            /** @description De slug van het cluster; nodig op prod */
+            confirm?: string;
+        };
+        ComponentJoinPlan: {
+            /** Format: uuid */
+            cluster_id: string;
+            cluster_name: string;
+            slug: string;
+            prod: boolean;
+            /** @enum {string} */
+            engine: "mariadb" | "postgresql";
+            title: string;
+            /** @description De revisie nu; met de node erbij wordt het de volgende */
+            revision: number;
+            /** @description De nodes van het cluster zonder de database */
+            candidates: components["schemas"]["ComponentJoinCandidate"][];
+            /** @description De nieuwe node met de controles en stappen; null zonder keuze */
+            node: components["schemas"]["ComponentPlanNode"] | null;
+            /** @description De nodes die er al zijn */
+            members: components["schemas"]["ComponentJoinMember"][];
+            /** @description Het VIP van de database; leeg zonder */
+            vip: string;
+            /** @description De nieuwe node krijgt het VIP in keepalived */
+            vip_joins: boolean;
+            /** @description Het aantal stemmen met de nieuwe node erbij */
+            votes: number;
+            /** @description Wat er gebeurt */
+            effects: string[];
+            findings: components["schemas"]["ComponentFinding"][];
+            blocked: boolean;
+            hash: string;
+        };
+        ComponentJoinCandidate: {
+            /** Format: uuid */
+            node_id: string;
+            hostname: string;
+        };
+        ComponentJoinMember: {
+            /** Format: uuid */
+            node_id: string;
+            hostname: string;
+            role: string;
+            state: string;
+            healthy: boolean;
+            /** @description De node met het VIP bij Galera */
+            writer: boolean;
+            /** @description Wat er op deze node verandert; niets herstart de database */
+            changes: string[];
         };
         ComponentRecoverPlan: {
             /** Format: uuid */
@@ -14378,6 +14490,70 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["ComponentUpgradeInput"];
+            };
+        };
+        responses: {
+            /** @description Taak aangemaakt */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Job"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    planClusterComponentJoin: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+                componentId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ComponentJoinPlanInput"];
+            };
+        };
+        responses: {
+            /** @description Het plan */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ComponentJoinPlan"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    joinClusterComponent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+                componentId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ComponentJoinInput"];
             };
         };
         responses: {

@@ -137,3 +137,70 @@ func toAPIUpgradePlan(p components.UpdatePlan) gen.ComponentUpgradePlan {
 	}
 	return out
 }
+
+// PlanClusterComponentJoin toont wat het toevoegen van een node aan een
+// database doet.
+func (s *Server) PlanClusterComponentJoin(w http.ResponseWriter, r *http.Request, clusterID, componentID uuid.UUID) {
+	if _, ok := requireAdmin(w, r); !ok {
+		return
+	}
+	var in gen.ComponentJoinPlanInput
+	if !decode(w, r, &in) {
+		return
+	}
+	p, err := s.components.JoinPlan(r.Context(), clusterID, componentID, in.NodeId)
+	if err != nil {
+		s.componentError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, toAPIJoinPlan(p))
+}
+
+// JoinClusterComponent voegt een node toe aan een database, als het plan
+// nog is wat de gebruiker zag.
+func (s *Server) JoinClusterComponent(w http.ResponseWriter, r *http.Request, clusterID, componentID uuid.UUID) {
+	p, ok := requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	var in gen.ComponentJoinInput
+	if !decode(w, r, &in) {
+		return
+	}
+	ctx := r.Context()
+	c, err := s.q.GetCluster(ctx, clusterID)
+	if err != nil {
+		s.componentError(w, r, err)
+		return
+	}
+	if !confirmProd(w, p, c.Environment == store.EnvironmentProd, c.Slug, in.Confirm, "een node aan een database toevoegen") {
+		return
+	}
+	j, err := s.components.Join(ctx, events.User(p.User.ID), clusterID, componentID, in.NodeId, in.Hash)
+	if err != nil {
+		s.componentError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, toAPIJob(j, &p.User.Username))
+}
+
+func toAPIJoinPlan(p components.JoinPlan) gen.ComponentJoinPlan {
+	out := gen.ComponentJoinPlan{
+		ClusterId: p.ClusterID, ClusterName: p.ClusterName, Slug: p.Slug, Prod: p.Prod, Engine: gen.ComponentJoinPlanEngine(p.Engine), Title: p.Title,
+		Revision: p.Revision, Candidates: make([]gen.ComponentJoinCandidate, 0, len(p.Candidates)), Members: make([]gen.ComponentJoinMember, 0, len(p.Members)),
+		Vip: p.VIP, VipJoins: p.VIPJoins, Votes: p.Votes, Effects: nonNil(p.Effects), Findings: toAPIFindings(p.Findings), Blocked: p.Blocked, Hash: p.Hash,
+		Node: nullable.NewNullNullable[gen.ComponentPlanNode](),
+	}
+	for _, c := range p.Candidates {
+		out.Candidates = append(out.Candidates, gen.ComponentJoinCandidate{NodeId: c.NodeID, Hostname: c.Hostname})
+	}
+	for _, m := range p.Members {
+		out.Members = append(out.Members, gen.ComponentJoinMember{
+			NodeId: m.NodeID, Hostname: m.Hostname, Role: m.Role, State: m.State, Healthy: m.Healthy, Writer: m.Writer, Changes: nonNil(m.Changes),
+		})
+	}
+	if n := p.Node; n != nil {
+		out.Node = nullable.NewNullableWithValue(toAPIPlanNode(*n))
+	}
+	return out
+}

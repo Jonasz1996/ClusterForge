@@ -91,7 +91,19 @@ func (s *Service) runPatroni(ctx context.Context, j *jobs.Job, r *rendered) erro
 			if n.Role == RoleData {
 				steps = steps[:i+1]
 			}
+			joins := slices.Contains(r.join, n.NodeID)
+			if joins {
+				// Een nieuwe node wordt eerst lid, en sluit dan aan bij de
+				// leden die er zijn.
+				if err := s.etcdJoin(ctx, j, st, r, n); err != nil {
+					return err
+				}
+				steps = append(steps, etcdWait())
+			}
 			_, err = deploy.ApplySteps(ctx, s.bus, options(ctx, j, st, n, "-etcd", s.Retry), steps)
+			if err == nil && joins {
+				st.Logf("etcd doet mee op %s", n.Hostname)
+			}
 			return err
 		}); err != nil {
 			return err
@@ -115,10 +127,11 @@ func (s *Service) runPatroni(ctx context.Context, j *jobs.Job, r *rendered) erro
 			return err
 		}
 	}
-	if r.revision <= 1 && !r.restart {
+	if (r.revision <= 1 && !r.restart) || len(r.join) > 0 {
 		// De eerste revisie: Patroni nam de instellingen mee bij het begin.
-		// Dat hangt af van de taak, niet van wat er al toegepast is, zodat
-		// een hervatte taak dezelfde stappen heeft.
+		// Een nieuwe node leest ze uit etcd. Dat hangt af van de taak, niet
+		// van wat er al toegepast is, zodat een hervatte taak dezelfde
+		// stappen heeft.
 		return nil
 	}
 	return s.patroniSettings(ctx, j, r, r.restart)
