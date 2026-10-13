@@ -3582,7 +3582,7 @@ type ClusterComponent struct {
 	// Engine mariadb of postgresql
 	Engine string `json:"engine"`
 
-	// Health Wat de bewaking laatst zag; leeg zolang ze nog niet keek. Telt mee in de status van het cluster
+	// Health Wat de bewaking laatst zag; leeg als ze nog niet keek of al twee minuten niet, zoals tijdens een taak. Telt mee in de status van het cluster
 	Health ClusterComponentHealth `json:"health"`
 
 	// HealthAt Wanneer de bewaking laatst keek
@@ -3622,7 +3622,7 @@ type ClusterComponent struct {
 	Vip nullable.Nullable[ComponentVIP] `json:"vip"`
 }
 
-// ClusterComponentHealth Wat de bewaking laatst zag; leeg zolang ze nog niet keek. Telt mee in de status van het cluster
+// ClusterComponentHealth Wat de bewaking laatst zag; leeg als ze nog niet keek of al twee minuten niet, zoals tijdens een taak. Telt mee in de status van het cluster
 type ClusterComponentHealth string
 
 // ClusterDetail defines model for ClusterDetail.
