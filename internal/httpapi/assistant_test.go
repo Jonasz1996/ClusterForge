@@ -568,7 +568,7 @@ func TestAssistantAsk(t *testing.T) {
 		shape.Thinking.BlockBinding.PrefixMismatchBehavior != "drop_block" || shape.OutputConfig.Effort != "medium" || shape.ToolChoice != nil {
 		t.Fatalf("vorm: %+v", shape)
 	}
-	if len(shape.Tools) != len(e.asst.Tools) || len(shape.Tools) != 22 {
+	if len(shape.Tools) != len(e.asst.Tools) || len(shape.Tools) != 24 {
 		t.Fatalf("%d tools", len(shape.Tools))
 	}
 	for _, tl := range shape.Tools {
