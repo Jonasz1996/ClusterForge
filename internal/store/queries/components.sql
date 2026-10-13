@@ -67,12 +67,12 @@ WHERE n.cluster_id = $1
 ORDER BY lower(n.hostname);
 
 -- name: ListWatchedComponents :many
--- De toegepaste onderdelen met MariaDB, voor de bewaking.
+-- De toegepaste onderdelen, voor de bewaking.
 SELECT cc.*, c.name AS cluster_name, c.slug AS cluster_slug
 FROM cluster_components cc
 JOIN clusters c ON c.id = cc.cluster_id
-WHERE cc.applied_revision IS NOT NULL AND cc.engine = 'mariadb'
-ORDER BY c.name;
+WHERE cc.applied_revision IS NOT NULL
+ORDER BY c.name, cc.engine;
 
 -- name: ListDBComponents :many
 -- De toegepaste onderdelen met een database van deze soort, voor een
@@ -87,6 +87,19 @@ ORDER BY c.name;
 UPDATE cluster_components
 SET down_since = @down_since, down_reason = @down_reason, nodes_out = @nodes_out
 WHERE id = @id;
+
+-- name: SetClusterComponentWatch :exec
+-- Wat de bewaking zag: de toestand van de database en wat ze onthoudt
+-- voor de volgende keer.
+UPDATE cluster_components
+SET health = @health, health_reason = @health_reason, health_at = @health_at, observed = @observed
+WHERE id = @id;
+
+-- name: ListComponentHealth :many
+-- De toestand van de databases, voor de status van de clusters.
+SELECT cluster_id, engine, health, health_reason, health_at
+FROM cluster_components
+WHERE applied_revision IS NOT NULL AND health_at IS NOT NULL;
 
 -- name: SetClusterComponentAutoRecover :exec
 UPDATE cluster_components SET auto_recover = @auto_recover, updated_at = now() WHERE id = @id;

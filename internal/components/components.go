@@ -30,6 +30,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/deploy"
 	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/jobs"
+	"github.com/Jonasz1996/clusterforge/internal/status"
 	"github.com/Jonasz1996/clusterforge/internal/store"
 	"github.com/Jonasz1996/clusterforge/internal/templates"
 	"github.com/Jonasz1996/clusterforge/pkg/protocol"
@@ -331,6 +332,13 @@ type Component struct {
 	// Recovery is de laatste taak die de database opnieuw startte; nil als
 	// er nog geen was.
 	Recovery *Recovery
+	// Health is wat de bewaking laatst zag (status.Healthy, Degraded of
+	// Down), met de reden; leeg als ze nog niet keek of al langer dan
+	// status.DBHealthStale niet, zoals tijdens een taak. HealthAt is
+	// wanneer ze laatst keek.
+	Health       string
+	HealthReason string
+	HealthAt     *time.Time
 }
 
 // NodeOut is een node die niet meedoet, met sinds wanneer en waarom.
@@ -425,6 +433,10 @@ func view(r store.ClusterComponent) (Component, error) {
 	if r.AppliedRevision != nil {
 		v := int(*r.AppliedRevision)
 		c.AppliedRevision = &v
+	}
+	c.HealthAt = r.HealthAt
+	if r.HealthAt != nil && time.Since(*r.HealthAt) <= status.DBHealthStale {
+		c.Health, c.HealthReason = r.Health, r.HealthReason
 	}
 	if v := spec.VIP; v != nil {
 		c.VIP = &ComponentVIP{ID: v.ID, Address: v.Address, Nodes: []string{}, Own: v.Own, VRID: v.VRID}

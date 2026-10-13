@@ -482,9 +482,19 @@ func (s *Service) mariadb(ctx context.Context, nodeID uuid.UUID) (*protocol.DBSe
 // server vraagt de agent naar de databaseserver van engine op zijn node;
 // nil als er geen is.
 func (s *Service) server(ctx context.Context, nodeID uuid.UUID, engine string) (*protocol.DBServer, error) {
+	return s.status(ctx, nodeID, engine, false)
+}
+
+// quickServer is server zonder de databases en de clients, voor de
+// bewaking. Een agent ouder dan protocol 13 geeft ze toch.
+func (s *Service) quickServer(ctx context.Context, nodeID uuid.UUID, engine string) (*protocol.DBServer, error) {
+	return s.status(ctx, nodeID, engine, true)
+}
+
+func (s *Service) status(ctx context.Context, nodeID uuid.UUID, engine string, quick bool) (*protocol.DBServer, error) {
 	ctx, cancel := context.WithTimeout(ctx, s.Timeout)
 	defer cancel()
-	res, err := s.bus.DB(ctx, nodeID, protocol.DBRequest{ID: uuid.NewString(), Op: protocol.DBStatus, Deadline: time.Now().Add(s.Timeout)})
+	res, err := s.bus.DB(ctx, nodeID, protocol.DBRequest{ID: uuid.NewString(), Op: protocol.DBStatus, Deadline: time.Now().Add(s.Timeout), Quick: quick})
 	if err != nil {
 		return nil, err
 	}

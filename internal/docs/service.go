@@ -211,7 +211,8 @@ func (s *Service) tick(ctx context.Context) error {
 var quiet = map[string]bool{
 	"agent.command": true, "agent.enroll_failed": true, "node.status_changed": true, "vip.owner_changed": true,
 	"service.status_changed": true, "kube.app_status_changed": true, "cluster.database_down": true, "cluster.database_up": true,
-	"cluster.database_node_out": true, "cluster.database_node_back": true, "cluster.database_recovering": true, "cluster.database_password": true, "vm.status_changed": true, "node.link_proposed": true, "node.link_ignored": true,
+	"cluster.database_node_out": true, "cluster.database_node_back": true, "cluster.database_restarted": true,
+	"cluster.database_state_transfer": true, "cluster.database_recovering": true, "cluster.database_password": true, "vm.status_changed": true, "node.link_proposed": true, "node.link_ignored": true,
 	"backup.sandbox_created": true, "backup.sandbox_destroyed": true, "backup.sandbox_destroy_failed": true,
 	"backup.sandbox_connection_refused": true, "backup.inventory_failed": true, "backup.inventory_recovered": true,
 	"backup.db_dumped": true, "backup.db_dump_suspect": true, "backup.db_dump_failed": true, "backup.db_restore_failed": true,

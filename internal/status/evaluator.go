@@ -125,6 +125,16 @@ func (e *Evaluator) evaluate(ctx context.Context, now time.Time) error {
 		if err != nil {
 			return err
 		}
+		health, err := q.ListComponentHealth(ctx)
+		if err != nil {
+			return err
+		}
+		dbs := map[uuid.UUID][]DBHealth{}
+		for _, h := range health {
+			if h.Health != "" && h.HealthAt != nil {
+				dbs[h.ClusterID] = append(dbs[h.ClusterID], DBHealth{Status: Status(h.Health), Reason: h.HealthReason, At: *h.HealthAt})
+			}
+		}
 		perCluster := map[uuid.UUID][]ClusterNode{}
 		hostnames := map[uuid.UUID]string{}
 		for _, n := range nodes {
@@ -173,6 +183,9 @@ func (e *Evaluator) evaluate(ctx context.Context, now time.Time) error {
 			result := res.Result
 			if in, ok := kube[c.ID]; ok && c.Type == "kubernetes" {
 				result = Kube(result, *in, now)
+			}
+			if in := dbs[c.ID]; len(in) > 0 {
+				result = Database(result, in, now)
 			}
 			if err := e.saveCluster(ctx, q, c, result); err != nil {
 				return err

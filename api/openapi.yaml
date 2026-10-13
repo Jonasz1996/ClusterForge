@@ -3282,6 +3282,30 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
+  /clusters/{clusterId}/components/{componentId}/metrics:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: componentId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: range, in: query, schema: { $ref: "#/components/schemas/MetricsRange" } }
+      - $ref: "#/components/parameters/MetricsFrom"
+      - $ref: "#/components/parameters/MetricsTo"
+    get:
+      operationId: getComponentMetrics
+      summary: Grafieken van de database van een cluster, met een lijn per node
+      description: |
+        Bij MariaDB verbindingen, query's per seconde, de buffer pool, de wachtrij en flow control van Galera, en de grootte per
+        database; bij PostgreSQL verbindingen, transacties per seconde, cache-hits, de achterstand van de replica's en de grootte
+        per database. De agent meet ze vanaf protocol 13. Ook voor viewers.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Metrics" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+        "503": { $ref: "#/components/responses/Error" }
   /clusters/{clusterId}/components/{componentId}/databases:
     parameters:
       - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -4577,7 +4601,7 @@ components:
     ClusterComponent:
       type: object
       required: [id, cluster_id, engine, template, version, title, revision, applied_revision, params, nodes, vip, state, job_id, job_error, created_at, updated_at,
-        auto_recover, down_since, down_reason, nodes_out, recovery]
+        auto_recover, down_since, down_reason, nodes_out, recovery, health, health_reason, health_at]
       properties:
         id: { type: string, format: uuid }
         cluster_id: { type: string, format: uuid }
@@ -4610,6 +4634,12 @@ components:
           allOf: [{ $ref: "#/components/schemas/ComponentRecovery" }]
           nullable: true
           description: De laatste taak die de database opnieuw startte; null als er nog geen was
+        health:
+          type: string
+          enum: ["", healthy, degraded, down]
+          description: Wat de bewaking laatst zag; leeg als ze nog niet keek of al twee minuten niet, zoals tijdens een taak. Telt mee in de status van het cluster
+        health_reason: { type: string, description: "Waarom verminderd of down, met de naam van de database ervoor" }
+        health_at: { type: string, format: date-time, nullable: true, description: Wanneer de bewaking laatst keek }
     ComponentNodeOut:
       type: object
       required: [hostname, since, reason]
@@ -9171,7 +9201,7 @@ components:
       properties:
         id: { type: string }
         title: { type: string }
-        unit: { type: string, enum: [percent, load, bytes_per_second, celsius, millicores, bytes] }
+        unit: { type: string, enum: [percent, load, bytes_per_second, celsius, millicores, bytes, count, per_second, seconds] }
         series:
           type: array
           items: { $ref: "#/components/schemas/MetricSeries" }

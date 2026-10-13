@@ -339,6 +339,7 @@ func toAPIComponent(c components.Component) gen.ClusterComponent {
 		rec = &gen.ComponentRecovery{JobId: v.JobID, Status: v.Status, Error: v.Error}
 	}
 	out.Recovery = nullableOf(rec)
+	out.Health, out.HealthReason, out.HealthAt = gen.ClusterComponentHealth(c.Health), c.HealthReason, nullableOf(c.HealthAt)
 	return out
 }
 

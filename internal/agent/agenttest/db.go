@@ -43,6 +43,11 @@ type MariaDB struct {
 	Users []MariaUser
 	// DumpIncomplete laat mariadb-dump stoppen zonder de slotregel.
 	DumpIncomplete bool
+	// Questions en BufferPool zijn voor de metingen: het aantal query's
+	// en de grootte van de buffer pool in bytes, waarvan BufferPoolData
+	// in gebruik.
+	Questions                  int64
+	BufferPool, BufferPoolData int64
 }
 
 // MariaUser is een gebruiker op één host. Password is het wachtwoord in
@@ -123,6 +128,10 @@ type Galera struct {
 	Members []string
 	// Seqno is wsrep_last_committed.
 	Seqno int64
+	// RecvQueue is wsrep_local_recv_queue, FlowPausedNs
+	// wsrep_flow_control_paused_ns.
+	RecvQueue    int
+	FlowPausedNs int64
 }
 
 // MariaSource is de replicatie van een MariaDB-replica.
@@ -152,6 +161,9 @@ type Postgres struct {
 	Roles []PGRole
 	// DumpIncomplete laat pg_dump stoppen zonder de slotregel.
 	DumpIncomplete bool
+	// Transactions, CacheHits en CacheReads zijn voor de metingen, net als
+	// SharedBuffers in bytes.
+	Transactions, CacheHits, CacheReads, SharedBuffers int64
 	// Voor een verhuizing: de adressen die pg_hba.conf niet binnenlaat, of
 	// de server TLS kan, en de extensies die te installeren zijn (nil is
 	// een gewone lijst met pgcrypto, pg_trgm en uuid-ossp).
@@ -265,11 +277,23 @@ func (h *Host) mariaExec(args []string) ([]byte, error) {
 	case dbsql.MariaPosition:
 		if g := m.Galera; g != nil {
 			rows = [][]string{
+				{"Uptime", strconv.FormatInt(m.Uptime, 10)},
 				{"wsrep_cluster_size", strconv.Itoa(g.Size)}, {"wsrep_cluster_state_uuid", g.UUID}, {"wsrep_cluster_status", g.Status},
 				{"wsrep_last_committed", strconv.FormatInt(g.Seqno, 10)}, {"wsrep_local_state", strconv.Itoa(g.State)},
 				{"wsrep_local_state_comment", g.Comment}, {"wsrep_ready", onOff(g.Ready)},
 			}
 		}
+	case dbsql.MariaMetrics:
+		rows = [][]string{
+			{"threads_connected", strconv.Itoa(m.Connections)}, {"questions", strconv.FormatInt(m.Questions, 10)},
+			{"innodb_buffer_pool_bytes_data", strconv.FormatInt(m.BufferPoolData, 10)},
+		}
+		if g := m.Galera; g != nil {
+			rows = append(rows, []string{"wsrep_local_recv_queue", strconv.Itoa(g.RecvQueue)},
+				[]string{"wsrep_flow_control_paused_ns", strconv.FormatInt(g.FlowPausedNs, 10)},
+				[]string{"wsrep_local_state", strconv.Itoa(g.State)}, []string{"wsrep_cluster_size", strconv.Itoa(g.Size)})
+		}
+		rows = append(rows, []string{"max_connections", strconv.Itoa(m.MaxConnections)}, []string{"innodb_buffer_pool_size", strconv.FormatInt(m.BufferPool, 10)})
 	case dbsql.MariaSource:
 		if s := m.Source; s != nil {
 			yes := map[bool]string{true: "Yes", false: "No"}
@@ -520,6 +544,14 @@ func (h *Host) runuser(args []string) ([]byte, error) {
 		if s := p.Source; s != nil && p.Recovery {
 			rows = [][]string{{s.Host, s.Status, strconv.FormatInt(s.Lag, 10)}}
 		}
+	case dbsql.PGMetrics:
+		lag := int64(-1)
+		if s := p.Source; s != nil && p.Recovery {
+			lag = s.Lag
+		}
+		rows = [][]string{{strconv.Itoa(p.Connections), strconv.Itoa(p.MaxConnections), strconv.FormatInt(p.Transactions, 10),
+			strconv.FormatInt(p.CacheHits, 10), strconv.FormatInt(p.CacheReads, 10), strconv.FormatInt(p.SharedBuffers, 10), t[p.Recovery],
+			strconv.FormatInt(lag, 10)}}
 	case dbsql.PGClients:
 		for _, c := range p.Clients {
 			rows = append(rows, []string{c.User, c.Host, c.Database, strconv.Itoa(c.Count)})

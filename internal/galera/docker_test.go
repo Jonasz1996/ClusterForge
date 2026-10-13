@@ -25,6 +25,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Jonasz1996/clusterforge/internal/agent/dbsql"
 )
 
 const galeraImage = "mariadb:11.8"
@@ -392,4 +394,20 @@ func TestRealGaleraJoin(t *testing.T) {
 	g.synced(3, 0, 3)
 	g.start(1, false)
 	g.synced(4, 0, 1, 2, 3)
+
+	// De query's van de agent voor de grafieken en de positie werken op
+	// een echte Galera-node.
+	m := keyValues(g.sql(0, dbsql.MariaMetrics))
+	for _, k := range []string{"threads_connected", "questions", "innodb_buffer_pool_bytes_data", "wsrep_local_recv_queue",
+		"wsrep_flow_control_paused_ns", "max_connections", "innodb_buffer_pool_size"} {
+		if _, err := strconv.ParseFloat(m[k], 64); err != nil {
+			t.Errorf("%s ontbreekt in de metingen: %v", k, m)
+		}
+	}
+	if m["wsrep_local_state"] != "4" || m["wsrep_cluster_size"] != "4" {
+		t.Errorf("metingen: %v", m)
+	}
+	if p := keyValues(g.sql(0, dbsql.MariaPosition)); p["Uptime"] == "" || p["wsrep_last_committed"] == "" {
+		t.Errorf("positie: %v", p)
+	}
 }

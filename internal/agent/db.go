@@ -128,7 +128,7 @@ func (a *Agent) dbOp(ctx context.Context, req protocol.DBRequest) protocol.DBRes
 	var res protocol.DBResponse
 	switch req.Op {
 	case protocol.DBStatus:
-		res = a.DBStatus(ctx)
+		res = a.dbStatus(ctx, req.Quick)
 	case protocol.DBTrack:
 		res = a.dbTrack(ctx, req.Track)
 	case protocol.DBPosition:
@@ -152,7 +152,11 @@ func (a *Agent) dbOp(ctx context.Context, req protocol.DBRequest) protocol.DBRes
 }
 
 // DBStatus leest elke MariaDB en PostgreSQL op de node.
-func (a *Agent) DBStatus(ctx context.Context) protocol.DBResponse {
+func (a *Agent) DBStatus(ctx context.Context) protocol.DBResponse { return a.dbStatus(ctx, false) }
+
+// dbStatus leest elke MariaDB en PostgreSQL op de node; quick laat de
+// databases en de clients weg.
+func (a *Agent) dbStatus(ctx context.Context, quick bool) protocol.DBResponse {
 	res := protocol.DBResponse{Servers: []protocol.DBServer{}}
 	units, err := a.dbUnits(ctx)
 	if err != nil {
@@ -160,10 +164,10 @@ func (a *Agent) DBStatus(ctx context.Context) protocol.DBResponse {
 		return res
 	}
 	if u, ok := mariaUnit(units); ok {
-		res.Servers = append(res.Servers, a.mariaStatus(ctx, u))
+		res.Servers = append(res.Servers, a.mariaStatus(ctx, u, quick))
 	}
 	if u, ok := pgUnit(units); ok {
-		res.Servers = append(res.Servers, a.pgStatus(ctx, u))
+		res.Servers = append(res.Servers, a.pgStatus(ctx, u, quick))
 	}
 	return res
 }
@@ -314,7 +318,7 @@ func keyValues(rows [][]string) map[string]string {
 	return m
 }
 
-func (a *Agent) mariaStatus(ctx context.Context, u UnitInfo) protocol.DBServer {
+func (a *Agent) mariaStatus(ctx context.Context, u UnitInfo, quick bool) protocol.DBServer {
 	s := protocol.DBServer{Engine: protocol.DBMariaDB, Unit: u.Name, Active: u.Active, Databases: []protocol.DBDatabase{}}
 	rows, err := a.maria(ctx, false, dbsql.MariaVariables)
 	if err != nil {
@@ -360,6 +364,10 @@ func (a *Agent) mariaStatus(ctx context.Context, u UnitInfo) protocol.DBServer {
 		s.Role = protocol.DBRolePrimary
 	default:
 		s.Role = protocol.DBRoleStandalone
+	}
+	if quick {
+		s.Error = strings.Join(errs, "; ")
+		return s
 	}
 	if rows, err := a.maria(ctx, false, dbsql.MariaDatabases); err != nil {
 		errs = append(errs, "databases: "+dbError(err))
@@ -537,7 +545,7 @@ func psqlRows(out []byte) [][]string {
 	return rows
 }
 
-func (a *Agent) pgStatus(ctx context.Context, u UnitInfo) protocol.DBServer {
+func (a *Agent) pgStatus(ctx context.Context, u UnitInfo, quick bool) protocol.DBServer {
 	s := protocol.DBServer{Engine: protocol.DBPostgreSQL, Unit: u.Name, Active: u.Active, Databases: []protocol.DBDatabase{}}
 	if u.Name == "patroni" {
 		s.Patroni = a.patroni(ctx)
@@ -596,6 +604,10 @@ func (a *Agent) pgStatus(ctx context.Context, u UnitInfo) protocol.DBServer {
 		s.Role = protocol.DBRolePrimary
 	default:
 		s.Role = protocol.DBRoleStandalone
+	}
+	if quick {
+		s.Error = strings.Join(errs, "; ")
+		return s
 	}
 	if rows, err := a.psql(ctx, "", dbsql.PGDatabases); err != nil {
 		errs = append(errs, "databases: "+dbError(err))
