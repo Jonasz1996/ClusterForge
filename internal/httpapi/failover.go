@@ -329,6 +329,14 @@ func toAPIProbe(p failover.Probe) gen.FailoverProbe {
 	return out
 }
 
+func toAPISegments(in []failover.Segment) []gen.TestRunSegment {
+	out := make([]gen.TestRunSegment, 0, len(in))
+	for _, sg := range in {
+		out = append(out, gen.TestRunSegment{FromMs: sg.FromMS, ToMs: sg.ToMS, Ok: sg.OK})
+	}
+	return out
+}
+
 func toAPIOptions(o failover.Options) gen.FailoverOptions {
 	out := gen.FailoverOptions{
 		Scenarios: make([]gen.FailoverScenarioOption, 0, len(o.Scenarios)), Vips: make([]gen.FailoverVIPOption, 0, len(o.VIPs)),
@@ -342,7 +350,9 @@ func toAPIOptions(o failover.Options) gen.FailoverOptions {
 		})
 	}
 	for _, v := range o.VIPs {
-		out.Vips = append(out.Vips, gen.FailoverVIPOption{Id: v.ID, Address: v.Address, OwnerHostname: nullableOf(v.OwnerHostname), Probe: toAPIProbe(v.Probe)})
+		out.Vips = append(out.Vips, gen.FailoverVIPOption{
+			Id: v.ID, Address: v.Address, OwnerHostname: nullableOf(v.OwnerHostname), Probe: toAPIProbe(v.Probe), Database: v.Database, OwnVip: v.OwnVIP,
+		})
 	}
 	return out
 }
@@ -407,10 +417,18 @@ func failoverReport(run store.TestRun, out *gen.TestRun) {
 	meas := gen.FailoverMeasurements{
 		DowntimeMs: nullableOf(m.DowntimeMS), ExpectMs: m.ExpectMS, WindowMs: m.WindowMS, TakeoverNode: m.TakeoverNode,
 		TakeoverNodeId: nullableOf(m.TakeoverNodeID), TakeoverMs: nullableOf(m.TakeoverMS), FailbackMs: nullableOf(m.FailbackMS),
-		ReturnedTo: m.ReturnedTo, EndMs: m.EndMS, Probe: make([]gen.TestRunSegment, 0, len(m.Probe)),
+		ReturnedTo: m.ReturnedTo, EndMs: m.EndMS, Probe: toAPISegments(m.Probe), Writes: nullable.NewNullNullable[gen.FailoverWrites](),
 	}
-	for _, sg := range m.Probe {
-		meas.Probe = append(meas.Probe, gen.TestRunSegment{FromMs: sg.FromMS, ToMs: sg.ToMS, Ok: sg.OK})
+	if w := m.Writes; w != nil {
+		lostSeqs := w.LostSeqs
+		if lostSeqs == nil {
+			lostSeqs = []int64{}
+		}
+		meas.Writes = nullable.NewNullableWithValue(gen.FailoverWrites{
+			Node: w.Node, Title: w.Title, Vip: w.VIP, Port: w.Port, DowntimeMs: nullableOf(w.DowntimeMS), Recovered: w.Recovered,
+			FailbackMs: nullableOf(w.FailbackMS), Attempts: w.Attempts, Failed: w.Failed, Confirmed: w.Confirmed, Lost: nullableOf(w.Lost),
+			LostSeqs: lostSeqs, Extra: w.Extra, CheckError: w.CheckError, Segments: toAPISegments(w.Segments),
+		})
 	}
 	var def failover.Definition
 	_ = json.Unmarshal(run.Definition, &def)

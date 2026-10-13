@@ -247,11 +247,12 @@ type componentOwnVIPPlan struct {
 // Patroni naspelen. nc1 en nc2 hebben het VIP van de app al in keepalived,
 // nc3 nog geen keepalived. Extra nodes, zoals nc4, zijn als nc3.
 type patroniLab struct {
-	e   *testEnv
-	c   *client
-	nc  cluster
-	g   *patroniHosts
-	ids map[string]string
+	e     *testEnv
+	c     *client
+	nc    cluster
+	g     *patroniHosts
+	ids   map[string]string
+	group *agenttest.Group
 }
 
 func newPatroniHosts(t *testing.T, extra ...string) patroniLab {
@@ -293,6 +294,7 @@ func newPatroniHosts(t *testing.T, extra ...string) patroniLab {
 			ag.ExecStdin, ag.Stream, ag.DumpDir = h.ExecStdin, h.Stream, filepath.Join(root, "var/backups/clusterforge-db")
 			ag.Collector.Interfaces, ag.Collector.PrimaryAddress = h.Interfaces, func() string { return ip }
 			ag.PatroniURL, ag.Dial = h.ServePatroni(t), h.Dial
+			ag.ProbeInterval = 50 * time.Millisecond
 			group.Join(h)
 		})
 	}
@@ -313,7 +315,7 @@ func newPatroniHosts(t *testing.T, extra ...string) patroniLab {
 		_ = e.pool.QueryRow(ctx, "SELECT count(*) FROM node_facts f JOIN nodes n ON n.id = f.node_id WHERE n.cluster_id = $1 AND f.facts->'os'->>'id' = 'debian'", nc.ID).Scan(&n)
 		return n == len(names)
 	})
-	return patroniLab{e: e, c: c, nc: nc, g: g, ids: ids}
+	return patroniLab{e: e, c: c, nc: nc, g: g, ids: ids, group: group}
 }
 
 // deploy rolt PostgreSQL met Patroni uit op de drie nodes, met het eigen

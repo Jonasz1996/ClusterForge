@@ -81,6 +81,8 @@ type Measurements struct {
 	ReturnedTo     string     `json:"returned_to,omitempty"`
 	EndMS          int64      `json:"end_ms"`
 	Probe          []Segment  `json:"probe"`
+	// Writes is de schrijftest bij een test die een database raakt.
+	Writes *WriteMeasurements `json:"writes,omitempty"`
 }
 
 // measureState is de state van de stap Storing en meten. InjectedAt staat
@@ -269,6 +271,21 @@ func (r *testRun) precheck(ctx context.Context, st *jobs.Step) error {
 		}
 		st.Logf("%s %s: %s", mark, ch.Name, ch.Detail)
 	}
+	if plan.Skipped == "" && plan.Writes != nil {
+		if err := r.startWrites(ctx, st, plan.Writes); err != nil {
+			if ctx.Err() != nil {
+				return context.Cause(ctx)
+			}
+			ch := Check{Name: "Schrijftest", OK: false, Detail: err.Error()}
+			if i := slices.IndexFunc(plan.Checks, func(c Check) bool { return c.Name == ch.Name }); i >= 0 {
+				plan.Checks[i] = ch
+			} else {
+				plan.Checks = append(plan.Checks, ch)
+			}
+			plan.Skipped = err.Error()
+			st.Logf("✗ %s: %s", ch.Name, ch.Detail)
+		}
+	}
 	if plan.Skipped != "" {
 		st.Logf("de test start niet; er verandert niets")
 	}
@@ -364,6 +381,7 @@ func (r *testRun) measure(ctx context.Context, st *jobs.Step, injectedAt time.Ti
 		vips = []string{def.VIP}
 	}
 	var takeover []TimelineEvent
+	ww := r.newWriteWatch(injectedAt)
 	tick := time.NewTicker(s.ProbeInterval)
 	defer tick.Stop()
 	var lastLook time.Time
@@ -389,7 +407,8 @@ func (r *testRun) measure(ctx context.Context, st *jobs.Step, injectedAt time.Ti
 				_ = st.Flush(ctx)
 			}
 		}
-		if m.TakenOver && pl.Recovered() {
+		r.poll(ctx, ww, injectedAt)
+		if m.TakenOver && pl.Recovered() && ww.recovered() {
 			break
 		}
 		select {
@@ -416,6 +435,13 @@ func (r *testRun) measure(ctx context.Context, st *jobs.Step, injectedAt time.Ti
 		st.Logf("%s bleef onbereikbaar tot het einde van de meting", def.VIP)
 	default:
 		st.Logf("onderbreking: %s (verwacht hoogstens %d s)", seconds(time.Duration(m.DowntimeMS)*time.Millisecond), def.MaxTakeoverSeconds)
+	}
+	if ww != nil && !m.Canceled {
+		if wp := r.plan.Writes; ww.recovered() {
+			st.Logf("schrijven via %s lukt weer (%s)", wp.VIP, wp.Prober.Hostname)
+		} else {
+			st.Logf("schrijven via %s lukte niet meer tot het einde van de meting", wp.VIP)
+		}
 	}
 	return m
 }
@@ -536,6 +562,9 @@ func stillDown(def Definition, host string) string {
 func (r *testRun) returnStep(ctx context.Context, st *jobs.Step, ret *returnState) error {
 	s, def, target := r.s, r.def, r.plan.Target
 	timeout := s.returnTimeout(def)
+	if len(r.plan.Databases) > 0 {
+		timeout = max(timeout, s.DBReturnTimeout)
+	}
 	ctx, cancel := context.WithTimeoutCause(ctx, timeout, errReturnTimeout)
 	defer cancel()
 	since := r.clearedAt
@@ -610,6 +639,16 @@ func (r *testRun) returnStep(ctx context.Context, st *jobs.Step, ret *returnStat
 		}
 		return err
 	}
+	// En een database die de storing raakte, moet weer helemaal gezond zijn:
+	// een node die terugkomt, haalt eerst bij.
+	for _, d := range r.plan.Databases {
+		if err := r.waitHealthy(ctx, d, progress); err != nil {
+			return failed(err)
+		}
+		timeline = append(timeline, TimelineEvent{TMS: ms(time.Now()), Kind: "db_ready", Text: d.Title + " is weer gezond"})
+		st.Logf("%s is weer gezond", d.Title)
+		_ = st.Flush(ctx)
+	}
 	stop()
 	end := time.Now()
 	ret.FailbackMS = pl.Downtime(end).Milliseconds()
@@ -626,6 +665,30 @@ func (r *testRun) returnStep(ctx context.Context, st *jobs.Step, ret *returnStat
 		st.Logf("onderbreking bij de terugkeer: %s", seconds(time.Duration(ret.FailbackMS)*time.Millisecond))
 	}
 	return st.SetState(ctx, *ret)
+}
+
+// waitHealthy wacht tot een database weer gezond is, en meldt elke nieuwe
+// reden waarom nog niet.
+func (r *testRun) waitHealthy(ctx context.Context, d DatabaseRef, progress func(string)) error {
+	last := ""
+	for {
+		ok, reason, err := r.s.DB.TestHealth(ctx, r.cluster, d.ComponentID)
+		if err == nil && ok {
+			return nil
+		}
+		if err != nil {
+			reason = d.Title + " is niet te lezen: " + err.Error()
+		}
+		if reason != last {
+			last = reason
+			progress(reason)
+		}
+		select {
+		case <-ctx.Done():
+			return context.Cause(ctx)
+		case <-time.After(2 * r.s.WritePoll):
+		}
+	}
 }
 
 // waitFor wacht tot ok true geeft of ctx afloopt.
@@ -758,6 +821,8 @@ type outcome struct {
 	m           *Measurement
 	restoreErr  error
 	ret         *returnState
+	// writes is wat de schrijftest zag; nil zonder.
+	writes *WriteMeasurements
 }
 
 // verdict geeft het resultaat, de samenvatting en of alles hersteld is.
@@ -790,6 +855,16 @@ func verdict(def Definition, plan Plan, o outcome) (result, summary string, rest
 			back = "daarna op " + o.ret.Owner + ", alles hersteld"
 		}
 	}
+	w := o.writes
+	if w != nil && w.Lost != nil && *w.Lost > 0 {
+		// Verloren data weegt het zwaarst, ook in een afgebroken test.
+		rows := "1 bevestigde rij"
+		if *w.Lost > 1 {
+			rows = fmt.Sprintf("%d bevestigde rijen", *w.Lost)
+		}
+		return "fail", fmt.Sprintf("FAIL: %s verloren bij schrijven via %s: de database bevestigde ze, maar na de test waren ze weg; %s",
+			rows, w.VIP, back), &yes
+	}
 	switch {
 	case o.interrupted:
 		return "error", "ERROR: meting onderbroken door een herstart van ClusterForge; " + back, &yes
@@ -805,14 +880,35 @@ func verdict(def Definition, plan Plan, o outcome) (result, summary string, rest
 	m := o.m
 	window := time.Duration(m.WindowMS) * time.Millisecond
 	down := time.Duration(m.DowntimeMS) * time.Millisecond
+	var wdown time.Duration
+	measured := w != nil && w.DowntimeMS != nil
+	if measured {
+		wdown = time.Duration(*w.DowntimeMS) * time.Millisecond
+	}
 	switch {
 	case !m.TakenOver:
 		return "fail", fmt.Sprintf("FAIL: geen andere node nam %s over binnen %s; %s", def.VIP, seconds(window), back), &yes
 	case !m.Recovered:
 		return "fail", fmt.Sprintf("FAIL: %s bleef onbereikbaar tot het einde van de meting (%s); %s", def.VIP, seconds(window), back), &yes
+	case measured && !w.Recovered:
+		return "fail", fmt.Sprintf("FAIL: schrijven via %s lukte niet meer tot het einde van de meting (%s); overgenomen door %s, %s",
+			w.VIP, seconds(window), m.TakeoverNode, back), &yes
 	case down > def.expect():
 		return "fail", fmt.Sprintf("FAIL: %s onbereikbaar, meer dan de verwachte %d s; overgenomen door %s, %s",
 			seconds(down), def.MaxTakeoverSeconds, m.TakeoverNode, back), &yes
+	case wdown > def.expect():
+		return "fail", fmt.Sprintf("FAIL: schrijven via %s lukte %s niet, meer dan de verwachte %d s; overgenomen door %s, %s",
+			w.VIP, seconds(wdown), def.MaxTakeoverSeconds, m.TakeoverNode, back), &yes
+	case w != nil && w.CheckError != "":
+		return "error", fmt.Sprintf("ERROR: de schrijftest kon niet nagaan of er rijen verloren gingen: %s; overgenomen door %s, %s",
+			w.CheckError, m.TakeoverNode, back), &yes
+	}
+	if w != nil {
+		what := "schrijven via " + w.VIP + " lukte steeds"
+		if wdown > 0 {
+			what = "schrijven via " + w.VIP + " lukte weer na " + seconds(wdown)
+		}
+		return "pass", fmt.Sprintf("PASS: %s, er ging niets verloren; overgenomen door %s, %s", what, m.TakeoverNode, back), &yes
 	}
 	what := seconds(down) + " onbereikbaar"
 	if m.DowntimeMS == 0 {
@@ -850,6 +946,10 @@ func (r *testRun) report(o outcome) ([]TimelineEvent, Measurements) {
 		meas.FailbackMS, meas.ReturnedTo = &ret.FailbackMS, ret.Owner
 		meas.EndMS = max(meas.EndMS, ret.EndMS)
 	}
+	if w := o.writes; w != nil {
+		timeline = append(timeline, w.Timeline...)
+		meas.Writes = w
+	}
 	return sortTimeline(timeline), meas
 }
 
@@ -867,6 +967,7 @@ func sortTimeline(t []TimelineEvent) []TimelineEvent {
 func (r *testRun) finish(ctx context.Context, o outcome) error {
 	dctx, cancel := jobs.Detach(ctx)
 	defer cancel()
+	o.writes = r.finishWrites(dctx, o)
 	result, summary, restored := verdict(r.def, r.plan, o)
 	timeline, meas := r.report(o)
 	err := r.j.Step(dctx, stepReport, func(ctx context.Context, st *jobs.Step) error {
@@ -899,6 +1000,14 @@ func (r *testRun) finish(ctx context.Context, o outcome) error {
 		if restored != nil {
 			extra["restored"] = *restored
 		}
+		if w := meas.Writes; w != nil {
+			if w.DowntimeMS != nil {
+				extra["writes_downtime_ms"] = *w.DowntimeMS
+			}
+			if w.Lost != nil {
+				extra["lost"] = *w.Lost
+			}
+		}
 		r.event(ctx, "failover.finished", extra)
 		return nil
 	})
@@ -930,8 +1039,11 @@ func (s *Service) testFinished(ctx context.Context, j store.Job) {
 		return
 	}
 	injected, returned := false, false
+	var plan Plan
 	for _, st := range steps {
 		switch st.Name {
+		case stepPrecheck:
+			_ = json.Unmarshal(st.State, &plan)
 		case stepMeasure:
 			var ms measureState
 			injected = json.Unmarshal(st.State, &ms) == nil && !ms.InjectedAt.IsZero()
@@ -942,6 +1054,14 @@ func (s *Service) testFinished(ctx context.Context, j store.Job) {
 	result, summary := "error", "ERROR: de taak stopte voor het rapport"
 	if j.Error != "" {
 		summary += ": " + j.Error
+	}
+	if w := plan.Writes; w != nil && !w.StartedAt.IsZero() && s.DB != nil {
+		// De agent stopt vanzelf, maar niet meteen.
+		sctx, cancel := context.WithTimeout(ctx, s.EmergencyTimeout)
+		if _, err := s.DB.WriteProbe(sctx, w.Prober.ID, w.Engine, protocol.DBProbeRequest{Action: protocol.DBProbeStop, Run: run.ID.String()}); err != nil {
+			s.log.Warn("schrijftest stoppen mislukt", "run", run.ID, "node", w.Prober.Hostname, "err", err)
+		}
+		cancel()
 	}
 	var restored *bool
 	switch {

@@ -209,6 +209,7 @@ function Summary({ run, d, m }: { run: TestRun; d: FailoverDefinition; m: Failov
             <dd className="tabular-nums">{seconds(m.downtime_ms)}</dd>
           </>
         )}
+        {m.writes && <Writes w={m.writes} />}
         {m.takeover_node && (
           <>
             <dt className={dtClass}>Overgenomen door</dt>
@@ -246,6 +247,60 @@ function Summary({ run, d, m }: { run: TestRun; d: FailoverDefinition; m: Failov
   );
 }
 
+// Writes is de schrijftest: hoe lang schrijven via het VIP van de database
+// niet lukte, en of er een bevestigde rij verloren ging.
+function Writes({ w }: { w: NonNullable<FailoverMeasurements["writes"]> }) {
+  const lost = w.lost ?? null;
+  return (
+    <>
+      <dt className={dtClass}>Schrijven</dt>
+      <dd>
+        <span className="tabular-nums">
+          {w.downtime_ms === null
+            ? "niet gemeten"
+            : !w.recovered
+              ? "lukte niet meer tot het einde van de meting"
+              : w.downtime_ms === 0
+                ? "lukte steeds"
+                : `lukte ${seconds(w.downtime_ms)} niet`}
+        </span>
+        {w.failback_ms !== null && w.failback_ms > 0 && (
+          <span className="text-slate-500"> (bij de terugkeer {seconds(w.failback_ms)} niet)</span>
+        )}
+        <div className="text-xs text-slate-500">
+          {w.node} schreef elke halve seconde een rij in {w.title} via{" "}
+          <span className="font-mono">
+            {w.vip}:{w.port}
+          </span>
+          ; {w.failed} van de {w.attempts} pogingen sinds de storing mislukten
+        </div>
+      </dd>
+      <dt className={dtClass}>Rijen</dt>
+      <dd className={cx("tabular-nums", lost !== null && lost > 0 && "text-red-700 dark:text-red-300")}>
+        {lost === null ? (
+          <>
+            {w.confirmed} bevestigd, niet nagekeken
+            <span className="block text-xs text-slate-500">{w.check_error}</span>
+          </>
+        ) : lost > 0 ? (
+          <>
+            {lost} van de {w.confirmed} bevestigde rijen verloren
+            {w.lost_seqs.length > 0 && <span className="block text-xs">volgnummers {w.lost_seqs.join(", ")}</span>}
+          </>
+        ) : (
+          `alle ${w.confirmed} bevestigde rijen zijn er nog`
+        )}
+        {w.extra > 0 && (
+          <span className="block text-xs text-slate-500">
+            {w.extra === 1 ? "1 rij kwam aan" : `${w.extra} rijen kwamen aan`} zonder dat de bevestiging terugkwam; dat is geen
+            verlies
+          </span>
+        )}
+      </dd>
+    </>
+  );
+}
+
 // Precheck is dichtgeklapt als alles in orde was.
 function Precheck({ checks }: { checks: TestRun["checks"] }) {
   const failed = checks.filter((c) => !c.ok).length;
@@ -272,33 +327,42 @@ const markers: Record<TestRunEvent["kind"], { color: string; label: string } | n
   clear: { color: "bg-slate-500", label: "Herstel" },
   ready: { color: "bg-slate-400", label: "Node klaar" },
   return: { color: "bg-violet-600", label: "Terugkeer" },
+  db_ready: { color: "bg-teal-600", label: "Database gezond" },
   down: null,
   up: null,
   step: null,
+  write_down: null,
+  write_up: null,
 };
 
 // Timeline toont de probe als horizontale balk, groen of rood, met
 // markeringen voor de storing, de overname, het herstel en de terugkeer.
+// Liep er een schrijftest, dan staat die eronder als tweede balk.
 function Timeline({ run, m }: { run: TestRun; m: FailoverMeasurements }) {
   const events = run.timeline;
+  const writes = m.writes?.segments ?? [];
   if (m.probe.length === 0 && events.length === 0) return null;
-  const end = Math.max(m.end_ms, ...m.probe.map((s) => s.to_ms), ...events.map((e) => e.t_ms), 1);
+  const end = Math.max(m.end_ms, ...m.probe.map((s) => s.to_ms), ...writes.map((s) => s.to_ms), ...events.map((e) => e.t_ms), 1);
   const pct = (ms: number) => `${Math.min(100, Math.max(0, (ms / end) * 100))}%`;
   const expectAt = m.expect_ms > 0 && m.expect_ms < end ? m.expect_ms : null;
+  const bar = (segs: FailoverMeasurements["probe"], label: string, ok: string, bad: string) => (
+    <div className="relative h-6 overflow-hidden rounded bg-slate-100 dark:bg-slate-800" aria-label={label}>
+      {segs.map((s, i) => (
+        <div
+          key={i}
+          className={cx("absolute inset-y-0", s.ok ? "bg-emerald-500" : "bg-red-500")}
+          style={{ left: pct(s.from_ms), width: `calc(${pct(s.to_ms - s.from_ms)} + 1px)` }}
+          title={`${s.ok ? ok : bad} van ${seconds(s.from_ms)} tot ${seconds(s.to_ms)}`}
+        />
+      ))}
+    </div>
+  );
   return (
     <Card title="Tijdlijn">
       <div className="space-y-4">
-        <div className="relative pt-5">
-          <div className="relative h-6 overflow-hidden rounded bg-slate-100 dark:bg-slate-800" aria-label="Probe tijdens de test">
-            {m.probe.map((s, i) => (
-              <div
-                key={i}
-                className={cx("absolute inset-y-0", s.ok ? "bg-emerald-500" : "bg-red-500")}
-                style={{ left: pct(s.from_ms), width: `calc(${pct(s.to_ms - s.from_ms)} + 1px)` }}
-                title={`${s.ok ? "Bereikbaar" : "Onbereikbaar"} van ${seconds(s.from_ms)} tot ${seconds(s.to_ms)}`}
-              />
-            ))}
-          </div>
+        <div className="relative space-y-1.5 pt-5">
+          {bar(m.probe, "Probe tijdens de test", "Bereikbaar", "Onbereikbaar")}
+          {m.writes && bar(writes, `Schrijven via ${m.writes.vip}`, "Schrijven lukt", "Schrijven lukt niet")}
           {expectAt !== null && (
             <div className="absolute top-3 bottom-0 border-l-2 border-dashed border-amber-500" style={{ left: pct(expectAt) }}>
               <span
@@ -331,6 +395,7 @@ function Timeline({ run, m }: { run: TestRun; m: FailoverMeasurements }) {
         <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-600 dark:text-slate-400">
           <Legend color="bg-emerald-500" label="VIP bereikbaar" />
           <Legend color="bg-red-500" label="VIP onbereikbaar" />
+          {m.writes && <span>Onderste balk: schrijven via {m.writes.vip}</span>}
           {Object.values(markers)
             .filter((x) => x && events.some((e) => markers[e.kind] === x))
             .map((x) => (

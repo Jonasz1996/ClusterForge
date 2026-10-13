@@ -629,6 +629,11 @@ func failoverDescribe(scenario, service string) string {
 		return or(service, "de dienst") + " stoppen op de eigenaar"
 	case "vm_hard_stop":
 		return "de VM van de eigenaar hard uitzetten"
+	case "database_stop":
+		if service == "" {
+			return "de database stoppen op de eigenaar"
+		}
+		return "de database (" + service + ") stoppen op de eigenaar"
 	}
 	return scenario
 }

@@ -46,6 +46,7 @@ type dbState struct {
 	sem     chan struct{}
 	dumps   dumpState
 	migrate migrateState
+	probes  probeState
 }
 
 func (a *Agent) initDB() {
@@ -114,6 +115,8 @@ func (a *Agent) handleDB(data []byte) protocol.DBResponse {
 		res = a.pgDrop(ctx, req.Drop)
 	case pg && req.Op == protocol.DBMigrate:
 		res = a.pgMigrate(ctx, req.Migrate)
+	case req.Op == protocol.DBWriteProbe:
+		res = a.writeProbe(ctx, req.Engine, req.Probe)
 	default:
 		res = a.dbOp(ctx, req)
 	}

@@ -214,30 +214,12 @@ func (s *Service) watched(ctx context.Context, w store.ListWatchedComponentsRow,
 	var prev observed
 	_ = json.Unmarshal(w.Observed, &prev)
 	cur := observeNodes(w.Engine, nodes, now)
-	in := healthInput{engine: w.Engine, spec: spec, nodes: nodes}
+	in, err := s.healthInput(ctx, w.Engine, spec, nodes, now)
+	if err != nil {
+		return err
+	}
 	if prev.Primary == cur.Primary && now.Sub(prev.At) <= observedGap {
 		in.stablePrimary = cur.Primary
-	}
-	if spec.VIP != nil {
-		holders, err := s.vipHolder(ctx, spec, now.Add(-s.Fresh))
-		if err != nil {
-			return err
-		}
-		for _, h := range holders {
-			in.holders = append(in.holders, h.Hostname)
-		}
-	}
-	for _, n := range spec.order() {
-		if n.Role != RoleArbiter {
-			continue
-		}
-		rt, err := s.q.GetNodeRuntime(ctx, n.NodeID)
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return err
-		}
-		if err != nil || rt.HeartbeatAt == nil || now.Sub(*rt.HeartbeatAt) > s.Fresh {
-			in.arbitersDown = append(in.arbitersDown, n.Hostname)
-		}
 	}
 	health, reason := dbHealth(in)
 	b, err := json.Marshal(cur)

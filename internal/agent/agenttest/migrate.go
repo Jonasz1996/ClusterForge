@@ -247,22 +247,28 @@ func (h *Host) login(cfg map[string]string) (remote *Host, unlock func(), errMsg
 	if h.Network != nil {
 		remote = h.Network(addr)
 	}
-	if remote == nil || remote == h {
+	if remote == nil {
 		return nil, nil, fmt.Sprintf("ERROR 2002 (HY000): Can't connect to server on '%s' (115)", cfg["host"])
 	}
-	remote.mu.Lock()
+	// Via een VIP dat deze machine zelf heeft, is de andere machine deze;
+	// die is al op slot.
+	unlock = func() {}
+	if remote != h {
+		remote.mu.Lock()
+		unlock = remote.mu.Unlock
+	}
 	m := remote.MariaDB
-	if m == nil || m.Down {
-		remote.mu.Unlock()
+	if m == nil || m.Down || remote.units["mariadb"] != nil && !remote.units["mariadb"].Active {
+		unlock()
 		return nil, nil, fmt.Sprintf("ERROR 2002 (HY000): Can't connect to server on '%s' (111)", cfg["host"])
 	}
 	if !slices.ContainsFunc(m.Users, func(u MariaUser) bool {
 		return u.User == cfg["user"] && u.Host == h.Address && u.LogsIn(cfg["password"])
 	}) {
-		remote.mu.Unlock()
+		unlock()
 		return nil, nil, fmt.Sprintf("ERROR 1045 (28000): Access denied for user '%s'@'%s' (using password: YES)", cfg["user"], h.Address)
 	}
-	return remote, remote.mu.Unlock, ""
+	return remote, unlock, ""
 }
 
 // remoteExec speelt mariadb met een optiebestand na: de query op de andere

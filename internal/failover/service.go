@@ -39,6 +39,8 @@ const (
 	// lab en test: een hard gestopte VM heeft geen agent, en alleen de
 	// server zet hem weer aan.
 	VMHardStop = "vm_hard_stop"
+	// DatabaseStop (database.go) stopt de database op de eigenaar van het
+	// VIP van een database.
 )
 
 // Hoe een run gestart is, zoals in test_runs.trigger.
@@ -68,7 +70,7 @@ type Scenario struct {
 }
 
 // Scenarios staan in de volgorde van het formulier.
-var Scenarios = []Scenario{{KeepalivedStop, 5}, {ServiceStop, 10}, {VMHardStop, 10}}
+var Scenarios = []Scenario{{KeepalivedStop, 5}, {ServiceStop, 10}, {VMHardStop, 10}, {DatabaseStop, 20}}
 
 // Describe zegt in gewone taal wat een test doet.
 func Describe(scenario, service string) string {
@@ -82,6 +84,11 @@ func Describe(scenario, service string) string {
 		return service + " stoppen op de eigenaar"
 	case VMHardStop:
 		return "de VM van de eigenaar hard uitzetten"
+	case DatabaseStop:
+		if service == "" {
+			return "de database stoppen op de eigenaar"
+		}
+		return "de database (" + service + ") stoppen op de eigenaar"
 	}
 	return scenario
 }
@@ -89,7 +96,7 @@ func Describe(scenario, service string) string {
 // unitOf is de systemd-unit die de storing stopt, of bij vm_hard_stop de
 // unit die na de terugkeer weer moet draaien.
 func unitOf(scenario, service string) string {
-	if scenario == ServiceStop {
+	if scenario == ServiceStop || scenario == DatabaseStop {
 		return service
 	}
 	return "keepalived"
@@ -187,6 +194,18 @@ type Service struct {
 	// Changed wordt aangeroepen na een run, zodat de status meteen opnieuw
 	// berekend wordt. Mag nil zijn.
 	Changed func()
+
+	// DB geeft de databases van een cluster en laat een agent schrijven;
+	// nil zonder onderdelen Database.
+	DB DBComponents
+	// DBReturnTimeout is hoe lang de terugkeer mag duren als de test een
+	// database raakt: een node die terugkomt, haalt eerst bij.
+	DBReturnTimeout time.Duration
+	// WriteStart is hoe lang de schrijftest bij de start mag doen over drie
+	// goede pogingen na elkaar; WritePoll hoe vaak de server de pogingen
+	// ophaalt; WriteFinishTimeout hoe lang het tellen van de rijen mag
+	// duren.
+	WriteStart, WritePoll, WriteFinishTimeout time.Duration
 }
 
 func NewService(pool *pgxpool.Pool, ev *events.Writer, log *slog.Logger, runner *jobs.Runner, bus Commander) *Service {
@@ -196,6 +215,7 @@ func NewService(pool *pgxpool.Pool, ev *events.Writer, log *slog.Logger, runner 
 		Prober: NetProber{Timeout: 400 * time.Millisecond}, ProbeInterval: 250 * time.Millisecond,
 		ReturnTimeout: 3 * time.Minute, Fresh: status.HeartbeatLate, MaxWindow: 120 * time.Second,
 		Retry: 5 * time.Second, EmergencyTimeout: 10 * time.Second, Window: planner.DefaultWindow, BootTimeout: 15 * time.Minute,
+		DBReturnTimeout: 10 * time.Minute, WriteStart: 15 * time.Second, WritePoll: time.Second, WriteFinishTimeout: 45 * time.Second,
 	}
 	// Geen van beide is Retryable: een retry uren later voert oude
 	// beslissingen uit. Een mislukte test start je opnieuw.
@@ -244,8 +264,10 @@ func (in *Input) validate(env store.Environment) error {
 		if env == store.EnvironmentProd {
 			return &FieldError{Field: "scenario", Message: msgProdHardStop}
 		}
+	case DatabaseStop:
+		// De dienst volgt uit de database achter het VIP (forDatabase).
 	default:
-		return &FieldError{Field: "scenario", Message: "kies keepalived stoppen, een dienst stoppen of de VM hard uitzetten"}
+		return &FieldError{Field: "scenario", Message: "kies keepalived stoppen, een dienst stoppen, de database stoppen of de VM hard uitzetten"}
 	}
 	if in.Scheduled && env == store.EnvironmentProd {
 		return &FieldError{Field: "scheduled", Message: msgProdSchedule}
@@ -306,6 +328,9 @@ func (s *Service) Create(ctx context.Context, actor events.Actor, clusterID uuid
 		if err != nil {
 			return err
 		}
+		if err := s.forDatabase(ctx, clusterID, vip, &in); err != nil {
+			return err
+		}
 		out, err = q.InsertFailoverTest(ctx, store.InsertFailoverTestParams{
 			ClusterID: clusterID, VipID: in.VIPID, Name: in.Name, Scenario: in.Scenario, Service: in.Service,
 			MaxTakeoverSeconds: int32(in.MaxTakeoverSeconds), ExpectFailback: in.ExpectFailback, //nolint:gosec // gecontroleerd: 1 tot 120
@@ -352,6 +377,9 @@ func (s *Service) Update(ctx context.Context, actor events.Actor, id uuid.UUID, 
 		}
 		vip, err := s.vipOf(ctx, q, old.ClusterID, in.VIPID)
 		if err != nil {
+			return err
+		}
+		if err := s.forDatabase(ctx, old.ClusterID, vip, &in); err != nil {
 			return err
 		}
 		// Blijft de planning aan, dan blijft ook het volgende moment staan.
@@ -431,12 +459,16 @@ type ScenarioOption struct {
 	Units []string
 }
 
-// VIPOption is een VIP van het cluster met zijn standaardprobe.
+// VIPOption is een VIP van het cluster met zijn standaardprobe. Database
+// is de naam van de database achter het VIP, leeg als er geen is; OwnVIP:
+// het is een eigen VIP van die database.
 type VIPOption struct {
 	ID            uuid.UUID
 	Address       string
 	OwnerHostname *string
 	Probe         Probe
+	Database      string
+	OwnVIP        bool
 }
 
 // Options is wat het formulier nodig heeft.
@@ -477,6 +509,10 @@ func (s *Service) Options(ctx context.Context, clusterID uuid.UUID) (Options, er
 	if err != nil {
 		return Options{}, err
 	}
+	dbs, err := s.databases(ctx, clusterID)
+	if err != nil {
+		return Options{}, err
+	}
 	tpl := s.templateOf(c)
 	start, _ := s.Window.Next(time.Now())
 	out := Options{
@@ -486,11 +522,23 @@ func (s *Service) Options(ctx context.Context, clusterID uuid.UUID) (Options, er
 	if tested.Unix() > 0 {
 		out.LastTested = &tested
 	}
+	dbUnits := []string{}
 	for _, v := range vips {
 		addr := v.Vip.Address.String()
-		out.VIPs = append(out.VIPs, VIPOption{ID: v.Vip.ID, Address: addr, OwnerHostname: v.OwnerHostname, Probe: tpl.probe(addr)})
+		o := VIPOption{ID: v.Vip.ID, Address: addr, OwnerHostname: v.OwnerHostname, Probe: tpl.probe(addr)}
+		if d, ok := dbOfVIP(dbs, addr); ok {
+			o.Database, o.OwnVIP = d.Title, d.OwnVIP
+			if d.OwnVIP {
+				// Achter een eigen VIP draait alleen de database.
+				o.Probe = Probe{TCP: &TCPProbe{Port: d.Port}}
+			}
+			if !slices.Contains(dbUnits, d.Unit) {
+				dbUnits = append(dbUnits, d.Unit)
+			}
+		}
+		out.VIPs = append(out.VIPs, o)
 	}
-	dbs := databasesOn(nodes)
+	outside := databasesOn(nodes, dbs)
 	keepalived, units, unlinked := 0, []string{}, []string{}
 	for _, n := range nodes {
 		st := health.ServiceStates(n.Services)
@@ -509,14 +557,17 @@ func (s *Service) Options(ctx context.Context, clusterID uuid.UUID) (Options, er
 	for _, sc := range Scenarios {
 		o := ScenarioOption{Key: sc.Key, Label: Describe(sc.Key, ""), DefaultSeconds: sc.DefaultSeconds, Available: true, Units: []string{}}
 		switch {
-		case len(dbs) > 0:
-			o.Available, o.Reason = false, "dit cluster draait een database ("+strings.Join(dbs, ", ")+"); een VIP dat naar een replica verhuist, kan schrijfacties laten mislukken"
+		case len(outside) > 0:
+			o.Available, o.Reason = false, "dit cluster draait een database die ClusterForge niet beheert ("+strings.Join(outside, ", ")+
+				"); een VIP dat naar een replica verhuist, kan schrijfacties laten mislukken"
 		case len(vips) == 0:
 			o.Available, o.Reason = false, "dit cluster heeft geen VIP"
 		case keepalived < 2:
 			o.Available, o.Reason = false, "er zijn geen twee nodes met keepalived die een VIP kunnen overnemen"
 		case sc.Key == ServiceStop && len(units) == 0:
 			o.Available, o.Reason = false, "op geen enkele node draait "+strings.Join(Units, " of ")
+		case sc.Key == DatabaseStop && len(dbUnits) == 0:
+			o.Available, o.Reason = false, "dit cluster heeft geen onderdeel Database met een VIP"
 		case sc.Key == VMHardStop && out.Prod:
 			o.Available, o.Reason = false, "niet op prod; alleen in lab en test"
 		case sc.Key == VMHardStop && s.Proxmox == nil:
@@ -524,27 +575,16 @@ func (s *Service) Options(ctx context.Context, clusterID uuid.UUID) (Options, er
 		case sc.Key == VMHardStop && len(unlinked) > 0:
 			o.Available, o.Reason = false, "geen Proxmox-koppeling voor "+strings.Join(unlinked, ", ")+"; koppel elke node met keepalived aan zijn VM"
 		}
-		if sc.Key == ServiceStop {
+		switch sc.Key {
+		case ServiceStop:
 			o.Label = "nginx of haproxy stoppen op de eigenaar"
 			o.Units = units
+		case DatabaseStop:
+			o.Units = dbUnits
 		}
 		out.Scenarios = append(out.Scenarios, o)
 	}
 	return out, nil
-}
-
-// databasesOn noemt de nodes waarop een database actief is.
-func databasesOn(nodes []store.ListFailoverNodesRow) []string {
-	var out []string
-	for _, n := range nodes {
-		st := health.ServiceStates(n.Services)
-		for _, db := range Databases {
-			if st[db] == "active" {
-				out = append(out, db+" op "+n.Hostname)
-			}
-		}
-	}
-	return out
 }
 
 // clusterTemplate is wat een template over failovertests zegt.
@@ -631,7 +671,11 @@ func definitionOf(row store.GetFailoverTestRow) (Definition, error) {
 		return d, fmt.Errorf("probe van de test: %w", err)
 	}
 	// De unit komt alleen uit de vaste lijst, ook als de rij anders zegt.
-	if d.Unit != "keepalived" && !slices.Contains(Units, d.Unit) {
+	allowed := Units
+	if d.Scenario == DatabaseStop {
+		allowed = DatabaseUnits
+	}
+	if d.Unit != "keepalived" && !slices.Contains(allowed, d.Unit) {
 		return d, fmt.Errorf("onbekende dienst %q", d.Unit)
 	}
 	return d, d.Probe.Validate()
@@ -654,6 +698,10 @@ type Plan struct {
 	Peers []string `json:"peers"`
 	// VM is bij vm_hard_stop de VM van het doel in Proxmox.
 	VM *VMRef `json:"vm,omitempty"`
+	// Databases zijn de databases die de storing raakt, Writes de
+	// schrijftest via het VIP van een ervan.
+	Databases []DatabaseRef `json:"databases,omitempty"`
+	Writes    *WritePlan    `json:"writes,omitempty"`
 }
 
 // VMRef is een VM in Proxmox.
@@ -700,9 +748,15 @@ func (s *Service) precheck(ctx context.Context, c store.Cluster, def Definition,
 	if err != nil {
 		return plan, err
 	}
-	if dbs := databasesOn(nodes); len(dbs) > 0 {
-		add("Geen database", false, "er draait een database ("+strings.Join(dbs, ", ")+"); een databasecluster krijgt geen failovertest")
-	} else {
+	dbs, err := s.databases(ctx, c.ID)
+	if err != nil {
+		return plan, err
+	}
+	switch outside := databasesOn(nodes, dbs); {
+	case len(outside) > 0:
+		add("Geen database", false, "er draait een database die ClusterForge niet beheert ("+strings.Join(outside, ", ")+
+			"); zo'n cluster krijgt geen failovertest. Een onderdeel Database wel")
+	case len(dbs) == 0:
 		add("Geen database", true, "geen node meldt postgresql, mariadb of mysql als actief")
 	}
 
@@ -785,6 +839,13 @@ func (s *Service) precheck(ctx context.Context, c store.Cluster, def Definition,
 			add("Reservenode", true, strings.Join(plan.Peers, ", ")+" kan "+def.VIP+" overnemen")
 		} else {
 			add("Reservenode", false, "geen andere actieve node met een verse heartbeat, keepalived actief en "+def.VIP+" in zijn configuratie")
+		}
+		if def.Scenario == DatabaseStop {
+			// Alleen het VIP van de database volgt de database.
+			plan.TargetVIPs = []string{def.VIP}
+		}
+		if len(dbs) > 0 {
+			s.databaseChecks(ctx, &plan, c, def, dbs, nodes, now, add)
 		}
 	}
 
