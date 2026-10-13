@@ -344,7 +344,9 @@ func (s *Service) waitVIP(ctx context.Context, st *jobs.Step, spec Spec, since t
 }
 
 // verifyVIP controleert dat precies één node het VIP heeft, en dat het een
-// datanode is.
+// datanode is. Twee eigenaars kan even, zolang keepalived na een herstart
+// of herladen nog kiest wie het VIP houdt; pas na VIPTimeout is dat
+// split-brain.
 func (s *Service) verifyVIP(ctx context.Context, st *jobs.Step, spec Spec) error {
 	if spec.VIP == nil {
 		return nil
@@ -355,20 +357,20 @@ func (s *Service) verifyVIP(ctx context.Context, st *jobs.Step, spec Spec) error
 		if err != nil {
 			return err
 		}
+		late := s.Now().After(deadline)
 		switch {
 		case len(holders) == 1 && holders[0].Role == RoleData:
 			st.Logf("het VIP %s staat op %s, een node met de database", spec.VIP.Address, holders[0].Hostname)
 			return nil
-		case len(holders) > 1:
+		case len(holders) == 1:
+			return fmt.Errorf("het VIP %s staat op %s, waar geen data is", spec.VIP.Address, holders[0].Hostname)
+		case len(holders) > 1 && late:
 			var names []string
 			for _, h := range holders {
 				names = append(names, h.Hostname)
 			}
 			return fmt.Errorf("het VIP %s staat op %s tegelijk (split-brain); kijk of keepalived op die nodes elkaar hoort", spec.VIP.Address, joinHosts(names))
-		case len(holders) == 1:
-			return fmt.Errorf("het VIP %s staat op %s, waar geen data is", spec.VIP.Address, holders[0].Hostname)
-		}
-		if s.Now().After(deadline) {
+		case late:
 			return fmt.Errorf("het VIP %s staat op geen enkele node van de database", spec.VIP.Address)
 		}
 		select {

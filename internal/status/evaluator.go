@@ -141,7 +141,10 @@ func (e *Evaluator) evaluate(ctx context.Context, now time.Time) error {
 			hostnames[n.ID] = n.Hostname
 			age := time.Duration(-1)
 			if n.HeartbeatAt != nil {
-				age = now.Sub(*n.HeartbeatAt)
+				// De database zet heartbeat_at met haar eigen klok. Een
+				// heartbeat die net na now binnenkwam, is vers, niet
+				// ontbrekend.
+				age = max(0, now.Sub(*n.HeartbeatAt))
 			}
 			in := NodeInput{
 				HasAgent: n.HasAgent, HeartbeatAge: age, DiskUsedRatio: n.DiskUsedRatio, DiskUsedMount: n.DiskUsedMount,

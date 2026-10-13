@@ -70,3 +70,39 @@ func TestAfterFails(t *testing.T) {
 		t.Fatalf("eigenaar %v, %d events vip.owner_changed", owner, events)
 	}
 }
+
+// TestHeartbeatJustNow: de database zet heartbeat_at met haar eigen klok.
+// Een heartbeat die binnenkomt terwijl de evaluator begint, ligt dan net na
+// zijn now. Dat is een verse heartbeat, geen ontbrekende: de node is gezond
+// en niet onbekend.
+func TestHeartbeatJustNow(t *testing.T) {
+	pool := storetest.DB(t)
+	ctx := context.Background()
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	ev := events.NewWriter(store.New(pool), log)
+
+	var node uuid.UUID
+	if err := pool.QueryRow(ctx, `INSERT INTO nodes (hostname) VALUES ('web01') RETURNING id`).Scan(&node); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO agents (id, node_id, nkey_public) VALUES (gen_random_uuid(), $1, 'UTEST')`, node); err != nil {
+		t.Fatal(err)
+	}
+	// Een seconde vooruit: ruim meer dan wat er tussen now en de query zit.
+	if _, err := pool.Exec(ctx, `INSERT INTO node_status (node_id, heartbeat_at) VALUES ($1, now() + interval '1 second')`, node); err != nil {
+		t.Fatal(err)
+	}
+
+	e := NewEvaluator(pool, ev, log)
+	e.Warmup = 0
+	if err := e.Evaluate(ctx); err != nil {
+		t.Fatal(err)
+	}
+	var st, reason string
+	if err := pool.QueryRow(ctx, `SELECT status, status_reason FROM nodes WHERE id = $1`, node).Scan(&st, &reason); err != nil {
+		t.Fatal(err)
+	}
+	if st != "healthy" {
+		t.Fatalf("node %s: %s", st, reason)
+	}
+}
