@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -55,6 +56,8 @@ type WhatIfWorld struct {
 	// Candidates zijn per cluster en VIP-adres de nodes die het adres in
 	// hun keepalived-configuratie hebben.
 	Candidates map[uuid.UUID]map[string][]uuid.UUID
+	// Databases zijn per cluster de onderdelen Database.
+	Databases map[uuid.UUID][]Database
 }
 
 // Components geeft alle onderdelen die kunnen uitvallen, in de volgorde
@@ -390,8 +393,9 @@ func (w WhatIfWorld) run(comps []Component, baseline bool, g *deps.Graph) WhatIf
 		slices.SortFunc(out.Nodes, func(a, b NodeOutcome) int {
 			return cmp.Or(cmp.Compare(a.Hostname, b.Hostname), cmp.Compare(a.ID.String(), b.ID.String()))
 		})
-		out.Clusters = w.predictClusters(g, during, after, baseline)
-		out.Services = servicesHit(g, outage, during, after)
+		var stops [2][]deps.Stop
+		out.Clusters, stops = w.predictClusters(g, during, after, baseline)
+		out.Services = servicesHit(g, outage, during, after, stops)
 	}
 
 	// 3. ClusterForge zelf.
@@ -527,9 +531,11 @@ func healthyGraph(g *deps.Graph) *deps.Graph {
 }
 
 // predictClusters past de statusregels toe op elk cluster met een node die
-// uitvalt: eerst, en na de herstart door HA als die iets verandert.
-func (w WhatIfWorld) predictClusters(g *deps.Graph, during, after map[uuid.UUID]string, baseline bool) []ClusterOutcome {
+// uitvalt: eerst, en na de herstart door HA als die iets verandert. Het geeft
+// ook de diensten van de databases die daardoor stoppen, eerst en na HA.
+func (w WhatIfWorld) predictClusters(g *deps.Graph, during, after map[uuid.UUID]string, baseline bool) ([]ClusterOutcome, [2][]deps.Stop) {
 	var out []ClusterOutcome
+	var stops [2][]deps.Stop
 	for _, c := range g.Clusters {
 		var hit []string
 		ha := false
@@ -548,21 +554,22 @@ func (w WhatIfWorld) predictClusters(g *deps.Graph, during, after map[uuid.UUID]
 			continue
 		}
 		slices.Sort(hit)
-		o := ClusterOutcome{
-			ID: c.ID, Name: c.Name, Env: c.Environment, NodesDown: hit,
-			Before: w.predict(g, c, nil, baseline), During: w.predict(g, c, during, baseline),
-		}
+		before, _ := w.predict(g, c, nil, baseline)
+		first, stopped := w.predict(g, c, during, baseline)
+		o := ClusterOutcome{ID: c.ID, Name: c.Name, Env: c.Environment, NodesDown: hit, Before: before, During: first}
+		stops[0] = append(stops[0], stopped...)
 		if ha {
-			p := w.predict(g, c, after, baseline)
-			o.AfterHA = &p
+			p, still := w.predict(g, c, after, baseline)
+			o.AfterHA, stopped = &p, still
 		}
+		stops[1] = append(stops[1], stopped...)
 		out = append(out, o)
 	}
 	slices.SortStableFunc(out, func(a, b ClusterOutcome) int {
 		return cmp.Or(cmp.Compare(envOrder(a.Env), envOrder(b.Env)), cmp.Compare(statusRank(a.Final().Status), statusRank(b.Final().Status)),
 			cmp.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name)))
 	})
-	return out
+	return out, stops
 }
 
 func envOrder(env string) int {
@@ -584,8 +591,10 @@ func statusRank(s string) int {
 // predict past status.ClusterWith toe met de uitgevallen nodes down. Een VIP
 // waarvan de eigenaar uitvalt, gaat naar een node die het in zijn
 // keepalived-configuratie heeft, of zonder die gegevens naar een andere
-// actieve node.
-func (w WhatIfWorld) predict(g *deps.Graph, c deps.Cluster, failed map[uuid.UUID]string, baseline bool) Prediction {
+// actieve node. Daarna telt de meerderheid van elke database mee, zoals
+// status.Database dat doet. Het geeft ook de diensten van een database die
+// stopt.
+func (w WhatIfWorld) predict(g *deps.Graph, c deps.Cluster, failed map[uuid.UUID]string, baseline bool) (Prediction, []deps.Stop) {
 	var nodes []status.ClusterNode
 	up := map[uuid.UUID]bool{}
 	var members []deps.Node
@@ -629,8 +638,21 @@ func (w WhatIfWorld) predict(g *deps.Graph, c deps.Cluster, failed map[uuid.UUID
 			}
 		}
 	}
-	r := status.ClusterWith(nodes, vips, holders)
-	return Prediction{Status: string(r.Status), Reason: r.Reason}
+	r := status.ClusterWith(nodes, vips, holders).Result
+	var hs []status.DBHealth
+	var stops []deps.Stop
+	for _, d := range w.Databases[c.ID] {
+		p := d.predict(g, failed, baseline)
+		hs = append(hs, p.health)
+		if p.stops {
+			for _, id := range dbServices(g, c.ID, d.Unit) {
+				stops = append(stops, deps.Stop{Service: id, Reason: p.why})
+			}
+		}
+	}
+	// De voorspelling heeft geen tijd: elke toestand telt.
+	r = status.Database(r, hs, time.Time{})
+	return Prediction{Status: string(r.Status), Reason: r.Reason}, stops
 }
 
 // firstCandidate is de eerste node, op hostnaam, die het VIP kan overnemen.
@@ -649,15 +671,16 @@ func (w WhatIfWorld) firstCandidate(cluster uuid.UUID, addr string, members []de
 }
 
 // servicesHit zijn de diensten die geraakt worden: met de nodes die eerst
-// uitvallen, en Recovers als ze na de herstart door HA weer werken.
-func servicesHit(g *deps.Graph, o deps.Outage, during, after map[uuid.UUID]string) []ServiceOutcome {
+// uitvallen, en Recovers als ze na de herstart door HA weer werken. stops
+// zijn de diensten van databases die stoppen, eerst en na HA.
+func servicesHit(g *deps.Graph, o deps.Outage, during, after map[uuid.UUID]string, stops [2][]deps.Stop) []ServiceOutcome {
 	first := o
-	first.Nodes = keys(during)
+	first.Nodes, first.Stops = keys(during), stops[0]
 	hits := g.ImpactOf(first)
 	later := map[uuid.UUID]deps.Impact{}
 	if len(after) != len(during) {
 		last := o
-		last.Nodes = keys(after)
+		last.Nodes, last.Stops = keys(after), stops[1]
 		for _, h := range g.ImpactOf(last) {
 			later[h.Service] = h.Impact
 		}

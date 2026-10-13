@@ -289,6 +289,8 @@ func serve() error {
 		return deps.SelfSkip(tp.OwnIPs(ctx), deps.Ports(append([]string{cfg.Listen, cfg.NATSListen, cfg.NATSAdvertise}, urls...)...))
 	}
 	rsk.Topo, rsk.Deps = tp, dps
+	// De wat-als kent de meerderheid van Galera en etcd.
+	rsk.DB = cmps
 	det := incidents.NewDetector(pool, ev, log)
 	eval.After = func(ctx context.Context) error {
 		return errors.Join(dps.Evaluate(ctx), det.Detect(ctx))

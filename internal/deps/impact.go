@@ -39,6 +39,16 @@ type Outage struct {
 	Services []uuid.UUID
 	Clusters []uuid.UUID
 	Nodes    []uuid.UUID
+	// Stops zijn diensten die door de rest stoppen, met de reden, zoals een
+	// database die zonder meerderheid stopt terwijl ze op een node nog
+	// draait.
+	Stops []Stop
+}
+
+// Stop is een dienst die stopt door wat er uitvalt.
+type Stop struct {
+	Service uuid.UUID
+	Reason  string
 }
 
 // Impact rekent uit wat er geraakt wordt als het doel uitvalt. Het is
@@ -92,6 +102,11 @@ func (g *Graph) ImpactOf(o Outage) []Hit {
 	}
 	for _, h := range g.nodeOutage(o.Nodes) {
 		direct(h)
+	}
+	for _, st := range o.Stops {
+		if g.svc[st.Service] != nil {
+			direct(Hit{Service: st.Service, Impact: ImpactDown, Direct: true, Reason: st.Reason})
+		}
 	}
 	for id, e := range g.propagate(roots) {
 		if chosen[id] {

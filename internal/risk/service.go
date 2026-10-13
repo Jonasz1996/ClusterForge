@@ -63,6 +63,9 @@ type Service struct {
 	// van ClusterForge zelf; zonder blijven die weg.
 	Topo *topo.Service
 	Deps *deps.Service
+	// DB geeft de onderdelen Database, voor de meerderheid in de wat-als;
+	// zonder telt alleen de status van de nodes.
+	DB DatabaseSource
 
 	mu           sync.Mutex
 	metricsAt    time.Time

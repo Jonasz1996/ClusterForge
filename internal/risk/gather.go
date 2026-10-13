@@ -306,7 +306,18 @@ func (s *Service) world(ctx context.Context, nodes []store.ListRiskNodesRow, vip
 			cands[v.ClusterID][addr] = c
 		}
 	}
-	return WhatIfWorld{Topo: m, Graph: g, Candidates: cands}, nil
+	w := WhatIfWorld{Topo: m, Graph: g, Candidates: cands}
+	if s.DB != nil {
+		dbs, err := s.DB.WhatIfDatabases(ctx)
+		if err != nil {
+			return WhatIfWorld{}, err
+		}
+		w.Databases = map[uuid.UUID][]Database{}
+		for _, d := range dbs {
+			w.Databases[d.ClusterID] = append(w.Databases[d.ClusterID], d)
+		}
+	}
+	return w, nil
 }
 
 // gatherTopo zet de SPOF's bij de clusters en de VM van ClusterForge zelf
