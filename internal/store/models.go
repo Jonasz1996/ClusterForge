@@ -601,6 +601,12 @@ type DbMigration struct {
 	CopiedAt       *time.Time
 	SwitchedAt     *time.Time
 	Locked         bool
+	RetireJobID    *uuid.UUID
+	RetiredAt      *time.Time
+	RetireNode     string
+	RetireFile     string
+	RetireBytes    int64
+	RetireMessage  string
 }
 
 type DbServer struct {

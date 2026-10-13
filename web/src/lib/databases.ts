@@ -13,6 +13,9 @@ export type MigrationTarget = components["schemas"]["DatabaseMigrationTarget"];
 export type MigrationRun = components["schemas"]["DatabaseMigrationRun"];
 export type MigrationInput = components["schemas"]["DatabaseMigrationInput"];
 export type MoveInput = components["schemas"]["DatabaseMoveInput"];
+export type RetireSource = components["schemas"]["DatabaseRetireSource"];
+export type RetireMove = components["schemas"]["DatabaseRetireMove"];
+export type RetireRule = components["schemas"]["DatabaseRetireRule"];
 
 type Tone = "slate" | "green" | "amber" | "red" | "blue";
 
@@ -107,5 +110,24 @@ export function useCancelMove() {
 export function useLockMove() {
   return useMigrationMutation(async ({ id, locked }: { id: string; locked: boolean }) =>
     unwrap(await api.POST("/databases/migrations/{id}/lock", { params: { path: { id } }, body: { locked } })),
+  );
+}
+
+// useRetire leest de oude databaseservers waarvan een database verhuisd is:
+// wat er op afbouwen wacht, wat er nog op staat en welke firewallregel weg
+// kan. Zolang er een afbouwen loopt, vaker.
+export function useRetire() {
+  return useQuery({
+    queryKey: ["databases", "retire"],
+    queryFn: async () => unwrap(await api.GET("/databases/retire")).items,
+    refetchInterval: (q) => (q.state.data?.some((s) => s.moves.some((m) => m.active)) ? 5_000 : 30_000),
+  });
+}
+
+// useRetireMove bouwt de oude database van een verhuizing af. Name is de
+// naam van de database, confirm de slug op prod.
+export function useRetireMove() {
+  return useMigrationMutation(async ({ id, name, confirm }: { id: string; name: string; confirm?: string }) =>
+    unwrap(await api.POST("/databases/migrations/{id}/retire", { params: { path: { id } }, body: { name, confirm } })),
   );
 }

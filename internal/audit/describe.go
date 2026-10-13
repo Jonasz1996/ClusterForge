@@ -492,6 +492,21 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 	case "cluster.database_unlocked":
 		return fmt.Sprintf("Slot van de oude database %s op %s gehaald: %s %s er weer in schrijven", str(p, "database"), str(p, "source"),
 			list(p["users"]), verbFor(p["users"], "mag", "mogen"))
+	case "cluster.database_retired":
+		s := fmt.Sprintf("Oude database %s op %s afgebouwd", str(p, "database"), str(p, "source"))
+		if n := str(p, "dump_node"); n != "" {
+			s += "; laatste dump op " + n + sizeText(p["dump_bytes"])
+		}
+		if l, ok := p["dropped"].([]any); ok && len(l) > 0 {
+			s += "; weggehaald: " + list(p["dropped"])
+		}
+		if l, ok := p["kept"].([]any); ok && len(l) > 0 {
+			s += "; " + count(float64(len(l)), "gebruiker blijft", "gebruikers blijven")
+		}
+		if e, _ := p["empty"].(bool); e {
+			s += "; " + list(p["servers"]) + " " + verbFor(p["servers"], "heeft", "hebben") + " geen database van een app meer"
+		}
+		return s
 	case "cluster.deployed":
 		return fmt.Sprintf("Cluster %s uitgerold uit %s %s met %s nodes", name, str(p, "template"), str(p, "version"), num(p["nodes"]))
 	case "node.created":
@@ -1426,8 +1441,11 @@ func vanaf(e Entry) string {
 }
 
 // dumpSize is de grootte van een dump in een beschrijving.
-func dumpSize(p map[string]any) string {
-	n, ok := p["size_bytes"].(float64)
+func dumpSize(p map[string]any) string { return sizeText(p["size_bytes"]) }
+
+// sizeText is een grootte tussen haakjes, zoals " (1,2 GB)"; leeg zonder.
+func sizeText(v any) string {
+	n, ok := v.(float64)
 	if !ok || n <= 0 {
 		return ""
 	}

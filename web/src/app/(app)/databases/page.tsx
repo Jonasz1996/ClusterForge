@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { RetireCards } from "@/components/databases/Retire";
 import { upgradeCommand } from "@/components/drift/Drift";
 import { ago, Empty, EnvBadge, formatBytes, QueryState, tableClass, tdClass, thClass } from "@/components/inventory/bits";
 import { CopyBlock } from "@/components/inventory/InstallAgent";
@@ -38,6 +39,8 @@ export default function DatabasesPage() {
           <CopyBlock text={upgradeCommand()} />
         </Card>
       )}
+
+      <RetireCards />
 
       <QueryState q={groups}>
         {groups.data?.length === 0 ? (
@@ -118,7 +121,8 @@ function GroupCard({ g }: { g: DatabaseGroup }) {
           {g.databases_from ? "Geen databases buiten die van het systeem." : "Geen server antwoordt, dus geen lijst."}
         </p>
       ) : (
-        <div className="overflow-x-auto">
+        // relative: anders maakt de onzichtbare kop de pagina op een telefoon breder dan het scherm.
+        <div className="relative overflow-x-auto">
           <table className={tableClass}>
             <thead className="border-b border-slate-200 dark:border-slate-800">
               <tr>

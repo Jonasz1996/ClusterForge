@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState, type ReactNode } from "react";
 import { CopyBlock } from "@/components/inventory/InstallAgent";
 import { tableClass, tdClass, thClass } from "@/components/inventory/bits";
+import { RetireSection } from "@/components/databases/Retire";
 import { ProdConfirm, prodConfirmed, useProdTotp } from "@/components/ProdConfirm";
 import { Alert, Badge, Button, Card, cx, Input } from "@/components/ui";
 import { ApiError } from "@/lib/api/client";
@@ -130,7 +131,12 @@ export function MoveCard({ p, loading, refresh }: { p: MigrationPlan; loading: b
         ) : finished ? null : (
           <Start p={p} loading={loading} refresh={refresh} />
         )}
-        {done && !open && <Moved p={p} r={done} />}
+        {done && !open && (
+          <>
+            <Moved p={p} r={done} />
+            <RetireSection r={done} />
+          </>
+        )}
       </div>
     </Card>
   );
@@ -535,14 +541,16 @@ function Copied({ p, r }: { p: MigrationPlan; r: MigrationRun }) {
   );
 }
 
-// Moved: na de verhuizing, met het slot op de oude database.
+// Moved: na de verhuizing, met het slot op de oude database. Na het
+// afbouwen is er geen oude database meer.
 function Moved({ p, r }: { p: MigrationPlan; r: MigrationRun }) {
   const isAdmin = useIsAdmin();
   const lock = useLockMove();
   const users = r.accounts.map((a) => a.user);
   const pg = isPG(p);
+  const retired = r.retired_at !== null;
   // Bij PostgreSQL staat het slot op de database zelf, ook zonder rollen.
-  const lockable = pg || users.length > 0;
+  const lockable = !retired && (pg || users.length > 0);
   return (
     <section className="space-y-2 rounded border border-slate-200 p-3 text-sm text-slate-700 dark:border-slate-800 dark:text-slate-300">
       <h3 className="flex flex-wrap items-center gap-2 font-semibold text-slate-900 dark:text-slate-100">
@@ -553,20 +561,24 @@ function Moved({ p, r }: { p: MigrationPlan; r: MigrationRun }) {
       </h3>
       <p>
         De app gebruikt {r.database} op <span className="font-mono">{r.target_address || r.cluster_name}</span>.{" "}
-        {pg
-          ? r.locked
-            ? `Op ${r.source_name} kan wie met ${r.database} verbindt, alleen nog lezen.`
-            : `Op ${r.source_name} kan iedereen weer in ${r.database} schrijven.`
-          : users.length === 0
-            ? "Er ging geen gebruiker mee, dus er is geen slot."
-            : r.locked
-              ? `Op ${r.source_name} ${users.length === 1 ? "mag" : "mogen"} ${users.join(" en ")} ${r.database} alleen nog lezen.`
-              : `Op ${r.source_name} ${users.length === 1 ? "kan" : "kunnen"} ${users.join(" en ")} weer in ${r.database} schrijven.`}
+        {retired
+          ? `De oude database op ${r.source_name} is afgebouwd.`
+          : pg
+            ? r.locked
+              ? `Op ${r.source_name} kan wie met ${r.database} verbindt, alleen nog lezen.`
+              : `Op ${r.source_name} kan iedereen weer in ${r.database} schrijven.`
+            : users.length === 0
+              ? "Er ging geen gebruiker mee, dus er is geen slot."
+              : r.locked
+                ? `Op ${r.source_name} ${users.length === 1 ? "mag" : "mogen"} ${users.join(" en ")} ${r.database} alleen nog lezen.`
+                : `Op ${r.source_name} ${users.length === 1 ? "kan" : "kunnen"} ${users.join(" en ")} weer in ${r.database} schrijven.`}
       </p>
-      <p className="text-slate-500">
-        Terug kan zolang de oude database bestaat: haal het slot eraf en wijs de app weer naar {p.source.address || p.source.name}
-        . Wat de app sinds het overschakelen schreef, staat dan alleen in de nieuwe database.
-      </p>
+      {!retired && (
+        <p className="text-slate-500">
+          Terug kan zolang de oude database bestaat: haal het slot eraf en wijs de app weer naar{" "}
+          {p.source.address || p.source.name}. Wat de app sinds het overschakelen schreef, staat dan alleen in de nieuwe database.
+        </p>
+      )}
       {lockable && (
         <Button
           variant="secondary"

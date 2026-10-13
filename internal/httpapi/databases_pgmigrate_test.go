@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -84,6 +85,7 @@ func TestDatabaseMigrationPostgres(t *testing.T) {
 		t.Fatalf("db1: %d", s)
 	}
 	var db1 *agenttest.Host
+	var dumps string
 	startAgentWith(t, e, c, db1n.ID, strings.Repeat("d", 32), &addrs{}, func(ag *agent.Agent, root string) {
 		db1 = agenttest.NewHost(root, "10.0.20.181")
 		db1.SetUnit("postgresql", agenttest.Unit{Enabled: true, Active: true})
@@ -101,13 +103,14 @@ func TestDatabaseMigrationPostgres(t *testing.T) {
 					Name: "nextcloud", Owner: "nextcloud", Size: 300 << 20, Tables: 6, Rows: 100, Views: 1, Routines: 2, Triggers: 1,
 					Extensions: []string{"pg_trgm", "postgis"}, ACL: map[string][]string{"rapport": {"CONNECT"}}, Grantees: []string{"nc_grp"},
 				},
-				{Name: "zabbix", Owner: "zabbix", Size: 2 << 30, Tables: 170},
+				{Name: "zabbix", Owner: "zabbix", Size: 2 << 30, Tables: 170, ACL: map[string][]string{"rapport": {"CONNECT"}}},
 			},
 			Clients: []agenttest.Client{{User: "nextcloud", Host: "10.0.20.186", Database: "nextcloud", Count: 4}},
 			// pg_hba.conf kent nc1 nog niet.
 			HBADeny: []string{"10.0.20.186"},
 		}
-		ag.Exec, ag.ExecStdin, ag.Stream, ag.Root, ag.Collector.Run = db1.Exec, db1.ExecStdin, db1.Stream, root, db1.Exec
+		dumps = filepath.Join(root, "var/backups/clusterforge-db")
+		ag.Exec, ag.ExecStdin, ag.Stream, ag.Root, ag.Collector.Run, ag.DumpDir = db1.Exec, db1.ExecStdin, db1.Stream, root, db1.Exec, dumps
 	})
 	network := func(addr string) *agenttest.Host {
 		if addr == "10.0.20.181:5432" {
@@ -391,6 +394,49 @@ func TestDatabaseMigrationPostgres(t *testing.T) {
 	dump.Write(raw)
 	if strings.Contains(dump.String(), "SCRAM-SHA-256$") {
 		t.Errorf("een verifier staat in ClusterForge")
+	}
+
+	// Mijlpaal 14: acht dagen later gaat de oude database weg, met een
+	// laatste dump. De rollen van de app gaan mee; rapport blijft, want hij
+	// mag ook in zabbix.
+	if _, err := e.pool.Exec(ctx, "UPDATE db_migrations SET switched_at = switched_at - interval '8 days' WHERE id = $1", run.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := e.pool.Exec(ctx, "UPDATE db_clients SET last_seen = last_seen - interval '9 days' WHERE node_id = $1", db1n.ID); err != nil {
+		t.Fatal(err)
+	}
+	retireURL := "/api/v1/databases/migrations/" + run.ID + "/retire"
+	if s := c.do("POST", retireURL, map[string]any{"name": "nextcloud"}, &j); s != http.StatusAccepted {
+		c.do("POST", retireURL, map[string]any{"name": "nextcloud"}, &ae)
+		t.Fatalf("afbouwen: %d %+v", s, ae)
+	}
+	if j = waitJobLong(t, c, j.ID); j.Status != "succeeded" {
+		t.Fatalf("afbouwen: %s %s %+v", j.Status, j.Error, j.Steps)
+	}
+	steps = strings.Join(stepLogs(j), "\n")
+	for _, want := range []string{
+		"in /var/backups/clusterforge-db/nextcloud/nextcloud-", "nextcloud is weg van db1.", "nc_grp weggehaald.", "nc_lid weggehaald.",
+		"nextcloud weggehaald.", "rapport blijft: hij heeft ook rechten op zabbix.", "Nog op db1: zabbix (PostgreSQL).",
+	} {
+		if !strings.Contains(steps, want) {
+			t.Errorf("afbouwen mist %q:\n%s", want, steps)
+		}
+	}
+	db1.Locked(func() {
+		pg := db1.Postgres
+		var dbs, roles []string
+		for _, d := range pg.Databases {
+			dbs = append(dbs, d.Name)
+		}
+		for _, r := range pg.Roles {
+			roles = append(roles, r.Name)
+		}
+		if strings.Join(dbs, " ") != "zabbix" || strings.Join(roles, " ") != "postgres rapport" {
+			t.Errorf("na het afbouwen op db1: %v %v", dbs, roles)
+		}
+	})
+	if files, _ := filepath.Glob(filepath.Join(dumps, "nextcloud", "nextcloud-*.pgsql.zst")); len(files) != 1 {
+		t.Errorf("dump op db1: %v", files)
 	}
 }
 

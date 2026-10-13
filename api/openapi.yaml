@@ -3688,6 +3688,54 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
+  /databases/migrations/{id}/retire:
+    post:
+      operationId: retireDatabaseMove
+      summary: De oude database van een verhuisde app afbouwen (admin); wordt een taak
+      description: |
+        Kan als er zeven dagen niemand van buiten de databasenode met de oude database verbonden was, en nu niemand
+        verbonden is (ook niet op de databasenode zelf). Een laatste dump op een node van de oude server, die blijft staan;
+        is hij niet compleet, dan stopt het. Daarna gaan de database en de gebruikers van de app weg. Een gebruiker die ook
+        rechten op een andere database heeft of er de laatste 30 dagen een andere gebruikte, blijft. Name is de naam van de
+        database; raakt het een prodcluster (dat van de app, anders het oude), dan ook de slug en tweestapsverificatie. 409
+        als het nog niet kan, met tot wanneer en waarom.
+      parameters:
+        - { name: id, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ComponentDropInput" }
+      responses:
+        "202":
+          description: Taak aangemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /databases/retire:
+    get:
+      operationId: listDatabaseRetire
+      summary: De oude databaseservers waarvan een database verhuisd is
+      description: |
+        Per oude server (alle databaseservers op dezelfde nodes, zoals MariaDB en PostgreSQL op db1 tot db3): de verhuisde
+        databases met wanneer afbouwen kan, wat er nog van een app op staat, en per app of zijn firewallregel naar de oude
+        server nog gebruikt wordt, uit de verbindingen die ClusterForge elke minuut leest. Ook voor viewers.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/DatabaseRetireSource" } }
+        "401": { $ref: "#/components/responses/Error" }
   /kubernetes/clusters:
     get:
       operationId: listKubeClusters
@@ -5370,10 +5418,17 @@ components:
       type: object
       required: [id, kind, status, cluster_id, cluster_name, component_id, source_name, source_node, source_address, database, target_database,
         target_node, started_at, finished_at, size_bytes, dump_bytes, import_ms, count_ms, tables, rows_source, rows_target, differences,
-        objects, message, job_id, stage, accounts, force, target_address, copied_at, switched_at, locked]
+        objects, message, job_id, stage, accounts, force, target_address, copied_at, switched_at, locked,
+        retire_job_id, retired_at, retire_node, retire_file, retire_bytes, retire_message]
       properties:
         id: { type: string, format: uuid }
         kind: { type: string, enum: [trial, migrate] }
+        retire_job_id: { type: string, format: uuid, nullable: true, description: Het laatste afbouwen van de oude database }
+        retired_at: { type: string, format: date-time, nullable: true, description: Wanneer de oude database en haar gebruikers weggingen }
+        retire_node: { type: string, description: De node met de laatste dump; leeg zonder dump }
+        retire_file: { type: string, description: "De laatste dump, in /var/backups/clusterforge-db/<database>/" }
+        retire_bytes: { type: integer, format: int64, description: De laatste dump op schijf }
+        retire_message: { type: string, description: Wat het afbouwen deed, of waarom het mislukte }
         status: { type: string, enum: [running, ok, failed] }
         stage:
           type: string
@@ -5409,6 +5464,72 @@ components:
         objects: { type: array, items: { $ref: "#/components/schemas/DatabaseMigrationObjects" } }
         message: { type: string }
         job_id: { type: string, format: uuid, nullable: true }
+    DatabaseRetireSource:
+      type: object
+      required: [name, cluster_id, keys, servers, readable, empty, remaining, moves, rules]
+      properties:
+        name: { type: string, description: "Het cluster, of de nodes als ze in geen of meer clusters zitten" }
+        cluster_id: { type: string, format: uuid, nullable: true }
+        keys: { type: array, items: { type: string }, description: De groepen onder Databases }
+        servers: { type: array, items: { type: string } }
+        readable: { type: boolean, description: Elke groep gaf een volledige lijst met databases }
+        empty: { type: boolean, description: Er staat geen database van een app meer op }
+        remaining: { type: array, items: { $ref: "#/components/schemas/DatabaseRetireRemaining" } }
+        moves: { type: array, items: { $ref: "#/components/schemas/DatabaseRetireMove" } }
+        rules: { type: array, items: { $ref: "#/components/schemas/DatabaseRetireRule" } }
+    DatabaseRetireRemaining:
+      type: object
+      required: [source_key, engine, database, moved]
+      properties:
+        source_key: { type: string }
+        engine: { type: string }
+        database: { type: string }
+        moved: { type: boolean, description: Verhuisd; wacht op afbouwen }
+    DatabaseRetireMove:
+      type: object
+      required: [run, engine, source_key, exists, last_used, last_by, last_local, local_by, ready_at, ready, active, prod_slug]
+      properties:
+        run: { $ref: "#/components/schemas/DatabaseMigrationRun" }
+        prod_slug: { type: string, description: "De slug om in te tikken als het afbouwen een prodcluster raakt; leeg als niet" }
+        engine: { type: string }
+        source_key: { type: string }
+        exists: { type: boolean, description: De oude database staat er volgens de laatste lezing nog }
+        last_used:
+          type: string
+          format: date-time
+          nullable: true
+          description: De laatste verbinding met de oude database van buiten de databasenode, in de laatste 30 dagen
+        last_by: { type: string, description: Wie dat was }
+        last_local:
+          type: string
+          format: date-time
+          nullable: true
+          description: De laatste verbinding op de databasenode zelf, zoals een back-up; die houdt afbouwen niet tegen
+        local_by: { type: string }
+        ready_at: { type: string, format: date-time, nullable: true, description: Vanaf wanneer afbouwen kan; null als het gebeurd is }
+        ready: { type: boolean }
+        active:
+          allOf: [{ $ref: "#/components/schemas/ComponentDumpJob" }]
+          nullable: true
+          description: Het afbouwen dat wacht of loopt
+    DatabaseRetireRule:
+      type: object
+      required: [cluster_id, cluster_name, engine, address, port, last_seen, state]
+      properties:
+        cluster_id: { type: string, format: uuid }
+        cluster_name: { type: string }
+        engine: { type: string }
+        address: { type: string, description: Waarlangs de app de oude database gebruikte; leeg als het onbekend is }
+        port: { type: integer }
+        last_seen:
+          type: string
+          format: date-time
+          nullable: true
+          description: De laatste verbinding van een node van de app met de oude servers, in de laatste 30 dagen
+        state:
+          type: string
+          enum: [in_use, until_retired, unused]
+          description: "in_use: de app verbond na het overschakelen nog; until_retired: nodig om terug te kunnen tot het afbouwen; unused: de regel kan weg"
     DatabaseMigrationMovedUser:
       type: object
       required: [user, old_hosts, hosts, privileges, new]

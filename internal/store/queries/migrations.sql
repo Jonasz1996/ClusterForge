@@ -89,3 +89,41 @@ INSERT INTO deploy_databases (cluster_id, engine, job_id, requested_by) VALUES (
 -- name: TakeDeployDatabase :one
 -- De database die na de uitrol van een cluster erbij moet; één keer.
 DELETE FROM deploy_databases WHERE cluster_id = $1 RETURNING *;
+
+-- name: StartDBMigrationRetire :one
+-- Het afbouwen van de oude database van een verhuizing begint. Er loopt
+-- er hoogstens één per verhuizing; een vorige dump blijft vastgelegd.
+UPDATE db_migrations m
+SET retire_job_id = @retire_job_id, retire_message = ''
+WHERE m.id = @id AND m.kind = 'migrate' AND m.stage = 'done' AND m.retired_at IS NULL
+    AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.id = m.retire_job_id AND j.status IN ('queued', 'running'))
+RETURNING *;
+
+-- name: GetDBMigrationByRetireJob :one
+SELECT * FROM db_migrations WHERE retire_job_id = $1;
+
+-- name: SetDBMigrationRetireDump :exec
+-- De laatste dump op de oude server is klaar.
+UPDATE db_migrations SET retire_node = @retire_node, retire_file = @retire_file, retire_bytes = @retire_bytes
+WHERE id = @id;
+
+-- name: RetireDBMigration :one
+-- De oude database en de gebruikers van de app zijn weg.
+UPDATE db_migrations SET retired_at = @retired_at, retire_message = @retire_message
+WHERE id = @id AND retired_at IS NULL
+RETURNING *;
+
+-- name: FailDBMigrationRetire :exec
+-- Het afbouwen mislukte; de eerste reden blijft staan.
+UPDATE db_migrations SET retire_message = @retire_message
+WHERE retire_job_id = @retire_job_id AND retired_at IS NULL AND retire_message = '';
+
+-- name: ListDoneDBMigrations :many
+-- De verhuizingen die klaar zijn, met de taak van hun afbouwen; de nieuwste
+-- eerst.
+SELECT sqlc.embed(m), c.name AS cluster_name, j.status AS retire_job_status, coalesce(j.title, '') AS retire_job_title
+FROM db_migrations m
+JOIN clusters c ON c.id = m.cluster_id
+LEFT JOIN jobs j ON j.id = m.retire_job_id
+WHERE m.kind = 'migrate' AND m.stage = 'done'
+ORDER BY m.switched_at DESC NULLS LAST, m.started_at DESC;

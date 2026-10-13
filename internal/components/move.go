@@ -288,7 +288,13 @@ func (s *Service) MoveProd(ctx context.Context, source string, componentID uuid.
 	if err != nil {
 		return false, "", err
 	}
-	c, err := s.q.GetCluster(ctx, r.ClusterID)
+	return s.prodOf(ctx, r.ClusterID, source)
+}
+
+// prodOf zegt of het cluster van de app of de oude server source prod is,
+// met de slug om in te tikken: eerst die van het cluster van de app.
+func (s *Service) prodOf(ctx context.Context, clusterID uuid.UUID, source string) (bool, string, error) {
+	c, err := s.q.GetCluster(ctx, clusterID)
 	if err != nil {
 		return false, "", err
 	}
@@ -1085,6 +1091,9 @@ func (s *Service) LockMove(ctx context.Context, actor events.Actor, id uuid.UUID
 	m := row.DbMigration
 	if m.Kind != store.DbMigrationKindMigrate || m.Stage != StageDone {
 		return row, &ConflictError{"alleen de oude database van een verhuizing die klaar is, kan op slot"}
+	}
+	if m.RetiredAt != nil {
+		return row, &ConflictError{"de oude database is afgebouwd; er is niets meer op slot te zetten"}
 	}
 	if m.Locked == lock {
 		return row, nil
