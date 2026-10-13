@@ -285,29 +285,35 @@ func (s *Service) down(ctx context.Context, w store.ListWatchedComponentsRow, al
 	if err := s.markDown(ctx, w, reason, now, ev); err != nil {
 		return err
 	}
-	if !w.AutoRecover || !s.backoffOver(w, now) {
+	if !w.AutoRecover || !s.backoffOver(w, now) || !s.recoverDue(all, now.Sub(since)) {
 		return nil
 	}
+	return s.autoRecover(ctx, w, reason)
+}
+
+// recoverDue zegt of ClusterForge een Galera zonder Primary component nu
+// vanzelf opnieuw begint; gone is hoe lang de database al weg is. De
+// failovertest die alle nodes herstart, beslist er ook mee.
+func (s *Service) recoverDue(all []obs, gone time.Duration) bool {
 	failed, starting := 0, 0
 	for _, o := range all {
 		switch {
 		case !o.answered(), o.pos.Running:
-			return nil
+			return false
 		case o.starting():
 			starting++
 		case o.pos.Active == "failed":
 			failed++
 		}
 	}
-	gone := now.Sub(since)
 	switch {
 	case failed == 0 && starting == 0:
 		// Overal gewoon uit: met opzet.
-		return nil
+		return false
 	case starting > 0 && gone < s.HungAfter, gone < s.RecoverGrace:
-		return nil
+		return false
 	}
-	return s.autoRecover(ctx, w, reason)
+	return true
 }
 
 func (s *Service) backoffOver(w store.ListWatchedComponentsRow, now time.Time) bool {

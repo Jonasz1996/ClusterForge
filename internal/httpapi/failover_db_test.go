@@ -2,7 +2,9 @@ package httpapi
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"maps"
 	"net"
 	"net/http"
 	"path/filepath"
@@ -121,41 +123,53 @@ func (n *vipNetwork) route(addr string) *agenttest.Host {
 	return n.nodes[host]
 }
 
-// TestFailoverDatabaseGalera is de acceptatie van mijlpaal 13 van fase 5
-// voor MariaDB: een failovertest op het Nextcloud-cluster stopt de database
-// op de eigenaar van .185. Ondertussen schrijft nc2 elke tik een rij via het
-// VIP; het rapport zegt hoe lang schrijven niet lukte en dat er niets
-// verloren ging. Verdwijnt er een bevestigde rij, dan is het FAIL.
-func TestFailoverDatabaseGalera(t *testing.T) {
+// ncGalera is Nextcloud met nc1 tot nc3, keepalived met het VIP .185 en,
+// na deploy, MariaDB Galera met dat VIP en de tabel van de schrijftest.
+type ncGalera struct {
+	t        *testing.T
+	e        *testEnv
+	c        *client
+	group    *agenttest.Group
+	nc       cluster
+	vipID    string
+	g        *galeraHosts
+	ids      map[string]string
+	table    *agenttest.ProbeTable
+	compBase string
+	h        healthHelpers
+}
+
+// newNCGalera start de agents; extra hoort elk gelukt commando na de
+// nagespeelde Galera.
+func newNCGalera(t *testing.T, extra func(name string, h *agenttest.Host, call string)) *ncGalera {
 	e, c := adminClient(t)
 	ctx := context.Background()
 	group := &agenttest.Group{Takeover: 200 * time.Millisecond}
 	e.fo.Prober = groupProber{group}
-
-	var nc cluster
-	if s := c.do("POST", "/api/v1/clusters", map[string]any{"slug": "nextcloud", "name": "Nextcloud", "type": "generic", "environment": "lab"}, &nc); s != http.StatusCreated {
+	lab := &ncGalera{t: t, e: e, c: c, group: group, ids: map[string]string{}, table: agenttest.NewProbeTable()}
+	if s := c.do("POST", "/api/v1/clusters", map[string]any{"slug": "nextcloud", "name": "Nextcloud", "type": "generic", "environment": "lab"}, &lab.nc); s != http.StatusCreated {
 		t.Fatalf("cluster: %d", s)
 	}
 	var vip struct {
 		ID string `json:"id"`
 	}
-	c.do("POST", "/api/v1/clusters/"+nc.ID+"/vips", map[string]any{"address": ncVIP}, &vip)
+	c.do("POST", "/api/v1/clusters/"+lab.nc.ID+"/vips", map[string]any{"address": ncVIP}, &vip)
+	lab.vipID = vip.ID
 
 	g := &galeraHosts{hosts: map[string]*agenttest.Host{}}
+	lab.g = g
 	byIP := map[string]*agenttest.Host{}
-	ids := map[string]string{}
-	table := agenttest.NewProbeTable()
-	var lose atomic.Bool
 	for i, name := range []string{"nc1", "nc2", "nc3"} {
 		ip := fmt.Sprintf("10.0.20.%d", 186+i)
 		var n node
-		if s := c.do("POST", "/api/v1/nodes", map[string]any{"hostname": name, "cluster_id": nc.ID, "primary_ip": ip}, &n); s != http.StatusCreated {
+		if s := c.do("POST", "/api/v1/nodes", map[string]any{"hostname": name, "cluster_id": lab.nc.ID, "primary_ip": ip}, &n); s != http.StatusCreated {
 			t.Fatalf("node %s: %d", name, s)
 		}
-		ids[name] = n.ID
+		lab.ids[name] = n.ID
 		startAgentWith(t, e, c, n.ID, strings.Repeat(string(rune('a'+i)), 32), &addrs{}, func(ag *agent.Agent, root string) {
 			writeFile(t, filepath.Join(root, "etc/os-release"), "ID=debian\nVERSION_ID=\"13\"\nPRETTY_NAME=\"Debian GNU/Linux 13 (trixie)\"\n", 0o644)
 			writeFile(t, filepath.Join(root, "proc/meminfo"), "MemTotal: 4194304 kB\nMemAvailable: 2097152 kB\n", 0o644)
+			writeFile(t, filepath.Join(root, "proc/uptime"), "86400.00 1.00\n", 0o644)
 			writeFile(t, filepath.Join(root, "etc/keepalived/keepalived.conf"), ncKeepalived(name, 150-10*i), 0o640)
 			h := agenttest.NewHost(root, ip)
 			if _, err := h.Exec(ctx, "apt-get", "install", "-y", "keepalived"); err != nil {
@@ -172,12 +186,6 @@ func TestFailoverDatabaseGalera(t *testing.T) {
 				switch call {
 				case "systemctl start mariadb":
 					g.restart(name, h)
-					if lose.Load() {
-						// Een bevestigde rij is na de herstart weg.
-						if runs := table.Runs(); len(runs) == 1 {
-							table.Lose(runs[0], table.Rows(runs[0])[0])
-						}
-					}
 				case "mariadb --batch --skip-print-query-on-error":
 					// Galera repliceert gebruikers en databases naar de andere
 					// nodes.
@@ -194,6 +202,9 @@ func TestFailoverDatabaseGalera(t *testing.T) {
 						}
 					}
 				}
+				if extra != nil {
+					extra(name, h, call)
+				}
 			})
 			ag.Exec, ag.ExecStdin, ag.Root, ag.Collector.Run, ag.Collector.Addresses = h.Exec, h.ExecStdin, root, h.Exec, h.Addresses
 			ag.Collector.Interfaces, ag.Collector.PrimaryAddress = h.Interfaces, func() string { return ip }
@@ -207,9 +218,66 @@ func TestFailoverDatabaseGalera(t *testing.T) {
 	}
 	eventually(t, "facts met keepalived van de drie nodes", func() bool {
 		var n int
-		_ = e.pool.QueryRow(ctx, "SELECT count(*) FROM node_facts f JOIN nodes n ON n.id = f.node_id WHERE n.cluster_id = $1 AND f.facts->'keepalived'->>'active' = 'active'", nc.ID).Scan(&n)
+		_ = e.pool.QueryRow(ctx, "SELECT count(*) FROM node_facts f JOIN nodes n ON n.id = f.node_id WHERE n.cluster_id = $1 AND f.facts->'keepalived'->>'active' = 'active'", lab.nc.ID).Scan(&n)
 		return n == 3
 	})
+	lab.compBase = "/api/v1/clusters/" + lab.nc.ID + "/components"
+	lab.h = healthHelpers{t: t, e: e, c: c, clusterID: lab.nc.ID, base: lab.compBase}
+	return lab
+}
+
+// deploy rolt MariaDB Galera uit met het VIP van Nextcloud. Komen er net
+// nog facts binnen, dan verandert het plan; dan bekijkt hij het opnieuw.
+func (lab *ncGalera) deploy() {
+	t, c := lab.t, lab.c
+	in := map[string]any{"engine": "mariadb", "nodes": []string{lab.ids["nc1"], lab.ids["nc2"], lab.ids["nc3"]}, "vip_id": lab.vipID}
+	var j job
+	eventually(t, "uitrol gestart", func() bool {
+		var plan componentPlanView
+		if s := c.do("POST", lab.compBase+"/plan", in, &plan); s != http.StatusOK || plan.Blocked {
+			t.Fatalf("plan: %d %+v", s, plan)
+		}
+		// Het plan kent geen hash; zo blijft in goed voor een nieuwe ronde.
+		add := maps.Clone(in)
+		add["hash"] = plan.Hash
+		var raw json.RawMessage
+		s := c.do("POST", lab.compBase, add, &raw)
+		var ae apiErr
+		if s == http.StatusConflict && json.Unmarshal(raw, &ae) == nil && ae.Code == "plan_stale" {
+			return false
+		}
+		if s != http.StatusAccepted || json.Unmarshal(raw, &j) != nil {
+			t.Fatalf("toevoegen: %d %s", s, raw)
+		}
+		return true
+	})
+	if j = waitJobLong(t, c, j.ID); j.Status != "succeeded" {
+		t.Fatalf("uitrol: %s %s", j.Status, j.Error)
+	}
+	for _, h := range lab.g.hosts {
+		h.Locked(func() { h.MariaDB.Probe = lab.table })
+	}
+	lab.h.check()
+	lab.h.clusterIs("healthy", "")
+}
+
+// TestFailoverDatabaseGalera is de acceptatie van mijlpaal 13 van fase 5
+// voor MariaDB: een failovertest op het Nextcloud-cluster stopt de database
+// op de eigenaar van .185. Ondertussen schrijft nc2 elke tik een rij via het
+// VIP; het rapport zegt hoe lang schrijven niet lukte en dat er niets
+// verloren ging. Verdwijnt er een bevestigde rij, dan is het FAIL.
+func TestFailoverDatabaseGalera(t *testing.T) {
+	var lose atomic.Bool
+	var lab *ncGalera
+	lab = newNCGalera(t, func(_ string, _ *agenttest.Host, call string) {
+		if call == "systemctl start mariadb" && lose.Load() {
+			// Een bevestigde rij is na de herstart weg.
+			if runs := lab.table.Runs(); len(runs) == 1 {
+				lab.table.Lose(runs[0], lab.table.Rows(runs[0])[0])
+			}
+		}
+	})
+	c, group, nc, vip, g, table := lab.c, lab.group, lab.nc, lab.vipID, lab.g, lab.table
 
 	// Een failovertest op het VIP van de app kan nog, zonder schrijftest.
 	listURL := "/api/v1/clusters/" + nc.ID + "/failover-tests"
@@ -218,28 +286,8 @@ func TestFailoverDatabaseGalera(t *testing.T) {
 	if ok, reason, _ := opts.scenario("database_stop"); ok || reason != "dit cluster heeft geen onderdeel Database met een VIP" {
 		t.Fatalf("database_stop zonder database: %v %q", ok, reason)
 	}
-
-	// MariaDB Galera met het VIP van Nextcloud.
-	compBase := "/api/v1/clusters/" + nc.ID + "/components"
-	in := map[string]any{"engine": "mariadb", "nodes": []string{ids["nc1"], ids["nc2"], ids["nc3"]}, "vip_id": vip.ID}
-	var plan componentPlanView
-	if s := c.do("POST", compBase+"/plan", in, &plan); s != http.StatusOK || plan.Blocked {
-		t.Fatalf("plan: %d %+v", s, plan)
-	}
-	in["hash"] = plan.Hash
-	var j job
-	if s := c.do("POST", compBase, in, &j); s != http.StatusAccepted {
-		t.Fatalf("toevoegen: %d", s)
-	}
-	if j = waitJobLong(t, c, j.ID); j.Status != "succeeded" {
-		t.Fatalf("uitrol: %s %s", j.Status, j.Error)
-	}
-	for _, h := range g.hosts {
-		h.Locked(func() { h.MariaDB.Probe = table })
-	}
-	h := healthHelpers{t: t, e: e, c: c, clusterID: nc.ID, base: compBase}
-	h.check()
-	h.clusterIs("healthy", "")
+	lab.deploy()
+	compBase, h := lab.compBase, lab.h
 
 	c.do("GET", listURL, nil, &opts)
 	if ok, _, units := opts.scenario("database_stop"); !ok || !slices.Equal(units, []string{"mariadb"}) {
@@ -250,7 +298,7 @@ func TestFailoverDatabaseGalera(t *testing.T) {
 	}
 
 	input := map[string]any{
-		"name": "database stoppen", "vip_id": vip.ID, "scenario": "database_stop", "max_takeover_seconds": 20,
+		"name": "database stoppen", "vip_id": vip, "scenario": "database_stop", "max_takeover_seconds": 20,
 		"expect_failback": true, "probe": map[string]any{"tcp": map[string]any{"port": 3306}},
 	}
 	var ft failoverTestView

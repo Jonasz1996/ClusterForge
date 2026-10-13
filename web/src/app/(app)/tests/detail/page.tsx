@@ -12,6 +12,7 @@ import { QueryState } from "@/components/inventory/bits";
 import { Steps } from "@/components/jobs/Steps";
 import { Alert, Button, Card, PageHeader, cx } from "@/components/ui";
 import {
+  list,
   probeText,
   seconds,
   stillDown,
@@ -52,6 +53,7 @@ function TestRunInner() {
   const rehearsal = run.data?.rehearsal ?? null;
   const skipped = run.data?.result === "skipped";
   const vm = run.data?.definition?.scenario === "vm_hard_stop";
+  const restartAll = run.data?.definition?.scenario === "restart_all";
 
   return (
     <QueryState q={run}>
@@ -111,6 +113,8 @@ function TestRunInner() {
                                 : `Rampoefening afbreken? ClusterForge zet ${disaster.unit || "de dienst"} meteen weer aan.`
                             : vm
                             ? "Test afbreken? ClusterForge start de VM meteen weer."
+                            : restartAll
+                            ? "Test afbreken? De herstart is al gebeurd; ClusterForge wacht tot de nodes terug zijn en zet de database recht."
                             : `Test afbreken? ClusterForge zet ${run.data?.definition?.unit || "de dienst"} meteen weer aan.`;
                         if (window.confirm(question)) cancel.mutate(job.data!.id);
                       }}
@@ -209,7 +213,8 @@ function Summary({ run, d, m }: { run: TestRun; d: FailoverDefinition; m: Failov
             <dd className="tabular-nums">{seconds(m.downtime_ms)}</dd>
           </>
         )}
-        {m.writes && <Writes w={m.writes} />}
+        {m.restart && <Restart r={m.restart} />}
+        {m.writes && <Writes w={m.writes} restart={!!m.restart} />}
         {m.takeover_node && (
           <>
             <dt className={dtClass}>Overgenomen door</dt>
@@ -247,34 +252,94 @@ function Summary({ run, d, m }: { run: TestRun; d: FailoverDefinition; m: Failov
   );
 }
 
+// Restart is wat alles herstarten zag: wanneer de nodes terug waren, wanneer
+// de database weer gezond was, en wat ClusterForge daarvoor deed.
+function Restart({ r }: { r: NonNullable<FailoverMeasurements["restart"]> }) {
+  const recovered =
+    r.began !== ""
+      ? `ClusterForge begon ${r.title} opnieuw op ${r.began}, de node met de nieuwste data` +
+        (r.started.length > 0 ? `, en startte MariaDB daarna op ${list(r.started)}` : "")
+      : r.started.length > 0
+        ? `ClusterForge startte MariaDB opnieuw op ${list(r.started)}`
+        : r.engine === "postgresql"
+          ? "Niet nodig: Patroni koos zelf een primary"
+          : "Niet nodig: Galera kwam vanzelf terug";
+  return (
+    <>
+      <dt className={dtClass}>Nodes terug</dt>
+      <dd>
+        <span className="tabular-nums">{r.back_ms !== null ? `na ${seconds(r.back_ms)}` : "niet allemaal binnen de meting"}</span>
+        <div className="text-xs text-slate-500 tabular-nums">
+          {r.nodes
+            .map(
+              (n) =>
+                `${n.hostname}${n.arbiter ? " (scheidsrechter)" : ""} ${
+                  n.error ? n.error : n.back_ms !== null ? `na ${seconds(n.back_ms)}` : "niet terug"
+                }`,
+            )
+            .join(" · ")}
+        </div>
+      </dd>
+      <dt className={dtClass}>Database gezond</dt>
+      <dd className={cx("tabular-nums", r.healthy_ms === null && "text-red-700 dark:text-red-300")}>
+        {r.healthy_ms !== null ? `na ${seconds(r.healthy_ms)}` : "niet binnen de meting"}
+        {r.healthy_ms === null && r.reason && <span className="block text-xs">{r.reason}</span>}
+      </dd>
+      <dt className={dtClass}>Opnieuw begonnen</dt>
+      <dd className={cx(r.recover_error && "text-red-700 dark:text-red-300")}>
+        {r.recover_error ? `Lukte niet: ${r.recover_error}` : recovered}
+      </dd>
+    </>
+  );
+}
+
 // Writes is de schrijftest: hoe lang schrijven via het VIP van de database
-// niet lukte, en of er een bevestigde rij verloren ging.
-function Writes({ w }: { w: NonNullable<FailoverMeasurements["writes"]> }) {
+// niet lukte, en of er een bevestigde rij verloren ging. Bij alles
+// herstarten schrijft hij tot de herstart en kijkt hij daarna na.
+function Writes({ w, restart }: { w: NonNullable<FailoverMeasurements["writes"]>; restart: boolean }) {
   const lost = w.lost ?? null;
   return (
     <>
-      <dt className={dtClass}>Schrijven</dt>
-      <dd>
-        <span className="tabular-nums">
-          {w.downtime_ms === null
-            ? "niet gemeten"
-            : !w.recovered
-              ? "lukte niet meer tot het einde van de meting"
-              : w.downtime_ms === 0
-                ? "lukte steeds"
-                : `lukte ${seconds(w.downtime_ms)} niet`}
-        </span>
-        {w.failback_ms !== null && w.failback_ms > 0 && (
-          <span className="text-slate-500"> (bij de terugkeer {seconds(w.failback_ms)} niet)</span>
-        )}
-        <div className="text-xs text-slate-500">
-          {w.node} schreef elke halve seconde een rij in {w.title} via{" "}
-          <span className="font-mono">
-            {w.vip}:{w.port}
-          </span>
-          ; {w.failed} van de {w.attempts} pogingen sinds de storing mislukten
-        </div>
-      </dd>
+      {restart ? (
+        <>
+          <dt className={dtClass}>Schrijven</dt>
+          <dd>
+            tot de herstart
+            <div className="text-xs text-slate-500">
+              {w.node} schreef elke halve seconde een rij in {w.title} via{" "}
+              <span className="font-mono">
+                {w.vip}:{w.port}
+              </span>{" "}
+              en keek na de herstart na of elke bevestigde rij er nog was
+            </div>
+          </dd>
+        </>
+      ) : (
+        <>
+          <dt className={dtClass}>Schrijven</dt>
+          <dd>
+            <span className="tabular-nums">
+              {w.downtime_ms === null
+                ? "niet gemeten"
+                : !w.recovered
+                  ? "lukte niet meer tot het einde van de meting"
+                  : w.downtime_ms === 0
+                    ? "lukte steeds"
+                    : `lukte ${seconds(w.downtime_ms)} niet`}
+            </span>
+            {w.failback_ms !== null && w.failback_ms > 0 && (
+              <span className="text-slate-500"> (bij de terugkeer {seconds(w.failback_ms)} niet)</span>
+            )}
+            <div className="text-xs text-slate-500">
+              {w.node} schreef elke halve seconde een rij in {w.title} via{" "}
+              <span className="font-mono">
+                {w.vip}:{w.port}
+              </span>
+              ; {w.failed} van de {w.attempts} pogingen sinds de storing mislukten
+            </div>
+          </dd>
+        </>
+      )}
       <dt className={dtClass}>Rijen</dt>
       <dd className={cx("tabular-nums", lost !== null && lost > 0 && "text-red-700 dark:text-red-300")}>
         {lost === null ? (
@@ -328,6 +393,8 @@ const markers: Record<TestRunEvent["kind"], { color: string; label: string } | n
   ready: { color: "bg-slate-400", label: "Node klaar" },
   return: { color: "bg-violet-600", label: "Terugkeer" },
   db_ready: { color: "bg-teal-600", label: "Database gezond" },
+  node_back: { color: "bg-amber-500", label: "Node terug" },
+  db_recover: { color: "bg-indigo-600", label: "Opnieuw begonnen" },
   down: null,
   up: null,
   step: null,
@@ -340,7 +407,9 @@ const markers: Record<TestRunEvent["kind"], { color: string; label: string } | n
 // Liep er een schrijftest, dan staat die eronder als tweede balk.
 function Timeline({ run, m }: { run: TestRun; m: FailoverMeasurements }) {
   const events = run.timeline;
+  // Bij alles herstarten heeft de schrijftest geen balk.
   const writes = m.writes?.segments ?? [];
+  const writeBar = !!m.writes && !m.restart;
   if (m.probe.length === 0 && events.length === 0) return null;
   const end = Math.max(m.end_ms, ...m.probe.map((s) => s.to_ms), ...writes.map((s) => s.to_ms), ...events.map((e) => e.t_ms), 1);
   const pct = (ms: number) => `${Math.min(100, Math.max(0, (ms / end) * 100))}%`;
@@ -362,7 +431,7 @@ function Timeline({ run, m }: { run: TestRun; m: FailoverMeasurements }) {
       <div className="space-y-4">
         <div className="relative space-y-1.5 pt-5">
           {bar(m.probe, "Probe tijdens de test", "Bereikbaar", "Onbereikbaar")}
-          {m.writes && bar(writes, `Schrijven via ${m.writes.vip}`, "Schrijven lukt", "Schrijven lukt niet")}
+          {writeBar && bar(writes, `Schrijven via ${m.writes!.vip}`, "Schrijven lukt", "Schrijven lukt niet")}
           {expectAt !== null && (
             <div className="absolute top-3 bottom-0 border-l-2 border-dashed border-amber-500" style={{ left: pct(expectAt) }}>
               <span
@@ -395,7 +464,7 @@ function Timeline({ run, m }: { run: TestRun; m: FailoverMeasurements }) {
         <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-600 dark:text-slate-400">
           <Legend color="bg-emerald-500" label="VIP bereikbaar" />
           <Legend color="bg-red-500" label="VIP onbereikbaar" />
-          {m.writes && <span>Onderste balk: schrijven via {m.writes.vip}</span>}
+          {writeBar && <span>Onderste balk: schrijven via {m.writes!.vip}</span>}
           {Object.values(markers)
             .filter((x) => x && events.some((e) => markers[e.kind] === x))
             .map((x) => (
@@ -404,8 +473,8 @@ function Timeline({ run, m }: { run: TestRun; m: FailoverMeasurements }) {
         </div>
         <ol className="space-y-1 text-sm">
           {events.map((e, i) => (
-            <li key={i} className="grid grid-cols-[4.5rem_1fr] gap-2">
-              <span className="text-right text-slate-500 tabular-nums">+{seconds(e.t_ms)}</span>
+            <li key={i} className="grid grid-cols-[5.5rem_1fr] gap-2">
+              <span className="text-right whitespace-nowrap text-slate-500 tabular-nums">+{seconds(e.t_ms)}</span>
               <span>{e.text}</span>
             </li>
           ))}

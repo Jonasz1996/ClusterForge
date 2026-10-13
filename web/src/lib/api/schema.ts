@@ -6625,7 +6625,7 @@ export interface components {
             items: components["schemas"]["DriftIgnore"][];
         };
         /** @enum {string} */
-        FailoverScenario: "keepalived_stop" | "service_stop" | "database_stop" | "vm_hard_stop";
+        FailoverScenario: "keepalived_stop" | "service_stop" | "database_stop" | "restart_all" | "vm_hard_stop";
         FailoverProbeHTTP: {
             /** @description Begint met /, zoals /health */
             path: string;
@@ -6645,9 +6645,9 @@ export interface components {
             /** Format: uuid */
             vip_id: string;
             scenario: components["schemas"]["FailoverScenario"];
-            /** @description nginx of haproxy bij service_stop; bij database_stop kiest ClusterForge zelf (mariadb of patroni) */
+            /** @description nginx of haproxy bij service_stop; bij database_stop en restart_all kiest ClusterForge zelf (mariadb of patroni) */
             service?: string;
-            /** @description 1 tot 120 */
+            /** @description 1 tot 120; bij restart_all hoe lang de database na de herstart hoogstens nodig heeft om weer gezond te zijn, 1 tot 1800 */
             max_takeover_seconds: number;
             /** @description Het VIP moet daarna terug naar de oorspronkelijke node */
             expect_failback: boolean;
@@ -6699,7 +6699,7 @@ export interface components {
             /** @description Waarom het scenario hier nu niet kan */
             reason: string;
             default_seconds: number;
-            /** @description De diensten die service_stop of database_stop hier kan stoppen */
+            /** @description De diensten die service_stop, database_stop of restart_all hier raken */
             units: string[];
         };
         FailoverVIPOption: {
@@ -6758,7 +6758,7 @@ export interface components {
              */
             t_ms: number;
             /** @enum {string} */
-            kind: "fault" | "down" | "up" | "takeover" | "clear" | "ready" | "return" | "step" | "write_down" | "write_up" | "db_ready";
+            kind: "fault" | "down" | "up" | "takeover" | "clear" | "ready" | "return" | "step" | "write_down" | "write_up" | "db_ready" | "node_back" | "db_recover";
             text: string;
         };
         TestRunSegment: {
@@ -6768,7 +6768,7 @@ export interface components {
             to_ms: number;
             ok: boolean;
         };
-        /** @description De schrijftest: een andere datanode schreef tijdens de test elke halve seconde een rij via het VIP van de database, en telde na de test of elke bevestigde rij er nog was. */
+        /** @description De schrijftest: een andere datanode schreef tijdens de test elke halve seconde een rij via het VIP van de database, en telde na de test of elke bevestigde rij er nog was. Bij restart_all schreef hij tot hij herstartte, en keek hij daarna na of de rijen die de server als bevestigd kende er nog waren. */
         FailoverWrites: {
             /** @description De datanode die schreef */
             node: string;
@@ -6804,6 +6804,44 @@ export interface components {
             check_error: string;
             segments: components["schemas"]["TestRunSegment"][];
         };
+        FailoverRestartNode: {
+            hostname: string;
+            /** @description Een scheidsrechter in plaats van een datanode */
+            arbiter: boolean;
+            /**
+             * Format: int64
+             * @description Wanneer de node terug was na de herstart; null als niet binnen de meting
+             */
+            back_ms: number | null;
+            /** @description Waarom de node niet herstartte, of leeg */
+            error: string;
+        };
+        /** @description Wat de test die alle nodes van de database herstart zag, in ms na het versturen van de herstart. */
+        FailoverRestart: {
+            /** @description De database, zoals MariaDB Galera */
+            title: string;
+            /** @enum {string} */
+            engine: "mariadb" | "postgresql";
+            nodes: components["schemas"]["FailoverRestartNode"][];
+            /**
+             * Format: int64
+             * @description Wanneer alle nodes terug waren
+             */
+            back_ms: number | null;
+            /**
+             * Format: int64
+             * @description Wanneer de database weer gezond was: alle datanodes doen mee
+             */
+            healthy_ms: number | null;
+            /** @description De node waarop ClusterForge Galera opnieuw begon; leeg als de database vanzelf terugkwam */
+            began: string;
+            /** @description De nodes waarop ClusterForge MariaDB opnieuw startte */
+            started: string[];
+            /** @description Waarom opnieuw beginnen niet lukte, of leeg */
+            recover_error: string;
+            /** @description Waarom de database aan het eind van de meting nog niet gezond was, of leeg */
+            reason: string;
+        };
         FailoverMeasurements: {
             /**
              * Format: int64
@@ -6833,6 +6871,8 @@ export interface components {
             probe: components["schemas"]["TestRunSegment"][];
             /** @description De schrijftest, bij een test die een database raakt */
             writes: components["schemas"]["FailoverWrites"] | null;
+            /** @description Bij restart_all de herstart van alle nodes */
+            restart: components["schemas"]["FailoverRestart"] | null;
         };
         FailoverDefinition: {
             /** Format: uuid */

@@ -69,7 +69,7 @@ func TestDatabases(t *testing.T) {
 		t.Fatalf("cluster: %d", s)
 	}
 	members := []string{"10.0.20.186:3306", "10.0.20.187:3306", "10.0.20.188:3306"}
-	ids := map[string]string{}
+	ids, stops := map[string]string{}, map[string]func(){}
 	for i, name := range []string{"nc1", "nc2", "nc3", "pg01"} {
 		body := map[string]any{"hostname": name}
 		if name != "pg01" {
@@ -80,7 +80,7 @@ func TestDatabases(t *testing.T) {
 			t.Fatalf("node %s: %d", name, s)
 		}
 		ids[name] = n.ID
-		startAgentWith(t, e, c, n.ID, strings.Repeat(string(rune('a'+i)), 32), &addrs{}, func(ag *agent.Agent, root string) {
+		stops[name] = startAgentWith(t, e, c, n.ID, strings.Repeat(string(rune('a'+i)), 32), &addrs{}, func(ag *agent.Agent, root string) {
 			h := agenttest.NewHost(root, "10.0.20.18"+string(rune('6'+i)))
 			ag.Exec, ag.Root, ag.Collector.Run = h.Exec, root, h.Exec
 			if name == "pg01" {
@@ -153,14 +153,20 @@ func TestDatabases(t *testing.T) {
 	}
 
 	// nc3 krijgt een agent van voor fase 5: ClusterForge vraagt hem niets
-	// meer en zegt hoe het op te lossen is.
-	if _, err := e.pool.Exec(ctx, "UPDATE agents SET protocol_version = 8 WHERE node_id = $1", ids["nc3"]); err != nil {
-		t.Fatal(err)
-	}
-	if err := e.dbs.SyncAll(ctx); err != nil {
-		t.Fatal(err)
-	}
-	c.do("GET", "/api/v1/databases", nil, &groups)
+	// meer en zegt hoe het op te lossen is. Elke heartbeat zet het protocol
+	// van de agent terug; daarom stopt de agent eerst, en wordt het opnieuw
+	// gezet tot een heartbeat die nog onderweg was, verwerkt is.
+	stops["nc3"]()
+	eventually(t, "nc3 met een oude agent", func() bool {
+		if _, err := e.pool.Exec(ctx, "UPDATE agents SET protocol_version = 8 WHERE node_id = $1", ids["nc3"]); err != nil {
+			t.Fatal(err)
+		}
+		if err := e.dbs.SyncAll(ctx); err != nil {
+			t.Fatal(err)
+		}
+		c.do("GET", "/api/v1/databases", nil, &groups)
+		return groups.Items[0].Servers[2].ErrorKind == "old_agent"
+	})
 	g = groups.Items[0]
 	if s := g.Servers[2]; s.State != "agent te oud" || s.Ok || s.Running || s.ErrorKind != "old_agent" {
 		t.Fatalf("nc3 met een oude agent: %+v", s)

@@ -63,13 +63,20 @@ func (g *patroniHosts) after(name string, h *agenttest.Host) func(call string, e
 	}
 }
 
-// reboot herstart een replica: PostgreSQL is even weg, de uptime begint
-// opnieuw, en na het opstarten houdt de replica weer bij.
+// reboot herstart een node: PostgreSQL is even weg, de uptime begint
+// opnieuw, en na het opstarten houdt een replica weer bij. Herstarten alle
+// nodes tegelijk, dan kiest Patroni dezelfde primary weer, zoals na een
+// nette stop met alle data.
 func (g *patroniHosts) reboot(h *agenttest.Host) {
 	h.Locked(func() { h.Patroni.State, h.Patroni.Replication = "stopped", "" })
 	_ = os.WriteFile(filepath.Join(h.Root, "proc/uptime"), []byte("1.00 1.00\n"), 0o644)
 	time.AfterFunc(300*time.Millisecond, func() {
-		h.Locked(func() { h.Patroni.State, h.Patroni.Replication, h.Postgres.Uptime = "running", "streaming", 0 })
+		h.Locked(func() {
+			h.Patroni.State, h.Postgres.Uptime = "running", 0
+			if h.Patroni.Role != "primary" {
+				h.Patroni.Replication = "streaming"
+			}
+		})
 	})
 }
 

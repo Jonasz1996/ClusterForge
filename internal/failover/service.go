@@ -40,7 +40,8 @@ const (
 	// server zet hem weer aan.
 	VMHardStop = "vm_hard_stop"
 	// DatabaseStop (database.go) stopt de database op de eigenaar van het
-	// VIP van een database.
+	// VIP van een database; RestartAll (restart.go) herstart alle nodes van
+	// die database.
 )
 
 // Hoe een run gestart is, zoals in test_runs.trigger.
@@ -70,7 +71,7 @@ type Scenario struct {
 }
 
 // Scenarios staan in de volgorde van het formulier.
-var Scenarios = []Scenario{{KeepalivedStop, 5}, {ServiceStop, 10}, {VMHardStop, 10}, {DatabaseStop, 20}}
+var Scenarios = []Scenario{{KeepalivedStop, 5}, {ServiceStop, 10}, {VMHardStop, 10}, {DatabaseStop, 20}, {RestartAll, 300}}
 
 // Describe zegt in gewone taal wat een test doet.
 func Describe(scenario, service string) string {
@@ -89,6 +90,11 @@ func Describe(scenario, service string) string {
 			return "de database stoppen op de eigenaar"
 		}
 		return "de database (" + service + ") stoppen op de eigenaar"
+	case RestartAll:
+		if service == "" {
+			return "alle nodes van de database herstarten"
+		}
+		return "alle nodes van de database (" + service + ") herstarten"
 	}
 	return scenario
 }
@@ -96,7 +102,7 @@ func Describe(scenario, service string) string {
 // unitOf is de systemd-unit die de storing stopt, of bij vm_hard_stop de
 // unit die na de terugkeer weer moet draaien.
 func unitOf(scenario, service string) string {
-	if scenario == ServiceStop || scenario == DatabaseStop {
+	if scenario == ServiceStop || scenario == DatabaseStop || scenario == RestartAll {
 		return service
 	}
 	return "keepalived"
@@ -206,6 +212,12 @@ type Service struct {
 	// ophaalt; WriteFinishTimeout hoe lang het tellen van de rijen mag
 	// duren.
 	WriteStart, WritePoll, WriteFinishTimeout time.Duration
+	// RebootDelay is de vertraging van de herstart bij alles herstarten, in
+	// seconden, zodat het antwoord van de agent nog aankomt. RestartMargin
+	// komt bij de verwachting voor het meetvenster; RestartPoll is hoe vaak
+	// de test doet wat de bewaking zou doen.
+	RebootDelay                int
+	RestartMargin, RestartPoll time.Duration
 }
 
 func NewService(pool *pgxpool.Pool, ev *events.Writer, log *slog.Logger, runner *jobs.Runner, bus Commander) *Service {
@@ -216,6 +228,7 @@ func NewService(pool *pgxpool.Pool, ev *events.Writer, log *slog.Logger, runner 
 		ReturnTimeout: 3 * time.Minute, Fresh: status.HeartbeatLate, MaxWindow: 120 * time.Second,
 		Retry: 5 * time.Second, EmergencyTimeout: 10 * time.Second, Window: planner.DefaultWindow, BootTimeout: 15 * time.Minute,
 		DBReturnTimeout: 10 * time.Minute, WriteStart: 15 * time.Second, WritePoll: time.Second, WriteFinishTimeout: 45 * time.Second,
+		RebootDelay: 3, RestartMargin: 5 * time.Minute, RestartPoll: 5 * time.Second,
 	}
 	// Geen van beide is Retryable: een retry uren later voert oude
 	// beslissingen uit. Een mislukte test start je opnieuw.
@@ -266,13 +279,20 @@ func (in *Input) validate(env store.Environment) error {
 		}
 	case DatabaseStop:
 		// De dienst volgt uit de database achter het VIP (forDatabase).
+	case RestartAll:
+		// Na een herstart staat het VIP waar keepalived het zet.
+		in.ExpectFailback = false
 	default:
-		return &FieldError{Field: "scenario", Message: "kies keepalived stoppen, een dienst stoppen, de database stoppen of de VM hard uitzetten"}
+		return &FieldError{Field: "scenario", Message: "kies keepalived stoppen, een dienst stoppen, de database stoppen, " +
+			"alle nodes herstarten of de VM hard uitzetten"}
 	}
 	if in.Scheduled && env == store.EnvironmentProd {
 		return &FieldError{Field: "scheduled", Message: msgProdSchedule}
 	}
-	if in.MaxTakeoverSeconds < 1 || in.MaxTakeoverSeconds > 120 {
+	switch {
+	case in.Scenario == RestartAll && (in.MaxTakeoverSeconds < 1 || in.MaxTakeoverSeconds > MaxRestartSeconds):
+		return &FieldError{Field: "max_takeover_seconds", Message: fmt.Sprintf("de verwachting ligt tussen 1 en %d seconden", MaxRestartSeconds)}
+	case in.Scenario != RestartAll && (in.MaxTakeoverSeconds < 1 || in.MaxTakeoverSeconds > 120):
 		return &FieldError{Field: "max_takeover_seconds", Message: "de verwachting ligt tussen 1 en 120 seconden"}
 	}
 	return in.Probe.Validate()
@@ -333,7 +353,7 @@ func (s *Service) Create(ctx context.Context, actor events.Actor, clusterID uuid
 		}
 		out, err = q.InsertFailoverTest(ctx, store.InsertFailoverTestParams{
 			ClusterID: clusterID, VipID: in.VIPID, Name: in.Name, Scenario: in.Scenario, Service: in.Service,
-			MaxTakeoverSeconds: int32(in.MaxTakeoverSeconds), ExpectFailback: in.ExpectFailback, //nolint:gosec // gecontroleerd: 1 tot 120
+			MaxTakeoverSeconds: int32(in.MaxTakeoverSeconds), ExpectFailback: in.ExpectFailback, //nolint:gosec // gecontroleerd: 1 tot 1800
 			Probe: probe, CreatedBy: userOf(actor), Scheduled: in.Scheduled, NextRunAt: next,
 		})
 		if err != nil {
@@ -393,7 +413,7 @@ func (s *Service) Update(ctx context.Context, actor events.Actor, id uuid.UUID, 
 		}
 		out, err = q.UpdateFailoverTest(ctx, store.UpdateFailoverTestParams{
 			ID: id, VipID: in.VIPID, Name: in.Name, Scenario: in.Scenario, Service: in.Service,
-			MaxTakeoverSeconds: int32(in.MaxTakeoverSeconds), ExpectFailback: in.ExpectFailback, //nolint:gosec // gecontroleerd: 1 tot 120
+			MaxTakeoverSeconds: int32(in.MaxTakeoverSeconds), ExpectFailback: in.ExpectFailback, //nolint:gosec // gecontroleerd: 1 tot 1800
 			Probe: probe, Scheduled: in.Scheduled, NextRunAt: next,
 		})
 		if err != nil {
@@ -566,7 +586,7 @@ func (s *Service) Options(ctx context.Context, clusterID uuid.UUID) (Options, er
 			o.Available, o.Reason = false, "er zijn geen twee nodes met keepalived die een VIP kunnen overnemen"
 		case sc.Key == ServiceStop && len(units) == 0:
 			o.Available, o.Reason = false, "op geen enkele node draait "+strings.Join(Units, " of ")
-		case sc.Key == DatabaseStop && len(dbUnits) == 0:
+		case (sc.Key == DatabaseStop || sc.Key == RestartAll) && len(dbUnits) == 0:
 			o.Available, o.Reason = false, "dit cluster heeft geen onderdeel Database met een VIP"
 		case sc.Key == VMHardStop && out.Prod:
 			o.Available, o.Reason = false, "niet op prod; alleen in lab en test"
@@ -579,7 +599,7 @@ func (s *Service) Options(ctx context.Context, clusterID uuid.UUID) (Options, er
 		case ServiceStop:
 			o.Label = "nginx of haproxy stoppen op de eigenaar"
 			o.Units = units
-		case DatabaseStop:
+		case DatabaseStop, RestartAll:
 			o.Units = dbUnits
 		}
 		out.Scenarios = append(out.Scenarios, o)
@@ -672,7 +692,7 @@ func definitionOf(row store.GetFailoverTestRow) (Definition, error) {
 	}
 	// De unit komt alleen uit de vaste lijst, ook als de rij anders zegt.
 	allowed := Units
-	if d.Scenario == DatabaseStop {
+	if d.Scenario == DatabaseStop || d.Scenario == RestartAll {
 		allowed = DatabaseUnits
 	}
 	if d.Unit != "keepalived" && !slices.Contains(allowed, d.Unit) {
@@ -702,6 +722,8 @@ type Plan struct {
 	// schrijftest via het VIP van een ervan.
 	Databases []DatabaseRef `json:"databases,omitempty"`
 	Writes    *WritePlan    `json:"writes,omitempty"`
+	// Restart zijn bij alles herstarten de nodes die herstarten.
+	Restart *RestartPlan `json:"restart,omitempty"`
 }
 
 // VMRef is een VM in Proxmox.
@@ -840,7 +862,7 @@ func (s *Service) precheck(ctx context.Context, c store.Cluster, def Definition,
 		} else {
 			add("Reservenode", false, "geen andere actieve node met een verse heartbeat, keepalived actief en "+def.VIP+" in zijn configuratie")
 		}
-		if def.Scenario == DatabaseStop {
+		if def.Scenario == DatabaseStop || def.Scenario == RestartAll {
 			// Alleen het VIP van de database volgt de database.
 			plan.TargetVIPs = []string{def.VIP}
 		}
@@ -1057,10 +1079,10 @@ func (s *Service) StartRestore(ctx context.Context, actor events.Actor, runID uu
 	return j, nil
 }
 
-// Seconds schrijft een duur als "3,4 s", "20 s" of "3 min".
+// Seconds schrijft een duur als "3,4 s", "20 s", "3 min" of "2 min 35 s".
 func Seconds(d time.Duration) string { return seconds(d) }
 
-// seconds schrijft een duur als "3,4 s", "20 s" of "3 min".
+// seconds schrijft een duur als "3,4 s", "20 s", "3 min" of "2 min 35 s".
 func seconds(d time.Duration) string {
 	d = d.Round(100 * time.Millisecond)
 	switch {
@@ -1071,5 +1093,10 @@ func seconds(d time.Duration) string {
 	case d < 2*time.Minute:
 		return fmt.Sprintf("%d s", int(d.Round(time.Second).Seconds()))
 	}
-	return fmt.Sprintf("%d min", int(d.Round(time.Minute).Minutes()))
+	// Na een herstart van alle nodes telt elke seconde nog.
+	d = d.Round(time.Second)
+	if d%time.Minute == 0 {
+		return fmt.Sprintf("%d min", int(d.Minutes()))
+	}
+	return fmt.Sprintf("%d min %d s", int(d.Minutes()), int((d % time.Minute).Seconds()))
 }

@@ -225,7 +225,7 @@ func TestFailover(t *testing.T) {
 	if s := c.do("GET", listURL, nil, &list); s != 200 {
 		t.Fatalf("lijst: %d", s)
 	}
-	if len(list.Items) != 0 || len(list.Options.Scenarios) != 4 || !list.Options.Scenarios[0].Available || !list.Options.Scenarios[1].Available ||
+	if len(list.Items) != 0 || len(list.Options.Scenarios) != 5 || !list.Options.Scenarios[0].Available || !list.Options.Scenarios[1].Available ||
 		!slices.Equal(list.Options.Scenarios[1].Units, []string{"nginx"}) || list.Options.Prod || list.Options.DefaultFailback ||
 		list.Options.Slug != "lb" || list.Options.Window != "zondag van 03:00 tot 05:00" || list.Options.LastTestedAt != nil ||
 		list.Options.NextWindow.IsZero() {

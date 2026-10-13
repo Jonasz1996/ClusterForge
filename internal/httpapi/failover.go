@@ -418,6 +418,21 @@ func failoverReport(run store.TestRun, out *gen.TestRun) {
 		DowntimeMs: nullableOf(m.DowntimeMS), ExpectMs: m.ExpectMS, WindowMs: m.WindowMS, TakeoverNode: m.TakeoverNode,
 		TakeoverNodeId: nullableOf(m.TakeoverNodeID), TakeoverMs: nullableOf(m.TakeoverMS), FailbackMs: nullableOf(m.FailbackMS),
 		ReturnedTo: m.ReturnedTo, EndMs: m.EndMS, Probe: toAPISegments(m.Probe), Writes: nullable.NewNullNullable[gen.FailoverWrites](),
+		Restart: nullable.NewNullNullable[gen.FailoverRestart](),
+	}
+	if rm := m.Restart; rm != nil {
+		r := gen.FailoverRestart{
+			Title: rm.Title, Engine: gen.FailoverRestartEngine(rm.Engine), Nodes: make([]gen.FailoverRestartNode, 0, len(rm.Nodes)),
+			BackMs: nullableOf(rm.BackMS), HealthyMs: nullableOf(rm.HealthyMS), Began: rm.Began, Started: rm.Started,
+			RecoverError: rm.RecoverError, Reason: rm.Reason,
+		}
+		if r.Started == nil {
+			r.Started = []string{}
+		}
+		for _, n := range rm.Nodes {
+			r.Nodes = append(r.Nodes, gen.FailoverRestartNode{Hostname: n.Hostname, Arbiter: n.Arbiter, BackMs: nullableOf(n.BackMS), Error: n.Error})
+		}
+		meas.Restart = nullable.NewNullableWithValue(r)
 	}
 	if w := m.Writes; w != nil {
 		lostSeqs := w.LostSeqs

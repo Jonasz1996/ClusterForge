@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/Jonasz1996/clusterforge/internal/health"
+	"github.com/Jonasz1996/clusterforge/internal/jobs"
 	"github.com/Jonasz1996/clusterforge/internal/store"
 	"github.com/Jonasz1996/clusterforge/pkg/protocol"
 )
@@ -144,6 +145,9 @@ func (f *fakeDB) WriteProbe(_ context.Context, _ uuid.UUID, _ string, req protoc
 		return f.finish, nil
 	}
 	return &protocol.DBProbeResult{}, nil
+}
+func (f *fakeDB) RestartRecover(context.Context, *jobs.Step, string, uuid.UUID, uuid.UUID, time.Time, bool) (Recovery, error) {
+	return Recovery{}, nil
 }
 
 func TestFinishWrites(t *testing.T) {

@@ -15,6 +15,7 @@ import {
   longAgo,
   probeText,
   runResults,
+  seconds,
   serverGoneText,
   stillDown,
   unitOf,
@@ -49,7 +50,8 @@ export function RunBadge({ run }: { run: Pick<TestRun, "result" | "job_status"> 
 }
 
 // expectation beschrijft wat de test verwacht, in gewone taal.
-export function expectation(t: { max_takeover_seconds: number; expect_failback: boolean }) {
+export function expectation(t: { scenario: FailoverScenario; max_takeover_seconds: number; expect_failback: boolean }) {
+  if (t.scenario === "restart_all") return `Database weer gezond binnen ${seconds(t.max_takeover_seconds * 1000)}`;
   return `Overname binnen ${t.max_takeover_seconds} s${t.expect_failback ? ", daarna terug naar de oorspronkelijke node" : ""}`;
 }
 
@@ -275,14 +277,17 @@ function StartDialog({ t, options, onClose }: { t: FailoverTest; options: Failov
   const [confirm, setConfirm] = useState("");
   const err = start.error instanceof ApiError ? start.error : null;
   const vm = t.scenario === "vm_hard_stop";
+  const restart = t.scenario === "restart_all";
   return (
     <Modal title={`Failovertest starten: ${t.name}`} onClose={onClose}>
       <div className="space-y-4 text-sm">
         <p>{confirmText(t, options)}</p>
         <p className="text-slate-500">
-          Afbreken kan op de rapportpagina; ClusterForge {vm ? "start de VM" : `zet ${unitOf(t)}`} dan meteen weer aan.
+          {restart
+            ? "Afbreken kan op de rapportpagina, maar de herstart is dan al gebeurd; ClusterForge wacht dan tot de nodes terug zijn en zet de database recht."
+            : `Afbreken kan op de rapportpagina; ClusterForge ${vm ? "start de VM" : `zet ${unitOf(t)}`} dan meteen weer aan.`}
         </p>
-        {t.vip_owner_id && (
+        {t.vip_owner_id && !restart && (
           <NodeImpact
             nodeId={t.vip_owner_id}
             title={vm ? `Wat raakt het wegvallen van ${t.vip_owner ?? "de eigenaar"}?` : `Wat raakt het als ${t.vip_owner ?? "de eigenaar"} helemaal wegvalt?`}
@@ -314,7 +319,13 @@ function StartDialog({ t, options, onClose }: { t: FailoverTest; options: Failov
               if (run) router.push(reportHref(run.id));
             }}
           >
-            {start.isPending ? "Voorcontrole…" : vm ? "VM hard uitzetten en meten" : `${unitOf(t)} stoppen en meten`}
+            {start.isPending
+              ? "Voorcontrole…"
+              : restart
+                ? "Alle nodes herstarten en meten"
+                : vm
+                  ? "VM hard uitzetten en meten"
+                  : `${unitOf(t)} stoppen en meten`}
           </Button>
         </div>
       </div>
@@ -389,19 +400,24 @@ function FailoverForm({
         ? "keepalived stoppen"
         : sc === "database_stop"
           ? "database stoppen"
-          : `${svc} stoppen`;
+          : sc === "restart_all"
+            ? "alles herstarten"
+            : `${svc} stoppen`;
   const shownName = nameTouched ? name : defaultName(scenario, service);
   const vip = options.vips.find((v) => v.id === vipId);
-  // De database stoppen kan alleen op het VIP van een database.
-  const vipChoices =
-    scenario === "database_stop" ? options.vips.filter((v) => v.database || v.id === initial?.vip_id) : options.vips;
+  // De database stoppen en alles herstarten kan alleen op het VIP van een
+  // database.
+  const forDatabase = (sc: FailoverScenario) => sc === "database_stop" || sc === "restart_all";
+  const restart = scenario === "restart_all";
+  const maxSecs = restart ? 1800 : 120;
+  const vipChoices = forDatabase(scenario) ? options.vips.filter((v) => v.database || v.id === initial?.vip_id) : options.vips;
 
   function pickScenario(key: FailoverScenario) {
     setScenario(key);
     const opt = options.scenarios.find((s) => s.key === key);
     if (!secsTouched && opt) setSecs(String(opt.default_seconds));
     if (key === "service_stop" && opt && !opt.units.includes(service)) setService(opt.units[0] ?? "nginx");
-    if (key === "database_stop" && !vip?.database) {
+    if (forDatabase(key) && !vip?.database) {
       const first = options.vips.find((v) => v.database);
       if (first) pickVip(first.id);
     }
@@ -432,7 +448,7 @@ function FailoverForm({
       scenario,
       service: scenario === "service_stop" ? service : "",
       max_takeover_seconds: Number(secs),
-      expect_failback: failback && !vip?.own_vip,
+      expect_failback: failback && !vip?.own_vip && !restart,
       probe: probeKind === "tcp" ? { tcp: { port: Number(port) } } : { http: { path, expect: Number(expect) } },
       scheduled: scheduled && !options.prod,
     };
@@ -479,7 +495,11 @@ function FailoverForm({
                 <span>
                   <span className="font-medium">{s.label}</span>
                   <span className="block text-xs text-slate-500">
-                    {s.available ? `Standaard verwacht: overname binnen ${s.default_seconds} s` : `Kan nu niet: ${s.reason}`}
+                    {!s.available
+                      ? `Kan nu niet: ${s.reason}`
+                      : s.key === "restart_all"
+                        ? `Herstart alle nodes van de database tegelijk en meet hoe lang het duurt tot ze weer gezond is; standaard binnen ${seconds(s.default_seconds * 1000)}. Alles op die nodes is zo lang weg.`
+                        : `Standaard verwacht: overname binnen ${s.default_seconds} s`}
                   </span>
                 </span>
               </label>
@@ -515,18 +535,27 @@ function FailoverForm({
           </Select>
           {vip?.database && (
             <p className="mt-1 text-xs text-slate-500">
-              Tijdens de test schrijft een andere datanode elke halve seconde een rij in {vip.database} via dit VIP. Het verslag
-              zegt hoe lang schrijven niet lukte en of er een bevestigde rij verloren ging.
+              {restart
+                ? `Tot hij herstart schrijft een datanode elke halve seconde een rij in ${vip.database} via dit VIP. Na de herstart kijkt ClusterForge na of elke bevestigde rij er nog is.`
+                : `Tijdens de test schrijft een andere datanode elke halve seconde een rij in ${vip.database} via dit VIP. Het verslag zegt hoe lang schrijven niet lukte en of er een bevestigde rij verloren ging.`}
             </p>
           )}
           {fieldError("vip_id")}
         </Field>
-        <Field label="Verwachte overname in seconden" htmlFor="fo-secs" hint="Hoogstens 120 s. Duurt het langer, dan is de uitslag FAIL.">
+        <Field
+          label={restart ? "Weer gezond binnen (seconden)" : "Verwachte overname in seconden"}
+          htmlFor="fo-secs"
+          hint={
+            restart
+              ? "Van de herstart tot alle nodes weer meedoen; hoogstens 1800 s (30 min). Duurt het langer, dan is de uitslag FAIL."
+              : "Hoogstens 120 s. Duurt het langer, dan is de uitslag FAIL."
+          }
+        >
           <Input
             id="fo-secs"
             type="number"
             min={1}
-            max={120}
+            max={maxSecs}
             required
             value={secs}
             onChange={(e) => {
@@ -551,24 +580,26 @@ function FailoverForm({
         </Field>
       </div>
 
-      <label className={cx("flex items-start gap-2 text-sm", vip?.own_vip && "opacity-60")}>
-        <input
-          type="checkbox"
-          className="mt-0.5"
-          checked={failback && !vip?.own_vip}
-          disabled={vip?.own_vip}
-          onChange={(e) => setFailback(e.target.checked)}
-        />
-        <span>
-          VIP moet daarna terug naar de oorspronkelijke node
-          <span className="block text-xs text-slate-500">
-            {vip?.own_vip
-              ? `Het VIP van ${vip.database} blijft waar de database schrijft; het komt niet terug.`
-              : "Aan bij keepalived met preempt, zoals de template keepalived-nginx. Uit als het VIP na een overname blijft waar het is."}
+      {!restart && (
+        <label className={cx("flex items-start gap-2 text-sm", vip?.own_vip && "opacity-60")}>
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={failback && !vip?.own_vip}
+            disabled={vip?.own_vip}
+            onChange={(e) => setFailback(e.target.checked)}
+          />
+          <span>
+            VIP moet daarna terug naar de oorspronkelijke node
+            <span className="block text-xs text-slate-500">
+              {vip?.own_vip
+                ? `Het VIP van ${vip.database} blijft waar de database schrijft; het komt niet terug.`
+                : "Aan bij keepalived met preempt, zoals de template keepalived-nginx. Uit als het VIP na een overname blijft waar het is."}
+            </span>
+            {fieldError("expect_failback")}
           </span>
-          {fieldError("expect_failback")}
-        </span>
-      </label>
+        </label>
+      )}
 
       <label className={cx("flex items-start gap-2 text-sm", options.prod && "opacity-60")}>
         <input

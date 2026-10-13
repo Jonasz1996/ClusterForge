@@ -442,7 +442,7 @@ func (s *Service) runRecover(ctx context.Context, j *jobs.Job) error {
 	nodes := dataNodes(r.spec, p.Skip)
 	var dec recoverState
 	if err := j.Step(ctx, stepPositions, func(ctx context.Context, st *jobs.Step) error {
-		d, err := s.decide(ctx, j, st, r, nodes)
+		d, err := s.decide(ctx, j.ID.String(), st, r, nodes)
 		if err != nil {
 			return err
 		}
@@ -462,7 +462,7 @@ func (s *Service) runRecover(ctx context.Context, j *jobs.Job) error {
 		}
 		n := nodes[i]
 		if err := j.Step(ctx, n.Hostname+": het cluster beginnen", func(ctx context.Context, st *jobs.Step) error {
-			return s.recoverBegin(ctx, j, st, r, n)
+			return s.recoverBegin(ctx, j.ID.String(), st, r, n)
 		}); err != nil {
 			return err
 		}
@@ -475,7 +475,7 @@ func (s *Service) runRecover(ctx context.Context, j *jobs.Job) error {
 		joined++
 		want := joined
 		if err := j.Step(ctx, n.Hostname+": aansluiten", func(ctx context.Context, st *jobs.Step) error {
-			return s.recoverJoin(ctx, j, st, n, slug, want)
+			return s.recoverJoin(ctx, j.ID.String(), st, n, slug, want)
 		}); err != nil {
 			return err
 		}
@@ -487,7 +487,7 @@ func (s *Service) runRecover(ctx context.Context, j *jobs.Job) error {
 		joined++
 		want := joined
 		if err := j.Step(ctx, n.Hostname+": scheidsrechter", func(ctx context.Context, st *jobs.Step) error {
-			return s.recoverArbiter(ctx, j, st, nodes[0], n, slug, want)
+			return s.recoverArbiter(ctx, j.ID.String(), st, nodes[0], n, slug, want)
 		}); err != nil {
 			return err
 		}
@@ -551,7 +551,7 @@ func hostsOf(nodes []Node) []string {
 // decide leest waar de nodes staan en kiest: zit er een al in een Primary
 // component, dan sluiten de andere daar aan; anders begint de node met de
 // nieuwste data.
-func (s *Service) decide(ctx context.Context, j *jobs.Job, st *jobs.Step, r *rendered, nodes []Node) (recoverState, error) {
+func (s *Service) decide(ctx context.Context, id string, st *jobs.Step, r *rendered, nodes []Node) (recoverState, error) {
 	slug := r.spec.Cluster.Slug
 	all := s.observe(ctx, nodes, false)
 	for _, o := range all {
@@ -573,7 +573,7 @@ func (s *Service) decide(ctx context.Context, j *jobs.Job, st *jobs.Step, r *ren
 		}
 		st.Logf("%s: MariaDB stoppen om de positie te lezen", o.node.Hostname)
 		stop := []templates.Step{{Step: protocol.Step{Service: &protocol.ServiceStep{Name: "mariadb", State: "stopped"}}, Title: "service mariadb"}}
-		if _, err := deployApply(ctx, s, j, st, o.node, "-stop", stop); err != nil {
+		if _, err := deployApplyAs(ctx, s, id, st, o.node, "-stop", stop); err != nil {
 			return recoverState{}, err
 		}
 	}
@@ -604,7 +604,7 @@ func (s *Service) decide(ctx context.Context, j *jobs.Job, st *jobs.Step, r *ren
 }
 
 // recoverBegin begint het cluster op n en wacht tot hij Synced is.
-func (s *Service) recoverBegin(ctx context.Context, j *jobs.Job, st *jobs.Step, r *rendered, n Node) error {
+func (s *Service) recoverBegin(ctx context.Context, id string, st *jobs.Step, r *rendered, n Node) error {
 	slug := r.spec.Cluster.Slug
 	if g, _ := s.galera(ctx, n.NodeID); healthy(g, slug, 1) {
 		st.Logf("%s zit al in een Primary component", n.Hostname)
@@ -617,12 +617,12 @@ func (s *Service) recoverBegin(ctx context.Context, j *jobs.Job, st *jobs.Step, 
 	}
 	if other {
 		st.Logf("een andere node zit ondertussen in een Primary component; %s sluit daar aan", n.Hostname)
-		return s.recoverJoin(ctx, j, st, n, slug, 1)
+		return s.recoverJoin(ctx, id, st, n, slug, 1)
 	}
 	// Het commando slaat over als de node toch al mag schrijven.
 	begin := []templates.Step{{Step: protocol.Step{Command: &protocol.CommandStep{Run: galera.Bootstrap, Unless: protocol.DBCheckCommand}},
 		Title: "het Galera-cluster beginnen"}}
-	if _, err := deployApply(ctx, s, j, st, n, "-begin", begin); err != nil {
+	if _, err := deployApplyAs(ctx, s, id, st, n, "-begin", begin); err != nil {
 		return err
 	}
 	return s.waitSynced(ctx, st, n, slug, 1)
@@ -630,22 +630,22 @@ func (s *Service) recoverBegin(ctx context.Context, j *jobs.Job, st *jobs.Step, 
 
 // recoverJoin start MariaDB op n opnieuw, tenzij hij al meedoet, en wacht
 // tot hij Synced is in een cluster van minstens want leden.
-func (s *Service) recoverJoin(ctx context.Context, j *jobs.Job, st *jobs.Step, n Node, slug string, want int) error {
+func (s *Service) recoverJoin(ctx context.Context, id string, st *jobs.Step, n Node, slug string, want int) error {
 	if g, _ := s.galera(ctx, n.NodeID); healthy(g, slug, 1) {
 		st.Logf("%s doet al mee", n.Hostname)
 		return s.waitSynced(ctx, st, n, slug, want)
 	}
 	restart := []templates.Step{{Step: protocol.Step{Service: &protocol.ServiceStep{Name: "mariadb", State: "restarted"}}, Title: "service mariadb"}}
-	if _, err := deployApply(ctx, s, j, st, n, "-join", restart); err != nil {
+	if _, err := deployApplyAs(ctx, s, id, st, n, "-join", restart); err != nil {
 		return err
 	}
 	return s.waitSynced(ctx, st, n, slug, want)
 }
 
 // recoverArbiter start garbd opnieuw en wacht tot het cluster hem meetelt.
-func (s *Service) recoverArbiter(ctx context.Context, j *jobs.Job, st *jobs.Step, first, n Node, slug string, want int) error {
+func (s *Service) recoverArbiter(ctx context.Context, id string, st *jobs.Step, first, n Node, slug string, want int) error {
 	restart := []templates.Step{{Step: protocol.Step{Service: &protocol.ServiceStep{Name: "garb", State: "restarted"}}, Title: "service garb"}}
-	if _, err := deployApply(ctx, s, j, st, n, "-garb", restart); err != nil {
+	if _, err := deployApplyAs(ctx, s, id, st, n, "-garb", restart); err != nil {
 		return err
 	}
 	return s.wait(ctx, st, n.Hostname+" telt mee", func(g *protocol.DBGalera, err error) (string, bool) {
@@ -688,7 +688,17 @@ func (s *Service) verifyNodes(ctx context.Context, st *jobs.Step, slug string, n
 }
 
 func deployApply(ctx context.Context, s *Service, j *jobs.Job, st *jobs.Step, n Node, suffix string, steps []templates.Step) (int, error) {
-	return deploy.ApplySteps(ctx, s.bus, options(ctx, j, st, n, suffix, s.Retry), steps)
+	return deployApplyAs(ctx, s, j.ID.String(), st, n, suffix, steps)
+}
+
+// deployApplyAs is deployApply met id voor het begin van het id van het
+// commando, zoals het id van de taak.
+func deployApplyAs(ctx context.Context, s *Service, id string, st *jobs.Step, n Node, suffix string, steps []templates.Step) (int, error) {
+	o := deploy.ApplyOptions{
+		NodeID: n.NodeID, Hostname: n.Hostname, CommandID: fmt.Sprintf("%s-%s%s", id, n.NodeID, suffix), Retry: s.Retry,
+		Logf: st.Logf, Flush: func() { _ = st.Flush(ctx) },
+	}
+	return deploy.ApplySteps(ctx, s.bus, o, steps)
 }
 
 // SetAutoRecover zet vanzelf opnieuw starten aan of uit.

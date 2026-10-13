@@ -92,12 +92,12 @@ func TestVerdict(t *testing.T) {
 	slow := &recoveryState{Clusters: []ClusterRecovery{{ClusterID: lb, RecoveredMS: ms(200 * time.Second)}, {ClusterID: app, Waiting: "status verminderd"}}}
 	result, summary, _, rows = verdict(def, outcome{injected: true, m: measure(60*time.Second, "degraded"), rec: slow}, short)
 	if result != "fail" || !strings.Contains(summary, "App herstelde niet") || !rows[0].Slow || rows[1].Match != MatchNotRecovered ||
-		!strings.HasSuffix(summary, "alles weer gestart, maar niet alles herstelde binnen 3 min") {
+		!strings.HasSuffix(summary, "alles weer gestart, maar niet alles herstelde binnen 2 min 30 s") {
 		t.Fatalf("niet hersteld: %s %q %+v", result, summary, rows)
 	}
 	slow.Clusters[1] = ClusterRecovery{ClusterID: app, RecoveredMS: ms(time.Second)}
 	result, summary, _, _ = verdict(def, outcome{injected: true, m: measure(60*time.Second, "degraded"), rec: slow}, short)
-	if result != "warning" || !strings.Contains(summary, "LB herstelde pas na 3 min, verwacht binnen 2 min") {
+	if result != "warning" || !strings.Contains(summary, "LB herstelde pas na 3 min 20 s, verwacht binnen 2 min") {
 		t.Fatalf("traag: %s %q", result, summary)
 	}
 

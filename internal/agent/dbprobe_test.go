@@ -3,6 +3,7 @@ package agent
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"os"
 	"os/exec"
 	"slices"
@@ -196,6 +197,76 @@ func TestWriteProbeGalera(t *testing.T) {
 	}
 }
 
+// TestWriteProbeVerify: de node die schreef, herstart. De nieuwe agent kent
+// de schrijftest niet meer; met de volgnummers van de server kijkt hij na
+// welke rijen er nog zijn, en haalt hij de oude map met het wachtwoord weg.
+func TestWriteProbeVerify(t *testing.T) {
+	g := newGaleraProbe(t)
+	probeOp(t, g.a, "", protocol.DBProbeRequest{Action: protocol.DBProbeStart, Run: probeRun, Host: "10.0.20.185", Port: 3306,
+		Password: dbTestPassword, MaxSeconds: 60})
+	r := waitAttempts(t, g.a, "", 0, true)
+	var seqs []int64
+	for _, x := range r.Attempts {
+		if x.OK {
+			seqs = append(seqs, x.Seq)
+		}
+	}
+	// De herstart: schrijven stopt, de map met het wachtwoord blijft.
+	st := g.a.probes()
+	st.mu.Lock()
+	old := st.runs[probeRun]
+	st.mu.Unlock()
+	old.stop()
+	stale := time.Now().Add(-2 * probeStaleDir)
+	if err := os.Chtimes(old.dir, stale, stale); err != nil {
+		t.Fatal(err)
+	}
+	nc2 := g.hosts["10.0.20.187"]
+	after := &Agent{Exec: nc2.Exec, ExecStdin: nc2.ExecStdin, Dial: nc2.Dial, Log: g.a.Log}
+	g.table.Lose(probeRun, seqs[0])
+	verify := protocol.DBProbeRequest{Action: protocol.DBProbeVerify, Run: probeRun, Host: "10.0.20.185", Port: 3306, Password: dbTestPassword}
+	for _, tc := range []struct {
+		name string
+		seqs []int64
+		want string
+	}{
+		{"nul", []int64{0}, "geen volgnummer"},
+		{"te veel", make([]int64, protocol.DBProbeVerifyMax+1), "hoogstens"},
+	} {
+		req := verify
+		req.Seqs = tc.seqs
+		if msg := probeErr(t, after, "", req); !strings.Contains(msg, tc.want) {
+			t.Errorf("%s: %s", tc.name, msg)
+		}
+	}
+	verify.Seqs = seqs
+	res := probeOp(t, after, "", verify)
+	if !res.Checked || res.Confirmed != len(seqs) || res.Missing != 1 || !slices.Equal(res.MissingSeqs, seqs[:1]) || res.CheckError != "" {
+		t.Fatalf("verify: %+v", res)
+	}
+	// Rijen die er zijn maar die de server niet als bevestigd kende, tellen
+	// apart.
+	if want := g.table.Written(probeRun) - len(seqs); res.Extra != want {
+		t.Errorf("extra: %d, verwacht %d", res.Extra, want)
+	}
+	if rows := g.table.Rows(probeRun); len(rows) != 0 {
+		t.Errorf("rijen over: %v", rows)
+	}
+	if entries, _ := os.ReadDir(os.Getenv("TMPDIR")); len(entries) != 0 {
+		t.Errorf("tijdelijke bestanden over: %v", entries)
+	}
+	for _, c := range nc2.Calls() {
+		if strings.Contains(c, dbTestPassword) {
+			t.Errorf("wachtwoord in een argument: %s", c)
+		}
+	}
+	// Een node die het VIP niet bereikt, kan niet nakijken.
+	g.moveVIP("10.0.20.199")
+	if msg := probeErr(t, after, "", verify); !strings.Contains(msg, "antwoordt niet") {
+		t.Errorf("zonder VIP: %s", msg)
+	}
+}
+
 func TestWriteProbeErrors(t *testing.T) {
 	g := newGaleraProbe(t)
 	ok := protocol.DBProbeRequest{Action: protocol.DBProbeStart, Run: probeRun, Host: "10.0.20.185", Port: 3306, Password: dbTestPassword}
@@ -386,9 +457,34 @@ func TestWriteProbeRealMariaDB(t *testing.T) {
 	if !strings.Contains(denied, "INSERT command denied") || strings.HasPrefix(denied, "exit status") {
 		t.Errorf("fout zonder INSERT: %q", denied)
 	}
-	out, err := exec.Command("docker", "exec", dst, "mariadb", "-N", "-e", "SELECT COUNT(*) FROM clusterforge_probe.writes").Output()
-	if err != nil || strings.TrimSpace(string(out)) != "0" {
-		t.Errorf("rijen over: %s %v", out, err)
+	count := func() string {
+		t.Helper()
+		out, err := exec.Command("docker", "exec", dst, "mariadb", "-N", "-e", "SELECT COUNT(*) FROM clusterforge_probe.writes").Output()
+		if err != nil {
+			t.Fatalf("tellen: %v", err)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	if n := count(); n != "0" {
+		t.Errorf("rijen over: %s", n)
+	}
+
+	// Nakijken zoals na een herstart, met de volgnummers van de server.
+	run = probeRunID()
+	probeOp(t, a, "", protocol.DBProbeRequest{Action: protocol.DBProbeStart, Run: run, Host: dstIP, Port: 3306, Password: dbTestPassword, MaxSeconds: 60})
+	var seqs []int64
+	for _, x := range read(0, true).Attempts {
+		if x.OK {
+			seqs = append(seqs, x.Seq)
+		}
+	}
+	res := probeOp(t, a, "", protocol.DBProbeRequest{Action: protocol.DBProbeVerify, Run: run, Host: dstIP, Port: 3306, Password: dbTestPassword,
+		Seqs: append(seqs, 999999)})
+	if !res.Checked || res.Missing != 1 || !slices.Equal(res.MissingSeqs, []int64{999999}) || res.CheckError != "" {
+		t.Fatalf("verify: %+v", res)
+	}
+	if n := count(); n != "0" {
+		t.Errorf("rijen over na verify: %s", n)
 	}
 }
 
@@ -428,6 +524,34 @@ func TestWriteProbeRealPostgres(t *testing.T) {
 	}
 	if n := r.sql(protocol.DBProbeDatabase, "SELECT count(*) FROM writes"); n != "0" {
 		t.Errorf("rijen over: %s", n)
+	}
+
+	// Nakijken zoals na een herstart: een tweede run, met de volgnummers
+	// die de server kent.
+	run = probeRunID()
+	probeOp(t, r.a, protocol.DBPostgreSQL, protocol.DBProbeRequest{Action: protocol.DBProbeStart, Run: run, Host: "127.0.0.1", Port: protocol.DBPGPort,
+		Password: dbTestPassword, MaxSeconds: 60})
+	var seqs []int64
+	for len(seqs) < 3 {
+		if time.Now().After(deadline.Add(30 * time.Second)) {
+			t.Fatalf("te weinig bevestigde rijen: %v", seqs)
+		}
+		time.Sleep(50 * time.Millisecond)
+		seqs = seqs[:0]
+		for _, x := range probeOp(t, r.a, protocol.DBPostgreSQL, protocol.DBProbeRequest{Action: protocol.DBProbeRead, Run: run}).Attempts {
+			if x.OK {
+				seqs = append(seqs, x.Seq)
+			}
+		}
+	}
+	r.sql(protocol.DBProbeDatabase, fmt.Sprintf("DELETE FROM writes WHERE run = '%s' AND seq = %d", run, seqs[1]))
+	res := probeOp(t, r.a, protocol.DBPostgreSQL, protocol.DBProbeRequest{Action: protocol.DBProbeVerify, Run: run, Host: "127.0.0.1",
+		Port: protocol.DBPGPort, Password: dbTestPassword, Seqs: seqs})
+	if !res.Checked || res.Missing != 1 || !slices.Equal(res.MissingSeqs, seqs[1:2]) || res.Confirmed != len(seqs) || res.CheckError != "" {
+		t.Fatalf("verify: %+v", res)
+	}
+	if n := r.sql(protocol.DBProbeDatabase, "SELECT count(*) FROM writes"); n != "0" {
+		t.Errorf("rijen over na verify: %s", n)
 	}
 }
 
