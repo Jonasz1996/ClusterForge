@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"net"
 	"net/http"
 	"path/filepath"
@@ -236,9 +237,11 @@ func (lab *ncGalera) deploy() {
 		if s := c.do("POST", lab.compBase+"/plan", in, &plan); s != http.StatusOK || plan.Blocked {
 			t.Fatalf("plan: %d %+v", s, plan)
 		}
-		in["hash"] = plan.Hash
+		// Het plan kent geen hash; zo blijft in goed voor een nieuwe ronde.
+		add := maps.Clone(in)
+		add["hash"] = plan.Hash
 		var raw json.RawMessage
-		s := c.do("POST", lab.compBase, in, &raw)
+		s := c.do("POST", lab.compBase, add, &raw)
 		var ae apiErr
 		if s == http.StatusConflict && json.Unmarshal(raw, &ae) == nil && ae.Code == "plan_stale" {
 			return false
