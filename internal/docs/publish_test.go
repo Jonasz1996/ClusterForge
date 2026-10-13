@@ -142,7 +142,7 @@ func TestCommitMessage(t *testing.T) {
 	if title != "Documentatie bijgewerkt: overzicht, a, b, c, en 3 andere" {
 		t.Fatal(title)
 	}
-	if !ours("README.md") || !ours("clusters/web/runbooks.md") || ours("clusters/web/eigen.md") || ours("clusters/web/x/netwerk.md") || ours("docs.md") {
+	if !ours("README.md") || !ours("clusters/web/runbooks.md") || !ours("clusters/web/database.md") || !ours("clusters/leren/kubernetes.md") || ours("clusters/web/eigen.md") || ours("clusters/web/x/netwerk.md") || ours("docs.md") {
 		t.Fatal("ours")
 	}
 }

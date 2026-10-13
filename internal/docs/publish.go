@@ -33,7 +33,7 @@ const (
 var (
 	shaRe = regexp.MustCompile(`^[0-9a-f]{40}$`)
 	// docRe zijn de hoofdstukken van een cluster zoals Path ze schrijft.
-	docRe = regexp.MustCompile(`^clusters/[^/]+/(architectuur|netwerk|configuratie|herstel|runbooks)\.md$`)
+	docRe = regexp.MustCompile(`^clusters/[^/]+/(architectuur|kubernetes|database|netwerk|configuratie|herstel|runbooks)\.md$`)
 )
 
 // De soorten wijziging van een bestand in een commit.

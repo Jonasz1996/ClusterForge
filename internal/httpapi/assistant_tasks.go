@@ -205,8 +205,13 @@ func (s *Server) SummarizeDocs(w http.ResponseWriter, r *http.Request, params ge
 		s.internalError(w, r, err)
 		return
 	}
+	kinds, err := s.docs.ChapterKinds(ctx, cl.ID, cl.Type)
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
 	var chapters strings.Builder
-	for _, kind := range docs.Kinds(cl.Type) {
+	for _, kind := range kinds {
 		d, err := s.docs.Get(ctx, docs.ScopeCluster, kind, &cl.ID, nil)
 		if err != nil {
 			s.internalError(w, r, err)

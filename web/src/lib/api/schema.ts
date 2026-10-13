@@ -2666,7 +2666,7 @@ export interface paths {
             path: {
                 /** @description overview of cluster */
                 scope: components["parameters"]["DocScopeParam"];
-                /** @description overzicht bij scope overview; architectuur, netwerk, configuratie, herstel of runbooks bij een cluster, en kubernetes bij een Kubernetes-cluster */
+                /** @description overzicht bij scope overview; architectuur, netwerk, configuratie, herstel of runbooks bij een cluster, kubernetes bij een Kubernetes-cluster, en database bij een cluster met een databaseserver op zijn nodes */
                 kind: components["parameters"]["DocKindParam"];
             };
             cookie?: never;
@@ -2692,7 +2692,7 @@ export interface paths {
             path: {
                 /** @description overview of cluster */
                 scope: components["parameters"]["DocScopeParam"];
-                /** @description overzicht bij scope overview; architectuur, netwerk, configuratie, herstel of runbooks bij een cluster, en kubernetes bij een Kubernetes-cluster */
+                /** @description overzicht bij scope overview; architectuur, netwerk, configuratie, herstel of runbooks bij een cluster, kubernetes bij een Kubernetes-cluster, en database bij een cluster met een databaseserver op zijn nodes */
                 kind: components["parameters"]["DocKindParam"];
             };
             cookie?: never;
@@ -2714,7 +2714,7 @@ export interface paths {
             path: {
                 /** @description overview of cluster */
                 scope: components["parameters"]["DocScopeParam"];
-                /** @description overzicht bij scope overview; architectuur, netwerk, configuratie, herstel of runbooks bij een cluster, en kubernetes bij een Kubernetes-cluster */
+                /** @description overzicht bij scope overview; architectuur, netwerk, configuratie, herstel of runbooks bij een cluster, kubernetes bij een Kubernetes-cluster, en database bij een cluster met een databaseserver op zijn nodes */
                 kind: components["parameters"]["DocKindParam"];
             };
             cookie?: never;
@@ -9997,7 +9997,7 @@ export interface components {
         KubeResource: string;
         /** @description overview of cluster */
         DocScopeParam: string;
-        /** @description overzicht bij scope overview; architectuur, netwerk, configuratie, herstel of runbooks bij een cluster, en kubernetes bij een Kubernetes-cluster */
+        /** @description overzicht bij scope overview; architectuur, netwerk, configuratie, herstel of runbooks bij een cluster, kubernetes bij een Kubernetes-cluster, en database bij een cluster met een databaseserver op zijn nodes */
         DocKindParam: string;
         /** @description Het cluster; verplicht bij scope cluster */
         DocClusterParam: string;
@@ -14257,7 +14257,7 @@ export interface operations {
             path: {
                 /** @description overview of cluster */
                 scope: components["parameters"]["DocScopeParam"];
-                /** @description overzicht bij scope overview; architectuur, netwerk, configuratie, herstel of runbooks bij een cluster, en kubernetes bij een Kubernetes-cluster */
+                /** @description overzicht bij scope overview; architectuur, netwerk, configuratie, herstel of runbooks bij een cluster, kubernetes bij een Kubernetes-cluster, en database bij een cluster met een databaseserver op zijn nodes */
                 kind: components["parameters"]["DocKindParam"];
             };
             cookie?: never;
@@ -14288,7 +14288,7 @@ export interface operations {
             path: {
                 /** @description overview of cluster */
                 scope: components["parameters"]["DocScopeParam"];
-                /** @description overzicht bij scope overview; architectuur, netwerk, configuratie, herstel of runbooks bij een cluster, en kubernetes bij een Kubernetes-cluster */
+                /** @description overzicht bij scope overview; architectuur, netwerk, configuratie, herstel of runbooks bij een cluster, kubernetes bij een Kubernetes-cluster, en database bij een cluster met een databaseserver op zijn nodes */
                 kind: components["parameters"]["DocKindParam"];
             };
             cookie?: never;
@@ -14321,7 +14321,7 @@ export interface operations {
             path: {
                 /** @description overview of cluster */
                 scope: components["parameters"]["DocScopeParam"];
-                /** @description overzicht bij scope overview; architectuur, netwerk, configuratie, herstel of runbooks bij een cluster, en kubernetes bij een Kubernetes-cluster */
+                /** @description overzicht bij scope overview; architectuur, netwerk, configuratie, herstel of runbooks bij een cluster, kubernetes bij een Kubernetes-cluster, en database bij een cluster met een databaseserver op zijn nodes */
                 kind: components["parameters"]["DocKindParam"];
             };
             cookie?: never;

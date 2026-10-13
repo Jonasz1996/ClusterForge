@@ -30,7 +30,7 @@ func Overview(f Fleet, o Opts) string {
 				tpl = code(t.Name) + " " + esc(t.Version)
 			}
 			var chapters []string
-			for _, k := range Kinds(c.Type)[1:] {
+			for _, k := range c.kinds()[1:] {
 				chapters = append(chapters, link(lower(Title(k)), Path(ScopeCluster, k, c.Slug)))
 			}
 			rows = append(rows, []string{

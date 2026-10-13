@@ -28,23 +28,31 @@ const (
 	KindRecovery      = "herstel"
 	KindRunbooks      = "runbooks"
 	KindKubernetes    = "kubernetes"
+	KindDatabase      = "database"
 )
 
 // ClusterKinds zijn de hoofdstukken van elk cluster, in hun volgorde.
 var ClusterKinds = []string{KindArchitecture, KindNetwork, KindConfiguration, KindRecovery, KindRunbooks}
 
-// Kinds zijn de hoofdstukken van een cluster van dit type: een
-// Kubernetes-cluster heeft na Architectuur het hoofdstuk Kubernetes.
-func Kinds(clusterType string) []string {
-	if clusterType != "kubernetes" {
-		return ClusterKinds
+// Kinds zijn de hoofdstukken van een cluster: een Kubernetes-cluster heeft
+// na Architectuur het hoofdstuk Kubernetes, en een cluster met een
+// databaseserver op zijn nodes daarna het hoofdstuk Database.
+func Kinds(clusterType string, database bool) []string {
+	out := []string{KindArchitecture}
+	if clusterType == "kubernetes" {
+		out = append(out, KindKubernetes)
 	}
-	return []string{KindArchitecture, KindKubernetes, KindNetwork, KindConfiguration, KindRecovery, KindRunbooks}
+	if database {
+		out = append(out, KindDatabase)
+	}
+	return append(out, ClusterKinds[1:]...)
 }
+
+func (c *Cluster) kinds() []string { return Kinds(c.Type, c.DB != nil) }
 
 var titles = map[string]string{
 	KindOverview: "Overzicht", KindArchitecture: "Architectuur", KindNetwork: "Netwerk", KindConfiguration: "Configuratie",
-	KindRecovery: "Herstel", KindRunbooks: "Runbooks", KindKubernetes: "Kubernetes",
+	KindRecovery: "Herstel", KindRunbooks: "Runbooks", KindKubernetes: "Kubernetes", KindDatabase: "Database",
 }
 
 // Title is de titel van een soort document.
@@ -56,7 +64,7 @@ func Valid(scope, kind string) bool {
 	case ScopeOverview:
 		return kind == KindOverview
 	case ScopeCluster:
-		return slices.Contains(Kinds("kubernetes"), kind)
+		return slices.Contains(Kinds("kubernetes", true), kind)
 	}
 	return false
 }
@@ -108,7 +116,7 @@ func Render(f Fleet, o Opts) []Rendered {
 // RenderCluster schrijft de hoofdstukken van één cluster.
 func RenderCluster(c *Cluster, o Opts) []Rendered {
 	id := c.ID
-	kinds := Kinds(c.Type)
+	kinds := c.kinds()
 	out := make([]Rendered, 0, len(kinds))
 	for _, k := range kinds {
 		out = append(out, Rendered{Scope: ScopeCluster, Kind: k, ClusterID: &id, Slug: c.Slug, Content: Chapter(c, k, o)})
@@ -133,6 +141,10 @@ func Chapter(c *Cluster, kind string, o Opts) string {
 		if c.Kube != nil {
 			return kubernetes(c, o)
 		}
+	case KindDatabase:
+		if c.DB != nil {
+			return database(c, o)
+		}
 	}
 	return ""
 }
@@ -141,7 +153,7 @@ func Chapter(c *Cluster, kind string, o Opts) string {
 func header(d *doc, c *Cluster, kind string) {
 	d.h1(esc(c.Name) + ": " + lower(Title(kind)))
 	nav := link("Overzicht", "../../README.md")
-	for _, k := range Kinds(c.Type) {
+	for _, k := range c.kinds() {
 		if k == kind {
 			nav += " · **" + Title(k) + "**"
 		} else {

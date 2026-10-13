@@ -26,6 +26,7 @@ export const kindLabels: Record<string, string> = {
   overzicht: "Overzicht",
   architectuur: "Architectuur",
   kubernetes: "Kubernetes",
+  database: "Database",
   netwerk: "Netwerk",
   configuratie: "Configuratie",
   herstel: "Herstel",

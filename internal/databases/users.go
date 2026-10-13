@@ -46,6 +46,21 @@ type User struct {
 	Dependency string
 }
 
+// Describe zegt wie een database gebruikte, zoals "nc-prod (nc1, nc2) als
+// nextcloud".
+func (u User) Describe() string {
+	as := " als " + strings.Join(u.DBUsers, ", ")
+	switch u.Kind {
+	case UserLocal:
+		return "de databasenode zelf (" + strings.Join(u.Nodes, ", ") + ")" + as
+	case UserCluster:
+		return u.Name + " (" + strings.Join(u.Nodes, ", ") + ")" + as
+	case UserUnknown:
+		return "het onbekende adres " + u.Name + as
+	}
+	return u.Name + as
+}
+
 // Key is uniek per gebruiker van een database.
 func (u User) Key() string {
 	switch {

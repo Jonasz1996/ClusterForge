@@ -749,6 +749,9 @@ func recovery(c *Cluster, o Opts) string {
 	if len(rows) > 0 {
 		d.table([]string{"Node", "VM", "Nieuwste back-up", "Storage", "Grootte", "Stand"}, rows)
 	}
+	if c.DB != nil && len(c.DB.Components) > 0 {
+		d.p("De nachtelijke dumps van de databases op deze nodes, en hoe je er een terugzet, staan in het hoofdstuk " + link("Database", KindDatabase+".md") + ".")
+	}
 
 	d.h2("Back-upcontroles")
 	rows = nil
@@ -1024,6 +1027,10 @@ func runbooks(c *Cluster, o Opts) string {
 	header(d, c, KindRunbooks)
 	d.p("Deze stappen volgen wat ClusterForge echt doet, met de namen en adressen van dit cluster. Waar gegevens ontbreken, staat dat erbij.")
 	keepalived := len(c.VIPs) > 0
+	if c.DB != nil && len(c.DB.Components) > 0 {
+		d.p("Voor de database op deze nodes, zoals opnieuw starten na een volledige uitval, een node opnieuw synchroniseren en overschakelen, zie het hoofdstuk " +
+			link("Database", KindDatabase+".md") + ".")
+	}
 
 	d.h2("Onderhoud aan een node")
 	if keepalived {

@@ -1,9 +1,21 @@
 -- name: ListDocClusters :many
+-- has_database is true met een toegepast onderdeel Database of een
+-- databaseserver op een node van het cluster: dan is er een hoofdstuk
+-- Database.
 SELECT c.id, c.slug, c.name, c.description, c.type, c.environment::text AS environment, c.tags, c.status,
        c.spec, c.spec_revision, c.applied_revision, (c.git_repo_id IS NOT NULL)::boolean AS git_linked,
-       c.rto_target_minutes, c.rpo_target_hours
+       c.rto_target_minutes, c.rpo_target_hours,
+       (EXISTS (SELECT 1 FROM cluster_components cc
+                WHERE cc.cluster_id = c.id AND cc.applied_revision IS NOT NULL AND cc.engine IN ('mariadb', 'postgresql'))
+        OR EXISTS (SELECT 1 FROM db_servers s JOIN nodes n ON n.id = s.node_id WHERE n.cluster_id = c.id))::boolean AS has_database
 FROM clusters c
 ORDER BY lower(c.name), c.id;
+
+-- name: ClusterHasDatabase :one
+-- Zoals has_database in ListDocClusters.
+SELECT (EXISTS (SELECT 1 FROM cluster_components cc
+                WHERE cc.cluster_id = @id AND cc.applied_revision IS NOT NULL AND cc.engine IN ('mariadb', 'postgresql'))
+        OR EXISTS (SELECT 1 FROM db_servers s JOIN nodes n ON n.id = s.node_id WHERE n.cluster_id = @id))::boolean AS has_database;
 
 -- name: ListDocNodes :many
 -- De nodes van alle clusters met hun facts en of ze een agent hebben.

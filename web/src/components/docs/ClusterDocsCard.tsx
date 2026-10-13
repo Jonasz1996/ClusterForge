@@ -6,8 +6,9 @@ import { docHref, formatTime, formatWhen, kindLabels, useDocIndex } from "@/lib/
 
 const chapters = ["architectuur", "netwerk", "configuratie", "herstel", "runbooks"];
 
-// ClusterDocsCard linkt naar de vijf hoofdstukken van de documentatie van
-// een cluster, met wanneer ze voor het laatst veranderden.
+// ClusterDocsCard linkt naar de hoofdstukken van de documentatie van een
+// cluster, met wanneer ze voor het laatst veranderden. De server zegt welke
+// er zijn: Kubernetes en Database horen niet bij elk cluster.
 export function ClusterDocsCard({ clusterId }: { clusterId: string }) {
   const index = useDocIndex();
   const c = index.data?.clusters.find((x) => x.id === clusterId);
@@ -21,7 +22,7 @@ export function ClusterDocsCard({ clusterId }: { clusterId: string }) {
         {c.queued_until && ` Een wijziging komt erin rond ${formatTime(c.queued_until)}.`}
       </p>
       <ul className="flex flex-wrap gap-2">
-        {chapters.map((k) => (
+        {(c.docs.length > 0 ? c.docs.map((d) => d.kind) : chapters).map((k) => (
           <li key={k}>
             <Link
               href={docHref(c.slug, k)}
