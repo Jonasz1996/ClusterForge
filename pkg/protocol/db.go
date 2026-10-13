@@ -36,6 +36,11 @@ const DBMetricsSince = 13
 // via het VIP voor de failovertests van een database.
 const DBProbeSince = 14
 
+// DBProbeVerifySince is de eerste protocolversie met DBProbeVerify: de
+// rijen van een schrijftest nakijken na een herstart van de node die
+// schreef, voor de failovertest die alle nodes herstart.
+const DBProbeVerifySince = 15
+
 // SubjectDB draagt de databaseverzoeken: cf.node.<id>.db. Net als de
 // kube-brug is het een eigen subject, zodat een trage database de
 // commando's op cmd niet ophoudt.
@@ -111,6 +116,12 @@ const (
 	DBProbeFinish = "finish"
 	// DBProbeStop stopt zonder te tellen, als de test niet doorgaat.
 	DBProbeStop = "stop"
+	// DBProbeVerify kijkt na of de volgnummers in Seqs er via het VIP nog
+	// zijn, en haalt daarna de rijen van Run weg, zoals finish. De agent
+	// hoeft de schrijftest niet meer te kennen: na een herstart van de node
+	// die schreef, zegt de server welke rijen bevestigd waren. Hij logt in
+	// met Host, Port en Password, zoals bij start.
+	DBProbeVerify = "verify"
 )
 
 // De database en de gebruiker van de schrijftest. De tabel heeft per run
@@ -135,6 +146,8 @@ const (
 	// DBProbeMissing is het hoogste aantal ontbrekende volgnummers in een
 	// antwoord; Missing telt ze allemaal.
 	DBProbeMissing = 50
+	// DBProbeVerifyMax is het hoogste aantal volgnummers in Seqs.
+	DBProbeVerifyMax = 2 * DBProbeMaxSeconds
 )
 
 // DBProbeRequest zegt wat een DBWriteProbe doet. Engine staat in het
@@ -154,6 +167,8 @@ type DBProbeRequest struct {
 	MaxSeconds int `json:"max_seconds,omitempty"`
 	// From is bij read de eerste poging die de server nog niet heeft.
 	From int `json:"from,omitempty"`
+	// Seqs zijn bij verify de bevestigde volgnummers.
+	Seqs []int64 `json:"seqs,omitempty"`
 }
 
 // DBProbeResult is het antwoord op een DBWriteProbe.
@@ -170,7 +185,7 @@ type DBProbeResult struct {
 	Attempts []DBProbeAttempt `json:"attempts"`
 	// Stopped zegt waarom de agent vanzelf stopte, zoals na MaxSeconds.
 	Stopped string `json:"stopped,omitempty"`
-	// Checked: bij finish telde de agent de rijen. Confirmed is het aantal
+	// Checked: bij finish of verify telde de agent de rijen. Confirmed is het aantal
 	// bevestigde rijen, Missing hoeveel daarvan er niet meer zijn (met de
 	// eerste volgnummers in MissingSeqs), en Extra hoeveel rijen er zijn
 	// waarvan de bevestiging niet aankwam. CheckError zegt waarom tellen

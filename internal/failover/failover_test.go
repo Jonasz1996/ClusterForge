@@ -268,7 +268,8 @@ func TestDescribeAndSeconds(t *testing.T) {
 	}
 	for d, want := range map[time.Duration]string{
 		3400 * time.Millisecond: "3,4 s", 12800 * time.Millisecond: "12,8 s", 20 * time.Second: "20 s", 3 * time.Minute: "3 min",
-		0: "0 s", 90500 * time.Millisecond: "91 s", 3449 * time.Millisecond: "3,4 s",
+		0: "0 s", 90500 * time.Millisecond: "91 s", 3449 * time.Millisecond: "3,4 s", 155400 * time.Millisecond: "2 min 35 s",
+		179600 * time.Millisecond: "3 min",
 	} {
 		if got := seconds(d); got != want {
 			t.Errorf("seconds(%s) = %q, wilde %q", d, got, want)

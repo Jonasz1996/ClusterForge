@@ -6875,7 +6875,7 @@ components:
         items: { type: array, items: { $ref: "#/components/schemas/DriftIgnore" } }
     FailoverScenario:
       type: string
-      enum: [keepalived_stop, service_stop, database_stop, vm_hard_stop]
+      enum: [keepalived_stop, service_stop, database_stop, restart_all, vm_hard_stop]
     FailoverProbeHTTP:
       type: object
       required: [path, expect]
@@ -6902,8 +6902,10 @@ components:
         scenario: { $ref: "#/components/schemas/FailoverScenario" }
         service:
           type: string
-          description: nginx of haproxy bij service_stop; bij database_stop kiest ClusterForge zelf (mariadb of patroni)
-        max_takeover_seconds: { type: integer, description: 1 tot 120 }
+          description: nginx of haproxy bij service_stop; bij database_stop en restart_all kiest ClusterForge zelf (mariadb of patroni)
+        max_takeover_seconds:
+          type: integer
+          description: "1 tot 120; bij restart_all hoe lang de database na de herstart hoogstens nodig heeft om weer gezond te zijn, 1 tot 1800"
         expect_failback: { type: boolean, description: Het VIP moet daarna terug naar de oorspronkelijke node }
         probe: { $ref: "#/components/schemas/FailoverProbe" }
         scheduled: { type: boolean, description: "Gepland in het testvenster; niet op prod. Standaard uit" }
@@ -6945,7 +6947,7 @@ components:
         available: { type: boolean }
         reason: { type: string, description: Waarom het scenario hier nu niet kan }
         default_seconds: { type: integer }
-        units: { type: array, items: { type: string }, description: De diensten die service_stop of database_stop hier kan stoppen }
+        units: { type: array, items: { type: string }, description: "De diensten die service_stop, database_stop of restart_all hier raken" }
     FailoverVIPOption:
       type: object
       required: [id, address, owner_hostname, probe, database, own_vip]
@@ -7003,7 +7005,7 @@ components:
       required: [t_ms, kind, text]
       properties:
         t_ms: { type: integer, format: int64, description: "Milliseconden na de storing, of bij een back-upcontrole na de start" }
-        kind: { type: string, enum: [fault, down, up, takeover, clear, ready, return, step, write_down, write_up, db_ready] }
+        kind: { type: string, enum: [fault, down, up, takeover, clear, ready, return, step, write_down, write_up, db_ready, node_back, db_recover] }
         text: { type: string }
     TestRunSegment:
       type: object
@@ -7016,7 +7018,8 @@ components:
       type: object
       description: >-
         De schrijftest: een andere datanode schreef tijdens de test elke halve seconde een rij via het VIP van de database, en telde
-        na de test of elke bevestigde rij er nog was.
+        na de test of elke bevestigde rij er nog was. Bij restart_all schreef hij tot hij herstartte, en keek hij daarna na of de
+        rijen die de server als bevestigd kende er nog waren.
       required: [node, title, vip, port, downtime_ms, recovered, failback_ms, attempts, failed, confirmed, lost, lost_seqs, extra,
         check_error, segments]
       properties:
@@ -7039,10 +7042,32 @@ components:
         extra: { type: integer, description: "Rijen waarvan de bevestiging niet aankwam, maar die er wel zijn" }
         check_error: { type: string, description: Waarom tellen niet lukte, of leeg }
         segments: { type: array, items: { $ref: "#/components/schemas/TestRunSegment" } }
+    FailoverRestartNode:
+      type: object
+      required: [hostname, arbiter, back_ms, error]
+      properties:
+        hostname: { type: string }
+        arbiter: { type: boolean, description: Een scheidsrechter in plaats van een datanode }
+        back_ms: { type: integer, format: int64, nullable: true, description: "Wanneer de node terug was na de herstart; null als niet binnen de meting" }
+        error: { type: string, description: "Waarom de node niet herstartte, of leeg" }
+    FailoverRestart:
+      type: object
+      description: Wat de test die alle nodes van de database herstart zag, in ms na het versturen van de herstart.
+      required: [title, engine, nodes, back_ms, healthy_ms, began, started, recover_error, reason]
+      properties:
+        title: { type: string, description: "De database, zoals MariaDB Galera" }
+        engine: { type: string, enum: [mariadb, postgresql] }
+        nodes: { type: array, items: { $ref: "#/components/schemas/FailoverRestartNode" } }
+        back_ms: { type: integer, format: int64, nullable: true, description: Wanneer alle nodes terug waren }
+        healthy_ms: { type: integer, format: int64, nullable: true, description: "Wanneer de database weer gezond was: alle datanodes doen mee" }
+        began: { type: string, description: "De node waarop ClusterForge Galera opnieuw begon; leeg als de database vanzelf terugkwam" }
+        started: { type: array, items: { type: string }, description: De nodes waarop ClusterForge MariaDB opnieuw startte }
+        recover_error: { type: string, description: "Waarom opnieuw beginnen niet lukte, of leeg" }
+        reason: { type: string, description: "Waarom de database aan het eind van de meting nog niet gezond was, of leeg" }
     FailoverMeasurements:
       type: object
       required: [downtime_ms, expect_ms, window_ms, takeover_node, takeover_node_id, takeover_ms, failback_ms, returned_to, end_ms, probe,
-        writes]
+        writes, restart]
       properties:
         downtime_ms: { type: integer, format: int64, nullable: true, description: Van de eerste mislukte probe tot de eerste van drie goede op rij }
         expect_ms: { type: integer, format: int64 }
@@ -7058,6 +7083,10 @@ components:
           allOf: [{ $ref: "#/components/schemas/FailoverWrites" }]
           nullable: true
           description: De schrijftest, bij een test die een database raakt
+        restart:
+          allOf: [{ $ref: "#/components/schemas/FailoverRestart" }]
+          nullable: true
+          description: Bij restart_all de herstart van alle nodes
     FailoverDefinition:
       type: object
       required: [test_id, name, scenario, service, unit, vip, max_takeover_seconds, expect_failback, probe, description]

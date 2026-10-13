@@ -57,7 +57,12 @@ type pgLogin struct {
 }
 
 func newPGLogin(host string, port int, user, password string) (*pgLogin, error) {
-	dir, err := os.MkdirTemp("", "cf-pglogin-")
+	return newPGLoginIn("cf-pglogin-", host, port, user, password)
+}
+
+// newPGLoginIn maakt de map met het wachtwoord met dit voorvoegsel.
+func newPGLoginIn(prefix, host string, port int, user, password string) (*pgLogin, error) {
+	dir, err := os.MkdirTemp("", prefix)
 	if err != nil {
 		return nil, fmt.Errorf("map voor het wachtwoord: %w", err)
 	}

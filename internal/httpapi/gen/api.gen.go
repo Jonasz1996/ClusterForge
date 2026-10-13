@@ -1137,10 +1137,29 @@ func (e EventActorType) Valid() bool {
 	}
 }
 
+// Defines values for FailoverRestartEngine.
+const (
+	FailoverRestartEngineMariadb    FailoverRestartEngine = "mariadb"
+	FailoverRestartEnginePostgresql FailoverRestartEngine = "postgresql"
+)
+
+// Valid indicates whether the value is a known member of the FailoverRestartEngine enum.
+func (e FailoverRestartEngine) Valid() bool {
+	switch e {
+	case FailoverRestartEngineMariadb:
+		return true
+	case FailoverRestartEnginePostgresql:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for FailoverScenario.
 const (
 	FailoverScenarioDatabaseStop   FailoverScenario = "database_stop"
 	FailoverScenarioKeepalivedStop FailoverScenario = "keepalived_stop"
+	FailoverScenarioRestartAll     FailoverScenario = "restart_all"
 	FailoverScenarioServiceStop    FailoverScenario = "service_stop"
 	FailoverScenarioVmHardStop     FailoverScenario = "vm_hard_stop"
 )
@@ -1151,6 +1170,8 @@ func (e FailoverScenario) Valid() bool {
 	case FailoverScenarioDatabaseStop:
 		return true
 	case FailoverScenarioKeepalivedStop:
+		return true
+	case FailoverScenarioRestartAll:
 		return true
 	case FailoverScenarioServiceStop:
 		return true
@@ -2668,8 +2689,10 @@ func (e TestRunTrigger) Valid() bool {
 const (
 	TestRunEventKindClear     TestRunEventKind = "clear"
 	TestRunEventKindDbReady   TestRunEventKind = "db_ready"
+	TestRunEventKindDbRecover TestRunEventKind = "db_recover"
 	TestRunEventKindDown      TestRunEventKind = "down"
 	TestRunEventKindFault     TestRunEventKind = "fault"
+	TestRunEventKindNodeBack  TestRunEventKind = "node_back"
 	TestRunEventKindReady     TestRunEventKind = "ready"
 	TestRunEventKindReturn    TestRunEventKind = "return"
 	TestRunEventKindStep      TestRunEventKind = "step"
@@ -2686,9 +2709,13 @@ func (e TestRunEventKind) Valid() bool {
 		return true
 	case TestRunEventKindDbReady:
 		return true
+	case TestRunEventKindDbRecover:
+		return true
 	case TestRunEventKindDown:
 		return true
 	case TestRunEventKindFault:
+		return true
+	case TestRunEventKindNodeBack:
 		return true
 	case TestRunEventKindReady:
 		return true
@@ -6322,7 +6349,10 @@ type FailoverMeasurements struct {
 	// FailbackMs De onderbreking bij de terugkeer
 	FailbackMs nullable.Nullable[int64] `json:"failback_ms"`
 	Probe      []TestRunSegment         `json:"probe"`
-	ReturnedTo string                   `json:"returned_to"`
+
+	// Restart Bij restart_all de herstart van alle nodes
+	Restart    nullable.Nullable[FailoverRestart] `json:"restart"`
+	ReturnedTo string                             `json:"returned_to"`
 
 	// TakeoverMs Wanneer een verse heartbeat de overname bevestigde
 	TakeoverMs     nullable.Nullable[int64]              `json:"takeover_ms"`
@@ -6375,6 +6405,48 @@ type FailoverProbeTCP struct {
 	Port int `json:"port"`
 }
 
+// FailoverRestart Wat de test die alle nodes van de database herstart zag, in ms na het versturen van de herstart.
+type FailoverRestart struct {
+	// BackMs Wanneer alle nodes terug waren
+	BackMs nullable.Nullable[int64] `json:"back_ms"`
+
+	// Began De node waarop ClusterForge Galera opnieuw begon; leeg als de database vanzelf terugkwam
+	Began  string                `json:"began"`
+	Engine FailoverRestartEngine `json:"engine"`
+
+	// HealthyMs Wanneer de database weer gezond was: alle datanodes doen mee
+	HealthyMs nullable.Nullable[int64] `json:"healthy_ms"`
+	Nodes     []FailoverRestartNode    `json:"nodes"`
+
+	// Reason Waarom de database aan het eind van de meting nog niet gezond was, of leeg
+	Reason string `json:"reason"`
+
+	// RecoverError Waarom opnieuw beginnen niet lukte, of leeg
+	RecoverError string `json:"recover_error"`
+
+	// Started De nodes waarop ClusterForge MariaDB opnieuw startte
+	Started []string `json:"started"`
+
+	// Title De database, zoals MariaDB Galera
+	Title string `json:"title"`
+}
+
+// FailoverRestartEngine defines model for FailoverRestart.Engine.
+type FailoverRestartEngine string
+
+// FailoverRestartNode defines model for FailoverRestartNode.
+type FailoverRestartNode struct {
+	// Arbiter Een scheidsrechter in plaats van een datanode
+	Arbiter bool `json:"arbiter"`
+
+	// BackMs Wanneer de node terug was na de herstart; null als niet binnen de meting
+	BackMs nullable.Nullable[int64] `json:"back_ms"`
+
+	// Error Waarom de node niet herstartte, of leeg
+	Error    string `json:"error"`
+	Hostname string `json:"hostname"`
+}
+
 // FailoverScenario defines model for FailoverScenario.
 type FailoverScenario string
 
@@ -6388,7 +6460,7 @@ type FailoverScenarioOption struct {
 	// Reason Waarom het scenario hier nu niet kan
 	Reason string `json:"reason"`
 
-	// Units De diensten die service_stop of database_stop hier kan stoppen
+	// Units De diensten die service_stop, database_stop of restart_all hier raken
 	Units []string `json:"units"`
 }
 
@@ -6435,7 +6507,7 @@ type FailoverTestInput struct {
 	// ExpectFailback Het VIP moet daarna terug naar de oorspronkelijke node
 	ExpectFailback bool `json:"expect_failback"`
 
-	// MaxTakeoverSeconds 1 tot 120
+	// MaxTakeoverSeconds 1 tot 120; bij restart_all hoe lang de database na de herstart hoogstens nodig heeft om weer gezond te zijn, 1 tot 1800
 	MaxTakeoverSeconds int    `json:"max_takeover_seconds"`
 	Name               string `json:"name"`
 
@@ -6446,7 +6518,7 @@ type FailoverTestInput struct {
 	// Scheduled Gepland in het testvenster; niet op prod. Standaard uit
 	Scheduled *bool `json:"scheduled,omitempty"`
 
-	// Service nginx of haproxy bij service_stop; bij database_stop kiest ClusterForge zelf (mariadb of patroni)
+	// Service nginx of haproxy bij service_stop; bij database_stop en restart_all kiest ClusterForge zelf (mariadb of patroni)
 	Service *string            `json:"service,omitempty"`
 	VipId   openapi_types.UUID `json:"vip_id"`
 }
@@ -6476,7 +6548,7 @@ type FailoverVIPOption struct {
 	Probe FailoverProbe `json:"probe"`
 }
 
-// FailoverWrites De schrijftest: een andere datanode schreef tijdens de test elke halve seconde een rij via het VIP van de database, en telde na de test of elke bevestigde rij er nog was.
+// FailoverWrites De schrijftest: een andere datanode schreef tijdens de test elke halve seconde een rij via het VIP van de database, en telde na de test of elke bevestigde rij er nog was. Bij restart_all schreef hij tot hij herstartte, en keek hij daarna na of de rijen die de server als bevestigd kende er nog waren.
 type FailoverWrites struct {
 	// Attempts Schrijfacties sinds de storing
 	Attempts int `json:"attempts"`

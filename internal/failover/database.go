@@ -46,9 +46,24 @@ type Database struct {
 	Port   int
 	// Unit is de dienst die database_stop stopt.
 	Unit string
-	// Nodes zijn de datanodes.
-	Nodes []DatabaseNode
+	// Nodes zijn de datanodes, Arbiters de scheidsrechters.
+	Nodes    []DatabaseNode
+	Arbiters []DatabaseNode
+	// AutoRecover: de bewaking begint Galera vanzelf opnieuw na een
+	// volledige uitval.
+	AutoRecover bool
 }
+
+// Recovery is wat RestartRecover deed; leeg als er (nog) niets te doen was.
+type Recovery struct {
+	// Began is de node waarop ClusterForge Galera opnieuw begon; Started
+	// zijn de nodes waarop het MariaDB opnieuw startte.
+	Began   string
+	Started []string
+}
+
+// Did: er gebeurde iets.
+func (r Recovery) Did() bool { return r.Began != "" || len(r.Started) > 0 }
 
 // DatabaseNode is een datanode.
 type DatabaseNode struct {
@@ -71,6 +86,14 @@ type DBComponents interface {
 	PrepareWrites(ctx context.Context, clusterID, componentID uuid.UUID, password string) error
 	// WriteProbe stuurt een DBWriteProbe naar de agent van een node.
 	WriteProbe(ctx context.Context, nodeID uuid.UUID, engine string, req protocol.DBProbeRequest) (*protocol.DBProbeResult, error)
+	// RestartRecover doet tijdens de test die alle nodes herstart wat de
+	// bewaking zou doen, want die slaat een cluster met een taak over:
+	// Galera opnieuw beginnen zodra dat veilig kan, of MariaDB opnieuw
+	// starten op een node die niet startte terwijl het cluster draait. since
+	// is het begin van de uitval; met force wacht het niet (Opnieuw
+	// herstellen). id begint de ids van de commando's. Patroni begint zelf
+	// opnieuw; dan doet het niets.
+	RestartRecover(ctx context.Context, st *jobs.Step, id string, clusterID, componentID uuid.UUID, since time.Time, force bool) (Recovery, error)
 }
 
 // WritePlan is de schrijftest van een test op een cluster met een
@@ -200,11 +223,12 @@ type DatabaseRef struct {
 func (s *Service) databaseChecks(ctx context.Context, plan *Plan, c store.Cluster, def Definition, dbs []Database,
 	nodes []store.ListFailoverNodesRow, now time.Time, add func(string, bool, string)) {
 	w, ok := writeTarget(dbs, def, plan.TargetVIPs)
+	onDB := def.Scenario == DatabaseStop || def.Scenario == RestartAll
 	switch {
-	case def.Scenario == DatabaseStop && (!ok || w.VIP != def.VIP):
-		add("Database", false, "de database stoppen kan alleen op het VIP van een database")
+	case onDB && (!ok || w.VIP != def.VIP):
+		add("Database", false, onDBText(def.Scenario)+" kan alleen op het VIP van een database")
 		return
-	case def.Scenario == DatabaseStop && w.Unit != def.Unit:
+	case onDB && w.Unit != def.Unit:
 		add("Database", false, fmt.Sprintf("%s draait met %s, maar de test stopt %s; sla de test opnieuw op", w.Title, w.Unit, def.Unit))
 		return
 	case ok && w.Engine == protocol.DBPostgreSQL && w.OwnVIP && def.Scenario == KeepalivedStop:
@@ -239,6 +263,13 @@ func (s *Service) databaseChecks(ctx context.Context, plan *Plan, c store.Cluste
 		}
 		plan.Databases = append(plan.Databases, DatabaseRef{ComponentID: d.ComponentID, Title: d.Title})
 	}
+	need, writes := protocol.DBProbeSince, "%s schrijft tijdens de test elke halve seconde een rij via %s:%d"
+	if def.Scenario == RestartAll {
+		s.restartChecks(plan, w, nodes, now, add)
+		// De node die schrijft, herstart mee en kijkt daarna de rijen na.
+		need, writes = protocol.DBProbeVerifySince, "%s schrijft elke halve seconde een rij via %s:%d tot hij herstart; "+
+			"daarna kijkt hij na of de bevestigde rijen er nog zijn"
+	}
 	if !ok {
 		// Een VM die uitgaat, raakt het VIP van de database niet: schrijven
 		// via dat VIP hoort gewoon te blijven lukken.
@@ -261,14 +292,14 @@ func (s *Service) databaseChecks(ctx context.Context, plan *Plan, c store.Cluste
 		case i < 0:
 		case !nodes[i].HasAgent || nodes[i].HeartbeatAt == nil || now.Sub(*nodes[i].HeartbeatAt) > s.Fresh:
 			why = append(why, dn.Hostname+" heeft geen verse heartbeat")
-		case nodes[i].AgentProtocol < protocol.DBProbeSince:
+		case nodes[i].AgentProtocol < int32(need):
 			why = append(why, fmt.Sprintf("de agent op %s heeft protocol %d", dn.Hostname, nodes[i].AgentProtocol))
 		default:
 			plan.Writes = &WritePlan{
 				ComponentID: w.ComponentID, Engine: w.Engine, Title: w.Title, VIP: w.VIP, Port: w.Port,
 				Prober: health.Holder{ID: dn.ID, Hostname: dn.Hostname},
 			}
-			add("Schrijftest", true, fmt.Sprintf("%s schrijft tijdens de test elke halve seconde een rij via %s:%d", dn.Hostname, w.VIP, w.Port))
+			add("Schrijftest", true, fmt.Sprintf(writes, dn.Hostname, w.VIP, w.Port))
 			return
 		}
 	}
@@ -277,7 +308,7 @@ func (s *Service) databaseChecks(ctx context.Context, plan *Plan, c store.Cluste
 		detail += ": " + strings.Join(why, "; ")
 	}
 	add("Schrijftest", false, fmt.Sprintf("%s; de schrijftest vraagt agentprotocol %d, werk de agents bij met het installatiescript en --upgrade",
-		detail, protocol.DBProbeSince))
+		detail, need))
 }
 
 // forDatabase past een nieuwe of gewijzigde test aan de databases van het
@@ -290,9 +321,9 @@ func (s *Service) forDatabase(ctx context.Context, clusterID uuid.UUID, vip stri
 		return err
 	}
 	d, ok := dbOfVIP(dbs, vip)
-	if in.Scenario == DatabaseStop {
+	if in.Scenario == DatabaseStop || in.Scenario == RestartAll {
 		if !ok {
-			return &FieldError{Field: "vip_id", Message: "de database stoppen kan alleen op het VIP van een database"}
+			return &FieldError{Field: "vip_id", Message: onDBText(in.Scenario) + " kan alleen op het VIP van een database"}
 		}
 		in.Service = d.Unit
 	}
@@ -301,6 +332,14 @@ func (s *Service) forDatabase(ctx context.Context, clusterID uuid.UUID, vip stri
 			"het blijft waar de database schrijft", vip, d.Title)}
 	}
 	return nil
+}
+
+// onDBText is het scenario in een zin over het VIP van een database.
+func onDBText(scenario string) string {
+	if scenario == RestartAll {
+		return "alles herstarten"
+	}
+	return "de database stoppen"
 }
 
 // writeLimit is hoe lang de agent hoogstens schrijft: de meting, de

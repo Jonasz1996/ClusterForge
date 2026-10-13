@@ -634,6 +634,11 @@ func failoverDescribe(scenario, service string) string {
 			return "de database stoppen op de eigenaar"
 		}
 		return "de database (" + service + ") stoppen op de eigenaar"
+	case "restart_all":
+		if service == "" {
+			return "alle nodes van de database herstarten"
+		}
+		return "alle nodes van de database (" + service + ") herstarten"
 	}
 	return scenario
 }

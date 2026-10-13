@@ -67,6 +67,8 @@ type Measurement struct {
 	Canceled bool            `json:"canceled,omitempty"`
 	Probe    []Segment       `json:"probe"`
 	Timeline []TimelineEvent `json:"timeline"`
+	// Restart is bij alles herstarten wat de herstart zag.
+	Restart *RestartMeasurement `json:"restart,omitempty"`
 }
 
 // Measurements staan in test_runs.measurements.
@@ -83,6 +85,8 @@ type Measurements struct {
 	Probe          []Segment  `json:"probe"`
 	// Writes is de schrijftest bij een test die een database raakt.
 	Writes *WriteMeasurements `json:"writes,omitempty"`
+	// Restart is bij alles herstarten wat de herstart zag.
+	Restart *RestartMeasurement `json:"restart,omitempty"`
 }
 
 // measureState is de state van de stap Storing en meten. InjectedAt staat
@@ -95,6 +99,8 @@ type measureState struct {
 	InjectError string       `json:"inject_error,omitempty"`
 	Interrupted bool         `json:"interrupted,omitempty"`
 	Measurement *Measurement `json:"measurement,omitempty"`
+	// Restart is bij alles herstarten wat de server van de herstart weet.
+	Restart *restartState `json:"restart,omitempty"`
 }
 
 type restoreState struct {
@@ -120,6 +126,7 @@ type testRun struct {
 
 	injectedAt time.Time
 	clearedAt  time.Time
+	restart    *restartState
 	// ran zegt welke stappen in deze poging liepen; van de andere komt de
 	// state uit een eerdere poging.
 	ran map[string]bool
@@ -190,6 +197,9 @@ func (r *testRun) execute(ctx context.Context) error {
 	o := outcome{
 		injected: !ms.InjectedAt.IsZero(), interrupted: ms.Interrupted, injectErr: ms.InjectError, m: ms.Measurement,
 		canceled: jobs.Canceled(ctx),
+	}
+	if r.restart = ms.Restart; ms.Restart != nil {
+		o.confirmed = ms.Restart.Confirmed
 	}
 	if !o.injected {
 		if jobs.Interrupted(ctx) {
@@ -308,6 +318,9 @@ func (r *testRun) measureStep(ctx context.Context, st *jobs.Step, ms *measureSta
 	}
 	if ctx.Err() != nil {
 		return context.Cause(ctx)
+	}
+	if r.def.Scenario == RestartAll {
+		return r.measureRestart(ctx, st, ms)
 	}
 	host := r.plan.Target.Hostname
 	ms.InjectedAt = time.Now()
@@ -484,8 +497,12 @@ func (r *testRun) takenOver(ctx context.Context, vips []string, since time.Time)
 	return o, true
 }
 
-// restore start de gestopte dienst of VM weer.
+// restore start de gestopte dienst of VM weer; na alles herstarten wacht
+// het tot de nodes en de database terug zijn.
 func (r *testRun) restore(ctx context.Context, st *jobs.Step) error {
+	if r.def.Scenario == RestartAll {
+		return r.restoreRestart(ctx, st)
+	}
 	host := r.plan.Target.Hostname
 	if r.def.Scenario == VMHardStop {
 		st.Logf("VM %d van %s weer starten via Proxmox", r.plan.VM.VMID, host)
@@ -550,6 +567,9 @@ func clearText(def Definition, host string) string {
 
 // stillDown zegt wat er mogelijk nog uit staat als het herstel niet lukte.
 func stillDown(def Definition, host string) string {
+	if def.Scenario == RestartAll {
+		return "de database draait mogelijk nog niet weer op alle nodes"
+	}
 	if def.Scenario == VMHardStop {
 		return "de VM van " + host + " staat mogelijk nog uit"
 	}
@@ -645,6 +665,10 @@ func (r *testRun) returnStep(ctx context.Context, st *jobs.Step, ret *returnStat
 		if err := r.waitHealthy(ctx, d, progress); err != nil {
 			return failed(err)
 		}
+		if def.Scenario == RestartAll {
+			// Dat staat al in de meting.
+			continue
+		}
 		timeline = append(timeline, TimelineEvent{TMS: ms(time.Now()), Kind: "db_ready", Text: d.Title + " is weer gezond"})
 		st.Logf("%s is weer gezond", d.Title)
 		_ = st.Flush(ctx)
@@ -726,6 +750,12 @@ func (s *Service) probeLoop(ctx context.Context, def Definition, pl *ProbeLog) {
 // emergency start de dienst als de herstelstap niet lukte of niet liep,
 // los van de taak en met een eigen limiet.
 func (r *testRun) emergency() {
+	if r.def.Scenario == RestartAll {
+		// Een herstart is niet terug te draaien; de nodes komen vanzelf
+		// terug, en de hervatte taak of Opnieuw herstellen maakt de
+		// database gezond.
+		return
+	}
 	ctx, cancel := context.WithTimeout(events.WithJob(context.Background(), r.j.ID), r.s.EmergencyTimeout)
 	defer cancel()
 	if r.def.Scenario == VMHardStop {
@@ -823,6 +853,8 @@ type outcome struct {
 	ret         *returnState
 	// writes is wat de schrijftest zag; nil zonder.
 	writes *WriteMeasurements
+	// confirmed zijn bij alles herstarten de bevestigde volgnummers.
+	confirmed []int64
 }
 
 // verdict geeft het resultaat, de samenvatting en of alles hersteld is.
@@ -877,6 +909,9 @@ func verdict(def Definition, plan Plan, o outcome) (result, summary string, rest
 	case o.m.Canceled:
 		return "canceled", "Afgebroken tijdens de meting; " + back, &yes
 	}
+	if def.Scenario == RestartAll {
+		return restartVerdict(def, o, back)
+	}
 	m := o.m
 	window := time.Duration(m.WindowMS) * time.Millisecond
 	down := time.Duration(m.DowntimeMS) * time.Millisecond
@@ -921,8 +956,12 @@ func verdict(def Definition, plan Plan, o outcome) (result, summary string, rest
 func (r *testRun) report(o outcome) ([]TimelineEvent, Measurements) {
 	meas := Measurements{ExpectMS: r.def.expect().Milliseconds(), Probe: []Segment{}}
 	timeline := []TimelineEvent{}
-	if o.injected && o.injectErr == "" {
-		timeline = append(timeline, TimelineEvent{TMS: 0, Kind: "fault", Text: faultText(r.def, r.plan.Target.Hostname)})
+	fault, clear := faultText(r.def, r.plan.Target.Hostname), clearText(r.def, r.plan.Target.Hostname)
+	if rp := r.plan.Restart; rp != nil && r.def.Scenario == RestartAll {
+		fault, clear = rp.hosts()+" herstart", "alle nodes zijn terug en "+rp.Title+" is gezond"
+	}
+	if o.injected && (o.injectErr == "" || r.restart != nil && len(r.restart.Sent) > 0) {
+		timeline = append(timeline, TimelineEvent{TMS: 0, Kind: "fault", Text: fault})
 	}
 	if m := o.m; m != nil {
 		timeline = append(timeline, m.Timeline...)
@@ -934,10 +973,11 @@ func (r *testRun) report(o outcome) ([]TimelineEvent, Measurements) {
 		if m.TakenOver {
 			meas.TakeoverNodeID, meas.TakeoverNode, meas.TakeoverMS = m.TakeoverNodeID, m.TakeoverNode, &m.TakeoverMS
 		}
+		meas.Restart = m.Restart
 	}
 	if !r.clearedAt.IsZero() {
 		at := r.clearedAt.Sub(r.injectedAt).Milliseconds()
-		timeline = append(timeline, TimelineEvent{TMS: at, Kind: "clear", Text: clearText(r.def, r.plan.Target.Hostname)})
+		timeline = append(timeline, TimelineEvent{TMS: at, Kind: "clear", Text: clear})
 		meas.EndMS = max(meas.EndMS, at)
 	}
 	if ret := o.ret; ret != nil {
@@ -967,7 +1007,25 @@ func sortTimeline(t []TimelineEvent) []TimelineEvent {
 func (r *testRun) finish(ctx context.Context, o outcome) error {
 	dctx, cancel := jobs.Detach(ctx)
 	defer cancel()
-	o.writes = r.finishWrites(dctx, o)
+	if w := r.plan.Writes; r.def.Scenario == RestartAll && o.injected && w != nil && !w.StartedAt.IsZero() {
+		// De node die schreef, herstartte: hij kijkt de rijen na met de
+		// volgnummers van de server. Een tweede keer nakijken vindt niets
+		// meer, dus het antwoord staat in de stap.
+		var wm WriteMeasurements
+		err := r.step(dctx, stepVerify, &wm, func(ctx context.Context, st *jobs.Step) error {
+			wm = *r.verifyWrites(ctx, st, o)
+			return st.SetState(ctx, wm)
+		})
+		if jobs.Interrupted(dctx) {
+			return err
+		}
+		if wm.Segments == nil {
+			wm.Segments = []Segment{}
+		}
+		o.writes = &wm
+	} else {
+		o.writes = r.finishWrites(dctx, o)
+	}
 	result, summary, restored := verdict(r.def, r.plan, o)
 	timeline, meas := r.report(o)
 	err := r.j.Step(dctx, stepReport, func(ctx context.Context, st *jobs.Step) error {
@@ -1112,7 +1170,12 @@ func (s *Service) runRestore(ctx context.Context, j *jobs.Job) error {
 	ran := false
 	err = j.Step(ctx, stepRestore, func(ctx context.Context, st *jobs.Step) error {
 		ran = true
-		if def.Scenario == VMHardStop {
+		switch def.Scenario {
+		case RestartAll:
+			if err := s.restoreRestartRun(ctx, st, cluster, def, j.ID.String()); err != nil {
+				return err
+			}
+		case VMHardStop:
 			row, err := s.q.GetNode(ctx, target)
 			if err != nil {
 				return err
@@ -1125,7 +1188,7 @@ func (s *Service) runRestore(ctx context.Context, j *jobs.Job) error {
 			if err := s.startVM(ctx, st, VMRef{ConnectionID: *n.ProxmoxID, VMID: int(*n.PveVmid)}); err != nil {
 				return err
 			}
-		} else {
+		default:
 			st.Logf("%s weer starten op %s", def.Unit, run.Hostname)
 			if err := s.apply(ctx, st, target, j.ID.String()+"-clear", "failovertest "+def.Name+" opnieuw herstellen", def.Unit, "started", 3); err != nil {
 				return err

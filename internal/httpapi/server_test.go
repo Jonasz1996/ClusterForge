@@ -240,6 +240,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	drf.Components = cmps
 	fo.DB = cmps
 	fo.WriteStart, fo.WritePoll, fo.WriteFinishTimeout, fo.DBReturnTimeout = 3*time.Second, 50*time.Millisecond, 3*time.Second, 8*time.Second
+	fo.RebootDelay, fo.RestartMargin, fo.RestartPoll = 0, 15*time.Second, 50*time.Millisecond
 	rep := reports.NewService(pool, log)
 	rep.Backups, rep.Risk = bk, rsk
 	var wg sync.WaitGroup

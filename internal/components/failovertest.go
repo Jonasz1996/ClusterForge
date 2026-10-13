@@ -15,7 +15,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
+	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/failover"
+	"github.com/Jonasz1996/clusterforge/internal/jobs"
 	"github.com/Jonasz1996/clusterforge/internal/status"
 	"github.com/Jonasz1996/clusterforge/pkg/protocol"
 )
@@ -50,8 +52,15 @@ func (s *Service) TestDatabases(ctx context.Context, clusterID uuid.UUID) ([]fai
 		if spec.VIP != nil {
 			d.VIP, d.OwnVIP = spec.VIP.Address, spec.VIP.Own
 		}
-		for _, n := range dataNodes(spec, nil) {
-			d.Nodes = append(d.Nodes, failover.DatabaseNode{ID: n.NodeID, Hostname: n.Hostname})
+		d.AutoRecover = c.AutoRecover
+		for _, n := range spec.order() {
+			dn := failover.DatabaseNode{ID: n.NodeID, Hostname: n.Hostname}
+			switch n.Role {
+			case RoleData:
+				d.Nodes = append(d.Nodes, dn)
+			case RoleArbiter:
+				d.Arbiters = append(d.Arbiters, dn)
+			}
 		}
 		out = append(out, d)
 	}
@@ -127,6 +136,101 @@ func (s *Service) WriteProbe(ctx context.Context, nodeID uuid.UUID, engine strin
 		return nil, fmt.Errorf("de agent gaf geen antwoord op %s", req.Action)
 	}
 	return res.Probe, nil
+}
+
+// RestartRecover is de bewaking binnen de failovertest die alle nodes
+// herstart. Ze beslist zoals de bewaking (recoverDue), zonder de backoff,
+// en doet het werk van component.recover in de stap van de test.
+func (s *Service) RestartRecover(ctx context.Context, st *jobs.Step, id string, clusterID, componentID uuid.UUID, since time.Time,
+	force bool) (failover.Recovery, error) {
+	var out failover.Recovery
+	c, err := s.get(ctx, s.q, clusterID, componentID, false)
+	if err != nil || c.Engine != protocol.DBMariaDB || c.AppliedRevision == nil {
+		return out, err
+	}
+	r, err := s.load(ctx, jobParams{ComponentID: c.ID, Revision: int(*c.AppliedRevision)})
+	if err != nil {
+		return out, err
+	}
+	slug := r.spec.Cluster.Slug
+	nodes := dataNodes(r.spec, nil)
+	all := s.observe(ctx, nodes, false)
+	gone := s.Now().Sub(since)
+	if force {
+		gone = max(gone, s.RecoverGrace, s.HungAfter)
+	}
+	if up(c.Engine, galeraNodes(all, slug)) {
+		// Het cluster draait: een node die niet startte, start opnieuw.
+		for i, o := range all {
+			if !o.answered() || o.pos.Active != "failed" || gone < s.RecoverGrace {
+				continue
+			}
+			st.Logf("MariaDB startte niet op %s terwijl het cluster draait; ClusterForge start hem daar opnieuw, zoals de bewaking", o.node.Hostname)
+			_ = st.Flush(ctx)
+			if err := s.recoverJoin(ctx, id, st, nodes[i], slug, 1); err != nil {
+				return out, err
+			}
+			out.Started = append(out.Started, o.node.Hostname)
+		}
+		return out, nil
+	}
+	if !s.recoverDue(all, gone) {
+		return out, nil
+	}
+	ev := func(action string, payload map[string]any) {
+		payload["name"], payload["component"], payload["auto"] = r.spec.Cluster.Name, r.tpl.Title, true
+		if err := s.ev.Write(ctx, nil, events.Event{
+			Actor: events.System(), SubjectType: "cluster", SubjectID: clusterID.String(), ClusterID: &clusterID, Action: action, Payload: payload,
+		}); err != nil {
+			s.log.Warn("event van de failovertest", "action", action, "err", err)
+		}
+	}
+	ev("cluster.database_recovering", map[string]any{"reason": "na het herstarten van alle nodes in een failovertest"})
+	st.Logf("geen enkele node zit in een Primary component; ClusterForge begint %s opnieuw, zoals de bewaking na een volledige uitval", r.tpl.Title)
+	_ = st.Flush(ctx)
+	dec, err := s.decide(ctx, id, st, r, nodes)
+	if err != nil {
+		return out, err
+	}
+	joined := 0
+	for _, n := range nodes {
+		if dec.Begin != nil && n.NodeID == *dec.Begin {
+			if err := s.recoverBegin(ctx, id, st, r, n); err != nil {
+				return out, err
+			}
+			out.Began, joined = n.Hostname, 1
+		}
+	}
+	for _, n := range nodes {
+		if n.Hostname == out.Began {
+			continue
+		}
+		joined++
+		if err := s.recoverJoin(ctx, id, st, n, slug, joined); err != nil {
+			return out, err
+		}
+		out.Started = append(out.Started, n.Hostname)
+	}
+	for _, n := range r.spec.order() {
+		if n.Role != RoleArbiter {
+			continue
+		}
+		joined++
+		if err := s.recoverArbiter(ctx, id, st, nodes[0], n, slug, joined); err != nil {
+			return out, err
+		}
+	}
+	if err := s.verifyNodes(ctx, st, slug, nodes, joined); err != nil {
+		return out, err
+	}
+	if err := s.verifyVIP(ctx, st, r.spec); err != nil {
+		return out, err
+	}
+	ev("cluster.database_recovered", map[string]any{"begin": out.Began, "nodes": hostsOf(nodes)})
+	if s.Changed != nil {
+		s.Changed()
+	}
+	return out, nil
 }
 
 // healthInput is wat dbHealth naast de nodes nodig heeft: wie het VIP

@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"cmp"
 	"context"
 	"net/http"
 	"os"
@@ -79,6 +80,8 @@ type galeraHosts struct {
 	mu      sync.Mutex
 	hosts   map[string]*agenttest.Host
 	members []string
+	// bootFor is hoe lang een herstart duurt; 0 is 300 ms.
+	bootFor time.Duration
 }
 
 const galeraUUID = "5c3a1e0e-0000-11f0-9a3b-7e1c2d3f4a5b"
@@ -117,7 +120,7 @@ func (g *galeraHosts) after(name string, h *agenttest.Host) func(call string, er
 func (g *galeraHosts) reboot(name string, h *agenttest.Host) {
 	g.leave(name, h)
 	_ = os.WriteFile(filepath.Join(h.Root, "proc/uptime"), []byte("1.00 1.00\n"), 0o644)
-	time.AfterFunc(300*time.Millisecond, func() { g.restart(name, h) })
+	time.AfterFunc(cmp.Or(g.bootFor, 300*time.Millisecond), func() { g.restart(name, h) })
 }
 
 // join zet de node in het cluster en maakt het merkteken, zoals touch.

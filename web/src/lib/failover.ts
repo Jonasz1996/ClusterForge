@@ -125,7 +125,8 @@ export function useRestoreTestRun() {
   });
 }
 
-// unitOf is wat de test stopt: keepalived, de gekozen dienst of de VM.
+// unitOf is wat de test stopt: keepalived, de gekozen dienst of de VM. Bij
+// alles herstarten is het de dienst van de database.
 export function unitOf(t: Pick<FailoverTest, "scenario" | "service">) {
   if (t.scenario === "vm_hard_stop") return "de VM";
   return t.scenario === "keepalived_stop" ? "keepalived" : t.service;
@@ -134,12 +135,15 @@ export function unitOf(t: Pick<FailoverTest, "scenario" | "service">) {
 // stillDown zegt wat er mogelijk nog uit staat als het herstel niet lukte.
 export function stillDown(def: Pick<FailoverDefinition, "scenario" | "unit"> | null | undefined, hostname: string) {
   if (def?.scenario === "vm_hard_stop") return `de VM van ${hostname} staat mogelijk nog uit`;
+  if (def?.scenario === "restart_all") return "de database draait mogelijk nog niet weer op alle nodes";
   return `${def?.unit || "de dienst"} staat mogelijk nog uit op ${hostname}`;
 }
 
 // windowSeconds is hoe lang de meting hoogstens duurt; zo lang kan het VIP
-// in het slechtste geval onbereikbaar zijn. Hetzelfde als de server.
-export function windowSeconds(expect: number) {
+// in het slechtste geval onbereikbaar zijn. Hetzelfde als de server: bij
+// alles herstarten de verwachting plus vijf minuten.
+export function windowSeconds(expect: number, scenario?: FailoverScenario) {
+  if (scenario === "restart_all") return expect + 300;
   return Math.min(2 * expect + 10, 120);
 }
 
@@ -161,18 +165,42 @@ export function list(items: string[]) {
   return `${items.slice(0, -1).join(", ")} en ${items[items.length - 1]}`;
 }
 
-// seconds toont milliseconden zoals de server: "3,4 s", "20 s" of "3 min".
+// seconds toont milliseconden zoals de server: "3,4 s", "20 s", "3 min" of
+// "2 min 35 s".
 export function seconds(ms: number) {
   const tenths = Math.round(ms / 100);
   if (tenths % 10 === 0 && tenths < 1200) return `${tenths / 10} s`;
   if (tenths < 600) return `${(tenths / 10).toFixed(1).replace(".", ",")} s`;
   if (tenths < 1200) return `${Math.round(tenths / 10)} s`;
-  return `${Math.round(ms / 60_000)} min`;
+  const secs = Math.round(tenths / 10);
+  return secs % 60 === 0 ? `${secs / 60} min` : `${Math.floor(secs / 60)} min ${secs % 60} s`;
+}
+
+// restartConfirmText is de zin in het bevestigingsvenster van alles
+// herstarten.
+function restartConfirmText(t: FailoverTest, db: string) {
+  const back =
+    t.service === "mariadb"
+      ? "Galera komt na een herstart van alle nodes meestal niet vanzelf terug; ClusterForge begint het dan opnieuw op de node met de nieuwste data, zoals de bewaking. "
+      : "Patroni kiest daarna zelf weer een primary. ";
+  return (
+    `Alle nodes van ${db} herstarten tegelijk, zoals na een stroomonderbreking. Alles wat erop draait, ook de app, is weg tot ze terug zijn, ` +
+    `en ${t.vip_address} is zo lang onbereikbaar. ` +
+    back +
+    `Verwacht: ${db} is binnen ${seconds(t.max_takeover_seconds * 1000)} weer gezond. ` +
+    `Lukt dat niet, dan stopt de meting na ${seconds(windowSeconds(t.max_takeover_seconds, t.scenario) * 1000)}; ` +
+    "daarna wacht ClusterForge tot alles terug is en zet het de database recht. " +
+    `Een datanode schrijft tot hij herstart elke halve seconde een rij in ${db} via ${t.vip_address}; ` +
+    "daarna kijkt ClusterForge na of elke bevestigde rij er nog is."
+  );
 }
 
 // confirmText is de zin in het bevestigingsvenster, met de VIP's die de
 // eigenaar nu heeft.
 export function confirmText(t: FailoverTest, options: FailoverOptions) {
+  if (t.scenario === "restart_all") {
+    return restartConfirmText(t, options.vips.find((v) => v.id === t.vip_id)?.database || "de database");
+  }
   const owner = t.vip_owner;
   const owned = owner ? options.vips.filter((v) => v.owner_hostname === owner).map((v) => v.address) : [t.vip_address];
   const vips = list(owned.length ? owned : [t.vip_address]);
@@ -195,6 +223,14 @@ export function confirmText(t: FailoverTest, options: FailoverOptions) {
 // serverGoneText zegt op prod wat er gebeurt als ClusterForge midden in de
 // test wegvalt.
 export function serverGoneText(t: FailoverTest) {
+  if (t.scenario === "restart_all") {
+    return (
+      "Valt ClusterForge tijdens de test weg, dan komen de nodes toch terug. " +
+      (t.service === "mariadb"
+        ? "Galera begint dan pas opnieuw als ClusterForge terug is: de bewaking doet dat zodra ze weer draait."
+        : "Patroni kiest zelf weer een primary; de rijen worden dan niet nagekeken.")
+    );
+  }
   const owner = t.vip_owner ?? "de eigenaar";
   const what = t.scenario === "vm_hard_stop" ? `de VM van ${owner}` : `${unitOf(t)} op ${owner}`;
   return (

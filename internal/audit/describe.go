@@ -728,14 +728,22 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 	case "failover_test.deleted":
 		return "Failovertest " + name + " verwijderd"
 	case "failover.fault_injected":
+		if str(p, "scenario") == "restart_all" {
+			nodes, _ := p["nodes"].([]any)
+			return fmt.Sprintf("Failovertest %s: %s herstart", str(p, "name"), enList(nodes))
+		}
 		if str(p, "scenario") == "vm_hard_stop" {
 			return fmt.Sprintf("Failovertest %s: VM van %s hard uitgezet", str(p, "name"), str(p, "hostname"))
 		}
 		return fmt.Sprintf("Failovertest %s: %s gestopt op %s", str(p, "name"), str(p, "unit"), str(p, "hostname"))
 	case "failover.fault_cleared":
 		s := fmt.Sprintf("Failovertest %s: %s weer gestart op %s", str(p, "name"), str(p, "unit"), str(p, "hostname"))
-		if str(p, "scenario") == "vm_hard_stop" {
+		switch str(p, "scenario") {
+		case "vm_hard_stop":
 			s = fmt.Sprintf("Failovertest %s: VM van %s weer gestart", str(p, "name"), str(p, "hostname"))
+		case "restart_all":
+			nodes, _ := p["nodes"].([]any)
+			s = fmt.Sprintf("Failovertest %s: %s terug na de herstart, en de database is gezond", str(p, "name"), enList(nodes))
 		}
 		if b, _ := p["restore"].(bool); b {
 			s += " (opnieuw herstellen)"
