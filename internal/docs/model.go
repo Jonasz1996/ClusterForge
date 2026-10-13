@@ -73,6 +73,66 @@ type Cluster struct {
 	// Kube is wat de sync laatst van een Kubernetes-cluster zag; nil bij
 	// een ander clustertype.
 	Kube *Kube
+	// DB zijn de databases op de nodes van het cluster; nil zonder.
+	DB *ClusterDB
+}
+
+// ClusterDB zijn de databases op de nodes van een cluster: de onderdelen
+// Database, en de servers die ClusterForge alleen leest. Er staan geen
+// wachtwoorden, hashes of rijen in.
+type ClusterDB struct {
+	Components []DBComponent
+	Servers    []DBServers
+}
+
+// DBComponent is een onderdeel Database dat ClusterForge uitrolde.
+type DBComponent struct {
+	Title, Engine string
+	// Version is de versie die de server meldt; leeg als ClusterForge hem
+	// nog niet las.
+	Version string
+	Port    int
+	// VIP is het adres van de database voor de app; leeg zonder. OwnVIP
+	// zegt of het een eigen VIP is dat de primary volgt.
+	VIP    string
+	OwnVIP bool
+	// Data zijn de datanodes, Arbiters de scheidsrechters, op hostnaam in
+	// de volgorde van de specificatie.
+	Data, Arbiters []string
+	// AutoRecover: ClusterForge begint Galera vanzelf opnieuw na een
+	// volledige uitval.
+	AutoRecover bool
+	// De nachtelijke dumps.
+	BackupOn bool
+	BackupAt string
+	KeepDays int
+	// Databases zijn de databases van de apps.
+	Databases []DBDatabase
+}
+
+// DBServers zijn databaseservers op de nodes van het cluster die
+// ClusterForge niet uitrolde, zoals een gedeeld databasecluster.
+type DBServers struct {
+	Engine string
+	// Kind is galera, patroni, replication of single.
+	Kind    string
+	Version string
+	Nodes   []string
+	// Databases zijn de databases van de apps.
+	Databases []DBDatabase
+}
+
+// DBDatabase is een database van een app.
+type DBDatabase struct {
+	Name      string
+	SizeBytes int64
+	Tables    int
+	// Users zijn wie de database de laatste dertig dagen gebruikte, zoals
+	// 'Nextcloud (nc1, nc2) als nextcloud'.
+	Users []string
+	// Dump is ok, stale, missing of off; leeg bij een server die
+	// ClusterForge alleen leest.
+	Dump string
 }
 
 // Kube is een Kubernetes-cluster zoals de sync het laatst zag.

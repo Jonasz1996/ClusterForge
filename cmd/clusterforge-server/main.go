@@ -314,6 +314,7 @@ func serve() error {
 	// wijziging en elke nacht.
 	dcs := docs.NewService(pool, log)
 	dcs.Deploy, dcs.GitOps, dcs.Backups, dcs.Risk, dcs.Box, dcs.Events = dep, git, bk, rsk, box, ev
+	dcs.Components = cmps
 	dcs.Opts = docs.Opts{Usernames: cfg.DocsUsernames}
 	go hub.Run(ctx)
 	go eval.Run(ctx)

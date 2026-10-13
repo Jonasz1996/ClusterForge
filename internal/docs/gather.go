@@ -13,6 +13,8 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/Jonasz1996/clusterforge/internal/backups"
+	"github.com/Jonasz1996/clusterforge/internal/components"
+	"github.com/Jonasz1996/clusterforge/internal/databases"
 	"github.com/Jonasz1996/clusterforge/internal/deploy"
 	"github.com/Jonasz1996/clusterforge/internal/deps"
 	"github.com/Jonasz1996/clusterforge/internal/kube"
@@ -47,6 +49,8 @@ type world struct {
 	kubeFacts map[uuid.UUID]store.ListKubeFactsRow
 	kubeNodes []store.ListKubeNodeFactsRow
 	kubeApps  []store.ListKubeAppFactsRow
+	// De databases per cluster.
+	dbs map[uuid.UUID]*components.ClusterDatabases
 }
 
 // Gather leest alles voor de documentatie. Ze leest alleen.
@@ -130,6 +134,11 @@ func (s *Service) read(ctx context.Context) (*world, []store.ListDocClustersRow,
 	}
 	if w.kubeApps, err = s.q.ListKubeAppFacts(ctx); err != nil {
 		return nil, nil, err
+	}
+	if s.Components != nil {
+		if w.dbs, err = s.Components.DescribeDatabases(ctx); err != nil {
+			return nil, nil, err
+		}
 	}
 	sums, err := s.q.ListDocSummaries(ctx)
 	if err != nil {
@@ -328,7 +337,65 @@ func (s *Service) cluster(ctx context.Context, w *world, r store.ListDocClusters
 	if f, ok := w.kubeFacts[r.ID]; ok {
 		c.Kube = s.kubeOf(w, f, tpl, initHost)
 	}
+	if r.HasDatabase {
+		c.DB = dbOf(w.dbs[r.ID])
+	}
 	return c, nil
+}
+
+// dbOf zet de databases van een cluster om voor het hoofdstuk Database,
+// zonder de database van de failovertest.
+func dbOf(cd *components.ClusterDatabases) *ClusterDB {
+	out := &ClusterDB{}
+	if cd == nil {
+		return out
+	}
+	for _, d := range cd.Components {
+		dc := DBComponent{
+			Title: d.Title, Engine: d.Engine, Port: d.Port, VIP: d.VIP, OwnVIP: d.OwnVIP, AutoRecover: d.AutoRecover,
+			BackupOn: d.Backup.On, BackupAt: d.Backup.At, KeepDays: d.Backup.KeepDays,
+		}
+		for _, n := range d.Nodes {
+			if n.Role == components.RoleArbiter {
+				dc.Arbiters = append(dc.Arbiters, n.Hostname)
+			} else {
+				dc.Data = append(dc.Data, n.Hostname)
+			}
+		}
+		dump := map[string]string{}
+		for _, b := range d.Dumps {
+			dump[b.Database] = b.Freshness
+		}
+		if d.Group != nil {
+			dc.Version = d.Group.Version
+			dc.Databases = dbDatabases(d.Group.Databases, dump)
+		}
+		out.Components = append(out.Components, dc)
+	}
+	for _, g := range cd.Unmanaged {
+		ds := DBServers{Engine: g.Engine, Kind: g.Kind, Version: g.Version, Databases: dbDatabases(g.Databases, nil)}
+		for _, sv := range g.Servers {
+			ds.Nodes = append(ds.Nodes, sv.Hostname)
+		}
+		out.Servers = append(out.Servers, ds)
+	}
+	return out
+}
+
+func dbDatabases(in []databases.Database, dump map[string]string) []DBDatabase {
+	var out []DBDatabase
+	for _, x := range in {
+		if x.Name == protocol.DBProbeDatabase {
+			continue
+		}
+		d := DBDatabase{Name: x.Name, SizeBytes: x.SizeBytes, Tables: x.Tables, Dump: dump[x.Name]}
+		for _, u := range x.Users {
+			d.Users = append(d.Users, u.Describe())
+		}
+		slices.Sort(d.Users)
+		out = append(out, d)
+	}
+	return out
 }
 
 // factsOf neemt het adres, de netwerkkaarten en het besturingssysteem uit

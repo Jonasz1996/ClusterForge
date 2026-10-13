@@ -1292,11 +1292,13 @@ func (s *Server) assistantTools() []assistant.Tool {
 				"adressen, bridges, VLAN's en poorten), configuratie (template, parameters zonder geheimen, revisies), " +
 				"herstel (back-ups, controles, failovertests en wat er uitvalt) en runbooks (onderhoud, VIP verplaatsen, " +
 				"terugzetten uit back-up, uitval van een host); bij een Kubernetes-cluster ook kubernetes (versie, nodes, " +
-				"namespaces, apps, webadressen, opslag, etcd-snapshots, en hoe je een node vervangt, bijwerkt en etcd terugzet). " +
-				"Goed voor een vraag als 'hoe zet ik web-01 terug'.",
+				"namespaces, apps, webadressen, opslag, etcd-snapshots, en hoe je een node vervangt, bijwerkt en etcd terugzet); " +
+				"bij een cluster met een databaseserver op zijn nodes ook database (engine en versie, nodes, het VIP, de databases " +
+				"met grootte en gebruikers, de dumps, en hoe je het cluster opnieuw start, een node opnieuw synchroniseert, een dump " +
+				"terugzet, overschakelt en verhuist). Goed voor een vraag als 'hoe zet ik web-01 terug'.",
 			Properties: map[string]any{
 				"cluster":   strProp(clusterDesc),
-				"hoofdstuk": enum("Welk document", "overzicht", "architectuur", "kubernetes", "netwerk", "configuratie", "herstel", "runbooks"),
+				"hoofdstuk": enum("Welk document", "overzicht", "architectuur", "kubernetes", "database", "netwerk", "configuratie", "herstel", "runbooks"),
 			},
 			Required: []string{"cluster", "hoofdstuk"},
 			Label: func(in map[string]any) string {

@@ -365,10 +365,10 @@ func retireMove(g databases.Group, m store.DbMigration, clusterName string, now 
 			switch {
 			case u.Kind == databases.UserLocal:
 				if mv.LastLocal == nil || t.After(*mv.LastLocal) {
-					mv.LastLocal, mv.LocalBy = &t, describeUser(u)
+					mv.LastLocal, mv.LocalBy = &t, u.Describe()
 				}
 			case mv.LastUsed == nil || t.After(*mv.LastUsed):
-				mv.LastUsed, mv.LastBy = &t, describeUser(u)
+				mv.LastUsed, mv.LastBy = &t, u.Describe()
 			}
 		}
 	}
@@ -383,21 +383,6 @@ func retireMove(g databases.Group, m store.DbMigration, clusterName string, now 
 	mv.ReadyAt = &at
 	mv.Ready = !now.Before(at)
 	return mv
-}
-
-// describeUser zegt wie een database gebruikte, zoals "nc-prod (nc1, nc2)
-// als nextcloud".
-func describeUser(u databases.User) string {
-	as := " als " + strings.Join(u.DBUsers, ", ")
-	switch u.Kind {
-	case databases.UserLocal:
-		return "de databasenode zelf (" + strings.Join(u.Nodes, ", ") + ")" + as
-	case databases.UserCluster:
-		return u.Name + " (" + strings.Join(u.Nodes, ", ") + ")" + as
-	case databases.UserUnknown:
-		return "het onbekende adres " + u.Name + as
-	}
-	return u.Name + as
 }
 
 // when schrijft een tijdstip zoals 20/10 om 14:05.

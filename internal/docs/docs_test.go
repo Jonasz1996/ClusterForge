@@ -320,10 +320,10 @@ func kubeCluster(env string) Cluster {
 
 func TestKubernetesChapter(t *testing.T) {
 	c := kubeCluster("lab")
-	if got := Kinds(c.Type); strings.Join(got, ",") != "architectuur,kubernetes,netwerk,configuratie,herstel,runbooks" {
+	if got := c.kinds(); strings.Join(got, ",") != "architectuur,kubernetes,netwerk,configuratie,herstel,runbooks" {
 		t.Fatalf("hoofdstukken: %v", got)
 	}
-	if !Valid(ScopeCluster, KindKubernetes) || len(Kinds("web")) != 5 {
+	if !Valid(ScopeCluster, KindKubernetes) || len(Kinds("web", false)) != 5 {
 		t.Fatal("kubernetes is een hoofdstuk van een cluster, alleen bij Kubernetes")
 	}
 	md := Chapter(&c, KindKubernetes, Opts{Loc: time.UTC})
@@ -388,5 +388,122 @@ func TestKubernetesChapter(t *testing.T) {
 	}
 	if n := len(RenderCluster(&c, Opts{})); n != 6 {
 		t.Errorf("hoofdstukken van Leren: %d", n)
+	}
+}
+
+// dbCluster is Nextcloud met MariaDB Galera op nc1 tot nc3 achter het VIP
+// .185, en de oude MariaDB-server die ClusterForge alleen leest.
+func dbCluster() Cluster {
+	return Cluster{
+		ID: uuid.MustParse("88888888-8888-8888-8888-888888888888"), Name: "Nextcloud", Slug: "nextcloud", Env: "prod", Type: "keepalived",
+		VIPs: []VIP{{Address: "10.0.20.185"}},
+		DB: &ClusterDB{
+			Components: []DBComponent{{
+				Title: "MariaDB Galera", Engine: "mariadb", Version: "11.8.3-MariaDB", Port: 3306, VIP: "10.0.20.185",
+				Data: []string{"nc1", "nc2", "nc3"}, AutoRecover: true, BackupOn: true, BackupAt: "02:00", KeepDays: 7,
+				Databases: []DBDatabase{
+					{Name: "nextcloud", SizeBytes: 2468 << 20, Tables: 121, Users: []string{"Nextcloud (nc1, nc2, nc3) als nextcloud"}, Dump: "ok"},
+					{Name: "wiki", SizeBytes: 40 << 20, Tables: 12, Dump: "missing"},
+				},
+			}},
+			Servers: []DBServers{{Engine: "postgresql", Kind: "single", Version: "17.6", Nodes: []string{"nc1"},
+				Databases: []DBDatabase{{Name: "zabbix", SizeBytes: 900 << 20, Tables: 180, Users: []string{"de databasenode zelf (nc1) als zabbix"}}}}},
+		},
+	}
+}
+
+func TestDatabaseChapter(t *testing.T) {
+	c := dbCluster()
+	if got := strings.Join(c.kinds(), ","); got != "architectuur,database,netwerk,configuratie,herstel,runbooks" {
+		t.Fatalf("hoofdstukken: %s", got)
+	}
+	if got := strings.Join(Kinds("kubernetes", true), ","); got != "architectuur,kubernetes,database,netwerk,configuratie,herstel,runbooks" || !Valid(ScopeCluster, KindDatabase) {
+		t.Fatalf("met Kubernetes: %s", got)
+	}
+	md := Chapter(&c, KindDatabase, Opts{Loc: time.UTC})
+	for _, want := range []string{
+		"# Nextcloud: database",
+		"[Architectuur](architectuur.md) · **Database** · [Netwerk](netwerk.md)",
+		"Nextcloud heeft MariaDB Galera op nc1, nc2 en nc3, uitgerold en beheerd door ClusterForge. Daarnaast draait er PostgreSQL op nc1; ClusterForge leest die server, maar beheert hem niet.",
+		"| **Versie** | MariaDB `11.8.3-MariaDB` |",
+		"| **Adres voor de app** | `10.0.20.185:3306`, via het VIP van de app, dat alleen op een node staat die mag schrijven |",
+		"| **Galera-cluster** | `nextcloud` |",
+		"| **Dumps** | elke nacht om 02:00, 7 dagen bewaard, in `/var/backups/clusterforge-db` op een datanode zonder het VIP |",
+		"| **Na een volledige uitval** | ClusterForge begint het cluster vanzelf opnieuw op de node met de nieuwste data |",
+		"| **nextcloud** | 2,4 GB | 121 | Nextcloud (nc1, nc2, nc3) als nextcloud | goed |",
+		"| **wiki** | 40 MB | 12 | – | nog geen |",
+		"galera_new_cluster",
+		"**4.** Kijk of alle nodes meedoen: `wsrep_cluster_size` is 3.",
+		"`nextcloud_herstel_<datum>`",
+		"zstd -dc /var/backups/clusterforge-db/nextcloud/<bestand>.sql.zst | mariadb nextcloud",
+		"De app schrijft naar de node met het VIP `10.0.20.185`.",
+		"## PostgreSQL op nc1",
+		"| **Soort** | losse server |",
+		"| **zabbix** | 900 MB | 180 | de databasenode zelf (nc1) als zabbix |",
+		"verhuis haar dan naar MariaDB Galera.",
+		"zoals tabellen zonder primaire sleutel of buiten InnoDB.",
+		"4. Wijs de app naar `10.0.20.185`, met dezelfde gebruiker en hetzelfde wachtwoord",
+	} {
+		if !strings.Contains(md, want) {
+			t.Errorf("Galera: mist %q in:\n%s", want, md)
+		}
+	}
+	for _, chapter := range []string{KindRecovery, KindRunbooks} {
+		if !strings.Contains(Chapter(&c, chapter, Opts{Loc: time.UTC}), "het hoofdstuk [Database](database.md)") {
+			t.Errorf("%s linkt niet naar het hoofdstuk Database", chapter)
+		}
+	}
+
+	// PostgreSQL met Patroni op twee datanodes en een scheidsrechter, met
+	// een eigen VIP.
+	cp := &c.DB.Components[0]
+	cp.Engine, cp.Title, cp.Port, cp.Version, cp.OwnVIP, cp.VIP = "postgresql", "PostgreSQL met Patroni", 5432, "17.6", true, "10.0.20.190"
+	cp.Data, cp.Arbiters = []string{"nc1", "nc2"}, []string{"nc3"}
+	c.DB.Servers = nil
+	md = Chapter(&c, KindDatabase, Opts{Loc: time.UTC})
+	for _, want := range []string{
+		"| **Nodes** | nc1 en nc2; scheidsrechter nc3 (alleen etcd) |",
+		"| **Adres voor de app** | `10.0.20.190:5432`, via het VIP, dat alleen op de primary staat |",
+		"| **Patroni-cluster (scope)** | `nextcloud` |",
+		"in `/var/backups/clusterforge-db` op de primary |",
+		"kijk dan als root op nc1 en nc2, en naar etcd op de scheidsrechter nc3:",
+		"patronictl -c /etc/patroni/clusterforge.yml reinit nextcloud nc2 --force'",
+		"runuser -u postgres -- createdb -O <eigenaar> nextcloud_terug",
+		"switchover nextcloud --candidate nc2 --force'",
+		"Het plan verandert niets en toont wat in de weg staat.",
+	} {
+		if !strings.Contains(md, want) {
+			t.Errorf("Patroni: mist %q in:\n%s", want, md)
+		}
+	}
+	if strings.Contains(md, "Na een volledige uitval") || strings.Contains(md, "galera") {
+		t.Errorf("Patroni noemt Galera:\n%s", md)
+	}
+
+	// Een cluster met alleen een server die ClusterForge leest.
+	c = dbCluster()
+	c.DB.Components = nil
+	md = Chapter(&c, KindDatabase, Opts{Loc: time.UTC})
+	if !strings.Contains(md, "Er draait PostgreSQL op nc1; ClusterForge leest die server, maar beheert hem niet.") || strings.Contains(md, "Proefverhuizing") ||
+		strings.Contains(Chapter(&c, KindRunbooks, Opts{Loc: time.UTC}), "het hoofdstuk [Database](database.md)") {
+		t.Errorf("alleen lezen:\n%s", md)
+	}
+	c.DB = &ClusterDB{}
+	if md = Chapter(&c, KindDatabase, Opts{Loc: time.UTC}); !strings.Contains(md, "ClusterForge ziet geen database op de nodes van Nextcloud.") {
+		t.Errorf("leeg:\n%s", md)
+	}
+	c.DB = nil
+	if Chapter(&c, KindDatabase, Opts{}) != "" || strings.Join(c.kinds(), ",") != strings.Join(ClusterKinds, ",") {
+		t.Error("zonder database is er geen hoofdstuk Database")
+	}
+}
+
+func TestRoughSize(t *testing.T) {
+	for in, want := range map[int64]string{
+		512 << 10: "510 kB", 1536 << 10: "1,5 MB", 40 << 20: "40 MB", 2468 << 20: "2,4 GB", 123 << 30: "120 GB", 3 << 40: "3,0 TB",
+	} {
+		if got := roughSize(in); got != want {
+			t.Errorf("%d: %s, verwacht %s", in, got, want)
+		}
 	}
 }

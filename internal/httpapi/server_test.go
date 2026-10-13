@@ -239,6 +239,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	life.DB = cmps
 	rsk.DB = cmps
 	drf.Components = cmps
+	dcs.Components = cmps
 	fo.DB = cmps
 	fo.WriteStart, fo.WritePoll, fo.WriteFinishTimeout, fo.DBReturnTimeout = 3*time.Second, 50*time.Millisecond, 3*time.Second, 8*time.Second
 	fo.RebootDelay, fo.RestartMargin, fo.RestartPoll = 0, 15*time.Second, 50*time.Millisecond

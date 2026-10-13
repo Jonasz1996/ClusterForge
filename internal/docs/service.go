@@ -21,6 +21,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/Jonasz1996/clusterforge/internal/backups"
+	"github.com/Jonasz1996/clusterforge/internal/components"
 	"github.com/Jonasz1996/clusterforge/internal/deploy"
 	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/gitops"
@@ -59,6 +60,9 @@ type Service struct {
 	GitOps  *gitops.Service
 	Backups *backups.Service
 	Risk    *risk.Service
+	// Components beschrijft de databases op de nodes; nil zonder, en dan
+	// is het hoofdstuk Database leeg.
+	Components *components.Service
 	// Box versleutelt het token van de GitHub-koppeling; zonder masterkey
 	// is hij nil en staat de export uit.
 	Box    *secrets.Box
@@ -507,7 +511,7 @@ func (s *Service) List(ctx context.Context) (Index, error) {
 	for _, r := range rows {
 		id := r.ID
 		ci := ClusterIndex{ID: id, Name: r.Name, Slug: r.Slug, Env: r.Environment, Queued: s.Queued(id), Summary: summaries[id]}
-		for _, k := range Kinds(r.Type) {
+		for _, k := range Kinds(r.Type, r.HasDatabase) {
 			m := meta(ScopeCluster, k, r.Slug, &id)
 			if m.GeneratedAt != nil && (ci.Changed == nil || m.GeneratedAt.After(*ci.Changed)) {
 				ci.Changed = m.GeneratedAt
@@ -517,6 +521,15 @@ func (s *Service) List(ctx context.Context) (Index, error) {
 		out.Clusters = append(out.Clusters, ci)
 	}
 	return out, nil
+}
+
+// ChapterKinds zijn de hoofdstukken van een cluster, zoals Kinds.
+func (s *Service) ChapterKinds(ctx context.Context, id uuid.UUID, clusterType string) ([]string, error) {
+	db, err := s.q.ClusterHasDatabase(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return Kinds(clusterType, db), nil
 }
 
 // Doc is één versie van een document.
@@ -555,8 +568,13 @@ func (s *Service) Get(ctx context.Context, scope, kind string, cluster *uuid.UUI
 		if err != nil {
 			return Doc{}, err
 		}
-		// Het hoofdstuk Kubernetes is er alleen bij een Kubernetes-cluster.
-		if !slices.Contains(Kinds(c.Type), kind) {
+		// Het hoofdstuk Kubernetes is er alleen bij een Kubernetes-cluster,
+		// het hoofdstuk Database bij een cluster met een databaseserver.
+		kinds, err := s.ChapterKinds(ctx, c.ID, c.Type)
+		if err != nil {
+			return Doc{}, err
+		}
+		if !slices.Contains(kinds, kind) {
 			return Doc{}, ErrNotFound
 		}
 		slug, name = c.Slug, c.Name

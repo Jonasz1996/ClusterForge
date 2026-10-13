@@ -12,6 +12,20 @@ import (
 	"github.com/google/uuid"
 )
 
+const clusterHasDatabase = `-- name: ClusterHasDatabase :one
+SELECT (EXISTS (SELECT 1 FROM cluster_components cc
+                WHERE cc.cluster_id = $1 AND cc.applied_revision IS NOT NULL AND cc.engine IN ('mariadb', 'postgresql'))
+        OR EXISTS (SELECT 1 FROM db_servers s JOIN nodes n ON n.id = s.node_id WHERE n.cluster_id = $1))::boolean AS has_database
+`
+
+// Zoals has_database in ListDocClusters.
+func (q *Queries) ClusterHasDatabase(ctx context.Context, id uuid.UUID) (bool, error) {
+	row := q.db.QueryRow(ctx, clusterHasDatabase, id)
+	var has_database bool
+	err := row.Scan(&has_database)
+	return has_database, err
+}
+
 const createDocsTarget = `-- name: CreateDocsTarget :one
 INSERT INTO docs_targets (id, api_url, owner, name, branch, path, token_enc, key_id, enabled)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
@@ -278,7 +292,10 @@ func (q *Queries) LatestDocSnapshots(ctx context.Context) ([]LatestDocSnapshotsR
 const listDocClusters = `-- name: ListDocClusters :many
 SELECT c.id, c.slug, c.name, c.description, c.type, c.environment::text AS environment, c.tags, c.status,
        c.spec, c.spec_revision, c.applied_revision, (c.git_repo_id IS NOT NULL)::boolean AS git_linked,
-       c.rto_target_minutes, c.rpo_target_hours
+       c.rto_target_minutes, c.rpo_target_hours,
+       (EXISTS (SELECT 1 FROM cluster_components cc
+                WHERE cc.cluster_id = c.id AND cc.applied_revision IS NOT NULL AND cc.engine IN ('mariadb', 'postgresql'))
+        OR EXISTS (SELECT 1 FROM db_servers s JOIN nodes n ON n.id = s.node_id WHERE n.cluster_id = c.id))::boolean AS has_database
 FROM clusters c
 ORDER BY lower(c.name), c.id
 `
@@ -298,8 +315,12 @@ type ListDocClustersRow struct {
 	GitLinked        bool
 	RtoTargetMinutes *int32
 	RpoTargetHours   *int32
+	HasDatabase      bool
 }
 
+// has_database is true met een toegepast onderdeel Database of een
+// databaseserver op een node van het cluster: dan is er een hoofdstuk
+// Database.
 func (q *Queries) ListDocClusters(ctx context.Context) ([]ListDocClustersRow, error) {
 	rows, err := q.db.Query(ctx, listDocClusters)
 	if err != nil {
@@ -324,6 +345,7 @@ func (q *Queries) ListDocClusters(ctx context.Context) ([]ListDocClustersRow, er
 			&i.GitLinked,
 			&i.RtoTargetMinutes,
 			&i.RpoTargetHours,
+			&i.HasDatabase,
 		); err != nil {
 			return nil, err
 		}
