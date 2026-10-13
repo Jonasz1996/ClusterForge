@@ -666,6 +666,27 @@ func (e DatabaseMigrationRunStatus) Valid() bool {
 	}
 }
 
+// Defines values for DatabaseRetireRuleState.
+const (
+	InUse        DatabaseRetireRuleState = "in_use"
+	UntilRetired DatabaseRetireRuleState = "until_retired"
+	Unused       DatabaseRetireRuleState = "unused"
+)
+
+// Valid indicates whether the value is a known member of the DatabaseRetireRuleState enum.
+func (e DatabaseRetireRuleState) Valid() bool {
+	switch e {
+	case InUse:
+		return true
+	case UntilRetired:
+		return true
+	case Unused:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for DepGroupKind.
 const (
 	DepGroupKindCluster  DepGroupKind = "cluster"
@@ -4973,15 +4994,33 @@ type DatabaseMigrationRun struct {
 	Kind     DatabaseMigrationRunKind              `json:"kind"`
 
 	// Locked De gebruikers van de app mogen de oude database alleen nog lezen
-	Locked        bool                       `json:"locked"`
-	Message       string                     `json:"message"`
-	Objects       []DatabaseMigrationObjects `json:"objects"`
-	RowsSource    int64                      `json:"rows_source"`
-	RowsTarget    int64                      `json:"rows_target"`
-	SizeBytes     int64                      `json:"size_bytes"`
-	SourceAddress string                     `json:"source_address"`
-	SourceName    string                     `json:"source_name"`
-	SourceNode    string                     `json:"source_node"`
+	Locked  bool                       `json:"locked"`
+	Message string                     `json:"message"`
+	Objects []DatabaseMigrationObjects `json:"objects"`
+
+	// RetireBytes De laatste dump op schijf
+	RetireBytes int64 `json:"retire_bytes"`
+
+	// RetireFile De laatste dump, in /var/backups/clusterforge-db/<database>/
+	RetireFile string `json:"retire_file"`
+
+	// RetireJobId Het laatste afbouwen van de oude database
+	RetireJobId nullable.Nullable[openapi_types.UUID] `json:"retire_job_id"`
+
+	// RetireMessage Wat het afbouwen deed
+	RetireMessage string `json:"retire_message"`
+
+	// RetireNode De node met de laatste dump; leeg zonder dump
+	RetireNode string `json:"retire_node"`
+
+	// RetiredAt Wanneer de oude database en haar gebruikers weggingen
+	RetiredAt     nullable.Nullable[time.Time] `json:"retired_at"`
+	RowsSource    int64                        `json:"rows_source"`
+	RowsTarget    int64                        `json:"rows_target"`
+	SizeBytes     int64                        `json:"size_bytes"`
+	SourceAddress string                       `json:"source_address"`
+	SourceName    string                       `json:"source_name"`
+	SourceNode    string                       `json:"source_node"`
 
 	// Stage Bij een verhuizing: copy (kopieert), copied (wacht op overschakelen), done of cancelled; leeg bij een proef
 	Stage      string                       `json:"stage"`
@@ -5082,6 +5121,85 @@ type DatabaseReplica struct {
 	LagBytes int64  `json:"lag_bytes"`
 	State    string `json:"state"`
 	Sync     string `json:"sync"`
+}
+
+// DatabaseRetireMove defines model for DatabaseRetireMove.
+type DatabaseRetireMove struct {
+	// Active Het afbouwen dat wacht of loopt
+	Active nullable.Nullable[ComponentDumpJob] `json:"active"`
+	Engine string                              `json:"engine"`
+
+	// Exists De oude database staat er volgens de laatste lezing nog
+	Exists bool `json:"exists"`
+
+	// LastBy Wie dat was
+	LastBy string `json:"last_by"`
+
+	// LastLocal De laatste verbinding op de databasenode zelf, zoals een back-up; die houdt afbouwen niet tegen
+	LastLocal nullable.Nullable[time.Time] `json:"last_local"`
+
+	// LastUsed De laatste verbinding met de oude database van buiten de databasenode, in de laatste 30 dagen
+	LastUsed nullable.Nullable[time.Time] `json:"last_used"`
+	LocalBy  string                       `json:"local_by"`
+
+	// ProdSlug De slug om in te tikken als het afbouwen een prodcluster raakt; leeg als niet
+	ProdSlug string `json:"prod_slug"`
+	Ready    bool   `json:"ready"`
+
+	// ReadyAt Vanaf wanneer afbouwen kan; null als het gebeurd is
+	ReadyAt   nullable.Nullable[time.Time] `json:"ready_at"`
+	Run       DatabaseMigrationRun         `json:"run"`
+	SourceKey string                       `json:"source_key"`
+}
+
+// DatabaseRetireRemaining defines model for DatabaseRetireRemaining.
+type DatabaseRetireRemaining struct {
+	Database string `json:"database"`
+	Engine   string `json:"engine"`
+
+	// Moved Verhuisd; wacht op afbouwen
+	Moved     bool   `json:"moved"`
+	SourceKey string `json:"source_key"`
+}
+
+// DatabaseRetireRule defines model for DatabaseRetireRule.
+type DatabaseRetireRule struct {
+	// Address Waarlangs de app de oude database gebruikte; leeg als het onbekend is
+	Address     string             `json:"address"`
+	ClusterId   openapi_types.UUID `json:"cluster_id"`
+	ClusterName string             `json:"cluster_name"`
+	Engine      string             `json:"engine"`
+
+	// LastSeen De laatste verbinding van een node van de app met de oude servers, in de laatste 30 dagen
+	LastSeen nullable.Nullable[time.Time] `json:"last_seen"`
+	Port     int                          `json:"port"`
+
+	// State in_use: de app verbond na het overschakelen nog; until_retired: nodig om terug te kunnen tot het afbouwen; unused: de regel kan weg
+	State DatabaseRetireRuleState `json:"state"`
+}
+
+// DatabaseRetireRuleState in_use: de app verbond na het overschakelen nog; until_retired: nodig om terug te kunnen tot het afbouwen; unused: de regel kan weg
+type DatabaseRetireRuleState string
+
+// DatabaseRetireSource defines model for DatabaseRetireSource.
+type DatabaseRetireSource struct {
+	ClusterId nullable.Nullable[openapi_types.UUID] `json:"cluster_id"`
+
+	// Empty Er staat geen database van een app meer op
+	Empty bool `json:"empty"`
+
+	// Keys De groepen onder Databases
+	Keys  []string             `json:"keys"`
+	Moves []DatabaseRetireMove `json:"moves"`
+
+	// Name Het cluster, of de nodes als ze in geen of meer clusters zitten
+	Name string `json:"name"`
+
+	// Readable Elke groep gaf een volledige lijst met databases
+	Readable  bool                      `json:"readable"`
+	Remaining []DatabaseRetireRemaining `json:"remaining"`
+	Rules     []DatabaseRetireRule      `json:"rules"`
+	Servers   []string                  `json:"servers"`
 }
 
 // DatabaseServer defines model for DatabaseServer.
@@ -10502,6 +10620,9 @@ type CancelDatabaseMoveJSONRequestBody CancelDatabaseMoveJSONBody
 // LockDatabaseMoveJSONRequestBody defines body for LockDatabaseMove for application/json ContentType.
 type LockDatabaseMoveJSONRequestBody LockDatabaseMoveJSONBody
 
+// RetireDatabaseMoveJSONRequestBody defines body for RetireDatabaseMove for application/json ContentType.
+type RetireDatabaseMoveJSONRequestBody = ComponentDropInput
+
 // SwitchDatabaseMoveJSONRequestBody defines body for SwitchDatabaseMove for application/json ContentType.
 type SwitchDatabaseMoveJSONRequestBody SwitchDatabaseMoveJSONBody
 
@@ -10894,9 +11015,15 @@ type ServerInterface interface {
 	// LockDatabaseMove De oude database van een verhuisde app op slot zetten of het slot eraf halen (admin)
 	// (POST /databases/migrations/{id}/lock)
 	LockDatabaseMove(w http.ResponseWriter, r *http.Request, id openapi_types.UUID)
+	// RetireDatabaseMove De oude database van een verhuisde app afbouwen (admin); wordt een taak
+	// (POST /databases/migrations/{id}/retire)
+	RetireDatabaseMove(w http.ResponseWriter, r *http.Request, id openapi_types.UUID)
 	// SwitchDatabaseMove De app draait op de nieuwe database (admin)
 	// (POST /databases/migrations/{id}/switch)
 	SwitchDatabaseMove(w http.ResponseWriter, r *http.Request, id openapi_types.UUID)
+	// ListDatabaseRetire De oude databaseservers waarvan een database verhuisd is
+	// (GET /databases/retire)
+	ListDatabaseRetire(w http.ResponseWriter, r *http.Request)
 	// CreateDependency Vastleggen dat een dienst van een andere afhangt (admin)
 	// (POST /dependencies)
 	CreateDependency(w http.ResponseWriter, r *http.Request)
@@ -11860,9 +11987,21 @@ func (_ Unimplemented) LockDatabaseMove(w http.ResponseWriter, r *http.Request, 
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// RetireDatabaseMove De oude database van een verhuisde app afbouwen (admin); wordt een taak
+// (POST /databases/migrations/{id}/retire)
+func (_ Unimplemented) RetireDatabaseMove(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // SwitchDatabaseMove De app draait op de nieuwe database (admin)
 // (POST /databases/migrations/{id}/switch)
 func (_ Unimplemented) SwitchDatabaseMove(w http.ResponseWriter, r *http.Request, id openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListDatabaseRetire De oude databaseservers waarvan een database verhuisd is
+// (GET /databases/retire)
+func (_ Unimplemented) ListDatabaseRetire(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -15502,6 +15641,32 @@ func (siw *ServerInterfaceWrapper) LockDatabaseMove(w http.ResponseWriter, r *ht
 	handler.ServeHTTP(w, r)
 }
 
+// RetireDatabaseMove operation middleware
+func (siw *ServerInterfaceWrapper) RetireDatabaseMove(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RetireDatabaseMove(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // SwitchDatabaseMove operation middleware
 func (siw *ServerInterfaceWrapper) SwitchDatabaseMove(w http.ResponseWriter, r *http.Request) {
 
@@ -15519,6 +15684,20 @@ func (siw *ServerInterfaceWrapper) SwitchDatabaseMove(w http.ResponseWriter, r *
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.SwitchDatabaseMove(w, r, id)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListDatabaseRetire operation middleware
+func (siw *ServerInterfaceWrapper) ListDatabaseRetire(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListDatabaseRetire(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -20586,6 +20765,12 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/databases/migrations/{id}/lock", wrapper.LockDatabaseMove)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/databases/migrations/{id}/retire", wrapper.RetireDatabaseMove)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/databases/retire", wrapper.ListDatabaseRetire)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/kubernetes/clusters", wrapper.ListKubeClusters)

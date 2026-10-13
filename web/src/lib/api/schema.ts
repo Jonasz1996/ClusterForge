@@ -3476,6 +3476,53 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/databases/migrations/{id}/retire": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * De oude database van een verhuisde app afbouwen (admin); wordt een taak
+         * @description Kan als er zeven dagen niemand van buiten de databasenode met de oude database verbonden was, en nu niemand
+         *     verbonden is (ook niet op de databasenode zelf). Een laatste dump op een node van de oude server, die blijft staan;
+         *     is hij niet compleet, dan stopt het. Daarna gaan de database en de gebruikers van de app weg. Een gebruiker die ook
+         *     rechten op een andere database heeft of er de laatste 30 dagen een andere gebruikte, blijft. Name is de naam van de
+         *     database; raakt het een prodcluster (dat van de app, anders het oude), dan ook de slug en tweestapsverificatie. 409
+         *     als het nog niet kan, met tot wanneer en waarom.
+         */
+        post: operations["retireDatabaseMove"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/databases/retire": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * De oude databaseservers waarvan een database verhuisd is
+         * @description Per oude server (alle databaseservers op dezelfde nodes, zoals MariaDB en PostgreSQL op db1 tot db3): de verhuisde
+         *     databases met wanneer afbouwen kan, wat er nog van een app op staat, en per app of zijn firewallregel naar de oude
+         *     server nog gebruikt wordt, uit de verbindingen die ClusterForge elke minuut leest. Ook voor viewers.
+         */
+        get: operations["listDatabaseRetire"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/kubernetes/clusters": {
         parameters: {
             query?: never;
@@ -5085,6 +5132,27 @@ export interface components {
             id: string;
             /** @enum {string} */
             kind: "trial" | "migrate";
+            /**
+             * Format: uuid
+             * @description Het laatste afbouwen van de oude database
+             */
+            retire_job_id: string | null;
+            /**
+             * Format: date-time
+             * @description Wanneer de oude database en haar gebruikers weggingen
+             */
+            retired_at: string | null;
+            /** @description De node met de laatste dump; leeg zonder dump */
+            retire_node: string;
+            /** @description De laatste dump, in /var/backups/clusterforge-db/<database>/ */
+            retire_file: string;
+            /**
+             * Format: int64
+             * @description De laatste dump op schijf
+             */
+            retire_bytes: number;
+            /** @description Wat het afbouwen deed */
+            retire_message: string;
             /** @enum {string} */
             status: "running" | "ok" | "failed";
             /** @description Bij een verhuizing: copy (kopieert), copied (wacht op overschakelen), done of cancelled; leeg bij een proef */
@@ -5143,6 +5211,78 @@ export interface components {
             message: string;
             /** Format: uuid */
             job_id: string | null;
+        };
+        DatabaseRetireSource: {
+            /** @description Het cluster, of de nodes als ze in geen of meer clusters zitten */
+            name: string;
+            /** Format: uuid */
+            cluster_id: string | null;
+            /** @description De groepen onder Databases */
+            keys: string[];
+            servers: string[];
+            /** @description Elke groep gaf een volledige lijst met databases */
+            readable: boolean;
+            /** @description Er staat geen database van een app meer op */
+            empty: boolean;
+            remaining: components["schemas"]["DatabaseRetireRemaining"][];
+            moves: components["schemas"]["DatabaseRetireMove"][];
+            rules: components["schemas"]["DatabaseRetireRule"][];
+        };
+        DatabaseRetireRemaining: {
+            source_key: string;
+            engine: string;
+            database: string;
+            /** @description Verhuisd; wacht op afbouwen */
+            moved: boolean;
+        };
+        DatabaseRetireMove: {
+            run: components["schemas"]["DatabaseMigrationRun"];
+            /** @description De slug om in te tikken als het afbouwen een prodcluster raakt; leeg als niet */
+            prod_slug: string;
+            engine: string;
+            source_key: string;
+            /** @description De oude database staat er volgens de laatste lezing nog */
+            exists: boolean;
+            /**
+             * Format: date-time
+             * @description De laatste verbinding met de oude database van buiten de databasenode, in de laatste 30 dagen
+             */
+            last_used: string | null;
+            /** @description Wie dat was */
+            last_by: string;
+            /**
+             * Format: date-time
+             * @description De laatste verbinding op de databasenode zelf, zoals een back-up; die houdt afbouwen niet tegen
+             */
+            last_local: string | null;
+            local_by: string;
+            /**
+             * Format: date-time
+             * @description Vanaf wanneer afbouwen kan; null als het gebeurd is
+             */
+            ready_at: string | null;
+            ready: boolean;
+            /** @description Het afbouwen dat wacht of loopt */
+            active: components["schemas"]["ComponentDumpJob"] | null;
+        };
+        DatabaseRetireRule: {
+            /** Format: uuid */
+            cluster_id: string;
+            cluster_name: string;
+            engine: string;
+            /** @description Waarlangs de app de oude database gebruikte; leeg als het onbekend is */
+            address: string;
+            port: number;
+            /**
+             * Format: date-time
+             * @description De laatste verbinding van een node van de app met de oude servers, in de laatste 30 dagen
+             */
+            last_seen: string | null;
+            /**
+             * @description in_use: de app verbond na het overschakelen nog; until_retired: nodig om terug te kunnen tot het afbouwen; unused: de regel kan weg
+             * @enum {string}
+             */
+            state: "in_use" | "until_retired" | "unused";
         };
         DatabaseMigrationMovedUser: {
             user: string;
@@ -15269,6 +15409,60 @@ export interface operations {
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];
+        };
+    };
+    retireDatabaseMove: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ComponentDropInput"];
+            };
+        };
+        responses: {
+            /** @description Taak aangemaakt */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Job"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    listDatabaseRetire: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["DatabaseRetireSource"][];
+                    };
+                };
+            };
+            401: components["responses"]["Error"];
         };
     };
     listKubeClusters: {

@@ -110,6 +110,7 @@ var Known = map[string]Spec{
 	"cluster.database_move_cancelled":  {CategoryInventory, "Verhuizing van database geannuleerd"},
 	"cluster.database_locked":          {CategoryInventory, "Oude database op slot gezet"},
 	"cluster.database_unlocked":        {CategoryInventory, "Slot van oude database gehaald"},
+	"cluster.database_retired":         {CategoryInventory, "Oude database afgebouwd"},
 	"cluster.database_not_added":       {CategoryInventory, "Database na uitrol niet toegevoegd"},
 	"node.created":                     {CategoryInventory, "Node toegevoegd"},
 	"node.updated":                     {CategoryInventory, "Node gewijzigd"},

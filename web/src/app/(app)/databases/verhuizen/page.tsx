@@ -54,9 +54,14 @@ function MigrateInner() {
         {p && (
           <>
             <SourceCard p={p} />
-            <TargetCard p={p} />
-            <FindingsCard p={p} />
-            <TrialCard p={p} loading={plan.isPlaceholderData} />
+            {/* Na het afbouwen staat de database er niet meer: niets meer te proberen. */}
+            {!retired(p) && (
+              <>
+                <TargetCard p={p} />
+                <FindingsCard p={p} />
+                <TrialCard p={p} loading={plan.isPlaceholderData} />
+              </>
+            )}
             <MoveCard p={p} loading={plan.isPlaceholderData} refresh={() => void plan.refetch()} />
             <Runs runs={p.runs} pg={isPG(p)} />
           </>
@@ -64,6 +69,13 @@ function MigrateInner() {
       </QueryState>
     </div>
   );
+}
+
+// retired zegt of de laatste verhuizing klaar is en de oude database
+// afgebouwd.
+function retired(p: MigrationPlan) {
+  const last = p.runs.find((r) => r.kind === "migrate");
+  return last?.stage === "done" && last.retired_at !== null;
 }
 
 function SourceCard({ p }: { p: MigrationPlan }) {

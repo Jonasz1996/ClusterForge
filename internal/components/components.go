@@ -199,6 +199,10 @@ func NewService(pool *pgxpool.Pool, ev *events.Writer, log *slog.Logger, runner 
 	// opnieuw: dan staat de nieuwe database er al.
 	runner.Register(MigrateKind, s.runMove)
 	runner.OnFinished(MigrateKind, s.failMigrationsOf)
+	// Afbouwen gaat na een herstart verder: de dump wacht verder op
+	// dezelfde, en weghalen kan twee keer.
+	runner.Register(RetireKind, s.runRetire)
+	runner.OnFinished(RetireKind, s.failRetireOf)
 	// 'Database erbij' bij Cluster uitrollen.
 	if dep != nil {
 		dep.OnFinished(s.deployFinished)

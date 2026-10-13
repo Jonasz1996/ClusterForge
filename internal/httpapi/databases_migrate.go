@@ -128,6 +128,75 @@ func (s *Server) LockDatabaseMove(w http.ResponseWriter, r *http.Request, id uui
 	writeJSON(w, http.StatusOK, toAPIMigrationRun(row.DbMigration, row.ClusterName))
 }
 
+// RetireDatabaseMove bouwt de oude database van een verhuisde app af: een
+// laatste dump, en dan de database en haar gebruikers weg. Name is de naam
+// van de database; op prod ook de slug en tweestapsverificatie.
+func (s *Server) RetireDatabaseMove(w http.ResponseWriter, r *http.Request, id uuid.UUID) {
+	p, ok := requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	var in gen.ComponentDropInput
+	if !decode(w, r, &in) {
+		return
+	}
+	ctx := r.Context()
+	prod, slug, err := s.components.RetireProd(ctx, id)
+	if err != nil {
+		s.migrationError(w, r, err)
+		return
+	}
+	if !confirmProd(w, p, prod, slug, in.Confirm, "een oude database afbouwen") {
+		return
+	}
+	j, err := s.components.StartRetire(ctx, events.User(p.User.ID), id, in.Name)
+	if err != nil {
+		s.migrationError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, toAPIJob(j, &p.User.Username))
+}
+
+// ListDatabaseRetire geeft de oude databaseservers waarvan een database
+// verhuisd is. Ook voor viewers.
+func (s *Server) ListDatabaseRetire(w http.ResponseWriter, r *http.Request) {
+	sources, err := s.components.RetireOverview(r.Context())
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	items := make([]gen.DatabaseRetireSource, 0, len(sources))
+	for _, src := range sources {
+		out := gen.DatabaseRetireSource{
+			Name: src.Name, ClusterId: nullableOf(src.ClusterID), Keys: nonNil(src.Keys), Servers: nonNil(src.Servers), Readable: src.Readable,
+			Empty: src.Empty, Remaining: make([]gen.DatabaseRetireRemaining, 0, len(src.Remaining)),
+			Moves: make([]gen.DatabaseRetireMove, 0, len(src.Moves)), Rules: make([]gen.DatabaseRetireRule, 0, len(src.Rules)),
+		}
+		for _, d := range src.Remaining {
+			out.Remaining = append(out.Remaining, gen.DatabaseRetireRemaining{SourceKey: d.SourceKey, Engine: d.Engine, Database: d.Database, Moved: d.Moved})
+		}
+		for _, mv := range src.Moves {
+			m := gen.DatabaseRetireMove{
+				Run: toAPIMigrationRun(mv.Migration, mv.ClusterName), Engine: mv.Engine, SourceKey: mv.Migration.SourceKey, Exists: mv.Exists,
+				LastUsed: nullableOf(mv.LastUsed), LastBy: mv.LastBy, LastLocal: nullableOf(mv.LastLocal), LocalBy: mv.LocalBy,
+				ReadyAt: nullableOf(mv.ReadyAt), Ready: mv.Ready, Active: nullable.NewNullNullable[gen.ComponentDumpJob](), ProdSlug: mv.ProdSlug,
+			}
+			if a := mv.Active; a != nil {
+				m.Active = nullable.NewNullableWithValue(gen.ComponentDumpJob{JobId: a.ID, Kind: a.Kind, Title: a.Title})
+			}
+			out.Moves = append(out.Moves, m)
+		}
+		for _, rule := range src.Rules {
+			out.Rules = append(out.Rules, gen.DatabaseRetireRule{
+				ClusterId: rule.ClusterID, ClusterName: rule.ClusterName, Engine: rule.Engine, Address: rule.Address, Port: rule.Port,
+				LastSeen: nullableOf(rule.LastSeen), State: gen.DatabaseRetireRuleState(rule.State),
+			})
+		}
+		items = append(items, out)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items})
+}
+
 func (s *Server) migrationError(w http.ResponseWriter, r *http.Request, err error) {
 	if errors.Is(err, components.ErrSourceNotFound) || errors.Is(err, components.ErrMigrationNotFound) {
 		writeError(w, http.StatusNotFound, "not_found", err.Error())
@@ -165,7 +234,9 @@ func toAPIMigrationPlan(p components.MigrationPlan) gen.DatabaseMigrationPlan {
 	if src.Node != nil {
 		out.Source.Node = src.Node.Hostname
 	}
-	if i := p.Info; i != nil {
+	// Een database die er niet (meer) is, zoals na het afbouwen, heeft geen
+	// gegevens.
+	if i := p.Info; i != nil && i.Exists {
 		info := gen.DatabaseMigrationInfo{
 			Version: i.Version, Charset: i.Charset, Collation: i.Collation, SizeBytes: i.SizeBytes, Tables: len(i.Tables),
 			Views: i.Views, Routines: i.Routines, Triggers: i.Triggers, Events: i.Events, Owner: i.Owner, Extensions: nonNil(i.Extensions),
@@ -228,6 +299,8 @@ func toAPIMigrationRun(m store.DbMigration, clusterName string) gen.DatabaseMigr
 		Differences: []gen.DatabaseMigrationCount{}, Objects: []gen.DatabaseMigrationObjects{}, Message: m.Message, JobId: nullableOf(m.JobID),
 		Stage: m.Stage, Accounts: []gen.DatabaseMigrationMovedUser{}, Force: m.Force, TargetAddress: m.TargetAddress,
 		CopiedAt: nullableOf(m.CopiedAt), SwitchedAt: nullableOf(m.SwitchedAt), Locked: m.Locked,
+		RetireJobId: nullableOf(m.RetireJobID), RetiredAt: nullableOf(m.RetiredAt), RetireNode: m.RetireNode, RetireFile: m.RetireFile,
+		RetireBytes: m.RetireBytes, RetireMessage: m.RetireMessage,
 	}
 	var accounts []components.MoveAccount
 	_ = json.Unmarshal(m.Accounts, &accounts)

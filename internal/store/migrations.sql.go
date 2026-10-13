@@ -16,7 +16,7 @@ const cancelDBMigration = `-- name: CancelDBMigration :one
 UPDATE db_migrations
 SET stage = 'cancelled', status = 'failed', finished_at = $1, message = $2
 WHERE id = $3 AND stage = 'copied' AND status = 'running'
-RETURNING id, kind, component_id, cluster_id, source_key, source_name, source_node, source_address, database, target_database, target_node, status, started_at, finished_at, size_bytes, dump_bytes, import_ms, count_ms, tables, objects, differences, message, job_id, requested_by, stage, accounts, force, target_address, copied_at, switched_at, locked
+RETURNING id, kind, component_id, cluster_id, source_key, source_name, source_node, source_address, database, target_database, target_node, status, started_at, finished_at, size_bytes, dump_bytes, import_ms, count_ms, tables, objects, differences, message, job_id, requested_by, stage, accounts, force, target_address, copied_at, switched_at, locked, retire_job_id, retired_at, retire_node, retire_file, retire_bytes, retire_message
 `
 
 type CancelDBMigrationParams struct {
@@ -61,6 +61,12 @@ func (q *Queries) CancelDBMigration(ctx context.Context, arg CancelDBMigrationPa
 		&i.CopiedAt,
 		&i.SwitchedAt,
 		&i.Locked,
+		&i.RetireJobID,
+		&i.RetiredAt,
+		&i.RetireNode,
+		&i.RetireFile,
+		&i.RetireBytes,
+		&i.RetireMessage,
 	)
 	return i, err
 }
@@ -70,7 +76,7 @@ UPDATE db_migrations
 SET stage = 'copied', copied_at = $1, dump_bytes = $2, import_ms = $3, count_ms = $4,
     tables = $5, objects = $6, differences = $7, message = $8
 WHERE id = $9 AND stage = 'copy' AND status = 'running'
-RETURNING id, kind, component_id, cluster_id, source_key, source_name, source_node, source_address, database, target_database, target_node, status, started_at, finished_at, size_bytes, dump_bytes, import_ms, count_ms, tables, objects, differences, message, job_id, requested_by, stage, accounts, force, target_address, copied_at, switched_at, locked
+RETURNING id, kind, component_id, cluster_id, source_key, source_name, source_node, source_address, database, target_database, target_node, status, started_at, finished_at, size_bytes, dump_bytes, import_ms, count_ms, tables, objects, differences, message, job_id, requested_by, stage, accounts, force, target_address, copied_at, switched_at, locked, retire_job_id, retired_at, retire_node, retire_file, retire_bytes, retire_message
 `
 
 type CopiedDBMigrationParams struct {
@@ -132,8 +138,30 @@ func (q *Queries) CopiedDBMigration(ctx context.Context, arg CopiedDBMigrationPa
 		&i.CopiedAt,
 		&i.SwitchedAt,
 		&i.Locked,
+		&i.RetireJobID,
+		&i.RetiredAt,
+		&i.RetireNode,
+		&i.RetireFile,
+		&i.RetireBytes,
+		&i.RetireMessage,
 	)
 	return i, err
+}
+
+const failDBMigrationRetire = `-- name: FailDBMigrationRetire :exec
+UPDATE db_migrations SET retire_message = $1
+WHERE retire_job_id = $2 AND retired_at IS NULL AND retire_message = ''
+`
+
+type FailDBMigrationRetireParams struct {
+	RetireMessage string
+	RetireJobID   *uuid.UUID
+}
+
+// Het afbouwen mislukte; de eerste reden blijft staan.
+func (q *Queries) FailDBMigrationRetire(ctx context.Context, arg FailDBMigrationRetireParams) error {
+	_, err := q.db.Exec(ctx, failDBMigrationRetire, arg.RetireMessage, arg.RetireJobID)
+	return err
 }
 
 const failRunningDBMigrations = `-- name: FailRunningDBMigrations :exec
@@ -158,7 +186,7 @@ UPDATE db_migrations
 SET status = $1, finished_at = $2, dump_bytes = $3, import_ms = $4, count_ms = $5,
     tables = $6, objects = $7, differences = $8, message = $9
 WHERE id = $10
-RETURNING id, kind, component_id, cluster_id, source_key, source_name, source_node, source_address, database, target_database, target_node, status, started_at, finished_at, size_bytes, dump_bytes, import_ms, count_ms, tables, objects, differences, message, job_id, requested_by, stage, accounts, force, target_address, copied_at, switched_at, locked
+RETURNING id, kind, component_id, cluster_id, source_key, source_name, source_node, source_address, database, target_database, target_node, status, started_at, finished_at, size_bytes, dump_bytes, import_ms, count_ms, tables, objects, differences, message, job_id, requested_by, stage, accounts, force, target_address, copied_at, switched_at, locked, retire_job_id, retired_at, retire_node, retire_file, retire_bytes, retire_message
 `
 
 type FinishDBMigrationParams struct {
@@ -220,12 +248,18 @@ func (q *Queries) FinishDBMigration(ctx context.Context, arg FinishDBMigrationPa
 		&i.CopiedAt,
 		&i.SwitchedAt,
 		&i.Locked,
+		&i.RetireJobID,
+		&i.RetiredAt,
+		&i.RetireNode,
+		&i.RetireFile,
+		&i.RetireBytes,
+		&i.RetireMessage,
 	)
 	return i, err
 }
 
 const getDBMigration = `-- name: GetDBMigration :one
-SELECT m.id, m.kind, m.component_id, m.cluster_id, m.source_key, m.source_name, m.source_node, m.source_address, m.database, m.target_database, m.target_node, m.status, m.started_at, m.finished_at, m.size_bytes, m.dump_bytes, m.import_ms, m.count_ms, m.tables, m.objects, m.differences, m.message, m.job_id, m.requested_by, m.stage, m.accounts, m.force, m.target_address, m.copied_at, m.switched_at, m.locked, c.name AS cluster_name
+SELECT m.id, m.kind, m.component_id, m.cluster_id, m.source_key, m.source_name, m.source_node, m.source_address, m.database, m.target_database, m.target_node, m.status, m.started_at, m.finished_at, m.size_bytes, m.dump_bytes, m.import_ms, m.count_ms, m.tables, m.objects, m.differences, m.message, m.job_id, m.requested_by, m.stage, m.accounts, m.force, m.target_address, m.copied_at, m.switched_at, m.locked, m.retire_job_id, m.retired_at, m.retire_node, m.retire_file, m.retire_bytes, m.retire_message, c.name AS cluster_name
 FROM db_migrations m
 JOIN clusters c ON c.id = m.cluster_id
 WHERE m.id = $1
@@ -271,13 +305,19 @@ func (q *Queries) GetDBMigration(ctx context.Context, id uuid.UUID) (GetDBMigrat
 		&i.DbMigration.CopiedAt,
 		&i.DbMigration.SwitchedAt,
 		&i.DbMigration.Locked,
+		&i.DbMigration.RetireJobID,
+		&i.DbMigration.RetiredAt,
+		&i.DbMigration.RetireNode,
+		&i.DbMigration.RetireFile,
+		&i.DbMigration.RetireBytes,
+		&i.DbMigration.RetireMessage,
 		&i.ClusterName,
 	)
 	return i, err
 }
 
 const getDBMigrationByJob = `-- name: GetDBMigrationByJob :one
-SELECT id, kind, component_id, cluster_id, source_key, source_name, source_node, source_address, database, target_database, target_node, status, started_at, finished_at, size_bytes, dump_bytes, import_ms, count_ms, tables, objects, differences, message, job_id, requested_by, stage, accounts, force, target_address, copied_at, switched_at, locked FROM db_migrations WHERE job_id = $1
+SELECT id, kind, component_id, cluster_id, source_key, source_name, source_node, source_address, database, target_database, target_node, status, started_at, finished_at, size_bytes, dump_bytes, import_ms, count_ms, tables, objects, differences, message, job_id, requested_by, stage, accounts, force, target_address, copied_at, switched_at, locked, retire_job_id, retired_at, retire_node, retire_file, retire_bytes, retire_message FROM db_migrations WHERE job_id = $1
 `
 
 func (q *Queries) GetDBMigrationByJob(ctx context.Context, jobID *uuid.UUID) (DbMigration, error) {
@@ -315,6 +355,61 @@ func (q *Queries) GetDBMigrationByJob(ctx context.Context, jobID *uuid.UUID) (Db
 		&i.CopiedAt,
 		&i.SwitchedAt,
 		&i.Locked,
+		&i.RetireJobID,
+		&i.RetiredAt,
+		&i.RetireNode,
+		&i.RetireFile,
+		&i.RetireBytes,
+		&i.RetireMessage,
+	)
+	return i, err
+}
+
+const getDBMigrationByRetireJob = `-- name: GetDBMigrationByRetireJob :one
+SELECT id, kind, component_id, cluster_id, source_key, source_name, source_node, source_address, database, target_database, target_node, status, started_at, finished_at, size_bytes, dump_bytes, import_ms, count_ms, tables, objects, differences, message, job_id, requested_by, stage, accounts, force, target_address, copied_at, switched_at, locked, retire_job_id, retired_at, retire_node, retire_file, retire_bytes, retire_message FROM db_migrations WHERE retire_job_id = $1
+`
+
+func (q *Queries) GetDBMigrationByRetireJob(ctx context.Context, retireJobID *uuid.UUID) (DbMigration, error) {
+	row := q.db.QueryRow(ctx, getDBMigrationByRetireJob, retireJobID)
+	var i DbMigration
+	err := row.Scan(
+		&i.ID,
+		&i.Kind,
+		&i.ComponentID,
+		&i.ClusterID,
+		&i.SourceKey,
+		&i.SourceName,
+		&i.SourceNode,
+		&i.SourceAddress,
+		&i.Database,
+		&i.TargetDatabase,
+		&i.TargetNode,
+		&i.Status,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.SizeBytes,
+		&i.DumpBytes,
+		&i.ImportMs,
+		&i.CountMs,
+		&i.Tables,
+		&i.Objects,
+		&i.Differences,
+		&i.Message,
+		&i.JobID,
+		&i.RequestedBy,
+		&i.Stage,
+		&i.Accounts,
+		&i.Force,
+		&i.TargetAddress,
+		&i.CopiedAt,
+		&i.SwitchedAt,
+		&i.Locked,
+		&i.RetireJobID,
+		&i.RetiredAt,
+		&i.RetireNode,
+		&i.RetireFile,
+		&i.RetireBytes,
+		&i.RetireMessage,
 	)
 	return i, err
 }
@@ -324,7 +419,7 @@ INSERT INTO db_migrations (kind, component_id, cluster_id, source_key, source_na
     stage, force)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
     $11, $12)
-RETURNING id, kind, component_id, cluster_id, source_key, source_name, source_node, source_address, database, target_database, target_node, status, started_at, finished_at, size_bytes, dump_bytes, import_ms, count_ms, tables, objects, differences, message, job_id, requested_by, stage, accounts, force, target_address, copied_at, switched_at, locked
+RETURNING id, kind, component_id, cluster_id, source_key, source_name, source_node, source_address, database, target_database, target_node, status, started_at, finished_at, size_bytes, dump_bytes, import_ms, count_ms, tables, objects, differences, message, job_id, requested_by, stage, accounts, force, target_address, copied_at, switched_at, locked, retire_job_id, retired_at, retire_node, retire_file, retire_bytes, retire_message
 `
 
 type InsertDBMigrationParams struct {
@@ -390,6 +485,12 @@ func (q *Queries) InsertDBMigration(ctx context.Context, arg InsertDBMigrationPa
 		&i.CopiedAt,
 		&i.SwitchedAt,
 		&i.Locked,
+		&i.RetireJobID,
+		&i.RetiredAt,
+		&i.RetireNode,
+		&i.RetireFile,
+		&i.RetireBytes,
+		&i.RetireMessage,
 	)
 	return i, err
 }
@@ -416,7 +517,7 @@ func (q *Queries) InsertDeployDatabase(ctx context.Context, arg InsertDeployData
 }
 
 const latestDBMigrationTarget = `-- name: LatestDBMigrationTarget :one
-SELECT id, kind, component_id, cluster_id, source_key, source_name, source_node, source_address, database, target_database, target_node, status, started_at, finished_at, size_bytes, dump_bytes, import_ms, count_ms, tables, objects, differences, message, job_id, requested_by, stage, accounts, force, target_address, copied_at, switched_at, locked FROM db_migrations
+SELECT id, kind, component_id, cluster_id, source_key, source_name, source_node, source_address, database, target_database, target_node, status, started_at, finished_at, size_bytes, dump_bytes, import_ms, count_ms, tables, objects, differences, message, job_id, requested_by, stage, accounts, force, target_address, copied_at, switched_at, locked, retire_job_id, retired_at, retire_node, retire_file, retire_bytes, retire_message FROM db_migrations
 WHERE component_id = $1 AND target_database = $2 AND id <> $3
 ORDER BY started_at DESC
 LIMIT 1
@@ -465,12 +566,18 @@ func (q *Queries) LatestDBMigrationTarget(ctx context.Context, arg LatestDBMigra
 		&i.CopiedAt,
 		&i.SwitchedAt,
 		&i.Locked,
+		&i.RetireJobID,
+		&i.RetiredAt,
+		&i.RetireNode,
+		&i.RetireFile,
+		&i.RetireBytes,
+		&i.RetireMessage,
 	)
 	return i, err
 }
 
 const listDBMigrations = `-- name: ListDBMigrations :many
-SELECT m.id, m.kind, m.component_id, m.cluster_id, m.source_key, m.source_name, m.source_node, m.source_address, m.database, m.target_database, m.target_node, m.status, m.started_at, m.finished_at, m.size_bytes, m.dump_bytes, m.import_ms, m.count_ms, m.tables, m.objects, m.differences, m.message, m.job_id, m.requested_by, m.stage, m.accounts, m.force, m.target_address, m.copied_at, m.switched_at, m.locked, c.name AS cluster_name
+SELECT m.id, m.kind, m.component_id, m.cluster_id, m.source_key, m.source_name, m.source_node, m.source_address, m.database, m.target_database, m.target_node, m.status, m.started_at, m.finished_at, m.size_bytes, m.dump_bytes, m.import_ms, m.count_ms, m.tables, m.objects, m.differences, m.message, m.job_id, m.requested_by, m.stage, m.accounts, m.force, m.target_address, m.copied_at, m.switched_at, m.locked, m.retire_job_id, m.retired_at, m.retire_node, m.retire_file, m.retire_bytes, m.retire_message, c.name AS cluster_name
 FROM db_migrations m
 JOIN clusters c ON c.id = m.cluster_id
 WHERE m.source_key = $1 AND m.database = $2
@@ -530,6 +637,12 @@ func (q *Queries) ListDBMigrations(ctx context.Context, arg ListDBMigrationsPara
 			&i.DbMigration.CopiedAt,
 			&i.DbMigration.SwitchedAt,
 			&i.DbMigration.Locked,
+			&i.DbMigration.RetireJobID,
+			&i.DbMigration.RetiredAt,
+			&i.DbMigration.RetireNode,
+			&i.DbMigration.RetireFile,
+			&i.DbMigration.RetireBytes,
+			&i.DbMigration.RetireMessage,
 			&i.ClusterName,
 		); err != nil {
 			return nil, err
@@ -540,6 +653,143 @@ func (q *Queries) ListDBMigrations(ctx context.Context, arg ListDBMigrationsPara
 		return nil, err
 	}
 	return items, nil
+}
+
+const listDoneDBMigrations = `-- name: ListDoneDBMigrations :many
+SELECT m.id, m.kind, m.component_id, m.cluster_id, m.source_key, m.source_name, m.source_node, m.source_address, m.database, m.target_database, m.target_node, m.status, m.started_at, m.finished_at, m.size_bytes, m.dump_bytes, m.import_ms, m.count_ms, m.tables, m.objects, m.differences, m.message, m.job_id, m.requested_by, m.stage, m.accounts, m.force, m.target_address, m.copied_at, m.switched_at, m.locked, m.retire_job_id, m.retired_at, m.retire_node, m.retire_file, m.retire_bytes, m.retire_message, c.name AS cluster_name, j.status AS retire_job_status, coalesce(j.title, '') AS retire_job_title
+FROM db_migrations m
+JOIN clusters c ON c.id = m.cluster_id
+LEFT JOIN jobs j ON j.id = m.retire_job_id
+WHERE m.kind = 'migrate' AND m.stage = 'done'
+ORDER BY m.switched_at DESC NULLS LAST, m.started_at DESC
+`
+
+type ListDoneDBMigrationsRow struct {
+	DbMigration     DbMigration
+	ClusterName     string
+	RetireJobStatus NullJobStatus
+	RetireJobTitle  string
+}
+
+// De verhuizingen die klaar zijn, met de taak van hun afbouwen; de nieuwste
+// eerst.
+func (q *Queries) ListDoneDBMigrations(ctx context.Context) ([]ListDoneDBMigrationsRow, error) {
+	rows, err := q.db.Query(ctx, listDoneDBMigrations)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDoneDBMigrationsRow{}
+	for rows.Next() {
+		var i ListDoneDBMigrationsRow
+		if err := rows.Scan(
+			&i.DbMigration.ID,
+			&i.DbMigration.Kind,
+			&i.DbMigration.ComponentID,
+			&i.DbMigration.ClusterID,
+			&i.DbMigration.SourceKey,
+			&i.DbMigration.SourceName,
+			&i.DbMigration.SourceNode,
+			&i.DbMigration.SourceAddress,
+			&i.DbMigration.Database,
+			&i.DbMigration.TargetDatabase,
+			&i.DbMigration.TargetNode,
+			&i.DbMigration.Status,
+			&i.DbMigration.StartedAt,
+			&i.DbMigration.FinishedAt,
+			&i.DbMigration.SizeBytes,
+			&i.DbMigration.DumpBytes,
+			&i.DbMigration.ImportMs,
+			&i.DbMigration.CountMs,
+			&i.DbMigration.Tables,
+			&i.DbMigration.Objects,
+			&i.DbMigration.Differences,
+			&i.DbMigration.Message,
+			&i.DbMigration.JobID,
+			&i.DbMigration.RequestedBy,
+			&i.DbMigration.Stage,
+			&i.DbMigration.Accounts,
+			&i.DbMigration.Force,
+			&i.DbMigration.TargetAddress,
+			&i.DbMigration.CopiedAt,
+			&i.DbMigration.SwitchedAt,
+			&i.DbMigration.Locked,
+			&i.DbMigration.RetireJobID,
+			&i.DbMigration.RetiredAt,
+			&i.DbMigration.RetireNode,
+			&i.DbMigration.RetireFile,
+			&i.DbMigration.RetireBytes,
+			&i.DbMigration.RetireMessage,
+			&i.ClusterName,
+			&i.RetireJobStatus,
+			&i.RetireJobTitle,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const retireDBMigration = `-- name: RetireDBMigration :one
+UPDATE db_migrations SET retired_at = $1, retire_message = $2
+WHERE id = $3 AND retired_at IS NULL
+RETURNING id, kind, component_id, cluster_id, source_key, source_name, source_node, source_address, database, target_database, target_node, status, started_at, finished_at, size_bytes, dump_bytes, import_ms, count_ms, tables, objects, differences, message, job_id, requested_by, stage, accounts, force, target_address, copied_at, switched_at, locked, retire_job_id, retired_at, retire_node, retire_file, retire_bytes, retire_message
+`
+
+type RetireDBMigrationParams struct {
+	RetiredAt     *time.Time
+	RetireMessage string
+	ID            uuid.UUID
+}
+
+// De oude database en de gebruikers van de app zijn weg.
+func (q *Queries) RetireDBMigration(ctx context.Context, arg RetireDBMigrationParams) (DbMigration, error) {
+	row := q.db.QueryRow(ctx, retireDBMigration, arg.RetiredAt, arg.RetireMessage, arg.ID)
+	var i DbMigration
+	err := row.Scan(
+		&i.ID,
+		&i.Kind,
+		&i.ComponentID,
+		&i.ClusterID,
+		&i.SourceKey,
+		&i.SourceName,
+		&i.SourceNode,
+		&i.SourceAddress,
+		&i.Database,
+		&i.TargetDatabase,
+		&i.TargetNode,
+		&i.Status,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.SizeBytes,
+		&i.DumpBytes,
+		&i.ImportMs,
+		&i.CountMs,
+		&i.Tables,
+		&i.Objects,
+		&i.Differences,
+		&i.Message,
+		&i.JobID,
+		&i.RequestedBy,
+		&i.Stage,
+		&i.Accounts,
+		&i.Force,
+		&i.TargetAddress,
+		&i.CopiedAt,
+		&i.SwitchedAt,
+		&i.Locked,
+		&i.RetireJobID,
+		&i.RetiredAt,
+		&i.RetireNode,
+		&i.RetireFile,
+		&i.RetireBytes,
+		&i.RetireMessage,
+	)
+	return i, err
 }
 
 const setDBMigrationAccounts = `-- name: SetDBMigrationAccounts :exec
@@ -559,7 +809,7 @@ func (q *Queries) SetDBMigrationAccounts(ctx context.Context, arg SetDBMigration
 const setDBMigrationLocked = `-- name: SetDBMigrationLocked :one
 UPDATE db_migrations SET locked = $1
 WHERE id = $2 AND stage = 'done'
-RETURNING id, kind, component_id, cluster_id, source_key, source_name, source_node, source_address, database, target_database, target_node, status, started_at, finished_at, size_bytes, dump_bytes, import_ms, count_ms, tables, objects, differences, message, job_id, requested_by, stage, accounts, force, target_address, copied_at, switched_at, locked
+RETURNING id, kind, component_id, cluster_id, source_key, source_name, source_node, source_address, database, target_database, target_node, status, started_at, finished_at, size_bytes, dump_bytes, import_ms, count_ms, tables, objects, differences, message, job_id, requested_by, stage, accounts, force, target_address, copied_at, switched_at, locked, retire_job_id, retired_at, retire_node, retire_file, retire_bytes, retire_message
 `
 
 type SetDBMigrationLockedParams struct {
@@ -602,8 +852,37 @@ func (q *Queries) SetDBMigrationLocked(ctx context.Context, arg SetDBMigrationLo
 		&i.CopiedAt,
 		&i.SwitchedAt,
 		&i.Locked,
+		&i.RetireJobID,
+		&i.RetiredAt,
+		&i.RetireNode,
+		&i.RetireFile,
+		&i.RetireBytes,
+		&i.RetireMessage,
 	)
 	return i, err
+}
+
+const setDBMigrationRetireDump = `-- name: SetDBMigrationRetireDump :exec
+UPDATE db_migrations SET retire_node = $1, retire_file = $2, retire_bytes = $3
+WHERE id = $4
+`
+
+type SetDBMigrationRetireDumpParams struct {
+	RetireNode  string
+	RetireFile  string
+	RetireBytes int64
+	ID          uuid.UUID
+}
+
+// De laatste dump op de oude server is klaar.
+func (q *Queries) SetDBMigrationRetireDump(ctx context.Context, arg SetDBMigrationRetireDumpParams) error {
+	_, err := q.db.Exec(ctx, setDBMigrationRetireDump,
+		arg.RetireNode,
+		arg.RetireFile,
+		arg.RetireBytes,
+		arg.ID,
+	)
+	return err
 }
 
 const setDBMigrationRoute = `-- name: SetDBMigrationRoute :exec
@@ -636,11 +915,71 @@ func (q *Queries) SetDBMigrationRoute(ctx context.Context, arg SetDBMigrationRou
 	return err
 }
 
+const startDBMigrationRetire = `-- name: StartDBMigrationRetire :one
+UPDATE db_migrations m
+SET retire_job_id = $1, retire_message = ''
+WHERE m.id = $2 AND m.kind = 'migrate' AND m.stage = 'done' AND m.retired_at IS NULL
+    AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.id = m.retire_job_id AND j.status IN ('queued', 'running'))
+RETURNING id, kind, component_id, cluster_id, source_key, source_name, source_node, source_address, database, target_database, target_node, status, started_at, finished_at, size_bytes, dump_bytes, import_ms, count_ms, tables, objects, differences, message, job_id, requested_by, stage, accounts, force, target_address, copied_at, switched_at, locked, retire_job_id, retired_at, retire_node, retire_file, retire_bytes, retire_message
+`
+
+type StartDBMigrationRetireParams struct {
+	RetireJobID *uuid.UUID
+	ID          uuid.UUID
+}
+
+// Het afbouwen van de oude database van een verhuizing begint. Er loopt
+// er hoogstens één per verhuizing; een vorige dump blijft vastgelegd.
+func (q *Queries) StartDBMigrationRetire(ctx context.Context, arg StartDBMigrationRetireParams) (DbMigration, error) {
+	row := q.db.QueryRow(ctx, startDBMigrationRetire, arg.RetireJobID, arg.ID)
+	var i DbMigration
+	err := row.Scan(
+		&i.ID,
+		&i.Kind,
+		&i.ComponentID,
+		&i.ClusterID,
+		&i.SourceKey,
+		&i.SourceName,
+		&i.SourceNode,
+		&i.SourceAddress,
+		&i.Database,
+		&i.TargetDatabase,
+		&i.TargetNode,
+		&i.Status,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.SizeBytes,
+		&i.DumpBytes,
+		&i.ImportMs,
+		&i.CountMs,
+		&i.Tables,
+		&i.Objects,
+		&i.Differences,
+		&i.Message,
+		&i.JobID,
+		&i.RequestedBy,
+		&i.Stage,
+		&i.Accounts,
+		&i.Force,
+		&i.TargetAddress,
+		&i.CopiedAt,
+		&i.SwitchedAt,
+		&i.Locked,
+		&i.RetireJobID,
+		&i.RetiredAt,
+		&i.RetireNode,
+		&i.RetireFile,
+		&i.RetireBytes,
+		&i.RetireMessage,
+	)
+	return i, err
+}
+
 const switchDBMigration = `-- name: SwitchDBMigration :one
 UPDATE db_migrations
 SET stage = 'done', status = 'ok', switched_at = $1, finished_at = $1, locked = $2, message = $3
 WHERE id = $4 AND stage = 'copied' AND status = 'running'
-RETURNING id, kind, component_id, cluster_id, source_key, source_name, source_node, source_address, database, target_database, target_node, status, started_at, finished_at, size_bytes, dump_bytes, import_ms, count_ms, tables, objects, differences, message, job_id, requested_by, stage, accounts, force, target_address, copied_at, switched_at, locked
+RETURNING id, kind, component_id, cluster_id, source_key, source_name, source_node, source_address, database, target_database, target_node, status, started_at, finished_at, size_bytes, dump_bytes, import_ms, count_ms, tables, objects, differences, message, job_id, requested_by, stage, accounts, force, target_address, copied_at, switched_at, locked, retire_job_id, retired_at, retire_node, retire_file, retire_bytes, retire_message
 `
 
 type SwitchDBMigrationParams struct {
@@ -691,6 +1030,12 @@ func (q *Queries) SwitchDBMigration(ctx context.Context, arg SwitchDBMigrationPa
 		&i.CopiedAt,
 		&i.SwitchedAt,
 		&i.Locked,
+		&i.RetireJobID,
+		&i.RetiredAt,
+		&i.RetireNode,
+		&i.RetireFile,
+		&i.RetireBytes,
+		&i.RetireMessage,
 	)
 	return i, err
 }

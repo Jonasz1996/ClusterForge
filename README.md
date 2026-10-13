@@ -85,6 +85,7 @@ Het technisch ontwerp staat in [docs/design/mvp-fase-1.md](docs/design/mvp-fase-
 | 11. Beheer | **Beheer…** op de kaart Database toont per node de toestand en wat er kan, met de reden als het niet kan en wat er gebeurt als je het doet. Bij Galera **Opnieuw synchroniseren**: de node gooit zijn positie weg en haalt alle data opnieuw bij een node die Synced is; niet op de enige node die Synced is. Bij Patroni **Primary maken**, alleen voor de synchrone replica zodat er niets verloren gaat, met het VIP mee, en **Opnieuw opbouwen** van een replica met `pg_basebackup`. **Onderhoud en herstarten** van een node met een database: is hij de primary van Patroni, dan schakelt ClusterForge eerst over; na de herstart of het onderhoud wacht de taak tot de node weer meedoet; zou de database stoppen, haar meerderheid in etcd verliezen of het VIP geen node hebben, dan vraagt ClusterForge eerst of je toch door wilt (agentprotocol 12). Getest met echte Patroni en etcd. **Instellingen…** (zoals de buffer pool, shared buffers en max_connections) wordt een nieuwe revisie die node voor node toegepast wordt, de schrijver als laatste; bij Patroni komt max_connections in etcd en herstart PostgreSQL node voor node, de primary als laatste. **Bijwerken…** werkt MariaDB of PostgreSQL node voor node bij binnen de versie van Debian, zoals 11.8.3 naar 11.8.4: apt-get update, alleen de pakketten van de database, en een herstart alleen waar iets veranderde; voor de primary schakelt ClusterForge eerst over. **Node toevoegen…** brengt de database naar een nieuwe node van het cluster, ook een CT die je zelf maakte: Galera haalt de data met SST, Patroni maakt de node lid van etcd en een replica; de nodes die er al zijn, herstarten niet. Getest met een echte vierde node van Galera, Patroni en etcd | klaar |
 | 12. Status, incidenten en grafieken | ClusterForge bewaakt nu ook PostgreSQL met Patroni om de 20 seconden. De database telt mee in de status van het cluster: down zonder Primary component of primary, of als het VIP op een node staat waar de database niet kan schrijven; verminderd als een node niet meedoet of niet Synced is, een replica meer dan 30 seconden achterloopt of de scheidsrechter weg is. Zo'n overgang geeft een incident. In het logboek en in What Broke komen een herstart van MariaDB of PostgreSQL, een failover van Patroni en een state transfer van Galera met de donor. **Grafieken** op de kaart Database: verbindingen, query's of transacties per seconde, de buffer pool of cache-hits, de wachtrij en flow control van Galera, de achterstand van de replica's en de grootte per database, met een lijn per node (agentprotocol 13) | klaar |
 | 13. Failovertests met database | Een nieuw scenario van de failovertest, **de database stoppen**, op het VIP van een onderdeel Database: ClusterForge stopt MariaDB of Patroni op de node met het VIP en meet hoe snel een andere node overneemt. Bij elke test die een database raakt (haar VIP verplaatsen, of een datanode uitzetten) schrijft een andere datanode elke halve seconde een rij via het VIP in een eigen kleine database `clusterforge_probe` (agentprotocol 14). Het rapport zegt hoe lang schrijven niet lukte en of er een bevestigde rij verloren ging, zoals 'schrijven via 10.0.20.185 lukte weer na 9 s, er ging niets verloren'; een verloren rij is altijd FAIL. Daarna wacht de test tot de database weer gezond is. Een database die ClusterForge niet beheert, houdt een cluster nog steeds buiten de failovertest. De test **[alles herstarten](#alles-herstarten)** herstart alle nodes van de database tegelijk, zoals na een stroomonderbreking, en meet hoe lang het duurt tot ze weer gezond is; bij Galera begint ClusterForge het cluster opnieuw zoals de bewaking, en daarna kijkt de agent na of elke rij die de database voor de herstart bevestigde er nog is (agentprotocol 15). Mag ook op prod, met de hand. De [wat-als](#wat-als) kent de meerderheid van Galera en etcd: 'zonder nc2 en nc3 is er geen meerderheid (1 van de 3 leden), dus MariaDB stopt', en dan zijn ook Nextcloud en het cluster down | klaar |
+| 14. Het oude cluster afbouwen | Een verhuisde database blijft op slot op het oude cluster staan. Zeven dagen nadat niemand van buiten de databasenode er nog mee verbond, kan **[Oude database afbouwen](#het-oude-cluster-afbouwen)**: een laatste dump op een node van het oude cluster, die blijft staan tot je hem weghaalt, en daarna de database en de gebruikers die niets anders hebben weghalen, met de naam ter bevestiging (op prod ook de slug en tweestapsverificatie). Bovenaan de pagina Databases staat per oude server wat er nog op staat, met de melding als db1 tot db3 leeg zijn, en welke firewallregel van een app naar het oude cluster weg kan. ClusterForge verwijdert geen nodes en beheert de firewall niet. Getest met een echte MariaDB 10.11 en PostgreSQL 16 | klaar |
 
 ## Draaien met Docker Compose
 
@@ -1050,7 +1051,7 @@ De echte verhuizing zet de database onder dezelfde naam op het nieuwe cluster, m
 
 Zolang je niet overgeschakeld hebt, kan **Annuleren**: tik de naam van de database, en ClusterForge haalt de kopie en de nieuwe gebruikers weg. Dat kan niet meer als iemand de nieuwe database al gebruikt; schakel dan over.
 
-Na de verhuizing haalt **Slot eraf halen** het slot er weer af: de gebruikers krijgen hun rechten van vóór de verhuizing terug. Terug naar de oude database gaat zo: slot eraf en de app weer naar het oude adres wijzen. Wat de app sinds het overschakelen schreef, staat dan alleen in de nieuwe database. De oude database blijft staan tot je het oude cluster afbouwt.
+Na de verhuizing haalt **Slot eraf halen** het slot er weer af: de gebruikers krijgen hun rechten van vóór de verhuizing terug. Terug naar de oude database gaat zo: slot eraf en de app weer naar het oude adres wijzen. Wat de app sinds het overschakelen schreef, staat dan alleen in de nieuwe database. De oude database blijft staan tot je ze [afbouwt](#het-oude-cluster-afbouwen).
 
 In het logboek: `cluster.database_move_copied`, `cluster.database_move_failed`, `cluster.database_moved`, `cluster.database_move_cancelled`, `cluster.database_locked` en `cluster.database_unlocked`.
 
@@ -1093,6 +1094,36 @@ Met de hand op de oude server, om te zien of er nog een tijdelijke gebruiker sta
 ```sh
 sudo -u postgres psql -XAtc "SELECT rolname, rolvaliduntil FROM pg_roles WHERE rolname LIKE 'cf\_verhuizing\_%'"
 ```
+
+#### Het oude cluster afbouwen
+
+Een verhuisde database blijft op de oude server staan, op slot, zodat je terug kunt. Op de verhuispagina staat onder de verhuizing **Oude database afbouwen**, met de dag vanaf wanneer het kan.
+
+- **Zeven dagen stil.** Afbouwen kan zeven dagen na het overschakelen, of zeven dagen na de laatste verbinding met de oude database als die later kwam. Alleen verbindingen van buiten de databasenode tellen: een back-up of cronjob op db1 zelf houdt het niet tegen. Die toont de pagina wel; zet zo'n back-up stop, want na het afbouwen mislukt hij. ClusterForge leest de verbindingen elke minuut, dus een verbinding van een paar seconden kan het missen. Daarom blijft het slot die week op de oude database: een vergeten cronjob die er schrijft, krijgt een fout.
+- **Niemand verbonden.** Bij het starten en nog eens vlak voor het weghalen kijkt ClusterForge of er nu iemand met de oude database verbonden is, ook op de node zelf. Is dat zo, dan haalt het niets weg en zegt het wie.
+- **Een laatste dump.** Op een node van het oude cluster, in `/var/backups/clusterforge-db/<database>/`, gecontroleerd zoals de nachtelijke dump: compleet en met alle tabellen. Lukt de dump niet, dan stopt het afbouwen en blijft de database staan. De dump blijft staan tot je hem weghaalt, en is weg als je de node weghaalt. De pagina geeft het commando om hem te kopiëren:
+
+  ```sh
+  scp root@db1:/var/backups/clusterforge-db/nextcloud/nextcloud-20261020-140512.sql.zst .
+  ```
+
+- **Weghalen.** Tik de naam van de database, op prod ook de slug, met tweestapsverificatie. ClusterForge haalt de database weg en daarna de gebruikers die alleen die database hadden. Een gebruiker blijft staan als hij rechten heeft op alle databases of op een andere, of de laatste 30 dagen een andere database gebruikte; de taak zegt waarom. Bij PostgreSQL blijft ook een rol met SUPERUSER, CREATEROLE of REPLICATION staan. MariaDB laat bij `DROP DATABASE` de rechten op die database staan, dus wie blijft, houdt ze; de taak geeft de `REVOKE` om ze weg te halen:
+
+  ```sql
+  REVOKE ALL PRIVILEGES ON `nextcloud`.* FROM 'rapport'@'10.0.20.%';
+  ```
+
+Bovenaan de pagina **Databases** staat per oude server wat er nog op staat: wat nog niet verhuisd is, met een link om het te verhuizen, en wat op afbouwen wacht. Staat er geen database van een app meer op, dan zegt ClusterForge dat db1, db2 en db3 leeg zijn. De CT's of VM's weghalen doe je in Proxmox; ClusterForge verwijdert geen nodes. Gaf een server geen lijst met databases, dan zegt ClusterForge niet dat hij leeg is.
+
+Daar staan ook de **firewallregels** van elke app naar de oude servers, zoals Nextcloud naar 10.0.20.180:3306, afgeleid uit de verbindingen die ClusterForge zag:
+
+- **kan weg**: alles van die app is afgebouwd en ze verbond na het overschakelen niet meer;
+- **nodig tot het afbouwen**: met de regel kan de app nog terug naar de oude database;
+- **nog in gebruik**: een node van de app verbond na het overschakelen nog met de oude servers. Dan wijst er nog iets naar het oude adres, zoals een tweede `config.php` of een cronjob.
+
+De firewall zelf beheert ClusterForge niet; een regel die weg kan, haal je daar weg.
+
+In het logboek: `cluster.database_retired`, met de dump, de gebruikers die weggingen en of de oude server nu leeg is.
 
 ### Hoe ClusterForge de databases leest
 

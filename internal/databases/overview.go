@@ -51,6 +51,9 @@ type Group struct {
 	Databases      []Database
 	DatabasesFrom  string
 	DatabasesTotal int
+	// Clients zijn wie de laatste ClientWindow met een server van de groep
+	// verbonden was, met welke database ook, ook een die er niet meer is.
+	Clients []User
 }
 
 // Key is uniek per groep: engine/<cluster> of engine/node/<node> voor een
@@ -182,11 +185,14 @@ func (s *Service) Overview(ctx context.Context) ([]Group, error) {
 		}
 		// De clients van alle servers van de groep, per database.
 		perDB := map[string][]store.DbClient{}
+		var all []store.DbClient
 		for _, c := range clients {
 			if c.Engine == g.Engine && slices.ContainsFunc(g.Servers, func(s Server) bool { return s.NodeID == c.NodeID }) {
 				perDB[c.DbName] = append(perDB[c.DbName], c)
+				all = append(all, c)
 			}
 		}
+		g.Clients = w.users(g, all)
 		for j := range g.Databases {
 			d := &g.Databases[j]
 			d.Users = w.users(g, perDB[d.Name])
