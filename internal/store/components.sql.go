@@ -37,7 +37,7 @@ func (q *Queries) DeleteSecretsWithPrefix(ctx context.Context, arg DeleteSecrets
 }
 
 const getClusterComponent = `-- name: GetClusterComponent :one
-SELECT id, cluster_id, engine, spec, revision, applied_revision, job_id, created_at, updated_at, auto_recover, down_since, down_reason, nodes_out, auto_recovered_at, recover_job_id, backup_on, backup_at, backup_keep_days, backup_next_at FROM cluster_components WHERE id = $1
+SELECT id, cluster_id, engine, spec, revision, applied_revision, job_id, created_at, updated_at, auto_recover, down_since, down_reason, nodes_out, auto_recovered_at, recover_job_id, backup_on, backup_at, backup_keep_days, backup_next_at, health, health_reason, health_at, observed FROM cluster_components WHERE id = $1
 `
 
 func (q *Queries) GetClusterComponent(ctx context.Context, id uuid.UUID) (ClusterComponent, error) {
@@ -63,6 +63,10 @@ func (q *Queries) GetClusterComponent(ctx context.Context, id uuid.UUID) (Cluste
 		&i.BackupAt,
 		&i.BackupKeepDays,
 		&i.BackupNextAt,
+		&i.Health,
+		&i.HealthReason,
+		&i.HealthAt,
+		&i.Observed,
 	)
 	return i, err
 }
@@ -92,7 +96,7 @@ func (q *Queries) GetClusterComponentRevision(ctx context.Context, arg GetCluste
 const insertClusterComponent = `-- name: InsertClusterComponent :one
 INSERT INTO cluster_components (cluster_id, engine, spec)
 VALUES ($1, $2, $3)
-RETURNING id, cluster_id, engine, spec, revision, applied_revision, job_id, created_at, updated_at, auto_recover, down_since, down_reason, nodes_out, auto_recovered_at, recover_job_id, backup_on, backup_at, backup_keep_days, backup_next_at
+RETURNING id, cluster_id, engine, spec, revision, applied_revision, job_id, created_at, updated_at, auto_recover, down_since, down_reason, nodes_out, auto_recovered_at, recover_job_id, backup_on, backup_at, backup_keep_days, backup_next_at, health, health_reason, health_at, observed
 `
 
 type InsertClusterComponentParams struct {
@@ -124,6 +128,10 @@ func (q *Queries) InsertClusterComponent(ctx context.Context, arg InsertClusterC
 		&i.BackupAt,
 		&i.BackupKeepDays,
 		&i.BackupNextAt,
+		&i.Health,
+		&i.HealthReason,
+		&i.HealthAt,
+		&i.Observed,
 	)
 	return i, err
 }
@@ -151,7 +159,7 @@ func (q *Queries) InsertClusterComponentRevision(ctx context.Context, arg Insert
 }
 
 const listClusterComponents = `-- name: ListClusterComponents :many
-SELECT cc.id, cc.cluster_id, cc.engine, cc.spec, cc.revision, cc.applied_revision, cc.job_id, cc.created_at, cc.updated_at, cc.auto_recover, cc.down_since, cc.down_reason, cc.nodes_out, cc.auto_recovered_at, cc.recover_job_id, cc.backup_on, cc.backup_at, cc.backup_keep_days, cc.backup_next_at, j.status AS job_status, j.error AS job_error, j.finished_at AS job_finished_at,
+SELECT cc.id, cc.cluster_id, cc.engine, cc.spec, cc.revision, cc.applied_revision, cc.job_id, cc.created_at, cc.updated_at, cc.auto_recover, cc.down_since, cc.down_reason, cc.nodes_out, cc.auto_recovered_at, cc.recover_job_id, cc.backup_on, cc.backup_at, cc.backup_keep_days, cc.backup_next_at, cc.health, cc.health_reason, cc.health_at, cc.observed, j.status AS job_status, j.error AS job_error, j.finished_at AS job_finished_at,
        rj.status AS recover_status, rj.error AS recover_error
 FROM cluster_components cc
 LEFT JOIN jobs j ON j.id = cc.job_id
@@ -199,6 +207,10 @@ func (q *Queries) ListClusterComponents(ctx context.Context, clusterID uuid.UUID
 			&i.ClusterComponent.BackupAt,
 			&i.ClusterComponent.BackupKeepDays,
 			&i.ClusterComponent.BackupNextAt,
+			&i.ClusterComponent.Health,
+			&i.ClusterComponent.HealthReason,
+			&i.ClusterComponent.HealthAt,
+			&i.ClusterComponent.Observed,
 			&i.JobStatus,
 			&i.JobError,
 			&i.JobFinishedAt,
@@ -279,6 +291,47 @@ func (q *Queries) ListComponentCandidates(ctx context.Context, clusterID *uuid.U
 	return items, nil
 }
 
+const listComponentHealth = `-- name: ListComponentHealth :many
+SELECT cluster_id, engine, health, health_reason, health_at
+FROM cluster_components
+WHERE applied_revision IS NOT NULL AND health_at IS NOT NULL
+`
+
+type ListComponentHealthRow struct {
+	ClusterID    uuid.UUID
+	Engine       string
+	Health       string
+	HealthReason string
+	HealthAt     *time.Time
+}
+
+// De toestand van de databases, voor de status van de clusters.
+func (q *Queries) ListComponentHealth(ctx context.Context) ([]ListComponentHealthRow, error) {
+	rows, err := q.db.Query(ctx, listComponentHealth)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListComponentHealthRow{}
+	for rows.Next() {
+		var i ListComponentHealthRow
+		if err := rows.Scan(
+			&i.ClusterID,
+			&i.Engine,
+			&i.Health,
+			&i.HealthReason,
+			&i.HealthAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listDBComponents = `-- name: ListDBComponents :many
 SELECT cc.id, cc.cluster_id, c.name AS cluster_name
 FROM cluster_components cc
@@ -316,7 +369,7 @@ func (q *Queries) ListDBComponents(ctx context.Context, engine string) ([]ListDB
 }
 
 const listNodeComponents = `-- name: ListNodeComponents :many
-SELECT cc.id, cc.cluster_id, cc.engine, cc.spec, cc.revision, cc.applied_revision, cc.job_id, cc.created_at, cc.updated_at, cc.auto_recover, cc.down_since, cc.down_reason, cc.nodes_out, cc.auto_recovered_at, cc.recover_job_id, cc.backup_on, cc.backup_at, cc.backup_keep_days, cc.backup_next_at
+SELECT cc.id, cc.cluster_id, cc.engine, cc.spec, cc.revision, cc.applied_revision, cc.job_id, cc.created_at, cc.updated_at, cc.auto_recover, cc.down_since, cc.down_reason, cc.nodes_out, cc.auto_recovered_at, cc.recover_job_id, cc.backup_on, cc.backup_at, cc.backup_keep_days, cc.backup_next_at, cc.health, cc.health_reason, cc.health_at, cc.observed
 FROM cluster_components cc
 WHERE cc.applied_revision IS NOT NULL
   AND EXISTS (SELECT 1 FROM jsonb_array_elements(cc.spec -> 'nodes') e WHERE e ->> 'node_id' = $1::uuid::text)
@@ -353,6 +406,10 @@ func (q *Queries) ListNodeComponents(ctx context.Context, nodeID uuid.UUID) ([]C
 			&i.BackupAt,
 			&i.BackupKeepDays,
 			&i.BackupNextAt,
+			&i.Health,
+			&i.HealthReason,
+			&i.HealthAt,
+			&i.Observed,
 		); err != nil {
 			return nil, err
 		}
@@ -365,11 +422,11 @@ func (q *Queries) ListNodeComponents(ctx context.Context, nodeID uuid.UUID) ([]C
 }
 
 const listWatchedComponents = `-- name: ListWatchedComponents :many
-SELECT cc.id, cc.cluster_id, cc.engine, cc.spec, cc.revision, cc.applied_revision, cc.job_id, cc.created_at, cc.updated_at, cc.auto_recover, cc.down_since, cc.down_reason, cc.nodes_out, cc.auto_recovered_at, cc.recover_job_id, cc.backup_on, cc.backup_at, cc.backup_keep_days, cc.backup_next_at, c.name AS cluster_name, c.slug AS cluster_slug
+SELECT cc.id, cc.cluster_id, cc.engine, cc.spec, cc.revision, cc.applied_revision, cc.job_id, cc.created_at, cc.updated_at, cc.auto_recover, cc.down_since, cc.down_reason, cc.nodes_out, cc.auto_recovered_at, cc.recover_job_id, cc.backup_on, cc.backup_at, cc.backup_keep_days, cc.backup_next_at, cc.health, cc.health_reason, cc.health_at, cc.observed, c.name AS cluster_name, c.slug AS cluster_slug
 FROM cluster_components cc
 JOIN clusters c ON c.id = cc.cluster_id
-WHERE cc.applied_revision IS NOT NULL AND cc.engine = 'mariadb'
-ORDER BY c.name
+WHERE cc.applied_revision IS NOT NULL
+ORDER BY c.name, cc.engine
 `
 
 type ListWatchedComponentsRow struct {
@@ -392,11 +449,15 @@ type ListWatchedComponentsRow struct {
 	BackupAt        string
 	BackupKeepDays  int32
 	BackupNextAt    *time.Time
+	Health          string
+	HealthReason    string
+	HealthAt        *time.Time
+	Observed        []byte
 	ClusterName     string
 	ClusterSlug     string
 }
 
-// De toegepaste onderdelen met MariaDB, voor de bewaking.
+// De toegepaste onderdelen, voor de bewaking.
 func (q *Queries) ListWatchedComponents(ctx context.Context) ([]ListWatchedComponentsRow, error) {
 	rows, err := q.db.Query(ctx, listWatchedComponents)
 	if err != nil {
@@ -426,6 +487,10 @@ func (q *Queries) ListWatchedComponents(ctx context.Context) ([]ListWatchedCompo
 			&i.BackupAt,
 			&i.BackupKeepDays,
 			&i.BackupNextAt,
+			&i.Health,
+			&i.HealthReason,
+			&i.HealthAt,
+			&i.Observed,
 			&i.ClusterName,
 			&i.ClusterSlug,
 		); err != nil {
@@ -440,7 +505,7 @@ func (q *Queries) ListWatchedComponents(ctx context.Context) ([]ListWatchedCompo
 }
 
 const lockClusterComponent = `-- name: LockClusterComponent :one
-SELECT id, cluster_id, engine, spec, revision, applied_revision, job_id, created_at, updated_at, auto_recover, down_since, down_reason, nodes_out, auto_recovered_at, recover_job_id, backup_on, backup_at, backup_keep_days, backup_next_at FROM cluster_components WHERE id = $1 FOR UPDATE
+SELECT id, cluster_id, engine, spec, revision, applied_revision, job_id, created_at, updated_at, auto_recover, down_since, down_reason, nodes_out, auto_recovered_at, recover_job_id, backup_on, backup_at, backup_keep_days, backup_next_at, health, health_reason, health_at, observed FROM cluster_components WHERE id = $1 FOR UPDATE
 `
 
 func (q *Queries) LockClusterComponent(ctx context.Context, id uuid.UUID) (ClusterComponent, error) {
@@ -466,6 +531,10 @@ func (q *Queries) LockClusterComponent(ctx context.Context, id uuid.UUID) (Clust
 		&i.BackupAt,
 		&i.BackupKeepDays,
 		&i.BackupNextAt,
+		&i.Health,
+		&i.HealthReason,
+		&i.HealthAt,
+		&i.Observed,
 	)
 	return i, err
 }
@@ -576,5 +645,32 @@ type SetClusterComponentSpecParams struct {
 // Een nieuwe revisie van de spec, zoals andere instellingen.
 func (q *Queries) SetClusterComponentSpec(ctx context.Context, arg SetClusterComponentSpecParams) error {
 	_, err := q.db.Exec(ctx, setClusterComponentSpec, arg.Spec, arg.Revision, arg.ID)
+	return err
+}
+
+const setClusterComponentWatch = `-- name: SetClusterComponentWatch :exec
+UPDATE cluster_components
+SET health = $1, health_reason = $2, health_at = $3, observed = $4
+WHERE id = $5
+`
+
+type SetClusterComponentWatchParams struct {
+	Health       string
+	HealthReason string
+	HealthAt     *time.Time
+	Observed     []byte
+	ID           uuid.UUID
+}
+
+// Wat de bewaking zag: de toestand van de database en wat ze onthoudt
+// voor de volgende keer.
+func (q *Queries) SetClusterComponentWatch(ctx context.Context, arg SetClusterComponentWatchParams) error {
+	_, err := q.db.Exec(ctx, setClusterComponentWatch,
+		arg.Health,
+		arg.HealthReason,
+		arg.HealthAt,
+		arg.Observed,
+		arg.ID,
+	)
 	return err
 }

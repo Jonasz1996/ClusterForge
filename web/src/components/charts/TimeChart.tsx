@@ -44,6 +44,12 @@ export function formatValue(v: number, unit: Unit) {
       return formatCPU(v);
     case "bytes":
       return formatBytes(v);
+    case "per_second":
+      return `${v.toLocaleString("nl-BE", { maximumFractionDigits: v < 10 ? 1 : 0 })}/s`;
+    case "seconds":
+      return `${v.toLocaleString("nl-BE", { maximumFractionDigits: v < 10 ? 1 : 0 })} s`;
+    case "count":
+      return v.toLocaleString("nl-BE", { maximumFractionDigits: v < 10 ? 1 : 0 });
     default:
       return v.toLocaleString("nl-BE", { maximumFractionDigits: 2 });
   }

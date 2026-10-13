@@ -500,6 +500,10 @@ type ClusterComponent struct {
 	BackupAt        string
 	BackupKeepDays  int32
 	BackupNextAt    *time.Time
+	Health          string
+	HealthReason    string
+	HealthAt        *time.Time
+	Observed        []byte
 }
 
 type ClusterComponentRevision struct {

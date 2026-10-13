@@ -51,6 +51,7 @@ func (a *Agent) dbPosition(ctx context.Context, req *protocol.DBPositionRequest)
 		st := keyValues(rows)
 		p.Galera = galeraOf(vars, st)
 		p.UUID = st["wsrep_cluster_state_uuid"]
+		p.UptimeSeconds, _ = strconv.ParseInt(st["uptime"], 10, 64)
 		if n, err := strconv.ParseInt(st["wsrep_last_committed"], 10, 64); err == nil {
 			p.Seqno = n
 		}

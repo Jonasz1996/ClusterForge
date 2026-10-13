@@ -361,6 +361,20 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 		return fmt.Sprintf("%s doet niet mee in %s van cluster %s", str(p, "hostname"), str(p, "component"), name) + colon(str(p, "reason"))
 	case "cluster.database_node_back":
 		return fmt.Sprintf("%s doet weer mee in %s van cluster %s", str(p, "hostname"), str(p, "component"), name)
+	case "cluster.database_restarted":
+		s := fmt.Sprintf("%s op %s herstartte (%s van cluster %s)", str(p, "server"), str(p, "hostname"), str(p, "component"), name)
+		if secs, ok := p["uptime"].(float64); ok {
+			s += "; draait nu " + duration(time.Duration(secs)*time.Second)
+		}
+		return s
+	case "cluster.database_failover":
+		return fmt.Sprintf("Failover in %s van cluster %s: %s is nu de primary in plaats van %s", str(p, "component"), name, str(p, "to"), str(p, "from"))
+	case "cluster.database_state_transfer":
+		s := fmt.Sprintf("%s sluit opnieuw aan bij %s van cluster %s en haalt de data die hij mist bij een andere node", str(p, "hostname"), str(p, "component"), name)
+		if d := list(p["donors"]); d != "" {
+			s = fmt.Sprintf("%s sluit opnieuw aan bij %s van cluster %s en haalt de data die hij mist bij %s", str(p, "hostname"), str(p, "component"), name, d)
+		}
+		return s + " (state transfer)"
 	case "cluster.database_recovering":
 		s := fmt.Sprintf("%s van cluster %s opnieuw gestart", str(p, "component"), name)
 		if p["auto"] == true {

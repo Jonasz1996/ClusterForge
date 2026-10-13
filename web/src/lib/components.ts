@@ -40,6 +40,31 @@ export const stateInfo: Record<string, { label: string; tone: Tone }> = {
 
 export const roleLabel: Record<string, string> = { data: "data", arbiter: "scheidsrechter" };
 
+// healthInfo is wat de bewaking laatst zag; leeg toont niets.
+export const healthInfo: Record<string, { label: string; tone: Tone }> = {
+  healthy: { label: "Gezond", tone: "green" },
+  degraded: { label: "Verminderd", tone: "amber" },
+  down: { label: "Down", tone: "red" },
+};
+
+// useComponentMetrics haalt de grafieken van een database, met een lijn per
+// datanode.
+export function useComponentMetrics(clusterId: string, componentId: string, range: components["schemas"]["MetricsRange"]) {
+  return useQuery({
+    queryKey: ["clusters", clusterId, "components", componentId, "metrics", range],
+    queryFn: async () =>
+      unwrap(
+        await api.GET("/clusters/{clusterId}/components/{componentId}/metrics", {
+          params: { path: { clusterId, componentId }, query: { range } },
+        }),
+      ),
+    enabled: clusterId !== "",
+    refetchInterval: 30_000,
+    placeholderData: keepPreviousData,
+    retry: false,
+  });
+}
+
 export function useComponentTemplates() {
   return useQuery({
     queryKey: ["component-templates"],

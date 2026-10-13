@@ -26,6 +26,12 @@ const DBPGMigrateSince = 11
 // de instellingen van PostgreSQL in etcd.
 const DBPatroniSince = 12
 
+// DBMetricsSince is de eerste protocolversie die metingen van MariaDB en
+// PostgreSQL meestuurt (node_db_*), een snelle DBStatus kent (Quick) en de
+// uptime van MariaDB in DBPosition zet. Een oudere agent stuurt geen
+// metingen en geeft bij Quick de hele status.
+const DBMetricsSince = 13
+
 // SubjectDB draagt de databaseverzoeken: cf.node.<id>.db. Net als de
 // kube-brug is het een eigen subject, zodat een trage database de
 // commando's op cmd niet ophoudt.
@@ -296,6 +302,9 @@ type DBRequest struct {
 	Migrate *DBMigrateRequest `json:"migrate,omitempty"`
 	// Patroni hoort bij DBPatroniOp.
 	Patroni *DBPatroniRequest `json:"patroni,omitempty"`
+	// Quick hoort bij DBStatus: zonder de databases en de clients, voor de
+	// bewaking.
+	Quick bool `json:"quick,omitempty"`
 }
 
 // DBMigrateRequest zegt wat een DBMigrate doet.
@@ -618,6 +627,9 @@ type DBPositionResult struct {
 	UUID            string `json:"uuid"`
 	Seqno           int64  `json:"seqno"`
 	SafeToBootstrap bool   `json:"safe_to_bootstrap"`
+	// UptimeSeconds is hoe lang MariaDB draait; 0 als hij niet draait of
+	// bij een agent ouder dan DBMetricsSince.
+	UptimeSeconds int64 `json:"uptime_seconds,omitempty"`
 	// From is DBFromRunning, DBFromGrastate of DBFromRecovery.
 	From  string `json:"from,omitempty"`
 	Error string `json:"error,omitempty"`

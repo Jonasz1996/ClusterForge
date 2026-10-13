@@ -3,12 +3,14 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { MetricsView } from "@/components/charts/MetricsPanels";
 import { JoinDialog, SettingsDialog, UpgradeDialog } from "@/components/databases/ComponentChanges";
 import { Modal } from "@/components/Modal";
 import { ProdConfirm, prodConfirmed, useProdTotp } from "@/components/ProdConfirm";
 import { QueryState, formatBytes, tableClass, tdClass, thClass } from "@/components/inventory/bits";
 import { Alert, Badge, Button, Card } from "@/components/ui";
 import {
+  healthInfo,
   positionFrom,
   recoverAction,
   recovering,
@@ -17,6 +19,7 @@ import {
   stateInfo,
   useClusterComponents,
   useComponentManage,
+  useComponentMetrics,
   useComponentTemplates,
   useManageComponent,
   useReapplyComponent,
@@ -28,7 +31,7 @@ import {
   type ComponentManageAction,
   type ComponentManageNode,
 } from "@/lib/components";
-import type { ClusterDetail } from "@/lib/inventory";
+import type { ClusterDetail, MetricsRange } from "@/lib/inventory";
 
 // ClusterDatabaseCard toont de databases die ClusterForge op de nodes van
 // dit cluster zette, en de knop om er een toe te voegen zolang er een soort
@@ -82,6 +85,7 @@ function Component({ c, comp, isAdmin }: { c: ClusterDetail; comp: ClusterCompon
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [upgrade, setUpgrade] = useState(false);
   const [joinOpen, setJoinOpen] = useState(false);
+  const [charts, setCharts] = useState(false);
   const remove = useRemoveComponent(c.id);
   const auto = useSetAutoRecover(c.id);
   const rec = recovering(comp);
@@ -94,12 +98,17 @@ function Component({ c, comp, isAdmin }: { c: ClusterDetail; comp: ClusterCompon
   // Bij PostgreSQL start Patroni de nodes zelf opnieuw; Beheer kan wel
   // overschakelen en een replica opnieuw opbouwen.
   const pg = comp.engine === "postgresql";
+  const health = applied && !busy && !rec ? healthInfo[comp.health] : undefined;
+  // De reden begint met de naam van de database, zoals in de status van
+  // het cluster; hier staat die naam er al boven.
+  const healthReason = comp.health_reason.replace(`${comp.title}: `, "");
   return (
     <div className="space-y-3 text-sm">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="flex flex-wrap items-center gap-2">
           <span className="font-medium">{comp.title}</span>
           <Badge tone={st.tone}>{st.label}</Badge>
+          {health && <Badge tone={health.tone}>{health.label}</Badge>}
           <span className="text-slate-500">
             revisie {comp.revision}
             {comp.applied_revision !== null && comp.applied_revision !== comp.revision && `, toegepast ${comp.applied_revision}`}
@@ -107,6 +116,11 @@ function Component({ c, comp, isAdmin }: { c: ClusterDetail; comp: ClusterCompon
         </span>
         {(isAdmin || applied) && (
           <span className="flex flex-wrap gap-2">
+            {applied && (
+              <Button variant="secondary" aria-expanded={charts} onClick={() => setCharts(!charts)}>
+                {charts ? "Grafieken verbergen" : "Grafieken"}
+              </Button>
+            )}
             {applied && (
               <Link href={`/clusters/databases?id=${c.id}&component=${comp.id}`}>
                 <Button variant="secondary">Databases en gebruikers</Button>
@@ -153,10 +167,20 @@ function Component({ c, comp, isAdmin }: { c: ClusterDetail; comp: ClusterCompon
       {comp.down_since !== null && !rec && (
         <Alert>
           De database draait niet sinds {sinceFmt.format(new Date(comp.down_since))}: {comp.down_reason}.{" "}
-          {comp.auto_recover
-            ? "ClusterForge start haar vanzelf opnieuw op de node met de nieuwste data, zodra alle datanodes antwoorden en MariaDB nergens meer start. Ontbreekt er een node, kies dan zelf Opnieuw starten."
-            : "Vanzelf opnieuw starten staat uit; kies Opnieuw starten."}
+          {pg
+            ? "Patroni maakt vanzelf een primary zodra een meerderheid van etcd er is en een replica de laatste data heeft. Kijk met Beheer welke nodes antwoorden."
+            : comp.auto_recover
+              ? "ClusterForge start haar vanzelf opnieuw op de node met de nieuwste data, zodra alle datanodes antwoorden en MariaDB nergens meer start. Ontbreekt er een node, kies dan zelf Opnieuw starten."
+              : "Vanzelf opnieuw starten staat uit; kies Opnieuw starten."}
         </Alert>
+      )}
+      {comp.health === "down" && comp.down_since === null && !rec && !busy && (
+        <Alert>De app kan niet bij de database: {healthReason}. Dit telt als down in de status van het cluster.</Alert>
+      )}
+      {comp.health === "degraded" && !rec && !busy && (
+        <p className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
+          Verminderd: {healthReason}. De database draait nog, maar het cluster staat daardoor op verminderd, met een incident.
+        </p>
       )}
       {comp.recovery && rec && (
         <Alert kind="info">
@@ -202,7 +226,7 @@ function Component({ c, comp, isAdmin }: { c: ClusterDetail; comp: ClusterCompon
             <tr>
               <th className={thClass}>Node</th>
               <th className={thClass}>Rol</th>
-              {applied && !pg && <th className={thClass}>Doet mee</th>}
+              {applied && <th className={thClass}>Doet mee</th>}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -216,7 +240,7 @@ function Component({ c, comp, isAdmin }: { c: ClusterDetail; comp: ClusterCompon
                     </Link>
                   </td>
                   <td className={tdClass}>{roleLabel[n.role] ?? n.role}</td>
-                  {applied && !pg && (
+                  {applied && (
                     <td className={tdClass}>
                       {n.role !== "data" || comp.down_since !== null ? (
                         <span className="text-slate-500">–</span>
@@ -281,12 +305,31 @@ function Component({ c, comp, isAdmin }: { c: ClusterDetail; comp: ClusterCompon
         </label>
       )}
       {auto.isError && <Alert>{auto.error.message}</Alert>}
+      {charts && <ComponentMetrics clusterId={c.id} comp={comp} />}
       {reapply && <ReapplyDialog c={c} comp={comp} onClose={() => setReapply(false)} />}
       {recover && <RecoverDialog c={c} comp={comp} onClose={() => setRecover(false)} />}
       {manage && <ManageDialog c={c} comp={comp} onClose={() => setManage(false)} />}
       {settingsOpen && <SettingsDialog c={c} comp={comp} onClose={() => setSettingsOpen(false)} />}
       {upgrade && <UpgradeDialog c={c} comp={comp} onClose={() => setUpgrade(false)} />}
       {joinOpen && <JoinDialog c={c} comp={comp} onClose={() => setJoinOpen(false)} />}
+    </div>
+  );
+}
+
+// ComponentMetrics toont de grafieken van de database, met een lijn per
+// datanode en bij de query's het totaal van het cluster.
+function ComponentMetrics({ clusterId, comp }: { clusterId: string; comp: ClusterComponent }) {
+  const [range, setRange] = useState<MetricsRange>("1h");
+  const q = useComponentMetrics(clusterId, comp.id, range);
+  return (
+    <div className="border-t border-slate-100 pt-3 dark:border-slate-800">
+      <MetricsView
+        q={q}
+        range={range}
+        onRange={setRange}
+        title={`Grafieken van ${comp.title}`}
+        empty="Nog geen metingen. De agent meet de database elke 15 seconden vanaf protocol 13; werk een oudere agent bij met --upgrade."
+      />
     </div>
   );
 }

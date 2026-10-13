@@ -15,7 +15,7 @@ const (
 	// MariaPosition is waar een Galera-node staat: zijn toestand en de
 	// laatste transactie.
 	MariaPosition = "SHOW GLOBAL STATUS WHERE Variable_name IN ('wsrep_cluster_size', 'wsrep_cluster_status', " +
-		"'wsrep_cluster_state_uuid', 'wsrep_local_state', 'wsrep_local_state_comment', 'wsrep_ready', 'wsrep_last_committed')"
+		"'wsrep_cluster_state_uuid', 'wsrep_local_state', 'wsrep_local_state_comment', 'wsrep_ready', 'wsrep_last_committed', 'Uptime')"
 	// MariaSource is de replicatie van een replica, met kolomnamen.
 	MariaSource = "SHOW ALL SLAVES STATUS"
 	// MariaReplicas zijn de replica's die nu de binlog van deze server lezen.
@@ -31,6 +31,13 @@ const (
 	MariaClients = "SELECT USER, HOST, COALESCE(DB, '') FROM information_schema.PROCESSLIST " +
 		"WHERE ID <> CONNECTION_ID() AND COMMAND NOT IN ('Daemon', 'Binlog Dump', 'Binlog Dump GTID') " +
 		"AND USER NOT IN ('system user', 'event_scheduler', 'unauthenticated user')"
+	// MariaMetrics zijn de tellers voor de grafieken: verbindingen,
+	// query's, de buffer pool en bij Galera de wachtrij en flow control.
+	MariaMetrics = "SELECT LOWER(VARIABLE_NAME), VARIABLE_VALUE FROM information_schema.GLOBAL_STATUS WHERE VARIABLE_NAME IN " +
+		"('THREADS_CONNECTED', 'QUESTIONS', 'INNODB_BUFFER_POOL_BYTES_DATA', 'WSREP_LOCAL_RECV_QUEUE', " +
+		"'WSREP_FLOW_CONTROL_PAUSED_NS', 'WSREP_LOCAL_STATE', 'WSREP_CLUSTER_SIZE') UNION ALL " +
+		"SELECT LOWER(VARIABLE_NAME), VARIABLE_VALUE FROM information_schema.GLOBAL_VARIABLES WHERE VARIABLE_NAME IN " +
+		"('MAX_CONNECTIONS', 'INNODB_BUFFER_POOL_SIZE')"
 )
 
 // De gebruikers van MariaDB en hun rechten: alleen namen, hosts en
@@ -60,14 +67,24 @@ const (
 	// van PostgreSQL.
 	PGClients = "SELECT usename, coalesce(host(client_addr), ''), coalesce(datname, ''), count(*) FROM pg_stat_activity " +
 		"WHERE backend_type = 'client backend' AND pid <> pg_backend_pid() AND usename IS NOT NULL GROUP BY 1, 2, 3 ORDER BY 1, 2, 3"
+	// PGMetrics zijn de tellers voor de grafieken, in één rij: verbindingen,
+	// het maximum, transacties, blokken uit de cache en van schijf, de
+	// shared buffers in bytes, of het een replica is, en hoeveel seconden
+	// een replica achterloopt (-1 op de primary of als het niet te zeggen
+	// is).
+	PGMetrics = "SELECT (SELECT count(*) FROM pg_stat_activity WHERE backend_type = 'client backend'), current_setting('max_connections'), " +
+		"coalesce(sum(xact_commit + xact_rollback), 0), coalesce(sum(blks_hit), 0), coalesce(sum(blks_read), 0), " +
+		"(SELECT setting::bigint * pg_size_bytes(unit) FROM pg_settings WHERE name = 'shared_buffers'), pg_is_in_recovery(), " +
+		"CASE WHEN NOT pg_is_in_recovery() THEN -1 WHEN pg_last_wal_receive_lsn() = pg_last_wal_replay_lsn() THEN 0 " +
+		"ELSE coalesce(extract(epoch FROM now() - pg_last_xact_replay_timestamp()), -1) END::bigint FROM pg_stat_database"
 )
 
 // All zijn alle query's die de agent ooit uitvoert. Tests en de
 // nagespeelde databases in agenttest gebruiken de lijst.
 var All = []string{
-	MariaVariables, MariaStatus, MariaPosition, MariaSource, MariaReplicas, MariaDatabases, MariaClients,
+	MariaVariables, MariaStatus, MariaPosition, MariaSource, MariaReplicas, MariaDatabases, MariaClients, MariaMetrics,
 	MariaUsers, MariaUserGrants, MariaSchemaGrants,
-	PGInfo, PGDatabases, PGTables, PGReplicas, PGSource, PGClients,
+	PGInfo, PGDatabases, PGTables, PGReplicas, PGSource, PGClients, PGMetrics,
 	PGRoles, PGDatabaseGrants, PGDumpTables,
 }
 

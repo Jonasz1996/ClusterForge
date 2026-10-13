@@ -349,6 +349,18 @@ func TestDBStatusRealPostgres(t *testing.T) {
 	if !s.Running || s.Error != "" || s.Version == "" || s.Role != protocol.DBRoleStandalone || s.MaxConnections == 0 || s.UptimeSeconds <= 0 {
 		t.Errorf("server: %+v", s)
 	}
+	samples := a.dbMetrics(context.Background(), true)
+	if sizeMap(samples)[db] <= 0 {
+		t.Errorf("grootte van %s: %v", db, sizeMap(samples))
+	}
+	m := sampleMap(samples)
+	if m["node_db_up"] != 1 || m["node_db_connections"] < 1 || m["node_db_max_connections"] < 1 || m["node_db_transactions_total"] <= 0 ||
+		m["node_db_cache_hits_total"] <= 0 || m["node_db_buffer_pool_bytes"] < 128*1024 || m["node_db_primary"] != 1 {
+		t.Errorf("metingen: %v", m)
+	}
+	if _, ok := m["node_db_replication_lag_seconds"]; ok {
+		t.Errorf("achterstand op een primary: %v", m)
+	}
 	i := slices.IndexFunc(s.Databases, func(d protocol.DBDatabase) bool { return d.Name == db })
 	if i < 0 || s.Databases[i].Tables != 1 || s.Databases[i].SizeBytes <= 0 {
 		t.Errorf("databases: %+v", s.Databases)
@@ -399,6 +411,18 @@ func TestDBStatusRealMariaDB(t *testing.T) {
 	s := res.Servers[0]
 	if !s.Running || s.Error != "" || s.Version == "" || s.Role != protocol.DBRoleStandalone || s.Galera != nil || s.MaxConnections == 0 {
 		t.Errorf("server: %+v", s)
+	}
+	samples := a.dbMetrics(context.Background(), true)
+	if sizeMap(samples)[db] <= 0 {
+		t.Errorf("grootte van %s: %v", db, sizeMap(samples))
+	}
+	m := sampleMap(samples)
+	if m["node_db_up"] != 1 || m["node_db_connections"] < 1 || m["node_db_max_connections"] < 1 || m["node_db_queries_total"] <= 0 ||
+		m["node_db_buffer_pool_bytes"] < 1<<20 || m["node_db_buffer_pool_data_bytes"] <= 0 {
+		t.Errorf("metingen: %v", m)
+	}
+	if q := a.dbStatus(context.Background(), true); len(q.Servers) != 1 || !q.Servers[0].Running || len(q.Servers[0].Databases) != 0 {
+		t.Errorf("snelle status: %+v", q)
 	}
 	i := slices.IndexFunc(s.Databases, func(d protocol.DBDatabase) bool { return d.Name == db })
 	if i < 0 || s.Databases[i].Tables != 1 || s.Databases[i].SizeBytes <= 0 {

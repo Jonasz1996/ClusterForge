@@ -362,6 +362,7 @@ func (a *Agent) connsLoop(ctx context.Context, sample, every time.Duration) {
 func (a *Agent) metricsLoop(ctx context.Context, every time.Duration) {
 	t := time.NewTicker(every)
 	defer t.Stop()
+	var sizesAt time.Time
 	for {
 		select {
 		case <-ctx.Done():
@@ -371,7 +372,16 @@ func (a *Agent) metricsLoop(ctx context.Context, every time.Duration) {
 		if !a.nc.IsConnected() {
 			continue
 		}
-		if err := a.publish(protocol.SubjectMetrics, protocol.TypeMetrics, a.Collector.Metrics()); err != nil {
+		m := a.Collector.Metrics()
+		sizes := time.Since(sizesAt) >= dbSizesEvery
+		if sizes {
+			sizesAt = time.Now()
+		}
+		m.Samples = append(m.Samples, a.dbMetrics(ctx, sizes)...)
+		if len(m.Samples) > protocol.MaxSamples {
+			m.Samples = m.Samples[:protocol.MaxSamples]
+		}
+		if err := a.publish(protocol.SubjectMetrics, protocol.TypeMetrics, m); err != nil {
 			a.Log.Warn("metrics sturen mislukt", "err", err)
 		}
 	}

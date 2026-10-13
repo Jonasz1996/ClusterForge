@@ -198,6 +198,30 @@ func (e BaselineItemKind) Valid() bool {
 	}
 }
 
+// Defines values for ClusterComponentHealth.
+const (
+	ClusterComponentHealthDegraded ClusterComponentHealth = "degraded"
+	ClusterComponentHealthDown     ClusterComponentHealth = "down"
+	ClusterComponentHealthEmpty    ClusterComponentHealth = ""
+	ClusterComponentHealthHealthy  ClusterComponentHealth = "healthy"
+)
+
+// Valid indicates whether the value is a known member of the ClusterComponentHealth enum.
+func (e ClusterComponentHealth) Valid() bool {
+	switch e {
+	case ClusterComponentHealthDegraded:
+		return true
+	case ClusterComponentHealthDown:
+		return true
+	case ClusterComponentHealthEmpty:
+		return true
+	case ClusterComponentHealthHealthy:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ClusterDriftSummaryStatus.
 const (
 	ClusterDriftSummaryStatusDrift   ClusterDriftSummaryStatus = "drift"
@@ -1988,9 +2012,12 @@ const (
 	Bytes          MetricPanelUnit = "bytes"
 	BytesPerSecond MetricPanelUnit = "bytes_per_second"
 	Celsius        MetricPanelUnit = "celsius"
+	Count          MetricPanelUnit = "count"
 	Load           MetricPanelUnit = "load"
 	Millicores     MetricPanelUnit = "millicores"
+	PerSecond      MetricPanelUnit = "per_second"
 	Percent        MetricPanelUnit = "percent"
+	Seconds        MetricPanelUnit = "seconds"
 )
 
 // Valid indicates whether the value is a known member of the MetricPanelUnit enum.
@@ -2002,11 +2029,17 @@ func (e MetricPanelUnit) Valid() bool {
 		return true
 	case Celsius:
 		return true
+	case Count:
+		return true
 	case Load:
 		return true
 	case Millicores:
 		return true
+	case PerSecond:
+		return true
 	case Percent:
+		return true
+	case Seconds:
 		return true
 	default:
 		return false
@@ -3547,8 +3580,17 @@ type ClusterComponent struct {
 	DownSince nullable.Nullable[time.Time] `json:"down_since"`
 
 	// Engine mariadb of postgresql
-	Engine string             `json:"engine"`
-	Id     openapi_types.UUID `json:"id"`
+	Engine string `json:"engine"`
+
+	// Health Wat de bewaking laatst zag; leeg als ze nog niet keek of al twee minuten niet, zoals tijdens een taak. Telt mee in de status van het cluster
+	Health ClusterComponentHealth `json:"health"`
+
+	// HealthAt Wanneer de bewaking laatst keek
+	HealthAt nullable.Nullable[time.Time] `json:"health_at"`
+
+	// HealthReason Waarom verminderd of down, met de naam van de database ervoor
+	HealthReason string             `json:"health_reason"`
+	Id           openapi_types.UUID `json:"id"`
 
 	// JobError Waarom die taak mislukte
 	JobError string `json:"job_error"`
@@ -3579,6 +3621,9 @@ type ClusterComponent struct {
 	// Vip Het VIP van de app dat de database volgt; null zonder
 	Vip nullable.Nullable[ComponentVIP] `json:"vip"`
 }
+
+// ClusterComponentHealth Wat de bewaking laatst zag; leeg als ze nog niet keek of al twee minuten niet, zoals tijdens een taak. Telt mee in de status van het cluster
+type ClusterComponentHealth string
 
 // ClusterDetail defines model for ClusterDetail.
 type ClusterDetail struct {
@@ -9806,6 +9851,15 @@ type ListClusterChangesParams struct {
 	Limit *ChangesLimit `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// GetComponentMetricsParams defines parameters for GetComponentMetrics.
+type GetComponentMetricsParams struct {
+	Range *MetricsRange `form:"range,omitempty" json:"range,omitempty"`
+
+	// From Een vast venster in plaats van range, samen met to; hoogstens 7 dagen
+	From *MetricsFrom `form:"from,omitempty" json:"from,omitempty"`
+	To   *MetricsTo   `form:"to,omitempty" json:"to,omitempty"`
+}
+
 // GetClusterMetricsParams defines parameters for GetClusterMetrics.
 type GetClusterMetricsParams struct {
 	Range *MetricsRange `form:"range,omitempty" json:"range,omitempty"`
@@ -10588,6 +10642,9 @@ type ServerInterface interface {
 	// ManageClusterComponent Een actie uit Beheer uitvoeren (admin); wordt een taak
 	// (POST /clusters/{clusterId}/components/{componentId}/manage)
 	ManageClusterComponent(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID)
+	// GetComponentMetrics Grafieken van de database van een cluster, met een lijn per node
+	// (GET /clusters/{clusterId}/components/{componentId}/metrics)
+	GetComponentMetrics(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID, params GetComponentMetricsParams)
 	// RecoverClusterComponent De database opnieuw starten (admin); wordt een taak
 	// (POST /clusters/{clusterId}/components/{componentId}/recover)
 	RecoverClusterComponent(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID)
@@ -11431,6 +11488,12 @@ func (_ Unimplemented) GetClusterComponentManage(w http.ResponseWriter, r *http.
 // ManageClusterComponent Een actie uit Beheer uitvoeren (admin); wordt een taak
 // (POST /clusters/{clusterId}/components/{componentId}/manage)
 func (_ Unimplemented) ManageClusterComponent(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetComponentMetrics Grafieken van de database van een cluster, met een lijn per node
+// (GET /clusters/{clusterId}/components/{componentId}/metrics)
+func (_ Unimplemented) GetComponentMetrics(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID, params GetComponentMetricsParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -14042,6 +14105,83 @@ func (siw *ServerInterfaceWrapper) ManageClusterComponent(w http.ResponseWriter,
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ManageClusterComponent(w, r, clusterId, componentId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetComponentMetrics operation middleware
+func (siw *ServerInterfaceWrapper) GetComponentMetrics(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "componentId" -------------
+	var componentId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "componentId", chi.URLParam(r, "componentId"), &componentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "componentId", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetComponentMetricsParams
+
+	// ------------- Optional query parameter "range" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "range", r.URL.Query(), &params.Range, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "range"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "range", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "from" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "from", r.URL.Query(), &params.From, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "from"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "from", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "to" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "to", r.URL.Query(), &params.To, runtime.BindQueryParameterOptions{Type: "string", Format: "date-time"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "to"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "to", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetComponentMetrics(w, r, clusterId, componentId, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -20260,6 +20400,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/clusters/{clusterId}/components/{componentId}/recover", wrapper.RecoverClusterComponent)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/clusters/{clusterId}/components/{componentId}/metrics", wrapper.GetComponentMetrics)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/clusters/{clusterId}/components/{componentId}/databases", wrapper.ListComponentDatabases)

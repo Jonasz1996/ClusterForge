@@ -124,8 +124,10 @@ func FromEvent(e audit.Entry) Entry {
 		rolledOut(&en, payloadText(e.Payload["at"]))
 	case "kube.app_status_changed":
 		en.From, en.Delay = e.Ts.Add(-statusDelay), "de status van een app komt uit de sync van elke 30 s"
-	case "cluster.database_down", "cluster.database_up", "cluster.database_node_back":
+	case "cluster.database_down", "cluster.database_up", "cluster.database_node_back", "cluster.database_failover", "cluster.database_state_transfer":
 		en.From, en.Delay = e.Ts.Add(-dbWatchDelay), "de databases worden elke 20 s bekeken"
+	case "cluster.database_restarted":
+		restarted(&en, e)
 	case "cluster.database_node_out":
 		en.From, en.Delay = e.Ts.Add(-5*time.Minute-dbWatchDelay), "een databasenode komt pas na 5 minuten in het logboek"
 	}
@@ -133,6 +135,17 @@ func FromEvent(e audit.Entry) Entry {
 		en.Link = eventLink(e)
 	}
 	return en
+}
+
+// restarted zet een herstart van een database op het moment zelf: de
+// bewaking ziet hoe lang hij al draait.
+func restarted(en *Entry, e audit.Entry) {
+	if secs, ok := e.Payload["uptime"].(float64); ok && secs >= 0 && secs <= (10*time.Minute).Seconds() {
+		t := e.Ts.Add(-time.Duration(secs) * time.Second)
+		en.Ts, en.From, en.To = t, t, t
+		return
+	}
+	en.From, en.Delay = e.Ts.Add(-dbWatchDelay), "de databases worden elke 20 s bekeken"
 }
 
 func payloadText(v any) string {
@@ -169,7 +182,8 @@ func eventKind(action string) string {
 		return "backup"
 	case action == "node.status_changed" || action == "cluster.status_changed" || action == "vip.owner_changed" ||
 		action == "service.status_changed" || action == "kube.app_status_changed" || action == "cluster.database_down" ||
-		action == "cluster.database_up" || action == "cluster.database_node_out" || action == "cluster.database_node_back":
+		action == "cluster.database_up" || action == "cluster.database_node_out" || action == "cluster.database_node_back" ||
+		action == "cluster.database_restarted" || action == "cluster.database_failover" || action == "cluster.database_state_transfer":
 		return "status"
 	case prefix == "incident":
 		return "incident"

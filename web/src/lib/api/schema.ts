@@ -3109,6 +3109,36 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/clusters/{clusterId}/components/{componentId}/metrics": {
+        parameters: {
+            query?: {
+                range?: components["schemas"]["MetricsRange"];
+                /** @description Een vast venster in plaats van range, samen met to; hoogstens 7 dagen */
+                from?: components["parameters"]["MetricsFrom"];
+                to?: components["parameters"]["MetricsTo"];
+            };
+            header?: never;
+            path: {
+                clusterId: string;
+                componentId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Grafieken van de database van een cluster, met een lijn per node
+         * @description Bij MariaDB verbindingen, query's per seconde, de buffer pool, de wachtrij en flow control van Galera, en de grootte per
+         *     database; bij PostgreSQL verbindingen, transacties per seconde, cache-hits, de achterstand van de replica's en de grootte
+         *     per database. De agent meet ze vanaf protocol 13. Ook voor viewers.
+         */
+        get: operations["getComponentMetrics"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/clusters/{clusterId}/components/{componentId}/databases": {
         parameters: {
             query?: never;
@@ -4252,6 +4282,18 @@ export interface components {
             nodes_out: components["schemas"]["ComponentNodeOut"][];
             /** @description De laatste taak die de database opnieuw startte; null als er nog geen was */
             recovery: components["schemas"]["ComponentRecovery"] | null;
+            /**
+             * @description Wat de bewaking laatst zag; leeg als ze nog niet keek of al twee minuten niet, zoals tijdens een taak. Telt mee in de status van het cluster
+             * @enum {string}
+             */
+            health: "" | "healthy" | "degraded" | "down";
+            /** @description Waarom verminderd of down, met de naam van de database ervoor */
+            health_reason: string;
+            /**
+             * Format: date-time
+             * @description Wanneer de bewaking laatst keek
+             */
+            health_at: string | null;
         };
         ComponentNodeOut: {
             hostname: string;
@@ -8781,7 +8823,7 @@ export interface components {
             id: string;
             title: string;
             /** @enum {string} */
-            unit: "percent" | "load" | "bytes_per_second" | "celsius" | "millicores" | "bytes";
+            unit: "percent" | "load" | "bytes_per_second" | "celsius" | "millicores" | "bytes" | "count" | "per_second" | "seconds";
             series: components["schemas"]["MetricSeries"][];
         };
         MetricSeries: {
@@ -14630,6 +14672,38 @@ export interface operations {
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];
+        };
+    };
+    getComponentMetrics: {
+        parameters: {
+            query?: {
+                range?: components["schemas"]["MetricsRange"];
+                /** @description Een vast venster in plaats van range, samen met to; hoogstens 7 dagen */
+                from?: components["parameters"]["MetricsFrom"];
+                to?: components["parameters"]["MetricsTo"];
+            };
+            header?: never;
+            path: {
+                clusterId: string;
+                componentId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Metrics"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+            503: components["responses"]["Error"];
         };
     };
     listComponentDatabases: {
