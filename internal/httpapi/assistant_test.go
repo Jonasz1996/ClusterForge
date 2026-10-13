@@ -568,7 +568,7 @@ func TestAssistantAsk(t *testing.T) {
 		shape.Thinking.BlockBinding.PrefixMismatchBehavior != "drop_block" || shape.OutputConfig.Effort != "medium" || shape.ToolChoice != nil {
 		t.Fatalf("vorm: %+v", shape)
 	}
-	if len(shape.Tools) != len(e.asst.Tools) || len(shape.Tools) != 22 {
+	if len(shape.Tools) != len(e.asst.Tools) || len(shape.Tools) != 24 {
 		t.Fatalf("%d tools", len(shape.Tools))
 	}
 	for _, tl := range shape.Tools {
@@ -916,6 +916,8 @@ func toolInputs(cluster, node, job string) map[string][]string {
 			fmt.Sprintf(`{"cluster":%q,"namespace":"demo","pod":"web-7c9-c","container":"","vorige":true}`, cluster),
 			fmt.Sprintf(`{"cluster":%q,"namespace":"demo","pod":"web-7c9-c","container":"main","vorige":false}`, cluster),
 		},
+		"database":         {fmt.Sprintf(`{"cluster":%q}`, cluster)},
+		"database_clients": {`{"cluster":""}`, fmt.Sprintf(`{"cluster":%q}`, cluster)},
 	}
 }
 

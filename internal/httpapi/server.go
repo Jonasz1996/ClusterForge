@@ -5,6 +5,7 @@ package httpapi
 import (
 	"log/slog"
 	"net/http"
+	"slices"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -184,7 +185,7 @@ func New(d Deps) *Server {
 		components:    d.Components,
 		kubeNodes:     d.KubeNodes,
 	}
-	s.assistant.Tools = append(s.assistantTools(), s.kubeTools()...)
+	s.assistant.Tools = slices.Concat(s.assistantTools(), s.kubeTools(), s.databaseTools())
 	s.lessons = kubelessons.New(s.kube, s.q)
 	return s
 }

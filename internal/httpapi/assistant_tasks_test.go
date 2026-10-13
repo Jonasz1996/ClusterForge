@@ -152,6 +152,10 @@ func TestAssistantAnalyze(t *testing.T) {
 			t.Errorf("opdracht mist %q", want)
 		}
 	}
+	// Web heeft geen database.
+	if strings.Contains(prompt, "met een database") {
+		t.Errorf("opdracht noemt een database:\n%s", prompt)
+	}
 
 	// Het resultaat staat bij het incident, zonder de inleiding.
 	var d incidentAIView
