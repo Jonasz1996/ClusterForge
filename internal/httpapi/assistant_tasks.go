@@ -66,7 +66,7 @@ func (s *Server) incidentAI(ctx context.Context, row store.Incident) nullable.Nu
 var cardNames = map[risk.CardID]string{
 	risk.Availability: "Beschikbaarheid", risk.Backups: "Back-ups", risk.Recovery: "Herstelbaarheid", risk.Redundancy: "Redundantie",
 	risk.Configuration: "Configuratie", risk.Maintenance: "Onderhoud", risk.Capacity: "Capaciteit", risk.Kubernetes: "Kubernetes",
-	risk.Platform: "Platform",
+	risk.DatabaseCard: "Database", risk.Platform: "Platform",
 }
 
 // componentNames zijn de soorten onderdelen in een zin.

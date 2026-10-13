@@ -2268,6 +2268,7 @@ const (
 	RiskCardIdBackups       RiskCardId = "backups"
 	RiskCardIdCapacity      RiskCardId = "capacity"
 	RiskCardIdConfiguration RiskCardId = "configuration"
+	RiskCardIdDatabase      RiskCardId = "database"
 	RiskCardIdKubernetes    RiskCardId = "kubernetes"
 	RiskCardIdMaintenance   RiskCardId = "maintenance"
 	RiskCardIdPlatform      RiskCardId = "platform"
@@ -2285,6 +2286,8 @@ func (e RiskCardId) Valid() bool {
 	case RiskCardIdCapacity:
 		return true
 	case RiskCardIdConfiguration:
+		return true
+	case RiskCardIdDatabase:
 		return true
 	case RiskCardIdKubernetes:
 		return true

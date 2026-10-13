@@ -26,8 +26,9 @@ const (
 	day         = 24 * time.Hour
 )
 
-// Score rekent de zeven kaarten van een cluster, en bij Kubernetes de
-// achtste. acc zijn de acceptaties die nu gelden.
+// Score rekent de zeven kaarten van een cluster, bij Kubernetes de kaart
+// Kubernetes en bij een database de kaart Database. acc zijn de acceptaties
+// die nu gelden.
 func Score(in ClusterInput, acc map[Key]Acceptance, now time.Time) Result {
 	b := builder{acc: acc}
 	cards := []Card{
@@ -41,6 +42,9 @@ func Score(in ClusterInput, acc map[Key]Acceptance, now time.Time) Result {
 	}
 	if in.Kube != nil {
 		cards = append(cards, b.card(Kubernetes, kubernetesCard(in, now)))
+	}
+	if in.DB != nil {
+		cards = append(cards, b.card(DatabaseCard, databaseCard(in, now)))
 	}
 	return finish(cards, caps(in, cards))
 }

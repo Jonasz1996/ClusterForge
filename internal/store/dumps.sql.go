@@ -64,7 +64,7 @@ UPDATE db_dumps
 SET status = $1, finished_at = $2, size_bytes = $3, raw_bytes = $4,
     tables = $5, tables_expected = $6, message = $7
 WHERE id = $8
-RETURNING id, component_id, cluster_id, node_id, hostname, database, file, trigger, status, started_at, finished_at, size_bytes, raw_bytes, tables, tables_expected, message, job_id, requested_by
+RETURNING id, component_id, cluster_id, node_id, hostname, database, file, trigger, status, started_at, finished_at, size_bytes, raw_bytes, tables, tables_expected, message, job_id, requested_by, no_primary_key, not_innodb
 `
 
 type FinishDBDumpParams struct {
@@ -109,12 +109,14 @@ func (q *Queries) FinishDBDump(ctx context.Context, arg FinishDBDumpParams) (DbD
 		&i.Message,
 		&i.JobID,
 		&i.RequestedBy,
+		&i.NoPrimaryKey,
+		&i.NotInnodb,
 	)
 	return i, err
 }
 
 const getDBDump = `-- name: GetDBDump :one
-SELECT id, component_id, cluster_id, node_id, hostname, database, file, trigger, status, started_at, finished_at, size_bytes, raw_bytes, tables, tables_expected, message, job_id, requested_by FROM db_dumps WHERE id = $1
+SELECT id, component_id, cluster_id, node_id, hostname, database, file, trigger, status, started_at, finished_at, size_bytes, raw_bytes, tables, tables_expected, message, job_id, requested_by, no_primary_key, not_innodb FROM db_dumps WHERE id = $1
 `
 
 func (q *Queries) GetDBDump(ctx context.Context, id uuid.UUID) (DbDump, error) {
@@ -139,6 +141,8 @@ func (q *Queries) GetDBDump(ctx context.Context, id uuid.UUID) (DbDump, error) {
 		&i.Message,
 		&i.JobID,
 		&i.RequestedBy,
+		&i.NoPrimaryKey,
+		&i.NotInnodb,
 	)
 	return i, err
 }
@@ -146,7 +150,7 @@ func (q *Queries) GetDBDump(ctx context.Context, id uuid.UUID) (DbDump, error) {
 const insertDBDump = `-- name: InsertDBDump :one
 INSERT INTO db_dumps (component_id, cluster_id, node_id, hostname, database, file, trigger, started_at, job_id, requested_by)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-RETURNING id, component_id, cluster_id, node_id, hostname, database, file, trigger, status, started_at, finished_at, size_bytes, raw_bytes, tables, tables_expected, message, job_id, requested_by
+RETURNING id, component_id, cluster_id, node_id, hostname, database, file, trigger, status, started_at, finished_at, size_bytes, raw_bytes, tables, tables_expected, message, job_id, requested_by, no_primary_key, not_innodb
 `
 
 type InsertDBDumpParams struct {
@@ -195,6 +199,8 @@ func (q *Queries) InsertDBDump(ctx context.Context, arg InsertDBDumpParams) (DbD
 		&i.Message,
 		&i.JobID,
 		&i.RequestedBy,
+		&i.NoPrimaryKey,
+		&i.NotInnodb,
 	)
 	return i, err
 }
@@ -330,7 +336,7 @@ func (q *Queries) ListComponentDatabaseNames(ctx context.Context) ([]ListCompone
 }
 
 const listDBDumps = `-- name: ListDBDumps :many
-SELECT id, component_id, cluster_id, node_id, hostname, database, file, trigger, status, started_at, finished_at, size_bytes, raw_bytes, tables, tables_expected, message, job_id, requested_by FROM db_dumps WHERE component_id = $1 ORDER BY started_at DESC, database
+SELECT id, component_id, cluster_id, node_id, hostname, database, file, trigger, status, started_at, finished_at, size_bytes, raw_bytes, tables, tables_expected, message, job_id, requested_by, no_primary_key, not_innodb FROM db_dumps WHERE component_id = $1 ORDER BY started_at DESC, database
 `
 
 // De dumps van een onderdeel, de nieuwste eerst.
@@ -362,6 +368,8 @@ func (q *Queries) ListDBDumps(ctx context.Context, componentID uuid.UUID) ([]DbD
 			&i.Message,
 			&i.JobID,
 			&i.RequestedBy,
+			&i.NoPrimaryKey,
+			&i.NotInnodb,
 		); err != nil {
 			return nil, err
 		}
@@ -374,7 +382,7 @@ func (q *Queries) ListDBDumps(ctx context.Context, componentID uuid.UUID) ([]DbD
 }
 
 const listLatestDBDumpAttempts = `-- name: ListLatestDBDumpAttempts :many
-SELECT DISTINCT ON (component_id, database) id, component_id, cluster_id, node_id, hostname, database, file, trigger, status, started_at, finished_at, size_bytes, raw_bytes, tables, tables_expected, message, job_id, requested_by
+SELECT DISTINCT ON (component_id, database) id, component_id, cluster_id, node_id, hostname, database, file, trigger, status, started_at, finished_at, size_bytes, raw_bytes, tables, tables_expected, message, job_id, requested_by, no_primary_key, not_innodb
 FROM db_dumps
 WHERE status <> 'running'
 ORDER BY component_id, database, started_at DESC
@@ -409,6 +417,8 @@ func (q *Queries) ListLatestDBDumpAttempts(ctx context.Context) ([]DbDump, error
 			&i.Message,
 			&i.JobID,
 			&i.RequestedBy,
+			&i.NoPrimaryKey,
+			&i.NotInnodb,
 		); err != nil {
 			return nil, err
 		}
@@ -421,7 +431,7 @@ func (q *Queries) ListLatestDBDumpAttempts(ctx context.Context) ([]DbDump, error
 }
 
 const listLatestDBDumps = `-- name: ListLatestDBDumps :many
-SELECT DISTINCT ON (component_id, database) id, component_id, cluster_id, node_id, hostname, database, file, trigger, status, started_at, finished_at, size_bytes, raw_bytes, tables, tables_expected, message, job_id, requested_by
+SELECT DISTINCT ON (component_id, database) id, component_id, cluster_id, node_id, hostname, database, file, trigger, status, started_at, finished_at, size_bytes, raw_bytes, tables, tables_expected, message, job_id, requested_by, no_primary_key, not_innodb
 FROM db_dumps
 WHERE status = 'ok'
 ORDER BY component_id, database, started_at DESC
@@ -456,6 +466,8 @@ func (q *Queries) ListLatestDBDumps(ctx context.Context) ([]DbDump, error) {
 			&i.Message,
 			&i.JobID,
 			&i.RequestedBy,
+			&i.NoPrimaryKey,
+			&i.NotInnodb,
 		); err != nil {
 			return nil, err
 		}
@@ -468,7 +480,7 @@ func (q *Queries) ListLatestDBDumps(ctx context.Context) ([]DbDump, error) {
 }
 
 const previousDBDump = `-- name: PreviousDBDump :one
-SELECT id, component_id, cluster_id, node_id, hostname, database, file, trigger, status, started_at, finished_at, size_bytes, raw_bytes, tables, tables_expected, message, job_id, requested_by FROM db_dumps
+SELECT id, component_id, cluster_id, node_id, hostname, database, file, trigger, status, started_at, finished_at, size_bytes, raw_bytes, tables, tables_expected, message, job_id, requested_by, no_primary_key, not_innodb FROM db_dumps
 WHERE component_id = $1 AND database = $2 AND status IN ('ok', 'suspect') AND id <> $3
 ORDER BY started_at DESC
 LIMIT 1
@@ -505,6 +517,8 @@ func (q *Queries) PreviousDBDump(ctx context.Context, arg PreviousDBDumpParams) 
 		&i.Message,
 		&i.JobID,
 		&i.RequestedBy,
+		&i.NoPrimaryKey,
+		&i.NotInnodb,
 	)
 	return i, err
 }
@@ -545,5 +559,22 @@ type SetComponentBackupNextParams struct {
 
 func (q *Queries) SetComponentBackupNext(ctx context.Context, arg SetComponentBackupNextParams) error {
 	_, err := q.db.Exec(ctx, setComponentBackupNext, arg.NextAt, arg.ID)
+	return err
+}
+
+const setDBDumpTables = `-- name: SetDBDumpTables :exec
+UPDATE db_dumps SET no_primary_key = $1::text[], not_innodb = $2::text[] WHERE id = $3
+`
+
+type SetDBDumpTablesParams struct {
+	NoPrimaryKey []string
+	NotInnodb    []string
+	ID           uuid.UUID
+}
+
+// De tabellen van een database van Galera zonder primaire sleutel of
+// buiten InnoDB, volgens ClusterForge na een goede dump.
+func (q *Queries) SetDBDumpTables(ctx context.Context, arg SetDBDumpTablesParams) error {
+	_, err := q.db.Exec(ctx, setDBDumpTables, arg.NoPrimaryKey, arg.NotInnodb, arg.ID)
 	return err
 }

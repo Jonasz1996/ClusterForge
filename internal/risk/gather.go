@@ -108,6 +108,12 @@ func (s *Service) gather(ctx context.Context, now time.Time) (world, error) {
 	if err != nil {
 		return w, err
 	}
+	var dbs map[uuid.UUID]*DatabaseCardInput
+	if s.DB != nil {
+		if dbs, err = s.DB.ScoreDatabases(ctx); err != nil {
+			return w, err
+		}
+	}
 	nodeMetrics, metricsRead := s.nodeMetrics(ctx, now)
 	backupsOf, verified := s.backupInputs(ctx)
 
@@ -155,6 +161,7 @@ func (s *Service) gather(ctx context.Context, now time.Time) (world, error) {
 			VIPMoves: map[uuid.UUID]int{}, Backups: backupsOf[c.ID], LastVerified: verified[c.ID],
 			DesiredState: c.DesiredState, SpecRevision: int(c.SpecRevision), AppliedRevision: int(c.AppliedRevision),
 			RevisionSince: notEpoch(c.RevisionSince), RevisionRunning: c.Busy, MetricsRead: metricsRead, Kube: kube[c.ID],
+			DB: dbs[c.ID],
 		}
 		for _, v := range vips {
 			if v.ClusterID != c.ID {

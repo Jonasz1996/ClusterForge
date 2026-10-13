@@ -316,7 +316,8 @@ export function FleetRiskCard({ isAdmin }: { isAdmin: boolean }) {
 }
 
 // share is het deel van de score dat de kaart weegt, in procenten: de
-// gewichten tellen op tot 100, met de kaart Kubernetes erbij tot 115.
+// gewichten tellen op tot 100, met de kaart Kubernetes of Database erbij tot 115
+// en met beide tot 130.
 function CardPanel({
   c,
   share,

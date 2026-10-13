@@ -718,6 +718,9 @@ func (s *Service) dumpOne(ctx context.Context, j *jobs.Job, st *jobs.Step, comp 
 			default:
 				return errors.New(d.Message)
 			}
+			if comp.Engine == protocol.DBMariaDB {
+				s.dumpTables(ctx, st, n, d)
+			}
 			return nil
 		}
 		select {
@@ -725,6 +728,40 @@ func (s *Service) dumpOne(ctx context.Context, j *jobs.Job, st *jobs.Step, comp 
 			return context.Cause(ctx)
 		case <-time.After(s.DumpPoll):
 		}
+	}
+}
+
+// dumpTables onthoudt bij een dump van MariaDB welke tabellen geen
+// primaire sleutel hebben of niet in InnoDB staan, voor de scorekaart
+// Database: Galera repliceert die traag of niet. Lukt dat niet, dan blijft
+// het onbekend; de dump is er wel.
+func (s *Service) dumpTables(ctx context.Context, st *jobs.Step, n Node, d store.DbDump) {
+	res, err := s.migrateReq(ctx, n, protocol.DBMariaDB, protocol.DBMigrateRequest{Action: protocol.DBMigrateInspect, Database: d.Database})
+	if err == nil && (res == nil || res.Info == nil || !res.Info.Exists) {
+		err = errors.New("de agent zei niets over de tabellen")
+	}
+	if err != nil {
+		st.Logf("Welke tabellen een primaire sleutel hebben, lukte niet te lezen: %v.", err)
+		return
+	}
+	noPK, other := []string{}, []string{}
+	for _, t := range res.Info.Tables {
+		if !t.PrimaryKey {
+			noPK = append(noPK, t.Name)
+		}
+		if t.Engine != "" && !strings.EqualFold(t.Engine, "InnoDB") {
+			other = append(other, t.Name)
+		}
+	}
+	if err := s.q.SetDBDumpTables(ctx, store.SetDBDumpTablesParams{ID: d.ID, NoPrimaryKey: noPK, NotInnodb: other}); err != nil {
+		st.Logf("De tabellen vastleggen lukte niet: %v.", err)
+		return
+	}
+	if len(noPK) > 0 {
+		st.Logf("%s zonder primaire sleutel: %s.", plural(len(noPK), "Eén tabel", "tabellen"), listSome(noPK, 8))
+	}
+	if len(other) > 0 {
+		st.Logf("%s niet in InnoDB: %s.", plural(len(other), "Eén tabel staat", "tabellen staan"), listSome(other, 8))
 	}
 }
 

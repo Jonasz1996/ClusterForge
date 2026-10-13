@@ -62,6 +62,18 @@ var Checks = map[string]string{
 	"kubernetes.memory_limit":     "Pods zonder geheugenlimiet",
 	"kubernetes.version_eol":      "k3s zonder updates",
 
+	"database.no_ha":          "Database zonder HA",
+	"database.degraded":       "Database verminderd",
+	"database.same_host":      "Databasenodes op één host",
+	"database.memory":         "Weinig geheugen vrij bij een database",
+	"database.dumps_off":      "Nachtelijke dumps uit",
+	"database.dump_stale":     "Dump ouder dan een dag",
+	"database.not_innodb":     "Tabellen buiten InnoDB in Galera",
+	"database.no_primary_key": "Tabellen zonder primaire sleutel in Galera",
+	"database.no_test":        "Geen geslaagde failovertest van de database",
+	"database.shared":         "Database van meer dan één cluster",
+	"database.not_retired":    "Verhuisde database niet afgebouwd",
+
 	"platform.admin_totp":          "Beheerder zonder tweestapsverificatie",
 	"platform.proxmox_unreachable": "Proxmox niet te lezen",
 	"platform.proxmox_certificate": "Certificaat van Proxmox verloopt",
@@ -73,5 +85,5 @@ var Checks = map[string]string{
 var CardLabels = map[CardID]string{
 	Availability: "Beschikbaarheid", Backups: "Back-ups", Recovery: "Herstelbaarheid", Redundancy: "Redundantie",
 	Configuration: "Configuratie", Maintenance: "Onderhoud en beveiliging", Capacity: "Capaciteit", Kubernetes: "Kubernetes",
-	Platform: "Platform",
+	DatabaseCard: "Database", Platform: "Platform",
 }

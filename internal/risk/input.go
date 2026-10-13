@@ -79,6 +79,9 @@ type ClusterInput struct {
 	// Kube is wat de kaart Kubernetes nodig heeft; nil bij een ander
 	// clustertype.
 	Kube *KubeInput
+	// DB is wat de kaart Database nodig heeft; nil als er op de nodes
+	// geen database staat.
+	DB *DatabaseCardInput
 }
 
 // KubeInput is wat de sync laatst van een Kubernetes-cluster zag.

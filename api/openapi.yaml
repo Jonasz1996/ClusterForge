@@ -8533,7 +8533,7 @@ components:
       enum: [low, medium, high, critical]
     RiskCardId:
       type: string
-      enum: [availability, backups, recovery, redundancy, configuration, maintenance, capacity, kubernetes, platform]
+      enum: [availability, backups, recovery, redundancy, configuration, maintenance, capacity, kubernetes, database, platform]
     RiskSubject:
       type: object
       required: [type, id, name]

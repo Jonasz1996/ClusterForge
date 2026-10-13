@@ -368,6 +368,42 @@ func (q *Queries) ListDBComponents(ctx context.Context, engine string) ([]ListDB
 	return items, nil
 }
 
+const listDatabaseTestPasses = `-- name: ListDatabaseTestPasses :many
+SELECT cluster_id::uuid AS cluster_id, (measurements->'writes'->>'title')::text AS title, max(finished_at)::timestamptz AS finished_at
+FROM test_runs
+WHERE kind = 'failover.test' AND result = 'pass' AND cluster_id IS NOT NULL AND finished_at IS NOT NULL
+  AND measurements->'writes'->>'title' IS NOT NULL
+GROUP BY 1, 2
+`
+
+type ListDatabaseTestPassesRow struct {
+	ClusterID  uuid.UUID
+	Title      string
+	FinishedAt time.Time
+}
+
+// Per cluster en database de laatste geslaagde failovertest met een
+// schrijftest via het VIP van die database, voor de scorekaart Database.
+func (q *Queries) ListDatabaseTestPasses(ctx context.Context) ([]ListDatabaseTestPassesRow, error) {
+	rows, err := q.db.Query(ctx, listDatabaseTestPasses)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDatabaseTestPassesRow{}
+	for rows.Next() {
+		var i ListDatabaseTestPassesRow
+		if err := rows.Scan(&i.ClusterID, &i.Title, &i.FinishedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listNodeComponents = `-- name: ListNodeComponents :many
 SELECT cc.id, cc.cluster_id, cc.engine, cc.spec, cc.revision, cc.applied_revision, cc.job_id, cc.created_at, cc.updated_at, cc.auto_recover, cc.down_since, cc.down_reason, cc.nodes_out, cc.auto_recovered_at, cc.recover_job_id, cc.backup_on, cc.backup_at, cc.backup_keep_days, cc.backup_next_at, cc.health, cc.health_reason, cc.health_at, cc.observed
 FROM cluster_components cc
