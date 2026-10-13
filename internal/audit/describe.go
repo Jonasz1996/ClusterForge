@@ -394,6 +394,8 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 			parts = append(parts, fmt.Sprintf("%s van %s naar %s", strings.ToLower(str(ch, "label")), str(ch, "from"), str(ch, "to")))
 		}
 		return fmt.Sprintf("Instellingen van %s van cluster %s gewijzigd (revisie %s)", str(p, "component"), name, num(p["revision"])) + colon(strings.Join(parts, ", "))
+	case "cluster.database_node_added":
+		return fmt.Sprintf("%s toegevoegd aan %s van cluster %s (revisie %s)", str(p, "node"), str(p, "component"), name, num(p["revision"]))
 	case "cluster.database_updated":
 		var parts []string
 		nodes, _ := p["nodes"].([]any)

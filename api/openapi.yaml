@@ -3178,6 +3178,61 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
+  /clusters/{clusterId}/components/{componentId}/join/plan:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: componentId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: planClusterComponentJoin
+      summary: Bekijken wat het toevoegen van een node aan een database doet (admin)
+      description: |
+        De nodes van het cluster die nog niet bij de database horen, en voor de gekozen node wat er gebeurt: de controles
+        op de nieuwe node (agent, Debian, poorten, geheugen, schijf), wat er op de andere nodes verandert (geen ervan
+        herstart de database), het VIP en het aantal stemmen daarna. Zonder node_id zijn het alleen de kandidaten. Er
+        verandert niets.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ComponentJoinPlanInput" }
+      responses:
+        "200":
+          description: Het plan
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ComponentJoinPlan" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /clusters/{clusterId}/components/{componentId}/join:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: componentId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: joinClusterComponent
+      summary: Een node toevoegen aan een database (admin); wordt een taak
+      description: |
+        Maakt een nieuwe revisie met de node erbij en past die toe. Bij Galera haalt de nieuwe node alle data bij een node
+        die meedoet; bij PostgreSQL wordt hij eerst lid van etcd en dan een replica. De andere nodes herstarten niet. Een
+        ander plan geeft 409 met code plan_stale. Op prod vraagt het tweestapsverificatie en de slug in confirm.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ComponentJoinInput" }
+      responses:
+        "202":
+          description: Taak aangemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
   /clusters/{clusterId}/components/{componentId}/recover/plan:
     parameters:
       - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -4914,6 +4969,59 @@ components:
       properties:
         hash: { type: string, description: De hash van het plan zoals je het zag }
         confirm: { type: string, description: De slug van het cluster; nodig op prod }
+    ComponentJoinPlanInput:
+      type: object
+      properties:
+        node_id: { type: string, format: uuid, description: De node die bij de database komt; zonder alleen de kandidaten }
+    ComponentJoinInput:
+      type: object
+      required: [node_id, hash]
+      properties:
+        node_id: { type: string, format: uuid }
+        hash: { type: string, description: De hash van het plan zoals je het zag }
+        confirm: { type: string, description: De slug van het cluster; nodig op prod }
+    ComponentJoinPlan:
+      type: object
+      required: [cluster_id, cluster_name, slug, prod, engine, title, revision, candidates, node, members, vip, vip_joins, votes, effects, findings,
+                 blocked, hash]
+      properties:
+        cluster_id: { type: string, format: uuid }
+        cluster_name: { type: string }
+        slug: { type: string }
+        prod: { type: boolean }
+        engine: { type: string, enum: [mariadb, postgresql] }
+        title: { type: string }
+        revision: { type: integer, description: De revisie nu; met de node erbij wordt het de volgende }
+        candidates: { type: array, items: { $ref: "#/components/schemas/ComponentJoinCandidate" }, description: De nodes van het cluster zonder de database }
+        node:
+          description: De nieuwe node met de controles en stappen; null zonder keuze
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/ComponentPlanNode" }]
+        members: { type: array, items: { $ref: "#/components/schemas/ComponentJoinMember" }, description: De nodes die er al zijn }
+        vip: { type: string, description: Het VIP van de database; leeg zonder }
+        vip_joins: { type: boolean, description: De nieuwe node krijgt het VIP in keepalived }
+        votes: { type: integer, description: Het aantal stemmen met de nieuwe node erbij }
+        effects: { type: array, items: { type: string }, description: Wat er gebeurt }
+        findings: { type: array, items: { $ref: "#/components/schemas/ComponentFinding" } }
+        blocked: { type: boolean }
+        hash: { type: string }
+    ComponentJoinCandidate:
+      type: object
+      required: [node_id, hostname]
+      properties:
+        node_id: { type: string, format: uuid }
+        hostname: { type: string }
+    ComponentJoinMember:
+      type: object
+      required: [node_id, hostname, role, state, healthy, writer, changes]
+      properties:
+        node_id: { type: string, format: uuid }
+        hostname: { type: string }
+        role: { type: string }
+        state: { type: string }
+        healthy: { type: boolean }
+        writer: { type: boolean, description: De node met het VIP bij Galera, de primary bij PostgreSQL }
+        changes: { type: array, items: { type: string }, description: Wat er op deze node verandert; niets herstart de database }
     ComponentRecoverPlan:
       type: object
       required: [cluster_id, cluster_name, slug, prod, title, nodes, primary, begin, findings, blocked, hash]

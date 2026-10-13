@@ -8,7 +8,8 @@ package components
 // binnen de tijd een nieuwe zonder bevestigde rij te verliezen, de oude
 // primary komt terug als replica, en na een uitval van alles komt het
 // cluster vanzelf terug. cf-agent check db postgresql slaagt alleen op de
-// primary.
+// primary. Aan het eind komt er een vierde node bij op 127.0.0.24, zoals
+// Node toevoegen dat doet.
 //
 // Hij draait alleen met CF_TEST_PATRONI (het pad van patroni), etcd in
 // PATH of in CF_TEST_ETCD, en PostgreSQL in CF_TEST_PG_BIN (standaard de
@@ -52,6 +53,9 @@ type realPatroni struct {
 	etcd    string
 	pgBin   string
 	nodes   []*realNode
+	base    string
+	// joined zijn de nodes die later bij etcd kwamen (etcd_joined).
+	joined string
 	// asPostgres: de test draait als root, en PostgreSQL weigert dat.
 	asPostgres bool
 }
@@ -95,14 +99,25 @@ func newRealPatroni(t *testing.T) *realPatroni {
 		}
 		_ = os.RemoveAll(base)
 	})
+	r.base = base
+	if r.asPostgres {
+		_ = os.Chmod(base, 0o755)
+	}
 	for i := 1; i <= 3; i++ {
-		n := &realNode{name: fmt.Sprintf("pg%d", i), ip: fmt.Sprintf("127.0.0.%d", 20+i), dir: filepath.Join(base, fmt.Sprintf("pg%d", i))}
-		for _, d := range []string{"etcd", "sock", "data"} {
-			if err := os.MkdirAll(filepath.Join(n.dir, d), 0o700); err != nil {
-				t.Fatal(err)
-			}
+		r.nodes = append(r.nodes, r.newNode(i))
+	}
+	t.Cleanup(r.stopAll)
+	return r
+}
+
+// newNode maakt de mappen van node pgi op 127.0.0.(20+i).
+func (r *realPatroni) newNode(i int) *realNode {
+	t := r.t
+	n := &realNode{name: fmt.Sprintf("pg%d", i), ip: fmt.Sprintf("127.0.0.%d", 20+i), dir: filepath.Join(r.base, fmt.Sprintf("pg%d", i))}
+	for _, d := range []string{"etcd", "sock", "data"} {
+		if err := os.MkdirAll(filepath.Join(n.dir, d), 0o700); err != nil {
+			t.Fatal(err)
 		}
-		r.nodes = append(r.nodes, n)
 	}
 	if r.asPostgres {
 		u, err := user.Lookup("postgres")
@@ -111,11 +126,9 @@ func newRealPatroni(t *testing.T) *realPatroni {
 		}
 		uid, _ := strconv.Atoi(u.Uid)
 		gid, _ := strconv.Atoi(u.Gid)
-		_ = os.Chmod(base, 0o755)
-		_ = filepath.Walk(base, func(p string, _ os.FileInfo, _ error) error { return os.Chown(p, uid, gid) })
+		_ = filepath.Walk(n.dir, func(p string, _ os.FileInfo, _ error) error { return os.Chown(p, uid, gid) })
 	}
-	t.Cleanup(r.stopAll)
-	return r
+	return n
 }
 
 func pgMajor(dir string) int {
@@ -131,7 +144,11 @@ func (r *realPatroni) render(n *realNode) (etcdConf, patroniConf []byte, env []s
 	if !ok {
 		t.Fatal("postgresql-patroni ontbreekt")
 	}
-	params, err := tpl.Values(map[string]any{"shared_buffers": "128M", "max_connections": 50},
+	settings := map[string]any{"shared_buffers": "128M", "max_connections": 50}
+	if r.joined != "" {
+		settings[joinedParam] = r.joined
+	}
+	params, err := tpl.Values(settings,
 		map[string]string{"replication_password": "repl4Test", "rewind_password": "rewind4Test", "rest_password": "rest4Test"})
 	if err != nil {
 		t.Fatal(err)
@@ -451,6 +468,89 @@ func TestRealPatroni(t *testing.T) {
 		})
 	}
 	r.manage(next)
+	r.join()
+}
+
+// join voegt pg4 toe zoals Node toevoegen: eerst lid van etcd via een node
+// die meedoet, dan etcd op pg4 met initial-cluster-state existing, en dan
+// Patroni, dat een replica met alle rijen wordt. De andere nodes herstarten
+// niet.
+func (r *realPatroni) join() {
+	t := r.t
+	primary := r.primary()
+	if primary == nil {
+		t.Fatal("geen primary voor het toevoegen")
+	}
+	via := r.nodes[0]
+	pg4 := r.newNode(4)
+	r.nodes = append(r.nodes, pg4)
+	r.joined = pg4.name
+
+	// De configuratie: pg4 sluit aan, de andere beginnen niets nieuws; pg_hba
+	// en etcd van de andere nodes kennen pg4.
+	conf, _, _ := r.render(pg4)
+	if !strings.Contains(string(conf), "initial-cluster-state: existing") ||
+		!strings.Contains(string(conf), "pg1=http://127.0.0.21:2380,pg2=http://127.0.0.22:2380,pg3=http://127.0.0.23:2380,pg4=http://127.0.0.24:2380") {
+		t.Fatalf("etcd.yml van pg4:\n%s", conf)
+	}
+	conf, patroniConf, _ := r.render(via)
+	if !strings.Contains(string(conf), "initial-cluster-state: new") {
+		t.Errorf("etcd.yml van %s moet new houden:\n%s", via.name, conf)
+	}
+	if !strings.Contains(string(patroniConf), "host replication cf_replicatie 127.0.0.24/32 scram-sha-256") || !strings.Contains(string(patroniConf), "127.0.0.24:2379") {
+		t.Errorf("patroni.yml van %s zonder pg4:\n%s", via.name, patroniConf)
+	}
+
+	// Lid worden, met de stap van ClusterForge; een tweede keer verandert
+	// er niets.
+	ctl := filepath.Join(filepath.Dir(r.etcd), "etcdctl") + " --endpoints=http://" + via.ip + ":2379"
+	sh := func(cmd string) error {
+		out, err := exec.Command("sh", "-c", strings.ReplaceAll(cmd, etcdctl, ctl)).CombinedOutput()
+		if err != nil {
+			return fmt.Errorf("%w: %s", err, out)
+		}
+		return nil
+	}
+	step := etcdJoinStep(pg4.name, "http://"+pg4.ip+":2380").Command
+	if err := sh(step.Unless); err == nil {
+		t.Fatal("pg4 was al lid van etcd")
+	}
+	if err := sh(step.Run); err != nil {
+		t.Fatalf("lid worden: %v", err)
+	}
+	if err := sh(step.Unless); err != nil {
+		t.Errorf("na het toevoegen ziet unless pg4 niet: %v", err)
+	}
+
+	// etcd op pg4, en de stap die wacht tot het meedoet.
+	r.startEtcd(pg4)
+	wait := etcdWait().Command
+	ctl = filepath.Join(filepath.Dir(r.etcd), "etcdctl") + " --endpoints=http://" + pg4.ip + ":2379"
+	if err := sh(wait.Run); err != nil {
+		t.Fatalf("etcd op pg4: %v", err)
+	}
+	out, err := exec.Command("sh", "-c", ctl+" member list").CombinedOutput()
+	if err != nil || strings.Count(string(out), ", started, ") != 4 {
+		t.Fatalf("leden van etcd: %v\n%s", err, out)
+	}
+
+	// Patroni op pg4: een replica met alle rijen, en de primary blijft.
+	r.startPatroni(pg4)
+	r.replicaOK(pg4, "na het toevoegen")
+	r.wait("pg4 heeft alle rijen", time.Minute, func() bool {
+		out, err := r.psql(pg4, "SELECT count(*) FROM proef")
+		return err == nil && out == "1002"
+	})
+	if r.primary() != primary {
+		t.Errorf("de primary veranderde bij het toevoegen: %v", r.primary())
+	}
+	if out, err := r.psql(primary, "INSERT INTO proef VALUES (1003)"); err != nil {
+		t.Fatalf("schrijven na het toevoegen: %v %s", err, out)
+	}
+	r.wait("pg4 heeft de nieuwe rij", 30*time.Second, func() bool {
+		out, err := r.psql(pg4, "SELECT count(*) FROM proef")
+		return err == nil && out == "1003"
+	})
 }
 
 // op vraagt de agent op n iets aan Patroni, zoals de server dat doet.

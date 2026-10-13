@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"path/filepath"
 	"slices"
@@ -34,7 +35,9 @@ type galeraLab struct {
 	days *atomic.Int64
 }
 
-func newGaleraLab(t *testing.T) galeraLab {
+// newGaleraLab maakt Nextcloud met nc1 tot nc3 en MariaDB Galera erop;
+// extra nodes, zoals nc4, komen in het cluster zonder database.
+func newGaleraLab(t *testing.T, extra ...string) galeraLab {
 	t.Helper()
 	e, c := adminClient(t)
 	ctx := context.Background()
@@ -46,8 +49,9 @@ func newGaleraLab(t *testing.T) galeraLab {
 	ids := map[string]string{}
 	as, dirs := map[string]*addrs{}, map[string]string{}
 	days := &atomic.Int64{}
-	for i, name := range []string{"nc1", "nc2", "nc3"} {
-		ip := "10.0.20.18" + string(rune('6'+i))
+	names := append([]string{"nc1", "nc2", "nc3"}, extra...)
+	for i, name := range names {
+		ip := fmt.Sprintf("10.0.20.%d", 186+i)
 		var n node
 		if s := c.do("POST", "/api/v1/nodes", map[string]any{"hostname": name, "cluster_id": nc.ID, "primary_ip": ip}, &n); s != http.StatusCreated {
 			t.Fatalf("node %s: %d", name, s)
@@ -73,10 +77,10 @@ func newGaleraLab(t *testing.T) galeraLab {
 			ag.Collector.Interfaces, ag.Collector.PrimaryAddress = h.Interfaces, func() string { return ip }
 		})
 	}
-	eventually(t, "facts van de drie nodes", func() bool {
+	eventually(t, "facts van de nodes", func() bool {
 		var n int
 		_ = e.pool.QueryRow(ctx, "SELECT count(*) FROM node_facts f JOIN nodes n ON n.id = f.node_id WHERE n.cluster_id = $1 AND f.facts->'os'->>'id' = 'debian'", nc.ID).Scan(&n)
-		return n == 3
+		return n == len(names)
 	})
 	base := "/api/v1/clusters/" + nc.ID + "/components"
 	in := map[string]any{"engine": "mariadb", "nodes": []string{ids["nc1"], ids["nc2"], ids["nc3"]}}

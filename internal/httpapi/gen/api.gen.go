@@ -342,6 +342,24 @@ func (e ComponentDumpTrigger) Valid() bool {
 	}
 }
 
+// Defines values for ComponentJoinPlanEngine.
+const (
+	ComponentJoinPlanEngineMariadb    ComponentJoinPlanEngine = "mariadb"
+	ComponentJoinPlanEnginePostgresql ComponentJoinPlanEngine = "postgresql"
+)
+
+// Valid indicates whether the value is a known member of the ComponentJoinPlanEngine enum.
+func (e ComponentJoinPlanEngine) Valid() bool {
+	switch e {
+	case ComponentJoinPlanEngineMariadb:
+		return true
+	case ComponentJoinPlanEnginePostgresql:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ComponentManageEngine.
 const (
 	ComponentManageEngineMariadb    ComponentManageEngine = "mariadb"
@@ -3953,6 +3971,82 @@ type ComponentInput struct {
 
 	// VipId Het VIP van de app: keepalived zet het dan alleen op een node waarvan MariaDB mag schrijven. Niet bij PostgreSQL
 	VipId nullable.Nullable[openapi_types.UUID] `json:"vip_id,omitempty"`
+}
+
+// ComponentJoinCandidate defines model for ComponentJoinCandidate.
+type ComponentJoinCandidate struct {
+	Hostname string             `json:"hostname"`
+	NodeId   openapi_types.UUID `json:"node_id"`
+}
+
+// ComponentJoinInput defines model for ComponentJoinInput.
+type ComponentJoinInput struct {
+	// Confirm De slug van het cluster; nodig op prod
+	Confirm *string `json:"confirm,omitempty"`
+
+	// Hash De hash van het plan zoals je het zag
+	Hash   string             `json:"hash"`
+	NodeId openapi_types.UUID `json:"node_id"`
+}
+
+// ComponentJoinMember defines model for ComponentJoinMember.
+type ComponentJoinMember struct {
+	// Changes Wat er op deze node verandert; niets herstart de database
+	Changes  []string           `json:"changes"`
+	Healthy  bool               `json:"healthy"`
+	Hostname string             `json:"hostname"`
+	NodeId   openapi_types.UUID `json:"node_id"`
+	Role     string             `json:"role"`
+	State    string             `json:"state"`
+
+	// Writer De node met het VIP bij Galera
+	Writer bool `json:"writer"`
+}
+
+// ComponentJoinPlan defines model for ComponentJoinPlan.
+type ComponentJoinPlan struct {
+	Blocked bool `json:"blocked"`
+
+	// Candidates De nodes van het cluster zonder de database
+	Candidates  []ComponentJoinCandidate `json:"candidates"`
+	ClusterId   openapi_types.UUID       `json:"cluster_id"`
+	ClusterName string                   `json:"cluster_name"`
+
+	// Effects Wat er gebeurt
+	Effects  []string                `json:"effects"`
+	Engine   ComponentJoinPlanEngine `json:"engine"`
+	Findings []ComponentFinding      `json:"findings"`
+	Hash     string                  `json:"hash"`
+
+	// Members De nodes die er al zijn
+	Members []ComponentJoinMember `json:"members"`
+
+	// Node De nieuwe node met de controles en stappen; null zonder keuze
+	Node nullable.Nullable[ComponentPlanNode] `json:"node"`
+	Prod bool                                 `json:"prod"`
+
+	// Revision De revisie nu; met de node erbij wordt het de volgende
+	Revision int    `json:"revision"`
+	Slug     string `json:"slug"`
+	Title    string `json:"title"`
+
+	// Vip Het VIP van de database; leeg zonder
+	Vip string `json:"vip"`
+
+	// VipJoins De nieuwe node krijgt het VIP in keepalived
+	VipJoins bool `json:"vip_joins"`
+
+	// Votes Het aantal stemmen met de nieuwe node erbij
+	Votes int `json:"votes"`
+}
+
+// ComponentJoinPlanEngine defines model for ComponentJoinPlan.Engine.
+type ComponentJoinPlanEngine string
+
+// ComponentJoinPlanInput defines model for ComponentJoinPlanInput.
+type ComponentJoinPlanInput struct {
+	// NodeId De node die bij de database komt; zonder alleen de kandidaten
+	NodeId *openapi_types.UUID `json:"node_id,omitempty"`
 }
 
 // ComponentManage defines model for ComponentManage.
@@ -10150,6 +10244,12 @@ type CreateComponentDumpJSONRequestBody = ComponentDumpInput
 // RestoreComponentDumpJSONRequestBody defines body for RestoreComponentDump for application/json ContentType.
 type RestoreComponentDumpJSONRequestBody = ComponentRestoreInput
 
+// JoinClusterComponentJSONRequestBody defines body for JoinClusterComponent for application/json ContentType.
+type JoinClusterComponentJSONRequestBody = ComponentJoinInput
+
+// PlanClusterComponentJoinJSONRequestBody defines body for PlanClusterComponentJoin for application/json ContentType.
+type PlanClusterComponentJoinJSONRequestBody = ComponentJoinPlanInput
+
 // ManageClusterComponentJSONRequestBody defines body for ManageClusterComponent for application/json ContentType.
 type ManageClusterComponentJSONRequestBody = ComponentManageInput
 
@@ -10476,6 +10576,12 @@ type ServerInterface interface {
 	// RestoreComponentDump Een dump terugzetten in een nieuwe database naast de bestaande (admin); wordt een taak
 	// (POST /clusters/{clusterId}/components/{componentId}/dumps/{dumpId}/restore)
 	RestoreComponentDump(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID, dumpId openapi_types.UUID)
+	// JoinClusterComponent Een node toevoegen aan een database (admin); wordt een taak
+	// (POST /clusters/{clusterId}/components/{componentId}/join)
+	JoinClusterComponent(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID)
+	// PlanClusterComponentJoin Bekijken wat het toevoegen van een node aan een database doet (admin)
+	// (POST /clusters/{clusterId}/components/{componentId}/join/plan)
+	PlanClusterComponentJoin(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID)
 	// GetClusterComponentManage Beheer van een database per node (admin)
 	// (GET /clusters/{clusterId}/components/{componentId}/manage)
 	GetClusterComponentManage(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID)
@@ -11301,6 +11407,18 @@ func (_ Unimplemented) CreateComponentDump(w http.ResponseWriter, r *http.Reques
 // RestoreComponentDump Een dump terugzetten in een nieuwe database naast de bestaande (admin); wordt een taak
 // (POST /clusters/{clusterId}/components/{componentId}/dumps/{dumpId}/restore)
 func (_ Unimplemented) RestoreComponentDump(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID, dumpId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// JoinClusterComponent Een node toevoegen aan een database (admin); wordt een taak
+// (POST /clusters/{clusterId}/components/{componentId}/join)
+func (_ Unimplemented) JoinClusterComponent(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// PlanClusterComponentJoin Bekijken wat het toevoegen van een node aan een database doet (admin)
+// (POST /clusters/{clusterId}/components/{componentId}/join/plan)
+func (_ Unimplemented) PlanClusterComponentJoin(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -13784,6 +13902,76 @@ func (siw *ServerInterfaceWrapper) RestoreComponentDump(w http.ResponseWriter, r
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RestoreComponentDump(w, r, clusterId, componentId, dumpId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// JoinClusterComponent operation middleware
+func (siw *ServerInterfaceWrapper) JoinClusterComponent(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "componentId" -------------
+	var componentId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "componentId", chi.URLParam(r, "componentId"), &componentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "componentId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.JoinClusterComponent(w, r, clusterId, componentId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PlanClusterComponentJoin operation middleware
+func (siw *ServerInterfaceWrapper) PlanClusterComponentJoin(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "componentId" -------------
+	var componentId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "componentId", chi.URLParam(r, "componentId"), &componentId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "componentId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PlanClusterComponentJoin(w, r, clusterId, componentId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -20060,6 +20248,12 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/clusters/{clusterId}/components/{componentId}/upgrade", wrapper.UpgradeClusterComponent)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/clusters/{clusterId}/components/{componentId}/join/plan", wrapper.PlanClusterComponentJoin)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/clusters/{clusterId}/components/{componentId}/join", wrapper.JoinClusterComponent)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/clusters/{clusterId}/components/{componentId}/recover/plan", wrapper.PlanRecoverClusterComponent)

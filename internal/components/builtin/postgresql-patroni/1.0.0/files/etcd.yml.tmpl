@@ -1,7 +1,9 @@
 # Beheerd door ClusterForge: etcd van de PostgreSQL van cluster
 # {{ .cluster.slug }}. Patroni bewaart hier wie de primary is; elke node van
 # de database (en de scheidsrechter) heeft een lid. De initial-* gelden
-# alleen bij de eerste start.
+# alleen bij de eerste start. Een node die later bij de database kwam,
+# sluit aan bij de leden die er al zijn (existing); ClusterForge voegt hem
+# eerst als lid toe.
 name: {{ .node.hostname }}
 data-dir: /var/lib/etcd/{{ .cluster.slug }}
 listen-peer-urls: http://{{ .node.address }}:2380
@@ -10,7 +12,8 @@ initial-advertise-peer-urls: http://{{ .node.address }}:2380
 advertise-client-urls: http://{{ .node.address }}:2379
 initial-cluster: {{ $first := true }}{{ range .nodes }}{{ if not $first }},{{ end }}{{ .hostname }}=http://{{ .address }}:2380{{ $first = false }}{{ end }}
 initial-cluster-token: clusterforge-{{ .cluster.slug }}
-initial-cluster-state: new
+{{- $state := "new" }}{{ with .params.etcd_joined }}{{ range fields . }}{{ if eq . $.node.hostname }}{{ $state = "existing" }}{{ end }}{{ end }}{{ end }}
+initial-cluster-state: {{ $state }}
 # Oude versies van de sleutels opruimen, elk uur.
 auto-compaction-mode: periodic
 auto-compaction-retention: "1h"

@@ -18,6 +18,7 @@ export type ComponentManageAction = components["schemas"]["ComponentManageAction
 export type ComponentSettingsPlan = components["schemas"]["ComponentSettingsPlan"];
 export type ComponentSettingParam = components["schemas"]["ComponentSettingParam"];
 export type ComponentUpgradePlan = components["schemas"]["ComponentUpgradePlan"];
+export type ComponentJoinPlan = components["schemas"]["ComponentJoinPlan"];
 export type ComponentDatabases = components["schemas"]["ComponentDatabases"];
 export type ComponentDatabase = components["schemas"]["ComponentDatabase"];
 export type ComponentDatabaseUser = components["schemas"]["ComponentDatabaseUser"];
@@ -157,6 +158,24 @@ export function useUpgradePlan(clusterId: string, componentId: string) {
   });
 }
 
+// useJoinPlan zegt wat het toevoegen van een node doet; zonder node zijn het
+// alleen de nodes die erbij kunnen. Er verandert niets.
+export function useJoinPlan(clusterId: string, componentId: string, nodeId: string) {
+  return useQuery({
+    queryKey: ["clusters", clusterId, "components", componentId, "join-plan", nodeId],
+    queryFn: async () =>
+      unwrap(
+        await api.POST("/clusters/{clusterId}/components/{componentId}/join/plan", {
+          params: { path: { clusterId, componentId } },
+          body: nodeId ? { node_id: nodeId } : {},
+        }),
+      ),
+    gcTime: 0,
+    retry: false,
+    refetchOnWindowFocus: false,
+  });
+}
+
 export function usePlanComponent(clusterId: string) {
   return useMutation({
     mutationFn: async (body: ComponentInput) =>
@@ -265,6 +284,20 @@ export function useUpgradeComponent(clusterId: string) {
         await api.POST("/clusters/{clusterId}/components/{componentId}/upgrade", {
           params: { path: { clusterId, componentId: id } },
           body: { hash, confirm },
+        }),
+      ),
+    onSuccess: invalidate,
+  });
+}
+
+export function useJoinComponent(clusterId: string) {
+  const invalidate = useInvalidate(clusterId);
+  return useMutation({
+    mutationFn: async ({ id, nodeId, hash, confirm }: { id: string; nodeId: string; hash: string; confirm?: string }) =>
+      unwrap(
+        await api.POST("/clusters/{clusterId}/components/{componentId}/join", {
+          params: { path: { clusterId, componentId: id } },
+          body: { node_id: nodeId, hash, confirm },
         }),
       ),
     onSuccess: invalidate,

@@ -31,7 +31,7 @@ func (s *Server) ListComponentTemplates(w http.ResponseWriter, r *http.Request) 
 		}
 		for _, p := range t.Params {
 			// Het eigen VIP kies je apart (vip_address), niet als instelling.
-			if p.Name == "vip" {
+			if p.Name == "vip" || components.Managed(p.Name) {
 				continue
 			}
 			out.Params = append(out.Params, toAPIParam(p))
@@ -368,12 +368,7 @@ func toAPIComponentPlan(p components.Plan) gen.ComponentPlan {
 		Nodes: make([]gen.ComponentPlanNode, 0, len(p.Nodes)), Findings: make([]gen.ComponentFinding, 0, len(p.Findings)),
 	}
 	for _, n := range p.Nodes {
-		out.Nodes = append(out.Nodes, gen.ComponentPlanNode{
-			NodeId: n.NodeID, Hostname: n.Hostname, Role: n.Role, Index: n.Index, Address: n.Address, Os: n.OS, PveType: n.PveType,
-			PveNode: n.PveNode, Vmid: n.VMID, MemoryBytes: n.MemoryBytes, MemoryUsedPct: nullableOf(float32Of(n.MemoryUsedPct)),
-			NeedBytes: n.NeedBytes, FreeAfterPct: nullableOf(float32Of(n.FreeAfterPct)), DiskFreeBytes: nullableOf(n.DiskFreeBytes),
-			DiskMount: n.DiskMount, Existing: n.Existing, Steps: nonNil(n.Steps), VipInstance: n.VIPInstance, VipDiff: n.VIPDiff,
-		})
+		out.Nodes = append(out.Nodes, toAPIPlanNode(n))
 	}
 	var vip *gen.ComponentPlanVIP
 	if v := p.VIP; v != nil {
@@ -386,6 +381,15 @@ func toAPIComponentPlan(p components.Plan) gen.ComponentPlan {
 		})
 	}
 	return out
+}
+
+func toAPIPlanNode(n components.PlanNode) gen.ComponentPlanNode {
+	return gen.ComponentPlanNode{
+		NodeId: n.NodeID, Hostname: n.Hostname, Role: n.Role, Index: n.Index, Address: n.Address, Os: n.OS, PveType: n.PveType,
+		PveNode: n.PveNode, Vmid: n.VMID, MemoryBytes: n.MemoryBytes, MemoryUsedPct: nullableOf(float32Of(n.MemoryUsedPct)),
+		NeedBytes: n.NeedBytes, FreeAfterPct: nullableOf(float32Of(n.FreeAfterPct)), DiskFreeBytes: nullableOf(n.DiskFreeBytes),
+		DiskMount: n.DiskMount, Existing: n.Existing, Steps: nonNil(n.Steps), VipInstance: n.VIPInstance, VipDiff: n.VIPDiff,
+	}
 }
 
 func float32Of(p *float64) *float32 {

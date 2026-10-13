@@ -22,12 +22,14 @@ import (
 
 // jobParams gaan mee met de taak: welk onderdeel in welke revisie. Bij
 // nieuwe instellingen staat de volgorde van de nodes erbij, met de schrijver
-// als laatste, en herstart PostgreSQL op elke node (Restart).
+// als laatste, en herstart PostgreSQL op elke node (Restart). Join zijn de
+// nodes die de taak toevoegt; de andere herstarten dan niet.
 type jobParams struct {
 	ComponentID uuid.UUID   `json:"component_id"`
 	Revision    int         `json:"revision"`
 	Order       []uuid.UUID `json:"order,omitempty"`
 	Restart     bool        `json:"restart,omitempty"`
+	Join        []uuid.UUID `json:"join,omitempty"`
 }
 
 // Marker is het merkteken dat een node meedoet in het Galera-cluster met
@@ -47,11 +49,12 @@ type rendered struct {
 	// vrrp is het wachtwoord van VRRP voor een eigen VIP.
 	vrrp string
 	// revision is de revisie die de taak toepast, order de volgorde van de
-	// nodes en restart of PostgreSQL op elke node herstart; uit de
-	// parameters van de taak.
+	// nodes, restart of PostgreSQL op elke node herstart en join de nodes
+	// die erbij komen; uit de parameters van de taak.
 	revision int
 	order    []uuid.UUID
 	restart  bool
+	join     []uuid.UUID
 }
 
 func (s *Service) load(ctx context.Context, p jobParams) (*rendered, error) {
@@ -94,7 +97,7 @@ func (s *Service) load(ctx context.Context, p jobParams) (*rendered, error) {
 	if err != nil {
 		return nil, err
 	}
-	r := &rendered{comp: comp, spec: spec, tpl: tpl, secrets: secrets, states: states, revision: p.Revision, order: p.Order, restart: p.Restart}
+	r := &rendered{comp: comp, spec: spec, tpl: tpl, secrets: secrets, states: states, revision: p.Revision, order: p.Order, restart: p.Restart, join: p.Join}
 	if own {
 		r.vrrp = opened[secretName(comp.Engine, vrrpSecret)]
 	}
@@ -227,7 +230,11 @@ func (s *Service) applyData(ctx context.Context, j *jobs.Job, st *jobs.Step, r *
 	if err != nil {
 		return err
 	}
-	if member && changed > 0 {
+	if member && changed > 0 && r.joining(n) {
+		// Er komt een node bij: zijn adres geldt hier bij de volgende start.
+		// MariaDB die draait, hoort de nieuwe node via Galera zelf.
+		st.Logf("%s krijgt de nieuwe node in zijn configuratie voor de volgende start; MariaDB herstart niet", n.Hostname)
+	} else if member && changed > 0 {
 		// De node deed al mee en kreeg een nieuwe configuratie: herstarten,
 		// en pas verder als hij weer Synced is.
 		st.Logf("%s deed al mee; MariaDB herstart om de nieuwe configuratie te lezen", n.Hostname)
@@ -240,11 +247,15 @@ func (s *Service) applyData(ctx context.Context, j *jobs.Job, st *jobs.Step, r *
 }
 
 // applyArbiter zet garbd op de scheidsrechter en wacht tot het cluster
-// hem meetelt.
+// hem meetelt. Komt er een node bij, dan herstart garbd niet: het nieuwe
+// adres geldt bij zijn volgende start.
 func (s *Service) applyArbiter(ctx context.Context, j *jobs.Job, st *jobs.Step, r *rendered, n Node, want int) error {
 	steps, err := deploy.RenderNode(r.tpl, r.spec.deploySpec(), r.secrets, r.states, n.NodeID)
 	if err != nil {
 		return err
+	}
+	if r.joining(n) {
+		steps = quiet(steps)
 	}
 	if _, err := deploy.ApplySteps(ctx, s.bus, options(ctx, j, st, n, "", s.Retry), steps); err != nil {
 		return err

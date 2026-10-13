@@ -245,7 +245,7 @@ type componentOwnVIPPlan struct {
 
 // patroniLab is Nextcloud op nc1 tot nc3 (10.0.20.186-188) met agents die
 // Patroni naspelen. nc1 en nc2 hebben het VIP van de app al in keepalived,
-// nc3 nog geen keepalived.
+// nc3 nog geen keepalived. Extra nodes, zoals nc4, zijn als nc3.
 type patroniLab struct {
 	e   *testEnv
 	c   *client
@@ -254,7 +254,7 @@ type patroniLab struct {
 	ids map[string]string
 }
 
-func newPatroniHosts(t *testing.T) patroniLab {
+func newPatroniHosts(t *testing.T, extra ...string) patroniLab {
 	t.Helper()
 	e, c := adminClient(t)
 	ctx := context.Background()
@@ -266,7 +266,8 @@ func newPatroniHosts(t *testing.T) patroniLab {
 	}
 	g := &patroniHosts{hosts: map[string]*agenttest.Host{}}
 	ids := map[string]string{}
-	for i, name := range []string{"nc1", "nc2", "nc3"} {
+	names := append([]string{"nc1", "nc2", "nc3"}, extra...)
+	for i, name := range names {
 		ip := fmt.Sprintf("10.0.20.%d", 186+i)
 		var n node
 		if s := c.do("POST", "/api/v1/nodes", map[string]any{"hostname": name, "cluster_id": nc.ID, "primary_ip": ip}, &n); s != http.StatusCreated {
@@ -279,7 +280,7 @@ func newPatroniHosts(t *testing.T) patroniLab {
 			// nc1 en nc2 hebben het VIP van de app al in keepalived; nc3 heeft
 			// nog geen keepalived.
 			h := agenttest.NewHost(root, ip)
-			if name != "nc3" {
+			if name == "nc1" || name == "nc2" {
 				writeFile(t, filepath.Join(root, "etc/keepalived/keepalived.conf"), ncKeepalived(name, 150-10*i), 0o640)
 				if _, err := h.Exec(ctx, "apt-get", "install", "-y", "keepalived"); err != nil {
 					t.Fatal(err)
@@ -297,7 +298,7 @@ func newPatroniHosts(t *testing.T) patroniLab {
 	}
 	// PostgreSQL op de andere nodes is bereikbaar op poort 5432.
 	network := func(addr string) *agenttest.Host {
-		for i, name := range []string{"nc1", "nc2", "nc3"} {
+		for i, name := range names {
 			if addr == fmt.Sprintf("10.0.20.%d:5432", 186+i) {
 				return g.hosts[name]
 			}
@@ -307,10 +308,10 @@ func newPatroniHosts(t *testing.T) patroniLab {
 	for _, h := range g.hosts {
 		h.Locked(func() { h.Network = network })
 	}
-	eventually(t, "facts van de drie nodes", func() bool {
+	eventually(t, "facts van de nodes", func() bool {
 		var n int
 		_ = e.pool.QueryRow(ctx, "SELECT count(*) FROM node_facts f JOIN nodes n ON n.id = f.node_id WHERE n.cluster_id = $1 AND f.facts->'os'->>'id' = 'debian'", nc.ID).Scan(&n)
-		return n == 3
+		return n == len(names)
 	})
 	return patroniLab{e: e, c: c, nc: nc, g: g, ids: ids}
 }
