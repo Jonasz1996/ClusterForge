@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/Jonasz1996/clusterforge/internal/assistant"
+	"github.com/Jonasz1996/clusterforge/internal/risk"
 	"github.com/Jonasz1996/clusterforge/internal/store"
 )
 
@@ -684,5 +685,15 @@ func TestDocsSummary(t *testing.T) {
 	if len(sums) != 3 || sums[0] != "Samenvatting 'In het kort' van Web weggehaald" ||
 		sums[2] != "Samenvatting 'In het kort' van Web geschreven door de assistent, $0,02 (claude-sonnet-5-5)" {
 		t.Fatalf("logboek = %q", sums)
+	}
+}
+
+// TestCardNames: de assistent kent elke kaart bij naam, zodat de uitleg
+// van een bevinding zegt op welke kaart ze staat.
+func TestCardNames(t *testing.T) {
+	for card := range risk.CardLabels {
+		if cardNames[card] == "" {
+			t.Errorf("kaart %s heeft geen naam voor de assistent", card)
+		}
 	}
 }
