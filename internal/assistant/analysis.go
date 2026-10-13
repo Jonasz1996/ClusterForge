@@ -62,6 +62,10 @@ func (s *Service) Analyze(ctx context.Context, c Caller, id uuid.UUID) (*Turn, e
 	if isErr {
 		return nil, fmt.Errorf("gegevens van incident #%d voor de analyse: %s", inc.Number, data)
 	}
+	dbs, err := s.q.IncidentDatabases(ctx, id)
+	if err != nil {
+		return nil, err
+	}
 	scope := "viewer"
 	if c.admin() {
 		scope = "admin"
@@ -70,7 +74,7 @@ func (s *Service) Analyze(ctx context.Context, c Caller, id uuid.UUID) (*Turn, e
 		Kind:        KindAnalysis,
 		Title:       fmt.Sprintf("Analyse van incident #%d: %s", inc.Number, inc.Title),
 		Question:    fmt.Sprintf("Analyseer incident #%d: %s.", inc.Number, inc.Title),
-		Prompt:      analysisPrompt(inc, data),
+		Prompt:      analysisPrompt(inc, data, dbs),
 		Effort:      EffortHigh,
 		SubjectType: SubjectIncident, SubjectID: &id, IncidentID: &id, Claim: &id,
 		Finish: func(ctx context.Context, r Result) error {
@@ -79,8 +83,16 @@ func (s *Service) Analyze(ctx context.Context, c Caller, id uuid.UUID) (*Turn, e
 	})
 }
 
-func analysisPrompt(inc store.Incident, data string) string {
-	return fmt.Sprintf(`Analyseer incident #%d, %q. Onderaan staan de gegevens van ClusterForge over dit incident, zoals de tool incident ze geeft: het incident, de analyse van What Broke met de waarschijnlijke oorzaken, de tijdlijn en de geschiedenis. Kijk met de tools verder waar dat helpt, bijvoorbeeld naar de metrics van het venster, de wijzigingen op de nodes, de impact op afhankelijke diensten of eerdere incidenten.
+// analysisPrompt is de opdracht voor de analyse van een incident; dbs zijn
+// de clusters en nodes met een database die het raakte.
+func analysisPrompt(inc store.Incident, data string, dbs []string) string {
+	var db string
+	if len(dbs) > 0 {
+		db = fmt.Sprintf(`
+
+Het incident raakte %s, met een database. Gaan de reden of de tijdlijn over de database, of kan ze meespelen, kijk dan met de tool database hoe ze ervoor staat: welke nodes meedoen en in welke toestand, wie het VIP heeft, de laatste herstart en de dumps; en met database_clients welke apps de database gebruiken en dus mee geraakt waren. Leg in gewone woorden uit wat Galera of Patroni deed, zoals een node die het cluster verliet en met een volledige kopie (SST) terugkwam, een failover naar een andere primary, of een cluster dat zonder meerderheid stopte. Noem bij Wat je kunt doen het runbook uit het hoofdstuk Database van de documentatie (tool documentatie) en Beheer bij het onderdeel Database op de pagina van het cluster.`, joinNames(dbs))
+	}
+	return fmt.Sprintf(`Analyseer incident #%d, %q. Onderaan staan de gegevens van ClusterForge over dit incident, zoals de tool incident ze geeft: het incident, de analyse van What Broke met de waarschijnlijke oorzaken, de tijdlijn en de geschiedenis. Kijk met de tools verder waar dat helpt, bijvoorbeeld naar de metrics van het venster, de wijzigingen op de nodes, de impact op afhankelijke diensten of eerdere incidenten.%s
 
 Schrijf het resultaat in precies deze vorm, met deze vier kopjes en niets ervoor:
 
@@ -97,7 +109,15 @@ Wat de gegevens niet laten zien en wat de gebruiker zelf moet nakijken, als kort
 Concrete stappen, elk met een link naar het scherm in ClusterForge waar de gebruiker het zelf doet. Je voert zelf niets uit.
 
 Gegevens van ClusterForge (tool incident):
-%s`, inc.Number, inc.Title, data)
+%s`, inc.Number, inc.Title, db, data)
+}
+
+// joinNames schrijft a, b en c.
+func joinNames(names []string) string {
+	if len(names) < 2 {
+		return strings.Join(names, "")
+	}
+	return strings.Join(names[:len(names)-1], ", ") + " en " + names[len(names)-1]
 }
 
 // AnalysisText is het resultaat van een analyse zonder wat het model voor

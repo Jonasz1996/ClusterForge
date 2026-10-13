@@ -916,6 +916,8 @@ func toolInputs(cluster, node, job string) map[string][]string {
 			fmt.Sprintf(`{"cluster":%q,"namespace":"demo","pod":"web-7c9-c","container":"","vorige":true}`, cluster),
 			fmt.Sprintf(`{"cluster":%q,"namespace":"demo","pod":"web-7c9-c","container":"main","vorige":false}`, cluster),
 		},
+		"database":         {fmt.Sprintf(`{"cluster":%q}`, cluster)},
+		"database_clients": {`{"cluster":""}`, fmt.Sprintf(`{"cluster":%q}`, cluster)},
 	}
 }
 

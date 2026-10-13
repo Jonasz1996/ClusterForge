@@ -285,6 +285,40 @@ func (q *Queries) GetIncidentIDByNumber(ctx context.Context, number int32) (uuid
 	return id, err
 }
 
+const incidentDatabases = `-- name: IncidentDatabases :many
+SELECT DISTINCT coalesce(c.name, s.name)::text AS name
+FROM incident_subjects s
+LEFT JOIN clusters c ON c.id = coalesce(s.cluster_id, CASE WHEN s.subject_type = 'cluster' THEN s.subject_id END)
+WHERE s.incident_id = $1
+  AND (EXISTS (SELECT 1 FROM cluster_components cc
+               WHERE cc.cluster_id = c.id AND cc.applied_revision IS NOT NULL AND cc.engine IN ('mariadb', 'postgresql'))
+       OR EXISTS (SELECT 1 FROM db_servers d JOIN nodes n ON n.id = d.node_id WHERE n.cluster_id = c.id)
+       OR (s.subject_type = 'node' AND EXISTS (SELECT 1 FROM db_servers d WHERE d.node_id = s.subject_id)))
+ORDER BY 1
+`
+
+// De clusters en losse nodes met een database die een incident raakte:
+// een toegepast onderdeel Database of een databaseserver op hun nodes.
+func (q *Queries) IncidentDatabases(ctx context.Context, incidentID uuid.UUID) ([]string, error) {
+	rows, err := q.db.Query(ctx, incidentDatabases, incidentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		items = append(items, name)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const insertAssistantMessage = `-- name: InsertAssistantMessage :one
 INSERT INTO assistant_messages (conversation_id, seq, role, content, text, model, input_tokens, output_tokens,
                                 cache_read_tokens, cache_write_tokens, cost_microusd, stop_reason, user_id)

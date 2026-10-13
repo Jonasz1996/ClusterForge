@@ -105,3 +105,16 @@ UPDATE incidents
 SET ai_analysis = @ai_analysis, ai_model = @ai_model, ai_at = @ai_at, ai_by = @ai_by, ai_automatic = @ai_automatic, ai_scope = @ai_scope,
     ai_conversation_id = @ai_conversation_id, ai_cost_microusd = @ai_cost_microusd
 WHERE id = @id;
+
+-- name: IncidentDatabases :many
+-- De clusters en losse nodes met een database die een incident raakte:
+-- een toegepast onderdeel Database of een databaseserver op hun nodes.
+SELECT DISTINCT coalesce(c.name, s.name)::text AS name
+FROM incident_subjects s
+LEFT JOIN clusters c ON c.id = coalesce(s.cluster_id, CASE WHEN s.subject_type = 'cluster' THEN s.subject_id END)
+WHERE s.incident_id = @incident_id
+  AND (EXISTS (SELECT 1 FROM cluster_components cc
+               WHERE cc.cluster_id = c.id AND cc.applied_revision IS NOT NULL AND cc.engine IN ('mariadb', 'postgresql'))
+       OR EXISTS (SELECT 1 FROM db_servers d JOIN nodes n ON n.id = d.node_id WHERE n.cluster_id = c.id)
+       OR (s.subject_type = 'node' AND EXISTS (SELECT 1 FROM db_servers d WHERE d.node_id = s.subject_id)))
+ORDER BY 1;
