@@ -1139,6 +1139,7 @@ func (e EventActorType) Valid() bool {
 
 // Defines values for FailoverScenario.
 const (
+	FailoverScenarioDatabaseStop   FailoverScenario = "database_stop"
 	FailoverScenarioKeepalivedStop FailoverScenario = "keepalived_stop"
 	FailoverScenarioServiceStop    FailoverScenario = "service_stop"
 	FailoverScenarioVmHardStop     FailoverScenario = "vm_hard_stop"
@@ -1147,6 +1148,8 @@ const (
 // Valid indicates whether the value is a known member of the FailoverScenario enum.
 func (e FailoverScenario) Valid() bool {
 	switch e {
+	case FailoverScenarioDatabaseStop:
+		return true
 	case FailoverScenarioKeepalivedStop:
 		return true
 	case FailoverScenarioServiceStop:
@@ -2663,20 +2666,25 @@ func (e TestRunTrigger) Valid() bool {
 
 // Defines values for TestRunEventKind.
 const (
-	TestRunEventKindClear    TestRunEventKind = "clear"
-	TestRunEventKindDown     TestRunEventKind = "down"
-	TestRunEventKindFault    TestRunEventKind = "fault"
-	TestRunEventKindReady    TestRunEventKind = "ready"
-	TestRunEventKindReturn   TestRunEventKind = "return"
-	TestRunEventKindStep     TestRunEventKind = "step"
-	TestRunEventKindTakeover TestRunEventKind = "takeover"
-	TestRunEventKindUp       TestRunEventKind = "up"
+	TestRunEventKindClear     TestRunEventKind = "clear"
+	TestRunEventKindDbReady   TestRunEventKind = "db_ready"
+	TestRunEventKindDown      TestRunEventKind = "down"
+	TestRunEventKindFault     TestRunEventKind = "fault"
+	TestRunEventKindReady     TestRunEventKind = "ready"
+	TestRunEventKindReturn    TestRunEventKind = "return"
+	TestRunEventKindStep      TestRunEventKind = "step"
+	TestRunEventKindTakeover  TestRunEventKind = "takeover"
+	TestRunEventKindUp        TestRunEventKind = "up"
+	TestRunEventKindWriteDown TestRunEventKind = "write_down"
+	TestRunEventKindWriteUp   TestRunEventKind = "write_up"
 )
 
 // Valid indicates whether the value is a known member of the TestRunEventKind enum.
 func (e TestRunEventKind) Valid() bool {
 	switch e {
 	case TestRunEventKindClear:
+		return true
+	case TestRunEventKindDbReady:
 		return true
 	case TestRunEventKindDown:
 		return true
@@ -2691,6 +2699,10 @@ func (e TestRunEventKind) Valid() bool {
 	case TestRunEventKindTakeover:
 		return true
 	case TestRunEventKindUp:
+		return true
+	case TestRunEventKindWriteDown:
+		return true
+	case TestRunEventKindWriteUp:
 		return true
 	default:
 		return false
@@ -6317,6 +6329,9 @@ type FailoverMeasurements struct {
 	TakeoverNode   string                                `json:"takeover_node"`
 	TakeoverNodeId nullable.Nullable[openapi_types.UUID] `json:"takeover_node_id"`
 	WindowMs       int64                                 `json:"window_ms"`
+
+	// Writes De schrijftest, bij een test die een database raakt
+	Writes nullable.Nullable[FailoverWrites] `json:"writes"`
 }
 
 // FailoverOptions defines model for FailoverOptions.
@@ -6373,7 +6388,7 @@ type FailoverScenarioOption struct {
 	// Reason Waarom het scenario hier nu niet kan
 	Reason string `json:"reason"`
 
-	// Units De diensten die service_stop hier kan stoppen
+	// Units De diensten die service_stop of database_stop hier kan stoppen
 	Units []string `json:"units"`
 }
 
@@ -6431,7 +6446,7 @@ type FailoverTestInput struct {
 	// Scheduled Gepland in het testvenster; niet op prod. Standaard uit
 	Scheduled *bool `json:"scheduled,omitempty"`
 
-	// Service nginx of haproxy bij service_stop
+	// Service nginx of haproxy bij service_stop; bij database_stop kiest ClusterForge zelf (mariadb of patroni)
 	Service *string            `json:"service,omitempty"`
 	VipId   openapi_types.UUID `json:"vip_id"`
 }
@@ -6447,12 +6462,60 @@ type FailoverTestList struct {
 
 // FailoverVIPOption defines model for FailoverVIPOption.
 type FailoverVIPOption struct {
-	Address       string                    `json:"address"`
-	Id            openapi_types.UUID        `json:"id"`
+	Address string `json:"address"`
+
+	// Database De database achter het VIP, zoals MariaDB met Galera; leeg als er geen is
+	Database string             `json:"database"`
+	Id       openapi_types.UUID `json:"id"`
+
+	// OwnVip Een eigen VIP van de database: het blijft waar de database schrijft en komt niet terug
+	OwnVip        bool                      `json:"own_vip"`
 	OwnerHostname nullable.Nullable[string] `json:"owner_hostname"`
 
 	// Probe Een HTTP-pad met de verwachte status, of een TCP-poort. De host is altijd het VIP.
 	Probe FailoverProbe `json:"probe"`
+}
+
+// FailoverWrites De schrijftest: een andere datanode schreef tijdens de test elke halve seconde een rij via het VIP van de database, en telde na de test of elke bevestigde rij er nog was.
+type FailoverWrites struct {
+	// Attempts Schrijfacties sinds de storing
+	Attempts int `json:"attempts"`
+
+	// CheckError Waarom tellen niet lukte
+	CheckError string `json:"check_error"`
+
+	// Confirmed Rijen die de database tijdens de hele test bevestigde
+	Confirmed int `json:"confirmed"`
+
+	// DowntimeMs Van de eerste mislukte schrijfactie tot de eerste van drie goede op rij, tijdens de meting
+	DowntimeMs nullable.Nullable[int64] `json:"downtime_ms"`
+
+	// Extra Rijen waarvan de bevestiging niet aankwam, maar die er wel zijn
+	Extra int `json:"extra"`
+
+	// FailbackMs De onderbreking bij de terugkeer
+	FailbackMs nullable.Nullable[int64] `json:"failback_ms"`
+
+	// Failed Hoeveel daarvan mislukten
+	Failed int `json:"failed"`
+
+	// Lost Bevestigde rijen die na de test weg waren; null als tellen niet lukte
+	Lost nullable.Nullable[int] `json:"lost"`
+
+	// LostSeqs De volgnummers van de eerste verloren rijen
+	LostSeqs []int64 `json:"lost_seqs"`
+
+	// Node De datanode die schreef
+	Node string `json:"node"`
+	Port int    `json:"port"`
+
+	// Recovered Schrijven lukte aan het eind van de meting weer
+	Recovered bool             `json:"recovered"`
+	Segments  []TestRunSegment `json:"segments"`
+
+	// Title De database, zoals MariaDB met Galera
+	Title string `json:"title"`
+	Vip   string `json:"vip"`
 }
 
 // GitApproveInput defines model for GitApproveInput.

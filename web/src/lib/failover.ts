@@ -182,11 +182,13 @@ export function confirmText(t: FailoverTest, options: FailoverOptions) {
         (owner ? `; hij heeft nu ${vips}. ` : ". ")
       : `${unitOf(t)} wordt gestopt ${owner ? `op ${owner}, nu eigenaar van ${vips}` : `op de eigenaar van ${t.vip_address}`}. `;
   const back = t.scenario === "vm_hard_stop" ? "start ClusterForge de VM weer" : `zet ClusterForge ${unitOf(t)} weer aan`;
+  const db = options.vips.find((v) => v.id === t.vip_id)?.database;
   return (
     fault +
     `Verwacht: een andere node neemt binnen ${t.max_takeover_seconds} s over` +
     (t.expect_failback ? ` en daarna gaat het VIP terug naar ${owner ?? "de oorspronkelijke node"}. ` : ". ") +
-    `Lukt dat niet, dan is ${t.vip_address} hoogstens ${windowSeconds(t.max_takeover_seconds)} s onbereikbaar; daarna ${back}.`
+    `Lukt dat niet, dan is ${t.vip_address} hoogstens ${windowSeconds(t.max_takeover_seconds)} s onbereikbaar; daarna ${back}.` +
+    (db ? ` Een andere datanode schrijft ondertussen elke halve seconde een rij in ${db} via ${t.vip_address}.` : "")
   );
 }
 

@@ -383,20 +383,35 @@ function FailoverForm({
   const busy = create.isPending || update.isPending || remove.isPending;
 
   const defaultName = (sc: FailoverScenario, svc: string) =>
-    sc === "vm_hard_stop" ? "VM hard uitzetten" : sc === "keepalived_stop" ? "keepalived stoppen" : `${svc} stoppen`;
+    sc === "vm_hard_stop"
+      ? "VM hard uitzetten"
+      : sc === "keepalived_stop"
+        ? "keepalived stoppen"
+        : sc === "database_stop"
+          ? "database stoppen"
+          : `${svc} stoppen`;
   const shownName = nameTouched ? name : defaultName(scenario, service);
+  const vip = options.vips.find((v) => v.id === vipId);
+  // De database stoppen kan alleen op het VIP van een database.
+  const vipChoices =
+    scenario === "database_stop" ? options.vips.filter((v) => v.database || v.id === initial?.vip_id) : options.vips;
 
   function pickScenario(key: FailoverScenario) {
     setScenario(key);
     const opt = options.scenarios.find((s) => s.key === key);
     if (!secsTouched && opt) setSecs(String(opt.default_seconds));
     if (key === "service_stop" && opt && !opt.units.includes(service)) setService(opt.units[0] ?? "nginx");
+    if (key === "database_stop" && !vip?.database) {
+      const first = options.vips.find((v) => v.database);
+      if (first) pickVip(first.id);
+    }
   }
 
   function pickVip(id: string) {
     setVipId(id);
     const v = options.vips.find((x) => x.id === id);
     if (!probeTouched && v) applyProbe(v.probe);
+    if (v?.own_vip) setFailback(false);
   }
 
   function applyProbe(p: FailoverProbe) {
@@ -417,7 +432,7 @@ function FailoverForm({
       scenario,
       service: scenario === "service_stop" ? service : "",
       max_takeover_seconds: Number(secs),
-      expect_failback: failback,
+      expect_failback: failback && !vip?.own_vip,
       probe: probeKind === "tcp" ? { tcp: { port: Number(port) } } : { http: { path, expect: Number(expect) } },
       scheduled: scheduled && !options.prod,
     };
@@ -489,14 +504,21 @@ function FailoverForm({
         )}
         <Field label="VIP" htmlFor="fo-vip">
           <Select id="fo-vip" required value={vipId} onChange={(e) => pickVip(e.target.value)}>
-            {options.vips.length === 0 && <option value="">Geen VIP&apos;s</option>}
-            {options.vips.map((v) => (
+            {vipChoices.length === 0 && <option value="">Geen VIP&apos;s</option>}
+            {vipChoices.map((v) => (
               <option key={v.id} value={v.id}>
                 {v.address}
+                {v.database ? ` · ${v.database}` : ""}
                 {v.owner_hostname ? ` (nu op ${v.owner_hostname})` : ""}
               </option>
             ))}
           </Select>
+          {vip?.database && (
+            <p className="mt-1 text-xs text-slate-500">
+              Tijdens de test schrijft een andere datanode elke halve seconde een rij in {vip.database} via dit VIP. Het verslag
+              zegt hoe lang schrijven niet lukte en of er een bevestigde rij verloren ging.
+            </p>
+          )}
           {fieldError("vip_id")}
         </Field>
         <Field label="Verwachte overname in seconden" htmlFor="fo-secs" hint="Hoogstens 120 s. Duurt het langer, dan is de uitslag FAIL.">
@@ -529,13 +551,22 @@ function FailoverForm({
         </Field>
       </div>
 
-      <label className="flex items-start gap-2 text-sm">
-        <input type="checkbox" className="mt-0.5" checked={failback} onChange={(e) => setFailback(e.target.checked)} />
+      <label className={cx("flex items-start gap-2 text-sm", vip?.own_vip && "opacity-60")}>
+        <input
+          type="checkbox"
+          className="mt-0.5"
+          checked={failback && !vip?.own_vip}
+          disabled={vip?.own_vip}
+          onChange={(e) => setFailback(e.target.checked)}
+        />
         <span>
           VIP moet daarna terug naar de oorspronkelijke node
           <span className="block text-xs text-slate-500">
-            Aan bij keepalived met preempt, zoals de template keepalived-nginx. Uit als het VIP na een overname blijft waar het is.
+            {vip?.own_vip
+              ? `Het VIP van ${vip.database} blijft waar de database schrijft; het komt niet terug.`
+              : "Aan bij keepalived met preempt, zoals de template keepalived-nginx. Uit als het VIP na een overname blijft waar het is."}
           </span>
+          {fieldError("expect_failback")}
         </span>
       </label>
 

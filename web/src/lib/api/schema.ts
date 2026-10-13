@@ -6625,7 +6625,7 @@ export interface components {
             items: components["schemas"]["DriftIgnore"][];
         };
         /** @enum {string} */
-        FailoverScenario: "keepalived_stop" | "service_stop" | "vm_hard_stop";
+        FailoverScenario: "keepalived_stop" | "service_stop" | "database_stop" | "vm_hard_stop";
         FailoverProbeHTTP: {
             /** @description Begint met /, zoals /health */
             path: string;
@@ -6645,7 +6645,7 @@ export interface components {
             /** Format: uuid */
             vip_id: string;
             scenario: components["schemas"]["FailoverScenario"];
-            /** @description nginx of haproxy bij service_stop */
+            /** @description nginx of haproxy bij service_stop; bij database_stop kiest ClusterForge zelf (mariadb of patroni) */
             service?: string;
             /** @description 1 tot 120 */
             max_takeover_seconds: number;
@@ -6699,7 +6699,7 @@ export interface components {
             /** @description Waarom het scenario hier nu niet kan */
             reason: string;
             default_seconds: number;
-            /** @description De diensten die service_stop hier kan stoppen */
+            /** @description De diensten die service_stop of database_stop hier kan stoppen */
             units: string[];
         };
         FailoverVIPOption: {
@@ -6708,6 +6708,10 @@ export interface components {
             address: string;
             owner_hostname: string | null;
             probe: components["schemas"]["FailoverProbe"];
+            /** @description De database achter het VIP, zoals MariaDB met Galera; leeg als er geen is */
+            database: string;
+            /** @description Een eigen VIP van de database: het blijft waar de database schrijft en komt niet terug */
+            own_vip: boolean;
         };
         FailoverOptions: {
             scenarios: components["schemas"]["FailoverScenarioOption"][];
@@ -6754,7 +6758,7 @@ export interface components {
              */
             t_ms: number;
             /** @enum {string} */
-            kind: "fault" | "down" | "up" | "takeover" | "clear" | "ready" | "return" | "step";
+            kind: "fault" | "down" | "up" | "takeover" | "clear" | "ready" | "return" | "step" | "write_down" | "write_up" | "db_ready";
             text: string;
         };
         TestRunSegment: {
@@ -6763,6 +6767,42 @@ export interface components {
             /** Format: int64 */
             to_ms: number;
             ok: boolean;
+        };
+        /** @description De schrijftest: een andere datanode schreef tijdens de test elke halve seconde een rij via het VIP van de database, en telde na de test of elke bevestigde rij er nog was. */
+        FailoverWrites: {
+            /** @description De datanode die schreef */
+            node: string;
+            /** @description De database, zoals MariaDB met Galera */
+            title: string;
+            vip: string;
+            port: number;
+            /**
+             * Format: int64
+             * @description Van de eerste mislukte schrijfactie tot de eerste van drie goede op rij, tijdens de meting
+             */
+            downtime_ms: number | null;
+            /** @description Schrijven lukte aan het eind van de meting weer */
+            recovered: boolean;
+            /**
+             * Format: int64
+             * @description De onderbreking bij de terugkeer
+             */
+            failback_ms: number | null;
+            /** @description Schrijfacties sinds de storing */
+            attempts: number;
+            /** @description Hoeveel daarvan mislukten */
+            failed: number;
+            /** @description Rijen die de database tijdens de hele test bevestigde */
+            confirmed: number;
+            /** @description Bevestigde rijen die na de test weg waren; null als tellen niet lukte */
+            lost: number | null;
+            /** @description De volgnummers van de eerste verloren rijen */
+            lost_seqs: number[];
+            /** @description Rijen waarvan de bevestiging niet aankwam, maar die er wel zijn */
+            extra: number;
+            /** @description Waarom tellen niet lukte */
+            check_error: string;
+            segments: components["schemas"]["TestRunSegment"][];
         };
         FailoverMeasurements: {
             /**
@@ -6791,6 +6831,8 @@ export interface components {
             /** Format: int64 */
             end_ms: number;
             probe: components["schemas"]["TestRunSegment"][];
+            /** @description De schrijftest, bij een test die een database raakt */
+            writes: components["schemas"]["FailoverWrites"] | null;
         };
         FailoverDefinition: {
             /** Format: uuid */

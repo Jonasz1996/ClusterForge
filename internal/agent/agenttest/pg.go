@@ -377,7 +377,22 @@ func (h *Host) pgRemoteQuery(args []string) ([]byte, error) {
 	if i < 0 || i+1 >= len(rest) {
 		return []byte("agenttest: psql zonder -c\n"), errors.New("exit status 2")
 	}
-	rows, ok := c.p.pgQuery(c.db, rest[i+1])
+	q := rest[i+1]
+	if isProbe(q) {
+		if c.db != protocol.DBProbeDatabase {
+			return []byte("ERROR:  relation \"writes\" does not exist\n"), errExit1
+		}
+		prows, failed := c.p.pgProbe(q)
+		if failed != nil {
+			return failed, errExit1
+		}
+		recs := make([]string, len(prows))
+		for i, r := range prows {
+			recs[i] = strings.Join(r, dbsql.PGFieldSep)
+		}
+		return []byte(strings.Join(recs, dbsql.PGRecordSep) + "\n"), nil
+	}
+	rows, ok := c.p.pgQuery(c.db, q)
 	if !ok {
 		return []byte("ERROR:  agenttest kent deze query niet: " + rest[i+1] + "\n"), errExit1
 	}

@@ -7,11 +7,13 @@ import (
 )
 
 // ProbeLog houdt de uitkomsten van de probe op één VIP bij, in ms na de
-// storing. Rampoefeningen houden er één per VIP bij.
+// storing. Rampoefeningen houden er één per VIP bij. Een WriteLog houdt zo
+// de schrijftest via het VIP van een database bij.
 type ProbeLog struct {
 	mu        sync.Mutex
 	start     time.Time
 	vip       string
+	writes    bool
 	segs      []Segment
 	events    []TimelineEvent
 	firstFail time.Time
@@ -22,6 +24,12 @@ type ProbeLog struct {
 }
 
 func NewProbeLog(start time.Time, vip string) *ProbeLog { return &ProbeLog{start: start, vip: vip} }
+
+// NewWriteLog houdt de schrijftest via het VIP van een database bij; de
+// gebeurtenissen heten write_down en write_up.
+func NewWriteLog(start time.Time, vip string) *ProbeLog {
+	return &ProbeLog{start: start, vip: vip, writes: true}
+}
 
 func (p *ProbeLog) ms(t time.Time) int64 { return t.Sub(p.start).Milliseconds() }
 
@@ -41,7 +49,11 @@ func (p *ProbeLog) Add(at time.Time, err error) {
 	if !ok {
 		if !p.down {
 			p.down = true
-			p.events = append(p.events, TimelineEvent{TMS: ms, Kind: "down", Text: p.vip + " onbereikbaar: " + short(err.Error())})
+			e := TimelineEvent{TMS: ms, Kind: "down", Text: p.vip + " onbereikbaar: " + short(err.Error())}
+			if p.writes {
+				e = TimelineEvent{TMS: ms, Kind: "write_down", Text: "schrijven via " + p.vip + " mislukt: " + short(err.Error())}
+			}
+			p.events = append(p.events, e)
 		}
 		if p.firstFail.IsZero() {
 			p.firstFail, p.firstErr = at, short(err.Error())
@@ -55,7 +67,11 @@ func (p *ProbeLog) Add(at time.Time, err error) {
 	p.okRun++
 	if p.down && p.okRun == 3 {
 		p.down = false
-		p.events = append(p.events, TimelineEvent{TMS: p.ms(p.okStart), Kind: "up", Text: p.vip + " weer bereikbaar"})
+		e := TimelineEvent{TMS: p.ms(p.okStart), Kind: "up", Text: p.vip + " weer bereikbaar"}
+		if p.writes {
+			e = TimelineEvent{TMS: p.ms(p.okStart), Kind: "write_up", Text: "schrijven via " + p.vip + " lukt weer"}
+		}
+		p.events = append(p.events, e)
 	}
 }
 

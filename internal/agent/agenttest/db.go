@@ -48,6 +48,9 @@ type MariaDB struct {
 	// in gebruik.
 	Questions                  int64
 	BufferPool, BufferPoolData int64
+	// Probe is de tabel van de schrijftest; de nodes van één Galera-cluster
+	// delen hem. Nil: de database clusterforge_probe bestaat niet.
+	Probe *ProbeTable
 }
 
 // MariaUser is een gebruiker op één host. Password is het wachtwoord in
@@ -170,6 +173,9 @@ type Postgres struct {
 	HBADeny   []string
 	TLS       bool
 	Available []string
+	// Probe is de tabel van de schrijftest; de nodes van één cluster delen
+	// hem. Een replica (Recovery) weigert er te schrijven.
+	Probe *ProbeTable
 }
 
 // PGSource is de WAL-ontvanger van een replica.
@@ -353,6 +359,14 @@ func (h *Host) mariaExec(args []string) ([]byte, error) {
 			}
 		}
 	default:
+		if isProbe(q) {
+			prows, failed := h.mariaProbe(q)
+			if failed != nil {
+				return failed, errExit1
+			}
+			rows = prows
+			break
+		}
 		if mrows, failed, ok := m.migrateQuery(q); ok {
 			if failed != nil {
 				return failed, errExit1

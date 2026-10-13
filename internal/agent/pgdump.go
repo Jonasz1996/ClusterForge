@@ -5,6 +5,7 @@ package agent
 // MariaDB in dbdump.go.
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -51,6 +52,8 @@ type pgLogin struct {
 	host      string
 	port      int
 	user, dir string
+	// timeout is connect_timeout in seconden; 0 is 10.
+	timeout int
 }
 
 func newPGLogin(host string, port int, user, password string) (*pgLogin, error) {
@@ -73,8 +76,8 @@ func (l *pgLogin) close() {
 
 // conninfo verbindt met db.
 func (l *pgLogin) conninfo(db string) string {
-	return fmt.Sprintf("host=%s port=%d dbname=%s user=%s passfile=%s connect_timeout=10 application_name=clusterforge",
-		l.host, l.port, db, l.user, conninfoQuote(filepath.Join(l.dir, "pgpass")))
+	return fmt.Sprintf("host=%s port=%d dbname=%s user=%s passfile=%s connect_timeout=%d application_name=clusterforge",
+		l.host, l.port, db, l.user, conninfoQuote(filepath.Join(l.dir, "pgpass")), cmp.Or(l.timeout, 10))
 }
 
 // args zijn de opties van psql voor opdrachten op stdin, in db, die stoppen

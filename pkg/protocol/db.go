@@ -32,6 +32,10 @@ const DBPatroniSince = 12
 // metingen en geeft bij Quick de hele status.
 const DBMetricsSince = 13
 
+// DBProbeSince is de eerste protocolversie met DBWriteProbe: de schrijftest
+// via het VIP voor de failovertests van een database.
+const DBProbeSince = 14
+
 // SubjectDB draagt de databaseverzoeken: cf.node.<id>.db. Net als de
 // kube-brug is het een eigen subject, zodat een trage database de
 // commando's op cmd niet ophoudt.
@@ -86,7 +90,108 @@ const (
 	// van het cluster in etcd zetten. De agent leest het wachtwoord van de
 	// REST-API uit /etc/patroni/clusterforge.env.
 	DBPatroniOp = "patroni"
+	// DBWriteProbe is de schrijftest van een failovertest: de agent schrijft
+	// elke halve seconde een rij via het VIP in DBProbeDatabase, met de
+	// gebruiker DBProbeUser die de server daarvoor maakte, en onthoudt welke
+	// rijen bevestigd zijn. Na de test telt hij welke er nog zijn. De
+	// pogingen staan alleen in zijn geheugen.
+	DBWriteProbe = "write_probe"
 )
+
+// Wat een DBWriteProbe doet.
+const (
+	// DBProbeStart begint te schrijven; staat de schrijftest van Run er al,
+	// dan geeft de agent die.
+	DBProbeStart = "start"
+	// DBProbeRead geeft de pogingen vanaf From.
+	DBProbeRead = "read"
+	// DBProbeFinish stopt met schrijven, telt welke bevestigde rijen er via
+	// het VIP nog zijn, en haalt de rijen van Run weg. Een tweede keer geeft
+	// hetzelfde antwoord, zodat een hervatte taak het opnieuw kan vragen.
+	DBProbeFinish = "finish"
+	// DBProbeStop stopt zonder te tellen, als de test niet doorgaat.
+	DBProbeStop = "stop"
+)
+
+// De database en de gebruiker van de schrijftest. De tabel heeft per run
+// de volgnummers van de rijen.
+const (
+	DBProbeDatabase = "clusterforge_probe"
+	DBProbeUser     = "cf_probe"
+	DBProbeTable    = "writes"
+)
+
+// Grenzen van een schrijftest.
+const (
+	// DBProbeInterval is hoe vaak de agent schrijft, en DBProbeTimeout hoe
+	// lang één poging mag duren.
+	DBProbeInterval = 500 * time.Millisecond
+	DBProbeTimeout  = 2 * time.Second
+	// DBProbeMaxSeconds is hoe lang een schrijftest hoogstens loopt; daarna
+	// stopt de agent vanzelf.
+	DBProbeMaxSeconds = 30 * 60
+	// DBProbeKeep is hoe lang de agent een afgeronde schrijftest onthoudt.
+	DBProbeKeep = time.Hour
+	// DBProbeMissing is het hoogste aantal ontbrekende volgnummers in een
+	// antwoord; Missing telt ze allemaal.
+	DBProbeMissing = 50
+)
+
+// DBProbeRequest zegt wat een DBWriteProbe doet. Engine staat in het
+// DBRequest.
+type DBProbeRequest struct {
+	Action string `json:"action"`
+	// Run is het id van de failovertest (een uuid); de rijen in de tabel
+	// hebben het.
+	Run string `json:"run"`
+	// Host en Port zijn het VIP van de database, bij start.
+	Host string `json:"host,omitempty"`
+	Port int    `json:"port,omitempty"`
+	// Password is van DBProbeUser: 16 tot 128 letters en cijfers. Het gaat
+	// in een bestand dat alleen root kan lezen.
+	Password string `json:"password,omitempty"`
+	// MaxSeconds: na zoveel seconden stopt de agent vanzelf.
+	MaxSeconds int `json:"max_seconds,omitempty"`
+	// From is bij read de eerste poging die de server nog niet heeft.
+	From int `json:"from,omitempty"`
+}
+
+// DBProbeResult is het antwoord op een DBWriteProbe.
+type DBProbeResult struct {
+	Run string `json:"run"`
+	// Running: de agent schrijft nog.
+	Running bool `json:"running"`
+	// ElapsedMS is hoe lang geleden de schrijftest begon, op het moment van
+	// het antwoord. Een poging heeft AtMS sinds dat begin; zo rekent de
+	// server met zijn eigen klok.
+	ElapsedMS int64 `json:"elapsed_ms"`
+	// Total is het aantal pogingen; Attempts zijn die vanaf From.
+	Total    int              `json:"total"`
+	Attempts []DBProbeAttempt `json:"attempts"`
+	// Stopped zegt waarom de agent vanzelf stopte, zoals na MaxSeconds.
+	Stopped string `json:"stopped,omitempty"`
+	// Checked: bij finish telde de agent de rijen. Confirmed is het aantal
+	// bevestigde rijen, Missing hoeveel daarvan er niet meer zijn (met de
+	// eerste volgnummers in MissingSeqs), en Extra hoeveel rijen er zijn
+	// waarvan de bevestiging niet aankwam. CheckError zegt waarom tellen
+	// niet lukte.
+	Checked     bool    `json:"checked,omitempty"`
+	Confirmed   int     `json:"confirmed,omitempty"`
+	Missing     int     `json:"missing,omitempty"`
+	MissingSeqs []int64 `json:"missing_seqs,omitempty"`
+	Extra       int     `json:"extra,omitempty"`
+	CheckError  string  `json:"check_error,omitempty"`
+}
+
+// DBProbeAttempt is één keer schrijven. OK: de database bevestigde de rij.
+type DBProbeAttempt struct {
+	Seq  int64 `json:"seq"`
+	AtMS int64 `json:"at_ms"`
+	// MS is hoe lang de poging duurde.
+	MS    int64  `json:"ms"`
+	OK    bool   `json:"ok"`
+	Error string `json:"error,omitempty"`
+}
 
 // Wat een DBPatroniOp doet.
 const (
@@ -305,6 +410,8 @@ type DBRequest struct {
 	// Quick hoort bij DBStatus: zonder de databases en de clients, voor de
 	// bewaking.
 	Quick bool `json:"quick,omitempty"`
+	// Probe hoort bij DBWriteProbe.
+	Probe *DBProbeRequest `json:"probe,omitempty"`
 }
 
 // DBMigrateRequest zegt wat een DBMigrate doet.
@@ -681,6 +788,8 @@ type DBResponse struct {
 	Migrate *DBMigrateResult `json:"migrate,omitempty"`
 	// Patroni is het antwoord op DBPatroniOp.
 	Patroni *DBPatroniResult `json:"patroni,omitempty"`
+	// Probe is het antwoord op DBWriteProbe.
+	Probe *DBProbeResult `json:"probe,omitempty"`
 }
 
 // DBServer is één MariaDB of PostgreSQL op een node.

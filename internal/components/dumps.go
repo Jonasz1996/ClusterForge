@@ -611,7 +611,8 @@ func (s *Service) runDump(ctx context.Context, j *jobs.Job) error {
 					continue
 				}
 				for _, d := range sv.Databases {
-					if !restoredCopy(d.Name) && dbsql.CheckDatabaseOf(comp.Engine, d.Name) == nil {
+					// De schrijftest van de failovertests hoeft geen dump.
+					if !restoredCopy(d.Name) && d.Name != protocol.DBProbeDatabase && dbsql.CheckDatabaseOf(comp.Engine, d.Name) == nil {
 						pick.Databases = append(pick.Databases, d.Name)
 					}
 				}

@@ -54,6 +54,9 @@ type Agent struct {
 	// DumpDir is de map met de dumps van de databases; leeg is
 	// protocol.DBDumpDir. Tests gebruiken een map.
 	DumpDir string
+	// ProbeInterval is hoe vaak een schrijftest schrijft; nul is
+	// protocol.DBProbeInterval. Tests zetten hem korter.
+	ProbeInterval time.Duration
 	// Now geeft de tijd voor de naam van een dump; nil is time.Now.
 	Now func() time.Time
 	// Root is de bestandssysteemwortel voor deploystappen; leeg is "/".

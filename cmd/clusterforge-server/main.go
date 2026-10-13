@@ -233,7 +233,7 @@ func serve() error {
 	}
 	fo := failover.NewService(pool, ev, log, runner, bus)
 	fo.Changed = eval.Kick
-	fo.Proxmox, fo.Window = pve, cfg.TestWindow
+	fo.Proxmox, fo.Window, fo.DB = pve, cfg.TestWindow, cmps
 	// De assistent; zonder masterkey kan hij niet aan en zeggen de
 	// instellingen waarom.
 	asst := assistant.NewService(pool, ev, log, box)

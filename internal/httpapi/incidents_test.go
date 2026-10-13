@@ -192,11 +192,13 @@ func TestIncidents(t *testing.T) {
 
 	// Een losse node die down gaat, is een eigen incident, met lage ernst.
 	stopSolo()
-	if _, err := e.pool.Exec(ctx, "UPDATE node_status SET heartbeat_at = now() - interval '5 minutes' WHERE node_id = $1", solo.ID); err != nil {
-		t.Fatal(err)
-	}
-	e.eval.Kick()
 	eventually(t, "solo down", func() bool {
+		// Een heartbeat die nog onderweg was, maakt de node weer vers; zet
+		// hem daarom elke ronde opnieuw terug.
+		if _, err := e.pool.Exec(ctx, "UPDATE node_status SET heartbeat_at = now() - interval '5 minutes' WHERE node_id = $1", solo.ID); err != nil {
+			t.Fatal(err)
+		}
+		e.eval.Kick()
 		got := c.incidents("status=open")
 		return len(got) == 1 && got[0].Title == "solo is down" && got[0].Severity == "low"
 	})

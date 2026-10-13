@@ -354,7 +354,7 @@ func (s *Service) databases(ctx context.Context, t dbTarget) (DatabaseList, erro
 		conns[c.Database] += c.Count
 	}
 	for _, d := range server.Databases {
-		if t.engine == protocol.DBPostgreSQL && slices.Contains(dbsql.PGSystemDatabases, d.Name) {
+		if t.engine == protocol.DBPostgreSQL && slices.Contains(dbsql.PGSystemDatabases, d.Name) || d.Name == protocol.DBProbeDatabase {
 			continue
 		}
 		out.Databases = append(out.Databases, DatabaseInfo{Name: d.Name, SizeBytes: d.SizeBytes, Tables: d.Tables, Connections: conns[d.Name], Users: []string{}})
@@ -379,7 +379,8 @@ func groupUsers(engine string, in []protocol.DBUser) []UserInfo {
 		i := slices.IndexFunc(out, func(x UserInfo) bool { return x.Name == u.Name })
 		if i < 0 {
 			i = len(out)
-			system := slices.Contains(dbsql.SystemUsersOf(engine), u.Name) || engine == protocol.DBPostgreSQL && tempRoleRe.MatchString(u.Name)
+			system := slices.Contains(dbsql.SystemUsersOf(engine), u.Name) || engine == protocol.DBPostgreSQL && tempRoleRe.MatchString(u.Name) ||
+				u.Name == protocol.DBProbeUser
 			out = append(out, UserInfo{Name: u.Name, System: system, Hosts: []string{}, Global: []string{}, Databases: []UserGrant{}})
 		}
 		x := &out[i]
