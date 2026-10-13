@@ -109,3 +109,12 @@ UPDATE cluster_components SET auto_recovered_at = @at WHERE id = @id;
 
 -- name: SetClusterComponentRecoverJob :exec
 UPDATE cluster_components SET recover_job_id = @job_id WHERE id = @id;
+
+-- name: ListDatabaseTestPasses :many
+-- Per cluster en database de laatste geslaagde failovertest met een
+-- schrijftest via het VIP van die database, voor de scorekaart Database.
+SELECT cluster_id::uuid AS cluster_id, (measurements->'writes'->>'title')::text AS title, max(finished_at)::timestamptz AS finished_at
+FROM test_runs
+WHERE kind = 'failover.test' AND result = 'pass' AND cluster_id IS NOT NULL AND finished_at IS NOT NULL
+  AND measurements->'writes'->>'title' IS NOT NULL
+GROUP BY 1, 2;

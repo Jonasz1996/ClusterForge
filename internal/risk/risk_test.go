@@ -463,7 +463,7 @@ func TestDeterministic(t *testing.T) {
 // geen checks die nergens gebruikt worden.
 func TestCatalog(t *testing.T) {
 	var src []byte
-	for _, f := range []string{"checks.go", "kube.go"} {
+	for _, f := range []string{"checks.go", "kube.go", "dbcard.go"} {
 		b, err := os.ReadFile(f)
 		if err != nil {
 			t.Fatal(err)
@@ -471,7 +471,7 @@ func TestCatalog(t *testing.T) {
 		src = append(src, b...)
 	}
 	used := map[string]bool{}
-	for _, m := range regexp.MustCompile(`"((?:availability|backups|recovery|redundancy|configuration|maintenance|capacity|kubernetes|platform)\.[a-z_]+)"`).FindAllStringSubmatch(string(src), -1) {
+	for _, m := range regexp.MustCompile(`"((?:availability|backups|recovery|redundancy|configuration|maintenance|capacity|kubernetes|database|platform)\.[a-z_]+)"`).FindAllStringSubmatch(string(src), -1) {
 		used[m[1]] = true
 		if Checks[m[1]] == "" {
 			t.Errorf("check %s ontbreekt in de catalogus", m[1])

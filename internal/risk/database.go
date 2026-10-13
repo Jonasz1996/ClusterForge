@@ -33,9 +33,11 @@ type Database struct {
 	Members []uuid.UUID
 }
 
-// DatabaseSource geeft de onderdelen Database van alle clusters.
+// DatabaseSource geeft de onderdelen Database van alle clusters, voor de
+// wat-als, en per cluster wat de kaart Database nodig heeft.
 type DatabaseSource interface {
 	WhatIfDatabases(ctx context.Context) ([]Database, error)
+	ScoreDatabases(ctx context.Context) (map[uuid.UUID]*DatabaseCardInput, error)
 }
 
 // dbPrediction is wat er met een database gebeurt.

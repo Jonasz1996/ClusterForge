@@ -567,6 +567,8 @@ type DbDump struct {
 	Message        string
 	JobID          *uuid.UUID
 	RequestedBy    *uuid.UUID
+	NoPrimaryKey   []string
+	NotInnodb      []string
 }
 
 type DbMigration struct {

@@ -86,3 +86,8 @@ ORDER BY component_id, database, started_at DESC;
 -- De dumps van een taak die stopte terwijl ze liepen.
 UPDATE db_dumps SET status = 'failed', finished_at = now(), message = @message
 WHERE job_id = @job_id AND status = 'running';
+
+-- name: SetDBDumpTables :exec
+-- De tabellen van een database van Galera zonder primaire sleutel of
+-- buiten InnoDB, volgens ClusterForge na een goede dump.
+UPDATE db_dumps SET no_primary_key = @no_primary_key::text[], not_innodb = @not_innodb::text[] WHERE id = @id;

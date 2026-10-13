@@ -8309,7 +8309,7 @@ export interface components {
         /** @enum {string} */
         RiskSeverity: "low" | "medium" | "high" | "critical";
         /** @enum {string} */
-        RiskCardId: "availability" | "backups" | "recovery" | "redundancy" | "configuration" | "maintenance" | "capacity" | "kubernetes" | "platform";
+        RiskCardId: "availability" | "backups" | "recovery" | "redundancy" | "configuration" | "maintenance" | "capacity" | "kubernetes" | "database" | "platform";
         RiskSubject: {
             /** @description cluster, node, vip, failover_test, test_run, dependency, drift_ignore, git_change, user, proxmox, component (een SPOF), self, kube_app (een app in Kubernetes) of kube_node (een node in Kubernetes zonder ClusterForge-node) */
             type: string;

@@ -33,6 +33,7 @@ export const cardLabels: Record<RiskCardId, string> = {
   maintenance: "Onderhoud en beveiliging",
   capacity: "Capaciteit",
   kubernetes: "Kubernetes",
+  database: "Database",
   platform: "Platform",
 };
 
