@@ -138,6 +138,9 @@ type Service struct {
 	MoveDrain time.Duration
 	// Retry is de wachttijd tussen pogingen als een agent even weg is.
 	Retry time.Duration
+	// PendingWait is hoe lang ClusterForge na nieuwe instellingen wacht tot
+	// Patroni op een node zegt dat ze een herstart nodig hebben.
+	PendingWait time.Duration
 	// Fresh is hoe oud de laatste heartbeat van een agent mag zijn.
 	Fresh time.Duration
 	Now   func() time.Time
@@ -163,8 +166,8 @@ func NewService(pool *pgxpool.Pool, ev *events.Writer, log *slog.Logger, runner 
 	s := &Service{
 		pool: pool, q: store.New(pool), ev: ev, log: log, jobs: runner, bus: bus, dep: dep,
 		Poll: 3 * time.Second, GateTimeout: 30 * time.Minute, VIPTimeout: 2 * time.Minute, Timeout: 15 * time.Second, Retry: 10 * time.Second, DumpPoll: 5 * time.Second,
-		MoveDrain: 30 * time.Second,
-		Fresh:     2 * time.Minute, Now: time.Now,
+		MoveDrain: 30 * time.Second, PendingWait: 30 * time.Second,
+		Fresh: 2 * time.Minute, Now: time.Now,
 		WatchInterval: 20 * time.Second, RecoverGrace: 90 * time.Second, HungAfter: 15 * time.Minute, NodeOutAfter: 5 * time.Minute,
 		AutoBackoff: 30 * time.Minute,
 	}
@@ -178,6 +181,10 @@ func NewService(pool *pgxpool.Pool, ev *events.Writer, log *slog.Logger, runner 
 	// verder.
 	runner.Register(ManageKind, s.runManage)
 	runner.Retryable(ManageKind)
+	// Bijwerken zet per node merktekens van de taak, dus een hervatte taak
+	// doet niets twee keer.
+	runner.Register(UpdateKind, s.runUpdate)
+	runner.Retryable(UpdateKind)
 	// Een hervatte dump wacht verder op dezelfde; terugzetten kan niet
 	// opnieuw, want de nieuwe database staat er dan al.
 	runner.Register(DumpKind, s.runDump)

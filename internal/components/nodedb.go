@@ -202,11 +202,18 @@ func (s *Service) LeaveDB(ctx context.Context, st *jobs.Step, actor events.Actor
 	if err != nil {
 		return err
 	}
+	return s.switchAway(ctx, st, actor, j, comp, spec, n, force, "maintenance")
+}
+
+// switchAway schakelt over naar de synchrone replica als n de primary van
+// Patroni is, en wacht tot het VIP meegaat. reason komt in het event, zoals
+// maintenance of update.
+func (s *Service) switchAway(ctx context.Context, st *jobs.Step, actor events.Actor, j *jobs.Job, comp store.ClusterComponent, spec Spec, n Node, force bool, reason string) error {
 	if comp.Engine != protocol.DBPostgreSQL || n.Role != RoleData {
 		return nil
 	}
 	slug := spec.Cluster.Slug
-	srv, err := s.server(ctx, nodeID, protocol.DBPostgreSQL)
+	srv, err := s.server(ctx, n.NodeID, protocol.DBPostgreSQL)
 	if err != nil {
 		return fmt.Errorf("%s zegt niet of hij de primary is: %w", n.Hostname, err)
 	}
@@ -237,7 +244,7 @@ func (s *Service) LeaveDB(ctx context.Context, st *jobs.Step, actor events.Actor
 			return err
 		}
 	}
-	return s.manageDone(ctx, actor, j, comp, spec, "cluster.database_switchover", map[string]any{"from": n.Hostname, "to": cand.node.Hostname, "maintenance": true})
+	return s.manageDone(ctx, actor, j, comp, spec, "cluster.database_switchover", map[string]any{"from": n.Hostname, "to": cand.node.Hostname, reason: true})
 }
 
 // RejoinDB wacht tot een node na een herstart of onderhoud weer meedoet in

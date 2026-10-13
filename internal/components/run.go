@@ -20,10 +20,14 @@ import (
 	"github.com/Jonasz1996/clusterforge/pkg/protocol"
 )
 
-// jobParams gaan mee met de taak: welk onderdeel in welke revisie.
+// jobParams gaan mee met de taak: welk onderdeel in welke revisie. Bij
+// nieuwe instellingen staat de volgorde van de nodes erbij, met de schrijver
+// als laatste, en herstart PostgreSQL op elke node (Restart).
 type jobParams struct {
-	ComponentID uuid.UUID `json:"component_id"`
-	Revision    int       `json:"revision"`
+	ComponentID uuid.UUID   `json:"component_id"`
+	Revision    int         `json:"revision"`
+	Order       []uuid.UUID `json:"order,omitempty"`
+	Restart     bool        `json:"restart,omitempty"`
 }
 
 // Marker is het merkteken dat een node meedoet in het Galera-cluster met
@@ -42,6 +46,12 @@ type rendered struct {
 	states  map[uuid.UUID]deploy.NodeState
 	// vrrp is het wachtwoord van VRRP voor een eigen VIP.
 	vrrp string
+	// revision is de revisie die de taak toepast, order de volgorde van de
+	// nodes en restart of PostgreSQL op elke node herstart; uit de
+	// parameters van de taak.
+	revision int
+	order    []uuid.UUID
+	restart  bool
 }
 
 func (s *Service) load(ctx context.Context, p jobParams) (*rendered, error) {
@@ -84,7 +94,7 @@ func (s *Service) load(ctx context.Context, p jobParams) (*rendered, error) {
 	if err != nil {
 		return nil, err
 	}
-	r := &rendered{comp: comp, spec: spec, tpl: tpl, secrets: secrets, states: states}
+	r := &rendered{comp: comp, spec: spec, tpl: tpl, secrets: secrets, states: states, revision: p.Revision, order: p.Order, restart: p.Restart}
 	if own {
 		r.vrrp = opened[secretName(comp.Engine, vrrpSecret)]
 	}
@@ -156,10 +166,11 @@ func (s *Service) run(ctx context.Context, j *jobs.Job) error {
 }
 
 // runGalera zet MariaDB op de nodes, een voor een: de datanodes op
-// volgnummer, daarna de scheidsrechter.
+// volgnummer, daarna de scheidsrechter. Bij nieuwe instellingen staat de
+// node met het VIP als laatste van de datanodes.
 func (s *Service) runGalera(ctx context.Context, j *jobs.Job, r *rendered) error {
 	data := r.spec.count(RoleData)
-	for _, n := range r.spec.order() {
+	for _, n := range r.spec.ordered(r.order) {
 		name := n.Hostname + ": MariaDB"
 		// Na deze node doen er zoveel mee; een scheidsrechter komt na alle
 		// datanodes.

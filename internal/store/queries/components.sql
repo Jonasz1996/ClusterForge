@@ -29,6 +29,10 @@ SELECT * FROM cluster_component_revisions WHERE component_id = $1 AND revision =
 -- name: SetClusterComponentJob :exec
 UPDATE cluster_components SET job_id = @job_id, updated_at = now() WHERE id = @id;
 
+-- name: SetClusterComponentSpec :exec
+-- Een nieuwe revisie van de spec, zoals andere instellingen.
+UPDATE cluster_components SET spec = @spec, revision = @revision, updated_at = now() WHERE id = @id;
+
 -- name: SetClusterComponentApplied :exec
 UPDATE cluster_components SET applied_revision = @revision, updated_at = now() WHERE id = @id;
 

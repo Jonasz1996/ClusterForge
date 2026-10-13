@@ -1,6 +1,6 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, unwrap } from "./api/client";
 import type { components } from "./api/schema";
 
@@ -15,6 +15,9 @@ export type ComponentRecoverNode = components["schemas"]["ComponentRecoverNode"]
 export type ComponentManage = components["schemas"]["ComponentManage"];
 export type ComponentManageNode = components["schemas"]["ComponentManageNode"];
 export type ComponentManageAction = components["schemas"]["ComponentManageAction"];
+export type ComponentSettingsPlan = components["schemas"]["ComponentSettingsPlan"];
+export type ComponentSettingParam = components["schemas"]["ComponentSettingParam"];
+export type ComponentUpgradePlan = components["schemas"]["ComponentUpgradePlan"];
 export type ComponentDatabases = components["schemas"]["ComponentDatabases"];
 export type ComponentDatabase = components["schemas"]["ComponentDatabase"];
 export type ComponentDatabaseUser = components["schemas"]["ComponentDatabaseUser"];
@@ -119,6 +122,41 @@ export function useComponentManage(clusterId: string, componentId: string) {
   });
 }
 
+// useSettingsPlan zegt wat nieuwe instellingen doen; zonder settings is het
+// alleen het overzicht. Er verandert niets.
+export function useSettingsPlan(clusterId: string, componentId: string, settings: Record<string, unknown>) {
+  return useQuery({
+    queryKey: ["clusters", clusterId, "components", componentId, "settings-plan", settings],
+    queryFn: async () =>
+      unwrap(
+        await api.POST("/clusters/{clusterId}/components/{componentId}/settings/plan", {
+          params: { path: { clusterId, componentId } },
+          body: { settings },
+        }),
+      ),
+    gcTime: 0,
+    retry: false,
+    refetchOnWindowFocus: false,
+    placeholderData: keepPreviousData,
+  });
+}
+
+// useUpgradePlan zegt wat bijwerken doet: per node de versie en de pakketten
+// met een nieuwere versie. Er verandert niets.
+export function useUpgradePlan(clusterId: string, componentId: string) {
+  return useQuery({
+    queryKey: ["clusters", clusterId, "components", componentId, "upgrade-plan"],
+    queryFn: async () =>
+      unwrap(
+        await api.GET("/clusters/{clusterId}/components/{componentId}/upgrade", {
+          params: { path: { clusterId, componentId } },
+        }),
+      ),
+    gcTime: 0,
+    refetchOnWindowFocus: false,
+  });
+}
+
 export function usePlanComponent(clusterId: string) {
   return useMutation({
     mutationFn: async (body: ComponentInput) =>
@@ -199,6 +237,34 @@ export function useManageComponent(clusterId: string) {
         await api.POST("/clusters/{clusterId}/components/{componentId}/manage", {
           params: { path: { clusterId, componentId: id } },
           body,
+        }),
+      ),
+    onSuccess: invalidate,
+  });
+}
+
+export function useChangeSettings(clusterId: string) {
+  const invalidate = useInvalidate(clusterId);
+  return useMutation({
+    mutationFn: async ({ id, ...body }: { id: string; settings: Record<string, unknown>; hash: string; confirm?: string }) =>
+      unwrap(
+        await api.POST("/clusters/{clusterId}/components/{componentId}/settings", {
+          params: { path: { clusterId, componentId: id } },
+          body,
+        }),
+      ),
+    onSuccess: invalidate,
+  });
+}
+
+export function useUpgradeComponent(clusterId: string) {
+  const invalidate = useInvalidate(clusterId);
+  return useMutation({
+    mutationFn: async ({ id, hash, confirm }: { id: string; hash: string; confirm?: string }) =>
+      unwrap(
+        await api.POST("/clusters/{clusterId}/components/{componentId}/upgrade", {
+          params: { path: { clusterId, componentId: id } },
+          body: { hash, confirm },
         }),
       ),
     onSuccess: invalidate,
