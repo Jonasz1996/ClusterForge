@@ -237,6 +237,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	cmps.VIPTimeout, cmps.DumpPoll, cmps.MoveDrain, cmps.PendingWait = 5*time.Second, 20*time.Millisecond, 200*time.Millisecond, 500*time.Millisecond
 	cmps.Overview = dbs.Overview
 	life.DB = cmps
+	rsk.DB = cmps
 	drf.Components = cmps
 	fo.DB = cmps
 	fo.WriteStart, fo.WritePoll, fo.WriteFinishTimeout, fo.DBReturnTimeout = 3*time.Second, 50*time.Millisecond, 3*time.Second, 8*time.Second

@@ -199,6 +199,9 @@ type seenNode struct {
 	Uptime   int64  `json:"uptime,omitempty"`
 	// Code is wsrep_local_state bij Galera.
 	Code int `json:"code,omitempty"`
+	// Member is true als de node meedoet: bij Galera in de Primary
+	// component, ook als donor. De wat-als telt er de meerderheid mee.
+	Member bool `json:"member"`
 }
 
 // observe onthoudt wat de bewaking nu ziet.
@@ -208,7 +211,7 @@ func observeNodes(engine string, nodes []dbNode, now time.Time) observed {
 		if !d.answered {
 			continue
 		}
-		o.Nodes[d.node.NodeID.String()] = seenNode{Hostname: d.node.Hostname, Running: d.running, Uptime: d.uptime, Code: d.code}
+		o.Nodes[d.node.NodeID.String()] = seenNode{Hostname: d.node.Hostname, Running: d.running, Uptime: d.uptime, Code: d.code, Member: d.member}
 		if engine == protocol.DBPostgreSQL && d.primary {
 			o.Primary = d.node.Hostname
 		}
