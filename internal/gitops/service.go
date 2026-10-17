@@ -202,6 +202,11 @@ func (s *Service) token(in RepoInput, cur *store.GitRepo) (string, error) {
 	if cur == nil {
 		return "", ValidationError{"token", "het token is verplicht"}
 	}
+	// Het opgeslagen token gaat nooit naar een ander adres: anders volstaat
+	// een gestolen sessie om het naar een eigen server te laten sturen.
+	if in.APIURL != cur.ApiUrl {
+		return "", ValidationError{"token", "het adres van de API is veranderd; vul het token opnieuw in"}
+	}
 	t, err := s.box.Open(cur.TokenEnc, aad(cur.ID), cur.KeyID)
 	if err != nil {
 		return "", ValidationError{"token", "het opgeslagen token is niet te ontsleutelen (is CF_MASTER_KEY veranderd?); vul het opnieuw in"}

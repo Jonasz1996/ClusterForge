@@ -255,6 +255,11 @@ func TestGitOpsReadValidatePlan(t *testing.T) {
 		st.Repo.Branch != "main" || st.Repo.Path != "clusters" {
 		t.Fatalf("koppelen: %d %+v", s, st)
 	}
+	// Het opgeslagen token gaat niet naar een ander adres.
+	other := map[string]any{"api_url": "https://elders.example", "repository": "https://github.com/jonas/cf-config.git"}
+	if s := c.do("POST", "/api/v1/gitops/repo/probe", other, &ae); s != 400 || !strings.Contains(ae.Message, "opnieuw in") {
+		t.Fatalf("opgeslagen token naar ander adres: %d %+v", s, ae)
+	}
 
 	// De lus pollt; in de test elke 50 ms in plaats van elke minuut.
 	e.git.Interval = 50 * time.Millisecond
