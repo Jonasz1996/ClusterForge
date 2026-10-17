@@ -44,6 +44,7 @@ type Service struct {
 	// dummyHash wordt gecontroleerd bij een onbekende gebruiker, zodat de
 	// responstijd niet verraadt of een gebruikersnaam bestaat.
 	dummyHash string
+	reauth    reauthLimiter
 }
 
 func NewService(q *store.Queries, ev *events.Writer, sessionTTL time.Duration) (*Service, error) {
@@ -236,6 +237,9 @@ func (s *Service) CreateUser(ctx context.Context, actor events.Actor, username, 
 
 // ChangePassword vervangt het wachtwoord en beëindigt alle andere sessies.
 func (s *Service) ChangePassword(ctx context.Context, p Principal, current, next string) error {
+	if err := s.reauth.allowed(p.User.ID, s.now()); err != nil {
+		return err
+	}
 	ok, err := VerifyPassword(current, p.User.PasswordHash)
 	if err != nil {
 		return err
@@ -244,6 +248,7 @@ func (s *Service) ChangePassword(ctx context.Context, p Principal, current, next
 		s.reauthFailed(ctx, p.User, "password_change", "bad_password")
 		return ErrInvalidCredentials
 	}
+	s.reauth.succeeded(p.User.ID)
 	if err := checkPassword(next); err != nil {
 		return err
 	}
@@ -295,12 +300,16 @@ func (s *Service) EnableTOTP(ctx context.Context, p Principal, code string) erro
 	if user.TotpSecret == nil {
 		return ErrTOTPNotPending
 	}
+	if err := s.reauth.allowed(user.ID, s.now()); err != nil {
+		return err
+	}
 	if err := s.useTOTP(ctx, user, code); err != nil {
 		if errors.Is(err, ErrInvalidTOTP) {
 			s.reauthFailed(ctx, user, "totp_enable", "bad_totp")
 		}
 		return err
 	}
+	s.reauth.succeeded(user.ID)
 	if err := s.q.EnableTOTP(ctx, user.ID); err != nil {
 		return err
 	}
@@ -315,6 +324,9 @@ func (s *Service) EnableTOTP(ctx context.Context, p Principal, code string) erro
 func (s *Service) DisableTOTP(ctx context.Context, p Principal, password, code string) error {
 	user, err := s.q.GetUserByID(ctx, p.User.ID)
 	if err != nil {
+		return err
+	}
+	if err := s.reauth.allowed(user.ID, s.now()); err != nil {
 		return err
 	}
 	ok, err := VerifyPassword(password, user.PasswordHash)
@@ -334,6 +346,7 @@ func (s *Service) DisableTOTP(ctx context.Context, p Principal, password, code s
 		}
 		return err
 	}
+	s.reauth.succeeded(user.ID)
 	if err := s.q.DisableTOTP(ctx, user.ID); err != nil {
 		return err
 	}
@@ -351,6 +364,9 @@ func (s *Service) Confirm(ctx context.Context, p Principal, password, code, what
 	if err != nil {
 		return err
 	}
+	if err := s.reauth.allowed(user.ID, s.now()); err != nil {
+		return err
+	}
 	if user.TotpEnabledAt != nil && user.TotpSecret != nil {
 		if err := s.useTOTP(ctx, user, code); err != nil {
 			if errors.Is(err, ErrInvalidTOTP) {
@@ -358,6 +374,7 @@ func (s *Service) Confirm(ctx context.Context, p Principal, password, code, what
 			}
 			return err
 		}
+		s.reauth.succeeded(user.ID)
 		return nil
 	}
 	ok, err := VerifyPassword(password, user.PasswordHash)
@@ -368,12 +385,14 @@ func (s *Service) Confirm(ctx context.Context, p Principal, password, code, what
 		s.reauthFailed(ctx, user, what, "bad_password")
 		return ErrInvalidCredentials
 	}
+	s.reauth.succeeded(user.ID)
 	return nil
 }
 
 // reauthFailed legt vast dat een ingelogde gebruiker zijn wachtwoord of code
 // fout invulde bij een gevoelige wijziging. what zegt welke.
 func (s *Service) reauthFailed(ctx context.Context, user store.User, what, reason string) {
+	s.reauth.failed(user.ID, s.now())
 	_ = s.ev.Write(ctx, nil, events.Event{
 		Actor: events.User(user.ID), SubjectType: "user", SubjectID: user.ID.String(),
 		Action: "auth.reauth_failed", Payload: map[string]any{"what": what, "reason": reason},
