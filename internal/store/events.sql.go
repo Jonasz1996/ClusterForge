@@ -94,7 +94,8 @@ WHERE ($1::bigint IS NULL OR e.id < $1::bigint)
        OR (e.subject_type = 'user' AND e.subject_id = $5::text)
        OR (e.actor_type = 'system' AND j.requested_by::text = $5::text))
   AND ($6::text IS NULL
-       OR e.cluster_id::text = $6::text
+       -- Zonder cast op de kolom, zodat events_cluster_idx gebruikt wordt.
+       OR e.cluster_id = $6::text::uuid
        OR (e.subject_type = 'cluster' AND e.subject_id = $6::text))
   AND ($7::text IS NULL OR e.node_ref = $7::text
        OR e.payload->'node_ids' @> to_jsonb($7::text))

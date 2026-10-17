@@ -46,7 +46,8 @@ WHERE (sqlc.narg('before_id')::bigint IS NULL OR e.id < sqlc.narg('before_id')::
        OR (e.subject_type = 'user' AND e.subject_id = sqlc.narg('user_id')::text)
        OR (e.actor_type = 'system' AND j.requested_by::text = sqlc.narg('user_id')::text))
   AND (sqlc.narg('cluster_id')::text IS NULL
-       OR e.cluster_id::text = sqlc.narg('cluster_id')::text
+       -- Zonder cast op de kolom, zodat events_cluster_idx gebruikt wordt.
+       OR e.cluster_id = sqlc.narg('cluster_id')::text::uuid
        OR (e.subject_type = 'cluster' AND e.subject_id = sqlc.narg('cluster_id')::text))
   AND (sqlc.narg('node_id')::text IS NULL OR e.node_ref = sqlc.narg('node_id')::text
        OR e.payload->'node_ids' @> to_jsonb(sqlc.narg('node_id')::text))
