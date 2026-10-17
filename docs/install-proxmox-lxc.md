@@ -240,6 +240,8 @@ Met een uitgebracht image hoeft de LXC niets te bouwen: zet `CF_IMAGE=ghcr.io/jo
 | --- | --- |
 | `docker run` geeft fouten over `permission denied` of `sysctl` | `nesting` en `keyctl` staan niet aan, of de container is niet herstart |
 | Inloggen lijkt te lukken maar je komt terug op het loginscherm | `CF_SECURE_COOKIES=true` zonder TLS |
+| Inloggen blijft hangen of de knop doet niets | De server krijgt geen databaseverbinding (pool vol, dode verbinding of een slot in PostgreSQL); zie [Inloggen blijft hangen](#inloggen-blijft-hangen) |
+| Melding "de server antwoordt niet op tijd" | Zelfde oorzaak; de server geeft het na 10 à 20 s op in plaats van eindeloos te wachten, en zet de oorzaak in de log |
 | Build stopt met `killed` | Te weinig geheugen; geef de LXC tijdelijk 3 GB |
 | `docker compose ps` toont de server als `unhealthy` | De server bereikt PostgreSQL niet of start niet; kijk met `docker compose logs server` |
 | Bij een node staat "Grafieken staan uit" | `CF_VICTORIAMETRICS_URL` is niet gezet; de compose-stack zet die standaard |
@@ -254,3 +256,33 @@ Met een uitgebracht image hoeft de LXC niets te bouwen: zet `CF_IMAGE=ghcr.io/jo
 | "cf-agent meldt zich niet aan" | De VM bereikt ClusterForge of poort 4222 niet; log in via de console van Proxmox en kijk met `journalctl -u cf-agent` |
 | Controle "geeft nog geen 200" | Nginx draait niet of het VIP is niet bereikbaar vanaf de LXC; kijk op de node naar `systemctl status nginx keepalived` en klik daarna op Opnieuw proberen |
 | Logs bekijken | `docker compose logs -f server` |
+
+### Inloggen blijft hangen
+
+Voer in `/opt/clusterforge/deploy` uit:
+
+```bash
+# Antwoordt de server, en bereikt hij de database? Hoort binnen 10 s {"status":"ok",...} te geven.
+curl -s -m 10 http://127.0.0.1:8080/api/v1/health; echo
+# Hoort binnen 20 s een 401 met JSON te geven (fout wachtwoord), geen stilte.
+curl -s -i -m 25 -X POST http://127.0.0.1:8080/api/v1/auth/login \
+  -H 'Content-Type: application/json' -d '{"username":"test","password":"test"}'
+# Staat de server op unhealthy?
+docker compose ps
+# Foutregels van de server
+docker compose logs --since 1h server | grep -iE 'error|interne fout|loopt nog|panic'
+# Wat doen de verbindingen van ClusterForge in PostgreSQL? Veel "idle in transaction"
+# of lang wachtende queries (wait_event Lock) wijzen op een vastzittende verbinding.
+docker compose exec postgres psql -U clusterforge -d clusterforge -c \
+  "select pid, state, wait_event_type, wait_event, now() - query_start as duur, left(query, 60) as query
+   from pg_stat_activity where datname = 'clusterforge' order by query_start;"
+```
+
+Daarna lost `docker compose restart server` het meestal op. Stuur de uitvoer van
+de commando's hierboven eerst mee als je de oorzaak wilt laten uitzoeken: na de
+herstart is ze weg.
+
+Op versies tot en met fase 5 (zonder de verbeterronde) had de server maar 4 databaseverbindingen op een
+kleine LXC en wachtte hij zonder grens. Werk bij naar de laatste versie, of zet
+tot dan `&pool_max_conns=25` achter `CF_DATABASE_URL` in `docker-compose.yml`
+(na `sslmode=disable`) en voer `docker compose up -d` uit.
