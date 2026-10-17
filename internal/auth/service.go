@@ -48,7 +48,7 @@ type Service struct {
 }
 
 func NewService(q *store.Queries, ev *events.Writer, sessionTTL time.Duration) (*Service, error) {
-	h, err := HashPassword("clusterforge-dummy-password")
+	h, err := HashPassword(context.Background(), "clusterforge-dummy-password")
 	if err != nil {
 		return nil, err
 	}
@@ -86,14 +86,14 @@ type LoginInput struct {
 func (s *Service) Login(ctx context.Context, in LoginInput) (Session, error) {
 	user, err := s.q.GetUserByUsername(ctx, in.Username)
 	if errors.Is(err, pgx.ErrNoRows) {
-		_, _ = VerifyPassword(in.Password, s.dummyHash)
+		_, _ = VerifyPassword(ctx, in.Password, s.dummyHash)
 		s.loginFailed(ctx, nil, in, "unknown_user")
 		return Session{}, ErrInvalidCredentials
 	}
 	if err != nil {
 		return Session{}, err
 	}
-	ok, err := VerifyPassword(in.Password, user.PasswordHash)
+	ok, err := VerifyPassword(ctx, in.Password, user.PasswordHash)
 	if err != nil {
 		return Session{}, fmt.Errorf("wachtwoord controleren: %w", err)
 	}
@@ -213,7 +213,7 @@ func (s *Service) CreateUser(ctx context.Context, actor events.Actor, username, 
 	if role != store.UserRoleAdmin && role != store.UserRoleViewer {
 		return store.User{}, ValidationError{"rol moet admin of viewer zijn"}
 	}
-	hash, err := HashPassword(password)
+	hash, err := HashPassword(ctx, password)
 	if err != nil {
 		return store.User{}, err
 	}
@@ -240,7 +240,7 @@ func (s *Service) ChangePassword(ctx context.Context, p Principal, current, next
 	if err := s.reauth.allowed(p.User.ID, s.now()); err != nil {
 		return err
 	}
-	ok, err := VerifyPassword(current, p.User.PasswordHash)
+	ok, err := VerifyPassword(ctx, current, p.User.PasswordHash)
 	if err != nil {
 		return err
 	}
@@ -252,7 +252,7 @@ func (s *Service) ChangePassword(ctx context.Context, p Principal, current, next
 	if err := checkPassword(next); err != nil {
 		return err
 	}
-	hash, err := HashPassword(next)
+	hash, err := HashPassword(ctx, next)
 	if err != nil {
 		return err
 	}
@@ -329,7 +329,7 @@ func (s *Service) DisableTOTP(ctx context.Context, p Principal, password, code s
 	if err := s.reauth.allowed(user.ID, s.now()); err != nil {
 		return err
 	}
-	ok, err := VerifyPassword(password, user.PasswordHash)
+	ok, err := VerifyPassword(ctx, password, user.PasswordHash)
 	if err != nil {
 		return err
 	}
@@ -377,7 +377,7 @@ func (s *Service) Confirm(ctx context.Context, p Principal, password, code, what
 		s.reauth.succeeded(user.ID)
 		return nil
 	}
-	ok, err := VerifyPassword(password, user.PasswordHash)
+	ok, err := VerifyPassword(ctx, password, user.PasswordHash)
 	if err != nil {
 		return err
 	}
