@@ -185,6 +185,8 @@ func (s *Server) authError(w http.ResponseWriter, r *http.Request, err error) bo
 		writeError(w, http.StatusBadRequest, "invalid_credentials", "huidig wachtwoord klopt niet")
 	case errors.Is(err, auth.ErrInvalidTOTP):
 		writeError(w, http.StatusBadRequest, "invalid_totp", err.Error())
+	case errors.Is(err, auth.ErrTooManyAttempts):
+		writeError(w, http.StatusTooManyRequests, "too_many_attempts", err.Error())
 	case errors.Is(err, auth.ErrTOTPAlreadyEnabled):
 		writeError(w, http.StatusConflict, "totp_already_enabled", err.Error())
 	case errors.Is(err, auth.ErrTOTPNotPending):

@@ -248,6 +248,11 @@ func (s *Service) Update(ctx context.Context, actor events.Actor, id uuid.UUID, 
 			return nil
 		}
 		if d["api_url"] != nil || d["token_id"] != nil || d["tls_fingerprint"] != nil || d["token_secret"] != nil {
+			if after.TokenSecret == "" && d["api_url"] != nil {
+				// Het bewaarde secret gaat nooit naar een ander adres: anders
+				// volstaat een gestolen sessie om het op te vangen.
+				return ValidationError{"het adres is veranderd; vul het token-secret opnieuw in"}
+			}
 			if after.TokenSecret == "" {
 				secret, err := s.box.Open(cur.TokenSecretEnc, aad(id), cur.KeyID)
 				if err != nil {

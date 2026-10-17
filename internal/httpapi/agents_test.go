@@ -1,7 +1,9 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -91,13 +93,13 @@ func TestAgentEnrollHeartbeatFactsRevoke(t *testing.T) {
 	}
 
 	// Onbekend token.
-	_, err := agent.Enroll(ctx, agent.EnrollOptions{ServerURL: e.srv.URL, Token: "cfe_onzin", Root: fakeRoot(t, strings.Repeat("a", 32))})
+	_, err := agent.Enroll(ctx, agent.EnrollOptions{ServerURL: e.srv.URL, AllowHTTP: true, Token: "cfe_onzin", Root: fakeRoot(t, strings.Repeat("a", 32))})
 	if err == nil || !strings.Contains(err.Error(), "401") {
 		t.Fatalf("onbekend token: %v", err)
 	}
 
 	root := fakeRoot(t, strings.Repeat("1", 32))
-	cfg, err := agent.Enroll(ctx, agent.EnrollOptions{ServerURL: e.srv.URL, Token: tok.Token, Version: "test", Root: root})
+	cfg, err := agent.Enroll(ctx, agent.EnrollOptions{ServerURL: e.srv.URL, AllowHTTP: true, Token: tok.Token, Version: "test", Root: root})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -106,7 +108,7 @@ func TestAgentEnrollHeartbeatFactsRevoke(t *testing.T) {
 	}
 
 	// Een andere machine met dezelfde hostname mag de node niet overnemen.
-	_, err = agent.Enroll(ctx, agent.EnrollOptions{ServerURL: e.srv.URL, Token: tok.Token, Root: fakeRoot(t, strings.Repeat("2", 32))})
+	_, err = agent.Enroll(ctx, agent.EnrollOptions{ServerURL: e.srv.URL, AllowHTTP: true, Token: tok.Token, Root: fakeRoot(t, strings.Repeat("2", 32))})
 	if err == nil || !strings.Contains(err.Error(), "409") {
 		t.Fatalf("andere machine: %v", err)
 	}
@@ -241,7 +243,7 @@ func TestEnrollmentTokens(t *testing.T) {
 	}
 
 	// Een token voor een vaste node koppelt aan die node, ook bij een andere hostname.
-	cfg, err := agent.Enroll(ctx, agent.EnrollOptions{ServerURL: e.srv.URL, Token: tok.Token, Root: fakeRoot(t, strings.Repeat("3", 32))})
+	cfg, err := agent.Enroll(ctx, agent.EnrollOptions{ServerURL: e.srv.URL, AllowHTTP: true, Token: tok.Token, Root: fakeRoot(t, strings.Repeat("3", 32))})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -249,7 +251,7 @@ func TestEnrollmentTokens(t *testing.T) {
 		t.Fatalf("node: %s, want %s", cfg.NodeID, n.ID)
 	}
 	// Opgebruikt.
-	if _, err := agent.Enroll(ctx, agent.EnrollOptions{ServerURL: e.srv.URL, Token: tok.Token, Root: fakeRoot(t, strings.Repeat("3", 32))}); err == nil {
+	if _, err := agent.Enroll(ctx, agent.EnrollOptions{ServerURL: e.srv.URL, AllowHTTP: true, Token: tok.Token, Root: fakeRoot(t, strings.Repeat("3", 32))}); err == nil {
 		t.Fatal("opgebruikt token geaccepteerd")
 	}
 	c.do("GET", "/api/v1/enrollment-tokens", nil, &list)
@@ -263,7 +265,7 @@ func TestEnrollmentTokens(t *testing.T) {
 	if _, err := e.pool.Exec(ctx, "UPDATE enrollment_tokens SET expires_at = now() - interval '1 minute' WHERE id = $1", tok2.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := agent.Enroll(ctx, agent.EnrollOptions{ServerURL: e.srv.URL, Token: tok2.Token, Root: fakeRoot(t, strings.Repeat("4", 32))}); err == nil {
+	if _, err := agent.Enroll(ctx, agent.EnrollOptions{ServerURL: e.srv.URL, AllowHTTP: true, Token: tok2.Token, Root: fakeRoot(t, strings.Repeat("4", 32))}); err == nil {
 		t.Fatal("verlopen token geaccepteerd")
 	}
 
@@ -272,7 +274,7 @@ func TestEnrollmentTokens(t *testing.T) {
 	if status := c.do("DELETE", "/api/v1/enrollment-tokens/"+tok3.ID, nil, nil); status != http.StatusNoContent {
 		t.Fatalf("delete: %d", status)
 	}
-	if _, err := agent.Enroll(ctx, agent.EnrollOptions{ServerURL: e.srv.URL, Token: tok3.Token, Root: fakeRoot(t, strings.Repeat("5", 32))}); err == nil {
+	if _, err := agent.Enroll(ctx, agent.EnrollOptions{ServerURL: e.srv.URL, AllowHTTP: true, Token: tok3.Token, Root: fakeRoot(t, strings.Repeat("5", 32))}); err == nil {
 		t.Fatal("verwijderd token geaccepteerd")
 	}
 	// Elke weigering staat in het logboek, met de reden.
@@ -347,7 +349,7 @@ func TestDeleteNodeDisconnectsAgent(t *testing.T) {
 
 	var tok newToken
 	c.do("POST", "/api/v1/enrollment-tokens", map[string]any{}, &tok)
-	cfg, err := agent.Enroll(ctx, agent.EnrollOptions{ServerURL: e.srv.URL, Token: tok.Token, Root: fakeRoot(t, strings.Repeat("3", 32))})
+	cfg, err := agent.Enroll(ctx, agent.EnrollOptions{ServerURL: e.srv.URL, AllowHTTP: true, Token: tok.Token, Root: fakeRoot(t, strings.Repeat("3", 32))})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -372,5 +374,55 @@ func TestDeleteNodeDisconnectsAgent(t *testing.T) {
 	}
 	if _, err := nats.Connect(cfg.NatsURL, nats.Nkey(pub, kp.Sign), nats.Secure(protocol.PinnedTLSConfig(cfg.NatsCertSHA256))); err == nil {
 		t.Fatal("sleutel van verwijderde node toegelaten")
+	}
+}
+
+// Een token zonder vaste node mag geen node overnemen die al een agent op een
+// andere machine heeft, of die in een ander cluster staat.
+func TestEnrollCannotTakeOverNode(t *testing.T) {
+	e, c := adminClient(t)
+
+	var web, db cluster
+	c.do("POST", "/api/v1/clusters", map[string]any{"slug": "web", "name": "Web", "type": "keepalived", "environment": "lab"}, &web)
+	c.do("POST", "/api/v1/clusters", map[string]any{"slug": "db", "name": "DB", "type": "keepalived", "environment": "lab"}, &db)
+	var tok newToken
+	c.do("POST", "/api/v1/enrollment-tokens", map[string]any{"cluster_id": db.ID, "max_uses": 10}, &tok)
+
+	enroll := func(hostname, machineID string) int {
+		t.Helper()
+		kp, err := nkeys.CreateUser()
+		if err != nil {
+			t.Fatal(err)
+		}
+		pub, _ := kp.PublicKey()
+		body, _ := json.Marshal(protocol.EnrollRequest{
+			Token: tok.Token, NkeyPublic: pub, Hostname: hostname, MachineID: machineID, ProtocolVersion: protocol.Version,
+		})
+		resp, err := http.Post(e.srv.URL+"/api/v1/agents/enroll", "application/json", bytes.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_ = resp.Body.Close()
+		return resp.StatusCode
+	}
+
+	if status := enroll("db1", strings.Repeat("1", 32)); status != http.StatusOK {
+		t.Fatalf("eerste aanmelding: %d", status)
+	}
+	// Dezelfde machine opnieuw (agent opnieuw geïnstalleerd) mag.
+	if status := enroll("db1", strings.Repeat("1", 32)); status != http.StatusOK {
+		t.Fatalf("zelfde machine: %d", status)
+	}
+	// Een andere machine, of een machine zonder machine-id, niet.
+	if status := enroll("db1", strings.Repeat("2", 32)); status != http.StatusConflict {
+		t.Fatalf("andere machine: %d", status)
+	}
+	if status := enroll("db1", ""); status != http.StatusConflict {
+		t.Fatalf("zonder machine-id: %d", status)
+	}
+	// Een node van een ander cluster, ook zonder agent, niet.
+	c.do("POST", "/api/v1/nodes", map[string]any{"hostname": "web1", "cluster_id": web.ID}, nil)
+	if status := enroll("web1", strings.Repeat("3", 32)); status != http.StatusConflict {
+		t.Fatalf("ander cluster: %d", status)
 	}
 }

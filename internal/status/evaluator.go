@@ -55,6 +55,9 @@ func NewEvaluator(pool *pgxpool.Pool, ev *events.Writer, log *slog.Logger) *Eval
 	}
 }
 
+// kickGap is de kortste tijd tussen twee berekeningen na een Kick.
+const kickGap = time.Second
+
 // Kick vraagt om een nieuwe berekening zonder te wachten.
 func (e *Evaluator) Kick() {
 	select {
@@ -68,6 +71,7 @@ func (e *Evaluator) Run(ctx context.Context) {
 	t := time.NewTicker(Interval)
 	defer t.Stop()
 	for {
+		start := time.Now()
 		if err := e.Evaluate(ctx); err != nil && ctx.Err() == nil {
 			e.log.Error("status berekenen mislukt", "err", err)
 		}
@@ -76,8 +80,15 @@ func (e *Evaluator) Run(ctx context.Context) {
 			return
 		case <-t.C:
 		case <-e.kick:
-			// Een reeks heartbeats tegelijk geeft één berekening.
-			time.Sleep(200 * time.Millisecond)
+			// Elke heartbeat kickt; met veel nodes zou de berekening anders
+			// bijna onafgebroken lopen. Hoogstens één per kickGap, en een
+			// reeks heartbeats tegelijk geeft één berekening.
+			wait := max(200*time.Millisecond, kickGap-time.Since(start))
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(wait):
+			}
 		}
 	}
 }

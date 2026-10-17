@@ -55,7 +55,8 @@ git -C /opt/clusterforge config core.sshCommand "ssh -i /root/.ssh/clusterforge"
 cd /opt/clusterforge/deploy
 cp .env.example .env
 sed -i "s/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=$(openssl rand -hex 24)/" .env
-sed -i "s/^CF_MASTER_KEY=.*/CF_MASTER_KEY=$(openssl rand -hex 32)/" .env
+# Alleen als hij nog leeg is: een nieuwe sleutel maakt de opgeslagen tokens onleesbaar.
+sed -i "s/^CF_MASTER_KEY=$/CF_MASTER_KEY=$(openssl rand -hex 32)/" .env
 grep CF_MASTER_KEY .env
 nano .env
 ```
@@ -186,15 +187,52 @@ Daarna, in ClusterForge:
 
 De nieuwe VM's moeten het adres van ClusterForge (veld "Adres van ClusterForge" in het formulier) en poort 4222 van de LXC kunnen bereiken.
 
+## Back-up en herstel van ClusterForge zelf
+
+Alles wat ClusterForge weet, staat in PostgreSQL: clusters, nodes, taken, het logboek, de versleutelde tokens en ook de sleutel en het certificaat van NATS waarmee de agents verbinden. Daarnaast heb je `deploy/.env` nodig, met `CF_MASTER_KEY`. De metrics in VictoriaMetrics zijn handig maar niet nodig om verder te kunnen.
+
+Een back-up maken (bijvoorbeeld elke nacht met cron):
+
+```sh
+cd /opt/clusterforge/deploy
+mkdir -p /root/cf-backup
+docker compose exec -T postgres pg_dump -U clusterforge -Fc clusterforge > /root/cf-backup/cf-$(date +%F).dump
+cp .env /root/cf-backup/env-$(date +%F)
+chmod 600 /root/cf-backup/*
+```
+
+Behandel de dump als een geheim: met de NATS-sleutel erin kan iemand zich tegenover je agents als ClusterForge voordoen. Bewaar `.env` ook buiten de LXC (wachtwoordmanager). Zonder dezelfde `CF_MASTER_KEY` zijn de Proxmox-, GitHub- en assistentsleutels in de dump niet meer te lezen en vul je ze opnieuw in.
+
+Het eenvoudigst is daarnaast een back-up van de hele LXC in Proxmox (modus *stop* of *snapshot*); die bevat database, metrics en `.env` samen.
+
+Terugzetten op een nieuwe LXC (stappen 1 tot 3 gedaan):
+
+```sh
+cd /opt/clusterforge/deploy
+cp /root/cf-backup/env-JJJJ-MM-DD .env
+docker compose up -d postgres
+docker compose exec -T postgres pg_restore -U clusterforge -d clusterforge --clean --if-exists < /root/cf-backup/cf-JJJJ-MM-DD.dump
+docker compose up -d --build
+```
+
+Geef de nieuwe LXC hetzelfde IP-adres (of zet `CF_NATS_ADVERTISE` en de DNS-naam goed): de agents verbinden met het adres en het certificaat dat ze bij hun aanmelding kregen, en melden zich dan vanzelf weer.
+
 ## Bijwerken
+
+Maak eerst een back-up zoals hierboven: migraties lopen automatisch bij het starten en een oudere versie terugzetten kan alleen met die back-up.
 
 ```sh
 cd /opt/clusterforge
-git pull
-cd deploy && docker compose up -d --build
+git fetch origin
+git checkout -B main origin/main      # of een versie: git checkout v0.5.0
+cd deploy
+CF_VERSION=$(git describe --tags --always) docker compose up -d --build
+docker compose ps                     # server moet na een minuut "healthy" zijn
 ```
 
-Databasemigraties lopen automatisch bij het starten van de server.
+Zet je liever `CF_VERSION` vast in `.env`, pas hem dan bij elke update aan. Draai alleen `main` of een versie-tag in productie, geen werkbranch: een branch die later anders gemerged wordt, kan je database een migratie geven die `main` niet kent.
+
+Met een uitgebracht image hoeft de LXC niets te bouwen: zet `CF_IMAGE=ghcr.io/jonasz1996/clusterforge-server:v0.5.0` in `.env` en draai `docker compose pull && docker compose up -d`.
 
 ## Problemen
 
@@ -203,6 +241,7 @@ Databasemigraties lopen automatisch bij het starten van de server.
 | `docker run` geeft fouten over `permission denied` of `sysctl` | `nesting` en `keyctl` staan niet aan, of de container is niet herstart |
 | Inloggen lijkt te lukken maar je komt terug op het loginscherm | `CF_SECURE_COOKIES=true` zonder TLS |
 | Build stopt met `killed` | Te weinig geheugen; geef de LXC tijdelijk 3 GB |
+| `docker compose ps` toont de server als `unhealthy` | De server bereikt PostgreSQL niet of start niet; kijk met `docker compose logs server` |
 | Bij een node staat "Grafieken staan uit" | `CF_VICTORIAMETRICS_URL` is niet gezet; de compose-stack zet die standaard |
 | Node blijft Offline na het installeren van de agent | Poort 4222 niet bereikbaar vanaf de node, of `CF_NATS_ADVERTISE` wijst niet naar de LXC; kijk op de node met `journalctl -u cf-agent` |
 | Bij Proxmox staat dat de server geen masterkey heeft | `CF_MASTER_KEY` is niet gezet in `.env`; zet hem en voer `docker compose up -d` uit |

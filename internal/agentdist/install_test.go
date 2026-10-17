@@ -62,7 +62,8 @@ func (e *installEnv) serve(bin, sum string) {
 }
 
 func (e *installEnv) run(args ...string) (string, int) {
-	cmd := exec.Command("sh", append([]string{e.script}, args...)...)
+	// De testserver is http.
+	cmd := exec.Command("sh", append([]string{e.script, "--allow-http"}, args...)...)
 	cmd.Env = append(os.Environ(), "PATH="+e.path, "CF_INSTALL_ROOT="+e.root)
 	out, err := cmd.CombinedOutput()
 	code := 0
@@ -133,5 +134,15 @@ func TestInstallUpgrade(t *testing.T) {
 	}
 	if out, code := e.run("--server", e.srv, "--upgrade"); code != 1 || !strings.Contains(out, "installeer hem met --token") {
 		t.Fatalf("zonder aanmelding: %d %s", code, out)
+	}
+}
+
+func TestInstallRefusesHTTP(t *testing.T) {
+	e := newInstallEnv(t)
+	cmd := exec.Command("sh", e.script, "--server", e.srv, "--upgrade")
+	cmd.Env = append(os.Environ(), "PATH="+e.path, "CF_INSTALL_ROOT="+e.root)
+	out, err := cmd.CombinedOutput()
+	if ee, ok := err.(*exec.ExitError); !ok || ee.ExitCode() != 2 || !strings.Contains(string(out), "--allow-http") {
+		t.Fatalf("http zonder --allow-http: %v %s", err, out)
 	}
 }

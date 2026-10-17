@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
@@ -14,7 +15,18 @@ import (
 
 // Open maakt een connectiepool naar PostgreSQL en controleert de verbinding.
 func Open(ctx context.Context, url string) (*pgxpool.Pool, error) {
-	pool, err := pgxpool.New(ctx, url)
+	cfg, err := pgxpool.ParseConfig(url)
+	if err != nil {
+		return nil, fmt.Errorf("database: %w", err)
+	}
+	// De standaard is max(4, aantal CPU's): te weinig voor de workers, hun
+	// heartbeats, de achtergrondlussen en de API samen. Een taak die te lang
+	// op een verbinding wacht, lijkt anders onderbroken. pool_max_conns in de
+	// URL gaat voor.
+	if !strings.Contains(url, "pool_max_conns") {
+		cfg.MaxConns = 25
+	}
+	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("database: %w", err)
 	}

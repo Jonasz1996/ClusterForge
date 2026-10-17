@@ -65,7 +65,7 @@ func (f *fleet) boot(_ int, name, file, content string) {
 		f.t.Errorf("onverwacht bestand %s", file)
 		return
 	}
-	var in struct{ Server, Token string }
+	var in agent.EnrollFile
 	if err := json.Unmarshal([]byte(content), &in); err != nil {
 		f.t.Errorf("aanmeldbestand: %v", err)
 		return
@@ -89,7 +89,7 @@ func (f *fleet) boot(_ int, name, file, content string) {
 			return
 		}
 	}
-	cfg, err := agent.Enroll(context.Background(), agent.EnrollOptions{ServerURL: in.Server, Token: in.Token, Version: "test", Root: root})
+	cfg, err := agent.Enroll(context.Background(), agent.EnrollOptions{ServerURL: in.Server, Token: in.Token, AllowHTTP: in.AllowHTTP, Version: "test", Root: root})
 	if err != nil {
 		f.t.Errorf("aanmelden %s: %v", name, err)
 		return

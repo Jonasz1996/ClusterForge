@@ -650,7 +650,7 @@ func (a *Agent) runRestore(path string, login *pgLogin, run protocol.DBDumpRun) 
 			in := io.MultiReader(zr, strings.NewReader(dbsql.PGRestoreFinish))
 			return a.stream(ctx, in, io.Discard, "psql", login.args(run.Target)...)
 		}
-		args := []string{"--batch", "--skip-print-query-on-error", run.Target}
+		args := append(slices.Clone(importArgs), run.Target)
 		err = a.stream(ctx, zr, io.Discard, "mariadb", args...)
 		if err != nil && notInstalled(err) {
 			err = a.stream(ctx, zr, io.Discard, "mysql", args...)

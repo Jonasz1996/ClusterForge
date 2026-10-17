@@ -488,6 +488,12 @@ func (a *Agent) runPull(req protocol.DBMigrateRequest, run protocol.DBMigrateRun
 	st.mu.Unlock()
 }
 
+// importArgs zijn de opties van mariadb om een dump in te lezen. Met
+// --binary-mode voert de client geen eigen commando's (zoals \! voor een
+// shell) uit die in de dump staan: de agent draait als root, en de inhoud
+// van een dump komt van een andere server.
+var importArgs = []string{"--batch", "--binary-mode", "--skip-print-query-on-error"}
+
 // pipeDump stuurt de uitvoer van mariadb-dump op de oude server direct naar
 // mariadb op deze node.
 func (a *Agent) pipeDump(ctx context.Context, client []string, db, target string, progress func(int64)) error {
@@ -501,7 +507,7 @@ func (a *Agent) pipeDump(ctx context.Context, client []string, db, target string
 		return err
 	}
 	imp := func(ctx context.Context, r io.Reader) error {
-		args := []string{"--batch", "--skip-print-query-on-error", target}
+		args := append(slices.Clone(importArgs), target)
 		err := a.stream(ctx, r, io.Discard, "mariadb", args...)
 		if err != nil && notInstalled(err) {
 			err = a.stream(ctx, r, io.Discard, "mysql", args...)

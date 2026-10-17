@@ -114,6 +114,11 @@ func (s *Service) token(in target, cur *store.DocsTarget) (string, error) {
 	if cur == nil {
 		return "", ValidationError{"token", "het token is verplicht"}
 	}
+	// Het opgeslagen token gaat nooit naar een ander adres: anders volstaat
+	// een gestolen sessie om het naar een eigen server te laten sturen.
+	if in.api != cur.ApiUrl {
+		return "", ValidationError{"token", "het adres van de API is veranderd; vul het token opnieuw in"}
+	}
 	return s.openToken(*cur)
 }
 

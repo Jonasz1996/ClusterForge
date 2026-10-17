@@ -75,13 +75,26 @@ func (s *Scheduler) Tick(ctx context.Context) {
 	}
 	defer conn.Release()
 	var locked bool
-	if err := conn.QueryRow(ctx, "SELECT pg_try_advisory_lock($1)", lockID).Scan(&locked); err != nil || !locked {
+	if err := conn.QueryRow(ctx, "SELECT pg_try_advisory_lock($1)", lockID).Scan(&locked); err != nil {
+		if ctx.Err() == nil {
+			s.log.Error("planner: slot nemen mislukt", "err", err)
+		}
+		return
+	}
+	if !locked {
+		// Een andere server plant.
 		return
 	}
 	defer func() {
 		uctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
-		_, _ = conn.Exec(uctx, "SELECT pg_advisory_unlock($1)", lockID)
+		if _, err := conn.Exec(uctx, "SELECT pg_advisory_unlock($1)", lockID); err != nil {
+			// Het slot hoort bij de verbinding: gaat die zo terug in de pool,
+			// dan krijgt geen enkele volgende Tick het slot nog. Sluiten geeft
+			// het slot vrij; de pool maakt een nieuwe verbinding.
+			s.log.Error("planner: slot vrijgeven mislukt; verbinding wordt gesloten", "err", err)
+			_ = conn.Conn().Close(uctx)
+		}
 	}()
 	for _, task := range s.tasks {
 		if err := task.Tick(ctx, s.Now()); err != nil && ctx.Err() == nil {

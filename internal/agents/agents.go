@@ -200,11 +200,16 @@ func (s *Service) Enroll(ctx context.Context, req protocol.EnrollRequest) (store
 			return err
 		}
 
-		// Een token zonder vaste node mag een node niet overnemen van een
-		// andere machine met dezelfde hostname.
+		// Een token zonder vaste node mag geen node van een ander cluster
+		// nemen, en een node met een actieve agent alleen terugnemen vanaf
+		// dezelfde machine. Wie alleen de hostname kent, krijgt anders de
+		// commando's en databasewachtwoorden van die node.
+		if tok.NodeID == nil && !created && tok.ClusterID != nil && node.ClusterID != nil && *node.ClusterID != *tok.ClusterID {
+			return ConflictError{"de node " + node.Hostname + " hoort bij een ander cluster dan dit token"}
+		}
 		if cur, err := q.GetActiveAgentByNode(ctx, node.ID); err == nil {
-			if tok.NodeID == nil && cur.MachineID != "" && req.MachineID != "" && cur.MachineID != req.MachineID {
-				return ConflictError{"de node " + node.Hostname + " hoort al bij een andere machine; maak een token voor die node als je hem wilt vervangen"}
+			if tok.NodeID == nil && (cur.MachineID == "" || req.MachineID != cur.MachineID) {
+				return ConflictError{"de node " + node.Hostname + " heeft al een agent op een andere machine; maak een token voor die node als je hem wilt vervangen"}
 			}
 		} else if !errors.Is(err, pgx.ErrNoRows) {
 			return err

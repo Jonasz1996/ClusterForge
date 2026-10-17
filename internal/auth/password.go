@@ -26,13 +26,24 @@ const MinPasswordLength = 12
 
 var errBadHash = errors.New("ongeldige wachtwoordhash")
 
+// argonSlots begrenst hoeveel hashes tegelijk lopen: elke hash neemt 64 MiB,
+// en honderd aanmeldingen tegelijk zouden de server anders zonder geheugen
+// zetten (en daarmee NATS en alle agents). De rest wacht even.
+var argonSlots = make(chan struct{}, 4)
+
+func argonKey(password, salt []byte, time, memory uint32, threads uint8, keyLen uint32) []byte {
+	argonSlots <- struct{}{}
+	defer func() { <-argonSlots }()
+	return argon2.IDKey(password, salt, time, memory, threads, keyLen)
+}
+
 // HashPassword geeft een argon2id-hash in PHC-formaat terug.
 func HashPassword(password string) (string, error) {
 	salt := make([]byte, argonSaltLen)
 	if _, err := rand.Read(salt); err != nil {
 		return "", err
 	}
-	key := argon2.IDKey([]byte(password), salt, argonTime, argonMemory, argonThreads, argonKeyLen)
+	key := argonKey([]byte(password), salt, argonTime, argonMemory, argonThreads, argonKeyLen)
 	return fmt.Sprintf("$argon2id$v=%d$m=%d,t=%d,p=%d$%s$%s",
 		argon2.Version, argonMemory, argonTime, argonThreads,
 		base64.RawStdEncoding.EncodeToString(salt),
@@ -64,6 +75,6 @@ func VerifyPassword(password, encoded string) (bool, error) {
 	if err != nil {
 		return false, errBadHash
 	}
-	got := argon2.IDKey([]byte(password), salt, time, memory, threads, uint32(len(want)))
+	got := argonKey([]byte(password), salt, time, memory, threads, uint32(len(want)))
 	return subtle.ConstantTimeCompare(got, want) == 1, nil
 }

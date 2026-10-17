@@ -28,14 +28,24 @@ type EnrollOptions struct {
 	Version string
 	// Root is de bestandssysteemwortel voor machine-id; leeg is "/".
 	Root string
+	// AllowHTTP staat aanmelden over http toe. Wie het verkeer kan
+	// onderscheppen, kan zich dan als ClusterForge voordoen en commando's
+	// als root naar de node sturen; daarom alleen op uitdrukkelijke vraag.
+	AllowHTTP bool
 }
 
 // Enroll maakt een nieuw sleutelpaar, meldt de agent aan en geeft de
 // configuratie terug. De private sleutel verlaat de machine niet.
 func Enroll(ctx context.Context, o EnrollOptions) (*Config, error) {
 	server := strings.TrimRight(o.ServerURL, "/")
-	if !strings.HasPrefix(server, "https://") && !strings.HasPrefix(server, "http://") {
-		return nil, errors.New("server moet beginnen met https:// of http://")
+	switch {
+	case strings.HasPrefix(server, "https://"):
+	case strings.HasPrefix(server, "http://"):
+		if !o.AllowHTTP {
+			return nil, errors.New("aanmelden over http is onveilig: gebruik https://, of sta http uitdrukkelijk toe met -allow-http")
+		}
+	default:
+		return nil, errors.New("server moet beginnen met https://")
 	}
 	kp, err := nkeys.CreateUser()
 	if err != nil {

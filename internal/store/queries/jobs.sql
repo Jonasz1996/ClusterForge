@@ -29,20 +29,23 @@ WHERE id = (
 RETURNING *;
 
 -- name: JobHeartbeat :one
-UPDATE jobs SET heartbeat_at = now() WHERE id = $1 AND status = 'running' RETURNING cancel_requested;
+-- attempts is het slot: een poging die is overgenomen, ziet geen rij meer.
+UPDATE jobs SET heartbeat_at = now() WHERE id = @id AND attempts = @attempts AND status = 'running' RETURNING cancel_requested;
 
 -- name: RequeueStaleJobs :many
--- Taken waarvan de heartbeat stilstaat, horen bij een gestopte server.
+-- Taken waarvan de heartbeat stilstaat, horen bij een gestopte server; de
+-- taken die deze server zelf nog uitvoert niet.
 UPDATE jobs SET status = 'queued'
 WHERE status = 'running' AND heartbeat_at < now() - make_interval(secs => @stale_seconds::float8)
+  AND NOT (id = ANY(@running::uuid[]))
 RETURNING id;
 
 -- name: RequeueJob :exec
-UPDATE jobs SET status = 'queued' WHERE id = $1 AND status = 'running';
+UPDATE jobs SET status = 'queued' WHERE id = @id AND attempts = @attempts AND status = 'running';
 
 -- name: FinishJob :one
-UPDATE jobs SET status = $2, error = $3, finished_at = now()
-WHERE id = $1 AND status IN ('queued', 'running')
+UPDATE jobs SET status = @status, error = @error, finished_at = now()
+WHERE id = @id AND attempts = @attempts AND status = 'running'
 RETURNING *;
 
 -- name: RequestJobCancel :one
@@ -66,8 +69,10 @@ LIMIT @max_rows;
 SELECT * FROM job_steps WHERE job_id = $1 ORDER BY seq;
 
 -- name: SaveJobStep :exec
+-- Alleen de poging die de taak nog heeft, schrijft zijn stappen weg.
 INSERT INTO job_steps (job_id, seq, name, status, finished_at, state, log, error)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+SELECT @job_id, @seq, @name, @status, @finished_at, @state, @log, @error
+WHERE EXISTS (SELECT 1 FROM jobs WHERE id = @job_id AND attempts = @attempts)
 ON CONFLICT (job_id, seq) DO UPDATE
 SET name = EXCLUDED.name, status = EXCLUDED.status, finished_at = EXCLUDED.finished_at,
     state = EXCLUDED.state, log = EXCLUDED.log, error = EXCLUDED.error;

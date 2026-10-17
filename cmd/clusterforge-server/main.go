@@ -13,9 +13,11 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"strings"
 	"syscall"
 	"time"
@@ -83,6 +85,8 @@ func run(args []string) error {
 		return serve()
 	case "migrate":
 		return migrateOnly()
+	case "healthcheck":
+		return healthcheck()
 	case "admin":
 		if len(args) < 2 || args[1] != "create" {
 			return usage()
@@ -97,7 +101,7 @@ func run(args []string) error {
 }
 
 func usage() error {
-	return errors.New(`gebruik: clusterforge-server <serve|migrate|admin create|version>`)
+	return errors.New(`gebruik: clusterforge-server <serve|migrate|admin create|healthcheck|version>`)
 }
 
 func newLogger(level string) *slog.Logger {
@@ -316,22 +320,22 @@ func serve() error {
 	dcs.Deploy, dcs.GitOps, dcs.Backups, dcs.Risk, dcs.Box, dcs.Events = dep, git, bk, rsk, box, ev
 	dcs.Components = cmps
 	dcs.Opts = docs.Opts{Usernames: cfg.DocsUsernames}
-	go hub.Run(ctx)
-	go eval.Run(ctx)
-	go ingest.Run(ctx)
-	go pve.Run(ctx)
-	go bk.Run(ctx)
-	go drf.Run(ctx)
-	go sched.Run(ctx)
-	go dps.Run(ctx)
-	go analyzer.Run(ctx)
-	go rsk.Run(ctx)
-	go dcs.Run(ctx)
-	go kub.Run(ctx)
-	go dbs.Run(ctx)
-	go cmps.Run(ctx)
+	goLoop(ctx, log, "hub", hub.Run)
+	goLoop(ctx, log, "eval", eval.Run)
+	goLoop(ctx, log, "ingest", ingest.Run)
+	goLoop(ctx, log, "pve", pve.Run)
+	goLoop(ctx, log, "bk", bk.Run)
+	goLoop(ctx, log, "drf", drf.Run)
+	goLoop(ctx, log, "sched", sched.Run)
+	goLoop(ctx, log, "dps", dps.Run)
+	goLoop(ctx, log, "analyzer", analyzer.Run)
+	goLoop(ctx, log, "rsk", rsk.Run)
+	goLoop(ctx, log, "dcs", dcs.Run)
+	goLoop(ctx, log, "kub", kub.Run)
+	goLoop(ctx, log, "dbs", dbs.Run)
+	goLoop(ctx, log, "cmps", cmps.Run)
 	if git.Enabled() {
-		go git.Run(ctx)
+		goLoop(ctx, log, "git", git.Run)
 	}
 	jobsDone := make(chan struct{})
 	go func() {
@@ -400,6 +404,61 @@ func cleanupSessions(ctx context.Context, log *slog.Logger, a *auth.Service) {
 			}
 		}
 	}
+}
+
+// goLoop draait een achtergrondlus in een eigen goroutine. Een panic in de
+// lus haalt niet de hele server (met NATS en alle agents) onderuit: hij
+// wordt gelogd en de lus start na even wachten opnieuw.
+func goLoop(ctx context.Context, log *slog.Logger, name string, run func(context.Context)) {
+	go func() {
+		for ctx.Err() == nil {
+			if !runLoop(ctx, log, name, run) {
+				return
+			}
+			select {
+			case <-ctx.Done():
+			case <-time.After(10 * time.Second):
+			}
+		}
+	}()
+}
+
+// runLoop geeft true terug als de lus door een panic stopte.
+func runLoop(ctx context.Context, log *slog.Logger, name string, run func(context.Context)) (panicked bool) {
+	defer func() {
+		if p := recover(); p != nil {
+			log.Error("panic in achtergrondlus; hij start opnieuw", "loop", name, "panic", p, "stack", string(debug.Stack()))
+			panicked = true
+		}
+	}()
+	run(ctx)
+	return false
+}
+
+// healthcheck vraagt /api/v1/health aan de eigen server, voor de
+// healthcheck van Docker: het image heeft geen curl of wget.
+func healthcheck() error {
+	listen := os.Getenv("CF_LISTEN")
+	if listen == "" {
+		listen = ":8080"
+	}
+	host, port, err := net.SplitHostPort(listen)
+	if err != nil {
+		return fmt.Errorf("CF_LISTEN: %w", err)
+	}
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		host = "127.0.0.1"
+	}
+	c := &http.Client{Timeout: 5 * time.Second}
+	resp, err := c.Get("http://" + net.JoinHostPort(host, port) + "/api/v1/health")
+	if err != nil {
+		return err
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("health: %s", resp.Status)
+	}
+	return nil
 }
 
 func migrateOnly() error {
