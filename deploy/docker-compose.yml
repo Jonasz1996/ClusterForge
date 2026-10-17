@@ -2,11 +2,27 @@
 # dit bestand (zie .env.example) en zet de server achter je reverse proxy met TLS.
 services:
   server:
-    image: ${CF_IMAGE:-ghcr.io/jonasz1996/clusterforge-server:latest}
+    # Standaard bouwt `docker compose up -d --build` het image hier zelf. Met
+    # een uitgebracht image: CF_IMAGE=ghcr.io/jonasz1996/clusterforge-server:v0.5.0
+    # in .env en `docker compose pull && docker compose up -d`.
+    image: ${CF_IMAGE:-clusterforge-server:local}
     build:
       context: ..
       dockerfile: deploy/Dockerfile
+      args:
+        # Zichtbaar in de webinterface en op /api/v1/health; zie de docs bij Bijwerken.
+        VERSION: ${CF_VERSION:-dev}
     restart: unless-stopped
+    # Lopende taken krijgen bij het stoppen tot 15 seconden om zich netjes in
+    # de wachtrij terug te zetten; de standaard van 10 is te kort.
+    stop_grace_period: 30s
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/clusterforge-server", "healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      # De eerste start voert alle databasemigraties uit.
+      start_period: 120s
     depends_on:
       postgres:
         condition: service_healthy
@@ -25,6 +41,11 @@ services:
       CF_DRIFT_INTERVAL: ${CF_DRIFT_INTERVAL:-15m}
       CF_MASTER_KEY: ${CF_MASTER_KEY:-}
       CF_TEST_WINDOW: ${CF_TEST_WINDOW:-zo 03:00-05:00}
+      CF_LOG_LEVEL: ${CF_LOG_LEVEL:-info}
+      CF_SANDBOX_STORAGE: ${CF_SANDBOX_STORAGE:-}
+      CF_SANDBOX_BOOT_TIMEOUT: ${CF_SANDBOX_BOOT_TIMEOUT:-}
+      CF_JOURNAL_SSH_LOGINS: ${CF_JOURNAL_SSH_LOGINS:-}
+      CF_DOCS_USERNAMES: ${CF_DOCS_USERNAMES:-}
       # Het testvenster rekent op deze klok, met zomer- en wintertijd.
       TZ: ${TZ:-Europe/Brussels}
     ports:
@@ -48,7 +69,7 @@ services:
   victoriametrics:
     image: victoriametrics/victoria-metrics:v1.153.0
     restart: unless-stopped
-    command: ["-retentionPeriod=90d"]
+    command: ["-retentionPeriod=${CF_VM_RETENTION:-90d}"]
     volumes: [vmdata:/victoria-metrics-data]
     # Alleen nodig als Grafana de metrics rechtstreeks leest. VictoriaMetrics
     # heeft geen login; open dit alleen naar je Grafana.

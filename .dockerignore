@@ -5,3 +5,6 @@ web/.next
 web/out
 internal/webui/dist/*
 !internal/webui/dist/.gitkeep
+# Wachtwoorden en CF_MASTER_KEY horen niet in de build.
+.env
+**/.env

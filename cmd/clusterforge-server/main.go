@@ -13,6 +13,7 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -83,6 +84,8 @@ func run(args []string) error {
 		return serve()
 	case "migrate":
 		return migrateOnly()
+	case "healthcheck":
+		return healthcheck()
 	case "admin":
 		if len(args) < 2 || args[1] != "create" {
 			return usage()
@@ -97,7 +100,7 @@ func run(args []string) error {
 }
 
 func usage() error {
-	return errors.New(`gebruik: clusterforge-server <serve|migrate|admin create|version>`)
+	return errors.New(`gebruik: clusterforge-server <serve|migrate|admin create|healthcheck|version>`)
 }
 
 func newLogger(level string) *slog.Logger {
@@ -400,6 +403,32 @@ func cleanupSessions(ctx context.Context, log *slog.Logger, a *auth.Service) {
 			}
 		}
 	}
+}
+
+// healthcheck vraagt /api/v1/health aan de eigen server, voor de
+// healthcheck van Docker: het image heeft geen curl of wget.
+func healthcheck() error {
+	listen := os.Getenv("CF_LISTEN")
+	if listen == "" {
+		listen = ":8080"
+	}
+	host, port, err := net.SplitHostPort(listen)
+	if err != nil {
+		return fmt.Errorf("CF_LISTEN: %w", err)
+	}
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		host = "127.0.0.1"
+	}
+	c := &http.Client{Timeout: 5 * time.Second}
+	resp, err := c.Get("http://" + net.JoinHostPort(host, port) + "/api/v1/health")
+	if err != nil {
+		return err
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("health: %s", resp.Status)
+	}
+	return nil
 }
 
 func migrateOnly() error {

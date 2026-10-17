@@ -20,6 +20,17 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      # latest alleen voor een gewone versie, niet voor v1.0.0-rc1 en dergelijke.
+      - id: tags
+        env:
+          REF: ${{ github.ref_name }}
+        run: |
+          {
+            echo "list<<EOF"
+            echo "ghcr.io/jonasz1996/clusterforge-server:$REF"
+            case "$REF" in *-*) ;; *) echo "ghcr.io/jonasz1996/clusterforge-server:latest" ;; esac
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
       - uses: docker/build-push-action@v6
         with:
           context: .
@@ -27,6 +38,4 @@ jobs:
           platforms: linux/amd64,linux/arm64
           push: true
           build-args: VERSION=${{ github.ref_name }}
-          tags: |
-            ghcr.io/jonasz1996/clusterforge-server:${{ github.ref_name }}
-            ghcr.io/jonasz1996/clusterforge-server:latest
+          tags: ${{ steps.tags.outputs.list }}
