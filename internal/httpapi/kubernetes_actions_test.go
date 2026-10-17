@@ -513,6 +513,17 @@ func TestKubernetesNodeLifecycle(t *testing.T) {
 		kubefake.Pod(kubefake.PodSpec{Namespace: "demo", Name: "db-0", Node: "leren-worker-01", OwnerKind: "StatefulSet", OwnerName: "db", Labels: db}),
 		kubefake.PodDisruptionBudget("demo", "db", db, 1, 0),
 	)
+	// De agent herstart pas na een pauze; wacht tot beide herstarts
+	// hierboven echt uitgevoerd zijn, anders telt de laatste hieronder mee.
+	eventually(t, "vorige herstarts uitgevoerd", func() bool {
+		n := 0
+		for _, c := range w1.called() {
+			if strings.HasPrefix(c, "reboot ") {
+				n++
+			}
+		}
+		return n == 2
+	})
 	calls := len(w1.called())
 	if j = run(map[string]any{"action": "reboot"}); j.Status != "failed" || len(j.Steps) != 1 ||
 		!strings.Contains(stepLog(j, "Kubernetes: node leegmaken"), "terugdraaien: leren-worker-01 krijgt weer pods") {
