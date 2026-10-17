@@ -83,6 +83,12 @@ type Server struct {
 	lessons      *kubelessons.Engine
 	version      string
 	loginLimiter *ipLimiter
+	// loginTimeout en sessionTimeout begrenzen het databasewerk van een login
+	// en van de sessiecontrole voor elke API-call. Een volle pool of een slot
+	// in PostgreSQL geeft dan een fout in plaats van een request die blijft
+	// hangen.
+	loginTimeout   time.Duration
+	sessionTimeout time.Duration
 	// enrollLimiter remt het raden van enrollmenttokens.
 	enrollLimiter *ipLimiter
 	// throttle remt events die een aanvaller gratis kan laten schrijven.
@@ -172,18 +178,20 @@ func New(d Deps) *Server {
 		git:      d.GitOps,
 		version:  d.Version,
 		// 10 pogingen direct, daarna één per 6 seconden per IP-adres.
-		loginLimiter:  newIPLimiter(6*time.Second, 10),
-		enrollLimiter: newIPLimiter(6*time.Second, 20),
-		throttle:      events.NewThrottle(ev),
-		assistant:     d.Assistant,
-		risk:          d.Risk,
-		topo:          d.Topo,
-		docs:          d.Docs,
-		reports:       d.Reports,
-		kube:          d.Kube,
-		databases:     d.Databases,
-		components:    d.Components,
-		kubeNodes:     d.KubeNodes,
+		loginLimiter:   newIPLimiter(6*time.Second, 10),
+		loginTimeout:   20 * time.Second,
+		sessionTimeout: 10 * time.Second,
+		enrollLimiter:  newIPLimiter(6*time.Second, 20),
+		throttle:       events.NewThrottle(ev),
+		assistant:      d.Assistant,
+		risk:           d.Risk,
+		topo:           d.Topo,
+		docs:           d.Docs,
+		reports:        d.Reports,
+		kube:           d.Kube,
+		databases:      d.Databases,
+		components:     d.Components,
+		kubeNodes:      d.KubeNodes,
 	}
 	s.assistant.Tools = slices.Concat(s.assistantTools(), s.kubeTools(), s.databaseTools())
 	s.lessons = kubelessons.New(s.kube, s.q)
