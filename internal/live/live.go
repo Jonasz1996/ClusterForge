@@ -29,9 +29,10 @@ type Hub struct {
 	pool *pgxpool.Pool
 	log  *slog.Logger
 
-	mu   sync.Mutex
-	subs map[chan string]struct{}
-	done chan struct{}
+	mu        sync.Mutex
+	subs      map[chan string]struct{}
+	done      chan struct{}
+	closeDone sync.Once
 }
 
 func NewHub(pool *pgxpool.Pool, log *slog.Logger) *Hub {
@@ -39,8 +40,14 @@ func NewHub(pool *pgxpool.Pool, log *slog.Logger) *Hub {
 }
 
 // Run luistert op PostgreSQL tot ctx afloopt en sluit daarna alle streams.
+// Stopt Run door een panic, dan blijven de streams open: de server start Run
+// opnieuw, en de streams krijgen daarna gewoon weer berichten.
 func (h *Hub) Run(ctx context.Context) {
-	defer close(h.done)
+	defer func() {
+		if ctx.Err() != nil {
+			h.closeDone.Do(func() { close(h.done) })
+		}
+	}()
 	wait := time.Second
 	for ctx.Err() == nil {
 		err := h.listen(ctx)
