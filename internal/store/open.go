@@ -4,7 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/jackc/pgx/v5/stdlib"
@@ -26,6 +28,7 @@ func Open(ctx context.Context, url string) (*pgxpool.Pool, error) {
 	if !strings.Contains(url, "pool_max_conns") {
 		cfg.MaxConns = 25
 	}
+	configureTimeouts(cfg, url)
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("database: %w", err)
@@ -35,6 +38,28 @@ func Open(ctx context.Context, url string) (*pgxpool.Pool, error) {
 		return nil, fmt.Errorf("database bereiken: %w", err)
 	}
 	return pool, nil
+}
+
+// configureTimeouts zorgt dat een verbinding die niet meer antwoordt (een
+// herstarte database, een netwerk dat pakketten laat vallen) snel als dood
+// geldt. Standaard wacht pgx daar zonder grens op: de pool pingt een oude
+// verbinding met de context van de aanroeper, en een login blijft dan
+// hangen tot TCP na een kwartier opgeeft.
+func configureTimeouts(cfg *pgxpool.Config, url string) {
+	cfg.PingTimeout = 5 * time.Second
+	d := &net.Dialer{
+		Timeout: 10 * time.Second,
+		KeepAliveConfig: net.KeepAliveConfig{
+			Enable: true, Idle: 30 * time.Second, Interval: 10 * time.Second, Count: 3,
+		},
+	}
+	// connect_timeout in de URL gaat voor.
+	if strings.Contains(url, "connect_timeout") {
+		d.Timeout = cfg.ConnConfig.ConnectTimeout
+	} else {
+		cfg.ConnConfig.ConnectTimeout = d.Timeout
+	}
+	cfg.ConnConfig.DialFunc = d.DialContext
 }
 
 // Migrate brengt het databaseschema naar de laatste versie.
