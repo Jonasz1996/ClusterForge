@@ -38,6 +38,9 @@ var (
 	// errShutdown is de oorzaak als de server stopt; de taak wordt dan later
 	// hervat in plaats van als mislukt gemarkeerd.
 	errShutdown = errors.New("server stopt")
+	// errLost: de taak is overgenomen door een andere poging (de heartbeat
+	// van deze poging vond hem niet meer).
+	errLost = errors.New("taak loopt niet meer")
 )
 
 // HandlerFunc voert een taak uit. Een fout maakt de taak mislukt; de context
@@ -380,7 +383,13 @@ func (r *Runner) Run(ctx context.Context) {
 }
 
 func (r *Runner) requeueStale(ctx context.Context) {
-	ids, err := r.q.RequeueStaleJobs(ctx, r.StaleAfter.Seconds())
+	r.mu.Lock()
+	running := make([]uuid.UUID, 0, len(r.running))
+	for id := range r.running {
+		running = append(running, id)
+	}
+	r.mu.Unlock()
+	ids, err := r.q.RequeueStaleJobs(ctx, store.RequeueStaleJobsParams{StaleSeconds: r.StaleAfter.Seconds(), Running: running})
 	if err != nil {
 		if ctx.Err() == nil {
 			r.log.Error("onderbroken taken opnieuw inplannen", "err", err)
@@ -459,12 +468,12 @@ func (r *Runner) execute(ctx context.Context, j store.Job) {
 	// handler die dan nog herstelt, mag niet als onderbroken gelden.
 	hctx, hstop := context.WithCancel(context.Background())
 	defer hstop()
-	go r.heartbeat(hctx, j.ID, cancel)
+	go r.heartbeat(hctx, j, cancel)
 
 	steps, err := r.q.ListJobSteps(jctx, j.ID)
 	if err != nil {
 		log.Error("stappen laden", "err", err)
-		r.requeue(j.ID)
+		r.requeue(j)
 		return
 	}
 	job := &Job{Job: j, r: r, steps: steps}
@@ -478,7 +487,10 @@ func (r *Runner) execute(ctx context.Context, j store.Job) {
 		r.finish(j, store.JobStatusSucceeded, "")
 	case errors.Is(cause, errShutdown):
 		// Niet afronden: de taak gaat terug in de wachtrij en wordt hervat.
-		r.requeue(j.ID)
+		r.requeue(j)
+	case errors.Is(cause, errLost):
+		// Een andere poging heeft de taak; die rondt hem af.
+		log.Warn("taak loopt elders verder", "err", err)
 	case errors.Is(err, ErrCanceled) || errors.Is(cause, ErrCanceled):
 		r.finish(j, store.JobStatusCanceled, "")
 	default:
@@ -497,7 +509,7 @@ func safeRun(ctx context.Context, h HandlerFunc, j *Job) (err error) {
 	return h(ctx, j)
 }
 
-func (r *Runner) heartbeat(ctx context.Context, id uuid.UUID, cancel context.CancelCauseFunc) {
+func (r *Runner) heartbeat(ctx context.Context, j store.Job, cancel context.CancelCauseFunc) {
 	t := time.NewTicker(r.Heartbeat)
 	defer t.Stop()
 	for {
@@ -507,32 +519,32 @@ func (r *Runner) heartbeat(ctx context.Context, id uuid.UUID, cancel context.Can
 		case <-t.C:
 		}
 		bctx, done := context.WithTimeout(context.Background(), 5*time.Second)
-		cancelRequested, err := r.q.JobHeartbeat(bctx, id)
+		cancelRequested, err := r.q.JobHeartbeat(bctx, store.JobHeartbeatParams{ID: j.ID, Attempts: j.Attempts})
 		done()
 		switch {
 		case errors.Is(err, pgx.ErrNoRows):
 			// Iemand anders heeft de taak overgenomen of afgerond.
-			cancel(errors.New("taak loopt niet meer"))
+			cancel(errLost)
 		case err != nil:
-			r.log.Warn("heartbeat van taak", "job", id, "err", err)
+			r.log.Warn("heartbeat van taak", "job", j.ID, "err", err)
 		case cancelRequested:
 			cancel(ErrCanceled)
 		}
 	}
 }
 
-func (r *Runner) requeue(id uuid.UUID) {
+func (r *Runner) requeue(j store.Job) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	if err := r.q.RequeueJob(ctx, id); err != nil {
-		r.log.Error("taak terug in de wachtrij zetten", "job", id, "err", err)
+	if err := r.q.RequeueJob(ctx, store.RequeueJobParams{ID: j.ID, Attempts: j.Attempts}); err != nil {
+		r.log.Error("taak terug in de wachtrij zetten", "job", j.ID, "err", err)
 	}
 }
 
 func (r *Runner) finish(j store.Job, status store.JobStatus, msg string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	done, err := r.q.FinishJob(ctx, store.FinishJobParams{ID: j.ID, Status: status, Error: msg})
+	done, err := r.q.FinishJob(ctx, store.FinishJobParams{ID: j.ID, Attempts: j.Attempts, Status: status, Error: msg})
 	if err != nil {
 		r.log.Error("taak afronden", "job", j.ID, "err", err)
 		return
@@ -697,7 +709,7 @@ func (s *Step) save(ctx context.Context, status store.JobStatus, msg string) err
 		log = append([]string{fmt.Sprintf("… %d regels weggelaten", len(log)-maxLogLines+1)}, log[len(log)-maxLogLines+1:]...)
 	}
 	params := store.SaveJobStepParams{
-		JobID: s.job.ID, Seq: s.seq, Name: s.name, Status: status, State: s.state, Log: log, Error: msg,
+		JobID: s.job.ID, Attempts: s.job.Attempts, Seq: s.seq, Name: s.name, Status: status, State: s.state, Log: log, Error: msg,
 	}
 	s.mu.Unlock()
 	if params.Log == nil {

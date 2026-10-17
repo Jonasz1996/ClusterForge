@@ -134,19 +134,25 @@ func (q *Queries) CreateJob(ctx context.Context, arg CreateJobParams) (Job, erro
 }
 
 const finishJob = `-- name: FinishJob :one
-UPDATE jobs SET status = $2, error = $3, finished_at = now()
-WHERE id = $1 AND status IN ('queued', 'running')
+UPDATE jobs SET status = $1, error = $2, finished_at = now()
+WHERE id = $3 AND attempts = $4 AND status = 'running'
 RETURNING id, kind, title, status, params, cluster_id, node_id, proxmox_id, requested_by, error, cancel_requested, attempts, created_at, started_at, finished_at, heartbeat_at, cluster_slot, slot_clusters
 `
 
 type FinishJobParams struct {
-	ID     uuid.UUID
-	Status JobStatus
-	Error  string
+	Status   JobStatus
+	Error    string
+	ID       uuid.UUID
+	Attempts int32
 }
 
 func (q *Queries) FinishJob(ctx context.Context, arg FinishJobParams) (Job, error) {
-	row := q.db.QueryRow(ctx, finishJob, arg.ID, arg.Status, arg.Error)
+	row := q.db.QueryRow(ctx, finishJob,
+		arg.Status,
+		arg.Error,
+		arg.ID,
+		arg.Attempts,
+	)
 	var i Job
 	err := row.Scan(
 		&i.ID,
@@ -233,11 +239,17 @@ func (q *Queries) GetJob(ctx context.Context, id uuid.UUID) (GetJobRow, error) {
 }
 
 const jobHeartbeat = `-- name: JobHeartbeat :one
-UPDATE jobs SET heartbeat_at = now() WHERE id = $1 AND status = 'running' RETURNING cancel_requested
+UPDATE jobs SET heartbeat_at = now() WHERE id = $1 AND attempts = $2 AND status = 'running' RETURNING cancel_requested
 `
 
-func (q *Queries) JobHeartbeat(ctx context.Context, id uuid.UUID) (bool, error) {
-	row := q.db.QueryRow(ctx, jobHeartbeat, id)
+type JobHeartbeatParams struct {
+	ID       uuid.UUID
+	Attempts int32
+}
+
+// attempts is het slot: een poging die is overgenomen, ziet geen rij meer.
+func (q *Queries) JobHeartbeat(ctx context.Context, arg JobHeartbeatParams) (bool, error) {
+	row := q.db.QueryRow(ctx, jobHeartbeat, arg.ID, arg.Attempts)
 	var cancel_requested bool
 	err := row.Scan(&cancel_requested)
 	return cancel_requested, err
@@ -388,23 +400,35 @@ func (q *Queries) RequestJobCancel(ctx context.Context, id uuid.UUID) (Job, erro
 }
 
 const requeueJob = `-- name: RequeueJob :exec
-UPDATE jobs SET status = 'queued' WHERE id = $1 AND status = 'running'
+UPDATE jobs SET status = 'queued' WHERE id = $1 AND attempts = $2 AND status = 'running'
 `
 
-func (q *Queries) RequeueJob(ctx context.Context, id uuid.UUID) error {
-	_, err := q.db.Exec(ctx, requeueJob, id)
+type RequeueJobParams struct {
+	ID       uuid.UUID
+	Attempts int32
+}
+
+func (q *Queries) RequeueJob(ctx context.Context, arg RequeueJobParams) error {
+	_, err := q.db.Exec(ctx, requeueJob, arg.ID, arg.Attempts)
 	return err
 }
 
 const requeueStaleJobs = `-- name: RequeueStaleJobs :many
 UPDATE jobs SET status = 'queued'
 WHERE status = 'running' AND heartbeat_at < now() - make_interval(secs => $1::float8)
+  AND NOT (id = ANY($2::uuid[]))
 RETURNING id
 `
 
-// Taken waarvan de heartbeat stilstaat, horen bij een gestopte server.
-func (q *Queries) RequeueStaleJobs(ctx context.Context, staleSeconds float64) ([]uuid.UUID, error) {
-	rows, err := q.db.Query(ctx, requeueStaleJobs, staleSeconds)
+type RequeueStaleJobsParams struct {
+	StaleSeconds float64
+	Running      []uuid.UUID
+}
+
+// Taken waarvan de heartbeat stilstaat, horen bij een gestopte server; de
+// taken die deze server zelf nog uitvoert niet.
+func (q *Queries) RequeueStaleJobs(ctx context.Context, arg RequeueStaleJobsParams) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, requeueStaleJobs, arg.StaleSeconds, arg.Running)
 	if err != nil {
 		return nil, err
 	}
@@ -425,7 +449,8 @@ func (q *Queries) RequeueStaleJobs(ctx context.Context, staleSeconds float64) ([
 
 const saveJobStep = `-- name: SaveJobStep :exec
 INSERT INTO job_steps (job_id, seq, name, status, finished_at, state, log, error)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+SELECT $1, $2, $3, $4, $5, $6, $7, $8
+WHERE EXISTS (SELECT 1 FROM jobs WHERE id = $1 AND attempts = $9)
 ON CONFLICT (job_id, seq) DO UPDATE
 SET name = EXCLUDED.name, status = EXCLUDED.status, finished_at = EXCLUDED.finished_at,
     state = EXCLUDED.state, log = EXCLUDED.log, error = EXCLUDED.error
@@ -440,8 +465,10 @@ type SaveJobStepParams struct {
 	State      []byte
 	Log        []string
 	Error      string
+	Attempts   int32
 }
 
+// Alleen de poging die de taak nog heeft, schrijft zijn stappen weg.
 func (q *Queries) SaveJobStep(ctx context.Context, arg SaveJobStepParams) error {
 	_, err := q.db.Exec(ctx, saveJobStep,
 		arg.JobID,
@@ -452,6 +479,7 @@ func (q *Queries) SaveJobStep(ctx context.Context, arg SaveJobStepParams) error 
 		arg.State,
 		arg.Log,
 		arg.Error,
+		arg.Attempts,
 	)
 	return err
 }

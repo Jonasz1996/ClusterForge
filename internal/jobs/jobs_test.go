@@ -497,3 +497,68 @@ func TestDetach(t *testing.T) {
 		t.Fatalf("oorzaak: %v", context.Cause(d2))
 	}
 }
+
+// Een taak die deze server zelf nog uitvoert, wordt niet opnieuw ingepland,
+// ook niet als zijn heartbeat achterloopt (bv. een drukke database).
+func TestOwnRunningJobNotRequeued(t *testing.T) {
+	ctx := context.Background()
+	pool := storetest.DB(t)
+	q := store.New(pool)
+	release := make(chan struct{})
+	var runs atomic.Int32
+	r := newRunner(pool)
+	r.Heartbeat = time.Hour
+	r.Register("test.slow", func(ctx context.Context, j *Job) error {
+		runs.Add(1)
+		<-release
+		return nil
+	})
+	stop := start(r)
+	defer stop()
+	j, _ := r.Enqueue(ctx, Spec{Kind: "test.slow", Title: "Traag", Actor: events.System()})
+	waitStatus(t, q, j.ID, store.JobStatusRunning)
+	time.Sleep(3 * r.StaleAfter)
+	close(release)
+	if done := waitStatus(t, q, j.ID, store.JobStatusSucceeded); done.Attempts != 1 || runs.Load() != 1 {
+		t.Errorf("attempts %d, %d keer uitgevoerd", done.Attempts, runs.Load())
+	}
+}
+
+// Een poging waarvan de taak is overgenomen, rondt hem niet af en schrijft
+// geen stappen meer weg.
+func TestLostJobNotFinished(t *testing.T) {
+	ctx := context.Background()
+	pool := storetest.DB(t)
+	q := store.New(pool)
+	started := make(chan struct{})
+	r := newRunner(pool)
+	r.Register("test.lost", func(ctx context.Context, j *Job) error {
+		return j.Step(ctx, "wachten", func(ctx context.Context, s *Step) error {
+			close(started)
+			<-ctx.Done()
+			return errors.New("afgebroken")
+		})
+	})
+	stop := start(r)
+	defer stop()
+	j, _ := r.Enqueue(ctx, Spec{Kind: "test.lost", Title: "Overgenomen", Actor: events.System()})
+	<-started
+	// Een andere server neemt de taak over.
+	if _, err := pool.Exec(ctx, "UPDATE jobs SET attempts = attempts + 1, heartbeat_at = now() WHERE id = $1", j.ID); err != nil {
+		t.Fatal(err)
+	}
+	time.Sleep(10 * r.Heartbeat)
+	got, err := q.GetJob(ctx, j.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Job.Status != store.JobStatusRunning || got.Job.Attempts != 2 {
+		t.Fatalf("status %s, attempts %d", got.Job.Status, got.Job.Attempts)
+	}
+	steps, _ := q.ListJobSteps(ctx, j.ID)
+	for _, s := range steps {
+		if s.Status != store.JobStatusRunning {
+			t.Errorf("stap %q door de oude poging afgerond: %s", s.Name, s.Status)
+		}
+	}
+}
