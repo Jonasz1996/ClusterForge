@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"crypto/subtle"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -51,11 +52,12 @@ func (s *Server) requireSession(next http.Handler) http.Handler {
 			writeError(w, http.StatusUnauthorized, "unauthenticated", "niet ingelogd")
 			return
 		}
-		p, err := s.auth.Authenticate(r.Context(), c.Value)
+		actx, cancel := context.WithTimeout(r.Context(), s.sessionTimeout)
+		p, err := s.auth.Authenticate(actx, c.Value)
+		cancel()
 		if err != nil {
 			if err != auth.ErrNoSession {
-				s.log.ErrorContext(r.Context(), "sessie controleren", "err", err)
-				writeError(w, http.StatusInternalServerError, "internal", "interne fout")
+				s.internalError(w, r, fmt.Errorf("sessie controleren: %w", err))
 				return
 			}
 			s.clearSessionCookie(w)
@@ -118,11 +120,29 @@ func securityHeaders(next http.Handler) http.Handler {
 	})
 }
 
+// slowRequest is hoe lang een request mag lopen voor er een waarschuwing in
+// de log komt. Zonder die regel is een request die blijft hangen (bijv. op
+// een volle databasepool) volledig onzichtbaar: de gewone regel komt pas na
+// afloop, en alleen op debugniveau.
+const slowRequest = 30 * time.Second
+
 func requestLogger(log *slog.Logger) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
 			start := time.Now()
+			// Streams (live-updates, assistent) blijven bewust lang open.
+			if !strings.Contains(r.Header.Get("Accept"), "text/event-stream") {
+				method, path, ip := r.Method, r.URL.Path, clientIP(r)
+				slow := time.AfterFunc(slowRequest, func() {
+					log.LogAttrs(context.Background(), slog.LevelWarn, "request loopt nog na 30 s",
+						slog.String("method", method),
+						slog.String("path", path),
+						slog.String("ip", ip),
+					)
+				})
+				defer slow.Stop()
+			}
 			next.ServeHTTP(ww, r)
 			log.LogAttrs(r.Context(), slog.LevelDebug, "request",
 				slog.String("method", r.Method),

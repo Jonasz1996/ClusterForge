@@ -1,6 +1,8 @@
 package auth
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -9,22 +11,22 @@ import (
 )
 
 func TestHashAndVerifyPassword(t *testing.T) {
-	h, err := HashPassword("correct horse battery")
+	h, err := HashPassword(t.Context(), "correct horse battery")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.HasPrefix(h, "$argon2id$v=19$m=65536,t=3,p=2$") {
 		t.Fatalf("onverwacht hashformaat: %s", h)
 	}
-	ok, err := VerifyPassword("correct horse battery", h)
+	ok, err := VerifyPassword(t.Context(), "correct horse battery", h)
 	if err != nil || !ok {
 		t.Fatalf("juist wachtwoord afgewezen: ok=%v err=%v", ok, err)
 	}
-	ok, err = VerifyPassword("wrong horse battery", h)
+	ok, err = VerifyPassword(t.Context(), "wrong horse battery", h)
 	if err != nil || ok {
 		t.Fatalf("fout wachtwoord geaccepteerd: ok=%v err=%v", ok, err)
 	}
-	h2, _ := HashPassword("correct horse battery")
+	h2, _ := HashPassword(t.Context(), "correct horse battery")
 	if h == h2 {
 		t.Fatal("twee hashes van hetzelfde wachtwoord zijn gelijk; salt ontbreekt")
 	}
@@ -32,9 +34,36 @@ func TestHashAndVerifyPassword(t *testing.T) {
 
 func TestVerifyPasswordRejectsGarbage(t *testing.T) {
 	for _, h := range []string{"", "plain", "$bcrypt$x$y$z$w", "$argon2id$v=19$m=1,t=1,p=1$!!$!!"} {
-		if _, err := VerifyPassword("x", h); err == nil {
+		if _, err := VerifyPassword(t.Context(), "x", h); err == nil {
 			t.Errorf("geen fout voor hash %q", h)
 		}
+	}
+}
+
+func TestArgonSlotsRespectContext(t *testing.T) {
+	// Alle plaatsen bezet, zoals bij vier hashes die blijven hangen of een
+	// vloed aan inlogpogingen: de volgende mag niet eindeloos wachten.
+	for range cap(argonSlots) {
+		argonSlots <- struct{}{}
+	}
+	defer func() {
+		for range cap(argonSlots) {
+			<-argonSlots
+		}
+	}()
+	h := "$argon2id$v=19$m=65536,t=3,p=2$c2FsdHNhbHRzYWx0c2FsdA$aGFzaGhhc2hoYXNoaGFzaGhhc2hoYXNoaGFzaGhhc2g"
+	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, err := VerifyPassword(ctx, "x", h)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err = %v, want DeadlineExceeded", err)
+	}
+	if d := time.Since(start); d > 2*time.Second {
+		t.Fatalf("wachtte %s ondanks afgelopen context", d)
+	}
+	if _, err := HashPassword(ctx, "correct horse battery"); !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("HashPassword err = %v, want DeadlineExceeded", err)
 	}
 }
 

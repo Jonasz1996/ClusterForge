@@ -25,9 +25,11 @@ func (s *Server) GetHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), s.loginTimeout)
+	defer cancel()
 	ip := clientIP(r)
 	if !s.loginLimiter.allow(ip) {
-		s.throttle.Write(r.Context(), ip, events.Event{
+		s.throttle.Write(ctx, ip, events.Event{
 			Actor: events.System(), SubjectType: "auth", SubjectID: "login", Action: "auth.rate_limited",
 			Payload: map[string]any{"ip": ip},
 		})
@@ -43,7 +45,7 @@ func (s *Server) Login(w http.ResponseWriter, r *http.Request) {
 	if req.TotpCode != nil {
 		in.TOTPCode = *req.TotpCode
 	}
-	sess, err := s.auth.Login(r.Context(), in)
+	sess, err := s.auth.Login(ctx, in)
 	switch {
 	case errors.Is(err, auth.ErrInvalidCredentials):
 		writeError(w, http.StatusUnauthorized, "invalid_credentials", err.Error())
@@ -198,6 +200,12 @@ func (s *Server) authError(w http.ResponseWriter, r *http.Request, err error) bo
 }
 
 func (s *Server) internalError(w http.ResponseWriter, r *http.Request, err error) {
+	if errors.Is(err, context.DeadlineExceeded) && r.Context().Err() == nil {
+		// Eigen time-out van de server, niet een browser die afhaakte.
+		s.log.ErrorContext(r.Context(), "interne fout: geen antwoord op tijd (databaseverbindingen bezet of database traag?)", "path", r.URL.Path, "err", err)
+		writeError(w, http.StatusServiceUnavailable, "timeout", "de server antwoordt niet op tijd; probeer het straks opnieuw")
+		return
+	}
 	s.log.ErrorContext(r.Context(), "interne fout", "path", r.URL.Path, "err", err)
 	writeError(w, http.StatusInternalServerError, "internal", "interne fout")
 }

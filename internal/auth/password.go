@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"encoding/base64"
@@ -28,22 +29,31 @@ var errBadHash = errors.New("ongeldige wachtwoordhash")
 
 // argonSlots begrenst hoeveel hashes tegelijk lopen: elke hash neemt 64 MiB,
 // en honderd aanmeldingen tegelijk zouden de server anders zonder geheugen
-// zetten (en daarmee NATS en alle agents). De rest wacht even.
+// zetten (en daarmee NATS en alle agents). De rest wacht even, maar nooit
+// langer dan de request: een volle wachtrij geeft een fout in plaats van een
+// login die eindeloos blijft hangen.
 var argonSlots = make(chan struct{}, 4)
 
-func argonKey(password, salt []byte, time, memory uint32, threads uint8, keyLen uint32) []byte {
-	argonSlots <- struct{}{}
+func argonKey(ctx context.Context, password, salt []byte, time, memory uint32, threads uint8, keyLen uint32) ([]byte, error) {
+	select {
+	case argonSlots <- struct{}{}:
+	case <-ctx.Done():
+		return nil, fmt.Errorf("wachten op wachtwoordcontrole: %w", ctx.Err())
+	}
 	defer func() { <-argonSlots }()
-	return argon2.IDKey(password, salt, time, memory, threads, keyLen)
+	return argon2.IDKey(password, salt, time, memory, threads, keyLen), nil
 }
 
 // HashPassword geeft een argon2id-hash in PHC-formaat terug.
-func HashPassword(password string) (string, error) {
+func HashPassword(ctx context.Context, password string) (string, error) {
 	salt := make([]byte, argonSaltLen)
 	if _, err := rand.Read(salt); err != nil {
 		return "", err
 	}
-	key := argonKey([]byte(password), salt, argonTime, argonMemory, argonThreads, argonKeyLen)
+	key, err := argonKey(ctx, []byte(password), salt, argonTime, argonMemory, argonThreads, argonKeyLen)
+	if err != nil {
+		return "", err
+	}
 	return fmt.Sprintf("$argon2id$v=%d$m=%d,t=%d,p=%d$%s$%s",
 		argon2.Version, argonMemory, argonTime, argonThreads,
 		base64.RawStdEncoding.EncodeToString(salt),
@@ -53,7 +63,7 @@ func HashPassword(password string) (string, error) {
 // VerifyPassword controleert een wachtwoord tegen een hash uit HashPassword.
 // De parameters komen uit de hash zelf, zodat oude hashes geldig blijven als
 // de standaardparameters later strenger worden.
-func VerifyPassword(password, encoded string) (bool, error) {
+func VerifyPassword(ctx context.Context, password, encoded string) (bool, error) {
 	parts := strings.Split(encoded, "$")
 	if len(parts) != 6 || parts[1] != "argon2id" {
 		return false, errBadHash
@@ -75,6 +85,9 @@ func VerifyPassword(password, encoded string) (bool, error) {
 	if err != nil {
 		return false, errBadHash
 	}
-	got := argonKey([]byte(password), salt, time, memory, threads, uint32(len(want)))
+	got, err := argonKey(ctx, []byte(password), salt, time, memory, threads, uint32(len(want)))
+	if err != nil {
+		return false, err
+	}
 	return subtle.ConstantTimeCompare(got, want) == 1, nil
 }

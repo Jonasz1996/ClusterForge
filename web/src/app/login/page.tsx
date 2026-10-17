@@ -43,6 +43,8 @@ export default function LoginPage() {
         setCode("");
       } else if (err instanceof ApiError && err.code === "invalid_credentials") {
         setError("Onjuiste gebruikersnaam of wachtwoord.");
+      } else if (err instanceof ApiError && err.code === "timeout") {
+        setError("De server antwoordt niet op tijd. Probeer het zo opnieuw; blijft het zo, herstart dan de server.");
       } else if (err instanceof ApiError && err.status === 429) {
         setError("Te veel pogingen. Probeer het over een minuut opnieuw.");
       } else {
