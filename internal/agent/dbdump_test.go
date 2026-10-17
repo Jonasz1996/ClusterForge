@@ -291,7 +291,7 @@ func TestDBDumpRestore(t *testing.T) {
 	}
 
 	// Mislukt het terugzetten, dan is de nieuwe database weer weg.
-	h.Fail("mariadb --batch --skip-print-query-on-error nextcloud_kapot", "ERROR 1064 (42000) at line 12: You have an error in your SQL syntax")
+	h.Fail("mariadb --batch --binary-mode --skip-print-query-on-error nextcloud_kapot", "ERROR 1064 (42000) at line 12: You have an error in your SQL syntax")
 	dumpReq(t, a, restore("nextcloud_kapot"))
 	l = listDumps(t, a)
 	if len(l.Restores) != 2 || !strings.Contains(l.Restores[1].Error, "ERROR 1064") {
