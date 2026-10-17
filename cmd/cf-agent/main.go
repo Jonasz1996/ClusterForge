@@ -139,6 +139,7 @@ func enroll(args []string) error {
 	token := fl.String("token", "", "enrollmenttoken uit de webinterface")
 	caFile := fl.String("ca", "", "extra CA-certificaat (PEM) voor de HTTPS-verbinding")
 	config := fl.String("config", agent.DefaultConfigPath, "pad van het configuratiebestand")
+	allowHTTP := fl.Bool("allow-http", false, "aanmelden over http toestaan (onveilig: alleen in een vertrouwd netwerk)")
 	_ = fl.Parse(args)
 	if *token == "" {
 		*token = os.Getenv("CF_ENROLL_TOKEN")
@@ -148,11 +149,11 @@ func enroll(args []string) error {
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
-	return doEnroll(ctx, *server, *token, *caFile, *config)
+	return doEnroll(ctx, *server, *token, *caFile, *config, *allowHTTP)
 }
 
-func doEnroll(ctx context.Context, server, token, caFile, config string) error {
-	c, err := agent.Enroll(ctx, agent.EnrollOptions{ServerURL: server, Token: token, CAFile: caFile, Version: version})
+func doEnroll(ctx context.Context, server, token, caFile, config string, allowHTTP bool) error {
+	c, err := agent.Enroll(ctx, agent.EnrollOptions{ServerURL: server, Token: token, CAFile: caFile, Version: version, AllowHTTP: allowHTTP})
 	if err != nil {
 		return err
 	}
@@ -209,7 +210,7 @@ func waitEnroll(ctx context.Context, log *slog.Logger, config, enrollFile string
 		switch {
 		case err == nil:
 			log.Info("aanmelden met het aanmeldbestand", "server", e.Server)
-			if err := doEnroll(ctx, e.Server, e.Token, "", config); err != nil {
+			if err := doEnroll(ctx, e.Server, e.Token, "", config, e.AllowHTTP); err != nil {
 				log.Error("aanmelden mislukt; straks opnieuw", "err", err)
 				delay = 15 * time.Second
 				break

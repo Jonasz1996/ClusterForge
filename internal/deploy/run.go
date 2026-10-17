@@ -394,7 +394,11 @@ func (r *runCtx) enroll(ctx context.Context, n *plannedNode, logf func(string, .
 	if err != nil {
 		return err
 	}
-	body, _ := json.Marshal(map[string]string{"server": r.p.ServerURL, "token": token})
+	// Een http-adres stelde de beheerder zelf zo in; de agent weigert http
+	// anders (zie agent.EnrollFile).
+	body, _ := json.Marshal(map[string]any{
+		"server": r.p.ServerURL, "token": token, "allow_http": strings.HasPrefix(r.p.ServerURL, "http://"),
+	})
 	if err := r.api.AgentFileWrite(ctx, g, enrollPath, string(body)+"\n"); err != nil {
 		return fmt.Errorf("%s: aanmeldbestand schrijven: %w", n.Hostname, err)
 	}

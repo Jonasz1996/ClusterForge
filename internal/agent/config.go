@@ -81,6 +81,9 @@ func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 type EnrollFile struct {
 	Server string `json:"server"`
 	Token  string `json:"token"`
+	// AllowHTTP: ClusterForge zelf schreef het bestand met een http-adres
+	// dat de beheerder zo instelde.
+	AllowHTTP bool `json:"allow_http,omitempty"`
 }
 
 func LoadEnrollFile(path string) (*EnrollFile, error) {

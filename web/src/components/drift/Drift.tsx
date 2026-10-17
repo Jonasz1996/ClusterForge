@@ -5,7 +5,7 @@ import { useState, type ReactNode } from "react";
 import { BaselineWizard, IgnoredList, IgnoreForm } from "@/components/drift/Baseline";
 import { RemediateDialog } from "@/components/drift/Remediate";
 import { actualText, expectedText } from "@/components/drift/text";
-import { CopyBlock } from "@/components/inventory/InstallAgent";
+import { CopyBlock, scriptCommand } from "@/components/inventory/InstallAgent";
 import { ago, QueryState } from "@/components/inventory/bits";
 import { Alert, Badge, Button, Card } from "@/components/ui";
 import {
@@ -24,8 +24,7 @@ const timeFmt = new Intl.DateTimeFormat("nl-BE", { dateStyle: "medium", timeStyl
 
 // upgradeCommand werkt cf-agent bij zonder opnieuw aan te melden.
 export function upgradeCommand() {
-  const origin = typeof window === "undefined" ? "https://clusterforge.example" : window.location.origin;
-  return `curl -fsSL ${origin}/install/agent.sh | sudo sh -s -- --server ${origin} --upgrade`;
+  return scriptCommand("--upgrade");
 }
 
 // DriftBadge staat in de lijsten naast de status: geel bij drift, grijs als

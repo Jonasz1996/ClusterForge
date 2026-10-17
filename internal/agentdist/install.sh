@@ -14,6 +14,10 @@
 # naar de versie van de server: nieuwe binary na een checksumcontrole, de
 # aanmelding in /etc/clusterforge/agent.json blijft, en de service herstart.
 #
+# De server moet https zijn. Met --allow-http mag http, alleen in een
+# vertrouwd netwerk: wie het verkeer kan onderscheppen, kan anders root-
+# commando's naar deze machine sturen.
+#
 # Beide plaatsen cf-agent-fault-clear.service: die draait bij het opstarten
 # de storingen van een rampoefening terug die nog in de state staan, ook als
 # de agent zelf niet start.
@@ -23,6 +27,7 @@ SERVER=""
 TOKEN=""
 NO_ENROLL=0
 UPGRADE=0
+ALLOW_HTTP=0
 # CF_INSTALL_ROOT zet alles onder een andere map; alleen voor de tests.
 ROOT="${CF_INSTALL_ROOT:-}"
 BIN="$ROOT/usr/local/bin/cf-agent"
@@ -33,6 +38,7 @@ while [ $# -gt 0 ]; do
 	--token) TOKEN="${2:-}"; shift 2 ;;
 	--no-enroll) NO_ENROLL=1; shift ;;
 	--upgrade) UPGRADE=1; shift ;;
+	--allow-http) ALLOW_HTTP=1; shift ;;
 	*) echo "onbekende optie: $1" >&2; exit 2 ;;
 	esac
 done
@@ -43,6 +49,18 @@ if [ -z "$SERVER" ] || { [ -z "$TOKEN" ] && [ "$NO_ENROLL" = 0 ] && [ "$UPGRADE"
 	echo "     of: agent.sh --server https://clusterforge.example --upgrade" >&2
 	exit 2
 fi
+# Over http kan wie het verkeer onderschept een eigen agent of server
+# aanbieden, en die draait als root; daarom alleen op uitdrukkelijke vraag.
+case "$SERVER" in
+https://*) ;;
+http://*)
+	if [ "$ALLOW_HTTP" = 0 ]; then
+		echo "--server gebruikt http: dat is onveilig; gebruik https://, of voeg --allow-http toe in een vertrouwd netwerk" >&2
+		exit 2
+	fi
+	;;
+*) echo "--server moet beginnen met https://" >&2; exit 2 ;;
+esac
 if [ "$(id -u)" != 0 ]; then
 	echo "draai dit script als root, bijvoorbeeld met sudo" >&2
 	exit 1
@@ -154,7 +172,12 @@ if [ "$NO_ENROLL" = 1 ]; then
 fi
 
 echo "aanmelden bij $SERVER"
-"$BIN" enroll -server "$SERVER" -token "$TOKEN"
+# Het token via de omgeving, niet als argument: dat staat in ps.
+if [ "$ALLOW_HTTP" = 1 ]; then
+	CF_ENROLL_TOKEN="$TOKEN" "$BIN" enroll -server "$SERVER" -allow-http
+else
+	CF_ENROLL_TOKEN="$TOKEN" "$BIN" enroll -server "$SERVER"
+fi
 
 systemctl enable cf-agent >/dev/null 2>&1
 systemctl restart cf-agent

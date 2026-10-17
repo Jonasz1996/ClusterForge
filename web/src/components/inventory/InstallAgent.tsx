@@ -4,10 +4,18 @@ import { useState, type FormEvent } from "react";
 import { Alert, Button, Field, Input, Select } from "@/components/ui";
 import { useClusters, useCreateEnrollmentToken, type EnrollmentToken } from "@/lib/inventory";
 
+// scriptCommand is de regel die het installatiescript van deze server haalt
+// en uitvoert. Over http weigert het script zonder --allow-http; wie
+// ClusterForge zelf over http opent, koos daar al voor.
+export function scriptCommand(args: string) {
+  const origin = typeof window === "undefined" ? "https://clusterforge.example" : window.location.origin;
+  const http = origin.startsWith("http://") ? " --allow-http" : "";
+  return `curl -fsSL ${origin}/install/agent.sh | sudo sh -s -- --server ${origin}${http} ${args}`;
+}
+
 // installCommand is de regel die je op de node plakt.
 export function installCommand(token: string) {
-  const origin = typeof window === "undefined" ? "https://clusterforge.example" : window.location.origin;
-  return `curl -fsSL ${origin}/install/agent.sh | sudo sh -s -- --server ${origin} --token ${token}`;
+  return scriptCommand(`--token ${token}`);
 }
 
 export function CopyBlock({ text }: { text: string }) {

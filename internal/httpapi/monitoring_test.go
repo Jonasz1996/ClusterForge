@@ -75,7 +75,7 @@ func startAgentWith(t *testing.T, e *testEnv, c *client, nodeID, machineID strin
 		t.Fatalf("token: %d", status)
 	}
 	root := procRoot(t, machineID)
-	cfg, err := agent.Enroll(context.Background(), agent.EnrollOptions{ServerURL: e.srv.URL, Token: tok.Token, Root: root})
+	cfg, err := agent.Enroll(context.Background(), agent.EnrollOptions{ServerURL: e.srv.URL, AllowHTTP: true, Token: tok.Token, Root: root})
 	if err != nil {
 		t.Fatal(err)
 	}

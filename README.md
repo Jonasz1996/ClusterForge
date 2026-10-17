@@ -148,10 +148,12 @@ Maak in de webinterface bij Nodes → Agent installeren een token aan en voer he
 curl -fsSL https://clusterforge.example/install/agent.sh | sudo sh -s -- --server https://clusterforge.example --token cfe_...
 ```
 
+De server moet `https://` zijn: over http kan wie het verkeer onderschept zich als ClusterForge voordoen en commando's als root naar de node sturen. Gebruik je in een vertrouwd netwerk toch http, voeg dan `--allow-http` toe (de webinterface doet dat zelf als je hem over http opent; een uitrol vanuit een golden image volgt het adres dat je bij Uitrollen instelde).
+
 Het script downloadt `cf-agent` van je eigen server, controleert de checksum, meldt de node aan en start de systemd-service `cf-agent`. Bestaat er nog geen node met die hostname, dan maakt de aanmelding er een aan. De agent stuurt elke 10 seconden een heartbeat, elke 15 seconden metrics en elk kwartier (en bij elke nieuwe verbinding) zijn facts: OS, kernel, CPU, geheugen, schijven, netwerk, services, updates, Docker, Keepalived en k3s.
 
 ```text
-cf-agent enroll -server URL -token cfe_...      meldt deze machine aan (doet het installatiescript)
+cf-agent enroll -server URL -token cfe_...      meldt deze machine aan (doet het installatiescript; -allow-http voor http)
 cf-agent run                                    verbindt met ClusterForge (zo start systemd hem)
 cf-agent facts                                  toont de facts van deze machine
 cf-agent fault-clear                            heft achtergebleven storingen van een rampoefening op
