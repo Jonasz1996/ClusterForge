@@ -84,7 +84,8 @@ func (s *Service) Kick() {
 	}
 }
 
-// Run leest de cronjobs elke Interval, tot ctx afloopt.
+// Run leest de cronjobs elke Interval en zet de beheerde jobs op de nodes,
+// tot ctx afloopt.
 func (s *Service) Run(ctx context.Context) {
 	if s.Interval <= 0 {
 		return
@@ -94,6 +95,12 @@ func (s *Service) Run(ctx context.Context) {
 	for {
 		if err := s.SyncAll(ctx); err != nil && ctx.Err() == nil {
 			s.log.Warn("cronjobs lezen mislukt", "err", err)
+		}
+		if err := s.ApplyAll(ctx); err != nil && ctx.Err() == nil {
+			s.log.Warn("beheerde cronjobs op de nodes zetten mislukt", "err", err)
+		}
+		if err := s.Prune(ctx); err != nil && ctx.Err() == nil {
+			s.log.Warn("oude runs van cronjobs weghalen mislukt", "err", err)
 		}
 		select {
 		case <-ctx.Done():

@@ -3388,6 +3388,109 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/cron-jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * De beheerde cronjobs, met de laatste run per node
+         * @description Ook voor viewers.
+         */
+        get: operations["listCronJobs"];
+        put?: never;
+        /**
+         * Een beheerde cronjob maken (admin)
+         * @description De job komt meteen op de nodes als systemd-timer (agentprotocol 18). Op prod vraagt het tweestapsverificatie en de
+         *     slug in confirm. 400 met field bij een fout in het formulier.
+         */
+        post: operations["createCronJob"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/cron-jobs/schedule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Een schema in gewone taal, met de volgende vijf runs */
+        get: operations["checkCronSchedule"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/cron-jobs/{jobId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                jobId: string;
+            };
+            cookie?: never;
+        };
+        /** Eén beheerde cronjob met zijn runs */
+        get: operations["getCronJob"];
+        /** Een beheerde cronjob wijzigen of aan- en uitzetten (admin) */
+        put: operations["updateCronJob"];
+        post?: never;
+        /** Een beheerde cronjob weghalen, ook van de nodes (admin) */
+        delete: operations["deleteCronJob"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/cron-jobs/{jobId}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Een beheerde cronjob nu uitvoeren (admin)
+         * @description Op de node met het VIP, op zijn node of op alle nodes. Op prod met tweestapsverificatie en de slug in confirm.
+         */
+        post: operations["runCronJob"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/cron-runs/{runId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Eén run met zijn uitvoer
+         * @description Een viewer ziet de uitvoer niet van een job die als root draait.
+         */
+        get: operations["getCronRun"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/cronjobs/refresh": {
         parameters: {
             query?: never;
@@ -5367,6 +5470,105 @@ export interface components {
             kind: string;
             source: number;
             target: number;
+        };
+        ManagedCronJobInput: {
+            name: string;
+            /** @description Een cronregel met vijf velden of een @-woord, zoals 0 *\/6 * * * */
+            schedule: string;
+            /** @enum {string} */
+            run_on: "vip" | "node" | "all";
+            /**
+             * Format: uuid
+             * @description Alleen bij run_on node
+             */
+            node_id?: string | null;
+            user: string;
+            command: string;
+            timeout_seconds: number;
+            enabled: boolean;
+            /** @description De slug van het cluster */
+            confirm?: string;
+        };
+        ManagedCronJobCreate: components["schemas"]["ManagedCronJobInput"] & {
+            /** Format: uuid */
+            cluster_id: string;
+        };
+        ManagedCronJob: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            cluster_id: string;
+            cluster_name: string;
+            cluster_slug: string;
+            cluster_environment: components["schemas"]["Environment"];
+            name: string;
+            schedule: string;
+            describe: string;
+            on_calendar: string;
+            /** @enum {string} */
+            run_on: "vip" | "node" | "all";
+            /** Format: uuid */
+            node_id: string | null;
+            node_hostname: string;
+            user: string;
+            command: string;
+            timeout_seconds: number;
+            enabled: boolean;
+            revision: number;
+            /** Format: date-time */
+            next_run: string | null;
+            failures_24h: number;
+            nodes: components["schemas"]["ManagedCronJobNode"][];
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        ManagedCronJobNode: {
+            /** Format: uuid */
+            node_id: string;
+            hostname: string;
+            /** @description De agent heeft de laatste versie van de job */
+            applied: boolean;
+            has_vip: boolean;
+            error: string;
+            last_run: components["schemas"]["CronRunSummary"] | null;
+        };
+        CronRunSummary: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            node_id: string;
+            hostname: string;
+            /** @enum {string} */
+            reason: "schedule" | "manual";
+            /** @enum {string} */
+            result: "running" | "ok" | "failed" | "skipped" | "timeout";
+            /** Format: date-time */
+            started_at: string;
+            /** Format: date-time */
+            ended_at: string | null;
+            exit_code: number | null;
+        };
+        CronRun: components["schemas"]["CronRunSummary"] & {
+            /** Format: uuid */
+            job_id: string;
+            job_name: string;
+            revision: number;
+            output: string;
+            /** @description Alleen de laatste 64 KiB */
+            output_truncated: boolean;
+            /** @description Een viewer ziet de uitvoer van een job als root niet */
+            output_hidden: boolean;
+        };
+        ManagedCronJobDetail: {
+            job: components["schemas"]["ManagedCronJob"];
+            runs: components["schemas"]["CronRunSummary"][];
+        };
+        CronScheduleInfo: {
+            describe: string;
+            on_calendar: string;
+            next: string[];
         };
         /** @description De cronjobs van één cluster, of van de nodes zonder cluster. */
         CronGroup: {
@@ -15445,6 +15647,222 @@ export interface operations {
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];
             502: components["responses"]["Error"];
+        };
+    };
+    listCronJobs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["ManagedCronJob"][];
+                    };
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    createCronJob: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ManagedCronJobCreate"];
+            };
+        };
+        responses: {
+            /** @description Gemaakt */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ManagedCronJob"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    checkCronSchedule: {
+        parameters: {
+            query: {
+                schedule: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CronScheduleInfo"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+        };
+    };
+    getCronJob: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                jobId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ManagedCronJobDetail"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    updateCronJob: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                jobId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ManagedCronJobInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ManagedCronJob"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    deleteCronJob: {
+        parameters: {
+            query?: {
+                confirm?: string;
+            };
+            header?: never;
+            path: {
+                jobId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Weg */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    runCronJob: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                jobId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    confirm?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Gestart */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        nodes: string[];
+                    };
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+        };
+    };
+    getCronRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                runId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CronRun"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
         };
     };
     refreshCronjobs: {

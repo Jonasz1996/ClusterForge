@@ -40,6 +40,9 @@ Gebruik:
   cf-agent verify -  leest een controle-aanvraag (JSON) van stdin en schrijft het
                      resultaat naar stdout; de back-upcontrole start dit in een
                      teruggezette sandbox
+  cf-agent cron-run <id>
+                     draait een beheerde cronjob van ClusterForge; de timer
+                     cf-cron-<id>.timer start dit
   cf-agent version
 `
 
@@ -61,6 +64,8 @@ func main() {
 		err = faultClear(os.Args[2:], log)
 	case "check":
 		os.Exit(check(os.Args[2:]))
+	case "cron-run":
+		os.Exit(cronRun(os.Args[2:]))
 	case "facts":
 		f := (&agent.Collector{}).Facts(context.Background())
 		enc := json.NewEncoder(os.Stdout)
@@ -112,6 +117,18 @@ func check(args []string) int {
 		return 1
 	}
 	return 0
+}
+
+// cronRun draait een beheerde cronjob en geeft de exitcode van de run.
+// SIGTERM (systemctl stop) stopt de job.
+func cronRun(args []string) int {
+	if len(args) != 1 {
+		fmt.Fprintln(os.Stderr, "gebruik: cf-agent cron-run <id>")
+		return 2
+	}
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+	return (&agent.CronRunner{}).Main(ctx, args[0])
 }
 
 // faultClear draait de storingen in de state terug, ook als de agent niet

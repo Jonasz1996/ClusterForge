@@ -3585,6 +3585,147 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
         "502": { $ref: "#/components/responses/Error" }
+  /cron-jobs:
+    get:
+      operationId: listCronJobs
+      summary: De beheerde cronjobs, met de laatste run per node
+      description: Ook voor viewers.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/ManagedCronJob" } }
+        "401": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createCronJob
+      summary: Een beheerde cronjob maken (admin)
+      description: |
+        De job komt meteen op de nodes als systemd-timer (agentprotocol 18). Op prod vraagt het tweestapsverificatie en de
+        slug in confirm. 400 met field bij een fout in het formulier.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ManagedCronJobCreate" }
+      responses:
+        "201":
+          description: Gemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ManagedCronJob" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /cron-jobs/schedule:
+    get:
+      operationId: checkCronSchedule
+      summary: Een schema in gewone taal, met de volgende vijf runs
+      parameters:
+        - { name: schedule, in: query, required: true, schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CronScheduleInfo" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+  /cron-jobs/{jobId}:
+    parameters:
+      - { name: jobId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getCronJob
+      summary: Eén beheerde cronjob met zijn runs
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ManagedCronJobDetail" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    put:
+      operationId: updateCronJob
+      summary: Een beheerde cronjob wijzigen of aan- en uitzetten (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ManagedCronJobInput" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ManagedCronJob" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteCronJob
+      summary: Een beheerde cronjob weghalen, ook van de nodes (admin)
+      parameters:
+        - { name: confirm, in: query, required: false, schema: { type: string } }
+      responses:
+        "204": { description: Weg }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /cron-jobs/{jobId}/run:
+    post:
+      operationId: runCronJob
+      summary: Een beheerde cronjob nu uitvoeren (admin)
+      description: Op de node met het VIP, op zijn node of op alle nodes. Op prod met tweestapsverificatie en de slug in confirm.
+      parameters:
+        - { name: jobId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                confirm: { type: string }
+      responses:
+        "202":
+          description: Gestart
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [nodes]
+                properties:
+                  nodes: { type: array, items: { type: string } }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+  /cron-runs/{runId}:
+    get:
+      operationId: getCronRun
+      summary: Eén run met zijn uitvoer
+      description: Een viewer ziet de uitvoer niet van een job die als root draait.
+      parameters:
+        - { name: runId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CronRun" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
   /cronjobs/refresh:
     post:
       operationId: refreshCronjobs
@@ -5614,6 +5755,100 @@ components:
         kind: { type: string, description: "views, routines, triggers of events" }
         source: { type: integer }
         target: { type: integer }
+    ManagedCronJobInput:
+      type: object
+      required: [name, schedule, run_on, user, command, timeout_seconds, enabled]
+      properties:
+        name: { type: string }
+        schedule: { type: string, description: "Een cronregel met vijf velden of een @-woord, zoals 0 */6 * * *" }
+        run_on: { type: string, enum: [vip, node, all] }
+        node_id: { type: string, format: uuid, nullable: true, description: Alleen bij run_on node }
+        user: { type: string }
+        command: { type: string }
+        timeout_seconds: { type: integer }
+        enabled: { type: boolean }
+        confirm: { type: string, description: De slug van het cluster, op prod }
+    ManagedCronJobCreate:
+      allOf:
+        - $ref: "#/components/schemas/ManagedCronJobInput"
+        - type: object
+          required: [cluster_id]
+          properties:
+            cluster_id: { type: string, format: uuid }
+    ManagedCronJob:
+      type: object
+      required: [id, cluster_id, cluster_name, cluster_slug, cluster_environment, name, schedule, describe, on_calendar, run_on, node_id, node_hostname,
+        user, command, timeout_seconds, enabled, revision, next_run, nodes, failures_24h, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        cluster_id: { type: string, format: uuid }
+        cluster_name: { type: string }
+        cluster_slug: { type: string }
+        cluster_environment: { $ref: "#/components/schemas/Environment" }
+        name: { type: string }
+        schedule: { type: string }
+        describe: { type: string }
+        on_calendar: { type: string }
+        run_on: { type: string, enum: [vip, node, all] }
+        node_id: { type: string, format: uuid, nullable: true }
+        node_hostname: { type: string }
+        user: { type: string }
+        command: { type: string }
+        timeout_seconds: { type: integer }
+        enabled: { type: boolean }
+        revision: { type: integer }
+        next_run: { type: string, format: date-time, nullable: true }
+        failures_24h: { type: integer }
+        nodes: { type: array, items: { $ref: "#/components/schemas/ManagedCronJobNode" } }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    ManagedCronJobNode:
+      type: object
+      required: [node_id, hostname, applied, has_vip, error, last_run]
+      properties:
+        node_id: { type: string, format: uuid }
+        hostname: { type: string }
+        applied: { type: boolean, description: De agent heeft de laatste versie van de job }
+        has_vip: { type: boolean }
+        error: { type: string }
+        last_run: { allOf: [{ $ref: "#/components/schemas/CronRunSummary" }], nullable: true }
+    CronRunSummary:
+      type: object
+      required: [id, node_id, hostname, reason, result, started_at, ended_at, exit_code]
+      properties:
+        id: { type: string, format: uuid }
+        node_id: { type: string, format: uuid }
+        hostname: { type: string }
+        reason: { type: string, enum: [schedule, manual] }
+        result: { type: string, enum: [running, ok, failed, skipped, timeout] }
+        started_at: { type: string, format: date-time }
+        ended_at: { type: string, format: date-time, nullable: true }
+        exit_code: { type: integer, nullable: true }
+    CronRun:
+      allOf:
+        - $ref: "#/components/schemas/CronRunSummary"
+        - type: object
+          required: [job_id, job_name, revision, output, output_truncated, output_hidden]
+          properties:
+            job_id: { type: string, format: uuid }
+            job_name: { type: string }
+            revision: { type: integer }
+            output: { type: string }
+            output_truncated: { type: boolean, description: Alleen de laatste 64 KiB }
+            output_hidden: { type: boolean, description: "Een viewer ziet de uitvoer van een job als root niet" }
+    ManagedCronJobDetail:
+      type: object
+      required: [job, runs]
+      properties:
+        job: { $ref: "#/components/schemas/ManagedCronJob" }
+        runs: { type: array, items: { $ref: "#/components/schemas/CronRunSummary" } }
+    CronScheduleInfo:
+      type: object
+      required: [describe, on_calendar, next]
+      properties:
+        describe: { type: string }
+        on_calendar: { type: string }
+        next: { type: array, items: { type: string, format: date-time } }
     CronGroup:
       type: object
       description: De cronjobs van één cluster, of van de nodes zonder cluster.

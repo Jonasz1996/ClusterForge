@@ -125,6 +125,10 @@ func (s *Service) Overview(ctx context.Context) ([]Group, error) {
 	}
 	jobs := map[*Group]map[string]*Job{}
 	for _, r := range rows {
+		// De timers van beheerde jobs staan bij de beheerde jobs.
+		if r.Clusterforge {
+			continue
+		}
 		g := group(r.ClusterID)
 		if jobs[g] == nil {
 			jobs[g] = map[string]*Job{}

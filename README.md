@@ -92,7 +92,7 @@ Het technisch ontwerp staat in [docs/design/mvp-fase-1.md](docs/design/mvp-fase-
 | --- | --- | --- |
 | 1. Cronjobs lezen | cf-agent leest elke cronjob en systemd-timer op de node (agentprotocol 16): `/etc/crontab`, `/etc/cron.d`, de crontabs van gebruikers, `cron.hourly` tot `cron.monthly` en de timers, met de laatste run uit de journal; wachtwoorden in commando's worden op de node al gemaskeerd. Een pagina **[Cronjobs](#cronjobs)** met per cluster elke job één keer, het schema in gewone taal, de volgende run, op welke nodes hij staat (en waar niet) en hoe de laatste run ging; een kaart Cronjobs op de pagina van een node. Een job die bijkomt, verdwijnt of verandert, staat in het logboek en in What Broke | klaar |
 | 2. Verschillen, waarschuwingen en fouten | Een job die op een node anders staat, toont het schema of commando van die node. Waarschuwingen bij gevaarlijke jobs naast een onderdeel van ClusterForge, zoals een Galera-bootstrap-cron naast het onderdeel Database (rood), een cron die de database herstart, of een script dat zelf een PostgreSQL-primary kiest; een rsync-cron krijgt de tip dat hij straks beheerd kan. Een job die mislukt, geeft een event en een incident tot hij weer lukt. Met de knop **Fouten van cron vastleggen** zet ClusterForge `-L 15` aan in een drop-in van cron.service (agentprotocol 17) | klaar |
-| 3. Beheerde cronjobs | Eigen cronjobs in ClusterForge op de node met het VIP, een vaste node of alle nodes, met runs en uitvoer | gepland |
+| 3. Beheerde cronjobs | Eigen cronjobs in ClusterForge: toevoegen, wijzigen, aan- en uitzetten, weghalen en **Nu uitvoeren**, op de node met het VIP (verhuist mee), een vaste node of alle nodes. Elke job is een systemd-timer met `cf-agent cron-run` (agentprotocol 18), met slot, tijdslimiet en per run de exitcode en de laatste 64 KiB uitvoer | klaar |
 | 4. Opvolgen | Live uitvoer, stoppen, herhalen, incidenten en de clusterstatus | gepland |
 | 5. Overnemen | Een bestaande cronjob met één knop beheerd maken | gepland |
 | 6. Bestandssync | rsync van de node met het VIP naar de andere nodes of een ander cluster, met proefrun | gepland |
@@ -1217,7 +1217,18 @@ Staat dezelfde job (zelfde bestand en gebruiker) op een node anders, dan staat b
 
 **Wijzigingen.** Komt er een job bij, verdwijnt er een of verandert het schema of commando, dan staat dat in het logboek en in [What Broke](#what-broke), zoals "Cronjob op nc1 gewijzigd in /etc/cron.d/nextcloud-sync: schema 0 */4 * * *, was 0 */6 * * *".
 
-Lezen kan vanaf **agentprotocol 16**, de knop Fouten van cron vastleggen vanaf **17**. Met een oudere agent toont de pagina het commando om hem bij te werken; de andere onderdelen blijven werken.
+Lezen kan vanaf **agentprotocol 16**, de knop Fouten van cron vastleggen vanaf **17**, beheerde jobs vanaf **18**. Met een oudere agent toont de pagina het commando om hem bij te werken; de andere onderdelen blijven werken.
+
+### Beheerde cronjobs
+
+Bovenaan **Cronjobs** staan de jobs die ClusterForge zelf beheert. Een beheerder voegt er een toe met **Cronjob toevoegen**: het cluster, een naam, het schema (een cronregel zoals `0 */6 * * *`, of een keuze uit de lijst; het formulier toont het in gewone taal met de volgende runs), waar hij draait, de gebruiker, het commando en de tijdslimiet (standaard een uur).
+
+- **Op de node met het VIP** (standaard): de timer staat op elke node, maar alleen de node die op dat moment het VIP heeft, voert de job uit. Verhuist het VIP, dan draait de volgende run op de nieuwe node. Tijdens een wissel kan een run vallen of heel kort op twee nodes starten; een job die dat niet mag, moet zelf tegen een dubbele run kunnen.
+- **Op één vaste node** of **op alle nodes** van het cluster.
+
+Op de node is een job een systemd-timer `cf-cron-<id>.timer` die `cf-cron@<id>.service` start; die draait `cf-agent cron-run <id>`. `systemctl list-timers` toont hem dus ook zonder ClusterForge, en een gemiste run komt na een herstart alsnog (`Persistent=true`). cf-agent neemt een slot (loopt de vorige run nog, dan slaat deze over), start het commando met `/bin/sh -c` als de gekozen gebruiker, stopt het na de tijdslimiet, en stuurt de run met de exitcode en de laatste 64 KiB uitvoer naar ClusterForge; de volledige uitvoer van de laatste tien runs blijft op de node in `/var/lib/clusterforge/cron/output`. Is ClusterForge even weg, dan lopen de jobs door en komen de runs later binnen.
+
+De pagina van een job heeft **Nu uitvoeren**, **Bewerken**, **Uitzetten** en **Weghalen**, en de runs met per run de node, de uitkomst, de duur en de uitvoer. Een run die mislukt, staat in het logboek en in What Broke. Een kijker ziet de jobs en runs, maar niet de uitvoer van een job die als root draait. Op prod vraagt elke wijziging tweestapsverificatie en de slug. Runs ouder dan negentig dagen gaan weg, behalve de laatste per job en node. Dit vraagt **agentprotocol 18**; een node met een oudere agent zegt dat bij de job.
 
 ## Failovertests
 

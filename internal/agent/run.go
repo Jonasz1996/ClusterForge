@@ -70,6 +70,9 @@ type Agent struct {
 	JournalInterval time.Duration
 	ConnsSample     time.Duration
 	ConnsInterval   time.Duration
+	// CronRunsInterval is hoe vaak de agent de runs van beheerde cronjobs
+	// stuurt; nul is vijf seconden.
+	CronRunsInterval time.Duration
 	// AddressPoll is hoe vaak de agent naar zijn adressen kijkt; bij een
 	// wijziging stuurt hij meteen een heartbeat. Nul is één seconde.
 	AddressPoll time.Duration
@@ -222,6 +225,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	go a.metricsLoop(ctx, metricsEvery)
 	go a.journalLoop(ctx, or(a.JournalInterval, protocol.JournalInterval))
 	go a.connsLoop(ctx, or(a.ConnsSample, protocol.ConnsSample), or(a.ConnsInterval, protocol.ConnsInterval))
+	go a.cronRunsLoop(ctx, or(a.CronRunsInterval, 5*time.Second))
 
 	t := time.NewTicker(hbEvery)
 	defer t.Stop()

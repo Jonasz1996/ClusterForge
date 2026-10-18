@@ -1,8 +1,12 @@
 package protocol
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"regexp"
 	"slices"
+	"strings"
 	"time"
 )
 
@@ -13,6 +17,10 @@ const CronSince = 16
 // CronLoggingSince is de eerste protocolversie met CronLogging: cron het
 // einde en de exitcode van elke job laten loggen.
 const CronLoggingSince = 17
+
+// CronManagedSince is de eerste protocolversie met beheerde cronjobs:
+// CronApply, CronRun en de runs als TypeCronRuns.
+const CronManagedSince = 18
 
 // SubjectCron draagt de cronverzoeken: cf.node.<id>.cron. Een eigen subject,
 // zodat een trage journal de commando's op cmd niet ophoudt.
@@ -33,7 +41,99 @@ const (
 	// in de journal komen. Lopende jobs draaien door; cron.service heeft
 	// KillMode=process.
 	CronLogging = "logging"
+	// CronApply zet de volledige set beheerde jobs van de node: de
+	// jobbestanden en timers komen er, of gaan weg als ze er niet meer in
+	// staan. Het antwoord heeft de hash van de set.
+	CronApply = "apply"
+	// CronRun start een beheerde job nu, ook als de node het VIP niet heeft.
+	CronRun = "run"
 )
+
+// Waar de agent de beheerde jobs bewaart.
+const (
+	// CronJobDir heeft per job <id>.json, de job zoals cf-agent cron-run
+	// hem leest.
+	CronJobDir = "/etc/clusterforge/cron"
+	// CronStateDir heeft de sloten, de uitvoer van de laatste runs en de
+	// wachtrij met runs voor de server.
+	CronStateDir = "/var/lib/clusterforge/cron"
+	// CronUnitDir is waar de timers staan: cf-cron-<id>.timer en de
+	// gedeelde service cf-cron@.service.
+	CronUnitDir = "/etc/systemd/system"
+	// CronOutputMax is hoeveel uitvoer van een run naar de server gaat: de
+	// laatste 64 KiB.
+	CronOutputMax = 64 << 10
+	// CronKeepOutputs is hoeveel volledige uitvoeren per job op de node
+	// blijven.
+	CronKeepOutputs = 10
+	// MaxCronRuns is het grootste aantal runs per bericht.
+	MaxCronRuns = 20
+	// TypeCronRuns gaat op het subject events, als request met een Ack.
+	TypeCronRuns = "cron_runs"
+)
+
+// Waar een beheerde job draait.
+const (
+	// CronOnVIP: op de node met het VIP van het cluster.
+	CronOnVIP = "vip"
+	// CronOnNode: op één vaste node.
+	CronOnNode = "node"
+	// CronOnAll: op elke node van het cluster.
+	CronOnAll = "all"
+)
+
+// ManagedCron is een beheerde job zoals de agent hem op een node zet.
+type ManagedCron struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Revision int    `json:"revision"`
+	// Schedule is de cronregel; OnCalendar is dezelfde tijd voor systemd.
+	Schedule   string `json:"schedule"`
+	OnCalendar string `json:"on_calendar"`
+	RunOn      string `json:"run_on"`
+	// VIPs zijn de adressen waarvan deze node er één moet hebben bij
+	// run_on vip.
+	VIPs           []string `json:"vips,omitempty"`
+	User           string   `json:"user"`
+	Command        string   `json:"command"`
+	TimeoutSeconds int      `json:"timeout_seconds"`
+	Enabled        bool     `json:"enabled"`
+}
+
+// Waarom een run startte.
+const (
+	CronReasonSchedule = "schedule"
+	CronReasonManual   = "manual"
+)
+
+// Uitkomsten van een beheerde run, naast CronOK, CronFailed en CronRunning.
+const (
+	// CronSkipped: de vorige run liep nog; deze sloeg over.
+	CronSkipped = "skipped"
+	// CronTimeout: gestopt na de tijdslimiet.
+	CronTimedOut = "timeout"
+)
+
+// CronRunRecord is één run van een beheerde job. De agent stuurt hem bij
+// de start (zonder EndedAt) en bij het einde.
+type CronRunRecord struct {
+	ID        string     `json:"id"`
+	JobID     string     `json:"job_id"`
+	Revision  int        `json:"revision"`
+	Reason    string     `json:"reason"`
+	Result    string     `json:"result"`
+	StartedAt time.Time  `json:"started_at"`
+	EndedAt   *time.Time `json:"ended_at,omitempty"`
+	Exit      *int       `json:"exit,omitempty"`
+	// Output is het einde van de uitvoer, gemaskeerd.
+	Output          string `json:"output,omitempty"`
+	OutputTruncated bool   `json:"output_truncated,omitempty"`
+}
+
+// CronRuns is een bericht met runs.
+type CronRuns struct {
+	Runs []CronRunRecord `json:"runs"`
+}
 
 // CronLoggingDropIn is de drop-in die CronLogging schrijft.
 const CronLoggingDropIn = "/etc/systemd/system/cron.service.d/50-clusterforge-log.conf"
@@ -48,12 +148,18 @@ type CronRequest struct {
 	Deadline time.Time `json:"deadline"`
 	// Enable hoort bij CronLogging: aan of terug zoals het was.
 	Enable bool `json:"enable,omitempty"`
+	// Jobs hoort bij CronApply: de hele set van de node.
+	Jobs []ManagedCron `json:"jobs,omitempty"`
+	// JobID hoort bij CronRun.
+	JobID string `json:"job_id,omitempty"`
 }
 
 type CronResponse struct {
 	Error string `json:"error,omitempty"`
-	// Output zegt bij CronLogging wat de agent deed.
+	// Output zegt bij CronLogging en CronApply wat de agent deed.
 	Output []string `json:"output,omitempty"`
+	// Hash is bij CronApply de hash van de toegepaste set.
+	Hash string `json:"hash,omitempty"`
 	// Daemon is de cron-daemon op de node: cron, cronie of leeg als er
 	// geen draait.
 	Daemon string `json:"daemon,omitempty"`
@@ -184,4 +290,14 @@ func MaskSecrets(s string) string {
 		})
 	}
 	return s
+}
+
+// CronSetHash is de hash van een set beheerde jobs; de server en de agent
+// rekenen hem op dezelfde manier.
+func CronSetHash(jobs []ManagedCron) string {
+	s := slices.Clone(jobs)
+	slices.SortFunc(s, func(a, b ManagedCron) int { return strings.Compare(a.ID, b.ID) })
+	data, _ := json.Marshal(s)
+	h := sha256.Sum256(data)
+	return hex.EncodeToString(h[:16])
 }

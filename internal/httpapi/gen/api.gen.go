@@ -570,6 +570,96 @@ func (e CronJobNodeLastResult) Valid() bool {
 	}
 }
 
+// Defines values for CronRunReason.
+const (
+	CronRunReasonManual   CronRunReason = "manual"
+	CronRunReasonSchedule CronRunReason = "schedule"
+)
+
+// Valid indicates whether the value is a known member of the CronRunReason enum.
+func (e CronRunReason) Valid() bool {
+	switch e {
+	case CronRunReasonManual:
+		return true
+	case CronRunReasonSchedule:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CronRunResult.
+const (
+	CronRunResultFailed  CronRunResult = "failed"
+	CronRunResultOk      CronRunResult = "ok"
+	CronRunResultRunning CronRunResult = "running"
+	CronRunResultSkipped CronRunResult = "skipped"
+	CronRunResultTimeout CronRunResult = "timeout"
+)
+
+// Valid indicates whether the value is a known member of the CronRunResult enum.
+func (e CronRunResult) Valid() bool {
+	switch e {
+	case CronRunResultFailed:
+		return true
+	case CronRunResultOk:
+		return true
+	case CronRunResultRunning:
+		return true
+	case CronRunResultSkipped:
+		return true
+	case CronRunResultTimeout:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CronRunSummaryReason.
+const (
+	CronRunSummaryReasonManual   CronRunSummaryReason = "manual"
+	CronRunSummaryReasonSchedule CronRunSummaryReason = "schedule"
+)
+
+// Valid indicates whether the value is a known member of the CronRunSummaryReason enum.
+func (e CronRunSummaryReason) Valid() bool {
+	switch e {
+	case CronRunSummaryReasonManual:
+		return true
+	case CronRunSummaryReasonSchedule:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CronRunSummaryResult.
+const (
+	CronRunSummaryResultFailed  CronRunSummaryResult = "failed"
+	CronRunSummaryResultOk      CronRunSummaryResult = "ok"
+	CronRunSummaryResultRunning CronRunSummaryResult = "running"
+	CronRunSummaryResultSkipped CronRunSummaryResult = "skipped"
+	CronRunSummaryResultTimeout CronRunSummaryResult = "timeout"
+)
+
+// Valid indicates whether the value is a known member of the CronRunSummaryResult enum.
+func (e CronRunSummaryResult) Valid() bool {
+	switch e {
+	case CronRunSummaryResultFailed:
+		return true
+	case CronRunSummaryResultOk:
+		return true
+	case CronRunSummaryResultRunning:
+		return true
+	case CronRunSummaryResultSkipped:
+		return true
+	case CronRunSummaryResultTimeout:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for CronWarningKind.
 const (
 	DbRestart       CronWarningKind = "db_restart"
@@ -2064,6 +2154,69 @@ func (e KubeWorkloadState) Valid() bool {
 	case KubeWorkloadStateStopped:
 		return true
 	case KubeWorkloadStateSuspended:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ManagedCronJobRunOn.
+const (
+	ManagedCronJobRunOnAll  ManagedCronJobRunOn = "all"
+	ManagedCronJobRunOnNode ManagedCronJobRunOn = "node"
+	ManagedCronJobRunOnVip  ManagedCronJobRunOn = "vip"
+)
+
+// Valid indicates whether the value is a known member of the ManagedCronJobRunOn enum.
+func (e ManagedCronJobRunOn) Valid() bool {
+	switch e {
+	case ManagedCronJobRunOnAll:
+		return true
+	case ManagedCronJobRunOnNode:
+		return true
+	case ManagedCronJobRunOnVip:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ManagedCronJobCreateRunOn.
+const (
+	ManagedCronJobCreateRunOnAll  ManagedCronJobCreateRunOn = "all"
+	ManagedCronJobCreateRunOnNode ManagedCronJobCreateRunOn = "node"
+	ManagedCronJobCreateRunOnVip  ManagedCronJobCreateRunOn = "vip"
+)
+
+// Valid indicates whether the value is a known member of the ManagedCronJobCreateRunOn enum.
+func (e ManagedCronJobCreateRunOn) Valid() bool {
+	switch e {
+	case ManagedCronJobCreateRunOnAll:
+		return true
+	case ManagedCronJobCreateRunOnNode:
+		return true
+	case ManagedCronJobCreateRunOnVip:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ManagedCronJobInputRunOn.
+const (
+	ManagedCronJobInputRunOnAll  ManagedCronJobInputRunOn = "all"
+	ManagedCronJobInputRunOnNode ManagedCronJobInputRunOn = "node"
+	ManagedCronJobInputRunOnVip  ManagedCronJobInputRunOn = "vip"
+)
+
+// Valid indicates whether the value is a known member of the ManagedCronJobInputRunOn enum.
+func (e ManagedCronJobInputRunOn) Valid() bool {
+	switch e {
+	case ManagedCronJobInputRunOnAll:
+		return true
+	case ManagedCronJobInputRunOnNode:
+		return true
+	case ManagedCronJobInputRunOnVip:
 		return true
 	default:
 		return false
@@ -4803,6 +4956,59 @@ type CronNodeRead struct {
 
 	// Truncated De node had meer dan 1000 jobs; de rest ontbreekt
 	Truncated bool `json:"truncated"`
+}
+
+// CronRun defines model for CronRun.
+type CronRun struct {
+	EndedAt  nullable.Nullable[time.Time] `json:"ended_at"`
+	ExitCode nullable.Nullable[int]       `json:"exit_code"`
+	Hostname string                       `json:"hostname"`
+	Id       openapi_types.UUID           `json:"id"`
+	JobId    openapi_types.UUID           `json:"job_id"`
+	JobName  string                       `json:"job_name"`
+	NodeId   openapi_types.UUID           `json:"node_id"`
+	Output   string                       `json:"output"`
+
+	// OutputHidden Een viewer ziet de uitvoer van een job als root niet
+	OutputHidden bool `json:"output_hidden"`
+
+	// OutputTruncated Alleen de laatste 64 KiB
+	OutputTruncated bool          `json:"output_truncated"`
+	Reason          CronRunReason `json:"reason"`
+	Result          CronRunResult `json:"result"`
+	Revision        int           `json:"revision"`
+	StartedAt       time.Time     `json:"started_at"`
+}
+
+// CronRunReason defines model for CronRun.Reason.
+type CronRunReason string
+
+// CronRunResult defines model for CronRun.Result.
+type CronRunResult string
+
+// CronRunSummary defines model for CronRunSummary.
+type CronRunSummary struct {
+	EndedAt   nullable.Nullable[time.Time] `json:"ended_at"`
+	ExitCode  nullable.Nullable[int]       `json:"exit_code"`
+	Hostname  string                       `json:"hostname"`
+	Id        openapi_types.UUID           `json:"id"`
+	NodeId    openapi_types.UUID           `json:"node_id"`
+	Reason    CronRunSummaryReason         `json:"reason"`
+	Result    CronRunSummaryResult         `json:"result"`
+	StartedAt time.Time                    `json:"started_at"`
+}
+
+// CronRunSummaryReason defines model for CronRunSummary.Reason.
+type CronRunSummaryReason string
+
+// CronRunSummaryResult defines model for CronRunSummary.Result.
+type CronRunSummaryResult string
+
+// CronScheduleInfo defines model for CronScheduleInfo.
+type CronScheduleInfo struct {
+	Describe   string      `json:"describe"`
+	Next       []time.Time `json:"next"`
+	OnCalendar string      `json:"on_calendar"`
 }
 
 // CronVariant defines model for CronVariant.
@@ -8623,6 +8829,97 @@ type LoginRequest struct {
 	Username string  `json:"username"`
 }
 
+// ManagedCronJob defines model for ManagedCronJob.
+type ManagedCronJob struct {
+	ClusterEnvironment Environment                           `json:"cluster_environment"`
+	ClusterId          openapi_types.UUID                    `json:"cluster_id"`
+	ClusterName        string                                `json:"cluster_name"`
+	ClusterSlug        string                                `json:"cluster_slug"`
+	Command            string                                `json:"command"`
+	CreatedAt          time.Time                             `json:"created_at"`
+	Describe           string                                `json:"describe"`
+	Enabled            bool                                  `json:"enabled"`
+	Failures24h        int                                   `json:"failures_24h"`
+	Id                 openapi_types.UUID                    `json:"id"`
+	Name               string                                `json:"name"`
+	NextRun            nullable.Nullable[time.Time]          `json:"next_run"`
+	NodeHostname       string                                `json:"node_hostname"`
+	NodeId             nullable.Nullable[openapi_types.UUID] `json:"node_id"`
+	Nodes              []ManagedCronJobNode                  `json:"nodes"`
+	OnCalendar         string                                `json:"on_calendar"`
+	Revision           int                                   `json:"revision"`
+	RunOn              ManagedCronJobRunOn                   `json:"run_on"`
+	Schedule           string                                `json:"schedule"`
+	TimeoutSeconds     int                                   `json:"timeout_seconds"`
+	UpdatedAt          time.Time                             `json:"updated_at"`
+	User               string                                `json:"user"`
+}
+
+// ManagedCronJobRunOn defines model for ManagedCronJob.RunOn.
+type ManagedCronJobRunOn string
+
+// ManagedCronJobCreate defines model for ManagedCronJobCreate.
+type ManagedCronJobCreate struct {
+	ClusterId openapi_types.UUID `json:"cluster_id"`
+	Command   string             `json:"command"`
+
+	// Confirm De slug van het cluster
+	Confirm *string `json:"confirm,omitempty"`
+	Enabled bool    `json:"enabled"`
+	Name    string  `json:"name"`
+
+	// NodeId Alleen bij run_on node
+	NodeId nullable.Nullable[openapi_types.UUID] `json:"node_id,omitempty"`
+	RunOn  ManagedCronJobCreateRunOn             `json:"run_on"`
+
+	// Schedule Een cronregel met vijf velden of een @-woord, zoals 0 */6 * * *
+	Schedule       string `json:"schedule"`
+	TimeoutSeconds int    `json:"timeout_seconds"`
+	User           string `json:"user"`
+}
+
+// ManagedCronJobCreateRunOn defines model for ManagedCronJobCreate.RunOn.
+type ManagedCronJobCreateRunOn string
+
+// ManagedCronJobDetail defines model for ManagedCronJobDetail.
+type ManagedCronJobDetail struct {
+	Job  ManagedCronJob   `json:"job"`
+	Runs []CronRunSummary `json:"runs"`
+}
+
+// ManagedCronJobInput defines model for ManagedCronJobInput.
+type ManagedCronJobInput struct {
+	Command string `json:"command"`
+
+	// Confirm De slug van het cluster
+	Confirm *string `json:"confirm,omitempty"`
+	Enabled bool    `json:"enabled"`
+	Name    string  `json:"name"`
+
+	// NodeId Alleen bij run_on node
+	NodeId nullable.Nullable[openapi_types.UUID] `json:"node_id,omitempty"`
+	RunOn  ManagedCronJobInputRunOn              `json:"run_on"`
+
+	// Schedule Een cronregel met vijf velden of een @-woord, zoals 0 */6 * * *
+	Schedule       string `json:"schedule"`
+	TimeoutSeconds int    `json:"timeout_seconds"`
+	User           string `json:"user"`
+}
+
+// ManagedCronJobInputRunOn defines model for ManagedCronJobInput.RunOn.
+type ManagedCronJobInputRunOn string
+
+// ManagedCronJobNode defines model for ManagedCronJobNode.
+type ManagedCronJobNode struct {
+	// Applied De agent heeft de laatste versie van de job
+	Applied  bool                              `json:"applied"`
+	Error    string                            `json:"error"`
+	HasVip   bool                              `json:"has_vip"`
+	Hostname string                            `json:"hostname"`
+	LastRun  nullable.Nullable[CronRunSummary] `json:"last_run"`
+	NodeId   openapi_types.UUID                `json:"node_id"`
+}
+
 // MapEdge defines model for MapEdge.
 type MapEdge struct {
 	From string `json:"from"`
@@ -10371,6 +10668,21 @@ type GetClusterTimelineParams struct {
 	Limit *TimelineLimit `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// CheckCronScheduleParams defines parameters for CheckCronSchedule.
+type CheckCronScheduleParams struct {
+	Schedule string `form:"schedule" json:"schedule"`
+}
+
+// DeleteCronJobParams defines parameters for DeleteCronJob.
+type DeleteCronJobParams struct {
+	Confirm *string `form:"confirm,omitempty" json:"confirm,omitempty"`
+}
+
+// RunCronJobJSONBody defines parameters for RunCronJob.
+type RunCronJobJSONBody struct {
+	Confirm *string `json:"confirm,omitempty"`
+}
+
 // GetDatabaseMigrationParams defines parameters for GetDatabaseMigration.
 type GetDatabaseMigrationParams struct {
 	// Source De sleutel van de server onder Databases, zoals mariadb/<cluster>
@@ -10841,6 +11153,15 @@ type PlanClusterSpecJSONRequestBody = SpecEditInput
 // CreateVipJSONRequestBody defines body for CreateVip for application/json ContentType.
 type CreateVipJSONRequestBody = VipInput
 
+// CreateCronJobJSONRequestBody defines body for CreateCronJob for application/json ContentType.
+type CreateCronJobJSONRequestBody = ManagedCronJobCreate
+
+// UpdateCronJobJSONRequestBody defines body for UpdateCronJob for application/json ContentType.
+type UpdateCronJobJSONRequestBody = ManagedCronJobInput
+
+// RunCronJobJSONRequestBody defines body for RunCronJob for application/json ContentType.
+type RunCronJobJSONRequestBody RunCronJobJSONBody
+
 // StartDatabaseMoveJSONRequestBody defines body for StartDatabaseMove for application/json ContentType.
 type StartDatabaseMoveJSONRequestBody = DatabaseMoveInput
 
@@ -11233,6 +11554,30 @@ type ServerInterface interface {
 	// ListComponentTemplates De databases die ClusterForge op de nodes van een cluster kan zetten, met hun instellingen
 	// (GET /component-templates)
 	ListComponentTemplates(w http.ResponseWriter, r *http.Request)
+	// ListCronJobs De beheerde cronjobs, met de laatste run per node
+	// (GET /cron-jobs)
+	ListCronJobs(w http.ResponseWriter, r *http.Request)
+	// CreateCronJob Een beheerde cronjob maken (admin)
+	// (POST /cron-jobs)
+	CreateCronJob(w http.ResponseWriter, r *http.Request)
+	// CheckCronSchedule Een schema in gewone taal, met de volgende vijf runs
+	// (GET /cron-jobs/schedule)
+	CheckCronSchedule(w http.ResponseWriter, r *http.Request, params CheckCronScheduleParams)
+	// DeleteCronJob Een beheerde cronjob weghalen, ook van de nodes (admin)
+	// (DELETE /cron-jobs/{jobId})
+	DeleteCronJob(w http.ResponseWriter, r *http.Request, jobId openapi_types.UUID, params DeleteCronJobParams)
+	// GetCronJob Eén beheerde cronjob met zijn runs
+	// (GET /cron-jobs/{jobId})
+	GetCronJob(w http.ResponseWriter, r *http.Request, jobId openapi_types.UUID)
+	// UpdateCronJob Een beheerde cronjob wijzigen of aan- en uitzetten (admin)
+	// (PUT /cron-jobs/{jobId})
+	UpdateCronJob(w http.ResponseWriter, r *http.Request, jobId openapi_types.UUID)
+	// RunCronJob Een beheerde cronjob nu uitvoeren (admin)
+	// (POST /cron-jobs/{jobId}/run)
+	RunCronJob(w http.ResponseWriter, r *http.Request, jobId openapi_types.UUID)
+	// GetCronRun Eén run met zijn uitvoer
+	// (GET /cron-runs/{runId})
+	GetCronRun(w http.ResponseWriter, r *http.Request, runId openapi_types.UUID)
 	// ListCronjobs De cronjobs en systemd-timers die de agents melden
 	// (GET /cronjobs)
 	ListCronjobs(w http.ResponseWriter, r *http.Request)
@@ -12193,6 +12538,54 @@ func (_ Unimplemented) CreateVip(w http.ResponseWriter, r *http.Request, cluster
 // ListComponentTemplates De databases die ClusterForge op de nodes van een cluster kan zetten, met hun instellingen
 // (GET /component-templates)
 func (_ Unimplemented) ListComponentTemplates(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListCronJobs De beheerde cronjobs, met de laatste run per node
+// (GET /cron-jobs)
+func (_ Unimplemented) ListCronJobs(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CreateCronJob Een beheerde cronjob maken (admin)
+// (POST /cron-jobs)
+func (_ Unimplemented) CreateCronJob(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CheckCronSchedule Een schema in gewone taal, met de volgende vijf runs
+// (GET /cron-jobs/schedule)
+func (_ Unimplemented) CheckCronSchedule(w http.ResponseWriter, r *http.Request, params CheckCronScheduleParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// DeleteCronJob Een beheerde cronjob weghalen, ook van de nodes (admin)
+// (DELETE /cron-jobs/{jobId})
+func (_ Unimplemented) DeleteCronJob(w http.ResponseWriter, r *http.Request, jobId openapi_types.UUID, params DeleteCronJobParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetCronJob Eén beheerde cronjob met zijn runs
+// (GET /cron-jobs/{jobId})
+func (_ Unimplemented) GetCronJob(w http.ResponseWriter, r *http.Request, jobId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// UpdateCronJob Een beheerde cronjob wijzigen of aan- en uitzetten (admin)
+// (PUT /cron-jobs/{jobId})
+func (_ Unimplemented) UpdateCronJob(w http.ResponseWriter, r *http.Request, jobId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RunCronJob Een beheerde cronjob nu uitvoeren (admin)
+// (POST /cron-jobs/{jobId}/run)
+func (_ Unimplemented) RunCronJob(w http.ResponseWriter, r *http.Request, jobId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetCronRun Eén run met zijn uitvoer
+// (GET /cron-runs/{runId})
+func (_ Unimplemented) GetCronRun(w http.ResponseWriter, r *http.Request, runId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -15742,6 +16135,213 @@ func (siw *ServerInterfaceWrapper) ListComponentTemplates(w http.ResponseWriter,
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListComponentTemplates(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListCronJobs operation middleware
+func (siw *ServerInterfaceWrapper) ListCronJobs(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListCronJobs(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateCronJob operation middleware
+func (siw *ServerInterfaceWrapper) CreateCronJob(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateCronJob(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CheckCronSchedule operation middleware
+func (siw *ServerInterfaceWrapper) CheckCronSchedule(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params CheckCronScheduleParams
+
+	// ------------- Required query parameter "schedule" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "schedule", r.URL.Query(), &params.Schedule, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "schedule"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "schedule", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CheckCronSchedule(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteCronJob operation middleware
+func (siw *ServerInterfaceWrapper) DeleteCronJob(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "jobId" -------------
+	var jobId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "jobId", chi.URLParam(r, "jobId"), &jobId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "jobId", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params DeleteCronJobParams
+
+	// ------------- Optional query parameter "confirm" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "confirm", r.URL.Query(), &params.Confirm, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "confirm"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "confirm", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteCronJob(w, r, jobId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetCronJob operation middleware
+func (siw *ServerInterfaceWrapper) GetCronJob(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "jobId" -------------
+	var jobId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "jobId", chi.URLParam(r, "jobId"), &jobId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "jobId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetCronJob(w, r, jobId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateCronJob operation middleware
+func (siw *ServerInterfaceWrapper) UpdateCronJob(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "jobId" -------------
+	var jobId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "jobId", chi.URLParam(r, "jobId"), &jobId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "jobId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateCronJob(w, r, jobId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RunCronJob operation middleware
+func (siw *ServerInterfaceWrapper) RunCronJob(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "jobId" -------------
+	var jobId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "jobId", chi.URLParam(r, "jobId"), &jobId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "jobId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RunCronJob(w, r, jobId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetCronRun operation middleware
+func (siw *ServerInterfaceWrapper) GetCronRun(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "runId" -------------
+	var runId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "runId", chi.URLParam(r, "runId"), &runId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "runId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetCronRun(w, r, runId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -21070,6 +21670,30 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/nodes/{nodeId}/cron-logging", wrapper.SetCronLogging)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/cron-jobs", wrapper.ListCronJobs)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/cron-jobs", wrapper.CreateCronJob)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/cron-jobs/schedule", wrapper.CheckCronSchedule)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/cron-jobs/{jobId}", wrapper.DeleteCronJob)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/cron-jobs/{jobId}", wrapper.GetCronJob)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/cron-jobs/{jobId}", wrapper.UpdateCronJob)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/cron-jobs/{jobId}/run", wrapper.RunCronJob)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/cron-runs/{runId}", wrapper.GetCronRun)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/cronjobs/refresh", wrapper.RefreshCronjobs)

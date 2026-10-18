@@ -307,3 +307,43 @@ func ints(v []int) []string {
 	}
 	return out
 }
+
+var calDays = []string{"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"}
+
+// OnCalendar zet het schema om naar een OnCalendar van systemd, zoals
+// "*-*-* 00/6:00:00" voor "0 */6 * * *". Elk veld wordt een lijst van de
+// waarden, zodat de betekenis precies die van cron is. Een schema met
+// zowel een dag van de maand als een weekdag kan niet: cron leest dat als
+// 'of', systemd als 'en'.
+func (s Schedule) OnCalendar() (string, error) {
+	if s.Reboot {
+		return "", fmt.Errorf("@reboot heeft geen tijd; een beheerde cronjob heeft een schema nodig")
+	}
+	if !s.DomStar && !s.DowStar && !full(s.Dom, 1, 31) && !full(s.Dow, 0, 6) {
+		return "", fmt.Errorf("een dag van de maand én een weekdag samen kan niet: cron draait als een van beide klopt, systemd alleen als beide kloppen; kies er één")
+	}
+	if s.Minute == 0 || s.Hour == 0 || s.Dom == 0 || s.Month == 0 || s.Dow == 0 {
+		return "", fmt.Errorf("het schema heeft een leeg veld")
+	}
+	num := func(mask uint64, lo, hi int, width int) string {
+		if full(mask, lo, hi) {
+			return "*"
+		}
+		vals := list(mask, lo, hi)
+		out := make([]string, len(vals))
+		for i, v := range vals {
+			out[i] = fmt.Sprintf("%0*d", width, v)
+		}
+		return strings.Join(out, ",")
+	}
+	cal := ""
+	if !full(s.Dow, 0, 6) {
+		var names []string
+		for _, d := range list(s.Dow, 0, 6) {
+			names = append(names, calDays[d])
+		}
+		cal = strings.Join(names, ",") + " "
+	}
+	cal += "*-" + num(s.Month, 1, 12, 2) + "-" + num(s.Dom, 1, 31, 2) + " " + num(s.Hour, 0, 23, 2) + ":" + num(s.Minute, 0, 59, 2) + ":00"
+	return cal, nil
+}

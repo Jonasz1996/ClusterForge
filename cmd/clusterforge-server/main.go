@@ -193,6 +193,7 @@ func serve() error {
 	dbs := databases.NewService(pool, bus, log)
 	// De cronjobs en timers op de nodes, via agentprotocol 16.
 	crons := cronjobs.NewService(pool, bus, ev, log)
+	bus.SetCronRuns(crons.HandleRuns)
 	// Een database als onderdeel van een cluster: MariaDB Galera op de
 	// nodes die er al zijn, met het geheugengebruik uit VictoriaMetrics in
 	// het plan.
