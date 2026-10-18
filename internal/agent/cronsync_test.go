@@ -175,22 +175,24 @@ func TestSync(t *testing.T) {
 // TestSyncReceiveRefuses: wat sync-receive niet toelaat.
 func TestSyncReceiveRefuses(t *testing.T) {
 	root := t.TempDir()
-	recv := []protocol.SyncReceive{{JobID: jobA, From: nodeSrc, Path: "/srv/data/", Addresses: []string{"192.0.2.1"}}}
-	data, _ := json.Marshal(recv)
-	writeTree(t, root, map[string]string{protocol.SyncDir + "/receive.json": string(data)}, 0o600)
+	// De doelmap maakt sync-receive zelf; in CI draait de test niet als root.
+	data := t.TempDir() + "/data/"
+	recv := []protocol.SyncReceive{{JobID: jobA, From: nodeSrc, Path: data, Addresses: []string{"192.0.2.1"}}}
+	js, _ := json.Marshal(recv)
+	writeTree(t, root, map[string]string{protocol.SyncDir + "/receive.json": string(js)}, 0o600)
 	var ran []string
 	r := &SyncReceiver{Root: root, Addresses: func() []string { return nil }, Stderr: &strings.Builder{}, Exec: func(argv []string) error {
 		ran = argv
 		return nil
 	}}
 	for name, tc := range map[string]struct{ from, cmd string }{
-		"andere bron":   {nodeDst, "rsync --server -logDtpre.iLsfxCIvu . /srv/data/"},
+		"andere bron":   {nodeDst, "rsync --server -logDtpre.iLsfxCIvu . " + data},
 		"andere map":    {nodeSrc, "rsync --server -logDtpre.iLsfxCIvu . /etc/"},
-		"omweg":         {nodeSrc, "rsync --server -logDtpre.iLsfxCIvu . /srv/data/../../etc/"},
-		"lezen":         {nodeSrc, "rsync --server --sender -logDtpre.iLsfxCIvu . /srv/data/"},
-		"delete":        {nodeSrc, "rsync --server -logDtpre.iLsfxCIvu --delete . /srv/data/"},
-		"optie":         {nodeSrc, "rsync --server --rsync-path=/bin/sh . /srv/data/"},
-		"shell":         {nodeSrc, "rsync --server . /srv/data/; rm -rf /"},
+		"omweg":         {nodeSrc, "rsync --server -logDtpre.iLsfxCIvu . " + data + "../../etc/"},
+		"lezen":         {nodeSrc, "rsync --server --sender -logDtpre.iLsfxCIvu . " + data},
+		"delete":        {nodeSrc, "rsync --server -logDtpre.iLsfxCIvu --delete . " + data},
+		"optie":         {nodeSrc, "rsync --server --rsync-path=/bin/sh . " + data},
+		"shell":         {nodeSrc, "rsync --server . " + data + "; rm -rf /"},
 		"ander program": {nodeSrc, "sh -c id"},
 	} {
 		ran = nil
@@ -198,7 +200,7 @@ func TestSyncReceiveRefuses(t *testing.T) {
 			t.Errorf("%s: %d %v", name, code, ran)
 		}
 	}
-	if code := r.Main(nodeSrc, "rsync --server -logDtpre.iLsfxCIvu --partial --bwlimit=100 . /srv/data/"); code != 0 || len(ran) != 7 {
+	if code := r.Main(nodeSrc, "rsync --server -logDtpre.iLsfxCIvu --partial --bwlimit=100 . "+data); code != 0 || len(ran) != 7 {
 		t.Errorf("toegestaan: %d %v", code, ran)
 	}
 }
