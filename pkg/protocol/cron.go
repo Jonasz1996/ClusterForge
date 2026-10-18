@@ -22,6 +22,10 @@ const CronLoggingSince = 17
 // CronApply, CronRun en de runs als TypeCronRuns.
 const CronManagedSince = 18
 
+// CronFollowSince is de eerste protocolversie met CronOutput, CronStop en
+// herhalen na een fout.
+const CronFollowSince = 19
+
 // SubjectCron draagt de cronverzoeken: cf.node.<id>.cron. Een eigen subject,
 // zodat een trage journal de commando's op cmd niet ophoudt.
 const SubjectCron = "cron"
@@ -47,6 +51,11 @@ const (
 	CronApply = "apply"
 	// CronRun start een beheerde job nu, ook als de node het VIP niet heeft.
 	CronRun = "run"
+	// CronOutput geeft de uitvoer tot nu toe van een run (RunID) van JobID,
+	// zolang de uitvoer op de node staat.
+	CronOutput = "output"
+	// CronStop stopt de lopende run van JobID.
+	CronStop = "stop"
 )
 
 // Waar de agent de beheerde jobs bewaart.
@@ -97,13 +106,19 @@ type ManagedCron struct {
 	User           string   `json:"user"`
 	Command        string   `json:"command"`
 	TimeoutSeconds int      `json:"timeout_seconds"`
-	Enabled        bool     `json:"enabled"`
+	// Retries is hoe vaak cron-run een mislukte run herhaalt (0 tot 3),
+	// met RetryDelaySeconds ertussen.
+	Retries           int  `json:"retries,omitempty"`
+	RetryDelaySeconds int  `json:"retry_delay_seconds,omitempty"`
+	Enabled           bool `json:"enabled"`
 }
 
 // Waarom een run startte.
 const (
 	CronReasonSchedule = "schedule"
 	CronReasonManual   = "manual"
+	// CronReasonRetry: een herhaling na een mislukte run.
+	CronReasonRetry = "retry"
 )
 
 // Uitkomsten van een beheerde run, naast CronOK, CronFailed en CronRunning.
@@ -112,6 +127,8 @@ const (
 	CronSkipped = "skipped"
 	// CronTimeout: gestopt na de tijdslimiet.
 	CronTimedOut = "timeout"
+	// CronStopped: met de hand gestopt.
+	CronStopped = "stopped"
 )
 
 // CronRunRecord is één run van een beheerde job. De agent stuurt hem bij
@@ -150,8 +167,10 @@ type CronRequest struct {
 	Enable bool `json:"enable,omitempty"`
 	// Jobs hoort bij CronApply: de hele set van de node.
 	Jobs []ManagedCron `json:"jobs,omitempty"`
-	// JobID hoort bij CronRun.
+	// JobID hoort bij CronRun, CronOutput en CronStop.
 	JobID string `json:"job_id,omitempty"`
+	// RunID hoort bij CronOutput.
+	RunID string `json:"run_id,omitempty"`
 }
 
 type CronResponse struct {
@@ -160,6 +179,10 @@ type CronResponse struct {
 	Output []string `json:"output,omitempty"`
 	// Hash is bij CronApply de hash van de toegepaste set.
 	Hash string `json:"hash,omitempty"`
+	// RunOutput is bij CronOutput het einde van de uitvoer (hoogstens
+	// CronOutputMax), gemaskeerd.
+	RunOutput          string `json:"run_output,omitempty"`
+	RunOutputTruncated bool   `json:"run_output_truncated,omitempty"`
 	// Daemon is de cron-daemon op de node: cron, cronie of leeg als er
 	// geen draait.
 	Daemon string `json:"daemon,omitempty"`

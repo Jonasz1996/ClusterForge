@@ -545,6 +545,8 @@ type CronJob struct {
 	CreatedBy      *uuid.UUID
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
+	Retries        int32
+	Alert          bool
 }
 
 type CronNodeSet struct {

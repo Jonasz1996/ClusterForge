@@ -334,3 +334,45 @@ func (a *Agent) sendCronRuns(ctx context.Context) error {
 	}
 	return nil
 }
+
+// cronOutput geeft de uitvoer tot nu toe van een run.
+func (a *Agent) cronOutput(jobID, runID string) protocol.CronResponse {
+	res := protocol.CronResponse{Entries: []protocol.CronEntry{}}
+	if _, err := uuid.Parse(jobID); err != nil {
+		res.Error = "ongeldige job-id"
+		return res
+	}
+	if _, err := uuid.Parse(runID); err != nil {
+		res.Error = "ongeldige run-id"
+		return res
+	}
+	dir, err := a.path(path.Join(protocol.CronStateDir, "output", jobID))
+	if err != nil {
+		res.Error = err.Error()
+		return res
+	}
+	files, _ := filepath.Glob(filepath.Join(dir, "*-"+runID+".log"))
+	if len(files) == 0 {
+		res.Error = "de uitvoer van deze run staat niet meer op de node"
+		return res
+	}
+	out, truncated := tailFile(files[0], protocol.CronOutputMax)
+	res.RunOutput, res.RunOutputTruncated = protocol.MaskSecrets(out), truncated
+	return res
+}
+
+// cronStop stopt de lopende run van een job; cf-agent cron-run krijgt
+// SIGTERM en stopt het commando met zijn hele procesgroep.
+func (a *Agent) cronStop(ctx context.Context, jobID string) protocol.CronResponse {
+	res := protocol.CronResponse{Entries: []protocol.CronEntry{}}
+	if _, err := uuid.Parse(jobID); err != nil {
+		res.Error = "ongeldige job-id"
+		return res
+	}
+	if out, err := a.exec(ctx, "systemctl", "stop", "cf-cron@"+jobID+".service"); err != nil {
+		res.Error = fmt.Sprintf("systemctl stop: %v: %s", err, strings.TrimSpace(string(out)))
+		return res
+	}
+	res.Output = []string{"gestopt"}
+	return res
+}

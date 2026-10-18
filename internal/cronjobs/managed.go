@@ -48,6 +48,10 @@ type JobInput struct {
 	Command        string
 	TimeoutSeconds int
 	Enabled        bool
+	// Retries is hoe vaak een mislukte run herhaalt, 0 tot 3.
+	Retries int
+	// Alert: een mislukte run opent een incident.
+	Alert bool
 }
 
 // InvalidError is een fout in wat de beheerder invulde, bij een veld.
@@ -120,6 +124,8 @@ func (s *Service) validate(ctx context.Context, q *store.Queries, clusterID uuid
 		return &InvalidError{"command", fmt.Sprintf("het commando is langer dan %d tekens; zet het in een script op de node", MaxJobCommand)}
 	case in.TimeoutSeconds < MinJobTimeout || in.TimeoutSeconds > MaxJobTimeout:
 		return &InvalidError{"timeout_seconds", "een tijdslimiet tussen 1 minuut en 24 uur"}
+	case in.Retries < 0 || in.Retries > 3:
+		return &InvalidError{"retries", "herhalen kan 0 tot 3 keer"}
 	}
 	if _, err := s.CheckSchedule(in.Schedule); err != nil {
 		return err
@@ -164,6 +170,7 @@ func jobPayload(j store.CronJob, cluster string) map[string]any {
 	p := map[string]any{
 		"name": j.Name, "cluster": cluster, "schedule": j.Schedule, "run_on": j.RunOn, "user": j.UserName,
 		"command": j.Command, "timeout_seconds": j.TimeoutSeconds, "enabled": j.Enabled, "revision": j.Revision,
+		"retries": j.Retries, "alert": j.Alert,
 	}
 	if j.NodeID != nil {
 		p["node_id"] = j.NodeID.String()
@@ -183,6 +190,7 @@ func (s *Service) CreateJob(ctx context.Context, actor events.Actor, createdBy *
 		job, err = q.InsertCronJob(ctx, store.InsertCronJobParams{
 			ClusterID: clusterID, Name: in.Name, Schedule: in.Schedule, RunOn: in.RunOn, NodeID: in.NodeID, UserName: in.User,
 			Command: in.Command, TimeoutSeconds: int32(in.TimeoutSeconds), Enabled: in.Enabled, CreatedBy: createdBy,
+			Retries: int32(in.Retries), Alert: in.Alert,
 		})
 		if isUnique(err) {
 			return &InvalidError{"name", "er is al een cronjob met die naam in dit cluster"}
@@ -221,7 +229,7 @@ func (s *Service) UpdateJob(ctx context.Context, actor events.Actor, id uuid.UUI
 		}
 		job, err = q.UpdateCronJob(ctx, store.UpdateCronJobParams{
 			ID: id, Name: in.Name, Schedule: in.Schedule, RunOn: in.RunOn, NodeID: in.NodeID, UserName: in.User,
-			Command: in.Command, TimeoutSeconds: int32(in.TimeoutSeconds), Enabled: in.Enabled,
+			Command: in.Command, TimeoutSeconds: int32(in.TimeoutSeconds), Enabled: in.Enabled, Retries: int32(in.Retries), Alert: in.Alert,
 		})
 		if isUnique(err) {
 			return &InvalidError{"name", "er is al een cronjob met die naam in dit cluster"}
@@ -231,7 +239,7 @@ func (s *Service) UpdateJob(ctx context.Context, actor events.Actor, id uuid.UUI
 		}
 		before := jobPayload(store.CronJob{
 			Name: old.Name, Schedule: old.Schedule, RunOn: old.RunOn, NodeID: old.NodeID, UserName: old.UserName, Command: old.Command,
-			TimeoutSeconds: old.TimeoutSeconds, Enabled: old.Enabled, Revision: old.Revision,
+			TimeoutSeconds: old.TimeoutSeconds, Enabled: old.Enabled, Revision: old.Revision, Retries: old.Retries, Alert: old.Alert,
 		}, old.ClusterName)
 		after := jobPayload(job, old.ClusterName)
 		changes := map[string]any{}
@@ -291,14 +299,16 @@ func (s *Service) DeleteJob(ctx context.Context, actor events.Actor, id uuid.UUI
 
 // world is wat ApplyAll en het overzicht nodig hebben.
 type world struct {
-	jobs  []store.ListCronJobsRow
-	nodes []store.ListCronCandidateNodesRow
-	vips  map[uuid.UUID][]store.ListCronVIPsRow
-	sets  map[uuid.UUID]store.CronNodeSet
+	// retryDelay is de wachttijd in seconden voor een herhaling.
+	retryDelay int
+	jobs       []store.ListCronJobsRow
+	nodes      []store.ListCronCandidateNodesRow
+	vips       map[uuid.UUID][]store.ListCronVIPsRow
+	sets       map[uuid.UUID]store.CronNodeSet
 }
 
 func (s *Service) world(ctx context.Context) (world, error) {
-	var w world
+	w := world{retryDelay: max(1, int(s.RetryDelay/time.Second))}
 	var err error
 	if w.jobs, err = s.q.ListCronJobs(ctx); err != nil {
 		return w, err
@@ -351,6 +361,7 @@ func (w world) desired(n store.ListCronCandidateNodesRow) []protocol.ManagedCron
 		m := protocol.ManagedCron{
 			ID: j.ID.String(), Name: j.Name, Revision: int(j.Revision), Schedule: j.Schedule, OnCalendar: cal, RunOn: j.RunOn,
 			User: j.UserName, Command: j.Command, TimeoutSeconds: int(j.TimeoutSeconds), Enabled: j.Enabled,
+			Retries: int(j.Retries), RetryDelaySeconds: w.retryDelay,
 		}
 		if j.RunOn == protocol.CronOnVIP {
 			for _, v := range w.vips[j.ClusterID] {
@@ -528,7 +539,7 @@ func (s *Service) HandleRuns(ctx context.Context, nodeID uuid.UUID, msg protocol
 				continue
 			}
 			switch r.Result {
-			case protocol.CronRunning, protocol.CronOK, protocol.CronFailed, protocol.CronSkipped, protocol.CronTimedOut:
+			case protocol.CronRunning, protocol.CronOK, protocol.CronFailed, protocol.CronSkipped, protocol.CronTimedOut, protocol.CronStopped:
 			default:
 				continue
 			}
@@ -581,4 +592,87 @@ func (s *Service) HandleRuns(ctx context.Context, nodeID uuid.UUID, msg protocol
 func (s *Service) Prune(ctx context.Context) error {
 	_, err := s.q.DeleteOldCronRuns(ctx)
 	return err
+}
+
+// ErrRunNotRunning: de run loopt niet meer.
+var ErrRunNotRunning = errors.New("deze run loopt niet meer")
+
+// StopRun stopt een lopende run op zijn node.
+func (s *Service) StopRun(ctx context.Context, actor events.Actor, runID uuid.UUID) error {
+	run, err := s.RunRecord(ctx, runID)
+	if err != nil {
+		return err
+	}
+	if run.Result != protocol.CronRunning {
+		return ErrRunNotRunning
+	}
+	n, err := s.agentNode(ctx, run.NodeID, protocol.CronFollowSince)
+	if err != nil {
+		return err
+	}
+	rctx, cancel := context.WithTimeout(ctx, s.Timeout)
+	defer cancel()
+	res, err := s.bus.Cron(rctx, run.NodeID, protocol.CronRequest{Op: protocol.CronStop, JobID: run.JobID.String()})
+	switch {
+	case err != nil:
+		return &AgentError{agentMessage(n.Hostname, err)}
+	case res.Error != "":
+		return &AgentError{n.Hostname + ": " + res.Error}
+	}
+	return s.ev.Write(ctx, nil, events.Event{
+		Actor: actor, SubjectType: "cron_job", SubjectID: run.JobID.String(), ClusterID: &run.ClusterID, Action: "cron_job.run_stopped",
+		Payload: map[string]any{"name": run.JobName, "hostname": run.Hostname, "run_id": runID.String()},
+	})
+}
+
+// LiveOutput haalt de uitvoer tot nu toe van een lopende run bij de agent.
+func (s *Service) LiveOutput(ctx context.Context, run store.GetCronRunRow) (string, bool, error) {
+	n, err := s.agentNode(ctx, run.NodeID, protocol.CronFollowSince)
+	if err != nil {
+		return "", false, err
+	}
+	rctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	res, err := s.bus.Cron(rctx, run.NodeID, protocol.CronRequest{Op: protocol.CronOutput, JobID: run.JobID.String(), RunID: run.ID.String()})
+	switch {
+	case err != nil:
+		return "", false, &AgentError{agentMessage(n.Hostname, err)}
+	case res.Error != "":
+		return "", false, &AgentError{n.Hostname + ": " + res.Error}
+	}
+	return res.RunOutput, res.RunOutputTruncated, nil
+}
+
+// agentNode geeft de node als zijn agent minstens protocol since heeft.
+func (s *Service) agentNode(ctx context.Context, nodeID uuid.UUID, since int32) (store.ListCronCandidateNodesRow, error) {
+	nodes, err := s.q.ListCronCandidateNodes(ctx)
+	if err != nil {
+		return store.ListCronCandidateNodesRow{}, err
+	}
+	i := slices.IndexFunc(nodes, func(n store.ListCronCandidateNodesRow) bool { return n.ID == nodeID })
+	if i < 0 {
+		return store.ListCronCandidateNodesRow{}, &AgentError{"de node heeft geen agent meer"}
+	}
+	if nodes[i].AgentProtocol < since {
+		return nodes[i], fmt.Errorf("%w: de agent op %s heeft protocol %d; dit vraagt protocol %d", ErrAgentTooOld, nodes[i].Hostname, nodes[i].AgentProtocol, since)
+	}
+	return nodes[i], nil
+}
+
+// missedGrace is hoe lang na het geplande moment een run mag beginnen voor
+// hij als gemist telt.
+const missedGrace = 10 * time.Minute
+
+// lastScheduled is het laatste geplande moment in [from, until], of nul.
+func lastScheduled(sc cronexpr.Schedule, from, until time.Time) time.Time {
+	var last time.Time
+	t := from
+	for range 20000 {
+		next := sc.Next(t)
+		if next.IsZero() || next.After(until) {
+			return last
+		}
+		last, t = next, next
+	}
+	return last
 }

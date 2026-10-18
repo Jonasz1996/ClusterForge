@@ -10,7 +10,7 @@ import (
 
 // Version is de protocolversie. Een agent meldt die bij elke heartbeat, zodat
 // de server geen berichten stuurt die de agent niet kent.
-const Version = 18
+const Version = 19
 
 // CommandsSince is de eerste protocolversie met commando's.
 const CommandsSince = 2

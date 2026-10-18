@@ -118,7 +118,14 @@ export function ManagedCard({ cluster }: { cluster: string }) {
                         {j.cluster_name}
                         <EnvBadge env={j.cluster_environment} />
                         {!j.enabled && <Badge>Uit</Badge>}
+                        {j.running > 0 && <Badge tone="blue">loopt nu</Badge>}
                         {j.failures_24h > 0 && <Badge tone="red">{j.failures_24h} mislukt in 24 u</Badge>}
+                        {j.missed_at && (
+                          <span title={`De run van ${timeFmt.format(new Date(j.missed_at))} is niet gestart`}>
+                            <Badge tone="amber">run gemist</Badge>
+                          </span>
+                        )}
+                        {j.retries > 0 && <span>herhaalt {j.retries}×</span>}
                       </div>
                     </td>
                     <td className={tdClass}>
@@ -161,6 +168,7 @@ export function RunOutput({ id }: { id: string }) {
             <p className="text-sm text-slate-500">{r.result === "running" ? "Nog geen uitvoer." : "Geen uitvoer."}</p>
           ) : (
             <pre className="max-h-96 overflow-auto rounded-md bg-slate-950 p-3 font-mono text-xs whitespace-pre-wrap text-slate-100">
+              {r.live && <span className="text-sky-300">{"Loopt nog; de uitvoer ververst vanzelf.\n"}</span>}
               {r.output_truncated && <span className="text-slate-400">{"… (alleen de laatste 64 KiB)\n"}</span>}
               {r.output}
             </pre>

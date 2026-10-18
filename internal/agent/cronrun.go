@@ -97,6 +97,34 @@ func (r *CronRunner) Main(ctx context.Context, id string) int {
 		r.logf("map voor de uitvoer: %v", err)
 		return 1
 	}
+	code := 0
+	for attempt := 0; ; attempt++ {
+		if attempt > 0 {
+			run = protocol.CronRunRecord{ID: uuid.NewString(), JobID: id, Revision: job.Revision, Reason: protocol.CronReasonRetry, StartedAt: r.now().UTC()}
+		}
+		code = r.attempt(ctx, job, &run, outDir)
+		retry := run.Result == protocol.CronFailed || run.Result == protocol.CronTimedOut
+		if !retry || attempt >= min(job.Retries, 3) || ctx.Err() != nil {
+			break
+		}
+		delay := time.Duration(job.RetryDelaySeconds) * time.Second
+		if delay <= 0 {
+			delay = time.Minute
+		}
+		select {
+		case <-ctx.Done():
+		case <-time.After(delay):
+		}
+		if ctx.Err() != nil {
+			break
+		}
+	}
+	pruneOutputs(outDir, protocol.CronKeepOutputs)
+	return code
+}
+
+// attempt draait het commando één keer en legt de run vast.
+func (r *CronRunner) attempt(ctx context.Context, job protocol.ManagedCron, run *protocol.CronRunRecord, outDir string) int {
 	outPath := filepath.Join(outDir, fmt.Sprintf("%d-%s.log", run.StartedAt.UnixNano(), run.ID))
 	out, err := os.OpenFile(outPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
@@ -104,7 +132,7 @@ func (r *CronRunner) Main(ctx context.Context, id string) int {
 		return 1
 	}
 	run.Result = protocol.CronRunning
-	r.spool(run)
+	r.spool(*run)
 
 	timeout := time.Duration(job.TimeoutSeconds) * time.Second
 	if timeout <= 0 {
@@ -112,13 +140,17 @@ func (r *CronRunner) Main(ctx context.Context, id string) int {
 	}
 	rctx, cancel := context.WithTimeout(ctx, timeout)
 	exit, runErr := runCronCommand(rctx, job.User, job.Command, out)
-	timedOut := errors.Is(rctx.Err(), context.DeadlineExceeded)
+	timedOut := errors.Is(rctx.Err(), context.DeadlineExceeded) && ctx.Err() == nil
+	stopped := ctx.Err() != nil
 	cancel()
 	if runErr != nil {
 		_, _ = fmt.Fprintf(out, "\nClusterForge: %v\n", runErr)
 	}
-	if timedOut {
+	switch {
+	case timedOut:
 		_, _ = fmt.Fprintf(out, "\nClusterForge: gestopt na de tijdslimiet van %s\n", timeout)
+	case stopped:
+		_, _ = fmt.Fprintf(out, "\nClusterForge: met de hand gestopt\n")
 	}
 	_ = out.Close()
 
@@ -127,6 +159,8 @@ func (r *CronRunner) Main(ctx context.Context, id string) int {
 	switch {
 	case timedOut:
 		run.Result = protocol.CronTimedOut
+	case stopped:
+		run.Result = protocol.CronStopped
 	case exit == 0 && runErr == nil:
 		run.Result = protocol.CronOK
 	default:
@@ -134,8 +168,7 @@ func (r *CronRunner) Main(ctx context.Context, id string) int {
 	}
 	run.Output, run.OutputTruncated = tailFile(outPath, protocol.CronOutputMax)
 	run.Output = protocol.MaskSecrets(run.Output)
-	r.spool(run)
-	pruneOutputs(outDir, protocol.CronKeepOutputs)
+	r.spool(*run)
 	if exit == 0 && run.Result != protocol.CronOK {
 		return 1
 	}

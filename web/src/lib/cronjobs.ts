@@ -93,6 +93,13 @@ export const runResultInfo: Record<CronRunSummary["result"], { label: string; to
   failed: { label: "Mislukt", tone: "red" },
   skipped: { label: "Overgeslagen", tone: "amber" },
   timeout: { label: "Tijdslimiet", tone: "red" },
+  stopped: { label: "Gestopt", tone: "amber" },
+};
+
+export const runReasonLabel: Record<CronRunSummary["reason"], string> = {
+  schedule: "volgens schema",
+  manual: "met de hand",
+  retry: "herhaling",
 };
 
 export const runOnLabel: Record<ManagedCronJob["run_on"], string> = {
@@ -181,5 +188,22 @@ export function jobInputOf(j: ManagedCronJob): ManagedCronJobInput {
     command: j.command,
     timeout_seconds: j.timeout_seconds,
     enabled: j.enabled,
+    retries: j.retries,
+    alert: j.alert,
   };
+}
+
+// useStopCronRun stopt een lopende run op zijn node.
+export function useStopCronRun() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, confirm }: { id: string; confirm?: string }) =>
+      unwrap(await api.POST("/cron-runs/{runId}/stop", { params: { path: { runId: id } }, body: { confirm } })),
+    onSuccess: (_, v) => {
+      setTimeout(() => {
+        void qc.invalidateQueries({ queryKey: managedKey });
+        void qc.invalidateQueries({ queryKey: ["cron-run", v.id] });
+      }, 1_000);
+    },
+  });
 }

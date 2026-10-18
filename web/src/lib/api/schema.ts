@@ -3491,6 +3491,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/cron-runs/{runId}/stop": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Een lopende run stoppen (admin)
+         * @description cf-agent stopt het commando met zijn hele procesgroep; de run krijgt de uitkomst stopped. Vraagt agentprotocol 19.
+         */
+        post: operations["stopCronRun"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/cronjobs/refresh": {
         parameters: {
             query?: never;
@@ -5486,6 +5506,10 @@ export interface components {
             command: string;
             timeout_seconds: number;
             enabled: boolean;
+            /** @description Hoe vaak een mislukte run herhaalt, met een minuut ertussen */
+            retries?: number;
+            /** @description Een mislukte run opent een incident */
+            alert?: boolean;
             /** @description De slug van het cluster */
             confirm?: string;
         };
@@ -5517,6 +5541,15 @@ export interface components {
             revision: number;
             /** Format: date-time */
             next_run: string | null;
+            /**
+             * Format: date-time
+             * @description Het laatste geplande moment, als de job toen niet draaide
+             */
+            missed_at: string | null;
+            /** @description Op hoeveel nodes er nu een run loopt */
+            running: number;
+            retries: number;
+            alert: boolean;
             failures_24h: number;
             nodes: components["schemas"]["ManagedCronJobNode"][];
             /** Format: date-time */
@@ -5541,9 +5574,9 @@ export interface components {
             node_id: string;
             hostname: string;
             /** @enum {string} */
-            reason: "schedule" | "manual";
+            reason: "schedule" | "manual" | "retry";
             /** @enum {string} */
-            result: "running" | "ok" | "failed" | "skipped" | "timeout";
+            result: "running" | "ok" | "failed" | "skipped" | "timeout" | "stopped";
             /** Format: date-time */
             started_at: string;
             /** Format: date-time */
@@ -5560,6 +5593,8 @@ export interface components {
             output_truncated: boolean;
             /** @description Een viewer ziet de uitvoer van een job als root niet */
             output_hidden: boolean;
+            /** @description De uitvoer komt zo net van de node, want de run loopt nog */
+            live: boolean;
         };
         ManagedCronJobDetail: {
             job: components["schemas"]["ManagedCronJob"];
@@ -8250,7 +8285,7 @@ export interface components {
         };
         IncidentSubject: {
             /** @enum {string} */
-            type: "cluster" | "node" | "service" | "test_run" | "app" | "cron";
+            type: "cluster" | "node" | "service" | "test_run" | "app" | "cron" | "cron_job";
             /** Format: uuid */
             id: string;
             name: string;
@@ -15863,6 +15898,37 @@ export interface operations {
             };
             401: components["responses"]["Error"];
             404: components["responses"]["Error"];
+        };
+    };
+    stopCronRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                runId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    confirm?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Gestopt */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            502: components["responses"]["Error"];
         };
     };
     refreshCronjobs: {

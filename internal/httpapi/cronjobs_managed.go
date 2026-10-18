@@ -24,6 +24,10 @@ func (s *Server) cronJobError(w http.ResponseWriter, r *http.Request, err error)
 		writeJSON(w, http.StatusBadRequest, gen.Error{Code: "validation", Message: inv.Msg, Field: &field})
 	case errors.Is(err, cronjobs.ErrJobNotFound), errors.Is(err, cronjobs.ErrRunNotFound), errors.Is(err, pgx.ErrNoRows):
 		writeError(w, http.StatusNotFound, "not_found", "niet gevonden")
+	case errors.Is(err, cronjobs.ErrRunNotRunning):
+		writeError(w, http.StatusConflict, "not_running", err.Error())
+	case errors.Is(err, cronjobs.ErrAgentTooOld):
+		writeError(w, http.StatusConflict, "agent_too_old", err.Error())
 	case errors.As(err, &agentErr):
 		writeError(w, http.StatusBadGateway, "agent", agentErr.Msg)
 	default:
@@ -44,7 +48,7 @@ func toAPIManagedJob(j cronjobs.ManagedJob) gen.ManagedCronJob {
 		Name: j.Name, Schedule: j.Schedule, Describe: j.Describe, OnCalendar: j.OnCalendar, RunOn: gen.ManagedCronJobRunOn(j.RunOn),
 		NodeId: nullableOf(j.NodeID), NodeHostname: deref(j.NodeHostname), User: j.UserName, Command: j.Command,
 		TimeoutSeconds: int(j.TimeoutSeconds), Enabled: j.Enabled, Revision: int(j.Revision), NextRun: nullableOf(j.NextRun),
-		Failures24h: j.Failures24h, Nodes: make([]gen.ManagedCronJobNode, 0, len(j.Nodes)), CreatedAt: j.CreatedAt, UpdatedAt: j.UpdatedAt,
+		Failures24h: j.Failures24h, Retries: int(j.Retries), Alert: j.Alert, MissedAt: nullableOf(j.MissedAt), Nodes: make([]gen.ManagedCronJobNode, 0, len(j.Nodes)), CreatedAt: j.CreatedAt, UpdatedAt: j.UpdatedAt,
 	}
 	for _, n := range j.Nodes {
 		mn := gen.ManagedCronJobNode{NodeId: n.NodeID, Hostname: n.Hostname, Applied: n.Applied, HasVip: n.HasVIP, Error: n.Error}
@@ -54,6 +58,9 @@ func toAPIManagedJob(j cronjobs.ManagedJob) gen.ManagedCronJob {
 			last = &x
 		}
 		mn.LastRun = nullableOf(last)
+		if n.LastRun != nil && n.LastRun.Result == "running" {
+			out.Running++
+		}
 		out.Nodes = append(out.Nodes, mn)
 	}
 	return out
@@ -82,10 +89,18 @@ func (s *Server) writeManagedJob(w http.ResponseWriter, r *http.Request, status 
 }
 
 func jobInput(in gen.ManagedCronJobInput) cronjobs.JobInput {
-	return cronjobs.JobInput{
+	out := cronjobs.JobInput{
 		Name: in.Name, Schedule: in.Schedule, RunOn: string(in.RunOn), NodeID: nullablePtr(in.NodeId), User: in.User,
-		Command: in.Command, TimeoutSeconds: in.TimeoutSeconds, Enabled: in.Enabled,
+		Command: in.Command, TimeoutSeconds: in.TimeoutSeconds, Enabled: in.Enabled, Alert: true,
 	}
+	if in.Retries != nil {
+		out.Retries = *in.Retries
+	}
+	// Zonder alert opent een mislukte run een incident, zoals bij elke job.
+	if in.Alert != nil {
+		out.Alert = *in.Alert
+	}
+	return out
 }
 
 func (s *Server) CreateCronJob(w http.ResponseWriter, r *http.Request) {
@@ -109,7 +124,7 @@ func (s *Server) CreateCronJob(w http.ResponseWriter, r *http.Request) {
 	uid := p.User.ID
 	job, err := s.cronjobs.CreateJob(ctx, events.User(p.User.ID), &uid, c.ID, c.Name, jobInput(gen.ManagedCronJobInput{
 		Name: in.Name, Schedule: in.Schedule, RunOn: gen.ManagedCronJobInputRunOn(in.RunOn), NodeId: in.NodeId, User: in.User,
-		Command: in.Command, TimeoutSeconds: in.TimeoutSeconds, Enabled: in.Enabled,
+		Command: in.Command, TimeoutSeconds: in.TimeoutSeconds, Enabled: in.Enabled, Retries: in.Retries, Alert: in.Alert,
 	}))
 	if err != nil {
 		s.cronJobError(w, r, err)
@@ -239,8 +254,42 @@ func (s *Server) GetCronRun(w http.ResponseWriter, r *http.Request, runID uuid.U
 	// bevatten wat root kan lezen.
 	if p.User.Role != store.UserRoleAdmin && run.UserName == "root" {
 		out.Output, out.OutputHidden = "", true
+	} else if run.Result == "running" {
+		// Loopt de run nog, dan komt de uitvoer tot nu toe van de node; lukt
+		// dat niet, dan blijft de opgeslagen uitvoer staan.
+		if text, truncated, err := s.cronjobs.LiveOutput(r.Context(), run); err == nil {
+			out.Output, out.OutputTruncated, out.Live = text, truncated, true
+		}
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) StopCronRun(w http.ResponseWriter, r *http.Request, runID uuid.UUID) {
+	p, ok := requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	var in gen.StopCronRunJSONBody
+	if r.ContentLength != 0 && !decode(w, r, &in) {
+		return
+	}
+	run, err := s.cronjobs.RunRecord(r.Context(), runID)
+	if err != nil {
+		s.cronJobError(w, r, err)
+		return
+	}
+	j, ok := s.jobCluster(w, r, run.JobID)
+	if !ok {
+		return
+	}
+	if !confirmProd(w, p, j.ClusterEnvironment == store.EnvironmentProd, j.ClusterSlug, in.Confirm, "een cronjob stoppen") {
+		return
+	}
+	if err := s.cronjobs.StopRun(r.Context(), events.User(p.User.ID), runID); err != nil {
+		s.cronJobError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusAccepted)
 }
 
 func intOf(v *int32) *int {

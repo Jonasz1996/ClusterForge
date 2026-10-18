@@ -65,13 +65,16 @@ type Service struct {
 	// nil is time.Local. cron rekent op de node in diens tijdzone, en
 	// ClusterForge draait meestal in dezelfde.
 	Location *time.Location
+	// RetryDelay is de wachttijd voor een herhaling na een mislukte run;
+	// standaard een minuut.
+	RetryDelay time.Duration
 
 	kick chan struct{}
 }
 
 func NewService(pool *pgxpool.Pool, bus Requester, ev *events.Writer, log *slog.Logger) *Service {
 	return &Service{
-		pool: pool, q: store.New(pool), bus: bus, ev: ev, log: log, Interval: 5 * time.Minute, Timeout: protocol.CronTimeout, Now: time.Now,
+		pool: pool, q: store.New(pool), bus: bus, ev: ev, log: log, Interval: 5 * time.Minute, Timeout: protocol.CronTimeout, Now: time.Now, RetryDelay: time.Minute,
 		kick: make(chan struct{}, 1),
 	}
 }

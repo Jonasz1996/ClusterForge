@@ -23,7 +23,10 @@ type ManagedJob struct {
 	OnCalendar  string
 	NextRun     *time.Time
 	Failures24h int
-	Nodes       []ManagedNode
+	// MissedAt is het geplande moment waarop de job niet draaide, als dat
+	// het laatste was.
+	MissedAt *time.Time
+	Nodes    []ManagedNode
 }
 
 // ManagedNode is een beheerde job op één node.
@@ -89,6 +92,15 @@ func (s *Service) Jobs(ctx context.Context) ([]ManagedJob, error) {
 		wantHash[n.ID] = protocol.CronSetHash(w.desired(n))
 	}
 	now := s.Now().In(s.loc())
+	since := now.Add(-8 * 24 * time.Hour)
+	starts, err := s.q.ListCronJobRunStarts(ctx, since)
+	if err != nil {
+		return nil, err
+	}
+	lastStart := map[uuid.UUID]time.Time{}
+	for _, st := range starts {
+		lastStart[st.JobID] = st.LastStart
+	}
 	out := make([]ManagedJob, 0, len(w.jobs))
 	for _, j := range w.jobs {
 		mj := ManagedJob{ListCronJobsRow: j, Failures24h: fails[j.ID]}
@@ -98,6 +110,16 @@ func (s *Service) Jobs(ctx context.Context) ([]ManagedJob, error) {
 			if j.Enabled {
 				if next := sc.Next(now); !next.IsZero() {
 					mj.NextRun = &next
+				}
+				// Gemist: het laatste geplande moment sinds de laatste
+				// wijziging is langer dan missedGrace voorbij, en er begon
+				// sindsdien geen run.
+				from := j.UpdatedAt.In(s.loc())
+				if from.Before(since) {
+					from = since
+				}
+				if due := lastScheduled(sc, from, now.Add(-missedGrace)); !due.IsZero() && lastStart[j.ID].Before(due.Add(-time.Minute)) {
+					mj.MissedAt = &due
 				}
 			}
 		}

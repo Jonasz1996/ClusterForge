@@ -573,6 +573,7 @@ func (e CronJobNodeLastResult) Valid() bool {
 // Defines values for CronRunReason.
 const (
 	CronRunReasonManual   CronRunReason = "manual"
+	CronRunReasonRetry    CronRunReason = "retry"
 	CronRunReasonSchedule CronRunReason = "schedule"
 )
 
@@ -580,6 +581,8 @@ const (
 func (e CronRunReason) Valid() bool {
 	switch e {
 	case CronRunReasonManual:
+		return true
+	case CronRunReasonRetry:
 		return true
 	case CronRunReasonSchedule:
 		return true
@@ -594,6 +597,7 @@ const (
 	CronRunResultOk      CronRunResult = "ok"
 	CronRunResultRunning CronRunResult = "running"
 	CronRunResultSkipped CronRunResult = "skipped"
+	CronRunResultStopped CronRunResult = "stopped"
 	CronRunResultTimeout CronRunResult = "timeout"
 )
 
@@ -608,6 +612,8 @@ func (e CronRunResult) Valid() bool {
 		return true
 	case CronRunResultSkipped:
 		return true
+	case CronRunResultStopped:
+		return true
 	case CronRunResultTimeout:
 		return true
 	default:
@@ -618,6 +624,7 @@ func (e CronRunResult) Valid() bool {
 // Defines values for CronRunSummaryReason.
 const (
 	CronRunSummaryReasonManual   CronRunSummaryReason = "manual"
+	CronRunSummaryReasonRetry    CronRunSummaryReason = "retry"
 	CronRunSummaryReasonSchedule CronRunSummaryReason = "schedule"
 )
 
@@ -625,6 +632,8 @@ const (
 func (e CronRunSummaryReason) Valid() bool {
 	switch e {
 	case CronRunSummaryReasonManual:
+		return true
+	case CronRunSummaryReasonRetry:
 		return true
 	case CronRunSummaryReasonSchedule:
 		return true
@@ -639,6 +648,7 @@ const (
 	CronRunSummaryResultOk      CronRunSummaryResult = "ok"
 	CronRunSummaryResultRunning CronRunSummaryResult = "running"
 	CronRunSummaryResultSkipped CronRunSummaryResult = "skipped"
+	CronRunSummaryResultStopped CronRunSummaryResult = "stopped"
 	CronRunSummaryResultTimeout CronRunSummaryResult = "timeout"
 )
 
@@ -652,6 +662,8 @@ func (e CronRunSummaryResult) Valid() bool {
 	case CronRunSummaryResultRunning:
 		return true
 	case CronRunSummaryResultSkipped:
+		return true
+	case CronRunSummaryResultStopped:
 		return true
 	case CronRunSummaryResultTimeout:
 		return true
@@ -1700,6 +1712,7 @@ const (
 	IncidentSubjectTypeApp     IncidentSubjectType = "app"
 	IncidentSubjectTypeCluster IncidentSubjectType = "cluster"
 	IncidentSubjectTypeCron    IncidentSubjectType = "cron"
+	IncidentSubjectTypeCronJob IncidentSubjectType = "cron_job"
 	IncidentSubjectTypeNode    IncidentSubjectType = "node"
 	IncidentSubjectTypeService IncidentSubjectType = "service"
 	IncidentSubjectTypeTestRun IncidentSubjectType = "test_run"
@@ -1713,6 +1726,8 @@ func (e IncidentSubjectType) Valid() bool {
 	case IncidentSubjectTypeCluster:
 		return true
 	case IncidentSubjectTypeCron:
+		return true
+	case IncidentSubjectTypeCronJob:
 		return true
 	case IncidentSubjectTypeNode:
 		return true
@@ -4966,8 +4981,11 @@ type CronRun struct {
 	Id       openapi_types.UUID           `json:"id"`
 	JobId    openapi_types.UUID           `json:"job_id"`
 	JobName  string                       `json:"job_name"`
-	NodeId   openapi_types.UUID           `json:"node_id"`
-	Output   string                       `json:"output"`
+
+	// Live De uitvoer komt zo net van de node, want de run loopt nog
+	Live   bool               `json:"live"`
+	NodeId openapi_types.UUID `json:"node_id"`
+	Output string             `json:"output"`
 
 	// OutputHidden Een viewer ziet de uitvoer van een job als root niet
 	OutputHidden bool `json:"output_hidden"`
@@ -8831,28 +8849,36 @@ type LoginRequest struct {
 
 // ManagedCronJob defines model for ManagedCronJob.
 type ManagedCronJob struct {
-	ClusterEnvironment Environment                           `json:"cluster_environment"`
-	ClusterId          openapi_types.UUID                    `json:"cluster_id"`
-	ClusterName        string                                `json:"cluster_name"`
-	ClusterSlug        string                                `json:"cluster_slug"`
-	Command            string                                `json:"command"`
-	CreatedAt          time.Time                             `json:"created_at"`
-	Describe           string                                `json:"describe"`
-	Enabled            bool                                  `json:"enabled"`
-	Failures24h        int                                   `json:"failures_24h"`
-	Id                 openapi_types.UUID                    `json:"id"`
-	Name               string                                `json:"name"`
-	NextRun            nullable.Nullable[time.Time]          `json:"next_run"`
-	NodeHostname       string                                `json:"node_hostname"`
-	NodeId             nullable.Nullable[openapi_types.UUID] `json:"node_id"`
-	Nodes              []ManagedCronJobNode                  `json:"nodes"`
-	OnCalendar         string                                `json:"on_calendar"`
-	Revision           int                                   `json:"revision"`
-	RunOn              ManagedCronJobRunOn                   `json:"run_on"`
-	Schedule           string                                `json:"schedule"`
-	TimeoutSeconds     int                                   `json:"timeout_seconds"`
-	UpdatedAt          time.Time                             `json:"updated_at"`
-	User               string                                `json:"user"`
+	Alert              bool               `json:"alert"`
+	ClusterEnvironment Environment        `json:"cluster_environment"`
+	ClusterId          openapi_types.UUID `json:"cluster_id"`
+	ClusterName        string             `json:"cluster_name"`
+	ClusterSlug        string             `json:"cluster_slug"`
+	Command            string             `json:"command"`
+	CreatedAt          time.Time          `json:"created_at"`
+	Describe           string             `json:"describe"`
+	Enabled            bool               `json:"enabled"`
+	Failures24h        int                `json:"failures_24h"`
+	Id                 openapi_types.UUID `json:"id"`
+
+	// MissedAt Het laatste geplande moment, als de job toen niet draaide
+	MissedAt     nullable.Nullable[time.Time]          `json:"missed_at"`
+	Name         string                                `json:"name"`
+	NextRun      nullable.Nullable[time.Time]          `json:"next_run"`
+	NodeHostname string                                `json:"node_hostname"`
+	NodeId       nullable.Nullable[openapi_types.UUID] `json:"node_id"`
+	Nodes        []ManagedCronJobNode                  `json:"nodes"`
+	OnCalendar   string                                `json:"on_calendar"`
+	Retries      int                                   `json:"retries"`
+	Revision     int                                   `json:"revision"`
+	RunOn        ManagedCronJobRunOn                   `json:"run_on"`
+
+	// Running Op hoeveel nodes er nu een run loopt
+	Running        int       `json:"running"`
+	Schedule       string    `json:"schedule"`
+	TimeoutSeconds int       `json:"timeout_seconds"`
+	UpdatedAt      time.Time `json:"updated_at"`
+	User           string    `json:"user"`
 }
 
 // ManagedCronJobRunOn defines model for ManagedCronJob.RunOn.
@@ -8860,6 +8886,8 @@ type ManagedCronJobRunOn string
 
 // ManagedCronJobCreate defines model for ManagedCronJobCreate.
 type ManagedCronJobCreate struct {
+	// Alert Een mislukte run opent een incident
+	Alert     *bool              `json:"alert,omitempty"`
 	ClusterId openapi_types.UUID `json:"cluster_id"`
 	Command   string             `json:"command"`
 
@@ -8870,7 +8898,10 @@ type ManagedCronJobCreate struct {
 
 	// NodeId Alleen bij run_on node
 	NodeId nullable.Nullable[openapi_types.UUID] `json:"node_id,omitempty"`
-	RunOn  ManagedCronJobCreateRunOn             `json:"run_on"`
+
+	// Retries Hoe vaak een mislukte run herhaalt, met een minuut ertussen
+	Retries *int                      `json:"retries,omitempty"`
+	RunOn   ManagedCronJobCreateRunOn `json:"run_on"`
 
 	// Schedule Een cronregel met vijf velden of een @-woord, zoals 0 */6 * * *
 	Schedule       string `json:"schedule"`
@@ -8889,6 +8920,8 @@ type ManagedCronJobDetail struct {
 
 // ManagedCronJobInput defines model for ManagedCronJobInput.
 type ManagedCronJobInput struct {
+	// Alert Een mislukte run opent een incident
+	Alert   *bool  `json:"alert,omitempty"`
 	Command string `json:"command"`
 
 	// Confirm De slug van het cluster
@@ -8898,7 +8931,10 @@ type ManagedCronJobInput struct {
 
 	// NodeId Alleen bij run_on node
 	NodeId nullable.Nullable[openapi_types.UUID] `json:"node_id,omitempty"`
-	RunOn  ManagedCronJobInputRunOn              `json:"run_on"`
+
+	// Retries Hoe vaak een mislukte run herhaalt, met een minuut ertussen
+	Retries *int                     `json:"retries,omitempty"`
+	RunOn   ManagedCronJobInputRunOn `json:"run_on"`
 
 	// Schedule Een cronregel met vijf velden of een @-woord, zoals 0 */6 * * *
 	Schedule       string `json:"schedule"`
@@ -10683,6 +10719,11 @@ type RunCronJobJSONBody struct {
 	Confirm *string `json:"confirm,omitempty"`
 }
 
+// StopCronRunJSONBody defines parameters for StopCronRun.
+type StopCronRunJSONBody struct {
+	Confirm *string `json:"confirm,omitempty"`
+}
+
 // GetDatabaseMigrationParams defines parameters for GetDatabaseMigration.
 type GetDatabaseMigrationParams struct {
 	// Source De sleutel van de server onder Databases, zoals mariadb/<cluster>
@@ -11162,6 +11203,9 @@ type UpdateCronJobJSONRequestBody = ManagedCronJobInput
 // RunCronJobJSONRequestBody defines body for RunCronJob for application/json ContentType.
 type RunCronJobJSONRequestBody RunCronJobJSONBody
 
+// StopCronRunJSONRequestBody defines body for StopCronRun for application/json ContentType.
+type StopCronRunJSONRequestBody StopCronRunJSONBody
+
 // StartDatabaseMoveJSONRequestBody defines body for StartDatabaseMove for application/json ContentType.
 type StartDatabaseMoveJSONRequestBody = DatabaseMoveInput
 
@@ -11578,6 +11622,9 @@ type ServerInterface interface {
 	// GetCronRun Eén run met zijn uitvoer
 	// (GET /cron-runs/{runId})
 	GetCronRun(w http.ResponseWriter, r *http.Request, runId openapi_types.UUID)
+	// StopCronRun Een lopende run stoppen (admin)
+	// (POST /cron-runs/{runId}/stop)
+	StopCronRun(w http.ResponseWriter, r *http.Request, runId openapi_types.UUID)
 	// ListCronjobs De cronjobs en systemd-timers die de agents melden
 	// (GET /cronjobs)
 	ListCronjobs(w http.ResponseWriter, r *http.Request)
@@ -12586,6 +12633,12 @@ func (_ Unimplemented) RunCronJob(w http.ResponseWriter, r *http.Request, jobId 
 // GetCronRun Eén run met zijn uitvoer
 // (GET /cron-runs/{runId})
 func (_ Unimplemented) GetCronRun(w http.ResponseWriter, r *http.Request, runId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// StopCronRun Een lopende run stoppen (admin)
+// (POST /cron-runs/{runId}/stop)
+func (_ Unimplemented) StopCronRun(w http.ResponseWriter, r *http.Request, runId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -16342,6 +16395,32 @@ func (siw *ServerInterfaceWrapper) GetCronRun(w http.ResponseWriter, r *http.Req
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetCronRun(w, r, runId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// StopCronRun operation middleware
+func (siw *ServerInterfaceWrapper) StopCronRun(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "runId" -------------
+	var runId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "runId", chi.URLParam(r, "runId"), &runId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "runId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StopCronRun(w, r, runId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -21694,6 +21773,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/cron-runs/{runId}", wrapper.GetCronRun)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/cron-runs/{runId}/stop", wrapper.StopCronRun)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/cronjobs/refresh", wrapper.RefreshCronjobs)

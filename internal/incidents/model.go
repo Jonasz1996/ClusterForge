@@ -30,6 +30,8 @@ const (
 	SubjectApp = "app"
 	// SubjectCron is een cronjob op een node die mislukt.
 	SubjectCron = "cron"
+	// SubjectCronJob is een beheerde cronjob die mislukt.
+	SubjectCronJob = "cron_job"
 )
 
 // Rules zijn de tijden van de detector.
