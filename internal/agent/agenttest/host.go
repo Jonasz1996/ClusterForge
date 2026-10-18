@@ -458,8 +458,43 @@ func (h *Host) exec(name string, args []string) ([]byte, error) {
 		return h.pgRemoteQuery(args)
 	case "galera_recovery":
 		return h.galeraRecovery()
+	case "my_print_defaults", "mariadb-print-defaults":
+		return h.printDefaults()
 	}
 	return nil, fmt.Errorf("onbekend commando %s", name)
+}
+
+// printDefaults speelt my_print_defaults --mysqld na: de opties uit de
+// secties van mariadbd in /etc/mysql/conf.d en /etc/mysql/mariadb.conf.d,
+// in de volgorde waarin MariaDB ze leest.
+func (h *Host) printDefaults() ([]byte, error) {
+	var files []string
+	for _, dir := range []string{"etc/mysql/conf.d", "etc/mysql/mariadb.conf.d"} {
+		f, _ := filepath.Glob(filepath.Join(h.Root, dir, "*.cnf"))
+		files = append(files, f...)
+	}
+	var b strings.Builder
+	for _, f := range files {
+		data, err := os.ReadFile(f)
+		if err != nil {
+			continue
+		}
+		section := ""
+		for line := range strings.SplitSeq(string(data), "\n") {
+			line = strings.TrimSpace(line)
+			switch {
+			case line == "" || line[0] == '#':
+			case line[0] == '[':
+				section = strings.Trim(line, "[] ")
+			case section == "mysqld" || section == "galera" || section == "server" || section == "mariadb" || section == "mariadbd":
+				if k, v, ok := strings.Cut(line, "="); ok {
+					v, _, _ = strings.Cut(v, " #")
+					fmt.Fprintf(&b, "--%s=%s\n", strings.TrimSpace(k), strings.TrimSpace(v))
+				}
+			}
+		}
+	}
+	return []byte(b.String()), nil
 }
 
 // nftExec speelt nft -f <script> en nft delete table inet cf_fault na.

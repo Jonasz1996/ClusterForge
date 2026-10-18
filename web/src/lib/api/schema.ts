@@ -3344,6 +3344,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/heal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Zelfherstel per database
+         * @description Wat er mis is met elke MariaDB-, MySQL- en PostgreSQL-database op de nodes, ook als ClusterForge haar niet toepaste,
+         *     met het herstelplan en of dat vanzelf mag. Elke minuut vraagt ClusterForge elke node met een databaseserver
+         *     heal inspect (agentprotocol 22): units, processen, vrije ruimte en de Galera-config. Ook voor viewers.
+         */
+        get: operations["listHeal"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/cronjobs": {
         parameters: {
             query?: never;
@@ -5843,6 +5865,63 @@ export interface components {
             failures: number;
             /** Format: date-time */
             next_run: string | null;
+        };
+        /** @description Zelfherstel voor één database; key is die van DatabaseGroup. */
+        HealReport: {
+            key: string;
+            /** Format: uuid */
+            cluster_id: string | null;
+            cluster_name: string;
+            cluster_slug: string;
+            cluster_environment: components["schemas"]["Environment"] | null;
+            /** @enum {string} */
+            engine: "mariadb" | "postgresql";
+            kind: string;
+            health: string;
+            problems: components["schemas"]["HealProblem"][];
+            plan: components["schemas"]["HealPlan"] | null;
+        };
+        HealProblem: {
+            /**
+             * @description no_inspect, unit_stopped, process_hung, process_outside_unit, unit_disabled, galera_wrong_address,
+             *     galera_no_primary, disk_full of no_quorum.
+             */
+            code: string;
+            /** @enum {string} */
+            level: "down" | "warning";
+            title: string;
+            why: string;
+            nodes: string[];
+        };
+        HealPlan: {
+            /** @description restart (gestopte servers starten), galera (adressen bijwerken en/of het cluster opnieuw beginnen), of leeg als het herstel bij het onderdeel hoort. */
+            action: string;
+            steps: string[];
+            nodes: components["schemas"]["HealPlanNode"][];
+            /** @description Het plan mag vanzelf, als Zelfherstel op het cluster vanzelf mag. */
+            auto: boolean;
+            auto_why: string;
+            /** @description Waarom het plan nu niet kan; leeg als het kan. */
+            blocked: string;
+            /** Format: uuid */
+            managed_component_id: string | null;
+            hash: string;
+        };
+        HealPlanNode: {
+            /** Format: uuid */
+            node_id: string;
+            hostname: string;
+            unit: string;
+            start: boolean;
+            kill: boolean;
+            kill_pids: number[];
+            primary: boolean;
+            set_address: boolean;
+            old_cluster_address: string;
+            cluster_address: string;
+            old_node_address: string;
+            node_address: string;
+            file: string;
         };
         /** @description Eén databasecluster, de servers van één engine in één cluster, of één losse node. */
         DatabaseGroup: {
@@ -15756,6 +15835,29 @@ export interface operations {
                 content: {
                     "application/json": {
                         items: components["schemas"]["DatabaseGroup"][];
+                    };
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    listHeal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["HealReport"][];
                     };
                 };
             };

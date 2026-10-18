@@ -30,6 +30,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/failover"
 	"github.com/Jonasz1996/clusterforge/internal/gitops"
+	"github.com/Jonasz1996/clusterforge/internal/heal"
 	"github.com/Jonasz1996/clusterforge/internal/httpapi/gen"
 	"github.com/Jonasz1996/clusterforge/internal/inventory"
 	"github.com/Jonasz1996/clusterforge/internal/jobs"
@@ -80,6 +81,7 @@ type Server struct {
 	kube         *kube.Service
 	databases    *databases.Service
 	cronjobs     *cronjobs.Service
+	heal         *heal.Service
 	components   *components.Service
 	kubeNodes    *kubenodes.Service
 	lessons      *kubelessons.Engine
@@ -146,6 +148,9 @@ type Deps struct {
 	// Databases leest de MariaDB- en PostgreSQL-servers op de nodes.
 	Databases *databases.Service
 	Cronjobs  *cronjobs.Service
+	// Heal is Zelfherstel: problemen met de databases vaststellen en
+	// herstellen.
+	Heal *heal.Service
 	// Components zet een database op de nodes van een cluster.
 	Components *components.Service
 	Version    string
@@ -194,6 +199,7 @@ func New(d Deps) *Server {
 		kube:           d.Kube,
 		databases:      d.Databases,
 		cronjobs:       d.Cronjobs,
+		heal:           d.Heal,
 		components:     d.Components,
 		kubeNodes:      d.KubeNodes,
 	}

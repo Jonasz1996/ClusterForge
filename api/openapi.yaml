@@ -3531,6 +3531,25 @@ paths:
                 properties:
                   items: { type: array, items: { $ref: "#/components/schemas/DatabaseGroup" } }
         "401": { $ref: "#/components/responses/Error" }
+  /heal:
+    get:
+      operationId: listHeal
+      summary: Zelfherstel per database
+      description: |
+        Wat er mis is met elke MariaDB-, MySQL- en PostgreSQL-database op de nodes, ook als ClusterForge haar niet toepaste,
+        met het herstelplan en of dat vanzelf mag. Elke minuut vraagt ClusterForge elke node met een databaseserver
+        heal inspect (agentprotocol 22): units, processen, vrije ruimte en de Galera-config. Ook voor viewers.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/HealReport" } }
+        "401": { $ref: "#/components/responses/Error" }
   /cronjobs:
     get:
       operationId: listCronjobs
@@ -6128,6 +6147,70 @@ components:
         runs: { type: integer, description: Runs in de laatste 24 uur }
         failures: { type: integer, description: Mislukte runs in de laatste 24 uur }
         next_run: { type: string, format: date-time, nullable: true }
+    HealReport:
+      type: object
+      description: Zelfherstel voor één database; key is die van DatabaseGroup.
+      required: [key, cluster_id, cluster_name, cluster_slug, cluster_environment, engine, kind, health, problems, plan]
+      properties:
+        key: { type: string }
+        cluster_id: { type: string, format: uuid, nullable: true }
+        cluster_name: { type: string }
+        cluster_slug: { type: string }
+        cluster_environment:
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/Environment" }]
+        engine: { type: string, enum: [mariadb, postgresql] }
+        kind: { type: string }
+        health: { type: string }
+        problems: { type: array, items: { $ref: "#/components/schemas/HealProblem" } }
+        plan:
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/HealPlan" }]
+    HealProblem:
+      type: object
+      required: [code, level, title, why, nodes]
+      properties:
+        code:
+          type: string
+          description: |
+            no_inspect, unit_stopped, process_hung, process_outside_unit, unit_disabled, galera_wrong_address,
+            galera_no_primary, disk_full of no_quorum.
+        level: { type: string, enum: [down, warning] }
+        title: { type: string }
+        why: { type: string }
+        nodes: { type: array, items: { type: string } }
+    HealPlan:
+      type: object
+      required: [action, steps, nodes, auto, auto_why, blocked, managed_component_id, hash]
+      properties:
+        action:
+          type: string
+          description: restart (gestopte servers starten), galera (adressen bijwerken en/of het cluster opnieuw beginnen), of leeg als het herstel bij het onderdeel hoort.
+        steps: { type: array, items: { type: string } }
+        nodes: { type: array, items: { $ref: "#/components/schemas/HealPlanNode" } }
+        auto: { type: boolean, description: "Het plan mag vanzelf, als Zelfherstel op het cluster vanzelf mag." }
+        auto_why: { type: string }
+        blocked: { type: string, description: "Waarom het plan nu niet kan; leeg als het kan." }
+        managed_component_id: { type: string, format: uuid, nullable: true }
+        hash: { type: string }
+    HealPlanNode:
+      type: object
+      required: [node_id, hostname, unit, start, kill, kill_pids, primary, set_address, old_cluster_address, cluster_address,
+        old_node_address, node_address, file]
+      properties:
+        node_id: { type: string, format: uuid }
+        hostname: { type: string }
+        unit: { type: string }
+        start: { type: boolean }
+        kill: { type: boolean }
+        kill_pids: { type: array, items: { type: integer } }
+        primary: { type: boolean }
+        set_address: { type: boolean }
+        old_cluster_address: { type: string }
+        cluster_address: { type: string }
+        old_node_address: { type: string }
+        node_address: { type: string }
+        file: { type: string }
     DatabaseGroup:
       type: object
       description: Eén databasecluster, de servers van één engine in één cluster, of één losse node.
