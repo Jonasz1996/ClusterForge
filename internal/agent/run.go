@@ -93,6 +93,9 @@ type Agent struct {
 	faults  *Faults
 	kube    *kubeBridge
 	db      *dbState
+	// cronMu bewaakt cron, wat de agent uit de journal over cron las.
+	cronMu sync.Mutex
+	cron   *cronLog
 }
 
 // Connect verbindt met NATS. Is de server nog niet bereikbaar, dan blijft de
@@ -172,7 +175,10 @@ func (a *Agent) Connect() error {
 	if _, err = a.nc.Subscribe(protocol.Subject(a.Config.NodeID, protocol.SubjectKube), a.onKube); err != nil {
 		return err
 	}
-	_, err = a.nc.Subscribe(protocol.Subject(a.Config.NodeID, protocol.SubjectDB), a.onDB)
+	if _, err = a.nc.Subscribe(protocol.Subject(a.Config.NodeID, protocol.SubjectDB), a.onDB); err != nil {
+		return err
+	}
+	_, err = a.nc.Subscribe(protocol.Subject(a.Config.NodeID, protocol.SubjectCron), a.onCron)
 	return err
 }
 

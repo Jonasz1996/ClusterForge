@@ -88,6 +88,16 @@ Het technisch ontwerp staat in [docs/design/mvp-fase-1.md](docs/design/mvp-fase-
 | 14. Het oude cluster afbouwen | Een verhuisde database blijft op slot op het oude cluster staan. Zeven dagen nadat niemand van buiten de databasenode er nog mee verbond, kan **[Oude database afbouwen](#het-oude-cluster-afbouwen)**: een laatste dump op een node van het oude cluster, die blijft staan tot je hem weghaalt, en daarna de database en de gebruikers die niets anders hebben weghalen, met de naam ter bevestiging (op prod ook de slug en tweestapsverificatie). Bovenaan de pagina Databases staat per oude server wat er nog op staat, met de melding als db1 tot db3 leeg zijn, en welke firewallregel van een app naar het oude cluster weg kan. ClusterForge verwijdert geen nodes en beheert de firewall niet. Getest met een echte MariaDB 10.11 en PostgreSQL 16 | klaar |
 | 15. Score, documentatie en assistent | Een scorekaart **Database** bij de health score, voor elk cluster met een databaseserver op zijn nodes: geen HA, een node die niet meedoet of een replica die achterloopt, twee databasenodes op dezelfde Proxmox-host, te weinig vrij geheugen, dumps die uit staan of ouder zijn dan een dag, Galera-tabellen zonder primaire sleutel of buiten InnoDB (de nachtelijke dump legt ze vast), geen geslaagde failovertest in 90 dagen, een database die meer dan één cluster gebruikt, en een verhuisde database die na 30 dagen nog niet afgebouwd is. Een hoofdstuk **Database** in de documentatie per cluster met de engine en versie, de nodes, het VIP, de databases met grootte, gebruikers en dumps, en runbooks voor opnieuw starten, een node opnieuw synchroniseren, een dump terugzetten, overschakelen en verhuizen. Twee tools voor de [assistent](#assistent-bij-databases) die alleen lezen: **database** met de toestand van een onderdeel, en **database_clients** met wie welke database gebruikt; de analyse van een incident op een cluster met een database kijkt daar ook naar | klaar |
 
+| Fase 6: cronjobs en bestandssync | Inhoud | Status |
+| --- | --- | --- |
+| 1. Cronjobs lezen | cf-agent leest elke cronjob en systemd-timer op de node (agentprotocol 16): `/etc/crontab`, `/etc/cron.d`, de crontabs van gebruikers, `cron.hourly` tot `cron.monthly` en de timers, met de laatste run uit de journal; wachtwoorden in commando's worden op de node al gemaskeerd. Een pagina **[Cronjobs](#cronjobs)** met per cluster elke job één keer, het schema in gewone taal, de volgende run, op welke nodes hij staat (en waar niet) en hoe de laatste run ging; een kaart Cronjobs op de pagina van een node. Een job die bijkomt, verdwijnt of verandert, staat in het logboek en in What Broke | klaar |
+| 2. Verschillen, waarschuwingen en fouten | Jobs die per node verschillen, waarschuwingen naast een onderdeel van ClusterForge, en een incident bij een job die faalt | gepland |
+| 3. Beheerde cronjobs | Eigen cronjobs in ClusterForge op de node met het VIP, een vaste node of alle nodes, met runs en uitvoer | gepland |
+| 4. Opvolgen | Live uitvoer, stoppen, herhalen, incidenten en de clusterstatus | gepland |
+| 5. Overnemen | Een bestaande cronjob met één knop beheerd maken | gepland |
+| 6. Bestandssync | rsync van de node met het VIP naar de andere nodes of een ander cluster, met proefrun | gepland |
+| 7. Documentatie en assistent | Het hoofdstuk Cronjobs en de assistent | gepland |
+
 ## Draaien met Docker Compose
 
 Stap voor stap in een Debian-container op Proxmox: [docs/install-proxmox-lxc.md](docs/install-proxmox-lxc.md). Daar staan ook [back-up en herstel van ClusterForge zelf](docs/install-proxmox-lxc.md#back-up-en-herstel-van-clusterforge-zelf) en [bijwerken](docs/install-proxmox-lxc.md#bijwerken). `docker compose ps` toont de server als `healthy` zodra hij antwoordt (`clusterforge-server healthcheck`).
@@ -1176,6 +1186,25 @@ curl -fsSL https://clusterforge.example/install/agent.sh | sudo sh -s -- --serve
 ```
 
 Bouw ook je golden image opnieuw met `golden-image.sh --replace`, anders krijgen nieuwe VM's de oude agent. De rest van ClusterForge blijft werken met een oudere agent. Het plan voor de hele fase staat in [docs/design/fase-5.md](docs/design/fase-5.md) (PR #57).
+
+## Cronjobs
+
+Het menu **Cronjobs** toont elke cronjob en systemd-timer op je nodes, per cluster. ClusterForge leest ze elke vijf minuten via de agent, of meteen met **Nu opnieuw lezen**:
+
+- `/etc/crontab` en de bestanden in `/etc/cron.d` (met de gebruiker uit de regel);
+- de crontabs van gebruikers, zoals `crontab -e` ze maakt (`/var/spool/cron/crontabs`);
+- de scripts in `/etc/cron.hourly`, `daily`, `weekly` en `monthly`;
+- elke systemd-timer met de service die hij start.
+
+Dezelfde job op meer nodes van een cluster staat er één keer, met per node de laatste run; staat hij niet op elke node, dan zegt de lijst waar hij ontbreekt. Het schema staat in gewone taal ("elke 6 uur, op minuut 0", "op werkdagen, om 04:00") met de volgende run. Jobs van Debian-pakketten, zoals `logrotate` of `apt-daily`, zijn standaard verborgen. De pagina van een node heeft een kaart Cronjobs met alleen de jobs van die node.
+
+**De laatste run.** Bij een timer zegt systemd wanneer hij liep, hoe lang en met welke exitcode. Bij cron leest de agent de journal: cron logt standaard alleen dat een job start, dus staat er **Gestart**. Start je cron met `-L 15`, dan logt hij ook het einde en de exitcode, en zegt ClusterForge **Gelukt** of **Mislukt**, met hoe vaak een job de laatste 24 uur mislukte.
+
+**Wachtwoorden.** De agent maskeert wachtwoorden in commando's voordat ze de node verlaten: `-pGeheim` van mysql en mariadb-dump, `--password=`, `PASSWORD=` en `PGPASSWORD=`, een gebruiker met wachtwoord in een URL, en een `Authorization`-header. Beter is natuurlijk een bestand met het wachtwoord op de node, zoals `~/.my.cnf`.
+
+**Wijzigingen.** Komt er een job bij, verdwijnt er een of verandert het schema of commando, dan staat dat in het logboek en in [What Broke](#what-broke), zoals "Cronjob op nc1 gewijzigd in /etc/cron.d/nextcloud-sync: schema 0 */4 * * *, was 0 */6 * * *".
+
+Dit kan vanaf **agentprotocol 16**. Met een oudere agent toont de pagina het commando om hem bij te werken; de andere onderdelen blijven werken.
 
 ## Failovertests
 

@@ -598,6 +598,22 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 			return "VIP " + name + " ligt nu op " + owner
 		}
 		return fmt.Sprintf("VIP %s verhuisd van %s naar %s", name, old, owner)
+	case "node.cron_added":
+		return fmt.Sprintf("Cronjob op %s verschenen in %s: %s %s", name, str(p, "file"), str(p, "schedule"), str(p, "command"))
+	case "node.cron_removed":
+		return fmt.Sprintf("Cronjob op %s verdwenen uit %s: %s %s", name, str(p, "file"), str(p, "schedule"), str(p, "command"))
+	case "node.cron_changed":
+		if c := num(p["count"]); c != "" && c != "0" {
+			return fmt.Sprintf("%s cronjobs op %s gewijzigd%s", c, name, colon(list(p["files"])))
+		}
+		s := fmt.Sprintf("Cronjob op %s gewijzigd in %s", name, str(p, "file"))
+		if str(p, "old_schedule") != str(p, "schedule") {
+			s += fmt.Sprintf(": schema %s, was %s", str(p, "schedule"), str(p, "old_schedule"))
+		}
+		if str(p, "old_command") != str(p, "command") {
+			s += fmt.Sprintf("; commando %s", str(p, "command"))
+		}
+		return s
 	case "node.facts_changed":
 		if b, _ := p["first"].(bool); b {
 			return "Eerste facts van " + name + " ontvangen"

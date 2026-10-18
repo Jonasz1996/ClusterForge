@@ -15,6 +15,7 @@ import { NodeForm } from "@/components/inventory/NodeForm";
 import { NodeLifecycleCard } from "@/components/inventory/NodeLifecycleCard";
 import { NodeProxmoxCard } from "@/components/proxmox/NodeProxmoxCard";
 import { NodeChangesCard } from "@/components/journal/Changes";
+import { NodeCronCard } from "@/components/cron/Cron";
 import {
   AgentBadge,
   ago,
@@ -190,6 +191,7 @@ function NodeDetailInner() {
           {runtime.data?.facts && <FactsView facts={runtime.data.facts} runtime={runtime.data} />}
           {isAdmin && node.data.agent && <NodeConnectionsCard nodeId={id} />}
           {node.data.agent && <NodeChangesCard nodeId={id} />}
+          {node.data.agent && <NodeCronCard nodeId={id} />}
           <HistoryCard filter={{ node: id }} isAdmin={isAdmin} />
         </div>
       )}

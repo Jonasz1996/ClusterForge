@@ -516,6 +516,60 @@ func (e ComponentUpgradePlanEngine) Valid() bool {
 	}
 }
 
+// Defines values for CronJobSource.
+const (
+	CronJobSourceCronD    CronJobSource = "cron.d"
+	CronJobSourceCrontab  CronJobSource = "crontab"
+	CronJobSourcePeriodic CronJobSource = "periodic"
+	CronJobSourceTimer    CronJobSource = "timer"
+	CronJobSourceUser     CronJobSource = "user"
+)
+
+// Valid indicates whether the value is a known member of the CronJobSource enum.
+func (e CronJobSource) Valid() bool {
+	switch e {
+	case CronJobSourceCronD:
+		return true
+	case CronJobSourceCrontab:
+		return true
+	case CronJobSourcePeriodic:
+		return true
+	case CronJobSourceTimer:
+		return true
+	case CronJobSourceUser:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CronJobNodeLastResult.
+const (
+	CronJobNodeLastResultEmpty   CronJobNodeLastResult = ""
+	CronJobNodeLastResultFailed  CronJobNodeLastResult = "failed"
+	CronJobNodeLastResultOk      CronJobNodeLastResult = "ok"
+	CronJobNodeLastResultRunning CronJobNodeLastResult = "running"
+	CronJobNodeLastResultStarted CronJobNodeLastResult = "started"
+)
+
+// Valid indicates whether the value is a known member of the CronJobNodeLastResult enum.
+func (e CronJobNodeLastResult) Valid() bool {
+	switch e {
+	case CronJobNodeLastResultEmpty:
+		return true
+	case CronJobNodeLastResultFailed:
+		return true
+	case CronJobNodeLastResultOk:
+		return true
+	case CronJobNodeLastResultRunning:
+		return true
+	case CronJobNodeLastResultStarted:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for DRSchedule.
 const (
 	DRScheduleEmpty   DRSchedule = ""
@@ -4598,6 +4652,105 @@ type ComponentVIP struct {
 
 	// Vrid Het VRRP-id van een eigen VIP; 0 bij het VIP van de app
 	Vrid int `json:"vrid"`
+}
+
+// CronGroup De cronjobs van één cluster, of van de nodes zonder cluster.
+type CronGroup struct {
+	ClusterEnvironment nullable.Nullable[Environment]        `json:"cluster_environment"`
+	ClusterId          nullable.Nullable[openapi_types.UUID] `json:"cluster_id"`
+	ClusterName        string                                `json:"cluster_name"`
+	ClusterSlug        string                                `json:"cluster_slug"`
+	Jobs               []CronJob                             `json:"jobs"`
+
+	// Key Uniek per groep, voor de webinterface
+	Key   string         `json:"key"`
+	Nodes []CronNodeRead `json:"nodes"`
+}
+
+// CronJob Eén cronjob of timer, met de nodes waarop hij staat.
+type CronJob struct {
+	// Clusterforge Een job die ClusterForge zelf beheert
+	Clusterforge bool `json:"clusterforge"`
+
+	// Command Gemaskeerd
+	Command string `json:"command"`
+
+	// Describe Het schema in gewone taal; leeg als ClusterForge het niet kan lezen
+	Describe    string `json:"describe"`
+	Description string `json:"description"`
+
+	// File Het bestand
+	File string `json:"file"`
+
+	// Key Dezelfde voor dezelfde job op elke node
+	Key     string                       `json:"key"`
+	Line    int                          `json:"line"`
+	NextRun nullable.Nullable[time.Time] `json:"next_run"`
+	Nodes   []CronJobNode                `json:"nodes"`
+
+	// Package Het Debian-pakket van het bestand; leeg voor wat Jonas zelf maakte
+	Package string `json:"package"`
+
+	// Schedule Vijf velden, een @-woord, hourly/daily/weekly/monthly, of de OnCalendar van een timer
+	Schedule string `json:"schedule"`
+
+	// Source /etc/crontab, /etc/cron.d, de crontab van een gebruiker, cron.hourly/daily/weekly/monthly, of een systemd-timer
+	Source CronJobSource `json:"source"`
+
+	// Unit De service van een timer
+	Unit string `json:"unit"`
+	User string `json:"user"`
+}
+
+// CronJobSource /etc/crontab, /etc/cron.d, de crontab van een gebruiker, cron.hourly/daily/weekly/monthly, of een systemd-timer
+type CronJobSource string
+
+// CronJobNode defines model for CronJobNode.
+type CronJobNode struct {
+	Enabled bool `json:"enabled"`
+
+	// Failures Mislukte runs in de laatste 24 uur
+	Failures int                          `json:"failures"`
+	Hostname string                       `json:"hostname"`
+	LastEnd  nullable.Nullable[time.Time] `json:"last_end"`
+	LastExit nullable.Nullable[int]       `json:"last_exit"`
+
+	// LastResult started: cron logde de start maar niet de uitkomst (cron zonder -L 15)
+	LastResult CronJobNodeLastResult        `json:"last_result"`
+	LastRun    nullable.Nullable[time.Time] `json:"last_run"`
+	NextRun    nullable.Nullable[time.Time] `json:"next_run"`
+	NodeId     openapi_types.UUID           `json:"node_id"`
+
+	// Runs Runs in de laatste 24 uur
+	Runs int `json:"runs"`
+}
+
+// CronJobNodeLastResult started: cron logde de start maar niet de uitkomst (cron zonder -L 15)
+type CronJobNodeLastResult string
+
+// CronNodeRead defines model for CronNodeRead.
+type CronNodeRead struct {
+	// Daemon cron, cronie of leeg als er geen cron draait
+	Daemon string `json:"daemon"`
+	Error  string `json:"error"`
+
+	// ErrorKind Waarom ClusterForge het de agent niet kon vragen: old_agent, offline, no_answer of agent; leeg als hij antwoordde
+	ErrorKind string `json:"error_kind"`
+	Hostname  string `json:"hostname"`
+
+	// Journal De agent kon de journal lezen
+	Journal bool `json:"journal"`
+
+	// Logging cron logt einde en exitcode (-L 15)
+	Logging bool               `json:"logging"`
+	NodeId  openapi_types.UUID `json:"node_id"`
+
+	// OkAt Wanneer de agent het laatst antwoordde
+	OkAt     nullable.Nullable[time.Time] `json:"ok_at"`
+	SyncedAt time.Time                    `json:"synced_at"`
+
+	// Truncated De node had meer dan 1000 jobs; de rest ontbreekt
+	Truncated bool `json:"truncated"`
 }
 
 // DRPlan defines model for DRPlan.
@@ -11000,6 +11153,12 @@ type ServerInterface interface {
 	// ListComponentTemplates De databases die ClusterForge op de nodes van een cluster kan zetten, met hun instellingen
 	// (GET /component-templates)
 	ListComponentTemplates(w http.ResponseWriter, r *http.Request)
+	// ListCronjobs De cronjobs en systemd-timers die de agents melden
+	// (GET /cronjobs)
+	ListCronjobs(w http.ResponseWriter, r *http.Request)
+	// RefreshCronjobs De cronjobs van alle nodes meteen opnieuw lezen
+	// (POST /cronjobs/refresh)
+	RefreshCronjobs(w http.ResponseWriter, r *http.Request)
 	// ListDatabases De MariaDB- en PostgreSQL-servers die de agents melden
 	// (GET /databases)
 	ListDatabases(w http.ResponseWriter, r *http.Request)
@@ -11951,6 +12110,18 @@ func (_ Unimplemented) CreateVip(w http.ResponseWriter, r *http.Request, cluster
 // ListComponentTemplates De databases die ClusterForge op de nodes van een cluster kan zetten, met hun instellingen
 // (GET /component-templates)
 func (_ Unimplemented) ListComponentTemplates(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListCronjobs De cronjobs en systemd-timers die de agents melden
+// (GET /cronjobs)
+func (_ Unimplemented) ListCronjobs(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RefreshCronjobs De cronjobs van alle nodes meteen opnieuw lezen
+// (POST /cronjobs/refresh)
+func (_ Unimplemented) RefreshCronjobs(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -15482,6 +15653,34 @@ func (siw *ServerInterfaceWrapper) ListComponentTemplates(w http.ResponseWriter,
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListComponentTemplates(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListCronjobs operation middleware
+func (siw *ServerInterfaceWrapper) ListCronjobs(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListCronjobs(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RefreshCronjobs operation middleware
+func (siw *ServerInterfaceWrapper) RefreshCronjobs(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RefreshCronjobs(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -20750,6 +20949,12 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/databases", wrapper.ListDatabases)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/cronjobs", wrapper.ListCronjobs)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/cronjobs/refresh", wrapper.RefreshCronjobs)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/databases/migration", wrapper.GetDatabaseMigration)

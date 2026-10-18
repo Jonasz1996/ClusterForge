@@ -190,7 +190,8 @@ func eventKind(action string) string {
 	case action == "node.lifecycle_changed":
 		return "lifecycle"
 	case action == "cluster.updated" || action == "cluster.deployed" || action == "cluster.spec_changed" ||
-		action == "secret.created" || action == "node.updated" || prefix == "vip" || prefix == "kube":
+		action == "secret.created" || action == "node.updated" || prefix == "vip" || prefix == "kube" ||
+		strings.HasPrefix(action, "node.cron_"):
 		return "config"
 	case prefix == "agent" || prefix == "enrollment_token" || action == "node.facts_changed":
 		return "agent"
