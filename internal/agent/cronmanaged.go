@@ -58,16 +58,25 @@ func validManagedCron(j protocol.ManagedCron) error {
 		return fmt.Errorf("job %s: ongeldige naam of schema", j.ID)
 	case !cronUser.MatchString(j.User):
 		return fmt.Errorf("job %s: ongeldige gebruiker %q", j.ID, j.User)
+	case j.Kind == protocol.CronKindSync:
+		if err := validSync(j); err != nil {
+			return err
+		}
+	case j.Kind != "" && j.Kind != protocol.CronKindCommand:
+		return fmt.Errorf("job %s: onbekende soort %q", j.ID, j.Kind)
 	case strings.TrimSpace(j.Command) == "":
 		return fmt.Errorf("job %s: geen commando", j.ID)
+	}
+	switch {
 	case j.RunOn != protocol.CronOnVIP && j.RunOn != protocol.CronOnNode && j.RunOn != protocol.CronOnAll:
 		return fmt.Errorf("job %s: onbekend run_on %q", j.ID, j.RunOn)
 	}
 	return nil
 }
 
-// cronApply zet de set beheerde jobs van de node.
-func (a *Agent) cronApply(ctx context.Context, jobs []protocol.ManagedCron) protocol.CronResponse {
+// cronApply zet de set beheerde jobs van de node, en wat hij voor syncs
+// nodig heeft.
+func (a *Agent) cronApply(ctx context.Context, jobs []protocol.ManagedCron, receives []protocol.SyncReceive) protocol.CronResponse {
 	res := protocol.CronResponse{Entries: []protocol.CronEntry{}}
 	fail := func(err error) protocol.CronResponse {
 		res.Error = err.Error()
@@ -198,7 +207,12 @@ func (a *Agent) cronApply(ctx context.Context, jobs []protocol.ManagedCron) prot
 			res.Output = append(res.Output, fmt.Sprintf("job %s (%s) staat uit", j.Name, id))
 		}
 	}
-	res.Hash = protocol.CronSetHash(jobs)
+	syncOut, err := a.syncState(jobs, receives)
+	if err != nil {
+		return fail(err)
+	}
+	res.Output = append(res.Output, syncOut...)
+	res.Hash = protocol.CronApplyHash(jobs, receives)
 	return res
 }
 

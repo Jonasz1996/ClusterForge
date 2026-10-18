@@ -3493,6 +3493,48 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/cron-jobs/{jobId}/plan": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Wat een bestandssync nodig heeft, per node gecontroleerd (admin)
+         * @description Vraagt elke bron en elk doel naar rsync, ssh, sshd, PermitRootLogin, de hostsleutels en de vrije ruimte in de doelmap.
+         *     Vraagt agentprotocol 21.
+         */
+        get: operations["getCronSyncPlan"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/cron-jobs/{jobId}/dry-run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Een bestandssync als proef draaien naar één doel (admin)
+         * @description rsync --dry-run --itemize-changes vanaf de bron die de sync nu zou draaien; er verandert niets. Elke regel is een bestand
+         *     dat zou veranderen, zoals ">f+++++++++ map/bestand" (nieuw) of "*deleting oud" (weg, alleen met verwijderen aan).
+         */
+        post: operations["dryRunCronSync"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/cron-runs/{runId}": {
         parameters: {
             query?: never;
@@ -5532,8 +5574,76 @@ export interface components {
             retries?: number;
             /** @description Een mislukte run opent een incident */
             alert?: boolean;
+            /**
+             * @description Een commando of een bestandssync; alleen bij het maken, daarna verandert het niet
+             * @enum {string}
+             */
+            kind?: "command" | "sync";
+            sync?: components["schemas"]["ManagedCronSyncInput"];
             /** @description De slug van het cluster */
             confirm?: string;
+        };
+        /** @description Een bestandssync met rsync over SSH, van de node met het VIP (of één node) naar de doelen. Command blijft leeg. */
+        ManagedCronSyncInput: {
+            /** @description De map op de bron, zoals /var/www/nextcloud/data/ */
+            source: string;
+            /** @description De map op elk doel; leeg is dezelfde map */
+            target?: string;
+            /**
+             * Format: uuid
+             * @description Leeg: de andere nodes van het eigen cluster
+             */
+            to_cluster_id?: string | null;
+            /** @description Bestanden op het doel weghalen die op de bron weg zijn */
+            delete?: boolean;
+            /** @description Patronen zoals *.part */
+            exclude?: string[];
+            /** @description Bandbreedte in MB/s; 0 is onbeperkt */
+            bwlimit_mb?: number;
+        };
+        ManagedCronSync: {
+            source: string;
+            target: string;
+            /** Format: uuid */
+            to_cluster_id: string | null;
+            /** @description Leeg bij een sync binnen het eigen cluster */
+            to_cluster_name: string;
+            delete: boolean;
+            exclude: string[];
+            bwlimit_mb: number;
+        };
+        CronSyncResult: {
+            /** Format: uuid */
+            node_id: string;
+            hostname: string;
+            /**
+             * @description refused: het doel heeft het VIP van zijn cluster of de sync mag dat niet
+             * @enum {string}
+             */
+            result: "ok" | "failed" | "refused";
+            exit: number;
+            files: number;
+            /** Format: int64 */
+            bytes: number;
+            deleted: number;
+            error: string;
+        };
+        CronSyncPlan: {
+            notes: string[];
+            nodes: {
+                /** Format: uuid */
+                node_id: string;
+                hostname: string;
+                /** @description bron, doel, of bron en doel */
+                role: string;
+                address: string;
+                ok: boolean;
+                checks: {
+                    name: string;
+                    ok: boolean;
+                    text: string;
+                }[];
+            }[];
         };
         ManagedCronJobCreate: components["schemas"]["ManagedCronJobInput"] & {
             /** Format: uuid */
@@ -5572,6 +5682,9 @@ export interface components {
             running: number;
             retries: number;
             alert: boolean;
+            /** @enum {string} */
+            kind: "command" | "sync";
+            sync: components["schemas"]["ManagedCronSync"] | null;
             failures_24h: number;
             nodes: components["schemas"]["ManagedCronJobNode"][];
             /** Format: date-time */
@@ -5595,6 +5708,8 @@ export interface components {
             /** Format: uuid */
             node_id: string;
             hostname: string;
+            /** @description Bij een sync de uitkomst per doel */
+            sync: components["schemas"]["CronSyncResult"][];
             /** @enum {string} */
             reason: "schedule" | "manual" | "retry";
             /** @enum {string} */
@@ -15930,6 +16045,74 @@ export interface operations {
                     };
                 };
             };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+        };
+    };
+    getCronSyncPlan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                jobId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CronSyncPlan"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    dryRunCronSync: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                jobId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /**
+                     * Format: uuid
+                     * @description De node-id van het doel
+                     */
+                    target: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** @description De bron die de proef draaide */
+                        source: string;
+                        lines: string[];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];

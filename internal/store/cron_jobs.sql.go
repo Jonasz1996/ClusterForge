@@ -82,10 +82,12 @@ func (q *Queries) DeleteOldCronRuns(ctx context.Context) (int64, error) {
 }
 
 const getCronJob = `-- name: GetCronJob :one
-SELECT j.id, j.cluster_id, j.name, j.kind, j.schedule, j.run_on, j.node_id, j.user_name, j.command, j.timeout_seconds, j.enabled, j.revision, j.created_by, j.created_at, j.updated_at, j.retries, j.alert, c.name AS cluster_name, c.slug AS cluster_slug, c.environment AS cluster_environment, n.hostname AS node_hostname
+SELECT j.id, j.cluster_id, j.name, j.kind, j.schedule, j.run_on, j.node_id, j.user_name, j.command, j.timeout_seconds, j.enabled, j.revision, j.created_by, j.created_at, j.updated_at, j.retries, j.alert, j.sync_source, j.sync_target, j.sync_to_cluster, j.sync_delete, j.sync_exclude, j.sync_bwlimit_mb, c.name AS cluster_name, c.slug AS cluster_slug, c.environment AS cluster_environment, n.hostname AS node_hostname,
+       coalesce(tc.name, '')::text AS sync_to_cluster_name
 FROM cron_jobs j
 JOIN clusters c ON c.id = j.cluster_id
 LEFT JOIN nodes n ON n.id = j.node_id
+LEFT JOIN clusters tc ON tc.id = j.sync_to_cluster
 WHERE j.id = $1
 `
 
@@ -107,10 +109,17 @@ type GetCronJobRow struct {
 	UpdatedAt          time.Time
 	Retries            int32
 	Alert              bool
+	SyncSource         string
+	SyncTarget         string
+	SyncToCluster      *uuid.UUID
+	SyncDelete         bool
+	SyncExclude        []string
+	SyncBwlimitMb      int32
 	ClusterName        string
 	ClusterSlug        string
 	ClusterEnvironment Environment
 	NodeHostname       *string
+	SyncToClusterName  string
 }
 
 func (q *Queries) GetCronJob(ctx context.Context, id uuid.UUID) (GetCronJobRow, error) {
@@ -134,16 +143,23 @@ func (q *Queries) GetCronJob(ctx context.Context, id uuid.UUID) (GetCronJobRow, 
 		&i.UpdatedAt,
 		&i.Retries,
 		&i.Alert,
+		&i.SyncSource,
+		&i.SyncTarget,
+		&i.SyncToCluster,
+		&i.SyncDelete,
+		&i.SyncExclude,
+		&i.SyncBwlimitMb,
 		&i.ClusterName,
 		&i.ClusterSlug,
 		&i.ClusterEnvironment,
 		&i.NodeHostname,
+		&i.SyncToClusterName,
 	)
 	return i, err
 }
 
 const getCronRun = `-- name: GetCronRun :one
-SELECT r.id, r.job_id, r.node_id, r.revision, r.reason, r.result, r.started_at, r.ended_at, r.exit_code, r.output, r.output_truncated, r.received_at, n.hostname, j.name AS job_name, j.user_name, j.cluster_id
+SELECT r.id, r.job_id, r.node_id, r.revision, r.reason, r.result, r.started_at, r.ended_at, r.exit_code, r.output, r.output_truncated, r.received_at, r.sync, n.hostname, j.name AS job_name, j.user_name, j.cluster_id
 FROM cron_runs r
 JOIN nodes n ON n.id = r.node_id
 JOIN cron_jobs j ON j.id = r.job_id
@@ -163,6 +179,7 @@ type GetCronRunRow struct {
 	Output          string
 	OutputTruncated bool
 	ReceivedAt      time.Time
+	Sync            []byte
 	Hostname        string
 	JobName         string
 	UserName        string
@@ -185,6 +202,7 @@ func (q *Queries) GetCronRun(ctx context.Context, id uuid.UUID) (GetCronRunRow, 
 		&i.Output,
 		&i.OutputTruncated,
 		&i.ReceivedAt,
+		&i.Sync,
 		&i.Hostname,
 		&i.JobName,
 		&i.UserName,
@@ -205,9 +223,10 @@ func (q *Queries) GetCronRunState(ctx context.Context, id uuid.UUID) (string, er
 }
 
 const insertCronJob = `-- name: InsertCronJob :one
-INSERT INTO cron_jobs (cluster_id, name, schedule, run_on, node_id, user_name, command, timeout_seconds, enabled, created_by, retries, alert)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-RETURNING id, cluster_id, name, kind, schedule, run_on, node_id, user_name, command, timeout_seconds, enabled, revision, created_by, created_at, updated_at, retries, alert
+INSERT INTO cron_jobs (cluster_id, name, schedule, run_on, node_id, user_name, command, timeout_seconds, enabled, created_by, retries, alert,
+                       kind, sync_source, sync_target, sync_to_cluster, sync_delete, sync_exclude, sync_bwlimit_mb)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+RETURNING id, cluster_id, name, kind, schedule, run_on, node_id, user_name, command, timeout_seconds, enabled, revision, created_by, created_at, updated_at, retries, alert, sync_source, sync_target, sync_to_cluster, sync_delete, sync_exclude, sync_bwlimit_mb
 `
 
 type InsertCronJobParams struct {
@@ -223,6 +242,13 @@ type InsertCronJobParams struct {
 	CreatedBy      *uuid.UUID
 	Retries        int32
 	Alert          bool
+	Kind           string
+	SyncSource     string
+	SyncTarget     string
+	SyncToCluster  *uuid.UUID
+	SyncDelete     bool
+	SyncExclude    []string
+	SyncBwlimitMb  int32
 }
 
 func (q *Queries) InsertCronJob(ctx context.Context, arg InsertCronJobParams) (CronJob, error) {
@@ -239,6 +265,13 @@ func (q *Queries) InsertCronJob(ctx context.Context, arg InsertCronJobParams) (C
 		arg.CreatedBy,
 		arg.Retries,
 		arg.Alert,
+		arg.Kind,
+		arg.SyncSource,
+		arg.SyncTarget,
+		arg.SyncToCluster,
+		arg.SyncDelete,
+		arg.SyncExclude,
+		arg.SyncBwlimitMb,
 	)
 	var i CronJob
 	err := row.Scan(
@@ -259,6 +292,12 @@ func (q *Queries) InsertCronJob(ctx context.Context, arg InsertCronJobParams) (C
 		&i.UpdatedAt,
 		&i.Retries,
 		&i.Alert,
+		&i.SyncSource,
+		&i.SyncTarget,
+		&i.SyncToCluster,
+		&i.SyncDelete,
+		&i.SyncExclude,
+		&i.SyncBwlimitMb,
 	)
 	return i, err
 }
@@ -297,10 +336,12 @@ func (q *Queries) ListCronJobRunStarts(ctx context.Context, since time.Time) ([]
 }
 
 const listCronJobs = `-- name: ListCronJobs :many
-SELECT j.id, j.cluster_id, j.name, j.kind, j.schedule, j.run_on, j.node_id, j.user_name, j.command, j.timeout_seconds, j.enabled, j.revision, j.created_by, j.created_at, j.updated_at, j.retries, j.alert, c.name AS cluster_name, c.slug AS cluster_slug, c.environment AS cluster_environment, n.hostname AS node_hostname
+SELECT j.id, j.cluster_id, j.name, j.kind, j.schedule, j.run_on, j.node_id, j.user_name, j.command, j.timeout_seconds, j.enabled, j.revision, j.created_by, j.created_at, j.updated_at, j.retries, j.alert, j.sync_source, j.sync_target, j.sync_to_cluster, j.sync_delete, j.sync_exclude, j.sync_bwlimit_mb, c.name AS cluster_name, c.slug AS cluster_slug, c.environment AS cluster_environment, n.hostname AS node_hostname,
+       coalesce(tc.name, '')::text AS sync_to_cluster_name
 FROM cron_jobs j
 JOIN clusters c ON c.id = j.cluster_id
 LEFT JOIN nodes n ON n.id = j.node_id
+LEFT JOIN clusters tc ON tc.id = j.sync_to_cluster
 ORDER BY lower(c.name), lower(j.name)
 `
 
@@ -322,10 +363,17 @@ type ListCronJobsRow struct {
 	UpdatedAt          time.Time
 	Retries            int32
 	Alert              bool
+	SyncSource         string
+	SyncTarget         string
+	SyncToCluster      *uuid.UUID
+	SyncDelete         bool
+	SyncExclude        []string
+	SyncBwlimitMb      int32
 	ClusterName        string
 	ClusterSlug        string
 	ClusterEnvironment Environment
 	NodeHostname       *string
+	SyncToClusterName  string
 }
 
 func (q *Queries) ListCronJobs(ctx context.Context) ([]ListCronJobsRow, error) {
@@ -355,10 +403,17 @@ func (q *Queries) ListCronJobs(ctx context.Context) ([]ListCronJobsRow, error) {
 			&i.UpdatedAt,
 			&i.Retries,
 			&i.Alert,
+			&i.SyncSource,
+			&i.SyncTarget,
+			&i.SyncToCluster,
+			&i.SyncDelete,
+			&i.SyncExclude,
+			&i.SyncBwlimitMb,
 			&i.ClusterName,
 			&i.ClusterSlug,
 			&i.ClusterEnvironment,
 			&i.NodeHostname,
+			&i.SyncToClusterName,
 		); err != nil {
 			return nil, err
 		}
@@ -402,7 +457,7 @@ func (q *Queries) ListCronNodeSets(ctx context.Context) ([]CronNodeSet, error) {
 }
 
 const listCronRunsOf = `-- name: ListCronRunsOf :many
-SELECT r.id, r.job_id, r.node_id, n.hostname, r.revision, r.reason, r.result, r.started_at, r.ended_at, r.exit_code, r.output_truncated
+SELECT r.id, r.job_id, r.node_id, n.hostname, r.revision, r.reason, r.result, r.started_at, r.ended_at, r.exit_code, r.output_truncated, r.sync
 FROM cron_runs r
 JOIN nodes n ON n.id = r.node_id
 WHERE r.job_id = $1
@@ -427,6 +482,7 @@ type ListCronRunsOfRow struct {
 	EndedAt         *time.Time
 	ExitCode        *int32
 	OutputTruncated bool
+	Sync            []byte
 }
 
 // De runs van een job, nieuwste eerst, zonder de uitvoer.
@@ -451,6 +507,41 @@ func (q *Queries) ListCronRunsOf(ctx context.Context, arg ListCronRunsOfParams) 
 			&i.EndedAt,
 			&i.ExitCode,
 			&i.OutputTruncated,
+			&i.Sync,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCronSyncNodes = `-- name: ListCronSyncNodes :many
+SELECT node_id, public_key, host_keys, rsync, ssh, sshd, permit_root_login, error, checked_at FROM cron_sync_nodes
+`
+
+func (q *Queries) ListCronSyncNodes(ctx context.Context) ([]CronSyncNode, error) {
+	rows, err := q.db.Query(ctx, listCronSyncNodes)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []CronSyncNode{}
+	for rows.Next() {
+		var i CronSyncNode
+		if err := rows.Scan(
+			&i.NodeID,
+			&i.PublicKey,
+			&i.HostKeys,
+			&i.Rsync,
+			&i.Ssh,
+			&i.Sshd,
+			&i.PermitRootLogin,
+			&i.Error,
+			&i.CheckedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -622,12 +713,30 @@ func (q *Queries) MarkCronNodeSet(ctx context.Context, arg MarkCronNodeSetParams
 	return err
 }
 
+const markCronSyncNode = `-- name: MarkCronSyncNode :exec
+INSERT INTO cron_sync_nodes (node_id, error, checked_at)
+VALUES ($1, $2, $3)
+ON CONFLICT (node_id) DO UPDATE SET error = excluded.error, checked_at = excluded.checked_at
+`
+
+type MarkCronSyncNodeParams struct {
+	NodeID    uuid.UUID
+	Error     string
+	CheckedAt time.Time
+}
+
+func (q *Queries) MarkCronSyncNode(ctx context.Context, arg MarkCronSyncNodeParams) error {
+	_, err := q.db.Exec(ctx, markCronSyncNode, arg.NodeID, arg.Error, arg.CheckedAt)
+	return err
+}
+
 const updateCronJob = `-- name: UpdateCronJob :one
 UPDATE cron_jobs
 SET name = $2, schedule = $3, run_on = $4, node_id = $5, user_name = $6, command = $7, timeout_seconds = $8, enabled = $9,
-    retries = $10, alert = $11, revision = revision + 1, updated_at = now()
+    retries = $10, alert = $11, sync_source = $12, sync_target = $13, sync_to_cluster = $14, sync_delete = $15, sync_exclude = $16,
+    sync_bwlimit_mb = $17, revision = revision + 1, updated_at = now()
 WHERE id = $1
-RETURNING id, cluster_id, name, kind, schedule, run_on, node_id, user_name, command, timeout_seconds, enabled, revision, created_by, created_at, updated_at, retries, alert
+RETURNING id, cluster_id, name, kind, schedule, run_on, node_id, user_name, command, timeout_seconds, enabled, revision, created_by, created_at, updated_at, retries, alert, sync_source, sync_target, sync_to_cluster, sync_delete, sync_exclude, sync_bwlimit_mb
 `
 
 type UpdateCronJobParams struct {
@@ -642,6 +751,12 @@ type UpdateCronJobParams struct {
 	Enabled        bool
 	Retries        int32
 	Alert          bool
+	SyncSource     string
+	SyncTarget     string
+	SyncToCluster  *uuid.UUID
+	SyncDelete     bool
+	SyncExclude    []string
+	SyncBwlimitMb  int32
 }
 
 func (q *Queries) UpdateCronJob(ctx context.Context, arg UpdateCronJobParams) (CronJob, error) {
@@ -657,6 +772,12 @@ func (q *Queries) UpdateCronJob(ctx context.Context, arg UpdateCronJobParams) (C
 		arg.Enabled,
 		arg.Retries,
 		arg.Alert,
+		arg.SyncSource,
+		arg.SyncTarget,
+		arg.SyncToCluster,
+		arg.SyncDelete,
+		arg.SyncExclude,
+		arg.SyncBwlimitMb,
 	)
 	var i CronJob
 	err := row.Scan(
@@ -677,6 +798,12 @@ func (q *Queries) UpdateCronJob(ctx context.Context, arg UpdateCronJobParams) (C
 		&i.UpdatedAt,
 		&i.Retries,
 		&i.Alert,
+		&i.SyncSource,
+		&i.SyncTarget,
+		&i.SyncToCluster,
+		&i.SyncDelete,
+		&i.SyncExclude,
+		&i.SyncBwlimitMb,
 	)
 	return i, err
 }
@@ -700,11 +827,11 @@ func (q *Queries) UpsertCronNodeSet(ctx context.Context, arg UpsertCronNodeSetPa
 }
 
 const upsertCronRun = `-- name: UpsertCronRun :exec
-INSERT INTO cron_runs (id, job_id, node_id, revision, reason, result, started_at, ended_at, exit_code, output, output_truncated)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+INSERT INTO cron_runs (id, job_id, node_id, revision, reason, result, started_at, ended_at, exit_code, output, output_truncated, sync)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 ON CONFLICT (id) DO UPDATE
 SET result = excluded.result, ended_at = excluded.ended_at, exit_code = excluded.exit_code, output = excluded.output,
-    output_truncated = excluded.output_truncated, received_at = now()
+    output_truncated = excluded.output_truncated, sync = excluded.sync, received_at = now()
 WHERE cron_runs.ended_at IS NULL AND cron_runs.node_id = excluded.node_id
 `
 
@@ -720,6 +847,7 @@ type UpsertCronRunParams struct {
 	ExitCode        *int32
 	Output          string
 	OutputTruncated bool
+	Sync            []byte
 }
 
 func (q *Queries) UpsertCronRun(ctx context.Context, arg UpsertCronRunParams) error {
@@ -735,6 +863,40 @@ func (q *Queries) UpsertCronRun(ctx context.Context, arg UpsertCronRunParams) er
 		arg.ExitCode,
 		arg.Output,
 		arg.OutputTruncated,
+		arg.Sync,
+	)
+	return err
+}
+
+const upsertCronSyncNode = `-- name: UpsertCronSyncNode :exec
+INSERT INTO cron_sync_nodes (node_id, public_key, host_keys, rsync, ssh, sshd, permit_root_login, error, checked_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, '', $8)
+ON CONFLICT (node_id) DO UPDATE
+SET public_key = excluded.public_key, host_keys = excluded.host_keys, rsync = excluded.rsync, ssh = excluded.ssh, sshd = excluded.sshd,
+    permit_root_login = excluded.permit_root_login, error = '', checked_at = excluded.checked_at
+`
+
+type UpsertCronSyncNodeParams struct {
+	NodeID          uuid.UUID
+	PublicKey       string
+	HostKeys        []string
+	Rsync           bool
+	Ssh             bool
+	Sshd            bool
+	PermitRootLogin string
+	CheckedAt       time.Time
+}
+
+func (q *Queries) UpsertCronSyncNode(ctx context.Context, arg UpsertCronSyncNodeParams) error {
+	_, err := q.db.Exec(ctx, upsertCronSyncNode,
+		arg.NodeID,
+		arg.PublicKey,
+		arg.HostKeys,
+		arg.Rsync,
+		arg.Ssh,
+		arg.Sshd,
+		arg.PermitRootLogin,
+		arg.CheckedAt,
 	)
 	return err
 }

@@ -672,6 +672,27 @@ func (e CronRunSummaryResult) Valid() bool {
 	}
 }
 
+// Defines values for CronSyncResultResult.
+const (
+	CronSyncResultResultFailed  CronSyncResultResult = "failed"
+	CronSyncResultResultOk      CronSyncResultResult = "ok"
+	CronSyncResultResultRefused CronSyncResultResult = "refused"
+)
+
+// Valid indicates whether the value is a known member of the CronSyncResultResult enum.
+func (e CronSyncResultResult) Valid() bool {
+	switch e {
+	case CronSyncResultResultFailed:
+		return true
+	case CronSyncResultResultOk:
+		return true
+	case CronSyncResultResultRefused:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for CronWarningKind.
 const (
 	DbRestart       CronWarningKind = "db_restart"
@@ -2175,6 +2196,24 @@ func (e KubeWorkloadState) Valid() bool {
 	}
 }
 
+// Defines values for ManagedCronJobKind.
+const (
+	ManagedCronJobKindCommand ManagedCronJobKind = "command"
+	ManagedCronJobKindSync    ManagedCronJobKind = "sync"
+)
+
+// Valid indicates whether the value is a known member of the ManagedCronJobKind enum.
+func (e ManagedCronJobKind) Valid() bool {
+	switch e {
+	case ManagedCronJobKindCommand:
+		return true
+	case ManagedCronJobKindSync:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ManagedCronJobRunOn.
 const (
 	ManagedCronJobRunOnAll  ManagedCronJobRunOn = "all"
@@ -2196,6 +2235,24 @@ func (e ManagedCronJobRunOn) Valid() bool {
 	}
 }
 
+// Defines values for ManagedCronJobCreateKind.
+const (
+	ManagedCronJobCreateKindCommand ManagedCronJobCreateKind = "command"
+	ManagedCronJobCreateKindSync    ManagedCronJobCreateKind = "sync"
+)
+
+// Valid indicates whether the value is a known member of the ManagedCronJobCreateKind enum.
+func (e ManagedCronJobCreateKind) Valid() bool {
+	switch e {
+	case ManagedCronJobCreateKindCommand:
+		return true
+	case ManagedCronJobCreateKindSync:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ManagedCronJobCreateRunOn.
 const (
 	ManagedCronJobCreateRunOnAll  ManagedCronJobCreateRunOn = "all"
@@ -2211,6 +2268,24 @@ func (e ManagedCronJobCreateRunOn) Valid() bool {
 	case ManagedCronJobCreateRunOnNode:
 		return true
 	case ManagedCronJobCreateRunOnVip:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for ManagedCronJobInputKind.
+const (
+	ManagedCronJobInputKindCommand ManagedCronJobInputKind = "command"
+	ManagedCronJobInputKindSync    ManagedCronJobInputKind = "sync"
+)
+
+// Valid indicates whether the value is a known member of the ManagedCronJobInputKind enum.
+func (e ManagedCronJobInputKind) Valid() bool {
+	switch e {
+	case ManagedCronJobInputKindCommand:
+		return true
+	case ManagedCronJobInputKindSync:
 		return true
 	default:
 		return false
@@ -4996,6 +5071,9 @@ type CronRun struct {
 	Result          CronRunResult `json:"result"`
 	Revision        int           `json:"revision"`
 	StartedAt       time.Time     `json:"started_at"`
+
+	// Sync Bij een sync de uitkomst per doel
+	Sync []CronSyncResult `json:"sync"`
 }
 
 // CronRunReason defines model for CronRun.Reason.
@@ -5014,6 +5092,9 @@ type CronRunSummary struct {
 	Reason    CronRunSummaryReason         `json:"reason"`
 	Result    CronRunSummaryResult         `json:"result"`
 	StartedAt time.Time                    `json:"started_at"`
+
+	// Sync Bij een sync de uitkomst per doel
+	Sync []CronSyncResult `json:"sync"`
 }
 
 // CronRunSummaryReason defines model for CronRunSummary.Reason.
@@ -5028,6 +5109,42 @@ type CronScheduleInfo struct {
 	Next       []time.Time `json:"next"`
 	OnCalendar string      `json:"on_calendar"`
 }
+
+// CronSyncPlan defines model for CronSyncPlan.
+type CronSyncPlan struct {
+	Nodes []struct {
+		Address string `json:"address"`
+		Checks  []struct {
+			Name string `json:"name"`
+			Ok   bool   `json:"ok"`
+			Text string `json:"text"`
+		} `json:"checks"`
+		Hostname string             `json:"hostname"`
+		NodeId   openapi_types.UUID `json:"node_id"`
+		Ok       bool               `json:"ok"`
+
+		// Role bron, doel, of bron en doel
+		Role string `json:"role"`
+	} `json:"nodes"`
+	Notes []string `json:"notes"`
+}
+
+// CronSyncResult defines model for CronSyncResult.
+type CronSyncResult struct {
+	Bytes    int64              `json:"bytes"`
+	Deleted  int                `json:"deleted"`
+	Error    string             `json:"error"`
+	Exit     int                `json:"exit"`
+	Files    int                `json:"files"`
+	Hostname string             `json:"hostname"`
+	NodeId   openapi_types.UUID `json:"node_id"`
+
+	// Result refused: het doel heeft het VIP van zijn cluster of de sync mag dat niet
+	Result CronSyncResultResult `json:"result"`
+}
+
+// CronSyncResultResult refused: het doel heeft het VIP van zijn cluster of de sync mag dat niet
+type CronSyncResultResult string
 
 // CronVariant defines model for CronVariant.
 type CronVariant struct {
@@ -8860,6 +8977,7 @@ type ManagedCronJob struct {
 	Enabled            bool               `json:"enabled"`
 	Failures24h        int                `json:"failures_24h"`
 	Id                 openapi_types.UUID `json:"id"`
+	Kind               ManagedCronJobKind `json:"kind"`
 
 	// MissedAt Het laatste geplande moment, als de job toen niet draaide
 	MissedAt     nullable.Nullable[time.Time]          `json:"missed_at"`
@@ -8874,12 +8992,16 @@ type ManagedCronJob struct {
 	RunOn        ManagedCronJobRunOn                   `json:"run_on"`
 
 	// Running Op hoeveel nodes er nu een run loopt
-	Running        int       `json:"running"`
-	Schedule       string    `json:"schedule"`
-	TimeoutSeconds int       `json:"timeout_seconds"`
-	UpdatedAt      time.Time `json:"updated_at"`
-	User           string    `json:"user"`
+	Running        int                                `json:"running"`
+	Schedule       string                             `json:"schedule"`
+	Sync           nullable.Nullable[ManagedCronSync] `json:"sync"`
+	TimeoutSeconds int                                `json:"timeout_seconds"`
+	UpdatedAt      time.Time                          `json:"updated_at"`
+	User           string                             `json:"user"`
 }
+
+// ManagedCronJobKind defines model for ManagedCronJob.Kind.
+type ManagedCronJobKind string
 
 // ManagedCronJobRunOn defines model for ManagedCronJob.RunOn.
 type ManagedCronJobRunOn string
@@ -8894,7 +9016,10 @@ type ManagedCronJobCreate struct {
 	// Confirm De slug van het cluster
 	Confirm *string `json:"confirm,omitempty"`
 	Enabled bool    `json:"enabled"`
-	Name    string  `json:"name"`
+
+	// Kind Een commando of een bestandssync; alleen bij het maken, daarna verandert het niet
+	Kind *ManagedCronJobCreateKind `json:"kind,omitempty"`
+	Name string                    `json:"name"`
 
 	// NodeId Alleen bij run_on node
 	NodeId nullable.Nullable[openapi_types.UUID] `json:"node_id,omitempty"`
@@ -8904,10 +9029,16 @@ type ManagedCronJobCreate struct {
 	RunOn   ManagedCronJobCreateRunOn `json:"run_on"`
 
 	// Schedule Een cronregel met vijf velden of een @-woord, zoals 0 */6 * * *
-	Schedule       string `json:"schedule"`
-	TimeoutSeconds int    `json:"timeout_seconds"`
-	User           string `json:"user"`
+	Schedule string `json:"schedule"`
+
+	// Sync Een bestandssync met rsync over SSH, van de node met het VIP (of één node) naar de doelen. Command blijft leeg.
+	Sync           *ManagedCronSyncInput `json:"sync,omitempty"`
+	TimeoutSeconds int                   `json:"timeout_seconds"`
+	User           string                `json:"user"`
 }
+
+// ManagedCronJobCreateKind Een commando of een bestandssync; alleen bij het maken, daarna verandert het niet
+type ManagedCronJobCreateKind string
 
 // ManagedCronJobCreateRunOn defines model for ManagedCronJobCreate.RunOn.
 type ManagedCronJobCreateRunOn string
@@ -8927,7 +9058,10 @@ type ManagedCronJobInput struct {
 	// Confirm De slug van het cluster
 	Confirm *string `json:"confirm,omitempty"`
 	Enabled bool    `json:"enabled"`
-	Name    string  `json:"name"`
+
+	// Kind Een commando of een bestandssync; alleen bij het maken, daarna verandert het niet
+	Kind *ManagedCronJobInputKind `json:"kind,omitempty"`
+	Name string                   `json:"name"`
 
 	// NodeId Alleen bij run_on node
 	NodeId nullable.Nullable[openapi_types.UUID] `json:"node_id,omitempty"`
@@ -8937,10 +9071,16 @@ type ManagedCronJobInput struct {
 	RunOn   ManagedCronJobInputRunOn `json:"run_on"`
 
 	// Schedule Een cronregel met vijf velden of een @-woord, zoals 0 */6 * * *
-	Schedule       string `json:"schedule"`
-	TimeoutSeconds int    `json:"timeout_seconds"`
-	User           string `json:"user"`
+	Schedule string `json:"schedule"`
+
+	// Sync Een bestandssync met rsync over SSH, van de node met het VIP (of één node) naar de doelen. Command blijft leeg.
+	Sync           *ManagedCronSyncInput `json:"sync,omitempty"`
+	TimeoutSeconds int                   `json:"timeout_seconds"`
+	User           string                `json:"user"`
 }
+
+// ManagedCronJobInputKind Een commando of een bestandssync; alleen bij het maken, daarna verandert het niet
+type ManagedCronJobInputKind string
 
 // ManagedCronJobInputRunOn defines model for ManagedCronJobInput.RunOn.
 type ManagedCronJobInputRunOn string
@@ -8954,6 +9094,40 @@ type ManagedCronJobNode struct {
 	Hostname string                            `json:"hostname"`
 	LastRun  nullable.Nullable[CronRunSummary] `json:"last_run"`
 	NodeId   openapi_types.UUID                `json:"node_id"`
+}
+
+// ManagedCronSync defines model for ManagedCronSync.
+type ManagedCronSync struct {
+	BwlimitMb   int                                   `json:"bwlimit_mb"`
+	Delete      bool                                  `json:"delete"`
+	Exclude     []string                              `json:"exclude"`
+	Source      string                                `json:"source"`
+	Target      string                                `json:"target"`
+	ToClusterId nullable.Nullable[openapi_types.UUID] `json:"to_cluster_id"`
+
+	// ToClusterName Leeg bij een sync binnen het eigen cluster
+	ToClusterName string `json:"to_cluster_name"`
+}
+
+// ManagedCronSyncInput Een bestandssync met rsync over SSH, van de node met het VIP (of één node) naar de doelen. Command blijft leeg.
+type ManagedCronSyncInput struct {
+	// BwlimitMb Bandbreedte in MB/s; 0 is onbeperkt
+	BwlimitMb *int `json:"bwlimit_mb,omitempty"`
+
+	// Delete Bestanden op het doel weghalen die op de bron weg zijn
+	Delete *bool `json:"delete,omitempty"`
+
+	// Exclude Patronen zoals *.part
+	Exclude *[]string `json:"exclude,omitempty"`
+
+	// Source De map op de bron, zoals /var/www/nextcloud/data/
+	Source string `json:"source"`
+
+	// Target De map op elk doel; leeg is dezelfde map
+	Target *string `json:"target,omitempty"`
+
+	// ToClusterId Leeg: de andere nodes van het eigen cluster
+	ToClusterId nullable.Nullable[openapi_types.UUID] `json:"to_cluster_id,omitempty"`
 }
 
 // MapEdge defines model for MapEdge.
@@ -10714,6 +10888,12 @@ type DeleteCronJobParams struct {
 	Confirm *string `form:"confirm,omitempty" json:"confirm,omitempty"`
 }
 
+// DryRunCronSyncJSONBody defines parameters for DryRunCronSync.
+type DryRunCronSyncJSONBody struct {
+	// Target De node-id van het doel
+	Target openapi_types.UUID `json:"target"`
+}
+
 // RunCronJobJSONBody defines parameters for RunCronJob.
 type RunCronJobJSONBody struct {
 	Confirm *string `json:"confirm,omitempty"`
@@ -11207,6 +11387,9 @@ type CreateCronJobJSONRequestBody = ManagedCronJobCreate
 // UpdateCronJobJSONRequestBody defines body for UpdateCronJob for application/json ContentType.
 type UpdateCronJobJSONRequestBody = ManagedCronJobInput
 
+// DryRunCronSyncJSONRequestBody defines body for DryRunCronSync for application/json ContentType.
+type DryRunCronSyncJSONRequestBody DryRunCronSyncJSONBody
+
 // RunCronJobJSONRequestBody defines body for RunCronJob for application/json ContentType.
 type RunCronJobJSONRequestBody RunCronJobJSONBody
 
@@ -11626,6 +11809,12 @@ type ServerInterface interface {
 	// UpdateCronJob Een beheerde cronjob wijzigen of aan- en uitzetten (admin)
 	// (PUT /cron-jobs/{jobId})
 	UpdateCronJob(w http.ResponseWriter, r *http.Request, jobId openapi_types.UUID)
+	// DryRunCronSync Een bestandssync als proef draaien naar één doel (admin)
+	// (POST /cron-jobs/{jobId}/dry-run)
+	DryRunCronSync(w http.ResponseWriter, r *http.Request, jobId openapi_types.UUID)
+	// GetCronSyncPlan Wat een bestandssync nodig heeft, per node gecontroleerd (admin)
+	// (GET /cron-jobs/{jobId}/plan)
+	GetCronSyncPlan(w http.ResponseWriter, r *http.Request, jobId openapi_types.UUID)
 	// RunCronJob Een beheerde cronjob nu uitvoeren (admin)
 	// (POST /cron-jobs/{jobId}/run)
 	RunCronJob(w http.ResponseWriter, r *http.Request, jobId openapi_types.UUID)
@@ -12634,6 +12823,18 @@ func (_ Unimplemented) GetCronJob(w http.ResponseWriter, r *http.Request, jobId 
 // UpdateCronJob Een beheerde cronjob wijzigen of aan- en uitzetten (admin)
 // (PUT /cron-jobs/{jobId})
 func (_ Unimplemented) UpdateCronJob(w http.ResponseWriter, r *http.Request, jobId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// DryRunCronSync Een bestandssync als proef draaien naar één doel (admin)
+// (POST /cron-jobs/{jobId}/dry-run)
+func (_ Unimplemented) DryRunCronSync(w http.ResponseWriter, r *http.Request, jobId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetCronSyncPlan Wat een bestandssync nodig heeft, per node gecontroleerd (admin)
+// (GET /cron-jobs/{jobId}/plan)
+func (_ Unimplemented) GetCronSyncPlan(w http.ResponseWriter, r *http.Request, jobId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -16362,6 +16563,58 @@ func (siw *ServerInterfaceWrapper) UpdateCronJob(w http.ResponseWriter, r *http.
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.UpdateCronJob(w, r, jobId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DryRunCronSync operation middleware
+func (siw *ServerInterfaceWrapper) DryRunCronSync(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "jobId" -------------
+	var jobId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "jobId", chi.URLParam(r, "jobId"), &jobId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "jobId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DryRunCronSync(w, r, jobId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetCronSyncPlan operation middleware
+func (siw *ServerInterfaceWrapper) GetCronSyncPlan(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "jobId" -------------
+	var jobId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "jobId", chi.URLParam(r, "jobId"), &jobId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "jobId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetCronSyncPlan(w, r, jobId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -21827,6 +22080,12 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/cron-jobs/{jobId}/run", wrapper.RunCronJob)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/cron-jobs/{jobId}/plan", wrapper.GetCronSyncPlan)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/cron-jobs/{jobId}/dry-run", wrapper.DryRunCronSync)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/cron-runs/{runId}", wrapper.GetCronRun)

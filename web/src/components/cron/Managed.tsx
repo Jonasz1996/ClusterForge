@@ -117,6 +117,11 @@ export function ManagedCard({ cluster }: { cluster: string }) {
                       <div className="mt-1 flex flex-wrap items-center gap-1 text-xs text-slate-500">
                         {j.cluster_name}
                         <EnvBadge env={j.cluster_environment} />
+                        {j.sync && (
+                          <span title={`${j.sync.source} naar ${j.sync.to_cluster_name || "de andere nodes"}`}>
+                            <Badge tone="blue">{j.sync.to_cluster_name ? `sync naar ${j.sync.to_cluster_name}` : "sync"}</Badge>
+                          </span>
+                        )}
                         {!j.enabled && <Badge>Uit</Badge>}
                         {j.running > 0 && <Badge tone="blue">loopt nu</Badge>}
                         {j.failures_24h > 0 && <Badge tone="red">{j.failures_24h} mislukt in 24 u</Badge>}

@@ -2,6 +2,7 @@ package cronjobs
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"slices"
 	"strings"
@@ -50,6 +51,8 @@ type RunSummary struct {
 	StartedAt time.Time
 	EndedAt   *time.Time
 	Exit      *int
+	// Sync is bij een sync de uitkomst per doel.
+	Sync []protocol.SyncResult
 }
 
 func intPtr(v *int32) *int {
@@ -89,7 +92,7 @@ func (s *Service) Jobs(ctx context.Context) ([]ManagedJob, error) {
 	// De hash die elke node zou moeten hebben.
 	wantHash := map[uuid.UUID]string{}
 	for _, n := range w.nodes {
-		wantHash[n.ID] = protocol.CronSetHash(w.desired(n))
+		wantHash[n.ID] = w.wantHash(n)
 	}
 	now := s.Now().In(s.loc())
 	since := now.Add(-8 * 24 * time.Hour)
@@ -159,10 +162,12 @@ func (s *Service) Job(ctx context.Context, id uuid.UUID, limit int) (ManagedJob,
 	}
 	runs := make([]RunSummary, 0, len(rows))
 	for _, r := range rows {
-		runs = append(runs, RunSummary{
+		rs := RunSummary{
 			ID: r.ID, NodeID: r.NodeID, Hostname: r.Hostname, Reason: r.Reason, Result: r.Result, StartedAt: r.StartedAt,
 			EndedAt: r.EndedAt, Exit: intPtr(r.ExitCode),
-		})
+		}
+		_ = json.Unmarshal(r.Sync, &rs.Sync)
+		runs = append(runs, rs)
 	}
 	return jobs[i], runs, nil
 }

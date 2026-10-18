@@ -190,6 +190,17 @@ export function jobInputOf(j: ManagedCronJob): ManagedCronJobInput {
     enabled: j.enabled,
     retries: j.retries,
     alert: j.alert,
+    kind: j.kind,
+    sync: j.sync
+      ? {
+          source: j.sync.source,
+          target: j.sync.target,
+          to_cluster_id: j.sync.to_cluster_id,
+          delete: j.sync.delete,
+          exclude: j.sync.exclude,
+          bwlimit_mb: j.sync.bwlimit_mb,
+        }
+      : undefined,
   };
 }
 
@@ -246,6 +257,25 @@ export function useToggleCron() {
 export function adoptInput(j: CronJob, g: CronGroup, hasVip: boolean): ManagedCronJobInput {
   const all = j.nodes.length > 1 && j.nodes.length >= g.nodes.length;
   const run_on: ManagedCronJobInput["run_on"] = j.nodes.length === 1 && g.nodes.length > 1 ? "node" : all && hasVip ? "vip" : "all";
+  const sync = rsyncOf(j.command);
+  if (sync) {
+    // Een sync draait nooit op alle nodes tegelijk.
+    const on = run_on === "all" ? (hasVip ? "vip" : "node") : run_on;
+    return {
+      name: adoptName(j.command),
+      schedule: j.schedule,
+      run_on: on,
+      node_id: on === "node" ? j.nodes[0].node_id : null,
+      user: "root",
+      command: "",
+      timeout_seconds: 3600,
+      enabled: true,
+      retries: 0,
+      alert: true,
+      kind: "sync",
+      sync,
+    };
+  }
   return {
     name: adoptName(j.command),
     schedule: j.schedule,
@@ -278,4 +308,69 @@ export function adoptName(command: string) {
     prev = w;
   }
   return "overgenomen";
+}
+
+export type CronSyncPlan = components["schemas"]["CronSyncPlan"];
+export type CronSyncResult = components["schemas"]["CronSyncResult"];
+export type ManagedCronSyncInput = components["schemas"]["ManagedCronSyncInput"];
+
+export const syncResultInfo: Record<CronSyncResult["result"], { label: string; tone: Tone }> = {
+  ok: { label: "Gelukt", tone: "green" },
+  failed: { label: "Mislukt", tone: "red" },
+  refused: { label: "Geweigerd", tone: "amber" },
+};
+
+// useCronSyncPlan vraagt bij elke node van een sync na of hij klaar is.
+export function useCronSyncPlan(id: string, enabled: boolean) {
+  return useQuery({
+    queryKey: [...managedKey, id, "plan"],
+    queryFn: async () => unwrap(await api.GET("/cron-jobs/{jobId}/plan", { params: { path: { jobId: id } } })),
+    enabled: enabled && id !== "",
+    refetchInterval: 60_000,
+  });
+}
+
+// useDryRunCronSync draait rsync --dry-run naar één doel.
+export function useDryRunCronSync() {
+  return useMutation({
+    mutationFn: async ({ id, target }: { id: string; target: string }) =>
+      unwrap(await api.POST("/cron-jobs/{jobId}/dry-run", { params: { path: { jobId: id } }, body: { target } })),
+  });
+}
+
+// rsyncOf herkent een rsync van een map naar een map op een andere node,
+// zoals rsync -a --delete /srv/data/ root@nc2:/srv/data/. Welke nodes het
+// doel zijn, zegt het cluster; dat kiest Jonas in het formulier.
+export function rsyncOf(command: string): ManagedCronSyncInput | null {
+  const words = command.trim().split(/\s+/);
+  const i = words.findIndex((w) => (w.split("/").pop() ?? "") === "rsync");
+  if (i < 0 || /[;&|`$]/.test(command)) return null;
+  const args = words.slice(i + 1);
+  const paths: string[] = [];
+  const exclude: string[] = [];
+  let bw = 0;
+  const unquote = (v: string) => v.replace(/^["']|["']$/g, "");
+  for (let k = 0; k < args.length; k++) {
+    const a = args[k];
+    if (a.startsWith("--exclude=")) exclude.push(unquote(a.slice(10)));
+    else if (a === "--exclude" && k + 1 < args.length) exclude.push(unquote(args[++k]));
+    else if (a.startsWith("--bwlimit=")) bw = Math.max(1, Math.round(parseInt(a.slice(10), 10) / 1024) || 0);
+    else if (a === "-e" || a === "--rsh") k++;
+    else if (!a.startsWith("-")) paths.push(a);
+  }
+  if (paths.length !== 2) return null;
+  const [src, dst] = paths;
+  const remote = dst.match(/^(?:[^@\s]+@)?[^:\s/]+:(\/.*)$/);
+  if (!src.startsWith("/") || !remote) return null;
+  const slash = (p: string) => (p.endsWith("/") ? p : p + "/");
+  // Zonder / achter de bron zet rsync de map zelf in het doel.
+  const base = src.endsWith("/") ? "" : (src.split("/").pop() ?? "");
+  return {
+    source: slash(src),
+    target: slash(slash(remote[1]) + base),
+    to_cluster_id: null,
+    delete: args.some((a) => a.startsWith("--delete")),
+    exclude,
+    bwlimit_mb: bw,
+  };
 }

@@ -3748,6 +3748,60 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
         "502": { $ref: "#/components/responses/Error" }
+  /cron-jobs/{jobId}/plan:
+    get:
+      operationId: getCronSyncPlan
+      summary: Wat een bestandssync nodig heeft, per node gecontroleerd (admin)
+      description: |
+        Vraagt elke bron en elk doel naar rsync, ssh, sshd, PermitRootLogin, de hostsleutels en de vrije ruimte in de doelmap.
+        Vraagt agentprotocol 21.
+      parameters:
+        - { name: jobId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CronSyncPlan" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /cron-jobs/{jobId}/dry-run:
+    post:
+      operationId: dryRunCronSync
+      summary: Een bestandssync als proef draaien naar één doel (admin)
+      description: |
+        rsync --dry-run --itemize-changes vanaf de bron die de sync nu zou draaien; er verandert niets. Elke regel is een bestand
+        dat zou veranderen, zoals ">f+++++++++ map/bestand" (nieuw) of "*deleting oud" (weg, alleen met verwijderen aan).
+      parameters:
+        - { name: jobId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [target]
+              properties:
+                target: { type: string, format: uuid, description: De node-id van het doel }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [source, lines]
+                properties:
+                  source: { type: string, description: De bron die de proef draaide }
+                  lines: { type: array, items: { type: string } }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
   /cron-runs/{runId}:
     get:
       operationId: getCronRun
@@ -5828,7 +5882,71 @@ components:
         enabled: { type: boolean }
         retries: { type: integer, minimum: 0, maximum: 3, description: "Hoe vaak een mislukte run herhaalt, met een minuut ertussen" }
         alert: { type: boolean, description: Een mislukte run opent een incident }
+        kind:
+          type: string
+          enum: [command, sync]
+          description: "Een commando of een bestandssync; alleen bij het maken, daarna verandert het niet"
+        sync: { $ref: "#/components/schemas/ManagedCronSyncInput" }
         confirm: { type: string, description: De slug van het cluster, op prod }
+    ManagedCronSyncInput:
+      type: object
+      description: "Een bestandssync met rsync over SSH, van de node met het VIP (of één node) naar de doelen. Command blijft leeg."
+      required: [source]
+      properties:
+        source: { type: string, description: "De map op de bron, zoals /var/www/nextcloud/data/" }
+        target: { type: string, description: "De map op elk doel; leeg is dezelfde map" }
+        to_cluster_id: { type: string, format: uuid, nullable: true, description: "Leeg: de andere nodes van het eigen cluster" }
+        delete: { type: boolean, description: "Bestanden op het doel weghalen die op de bron weg zijn" }
+        exclude: { type: array, items: { type: string }, description: "Patronen zoals *.part" }
+        bwlimit_mb: { type: integer, description: "Bandbreedte in MB/s; 0 is onbeperkt" }
+    ManagedCronSync:
+      type: object
+      required: [source, target, to_cluster_id, to_cluster_name, delete, exclude, bwlimit_mb]
+      properties:
+        source: { type: string }
+        target: { type: string }
+        to_cluster_id: { type: string, format: uuid, nullable: true }
+        to_cluster_name: { type: string, description: "Leeg bij een sync binnen het eigen cluster" }
+        delete: { type: boolean }
+        exclude: { type: array, items: { type: string } }
+        bwlimit_mb: { type: integer }
+    CronSyncResult:
+      type: object
+      required: [node_id, hostname, result, exit, files, bytes, deleted, error]
+      properties:
+        node_id: { type: string, format: uuid }
+        hostname: { type: string }
+        result: { type: string, enum: [ok, failed, refused], description: "refused: het doel heeft het VIP van zijn cluster of de sync mag dat niet" }
+        exit: { type: integer }
+        files: { type: integer }
+        bytes: { type: integer, format: int64 }
+        deleted: { type: integer }
+        error: { type: string }
+    CronSyncPlan:
+      type: object
+      required: [nodes, notes]
+      properties:
+        notes: { type: array, items: { type: string } }
+        nodes:
+          type: array
+          items:
+            type: object
+            required: [node_id, hostname, role, address, ok, checks]
+            properties:
+              node_id: { type: string, format: uuid }
+              hostname: { type: string }
+              role: { type: string, description: "bron, doel, of bron en doel" }
+              address: { type: string }
+              ok: { type: boolean }
+              checks:
+                type: array
+                items:
+                  type: object
+                  required: [name, ok, text]
+                  properties:
+                    name: { type: string }
+                    ok: { type: boolean }
+                    text: { type: string }
     ManagedCronJobCreate:
       allOf:
         - $ref: "#/components/schemas/ManagedCronJobInput"
@@ -5839,7 +5957,7 @@ components:
     ManagedCronJob:
       type: object
       required: [id, cluster_id, cluster_name, cluster_slug, cluster_environment, name, schedule, describe, on_calendar, run_on, node_id, node_hostname,
-        user, command, timeout_seconds, enabled, retries, alert, revision, next_run, missed_at, running, nodes, failures_24h, created_at, updated_at]
+        user, command, timeout_seconds, enabled, retries, alert, kind, sync, revision, next_run, missed_at, running, nodes, failures_24h, created_at, updated_at]
       properties:
         id: { type: string, format: uuid }
         cluster_id: { type: string, format: uuid }
@@ -5863,6 +5981,8 @@ components:
         running: { type: integer, description: Op hoeveel nodes er nu een run loopt }
         retries: { type: integer }
         alert: { type: boolean }
+        kind: { type: string, enum: [command, sync] }
+        sync: { allOf: [{ $ref: "#/components/schemas/ManagedCronSync" }], nullable: true }
         failures_24h: { type: integer }
         nodes: { type: array, items: { $ref: "#/components/schemas/ManagedCronJobNode" } }
         created_at: { type: string, format: date-time }
@@ -5879,11 +5999,12 @@ components:
         last_run: { allOf: [{ $ref: "#/components/schemas/CronRunSummary" }], nullable: true }
     CronRunSummary:
       type: object
-      required: [id, node_id, hostname, reason, result, started_at, ended_at, exit_code]
+      required: [id, node_id, hostname, reason, result, started_at, ended_at, exit_code, sync]
       properties:
         id: { type: string, format: uuid }
         node_id: { type: string, format: uuid }
         hostname: { type: string }
+        sync: { type: array, items: { $ref: "#/components/schemas/CronSyncResult" }, description: "Bij een sync de uitkomst per doel" }
         reason: { type: string, enum: [schedule, manual, retry] }
         result: { type: string, enum: [running, ok, failed, skipped, timeout, stopped] }
         started_at: { type: string, format: date-time }

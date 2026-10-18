@@ -636,6 +636,8 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 		return fmt.Sprintf("Cronjob %s weggehaald uit %s", name, str(p, "cluster"))
 	case "cron_job.run_requested":
 		return fmt.Sprintf("Cronjob %s met de hand gestart op %s", name, list(p["nodes"]))
+	case "cron_job.dry_run":
+		return fmt.Sprintf("Proefrun van sync %s vanaf %s: %s regels", name, str(p, "hostname"), num(p["lines"]))
 	case "cron_job.run_stopped":
 		return fmt.Sprintf("Run van cronjob %s op %s met de hand gestopt", name, str(p, "hostname"))
 	case "cron_job.run_failed":
@@ -1521,6 +1523,8 @@ func changedFields(p map[string]any) []string {
 	labels := map[string]string{
 		"name": "naam", "schedule": "schema", "run_on": "waar", "node_id": "node", "user": "gebruiker", "command": "commando",
 		"timeout_seconds": "tijdslimiet", "enabled": "aan of uit", "retries": "herhalen", "alert": "incident",
+		"source": "bronmap", "target": "doelmap", "to_cluster_id": "doelcluster", "delete": "verwijderen op het doel", "exclude": "uitzonderingen",
+		"bwlimit_mb": "bandbreedte",
 	}
 	c, _ := p["changes"].(map[string]any)
 	var out []string

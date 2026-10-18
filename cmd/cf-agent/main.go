@@ -43,6 +43,9 @@ Gebruik:
   cf-agent cron-run <id>
                      draait een beheerde cronjob van ClusterForge; de timer
                      cf-cron-<id>.timer start dit
+  cf-agent sync-receive --from <node>
+                     ontvangt een bestandssync; alleen via de sleutel van
+                     een bron in authorized_keys
   cf-agent version
 `
 
@@ -66,6 +69,8 @@ func main() {
 		os.Exit(check(os.Args[2:]))
 	case "cron-run":
 		os.Exit(cronRun(os.Args[2:]))
+	case "sync-receive":
+		os.Exit(syncReceive(os.Args[2:]))
 	case "facts":
 		f := (&agent.Collector{}).Facts(context.Background())
 		enc := json.NewEncoder(os.Stdout)
@@ -129,6 +134,13 @@ func cronRun(args []string) int {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	return (&agent.CronRunner{}).Main(ctx, args[0])
+}
+
+func syncReceive(args []string) int {
+	fl := flag.NewFlagSet("sync-receive", flag.ExitOnError)
+	from := fl.String("from", "", "de node-id van de bron")
+	_ = fl.Parse(args)
+	return (&agent.SyncReceiver{}).Main(*from, os.Getenv("SSH_ORIGINAL_COMMAND"))
 }
 
 // faultClear draait de storingen in de state terug, ook als de agent niet

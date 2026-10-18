@@ -547,6 +547,12 @@ type CronJob struct {
 	UpdatedAt      time.Time
 	Retries        int32
 	Alert          bool
+	SyncSource     string
+	SyncTarget     string
+	SyncToCluster  *uuid.UUID
+	SyncDelete     bool
+	SyncExclude    []string
+	SyncBwlimitMb  int32
 }
 
 type CronNodeSet struct {
@@ -571,6 +577,19 @@ type CronRun struct {
 	Output          string
 	OutputTruncated bool
 	ReceivedAt      time.Time
+	Sync            []byte
+}
+
+type CronSyncNode struct {
+	NodeID          uuid.UUID
+	PublicKey       string
+	HostKeys        []string
+	Rsync           bool
+	Ssh             bool
+	Sshd            bool
+	PermitRootLogin string
+	Error           string
+	CheckedAt       time.Time
 }
 
 type DbClient struct {

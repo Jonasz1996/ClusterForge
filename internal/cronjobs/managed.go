@@ -6,6 +6,7 @@ package cronjobs
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
@@ -52,6 +53,10 @@ type JobInput struct {
 	Retries int
 	// Alert: een mislukte run opent een incident.
 	Alert bool
+	// Kind is command (leeg) of sync; een sync heeft Sync in plaats van
+	// Command.
+	Kind string
+	Sync *SyncInput
 }
 
 // InvalidError is een fout in wat de beheerder invulde, bij een veld.
@@ -110,6 +115,16 @@ func (s *Service) validate(ctx context.Context, q *store.Queries, clusterID uuid
 	if in.User == "" {
 		in.User = "root"
 	}
+	switch in.Kind {
+	case "", protocol.CronKindCommand:
+		in.Kind, in.Sync = protocol.CronKindCommand, nil
+	case protocol.CronKindSync:
+		if err := validateSync(ctx, q, clusterID, in); err != nil {
+			return err
+		}
+	default:
+		return &InvalidError{"kind", "kies command of sync"}
+	}
 	if in.TimeoutSeconds == 0 {
 		in.TimeoutSeconds = defaultTimeout
 	}
@@ -118,7 +133,7 @@ func (s *Service) validate(ctx context.Context, q *store.Queries, clusterID uuid
 		return &InvalidError{"name", fmt.Sprintf("een naam van 1 tot %d tekens, op één regel", maxJobName)}
 	case !jobUser.MatchString(in.User):
 		return &InvalidError{"user", "een gebruikersnaam zoals root of www-data"}
-	case strings.TrimSpace(in.Command) == "":
+	case in.Kind == protocol.CronKindCommand && strings.TrimSpace(in.Command) == "":
 		return &InvalidError{"command", "geen commando"}
 	case len(in.Command) > MaxJobCommand:
 		return &InvalidError{"command", fmt.Sprintf("het commando is langer dan %d tekens; zet het in een script op de node", MaxJobCommand)}
@@ -170,10 +185,17 @@ func jobPayload(j store.CronJob, cluster string) map[string]any {
 	p := map[string]any{
 		"name": j.Name, "cluster": cluster, "schedule": j.Schedule, "run_on": j.RunOn, "user": j.UserName,
 		"command": j.Command, "timeout_seconds": j.TimeoutSeconds, "enabled": j.Enabled, "revision": j.Revision,
-		"retries": j.Retries, "alert": j.Alert,
+		"retries": j.Retries, "alert": j.Alert, "kind": j.Kind,
 	}
 	if j.NodeID != nil {
 		p["node_id"] = j.NodeID.String()
+	}
+	if j.Kind == protocol.CronKindSync {
+		delete(p, "command")
+		p["source"], p["target"], p["delete"], p["exclude"], p["bwlimit_mb"] = j.SyncSource, j.SyncTarget, j.SyncDelete, j.SyncExclude, j.SyncBwlimitMb
+		if j.SyncToCluster != nil {
+			p["to_cluster_id"] = j.SyncToCluster.String()
+		}
 	}
 	return p
 }
@@ -187,10 +209,12 @@ func (s *Service) CreateJob(ctx context.Context, actor events.Actor, createdBy *
 			return err
 		}
 		var err error
+		src, dst, to, del, ex, bw := syncParams(in)
 		job, err = q.InsertCronJob(ctx, store.InsertCronJobParams{
 			ClusterID: clusterID, Name: in.Name, Schedule: in.Schedule, RunOn: in.RunOn, NodeID: in.NodeID, UserName: in.User,
 			Command: in.Command, TimeoutSeconds: int32(in.TimeoutSeconds), Enabled: in.Enabled, CreatedBy: createdBy,
-			Retries: int32(in.Retries), Alert: in.Alert,
+			Retries: int32(in.Retries), Alert: in.Alert, Kind: in.Kind, SyncSource: src, SyncTarget: dst, SyncToCluster: to,
+			SyncDelete: del, SyncExclude: ex, SyncBwlimitMb: bw,
 		})
 		if isUnique(err) {
 			return &InvalidError{"name", "er is al een cronjob met die naam in dit cluster"}
@@ -206,14 +230,14 @@ func (s *Service) CreateJob(ctx context.Context, actor events.Actor, createdBy *
 	if err != nil {
 		return job, err
 	}
-	s.applyCluster(ctx, clusterID)
+	s.applyClusters(ctx, clusterID, derefID(job.SyncToCluster))
 	return job, nil
 }
 
 // UpdateJob wijzigt een job; het event heeft de oude en nieuwe waarden.
 func (s *Service) UpdateJob(ctx context.Context, actor events.Actor, id uuid.UUID, in JobInput) (store.CronJob, error) {
 	var job store.CronJob
-	var clusterID uuid.UUID
+	var clusterID, oldTo uuid.UUID
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q := store.New(tx)
 		old, err := q.GetCronJob(ctx, id)
@@ -223,13 +247,17 @@ func (s *Service) UpdateJob(ctx context.Context, actor events.Actor, id uuid.UUI
 		if err != nil {
 			return err
 		}
-		clusterID = old.ClusterID
+		clusterID, oldTo = old.ClusterID, derefID(old.SyncToCluster)
+		// De soort van een job verandert niet.
+		in.Kind = old.Kind
 		if err := s.validate(ctx, q, old.ClusterID, &in); err != nil {
 			return err
 		}
+		src, dst, to, del, ex, bw := syncParams(in)
 		job, err = q.UpdateCronJob(ctx, store.UpdateCronJobParams{
 			ID: id, Name: in.Name, Schedule: in.Schedule, RunOn: in.RunOn, NodeID: in.NodeID, UserName: in.User,
 			Command: in.Command, TimeoutSeconds: int32(in.TimeoutSeconds), Enabled: in.Enabled, Retries: int32(in.Retries), Alert: in.Alert,
+			SyncSource: src, SyncTarget: dst, SyncToCluster: to, SyncDelete: del, SyncExclude: ex, SyncBwlimitMb: bw,
 		})
 		if isUnique(err) {
 			return &InvalidError{"name", "er is al een cronjob met die naam in dit cluster"}
@@ -240,6 +268,8 @@ func (s *Service) UpdateJob(ctx context.Context, actor events.Actor, id uuid.UUI
 		before := jobPayload(store.CronJob{
 			Name: old.Name, Schedule: old.Schedule, RunOn: old.RunOn, NodeID: old.NodeID, UserName: old.UserName, Command: old.Command,
 			TimeoutSeconds: old.TimeoutSeconds, Enabled: old.Enabled, Revision: old.Revision, Retries: old.Retries, Alert: old.Alert,
+			Kind: old.Kind, SyncSource: old.SyncSource, SyncTarget: old.SyncTarget, SyncToCluster: old.SyncToCluster, SyncDelete: old.SyncDelete,
+			SyncExclude: old.SyncExclude, SyncBwlimitMb: old.SyncBwlimitMb,
 		}, old.ClusterName)
 		after := jobPayload(job, old.ClusterName)
 		changes := map[string]any{}
@@ -248,9 +278,11 @@ func (s *Service) UpdateJob(ctx context.Context, actor events.Actor, id uuid.UUI
 				changes[k] = map[string]any{"from": before[k], "to": v}
 			}
 		}
-		if _, ok := before["node_id"]; ok {
-			if _, still := after["node_id"]; !still {
-				changes["node_id"] = map[string]any{"from": before["node_id"], "to": nil}
+		for _, k := range []string{"node_id", "to_cluster_id"} {
+			if _, ok := before[k]; ok {
+				if _, still := after[k]; !still {
+					changes[k] = map[string]any{"from": before[k], "to": nil}
+				}
 			}
 		}
 		action := "cron_job.updated"
@@ -265,13 +297,13 @@ func (s *Service) UpdateJob(ctx context.Context, actor events.Actor, id uuid.UUI
 	if err != nil {
 		return job, err
 	}
-	s.applyCluster(ctx, clusterID)
+	s.applyClusters(ctx, clusterID, oldTo, derefID(job.SyncToCluster))
 	return job, nil
 }
 
 // DeleteJob haalt een job weg, ook van de nodes.
 func (s *Service) DeleteJob(ctx context.Context, actor events.Actor, id uuid.UUID) error {
-	var clusterID uuid.UUID
+	var clusterID, oldTo uuid.UUID
 	err := pgx.BeginFunc(ctx, s.pool, func(tx pgx.Tx) error {
 		q := store.New(tx)
 		old, err := q.GetCronJob(ctx, id)
@@ -281,7 +313,7 @@ func (s *Service) DeleteJob(ctx context.Context, actor events.Actor, id uuid.UUI
 		if err != nil {
 			return err
 		}
-		clusterID = old.ClusterID
+		clusterID, oldTo = old.ClusterID, derefID(old.SyncToCluster)
 		if err := q.DeleteCronJob(ctx, id); err != nil {
 			return err
 		}
@@ -293,7 +325,7 @@ func (s *Service) DeleteJob(ctx context.Context, actor events.Actor, id uuid.UUI
 	if err != nil {
 		return err
 	}
-	s.applyCluster(ctx, clusterID)
+	s.applyClusters(ctx, clusterID, oldTo)
 	return nil
 }
 
@@ -305,6 +337,8 @@ type world struct {
 	nodes      []store.ListCronCandidateNodesRow
 	vips       map[uuid.UUID][]store.ListCronVIPsRow
 	sets       map[uuid.UUID]store.CronNodeSet
+	// syncNodes zijn de sleutels van de nodes in een sync.
+	syncNodes map[uuid.UUID]store.CronSyncNode
 }
 
 func (s *Service) world(ctx context.Context) (world, error) {
@@ -331,6 +365,14 @@ func (s *Service) world(ctx context.Context) (world, error) {
 	w.sets = map[uuid.UUID]store.CronNodeSet{}
 	for _, st := range sets {
 		w.sets[st.NodeID] = st
+	}
+	keys, err := s.q.ListCronSyncNodes(ctx)
+	if err != nil {
+		return w, err
+	}
+	w.syncNodes = map[uuid.UUID]store.CronSyncNode{}
+	for _, k := range keys {
+		w.syncNodes[k.NodeID] = k
 	}
 	return w, nil
 }
@@ -363,6 +405,9 @@ func (w world) desired(n store.ListCronCandidateNodesRow) []protocol.ManagedCron
 			User: j.UserName, Command: j.Command, TimeoutSeconds: int(j.TimeoutSeconds), Enabled: j.Enabled,
 			Retries: int(j.Retries), RetryDelaySeconds: w.retryDelay,
 		}
+		if isSync(j) {
+			m.Kind, m.Sync = protocol.CronKindSync, w.syncSpec(j, n)
+		}
 		if j.RunOn == protocol.CronOnVIP {
 			for _, v := range w.vips[j.ClusterID] {
 				m.VIPs = append(m.VIPs, v.Address.String())
@@ -376,6 +421,11 @@ func (w world) desired(n store.ListCronCandidateNodesRow) []protocol.ManagedCron
 
 var emptySetHash = protocol.CronSetHash(nil)
 
+// wantHash is de hash die node n moet hebben.
+func (w world) wantHash(n store.ListCronCandidateNodesRow) string {
+	return protocol.CronApplyHash(w.desired(n), w.receives(n))
+}
+
 // ApplyAll zet op elke node de jobs die er horen. Een node die al klopt,
 // krijgt de set ook: zo komt een job terug na een herinstallatie; de agent
 // schrijft alleen wat verschilt.
@@ -383,33 +433,50 @@ func (s *Service) ApplyAll(ctx context.Context) error {
 	return s.apply(ctx, nil)
 }
 
-// applyCluster past de nodes van één cluster toe, na een wijziging. Een
-// fout staat bij de node; de lus probeert het later opnieuw.
-func (s *Service) applyCluster(ctx context.Context, clusterID uuid.UUID) {
-	if err := s.apply(ctx, &clusterID); err != nil && ctx.Err() == nil {
+// derefID geeft de uuid, of uuid.Nil zonder.
+func derefID(id *uuid.UUID) uuid.UUID {
+	if id == nil {
+		return uuid.Nil
+	}
+	return *id
+}
+
+// applyClusters past de nodes van de clusters toe, na een wijziging (een
+// sync raakt ook het cluster van zijn doelen). Een fout staat bij de node;
+// de lus probeert het later opnieuw.
+func (s *Service) applyClusters(ctx context.Context, ids ...uuid.UUID) {
+	set := map[uuid.UUID]bool{}
+	for _, id := range ids {
+		if id != uuid.Nil {
+			set[id] = true
+		}
+	}
+	if err := s.apply(ctx, set); err != nil && ctx.Err() == nil {
 		s.log.Warn("cronjobs op de nodes zetten mislukt", "err", err)
 	}
 }
 
-func (s *Service) apply(ctx context.Context, cluster *uuid.UUID) error {
+func (s *Service) apply(ctx context.Context, clusters map[uuid.UUID]bool) error {
 	w, err := s.world(ctx)
 	if err != nil {
 		return err
 	}
+	s.ensureKeys(ctx, &w)
 	now := s.Now()
 	var errs []error
 	for _, n := range w.nodes {
-		if cluster != nil && (n.ClusterID == nil || *n.ClusterID != *cluster) {
+		if clusters != nil && (n.ClusterID == nil || !clusters[*n.ClusterID]) {
 			// Een node die uit het cluster ging, heeft misschien nog jobs.
 			if st, ok := w.sets[n.ID]; !ok || st.Hash == "" || st.Hash == emptySetHash {
 				continue
 			}
 		}
-		set := w.desired(n)
+		set, receives := w.desired(n), w.receives(n)
 		st, known := w.sets[n.ID]
-		if len(set) == 0 && (!known || st.Hash == "" || st.Hash == emptySetHash) {
+		if len(set) == 0 && len(receives) == 0 && (!known || st.Hash == "" || st.Hash == emptySetHash) {
 			continue
 		}
+		hasSync := len(receives) > 0 || slices.ContainsFunc(set, func(m protocol.ManagedCron) bool { return m.Kind == protocol.CronKindSync })
 		mark := func(kind, msg string) {
 			if err := s.q.MarkCronNodeSet(ctx, store.MarkCronNodeSetParams{NodeID: n.ID, Error: msg, ErrorKind: kind, SyncedAt: now}); err != nil {
 				errs = append(errs, err)
@@ -419,12 +486,15 @@ func (s *Service) apply(ctx context.Context, cluster *uuid.UUID) error {
 		case n.AgentProtocol < protocol.CronManagedSince:
 			mark(ErrOldAgent, fmt.Sprintf("de agent op %s heeft protocol %d; beheerde cronjobs vragen protocol %d", n.Hostname, n.AgentProtocol, protocol.CronManagedSince))
 			continue
+		case hasSync && n.AgentProtocol < protocol.CronSyncSince:
+			mark(ErrOldAgent, fmt.Sprintf("de agent op %s heeft protocol %d; een bestandssync vraagt protocol %d", n.Hostname, n.AgentProtocol, protocol.CronSyncSince))
+			continue
 		case n.HeartbeatAt == nil || now.Sub(*n.HeartbeatAt) > status.HeartbeatLate:
 			mark(ErrOffline, "de agent op "+n.Hostname+" is niet verbonden")
 			continue
 		}
 		rctx, cancel := context.WithTimeout(ctx, s.Timeout)
-		res, err := s.bus.Cron(rctx, n.ID, protocol.CronRequest{Op: protocol.CronApply, Jobs: set})
+		res, err := s.bus.Cron(rctx, n.ID, protocol.CronRequest{Op: protocol.CronApply, Jobs: set, Receives: receives})
 		cancel()
 		switch {
 		case errors.Is(err, agentbus.ErrAgentOffline):
@@ -477,8 +547,8 @@ func (s *Service) RunJob(ctx context.Context, actor events.Actor, id uuid.UUID) 
 	}
 	var started, failed []string
 	for _, n := range targets {
-		if st, ok := w.sets[n.ID]; !ok || st.Hash != protocol.CronSetHash(w.desired(n)) {
-			s.applyCluster(ctx, j.ClusterID)
+		if st, ok := w.sets[n.ID]; !ok || st.Hash != w.wantHash(n) {
+			s.applyClusters(ctx, j.ClusterID, derefID(j.SyncToCluster))
 			break
 		}
 	}
@@ -562,9 +632,17 @@ func (s *Service) HandleRuns(ctx context.Context, nodeID uuid.UUID, msg protocol
 				r.Output, r.OutputTruncated = r.Output[len(r.Output)-protocol.CronOutputMax:], true
 			}
 			r.Output = strings.ToValidUTF8(strings.ReplaceAll(r.Output, "\x00", ""), "?")
+			if len(r.Sync) > 100 {
+				r.Sync = r.Sync[:100]
+			}
+			syncJSON := []byte("[]")
+			if len(r.Sync) > 0 {
+				syncJSON, _ = json.Marshal(r.Sync)
+			}
 			if err := q.UpsertCronRun(ctx, store.UpsertCronRunParams{
 				ID: id, JobID: jobID, NodeID: nodeID, Revision: int32(r.Revision), Reason: r.Reason, Result: r.Result,
 				StartedAt: r.StartedAt, EndedAt: r.EndedAt, ExitCode: int32Ptr(r.Exit), Output: r.Output, OutputTruncated: r.OutputTruncated,
+				Sync: syncJSON,
 			}); err != nil {
 				return err
 			}
