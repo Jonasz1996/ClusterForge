@@ -15,8 +15,6 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/agentbus"
 	"github.com/Jonasz1996/clusterforge/internal/databases"
 	"github.com/Jonasz1996/clusterforge/internal/deploy"
-	"github.com/Jonasz1996/clusterforge/internal/events"
-	"github.com/Jonasz1996/clusterforge/internal/jobs"
 	"github.com/Jonasz1996/clusterforge/internal/status"
 	"github.com/Jonasz1996/clusterforge/internal/store"
 	"github.com/Jonasz1996/clusterforge/pkg/protocol"
@@ -39,9 +37,6 @@ type Service struct {
 	q    *store.Queries
 	bus  Bus
 	log  *slog.Logger
-	ev   *events.Writer
-	// runner voert heal.run uit; nil tot EnableRun.
-	runner *jobs.Runner
 	// Overview geeft de databases van de pagina Databases.
 	Overview func(ctx context.Context) ([]databases.Group, error)
 	// Interval is hoe vaak Run de nodes bekijkt; nul of minder zet het uit.
