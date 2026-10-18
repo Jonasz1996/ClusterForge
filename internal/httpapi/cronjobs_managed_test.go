@@ -235,7 +235,12 @@ func TestManagedCronJobs(t *testing.T) {
 		t.Errorf("kijker voert uit: %d", s)
 	}
 
-	// Uitzetten en weghalen: de timer gaat weg van de nodes.
+	// Uitzetten en weghalen: de timer gaat weg van de nodes. De gebruiker
+	// gaat eerst terug, anders telt de wijziging als meer dan uitzetten
+	// (in CI draait de test niet als root).
+	if _, err := e.pool.Exec(ctx, "UPDATE cron_jobs SET user_name = $2 WHERE id = $1", job.ID, me.Username); err != nil {
+		t.Fatal(err)
+	}
 	in["enabled"], in["user"] = false, me.Username
 	if s := c.do("PUT", "/api/v1/cron-jobs/"+job.ID, in, &job); s != http.StatusOK || job.Enabled {
 		t.Fatalf("uitzetten: %d", s)
