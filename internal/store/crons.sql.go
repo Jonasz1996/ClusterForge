@@ -21,6 +21,45 @@ func (q *Queries) DeleteNodeCrons(ctx context.Context, nodeID uuid.UUID) error {
 	return err
 }
 
+const getNodeCron = `-- name: GetNodeCron :one
+SELECT node_id, key, source, file, line, user_name, schedule, command, unit, description, package, enabled, clusterforge, last_run_at, last_end_at, last_exit, last_result, runs, failures, next_run_at, first_seen, subject_id FROM node_crons WHERE node_id = $1 AND key = $2
+`
+
+type GetNodeCronParams struct {
+	NodeID uuid.UUID
+	Key    string
+}
+
+func (q *Queries) GetNodeCron(ctx context.Context, arg GetNodeCronParams) (NodeCron, error) {
+	row := q.db.QueryRow(ctx, getNodeCron, arg.NodeID, arg.Key)
+	var i NodeCron
+	err := row.Scan(
+		&i.NodeID,
+		&i.Key,
+		&i.Source,
+		&i.File,
+		&i.Line,
+		&i.UserName,
+		&i.Schedule,
+		&i.Command,
+		&i.Unit,
+		&i.Description,
+		&i.Package,
+		&i.Enabled,
+		&i.Clusterforge,
+		&i.LastRunAt,
+		&i.LastEndAt,
+		&i.LastExit,
+		&i.LastResult,
+		&i.Runs,
+		&i.Failures,
+		&i.NextRunAt,
+		&i.FirstSeen,
+		&i.SubjectID,
+	)
+	return i, err
+}
+
 const insertNodeCron = `-- name: InsertNodeCron :exec
 INSERT INTO node_crons (node_id, key, source, file, line, user_name, schedule, command, unit, description, package, enabled,
                         clusterforge, last_run_at, last_end_at, last_exit, last_result, runs, failures, next_run_at, first_seen, subject_id)

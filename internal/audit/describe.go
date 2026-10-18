@@ -647,6 +647,10 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 			s += " met exitcode " + e
 		}
 		return s
+	case "node.cron_disabled":
+		return fmt.Sprintf("Cronjob %s op %s in commentaar gezet (%s)", str(p, "command"), name, str(p, "file"))
+	case "node.cron_enabled":
+		return fmt.Sprintf("Cronjob %s op %s weer aangezet (%s)", str(p, "command"), name, str(p, "file"))
 	case "node.cron_logging":
 		if b, _ := p["enabled"].(bool); b {
 			return "cron op " + name + " logt nu het einde en de exitcode van elke job"

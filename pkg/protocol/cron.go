@@ -26,6 +26,15 @@ const CronManagedSince = 18
 // herhalen na een fout.
 const CronFollowSince = 19
 
+// CronToggleSince is de eerste protocolversie met CronToggle: een gevonden
+// cronregel in commentaar zetten of weer aanzetten. CronList meldt zo'n
+// regel dan met Enabled false.
+const CronToggleSince = 20
+
+// CronOffPrefix staat voor een cronregel die ClusterForge in commentaar
+// zette; de rest van de regel is de regel zoals hij was.
+const CronOffPrefix = "# uitgezet door ClusterForge: "
+
 // SubjectCron draagt de cronverzoeken: cf.node.<id>.cron. Een eigen subject,
 // zodat een trage journal de commando's op cmd niet ophoudt.
 const SubjectCron = "cron"
@@ -56,6 +65,12 @@ const (
 	CronOutput = "output"
 	// CronStop stopt de lopende run van JobID.
 	CronStop = "stop"
+	// CronToggle zet een gevonden cronregel in commentaar (Enable false),
+	// met CronOffPrefix ervoor, of haalt dat weer weg. Entry zegt welke
+	// regel: bestand, regelnummer, gebruiker, schema en het gemaskeerde
+	// commando zoals CronList het gaf. Staat de regel niet meer op dat
+	// nummer, dan zoekt de agent hem in de rest van het bestand.
+	CronToggle = "toggle"
 )
 
 // Waar de agent de beheerde jobs bewaart.
@@ -171,6 +186,8 @@ type CronRequest struct {
 	JobID string `json:"job_id,omitempty"`
 	// RunID hoort bij CronOutput.
 	RunID string `json:"run_id,omitempty"`
+	// Entry hoort bij CronToggle.
+	Entry *CronEntry `json:"entry,omitempty"`
 }
 
 type CronResponse struct {

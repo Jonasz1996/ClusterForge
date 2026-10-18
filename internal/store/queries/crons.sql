@@ -61,3 +61,6 @@ SELECT j.node_id, j.key, j.subject_id, j.file, j.command, j.schedule, j.last_run
 FROM node_crons j
 JOIN nodes n ON n.id = j.node_id
 WHERE j.package = '' AND j.subject_id IS NOT NULL;
+
+-- name: GetNodeCron :one
+SELECT * FROM node_crons WHERE node_id = $1 AND key = $2;

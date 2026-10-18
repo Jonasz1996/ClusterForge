@@ -10,6 +10,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/cronjobs"
 	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/httpapi/gen"
+	"github.com/Jonasz1996/clusterforge/internal/store"
 )
 
 func (s *Server) ListCronjobs(w http.ResponseWriter, r *http.Request) {
@@ -87,6 +88,54 @@ func (s *Server) SetCronLogging(w http.ResponseWriter, r *http.Request, nodeID u
 	switch {
 	case errors.Is(err, cronjobs.ErrNotFound):
 		writeError(w, http.StatusNotFound, "not_found", "node niet gevonden of zonder agent")
+	case errors.Is(err, cronjobs.ErrAgentTooOld):
+		writeError(w, http.StatusConflict, "agent_too_old", err.Error())
+	case errors.As(err, &agentErr):
+		writeError(w, http.StatusBadGateway, "agent", agentErr.Msg)
+	case err != nil:
+		s.internalError(w, r, err)
+	default:
+		if out == nil {
+			out = []string{}
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"output": out})
+	}
+}
+
+func (s *Server) ToggleNodeCron(w http.ResponseWriter, r *http.Request, nodeID uuid.UUID, key string) {
+	p, ok := requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	var req gen.ToggleNodeCronJSONRequestBody
+	if !decode(w, r, &req) {
+		return
+	}
+	ref, ok := s.nodeCluster(w, r, nodeID)
+	if !ok {
+		return
+	}
+	if ref != nil {
+		c, err := s.q.GetCluster(r.Context(), *ref)
+		if err != nil {
+			s.internalError(w, r, err)
+			return
+		}
+		what := "een cronjob uitzetten"
+		if req.Enabled {
+			what = "een cronjob weer aanzetten"
+		}
+		if !confirmProd(w, p, c.Environment == store.EnvironmentProd, c.Slug, req.Confirm, what) {
+			return
+		}
+	}
+	out, err := s.cronjobs.ToggleFound(r.Context(), events.User(p.User.ID), nodeID, key, req.Enabled)
+	var agentErr *cronjobs.AgentError
+	switch {
+	case errors.Is(err, cronjobs.ErrNotFound), errors.Is(err, cronjobs.ErrCronNotFound):
+		writeError(w, http.StatusNotFound, "not_found", err.Error())
+	case errors.Is(err, cronjobs.ErrNotToggleable):
+		writeError(w, http.StatusBadRequest, "not_toggleable", err.Error())
 	case errors.Is(err, cronjobs.ErrAgentTooOld):
 		writeError(w, http.StatusConflict, "agent_too_old", err.Error())
 	case errors.As(err, &agentErr):

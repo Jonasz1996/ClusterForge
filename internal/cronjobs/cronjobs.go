@@ -391,3 +391,66 @@ func (s *Service) SetLogging(ctx context.Context, actor events.Actor, nodeID uui
 	}
 	return res.Output, nil
 }
+
+// Fouten van ToggleFound.
+var (
+	// ErrCronNotFound: de node meldt die cronjob niet (meer).
+	ErrCronNotFound = errors.New("die cronjob staat niet (meer) op de node")
+	// ErrNotToggleable: alleen een regel in een crontab kan aan of uit.
+	ErrNotToggleable = errors.New("alleen een regel in /etc/crontab, /etc/cron.d of de crontab van een gebruiker kan aan of uit; een timer of een script in cron.daily niet")
+)
+
+// ToggleFound zet een gevonden cronregel op een node in commentaar, of weer
+// aan, en leest de node daarna opnieuw.
+func (s *Service) ToggleFound(ctx context.Context, actor events.Actor, nodeID uuid.UUID, key string, enable bool) ([]string, error) {
+	nodes, err := s.q.ListCronCandidateNodes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	i := slices.IndexFunc(nodes, func(n store.ListCronCandidateNodesRow) bool { return n.ID == nodeID })
+	if i < 0 {
+		return nil, ErrNotFound
+	}
+	n := nodes[i]
+	j, err := s.q.GetNodeCron(ctx, store.GetNodeCronParams{NodeID: nodeID, Key: key})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, ErrCronNotFound
+	} else if err != nil {
+		return nil, err
+	}
+	switch {
+	case j.Clusterforge || (j.Source != protocol.CronSourceCrontab && j.Source != protocol.CronSourceCronD && j.Source != protocol.CronSourceUser):
+		return nil, ErrNotToggleable
+	case n.AgentProtocol < protocol.CronToggleSince:
+		return nil, fmt.Errorf("%w: de agent op %s heeft protocol %d; dit vraagt protocol %d", ErrAgentTooOld, n.Hostname, n.AgentProtocol, protocol.CronToggleSince)
+	}
+	rctx, cancel := context.WithTimeout(ctx, s.Timeout)
+	defer cancel()
+	res, err := s.bus.Cron(rctx, n.ID, protocol.CronRequest{Op: protocol.CronToggle, Enable: enable, Entry: &protocol.CronEntry{
+		Source: j.Source, File: j.File, Line: int(j.Line), User: j.UserName, Schedule: j.Schedule, Command: j.Command,
+	}})
+	switch {
+	case errors.Is(err, agentbus.ErrAgentOffline):
+		return nil, &AgentError{"de agent op " + n.Hostname + " is niet verbonden"}
+	case errors.Is(err, agentbus.ErrNoAnswer):
+		return nil, &AgentError{"de agent op " + n.Hostname + " antwoordde niet op tijd"}
+	case err != nil:
+		return nil, &AgentError{err.Error()}
+	case res.Error != "":
+		return nil, &AgentError{n.Hostname + ": " + res.Error}
+	}
+	action := "node.cron_disabled"
+	if enable {
+		action = "node.cron_enabled"
+	}
+	if err := s.ev.Write(ctx, nil, events.Event{
+		Actor: actor, SubjectType: "node", SubjectID: n.ID.String(), ClusterID: n.ClusterID, Action: action,
+		Payload: map[string]any{"hostname": n.Hostname, "file": j.File, "user": j.UserName, "schedule": j.Schedule, "command": j.Command},
+	}); err != nil {
+		return nil, err
+	}
+	if err := s.syncNode(ctx, n); err != nil {
+		s.log.Warn("cronjobs opnieuw lezen na aan- of uitzetten mislukt", "node", n.Hostname, "err", err)
+	}
+	return res.Output, nil
+}

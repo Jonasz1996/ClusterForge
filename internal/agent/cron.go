@@ -110,6 +110,8 @@ func (a *Agent) handleCron(data []byte) protocol.CronResponse {
 		return a.cronOutput(req.JobID, req.RunID)
 	case protocol.CronStop:
 		return a.cronStop(ctx, req.JobID)
+	case protocol.CronToggle:
+		return a.cronToggle(req.Entry, req.Enable)
 	default:
 		return protocol.CronResponse{Error: "onbekend cronverzoek " + req.Op, Entries: []protocol.CronEntry{}}
 	}
@@ -236,32 +238,44 @@ func parseCrontabFile(c *Collector, p, source, user string) []rawCron {
 	for sc.Scan() {
 		n++
 		line := strings.TrimSpace(sc.Text())
-		if line == "" || strings.HasPrefix(line, "#") || cronEnvLine.MatchString(line) {
-			continue
+		// Een regel die ClusterForge uitzette, staat er als uit.
+		enabled := true
+		if rest, ok := strings.CutPrefix(line, protocol.CronOffPrefix); ok {
+			line, enabled = strings.TrimSpace(rest), false
 		}
-		schedule, rest, ok := splitSchedule(line)
+		schedule, u, cmd, ok := parseCronLine(line, user)
 		if !ok {
 			continue
 		}
-		u := user
-		if u == "" {
-			rest = strings.TrimLeft(rest, " \t")
-			i := strings.IndexAny(rest, " \t")
-			if i <= 0 {
-				continue
-			}
-			u, rest = rest[:i], rest[i:]
-		}
-		cmd := strings.TrimSpace(rest)
-		if cmd == "" {
-			continue
-		}
 		out = append(out, rawCron{
-			entry:   protocol.CronEntry{Source: source, File: p, Line: n, User: u, Schedule: schedule, Command: cmd, Enabled: true},
+			entry:   protocol.CronEntry{Source: source, File: p, Line: n, User: u, Schedule: schedule, Command: cmd, Enabled: enabled},
 			command: cmd, path: p,
 		})
 	}
 	return out
+}
+
+// parseCronLine leest één regel van een crontab. user leeg betekent dat de
+// regel een gebruikersveld heeft.
+func parseCronLine(line, user string) (schedule, u, cmd string, ok bool) {
+	if line == "" || strings.HasPrefix(line, "#") || cronEnvLine.MatchString(line) {
+		return "", "", "", false
+	}
+	schedule, rest, ok := splitSchedule(line)
+	if !ok {
+		return "", "", "", false
+	}
+	u = user
+	if u == "" {
+		rest = strings.TrimLeft(rest, " \t")
+		i := strings.IndexAny(rest, " \t")
+		if i <= 0 {
+			return "", "", "", false
+		}
+		u, rest = rest[:i], rest[i:]
+	}
+	cmd = strings.TrimSpace(rest)
+	return schedule, u, cmd, cmd != ""
 }
 
 // splitSchedule haalt de tijdsaanduiding van een cronregel af: vijf velden

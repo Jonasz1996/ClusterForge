@@ -1,12 +1,24 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
 import { ProdConfirm, prodConfirmed, useProdTotp } from "@/components/ProdConfirm";
 import { Alert, Button, Card, Field, Input, PageHeader, Select, Textarea } from "@/components/ui";
 import { ApiError } from "@/lib/api/client";
-import { jobInputOf, useCronSchedule, useManagedCronJob, useSaveCronJob, type ManagedCronJob, type ManagedCronJobInput } from "@/lib/cronjobs";
-import { useClusters, useIsAdmin, useNodes } from "@/lib/inventory";
+import {
+  adoptInput,
+  jobInputOf,
+  useCronjobs,
+  useCronSchedule,
+  useManagedCronJob,
+  useSaveCronJob,
+  useToggleCron,
+  type CronJob,
+  type ManagedCronJob,
+  type ManagedCronJobInput,
+} from "@/lib/cronjobs";
+import { useCluster, useClusters, useIsAdmin, useNodes } from "@/lib/inventory";
 
 const presets: { label: string; schedule: string }[] = [
   { label: "Elk uur", schedule: "0 * * * *" },
@@ -46,19 +58,43 @@ function EditInner() {
   const existing = useManagedCronJob(id);
   const isAdmin = useIsAdmin();
   const job = existing.data?.job;
+  const adoptKey = params.get("overnemen") ?? "";
+  const initialCluster = params.get("cluster") ?? "";
+  const found = useCronjobs();
+  const cluster = useCluster(adoptKey !== "" ? initialCluster : "");
   if (!isAdmin) return <Alert>Alleen een beheerder kan cronjobs maken of wijzigen.</Alert>;
   if (id !== "" && !job) return <p className="text-sm text-slate-500">Laden…</p>;
-  return <JobForm key={job?.id ?? "nieuw"} job={job} initialCluster={params.get("cluster") ?? ""} />;
+  if (adoptKey !== "") {
+    if (!found.data || !cluster.data) return <p className="text-sm text-slate-500">Laden…</p>;
+    const g = found.data.find((x) => x.cluster_id === initialCluster);
+    const origin = g?.jobs.find((j) => j.key === adoptKey);
+    if (!g || !origin) return <Alert>Die cronjob staat niet (meer) op de nodes van dit cluster.</Alert>;
+    return <JobForm key={`overnemen-${adoptKey}`} initialCluster={initialCluster} origin={origin} initial={adoptInput(origin, g, cluster.data.vips.length > 0)} />;
+  }
+  return <JobForm key={job?.id ?? "nieuw"} job={job} initialCluster={initialCluster} />;
 }
 
-function JobForm({ job, initialCluster }: { job?: ManagedCronJob; initialCluster: string }) {
+function JobForm({
+  job,
+  initialCluster,
+  origin,
+  initial,
+}: {
+  job?: ManagedCronJob;
+  initialCluster: string;
+  origin?: CronJob;
+  initial?: ManagedCronJobInput;
+}) {
   const id = job?.id ?? "";
   const clusters = useClusters();
   const nodes = useNodes();
   const totp = useProdTotp();
   const save = useSaveCronJob();
   const router = useRouter();
-  const [form, setForm] = useState<ManagedCronJobInput>(job ? jobInputOf(job) : empty);
+  const [form, setForm] = useState<ManagedCronJobInput>(job ? jobInputOf(job) : (initial ?? empty));
+  const toggle = useToggleCron();
+  const [created, setCreated] = useState<string | null>(null);
+  const originOn = origin?.nodes.filter((n) => n.enabled) ?? [];
   const [clusterId, setClusterId] = useState(job?.cluster_id ?? initialCluster);
   const [confirm, setConfirm] = useState("");
 
@@ -70,11 +106,43 @@ function JobForm({ job, initialCluster }: { job?: ManagedCronJob; initialCluster
   const set = (patch: Partial<ManagedCronJobInput>) => setForm((f) => ({ ...f, ...patch }));
   const err = (field: string) => (fieldError === field && save.error ? <p className="mt-1 text-sm text-red-700 dark:text-red-300">{save.error.message}</p> : null);
 
+  // Bij overnemen gaat de oude regel daarna in commentaar, op elke node
+  // waar hij aanstond.
   const submit = () =>
     save.mutate(
       { id: id || undefined, clusterId, body: { ...form, confirm: prod ? confirm : undefined } },
-      { onSuccess: (j) => router.push(`/cronjobs/job?id=${j.id}`) },
+      {
+        onSuccess: (j) => {
+          if (!origin || originOn.length === 0) {
+            router.push(`/cronjobs/job?id=${j.id}`);
+            return;
+          }
+          setCreated(j.id);
+          toggle.mutate(
+            { key: origin.key, nodes: originOn, enabled: false, confirm: prod ? confirm : undefined },
+            { onSuccess: () => router.push(`/cronjobs/job?id=${j.id}`) },
+          );
+        },
+      },
     );
+
+  if (created) {
+    return (
+      <div className="space-y-4">
+        <PageHeader title={`${form.name} overgenomen`} />
+        {toggle.isPending && <p className="text-sm text-slate-500">De oude regel gaat in commentaar op {originOn.map((n) => n.hostname).join(", ")}…</p>}
+        {toggle.isError && (
+          <Alert>
+            De beheerde job staat er, maar de oude regel kon niet overal uit: {toggle.error.message}. Zet hem uit bij Gevonden op de nodes, anders draait
+            de job twee keer.
+          </Alert>
+        )}
+        <Link href={`/cronjobs/job?id=${created}`} className="text-sm text-brand-700 hover:underline dark:text-sky-300">
+          Naar de job
+        </Link>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -82,6 +150,15 @@ function JobForm({ job, initialCluster }: { job?: ManagedCronJob; initialCluster
         title={id ? `${job?.name} bewerken` : "Cronjob toevoegen"}
         description="Een beheerde cronjob staat als systemd-timer op de nodes van het cluster. cf-agent start het commando, houdt bij of het lukte en stuurt de uitvoer naar ClusterForge."
       />
+      {origin && (
+        <Alert kind="info">
+          Overnemen van {origin.file}
+          {origin.line ? `, regel ${origin.line}` : ""} op {origin.nodes.map((n) => n.hostname).join(", ")}. Na het opslaan zet ClusterForge die regel in
+          commentaar, met &quot;# uitgezet door ClusterForge&quot; ervoor; terugzetten kan bij Gevonden op de nodes.
+          {form.command.includes("***") &&
+            " Het commando bevat een wachtwoord dat ClusterForge niet ziet (***). Zet het in een bestand op de node, zoals ~/.my.cnf, en pas het commando aan."}
+        </Alert>
+      )}
       <Card>
         <div className="grid max-w-2xl gap-4">
           <Field label="Cluster" htmlFor="cluster">
@@ -188,8 +265,8 @@ function JobForm({ job, initialCluster }: { job?: ManagedCronJob; initialCluster
           {prod && cluster && <ProdConfirm slug={cluster.slug} value={confirm} onChange={setConfirm} />}
           {save.isError && !fieldError && <Alert>{save.error.message}</Alert>}
           <div>
-            <Button disabled={clusterId === "" || save.isPending || (prod && !prodConfirmed(cluster?.slug ?? "", confirm, totp))} onClick={submit}>
-              {save.isPending ? "Bezig…" : id ? "Opslaan" : "Toevoegen"}
+            <Button disabled={clusterId === "" || save.isPending || (!!origin && form.command.includes("***")) || (prod && !prodConfirmed(cluster?.slug ?? "", confirm, totp))} onClick={submit}>
+              {save.isPending ? "Bezig…" : id ? "Opslaan" : origin ? "Overnemen" : "Toevoegen"}
             </Button>
           </div>
         </div>
