@@ -3344,6 +3344,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/cronjobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * De cronjobs en systemd-timers die de agents melden
+         * @description ClusterForge vraagt elke vijf minuten elke node naar zijn cronjobs en timers, via agentprotocol 16: /etc/crontab,
+         *     /etc/cron.d, de crontabs van gebruikers, de periodieke mappen en de systemd-timers, met de laatste run uit de journal.
+         *     Per cluster dezelfde job op meer nodes samen. Wachtwoorden in commando's zijn op de node al gemaskeerd. Ook voor
+         *     viewers.
+         */
+        get: operations["listCronjobs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/cronjobs/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** De cronjobs van alle nodes meteen opnieuw lezen */
+        post: operations["refreshCronjobs"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/databases/migration": {
         parameters: {
             query?: never;
@@ -5306,6 +5346,93 @@ export interface components {
             kind: string;
             source: number;
             target: number;
+        };
+        /** @description De cronjobs van één cluster, of van de nodes zonder cluster. */
+        CronGroup: {
+            /** @description Uniek per groep, voor de webinterface */
+            key: string;
+            /** Format: uuid */
+            cluster_id: string | null;
+            cluster_name: string;
+            cluster_slug: string;
+            cluster_environment: components["schemas"]["Environment"] | null;
+            nodes: components["schemas"]["CronNodeRead"][];
+            jobs: components["schemas"]["CronJob"][];
+        };
+        CronNodeRead: {
+            /** Format: uuid */
+            node_id: string;
+            hostname: string;
+            /** @description cron, cronie of leeg als er geen cron draait */
+            daemon: string;
+            /** @description cron logt einde en exitcode (-L 15) */
+            logging: boolean;
+            /** @description De agent kon de journal lezen */
+            journal: boolean;
+            /** @description De node had meer dan 1000 jobs; de rest ontbreekt */
+            truncated: boolean;
+            error: string;
+            /** @description Waarom ClusterForge het de agent niet kon vragen: old_agent, offline, no_answer of agent; leeg als hij antwoordde */
+            error_kind: string;
+            /** Format: date-time */
+            synced_at: string;
+            /**
+             * Format: date-time
+             * @description Wanneer de agent het laatst antwoordde
+             */
+            ok_at: string | null;
+        };
+        /** @description Eén cronjob of timer, met de nodes waarop hij staat. */
+        CronJob: {
+            /** @description Dezelfde voor dezelfde job op elke node */
+            key: string;
+            /**
+             * @description /etc/crontab, /etc/cron.d, de crontab van een gebruiker, cron.hourly/daily/weekly/monthly, of een systemd-timer
+             * @enum {string}
+             */
+            source: "crontab" | "cron.d" | "user" | "periodic" | "timer";
+            /** @description Het bestand */
+            file: string;
+            line: number;
+            user: string;
+            /** @description Vijf velden, een @-woord, hourly/daily/weekly/monthly, of de OnCalendar van een timer */
+            schedule: string;
+            /** @description Het schema in gewone taal; leeg als ClusterForge het niet kan lezen */
+            describe: string;
+            /** @description Gemaskeerd */
+            command: string;
+            /** @description De service van een timer */
+            unit: string;
+            description: string;
+            /** @description Het Debian-pakket van het bestand; leeg voor wat Jonas zelf maakte */
+            package: string;
+            /** @description Een job die ClusterForge zelf beheert */
+            clusterforge: boolean;
+            /** Format: date-time */
+            next_run: string | null;
+            nodes: components["schemas"]["CronJobNode"][];
+        };
+        CronJobNode: {
+            /** Format: uuid */
+            node_id: string;
+            hostname: string;
+            enabled: boolean;
+            /** Format: date-time */
+            last_run: string | null;
+            /** Format: date-time */
+            last_end: string | null;
+            last_exit: number | null;
+            /**
+             * @description started: cron logde de start maar niet de uitkomst (cron zonder -L 15)
+             * @enum {string}
+             */
+            last_result: "" | "ok" | "failed" | "running" | "started";
+            /** @description Runs in de laatste 24 uur */
+            runs: number;
+            /** @description Mislukte runs in de laatste 24 uur */
+            failures: number;
+            /** Format: date-time */
+            next_run: string | null;
         };
         /** @description Eén databasecluster, de servers van één engine in één cluster, of één losse node. */
         DatabaseGroup: {
@@ -15221,6 +15348,48 @@ export interface operations {
                         items: components["schemas"]["DatabaseGroup"][];
                     };
                 };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    listCronjobs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["CronGroup"][];
+                    };
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    refreshCronjobs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Gestart */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             401: components["responses"]["Error"];
         };

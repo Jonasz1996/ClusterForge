@@ -3531,6 +3531,33 @@ paths:
                 properties:
                   items: { type: array, items: { $ref: "#/components/schemas/DatabaseGroup" } }
         "401": { $ref: "#/components/responses/Error" }
+  /cronjobs:
+    get:
+      operationId: listCronjobs
+      summary: De cronjobs en systemd-timers die de agents melden
+      description: |
+        ClusterForge vraagt elke vijf minuten elke node naar zijn cronjobs en timers, via agentprotocol 16: /etc/crontab,
+        /etc/cron.d, de crontabs van gebruikers, de periodieke mappen en de systemd-timers, met de laatste run uit de journal.
+        Per cluster dezelfde job op meer nodes samen. Wachtwoorden in commando's zijn op de node al gemaskeerd. Ook voor
+        viewers.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/CronGroup" } }
+        "401": { $ref: "#/components/responses/Error" }
+  /cronjobs/refresh:
+    post:
+      operationId: refreshCronjobs
+      summary: De cronjobs van alle nodes meteen opnieuw lezen
+      responses:
+        "202": { description: Gestart }
+        "401": { $ref: "#/components/responses/Error" }
   /databases/migration:
     get:
       operationId: getDatabaseMigration
@@ -5553,6 +5580,75 @@ components:
         kind: { type: string, description: "views, routines, triggers of events" }
         source: { type: integer }
         target: { type: integer }
+    CronGroup:
+      type: object
+      description: De cronjobs van één cluster, of van de nodes zonder cluster.
+      required: [key, cluster_id, cluster_name, cluster_slug, cluster_environment, nodes, jobs]
+      properties:
+        key: { type: string, description: "Uniek per groep, voor de webinterface" }
+        cluster_id: { type: string, format: uuid, nullable: true }
+        cluster_name: { type: string }
+        cluster_slug: { type: string }
+        cluster_environment:
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/Environment" }]
+        nodes: { type: array, items: { $ref: "#/components/schemas/CronNodeRead" } }
+        jobs: { type: array, items: { $ref: "#/components/schemas/CronJob" } }
+    CronNodeRead:
+      type: object
+      required: [node_id, hostname, daemon, logging, journal, truncated, error, error_kind, synced_at, ok_at]
+      properties:
+        node_id: { type: string, format: uuid }
+        hostname: { type: string }
+        daemon: { type: string, description: "cron, cronie of leeg als er geen cron draait" }
+        logging: { type: boolean, description: "cron logt einde en exitcode (-L 15)" }
+        journal: { type: boolean, description: De agent kon de journal lezen }
+        truncated: { type: boolean, description: "De node had meer dan 1000 jobs; de rest ontbreekt" }
+        error: { type: string }
+        error_kind:
+          type: string
+          description: "Waarom ClusterForge het de agent niet kon vragen: old_agent, offline, no_answer of agent; leeg als hij antwoordde"
+        synced_at: { type: string, format: date-time }
+        ok_at: { type: string, format: date-time, nullable: true, description: Wanneer de agent het laatst antwoordde }
+    CronJob:
+      type: object
+      description: Eén cronjob of timer, met de nodes waarop hij staat.
+      required: [key, source, file, line, user, schedule, describe, command, unit, description, package, clusterforge, nodes, next_run]
+      properties:
+        key: { type: string, description: Dezelfde voor dezelfde job op elke node }
+        source:
+          type: string
+          enum: [crontab, cron.d, user, periodic, timer]
+          description: "/etc/crontab, /etc/cron.d, de crontab van een gebruiker, cron.hourly/daily/weekly/monthly, of een systemd-timer"
+        file: { type: string, description: Het bestand, of de unit van een timer }
+        line: { type: integer }
+        user: { type: string }
+        schedule: { type: string, description: "Vijf velden, een @-woord, hourly/daily/weekly/monthly, of de OnCalendar van een timer" }
+        describe: { type: string, description: "Het schema in gewone taal; leeg als ClusterForge het niet kan lezen" }
+        command: { type: string, description: Gemaskeerd }
+        unit: { type: string, description: De service van een timer }
+        description: { type: string }
+        package: { type: string, description: "Het Debian-pakket van het bestand; leeg voor wat Jonas zelf maakte" }
+        clusterforge: { type: boolean, description: Een job die ClusterForge zelf beheert }
+        next_run: { type: string, format: date-time, nullable: true }
+        nodes: { type: array, items: { $ref: "#/components/schemas/CronJobNode" } }
+    CronJobNode:
+      type: object
+      required: [node_id, hostname, enabled, last_run, last_end, last_exit, last_result, runs, failures, next_run]
+      properties:
+        node_id: { type: string, format: uuid }
+        hostname: { type: string }
+        enabled: { type: boolean }
+        last_run: { type: string, format: date-time, nullable: true }
+        last_end: { type: string, format: date-time, nullable: true }
+        last_exit: { type: integer, nullable: true }
+        last_result:
+          type: string
+          enum: ["", ok, failed, running, started]
+          description: "started: cron logde de start maar niet de uitkomst (cron zonder -L 15)"
+        runs: { type: integer, description: Runs in de laatste 24 uur }
+        failures: { type: integer, description: Mislukte runs in de laatste 24 uur }
+        next_run: { type: string, format: date-time, nullable: true }
     DatabaseGroup:
       type: object
       description: Eén databasecluster, de servers van één engine in één cluster, of één losse node.

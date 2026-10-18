@@ -20,6 +20,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/backups"
 	"github.com/Jonasz1996/clusterforge/internal/components"
 	"github.com/Jonasz1996/clusterforge/internal/config"
+	"github.com/Jonasz1996/clusterforge/internal/cronjobs"
 	"github.com/Jonasz1996/clusterforge/internal/databases"
 	"github.com/Jonasz1996/clusterforge/internal/deploy"
 	"github.com/Jonasz1996/clusterforge/internal/deps"
@@ -78,6 +79,7 @@ type Server struct {
 	reports      *reports.Service
 	kube         *kube.Service
 	databases    *databases.Service
+	cronjobs     *cronjobs.Service
 	components   *components.Service
 	kubeNodes    *kubenodes.Service
 	lessons      *kubelessons.Engine
@@ -143,6 +145,7 @@ type Deps struct {
 	KubeNodes *kubenodes.Service
 	// Databases leest de MariaDB- en PostgreSQL-servers op de nodes.
 	Databases *databases.Service
+	Cronjobs  *cronjobs.Service
 	// Components zet een database op de nodes van een cluster.
 	Components *components.Service
 	Version    string
@@ -190,6 +193,7 @@ func New(d Deps) *Server {
 		reports:        d.Reports,
 		kube:           d.Kube,
 		databases:      d.Databases,
+		cronjobs:       d.Cronjobs,
 		components:     d.Components,
 		kubeNodes:      d.KubeNodes,
 	}

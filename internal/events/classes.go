@@ -47,6 +47,7 @@ var classes = map[string]Class{
 	"agent.enrolled": ClassChange, "agent.enroll_failed": ClassInfo, "agent.command": ClassChange,
 	"agent.revoked": ClassChange, "enrollment_token.created": ClassInfo, "enrollment_token.deleted": ClassInfo,
 	"node.facts_changed": ClassInfo,
+	"node.cron_added":    ClassChange, "node.cron_removed": ClassChange, "node.cron_changed": ClassChange,
 
 	"proxmox.created": ClassInfo, "proxmox.updated": ClassInfo, "proxmox.deleted": ClassInfo,
 	"proxmox.sync_requested": ClassInfo, "proxmox.sync_failed": ClassSymptom, "proxmox.sync_recovered": ClassInfo,

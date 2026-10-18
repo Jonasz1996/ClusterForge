@@ -1033,6 +1033,42 @@ type NodeChange struct {
 	JobID      *uuid.UUID
 }
 
+type NodeCron struct {
+	NodeID       uuid.UUID
+	Key          string
+	Source       string
+	File         string
+	Line         int32
+	UserName     string
+	Schedule     string
+	Command      string
+	Unit         string
+	Description  string
+	Package      string
+	Enabled      bool
+	Clusterforge bool
+	LastRunAt    *time.Time
+	LastEndAt    *time.Time
+	LastExit     *int32
+	LastResult   string
+	Runs         int32
+	Failures     int32
+	NextRunAt    *time.Time
+	FirstSeen    time.Time
+}
+
+type NodeCronRead struct {
+	NodeID    uuid.UUID
+	Daemon    string
+	Logging   bool
+	Journal   bool
+	Truncated bool
+	Error     string
+	ErrorKind string
+	SyncedAt  time.Time
+	OkAt      *time.Time
+}
+
 type NodeFact struct {
 	NodeID      uuid.UUID
 	Hash        string

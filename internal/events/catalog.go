@@ -24,6 +24,7 @@ const (
 	CategoryRisk      Category = "risk"
 	CategoryDocs      Category = "docs"
 	CategoryKube      Category = "kubernetes"
+	CategoryCron      Category = "cron"
 )
 
 // Categories staan in de volgorde van het filter in de webinterface.
@@ -48,6 +49,7 @@ var Categories = []struct {
 	{CategoryRisk, "Gezondheid"},
 	{CategoryDocs, "Documentatie"},
 	{CategoryKube, "Kubernetes"},
+	{CategoryCron, "Cronjobs"},
 }
 
 // Spec beschrijft een action: zijn soort en een korte Nederlandse omschrijving
@@ -135,6 +137,9 @@ var Known = map[string]Spec{
 	"enrollment_token.created": {CategoryAgents, "Aanmeldtoken gemaakt"},
 	"enrollment_token.deleted": {CategoryAgents, "Aanmeldtoken ingetrokken"},
 	"node.facts_changed":       {CategoryAgents, "Facts van node gewijzigd"},
+	"node.cron_added":          {CategoryCron, "Cronjob verschenen op node"},
+	"node.cron_removed":        {CategoryCron, "Cronjob verdwenen van node"},
+	"node.cron_changed":        {CategoryCron, "Cronjob gewijzigd op node"},
 
 	"proxmox.created":               {CategoryProxmox, "Proxmox gekoppeld"},
 	"proxmox.updated":               {CategoryProxmox, "Proxmox-koppeling gewijzigd"},
