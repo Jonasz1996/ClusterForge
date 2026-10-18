@@ -52,7 +52,8 @@ var (
 
 // warnings geeft de waarschuwingen bij één job in een cluster.
 func warnings(j Job, cc clusterContext) []Warning {
-	if j.Package != "" || j.ClusterForge {
+	// Een job die op geen enkele node aanstaat, doet niets meer.
+	if j.Package != "" || j.ClusterForge || !slices.ContainsFunc(j.Nodes, func(n JobNode) bool { return n.Enabled }) {
 		return nil
 	}
 	var out []Warning

@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { useState } from "react";
 import { ago, Empty, EnvBadge, QueryState, tableClass, tdClass, thClass } from "@/components/inventory/bits";
-import { Badge, Button, Card } from "@/components/ui";
+import { ProdConfirm, prodConfirmed, useProdTotp } from "@/components/ProdConfirm";
+import { Alert, Badge, Button, Card } from "@/components/ui";
 import { useIsAdmin } from "@/lib/inventory";
 import {
   missingOn,
@@ -11,7 +12,9 @@ import {
   warningTone,
   resultInfo,
   sourceLabel,
+  toggleable,
   useCronjobs,
+  useToggleCron,
   worstResult,
   type CronGroup,
   type CronJob,
@@ -82,7 +85,9 @@ function NodeRuns({ job, single }: { job: CronJob; single: boolean }) {
 
 // JobRows toont de jobs als tabel. Met group erbij zegt de kolom Nodes ook
 // waar de job ontbreekt.
-export function JobTable({ jobs, group, single }: { jobs: CronJob[]; group?: CronGroup; single?: boolean }) {
+export function JobTable({ jobs, group, single, owner }: { jobs: CronJob[]; group?: CronGroup; single?: boolean; owner?: CronGroup }) {
+  const isAdmin = useIsAdmin();
+  const actions = isAdmin && !!owner;
   return (
     <div className="overflow-x-auto">
       <table className={tableClass}>
@@ -93,6 +98,7 @@ export function JobTable({ jobs, group, single }: { jobs: CronJob[]; group?: Cro
             <th className={thClass}>Gebruiker</th>
             <th className={thClass}>{single ? "Laatste run" : "Nodes en laatste run"}</th>
             <th className={thClass}>Volgende</th>
+            {actions && <th className={thClass} />}
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
@@ -158,11 +164,77 @@ export function JobTable({ jobs, group, single }: { jobs: CronJob[]; group?: Cro
                     <span className="text-slate-400">–</span>
                   )}
                 </td>
+                {actions && owner && (
+                  <td className={tdClass}>
+                    <FoundActions j={j} g={owner} />
+                  </td>
+                )}
               </tr>
             );
           })}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+// FoundActions zijn de knoppen bij een gevonden job: overnemen in
+// ClusterForge, en uit- of weer aanzetten op de nodes waar hij staat.
+function FoundActions({ j, g }: { j: CronJob; g: CronGroup }) {
+  const toggle = useToggleCron();
+  const totp = useProdTotp();
+  const [asking, setAsking] = useState<boolean | null>(null);
+  const [confirm, setConfirm] = useState("");
+  if (!toggleable(j)) return null;
+  const prod = g.cluster_environment === "prod";
+  const on = j.nodes.filter((n) => n.enabled);
+  const off = j.nodes.filter((n) => !n.enabled);
+  const run = (enabled: boolean) =>
+    toggle.mutate(
+      { key: j.key, nodes: enabled ? off : on, enabled, confirm: prod ? confirm : undefined },
+      { onSuccess: () => setAsking(null) },
+    );
+  if (asking !== null) {
+    return (
+      <div className="w-64 space-y-2">
+        <p className="text-sm">
+          {asking
+            ? `De regel staat weer aan op ${off.map((n) => n.hostname).join(", ")}.`
+            : `De regel komt in commentaar op ${on.map((n) => n.hostname).join(", ")}, met "# uitgezet door ClusterForge" ervoor. Weer aanzetten is één klik.`}
+        </p>
+        {prod && <ProdConfirm slug={g.cluster_slug} value={confirm} onChange={setConfirm} />}
+        <div className="flex gap-2">
+          <Button disabled={toggle.isPending || (prod && !prodConfirmed(g.cluster_slug, confirm, totp))} onClick={() => run(asking)}>
+            {toggle.isPending ? "Bezig…" : asking ? "Aanzetten" : "Uitzetten"}
+          </Button>
+          <Button variant="ghost" onClick={() => setAsking(null)}>
+            Annuleren
+          </Button>
+        </div>
+        {toggle.isError && <Alert>{toggle.error.message}</Alert>}
+      </div>
+    );
+  }
+  return (
+    <div className="flex flex-col items-start gap-1 text-sm whitespace-nowrap">
+      {g.cluster_id && on.length > 0 && (
+        <Link
+          href={`/cronjobs/bewerken?cluster=${g.cluster_id}&overnemen=${encodeURIComponent(j.key)}`}
+          className="text-brand-700 hover:underline dark:text-sky-300"
+        >
+          Overnemen in ClusterForge
+        </Link>
+      )}
+      {on.length > 0 && (
+        <button type="button" className="text-slate-600 hover:underline dark:text-slate-300" onClick={() => setAsking(false)}>
+          Uitzetten
+        </button>
+      )}
+      {off.length > 0 && (
+        <button type="button" className="text-slate-600 hover:underline dark:text-slate-300" onClick={() => setAsking(true)}>
+          Weer aanzetten
+        </button>
+      )}
     </div>
   );
 }
@@ -251,7 +323,7 @@ export function GroupCard({ g, showSystem }: { g: CronGroup; showSystem: boolean
       {jobs.length === 0 ? (
         <p className="text-sm text-slate-500">Geen eigen cronjobs op deze nodes.</p>
       ) : (
-        <JobTable jobs={jobs} group={g} />
+        <JobTable jobs={jobs} group={g} owner={g} />
       )}
       {hidden > 0 && (
         <p className="mt-2 text-xs text-slate-500">
@@ -290,7 +362,7 @@ export function NodeCronCard({ nodeId }: { nodeId: string }) {
           <>
             {read.error && <p className="mb-2 text-sm text-amber-700 dark:text-amber-300">{read.error}</p>}
             <LoggingHint nodes={[read]} />
-            {jobs.length === 0 ? <Empty>Geen eigen cronjobs of timers op deze node.</Empty> : <JobTable jobs={jobs} single />}
+            {jobs.length === 0 ? <Empty>Geen eigen cronjobs of timers op deze node.</Empty> : <JobTable jobs={jobs} single owner={group} />}
             {all.length > jobs.length && (
               <button type="button" className="mt-2 text-xs text-brand-700 hover:underline dark:text-sky-300" onClick={() => setShowSystem(true)}>
                 Ook de {all.length - jobs.length} jobs van Debian-pakketten tonen

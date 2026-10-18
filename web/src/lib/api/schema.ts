@@ -3388,6 +3388,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/nodes/{nodeId}/crons/{key}/toggle": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Een gevonden cronregel op een node uit- of weer aanzetten (admin)
+         * @description Zet de regel in commentaar, met "# uitgezet door ClusterForge: " ervoor, of haalt dat weer weg. Alleen voor een regel
+         *     in /etc/crontab, /etc/cron.d of de crontab van een gebruiker; de rest van het bestand blijft zoals het is. Daarna leest
+         *     ClusterForge de node opnieuw. Vraagt agentprotocol 20, en op prod de slug en TOTP.
+         */
+        post: operations["toggleNodeCron"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/cron-jobs": {
         parameters: {
             query?: never;
@@ -15661,6 +15683,45 @@ export interface operations {
             content: {
                 "application/json": {
                     enabled: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description Gedaan */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        output: string[];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+        };
+    };
+    toggleNodeCron: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    enabled: boolean;
+                    /** @description De slug van het cluster */
+                    confirm?: string;
                 };
             };
         };

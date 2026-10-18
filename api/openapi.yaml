@@ -3585,6 +3585,43 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
         "502": { $ref: "#/components/responses/Error" }
+  /nodes/{nodeId}/crons/{key}/toggle:
+    post:
+      operationId: toggleNodeCron
+      summary: Een gevonden cronregel op een node uit- of weer aanzetten (admin)
+      description: |
+        Zet de regel in commentaar, met "# uitgezet door ClusterForge: " ervoor, of haalt dat weer weg. Alleen voor een regel
+        in /etc/crontab, /etc/cron.d of de crontab van een gebruiker; de rest van het bestand blijft zoals het is. Daarna leest
+        ClusterForge de node opnieuw. Vraagt agentprotocol 20, en op prod de slug en TOTP.
+      parameters:
+        - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: key, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled]
+              properties:
+                enabled: { type: boolean }
+                confirm: { type: string, description: De slug van het cluster, op prod }
+      responses:
+        "200":
+          description: Gedaan
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [output]
+                properties:
+                  output: { type: array, items: { type: string } }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
   /cron-jobs:
     get:
       operationId: listCronJobs

@@ -11017,6 +11017,13 @@ type SetCronLoggingJSONBody struct {
 	Enabled bool `json:"enabled"`
 }
 
+// ToggleNodeCronJSONBody defines parameters for ToggleNodeCron.
+type ToggleNodeCronJSONBody struct {
+	// Confirm De slug van het cluster
+	Confirm *string `json:"confirm,omitempty"`
+	Enabled bool    `json:"enabled"`
+}
+
 // GetNodeMetricsParams defines parameters for GetNodeMetrics.
 type GetNodeMetricsParams struct {
 	Range *MetricsRange `form:"range,omitempty" json:"range,omitempty"`
@@ -11310,6 +11317,9 @@ type VerifyNodeBackupJSONRequestBody = BackupVerifyInput
 
 // SetCronLoggingJSONRequestBody defines body for SetCronLogging for application/json ContentType.
 type SetCronLoggingJSONRequestBody SetCronLoggingJSONBody
+
+// ToggleNodeCronJSONRequestBody defines body for ToggleNodeCron for application/json ContentType.
+type ToggleNodeCronJSONRequestBody ToggleNodeCronJSONBody
 
 // CreateProxmoxJSONRequestBody defines body for CreateProxmox for application/json ContentType.
 type CreateProxmoxJSONRequestBody = ProxmoxInput
@@ -11961,6 +11971,9 @@ type ServerInterface interface {
 	// SetCronLogging cron op een node het einde en de exitcode van elke job laten loggen (admin)
 	// (POST /nodes/{nodeId}/cron-logging)
 	SetCronLogging(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// ToggleNodeCron Een gevonden cronregel op een node uit- of weer aanzetten (admin)
+	// (POST /nodes/{nodeId}/crons/{key}/toggle)
+	ToggleNodeCron(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID, key string)
 	// GetNodeDrift Drift van één node
 	// (GET /nodes/{nodeId}/drift)
 	GetNodeDrift(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
@@ -13311,6 +13324,12 @@ func (_ Unimplemented) GetNodeConnections(w http.ResponseWriter, r *http.Request
 // SetCronLogging cron op een node het einde en de exitcode van elke job laten loggen (admin)
 // (POST /nodes/{nodeId}/cron-logging)
 func (_ Unimplemented) SetCronLogging(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ToggleNodeCron Een gevonden cronregel op een node uit- of weer aanzetten (admin)
+// (POST /nodes/{nodeId}/crons/{key}/toggle)
+func (_ Unimplemented) ToggleNodeCron(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID, key string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -20020,6 +20039,41 @@ func (siw *ServerInterfaceWrapper) SetCronLogging(w http.ResponseWriter, r *http
 	handler.ServeHTTP(w, r)
 }
 
+// ToggleNodeCron operation middleware
+func (siw *ServerInterfaceWrapper) ToggleNodeCron(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "key" -------------
+	var key string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "key", chi.URLParam(r, "key"), &key, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "key", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ToggleNodeCron(w, r, nodeId, key)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetNodeDrift operation middleware
 func (siw *ServerInterfaceWrapper) GetNodeDrift(w http.ResponseWriter, r *http.Request) {
 
@@ -21749,6 +21803,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/nodes/{nodeId}/cron-logging", wrapper.SetCronLogging)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/nodes/{nodeId}/crons/{key}/toggle", wrapper.ToggleNodeCron)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/cron-jobs", wrapper.ListCronJobs)

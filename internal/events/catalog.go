@@ -143,6 +143,8 @@ var Known = map[string]Spec{
 	"node.cron_failed":         {CategoryCron, "Cronjob mislukt"},
 	"node.cron_recovered":      {CategoryCron, "Cronjob lukt weer"},
 	"node.cron_logging":        {CategoryCron, "Logging van cron gewijzigd"},
+	"node.cron_disabled":       {CategoryCron, "Cronjob op een node uitgezet"},
+	"node.cron_enabled":        {CategoryCron, "Cronjob op een node weer aangezet"},
 	"cron_job.created":         {CategoryCron, "Beheerde cronjob gemaakt"},
 	"cron_job.updated":         {CategoryCron, "Beheerde cronjob gewijzigd"},
 	"cron_job.enabled":         {CategoryCron, "Beheerde cronjob aangezet"},

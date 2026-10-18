@@ -207,3 +207,75 @@ export function useStopCronRun() {
     },
   });
 }
+
+// toggleable: een regel in een crontab, die ClusterForge in commentaar kan
+// zetten en terug.
+export function toggleable(j: CronJob) {
+  return !j.clusterforge && (j.source === "crontab" || j.source === "cron.d" || j.source === "user");
+}
+
+// useToggleCron zet een gevonden job uit of weer aan op de gegeven nodes,
+// node na node.
+export function useToggleCron() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ key, nodes, enabled, confirm }: { key: string; nodes: { node_id: string; hostname: string }[]; enabled: boolean; confirm?: string }) => {
+      const out: string[] = [];
+      for (const n of nodes) {
+        const res = await api.POST("/nodes/{nodeId}/crons/{key}/toggle", {
+          params: { path: { nodeId: n.node_id, key } },
+          body: { enabled, confirm },
+        });
+        try {
+          out.push(...unwrap(res).output.map((o) => `${n.hostname}: ${o}`));
+        } catch (e) {
+          if (e instanceof Error) e.message = `${n.hostname}: ${e.message}`;
+          throw e;
+        }
+      }
+      return out;
+    },
+    onSettled: () => void qc.invalidateQueries({ queryKey: ["cronjobs"] }),
+  });
+}
+
+// adoptInput maakt van een gevonden job een beheerde: hetzelfde schema,
+// dezelfde gebruiker en hetzelfde commando. Een job op alle nodes van het
+// cluster draait voortaan op de node met het VIP, of zonder VIP op alle
+// nodes; een job op één node op die node.
+export function adoptInput(j: CronJob, g: CronGroup, hasVip: boolean): ManagedCronJobInput {
+  const all = j.nodes.length > 1 && j.nodes.length >= g.nodes.length;
+  const run_on: ManagedCronJobInput["run_on"] = j.nodes.length === 1 && g.nodes.length > 1 ? "node" : all && hasVip ? "vip" : "all";
+  return {
+    name: adoptName(j.command),
+    schedule: j.schedule,
+    run_on,
+    node_id: run_on === "node" ? j.nodes[0].node_id : null,
+    user: j.user || "root",
+    command: j.command,
+    timeout_seconds: 3600,
+    enabled: true,
+    retries: 0,
+    alert: true,
+  };
+}
+
+// adoptName is een naam uit het commando: het eerste programma dat geen
+// cd, sudo of shell is, zoals backup uit /usr/local/bin/backup.sh.
+export function adoptName(command: string) {
+  const skip = new Set(["cd", "sudo", "nice", "ionice", "flock", "timeout", "env", "sh", "bash", "php", "python3", "perl", "&&", ";"]);
+  const words = command.split(/\s+/).filter((w) => w !== "" && !w.includes("="));
+  let prev = "";
+  for (const w of words) {
+    const prog = w.split("/").pop() ?? "";
+    if (w.startsWith("-") || skip.has(prog) || prev === "cd" || prev === "-u") {
+      prev = w;
+      continue;
+    }
+    const base = w.replace(/^["']|["']$/g, "").split("/").pop() ?? "";
+    const name = base.replace(/\.(sh|py|php|pl)$/, "").toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, "");
+    if (name !== "") return name.slice(0, 50);
+    prev = w;
+  }
+  return "overgenomen";
+}
