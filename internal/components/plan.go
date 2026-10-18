@@ -605,7 +605,13 @@ func (s *Service) checkExisting(pn *PlanNode, n *Node, f *protocol.Facts, st dbS
 		add(Warning, "mariadb_takeover", n, fmt.Sprintf("op %s draait al een MariaDB zonder eigen databases; ClusterForge neemt hem over en "+
 			"herstart hem als node van het cluster", n.Hostname), "")
 	default:
+		// Een stilstaande MariaDB toont geen databases; misschien staan ze
+		// er wel. Een nieuwe Galera-node krijgt bij het aansluiten een
+		// volledige kopie en wist wat er stond.
 		pn.Existing = "MariaDB staat erop maar draait niet"
+		add(Blocked, "mariadb_stopped", n, fmt.Sprintf("op %s staat MariaDB maar die draait niet, dus ClusterForge ziet niet welke databases erin "+
+			"staan en zet er geen cluster overheen. Start hem eerst; kijk op de pagina Databases bij Zelfherstel als hij niet start", n.Hostname),
+			"systemctl start mariadb")
 	}
 }
 

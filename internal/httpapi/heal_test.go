@@ -527,10 +527,20 @@ func TestHealRun(t *testing.T) {
 // TestHealRunSingle: een losse MariaDB zonder cluster die stilstaat, start
 // Nu herstellen weer, met de events bij de node.
 func TestHealRunSingle(t *testing.T) {
+	// Een losse MariaDB, en een MySQL (mysql.service) zonder Galera.
+	for _, tc := range []struct{ host, unit, version, title string }{
+		{"mysql1", "mariadb", "11.8.3-MariaDB-0+deb13u1", "MariaDB staat stil op mysql1"},
+		{"web1", "mysql", "8.0.43-0ubuntu0.24.04.2", "MySQL staat stil op web1"},
+	} {
+		t.Run(tc.unit, func(t *testing.T) { healRunSingle(t, tc.host, tc.unit, tc.version, tc.title) })
+	}
+}
+
+func healRunSingle(t *testing.T, host, unit, version, title string) {
 	e, c := adminClient(t)
 	ctx := context.Background()
 	var n node
-	if s := c.do("POST", "/api/v1/nodes", map[string]any{"hostname": "mysql1"}, &n); s != http.StatusCreated {
+	if s := c.do("POST", "/api/v1/nodes", map[string]any{"hostname": host}, &n); s != http.StatusCreated {
 		t.Fatalf("node: %d", s)
 	}
 	a := &addrs{}
@@ -539,17 +549,17 @@ func TestHealRunSingle(t *testing.T) {
 	startAgentWith(t, e, c, n.ID, strings.Repeat("c", 32), a, func(ag *agent.Agent, root string) {
 		h = agenttest.NewHost(root, "10.0.0.50")
 		ag.Exec, ag.Root, ag.Collector.Run = h.Exec, root, h.Exec
-		h.MariaDB = &agenttest.MariaDB{Version: "11.8.3-MariaDB-0+deb13u1", MaxConnections: 151, Down: true}
-		h.SetUnit("mariadb", agenttest.Unit{Enabled: true, Failed: true})
+		h.MariaDB = &agenttest.MariaDB{Version: version, MaxConnections: 151, Down: true}
+		h.SetUnit(unit, agenttest.Unit{Enabled: true, Failed: true})
 		h.Shell = func(cmd string) (bool, []byte, error) {
 			switch cmd {
-			case "systemctl is-active --quiet mariadb":
-				if u, _ := h.Unit("mariadb"); u.Active {
+			case "systemctl is-active --quiet " + unit:
+				if u, _ := h.Unit(unit); u.Active {
 					return true, nil, nil
 				}
 				return true, nil, errors.New("exit status 3")
-			case "systemctl reset-failed mariadb 2>/dev/null; systemctl start --no-block mariadb":
-				h.SetUnit("mariadb", agenttest.Unit{Enabled: true, Active: true})
+			case "systemctl reset-failed " + unit + " 2>/dev/null; systemctl start --no-block " + unit:
+				h.SetUnit(unit, agenttest.Unit{Enabled: true, Active: true})
 				h.Locked(func() { h.MariaDB.Down, h.MariaDB.Uptime = false, 1 })
 				return true, nil, nil
 			}
@@ -558,7 +568,7 @@ func TestHealRunSingle(t *testing.T) {
 	})
 	key := "mariadb/node/" + n.ID
 	var r healView
-	eventually(t, "Zelfherstel ziet mysql1", func() bool {
+	eventually(t, "Zelfherstel ziet "+host, func() bool {
 		if err := e.dbs.SyncAll(ctx); err != nil {
 			t.Fatal(err)
 		}
@@ -568,13 +578,16 @@ func TestHealRunSingle(t *testing.T) {
 		var l list[healView]
 		c.do("GET", "/api/v1/heal", nil, &l)
 		for _, x := range l.Items {
-			if x.Key == key && x.codes() == "unit_stopped@mysql1" {
+			if x.Key == key && x.codes() == "unit_stopped@"+host {
 				r = x
 				return true
 			}
 		}
 		return false
 	})
+	if r.Problems[0].Title != title {
+		t.Errorf("probleem: %+v", r.Problems[0])
+	}
 	if r.Plan == nil || r.Plan.Action != "restart" || !r.Plan.Auto {
 		t.Fatalf("plan: %+v", r.Plan)
 	}
@@ -583,10 +596,10 @@ func TestHealRunSingle(t *testing.T) {
 		t.Fatalf("herstellen: %d", s)
 	}
 	j = waitJobLong(t, c, j.ID)
-	if j.Status != "succeeded" || len(j.Steps) != 1 || j.Steps[0].Name != "mysql1: mariadb starten" || j.NodeID == nil || *j.NodeID != n.ID {
+	if j.Status != "succeeded" || len(j.Steps) != 1 || j.Steps[0].Name != host+": "+unit+" starten" || j.NodeID == nil || *j.NodeID != n.ID {
 		t.Fatalf("taak: %s %s %+v", j.Status, j.Error, j.Steps)
 	}
-	if l := strings.Join(j.Steps[0].Log, "\n"); !strings.Contains(l, "mariadb draait") {
+	if l := strings.Join(j.Steps[0].Log, "\n"); !strings.Contains(l, unit+" draait") {
 		t.Errorf("log:\n%s", l)
 	}
 	var evs []string

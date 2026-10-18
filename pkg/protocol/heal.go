@@ -13,7 +13,8 @@ const DBHeal = "heal"
 
 // Wat een DBHeal doet.
 const (
-	// HealInspect leest units, processen, vrije ruimte en de Galera-config.
+	// HealInspect leest units, processen, vrije ruimte, de Galera-config en
+	// de config van Patroni, en probeert de etcd-adressen van Patroni.
 	HealInspect = "inspect"
 	// HealSetGaleraAddress zet wsrep_cluster_address en wsrep_node_address
 	// in het bestand waar ze staan, na een kopie. Een MariaDB die draait,
@@ -67,7 +68,9 @@ type HealEngine struct {
 	DataTotal uint64 `json:"data_total,omitempty"`
 	// Galera is de Galera-config, voor MariaDB en MySQL met wsrep.
 	Galera *HealGalera `json:"galera,omitempty"`
-	Error  string      `json:"error,omitempty"`
+	// Patroni is de config van Patroni, als de unit patroni is.
+	Patroni *HealPatroni `json:"patroni,omitempty"`
+	Error   string       `json:"error,omitempty"`
 }
 
 // HealProcess is een proces van een database.
@@ -96,6 +99,34 @@ type HealGalera struct {
 	// PeerTimeouts zijn de adressen die de journal van de laatste vijftien
 	// minuten noemt bij "connection to peer … timed out".
 	PeerTimeouts []string `json:"peer_timeouts,omitempty"`
+}
+
+// HealPatroni is wat de agent in de config van Patroni leest, met waar elk
+// adres staat, en of hij etcd bereikt.
+type HealPatroni struct {
+	// File is het configbestand uit ExecStart van patroni.service.
+	File  string `json:"file,omitempty"`
+	Scope string `json:"scope,omitempty"`
+	Name  string `json:"name,omitempty"`
+	// DCS is etcd3 of etcd; een andere, zoals consul, controleert de
+	// agent niet.
+	DCS string `json:"dcs,omitempty"`
+	// Settings zijn de regels met de etcd-adressen (etcd3.hosts, …) en de
+	// connect_address van restapi en postgresql.
+	Settings []HealSetting `json:"settings,omitempty"`
+	// Endpoints zijn de etcd-adressen, met of de agent ze bereikte.
+	Endpoints []HealEndpoint `json:"endpoints,omitempty"`
+	// Etcd is de toestand van etcd.service op deze node; leeg als die er
+	// niet is.
+	Etcd  string `json:"etcd,omitempty"`
+	Error string `json:"error,omitempty"`
+}
+
+// HealEndpoint is een adres dat de agent probeerde te bereiken.
+type HealEndpoint struct {
+	Address string `json:"address"`
+	OK      bool   `json:"ok"`
+	Error   string `json:"error,omitempty"`
 }
 
 // HealSetting is één regel in een configbestand.

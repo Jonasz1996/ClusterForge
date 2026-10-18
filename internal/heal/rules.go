@@ -39,6 +39,8 @@ const (
 	CodeDiskFull     = "disk_full"
 	CodeNoQuorum     = "no_quorum"
 	CodeUnitDisabled = "unit_disabled"
+	CodePatroniDCS   = "patroni_dcs"
+	CodePatroniAddr  = "patroni_wrong_address"
 )
 
 // Wat een plan doet.
@@ -242,9 +244,13 @@ func Diagnose(in Input) Report {
 	}
 	galera := g.Kind == databases.KindGalera || slices.ContainsFunc(states, func(s nodeState) bool { return s.insp != nil && s.insp.Galera != nil && s.insp.Galera.On })
 
-	// Per node: stilstaand, hangend, buiten systemd, schijf.
+	// Per node: stilstaand, hangend, buiten systemd, schijf, Patroni.
 	var outside []string
 	diskLow := map[string]bool{}
+	// noDCS: Patroni bereikt etcd niet; badAddr: Patroni geeft een adres
+	// op dat de node niet heeft.
+	var noDCS, badAddr []string
+	known := knownAddresses(in, states)
 	for _, st := range states {
 		if st.insp == nil {
 			continue
@@ -277,6 +283,15 @@ func Diagnose(in Input) Report {
 			add(CodeDiskFull, LevelWarning, fmt.Sprintf("De schijf van %s is bijna vol", h),
 				fmt.Sprintf("%s heeft nog %s vrij van %s. Een database die niet kan schrijven, stopt; een node die opnieuw aansluit, heeft ruimte nodig voor een volledige kopie. Maak ruimte of vergroot de schijf; ClusterForge gooit niets weg.",
 					e.DataDir, bytes(e.DataFree), bytes(e.DataTotal)), h)
+		}
+		if e.Patroni != nil {
+			dcs, addr := patroniChecks(st, known, add)
+			if dcs && (st.down || st.hung) {
+				noDCS = append(noDCS, h)
+			}
+			if addr {
+				badAddr = append(badAddr, h)
+			}
 		}
 	}
 
@@ -322,9 +337,16 @@ func Diagnose(in Input) Report {
 	if len(outside) > 0 {
 		block(joinHosts(outside) + " heeft een proces buiten systemd; stop het eerst zelf")
 	}
+	if len(noDCS) > 0 {
+		block("Patroni op " + joinHosts(noDCS) + " bereikt etcd niet; starten helpt pas als etcd weer antwoordt")
+	}
 	switch {
 	case galera && len(primaries) == 0:
 		p.Action = ActionGalera
+		if mysql := mysqlGalera(states); len(mysql) > 0 {
+			block(joinHosts(mysql) + " draait Galera met MySQL (mysql.service); een Galera-cluster opnieuw beginnen kan ClusterForge alleen met MariaDB. " +
+				"Begin het zelf op de node met de hoogste seqno, met de opdracht van je distributie (bij Percona XtraDB Cluster systemctl start mysql@bootstrap); daarna sluit Zelfherstel de andere aan")
+		}
 		if len(unknown) > 0 {
 			add(CodeNoQuorum, LevelWarning, "Niet alle nodes zijn te bekijken",
 				fmt.Sprintf("Opnieuw beginnen kan alleen vanaf de node met de nieuwste data, en daarvoor moet ClusterForge elke node zien. %s kan nieuwere data hebben: zorg dat de agent er weer antwoordt.", joinHosts(unknown)), unknown...)
@@ -415,6 +437,8 @@ func Diagnose(in Input) Report {
 			p.AutoWhy = "Adressen wijzigen gebeurt nooit vanzelf: een fout adres splitst het cluster. Bevestig het plan."
 		case anyDisk(diskLow, starts):
 			p.AutoWhy = "Een node heeft te weinig vrije ruimte; starten zou meteen weer stoppen."
+		case len(badAddr) > 0:
+			p.AutoWhy = "Patroni op " + joinHosts(badAddr) + " geeft een adres op dat de node niet heeft; zet dat eerst goed, of bevestig het plan."
 		default:
 			p.Auto = true
 			p.AutoWhy = "Alleen starten van wat stilstaat; er gaat geen data verloren."
@@ -541,6 +565,108 @@ func wrongAddresses(in Input, states []nodeState, add func(code, level, title, w
 			continue
 		}
 		out = append(out, pn)
+	}
+	return out
+}
+
+// knownAddresses zijn de adressen van alle nodes met een agent en de VIP's.
+func knownAddresses(in Input, states []nodeState) map[string]bool {
+	out := map[string]bool{}
+	for a := range in.Known {
+		out[a] = true
+	}
+	for _, v := range in.VIPs {
+		out[v] = true
+	}
+	for _, st := range states {
+		for _, a := range st.node.Addresses {
+			out[a] = true
+		}
+	}
+	return out
+}
+
+// patroniChecks meldt een Patroni die etcd niet bereikt, en een
+// connect_address die de node niet heeft, met het bestand en de regel. dcs
+// is true als de agent geen enkel etcd-adres bereikte, addr als een
+// connect_address niet klopt.
+func patroniChecks(st nodeState, known map[string]bool, add func(code, level, title, why string, nodes ...string)) (dcs, addr bool) {
+	pt, h := st.insp.Patroni, st.srv.Hostname
+	where := func(key, value string) string {
+		for _, s := range pt.Settings {
+			if s.Value == value && (key == "" || s.Key == key) {
+				return fmt.Sprintf("%s regel %d", s.File, s.Line)
+			}
+		}
+		return pt.File
+	}
+	foreign := func(host string) bool {
+		ip, err := netip.ParseAddr(host)
+		return err == nil && !known[ip.String()]
+	}
+	var bad []string
+	ok := 0
+	for _, ep := range pt.Endpoints {
+		if ep.OK {
+			ok++
+			continue
+		}
+		d := ep.Address + ": " + cmp.Or(ep.Error, "geen antwoord")
+		if foreign(hostOnly(ep.Address)) {
+			d += ", en geen node heeft dat adres"
+		}
+		bad = append(bad, d+" ("+where("", ep.Address)+")")
+	}
+	etcd := ""
+	if pt.Etcd == "failed" || pt.Etcd == "inactive" {
+		etcd = fmt.Sprintf(" etcd.service staat op %s zelf %s.", h, stateWord(pt.Etcd))
+	}
+	switch {
+	case len(bad) > 0 && ok == 0:
+		dcs = true
+		add(CodePatroniDCS, LevelDown, fmt.Sprintf("Patroni op %s bereikt etcd niet", h),
+			fmt.Sprintf("De agent op %s bereikt geen enkel etcd-adres uit de config: %s. Zonder etcd weet Patroni niet wie de primary is: een primary gaat naar alleen-lezen en een replica start PostgreSQL niet. Herstarten helpt niet.%s Zorg dat etcd draait en bereikbaar is, of zet de juiste adressen in het bestand en herstart patroni; ClusterForge wijzigt de config van Patroni niet zelf.",
+				h, strings.Join(bad, "; "), etcd), h)
+	case len(bad) > 0:
+		add(CodePatroniDCS, LevelWarning, fmt.Sprintf("Patroni op %s bereikt niet elke etcd-node", h),
+			fmt.Sprintf("De agent op %s bereikt niet elk etcd-adres uit de config: %s.%s Patroni werkt zolang een meerderheid van etcd antwoordt; valt er nog een uit, dan stopt het kiezen van een primary.",
+				h, strings.Join(bad, "; "), etcd), h)
+	}
+	if len(st.node.Addresses) == 0 {
+		return dcs, false
+	}
+	var wrong []string
+	for _, s := range pt.Settings {
+		if s.Key != "restapi.connect_address" && s.Key != "postgresql.connect_address" {
+			continue
+		}
+		ip, err := netip.ParseAddr(hostOnly(s.Value))
+		if err != nil || slices.Contains(st.node.Addresses, ip.String()) {
+			continue
+		}
+		wrong = append(wrong, fmt.Sprintf("%s: %s (%s regel %d)", s.Key, s.Value, s.File, s.Line))
+	}
+	if len(wrong) == 0 {
+		return dcs, false
+	}
+	add(CodePatroniAddr, LevelDown, fmt.Sprintf("Patroni op %s geeft een adres op dat de node niet heeft", h),
+		fmt.Sprintf("De config zegt %s, maar %s heeft nu %s. Patroni zet dat adres in etcd; replica's en apps zoeken %s daar. ClusterForge wijzigt de config van Patroni niet zelf: zet het juiste adres in het bestand en herstart patroni, één node tegelijk.",
+			joinHosts(wrong), h, strings.Join(st.node.Addresses, ", "), h), h)
+	return dcs, true
+}
+
+// mysqlGalera zijn de nodes die Galera met MySQL draaien in plaats van met
+// MariaDB.
+func mysqlGalera(states []nodeState) []string {
+	var out []string
+	for _, st := range states {
+		u := st.srv.Unit
+		if st.insp != nil {
+			u = st.insp.Unit
+		}
+		if u == "mysql" && !strings.Contains(strings.ToLower(st.srv.Version), "mariadb") {
+			out = append(out, st.srv.Hostname)
+		}
 	}
 	return out
 }

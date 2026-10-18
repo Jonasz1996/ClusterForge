@@ -70,7 +70,12 @@ func checkExistingPG(pn *PlanNode, n *Node, st dbStatus, slug string, add func(s
 		add(Warning, "postgresql_takeover", n, fmt.Sprintf("op %s draait al een leeg PostgreSQL-cluster main; ClusterForge haalt het weg en "+
 			"Patroni start PostgreSQL voortaan zelf", n.Hostname), "")
 	default:
+		// Een stilstaand cluster toont geen databases; misschien staan ze er
+		// wel.
 		pn.Existing = "PostgreSQL staat erop maar draait niet"
+		add(Blocked, "postgresql_stopped", n, fmt.Sprintf("op %s staat PostgreSQL (%s) maar die draait niet, dus ClusterForge ziet niet welke "+
+			"databases erin staan en zet er geen cluster overheen. Start hem eerst; kijk op de pagina Databases bij Zelfherstel als hij niet start",
+			n.Hostname, srv.Unit), "systemctl start "+srv.Unit)
 	}
 }
 

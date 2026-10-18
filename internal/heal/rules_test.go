@@ -237,3 +237,143 @@ func TestDiagnoseKnownNode(t *testing.T) {
 		t.Fatalf("plan: %s %+v", codes(r), r.Plan)
 	}
 }
+
+// patroni is een PostgreSQL-cluster met Patroni na een nieuwe
+// netwerkindeling: de config noemt etcd en de nodes nog op 192.168.0.x,
+// pg1 staat stil.
+func patroni() *fixture {
+	f := &fixture{hosts: []string{"pg1", "pg2", "pg3"}}
+	cid := uuid.New()
+	g := databases.Group{ClusterID: &cid, ClusterName: "pg", ClusterSlug: "pg", ClusterEnv: "lab", Engine: protocol.DBPostgreSQL, Kind: databases.KindPatroni, Health: databases.HealthDown}
+	f.in = Input{Nodes: map[uuid.UUID]Node{}}
+	const file = "/etc/patroni/config.yml"
+	for i, h := range f.hosts {
+		id := uuid.New()
+		f.ids = append(f.ids, id)
+		ip := "192.168.10.19" + string(rune('1'+i))
+		old := "192.168.0.19" + string(rune('1'+i))
+		srv := databases.Server{NodeID: id, Hostname: h, Unit: "patroni", Active: "active"}
+		insp := &protocol.HealEngine{Engine: protocol.DBPostgreSQL, Unit: "patroni", Active: "active", Enabled: "enabled", DataDir: "/var/lib/postgresql/16/main",
+			Patroni: &protocol.HealPatroni{File: file, Scope: "pg", Name: h, DCS: "etcd3", Etcd: "active"}}
+		for j := range 3 {
+			ep := "192.168.0.19" + string(rune('1'+j)) + ":2379"
+			insp.Patroni.Settings = append(insp.Patroni.Settings, protocol.HealSetting{Key: "etcd3.hosts", Value: ep, File: file, Line: 10 + j})
+			insp.Patroni.Endpoints = append(insp.Patroni.Endpoints, protocol.HealEndpoint{Address: ep, Error: "geen antwoord binnen 2 s"})
+		}
+		insp.Patroni.Settings = append(insp.Patroni.Settings,
+			protocol.HealSetting{Key: "restapi.connect_address", Value: old + ":8008", File: file, Line: 6},
+			protocol.HealSetting{Key: "postgresql.connect_address", Value: old + ":5432", File: file, Line: 16})
+		if i == 0 {
+			srv.Active, insp.Active, insp.Result, insp.StateSeconds = "failed", "failed", "exit-code", 600
+		}
+		g.Servers = append(g.Servers, srv)
+		f.in.Nodes[id] = Node{ID: id, Hostname: h, Online: true, PrimaryIP: ip, Addresses: []string{ip}, Inspect: insp}
+	}
+	f.in.Group = g
+	return f
+}
+
+// fix zet de adressen in de config van node i goed; reach zegt welke
+// etcd-adressen antwoorden.
+func (f *fixture) fix(i int, reach ...bool) {
+	pt := f.in.Nodes[f.ids[i]].Inspect.Patroni
+	for j := range pt.Settings {
+		pt.Settings[j].Value = strings.Replace(pt.Settings[j].Value, "192.168.0.", "192.168.10.", 1)
+	}
+	for j := range pt.Endpoints {
+		pt.Endpoints[j].Address = strings.Replace(pt.Endpoints[j].Address, "192.168.0.", "192.168.10.", 1)
+		if j < len(reach) && reach[j] {
+			pt.Endpoints[j].OK, pt.Endpoints[j].Error = true, ""
+		}
+	}
+}
+
+func TestDiagnosePatroni(t *testing.T) {
+	f := patroni()
+	r := Diagnose(f.in)
+	want := "unit_stopped@pg1 patroni_dcs@pg1 patroni_wrong_address@pg1 patroni_dcs@pg2 patroni_wrong_address@pg2 patroni_dcs@pg3 patroni_wrong_address@pg3"
+	if got := codes(r); got != want {
+		t.Errorf("problemen:\n%s\nverwacht:\n%s", got, want)
+	}
+	for _, p := range r.Problems {
+		switch {
+		case p.Code == CodePatroniDCS && (p.Level != LevelDown || !strings.Contains(p.Why, "192.168.0.192:2379: geen antwoord binnen 2 s, en geen node heeft dat adres (/etc/patroni/config.yml regel 11)")):
+			t.Errorf("etcd: %+v", p)
+		case p.Code == CodePatroniAddr && p.Nodes[0] == "pg2" && !strings.Contains(p.Why, "De config zegt restapi.connect_address: 192.168.0.192:8008 (/etc/patroni/config.yml regel 6) en "+
+			"postgresql.connect_address: 192.168.0.192:5432 (/etc/patroni/config.yml regel 16), maar pg2 heeft nu 192.168.10.192."):
+			t.Errorf("adres: %+v", p)
+		}
+	}
+	if p := r.Plan; p == nil || p.Action != ActionRestart || p.Auto || !strings.Contains(p.Blocked, "Patroni op pg1 bereikt etcd niet") {
+		t.Fatalf("plan: %+v", r.Plan)
+	}
+
+	// De adressen kloppen weer en etcd op pg3 antwoordt niet: pg1 starten
+	// mag vanzelf, met een waarschuwing per node.
+	for i := range 3 {
+		f.fix(i, true, true, false)
+	}
+	r = Diagnose(f.in)
+	if got := codes(r); got != "unit_stopped@pg1 patroni_dcs@pg1 patroni_dcs@pg2 patroni_dcs@pg3" {
+		t.Errorf("problemen: %s", got)
+	}
+	if r.Problems[1].Level != LevelWarning || strings.Contains(r.Problems[1].Why, "geen node heeft") {
+		t.Errorf("waarschuwing: %+v", r.Problems[1])
+	}
+	if p := r.Plan; p == nil || !p.Auto || p.Blocked != "" || len(p.Nodes) != 1 || p.Nodes[0].Hostname != "pg1" || p.Nodes[0].Unit != "patroni" {
+		t.Fatalf("plan: %+v", r.Plan)
+	}
+
+	// Alleen pg1 heeft nog een oud eigen adres: starten mag, maar niet
+	// vanzelf.
+	f = patroni()
+	for i := range 3 {
+		f.fix(i, true, true, true)
+	}
+	f.in.Nodes[f.ids[0]].Inspect.Patroni.Settings[4].Value = "192.168.0.191:5432"
+	r = Diagnose(f.in)
+	if got := codes(r); got != "unit_stopped@pg1 patroni_wrong_address@pg1" {
+		t.Errorf("problemen: %s", got)
+	}
+	if p := r.Plan; p == nil || p.Auto || p.Blocked != "" || !strings.Contains(p.AutoWhy, "Patroni op pg1") {
+		t.Fatalf("plan: %+v", r.Plan)
+	}
+}
+
+func TestDiagnoseMySQL(t *testing.T) {
+	// Een losse MySQL waarvan systemd de unit op failed zette terwijl
+	// mysqld nog draait.
+	id := uuid.New()
+	in := Input{
+		Group: databases.Group{Engine: protocol.DBMariaDB, Kind: databases.KindSingle, Health: databases.HealthDown,
+			Servers: []databases.Server{{NodeID: id, Hostname: "web1", Unit: "mysql", Active: "failed", Version: "8.0.43"}}},
+		Nodes: map[uuid.UUID]Node{id: {ID: id, Hostname: "web1", Addresses: []string{"10.0.0.7"},
+			Inspect: &protocol.HealEngine{Engine: protocol.DBMariaDB, Unit: "mysql", Active: "failed", Result: "timeout", Enabled: "enabled", StateSeconds: 900,
+				Processes: []protocol.HealProcess{{PID: 2210, Name: "mysqld", Unit: "mysql"}}, DataDir: "/var/lib/mysql", DataFree: 20 << 30, DataTotal: 40 << 30}}},
+	}
+	r := Diagnose(in)
+	if codes(r) != "process_hung@web1" || !strings.HasPrefix(r.Problems[0].Title, "MySQL op web1") {
+		t.Errorf("problemen: %s %+v", codes(r), r.Problems)
+	}
+	p := r.Plan
+	if p == nil || p.Action != ActionRestart || !p.Auto || len(p.Nodes) != 1 || !p.Nodes[0].Kill || p.Nodes[0].Unit != "mysql" || p.Nodes[0].KillPIDs[0] != 2210 {
+		t.Fatalf("plan: %+v", p)
+	}
+	if !strings.Contains(p.Steps[0], "MySQL een voor een starten") {
+		t.Errorf("stappen: %q", p.Steps)
+	}
+
+	// Galera op MySQL zonder Primary: niet zelf opnieuw beginnen.
+	f := jonas()
+	for i, id := range f.ids {
+		n := f.in.Nodes[id]
+		n.Inspect.Unit, n.Inspect.Galera.ClusterAddress, n.Inspect.Galera.NodeAddress, n.Inspect.Galera.PeerTimeouts = "mysql", "gcomm://192.168.10.181,192.168.10.182,192.168.10.183", "", nil
+		n.Inspect.Processes = nil
+		f.in.Group.Servers[i].Unit, f.in.Group.Servers[i].Version = "mysql", "8.0.41-32.1"
+		f.in.Nodes[id] = n
+	}
+	r = Diagnose(f.in)
+	if p := r.Plan; p == nil || p.Auto || !strings.Contains(p.Blocked, "kan ClusterForge alleen met MariaDB") {
+		t.Fatalf("Galera op MySQL: %s %+v", codes(r), r.Plan)
+	}
+}

@@ -4,8 +4,8 @@ package agent
 // PostgreSQL op deze node mis is, ook als ClusterForge ze niet toepaste. De
 // agent leest wat systemd over de units zegt, welke processen er echt
 // draaien (een mariadbd die blijft aansluiten terwijl systemd de unit al op
-// failed zette), de vrije ruimte in de datamap, en de Galera-config met het
-// bestand en de regel waar elk adres staat. Alleen set_galera_address
+// failed zette), de vrije ruimte in de datamap, en de config van Galera of
+// Patroni met het bestand en de regel waar elk adres staat. Alleen set_galera_address
 // verandert iets: de adressen in dat bestand, na een kopie. Dat werkt pas
 // bij de volgende start van MariaDB.
 
@@ -147,6 +147,9 @@ func (a *Agent) healInspect(ctx context.Context) ([]protocol.HealEngine, error) 
 	if u := pick(protocol.DBPostgreSQL, func(n string) bool { return n == "patroni" || n == "postgresql" || strings.HasPrefix(n, "postgresql@") }); u != nil {
 		e := a.healEngine(*u, uptime, procs, protocol.DBPostgreSQL)
 		e.DataDir = "/var/lib/postgresql"
+		if u.name == "patroni" {
+			a.healPatroni(ctx, &e)
+		}
 		a.healDisk(&e)
 		out = append(out, e)
 	}
