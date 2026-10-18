@@ -168,13 +168,13 @@ func TestKubernetesScore(t *testing.T) {
 			i = j
 		}
 	}
-	if i < 0 || len(idx.Clusters[i].Docs) != 6 || idx.Clusters[i].Docs[1].Kind != "kubernetes" || idx.Clusters[i].Docs[1].Path != "clusters/leren/kubernetes.md" {
+	if i < 0 || len(idx.Clusters[i].Docs) != 7 || idx.Clusters[i].Docs[1].Kind != "kubernetes" || idx.Clusters[i].Docs[1].Path != "clusters/leren/kubernetes.md" {
 		t.Fatalf("index: %+v", idx)
 	}
 	if s := c.do("GET", "/api/v1/docs/cluster/kubernetes?cluster="+other.ID, nil, nil); s != http.StatusNotFound {
 		t.Fatalf("hoofdstuk Kubernetes bij keepalived: %d", s)
 	}
-	if n, err := e.docs.GenerateCluster(ctx, id, docs.CauseManual); err != nil || n != 6 {
+	if n, err := e.docs.GenerateCluster(ctx, id, docs.CauseManual); err != nil || n != 7 {
 		t.Fatalf("schrijven: %d %v", n, err)
 	}
 	get := func(kind string) string {

@@ -464,8 +464,9 @@ func TestDeploy(t *testing.T) {
 				t.Errorf("tool %s geeft %q door", tool, secret)
 			}
 		}
-		// De tools voor Kubernetes horen bij een ander soort cluster.
-		if strings.Contains(out, "FOUT") && tool != "incident" && !strings.HasPrefix(tool, "kube") {
+		// De tools voor Kubernetes horen bij een ander soort cluster, en Web
+		// heeft geen beheerde cronjob.
+		if strings.Contains(out, "FOUT") && tool != "incident" && tool != "cron_runs" && !strings.HasPrefix(tool, "kube") {
 			t.Errorf("%s: %s", tool, out)
 		}
 	}

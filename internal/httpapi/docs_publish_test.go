@@ -132,7 +132,7 @@ func TestDocsPublish(t *testing.T) {
 	}
 
 	// De eerste ronde schrijft alles en publiceert in dezelfde Tick.
-	if n, err := e.docs.GenerateAll(ctx, docs.CauseStart); err != nil || n != 6 {
+	if n, err := e.docs.GenerateAll(ctx, docs.CauseStart); err != nil || n != 7 {
 		t.Fatalf("schrijven: %d %v", n, err)
 	}
 	if err := e.docs.Tick(ctx); err != nil {
@@ -140,7 +140,7 @@ func TestDocsPublish(t *testing.T) {
 	}
 	files := gh.FilesOn("documentatie")
 	wantPaths := []string{"docs/README.md", "docs/clusters/web/architectuur.md", "docs/clusters/web/configuratie.md",
-		"docs/clusters/web/herstel.md", "docs/clusters/web/netwerk.md", "docs/clusters/web/runbooks.md"}
+		"docs/clusters/web/cronjobs.md", "docs/clusters/web/herstel.md", "docs/clusters/web/netwerk.md", "docs/clusters/web/runbooks.md"}
 	if got := slices.Sorted(maps.Keys(files)); !slices.Equal(got, wantPaths) {
 		t.Fatalf("bestanden: %v", got)
 	}
@@ -159,7 +159,7 @@ func TestDocsPublish(t *testing.T) {
 		t.Fatalf("eerste commit: %+v", first)
 	}
 	if c.do("GET", "/api/v1/docs/target", nil, &st); st.Target.LastCommit == nil || st.Target.LastCommit.Sha != first.SHA ||
-		st.Target.LastCommit.Files != 6 || st.Target.LastError != "" || st.Pending {
+		st.Target.LastCommit.Files != 7 || st.Target.LastError != "" || st.Pending {
 		t.Fatalf("na de eerste commit: %+v", st.Target)
 	}
 
@@ -313,7 +313,7 @@ func TestDocsPublish(t *testing.T) {
 	text := strings.Join(sums, "\n")
 	for _, want := range []string{
 		"Documentatie naar GitHub-repository Jonas/CF-config (branch documentatie, map docs)",
-		"Documentatie naar Jonas/CF-config geschreven: commit " + first.SHA[:7] + " met 6 bestanden (overzicht, web)",
+		"Documentatie naar Jonas/CF-config geschreven: commit " + first.SHA[:7] + " met 7 bestanden (overzicht, web)",
 		"Documentatie naar Jonas/CF-config schrijven mislukt: GitHub antwoordt met 503",
 		"Documentatie naar Jonas/CF-config schrijven lukt weer",
 		"Koppeling van de documentatie met GitHub gewijzigd: automatisch publiceren",
@@ -327,7 +327,7 @@ func TestDocsPublish(t *testing.T) {
 	if s := c.do("DELETE", "/api/v1/docs/target", nil, nil); s != http.StatusNoContent {
 		t.Fatalf("ontkoppelen: %d", s)
 	}
-	if c.do("GET", "/api/v1/docs/target", nil, &st); st.Target != nil || len(gh.FilesOn("documentatie")) != 7 || count("docs.target_disconnected") != 1 {
+	if c.do("GET", "/api/v1/docs/target", nil, &st); st.Target != nil || len(gh.FilesOn("documentatie")) != 8 || count("docs.target_disconnected") != 1 {
 		t.Fatalf("na ontkoppelen: %+v", st)
 	}
 }
