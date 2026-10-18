@@ -3,10 +3,13 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/Jonasz1996/clusterforge/internal/agent"
@@ -63,6 +66,116 @@ type healDB struct {
 	ids     []string
 	hosts   []*agenttest.Host
 	roots   []string
+
+	// Galera zoals de test het naspeelt: wie meedoet, en op welke node het
+	// cluster begon.
+	mu      sync.Mutex
+	members []int
+	began   []string
+}
+
+const (
+	healUUID    = "5c3a1e0e-0000-11f0-9a3b-7e1c2d3f4a5b"
+	healGalera  = "/etc/mysql/mariadb.conf.d/60-galera.cnf"
+	healNewAddr = "gcomm://192.168.10.181,192.168.10.182,192.168.10.183"
+)
+
+// shell speelt de commando's van een herstel na op node i: een hangend
+// proces stoppen, MariaDB starten zonder te wachten en het cluster
+// beginnen. Een node sluit alleen aan als zijn config de nieuwe adressen
+// heeft en er een Primary component is; anders faalt de unit, zoals Galera.
+func (d *healDB) shell(i int) func(cmd string) (bool, []byte, error) {
+	return func(cmd string) (bool, []byte, error) {
+		h, root := d.hosts[i], d.roots[i]
+		fail := errors.New("exit status 1")
+		switch {
+		case strings.HasPrefix(cmd, "! { kill -0 "):
+			if _, err := os.Stat(filepath.Join(root, "proc/169")); err == nil {
+				return true, nil, fail
+			}
+			return true, nil, nil
+		case strings.HasPrefix(cmd, "systemctl kill --signal=TERM mariadb.service"):
+			_ = os.RemoveAll(filepath.Join(root, "proc/169"))
+			return true, nil, nil
+		case cmd == "systemctl is-active --quiet mariadb":
+			if u, _ := h.Unit("mariadb"); u.Active {
+				return true, nil, nil
+			}
+			return true, nil, fail
+		case cmd == "systemctl reset-failed mariadb 2>/dev/null; systemctl start --no-block mariadb":
+			cfg, _ := os.ReadFile(filepath.Join(root, healGalera))
+			d.mu.Lock()
+			alive := len(d.members) > 0
+			d.mu.Unlock()
+			if !alive || !strings.Contains(string(cfg), healNewAddr) {
+				d.setUnit(i, agenttest.Unit{Failed: true})
+				return true, nil, nil
+			}
+			d.join(i, false)
+			return true, nil, nil
+		case strings.Contains(cmd, "galera_new_cluster"):
+			d.join(i, true)
+			return true, nil, nil
+		}
+		return false, nil, nil
+	}
+}
+
+// after laat een gewone stop van MariaDB de node uit het cluster halen en
+// zijn positie in grastate.dat schrijven.
+func (d *healDB) after(i int) func(call string, err error) {
+	return func(call string, err error) {
+		if err == nil && call == "systemctl stop mariadb" {
+			d.leave(i)
+		}
+	}
+}
+
+func (d *healDB) setUnit(i int, u agenttest.Unit) {
+	old, _ := d.hosts[i].Unit("mariadb")
+	u.Enabled = old.Enabled
+	d.hosts[i].SetUnit("mariadb", u)
+}
+
+func (d *healDB) join(i int, first bool) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if first {
+		d.members = nil
+		d.began = append(d.began, []string{"db1", "db2", "db3"}[i])
+	}
+	if !slices.Contains(d.members, i) {
+		d.members = append(d.members, i)
+	}
+	d.setUnit(i, agenttest.Unit{Active: true})
+	d.update()
+}
+
+func (d *healDB) leave(i int) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.members = slices.DeleteFunc(d.members, func(m int) bool { return m == i })
+	h := d.hosts[i]
+	var seqno int64 = -1
+	h.Locked(func() {
+		if h.MariaDB.Galera != nil {
+			seqno = h.MariaDB.Galera.Seqno
+		}
+		h.MariaDB.Down, h.MariaDB.Galera = true, nil
+	})
+	writeGrastate(h, seqno, false)
+	d.update()
+}
+
+// update geeft elk lid de toestand van het cluster; d.mu is vast.
+func (d *healDB) update() {
+	for _, m := range d.members {
+		h := d.hosts[m]
+		h.Locked(func() {
+			h.MariaDB.Down = false
+			h.MariaDB.Galera = &agenttest.Galera{ClusterName: "db", UUID: healUUID, Status: "Primary", Size: len(d.members), State: 4, Comment: "Synced", Ready: true, Seqno: 42}
+		})
+	}
 }
 
 func newHealDB(t *testing.T, e *testEnv, c *client) *healDB {
@@ -95,7 +208,9 @@ func newHealDB(t *testing.T, e *testEnv, c *client) *healDB {
 			write("etc/mysql/my.cnf", "[client-server]\n!includedir /etc/mysql/conf.d/\n!includedir /etc/mysql/mariadb.conf.d/\n")
 			write("etc/mysql/mariadb.conf.d/60-galera.cnf", "[galera]\nwsrep_on = ON\nwsrep_cluster_name = db\n"+
 				"wsrep_cluster_address = gcomm://192.168.0.190,192.168.0.191,192.168.0.192\nwsrep_node_address = 192.168.0.19"+string(rune('0'+i))+"\n")
-			galera := &agenttest.Galera{ClusterName: "db", UUID: "5c3a1e0e-0000-11f0-9a3b-7e1c2d3f4a5b", Status: "non-Primary", Size: 1, State: 0, Comment: "Initialized"}
+			// db1 crashte (de positie zit alleen nog in InnoDB) en heeft de
+			// nieuwste data; db2 stopte gewoon.
+			h.MariaDB = &agenttest.MariaDB{Version: "12.2.2-MariaDB", MaxConnections: 200, Down: true, Recovered: healUUID + ":42"}
 			switch i {
 			case 0:
 				h.SetUnit("mariadb", agenttest.Unit{Failed: true})
@@ -103,14 +218,19 @@ func newHealDB(t *testing.T, e *testEnv, c *client) *healDB {
 				write("proc/169/stat", "169 (mariadbd) S 1 169 169 0 -1 4194560 0 0 0 0 0 0 0 0 20 0 7 0 100 0 0\n")
 				write("proc/169/cgroup", "0::/system.slice/mariadb.service\n")
 				h.SetJournal("mariadb.service", "WSREP: (abc251de-a157, 'tcp://0.0.0.0:4567') connection to peer 00000000-0000 with addr tcp://192.168.0.191:4567 timed out, no messages seen in PT3S\n")
+				writeGrastate(h, -1, false)
 			case 1:
 				h.SetUnit("mariadb", agenttest.Unit{Failed: true})
+				writeGrastate(h, 41, false)
 			case 2:
 				h.SetUnit("mariadb", agenttest.Unit{Enabled: true, Active: true})
-				h.MariaDB = &agenttest.MariaDB{Version: "12.2.2-MariaDB", MaxConnections: 200, Uptime: 3600, Galera: galera}
+				h.MariaDB.Down, h.MariaDB.Uptime = false, 3600
+				h.MariaDB.Galera = &agenttest.Galera{ClusterName: "db", UUID: healUUID, Status: "non-Primary", Size: 1, State: 0, Comment: "Initialized", Seqno: 40}
 			}
 			d.hosts = append(d.hosts, h)
 			d.roots = append(d.roots, root)
+			h.Shell = d.shell(i)
+			h.SetAfter(d.after(i))
 		})
 	}
 	return d
@@ -190,5 +310,296 @@ func TestHeal(t *testing.T) {
 	}
 	if s := v.do("GET", "/api/v1/heal", nil, nil); s != http.StatusOK {
 		t.Fatalf("kijker: %d", s)
+	}
+}
+
+// TestHealRun is de acceptatie van mijlpaal 2 van fase 7: Nu herstellen op
+// Jonas' storing zet de Galera-adressen goed (met een kopie van de config),
+// stopt het hangende mariadbd op db1, leest de posities, begint het cluster
+// op db1 dat de nieuwste data heeft, en laat db2 en db3 aansluiten tot alle
+// drie Synced zijn. Alleen een beheerder mag het, met het plan dat hij zag.
+func TestHealRun(t *testing.T) {
+	e, c := adminClient(t)
+	ctx := context.Background()
+	d := newHealDB(t, e, c)
+	r := d.heal(t, e, c, func(r healView) bool { return strings.Contains(r.codes(), "db1+db2+db3") })
+	if r.Plan == nil || r.Plan.Blocked != "" {
+		t.Fatalf("plan: %+v", r.Plan)
+	}
+	hash := r.Plan.Hash
+	run := func(c *client, hash, confirm string, out any) int {
+		t.Helper()
+		body := map[string]any{"key": r.Key, "hash": hash}
+		if confirm != "" {
+			body["confirm"] = confirm
+		}
+		return c.do("POST", "/api/v1/heal/run", body, out)
+	}
+
+	// Een kijker mag niet, een ander plan ook niet.
+	e.createUser("kijker", "een-lang-wachtwoord", store.UserRoleViewer)
+	v := e.client()
+	if s, _, _ := v.login("kijker", "een-lang-wachtwoord", ""); s != http.StatusOK {
+		t.Fatalf("login kijker: %d", s)
+	}
+	if s := run(v, hash, "", nil); s != http.StatusForbidden {
+		t.Fatalf("kijker: %d", s)
+	}
+	var apiErr struct {
+		Code string `json:"code"`
+	}
+	if s := run(c, "een-ander-plan", "", &apiErr); s != http.StatusConflict || apiErr.Code != "plan_stale" {
+		t.Fatalf("ander plan: %d %+v", s, apiErr)
+	}
+	if s := c.do("POST", "/api/v1/heal/run", map[string]any{"key": "mariadb/" + d.ids[0], "hash": hash}, nil); s != http.StatusNotFound {
+		t.Fatalf("onbekende database: %d", s)
+	}
+	// Op prod vraagt het tweestapsverificatie.
+	if s := c.do("PATCH", "/api/v1/clusters/"+d.cluster.ID, map[string]any{"environment": "prod"}, nil); s != http.StatusOK {
+		t.Fatalf("naar prod: %d", s)
+	}
+	if s := run(c, hash, "database-cluster", &apiErr); s != http.StatusForbidden || apiErr.Code != "totp_required" {
+		t.Fatalf("prod: %d %+v", s, apiErr)
+	}
+	if s := c.do("PATCH", "/api/v1/clusters/"+d.cluster.ID, map[string]any{"environment": "lab"}, nil); s != http.StatusOK {
+		t.Fatalf("naar lab: %d", s)
+	}
+
+	var j job
+	if s := run(c, hash, "", &j); s != http.StatusAccepted || j.Title != "Zelfherstel: MariaDB van database cluster" {
+		t.Fatalf("herstellen: %d %+v", s, j)
+	}
+	j = waitJobLong(t, c, j.ID)
+	var steps []string
+	logs := map[string]string{}
+	for _, st := range j.Steps {
+		steps = append(steps, st.Name)
+		logs[st.Name] = strings.Join(st.Log, "\n")
+	}
+	if j.Status != "succeeded" {
+		t.Fatalf("taak: %s %s %v\n%v", j.Status, j.Error, steps, logs)
+	}
+	want := []string{"db1: Galera-adressen bijwerken", "db2: Galera-adressen bijwerken", "db3: Galera-adressen bijwerken", "db1: hangend proces stoppen",
+		"Posities lezen", "db1: het cluster beginnen", "db2: aansluiten", "db3: aansluiten", "Controleren"}
+	if !slices.Equal(steps, want) {
+		t.Fatalf("stappen:\n%q\nverwacht:\n%q", steps, want)
+	}
+	if l := logs["Posities lezen"]; !strings.Contains(l, "db3: MariaDB stoppen om de positie te lezen") || !strings.Contains(l, "db1: seqno 42 uit recovery") ||
+		!strings.Contains(l, "db2: seqno 41 uit grastate") || !strings.Contains(l, "db1 heeft de nieuwste data (seqno 42) en begint het cluster") {
+		t.Errorf("posities:\n%s", l)
+	}
+	if l := logs["Controleren"]; !strings.Contains(l, "3 nodes Synced in één cluster") {
+		t.Errorf("controle:\n%s", l)
+	}
+	d.mu.Lock()
+	began := slices.Clone(d.began)
+	d.mu.Unlock()
+	if !slices.Equal(began, []string{"db1"}) {
+		t.Fatalf("het cluster begon op %v", began)
+	}
+	for i, root := range d.roots {
+		b, _ := os.ReadFile(filepath.Join(root, healGalera))
+		if !strings.Contains(string(b), "wsrep_cluster_address = "+healNewAddr) || !strings.Contains(string(b), "wsrep_node_address = 192.168.10.18"+string(rune('1'+i))) {
+			t.Errorf("db%d config:\n%s", i+1, b)
+		}
+		copies, _ := filepath.Glob(filepath.Join(root, healGalera+".cf-zelfherstel-*"))
+		if len(copies) != 1 {
+			t.Errorf("db%d kopieën: %v", i+1, copies)
+		} else if b, _ := os.ReadFile(copies[0]); !strings.Contains(string(b), "192.168.0.190") {
+			t.Errorf("db%d kopie:\n%s", i+1, b)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(d.roots[0], "proc/169")); err == nil {
+		t.Error("mariadbd 169 draait nog op db1")
+	}
+
+	// Daarna is er niets meer mis, en toont de kaart het gelukte herstel.
+	var last struct {
+		LastRun *struct {
+			JobID  string `json:"job_id"`
+			Status string `json:"status"`
+		} `json:"last_run"`
+	}
+	r = d.heal(t, e, c, func(r healView) bool { return !strings.Contains(r.codes(), "galera") })
+	if r.codes() != "" || r.Plan != nil {
+		t.Fatalf("na het herstel: %s %+v", r.codes(), r.Plan)
+	}
+	var l list[json.RawMessage]
+	c.do("GET", "/api/v1/heal", nil, &l)
+	for _, raw := range l.Items {
+		var k struct {
+			Key string `json:"key"`
+		}
+		_ = json.Unmarshal(raw, &k)
+		if k.Key == r.Key {
+			_ = json.Unmarshal(raw, &last)
+		}
+	}
+	if last.LastRun == nil || last.LastRun.JobID != j.ID || last.LastRun.Status != "succeeded" {
+		t.Fatalf("laatste herstel: %+v", last.LastRun)
+	}
+
+	// In het logboek, bij het cluster.
+	rows, err := e.pool.Query(ctx, "SELECT action, subject_type, subject_id, job_ref FROM events WHERE action LIKE 'cluster.heal_%' ORDER BY id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var evs []string
+	for rows.Next() {
+		var a, st, sid string
+		var jr *string
+		if err := rows.Scan(&a, &st, &sid, &jr); err != nil {
+			t.Fatal(err)
+		}
+		if st != "cluster" || sid != d.cluster.ID || jr == nil || *jr != j.ID {
+			t.Errorf("%s: %s %s %v", a, st, sid, jr)
+		}
+		evs = append(evs, a)
+	}
+	rows.Close()
+	if !slices.Equal(evs, []string{"cluster.heal_started", "cluster.heal_done"}) {
+		t.Fatalf("events: %v", evs)
+	}
+	var audit list[struct {
+		Action  string `json:"action"`
+		Summary string `json:"summary"`
+	}]
+	c.do("GET", "/api/v1/audit?cluster="+d.cluster.ID, nil, &audit)
+	var sums []string
+	for _, a := range audit.Items {
+		if strings.HasPrefix(a.Action, "cluster.heal_") {
+			sums = append(sums, a.Summary)
+		}
+	}
+	if !slices.Contains(sums, "Zelfherstel van MariaDB van database cluster gelukt") ||
+		!slices.ContainsFunc(sums, func(s string) bool {
+			return strings.HasPrefix(s, "Zelfherstel gestart voor MariaDB van database cluster: db1, db2")
+		}) {
+		t.Errorf("logboek: %q", sums)
+	}
+
+	// Er is niets meer te herstellen.
+	if s := run(c, hash, "", &apiErr); s != http.StatusConflict {
+		t.Fatalf("niets te doen: %d", s)
+	}
+
+	// Een nieuwe stroomstoring: alles valt uit. Terwijl Jonas het plan
+	// bekijkt, begint hij het cluster zelf op db3. Het herstel begint dan
+	// geen tweede cluster, maar laat db1 en db2 bij db3 aansluiten.
+	d.mu.Lock()
+	d.members = nil
+	d.mu.Unlock()
+	for i, h := range d.hosts {
+		h.Locked(func() { h.MariaDB.Down, h.MariaDB.Galera = true, nil })
+		d.setUnit(i, agenttest.Unit{Failed: true})
+		writeGrastate(h, -1, false)
+	}
+	r = d.heal(t, e, c, func(r healView) bool { return strings.Contains(r.codes(), "galera_no_primary") })
+	if r.Plan == nil || r.Plan.Action != "galera" || !r.Plan.Auto || r.Plan.Blocked != "" {
+		t.Fatalf("plan na de storing: %s %+v", r.codes(), r.Plan)
+	}
+	d.join(2, true)
+	if s := run(c, r.Plan.Hash, "", &j); s != http.StatusAccepted {
+		t.Fatalf("tweede herstel: %d", s)
+	}
+	j = waitJobLong(t, c, j.ID)
+	steps, logs = nil, map[string]string{}
+	for _, st := range j.Steps {
+		steps = append(steps, st.Name)
+		logs[st.Name] = strings.Join(st.Log, "\n")
+	}
+	if j.Status != "succeeded" || !slices.Equal(steps, []string{"Posities lezen", "db1: aansluiten", "db2: aansluiten", "db3: aansluiten", "Controleren"}) {
+		t.Fatalf("tweede herstel: %s %s %q\n%v", j.Status, j.Error, steps, logs)
+	}
+	if l := logs["Posities lezen"] + logs["db3: aansluiten"]; !strings.Contains(l, "db3 zit in een Primary component; de andere nodes sluiten daar aan") ||
+		!strings.Contains(l, "db3 doet al mee") {
+		t.Errorf("posities:\n%s", l)
+	}
+	d.mu.Lock()
+	began = slices.Clone(d.began)
+	d.mu.Unlock()
+	if !slices.Equal(began, []string{"db1", "db3"}) {
+		t.Fatalf("het cluster begon op %v", began)
+	}
+}
+
+// TestHealRunSingle: een losse MariaDB zonder cluster die stilstaat, start
+// Nu herstellen weer, met de events bij de node.
+func TestHealRunSingle(t *testing.T) {
+	e, c := adminClient(t)
+	ctx := context.Background()
+	var n node
+	if s := c.do("POST", "/api/v1/nodes", map[string]any{"hostname": "mysql1"}, &n); s != http.StatusCreated {
+		t.Fatalf("node: %d", s)
+	}
+	a := &addrs{}
+	a.set("10.0.0.50")
+	var h *agenttest.Host
+	startAgentWith(t, e, c, n.ID, strings.Repeat("c", 32), a, func(ag *agent.Agent, root string) {
+		h = agenttest.NewHost(root, "10.0.0.50")
+		ag.Exec, ag.Root, ag.Collector.Run = h.Exec, root, h.Exec
+		h.MariaDB = &agenttest.MariaDB{Version: "11.8.3-MariaDB-0+deb13u1", MaxConnections: 151, Down: true}
+		h.SetUnit("mariadb", agenttest.Unit{Enabled: true, Failed: true})
+		h.Shell = func(cmd string) (bool, []byte, error) {
+			switch cmd {
+			case "systemctl is-active --quiet mariadb":
+				if u, _ := h.Unit("mariadb"); u.Active {
+					return true, nil, nil
+				}
+				return true, nil, errors.New("exit status 3")
+			case "systemctl reset-failed mariadb 2>/dev/null; systemctl start --no-block mariadb":
+				h.SetUnit("mariadb", agenttest.Unit{Enabled: true, Active: true})
+				h.Locked(func() { h.MariaDB.Down, h.MariaDB.Uptime = false, 1 })
+				return true, nil, nil
+			}
+			return false, nil, nil
+		}
+	})
+	key := "mariadb/node/" + n.ID
+	var r healView
+	eventually(t, "Zelfherstel ziet mysql1", func() bool {
+		if err := e.dbs.SyncAll(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if err := e.heal.InspectAll(ctx); err != nil {
+			t.Fatal(err)
+		}
+		var l list[healView]
+		c.do("GET", "/api/v1/heal", nil, &l)
+		for _, x := range l.Items {
+			if x.Key == key && x.codes() == "unit_stopped@mysql1" {
+				r = x
+				return true
+			}
+		}
+		return false
+	})
+	if r.Plan == nil || r.Plan.Action != "restart" || !r.Plan.Auto {
+		t.Fatalf("plan: %+v", r.Plan)
+	}
+	var j job
+	if s := c.do("POST", "/api/v1/heal/run", map[string]any{"key": key, "hash": r.Plan.Hash}, &j); s != http.StatusAccepted {
+		t.Fatalf("herstellen: %d", s)
+	}
+	j = waitJobLong(t, c, j.ID)
+	if j.Status != "succeeded" || len(j.Steps) != 1 || j.Steps[0].Name != "mysql1: mariadb starten" || j.NodeID == nil || *j.NodeID != n.ID {
+		t.Fatalf("taak: %s %s %+v", j.Status, j.Error, j.Steps)
+	}
+	if l := strings.Join(j.Steps[0].Log, "\n"); !strings.Contains(l, "mariadb draait") {
+		t.Errorf("log:\n%s", l)
+	}
+	var evs []string
+	rows, err := e.pool.Query(ctx, "SELECT action FROM events WHERE action LIKE '%.heal_%' AND subject_type = 'node' AND subject_id = $1 ORDER BY id", n.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var a string
+		_ = rows.Scan(&a)
+		evs = append(evs, a)
+	}
+	rows.Close()
+	if !slices.Equal(evs, []string{"node.heal_started", "node.heal_done"}) {
+		t.Fatalf("events: %v", evs)
 	}
 }

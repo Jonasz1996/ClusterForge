@@ -240,6 +240,9 @@ func newTestEnv(t *testing.T) *testEnv {
 	// Zelfherstel kijkt niet vanzelf; een test roept InspectAll aan.
 	hl := heal.NewService(pool, bus, dbs.Overview, log)
 	hl.Interval, hl.Timeout = 0, 5*time.Second
+	hl.Poll, hl.Retry, hl.StartTimeout, hl.JoinTimeout = 20*time.Millisecond, 50*time.Millisecond, 3*time.Second, 5*time.Second
+	hl.EnableRun(runner, ev)
+	hl.Changed = func() { eval.Kick(); dbs.Kick() }
 	// De database als onderdeel, met korte tijden; zonder metingen van het
 	// geheugen tenzij een test ze zet.
 	cmps := components.NewService(pool, ev, log, runner, bus, dep)

@@ -198,6 +198,8 @@ func serve() error {
 	// Zelfherstel: elke minuut heal inspect op elke node met een
 	// databaseserver, via agentprotocol 22.
 	hl := heal.NewService(pool, bus, dbs.Overview, log)
+	hl.EnableRun(runner, ev)
+	hl.Changed = func() { eval.Kick(); dbs.Kick() }
 	// Een database als onderdeel van een cluster: MariaDB Galera op de
 	// nodes die er al zijn, met het geheugengebruik uit VictoriaMetrics in
 	// het plan.

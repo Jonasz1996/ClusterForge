@@ -14,6 +14,7 @@ import (
 	"net/netip"
 	"slices"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -156,6 +157,18 @@ type Report struct {
 	Problems    []Problem
 	// Plan is nil als er niets te doen is.
 	Plan *Plan
+	// Last is de laatste herstelpoging van het afgelopen etmaal; Diagnose
+	// laat hem leeg.
+	Last *LastRun
+}
+
+// LastRun is een taak heal.run van een database.
+type LastRun struct {
+	JobID      uuid.UUID
+	Status     string
+	Error      string
+	CreatedAt  time.Time
+	FinishedAt *time.Time
 }
 
 // nodeState is wat de regels over één server zeggen.

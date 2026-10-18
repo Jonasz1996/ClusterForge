@@ -13,6 +13,64 @@ import (
 	"github.com/google/uuid"
 )
 
+const healJobActive = `-- name: HealJobActive :one
+SELECT EXISTS (
+    SELECT 1 FROM jobs WHERE kind = 'heal.run' AND status IN ('queued', 'running') AND params->>'key' = $1::text
+) AS active
+`
+
+func (q *Queries) HealJobActive(ctx context.Context, key string) (bool, error) {
+	row := q.db.QueryRow(ctx, healJobActive, key)
+	var active bool
+	err := row.Scan(&active)
+	return active, err
+}
+
+const listHealJobs = `-- name: ListHealJobs :many
+SELECT DISTINCT ON (params->>'key') coalesce(params->>'key', '')::text AS key, id, status, error, created_at, finished_at
+FROM jobs
+WHERE kind = 'heal.run' AND created_at > now() - interval '1 day'
+ORDER BY params->>'key', created_at DESC
+`
+
+type ListHealJobsRow struct {
+	Key        string
+	ID         uuid.UUID
+	Status     JobStatus
+	Error      string
+	CreatedAt  time.Time
+	FinishedAt *time.Time
+}
+
+// De laatste taak heal.run per database van het afgelopen etmaal, voor de
+// kaart Zelfherstel.
+func (q *Queries) ListHealJobs(ctx context.Context) ([]ListHealJobsRow, error) {
+	rows, err := q.db.Query(ctx, listHealJobs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListHealJobsRow{}
+	for rows.Next() {
+		var i ListHealJobsRow
+		if err := rows.Scan(
+			&i.Key,
+			&i.ID,
+			&i.Status,
+			&i.Error,
+			&i.CreatedAt,
+			&i.FinishedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listHealNodes = `-- name: ListHealNodes :many
 SELECT n.id, n.hostname, n.cluster_id, n.primary_ip, a.protocol_version AS agent_protocol, s.heartbeat_at,
        coalesce(s.addresses, '{}')::text[] AS addresses
@@ -85,4 +143,15 @@ func (q *Queries) ListVIPAddresses(ctx context.Context) ([]string, error) {
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockHealKey = `-- name: LockHealKey :exec
+SELECT pg_advisory_xact_lock(hashtext('heal:' || $1::text))
+`
+
+// Vergrendelt een database tot het einde van de transactie, zodat er nooit
+// twee herstellen tegelijk aan beginnen.
+func (q *Queries) LockHealKey(ctx context.Context, key string) error {
+	_, err := q.db.Exec(ctx, lockHealKey, key)
+	return err
 }

@@ -1,13 +1,16 @@
 package httpapi
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/google/uuid"
 	"github.com/oapi-codegen/nullable"
 
+	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/heal"
 	"github.com/Jonasz1996/clusterforge/internal/httpapi/gen"
+	"github.com/Jonasz1996/clusterforge/internal/store"
 )
 
 func (s *Server) ListHeal(w http.ResponseWriter, r *http.Request) {
@@ -23,11 +26,59 @@ func (s *Server) ListHeal(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, list[gen.HealReport]{items})
 }
 
+// RunHeal voert het herstelplan van een database uit, als het nog het plan
+// is dat de beheerder zag.
+func (s *Server) RunHeal(w http.ResponseWriter, r *http.Request) {
+	p, ok := requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	var in gen.HealRunInput
+	if !decode(w, r, &in) {
+		return
+	}
+	ctx := r.Context()
+	rep, _, err := s.heal.Report(ctx, in.Key)
+	if err != nil {
+		s.healError(w, r, err)
+		return
+	}
+	if !confirmProd(w, p, rep.ClusterEnv == string(store.EnvironmentProd), rep.ClusterSlug, in.Confirm, "een database herstellen") {
+		return
+	}
+	j, err := s.heal.RunPlan(ctx, events.User(p.User.ID), in.Key, in.Hash)
+	if err != nil {
+		s.healError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, toAPIJob(j, &p.User.Username))
+}
+
+func (s *Server) healError(w http.ResponseWriter, r *http.Request, err error) {
+	var ce *heal.ConflictError
+	switch {
+	case errors.Is(err, heal.ErrNotFound):
+		writeError(w, http.StatusNotFound, "not_found", err.Error())
+	case errors.Is(err, heal.ErrStale):
+		writeError(w, http.StatusConflict, "plan_stale", err.Error())
+	case errors.As(err, &ce):
+		writeError(w, http.StatusConflict, "conflict", ce.Msg)
+	default:
+		s.internalError(w, r, err)
+	}
+}
+
 func toAPIHealReport(rep heal.Report) gen.HealReport {
 	out := gen.HealReport{
 		Key: rep.Key, ClusterId: nullableOf(rep.ClusterID), ClusterName: rep.ClusterName, ClusterSlug: rep.ClusterSlug,
 		ClusterEnvironment: nullable.NewNullNullable[gen.Environment](), Engine: gen.HealReportEngine(rep.Engine), Kind: rep.Kind,
 		Health: rep.Health, Problems: make([]gen.HealProblem, 0, len(rep.Problems)), Plan: nullable.NewNullNullable[gen.HealPlan](),
+		LastRun: nullable.NewNullNullable[gen.HealRun](),
+	}
+	if l := rep.Last; l != nil {
+		out.LastRun = nullable.NewNullableWithValue(gen.HealRun{
+			JobId: l.JobID, Status: gen.JobStatus(l.Status), Error: l.Error, CreatedAt: l.CreatedAt, FinishedAt: nullableOf(l.FinishedAt),
+		})
 	}
 	if rep.ClusterEnv != "" {
 		out.ClusterEnvironment = nullable.NewNullableWithValue(gen.Environment(rep.ClusterEnv))
