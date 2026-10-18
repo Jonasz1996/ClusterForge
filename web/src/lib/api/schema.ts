@@ -3366,6 +3366,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/heal/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Het herstelplan van een database uitvoeren (admin); wordt een taak heal.run
+         * @description Doet wat het plan met deze hash zei: Galera-adressen bijwerken, een hangend proces stoppen, de server starten, of
+         *     bij Galera zonder Primary component het cluster beginnen op de node met de nieuwste data en de andere laten
+         *     aansluiten. Een ander plan geeft 409 met code plan_stale; een plan dat nu niet kan, of een database die een onderdeel
+         *     van ClusterForge is, geeft 409. Op prod vraagt het tweestapsverificatie en de slug in confirm.
+         */
+        post: operations["runHeal"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/cronjobs": {
         parameters: {
             query?: never;
@@ -4628,6 +4651,14 @@ export interface components {
         ComponentUpdateInput: {
             auto_recover: boolean;
         };
+        HealRunInput: {
+            /** @description De sleutel van de database uit GET /heal */
+            key: string;
+            /** @description De hash van het plan dat je zag */
+            hash: string;
+            /** @description De slug van het cluster; nodig op prod */
+            confirm?: string;
+        };
         ComponentRecoverInput: {
             /** @description De hash van het plan dat je zag */
             hash: string;
@@ -5880,6 +5911,18 @@ export interface components {
             health: string;
             problems: components["schemas"]["HealProblem"][];
             plan: components["schemas"]["HealPlan"] | null;
+            /** @description De laatste taak heal.run van deze database in het afgelopen etmaal. */
+            last_run: components["schemas"]["HealRun"] | null;
+        };
+        HealRun: {
+            /** Format: uuid */
+            job_id: string;
+            status: components["schemas"]["JobStatus"];
+            error: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            finished_at: string | null;
         };
         HealProblem: {
             /**
@@ -15862,6 +15905,35 @@ export interface operations {
                 };
             };
             401: components["responses"]["Error"];
+        };
+    };
+    runHeal: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["HealRunInput"];
+            };
+        };
+        responses: {
+            /** @description Taak aangemaakt */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Job"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
         };
     };
     listCronjobs: {

@@ -36,6 +36,8 @@ var classes = map[string]Class{
 	"cluster.database_not_added": ClassInfo, "cluster.database_retired": ClassChange,
 	"cluster.database_move_copied": ClassChange, "cluster.database_move_failed": ClassInfo, "cluster.database_moved": ClassChange,
 	"cluster.database_move_cancelled": ClassChange, "cluster.database_locked": ClassChange, "cluster.database_unlocked": ClassChange,
+	"cluster.heal_started": ClassChange, "cluster.heal_done": ClassChange, "cluster.heal_failed": ClassInfo,
+	"node.heal_started": ClassChange, "node.heal_done": ClassChange, "node.heal_failed": ClassInfo,
 	"node.created": ClassInfo, "node.updated": ClassChange, "node.deleted": ClassInfo,
 	"vip.created": ClassChange, "vip.updated": ClassChange, "vip.deleted": ClassChange,
 

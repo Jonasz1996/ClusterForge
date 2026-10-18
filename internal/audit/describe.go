@@ -391,6 +391,16 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 			return fmt.Sprintf("%s van cluster %s draait weer; %s begon het cluster met de nieuwste data", str(p, "component"), name, b)
 		}
 		return fmt.Sprintf("%s van cluster %s draait weer op %s", str(p, "component"), name, list(p["nodes"]))
+	case "cluster.heal_started", "node.heal_started":
+		what := or(str(p, "what"), "de database van "+name)
+		if p["auto"] == true {
+			return "ClusterForge herstelt " + what + " vanzelf" + colon(str(p, "reason"))
+		}
+		return "Zelfherstel gestart voor " + what + colon(list(p["nodes"]))
+	case "cluster.heal_done", "node.heal_done":
+		return "Zelfherstel van " + or(str(p, "what"), "de database van "+name) + " gelukt"
+	case "cluster.heal_failed", "node.heal_failed":
+		return "Zelfherstel van " + or(str(p, "what"), "de database van "+name) + " mislukt" + colon(str(p, "error"))
 	case "cluster.database_resynced":
 		return fmt.Sprintf("%s opnieuw gesynchroniseerd in %s van cluster %s", str(p, "hostname"), str(p, "component"), name)
 	case "cluster.database_switchover":

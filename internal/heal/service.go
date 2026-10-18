@@ -15,6 +15,8 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/agentbus"
 	"github.com/Jonasz1996/clusterforge/internal/databases"
 	"github.com/Jonasz1996/clusterforge/internal/deploy"
+	"github.com/Jonasz1996/clusterforge/internal/events"
+	"github.com/Jonasz1996/clusterforge/internal/jobs"
 	"github.com/Jonasz1996/clusterforge/internal/status"
 	"github.com/Jonasz1996/clusterforge/internal/store"
 	"github.com/Jonasz1996/clusterforge/pkg/protocol"
@@ -37,6 +39,9 @@ type Service struct {
 	q    *store.Queries
 	bus  Bus
 	log  *slog.Logger
+	ev   *events.Writer
+	// runner voert heal.run uit; nil tot EnableRun.
+	runner *jobs.Runner
 	// Overview geeft de databases van de pagina Databases.
 	Overview func(ctx context.Context) ([]databases.Group, error)
 	// Interval is hoe vaak Run de nodes bekijkt; nul of minder zet het uit.
@@ -210,9 +215,28 @@ func (s *Service) Reports(ctx context.Context) ([]Report, error) {
 	if err != nil {
 		return nil, err
 	}
+	last, err := s.lastRuns(ctx)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]Report, 0, len(in))
 	for _, x := range in {
-		out = append(out, Diagnose(x))
+		r := Diagnose(x)
+		r.Last = last[r.Key]
+		out = append(out, r)
+	}
+	return out, nil
+}
+
+// lastRuns is de laatste taak heal.run per database.
+func (s *Service) lastRuns(ctx context.Context) (map[string]*LastRun, error) {
+	rows, err := s.q.ListHealJobs(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]*LastRun, len(rows))
+	for _, r := range rows {
+		out[r.Key] = &LastRun{JobID: r.ID, Status: string(r.Status), Error: r.Error, CreatedAt: r.CreatedAt, FinishedAt: r.FinishedAt}
 	}
 	return out, nil
 }

@@ -7701,12 +7701,36 @@ type HealReport struct {
 	Health             string                                `json:"health"`
 	Key                string                                `json:"key"`
 	Kind               string                                `json:"kind"`
-	Plan               nullable.Nullable[HealPlan]           `json:"plan"`
-	Problems           []HealProblem                         `json:"problems"`
+
+	// LastRun De laatste taak heal.run van deze database in het afgelopen etmaal.
+	LastRun  nullable.Nullable[HealRun]  `json:"last_run"`
+	Plan     nullable.Nullable[HealPlan] `json:"plan"`
+	Problems []HealProblem               `json:"problems"`
 }
 
 // HealReportEngine defines model for HealReport.Engine.
 type HealReportEngine string
+
+// HealRun defines model for HealRun.
+type HealRun struct {
+	CreatedAt  time.Time                    `json:"created_at"`
+	Error      string                       `json:"error"`
+	FinishedAt nullable.Nullable[time.Time] `json:"finished_at"`
+	JobId      openapi_types.UUID           `json:"job_id"`
+	Status     JobStatus                    `json:"status"`
+}
+
+// HealRunInput defines model for HealRunInput.
+type HealRunInput struct {
+	// Confirm De slug van het cluster; nodig op prod
+	Confirm *string `json:"confirm,omitempty"`
+
+	// Hash De hash van het plan dat je zag
+	Hash string `json:"hash"`
+
+	// Key De sleutel van de database uit GET /heal
+	Key string `json:"key"`
+}
 
 // Health defines model for Health.
 type Health struct {
@@ -11560,6 +11584,9 @@ type SaveGitRepoJSONRequestBody = GitRepoInput
 // ProbeGitRepoJSONRequestBody defines body for ProbeGitRepo for application/json ContentType.
 type ProbeGitRepoJSONRequestBody = GitRepoInput
 
+// RunHealJSONRequestBody defines body for RunHeal for application/json ContentType.
+type RunHealJSONRequestBody = HealRunInput
+
 // SetIncidentNoteJSONRequestBody defines body for SetIncidentNote for application/json ContentType.
 type SetIncidentNoteJSONRequestBody = IncidentNote
 
@@ -12090,6 +12117,9 @@ type ServerInterface interface {
 	// ListHeal Zelfherstel per database
 	// (GET /heal)
 	ListHeal(w http.ResponseWriter, r *http.Request)
+	// RunHeal Het herstelplan van een database uitvoeren (admin); wordt een taak heal.run
+	// (POST /heal/run)
+	RunHeal(w http.ResponseWriter, r *http.Request)
 	// GetHealth Gezondheid van de server en de database
 	// (GET /health)
 	GetHealth(w http.ResponseWriter, r *http.Request)
@@ -13287,6 +13317,12 @@ func (_ Unimplemented) SyncGit(w http.ResponseWriter, r *http.Request) {
 // ListHeal Zelfherstel per database
 // (GET /heal)
 func (_ Unimplemented) ListHeal(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RunHeal Het herstelplan van een database uitvoeren (admin); wordt een taak heal.run
+// (POST /heal/run)
+func (_ Unimplemented) RunHeal(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -18203,6 +18239,20 @@ func (siw *ServerInterfaceWrapper) ListHeal(w http.ResponseWriter, r *http.Reque
 	handler.ServeHTTP(w, r)
 }
 
+// RunHeal operation middleware
+func (siw *ServerInterfaceWrapper) RunHeal(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RunHeal(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetHealth operation middleware
 func (siw *ServerInterfaceWrapper) GetHealth(w http.ResponseWriter, r *http.Request) {
 
@@ -22177,6 +22227,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/heal", wrapper.ListHeal)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/heal/run", wrapper.RunHeal)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/cronjobs", wrapper.ListCronjobs)

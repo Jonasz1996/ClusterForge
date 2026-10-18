@@ -3550,6 +3550,31 @@ paths:
                 properties:
                   items: { type: array, items: { $ref: "#/components/schemas/HealReport" } }
         "401": { $ref: "#/components/responses/Error" }
+  /heal/run:
+    post:
+      operationId: runHeal
+      summary: Het herstelplan van een database uitvoeren (admin); wordt een taak heal.run
+      description: |
+        Doet wat het plan met deze hash zei: Galera-adressen bijwerken, een hangend proces stoppen, de server starten, of
+        bij Galera zonder Primary component het cluster beginnen op de node met de nieuwste data en de andere laten
+        aansluiten. Een ander plan geeft 409 met code plan_stale; een plan dat nu niet kan, of een database die een onderdeel
+        van ClusterForge is, geeft 409. Op prod vraagt het tweestapsverificatie en de slug in confirm.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/HealRunInput" }
+      responses:
+        "202":
+          description: Taak aangemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
   /cronjobs:
     get:
       operationId: listCronjobs
@@ -5041,6 +5066,13 @@ components:
       required: [auto_recover]
       properties:
         auto_recover: { type: boolean }
+    HealRunInput:
+      type: object
+      required: [key, hash]
+      properties:
+        key: { type: string, description: De sleutel van de database uit GET /heal }
+        hash: { type: string, description: De hash van het plan dat je zag }
+        confirm: { type: string, description: De slug van het cluster; nodig op prod }
     ComponentRecoverInput:
       type: object
       required: [hash]
@@ -6150,7 +6182,7 @@ components:
     HealReport:
       type: object
       description: Zelfherstel voor één database; key is die van DatabaseGroup.
-      required: [key, cluster_id, cluster_name, cluster_slug, cluster_environment, engine, kind, health, problems, plan]
+      required: [key, cluster_id, cluster_name, cluster_slug, cluster_environment, engine, kind, health, problems, plan, last_run]
       properties:
         key: { type: string }
         cluster_id: { type: string, format: uuid, nullable: true }
@@ -6166,6 +6198,19 @@ components:
         plan:
           nullable: true
           allOf: [{ $ref: "#/components/schemas/HealPlan" }]
+        last_run:
+          nullable: true
+          description: De laatste taak heal.run van deze database in het afgelopen etmaal.
+          allOf: [{ $ref: "#/components/schemas/HealRun" }]
+    HealRun:
+      type: object
+      required: [job_id, status, error, created_at, finished_at]
+      properties:
+        job_id: { type: string, format: uuid }
+        status: { $ref: "#/components/schemas/JobStatus" }
+        error: { type: string }
+        created_at: { type: string, format: date-time }
+        finished_at: { type: string, format: date-time, nullable: true }
     HealProblem:
       type: object
       required: [code, level, title, why, nodes]
