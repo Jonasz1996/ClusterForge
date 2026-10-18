@@ -64,6 +64,19 @@ func (b *Bus) onEvents(m *nats.Msg) {
 		if err := b.handleConns(ctx, nodeID, c, received); err != nil {
 			b.log.Warn("verbindingen verwerken mislukt", "node", nodeID, "err", err)
 		}
+	case protocol.TypeCronRuns:
+		var c protocol.CronRuns
+		fn := b.cronRuns.Load()
+		if err := json.Unmarshal(env.Body, &c); err != nil || fn == nil {
+			b.log.Warn("ongeldige of onverwachte runs van cronjobs", "node", nodeID, "err", err)
+			reply(errors.New("niet verwerkt"))
+			return
+		}
+		err = (*fn)(ctx, nodeID, c)
+		if err != nil {
+			b.log.Error("runs van cronjobs verwerken mislukt", "node", nodeID, "err", err)
+		}
+		reply(err)
 	default:
 		b.log.Warn("onbekend berichttype op events", "node", nodeID, "type", env.Type)
 		reply(errors.New("onbekend berichttype"))

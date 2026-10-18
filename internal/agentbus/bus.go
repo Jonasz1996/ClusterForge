@@ -20,6 +20,7 @@ import (
 	"net"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -64,7 +65,16 @@ type Bus struct {
 	started time.Time
 	// noLogins laat SSH-logins uit het journaal van de agents weg.
 	noLogins bool
+	// cronRuns verwerkt de runs van beheerde cronjobs; zie SetCronRuns.
+	cronRuns atomic.Pointer[CronRunsFunc]
 }
+
+// CronRunsFunc bewaart de runs van beheerde cronjobs van een node.
+type CronRunsFunc func(ctx context.Context, nodeID uuid.UUID, runs protocol.CronRuns) error
+
+// SetCronRuns zet wie de runs van beheerde cronjobs bewaart. Zonder krijgt
+// de agent geen Ack en houdt hij ze bij.
+func (b *Bus) SetCronRuns(fn CronRunsFunc) { b.cronRuns.Store(&fn) }
 
 // Hooks geven berichten van agents door aan de rest van de server. Elk veld
 // mag nil zijn.

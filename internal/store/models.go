@@ -529,6 +529,48 @@ type ClusterSpecRevision struct {
 	CommitSha *string
 }
 
+type CronJob struct {
+	ID             uuid.UUID
+	ClusterID      uuid.UUID
+	Name           string
+	Kind           string
+	Schedule       string
+	RunOn          string
+	NodeID         *uuid.UUID
+	UserName       string
+	Command        string
+	TimeoutSeconds int32
+	Enabled        bool
+	Revision       int32
+	CreatedBy      *uuid.UUID
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+}
+
+type CronNodeSet struct {
+	NodeID    uuid.UUID
+	Hash      string
+	AppliedAt *time.Time
+	Error     string
+	ErrorKind string
+	SyncedAt  time.Time
+}
+
+type CronRun struct {
+	ID              uuid.UUID
+	JobID           uuid.UUID
+	NodeID          uuid.UUID
+	Revision        int32
+	Reason          string
+	Result          string
+	StartedAt       time.Time
+	EndedAt         *time.Time
+	ExitCode        *int32
+	Output          string
+	OutputTruncated bool
+	ReceivedAt      time.Time
+}
+
 type DbClient struct {
 	NodeID      uuid.UUID
 	Engine      string

@@ -180,7 +180,7 @@ func eventKind(action string) string {
 		return "test"
 	case prefix == "backup":
 		return "backup"
-	case action == "node.status_changed" || action == "cluster.status_changed" || action == "node.cron_failed" || action == "node.cron_recovered" || action == "vip.owner_changed" ||
+	case action == "node.status_changed" || action == "cluster.status_changed" || action == "node.cron_failed" || action == "node.cron_recovered" || action == "cron_job.run_failed" || action == "vip.owner_changed" ||
 		action == "service.status_changed" || action == "kube.app_status_changed" || action == "cluster.database_down" ||
 		action == "cluster.database_up" || action == "cluster.database_node_out" || action == "cluster.database_node_back" ||
 		action == "cluster.database_restarted" || action == "cluster.database_failover" || action == "cluster.database_state_transfer":
@@ -191,7 +191,7 @@ func eventKind(action string) string {
 		return "lifecycle"
 	case action == "cluster.updated" || action == "cluster.deployed" || action == "cluster.spec_changed" ||
 		action == "secret.created" || action == "node.updated" || prefix == "vip" || prefix == "kube" ||
-		strings.HasPrefix(action, "node.cron_"):
+		strings.HasPrefix(action, "node.cron_") || prefix == "cron_job":
 		return "config"
 	case prefix == "agent" || prefix == "enrollment_token" || action == "node.facts_changed":
 		return "agent"

@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { GroupCard } from "@/components/cron/Cron";
+import { ManagedCard } from "@/components/cron/Managed";
 import { upgradeCommand } from "@/components/drift/Drift";
 import { Empty, QueryState } from "@/components/inventory/bits";
 import { CopyBlock } from "@/components/inventory/InstallAgent";
@@ -22,7 +23,7 @@ export default function CronjobsPage() {
     <div className="space-y-6">
       <PageHeader
         title="Cronjobs"
-        description="Elke cronjob en systemd-timer op je nodes, per cluster: wanneer hij draait, wat hij doet, en hoe de laatste run ging."
+        description="Beheerde cronjobs van ClusterForge, en elke cronjob en systemd-timer die al op je nodes stond: wanneer hij draait, wat hij doet, en hoe de laatste run ging."
         actions={
           <Button variant="secondary" onClick={() => refresh.mutate()} disabled={refresh.isPending}>
             {refresh.isPending || refresh.isSuccess ? "Wordt gelezen…" : "Nu opnieuw lezen"}
@@ -58,6 +59,9 @@ export default function CronjobsPage() {
         </label>
       </div>
 
+      <ManagedCard cluster={cluster} />
+
+      <h2 className="text-lg font-semibold">Gevonden op de nodes</h2>
       <QueryState q={groups}>
         {shown.length === 0 ? (
           <Empty>

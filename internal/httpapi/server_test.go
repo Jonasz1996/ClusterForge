@@ -234,6 +234,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	// De cronjobs ook.
 	crons := cronjobs.NewService(pool, bus, ev, log)
 	crons.Interval, crons.Timeout = 0, 5*time.Second
+	bus.SetCronRuns(crons.HandleRuns)
 	// De database als onderdeel, met korte tijden; zonder metingen van het
 	// geheugen tenzij een test ze zet.
 	cmps := components.NewService(pool, ev, log, runner, bus, dep)

@@ -120,6 +120,8 @@ func subjectName(r store.ListAuditRow, p map[string]any, n names, e Entry) (stri
 		return "onbekend", false
 	case "vip":
 		return str(p, "address"), false
+	case "cron_job":
+		return str(p, "name"), false
 	case "agent":
 		return "agent op " + str(p, "hostname"), false
 	case "proxmox":
@@ -622,6 +624,27 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 		return s + fmt.Sprintf(": %s (%s)", str(p, "command"), str(p, "file"))
 	case "node.cron_recovered":
 		return fmt.Sprintf("Cronjob op %s lukt weer: %s (%s)", name, str(p, "command"), str(p, "file"))
+	case "cron_job.created":
+		return fmt.Sprintf("Cronjob %s gemaakt in %s: %s %s", name, str(p, "cluster"), str(p, "schedule"), str(p, "command"))
+	case "cron_job.updated":
+		return fmt.Sprintf("Cronjob %s gewijzigd%s", name, colon(strings.Join(changedFields(p), ", ")))
+	case "cron_job.enabled":
+		return "Cronjob " + name + " aangezet"
+	case "cron_job.disabled":
+		return "Cronjob " + name + " uitgezet"
+	case "cron_job.deleted":
+		return fmt.Sprintf("Cronjob %s weggehaald uit %s", name, str(p, "cluster"))
+	case "cron_job.run_requested":
+		return fmt.Sprintf("Cronjob %s met de hand gestart op %s", name, list(p["nodes"]))
+	case "cron_job.run_failed":
+		s := fmt.Sprintf("Cronjob %s mislukt op %s", name, str(p, "hostname"))
+		if str(p, "result") == "timeout" {
+			return s + ": tijdslimiet bereikt"
+		}
+		if e := num(p["exit"]); e != "" {
+			s += " met exitcode " + e
+		}
+		return s
 	case "node.cron_logging":
 		if b, _ := p["enabled"].(bool); b {
 			return "cron op " + name + " logt nu het einde en de exitcode van elke job"
@@ -1485,4 +1508,22 @@ func sizeText(v any) string {
 		u++
 	}
 	return " (" + strings.Replace(fmt.Sprintf("%.1f %s", n, units[u]), ".", ",", 1) + ")"
+}
+
+// changedFields geeft de namen van de gewijzigde velden van een cronjob.
+func changedFields(p map[string]any) []string {
+	labels := map[string]string{
+		"name": "naam", "schedule": "schema", "run_on": "waar", "node_id": "node", "user": "gebruiker", "command": "commando",
+		"timeout_seconds": "tijdslimiet", "enabled": "aan of uit",
+	}
+	c, _ := p["changes"].(map[string]any)
+	var out []string
+	for k := range c {
+		if l := labels[k]; l != "" {
+			k = l
+		}
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
 }

@@ -82,3 +82,104 @@ export const warningTone: Record<CronWarning["level"], "red" | "amber" | "blue">
   warning: "amber",
   info: "blue",
 };
+
+export type ManagedCronJob = components["schemas"]["ManagedCronJob"];
+export type ManagedCronJobInput = components["schemas"]["ManagedCronJobInput"];
+export type CronRunSummary = components["schemas"]["CronRunSummary"];
+
+export const runResultInfo: Record<CronRunSummary["result"], { label: string; tone: Tone }> = {
+  running: { label: "Loopt", tone: "blue" },
+  ok: { label: "Gelukt", tone: "green" },
+  failed: { label: "Mislukt", tone: "red" },
+  skipped: { label: "Overgeslagen", tone: "amber" },
+  timeout: { label: "Tijdslimiet", tone: "red" },
+};
+
+export const runOnLabel: Record<ManagedCronJob["run_on"], string> = {
+  vip: "Op de node met het VIP",
+  node: "Op één node",
+  all: "Op alle nodes",
+};
+
+const managedKey = ["cron-jobs"] as const;
+
+export function useManagedCronJobs() {
+  return useQuery({
+    queryKey: managedKey,
+    queryFn: async () => unwrap(await api.GET("/cron-jobs")).items,
+    refetchInterval: 15_000,
+  });
+}
+
+// useManagedCronJob ververst vaker terwijl er een run loopt.
+export function useManagedCronJob(id: string) {
+  return useQuery({
+    queryKey: [...managedKey, id],
+    queryFn: async () => unwrap(await api.GET("/cron-jobs/{jobId}", { params: { path: { jobId: id } } })),
+    enabled: id !== "",
+    refetchInterval: (q) => (q.state.data?.runs.some((r) => r.result === "running") ? 2_000 : 15_000),
+  });
+}
+
+export function useCronRun(id: string | null) {
+  return useQuery({
+    queryKey: ["cron-run", id],
+    queryFn: async () => unwrap(await api.GET("/cron-runs/{runId}", { params: { path: { runId: id ?? "" } } })),
+    enabled: !!id,
+    refetchInterval: (q) => (q.state.data?.result === "running" ? 2_000 : false),
+  });
+}
+
+export function useCronSchedule(schedule: string) {
+  return useQuery({
+    queryKey: ["cron-schedule", schedule],
+    queryFn: async () => unwrap(await api.GET("/cron-jobs/schedule", { params: { query: { schedule } } })),
+    enabled: schedule.trim() !== "",
+    retry: false,
+  });
+}
+
+export function useSaveCronJob() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, clusterId, body }: { id?: string; clusterId: string; body: ManagedCronJobInput }) =>
+      id
+        ? unwrap(await api.PUT("/cron-jobs/{jobId}", { params: { path: { jobId: id } }, body }))
+        : unwrap(await api.POST("/cron-jobs", { body: { ...body, cluster_id: clusterId } })),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: managedKey }),
+  });
+}
+
+export function useDeleteCronJob() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, confirm }: { id: string; confirm?: string }) =>
+      unwrap(await api.DELETE("/cron-jobs/{jobId}", { params: { path: { jobId: id }, query: { confirm } } })),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: managedKey }),
+  });
+}
+
+export function useRunCronJob() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, confirm }: { id: string; confirm?: string }) =>
+      unwrap(await api.POST("/cron-jobs/{jobId}/run", { params: { path: { jobId: id } }, body: { confirm } })).nodes,
+    onSuccess: () => {
+      setTimeout(() => void qc.invalidateQueries({ queryKey: managedKey }), 1_000);
+    },
+  });
+}
+
+// jobInputOf maakt van een job het formulier.
+export function jobInputOf(j: ManagedCronJob): ManagedCronJobInput {
+  return {
+    name: j.name,
+    schedule: j.schedule,
+    run_on: j.run_on,
+    node_id: j.node_id,
+    user: j.user,
+    command: j.command,
+    timeout_seconds: j.timeout_seconds,
+    enabled: j.enabled,
+  };
+}
