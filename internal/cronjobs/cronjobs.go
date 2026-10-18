@@ -185,6 +185,7 @@ func (s *Service) syncNode(ctx context.Context, n store.ListCronCandidateNodesRo
 		}
 		seen := map[string]bool{}
 		var added []protocol.CronEntry
+		var results []result
 		for _, e := range res.Entries {
 			key := Key(e)
 			// Twee gelijke regels in één bestand: de tweede krijgt een
@@ -194,17 +195,28 @@ func (s *Service) syncNode(ctx context.Context, n store.ListCronCandidateNodesRo
 			}
 			seen[key] = true
 			first := now
-			if o, ok := oldByKey[key]; ok {
+			o, known := oldByKey[key]
+			if known {
 				first = o.FirstSeen
 				delete(oldByKey, key)
 			} else {
 				added = append(added, e)
+			}
+			// Een job die nu mislukt en het eerst niet deed, of weer lukt.
+			if e.Package == "" {
+				switch {
+				case e.LastResult == protocol.CronFailed && (!known || o.LastResult != protocol.CronFailed):
+					results = append(results, result{"node.cron_failed", e})
+				case known && o.LastResult == protocol.CronFailed && e.LastResult == protocol.CronOK:
+					results = append(results, result{"node.cron_recovered", e})
+				}
 			}
 			if err := q.InsertNodeCron(ctx, store.InsertNodeCronParams{
 				NodeID: n.ID, Key: key, Source: e.Source, File: e.File, Line: int32(e.Line), UserName: e.User, Schedule: e.Schedule,
 				Command: e.Command, Unit: e.Unit, Description: e.Description, Package: e.Package, Enabled: e.Enabled,
 				Clusterforge: e.ClusterForge, LastRunAt: e.LastRun, LastEndAt: e.LastEnd, LastExit: int32Ptr(e.LastExit),
 				LastResult: e.LastResult, Runs: int32(e.Runs), Failures: int32(e.Failures), NextRunAt: e.NextRun, FirstSeen: first,
+				SubjectID: new(SubjectID(n.ID, key)),
 			}); err != nil {
 				return err
 			}
@@ -212,6 +224,9 @@ func (s *Service) syncNode(ctx context.Context, n store.ListCronCandidateNodesRo
 		if err := q.UpsertCronRead(ctx, store.UpsertCronReadParams{
 			NodeID: n.ID, Daemon: res.Daemon, Logging: res.Logging, Journal: res.Journal, Truncated: res.Truncated, SyncedAt: now,
 		}); err != nil {
+			return err
+		}
+		if err := s.resultEvents(ctx, q, n, results); err != nil {
 			return err
 		}
 		// De eerste keer is alles nieuw; dat is geen wijziging op de node.
@@ -224,6 +239,38 @@ func (s *Service) syncNode(ctx context.Context, n store.ListCronCandidateNodesRo
 		}
 		return s.changeEvents(ctx, q, n, added, removed)
 	})
+}
+
+// resultEvents schrijft een event per job die begon te mislukken of weer
+// lukt; ook de eerste keer, want een job die al mislukt is nieuws.
+func (s *Service) resultEvents(ctx context.Context, q *store.Queries, n store.ListCronCandidateNodesRow, results []result) error {
+	for _, r := range results {
+		p := map[string]any{"hostname": n.Hostname, "file": r.entry.File, "user": r.entry.User, "schedule": r.entry.Schedule, "command": r.entry.Command}
+		if r.entry.LastExit != nil {
+			p["exit"] = *r.entry.LastExit
+		}
+		if r.entry.LastRun != nil {
+			p["run_at"] = r.entry.LastRun.UTC().Format(time.RFC3339)
+		}
+		if err := s.ev.Write(ctx, q, events.Event{
+			Actor: events.System(), SubjectType: "node", SubjectID: n.ID.String(), ClusterID: n.ClusterID, Action: r.action, Payload: p,
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// result is een job die begon te mislukken of weer lukt.
+type result struct {
+	action string
+	entry  protocol.CronEntry
+}
+
+// SubjectID is de vaste uuid van een job op een node, als onderwerp van een
+// incident.
+func SubjectID(nodeID uuid.UUID, key string) uuid.UUID {
+	return uuid.NewSHA1(nodeID, []byte("cron:"+key))
 }
 
 func int32Ptr(v *int) *int32 {
@@ -280,4 +327,57 @@ func (s *Service) changeEvents(ctx context.Context, q *store.Queries, n store.Li
 		}
 	}
 	return nil
+}
+
+// Fouten van SetLogging.
+var (
+	ErrNotFound = errors.New("node niet gevonden of zonder agent")
+	// ErrAgentTooOld: de agent kent CronLogging nog niet.
+	ErrAgentTooOld = errors.New("agent te oud")
+)
+
+// AgentError is een fout van de agent of de verbinding, met een zin voor
+// Jonas.
+type AgentError struct{ Msg string }
+
+func (e *AgentError) Error() string { return e.Msg }
+
+// SetLogging laat cron op een node het einde en de exitcode van elke job
+// loggen, of zet dat terug, en leest de node daarna opnieuw.
+func (s *Service) SetLogging(ctx context.Context, actor events.Actor, nodeID uuid.UUID, enable bool) ([]string, error) {
+	nodes, err := s.q.ListCronCandidateNodes(ctx)
+	if err != nil {
+		return nil, err
+	}
+	i := slices.IndexFunc(nodes, func(n store.ListCronCandidateNodesRow) bool { return n.ID == nodeID })
+	if i < 0 {
+		return nil, ErrNotFound
+	}
+	n := nodes[i]
+	if n.AgentProtocol < protocol.CronLoggingSince {
+		return nil, fmt.Errorf("%w: de agent op %s heeft protocol %d; dit vraagt protocol %d", ErrAgentTooOld, n.Hostname, n.AgentProtocol, protocol.CronLoggingSince)
+	}
+	rctx, cancel := context.WithTimeout(ctx, s.Timeout)
+	defer cancel()
+	res, err := s.bus.Cron(rctx, n.ID, protocol.CronRequest{Op: protocol.CronLogging, Enable: enable})
+	switch {
+	case errors.Is(err, agentbus.ErrAgentOffline):
+		return nil, &AgentError{"de agent op " + n.Hostname + " is niet verbonden"}
+	case errors.Is(err, agentbus.ErrNoAnswer):
+		return nil, &AgentError{"de agent op " + n.Hostname + " antwoordde niet op tijd"}
+	case err != nil:
+		return nil, &AgentError{err.Error()}
+	case res.Error != "":
+		return nil, &AgentError{n.Hostname + ": " + res.Error}
+	}
+	if err := s.ev.Write(ctx, nil, events.Event{
+		Actor: actor, SubjectType: "node", SubjectID: n.ID.String(), ClusterID: n.ClusterID, Action: "node.cron_logging",
+		Payload: map[string]any{"hostname": n.Hostname, "enabled": enable},
+	}); err != nil {
+		return nil, err
+	}
+	if err := s.syncNode(ctx, n); err != nil {
+		s.log.Warn("cronjobs opnieuw lezen na de logging mislukt", "node", n.Hostname, "err", err)
+	}
+	return res.Output, nil
 }

@@ -614,6 +614,19 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 			s += fmt.Sprintf("; commando %s", str(p, "command"))
 		}
 		return s
+	case "node.cron_failed":
+		s := fmt.Sprintf("Cronjob op %s mislukt", name)
+		if e := num(p["exit"]); e != "" {
+			s += " met exitcode " + e
+		}
+		return s + fmt.Sprintf(": %s (%s)", str(p, "command"), str(p, "file"))
+	case "node.cron_recovered":
+		return fmt.Sprintf("Cronjob op %s lukt weer: %s (%s)", name, str(p, "command"), str(p, "file"))
+	case "node.cron_logging":
+		if b, _ := p["enabled"].(bool); b {
+			return "cron op " + name + " logt nu het einde en de exitcode van elke job"
+		}
+		return "cron op " + name + " logt weer alleen de start van een job"
 	case "node.facts_changed":
 		if b, _ := p["first"].(bool); b {
 			return "Eerste facts van " + name + " ontvangen"

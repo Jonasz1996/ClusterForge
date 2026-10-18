@@ -91,7 +91,7 @@ Het technisch ontwerp staat in [docs/design/mvp-fase-1.md](docs/design/mvp-fase-
 | Fase 6: cronjobs en bestandssync | Inhoud | Status |
 | --- | --- | --- |
 | 1. Cronjobs lezen | cf-agent leest elke cronjob en systemd-timer op de node (agentprotocol 16): `/etc/crontab`, `/etc/cron.d`, de crontabs van gebruikers, `cron.hourly` tot `cron.monthly` en de timers, met de laatste run uit de journal; wachtwoorden in commando's worden op de node al gemaskeerd. Een pagina **[Cronjobs](#cronjobs)** met per cluster elke job één keer, het schema in gewone taal, de volgende run, op welke nodes hij staat (en waar niet) en hoe de laatste run ging; een kaart Cronjobs op de pagina van een node. Een job die bijkomt, verdwijnt of verandert, staat in het logboek en in What Broke | klaar |
-| 2. Verschillen, waarschuwingen en fouten | Jobs die per node verschillen, waarschuwingen naast een onderdeel van ClusterForge, en een incident bij een job die faalt | gepland |
+| 2. Verschillen, waarschuwingen en fouten | Een job die op een node anders staat, toont het schema of commando van die node. Waarschuwingen bij gevaarlijke jobs naast een onderdeel van ClusterForge, zoals een Galera-bootstrap-cron naast het onderdeel Database (rood), een cron die de database herstart, of een script dat zelf een PostgreSQL-primary kiest; een rsync-cron krijgt de tip dat hij straks beheerd kan. Een job die mislukt, geeft een event en een incident tot hij weer lukt. Met de knop **Fouten van cron vastleggen** zet ClusterForge `-L 15` aan in een drop-in van cron.service (agentprotocol 17) | klaar |
 | 3. Beheerde cronjobs | Eigen cronjobs in ClusterForge op de node met het VIP, een vaste node of alle nodes, met runs en uitvoer | gepland |
 | 4. Opvolgen | Live uitvoer, stoppen, herhalen, incidenten en de clusterstatus | gepland |
 | 5. Overnemen | Een bestaande cronjob met één knop beheerd maken | gepland |
@@ -1202,9 +1202,22 @@ Dezelfde job op meer nodes van een cluster staat er één keer, met per node de 
 
 **Wachtwoorden.** De agent maskeert wachtwoorden in commando's voordat ze de node verlaten: `-pGeheim` van mysql en mariadb-dump, `--password=`, `PASSWORD=` en `PGPASSWORD=`, een gebruiker met wachtwoord in een URL, en een `Authorization`-header. Beter is natuurlijk een bestand met het wachtwoord op de node, zoals `~/.my.cnf`.
 
+Staat dezelfde job (zelfde bestand en gebruiker) op een node anders, dan staat bij de job **Anders op** met het schema of commando van die node. Het cluster krijgt dan het label "verschilt per node".
+
+**Fouten van cron vastleggen.** Logt cron op een node niet of een job lukte, dan staat boven de lijst een knop **Fouten van cron vastleggen** (alleen voor een beheerder). Die schrijft `/etc/systemd/system/cron.service.d/50-clusterforge-log.conf` met dezelfde `ExecStart` plus `-L 15`, doet `systemctl daemon-reload` en herstart cron; jobs die al lopen, draaien door. Weghalen kan met `rm` van dat bestand, `systemctl daemon-reload` en `systemctl restart cron`. Dit kan vanaf agentprotocol 17, en alleen bij cron van Debian; cronie logt geen exitcode.
+
+**Waarschuwingen.** ClusterForge legt elke eigen cronjob naast wat het zelf beheert:
+
+- **Gevaarlijk:** een cron die Galera opnieuw start (`galera_new_cluster`, `safe_to_bootstrap`, een script met galera en bootstrap of recover in de naam) op een cluster met het [onderdeel Database](#met-een-database) MariaDB. ClusterForge start Galera zelf opnieuw, alleen als alle nodes antwoorden en op de node met de nieuwste data; zo'n cron kan bij een netwerkstoring een tweede cluster starten. Haal hem weg. Zonder het onderdeel is het een waarschuwing.
+- **Gevaarlijk:** een script dat zelf een PostgreSQL-primary zoekt of promote (`pg_ctl promote`, `repmgr`) naast het onderdeel Database PostgreSQL: Patroni kiest de primary.
+- **Let op:** een cron die MariaDB of PostgreSQL herstart naast het onderdeel van die database; dat kan een failovertest of onderhoud doorkruisen.
+- **Tip:** een `rsync` naar een andere host is een bestandssync die ClusterForge straks beheerd kan draaien, alleen vanaf de node met het VIP.
+
+**Fouten.** Mislukt een job (een exitcode die niet 0 is), dan staat er een event "Cronjob op db1 mislukt" in het logboek en opent een [incident](#incidenten) "Cronjob … op db1 mislukt" met ernst laag; een mislukte back-up maakt een cluster niet down. Lukt de volgende run, dan volgt "Cronjob op db1 lukt weer" en sluit het incident. Jobs van Debian-pakketten tellen niet mee.
+
 **Wijzigingen.** Komt er een job bij, verdwijnt er een of verandert het schema of commando, dan staat dat in het logboek en in [What Broke](#what-broke), zoals "Cronjob op nc1 gewijzigd in /etc/cron.d/nextcloud-sync: schema 0 */4 * * *, was 0 */6 * * *".
 
-Dit kan vanaf **agentprotocol 16**. Met een oudere agent toont de pagina het commando om hem bij te werken; de andere onderdelen blijven werken.
+Lezen kan vanaf **agentprotocol 16**, de knop Fouten van cron vastleggen vanaf **17**. Met een oudere agent toont de pagina het commando om hem bij te werken; de andere onderdelen blijven werken.
 
 ## Failovertests
 

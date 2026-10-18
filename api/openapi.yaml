@@ -3551,6 +3551,40 @@ paths:
                 properties:
                   items: { type: array, items: { $ref: "#/components/schemas/CronGroup" } }
         "401": { $ref: "#/components/responses/Error" }
+  /nodes/{nodeId}/cron-logging:
+    post:
+      operationId: setCronLogging
+      summary: cron op een node het einde en de exitcode van elke job laten loggen (admin)
+      description: |
+        Schrijft een drop-in voor cron.service die cron met -L 15 start, en herstart cron; lopende jobs draaien door.
+        Met enabled=false gaat de drop-in weg. Vraagt agentprotocol 17.
+      parameters:
+        - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled]
+              properties:
+                enabled: { type: boolean }
+      responses:
+        "200":
+          description: Gedaan
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [output]
+                properties:
+                  output: { type: array, items: { type: string } }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
   /cronjobs/refresh:
     post:
       operationId: refreshCronjobs
@@ -5613,7 +5647,8 @@ components:
     CronJob:
       type: object
       description: Eén cronjob of timer, met de nodes waarop hij staat.
-      required: [key, source, file, line, user, schedule, describe, command, unit, description, package, clusterforge, nodes, next_run]
+      required: [key, source, file, line, user, schedule, describe, command, unit, description, package, clusterforge, nodes, next_run,
+        differs, warnings]
       properties:
         key: { type: string, description: Dezelfde voor dezelfde job op elke node }
         source:
@@ -5632,6 +5667,28 @@ components:
         clusterforge: { type: boolean, description: Een job die ClusterForge zelf beheert }
         next_run: { type: string, format: date-time, nullable: true }
         nodes: { type: array, items: { $ref: "#/components/schemas/CronJobNode" } }
+        differs:
+          type: array
+          description: Nodes waar dezelfde job (zelfde bestand en gebruiker) met een ander schema of commando staat
+          items: { $ref: "#/components/schemas/CronVariant" }
+        warnings: { type: array, items: { $ref: "#/components/schemas/CronWarning" } }
+    CronVariant:
+      type: object
+      required: [hostname, schedule, command]
+      properties:
+        hostname: { type: string }
+        schedule: { type: string }
+        command: { type: string }
+    CronWarning:
+      type: object
+      required: [kind, level, text]
+      properties:
+        kind: { type: string, enum: [galera_bootstrap, db_restart, pg_failover, rsync] }
+        level:
+          type: string
+          enum: [danger, warning, info]
+          x-enum-varnames: [CronWarningDanger, CronWarningWarning, CronWarningInfo]
+        text: { type: string }
     CronJobNode:
       type: object
       required: [node_id, hostname, enabled, last_run, last_end, last_exit, last_result, runs, failures, next_run]
@@ -8157,7 +8214,7 @@ components:
       type: object
       required: [type, id, name, cluster_id, first_status, worst_status, last_status, reason, since, until, present, app]
       properties:
-        type: { type: string, enum: [cluster, node, service, test_run, app] }
+        type: { type: string, enum: [cluster, node, service, test_run, app, cron] }
         id: { type: string, format: uuid }
         name: { type: string }
         cluster_id: { type: string, format: uuid, nullable: true }

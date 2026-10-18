@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path"
 	"regexp"
@@ -99,6 +100,8 @@ func (a *Agent) handleCron(data []byte) protocol.CronResponse {
 	switch req.Op {
 	case protocol.CronList:
 		return a.cronList(ctx)
+	case protocol.CronLogging:
+		return a.cronLogging(ctx, req.Enable)
 	default:
 		return protocol.CronResponse{Error: "onbekend cronverzoek " + req.Op, Entries: []protocol.CronEntry{}}
 	}
@@ -665,4 +668,63 @@ func (l *cronLog) fill(e *protocol.CronEntry, key string, now time.Time, logging
 	default:
 		e.LastResult = protocol.CronStarted
 	}
+}
+
+// cronLogging laat cron het einde en de exitcode van elke job loggen, met
+// een drop-in die ExecStart van cron.service herhaalt met -L 15 erachter
+// (de laatste -L telt), of haalt die drop-in weer weg.
+func (a *Agent) cronLogging(ctx context.Context, enable bool) protocol.CronResponse {
+	res := protocol.CronResponse{Entries: []protocol.CronEntry{}}
+	c := a.Collector
+	if c == nil {
+		c = &Collector{}
+	}
+	daemon, _ := cronDaemon(ctx, c)
+	if daemon != "cron" {
+		res.Error = "op deze node draait geen cron van Debian"
+		if daemon == "cronie" {
+			res.Error = "cronie logt geen exitcode; dat kan ClusterForge niet aanzetten"
+		}
+		return res
+	}
+	p, err := a.path(protocol.CronLoggingDropIn)
+	if err != nil {
+		res.Error = err.Error()
+		return res
+	}
+	if enable {
+		start := "/usr/sbin/cron -f -P $EXTRA_OPTS"
+		if props := systemctlShow(ctx, c, []string{"cron.service"}, "ExecStart"); len(props) > 0 {
+			if cmd := execStart(props[0].get("ExecStart")); cmd != "" && !strings.Contains(cmd, ";") {
+				start = strings.TrimSpace(strings.TrimSuffix(cmd, "-L 15"))
+			}
+		}
+		content := "# ClusterForge: cron logt het einde en de exitcode van elke job (-L 15).\n" +
+			"# Weghalen kan bij Cronjobs, of met: rm " + protocol.CronLoggingDropIn + " && systemctl daemon-reload && systemctl restart cron\n" +
+			"[Service]\nExecStart=\nExecStart=" + start + " -L 15\n"
+		if err := os.MkdirAll(path.Dir(p), 0o755); err != nil {
+			res.Error = err.Error()
+			return res
+		}
+		if err := writeFileAtomic(p, []byte(content), 0o644); err != nil {
+			res.Error = err.Error()
+			return res
+		}
+		res.Output = append(res.Output, protocol.CronLoggingDropIn+" geschreven: ExecStart="+start+" -L 15")
+	} else {
+		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+			res.Error = err.Error()
+			return res
+		}
+		res.Output = append(res.Output, protocol.CronLoggingDropIn+" weggehaald")
+	}
+	for _, args := range [][]string{{"daemon-reload"}, {"restart", "cron.service"}} {
+		if out, err := a.exec(ctx, "systemctl", args...); err != nil {
+			res.Error = fmt.Sprintf("systemctl %s: %v: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+			return res
+		}
+	}
+	res.Output = append(res.Output, "cron herstart; lopende jobs draaien door")
+	res.Daemon, res.Logging = cronDaemon(ctx, c)
+	return res
 }

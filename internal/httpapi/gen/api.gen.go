@@ -570,6 +570,51 @@ func (e CronJobNodeLastResult) Valid() bool {
 	}
 }
 
+// Defines values for CronWarningKind.
+const (
+	DbRestart       CronWarningKind = "db_restart"
+	GaleraBootstrap CronWarningKind = "galera_bootstrap"
+	PgFailover      CronWarningKind = "pg_failover"
+	Rsync           CronWarningKind = "rsync"
+)
+
+// Valid indicates whether the value is a known member of the CronWarningKind enum.
+func (e CronWarningKind) Valid() bool {
+	switch e {
+	case DbRestart:
+		return true
+	case GaleraBootstrap:
+		return true
+	case PgFailover:
+		return true
+	case Rsync:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CronWarningLevel.
+const (
+	CronWarningDanger  CronWarningLevel = "danger"
+	CronWarningInfo    CronWarningLevel = "info"
+	CronWarningWarning CronWarningLevel = "warning"
+)
+
+// Valid indicates whether the value is a known member of the CronWarningLevel enum.
+func (e CronWarningLevel) Valid() bool {
+	switch e {
+	case CronWarningDanger:
+		return true
+	case CronWarningInfo:
+		return true
+	case CronWarningWarning:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for DRSchedule.
 const (
 	DRScheduleEmpty   DRSchedule = ""
@@ -1564,6 +1609,7 @@ func (e IncidentFindingMetric) Valid() bool {
 const (
 	IncidentSubjectTypeApp     IncidentSubjectType = "app"
 	IncidentSubjectTypeCluster IncidentSubjectType = "cluster"
+	IncidentSubjectTypeCron    IncidentSubjectType = "cron"
 	IncidentSubjectTypeNode    IncidentSubjectType = "node"
 	IncidentSubjectTypeService IncidentSubjectType = "service"
 	IncidentSubjectTypeTestRun IncidentSubjectType = "test_run"
@@ -1575,6 +1621,8 @@ func (e IncidentSubjectType) Valid() bool {
 	case IncidentSubjectTypeApp:
 		return true
 	case IncidentSubjectTypeCluster:
+		return true
+	case IncidentSubjectTypeCron:
 		return true
 	case IncidentSubjectTypeNode:
 		return true
@@ -4679,6 +4727,9 @@ type CronJob struct {
 	Describe    string `json:"describe"`
 	Description string `json:"description"`
 
+	// Differs Nodes waar dezelfde job (zelfde bestand en gebruiker) met een ander schema of commando staat
+	Differs []CronVariant `json:"differs"`
+
 	// File Het bestand
 	File string `json:"file"`
 
@@ -4698,8 +4749,9 @@ type CronJob struct {
 	Source CronJobSource `json:"source"`
 
 	// Unit De service van een timer
-	Unit string `json:"unit"`
-	User string `json:"user"`
+	Unit     string        `json:"unit"`
+	User     string        `json:"user"`
+	Warnings []CronWarning `json:"warnings"`
 }
 
 // CronJobSource /etc/crontab, /etc/cron.d, de crontab van een gebruiker, cron.hourly/daily/weekly/monthly, of een systemd-timer
@@ -4752,6 +4804,26 @@ type CronNodeRead struct {
 	// Truncated De node had meer dan 1000 jobs; de rest ontbreekt
 	Truncated bool `json:"truncated"`
 }
+
+// CronVariant defines model for CronVariant.
+type CronVariant struct {
+	Command  string `json:"command"`
+	Hostname string `json:"hostname"`
+	Schedule string `json:"schedule"`
+}
+
+// CronWarning defines model for CronWarning.
+type CronWarning struct {
+	Kind  CronWarningKind  `json:"kind"`
+	Level CronWarningLevel `json:"level"`
+	Text  string           `json:"text"`
+}
+
+// CronWarningKind defines model for CronWarning.Kind.
+type CronWarningKind string
+
+// CronWarningLevel defines model for CronWarning.Level.
+type CronWarningLevel string
 
 // DRPlan defines model for DRPlan.
 type DRPlan struct {
@@ -10587,6 +10659,11 @@ type ListNodeChangesParams struct {
 	Limit *ChangesLimit `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// SetCronLoggingJSONBody defines parameters for SetCronLogging.
+type SetCronLoggingJSONBody struct {
+	Enabled bool `json:"enabled"`
+}
+
 // GetNodeMetricsParams defines parameters for GetNodeMetrics.
 type GetNodeMetricsParams struct {
 	Range *MetricsRange `form:"range,omitempty" json:"range,omitempty"`
@@ -10865,6 +10942,9 @@ type NodeActionJSONRequestBody = NodeActionInput
 
 // VerifyNodeBackupJSONRequestBody defines body for VerifyNodeBackup for application/json ContentType.
 type VerifyNodeBackupJSONRequestBody = BackupVerifyInput
+
+// SetCronLoggingJSONRequestBody defines body for SetCronLogging for application/json ContentType.
+type SetCronLoggingJSONRequestBody SetCronLoggingJSONBody
 
 // CreateProxmoxJSONRequestBody defines body for CreateProxmox for application/json ContentType.
 type CreateProxmoxJSONRequestBody = ProxmoxInput
@@ -11486,6 +11566,9 @@ type ServerInterface interface {
 	// GetNodeConnections De TCP-verbindingen die de agent de afgelopen 24 uur zag (admin)
 	// (GET /nodes/{nodeId}/connections)
 	GetNodeConnections(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// SetCronLogging cron op een node het einde en de exitcode van elke job laten loggen (admin)
+	// (POST /nodes/{nodeId}/cron-logging)
+	SetCronLogging(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
 	// GetNodeDrift Drift van één node
 	// (GET /nodes/{nodeId}/drift)
 	GetNodeDrift(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
@@ -12776,6 +12859,12 @@ func (_ Unimplemented) ListNodeChanges(w http.ResponseWriter, r *http.Request, n
 // GetNodeConnections De TCP-verbindingen die de agent de afgelopen 24 uur zag (admin)
 // (GET /nodes/{nodeId}/connections)
 func (_ Unimplemented) GetNodeConnections(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SetCronLogging cron op een node het einde en de exitcode van elke job laten loggen (admin)
+// (POST /nodes/{nodeId}/cron-logging)
+func (_ Unimplemented) SetCronLogging(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -19226,6 +19315,32 @@ func (siw *ServerInterfaceWrapper) GetNodeConnections(w http.ResponseWriter, r *
 	handler.ServeHTTP(w, r)
 }
 
+// SetCronLogging operation middleware
+func (siw *ServerInterfaceWrapper) SetCronLogging(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetCronLogging(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetNodeDrift operation middleware
 func (siw *ServerInterfaceWrapper) GetNodeDrift(w http.ResponseWriter, r *http.Request) {
 
@@ -20952,6 +21067,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/cronjobs", wrapper.ListCronjobs)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/nodes/{nodeId}/cron-logging", wrapper.SetCronLogging)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/cronjobs/refresh", wrapper.RefreshCronjobs)

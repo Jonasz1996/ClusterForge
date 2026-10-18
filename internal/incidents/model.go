@@ -28,6 +28,8 @@ const (
 	SubjectTestRun = "test_run"
 	// SubjectApp is een app in een Kubernetes-cluster.
 	SubjectApp = "app"
+	// SubjectCron is een cronjob op een node die mislukt.
+	SubjectCron = "cron"
 )
 
 // Rules zijn de tijden van de detector.
