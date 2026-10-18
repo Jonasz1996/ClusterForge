@@ -604,8 +604,21 @@ func (s *Service) checkExisting(pn *PlanNode, n *Node, f *protocol.Facts, st dbS
 		pn.Existing = "MariaDB " + srv.Version + " zonder eigen databases"
 		add(Warning, "mariadb_takeover", n, fmt.Sprintf("op %s draait al een MariaDB zonder eigen databases; ClusterForge neemt hem over en "+
 			"herstart hem als node van het cluster", n.Hostname), "")
+	case srv.Active == "active" || srv.Active == "activating" || srv.Active == "reloading":
+		// De unit draait, maar de agent komt er niet in, bijvoorbeeld omdat
+		// root@localhost niet meer via de socket mag.
+		pn.Existing = "MariaDB draait, maar de agent kan haar niet lezen"
+		add(Blocked, "mariadb_unreadable", n, fmt.Sprintf("op %s draait MariaDB (%s), maar de agent kan er niet in: %s. ClusterForge ziet dus niet welke "+
+			"databases erin staan en zet er geen cluster overheen. Zorg dat root via de socket mag inloggen (mariadb -u root zonder wachtwoord)",
+			n.Hostname, srv.Unit, cmp.Or(srv.Error, "geen antwoord")), "")
 	default:
+		// Een stilstaande MariaDB toont geen databases; misschien staan ze
+		// er wel. Een nieuwe Galera-node krijgt bij het aansluiten een
+		// volledige kopie en wist wat er stond.
 		pn.Existing = "MariaDB staat erop maar draait niet"
+		add(Blocked, "mariadb_stopped", n, fmt.Sprintf("op %s staat MariaDB maar die draait niet, dus ClusterForge ziet niet welke databases erin "+
+			"staan en zet er geen cluster overheen. Start hem eerst; kijk op de pagina Databases bij Zelfherstel als hij niet start", n.Hostname),
+			"systemctl start "+srv.Unit)
 	}
 }
 

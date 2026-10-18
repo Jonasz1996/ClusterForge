@@ -679,3 +679,68 @@ func TestClusterComponentPatroni(t *testing.T) {
 		t.Errorf("staat van de taak: %s, %s", state, jobParams)
 	}
 }
+
+// Staat er op een node een MariaDB of PostgreSQL die niet draait, dan ziet
+// ClusterForge niet welke databases erin staan: Database toevoegen weigert
+// die node en verwijst naar Zelfherstel.
+func TestComponentPlanStoppedDatabase(t *testing.T) {
+	lab := newPatroniHosts(t)
+	c, g, nc, ids := lab.c, lab.g, lab.nc, lab.ids
+	base := "/api/v1/clusters/" + nc.ID + "/components"
+	nodes := []string{ids["nc1"], ids["nc2"], ids["nc3"]}
+	plan := func(engine string) componentPlanView {
+		t.Helper()
+		var p componentPlanView
+		if s := c.do("POST", base+"/plan", map[string]any{"engine": engine, "nodes": nodes, "vip_address": "10.0.20.191"}, &p); s != http.StatusOK {
+			t.Fatalf("plan %s: %d", engine, s)
+		}
+		return p
+	}
+	find := func(p componentPlanView, code string) string {
+		for _, f := range p.Findings {
+			if f.Code == code {
+				return f.Hostname + ": " + f.Message
+			}
+		}
+		return ""
+	}
+	if p := plan("mariadb"); p.Blocked {
+		t.Fatalf("lege nodes: %+v", p.codes())
+	}
+
+	h := g.hosts["nc2"]
+	h.Locked(func() {
+		h.MariaDB = &agenttest.MariaDB{Version: "11.8.3-MariaDB-0+deb13u1", MaxConnections: 151, Down: true}
+	})
+	h.SetUnit("mariadb", agenttest.Unit{Enabled: true, Failed: true})
+	p := plan("mariadb")
+	if f := find(p, "mariadb_stopped"); !p.Blocked || !strings.HasPrefix(f, "nc2: op nc2 staat MariaDB maar die draait niet") || !strings.Contains(f, "Zelfherstel") {
+		t.Fatalf("stilstaande MariaDB: %v %q", p.codes(), f)
+	}
+	// Draait de unit maar komt de agent er niet in, dan zegt het plan dat,
+	// zonder systemctl start.
+	h.SetUnit("mariadb", agenttest.Unit{Enabled: true, Active: true})
+	p = plan("mariadb")
+	if f := find(p, "mariadb_unreadable"); !p.Blocked || !strings.HasPrefix(f, "nc2: op nc2 draait MariaDB (mariadb), maar de agent kan er niet in") {
+		t.Fatalf("onleesbare MariaDB: %v %q", p.codes(), f)
+	}
+
+	// Alleen de overkoepelende unit postgresql, zonder cluster: dat houdt
+	// niets tegen.
+	h1 := g.hosts["nc1"]
+	h1.Locked(func() { h1.Postgres = &agenttest.Postgres{Version: "17.6", Down: true} })
+	h1.SetUnit("postgresql", agenttest.Unit{Enabled: true, Active: true})
+	for _, code := range []string{"postgresql_stopped", "postgresql_unreadable"} {
+		if f := find(plan("postgresql"), code); f != "" {
+			t.Fatalf("alleen de overkoepelende unit: %s", f)
+		}
+	}
+
+	h = g.hosts["nc3"]
+	h.Locked(func() { h.Postgres = &agenttest.Postgres{Version: "17.6", Down: true} })
+	h.SetUnit("postgresql@17-main", agenttest.Unit{Enabled: true, Failed: true})
+	p = plan("postgresql")
+	if f := find(p, "postgresql_stopped"); !p.Blocked || !strings.HasPrefix(f, "nc3: op nc3 staat PostgreSQL (postgresql@17-main) maar die draait niet") {
+		t.Fatalf("stilstaande PostgreSQL: %v %q", p.codes(), f)
+	}
+}
