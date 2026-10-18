@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"os"
@@ -213,6 +214,13 @@ func TestDatabaseJoinPatroni(t *testing.T) {
 	cid := lab.deploy(t)
 	url := "/api/v1/clusters/" + nc.ID + "/components/" + cid
 	eventually(t, "het VIP op nc1", func() bool { return slices.Contains(g.hosts["nc1"].Addresses(), "10.0.20.190") })
+	// De taak zet het VIP als laatste op de node die het volgens de server
+	// heeft; die moet dat dus eerst weten.
+	eventually(t, "de server ziet het VIP op nc1", func() bool {
+		var has bool
+		_ = e.pool.QueryRow(context.Background(), "SELECT '10.0.20.190' = ANY(addresses) FROM node_status WHERE node_id = $1", lab.ids["nc1"]).Scan(&has)
+		return has
+	})
 	etcd := &etcdShell{peers: []string{"http://10.0.20.186:2380", "http://10.0.20.187:2380", "http://10.0.20.188:2380"}}
 	for name, h := range g.hosts {
 		h.Locked(func() { h.Shell = etcd.shell(name, h) })
