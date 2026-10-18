@@ -41,6 +41,7 @@ const (
 	CodeUnitDisabled = "unit_disabled"
 	CodePatroniDCS   = "patroni_dcs"
 	CodePatroniAddr  = "patroni_wrong_address"
+	CodePatroniConf  = "patroni_config"
 )
 
 // Wat een plan doet.
@@ -285,7 +286,7 @@ func Diagnose(in Input) Report {
 					e.DataDir, bytes(e.DataFree), bytes(e.DataTotal)), h)
 		}
 		if e.Patroni != nil {
-			dcs, addr := patroniChecks(st, known, add)
+			dcs, addr := patroniChecks(st, known, in.Managed, add)
 			if dcs && (st.down || st.hung) {
 				noDCS = append(noDCS, h)
 			}
@@ -589,9 +590,14 @@ func knownAddresses(in Input, states []nodeState) map[string]bool {
 // patroniChecks meldt een Patroni die etcd niet bereikt, en een
 // connect_address die de node niet heeft, met het bestand en de regel. dcs
 // is true als de agent geen enkel etcd-adres bereikte, addr als een
-// connect_address niet klopt.
-func patroniChecks(st nodeState, known map[string]bool, add func(code, level, title, why string, nodes ...string)) (dcs, addr bool) {
+// connect_address niet klopt. Bij een onderdeel van ClusterForge schrijft
+// Toepassen het bestand; anders past ClusterForge het niet aan.
+func patroniChecks(st nodeState, known map[string]bool, managed *Managed, add func(code, level, title, why string, nodes ...string)) (dcs, addr bool) {
 	pt, h := st.insp.Patroni, st.srv.Hostname
+	if pt.Error != "" {
+		add(CodePatroniConf, LevelWarning, fmt.Sprintf("Zelfherstel kan Patroni op %s niet nakijken", h),
+			upper(pt.Error)+". Of Patroni daar etcd bereikt en de goede adressen opgeeft, ziet ClusterForge dus niet.", h)
+	}
 	where := func(key, value string) string {
 		for _, s := range pt.Settings {
 			if s.Value == value && (key == "" || s.Key == key) {
@@ -602,7 +608,7 @@ func patroniChecks(st nodeState, known map[string]bool, add func(code, level, ti
 	}
 	foreign := func(host string) bool {
 		ip, err := netip.ParseAddr(host)
-		return err == nil && !known[ip.String()]
+		return err == nil && !local(ip) && !known[ip.String()]
 	}
 	var bad []string
 	ok := 0
@@ -612,7 +618,7 @@ func patroniChecks(st nodeState, known map[string]bool, add func(code, level, ti
 			continue
 		}
 		d := ep.Address + ": " + cmp.Or(ep.Error, "geen antwoord")
-		if foreign(hostOnly(ep.Address)) {
+		if foreign(patroniHost(ep.Address)) {
 			d += ", en geen node heeft dat adres"
 		}
 		bad = append(bad, d+" ("+where("", ep.Address)+")")
@@ -621,12 +627,16 @@ func patroniChecks(st nodeState, known map[string]bool, add func(code, level, ti
 	if pt.Etcd == "failed" || pt.Etcd == "inactive" {
 		etcd = fmt.Sprintf(" etcd.service staat op %s zelf %s.", h, stateWord(pt.Etcd))
 	}
+	fix := "Zorg dat etcd draait en bereikbaar is, of zet de juiste adressen in het bestand en herstart patroni; ClusterForge wijzigt de config van Patroni niet zelf."
+	if managed != nil {
+		fix = fmt.Sprintf("Zorg dat etcd draait en bereikbaar is; kloppen de adressen niet meer, schrijf het bestand dan opnieuw met Toepassen van het onderdeel %s.", managed.Title)
+	}
 	switch {
 	case len(bad) > 0 && ok == 0:
 		dcs = true
 		add(CodePatroniDCS, LevelDown, fmt.Sprintf("Patroni op %s bereikt etcd niet", h),
-			fmt.Sprintf("De agent op %s bereikt geen enkel etcd-adres uit de config: %s. Zonder etcd weet Patroni niet wie de primary is: een primary gaat naar alleen-lezen en een replica start PostgreSQL niet. Herstarten helpt niet.%s Zorg dat etcd draait en bereikbaar is, of zet de juiste adressen in het bestand en herstart patroni; ClusterForge wijzigt de config van Patroni niet zelf.",
-				h, strings.Join(bad, "; "), etcd), h)
+			fmt.Sprintf("De agent op %s bereikt geen enkel etcd-adres uit de config: %s. Zonder etcd weet Patroni niet wie de primary is: een primary gaat naar alleen-lezen en een replica start PostgreSQL niet. Herstarten helpt niet.%s %s",
+				h, strings.Join(bad, "; "), etcd, fix), h)
 	case len(bad) > 0:
 		add(CodePatroniDCS, LevelWarning, fmt.Sprintf("Patroni op %s bereikt niet elke etcd-node", h),
 			fmt.Sprintf("De agent op %s bereikt niet elk etcd-adres uit de config: %s.%s Patroni werkt zolang een meerderheid van etcd antwoordt; valt er nog een uit, dan stopt het kiezen van een primary.",
@@ -640,8 +650,8 @@ func patroniChecks(st nodeState, known map[string]bool, add func(code, level, ti
 		if s.Key != "restapi.connect_address" && s.Key != "postgresql.connect_address" {
 			continue
 		}
-		ip, err := netip.ParseAddr(hostOnly(s.Value))
-		if err != nil || slices.Contains(st.node.Addresses, ip.String()) {
+		ip, err := netip.ParseAddr(patroniHost(s.Value))
+		if err != nil || local(ip) || slices.Contains(st.node.Addresses, ip.String()) {
 			continue
 		}
 		wrong = append(wrong, fmt.Sprintf("%s: %s (%s regel %d)", s.Key, s.Value, s.File, s.Line))
@@ -649,14 +659,36 @@ func patroniChecks(st nodeState, known map[string]bool, add func(code, level, ti
 	if len(wrong) == 0 {
 		return dcs, false
 	}
+	fix = "ClusterForge wijzigt de config van Patroni niet zelf: zet het juiste adres in het bestand en herstart patroni, één node tegelijk."
+	if managed != nil {
+		fix = fmt.Sprintf("Toepassen van het onderdeel %s schrijft het bestand opnieuw met de huidige adressen van de nodes.", managed.Title)
+	}
 	add(CodePatroniAddr, LevelDown, fmt.Sprintf("Patroni op %s geeft een adres op dat de node niet heeft", h),
-		fmt.Sprintf("De config zegt %s, maar %s heeft nu %s. Patroni zet dat adres in etcd; replica's en apps zoeken %s daar. ClusterForge wijzigt de config van Patroni niet zelf: zet het juiste adres in het bestand en herstart patroni, één node tegelijk.",
-			joinHosts(wrong), h, strings.Join(st.node.Addresses, ", "), h), h)
+		fmt.Sprintf("De config zegt %s, maar %s heeft nu %s. Patroni zet dat adres in etcd; replica's en apps zoeken %s daar. %s",
+			joinHosts(wrong), h, strings.Join(st.node.Addresses, ", "), h, fix), h)
 	return dcs, true
 }
 
+// patroniHost is de host van een adres uit de config van Patroni, zoals
+// split_host_port van Patroni het leest: de poort staat na de laatste
+// dubbele punt, ook bij IPv6 zonder haken (fd00::1:5432).
+func patroniHost(s string) string {
+	s = strings.TrimSpace(s)
+	if i := strings.LastIndexByte(s, ':'); i >= 0 {
+		s = s[:i]
+	}
+	return strings.Trim(s, "[]")
+}
+
+// local is een adres dat elke node zelf heeft en dat niet in de heartbeat
+// staat, zoals 127.0.0.1.
+func local(ip netip.Addr) bool {
+	return ip.IsLoopback() || ip.IsLinkLocalUnicast() || ip.IsUnspecified()
+}
+
 // mysqlGalera zijn de nodes die Galera met MySQL draaien in plaats van met
-// MariaDB.
+// MariaDB: mysql.service. Bij MariaDB is mysql.service een alias en heet de
+// unit mariadb.
 func mysqlGalera(states []nodeState) []string {
 	var out []string
 	for _, st := range states {
@@ -664,7 +696,7 @@ func mysqlGalera(states []nodeState) []string {
 		if st.insp != nil {
 			u = st.insp.Unit
 		}
-		if u == "mysql" && !strings.Contains(strings.ToLower(st.srv.Version), "mariadb") {
+		if u == "mysql" {
 			out = append(out, st.srv.Hostname)
 		}
 	}

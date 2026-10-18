@@ -717,6 +717,24 @@ func TestComponentPlanStoppedDatabase(t *testing.T) {
 	if f := find(p, "mariadb_stopped"); !p.Blocked || !strings.HasPrefix(f, "nc2: op nc2 staat MariaDB maar die draait niet") || !strings.Contains(f, "Zelfherstel") {
 		t.Fatalf("stilstaande MariaDB: %v %q", p.codes(), f)
 	}
+	// Draait de unit maar komt de agent er niet in, dan zegt het plan dat,
+	// zonder systemctl start.
+	h.SetUnit("mariadb", agenttest.Unit{Enabled: true, Active: true})
+	p = plan("mariadb")
+	if f := find(p, "mariadb_unreadable"); !p.Blocked || !strings.HasPrefix(f, "nc2: op nc2 draait MariaDB (mariadb), maar de agent kan er niet in") {
+		t.Fatalf("onleesbare MariaDB: %v %q", p.codes(), f)
+	}
+
+	// Alleen de overkoepelende unit postgresql, zonder cluster: dat houdt
+	// niets tegen.
+	h1 := g.hosts["nc1"]
+	h1.Locked(func() { h1.Postgres = &agenttest.Postgres{Version: "17.6", Down: true} })
+	h1.SetUnit("postgresql", agenttest.Unit{Enabled: true, Active: true})
+	for _, code := range []string{"postgresql_stopped", "postgresql_unreadable"} {
+		if f := find(plan("postgresql"), code); f != "" {
+			t.Fatalf("alleen de overkoepelende unit: %s", f)
+		}
+	}
 
 	h = g.hosts["nc3"]
 	h.Locked(func() { h.Postgres = &agenttest.Postgres{Version: "17.6", Down: true} })

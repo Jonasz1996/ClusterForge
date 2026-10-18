@@ -7,6 +7,7 @@ package agent
 // naar een verkeerd adres zoeken. De agent wijzigt hier niets.
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"net"
@@ -112,9 +113,9 @@ func (a *Agent) patroniFile(unit map[string]string) string {
 			if strings.HasPrefix(args[i], "-") {
 				continue
 			}
-			f := os.Expand(args[i], func(k string) string { return env[k] })
+			f := filepath.Clean(os.Expand(args[i], func(k string) string { return env[k] }))
 			if filepath.IsAbs(f) && a.exists(f) {
-				return filepath.Clean(f)
+				return f
 			}
 			break
 		}
@@ -210,71 +211,97 @@ func (c *patroniConfig) add(file string, root *yaml.Node) {
 			continue
 		}
 		c.dcs = dcs
-		if dcs != "etcd3" && dcs != "etcd" {
-			c.endpoints, c.srv = nil, ""
-			return
+		c.endpoints, c.srv = nil, ""
+		if dcs == "etcd3" || dcs == "etcd" {
+			c.etcd(file, dcs, sec)
 		}
-		var eps []protocol.HealSetting
-		for _, key := range []string{"hosts", "host", "urls", "url"} {
-			v := yamlGet(sec, key)
-			if v == nil {
-				continue
+		return
+	}
+}
+
+// etcd leest de etcd-adressen zoals Patroni: srv zoekt ze via DNS; anders
+// geldt één bron, proxy, dan url, dan hosts (met port als standaardpoort),
+// dan host.
+func (c *patroniConfig) etcd(file, dcs string, sec *yaml.Node) {
+	if v := yamlGet(sec, "srv"); v != nil && v.Value != "" {
+		c.srv = v.Value
+		return
+	}
+	port := "2379"
+	if v := yamlGet(sec, "port"); v != nil && v.Kind == yaml.ScalarNode && v.Value != "" {
+		port = v.Value
+	}
+	for _, key := range []string{"proxy", "url", "hosts", "host"} {
+		v := yamlGet(sec, key)
+		if v == nil {
+			continue
+		}
+		items := []*yaml.Node{v}
+		if v.Kind == yaml.SequenceNode {
+			items = v.Content
+		}
+		for _, it := range items {
+			parts := []string{it.Value}
+			if key == "hosts" {
+				parts = strings.Split(it.Value, ",")
 			}
-			var items []*yaml.Node
-			if v.Kind == yaml.SequenceNode {
-				items = v.Content
-			} else {
-				items = []*yaml.Node{v}
-			}
-			for _, it := range items {
-				for part := range strings.SplitSeq(it.Value, ",") {
-					if ep := etcdEndpoint(part); ep != "" {
-						eps = append(eps, protocol.HealSetting{Key: dcs + "." + key, Value: ep, File: file, Line: it.Line})
-					}
+			for _, part := range parts {
+				var ep string
+				if key == "proxy" || key == "url" {
+					ep = etcdURL(part)
+				} else {
+					ep = splitHostPort(part, port)
+				}
+				if ep != "" {
+					c.endpoints = append(c.endpoints, protocol.HealSetting{Key: dcs + "." + key, Value: ep, File: file, Line: it.Line})
 				}
 			}
-		}
-		if v := yamlGet(sec, "srv"); v != nil {
-			c.srv = v.Value
-		}
-		if eps != nil || c.srv != "" {
-			c.endpoints = eps
 		}
 		return
 	}
 }
 
 // yamlGet is de waarde van key in een mapping; nil als hij er niet staat.
+// Staat hij er twee keer, dan geldt zoals bij Patroni de laatste.
 func yamlGet(m *yaml.Node, key string) *yaml.Node {
 	if m == nil || m.Kind != yaml.MappingNode {
 		return nil
 	}
+	var v *yaml.Node
 	for i := 0; i+1 < len(m.Content); i += 2 {
 		if m.Content[i].Value == key {
-			return m.Content[i+1]
+			v = m.Content[i+1]
 		}
 	}
-	return nil
+	return v
 }
 
-// etcdEndpoint maakt van een host, host:poort of URL een host:poort, met
-// 2379 als de poort ontbreekt.
-func etcdEndpoint(s string) string {
+// splitHostPort leest host:poort zoals split_host_port van Patroni: de
+// poort staat na de laatste dubbele punt, zodat ook IPv6 zonder haken
+// (fd00::1:2379) kan; zonder dubbele punt geldt port. Het antwoord is
+// host:poort zoals net.Dial het wil, of leeg als de poort geen getal is.
+func splitHostPort(s, port string) string {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return ""
 	}
-	if strings.Contains(s, "://") {
-		u, err := url.Parse(s)
-		if err != nil || u.Host == "" {
-			return ""
-		}
-		s = u.Host
+	host, p := s, port
+	if i := strings.LastIndexByte(s, ':'); i >= 0 {
+		host, p = s[:i], s[i+1:]
 	}
-	if _, _, err := net.SplitHostPort(s); err == nil {
-		return s
+	if _, err := strconv.ParseUint(p, 10, 16); err != nil || host == "" {
+		return ""
 	}
-	return net.JoinHostPort(strings.Trim(s, "[]"), "2379")
+	return net.JoinHostPort(strings.Trim(host, "[]"), p)
+}
+
+// etcdURL is host:poort van een URL, met 2379 als de poort ontbreekt.
+func etcdURL(s string) string {
+	u, err := url.Parse(strings.TrimSpace(s))
+	if err != nil || u.Hostname() == "" {
+		return ""
+	}
+	return net.JoinHostPort(u.Hostname(), cmp.Or(u.Port(), "2379"))
 }
 
 // reach probeert elk adres tegelijk, hoogstens healDialTimeout.

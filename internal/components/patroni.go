@@ -69,6 +69,16 @@ func checkExistingPG(pn *PlanNode, n *Node, st dbStatus, slug string, add func(s
 		pn.Existing = "PostgreSQL " + srv.Version + " zonder eigen databases"
 		add(Warning, "postgresql_takeover", n, fmt.Sprintf("op %s draait al een leeg PostgreSQL-cluster main; ClusterForge haalt het weg en "+
 			"Patroni start PostgreSQL voortaan zelf", n.Hostname), "")
+	case srv.Unit == "postgresql":
+		// Alleen de overkoepelende unit, zonder geladen cluster: er is geen
+		// cluster, of een dat niet vanzelf start. Een cluster main ziet de
+		// uitrol nog na voor hij het weghaalt; de rest laat hij staan.
+		pn.Existing = "PostgreSQL zonder draaiend cluster"
+	case srv.Active == "active" || srv.Active == "activating" || srv.Active == "reloading":
+		pn.Existing = "PostgreSQL draait, maar de agent kan het niet lezen"
+		add(Blocked, "postgresql_unreadable", n, fmt.Sprintf("op %s draait PostgreSQL (%s), maar de agent kan er niet in: %s. ClusterForge ziet dus niet "+
+			"welke databases erin staan en zet er geen cluster overheen. Zorg dat de gebruiker postgres via de socket mag inloggen (peer in pg_hba.conf)",
+			n.Hostname, srv.Unit, cmp.Or(srv.Error, "geen antwoord")), "")
 	default:
 		// Een stilstaand cluster toont geen databases; misschien staan ze er
 		// wel.

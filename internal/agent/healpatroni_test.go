@@ -116,7 +116,13 @@ func TestHealInspectPatroniForms(t *testing.T) {
 	for _, tc := range []struct{ cfg, want string }{
 		{"etcd:\n  host: 10.0.0.1:2379\n", "etcd.host=10.0.0.1:2379@2"},
 		{"etcd3:\n  hosts: 10.0.0.1:2379,10.0.0.2\n", "etcd3.hosts=10.0.0.1:2379@2 etcd3.hosts=10.0.0.2:2379@2"},
-		{"etcd3:\n  urls:\n  - https://[fd00::1]:2379\n  - http://etcd.lan\n", "etcd3.urls=[fd00::1]:2379@3 etcd3.urls=etcd.lan:2379@4"},
+		{"etcd3:\n  url: https://[fd00::1]:2379\n", "etcd3.url=[fd00::1]:2379@2"},
+		{"etcd3:\n  proxy: http://etcd.lan\n  hosts: 10.0.0.1\n", "etcd3.proxy=etcd.lan:2379@2"},
+		// Zoals Patroni: IPv6 zonder haken met de poort na de laatste
+		// dubbele punt, port als standaard, en hosts gaat voor host.
+		{"etcd3:\n  port: 2380\n  host: 127.0.0.1\n  hosts:\n  - fd00::1:2379\n  - 10.0.0.2\n", "etcd3.hosts=[fd00::1]:2379@5 etcd3.hosts=10.0.0.2:2380@6"},
+		// Een sleutel die twee keer staat: de laatste geldt.
+		{"etcd3:\n  hosts: 10.0.0.1\n  hosts: 10.0.0.9\n", "etcd3.hosts=10.0.0.9:2379@3"},
 		{"consul:\n  host: 10.0.0.1:8500\n", ""},
 	} {
 		a := patroniHost(t, tc.cfg)
@@ -132,5 +138,41 @@ func TestHealInspectPatroniForms(t *testing.T) {
 	a := patroniHost(t, "etcd3:\n  srv: etcd.lan\n")
 	if e := a.dbHeal(context.Background(), &protocol.DBHealRequest{Action: protocol.HealInspect}).Heal.Engines[0]; !strings.Contains(e.Patroni.Error, "DNS") {
 		t.Errorf("srv: %+v", e.Patroni)
+	}
+}
+
+func TestHealInspectPatroniDir(t *testing.T) {
+	// Een map als config, met een schuine streep erachter in ExecStart: de
+	// bestanden op naam, een later bestand vervangt een waarde.
+	a := patroniHost(t, "")
+	for f, s := range map[string]string{
+		"/etc/patroni/conf.d/00-base.yml":  "scope: pg\netcd3:\n  hosts: 10.0.0.1:2379\nrestapi:\n  connect_address: 10.0.0.5:8008\n",
+		"/etc/patroni/conf.d/10-local.yml": "name: pg1\netcd3:\n  hosts: 10.0.0.2:2379\n",
+		"/etc/patroni/conf.d/README":       "geen yaml\n",
+	} {
+		p := filepath.Join(a.Root, f)
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(s), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	exec := a.Exec
+	a.Exec = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		if name == "systemctl" && len(args) > 1 && strings.Contains(args[1], "ExecStart") {
+			return []byte("Id=patroni.service\nLoadState=loaded\nActiveState=active\nExecStart={ path=/usr/bin/patroni ; argv[]=/usr/bin/patroni /etc/patroni/conf.d/ ; ignore_errors=no }\n\n" +
+				"Id=etcd.service\nLoadState=not-found\nActiveState=inactive\n"), nil
+		}
+		return exec(ctx, name, args...)
+	}
+	p := a.dbHeal(context.Background(), &protocol.DBHealRequest{Action: protocol.HealInspect}).Heal.Engines[0].Patroni
+	var lines []string
+	for _, s := range p.Settings {
+		lines = append(lines, fmt.Sprintf("%s=%s@%s:%d", s.Key, s.Value, filepath.Base(s.File), s.Line))
+	}
+	if p.File != "/etc/patroni/conf.d" || p.Scope != "pg" || p.Name != "pg1" || p.Etcd != "" ||
+		strings.Join(lines, " ") != "etcd3.hosts=10.0.0.2:2379@10-local.yml:3 restapi.connect_address=10.0.0.5:8008@00-base.yml:5" {
+		t.Errorf("patroni: %+v %v", p, lines)
 	}
 }

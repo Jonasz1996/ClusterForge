@@ -377,3 +377,39 @@ func TestDiagnoseMySQL(t *testing.T) {
 		t.Fatalf("Galera op MySQL: %s %+v", codes(r), r.Plan)
 	}
 }
+
+func TestDiagnosePatroniAddresses(t *testing.T) {
+	// 127.0.0.1 en IPv6 zonder haken (zoals Patroni ze leest) kloppen.
+	f := patroni()
+	for i := range 3 {
+		f.fix(i, true, true, true)
+	}
+	n := f.in.Nodes[f.ids[1]]
+	n.Addresses = []string{"192.168.10.192", "fd00::12"}
+	n.Inspect.Patroni.Settings[3].Value, n.Inspect.Patroni.Settings[4].Value = "127.0.0.1:8008", "fd00::12:5432"
+	f.in.Nodes[f.ids[1]] = n
+	if got := codes(Diagnose(f.in)); got != "unit_stopped@pg1" {
+		t.Errorf("problemen: %s", got)
+	}
+
+	// Kan de agent de config niet lezen, dan zegt Zelfherstel dat.
+	n.Inspect.Patroni = &protocol.HealPatroni{Error: "geen configbestand van Patroni gevonden"}
+	f.in.Nodes[f.ids[1]] = n
+	r := Diagnose(f.in)
+	if got := codes(r); got != "unit_stopped@pg1 patroni_config@pg2" || !strings.HasPrefix(r.Problems[1].Why, "Geen configbestand van Patroni gevonden.") {
+		t.Errorf("problemen: %s %+v", got, r.Problems)
+	}
+
+	// Bij een onderdeel van ClusterForge wijst de tekst naar Toepassen.
+	f = patroni()
+	f.in.Managed = &Managed{ComponentID: uuid.New(), Title: "PostgreSQL met Patroni"}
+	r = Diagnose(f.in)
+	for _, p := range r.Problems {
+		if strings.HasPrefix(p.Code, "patroni_") && (!strings.Contains(p.Why, "Toepassen van het onderdeel PostgreSQL met Patroni") || strings.Contains(p.Why, "niet zelf")) {
+			t.Errorf("onderdeel: %+v", p)
+		}
+	}
+	if r.Plan == nil || r.Plan.Managed == nil {
+		t.Errorf("plan: %+v", r.Plan)
+	}
+}
