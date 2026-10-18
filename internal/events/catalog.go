@@ -96,6 +96,8 @@ var Known = map[string]Spec{
 	"cluster.heal_started":             {CategoryInventory, "Zelfherstel van een database gestart"},
 	"cluster.heal_done":                {CategoryInventory, "Zelfherstel van een database gelukt"},
 	"cluster.heal_failed":              {CategoryInventory, "Zelfherstel van een database mislukt"},
+	"cluster.heal_auto_changed":        {CategoryInventory, "Zelfherstel vanzelf aan- of uitgezet"},
+	"cluster.heal_auto_paused":         {CategoryInventory, "Zelfherstel vanzelf gepauzeerd na mislukte pogingen"},
 	"node.heal_started":                {CategoryInventory, "Zelfherstel van een losse database gestart"},
 	"node.heal_done":                   {CategoryInventory, "Zelfherstel van een losse database gelukt"},
 	"node.heal_failed":                 {CategoryInventory, "Zelfherstel van een losse database mislukt"},

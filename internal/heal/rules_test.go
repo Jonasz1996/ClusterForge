@@ -210,3 +210,30 @@ func TestDiagnoseSingle(t *testing.T) {
 		t.Errorf("%s %+v", codes(r), r.Plan)
 	}
 }
+
+func TestDiagnoseKnownNode(t *testing.T) {
+	// De config klopt, maar ClusterForge meldt de MariaDB van Node3 nog
+	// niet: zijn adres is niet verouderd en het plan haalt hem er niet uit.
+	f := jonas()
+	cur := "gcomm://192.168.10.181,192.168.10.182,192.168.10.183"
+	for _, id := range f.ids {
+		n := f.in.Nodes[id]
+		n.Inspect.Galera.ClusterAddress, n.Inspect.Galera.NodeAddress, n.Inspect.Galera.PeerTimeouts = cur, "", nil
+		n.Inspect.Processes = nil
+		f.in.Nodes[id] = n
+	}
+	delete(f.in.Nodes, f.ids[2])
+	f.in.Group.Servers = f.in.Group.Servers[:2]
+	f.in.Known = map[string]string{"192.168.10.181": f.hosts[0], "192.168.10.182": f.hosts[1], "192.168.10.183": f.hosts[2]}
+	if r := Diagnose(f.in); strings.Contains(codes(r), CodeWrongAddress) {
+		t.Errorf("bekende node als verouderd gezien: %s", codes(r))
+	}
+	// Mist er wel een adres, dan blijft Node3 in het nieuwe adres staan.
+	for _, id := range f.ids[:2] {
+		f.in.Nodes[id].Inspect.Galera.ClusterAddress = "gcomm://192.168.0.190,192.168.10.183"
+	}
+	r := Diagnose(f.in)
+	if r.Plan == nil || len(r.Plan.Nodes) == 0 || r.Plan.Nodes[0].ClusterAddress != cur {
+		t.Fatalf("plan: %s %+v", codes(r), r.Plan)
+	}
+}

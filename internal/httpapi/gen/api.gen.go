@@ -7643,6 +7643,32 @@ type GitStepChangeChange string
 // GuestType defines model for GuestType.
 type GuestType string
 
+// HealAuto defines model for HealAuto.
+type HealAuto struct {
+	// Allowed false op prod
+	Allowed bool `json:"allowed"`
+
+	// Due Zelfherstel voert het plan nu vanzelf uit
+	Due     bool `json:"due"`
+	Enabled bool `json:"enabled"`
+
+	// Note Waarom het plan wel of niet vanzelf gebeurt; leeg als er niets te doen is
+	Note string `json:"note"`
+
+	// PausedAt Gepauzeerd na drie mislukte pogingen op rij; aanzetten heft het op.
+	PausedAt     nullable.Nullable[time.Time] `json:"paused_at"`
+	PausedReason string                       `json:"paused_reason"`
+}
+
+// HealAutoSetting defines model for HealAutoSetting.
+type HealAutoSetting struct {
+	Enabled bool `json:"enabled"`
+
+	// PausedAt Gepauzeerd na drie mislukte pogingen op rij; aanzetten heft het op.
+	PausedAt     nullable.Nullable[time.Time] `json:"paused_at"`
+	PausedReason string                       `json:"paused_reason"`
+}
+
 // HealPlan defines model for HealPlan.
 type HealPlan struct {
 	// Action restart (gestopte servers starten), galera (adressen bijwerken en/of het cluster opnieuw beginnen), of leeg als het herstel bij het onderdeel hoort.
@@ -7693,6 +7719,8 @@ type HealProblemLevel string
 
 // HealReport Zelfherstel voor één database; key is die van DatabaseGroup.
 type HealReport struct {
+	// Auto Zelfherstel vanzelf van het cluster; null bij een losse node.
+	Auto               nullable.Nullable[HealAuto]           `json:"auto"`
 	ClusterEnvironment nullable.Nullable[Environment]        `json:"cluster_environment"`
 	ClusterId          nullable.Nullable[openapi_types.UUID] `json:"cluster_id"`
 	ClusterName        string                                `json:"cluster_name"`
@@ -10973,6 +11001,11 @@ type GetComponentMetricsParams struct {
 	To   *MetricsTo   `form:"to,omitempty" json:"to,omitempty"`
 }
 
+// SetHealAutoJSONBody defines parameters for SetHealAuto.
+type SetHealAutoJSONBody struct {
+	Enabled bool `json:"enabled"`
+}
+
 // GetClusterMetricsParams defines parameters for GetClusterMetrics.
 type GetClusterMetricsParams struct {
 	Range *MetricsRange `form:"range,omitempty" json:"range,omitempty"`
@@ -11494,6 +11527,9 @@ type CreateFailoverTestJSONRequestBody = FailoverTestInput
 // ReapplyClusterGitJSONRequestBody defines body for ReapplyClusterGit for application/json ContentType.
 type ReapplyClusterGitJSONRequestBody = GitReapplyInput
 
+// SetHealAutoJSONRequestBody defines body for SetHealAuto for application/json ContentType.
+type SetHealAutoJSONRequestBody SetHealAutoJSONBody
+
 // SetRecoveryTargetsJSONRequestBody defines body for SetRecoveryTargets for application/json ContentType.
 type SetRecoveryTargetsJSONRequestBody = RecoveryTargetsInput
 
@@ -11889,6 +11925,9 @@ type ServerInterface interface {
 	// UnlinkClusterGit Het cluster van Git ontkoppelen (admin); een wachtende wijziging vervalt
 	// (POST /clusters/{clusterId}/git/unlink)
 	UnlinkClusterGit(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
+	// SetHealAuto Zelfherstel vanzelf aan- of uitzetten op een cluster (admin)
+	// (PUT /clusters/{clusterId}/heal-auto)
+	SetHealAuto(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
 	// GetClusterMetrics Grafieken van een cluster, met een lijn per node
 	// (GET /clusters/{clusterId}/metrics)
 	GetClusterMetrics(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params GetClusterMetricsParams)
@@ -12861,6 +12900,12 @@ func (_ Unimplemented) ReapplyClusterGit(w http.ResponseWriter, r *http.Request,
 // UnlinkClusterGit Het cluster van Git ontkoppelen (admin); een wachtende wijziging vervalt
 // (POST /clusters/{clusterId}/git/unlink)
 func (_ Unimplemented) UnlinkClusterGit(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SetHealAuto Zelfherstel vanzelf aan- of uitzetten op een cluster (admin)
+// (PUT /clusters/{clusterId}/heal-auto)
+func (_ Unimplemented) SetHealAuto(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -16193,6 +16238,32 @@ func (siw *ServerInterfaceWrapper) UnlinkClusterGit(w http.ResponseWriter, r *ht
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.UnlinkClusterGit(w, r, clusterId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetHealAuto operation middleware
+func (siw *ServerInterfaceWrapper) SetHealAuto(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetHealAuto(w, r, clusterId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -22188,6 +22259,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/clusters/{clusterId}/components/{componentId}/recover/plan", wrapper.PlanRecoverClusterComponent)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/clusters/{clusterId}/heal-auto", wrapper.SetHealAuto)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/clusters/{clusterId}/components/{componentId}/recover", wrapper.RecoverClusterComponent)

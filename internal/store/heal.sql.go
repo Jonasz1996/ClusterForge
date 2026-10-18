@@ -13,6 +13,25 @@ import (
 	"github.com/google/uuid"
 )
 
+const getHealAuto = `-- name: GetHealAuto :one
+SELECT cluster_id, enabled, enabled_at, paused_at, paused_reason, updated_at, updated_by FROM heal_auto WHERE cluster_id = $1
+`
+
+func (q *Queries) GetHealAuto(ctx context.Context, clusterID uuid.UUID) (HealAuto, error) {
+	row := q.db.QueryRow(ctx, getHealAuto, clusterID)
+	var i HealAuto
+	err := row.Scan(
+		&i.ClusterID,
+		&i.Enabled,
+		&i.EnabledAt,
+		&i.PausedAt,
+		&i.PausedReason,
+		&i.UpdatedAt,
+		&i.UpdatedBy,
+	)
+	return i, err
+}
+
 const healJobActive = `-- name: HealJobActive :one
 SELECT EXISTS (
     SELECT 1 FROM jobs WHERE kind = 'heal.run' AND status IN ('queued', 'running') AND params->>'key' = $1::text
@@ -24,6 +43,86 @@ func (q *Queries) HealJobActive(ctx context.Context, key string) (bool, error) {
 	var active bool
 	err := row.Scan(&active)
 	return active, err
+}
+
+const listHealAuto = `-- name: ListHealAuto :many
+SELECT cluster_id, enabled, enabled_at, paused_at, paused_reason, updated_at, updated_by FROM heal_auto
+`
+
+func (q *Queries) ListHealAuto(ctx context.Context) ([]HealAuto, error) {
+	rows, err := q.db.Query(ctx, listHealAuto)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []HealAuto{}
+	for rows.Next() {
+		var i HealAuto
+		if err := rows.Scan(
+			&i.ClusterID,
+			&i.Enabled,
+			&i.EnabledAt,
+			&i.PausedAt,
+			&i.PausedReason,
+			&i.UpdatedAt,
+			&i.UpdatedBy,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listHealAutoRuns = `-- name: ListHealAutoRuns :many
+SELECT id, status, created_at, finished_at, coalesce((params->>'bootstrap')::boolean, false)::boolean AS bootstrap
+FROM jobs
+WHERE kind = 'heal.run' AND cluster_id = $1 AND params->>'auto' = 'true' AND created_at >= $2
+ORDER BY created_at DESC
+`
+
+type ListHealAutoRunsParams struct {
+	ClusterID *uuid.UUID
+	Since     time.Time
+}
+
+type ListHealAutoRunsRow struct {
+	ID         uuid.UUID
+	Status     JobStatus
+	CreatedAt  time.Time
+	FinishedAt *time.Time
+	Bootstrap  bool
+}
+
+// De pogingen van Zelfherstel vanzelf op een cluster sinds een tijdstip,
+// nieuwste eerst.
+func (q *Queries) ListHealAutoRuns(ctx context.Context, arg ListHealAutoRunsParams) ([]ListHealAutoRunsRow, error) {
+	rows, err := q.db.Query(ctx, listHealAutoRuns, arg.ClusterID, arg.Since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListHealAutoRunsRow{}
+	for rows.Next() {
+		var i ListHealAutoRunsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Status,
+			&i.CreatedAt,
+			&i.FinishedAt,
+			&i.Bootstrap,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listHealJobs = `-- name: ListHealJobs :many
@@ -154,4 +253,54 @@ SELECT pg_advisory_xact_lock(hashtext('heal:' || $1::text))
 func (q *Queries) LockHealKey(ctx context.Context, key string) error {
 	_, err := q.db.Exec(ctx, lockHealKey, key)
 	return err
+}
+
+const pauseHealAuto = `-- name: PauseHealAuto :execrows
+UPDATE heal_auto SET paused_at = now(), paused_reason = $1, updated_at = now()
+WHERE cluster_id = $2 AND enabled AND paused_at IS NULL
+`
+
+type PauseHealAutoParams struct {
+	Reason    string
+	ClusterID uuid.UUID
+}
+
+func (q *Queries) PauseHealAuto(ctx context.Context, arg PauseHealAutoParams) (int64, error) {
+	result, err := q.db.Exec(ctx, pauseHealAuto, arg.Reason, arg.ClusterID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const setHealAuto = `-- name: SetHealAuto :one
+INSERT INTO heal_auto (cluster_id, enabled, enabled_at, paused_at, paused_reason, updated_at, updated_by)
+VALUES ($1, $2, CASE WHEN $2::boolean THEN now() END, NULL, '', now(), $3)
+ON CONFLICT (cluster_id) DO UPDATE SET
+    enabled = EXCLUDED.enabled,
+    enabled_at = CASE WHEN EXCLUDED.enabled THEN now() ELSE heal_auto.enabled_at END,
+    paused_at = NULL, paused_reason = '', updated_at = now(), updated_by = EXCLUDED.updated_by
+RETURNING cluster_id, enabled, enabled_at, paused_at, paused_reason, updated_at, updated_by
+`
+
+type SetHealAutoParams struct {
+	ClusterID uuid.UUID
+	Enabled   bool
+	UpdatedBy *uuid.UUID
+}
+
+// Aanzetten wist een pauze en begint de telling opnieuw.
+func (q *Queries) SetHealAuto(ctx context.Context, arg SetHealAutoParams) (HealAuto, error) {
+	row := q.db.QueryRow(ctx, setHealAuto, arg.ClusterID, arg.Enabled, arg.UpdatedBy)
+	var i HealAuto
+	err := row.Scan(
+		&i.ClusterID,
+		&i.Enabled,
+		&i.EnabledAt,
+		&i.PausedAt,
+		&i.PausedReason,
+		&i.UpdatedAt,
+		&i.UpdatedBy,
+	)
+	return i, err
 }

@@ -29,3 +29,31 @@ SELECT pg_advisory_xact_lock(hashtext('heal:' || @key::text));
 SELECT EXISTS (
     SELECT 1 FROM jobs WHERE kind = 'heal.run' AND status IN ('queued', 'running') AND params->>'key' = @key::text
 ) AS active;
+
+-- name: ListHealAuto :many
+SELECT * FROM heal_auto;
+
+-- name: GetHealAuto :one
+SELECT * FROM heal_auto WHERE cluster_id = $1;
+
+-- name: SetHealAuto :one
+-- Aanzetten wist een pauze en begint de telling opnieuw.
+INSERT INTO heal_auto (cluster_id, enabled, enabled_at, paused_at, paused_reason, updated_at, updated_by)
+VALUES (@cluster_id, @enabled, CASE WHEN @enabled::boolean THEN now() END, NULL, '', now(), @updated_by)
+ON CONFLICT (cluster_id) DO UPDATE SET
+    enabled = EXCLUDED.enabled,
+    enabled_at = CASE WHEN EXCLUDED.enabled THEN now() ELSE heal_auto.enabled_at END,
+    paused_at = NULL, paused_reason = '', updated_at = now(), updated_by = EXCLUDED.updated_by
+RETURNING *;
+
+-- name: PauseHealAuto :execrows
+UPDATE heal_auto SET paused_at = now(), paused_reason = @reason, updated_at = now()
+WHERE cluster_id = @cluster_id AND enabled AND paused_at IS NULL;
+
+-- name: ListHealAutoRuns :many
+-- De pogingen van Zelfherstel vanzelf op een cluster sinds een tijdstip,
+-- nieuwste eerst.
+SELECT id, status, created_at, finished_at, coalesce((params->>'bootstrap')::boolean, false)::boolean AS bootstrap
+FROM jobs
+WHERE kind = 'heal.run' AND cluster_id = @cluster_id AND params->>'auto' = 'true' AND created_at >= @since
+ORDER BY created_at DESC;

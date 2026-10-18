@@ -3083,6 +3083,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/clusters/{clusterId}/heal-auto": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Zelfherstel vanzelf aan- of uitzetten op een cluster (admin)
+         * @description Aan voert ClusterForge elk plan van Zelfherstel dat vanzelf mag zelf uit, met een rem: het probleem bestaat minstens
+         *     twee minuten, hoogstens drie pogingen per uur, na een mislukte poging een kwartier wachten, het Galera-cluster opnieuw
+         *     beginnen hoogstens eens per uur, en na drie mislukte pogingen op rij pauze. Aanzetten heft een pauze op. Op prod kan
+         *     het niet aan (409).
+         */
+        put: operations["setHealAuto"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/clusters/{clusterId}/components/{componentId}/recover": {
         parameters: {
             query?: never;
@@ -5913,6 +5938,25 @@ export interface components {
             plan: components["schemas"]["HealPlan"] | null;
             /** @description De laatste taak heal.run van deze database in het afgelopen etmaal. */
             last_run: components["schemas"]["HealRun"] | null;
+            /** @description Zelfherstel vanzelf van het cluster; null bij een losse node. */
+            auto: components["schemas"]["HealAuto"] | null;
+        };
+        HealAutoSetting: {
+            enabled: boolean;
+            /**
+             * Format: date-time
+             * @description Gepauzeerd na drie mislukte pogingen op rij; aanzetten heft het op.
+             */
+            paused_at: string | null;
+            paused_reason: string;
+        };
+        HealAuto: components["schemas"]["HealAutoSetting"] & {
+            /** @description false op prod */
+            allowed: boolean;
+            /** @description Zelfherstel voert het plan nu vanzelf uit */
+            due: boolean;
+            /** @description Waarom het plan wel of niet vanzelf gebeurt; leeg als er niets te doen is */
+            note: string;
         };
         HealRun: {
             /** Format: uuid */
@@ -15517,6 +15561,39 @@ export interface operations {
                     "application/json": components["schemas"]["ComponentRecoverPlan"];
                 };
             };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    setHealAuto: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    enabled: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HealAutoSetting"];
+                };
+            };
+            400: components["responses"]["Error"];
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];

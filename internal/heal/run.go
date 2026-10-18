@@ -55,6 +55,9 @@ type runParams struct {
 	Plan   Plan   `json:"plan"`
 	Auto   bool   `json:"auto,omitempty"`
 	Reason string `json:"reason,omitempty"`
+	// Bootstrap: het plan kan het Galera-cluster opnieuw beginnen; vanzelf
+	// gebeurt dat hoogstens eens per BootstrapEvery.
+	Bootstrap bool `json:"bootstrap,omitempty"`
 }
 
 // EnableRun laat de runner heal.run uitvoeren.
