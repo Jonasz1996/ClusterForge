@@ -77,6 +77,54 @@ type Cluster struct {
 	DB *ClusterDB
 	// Cron zijn de beheerde cronjobs en wat ClusterForge op de nodes vond.
 	Cron ClusterCron
+	// Heal is wat Zelfherstel de laatste dertig dagen deed; nil zonder
+	// database en zonder herstel, en dan is er geen sectie Zelfherstel.
+	Heal *ClusterHeal
+}
+
+// ClusterHeal is Zelfherstel op een cluster: Vanzelf herstellen nu, en de
+// pogingen en wijzigingen uit het logboek, oudste eerst.
+type ClusterHeal struct {
+	Auto    HealAuto
+	Runs    []HealRun
+	Changes []HealChange
+}
+
+// HealAuto is Vanzelf herstellen van het cluster.
+type HealAuto struct {
+	Enabled bool
+	// Allowed is false op prod: daar kan het niet aan.
+	Allowed bool
+	// Paused zegt waarom het gepauzeerd is; leeg als het dat niet is.
+	Paused string
+}
+
+// HealRun is één taak heal.run.
+type HealRun struct {
+	JobID string
+	// At is de start; als die voor de laatste dertig dagen viel, het einde.
+	At   time.Time
+	What string
+	Auto bool
+	// By is wie het herstel vroeg; leeg als het vanzelf ging.
+	By string
+	// Problems is wat er mis was, Steps het plan en Nodes de nodes erin.
+	Problems, Steps, Nodes []string
+	// Result is done, failed of canceled; leeg zolang de taak bezig is.
+	Result string
+	Error  string
+	// jobStatus en jobError zijn de taak zelf, voor een herstel zonder
+	// einde in het logboek.
+	jobStatus, jobError string
+}
+
+// HealChange is Vanzelf herstellen aan- of uitgezet, of gepauzeerd.
+type HealChange struct {
+	At time.Time
+	// Kind is on, off of paused.
+	Kind   string
+	By     string
+	Reason string
 }
 
 // ClusterCron zijn de cronjobs van een cluster. Commando's zijn op de node

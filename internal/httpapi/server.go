@@ -203,7 +203,7 @@ func New(d Deps) *Server {
 		components:     d.Components,
 		kubeNodes:      d.KubeNodes,
 	}
-	s.assistant.Tools = slices.Concat(s.assistantTools(), s.kubeTools(), s.databaseTools(), s.cronTools())
+	s.assistant.Tools = slices.Concat(s.assistantTools(), s.kubeTools(), s.databaseTools(), s.cronTools(), s.healTools())
 	s.lessons = kubelessons.New(s.kube, s.q)
 	return s
 }

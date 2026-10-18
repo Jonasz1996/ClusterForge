@@ -54,6 +54,10 @@ type world struct {
 	// De beheerde en de gevonden cronjobs.
 	cronJobs  []store.ListCronJobsRow
 	nodeCrons []store.ListNodeCronsRow
+	// Wat Zelfherstel de laatste dertig dagen deed, en Vanzelf herstellen
+	// per cluster.
+	healEvents []store.ListDocHealEventsRow
+	healAuto   map[uuid.UUID]store.HealAuto
 }
 
 // Gather leest alles voor de documentatie. Ze leest alleen.
@@ -148,6 +152,17 @@ func (s *Service) read(ctx context.Context) (*world, []store.ListDocClustersRow,
 	}
 	if w.nodeCrons, err = s.q.ListNodeCrons(ctx); err != nil {
 		return nil, nil, err
+	}
+	if w.healEvents, err = s.q.ListDocHealEvents(ctx, s.Now().Add(-healWindow)); err != nil {
+		return nil, nil, err
+	}
+	autos, err := s.q.ListHealAuto(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	w.healAuto = map[uuid.UUID]store.HealAuto{}
+	for _, a := range autos {
+		w.healAuto[a.ClusterID] = a
 	}
 	sums, err := s.q.ListDocSummaries(ctx)
 	if err != nil {
@@ -350,6 +365,7 @@ func (s *Service) cluster(ctx context.Context, w *world, r store.ListDocClusters
 		c.DB = dbOf(w.dbs[r.ID])
 	}
 	c.Cron = cronOf(w, r.ID)
+	c.Heal = healOf(w, r)
 	return c, nil
 }
 

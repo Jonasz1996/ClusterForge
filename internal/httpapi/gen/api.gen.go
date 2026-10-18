@@ -7981,7 +7981,7 @@ type IncidentDetail struct {
 	// Analysis Null zolang de analyse nog niet gerekend is
 	Analysis nullable.Nullable[IncidentAnalysis] `json:"analysis"`
 
-	// History Statusovergangen, incidenten en tests over wat geraakt was, oudste eerst
+	// History Statusovergangen, incidenten, tests en herstelacties van Zelfherstel over wat geraakt was, oudste eerst
 	History []AuditEntry `json:"history"`
 
 	// HistoryMore Er waren meer regels dan getoond

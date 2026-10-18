@@ -227,6 +227,8 @@ var quiet = map[string]bool{
 	"proxmox.sync_requested": true, "proxmox.sync_failed": true, "proxmox.sync_recovered": true,
 	"kube.access_issued": true, "kube.access_revoked": true, "kube.snapshot_saved": true,
 	"kube.snapshot_restore_started": true,
+	// Zelfherstel van een losse node raakt geen cluster.
+	"node.heal_started": true, "node.heal_done": true, "node.heal_failed": true,
 }
 
 var quietPrefixes = []string{"auth.", "user.", "audit.", "job.", "assistant.", "incident.", "drift.", "enrollment_token.", "docs."}

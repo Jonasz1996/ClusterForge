@@ -134,6 +134,11 @@ func FromEvent(e audit.Entry) Entry {
 	if !e.Subject.Deleted {
 		en.Link = eventLink(e)
 	}
+	// Een herstel van Zelfherstel wijst naar zijn taak, met de stappen en de
+	// uitvoer, ook als het cluster of de node weg is.
+	if isHeal(e.Action) && en.JobID != nil {
+		en.Link = "/taken/detail?id=" + en.JobID.String()
+	}
 	return en
 }
 
@@ -166,6 +171,8 @@ func eventKind(action string) string {
 	switch {
 	case prefix == "job":
 		return "job"
+	case isHeal(action):
+		return "heal"
 	case action == "agent.command":
 		return "command"
 	case prefix == "gitops" || strings.HasPrefix(action, "cluster.git_"):

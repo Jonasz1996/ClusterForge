@@ -1292,8 +1292,9 @@ func (s *Server) assistantTools() []assistant.Tool {
 				"adressen, bridges, VLAN's en poorten), configuratie (template, parameters zonder geheimen, revisies), " +
 				"cronjobs (beheerde jobs en bestandssyncs, wat er verder op de nodes staat, en hoe je een run nakijkt en een sync " +
 				"terugdraait), " +
-				"herstel (back-ups, controles, failovertests en wat er uitvalt) en runbooks (onderhoud, VIP verplaatsen, " +
-				"terugzetten uit back-up, uitval van een host); bij een Kubernetes-cluster ook kubernetes (versie, nodes, " +
+				"herstel (back-ups, controles, failovertests, wat Zelfherstel de laatste 30 dagen met de databases deed en wat er " +
+				"uitvalt) en runbooks (onderhoud, VIP verplaatsen, terugzetten uit back-up, uitval van een host); bij een " +
+				"Kubernetes-cluster ook kubernetes (versie, nodes, " +
 				"namespaces, apps, webadressen, opslag, etcd-snapshots, en hoe je een node vervangt, bijwerkt en etcd terugzet); " +
 				"bij een cluster met een databaseserver op zijn nodes ook database (engine en versie, nodes, het VIP, de databases " +
 				"met grootte en gebruikers, de dumps, en hoe je het cluster opnieuw start, een node opnieuw synchroniseert, een dump " +

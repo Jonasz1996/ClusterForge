@@ -132,6 +132,7 @@ func (s *Service) enqueue(ctx context.Context, actor events.Actor, rep Report, i
 		}
 		return s.ev.Write(ctx, q, s.event(actor, params, "heal_started", map[string]any{
 			"steps": params.Plan.Steps, "nodes": planHosts(params.Plan, func(PlanNode) bool { return true }), "job_id": j.ID, "title": j.Title,
+			"problems": problemTitles(rep),
 		}))
 	})
 	var busy jobs.BusyError
@@ -161,6 +162,19 @@ func (s *Service) event(actor events.Actor, p runParams, action string, payload 
 		payload["hostname"] = p.Plan.Nodes[0].Hostname
 	}
 	return e
+}
+
+// problemTitles is wat er mis was, elke titel één keer, voor het hoofdstuk
+// Herstel van de documentatie. Een node die Zelfherstel niet kon bekijken,
+// is geen reden om te herstellen.
+func problemTitles(r Report) []string {
+	out := []string{}
+	for _, p := range r.Problems {
+		if p.Code != CodeNoInspect && !slices.Contains(out, p.Title) {
+			out = append(out, p.Title)
+		}
+	}
+	return out
 }
 
 func what(r Report, g databases.Group) string {
