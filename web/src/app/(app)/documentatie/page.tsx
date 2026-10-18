@@ -28,7 +28,7 @@ import {
 } from "@/lib/docs";
 import { useIsAdmin } from "@/lib/inventory";
 
-const chapters = ["architectuur", "netwerk", "configuratie", "herstel", "runbooks"];
+const chapters = ["architectuur", "netwerk", "configuratie", "cronjobs", "herstel", "runbooks"];
 
 // chaptersOf zijn de hoofdstukken van een cluster, zoals de server ze
 // noemt: een Kubernetes-cluster heeft er een meer.

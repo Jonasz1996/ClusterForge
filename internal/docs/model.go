@@ -75,6 +75,53 @@ type Cluster struct {
 	Kube *Kube
 	// DB zijn de databases op de nodes van het cluster; nil zonder.
 	DB *ClusterDB
+	// Cron zijn de beheerde cronjobs en wat ClusterForge op de nodes vond.
+	Cron ClusterCron
+}
+
+// ClusterCron zijn de cronjobs van een cluster. Commando's zijn op de node
+// al gemaskeerd.
+type ClusterCron struct {
+	Managed []CronManaged
+	Found   []CronFound
+}
+
+// CronManaged is een beheerde cronjob of bestandssync.
+type CronManaged struct {
+	ID                       string
+	Name, Schedule, Describe string
+	// RunOn is vip, node of all; Node de vaste node.
+	RunOn, Node   string
+	User, Command string
+	TimeoutMin    int
+	Retries       int
+	Enabled       bool
+	Sync          *CronSync
+}
+
+// CronSync is de rsync van een beheerde sync.
+type CronSync struct {
+	Source, Target string
+	// ToCluster is het doelcluster; leeg is de andere nodes van het eigen
+	// cluster.
+	ToCluster string
+	Delete    bool
+	Exclude   []string
+	BwLimitMB int
+}
+
+// CronFound is een cronjob of timer die ClusterForge op de nodes vond.
+type CronFound struct {
+	Source, File string
+	Line         int
+	User         string
+	Schedule     string
+	Describe     string
+	Command      string
+	Package      string
+	Nodes        []string
+	// Off zijn de nodes waar ClusterForge de regel in commentaar zette.
+	Off []string
 }
 
 // ClusterDB zijn de databases op de nodes van een cluster: de onderdelen

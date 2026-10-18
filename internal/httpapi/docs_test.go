@@ -87,7 +87,7 @@ func TestDocs(t *testing.T) {
 	// gelezen worden.
 	var idx testDocIndex
 	if s := viewer.do("GET", "/api/v1/docs", nil, &idx); s != http.StatusOK || len(idx.Clusters) != 1 || idx.Clusters[0].ID != clusterID ||
-		len(idx.Clusters[0].Docs) != 5 || idx.Overview.Version != nil || idx.Clusters[0].Docs[1].Path != "clusters/web/netwerk.md" {
+		len(idx.Clusters[0].Docs) != 6 || idx.Overview.Version != nil || idx.Clusters[0].Docs[1].Path != "clusters/web/netwerk.md" {
 		t.Fatalf("index: %d %+v", s, idx)
 	}
 	q := "?cluster=" + clusterID
@@ -98,7 +98,7 @@ func TestDocs(t *testing.T) {
 	}
 
 	n, err := e.docs.GenerateAll(ctx, docs.CauseStart)
-	if err != nil || n != 6 {
+	if err != nil || n != 7 {
 		t.Fatalf("eerste ronde: %d %v", n, err)
 	}
 	if n, err := e.docs.GenerateAll(ctx, docs.CauseNight); err != nil || n != 0 {
@@ -163,7 +163,7 @@ func TestDocs(t *testing.T) {
 			t.Errorf("%s heeft geen kopregel", f.Name)
 		}
 	}
-	if strings.Join(names, " ") != "README.md clusters/web/architectuur.md clusters/web/netwerk.md clusters/web/configuratie.md "+
+	if strings.Join(names, " ") != "README.md clusters/web/architectuur.md clusters/web/netwerk.md clusters/web/configuratie.md clusters/web/cronjobs.md "+
 		"clusters/web/herstel.md clusters/web/runbooks.md" {
 		t.Fatalf("zip: %v", names)
 	}

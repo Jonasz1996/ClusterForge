@@ -43,7 +43,7 @@ func TestDatabaseDocs(t *testing.T) {
 			}
 		}
 	}
-	if strings.Join(kinds, ",") != "architectuur,database,netwerk,configuratie,herstel,runbooks" {
+	if strings.Join(kinds, ",") != "architectuur,database,netwerk,configuratie,cronjobs,herstel,runbooks" {
 		t.Fatalf("hoofdstukken: %v", kinds)
 	}
 	// Een cluster zonder database heeft het hoofdstuk niet.
@@ -54,7 +54,7 @@ func TestDatabaseDocs(t *testing.T) {
 	}
 
 	id := uuid.MustParse(lab.cluster.ID)
-	if n, err := e.docs.GenerateCluster(ctx, id, docs.CauseManual); err != nil || n != 6 {
+	if n, err := e.docs.GenerateCluster(ctx, id, docs.CauseManual); err != nil || n != 7 {
 		t.Fatalf("schrijven: %d %v", n, err)
 	}
 	get := func(kind string) string {

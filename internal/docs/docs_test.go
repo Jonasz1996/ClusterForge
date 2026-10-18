@@ -320,10 +320,10 @@ func kubeCluster(env string) Cluster {
 
 func TestKubernetesChapter(t *testing.T) {
 	c := kubeCluster("lab")
-	if got := c.kinds(); strings.Join(got, ",") != "architectuur,kubernetes,netwerk,configuratie,herstel,runbooks" {
+	if got := c.kinds(); strings.Join(got, ",") != "architectuur,kubernetes,netwerk,configuratie,cronjobs,herstel,runbooks" {
 		t.Fatalf("hoofdstukken: %v", got)
 	}
-	if !Valid(ScopeCluster, KindKubernetes) || len(Kinds("web", false)) != 5 {
+	if !Valid(ScopeCluster, KindKubernetes) || len(Kinds("web", false)) != 6 {
 		t.Fatal("kubernetes is een hoofdstuk van een cluster, alleen bij Kubernetes")
 	}
 	md := Chapter(&c, KindKubernetes, Opts{Loc: time.UTC})
@@ -383,10 +383,10 @@ func TestKubernetesChapter(t *testing.T) {
 	}
 	// Een ander cluster heeft geen hoofdstuk Kubernetes.
 	f := fleet()
-	if Chapter(&f.Clusters[0], KindKubernetes, Opts{}) != "" || len(RenderCluster(&f.Clusters[0], Opts{})) != 5 {
+	if Chapter(&f.Clusters[0], KindKubernetes, Opts{}) != "" || len(RenderCluster(&f.Clusters[0], Opts{})) != 6 {
 		t.Error("hoofdstuk Kubernetes bij een ander cluster")
 	}
-	if n := len(RenderCluster(&c, Opts{})); n != 6 {
+	if n := len(RenderCluster(&c, Opts{})); n != 7 {
 		t.Errorf("hoofdstukken van Leren: %d", n)
 	}
 }
@@ -414,10 +414,10 @@ func dbCluster() Cluster {
 
 func TestDatabaseChapter(t *testing.T) {
 	c := dbCluster()
-	if got := strings.Join(c.kinds(), ","); got != "architectuur,database,netwerk,configuratie,herstel,runbooks" {
+	if got := strings.Join(c.kinds(), ","); got != "architectuur,database,netwerk,configuratie,cronjobs,herstel,runbooks" {
 		t.Fatalf("hoofdstukken: %s", got)
 	}
-	if got := strings.Join(Kinds("kubernetes", true), ","); got != "architectuur,kubernetes,database,netwerk,configuratie,herstel,runbooks" || !Valid(ScopeCluster, KindDatabase) {
+	if got := strings.Join(Kinds("kubernetes", true), ","); got != "architectuur,kubernetes,database,netwerk,configuratie,cronjobs,herstel,runbooks" || !Valid(ScopeCluster, KindDatabase) {
 		t.Fatalf("met Kubernetes: %s", got)
 	}
 	md := Chapter(&c, KindDatabase, Opts{Loc: time.UTC})
@@ -505,5 +505,52 @@ func TestRoughSize(t *testing.T) {
 		if got := roughSize(in); got != want {
 			t.Errorf("%d: %s, verwacht %s", in, got, want)
 		}
+	}
+}
+
+func TestCronjobsChapter(t *testing.T) {
+	c := dbCluster()
+	c.Cron = ClusterCron{
+		Managed: []CronManaged{
+			{ID: "1b2c", Name: "opruimen", Schedule: "0 */6 * * *", Describe: "elke 6 uur, op minuut 0", RunOn: "vip", User: "www-data",
+				Command: "php occ trashbin:cleanup --all-users", Enabled: true},
+			{ID: "3d4e", Name: "data naar backup", Schedule: "0 */4 * * *", RunOn: "vip", User: "root", Enabled: false,
+				Sync: &CronSync{Source: "/srv/data/", Target: "/srv/kopie/", ToCluster: "Backup", Delete: true, Exclude: []string{"*.part"}, BwLimitMB: 20}},
+		},
+		Found: []CronFound{
+			{Source: "cron.d", File: "/etc/cron.d/php", Line: 3, User: "root", Schedule: "09,39 * * * *", Command: "/usr/lib/php/sessionclean",
+				Package: "php8.2-common", Nodes: []string{"nc1", "nc2", "nc3"}},
+			{Source: "user", File: "/var/spool/cron/crontabs/root", Line: 2, User: "root", Schedule: "0 2 * * *", Describe: "elke dag om 02:00",
+				Command: "rsync -a /srv/data/ root@nc2:/srv/data/", Nodes: []string{"nc1"}, Off: []string{"nc1"}},
+		},
+	}
+	md := Chapter(&c, KindCronjobs, Opts{Loc: time.UTC})
+	for _, want := range []string{
+		"# Nextcloud: cronjobs",
+		"| opruimen | elke 6 uur, op minuut 0 `0 */6 * * *` | node met het VIP | `php occ trashbin:cleanup --all-users` als www-data | aan |",
+		"| data naar backup |",
+		"sync `/srv/data/` naar alle nodes van Backup, in `/srv/kopie/` | uit |",
+		"### Sync data naar backup",
+		"Wat op de bron weg is, gaat ook op het doel weg (`--delete`).",
+		"Niet mee: `*.part`.",
+		"Hoogstens 20 MB/s.",
+		"uitgezet door ClusterForge op nc1",
+		"(pakket php8.2-common)",
+		"### Een sync terugdraaien",
+		"[Herstel](herstel.md)",
+		"opruimen: `1b2c`",
+	} {
+		if !strings.Contains(md, want) {
+			t.Errorf("mist %q in:\n%s", want, md)
+		}
+	}
+	// Eerst wat Jonas zelf maakte.
+	if strings.Index(md, "rsync -a") > strings.Index(md, "sessionclean") {
+		t.Error("de job uit een pakket staat voor de eigen job")
+	}
+	c.Cron = ClusterCron{}
+	md = Chapter(&c, KindCronjobs, Opts{Loc: time.UTC})
+	if !strings.Contains(md, "Geen. Een job of bestandssync") || !strings.Contains(md, "geen andere cronjobs of timers") {
+		t.Errorf("zonder jobs:\n%s", md)
 	}
 }

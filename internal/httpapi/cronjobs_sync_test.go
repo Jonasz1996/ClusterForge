@@ -12,6 +12,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
+
 	"github.com/Jonasz1996/clusterforge/internal/agent"
 	"github.com/Jonasz1996/clusterforge/pkg/protocol"
 )
@@ -248,6 +250,21 @@ func TestCronSync(t *testing.T) {
 	var proef int
 	if err := e.pool.QueryRow(ctx, "SELECT count(*) FROM events WHERE action = 'cron_job.dry_run' AND subject_id = $1", job.ID).Scan(&proef); err != nil || proef != 1 {
 		t.Errorf("%d proefrun-events: %v", proef, err)
+	}
+
+	// De assistent ziet de sync en zijn runs.
+	inputs := toolInputs("Nextcloud", "nc1", uuid.NewString())
+	inputs["cron_runs"] = []string{`{"job":"data naar backup","cluster":""}`, `{"job":"bestaat niet","cluster":"Nextcloud"}`}
+	out := e.runTools(t, "admin", inputs)
+	for tool, want := range map[string][]string{
+		"cronjobs":  {"data naar backup", `"to_cluster_name":"Backup"`, `"kind":"sync"`},
+		"cron_runs": {`"hostname":"bk1"`, `"files":2`, "FOUT geen beheerde cronjob bestaat niet; er zijn: data naar backup"},
+	} {
+		for _, w := range want {
+			if !strings.Contains(out[tool], w) {
+				t.Errorf("%s mist %s:\n%s", tool, w, out[tool])
+			}
+		}
 	}
 
 	// Een agent met protocol 20 op het doel krijgt een melding.

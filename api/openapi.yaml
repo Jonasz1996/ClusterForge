@@ -4846,7 +4846,7 @@ components:
       name: kind
       in: path
       required: true
-      description: overzicht bij scope overview; architectuur, netwerk, configuratie, herstel of runbooks bij een cluster, kubernetes bij een Kubernetes-cluster, en database bij een cluster met een databaseserver op zijn nodes
+      description: overzicht bij scope overview; architectuur, netwerk, configuratie, cronjobs, herstel of runbooks bij een cluster, kubernetes bij een Kubernetes-cluster, en database bij een cluster met een databaseserver op zijn nodes
       schema: { type: string }
     DocClusterParam:
       name: cluster
