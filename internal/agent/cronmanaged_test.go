@@ -37,7 +37,7 @@ func TestCronApply(t *testing.T) {
 	ctx := context.Background()
 	jobs := []protocol.ManagedCron{testJob(jobA, "echo a"), testJob(jobB, "echo b")}
 	jobs[1].Enabled = false
-	res := a.cronApply(ctx, jobs)
+	res := a.cronApply(ctx, jobs, nil)
 	if res.Error != "" {
 		t.Fatal(res.Error)
 	}
@@ -62,7 +62,7 @@ func TestCronApply(t *testing.T) {
 
 	// Dezelfde set nog eens: niets te doen.
 	calls = nil
-	if res := a.cronApply(ctx, jobs); res.Error != "" || len(calls) != 0 {
+	if res := a.cronApply(ctx, jobs, nil); res.Error != "" || len(calls) != 0 {
 		t.Errorf("tweede keer: %v %v", res.Error, calls)
 	}
 
@@ -70,7 +70,7 @@ func TestCronApply(t *testing.T) {
 	calls = nil
 	a1 := testJob(jobA, "echo a")
 	a1.OnCalendar, a1.Revision = "*-*-* 03:00:00", 2
-	if res := a.cronApply(ctx, []protocol.ManagedCron{a1}); res.Error != "" {
+	if res := a.cronApply(ctx, []protocol.ManagedCron{a1}, nil); res.Error != "" {
 		t.Fatal(res.Error)
 	}
 	want = "systemctl disable --now cf-cron-" + jobB + ".timer; systemctl daemon-reload; systemctl enable cf-cron-" + jobA + ".timer; systemctl restart cf-cron-" + jobA + ".timer"
@@ -82,7 +82,7 @@ func TestCronApply(t *testing.T) {
 	}
 
 	// Geen jobs meer: ook de service gaat weg.
-	if res := a.cronApply(ctx, nil); res.Error != "" {
+	if res := a.cronApply(ctx, nil, nil); res.Error != "" {
 		t.Fatal(res.Error)
 	}
 	if _, err := os.Stat(filepath.Join(root, "etc/systemd/system/cf-cron@.service")); !os.IsNotExist(err) {
@@ -92,11 +92,11 @@ func TestCronApply(t *testing.T) {
 	// Een ongeldige gebruiker of id komt er niet door.
 	bad := testJob(jobA, "echo")
 	bad.User = "root; rm -rf /"
-	if res := a.cronApply(ctx, []protocol.ManagedCron{bad}); res.Error == "" {
+	if res := a.cronApply(ctx, []protocol.ManagedCron{bad}, nil); res.Error == "" {
 		t.Error("ongeldige gebruiker aanvaard")
 	}
 	bad = testJob("../../etc/passwd", "echo")
-	if res := a.cronApply(ctx, []protocol.ManagedCron{bad}); res.Error == "" {
+	if res := a.cronApply(ctx, []protocol.ManagedCron{bad}, nil); res.Error == "" {
 		t.Error("ongeldige id aanvaard")
 	}
 }

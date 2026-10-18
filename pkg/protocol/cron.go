@@ -71,6 +71,13 @@ const (
 	// commando zoals CronList het gaf. Staat de regel niet meer op dat
 	// nummer, dan zoekt de agent hem in de rest van het bestand.
 	CronToggle = "toggle"
+	// CronKeys geeft de publieke sleutel voor syncs (de agent maakt hem
+	// als hij er nog niet is), de hostsleutels van de node en het plan:
+	// rsync, ssh, sshd, PermitRootLogin en de vrije ruimte in Paths.
+	CronKeys = "keys"
+	// CronDryRun draait de sync JobID als proef naar één doel (Target):
+	// rsync --dry-run --itemize-changes, met de lijst in Output.
+	CronDryRun = "dryrun"
 )
 
 // Waar de agent de beheerde jobs bewaart.
@@ -126,6 +133,10 @@ type ManagedCron struct {
 	Retries           int  `json:"retries,omitempty"`
 	RetryDelaySeconds int  `json:"retry_delay_seconds,omitempty"`
 	Enabled           bool `json:"enabled"`
+	// Kind is leeg of CronKindCommand voor een commando, CronKindSync voor
+	// een bestandssync; die heeft Sync in plaats van Command.
+	Kind string    `json:"kind,omitempty"`
+	Sync *SyncSpec `json:"sync,omitempty"`
 }
 
 // Waarom een run startte.
@@ -160,6 +171,8 @@ type CronRunRecord struct {
 	// Output is het einde van de uitvoer, gemaskeerd.
 	Output          string `json:"output,omitempty"`
 	OutputTruncated bool   `json:"output_truncated,omitempty"`
+	// Sync is bij een bestandssync de uitkomst per doel.
+	Sync []SyncResult `json:"sync,omitempty"`
 }
 
 // CronRuns is een bericht met runs.
@@ -188,6 +201,13 @@ type CronRequest struct {
 	RunID string `json:"run_id,omitempty"`
 	// Entry hoort bij CronToggle.
 	Entry *CronEntry `json:"entry,omitempty"`
+	// Receives hoort bij CronApply: de syncs die deze node ontvangt.
+	Receives []SyncReceive `json:"receives,omitempty"`
+	// Paths hoort bij CronKeys: de mappen waarvan de vrije ruimte in het
+	// plan komt.
+	Paths []string `json:"paths,omitempty"`
+	// Target hoort bij CronDryRun: de node-id van het doel.
+	Target string `json:"target,omitempty"`
 }
 
 type CronResponse struct {
@@ -212,6 +232,8 @@ type CronResponse struct {
 	Entries []CronEntry `json:"entries"`
 	// Truncated is true als er meer dan MaxCronEntries waren.
 	Truncated bool `json:"truncated,omitempty"`
+	// Keys is het antwoord op CronKeys.
+	Keys *SyncKeys `json:"keys,omitempty"`
 }
 
 // MaxCronEntries is het grootste aantal jobs per antwoord.

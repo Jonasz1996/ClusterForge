@@ -7,6 +7,7 @@ package store
 
 import (
 	"context"
+	"net/netip"
 	"time"
 
 	"github.com/google/uuid"
@@ -120,7 +121,7 @@ func (q *Queries) InsertNodeCron(ctx context.Context, arg InsertNodeCronParams) 
 }
 
 const listCronCandidateNodes = `-- name: ListCronCandidateNodes :many
-SELECT n.id, n.hostname, n.cluster_id, a.protocol_version AS agent_protocol, s.heartbeat_at,
+SELECT n.id, n.hostname, n.cluster_id, n.primary_ip, a.protocol_version AS agent_protocol, s.heartbeat_at,
        (r.node_id IS NOT NULL)::boolean AS read_before
 FROM nodes n
 JOIN agents a ON a.node_id = n.id AND a.revoked_at IS NULL
@@ -133,6 +134,7 @@ type ListCronCandidateNodesRow struct {
 	ID            uuid.UUID
 	Hostname      string
 	ClusterID     *uuid.UUID
+	PrimaryIp     *netip.Addr
 	AgentProtocol int32
 	HeartbeatAt   *time.Time
 	ReadBefore    bool
@@ -152,6 +154,7 @@ func (q *Queries) ListCronCandidateNodes(ctx context.Context) ([]ListCronCandida
 			&i.ID,
 			&i.Hostname,
 			&i.ClusterID,
+			&i.PrimaryIp,
 			&i.AgentProtocol,
 			&i.HeartbeatAt,
 			&i.ReadBefore,

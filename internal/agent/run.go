@@ -73,6 +73,9 @@ type Agent struct {
 	// CronRunsInterval is hoe vaak de agent de runs van beheerde cronjobs
 	// stuurt; nul is vijf seconden.
 	CronRunsInterval time.Duration
+	// SyncSSH is het ssh-commando van rsync bij een proefrun van een sync;
+	// leeg is ssh met de sleutel in protocol.SyncDir. Tests vervangen het.
+	SyncSSH string
 	// AddressPoll is hoe vaak de agent naar zijn adressen kijkt; bij een
 	// wijziging stuurt hij meteen een heartbeat. Nul is één seconde.
 	AddressPoll time.Duration

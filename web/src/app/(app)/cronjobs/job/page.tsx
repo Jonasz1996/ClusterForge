@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
+import { SyncPlan, SyncResults } from "@/components/cron/Sync";
 import { RunBadge, runDuration, RunNow, RunOutput, where } from "@/components/cron/Managed";
 import { ago, EnvBadge, QueryState, tableClass, tdClass, thClass } from "@/components/inventory/bits";
 import { ProdConfirm, prodConfirmed, useProdTotp } from "@/components/ProdConfirm";
@@ -95,8 +96,31 @@ function CronJobInner() {
               </dd>
               <dt className="text-slate-500">Waar</dt>
               <dd>{where(j)}</dd>
-              <dt className="text-slate-500">Gebruiker</dt>
-              <dd>{j.user}</dd>
+              {j.sync ? (
+                <>
+                  <dt className="text-slate-500">Sync</dt>
+                  <dd>
+                    <span className="font-mono text-xs">{j.sync.source}</span> naar{" "}
+                    {j.sync.to_cluster_name ? `alle nodes van ${j.sync.to_cluster_name}` : "de andere nodes van het cluster"}, in{" "}
+                    <span className="font-mono text-xs">{j.sync.target}</span>
+                  </dd>
+                  <dt className="text-slate-500">Opties</dt>
+                  <dd>
+                    {[
+                      j.sync.delete ? "weghalen op het doel wat op de bron weg is" : "niets weghalen op het doel",
+                      j.sync.exclude.length > 0 ? `niet mee: ${j.sync.exclude.join(", ")}` : "",
+                      j.sync.bwlimit_mb > 0 ? `hoogstens ${j.sync.bwlimit_mb} MB/s` : "",
+                    ]
+                      .filter((x) => x !== "")
+                      .join("; ")}
+                  </dd>
+                </>
+              ) : (
+                <>
+                  <dt className="text-slate-500">Gebruiker</dt>
+                  <dd>{j.user}</dd>
+                </>
+              )}
               <dt className="text-slate-500">Tijdslimiet</dt>
               <dd>{j.timeout_seconds >= 3600 ? `${j.timeout_seconds / 3600} u` : `${Math.round(j.timeout_seconds / 60)} min`}</dd>
               <dt className="text-slate-500">Als hij mislukt</dt>
@@ -104,10 +128,14 @@ function CronJobInner() {
                 {j.retries > 0 ? `${j.retries} keer opnieuw proberen, met een minuut ertussen` : "niet opnieuw proberen"}
                 {j.alert ? "; daarna een incident tot hij weer lukt" : "; geen incident"}
               </dd>
-              <dt className="text-slate-500">Commando</dt>
-              <dd>
-                <pre className="overflow-x-auto rounded-md bg-slate-100 p-2 font-mono text-xs whitespace-pre-wrap dark:bg-slate-800">{j.command}</pre>
-              </dd>
+              {!j.sync && (
+                <>
+                  <dt className="text-slate-500">Commando</dt>
+                  <dd>
+                    <pre className="overflow-x-auto rounded-md bg-slate-100 p-2 font-mono text-xs whitespace-pre-wrap dark:bg-slate-800">{j.command}</pre>
+                  </dd>
+                </>
+              )}
               <dt className="text-slate-500">Op de nodes</dt>
               <dd>
                 <ul className="space-y-1">
@@ -163,6 +191,8 @@ function CronJobInner() {
               </div>
             )}
           </Card>
+
+          {j.sync && isAdmin && <SyncPlan j={j} />}
 
           <Card title="Runs">
             {(q.data?.runs ?? []).length === 0 ? (
@@ -224,6 +254,7 @@ function RunRow({
         <td className={tdClass}>{r.hostname}</td>
         <td className={tdClass}>
           <RunBadge r={r} />
+          {r.sync.length > 0 && <SyncResults results={r.sync} />}
         </td>
         <td className={tdClass}>{runDuration(r) ?? "–"}</td>
         <td className={tdClass}>{runReasonLabel[r.reason]}</td>

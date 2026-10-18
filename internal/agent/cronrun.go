@@ -31,6 +31,9 @@ type CronRunner struct {
 	Now func() time.Time
 	// Stderr krijgt wat cron-run zelf meldt; nil is os.Stderr.
 	Stderr io.Writer
+	// SSH is het commando waarmee rsync een doel van een sync bereikt;
+	// leeg is ssh met de sleutel en known_hosts in protocol.SyncDir.
+	SSH string
 }
 
 func (r *CronRunner) path(p string) string {
@@ -139,7 +142,13 @@ func (r *CronRunner) attempt(ctx context.Context, job protocol.ManagedCron, run 
 		timeout = time.Hour
 	}
 	rctx, cancel := context.WithTimeout(ctx, timeout)
-	exit, runErr := runCronCommand(rctx, job.User, job.Command, out)
+	var exit int
+	var runErr error
+	if job.Kind == protocol.CronKindSync {
+		exit, run.Sync, runErr = r.runSync(rctx, job, out)
+	} else {
+		exit, runErr = runCronCommand(rctx, job.User, job.Command, out)
+	}
 	timedOut := errors.Is(rctx.Err(), context.DeadlineExceeded) && ctx.Err() == nil
 	stopped := ctx.Err() != nil
 	cancel()

@@ -32,11 +32,23 @@ func cronLock(p string) (func(), error) {
 // runCronCommand draait command met /bin/sh als name, met stdout en stderr
 // naar out. Afloop van ctx stopt de hele procesgroep.
 func runCronCommand(ctx context.Context, name, command string, out io.Writer) (int, error) {
-	cmd := exec.CommandContext(ctx, "/bin/sh", "-c", command)
+	return runCronArgv(ctx, name, []string{"/bin/sh", "-c", command}, out)
+}
+
+// runCronArgv draait argv als name, zoals runCronCommand.
+func runCronArgv(ctx context.Context, name string, argv []string, out io.Writer) (int, error) {
+	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Stdout, cmd.Stderr = out, out
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	env := []string{"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "LANG=C.UTF-8"}
-	u, err := user.Lookup(name)
+	// Zonder naam draait het als de gebruiker van cf-agent zelf.
+	var u *user.User
+	var err error
+	if name == "" {
+		u, err = user.Current()
+	} else {
+		u, err = user.Lookup(name)
+	}
 	if err != nil {
 		return -1, err
 	}

@@ -52,6 +52,7 @@ var classes = map[string]Class{
 	"node.cron_disabled": ClassChange, "node.cron_enabled": ClassChange,
 	"cron_job.created": ClassChange, "cron_job.updated": ClassChange, "cron_job.enabled": ClassChange, "cron_job.disabled": ClassChange,
 	"cron_job.deleted": ClassChange, "cron_job.run_requested": ClassChange, "cron_job.run_failed": ClassSymptom, "cron_job.run_stopped": ClassChange,
+	"cron_job.dry_run": ClassInfo,
 
 	"proxmox.created": ClassInfo, "proxmox.updated": ClassInfo, "proxmox.deleted": ClassInfo,
 	"proxmox.sync_requested": ClassInfo, "proxmox.sync_failed": ClassSymptom, "proxmox.sync_recovered": ClassInfo,

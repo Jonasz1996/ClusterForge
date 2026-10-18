@@ -103,7 +103,7 @@ func (a *Agent) handleCron(data []byte) protocol.CronResponse {
 	case protocol.CronLogging:
 		return a.cronLogging(ctx, req.Enable)
 	case protocol.CronApply:
-		return a.cronApply(ctx, req.Jobs)
+		return a.cronApply(ctx, req.Jobs, req.Receives)
 	case protocol.CronRun:
 		return a.cronRunNow(ctx, req.JobID)
 	case protocol.CronOutput:
@@ -112,6 +112,10 @@ func (a *Agent) handleCron(data []byte) protocol.CronResponse {
 		return a.cronStop(ctx, req.JobID)
 	case protocol.CronToggle:
 		return a.cronToggle(req.Entry, req.Enable)
+	case protocol.CronKeys:
+		return a.cronKeys(ctx, req.Paths)
+	case protocol.CronDryRun:
+		return a.cronDryRun(ctx, req.JobID, req.Target)
 	default:
 		return protocol.CronResponse{Error: "onbekend cronverzoek " + req.Op, Entries: []protocol.CronEntry{}}
 	}

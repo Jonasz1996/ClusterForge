@@ -55,10 +55,12 @@ type managedNode struct {
 	addrs *addrs
 	calls []string
 	wg    sync.WaitGroup
+	// ssh is het ssh van rsync bij een sync; leeg is het echte.
+	ssh string
 }
 
 func (h *managedNode) runner() *agent.CronRunner {
-	return &agent.CronRunner{Root: h.root, Addresses: h.addrs.get, Stderr: os.Stderr}
+	return &agent.CronRunner{Root: h.root, Addresses: h.addrs.get, Stderr: os.Stderr, SSH: h.ssh}
 }
 
 func (h *managedNode) exec(_ context.Context, name string, args ...string) ([]byte, error) {
