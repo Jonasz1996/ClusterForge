@@ -150,6 +150,7 @@ var Known = map[string]Spec{
 	"cron_job.deleted":         {CategoryCron, "Beheerde cronjob weggehaald"},
 	"cron_job.run_requested":   {CategoryCron, "Beheerde cronjob met de hand gestart"},
 	"cron_job.run_failed":      {CategoryCron, "Run van beheerde cronjob mislukt"},
+	"cron_job.run_stopped":     {CategoryCron, "Run van beheerde cronjob gestopt"},
 
 	"proxmox.created":               {CategoryProxmox, "Proxmox gekoppeld"},
 	"proxmox.updated":               {CategoryProxmox, "Proxmox-koppeling gewijzigd"},

@@ -636,6 +636,8 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 		return fmt.Sprintf("Cronjob %s weggehaald uit %s", name, str(p, "cluster"))
 	case "cron_job.run_requested":
 		return fmt.Sprintf("Cronjob %s met de hand gestart op %s", name, list(p["nodes"]))
+	case "cron_job.run_stopped":
+		return fmt.Sprintf("Run van cronjob %s op %s met de hand gestopt", name, str(p, "hostname"))
 	case "cron_job.run_failed":
 		s := fmt.Sprintf("Cronjob %s mislukt op %s", name, str(p, "hostname"))
 		if str(p, "result") == "timeout" {
@@ -1514,7 +1516,7 @@ func sizeText(v any) string {
 func changedFields(p map[string]any) []string {
 	labels := map[string]string{
 		"name": "naam", "schedule": "schema", "run_on": "waar", "node_id": "node", "user": "gebruiker", "command": "commando",
-		"timeout_seconds": "tijdslimiet", "enabled": "aan of uit",
+		"timeout_seconds": "tijdslimiet", "enabled": "aan of uit", "retries": "herhalen", "alert": "incident",
 	}
 	c, _ := p["changes"].(map[string]any)
 	var out []string

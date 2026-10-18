@@ -94,6 +94,7 @@ SELECT s.*,
             WHEN 'service' THEN EXISTS (SELECT 1 FROM services WHERE id = s.subject_id)
             WHEN 'app' THEN EXISTS (SELECT 1 FROM kube_workloads WHERE id = s.subject_id)
             WHEN 'cron' THEN EXISTS (SELECT 1 FROM node_crons WHERE subject_id = s.subject_id)
+            WHEN 'cron_job' THEN EXISTS (SELECT 1 FROM cron_jobs WHERE id = s.subject_id)
             ELSE EXISTS (SELECT 1 FROM test_runs WHERE id = s.subject_id)
         END)::boolean AS present
 FROM incident_subjects s

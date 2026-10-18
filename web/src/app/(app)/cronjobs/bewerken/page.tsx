@@ -28,6 +28,8 @@ const empty: ManagedCronJobInput = {
   command: "",
   timeout_seconds: 3600,
   enabled: true,
+  retries: 0,
+  alert: true,
 };
 
 export default function EditCronJobPage() {
@@ -166,6 +168,19 @@ function JobForm({ job, initialCluster }: { job?: ManagedCronJob; initialCluster
             />
             {err("timeout_seconds")}
           </Field>
+          <Field label="Opnieuw proberen" htmlFor="retries" hint="Mislukt een run, dan probeert cf-agent het een minuut later nog eens.">
+            <Select id="retries" className="w-auto" value={form.retries ?? 0} onChange={(e) => set({ retries: Number(e.target.value) })}>
+              <option value={0}>Niet</option>
+              <option value={1}>1 keer</option>
+              <option value={2}>2 keer</option>
+              <option value={3}>3 keer</option>
+            </Select>
+            {err("retries")}
+          </Field>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={form.alert ?? true} onChange={(e) => set({ alert: e.target.checked })} />
+            Een incident openen als de job mislukt, tot hij weer lukt
+          </label>
           <label className="flex items-center gap-2 text-sm">
             <input type="checkbox" checked={form.enabled} onChange={(e) => set({ enabled: e.target.checked })} />
             Aan

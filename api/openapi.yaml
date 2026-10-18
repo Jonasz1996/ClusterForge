@@ -3726,6 +3726,28 @@ paths:
               schema: { $ref: "#/components/schemas/CronRun" }
         "401": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /cron-runs/{runId}/stop:
+    post:
+      operationId: stopCronRun
+      summary: Een lopende run stoppen (admin)
+      description: cf-agent stopt het commando met zijn hele procesgroep; de run krijgt de uitkomst stopped. Vraagt agentprotocol 19.
+      parameters:
+        - { name: runId, in: path, required: true, schema: { type: string, format: uuid } }
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                confirm: { type: string }
+      responses:
+        "202": { description: Gestopt }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
   /cronjobs/refresh:
     post:
       operationId: refreshCronjobs
@@ -5767,6 +5789,8 @@ components:
         command: { type: string }
         timeout_seconds: { type: integer }
         enabled: { type: boolean }
+        retries: { type: integer, minimum: 0, maximum: 3, description: "Hoe vaak een mislukte run herhaalt, met een minuut ertussen" }
+        alert: { type: boolean, description: Een mislukte run opent een incident }
         confirm: { type: string, description: De slug van het cluster, op prod }
     ManagedCronJobCreate:
       allOf:
@@ -5778,7 +5802,7 @@ components:
     ManagedCronJob:
       type: object
       required: [id, cluster_id, cluster_name, cluster_slug, cluster_environment, name, schedule, describe, on_calendar, run_on, node_id, node_hostname,
-        user, command, timeout_seconds, enabled, revision, next_run, nodes, failures_24h, created_at, updated_at]
+        user, command, timeout_seconds, enabled, retries, alert, revision, next_run, missed_at, running, nodes, failures_24h, created_at, updated_at]
       properties:
         id: { type: string, format: uuid }
         cluster_id: { type: string, format: uuid }
@@ -5798,6 +5822,10 @@ components:
         enabled: { type: boolean }
         revision: { type: integer }
         next_run: { type: string, format: date-time, nullable: true }
+        missed_at: { type: string, format: date-time, nullable: true, description: "Het laatste geplande moment, als de job toen niet draaide" }
+        running: { type: integer, description: Op hoeveel nodes er nu een run loopt }
+        retries: { type: integer }
+        alert: { type: boolean }
         failures_24h: { type: integer }
         nodes: { type: array, items: { $ref: "#/components/schemas/ManagedCronJobNode" } }
         created_at: { type: string, format: date-time }
@@ -5819,8 +5847,8 @@ components:
         id: { type: string, format: uuid }
         node_id: { type: string, format: uuid }
         hostname: { type: string }
-        reason: { type: string, enum: [schedule, manual] }
-        result: { type: string, enum: [running, ok, failed, skipped, timeout] }
+        reason: { type: string, enum: [schedule, manual, retry] }
+        result: { type: string, enum: [running, ok, failed, skipped, timeout, stopped] }
         started_at: { type: string, format: date-time }
         ended_at: { type: string, format: date-time, nullable: true }
         exit_code: { type: integer, nullable: true }
@@ -5828,7 +5856,7 @@ components:
       allOf:
         - $ref: "#/components/schemas/CronRunSummary"
         - type: object
-          required: [job_id, job_name, revision, output, output_truncated, output_hidden]
+          required: [job_id, job_name, revision, output, output_truncated, output_hidden, live]
           properties:
             job_id: { type: string, format: uuid }
             job_name: { type: string }
@@ -5836,6 +5864,7 @@ components:
             output: { type: string }
             output_truncated: { type: boolean, description: Alleen de laatste 64 KiB }
             output_hidden: { type: boolean, description: "Een viewer ziet de uitvoer van een job als root niet" }
+            live: { type: boolean, description: "De uitvoer komt zo net van de node, want de run loopt nog" }
     ManagedCronJobDetail:
       type: object
       required: [job, runs]
@@ -8449,7 +8478,7 @@ components:
       type: object
       required: [type, id, name, cluster_id, first_status, worst_status, last_status, reason, since, until, present, app]
       properties:
-        type: { type: string, enum: [cluster, node, service, test_run, app, cron] }
+        type: { type: string, enum: [cluster, node, service, test_run, app, cron, cron_job] }
         id: { type: string, format: uuid }
         name: { type: string }
         cluster_id: { type: string, format: uuid, nullable: true }

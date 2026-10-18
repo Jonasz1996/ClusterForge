@@ -7,7 +7,16 @@ import { RunBadge, runDuration, RunNow, RunOutput, where } from "@/components/cr
 import { ago, EnvBadge, QueryState, tableClass, tdClass, thClass } from "@/components/inventory/bits";
 import { ProdConfirm, prodConfirmed, useProdTotp } from "@/components/ProdConfirm";
 import { Alert, Badge, Button, Card, PageHeader } from "@/components/ui";
-import { useDeleteCronJob, useManagedCronJob, useRunCronJob, useSaveCronJob, jobInputOf } from "@/lib/cronjobs";
+import {
+  jobInputOf,
+  runReasonLabel,
+  useDeleteCronJob,
+  useManagedCronJob,
+  useRunCronJob,
+  useSaveCronJob,
+  useStopCronRun,
+  type ManagedCronJob,
+} from "@/lib/cronjobs";
 import { useIsAdmin } from "@/lib/inventory";
 
 const timeFmt = new Intl.DateTimeFormat("nl-BE", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
@@ -68,6 +77,12 @@ function CronJobInner() {
           />
           {run.isError && <Alert>{run.error.message}</Alert>}
           {run.isSuccess && <p className="text-sm text-slate-600 dark:text-slate-400">Gestart op {run.data.join(", ")}.</p>}
+          {j.missed_at && (
+            <Alert>
+              De run van {timeFmt.format(new Date(j.missed_at))} is niet gestart. Staat de node aan en draait cf-agent? Een run van een
+              uitgezette of nieuwe job telt niet mee.
+            </Alert>
+          )}
 
           <Card title="De job">
             <dl className="grid gap-x-6 gap-y-3 text-sm sm:grid-cols-[auto_1fr]">
@@ -84,6 +99,11 @@ function CronJobInner() {
               <dd>{j.user}</dd>
               <dt className="text-slate-500">Tijdslimiet</dt>
               <dd>{j.timeout_seconds >= 3600 ? `${j.timeout_seconds / 3600} u` : `${Math.round(j.timeout_seconds / 60)} min`}</dd>
+              <dt className="text-slate-500">Als hij mislukt</dt>
+              <dd>
+                {j.retries > 0 ? `${j.retries} keer opnieuw proberen, met een minuut ertussen` : "niet opnieuw proberen"}
+                {j.alert ? "; daarna een incident tot hij weer lukt" : "; geen incident"}
+              </dd>
               <dt className="text-slate-500">Commando</dt>
               <dd>
                 <pre className="overflow-x-auto rounded-md bg-slate-100 p-2 font-mono text-xs whitespace-pre-wrap dark:bg-slate-800">{j.command}</pre>
@@ -162,7 +182,14 @@ function CronJobInner() {
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                     {(q.data?.runs ?? []).map((r) => (
-                      <RunRow key={r.id} open={open === r.id} onToggle={() => setOpen(open === r.id ? null : r.id)} r={r} />
+                      <RunRow
+                        key={r.id}
+                        j={j}
+                        canStop={isAdmin}
+                        open={open === r.id}
+                        onToggle={() => setOpen(open === r.id ? null : r.id)}
+                        r={r}
+                      />
                     ))}
                   </tbody>
                 </table>
@@ -175,7 +202,19 @@ function CronJobInner() {
   );
 }
 
-function RunRow({ r, open, onToggle }: { r: Parameters<typeof RunBadge>[0]["r"]; open: boolean; onToggle: () => void }) {
+function RunRow({
+  j,
+  r,
+  canStop,
+  open,
+  onToggle,
+}: {
+  j: ManagedCronJob;
+  r: Parameters<typeof RunBadge>[0]["r"];
+  canStop: boolean;
+  open: boolean;
+  onToggle: () => void;
+}) {
   return (
     <>
       <tr>
@@ -187,11 +226,12 @@ function RunRow({ r, open, onToggle }: { r: Parameters<typeof RunBadge>[0]["r"];
           <RunBadge r={r} />
         </td>
         <td className={tdClass}>{runDuration(r) ?? "–"}</td>
-        <td className={tdClass}>{r.reason === "manual" ? "met de hand" : "volgens schema"}</td>
-        <td className={tdClass}>
+        <td className={tdClass}>{runReasonLabel[r.reason]}</td>
+        <td className={`${tdClass} whitespace-nowrap`}>
           <button type="button" className="text-sm text-brand-700 hover:underline dark:text-sky-300" onClick={onToggle}>
-            {open ? "Verbergen" : "Uitvoer"}
+            {open ? "Verbergen" : r.result === "running" ? "Volgen" : "Uitvoer"}
           </button>
+          {canStop && r.result === "running" && <StopRun j={j} id={r.id} />}
         </td>
       </tr>
       {open && (
@@ -202,5 +242,40 @@ function RunRow({ r, open, onToggle }: { r: Parameters<typeof RunBadge>[0]["r"];
         </tr>
       )}
     </>
+  );
+}
+
+// StopRun stopt een lopende run, met de bevestiging op prod.
+function StopRun({ j, id }: { j: ManagedCronJob; id: string }) {
+  const stop = useStopCronRun();
+  const totp = useProdTotp();
+  const prod = j.cluster_environment === "prod";
+  const [asking, setAsking] = useState(false);
+  const [confirm, setConfirm] = useState("");
+  if (stop.isSuccess) return <span className="ml-3 text-sm text-slate-500">Wordt gestopt…</span>;
+  if (asking) {
+    return (
+      <div className="mt-2 space-y-2 whitespace-normal">
+        {prod && <ProdConfirm slug={j.cluster_slug} value={confirm} onChange={setConfirm} />}
+        <div className="flex gap-2">
+          <Button
+            variant="danger"
+            disabled={stop.isPending || (prod && !prodConfirmed(j.cluster_slug, confirm, totp))}
+            onClick={() => stop.mutate({ id, confirm: prod ? confirm : undefined })}
+          >
+            Echt stoppen
+          </Button>
+          <Button variant="ghost" onClick={() => setAsking(false)}>
+            Annuleren
+          </Button>
+        </div>
+        {stop.isError && <Alert>{stop.error.message}</Alert>}
+      </div>
+    );
+  }
+  return (
+    <button type="button" className="ml-3 text-sm text-red-700 hover:underline dark:text-red-300" onClick={() => setAsking(true)}>
+      Stoppen
+    </button>
   );
 }

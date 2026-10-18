@@ -106,6 +106,10 @@ func (a *Agent) handleCron(data []byte) protocol.CronResponse {
 		return a.cronApply(ctx, req.Jobs)
 	case protocol.CronRun:
 		return a.cronRunNow(ctx, req.JobID)
+	case protocol.CronOutput:
+		return a.cronOutput(req.JobID, req.RunID)
+	case protocol.CronStop:
+		return a.cronStop(ctx, req.JobID)
 	default:
 		return protocol.CronResponse{Error: "onbekend cronverzoek " + req.Op, Entries: []protocol.CronEntry{}}
 	}

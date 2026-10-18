@@ -24,7 +24,7 @@ func Title(p Problem) string {
 		return "Dienst " + p.Name + " is " + st
 	case SubjectApp:
 		return "App " + p.Name + " is " + st
-	case SubjectCron:
+	case SubjectCron, SubjectCronJob:
 		return "Cronjob " + p.Name + " mislukt"
 	case SubjectTestRun:
 		if p.Status == "error" {

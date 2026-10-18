@@ -82,7 +82,7 @@ func (q *Queries) DeleteOldCronRuns(ctx context.Context) (int64, error) {
 }
 
 const getCronJob = `-- name: GetCronJob :one
-SELECT j.id, j.cluster_id, j.name, j.kind, j.schedule, j.run_on, j.node_id, j.user_name, j.command, j.timeout_seconds, j.enabled, j.revision, j.created_by, j.created_at, j.updated_at, c.name AS cluster_name, c.slug AS cluster_slug, c.environment AS cluster_environment, n.hostname AS node_hostname
+SELECT j.id, j.cluster_id, j.name, j.kind, j.schedule, j.run_on, j.node_id, j.user_name, j.command, j.timeout_seconds, j.enabled, j.revision, j.created_by, j.created_at, j.updated_at, j.retries, j.alert, c.name AS cluster_name, c.slug AS cluster_slug, c.environment AS cluster_environment, n.hostname AS node_hostname
 FROM cron_jobs j
 JOIN clusters c ON c.id = j.cluster_id
 LEFT JOIN nodes n ON n.id = j.node_id
@@ -105,6 +105,8 @@ type GetCronJobRow struct {
 	CreatedBy          *uuid.UUID
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
+	Retries            int32
+	Alert              bool
 	ClusterName        string
 	ClusterSlug        string
 	ClusterEnvironment Environment
@@ -130,6 +132,8 @@ func (q *Queries) GetCronJob(ctx context.Context, id uuid.UUID) (GetCronJobRow, 
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Retries,
+		&i.Alert,
 		&i.ClusterName,
 		&i.ClusterSlug,
 		&i.ClusterEnvironment,
@@ -201,9 +205,9 @@ func (q *Queries) GetCronRunState(ctx context.Context, id uuid.UUID) (string, er
 }
 
 const insertCronJob = `-- name: InsertCronJob :one
-INSERT INTO cron_jobs (cluster_id, name, schedule, run_on, node_id, user_name, command, timeout_seconds, enabled, created_by)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-RETURNING id, cluster_id, name, kind, schedule, run_on, node_id, user_name, command, timeout_seconds, enabled, revision, created_by, created_at, updated_at
+INSERT INTO cron_jobs (cluster_id, name, schedule, run_on, node_id, user_name, command, timeout_seconds, enabled, created_by, retries, alert)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+RETURNING id, cluster_id, name, kind, schedule, run_on, node_id, user_name, command, timeout_seconds, enabled, revision, created_by, created_at, updated_at, retries, alert
 `
 
 type InsertCronJobParams struct {
@@ -217,6 +221,8 @@ type InsertCronJobParams struct {
 	TimeoutSeconds int32
 	Enabled        bool
 	CreatedBy      *uuid.UUID
+	Retries        int32
+	Alert          bool
 }
 
 func (q *Queries) InsertCronJob(ctx context.Context, arg InsertCronJobParams) (CronJob, error) {
@@ -231,6 +237,8 @@ func (q *Queries) InsertCronJob(ctx context.Context, arg InsertCronJobParams) (C
 		arg.TimeoutSeconds,
 		arg.Enabled,
 		arg.CreatedBy,
+		arg.Retries,
+		arg.Alert,
 	)
 	var i CronJob
 	err := row.Scan(
@@ -249,12 +257,47 @@ func (q *Queries) InsertCronJob(ctx context.Context, arg InsertCronJobParams) (C
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Retries,
+		&i.Alert,
 	)
 	return i, err
 }
 
+const listCronJobRunStarts = `-- name: ListCronJobRunStarts :many
+SELECT job_id, max(started_at)::timestamptz AS last_start
+FROM cron_runs
+WHERE started_at >= $1
+GROUP BY job_id
+`
+
+type ListCronJobRunStartsRow struct {
+	JobID     uuid.UUID
+	LastStart time.Time
+}
+
+// De starttijden van de runs sinds @since, voor gemiste runs.
+func (q *Queries) ListCronJobRunStarts(ctx context.Context, since time.Time) ([]ListCronJobRunStartsRow, error) {
+	rows, err := q.db.Query(ctx, listCronJobRunStarts, since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListCronJobRunStartsRow{}
+	for rows.Next() {
+		var i ListCronJobRunStartsRow
+		if err := rows.Scan(&i.JobID, &i.LastStart); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listCronJobs = `-- name: ListCronJobs :many
-SELECT j.id, j.cluster_id, j.name, j.kind, j.schedule, j.run_on, j.node_id, j.user_name, j.command, j.timeout_seconds, j.enabled, j.revision, j.created_by, j.created_at, j.updated_at, c.name AS cluster_name, c.slug AS cluster_slug, c.environment AS cluster_environment, n.hostname AS node_hostname
+SELECT j.id, j.cluster_id, j.name, j.kind, j.schedule, j.run_on, j.node_id, j.user_name, j.command, j.timeout_seconds, j.enabled, j.revision, j.created_by, j.created_at, j.updated_at, j.retries, j.alert, c.name AS cluster_name, c.slug AS cluster_slug, c.environment AS cluster_environment, n.hostname AS node_hostname
 FROM cron_jobs j
 JOIN clusters c ON c.id = j.cluster_id
 LEFT JOIN nodes n ON n.id = j.node_id
@@ -277,6 +320,8 @@ type ListCronJobsRow struct {
 	CreatedBy          *uuid.UUID
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
+	Retries            int32
+	Alert              bool
 	ClusterName        string
 	ClusterSlug        string
 	ClusterEnvironment Environment
@@ -308,6 +353,8 @@ func (q *Queries) ListCronJobs(ctx context.Context) ([]ListCronJobsRow, error) {
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Retries,
+			&i.Alert,
 			&i.ClusterName,
 			&i.ClusterSlug,
 			&i.ClusterEnvironment,
@@ -445,6 +492,62 @@ func (q *Queries) ListCronVIPs(ctx context.Context) ([]ListCronVIPsRow, error) {
 	return items, nil
 }
 
+const listIncidentCronJobs = `-- name: ListIncidentCronJobs :many
+SELECT DISTINCT ON (r.job_id, r.node_id) r.job_id, r.node_id, n.hostname, r.result, r.exit_code, r.started_at,
+       j.name, j.cluster_id, j.alert, j.enabled
+FROM cron_runs r
+JOIN cron_jobs j ON j.id = r.job_id
+JOIN nodes n ON n.id = r.node_id
+WHERE r.result IN ('ok', 'failed', 'timeout')
+ORDER BY r.job_id, r.node_id, r.started_at DESC
+`
+
+type ListIncidentCronJobsRow struct {
+	JobID     uuid.UUID
+	NodeID    uuid.UUID
+	Hostname  string
+	Result    string
+	ExitCode  *int32
+	StartedAt time.Time
+	Name      string
+	ClusterID uuid.UUID
+	Alert     bool
+	Enabled   bool
+}
+
+// De laatste afgeronde run per beheerde job en node, voor de incidenten;
+// een overgeslagen of gestopte run telt niet.
+func (q *Queries) ListIncidentCronJobs(ctx context.Context) ([]ListIncidentCronJobsRow, error) {
+	rows, err := q.db.Query(ctx, listIncidentCronJobs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListIncidentCronJobsRow{}
+	for rows.Next() {
+		var i ListIncidentCronJobsRow
+		if err := rows.Scan(
+			&i.JobID,
+			&i.NodeID,
+			&i.Hostname,
+			&i.Result,
+			&i.ExitCode,
+			&i.StartedAt,
+			&i.Name,
+			&i.ClusterID,
+			&i.Alert,
+			&i.Enabled,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listLatestCronRuns = `-- name: ListLatestCronRuns :many
 SELECT DISTINCT ON (r.job_id, r.node_id) r.id, r.job_id, r.node_id, n.hostname, r.reason, r.result, r.started_at, r.ended_at, r.exit_code
 FROM cron_runs r
@@ -522,9 +625,9 @@ func (q *Queries) MarkCronNodeSet(ctx context.Context, arg MarkCronNodeSetParams
 const updateCronJob = `-- name: UpdateCronJob :one
 UPDATE cron_jobs
 SET name = $2, schedule = $3, run_on = $4, node_id = $5, user_name = $6, command = $7, timeout_seconds = $8, enabled = $9,
-    revision = revision + 1, updated_at = now()
+    retries = $10, alert = $11, revision = revision + 1, updated_at = now()
 WHERE id = $1
-RETURNING id, cluster_id, name, kind, schedule, run_on, node_id, user_name, command, timeout_seconds, enabled, revision, created_by, created_at, updated_at
+RETURNING id, cluster_id, name, kind, schedule, run_on, node_id, user_name, command, timeout_seconds, enabled, revision, created_by, created_at, updated_at, retries, alert
 `
 
 type UpdateCronJobParams struct {
@@ -537,6 +640,8 @@ type UpdateCronJobParams struct {
 	Command        string
 	TimeoutSeconds int32
 	Enabled        bool
+	Retries        int32
+	Alert          bool
 }
 
 func (q *Queries) UpdateCronJob(ctx context.Context, arg UpdateCronJobParams) (CronJob, error) {
@@ -550,6 +655,8 @@ func (q *Queries) UpdateCronJob(ctx context.Context, arg UpdateCronJobParams) (C
 		arg.Command,
 		arg.TimeoutSeconds,
 		arg.Enabled,
+		arg.Retries,
+		arg.Alert,
 	)
 	var i CronJob
 	err := row.Scan(
@@ -568,6 +675,8 @@ func (q *Queries) UpdateCronJob(ctx context.Context, arg UpdateCronJobParams) (C
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Retries,
+		&i.Alert,
 	)
 	return i, err
 }

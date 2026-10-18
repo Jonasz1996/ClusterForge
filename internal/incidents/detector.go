@@ -245,6 +245,45 @@ func (d *Detector) world(ctx context.Context, q *store.Queries, now time.Time) (
 		w.Problems = append(w.Problems, p)
 	}
 
+	// Een beheerde cronjob waarvan de laatste run op een node mislukte, tot
+	// die weer lukt; per job uit te zetten.
+	managed, err := q.ListIncidentCronJobs(ctx)
+	if err != nil {
+		return w, err
+	}
+	failing := map[uuid.UUID]*Problem{}
+	var order []uuid.UUID
+	for _, r := range managed {
+		k := Key{SubjectCronJob, r.JobID}
+		if _, ok := w.Status[k]; !ok {
+			w.Status[k] = "healthy"
+		}
+		if !r.Alert || !r.Enabled || (r.Result != "failed" && r.Result != "timeout") {
+			continue
+		}
+		reason := r.Hostname + ": de laatste run mislukte"
+		switch {
+		case r.Result == "timeout":
+			reason = r.Hostname + ": de laatste run haalde de tijdslimiet niet"
+		case r.ExitCode != nil:
+			reason = fmt.Sprintf("%s: de laatste run mislukte met exitcode %d", r.Hostname, *r.ExitCode)
+		}
+		if p := failing[r.JobID]; p != nil {
+			p.Reason += "; " + reason
+			w.Hosts[k] = append(w.Hosts[k], r.Hostname)
+			continue
+		}
+		cid := r.ClusterID
+		p := &Problem{Key: k, Name: r.Name, ClusterID: &cid, Status: "fail", Reason: reason, Since: r.StartedAt, Primary: true, Env: env[cid]}
+		failing[r.JobID] = p
+		order = append(order, r.JobID)
+		w.Status[k] = "fail"
+		w.Hosts[k] = []string{r.Hostname}
+	}
+	for _, id := range order {
+		w.Problems = append(w.Problems, *failing[id])
+	}
+
 	// Clusters die via de graaf van elkaar afhangen, ook over een tussenstap.
 	next := map[uuid.UUID][]uuid.UUID{}
 	for _, dep := range deps {

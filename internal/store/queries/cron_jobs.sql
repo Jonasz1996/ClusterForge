@@ -13,14 +13,14 @@ LEFT JOIN nodes n ON n.id = j.node_id
 WHERE j.id = $1;
 
 -- name: InsertCronJob :one
-INSERT INTO cron_jobs (cluster_id, name, schedule, run_on, node_id, user_name, command, timeout_seconds, enabled, created_by)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+INSERT INTO cron_jobs (cluster_id, name, schedule, run_on, node_id, user_name, command, timeout_seconds, enabled, created_by, retries, alert)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 RETURNING *;
 
 -- name: UpdateCronJob :one
 UPDATE cron_jobs
 SET name = $2, schedule = $3, run_on = $4, node_id = $5, user_name = $6, command = $7, timeout_seconds = $8, enabled = $9,
-    revision = revision + 1, updated_at = now()
+    retries = $10, alert = $11, revision = revision + 1, updated_at = now()
 WHERE id = $1
 RETURNING *;
 
@@ -94,3 +94,21 @@ WHERE r.id = $1;
 DELETE FROM cron_runs r
 WHERE r.started_at < now() - interval '90 days'
   AND r.id NOT IN (SELECT DISTINCT ON (job_id, node_id) id FROM cron_runs ORDER BY job_id, node_id, started_at DESC);
+
+-- name: ListIncidentCronJobs :many
+-- De laatste afgeronde run per beheerde job en node, voor de incidenten;
+-- een overgeslagen of gestopte run telt niet.
+SELECT DISTINCT ON (r.job_id, r.node_id) r.job_id, r.node_id, n.hostname, r.result, r.exit_code, r.started_at,
+       j.name, j.cluster_id, j.alert, j.enabled
+FROM cron_runs r
+JOIN cron_jobs j ON j.id = r.job_id
+JOIN nodes n ON n.id = r.node_id
+WHERE r.result IN ('ok', 'failed', 'timeout')
+ORDER BY r.job_id, r.node_id, r.started_at DESC;
+
+-- name: ListCronJobRunStarts :many
+-- De starttijden van de runs sinds @since, voor gemiste runs.
+SELECT job_id, max(started_at)::timestamptz AS last_start
+FROM cron_runs
+WHERE started_at >= @since
+GROUP BY job_id;
