@@ -1055,6 +1055,7 @@ type NodeCron struct {
 	Failures     int32
 	NextRunAt    *time.Time
 	FirstSeen    time.Time
+	SubjectID    *uuid.UUID
 }
 
 type NodeCronRead struct {

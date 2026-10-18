@@ -3,9 +3,12 @@
 import Link from "next/link";
 import { useState } from "react";
 import { ago, Empty, EnvBadge, QueryState, tableClass, tdClass, thClass } from "@/components/inventory/bits";
-import { Badge, Card } from "@/components/ui";
+import { Badge, Button, Card } from "@/components/ui";
+import { useIsAdmin } from "@/lib/inventory";
 import {
   missingOn,
+  useCronLogging,
+  warningTone,
   resultInfo,
   sourceLabel,
   useCronjobs,
@@ -13,6 +16,7 @@ import {
   type CronGroup,
   type CronJob,
   type CronJobNode,
+  type CronNodeRead,
 } from "@/lib/cronjobs";
 
 const timeFmt = new Intl.DateTimeFormat("nl-BE", { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
@@ -102,6 +106,21 @@ export function JobTable({ jobs, group, single }: { jobs: CronJob[]; group?: Cro
                 </td>
                 <td className={`${tdClass} max-w-xl`}>
                   <div className="font-mono text-xs break-all">{j.command}</div>
+                  {j.warnings.map((w) => (
+                    <div
+                      key={w.kind}
+                      className={
+                        w.level === "danger"
+                          ? "mt-1 rounded-sm bg-red-50 px-2 py-1 text-xs text-red-800 dark:bg-red-950 dark:text-red-200"
+                          : w.level === "warning"
+                            ? "mt-1 rounded-sm bg-amber-50 px-2 py-1 text-xs text-amber-800 dark:bg-amber-950 dark:text-amber-200"
+                            : "mt-1 text-xs text-slate-600 dark:text-slate-400"
+                      }
+                    >
+                      <Badge tone={warningTone[w.level]}>{w.level === "danger" ? "Gevaarlijk" : w.level === "warning" ? "Let op" : "Tip"}</Badge>{" "}
+                      {w.text}
+                    </div>
+                  ))}
                   <div className="mt-1 flex flex-wrap gap-1 text-xs text-slate-500">
                     <span title={j.line ? `${j.file}, regel ${j.line}` : j.file}>
                       {j.source === "timer" ? j.file : `${sourceLabel[j.source]} · ${j.file}`}
@@ -117,6 +136,20 @@ export function JobTable({ jobs, group, single }: { jobs: CronJob[]; group?: Cro
                   {missing.length > 0 && (
                     <div className="mt-1 text-xs text-amber-700 dark:text-amber-300">Niet op {missing.join(", ")}</div>
                   )}
+                  {j.differs.length > 0 && (
+                    <div className="mt-1 text-xs text-amber-700 dark:text-amber-300">
+                      Anders op:
+                      <ul className="mt-0.5 space-y-0.5">
+                        {j.differs.map((d, i) => (
+                          <li key={i}>
+                            <span className="font-medium">{d.hostname}</span>{" "}
+                            {d.schedule !== j.schedule && <span className="font-mono">{d.schedule}</span>}
+                            {d.command !== j.command && <span className="font-mono break-all"> {d.command}</span>}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
                 </td>
                 <td className={`${tdClass} whitespace-nowrap`}>
                   {j.next_run ? (
@@ -130,6 +163,55 @@ export function JobTable({ jobs, group, single }: { jobs: CronJob[]; group?: Cro
           })}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+// LoggingHint zegt op welke nodes cron niet logt of een job lukte, met een
+// knop om dat aan te zetten.
+function LoggingHint({ nodes }: { nodes: CronNodeRead[] }) {
+  const isAdmin = useIsAdmin();
+  const logging = useCronLogging();
+  const [done, setDone] = useState<string[]>([]);
+  const off = nodes.filter((n) => n.error === "" && n.daemon === "cron" && !n.logging);
+  if (off.length === 0 && done.length === 0) return null;
+  const enable = async () => {
+    const out: string[] = [];
+    for (const n of off) {
+      try {
+        await logging.mutateAsync({ nodeId: n.node_id, enabled: true });
+        out.push(`${n.hostname}: aangezet`);
+      } catch (e) {
+        out.push(`${n.hostname}: ${e instanceof Error ? e.message : "mislukt"}`);
+      }
+    }
+    setDone(out);
+  };
+  return (
+    <div className="mb-3 text-sm text-slate-600 dark:text-slate-400">
+      {off.length > 0 && (
+        <p>
+          cron logt op {off.map((n) => n.hostname).join(", ")} alleen de start van een job, niet of hij lukte. Daarom staat er
+          &lsquo;Gestart&rsquo; in plaats van &lsquo;Gelukt&rsquo; of &lsquo;Mislukt&rsquo;, en geeft een mislukte job geen incident.
+        </p>
+      )}
+      {isAdmin && off.length > 0 && (
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <Button variant="secondary" disabled={logging.isPending} onClick={() => void enable()}>
+            {logging.isPending ? "Bezig…" : "Fouten van cron vastleggen"}
+          </Button>
+          <span className="text-xs text-slate-500">
+            Zet -L 15 in een drop-in van cron.service en herstart cron; lopende jobs draaien door.
+          </span>
+        </div>
+      )}
+      {done.length > 0 && (
+        <ul className="mt-2 text-xs">
+          {done.map((d) => (
+            <li key={d}>{d}</li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
@@ -153,6 +235,8 @@ export function GroupCard({ g, showSystem }: { g: CronGroup; showSystem: boolean
         {jobs.length} {jobs.length === 1 ? "job" : "jobs"} op {g.nodes.map((n) => n.hostname).join(", ")}
       </span>
       {failing > 0 && <Badge tone="red">{failing} mislukt</Badge>}
+      {jobs.some((j) => j.warnings.some((w) => w.level === "danger")) && <Badge tone="red">gevaarlijke cronjob</Badge>}
+      {jobs.some((j) => j.differs.length > 0) && <Badge tone="amber">verschilt per node</Badge>}
     </span>
   );
   return (
@@ -163,12 +247,7 @@ export function GroupCard({ g, showSystem }: { g: CronGroup; showSystem: boolean
           {n.ok_at && <span className="text-slate-500"> (laatst gelezen {ago(n.ok_at)})</span>}
         </p>
       ))}
-      {g.nodes.some((n) => n.error === "" && n.daemon === "cron" && !n.logging) && (
-        <p className="mb-3 text-sm text-slate-600 dark:text-slate-400">
-          cron logt op {g.nodes.filter((n) => n.daemon === "cron" && !n.logging).map((n) => n.hostname).join(", ")} alleen de start
-          van een job, niet of hij lukte. Daarom staat er &lsquo;Gestart&rsquo; in plaats van &lsquo;Gelukt&rsquo; of &lsquo;Mislukt&rsquo;.
-        </p>
-      )}
+      <LoggingHint nodes={g.nodes} />
       {jobs.length === 0 ? (
         <p className="text-sm text-slate-500">Geen eigen cronjobs op deze nodes.</p>
       ) : (
@@ -210,6 +289,7 @@ export function NodeCronCard({ nodeId }: { nodeId: string }) {
         ) : (
           <>
             {read.error && <p className="mb-2 text-sm text-amber-700 dark:text-amber-300">{read.error}</p>}
+            <LoggingHint nodes={[read]} />
             {jobs.length === 0 ? <Empty>Geen eigen cronjobs of timers op deze node.</Empty> : <JobTable jobs={jobs} single />}
             {all.length > jobs.length && (
               <button type="button" className="mt-2 text-xs text-brand-700 hover:underline dark:text-sky-300" onClick={() => setShowSystem(true)}>

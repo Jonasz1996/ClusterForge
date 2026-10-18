@@ -140,6 +140,9 @@ var Known = map[string]Spec{
 	"node.cron_added":          {CategoryCron, "Cronjob verschenen op node"},
 	"node.cron_removed":        {CategoryCron, "Cronjob verdwenen van node"},
 	"node.cron_changed":        {CategoryCron, "Cronjob gewijzigd op node"},
+	"node.cron_failed":         {CategoryCron, "Cronjob mislukt"},
+	"node.cron_recovered":      {CategoryCron, "Cronjob lukt weer"},
+	"node.cron_logging":        {CategoryCron, "Logging van cron gewijzigd"},
 
 	"proxmox.created":               {CategoryProxmox, "Proxmox gekoppeld"},
 	"proxmox.updated":               {CategoryProxmox, "Proxmox-koppeling gewijzigd"},

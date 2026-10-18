@@ -23,8 +23,8 @@ func (q *Queries) DeleteNodeCrons(ctx context.Context, nodeID uuid.UUID) error {
 
 const insertNodeCron = `-- name: InsertNodeCron :exec
 INSERT INTO node_crons (node_id, key, source, file, line, user_name, schedule, command, unit, description, package, enabled,
-                        clusterforge, last_run_at, last_end_at, last_exit, last_result, runs, failures, next_run_at, first_seen)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21)
+                        clusterforge, last_run_at, last_end_at, last_exit, last_result, runs, failures, next_run_at, first_seen, subject_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
 `
 
 type InsertNodeCronParams struct {
@@ -49,6 +49,7 @@ type InsertNodeCronParams struct {
 	Failures     int32
 	NextRunAt    *time.Time
 	FirstSeen    time.Time
+	SubjectID    *uuid.UUID
 }
 
 func (q *Queries) InsertNodeCron(ctx context.Context, arg InsertNodeCronParams) error {
@@ -74,6 +75,7 @@ func (q *Queries) InsertNodeCron(ctx context.Context, arg InsertNodeCronParams) 
 		arg.Failures,
 		arg.NextRunAt,
 		arg.FirstSeen,
+		arg.SubjectID,
 	)
 	return err
 }
@@ -115,6 +117,36 @@ func (q *Queries) ListCronCandidateNodes(ctx context.Context) ([]ListCronCandida
 			&i.HeartbeatAt,
 			&i.ReadBefore,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listCronComponents = `-- name: ListCronComponents :many
+SELECT cluster_id, engine FROM cluster_components
+`
+
+type ListCronComponentsRow struct {
+	ClusterID uuid.UUID
+	Engine    string
+}
+
+// De onderdelen Database per cluster, voor de waarschuwingen bij cronjobs.
+func (q *Queries) ListCronComponents(ctx context.Context) ([]ListCronComponentsRow, error) {
+	rows, err := q.db.Query(ctx, listCronComponents)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListCronComponentsRow{}
+	for rows.Next() {
+		var i ListCronComponentsRow
+		if err := rows.Scan(&i.ClusterID, &i.Engine); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -185,8 +217,67 @@ func (q *Queries) ListCronReads(ctx context.Context) ([]ListCronReadsRow, error)
 	return items, nil
 }
 
+const listIncidentCrons = `-- name: ListIncidentCrons :many
+SELECT j.node_id, j.key, j.subject_id, j.file, j.command, j.schedule, j.last_run_at, j.last_exit, j.last_result, n.hostname, n.cluster_id,
+       (j.last_result = 'failed' AND j.enabled AND n.lifecycle = 'active')::boolean AS failing
+FROM node_crons j
+JOIN nodes n ON n.id = j.node_id
+WHERE j.package = '' AND j.subject_id IS NOT NULL
+`
+
+type ListIncidentCronsRow struct {
+	NodeID     uuid.UUID
+	Key        string
+	SubjectID  *uuid.UUID
+	File       string
+	Command    string
+	Schedule   string
+	LastRunAt  *time.Time
+	LastExit   *int32
+	LastResult string
+	Hostname   string
+	ClusterID  *uuid.UUID
+	Failing    bool
+}
+
+// De cronjobs voor de incidenten: een job waarvan de laatste run mislukte,
+// opent er een. Jobs van Debian-pakketten (zoals e2scrub in een CT) tellen
+// niet mee.
+func (q *Queries) ListIncidentCrons(ctx context.Context) ([]ListIncidentCronsRow, error) {
+	rows, err := q.db.Query(ctx, listIncidentCrons)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListIncidentCronsRow{}
+	for rows.Next() {
+		var i ListIncidentCronsRow
+		if err := rows.Scan(
+			&i.NodeID,
+			&i.Key,
+			&i.SubjectID,
+			&i.File,
+			&i.Command,
+			&i.Schedule,
+			&i.LastRunAt,
+			&i.LastExit,
+			&i.LastResult,
+			&i.Hostname,
+			&i.ClusterID,
+			&i.Failing,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listNodeCrons = `-- name: ListNodeCrons :many
-SELECT j.node_id, j.key, j.source, j.file, j.line, j.user_name, j.schedule, j.command, j.unit, j.description, j.package, j.enabled, j.clusterforge, j.last_run_at, j.last_end_at, j.last_exit, j.last_result, j.runs, j.failures, j.next_run_at, j.first_seen, n.hostname, n.cluster_id, c.name AS cluster_name, c.slug AS cluster_slug, c.environment AS cluster_environment
+SELECT j.node_id, j.key, j.source, j.file, j.line, j.user_name, j.schedule, j.command, j.unit, j.description, j.package, j.enabled, j.clusterforge, j.last_run_at, j.last_end_at, j.last_exit, j.last_result, j.runs, j.failures, j.next_run_at, j.first_seen, j.subject_id, n.hostname, n.cluster_id, c.name AS cluster_name, c.slug AS cluster_slug, c.environment AS cluster_environment
 FROM node_crons j
 JOIN nodes n ON n.id = j.node_id
 LEFT JOIN clusters c ON c.id = n.cluster_id
@@ -215,6 +306,7 @@ type ListNodeCronsRow struct {
 	Failures           int32
 	NextRunAt          *time.Time
 	FirstSeen          time.Time
+	SubjectID          *uuid.UUID
 	Hostname           string
 	ClusterID          *uuid.UUID
 	ClusterName        *string
@@ -254,6 +346,7 @@ func (q *Queries) ListNodeCrons(ctx context.Context) ([]ListNodeCronsRow, error)
 			&i.Failures,
 			&i.NextRunAt,
 			&i.FirstSeen,
+			&i.SubjectID,
 			&i.Hostname,
 			&i.ClusterID,
 			&i.ClusterName,
@@ -271,7 +364,7 @@ func (q *Queries) ListNodeCrons(ctx context.Context) ([]ListNodeCronsRow, error)
 }
 
 const listNodeCronsOf = `-- name: ListNodeCronsOf :many
-SELECT node_id, key, source, file, line, user_name, schedule, command, unit, description, package, enabled, clusterforge, last_run_at, last_end_at, last_exit, last_result, runs, failures, next_run_at, first_seen FROM node_crons WHERE node_id = $1
+SELECT node_id, key, source, file, line, user_name, schedule, command, unit, description, package, enabled, clusterforge, last_run_at, last_end_at, last_exit, last_result, runs, failures, next_run_at, first_seen, subject_id FROM node_crons WHERE node_id = $1
 `
 
 func (q *Queries) ListNodeCronsOf(ctx context.Context, nodeID uuid.UUID) ([]NodeCron, error) {
@@ -305,6 +398,7 @@ func (q *Queries) ListNodeCronsOf(ctx context.Context, nodeID uuid.UUID) ([]Node
 			&i.Failures,
 			&i.NextRunAt,
 			&i.FirstSeen,
+			&i.SubjectID,
 		); err != nil {
 			return nil, err
 		}

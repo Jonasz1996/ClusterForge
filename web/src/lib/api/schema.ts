@@ -3367,6 +3367,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/nodes/{nodeId}/cron-logging": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * cron op een node het einde en de exitcode van elke job laten loggen (admin)
+         * @description Schrijft een drop-in voor cron.service die cron met -L 15 start, en herstart cron; lopende jobs draaien door.
+         *     Met enabled=false gaat de drop-in weg. Vraagt agentprotocol 17.
+         */
+        post: operations["setCronLogging"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/cronjobs/refresh": {
         parameters: {
             query?: never;
@@ -5411,6 +5432,21 @@ export interface components {
             /** Format: date-time */
             next_run: string | null;
             nodes: components["schemas"]["CronJobNode"][];
+            /** @description Nodes waar dezelfde job (zelfde bestand en gebruiker) met een ander schema of commando staat */
+            differs: components["schemas"]["CronVariant"][];
+            warnings: components["schemas"]["CronWarning"][];
+        };
+        CronVariant: {
+            hostname: string;
+            schedule: string;
+            command: string;
+        };
+        CronWarning: {
+            /** @enum {string} */
+            kind: "galera_bootstrap" | "db_restart" | "pg_failover" | "rsync";
+            /** @enum {string} */
+            level: "danger" | "warning" | "info";
+            text: string;
         };
         CronJobNode: {
             /** Format: uuid */
@@ -8012,7 +8048,7 @@ export interface components {
         };
         IncidentSubject: {
             /** @enum {string} */
-            type: "cluster" | "node" | "service" | "test_run" | "app";
+            type: "cluster" | "node" | "service" | "test_run" | "app" | "cron";
             /** Format: uuid */
             id: string;
             name: string;
@@ -15373,6 +15409,42 @@ export interface operations {
                 };
             };
             401: components["responses"]["Error"];
+        };
+    };
+    setCronLogging: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    enabled: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description Gedaan */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        output: string[];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            502: components["responses"]["Error"];
         };
     };
     refreshCronjobs: {

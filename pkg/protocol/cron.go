@@ -10,6 +10,10 @@ import (
 // de cronjobs en systemd-timers op zijn node (fase 6).
 const CronSince = 16
 
+// CronLoggingSince is de eerste protocolversie met CronLogging: cron het
+// einde en de exitcode van elke job laten loggen.
+const CronLoggingSince = 17
+
 // SubjectCron draagt de cronverzoeken: cf.node.<id>.cron. Een eigen subject,
 // zodat een trage journal de commando's op cmd niet ophoudt.
 const SubjectCron = "cron"
@@ -24,7 +28,15 @@ const (
 	// CronList leest elke cronjob en timer op de node, met de laatste run
 	// uit de journal. Wachtwoorden in commando's zijn gemaskeerd.
 	CronList = "list"
+	// CronLogging zet cron met -L 15 aan (of terug zoals het was), met een
+	// drop-in voor cron.service, zodat het einde en de exitcode van elke job
+	// in de journal komen. Lopende jobs draaien door; cron.service heeft
+	// KillMode=process.
+	CronLogging = "logging"
 )
+
+// CronLoggingDropIn is de drop-in die CronLogging schrijft.
+const CronLoggingDropIn = "/etc/systemd/system/cron.service.d/50-clusterforge-log.conf"
 
 // CronTimeout is hoe lang een cronverzoek mag duren.
 const CronTimeout = 30 * time.Second
@@ -34,10 +46,14 @@ type CronRequest struct {
 	Op string `json:"op"`
 	// Deadline: na dit tijdstip weigert de agent het verzoek.
 	Deadline time.Time `json:"deadline"`
+	// Enable hoort bij CronLogging: aan of terug zoals het was.
+	Enable bool `json:"enable,omitempty"`
 }
 
 type CronResponse struct {
 	Error string `json:"error,omitempty"`
+	// Output zegt bij CronLogging wat de agent deed.
+	Output []string `json:"output,omitempty"`
 	// Daemon is de cron-daemon op de node: cron, cronie of leeg als er
 	// geen draait.
 	Daemon string `json:"daemon,omitempty"`

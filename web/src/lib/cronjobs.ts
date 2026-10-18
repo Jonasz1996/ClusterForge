@@ -8,6 +8,7 @@ export type CronGroup = components["schemas"]["CronGroup"];
 export type CronJob = components["schemas"]["CronJob"];
 export type CronJobNode = components["schemas"]["CronJobNode"];
 export type CronNodeRead = components["schemas"]["CronNodeRead"];
+export type CronWarning = components["schemas"]["CronWarning"];
 
 type Tone = "slate" | "green" | "amber" | "red" | "blue";
 
@@ -64,3 +65,20 @@ export function worstResult(job: CronJob): CronJobNode["last_result"] {
   for (const r of order) if (job.nodes.some((n) => n.last_result === r)) return r;
   return "";
 }
+
+// useCronLogging laat cron op een node het einde en de exitcode van elke
+// job loggen, of zet dat terug.
+export function useCronLogging() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ nodeId, enabled }: { nodeId: string; enabled: boolean }) =>
+      unwrap(await api.POST("/nodes/{nodeId}/cron-logging", { params: { path: { nodeId } }, body: { enabled } })).output,
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ["cronjobs"] }),
+  });
+}
+
+export const warningTone: Record<CronWarning["level"], "red" | "amber" | "blue"> = {
+  danger: "red",
+  warning: "amber",
+  info: "blue",
+};

@@ -56,6 +56,11 @@ type Job struct {
 	Nodes        []JobNode
 	// NextRun is de eerste volgende run over de nodes.
 	NextRun *time.Time
+	// Differs zijn de nodes waar dezelfde job (zelfde bestand en
+	// gebruiker) anders staat.
+	Differs []Variant
+	// Warnings zijn de waarschuwingen bij deze job.
+	Warnings []Warning
 }
 
 // JobNode is een job op één node.
@@ -83,6 +88,15 @@ func (s *Service) Overview(ctx context.Context) ([]Group, error) {
 	if err != nil {
 		return nil, err
 	}
+	comps, err := s.q.ListCronComponents(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var cr []engineRow
+	for _, c := range comps {
+		cr = append(cr, engineRow{c.ClusterID, c.Engine})
+	}
+	ctxs := contexts(cr)
 	loc := s.Location
 	if loc == nil {
 		loc = time.Local
@@ -162,6 +176,13 @@ func (s *Service) Overview(ctx context.Context) ([]Group, error) {
 		slices.SortFunc(g.Nodes, func(a, b NodeRead) int {
 			return strings.Compare(strings.ToLower(a.Hostname), strings.ToLower(b.Hostname))
 		})
+		cc := clusterContext{components: map[string]bool{}}
+		if g.ClusterID != nil {
+			if c, ok := ctxs[*g.ClusterID]; ok {
+				cc = c
+			}
+		}
+		analyze(g, cc)
 		out = append(out, *g)
 	}
 	slices.SortFunc(out, func(a, b Group) int {

@@ -2,6 +2,7 @@ package incidents
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -213,6 +214,33 @@ func (d *Detector) world(ctx context.Context, q *store.Queries, now time.Time) (
 		if r.ClusterID != nil {
 			p.Env = env[*r.ClusterID]
 			w.Hosts[k] = w.Hosts[Key{SubjectCluster, *r.ClusterID}]
+		}
+		w.Problems = append(w.Problems, p)
+	}
+
+	// Een cronjob waarvan de laatste run mislukte, tot hij weer lukt.
+	crons, err := q.ListIncidentCrons(ctx)
+	if err != nil {
+		return w, err
+	}
+	for _, c := range crons {
+		k := Key{SubjectCron, *c.SubjectID}
+		if !c.Failing {
+			w.Status[k] = "healthy"
+			continue
+		}
+		reason := "de laatste run mislukte"
+		if c.LastExit != nil {
+			reason = fmt.Sprintf("de laatste run mislukte met exitcode %d", *c.LastExit)
+		}
+		p := Problem{Key: k, Name: clip(c.Command, 60) + " op " + c.Hostname, ClusterID: c.ClusterID, Status: "fail",
+			Reason: reason + " (" + c.File + ")", Since: or(c.LastRunAt, now), Primary: true}
+		w.Status[k] = "fail"
+		if h := nodeHost[c.NodeID]; h != "" {
+			w.Hosts[k] = []string{h}
+		}
+		if c.ClusterID != nil {
+			p.Env = env[*c.ClusterID]
 		}
 		w.Problems = append(w.Problems, p)
 	}

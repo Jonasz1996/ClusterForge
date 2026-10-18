@@ -185,3 +185,37 @@ func TestCronListWithoutLogging(t *testing.T) {
 		}
 	}
 }
+
+func TestCronLogging(t *testing.T) {
+	journal := ""
+	c := cronHost(t, time.Now(), &journal)
+	inner := c.Run
+	c.Run = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		if name == "systemctl" && strings.Contains(strings.Join(args, " "), "ExecStart") {
+			return []byte("ExecStart={ path=/usr/sbin/cron ; argv[]=/usr/sbin/cron -f -P $EXTRA_OPTS ; ignore_errors=no }\n"), nil
+		}
+		return inner(ctx, name, args...)
+	}
+	var calls []string
+	a := &Agent{Collector: c, Root: c.Root, Exec: func(_ context.Context, name string, args ...string) ([]byte, error) {
+		calls = append(calls, name+" "+strings.Join(args, " "))
+		return nil, nil
+	}}
+	res := a.cronLogging(context.Background(), true)
+	if res.Error != "" {
+		t.Fatal(res.Error)
+	}
+	b, err := os.ReadFile(filepath.Join(c.Root, protocol.CronLoggingDropIn))
+	if err != nil || !strings.Contains(string(b), "ExecStart=\nExecStart=/usr/sbin/cron -f -P $EXTRA_OPTS -L 15\n") {
+		t.Fatalf("drop-in: %q %v", b, err)
+	}
+	if strings.Join(calls, "; ") != "systemctl daemon-reload; systemctl restart cron.service" {
+		t.Errorf("commando's: %v", calls)
+	}
+	if res = a.cronLogging(context.Background(), false); res.Error != "" {
+		t.Fatal(res.Error)
+	}
+	if _, err := os.Stat(filepath.Join(c.Root, protocol.CronLoggingDropIn)); !os.IsNotExist(err) {
+		t.Errorf("drop-in staat er nog: %v", err)
+	}
+}
