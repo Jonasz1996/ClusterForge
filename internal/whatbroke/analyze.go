@@ -434,12 +434,16 @@ func Analyze(in Input) Analysis {
 	a.FirstSymptom = first
 	a.WindowFrom, a.WindowTo = first.From.Add(-Lookback), first.To.Add(candidateAfter)
 	f := r.facts(entries, in.Started.Add(-symptomBefore))
+	repairs := responses(entries, first)
 
 	var cands []candidate
 	for _, e := range entries {
 		isChange := e.Class == events.ClassChange
 		early := e.Source == SourceMetrics || (e.Source != SourceLog && e.Kind == journal.KindOOM)
 		if (!isChange && !early) || e.Ts.Before(a.WindowFrom) || e.Ts.After(a.WindowTo) {
+			continue
+		}
+		if e.JobID != nil && repairs[*e.JobID] {
 			continue
 		}
 		if isChange {
@@ -633,7 +637,8 @@ func kindWeight(e Entry) float64 {
 			}
 			return 0.3
 		case "job.queued", "job.succeeded", "job.failed", "job.retried", "agent.command", "drift.remediation_requested",
-			"kube.scaled", "kube.restarted", "kube.deleted", "kube.drained", "kube.node_removed":
+			"kube.scaled", "kube.restarted", "kube.deleted", "kube.drained", "kube.node_removed", "cluster.heal_started",
+			"cluster.heal_done", "node.heal_started", "node.heal_done":
 			return 0.9
 		case "drift.detected", "drift.changed":
 			return 0.8
@@ -903,10 +908,11 @@ func level(score float64) string {
 }
 
 // representative is de regel die een groep het best beschrijft: bij een
-// taak de Git-wijziging of de afronding van de taak, anders de regel met de
-// hoogste score.
+// taak de Git-wijziging, de mislukte taak of het herstel van Zelfherstel,
+// dan de afronding van de taak, anders de regel met de hoogste score.
 func representative(ms []candidate, best candidate) candidate {
-	for _, want := range []string{"gitops.change_failed", "gitops.change_applied", "job.failed", "job.succeeded", "job.queued"} {
+	for _, want := range []string{"gitops.change_failed", "gitops.change_applied", "job.failed", "cluster.heal_done", "node.heal_done",
+		"cluster.heal_started", "node.heal_started", "job.succeeded", "job.queued"} {
 		for _, m := range ms {
 			if m.e.Source == SourceLog && m.e.Action == want {
 				return m

@@ -83,10 +83,13 @@ function IncidentInner() {
 }
 
 // TimelineCard is de tijdlijn van het incident: wat er veranderde en wat er
-// misging, van twee uur voor het eerste symptoom tot het einde.
+// misging, van twee uur voor het eerste symptoom tot het einde. Een herstel
+// van Zelfherstel staat bij de veranderingen, ook als het mislukte.
 function TimelineCard({ entries, more, firstSymptom }: { entries: TimelineEntry[]; more: boolean; firstSymptom?: string }) {
   const [shown, setShown] = useState<TimelineClass[]>(["change", "symptom"]);
-  const items = entries.filter((e) => shown.includes(e.class) || e.id === firstSymptom);
+  const items = entries.filter(
+    (e) => shown.includes(e.class) || (e.kind === "heal" && shown.includes("change")) || e.id === firstSymptom,
+  );
   return (
     <Card title="Tijdlijn">
       <div className="space-y-3">
@@ -98,7 +101,7 @@ function TimelineCard({ entries, more, firstSymptom }: { entries: TimelineEntry[
           <ClassFilter value={shown} onChange={setShown} />
         </div>
         <TimelineList entries={items} firstSymptom={firstSymptom} empty="Niets in de tijdlijn met deze filters." />
-        {more && <p className="text-sm text-slate-500">De tijdlijn had meer dan 1000 regels; de oudste ontbreken.</p>}
+        {more && <p className="text-sm text-slate-500">De tijdlijn had te veel regels; de oudste ontbreken.</p>}
       </div>
     </Card>
   );

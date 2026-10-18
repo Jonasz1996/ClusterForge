@@ -8663,7 +8663,7 @@ export interface components {
             timeline: components["schemas"]["TimelineEntry"][];
             /** @description Er waren meer regels; de oudste ontbreken */
             timeline_more: boolean;
-            /** @description Statusovergangen, incidenten en tests over wat geraakt was, oudste eerst */
+            /** @description Statusovergangen, incidenten, tests en herstelacties van Zelfherstel over wat geraakt was, oudste eerst */
             history: components["schemas"]["AuditEntry"][];
             /** @description Er waren meer regels dan getoond */
             history_more: boolean;

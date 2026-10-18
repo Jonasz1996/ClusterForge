@@ -51,9 +51,13 @@ func database(c *Cluster, _ Opts) string {
 		}
 		intro = append(intro, there+list(read)+"; ClusterForge leest "+them+" niet.")
 	}
-	d.p(append(intro,
+	intro = append(intro,
 		"Dit hoofdstuk beschrijft wat ClusterForge bij de laatste ronde zag (het leest de databaseservers elke minuut), zonder wachtwoorden en zonder de inhoud van tabellen.",
-		"Hoe het er nu voor staat, zie je in ClusterForge op de kaart Database van het cluster en bij Databases.")...)
+		"Hoe het er nu voor staat, zie je in ClusterForge op de kaart Database van het cluster en bij Databases.")
+	if c.Heal != nil {
+		intro = append(intro, "Wat Zelfherstel de laatste "+strconv.Itoa(healDays)+" dagen herstelde, staat in het hoofdstuk "+link("Herstel", KindRecovery+".md#zelfherstel")+".")
+	}
+	d.p(intro...)
 
 	for _, cp := range db.Components {
 		dbComponent(d, c, cp)

@@ -32,6 +32,7 @@ export const levels: Record<IncidentCause["level"], { label: string; tone: Tone 
 export const kindLabels: Record<string, string> = {
   ...journalKinds,
   job: "taak",
+  heal: "zelfherstel",
   gitops: "Git",
   drift: "drift",
   proxmox: "Proxmox",

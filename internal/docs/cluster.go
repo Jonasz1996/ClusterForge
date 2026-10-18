@@ -799,6 +799,11 @@ func recovery(c *Cluster, o Opts) string {
 	d.h2("DR-repetitie")
 	drSection(d, c, o)
 
+	if c.Heal != nil {
+		d.h2("Zelfherstel")
+		healSection(d, c, o)
+	}
+
 	d.h2("Wat er uitvalt")
 	if len(c.Outages) == 0 {
 		d.p("ClusterForge kan dit niet voorspellen: er staan geen nodes in dit cluster.")
