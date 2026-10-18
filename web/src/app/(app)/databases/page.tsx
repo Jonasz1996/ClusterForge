@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { HealPanel } from "@/components/databases/Heal";
 import { RetireCards } from "@/components/databases/Retire";
 import { upgradeCommand } from "@/components/drift/Drift";
 import { ago, Empty, EnvBadge, formatBytes, QueryState, tableClass, tdClass, thClass } from "@/components/inventory/bits";
@@ -16,9 +17,11 @@ import {
   type DatabaseServer,
   type DatabaseUser,
 } from "@/lib/databases";
+import { useHeal, type HealReport } from "@/lib/heal";
 
 export default function DatabasesPage() {
   const groups = useDatabases();
+  const heal = useHeal();
   const oldAgents = [
     ...new Set((groups.data ?? []).flatMap((g) => g.servers.filter((s) => s.error_kind === "old_agent").map((s) => s.hostname))),
   ];
@@ -51,7 +54,7 @@ export default function DatabasesPage() {
         ) : (
           <div className="space-y-6">
             {(groups.data ?? []).map((g) => (
-              <GroupCard key={g.key} g={g} />
+              <GroupCard key={g.key} g={g} heal={heal.data?.find((r) => r.key === g.key)} />
             ))}
           </div>
         )}
@@ -65,7 +68,7 @@ function movable(g: DatabaseGroup) {
   return g.engine === "mariadb" || g.engine === "postgresql";
 }
 
-function GroupCard({ g }: { g: DatabaseGroup }) {
+function GroupCard({ g, heal }: { g: DatabaseGroup; heal?: HealReport }) {
   const health = healthInfo[g.health];
   const title = (
     <span className="flex flex-wrap items-center gap-2">
@@ -91,6 +94,7 @@ function GroupCard({ g }: { g: DatabaseGroup }) {
   return (
     <Card title={title}>
       <p className="mb-4 text-sm text-slate-700 dark:text-slate-300">{g.summary}</p>
+      <HealPanel r={heal} />
       <div className="overflow-x-auto">
         <table className={tableClass}>
           <thead className="border-b border-slate-200 dark:border-slate-800">

@@ -427,6 +427,8 @@ type DBRequest struct {
 	Quick bool `json:"quick,omitempty"`
 	// Probe hoort bij DBWriteProbe.
 	Probe *DBProbeRequest `json:"probe,omitempty"`
+	// Heal hoort bij DBHeal.
+	Heal *DBHealRequest `json:"heal,omitempty"`
 }
 
 // DBMigrateRequest zegt wat een DBMigrate doet.
@@ -805,6 +807,8 @@ type DBResponse struct {
 	Patroni *DBPatroniResult `json:"patroni,omitempty"`
 	// Probe is het antwoord op DBWriteProbe.
 	Probe *DBProbeResult `json:"probe,omitempty"`
+	// Heal is het antwoord op DBHeal.
+	Heal *DBHealResult `json:"heal,omitempty"`
 }
 
 // DBServer is één MariaDB of PostgreSQL op een node.

@@ -1587,6 +1587,42 @@ func (e GuestType) Valid() bool {
 	}
 }
 
+// Defines values for HealProblemLevel.
+const (
+	HealProblemLevelDown    HealProblemLevel = "down"
+	HealProblemLevelWarning HealProblemLevel = "warning"
+)
+
+// Valid indicates whether the value is a known member of the HealProblemLevel enum.
+func (e HealProblemLevel) Valid() bool {
+	switch e {
+	case HealProblemLevelDown:
+		return true
+	case HealProblemLevelWarning:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for HealReportEngine.
+const (
+	HealReportEngineMariadb    HealReportEngine = "mariadb"
+	HealReportEnginePostgresql HealReportEngine = "postgresql"
+)
+
+// Valid indicates whether the value is a known member of the HealReportEngine enum.
+func (e HealReportEngine) Valid() bool {
+	switch e {
+	case HealReportEngineMariadb:
+		return true
+	case HealReportEnginePostgresql:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for HealthDatabase.
 const (
 	HealthDatabaseOk          HealthDatabase = "ok"
@@ -7607,6 +7643,71 @@ type GitStepChangeChange string
 // GuestType defines model for GuestType.
 type GuestType string
 
+// HealPlan defines model for HealPlan.
+type HealPlan struct {
+	// Action restart (gestopte servers starten), galera (adressen bijwerken en/of het cluster opnieuw beginnen), of leeg als het herstel bij het onderdeel hoort.
+	Action string `json:"action"`
+
+	// Auto Het plan mag vanzelf, als Zelfherstel op het cluster vanzelf mag.
+	Auto    bool   `json:"auto"`
+	AutoWhy string `json:"auto_why"`
+
+	// Blocked Waarom het plan nu niet kan; leeg als het kan.
+	Blocked            string                                `json:"blocked"`
+	Hash               string                                `json:"hash"`
+	ManagedComponentId nullable.Nullable[openapi_types.UUID] `json:"managed_component_id"`
+	Nodes              []HealPlanNode                        `json:"nodes"`
+	Steps              []string                              `json:"steps"`
+}
+
+// HealPlanNode defines model for HealPlanNode.
+type HealPlanNode struct {
+	ClusterAddress    string             `json:"cluster_address"`
+	File              string             `json:"file"`
+	Hostname          string             `json:"hostname"`
+	Kill              bool               `json:"kill"`
+	KillPids          []int              `json:"kill_pids"`
+	NodeAddress       string             `json:"node_address"`
+	NodeId            openapi_types.UUID `json:"node_id"`
+	OldClusterAddress string             `json:"old_cluster_address"`
+	OldNodeAddress    string             `json:"old_node_address"`
+	Primary           bool               `json:"primary"`
+	SetAddress        bool               `json:"set_address"`
+	Start             bool               `json:"start"`
+	Unit              string             `json:"unit"`
+}
+
+// HealProblem defines model for HealProblem.
+type HealProblem struct {
+	// Code no_inspect, unit_stopped, process_hung, process_outside_unit, unit_disabled, galera_wrong_address,
+	// galera_no_primary, disk_full of no_quorum.
+	Code  string           `json:"code"`
+	Level HealProblemLevel `json:"level"`
+	Nodes []string         `json:"nodes"`
+	Title string           `json:"title"`
+	Why   string           `json:"why"`
+}
+
+// HealProblemLevel defines model for HealProblem.Level.
+type HealProblemLevel string
+
+// HealReport Zelfherstel voor één database; key is die van DatabaseGroup.
+type HealReport struct {
+	ClusterEnvironment nullable.Nullable[Environment]        `json:"cluster_environment"`
+	ClusterId          nullable.Nullable[openapi_types.UUID] `json:"cluster_id"`
+	ClusterName        string                                `json:"cluster_name"`
+	ClusterSlug        string                                `json:"cluster_slug"`
+	Engine             HealReportEngine                      `json:"engine"`
+	Health             string                                `json:"health"`
+	Key                string                                `json:"key"`
+	Kind               string                                `json:"kind"`
+	Plan               nullable.Nullable[HealPlan]           `json:"plan"`
+	Problems           []HealProblem                         `json:"problems"`
+}
+
+// HealReportEngine defines model for HealReport.Engine.
+type HealReportEngine string
+
 // Health defines model for Health.
 type Health struct {
 	Database HealthDatabase `json:"database"`
@@ -11986,6 +12087,9 @@ type ServerInterface interface {
 	// SyncGit Nu synchroniseren (admin)
 	// (POST /gitops/sync)
 	SyncGit(w http.ResponseWriter, r *http.Request)
+	// ListHeal Zelfherstel per database
+	// (GET /heal)
+	ListHeal(w http.ResponseWriter, r *http.Request)
 	// GetHealth Gezondheid van de server en de database
 	// (GET /health)
 	GetHealth(w http.ResponseWriter, r *http.Request)
@@ -13177,6 +13281,12 @@ func (_ Unimplemented) ProbeGitRepo(w http.ResponseWriter, r *http.Request) {
 // SyncGit Nu synchroniseren (admin)
 // (POST /gitops/sync)
 func (_ Unimplemented) SyncGit(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListHeal Zelfherstel per database
+// (GET /heal)
+func (_ Unimplemented) ListHeal(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -18079,6 +18189,20 @@ func (siw *ServerInterfaceWrapper) SyncGit(w http.ResponseWriter, r *http.Reques
 	handler.ServeHTTP(w, r)
 }
 
+// ListHeal operation middleware
+func (siw *ServerInterfaceWrapper) ListHeal(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListHeal(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetHealth operation middleware
 func (siw *ServerInterfaceWrapper) GetHealth(w http.ResponseWriter, r *http.Request) {
 
@@ -22050,6 +22174,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/databases", wrapper.ListDatabases)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/heal", wrapper.ListHeal)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/cronjobs", wrapper.ListCronjobs)

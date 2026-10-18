@@ -148,6 +148,8 @@ func (a *Agent) dbOp(ctx context.Context, req protocol.DBRequest) protocol.DBRes
 		res = a.dbMigrate(ctx, req.Migrate)
 	case protocol.DBPatroniOp:
 		res = a.PatroniOp(ctx, req.Patroni)
+	case protocol.DBHeal:
+		res = a.dbHeal(ctx, req.Heal)
 	default:
 		res = protocol.DBResponse{Error: "onbekend databaseverzoek " + req.Op, Servers: []protocol.DBServer{}}
 	}
