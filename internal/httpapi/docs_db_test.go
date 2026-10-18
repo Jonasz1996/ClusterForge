@@ -43,7 +43,7 @@ func TestDatabaseDocs(t *testing.T) {
 			}
 		}
 	}
-	if strings.Join(kinds, ",") != "architectuur,database,netwerk,configuratie,herstel,runbooks" {
+	if strings.Join(kinds, ",") != "architectuur,database,netwerk,configuratie,cronjobs,herstel,runbooks" {
 		t.Fatalf("hoofdstukken: %v", kinds)
 	}
 	// Een cluster zonder database heeft het hoofdstuk niet.

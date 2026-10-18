@@ -29,6 +29,7 @@ export const kindLabels: Record<string, string> = {
   database: "Database",
   netwerk: "Netwerk",
   configuratie: "Configuratie",
+  cronjobs: "Cronjobs",
   herstel: "Herstel",
   runbooks: "Runbooks",
 };

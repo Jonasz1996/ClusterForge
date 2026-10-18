@@ -4,7 +4,7 @@ import Link from "next/link";
 import { Card } from "@/components/ui";
 import { docHref, formatTime, formatWhen, kindLabels, useDocIndex } from "@/lib/docs";
 
-const chapters = ["architectuur", "netwerk", "configuratie", "herstel", "runbooks"];
+const chapters = ["architectuur", "netwerk", "configuratie", "cronjobs", "herstel", "runbooks"];
 
 // ClusterDocsCard linkt naar de hoofdstukken van de documentatie van een
 // cluster, met wanneer ze voor het laatst veranderden. De server zegt welke

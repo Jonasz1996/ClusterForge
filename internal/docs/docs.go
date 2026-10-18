@@ -29,10 +29,11 @@ const (
 	KindRunbooks      = "runbooks"
 	KindKubernetes    = "kubernetes"
 	KindDatabase      = "database"
+	KindCronjobs      = "cronjobs"
 )
 
 // ClusterKinds zijn de hoofdstukken van elk cluster, in hun volgorde.
-var ClusterKinds = []string{KindArchitecture, KindNetwork, KindConfiguration, KindRecovery, KindRunbooks}
+var ClusterKinds = []string{KindArchitecture, KindNetwork, KindConfiguration, KindCronjobs, KindRecovery, KindRunbooks}
 
 // Kinds zijn de hoofdstukken van een cluster: een Kubernetes-cluster heeft
 // na Architectuur het hoofdstuk Kubernetes, en een cluster met een
@@ -53,6 +54,7 @@ func (c *Cluster) kinds() []string { return Kinds(c.Type, c.DB != nil) }
 var titles = map[string]string{
 	KindOverview: "Overzicht", KindArchitecture: "Architectuur", KindNetwork: "Netwerk", KindConfiguration: "Configuratie",
 	KindRecovery: "Herstel", KindRunbooks: "Runbooks", KindKubernetes: "Kubernetes", KindDatabase: "Database",
+	KindCronjobs: "Cronjobs",
 }
 
 // Title is de titel van een soort document.
@@ -133,6 +135,8 @@ func Chapter(c *Cluster, kind string, o Opts) string {
 		return network(c, o)
 	case KindConfiguration:
 		return configuration(c, o)
+	case KindCronjobs:
+		return cronjobs(c, o)
 	case KindRecovery:
 		return recovery(c, o)
 	case KindRunbooks:

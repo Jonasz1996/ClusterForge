@@ -918,6 +918,8 @@ func toolInputs(cluster, node, job string) map[string][]string {
 		},
 		"database":         {fmt.Sprintf(`{"cluster":%q}`, cluster)},
 		"database_clients": {`{"cluster":""}`, fmt.Sprintf(`{"cluster":%q}`, cluster)},
+		"cronjobs":         {`{"cluster":""}`, fmt.Sprintf(`{"cluster":%q}`, cluster)},
+		"cron_runs":        {fmt.Sprintf(`{"job":"opruimen","cluster":%q}`, cluster)},
 	}
 }
 

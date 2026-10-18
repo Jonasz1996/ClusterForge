@@ -51,6 +51,9 @@ type world struct {
 	kubeApps  []store.ListKubeAppFactsRow
 	// De databases per cluster.
 	dbs map[uuid.UUID]*components.ClusterDatabases
+	// De beheerde en de gevonden cronjobs.
+	cronJobs  []store.ListCronJobsRow
+	nodeCrons []store.ListNodeCronsRow
 }
 
 // Gather leest alles voor de documentatie. Ze leest alleen.
@@ -139,6 +142,12 @@ func (s *Service) read(ctx context.Context) (*world, []store.ListDocClustersRow,
 		if w.dbs, err = s.Components.DescribeDatabases(ctx); err != nil {
 			return nil, nil, err
 		}
+	}
+	if w.cronJobs, err = s.q.ListCronJobs(ctx); err != nil {
+		return nil, nil, err
+	}
+	if w.nodeCrons, err = s.q.ListNodeCrons(ctx); err != nil {
+		return nil, nil, err
 	}
 	sums, err := s.q.ListDocSummaries(ctx)
 	if err != nil {
@@ -340,6 +349,7 @@ func (s *Service) cluster(ctx context.Context, w *world, r store.ListDocClusters
 	if r.HasDatabase {
 		c.DB = dbOf(w.dbs[r.ID])
 	}
+	c.Cron = cronOf(w, r.ID)
 	return c, nil
 }
 
