@@ -52,7 +52,7 @@ Het bestaande subject `cf.node.<id>.db` krijgt het verzoek `heal` met twee actie
 | Actie | Wat het doet |
 | --- | --- |
 | `inspect` | Per engine: de unit (active, sub, result, MainPID, enabled), processen van de engine buiten een draaiende unit (`mariadbd`, `mysqld`, `postgres`, `patroni`), de vrije ruimte in de datamap, en voor Galera de geldende waarden van `wsrep_cluster_address`, `wsrep_node_address`, `wsrep_sst_receive_address` en `wsrep_cluster_name` (via `my_print_defaults`, met het bestand en de regel waar ze staan), en de adressen waarop de laatste journalregels "connection to peer … timed out" melden. De eigen IPv4-adressen van de node. Leest alleen. |
-| `set_galera_address` | Zet `wsrep_cluster_address` en `wsrep_node_address` in het bestand waar ze nu staan, na een kopie, en controleert met `my_print_defaults` dat de nieuwe waarde geldt. Weigert als MariaDB in een Primary component draait. |
+| `set_galera_address` | Zet `wsrep_cluster_address` en `wsrep_node_address` in het bestand waar ze nu staan, na een kopie, en controleert met `my_print_defaults` dat de nieuwe waarde geldt; anders zet de agent de kopie terug. Een MariaDB die draait, leest het bestand pas bij zijn volgende start, dus een node die de apps bedient merkt er nu niets van. |
 
 Starten, stoppen, een hangend proces beëindigen en `galera_new_cluster` gaan met de bestaande deploystappen (service en command), zodat hun uitvoer in de taak staat.
 
@@ -101,7 +101,7 @@ Elke uitvoering is een taak `heal.run` met stappen, de uitvoer van elke stap, en
 ## Veiligheid
 
 - **Beginnen kan data kosten.** Daarom alleen vanaf de hoogste seqno, met alle nodes gezien, en vlak voor het beginnen nog eens nagaan of intussen een andere node Primary werd (zoals `recoverBegin` al doet). Twee nodes met dezelfde seqno maar een andere cluster-UUID: nooit vanzelf.
-- **Een adres wijzigen kan een cluster splitsen.** Daarom nooit vanzelf, het plan toont oud en nieuw per node, en de agent weigert op een node die Primary is.
+- **Een adres wijzigen kan een cluster splitsen.** Daarom nooit vanzelf, en het plan toont oud en nieuw per node met het bestand. Op een node die draait, verandert alleen het bestand; ClusterForge herstart die node niet.
 - **Een proces beëindigen** alleen in de cgroup van de unit en alleen als de node niet in een Primary component zit.
 - **Vanzelf** staat standaard uit, nooit op prod, en heeft een rem.
 - **De agent schrijft alleen** het bestand dat de Galera-adressen al bevat, na een kopie.
