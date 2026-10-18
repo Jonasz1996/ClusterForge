@@ -1010,7 +1010,7 @@ Bij **Databases** staat naast elke database van MariaDB of PostgreSQL **Verhuize
 - **Naar**: de clusters met een MariaDB van ClusterForge. Gebruikt de app van een cluster de database nu al, dan staat dat cluster gekozen. Je ziet de node die importeert, zijn versie, het adres waar de app de database straks vindt, de buffer pool, de vrije schijf op elke node en of de nieuwe node de oude server echt bereikt.
 - **Controle**: wat blokkeert, wat aandacht vraagt en wat goed is om te weten.
 
-Wat blokkeert: de database bestaat niet, de oude server draait niet goed genoeg om van te lezen, een agent is te oud, het is hetzelfde cluster, de nieuwe node bereikt poort 3306 van de oude server niet (een firewall of `bind-address`; er staat bij welke poort van welke adressen open moet), MariaDB weigert de node, bijvoorbeeld na te veel mislukte verbindingen (dan staat `mariadb-admin flush-hosts` erbij), de nieuwe MariaDB is ouder dan de oude, een andere database heet al `<naam>_proef`, er loopt al een proef, een verhuizing wacht nog op overschakelen, of er is niet genoeg schijf voor de data plus 1 GB.
+Wat blokkeert: de database bestaat niet, de oude server draait niet goed genoeg om van te lezen, een agent is te oud, het is hetzelfde cluster, de nieuwe node bereikt poort 3306 van de oude server niet (een firewall of `bind-address`; er staat bij welke poort van welke adressen open moet), MariaDB weigert de node, bijvoorbeeld na te veel mislukte verbindingen (dan staat `mariadb-admin flush-hosts` erbij), een andere database heet al `<naam>_proef`, er loopt al een proef, een verhuizing wacht nog op overschakelen, of er is niet genoeg schijf voor de data plus 1 GB.
 
 Wat aandacht vraagt, laat de proef wel door:
 
@@ -1018,6 +1018,7 @@ Wat aandacht vraagt, laat de proef wel door:
 - **MyISAM of een andere engine dan InnoDB**: Galera repliceert alleen InnoDB. Het plan geeft per tabel de `ALTER TABLE … ENGINE=InnoDB`.
 - **ook andere apps gebruiken de database**: die moeten mee verhuizen of eerst een eigen database krijgen.
 - **de database staat er al** op het nieuwe cluster, of de oude server draait MySQL in plaats van MariaDB.
+- **de nieuwe MariaDB is ouder dan de oude**, zoals 12.2 van MariaDB.org naar 11.8 van Debian 13. Een dump van een nieuwere MariaDB gaat meestal goed in een oudere, maar niet altijd: wat de oudere niet kent, zoals een nieuwe collatie of syntaxis, laat de import mislukken. De proef doet dezelfde dump en import als de verhuizing en stopt bij de eerste fout, met de foutregel van `mariadb` in het verslag. Daarom kan de verhuizing hier pas na een geslaagde proef naar hetzelfde cluster, met dezelfde versies (major.minor) aan beide kanten; krijgt een van de twee intussen een andere versie, doe dan de proef opnieuw. Wat de proef niet ziet: een tabeloptie die de oudere MariaDB stil overslaat. Bij PostgreSQL blijft een oudere versie geblokkeerd, want `pg_dump` leest geen nieuwere server.
 - **krappe schijf** (minder dan twee keer de data) of **een te kleine buffer pool** voor de data die er al staat plus deze database; dan wordt de app trager tot je `innodb_buffer_pool_size` groter maakt.
 
 Goed om te weten: het verkeer gaat via het VIP van de oude server, zonder TLS, de versie gaat omhoog, of een vorige proef liet een kopie achter die de volgende proef eerst weghaalt.
@@ -1047,7 +1048,7 @@ De echte verhuizing zet de database onder dezelfde naam op het nieuwe cluster, m
    Je ziet wie er nu met de oude database verbonden is, op elke server van het oude cluster; **Opnieuw kijken** leest het opnieuw. Is er nog iemand, dan start de verhuizing niet, tenzij je **Toch verhuizen** aanvinkt.
 
 2. **Verhuizing starten** (alleen een beheerder; raakt de verhuizing een prodcluster, dan met de slug en tweestapsverificatie). De taak gaat na een herstart van ClusterForge verder:
-   1. Controle: het plan opnieuw. Ook een database met dezelfde naam op het nieuwe cluster blokkeert, want de verhuizing schrijft niet over een bestaande database.
+   1. Controle: het plan opnieuw. Ook een database met dezelfde naam op het nieuwe cluster blokkeert, want de verhuizing schrijft niet over een bestaande database, en naar een oudere MariaDB een ontbrekende of mislukte proef met dezelfde versies.
    2. Onderhoud: ClusterForge wacht even tot niemand meer met de oude database verbonden is. Lukt dat niet, dan stopt de taak.
    3. Gebruikers maken: elke gebruiker met rechten op de database en een gewoon wachtwoord (`mysql_native_password`) komt op het nieuwe cluster met dezelfde hash van zijn wachtwoord, vanaf de adressen van de nodes en VIP's van het cluster en `localhost`, met dezelfde rechten op die database. De app logt dus in met haar oude wachtwoord. Een gebruiker die via de socket of een andere plugin inlogt, gaat niet mee; dat staat in het plan.
    4. Ophalen en importeren, zoals bij de proef, maar in de echte naam.

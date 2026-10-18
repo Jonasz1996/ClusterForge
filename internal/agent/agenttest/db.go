@@ -43,6 +43,9 @@ type MariaDB struct {
 	Users []MariaUser
 	// DumpIncomplete laat mariadb-dump stoppen zonder de slotregel.
 	DumpIncomplete bool
+	// ImportError laat mariadb met een dump op stdin met deze fout stoppen,
+	// zoals een oudere MariaDB bij iets uit een nieuwere.
+	ImportError string
 	// Questions en BufferPool zijn voor de metingen: het aantal query's
 	// en de grootte van de buffer pool in bytes, waarvan BufferPoolData
 	// in gebruik.
@@ -630,6 +633,9 @@ func (h *Host) mariaRestore(args []string, dump []byte) error {
 	i := slices.IndexFunc(m.Databases, func(d Database) bool { return d.Name == db })
 	if i < 0 {
 		return fmt.Errorf("ERROR 1049 (42000): Unknown database '%s'", db)
+	}
+	if m.ImportError != "" {
+		return errors.New(m.ImportError)
 	}
 	m.Databases[i].Tables = strings.Count(string(dump), "-- Table structure for table `")
 	m.Databases[i].Size = int64(len(dump))

@@ -88,7 +88,8 @@ func database(c *Cluster, _ Opts) string {
 		d.p("Staat de database van een app van dit cluster nog op een andere server, zoals een gedeeld databasecluster, verhuis haar dan naar " + target + ".")
 		d.steps([]string{
 			"Kies in ClusterForge bij Databases **Verhuizen…** naast de database. Het plan verandert niets en " + block + ".",
-			"**Proefverhuizing starten** zet een kopie naast de bestaande en telt de rijen; de app merkt er niets van. Zo weet je hoe lang de app straks in onderhoud moet.",
+			"**Proefverhuizing starten** zet een kopie naast de bestaande en telt de rijen; de app merkt er niets van. Zo weet je hoe lang de app straks in onderhoud moet. " +
+				"Is de nieuwe MariaDB ouder dan de oude, dan kan de verhuizing pas na een geslaagde proef: die stopt bij de eerste fout die de oudere versie geeft.",
 			"Zet de app in onderhoud en kies **Verhuizing starten**. De database komt onder dezelfde naam, met dezelfde gebruikers en wachtwoorden, op " + esc(c.Name) + ".",
 			"Wijs de app naar " + addr + ", met dezelfde gebruiker en hetzelfde wachtwoord, en haal het onderhoud eraf. ClusterForge zet de oude database dan op slot: alleen nog lezen.",
 			"Zeven dagen nadat niemand de oude database nog gebruikte, kies je **Oude database afbouwen**: een laatste dump op het oude cluster, en daarna gaan de database en de gebruikers die niets anders hebben weg.",

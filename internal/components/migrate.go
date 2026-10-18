@@ -260,6 +260,10 @@ type migrationRoute struct {
 	// dump de eigenaars en rechten mee.
 	Owner string `json:"owner,omitempty"`
 	Move  bool   `json:"move,omitempty"`
+	// De versies bij de controle: zo weet een verhuizing naar een oudere
+	// MariaDB of de proef met dezelfde versies liep.
+	SourceVersion string `json:"source_version,omitempty"`
+	TargetVersion string `json:"target_version,omitempty"`
 }
 
 // engine is de engine van de route.
@@ -654,8 +658,22 @@ func (s *Service) planMigration(ctx context.Context, source, database string, co
 		switch {
 		case !ok1 || !ok2:
 		case tMaj < sMaj || tMaj == sMaj && tMin < sMin:
-			add(Blocked, "downgrade", &t.node, fmt.Sprintf("de nieuwe MariaDB (%d.%d op %s) is ouder dan de oude (%d.%d op %s); een dump van een nieuwere MariaDB gaat niet "+
-				"altijd goed in een oudere. Neem nodes met Debian 13 (MariaDB 11.8)", tMaj, tMin, t.node.Hostname, sMaj, sMin, sn.Hostname), "")
+			from, to := fmt.Sprintf("%d.%d", sMaj, sMin), fmt.Sprintf("%d.%d", tMaj, tMin)
+			add(Warning, "downgrade", &t.node, fmt.Sprintf("de nieuwe MariaDB (%s op %s) is ouder dan de oude (%s op %s). Een dump van een nieuwere MariaDB "+
+				"gaat meestal goed in een oudere, maar niet altijd: wat %s niet kent, zoals een nieuwe collatie of syntaxis, laat de import mislukken. "+
+				"De proef doet dezelfde dump en import als de verhuizing en stopt bij de eerste fout; pas na een geslaagde proef kan de verhuizing",
+				to, t.node.Hostname, from, sn.Hostname, to), "")
+			ok, failed, err := s.downgradeTrial(ctx, p.Runs, opt.ComponentID, from, to)
+			switch {
+			case err != nil:
+				return p, route, err
+			case failed:
+				addMove(Blocked, "downgrade_trial", &t.node, fmt.Sprintf("de laatste proef van MariaDB %s naar %s mislukte; los op wat ze meldt en doe de proef opnieuw. "+
+					"Zonder geslaagde proef verhuist ClusterForge niet naar een oudere MariaDB", from, to), "")
+			case !ok:
+				addMove(Blocked, "downgrade_trial", &t.node, fmt.Sprintf("de nieuwe MariaDB is ouder dan de oude, dus de verhuizing kan pas na een geslaagde proef "+
+					"van MariaDB %s naar %s op %s", from, to, opt.ClusterName), "")
+			}
 		case tMaj != sMaj || tMin != sMin:
 			add(Info, "upgrade", nil, fmt.Sprintf("van MariaDB %d.%d naar %d.%d: een dump gaat goed in een nieuwere versie", sMaj, sMin, tMaj, tMin), "")
 		}
@@ -719,6 +737,7 @@ func (s *Service) planMigration(ctx context.Context, source, database string, co
 	}
 
 	route = migrationRoute{
+		SourceVersion: info.Version, TargetVersion: target.Version,
 		SourceNode: sn, Address: p.Source.Address, Port: port, Via: p.Source.Via, Hosts: target.Hosts, Import: t.node, Owner: info.Owner,
 		Target: trial, Charset: info.Charset, Collation: info.Collation, Size: info.SizeBytes,
 		Views: info.Views, Routines: info.Routines, Triggers: info.Triggers, Events: info.Events, Leftover: leftover,
@@ -882,6 +901,36 @@ func checkClients(clients []databases.User, opt MigrationOption, database string
 	case !seen:
 		add(Info, "no_clients", nil, fmt.Sprintf("de laatste 30 dagen verbond niemand van %s met %s", opt.ClusterName, database), "")
 	}
+}
+
+// downgradeTrial zoekt de laatste afgelopen proef naar het onderdeel
+// componentID die van MariaDB from naar to (major.minor) ging: ok als ze
+// slaagde, failed als ze mislukte. De versies staan in de controlestap van
+// de proef; een proef van voor die tijd telt niet.
+func (s *Service) downgradeTrial(ctx context.Context, runs []store.ListDBMigrationsRow, componentID uuid.UUID, from, to string) (ok, failed bool, err error) {
+	for _, r := range runs {
+		m := r.DbMigration
+		if m.Kind != store.DbMigrationKindTrial || m.ComponentID != componentID || m.Status == store.DbMigrationStatusRunning || m.JobID == nil {
+			continue
+		}
+		steps, err := s.q.ListJobSteps(ctx, *m.JobID)
+		if err != nil {
+			return false, false, err
+		}
+		var route migrationRoute
+		for _, st := range steps {
+			if st.Name == stepTrialCheck && len(st.State) > 0 {
+				_ = json.Unmarshal(st.State, &route)
+			}
+		}
+		sMaj, sMin, ok1 := majorMinor(route.SourceVersion)
+		tMaj, tMin, ok2 := majorMinor(route.TargetVersion)
+		if !ok1 || !ok2 || fmt.Sprintf("%d.%d", sMaj, sMin) != from || fmt.Sprintf("%d.%d", tMaj, tMin) != to {
+			continue
+		}
+		return m.Status == store.DbMigrationStatusOk, m.Status == store.DbMigrationStatusFailed, nil
+	}
+	return false, false, nil
 }
 
 func majorMinor(v string) (int, int, bool) {
