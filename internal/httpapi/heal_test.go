@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Jonasz1996/clusterforge/internal/agent"
 	"github.com/Jonasz1996/clusterforge/internal/agent/agenttest"
@@ -600,6 +601,240 @@ func TestHealRunSingle(t *testing.T) {
 	}
 	rows.Close()
 	if !slices.Equal(evs, []string{"node.heal_started", "node.heal_done"}) {
+		t.Fatalf("events: %v", evs)
+	}
+}
+
+// crash laat alle drie de nodes tegelijk uitvallen: MariaDB draait nergens
+// en de positie zit alleen nog in InnoDB.
+func (d *healDB) crash() {
+	d.mu.Lock()
+	d.members = nil
+	d.mu.Unlock()
+	for i, h := range d.hosts {
+		h.Locked(func() { h.MariaDB.Down, h.MariaDB.Galera = true, nil })
+		d.setUnit(i, agenttest.Unit{Failed: true})
+		writeGrastate(h, -1, false)
+	}
+}
+
+// TestHealAuto is de acceptatie van mijlpaal 3 van fase 7: Vanzelf
+// herstellen staat uit tot een beheerder het per cluster aanzet, kan niet
+// aan op prod, wacht tot een probleem lang genoeg bestaat, begint het
+// cluster hoogstens eens per uur opnieuw, wacht na een mislukte poging en
+// pauzeert na drie mislukte pogingen op rij.
+func TestHealAuto(t *testing.T) {
+	e, c := adminClient(t)
+	ctx := context.Background()
+	d := newHealDB(t, e, c)
+	// De adressen kloppen al en niets hangt: het plan mag vanzelf.
+	for i, root := range d.roots {
+		writeFile(t, filepath.Join(root, healGalera), "[galera]\nwsrep_on = ON\nwsrep_cluster_name = db\nwsrep_cluster_address = "+healNewAddr+
+			"\nwsrep_node_address = 192.168.10.18"+string(rune('1'+i))+"\n", 0o644)
+		d.hosts[i].SetJournal("mariadb.service", "")
+	}
+	_ = os.RemoveAll(filepath.Join(d.roots[0], "proc/169"))
+	type autoView struct {
+		Auto *struct {
+			Enabled      bool    `json:"enabled"`
+			PausedAt     *string `json:"paused_at"`
+			PausedReason string  `json:"paused_reason"`
+			Allowed      bool    `json:"allowed"`
+			Due          bool    `json:"due"`
+			Note         string  `json:"note"`
+		} `json:"auto"`
+	}
+	auto := func() autoView {
+		t.Helper()
+		var l list[json.RawMessage]
+		c.do("GET", "/api/v1/heal", nil, &l)
+		for _, raw := range l.Items {
+			var k struct {
+				Key string `json:"key"`
+			}
+			_ = json.Unmarshal(raw, &k)
+			if k.Key == "mariadb/"+d.cluster.ID {
+				var v autoView
+				_ = json.Unmarshal(raw, &v)
+				if v.Auto == nil {
+					t.Fatal("geen auto bij een cluster")
+				}
+				return v
+			}
+		}
+		t.Fatal("geen rapport")
+		return autoView{}
+	}
+	autoJobs := func() []job {
+		t.Helper()
+		rows, err := e.pool.Query(ctx, "SELECT id FROM jobs WHERE kind = 'heal.run' AND params->>'auto' = 'true' ORDER BY created_at")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var ids []string
+		for rows.Next() {
+			var id string
+			_ = rows.Scan(&id)
+			ids = append(ids, id)
+		}
+		rows.Close()
+		var out []job
+		for _, id := range ids {
+			var j job
+			c.do("GET", "/api/v1/jobs/"+id, nil, &j)
+			out = append(out, j)
+		}
+		return out
+	}
+	autoRun := func() {
+		t.Helper()
+		if err := e.heal.InspectAll(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if err := e.heal.AutoRun(ctx); err != nil {
+			t.Fatalf("vanzelf: %v", err)
+		}
+	}
+	put := func(c *client, on bool, out any) int {
+		t.Helper()
+		return c.do("PUT", "/api/v1/clusters/"+d.cluster.ID+"/heal-auto", map[string]any{"enabled": on}, out)
+	}
+
+	r := d.heal(t, e, c, func(r healView) bool { return strings.Contains(r.codes(), "galera_no_primary@db1+db2+db3") })
+	if r.Plan == nil || !r.Plan.Auto || strings.Contains(r.codes(), "wrong_address") || strings.Contains(r.codes(), "hung") {
+		t.Fatalf("plan: %s %+v", r.codes(), r.Plan)
+	}
+	// Standaard uit: niets gebeurt vanzelf.
+	if a := auto().Auto; a.Enabled || !a.Allowed || a.Due || !strings.Contains(a.Note, "Vanzelf herstellen staat uit") {
+		t.Fatalf("standaard: %+v", a)
+	}
+	autoRun()
+	if j := autoJobs(); len(j) != 0 {
+		t.Fatalf("vanzelf terwijl het uit staat: %+v", j)
+	}
+
+	// Een kijker mag het niet aanzetten, en op prod kan het niet.
+	e.createUser("kijker", "een-lang-wachtwoord", store.UserRoleViewer)
+	v := e.client()
+	if s, _, _ := v.login("kijker", "een-lang-wachtwoord", ""); s != http.StatusOK {
+		t.Fatalf("login kijker: %d", s)
+	}
+	if s := put(v, true, nil); s != http.StatusForbidden {
+		t.Fatalf("kijker: %d", s)
+	}
+	c.do("PATCH", "/api/v1/clusters/"+d.cluster.ID, map[string]any{"environment": "prod"}, nil)
+	if s := put(c, true, nil); s != http.StatusConflict {
+		t.Fatalf("prod: %d", s)
+	}
+	if a := auto().Auto; a.Allowed || a.Due || !strings.Contains(a.Note, "Op prod") {
+		t.Fatalf("prod: %+v", a)
+	}
+	c.do("PATCH", "/api/v1/clusters/"+d.cluster.ID, map[string]any{"environment": "lab"}, nil)
+
+	// Aan, maar het probleem moet eerst lang genoeg bestaan.
+	e.heal.AutoAfter = time.Hour
+	var set struct {
+		Enabled bool `json:"enabled"`
+	}
+	if s := put(c, true, &set); s != http.StatusOK || !set.Enabled {
+		t.Fatalf("aanzetten: %d %+v", s, set)
+	}
+	autoRun()
+	if j := autoJobs(); len(j) != 0 {
+		t.Fatalf("vanzelf te vroeg: %+v", j)
+	}
+	if a := auto().Auto; !a.Enabled || a.Due || !strings.Contains(a.Note, "wacht tot het probleem 60 min bestaat") {
+		t.Fatalf("wachten: %+v", a)
+	}
+	e.heal.AutoAfter = 0
+	if a := auto().Auto; !a.Due {
+		t.Fatalf("nu: %+v", a)
+	}
+	autoRun()
+	jobs := autoJobs()
+	if len(jobs) != 1 || jobs[0].Title != "Zelfherstel (vanzelf): MariaDB van database cluster" || jobs[0].RequestedBy != nil {
+		t.Fatalf("vanzelf: %+v", jobs)
+	}
+	if j := waitJobLong(t, c, jobs[0].ID); j.Status != "succeeded" {
+		t.Fatalf("vanzelf herstel: %s %s", j.Status, j.Error)
+	}
+	d.mu.Lock()
+	began := slices.Clone(d.began)
+	d.mu.Unlock()
+	if !slices.Equal(began, []string{"db1"}) {
+		t.Fatalf("het cluster begon op %v", began)
+	}
+
+	// Weer alles uit binnen het uur: het cluster begint niet nog eens
+	// vanzelf.
+	d.crash()
+	d.heal(t, e, c, func(r healView) bool { return strings.Contains(r.codes(), "galera_no_primary@db1+db2+db3") })
+	autoRun()
+	if j := autoJobs(); len(j) != 1 {
+		t.Fatalf("tweede keer beginnen: %d taken", len(j))
+	}
+	if a := auto().Auto; a.Due || !strings.Contains(a.Note, "begon het afgelopen uur al vanzelf opnieuw") {
+		t.Fatalf("eens per uur: %+v", a)
+	}
+
+	// Na een mislukte poging wacht het; na drie op rij pauzeert het.
+	fail := func() {
+		t.Helper()
+		if _, err := e.pool.Exec(ctx, `INSERT INTO jobs (kind, title, status, params, cluster_id, error, started_at, finished_at)
+			VALUES ('heal.run', 'Zelfherstel (vanzelf): MariaDB van database cluster', 'failed', $1, $2, 'db2 sloot niet aan', now(), now())`,
+			`{"auto": true, "key": "mariadb/`+d.cluster.ID+`"}`, d.cluster.ID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Zonder bootstrap-probleem: db3 draait weer als Primary, db1 en db2
+	// staan stil.
+	d.join(2, true)
+	d.heal(t, e, c, func(r healView) bool {
+		return !strings.Contains(r.codes(), "galera_no_primary") && strings.Contains(r.codes(), "unit_stopped@db1") && strings.Contains(r.codes(), "unit_stopped@db2")
+	})
+	fail()
+	autoRun()
+	if a := auto().Auto; a.Due || !strings.Contains(a.Note, "De vorige poging mislukte") {
+		t.Fatalf("na een mislukte poging: %+v", a)
+	}
+	fail()
+	fail()
+	autoRun()
+	a := auto().Auto
+	if a.PausedAt == nil || !strings.Contains(a.PausedReason, "3 pogingen op rij mislukten") || a.Due {
+		t.Fatalf("pauze: %+v", a)
+	}
+	if j := autoJobs(); len(j) != 4 {
+		t.Fatalf("taken na de pauze: %d", len(j))
+	}
+	// Opnieuw aanzetten heft de pauze op en begint de telling opnieuw.
+	if s := put(c, true, nil); s != http.StatusOK {
+		t.Fatalf("opnieuw aan: %d", s)
+	}
+	if a := auto().Auto; a.PausedAt != nil || !a.Due {
+		t.Fatalf("opnieuw aan: %+v", a)
+	}
+	autoRun()
+	jobs = autoJobs()
+	if len(jobs) != 5 {
+		t.Fatalf("na opnieuw aanzetten: %d taken", len(jobs))
+	}
+	if j := waitJobLong(t, c, jobs[4].ID); j.Status != "succeeded" {
+		t.Fatalf("na opnieuw aanzetten: %s %s", j.Status, j.Error)
+	}
+
+	var evs []string
+	rows, err := e.pool.Query(ctx, "SELECT action FROM events WHERE action LIKE 'cluster.heal_auto_%' ORDER BY id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for rows.Next() {
+		var a string
+		_ = rows.Scan(&a)
+		evs = append(evs, a)
+	}
+	rows.Close()
+	if !slices.Equal(evs, []string{"cluster.heal_auto_changed", "cluster.heal_auto_paused", "cluster.heal_auto_changed"}) {
 		t.Fatalf("events: %v", evs)
 	}
 }

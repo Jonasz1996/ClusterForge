@@ -59,10 +59,15 @@ type Service struct {
 	JoinTimeout  time.Duration
 	// Changed wordt aangeroepen na een herstel, zoals de evaluator.
 	Changed func()
+	// AutoAfter is hoe lang een probleem moet bestaan voor Zelfherstel het
+	// vanzelf herstelt: een herstart door systemd is dan al klaar.
+	AutoAfter time.Duration
 
 	mu    sync.Mutex
 	cache map[uuid.UUID]inspected
-	kick  chan struct{}
+	// seen is per database sinds wanneer er een plan is dat vanzelf mag.
+	seen map[string]time.Time
+	kick chan struct{}
 }
 
 type inspected struct {
@@ -74,8 +79,8 @@ type inspected struct {
 func NewService(pool *pgxpool.Pool, bus Bus, overview func(context.Context) ([]databases.Group, error), log *slog.Logger) *Service {
 	return &Service{
 		pool: pool, q: store.New(pool), bus: bus, log: log, Overview: overview, Interval: time.Minute, Timeout: protocol.DBTimeout, Now: time.Now,
-		Poll: 2 * time.Second, Retry: 5 * time.Second, StartTimeout: 5 * time.Minute, JoinTimeout: 12 * time.Hour,
-		cache: map[uuid.UUID]inspected{}, kick: make(chan struct{}, 1),
+		Poll: 2 * time.Second, Retry: 5 * time.Second, StartTimeout: 5 * time.Minute, JoinTimeout: 12 * time.Hour, AutoAfter: 2 * time.Minute,
+		cache: map[uuid.UUID]inspected{}, seen: map[string]time.Time{}, kick: make(chan struct{}, 1),
 	}
 }
 
@@ -97,6 +102,8 @@ func (s *Service) Run(ctx context.Context) {
 	for {
 		if err := s.InspectAll(ctx); err != nil && ctx.Err() == nil {
 			s.log.Warn("zelfherstel: nodes bekijken mislukt", "err", err)
+		} else if err := s.AutoRun(ctx); err != nil && ctx.Err() == nil {
+			s.log.Warn("zelfherstel: vanzelf herstellen mislukt", "err", err)
 		}
 		select {
 		case <-ctx.Done():
@@ -207,25 +214,51 @@ func (s *Service) inspect(ctx context.Context, n store.ListHealNodesRow) inspect
 // Reports maakt het rapport van elke database, met wat de agents het laatst
 // zeiden.
 func (s *Service) Reports(ctx context.Context) ([]Report, error) {
+	out, _, err := s.reports(ctx)
+	return out, err
+}
+
+// reports geeft de rapporten met de invoer waaruit ze komen, in dezelfde
+// volgorde, en zegt per cluster of het plan nu vanzelf mag.
+func (s *Service) reports(ctx context.Context) ([]Report, []Input, error) {
 	groups, err := s.Overview(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	in, err := s.inputs(ctx, groups)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	last, err := s.lastRuns(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
+	autos, err := s.q.ListHealAuto(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	settings := map[uuid.UUID]store.HealAuto{}
+	for _, a := range autos {
+		settings[a.ClusterID] = a
+	}
+	now := s.Now()
 	out := make([]Report, 0, len(in))
 	for _, x := range in {
 		r := Diagnose(x)
 		r.Last = last[r.Key]
+		// Een onderdeel van ClusterForge heeft zijn eigen Vanzelf opnieuw
+		// starten.
+		if r.ClusterID != nil && x.Managed == nil {
+			a := settings[*r.ClusterID]
+			st, err := s.autoState(ctx, r, a, now)
+			if err != nil {
+				return nil, nil, err
+			}
+			r.Auto = &st
+		}
 		out = append(out, r)
 	}
-	return out, nil
+	return out, in, nil
 }
 
 // lastRuns is de laatste taak heal.run per database.
@@ -281,8 +314,12 @@ func (s *Service) inputs(ctx context.Context, groups []databases.Group) ([]Input
 		managed[c.Engine+"/"+c.ClusterID.String()] = &Managed{ComponentID: c.ID, Title: databases.EngineName(c.Engine)}
 	}
 	byID := map[uuid.UUID]store.ListHealNodesRow{}
+	known := map[string]string{}
 	for _, n := range nodes {
 		byID[n.ID] = n
+		for _, a := range n.Addresses {
+			known[a] = n.Hostname
+		}
 	}
 	s.mu.Lock()
 	cache := make(map[uuid.UUID]inspected, len(s.cache))
@@ -293,7 +330,7 @@ func (s *Service) inputs(ctx context.Context, groups []databases.Group) ([]Input
 	now := s.Now()
 	out := make([]Input, 0, len(groups))
 	for _, g := range groups {
-		in := Input{Group: g, Nodes: map[uuid.UUID]Node{}, VIPs: vips}
+		in := Input{Group: g, Nodes: map[uuid.UUID]Node{}, VIPs: vips, Known: known}
 		if g.ClusterID != nil {
 			in.Managed = managed[g.Engine+"/"+g.ClusterID.String()]
 		}

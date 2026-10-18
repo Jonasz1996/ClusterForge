@@ -3254,6 +3254,37 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
+  /clusters/{clusterId}/heal-auto:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+    put:
+      operationId: setHealAuto
+      summary: Zelfherstel vanzelf aan- of uitzetten op een cluster (admin)
+      description: |
+        Aan voert ClusterForge elk plan van Zelfherstel dat vanzelf mag zelf uit, met een rem: het probleem bestaat minstens
+        twee minuten, hoogstens drie pogingen per uur, na een mislukte poging een kwartier wachten, het Galera-cluster opnieuw
+        beginnen hoogstens eens per uur, en na drie mislukte pogingen op rij pauze. Aanzetten heft een pauze op. Op prod kan
+        het niet aan (409).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled]
+              properties:
+                enabled: { type: boolean }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HealAutoSetting" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
   /clusters/{clusterId}/components/{componentId}/recover:
     parameters:
       - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -6182,7 +6213,7 @@ components:
     HealReport:
       type: object
       description: Zelfherstel voor één database; key is die van DatabaseGroup.
-      required: [key, cluster_id, cluster_name, cluster_slug, cluster_environment, engine, kind, health, problems, plan, last_run]
+      required: [key, cluster_id, cluster_name, cluster_slug, cluster_environment, engine, kind, health, problems, plan, last_run, auto]
       properties:
         key: { type: string }
         cluster_id: { type: string, format: uuid, nullable: true }
@@ -6202,6 +6233,30 @@ components:
           nullable: true
           description: De laatste taak heal.run van deze database in het afgelopen etmaal.
           allOf: [{ $ref: "#/components/schemas/HealRun" }]
+        auto:
+          nullable: true
+          description: Zelfherstel vanzelf van het cluster; null bij een losse node.
+          allOf: [{ $ref: "#/components/schemas/HealAuto" }]
+    HealAutoSetting:
+      type: object
+      required: [enabled, paused_at, paused_reason]
+      properties:
+        enabled: { type: boolean }
+        paused_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Gepauzeerd na drie mislukte pogingen op rij; aanzetten heft het op.
+        paused_reason: { type: string }
+    HealAuto:
+      allOf:
+        - $ref: "#/components/schemas/HealAutoSetting"
+        - type: object
+          required: [allowed, due, note]
+          properties:
+            allowed: { type: boolean, description: false op prod }
+            due: { type: boolean, description: Zelfherstel voert het plan nu vanzelf uit }
+            note: { type: string, description: Waarom het plan wel of niet vanzelf gebeurt; leeg als er niets te doen is }
     HealRun:
       type: object
       required: [job_id, status, error, created_at, finished_at]

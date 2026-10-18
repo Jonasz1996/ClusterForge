@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/oapi-codegen/nullable"
 
 	"github.com/Jonasz1996/clusterforge/internal/events"
@@ -54,9 +55,29 @@ func (s *Server) RunHeal(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, toAPIJob(j, &p.User.Username))
 }
 
+// SetHealAuto zet Zelfherstel vanzelf aan of uit op een cluster.
+func (s *Server) SetHealAuto(w http.ResponseWriter, r *http.Request, clusterID uuid.UUID) {
+	p, ok := requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	var in gen.SetHealAutoJSONRequestBody
+	if !decode(w, r, &in) {
+		return
+	}
+	a, err := s.heal.SetAuto(r.Context(), events.User(p.User.ID), clusterID, in.Enabled)
+	if err != nil {
+		s.healError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, gen.HealAutoSetting{Enabled: a.Enabled, PausedAt: nullableOf(a.PausedAt), PausedReason: a.PausedReason})
+}
+
 func (s *Server) healError(w http.ResponseWriter, r *http.Request, err error) {
 	var ce *heal.ConflictError
 	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		writeError(w, http.StatusNotFound, "not_found", "cluster niet gevonden")
 	case errors.Is(err, heal.ErrNotFound):
 		writeError(w, http.StatusNotFound, "not_found", err.Error())
 	case errors.Is(err, heal.ErrStale):
@@ -74,6 +95,12 @@ func toAPIHealReport(rep heal.Report) gen.HealReport {
 		ClusterEnvironment: nullable.NewNullNullable[gen.Environment](), Engine: gen.HealReportEngine(rep.Engine), Kind: rep.Kind,
 		Health: rep.Health, Problems: make([]gen.HealProblem, 0, len(rep.Problems)), Plan: nullable.NewNullNullable[gen.HealPlan](),
 		LastRun: nullable.NewNullNullable[gen.HealRun](),
+	}
+	out.Auto = nullable.NewNullNullable[gen.HealAuto]()
+	if a := rep.Auto; a != nil {
+		out.Auto = nullable.NewNullableWithValue(gen.HealAuto{
+			Enabled: a.Enabled, PausedAt: nullableOf(a.PausedAt), PausedReason: a.PausedReason, Allowed: a.Allowed, Due: a.Due, Note: a.Note,
+		})
 	}
 	if l := rep.Last; l != nil {
 		out.LastRun = nullable.NewNullableWithValue(gen.HealRun{

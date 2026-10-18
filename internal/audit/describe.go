@@ -399,6 +399,13 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 		return "Zelfherstel gestart voor " + what + colon(list(p["nodes"]))
 	case "cluster.heal_done", "node.heal_done":
 		return "Zelfherstel van " + or(str(p, "what"), "de database van "+name) + " gelukt"
+	case "cluster.heal_auto_changed":
+		if p["enabled"] == true {
+			return "Zelfherstel vanzelf aangezet op cluster " + name
+		}
+		return "Zelfherstel vanzelf uitgezet op cluster " + name
+	case "cluster.heal_auto_paused":
+		return "Zelfherstel vanzelf gepauzeerd op cluster " + name + colon(str(p, "reason"))
 	case "cluster.heal_failed", "node.heal_failed":
 		return "Zelfherstel van " + or(str(p, "what"), "de database van "+name) + " mislukt" + colon(str(p, "error"))
 	case "cluster.database_resynced":

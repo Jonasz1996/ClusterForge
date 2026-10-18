@@ -88,6 +88,10 @@ type Input struct {
 	// Managed is het onderdeel van ClusterForge voor deze database, als
 	// ClusterForge haar toepaste.
 	Managed *Managed
+	// Known zijn de adressen uit de heartbeat van elke node met een agent,
+	// met zijn hostname. Een adres in wsrep_cluster_address van een node
+	// die (nog) niet bij de groep hoort, is niet verouderd en blijft staan.
+	Known map[string]string
 }
 
 // Managed is een toegepast onderdeel; het herstel daarvan gaat met de
@@ -160,6 +164,9 @@ type Report struct {
 	// Last is de laatste herstelpoging van het afgelopen etmaal; Diagnose
 	// laat hem leeg.
 	Last *LastRun
+	// Auto is Vanzelf herstellen van het cluster; nil bij een losse node.
+	// Diagnose laat het leeg.
+	Auto *AutoState
 }
 
 // LastRun is een taak heal.run van een database.
@@ -446,6 +453,22 @@ func wrongAddresses(in Input, states []nodeState, add func(code, level, title, w
 		}
 	}
 	complete := len(want) == len(states)
+	// Een andere node van ClusterForge in de config, zoals een node waarvan
+	// de agent zijn MariaDB nog niet meldde, blijft erin.
+	other := func(x string) bool {
+		ip, err := netip.ParseAddr(x)
+		return err == nil && !all[ip.String()] && !vips[ip.String()] && in.Known[ip.String()] != ""
+	}
+	for _, st := range states {
+		if st.insp == nil || st.insp.Galera == nil {
+			continue
+		}
+		for _, x := range gcommHosts(st.insp.Galera.ClusterAddress) {
+			if other(x) && !slices.Contains(want, x) {
+				want = append(want, x)
+			}
+		}
+	}
 	newCluster := "gcomm://" + strings.Join(want, ",")
 	var out []PlanNode
 	for _, st := range states {
@@ -457,7 +480,7 @@ func wrongAddresses(in Input, states []nodeState, add func(code, level, title, w
 		hosts := gcommHosts(g.ClusterAddress)
 		var stale, missing []string
 		for _, x := range hosts {
-			if ip, err := netip.ParseAddr(x); err == nil && !all[ip.String()] && !vips[ip.String()] {
+			if ip, err := netip.ParseAddr(x); err == nil && !all[ip.String()] && !vips[ip.String()] && !other(x) {
 				stale = append(stale, x)
 			}
 		}

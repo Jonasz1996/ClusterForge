@@ -871,6 +871,16 @@ type GitRepo struct {
 	ServerUrl  string
 }
 
+type HealAuto struct {
+	ClusterID    uuid.UUID
+	Enabled      bool
+	EnabledAt    *time.Time
+	PausedAt     *time.Time
+	PausedReason string
+	UpdatedAt    time.Time
+	UpdatedBy    *uuid.UUID
+}
+
 type Incident struct {
 	ID               uuid.UUID
 	Number           int32
