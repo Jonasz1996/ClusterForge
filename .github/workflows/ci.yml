@@ -132,13 +132,60 @@ jobs:
   docker:
     name: Container-image
     runs-on: ubuntu-latest
+    # Een image per commit, zodat een kleine LXC kan bijwerken zonder zelf te
+    # bouwen. Alleen voor branches in deze repo: een fork krijgt geen schrijfrechten.
+    permissions:
+      contents: read
+      packages: write
+    env:
+      PUSH: ${{ github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository }}
     steps:
       - uses: actions/checkout@v5
       - uses: docker/setup-buildx-action@v3
+      - if: env.PUSH == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      # Bij een PR is github.sha de merge-commit; het image hoort bij de kop
+      # van de branch, zoals `git describe --tags --always` op de LXC hem noemt.
+      - id: tags
+        env:
+          SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          PR: ${{ github.event.pull_request.number }}
+          REF: ${{ github.ref_name }}
+        run: |
+          short=${SHA:0:7}
+          image=ghcr.io/jonasz1996/clusterforge-server
+          echo "version=$short" >> "$GITHUB_OUTPUT"
+          {
+            echo "list<<EOF"
+            echo "$image:$short"
+            if [ -n "$PR" ]; then echo "$image:pr-$PR"; else echo "$image:$REF"; fi
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
       - uses: docker/build-push-action@v6
         with:
           context: .
           file: deploy/Dockerfile
-          push: false
+          push: ${{ env.PUSH == 'true' }}
+          load: true
+          build-args: VERSION=${{ steps.tags.outputs.version }}
+          tags: ${{ steps.tags.outputs.list }}
+          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      # De server biedt de agent voor amd64 en arm64 aan; die moeten in elk image zitten.
+      - name: Agents in het image
+        env:
+          IMAGE: ghcr.io/jonasz1996/clusterforge-server:${{ steps.tags.outputs.version }}
+        run: |
+          id=$(docker create "$IMAGE")
+          docker cp "$id:/usr/share/clusterforge/agents" agents
+          docker rm "$id"
+          ls -l agents
+          for arch in amd64 arm64; do
+            test -s agents/cf-agent-linux-$arch
+            (cd agents && sha256sum -c cf-agent-linux-$arch.sha256)
+          done
