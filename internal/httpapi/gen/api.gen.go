@@ -36,6 +36,36 @@ func (e AgentConnection) Valid() bool {
 	}
 }
 
+// Defines values for AgentUpgradeAgentState.
+const (
+	AgentUpgradeAgentStateCurrent  AgentUpgradeAgentState = "current"
+	AgentUpgradeAgentStateFailed   AgentUpgradeAgentState = "failed"
+	AgentUpgradeAgentStateManual   AgentUpgradeAgentState = "manual"
+	AgentUpgradeAgentStateNewer    AgentUpgradeAgentState = "newer"
+	AgentUpgradeAgentStateOutdated AgentUpgradeAgentState = "outdated"
+	AgentUpgradeAgentStateUnknown  AgentUpgradeAgentState = "unknown"
+)
+
+// Valid indicates whether the value is a known member of the AgentUpgradeAgentState enum.
+func (e AgentUpgradeAgentState) Valid() bool {
+	switch e {
+	case AgentUpgradeAgentStateCurrent:
+		return true
+	case AgentUpgradeAgentStateFailed:
+		return true
+	case AgentUpgradeAgentStateManual:
+		return true
+	case AgentUpgradeAgentStateNewer:
+		return true
+	case AgentUpgradeAgentStateOutdated:
+		return true
+	case AgentUpgradeAgentStateUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AssistantConversationKind.
 const (
 	Analysis AssistantConversationKind = "analysis"
@@ -2081,19 +2111,19 @@ func (e KubeLessonStepKind) Valid() bool {
 
 // Defines values for KubeLessonStepState.
 const (
-	Current KubeLessonStepState = "current"
-	Done    KubeLessonStepState = "done"
-	Locked  KubeLessonStepState = "locked"
+	KubeLessonStepStateCurrent KubeLessonStepState = "current"
+	KubeLessonStepStateDone    KubeLessonStepState = "done"
+	KubeLessonStepStateLocked  KubeLessonStepState = "locked"
 )
 
 // Valid indicates whether the value is a known member of the KubeLessonStepState enum.
 func (e KubeLessonStepState) Valid() bool {
 	switch e {
-	case Current:
+	case KubeLessonStepStateCurrent:
 		return true
-	case Done:
+	case KubeLessonStepStateDone:
 		return true
-	case Locked:
+	case KubeLessonStepStateLocked:
 		return true
 	default:
 		return false
@@ -3410,6 +3440,76 @@ type AgentSummary struct {
 	Id         openapi_types.UUID           `json:"id"`
 	LastSeenAt nullable.Nullable[time.Time] `json:"last_seen_at"`
 	Version    string                       `json:"version"`
+}
+
+// AgentUpgradeAgent defines model for AgentUpgradeAgent.
+type AgentUpgradeAgent struct {
+	Arch string `json:"arch"`
+
+	// Auto ClusterForge werkt deze agent vanzelf bij
+	Auto bool `json:"auto"`
+
+	// ClusterEnvironment lab, test, prod, of leeg zonder cluster
+	ClusterEnvironment string                                `json:"cluster_environment"`
+	ClusterId          nullable.Nullable[openapi_types.UUID] `json:"cluster_id"`
+	ClusterName        string                                `json:"cluster_name"`
+	ClusterSlug        string                                `json:"cluster_slug"`
+	Hostname           string                                `json:"hostname"`
+	NodeId             openapi_types.UUID                    `json:"node_id"`
+	Online             bool                                  `json:"online"`
+	Protocol           int                                   `json:"protocol"`
+
+	// State current: dezelfde agent als die van de server. outdated: verouderd, werkt zichzelf bij. failed: de update werd
+	// op de node teruggezet. manual: verouderd en ouder dan protocol 23, met de hand bijwerken. newer: nieuwer dan de
+	// server. unknown: de server heeft geen agent voor deze node of de agent meldde zijn binary nog niet.
+	State   AgentUpgradeAgentState `json:"state"`
+	Version string                 `json:"version"`
+	Why     string                 `json:"why"`
+}
+
+// AgentUpgradeAgentState current: dezelfde agent als die van de server. outdated: verouderd, werkt zichzelf bij. failed: de update werd
+// op de node teruggezet. manual: verouderd en ouder dan protocol 23, met de hand bijwerken. newer: nieuwer dan de
+// server. unknown: de server heeft geen agent voor deze node of de agent meldde zijn binary nog niet.
+type AgentUpgradeAgentState string
+
+// AgentUpgradeInput defines model for AgentUpgradeInput.
+type AgentUpgradeInput struct {
+	All       *bool               `json:"all,omitempty"`
+	ClusterId *openapi_types.UUID `json:"cluster_id,omitempty"`
+
+	// Confirm De slug van het prodcluster
+	Confirm *string               `json:"confirm,omitempty"`
+	NodeIds *[]openapi_types.UUID `json:"node_ids,omitempty"`
+}
+
+// AgentUpgradeOverview defines model for AgentUpgradeOverview.
+type AgentUpgradeOverview struct {
+	Agents []AgentUpgradeAgent `json:"agents"`
+
+	// Archs Architecturen waarvoor de server een agent heeft
+	Archs []string `json:"archs"`
+
+	// Auto Agents vanzelf bijwerken staat aan
+	Auto bool `json:"auto"`
+
+	// OffClusterIds Clusters waar vanzelf bijwerken uitstaat
+	OffClusterIds []openapi_types.UUID `json:"off_cluster_ids"`
+	Protocol      int                  `json:"protocol"`
+
+	// Running Taken agents.upgrade die wachten of lopen
+	Running []struct {
+		ClusterId nullable.Nullable[openapi_types.UUID] `json:"cluster_id"`
+		JobId     openapi_types.UUID                    `json:"job_id"`
+	} `json:"running"`
+
+	// Version De versie van de agent die deze server aanbiedt
+	Version string `json:"version"`
+}
+
+// AgentUpgradeStarted defines model for AgentUpgradeStarted.
+type AgentUpgradeStarted struct {
+	Jobs    []Job    `json:"jobs"`
+	Skipped []string `json:"skipped"`
 }
 
 // AssistantConversation defines model for AssistantConversation.
@@ -10911,6 +11011,11 @@ type TimelineLimit = int
 // TimelineTo defines model for TimelineTo.
 type TimelineTo = time.Time
 
+// SetAgentUpgradeAutoJSONBody defines parameters for SetAgentUpgradeAuto.
+type SetAgentUpgradeAutoJSONBody struct {
+	Enabled bool `json:"enabled"`
+}
+
 // ListAssistantConversationsParams defines parameters for ListAssistantConversations.
 type ListAssistantConversationsParams struct {
 	// All Ook die van anderen (admin)
@@ -10978,6 +11083,11 @@ type ExportAuditParams struct {
 
 // ExportAuditParamsActorType defines parameters for ExportAudit.
 type ExportAuditParamsActorType string
+
+// SetClusterAgentUpgradeAutoJSONBody defines parameters for SetClusterAgentUpgradeAuto.
+type SetClusterAgentUpgradeAutoJSONBody struct {
+	Enabled bool `json:"enabled"`
+}
 
 // ListClusterChangesParams defines parameters for ListClusterChanges.
 type ListClusterChangesParams struct {
@@ -11413,6 +11523,12 @@ type ListTestRunsParams struct {
 	Limit     *int                `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// StartAgentUpgradesJSONRequestBody defines body for StartAgentUpgrades for application/json ContentType.
+type StartAgentUpgradesJSONRequestBody = AgentUpgradeInput
+
+// SetAgentUpgradeAutoJSONRequestBody defines body for SetAgentUpgradeAuto for application/json ContentType.
+type SetAgentUpgradeAutoJSONRequestBody SetAgentUpgradeAutoJSONBody
+
 // EnrollAgentJSONRequestBody defines body for EnrollAgent for application/json ContentType.
 type EnrollAgentJSONRequestBody = EnrollRequest
 
@@ -11451,6 +11567,9 @@ type CreateClusterJSONRequestBody = ClusterInput
 
 // UpdateClusterJSONRequestBody defines body for UpdateCluster for application/json ContentType.
 type UpdateClusterJSONRequestBody = ClusterPatch
+
+// SetClusterAgentUpgradeAutoJSONRequestBody defines body for SetClusterAgentUpgradeAuto for application/json ContentType.
+type SetClusterAgentUpgradeAutoJSONRequestBody SetClusterAgentUpgradeAutoJSONBody
 
 // UpdateBackupPolicyJSONRequestBody defines body for UpdateBackupPolicy for application/json ContentType.
 type UpdateBackupPolicyJSONRequestBody = BackupPolicyInput
@@ -11703,6 +11822,15 @@ type UpdateVipJSONRequestBody = VipPatch
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
+	// ListAgentUpgrades Welke agents verouderd zijn en of ze vanzelf bijgewerkt worden
+	// (GET /agent-upgrades)
+	ListAgentUpgrades(w http.ResponseWriter, r *http.Request)
+	// StartAgentUpgrades Agents bijwerken (admin); één taak agents.upgrade per cluster, één node tegelijk
+	// (POST /agent-upgrades)
+	StartAgentUpgrades(w http.ResponseWriter, r *http.Request)
+	// SetAgentUpgradeAuto Agents vanzelf bijwerken aan- of uitzetten (admin)
+	// (PUT /agent-upgrades/auto)
+	SetAgentUpgradeAuto(w http.ResponseWriter, r *http.Request)
 	// EnrollAgent Een agent meldt zich aan met een enrollmenttoken (zonder sessie)
 	// (POST /agents/enroll)
 	EnrollAgent(w http.ResponseWriter, r *http.Request)
@@ -11796,6 +11924,9 @@ type ServerInterface interface {
 	// UpdateCluster Cluster wijzigen (admin); alleen meegestuurde velden veranderen
 	// (PATCH /clusters/{clusterId})
 	UpdateCluster(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
+	// SetClusterAgentUpgradeAuto Agents vanzelf bijwerken op één cluster aan- of uitzetten (admin)
+	// (PUT /clusters/{clusterId}/agent-upgrade-auto)
+	SetClusterAgentUpgradeAuto(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
 	// GetBackupPolicy Back-upbeleid van een cluster, of de standaard als het er nog geen heeft
 	// (GET /clusters/{clusterId}/backup-policy)
 	GetBackupPolicy(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
@@ -12459,6 +12590,24 @@ type ServerInterface interface {
 
 type Unimplemented struct{}
 
+// ListAgentUpgrades Welke agents verouderd zijn en of ze vanzelf bijgewerkt worden
+// (GET /agent-upgrades)
+func (_ Unimplemented) ListAgentUpgrades(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// StartAgentUpgrades Agents bijwerken (admin); één taak agents.upgrade per cluster, één node tegelijk
+// (POST /agent-upgrades)
+func (_ Unimplemented) StartAgentUpgrades(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SetAgentUpgradeAuto Agents vanzelf bijwerken aan- of uitzetten (admin)
+// (PUT /agent-upgrades/auto)
+func (_ Unimplemented) SetAgentUpgradeAuto(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // EnrollAgent Een agent meldt zich aan met een enrollmenttoken (zonder sessie)
 // (POST /agents/enroll)
 func (_ Unimplemented) EnrollAgent(w http.ResponseWriter, r *http.Request) {
@@ -12642,6 +12791,12 @@ func (_ Unimplemented) GetCluster(w http.ResponseWriter, r *http.Request, cluste
 // UpdateCluster Cluster wijzigen (admin); alleen meegestuurde velden veranderen
 // (PATCH /clusters/{clusterId})
 func (_ Unimplemented) UpdateCluster(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SetClusterAgentUpgradeAuto Agents vanzelf bijwerken op één cluster aan- of uitzetten (admin)
+// (PUT /clusters/{clusterId}/agent-upgrade-auto)
+func (_ Unimplemented) SetClusterAgentUpgradeAuto(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -13968,6 +14123,48 @@ type ServerInterfaceWrapper struct {
 
 type MiddlewareFunc func(http.Handler) http.Handler
 
+// ListAgentUpgrades operation middleware
+func (siw *ServerInterfaceWrapper) ListAgentUpgrades(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListAgentUpgrades(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// StartAgentUpgrades operation middleware
+func (siw *ServerInterfaceWrapper) StartAgentUpgrades(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StartAgentUpgrades(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetAgentUpgradeAuto operation middleware
+func (siw *ServerInterfaceWrapper) SetAgentUpgradeAuto(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetAgentUpgradeAuto(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // EnrollAgent operation middleware
 func (siw *ServerInterfaceWrapper) EnrollAgent(w http.ResponseWriter, r *http.Request) {
 
@@ -14780,6 +14977,32 @@ func (siw *ServerInterfaceWrapper) UpdateCluster(w http.ResponseWriter, r *http.
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.UpdateCluster(w, r, clusterId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetClusterAgentUpgradeAuto operation middleware
+func (siw *ServerInterfaceWrapper) SetClusterAgentUpgradeAuto(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetClusterAgentUpgradeAuto(w, r, clusterId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -22304,6 +22527,18 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/heal/run", wrapper.RunHeal)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/agent-upgrades", wrapper.ListAgentUpgrades)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/agent-upgrades", wrapper.StartAgentUpgrades)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/agent-upgrades/auto", wrapper.SetAgentUpgradeAuto)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/clusters/{clusterId}/agent-upgrade-auto", wrapper.SetClusterAgentUpgradeAuto)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/cronjobs", wrapper.ListCronjobs)

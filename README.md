@@ -175,6 +175,8 @@ cf-agent enroll -server URL -token cfe_...      meldt deze machine aan (doet het
 cf-agent run                                    verbindt met ClusterForge (zo start systemd hem)
 cf-agent facts                                  toont de facts van deze machine
 cf-agent fault-clear                            heft achtergebleven storingen van een rampoefening op
+cf-agent self-check                             versie, protocol en architectuur als JSON
+cf-agent upgrade-rollback                       zet de oude agent terug (doet de timer cf-agent-rollback)
 cf-agent version                                toont de versie
 ```
 
@@ -186,7 +188,23 @@ Een nieuwere agent zet je erop zonder opnieuw aan te melden:
 curl -fsSL https://clusterforge.example/install/agent.sh | sudo sh -s -- --server https://clusterforge.example --upgrade
 ```
 
-Het script controleert de checksum, vervangt alleen de binary en herstart `cf-agent`; `agent.json` blijft staan. Mislukt de download of de checksum, dan blijft de oude agent draaien. Sinds de storingen van [rampoefeningen](#reeksen-van-storingen) zet het script ook `cf-agent-fault-clear.service` neer, die bij elke start van de machine achtergebleven storingen opheft voordat het netwerk opkomt. Voor een reeks heeft de node `nft` (pakket `nftables`) en `tc` (pakket `iproute2`) nodig.
+Het script controleert de checksum, vervangt alleen de binary en herstart `cf-agent`; `agent.json` blijft staan. Mislukt de download of de checksum, dan blijft de oude agent draaien. Vanaf **agentprotocol 23** hoeft dit maar één keer: daarna werken de agents zichzelf bij (zie hieronder). Sinds de storingen van [rampoefeningen](#reeksen-van-storingen) zet het script ook `cf-agent-fault-clear.service` neer, die bij elke start van de machine achtergebleven storingen opheft voordat het netwerk opkomt. Voor een reeks heeft de node `nft` (pakket `nftables`) en `tc` (pakket `iproute2`) nodig.
+
+### Agents werken zichzelf bij
+
+Vanaf agentprotocol 23 werkt ClusterForge de agents zelf bij naar de agent die de server meebrengt. Bij Nodes staat de kaart "Agents bijwerken" zodra er een agent ouder is, of een andere build met hetzelfde protocol. "Agents bijwerken" doet alles buiten prod, per prodcluster is er een eigen knop die tweestapsverificatie en de slug vraagt; bij een node staat "Agent bijwerken" in de kaart Agent. Het wordt een taak per cluster, één node tegelijk: de volgende pas als de vorige met de nieuwe agent terug is. Komt een node niet terug, of zet hij de oude terug, dan stopt de taak van dat cluster, met een regel in het logboek. Een node die wegblijft, staat offline en opent een incident zoals elke node.
+
+Wat de agent zelf doet:
+
+1. hij haalt `/downloads/cf-agent-linux-<arch>` van zijn eigen server en controleert de sha256 die over de vastgepinde NATS-verbinding meekwam (de download zelf mag dus over http);
+2. hij start de nieuwe met `cf-agent self-check`, die hier moet draaien en geen lager protocol mag melden: nooit terug naar een oudere versie;
+3. hij bewaart zichzelf als `/usr/local/bin/cf-agent.prev` en zet met `systemd-run` een tijdelijke timer `cf-agent-rollback`;
+4. hij vervangt zichzelf in één keer en herstart `cf-agent`;
+5. de nieuwe agent zet de timer uit zodra de server iets van hem aanneemt; pas dan telt de server de node als bijgewerkt. Gebeurt dat niet binnen 3 minuten, dan zet de timer de oude agent terug en meldt die dat aan de server.
+
+Een update die mislukt (teruggezet, of de download, de self-check of de herstart lukt niet) probeert ClusterForge niet nog eens vanzelf naar dezelfde agent; de knop wel.
+
+Vanzelf bijwerken staat standaard aan: elke minuut start de server een taak voor de clusters met verouderde, verbonden agents. Nooit op prod. Uitzetten, voor alles of per cluster, kan bij Instellingen → Agents bijwerken. Agents onder protocol 23 kennen dit nog niet: die werk je één keer bij met `--upgrade` hierboven; de kaart toont het commando. Het golden image hoeft daarna niet meer na elke update opnieuw: een nieuwe VM meldt zich aan en wordt bijgewerkt (op prod met de knop). Na een reboot binnen die 3 minuten zet de nieuwe agent de timer terug; een agent die al bij het starten crasht, kan dat niet: zet de oude dan terug met `sudo /usr/local/bin/cf-agent.prev upgrade-rollback`. `agent.sh --upgrade` helpt daar niet, dat haalt dezelfde agent opnieuw. Het ontwerp staat in [docs/design/agent-zelfupdate.md](docs/design/agent-zelfupdate.md).
 
 ## Monitoring
 

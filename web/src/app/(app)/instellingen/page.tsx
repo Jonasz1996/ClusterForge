@@ -4,6 +4,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import QRCode from "qrcode";
 import { useState, type FormEvent } from "react";
 import { AssistantSettingsCard } from "@/components/assistant/AssistantSettings";
+import { AgentUpgradeSettingsCard } from "@/components/inventory/AgentUpgrades";
 import { DocsTargetCard } from "@/components/docs/DocsTargetCard";
 import { SelfLocationCard } from "@/components/risk/SelfLocationCard";
 import { Alert, Button, Card, Input, Label } from "@/components/ui";
@@ -23,6 +24,9 @@ export default function SettingsPage() {
         <DocsTargetCard isAdmin={isAdmin} />
       </div>
       <SelfLocationCard isAdmin={isAdmin} />
+      <div id="agents-bijwerken" className="scroll-mt-6">
+        <AgentUpgradeSettingsCard isAdmin={isAdmin} />
+      </div>
     </div>
   );
 }

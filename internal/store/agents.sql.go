@@ -16,7 +16,7 @@ import (
 const createAgent = `-- name: CreateAgent :one
 INSERT INTO agents (id, node_id, nkey_public, machine_id, version, protocol_version)
 VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, node_id, nkey_public, machine_id, version, protocol_version, enrolled_at, last_seen_at, revoked_at
+RETURNING id, node_id, nkey_public, machine_id, version, protocol_version, enrolled_at, last_seen_at, revoked_at, arch, binary_sha256, upgrade_rolled_back
 `
 
 type CreateAgentParams struct {
@@ -48,6 +48,9 @@ func (q *Queries) CreateAgent(ctx context.Context, arg CreateAgentParams) (Agent
 		&i.EnrolledAt,
 		&i.LastSeenAt,
 		&i.RevokedAt,
+		&i.Arch,
+		&i.BinarySha256,
+		&i.UpgradeRolledBack,
 	)
 	return i, err
 }
@@ -134,7 +137,7 @@ func (q *Queries) FindNodeByHostname(ctx context.Context, hostname string) (Node
 }
 
 const getActiveAgentByNkey = `-- name: GetActiveAgentByNkey :one
-SELECT id, node_id, nkey_public, machine_id, version, protocol_version, enrolled_at, last_seen_at, revoked_at FROM agents WHERE nkey_public = $1 AND revoked_at IS NULL
+SELECT id, node_id, nkey_public, machine_id, version, protocol_version, enrolled_at, last_seen_at, revoked_at, arch, binary_sha256, upgrade_rolled_back FROM agents WHERE nkey_public = $1 AND revoked_at IS NULL
 `
 
 func (q *Queries) GetActiveAgentByNkey(ctx context.Context, nkeyPublic string) (Agent, error) {
@@ -150,12 +153,15 @@ func (q *Queries) GetActiveAgentByNkey(ctx context.Context, nkeyPublic string) (
 		&i.EnrolledAt,
 		&i.LastSeenAt,
 		&i.RevokedAt,
+		&i.Arch,
+		&i.BinarySha256,
+		&i.UpgradeRolledBack,
 	)
 	return i, err
 }
 
 const getActiveAgentByNode = `-- name: GetActiveAgentByNode :one
-SELECT id, node_id, nkey_public, machine_id, version, protocol_version, enrolled_at, last_seen_at, revoked_at FROM agents WHERE node_id = $1 AND revoked_at IS NULL
+SELECT id, node_id, nkey_public, machine_id, version, protocol_version, enrolled_at, last_seen_at, revoked_at, arch, binary_sha256, upgrade_rolled_back FROM agents WHERE node_id = $1 AND revoked_at IS NULL
 `
 
 func (q *Queries) GetActiveAgentByNode(ctx context.Context, nodeID uuid.UUID) (Agent, error) {
@@ -171,12 +177,15 @@ func (q *Queries) GetActiveAgentByNode(ctx context.Context, nodeID uuid.UUID) (A
 		&i.EnrolledAt,
 		&i.LastSeenAt,
 		&i.RevokedAt,
+		&i.Arch,
+		&i.BinarySha256,
+		&i.UpgradeRolledBack,
 	)
 	return i, err
 }
 
 const getAgent = `-- name: GetAgent :one
-SELECT id, node_id, nkey_public, machine_id, version, protocol_version, enrolled_at, last_seen_at, revoked_at FROM agents WHERE id = $1
+SELECT id, node_id, nkey_public, machine_id, version, protocol_version, enrolled_at, last_seen_at, revoked_at, arch, binary_sha256, upgrade_rolled_back FROM agents WHERE id = $1
 `
 
 func (q *Queries) GetAgent(ctx context.Context, id uuid.UUID) (Agent, error) {
@@ -192,6 +201,9 @@ func (q *Queries) GetAgent(ctx context.Context, id uuid.UUID) (Agent, error) {
 		&i.EnrolledAt,
 		&i.LastSeenAt,
 		&i.RevokedAt,
+		&i.Arch,
+		&i.BinarySha256,
+		&i.UpgradeRolledBack,
 	)
 	return i, err
 }
@@ -363,7 +375,7 @@ func (q *Queries) LockNodeFacts(ctx context.Context, nodeID uuid.UUID) (NodeFact
 const revokeAgent = `-- name: RevokeAgent :one
 UPDATE agents SET revoked_at = now()
 WHERE id = $1 AND revoked_at IS NULL
-RETURNING id, node_id, nkey_public, machine_id, version, protocol_version, enrolled_at, last_seen_at, revoked_at
+RETURNING id, node_id, nkey_public, machine_id, version, protocol_version, enrolled_at, last_seen_at, revoked_at, arch, binary_sha256, upgrade_rolled_back
 `
 
 func (q *Queries) RevokeAgent(ctx context.Context, id uuid.UUID) (Agent, error) {
@@ -379,6 +391,9 @@ func (q *Queries) RevokeAgent(ctx context.Context, id uuid.UUID) (Agent, error) 
 		&i.EnrolledAt,
 		&i.LastSeenAt,
 		&i.RevokedAt,
+		&i.Arch,
+		&i.BinarySha256,
+		&i.UpgradeRolledBack,
 	)
 	return i, err
 }
@@ -386,7 +401,7 @@ func (q *Queries) RevokeAgent(ctx context.Context, id uuid.UUID) (Agent, error) 
 const revokeAgentsOfNode = `-- name: RevokeAgentsOfNode :many
 UPDATE agents SET revoked_at = now()
 WHERE node_id = $1 AND revoked_at IS NULL
-RETURNING id, node_id, nkey_public, machine_id, version, protocol_version, enrolled_at, last_seen_at, revoked_at
+RETURNING id, node_id, nkey_public, machine_id, version, protocol_version, enrolled_at, last_seen_at, revoked_at, arch, binary_sha256, upgrade_rolled_back
 `
 
 func (q *Queries) RevokeAgentsOfNode(ctx context.Context, nodeID uuid.UUID) ([]Agent, error) {
@@ -408,6 +423,9 @@ func (q *Queries) RevokeAgentsOfNode(ctx context.Context, nodeID uuid.UUID) ([]A
 			&i.EnrolledAt,
 			&i.LastSeenAt,
 			&i.RevokedAt,
+			&i.Arch,
+			&i.BinarySha256,
+			&i.UpgradeRolledBack,
 		); err != nil {
 			return nil, err
 		}
@@ -448,18 +466,29 @@ func (q *Queries) SetVIPOwner(ctx context.Context, arg SetVIPOwnerParams) error 
 }
 
 const touchAgent = `-- name: TouchAgent :exec
-UPDATE agents SET last_seen_at = now(), version = $2, protocol_version = $3
+UPDATE agents SET last_seen_at = now(), version = $2, protocol_version = $3,
+    arch = $4, binary_sha256 = $5, upgrade_rolled_back = $6
 WHERE node_id = $1 AND revoked_at IS NULL
 `
 
 type TouchAgentParams struct {
-	NodeID          uuid.UUID
-	Version         string
-	ProtocolVersion int32
+	NodeID            uuid.UUID
+	Version           string
+	ProtocolVersion   int32
+	Arch              string
+	BinarySha256      string
+	UpgradeRolledBack string
 }
 
 func (q *Queries) TouchAgent(ctx context.Context, arg TouchAgentParams) error {
-	_, err := q.db.Exec(ctx, touchAgent, arg.NodeID, arg.Version, arg.ProtocolVersion)
+	_, err := q.db.Exec(ctx, touchAgent,
+		arg.NodeID,
+		arg.Version,
+		arg.ProtocolVersion,
+		arg.Arch,
+		arg.BinarySha256,
+		arg.UpgradeRolledBack,
+	)
 	return err
 }
 

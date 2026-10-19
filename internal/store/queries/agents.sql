@@ -55,7 +55,8 @@ VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING *;
 
 -- name: TouchAgent :exec
-UPDATE agents SET last_seen_at = now(), version = $2, protocol_version = $3
+UPDATE agents SET last_seen_at = now(), version = $2, protocol_version = $3,
+    arch = @arch, binary_sha256 = @binary_sha256, upgrade_rolled_back = @upgrade_rolled_back
 WHERE node_id = $1 AND revoked_at IS NULL;
 
 -- name: UpsertNodeStatus :exec

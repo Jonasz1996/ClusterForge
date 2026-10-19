@@ -3414,6 +3414,79 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/agent-upgrades": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Welke agents verouderd zijn en of ze vanzelf bijgewerkt worden
+         * @description Per node met een agent: versie, protocol en binary tegenover de agent die deze server aanbiedt. Een agent vanaf
+         *     protocol 23 werkt zichzelf bij; een oudere werk je één keer met het installatiescript en --upgrade bij. Ook voor
+         *     viewers.
+         */
+        get: operations["listAgentUpgrades"];
+        put?: never;
+        /**
+         * Agents bijwerken (admin); één taak agents.upgrade per cluster, één node tegelijk
+         * @description node_ids werkt die nodes bij, cluster_id elke verouderde agent van dat cluster, all elke verouderde agent buiten
+         *     prod. Per cluster één node tegelijk: de volgende pas als de vorige met de nieuwe agent terug is. Komt een node niet
+         *     terug of zet hij de oude agent terug, dan stopt de taak van dat cluster. Op prod vraagt het tweestapsverificatie en
+         *     de slug van het cluster in confirm; nodes uit meer dan één prodcluster tegelijk kan niet (400). Een cluster waar al
+         *     een taak loopt, staat in skipped; is er niets gestart, dan 409.
+         */
+        post: operations["startAgentUpgrades"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agent-upgrades/auto": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Agents vanzelf bijwerken aan- of uitzetten (admin)
+         * @description Aan (standaard) werkt ClusterForge elke minuut verouderde agents bij die verbonden zijn, met een taak per cluster.
+         *     Nooit op prod, niet op clusters waar het uitstaat, en niet naar een agent waarnaar bijwerken op die node al eens mislukte.
+         */
+        put: operations["setAgentUpgradeAuto"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/clusters/{clusterId}/agent-upgrade-auto": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Agents vanzelf bijwerken op één cluster aan- of uitzetten (admin)
+         * @description Uit werkt ClusterForge de agents van dit cluster alleen met de knop bij. Prod gaat nooit vanzelf.
+         */
+        put: operations["setClusterAgentUpgradeAuto"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/cronjobs": {
         parameters: {
             query?: never;
@@ -9946,6 +10019,62 @@ export interface components {
         };
         /** @enum {string} */
         JobStatus: "queued" | "running" | "succeeded" | "failed" | "canceled";
+        AgentUpgradeOverview: {
+            /** @description De versie van de agent die deze server aanbiedt */
+            version: string;
+            protocol: number;
+            /** @description Architecturen waarvoor de server een agent heeft */
+            archs: string[];
+            /** @description Agents vanzelf bijwerken staat aan */
+            auto: boolean;
+            /** @description Clusters waar vanzelf bijwerken uitstaat */
+            off_cluster_ids: string[];
+            agents: components["schemas"]["AgentUpgradeAgent"][];
+            /** @description Taken agents.upgrade die wachten of lopen */
+            running: {
+                /** Format: uuid */
+                cluster_id: string | null;
+                /** Format: uuid */
+                job_id: string;
+            }[];
+        };
+        AgentUpgradeAgent: {
+            /** Format: uuid */
+            node_id: string;
+            hostname: string;
+            /** Format: uuid */
+            cluster_id: string | null;
+            cluster_name: string;
+            cluster_slug: string;
+            /** @description lab, test, prod, of leeg zonder cluster */
+            cluster_environment: string;
+            version: string;
+            protocol: number;
+            arch: string;
+            online: boolean;
+            /**
+             * @description current: dezelfde agent als die van de server. outdated: verouderd, werkt zichzelf bij. failed: de update werd
+             *     op de node teruggezet. manual: verouderd en ouder dan protocol 23, met de hand bijwerken. newer: nieuwer dan de
+             *     server. unknown: de server heeft geen agent voor deze node of de agent meldde zijn binary nog niet.
+             * @enum {string}
+             */
+            state: "current" | "outdated" | "failed" | "manual" | "newer" | "unknown";
+            why: string;
+            /** @description ClusterForge werkt deze agent vanzelf bij */
+            auto: boolean;
+        };
+        AgentUpgradeInput: {
+            node_ids?: string[];
+            /** Format: uuid */
+            cluster_id?: string;
+            all?: boolean;
+            /** @description De slug van het prodcluster */
+            confirm?: string;
+        };
+        AgentUpgradeStarted: {
+            jobs: components["schemas"]["Job"][];
+            skipped: string[];
+        };
         Job: {
             /** Format: uuid */
             id: string;
@@ -16011,6 +16140,116 @@ export interface operations {
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];
+        };
+    };
+    listAgentUpgrades: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentUpgradeOverview"];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    startAgentUpgrades: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentUpgradeInput"];
+            };
+        };
+        responses: {
+            /** @description Taken aangemaakt */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentUpgradeStarted"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    setAgentUpgradeAuto: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    enabled: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentUpgradeOverview"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+        };
+    };
+    setClusterAgentUpgradeAuto: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    enabled: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentUpgradeOverview"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
         };
     };
     listCronjobs: {

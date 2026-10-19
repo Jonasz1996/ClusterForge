@@ -10,6 +10,7 @@ import { NodeDriftCard } from "@/components/drift/Drift";
 import { MetricsPanels } from "@/components/charts/MetricsPanels";
 import { JobList } from "@/components/jobs/JobList";
 import { ConfirmDelete } from "@/components/inventory/ConfirmDelete";
+import { AgentUpgradeRow } from "@/components/inventory/AgentUpgrades";
 import { InstallAgent } from "@/components/inventory/InstallAgent";
 import { NodeForm } from "@/components/inventory/NodeForm";
 import { NodeLifecycleCard } from "@/components/inventory/NodeLifecycleCard";
@@ -248,6 +249,7 @@ function AgentCard({ node, runtime, isAdmin }: { node: Node; runtime?: NodeRunti
           </>
         )}
       </dl>
+      <AgentUpgradeRow nodeId={node.id} isAdmin={isAdmin} />
       {isAdmin && (
         <div className="mt-4 flex flex-wrap items-center gap-2">
           {a.commands && a.connection !== "offline" && (

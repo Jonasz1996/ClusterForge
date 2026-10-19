@@ -29,6 +29,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/Jonasz1996/clusterforge/internal/agentbus"
+	"github.com/Jonasz1996/clusterforge/internal/agentupgrade"
 	"github.com/Jonasz1996/clusterforge/internal/assistant"
 	"github.com/Jonasz1996/clusterforge/internal/auth"
 	"github.com/Jonasz1996/clusterforge/internal/backups"
@@ -200,6 +201,9 @@ func serve() error {
 	hl := heal.NewService(pool, bus, dbs.Overview, log)
 	hl.EnableRun(runner, ev)
 	hl.Changed = func() { eval.Kick(); dbs.Kick() }
+	// Agents bijwerken: met de knop, en vanzelf na een serverupdate.
+	upg := agentupgrade.NewService(pool, ev, log, runner, bus, cfg.AgentDir, version)
+	upg.Changed = eval.Kick
 	// Een database als onderdeel van een cluster: MariaDB Galera op de
 	// nodes die er al zijn, met het geheugengebruik uit VictoriaMetrics in
 	// het plan.
@@ -345,6 +349,7 @@ func serve() error {
 	goLoop(ctx, log, "dbs", dbs.Run)
 	goLoop(ctx, log, "crons", crons.Run)
 	goLoop(ctx, log, "heal", hl.Run)
+	goLoop(ctx, log, "upg", upg.Run)
 	goLoop(ctx, log, "cmps", cmps.Run)
 	if git.Enabled() {
 		goLoop(ctx, log, "git", git.Run)
@@ -363,7 +368,7 @@ func serve() error {
 			Config: cfg, Log: log, Pool: pool, Auth: authSvc, Bus: bus, Hub: hub, Proxmox: pve, Jobs: runner,
 			Lifecycle: life, Deploy: dep, Backups: bk, Drift: drf, Failover: fo, Disaster: dis, Deps: dps, Rollout: ro,
 			GitOps: git, Assistant: asst, Risk: rsk, Topo: tp, Docs: dcs, Reports: rep, Kube: kub, KubeNodes: kn, Databases: dbs, Cronjobs: crons, Heal: hl,
-			Components: cmps, Version: version,
+			Components: cmps, Upgrades: upg, Version: version,
 		}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,

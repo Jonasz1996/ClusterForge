@@ -177,7 +177,7 @@ Gebruik het adres waarop de LXC bereikbaar is. Het script installeert zo nodig `
 | `--storage` | `local-lvm` | Kies gedeelde storage (Ceph, NFS) om de VM's over meerdere hosts te verdelen; op lokale storage komen ze allemaal op deze host |
 | `--vmid` | `9000` | Als 9000 al bezet is |
 | `--bridge` | `vmbr0` | Een andere netwerkbridge |
-| `--replace` | | Een eerdere golden image vervangen, bijvoorbeeld na een update van ClusterForge |
+| `--replace` | | Een eerdere golden image vervangen; sinds agentprotocol 23 alleen nog als de agent erin ouder is dan 23, want nieuwe VM's werken zichzelf bij |
 
 Daarna, in ClusterForge:
 
@@ -233,6 +233,18 @@ docker compose ps                     # server moet na een minuut "healthy" zijn
 Zet je liever `CF_VERSION` vast in `.env`, pas hem dan bij elke update aan. Draai alleen `main` of een versie-tag in productie, geen werkbranch: een branch die later anders gemerged wordt, kan je database een migratie geven die `main` niet kent.
 
 Met een uitgebracht image hoeft de LXC niets te bouwen: zet `CF_IMAGE=ghcr.io/jonasz1996/clusterforge-server:v0.5.0` in `.env` en draai `docker compose pull && docker compose up -d`.
+
+### De agents
+
+Agents vanaf protocol 23 werken zichzelf bij: na de update ziet de server dat ze ouder zijn en werkt hij ze binnen een paar minuten bij, één node tegelijk per cluster. Op prod nooit vanzelf; daar klik je bij Nodes op "Bijwerken in … (prod)". Volgen kan bij Nodes (kaart "Agents bijwerken") en bij Taken. Uitzetten, voor alles of per cluster, kan bij Instellingen → Agents bijwerken.
+
+Een agent onder protocol 23 kent dat nog niet. Werk die één keer met de hand bij, op elke node, nadat de server "healthy" is:
+
+```sh
+curl -fsSL http://192.168.10.153:8080/install/agent.sh | sudo sh -s -- --server http://192.168.10.153:8080 --allow-http --upgrade
+```
+
+(Met https laat je `--allow-http` weg.) De kaart "Agents bijwerken" bij Nodes zegt welke nodes dat nog nodig hebben, met het commando voor jouw server. Daarna hoef je dit niet meer, en ook het golden image niet na elke update opnieuw te maken: een VM uit een ouder image meldt zich aan en wordt daarna vanzelf bijgewerkt. Alleen een image met een agent onder protocol 23 maak je nog één keer opnieuw met `--replace`.
 
 ## Problemen
 

@@ -3606,6 +3606,96 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
+  /agent-upgrades:
+    get:
+      operationId: listAgentUpgrades
+      summary: Welke agents verouderd zijn en of ze vanzelf bijgewerkt worden
+      description: |
+        Per node met een agent: versie, protocol en binary tegenover de agent die deze server aanbiedt. Een agent vanaf
+        protocol 23 werkt zichzelf bij; een oudere werk je één keer met het installatiescript en --upgrade bij. Ook voor
+        viewers.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentUpgradeOverview" }
+        "401": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: startAgentUpgrades
+      summary: Agents bijwerken (admin); één taak agents.upgrade per cluster, één node tegelijk
+      description: |
+        node_ids werkt die nodes bij, cluster_id elke verouderde agent van dat cluster, all elke verouderde agent buiten
+        prod. Per cluster één node tegelijk: de volgende pas als de vorige met de nieuwe agent terug is. Komt een node niet
+        terug of zet hij de oude agent terug, dan stopt de taak van dat cluster. Op prod vraagt het tweestapsverificatie en
+        de slug van het cluster in confirm; nodes uit meer dan één prodcluster tegelijk kan niet (400). Een cluster waar al
+        een taak loopt, staat in skipped; is er niets gestart, dan 409.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AgentUpgradeInput" }
+      responses:
+        "202":
+          description: Taken aangemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentUpgradeStarted" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /agent-upgrades/auto:
+    put:
+      operationId: setAgentUpgradeAuto
+      summary: Agents vanzelf bijwerken aan- of uitzetten (admin)
+      description: |
+        Aan (standaard) werkt ClusterForge elke minuut verouderde agents bij die verbonden zijn, met een taak per cluster.
+        Nooit op prod, niet op clusters waar het uitstaat, en niet naar een agent waarnaar bijwerken op die node al eens mislukte.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled]
+              properties:
+                enabled: { type: boolean }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentUpgradeOverview" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /clusters/{clusterId}/agent-upgrade-auto:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+    put:
+      operationId: setClusterAgentUpgradeAuto
+      summary: Agents vanzelf bijwerken op één cluster aan- of uitzetten (admin)
+      description: Uit werkt ClusterForge de agents van dit cluster alleen met de knop bij. Prod gaat nooit vanzelf.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled]
+              properties:
+                enabled: { type: boolean }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentUpgradeOverview" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
   /cronjobs:
     get:
       operationId: listCronjobs
@@ -10333,6 +10423,61 @@ components:
     JobStatus:
       type: string
       enum: [queued, running, succeeded, failed, canceled]
+    AgentUpgradeOverview:
+      type: object
+      required: [version, protocol, archs, auto, off_cluster_ids, agents, running]
+      properties:
+        version: { type: string, description: De versie van de agent die deze server aanbiedt }
+        protocol: { type: integer }
+        archs: { type: array, items: { type: string }, description: "Architecturen waarvoor de server een agent heeft" }
+        auto: { type: boolean, description: Agents vanzelf bijwerken staat aan }
+        off_cluster_ids: { type: array, items: { type: string, format: uuid }, description: Clusters waar vanzelf bijwerken uitstaat }
+        agents: { type: array, items: { $ref: "#/components/schemas/AgentUpgradeAgent" } }
+        running:
+          type: array
+          description: Taken agents.upgrade die wachten of lopen
+          items:
+            type: object
+            required: [cluster_id, job_id]
+            properties:
+              cluster_id: { type: string, format: uuid, nullable: true }
+              job_id: { type: string, format: uuid }
+    AgentUpgradeAgent:
+      type: object
+      required: [node_id, hostname, cluster_id, cluster_name, cluster_slug, cluster_environment, version, protocol, arch, online, state, why, auto]
+      properties:
+        node_id: { type: string, format: uuid }
+        hostname: { type: string }
+        cluster_id: { type: string, format: uuid, nullable: true }
+        cluster_name: { type: string }
+        cluster_slug: { type: string }
+        cluster_environment: { type: string, description: "lab, test, prod, of leeg zonder cluster" }
+        version: { type: string }
+        protocol: { type: integer }
+        arch: { type: string }
+        online: { type: boolean }
+        state:
+          type: string
+          enum: [current, outdated, failed, manual, newer, unknown]
+          description: |
+            current: dezelfde agent als die van de server. outdated: verouderd, werkt zichzelf bij. failed: de update werd
+            op de node teruggezet. manual: verouderd en ouder dan protocol 23, met de hand bijwerken. newer: nieuwer dan de
+            server. unknown: de server heeft geen agent voor deze node of de agent meldde zijn binary nog niet.
+        why: { type: string }
+        auto: { type: boolean, description: ClusterForge werkt deze agent vanzelf bij }
+    AgentUpgradeInput:
+      type: object
+      properties:
+        node_ids: { type: array, items: { type: string, format: uuid } }
+        cluster_id: { type: string, format: uuid }
+        all: { type: boolean }
+        confirm: { type: string, description: De slug van het prodcluster, ter bevestiging }
+    AgentUpgradeStarted:
+      type: object
+      required: [jobs, skipped]
+      properties:
+        jobs: { type: array, items: { $ref: "#/components/schemas/Job" } }
+        skipped: { type: array, items: { type: string } }
     Job:
       type: object
       required: [id, kind, title, status, error, cluster_id, node_id, proxmox_id, requested_by, attempts, cancel_requested, retryable, created_at, started_at, finished_at]
