@@ -343,7 +343,8 @@ const (
 	DBFromRunning = "running"
 	// DBFromGrastate: grastate.dat, na een gewone stop.
 	DBFromGrastate = "grastate"
-	// DBFromRecovery: galera_recovery, na een crash.
+	// DBFromRecovery: uit InnoDB, na een crash; DBPositionResult.Via zegt
+	// waarmee.
 	DBFromRecovery = "recovery"
 )
 
@@ -392,8 +393,8 @@ const (
 	// DBTimeout is hoe lang een verzoek op de agent mag duren.
 	DBTimeout = 30 * time.Second
 	// DBRecoverTimeout is hoe lang een DBPosition met Recover mag duren:
-	// galera_recovery start mariadbd even zonder netwerk, en InnoDB kan na
-	// een crash lang bezig zijn.
+	// galera_recovery (of mariadbd --wsrep-recover) start mariadbd even
+	// zonder netwerk, en InnoDB kan na een crash lang bezig zijn.
 	DBRecoverTimeout = 10 * time.Minute
 )
 
@@ -732,9 +733,10 @@ type DBGrant struct {
 	Privileges []string `json:"privileges"`
 }
 
-// DBPositionRequest: Recover laat de agent galera_recovery draaien als
-// MariaDB stilstaat en grastate.dat geen seqno heeft. Zonder Recover is
-// de positie dan onbekend.
+// DBPositionRequest: Recover laat de agent de positie uit InnoDB halen
+// als MariaDB stilstaat en grastate.dat geen seqno heeft: met
+// galera_recovery, of zonder dat script met mariadbd --wsrep-recover.
+// Zonder Recover is de positie dan onbekend.
 type DBPositionRequest struct {
 	Recover bool `json:"recover"`
 }
@@ -759,7 +761,11 @@ type DBPositionResult struct {
 	// bij een agent ouder dan DBMetricsSince.
 	UptimeSeconds int64 `json:"uptime_seconds,omitempty"`
 	// From is DBFromRunning, DBFromGrastate of DBFromRecovery.
-	From  string `json:"from,omitempty"`
+	From string `json:"from,omitempty"`
+	// Via is bij DBFromRecovery het programma dat de positie las:
+	// galera_recovery, of mariadbd --wsrep-recover als dat script
+	// ontbreekt. Leeg bij een oudere agent.
+	Via   string `json:"via,omitempty"`
 	Error string `json:"error,omitempty"`
 }
 

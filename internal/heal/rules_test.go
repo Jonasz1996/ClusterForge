@@ -1,6 +1,7 @@
 package heal
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -125,6 +126,184 @@ func TestDiagnoseRestartAll(t *testing.T) {
 	r = Diagnose(f.in)
 	if p := r.Plan; p == nil || p.Auto || !strings.Contains(p.Blocked, "DatabaseClusterNode2") || !strings.Contains(codes(r), "no_quorum") {
 		t.Errorf("plan zonder Node2: %+v %s", r.Plan, codes(r))
+	}
+}
+
+func TestDiagnoseGaleraPackage(t *testing.T) {
+	// Alles gestopt na een herstart; Node1 ging naar MariaDB 12.3.2 zonder
+	// mariadb-server-galera.
+	f := jonas()
+	for i, id := range f.ids {
+		n := f.in.Nodes[id]
+		n.Inspect.Galera.ClusterAddress = "gcomm://192.168.10.181,192.168.10.182,192.168.10.183"
+		n.Inspect.Galera.NodeAddress = ""
+		n.Inspect.Galera.PeerTimeouts = nil
+		n.Inspect.Active, n.Inspect.Processes, n.Inspect.Enabled = "inactive", nil, "enabled"
+		if i == 0 {
+			n.Inspect.Galera.MissingTools = []string{"galera_recovery"}
+		}
+		f.in.Group.Servers[i].Running, f.in.Group.Servers[i].Galera = false, nil
+		f.in.Nodes[id] = n
+	}
+	r := Diagnose(f.in)
+	want := "unit_stopped@DatabaseClusterNode1 galera_package@DatabaseClusterNode1 unit_stopped@DatabaseClusterNode2 unit_stopped@DatabaseClusterNode3 " +
+		"galera_no_primary@DatabaseClusterNode1+DatabaseClusterNode2+DatabaseClusterNode3"
+	if got := codes(r); got != want {
+		t.Errorf("problemen:\n%s\nverwacht:\n%s", got, want)
+	}
+	for _, p := range r.Problems {
+		if p.Code == CodeGaleraTools && (p.Level != LevelWarning || p.Title != "Op DatabaseClusterNode1 ontbreekt het pakket mariadb-server-galera" ||
+			!strings.HasPrefix(p.Why, "galera_recovery staat niet op DatabaseClusterNode1. Sinds MariaDB 12.3.2") || !strings.Contains(p.Why, "apt install mariadb-server-galera")) {
+			t.Errorf("probleem: %+v", p)
+		}
+	}
+	// Het plan kan, maar niet vanzelf: beginnen of aansluiten lukt op
+	// Node1 niet, en de taak slaat hem over.
+	p := r.Plan
+	if p == nil || p.Action != ActionGalera || p.Blocked != "" || p.Auto ||
+		p.AutoWhy != "Op DatabaseClusterNode1 ontbreekt mariadb-server-galera; die node kan het cluster niet beginnen en niet aansluiten. Installeer het eerst, of bevestig het plan." {
+		t.Fatalf("plan: %+v", p)
+	}
+	if steps := strings.Join(p.Steps, " "); !strings.Contains(steps, "mariadbd --wsrep-recover waar dat script ontbreekt") ||
+		!strings.Contains(steps, "Op DatabaseClusterNode1 ontbreekt mariadb-server-galera: de taak start MariaDB daar niet") {
+		t.Errorf("stappen: %q", p.Steps)
+	}
+	for i, n := range p.Nodes {
+		if n.NoGaleraTools != (i == 0) {
+			t.Errorf("node %s: NoGaleraTools %v", n.Hostname, n.NoGaleraTools)
+		}
+	}
+
+	// Draaien Node2 en Node3 in Primary, dan zou Node1 aansluiten; zonder
+	// het pakket lukt dat niet, en meer is er niet te doen.
+	for i, id := range f.ids[1:] {
+		n := f.in.Nodes[id]
+		n.Inspect.Active = "active"
+		f.in.Nodes[id] = n
+		f.in.Group.Servers[i+1].Running = true
+		f.in.Group.Servers[i+1].Galera = &protocol.DBGalera{ClusterStatus: "Primary", State: "Synced", StateCode: 4, ClusterSize: 2}
+	}
+	r = Diagnose(f.in)
+	if p := r.Plan; p == nil || p.Auto || p.Blocked != "Op DatabaseClusterNode1 ontbreekt mariadb-server-galera; zonder dat pakket sluit de node niet aan. Installeer het eerst, in de versie van mariadb-server" ||
+		len(p.Steps) != 0 {
+		t.Fatalf("aansluiten: %s %+v", codes(r), r.Plan)
+	}
+	// Staat ook Node2 stil, mét het pakket, dan start de taak alleen Node2.
+	n := f.in.Nodes[f.ids[1]]
+	n.Inspect.Active = "inactive"
+	f.in.Nodes[f.ids[1]] = n
+	f.in.Group.Servers[1].Running, f.in.Group.Servers[1].Galera = false, nil
+	r = Diagnose(f.in)
+	if p := r.Plan; p == nil || p.Auto || p.Blocked != "" || len(p.Steps) != 2 ||
+		!strings.HasPrefix(p.Steps[0], "Op DatabaseClusterNode2 MariaDB een voor een starten") ||
+		!strings.HasPrefix(p.Steps[1], "Op DatabaseClusterNode1 ontbreekt mariadb-server-galera: de taak start MariaDB daar niet") ||
+		!strings.HasPrefix(p.AutoWhy, "Op DatabaseClusterNode1 ontbreekt mariadb-server-galera; zonder dat pakket sluit die node niet aan") {
+		t.Fatalf("met Node2: %s %+v", codes(r), r.Plan)
+	}
+	n.Inspect.Active = "active"
+	f.in.Nodes[f.ids[1]] = n
+	f.in.Group.Servers[1].Running = true
+	f.in.Group.Servers[1].Galera = &protocol.DBGalera{ClusterStatus: "Primary", State: "Synced", StateCode: 4, ClusterSize: 2}
+	// Mist een draaiende node het pakket, dan kan hij geen donor zijn: niet
+	// vanzelf.
+	n = f.in.Nodes[f.ids[1]]
+	n.Inspect.Galera.MissingTools = []string{"galera_recovery"}
+	f.in.Nodes[f.ids[1]] = n
+	n = f.in.Nodes[f.ids[0]]
+	n.Inspect.Galera.MissingTools = nil
+	f.in.Nodes[f.ids[0]] = n
+	if r := Diagnose(f.in); r.Plan == nil || r.Plan.Auto || !strings.Contains(r.Plan.AutoWhy, "als donor") || !strings.Contains(codes(r), "galera_package@DatabaseClusterNode2") {
+		t.Fatalf("draaiende node zonder pakket: %s %+v", codes(r), r.Plan)
+	}
+
+	// Zonder Galera telt het niet.
+	f.in.Group.Kind = databases.KindSingle
+	for _, id := range f.ids {
+		f.in.Nodes[id].Inspect.Galera.On = false
+	}
+	if r := Diagnose(f.in); strings.Contains(codes(r), "galera_package") {
+		t.Errorf("zonder Galera: %s", codes(r))
+	}
+}
+
+func TestDiagnoseGaleraPackageEverywhere(t *testing.T) {
+	// Alle nodes naar 12.3 zonder mariadb-server-galera, en alles gestopt:
+	// geen node kan beginnen, dus geen knop.
+	f := jonas()
+	for i, id := range f.ids {
+		n := f.in.Nodes[id]
+		n.Inspect.Galera.ClusterAddress = "gcomm://192.168.10.181,192.168.10.182,192.168.10.183"
+		n.Inspect.Galera.NodeAddress, n.Inspect.Galera.PeerTimeouts = "", nil
+		n.Inspect.Active, n.Inspect.Processes = "inactive", nil
+		n.Inspect.Galera.MissingTools = []string{"galera_recovery"}
+		f.in.Group.Servers[i].Running, f.in.Group.Servers[i].Galera = false, nil
+		f.in.Nodes[id] = n
+	}
+	r := Diagnose(f.in)
+	if p := r.Plan; p == nil || p.Auto || !strings.HasPrefix(p.Blocked, "Op geen enkele node staat mariadb-server-galera") {
+		t.Fatalf("plan: %s %+v", codes(r), r.Plan)
+	}
+}
+
+func TestDiagnoseSST(t *testing.T) {
+	// Node1 haalt al een uur een volledige kopie bij Node2, die Primary is;
+	// Node3 staat stil, dus Galera meldt dat het die niet bereikt.
+	f := jonas()
+	for i, id := range f.ids {
+		n := f.in.Nodes[id]
+		n.Inspect.Galera.ClusterAddress = "gcomm://192.168.10.181,192.168.10.182,192.168.10.183"
+		n.Inspect.Galera.NodeAddress = ""
+		n.Inspect.Galera.PeerTimeouts = []string{"192.168.10.183"}
+		n.Inspect.Enabled = "enabled"
+		switch i {
+		case 0:
+			n.Inspect.Active, n.Inspect.StateSeconds, n.Inspect.Processes = "activating", 3600, []protocol.HealProcess{{PID: 900, Name: "mariadbd", Unit: "mariadb"}}
+			f.in.Group.Servers[i].Running, f.in.Group.Servers[i].Galera = false, nil
+		case 1:
+			n.Inspect.Active = "active"
+			f.in.Group.Servers[i].Running, f.in.Group.Servers[i].Active = true, "active"
+			f.in.Group.Servers[i].Galera = &protocol.DBGalera{ClusterName: "db", ClusterStatus: "Primary", State: "Donor/Desynced", ClusterSize: 2}
+		case 2:
+			n.Inspect.Active, n.Inspect.Processes = "inactive", nil
+			f.in.Group.Servers[i].Running, f.in.Group.Servers[i].Galera = false, nil
+		}
+		f.in.Nodes[id] = n
+	}
+	// Zonder SST-script lijkt Node1 te hangen.
+	if r := Diagnose(f.in); !strings.Contains(codes(r), "process_hung@DatabaseClusterNode1") {
+		t.Fatalf("zonder SST: %s", codes(r))
+	}
+	f.in.Nodes[f.ids[0]].Inspect.Galera.SST = "wsrep_sst_rsync"
+	r := Diagnose(f.in)
+	if strings.Contains(codes(r), "DatabaseClusterNode1") {
+		t.Errorf("Node1 haalt een kopie, toch: %s", codes(r))
+	}
+	// Node3 start pas als de kopie klaar is.
+	if p := r.Plan; p == nil || p.Auto || p.Blocked != "DatabaseClusterNode1 haalt nu een volledige kopie (SST); herstel de rest als die Synced is, zodat de donor niet twee kopieën tegelijk geeft" ||
+		slices.ContainsFunc(p.Nodes, func(n PlanNode) bool { return n.Hostname == "DatabaseClusterNode1" && (n.Kill || n.Start) }) {
+		t.Errorf("plan: %+v", p)
+	}
+}
+
+func TestDiagnoseNewClusterFlag(t *testing.T) {
+	f := jonas()
+	// Node3 draait; een afgebroken galera_new_cluster liet de vlag staan.
+	f.in.Nodes[f.ids[2]].Inspect.Galera.NewClusterFlag = true
+	r := Diagnose(f.in)
+	if !strings.Contains(codes(r), "galera_new_cluster_flag@DatabaseClusterNode3") {
+		t.Fatalf("problemen: %s", codes(r))
+	}
+	for _, p := range r.Problems {
+		if p.Code == CodeNewCluster && (p.Level != LevelWarning || p.Title != "Een volgende start van MariaDB op DatabaseClusterNode3 probeert een nieuw cluster te beginnen" ||
+			!strings.Contains(p.Why, "systemctl unset-environment _WSREP_NEW_CLUSTER")) {
+			t.Errorf("probleem: %+v", p)
+		}
+	}
+	// Zolang MariaDB start, hoort de vlag bij een galera_new_cluster die nog
+	// loopt.
+	f.in.Nodes[f.ids[2]].Inspect.Active = "activating"
+	if r := Diagnose(f.in); strings.Contains(codes(r), "galera_new_cluster_flag") {
+		t.Errorf("tijdens het starten: %s", codes(r))
 	}
 }
 

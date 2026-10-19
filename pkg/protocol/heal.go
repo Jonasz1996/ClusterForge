@@ -99,6 +99,17 @@ type HealGalera struct {
 	// PeerTimeouts zijn de adressen die de journal van de laatste vijftien
 	// minuten noemt bij "connection to peer … timed out".
 	PeerTimeouts []string `json:"peer_timeouts,omitempty"`
+	// MissingTools zijn de scripts van Galera die op deze node ontbreken,
+	// zoals galera_recovery: sinds MariaDB 12.3.2 zitten ze in een apart
+	// pakket. Leeg bij een oudere agent.
+	MissingTools []string `json:"missing_tools,omitempty"`
+	// NewClusterFlag: _WSREP_NEW_CLUSTER staat nog in de omgeving van
+	// systemd, zodat de volgende start van MariaDB een nieuw cluster begint.
+	NewClusterFlag bool `json:"new_cluster_flag,omitempty"`
+	// SST is het script van een volledige kopie dat nu in de unit draait,
+	// zoals wsrep_sst_rsync: de node haalt alle data bij een donor (of geeft
+	// ze als donor). Dat kan uren duren; zo'n node hangt niet.
+	SST string `json:"sst,omitempty"`
 }
 
 // HealPatroni is wat de agent in de config van Patroni leest, met waar elk

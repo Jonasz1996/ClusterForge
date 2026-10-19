@@ -99,7 +99,7 @@ func (o obs) describe(slug string) string {
 }
 
 // position vraagt een node waar zijn Galera staat. Met recover mag de agent
-// galera_recovery draaien; dat duurt langer.
+// de positie uit InnoDB lezen; dat duurt langer.
 func (s *Service) position(ctx context.Context, n Node, recover bool) (*protocol.DBPositionResult, error) {
 	timeout := s.Timeout
 	if recover {
@@ -186,7 +186,7 @@ type RecoverPlan struct {
 }
 
 // RecoverPlan bekijkt wat Opnieuw starten zou doen. Er verandert niets: de
-// agents lezen alleen, zonder galera_recovery.
+// agents lezen alleen, zonder de positie uit InnoDB te halen.
 func (s *Service) RecoverPlan(ctx context.Context, clusterID, id uuid.UUID) (RecoverPlan, error) {
 	c, err := s.q.GetCluster(ctx, clusterID)
 	if err != nil {
@@ -257,7 +257,7 @@ func (s *Service) RecoverPlan(ctx context.Context, clusterID, id uuid.UUID) (Rec
 	switch {
 	case p.Primary != "" || len(cands) == 0:
 	case unknown:
-		add(Warning, "after_crash", "", "na een crash staat de positie alleen in InnoDB; de taak leest haar eerst met galera_recovery en begint dan op de node met de nieuwste data")
+		add(Warning, "after_crash", "", "na een crash staat de positie alleen in InnoDB; de taak leest haar eerst uit InnoDB (galera_recovery, of mariadbd --wsrep-recover als dat script ontbreekt) en begint dan op de node met de nieuwste data")
 	default:
 		best, err := galera.Choose(cands)
 		if err != nil {
@@ -585,13 +585,13 @@ func (s *Service) decide(ctx context.Context, id string, st *jobs.Step, r *rende
 		}
 		pos := galera.Position{UUID: o.pos.UUID, Seqno: o.pos.Seqno, SafeToBootstrap: o.pos.SafeToBootstrap}
 		if !pos.Known() {
-			return recoverState{}, fmt.Errorf("de positie van %s is onbekend: %s", o.node.Hostname, firstNonEmpty(o.pos.Error, "geen seqno"))
+			return recoverState{}, fmt.Errorf("de positie van %s is onbekend: %s", o.node.Hostname, galera.PositionError(firstNonEmpty(o.pos.Error, "geen seqno")))
 		}
 		safe := ""
 		if pos.SafeToBootstrap {
 			safe = ", stopte als laatste"
 		}
-		st.Logf("%s: seqno %d uit %s%s", o.node.Hostname, pos.Seqno, o.pos.From, safe)
+		st.Logf("%s: seqno %d uit %s%s%s", o.node.Hostname, pos.Seqno, o.pos.From, galera.ViaNote(o.pos.Via), safe)
 		cands = append(cands, galera.Candidate{Name: o.node.Hostname, Index: o.node.Index, Position: pos})
 	}
 	best, err := galera.Choose(cands)
@@ -629,13 +629,18 @@ func (s *Service) recoverBegin(ctx context.Context, id string, st *jobs.Step, r 
 }
 
 // recoverJoin start MariaDB op n opnieuw, tenzij hij al meedoet, en wacht
-// tot hij Synced is in een cluster van minstens want leden.
+// tot hij Synced is in een cluster van minstens want leden. Eerst gaat een
+// achtergebleven vlag van galera_new_cluster weg, anders begint n een
+// tweede cluster.
 func (s *Service) recoverJoin(ctx context.Context, id string, st *jobs.Step, n Node, slug string, want int) error {
 	if g, _ := s.galera(ctx, n.NodeID); healthy(g, slug, 1) {
 		st.Logf("%s doet al mee", n.Hostname)
 		return s.waitSynced(ctx, st, n, slug, want)
 	}
-	restart := []templates.Step{{Step: protocol.Step{Service: &protocol.ServiceStep{Name: "mariadb", State: "restarted"}}, Title: "service mariadb"}}
+	restart := []templates.Step{
+		{Step: protocol.Step{Command: &protocol.CommandStep{Run: galera.ClearNewCluster, Unless: galera.NewClusterGone}}, Title: "de vlag van galera_new_cluster wissen"},
+		{Step: protocol.Step{Service: &protocol.ServiceStep{Name: "mariadb", State: "restarted"}}, Title: "service mariadb"},
+	}
 	if _, err := deployApplyAs(ctx, s, id, st, n, "-join", restart); err != nil {
 		return err
 	}

@@ -329,8 +329,14 @@ func (s *Service) startServer(ctx context.Context, id string, st *jobs.Step, n P
 // startNoBlock start de unit zonder te wachten: een node die een volledige
 // kopie haalt, kan er uren over doen, en systemd blijft dan bezig.
 func (s *Service) startNoBlock(ctx context.Context, id string, st *jobs.Step, n PlanNode) error {
+	run := "systemctl reset-failed " + n.Unit + " 2>/dev/null; systemctl start --no-block " + n.Unit
+	if n.Unit == "mariadb" {
+		// Een gewone start begint nooit een cluster, ook niet als een
+		// afgebroken galera_new_cluster de vlag liet staan.
+		run = galera.ClearNewCluster + "; " + run
+	}
 	steps := []templates.Step{{Step: protocol.Step{Command: &protocol.CommandStep{
-		Run: "systemctl reset-failed " + n.Unit + " 2>/dev/null; systemctl start --no-block " + n.Unit, Unless: "systemctl is-active --quiet " + n.Unit,
+		Run: run, Unless: "systemctl is-active --quiet " + n.Unit,
 	}}, Title: n.Unit + " starten"}}
 	_, err := s.apply(ctx, id, st, n, "-start", steps)
 	return err
@@ -386,9 +392,15 @@ func (s *Service) runGalera(ctx context.Context, j *jobs.Job, p runParams) error
 		if !n.Start && begin == nil {
 			continue
 		}
+		// Zonder galera.Package sluit n niet aan; starten zou mislukken of
+		// tot JoinTimeout wachten. Controleren meldt het.
 		if err := j.Step(ctx, n.Hostname+": aansluiten", func(ctx context.Context, st *jobs.Step) error {
 			if g, _ := s.galera(ctx, n.NodeID); healthy(g, name, 1) {
 				st.Logf("%s doet al mee", n.Hostname)
+				return nil
+			}
+			if n.NoGaleraTools {
+				st.Logf("%s overgeslagen: het pakket %s ontbreekt, en zonder sluit hij niet aan (ook niet met IST)", n.Hostname, galera.Package)
 				return nil
 			}
 			if err := s.startNoBlock(ctx, id, st, n); err != nil {
@@ -399,24 +411,43 @@ func (s *Service) runGalera(ctx context.Context, j *jobs.Job, p runParams) error
 		}); err != nil {
 			return err
 		}
-		joined++
+		// Te laag tellen is veilig: waitSynced wacht op minstens zoveel
+		// leden.
+		if !n.NoGaleraTools {
+			joined++
+		}
 	}
 	return j.Step(ctx, "Controleren", func(ctx context.Context, st *jobs.Step) error {
-		uuids := map[string][]string{}
+		var noTools []string
 		for _, n := range nodes {
+			if g, _ := s.galera(ctx, n.NodeID); n.NoGaleraTools && !healthy(g, name, 1) {
+				noTools = append(noTools, n.Hostname)
+			}
+		}
+		uuids := map[string][]string{}
+		want := len(nodes) - len(noTools)
+		for _, n := range nodes {
+			if slices.Contains(noTools, n.Hostname) {
+				continue
+			}
 			g, err := s.galera(ctx, n.NodeID)
 			switch {
 			case err != nil:
 				return fmt.Errorf("%s: %w", n.Hostname, err)
-			case !healthy(g, name, len(nodes)):
-				return fmt.Errorf("%s is %s in een %s component van %d leden; verwacht Synced in Primary met %d", n.Hostname, g.State, g.ClusterStatus, g.ClusterSize, len(nodes))
+			case !healthy(g, name, want):
+				return fmt.Errorf("%s is %s in een %s component van %d leden; verwacht Synced in Primary met %d", n.Hostname, g.State, g.ClusterStatus, g.ClusterSize, want)
 			}
 			uuids[g.ClusterUUID] = append(uuids[g.ClusterUUID], n.Hostname)
 		}
 		if len(uuids) > 1 {
 			return errors.New("de nodes zitten in verschillende clusters met dezelfde naam")
 		}
-		st.Logf("%d nodes Synced in één cluster", len(nodes))
+		st.Logf("%d nodes Synced in één cluster", want)
+		if len(noTools) > 0 {
+			return fmt.Errorf("%s doet niet mee: daar ontbreekt het pakket %s. Installeer het in de versie van mariadb-server "+
+				"(apt install %s=$(dpkg-query -W -f='${Version}' mariadb-server)) en start MariaDB daar, of herstel opnieuw",
+				strings.Join(noTools, " en "), galera.Package, galera.Package)
+		}
 		return nil
 	})
 }
@@ -465,18 +496,37 @@ func (s *Service) decide(ctx context.Context, id string, st *jobs.Step, p runPar
 		}
 		gp := galera.Position{UUID: pos.UUID, Seqno: pos.Seqno, SafeToBootstrap: pos.SafeToBootstrap}
 		if !gp.Known() {
-			return nil, fmt.Errorf("de positie van %s is onbekend: %s; ClusterForge begint het cluster niet", n.Hostname, cmpOr(pos.Error, "geen seqno"))
+			return nil, fmt.Errorf("de positie van %s is onbekend: %s; ClusterForge begint het cluster niet", n.Hostname, galera.PositionError(cmpOr(pos.Error, "geen seqno")))
 		}
 		safe := ""
 		if gp.SafeToBootstrap {
 			safe = ", stopte als laatste"
 		}
-		st.Logf("%s: seqno %d uit %s%s", n.Hostname, gp.Seqno, pos.From, safe)
+		st.Logf("%s: seqno %d uit %s%s%s", n.Hostname, gp.Seqno, pos.From, galera.ViaNote(pos.Via), safe)
 		cands = append(cands, galera.Candidate{Name: n.Hostname, Index: i, Position: gp})
 	}
 	best, err := galera.Choose(cands)
 	if err != nil {
 		return nil, err
+	}
+	if p.Plan.Nodes[best.Index].NoGaleraTools {
+		// Zonder galera_new_cluster begint best niet. Een node met het
+		// pakket en dezelfde seqno heeft dezelfde data (Choose eist
+		// dezelfde uuid) en mag dan in zijn plaats.
+		var with []galera.Candidate
+		for _, c := range cands {
+			if !p.Plan.Nodes[c.Index].NoGaleraTools {
+				with = append(with, c)
+			}
+		}
+		alt, err := galera.Choose(with)
+		if err != nil || alt.Position.Seqno != best.Position.Seqno {
+			return nil, fmt.Errorf("%s heeft de nieuwste data (seqno %d), maar daar ontbreekt het pakket %s met galera_new_cluster; ClusterForge begint het cluster niet. "+
+				"Installeer het in de versie van mariadb-server (apt install %s=$(dpkg-query -W -f='${Version}' mariadb-server)) en herstel opnieuw",
+				best.Name, best.Position.Seqno, galera.Package, galera.Package)
+		}
+		st.Logf("%s heeft dezelfde data als %s (seqno %d) en begint het cluster, want op %s ontbreekt %s", alt.Name, best.Name, alt.Position.Seqno, best.Name, galera.Package)
+		return &p.Plan.Nodes[alt.Index].NodeID, nil
 	}
 	st.Logf("%s heeft de nieuwste data (seqno %d) en begint het cluster", best.Name, best.Position.Seqno)
 	return &p.Plan.Nodes[best.Index].NodeID, nil

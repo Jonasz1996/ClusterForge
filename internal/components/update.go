@@ -24,6 +24,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/Jonasz1996/clusterforge/internal/events"
+	"github.com/Jonasz1996/clusterforge/internal/galera"
 	"github.com/Jonasz1996/clusterforge/internal/jobs"
 	"github.com/Jonasz1996/clusterforge/internal/store"
 	"github.com/Jonasz1996/clusterforge/internal/templates"
@@ -221,7 +222,8 @@ func updateEffects(p UpdatePlan, spec Spec, nodes []rollNode) []string {
 			order += ", daarna de scheidsrechter " + joinHosts(arbiters)
 		}
 		out = append(out,
-			fmt.Sprintf("Node voor node: %s. Op elke node draait ClusterForge apt-get update en werkt het alleen MariaDB en Galera bij, binnen de versie van Debian, zoals 11.8.3 naar 11.8.4.", order),
+			fmt.Sprintf("Node voor node: %s. Op elke node draait ClusterForge apt-get update en werkt het alleen MariaDB en Galera bij, binnen de versie van Debian, zoals 11.8.3 naar 11.8.4. "+
+				"Heeft de nieuwe versie de scripts van Galera in %s (MariaDB.org vanaf 12.3.2), dan installeert het dat mee, zodat de node weer aansluit.", order, galera.Package),
 			"Veranderde er iets, dan herstart MariaDB op die node, en ClusterForge wacht tot hij weer Synced is voor de volgende node. De andere nodes werken door.")
 		if len(writers) > 0 && spec.VIP != nil {
 			out = append(out, fmt.Sprintf("Bij de herstart van %s gaat het VIP %s naar een andere node; de app kan een paar seconden niet schrijven.", joinHosts(writers), spec.VIP.Address))
@@ -394,14 +396,42 @@ func updatePkgs(patterns []string) string {
 	return `pkgs=$(dpkg-query -W -f='${db:Status-Abbrev} ${Package}\n' ` + strings.Join(q, " ") + ` 2>/dev/null | awk '$1=="ii"{print $2}')`
 }
 
+// galeraExtra zet $extra op galera.Package in de versie die apt voor
+// mariadb-server zou installeren, als Galera op de node staat, dat pakket
+// nog niet, en de pakketbron het in die versie heeft: sinds MariaDB 12.3.2
+// (MariaDB.org) zitten de scripts van Galera daarin. Het moet mee in
+// dezelfde apt-get als het bijwerken: mariadb-server stopt en start MariaDB
+// zelf, en zonder de scripts sluit hij niet aan, faalt die start en dus apt.
+func galeraExtra(apt string) string {
+	return `extra=; if dpkg-query -W -f='${db:Status-Abbrev}' galera-4 2>/dev/null | grep -q '^ii' && ` +
+		`! dpkg-query -W -f='${db:Status-Abbrev}' ` + galera.Package + ` 2>/dev/null | grep -q '^ii'; then ` +
+		`cand=$(LC_ALL=C apt-cache policy mariadb-server 2>/dev/null | awk '/Candidate:/{print $2}'); ` +
+		`[ -z "$cand" ] || [ "$cand" = "(none)" ] || ! ` + apt + ` -s -o Debug::NoLocking=1 install --no-remove "` + galera.Package + `=$cand" >/dev/null 2>&1 || ` +
+		`extra="` + galera.Package + `=$cand"; fi`
+}
+
+// galeraScripts controleert na het bijwerken of Galera zijn scripts nog
+// heeft, en installeert anders galera.Package in de versie van
+// mariadb-server. Heeft de pakketbron die versie niet, dan stopt de stap,
+// voor de herstart.
+func galeraScripts(apt string) string {
+	pin := `"` + galera.Package + `=$(dpkg-query -W -f='${Version}' mariadb-server)"`
+	return `{ ! dpkg-query -W -f='${db:Status-Abbrev}' galera-4 2>/dev/null | grep -q '^ii' || command -v galera_recovery >/dev/null || ` +
+		`{ { ` + apt + ` -s -o Debug::NoLocking=1 install --no-remove ` + pin + ` >/dev/null 2>&1 || ` +
+		`{ echo "` + galera.Package + ` staat niet in de pakketbron in de versie van mariadb-server; zonder dat pakket sluit deze node niet meer aan als MariaDB opnieuw start" >&2; exit 1; }; } && ` +
+		`echo "nieuw: ` + galera.Package + ` (sinds MariaDB 12.3.2 apart)" && ` +
+		`DEBIAN_FRONTEND=noninteractive ` + apt + ` install -y --no-install-recommends --no-remove -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold ` + pin + `; }; }`
+}
+
 // updateSteps zijn de stappen van bijwerken op een node, elk met een
 // merkteken van de taak, zodat een hervatte taak niets twee keer doet:
 //
 //   - check: apt-get update, en kijken of er een nieuwere versie is; zo ja,
 //     dan komt er een merkteken .found;
 //   - found: niets, maar alleen als .found er is; zo weet ClusterForge het;
-//   - install: de pakketten bijwerken. Veranderde er een versie, dan komt
-//     in .restart de tijd van voor het bijwerken;
+//   - install: de pakketten bijwerken, bij MariaDB met Galera ook
+//     galera.Package als het nodig werd (galeraScripts). Veranderde er een
+//     versie, dan komt in .restart de tijd van voor het bijwerken;
 //   - restart: de dienst herstarten, tenzij het pakket dat na die tijd al
 //     deed.
 func updateSteps(jobID uuid.UUID, patterns []string, unit string) (check, found, install, restart templates.Step) {
@@ -418,12 +448,20 @@ func updateSteps(jobID uuid.UUID, patterns []string, unit string) (check, found,
 	found = templates.Step{Step: protocol.Step{Command: &protocol.CommandStep{
 		Run: "true", Unless: fmt.Sprintf("test ! -e %s.found", m),
 	}}, Title: "er is een nieuwere versie"}
+	const opts = "--no-remove -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold"
+	upgrade := "DEBIAN_FRONTEND=noninteractive " + apt + " install -y --only-upgrade " + opts + " $pkgs && "
+	if unit == "mariadb" {
+		// Zonder --only-upgrade, want dat slaat een pakket over dat er nog
+		// niet staat; $pkgs staat er allemaal al.
+		upgrade = galeraExtra(apt) + `; if [ -n "$extra" ]; then echo "nieuw: $extra (sinds MariaDB 12.3.2 apart)"; ` +
+			"DEBIAN_FRONTEND=noninteractive " + apt + " install -y --no-install-recommends " + opts + ` $pkgs "$extra"; ` +
+			"else DEBIAN_FRONTEND=noninteractive " + apt + " install -y --only-upgrade " + opts + " $pkgs; fi && " + galeraScripts(apt) + " && "
+	}
 	install = templates.Step{Step: protocol.Step{Command: &protocol.CommandStep{
-		Run: fmt.Sprintf(`%s; [ -e %[2]s.t0 ] || date +%%s > %[2]s.t0; [ -e %[2]s.before ] || dpkg-query -W -f='${Package}=${Version}\n' $pkgs > %[2]s.before; `+
-			`DEBIAN_FRONTEND=noninteractive %[3]s install -y --only-upgrade --no-remove -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold $pkgs && `+
+		Run: fmt.Sprintf(`%s; [ -e %[2]s.t0 ] || date +%%s > %[2]s.t0; [ -e %[2]s.before ] || dpkg-query -W -f='${Package}=${Version}\n' $pkgs > %[2]s.before; %[4]s`+
 			`dpkg-query -W -f='${Package}=${Version}\n' $pkgs > %[2]s.after && `+
 			`{ cmp -s %[2]s.before %[2]s.after || { diff %[2]s.before %[2]s.after | sed -n 's/^> /nieuw: /p'; cp %[2]s.t0 %[2]s.restart; }; } && touch %[2]s.done`,
-			pkgs, m, apt),
+			pkgs, m, apt, upgrade),
 		Creates: m + ".done",
 	}}, Title: "de pakketten van de database bijwerken"}
 	// MariaDB kan bij een nieuwe node lang starten (een kopie van alle
