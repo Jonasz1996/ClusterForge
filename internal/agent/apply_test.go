@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"os"
@@ -174,5 +175,75 @@ func TestApplyUnitFileReloads(t *testing.T) {
 	unit.File.Content += "Restart=always\n"
 	if res := a.apply(context.Background(), []protocol.Step{unit}); res.OK || !strings.Contains(res.Error, "daemon-reload") {
 		t.Fatalf("mislukte reload: %+v", res)
+	}
+}
+
+// Uitvoer van apt-get update op een node van Jonas, met een kapotte bron van
+// Zabbix naast werkende bronnen.
+const aptZabbix404 = `Hit:1 http://security.debian.org trixie-security InRelease
+Hit:2 http://deb.debian.org/debian trixie InRelease
+Hit:4 http://repo.zabbix.com/zabbix/8.0/release/debian trixie InRelease
+Ign:6 http://repo.zabbix.com/zabbix/8.0/stable/debian trixie InRelease
+Err:7 http://repo.zabbix.com/zabbix/8.0/stable/debian trixie Release
+  404  Not Found [IP: 178.128.6.101 80]
+Reading package lists...
+E: The repository 'http://repo.zabbix.com/zabbix/8.0/stable/debian trixie Release' does not have a Release file.
+N: Updating from such a repository can't be done securely, and is therefore disabled by default.
+`
+
+const aptDebian404 = `Err:2 http://deb.debian.org/debian trixie InRelease
+  Could not resolve 'deb.debian.org'
+Reading package lists...
+W: Failed to fetch http://deb.debian.org/debian/dists/trixie/InRelease  Could not resolve 'deb.debian.org'
+E: Some index files failed to download. They have been ignored, or old ones used instead.
+`
+
+const aptLock = `Reading package lists...
+E: Could not get lock /var/lib/apt/lists/lock. It is held by process 123 (apt-get)
+`
+
+const aptPolicyDebian = `mariadb-server:
+  Installed: (none)
+  Candidate: 1:11.8.3-0+deb13u1
+  Version table:
+     1:11.8.3-0+deb13u1 500
+        500 http://deb.debian.org/debian trixie/main amd64 Packages
+`
+
+func TestApplyPackageBrokenSource(t *testing.T) {
+	for name, tc := range map[string]struct {
+		update, policy string
+		ok             bool
+		want           string
+	}{
+		"zabbix kapot":           {update: aptZabbix404, policy: aptPolicyDebian, ok: true, want: "waarschuwing: de pakketbron http://repo.zabbix.com/zabbix/8.0/stable/debian trixie werkt niet (404 Not Found [IP: 178.128.6.101 80])"},
+		"debian kapot":           {update: aptDebian404, policy: aptPolicyDebian, want: "Some index files failed to download"},
+		"slot":                   {update: aptLock, want: "Could not get lock"},
+		"bron biedt pakket aan":  {update: aptZabbix404, policy: "        500 http://repo.zabbix.com/zabbix/8.0/stable/debian trixie/main amd64 Packages\n", want: "biedt mariadb-server aan"},
+		"apt-cache policy faalt": {update: aptZabbix404, want: "does not have a Release file"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			a, h := applyAgent(t)
+			a.Exec = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+				switch {
+				case name == "env" && slices.Contains(args, "update"):
+					return []byte(tc.update), errors.New("exit status 100")
+				case name == "apt-cache":
+					if tc.policy == "" {
+						return nil, errors.New("exit status 1")
+					}
+					return []byte(tc.policy), nil
+				}
+				return h.Exec(ctx, name, args...)
+			}
+			res := a.apply(context.Background(), []protocol.Step{{Package: &protocol.PackageStep{Names: []string{"mariadb-server"}}}})
+			out := strings.Join(res.Steps[0].Output, "\n") + "\n" + res.Steps[0].Error
+			if res.OK != tc.ok || !strings.Contains(out, tc.want) {
+				t.Fatalf("ok=%v, uitvoer:\n%s", res.OK, out)
+			}
+			if tc.ok && !strings.Contains(out, "geïnstalleerd: mariadb-server") {
+				t.Fatalf("niet geïnstalleerd:\n%s", out)
+			}
+		})
 	}
 }
