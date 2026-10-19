@@ -247,3 +247,24 @@ func TestApplyPackageBrokenSource(t *testing.T) {
 		})
 	}
 }
+
+func TestApplyPackageDpkgInterrupted(t *testing.T) {
+	a, h := applyAgent(t)
+	installs, configured := 0, false
+	a.Exec = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		switch {
+		case name == "env" && slices.Contains(args, "dpkg"):
+			configured = true
+			return []byte("Setting up mariadb-server ...\n"), nil
+		case name == "env" && slices.Contains(args, "install") && !configured:
+			installs++
+			return []byte("E: dpkg was interrupted, you must manually run 'dpkg --configure -a' to correct the problem.\n"), errors.New("exit status 100")
+		}
+		return h.Exec(ctx, name, args...)
+	}
+	res := a.apply(context.Background(), []protocol.Step{{Package: &protocol.PackageStep{Names: []string{"mariadb-server"}}}})
+	out := strings.Join(res.Steps[0].Output, "\n") + "\n" + res.Steps[0].Error
+	if !res.OK || !configured || installs != 1 || !strings.Contains(out, "dpkg --configure -a") {
+		t.Fatalf("ok=%v configured=%v installs=%d, uitvoer:\n%s", res.OK, configured, installs, out)
+	}
+}

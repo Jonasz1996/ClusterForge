@@ -118,11 +118,31 @@ func (a *Agent) applyPackage(ctx context.Context, p *protocol.PackageStep) (bool
 		"-o", "Dpkg::Options::=--force-confdef", "-o", "Dpkg::Options::=--force-confold",
 	}
 	out, err := a.execTimeout(ctx, 10*time.Minute, "env", append(args, todo...)...)
+	if err != nil && strings.Contains(string(out), "dpkg was interrupted") {
+		// Een eerdere installatie brak af (bijvoorbeeld een mislukte
+		// postinst). apt weigert dan alles tot dpkg --configure -a draait;
+		// dat doet de agent zelf, en probeert het daarna één keer opnieuw.
+		lines = append(lines, "dpkg was onderbroken; ClusterForge draait dpkg --configure -a")
+		cout, cerr := a.execTimeout(ctx, 10*time.Minute, "env", "DEBIAN_FRONTEND=noninteractive", "dpkg", "--configure", "-a",
+			"--force-confdef", "--force-confold")
+		if cerr != nil {
+			return false, append(lines, tail(cout)...), fmt.Errorf("dpkg --configure -a: %w", cerr)
+		}
+		out, err = a.execTimeout(ctx, 10*time.Minute, "env", append(args, todo...)...)
+	}
 	lines = append(lines, tail(out)...)
 	if err != nil {
 		return false, lines, aptError("apt-get install", out, err)
 	}
-	return true, append(lines, "geïnstalleerd: "+strings.Join(todo, ", ")), nil
+	// De versie erbij, zodat zichtbaar is uit welke reeks apt koos.
+	done := todo
+	if after, err := a.packageStates(ctx, todo); err == nil {
+		done = nil
+		for _, n := range todo {
+			done = append(done, strings.TrimSpace(n+" "+after[n].Version))
+		}
+	}
+	return true, append(lines, "geïnstalleerd: "+strings.Join(done, ", ")), nil
 }
 
 // aptUpdate draait apt-get update. Faalt daarbij alleen een pakketbron
