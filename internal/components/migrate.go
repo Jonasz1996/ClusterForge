@@ -1232,6 +1232,8 @@ func (s *Service) trialPull(ctx context.Context, j *jobs.Job, st *jobs.Step, p t
 		pullReq := protocol.DBMigrateRequest{
 			Action: protocol.DBMigratePull, Database: p.Database, User: user, Password: pw, Host: route.Address, Port: route.Port,
 			Target: route.Target, Charset: route.Charset, Collation: route.Collation, Total: route.Size,
+			// De agent op de oude server geeft alleen EVENT als er events zijn.
+			SkipEvents: !route.pg() && route.Events == 0,
 		}
 		switch {
 		case route.pg() && route.Move:

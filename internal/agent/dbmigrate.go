@@ -452,7 +452,7 @@ func (a *Agent) runPull(req protocol.DBMigrateRequest, run protocol.DBMigrateRun
 		}
 		defer func() { _ = os.RemoveAll(dir) }()
 		client := clientArgs(cnf, run.TLS)
-		if err := a.pipeDump(ctx, client, req.Database, req.Target, progress); err != nil {
+		if err := a.pipeDump(ctx, client, req.Database, req.Target, req.SkipEvents, progress); err != nil {
 			return err
 		}
 		imported = true
@@ -495,10 +495,13 @@ func (a *Agent) runPull(req protocol.DBMigrateRequest, run protocol.DBMigrateRun
 var importArgs = []string{"--batch", "--binary-mode", "--skip-print-query-on-error"}
 
 // pipeDump stuurt de uitvoer van mariadb-dump op de oude server direct naar
-// mariadb op deze node.
-func (a *Agent) pipeDump(ctx context.Context, client []string, db, target string, progress func(int64)) error {
+// mariadb op deze node; met skipEvents zonder --events.
+func (a *Agent) pipeDump(ctx context.Context, client []string, db, target string, skipEvents bool, progress func(int64)) error {
 	dump := func(ctx context.Context, w io.Writer) error {
 		args := append(slices.Clone(client), dumpArgs...)
+		if skipEvents {
+			args = slices.DeleteFunc(args, func(a string) bool { return a == "--events" })
+		}
 		args = append(args, db)
 		err := a.stream(ctx, nil, w, "mariadb-dump", args...)
 		if err != nil && notInstalled(err) {

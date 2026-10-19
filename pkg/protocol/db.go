@@ -454,6 +454,10 @@ type DBMigrateRequest struct {
 	// Total is ongeveer hoeveel SQL er komt, voor de voortgang; 0 als dat
 	// onbekend is.
 	Total int64 `json:"total,omitempty"`
+	// SkipEvents: de oude database heeft geen events, dus de tijdelijke
+	// gebruiker heeft geen recht EVENT en pull dumpt zonder --events.
+	// Zonder dat recht stopt mariadb-dump --events bij SHOW EVENTS.
+	SkipEvents bool `json:"skip_events,omitempty"`
 	// Secret: accounts geeft ook de hash van elk wachtwoord.
 	Secret bool `json:"secret,omitempty"`
 	// Accounts zijn de gebruikers bij adopt, lock en unlock: één per host.
