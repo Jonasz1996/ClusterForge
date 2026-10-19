@@ -6,6 +6,7 @@ package agenttest
 // test meteen ziet als de agent iets nieuws vraagt.
 
 import (
+	"cmp"
 	"crypto/sha1"
 	"encoding/hex"
 	"errors"
@@ -43,6 +44,8 @@ type MariaDB struct {
 	Users []MariaUser
 	// DumpIncomplete laat mariadb-dump stoppen zonder de slotregel.
 	DumpIncomplete bool
+	// Port is waar MariaDB luistert; 0 is 3306.
+	Port int
 	// ImportError laat mariadb met een dump op stdin met deze fout stoppen,
 	// zoals een oudere MariaDB bij iets uit een nieuwere.
 	ImportError string
@@ -274,6 +277,7 @@ func (h *Host) mariaExec(args []string) ([]byte, error) {
 		if m.Galera != nil {
 			rows[3][1] = m.Galera.ClusterName
 		}
+		rows = append(rows, []string{"port", strconv.Itoa(cmp.Or(m.Port, 3306))})
 	case dbsql.MariaStatus:
 		rows = [][]string{{"Threads_connected", strconv.Itoa(m.Connections)}, {"Uptime", strconv.FormatInt(m.Uptime, 10)}}
 		if g := m.Galera; g != nil {

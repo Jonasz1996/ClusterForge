@@ -415,6 +415,11 @@ func (s *Service) planMigration(ctx context.Context, source, database string, co
 	}
 	sn := Node{NodeID: srv.NodeID, Hostname: srv.Hostname}
 	p.Source.Node = &sn
+	// MariaDB luistert niet altijd op 3306, bijvoorbeeld met HAProxy op
+	// 3306 van dezelfde node; de verhuizing leest rechtstreeks van MariaDB.
+	if !pg && srv.Port > 0 {
+		p.Source.Port = srv.Port
+	}
 	if srv.ErrorKind == databases.ErrOldAgent {
 		add(Blocked, "old_agent", &sn, fmt.Sprintf("de agent op %s is te oud; werk hem bij met het installatiescript en --upgrade", sn.Hostname), "")
 		return p, route, nil
@@ -589,7 +594,7 @@ func (s *Service) planMigration(ctx context.Context, source, database string, co
 	}
 	var tried []string
 	for i, a := range addrs {
-		pr, err := s.migrateReq(ctx, t.node, g.Engine, protocol.DBMigrateRequest{Action: protocol.DBMigrateProbe, Host: a, Port: port, Database: database})
+		pr, err := s.migrateReq(ctx, t.node, g.Engine, protocol.DBMigrateRequest{Action: protocol.DBMigrateProbe, Host: a, Port: p.Source.Port, Database: database})
 		if errors.As(err, &ce) {
 			add(Blocked, "target_agent", &t.node, ce.Msg, "")
 			return p, route, nil
@@ -616,7 +621,7 @@ func (s *Service) planMigration(ctx context.Context, source, database string, co
 	switch {
 	case p.Reach == nil:
 		add(Blocked, "unreachable", &t.node, fmt.Sprintf("%s bereikt %s op %s niet (%s). Zet in de firewall poort %d open van %s naar %s, zolang de verhuizing duurt",
-			t.node.Hostname, engineName, sn.Hostname, strings.Join(tried, "; "), port, joinHosts(target.Hosts), addrs[0]), "")
+			t.node.Hostname, engineName, sn.Hostname, strings.Join(tried, "; "), p.Source.Port, joinHosts(target.Hosts), addrs[0]), "")
 	case pg:
 		checkPGReach(&p, info, ip, sn, tried, add)
 	default:
@@ -738,7 +743,7 @@ func (s *Service) planMigration(ctx context.Context, source, database string, co
 
 	route = migrationRoute{
 		SourceVersion: info.Version, TargetVersion: target.Version,
-		SourceNode: sn, Address: p.Source.Address, Port: port, Via: p.Source.Via, Hosts: target.Hosts, Import: t.node, Owner: info.Owner,
+		SourceNode: sn, Address: p.Source.Address, Port: p.Source.Port, Via: p.Source.Via, Hosts: target.Hosts, Import: t.node, Owner: info.Owner,
 		Target: trial, Charset: info.Charset, Collation: info.Collation, Size: info.SizeBytes,
 		Views: info.Views, Routines: info.Routines, Triggers: info.Triggers, Events: info.Events, Leftover: leftover,
 		Servers: route.Servers, DataNodes: dataNodes(t.spec, nil), TargetAddress: target.Address, NewHosts: p.NewHosts,

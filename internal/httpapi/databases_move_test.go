@@ -490,7 +490,9 @@ func sortedCopy(v []string) []string {
 // TestDatabaseMoveDowngrade: Jonas' oude Galera draait MariaDB 12.2 van
 // MariaDB.org, de nieuwe op nc1 tot nc3 de 11.8 van Debian 13. De proef mag,
 // met een waarschuwing; de verhuizing pas na een geslaagde proef met
-// dezelfde versies. Een fout bij de import maakt de proef rood.
+// dezelfde versies. Een fout bij de import maakt de proef rood. Zoals bij
+// Jonas luistert MariaDB op 3307, achter een HAProxy op 3306: de
+// verhuizing leest rechtstreeks van 3307.
 func TestDatabaseMoveDowngrade(t *testing.T) {
 	lab := newGaleraLab(t)
 	e, c, g := lab.e, lab.c, lab.g
@@ -504,13 +506,13 @@ func TestDatabaseMoveDowngrade(t *testing.T) {
 		db1 = agenttest.NewHost(root, "10.0.20.181")
 		db1.SetUnit("mariadb", agenttest.Unit{Enabled: true, Active: true})
 		db1.MariaDB = &agenttest.MariaDB{
-			Version: "12.2.2-MariaDB-deb13", MaxConnections: 151, Uptime: 86400, Users: agenttest.DebianUsers(),
+			Version: "12.2.2-MariaDB-deb13", MaxConnections: 151, Uptime: 86400, Users: agenttest.DebianUsers(), Port: 3307,
 			Databases: []agenttest.Database{{Name: "nextcloud", Size: 300 << 20, Tables: 6, Rows: 100}},
 		}
 		ag.Exec, ag.ExecStdin, ag.Stream, ag.Root, ag.Collector.Run = db1.Exec, db1.ExecStdin, db1.Stream, root, db1.Exec
 	})
 	network := func(addr string) *agenttest.Host {
-		if addr == "10.0.20.181:3306" {
+		if addr == "10.0.20.181:3307" {
 			return db1
 		}
 		return nil

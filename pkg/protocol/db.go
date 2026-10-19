@@ -830,6 +830,8 @@ type DBServer struct {
 	Connections    int    `json:"connections"`
 	MaxConnections int    `json:"max_connections"`
 	UptimeSeconds  int64  `json:"uptime_seconds"`
+	// Port is waar MariaDB luistert; 0 bij een oudere agent of PostgreSQL.
+	Port int `json:"port,omitempty"`
 
 	Galera  *DBGalera  `json:"galera,omitempty"`
 	Patroni *DBPatroni `json:"patroni,omitempty"`

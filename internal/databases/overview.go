@@ -80,6 +80,8 @@ type Server struct {
 	ReadOnly       bool
 	Connections    int
 	MaxConnections int
+	// Port is waar MariaDB luistert; 0 als de agent het niet zegt.
+	Port int
 	// State zegt in een paar woorden hoe de server ervoor staat, en OK of
 	// dat goed is.
 	State     string
@@ -216,7 +218,7 @@ func server(r store.ListDBServersRow) Server {
 	}
 	var st protocol.DBServer
 	if err := json.Unmarshal(r.Status, &st); err == nil {
-		srv.ReadOnly, srv.Connections, srv.MaxConnections = st.ReadOnly, st.Connections, st.MaxConnections
+		srv.ReadOnly, srv.Connections, srv.MaxConnections, srv.Port = st.ReadOnly, st.Connections, st.MaxConnections, st.Port
 		srv.Galera, srv.Patroni, srv.Source, srv.Replicas = st.Galera, st.Patroni, st.Source, st.Replicas
 	}
 	// Kon ClusterForge het niet vragen, dan is de laatst bekende toestand

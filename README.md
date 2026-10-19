@@ -1038,7 +1038,7 @@ Bij **Databases** staat naast elke database van MariaDB of PostgreSQL **Verhuize
 - **Naar**: de clusters met een MariaDB van ClusterForge. Gebruikt de app van een cluster de database nu al, dan staat dat cluster gekozen. Je ziet de node die importeert, zijn versie, het adres waar de app de database straks vindt, de buffer pool, de vrije schijf op elke node en of de nieuwe node de oude server echt bereikt.
 - **Controle**: wat blokkeert, wat aandacht vraagt en wat goed is om te weten.
 
-Wat blokkeert: de database bestaat niet, de oude server draait niet goed genoeg om van te lezen, een agent is te oud, het is hetzelfde cluster, de nieuwe node bereikt poort 3306 van de oude server niet (een firewall of `bind-address`; er staat bij welke poort van welke adressen open moet), MariaDB weigert de node, bijvoorbeeld na te veel mislukte verbindingen (dan staat `mariadb-admin flush-hosts` erbij), een andere database heet al `<naam>_proef`, er loopt al een proef, een verhuizing wacht nog op overschakelen, of er is niet genoeg schijf voor de data plus 1 GB.
+Wat blokkeert: de database bestaat niet, de oude server draait niet goed genoeg om van te lezen, een agent is te oud, het is hetzelfde cluster, de nieuwe node bereikt de poort van MariaDB op de oude server niet (een firewall of `bind-address`; er staat bij welke poort van welke adressen open moet), MariaDB weigert de node, bijvoorbeeld na te veel mislukte verbindingen (dan staat `mariadb-admin flush-hosts` erbij), een andere database heet al `<naam>_proef`, er loopt al een proef, een verhuizing wacht nog op overschakelen, of er is niet genoeg schijf voor de data plus 1 GB.
 
 Wat aandacht vraagt, laat de proef wel door:
 
@@ -1057,7 +1057,7 @@ Goed om te weten: het verkeer gaat via het VIP van de oude server, zonder TLS, d
 
 1. Controle: het plan opnieuw, met dezelfde blokkades.
 2. Een kopie van een vorige proef weghalen, als die er nog is.
-3. Op de oude server maakt de agent een tijdelijke gebruiker `cf_verhuizing_<nummer>` met een willekeurig wachtwoord, die alleen mag lezen (`SELECT`, `SHOW VIEW`, en zo nodig `TRIGGER`, `EVENT` en het lezen van de routines) en alleen vanaf de adressen van de nieuwe node. De nieuwe node haalt de database met `mariadb-dump --single-transaction` en zet haar meteen in `<naam>_proef`; er komt geen bestand op schijf. Daarna haalt de agent de tijdelijke gebruiker weer weg, ook als de proef mislukt of je ze annuleert.
+3. Op de oude server maakt de agent een tijdelijke gebruiker `cf_verhuizing_<nummer>` met een willekeurig wachtwoord, die alleen mag lezen (`SELECT`, `SHOW VIEW`, en zo nodig `TRIGGER`, `EVENT` en het lezen van de routines) en alleen vanaf de adressen van de nieuwe node. De nieuwe node haalt de database met `mariadb-dump --single-transaction` en zet haar meteen in `<naam>_proef`; er komt geen bestand op schijf. Hij verbindt rechtstreeks met de poort waarop MariaDB op die node luistert, ook als dat niet 3306 is: een HAProxy of andere proxy ertussen zou MariaDB het adres van de proxy laten zien, en dan weigert ze de tijdelijke gebruiker. Daarna haalt de agent de tijdelijke gebruiker weer weg, ook als de proef mislukt of je ze annuleert.
 4. Rijen en objecten vergelijken: ClusterForge telt de rijen van elke tabel aan beide kanten, en de views, routines, triggers en events. Een paar rijen verschil is normaal, want de app schrijft intussen verder; ontbreekt er een tabel of object, dan is de proef mislukt.
 5. `<naam>_proef` weghalen.
 
