@@ -19,6 +19,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/Jonasz1996/clusterforge/internal/databases"
+	galerapkg "github.com/Jonasz1996/clusterforge/internal/galera"
 	"github.com/Jonasz1996/clusterforge/pkg/protocol"
 )
 
@@ -42,6 +43,8 @@ const (
 	CodePatroniDCS   = "patroni_dcs"
 	CodePatroniAddr  = "patroni_wrong_address"
 	CodePatroniConf  = "patroni_config"
+	CodeGaleraTools  = "galera_package"
+	CodeNewCluster   = "galera_new_cluster_flag"
 )
 
 // Wat een plan doet.
@@ -133,6 +136,9 @@ type PlanNode struct {
 	OldNodeAddress    string
 	NodeAddress       string
 	File              string
+	// NoGaleraTools: op de node ontbreekt galerapkg.Package. Hij kan het
+	// cluster dan niet beginnen en niet aansluiten; de taak slaat hem over.
+	NoGaleraTools bool
 }
 
 // Plan is wat Zelfherstel zou doen.
@@ -234,7 +240,9 @@ func Diagnose(in Input) Report {
 			st.hung = true
 		case stopped:
 			st.down = true
-		case e.Active == "activating" && e.Galera != nil && len(e.Galera.PeerTimeouts) > 0 && e.StateSeconds >= HungAfter:
+		case e.Active == "activating" && e.Galera != nil && len(e.Galera.PeerTimeouts) > 0 && e.StateSeconds >= HungAfter && e.Galera.SST == "":
+			// Een node die een volledige kopie haalt, start zo lang als de
+			// kopie duurt; stoppen begint haar opnieuw.
 			st.hung = true
 		}
 		states = append(states, st)
@@ -251,6 +259,10 @@ func Diagnose(in Input) Report {
 	// noDCS: Patroni bereikt etcd niet; badAddr: Patroni geeft een adres
 	// op dat de node niet heeft.
 	var noDCS, badAddr []string
+	// noTools: Galera mist zijn scripts, zoals galera_recovery; sst: de
+	// node haalt een volledige kopie.
+	var noTools, sst []string
+	noToolsOn := map[string]bool{}
 	known := knownAddresses(in, states)
 	for _, st := range states {
 		if st.insp == nil {
@@ -284,6 +296,19 @@ func Diagnose(in Input) Report {
 			add(CodeDiskFull, LevelWarning, fmt.Sprintf("De schijf van %s is bijna vol", h),
 				fmt.Sprintf("%s heeft nog %s vrij van %s. Een database die niet kan schrijven, stopt; een node die opnieuw aansluit, heeft ruimte nodig voor een volledige kopie. Maak ruimte of vergroot de schijf; ClusterForge gooit niets weg.",
 					e.DataDir, bytes(e.DataFree), bytes(e.DataTotal)), h)
+		}
+		if e.Galera != nil && e.Galera.SST != "" && e.Active == "activating" {
+			sst = append(sst, h)
+		}
+		if e.Galera != nil && e.Galera.On && len(e.Galera.MissingTools) > 0 {
+			noTools = append(noTools, h)
+			noToolsOn[h] = true
+			add(CodeGaleraTools, LevelWarning, fmt.Sprintf("Op %s ontbreekt het pakket %s", h, galerapkg.Package), missingToolsWhy(h, e.Galera.MissingTools), h)
+		}
+		// Tijdens een galera_new_cluster staat de vlag terecht: zolang
+		// MariaDB start.
+		if e.Galera != nil && e.Galera.NewClusterFlag && e.Active != "activating" {
+			add(CodeNewCluster, LevelWarning, fmt.Sprintf("Een volgende start van MariaDB op %s probeert een nieuw cluster te beginnen", h), newClusterWhy(h), h)
 		}
 		if e.Patroni != nil {
 			dcs, addr := patroniChecks(st, known, in.Managed, add)
@@ -341,6 +366,9 @@ func Diagnose(in Input) Report {
 	if len(noDCS) > 0 {
 		block("Patroni op " + joinHosts(noDCS) + " bereikt etcd niet; starten helpt pas als etcd weer antwoordt")
 	}
+	if len(sst) > 0 {
+		block(joinHosts(sst) + " haalt nu een volledige kopie (SST); herstel de rest als die Synced is, zodat de donor niet twee kopieën tegelijk geeft")
+	}
 	switch {
 	case galera && len(primaries) == 0:
 		p.Action = ActionGalera
@@ -366,6 +394,7 @@ func Diagnose(in Input) Report {
 			if st.insp != nil {
 				pn.Unit = st.insp.Unit
 			}
+			pn.NoGaleraTools = noToolsOn[pn.Hostname]
 			p.Nodes = append(p.Nodes, pn)
 		}
 		if len(wrong) > 0 {
@@ -373,9 +402,15 @@ func Diagnose(in Input) Report {
 		}
 		p.Steps = append(p.Steps,
 			"MariaDB stoppen op elke node"+killNote(p.Nodes)+", zodat Galera de positie (seqno) van elke node vastlegt.",
-			"De posities lezen uit grastate.dat, of na een crash met galera_recovery.",
+			"De posities lezen uit grastate.dat, of na een crash uit InnoDB met galera_recovery (of mariadbd --wsrep-recover waar dat script ontbreekt).",
 			"Het cluster beginnen op de node met de hoogste seqno (galera_new_cluster). Zijn de posities onbekend of hebben de nodes een andere geschiedenis, dan stopt de taak zonder te beginnen.",
 			"De andere nodes een voor een starten; elke node sluit aan en haalt de ontbrekende data (IST of een volledige kopie), en de taak wacht tot hij Synced is.")
+		if len(noTools) > 0 {
+			p.Steps = append(p.Steps, noToolsStep(noTools, true))
+		}
+		if len(noTools) == len(p.Nodes) {
+			block("Op geen enkele node staat " + galerapkg.Package + ", dus geen node kan het cluster beginnen. Installeer het eerst, in de versie van mariadb-server")
+		}
 		switch {
 		case len(wrong) > 0:
 			p.AutoWhy = "Adressen wijzigen gebeurt nooit vanzelf: een fout adres splitst het cluster. Bevestig het plan."
@@ -383,6 +418,8 @@ func Diagnose(in Input) Report {
 			p.AutoWhy = "Niet alle nodes zijn te bekijken."
 		case len(diskLow) > 0:
 			p.AutoWhy = "Een node heeft te weinig vrije ruimte voor een volledige kopie."
+		case len(noTools) > 0:
+			p.AutoWhy = "Op " + joinHosts(noTools) + " ontbreekt " + galerapkg.Package + "; die node kan het cluster niet beginnen en niet aansluiten. Installeer het eerst, of bevestig het plan."
 		default:
 			p.Auto = true
 			p.AutoWhy = "Alle nodes zijn te bekijken; de taak begint alleen op de node met de nieuwste data."
@@ -405,12 +442,15 @@ func Diagnose(in Input) Report {
 			}
 			pn := &p.Nodes[i]
 			pn.Primary = st.primary
+			pn.NoGaleraTools = noToolsOn[pn.Hostname]
 			if st.insp != nil {
 				pn.Unit = st.insp.Unit
 			}
 			if st.down || st.hung {
 				pn.Start = true
-				if st.hung {
+				// Zonder galerapkg.Package slaat de taak de node over; een
+				// hangend proces stoppen helpt hem dan niet.
+				if st.hung && !pn.NoGaleraTools {
 					pn.Kill, pn.KillPIDs = true, st.kill
 				}
 			}
@@ -418,9 +458,14 @@ func Diagnose(in Input) Report {
 		if len(wrong) > 0 {
 			p.Steps = append(p.Steps, "Op "+joinHosts(hostsOfPlan(wrong))+" de Galera-adressen bijwerken naar de huidige adressen van de nodes (met een kopie van het bestand). Een node die draait, leest ze bij zijn volgende start.")
 		}
-		var starts []string
+		// starts: de nodes die de taak start; startsNoTools: die ze
+		// overslaat omdat galerapkg.Package ontbreekt.
+		var starts, startsNoTools []string
 		for _, n := range p.Nodes {
-			if n.Start {
+			switch {
+			case n.Start && n.NoGaleraTools:
+				startsNoTools = append(startsNoTools, n.Hostname)
+			case n.Start:
 				starts = append(starts, n.Hostname)
 			}
 		}
@@ -434,9 +479,19 @@ func Diagnose(in Input) Report {
 			p.Steps = append(p.Steps, step+".")
 		}
 		switch {
+		case len(startsNoTools) > 0 && len(starts) == 0 && len(wrong) == 0:
+			block("Op " + joinHosts(startsNoTools) + " ontbreekt " + galerapkg.Package + "; zonder dat pakket sluit de node niet aan. Installeer het eerst, in de versie van mariadb-server")
+		case len(startsNoTools) > 0:
+			p.Steps = append(p.Steps, noToolsStep(startsNoTools, false))
+		}
+		switch {
 		case len(wrong) > 0:
 			p.AutoWhy = "Adressen wijzigen gebeurt nooit vanzelf: een fout adres splitst het cluster. Bevestig het plan."
-		case anyDisk(diskLow, starts):
+		case len(startsNoTools) > 0:
+			p.AutoWhy = "Op " + joinHosts(startsNoTools) + " ontbreekt " + galerapkg.Package + "; zonder dat pakket sluit die node niet aan. Installeer het eerst, of bevestig het plan voor de andere nodes."
+		case len(noTools) > 0 && len(starts) > 0:
+			p.AutoWhy = "Op " + joinHosts(noTools) + " ontbreekt " + galerapkg.Package + "; kiest Galera die node als donor, dan mislukt het aansluiten. Installeer het eerst, of bevestig het plan."
+		case anyDisk(diskLow, append(starts, startsNoTools...)):
 			p.AutoWhy = "Een node heeft te weinig vrije ruimte; starten zou meteen weer stoppen."
 		case len(badAddr) > 0:
 			p.AutoWhy = "Patroni op " + joinHosts(badAddr) + " geeft een adres op dat de node niet heeft; zet dat eerst goed, of bevestig het plan."
@@ -450,6 +505,38 @@ func Diagnose(in Input) Report {
 	}
 	r.Plan = finish(r, p)
 	return r
+}
+
+// missingToolsWhy legt uit waarom de scripts van Galera ontbreken en wat
+// eraan te doen is.
+func missingToolsWhy(host string, tools []string) string {
+	return fmt.Sprintf("%s staat niet op %s. Sinds MariaDB 12.3.2 zitten de scripts van Galera (galera_recovery, galera_new_cluster en die voor een volledige kopie) "+
+		"in het aparte pakket %s; wie naar 12.3.2 bijwerkte, krijgt het niet vanzelf. Zonder dat pakket kan deze node het cluster niet beginnen, niet aansluiten "+
+		"en geen donor zijn: ook voor een IST start MariaDB het script voor een volledige kopie (SST). Draait de node nu, laat hem dan draaien tot het pakket er staat. "+
+		"De positie na een crash leest Zelfherstel met mariadbd --wsrep-recover. Installeer het in de versie van mariadb-server, zodat apt de server niet bijwerkt: "+
+		"apt install %s=$(dpkg-query -W -f='${Version}' mariadb-server)",
+		strings.Join(tools, " en "), host, galerapkg.Package, galerapkg.Package)
+}
+
+// noToolsStep is de stap van het plan voor nodes zonder galerapkg.Package;
+// bootstrap: het plan begint het cluster opnieuw.
+func noToolsStep(hosts []string, bootstrap bool) string {
+	s := "Op " + joinHosts(hosts) + " ontbreekt " + galerapkg.Package + ": de taak start MariaDB daar niet, want zonder dat pakket begint die node geen cluster en sluit hij niet aan. "
+	if bootstrap {
+		s += "Heeft een node met het pakket dezelfde seqno, dan begint die het cluster; heeft een node zonder het pakket als enige de nieuwste data, dan begint de taak niets en blijven alle nodes gestopt. "
+	}
+	return s + "De andere nodes herstelt ze wel; daarna stopt ze met een fout tot het pakket er staat."
+}
+
+// newClusterWhy legt uit waarom de vlag van galera_new_cluster gevaarlijk
+// is en hoe hij weggaat.
+func newClusterWhy(host string) string {
+	v := galerapkg.NewClusterVar
+	return fmt.Sprintf("%s=--wsrep-new-cluster staat nog op %s, in de omgeving van systemd of in een bestand in /run zoals /run/mariadb-wsrep-new-cluster, van een galera_new_cluster die werd afgebroken. "+
+		"Elke start van MariaDB daar, ook een herstart door systemd zelf, probeert dan een nieuw cluster te beginnen. Meestal weigert Galera dat (safe_to_bootstrap: 0 in grastate.dat) en start de node niet; "+
+		"staat safe_to_bootstrap op 1, dan ontstaat naast het draaiende cluster een tweede. "+
+		"Zelfherstel en Opnieuw starten of Opnieuw synchroniseren bij het onderdeel wissen de vlag voor ze MariaDB starten. "+
+		"Met de hand: systemctl unset-environment %s; rm -f %s", v, host, v, strings.Join(galerapkg.NewClusterFiles, " "))
 }
 
 // wrongAddresses zoekt nodes waarvan de Galera-adressen niet kloppen met de

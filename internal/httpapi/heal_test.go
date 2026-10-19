@@ -15,6 +15,7 @@ import (
 
 	"github.com/Jonasz1996/clusterforge/internal/agent"
 	"github.com/Jonasz1996/clusterforge/internal/agent/agenttest"
+	"github.com/Jonasz1996/clusterforge/internal/galera"
 	"github.com/Jonasz1996/clusterforge/internal/store"
 )
 
@@ -103,18 +104,23 @@ func (d *healDB) shell(i int) func(cmd string) (bool, []byte, error) {
 				return true, nil, nil
 			}
 			return true, nil, fail
-		case cmd == "systemctl reset-failed mariadb 2>/dev/null; systemctl start --no-block mariadb":
+		case cmd == galera.ClearNewCluster+"; systemctl reset-failed mariadb 2>/dev/null; systemctl start --no-block mariadb":
 			cfg, _ := os.ReadFile(filepath.Join(root, healGalera))
 			d.mu.Lock()
 			alive := len(d.members) > 0
 			d.mu.Unlock()
-			if !alive || !strings.Contains(string(cfg), healNewAddr) {
+			// Zonder mariadb-server-galera faalt ook een IST: de joiner
+			// start altijd wsrep_sst_<methode>.
+			if !alive || !strings.Contains(string(cfg), healNewAddr) || h.MariaDB.NoGaleraScripts {
 				d.setUnit(i, agenttest.Unit{Failed: true})
 				return true, nil, nil
 			}
 			d.join(i, false)
 			return true, nil, nil
 		case strings.Contains(cmd, "galera_new_cluster"):
+			if h.MariaDB.NoGaleraScripts {
+				return true, []byte(galera.NoNewCluster + "\n"), fail
+			}
 			d.join(i, true)
 			return true, nil, nil
 		}
@@ -179,7 +185,7 @@ func (d *healDB) update() {
 	}
 }
 
-func newHealDB(t *testing.T, e *testEnv, c *client) *healDB {
+func newHealDB(t *testing.T, e *testEnv, c *client, setup ...func(i int, h *agenttest.Host)) *healDB {
 	t.Helper()
 	d := &healDB{}
 	if s := c.do("POST", "/api/v1/clusters", map[string]any{"slug": "database-cluster", "name": "database cluster", "type": "generic", "environment": "lab"}, &d.cluster); s != http.StatusCreated {
@@ -227,6 +233,9 @@ func newHealDB(t *testing.T, e *testEnv, c *client) *healDB {
 				h.SetUnit("mariadb", agenttest.Unit{Enabled: true, Active: true})
 				h.MariaDB.Down, h.MariaDB.Uptime = false, 3600
 				h.MariaDB.Galera = &agenttest.Galera{ClusterName: "db", UUID: healUUID, Status: "non-Primary", Size: 1, State: 0, Comment: "Initialized", Seqno: 40}
+			}
+			for _, f := range setup {
+				f(i, h)
 			}
 			d.hosts = append(d.hosts, h)
 			d.roots = append(d.roots, root)
@@ -524,6 +533,113 @@ func TestHealRun(t *testing.T) {
 	}
 }
 
+// TestHealRunNoGaleraScripts: zoals DatabaseClusterNode1 op 19 oktober mist
+// db1 galera_recovery, galera_new_cluster en de SST-scripts (MariaDB 12.3.2
+// zonder mariadb-server-galera). Zelfherstel meldt dat, leest de positie van
+// db1 met mariadbd --wsrep-recover en begint het cluster op db2, die de
+// nieuwste data heeft; db3 sluit aan. db1 kan niet aansluiten: de taak
+// start hem niet en faalt met wat er ontbreekt.
+func TestHealRunNoGaleraScripts(t *testing.T) {
+	e, c := adminClient(t)
+	d := newHealDB(t, e, c, func(i int, h *agenttest.Host) {
+		if i == 0 {
+			h.MariaDB.Version, h.MariaDB.NoGaleraScripts, h.MariaDB.Recovered = "12.3.2-MariaDB", true, healUUID+":39"
+		}
+	})
+	r := d.heal(t, e, c, func(r healView) bool {
+		return strings.Contains(r.codes(), "galera_package@db1") && strings.Contains(r.codes(), "galera_no_primary@db1+db2+db3")
+	})
+	for _, p := range r.Problems {
+		if p.Code == "galera_package" && (p.Title != "Op db1 ontbreekt het pakket mariadb-server-galera" || !strings.Contains(p.Why, "mariadbd --wsrep-recover")) {
+			t.Errorf("probleem: %+v", p)
+		}
+	}
+	if r.Plan == nil || r.Plan.Blocked != "" || r.Plan.Auto || !slices.ContainsFunc(r.Plan.Steps, func(s string) bool { return strings.HasPrefix(s, "Op db1 ontbreekt mariadb-server-galera") }) {
+		t.Fatalf("plan: %+v", r.Plan)
+	}
+	var j job
+	if s := c.do("POST", "/api/v1/heal/run", map[string]any{"key": r.Key, "hash": r.Plan.Hash}, &j); s != http.StatusAccepted {
+		t.Fatalf("herstellen: %d", s)
+	}
+	j = waitJobLong(t, c, j.ID)
+	logs := map[string]string{}
+	for _, st := range j.Steps {
+		logs[st.Name] = strings.Join(st.Log, "\n")
+	}
+	if j.Status != "failed" || !strings.Contains(j.Error, "db1 doet niet mee: daar ontbreekt het pakket mariadb-server-galera") {
+		t.Fatalf("taak: %s %s\n%v", j.Status, j.Error, logs)
+	}
+	if l := logs["db1: aansluiten"]; !strings.Contains(l, "db1 overgeslagen: het pakket mariadb-server-galera ontbreekt") {
+		t.Errorf("db1:\n%s", l)
+	}
+	if l := logs["Controleren"]; !strings.Contains(l, "2 nodes Synced in één cluster") {
+		t.Errorf("controleren:\n%s", l)
+	}
+	if slices.ContainsFunc(d.hosts[0].Calls(), func(c string) bool { return strings.Contains(c, "systemctl start --no-block mariadb") }) {
+		t.Errorf("db1 gestart: %v", d.hosts[0].Calls())
+	}
+	if l := logs["Posities lezen"]; !strings.Contains(l, "db1: seqno 39 uit recovery met mariadbd --wsrep-recover (galera_recovery ontbreekt)") ||
+		!strings.Contains(l, "db2: seqno 41 uit grastate") || !strings.Contains(l, "db2 heeft de nieuwste data (seqno 41) en begint het cluster") {
+		t.Errorf("posities:\n%s", l)
+	}
+	if !slices.Contains(d.hosts[0].Calls(), "mariadbd --user=mysql --wsrep-recover --disable-log-error") {
+		t.Errorf("db1 zonder mariadbd --wsrep-recover: %v", d.hosts[0].Calls())
+	}
+	d.mu.Lock()
+	began := slices.Clone(d.began)
+	d.mu.Unlock()
+	if !slices.Equal(began, []string{"db2"}) {
+		t.Fatalf("het cluster begon op %v", began)
+	}
+}
+
+// TestHealRunNoGaleraScriptsNewest: heeft de node zonder
+// mariadb-server-galera de nieuwste data, dan begint Zelfherstel het cluster
+// niet, ook niet op een andere node. Heeft een node met het pakket dezelfde
+// data, dan begint die.
+func TestHealRunNoGaleraScriptsNewest(t *testing.T) {
+	for _, tc := range []struct {
+		name, recovered, err, log string
+		began                     []string
+	}{
+		{"nieuwer", ":45", "db1 heeft de nieuwste data (seqno 45), maar daar ontbreekt het pakket mariadb-server-galera", "", nil},
+		{"gelijk", ":41", "db1 doet niet mee: daar ontbreekt het pakket mariadb-server-galera",
+			"db2 heeft dezelfde data als db1 (seqno 41) en begint het cluster, want op db1 ontbreekt mariadb-server-galera", []string{"db2"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			e, c := adminClient(t)
+			d := newHealDB(t, e, c, func(i int, h *agenttest.Host) {
+				if i == 0 {
+					h.MariaDB.Version, h.MariaDB.NoGaleraScripts, h.MariaDB.Recovered = "12.3.2-MariaDB", true, healUUID+tc.recovered
+				}
+			})
+			r := d.heal(t, e, c, func(r healView) bool {
+				return strings.Contains(r.codes(), "galera_package@db1") && strings.Contains(r.codes(), "galera_no_primary@db1+db2+db3")
+			})
+			var j job
+			if s := c.do("POST", "/api/v1/heal/run", map[string]any{"key": r.Key, "hash": r.Plan.Hash}, &j); s != http.StatusAccepted {
+				t.Fatalf("herstellen: %d", s)
+			}
+			j = waitJobLong(t, c, j.ID)
+			var log string
+			for _, st := range j.Steps {
+				if st.Name == "Posities lezen" {
+					log = strings.Join(st.Log, "\n")
+				}
+			}
+			if j.Status != "failed" || !strings.Contains(j.Error, tc.err) || !strings.Contains(log, tc.log) {
+				t.Fatalf("taak: %s %s\n%s", j.Status, j.Error, log)
+			}
+			d.mu.Lock()
+			began := slices.Clone(d.began)
+			d.mu.Unlock()
+			if !slices.Equal(began, tc.began) {
+				t.Fatalf("het cluster begon op %v", began)
+			}
+		})
+	}
+}
+
 // TestHealRunSingle: een losse MariaDB zonder cluster die stilstaat, start
 // Nu herstellen weer, met de events bij de node.
 func TestHealRunSingle(t *testing.T) {
@@ -551,6 +667,10 @@ func healRunSingle(t *testing.T, host, unit, version, title string) {
 		ag.Exec, ag.Root, ag.Collector.Run = h.Exec, root, h.Exec
 		h.MariaDB = &agenttest.MariaDB{Version: version, MaxConnections: 151, Down: true}
 		h.SetUnit(unit, agenttest.Unit{Enabled: true, Failed: true})
+		start := "systemctl reset-failed " + unit + " 2>/dev/null; systemctl start --no-block " + unit
+		if unit == "mariadb" {
+			start = galera.ClearNewCluster + "; " + start
+		}
 		h.Shell = func(cmd string) (bool, []byte, error) {
 			switch cmd {
 			case "systemctl is-active --quiet " + unit:
@@ -558,7 +678,7 @@ func healRunSingle(t *testing.T, host, unit, version, title string) {
 					return true, nil, nil
 				}
 				return true, nil, errors.New("exit status 3")
-			case "systemctl reset-failed " + unit + " 2>/dev/null; systemctl start --no-block " + unit:
+			case start:
 				h.SetUnit(unit, agenttest.Unit{Enabled: true, Active: true})
 				h.Locked(func() { h.MariaDB.Down, h.MariaDB.Uptime = false, 1 })
 				return true, nil, nil
