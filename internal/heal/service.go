@@ -313,6 +313,18 @@ func (s *Service) inputs(ctx context.Context, groups []databases.Group) ([]Input
 	for _, c := range comps {
 		managed[c.Engine+"/"+c.ClusterID.String()] = &Managed{ComponentID: c.ID, Title: databases.EngineName(c.Engine)}
 	}
+	pending, err := s.q.ListUnfinishedComponents(ctx)
+	if err != nil {
+		return nil, err
+	}
+	unfinished := map[string]*Unfinished{}
+	for _, c := range pending {
+		u := &Unfinished{ComponentID: c.ID, Running: c.JobStatus.JobStatus == store.JobStatusQueued || c.JobStatus.JobStatus == store.JobStatusRunning}
+		if c.JobError != nil {
+			u.Error = *c.JobError
+		}
+		unfinished[c.Engine+"/"+c.ClusterID.String()] = u
+	}
 	byID := map[uuid.UUID]store.ListHealNodesRow{}
 	known := map[string]string{}
 	for _, n := range nodes {
@@ -333,6 +345,7 @@ func (s *Service) inputs(ctx context.Context, groups []databases.Group) ([]Input
 		in := Input{Group: g, Nodes: map[uuid.UUID]Node{}, VIPs: vips, Known: known}
 		if g.ClusterID != nil {
 			in.Managed = managed[g.Engine+"/"+g.ClusterID.String()]
+			in.Unfinished = unfinished[g.Engine+"/"+g.ClusterID.String()]
 		}
 		for _, srv := range g.Servers {
 			n := byID[srv.NodeID]

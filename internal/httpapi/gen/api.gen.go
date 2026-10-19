@@ -7806,7 +7806,7 @@ type HealPlanNode struct {
 // HealProblem defines model for HealProblem.
 type HealProblem struct {
 	// Code no_inspect, unit_stopped, process_hung, process_outside_unit, unit_disabled, galera_wrong_address,
-	// galera_no_primary, galera_package, galera_new_cluster_flag, disk_full of no_quorum.
+	// galera_no_primary, galera_package, galera_new_cluster_flag, component_unfinished, disk_full of no_quorum.
 	Code  string           `json:"code"`
 	Level HealProblemLevel `json:"level"`
 	Nodes []string         `json:"nodes"`

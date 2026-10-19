@@ -159,12 +159,18 @@ func (g *galeraHosts) update() {
 }
 
 // restart sluit een node die niet meedoet aan bij het cluster; zonder
-// cluster startt hij niet, zoals Galera zonder Primary component.
+// cluster startt hij niet, zoals Galera zonder Primary component. De enige
+// node die meedoet, stopt het cluster met zijn herstart, en vindt daarna
+// niemand om bij aan te sluiten.
 func (g *galeraHosts) restart(name string, h *agenttest.Host) {
 	g.mu.Lock()
 	member, alive := slices.Contains(g.members, name), len(g.members) > 0
+	alone := member && len(g.members) == 1
 	g.mu.Unlock()
 	switch {
+	case alone:
+		g.leave(name, h)
+		h.SetUnit("mariadb", agenttest.Unit{Enabled: true, Failed: true})
 	case member:
 	case alive:
 		g.join(name, h, false)

@@ -45,6 +45,7 @@ const (
 	CodePatroniConf  = "patroni_config"
 	CodeGaleraTools  = "galera_package"
 	CodeNewCluster   = "galera_new_cluster_flag"
+	CodeUnfinished   = "component_unfinished"
 )
 
 // Wat een plan doet.
@@ -98,6 +99,17 @@ type Input struct {
 	// met zijn hostname. Een adres in wsrep_cluster_address van een node
 	// die (nog) niet bij de groep hoort, is niet verouderd en blijft staan.
 	Known map[string]string
+	// Unfinished is het onderdeel van ClusterForge voor deze database als
+	// het nog nooit helemaal uitgerold is.
+	Unfinished *Unfinished
+}
+
+// Unfinished is een onderdeel dat nog nooit helemaal uitgerold is: de
+// eerste uitrol loopt nog (Running) of stopte met Error.
+type Unfinished struct {
+	ComponentID uuid.UUID
+	Running     bool
+	Error       string
 }
 
 // Managed is een toegepast onderdeel; het herstel daarvan gaat met de
@@ -321,6 +333,10 @@ func Diagnose(in Input) Report {
 		}
 	}
 
+	if u := in.Unfinished; u != nil && !u.Running {
+		add(CodeUnfinished, LevelWarning, fmt.Sprintf("De uitrol van %s op %s is niet af", name, g.ClusterName), unfinishedWhy(name, galera, u), hostsOf(states)...)
+	}
+
 	if in.Managed != nil {
 		if hasDown(r.Problems) || g.Health == databases.HealthDown {
 			r.Plan = finish(r, &Plan{Managed: in.Managed, Steps: []string{
@@ -500,11 +516,33 @@ func Diagnose(in Input) Report {
 			p.AutoWhy = "Alleen starten van wat stilstaat; er gaat geen data verloren."
 		}
 	}
+	if in.Unfinished != nil && p.Auto {
+		// Zolang de uitrol niet af is, beslist het onderdeel; vanzelf
+		// herstellen zou er dwars door lopen.
+		p.Auto = false
+		p.AutoWhy = "De uitrol van het onderdeel van ClusterForge is niet af; Opnieuw toepassen bij de database van het cluster maakt hem af. Bevestig dit plan alleen als je de database nu zonder die uitrol wilt herstellen."
+	}
 	if p.Blocked != "" {
 		p.Auto = false
 	}
 	r.Plan = finish(r, p)
 	return r
+}
+
+// unfinishedWhy legt uit wat een uitrol die niet af kwam betekent en hoe hij
+// af komt.
+func unfinishedWhy(name string, galera bool, u *Unfinished) string {
+	s := "ClusterForge zet " + name + " op dit cluster, maar de laatste uitrol (Database toevoegen of Opnieuw toepassen) stopte"
+	if u.Error != "" {
+		s += ": " + strings.TrimSuffix(u.Error, ".")
+	}
+	s += ". Een node waar " + name + " nog niet op staat, ziet Zelfherstel niet, en vanzelf herstellen wacht tot de uitrol af is. " +
+		"Kies Opnieuw toepassen bij de database op de pagina van het cluster: dat installeert " + name + " waar het nog ontbreekt en laat elke node aansluiten."
+	if galera {
+		s += " Draait het cluster niet meer, dan begint de eerste node het opnieuw, behalve als er al databases met tabellen op staan of als een andere node al in het cluster zat; " +
+			"begin het dan hier met Nu herstellen en kies daarna Opnieuw toepassen."
+	}
+	return s
 }
 
 // missingToolsWhy legt uit waarom de scripts van Galera ontbreken en wat

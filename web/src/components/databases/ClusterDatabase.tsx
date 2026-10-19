@@ -578,7 +578,10 @@ function ReapplyDialog({ c, comp, onClose }: { c: ClusterDetail; comp: ClusterCo
           <p>
             ClusterForge zet de configuratie van revisie {comp.revision} terug op elke node, een voor een. Een node waarop iets
             veranderde, herstart MariaDB en ClusterForge wacht tot hij weer Synced is voor hij verder gaat. De andere nodes
-            blijven draaien, dus de database blijft bereikbaar.
+            blijven draaien, dus de database blijft bereikbaar. Doet een node als enige mee, dan herstart hij niet; zijn nieuwe
+            configuratie geldt bij zijn volgende start. Kwam de uitrol eerder niet af en draait er geen cluster meer, dan begint
+            de eerste node het opnieuw, behalve als daar al databases met tabellen staan; dan vraagt ClusterForge je dat met
+            Zelfherstel te bevestigen.
           </p>
         )}
         {prod && <ProdConfirm slug={c.slug} value={confirm} onChange={setConfirm} />}

@@ -20,9 +20,11 @@ import (
 	"strings"
 )
 
-// GrastateFile is waar Galera zijn positie bewaart, in de datamap van
-// MariaDB op Debian.
-const GrastateFile = "/var/lib/mysql/grastate.dat"
+// DataDir is de datamap van MariaDB op Debian.
+const DataDir = "/var/lib/mysql"
+
+// GrastateFile is waar Galera zijn positie bewaart, in DataDir.
+const GrastateFile = DataDir + "/grastate.dat"
 
 // SafeToBootstrap zet safe_to_bootstrap op 1 in GrastateFile. Galera weigert
 // anders te beginnen op een node die niet als laatste stopte; ClusterForge

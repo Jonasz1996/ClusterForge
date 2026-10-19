@@ -457,6 +457,50 @@ func (q *Queries) ListNodeComponents(ctx context.Context, nodeID uuid.UUID) ([]C
 	return items, nil
 }
 
+const listUnfinishedComponents = `-- name: ListUnfinishedComponents :many
+SELECT cc.id, cc.cluster_id, cc.engine, j.status AS job_status, j.error AS job_error
+FROM cluster_components cc
+LEFT JOIN jobs j ON j.id = cc.job_id
+WHERE cc.applied_revision IS NULL
+ORDER BY cc.cluster_id, cc.engine
+`
+
+type ListUnfinishedComponentsRow struct {
+	ID        uuid.UUID
+	ClusterID uuid.UUID
+	Engine    string
+	JobStatus NullJobStatus
+	JobError  *string
+}
+
+// De onderdelen die nog nooit helemaal uitgerold zijn, met de laatste taak
+// die ze toepaste, voor Zelfherstel.
+func (q *Queries) ListUnfinishedComponents(ctx context.Context) ([]ListUnfinishedComponentsRow, error) {
+	rows, err := q.db.Query(ctx, listUnfinishedComponents)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListUnfinishedComponentsRow{}
+	for rows.Next() {
+		var i ListUnfinishedComponentsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.ClusterID,
+			&i.Engine,
+			&i.JobStatus,
+			&i.JobError,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listWatchedComponents = `-- name: ListWatchedComponents :many
 SELECT cc.id, cc.cluster_id, cc.engine, cc.spec, cc.revision, cc.applied_revision, cc.job_id, cc.created_at, cc.updated_at, cc.auto_recover, cc.down_since, cc.down_reason, cc.nodes_out, cc.auto_recovered_at, cc.recover_job_id, cc.backup_on, cc.backup_at, cc.backup_keep_days, cc.backup_next_at, cc.health, cc.health_reason, cc.health_at, cc.observed, c.name AS cluster_name, c.slug AS cluster_slug
 FROM cluster_components cc
