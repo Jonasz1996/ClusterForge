@@ -72,6 +72,11 @@ func healHost(t *testing.T, primary bool) (*Agent, string) {
 				return []byte("wsrep_cluster_status\tPrimary\n"), nil
 			}
 			return []byte("ERROR 2002 (HY000): Can't connect to local server through socket '/run/mysqld/mysqld.sock' (2)"), errors.New("exit status 1")
+		case "sh":
+			// MariaDB 12.3.2 zonder mariadb-server-galera.
+			if len(args) == 2 && args[1] == "command -v galera_recovery" {
+				return nil, errors.New("exit status 127")
+			}
 		}
 		return nil, fmt.Errorf("onbekend commando %s", name)
 	}
@@ -104,12 +109,81 @@ func TestHealInspect(t *testing.T) {
 	if strings.Join(g.PeerTimeouts, ",") != "192.168.0.191,192.168.0.192" {
 		t.Errorf("peers: %v", g.PeerTimeouts)
 	}
+	if strings.Join(g.MissingTools, ",") != "galera_recovery" {
+		t.Errorf("ontbrekende scripts: %v", g.MissingTools)
+	}
 	var keys []string
 	for _, s := range g.Settings {
 		keys = append(keys, fmt.Sprintf("%s@%s:%d", s.Key, filepath.Base(s.File), s.Line))
 	}
 	if strings.Join(keys, " ") != "wsrep_cluster_name@60-galera.cnf:4 wsrep_cluster_address@60-galera.cnf:5 wsrep_node_address@60-galera.cnf:6" {
 		t.Errorf("regels: %v", keys)
+	}
+}
+
+func TestHealInspectGaleraScripts(t *testing.T) {
+	a, _ := healHost(t, false)
+	exec := a.Exec
+	a.Exec = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		if name == "sh" && len(args) == 2 && args[1] == "command -v galera_recovery" {
+			return []byte("/usr/bin/galera_recovery\n"), nil
+		}
+		return exec(ctx, name, args...)
+	}
+	res := a.dbHeal(context.Background(), &protocol.DBHealRequest{Action: protocol.HealInspect})
+	if res.Error != "" || res.Heal == nil || len(res.Heal.Engines) != 1 || res.Heal.Engines[0].Galera == nil {
+		t.Fatalf("antwoord: %+v", res)
+	}
+	if m := res.Heal.Engines[0].Galera.MissingTools; m != nil {
+		t.Errorf("galera_recovery staat er, toch ontbreekt %v", m)
+	}
+	if res.Heal.Engines[0].Galera.NewClusterFlag {
+		t.Error("vlag van galera_new_cluster zonder dat hij staat")
+	}
+}
+
+func TestHealInspectSST(t *testing.T) {
+	a, root := healHost(t, false)
+	if res := a.dbHeal(context.Background(), &protocol.DBHealRequest{Action: protocol.HealInspect}); res.Heal.Engines[0].Galera.SST != "" {
+		t.Fatalf("SST zonder script: %q", res.Heal.Engines[0].Galera.SST)
+	}
+	// Een script van een andere unit telt niet; dat van mariadb wel.
+	for pid, cg := range map[string]string{"171": "0::/user.slice/user-0.slice/session-1.scope\n", "172": "0::/system.slice/mariadb.service\n"} {
+		writeFile(t, root, "/proc/"+pid+"/comm", "wsrep_sst_rsync\n")
+		writeFile(t, root, "/proc/"+pid+"/cgroup", cg)
+	}
+	res := a.dbHeal(context.Background(), &protocol.DBHealRequest{Action: protocol.HealInspect})
+	if g := res.Heal.Engines[0].Galera; g.SST != "wsrep_sst_rsync" {
+		t.Fatalf("SST: %q", g.SST)
+	}
+	if err := os.Remove(filepath.Join(root, "/proc/172/cgroup")); err != nil {
+		t.Fatal(err)
+	}
+	if g := a.dbHeal(context.Background(), &protocol.DBHealRequest{Action: protocol.HealInspect}).Heal.Engines[0].Galera; g.SST != "" {
+		t.Fatalf("SST buiten de unit: %q", g.SST)
+	}
+}
+
+func TestHealInspectNewClusterFlag(t *testing.T) {
+	for env, want := range map[string]bool{
+		"LANG=C.UTF-8\n_WSREP_NEW_CLUSTER=--wsrep-new-cluster\n": true,
+		// Zoals galera_new_cluster hem achterlaat als het klaar is.
+		"_WSREP_NEW_CLUSTER=\n":   false,
+		"_WSREP_NEW_CLUSTER=''\n": false,
+		"LANG=C.UTF-8\n":          false,
+	} {
+		a, _ := healHost(t, false)
+		exec := a.Exec
+		a.Exec = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+			if name == "systemctl" && len(args) == 1 && args[0] == "show-environment" {
+				return []byte(env), nil
+			}
+			return exec(ctx, name, args...)
+		}
+		res := a.dbHeal(context.Background(), &protocol.DBHealRequest{Action: protocol.HealInspect})
+		if res.Heal == nil || len(res.Heal.Engines) != 1 || res.Heal.Engines[0].Galera == nil || res.Heal.Engines[0].Galera.NewClusterFlag != want {
+			t.Errorf("%q: %+v", env, res)
+		}
 	}
 }
 

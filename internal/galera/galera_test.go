@@ -1,6 +1,11 @@
 package galera
 
 import (
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -87,5 +92,88 @@ func TestChoose(t *testing.T) {
 				t.Fatalf("%+v %v, verwacht %s", got, err, tc.want)
 			}
 		})
+	}
+}
+
+// TestBootstrap draait Bootstrap in een echte shell, met systemctl, sed en
+// galera_new_cluster als scripts die alleen opschrijven dat ze draaiden.
+func TestBootstrap(t *testing.T) {
+	run := func(t *testing.T, tools map[string]int) (log, stderr string, code int) {
+		t.Helper()
+		dir := t.TempDir()
+		logFile := filepath.Join(dir, "log")
+		for name, exit := range tools {
+			script := fmt.Sprintf("#!/bin/sh\necho \"${0##*/} $*\" >> %s\nexit %d\n", logFile, exit)
+			if err := os.WriteFile(filepath.Join(dir, name), []byte(script), 0o755); err != nil {
+				t.Fatal(err)
+			}
+		}
+		cmd := exec.Command("/bin/sh", "-c", Bootstrap)
+		cmd.Env = []string{"PATH=" + dir}
+		var errb strings.Builder
+		cmd.Stderr = &errb
+		err := cmd.Run()
+		var ee *exec.ExitError
+		switch {
+		case errors.As(err, &ee):
+			code = ee.ExitCode()
+		case err != nil:
+			t.Fatal(err)
+		}
+		b, _ := os.ReadFile(logFile)
+		return string(b), errb.String(), code
+	}
+	const (
+		stop  = "systemctl stop mariadb\n"
+		sed   = "sed -i s/^safe_to_bootstrap:.*/safe_to_bootstrap: 1/ " + GrastateFile + "\n"
+		unset = "systemctl unset-environment _WSREP_NEW_CLUSTER\n"
+	)
+	t.Run("zonder galera_new_cluster", func(t *testing.T) {
+		log, stderr, code := run(t, map[string]int{"systemctl": 0, "sed": 0})
+		if code != 1 || log != "" || stderr != NoNewCluster+"\n" {
+			t.Fatalf("code %d, stderr %q, log %q", code, stderr, log)
+		}
+	})
+	t.Run("gelukt", func(t *testing.T) {
+		log, _, code := run(t, map[string]int{"systemctl": 0, "sed": 0, "galera_new_cluster": 0})
+		if code != 0 || log != stop+sed+"galera_new_cluster \n"+unset {
+			t.Fatalf("code %d, log %q", code, log)
+		}
+	})
+	t.Run("galera_new_cluster mislukt", func(t *testing.T) {
+		// De vlag gaat ook dan weg, en de fout blijft.
+		log, _, code := run(t, map[string]int{"systemctl": 0, "sed": 0, "galera_new_cluster": 3})
+		if code != 3 || log != stop+sed+"galera_new_cluster \n"+unset {
+			t.Fatalf("code %d, log %q", code, log)
+		}
+	})
+	t.Run("sed mislukt", func(t *testing.T) {
+		log, _, code := run(t, map[string]int{"systemctl": 0, "sed": 2, "galera_new_cluster": 0})
+		if code != 2 || log != stop+sed+unset {
+			t.Fatalf("code %d, log %q", code, log)
+		}
+	})
+}
+
+func TestViaNote(t *testing.T) {
+	for via, want := range map[string]string{
+		"":                         "",
+		"galera_recovery":          "",
+		"mariadbd --wsrep-recover": " met mariadbd --wsrep-recover (galera_recovery ontbreekt)",
+	} {
+		if got := ViaNote(via); got != want {
+			t.Errorf("%q: %q", via, got)
+		}
+	}
+}
+
+func TestPositionError(t *testing.T) {
+	// Zoals een agent van voor de terugval het op 19 oktober zei.
+	old := `galera_recovery: het programma om de database te lezen ontbreekt: exec: "galera_recovery": executable file not found in $PATH`
+	if got := PositionError(old); !strings.HasPrefix(got, old+". Op deze node ontbreekt het pakket mariadb-server-galera") || !strings.Contains(got, "Agents bijwerken") {
+		t.Errorf("oude agent: %q", got)
+	}
+	if got := PositionError("geen seqno"); got != "geen seqno" {
+		t.Errorf("andere fout: %q", got)
 	}
 }

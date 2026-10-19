@@ -41,6 +41,17 @@ roles:
     count: "3"
     steps:
       - package: { names: [mariadb-server, mariadb-backup, galera-4, socat] }
+      # Sinds MariaDB 12.3.2 (de pakketten van MariaDB.org) zitten
+      # galera_recovery, galera_new_cluster en de scripts voor SST in een
+      # apart pakket. MariaDB van Debian heeft ze in mariadb-server; dan is
+      # er niets te doen. In de versie van mariadb-server, zodat apt de
+      # server niet bijwerkt en herstart.
+      - command:
+          title: de scripts van Galera (mariadb-server-galera)
+          run: >-
+            v=$(dpkg-query -W -f='${Version}' mariadb-server) &&
+            DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends "mariadb-server-galera=$v"
+          unless: command -v galera_recovery >/dev/null || ! apt-cache show mariadb-server-galera >/dev/null 2>&1
       - directory: { path: /var/lib/clusterforge, mode: "0755" }
       - file:
           path: /etc/mysql/mariadb.conf.d/99-clusterforge-galera.cnf

@@ -2,6 +2,8 @@ package agent
 
 import (
 	"context"
+	"errors"
+	osexec "os/exec"
 	"slices"
 	"strings"
 	"testing"
@@ -20,6 +22,26 @@ func grastate(seqno string, safe bool) string {
 	}
 	return "# GALERA saved state\nversion: 2.1\nuuid:    " + posUUID + "\nseqno:   " + seqno + "\nsafe_to_bootstrap: " + s + "\n"
 }
+
+func TestRecoverFailure(t *testing.T) {
+	for _, c := range []struct {
+		out  string
+		err  error
+		want string
+	}{
+		{"[Note] a\n[ERROR] b\n[ERROR] c\n[Note] d\n", nil, "[ERROR] b"},
+		{"[Note] a\n[Note] d\n\n", nil, "[Note] d"},
+		{"", errExit1Test, "exit status 1"},
+		{"", nil, "lege uitvoer"},
+		{strings.Repeat("x", 400), nil, strings.Repeat("x", 300) + "…"},
+	} {
+		if got := recoverFailure([]byte(c.out), c.err); got != c.want {
+			t.Errorf("%q: %q, verwacht %q", c.out, got, c.want)
+		}
+	}
+}
+
+var errExit1Test = errors.New("exit status 1")
 
 func TestDBPosition(t *testing.T) {
 	ctx := context.Background()
@@ -85,11 +107,14 @@ func TestDBPosition(t *testing.T) {
 	t.Run("crash", func(t *testing.T) {
 		a, h := stopped(t, agenttest.Unit{Enabled: true, Failed: true}, grastate("-1", false))
 		p := a.dbPosition(ctx, &protocol.DBPositionRequest{Recover: true}).Position
-		if p == nil || p.Seqno != 1234 || p.UUID != posUUID || p.From != protocol.DBFromRecovery || p.Error != "" || p.Active != "failed" {
+		if p == nil || p.Seqno != 1234 || p.UUID != posUUID || p.From != protocol.DBFromRecovery || p.Via != "galera_recovery" || p.Error != "" || p.Active != "failed" {
 			t.Fatalf("%+v", p)
 		}
 		if !recovered(h) {
 			t.Fatal("geen galera_recovery")
+		}
+		if slices.ContainsFunc(h.Calls(), func(c string) bool { return strings.HasPrefix(c, "mariadbd") }) {
+			t.Fatal("mariadbd --wsrep-recover terwijl galera_recovery er is")
 		}
 	})
 	t.Run("start nog", func(t *testing.T) {
@@ -108,6 +133,83 @@ func TestDBPosition(t *testing.T) {
 		p := a.dbPosition(ctx, &protocol.DBPositionRequest{Recover: true}).Position
 		if p == nil || p.Seqno != -1 || !strings.HasPrefix(p.Error, "galera_recovery: ") || !strings.Contains(p.Error, "InnoDB has no position") {
 			t.Fatalf("%+v", p)
+		}
+	})
+	t.Run("crash zonder galera_recovery", func(t *testing.T) {
+		// MariaDB 12.3.2 zonder mariadb-server-galera, zoals
+		// DatabaseClusterNode1 op 19 oktober.
+		a, h := stopped(t, agenttest.Unit{Enabled: true, Failed: true}, grastate("-1", false))
+		h.MariaDB.NoGaleraScripts = true
+		p := a.dbPosition(ctx, &protocol.DBPositionRequest{Recover: true}).Position
+		if p == nil || p.Seqno != 1234 || p.UUID != posUUID || p.From != protocol.DBFromRecovery || p.Via != "mariadbd --wsrep-recover" || p.Error != "" {
+			t.Fatalf("%+v", p)
+		}
+		if !slices.Contains(h.Calls(), "mariadbd --user=mysql --wsrep-recover --disable-log-error") {
+			t.Fatalf("geen mariadbd --wsrep-recover: %v", h.Calls())
+		}
+	})
+	t.Run("crash zonder galera_recovery, gebruiker uit de config", func(t *testing.T) {
+		a, h := stopped(t, agenttest.Unit{Enabled: true}, grastate("-1", false))
+		h.MariaDB.NoGaleraScripts = true
+		writeFile(t, a.Root, "/etc/mysql/mariadb.conf.d/50-server.cnf", "[mysqld]\nuser = mariadb\n")
+		if p := a.dbPosition(ctx, &protocol.DBPositionRequest{Recover: true}).Position; p == nil || p.Seqno != 1234 {
+			t.Fatalf("%+v", p)
+		}
+		if !slices.Contains(h.Calls(), "mariadbd --user=mariadb --wsrep-recover --disable-log-error") {
+			t.Fatalf("niet als de gebruiker uit de config: %v", h.Calls())
+		}
+	})
+	t.Run("zonder galera_recovery geen positie", func(t *testing.T) {
+		a, h := stopped(t, agenttest.Unit{Enabled: true}, grastate("-1", false))
+		h.MariaDB.NoGaleraScripts, h.MariaDB.Recovered = true, ""
+		p := a.dbPosition(ctx, &protocol.DBPositionRequest{Recover: true}).Position
+		if p == nil || p.Seqno != -1 || p.Via != "mariadbd --wsrep-recover" ||
+			p.Error != "galera_recovery ontbreekt op deze node (sinds MariaDB 12.3.2 zit het in het pakket mariadb-server-galera), en mariadbd --wsrep-recover gaf geen positie: "+
+				"2026-10-19 18:20:01 0 [Note] Server socket created on IP: '0.0.0.0'." {
+			t.Fatalf("%+v", p)
+		}
+	})
+	t.Run("zonder galera_recovery mislukt", func(t *testing.T) {
+		// systemd zegt failed, maar een mariadbd buiten de unit houdt de
+		// datamap nog vast.
+		a, h := stopped(t, agenttest.Unit{Enabled: true, Failed: true}, grastate("-1", false))
+		h.MariaDB.NoGaleraScripts = true
+		h.Fail("mariadbd", "2026-10-19 18:20:01 0 [Note] Starting MariaDB 12.3.2-MariaDB-deb13 source revision as process 4242\n"+
+			"2026-10-19 18:20:01 0 [ERROR] mariadbd: Can't lock aria control file '/var/lib/mysql/aria_log_control' for exclusive use, error: 11. Will retry for 30 seconds\n"+
+			"2026-10-19 18:20:31 0 [ERROR] Aborting\n")
+		p := a.dbPosition(ctx, &protocol.DBPositionRequest{Recover: true}).Position
+		if p == nil || p.Seqno != -1 || p.Error != "galera_recovery ontbreekt op deze node (sinds MariaDB 12.3.2 zit het in het pakket mariadb-server-galera), "+
+			"en mariadbd --wsrep-recover lukte niet: 2026-10-19 18:20:01 0 [ERROR] mariadbd: Can't lock aria control file "+
+			"'/var/lib/mysql/aria_log_control' for exclusive use, error: 11. Will retry for 30 seconds" {
+			t.Fatalf("%+v", p)
+		}
+	})
+	t.Run("zonder galera_recovery en mariadbd", func(t *testing.T) {
+		a, h := stopped(t, agenttest.Unit{Enabled: true}, grastate("-1", false))
+		h.MariaDB.NoGaleraScripts = true
+		exec := a.Exec
+		a.Exec = func(ctx context.Context, name string, args ...string) ([]byte, error) {
+			if name == "mariadbd" || name == "mysqld" {
+				return nil, &osexec.Error{Name: name, Err: osexec.ErrNotFound}
+			}
+			return exec(ctx, name, args...)
+		}
+		p := a.dbPosition(ctx, &protocol.DBPositionRequest{Recover: true}).Position
+		if p == nil || p.Seqno != -1 || p.Via != "" || !strings.HasSuffix(p.Error, ", en mariadbd ook") {
+			t.Fatalf("%+v", p)
+		}
+	})
+	t.Run("galera_recovery mislukt anders", func(t *testing.T) {
+		// Een andere fout dan "ontbreekt": geen terugval, want het script
+		// deed al wat mariadbd zou doen.
+		a, h := stopped(t, agenttest.Unit{Enabled: true}, grastate("-1", false))
+		h.Fail("galera_recovery", "WSREP: Failed to start mysqld for wsrep recovery: '[ERROR] InnoDB: Plugin initialization aborted'\n")
+		p := a.dbPosition(ctx, &protocol.DBPositionRequest{Recover: true}).Position
+		if p == nil || p.Seqno != -1 || p.Via != "galera_recovery" || !strings.HasPrefix(p.Error, "galera_recovery: exit status 1: WSREP: Failed to start mysqld") {
+			t.Fatalf("%+v", p)
+		}
+		if slices.ContainsFunc(h.Calls(), func(c string) bool { return strings.HasPrefix(c, "mariadbd") }) {
+			t.Fatal("mariadbd na een andere fout van galera_recovery")
 		}
 	})
 	t.Run("nooit in een cluster", func(t *testing.T) {

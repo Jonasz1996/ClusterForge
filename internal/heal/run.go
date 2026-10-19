@@ -329,8 +329,14 @@ func (s *Service) startServer(ctx context.Context, id string, st *jobs.Step, n P
 // startNoBlock start de unit zonder te wachten: een node die een volledige
 // kopie haalt, kan er uren over doen, en systemd blijft dan bezig.
 func (s *Service) startNoBlock(ctx context.Context, id string, st *jobs.Step, n PlanNode) error {
+	run := "systemctl reset-failed " + n.Unit + " 2>/dev/null; systemctl start --no-block " + n.Unit
+	if n.Unit == "mariadb" {
+		// Een gewone start begint nooit een cluster, ook niet als een
+		// afgebroken galera_new_cluster de vlag liet staan.
+		run = "systemctl unset-environment " + galera.NewClusterVar + "; " + run
+	}
 	steps := []templates.Step{{Step: protocol.Step{Command: &protocol.CommandStep{
-		Run: "systemctl reset-failed " + n.Unit + " 2>/dev/null; systemctl start --no-block " + n.Unit, Unless: "systemctl is-active --quiet " + n.Unit,
+		Run: run, Unless: "systemctl is-active --quiet " + n.Unit,
 	}}, Title: n.Unit + " starten"}}
 	_, err := s.apply(ctx, id, st, n, "-start", steps)
 	return err
@@ -465,13 +471,13 @@ func (s *Service) decide(ctx context.Context, id string, st *jobs.Step, p runPar
 		}
 		gp := galera.Position{UUID: pos.UUID, Seqno: pos.Seqno, SafeToBootstrap: pos.SafeToBootstrap}
 		if !gp.Known() {
-			return nil, fmt.Errorf("de positie van %s is onbekend: %s; ClusterForge begint het cluster niet", n.Hostname, cmpOr(pos.Error, "geen seqno"))
+			return nil, fmt.Errorf("de positie van %s is onbekend: %s; ClusterForge begint het cluster niet", n.Hostname, galera.PositionError(cmpOr(pos.Error, "geen seqno")))
 		}
 		safe := ""
 		if gp.SafeToBootstrap {
 			safe = ", stopte als laatste"
 		}
-		st.Logf("%s: seqno %d uit %s%s", n.Hostname, gp.Seqno, pos.From, safe)
+		st.Logf("%s: seqno %d uit %s%s%s", n.Hostname, gp.Seqno, pos.From, galera.ViaNote(pos.Via), safe)
 		cands = append(cands, galera.Candidate{Name: n.Hostname, Index: i, Position: gp})
 	}
 	best, err := galera.Choose(cands)

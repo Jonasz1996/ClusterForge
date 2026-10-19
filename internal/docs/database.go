@@ -195,8 +195,9 @@ func galeraRunbooks(d *doc, c *Cluster, cp DBComponent, db string) {
 		"Na een gewone stop van alle nodes, zoals een herstart van de Proxmox-host, begint Galera niet vanzelf: elke node wacht op een cluster dat er niet is.",
 		auto, "Kan ClusterForge er niet bij, doe het dan zo, als root:")
 	d.p("**1.** Kijk op " + all + " tot welke transactie elke node de data heeft. Staat er `seqno: -1`, dan stopte MariaDB niet netjes; " +
-		code("galera_recovery") + " haalt de positie dan uit InnoDB, alleen als MariaDB stilstaat.")
-	d.code("sh", "cat /var/lib/mysql/grastate.dat\ngalera_recovery")
+		code("galera_recovery") + " haalt de positie dan uit InnoDB, alleen als MariaDB stilstaat. Ontbreekt dat script, zoals op MariaDB 12.3.2 zonder het pakket " +
+		code("mariadb-server-galera") + ", dan doet de laatste regel hetzelfde.")
+	d.code("sh", "cat /var/lib/mysql/grastate.dat\ngalera_recovery\nmariadbd --user=mysql --wsrep-recover --disable-log-error 2>&1 | grep 'Recovered position'")
 	d.p("**2.** Begin het cluster op de node met de hoogste seqno, en alleen daar: twee nodes die elk een cluster beginnen, geven twee clusters met dezelfde naam.")
 	d.code("sh", "sed -i 's/^safe_to_bootstrap:.*/safe_to_bootstrap: 1/' /var/lib/mysql/grastate.dat\ngalera_new_cluster")
 	d.p("**3.** Start MariaDB op de andere nodes, één voor één; elke node haalt wat hij mist bij de eerste.")

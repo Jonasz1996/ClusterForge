@@ -24,6 +24,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Jonasz1996/clusterforge/internal/galera"
 	"github.com/Jonasz1996/clusterforge/pkg/protocol"
 )
 
@@ -295,7 +296,64 @@ func (a *Agent) healMaria(ctx context.Context, e *protocol.HealEngine) {
 		return
 	}
 	g.PeerTimeouts = a.peerTimeouts(ctx, e.Unit)
+	if e.Unit == "mariadb" {
+		if !a.hasProgram(ctx, "galera_recovery") {
+			g.MissingTools = []string{"galera_recovery"}
+		}
+		g.NewClusterFlag = a.newClusterFlag(ctx)
+	}
+	g.SST = a.sstProcess(e.Unit)
 	e.Galera = g
+}
+
+// sstProcess is de naam van een script voor een volledige kopie
+// (wsrep_sst_rsync, wsrep_sst_mariabackup) in de cgroup van unit; leeg als
+// er geen draait.
+func (a *Agent) sstProcess(unit string) string {
+	root, err := a.path("/proc")
+	if err != nil {
+		return ""
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		return ""
+	}
+	for _, ent := range entries {
+		if _, err := strconv.Atoi(ent.Name()); err != nil {
+			continue
+		}
+		b, _ := os.ReadFile(filepath.Join(root, ent.Name(), "comm"))
+		name := strings.TrimSpace(string(b))
+		if !strings.HasPrefix(name, "wsrep_sst_") {
+			continue
+		}
+		if cg, err := os.ReadFile(filepath.Join(root, ent.Name(), "cgroup")); err == nil && unitFromCgroup(string(cg)) == unit {
+			return name
+		}
+	}
+	return ""
+}
+
+// newClusterFlag zegt of galera.NewClusterVar een waarde heeft in de
+// omgeving van systemd.
+func (a *Agent) newClusterFlag(ctx context.Context) bool {
+	out, err := a.dbRun(ctx, "systemctl", "show-environment")
+	if err != nil {
+		return false
+	}
+	for line := range strings.SplitSeq(string(out), "\n") {
+		if v, ok := strings.CutPrefix(line, galera.NewClusterVar+"="); ok && strings.Trim(v, "'\" ") != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// hasProgram zegt of name in PATH staat. Kan de agent het niet nagaan,
+// dan telt het als aanwezig.
+func (a *Agent) hasProgram(ctx context.Context, name string) bool {
+	_, err := a.dbRun(ctx, "sh", "-c", "command -v "+name)
+	return err == nil || ctx.Err() != nil
 }
 
 func isOn(v string) bool {

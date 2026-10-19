@@ -6364,7 +6364,7 @@ components:
           type: string
           description: |
             no_inspect, unit_stopped, process_hung, process_outside_unit, unit_disabled, galera_wrong_address,
-            galera_no_primary, disk_full of no_quorum.
+            galera_no_primary, galera_package, galera_new_cluster_flag, disk_full of no_quorum.
         level: { type: string, enum: [down, warning] }
         title: { type: string }
         why: { type: string }

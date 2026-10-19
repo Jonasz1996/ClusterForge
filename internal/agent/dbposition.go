@@ -3,7 +3,7 @@ package agent
 // Waar een Galera-node staat, voor het opnieuw beginnen van het cluster na
 // een volledige uitval. Draait MariaDB, dan zegt Galera het zelf. Staat hij
 // stil, dan staat de positie na een gewone stop in grastate.dat; na een
-// crash niet, en dan haalt galera_recovery haar uit InnoDB. Dat start
+// crash niet, en dan haalt recoverPosition haar uit InnoDB. Dat start
 // mariadbd even zonder netwerk en mag dus alleen als MariaDB echt stilstaat.
 
 import (
@@ -90,12 +90,8 @@ func (a *Agent) dbPosition(ctx context.Context, req *protocol.DBPositionRequest)
 		p.Error = "MariaDB is " + u.Active + "; de positie lezen kan pas als hij stilstaat"
 		return res
 	}
-	out, err := a.dbRun(ctx, "galera_recovery")
-	if err != nil {
-		p.Error = "galera_recovery: " + dbError(err)
-		return res
-	}
-	r, err := galera.ParseRecovered(string(out))
+	r, via, err := a.recoverPosition(ctx)
+	p.Via = via
 	if err != nil {
 		p.Error = err.Error()
 		return res

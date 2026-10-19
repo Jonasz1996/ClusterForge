@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"os/exec"
 	"regexp"
 	"slices"
 	"strconv"
@@ -38,6 +39,10 @@ type MariaDB struct {
 	// Recovered is wat galera_recovery vindt als MariaDB stilstaat, zoals
 	// uuid:seqno; leeg laat galera_recovery mislukken.
 	Recovered string
+	// NoGaleraScripts: galera_recovery en galera_new_cluster ontbreken,
+	// zoals op MariaDB 12.3.2 zonder het pakket mariadb-server-galera.
+	// mariadbd --wsrep-recover vindt dan Recovered.
+	NoGaleraScripts bool
 	// Users zijn de gebruikers met hun rechten. De opdrachten van de agent
 	// via stdin passen ze aan, net als Databases.
 	Users []MariaUser
@@ -494,6 +499,9 @@ func (h *Host) galeraRecovery() ([]byte, error) {
 	if m == nil {
 		return []byte("sh: 1: galera_recovery: not found\n"), errors.New("exit status 127")
 	}
+	if m.NoGaleraScripts {
+		return nil, &exec.Error{Name: "galera_recovery", Err: exec.ErrNotFound}
+	}
 	if u := h.units["mariadb"]; !m.Down || u != nil && (u.Active || u.Activating) {
 		return []byte("WSREP: Failed to start mysqld for wsrep recovery: the data directory is in use\n"), errExit1
 	}
@@ -501,6 +509,42 @@ func (h *Host) galeraRecovery() ([]byte, error) {
 		return []byte("WSREP: Failed to recover position: InnoDB has no position\n"), errExit1
 	}
 	return []byte("WSREP: Recovered position " + m.Recovered + "\n--wsrep_start_position=" + m.Recovered + "\n"), nil
+}
+
+// wsrepRecover speelt mariadbd --user=<u> --wsrep-recover --disable-log-error
+// na, met de log op stderr zoals mariadbd hem schrijft.
+func (h *Host) wsrepRecover(args []string) ([]byte, error) {
+	m := h.MariaDB
+	if m == nil {
+		return nil, &exec.Error{Name: "mariadbd", Err: exec.ErrNotFound}
+	}
+	if !slices.Contains(args, "--wsrep-recover") || !slices.Contains(args, "--disable-log-error") ||
+		!slices.ContainsFunc(args, func(a string) bool { return strings.HasPrefix(a, "--user=") }) {
+		return nil, fmt.Errorf("mariadbd %s", strings.Join(args, " "))
+	}
+	const ts = "2026-10-19 18:20:01 0 "
+	if u := h.units["mariadb"]; !m.Down || u != nil && (u.Active || u.Activating) {
+		return []byte(ts + "[ERROR] mariadbd: Can't lock aria control file '/var/lib/mysql/aria_log_control' for exclusive use, error: 11. Will retry for 30 seconds\n" +
+			ts + "[ERROR] Aborting\n"), errExit1
+	}
+	if m.Recovered == "" {
+		return []byte(ts + "[Note] InnoDB: Completed initialization of buffer pool\n" + ts + "[Note] Server socket created on IP: '0.0.0.0'.\n"), nil
+	}
+	return []byte(ts + "[Note] InnoDB: Completed initialization of buffer pool\n" +
+		ts + "[Note] WSREP: Recovered position: " + m.Recovered + "\n"), nil
+}
+
+// commandV speelt sh -c 'command -v <naam>' na voor de scripts van Galera;
+// elk ander programma is er.
+func (h *Host) commandV(name string) ([]byte, error) {
+	switch name {
+	case "galera_recovery", "galera_new_cluster":
+		if h.MariaDB == nil || h.MariaDB.NoGaleraScripts {
+			return nil, errors.New("exit status 127")
+		}
+		return []byte("/usr/bin/" + name + "\n"), nil
+	}
+	return []byte("/usr/bin/" + name + "\n"), nil
 }
 
 // runuser speelt runuser -u postgres -- psql -XAtq -F <fs> -R <rs> [-d db]
