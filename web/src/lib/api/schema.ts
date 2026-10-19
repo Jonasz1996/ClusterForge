@@ -3455,7 +3455,7 @@ export interface paths {
         /**
          * Agents vanzelf bijwerken aan- of uitzetten (admin)
          * @description Aan (standaard) werkt ClusterForge elke minuut verouderde agents bij die verbonden zijn, met een taak per cluster.
-         *     Nooit op prod, niet op clusters waar het uitstaat, en niet naar een agent die een node al eens terugzette.
+         *     Nooit op prod, niet op clusters waar het uitstaat, en niet naar een agent waarnaar bijwerken op die node al eens mislukte.
          */
         put: operations["setAgentUpgradeAuto"];
         post?: never;

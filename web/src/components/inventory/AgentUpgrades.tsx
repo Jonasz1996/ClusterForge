@@ -270,13 +270,16 @@ export function AgentUpgradeSettingsCard({ isAdmin }: { isAdmin: boolean }) {
             Agents vanzelf bijwerken
             <span className="block text-slate-500">
               Na een update van ClusterForge werkt de server verouderde agents vanzelf bij, één node tegelijk per cluster. Nooit op
-              prod: daar gebruik je de knop bij Nodes. Een update die een node terugzette, probeert hij niet nog eens vanzelf.
+              prod: daar gebruik je de knop bij Nodes. Een update die mislukte, probeert hij niet nog eens vanzelf.
             </span>
           </span>
         </label>
-        {ov.auto && (clusters.data?.length ?? 0) > 0 && (
+        {(clusters.data?.length ?? 0) > 0 && (
           <div className="space-y-1">
             <p className="font-medium">Per cluster</p>
+            {!ov.auto && (
+              <p className="text-slate-500">Geldt zodra vanzelf bijwerken aan staat; zet clusters die erbuiten moeten eerst uit.</p>
+            )}
             {clusters.data!.map((c) => {
               const prod = c.environment === "prod";
               return (

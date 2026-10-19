@@ -200,9 +200,11 @@ Wat de agent zelf doet:
 2. hij start de nieuwe met `cf-agent self-check`, die hier moet draaien en geen lager protocol mag melden: nooit terug naar een oudere versie;
 3. hij bewaart zichzelf als `/usr/local/bin/cf-agent.prev` en zet met `systemd-run` een tijdelijke timer `cf-agent-rollback`;
 4. hij vervangt zichzelf in één keer en herstart `cf-agent`;
-5. de nieuwe agent zet de timer uit zodra de server iets van hem aanneemt. Gebeurt dat niet binnen 3 minuten, dan zet de timer de oude agent terug en meldt die dat aan de server. Zo'n update probeert ClusterForge niet nog eens vanzelf; de knop wel.
+5. de nieuwe agent zet de timer uit zodra de server iets van hem aanneemt; pas dan telt de server de node als bijgewerkt. Gebeurt dat niet binnen 3 minuten, dan zet de timer de oude agent terug en meldt die dat aan de server.
 
-Vanzelf bijwerken staat standaard aan: elke minuut start de server een taak voor de clusters met verouderde, verbonden agents. Nooit op prod. Uitzetten, voor alles of per cluster, kan bij Instellingen → Agents bijwerken. Agents onder protocol 23 kennen dit nog niet: die werk je één keer bij met `--upgrade` hierboven; de kaart toont het commando. Het golden image hoeft daarna niet meer na elke update opnieuw: een nieuwe VM meldt zich aan en wordt bijgewerkt (op prod met de knop). Na een reboot binnen die 3 minuten zet de nieuwe agent de timer terug; een agent die al bij het starten crasht, kan dat niet, en dan helpt `agent.sh --upgrade` of `cp /usr/local/bin/cf-agent.prev /usr/local/bin/cf-agent && systemctl restart cf-agent`. Het ontwerp staat in [docs/design/agent-zelfupdate.md](docs/design/agent-zelfupdate.md).
+Een update die mislukt (teruggezet, of de download, de self-check of de herstart lukt niet) probeert ClusterForge niet nog eens vanzelf naar dezelfde agent; de knop wel.
+
+Vanzelf bijwerken staat standaard aan: elke minuut start de server een taak voor de clusters met verouderde, verbonden agents. Nooit op prod. Uitzetten, voor alles of per cluster, kan bij Instellingen → Agents bijwerken. Agents onder protocol 23 kennen dit nog niet: die werk je één keer bij met `--upgrade` hierboven; de kaart toont het commando. Het golden image hoeft daarna niet meer na elke update opnieuw: een nieuwe VM meldt zich aan en wordt bijgewerkt (op prod met de knop). Na een reboot binnen die 3 minuten zet de nieuwe agent de timer terug; een agent die al bij het starten crasht, kan dat niet: zet de oude dan terug met `sudo /usr/local/bin/cf-agent.prev upgrade-rollback`. `agent.sh --upgrade` helpt daar niet, dat haalt dezelfde agent opnieuw. Het ontwerp staat in [docs/design/agent-zelfupdate.md](docs/design/agent-zelfupdate.md).
 
 ## Monitoring
 

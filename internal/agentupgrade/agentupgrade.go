@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -155,9 +156,12 @@ type Service struct {
 	Dir     string
 	Version string
 	// Poll is hoe vaak een update kijkt of de node terug is; Back hoe lang
-	// een node daarover mag doen, na het commando.
-	Poll time.Duration
-	Back time.Duration
+	// een node daarover mag doen, na het commando. RollbackAfter is na
+	// hoeveel tijd de terugvaltimer op de node afgaat: een terugzetting die
+	// eerder gemeld wordt, is een oude.
+	Poll          time.Duration
+	Back          time.Duration
+	RollbackAfter time.Duration
 	// Interval is hoe vaak Run kijkt of er agents vanzelf bij te werken
 	// zijn; nul of minder zet het uit. StartDelay is hoe lang Run na de
 	// start wacht, zodat de agents na een serverupdate eerst terug zijn.
@@ -168,12 +172,22 @@ type Service struct {
 	Changed func()
 
 	kick chan struct{}
+
+	// failedMu bewaakt failedTo: per node de laatste update die mislukte
+	// zonder terugzetting op de node (download, self-check, time-out). Die
+	// probeert AutoRun niet opnieuw tot de server een andere agent aanbiedt;
+	// na een herstart van de server één keer wel.
+	failedMu sync.Mutex
+	failedTo map[uuid.UUID]failure
 }
+
+type failure struct{ To, Msg string }
 
 func NewService(pool *pgxpool.Pool, ev *events.Writer, log *slog.Logger, runner *jobs.Runner, bus Commander, dir, version string) *Service {
 	s := &Service{
 		pool: pool, q: store.New(pool), ev: ev, log: log, bus: bus, runner: runner, Dir: dir, Version: version,
-		Poll: 2 * time.Second, Back: protocol.UpgradeRollbackAfter + 2*time.Minute,
+		Poll: 2 * time.Second, Back: protocol.UpgradeRollbackAfter + 2*time.Minute, RollbackAfter: protocol.UpgradeRollbackAfter,
+		failedTo: map[uuid.UUID]failure{},
 		Interval: time.Minute, StartDelay: 2 * time.Minute, Now: time.Now, kick: make(chan struct{}, 1),
 	}
 	if runner != nil {
@@ -213,6 +227,9 @@ func (s *Service) Overview(ctx context.Context) (Overview, error) {
 	now := s.Now()
 	for _, r := range rows {
 		a := Classify(r, ov.Offer, now)
+		if f, ok := s.lastFailure(r.ID); ok && a.State == StateOutdated && f.To == ov.Offer.SHA256[a.Arch] {
+			a.State, a.Why = StateFailed, "bijwerken naar deze agent mislukte: "+f.Msg+". ClusterForge probeert het niet vanzelf opnieuw; Bijwerken wel"
+		}
 		a.Auto = ov.Auto && a.State == StateOutdated && !a.Prod() && (a.ClusterID == nil || !slices.Contains(ov.Off, *a.ClusterID))
 		ov.Agents = append(ov.Agents, a)
 	}
@@ -485,9 +502,9 @@ func (s *Service) upgradeNode(ctx context.Context, j *jobs.Job, st *jobs.Step, r
 		case ctx.Err() != nil:
 			return context.Cause(ctx)
 		case err != nil:
-			return s.failed(ctx, j, r, actor, auto, err.Error())
+			return s.failed(ctx, j, r, actor, auto, state.To, err.Error())
 		case !res.OK:
-			return s.failed(ctx, j, r, actor, auto, "de agent meldt: "+res.Error)
+			return s.failed(ctx, j, r, actor, auto, state.To, "de agent meldt: "+res.Error)
 		}
 		if err := st.SetState(ctx, state); err != nil {
 			return err
@@ -512,6 +529,12 @@ func (s *Service) upgradeNode(ctx context.Context, j *jobs.Job, st *jobs.Step, r
 			result = cur.Version
 			return true, nil
 		case cur.UpgradeRolledBack:
+			// De terugvaltimer gaat pas RollbackAfter na het commando af;
+			// een eerdere melding komt van de oude agent, van voor deze
+			// poging.
+			if cur.HeartbeatAt.Before(state.SentAt.Add(s.RollbackAfter)) {
+				return false, nil
+			}
 			return false, errors.New("de nieuwe agent praatte niet op tijd met de server en de node zette de oude terug; kijk op de node met journalctl -u cf-agent waarom")
 		}
 		return false, nil
@@ -523,8 +546,11 @@ func (s *Service) upgradeNode(ctx context.Context, j *jobs.Job, st *jobs.Step, r
 		if wctx.Err() != nil {
 			err = fmt.Errorf("de agent kwam niet terug binnen %s; kijk op de node met systemctl status cf-agent en journalctl -u cf-agent", seconds(s.Back))
 		}
-		return s.failed(ctx, j, r, actor, auto, err.Error())
+		return s.failed(ctx, j, r, actor, auto, state.To, err.Error())
 	}
+	s.failedMu.Lock()
+	delete(s.failedTo, r.ID)
+	s.failedMu.Unlock()
 	if s.Changed != nil {
 		s.Changed()
 	}
@@ -537,8 +563,14 @@ func (s *Service) upgradeNode(ctx context.Context, j *jobs.Job, st *jobs.Step, r
 	})
 }
 
-// failed schrijft een logboekregel en geeft de fout terug.
-func (s *Service) failed(ctx context.Context, j *jobs.Job, r store.ListUpgradeAgentsRow, actor events.Actor, auto bool, msg string) error {
+// failed schrijft een logboekregel, onthoudt naar welke agent het mislukte
+// en geeft de fout terug.
+func (s *Service) failed(ctx context.Context, j *jobs.Job, r store.ListUpgradeAgentsRow, actor events.Actor, auto bool, to, msg string) error {
+	if to != "" {
+		s.failedMu.Lock()
+		s.failedTo[r.ID] = failure{To: to, Msg: msg}
+		s.failedMu.Unlock()
+	}
 	if err := s.ev.Write(context.WithoutCancel(ctx), nil, events.Event{
 		Actor: actor, SubjectType: "node", SubjectID: r.ID.String(), ClusterID: r.ClusterID, Action: "node.agent_upgrade_failed",
 		Payload: map[string]any{"hostname": r.Hostname, "error": msg, "job_id": j.ID, "auto": auto},
@@ -549,6 +581,13 @@ func (s *Service) failed(ctx context.Context, j *jobs.Job, r store.ListUpgradeAg
 		s.Changed()
 	}
 	return errors.New(msg)
+}
+
+func (s *Service) lastFailure(node uuid.UUID) (failure, bool) {
+	s.failedMu.Lock()
+	defer s.failedMu.Unlock()
+	f, ok := s.failedTo[node]
+	return f, ok
 }
 
 func pollEvery(ctx context.Context, every time.Duration, check func(context.Context) (bool, error)) error {

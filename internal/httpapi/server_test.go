@@ -264,7 +264,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	// Agents bijwerken: niet vanzelf; een test roept AutoRun aan.
 	agentDir := t.TempDir()
 	upg := agentupgrade.NewService(pool, ev, log, runner, bus, agentDir, "test")
-	upg.Interval, upg.Poll, upg.Back = 0, 20*time.Millisecond, 5*time.Second
+	upg.Interval, upg.Poll, upg.Back, upg.RollbackAfter = 0, 20*time.Millisecond, 5*time.Second, time.Second
 	upg.Changed = eval.Kick
 	var wg sync.WaitGroup
 	wg.Add(3)

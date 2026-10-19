@@ -60,6 +60,7 @@ type upgradeNode struct {
 	cfg      *agent.Config
 	mu       sync.Mutex
 	rollback bool
+	broken   bool
 	stop     func()
 	done     chan struct{}
 }
@@ -67,6 +68,12 @@ type upgradeNode struct {
 func (n *upgradeNode) exec(_ context.Context, name string, args ...string) ([]byte, error) {
 	switch {
 	case len(args) == 1 && args[0] == "self-check":
+		n.mu.Lock()
+		broken := n.broken
+		n.mu.Unlock()
+		if broken {
+			return []byte("Illegal instruction"), errors.New("signal: illegal instruction")
+		}
 		return json.Marshal(protocol.SelfCheck{Version: "nieuw", Protocol: protocol.Version, Arch: runtime.GOARCH})
 	case name == "systemd-run", name == "systemctl":
 		if name == "systemctl" && len(args) > 0 && args[0] == "is-active" {
@@ -164,7 +171,7 @@ func TestAgentUpgrades(t *testing.T) {
 	c.do("POST", "/api/v1/nodes", map[string]any{"hostname": "web02", "cluster_id": lab.ID}, &web02)
 	c.do("POST", "/api/v1/nodes", map[string]any{"hostname": "db01", "cluster_id": prod.ID}, &db01)
 	n1 := startUpgradeNode(t, e, c, web01.ID, strings.Repeat("1", 32))
-	startUpgradeNode(t, e, c, web02.ID, strings.Repeat("2", 32))
+	n2 := startUpgradeNode(t, e, c, web02.ID, strings.Repeat("2", 32))
 	startUpgradeNode(t, e, c, db01.ID, strings.Repeat("3", 32))
 
 	var v upgradeView
@@ -257,6 +264,46 @@ func TestAgentUpgrades(t *testing.T) {
 		t.Fatalf("na vanzelf: %s", got)
 	}
 
+	// De knop probeert web01 opnieuw. De oude agent meldt de vorige
+	// terugzetting tot hij herstart; dat is geen nieuwe.
+	n1.mu.Lock()
+	n1.rollback = false
+	n1.mu.Unlock()
+	if s := c.do("POST", "/api/v1/agent-upgrades", map[string]any{"node_ids": []string{web01.ID}}, &started); s != http.StatusAccepted {
+		t.Fatalf("web01 opnieuw: %d", s)
+	}
+	if j := waitJob(t, c, started.Jobs[0].ID); j.Status != "succeeded" {
+		t.Fatalf("web01 opnieuw: %+v", j)
+	}
+
+	// Een update die op web02 mislukt zonder terugzetting, probeert vanzelf
+	// het niet elke minuut opnieuw.
+	offerAgent(t, e, "derde agent")
+	n2.mu.Lock()
+	n2.broken = true
+	n2.mu.Unlock()
+	if err := e.upg.AutoRun(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	c.do("GET", "/api/v1/jobs?limit=20", nil, &jobs)
+	if len(jobs.Items) != 5 || !strings.HasSuffix(jobs.Items[0].Title, "(vanzelf)") {
+		t.Fatalf("vanzelf derde: %+v", jobs.Items)
+	}
+	if j := waitJob(t, c, jobs.Items[0].ID); j.Status != "failed" || !strings.Contains(j.Error, "start niet") {
+		t.Fatalf("web02 kapot: %+v", j)
+	}
+	c.do("GET", "/api/v1/agent-upgrades", nil, &v)
+	if got := v.states(); got != "db01=outdated web01=current web02=failed" {
+		t.Fatalf("na mislukt: %s", got)
+	}
+	if err := e.upg.AutoRun(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	c.do("GET", "/api/v1/jobs?limit=20", nil, &jobs)
+	if len(jobs.Items) != 5 {
+		t.Fatalf("vanzelf opnieuw na een mislukte update: %+v", jobs.Items[0])
+	}
+
 	// Helemaal uit.
 	if s := c.do("PUT", "/api/v1/agent-upgrades/auto", map[string]any{"enabled": false}, &v); s != http.StatusOK || v.Auto {
 		t.Fatalf("uit: %d %+v", s, v)
@@ -273,7 +320,7 @@ func TestAgentUpgrades(t *testing.T) {
 	for _, ev := range evs.Items {
 		seen[ev.Action]++
 	}
-	if seen["node.agent_upgraded"] != 3 || seen["node.agent_upgrade_failed"] != 1 || seen["cluster.agent_upgrade_auto"] != 2 ||
+	if seen["node.agent_upgraded"] != 5 || seen["node.agent_upgrade_failed"] != 2 || seen["cluster.agent_upgrade_auto"] != 2 ||
 		seen["settings.agent_upgrade_auto"] != 1 {
 		t.Fatalf("events: %v", seen)
 	}
