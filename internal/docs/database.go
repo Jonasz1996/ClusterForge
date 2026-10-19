@@ -198,8 +198,11 @@ func galeraRunbooks(d *doc, c *Cluster, cp DBComponent, db string) {
 		code("galera_recovery") + " haalt de positie dan uit InnoDB, alleen als MariaDB stilstaat. Ontbreekt dat script, zoals op MariaDB 12.3.2 zonder het pakket " +
 		code("mariadb-server-galera") + ", dan doet de laatste regel hetzelfde.")
 	d.code("sh", "cat /var/lib/mysql/grastate.dat\ngalera_recovery\nmariadbd --user=mysql --wsrep-recover --disable-log-error 2>&1 | grep 'Recovered position'")
-	d.p("**2.** Begin het cluster op de node met de hoogste seqno, en alleen daar: twee nodes die elk een cluster beginnen, geven twee clusters met dezelfde naam.")
-	d.code("sh", "sed -i 's/^safe_to_bootstrap:.*/safe_to_bootstrap: 1/' /var/lib/mysql/grastate.dat\ngalera_new_cluster")
+	d.p("**2.** Begin het cluster op de node met de hoogste seqno, en alleen daar: twee nodes die elk een cluster beginnen, geven twee clusters met dezelfde naam. " +
+		"Ontbreekt " + code("galera_new_cluster") + ", installeer dan eerst " + code("mariadb-server-galera") + " in de versie van " + code("mariadb-server") +
+		"; dat geldt ook voor elke node die daarna aansluit, want zonder dat pakket sluit een node niet aan.")
+	d.code("sh", "command -v galera_new_cluster || apt-get install mariadb-server-galera=$(dpkg-query -W -f='${Version}' mariadb-server)\n"+
+		"sed -i 's/^safe_to_bootstrap:.*/safe_to_bootstrap: 1/' /var/lib/mysql/grastate.dat\ngalera_new_cluster")
 	d.p("**3.** Start MariaDB op de andere nodes, één voor één; elke node haalt wat hij mist bij de eerste.")
 	d.code("sh", "systemctl start mariadb")
 	members := len(cp.Data) + len(cp.Arbiters)

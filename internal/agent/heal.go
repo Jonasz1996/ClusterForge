@@ -325,7 +325,12 @@ func (a *Agent) sstProcess(unit string) string {
 		b, _ := os.ReadFile(filepath.Join(root, ent.Name(), "comm"))
 		name := strings.TrimSpace(string(b))
 		if !strings.HasPrefix(name, "wsrep_sst_") {
-			continue
+			// De scripts beginnen met #!/usr/bin/env bash; dan heet het
+			// proces bash en staat het script in de opdrachtregel.
+			cmd, _ := os.ReadFile(filepath.Join(root, ent.Name(), "cmdline"))
+			if name = sstScript(string(cmd)); name == "" {
+				continue
+			}
 		}
 		if cg, err := os.ReadFile(filepath.Join(root, ent.Name(), "cgroup")); err == nil && unitFromCgroup(string(cg)) == unit {
 			return name
@@ -334,15 +339,45 @@ func (a *Agent) sstProcess(unit string) string {
 	return ""
 }
 
-// newClusterFlag zegt of galera.NewClusterVar een waarde heeft in de
-// omgeving van systemd.
-func (a *Agent) newClusterFlag(ctx context.Context) bool {
-	out, err := a.dbRun(ctx, "systemctl", "show-environment")
-	if err != nil {
-		return false
+// sstScript is de naam van het wsrep_sst_-script in de opdrachtregel van
+// een proces (argumenten gescheiden door een nulbyte), zoals
+// "bash /usr/bin/wsrep_sst_rsync --role joiner …", of "".
+func sstScript(cmdline string) string {
+	args := strings.Split(cmdline, "\x00")
+	for i, arg := range args[:min(len(args), 2)] {
+		if i > 0 && strings.HasPrefix(arg, "-") {
+			break
+		}
+		if name := filepath.Base(arg); strings.HasPrefix(name, "wsrep_sst_") {
+			return name
+		}
 	}
-	for line := range strings.SplitSeq(string(out), "\n") {
-		if v, ok := strings.CutPrefix(line, galera.NewClusterVar+"="); ok && strings.Trim(v, "'\" ") != "" {
+	return ""
+}
+
+// newClusterFlag zegt of galera.NewClusterVar een waarde heeft in de
+// omgeving van systemd of in een van galera.NewClusterFiles.
+func (a *Agent) newClusterFlag(ctx context.Context) bool {
+	if out, err := a.dbRun(ctx, "systemctl", "show-environment"); err == nil && newClusterSet(string(out)) {
+		return true
+	}
+	for _, f := range galera.NewClusterFiles {
+		path, err := a.path(f)
+		if err != nil {
+			continue
+		}
+		if b, err := os.ReadFile(path); err == nil && (newClusterSet(string(b)) || strings.Contains(string(b), "--wsrep-new-cluster")) {
+			return true
+		}
+	}
+	return false
+}
+
+// newClusterSet zegt of galera.NewClusterVar in s, regels VAR=waarde, een
+// waarde heeft.
+func newClusterSet(s string) bool {
+	for line := range strings.SplitSeq(s, "\n") {
+		if v, ok := strings.CutPrefix(strings.TrimSpace(line), galera.NewClusterVar+"="); ok && strings.Trim(v, "'\" ") != "" {
 			return true
 		}
 	}

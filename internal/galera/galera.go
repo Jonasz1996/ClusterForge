@@ -39,20 +39,38 @@ const Package = "mariadb-server-galera"
 // galera_new_cluster.
 const NoNewCluster = "galera_new_cluster ontbreekt op deze node; sinds MariaDB 12.3.2 zit het in het pakket " + Package + ". Installeer dat en probeer opnieuw"
 
-// NewClusterVar is de variabele in de omgeving van systemd waarmee
-// galera_new_cluster mariadb.service --wsrep-new-cluster meegeeft. Het
-// script wist hem na de start; wordt het afgebroken, dan blijft hij staan
-// en begint elke volgende start van MariaDB een nieuw cluster.
+// NewClusterVar is de variabele waarmee galera_new_cluster mariadb.service
+// --wsrep-new-cluster meegeeft: in de omgeving van systemd (oudere
+// MariaDB), of in een van NewClusterFiles, dat de unit als EnvironmentFile
+// leest. Het script wist hem zelf; wordt het hard afgebroken, dan kan hij
+// blijven staan, en dan probeert de volgende start van MariaDB een nieuw
+// cluster te beginnen.
 const NewClusterVar = "_WSREP_NEW_CLUSTER"
+
+// NewClusterFiles zijn de bestanden waarin nieuwere versies van
+// galera_new_cluster NewClusterVar zetten: /run/mariadb-wsrep-new-cluster
+// bij MariaDB 12.3 op Debian, de andere bij eerdere versies en RPM.
+var NewClusterFiles = []string{"/run/mariadb-wsrep-new-cluster", "/run/mysqld/wsrep-new-cluster", "/run/mariadb/wsrep-new-cluster"}
+
+// newClusterFiles is NewClusterFiles voor de shell.
+const newClusterFiles = "/run/mariadb-wsrep-new-cluster /run/mysqld/wsrep-new-cluster /run/mariadb/wsrep-new-cluster"
+
+// ClearNewCluster haalt NewClusterVar weg, uit systemd en uit
+// NewClusterFiles. Het lukt ook als hij er niet is.
+const ClearNewCluster = "systemctl unset-environment " + NewClusterVar + " && rm -f " + newClusterFiles
+
+// NewClusterGone slaagt als NewClusterVar nergens staat; een unless voor
+// ClearNewCluster.
+const NewClusterGone = "! systemctl show-environment 2>/dev/null | grep -q '^" + NewClusterVar + "=.' && " +
+	"for f in " + newClusterFiles + "; do [ ! -e \"$f\" ] || exit 1; done"
 
 // Bootstrap begint het cluster op deze node: MariaDB stoppen als hij nog
 // probeert te starten, de node veilig verklaren en galera_new_cluster.
 // systemd haalt bij het starten zelf de positie uit InnoDB als grastate.dat
-// die niet heeft. Zonder galera_new_cluster verandert het niets. Daarna
-// gaat NewClusterVar weg, ook als galera_new_cluster mislukte of stopte
-// voor het hem zelf wiste.
+// die niet heeft. Zonder galera_new_cluster verandert het niets. Daarna gaat
+// NewClusterVar weg, ook als galera_new_cluster mislukte.
 const Bootstrap = "command -v galera_new_cluster >/dev/null || { echo '" + NoNewCluster + "' >&2; exit 1; }; " +
-	"systemctl stop mariadb; " + SafeToBootstrap + " && galera_new_cluster; rc=$?; systemctl unset-environment " + NewClusterVar + "; exit $rc"
+	"systemctl stop mariadb; " + SafeToBootstrap + " && galera_new_cluster; rc=$?; " + ClearNewCluster + "; exit $rc"
 
 // NoUUID is de uuid van een node die nog nooit in een cluster zat.
 const NoUUID = "00000000-0000-0000-0000-000000000000"

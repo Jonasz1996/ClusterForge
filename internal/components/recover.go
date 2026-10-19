@@ -629,13 +629,18 @@ func (s *Service) recoverBegin(ctx context.Context, id string, st *jobs.Step, r 
 }
 
 // recoverJoin start MariaDB op n opnieuw, tenzij hij al meedoet, en wacht
-// tot hij Synced is in een cluster van minstens want leden.
+// tot hij Synced is in een cluster van minstens want leden. Eerst gaat een
+// achtergebleven vlag van galera_new_cluster weg, anders begint n een
+// tweede cluster.
 func (s *Service) recoverJoin(ctx context.Context, id string, st *jobs.Step, n Node, slug string, want int) error {
 	if g, _ := s.galera(ctx, n.NodeID); healthy(g, slug, 1) {
 		st.Logf("%s doet al mee", n.Hostname)
 		return s.waitSynced(ctx, st, n, slug, want)
 	}
-	restart := []templates.Step{{Step: protocol.Step{Service: &protocol.ServiceStep{Name: "mariadb", State: "restarted"}}, Title: "service mariadb"}}
+	restart := []templates.Step{
+		{Step: protocol.Step{Command: &protocol.CommandStep{Run: galera.ClearNewCluster, Unless: galera.NewClusterGone}}, Title: "de vlag van galera_new_cluster wissen"},
+		{Step: protocol.Step{Service: &protocol.ServiceStep{Name: "mariadb", State: "restarted"}}, Title: "service mariadb"},
+	}
 	if _, err := deployApplyAs(ctx, s, id, st, n, "-join", restart); err != nil {
 		return err
 	}

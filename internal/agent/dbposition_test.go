@@ -184,6 +184,28 @@ func TestDBPosition(t *testing.T) {
 			t.Fatalf("%+v", p)
 		}
 	})
+	t.Run("zonder galera_recovery te lang", func(t *testing.T) {
+		// De tijdslimiet loopt af terwijl InnoDB nog herstelt; exec doodt
+		// mariadbd.
+		a, h := stopped(t, agenttest.Unit{Enabled: true}, grastate("-1", false))
+		h.MariaDB.NoGaleraScripts = true
+		ctx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		exec := a.Exec
+		a.Exec = func(c context.Context, name string, args ...string) ([]byte, error) {
+			if name == "mariadbd" {
+				cancel()
+				return []byte("2026-10-19 18:20:01 0 [Note] InnoDB: To recover: 183456 pages\n"), errors.New("signal: killed")
+			}
+			return exec(c, name, args...)
+		}
+		p := a.dbPosition(ctx, &protocol.DBPositionRequest{Recover: true}).Position
+		if p == nil || p.Seqno != -1 || p.Via != "mariadbd --wsrep-recover" ||
+			!strings.Contains(p.Error, "en de agent brak mariadbd --wsrep-recover af na de tijdslimiet (10m0s); InnoDB was nog bezig met herstellen") ||
+			!strings.HasSuffix(p.Error, "Laatste regel: 2026-10-19 18:20:01 0 [Note] InnoDB: To recover: 183456 pages") {
+			t.Fatalf("%+v", p)
+		}
+	})
 	t.Run("zonder galera_recovery en mariadbd", func(t *testing.T) {
 		a, h := stopped(t, agenttest.Unit{Enabled: true}, grastate("-1", false))
 		h.MariaDB.NoGaleraScripts = true

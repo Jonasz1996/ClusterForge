@@ -157,15 +157,63 @@ func TestDiagnoseGaleraPackage(t *testing.T) {
 			t.Errorf("probleem: %+v", p)
 		}
 	}
-	// Het plan kan, maar niet vanzelf: beginnen of een volledige kopie
-	// lukt op Node1 niet.
+	// Het plan kan, maar niet vanzelf: beginnen of aansluiten lukt op
+	// Node1 niet, en de taak slaat hem over.
 	p := r.Plan
 	if p == nil || p.Action != ActionGalera || p.Blocked != "" || p.Auto ||
-		p.AutoWhy != "Op DatabaseClusterNode1 ontbreekt mariadb-server-galera; daar lukt het beginnen of een volledige kopie niet. Installeer het eerst, of bevestig het plan." {
+		p.AutoWhy != "Op DatabaseClusterNode1 ontbreekt mariadb-server-galera; die node kan het cluster niet beginnen en niet aansluiten. Installeer het eerst, of bevestig het plan." {
 		t.Fatalf("plan: %+v", p)
 	}
-	if !strings.Contains(strings.Join(p.Steps, " "), "mariadbd --wsrep-recover waar dat script ontbreekt") {
+	if steps := strings.Join(p.Steps, " "); !strings.Contains(steps, "mariadbd --wsrep-recover waar dat script ontbreekt") ||
+		!strings.Contains(steps, "Op DatabaseClusterNode1 ontbreekt mariadb-server-galera: de taak start MariaDB daar niet") {
 		t.Errorf("stappen: %q", p.Steps)
+	}
+	for i, n := range p.Nodes {
+		if n.NoGaleraTools != (i == 0) {
+			t.Errorf("node %s: NoGaleraTools %v", n.Hostname, n.NoGaleraTools)
+		}
+	}
+
+	// Draaien Node2 en Node3 in Primary, dan zou Node1 aansluiten; zonder
+	// het pakket lukt dat niet, en meer is er niet te doen.
+	for i, id := range f.ids[1:] {
+		n := f.in.Nodes[id]
+		n.Inspect.Active = "active"
+		f.in.Nodes[id] = n
+		f.in.Group.Servers[i+1].Running = true
+		f.in.Group.Servers[i+1].Galera = &protocol.DBGalera{ClusterStatus: "Primary", State: "Synced", StateCode: 4, ClusterSize: 2}
+	}
+	r = Diagnose(f.in)
+	if p := r.Plan; p == nil || p.Auto || p.Blocked != "Op DatabaseClusterNode1 ontbreekt mariadb-server-galera; zonder dat pakket sluit de node niet aan. Installeer het eerst, in de versie van mariadb-server" ||
+		len(p.Steps) != 0 {
+		t.Fatalf("aansluiten: %s %+v", codes(r), r.Plan)
+	}
+	// Staat ook Node2 stil, mét het pakket, dan start de taak alleen Node2.
+	n := f.in.Nodes[f.ids[1]]
+	n.Inspect.Active = "inactive"
+	f.in.Nodes[f.ids[1]] = n
+	f.in.Group.Servers[1].Running, f.in.Group.Servers[1].Galera = false, nil
+	r = Diagnose(f.in)
+	if p := r.Plan; p == nil || p.Auto || p.Blocked != "" || len(p.Steps) != 2 ||
+		!strings.HasPrefix(p.Steps[0], "Op DatabaseClusterNode2 MariaDB een voor een starten") ||
+		!strings.HasPrefix(p.Steps[1], "Op DatabaseClusterNode1 ontbreekt mariadb-server-galera: de taak start MariaDB daar niet") ||
+		!strings.HasPrefix(p.AutoWhy, "Op DatabaseClusterNode1 ontbreekt mariadb-server-galera; zonder dat pakket sluit die node niet aan") {
+		t.Fatalf("met Node2: %s %+v", codes(r), r.Plan)
+	}
+	n.Inspect.Active = "active"
+	f.in.Nodes[f.ids[1]] = n
+	f.in.Group.Servers[1].Running = true
+	f.in.Group.Servers[1].Galera = &protocol.DBGalera{ClusterStatus: "Primary", State: "Synced", StateCode: 4, ClusterSize: 2}
+	// Mist een draaiende node het pakket, dan kan hij geen donor zijn: niet
+	// vanzelf.
+	n = f.in.Nodes[f.ids[1]]
+	n.Inspect.Galera.MissingTools = []string{"galera_recovery"}
+	f.in.Nodes[f.ids[1]] = n
+	n = f.in.Nodes[f.ids[0]]
+	n.Inspect.Galera.MissingTools = nil
+	f.in.Nodes[f.ids[0]] = n
+	if r := Diagnose(f.in); r.Plan == nil || r.Plan.Auto || !strings.Contains(r.Plan.AutoWhy, "als donor") || !strings.Contains(codes(r), "galera_package@DatabaseClusterNode2") {
+		t.Fatalf("draaiende node zonder pakket: %s %+v", codes(r), r.Plan)
 	}
 
 	// Zonder Galera telt het niet.
@@ -175,6 +223,25 @@ func TestDiagnoseGaleraPackage(t *testing.T) {
 	}
 	if r := Diagnose(f.in); strings.Contains(codes(r), "galera_package") {
 		t.Errorf("zonder Galera: %s", codes(r))
+	}
+}
+
+func TestDiagnoseGaleraPackageEverywhere(t *testing.T) {
+	// Alle nodes naar 12.3 zonder mariadb-server-galera, en alles gestopt:
+	// geen node kan beginnen, dus geen knop.
+	f := jonas()
+	for i, id := range f.ids {
+		n := f.in.Nodes[id]
+		n.Inspect.Galera.ClusterAddress = "gcomm://192.168.10.181,192.168.10.182,192.168.10.183"
+		n.Inspect.Galera.NodeAddress, n.Inspect.Galera.PeerTimeouts = "", nil
+		n.Inspect.Active, n.Inspect.Processes = "inactive", nil
+		n.Inspect.Galera.MissingTools = []string{"galera_recovery"}
+		f.in.Group.Servers[i].Running, f.in.Group.Servers[i].Galera = false, nil
+		f.in.Nodes[id] = n
+	}
+	r := Diagnose(f.in)
+	if p := r.Plan; p == nil || p.Auto || !strings.HasPrefix(p.Blocked, "Op geen enkele node staat mariadb-server-galera") {
+		t.Fatalf("plan: %s %+v", codes(r), r.Plan)
 	}
 }
 
@@ -227,7 +294,7 @@ func TestDiagnoseNewClusterFlag(t *testing.T) {
 		t.Fatalf("problemen: %s", codes(r))
 	}
 	for _, p := range r.Problems {
-		if p.Code == CodeNewCluster && (p.Level != LevelWarning || p.Title != "Een volgende start van MariaDB op DatabaseClusterNode3 begint een nieuw cluster" ||
+		if p.Code == CodeNewCluster && (p.Level != LevelWarning || p.Title != "Een volgende start van MariaDB op DatabaseClusterNode3 probeert een nieuw cluster te beginnen" ||
 			!strings.Contains(p.Why, "systemctl unset-environment _WSREP_NEW_CLUSTER")) {
 			t.Errorf("probleem: %+v", p)
 		}

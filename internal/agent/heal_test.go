@@ -147,11 +147,17 @@ func TestHealInspectSST(t *testing.T) {
 	if res := a.dbHeal(context.Background(), &protocol.DBHealRequest{Action: protocol.HealInspect}); res.Heal.Engines[0].Galera.SST != "" {
 		t.Fatalf("SST zonder script: %q", res.Heal.Engines[0].Galera.SST)
 	}
-	// Een script van een andere unit telt niet; dat van mariadb wel.
+	// Een script van een andere unit telt niet; dat van mariadb wel. De
+	// scripts beginnen met #!/usr/bin/env bash, dus het proces heet bash.
 	for pid, cg := range map[string]string{"171": "0::/user.slice/user-0.slice/session-1.scope\n", "172": "0::/system.slice/mariadb.service\n"} {
-		writeFile(t, root, "/proc/"+pid+"/comm", "wsrep_sst_rsync\n")
+		writeFile(t, root, "/proc/"+pid+"/comm", "bash\n")
+		writeFile(t, root, "/proc/"+pid+"/cmdline", "bash\x00/usr/bin/wsrep_sst_rsync\x00--role\x00joiner\x00--address\x00192.168.10.191\x00")
 		writeFile(t, root, "/proc/"+pid+"/cgroup", cg)
 	}
+	// Een gewone bash in mariadb.service is geen SST.
+	writeFile(t, root, "/proc/173/comm", "bash\n")
+	writeFile(t, root, "/proc/173/cmdline", "bash\x00-c\x00wsrep_sst_rsync\x00")
+	writeFile(t, root, "/proc/173/cgroup", "0::/system.slice/mariadb.service\n")
 	res := a.dbHeal(context.Background(), &protocol.DBHealRequest{Action: protocol.HealInspect})
 	if g := res.Heal.Engines[0].Galera; g.SST != "wsrep_sst_rsync" {
 		t.Fatalf("SST: %q", g.SST)
@@ -161,6 +167,21 @@ func TestHealInspectSST(t *testing.T) {
 	}
 	if g := a.dbHeal(context.Background(), &protocol.DBHealRequest{Action: protocol.HealInspect}).Heal.Engines[0].Galera; g.SST != "" {
 		t.Fatalf("SST buiten de unit: %q", g.SST)
+	}
+}
+
+func TestSSTScript(t *testing.T) {
+	for cmd, want := range map[string]string{
+		"bash\x00/usr/bin/wsrep_sst_rsync\x00--role\x00joiner\x00": "wsrep_sst_rsync",
+		"/bin/bash\x00-ue\x00/usr/bin/wsrep_sst_mariabackup\x00":   "",
+		"/usr/bin/wsrep_sst_mariabackup\x00--role\x00donor\x00":    "wsrep_sst_mariabackup",
+		"bash\x00-c\x00wsrep_sst_rsync\x00":                        "",
+		"/usr/sbin/mariadbd\x00--wsrep_start_position=x:1\x00":     "",
+		"": "",
+	} {
+		if got := sstScript(cmd); got != want {
+			t.Errorf("%q: %q, verwacht %q", cmd, got, want)
+		}
 	}
 }
 
@@ -183,6 +204,24 @@ func TestHealInspectNewClusterFlag(t *testing.T) {
 		res := a.dbHeal(context.Background(), &protocol.DBHealRequest{Action: protocol.HealInspect})
 		if res.Heal == nil || len(res.Heal.Engines) != 1 || res.Heal.Engines[0].Galera == nil || res.Heal.Engines[0].Galera.NewClusterFlag != want {
 			t.Errorf("%q: %+v", env, res)
+		}
+	}
+	// Nieuwere versies van galera_new_cluster zetten hem in een bestand dat
+	// de unit leest.
+	for _, tc := range []struct {
+		file, content string
+		want          bool
+	}{
+		{"/run/mariadb-wsrep-new-cluster", "_WSREP_NEW_CLUSTER=--wsrep-new-cluster\n", true},
+		{"/run/mysqld/wsrep-new-cluster", "_WSREP_NEW_CLUSTER='--wsrep-new-cluster'\n", true},
+		{"/run/mariadb/wsrep-new-cluster", "--wsrep-new-cluster\n", true},
+		{"/run/mariadb-wsrep-new-cluster", "", false},
+	} {
+		a, root := healHost(t, false)
+		writeFile(t, root, tc.file, tc.content)
+		res := a.dbHeal(context.Background(), &protocol.DBHealRequest{Action: protocol.HealInspect})
+		if res.Heal == nil || len(res.Heal.Engines) != 1 || res.Heal.Engines[0].Galera == nil || res.Heal.Engines[0].Galera.NewClusterFlag != tc.want {
+			t.Errorf("%s %q: %+v", tc.file, tc.content, res)
 		}
 	}
 }

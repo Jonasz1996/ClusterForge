@@ -103,7 +103,7 @@ func TestBootstrap(t *testing.T) {
 		dir := t.TempDir()
 		logFile := filepath.Join(dir, "log")
 		for name, exit := range tools {
-			script := fmt.Sprintf("#!/bin/sh\necho \"${0##*/} $*\" >> %s\nexit %d\n", logFile, exit)
+			script := fmt.Sprintf("#!/bin/sh\necho \"${0##*/} $*\" >> '%s'\nexit %d\n", logFile, exit)
 			if err := os.WriteFile(filepath.Join(dir, name), []byte(script), 0o755); err != nil {
 				t.Fatal(err)
 			}
@@ -126,29 +126,29 @@ func TestBootstrap(t *testing.T) {
 	const (
 		stop  = "systemctl stop mariadb\n"
 		sed   = "sed -i s/^safe_to_bootstrap:.*/safe_to_bootstrap: 1/ " + GrastateFile + "\n"
-		unset = "systemctl unset-environment _WSREP_NEW_CLUSTER\n"
+		unset = "systemctl unset-environment _WSREP_NEW_CLUSTER\nrm -f /run/mariadb-wsrep-new-cluster /run/mysqld/wsrep-new-cluster /run/mariadb/wsrep-new-cluster\n"
 	)
 	t.Run("zonder galera_new_cluster", func(t *testing.T) {
-		log, stderr, code := run(t, map[string]int{"systemctl": 0, "sed": 0})
+		log, stderr, code := run(t, map[string]int{"systemctl": 0, "sed": 0, "rm": 0})
 		if code != 1 || log != "" || stderr != NoNewCluster+"\n" {
 			t.Fatalf("code %d, stderr %q, log %q", code, stderr, log)
 		}
 	})
 	t.Run("gelukt", func(t *testing.T) {
-		log, _, code := run(t, map[string]int{"systemctl": 0, "sed": 0, "galera_new_cluster": 0})
+		log, _, code := run(t, map[string]int{"systemctl": 0, "sed": 0, "rm": 0, "galera_new_cluster": 0})
 		if code != 0 || log != stop+sed+"galera_new_cluster \n"+unset {
 			t.Fatalf("code %d, log %q", code, log)
 		}
 	})
 	t.Run("galera_new_cluster mislukt", func(t *testing.T) {
 		// De vlag gaat ook dan weg, en de fout blijft.
-		log, _, code := run(t, map[string]int{"systemctl": 0, "sed": 0, "galera_new_cluster": 3})
+		log, _, code := run(t, map[string]int{"systemctl": 0, "sed": 0, "rm": 0, "galera_new_cluster": 3})
 		if code != 3 || log != stop+sed+"galera_new_cluster \n"+unset {
 			t.Fatalf("code %d, log %q", code, log)
 		}
 	})
 	t.Run("sed mislukt", func(t *testing.T) {
-		log, _, code := run(t, map[string]int{"systemctl": 0, "sed": 2, "galera_new_cluster": 0})
+		log, _, code := run(t, map[string]int{"systemctl": 0, "sed": 2, "rm": 0, "galera_new_cluster": 0})
 		if code != 2 || log != stop+sed+unset {
 			t.Fatalf("code %d, log %q", code, log)
 		}
@@ -175,5 +175,23 @@ func TestPositionError(t *testing.T) {
 	}
 	if got := PositionError("geen seqno"); got != "geen seqno" {
 		t.Errorf("andere fout: %q", got)
+	}
+}
+
+func TestNewClusterGone(t *testing.T) {
+	for env, gone := range map[string]bool{
+		"LANG=C.UTF-8\n_WSREP_NEW_CLUSTER=--wsrep-new-cluster\n": false,
+		"_WSREP_NEW_CLUSTER=\n":                                  true,
+		"LANG=C.UTF-8\n":                                         true,
+	} {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "systemctl"), []byte("#!/bin/sh\nprintf '"+strings.ReplaceAll(env, "\n", `\n`)+"'\n"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		cmd := exec.Command("/bin/sh", "-c", NewClusterGone)
+		cmd.Env = []string{"PATH=" + dir + ":/usr/bin:/bin"}
+		if err := cmd.Run(); (err == nil) != gone {
+			t.Errorf("%q: %v", env, err)
+		}
 	}
 }

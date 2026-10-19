@@ -39,12 +39,22 @@ func (a *Agent) recoverPosition(ctx context.Context) (pos galera.Position, via s
 	defaults, _ := a.printDefaults(ctx)
 	args := []string{"--user=" + cmp.Or(defaults["user"], "mysql"), "--wsrep-recover", "--disable-log-error"}
 	for _, bin := range []string{"mariadbd", "mysqld"} {
-		out, err = a.execTimeout(ctx, protocol.DBRecoverTimeout, bin, args...)
+		// rctx loopt niet later af dan de tijdslimiet van execTimeout; zo
+		// is te zien dat de agent mariadbd afbrak.
+		rctx, cancel := context.WithTimeout(ctx, protocol.DBRecoverTimeout)
+		out, err = a.execTimeout(rctx, protocol.DBRecoverTimeout, bin, args...)
+		stopped := rctx.Err() != nil
+		cancel()
 		if err != nil && notInstalled(err) {
 			continue
 		}
 		via = bin + " --wsrep-recover"
-		if err != nil {
+		switch {
+		case err != nil && stopped:
+			return galera.Position{Seqno: -1}, via, fmt.Errorf("%s, en de agent brak %s af na de tijdslimiet (%s); InnoDB was nog bezig met herstellen. "+
+				"Laat het met de hand uitlopen: mariadbd --user=mysql --wsrep-recover --disable-log-error. Laatste regel: %s",
+				noRecoveryScript, via, protocol.DBRecoverTimeout, recoverFailure(out, nil))
+		case err != nil:
 			return galera.Position{Seqno: -1}, via, fmt.Errorf("%s, en %s lukte niet: %s", noRecoveryScript, via, recoverFailure(out, err))
 		}
 		pos, err := galera.ParseRecovered(string(out))
