@@ -87,9 +87,40 @@ func (a *Agent) binary() (path, sum string) {
 			p = real
 		}
 		a.self.path = p
-		a.self.sum, _ = fileSHA256(p)
+		a.self.sum = cachedSHA256(p)
 	})
 	return a.self.path, a.self.sum
+}
+
+// sumCache bewaart de sha256 per bestand voor het hele proces: agents in
+// hetzelfde proces (de tests) lezen dezelfde binary zo maar één keer.
+var sumCache struct {
+	sync.Mutex
+	m map[string]string
+}
+
+// cachedSHA256 is fileSHA256 met een cache op pad, grootte en wijzigtijd.
+// Fouten geven een lege sha256.
+func cachedSHA256(path string) string {
+	st, err := os.Stat(path)
+	if err != nil {
+		return ""
+	}
+	key := fmt.Sprintf("%s|%d|%d", path, st.Size(), st.ModTime().UnixNano())
+	sumCache.Lock()
+	defer sumCache.Unlock()
+	if s, ok := sumCache.m[key]; ok {
+		return s
+	}
+	s, err := fileSHA256(path)
+	if err != nil {
+		return ""
+	}
+	if sumCache.m == nil {
+		sumCache.m = map[string]string{}
+	}
+	sumCache.m[key] = s
+	return s
 }
 
 func fileSHA256(path string) (string, error) {
