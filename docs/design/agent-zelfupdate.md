@@ -23,7 +23,9 @@ een serverupdate.
 5. Hij vervangt zichzelf in één rename en herstart met
    `systemctl --no-block restart cf-agent`.
 6. De nieuwe agent bevestigt zodra de server iets van hem aanneemt (facts met
-   Ack): de timer gaat weg en `upgrade.json` ook.
+   Ack): de timer gaat weg en `upgrade.json` ook. Pas dan meldt zijn heartbeat
+   de nieuwe sha256, zodat de server een agent die crasht of niet aangenomen
+   wordt niet als bijgewerkt telt.
 7. Bevestigt hij niet op tijd (crasht, verbindt niet), dan zet de timer de oude
    binary terug, herstart cf-agent en schrijft `rolled_back` in
    `upgrade.json`. De oude agent meldt in zijn heartbeat welke sha256 mislukte;
@@ -31,8 +33,9 @@ een serverupdate.
 
 Na een reboot binnen die 3 minuten is de tijdelijke timer weg; de nieuwe agent
 zet hem bij zijn start terug met de tijd die er nog over was. Een agent die al
-bij het starten crasht, kan dat niet: dan herstel je met `agent.sh --upgrade`
-of `cp /usr/local/bin/cf-agent.prev /usr/local/bin/cf-agent`.
+bij het starten crasht, kan dat niet: zet de oude dan terug met
+`sudo /usr/local/bin/cf-agent.prev upgrade-rollback`. `agent.sh --upgrade` helpt
+hier niet: dat haalt dezelfde binary opnieuw.
 
 De heartbeat meldt vanaf 23 ook `arch` en `binary_sha256`, zodat de server
 ziet of een agent dezelfde is als die hij aanbiedt, ook bij hetzelfde protocol.
