@@ -215,6 +215,8 @@ func commandText(p map[string]any) string {
 	case "fault.inject":
 		f, _ := p["fault"].(map[string]any)
 		return "storing aanzetten: " + faultText(f) + fmt.Sprintf(", hoogstens %s s", num(f["max_seconds"]))
+	case "agent.upgrade":
+		return "agent bijwerken"
 	case "fault.clear":
 		ids, _ := p["fault_ids"].([]any)
 		if len(ids) == 0 {
@@ -697,6 +699,25 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 		return "Commando aan " + name + ": " + commandText(p) + paren(prefixed("reden: ", str(p, "reason")))
 	case "agent.revoked":
 		return "Agent op " + str(p, "hostname") + " ingetrokken"
+	case "node.agent_upgraded":
+		s := fmt.Sprintf("Agent op %s bijgewerkt van %s (protocol %s) naar %s (protocol %s)", str(p, "hostname"),
+			or(str(p, "from"), "?"), num(p["from_protocol"]), or(str(p, "to"), "?"), num(p["to_protocol"]))
+		if p["auto"] == true {
+			s += ", vanzelf"
+		}
+		return s
+	case "settings.agent_upgrade_auto":
+		if p["enabled"] == true {
+			return "Agents vanzelf bijwerken aangezet"
+		}
+		return "Agents vanzelf bijwerken uitgezet"
+	case "cluster.agent_upgrade_auto":
+		if p["enabled"] == true {
+			return "Agents vanzelf bijwerken aangezet op cluster " + name
+		}
+		return "Agents vanzelf bijwerken uitgezet op cluster " + name
+	case "node.agent_upgrade_failed":
+		return "Agent op " + str(p, "hostname") + " bijwerken mislukt" + colon(str(p, "error"))
 	case "enrollment_token.created":
 		return "Aanmeldtoken gemaakt" + colon(str(p, "description"))
 	case "proxmox.created":

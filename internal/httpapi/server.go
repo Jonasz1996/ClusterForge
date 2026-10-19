@@ -14,6 +14,7 @@ import (
 
 	"github.com/Jonasz1996/clusterforge/internal/agentdist"
 	"github.com/Jonasz1996/clusterforge/internal/agents"
+	"github.com/Jonasz1996/clusterforge/internal/agentupgrade"
 	"github.com/Jonasz1996/clusterforge/internal/assistant"
 	"github.com/Jonasz1996/clusterforge/internal/audit"
 	"github.com/Jonasz1996/clusterforge/internal/auth"
@@ -86,6 +87,7 @@ type Server struct {
 	kubeNodes    *kubenodes.Service
 	lessons      *kubelessons.Engine
 	version      string
+	upgrades     *agentupgrade.Service
 	loginLimiter *ipLimiter
 	// loginTimeout en sessionTimeout begrenzen het databasewerk van een login
 	// en van de sessiecontrole voor elke API-call. Een volle pool of een slot
@@ -153,7 +155,9 @@ type Deps struct {
 	Heal *heal.Service
 	// Components zet een database op de nodes van een cluster.
 	Components *components.Service
-	Version    string
+	// Upgrades werkt de agents bij.
+	Upgrades *agentupgrade.Service
+	Version  string
 }
 
 func New(d Deps) *Server {
@@ -185,6 +189,7 @@ func New(d Deps) *Server {
 		rollout:  d.Rollout,
 		git:      d.GitOps,
 		version:  d.Version,
+		upgrades: d.Upgrades,
 		// 10 pogingen direct, daarna één per 6 seconden per IP-adres.
 		loginLimiter:   newIPLimiter(6*time.Second, 10),
 		loginTimeout:   20 * time.Second,

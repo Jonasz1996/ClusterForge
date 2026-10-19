@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { BackupBadge } from "@/components/backups/Backups";
+import { AgentUpgradeCard } from "@/components/inventory/AgentUpgrades";
 import { InstallAgent } from "@/components/inventory/InstallAgent";
 import { NodeForm } from "@/components/inventory/NodeForm";
 import { AgentBadge, Empty, LifecycleBadge, QueryState, StatusBadge, Tags } from "@/components/inventory/bits";
@@ -180,6 +181,8 @@ export default function NodesPage() {
           </>
         )}
       </QueryState>
+
+      <AgentUpgradeCard isAdmin={isAdmin} />
 
       {isAdmin && <ActiveTokens />}
     </div>
