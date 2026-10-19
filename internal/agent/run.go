@@ -116,10 +116,12 @@ type Agent struct {
 	cronMu sync.Mutex
 	cron   *cronLog
 	// self is de binary die draait; rolledBack de sha256 van een update die
-	// teruggezet werd, en confirmed of deze agent zijn update bevestigde.
-	self       selfBinary
-	rolledBack atomic.Value
-	confirmed  atomic.Bool
+	// teruggezet werd, confirmed of deze agent zijn update bevestigde en
+	// unconfirmed of hij de nieuwe van een update is die dat nog moet.
+	self        selfBinary
+	rolledBack  atomic.Value
+	confirmed   atomic.Bool
+	unconfirmed atomic.Bool
 }
 
 // Connect verbindt met NATS. Is de server nog niet bereikbaar, dan blijft de
@@ -299,7 +301,9 @@ func (a *Agent) sendHeartbeat(ctx context.Context) {
 		return
 	}
 	hb := a.Collector.Heartbeat(ctx, a.Version)
-	hb.BinarySHA256 = a.binarySum()
+	if !a.unconfirmed.Load() {
+		hb.BinarySHA256 = a.binarySum()
+	}
 	hb.Arch = runtime.GOARCH
 	hb.UpgradeRolledBack, _ = a.rolledBack.Load().(string)
 	if err := a.publish(protocol.SubjectHeartbeat, protocol.TypeHeartbeat, hb); err != nil {

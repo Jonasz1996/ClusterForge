@@ -179,8 +179,11 @@ func TestUpgradeReplacesItselfAndArmsRollback(t *testing.T) {
 	if len(h.called("systemd-run")) != 1 {
 		t.Fatal("de nieuwe agent zette de timer opnieuw terwijl hij nog liep")
 	}
+	if !b.unconfirmed.Load() {
+		t.Fatal("de nieuwe agent meldt zijn sha256 al voor de bevestiging")
+	}
 	b.confirmUpgrade(context.Background())
-	if marker(t, h) != nil || h.timer {
+	if marker(t, h) != nil || h.timer || b.unconfirmed.Load() {
 		t.Fatal("update niet bevestigd")
 	}
 	// Hetzelfde commando nog eens: al bijgewerkt.
@@ -228,6 +231,24 @@ func TestUpgradeRollsBack(t *testing.T) {
 	}
 	if got := read(t, h.bin); got != "oude agent" {
 		t.Fatalf("binary = %q", got)
+	}
+
+	// Een nieuwe poging die mislukt, laat de oude terugzetting staan.
+	h.served = []byte("iets anders")
+	if res := c.handleCommand(command(t, h.command(h.newSum))); res.OK {
+		t.Fatal("download met een andere sha256 aangenomen")
+	}
+	if got, _ := c.rolledBack.Load().(string); got != h.newSum {
+		t.Fatalf("rolledBack na een mislukte poging = %q", got)
+	}
+	// Een nieuwe poging die lukt, meldt de oude terugzetting niet meer: de
+	// server zou de oude heartbeat anders als een nieuwe terugzetting lezen.
+	h.served = []byte("nieuwe agent")
+	if res := c.handleCommand(command(t, h.command(h.newSum))); !res.OK {
+		t.Fatal(res.Error)
+	}
+	if got, _ := c.rolledBack.Load().(string); got != "" {
+		t.Fatalf("rolledBack tijdens een nieuwe poging = %q", got)
 	}
 }
 

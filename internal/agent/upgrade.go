@@ -193,6 +193,16 @@ func (a *Agent) upgrade(ctx context.Context, cmd protocol.Command) protocol.Resu
 	case a.Config == nil || a.Config.ServerURL == "":
 		return failed(nil, "agent.json heeft geen server_url; werk deze agent bij met agent.sh --upgrade")
 	}
+	// Een nieuwe poging vervangt een eerdere die teruggezet werd: de
+	// heartbeats melden die niet meer, behalve als deze poging mislukt.
+	prevRB, _ := a.rolledBack.Load().(string)
+	a.rolledBack.Store("")
+	ok := false
+	defer func() {
+		if !ok {
+			a.rolledBack.Store(prevRB)
+		}
+	}()
 	var out []string
 	tmp, err := a.download(ctx, bin, want)
 	if err != nil {
@@ -244,6 +254,7 @@ func (a *Agent) upgrade(ctx context.Context, cmd protocol.Command) protocol.Resu
 	}
 	out = append(out, fmt.Sprintf("cf-agent herstart; praat de nieuwe niet binnen %s met de server, dan komt de oude terug", seconds(a.rollbackAfter())))
 	a.Log.Warn("agent bijgewerkt; herstarten", "from", a.Version, "to", sc.Version)
+	ok = true
 	go func() {
 		// Even wachten, zodat het antwoord nog weg kan.
 		time.Sleep(time.Second)
@@ -346,6 +357,10 @@ func (a *Agent) resumeUpgrade(ctx context.Context) {
 		a.rolledBack.Store(m.To)
 		a.Log.Warn("de vorige update werd teruggezet", "to_version", m.ToVersion, "reason", m.Reason)
 	case m.Status == upgradePending && own == m.To:
+		// De heartbeat meldt de nieuwe sha256 pas na de bevestiging: zo
+		// telt de server een agent die crasht of niet aangenomen wordt
+		// niet als bijgewerkt.
+		a.unconfirmed.Store(true)
 		if _, err := a.exec(ctx, "systemctl", "is-active", "--quiet", rollbackUnit+".timer"); err == nil {
 			return
 		}
@@ -365,6 +380,13 @@ func (a *Agent) confirmUpgrade(ctx context.Context) {
 	if a.confirmed.Swap(true) {
 		return
 	}
+	defer func() {
+		// Meteen een heartbeat met de nieuwe sha256, zodat de server niet
+		// tot de volgende hoeft te wachten.
+		if a.unconfirmed.Swap(false) {
+			a.signal(a.connected)
+		}
+	}()
 	path := upgradeMarkerPath(a.statePath())
 	m, err := loadMarker(path)
 	if err != nil || m == nil || m.Status != upgradePending {
