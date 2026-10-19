@@ -133,7 +133,9 @@ type incidentAnalysis struct {
 }
 
 // incidentTimeline is de tijdlijn die de analyse las, met de afwijkingen in
-// de metrics erbij.
+// de metrics erbij. De herstelacties van Zelfherstel na dat venster staan er
+// ook in, tot nu of tot een minuut na het einde, maar alleen die over het
+// incident zelf (whatbroke.RepairScope).
 func (s *Server) incidentTimeline(ctx context.Context, row store.Incident, a *whatbroke.Analysis) ([]whatbroke.Entry, bool, error) {
 	subjects, err := s.q.ListIncidentSubjectsOf(ctx, []uuid.UUID{row.ID})
 	if err != nil {
@@ -143,17 +145,28 @@ func (s *Server) incidentTimeline(ctx context.Context, row store.Incident, a *wh
 	if err != nil {
 		return nil, false, err
 	}
-	from, to := whatbroke.AnalysisWindow(row, time.Now())
+	now := time.Now()
+	from, to := whatbroke.AnalysisWindow(row, now)
 	sc := whatbroke.ScopeFor(row.ID, whatbroke.SubjectsOf(subjects), world)
 	entries, more, err := whatbroke.Timeline(ctx, s.q, s.audit, sc, from, to, whatbroke.MaxEntries)
 	if err != nil {
 		return nil, false, err
 	}
+	end := now
+	if row.ResolvedAt != nil {
+		end = row.ResolvedAt.Add(time.Minute)
+	}
+	rsc := whatbroke.RepairScope(row.ID, whatbroke.SubjectsOf(subjects), world)
+	repairs, rmore, err := whatbroke.Repairs(ctx, s.audit, rsc, to, end)
+	if err != nil {
+		return nil, false, err
+	}
+	entries, more = append(entries, repairs...), more || rmore
 	if a != nil {
 		for _, f := range a.Anomalies {
 			entries = append(entries, f.Entry())
 		}
-		whatbroke.Sort(entries)
 	}
+	whatbroke.Sort(entries)
 	return entries, more, nil
 }

@@ -23,6 +23,7 @@ import (
 	"github.com/pquerna/otp/totp"
 
 	"github.com/Jonasz1996/clusterforge/internal/agentbus"
+	"github.com/Jonasz1996/clusterforge/internal/agentupgrade"
 	"github.com/Jonasz1996/clusterforge/internal/assistant"
 	"github.com/Jonasz1996/clusterforge/internal/auth"
 	"github.com/Jonasz1996/clusterforge/internal/backups"
@@ -38,6 +39,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/failover"
 	"github.com/Jonasz1996/clusterforge/internal/gitops"
+	"github.com/Jonasz1996/clusterforge/internal/heal"
 	"github.com/Jonasz1996/clusterforge/internal/incidents"
 	"github.com/Jonasz1996/clusterforge/internal/inventory"
 	"github.com/Jonasz1996/clusterforge/internal/jobs"
@@ -94,6 +96,8 @@ type testEnv struct {
 	kube      *kube.Service
 	dbs       *databases.Service
 	crons     *cronjobs.Service
+	heal      *heal.Service
+	upg       *agentupgrade.Service
 	cmps      *components.Service
 	ingest    *metrics.Ingester
 
@@ -235,6 +239,12 @@ func newTestEnv(t *testing.T) *testEnv {
 	crons := cronjobs.NewService(pool, bus, ev, log)
 	crons.Interval, crons.Timeout = 0, 5*time.Second
 	bus.SetCronRuns(crons.HandleRuns)
+	// Zelfherstel kijkt niet vanzelf; een test roept InspectAll aan.
+	hl := heal.NewService(pool, bus, dbs.Overview, log)
+	hl.Interval, hl.Timeout = 0, 5*time.Second
+	hl.Poll, hl.Retry, hl.StartTimeout, hl.JoinTimeout = 20*time.Millisecond, 50*time.Millisecond, 3*time.Second, 5*time.Second
+	hl.EnableRun(runner, ev)
+	hl.Changed = func() { eval.Kick(); dbs.Kick() }
 	// De database als onderdeel, met korte tijden; zonder metingen van het
 	// geheugen tenzij een test ze zet.
 	cmps := components.NewService(pool, ev, log, runner, bus, dep)
@@ -251,24 +261,29 @@ func newTestEnv(t *testing.T) *testEnv {
 	fo.RebootDelay, fo.RestartMargin, fo.RestartPoll = 0, 15*time.Second, 50*time.Millisecond
 	rep := reports.NewService(pool, log)
 	rep.Backups, rep.Risk = bk, rsk
+	// Agents bijwerken: niet vanzelf; een test roept AutoRun aan.
+	agentDir := t.TempDir()
+	upg := agentupgrade.NewService(pool, ev, log, runner, bus, agentDir, "test")
+	upg.Interval, upg.Poll, upg.Back, upg.RollbackAfter = 0, 20*time.Millisecond, 5*time.Second, time.Second
+	upg.Changed = eval.Kick
 	var wg sync.WaitGroup
 	wg.Add(3)
 	go func() { defer wg.Done(); hub.Run(runCtx) }()
 	go func() { defer wg.Done(); eval.Run(runCtx) }()
 	go func() { defer wg.Done(); ana.Run(runCtx) }()
 	cfg := config.Config{
-		SecureCookies: false, SessionTTL: time.Hour, AgentDir: t.TempDir(), VictoriaMetricsURL: vm.srv.URL,
+		SecureCookies: false, SessionTTL: time.Hour, AgentDir: agentDir, VictoriaMetricsURL: vm.srv.URL,
 		GrafanaNodeURL: "https://grafana.example/d/node?var-node={hostname}",
 	}
 	api := New(Deps{
 		Config: cfg, Log: log, Pool: pool, Auth: a, Bus: bus, Hub: hub, Proxmox: pve, Jobs: runner, Lifecycle: life,
 		Deploy: dep, Backups: bk, Drift: drf, Failover: fo, Disaster: dis, Deps: dps, Rollout: ro, GitOps: git, Assistant: asst,
-		Risk: rsk, Topo: tp, Docs: dcs, Reports: rep, Kube: kub, KubeNodes: kn, Databases: dbs, Cronjobs: crons, Components: cmps, Version: "test",
+		Risk: rsk, Topo: tp, Docs: dcs, Reports: rep, Kube: kub, KubeNodes: kn, Databases: dbs, Cronjobs: crons, Heal: hl, Components: cmps, Upgrades: upg, Version: "test",
 	})
 	srv := httptest.NewServer(api.Handler())
 	t.Cleanup(srv.Close)
 	e := &testEnv{t: t, srv: srv, auth: a, pool: pool, api: api, bus: bus, eval: eval, vm: vm, pve: pve, jobs: runner, life: life, deploy: dep,
-		backups: bk, drift: drf, fo: fo, dis: dis, evalClock: evalClock, deps: dps, ro: ro, git: git, det: det, ana: ana, conns: conns, asst: asst, risk: rsk, topo: tp, docs: dcs, reports: rep, kube: kub, dbs: dbs, crons: crons, cmps: cmps, ingest: ingest, runCtx: runCtx}
+		backups: bk, drift: drf, fo: fo, dis: dis, evalClock: evalClock, deps: dps, ro: ro, git: git, det: det, ana: ana, conns: conns, asst: asst, risk: rsk, topo: tp, docs: dcs, reports: rep, kube: kub, dbs: dbs, crons: crons, heal: hl, cmps: cmps, upg: upg, ingest: ingest, runCtx: runCtx}
 	e.startRunner()
 	t.Cleanup(func() {
 		stop()

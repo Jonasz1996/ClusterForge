@@ -83,6 +83,22 @@ WHERE e.id > @after
 ORDER BY e.id
 LIMIT @lim;
 
+-- name: ListDocHealEvents :many
+-- Wat Zelfherstel sinds @since op de clusters deed, met de taak en wie het
+-- vroeg, oudste eerst, voor het hoofdstuk Herstel. De status van de taak
+-- zegt hoe een herstel afliep dat geen einde in het logboek schreef, zoals
+-- een taak die in de wachtrij geannuleerd werd.
+SELECT e.id, e.ts, e.cluster_id::uuid AS cluster_id, e.action, e.payload,
+       coalesce(e.job_ref, '')::text AS job_id, coalesce(u.username, '')::text AS username,
+       coalesce(j.status::text, '')::text AS job_status, coalesce(j.error, '')::text AS job_error
+FROM events e
+LEFT JOIN users u ON e.actor_type = 'user' AND u.id::text = e.actor_id
+LEFT JOIN jobs j ON j.id::text = e.job_ref
+WHERE e.action IN ('cluster.heal_started', 'cluster.heal_done', 'cluster.heal_failed',
+                   'cluster.heal_auto_changed', 'cluster.heal_auto_paused')
+  AND e.cluster_id IS NOT NULL AND e.ts >= @since
+ORDER BY e.id;
+
 -- name: MaxEventID :one
 SELECT coalesce(max(id), 0)::bigint FROM events;
 

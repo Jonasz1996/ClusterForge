@@ -36,6 +36,36 @@ func (e AgentConnection) Valid() bool {
 	}
 }
 
+// Defines values for AgentUpgradeAgentState.
+const (
+	AgentUpgradeAgentStateCurrent  AgentUpgradeAgentState = "current"
+	AgentUpgradeAgentStateFailed   AgentUpgradeAgentState = "failed"
+	AgentUpgradeAgentStateManual   AgentUpgradeAgentState = "manual"
+	AgentUpgradeAgentStateNewer    AgentUpgradeAgentState = "newer"
+	AgentUpgradeAgentStateOutdated AgentUpgradeAgentState = "outdated"
+	AgentUpgradeAgentStateUnknown  AgentUpgradeAgentState = "unknown"
+)
+
+// Valid indicates whether the value is a known member of the AgentUpgradeAgentState enum.
+func (e AgentUpgradeAgentState) Valid() bool {
+	switch e {
+	case AgentUpgradeAgentStateCurrent:
+		return true
+	case AgentUpgradeAgentStateFailed:
+		return true
+	case AgentUpgradeAgentStateManual:
+		return true
+	case AgentUpgradeAgentStateNewer:
+		return true
+	case AgentUpgradeAgentStateOutdated:
+		return true
+	case AgentUpgradeAgentStateUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AssistantConversationKind.
 const (
 	Analysis AssistantConversationKind = "analysis"
@@ -1587,6 +1617,42 @@ func (e GuestType) Valid() bool {
 	}
 }
 
+// Defines values for HealProblemLevel.
+const (
+	HealProblemLevelDown    HealProblemLevel = "down"
+	HealProblemLevelWarning HealProblemLevel = "warning"
+)
+
+// Valid indicates whether the value is a known member of the HealProblemLevel enum.
+func (e HealProblemLevel) Valid() bool {
+	switch e {
+	case HealProblemLevelDown:
+		return true
+	case HealProblemLevelWarning:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for HealReportEngine.
+const (
+	HealReportEngineMariadb    HealReportEngine = "mariadb"
+	HealReportEnginePostgresql HealReportEngine = "postgresql"
+)
+
+// Valid indicates whether the value is a known member of the HealReportEngine enum.
+func (e HealReportEngine) Valid() bool {
+	switch e {
+	case HealReportEngineMariadb:
+		return true
+	case HealReportEnginePostgresql:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for HealthDatabase.
 const (
 	HealthDatabaseOk          HealthDatabase = "ok"
@@ -2045,19 +2111,19 @@ func (e KubeLessonStepKind) Valid() bool {
 
 // Defines values for KubeLessonStepState.
 const (
-	Current KubeLessonStepState = "current"
-	Done    KubeLessonStepState = "done"
-	Locked  KubeLessonStepState = "locked"
+	KubeLessonStepStateCurrent KubeLessonStepState = "current"
+	KubeLessonStepStateDone    KubeLessonStepState = "done"
+	KubeLessonStepStateLocked  KubeLessonStepState = "locked"
 )
 
 // Valid indicates whether the value is a known member of the KubeLessonStepState enum.
 func (e KubeLessonStepState) Valid() bool {
 	switch e {
-	case Current:
+	case KubeLessonStepStateCurrent:
 		return true
-	case Done:
+	case KubeLessonStepStateDone:
 		return true
-	case Locked:
+	case KubeLessonStepStateLocked:
 		return true
 	default:
 		return false
@@ -3374,6 +3440,76 @@ type AgentSummary struct {
 	Id         openapi_types.UUID           `json:"id"`
 	LastSeenAt nullable.Nullable[time.Time] `json:"last_seen_at"`
 	Version    string                       `json:"version"`
+}
+
+// AgentUpgradeAgent defines model for AgentUpgradeAgent.
+type AgentUpgradeAgent struct {
+	Arch string `json:"arch"`
+
+	// Auto ClusterForge werkt deze agent vanzelf bij
+	Auto bool `json:"auto"`
+
+	// ClusterEnvironment lab, test, prod, of leeg zonder cluster
+	ClusterEnvironment string                                `json:"cluster_environment"`
+	ClusterId          nullable.Nullable[openapi_types.UUID] `json:"cluster_id"`
+	ClusterName        string                                `json:"cluster_name"`
+	ClusterSlug        string                                `json:"cluster_slug"`
+	Hostname           string                                `json:"hostname"`
+	NodeId             openapi_types.UUID                    `json:"node_id"`
+	Online             bool                                  `json:"online"`
+	Protocol           int                                   `json:"protocol"`
+
+	// State current: dezelfde agent als die van de server. outdated: verouderd, werkt zichzelf bij. failed: de update werd
+	// op de node teruggezet. manual: verouderd en ouder dan protocol 23, met de hand bijwerken. newer: nieuwer dan de
+	// server. unknown: de server heeft geen agent voor deze node of de agent meldde zijn binary nog niet.
+	State   AgentUpgradeAgentState `json:"state"`
+	Version string                 `json:"version"`
+	Why     string                 `json:"why"`
+}
+
+// AgentUpgradeAgentState current: dezelfde agent als die van de server. outdated: verouderd, werkt zichzelf bij. failed: de update werd
+// op de node teruggezet. manual: verouderd en ouder dan protocol 23, met de hand bijwerken. newer: nieuwer dan de
+// server. unknown: de server heeft geen agent voor deze node of de agent meldde zijn binary nog niet.
+type AgentUpgradeAgentState string
+
+// AgentUpgradeInput defines model for AgentUpgradeInput.
+type AgentUpgradeInput struct {
+	All       *bool               `json:"all,omitempty"`
+	ClusterId *openapi_types.UUID `json:"cluster_id,omitempty"`
+
+	// Confirm De slug van het prodcluster
+	Confirm *string               `json:"confirm,omitempty"`
+	NodeIds *[]openapi_types.UUID `json:"node_ids,omitempty"`
+}
+
+// AgentUpgradeOverview defines model for AgentUpgradeOverview.
+type AgentUpgradeOverview struct {
+	Agents []AgentUpgradeAgent `json:"agents"`
+
+	// Archs Architecturen waarvoor de server een agent heeft
+	Archs []string `json:"archs"`
+
+	// Auto Agents vanzelf bijwerken staat aan
+	Auto bool `json:"auto"`
+
+	// OffClusterIds Clusters waar vanzelf bijwerken uitstaat
+	OffClusterIds []openapi_types.UUID `json:"off_cluster_ids"`
+	Protocol      int                  `json:"protocol"`
+
+	// Running Taken agents.upgrade die wachten of lopen
+	Running []struct {
+		ClusterId nullable.Nullable[openapi_types.UUID] `json:"cluster_id"`
+		JobId     openapi_types.UUID                    `json:"job_id"`
+	} `json:"running"`
+
+	// Version De versie van de agent die deze server aanbiedt
+	Version string `json:"version"`
+}
+
+// AgentUpgradeStarted defines model for AgentUpgradeStarted.
+type AgentUpgradeStarted struct {
+	Jobs    []Job    `json:"jobs"`
+	Skipped []string `json:"skipped"`
 }
 
 // AssistantConversation defines model for AssistantConversation.
@@ -7607,6 +7743,123 @@ type GitStepChangeChange string
 // GuestType defines model for GuestType.
 type GuestType string
 
+// HealAuto defines model for HealAuto.
+type HealAuto struct {
+	// Allowed false op prod
+	Allowed bool `json:"allowed"`
+
+	// Due Zelfherstel voert het plan nu vanzelf uit
+	Due     bool `json:"due"`
+	Enabled bool `json:"enabled"`
+
+	// Note Waarom het plan wel of niet vanzelf gebeurt; leeg als er niets te doen is
+	Note string `json:"note"`
+
+	// PausedAt Gepauzeerd na drie mislukte pogingen op rij; aanzetten heft het op.
+	PausedAt     nullable.Nullable[time.Time] `json:"paused_at"`
+	PausedReason string                       `json:"paused_reason"`
+}
+
+// HealAutoSetting defines model for HealAutoSetting.
+type HealAutoSetting struct {
+	Enabled bool `json:"enabled"`
+
+	// PausedAt Gepauzeerd na drie mislukte pogingen op rij; aanzetten heft het op.
+	PausedAt     nullable.Nullable[time.Time] `json:"paused_at"`
+	PausedReason string                       `json:"paused_reason"`
+}
+
+// HealPlan defines model for HealPlan.
+type HealPlan struct {
+	// Action restart (gestopte servers starten), galera (adressen bijwerken en/of het cluster opnieuw beginnen), of leeg als het herstel bij het onderdeel hoort.
+	Action string `json:"action"`
+
+	// Auto Het plan mag vanzelf, als Zelfherstel op het cluster vanzelf mag.
+	Auto    bool   `json:"auto"`
+	AutoWhy string `json:"auto_why"`
+
+	// Blocked Waarom het plan nu niet kan; leeg als het kan.
+	Blocked            string                                `json:"blocked"`
+	Hash               string                                `json:"hash"`
+	ManagedComponentId nullable.Nullable[openapi_types.UUID] `json:"managed_component_id"`
+	Nodes              []HealPlanNode                        `json:"nodes"`
+	Steps              []string                              `json:"steps"`
+}
+
+// HealPlanNode defines model for HealPlanNode.
+type HealPlanNode struct {
+	ClusterAddress    string             `json:"cluster_address"`
+	File              string             `json:"file"`
+	Hostname          string             `json:"hostname"`
+	Kill              bool               `json:"kill"`
+	KillPids          []int              `json:"kill_pids"`
+	NodeAddress       string             `json:"node_address"`
+	NodeId            openapi_types.UUID `json:"node_id"`
+	OldClusterAddress string             `json:"old_cluster_address"`
+	OldNodeAddress    string             `json:"old_node_address"`
+	Primary           bool               `json:"primary"`
+	SetAddress        bool               `json:"set_address"`
+	Start             bool               `json:"start"`
+	Unit              string             `json:"unit"`
+}
+
+// HealProblem defines model for HealProblem.
+type HealProblem struct {
+	// Code no_inspect, unit_stopped, process_hung, process_outside_unit, unit_disabled, galera_wrong_address,
+	// galera_no_primary, disk_full of no_quorum.
+	Code  string           `json:"code"`
+	Level HealProblemLevel `json:"level"`
+	Nodes []string         `json:"nodes"`
+	Title string           `json:"title"`
+	Why   string           `json:"why"`
+}
+
+// HealProblemLevel defines model for HealProblem.Level.
+type HealProblemLevel string
+
+// HealReport Zelfherstel voor één database; key is die van DatabaseGroup.
+type HealReport struct {
+	// Auto Zelfherstel vanzelf van het cluster; null bij een losse node.
+	Auto               nullable.Nullable[HealAuto]           `json:"auto"`
+	ClusterEnvironment nullable.Nullable[Environment]        `json:"cluster_environment"`
+	ClusterId          nullable.Nullable[openapi_types.UUID] `json:"cluster_id"`
+	ClusterName        string                                `json:"cluster_name"`
+	ClusterSlug        string                                `json:"cluster_slug"`
+	Engine             HealReportEngine                      `json:"engine"`
+	Health             string                                `json:"health"`
+	Key                string                                `json:"key"`
+	Kind               string                                `json:"kind"`
+
+	// LastRun De laatste taak heal.run van deze database in het afgelopen etmaal.
+	LastRun  nullable.Nullable[HealRun]  `json:"last_run"`
+	Plan     nullable.Nullable[HealPlan] `json:"plan"`
+	Problems []HealProblem               `json:"problems"`
+}
+
+// HealReportEngine defines model for HealReport.Engine.
+type HealReportEngine string
+
+// HealRun defines model for HealRun.
+type HealRun struct {
+	CreatedAt  time.Time                    `json:"created_at"`
+	Error      string                       `json:"error"`
+	FinishedAt nullable.Nullable[time.Time] `json:"finished_at"`
+	JobId      openapi_types.UUID           `json:"job_id"`
+	Status     JobStatus                    `json:"status"`
+}
+
+// HealRunInput defines model for HealRunInput.
+type HealRunInput struct {
+	// Confirm De slug van het cluster; nodig op prod
+	Confirm *string `json:"confirm,omitempty"`
+
+	// Hash De hash van het plan dat je zag
+	Hash string `json:"hash"`
+
+	// Key De sleutel van de database uit GET /heal
+	Key string `json:"key"`
+}
+
 // Health defines model for Health.
 type Health struct {
 	Database HealthDatabase `json:"database"`
@@ -7828,7 +8081,7 @@ type IncidentDetail struct {
 	// Analysis Null zolang de analyse nog niet gerekend is
 	Analysis nullable.Nullable[IncidentAnalysis] `json:"analysis"`
 
-	// History Statusovergangen, incidenten en tests over wat geraakt was, oudste eerst
+	// History Statusovergangen, incidenten, tests en herstelacties van Zelfherstel over wat geraakt was, oudste eerst
 	History []AuditEntry `json:"history"`
 
 	// HistoryMore Er waren meer regels dan getoond
@@ -10758,6 +11011,11 @@ type TimelineLimit = int
 // TimelineTo defines model for TimelineTo.
 type TimelineTo = time.Time
 
+// SetAgentUpgradeAutoJSONBody defines parameters for SetAgentUpgradeAuto.
+type SetAgentUpgradeAutoJSONBody struct {
+	Enabled bool `json:"enabled"`
+}
+
 // ListAssistantConversationsParams defines parameters for ListAssistantConversations.
 type ListAssistantConversationsParams struct {
 	// All Ook die van anderen (admin)
@@ -10826,6 +11084,11 @@ type ExportAuditParams struct {
 // ExportAuditParamsActorType defines parameters for ExportAudit.
 type ExportAuditParamsActorType string
 
+// SetClusterAgentUpgradeAutoJSONBody defines parameters for SetClusterAgentUpgradeAuto.
+type SetClusterAgentUpgradeAutoJSONBody struct {
+	Enabled bool `json:"enabled"`
+}
+
 // ListClusterChangesParams defines parameters for ListClusterChanges.
 type ListClusterChangesParams struct {
 	// From Vanaf dit tijdstip; standaard 7 dagen geleden
@@ -10846,6 +11109,11 @@ type GetComponentMetricsParams struct {
 	// From Een vast venster in plaats van range, samen met to; hoogstens 7 dagen
 	From *MetricsFrom `form:"from,omitempty" json:"from,omitempty"`
 	To   *MetricsTo   `form:"to,omitempty" json:"to,omitempty"`
+}
+
+// SetHealAutoJSONBody defines parameters for SetHealAuto.
+type SetHealAutoJSONBody struct {
+	Enabled bool `json:"enabled"`
 }
 
 // GetClusterMetricsParams defines parameters for GetClusterMetrics.
@@ -11255,6 +11523,12 @@ type ListTestRunsParams struct {
 	Limit     *int                `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// StartAgentUpgradesJSONRequestBody defines body for StartAgentUpgrades for application/json ContentType.
+type StartAgentUpgradesJSONRequestBody = AgentUpgradeInput
+
+// SetAgentUpgradeAutoJSONRequestBody defines body for SetAgentUpgradeAuto for application/json ContentType.
+type SetAgentUpgradeAutoJSONRequestBody SetAgentUpgradeAutoJSONBody
+
 // EnrollAgentJSONRequestBody defines body for EnrollAgent for application/json ContentType.
 type EnrollAgentJSONRequestBody = EnrollRequest
 
@@ -11293,6 +11567,9 @@ type CreateClusterJSONRequestBody = ClusterInput
 
 // UpdateClusterJSONRequestBody defines body for UpdateCluster for application/json ContentType.
 type UpdateClusterJSONRequestBody = ClusterPatch
+
+// SetClusterAgentUpgradeAutoJSONRequestBody defines body for SetClusterAgentUpgradeAuto for application/json ContentType.
+type SetClusterAgentUpgradeAutoJSONRequestBody SetClusterAgentUpgradeAutoJSONBody
 
 // UpdateBackupPolicyJSONRequestBody defines body for UpdateBackupPolicy for application/json ContentType.
 type UpdateBackupPolicyJSONRequestBody = BackupPolicyInput
@@ -11368,6 +11645,9 @@ type CreateFailoverTestJSONRequestBody = FailoverTestInput
 
 // ReapplyClusterGitJSONRequestBody defines body for ReapplyClusterGit for application/json ContentType.
 type ReapplyClusterGitJSONRequestBody = GitReapplyInput
+
+// SetHealAutoJSONRequestBody defines body for SetHealAuto for application/json ContentType.
+type SetHealAutoJSONRequestBody SetHealAutoJSONBody
 
 // SetRecoveryTargetsJSONRequestBody defines body for SetRecoveryTargets for application/json ContentType.
 type SetRecoveryTargetsJSONRequestBody = RecoveryTargetsInput
@@ -11459,6 +11739,9 @@ type SaveGitRepoJSONRequestBody = GitRepoInput
 // ProbeGitRepoJSONRequestBody defines body for ProbeGitRepo for application/json ContentType.
 type ProbeGitRepoJSONRequestBody = GitRepoInput
 
+// RunHealJSONRequestBody defines body for RunHeal for application/json ContentType.
+type RunHealJSONRequestBody = HealRunInput
+
 // SetIncidentNoteJSONRequestBody defines body for SetIncidentNote for application/json ContentType.
 type SetIncidentNoteJSONRequestBody = IncidentNote
 
@@ -11539,6 +11822,15 @@ type UpdateVipJSONRequestBody = VipPatch
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
+	// ListAgentUpgrades Welke agents verouderd zijn en of ze vanzelf bijgewerkt worden
+	// (GET /agent-upgrades)
+	ListAgentUpgrades(w http.ResponseWriter, r *http.Request)
+	// StartAgentUpgrades Agents bijwerken (admin); één taak agents.upgrade per cluster, één node tegelijk
+	// (POST /agent-upgrades)
+	StartAgentUpgrades(w http.ResponseWriter, r *http.Request)
+	// SetAgentUpgradeAuto Agents vanzelf bijwerken aan- of uitzetten (admin)
+	// (PUT /agent-upgrades/auto)
+	SetAgentUpgradeAuto(w http.ResponseWriter, r *http.Request)
 	// EnrollAgent Een agent meldt zich aan met een enrollmenttoken (zonder sessie)
 	// (POST /agents/enroll)
 	EnrollAgent(w http.ResponseWriter, r *http.Request)
@@ -11632,6 +11924,9 @@ type ServerInterface interface {
 	// UpdateCluster Cluster wijzigen (admin); alleen meegestuurde velden veranderen
 	// (PATCH /clusters/{clusterId})
 	UpdateCluster(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
+	// SetClusterAgentUpgradeAuto Agents vanzelf bijwerken op één cluster aan- of uitzetten (admin)
+	// (PUT /clusters/{clusterId}/agent-upgrade-auto)
+	SetClusterAgentUpgradeAuto(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
 	// GetBackupPolicy Back-upbeleid van een cluster, of de standaard als het er nog geen heeft
 	// (GET /clusters/{clusterId}/backup-policy)
 	GetBackupPolicy(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
@@ -11761,6 +12056,9 @@ type ServerInterface interface {
 	// UnlinkClusterGit Het cluster van Git ontkoppelen (admin); een wachtende wijziging vervalt
 	// (POST /clusters/{clusterId}/git/unlink)
 	UnlinkClusterGit(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
+	// SetHealAuto Zelfherstel vanzelf aan- of uitzetten op een cluster (admin)
+	// (PUT /clusters/{clusterId}/heal-auto)
+	SetHealAuto(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
 	// GetClusterMetrics Grafieken van een cluster, met een lijn per node
 	// (GET /clusters/{clusterId}/metrics)
 	GetClusterMetrics(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params GetClusterMetricsParams)
@@ -11986,6 +12284,12 @@ type ServerInterface interface {
 	// SyncGit Nu synchroniseren (admin)
 	// (POST /gitops/sync)
 	SyncGit(w http.ResponseWriter, r *http.Request)
+	// ListHeal Zelfherstel per database
+	// (GET /heal)
+	ListHeal(w http.ResponseWriter, r *http.Request)
+	// RunHeal Het herstelplan van een database uitvoeren (admin); wordt een taak heal.run
+	// (POST /heal/run)
+	RunHeal(w http.ResponseWriter, r *http.Request)
 	// GetHealth Gezondheid van de server en de database
 	// (GET /health)
 	GetHealth(w http.ResponseWriter, r *http.Request)
@@ -12286,6 +12590,24 @@ type ServerInterface interface {
 
 type Unimplemented struct{}
 
+// ListAgentUpgrades Welke agents verouderd zijn en of ze vanzelf bijgewerkt worden
+// (GET /agent-upgrades)
+func (_ Unimplemented) ListAgentUpgrades(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// StartAgentUpgrades Agents bijwerken (admin); één taak agents.upgrade per cluster, één node tegelijk
+// (POST /agent-upgrades)
+func (_ Unimplemented) StartAgentUpgrades(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SetAgentUpgradeAuto Agents vanzelf bijwerken aan- of uitzetten (admin)
+// (PUT /agent-upgrades/auto)
+func (_ Unimplemented) SetAgentUpgradeAuto(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // EnrollAgent Een agent meldt zich aan met een enrollmenttoken (zonder sessie)
 // (POST /agents/enroll)
 func (_ Unimplemented) EnrollAgent(w http.ResponseWriter, r *http.Request) {
@@ -12469,6 +12791,12 @@ func (_ Unimplemented) GetCluster(w http.ResponseWriter, r *http.Request, cluste
 // UpdateCluster Cluster wijzigen (admin); alleen meegestuurde velden veranderen
 // (PATCH /clusters/{clusterId})
 func (_ Unimplemented) UpdateCluster(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SetClusterAgentUpgradeAuto Agents vanzelf bijwerken op één cluster aan- of uitzetten (admin)
+// (PUT /clusters/{clusterId}/agent-upgrade-auto)
+func (_ Unimplemented) SetClusterAgentUpgradeAuto(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -12727,6 +13055,12 @@ func (_ Unimplemented) ReapplyClusterGit(w http.ResponseWriter, r *http.Request,
 // UnlinkClusterGit Het cluster van Git ontkoppelen (admin); een wachtende wijziging vervalt
 // (POST /clusters/{clusterId}/git/unlink)
 func (_ Unimplemented) UnlinkClusterGit(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SetHealAuto Zelfherstel vanzelf aan- of uitzetten op een cluster (admin)
+// (PUT /clusters/{clusterId}/heal-auto)
+func (_ Unimplemented) SetHealAuto(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -13177,6 +13511,18 @@ func (_ Unimplemented) ProbeGitRepo(w http.ResponseWriter, r *http.Request) {
 // SyncGit Nu synchroniseren (admin)
 // (POST /gitops/sync)
 func (_ Unimplemented) SyncGit(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListHeal Zelfherstel per database
+// (GET /heal)
+func (_ Unimplemented) ListHeal(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RunHeal Het herstelplan van een database uitvoeren (admin); wordt een taak heal.run
+// (POST /heal/run)
+func (_ Unimplemented) RunHeal(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -13776,6 +14122,48 @@ type ServerInterfaceWrapper struct {
 }
 
 type MiddlewareFunc func(http.Handler) http.Handler
+
+// ListAgentUpgrades operation middleware
+func (siw *ServerInterfaceWrapper) ListAgentUpgrades(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListAgentUpgrades(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// StartAgentUpgrades operation middleware
+func (siw *ServerInterfaceWrapper) StartAgentUpgrades(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StartAgentUpgrades(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetAgentUpgradeAuto operation middleware
+func (siw *ServerInterfaceWrapper) SetAgentUpgradeAuto(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetAgentUpgradeAuto(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
 
 // EnrollAgent operation middleware
 func (siw *ServerInterfaceWrapper) EnrollAgent(w http.ResponseWriter, r *http.Request) {
@@ -14589,6 +14977,32 @@ func (siw *ServerInterfaceWrapper) UpdateCluster(w http.ResponseWriter, r *http.
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.UpdateCluster(w, r, clusterId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetClusterAgentUpgradeAuto operation middleware
+func (siw *ServerInterfaceWrapper) SetClusterAgentUpgradeAuto(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetClusterAgentUpgradeAuto(w, r, clusterId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -16047,6 +16461,32 @@ func (siw *ServerInterfaceWrapper) UnlinkClusterGit(w http.ResponseWriter, r *ht
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.UnlinkClusterGit(w, r, clusterId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetHealAuto operation middleware
+func (siw *ServerInterfaceWrapper) SetHealAuto(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetHealAuto(w, r, clusterId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -18070,6 +18510,34 @@ func (siw *ServerInterfaceWrapper) SyncGit(w http.ResponseWriter, r *http.Reques
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.SyncGit(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListHeal operation middleware
+func (siw *ServerInterfaceWrapper) ListHeal(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListHeal(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RunHeal operation middleware
+func (siw *ServerInterfaceWrapper) RunHeal(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RunHeal(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -22016,6 +22484,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/clusters/{clusterId}/components/{componentId}/recover/plan", wrapper.PlanRecoverClusterComponent)
 	})
 	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/clusters/{clusterId}/heal-auto", wrapper.SetHealAuto)
+	})
+	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/clusters/{clusterId}/components/{componentId}/recover", wrapper.RecoverClusterComponent)
 	})
 	r.Group(func(r chi.Router) {
@@ -22050,6 +22521,24 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/databases", wrapper.ListDatabases)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/heal", wrapper.ListHeal)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/heal/run", wrapper.RunHeal)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/agent-upgrades", wrapper.ListAgentUpgrades)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/agent-upgrades", wrapper.StartAgentUpgrades)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/agent-upgrades/auto", wrapper.SetAgentUpgradeAuto)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/clusters/{clusterId}/agent-upgrade-auto", wrapper.SetClusterAgentUpgradeAuto)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/cronjobs", wrapper.ListCronjobs)

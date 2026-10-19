@@ -14,6 +14,7 @@ import (
 
 	"github.com/Jonasz1996/clusterforge/internal/agentdist"
 	"github.com/Jonasz1996/clusterforge/internal/agents"
+	"github.com/Jonasz1996/clusterforge/internal/agentupgrade"
 	"github.com/Jonasz1996/clusterforge/internal/assistant"
 	"github.com/Jonasz1996/clusterforge/internal/audit"
 	"github.com/Jonasz1996/clusterforge/internal/auth"
@@ -30,6 +31,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/failover"
 	"github.com/Jonasz1996/clusterforge/internal/gitops"
+	"github.com/Jonasz1996/clusterforge/internal/heal"
 	"github.com/Jonasz1996/clusterforge/internal/httpapi/gen"
 	"github.com/Jonasz1996/clusterforge/internal/inventory"
 	"github.com/Jonasz1996/clusterforge/internal/jobs"
@@ -80,10 +82,12 @@ type Server struct {
 	kube         *kube.Service
 	databases    *databases.Service
 	cronjobs     *cronjobs.Service
+	heal         *heal.Service
 	components   *components.Service
 	kubeNodes    *kubenodes.Service
 	lessons      *kubelessons.Engine
 	version      string
+	upgrades     *agentupgrade.Service
 	loginLimiter *ipLimiter
 	// loginTimeout en sessionTimeout begrenzen het databasewerk van een login
 	// en van de sessiecontrole voor elke API-call. Een volle pool of een slot
@@ -146,9 +150,14 @@ type Deps struct {
 	// Databases leest de MariaDB- en PostgreSQL-servers op de nodes.
 	Databases *databases.Service
 	Cronjobs  *cronjobs.Service
+	// Heal is Zelfherstel: problemen met de databases vaststellen en
+	// herstellen.
+	Heal *heal.Service
 	// Components zet een database op de nodes van een cluster.
 	Components *components.Service
-	Version    string
+	// Upgrades werkt de agents bij.
+	Upgrades *agentupgrade.Service
+	Version  string
 }
 
 func New(d Deps) *Server {
@@ -180,6 +189,7 @@ func New(d Deps) *Server {
 		rollout:  d.Rollout,
 		git:      d.GitOps,
 		version:  d.Version,
+		upgrades: d.Upgrades,
 		// 10 pogingen direct, daarna één per 6 seconden per IP-adres.
 		loginLimiter:   newIPLimiter(6*time.Second, 10),
 		loginTimeout:   20 * time.Second,
@@ -194,10 +204,11 @@ func New(d Deps) *Server {
 		kube:           d.Kube,
 		databases:      d.Databases,
 		cronjobs:       d.Cronjobs,
+		heal:           d.Heal,
 		components:     d.Components,
 		kubeNodes:      d.KubeNodes,
 	}
-	s.assistant.Tools = slices.Concat(s.assistantTools(), s.kubeTools(), s.databaseTools(), s.cronTools())
+	s.assistant.Tools = slices.Concat(s.assistantTools(), s.kubeTools(), s.databaseTools(), s.cronTools(), s.healTools())
 	s.lessons = kubelessons.New(s.kube, s.q)
 	return s
 }

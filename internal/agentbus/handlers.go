@@ -119,6 +119,7 @@ func (b *Bus) handleHeartbeat(ctx context.Context, nodeID uuid.UUID, hb protocol
 		version := limit(hb.AgentVersion, 64)
 		err = q.TouchAgent(ctx, store.TouchAgentParams{
 			NodeID: nodeID, Version: version, ProtocolVersion: int32(hb.ProtocolVersion),
+			Arch: limit(hb.Arch, 16), BinarySha256: limit(hb.BinarySHA256, 64), UpgradeRolledBack: limit(hb.UpgradeRolledBack, 64),
 		})
 		if err != nil {
 			return err

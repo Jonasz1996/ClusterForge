@@ -216,10 +216,13 @@ func TestDatabaseJoinPatroni(t *testing.T) {
 	eventually(t, "het VIP op nc1", func() bool { return slices.Contains(g.hosts["nc1"].Addresses(), "10.0.20.190") })
 	// De taak zet het VIP als laatste op de node die het volgens de server
 	// heeft; die moet dat dus eerst weten.
+	// De evaluator zet de houder in vips; de taak leest hem daar.
 	eventually(t, "de server ziet het VIP op nc1", func() bool {
 		var has bool
 		_ = e.pool.QueryRow(context.Background(), "SELECT '10.0.20.190' = ANY(addresses) FROM node_status WHERE node_id = $1", lab.ids["nc1"]).Scan(&has)
-		return has
+		var owner bool
+		_ = e.pool.QueryRow(context.Background(), "SELECT owner_node_id = $1 FROM vips WHERE host(address) = '10.0.20.190'", lab.ids["nc1"]).Scan(&owner)
+		return has && owner
 	})
 	etcd := &etcdShell{peers: []string{"http://10.0.20.186:2380", "http://10.0.20.187:2380", "http://10.0.20.188:2380"}}
 	for name, h := range g.hosts {

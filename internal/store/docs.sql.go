@@ -464,6 +464,65 @@ func (q *Queries) ListDocFailoverTests(ctx context.Context) ([]ListDocFailoverTe
 	return items, nil
 }
 
+const listDocHealEvents = `-- name: ListDocHealEvents :many
+SELECT e.id, e.ts, e.cluster_id::uuid AS cluster_id, e.action, e.payload,
+       coalesce(e.job_ref, '')::text AS job_id, coalesce(u.username, '')::text AS username,
+       coalesce(j.status::text, '')::text AS job_status, coalesce(j.error, '')::text AS job_error
+FROM events e
+LEFT JOIN users u ON e.actor_type = 'user' AND u.id::text = e.actor_id
+LEFT JOIN jobs j ON j.id::text = e.job_ref
+WHERE e.action IN ('cluster.heal_started', 'cluster.heal_done', 'cluster.heal_failed',
+                   'cluster.heal_auto_changed', 'cluster.heal_auto_paused')
+  AND e.cluster_id IS NOT NULL AND e.ts >= $1
+ORDER BY e.id
+`
+
+type ListDocHealEventsRow struct {
+	ID        int64
+	Ts        time.Time
+	ClusterID uuid.UUID
+	Action    string
+	Payload   []byte
+	JobID     string
+	Username  string
+	JobStatus string
+	JobError  string
+}
+
+// Wat Zelfherstel sinds @since op de clusters deed, met de taak en wie het
+// vroeg, oudste eerst, voor het hoofdstuk Herstel. De status van de taak
+// zegt hoe een herstel afliep dat geen einde in het logboek schreef, zoals
+// een taak die in de wachtrij geannuleerd werd.
+func (q *Queries) ListDocHealEvents(ctx context.Context, since time.Time) ([]ListDocHealEventsRow, error) {
+	rows, err := q.db.Query(ctx, listDocHealEvents, since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDocHealEventsRow{}
+	for rows.Next() {
+		var i ListDocHealEventsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Ts,
+			&i.ClusterID,
+			&i.Action,
+			&i.Payload,
+			&i.JobID,
+			&i.Username,
+			&i.JobStatus,
+			&i.JobError,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listDocHistory = `-- name: ListDocHistory :many
 SELECT id, sha256, generated_at, cause
 FROM doc_snapshots

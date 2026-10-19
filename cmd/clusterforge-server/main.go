@@ -29,6 +29,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/Jonasz1996/clusterforge/internal/agentbus"
+	"github.com/Jonasz1996/clusterforge/internal/agentupgrade"
 	"github.com/Jonasz1996/clusterforge/internal/assistant"
 	"github.com/Jonasz1996/clusterforge/internal/auth"
 	"github.com/Jonasz1996/clusterforge/internal/backups"
@@ -44,6 +45,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/failover"
 	"github.com/Jonasz1996/clusterforge/internal/gitops"
+	"github.com/Jonasz1996/clusterforge/internal/heal"
 	"github.com/Jonasz1996/clusterforge/internal/httpapi"
 	"github.com/Jonasz1996/clusterforge/internal/incidents"
 	"github.com/Jonasz1996/clusterforge/internal/inventory"
@@ -194,6 +196,14 @@ func serve() error {
 	// De cronjobs en timers op de nodes, via agentprotocol 16.
 	crons := cronjobs.NewService(pool, bus, ev, log)
 	bus.SetCronRuns(crons.HandleRuns)
+	// Zelfherstel: elke minuut heal inspect op elke node met een
+	// databaseserver, via agentprotocol 22.
+	hl := heal.NewService(pool, bus, dbs.Overview, log)
+	hl.EnableRun(runner, ev)
+	hl.Changed = func() { eval.Kick(); dbs.Kick() }
+	// Agents bijwerken: met de knop, en vanzelf na een serverupdate.
+	upg := agentupgrade.NewService(pool, ev, log, runner, bus, cfg.AgentDir, version)
+	upg.Changed = eval.Kick
 	// Een database als onderdeel van een cluster: MariaDB Galera op de
 	// nodes die er al zijn, met het geheugengebruik uit VictoriaMetrics in
 	// het plan.
@@ -338,6 +348,8 @@ func serve() error {
 	goLoop(ctx, log, "kub", kub.Run)
 	goLoop(ctx, log, "dbs", dbs.Run)
 	goLoop(ctx, log, "crons", crons.Run)
+	goLoop(ctx, log, "heal", hl.Run)
+	goLoop(ctx, log, "upg", upg.Run)
 	goLoop(ctx, log, "cmps", cmps.Run)
 	if git.Enabled() {
 		goLoop(ctx, log, "git", git.Run)
@@ -355,8 +367,8 @@ func serve() error {
 		Handler: httpapi.New(httpapi.Deps{
 			Config: cfg, Log: log, Pool: pool, Auth: authSvc, Bus: bus, Hub: hub, Proxmox: pve, Jobs: runner,
 			Lifecycle: life, Deploy: dep, Backups: bk, Drift: drf, Failover: fo, Disaster: dis, Deps: dps, Rollout: ro,
-			GitOps: git, Assistant: asst, Risk: rsk, Topo: tp, Docs: dcs, Reports: rep, Kube: kub, KubeNodes: kn, Databases: dbs, Cronjobs: crons,
-			Components: cmps, Version: version,
+			GitOps: git, Assistant: asst, Risk: rsk, Topo: tp, Docs: dcs, Reports: rep, Kube: kub, KubeNodes: kn, Databases: dbs, Cronjobs: crons, Heal: hl,
+			Components: cmps, Upgrades: upg, Version: version,
 		}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,

@@ -10,7 +10,7 @@ import (
 
 // Version is de protocolversie. Een agent meldt die bij elke heartbeat, zodat
 // de server geen berichten stuurt die de agent niet kent.
-const Version = 21
+const Version = 23
 
 // CommandsSince is de eerste protocolversie met commando's.
 const CommandsSince = 2
@@ -104,6 +104,14 @@ type Heartbeat struct {
 	Addresses []string `json:"addresses"`
 	// Services is de toestand (systemctl is-active) van de gevolgde units.
 	Services map[string]string `json:"services"`
+	// Arch en BinarySHA256 zeggen welke binary hier draait: GOARCH en de
+	// sha256 van het bestand. Zo ziet de server of de agent dezelfde is als
+	// die hij aanbiedt. Vanaf SelfUpgradeSince.
+	Arch         string `json:"arch,omitempty"`
+	BinarySHA256 string `json:"binary_sha256,omitempty"`
+	// UpgradeRolledBack is de sha256 van een nieuwe agent die niet goed
+	// startte en teruggezet werd; leeg als de laatste update lukte.
+	UpgradeRolledBack string `json:"upgrade_rolled_back,omitempty"`
 }
 
 const (
@@ -345,6 +353,8 @@ type Command struct {
 	Fault *Fault `json:"fault,omitempty"`
 	// FaultIDs zijn de storingen van CmdFaultRenew en CmdFaultClear.
 	FaultIDs []string `json:"fault_ids,omitempty"`
+	// Upgrade is de nieuwe agent van CmdAgentUpgrade.
+	Upgrade *AgentUpgrade `json:"upgrade,omitempty"`
 }
 
 // Soorten storing. Er is geen vrije interface, regel of commando: de agent

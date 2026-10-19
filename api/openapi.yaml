@@ -3254,6 +3254,37 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
+  /clusters/{clusterId}/heal-auto:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+    put:
+      operationId: setHealAuto
+      summary: Zelfherstel vanzelf aan- of uitzetten op een cluster (admin)
+      description: |
+        Aan voert ClusterForge elk plan van Zelfherstel dat vanzelf mag zelf uit, met een rem: het probleem bestaat minstens
+        twee minuten, hoogstens drie pogingen per uur, na een mislukte poging een kwartier wachten, het Galera-cluster opnieuw
+        beginnen hoogstens eens per uur, en na drie mislukte pogingen op rij pauze. Aanzetten heft een pauze op. Op prod kan
+        het niet aan (409).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled]
+              properties:
+                enabled: { type: boolean }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/HealAutoSetting" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
   /clusters/{clusterId}/components/{componentId}/recover:
     parameters:
       - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -3531,6 +3562,140 @@ paths:
                 properties:
                   items: { type: array, items: { $ref: "#/components/schemas/DatabaseGroup" } }
         "401": { $ref: "#/components/responses/Error" }
+  /heal:
+    get:
+      operationId: listHeal
+      summary: Zelfherstel per database
+      description: |
+        Wat er mis is met elke MariaDB-, MySQL- en PostgreSQL-database op de nodes, ook als ClusterForge haar niet toepaste,
+        met het herstelplan en of dat vanzelf mag. Elke minuut vraagt ClusterForge elke node met een databaseserver
+        heal inspect (agentprotocol 22): units, processen, vrije ruimte en de Galera-config. Ook voor viewers.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/HealReport" } }
+        "401": { $ref: "#/components/responses/Error" }
+  /heal/run:
+    post:
+      operationId: runHeal
+      summary: Het herstelplan van een database uitvoeren (admin); wordt een taak heal.run
+      description: |
+        Doet wat het plan met deze hash zei: Galera-adressen bijwerken, een hangend proces stoppen, de server starten, of
+        bij Galera zonder Primary component het cluster beginnen op de node met de nieuwste data en de andere laten
+        aansluiten. Een ander plan geeft 409 met code plan_stale; een plan dat nu niet kan, of een database die een onderdeel
+        van ClusterForge is, geeft 409. Op prod vraagt het tweestapsverificatie en de slug in confirm.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/HealRunInput" }
+      responses:
+        "202":
+          description: Taak aangemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /agent-upgrades:
+    get:
+      operationId: listAgentUpgrades
+      summary: Welke agents verouderd zijn en of ze vanzelf bijgewerkt worden
+      description: |
+        Per node met een agent: versie, protocol en binary tegenover de agent die deze server aanbiedt. Een agent vanaf
+        protocol 23 werkt zichzelf bij; een oudere werk je één keer met het installatiescript en --upgrade bij. Ook voor
+        viewers.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentUpgradeOverview" }
+        "401": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: startAgentUpgrades
+      summary: Agents bijwerken (admin); één taak agents.upgrade per cluster, één node tegelijk
+      description: |
+        node_ids werkt die nodes bij, cluster_id elke verouderde agent van dat cluster, all elke verouderde agent buiten
+        prod. Per cluster één node tegelijk: de volgende pas als de vorige met de nieuwe agent terug is. Komt een node niet
+        terug of zet hij de oude agent terug, dan stopt de taak van dat cluster. Op prod vraagt het tweestapsverificatie en
+        de slug van het cluster in confirm; nodes uit meer dan één prodcluster tegelijk kan niet (400). Een cluster waar al
+        een taak loopt, staat in skipped; is er niets gestart, dan 409.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AgentUpgradeInput" }
+      responses:
+        "202":
+          description: Taken aangemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentUpgradeStarted" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /agent-upgrades/auto:
+    put:
+      operationId: setAgentUpgradeAuto
+      summary: Agents vanzelf bijwerken aan- of uitzetten (admin)
+      description: |
+        Aan (standaard) werkt ClusterForge elke minuut verouderde agents bij die verbonden zijn, met een taak per cluster.
+        Nooit op prod, niet op clusters waar het uitstaat, en niet naar een agent waarnaar bijwerken op die node al eens mislukte.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled]
+              properties:
+                enabled: { type: boolean }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentUpgradeOverview" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /clusters/{clusterId}/agent-upgrade-auto:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+    put:
+      operationId: setClusterAgentUpgradeAuto
+      summary: Agents vanzelf bijwerken op één cluster aan- of uitzetten (admin)
+      description: Uit werkt ClusterForge de agents van dit cluster alleen met de knop bij. Prod gaat nooit vanzelf.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled]
+              properties:
+                enabled: { type: boolean }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentUpgradeOverview" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
   /cronjobs:
     get:
       operationId: listCronjobs
@@ -5022,6 +5187,13 @@ components:
       required: [auto_recover]
       properties:
         auto_recover: { type: boolean }
+    HealRunInput:
+      type: object
+      required: [key, hash]
+      properties:
+        key: { type: string, description: De sleutel van de database uit GET /heal }
+        hash: { type: string, description: De hash van het plan dat je zag }
+        confirm: { type: string, description: De slug van het cluster; nodig op prod }
     ComponentRecoverInput:
       type: object
       required: [hash]
@@ -6128,6 +6300,107 @@ components:
         runs: { type: integer, description: Runs in de laatste 24 uur }
         failures: { type: integer, description: Mislukte runs in de laatste 24 uur }
         next_run: { type: string, format: date-time, nullable: true }
+    HealReport:
+      type: object
+      description: Zelfherstel voor één database; key is die van DatabaseGroup.
+      required: [key, cluster_id, cluster_name, cluster_slug, cluster_environment, engine, kind, health, problems, plan, last_run, auto]
+      properties:
+        key: { type: string }
+        cluster_id: { type: string, format: uuid, nullable: true }
+        cluster_name: { type: string }
+        cluster_slug: { type: string }
+        cluster_environment:
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/Environment" }]
+        engine: { type: string, enum: [mariadb, postgresql] }
+        kind: { type: string }
+        health: { type: string }
+        problems: { type: array, items: { $ref: "#/components/schemas/HealProblem" } }
+        plan:
+          nullable: true
+          allOf: [{ $ref: "#/components/schemas/HealPlan" }]
+        last_run:
+          nullable: true
+          description: De laatste taak heal.run van deze database in het afgelopen etmaal.
+          allOf: [{ $ref: "#/components/schemas/HealRun" }]
+        auto:
+          nullable: true
+          description: Zelfherstel vanzelf van het cluster; null bij een losse node.
+          allOf: [{ $ref: "#/components/schemas/HealAuto" }]
+    HealAutoSetting:
+      type: object
+      required: [enabled, paused_at, paused_reason]
+      properties:
+        enabled: { type: boolean }
+        paused_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Gepauzeerd na drie mislukte pogingen op rij; aanzetten heft het op.
+        paused_reason: { type: string }
+    HealAuto:
+      allOf:
+        - $ref: "#/components/schemas/HealAutoSetting"
+        - type: object
+          required: [allowed, due, note]
+          properties:
+            allowed: { type: boolean, description: false op prod }
+            due: { type: boolean, description: Zelfherstel voert het plan nu vanzelf uit }
+            note: { type: string, description: Waarom het plan wel of niet vanzelf gebeurt; leeg als er niets te doen is }
+    HealRun:
+      type: object
+      required: [job_id, status, error, created_at, finished_at]
+      properties:
+        job_id: { type: string, format: uuid }
+        status: { $ref: "#/components/schemas/JobStatus" }
+        error: { type: string }
+        created_at: { type: string, format: date-time }
+        finished_at: { type: string, format: date-time, nullable: true }
+    HealProblem:
+      type: object
+      required: [code, level, title, why, nodes]
+      properties:
+        code:
+          type: string
+          description: |
+            no_inspect, unit_stopped, process_hung, process_outside_unit, unit_disabled, galera_wrong_address,
+            galera_no_primary, disk_full of no_quorum.
+        level: { type: string, enum: [down, warning] }
+        title: { type: string }
+        why: { type: string }
+        nodes: { type: array, items: { type: string } }
+    HealPlan:
+      type: object
+      required: [action, steps, nodes, auto, auto_why, blocked, managed_component_id, hash]
+      properties:
+        action:
+          type: string
+          description: restart (gestopte servers starten), galera (adressen bijwerken en/of het cluster opnieuw beginnen), of leeg als het herstel bij het onderdeel hoort.
+        steps: { type: array, items: { type: string } }
+        nodes: { type: array, items: { $ref: "#/components/schemas/HealPlanNode" } }
+        auto: { type: boolean, description: "Het plan mag vanzelf, als Zelfherstel op het cluster vanzelf mag." }
+        auto_why: { type: string }
+        blocked: { type: string, description: "Waarom het plan nu niet kan; leeg als het kan." }
+        managed_component_id: { type: string, format: uuid, nullable: true }
+        hash: { type: string }
+    HealPlanNode:
+      type: object
+      required: [node_id, hostname, unit, start, kill, kill_pids, primary, set_address, old_cluster_address, cluster_address,
+        old_node_address, node_address, file]
+      properties:
+        node_id: { type: string, format: uuid }
+        hostname: { type: string }
+        unit: { type: string }
+        start: { type: boolean }
+        kill: { type: boolean }
+        kill_pids: { type: array, items: { type: integer } }
+        primary: { type: boolean }
+        set_address: { type: boolean }
+        old_cluster_address: { type: string }
+        cluster_address: { type: string }
+        old_node_address: { type: string }
+        node_address: { type: string }
+        file: { type: string }
     DatabaseGroup:
       type: object
       description: Eén databasecluster, de servers van één engine in één cluster, of één losse node.
@@ -8726,7 +8999,7 @@ components:
           description: Er waren meer regels; de oudste ontbreken
         history:
           type: array
-          description: Statusovergangen, incidenten en tests over wat geraakt was, oudste eerst
+          description: Statusovergangen, incidenten, tests en herstelacties van Zelfherstel over wat geraakt was, oudste eerst
           items: { $ref: "#/components/schemas/AuditEntry" }
         history_more:
           type: boolean
@@ -10150,6 +10423,61 @@ components:
     JobStatus:
       type: string
       enum: [queued, running, succeeded, failed, canceled]
+    AgentUpgradeOverview:
+      type: object
+      required: [version, protocol, archs, auto, off_cluster_ids, agents, running]
+      properties:
+        version: { type: string, description: De versie van de agent die deze server aanbiedt }
+        protocol: { type: integer }
+        archs: { type: array, items: { type: string }, description: "Architecturen waarvoor de server een agent heeft" }
+        auto: { type: boolean, description: Agents vanzelf bijwerken staat aan }
+        off_cluster_ids: { type: array, items: { type: string, format: uuid }, description: Clusters waar vanzelf bijwerken uitstaat }
+        agents: { type: array, items: { $ref: "#/components/schemas/AgentUpgradeAgent" } }
+        running:
+          type: array
+          description: Taken agents.upgrade die wachten of lopen
+          items:
+            type: object
+            required: [cluster_id, job_id]
+            properties:
+              cluster_id: { type: string, format: uuid, nullable: true }
+              job_id: { type: string, format: uuid }
+    AgentUpgradeAgent:
+      type: object
+      required: [node_id, hostname, cluster_id, cluster_name, cluster_slug, cluster_environment, version, protocol, arch, online, state, why, auto]
+      properties:
+        node_id: { type: string, format: uuid }
+        hostname: { type: string }
+        cluster_id: { type: string, format: uuid, nullable: true }
+        cluster_name: { type: string }
+        cluster_slug: { type: string }
+        cluster_environment: { type: string, description: "lab, test, prod, of leeg zonder cluster" }
+        version: { type: string }
+        protocol: { type: integer }
+        arch: { type: string }
+        online: { type: boolean }
+        state:
+          type: string
+          enum: [current, outdated, failed, manual, newer, unknown]
+          description: |
+            current: dezelfde agent als die van de server. outdated: verouderd, werkt zichzelf bij. failed: de update werd
+            op de node teruggezet. manual: verouderd en ouder dan protocol 23, met de hand bijwerken. newer: nieuwer dan de
+            server. unknown: de server heeft geen agent voor deze node of de agent meldde zijn binary nog niet.
+        why: { type: string }
+        auto: { type: boolean, description: ClusterForge werkt deze agent vanzelf bij }
+    AgentUpgradeInput:
+      type: object
+      properties:
+        node_ids: { type: array, items: { type: string, format: uuid } }
+        cluster_id: { type: string, format: uuid }
+        all: { type: boolean }
+        confirm: { type: string, description: De slug van het prodcluster, ter bevestiging }
+    AgentUpgradeStarted:
+      type: object
+      required: [jobs, skipped]
+      properties:
+        jobs: { type: array, items: { $ref: "#/components/schemas/Job" } }
+        skipped: { type: array, items: { type: string } }
     Job:
       type: object
       required: [id, kind, title, status, error, cluster_id, node_id, proxmox_id, requested_by, attempts, cancel_requested, retryable, created_at, started_at, finished_at]

@@ -215,6 +215,8 @@ func commandText(p map[string]any) string {
 	case "fault.inject":
 		f, _ := p["fault"].(map[string]any)
 		return "storing aanzetten: " + faultText(f) + fmt.Sprintf(", hoogstens %s s", num(f["max_seconds"]))
+	case "agent.upgrade":
+		return "agent bijwerken"
 	case "fault.clear":
 		ids, _ := p["fault_ids"].([]any)
 		if len(ids) == 0 {
@@ -391,6 +393,23 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 			return fmt.Sprintf("%s van cluster %s draait weer; %s begon het cluster met de nieuwste data", str(p, "component"), name, b)
 		}
 		return fmt.Sprintf("%s van cluster %s draait weer op %s", str(p, "component"), name, list(p["nodes"]))
+	case "cluster.heal_started", "node.heal_started":
+		what := or(str(p, "what"), "de database van "+name)
+		if p["auto"] == true {
+			return "ClusterForge herstelt " + what + " vanzelf" + colon(str(p, "reason"))
+		}
+		return "Zelfherstel gestart voor " + what + colon(list(p["nodes"]))
+	case "cluster.heal_done", "node.heal_done":
+		return "Zelfherstel van " + or(str(p, "what"), "de database van "+name) + " gelukt"
+	case "cluster.heal_auto_changed":
+		if p["enabled"] == true {
+			return "Zelfherstel vanzelf aangezet op cluster " + name
+		}
+		return "Zelfherstel vanzelf uitgezet op cluster " + name
+	case "cluster.heal_auto_paused":
+		return "Zelfherstel vanzelf gepauzeerd op cluster " + name + colon(str(p, "reason"))
+	case "cluster.heal_failed", "node.heal_failed":
+		return "Zelfherstel van " + or(str(p, "what"), "de database van "+name) + " mislukt" + colon(str(p, "error"))
 	case "cluster.database_resynced":
 		return fmt.Sprintf("%s opnieuw gesynchroniseerd in %s van cluster %s", str(p, "hostname"), str(p, "component"), name)
 	case "cluster.database_switchover":
@@ -680,6 +699,25 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 		return "Commando aan " + name + ": " + commandText(p) + paren(prefixed("reden: ", str(p, "reason")))
 	case "agent.revoked":
 		return "Agent op " + str(p, "hostname") + " ingetrokken"
+	case "node.agent_upgraded":
+		s := fmt.Sprintf("Agent op %s bijgewerkt van %s (protocol %s) naar %s (protocol %s)", str(p, "hostname"),
+			or(str(p, "from"), "?"), num(p["from_protocol"]), or(str(p, "to"), "?"), num(p["to_protocol"]))
+		if p["auto"] == true {
+			s += ", vanzelf"
+		}
+		return s
+	case "settings.agent_upgrade_auto":
+		if p["enabled"] == true {
+			return "Agents vanzelf bijwerken aangezet"
+		}
+		return "Agents vanzelf bijwerken uitgezet"
+	case "cluster.agent_upgrade_auto":
+		if p["enabled"] == true {
+			return "Agents vanzelf bijwerken aangezet op cluster " + name
+		}
+		return "Agents vanzelf bijwerken uitgezet op cluster " + name
+	case "node.agent_upgrade_failed":
+		return "Agent op " + str(p, "hostname") + " bijwerken mislukt" + colon(str(p, "error"))
 	case "enrollment_token.created":
 		return "Aanmeldtoken gemaakt" + colon(str(p, "description"))
 	case "proxmox.created":

@@ -36,6 +36,9 @@ var classes = map[string]Class{
 	"cluster.database_not_added": ClassInfo, "cluster.database_retired": ClassChange,
 	"cluster.database_move_copied": ClassChange, "cluster.database_move_failed": ClassInfo, "cluster.database_moved": ClassChange,
 	"cluster.database_move_cancelled": ClassChange, "cluster.database_locked": ClassChange, "cluster.database_unlocked": ClassChange,
+	"cluster.heal_started": ClassChange, "cluster.heal_done": ClassChange, "cluster.heal_failed": ClassInfo,
+	"cluster.heal_auto_changed": ClassChange, "cluster.heal_auto_paused": ClassInfo,
+	"node.heal_started": ClassChange, "node.heal_done": ClassChange, "node.heal_failed": ClassInfo,
 	"node.created": ClassInfo, "node.updated": ClassChange, "node.deleted": ClassInfo,
 	"vip.created": ClassChange, "vip.updated": ClassChange, "vip.deleted": ClassChange,
 
@@ -45,6 +48,8 @@ var classes = map[string]Class{
 	"job.cancel_requested": ClassInfo, "job.retried": ClassChange,
 
 	"agent.enrolled": ClassChange, "agent.enroll_failed": ClassInfo, "agent.command": ClassChange,
+	"node.agent_upgraded": ClassChange, "node.agent_upgrade_failed": ClassInfo,
+	"settings.agent_upgrade_auto": ClassChange, "cluster.agent_upgrade_auto": ClassChange,
 	"agent.revoked": ClassChange, "enrollment_token.created": ClassInfo, "enrollment_token.deleted": ClassInfo,
 	"node.facts_changed": ClassInfo,
 	"node.cron_added":    ClassChange, "node.cron_removed": ClassChange, "node.cron_changed": ClassChange,

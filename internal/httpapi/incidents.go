@@ -22,14 +22,16 @@ import (
 )
 
 // incidentHistory zijn de actions in de geschiedenis van een incident: wat
-// er met de status gebeurde, de incidenten zelf en de tests. Nooit iets uit
-// de beveiliging, zodat een viewer hem mag zien.
+// er met de status gebeurde, de incidenten zelf, de tests en de
+// herstelacties van Zelfherstel. Nooit iets uit de beveiliging, zodat een
+// viewer hem mag zien.
 var incidentHistory = slices.Concat(
 	events.Actions(events.CategoryStatus),
 	events.Actions(events.CategoryIncident),
 	[]string{"service.status_changed", "kube.app_status_changed", "kube.rolled_out", "failover.fault_injected", "failover.fault_cleared",
 		"failover.finished", "backup.verify_finished", "disaster.started", "disaster.fault_injected", "disaster.fault_cleared",
 		"disaster.finished", "dr.aborted", "dr.finished"},
+	whatbroke.RepairActions,
 )
 
 // historyLimit is het grootste aantal regels in de geschiedenis van een

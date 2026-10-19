@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/Jonasz1996/clusterforge/internal/kube"
+	"github.com/Jonasz1996/clusterforge/internal/store"
 )
 
 func ptr[T any](v T) *T { return &v }
@@ -552,5 +553,168 @@ func TestCronjobsChapter(t *testing.T) {
 	md = Chapter(&c, KindCronjobs, Opts{Loc: time.UTC})
 	if !strings.Contains(md, "Geen. Een job of bestandssync") || !strings.Contains(md, "geen andere cronjobs of timers") {
 		t.Errorf("zonder jobs:\n%s", md)
+	}
+}
+
+func TestRecoveryHeal(t *testing.T) {
+	c := dbCluster()
+	at := time.Date(2026, 11, 3, 14, 5, 0, 0, time.UTC)
+	c.Heal = &ClusterHeal{
+		Auto: HealAuto{Allowed: true, Enabled: true},
+		Runs: []HealRun{
+			{At: at, What: "MariaDB van Nextcloud", Auto: true, Problems: []string{"MariaDB staat stil op nc2"}, Steps: []string{"Op nc2 MariaDB starten."}, Result: "done"},
+			{At: at.Add(time.Hour), What: "MariaDB van Nextcloud", By: "jonas", Nodes: []string{"nc1", "nc2"}, Result: "failed", Error: "nc2: start | mislukt *"},
+			{At: at.Add(2 * time.Hour), What: "PostgreSQL van Nextcloud", Auto: true},
+		},
+		Changes: []HealChange{{At: at.Add(-time.Hour), Kind: "on", By: "jonas"}, {At: at.Add(3 * time.Hour), Kind: "paused", Reason: "3 pogingen op rij mislukten"}},
+	}
+	md := recovery(&c, Opts{Loc: time.UTC, Usernames: true})
+	for _, want := range []string{
+		"## Zelfherstel",
+		"Vanzelf herstellen staat aan op dit cluster: Zelfherstel voert een plan dat vanzelf mag zelf uit",
+		"Een onderdeel Database dat ClusterForge uitrolde, herstelt Zelfherstel niet zelf",
+		"| Wanneer | Database | Wat er mis was | Wat Zelfherstel deed | Uitkomst |",
+		"| 3 november 2026 om 14:05 | MariaDB van Nextcloud | MariaDB staat stil op nc2 | vanzelf: Op nc2 MariaDB starten. | gelukt |",
+		`| 3 november 2026 om 15:05 | MariaDB van Nextcloud | – | met de hand door jonas, op nc1 en nc2 | mislukt: nc2: start \| mislukt \* |`,
+		"| 3 november 2026 om 16:05 | PostgreSQL van Nextcloud | – | vanzelf | bezig |",
+		"- Op 3 november 2026 om 17:05 gepauzeerd: 3 pogingen op rij mislukten.",
+		"- Op 3 november 2026 om 13:05 aangezet door jonas.",
+		"Wat Zelfherstel nu ziet en zou doen, zie je in ClusterForge bij Databases, onder Zelfherstel bij de database.",
+	} {
+		if !strings.Contains(md, want) {
+			t.Errorf("mist %q in:\n%s", want, md)
+		}
+	}
+	// Nieuwste eerst, en voor de wat-als.
+	if strings.Index(md, "16:05") > strings.Index(md, "15:05") || strings.Index(md, "15:05") > strings.Index(md, "14:05") ||
+		strings.Index(md, "gepauzeerd: 3") > strings.Index(md, "aangezet door") {
+		t.Errorf("volgorde:\n%s", md)
+	}
+	if strings.Index(md, "## Zelfherstel") > strings.Index(md, "## Wat er uitvalt") {
+		t.Error("Zelfherstel staat na Wat er uitvalt")
+	}
+	f := fleet()
+	f.Clusters[0].Heal = &ClusterHeal{}
+	if web := recovery(&f.Clusters[0], Opts{Loc: time.UTC}); strings.Index(web, "## Zelfherstel") > strings.Index(web, "## Wat er uitvalt") || !strings.Contains(web, "| **web-01** |") {
+		t.Errorf("met de wat-als:\n%s", web)
+	}
+	if db := database(&c, Opts{}); !strings.Contains(db, "staat in het hoofdstuk [Herstel](herstel.md#zelfherstel).") {
+		t.Errorf("database linkt niet naar Zelfherstel:\n%s", db)
+	}
+	// Zonder gebruikersnamen staat niet wie het vroeg.
+	if md := recovery(&c, Opts{Loc: time.UTC}); strings.Contains(md, "jonas") || !strings.Contains(md, "| met de hand, op nc1 en nc2 |") || !strings.Contains(md, "- Op 3 november 2026 om 13:05 aangezet.") {
+		t.Errorf("zonder gebruikersnamen:\n%s", md)
+	}
+
+	// Hoogstens maxHealRuns pogingen.
+	c.Heal.Runs = nil
+	for i := range maxHealRuns + 5 {
+		c.Heal.Runs = append(c.Heal.Runs, HealRun{At: at.Add(time.Duration(i) * time.Minute), What: "MariaDB van Nextcloud", Auto: true, Result: "done"})
+	}
+	md = recovery(&c, Opts{Loc: time.UTC})
+	if n := strings.Count(md, "| vanzelf | gelukt |"); n != maxHealRuns || !strings.Contains(md, "En nog 5; ze staan allemaal in ClusterForge bij Taken.") ||
+		!strings.Contains(md, "om 14:49") || strings.Contains(md, "om 14:05 |") {
+		t.Errorf("%d rijen:\n%s", n, md)
+	}
+
+	for _, tc := range []struct {
+		auto HealAuto
+		want string
+	}{
+		{HealAuto{Allowed: true}, "Vanzelf herstellen staat uit op dit cluster: Zelfherstel herstelt pas als een beheerder bij Databases Nu herstellen kiest."},
+		{HealAuto{Enabled: true}, "Op prod herstelt ClusterForge nooit vanzelf: elk herstel vraagt de bevestiging van een beheerder, met Nu herstellen bij Databases."},
+		{HealAuto{Allowed: true, Enabled: true, Paused: "3 pogingen op rij mislukten"}, "Vanzelf herstellen is gepauzeerd: 3 pogingen op rij mislukten. Zelfherstel probeert het pas weer vanzelf"},
+	} {
+		c.Heal = &ClusterHeal{Auto: tc.auto}
+		md := recovery(&c, Opts{Loc: time.UTC})
+		if !strings.Contains(md, tc.want) || !strings.Contains(md, "Zelfherstel deed de laatste 30 dagen niets op dit cluster.") ||
+			strings.Contains(md, "| Wanneer |") || strings.Contains(md, "Vanzelf herstellen veranderde") {
+			t.Errorf("%+v:\n%s", tc.auto, md)
+		}
+	}
+	c.Heal = nil
+	if md := recovery(&c, Opts{Loc: time.UTC}); strings.Contains(md, "Zelfherstel") || strings.Contains(database(&c, Opts{}), "#zelfherstel") {
+		t.Errorf("zonder Zelfherstel:\n%s", md)
+	}
+}
+
+func TestHealOf(t *testing.T) {
+	id := uuid.MustParse("88888888-8888-8888-8888-888888888888")
+	other := uuid.MustParse("99999999-9999-9999-9999-999999999999")
+	at := time.Date(2026, 11, 3, 14, 0, 0, 0, time.UTC)
+	ev := func(n int64, cluster uuid.UUID, action, job, user, payload string) store.ListDocHealEventsRow {
+		return store.ListDocHealEventsRow{ID: n, Ts: at.Add(time.Duration(n) * time.Minute), ClusterID: cluster, Action: action, Payload: []byte(payload), JobID: job, Username: user}
+	}
+	paused := at.Add(5 * time.Minute)
+	w := &world{
+		healAuto: map[uuid.UUID]store.HealAuto{id: {ClusterID: id, Enabled: true, PausedAt: &paused, PausedReason: "3 pogingen op rij mislukten"}},
+		healEvents: []store.ListDocHealEventsRow{
+			// De start viel voor de laatste dertig dagen.
+			ev(1, id, "cluster.heal_done", "job-0", "", `{"job_id":"job-0","title":"Zelfherstel (vanzelf): MariaDB van Nextcloud","what":"MariaDB van Nextcloud","auto":true,"reason":"MariaDB staat stil op nc2; MariaDB staat stil op nc2"}`),
+			ev(2, id, "cluster.heal_started", "job-1", "jonas", `{"job_id":"job-1","what":"MariaDB van Nextcloud","auto":false,"steps":["Op nc2 MariaDB starten."],"nodes":["nc2"],"problems":["MariaDB staat stil op nc2"]}`),
+			ev(3, other, "cluster.heal_started", "job-2", "", `{"job_id":"job-2","what":"MariaDB van Web"}`),
+			ev(4, id, "cluster.heal_failed", "job-1", "jonas", `{"job_id":"job-1","what":"MariaDB van Nextcloud","error":"nc2 start niet"}`),
+			ev(5, id, "cluster.heal_auto_paused", "job-1", "", `{"name":"Nextcloud","reason":"3 pogingen op rij mislukten","job_id":"job-1"}`),
+			ev(6, id, "cluster.heal_auto_changed", "", "jonas", `{"name":"Nextcloud","enabled":true}`),
+			ev(7, id, "cluster.heal_started", "job-3", "", `{"job_id":"job-3","what":"PostgreSQL van Nextcloud","auto":true,"reason":"PostgreSQL staat stil op nc1","problems":[]}`),
+			// Geannuleerd in de wachtrij en opgegeven door de runner: geen
+			// einde in het logboek, wel in de taak.
+			ev(8, id, "cluster.heal_started", "job-4", "jonas", `{"job_id":"job-4","what":"MariaDB van Nextcloud"}`),
+			ev(9, id, "cluster.heal_started", "job-5", "jonas", `{"job_id":"job-5","what":"MariaDB van Nextcloud"}`),
+		},
+	}
+	w.healEvents[2].JobStatus = "running"
+	w.healEvents[6].JobStatus = "running"
+	w.healEvents[7].JobStatus = "canceled"
+	w.healEvents[8].JobStatus, w.healEvents[8].JobError = "failed", "de taak werd te vaak onderbroken"
+	// Het einde in het logboek gaat voor de taak.
+	w.healEvents[1].JobStatus = "failed"
+	h := healOf(w, store.ListDocClustersRow{ID: id, Environment: "lab", HasDatabase: true})
+	if h == nil || h.Auto != (HealAuto{Enabled: true, Allowed: true, Paused: "3 pogingen op rij mislukten"}) || len(h.Runs) != 5 {
+		t.Fatalf("zelfherstel: %+v", h)
+	}
+	if r := h.Runs[0]; r.JobID != "job-0" || !r.At.Equal(at.Add(time.Minute)) || !r.Auto || r.Result != "done" || strings.Join(r.Problems, "|") != "MariaDB staat stil op nc2" {
+		t.Errorf("alleen het einde: %+v", r)
+	}
+	if r := h.Runs[1]; r.JobID != "job-1" || !r.At.Equal(at.Add(2*time.Minute)) || r.Auto || r.By != "jonas" || r.Result != "failed" || r.Error != "nc2 start niet" ||
+		strings.Join(r.Problems, "|") != "MariaDB staat stil op nc2" || strings.Join(r.Steps, "|") != "Op nc2 MariaDB starten." || strings.Join(r.Nodes, "|") != "nc2" {
+		t.Errorf("mislukt: %+v", r)
+	}
+	if r := h.Runs[2]; r.JobID != "job-3" || r.What != "PostgreSQL van Nextcloud" || r.Result != "" || strings.Join(r.Problems, "|") != "PostgreSQL staat stil op nc1" {
+		t.Errorf("bezig: %+v", r)
+	}
+	if r := h.Runs[3]; r.JobID != "job-4" || r.Result != "canceled" || healResult(r) != "geannuleerd" {
+		t.Errorf("geannuleerd: %+v", r)
+	}
+	if r := h.Runs[4]; r.JobID != "job-5" || r.Result != "failed" || healResult(r) != "mislukt: de taak werd te vaak onderbroken" {
+		t.Errorf("opgegeven: %+v", r)
+	}
+	if len(h.Changes) != 2 || h.Changes[0] != (HealChange{At: at.Add(5 * time.Minute), Kind: "paused", Reason: "3 pogingen op rij mislukten"}) ||
+		h.Changes[1] != (HealChange{At: at.Add(6 * time.Minute), Kind: "on", By: "jonas"}) {
+		t.Errorf("wijzigingen: %+v", h.Changes)
+	}
+	if h := healOf(w, store.ListDocClustersRow{ID: id, Environment: "prod", HasDatabase: true}); h.Auto.Allowed {
+		t.Error("op prod mag Vanzelf herstellen")
+	}
+	// Een ander cluster zonder database, met een herstel van vroeger.
+	if h := healOf(w, store.ListDocClustersRow{ID: other, Environment: "lab"}); h == nil || len(h.Runs) != 1 || h.Runs[0].What != "MariaDB van Web" || len(h.Changes) != 0 || h.Auto.Enabled {
+		t.Errorf("ander cluster: %+v", h)
+	}
+	if h := healOf(w, store.ListDocClustersRow{ID: uuid.New(), Environment: "lab"}); h != nil {
+		t.Errorf("zonder database en herstel: %+v", h)
+	}
+	if h := healOf(w, store.ListDocClustersRow{ID: uuid.New(), Environment: "lab", HasDatabase: true}); h == nil || len(h.Runs)+len(h.Changes) != 0 {
+		t.Errorf("met database, zonder herstel: %+v", h)
+	}
+
+	// Zelfherstel van een losse node schrijft geen cluster opnieuw; dat van
+	// een cluster alleen dat cluster en het overzicht.
+	for _, a := range []string{"node.heal_started", "node.heal_done", "node.heal_failed"} {
+		if touch, _, _ := Affects(a, nil); touch {
+			t.Errorf("%s raakt de documentatie", a)
+		}
+	}
+	if touch, overview, all := Affects("cluster.heal_done", &id); !touch || !overview || all {
+		t.Errorf("cluster.heal_done: %v %v %v", touch, overview, all)
 	}
 }
