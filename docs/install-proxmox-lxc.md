@@ -4,7 +4,7 @@ Deze stappen zetten ClusterForge op in een lege Debian-container met Docker Comp
 
 ## 1. De container in Proxmox
 
-Aanbevolen: Debian 13-template, 2 vCPU, 2 GB RAM, 16 GB disk, een vast IP-adres. Het eerste bouwen van de image (Go en Next.js) heeft het meeste geheugen nodig; daarna draait alles ruim binnen 1 GB.
+Aanbevolen: Debian 13-template, 2 vCPU, 2 GB RAM, 16 GB disk, een vast IP-adres. Draaien gaat ruim binnen 1 GB; alleen het image zelf bouwen vraagt meer: de Go-compiler gebruikt tot 2,2 GB, bovenop de containers die al draaien. Met 2 GB RAM bouw je met de zuinige vlaggen uit [Bijwerken](#bijwerken), of je bouwt niet en haalt het kant-en-klare image.
 
 Docker in een LXC heeft twee features nodig. Zet ze aan op de Proxmox-host (vervang `120` door je container-ID) en herstart de container:
 
@@ -221,18 +221,57 @@ Geef de nieuwe LXC hetzelfde IP-adres (of zet `CF_NATS_ADVERTISE` en de DNS-naam
 
 Maak eerst een back-up zoals hierboven: migraties lopen automatisch bij het starten en een oudere versie terugzetten kan alleen met die back-up.
 
+### Zonder bouwen (aanbevolen op een kleine LXC)
+
+CI bouwt bij elke commit een image en zet het op ghcr.io, getagd met de korte commit (`47d7ecc`), het PR-nummer (`pr-97`) of de branch (`main`), en bij een versie met de tag (`v0.5.0`). De LXC haalt het alleen op:
+
+```sh
+cd /opt/clusterforge
+git fetch origin
+git checkout -B main origin/main      # compose-bestand en docs van dezelfde versie
+cd deploy
+sed -i 's|^CF_IMAGE=.*|CF_IMAGE=ghcr.io/jonasz1996/clusterforge-server:main|' .env
+docker compose pull server
+docker compose up -d
+docker compose ps                     # server moet na een minuut "healthy" zijn
+```
+
+Kies een tag die bij je checkout past: `:pr-97` bij een PR, `:v0.5.0` bij een versie. Het image bevat ook de agents voor amd64 en arm64 die de server aanbiedt; de server-image uit CI is alleen amd64 (een versie-tag ook arm64). De versie in de webinterface is de korte commit; `CF_VERSION` doet hier niets.
+
+Geeft `pull` `denied` of `unauthorized`, dan staat het pakket nog op privé. Zet het eenmalig op openbaar op GitHub: profiel → Packages → clusterforge-server → Package settings → Change visibility → Public. Of log op de LXC in met een token met alleen `read:packages` (GitHub → Settings → Developer settings → Personal access tokens (classic)):
+
+```sh
+docker login ghcr.io -u Jonasz1996     # plak het token als wachtwoord
+```
+
+### Zelf bouwen
+
 ```sh
 cd /opt/clusterforge
 git fetch origin
 git checkout -B main origin/main      # of een versie: git checkout v0.5.0
 cd deploy
 CF_VERSION=$(git describe --tags --always) docker compose up -d --build
-docker compose ps                     # server moet na een minuut "healthy" zijn
+docker compose ps
 ```
 
-Zet je liever `CF_VERSION` vast in `.env`, pas hem dan bij elke update aan. Draai alleen `main` of een versie-tag in productie, geen werkbranch: een branch die later anders gemerged wordt, kan je database een migratie geven die `main` niet kent.
+Laat `CF_IMAGE` daarvoor leeg in `.env`. Zet je liever `CF_VERSION` vast in `.env`, pas hem dan bij elke update aan. Draai alleen `main` of een versie-tag in productie, geen werkbranch: een branch die later anders gemerged wordt, kan je database een migratie geven die `main` niet kent.
 
-Met een uitgebracht image hoeft de LXC niets te bouwen: zet `CF_IMAGE=ghcr.io/jonasz1996/clusterforge-server:v0.5.0` in `.env` en draai `docker compose pull && docker compose up -d`.
+Bouwen vraagt geheugen. Gemeten op de server met een lege build-cache (4 CPU's), het piekgeheugen van de Go-compiler alleen:
+
+| In `.env` | Piek | Duur |
+| --- | --- | --- |
+| niets (standaard) | 2,2 GB | 1× |
+| `CF_BUILD_GOFLAGS="-p=1 -gcflags=all=-c=1"` | 1,8 GB | 2,3× |
+| dat en `CF_BUILD_GOGC=25` | 1,4 GB | 2,6× |
+
+Het grootste pakket (de Anthropic-SDK voor de assistent) vraagt het meeste; `-p=1` alleen helpt daarom nauwelijks. Op een LXC met 2 GB RAM zet je beide regels in `.env`, en geef je hem swap of tijdelijk meer geheugen op de Proxmox-host (werkt meteen, zonder herstart):
+
+```sh
+pct set <ctid> --memory 4096 --swap 2048
+```
+
+Stopt de build toch met `signal: killed`, stop dan eerst de draaiende containers met `docker compose stop` en bouw opnieuw.
 
 ## Problemen
 
@@ -242,7 +281,7 @@ Met een uitgebracht image hoeft de LXC niets te bouwen: zet `CF_IMAGE=ghcr.io/jo
 | Inloggen lijkt te lukken maar je komt terug op het loginscherm | `CF_SECURE_COOKIES=true` zonder TLS |
 | Inloggen blijft hangen of de knop doet niets | De server krijgt geen databaseverbinding (pool vol, dode verbinding of een slot in PostgreSQL); zie [Inloggen blijft hangen](#inloggen-blijft-hangen) |
 | Melding "de server antwoordt niet op tijd" | Zelfde oorzaak; de server geeft het na 10 à 20 s op in plaats van eindeloos te wachten, en zet de oorzaak in de log |
-| Build stopt met `killed` | Te weinig geheugen; geef de LXC tijdelijk 3 GB |
+| Build stopt met `signal: killed` | Te weinig geheugen; haal het image uit CI of bouw zuiniger, zie [Bijwerken](#bijwerken) |
 | `docker compose ps` toont de server als `unhealthy` | De server bereikt PostgreSQL niet of start niet; kijk met `docker compose logs server` |
 | Bij een node staat "Grafieken staan uit" | `CF_VICTORIAMETRICS_URL` is niet gezet; de compose-stack zet die standaard |
 | Node blijft Offline na het installeren van de agent | Poort 4222 niet bereikbaar vanaf de node, of `CF_NATS_ADVERTISE` wijst niet naar de LXC; kijk op de node met `journalctl -u cf-agent` |

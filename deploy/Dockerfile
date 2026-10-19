@@ -18,6 +18,10 @@ COPY --from=web /src/web/out/ ./internal/webui/dist/
 ARG VERSION=dev
 ARG TARGETOS=linux
 ARG TARGETARCH
+# Op een LXC met weinig geheugen: CF_BUILD_GOFLAGS en CF_BUILD_GOGC in deploy/.env
+# (zie Bijwerken in docs/install-proxmox-lxc.md). Leeg = de standaard van Go.
+ARG GOFLAGS=
+ARG GOGC=
 RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" -o /out/clusterforge-server ./cmd/clusterforge-server
 # De server biedt de agent aan om te downloaden, voor beide architecturen.
 RUN for arch in amd64 arm64; do \

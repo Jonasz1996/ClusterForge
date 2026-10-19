@@ -117,6 +117,8 @@ docker compose up -d --build
 docker compose exec -it server clusterforge-server admin create -username jonas
 ```
 
+Zelf bouwen vraagt tot 2,2 GB geheugen voor de Go-compiler, bovenop wat al draait. Op een kleine LXC bouw je zuiniger met `CF_BUILD_GOFLAGS="-p=1 -gcflags=all=-c=1"` en `CF_BUILD_GOGC=25` in `.env` (1,4 GB, trager), of je bouwt niet: CI zet bij elke commit een image op `ghcr.io/jonasz1996/clusterforge-server` (tags: korte commit, `pr-<nummer>`, `main`, en een versie zoals `v0.5.0`). Zet dat in `CF_IMAGE` en draai `docker compose pull server && docker compose up -d`; zie [bijwerken](docs/install-proxmox-lxc.md#bijwerken).
+
 De server luistert op `127.0.0.1:8080`. Zet hem achter je reverse proxy met TLS: de sessiecookie heeft de `Secure`-vlag en werkt dus niet over gewone http (tenzij `CF_SECURE_COOKIES=false`).
 
 Agents verbinden zelf naar de server, op poort 4222 (NATS met TLS). Die poort moet dus bereikbaar zijn vanaf je nodes; ClusterForge maakt nooit zelf een verbinding naar een node.
