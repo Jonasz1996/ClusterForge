@@ -299,7 +299,7 @@ func (a *Agent) sendHeartbeat(ctx context.Context) {
 		return
 	}
 	hb := a.Collector.Heartbeat(ctx, a.Version)
-	_, hb.BinarySHA256 = a.binary()
+	hb.BinarySHA256 = a.binarySum()
 	hb.Arch = runtime.GOARCH
 	hb.UpgradeRolledBack, _ = a.rolledBack.Load().(string)
 	if err := a.publish(protocol.SubjectHeartbeat, protocol.TypeHeartbeat, hb); err != nil {

@@ -16,6 +16,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Jonasz1996/clusterforge/pkg/protocol"
@@ -57,13 +58,25 @@ type upgradeMarker struct {
 // selfBinary geeft het pad en de sha256 van de binary die draait, één keer
 // berekend. Fouten geven een lege sha256.
 type selfBinary struct {
-	once sync.Once
-	path string
-	sum  string
+	once  sync.Once
+	path  string
+	sum   string
+	ready atomic.Bool
+}
+
+// binarySum is de sha256 als die al berekend is, anders leeg: een
+// heartbeat wacht niet op het lezen van de binary.
+func (a *Agent) binarySum() string {
+	if !a.self.ready.Load() {
+		go a.binary()
+		return ""
+	}
+	return a.self.sum
 }
 
 func (a *Agent) binary() (path, sum string) {
 	a.self.once.Do(func() {
+		defer a.self.ready.Store(true)
 		p := a.BinaryPath
 		if p == "" {
 			if exe, err := os.Executable(); err == nil {
