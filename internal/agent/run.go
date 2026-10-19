@@ -9,11 +9,14 @@ import (
 	"io"
 	"log/slog"
 	"net"
+	"net/http"
 	"net/url"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -85,6 +88,16 @@ type Agent struct {
 	// PatroniURL is de REST-API van Patroni; leeg is DefaultPatroniURL.
 	// Tests vervangen het.
 	PatroniURL string
+	// BinaryPath is de binary die draait; leeg is os.Executable. Zelf
+	// bijwerken vervangt hem.
+	BinaryPath string
+	// HTTPClient haalt een nieuwe agent; nil is http.DefaultClient.
+	HTTPClient *http.Client
+	// RollbackAfter is hoe lang een nieuwe agent heeft om met de server te
+	// praten; nul is protocol.UpgradeRollbackAfter.
+	RollbackAfter time.Duration
+	// Restart herstart de agent na een update; nil is systemctl restart.
+	Restart func()
 
 	nc    *nats.Conn
 	conns ConnTracker
@@ -102,6 +115,11 @@ type Agent struct {
 	// cronMu bewaakt cron, wat de agent uit de journal over cron las.
 	cronMu sync.Mutex
 	cron   *cronLog
+	// self is de binary die draait; rolledBack de sha256 van een update die
+	// teruggezet werd, en confirmed of deze agent zijn update bevestigde.
+	self       selfBinary
+	rolledBack atomic.Value
+	confirmed  atomic.Bool
 }
 
 // Connect verbindt met NATS. Is de server nog niet bereikbaar, dan blijft de
@@ -217,6 +235,7 @@ func (a *Agent) Run(ctx context.Context) error {
 		factsEvery = protocol.FactsInterval
 	}
 
+	a.resumeUpgrade(ctx)
 	// Storingen die er nog staan, bijvoorbeeld na een crash, gaan eerst weg.
 	if res := a.faults.ClearAll(ctx); !res.OK {
 		a.Log.Error("achtergebleven storingen terugdraaien mislukt", "err", res.Error)
@@ -280,6 +299,9 @@ func (a *Agent) sendHeartbeat(ctx context.Context) {
 		return
 	}
 	hb := a.Collector.Heartbeat(ctx, a.Version)
+	_, hb.BinarySHA256 = a.binary()
+	hb.Arch = runtime.GOARCH
+	hb.UpgradeRolledBack, _ = a.rolledBack.Load().(string)
 	if err := a.publish(protocol.SubjectHeartbeat, protocol.TypeHeartbeat, hb); err != nil {
 		a.Log.Warn("heartbeat sturen mislukt", "err", err)
 		return
@@ -449,6 +471,8 @@ func (a *Agent) sendFacts(ctx context.Context) error {
 	if !ack.OK {
 		return errors.New("server: " + ack.Error)
 	}
+	// De server nam iets van deze agent aan: een nieuwe agent werkt.
+	a.confirmUpgrade(ctx)
 	return nil
 }
 

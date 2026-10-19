@@ -12,6 +12,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"os"
+	"os/exec"
 	"os/signal"
 	"syscall"
 	"time"
@@ -46,6 +47,12 @@ Gebruik:
   cf-agent sync-receive --from <node>
                      ontvangt een bestandssync; alleen via de sleutel van
                      een bron in authorized_keys
+  cf-agent self-check
+                     print versie, protocol en architectuur als JSON; een
+                     agent die zichzelf bijwerkt, controleert zo de nieuwe
+  cf-agent upgrade-rollback
+                     zet de oude agent terug als de nieuwe niet met de server
+                     praat; de timer cf-agent-rollback start dit
   cf-agent version
 `
 
@@ -76,6 +83,10 @@ func main() {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
 		err = enc.Encode(f)
+	case "self-check":
+		err = json.NewEncoder(os.Stdout).Encode(agent.SelfCheckOf(version))
+	case "upgrade-rollback":
+		err = upgradeRollback(os.Args[2:], log)
 	case "version", "-version", "--version":
 		fmt.Println(version)
 	case "help", "-h", "--help":
@@ -160,6 +171,20 @@ func faultClear(args []string, log *slog.Logger) error {
 		return errors.New(res.Error)
 	}
 	return nil
+}
+
+// upgradeRollback zet de oude agent terug als de nieuwe zijn update niet
+// bevestigde. De bewaarde oude agent draait dit zelf.
+func upgradeRollback(args []string, log *slog.Logger) error {
+	fl := flag.NewFlagSet("upgrade-rollback", flag.ExitOnError)
+	bin := fl.String("binary", "/usr/local/bin/cf-agent", "de binary van cf-agent.service")
+	statePath := fl.String("state", agent.DefaultStatePath, "bestand waarin de agent onderhoud en herstarts onthoudt; de update-status staat ernaast")
+	_ = fl.Parse(args)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	return agent.RollbackUpgrade(ctx, *bin, *statePath, log, func(ctx context.Context, name string, args ...string) ([]byte, error) {
+		return exec.CommandContext(ctx, name, args...).CombinedOutput()
+	})
 }
 
 func enroll(args []string) error {
