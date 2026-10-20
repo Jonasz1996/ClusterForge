@@ -6,6 +6,7 @@ package heal
 // begint ze het cluster niet opnieuw maar laat ze de rest daar aansluiten.
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -231,15 +232,37 @@ func (s *Service) run(ctx context.Context, j *jobs.Job) (err error) {
 			return err
 		}
 	}
-	// Een losse server naast het Galera-cluster start als gewone server, na
-	// het cluster: hij hangt er niet van af, en start hij niet, dan houdt
-	// dat het herstel van het cluster niet tegen.
-	var members, loose []PlanNode
+	// Een losse server naast het Galera-cluster start als gewone server, voor
+	// het cluster: hij hangt er niet van af. Start hij niet, dan gaat de taak
+	// toch verder met het cluster. Een losse server heeft altijd evenveel
+	// stappen, zodat een hervatte taak elke stap op dezelfde plek terugvindt.
+	var members []PlanNode
+	var errs []error
 	for _, n := range plan.Nodes {
-		if n.Loose {
-			loose = append(loose, n)
-		} else {
+		if !n.Loose {
 			members = append(members, n)
+			continue
+		}
+		var err error
+		if n.Kill {
+			err = j.Step(ctx, n.Hostname+": hangend proces stoppen", func(ctx context.Context, st *jobs.Step) error {
+				return s.kill(ctx, j.ID.String(), st, n)
+			})
+		}
+		if n.Start {
+			if err != nil {
+				j.Keep()
+			} else {
+				err = j.Step(ctx, n.Hostname+": "+n.Unit+" starten", func(ctx context.Context, st *jobs.Step) error {
+					return s.startServer(ctx, j.ID.String(), st, n, p.Engine)
+				})
+			}
+		}
+		if ctx.Err() != nil {
+			return cmp.Or(err, context.Cause(ctx))
+		}
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", n.Hostname, err))
 		}
 	}
 	for _, n := range members {
@@ -249,7 +272,7 @@ func (s *Service) run(ctx context.Context, j *jobs.Job) (err error) {
 		if err := j.Step(ctx, n.Hostname+": hangend proces stoppen", func(ctx context.Context, st *jobs.Step) error {
 			return s.kill(ctx, j.ID.String(), st, n)
 		}); err != nil {
-			return err
+			return errors.Join(append([]error{err}, errs...)...)
 		}
 	}
 	// cerr: de fout van het cluster.
@@ -275,30 +298,7 @@ func (s *Service) run(ctx context.Context, j *jobs.Job) (err error) {
 	default:
 		return fmt.Errorf("onbekende actie %q", plan.Action)
 	}
-	if ctx.Err() != nil {
-		return cerr
-	}
-	errs := []error{cerr}
-	for _, n := range loose {
-		var err error
-		if n.Kill {
-			err = j.Step(ctx, n.Hostname+": hangend proces stoppen", func(ctx context.Context, st *jobs.Step) error {
-				return s.kill(ctx, j.ID.String(), st, n)
-			})
-		}
-		if err == nil && n.Start {
-			err = j.Step(ctx, n.Hostname+": "+n.Unit+" starten", func(ctx context.Context, st *jobs.Step) error {
-				return s.startServer(ctx, j.ID.String(), st, n, p.Engine)
-			})
-		}
-		if err != nil {
-			errs = append(errs, fmt.Errorf("%s: %w", n.Hostname, err))
-		}
-		if ctx.Err() != nil {
-			break
-		}
-	}
-	return errors.Join(errs...)
+	return errors.Join(append([]error{cerr}, errs...)...)
 }
 
 // setAddress zet de Galera-adressen op één node.
@@ -397,10 +397,11 @@ func (s *Service) runGalera(ctx context.Context, j *jobs.Job, p runParams) error
 	nodes := p.Plan.Nodes
 	name := p.Galera
 	var begin *uuid.UUID
+	type positions struct {
+		Begin *uuid.UUID `json:"begin,omitempty"`
+	}
 	if err := j.Step(ctx, "Posities lezen", func(ctx context.Context, st *jobs.Step) error {
-		var state struct {
-			Begin *uuid.UUID `json:"begin,omitempty"`
-		}
+		var state positions
 		if st.State(&state) {
 			begin = state.Begin
 			return nil
@@ -414,6 +415,11 @@ func (s *Service) runGalera(ctx context.Context, j *jobs.Job, p runParams) error
 		return st.SetState(ctx, state)
 	}); err != nil {
 		return err
+	}
+	// Lukte de stap al bij een eerdere poging, dan sloeg Step hem over; de
+	// keuze staat in zijn state.
+	if state := (positions{}); begin == nil && j.Done("Posities lezen", &state) {
+		begin = state.Begin
 	}
 	joined := s.primaryCount(ctx, nodes, name)
 	if begin != nil {

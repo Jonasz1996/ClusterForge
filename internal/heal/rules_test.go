@@ -486,7 +486,7 @@ func TestDiagnoseLooseServer(t *testing.T) {
 	}
 
 	// Staat Zabbixproxy ook stil, dan start de taak hem als gewone server,
-	// na het cluster.
+	// voor het cluster.
 	stop(&in, "Zabbixproxy")
 	r = Diagnose(in)
 	if !strings.Contains(codes(r), "unit_stopped@Zabbixproxy") || strings.Contains(codes(r), "galera_no_primary@ZabbixHa1+Zabbixproxy") {
@@ -497,8 +497,8 @@ func TestDiagnoseLooseServer(t *testing.T) {
 		pl.Nodes[1].Hostname != "Zabbixproxy" || !pl.Nodes[1].Loose || !pl.Nodes[1].Start || pl.Nodes[1].Unit != "mariadb" {
 		t.Fatalf("plan: %+v", pl)
 	}
-	if last := pl.Steps[len(pl.Steps)-1]; !strings.HasPrefix(last, "Op Zabbixproxy MariaDB starten en wachten tot hij antwoordt.") || !strings.Contains(last, "zonder Galera-config") ||
-		slices.ContainsFunc(pl.Steps[:len(pl.Steps)-1], func(s string) bool { return strings.Contains(s, "Zabbixproxy") }) {
+	if first := pl.Steps[0]; !strings.HasPrefix(first, "Op Zabbixproxy MariaDB starten en wachten tot hij antwoordt.") || !strings.Contains(first, "zonder Galera-config") ||
+		slices.ContainsFunc(pl.Steps[1:], func(s string) bool { return strings.Contains(s, "Zabbixproxy") }) {
 		t.Errorf("stappen: %q", pl.Steps)
 	}
 	in.Unfinished = nil
@@ -584,6 +584,13 @@ func TestDiagnoseLooseListed(t *testing.T) {
 	r = Diagnose(in)
 	if pl := r.Plan; pl == nil || strings.Contains(pl.Blocked, "niet lezen") || len(pl.Nodes) != 2 || pl.Nodes[1].Loose {
 		t.Errorf("MySQL: %s %+v", codes(r), r.Plan)
+	}
+	// Naast garb is zo'n MySQL de eigen database van de scheidsrechter.
+	n.Garb = true
+	in.Nodes[n.ID] = n
+	r = Diagnose(in)
+	if pl := r.Plan; pl == nil || pl.Blocked != "" || len(pl.Nodes) != 1 || pl.Nodes[0].Hostname != "ZabbixHa1" {
+		t.Errorf("MySQL naast garb: %s %+v", codes(r), r.Plan)
 	}
 }
 

@@ -385,9 +385,11 @@ func (s *Service) planMigration(ctx context.Context, source, database string, co
 		}
 	}
 	for _, c := range comps {
-		// Een losse server in een cluster, zoals op de scheidsrechter, hoort
-		// niet bij de database van dat cluster: daarheen verhuizen kan.
-		if g.ClusterID != nil && g.NodeID == nil && c.ClusterID == *g.ClusterID {
+		// Ook een losse server in een cluster, zoals op de scheidsrechter,
+		// verhuist niet naar de database van dat cluster: zijn apps delen
+		// vaak een gebruiker met die van het cluster (zabbix bij een
+		// Zabbix-proxy), en verhuizen zou het wachtwoord daar overschrijven.
+		if g.ClusterID != nil && c.ClusterID == *g.ClusterID {
 			continue
 		}
 		p.Targets = append(p.Targets, MigrationOption{ClusterID: c.ClusterID, ClusterName: c.ClusterName, ComponentID: c.ID, Suggested: using[c.ClusterID]})
@@ -503,8 +505,13 @@ func (s *Service) planMigration(ctx context.Context, source, database string, co
 	}
 	oi := slices.IndexFunc(p.Targets, func(o MigrationOption) bool { return o.ComponentID == *componentID })
 	if oi < 0 {
-		if r, err := s.q.GetClusterComponent(ctx, *componentID); err == nil && g.ClusterID != nil && g.NodeID == nil && r.ClusterID == *g.ClusterID {
-			add(Blocked, "same", nil, database+" staat al in de database van dit cluster", "")
+		if r, err := s.q.GetClusterComponent(ctx, *componentID); err == nil && g.ClusterID != nil && r.ClusterID == *g.ClusterID {
+			msg := database + " staat al in de database van dit cluster"
+			if g.NodeID != nil {
+				msg = database + " staat op " + p.Source.Name + ", een losse server in dit cluster; naar de database van hetzelfde cluster verhuist ClusterForge niet, " +
+					"want een gebruiker met dezelfde naam, zoals zabbix bij een Zabbix-proxy, zou daar het wachtwoord van de andere app overschrijven"
+			}
+			add(Blocked, "same", nil, msg, "")
 			return p, route, nil
 		}
 		return p, route, &InvalidError{"component", fmt.Sprintf("kies een cluster met een %s van ClusterForge die draait", databases.EngineName(g.Engine))}

@@ -173,10 +173,14 @@ func (q *Queries) ListHealJobs(ctx context.Context) ([]ListHealJobsRow, error) {
 const listHealNodes = `-- name: ListHealNodes :many
 SELECT n.id, n.hostname, n.cluster_id, n.primary_ip, a.protocol_version AS agent_protocol, s.heartbeat_at,
        coalesce(s.addresses, '{}')::text[] AS addresses,
-       (coalesce(s.services ->> 'garb', '') IN ('active', 'activating', 'reloading'))::boolean AS garb
+       (coalesce(s.services ->> 'garb', '') IN ('active', 'activating', 'reloading')
+        OR EXISTS (SELECT 1
+                   FROM jsonb_array_elements(CASE WHEN jsonb_typeof(f.facts -> 'services') = 'array' THEN f.facts -> 'services' ELSE '[]'::jsonb END) x
+                   WHERE x ->> 'name' = 'garb' AND x ->> 'enabled' = 'enabled'))::boolean AS garb
 FROM nodes n
 JOIN agents a ON a.node_id = n.id AND a.revoked_at IS NULL
 LEFT JOIN node_status s ON s.node_id = n.id
+LEFT JOIN node_facts f ON f.node_id = n.id
 ORDER BY lower(n.hostname)
 `
 
@@ -192,8 +196,10 @@ type ListHealNodesRow struct {
 }
 
 // De nodes met een agent, met hun adressen uit de laatste heartbeat, voor
-// Zelfherstel. garb: garb, de scheidsrechter van Galera, draait op de node;
-// alleen geïnstalleerd telt niet (op RHEL zit garb.service bij galera-4).
+// Zelfherstel. garb: garb, de scheidsrechter van Galera, draait op de node
+// of start er bij een boot (enabled): na een stroomonderbreking stopt garb
+// zolang er geen Primary is. Alleen geïnstalleerd telt niet: op RHEL zit een
+// uitgeschakelde garb.service bij galera-4 op elke datanode.
 func (q *Queries) ListHealNodes(ctx context.Context) ([]ListHealNodesRow, error) {
 	rows, err := q.db.Query(ctx, listHealNodes)
 	if err != nil {
