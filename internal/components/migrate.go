@@ -1279,7 +1279,7 @@ func (s *Service) trialPull(ctx context.Context, j *jobs.Job, st *jobs.Step, p t
 	}
 	res.pulled = true
 	deadline := s.Now().Add(protocol.DBDumpTimeout + time.Hour)
-	reported, counting := int64(0), false
+	reported, reportedIn, counting := int64(0), int64(0), false
 	for {
 		cur, err := s.migrateReq(ctx, route.Import, engine, protocol.DBMigrateRequest{Action: protocol.DBMigrateStatus, Target: route.Target})
 		var run *protocol.DBMigrateRun
@@ -1302,9 +1302,15 @@ func (s *Service) trialPull(ctx context.Context, j *jobs.Job, st *jobs.Step, p t
 				_ = st.Flush(ctx)
 			}
 		case run.Finished.IsZero():
-			if b := run.Bytes; b-reported >= 64<<20 {
-				reported = b
-				st.Logf("%s binnen.", humanBytes(b))
+			// Een agent met een buffer leest de dump door terwijl de import
+			// achterloopt; dan telt ook wat de import al las.
+			if b, in := run.Bytes, run.Bytes-run.Buffered; b-reported >= 64<<20 || in-reportedIn >= 64<<20 {
+				reported, reportedIn = b, in
+				if run.Buffered > 0 {
+					st.Logf("%s binnen, %s geïmporteerd.", humanBytes(b), humanBytes(in))
+				} else {
+					st.Logf("%s binnen.", humanBytes(b))
+				}
 				_ = st.Flush(ctx)
 			}
 		default:

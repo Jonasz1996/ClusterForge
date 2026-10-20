@@ -586,6 +586,10 @@ type DBMigrateRun struct {
 	// Bytes is de SQL die al binnen is, Total wat er ongeveer komt.
 	Bytes int64 `json:"bytes"`
 	Total int64 `json:"total"`
+	// Buffered is wat daarvan op schijf op de import wacht: de agent leest
+	// de dump altijd door, ook als de import even stilstaat. 0 bij een
+	// agent van voor de buffer.
+	Buffered int64 `json:"buffered,omitempty"`
 	// Tables zijn de rijen per tabel aan beide kanten, na de import.
 	Tables []DBMigrateCount `json:"tables,omitempty"`
 	// Views, Routines, Triggers en Events staan in de nieuwe database.

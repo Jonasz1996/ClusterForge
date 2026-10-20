@@ -11,6 +11,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strconv"
@@ -139,7 +140,7 @@ func dockerAgent(t *testing.T, container string) *Agent {
 		}
 		return append(opts, args[1:]...)
 	}
-	a := &Agent{Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	a := &Agent{SpoolDir: filepath.Join(t.TempDir(), "verhuizing"), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	a.Exec = func(ctx context.Context, name string, args ...string) ([]byte, error) {
 		switch name {
 		case "systemctl":
@@ -488,7 +489,8 @@ func TestDBMigrate(t *testing.T) {
 	}
 	old.Network, nw.Network = network, network
 	agent := func(h *agenttest.Host) *Agent {
-		return &Agent{Exec: h.Exec, ExecStdin: h.ExecStdin, Stream: h.Stream, Dial: h.Dial, Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+		return &Agent{Exec: h.Exec, ExecStdin: h.ExecStdin, Stream: h.Stream, Dial: h.Dial, SpoolDir: filepath.Join(t.TempDir(), "verhuizing"),
+			Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	}
 	a, b := agent(old), agent(nw)
 

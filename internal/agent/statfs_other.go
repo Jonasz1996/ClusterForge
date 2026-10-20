@@ -12,3 +12,6 @@ func fileOwner(fs.FileInfo) (uid, gid int, ok bool) { return 0, 0, false }
 
 // allocate schrijft nullen; fallocate is er alleen op Linux.
 func allocate(path string, n int64) error { return writeZeros(path, n) }
+
+// sameDevice is alleen op Linux geïmplementeerd; zonder weten: ja.
+func sameDevice(string, string) bool { return true }

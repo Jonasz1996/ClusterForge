@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"cmp"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -342,6 +343,22 @@ func (a *Agent) migrateRun(target string) *protocol.DBMigrateRun {
 	return nil
 }
 
+// migrateSpool maakt de spool voor een import van ongeveer total bytes.
+// Er loopt maar één import tegelijk, dus wat er nog staat, is van een
+// afgebroken import en gaat eerst weg.
+func (a *Agent) migrateSpool(total int64, consumed func(int64)) (*spool, error) {
+	dir, _ := a.path(defaultSpoolDir)
+	dataDir, _ := a.path(mariaDataDir)
+	dir = cmp.Or(a.SpoolDir, dir)
+	if err := os.RemoveAll(dir); err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, err
+	}
+	return newSpool(dir, spoolLimit(dir, dataDir, total), consumed)
+}
+
 // migratePull begint de import van req.Database van de oude MariaDB in de
 // nieuwe database req.Target op deze node.
 func (a *Agent) migratePull(ctx context.Context, req *protocol.DBMigrateRequest) error {
@@ -441,6 +458,7 @@ func (a *Agent) runPull(req protocol.DBMigrateRequest, run protocol.DBMigrateRun
 		st.mu.Lock()
 		if st.running != nil {
 			st.running.Bytes += n
+			st.running.Buffered += n
 		}
 		st.mu.Unlock()
 	}
@@ -452,7 +470,18 @@ func (a *Agent) runPull(req protocol.DBMigrateRequest, run protocol.DBMigrateRun
 		}
 		defer func() { _ = os.RemoveAll(dir) }()
 		client := clientArgs(cnf, run.TLS)
-		if err := a.pipeDump(ctx, client, req.Database, req.Target, req.SkipEvents, progress); err != nil {
+		sp, err := a.migrateSpool(req.Total, func(n int64) {
+			st.mu.Lock()
+			if st.running != nil {
+				st.running.Buffered -= n
+			}
+			st.mu.Unlock()
+		})
+		if err != nil {
+			return fmt.Errorf("buffer op schijf: %w", err)
+		}
+		defer sp.remove()
+		if err := a.pipeDump(ctx, client, req.Database, req.Target, req.SkipEvents, sp, progress); err != nil {
 			return err
 		}
 		imported = true
@@ -494,9 +523,9 @@ func (a *Agent) runPull(req protocol.DBMigrateRequest, run protocol.DBMigrateRun
 // van een dump komt van een andere server.
 var importArgs = []string{"--batch", "--binary-mode", "--skip-print-query-on-error"}
 
-// pipeDump stuurt de uitvoer van mariadb-dump op de oude server direct naar
-// mariadb op deze node; met skipEvents zonder --events.
-func (a *Agent) pipeDump(ctx context.Context, client []string, db, target string, skipEvents bool, progress func(int64)) error {
+// pipeDump stuurt de uitvoer van mariadb-dump op de oude server via de
+// spool naar mariadb op deze node; met skipEvents zonder --events.
+func (a *Agent) pipeDump(ctx context.Context, client []string, db, target string, skipEvents bool, sp *spool, progress func(int64)) error {
 	dump := func(ctx context.Context, w io.Writer) error {
 		args := append(slices.Clone(client), dumpArgs...)
 		if skipEvents {
@@ -517,35 +546,68 @@ func (a *Agent) pipeDump(ctx context.Context, client []string, db, target string
 		}
 		return err
 	}
-	return pipe(ctx, protocol.DBMariaDB, dump, imp, progress)
+	return pipe(ctx, protocol.DBMariaDB, dump, imp, progress, sp)
 }
 
-// pipe stuurt wat dump schrijft direct naar imp. Stopt de dump met een
-// fout, dan krijgt de import het einde van de invoer en is de fout van de
-// dump de oorzaak; mislukt de import eerst, dan stopt de dump. Een dump
-// zonder slotregel is niet compleet.
+// pipeBuffer verbindt dump en import: een io.Pipe of een spool.
+type pipeBuffer interface {
+	io.Reader
+	io.Writer
+	// Close: de dump is compleet. CloseWithError: de dump mislukte.
+	Close() error
+	CloseWithError(err error)
+	// CloseRead: de import leest niet meer.
+	CloseRead(err error)
+}
+
+// memPipe is een io.Pipe als pipeBuffer. Ook na een mislukte dump krijgt
+// de import gewoon het einde van de invoer.
+type memPipe struct {
+	r *io.PipeReader
+	w *io.PipeWriter
+}
+
+func (p memPipe) Read(b []byte) (int, error)  { return p.r.Read(b) }
+func (p memPipe) Write(b []byte) (int, error) { return p.w.Write(b) }
+func (p memPipe) Close() error                { return p.w.Close() }
+func (p memPipe) CloseWithError(error)        { _ = p.w.Close() }
+func (p memPipe) CloseRead(err error)         { _ = p.r.CloseWithError(err) }
+
+// pipe stuurt wat dump schrijft naar imp, via sp als die er is en anders
+// direct. Stopt de dump met een fout, dan stopt de import en is de fout
+// van de dump de oorzaak; mislukt de import eerst, dan stopt de dump. Een
+// dump zonder slotregel is niet compleet.
 func pipe(ctx context.Context, engine string, dump func(context.Context, io.Writer) error, imp func(context.Context, io.Reader) error,
-	progress func(int64)) error {
+	progress func(int64), sp *spool) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	pr, pw := io.Pipe()
+	var buf pipeBuffer = sp
+	if sp == nil {
+		pr, pw := io.Pipe()
+		buf = memPipe{r: pr, w: pw}
+	}
 	scan := newDumpScan(engine, progress)
 	var dumpFailed atomic.Bool
 	dumpErr := make(chan error, 1)
 	go func() {
-		err := dump(ctx, io.MultiWriter(pw, scan))
-		dumpFailed.Store(err != nil)
-		_ = pw.Close()
+		err := dump(ctx, io.MultiWriter(buf, scan))
+		if err == nil {
+			err = buf.Close()
+		}
+		if err != nil {
+			dumpFailed.Store(true)
+			buf.CloseWithError(err)
+		}
 		dumpErr <- err
 	}()
-	err := imp(ctx, pr)
+	err := imp(ctx, buf)
 	causedByDump := dumpFailed.Load()
 	if err != nil {
 		cancel()
-		_ = pr.CloseWithError(err)
+		buf.CloseRead(err)
 	} else {
 		// Wat de import niet las, moet toch weg, anders blijft de dump hangen.
-		_, _ = io.Copy(io.Discard, pr)
+		_, _ = io.Copy(io.Discard, buf)
 	}
 	derr := <-dumpErr
 	switch {
