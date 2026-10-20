@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -123,9 +124,9 @@ func TestArbiter(t *testing.T) {
 	if !strings.Contains(garb, `GALERA_NODES="10.0.20.186:4567 10.0.20.187:4567"`) || !strings.Contains(garb, `GALERA_GROUP="nextcloud"`) {
 		t.Errorf("garb:\n%s", garb)
 	}
-	// garbd draait als nobody; een logbestand dat hij niet mag openen, laat
-	// hem meteen stoppen.
-	if strings.Contains(garb, "\nLOG_FILE=") {
+	// garbd draait niet als root; een logbestand dat hij niet mag openen,
+	// laat hem meteen stoppen.
+	if regexp.MustCompile(`(?m)^\s*(export\s+)?LOG_FILE=`).MatchString(garb) {
 		t.Errorf("garb met een logbestand:\n%s", garb)
 	}
 	if steps[0].Package == nil || steps[0].Package.Names[0] != "galera-arbitrator-4" || steps[len(steps)-1].Service.Name != "garb" {
