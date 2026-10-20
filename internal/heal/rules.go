@@ -79,9 +79,9 @@ type Node struct {
 	PrimaryIP string
 	// Addresses zijn de adressen uit de laatste heartbeat.
 	Addresses []string
-	// Garb: garb, de scheidsrechter van Galera, staat op de node. Die
-	// luistert op de poort van Galera, dus een MariaDB ernaast is geen
-	// Galera-node.
+	// Garb: garb, de scheidsrechter van Galera, draait op de node. Die
+	// luistert op de poort van Galera, dus het adres van de node in
+	// wsrep_cluster_address is van garb, niet van een MariaDB ernaast.
 	Garb bool
 	// Inspect is het antwoord op heal inspect voor de engine van de groep;
 	// nil als de agent het niet gaf, en InspectError zegt dan waarom.
@@ -431,6 +431,12 @@ func Diagnose(in Input) Report {
 	if len(unreadable) > 0 {
 		block("Zelfherstel kan de config van MariaDB op " + joinHosts(unreadable) + " niet lezen en weet dus niet of die node bij het Galera-cluster hoort; zorg dat my_print_defaults daar weer werkt")
 	}
+	if galera && g.NodeID != nil && g.ClusterID != nil {
+		// De server staat op de scheidsrechter van het onderdeel; alleen zijn
+		// eigen node bekijken en daar beginnen kan een tweede cluster geven.
+		block("Op " + joinHosts(hostsOf(states)) + " staat de scheidsrechter van het onderdeel, maar MariaDB heeft daar een Galera-config; Zelfherstel begint daar geen tweede Galera-cluster naast dat van de datanodes. " +
+			"Hoort die server los te staan, haal de Galera-config daar dan weg")
+	}
 	switch {
 	case galera && len(primaries) == 0:
 		p.Action = ActionGalera
@@ -478,7 +484,7 @@ func Diagnose(in Input) Report {
 			p.AutoWhy = "Adressen wijzigen gebeurt nooit vanzelf: een fout adres splitst het cluster. Bevestig het plan."
 		case len(unknown) > 0:
 			p.AutoWhy = "Niet alle nodes zijn te bekijken."
-		case anyDisk(diskLow, hostsOf(states)):
+		case anyDisk(diskLow, append(hostsOf(states), hostsOf(looseTodo)...)):
 			p.AutoWhy = "Een node heeft te weinig vrije ruimte voor een volledige kopie."
 		case len(noTools) > 0:
 			p.AutoWhy = "Op " + joinHosts(noTools) + " ontbreekt " + galerapkg.Package + "; die node kan het cluster niet beginnen en niet aansluiten. Installeer het eerst, of bevestig het plan."
@@ -563,7 +569,7 @@ func Diagnose(in Input) Report {
 		}
 	}
 	if len(looseTodo) > 0 {
-		addLoose(p, looseTodo, name, len(wrong) > 0)
+		addLoose(p, looseTodo, name)
 	}
 	if in.Unfinished != nil && p.Auto {
 		// Zolang de uitrol niet af is, beslist het onderdeel; vanzelf
@@ -580,24 +586,29 @@ func Diagnose(in Input) Report {
 
 // galeraLoose zoekt in een Galera-groep de losse servers: MariaDB zonder
 // Galera-config (geen wsrep_on, wsrep_provider of wsrep_cluster_address) en
-// zonder wsrep-status, zoals de eigen database van een Zabbix-proxy. Staat
-// zo'n server toch in wsrep_cluster_address van een andere node, dan kan hij
-// een Galera-node zijn die zijn config kwijt is (listed), behalve als garb,
-// de scheidsrechter, op zijn node staat: die luistert op dat adres. Kan de
+// zonder wsrep-status, zoals de eigen database van een Zabbix-proxy. Kan de
 // agent de config niet lezen, dan valt het niet te zeggen (unreadable).
-// listed en unreadable tellen mee als Galera-node.
+// Staat zo'n server in wsrep_cluster_address van een andere node, dan kan hij
+// een Galera-node zijn die zijn config kwijt is (listed), behalve als garb,
+// de scheidsrechter, op zijn node draait: die luistert op dat adres. listed
+// en unreadable tellen mee als Galera-node.
 func galeraLoose(states []nodeState) (loose map[string]bool, listed, unreadable []string) {
 	loose = map[string]bool{}
 	for i, st := range states {
 		if st.insp == nil || st.insp.Galera != nil || st.srv.Galera != nil {
 			continue
 		}
+		// my_print_defaults van MySQL kent --mysqld niet, dus daar is de
+		// config nooit te lezen; zo'n node telt als Galera-node.
+		if st.insp.Error != "" && st.insp.Unit == "mysql" {
+			continue
+		}
 		h := st.srv.Hostname
 		switch {
-		case st.node.Garb:
-			loose[h] = true
 		case st.insp.Error != "":
 			unreadable = append(unreadable, h)
+		case st.node.Garb:
+			loose[h] = true
 		case slices.ContainsFunc(states, func(o nodeState) bool { return o.srv.NodeID != states[i].srv.NodeID && lists(o, st) }):
 			listed = append(listed, h)
 		default:
@@ -625,8 +636,9 @@ func listedWhy(hosts []string) string {
 }
 
 // addLoose zet de losse servers die stilstaan in het plan: de taak start ze
-// als gewone server, na het bijwerken van de adressen en voor het cluster.
-func addLoose(p *Plan, todo []nodeState, name string, addresses bool) {
+// als gewone server, na het cluster, zodat een server die niet start het
+// herstel van het cluster niet tegenhoudt.
+func addLoose(p *Plan, todo []nodeState, name string) {
 	var hosts []string
 	for _, st := range todo {
 		pn := PlanNode{NodeID: st.srv.NodeID, Hostname: st.srv.Hostname, Start: true, Loose: true}
@@ -639,13 +651,9 @@ func addLoose(p *Plan, todo []nodeState, name string, addresses bool) {
 		p.Nodes = append(p.Nodes, pn)
 		hosts = append(hosts, st.srv.Hostname)
 	}
-	step := "Op " + joinHosts(hosts) + killNote(p.Nodes[len(p.Nodes)-len(todo):]) + " " + name + " starten en wachten tot hij antwoordt. " +
-		"Daar draait " + name + " zonder Galera-config, los van het cluster; de taak telt die server niet mee en raakt hem verder niet aan."
-	i := 0
-	if addresses {
-		i = 1
-	}
-	p.Steps = slices.Insert(p.Steps, min(i, len(p.Steps)), step)
+	p.Steps = append(p.Steps, "Op "+joinHosts(hosts)+killNote(p.Nodes[len(p.Nodes)-len(todo):])+" "+name+" starten en wachten tot hij antwoordt. "+
+		"Daar draait "+name+" zonder Galera-config, los van het cluster; de taak telt die server niet mee en raakt hem verder niet aan. "+
+		"De taak doet dat na het cluster: start hij niet, dan houdt dat het herstel van het cluster niet tegen.")
 }
 
 // unfinishedWhy legt uit wat een uitrol die niet af kwam betekent en hoe hij

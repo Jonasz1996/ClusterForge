@@ -486,7 +486,7 @@ func TestDiagnoseLooseServer(t *testing.T) {
 	}
 
 	// Staat Zabbixproxy ook stil, dan start de taak hem als gewone server,
-	// voor het cluster.
+	// na het cluster.
 	stop(&in, "Zabbixproxy")
 	r = Diagnose(in)
 	if !strings.Contains(codes(r), "unit_stopped@Zabbixproxy") || strings.Contains(codes(r), "galera_no_primary@ZabbixHa1+Zabbixproxy") {
@@ -497,9 +497,20 @@ func TestDiagnoseLooseServer(t *testing.T) {
 		pl.Nodes[1].Hostname != "Zabbixproxy" || !pl.Nodes[1].Loose || !pl.Nodes[1].Start || pl.Nodes[1].Unit != "mariadb" {
 		t.Fatalf("plan: %+v", pl)
 	}
-	if !strings.HasPrefix(pl.Steps[0], "Op Zabbixproxy MariaDB starten en wachten tot hij antwoordt.") || !strings.Contains(pl.Steps[0], "zonder Galera-config") {
-		t.Errorf("stap: %q", pl.Steps)
+	if last := pl.Steps[len(pl.Steps)-1]; !strings.HasPrefix(last, "Op Zabbixproxy MariaDB starten en wachten tot hij antwoordt.") || !strings.Contains(last, "zonder Galera-config") ||
+		slices.ContainsFunc(pl.Steps[:len(pl.Steps)-1], func(s string) bool { return strings.Contains(s, "Zabbixproxy") }) {
+		t.Errorf("stappen: %q", pl.Steps)
 	}
+	in.Unfinished = nil
+	if pl := Diagnose(in).Plan; pl == nil || !pl.Auto {
+		t.Errorf("vanzelf: %+v", pl)
+	}
+	// Een bijna volle schijf op Zabbixproxy: dan niet vanzelf.
+	nodeOf(in, "Zabbixproxy").Inspect.DataFree = 100 << 20
+	if pl := Diagnose(in).Plan; pl == nil || pl.Auto || pl.AutoWhy != "Een node heeft te weinig vrije ruimte voor een volledige kopie." {
+		t.Errorf("volle schijf: %+v", pl)
+	}
+	nodeOf(in, "Zabbixproxy").Inspect.DataFree = 10 << 30
 
 	// Draait ZabbixHa1 weer, dan start het plan alleen Zabbixproxy; vanzelf
 	// mag dat zodra de uitrol af is.
@@ -550,13 +561,53 @@ func TestDiagnoseLooseListed(t *testing.T) {
 	}
 
 	// Kan de agent de config van Zabbixproxy niet lezen, dan weet
-	// Zelfherstel niet wat hij is.
+	// Zelfherstel niet wat hij is, ook niet met garb op de node.
+	for _, garb := range []bool{false, true} {
+		in = zabbixProxy()
+		stop(&in, "ZabbixHa1")
+		n := nodeOf(in, "Zabbixproxy")
+		n.Garb, n.Inspect.Error = garb, "my_print_defaults: exit status 1"
+		in.Nodes[n.ID] = n
+		r = Diagnose(in)
+		if pl := r.Plan; pl == nil || !strings.HasPrefix(pl.Blocked, "Zelfherstel kan de config van MariaDB op Zabbixproxy niet lezen") || pl.Auto {
+			t.Errorf("onleesbaar, garb %v: %s %+v", garb, codes(r), r.Plan)
+		}
+	}
+
+	// my_print_defaults van MySQL kent --mysqld niet: een node met
+	// mysql.service telt dan als Galera-node, zoals vroeger.
 	in = zabbixProxy()
 	stop(&in, "ZabbixHa1")
-	nodeOf(in, "Zabbixproxy").Inspect.Error = "my_print_defaults: exit status 1"
+	n = nodeOf(in, "Zabbixproxy")
+	n.Inspect.Unit, n.Inspect.Error = "mysql", "my_print_defaults: exit status 1"
+	in.Nodes[n.ID] = n
 	r = Diagnose(in)
-	if pl := r.Plan; pl == nil || !strings.HasPrefix(pl.Blocked, "Zelfherstel kan de config van MariaDB op Zabbixproxy niet lezen") {
-		t.Errorf("onleesbaar: %s %+v", codes(r), r.Plan)
+	if pl := r.Plan; pl == nil || strings.Contains(pl.Blocked, "niet lezen") || len(pl.Nodes) != 2 || pl.Nodes[1].Loose {
+		t.Errorf("MySQL: %s %+v", codes(r), r.Plan)
+	}
+}
+
+func TestDiagnoseLooseGaleraOnArbiter(t *testing.T) {
+	// Een losse groep op de scheidsrechter van het onderdeel met een
+	// Galera-config: Zelfherstel begint daar geen tweede cluster.
+	in := zabbixProxy()
+	stop(&in, "Zabbixproxy")
+	srv := in.Group.Servers[slices.IndexFunc(in.Group.Servers, func(s databases.Server) bool { return s.Hostname == "Zabbixproxy" })]
+	n := in.Nodes[srv.NodeID]
+	n.Inspect.Galera = &protocol.HealGalera{On: true, ClusterName: "zabbix", ClusterAddress: "gcomm://192.168.10.134,192.168.10.135,192.168.10.198", NodeAddress: "192.168.10.198"}
+	cluster := in.Group.ClusterID
+	in = Input{Group: databases.Group{ClusterID: cluster, NodeID: &srv.NodeID, ClusterName: "zabbix", Engine: protocol.DBMariaDB, Kind: databases.KindSingle,
+		Health: databases.HealthDown, Servers: []databases.Server{srv}}, Nodes: map[uuid.UUID]Node{srv.NodeID: n}, Known: map[string]string{}}
+	r := Diagnose(in)
+	if pl := r.Plan; pl == nil || pl.Action != ActionGalera || pl.Auto || !strings.HasPrefix(pl.Blocked, "Op Zabbixproxy staat de scheidsrechter van het onderdeel") {
+		t.Fatalf("plan: %s %+v", codes(r), r.Plan)
+	}
+
+	// Zonder Galera-config is het een gewone server: starten.
+	n.Inspect.Galera = nil
+	r = Diagnose(in)
+	if pl := r.Plan; pl == nil || pl.Action != ActionRestart || pl.Blocked != "" || len(pl.Nodes) != 1 || !pl.Nodes[0].Start {
+		t.Fatalf("zonder config: %s %+v", codes(r), r.Plan)
 	}
 }
 

@@ -385,7 +385,9 @@ func (s *Service) planMigration(ctx context.Context, source, database string, co
 		}
 	}
 	for _, c := range comps {
-		if g.ClusterID != nil && c.ClusterID == *g.ClusterID {
+		// Een losse server in een cluster, zoals op de scheidsrechter, hoort
+		// niet bij de database van dat cluster: daarheen verhuizen kan.
+		if g.ClusterID != nil && g.NodeID == nil && c.ClusterID == *g.ClusterID {
 			continue
 		}
 		p.Targets = append(p.Targets, MigrationOption{ClusterID: c.ClusterID, ClusterName: c.ClusterName, ComponentID: c.ID, Suggested: using[c.ClusterID]})
@@ -501,7 +503,7 @@ func (s *Service) planMigration(ctx context.Context, source, database string, co
 	}
 	oi := slices.IndexFunc(p.Targets, func(o MigrationOption) bool { return o.ComponentID == *componentID })
 	if oi < 0 {
-		if r, err := s.q.GetClusterComponent(ctx, *componentID); err == nil && g.ClusterID != nil && r.ClusterID == *g.ClusterID {
+		if r, err := s.q.GetClusterComponent(ctx, *componentID); err == nil && g.ClusterID != nil && g.NodeID == nil && r.ClusterID == *g.ClusterID {
 			add(Blocked, "same", nil, database+" staat al in de database van dit cluster", "")
 			return p, route, nil
 		}

@@ -231,7 +231,18 @@ func (s *Service) run(ctx context.Context, j *jobs.Job) (err error) {
 			return err
 		}
 	}
+	// Een losse server naast het Galera-cluster start als gewone server, na
+	// het cluster: hij hangt er niet van af, en start hij niet, dan houdt
+	// dat het herstel van het cluster niet tegen.
+	var members, loose []PlanNode
 	for _, n := range plan.Nodes {
+		if n.Loose {
+			loose = append(loose, n)
+		} else {
+			members = append(members, n)
+		}
+	}
+	for _, n := range members {
 		if !n.Kill {
 			continue
 		}
@@ -241,45 +252,53 @@ func (s *Service) run(ctx context.Context, j *jobs.Job) (err error) {
 			return err
 		}
 	}
-	// Een losse server naast het Galera-cluster start als gewone server, voor
-	// het cluster: hij hangt er niet van af.
-	var members []PlanNode
-	for _, n := range plan.Nodes {
-		if !n.Loose {
-			members = append(members, n)
-			continue
-		}
-		if !n.Start {
-			continue
-		}
-		if err := j.Step(ctx, n.Hostname+": "+n.Unit+" starten", func(ctx context.Context, st *jobs.Step) error {
-			return s.startServer(ctx, j.ID.String(), st, n, p.Engine)
-		}); err != nil {
-			return err
-		}
-	}
+	// cerr: de fout van het cluster.
+	var cerr error
 	switch plan.Action {
 	case ActionRestart:
 		for _, n := range members {
 			if !n.Start {
 				continue
 			}
-			if err := j.Step(ctx, n.Hostname+": "+n.Unit+" starten", func(ctx context.Context, st *jobs.Step) error {
+			if cerr = j.Step(ctx, n.Hostname+": "+n.Unit+" starten", func(ctx context.Context, st *jobs.Step) error {
 				return s.startServer(ctx, j.ID.String(), st, n, p.Engine)
-			}); err != nil {
-				return err
+			}); cerr != nil {
+				break
 			}
 		}
-		return nil
 	case ActionGalera:
-		if len(members) == 0 {
-			return nil
+		if len(members) > 0 {
+			gp := p
+			gp.Plan.Nodes = members
+			cerr = s.runGalera(ctx, j, gp)
 		}
-		gp := p
-		gp.Plan.Nodes = members
-		return s.runGalera(ctx, j, gp)
+	default:
+		return fmt.Errorf("onbekende actie %q", plan.Action)
 	}
-	return fmt.Errorf("onbekende actie %q", plan.Action)
+	if ctx.Err() != nil {
+		return cerr
+	}
+	errs := []error{cerr}
+	for _, n := range loose {
+		var err error
+		if n.Kill {
+			err = j.Step(ctx, n.Hostname+": hangend proces stoppen", func(ctx context.Context, st *jobs.Step) error {
+				return s.kill(ctx, j.ID.String(), st, n)
+			})
+		}
+		if err == nil && n.Start {
+			err = j.Step(ctx, n.Hostname+": "+n.Unit+" starten", func(ctx context.Context, st *jobs.Step) error {
+				return s.startServer(ctx, j.ID.String(), st, n, p.Engine)
+			})
+		}
+		if err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", n.Hostname, err))
+		}
+		if ctx.Err() != nil {
+			break
+		}
+	}
+	return errors.Join(errs...)
 }
 
 // setAddress zet de Galera-adressen op één node.

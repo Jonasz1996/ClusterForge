@@ -173,7 +173,7 @@ func (q *Queries) ListHealJobs(ctx context.Context) ([]ListHealJobsRow, error) {
 const listHealNodes = `-- name: ListHealNodes :many
 SELECT n.id, n.hostname, n.cluster_id, n.primary_ip, a.protocol_version AS agent_protocol, s.heartbeat_at,
        coalesce(s.addresses, '{}')::text[] AS addresses,
-       (coalesce(s.services ->> 'garb', '') <> '')::boolean AS garb
+       (coalesce(s.services ->> 'garb', '') IN ('active', 'activating', 'reloading'))::boolean AS garb
 FROM nodes n
 JOIN agents a ON a.node_id = n.id AND a.revoked_at IS NULL
 LEFT JOIN node_status s ON s.node_id = n.id
@@ -192,8 +192,8 @@ type ListHealNodesRow struct {
 }
 
 // De nodes met een agent, met hun adressen uit de laatste heartbeat, voor
-// Zelfherstel. garb: de agent ziet garb, de scheidsrechter van Galera, op
-// de node.
+// Zelfherstel. garb: garb, de scheidsrechter van Galera, draait op de node;
+// alleen geïnstalleerd telt niet (op RHEL zit garb.service bij galera-4).
 func (q *Queries) ListHealNodes(ctx context.Context) ([]ListHealNodesRow, error) {
 	rows, err := q.db.Query(ctx, listHealNodes)
 	if err != nil {

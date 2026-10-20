@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -27,6 +28,8 @@ type zabbixHeal struct {
 	ids     map[string]string
 	hosts   map[string]*agenttest.Host
 	roots   map[string]string
+	// proxyFails: MariaDB op Zabbixproxy start niet.
+	proxyFails bool
 }
 
 const zabbixGalera = "/etc/mysql/mariadb.conf.d/99-clusterforge-galera.cnf"
@@ -91,6 +94,10 @@ func newZabbixHeal(t *testing.T, e *testEnv, c *client, component, proxyRunning 
 						}
 						return true, nil, errors.New("exit status 3")
 					case start:
+						if z.proxyFails {
+							h.SetUnit("mariadb", agenttest.Unit{Enabled: true, Failed: true})
+							return true, nil, errors.New("Job for mariadb.service failed")
+						}
 						h.SetUnit("mariadb", agenttest.Unit{Enabled: true, Active: true})
 						h.Locked(func() { h.MariaDB.Down, h.MariaDB.Uptime = false, 1 })
 						return true, nil, nil
@@ -245,6 +252,28 @@ func TestHealZabbixArbiter(t *testing.T) {
 	if !slices.Equal(got, want) {
 		t.Errorf("databases:\n%q\nwil\n%q", got, want)
 	}
+
+	// Verhuizen van de proxy naar de database van zijn eigen cluster kan:
+	// die staat niet in het onderdeel.
+	var comp string
+	if err := e.pool.QueryRow(context.Background(), `UPDATE cluster_components SET applied_revision = 1 WHERE cluster_id = $1 RETURNING id::text`, z.cluster.ID).Scan(&comp); err != nil {
+		t.Fatal(err)
+	}
+	var mp migrationPlanView
+	if s := c.do("GET", "/api/v1/databases/migration?source="+url.QueryEscape(proxyKey)+"&database=zabbix_proxy", nil, &mp); s != http.StatusOK {
+		t.Fatalf("verhuizen: %d", s)
+	}
+	if len(mp.Targets) != 1 || mp.Targets[0].ComponentID != comp || mp.Source.Name != "Zabbixproxy" {
+		t.Errorf("verhuizen: %+v %+v", mp.Source, mp.Targets)
+	}
+	if s := c.do("GET", "/api/v1/databases/migration?source="+url.QueryEscape(proxyKey)+"&database=zabbix_proxy&component="+comp, nil, &mp); s != http.StatusOK {
+		t.Fatalf("verhuizen naar zabbix: %d", s)
+	}
+	for _, f := range mp.Findings {
+		if f.Code == "same" {
+			t.Errorf("verhuizen naar zabbix: %+v", f)
+		}
+	}
 }
 
 // TestHealLooseNextToGalera: zonder onderdeel weet ClusterForge niet dat
@@ -264,11 +293,11 @@ func TestHealLooseNextToGalera(t *testing.T) {
 		t.Fatalf("problemen: %s", r.codes())
 	}
 	if r.Plan == nil || r.Plan.Blocked != "" || len(r.Plan.Nodes) != 2 || r.Plan.Nodes[0].SetAddress || r.Plan.Nodes[1].Hostname != "Zabbixproxy" ||
-		!strings.HasPrefix(r.Plan.Steps[0], "Op Zabbixproxy MariaDB starten en wachten tot hij antwoordt.") {
+		!strings.HasPrefix(r.Plan.Steps[len(r.Plan.Steps)-1], "Op Zabbixproxy MariaDB starten en wachten tot hij antwoordt.") {
 		t.Fatalf("plan: %+v", r.Plan)
 	}
 	j, logs := (&healDB{}).healRun(t, c, r)
-	want := []string{"Zabbixproxy: mariadb starten", "Posities lezen", "ZabbixHa1: het cluster beginnen", "Controleren"}
+	want := []string{"Posities lezen", "ZabbixHa1: het cluster beginnen", "Controleren", "Zabbixproxy: mariadb starten"}
 	if j.Status != "succeeded" || !slices.Equal(stepNames(j), want) {
 		t.Fatalf("taak: %s %s %v\n%v", j.Status, j.Error, stepNames(j), logs)
 	}
@@ -285,5 +314,49 @@ func TestHealLooseNextToGalera(t *testing.T) {
 	}
 	if matches, _ := filepath.Glob(filepath.Join(z.roots["ZabbixHa1"], zabbixGalera+".cf-zelfherstel-*")); len(matches) > 0 {
 		t.Errorf("config van ZabbixHa1 gewijzigd: %v", matches)
+	}
+}
+
+// TestHealLooseFails: start de MariaDB van Zabbixproxy niet, dan begint de
+// taak het cluster toch op ZabbixHa1 en mislukt ze daarna met de fout van
+// de proxy.
+func TestHealLooseFails(t *testing.T) {
+	e, c := adminClient(t)
+	z := newZabbixHeal(t, e, c, false, false)
+	z.proxyFails = true
+	key := "mariadb/" + z.cluster.ID
+	reps := z.reports(t, e, c, func(m map[string]healView) bool {
+		return strings.Contains(m[key].codes(), "unit_stopped@Zabbixproxy") && strings.Contains(m[key].codes(), "galera_no_primary")
+	})
+	j, logs := (&healDB{}).healRun(t, c, reps[key])
+	want := []string{"Posities lezen", "ZabbixHa1: het cluster beginnen", "Controleren", "Zabbixproxy: mariadb starten"}
+	if j.Status != "failed" || !slices.Equal(stepNames(j), want) || !strings.Contains(j.Error, "Zabbixproxy") {
+		t.Fatalf("taak: %s %s %v\n%v", j.Status, j.Error, stepNames(j), logs)
+	}
+	if u, _ := z.hosts["ZabbixHa1"].Unit("mariadb"); !u.Active {
+		t.Errorf("ZabbixHa1 niet begonnen: %+v", u)
+	}
+}
+
+// TestHealLooseListedGarb: staat 192.168.10.198 in wsrep_cluster_address van
+// ZabbixHa1, dan telt alleen een garb die draait: een geïnstalleerde maar
+// gestopte garb zegt niet dat het adres van garb is.
+func TestHealLooseListedGarb(t *testing.T) {
+	e, c := adminClient(t)
+	z := newZabbixHeal(t, e, c, false, true)
+	writeFile(t, filepath.Join(z.roots["ZabbixHa1"], zabbixGalera), "[galera]\nwsrep_on = ON\nwsrep_cluster_name = zabbix\n"+
+		"wsrep_cluster_address = gcomm://192.168.10.134,192.168.10.198,192.168.10.135\nwsrep_node_address = 192.168.10.134\n", 0o644)
+	z.hosts["Zabbixproxy"].SetUnit("garb", agenttest.Unit{Enabled: true, Failed: true})
+	key := "mariadb/" + z.cluster.ID
+	reps := z.reports(t, e, c, func(m map[string]healView) bool {
+		return m[key].Plan != nil && strings.HasPrefix(m[key].Plan.Blocked, "Zabbixproxy staat in wsrep_cluster_address van een andere node")
+	})
+	if r := reps[key]; r.Plan.Auto {
+		t.Errorf("garb gestopt: %+v", r.Plan)
+	}
+	z.hosts["Zabbixproxy"].SetUnit("garb", agenttest.Unit{Enabled: true, Active: true})
+	reps = z.reports(t, e, c, func(m map[string]healView) bool { return m[key].Plan != nil && m[key].Plan.Blocked == "" })
+	if r := reps[key]; len(r.Plan.Nodes) != 1 || r.Plan.Nodes[0].Hostname != "ZabbixHa1" || r.Plan.Nodes[0].SetAddress {
+		t.Errorf("garb draait: %+v", r.Plan)
 	}
 }
