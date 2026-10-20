@@ -40,7 +40,7 @@ func (a *Agent) dbPosition(ctx context.Context, req *protocol.DBPositionRequest)
 		vars := keyValues(rows)
 		p.Running = true
 		if !strings.EqualFold(vars["wsrep_on"], "ON") {
-			p.Error = "MariaDB draait zonder Galera"
+			p.Error = galera.NoWsrep
 			return res
 		}
 		rows, err := a.maria(ctx, false, dbsql.MariaPosition)

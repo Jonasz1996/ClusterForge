@@ -252,13 +252,14 @@ func groupForModel(g gen.DatabaseGroup) any {
 	return compact(out)
 }
 
-// groupName is het cluster van een databaseserver, of de node als die in
-// geen cluster zit.
+// groupName is het cluster van een databaseserver, of de node van een
+// losse server, zoals een node zonder cluster of een MariaDB op de
+// scheidsrechter van een cluster.
 func groupName(g gen.DatabaseGroup) string {
-	if g.ClusterName != "" || len(g.Servers) == 0 {
-		return g.ClusterName
+	if _, err := g.NodeId.Get(); (err == nil || g.ClusterName == "") && len(g.Servers) > 0 {
+		return g.Servers[0].Hostname
 	}
-	return g.Servers[0].Hostname
+	return g.ClusterName
 }
 
 // componentRights zijn de gebruikers met hun rechten in de onderdelen

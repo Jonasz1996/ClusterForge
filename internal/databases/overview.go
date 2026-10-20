@@ -32,9 +32,15 @@ const (
 )
 
 // Group is één databasecluster: de servers van één engine in één cluster
-// van ClusterForge, of één losse node zonder cluster.
+// van ClusterForge, of één losse server. Een losse server is een node
+// zonder cluster, of een server op de scheidsrechter van het onderdeel van
+// ClusterForge in een cluster: het onderdeel zet daar geen databaseserver,
+// dus die hoort niet bij de database van het cluster.
 type Group struct {
-	ClusterID   *uuid.UUID
+	ClusterID *uuid.UUID
+	// NodeID is de node van een losse server; nil bij de database van een
+	// cluster.
+	NodeID      *uuid.UUID
 	ClusterName string
 	ClusterSlug string
 	ClusterEnv  string
@@ -57,9 +63,11 @@ type Group struct {
 }
 
 // Key is uniek per groep: engine/<cluster> of engine/node/<node> voor een
-// losse node. Een verhuizing noemt haar bron zo.
+// losse server. Een verhuizing noemt haar bron zo.
 func (g Group) Key() string {
 	switch {
+	case g.NodeID != nil:
+		return g.Engine + "/node/" + g.NodeID.String()
 	case g.ClusterID != nil:
 		return g.Engine + "/" + g.ClusterID.String()
 	case len(g.Servers) > 0:
@@ -151,13 +159,15 @@ func (s *Service) Overview(ctx context.Context) ([]Group, error) {
 	index := map[string]int{}
 	totals := map[uuid.UUID]int{}
 	for _, r := range rows {
-		gk := r.Engine + "/" + r.NodeID.String()
-		if r.ClusterID != nil {
-			gk = r.Engine + "/" + r.ClusterID.String()
+		srv := server(r)
+		g := Group{ClusterID: r.ClusterID, Engine: r.Engine}
+		if r.ClusterID == nil || loose(r, srv) {
+			id := r.NodeID
+			g.NodeID = &id
 		}
+		gk := g.Key()
 		i, ok := index[gk]
 		if !ok {
-			g := Group{ClusterID: r.ClusterID, Engine: r.Engine}
 			if r.ClusterID != nil {
 				g.ClusterName, g.ClusterSlug = deref(r.ClusterName), deref(r.ClusterSlug)
 				if r.ClusterEnvironment.Valid {
@@ -168,7 +178,6 @@ func (s *Service) Overview(ctx context.Context) ([]Group, error) {
 			i = len(groups) - 1
 			index[gk] = i
 		}
-		srv := server(r)
 		totals[srv.NodeID] = int(r.DatabasesTotal)
 		groups[i].Servers = append(groups[i].Servers, srv)
 	}
@@ -200,6 +209,14 @@ func (s *Service) Overview(ctx context.Context) ([]Group, error) {
 		}
 	}
 	return groups, nil
+}
+
+// loose: de server staat op de scheidsrechter van het onderdeel van zijn
+// cluster en doet niet mee in Galera of Patroni, zoals de eigen MariaDB van
+// een Zabbix-proxy. Hij is een losse server en hoort niet bij de database
+// van het cluster.
+func loose(r store.ListDBServersRow, srv Server) bool {
+	return r.Arbiter && srv.Galera == nil && srv.Patroni == nil
 }
 
 func deref(s *string) string {

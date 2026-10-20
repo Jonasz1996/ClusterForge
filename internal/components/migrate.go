@@ -319,8 +319,15 @@ func (s *Service) planMigration(ctx context.Context, source, database string, co
 		Database: database, Clients: []databases.User{}, Targets: []MigrationOption{}, Findings: []Finding{},
 		Accounts: []protocol.DBMigrateAccount{}, NewHosts: []string{}, Connections: []MigrationConnection{}, MoveFindings: []Finding{},
 	}
+	// Een losse server in een cluster, zoals een MariaDB op de
+	// scheidsrechter, heet naar zijn node: de naam van het cluster is die
+	// van zijn database.
+	name := g.ClusterName
+	if g.NodeID != nil {
+		name = ""
+	}
 	p.Source = MigrationSource{
-		Key: source, Name: g.ClusterName, ClusterID: g.ClusterID, Slug: g.ClusterSlug, Environment: g.ClusterEnv, Engine: g.Engine, Kind: g.Kind,
+		Key: source, Name: name, ClusterID: g.ClusterID, Slug: g.ClusterSlug, Environment: g.ClusterEnv, Engine: g.Engine, Kind: g.Kind,
 		Version: g.Version, Summary: g.Summary, Port: port, Servers: []string{},
 	}
 	for _, sv := range g.Servers {
@@ -378,6 +385,10 @@ func (s *Service) planMigration(ctx context.Context, source, database string, co
 		}
 	}
 	for _, c := range comps {
+		// Ook een losse server in een cluster, zoals op de scheidsrechter,
+		// verhuist niet naar de database van dat cluster: zijn apps delen
+		// vaak een gebruiker met die van het cluster (zabbix bij een
+		// Zabbix-proxy), en verhuizen zou het wachtwoord daar overschrijven.
 		if g.ClusterID != nil && c.ClusterID == *g.ClusterID {
 			continue
 		}
@@ -495,7 +506,12 @@ func (s *Service) planMigration(ctx context.Context, source, database string, co
 	oi := slices.IndexFunc(p.Targets, func(o MigrationOption) bool { return o.ComponentID == *componentID })
 	if oi < 0 {
 		if r, err := s.q.GetClusterComponent(ctx, *componentID); err == nil && g.ClusterID != nil && r.ClusterID == *g.ClusterID {
-			add(Blocked, "same", nil, database+" staat al in de database van dit cluster", "")
+			msg := database + " staat al in de database van dit cluster"
+			if g.NodeID != nil {
+				msg = database + " staat op " + p.Source.Name + ", een losse server in dit cluster; naar de database van hetzelfde cluster verhuist ClusterForge niet, " +
+					"want een gebruiker met dezelfde naam, zoals zabbix bij een Zabbix-proxy, zou daar het wachtwoord van de andere app overschrijven"
+			}
+			add(Blocked, "same", nil, msg, "")
 			return p, route, nil
 		}
 		return p, route, &InvalidError{"component", fmt.Sprintf("kies een cluster met een %s van ClusterForge die draait", databases.EngineName(g.Engine))}
@@ -545,8 +561,9 @@ func (s *Service) planMigration(ctx context.Context, source, database string, co
 		}
 	}
 	target.Hosts = nodeAddresses(byID[t.node.NodeID])
+	// De database van het cluster, niet een losse server erin.
 	tg := slices.IndexFunc(groups, func(x databases.Group) bool {
-		return x.ClusterID != nil && *x.ClusterID == opt.ClusterID && x.Engine == g.Engine
+		return x.Key() == g.Engine+"/"+opt.ClusterID.String()
 	})
 	trial := TrialName(database)
 	trialExists := false

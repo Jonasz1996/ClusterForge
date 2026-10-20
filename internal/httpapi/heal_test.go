@@ -20,9 +20,11 @@ import (
 )
 
 type healView struct {
-	Key         string `json:"key"`
-	ClusterName string `json:"cluster_name"`
-	Engine      string `json:"engine"`
+	Key         string  `json:"key"`
+	ClusterName string  `json:"cluster_name"`
+	NodeID      *string `json:"node_id"`
+	Hostname    string  `json:"hostname"`
+	Engine      string  `json:"engine"`
 	Problems    []struct {
 		Code  string   `json:"code"`
 		Level string   `json:"level"`

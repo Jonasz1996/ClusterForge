@@ -6303,10 +6303,13 @@ components:
     HealReport:
       type: object
       description: Zelfherstel voor één database; key is die van DatabaseGroup.
-      required: [key, cluster_id, cluster_name, cluster_slug, cluster_environment, engine, kind, health, problems, plan, last_run, auto]
+      required: [key, cluster_id, node_id, hostname, cluster_name, cluster_slug, cluster_environment, engine, kind, health, problems, plan,
+        last_run, auto]
       properties:
         key: { type: string }
         cluster_id: { type: string, format: uuid, nullable: true }
+        node_id: { type: string, format: uuid, nullable: true, description: "De node van een losse server, zoals bij DatabaseGroup" }
+        hostname: { type: string, description: "De hostname van die node; leeg bij de database van een cluster" }
         cluster_name: { type: string }
         cluster_slug: { type: string }
         cluster_environment:
@@ -6325,7 +6328,7 @@ components:
           allOf: [{ $ref: "#/components/schemas/HealRun" }]
         auto:
           nullable: true
-          description: Zelfherstel vanzelf van het cluster; null bij een losse node.
+          description: Zelfherstel vanzelf van het cluster, ook voor een losse server in een cluster; null bij een node zonder cluster.
           allOf: [{ $ref: "#/components/schemas/HealAuto" }]
     HealAutoSetting:
       type: object
@@ -6403,12 +6406,16 @@ components:
         file: { type: string }
     DatabaseGroup:
       type: object
-      description: Eén databasecluster, de servers van één engine in één cluster, of één losse node.
-      required: [key, cluster_id, cluster_name, cluster_slug, cluster_environment, engine, kind, health, summary, version, servers,
+      description: |
+        Eén databasecluster, de servers van één engine in één cluster, of één losse server: een node zonder cluster, of een server
+        op de scheidsrechter van het onderdeel van ClusterForge in een cluster. Het onderdeel zet daar geen databaseserver, dus die
+        hoort niet bij de database van het cluster.
+      required: [key, cluster_id, node_id, cluster_name, cluster_slug, cluster_environment, engine, kind, health, summary, version, servers,
         databases, databases_from, databases_total]
       properties:
         key: { type: string, description: "Uniek per groep, voor de webinterface" }
         cluster_id: { type: string, format: uuid, nullable: true }
+        node_id: { type: string, format: uuid, nullable: true, description: "De node van een losse server; null bij de database van een cluster" }
         cluster_name: { type: string }
         cluster_slug: { type: string }
         cluster_environment:

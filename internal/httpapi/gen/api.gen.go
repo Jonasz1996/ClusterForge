@@ -5452,7 +5452,9 @@ type DatabaseGalera struct {
 	State string `json:"state"`
 }
 
-// DatabaseGroup Eén databasecluster, de servers van één engine in één cluster, of één losse node.
+// DatabaseGroup Eén databasecluster, de servers van één engine in één cluster, of één losse server: een node zonder cluster, of een server
+// op de scheidsrechter van het onderdeel van ClusterForge in een cluster. Het onderdeel zet daar geen databaseserver, dus die
+// hoort niet bij de database van het cluster.
 type DatabaseGroup struct {
 	ClusterEnvironment nullable.Nullable[Environment]        `json:"cluster_environment"`
 	ClusterId          nullable.Nullable[openapi_types.UUID] `json:"cluster_id"`
@@ -5472,8 +5474,11 @@ type DatabaseGroup struct {
 	Key string `json:"key"`
 
 	// Kind Galera, PostgreSQL met Patroni, een primary met replica's, of losse servers
-	Kind    DatabaseGroupKind `json:"kind"`
-	Servers []DatabaseServer  `json:"servers"`
+	Kind DatabaseGroupKind `json:"kind"`
+
+	// NodeId De node van een losse server; null bij de database van een cluster
+	NodeId  nullable.Nullable[openapi_types.UUID] `json:"node_id"`
+	Servers []DatabaseServer                      `json:"servers"`
 
 	// Summary In één zin hoe het ervoor staat
 	Summary string `json:"summary"`
@@ -7819,7 +7824,7 @@ type HealProblemLevel string
 
 // HealReport Zelfherstel voor één database; key is die van DatabaseGroup.
 type HealReport struct {
-	// Auto Zelfherstel vanzelf van het cluster; null bij een losse node.
+	// Auto Zelfherstel vanzelf van het cluster, ook voor een losse server in een cluster; null bij een node zonder cluster.
 	Auto               nullable.Nullable[HealAuto]           `json:"auto"`
 	ClusterEnvironment nullable.Nullable[Environment]        `json:"cluster_environment"`
 	ClusterId          nullable.Nullable[openapi_types.UUID] `json:"cluster_id"`
@@ -7827,13 +7832,19 @@ type HealReport struct {
 	ClusterSlug        string                                `json:"cluster_slug"`
 	Engine             HealReportEngine                      `json:"engine"`
 	Health             string                                `json:"health"`
-	Key                string                                `json:"key"`
-	Kind               string                                `json:"kind"`
+
+	// Hostname De hostname van die node; leeg bij de database van een cluster
+	Hostname string `json:"hostname"`
+	Key      string `json:"key"`
+	Kind     string `json:"kind"`
 
 	// LastRun De laatste taak heal.run van deze database in het afgelopen etmaal.
-	LastRun  nullable.Nullable[HealRun]  `json:"last_run"`
-	Plan     nullable.Nullable[HealPlan] `json:"plan"`
-	Problems []HealProblem               `json:"problems"`
+	LastRun nullable.Nullable[HealRun] `json:"last_run"`
+
+	// NodeId De node van een losse server, zoals bij DatabaseGroup
+	NodeId   nullable.Nullable[openapi_types.UUID] `json:"node_id"`
+	Plan     nullable.Nullable[HealPlan]           `json:"plan"`
+	Problems []HealProblem                         `json:"problems"`
 }
 
 // HealReportEngine defines model for HealReport.Engine.
