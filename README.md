@@ -777,6 +777,8 @@ De pagina **Databases** toont de MariaDB- en PostgreSQL-servers op je nodes, geg
 - een **primary met replica's**: de bron van elke replica en hoeveel seconden hij achterloopt;
 - een **losse server**.
 
+Een MariaDB of PostgreSQL op de scheidsrechter van een [database op de nodes van een cluster](#een-database-op-de-nodes-van-een-cluster) hoort niet bij die database: de scheidsrechter heeft alleen `garbd` of etcd en geen data. Draait daar een eigen server zonder Galera of Patroni, zoals de MariaDB van een Zabbix-proxy, dan staat die apart als losse server, **MariaDB op <node> in <cluster>**, met haar eigen [Zelfherstel](#zelfherstel).
+
 Bovenaan elk cluster staat in één zin hoe het ervoor staat, zoals "3 van 3 nodes Synced." of "Primary db1 met 2 replica's.". Daaronder de nodes met hun toestand, het aantal verbindingen en wanneer ClusterForge ze het laatst gelezen heeft, en de databases met hun grootte en het aantal tabellen. Een kijker ziet hetzelfde als een beheerder.
 
 ClusterForge leest elke node met een databaseserver elke minuut. Kan het een node niet vragen, dan blijft de laatste stand staan met de reden: agent offline, geen antwoord of agent te oud. Wat er mis is met een database en hoe ClusterForge het herstelt, staat bij elke database onder [Zelfherstel](#zelfherstel).
@@ -1309,11 +1311,13 @@ Elke minuut vraagt ClusterForge elke node met een databaseserver wat er speelt: 
 - **Patroni geeft een verkeerd adres op** (`patroni_wrong_address`): `restapi.connect_address` of `postgresql.connect_address` is geen adres van de node, dus replica's en apps zoeken hem daar.
 - **Niet na te kijken** (`no_inspect`, `patroni_config`): de agent antwoordde niet, is te oud, of vond de config van Patroni niet; de reden staat erbij.
 
+Staat naast een Galera-cluster een MariaDB zonder Galera-config in dezelfde groep (ClusterForge weet dan niet dat haar node de scheidsrechter is, bijvoorbeeld bij een cluster dat je met de hand opzette), dan telt Zelfherstel die server niet als Galera-node: ze komt niet in de adressen van het cluster, wordt niet gestopt om een positie te lezen en telt niet mee bij het beginnen. Staat ze stil, dan start de taak haar eerst als gewone server. Noemt een andere node haar adres in `wsrep_cluster_address` terwijl op haar node geen `garbd` draait, of kan de agent haar config niet lezen, dan begint Zelfherstel het cluster niet: misschien hoort ze er wel bij.
+
 ### Nu herstellen
 
 Onder de problemen staat het **Herstelplan**: de stappen in gewone taal, bij nieuwe adressen een tabel met per node het adres nu, wat het wordt en het bestand, en **mag vanzelf** of **alleen met bevestiging** met de reden. Kan het plan nu niet, dan staat er waarom en is er geen knop: een proces buiten systemd, een Patroni die etcd niet bereikt, een node die niet te bekijken is, een node die nog een volledige kopie (SST) haalt (de rest komt daarna, zodat de donor niet twee kopieën tegelijk geeft), of Galera met MySQL in plaats van MariaDB. Dat laatste begin je zelf op de node met de hoogste seqno, bij Percona XtraDB Cluster met `systemctl start mysql@bootstrap`; daarna sluit Zelfherstel de andere nodes aan.
 
-**Nu herstellen** toont het plan nog eens; op prod tik je de slug in, en het kan alleen met tweestapsverificatie. ClusterForge voert alleen het plan uit dat je zag: veranderde de toestand intussen, dan weigert het en zie je het nieuwe plan. Het herstel is een taak **Zelfherstel: MariaDB van <cluster>** met een stap per node en de uitvoer van elke stap. Per database loopt hoogstens één herstel, en zoals elke taak die iets verandert niet terwijl er een andere taak op het cluster loopt. De taak doet:
+**Nu herstellen** toont het plan nog eens; op prod tik je de slug in, en het kan alleen met tweestapsverificatie. ClusterForge voert alleen het plan uit dat je zag: veranderde de toestand intussen, dan weigert het en zie je het nieuwe plan. Het herstel is een taak **Zelfherstel: MariaDB van <cluster>** (bij een losse server **Zelfherstel: MariaDB op <node>**) met een stap per node en de uitvoer van elke stap. Per database loopt hoogstens één herstel, en zoals elke taak die iets verandert niet terwijl er een andere taak op het cluster loopt. De taak doet:
 
 1. **Galera-adressen bijwerken** op elke node waar ze niet kloppen. De agent zet `wsrep_cluster_address` en `wsrep_node_address` in het bestand waar ze nu staan, na een kopie ernaast als `<bestand>.cf-zelfherstel-<tijd>`, en kijkt met `my_print_defaults` of de nieuwe waarde echt geldt; zo niet, dan zet hij de kopie terug. Een MariaDB die draait, leest het bestand pas bij haar volgende start; ClusterForge herstart haar daarvoor niet.
 2. **Een hangend proces stoppen**: TERM aan de processen in de cgroup van de unit, na een minuut KILL, en nakijken dat ze weg zijn. Een pid dat intussen niet meer bij de unit hoort, krijgt niets.
@@ -1332,12 +1336,13 @@ Op de kaart zet een beheerder per cluster **Vanzelf herstellen op dit cluster** 
 - het Galera-cluster opnieuw beginnen gebeurt hoogstens eens per uur; nog een keer kan alleen met Nu herstellen;
 - na drie mislukte pogingen op rij gaat het op pauze, tot een beheerder het opnieuw aanzet.
 
-Vanzelf mag alleen wat geen data kost: starten wat stilstaat, een hangend proces stoppen, en het Galera-cluster opnieuw beginnen als elke node te bekijken is en geen node te weinig schijf heeft. Adressen wijzigen gebeurt nooit vanzelf, want een fout adres splitst het cluster. Een database op een losse node en een onderdeel van ClusterForge (met zijn eigen [Vanzelf opnieuw starten](#na-een-herstart)) herstelt Zelfherstel ook niet vanzelf. De kaart zegt bij elk plan waarom het nu wel of niet vanzelf gebeurt. Een vanzelf gestarte taak heet **Zelfherstel (vanzelf): …**, en het logboek zegt "ClusterForge herstelt MariaDB van <cluster> vanzelf" met de problemen als reden.
+Vanzelf mag alleen wat geen data kost: starten wat stilstaat, een hangend proces stoppen, en het Galera-cluster opnieuw beginnen als elke node te bekijken is en geen node te weinig schijf heeft. Adressen wijzigen gebeurt nooit vanzelf, want een fout adres splitst het cluster. Een database op een node zonder cluster en een onderdeel van ClusterForge (met zijn eigen [Vanzelf opnieuw starten](#na-een-herstart)) herstelt Zelfherstel ook niet vanzelf. De kaart zegt bij elk plan waarom het nu wel of niet vanzelf gebeurt. Een vanzelf gestarte taak heet **Zelfherstel (vanzelf): …**, en het logboek zegt "ClusterForge herstelt MariaDB van <cluster> vanzelf" met de problemen als reden.
 
 ### Wat Zelfherstel nooit doet
 
 - Een Galera-cluster beginnen als niet elke node antwoordt, op een andere node dan die met de nieuwste data, of als de nodes een andere geschiedenis hebben.
 - Een proces stoppen dat niet in de cgroup van de unit zit.
+- Een MariaDB zonder Galera-config als Galera-node behandelen, zoals een eigen database op de node van de scheidsrechter.
 - Een bestand wijzigen zonder kopie, of een ander bestand dan dat met de Galera-adressen. De enige uitzondering is `safe_to_bootstrap: 1` in `/var/lib/mysql/grastate.dat` van de node die het cluster opnieuw begint, zoals `galera_new_cluster` het vraagt. De config van Patroni en etcd verandert het niet: zet een adres daar zelf goed en herstart patroni, één node tegelijk, of kies bij een onderdeel van ClusterForge Toepassen.
 - Ruimte vrijmaken bij een volle schijf.
 - Apps zoals Nextcloud of keepalived herstellen.

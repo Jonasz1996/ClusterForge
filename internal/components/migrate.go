@@ -319,8 +319,15 @@ func (s *Service) planMigration(ctx context.Context, source, database string, co
 		Database: database, Clients: []databases.User{}, Targets: []MigrationOption{}, Findings: []Finding{},
 		Accounts: []protocol.DBMigrateAccount{}, NewHosts: []string{}, Connections: []MigrationConnection{}, MoveFindings: []Finding{},
 	}
+	// Een losse server in een cluster, zoals een MariaDB op de
+	// scheidsrechter, heet naar zijn node: de naam van het cluster is die
+	// van zijn database.
+	name := g.ClusterName
+	if g.NodeID != nil {
+		name = ""
+	}
 	p.Source = MigrationSource{
-		Key: source, Name: g.ClusterName, ClusterID: g.ClusterID, Slug: g.ClusterSlug, Environment: g.ClusterEnv, Engine: g.Engine, Kind: g.Kind,
+		Key: source, Name: name, ClusterID: g.ClusterID, Slug: g.ClusterSlug, Environment: g.ClusterEnv, Engine: g.Engine, Kind: g.Kind,
 		Version: g.Version, Summary: g.Summary, Port: port, Servers: []string{},
 	}
 	for _, sv := range g.Servers {
@@ -545,8 +552,9 @@ func (s *Service) planMigration(ctx context.Context, source, database string, co
 		}
 	}
 	target.Hosts = nodeAddresses(byID[t.node.NodeID])
+	// De database van het cluster, niet een losse server erin.
 	tg := slices.IndexFunc(groups, func(x databases.Group) bool {
-		return x.ClusterID != nil && *x.ClusterID == opt.ClusterID && x.Engine == g.Engine
+		return x.Key() == g.Engine+"/"+opt.ClusterID.String()
 	})
 	trial := TrialName(database)
 	trialExists := false

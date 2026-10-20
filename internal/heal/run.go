@@ -179,7 +179,7 @@ func problemTitles(r Report) []string {
 
 func what(r Report, g databases.Group) string {
 	name := engineName(g)
-	if r.ClusterID != nil {
+	if r.ClusterID != nil && r.NodeID == nil {
 		return name + " van " + r.ClusterName
 	}
 	if len(g.Servers) > 0 {
@@ -241,9 +241,26 @@ func (s *Service) run(ctx context.Context, j *jobs.Job) (err error) {
 			return err
 		}
 	}
+	// Een losse server naast het Galera-cluster start als gewone server, voor
+	// het cluster: hij hangt er niet van af.
+	var members []PlanNode
+	for _, n := range plan.Nodes {
+		if !n.Loose {
+			members = append(members, n)
+			continue
+		}
+		if !n.Start {
+			continue
+		}
+		if err := j.Step(ctx, n.Hostname+": "+n.Unit+" starten", func(ctx context.Context, st *jobs.Step) error {
+			return s.startServer(ctx, j.ID.String(), st, n, p.Engine)
+		}); err != nil {
+			return err
+		}
+	}
 	switch plan.Action {
 	case ActionRestart:
-		for _, n := range plan.Nodes {
+		for _, n := range members {
 			if !n.Start {
 				continue
 			}
@@ -255,7 +272,12 @@ func (s *Service) run(ctx context.Context, j *jobs.Job) (err error) {
 		}
 		return nil
 	case ActionGalera:
-		return s.runGalera(ctx, j, p)
+		if len(members) == 0 {
+			return nil
+		}
+		gp := p
+		gp.Plan.Nodes = members
+		return s.runGalera(ctx, j, gp)
 	}
 	return fmt.Errorf("onbekende actie %q", plan.Action)
 }
@@ -434,6 +456,8 @@ func (s *Service) runGalera(ctx context.Context, j *jobs.Job, p runParams) error
 			switch {
 			case err != nil:
 				return fmt.Errorf("%s: %w", n.Hostname, err)
+			case g == nil:
+				return fmt.Errorf("%s: %s", n.Hostname, galera.NoWsrep)
 			case !healthy(g, name, want):
 				return fmt.Errorf("%s is %s in een %s component van %d leden; verwacht Synced in Primary met %d", n.Hostname, g.State, g.ClusterStatus, g.ClusterSize, want)
 			}
@@ -481,6 +505,9 @@ func (s *Service) decide(ctx context.Context, id string, st *jobs.Step, p runPar
 		}
 		if pos.Active == "inactive" || pos.Active == "failed" {
 			continue
+		}
+		if pos.Running && pos.Error == galera.NoWsrep {
+			return nil, fmt.Errorf("MariaDB op %s draait zonder Galera (wsrep_on staat uit); ClusterForge stopt die server niet en begint het cluster niet", n.Hostname)
 		}
 		st.Logf("%s: MariaDB stoppen om de positie te lezen", n.Hostname)
 		stop := []templates.Step{{Step: protocol.Step{Service: &protocol.ServiceStep{Name: n.Unit, State: "stopped"}}, Title: "service " + n.Unit}}
@@ -593,7 +620,7 @@ func (s *Service) waitSynced(ctx context.Context, st *jobs.Step, n PlanNode, nam
 		case err != nil:
 			return fmt.Sprintf("%s: %v", n.Hostname, err), false
 		case g == nil:
-			return n.Hostname + ": MariaDB draait zonder Galera", false
+			return n.Hostname + ": " + galera.NoWsrep, false
 		case name != "" && g.ClusterName != name:
 			return fmt.Sprintf("%s doet mee in cluster %s in plaats van %s", n.Hostname, g.ClusterName, name), false
 		}

@@ -301,18 +301,46 @@ func (s *Service) prodOf(ctx context.Context, clusterID uuid.UUID, source string
 	if c.Environment == store.EnvironmentProd {
 		return true, c.Slug, nil
 	}
-	if engine, rest, ok := strings.Cut(source, "/"); ok && engine != "" {
-		if id, err := uuid.Parse(rest); err == nil {
-			c, err := s.q.GetCluster(ctx, id)
-			switch {
-			case err == nil && c.Environment == store.EnvironmentProd:
-				return true, c.Slug, nil
-			case err != nil && !errors.Is(err, pgx.ErrNoRows):
-				return false, "", err
-			}
-		}
+	id, err := s.sourceCluster(ctx, source)
+	if err != nil || id == nil {
+		return false, "", err
+	}
+	switch c, err := s.q.GetCluster(ctx, *id); {
+	case err == nil && c.Environment == store.EnvironmentProd:
+		return true, c.Slug, nil
+	case err != nil && !errors.Is(err, pgx.ErrNoRows):
+		return false, "", err
 	}
 	return false, "", nil
+}
+
+// sourceCluster is het cluster van de oude server source: engine/<cluster>,
+// of bij een losse server (engine/node/<node>) het cluster van zijn node;
+// nil zonder cluster.
+func (s *Service) sourceCluster(ctx context.Context, source string) (*uuid.UUID, error) {
+	engine, rest, ok := strings.Cut(source, "/")
+	if !ok || engine == "" {
+		return nil, nil
+	}
+	n, loose := strings.CutPrefix(rest, "node/")
+	if !loose {
+		if id, err := uuid.Parse(rest); err == nil {
+			return &id, nil
+		}
+		return nil, nil
+	}
+	id, err := uuid.Parse(n)
+	if err != nil {
+		return nil, nil
+	}
+	node, err := s.q.GetNode(ctx, id)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return node.Node.ClusterID, nil
 }
 
 type moveParams struct {

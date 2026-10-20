@@ -1,8 +1,10 @@
 -- name: ListHealNodes :many
 -- De nodes met een agent, met hun adressen uit de laatste heartbeat, voor
--- Zelfherstel.
+-- Zelfherstel. garb: de agent ziet garb, de scheidsrechter van Galera, op
+-- de node.
 SELECT n.id, n.hostname, n.cluster_id, n.primary_ip, a.protocol_version AS agent_protocol, s.heartbeat_at,
-       coalesce(s.addresses, '{}')::text[] AS addresses
+       coalesce(s.addresses, '{}')::text[] AS addresses,
+       (coalesce(s.services ->> 'garb', '') <> '')::boolean AS garb
 FROM nodes n
 JOIN agents a ON a.node_id = n.id AND a.revoked_at IS NULL
 LEFT JOIN node_status s ON s.node_id = n.id
