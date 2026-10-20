@@ -195,7 +195,7 @@ func TestDatabaseReapplyUnfinished(t *testing.T) {
 	data.Store(true)
 	from = since()
 	j = reapply()
-	if j.Status != "failed" || !strings.Contains(j.Error, "op nc1 staan al databases met tabellen") || !strings.Contains(j.Error, "Zelfherstel") {
+	if j.Status != "failed" || !strings.Contains(j.Error, "op nc1 staan al databases met tabellen (zabbix_proef)") || !strings.Contains(j.Error, "Zelfherstel") {
 		t.Fatalf("met data: %s %s", j.Status, j.Error)
 	}
 	if log := stepLog(j, "nc1: MariaDB"); !strings.Contains(log, "databases met tabellen: zabbix_proef") {

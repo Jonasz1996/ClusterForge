@@ -171,7 +171,7 @@ func TestBootstrap(t *testing.T) {
 		t.Errorf("nakijken: %+v %+v", data, data.Command)
 	}
 	if begin.Title != "het Galera-cluster opnieuw beginnen" || begin.Command.Creates != "" || begin.Command.Unless != protocol.DBCheckCommand ||
-		begin.Command.Run != "("+galera.Bootstrap+") && touch /var/lib/clusterforge/galera-nextcloud" {
+		begin.Command.Run != "("+galera.BootstrapAny+") && touch /var/lib/clusterforge/galera-nextcloud" {
 		t.Errorf("opnieuw beginnen: %+v %+v", begin, begin.Command)
 	}
 	if out[i+3].Service == nil || out[i+3].Service.Name != "mariadb" {
@@ -240,6 +240,79 @@ func TestOnlyHolder(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			ok, why := onlyHolder(tc.peers)
 			if ok != tc.ok || why != tc.why {
+				t.Errorf("%v %q, verwacht %v %q", ok, why, tc.ok, tc.why)
+			}
+		})
+	}
+}
+
+// TestPeerOf: een andere datanode telt alleen als zonder data als zijn
+// MariaDB zeker stilstaat en hij zeker nog nooit in een cluster zat.
+func TestPeerOf(t *testing.T) {
+	const clusterUUID = "5c3a1e0e-0000-11f0-9a3b-7e1c2d3f4a5b"
+	stopped := &protocol.DBServer{Active: "failed"}
+	for _, tc := range []struct {
+		name   string
+		srv    *protocol.DBServer
+		err    error
+		pos    *protocol.DBPositionResult
+		posErr error
+		ok     bool
+		why    string
+	}{
+		{"geen MariaDB", nil, nil, nil, nil, true, ""},
+		{"geen grastate.dat", stopped, nil, &protocol.DBPositionResult{Error: galera.NoGrastate}, nil, true, ""},
+		{"uuid van nullen", stopped, nil, &protocol.DBPositionResult{UUID: galera.NoUUID, Seqno: -1, From: protocol.DBFromGrastate}, nil, true, ""},
+		{"zat in een cluster, crash", stopped, nil, &protocol.DBPositionResult{UUID: clusterUUID, Seqno: -1, From: protocol.DBFromGrastate, Error: "MariaDB stopte niet gewoon"}, nil, false,
+			"nc2 zat al in een Galera-cluster en kan nieuwere data hebben"},
+		{"grastate.dat leeg", stopped, nil, &protocol.DBPositionResult{Error: "grastate.dat heeft geen uuid"}, nil, false,
+			"nc2 zegt niet of daar data staat (grastate.dat heeft geen uuid)"},
+		{"grastate.dat niet te lezen", stopped, nil, &protocol.DBPositionResult{Error: "open /var/lib/mysql/grastate.dat: permission denied"}, nil, false,
+			"nc2 zegt niet of daar data staat (open /var/lib/mysql/grastate.dat: permission denied)"},
+		{"positie zonder antwoord", stopped, nil, nil, errors.New("de agent antwoordde niet op tijd"), false, "nc2 zegt niet of daar data staat (de agent antwoordde niet op tijd)"},
+		{"draait intussen", stopped, nil, &protocol.DBPositionResult{Running: true, Error: "status: geen antwoord"}, nil, false, "op nc2 draait MariaDB"},
+		{"start nog (volledige kopie)", &protocol.DBServer{Active: "activating", Error: "geen socket"}, nil, nil, nil, false, "op nc2 draait MariaDB"},
+		{"unit draait, agent kan er niet in", &protocol.DBServer{Active: "active", Error: "Access denied"}, nil, nil, nil, false, "op nc2 draait MariaDB"},
+		{"status zonder antwoord", nil, errors.New("de agent is offline"), nil, nil, false, "nc2 zegt niet of daar data staat (de agent is offline)"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			asked := false
+			p := peerOf("nc2", tc.srv, tc.err, func() (*protocol.DBPositionResult, error) {
+				asked = true
+				if tc.pos == nil && tc.posErr == nil {
+					t.Fatal("positie gevraagd")
+				}
+				return tc.pos, tc.posErr
+			})
+			if ok, why := onlyHolder([]peer{p}); ok != tc.ok || why != tc.why {
+				t.Errorf("%v %q, verwacht %v %q (%+v, positie gevraagd: %v)", ok, why, tc.ok, tc.why, p, asked)
+			}
+		})
+	}
+}
+
+// TestOutside: de eerste node begint het cluster alleen opnieuw als hij
+// zeker niet meer in een Primary component zit; een donor doet nog mee.
+func TestOutside(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		srv  *protocol.DBServer
+		err  error
+		ok   bool
+		why  string
+	}{
+		{"geen MariaDB", nil, nil, true, ""},
+		{"gestopt na een fout", &protocol.DBServer{Active: "failed"}, nil, true, ""},
+		{"gestopt", &protocol.DBServer{Active: "inactive"}, nil, true, ""},
+		{"draait zonder Galera", &protocol.DBServer{Active: "active", Running: true}, nil, true, ""},
+		{"non-Primary", &protocol.DBServer{Active: "active", Running: true, Galera: &protocol.DBGalera{ClusterName: "zabbix", ClusterStatus: "non-Primary", State: "Initialized"}}, nil, true, ""},
+		{"donor", &protocol.DBServer{Active: "active", Running: true, Galera: &protocol.DBGalera{ClusterName: "zabbix", ClusterStatus: "Primary", State: "Donor/Desynced"}}, nil, false,
+			"MariaDB op ZabbixHa1 zit nog in een Primary component (Donor/Desynced)"},
+		{"start nog", &protocol.DBServer{Active: "activating"}, nil, false, "MariaDB op ZabbixHa1 is activating"},
+		{"zonder antwoord", nil, errors.New("de agent is offline"), false, "ZabbixHa1 zegt niet hoe MariaDB ervoor staat (de agent is offline)"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if ok, why := outside(tc.srv, tc.err, "ZabbixHa1"); ok != tc.ok || why != tc.why {
 				t.Errorf("%v %q, verwacht %v %q", ok, why, tc.ok, tc.why)
 			}
 		})

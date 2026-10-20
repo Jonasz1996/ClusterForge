@@ -580,8 +580,9 @@ function ReapplyDialog({ c, comp, onClose }: { c: ClusterDetail; comp: ClusterCo
             veranderde, herstart MariaDB en ClusterForge wacht tot hij weer Synced is voor hij verder gaat. De andere nodes
             blijven draaien, dus de database blijft bereikbaar. Doet een node als enige mee, dan herstart hij niet; zijn nieuwe
             configuratie geldt bij zijn volgende start. Kwam de uitrol eerder niet af en draait er geen cluster meer, dan begint
-            de eerste node het opnieuw, behalve als daar al databases met tabellen staan; dan vraagt ClusterForge je dat met
-            Zelfherstel te bevestigen.
+            de eerste node het opnieuw, behalve als daar al databases met tabellen staan, of als een andere node data van het
+            cluster kan hebben (daar draait MariaDB, of hij zat al in het cluster). Dan begint de taak niets: begin het cluster
+            met Zelfherstel (Nu herstellen), dat eerst de posities vergelijkt, en kies daarna opnieuw Opnieuw toepassen.
           </p>
         )}
         {prod && <ProdConfirm slug={c.slug} value={confirm} onChange={setConfirm} />}

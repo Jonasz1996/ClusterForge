@@ -1,6 +1,7 @@
 package components
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -208,7 +209,11 @@ func (s *Service) applyData(ctx context.Context, j *jobs.Job, st *jobs.Step, r *
 	if err != nil {
 		return err
 	}
-	before, _ := s.galera(ctx, n.NodeID)
+	srv, srvErr := s.mariadb(ctx, n.NodeID)
+	var before *protocol.DBGalera
+	if srvErr == nil && srv != nil && srv.Running {
+		before = srv.Galera
+	}
 	member := healthy(before, slug, 1)
 	// again: de eerste node begint het cluster ook opnieuw als hij het
 	// merkteken van een eerdere poging heeft.
@@ -228,7 +233,9 @@ func (s *Service) applyData(ctx context.Context, j *jobs.Job, st *jobs.Step, r *
 			// opnieuw; anders kan een andere node nieuwere data hebben.
 			if !member && r.comp.AppliedRevision == nil {
 				var why string
-				if again, why = onlyHolder(s.peers(ctx, r.spec, n.NodeID)); !again {
+				if again, why = outside(srv, srvErr, n.Hostname); !again {
+					st.Logf("zat %s al in het cluster, dan begint de taak het daar niet opnieuw: %s", n.Hostname, why)
+				} else if again, why = onlyHolder(s.peers(ctx, r.spec, n.NodeID)); !again {
 					st.Logf("zat %s al in het cluster, dan begint de taak het daar niet opnieuw: %s. Begin het dan met Zelfherstel op de pagina Databases (Nu herstellen), dat eerst de positie van elke node vergelijkt", n.Hostname, why)
 				}
 			}
@@ -240,11 +247,25 @@ func (s *Service) applyData(ctx context.Context, j *jobs.Job, st *jobs.Step, r *
 			}
 		}
 	}
-	changed, err := deploy.ApplySteps(ctx, s.bus, options(ctx, j, st, n, "", s.Retry), steps)
+	o := options(ctx, j, st, n, "", s.Retry)
+	// tables zijn de databases die de stap dataTitle vond.
+	var tables string
+	if again {
+		logf := o.Logf
+		o.Logf = func(format string, a ...any) {
+			line := fmt.Sprintf(format, a...)
+			if v, ok := strings.CutPrefix(strings.TrimSpace(line), tablesPrefix); ok {
+				tables = strings.TrimSpace(v)
+			}
+			logf("%s", line)
+		}
+	}
+	changed, err := deploy.ApplySteps(ctx, s.bus, o, steps)
 	if err != nil {
-		if again && strings.HasPrefix(err.Error(), dataTitle+": ") {
-			return fmt.Errorf("op %s staan al databases met tabellen; hun namen staan hierboven. ClusterForge begint het cluster daar niet zonder je bevestiging opnieuw: "+
-				"die databases worden dan de data van het cluster, en de andere nodes krijgen er een kopie van. Wil je dat, begin het cluster dan met Zelfherstel op de pagina Databases (Nu herstellen) en kies daarna opnieuw Opnieuw toepassen", n.Hostname)
+		if again && tables != "" && strings.HasPrefix(err.Error(), dataTitle+": ") {
+			return fmt.Errorf("op %s staan al databases met tabellen (%s). ClusterForge begint het cluster daar niet zonder je bevestiging opnieuw: "+
+				"die databases worden dan de data van het cluster, en de andere nodes krijgen er een kopie van. Wil je dat, begin het cluster dan met Zelfherstel op de pagina Databases (Nu herstellen) en kies daarna opnieuw Opnieuw toepassen",
+				n.Hostname, strings.Join(strings.Fields(tables), ", "))
 		}
 		return err
 	}
@@ -304,25 +325,61 @@ func (s *Service) peers(ctx context.Context, spec Spec, self uuid.UUID) []peer {
 		if n.Role != RoleData || n.NodeID == self {
 			continue
 		}
-		p := peer{host: n.Hostname}
 		srv, err := s.mariadb(ctx, n.NodeID)
-		switch {
-		case err != nil:
-			p.err = err
-		case srv != nil:
-			p.server, p.running = true, srv.Running
-			if !srv.Running {
-				pos, err := s.position(ctx, n, false)
-				if err != nil {
-					p.err = err
-				} else {
-					p.uuid = pos.UUID
-				}
-			}
-		}
-		out = append(out, p)
+		out = append(out, peerOf(n.Hostname, srv, err, func() (*protocol.DBPositionResult, error) { return s.position(ctx, n, false) }))
 	}
 	return out
+}
+
+// peerOf maakt een peer van de status van zijn MariaDB, en van zijn
+// positie als die stilstaat. Een unit die nog draait of start, telt als
+// draaiend, ook als de agent er niet in kan; een positie die om een andere
+// reden onbekend is dan dat de node nog nooit in een cluster zat, zegt niet
+// of er data staat.
+func peerOf(host string, srv *protocol.DBServer, err error, position func() (*protocol.DBPositionResult, error)) peer {
+	p := peer{host: host}
+	switch {
+	case err != nil:
+		p.err = err
+		return p
+	case srv == nil:
+		return p
+	}
+	p.server = true
+	if srv.Running || srv.Active == "active" || srv.Active == "activating" || srv.Active == "reloading" {
+		p.running = true
+		return p
+	}
+	pos, err := position()
+	switch {
+	case err != nil:
+		p.err = err
+	case pos.Running:
+		p.running = true
+	case pos.UUID == "" && !galerapkg.NeverInCluster(pos.UUID, pos.Error):
+		p.err = errors.New(cmp.Or(pos.Error, "de agent gaf geen positie"))
+	default:
+		p.uuid = pos.UUID
+	}
+	return p
+}
+
+// outside zegt of MariaDB op de eerste node zeker niet in een Primary
+// component zit: er staat geen MariaDB, hij staat stil, of hij draait
+// buiten een Primary component. Anders zegt why waarom niet; een donor
+// doet bijvoorbeeld nog mee, ook al is hij niet Synced.
+func outside(srv *protocol.DBServer, err error, host string) (ok bool, why string) {
+	switch {
+	case err != nil:
+		return false, fmt.Sprintf("%s zegt niet hoe MariaDB ervoor staat (%v)", host, err)
+	case srv == nil:
+		return true, ""
+	case srv.Running && srv.Galera != nil && srv.Galera.ClusterStatus == "Primary":
+		return false, fmt.Sprintf("MariaDB op %s zit nog in een Primary component (%s)", host, cmp.Or(srv.Galera.State, "niet Synced"))
+	case srv.Running, srv.Active == "inactive", srv.Active == "failed":
+		return true, ""
+	}
+	return false, fmt.Sprintf("MariaDB op %s is %s", host, cmp.Or(srv.Active, "in een onbekende toestand"))
 }
 
 // onlyHolder zegt of de eerste node als enige data van het cluster kan
@@ -376,8 +433,12 @@ func (s *Service) applyArbiter(ctx context.Context, j *jobs.Job, st *jobs.Step, 
 }
 
 // dataTitle is de stap die nakijkt of er geen databases met tabellen op de
-// eerste node staan, voor hij het cluster opnieuw begint.
-const dataTitle = "nakijken of er geen databases met tabellen staan"
+// eerste node staan, voor hij het cluster opnieuw begint. Vindt ze er,
+// dan schrijft ze tablesPrefix met hun namen.
+const (
+	dataTitle    = "nakijken of er geen databases met tabellen staan"
+	tablesPrefix = "databases met tabellen: "
+)
 
 // userDatabases zet de databases met tabellen in de datamap van MariaDB op
 // één regel, zonder die van MariaDB zelf. Een database met alleen db.opt is
@@ -410,10 +471,10 @@ func bootstrap(steps []templates.Step, slug string, member, again bool) ([]templ
 	// slaan deze twee over.
 	extra := []templates.Step{
 		{Step: protocol.Step{Command: &protocol.CommandStep{
-			Run:    `echo "databases met tabellen: $(` + userDatabases + `)"; exit 3`,
+			Run:    `echo "` + tablesPrefix + `$(` + userDatabases + `)"; exit 3`,
 			Unless: protocol.DBCheckCommand + ` || [ -z "$(` + userDatabases + `)" ]`,
 		}}, Title: dataTitle},
-		{Step: protocol.Step{Command: &protocol.CommandStep{Run: "(" + galerapkg.Bootstrap + ") && touch " + m, Unless: protocol.DBCheckCommand}},
+		{Step: protocol.Step{Command: &protocol.CommandStep{Run: "(" + galerapkg.BootstrapAny + ") && touch " + m, Unless: protocol.DBCheckCommand}},
 			Title: "het Galera-cluster opnieuw beginnen"},
 	}
 	return slices.Insert(out, i+1, extra...), nil

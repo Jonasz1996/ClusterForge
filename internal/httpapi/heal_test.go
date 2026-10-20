@@ -593,6 +593,54 @@ func TestHealRunNoGaleraScripts(t *testing.T) {
 	}
 }
 
+// TestHealRunNeverJoined: db3 kreeg MariaDB van een uitrol die niet af
+// kwam en zat nog nooit in het cluster (geen grastate.dat). Zelfherstel
+// telt hem niet mee voor de nieuwste data, begint het cluster op db1 en
+// laat db3 daarna aansluiten met een volledige kopie.
+func TestHealRunNeverJoined(t *testing.T) {
+	e, c := adminClient(t)
+	d := newHealDB(t, e, c, func(i int, h *agenttest.Host) {
+		if i == 2 {
+			h.SetUnit("mariadb", agenttest.Unit{Failed: true})
+			h.MariaDB.Down, h.MariaDB.Galera, h.MariaDB.Uptime = true, nil, 0
+		}
+	})
+	r := d.heal(t, e, c, func(r healView) bool { return strings.Contains(r.codes(), "galera_no_primary@db1+db2+db3") })
+	if r.Plan == nil || r.Plan.Blocked != "" || r.Plan.Auto || !slices.ContainsFunc(r.Plan.Steps, func(s string) bool {
+		return strings.Contains(s, "Een node die nog nooit in een Galera-cluster zat, telt daarbij niet mee")
+	}) {
+		t.Fatalf("plan: %+v", r.Plan)
+	}
+	var j job
+	if s := c.do("POST", "/api/v1/heal/run", map[string]any{"key": r.Key, "hash": r.Plan.Hash}, &j); s != http.StatusAccepted {
+		t.Fatalf("herstellen: %d", s)
+	}
+	j = waitJobLong(t, c, j.ID)
+	logs := map[string]string{}
+	for _, st := range j.Steps {
+		logs[st.Name] = strings.Join(st.Log, "\n")
+	}
+	if j.Status != "succeeded" {
+		t.Fatalf("taak: %s %s\n%v", j.Status, j.Error, logs)
+	}
+	if l := logs["Posities lezen"]; !strings.Contains(l, "db3 zat nog nooit in een Galera-cluster: telt niet mee voor de nieuwste data en krijgt bij het aansluiten een volledige kopie") ||
+		!strings.Contains(l, "db1 heeft de nieuwste data (seqno 42) en begint het cluster") || strings.Contains(l, "db3: seqno") {
+		t.Errorf("posities:\n%s", l)
+	}
+	if l := logs["Controleren"]; !strings.Contains(l, "3 nodes Synced in één cluster") {
+		t.Errorf("controle:\n%s", l)
+	}
+	d.mu.Lock()
+	began, members := slices.Clone(d.began), slices.Clone(d.members)
+	d.mu.Unlock()
+	if !slices.Equal(began, []string{"db1"}) || len(members) != 3 {
+		t.Fatalf("het cluster begon op %v, leden %v", began, members)
+	}
+	if slices.ContainsFunc(d.hosts[2].Calls(), func(c string) bool { return strings.Contains(c, "wsrep-recover") }) {
+		t.Errorf("db3 las een positie uit InnoDB: %v", d.hosts[2].Calls())
+	}
+}
+
 // TestHealRunNoGaleraScriptsNewest: heeft de node zonder
 // mariadb-server-galera de nieuwste data, dan begint Zelfherstel het cluster
 // niet, ook niet op een andere node. Heeft een node met het pakket dezelfde

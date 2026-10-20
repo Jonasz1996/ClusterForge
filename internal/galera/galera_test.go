@@ -98,6 +98,7 @@ func TestChoose(t *testing.T) {
 // TestBootstrap draait Bootstrap in een echte shell, met systemctl, sed en
 // galera_new_cluster als scripts die alleen opschrijven dat ze draaiden.
 func TestBootstrap(t *testing.T) {
+	script := Bootstrap
 	run := func(t *testing.T, tools map[string]int) (log, stderr string, code int) {
 		t.Helper()
 		dir := t.TempDir()
@@ -108,7 +109,7 @@ func TestBootstrap(t *testing.T) {
 				t.Fatal(err)
 			}
 		}
-		cmd := exec.Command("/bin/sh", "-c", Bootstrap)
+		cmd := exec.Command("/bin/sh", "-c", script)
 		cmd.Env = []string{"PATH=" + dir}
 		var errb strings.Builder
 		cmd.Stderr = &errb
@@ -153,6 +154,40 @@ func TestBootstrap(t *testing.T) {
 			t.Fatalf("code %d, log %q", code, log)
 		}
 	})
+	// BootstrapAny op een node zonder grastate.dat: niets veilig te
+	// verklaren, galera_new_cluster begint een nieuwe geschiedenis.
+	t.Run("BootstrapAny zonder grastate.dat", func(t *testing.T) {
+		if _, err := os.Stat(GrastateFile); err == nil {
+			t.Skip(GrastateFile + " staat op deze machine")
+		}
+		script = BootstrapAny
+		defer func() { script = Bootstrap }()
+		log, _, code := run(t, map[string]int{"systemctl": 0, "sed": 2, "rm": 0, "galera_new_cluster": 0})
+		if code != 0 || log != stop+"galera_new_cluster \n"+unset {
+			t.Fatalf("code %d, log %q", code, log)
+		}
+	})
+	// Met grastate.dat moet de sed lukken, net als bij Bootstrap.
+	t.Run("BootstrapAny met grastate.dat", func(t *testing.T) {
+		f := filepath.Join(t.TempDir(), "grastate.dat")
+		if err := os.WriteFile(f, []byte("safe_to_bootstrap: 0\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		script = strings.ReplaceAll(BootstrapAny, GrastateFile, f)
+		defer func() { script = Bootstrap }()
+		sedF := strings.ReplaceAll(sed, GrastateFile, f)
+		log, _, code := run(t, map[string]int{"systemctl": 0, "sed": 2, "rm": 0, "galera_new_cluster": 0})
+		if code != 2 || log != stop+sedF+unset {
+			t.Fatalf("sed mislukt: code %d, log %q", code, log)
+		}
+		log, _, code = run(t, map[string]int{"systemctl": 0, "sed": 0, "rm": 0, "galera_new_cluster": 0})
+		if code != 0 || log != stop+sedF+"galera_new_cluster \n"+unset {
+			t.Fatalf("gelukt: code %d, log %q", code, log)
+		}
+	})
+	if !strings.Contains(BootstrapAny, SafeToBootstrap) || strings.Replace(BootstrapAny, "{ [ ! -e "+GrastateFile+" ] || "+SafeToBootstrap+"; }", SafeToBootstrap, 1) != Bootstrap {
+		t.Errorf("BootstrapAny wijkt meer af van Bootstrap dan de controle op %s:\n%s", GrastateFile, BootstrapAny)
+	}
 }
 
 func TestViaNote(t *testing.T) {

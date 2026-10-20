@@ -66,7 +66,7 @@ func (a *Agent) dbPosition(ctx context.Context, req *protocol.DBPositionRequest)
 	b, err := os.ReadFile(path)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
-		p.Error = "deze node was nog nooit in een Galera-cluster: " + galera.GrastateFile + " ontbreekt"
+		p.Error = galera.NoGrastate
 		return res
 	case err != nil:
 		p.Error = err.Error()

@@ -419,7 +419,7 @@ func Diagnose(in Input) Report {
 		p.Steps = append(p.Steps,
 			"MariaDB stoppen op elke node"+killNote(p.Nodes)+", zodat Galera de positie (seqno) van elke node vastlegt.",
 			"De posities lezen uit grastate.dat, of na een crash uit InnoDB met galera_recovery (of mariadbd --wsrep-recover waar dat script ontbreekt).",
-			"Het cluster beginnen op de node met de hoogste seqno (galera_new_cluster). Zijn de posities onbekend of hebben de nodes een andere geschiedenis, dan stopt de taak zonder te beginnen.",
+			"Het cluster beginnen op de node met de hoogste seqno (galera_new_cluster). Een node die nog nooit in een Galera-cluster zat, telt daarbij niet mee en krijgt bij het aansluiten een volledige kopie. Zijn de andere posities onbekend of hebben de nodes een andere geschiedenis, dan stopt de taak zonder te beginnen.",
 			"De andere nodes een voor een starten; elke node sluit aan en haalt de ontbrekende data (IST of een volledige kopie), en de taak wacht tot hij Synced is.")
 		if len(noTools) > 0 {
 			p.Steps = append(p.Steps, noToolsStep(noTools, true))
@@ -532,15 +532,15 @@ func Diagnose(in Input) Report {
 // unfinishedWhy legt uit wat een uitrol die niet af kwam betekent en hoe hij
 // af komt.
 func unfinishedWhy(name string, galera bool, u *Unfinished) string {
-	s := "ClusterForge zet " + name + " op dit cluster, maar de laatste uitrol (Database toevoegen of Opnieuw toepassen) stopte"
+	s := "ClusterForge zet " + name + " op dit cluster, maar die is nog nooit helemaal uitgerold: de laatste uitrol (Database toevoegen of Opnieuw toepassen) stopte"
 	if u.Error != "" {
 		s += ": " + strings.TrimSuffix(u.Error, ".")
 	}
 	s += ". Een node waar " + name + " nog niet op staat, ziet Zelfherstel niet, en vanzelf herstellen wacht tot de uitrol af is. " +
 		"Kies Opnieuw toepassen bij de database op de pagina van het cluster: dat installeert " + name + " waar het nog ontbreekt en laat elke node aansluiten."
 	if galera {
-		s += " Draait het cluster niet meer, dan begint de eerste node het opnieuw, behalve als er al databases met tabellen op staan of als een andere node al in het cluster zat; " +
-			"begin het dan hier met Nu herstellen en kies daarna Opnieuw toepassen."
+		s += " Draait het cluster niet meer, dan begint de eerste node het opnieuw, behalve als er al databases met tabellen op staan, of als een andere node MariaDB draait, " +
+			"niet antwoordt of al in het cluster zat; begin het dan hier met Nu herstellen en kies daarna Opnieuw toepassen."
 	}
 	return s
 }

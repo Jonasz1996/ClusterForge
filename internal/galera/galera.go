@@ -71,11 +71,31 @@ const NewClusterGone = "! systemctl show-environment 2>/dev/null | grep -q '^" +
 // systemd haalt bij het starten zelf de positie uit InnoDB als grastate.dat
 // die niet heeft. Zonder galera_new_cluster verandert het niets. Daarna gaat
 // NewClusterVar weg, ook als galera_new_cluster mislukte.
-const Bootstrap = "command -v galera_new_cluster >/dev/null || { echo '" + NoNewCluster + "' >&2; exit 1; }; " +
-	"systemctl stop mariadb; " + SafeToBootstrap + " && galera_new_cluster; rc=$?; " + ClearNewCluster + "; exit $rc"
+const Bootstrap = bootstrapStart + SafeToBootstrap + bootstrapEnd
+
+// BootstrapAny is Bootstrap voor een node die misschien nog nooit in een
+// cluster zat: zonder GrastateFile is er niets veilig te verklaren, en
+// begint galera_new_cluster een nieuwe geschiedenis.
+const BootstrapAny = bootstrapStart + "{ [ ! -e " + GrastateFile + " ] || " + SafeToBootstrap + "; }" + bootstrapEnd
+
+const (
+	bootstrapStart = "command -v galera_new_cluster >/dev/null || { echo '" + NoNewCluster + "' >&2; exit 1; }; systemctl stop mariadb; "
+	bootstrapEnd   = " && galera_new_cluster; rc=$?; " + ClearNewCluster + "; exit $rc"
+)
 
 // NoUUID is de uuid van een node die nog nooit in een cluster zat.
 const NoUUID = "00000000-0000-0000-0000-000000000000"
+
+// NoGrastate is de fout van de positie van een node zonder GrastateFile:
+// MariaDB draaide daar nog nooit met Galera.
+const NoGrastate = "deze node was nog nooit in een Galera-cluster: " + GrastateFile + " ontbreekt"
+
+// NeverInCluster is true als een positie zegt dat de node nog nooit in een
+// Galera-cluster zat: GrastateFile ontbreekt, of heeft geen geschiedenis.
+// Een positie die om een andere reden onbekend is, telt niet.
+func NeverInCluster(uuid, err string) bool {
+	return uuid == NoUUID || uuid == "" && err == NoGrastate
+}
 
 // Position is tot waar een node de data van het cluster heeft: de uuid van
 // de geschiedenis van het cluster en het volgnummer van de laatste
