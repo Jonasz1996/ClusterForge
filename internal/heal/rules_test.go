@@ -431,6 +431,193 @@ func TestDiagnoseUnfinished(t *testing.T) {
 	}
 }
 
+// zabbixProxy is zabbix() met Zabbixproxy erbij: de scheidsrechter van het
+// cluster, met zijn eigen MariaDB zonder Galera-config voor de Zabbix-proxy.
+// Op 20 oktober zag Zelfherstel die als Galera-node: het zette zijn adres in
+// wsrep_cluster_address van ZabbixHa1 en stopte hem om de positie te lezen.
+func zabbixProxy() Input {
+	in := zabbix()
+	id := uuid.New()
+	in.Group.Servers = append(in.Group.Servers, databases.Server{NodeID: id, Hostname: "Zabbixproxy", Unit: "mariadb", Active: "active", Running: true, Version: "11.8.3"})
+	in.Nodes[id] = Node{ID: id, Hostname: "Zabbixproxy", Protocol: protocol.Version, Online: true, Addresses: []string{"192.168.10.198"},
+		Inspect: &protocol.HealEngine{Engine: protocol.DBMariaDB, Unit: "mariadb", Active: "active", Enabled: "enabled", DataDir: "/var/lib/mysql",
+			DataFree: 10 << 30, DataTotal: 20 << 30, Processes: []protocol.HealProcess{{PID: 812, Name: "mariadbd", Unit: "mariadb", AgeSeconds: 3600}}}}
+	in.Known["192.168.10.198"] = "Zabbixproxy"
+	return in
+}
+
+// stop zet de server van host stil, zoals systemd na een fout.
+func stop(in *Input, host string) {
+	i := slices.IndexFunc(in.Group.Servers, func(s databases.Server) bool { return s.Hostname == host })
+	srv := &in.Group.Servers[i]
+	srv.Running, srv.Active, srv.Galera = false, "failed", nil
+	n := in.Nodes[srv.NodeID]
+	n.Inspect.Active, n.Inspect.Result, n.Inspect.Processes = "failed", "exit-code", nil
+	in.Nodes[srv.NodeID] = n
+}
+
+func nodeOf(in Input, host string) Node {
+	i := slices.IndexFunc(in.Group.Servers, func(s databases.Server) bool { return s.Hostname == host })
+	return in.Nodes[in.Group.Servers[i].NodeID]
+}
+
+func TestDiagnoseLooseServer(t *testing.T) {
+	// Draait alles, dan is er niets te doen: Zabbixproxy hoort niet bij het
+	// cluster en ontbreekt dus niet in wsrep_cluster_address.
+	in := zabbixProxy()
+	if r := Diagnose(in); codes(r) != "component_unfinished@ZabbixHa1" || r.Plan != nil {
+		t.Fatalf("draait: %s %+v", codes(r), r.Plan)
+	}
+
+	// Staat ZabbixHa1 stil, dan begint het plan het cluster alleen op
+	// ZabbixHa1; Zabbixproxy blijft draaien.
+	stop(&in, "ZabbixHa1")
+	in.Group.Kind, in.Group.Health = databases.KindSingle, databases.HealthWarning
+	r := Diagnose(in)
+	if codes(r) != "unit_stopped@ZabbixHa1 component_unfinished@ZabbixHa1 galera_no_primary@ZabbixHa1" {
+		t.Fatalf("ZabbixHa1 stil: %s", codes(r))
+	}
+	pl := r.Plan
+	if pl == nil || pl.Action != ActionGalera || pl.Blocked != "" || len(pl.Nodes) != 1 || pl.Nodes[0].Hostname != "ZabbixHa1" || pl.Nodes[0].SetAddress {
+		t.Fatalf("plan: %+v", pl)
+	}
+	if slices.ContainsFunc(pl.Steps, func(s string) bool { return strings.Contains(s, "Zabbixproxy") }) {
+		t.Errorf("stappen noemen Zabbixproxy: %q", pl.Steps)
+	}
+
+	// Staat Zabbixproxy ook stil, dan start de taak hem als gewone server,
+	// voor het cluster.
+	stop(&in, "Zabbixproxy")
+	r = Diagnose(in)
+	if !strings.Contains(codes(r), "unit_stopped@Zabbixproxy") || strings.Contains(codes(r), "galera_no_primary@ZabbixHa1+Zabbixproxy") {
+		t.Fatalf("beide stil: %s", codes(r))
+	}
+	pl = r.Plan
+	if pl == nil || len(pl.Nodes) != 2 || pl.Nodes[0].Hostname != "ZabbixHa1" || pl.Nodes[0].Loose ||
+		pl.Nodes[1].Hostname != "Zabbixproxy" || !pl.Nodes[1].Loose || !pl.Nodes[1].Start || pl.Nodes[1].Unit != "mariadb" {
+		t.Fatalf("plan: %+v", pl)
+	}
+	if first := pl.Steps[0]; !strings.HasPrefix(first, "Op Zabbixproxy MariaDB starten en wachten tot hij antwoordt.") || !strings.Contains(first, "zonder Galera-config") ||
+		slices.ContainsFunc(pl.Steps[1:], func(s string) bool { return strings.Contains(s, "Zabbixproxy") }) {
+		t.Errorf("stappen: %q", pl.Steps)
+	}
+	in.Unfinished = nil
+	if pl := Diagnose(in).Plan; pl == nil || !pl.Auto {
+		t.Errorf("vanzelf: %+v", pl)
+	}
+	// Een bijna volle schijf op Zabbixproxy: dan niet vanzelf.
+	nodeOf(in, "Zabbixproxy").Inspect.DataFree = 100 << 20
+	if pl := Diagnose(in).Plan; pl == nil || pl.Auto || pl.AutoWhy != "Een node heeft te weinig vrije ruimte voor een volledige kopie." {
+		t.Errorf("volle schijf: %+v", pl)
+	}
+	nodeOf(in, "Zabbixproxy").Inspect.DataFree = 10 << 30
+
+	// Draait ZabbixHa1 weer, dan start het plan alleen Zabbixproxy; vanzelf
+	// mag dat zodra de uitrol af is.
+	in = zabbixProxy()
+	stop(&in, "Zabbixproxy")
+	r = Diagnose(in)
+	pl = r.Plan
+	if pl == nil || pl.Action != ActionGalera || pl.Auto || len(pl.Nodes) != 2 || !pl.Nodes[0].Primary || !pl.Nodes[1].Loose || len(pl.Steps) != 1 {
+		t.Fatalf("alleen Zabbixproxy: %s %+v", codes(r), pl)
+	}
+	in.Unfinished = nil
+	if pl := Diagnose(in).Plan; pl == nil || !pl.Auto || pl.AutoWhy != "Alleen starten van wat stilstaat; er gaat geen data verloren." {
+		t.Errorf("vanzelf: %+v", pl)
+	}
+
+	// Een proces buiten systemd op Zabbixproxy houdt het cluster niet
+	// tegen; Zabbixproxy start de taak dan niet.
+	in = zabbixProxy()
+	stop(&in, "ZabbixHa1")
+	stop(&in, "Zabbixproxy")
+	nodeOf(in, "Zabbixproxy").Inspect.Processes = []protocol.HealProcess{{PID: 900, Name: "mariadbd"}}
+	r = Diagnose(in)
+	if pl := r.Plan; !strings.Contains(codes(r), "process_outside_unit@Zabbixproxy") || pl == nil || pl.Blocked != "" || len(pl.Nodes) != 1 {
+		t.Errorf("buiten systemd: %s %+v", codes(r), r.Plan)
+	}
+}
+
+func TestDiagnoseLooseListed(t *testing.T) {
+	// Na de mislukte taak van 20 oktober staat 192.168.10.198 in
+	// wsrep_cluster_address van ZabbixHa1. Zonder garb op Zabbixproxy kan
+	// die een Galera-node zijn die zijn config kwijt is: dan geen plan.
+	in := zabbixProxy()
+	stop(&in, "ZabbixHa1")
+	nodeOf(in, "ZabbixHa1").Inspect.Galera.ClusterAddress = "gcomm://192.168.10.134,192.168.10.198,192.168.10.135"
+	r := Diagnose(in)
+	if pl := r.Plan; pl == nil || !strings.HasPrefix(pl.Blocked, "Zabbixproxy staat in wsrep_cluster_address van een andere node") || pl.Auto {
+		t.Fatalf("zonder garb: %s %+v", codes(r), r.Plan)
+	}
+
+	// Met garb, de scheidsrechter, op Zabbixproxy is dat adres dat van garb:
+	// het plan begint het cluster op ZabbixHa1 en laat het adres staan.
+	n := nodeOf(in, "Zabbixproxy")
+	n.Garb = true
+	in.Nodes[n.ID] = n
+	r = Diagnose(in)
+	if pl := r.Plan; pl == nil || pl.Blocked != "" || len(pl.Nodes) != 1 || pl.Nodes[0].Hostname != "ZabbixHa1" || pl.Nodes[0].SetAddress || strings.Contains(codes(r), CodeWrongAddress) {
+		t.Fatalf("met garb: %s %+v", codes(r), r.Plan)
+	}
+
+	// Kan de agent de config van Zabbixproxy niet lezen, dan weet
+	// Zelfherstel niet wat hij is, ook niet met garb op de node.
+	for _, garb := range []bool{false, true} {
+		in = zabbixProxy()
+		stop(&in, "ZabbixHa1")
+		n := nodeOf(in, "Zabbixproxy")
+		n.Garb, n.Inspect.Error = garb, "my_print_defaults: exit status 1"
+		in.Nodes[n.ID] = n
+		r = Diagnose(in)
+		if pl := r.Plan; pl == nil || !strings.HasPrefix(pl.Blocked, "Zelfherstel kan de config van MariaDB op Zabbixproxy niet lezen") || pl.Auto {
+			t.Errorf("onleesbaar, garb %v: %s %+v", garb, codes(r), r.Plan)
+		}
+	}
+
+	// my_print_defaults van MySQL kent --mysqld niet: een node met
+	// mysql.service telt dan als Galera-node, zoals vroeger.
+	in = zabbixProxy()
+	stop(&in, "ZabbixHa1")
+	n = nodeOf(in, "Zabbixproxy")
+	n.Inspect.Unit, n.Inspect.Error = "mysql", "my_print_defaults: exit status 1"
+	in.Nodes[n.ID] = n
+	r = Diagnose(in)
+	if pl := r.Plan; pl == nil || strings.Contains(pl.Blocked, "niet lezen") || len(pl.Nodes) != 2 || pl.Nodes[1].Loose {
+		t.Errorf("MySQL: %s %+v", codes(r), r.Plan)
+	}
+	// Naast garb is zo'n MySQL de eigen database van de scheidsrechter.
+	n.Garb = true
+	in.Nodes[n.ID] = n
+	r = Diagnose(in)
+	if pl := r.Plan; pl == nil || pl.Blocked != "" || len(pl.Nodes) != 1 || pl.Nodes[0].Hostname != "ZabbixHa1" {
+		t.Errorf("MySQL naast garb: %s %+v", codes(r), r.Plan)
+	}
+}
+
+func TestDiagnoseLooseGaleraOnArbiter(t *testing.T) {
+	// Een losse groep op de scheidsrechter van het onderdeel met een
+	// Galera-config: Zelfherstel begint daar geen tweede cluster.
+	in := zabbixProxy()
+	stop(&in, "Zabbixproxy")
+	srv := in.Group.Servers[slices.IndexFunc(in.Group.Servers, func(s databases.Server) bool { return s.Hostname == "Zabbixproxy" })]
+	n := in.Nodes[srv.NodeID]
+	n.Inspect.Galera = &protocol.HealGalera{On: true, ClusterName: "zabbix", ClusterAddress: "gcomm://192.168.10.134,192.168.10.135,192.168.10.198", NodeAddress: "192.168.10.198"}
+	cluster := in.Group.ClusterID
+	in = Input{Group: databases.Group{ClusterID: cluster, NodeID: &srv.NodeID, ClusterName: "zabbix", Engine: protocol.DBMariaDB, Kind: databases.KindSingle,
+		Health: databases.HealthDown, Servers: []databases.Server{srv}}, Nodes: map[uuid.UUID]Node{srv.NodeID: n}, Known: map[string]string{}}
+	r := Diagnose(in)
+	if pl := r.Plan; pl == nil || pl.Action != ActionGalera || pl.Auto || !strings.HasPrefix(pl.Blocked, "Op Zabbixproxy staat de scheidsrechter van het onderdeel") {
+		t.Fatalf("plan: %s %+v", codes(r), r.Plan)
+	}
+
+	// Zonder Galera-config is het een gewone server: starten.
+	n.Inspect.Galera = nil
+	r = Diagnose(in)
+	if pl := r.Plan; pl == nil || pl.Action != ActionRestart || pl.Blocked != "" || len(pl.Nodes) != 1 || !pl.Nodes[0].Start {
+		t.Fatalf("zonder config: %s %+v", codes(r), r.Plan)
+	}
+}
+
 func TestDiagnoseSingle(t *testing.T) {
 	// Een losse PostgreSQL die stilstaat.
 	id := uuid.New()

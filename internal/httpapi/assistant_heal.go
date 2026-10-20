@@ -140,8 +140,8 @@ func healItems(reps []gen.HealReport, groups map[string]gen.DatabaseGroup, budge
 	items := make([]any, 0, len(reps))
 	for _, r := range reps {
 		name := r.ClusterName
-		if _, err := r.ClusterId.Get(); err != nil {
-			name = groupName(groups[r.Key])
+		if _, err := r.ClusterId.Get(); err != nil || r.Hostname != "" {
+			name = cmp.Or(r.Hostname, groupName(groups[r.Key]))
 		}
 		items = append(items, healForModel(r, name))
 	}
@@ -164,12 +164,20 @@ func healRank(r gen.HealReport) int {
 }
 
 // healForModel is Zelfherstel voor één database; name is het cluster, of de
-// node van een database die in geen cluster zit.
+// node van een losse server. Een losse server in een cluster noemt ook dat
+// cluster.
 func healForModel(r gen.HealReport, name string) any {
 	out := map[string]any{"engine": r.Engine, "soort": r.Kind, "gezondheid": r.Health, "omgeving": r.ClusterEnvironment}
-	if id, err := r.ClusterId.Get(); err == nil {
+	id, clusterErr := r.ClusterId.Get()
+	switch node, err := r.NodeId.Get(); {
+	case err == nil:
+		out["node"], out["node_id"] = name, node
+		if clusterErr == nil {
+			out["cluster"], out["cluster_id"] = r.ClusterName, id
+		}
+	case clusterErr == nil:
 		out["cluster"], out["cluster_id"] = name, id
-	} else {
+	default:
 		out["node"] = name
 		if _, node, ok := strings.Cut(r.Key, "/node/"); ok {
 			out["node_id"] = node

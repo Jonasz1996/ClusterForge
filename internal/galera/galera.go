@@ -95,6 +95,10 @@ const NoGrastate = "deze node was nog nooit in een Galera-cluster: " + GrastateF
 // een Galera-cluster.
 const NoHistory = "deze node zat nog nooit in een Galera-cluster (InnoDB heeft geen positie)"
 
+// NoWsrep zegt de agent als MariaDB draait met wsrep_on uit: geen
+// Galera-node, dus geen positie.
+const NoWsrep = "MariaDB draait zonder Galera"
+
 // Position is tot waar een node de data van het cluster heeft: de uuid van
 // de geschiedenis van het cluster en het volgnummer van de laatste
 // transactie. Seqno is -1 als het niet bekend is.
