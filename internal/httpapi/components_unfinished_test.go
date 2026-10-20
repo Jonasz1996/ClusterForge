@@ -34,8 +34,9 @@ func TestDatabaseReapplyUnfinished(t *testing.T) {
 	}
 	g := &galeraHosts{hosts: map[string]*agenttest.Host{}}
 	ids := map[string]string{}
-	// data: op nc1 staat een database met tabellen.
-	var data atomic.Bool
+	// data: op nc1 staat een database met tabellen; checkFails: het
+	// nakijken zelf mislukt.
+	var data, checkFails atomic.Bool
 	for i, name := range []string{"nc1", "nc2", "nc3"} {
 		ip := fmt.Sprintf("10.0.20.%d", 186+i)
 		var n node
@@ -53,11 +54,14 @@ func TestDatabaseReapplyUnfinished(t *testing.T) {
 				// Het nakijken van de datamap: de unless mislukt en het
 				// commando noemt de database.
 				h.Shell = func(cmd string) (bool, []byte, error) {
-					if !strings.Contains(cmd, "db.opt") || !data.Load() {
+					if !strings.Contains(cmd, "db.opt") || !data.Load() && !checkFails.Load() {
 						return false, nil, nil
 					}
-					if strings.HasPrefix(cmd, protocol.DBCheckCommand+" || ") {
+					switch {
+					case strings.HasPrefix(cmd, protocol.DBCheckCommand+" || "):
 						return true, nil, errors.New("exit status 1")
+					case checkFails.Load():
+						return true, nil, errors.New("exit status 2")
 					}
 					return true, []byte("databases met tabellen: zabbix_proef \n"), errors.New("exit status 3")
 				}
@@ -192,6 +196,21 @@ func TestDatabaseReapplyUnfinished(t *testing.T) {
 		t.Fatalf("nc1 stopte niet: %v", m)
 	}
 	g.hosts["nc2"].Unfail("apt-get update")
+
+	// Mislukt het nakijken zelf, dan geeft de taak die fout, niet die over
+	// databases met tabellen.
+	checkFails.Store(true)
+	from = since()
+	j = reapply()
+	if j.Status != "failed" || !strings.Contains(j.Error, "nakijken of er geen databases met tabellen staan: ") || !strings.Contains(j.Error, "exit status 2") ||
+		strings.Contains(j.Error, "staan al databases met tabellen") {
+		t.Fatalf("nakijken mislukt: %s %s", j.Status, j.Error)
+	}
+	if c := calls("nc1", from); strings.Contains(c, "galera_new_cluster") {
+		t.Errorf("nc1 begon het cluster terwijl het nakijken mislukte:\n%s", c)
+	}
+	checkFails.Store(false)
+
 	data.Store(true)
 	from = since()
 	j = reapply()

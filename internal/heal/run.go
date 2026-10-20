@@ -499,9 +499,9 @@ func (s *Service) decide(ctx context.Context, id string, st *jobs.Step, p runPar
 			return nil, fmt.Errorf("%s: %w", n.Hostname, err)
 		}
 		gp := galera.Position{UUID: pos.UUID, Seqno: pos.Seqno, SafeToBootstrap: pos.SafeToBootstrap}
-		if !gp.Known() && galera.NeverInCluster(pos.UUID, pos.Error) {
+		if pos.NeverInCluster() {
 			if p.Auto {
-				return nil, fmt.Errorf("%s zat nog nooit in een Galera-cluster en krijgt bij het aansluiten een volledige kopie; dat doet ClusterForge niet vanzelf. Bevestig het plan bij Zelfherstel", n.Hostname)
+				return nil, fmt.Errorf("%s zat nog nooit in een Galera-cluster en zou bij het aansluiten een volledige kopie krijgen; dat doet ClusterForge niet vanzelf. Bevestig het plan bij Zelfherstel", n.Hostname)
 			}
 			fresh = append(fresh, n.Hostname)
 			continue
@@ -516,11 +516,13 @@ func (s *Service) decide(ctx context.Context, id string, st *jobs.Step, p runPar
 		st.Logf("%s: seqno %d uit %s%s%s", n.Hostname, gp.Seqno, pos.From, galera.ViaNote(pos.Via), safe)
 		cands = append(cands, galera.Candidate{Name: n.Hostname, Index: i, Position: gp})
 	}
-	if len(fresh) > 0 {
-		if len(cands) == 0 {
-			return nil, errors.New("geen node zat al in een Galera-cluster, dus er is geen data om het cluster mee te beginnen; ClusterForge begint het niet. Rol de database uit met Opnieuw toepassen")
-		}
-		st.Logf("%s zat nog nooit in een Galera-cluster: telt niet mee voor de nieuwste data en krijgt bij het aansluiten een volledige kopie", strings.Join(fresh, " en "))
+	switch {
+	case len(fresh) > 0 && len(cands) == 0:
+		return nil, errors.New("geen node zat al in een Galera-cluster, dus geen node heeft data van het cluster; ClusterForge begint het niet")
+	case len(fresh) == 1:
+		st.Logf("%s zat nog nooit in een Galera-cluster (InnoDB heeft geen positie): hij telt niet mee voor de nieuwste data en krijgt bij het aansluiten een volledige kopie", fresh[0])
+	case len(fresh) > 1:
+		st.Logf("%s zaten nog nooit in een Galera-cluster (InnoDB heeft geen positie): ze tellen niet mee voor de nieuwste data en krijgen bij het aansluiten een volledige kopie", joinHosts(fresh))
 	}
 	best, err := galera.Choose(cands)
 	if err != nil {

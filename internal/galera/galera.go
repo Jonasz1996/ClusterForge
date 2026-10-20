@@ -86,16 +86,14 @@ const (
 // NoUUID is de uuid van een node die nog nooit in een cluster zat.
 const NoUUID = "00000000-0000-0000-0000-000000000000"
 
-// NoGrastate is de fout van de positie van een node zonder GrastateFile:
-// MariaDB draaide daar nog nooit met Galera.
+// NoGrastate is de fout van de positie van een node zonder GrastateFile
+// als de agent InnoDB niet las: MariaDB draaide daar misschien nog nooit
+// met Galera.
 const NoGrastate = "deze node was nog nooit in een Galera-cluster: " + GrastateFile + " ontbreekt"
 
-// NeverInCluster is true als een positie zegt dat de node nog nooit in een
-// Galera-cluster zat: GrastateFile ontbreekt, of heeft geen geschiedenis.
-// Een positie die om een andere reden onbekend is, telt niet.
-func NeverInCluster(uuid, err string) bool {
-	return uuid == NoUUID || uuid == "" && err == NoGrastate
-}
+// NoHistory zegt dat InnoDB geen positie heeft: de node zat nog nooit in
+// een Galera-cluster.
+const NoHistory = "deze node zat nog nooit in een Galera-cluster (InnoDB heeft geen positie)"
 
 // Position is tot waar een node de data van het cluster heeft: de uuid van
 // de geschiedenis van het cluster en het volgnummer van de laatste

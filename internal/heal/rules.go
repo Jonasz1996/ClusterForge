@@ -419,7 +419,7 @@ func Diagnose(in Input) Report {
 		p.Steps = append(p.Steps,
 			"MariaDB stoppen op elke node"+killNote(p.Nodes)+", zodat Galera de positie (seqno) van elke node vastlegt.",
 			"De posities lezen uit grastate.dat, of na een crash uit InnoDB met galera_recovery (of mariadbd --wsrep-recover waar dat script ontbreekt).",
-			"Het cluster beginnen op de node met de hoogste seqno (galera_new_cluster). Een node die nog nooit in een Galera-cluster zat, telt daarbij niet mee en krijgt bij het aansluiten een volledige kopie. Zijn de andere posities onbekend of hebben de nodes een andere geschiedenis, dan stopt de taak zonder te beginnen.",
+			"Het cluster beginnen op de node met de hoogste seqno (galera_new_cluster). Een node die volgens InnoDB nog nooit in een Galera-cluster zat, telt daarbij niet mee en krijgt bij het aansluiten een volledige kopie; vanzelf gebeurt dat niet, dan stopt de taak. Zijn de andere posities onbekend of hebben de nodes een andere geschiedenis, dan stopt de taak zonder te beginnen.",
 			"De andere nodes een voor een starten; elke node sluit aan en haalt de ontbrekende data (IST of een volledige kopie), en de taak wacht tot hij Synced is.")
 		if len(noTools) > 0 {
 			p.Steps = append(p.Steps, noToolsStep(noTools, true))

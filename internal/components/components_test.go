@@ -232,9 +232,9 @@ func TestOnlyHolder(t *testing.T) {
 	}{
 		{"geen andere datanodes", nil, true, ""},
 		{"nergens MariaDB", []peer{{host: "nc2"}, {host: "nc3"}}, true, ""},
-		{"nog nooit in een cluster", []peer{{host: "nc2", server: true}, {host: "nc3", server: true, uuid: galera.NoUUID}}, true, ""},
+		{"nog nooit in een cluster", []peer{{host: "nc2", server: true, fresh: true}, {host: "nc3"}}, true, ""},
 		{"draait", []peer{{host: "nc2"}, {host: "nc3", server: true, running: true}}, false, "op nc3 draait MariaDB"},
-		{"zat in een cluster", []peer{{host: "nc2", server: true, uuid: "5c3a1e0e-0000-11f0-9a3b-7e1c2d3f4a5b"}}, false, "nc2 zat al in een Galera-cluster en kan nieuwere data hebben"},
+		{"zat in een cluster", []peer{{host: "nc2", server: true}}, false, "nc2 zat al in een Galera-cluster en kan nieuwere data hebben"},
 		{"antwoordt niet", []peer{{host: "nc2", err: errors.New("de agent is offline")}}, false, "nc2 zegt niet of daar data staat (de agent is offline)"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -261,9 +261,17 @@ func TestPeerOf(t *testing.T) {
 		why    string
 	}{
 		{"geen MariaDB", nil, nil, nil, nil, true, ""},
-		{"geen grastate.dat", stopped, nil, &protocol.DBPositionResult{Error: galera.NoGrastate}, nil, true, ""},
-		{"uuid van nullen", stopped, nil, &protocol.DBPositionResult{UUID: galera.NoUUID, Seqno: -1, From: protocol.DBFromGrastate}, nil, true, ""},
-		{"zat in een cluster, crash", stopped, nil, &protocol.DBPositionResult{UUID: clusterUUID, Seqno: -1, From: protocol.DBFromGrastate, Error: "MariaDB stopte niet gewoon"}, nil, false,
+		{"volgens InnoDB nooit in een cluster", stopped, nil, &protocol.DBPositionResult{UUID: galera.NoUUID, Seqno: -1, From: protocol.DBFromRecovery, Via: "galera_recovery"}, nil, true, ""},
+		// Alleen grastate.dat zegt het niet zeker: een teruggezette
+		// back-up heeft er geen, en Galera zet er nullen in bij een
+		// volledige kopie.
+		{"geen grastate.dat, InnoDB niet gelezen", stopped, nil, &protocol.DBPositionResult{Seqno: -1, Error: galera.NoGrastate}, nil, false,
+			"nc2 zegt niet of daar data staat (" + galera.NoGrastate + ")"},
+		{"uuid van nullen in grastate.dat, recovery mislukt", stopped, nil, &protocol.DBPositionResult{UUID: galera.NoUUID, Seqno: -1, From: protocol.DBFromGrastate, Error: "galera_recovery: exit status 1"}, nil, false,
+			"nc2 zegt niet of daar data staat (galera_recovery: exit status 1)"},
+		{"teruggezette back-up", stopped, nil, &protocol.DBPositionResult{UUID: clusterUUID, Seqno: 9000, From: protocol.DBFromRecovery}, nil, false,
+			"nc2 zat al in een Galera-cluster en kan nieuwere data hebben"},
+		{"zat in een cluster, recovery mislukt", stopped, nil, &protocol.DBPositionResult{UUID: clusterUUID, Seqno: -1, From: protocol.DBFromGrastate, Error: "galera_recovery: exit status 1"}, nil, false,
 			"nc2 zat al in een Galera-cluster en kan nieuwere data hebben"},
 		{"grastate.dat leeg", stopped, nil, &protocol.DBPositionResult{Error: "grastate.dat heeft geen uuid"}, nil, false,
 			"nc2 zegt niet of daar data staat (grastate.dat heeft geen uuid)"},
@@ -305,6 +313,8 @@ func TestOutside(t *testing.T) {
 		{"gestopt na een fout", &protocol.DBServer{Active: "failed"}, nil, true, ""},
 		{"gestopt", &protocol.DBServer{Active: "inactive"}, nil, true, ""},
 		{"draait zonder Galera", &protocol.DBServer{Active: "active", Running: true}, nil, true, ""},
+		{"status van Galera niet te lezen", &protocol.DBServer{Active: "active", Running: true, Error: "status: timeout"}, nil, false,
+			"ZabbixHa1 zegt niet of MariaDB in een Primary component zit (status: timeout)"},
 		{"non-Primary", &protocol.DBServer{Active: "active", Running: true, Galera: &protocol.DBGalera{ClusterName: "zabbix", ClusterStatus: "non-Primary", State: "Initialized"}}, nil, true, ""},
 		{"donor", &protocol.DBServer{Active: "active", Running: true, Galera: &protocol.DBGalera{ClusterName: "zabbix", ClusterStatus: "Primary", State: "Donor/Desynced"}}, nil, false,
 			"MariaDB op ZabbixHa1 zit nog in een Primary component (Donor/Desynced)"},

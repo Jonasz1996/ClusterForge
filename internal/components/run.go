@@ -313,9 +313,8 @@ type peer struct {
 	// server: er staat MariaDB; running: hij draait.
 	server  bool
 	running bool
-	// uuid is de geschiedenis van het cluster in grastate.dat; leeg of
-	// galerapkg.NoUUID als de node nog nooit in een cluster zat.
-	uuid string
+	// fresh: volgens InnoDB zat hij nog nooit in een Galera-cluster.
+	fresh bool
 }
 
 // peers vraagt de andere datanodes naar hun MariaDB.
@@ -326,16 +325,16 @@ func (s *Service) peers(ctx context.Context, spec Spec, self uuid.UUID) []peer {
 			continue
 		}
 		srv, err := s.mariadb(ctx, n.NodeID)
-		out = append(out, peerOf(n.Hostname, srv, err, func() (*protocol.DBPositionResult, error) { return s.position(ctx, n, false) }))
+		out = append(out, peerOf(n.Hostname, srv, err, func() (*protocol.DBPositionResult, error) { return s.position(ctx, n, true) }))
 	}
 	return out
 }
 
 // peerOf maakt een peer van de status van zijn MariaDB, en van zijn
-// positie als die stilstaat. Een unit die nog draait of start, telt als
-// draaiend, ook als de agent er niet in kan; een positie die om een andere
-// reden onbekend is dan dat de node nog nooit in een cluster zat, zegt niet
-// of er data staat.
+// positie als die stilstaat; position mag die uit InnoDB lezen. Een unit
+// die nog draait of start, telt als draaiend, ook als de agent er niet in
+// kan. Alleen InnoDB zegt zeker dat een node nog nooit in een cluster zat;
+// een positie die onbekend is, zegt niet of er data staat.
 func peerOf(host string, srv *protocol.DBServer, err error, position func() (*protocol.DBPositionResult, error)) peer {
 	p := peer{host: host}
 	switch {
@@ -356,10 +355,11 @@ func peerOf(host string, srv *protocol.DBServer, err error, position func() (*pr
 		p.err = err
 	case pos.Running:
 		p.running = true
-	case pos.UUID == "" && !galerapkg.NeverInCluster(pos.UUID, pos.Error):
+	case pos.NeverInCluster():
+		p.fresh = true
+	case strings.Trim(pos.UUID, "0-") == "":
+		// Geen geschiedenis in grastate.dat, maar InnoDB is niet gelezen.
 		p.err = errors.New(cmp.Or(pos.Error, "de agent gaf geen positie"))
-	default:
-		p.uuid = pos.UUID
 	}
 	return p
 }
@@ -376,6 +376,9 @@ func outside(srv *protocol.DBServer, err error, host string) (ok bool, why strin
 		return true, ""
 	case srv.Running && srv.Galera != nil && srv.Galera.ClusterStatus == "Primary":
 		return false, fmt.Sprintf("MariaDB op %s zit nog in een Primary component (%s)", host, cmp.Or(srv.Galera.State, "niet Synced"))
+	case srv.Running && srv.Galera == nil && srv.Error != "":
+		// De status van Galera kwam niet: misschien doet hij nog mee.
+		return false, fmt.Sprintf("%s zegt niet of MariaDB in een Primary component zit (%s)", host, srv.Error)
 	case srv.Running, srv.Active == "inactive", srv.Active == "failed":
 		return true, ""
 	}
@@ -393,7 +396,7 @@ func onlyHolder(peers []peer) (ok bool, why string) {
 		case !p.server:
 		case p.running:
 			return false, "op " + p.host + " draait MariaDB"
-		case p.uuid != "" && p.uuid != galerapkg.NoUUID:
+		case !p.fresh:
 			return false, p.host + " zat al in een Galera-cluster en kan nieuwere data hebben"
 		}
 	}
