@@ -327,6 +327,25 @@ func TestHealLooseNextToGalera(t *testing.T) {
 	if matches, _ := filepath.Glob(filepath.Join(z.roots["ZabbixHa1"], zabbixGalera+".cf-zelfherstel-*")); len(matches) > 0 {
 		t.Errorf("config van ZabbixHa1 gewijzigd: %v", matches)
 	}
+
+	// Draait het cluster en staat alleen Zabbixproxy stil, dan start de
+	// taak alleen hem en raakt ze het cluster niet aan.
+	proxy := z.hosts["Zabbixproxy"]
+	proxy.SetUnit("mariadb", agenttest.Unit{Enabled: true, Failed: true})
+	proxy.Locked(func() { proxy.MariaDB.Down = true })
+	reps = z.reports(t, e, c, func(m map[string]healView) bool {
+		return m[key].codes() == "unit_stopped@Zabbixproxy" && m[key].Plan != nil
+	})
+	calls := len(z.hosts["ZabbixHa1"].Calls())
+	j, logs = (&healDB{}).healRun(t, c, reps[key])
+	if j.Status != "succeeded" || !slices.Equal(stepNames(j), []string{"Zabbixproxy: mariadb starten"}) {
+		t.Fatalf("alleen de proxy: %s %s %v\n%v", j.Status, j.Error, stepNames(j), logs)
+	}
+	for _, call := range z.hosts["ZabbixHa1"].Calls()[calls:] {
+		if galeraCall(call) {
+			t.Errorf("ZabbixHa1 aangeraakt: %s", call)
+		}
+	}
 }
 
 // TestHealLooseFails: start de MariaDB van Zabbixproxy niet, dan begint de

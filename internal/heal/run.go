@@ -290,7 +290,9 @@ func (s *Service) run(ctx context.Context, j *jobs.Job) (err error) {
 			}
 		}
 	case ActionGalera:
-		if len(members) > 0 {
+		// Start het plan alleen een losse server, dan is er voor het cluster
+		// niets te doen: geen posities lezen en niet controleren.
+		if slices.ContainsFunc(members, func(n PlanNode) bool { return n.Start || n.SetAddress }) {
 			gp := p
 			gp.Plan.Nodes = members
 			cerr = s.runGalera(ctx, j, gp)
