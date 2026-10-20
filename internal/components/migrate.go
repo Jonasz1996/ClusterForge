@@ -1400,13 +1400,32 @@ func compareTrial(route *migrationRoute, run *protocol.DBMigrateRun, res *trialR
 	res.message = strings.Join(lines, "\n")
 }
 
-// dropTrial haalt de kopie van een proef weg.
+// dropTries is hoe vaak dropTrial het probeert.
+const dropTries = 6
+
+// dropTrial haalt de kopie van een proef weg. Een kopie van tientallen GB
+// weghalen kan langer duren dan één verzoek mag; DROP DATABASE IF EXISTS
+// mag gewoon opnieuw, dus pas na een paar pogingen is het een fout. Anders
+// telde een geslaagde proef als mislukt.
 func (s *Service) dropTrial(ctx context.Context, route *migrationRoute) error {
-	_, err := s.dbRequest(ctx, dbTarget{node: route.Import, engine: route.engine()}, protocol.DBRequest{Op: protocol.DBDrop, Drop: &protocol.DBDropRequest{
-		Database: route.Target, Confirm: route.Target,
-	}})
-	if err == nil && s.DBChanged != nil {
-		s.DBChanged()
+	var err error
+	for try := range dropTries {
+		if try > 0 {
+			select {
+			case <-ctx.Done():
+				return err
+			case <-time.After(s.Retry):
+			}
+		}
+		_, err = s.dbRequest(ctx, dbTarget{node: route.Import, engine: route.engine()}, protocol.DBRequest{Op: protocol.DBDrop, Drop: &protocol.DBDropRequest{
+			Database: route.Target, Confirm: route.Target,
+		}})
+		if err == nil {
+			if s.DBChanged != nil {
+				s.DBChanged()
+			}
+			return nil
+		}
 	}
 	return err
 }

@@ -54,6 +54,9 @@ type MariaDB struct {
 	// ImportError laat mariadb met een dump op stdin met deze fout stoppen,
 	// zoals een oudere MariaDB bij iets uit een nieuwere.
 	ImportError string
+	// DropFails laat zoveel keer DROP DATABASE mislukken, zoals een grote
+	// database weghalen die langer duurt dan het verzoek mag.
+	DropFails int
 	// Questions en BufferPool zijn voor de metingen: het aantal query's
 	// en de grootte van de buffer pool in bytes, waarvan BufferPoolData
 	// in gebruik.
@@ -481,6 +484,9 @@ func (h *Host) mariaWrite(stdin string) ([]byte, error) {
 			}
 			m.Databases = append(m.Databases, Database{Name: name})
 			slices.SortFunc(m.Databases, func(a, b Database) int { return strings.Compare(a.Name, b.Name) })
+		case dropDBRe.MatchString(line) && m.DropFails > 0:
+			m.DropFails--
+			return fail("1205 (HY000)", "Lock wait timeout exceeded; try restarting transaction")
 		case dropDBRe.MatchString(line):
 			name := dropDBRe.FindStringSubmatch(line)[1]
 			m.Databases = slices.DeleteFunc(m.Databases, func(d Database) bool { return d.Name == name })

@@ -304,7 +304,9 @@ func TestDatabaseMigrationTrial(t *testing.T) {
 		return waitJobLong(t, c, j.ID)
 	}
 
-	// De eerste proef: alles gelijk.
+	// De eerste proef: alles gelijk. De kopie weghalen lukt pas de derde
+	// keer, zoals bij een grote kopie; de proef is toch geslaagd.
+	nc1.Locked(func() { nc1.MariaDB.DropFails = 2 })
 	j := start()
 	if j.Status != "succeeded" {
 		t.Fatalf("proef: %s %s %+v", j.Status, j.Error, j.Steps)
@@ -347,6 +349,11 @@ func TestDatabaseMigrationTrial(t *testing.T) {
 	// De kopie en de tijdelijke gebruiker zijn weg; aan db1 is niets
 	// veranderd.
 	assertMigrationClean(t, nc1, db1)
+	nc1.Locked(func() {
+		if nc1.MariaDB.DropFails != 0 {
+			t.Errorf("DROP niet opnieuw geprobeerd: nog %d", nc1.MariaDB.DropFails)
+		}
+	})
 
 	// Een kopie van een vorige proef die bleef staan, haalt de volgende
 	// eerst weg. De app werkt door, dus de oude kant telt meer rijen.
