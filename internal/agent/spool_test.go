@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -215,6 +216,31 @@ func TestPipeSpoolDumpError(t *testing.T) {
 	}
 	err = pipe(context.Background(), protocol.DBMariaDB, dump, imp, nil, s)
 	if err == nil || err.Error() != "dump: mariadb-dump: Error 2026: TLS/SSL error: Connection reset by peer (104)" {
+		t.Fatalf("fout: %v", err)
+	}
+}
+
+// Lukt het schrijven naar de buffer niet, dan meldt pipe die fout en niet
+// de gebroken pijp van mariadb-dump die erop volgt.
+func TestPipeSpoolDiskError(t *testing.T) {
+	s := testSpool(t, 1<<40, nil)
+	defer s.remove()
+	// Het tweede bestand bestaat al, dus het openen ervan mislukt.
+	if err := os.WriteFile(s.path(1), nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	dump := func(_ context.Context, w io.Writer) error {
+		if _, err := w.Write(spoolData(200_000)); err != nil {
+			return errors.New("mariadb-dump: signal: broken pipe")
+		}
+		return nil
+	}
+	imp := func(_ context.Context, r io.Reader) error {
+		_, err := io.Copy(io.Discard, r)
+		return err
+	}
+	err := pipe(context.Background(), protocol.DBMariaDB, dump, imp, nil, s)
+	if err == nil || !strings.HasPrefix(err.Error(), "buffer op schijf: ") || !errors.Is(err, os.ErrExist) {
 		t.Fatalf("fout: %v", err)
 	}
 }

@@ -610,7 +610,15 @@ func pipe(ctx context.Context, engine string, dump func(context.Context, io.Writ
 		_, _ = io.Copy(io.Discard, buf)
 	}
 	derr := <-dumpErr
+	var spoolErr error
+	if sp != nil {
+		spoolErr = sp.Err()
+	}
 	switch {
+	case spoolErr != nil && (derr != nil || err != nil):
+		// Een volle schijf of een leesfout van de buffer; de dump of de
+		// import meldt dan alleen een gebroken pijp.
+		return spoolErr
 	case derr != nil && (err == nil || causedByDump):
 		return fmt.Errorf("dump: %w", derr)
 	case err != nil:

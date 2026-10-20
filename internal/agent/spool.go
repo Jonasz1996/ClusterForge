@@ -67,6 +67,10 @@ type spool struct {
 	done   bool
 	werr   error
 	rerr   error
+	// ioErr is de eerste fout van de spool zelf, bijvoorbeeld een volle
+	// schijf. Die is de echte oorzaak: mariadb-dump of mariadb meldt dan
+	// alleen een gebroken pijp.
+	ioErr error
 
 	// Van de lezer.
 	cur   []byte
@@ -130,18 +134,20 @@ func (s *spool) flush() error {
 	s.buf = s.buf[:0]
 	if s.w == nil || s.off >= s.size {
 		if s.w != nil {
-			if err := s.w.Close(); err != nil {
-				return err
+			err := s.w.Close()
+			s.w = nil
+			if err != nil {
+				return s.fail(err)
 			}
 		}
 		f, err := os.OpenFile(s.path(s.file+1), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 		if err != nil {
-			return err
+			return s.fail(err)
 		}
 		s.w, s.file, s.off = f, s.file+1, 0
 	}
 	if _, err := s.w.Write(comp); err != nil {
-		return fmt.Errorf("buffer op schijf: %w", err)
+		return s.fail(err)
 	}
 	s.mu.Lock()
 	s.frames = append(s.frames, spoolFrame{file: s.file, off: s.off, size: int64(len(comp))})
@@ -157,8 +163,8 @@ func (s *spool) flush() error {
 func (s *spool) Close() error {
 	err := s.flush()
 	if s.w != nil {
-		if cerr := s.w.Close(); err == nil {
-			err = cerr
+		if cerr := s.w.Close(); err == nil && cerr != nil {
+			err = s.fail(cerr)
 		}
 		s.w = nil
 	}
@@ -223,7 +229,7 @@ func (s *spool) Read(p []byte) (int, error) {
 		s.mu.Unlock()
 		raw, err := s.readFrame(fr)
 		if err != nil {
-			return 0, fmt.Errorf("buffer op schijf: %w", err)
+			return 0, s.fail(err)
 		}
 		s.mu.Lock()
 		s.frames = s.frames[1:]
@@ -238,6 +244,24 @@ func (s *spool) Read(p []byte) (int, error) {
 	n := copy(p, s.cur)
 	s.cur = s.cur[n:]
 	return n, nil
+}
+
+// fail onthoudt een fout van de spool zelf en geeft die terug.
+func (s *spool) fail(err error) error {
+	err = fmt.Errorf("buffer op schijf: %w", err)
+	s.mu.Lock()
+	if s.ioErr == nil {
+		s.ioErr = err
+	}
+	s.mu.Unlock()
+	return err
+}
+
+// Err is de eerste fout van de spool zelf, of nil.
+func (s *spool) Err() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.ioErr
 }
 
 // readFrame leest en pakt een frame uit; een bestand dat de lezer uit
