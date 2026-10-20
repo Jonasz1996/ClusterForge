@@ -10,6 +10,7 @@ import (
 	"os/user"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -108,20 +109,118 @@ func (a *Agent) applyPackage(ctx context.Context, p *protocol.PackageStep) (bool
 	case p.State != "" && p.State != "present":
 		return false, nil, fmt.Errorf("onbekende state %q", p.State)
 	}
-	var lines []string
-	if out, err := a.execTimeout(ctx, 5*time.Minute, "env", "DEBIAN_FRONTEND=noninteractive", "apt-get", "update", "-q"); err != nil {
-		return false, tail(out), aptError("apt-get update", out, err)
+	lines, err := a.aptUpdate(ctx, todo)
+	if err != nil {
+		return false, lines, err
 	}
 	args := []string{
 		"DEBIAN_FRONTEND=noninteractive", "apt-get", "install", "-y", "-q", "--no-install-recommends",
 		"-o", "Dpkg::Options::=--force-confdef", "-o", "Dpkg::Options::=--force-confold",
 	}
 	out, err := a.execTimeout(ctx, 10*time.Minute, "env", append(args, todo...)...)
+	if err != nil && strings.Contains(string(out), "dpkg was interrupted") {
+		// Een eerdere installatie brak af (bijvoorbeeld een mislukte
+		// postinst). apt weigert dan alles tot dpkg --configure -a draait;
+		// dat doet de agent zelf, en probeert het daarna één keer opnieuw.
+		lines = append(lines, "dpkg was onderbroken; ClusterForge draait dpkg --configure -a")
+		cout, cerr := a.execTimeout(ctx, 10*time.Minute, "env", "DEBIAN_FRONTEND=noninteractive", "dpkg", "--configure", "-a",
+			"--force-confdef", "--force-confold")
+		if cerr != nil {
+			return false, append(lines, tail(cout)...), fmt.Errorf("dpkg --configure -a: %w", cerr)
+		}
+		out, err = a.execTimeout(ctx, 10*time.Minute, "env", append(args, todo...)...)
+	}
 	lines = append(lines, tail(out)...)
 	if err != nil {
 		return false, lines, aptError("apt-get install", out, err)
 	}
-	return true, append(lines, "geïnstalleerd: "+strings.Join(todo, ", ")), nil
+	// De versie erbij, zodat zichtbaar is uit welke reeks apt koos.
+	done := todo
+	if after, err := a.packageStates(ctx, todo); err == nil {
+		done = nil
+		for _, n := range todo {
+			done = append(done, strings.TrimSpace(n+" "+after[n].Version))
+		}
+	}
+	return true, append(lines, "geïnstalleerd: "+strings.Join(done, ", ")), nil
+}
+
+// aptUpdate draait apt-get update. Faalt daarbij alleen een pakketbron
+// buiten Debian die geen van pkgs aanbiedt, zoals een kapotte bron van
+// Zabbix, dan is dat een waarschuwing en gaat de installatie door met de
+// lijsten die apt wel heeft. Een kapotte bron van Debian, een bron die een
+// van pkgs aanbiedt, of een andere fout (een slot, een volle schijf) blijft
+// een fout: dan zou apt een oude of verkeerde versie kunnen kiezen.
+func (a *Agent) aptUpdate(ctx context.Context, pkgs []string) ([]string, error) {
+	out, err := a.execTimeout(ctx, 5*time.Minute, "env", "DEBIAN_FRONTEND=noninteractive", "apt-get", "update", "-q")
+	if err == nil {
+		return nil, nil
+	}
+	fail := aptError("apt-get update", out, err)
+	broken, ok := brokenSources(out)
+	if !ok {
+		return tail(out), fail
+	}
+	for _, b := range broken {
+		if strings.Contains(strings.ToLower(b.uri), "debian.org") {
+			return tail(out), fail
+		}
+	}
+	policy, perr := a.execTimeout(ctx, time.Minute, "apt-cache", append([]string{"policy"}, pkgs...)...)
+	if perr != nil {
+		return tail(out), fail
+	}
+	var lines []string
+	for _, b := range broken {
+		if strings.Contains(string(policy), " "+b.uri+" ") {
+			return tail(out), fmt.Errorf("%w (de pakketbron %s %s biedt %s aan)", fail, b.uri, b.suite, strings.Join(pkgs, ", "))
+		}
+		lines = append(lines, fmt.Sprintf("waarschuwing: de pakketbron %s %s werkt niet (%s). Die bron hoort niet bij Debian en biedt deze pakketten niet aan, dus de installatie gaat door. Zet de bron goed of haal hem weg.", b.uri, b.suite, b.reason))
+	}
+	return lines, nil
+}
+
+type aptSource struct{ uri, suite, reason string }
+
+// brokenSources haalt de pakketbronnen uit de uitvoer van een mislukte
+// apt-get update (regels "Err:7 <uri> <suite> Release", met de reden op de
+// regel eronder). ok is false als er geen bron faalde, of als apt een fout
+// meldt die niet over die bronnen gaat.
+func brokenSources(out []byte) (srcs []aptSource, ok bool) {
+	var raw []string
+	for l := range strings.Lines(string(out)) {
+		if l = strings.TrimRight(l, " \t\r\n"); strings.TrimSpace(l) != "" {
+			raw = append(raw, l)
+		}
+	}
+	lines := outputLines(out)
+	for i, l := range lines {
+		f := strings.Fields(l)
+		if len(f) < 3 || !strings.HasPrefix(f[0], "Err:") {
+			continue
+		}
+		s := aptSource{uri: f[1], suite: f[2], reason: "fout bij ophalen"}
+		// De reden staat ingesprongen op de regel eronder.
+		if i+1 < len(raw) && len(raw[i+1])-len(strings.TrimLeft(raw[i+1], " \t")) > len(raw[i])-len(strings.TrimLeft(raw[i], " \t")) {
+			s.reason = strings.Join(strings.Fields(raw[i+1]), " ")
+		}
+		if !slices.ContainsFunc(srcs, func(o aptSource) bool { return o.uri == s.uri && o.suite == s.suite }) {
+			srcs = append(srcs, s)
+		}
+	}
+	if len(srcs) == 0 {
+		return nil, false
+	}
+	for _, l := range lines {
+		msg, isErr := strings.CutPrefix(l, "E: ")
+		if !isErr || strings.HasPrefix(msg, "Some index files failed to download") {
+			continue
+		}
+		if !slices.ContainsFunc(srcs, func(s aptSource) bool { return strings.Contains(msg, s.uri+" ") || strings.Contains(msg, s.uri+"/") }) {
+			return nil, false
+		}
+	}
+	return srcs, true
 }
 
 // aptError noemt de laatste foutregel van apt (E: ...), die meestal zegt
