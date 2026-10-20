@@ -123,6 +123,14 @@ func (s *Service) position(ctx context.Context, n Node, recover bool) (*protocol
 	return res.Position, nil
 }
 
+// noSeqno zegt waarom een positie zonder fout onbekend is.
+func noSeqno(p *protocol.DBPositionResult) string {
+	if p.NeverInCluster() {
+		return galera.NoHistory
+	}
+	return "geen seqno"
+}
+
 // observe vraagt alle nodes tegelijk waar ze staan.
 func (s *Service) observe(ctx context.Context, nodes []Node, recover bool) []obs {
 	out := make([]obs, len(nodes))
@@ -585,7 +593,7 @@ func (s *Service) decide(ctx context.Context, id string, st *jobs.Step, r *rende
 		}
 		pos := galera.Position{UUID: o.pos.UUID, Seqno: o.pos.Seqno, SafeToBootstrap: o.pos.SafeToBootstrap}
 		if !pos.Known() {
-			return recoverState{}, fmt.Errorf("de positie van %s is onbekend: %s", o.node.Hostname, galera.PositionError(firstNonEmpty(o.pos.Error, "geen seqno")))
+			return recoverState{}, fmt.Errorf("de positie van %s is onbekend: %s", o.node.Hostname, galera.PositionError(firstNonEmpty(o.pos.Error, noSeqno(o.pos))))
 		}
 		safe := ""
 		if pos.SafeToBootstrap {

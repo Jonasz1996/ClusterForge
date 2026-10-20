@@ -235,9 +235,30 @@ func TestDBPosition(t *testing.T) {
 		}
 	})
 	t.Run("nooit in een cluster", func(t *testing.T) {
-		a, _ := stopped(t, agenttest.Unit{Enabled: true}, "")
+		// Zonder recover zegt alleen grastate.dat iets, en dat ontbreekt.
+		a, h := stopped(t, agenttest.Unit{Enabled: true}, "")
+		p := a.dbPosition(ctx, &protocol.DBPositionRequest{}).Position
+		if p == nil || p.Seqno != -1 || p.Error != galera.NoGrastate || p.NeverInCluster() || recovered(h) {
+			t.Fatalf("%+v", p)
+		}
+		// Met recover zegt InnoDB het zeker.
+		h.MariaDB.Recovered = galera.NoUUID + ":-1"
+		p = a.dbPosition(ctx, &protocol.DBPositionRequest{Recover: true}).Position
+		if p == nil || p.Seqno != -1 || p.Error != "" || p.From != protocol.DBFromRecovery || !p.NeverInCluster() || !recovered(h) {
+			t.Fatalf("%+v", p)
+		}
+	})
+	t.Run("teruggezette back-up zonder grastate.dat", func(t *testing.T) {
+		a, h := stopped(t, agenttest.Unit{Enabled: true}, "")
 		p := a.dbPosition(ctx, &protocol.DBPositionRequest{Recover: true}).Position
-		if p == nil || p.Seqno != -1 || !strings.Contains(p.Error, "nog nooit in een Galera-cluster") {
+		if p == nil || p.Seqno != 1234 || p.UUID != posUUID || p.From != protocol.DBFromRecovery || p.Error != "" || p.NeverInCluster() || !recovered(h) {
+			t.Fatalf("%+v", p)
+		}
+	})
+	t.Run("zonder grastate.dat terwijl MariaDB start", func(t *testing.T) {
+		a, h := stopped(t, agenttest.Unit{Enabled: true, Activating: true}, "")
+		p := a.dbPosition(ctx, &protocol.DBPositionRequest{Recover: true}).Position
+		if p == nil || p.Error != galera.NoGrastate || p.NeverInCluster() || recovered(h) {
 			t.Fatalf("%+v", p)
 		}
 	})

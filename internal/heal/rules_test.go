@@ -375,6 +375,62 @@ func TestDiagnoseHealthyAndManaged(t *testing.T) {
 	}
 }
 
+// zabbix is het zabbix-cluster van Jonas op 19 oktober: de uitrol van het
+// onderdeel kwam op ZabbixHa1 niet verder, zabbix2 heeft nog geen MariaDB,
+// dus de groep is alleen ZabbixHa1, die als enige draait.
+func zabbix() Input {
+	id, cid := uuid.New(), uuid.New()
+	return Input{
+		Group: databases.Group{ClusterID: &cid, ClusterName: "zabbix", ClusterSlug: "zabbix", ClusterEnv: "test", Engine: protocol.DBMariaDB, Kind: databases.KindGalera, Health: databases.HealthOK,
+			Servers: []databases.Server{{NodeID: id, Hostname: "ZabbixHa1", Unit: "mariadb", Active: "active", Running: true,
+				Galera: &protocol.DBGalera{ClusterName: "zabbix", ClusterStatus: "Primary", State: "Synced", StateCode: 4, ClusterSize: 1}}}},
+		Nodes: map[uuid.UUID]Node{id: {ID: id, Hostname: "ZabbixHa1", Protocol: protocol.Version, Online: true, Addresses: []string{"192.168.10.134"},
+			Inspect: &protocol.HealEngine{Engine: protocol.DBMariaDB, Unit: "mariadb", Active: "active", Enabled: "enabled", DataDir: "/var/lib/mysql", DataFree: 100 << 30, DataTotal: 200 << 30,
+				Galera: &protocol.HealGalera{On: true, ClusterName: "zabbix", ClusterAddress: "gcomm://192.168.10.134,192.168.10.135"}}}},
+		Known:      map[string]string{"192.168.10.134": "ZabbixHa1", "192.168.10.135": "zabbix2"},
+		Unfinished: &Unfinished{ComponentID: uuid.New(), Error: "zabbix2: MariaDB: pakketten: apt-get update: E: The repository 'https://repo.zabbix.com/zabbix/8.0/stable/debian trixie Release' does not have a Release file."},
+	}
+}
+
+func TestDiagnoseUnfinished(t *testing.T) {
+	// Draait ZabbixHa1, dan meldt Zelfherstel alleen dat de uitrol niet af
+	// is, met de fout van de taak en wat de uitrol afmaakt.
+	in := zabbix()
+	r := Diagnose(in)
+	if codes(r) != "component_unfinished@ZabbixHa1" || r.Plan != nil {
+		t.Fatalf("draait: %s %+v", codes(r), r.Plan)
+	}
+	p := r.Problems[0]
+	if p.Level != LevelWarning || p.Title != "De uitrol van MariaDB op zabbix is niet af" || !strings.Contains(p.Why, "stopte: zabbix2: MariaDB: pakketten: apt-get update") ||
+		!strings.Contains(p.Why, "Kies Opnieuw toepassen") || !strings.Contains(p.Why, "begint de eerste node het opnieuw") {
+		t.Errorf("probleem: %+v", p)
+	}
+
+	// Staat hij stil, dan is er een plan, maar niet vanzelf: de uitrol
+	// beslist.
+	srv := &in.Group.Servers[0]
+	srv.Running, srv.Active, srv.Galera = false, "failed", nil
+	n := in.Nodes[srv.NodeID]
+	n.Inspect.Active, n.Inspect.Result = "failed", "exit-code"
+	in.Nodes[srv.NodeID] = n
+	in.Group.Kind, in.Group.Health = databases.KindSingle, databases.HealthDown
+	r = Diagnose(in)
+	if codes(r) != "unit_stopped@ZabbixHa1 component_unfinished@ZabbixHa1 galera_no_primary@ZabbixHa1" {
+		t.Fatalf("stil: %s", codes(r))
+	}
+	if pl := r.Plan; pl == nil || pl.Action != ActionGalera || pl.Auto || pl.Blocked != "" || !strings.HasPrefix(pl.AutoWhy, "De uitrol van het onderdeel van ClusterForge is niet af") {
+		t.Errorf("plan: %+v", r.Plan)
+	}
+
+	// Loopt de uitrol nog, dan is er niets te melden, en nog steeds niets
+	// vanzelf.
+	in.Unfinished.Running = true
+	r = Diagnose(in)
+	if strings.Contains(codes(r), "component_unfinished") || r.Plan == nil || r.Plan.Auto {
+		t.Errorf("uitrol loopt: %s %+v", codes(r), r.Plan)
+	}
+}
+
 func TestDiagnoseSingle(t *testing.T) {
 	// Een losse PostgreSQL die stilstaat.
 	id := uuid.New()
