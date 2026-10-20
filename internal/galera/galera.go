@@ -20,9 +20,11 @@ import (
 	"strings"
 )
 
-// GrastateFile is waar Galera zijn positie bewaart, in de datamap van
-// MariaDB op Debian.
-const GrastateFile = "/var/lib/mysql/grastate.dat"
+// DataDir is de datamap van MariaDB op Debian.
+const DataDir = "/var/lib/mysql"
+
+// GrastateFile is waar Galera zijn positie bewaart, in DataDir.
+const GrastateFile = DataDir + "/grastate.dat"
 
 // SafeToBootstrap zet safe_to_bootstrap op 1 in GrastateFile. Galera weigert
 // anders te beginnen op een node die niet als laatste stopte; ClusterForge
@@ -69,11 +71,29 @@ const NewClusterGone = "! systemctl show-environment 2>/dev/null | grep -q '^" +
 // systemd haalt bij het starten zelf de positie uit InnoDB als grastate.dat
 // die niet heeft. Zonder galera_new_cluster verandert het niets. Daarna gaat
 // NewClusterVar weg, ook als galera_new_cluster mislukte.
-const Bootstrap = "command -v galera_new_cluster >/dev/null || { echo '" + NoNewCluster + "' >&2; exit 1; }; " +
-	"systemctl stop mariadb; " + SafeToBootstrap + " && galera_new_cluster; rc=$?; " + ClearNewCluster + "; exit $rc"
+const Bootstrap = bootstrapStart + SafeToBootstrap + bootstrapEnd
+
+// BootstrapAny is Bootstrap voor een node die misschien nog nooit in een
+// cluster zat: zonder GrastateFile is er niets veilig te verklaren, en
+// begint galera_new_cluster een nieuwe geschiedenis.
+const BootstrapAny = bootstrapStart + "{ [ ! -e " + GrastateFile + " ] || " + SafeToBootstrap + "; }" + bootstrapEnd
+
+const (
+	bootstrapStart = "command -v galera_new_cluster >/dev/null || { echo '" + NoNewCluster + "' >&2; exit 1; }; systemctl stop mariadb; "
+	bootstrapEnd   = " && galera_new_cluster; rc=$?; " + ClearNewCluster + "; exit $rc"
+)
 
 // NoUUID is de uuid van een node die nog nooit in een cluster zat.
 const NoUUID = "00000000-0000-0000-0000-000000000000"
+
+// NoGrastate is de fout van de positie van een node zonder GrastateFile
+// als de agent InnoDB niet las: MariaDB draaide daar misschien nog nooit
+// met Galera.
+const NoGrastate = "deze node was nog nooit in een Galera-cluster: " + GrastateFile + " ontbreekt"
+
+// NoHistory zegt dat InnoDB geen positie heeft: de node zat nog nooit in
+// een Galera-cluster.
+const NoHistory = "deze node zat nog nooit in een Galera-cluster (InnoDB heeft geen positie)"
 
 // Position is tot waar een node de data van het cluster heeft: de uuid van
 // de geschiedenis van het cluster en het volgnummer van de laatste

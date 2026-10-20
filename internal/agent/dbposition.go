@@ -66,29 +66,34 @@ func (a *Agent) dbPosition(ctx context.Context, req *protocol.DBPositionRequest)
 	b, err := os.ReadFile(path)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
-		p.Error = "deze node was nog nooit in een Galera-cluster: " + galera.GrastateFile + " ontbreekt"
-		return res
+		// Nog nooit met Galera gestart, of een teruggezette back-up: dat
+		// zegt alleen InnoDB.
+		if !req.Recover || u.Active != "inactive" && u.Active != "failed" {
+			p.Error = galera.NoGrastate
+			return res
+		}
 	case err != nil:
 		p.Error = err.Error()
 		return res
-	}
-	pos, err := galera.ParseGrastate(string(b))
-	if err != nil {
-		p.Error = err.Error()
-		return res
-	}
-	p.UUID, p.Seqno, p.SafeToBootstrap, p.From = pos.UUID, pos.Seqno, pos.SafeToBootstrap, protocol.DBFromGrastate
-	if pos.Seqno >= 0 {
-		return res
-	}
-	// Na een crash.
-	switch {
-	case !req.Recover:
-		p.Error = "MariaDB stopte niet gewoon; de positie staat alleen nog in InnoDB"
-		return res
-	case u.Active != "inactive" && u.Active != "failed":
-		p.Error = "MariaDB is " + u.Active + "; de positie lezen kan pas als hij stilstaat"
-		return res
+	default:
+		pos, err := galera.ParseGrastate(string(b))
+		if err != nil {
+			p.Error = err.Error()
+			return res
+		}
+		p.UUID, p.Seqno, p.SafeToBootstrap, p.From = pos.UUID, pos.Seqno, pos.SafeToBootstrap, protocol.DBFromGrastate
+		if pos.Seqno >= 0 {
+			return res
+		}
+		// Na een crash.
+		switch {
+		case !req.Recover:
+			p.Error = "MariaDB stopte niet gewoon; de positie staat alleen nog in InnoDB"
+			return res
+		case u.Active != "inactive" && u.Active != "failed":
+			p.Error = "MariaDB is " + u.Active + "; de positie lezen kan pas als hij stilstaat"
+			return res
+		}
 	}
 	r, via, err := a.recoverPosition(ctx)
 	p.Via = via

@@ -734,9 +734,10 @@ type DBGrant struct {
 }
 
 // DBPositionRequest: Recover laat de agent de positie uit InnoDB halen
-// als MariaDB stilstaat en grastate.dat geen seqno heeft: met
+// als MariaDB stilstaat en grastate.dat geen seqno heeft of ontbreekt: met
 // galera_recovery, of zonder dat script met mariadbd --wsrep-recover.
-// Zonder Recover is de positie dan onbekend.
+// Zonder Recover is de positie dan onbekend. Een agent van voor
+// NeverInCluster leest InnoDB niet als grastate.dat ontbreekt.
 type DBPositionRequest struct {
 	Recover bool `json:"recover"`
 }
@@ -767,6 +768,15 @@ type DBPositionResult struct {
 	// ontbreekt. Leeg bij een oudere agent.
 	Via   string `json:"via,omitempty"`
 	Error string `json:"error,omitempty"`
+}
+
+// NeverInCluster is true als InnoDB zegt dat de node nog nooit in een
+// Galera-cluster zat: de agent las de positie met recovery, en die heeft
+// geen geschiedenis. Alleen grastate.dat zegt dat niet zeker: na een
+// teruggezette back-up ontbreekt het, en Galera zet er zelf nullen in als
+// een node een volledige kopie vraagt.
+func (p *DBPositionResult) NeverInCluster() bool {
+	return p != nil && p.From == DBFromRecovery && p.Error == "" && p.Seqno < 0 && strings.Trim(p.UUID, "0-") == ""
 }
 
 // DBTrackRequest zegt welk VIP keepalived met de database moet bewaken.
