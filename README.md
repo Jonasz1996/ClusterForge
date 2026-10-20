@@ -806,7 +806,7 @@ Kies de nodes, standaard alle actieve nodes van het cluster, en eventueel de buf
 
 Wat niet kan, blokkeert, met de reden: minder dan twee nodes, **twee nodes zonder scheidsrechter** (valt er één weg, dan heeft de andere geen meerderheid en stopt de database), een agent die offline of te oud is, een andere Debian dan 12 of 13, een poort (3306, 4444, 4567 of 4568) die al bezet is, MySQL, een Galera-cluster of een MariaDB met eigen databases die al op de node staat (verhuis die eerst), een MariaDB die er staat maar niet draait, of draait maar waar de agent niet in kan (ClusterForge ziet dan niet welke databases erin staan; start een stilstaande MariaDB eerst, of kijk bij [Zelfherstel](#zelfherstel) als ze niet start, en zorg bij een draaiende dat root via de socket mag inloggen, met `mariadb -u root` zonder wachtwoord), of minder dan 2 GB vrije schijf. Een waarschuwing laat je wel door: een even aantal stemmen, twee van de drie stemmen op dezelfde Proxmox-host, een lege MariaDB die al draait (ClusterForge neemt haar over), krap geheugen of minder dan 10 GB vrije schijf. Bij krap geheugen staat het commando erbij, zoals `pct set 186 --memory 5632`.
 
-Met twee nodes kies je een derde node van het cluster als **scheidsrechter**: hij krijgt alleen `garbd`, stemt mee en heeft geen data.
+Met twee nodes kies je een derde node van het cluster als **scheidsrechter**: hij krijgt alleen `garbd`, stemt mee en heeft geen data. `garbd` draait niet als root (op Debian 13 als `_galera`) en schrijft zijn log in de journal van de node, niet in een eigen bestand.
 
 Database toevoegen doet het plan dat je zag; is er intussen iets veranderd, dan toont ClusterForge het nieuwe plan. Op prod tik je de slug in. Daarna is het een taak met een stap per node:
 
