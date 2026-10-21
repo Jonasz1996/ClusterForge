@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -243,4 +244,28 @@ func TestPipeSpoolDiskError(t *testing.T) {
 	if err == nil || !strings.HasPrefix(err.Error(), "buffer op schijf: ") || !errors.Is(err, os.ErrExist) {
 		t.Fatalf("fout: %v", err)
 	}
+}
+
+// Na een herstart staat de buffer van een afgebroken import er niet meer;
+// tijdens een import blijft hij staan.
+func TestClearSpool(t *testing.T) {
+	a := &Agent{SpoolDir: filepath.Join(t.TempDir(), "verhuizing"), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	if err := os.MkdirAll(a.SpoolDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(a.SpoolDir, "000003.zst"), spoolData(1000), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	st := a.migrations()
+	st.running = &protocol.DBMigrateRun{Database: "zabbix"}
+	a.clearSpool()
+	if _, err := os.Stat(a.SpoolDir); err != nil {
+		t.Fatalf("weg tijdens een import: %v", err)
+	}
+	st.running = nil
+	a.clearSpool()
+	if _, err := os.Stat(a.SpoolDir); !os.IsNotExist(err) {
+		t.Fatalf("staat er nog: %v", err)
+	}
+	a.clearSpool()
 }

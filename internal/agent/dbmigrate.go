@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"os"
 	"path/filepath"
@@ -347,9 +348,8 @@ func (a *Agent) migrateRun(target string) *protocol.DBMigrateRun {
 // Er loopt maar één import tegelijk, dus wat er nog staat, is van een
 // afgebroken import en gaat eerst weg.
 func (a *Agent) migrateSpool(total int64, consumed func(int64)) (*spool, error) {
-	dir, _ := a.path(defaultSpoolDir)
+	dir := a.spoolDir()
 	dataDir, _ := a.path(mariaDataDir)
-	dir = cmp.Or(a.SpoolDir, dir)
 	if err := os.RemoveAll(dir); err != nil {
 		return nil, err
 	}
@@ -357,6 +357,40 @@ func (a *Agent) migrateSpool(total int64, consumed func(int64)) (*spool, error) 
 		return nil, err
 	}
 	return newSpool(dir, spoolLimit(dir, dataDir, total), consumed)
+}
+
+func (a *Agent) spoolDir() string {
+	dir, _ := a.path(defaultSpoolDir)
+	return cmp.Or(a.SpoolDir, dir)
+}
+
+// clearSpool haalt een buffer weg die na een herstart van de agent is
+// blijven staan; een import gaat na een herstart nooit verder.
+func (a *Agent) clearSpool() {
+	st := a.migrations()
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	if st.running != nil {
+		return
+	}
+	dir := a.spoolDir()
+	if _, err := os.Lstat(dir); err != nil {
+		return
+	}
+	var size int64
+	_ = filepath.WalkDir(dir, func(_ string, d fs.DirEntry, err error) error {
+		if err == nil && !d.IsDir() {
+			if fi, err := d.Info(); err == nil {
+				size += fi.Size()
+			}
+		}
+		return nil
+	})
+	if err := os.RemoveAll(dir); err != nil {
+		a.Log.Error("achtergebleven buffer van een verhuizing weghalen mislukt", "dir", dir, "err", err)
+		return
+	}
+	a.Log.Warn("achtergebleven buffer van een verhuizing weggehaald", "dir", dir, "bytes", size)
 }
 
 // migratePull begint de import van req.Database van de oude MariaDB in de

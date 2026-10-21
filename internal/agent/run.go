@@ -220,6 +220,9 @@ func (a *Agent) signal(ch chan struct{}) {
 
 // Run stuurt heartbeats, metrics en facts tot ctx afloopt.
 func (a *Agent) Run(ctx context.Context) error {
+	// Vóór de eerste verzoeken: een buffer van een import die een herstart
+	// afbrak, staat er anders voor altijd.
+	a.clearSpool()
 	if a.nc == nil {
 		if err := a.Connect(); err != nil {
 			return err
