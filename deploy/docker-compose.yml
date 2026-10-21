@@ -2,9 +2,9 @@
 # dit bestand (zie .env.example) en zet de server achter je reverse proxy met TLS.
 services:
   server:
-    # Standaard bouwt `docker compose up -d --build` het image hier zelf. Met
-    # een uitgebracht image: CF_IMAGE=ghcr.io/jonasz1996/clusterforge-server:v0.5.0
-    # in .env en `docker compose pull && docker compose up -d`.
+    # Standaard bouwt `docker compose up -d --build` het image hier zelf (vraagt
+    # zo'n 3 GB geheugen). Zonder bouwen: CF_IMAGE=ghcr.io/jonasz1996/clusterforge-server:v0.5.0
+    # (of :pr-97, :47d7ecc uit CI) in .env en `docker compose pull && docker compose up -d`.
     image: ${CF_IMAGE:-clusterforge-server:local}
     build:
       context: ..
@@ -12,6 +12,9 @@ services:
       args:
         # Zichtbaar in de webinterface en op /api/v1/health; zie de docs bij Bijwerken.
         VERSION: ${CF_VERSION:-dev}
+        # Minder geheugen bij het bouwen, ten koste van tijd; zie de docs bij Bijwerken.
+        GOFLAGS: ${CF_BUILD_GOFLAGS:-}
+        GOGC: ${CF_BUILD_GOGC:-}
     restart: unless-stopped
     # Lopende taken krijgen bij het stoppen tot 15 seconden om zich netjes in
     # de wachtrij terug te zetten; de standaard van 10 is te kort.

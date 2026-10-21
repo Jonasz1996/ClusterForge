@@ -57,6 +57,9 @@ type Agent struct {
 	// DumpDir is de map met de dumps van de databases; leeg is
 	// protocol.DBDumpDir. Tests gebruiken een map.
 	DumpDir string
+	// SpoolDir is de buffer van een verhuizing tussen dump en import; leeg
+	// is defaultSpoolDir onder Root. Tests gebruiken een map.
+	SpoolDir string
 	// ProbeInterval is hoe vaak een schrijftest schrijft; nul is
 	// protocol.DBProbeInterval. Tests zetten hem korter.
 	ProbeInterval time.Duration
@@ -217,6 +220,9 @@ func (a *Agent) signal(ch chan struct{}) {
 
 // Run stuurt heartbeats, metrics en facts tot ctx afloopt.
 func (a *Agent) Run(ctx context.Context) error {
+	// Vóór de eerste verzoeken: een buffer van een import die een herstart
+	// afbrak, staat er anders voor altijd.
+	a.clearSpool()
 	if a.nc == nil {
 		if err := a.Connect(); err != nil {
 			return err

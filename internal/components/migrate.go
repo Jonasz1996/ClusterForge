@@ -260,6 +260,10 @@ type migrationRoute struct {
 	// dump de eigenaars en rechten mee.
 	Owner string `json:"owner,omitempty"`
 	Move  bool   `json:"move,omitempty"`
+	// De versies bij de controle: zo weet een verhuizing naar een oudere
+	// MariaDB of de proef met dezelfde versies liep.
+	SourceVersion string `json:"source_version,omitempty"`
+	TargetVersion string `json:"target_version,omitempty"`
 }
 
 // engine is de engine van de route.
@@ -319,8 +323,15 @@ func (s *Service) planMigration(ctx context.Context, source, database string, co
 		Database: database, Clients: []databases.User{}, Targets: []MigrationOption{}, Findings: []Finding{},
 		Accounts: []protocol.DBMigrateAccount{}, NewHosts: []string{}, Connections: []MigrationConnection{}, MoveFindings: []Finding{},
 	}
+	// Een losse server in een cluster, zoals een MariaDB op de
+	// scheidsrechter, heet naar zijn node: de naam van het cluster is die
+	// van zijn database.
+	name := g.ClusterName
+	if g.NodeID != nil {
+		name = ""
+	}
 	p.Source = MigrationSource{
-		Key: source, Name: g.ClusterName, ClusterID: g.ClusterID, Slug: g.ClusterSlug, Environment: g.ClusterEnv, Engine: g.Engine, Kind: g.Kind,
+		Key: source, Name: name, ClusterID: g.ClusterID, Slug: g.ClusterSlug, Environment: g.ClusterEnv, Engine: g.Engine, Kind: g.Kind,
 		Version: g.Version, Summary: g.Summary, Port: port, Servers: []string{},
 	}
 	for _, sv := range g.Servers {
@@ -378,6 +389,10 @@ func (s *Service) planMigration(ctx context.Context, source, database string, co
 		}
 	}
 	for _, c := range comps {
+		// Ook een losse server in een cluster, zoals op de scheidsrechter,
+		// verhuist niet naar de database van dat cluster: zijn apps delen
+		// vaak een gebruiker met die van het cluster (zabbix bij een
+		// Zabbix-proxy), en verhuizen zou het wachtwoord daar overschrijven.
 		if g.ClusterID != nil && c.ClusterID == *g.ClusterID {
 			continue
 		}
@@ -411,6 +426,11 @@ func (s *Service) planMigration(ctx context.Context, source, database string, co
 	}
 	sn := Node{NodeID: srv.NodeID, Hostname: srv.Hostname}
 	p.Source.Node = &sn
+	// MariaDB luistert niet altijd op 3306, bijvoorbeeld met HAProxy op
+	// 3306 van dezelfde node; de verhuizing leest rechtstreeks van MariaDB.
+	if !pg && srv.Port > 0 {
+		p.Source.Port = srv.Port
+	}
 	if srv.ErrorKind == databases.ErrOldAgent {
 		add(Blocked, "old_agent", &sn, fmt.Sprintf("de agent op %s is te oud; werk hem bij met het installatiescript en --upgrade", sn.Hostname), "")
 		return p, route, nil
@@ -495,7 +515,12 @@ func (s *Service) planMigration(ctx context.Context, source, database string, co
 	oi := slices.IndexFunc(p.Targets, func(o MigrationOption) bool { return o.ComponentID == *componentID })
 	if oi < 0 {
 		if r, err := s.q.GetClusterComponent(ctx, *componentID); err == nil && g.ClusterID != nil && r.ClusterID == *g.ClusterID {
-			add(Blocked, "same", nil, database+" staat al in de database van dit cluster", "")
+			msg := database + " staat al in de database van dit cluster"
+			if g.NodeID != nil {
+				msg = database + " staat op " + p.Source.Name + ", een losse server in dit cluster; naar de database van hetzelfde cluster verhuist ClusterForge niet, " +
+					"want een gebruiker met dezelfde naam, zoals zabbix bij een Zabbix-proxy, zou daar het wachtwoord van de andere app overschrijven"
+			}
+			add(Blocked, "same", nil, msg, "")
 			return p, route, nil
 		}
 		return p, route, &InvalidError{"component", fmt.Sprintf("kies een cluster met een %s van ClusterForge die draait", databases.EngineName(g.Engine))}
@@ -545,8 +570,9 @@ func (s *Service) planMigration(ctx context.Context, source, database string, co
 		}
 	}
 	target.Hosts = nodeAddresses(byID[t.node.NodeID])
+	// De database van het cluster, niet een losse server erin.
 	tg := slices.IndexFunc(groups, func(x databases.Group) bool {
-		return x.ClusterID != nil && *x.ClusterID == opt.ClusterID && x.Engine == g.Engine
+		return x.Key() == g.Engine+"/"+opt.ClusterID.String()
 	})
 	trial := TrialName(database)
 	trialExists := false
@@ -585,7 +611,7 @@ func (s *Service) planMigration(ctx context.Context, source, database string, co
 	}
 	var tried []string
 	for i, a := range addrs {
-		pr, err := s.migrateReq(ctx, t.node, g.Engine, protocol.DBMigrateRequest{Action: protocol.DBMigrateProbe, Host: a, Port: port, Database: database})
+		pr, err := s.migrateReq(ctx, t.node, g.Engine, protocol.DBMigrateRequest{Action: protocol.DBMigrateProbe, Host: a, Port: p.Source.Port, Database: database})
 		if errors.As(err, &ce) {
 			add(Blocked, "target_agent", &t.node, ce.Msg, "")
 			return p, route, nil
@@ -612,7 +638,7 @@ func (s *Service) planMigration(ctx context.Context, source, database string, co
 	switch {
 	case p.Reach == nil:
 		add(Blocked, "unreachable", &t.node, fmt.Sprintf("%s bereikt %s op %s niet (%s). Zet in de firewall poort %d open van %s naar %s, zolang de verhuizing duurt",
-			t.node.Hostname, engineName, sn.Hostname, strings.Join(tried, "; "), port, joinHosts(target.Hosts), addrs[0]), "")
+			t.node.Hostname, engineName, sn.Hostname, strings.Join(tried, "; "), p.Source.Port, joinHosts(target.Hosts), addrs[0]), "")
 	case pg:
 		checkPGReach(&p, info, ip, sn, tried, add)
 	default:
@@ -654,8 +680,22 @@ func (s *Service) planMigration(ctx context.Context, source, database string, co
 		switch {
 		case !ok1 || !ok2:
 		case tMaj < sMaj || tMaj == sMaj && tMin < sMin:
-			add(Blocked, "downgrade", &t.node, fmt.Sprintf("de nieuwe MariaDB (%d.%d op %s) is ouder dan de oude (%d.%d op %s); een dump van een nieuwere MariaDB gaat niet "+
-				"altijd goed in een oudere. Neem nodes met Debian 13 (MariaDB 11.8)", tMaj, tMin, t.node.Hostname, sMaj, sMin, sn.Hostname), "")
+			from, to := fmt.Sprintf("%d.%d", sMaj, sMin), fmt.Sprintf("%d.%d", tMaj, tMin)
+			add(Warning, "downgrade", &t.node, fmt.Sprintf("de nieuwe MariaDB (%s op %s) is ouder dan de oude (%s op %s). Een dump van een nieuwere MariaDB "+
+				"gaat meestal goed in een oudere, maar niet altijd: wat %s niet kent, zoals een nieuwe collatie of syntaxis, laat de import mislukken. "+
+				"De proef doet dezelfde dump en import als de verhuizing en stopt bij de eerste fout; pas na een geslaagde proef kan de verhuizing",
+				to, t.node.Hostname, from, sn.Hostname, to), "")
+			ok, failed, err := s.downgradeTrial(ctx, p.Runs, opt.ComponentID, from, to)
+			switch {
+			case err != nil:
+				return p, route, err
+			case failed:
+				addMove(Blocked, "downgrade_trial", &t.node, fmt.Sprintf("de laatste proef van MariaDB %s naar %s mislukte; los op wat ze meldt en doe de proef opnieuw. "+
+					"Zonder geslaagde proef verhuist ClusterForge niet naar een oudere MariaDB", from, to), "")
+			case !ok:
+				addMove(Blocked, "downgrade_trial", &t.node, fmt.Sprintf("de nieuwe MariaDB is ouder dan de oude, dus de verhuizing kan pas na een geslaagde proef "+
+					"van MariaDB %s naar %s op %s", from, to, opt.ClusterName), "")
+			}
 		case tMaj != sMaj || tMin != sMin:
 			add(Info, "upgrade", nil, fmt.Sprintf("van MariaDB %d.%d naar %d.%d: een dump gaat goed in een nieuwere versie", sMaj, sMin, tMaj, tMin), "")
 		}
@@ -719,7 +759,8 @@ func (s *Service) planMigration(ctx context.Context, source, database string, co
 	}
 
 	route = migrationRoute{
-		SourceNode: sn, Address: p.Source.Address, Port: port, Via: p.Source.Via, Hosts: target.Hosts, Import: t.node, Owner: info.Owner,
+		SourceVersion: info.Version, TargetVersion: target.Version,
+		SourceNode: sn, Address: p.Source.Address, Port: p.Source.Port, Via: p.Source.Via, Hosts: target.Hosts, Import: t.node, Owner: info.Owner,
 		Target: trial, Charset: info.Charset, Collation: info.Collation, Size: info.SizeBytes,
 		Views: info.Views, Routines: info.Routines, Triggers: info.Triggers, Events: info.Events, Leftover: leftover,
 		Servers: route.Servers, DataNodes: dataNodes(t.spec, nil), TargetAddress: target.Address, NewHosts: p.NewHosts,
@@ -882,6 +923,36 @@ func checkClients(clients []databases.User, opt MigrationOption, database string
 	case !seen:
 		add(Info, "no_clients", nil, fmt.Sprintf("de laatste 30 dagen verbond niemand van %s met %s", opt.ClusterName, database), "")
 	}
+}
+
+// downgradeTrial zoekt de laatste afgelopen proef naar het onderdeel
+// componentID die van MariaDB from naar to (major.minor) ging: ok als ze
+// slaagde, failed als ze mislukte. De versies staan in de controlestap van
+// de proef; een proef van voor die tijd telt niet.
+func (s *Service) downgradeTrial(ctx context.Context, runs []store.ListDBMigrationsRow, componentID uuid.UUID, from, to string) (ok, failed bool, err error) {
+	for _, r := range runs {
+		m := r.DbMigration
+		if m.Kind != store.DbMigrationKindTrial || m.ComponentID != componentID || m.Status == store.DbMigrationStatusRunning || m.JobID == nil {
+			continue
+		}
+		steps, err := s.q.ListJobSteps(ctx, *m.JobID)
+		if err != nil {
+			return false, false, err
+		}
+		var route migrationRoute
+		for _, st := range steps {
+			if st.Name == stepTrialCheck && len(st.State) > 0 {
+				_ = json.Unmarshal(st.State, &route)
+			}
+		}
+		sMaj, sMin, ok1 := majorMinor(route.SourceVersion)
+		tMaj, tMin, ok2 := majorMinor(route.TargetVersion)
+		if !ok1 || !ok2 || fmt.Sprintf("%d.%d", sMaj, sMin) != from || fmt.Sprintf("%d.%d", tMaj, tMin) != to {
+			continue
+		}
+		return m.Status == store.DbMigrationStatusOk, m.Status == store.DbMigrationStatusFailed, nil
+	}
+	return false, false, nil
 }
 
 func majorMinor(v string) (int, int, bool) {
@@ -1178,6 +1249,8 @@ func (s *Service) trialPull(ctx context.Context, j *jobs.Job, st *jobs.Step, p t
 		pullReq := protocol.DBMigrateRequest{
 			Action: protocol.DBMigratePull, Database: p.Database, User: user, Password: pw, Host: route.Address, Port: route.Port,
 			Target: route.Target, Charset: route.Charset, Collation: route.Collation, Total: route.Size,
+			// De agent op de oude server geeft alleen EVENT als er events zijn.
+			SkipEvents: !route.pg() && route.Events == 0,
 		}
 		switch {
 		case route.pg() && route.Move:
@@ -1206,7 +1279,7 @@ func (s *Service) trialPull(ctx context.Context, j *jobs.Job, st *jobs.Step, p t
 	}
 	res.pulled = true
 	deadline := s.Now().Add(protocol.DBDumpTimeout + time.Hour)
-	reported, counting := int64(0), false
+	reported, reportedIn, counting := int64(0), int64(0), false
 	for {
 		cur, err := s.migrateReq(ctx, route.Import, engine, protocol.DBMigrateRequest{Action: protocol.DBMigrateStatus, Target: route.Target})
 		var run *protocol.DBMigrateRun
@@ -1229,9 +1302,15 @@ func (s *Service) trialPull(ctx context.Context, j *jobs.Job, st *jobs.Step, p t
 				_ = st.Flush(ctx)
 			}
 		case run.Finished.IsZero():
-			if b := run.Bytes; b-reported >= 64<<20 {
-				reported = b
-				st.Logf("%s binnen.", humanBytes(b))
+			// Een agent met een buffer leest de dump door terwijl de import
+			// achterloopt; dan telt ook wat de import al las.
+			if b, in := run.Bytes, run.Bytes-run.Buffered; b-reported >= 64<<20 || in-reportedIn >= 64<<20 {
+				reported, reportedIn = b, in
+				if run.Buffered > 0 {
+					st.Logf("%s binnen, %s geïmporteerd.", humanBytes(b), humanBytes(in))
+				} else {
+					st.Logf("%s binnen.", humanBytes(b))
+				}
 				_ = st.Flush(ctx)
 			}
 		default:
@@ -1321,13 +1400,32 @@ func compareTrial(route *migrationRoute, run *protocol.DBMigrateRun, res *trialR
 	res.message = strings.Join(lines, "\n")
 }
 
-// dropTrial haalt de kopie van een proef weg.
+// dropTries is hoe vaak dropTrial het probeert.
+const dropTries = 6
+
+// dropTrial haalt de kopie van een proef weg. Een kopie van tientallen GB
+// weghalen kan langer duren dan één verzoek mag; DROP DATABASE IF EXISTS
+// mag gewoon opnieuw, dus pas na een paar pogingen is het een fout. Anders
+// telde een geslaagde proef als mislukt.
 func (s *Service) dropTrial(ctx context.Context, route *migrationRoute) error {
-	_, err := s.dbRequest(ctx, dbTarget{node: route.Import, engine: route.engine()}, protocol.DBRequest{Op: protocol.DBDrop, Drop: &protocol.DBDropRequest{
-		Database: route.Target, Confirm: route.Target,
-	}})
-	if err == nil && s.DBChanged != nil {
-		s.DBChanged()
+	var err error
+	for try := range dropTries {
+		if try > 0 {
+			select {
+			case <-ctx.Done():
+				return err
+			case <-time.After(s.Retry):
+			}
+		}
+		_, err = s.dbRequest(ctx, dbTarget{node: route.Import, engine: route.engine()}, protocol.DBRequest{Op: protocol.DBDrop, Drop: &protocol.DBDropRequest{
+			Database: route.Target, Confirm: route.Target,
+		}})
+		if err == nil {
+			if s.DBChanged != nil {
+				s.DBChanged()
+			}
+			return nil
+		}
 	}
 	return err
 }

@@ -89,7 +89,7 @@ func TestManagedCronJobs(t *testing.T) {
 	if s := c.do("POST", "/api/v1/clusters/"+nc.ID+"/vips", map[string]any{"address": "10.0.20.185"}, nil); s != http.StatusCreated {
 		t.Fatalf("vip: %d", s)
 	}
-	hosts, ids := map[string]*managedNode{}, map[string]string{}
+	hosts, ids, stops := map[string]*managedNode{}, map[string]string{}, map[string]func(){}
 	for i, name := range []string{"nc1", "nc2", "nc3"} {
 		var n node
 		if s := c.do("POST", "/api/v1/nodes", map[string]any{"hostname": name, "cluster_id": nc.ID}, &n); s != http.StatusCreated {
@@ -103,7 +103,7 @@ func TestManagedCronJobs(t *testing.T) {
 		}
 		h := &managedNode{addrs: a}
 		hosts[name] = h
-		startAgentWith(t, e, c, n.ID, strings.Repeat(string(rune('7'+i)), 32), a, func(ag *agent.Agent, root string) {
+		stops[name] = startAgentWith(t, e, c, n.ID, strings.Repeat(string(rune('7'+i)), 32), a, func(ag *agent.Agent, root string) {
 			h.root = root
 			ag.Root, ag.Exec = root, h.exec
 			ag.CronRunsInterval = 100 * time.Millisecond
@@ -267,7 +267,9 @@ func TestManagedCronJobs(t *testing.T) {
 		t.Errorf("%d events: %v", n, err)
 	}
 
-	// Een agent met protocol 17 krijgt een melding.
+	// Een agent met protocol 17 krijgt een melding. De agent stopt eerst,
+	// anders zet zijn heartbeat het protocol meteen terug.
+	stops["nc3"]()
 	if _, err := e.pool.Exec(ctx, "UPDATE agents SET protocol_version = 17 WHERE node_id = $1", ids["nc3"]); err != nil {
 		t.Fatal(err)
 	}

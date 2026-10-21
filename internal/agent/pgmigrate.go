@@ -379,7 +379,7 @@ func (a *Agent) runPGPull(req protocol.DBMigrateRequest, run protocol.DBMigrateR
 		imp := func(ctx context.Context, r io.Reader) error {
 			return a.stream(ctx, r, io.Discard, "runuser", "-u", "postgres", "--", "psql", "-X", "-q", "-v", "ON_ERROR_STOP=1", "-d", req.Target)
 		}
-		if err := pipe(ctx, protocol.DBPostgreSQL, dump, imp, progress); err != nil {
+		if err := pipe(ctx, protocol.DBPostgreSQL, dump, imp, progress, nil); err != nil {
 			return err
 		}
 		imported = true
