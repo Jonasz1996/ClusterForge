@@ -119,9 +119,9 @@ Wat er verschilt met de handleiding van Zabbix, en waarom:
 | `DATABASE naam [CHARSET] [COLLATE]` | Maakt de database als ze er niet is | één keer, schrijvende datanode |
 | `DBUSER naam PASSWORD … GRANT ALL ON db` | Gebruiker vanaf de nodes en het VIP | één keer, schrijvende datanode |
 | `IMPORT db FROM pad [TRUST_FUNCTIONS] [UNLESS "sql"]` | Laadt een `.sql` of `.sql.gz` van de node; `UNLESS` maakt het herhaalbaar | één keer |
-| `SERVICE naam … ENABLE\|DISABLE START\|STOP [RELOAD]` | Zet diensten aan; herstart (of herlaadt) na een wijziging erboven | elke node |
-| `RUN commando [CREATES pad] [UNLESS commando]` | Uitwijkmogelijkheid; zonder `CREATES` of `UNLESS` geeft de editor een waarschuwing | elke node |
-| `ONCE <instructie>` | Laat een node-instructie maar op één node lopen (de VIP-houder) | één keer |
+| `SERVICE naam … ENABLE\|DISABLE START\|STOP [RELOAD\|NORESTART]` | Zet diensten aan; herstart (of herlaadt) als een `FILE`, `SET` of `RUN` erboven iets veranderde, sinds de vorige regel voor die dienst | elke node |
+| `RUN [CREATES pad] [UNLESS "commando"] [TITLE "tekst"] commando` | Uitwijkmogelijkheid; `CREATES` of `UNLESS` is verplicht (zoals de bestaande commandostap), zodat een tweede uitrol het niet opnieuw doet | elke node |
+| `ONCE RUN\|FILE\|SET …` | Laat die instructie maar op één node lopen (de VIP-houder); een dienst herstart er niet voor | één keer |
 | `ROLE naam` | Alles eronder geldt alleen voor die rol (een recept kan meer rollen hebben) | – |
 | `HEALTH service naam`, `HEALTH http url code`, `HEALTH port n`, `HEALTH db` | Wat "gezond" is op een node | – |
 
@@ -214,8 +214,8 @@ Elke mijlpaal is een eigen PR op de vorige. Deze ontwerp-PR staat op PR #108
 - Docker-images en compose als recept: daarvoor is er de docker-template.
 - Ansible of shellscripts als recept inladen.
 - Recepten delen tussen ClusterForge-installaties.
-- Een `RUN` zonder `CREATES`/`UNLESS` verbieden: het blijft mogelijk, met een
-  waarschuwing, omdat niet alles in een instructie past.
+- Een heredoc (`<<EOF`) in `RUN`; die kan alleen bij `FILE`. Schrijf het
+  script met `FILE` en roep het aan met `RUN`.
 
 ## Vragen die het bouwen niet tegenhouden
 
