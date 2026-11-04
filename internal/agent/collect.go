@@ -25,6 +25,9 @@ var WatchedServices = []string{
 	"cron", "qemu-guest-agent", "pve-cluster", "pveproxy", "cf-agent",
 	// De container van de template generic.
 	"cf-app",
+	// De template zabbix: ClusterForge en een uitrol wachten tot deze
+	// active zijn.
+	"cf-zabbix-server", "cf-zabbix-db", "cf-zabbix-proxy",
 	// Kubernetes: k3s op een server, k3s-agent op een worker.
 	"k3s", "k3s-agent",
 	// Databaseclusters: Patroni met etcd voor PostgreSQL, en garb, de

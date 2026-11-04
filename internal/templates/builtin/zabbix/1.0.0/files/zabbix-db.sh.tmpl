@@ -81,7 +81,10 @@ while :; do
 			if has_vip; then
 				users || exit 1
 			fi
-			exit 0
+			echo "database en schema van Zabbix zijn klaar"
+			# Blijven draaien: de dienst staat zo active, en daar wachten
+			# een uitrol en een herstel op.
+			exec sleep infinity
 		fi
 		if has_vip; then
 			setup || exit 1
