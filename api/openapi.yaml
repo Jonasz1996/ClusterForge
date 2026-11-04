@@ -10791,7 +10791,7 @@ components:
         groups: { type: array, items: { $ref: "#/components/schemas/ImpactGroup" }, description: Per groep de ergste impact, prod bovenaan }
     Template:
       type: object
-      required: [name, version, title, description, cluster_type, params, roles, services]
+      required: [name, version, title, description, cluster_type, params, roles, services, database]
       properties:
         name: { type: string }
         version: { type: string }
@@ -10801,6 +10801,14 @@ components:
         params: { type: array, items: { $ref: "#/components/schemas/TemplateParam" } }
         roles: { type: array, items: { $ref: "#/components/schemas/TemplateRole" } }
         services: { type: array, items: { $ref: "#/components/schemas/TemplateService" }, description: De diensten die een uitrol in de afhankelijkheidsgraaf zet }
+        database: { allOf: [{ $ref: "#/components/schemas/TemplateDatabase" }], nullable: true, description: "De database die een uitrol altijd krijgt; null voor een template zonder" }
+    TemplateDatabase:
+      type: object
+      description: Zoals Database erbij, maar altijd en alleen op de nodes van role
+      required: [engine, role]
+      properties:
+        engine: { type: string }
+        role: { type: string }
     TemplateService:
       type: object
       required: [name, kind, unit, port, port_param, depends_on]

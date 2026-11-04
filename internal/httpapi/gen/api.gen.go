@@ -10655,16 +10655,25 @@ type Status string
 
 // Template defines model for Template.
 type Template struct {
-	ClusterType ClusterType     `json:"cluster_type"`
-	Description string          `json:"description"`
-	Name        string          `json:"name"`
-	Params      []TemplateParam `json:"params"`
-	Roles       []TemplateRole  `json:"roles"`
+	ClusterType ClusterType `json:"cluster_type"`
+
+	// Database De database die een uitrol altijd krijgt; null voor een template zonder
+	Database    nullable.Nullable[TemplateDatabase] `json:"database"`
+	Description string                              `json:"description"`
+	Name        string                              `json:"name"`
+	Params      []TemplateParam                     `json:"params"`
+	Roles       []TemplateRole                      `json:"roles"`
 
 	// Services De diensten die een uitrol in de afhankelijkheidsgraaf zet
 	Services []TemplateService `json:"services"`
 	Title    string            `json:"title"`
 	Version  string            `json:"version"`
+}
+
+// TemplateDatabase Zoals Database erbij, maar altijd en alleen op de nodes van role
+type TemplateDatabase struct {
+	Engine string `json:"engine"`
+	Role   string `json:"role"`
 }
 
 // TemplateParam defines model for TemplateParam.

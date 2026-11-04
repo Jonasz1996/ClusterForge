@@ -56,6 +56,10 @@ func toAPITemplate(t *templates.Template) gen.Template {
 		ClusterType: gen.ClusterType(t.ClusterType), Params: []gen.TemplateParam{}, Roles: []gen.TemplateRole{},
 		Services: []gen.TemplateService{},
 	}
+	out.Database = nullable.NewNullNullable[gen.TemplateDatabase]()
+	if d := t.Database; d != nil {
+		out.Database = nullable.NewNullableWithValue(gen.TemplateDatabase{Engine: d.Engine, Role: d.Role})
+	}
 	for _, p := range t.Params {
 		out.Params = append(out.Params, toAPIParam(p))
 	}
@@ -126,6 +130,10 @@ func (s *Server) DeployCluster(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var o deploy.RequestOptions
+	// Een template met een eigen database (Zabbix) krijgt haar altijd.
+	if tpl, ok := s.deploy.Templates.Latest(in.Template); ok && tpl.Database != nil && in.Database == nil {
+		in.Database = &gen.DeployDatabase{Engine: tpl.Database.Engine}
+	}
 	if in.Database != nil {
 		inTx, err := s.components.WithDeploy(in.Database.Engine)
 		if err != nil {

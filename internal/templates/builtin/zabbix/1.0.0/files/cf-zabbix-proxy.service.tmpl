@@ -1,0 +1,21 @@
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}). Wijzigingen hier
+# worden bij de volgende uitrol overschreven.
+
+[Unit]
+Description=Zabbix proxy {{ .node.hostname }} (ClusterForge)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=zabbix
+RuntimeDirectory=cf-zabbix-proxy
+StateDirectory=cf-zabbix-proxy
+ExecStart=/usr/sbin/zabbix_proxy -f -c /etc/zabbix/cf-zabbix_proxy.conf
+Restart=always
+RestartSec=15
+TimeoutStopSec=60
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

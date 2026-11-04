@@ -10453,6 +10453,13 @@ export interface components {
             roles: components["schemas"]["TemplateRole"][];
             /** @description De diensten die een uitrol in de afhankelijkheidsgraaf zet */
             services: components["schemas"]["TemplateService"][];
+            /** @description De database die een uitrol altijd krijgt; null voor een template zonder */
+            database: components["schemas"]["TemplateDatabase"] | null;
+        };
+        /** @description Zoals Database erbij, maar altijd en alleen op de nodes van role */
+        TemplateDatabase: {
+            engine: string;
+            role: string;
         };
         TemplateService: {
             name: string;

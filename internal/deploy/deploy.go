@@ -755,3 +755,24 @@ func (s *Service) checkVIP(ctx context.Context, tpl *templates.Template, p *para
 	}
 	return invalid("params.vrid", "er is geen VRRP-id meer vrij")
 }
+
+// DatabaseNodes zegt op welke nodes van een uitrol de database moet die de
+// template vanzelf meebrengt (Template.Database): de nodes met die rol, op
+// volgorde. ok is false voor een template zonder; de database komt dan,
+// als erom gevraagd is, op alle nodes.
+func (s *Service) DatabaseNodes(j store.Job) (nodes []uuid.UUID, ok bool, err error) {
+	var p params
+	if err := json.Unmarshal(j.Params, &p); err != nil {
+		return nil, false, err
+	}
+	tpl, found := s.Templates.Get(p.Template, p.Version)
+	if !found || tpl.Database == nil {
+		return nil, false, nil
+	}
+	for _, n := range p.Nodes {
+		if n.Role == tpl.Database.Role {
+			nodes = append(nodes, n.ID)
+		}
+	}
+	return nodes, true, nil
+}

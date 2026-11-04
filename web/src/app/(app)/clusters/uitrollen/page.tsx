@@ -101,7 +101,11 @@ function toInput(f: Form, t: Template | undefined): DeployInput {
       ssh_keys: f.sshKeys,
     },
     server_url: (f.serverUrl ?? "").trim(),
-    ...(f.database && t?.cluster_type !== "kubernetes" ? { database: { engine: "mariadb" } } : {}),
+    ...(t?.database
+      ? { database: { engine: t.database.engine } }
+      : f.database && t?.cluster_type !== "kubernetes"
+        ? { database: { engine: "mariadb" } }
+        : {}),
   };
 }
 
@@ -277,7 +281,17 @@ function DeployInner() {
         </Card>
       )}
 
-      {template && template.cluster_type !== "kubernetes" && (
+      {template && template.database && (
+        <Card title="Database">
+          <p className="text-sm text-slate-600 dark:text-slate-400">
+            Deze template krijgt altijd MariaDB Galera, op de nodes met de rol {template.database.role}. Na de uitrol zet
+            ClusterForge de database er vanzelf op; de template maakt daarna zelf de database, de gebruiker en het schema
+            klaar. Volg het bij de taak van de database op de pagina van het cluster.
+          </p>
+        </Card>
+      )}
+
+      {template && template.cluster_type !== "kubernetes" && !template.database && (
         <Card title="Database">
           <label className="inline-flex items-center gap-2 text-sm font-medium text-slate-700 dark:text-slate-300">
             <input type="checkbox" id={fieldId("database")} checked={form.database} onChange={(e) => set("database", e.target.checked)} />

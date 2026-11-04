@@ -3,6 +3,8 @@ package templates
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
+	"os/exec"
 	"reflect"
 	"strings"
 	"testing"
@@ -235,7 +237,7 @@ func TestBuiltinList(t *testing.T) {
 	for _, tpl := range Builtin() {
 		names = append(names, tpl.Name+" "+tpl.Version)
 	}
-	if got := strings.Join(names, ", "); got != "cron 1.0.0, docker 1.0.0, generic 1.0.0, keepalived-nginx 1.1.0, kubernetes 1.1.0" {
+	if got := strings.Join(names, ", "); got != "cron 1.0.0, docker 1.0.0, generic 1.0.0, keepalived-nginx 1.1.0, kubernetes 1.1.0, zabbix 1.0.0" {
 		t.Fatalf("ingebouwde templates: %s", got)
 	}
 }
@@ -369,5 +371,91 @@ func TestRenderGeneric(t *testing.T) {
 		if _, err := tpl.Validate(map[string]any{"vip": "10.0.30.100", "image": good}); err != nil {
 			t.Errorf("%s geweigerd: %v", good, err)
 		}
+	}
+}
+
+func TestRenderZabbix(t *testing.T) {
+	tpl, _ := Latest("zabbix")
+	if tpl.Database == nil || tpl.Database.Engine != "mariadb" || tpl.Database.Role != "server" {
+		t.Fatalf("database: %+v", tpl.Database)
+	}
+	params, err := tpl.Validate(map[string]any{"vip": "10.0.30.100", "vrid": 63, "auth_pass": "geheim12", "db_password": "Abcdefgh23456789Abcdefgh23456789"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if params["server_disk"] != "75G" || params["servers"] != 3 {
+		t.Fatalf("standaarden: %+v", params)
+	}
+	counts, err := tpl.Counts(Context{Params: params})
+	if err != nil || len(counts) != 2 || counts[0] != 3 || counts[1] != 1 {
+		t.Fatalf("aantallen: %v %v", counts, err)
+	}
+	c := Context{Params: params, Cluster: ClusterInfo{Name: "Zabbix", Slug: "zabbix", Environment: "prod"}}
+	for i := 1; i <= 3; i++ {
+		c.Nodes = append(c.Nodes, NodeInfo{Hostname: fmt.Sprintf("zabbix-server-%02d", i), Role: "server", Index: i,
+			Address: fmt.Sprintf("10.0.30.%d", 10+i), Prefix: 24, Interface: "eth0"})
+	}
+	c.Nodes = append(c.Nodes, NodeInfo{Hostname: "zabbix-proxy-01", Role: "proxy", Index: 1, Address: "10.0.30.14", Prefix: 24, Interface: "eth0"})
+
+	c.Node = &c.Nodes[1]
+	steps, err := tpl.Steps("server", c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	files := map[string]string{}
+	for _, s := range steps {
+		if s.File != nil {
+			files[s.File.Path] = s.File.Content
+		}
+		if s.Command != nil {
+			t.Errorf("de template gebruikt geen commando's: %+v", s.Command)
+		}
+	}
+	for path, want := range map[string][]string{
+		"/etc/zabbix/cf-zabbix_server.conf": {"HANodeName=zabbix-server-02\n", "NodeAddress=10.0.30.12:10051\n", "DBHost=10.0.30.100\n",
+			"Include=/run/credentials/cf-zabbix-server.service/db.conf\n"},
+		"/etc/zabbix/cf-zabbix_server-db.conf":     {"DBPassword=Abcdefgh23456789Abcdefgh23456789\n"},
+		"/usr/local/lib/clusterforge/zabbix-db.sh": {"VIP=10.0.30.100\n", `HOSTS="10.0.30.11 10.0.30.12 10.0.30.13 $VIP"`},
+		"/usr/share/zabbix/conf/zabbix.conf.php":   {"$DB['SERVER']          = '10.0.30.100';", "$DB['PASSWORD']        = 'Abcdefgh23456789Abcdefgh23456789';"},
+		"/etc/keepalived/keepalived.conf":          {"priority 140\n", "        10.0.30.11\n        10.0.30.13\n    }", "nopreempt", "chk_zabbix\n    }"},
+		"/etc/nginx/sites-enabled/default":         {"location = /cf-health", "root /usr/share/zabbix;"},
+		"/etc/keepalived/check-zabbix.sh":          {"exec /usr/local/bin/cf-agent check db mariadb"},
+	} {
+		got, ok := files[path]
+		if !ok {
+			t.Errorf("geen bestand %s", path)
+			continue
+		}
+		for _, w := range want {
+			if !strings.Contains(got, w) {
+				t.Errorf("%s mist %q:\n%s", path, w, got)
+			}
+		}
+	}
+	// De scripts zijn geldige sh.
+	for _, path := range []string{"/usr/local/lib/clusterforge/zabbix-db.sh", "/etc/keepalived/check-zabbix.sh"} {
+		cmd := exec.Command("sh", "-n")
+		cmd.Stdin = strings.NewReader(files[path])
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Errorf("%s: %v %s", path, err, out)
+		}
+	}
+
+	c.Node = &c.Nodes[3]
+	steps, err = tpl.Steps("proxy", c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conf := steps[3].File.Content
+	for _, w := range []string{"Hostname=zabbix-proxy-01\n", "Server=10.0.30.11;10.0.30.12;10.0.30.13\n", "ProxyMode=0\n"} {
+		if !strings.Contains(conf, w) {
+			t.Errorf("zabbix_proxy.conf mist %q:\n%s", w, conf)
+		}
+	}
+
+	c.Node = nil
+	checks, err := tpl.RenderChecks(c)
+	if err != nil || len(checks) != 2 || checks[1].HTTP.URL != "http://10.0.30.100/cf-health" {
+		t.Fatalf("checks: %+v %v", checks, err)
 	}
 }
