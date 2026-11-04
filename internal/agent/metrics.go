@@ -52,7 +52,7 @@ func (c *Collector) Metrics() protocol.Metrics {
 		}
 	}
 	for _, mt := range c.mounts() {
-		st, ok := statfs(c.path(mt.path))
+		st, ok := c.statfs(c.path(mt.path))
 		if !ok || st.size == 0 {
 			continue
 		}

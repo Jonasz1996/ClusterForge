@@ -25,6 +25,8 @@ NAME=debian-13-clusterforge-ct
 OSTEMPLATE=""
 REPLACE=0
 ALLOW_HTTP=0
+ASK_PASSWORD=0
+SSH_KEYS=""
 
 usage() {
 	cat >&2 <<'EOF'
@@ -41,6 +43,10 @@ gebruik: ct-template.sh --server https://clusterforge.example [opties]
   --name NAAM          hostname van de template (standaard debian-13-clusterforge-ct)
   --ostemplate VOLID   een eigen containertemplate, zoals
                        local:vztmpl/debian-13-standard_13.1-2_amd64.tar.zst
+  --ask-password       vraagt een rootwachtwoord voor de template; elke CT
+                       die ClusterForge eruit kloont, krijgt hetzelfde
+                       (voor de console van Proxmox)
+  --ssh-keys BESTAND   publieke SSH-sleutels voor root in de template
   --replace            een bestaande template met dit nummer vervangen
 EOF
 	exit 2
@@ -58,6 +64,7 @@ main() {
 		case "$1" in
 		--replace) REPLACE=1; shift; continue ;;
 		--allow-http) ALLOW_HTTP=1; shift; continue ;;
+		--ask-password) ASK_PASSWORD=1; shift; continue ;;
 		-h | --help) usage ;;
 		esac
 		[ $# -ge 2 ] || usage
@@ -69,6 +76,7 @@ main() {
 		--bridge) BRIDGE="$2" ;;
 		--name) NAME="$2" ;;
 		--ostemplate) OSTEMPLATE="$2" ;;
+		--ssh-keys) SSH_KEYS="$2" ;;
 		*) echo "onbekende optie: $1" >&2; usage ;;
 		esac
 		shift 2
@@ -91,6 +99,19 @@ main() {
 	x86_64 | amd64) ;;
 	*) fail "alleen amd64 wordt ondersteund" ;;
 	esac
+
+	[ -z "$SSH_KEYS" ] || [ -s "$SSH_KEYS" ] || fail "--ssh-keys: $SSH_KEYS bestaat niet of is leeg"
+	ROOT_PASSWORD=""
+	if [ "$ASK_PASSWORD" = 1 ]; then
+		# Van de terminal, niet van stdin: die is bij curl | bash het script.
+		[ -r /dev/tty ] || fail "--ask-password heeft een terminal nodig"
+		read -rsp "Rootwachtwoord voor de CT's: " ROOT_PASSWORD </dev/tty
+		echo
+		read -rsp "Nog een keer: " again </dev/tty
+		echo
+		[ "$ROOT_PASSWORD" = "$again" ] || fail "de wachtwoorden verschillen"
+		[ "${#ROOT_PASSWORD}" -ge 8 ] || fail "het wachtwoord moet minstens 8 tekens hebben"
+	fi
 
 	if pct status "$VMID" >/dev/null 2>&1; then
 		pct config "$VMID" | grep -q '^template: 1' || fail "CT $VMID bestaat al en is geen template; kies een ander nummer met --vmid"
@@ -185,9 +206,12 @@ UNIT
 	fi
 
 	echo "==> CT $VMID ($NAME) maken uit $OSTEMPLATE op $STORAGE"
+	EXTRA=()
+	[ -z "$SSH_KEYS" ] || EXTRA+=(--ssh-public-keys "$SSH_KEYS")
+	[ -z "$ROOT_PASSWORD" ] || EXTRA+=(--password "$ROOT_PASSWORD")
 	pct create "$VMID" "$OSTEMPLATE" --hostname "$NAME" --ostype debian --unprivileged 1 --features nesting=1 \
 		--rootfs "$STORAGE:4" --cores 1 --memory 1024 --swap 512 \
-		--net0 "name=eth0,bridge=$BRIDGE,ip=dhcp" --tags clusterforge \
+		--net0 "name=eth0,bridge=$BRIDGE,ip=dhcp" --tags clusterforge "${EXTRA[@]}" \
 		--description "CT-template voor ClusterForge: Debian 13 met cf-agent $AGENT_VERSION. Gemaakt op $(date -I) met ct-template.sh." >/dev/null
 
 	echo "==> cf-agent $AGENT_VERSION erin zetten"
