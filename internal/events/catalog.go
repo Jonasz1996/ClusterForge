@@ -126,6 +126,7 @@ var Known = map[string]Spec{
 	"cluster.recipe_database_failed":   {CategoryInventory, "Database-instructies van recept mislukt"},
 	"recipe.saved":                     {CategoryInventory, "Recept bewaard"},
 	"recipe.deleted":                   {CategoryInventory, "Receptversie weggehaald"},
+	"cluster.secret_revealed":          {CategorySecurity, "Wachtwoord van databasegebruiker getoond"},
 	"blueprint.saved":                  {CategoryInventory, "Cluster samengesteld uit recepten"},
 	"node.created":                     {CategoryInventory, "Node toegevoegd"},
 	"node.updated":                     {CategoryInventory, "Node gewijzigd"},

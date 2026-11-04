@@ -30,6 +30,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/deploy"
 	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/jobs"
+	"github.com/Jonasz1996/clusterforge/internal/rollout"
 	"github.com/Jonasz1996/clusterforge/internal/status"
 	"github.com/Jonasz1996/clusterforge/internal/store"
 	"github.com/Jonasz1996/clusterforge/internal/templates"
@@ -210,8 +211,10 @@ func NewService(pool *pgxpool.Pool, ev *events.Writer, log *slog.Logger, runner 
 	if dep != nil {
 		dep.OnFinished(s.deployFinished)
 	}
-	// De database-instructies van een samengesteld cluster (fase 9).
+	// De database-instructies van een samengesteld cluster (fase 9): als de
+	// database er is, en na het toepassen van een nieuwe versie.
 	runner.OnFinished(Kind, s.recipeAfterAdd)
+	runner.OnFinished(rollout.Kind, s.recipeAfterAdd)
 	return s
 }
 

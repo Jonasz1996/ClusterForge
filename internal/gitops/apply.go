@@ -273,6 +273,8 @@ func (s *Service) Approve(ctx context.Context, actor events.Actor, id uuid.UUID)
 	}
 	if out.Job != nil {
 		s.ro.Kick()
+	} else if s.Applied != nil {
+		s.Applied(ctx, c.ID)
 	}
 	s.Kick(false)
 	return out, nil

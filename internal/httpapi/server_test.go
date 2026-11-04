@@ -248,6 +248,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	// De database als onderdeel, met korte tijden; zonder metingen van het
 	// geheugen tenzij een test ze zet.
 	cmps := components.NewService(pool, ev, log, runner, bus, dep)
+	git.Applied = cmps.RecipeDatabaseFor
 	cmps.Changed = eval.Kick
 	cmps.Poll, cmps.GateTimeout, cmps.Timeout, cmps.Retry = 20*time.Millisecond, 5*time.Second, 2*time.Second, 50*time.Millisecond
 	cmps.VIPTimeout, cmps.DumpPoll, cmps.MoveDrain, cmps.PendingWait = 5*time.Second, 20*time.Millisecond, 200*time.Millisecond, 500*time.Millisecond

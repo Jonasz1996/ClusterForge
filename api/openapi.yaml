@@ -1495,6 +1495,44 @@ paths:
               schema: { $ref: "#/components/schemas/SpecHistory" }
         "401": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /clusters/{clusterId}/connection:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getClusterConnection
+      summary: Hoe een app de database van een samengesteld cluster bereikt
+      description: Adres, poort, databases en gebruikers uit de recepten; zonder wachtwoorden.
+      responses:
+        "200":
+          description: De verbinding
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ClusterConnection" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /clusters/{clusterId}/connection/reveal:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: revealClusterConnectionSecret
+      summary: Het wachtwoord van een databasegebruiker tonen (admin)
+      description: Vraagt je code van tweestapsverificatie, of je wachtwoord als je die niet hebt. Komt in het logboek.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ConnectionRevealInput" }
+      responses:
+        "200":
+          description: Het wachtwoord
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConnectionSecret" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
   /clusters/{clusterId}/spec/edit:
     parameters:
       - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -5301,6 +5339,40 @@ components:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
   schemas:
+    ClusterConnection:
+      type: object
+      required: [available, reason, engine, host, port, role, databases, users]
+      properties:
+        available: { type: boolean, description: "false voor een cluster zonder database uit recepten" }
+        reason: { type: string, description: "Waarom er geen verbinding is; leeg als available" }
+        engine: { type: string }
+        host: { type: string, description: "Het VIP, of localhost op de nodes met de database" }
+        port: { type: integer }
+        role: { type: string, description: De rol met de database }
+        databases: { type: array, items: { type: string } }
+        users:
+          type: array
+          items: { $ref: "#/components/schemas/ConnectionUser" }
+    ConnectionUser:
+      type: object
+      required: [name, database, secret]
+      properties:
+        name: { type: string }
+        database: { type: string, description: "De database met alle rechten; leeg voor geen" }
+        secret: { type: string, description: De naam van het geheim met het wachtwoord }
+    ConnectionRevealInput:
+      type: object
+      required: [secret]
+      properties:
+        secret: { type: string }
+        password: { type: string, maxLength: 1024, description: Je wachtwoord, als je geen tweestapsverificatie hebt }
+        totp_code: { type: string, maxLength: 10, description: Je code, als je tweestapsverificatie hebt }
+    ConnectionSecret:
+      type: object
+      required: [secret, value]
+      properties:
+        secret: { type: string }
+        value: { type: string }
     Composition:
       type: object
       required: [name, title, roles]

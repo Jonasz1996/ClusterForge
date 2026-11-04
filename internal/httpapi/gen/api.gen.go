@@ -4187,6 +4187,25 @@ type ClusterComponent struct {
 // ClusterComponentHealth Wat de bewaking laatst zag; leeg als ze nog niet keek of al twee minuten niet, zoals tijdens een taak. Telt mee in de status van het cluster
 type ClusterComponentHealth string
 
+// ClusterConnection defines model for ClusterConnection.
+type ClusterConnection struct {
+	// Available false voor een cluster zonder database uit recepten
+	Available bool     `json:"available"`
+	Databases []string `json:"databases"`
+	Engine    string   `json:"engine"`
+
+	// Host Het VIP, of localhost op de nodes met de database
+	Host string `json:"host"`
+	Port int    `json:"port"`
+
+	// Reason Waarom er geen verbinding is; leeg als available
+	Reason string `json:"reason"`
+
+	// Role De rol met de database
+	Role  string           `json:"role"`
+	Users []ConnectionUser `json:"users"`
+}
+
 // ClusterDetail defines model for ClusterDetail.
 type ClusterDetail struct {
 	// AppliedRevision De revisie die op alle nodes staat; lager dan spec_revision na een mislukte toepassing
@@ -5148,6 +5167,32 @@ type CompositionRole struct {
 // CompositionVIP defines model for CompositionVIP.
 type CompositionVIP struct {
 	Role string `json:"role"`
+}
+
+// ConnectionRevealInput defines model for ConnectionRevealInput.
+type ConnectionRevealInput struct {
+	// Password Je wachtwoord
+	Password *string `json:"password,omitempty"`
+	Secret   string  `json:"secret"`
+
+	// TotpCode Je code
+	TotpCode *string `json:"totp_code,omitempty"`
+}
+
+// ConnectionSecret defines model for ConnectionSecret.
+type ConnectionSecret struct {
+	Secret string `json:"secret"`
+	Value  string `json:"value"`
+}
+
+// ConnectionUser defines model for ConnectionUser.
+type ConnectionUser struct {
+	// Database De database met alle rechten; leeg voor geen
+	Database string `json:"database"`
+	Name     string `json:"name"`
+
+	// Secret De naam van het geheim met het wachtwoord
+	Secret string `json:"secret"`
 }
 
 // CronGroup De cronjobs van één cluster, of van de nodes zonder cluster.
@@ -11858,6 +11903,9 @@ type DropComponentUserJSONRequestBody = ComponentDropInput
 // SetComponentUserPasswordJSONRequestBody defines body for SetComponentUserPassword for application/json ContentType.
 type SetComponentUserPasswordJSONRequestBody = ComponentConfirmInput
 
+// RevealClusterConnectionSecretJSONRequestBody defines body for RevealClusterConnectionSecret for application/json ContentType.
+type RevealClusterConnectionSecretJSONRequestBody = ConnectionRevealInput
+
 // CreateDisasterScenarioJSONRequestBody defines body for CreateDisasterScenario for application/json ContentType.
 type CreateDisasterScenarioJSONRequestBody = DisasterScenarioInput
 
@@ -12259,6 +12307,12 @@ type ServerInterface interface {
 	// SetComponentUserPassword Een gebruiker een nieuw wachtwoord geven (admin)
 	// (POST /clusters/{clusterId}/components/{componentId}/users/{user}/password)
 	SetComponentUserPassword(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID, user string)
+	// GetClusterConnection Hoe een app de database van een samengesteld cluster bereikt
+	// (GET /clusters/{clusterId}/connection)
+	GetClusterConnection(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
+	// RevealClusterConnectionSecret Het wachtwoord van een databasegebruiker tonen (admin)
+	// (POST /clusters/{clusterId}/connection/reveal)
+	RevealClusterConnectionSecret(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
 	// ListDisasterScenarios Rampoefeningen van een cluster met hun laatste run
 	// (GET /clusters/{clusterId}/disaster-scenarios)
 	ListDisasterScenarios(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
@@ -13255,6 +13309,18 @@ func (_ Unimplemented) DropComponentUser(w http.ResponseWriter, r *http.Request,
 // SetComponentUserPassword Een gebruiker een nieuw wachtwoord geven (admin)
 // (POST /clusters/{clusterId}/components/{componentId}/users/{user}/password)
 func (_ Unimplemented) SetComponentUserPassword(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID, user string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetClusterConnection Hoe een app de database van een samengesteld cluster bereikt
+// (GET /clusters/{clusterId}/connection)
+func (_ Unimplemented) GetClusterConnection(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RevealClusterConnectionSecret Het wachtwoord van een databasegebruiker tonen (admin)
+// (POST /clusters/{clusterId}/connection/reveal)
+func (_ Unimplemented) RevealClusterConnectionSecret(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -16465,6 +16531,58 @@ func (siw *ServerInterfaceWrapper) SetComponentUserPassword(w http.ResponseWrite
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.SetComponentUserPassword(w, r, clusterId, componentId, user)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetClusterConnection operation middleware
+func (siw *ServerInterfaceWrapper) GetClusterConnection(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetClusterConnection(w, r, clusterId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RevealClusterConnectionSecret operation middleware
+func (siw *ServerInterfaceWrapper) RevealClusterConnectionSecret(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RevealClusterConnectionSecret(w, r, clusterId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -22717,6 +22835,12 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/clusters/{clusterId}/spec-revisions", wrapper.ListSpecRevisions)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/clusters/{clusterId}/connection", wrapper.GetClusterConnection)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/clusters/{clusterId}/connection/reveal", wrapper.RevealClusterConnectionSecret)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/clusters/{clusterId}/spec/edit", wrapper.GetClusterSpecEdit)

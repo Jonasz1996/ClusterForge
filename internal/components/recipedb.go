@@ -125,7 +125,9 @@ func (s *Service) RunRecipeDatabase(ctx context.Context, clusterID, id uuid.UUID
 const RecipeDBTimeout = 45 * time.Minute
 
 // recipeAfterAdd voert de database-instructies van een samengesteld cluster
-// (Template.Database.Steps) uit zodra de database er is. Ze zijn
+// (Template.Database.Steps) uit zodra de database er is, en na het
+// toepassen van een nieuwe revisie (rollout), zodat een nieuwe DATABASE of
+// DBUSER er meteen bij komt. Ze zijn
 // idempotent, dus ook na een tweede 'Database toevoegen' verandert er
 // niets. Het resultaat staat in het logboek van het cluster.
 func (s *Service) recipeAfterAdd(ctx context.Context, j store.Job) {
@@ -133,21 +135,38 @@ func (s *Service) recipeAfterAdd(ctx context.Context, j store.Job) {
 		return
 	}
 	var p jobParams
-	if err := json.Unmarshal(j.Params, &p); err != nil {
-		return
+	if j.Kind == Kind {
+		if err := json.Unmarshal(j.Params, &p); err != nil {
+			return
+		}
 	}
-	d, err := s.dep.Desired(ctx, *j.ClusterID)
+	s.recipeDatabase(ctx, *j.ClusterID, p.ComponentID)
+}
+
+// RecipeDatabaseFor voert de database-instructies van een samengesteld
+// cluster uit na een nieuwe revisie die op geen node iets verandert, zoals
+// een nieuwe versie met alleen een extra DATABASE.
+func (s *Service) RecipeDatabaseFor(ctx context.Context, clusterID uuid.UUID) {
+	if s.dep != nil {
+		s.recipeDatabase(ctx, clusterID, uuid.Nil)
+	}
+}
+
+// recipeDatabase voert de instructies uit op het onderdeel compID, of op de
+// database van het cluster als compID leeg is.
+func (s *Service) recipeDatabase(ctx context.Context, clusterID, compID uuid.UUID) {
+	d, err := s.dep.Desired(ctx, clusterID)
 	if err != nil || d.Template.Database == nil || len(d.Template.Database.Steps) == 0 {
 		return
 	}
 	tctx, err := d.Context()
 	if err != nil {
-		s.log.Error("database-instructies renderen mislukt", "cluster", *j.ClusterID, "err", err)
+		s.log.Error("database-instructies renderen mislukt", "cluster", clusterID, "err", err)
 		return
 	}
 	steps, err := d.Template.RenderDBSteps(tctx)
 	if err != nil {
-		s.log.Error("database-instructies renderen mislukt", "cluster", *j.ClusterID, "err", err)
+		s.log.Error("database-instructies renderen mislukt", "cluster", clusterID, "err", err)
 		return
 	}
 	run := make([]RecipeDBStep, len(steps))
@@ -155,7 +174,23 @@ func (s *Service) recipeAfterAdd(ctx context.Context, j store.Job) {
 		run[i] = RecipeDBStep{Kind: st.Kind, Database: st.Database, Charset: st.Charset, Collation: st.Collation, User: st.User,
 			Password: st.Password, GrantOn: st.GrantOn, Path: st.Path, TrustFunctions: st.TrustFunctions, Unless: st.Unless}
 	}
-	clusterID, compID := *j.ClusterID, p.ComponentID
+	if compID == uuid.Nil {
+		// Na een nieuwe versie toepassen: de database van het cluster, als
+		// die er al is.
+		rows, err := s.q.ListClusterComponents(ctx, clusterID)
+		if err != nil {
+			s.log.Error("onderdelen lezen mislukt", "cluster", clusterID, "err", err)
+			return
+		}
+		for _, r := range rows {
+			if r.ClusterComponent.Engine == d.Template.Database.Engine && r.ClusterComponent.AppliedRevision != nil {
+				compID = r.ClusterComponent.ID
+			}
+		}
+		if compID == uuid.Nil {
+			return
+		}
+	}
 	// Een schema laden duurt langer dan een taak mag wachten op wie hoort
 	// dat ze klaar is.
 	s.wg.Add(1)

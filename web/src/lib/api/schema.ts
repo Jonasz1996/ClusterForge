@@ -1375,6 +1375,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/clusters/{clusterId}/connection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Hoe een app de database van een samengesteld cluster bereikt
+         * @description Adres, poort, databases en gebruikers uit de recepten; zonder wachtwoorden.
+         */
+        get: operations["getClusterConnection"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/clusters/{clusterId}/connection/reveal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Het wachtwoord van een databasegebruiker tonen (admin)
+         * @description Vraagt je code van tweestapsverificatie, of je wachtwoord als je die niet hebt. Komt in het logboek.
+         */
+        post: operations["revealClusterConnectionSecret"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/clusters/{clusterId}/spec/edit": {
         parameters: {
             query?: never;
@@ -4811,6 +4855,38 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        ClusterConnection: {
+            /** @description false voor een cluster zonder database uit recepten */
+            available: boolean;
+            /** @description Waarom er geen verbinding is; leeg als available */
+            reason: string;
+            engine: string;
+            /** @description Het VIP, of localhost op de nodes met de database */
+            host: string;
+            port: number;
+            /** @description De rol met de database */
+            role: string;
+            databases: string[];
+            users: components["schemas"]["ConnectionUser"][];
+        };
+        ConnectionUser: {
+            name: string;
+            /** @description De database met alle rechten; leeg voor geen */
+            database: string;
+            /** @description De naam van het geheim met het wachtwoord */
+            secret: string;
+        };
+        ConnectionRevealInput: {
+            secret: string;
+            /** @description Je wachtwoord */
+            password?: string;
+            /** @description Je code */
+            totp_code?: string;
+        };
+        ConnectionSecret: {
+            secret: string;
+            value: string;
+        };
         Composition: {
             /** @description Korte naam; de template heet eigen-<naam> */
             name: string;
@@ -13470,6 +13546,61 @@ export interface operations {
             };
             401: components["responses"]["Error"];
             404: components["responses"]["Error"];
+        };
+    };
+    getClusterConnection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description De verbinding */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClusterConnection"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    revealClusterConnectionSecret: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConnectionRevealInput"];
+            };
+        };
+        responses: {
+            /** @description Het wachtwoord */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectionSecret"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            429: components["responses"]["Error"];
         };
     };
     getClusterSpecEdit: {

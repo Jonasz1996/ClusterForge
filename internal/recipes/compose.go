@@ -335,7 +335,10 @@ func Compose(c Composition, version string, recipes map[string]*Recipe) (*Compos
 
 	// De database.
 	if d := c.Database; d != nil {
-		info := &templates.DatabaseInfo{Engine: "mariadb", Role: d.Role, Steps: dbSteps}
+		info := &templates.DatabaseInfo{Engine: "mariadb", Role: d.Role, Steps: dbSteps, Host: "localhost"}
+		if c.VIP != nil && c.VIP.Role == d.Role {
+			info.Host = "{{ .params.vip }}"
+		}
 		settings := map[string]any{}
 		if d.BufferPool != "" {
 			b, err := templates.ParseSize(d.BufferPool)

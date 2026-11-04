@@ -60,6 +60,9 @@ type DatabaseInfo struct {
 	// Steps zijn de database-instructies van een recept (fase 9): ze lopen
 	// één keer, nadat de database er is.
 	Steps []DBStep `yaml:"steps"`
+	// Host is het adres waarmee de apps de database bereiken, zoals
+	// {{ .params.vip }} of localhost; leeg als de template het niet zegt.
+	Host string `yaml:"host,omitempty"`
 }
 
 // DBStep is een database-instructie van een recept: db_database, db_user
@@ -78,6 +81,15 @@ type DBStep struct {
 }
 
 var dbStepKinds = map[string]bool{"db_database": true, "db_user": true, "db_import": true}
+
+// DBHost geeft het adres van de database voor de apps, met de parameters
+// ingevuld; leeg als de template het niet zegt.
+func (t *Template) DBHost(c Context) (string, error) {
+	if t.Database == nil {
+		return "", nil
+	}
+	return expandString(t.Database.Host, c.data())
+}
 
 // RenderDBSteps vult de parameters en geheimen in de database-instructies
 // in.
