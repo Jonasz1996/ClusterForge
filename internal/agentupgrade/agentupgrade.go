@@ -109,8 +109,10 @@ func (a Agent) Upgradable() bool {
 	return a.Online && (a.State == StateOutdated || a.State == StateFailed)
 }
 
-// Behind is true als deze agent niet die van de server is en de server
-// een nieuwere heeft: hij mist dan de fixes die met de server meekwamen.
+// Behind is true als deze agent een andere build is dan die van de server,
+// en geen hoger protocol heeft: dan kan hij fixes missen die met de server
+// meekwamen. Builds met hetzelfde protocol hebben geen volgorde; die van de
+// server is de maat.
 func (a Agent) Behind() bool {
 	return a.State == StateOutdated || a.State == StateFailed || a.State == StateManual
 }
