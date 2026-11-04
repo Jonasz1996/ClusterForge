@@ -1852,6 +1852,121 @@ paths:
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /recipes:
+    get:
+      operationId: listRecipes
+      summary: Alle recepten met hun versies (fase 9)
+      responses:
+        "200":
+          description: Recepten
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/RecipeSummary" }
+        "401": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: saveRecipe
+      summary: Een recept als nieuwe versie bewaren (admin)
+      description: >-
+        Naam en versie komen van de RECIPE-regel. Dezelfde tekst nog eens
+        bewaren geeft 200 en verandert niets; een andere tekst met een
+        bestaande versie geeft 409. Een recept met fouten geeft 400 met de
+        fouten per regel in details.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RecipeSource" }
+      responses:
+        "200":
+          description: Bestond al met dezelfde tekst
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecipeVersion" }
+        "201":
+          description: Bewaard
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecipeVersion" }
+        "400":
+          description: Het recept heeft fouten
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecipeCheck" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /recipes/check:
+    post:
+      operationId: checkRecipe
+      summary: Een recept controleren zonder het te bewaren
+      description: Geeft de fouten en waarschuwingen per regel en, zonder fouten, wat het recept per node doet.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RecipeSource" }
+      responses:
+        "200":
+          description: Resultaat van de controle
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecipeCheck" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+  /recipes/examples:
+    get:
+      operationId: listRecipeExamples
+      summary: Ingebouwde voorbeeldrecepten om mee te beginnen
+      responses:
+        "200":
+          description: Voorbeelden
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/RecipeExample" }
+        "401": { $ref: "#/components/responses/Error" }
+  /recipes/{recipeName}:
+    parameters:
+      - { name: recipeName, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: listRecipeVersions
+      summary: Alle versies van een recept, nieuwste eerst
+      responses:
+        "200":
+          description: Versies
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/RecipeVersion" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /recipes/{recipeName}/versions/{recipeVersion}:
+    parameters:
+      - { name: recipeName, in: path, required: true, schema: { type: string } }
+      - { name: recipeVersion, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: getRecipeVersion
+      summary: Eén versie van een recept, met wat ze per node doet
+      responses:
+        "200":
+          description: Versie
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecipeVersionDetail" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteRecipeVersion
+      summary: Een versie van een recept verwijderen (admin)
+      responses:
+        "204": { description: Verwijderd }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
   /dependencies:
     post:
       operationId: createDependency
@@ -5146,6 +5261,113 @@ components:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
   schemas:
+    RecipeSource:
+      type: object
+      required: [source]
+      properties:
+        source: { type: string, description: "De tekst van het recept (hoogstens 256 KiB)" }
+    RecipeSummary:
+      type: object
+      required: [name, versions, updated_at]
+      properties:
+        name: { type: string }
+        versions: { type: array, items: { type: string }, description: Nieuwste eerst }
+        updated_at: { type: string, format: date-time }
+    RecipeVersion:
+      type: object
+      required: [name, version, source, created_at, created_by]
+      properties:
+        name: { type: string }
+        version: { type: string }
+        source: { type: string }
+        created_at: { type: string, format: date-time }
+        created_by: { type: string, nullable: true, description: Gebruikersnaam }
+    RecipeVersionDetail:
+      allOf:
+        - { $ref: "#/components/schemas/RecipeVersion" }
+        - type: object
+          required: [check]
+          properties:
+            check: { $ref: "#/components/schemas/RecipeCheck" }
+    RecipeExample:
+      type: object
+      required: [name, title, source]
+      properties:
+        name: { type: string }
+        title: { type: string }
+        source: { type: string }
+    RecipeDiag:
+      type: object
+      required: [line, message, warning]
+      properties:
+        line: { type: integer }
+        message: { type: string }
+        warning: { type: boolean }
+    RecipeCheck:
+      type: object
+      required: [ok, diagnostics, recipe]
+      properties:
+        ok: { type: boolean, description: Geen fouten (waarschuwingen mogen) }
+        diagnostics: { type: array, items: { $ref: "#/components/schemas/RecipeDiag" } }
+        recipe:
+          allOf: [{ $ref: "#/components/schemas/RecipeParsed" }]
+          nullable: true
+          description: null als er fouten zijn
+    RecipeParsed:
+      type: object
+      required: [name, version, from, needs, params, roles]
+      properties:
+        name: { type: string }
+        version: { type: string }
+        from: { type: string }
+        needs:
+          type: array
+          items:
+            type: object
+            required: [service]
+            properties:
+              service: { type: string, description: vip of database }
+              engine: { type: string, description: mariadb of postgresql bij database }
+        params:
+          type: array
+          items:
+            type: object
+            required: [name, type, line]
+            properties:
+              name: { type: string }
+              type: { type: string, description: "string, int, bool, ipv4, size of secret" }
+              default: { type: string }
+              length: { type: integer }
+              line: { type: integer }
+        roles:
+          type: array
+          items:
+            type: object
+            required: [name, steps, health]
+            properties:
+              name: { type: string, description: "Leeg: geldt voor de rol waar je het recept aan koppelt" }
+              steps:
+                type: array
+                items:
+                  type: object
+                  required: [line, kind, once, secret, title, spec]
+                  properties:
+                    line: { type: integer }
+                    kind: { type: string }
+                    once: { type: boolean, description: "Loopt op één node" }
+                    secret: { type: boolean, description: "Er zit een geheim in; de inhoud staat alleen als {{ .params.naam }}" }
+                    title: { type: string }
+                    spec: { type: object, additionalProperties: true, description: De stap in de vorm van template.yaml }
+              health:
+                type: array
+                items:
+                  type: object
+                  required: [line, kind]
+                  properties:
+                    line: { type: integer }
+                    kind: { type: string, description: "service, http, port of db" }
+                    target: { type: string }
+                    expect: { type: integer }
     Preferences:
       type: object
       required: [kube_learning]

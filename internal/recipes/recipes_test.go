@@ -280,3 +280,22 @@ func TestRepo(t *testing.T) {
 		t.Errorf("repo: %+v", repo)
 	}
 }
+
+func TestExamples(t *testing.T) {
+	ex := Examples()
+	if len(ex) == 0 {
+		t.Fatal("geen voorbeelden")
+	}
+	for _, e := range ex {
+		if e.Title == "" {
+			t.Errorf("%s heeft geen titel", e.Name)
+		}
+		r := mustParse(t, e.Source)
+		if r.Name != e.Name {
+			t.Errorf("bestand %s heet %s", e.Name, r.Name)
+		}
+	}
+	if ex[0].Source != zabbix {
+		t.Error("het voorbeeld zabbix wijkt af van het recept in de test")
+	}
+}

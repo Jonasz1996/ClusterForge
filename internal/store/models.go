@@ -1313,6 +1313,14 @@ type ProxmoxTask struct {
 	EndedAt      *time.Time
 }
 
+type RecipeVersion struct {
+	Name      string
+	Version   string
+	Source    string
+	CreatedAt time.Time
+	CreatedBy *uuid.UUID
+}
+
 type RecoveryReport struct {
 	Month       pgtype.Date
 	Report      []byte

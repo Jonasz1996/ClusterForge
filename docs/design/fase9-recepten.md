@@ -119,6 +119,7 @@ Wat er verschilt met de handleiding van Zabbix, en waarom:
 | `DATABASE naam [CHARSET] [COLLATE]` | Maakt de database als ze er niet is | één keer, schrijvende datanode |
 | `DBUSER naam PASSWORD … GRANT ALL ON db` | Gebruiker vanaf de nodes en het VIP | één keer, schrijvende datanode |
 | `IMPORT db FROM pad [TRUST_FUNCTIONS] [UNLESS "sql"]` | Laadt een `.sql` of `.sql.gz` van de node; `UNLESS` maakt het herhaalbaar | één keer |
+| `DBCONFIG sleutel=waarde [MIN]` | Een instelling van de databaseserver die de app nodig heeft (zie hieronder) | elke datanode |
 | `SERVICE naam … ENABLE\|DISABLE START\|STOP [RELOAD\|NORESTART]` | Zet diensten aan; herstart (of herlaadt) als een `FILE`, `SET` of `RUN` erboven iets veranderde, sinds de vorige regel voor die dienst | elke node |
 | `RUN [CREATES pad] [UNLESS "commando"] [TITLE "tekst"] commando` | Uitwijkmogelijkheid; `CREATES` of `UNLESS` is verplicht (zoals de bestaande commandostap), zodat een tweede uitrol het niet opnieuw doet | elke node |
 | `ONCE RUN\|FILE\|SET …` | Laat die instructie maar op één node lopen (de VIP-houder); een dienst herstart er niet voor | één keer |
@@ -127,7 +128,7 @@ Wat er verschilt met de handleiding van Zabbix, en waarom:
 
 Waarden in `{{ … }}`: `vip`, `node.name`, `node.ip`, `cluster.name`,
 `cluster.nodes` (lijst), `role.nodes`, `db.host` (het VIP of `localhost`),
-`db.port`, `param.<naam>`, `secret.<naam>`.
+`db.port`, `db.name`, `db.user`, `param.<naam>`, `secret.<naam>`.
 
 ### Geheimen
 
@@ -139,6 +140,52 @@ Waarden in `{{ … }}`: `vip`, `node.name`, `node.ip`, `cluster.name`,
 - Een `FILE` of `SET` waar een geheim in komt, krijgt standaard mode `0600`;
   het plan, het logboek en de GitOps-export tonen `••••`.
 - Een geheim tonen kan bij het cluster, met TOTP, en komt in het logboek.
+
+## Database-instellingen en de app koppelen
+
+Gevraagd op 2026-11-04 bij de eerste Zabbix-uitrol: je wil bij een zelf
+samengesteld cluster ook de instellingen van de database kunnen kiezen, en
+weten wat de app als verbinding moet krijgen.
+
+**Bij het uitrollen** heeft het blok Database in "Zelf samenstellen" dezelfde
+velden als nu de kaart Instellingen van een database (buffer pool,
+max_connections), plus:
+
+- de bron van MariaDB: Debian (11.8) of MariaDB.org met een versie, zoals bij
+  Versies (fase 8);
+- extra instellingen als `sleutel = waarde` voor `[mysqld]`, zoals
+  `innodb_log_file_size = 512M` of `max_allowed_packet = 64M`. ClusterForge
+  weigert sleutels die het zelf beheert (`wsrep_*`, `bind-address`, poorten,
+  `datadir`) en zegt waarom;
+- de standaard tekenset (`utf8mb4`) en collatie.
+
+Na de uitrol wijzig je ze op de kaart Instellingen van de database, met de
+bestaande uitrol node voor node (VIP-houder laatst, wachten op Synced).
+
+**Een recept kan instellingen vragen** met een nieuwe instructie:
+
+```dockerfile
+DBCONFIG innodb_lock_wait_timeout=120
+DBCONFIG max_allowed_packet=64M MIN
+```
+
+Zonder `MIN` zet het recept de waarde; met `MIN` is het een ondergrens en
+houdt ClusterForge een hogere waarde die je zelf koos. Botst een `DBCONFIG`
+met wat je in het blok Database koos, dan toont het plan dat vóór de uitrol.
+De waarden komen in een eigen bestand `99-clusterforge-app.cnf`, los van de
+Galera-configuratie.
+
+**De app koppelen.** Elke database-instructie in een recept vult vaste
+waarden die het recept kan gebruiken: `{{ db.host }}` (het VIP, of
+`localhost` zonder VIP), `{{ db.port }}` (3306), `{{ db.name }}` en
+`{{ db.user }}` (de eerste `DATABASE` en `DBUSER` van het recept). Daarmee
+schrijft het recept de configuratie van de app zelf, zodat een
+installatiewizard zoals die van de Zabbix-frontend niet meer nodig is: in het
+voorbeeld komt `zabbix.conf.php` er met een `FILE`.
+
+Op de pagina van het cluster staat een kaart **Verbinding** met host, poort,
+database en gebruiker, voor een app die je toch met de hand koppelt. Het
+wachtwoord toont ClusterForge alleen na TOTP, en dat komt in het logboek.
 
 ## Gezondheid, VIP en database samen
 
@@ -200,8 +247,8 @@ een ingebouwde template: plan, uitrol, GitOps, drift, Opnieuw toepassen.
 | M1 | Parser en compiler, met tests op het Zabbix-recept | Nog niets; CI |
 | M2 | Pagina Recepten: editor, live controle, voorbeeld, versies | Recepten schrijven en zien wat ze doen |
 | M3 | Agentstappen `repo_deb`, `ini_set`, `once` (protocolverhoging) | Agents bijwerken via de GUI |
-| M4 | Database-instructies (`DATABASE`, `DBUSER`, `IMPORT`) en geheimen | Database met schema zonder commando's |
-| M5 | Cluster uitrollen → Zelf samenstellen (rollen, VIP, database, sync, cronjobs) | Een cluster uitrollen met een eigen recept |
+| M4 | Database-instructies (`DATABASE`, `DBUSER`, `IMPORT`, `DBCONFIG`), geheimen en de kaart Verbinding | Database met schema en de juiste instellingen, zonder commando's |
+| M5 | Cluster uitrollen → Zelf samenstellen (rollen, VIP, database met instellingen, sync, cronjobs) | Een cluster uitrollen met een eigen recept |
 | M6 | Keepalived-check uit `HEALTH`, controles na de uitrol, health score | VIP volgt een gezonde node |
 | M7 | Nieuwe receptversie toepassen op een bestaand cluster (diff, node per node) | Updates van je app via de GUI |
 | M8 | GitOps-export en drift voor recepten | Recepten in Git |

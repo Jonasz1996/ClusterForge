@@ -1,0 +1,27 @@
+RECIPE zabbix 8.0
+FROM debian:13
+NEEDS database mariadb           # zonder databasecluster kan je dit niet uitrollen
+
+SECRET db_password               # ClusterForge maakt het, bewaart het versleuteld
+
+# a. Repository van Zabbix
+REPO_DEB https://repo.zabbix.com/zabbix/8.0/release/debian/pool/main/z/zabbix-release/zabbix-release_latest_8.0+debian13_all.deb
+
+# b. Pakketten
+APT zabbix-server-mysql zabbix-frontend-php zabbix-apache-conf zabbix-sql-scripts zabbix-agent
+
+# c. Database, gebruiker en schema (op het databasecluster van dit cluster)
+DATABASE zabbix CHARSET utf8mb4 COLLATE utf8mb4_bin
+DBUSER zabbix PASSWORD {{ secret.db_password }} GRANT ALL ON zabbix
+IMPORT zabbix FROM /usr/share/zabbix/sql-scripts/mysql/server.sql.gz \
+    TRUST_FUNCTIONS UNLESS "SELECT 1 FROM config"
+
+# d. Configuratie
+SET /etc/zabbix/zabbix_server.conf DBHost={{ db.host }}
+SET /etc/zabbix/zabbix_server.conf DBPassword={{ secret.db_password }} MODE 0640 GROUP zabbix
+
+# e. Diensten
+SERVICE zabbix-server zabbix-agent apache2 ENABLE START
+
+HEALTH service zabbix-server
+HEALTH http http://localhost/zabbix/ 200

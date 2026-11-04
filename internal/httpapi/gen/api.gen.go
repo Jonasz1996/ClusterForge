@@ -9918,6 +9918,119 @@ type ProxmoxStorage struct {
 	Type    string `json:"type"`
 }
 
+// RecipeCheck defines model for RecipeCheck.
+type RecipeCheck struct {
+	Diagnostics []RecipeDiag `json:"diagnostics"`
+
+	// Ok Geen fouten (waarschuwingen mogen)
+	Ok bool `json:"ok"`
+
+	// Recipe null als er fouten zijn
+	Recipe nullable.Nullable[RecipeParsed] `json:"recipe"`
+}
+
+// RecipeDiag defines model for RecipeDiag.
+type RecipeDiag struct {
+	Line    int    `json:"line"`
+	Message string `json:"message"`
+	Warning bool   `json:"warning"`
+}
+
+// RecipeExample defines model for RecipeExample.
+type RecipeExample struct {
+	Name   string `json:"name"`
+	Source string `json:"source"`
+	Title  string `json:"title"`
+}
+
+// RecipeParsed defines model for RecipeParsed.
+type RecipeParsed struct {
+	From  string `json:"from"`
+	Name  string `json:"name"`
+	Needs []struct {
+		// Engine mariadb of postgresql bij database
+		Engine *string `json:"engine,omitempty"`
+
+		// Service vip of database
+		Service string `json:"service"`
+	} `json:"needs"`
+	Params []struct {
+		Default *string `json:"default,omitempty"`
+		Length  *int    `json:"length,omitempty"`
+		Line    int     `json:"line"`
+		Name    string  `json:"name"`
+
+		// Type string, int, bool, ipv4, size of secret
+		Type string `json:"type"`
+	} `json:"params"`
+	Roles []struct {
+		Health []struct {
+			Expect *int `json:"expect,omitempty"`
+
+			// Kind service, http, port of db
+			Kind   string  `json:"kind"`
+			Line   int     `json:"line"`
+			Target *string `json:"target,omitempty"`
+		} `json:"health"`
+
+		// Name Leeg: geldt voor de rol waar je het recept aan koppelt
+		Name  string `json:"name"`
+		Steps []struct {
+			Kind string `json:"kind"`
+			Line int    `json:"line"`
+
+			// Once Loopt op één node
+			Once bool `json:"once"`
+
+			// Secret Er zit een geheim in; de inhoud staat alleen als {{ .params.naam }}
+			Secret bool `json:"secret"`
+
+			// Spec De stap in de vorm van template.yaml
+			Spec  map[string]interface{} `json:"spec"`
+			Title string                 `json:"title"`
+		} `json:"steps"`
+	} `json:"roles"`
+	Version string `json:"version"`
+}
+
+// RecipeSource defines model for RecipeSource.
+type RecipeSource struct {
+	// Source De tekst van het recept (hoogstens 256 KiB)
+	Source string `json:"source"`
+}
+
+// RecipeSummary defines model for RecipeSummary.
+type RecipeSummary struct {
+	Name      string    `json:"name"`
+	UpdatedAt time.Time `json:"updated_at"`
+
+	// Versions Nieuwste eerst
+	Versions []string `json:"versions"`
+}
+
+// RecipeVersion defines model for RecipeVersion.
+type RecipeVersion struct {
+	CreatedAt time.Time `json:"created_at"`
+
+	// CreatedBy Gebruikersnaam
+	CreatedBy nullable.Nullable[string] `json:"created_by"`
+	Name      string                    `json:"name"`
+	Source    string                    `json:"source"`
+	Version   string                    `json:"version"`
+}
+
+// RecipeVersionDetail defines model for RecipeVersionDetail.
+type RecipeVersionDetail struct {
+	Check     RecipeCheck `json:"check"`
+	CreatedAt time.Time   `json:"created_at"`
+
+	// CreatedBy Gebruikersnaam
+	CreatedBy nullable.Nullable[string] `json:"created_by"`
+	Name      string                    `json:"name"`
+	Source    string                    `json:"source"`
+	Version   string                    `json:"version"`
+}
+
 // RecoveryReport defines model for RecoveryReport.
 type RecoveryReport struct {
 	Clusters    []RecoveryReportCluster `json:"clusters"`
@@ -11847,6 +11960,12 @@ type SetBackupWatchJSONRequestBody = BackupWatchInput
 // VmActionJSONRequestBody defines body for VmAction for application/json ContentType.
 type VmActionJSONRequestBody = VmActionInput
 
+// SaveRecipeJSONRequestBody defines body for SaveRecipe for application/json ContentType.
+type SaveRecipeJSONRequestBody = RecipeSource
+
+// CheckRecipeJSONRequestBody defines body for CheckRecipe for application/json ContentType.
+type CheckRecipeJSONRequestBody = RecipeSource
+
 // AcceptRiskFindingJSONRequestBody defines body for AcceptRiskFinding for application/json ContentType.
 type AcceptRiskFindingJSONRequestBody = RiskAcceptanceInput
 
@@ -12566,6 +12685,27 @@ type ServerInterface interface {
 	// ListVmSnapshots Snapshots van een VM of container, rechtstreeks uit Proxmox
 	// (GET /proxmox/{proxmoxId}/vms/{vmid}/snapshots)
 	ListVmSnapshots(w http.ResponseWriter, r *http.Request, proxmoxId openapi_types.UUID, vmid int)
+	// ListRecipes Alle recepten met hun versies (fase 9)
+	// (GET /recipes)
+	ListRecipes(w http.ResponseWriter, r *http.Request)
+	// SaveRecipe Een recept als nieuwe versie bewaren (admin)
+	// (POST /recipes)
+	SaveRecipe(w http.ResponseWriter, r *http.Request)
+	// CheckRecipe Een recept controleren zonder het te bewaren
+	// (POST /recipes/check)
+	CheckRecipe(w http.ResponseWriter, r *http.Request)
+	// ListRecipeExamples Ingebouwde voorbeeldrecepten om mee te beginnen
+	// (GET /recipes/examples)
+	ListRecipeExamples(w http.ResponseWriter, r *http.Request)
+	// ListRecipeVersions Alle versies van een recept, nieuwste eerst
+	// (GET /recipes/{recipeName})
+	ListRecipeVersions(w http.ResponseWriter, r *http.Request, recipeName string)
+	// DeleteRecipeVersion Een versie van een recept verwijderen (admin)
+	// (DELETE /recipes/{recipeName}/versions/{recipeVersion})
+	DeleteRecipeVersion(w http.ResponseWriter, r *http.Request, recipeName string, recipeVersion string)
+	// GetRecipeVersion Eén versie van een recept, met wat ze per node doet
+	// (GET /recipes/{recipeName}/versions/{recipeVersion})
+	GetRecipeVersion(w http.ResponseWriter, r *http.Request, recipeName string, recipeVersion string)
 	// GetRecoveryReport Het rapport Herstelbaarheid van een maand
 	// (GET /reports/recovery)
 	GetRecoveryReport(w http.ResponseWriter, r *http.Request, params GetRecoveryReportParams)
@@ -14033,6 +14173,48 @@ func (_ Unimplemented) VmAction(w http.ResponseWriter, r *http.Request, proxmoxI
 // ListVmSnapshots Snapshots van een VM of container, rechtstreeks uit Proxmox
 // (GET /proxmox/{proxmoxId}/vms/{vmid}/snapshots)
 func (_ Unimplemented) ListVmSnapshots(w http.ResponseWriter, r *http.Request, proxmoxId openapi_types.UUID, vmid int) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListRecipes Alle recepten met hun versies (fase 9)
+// (GET /recipes)
+func (_ Unimplemented) ListRecipes(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SaveRecipe Een recept als nieuwe versie bewaren (admin)
+// (POST /recipes)
+func (_ Unimplemented) SaveRecipe(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CheckRecipe Een recept controleren zonder het te bewaren
+// (POST /recipes/check)
+func (_ Unimplemented) CheckRecipe(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListRecipeExamples Ingebouwde voorbeeldrecepten om mee te beginnen
+// (GET /recipes/examples)
+func (_ Unimplemented) ListRecipeExamples(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListRecipeVersions Alle versies van een recept, nieuwste eerst
+// (GET /recipes/{recipeName})
+func (_ Unimplemented) ListRecipeVersions(w http.ResponseWriter, r *http.Request, recipeName string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// DeleteRecipeVersion Een versie van een recept verwijderen (admin)
+// (DELETE /recipes/{recipeName}/versions/{recipeVersion})
+func (_ Unimplemented) DeleteRecipeVersion(w http.ResponseWriter, r *http.Request, recipeName string, recipeVersion string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetRecipeVersion Eén versie van een recept, met wat ze per node doet
+// (GET /recipes/{recipeName}/versions/{recipeVersion})
+func (_ Unimplemented) GetRecipeVersion(w http.ResponseWriter, r *http.Request, recipeName string, recipeVersion string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -21384,6 +21566,158 @@ func (siw *ServerInterfaceWrapper) ListVmSnapshots(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
+// ListRecipes operation middleware
+func (siw *ServerInterfaceWrapper) ListRecipes(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListRecipes(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SaveRecipe operation middleware
+func (siw *ServerInterfaceWrapper) SaveRecipe(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SaveRecipe(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CheckRecipe operation middleware
+func (siw *ServerInterfaceWrapper) CheckRecipe(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CheckRecipe(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListRecipeExamples operation middleware
+func (siw *ServerInterfaceWrapper) ListRecipeExamples(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListRecipeExamples(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListRecipeVersions operation middleware
+func (siw *ServerInterfaceWrapper) ListRecipeVersions(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "recipeName" -------------
+	var recipeName string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "recipeName", chi.URLParam(r, "recipeName"), &recipeName, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "recipeName", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListRecipeVersions(w, r, recipeName)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteRecipeVersion operation middleware
+func (siw *ServerInterfaceWrapper) DeleteRecipeVersion(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "recipeName" -------------
+	var recipeName string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "recipeName", chi.URLParam(r, "recipeName"), &recipeName, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "recipeName", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "recipeVersion" -------------
+	var recipeVersion string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "recipeVersion", chi.URLParam(r, "recipeVersion"), &recipeVersion, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "recipeVersion", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteRecipeVersion(w, r, recipeName, recipeVersion)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetRecipeVersion operation middleware
+func (siw *ServerInterfaceWrapper) GetRecipeVersion(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "recipeName" -------------
+	var recipeName string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "recipeName", chi.URLParam(r, "recipeName"), &recipeName, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "recipeName", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "recipeVersion" -------------
+	var recipeVersion string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "recipeVersion", chi.URLParam(r, "recipeVersion"), &recipeVersion, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "recipeVersion", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetRecipeVersion(w, r, recipeName, recipeVersion)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetRecoveryReport operation middleware
 func (siw *ServerInterfaceWrapper) GetRecoveryReport(w http.ResponseWriter, r *http.Request) {
 
@@ -22319,6 +22653,27 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Patch(options.BaseURL+"/services/{serviceId}", wrapper.UpdateService)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/recipes", wrapper.ListRecipes)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/recipes", wrapper.SaveRecipe)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/recipes/check", wrapper.CheckRecipe)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/recipes/examples", wrapper.ListRecipeExamples)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/recipes/{recipeName}", wrapper.ListRecipeVersions)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/recipes/{recipeName}/versions/{recipeVersion}", wrapper.DeleteRecipeVersion)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/recipes/{recipeName}/versions/{recipeVersion}", wrapper.GetRecipeVersion)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/dependencies", wrapper.CreateDependency)

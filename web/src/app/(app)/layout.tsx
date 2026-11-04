@@ -30,6 +30,7 @@ const nav: NavItem[] = [
   { href: "/tests", label: "Tests" },
   { href: "/taken", label: "Taken" },
   { href: "/templates", label: "Templates" },
+  { href: "/recepten", label: "Recepten" },
   { href: "/gitops", label: "GitOps" },
   { href: "/logboek", label: "Logboek", adminOnly: true },
   { href: "/instellingen", label: "Instellingen" },

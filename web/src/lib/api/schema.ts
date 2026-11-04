@@ -1701,6 +1701,104 @@ export interface paths {
         patch: operations["updateService"];
         trace?: never;
     };
+    "/recipes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Alle recepten met hun versies (fase 9) */
+        get: operations["listRecipes"];
+        put?: never;
+        /**
+         * Een recept als nieuwe versie bewaren (admin)
+         * @description Naam en versie komen van de RECIPE-regel. Dezelfde tekst nog eens bewaren geeft 200 en verandert niets; een andere tekst met een bestaande versie geeft 409. Een recept met fouten geeft 400 met de fouten per regel in details.
+         */
+        post: operations["saveRecipe"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/recipes/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Een recept controleren zonder het te bewaren
+         * @description Geeft de fouten en waarschuwingen per regel en, zonder fouten, wat het recept per node doet.
+         */
+        post: operations["checkRecipe"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/recipes/examples": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Ingebouwde voorbeeldrecepten om mee te beginnen */
+        get: operations["listRecipeExamples"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/recipes/{recipeName}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                recipeName: string;
+            };
+            cookie?: never;
+        };
+        /** Alle versies van een recept, nieuwste eerst */
+        get: operations["listRecipeVersions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/recipes/{recipeName}/versions/{recipeVersion}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                recipeName: string;
+                recipeVersion: string;
+            };
+            cookie?: never;
+        };
+        /** Eén versie van een recept, met wat ze per node doet */
+        get: operations["getRecipeVersion"];
+        put?: never;
+        post?: never;
+        /** Een versie van een recept verwijderen (admin) */
+        delete: operations["deleteRecipeVersion"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/dependencies": {
         parameters: {
             query?: never;
@@ -4692,6 +4790,89 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        RecipeSource: {
+            /** @description De tekst van het recept (hoogstens 256 KiB) */
+            source: string;
+        };
+        RecipeSummary: {
+            name: string;
+            /** @description Nieuwste eerst */
+            versions: string[];
+            /** Format: date-time */
+            updated_at: string;
+        };
+        RecipeVersion: {
+            name: string;
+            version: string;
+            source: string;
+            /** Format: date-time */
+            created_at: string;
+            /** @description Gebruikersnaam */
+            created_by: string | null;
+        };
+        RecipeVersionDetail: components["schemas"]["RecipeVersion"] & {
+            check: components["schemas"]["RecipeCheck"];
+        };
+        RecipeExample: {
+            name: string;
+            title: string;
+            source: string;
+        };
+        RecipeDiag: {
+            line: number;
+            message: string;
+            warning: boolean;
+        };
+        RecipeCheck: {
+            /** @description Geen fouten (waarschuwingen mogen) */
+            ok: boolean;
+            diagnostics: components["schemas"]["RecipeDiag"][];
+            /** @description null als er fouten zijn */
+            recipe: components["schemas"]["RecipeParsed"] | null;
+        };
+        RecipeParsed: {
+            name: string;
+            version: string;
+            from: string;
+            needs: {
+                /** @description vip of database */
+                service: string;
+                /** @description mariadb of postgresql bij database */
+                engine?: string;
+            }[];
+            params: {
+                name: string;
+                /** @description string, int, bool, ipv4, size of secret */
+                type: string;
+                default?: string;
+                length?: number;
+                line: number;
+            }[];
+            roles: {
+                /** @description Leeg: geldt voor de rol waar je het recept aan koppelt */
+                name: string;
+                steps: {
+                    line: number;
+                    kind: string;
+                    /** @description Loopt op één node */
+                    once: boolean;
+                    /** @description Er zit een geheim in; de inhoud staat alleen als {{ .params.naam }} */
+                    secret: boolean;
+                    title: string;
+                    /** @description De stap in de vorm van template.yaml */
+                    spec: {
+                        [key: string]: unknown;
+                    };
+                }[];
+                health: {
+                    line: number;
+                    /** @description service, http, port of db */
+                    kind: string;
+                    target?: string;
+                    expect?: number;
+                }[];
+            }[];
+        };
         Preferences: {
             /** @description De leermodus in het dashboard Kubernetes: uitleg en kubectl-commando's */
             kube_learning: boolean;
@@ -13729,6 +13910,192 @@ export interface operations {
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];
+        };
+    };
+    listRecipes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Recepten */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecipeSummary"][];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    saveRecipe: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecipeSource"];
+            };
+        };
+        responses: {
+            /** @description Bestond al met dezelfde tekst */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecipeVersion"];
+                };
+            };
+            /** @description Bewaard */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecipeVersion"];
+                };
+            };
+            /** @description Het recept heeft fouten */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecipeCheck"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    checkRecipe: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecipeSource"];
+            };
+        };
+        responses: {
+            /** @description Resultaat van de controle */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecipeCheck"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+        };
+    };
+    listRecipeExamples: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Voorbeelden */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecipeExample"][];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    listRecipeVersions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                recipeName: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Versies */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecipeVersion"][];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    getRecipeVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                recipeName: string;
+                recipeVersion: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Versie */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecipeVersionDetail"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    deleteRecipeVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                recipeName: string;
+                recipeVersion: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Verwijderd */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
         };
     };
     createDependency: {

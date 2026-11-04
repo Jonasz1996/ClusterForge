@@ -71,7 +71,7 @@ type Health struct {
 type Role struct {
 	Name   string   `json:"name"`
 	Steps  []Step   `json:"steps"`
-	Health []Health `json:"health,omitempty"`
+	Health []Health `json:"health"`
 }
 
 // Recipe is een gelezen recept.
@@ -79,8 +79,8 @@ type Recipe struct {
 	Name    string  `json:"name"`
 	Version string  `json:"version"`
 	From    string  `json:"from"`
-	Needs   []Need  `json:"needs,omitempty"`
-	Params  []Param `json:"params,omitempty"`
+	Needs   []Need  `json:"needs"`
+	Params  []Param `json:"params"`
 	Roles   []Role  `json:"roles"`
 }
 
@@ -132,7 +132,19 @@ func Parse(src string) (*Recipe, []Diag) {
 	if p.errors() {
 		return nil, p.diags
 	}
-	return p.r, p.diags
+	r := p.r
+	if r.Needs == nil {
+		r.Needs = []Need{}
+	}
+	if r.Params == nil {
+		r.Params = []Param{}
+	}
+	for i := range r.Roles {
+		if r.Roles[i].Health == nil {
+			r.Roles[i].Health = []Health{}
+		}
+	}
+	return r, p.diags
 }
 
 type parser struct {
@@ -326,7 +338,7 @@ func (p *parser) run(src string) {
 		p.line = lines[0].no
 		p.errorf("FROM ontbreekt: zeg op welk OS het recept draait, zoals FROM debian:13")
 	}
-	if len(p.r.Roles) == 0 {
+	if len(p.r.Roles) == 0 && !p.errors() {
 		p.line = lines[len(lines)-1].no
 		p.errorf("het recept doet niets: er staat geen enkele stap in")
 	}
@@ -568,7 +580,7 @@ func (p *parser) expandSecret(s string) (string, bool, bool) {
 			return "{{ .nodes }}"
 		case e == "role.nodes":
 			return "{{ .role_nodes }}"
-		case e == "db.host" || e == "db.port":
+		case e == "db.host" || e == "db.port" || e == "db.name" || e == "db.user":
 			if p.r.NeedsDatabase() == "" {
 				p.errorf("{{ %s }} vraagt NEEDS database (eerder in het recept)", e)
 				ok = false
@@ -596,7 +608,7 @@ func (p *parser) expandSecret(s string) (string, bool, bool) {
 			}
 			return "{{ .params." + rest + " }}"
 		}
-		p.errorf("onbekende waarde {{ %s }}; ken vip, node.name, node.ip, cluster.name, cluster.nodes, role.nodes, db.host, db.port, param.x en secret.x", e)
+		p.errorf("onbekende waarde {{ %s }}; ken vip, node.name, node.ip, cluster.name, cluster.nodes, role.nodes, db.host, db.port, db.name, db.user, param.x en secret.x", e)
 		ok = false
 		return m
 	})
