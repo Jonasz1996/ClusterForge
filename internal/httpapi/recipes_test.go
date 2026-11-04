@@ -69,7 +69,7 @@ func TestRecipes(t *testing.T) {
 	if s := c.do("POST", "/api/v1/recipes/check", map[string]any{"source": zabbix}, &chk); s != 200 || !chk.Ok || chk.Recipe == nil {
 		t.Fatalf("check: %d %+v", s, chk)
 	}
-	if r := chk.Recipe; r.Name != "zabbix" || len(r.Roles) != 1 || len(r.Roles[0].Steps) != 10 || r.Needs[0].Engine != "mariadb" || r.Params[0].Type != "secret" {
+	if r := chk.Recipe; r.Name != "zabbix" || len(r.Roles) != 1 || len(r.Roles[0].Steps) != 12 || r.Needs[0].Engine != "mariadb" || r.Params[1].Type != "secret" {
 		t.Fatalf("recept: %+v", r)
 	}
 	var list []struct {
@@ -88,7 +88,7 @@ func TestRecipes(t *testing.T) {
 
 	// Bewaren.
 	var v recipeVersionView
-	if s := c.do("POST", "/api/v1/recipes", map[string]any{"source": zabbix}, &v); s != http.StatusCreated || v.Name != "zabbix" || v.Version != "8.0" || v.CreatedBy == nil || *v.CreatedBy != "admin" {
+	if s := c.do("POST", "/api/v1/recipes", map[string]any{"source": zabbix}, &v); s != http.StatusCreated || v.Name != "zabbix" || v.Version != "1.0" || v.CreatedBy == nil || *v.CreatedBy != "admin" {
 		t.Fatalf("bewaren: %d %+v", s, v)
 	}
 	// Dezelfde tekst nog eens: niets nieuws.
@@ -104,15 +104,15 @@ func TestRecipes(t *testing.T) {
 	if s := c.do("POST", "/api/v1/recipes", map[string]any{"source": "RECIPE app 1.0\n"}, &chk); s != http.StatusBadRequest || chk.Ok || len(chk.Diagnostics) == 0 {
 		t.Fatalf("met fouten: %d %+v", s, chk)
 	}
-	v2 := strings.Replace(zabbix, "RECIPE zabbix 8.0", "RECIPE zabbix 8.0.1", 1)
-	if s := c.do("POST", "/api/v1/recipes", map[string]any{"source": v2}, &v); s != http.StatusCreated || v.Version != "8.0.1" {
+	v2 := strings.Replace(zabbix, "RECIPE zabbix 1.0", "RECIPE zabbix 1.0.1", 1)
+	if s := c.do("POST", "/api/v1/recipes", map[string]any{"source": v2}, &v); s != http.StatusCreated || v.Version != "1.0.1" {
 		t.Fatalf("tweede versie: %d %+v", s, v)
 	}
-	if c.do("GET", "/api/v1/recipes", nil, &list); len(list) != 1 || strings.Join(list[0].Versions, ",") != "8.0.1,8.0" {
+	if c.do("GET", "/api/v1/recipes", nil, &list); len(list) != 1 || strings.Join(list[0].Versions, ",") != "1.0.1,1.0" {
 		t.Fatalf("lijst: %+v", list)
 	}
 	var d recipeVersionView
-	if s := c.do("GET", "/api/v1/recipes/zabbix/versions/8.0", nil, &d); s != 200 || d.Source != zabbix || !d.Check.Ok || d.Check.Recipe == nil {
+	if s := c.do("GET", "/api/v1/recipes/zabbix/versions/1.0", nil, &d); s != 200 || d.Source != zabbix || !d.Check.Ok || d.Check.Recipe == nil {
 		t.Fatalf("versie: %d %+v", s, d)
 	}
 
@@ -125,17 +125,17 @@ func TestRecipes(t *testing.T) {
 	if s := k.do("POST", "/api/v1/recipes", map[string]any{"source": v2}, nil); s != http.StatusForbidden {
 		t.Fatalf("kijker bewaart: %d", s)
 	}
-	if s := k.do("DELETE", "/api/v1/recipes/zabbix/versions/8.0", nil, nil); s != http.StatusForbidden {
+	if s := k.do("DELETE", "/api/v1/recipes/zabbix/versions/1.0", nil, nil); s != http.StatusForbidden {
 		t.Fatalf("kijker verwijdert: %d", s)
 	}
 
-	if s := c.do("DELETE", "/api/v1/recipes/zabbix/versions/8.0", nil, nil); s != http.StatusNoContent {
+	if s := c.do("DELETE", "/api/v1/recipes/zabbix/versions/1.0", nil, nil); s != http.StatusNoContent {
 		t.Fatalf("verwijderen: %d", s)
 	}
-	if s := c.do("GET", "/api/v1/recipes/zabbix/versions/8.0", nil, nil); s != http.StatusNotFound {
+	if s := c.do("GET", "/api/v1/recipes/zabbix/versions/1.0", nil, nil); s != http.StatusNotFound {
 		t.Fatalf("na verwijderen: %d", s)
 	}
-	if s := c.do("DELETE", "/api/v1/recipes/zabbix/versions/8.0", nil, nil); s != http.StatusNotFound {
+	if s := c.do("DELETE", "/api/v1/recipes/zabbix/versions/1.0", nil, nil); s != http.StatusNotFound {
 		t.Fatalf("twee keer verwijderen: %d", s)
 	}
 	if s := c.do("GET", "/api/v1/recipes/bestaat-niet", nil, nil); s != http.StatusNotFound {

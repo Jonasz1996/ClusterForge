@@ -1,14 +1,17 @@
-RECIPE zabbix 8.0
+RECIPE zabbix 1.0
 FROM debian:13
 NEEDS database mariadb           # zonder databasecluster kan je dit niet uitrollen
 
+PARAM zabbix_version version 8.0 # 7.0, 7.4, 8.0 of een nieuwere versie
 SECRET db_password               # ClusterForge maakt het, bewaart het versleuteld
 
-# a. Repository van Zabbix
-REPO_DEB https://repo.zabbix.com/zabbix/8.0/release/debian/pool/main/z/zabbix-release/zabbix-release_latest_8.0+debian13_all.deb
+# a. Repository van Zabbix, voor de gekozen versie
+REPO_DEB https://repo.zabbix.com/zabbix/{{ param.zabbix_version }}/release/debian/pool/main/z/zabbix-release/zabbix-release_latest_{{ param.zabbix_version }}+debian13_all.deb
 
-# b. Pakketten
+# b. Pakketten; de voorcontrole van de webinterface wil de locale en_US
+#    (locales-all) en php-curl
 APT zabbix-server-mysql zabbix-frontend-php zabbix-apache-conf zabbix-sql-scripts zabbix-agent
+APT locales-all php-curl
 
 # c. Database, gebruiker en schema (op het databasecluster van dit cluster)
 DATABASE zabbix CHARSET utf8mb4 COLLATE utf8mb4_bin
@@ -19,6 +22,23 @@ IMPORT zabbix FROM /usr/share/zabbix/sql-scripts/mysql/server.sql.gz \
 # d. Configuratie
 SET /etc/zabbix/zabbix_server.conf DBHost={{ db.host }}
 SET /etc/zabbix/zabbix_server.conf DBPassword={{ secret.db_password }} MODE 0640 GROUP zabbix
+
+# De webinterface leest /etc/zabbix/web/zabbix.conf.php; zo slaat ze de
+# installatiewizard over.
+FILE /etc/zabbix/web/zabbix.conf.php MODE 0640 GROUP www-data <<EOF
+<?php
+$DB['TYPE']     = 'MYSQL';
+$DB['SERVER']   = '{{ db.host }}';
+$DB['PORT']     = '{{ db.port }}';
+$DB['DATABASE'] = 'zabbix';
+$DB['USER']     = 'zabbix';
+$DB['PASSWORD'] = '{{ secret.db_password }}';
+$DB['SCHEMA']   = '';
+$DB['ENCRYPTION'] = false;
+$DB['DOUBLE_IEEE754'] = true;
+$ZBX_SERVER_NAME = '{{ cluster.name }}';
+$IMAGE_FORMAT_DEFAULT = IMAGE_FORMAT_PNG;
+EOF
 
 # e. Diensten
 SERVICE zabbix-server zabbix-agent apache2 ENABLE START

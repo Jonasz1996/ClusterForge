@@ -147,7 +147,14 @@ var (
 	secretKeys = regexp.MustCompile(`(?i)pass|secret|token|key`)
 )
 
-var paramTypes = map[string]bool{"string": true, "int": true, "bool": true, "ipv4": true, "size": true}
+var paramTypes = map[string]bool{"string": true, "int": true, "bool": true, "ipv4": true, "size": true, "version": true}
+
+// VersionPattern is de vorm van een PARAM van type version, zoals 7.0, 8.0
+// of 8.0.0beta1: cijfers en punten, met eventueel een achtervoegsel. Zo'n
+// versie kan veilig in een URL of commando staan.
+const VersionPattern = `^[0-9]+(\.[0-9]+)*[A-Za-z0-9.~+-]{0,32}$`
+
+var paramVersionRe = regexp.MustCompile(VersionPattern)
 
 // Parse leest een recept. Een recept met fouten geeft nil en de fouten;
 // waarschuwingen staan er altijd bij.
@@ -507,12 +514,16 @@ func (p *parser) param(args []string) {
 		return
 	}
 	if !paramTypes[args[1]] {
-		p.errorf("type %q: kies string, int, bool, ipv4 of size; een wachtwoord is een SECRET", args[1])
+		p.errorf("type %q: kies string, int, bool, ipv4, size of version; een wachtwoord is een SECRET", args[1])
 		return
 	}
 	pr := Param{Name: args[0], Type: args[1], Line: p.line}
 	if len(args) == 3 {
 		pr.Default = args[2]
+	}
+	if pr.Type == "version" && pr.Default != "" && !paramVersionRe.MatchString(pr.Default) {
+		p.errorf("versie %q: cijfers en punten, zoals 7.0 of 8.0", pr.Default)
+		return
 	}
 	if secretKeys.MatchString(pr.Name) && pr.Type == "string" {
 		p.warnf("%s klinkt als een geheim; gebruik SECRET, dan staat het versleuteld en nooit in het plan", pr.Name)
@@ -669,7 +680,7 @@ func (p *parser) shellSafe(what, s string) bool {
 		case e == "vip" || e == "node.name" || e == "node.ip" || e == "db.host" || e == "db.port":
 		case root == "param" && p.params[rest] != nil && p.params[rest].Type != "string" && p.params[rest].Type != "secret":
 		default:
-			p.errorf("{{ %s }} kan niet in %s: alleen vip, node.name, node.ip, db.host, db.port en params van type int, bool, ipv4 of size; zet een tekst of geheim met SET of FILE", e, what)
+			p.errorf("{{ %s }} kan niet in %s: alleen vip, node.name, node.ip, db.host, db.port en params van type int, bool, ipv4, size of version; zet een tekst of geheim met SET of FILE", e, what)
 			ok = false
 		}
 	}
@@ -736,6 +747,9 @@ func (p *parser) step(op string, args []string, l line) {
 			p.errorf("REPO_DEB url van het release-pakket (.deb)")
 			return
 		}
+		if !p.shellSafe("een URL", args[0]) {
+			return
+		}
 		u, ok := p.expand(args[0])
 		if !ok {
 			return
@@ -761,6 +775,9 @@ func (p *parser) step(op string, args []string, l line) {
 		}
 		var vals []string
 		for _, a := range append(args[1:ki], args[ki+1]) {
+			if !p.shellSafe("een repository", a) {
+				return
+			}
 			v, ok := p.expand(a)
 			if !ok {
 				return

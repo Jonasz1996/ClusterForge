@@ -9969,7 +9969,7 @@ type RecipeParsed struct {
 		Line    int     `json:"line"`
 		Name    string  `json:"name"`
 
-		// Type string, int, bool, ipv4, size of secret
+		// Type string, int, bool, ipv4, size, version of secret
 		Type string `json:"type"`
 	} `json:"params"`
 	Roles []struct {

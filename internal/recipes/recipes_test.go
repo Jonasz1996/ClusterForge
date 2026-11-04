@@ -8,17 +8,20 @@ import (
 )
 
 // Het Zabbix-voorbeeld uit docs/design/fase9-recepten.md.
-const zabbix = `RECIPE zabbix 8.0
+const zabbix = `RECIPE zabbix 1.0
 FROM debian:13
 NEEDS database mariadb           # zonder databasecluster kan je dit niet uitrollen
 
+PARAM zabbix_version version 8.0 # 7.0, 7.4, 8.0 of een nieuwere versie
 SECRET db_password               # ClusterForge maakt het, bewaart het versleuteld
 
-# a. Repository van Zabbix
-REPO_DEB https://repo.zabbix.com/zabbix/8.0/release/debian/pool/main/z/zabbix-release/zabbix-release_latest_8.0+debian13_all.deb
+# a. Repository van Zabbix, voor de gekozen versie
+REPO_DEB https://repo.zabbix.com/zabbix/{{ param.zabbix_version }}/release/debian/pool/main/z/zabbix-release/zabbix-release_latest_{{ param.zabbix_version }}+debian13_all.deb
 
-# b. Pakketten
+# b. Pakketten; de voorcontrole van de webinterface wil de locale en_US
+#    (locales-all) en php-curl
 APT zabbix-server-mysql zabbix-frontend-php zabbix-apache-conf zabbix-sql-scripts zabbix-agent
+APT locales-all php-curl
 
 # c. Database, gebruiker en schema (op het databasecluster van dit cluster)
 DATABASE zabbix CHARSET utf8mb4 COLLATE utf8mb4_bin
@@ -29,6 +32,23 @@ IMPORT zabbix FROM /usr/share/zabbix/sql-scripts/mysql/server.sql.gz \
 # d. Configuratie
 SET /etc/zabbix/zabbix_server.conf DBHost={{ db.host }}
 SET /etc/zabbix/zabbix_server.conf DBPassword={{ secret.db_password }} MODE 0640 GROUP zabbix
+
+# De webinterface leest /etc/zabbix/web/zabbix.conf.php; zo slaat ze de
+# installatiewizard over.
+FILE /etc/zabbix/web/zabbix.conf.php MODE 0640 GROUP www-data <<EOF
+<?php
+$DB['TYPE']     = 'MYSQL';
+$DB['SERVER']   = '{{ db.host }}';
+$DB['PORT']     = '{{ db.port }}';
+$DB['DATABASE'] = 'zabbix';
+$DB['USER']     = 'zabbix';
+$DB['PASSWORD'] = '{{ secret.db_password }}';
+$DB['SCHEMA']   = '';
+$DB['ENCRYPTION'] = false;
+$DB['DOUBLE_IEEE754'] = true;
+$ZBX_SERVER_NAME = '{{ cluster.name }}';
+$IMAGE_FORMAT_DEFAULT = IMAGE_FORMAT_PNG;
+EOF
 
 # e. Diensten
 SERVICE zabbix-server zabbix-agent apache2 ENABLE START
@@ -69,13 +89,13 @@ func hasDiag(diags []Diag, line int, part string) bool {
 
 func TestZabbix(t *testing.T) {
 	r := mustParse(t, zabbix)
-	if r.Name != "zabbix" || r.Version != "8.0" || r.From != "debian:13" {
+	if r.Name != "zabbix" || r.Version != "1.0" || r.From != "debian:13" {
 		t.Fatalf("kop: %+v", r)
 	}
 	if r.NeedsDatabase() != "mariadb" || r.NeedsVIP() {
 		t.Fatalf("needs: %+v", r.Needs)
 	}
-	if len(r.Params) != 1 || r.Params[0].Type != "secret" || r.Params[0].Length != 32 {
+	if len(r.Params) != 2 || r.Params[0].Type != "version" || r.Params[0].Default != "8.0" || r.Params[1].Type != "secret" || r.Params[1].Length != 32 {
 		t.Fatalf("params: %+v", r.Params)
 	}
 	if len(r.Roles) != 1 || r.Roles[0].Name != "" {
@@ -86,7 +106,7 @@ func TestZabbix(t *testing.T) {
 	for _, s := range steps {
 		kinds = append(kinds, s.Kind)
 	}
-	want := "repo_deb package db_database db_user db_import ini_set ini_set service service service"
+	want := "repo_deb package package db_database db_user db_import ini_set ini_set file service service service"
 	if got := strings.Join(kinds, " "); got != want {
 		t.Fatalf("soorten:\n got %s\nwant %s", got, want)
 	}
@@ -101,19 +121,19 @@ func TestZabbix(t *testing.T) {
 	if strings.Contains(string(b), "secret.") {
 		t.Errorf("onvertaalde verwijzing: %s", b)
 	}
-	user := steps[3]
+	user := steps[4]
 	if !user.Secret || user.Spec["db_user"].(map[string]any)["password"] != "{{ .params.db_password }}" {
 		t.Errorf("db_user: %+v", user)
 	}
-	imp := steps[4].Spec["db_import"].(map[string]any)
+	imp := steps[5].Spec["db_import"].(map[string]any)
 	if imp["trust_functions"] != true || imp["unless"] != "SELECT 1 FROM config" || imp["path"] != "/usr/share/zabbix/sql-scripts/mysql/server.sql.gz" {
 		t.Errorf("import: %+v", imp)
 	}
-	host := steps[5].Spec["ini_set"].(map[string]any)
+	host := steps[6].Spec["ini_set"].(map[string]any)
 	if host["value"] != "{{ .db.host }}" || host["mode"] != nil {
 		t.Errorf("DBHost: %+v", host)
 	}
-	pw := steps[6]
+	pw := steps[7]
 	spec := pw.Spec["ini_set"].(map[string]any)
 	if !pw.Secret || spec["value"] != "{{ .params.db_password }}" || spec["mode"] != "0640" || spec["group"] != "zabbix" {
 		t.Errorf("DBPassword: %+v", pw)
@@ -123,7 +143,13 @@ func TestZabbix(t *testing.T) {
 	if strings.Join(n, ",") != "service:zabbix-server:restart,service:zabbix-agent:restart,service:apache2:restart" {
 		t.Errorf("notify: %v", n)
 	}
-	svc := steps[7].Spec["service"].(map[string]any)
+	if u := steps[0].Spec["repo_deb"].(map[string]any)["url"]; u != "https://repo.zabbix.com/zabbix/{{ .params.zabbix_version }}/release/debian/pool/main/z/zabbix-release/zabbix-release_latest_{{ .params.zabbix_version }}+debian13_all.deb" {
+		t.Errorf("repo_deb: %v", u)
+	}
+	if f := steps[8]; !f.Secret || f.Spec["file"].(map[string]any)["path"] != "/etc/zabbix/web/zabbix.conf.php" {
+		t.Errorf("zabbix.conf.php: %+v", f)
+	}
+	svc := steps[9].Spec["service"].(map[string]any)
 	if svc["name"] != "zabbix-server" || svc["enabled"] != true || svc["state"] != "started" {
 		t.Errorf("service: %+v", svc)
 	}
@@ -336,5 +362,19 @@ func TestDBConfig(t *testing.T) {
 		if !slices.ContainsFunc(d, func(x Diag) bool { return strings.Contains(x.Message, part) }) {
 			t.Errorf("%q: wilde %q, kreeg %v", src, part, d)
 		}
+	}
+}
+
+func TestVersionParam(t *testing.T) {
+	base := "RECIPE app 1.0\nFROM debian:13\n"
+	r := mustParse(t, base+"PARAM v version 8.0\nREPO_DEB https://x.example/{{ param.v }}/app_{{ param.v }}.deb\nRUN CREATES /opt/app-{{ param.v }} echo {{ param.v }}\n")
+	if r.Params[0].Type != "version" {
+		t.Fatalf("params: %+v", r.Params)
+	}
+	if !hasDiag(errs(t, base+"PARAM v version 8.0;rm\n"), 3, "versie") {
+		t.Error("foute standaardversie")
+	}
+	if !hasDiag(errs(t, base+"PARAM s string x\nREPO_DEB https://x.example/{{ param.s }}.deb\n"), 4, "URL") {
+		t.Error("string in REPO_DEB")
 	}
 }

@@ -55,17 +55,21 @@ Eén instructie per regel, in hoofdletters zoals in een Dockerfile. Een `\`
 aan het einde zet de regel voort; `#` is commentaar. Waarden tussen
 `{{ … }}` vult ClusterForge in per node.
 
-Jouw Zabbix-voorbeeld, als recept:
+Jouw Zabbix-voorbeeld, als recept. De versie van Zabbix is een veld bij het
+uitrollen (`PARAM zabbix_version version`): 8.0 nu, een nieuwere later, zonder
+het recept te wijzigen. Het volledige voorbeeld met de webconfiguratie staat in
+`internal/recipes/examples/zabbix.cfr`.
 
 ```dockerfile
-RECIPE zabbix 8.0
+RECIPE zabbix 1.0
 FROM debian:13
 NEEDS database mariadb           # zonder databasecluster kan je dit niet uitrollen
 
+PARAM zabbix_version version 8.0 # 7.0, 7.4, 8.0 of een nieuwere versie
 SECRET db_password               # ClusterForge maakt het, bewaart het versleuteld
 
-# a. Repository van Zabbix
-REPO_DEB https://repo.zabbix.com/zabbix/8.0/release/debian/pool/main/z/zabbix-release/zabbix-release_latest_8.0+debian13_all.deb
+# a. Repository van Zabbix, voor de gekozen versie
+REPO_DEB https://repo.zabbix.com/zabbix/{{ param.zabbix_version }}/release/debian/pool/main/z/zabbix-release/zabbix-release_latest_{{ param.zabbix_version }}+debian13_all.deb
 
 # b. Pakketten
 APT zabbix-server-mysql zabbix-frontend-php zabbix-apache-conf zabbix-sql-scripts zabbix-agent
@@ -108,7 +112,7 @@ Wat er verschilt met de handleiding van Zabbix, en waarom:
 | `RECIPE naam versie` | Naam en versie; verplicht, eerste regel | – |
 | `FROM debian:13` | Welk OS de nodes moeten hebben; het plan weigert een andere node | – |
 | `NEEDS database mariadb\|postgresql`, `NEEDS vip` | Clusterservices die aan moeten staan | – |
-| `PARAM naam type [standaard]` | Een gewone instelling in het formulier (int, string, ipv4, size, bool) | – |
+| `PARAM naam type [standaard]` | Een gewone instelling in het formulier (int, string, ipv4, size, bool, version; een version zoals 8.0 mag in een URL of RUN) | – |
 | `SECRET naam [lengte]` | Een geheim; leeg gelaten maakt ClusterForge er een | – |
 | `REPO_DEB url` | Download het release-pakket, `dpkg -i`, `apt update`; slaat over als het pakket er al is | elke node |
 | `REPO naam url suite comp KEY url` | Een apt-bron met een eigen sleutel in `/etc/apt/keyrings` | elke node |

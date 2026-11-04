@@ -4850,7 +4850,7 @@ export interface components {
             }[];
             params: {
                 name: string;
-                /** @description string, int, bool, ipv4, size of secret */
+                /** @description string, int, bool, ipv4, size, version of secret */
                 type: string;
                 default?: string;
                 length?: number;

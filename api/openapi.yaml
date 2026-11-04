@@ -5346,7 +5346,7 @@ components:
             required: [name, type, line]
             properties:
               name: { type: string }
-              type: { type: string, description: "string, int, bool, ipv4, size of secret" }
+              type: { type: string, description: "string, int, bool, ipv4, size, version of secret" }
               default: { type: string }
               length: { type: integer }
               line: { type: integer }
