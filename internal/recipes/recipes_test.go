@@ -2,6 +2,7 @@ package recipes
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -315,4 +316,25 @@ func TestShellSafety(t *testing.T) {
 		}
 	}
 	mustParse(t, base+"RUN CREATES /x app --workers {{ param.workers }} --ip {{ node.ip }}\n")
+}
+
+func TestDBConfig(t *testing.T) {
+	base := "RECIPE app 1.0\nFROM debian:13\nNEEDS database mariadb\nAPT app\n"
+	r := mustParse(t, base+"DBCONFIG innodb-lock-wait-timeout=120\nDBCONFIG max_allowed_packet=64M MIN\n")
+	if len(r.DBConfig) != 2 || r.DBConfig[0].Key != "innodb_lock_wait_timeout" || r.DBConfig[0].Min || !r.DBConfig[1].Min || r.DBConfig[1].Value != "64M" {
+		t.Fatalf("%+v", r.DBConfig)
+	}
+	for src, part := range map[string]string{
+		base + "DBCONFIG wsrep_slave_threads=4\n":        "Galera",
+		base + "DBCONFIG innodb_buffer_pool_size=1G\n":   "blok Database",
+		base + "DBCONFIG port=3307\n":                    "poort",
+		base + "DBCONFIG a=1\nDBCONFIG a=2\n":            "staat er al",
+		base + "DBCONFIG sql_mode='a;b'\n":               "waarde",
+		"RECIPE app 1.0\nFROM debian:13\nDBCONFIG a=1\n": "NEEDS database mariadb",
+	} {
+		d := errs(t, src)
+		if !slices.ContainsFunc(d, func(x Diag) bool { return strings.Contains(x.Message, part) }) {
+			t.Errorf("%q: wilde %q, kreeg %v", src, part, d)
+		}
+	}
 }

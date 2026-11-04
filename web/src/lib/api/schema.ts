@@ -4834,6 +4834,14 @@ export interface components {
             name: string;
             version: string;
             from: string;
+            /** @description Instellingen van de databaseserver die het recept vraagt (DBCONFIG) */
+            db_config: {
+                key: string;
+                value: string;
+                /** @description Een ondergrens: een hogere waarde blijft */
+                min?: boolean;
+                line: number;
+            }[];
             needs: {
                 /** @description vip of database */
                 service: string;

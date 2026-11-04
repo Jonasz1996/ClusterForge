@@ -221,6 +221,21 @@ function Plan({ recipe }: { recipe: RecipeParsed }) {
         </dd>
         <dt className="text-slate-500">Clusterservices</dt>
         <dd>{recipe.needs.length ? recipe.needs.map(needLabel).join(", ") : "geen"}</dd>
+        {recipe.db_config.length > 0 && (
+          <>
+            <dt className="text-slate-500">Database-instellingen</dt>
+            <dd>
+              {recipe.db_config.map((d) => (
+                <span key={d.key} className="mr-3">
+                  <code>
+                    {d.key} = {d.value}
+                  </code>
+                  {d.min && <span className="text-slate-500"> (minstens)</span>}
+                </span>
+              ))}
+            </dd>
+          </>
+        )}
         {recipe.params.length > 0 && (
           <>
             <dt className="text-slate-500">Vraagt</dt>

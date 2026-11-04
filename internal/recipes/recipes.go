@@ -82,8 +82,32 @@ type Recipe struct {
 	From    string  `json:"from"`
 	Needs   []Need  `json:"needs"`
 	Params  []Param `json:"params"`
-	Roles   []Role  `json:"roles"`
+	// DBConfig zijn instellingen van de databaseserver die de app nodig
+	// heeft (DBCONFIG).
+	DBConfig []DBSetting `json:"db_config"`
+	Roles    []Role      `json:"roles"`
 }
+
+// DBSetting is één DBCONFIG: een sleutel van [mysqld] met een waarde. Met
+// Min is het een ondergrens.
+type DBSetting struct {
+	Key   string `json:"key"`
+	Value string `json:"value"`
+	Min   bool   `json:"min,omitempty"`
+	Line  int    `json:"line"`
+}
+
+// managedDBKeys beheert ClusterForge zelf; een recept mag ze niet zetten.
+var managedDBKeys = map[string]string{
+	"bind_address": "ClusterForge zet het adres", "port": "ClusterForge zet de poort", "datadir": "de datamap ligt vast",
+	"socket": "de socket ligt vast", "binlog_format": "Galera vraagt ROW", "default_storage_engine": "Galera vraagt InnoDB",
+	"innodb_autoinc_lock_mode":        "Galera vraagt 2",
+	"innodb_buffer_pool_size":         "kies de buffer pool in het blok Database of op de kaart Instellingen",
+	"max_connections":                 "kies max_connections in het blok Database of op de kaart Instellingen",
+	"log_bin_trust_function_creators": "gebruik IMPORT … TRUST_FUNCTIONS; dat zet het alleen tijdens het laden aan",
+}
+
+var dbValueRe = regexp.MustCompile(`^[A-Za-z0-9_.+-]{1,64}$`)
 
 // Need is een clusterservice die aan moet staan.
 type Need struct {
@@ -139,6 +163,9 @@ func Parse(src string) (*Recipe, []Diag) {
 	}
 	if r.Params == nil {
 		r.Params = []Param{}
+	}
+	if r.DBConfig == nil {
+		r.DBConfig = []DBSetting{}
 	}
 	for i := range r.Roles {
 		if r.Roles[i].Health == nil {
@@ -415,7 +442,7 @@ func (p *parser) instr(op string, args []string, l line) {
 		}
 	case "HEALTH":
 		p.health(args)
-	case "REPO_DEB", "REPO", "APT", "FILE", "SET", "DIR", "USER", "SERVICE", "RUN", "DATABASE", "DBUSER", "IMPORT":
+	case "REPO_DEB", "REPO", "APT", "FILE", "SET", "DIR", "USER", "SERVICE", "RUN", "DATABASE", "DBUSER", "IMPORT", "DBCONFIG":
 		if p.r.Name == "" {
 			return
 		}
@@ -849,6 +876,8 @@ func (p *parser) step(op string, args []string, l line) {
 		p.runStep(args, l)
 	case "DATABASE", "DBUSER", "IMPORT":
 		p.dbStep(op, args)
+	case "DBCONFIG":
+		p.dbConfig(args)
 	}
 }
 
@@ -1069,6 +1098,41 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n-1] + "…"
+}
+
+func (p *parser) dbConfig(args []string) {
+	if p.r.NeedsDatabase() != "mariadb" {
+		p.errorf("DBCONFIG vraagt NEEDS database mariadb (eerder in het recept)")
+		return
+	}
+	if len(args) < 1 || len(args) > 2 || !strings.Contains(args[0], "=") || (len(args) == 2 && args[1] != "MIN") {
+		p.errorf("DBCONFIG sleutel=waarde [MIN], zoals DBCONFIG max_allowed_packet=64M MIN")
+		return
+	}
+	k, v, _ := strings.Cut(args[0], "=")
+	k = strings.ReplaceAll(strings.ToLower(strings.TrimSpace(k)), "-", "_")
+	if !identRe.MatchString(k) {
+		p.errorf("sleutel %q", k)
+		return
+	}
+	if why, ok := managedDBKeys[k]; ok || strings.HasPrefix(k, "wsrep_") {
+		if !ok {
+			why = "ClusterForge beheert de Galera-instellingen"
+		}
+		p.errorf("%s kan niet in een recept: %s", k, why)
+		return
+	}
+	if !dbValueRe.MatchString(v) {
+		p.errorf("waarde %q: letters, cijfers en . _ + -", v)
+		return
+	}
+	for _, o := range p.r.DBConfig {
+		if o.Key == k {
+			p.errorf("%s staat er al (regel %d)", k, o.Line)
+			return
+		}
+	}
+	p.r.DBConfig = append(p.r.DBConfig, DBSetting{Key: k, Value: v, Min: len(args) == 2, Line: p.line})
 }
 
 func (p *parser) dbStep(op string, args []string) {

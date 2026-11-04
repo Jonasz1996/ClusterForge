@@ -9945,6 +9945,15 @@ type RecipeExample struct {
 
 // RecipeParsed defines model for RecipeParsed.
 type RecipeParsed struct {
+	// DbConfig Instellingen van de databaseserver die het recept vraagt (DBCONFIG)
+	DbConfig []struct {
+		Key  string `json:"key"`
+		Line int    `json:"line"`
+
+		// Min Een ondergrens: een hogere waarde blijft
+		Min   *bool  `json:"min,omitempty"`
+		Value string `json:"value"`
+	} `json:"db_config"`
 	From  string `json:"from"`
 	Name  string `json:"name"`
 	Needs []struct {

@@ -5315,11 +5315,22 @@ components:
           description: null als er fouten zijn
     RecipeParsed:
       type: object
-      required: [name, version, from, needs, params, roles]
+      required: [name, version, from, needs, params, db_config, roles]
       properties:
         name: { type: string }
         version: { type: string }
         from: { type: string }
+        db_config:
+          type: array
+          description: Instellingen van de databaseserver die het recept vraagt (DBCONFIG)
+          items:
+            type: object
+            required: [key, value, line]
+            properties:
+              key: { type: string }
+              value: { type: string }
+              min: { type: boolean, description: "Een ondergrens: een hogere waarde blijft" }
+              line: { type: integer }
         needs:
           type: array
           items:

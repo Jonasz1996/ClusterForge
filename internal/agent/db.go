@@ -94,6 +94,8 @@ func (a *Agent) handleDB(data []byte) protocol.DBResponse {
 		timeout = protocol.DBRecoverTimeout
 	case req.Op == protocol.DBPatroniOp:
 		timeout = protocol.DBPatroniTimeout
+	case req.Op == protocol.DBImport:
+		timeout = protocol.DBImportTimeout
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
@@ -113,6 +115,8 @@ func (a *Agent) handleDB(data []byte) protocol.DBResponse {
 		res = a.pgEnsure(ctx, req.Ensure)
 	case pg && req.Op == protocol.DBDrop:
 		res = a.pgDrop(ctx, req.Drop)
+	case pg && req.Op == protocol.DBImport:
+		res = protocol.DBResponse{Error: "een schema laden kan nog alleen in MariaDB", Servers: []protocol.DBServer{}}
 	case pg && req.Op == protocol.DBMigrate:
 		res = a.pgMigrate(ctx, req.Migrate)
 	case req.Op == protocol.DBWriteProbe:
@@ -150,6 +154,8 @@ func (a *Agent) dbOp(ctx context.Context, req protocol.DBRequest) protocol.DBRes
 		res = a.PatroniOp(ctx, req.Patroni)
 	case protocol.DBHeal:
 		res = a.dbHeal(ctx, req.Heal)
+	case protocol.DBImport:
+		res = a.dbImport(ctx, req.Import)
 	default:
 		res = protocol.DBResponse{Error: "onbekend databaseverzoek " + req.Op, Servers: []protocol.DBServer{}}
 	}
