@@ -102,7 +102,11 @@ roles:
     steps:
       # Eerst de webserver, zodat zabbix-frontend-php Nginx kiest en geen
       # Apache meebrengt.
-      - package: { names: [nginx, php-fpm, php-mysql, php-gd, php-bcmath, php-mbstring, php-xml, php-ldap, keepalived] }
+      - package: { names: [nginx, php-fpm, php-mysql, php-gd, php-bcmath, php-mbstring, php-xml, php-ldap, php-curl, keepalived] }
+      # De voorcontrole van de webinterface eist de locale en_US; een kale
+      # Debian-CT heeft alleen C. locales-all brengt alle locales al
+      # gecompileerd mee, zonder locale-gen.
+      - package: { names: [locales-all] }
       - package: { names: [zabbix-server-mysql, zabbix-frontend-php] }
       # De dienst van het pakket leest zijn eigen configuratie; ClusterForge
       # draait de Zabbix server als cf-zabbix-server.
