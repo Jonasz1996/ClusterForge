@@ -57,6 +57,21 @@ jobs:
       - uses: golangci/golangci-lint-action@v8
         with:
           version: v2.14.0
+      # De tests van de agent dumpen en lezen in met psql en pg_dump van de
+      # runner. Die moeten dezelfde hoofdversie hebben als de server (16,
+      # zoals in deploy/): pg_dump 17 en nieuwer schrijft
+      # "SET transaction_timeout", en dat kent PostgreSQL 16 niet.
+      - name: psql en pg_dump van PostgreSQL 16
+        run: |
+          if [ ! -x /usr/lib/postgresql/16/bin/pg_dump ]; then
+            sudo apt-get update -q
+            if ! sudo apt-get install -y -q postgresql-client-16; then
+              sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+              sudo apt-get install -y -q postgresql-client-16
+            fi
+          fi
+          /usr/lib/postgresql/16/bin/pg_dump --version
+          echo /usr/lib/postgresql/16/bin >> "$GITHUB_PATH"
       - name: Tests
         env:
           CF_TEST_DATABASE_URL: postgres://clusterforge:clusterforge@localhost:5432/clusterforge_test?sslmode=disable
