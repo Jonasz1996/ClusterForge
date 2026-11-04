@@ -109,3 +109,21 @@ export const healthLabel = (h: RecipeParsed["roles"][number]["health"][number]) 
   }
   return h.kind;
 };
+
+export type Composition = components["schemas"]["Composition"];
+export type Blueprint = components["schemas"]["Blueprint"];
+
+export function useBlueprints() {
+  return useQuery({ queryKey: ["blueprints"], queryFn: async () => unwrap(await api.GET("/blueprints")) });
+}
+
+export function useComposeBlueprint() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: Composition) => unwrap(await api.POST("/blueprints", { body })),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["blueprints"] });
+      void qc.invalidateQueries({ queryKey: ["templates"] });
+    },
+  });
+}

@@ -262,8 +262,26 @@ een ingebouwde template: plan, uitrol, GitOps, drift, Opnieuw toepassen.
 | M7 | Nieuwe receptversie toepassen op een bestaand cluster (diff, node per node) | Updates van je app via de GUI |
 | M8 | GitOps-export en drift voor recepten | Recepten in Git |
 
-Elke mijlpaal is een eigen PR op de vorige. Deze ontwerp-PR staat op PR #108
-(bestaande nodes en CT's uitrollen, `database`-blok in templates).
+Alle mijlpalen staan in PR #109, die op PR #108 staat (bestaande nodes en
+CT's uitrollen, `database`-blok in templates).
+
+### Stand na M5
+
+- Zelf samenstellen (Cluster uitrollen → Zelf samenstellen) maakt een template
+  `eigen-<naam>` die in de tabel `blueprints` staat; dezelfde samenstelling
+  geeft dezelfde versie, een andere een nieuwe (1.0.0, 1.0.1, …).
+- De keepalived-check uit `HEALTH` (M6) zit er al in: `service`, `http`,
+  `port` en `db`, en met de database op dezelfde rol alleen een node waarvan
+  MariaDB mag schrijven.
+- `db.host` is het VIP als het op de databaserol staat, of `localhost` als de
+  app op die nodes zelf draait. Een app op andere nodes zonder VIP daar kan
+  niet: dan weet ze niet waar de database is.
+- `IMPORT` leest het bestand op een node met de database; een recept met
+  `IMPORT` staat daarom op de databaserol.
+- Sync en cronjobs zet je na de uitrol aan op de clusterpagina (fase 6); ze
+  zitten niet in de samenstelling.
+- Nog te doen: de kaart Verbinding, een nieuwe receptversie toepassen op een
+  bestaand cluster (M7) en GitOps (M8).
 
 ## Niet in deze fase
 
