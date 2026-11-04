@@ -8,7 +8,7 @@ server {
     listen [::]:80 default_server;
     server_name _;
 
-    root /usr/share/zabbix;
+    root /usr/local/lib/clusterforge/zabbix-web;
     index index.php;
     client_max_body_size 16m;
 
@@ -46,9 +46,9 @@ server {
         fastcgi_split_path_info ^(.+\.php)(/.+)$;
         fastcgi_index index.php;
         include fastcgi_params;
-        fastcgi_param DOCUMENT_ROOT /usr/share/zabbix;
-        fastcgi_param SCRIPT_FILENAME /usr/share/zabbix$fastcgi_script_name;
-        fastcgi_param PATH_TRANSLATED /usr/share/zabbix$fastcgi_script_name;
+        fastcgi_param DOCUMENT_ROOT /usr/local/lib/clusterforge/zabbix-web;
+        fastcgi_param SCRIPT_FILENAME /usr/local/lib/clusterforge/zabbix-web$fastcgi_script_name;
+        fastcgi_param PATH_TRANSLATED /usr/local/lib/clusterforge/zabbix-web$fastcgi_script_name;
         # De instellingen die Zabbix van PHP vraagt.
         fastcgi_param PHP_VALUE "post_max_size=16M
 max_execution_time=300

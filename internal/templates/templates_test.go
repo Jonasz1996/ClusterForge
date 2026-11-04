@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os/exec"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -403,13 +404,24 @@ func TestRenderZabbix(t *testing.T) {
 		t.Fatal(err)
 	}
 	files := map[string]string{}
+	var cmds []*protocol.CommandStep
+	var pkgs []string
 	for _, s := range steps {
 		if s.File != nil {
 			files[s.File.Path] = s.File.Content
 		}
 		if s.Command != nil {
-			t.Errorf("de template gebruikt geen commando's: %+v", s.Command)
+			cmds = append(cmds, s.Command)
 		}
+		if s.Package != nil {
+			pkgs = append(pkgs, s.Package.Names...)
+		}
+	}
+	// Met debian (de standaard) doet de stap voor de bron niets, en komt er
+	// geen zabbix-sql-scripts.
+	if len(cmds) != 2 || cmds[0].Run != "true" || cmds[0].Creates != "/etc/debian_version" || slices.Contains(pkgs, "zabbix-sql-scripts") ||
+		!strings.Contains(cmds[1].Run, "ln -sfn") || cmds[1].Unless == "" {
+		t.Fatalf("commando's: %+v %v", cmds, pkgs)
 	}
 	for path, want := range map[string][]string{
 		"/etc/zabbix/cf-zabbix_server.conf": {"HANodeName=zabbix-server-02\n", "NodeAddress=10.0.30.12:10051\n", "DBHost=10.0.30.100\n",
@@ -418,7 +430,7 @@ func TestRenderZabbix(t *testing.T) {
 		"/usr/local/lib/clusterforge/zabbix-db.sh": {"VIP=10.0.30.100\n", `HOSTS="10.0.30.11 10.0.30.12 10.0.30.13 $VIP"`},
 		"/usr/share/zabbix/conf/zabbix.conf.php":   {"$DB['SERVER']          = '10.0.30.100';", "$DB['PASSWORD']        = 'Abcdefgh23456789Abcdefgh23456789';"},
 		"/etc/keepalived/keepalived.conf":          {"priority 140\n", "        10.0.30.11\n        10.0.30.13\n    }", "nopreempt", "chk_zabbix\n    }"},
-		"/etc/nginx/sites-enabled/default":         {"location = /cf-health", "root /usr/share/zabbix;"},
+		"/etc/nginx/sites-enabled/default":         {"location = /cf-health", "root /usr/local/lib/clusterforge/zabbix-web;"},
 		"/etc/keepalived/check-zabbix.sh":          {"exec /usr/local/bin/cf-agent check db mariadb"},
 	} {
 		got, ok := files[path]
@@ -446,10 +458,57 @@ func TestRenderZabbix(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	conf := steps[3].File.Content
+	conf := ""
+	for _, s := range steps {
+		if s.File != nil && s.File.Path == "/etc/zabbix/cf-zabbix_proxy.conf" {
+			conf = s.File.Content
+		}
+	}
 	for _, w := range []string{"Hostname=zabbix-proxy-01\n", "Server=10.0.30.11;10.0.30.12;10.0.30.13\n", "ProxyMode=0\n"} {
 		if !strings.Contains(conf, w) {
 			t.Errorf("zabbix_proxy.conf mist %q:\n%s", w, conf)
+		}
+	}
+
+	// Een versie van repo.zabbix.com: de bron uit hun zabbix-release, en het
+	// schema uit zabbix-sql-scripts.
+	if _, err := tpl.Validate(map[string]any{"vip": "10.0.30.100", "zabbix_version": "8"}); err == nil {
+		t.Fatal("versie 8 zonder punt aanvaard")
+	}
+	p8, err := tpl.Validate(map[string]any{"vip": "10.0.30.100", "vrid": 63, "auth_pass": "geheim12", "db_password": "Abcdefgh23456789Abcdefgh23456789", "zabbix_version": "8.0"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	c8 := c
+	c8.Params = p8
+	for _, role := range []string{"server", "proxy"} {
+		c8.Node = &c.Nodes[0]
+		if role == "proxy" {
+			c8.Node = &c.Nodes[3]
+		}
+		steps, err := tpl.Steps(role, c8)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var repo *protocol.CommandStep
+		var names []string
+		for _, s := range steps {
+			if s.Command != nil && repo == nil {
+				repo = s.Command
+			}
+			if s.Package != nil {
+				names = append(names, s.Package.Names...)
+			}
+		}
+		if repo == nil || repo.Creates != "/usr/local/lib/clusterforge/zabbix-repo-8.0" ||
+			!strings.Contains(repo.Run, "https://repo.zabbix.com/zabbix/$v/release/debian/pool/main/z/zabbix-release/zabbix-release_latest_${v}+debian13_all.deb") ||
+			!strings.Contains(repo.Run, "v='8.0'") || slices.Contains(names, "zabbix-sql-scripts") != (role == "server") {
+			t.Fatalf("%s met 8.0: %+v %v", role, repo, names)
+		}
+		cmd := exec.Command("sh", "-n")
+		cmd.Stdin = strings.NewReader(repo.Run)
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Errorf("bronstap: %v %s", err, out)
 		}
 	}
 

@@ -2,7 +2,8 @@ name: zabbix
 version: 1.0.0
 title: Zabbix met HA
 description: >-
-  Zabbix 7.0 LTS uit Debian 13. Drie (of vijf) servers draaien elk de Zabbix
+  Zabbix uit Debian 13 (7.0 LTS) of, met een versie zoals 8.0, uit
+  repo.zabbix.com. Drie (of vijf) servers draaien elk de Zabbix
   server in HA-modus (één actief, de andere stand-by), de webinterface met
   Nginx en MariaDB Galera; het VIP staat op een node waarvan de database mag
   schrijven, en zowel de Zabbix server als de webinterface verbinden via het
@@ -26,6 +27,16 @@ params:
     label: VIP
     immutable: true
     help: Het adres van de webinterface (http://VIP/) en van de database. Het moet vrij zijn en in hetzelfde netwerk liggen als de nodes.
+  - name: zabbix_version
+    type: string
+    label: Zabbix-versie
+    help: >-
+      debian is Zabbix 7.0 LTS uit Debian 13. Een versie zoals 8.0 of 7.4 haalt
+      Zabbix uit repo.zabbix.com, met hun pakket zabbix-release voor Debian 13.
+      Ligt vast na de uitrol.
+    default: debian
+    pattern: 'debian|[0-9]+\.[0-9]+'
+    immutable: true
   - name: servers
     type: int
     label: Aantal servers
@@ -107,7 +118,30 @@ roles:
       # Debian-CT heeft alleen C. locales-all brengt alle locales al
       # gecompileerd mee, zonder locale-gen.
       - package: { names: [locales-all] }
-      - package: { names: [zabbix-server-mysql, zabbix-frontend-php] }
+      # Een versie van repo.zabbix.com: hun pakket zabbix-release zet de bron
+      # en de sleutel, zoals de installatiegids van Zabbix. Met debian doet
+      # deze stap niets.
+      - package: { names: [curl, ca-certificates] }
+      - directory: { path: /usr/local/lib/clusterforge, mode: "0755" }
+      - command:
+          title: "bron van Zabbix: {{ .params.zabbix_version }}"
+          run: |-
+            {{ if ne .params.zabbix_version "debian" }}set -e
+            v='{{ .params.zabbix_version }}'
+            d=$(mktemp -d)
+            trap 'rm -rf "$d"' EXIT
+            curl -fsSL -o "$d/zabbix-release.deb" "https://repo.zabbix.com/zabbix/$v/release/debian/pool/main/z/zabbix-release/zabbix-release_latest_${v}+debian13_all.deb"
+            dpkg -i "$d/zabbix-release.deb"
+            apt-get update
+            touch "/usr/local/lib/clusterforge/zabbix-repo-$v"{{ else }}true{{ end }}
+          creates: '{{ if ne .params.zabbix_version "debian" }}/usr/local/lib/clusterforge/zabbix-repo-{{ .params.zabbix_version }}{{ else }}/etc/debian_version{{ end }}'
+      # Uit repo.zabbix.com staat het schema in zabbix-sql-scripts.
+      - package:
+          names:
+            - zabbix-server-mysql
+            - zabbix-frontend-php
+            - '{{ if ne .params.zabbix_version "debian" }}zabbix-sql-scripts{{ else }}zabbix-server-mysql{{ end }}'
+
       # De dienst van het pakket leest zijn eigen configuratie; ClusterForge
       # draait de Zabbix server als cf-zabbix-server.
       # Het pakket maakt de gebruiker zabbix zelf; dit zegt alleen dat
@@ -159,6 +193,13 @@ roles:
           path: /etc/zabbix/web/zabbix.conf.php
           template: zabbix.conf.php.tmpl
           mode: "0644"
+      # De webinterface staat in /usr/share/zabbix, of in ui/ daaronder bij
+      # nieuwere versies van repo.zabbix.com; Nginx wijst naar deze link.
+      - command:
+          title: webinterface van Zabbix zoeken
+          run: d=/usr/share/zabbix; [ -f "$d/ui/index.php" ] && d=$d/ui; ln -sfn "$d" /usr/local/lib/clusterforge/zabbix-web
+          unless: d=/usr/share/zabbix; [ -f "$d/ui/index.php" ] && d=$d/ui; [ "$(readlink /usr/local/lib/clusterforge/zabbix-web)" = "$d" ]
+          notify: [service:nginx:reload]
       - file:
           path: /etc/nginx/sites-enabled/default
           template: nginx.conf.tmpl
@@ -182,6 +223,23 @@ roles:
       memory: "{{ .params.proxy_memory }}"
       disk: "{{ .params.proxy_disk }}"
     steps:
+      # Een versie van repo.zabbix.com: hun pakket zabbix-release zet de bron
+      # en de sleutel, zoals de installatiegids van Zabbix. Met debian doet
+      # deze stap niets.
+      - package: { names: [curl, ca-certificates] }
+      - directory: { path: /usr/local/lib/clusterforge, mode: "0755" }
+      - command:
+          title: "bron van Zabbix: {{ .params.zabbix_version }}"
+          run: |-
+            {{ if ne .params.zabbix_version "debian" }}set -e
+            v='{{ .params.zabbix_version }}'
+            d=$(mktemp -d)
+            trap 'rm -rf "$d"' EXIT
+            curl -fsSL -o "$d/zabbix-release.deb" "https://repo.zabbix.com/zabbix/$v/release/debian/pool/main/z/zabbix-release/zabbix-release_latest_${v}+debian13_all.deb"
+            dpkg -i "$d/zabbix-release.deb"
+            apt-get update
+            touch "/usr/local/lib/clusterforge/zabbix-repo-$v"{{ else }}true{{ end }}
+          creates: '{{ if ne .params.zabbix_version "debian" }}/usr/local/lib/clusterforge/zabbix-repo-{{ .params.zabbix_version }}{{ else }}/etc/debian_version{{ end }}'
       - package: { names: [zabbix-proxy-sqlite3, fping] }
       - user: { name: zabbix, system: true, home: /var/lib/zabbix }
       - service: { name: zabbix-proxy, enabled: false, state: stopped }
