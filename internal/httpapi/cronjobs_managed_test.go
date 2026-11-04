@@ -190,9 +190,10 @@ func TestManagedCronJobs(t *testing.T) {
 	for _, h := range hosts {
 		h.runner().Main(ctx, job.ID)
 	}
+	// De run staat er al als running voor het resultaat binnen is.
 	eventually(t, "de run van nc2", func() bool {
 		c.do("GET", "/api/v1/cron-jobs/"+job.ID, nil, &detail)
-		return len(detail.Runs) == 2
+		return len(detail.Runs) == 2 && detail.Runs[0].Result != "running"
 	})
 	if r := detail.Runs[0]; r.Hostname != "nc2" || r.Reason != "schedule" || r.Result != "ok" {
 		t.Errorf("run na de verhuizing: %+v", r)
