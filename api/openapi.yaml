@@ -710,6 +710,31 @@ paths:
         "401": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
         "429": { $ref: "#/components/responses/Error" }
+  /agents/claim:
+    post:
+      operationId: claimAgent
+      summary: Een agent in een CT uit een CT-template meldt zich aan zonder token (zonder sessie)
+      description: |
+        Alleen tijdens een uitrol: die zette voor de node met deze hostname
+        een token klaar met het adres van de CT. De aanvraag moet van dat
+        adres komen. 404 no_claim betekent dat er (nog) niets klaarstaat;
+        de agent probeert het later opnieuw.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ClaimRequest" }
+      responses:
+        "200":
+          description: Aangemeld
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/EnrollResponse" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
   /agents/{agentId}/revoke:
     parameters:
       - { name: agentId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -10204,6 +10229,15 @@ components:
       required: [token, nkey_public, hostname, machine_id, agent_version, protocol_version]
       properties:
         token: { type: string }
+        nkey_public: { type: string }
+        hostname: { type: string }
+        machine_id: { type: string }
+        agent_version: { type: string }
+        protocol_version: { type: integer }
+    ClaimRequest:
+      type: object
+      required: [nkey_public, hostname, machine_id, agent_version, protocol_version]
+      properties:
         nkey_public: { type: string }
         hostname: { type: string }
         machine_id: { type: string }

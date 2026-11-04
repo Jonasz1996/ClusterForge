@@ -103,7 +103,7 @@ func (g *Grow) placeAll(ctx context.Context) error {
 			g.place = fmt.Errorf("de golden image (VM %d): %w", r.p.Target.ImageVMID, err)
 			return
 		}
-		r.p.ImageName, r.p.ImageShared = img.Name, img.Shared
+		r.p.ImageName, r.p.ImageShared, r.p.Target.ImageType = img.Name, img.Shared, img.Type
 		p := &params{Target: r.p.Target, ImageShared: img.Shared}
 		var idx []int
 		for i, n := range r.p.Nodes {
@@ -154,6 +154,12 @@ func (g *Grow) CreateVM(ctx context.Context, st *jobs.Step, i int) error {
 func (g *Grow) Enroll(ctx context.Context, st *jobs.Step) error {
 	if g.r.p.ServerURL == "" {
 		return errors.New("het adres van ClusterForge ontbreekt, dus de nieuwe nodes kunnen zich niet aanmelden")
+	}
+	if g.r.p.Target.ImageType == "" {
+		// Een gewenste staat uit Git noemt het soort template niet.
+		if img, err := g.r.s.pve.Image(ctx, g.r.p.Target.ProxmoxID, g.r.p.Target.ImageVMID); err == nil {
+			g.r.p.Target.ImageType = img.Type
+		}
 	}
 	for i := range g.r.p.Nodes {
 		n := &g.r.p.Nodes[i]

@@ -37,6 +37,7 @@ var publicRoutes = map[string]bool{
 	"GET /api/v1/health":         true,
 	"POST /api/v1/auth/login":    true,
 	"POST /api/v1/agents/enroll": true,
+	"POST /api/v1/agents/claim":  true,
 }
 
 // requireSession laat alleen requests met een geldige sessie door en eist

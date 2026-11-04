@@ -15,6 +15,10 @@ const (
 	// DefaultEnrollPath is een eenmalig aanmeldbestand, bijvoorbeeld door
 	// Proxmox in een nieuwe VM gezet: {"server": "...", "token": "..."}.
 	DefaultEnrollPath = "/etc/clusterforge/enroll.json"
+	// DefaultClaimPath staat in een CT-template: {"server": "..."}. Een CT
+	// die daaruit gekloond is, vraagt de server dan zelf om aanmelding
+	// (zonder token) tot een uitrol op zijn hostname wacht.
+	DefaultClaimPath = "/etc/clusterforge/claim.json"
 )
 
 // Config is wat de agent na het aanmelden bewaart. Het bestand bevat de
@@ -84,6 +88,27 @@ type EnrollFile struct {
 	// AllowHTTP: ClusterForge zelf schreef het bestand met een http-adres
 	// dat de beheerder zo instelde.
 	AllowHTTP bool `json:"allow_http,omitempty"`
+}
+
+// ClaimFile is de inhoud van DefaultClaimPath.
+type ClaimFile struct {
+	Server    string `json:"server"`
+	AllowHTTP bool   `json:"allow_http,omitempty"`
+}
+
+func LoadClaimFile(path string) (*ClaimFile, error) {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var c ClaimFile
+	if err := json.Unmarshal(b, &c); err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+	if c.Server == "" {
+		return nil, errors.New(path + " mist server")
+	}
+	return &c, nil
 }
 
 func LoadEnrollFile(path string) (*EnrollFile, error) {

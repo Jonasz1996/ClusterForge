@@ -32,7 +32,19 @@ type EnrollOptions struct {
 	// onderscheppen, kan zich dan als ClusterForge voordoen en commando's
 	// als root naar de node sturen; daarom alleen op uitdrukkelijke vraag.
 	AllowHTTP bool
+	// Claim meldt aan zonder token, voor een CT uit een CT-template: dat
+	// lukt alleen als een uitrol op deze hostname wacht (ErrNotClaimed
+	// anders). Token blijft dan leeg.
+	Claim bool
+	// HTTPClient vervangt de standaardclient, en Hostname die van deze
+	// machine; voor tests.
+	HTTPClient *http.Client
+	Hostname   string
 }
+
+// ErrNotClaimed: bij aanmelden zonder token wacht er (nog) geen uitrol op
+// deze node.
+var ErrNotClaimed = errors.New("er wacht nog geen uitrol op deze node")
 
 // Enroll maakt een nieuw sleutelpaar, meldt de agent aan en geeft de
 // configuratie terug. De private sleutel verlaat de machine niet.
@@ -59,13 +71,15 @@ func Enroll(ctx context.Context, o EnrollOptions) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	hostname, err := os.Hostname()
-	if err != nil {
-		return nil, err
+	hostname := o.Hostname
+	if hostname == "" {
+		if hostname, err = os.Hostname(); err != nil {
+			return nil, err
+		}
 	}
 	c := &Collector{Root: o.Root}
 	body, err := json.Marshal(protocol.EnrollRequest{
-		Token: strings.TrimSpace(o.Token), NkeyPublic: pub, Hostname: hostname, MachineID: c.machineID(),
+		Token: tokenFor(o), NkeyPublic: pub, Hostname: hostname, MachineID: c.machineID(),
 		AgentVersion: o.Version, ProtocolVersion: protocol.Version,
 	})
 	if err != nil {
@@ -73,6 +87,9 @@ func Enroll(ctx context.Context, o EnrollOptions) (*Config, error) {
 	}
 
 	client := &http.Client{Timeout: 30 * time.Second}
+	if o.HTTPClient != nil {
+		client = o.HTTPClient
+	}
 	if o.CAFile != "" {
 		pem, err := os.ReadFile(o.CAFile)
 		if err != nil {
@@ -87,7 +104,11 @@ func Enroll(ctx context.Context, o EnrollOptions) (*Config, error) {
 		}
 		client.Transport = &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}}
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, server+"/api/v1/agents/enroll", bytes.NewReader(body))
+	path := "/api/v1/agents/enroll"
+	if o.Claim {
+		path = "/api/v1/agents/claim"
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, server+path, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -100,9 +121,13 @@ func Enroll(ctx context.Context, o EnrollOptions) (*Config, error) {
 	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if resp.StatusCode != http.StatusOK {
 		var e struct {
+			Code    string `json:"code"`
 			Message string `json:"message"`
 		}
 		_ = json.Unmarshal(data, &e)
+		if o.Claim && resp.StatusCode == http.StatusNotFound && e.Code == "no_claim" {
+			return nil, ErrNotClaimed
+		}
 		if e.Message == "" {
 			e.Message = strings.TrimSpace(string(data))
 		}
@@ -116,4 +141,11 @@ func Enroll(ctx context.Context, o EnrollOptions) (*Config, error) {
 		ServerURL: server, AgentID: er.AgentID, NodeID: er.NodeID, NatsURL: er.NatsURL,
 		NatsCertSHA256: er.NatsCertSHA256, NkeySeed: string(seed),
 	}, nil
+}
+
+func tokenFor(o EnrollOptions) string {
+	if o.Claim {
+		return ""
+	}
+	return strings.TrimSpace(o.Token)
 }

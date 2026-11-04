@@ -350,6 +350,14 @@ Loopt een stap mis, dan staat bij de taak waarom. Los het op en klik op "Opnieuw
 
 **Op bestaande nodes.** Kies bij "Waar" voor Bestaande nodes, zoals CT's (niet bij Kubernetes). ClusterForge maakt dan geen VM's: je maakt de CT's zelf in Proxmox, installeert op elke CT één keer de agent met een token zonder cluster (Nodes → Agent installeren), en geeft elke node hier een rol van de template. Per rol moeten er precies zoveel nodes zijn als de template vraagt; ze moeten actief zijn, een agent hebben en nog in geen cluster zitten. Hun hostname en adres blijven. De taak slaat het maken van de VM's en het aanmelden over: ze zet de nodes met hun rol in het nieuwe cluster, voert de stappen van de template uit en controleert het cluster, net als hierboven. Omhoog schalen naar nieuwe VM's kan zo'n cluster niet; een node erbij is een nieuwe CT met de agent.
 
+**Op nieuwe CT's.** Kies bij "Waar" voor Nieuwe CT's in Proxmox (niet bij Kubernetes). ClusterForge kloont dan containers (LXC) uit een CT-template, net als VM's uit de golden image. Maak die template één keer als root op een Proxmox-host:
+
+```sh
+curl -fsSL https://clusterforge.example/install/ct-template.sh | bash -s -- --server https://clusterforge.example --storage local-lvm
+```
+
+Het script haalt de Debian 13-containertemplate met `pveam`, maakt een onbevoorrechte CT met nesting, zet er cf-agent in en maakt er CT-template 9100 van. Met `--vmid`, `--storage`, `--tmpl-storage`, `--bridge`, `--name` en `--ostemplate` kies je iets anders, `--replace` vervangt een eerdere template, en `--allow-http` is nodig als ClusterForge op http draait. De taak kloont per node de CT met zijn hostname, zet cores, geheugen, `net0` (bridge, VLAN, vast adres en gateway) en de DNS-servers, vergroot de schijf `rootfs` en start hem. Een CT heeft geen QEMU guest agent, dus ClusterForge kan er geen aanmeldbestand in zetten. In de template staat daarom `/etc/clusterforge/claim.json` met het adres van ClusterForge, en de agent in een nieuwe CT vraagt zelf om aanmelding (`POST /api/v1/agents/claim`). Dat lukt alleen als een uitrol voor een node met die hostname een token klaarzette, en alleen vanaf het vaste adres dat de uitrol hem gaf. Een poging vanaf een ander adres staat in de events als `agent.enroll_failed`. Daarom kan het alleen met vaste adressen, en moet het verkeer van de CT's zonder NAT bij ClusterForge aankomen. Zet ClusterForge achter een reverse proxy, zet dan `CF_TRUST_PROXY_HEADERS` aan. SSH-sleutels kan Proxmox bij een kloon van een CT niet zetten: zet ze in de template. Elke kloon krijgt een eigen machine-id en eigen SSH-hostsleutels.
+
 Een eigen golden image kan ook: installeer cf-agent erin met `agent.sh --server https://clusterforge.example --no-enroll`. De agent meldt zich dan aan zodra ClusterForge het aanmeldbestand in de nieuwe VM zet. Zorg ook voor cloud-init en qemu-guest-agent, en maak `/etc/machine-id` leeg voor je er een template van maakt.
 
 ### De templates
