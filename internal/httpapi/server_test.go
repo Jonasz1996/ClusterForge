@@ -266,6 +266,8 @@ func newTestEnv(t *testing.T) *testEnv {
 	upg := agentupgrade.NewService(pool, ev, log, runner, bus, agentDir, "test")
 	upg.Interval, upg.Poll, upg.Back, upg.RollbackAfter = 0, 20*time.Millisecond, 5*time.Second, time.Second
 	upg.Changed = eval.Kick
+	// Zonder agent in agentDir is elke agent "unknown" en houdt dit niets tegen.
+	cmps.Agent = upg.Agent
 	var wg sync.WaitGroup
 	wg.Add(3)
 	go func() { defer wg.Done(); hub.Run(runCtx) }()

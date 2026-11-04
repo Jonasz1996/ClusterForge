@@ -159,6 +159,28 @@ func offerAgent(t *testing.T, e *testEnv, content string) {
 	}
 }
 
+// offerSelf biedt de binary aan die de agents in de tests draaien, de
+// testbinary zelf: zo zijn ze bij. Alleen het sha256-bestand telt.
+func offerSelf(t *testing.T, e *testEnv) {
+	t.Helper()
+	exe, err := os.Executable()
+	if err == nil {
+		exe, err = filepath.EvalSymlinks(exe)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(exe)
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := "cf-agent-linux-" + runtime.GOARCH
+	sum := sha256.Sum256(b)
+	if err := os.WriteFile(filepath.Join(e.upg.Dir, name+".sha256"), []byte(hex.EncodeToString(sum[:])+"  "+name+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestAgentUpgrades(t *testing.T) {
 	e, c := adminClient(t)
 	offerAgent(t, e, "nieuwe agent")

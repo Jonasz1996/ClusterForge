@@ -212,6 +212,8 @@ func serve() error {
 	cmps.DBChanged = dbs.Kick
 	// Een database verhuizen begint bij een server onder Databases.
 	cmps.Overview = dbs.Overview
+	// De verhuizing wacht tot de agent van de importnode bijgewerkt is.
+	cmps.Agent = upg.Agent
 	memory := metrics.NewClient(cfg.VictoriaMetricsURL)
 	cmps.Memory = func(ctx context.Context) (map[uuid.UUID]float64, error) { return memory.MemoryP95(ctx, time.Now()) }
 	runner.OnFinished(components.Kind, func(context.Context, store.Job) { dbs.Kick() })

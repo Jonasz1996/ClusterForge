@@ -38,6 +38,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/Jonasz1996/clusterforge/internal/agent/dbsql"
+	"github.com/Jonasz1996/clusterforge/internal/agentupgrade"
 	"github.com/Jonasz1996/clusterforge/internal/databases"
 	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/jobs"
@@ -279,6 +280,25 @@ func (s *Service) migrationPlan(ctx context.Context, source, database string, co
 	p.Blocked = slices.ContainsFunc(p.Findings, func(f Finding) bool { return f.Level == Blocked })
 	p.MoveBlocked = len(moveBlockers(p)) > 0
 	return p, route, err
+}
+
+// agentBehind zegt waarom een importnode met deze agent moet wachten, en
+// waar de knop staat.
+func agentBehind(a agentupgrade.Agent) string {
+	name := a.Hostname
+	if a.Version != "" {
+		name += " (" + a.Version + ")"
+	}
+	msg := fmt.Sprintf("de agent op %s is niet die van deze server: %s. De dump en de import draaien in die agent en zouden de fixes van deze server missen",
+		name, strings.TrimSuffix(a.Why, "."))
+	if a.State == agentupgrade.StateManual {
+		return msg
+	}
+	msg += ". Werk hem eerst bij: Nodes → " + a.Hostname + " → kaart Agent → Agent bijwerken"
+	if a.Auto {
+		msg += ", of wacht tot ClusterForge dat vanzelf doet"
+	}
+	return msg
 }
 
 // moveBlockers zijn de redenen waarom de verhuizing niet kan.
@@ -542,6 +562,19 @@ func (s *Service) planMigration(ctx context.Context, source, database string, co
 		ComponentID: opt.ComponentID, Node: t.node, Port: port, Hosts: []string{}, Disks: []MigrationDisk{},
 	}
 	p.Target = target
+	// De dump en de import draaien in de agent van de importnode, met zijn
+	// eigen mariadb-dump of pg_dump. Een fix in een nieuwe server werkt dus
+	// pas als die agent ook bijgewerkt is; anders mislukt de proef op
+	// dezelfde fout als de vorige keer.
+	if s.Agent != nil {
+		a, ok, err := s.Agent(ctx, t.node.NodeID)
+		if err != nil {
+			return p, route, err
+		}
+		if ok && a.Behind() {
+			add(Blocked, "agent_behind", &t.node, agentBehind(a), "")
+		}
+	}
 	if pg {
 		if err := s.pgMigrateAgent(ctx, t.node); errors.As(err, &ce) {
 			add(Blocked, "target_agent", &t.node, ce.Msg, "")

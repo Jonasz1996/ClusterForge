@@ -109,6 +109,12 @@ func (a Agent) Upgradable() bool {
 	return a.Online && (a.State == StateOutdated || a.State == StateFailed)
 }
 
+// Behind is true als deze agent niet die van de server is en de server
+// een nieuwere heeft: hij mist dan de fixes die met de server meekwamen.
+func (a Agent) Behind() bool {
+	return a.State == StateOutdated || a.State == StateFailed || a.State == StateManual
+}
+
 // Classify zegt hoe een agent ervoor staat tegenover de agent van de server.
 func Classify(r store.ListUpgradeAgentsRow, o Offer, now time.Time) Agent {
 	a := Agent{
@@ -245,6 +251,20 @@ func (s *Service) Overview(ctx context.Context) (Overview, error) {
 		ov.Running[key] = j.ID
 	}
 	return ov, nil
+}
+
+// Agent is de agent op één node, zoals in Overview; false als die node geen
+// agent heeft.
+func (s *Service) Agent(ctx context.Context, nodeID uuid.UUID) (Agent, bool, error) {
+	ov, err := s.Overview(ctx)
+	if err != nil {
+		return Agent{}, false, err
+	}
+	i := slices.IndexFunc(ov.Agents, func(a Agent) bool { return a.NodeID == nodeID })
+	if i < 0 {
+		return Agent{}, false, nil
+	}
+	return ov.Agents[i], true, nil
 }
 
 // Request zegt welke agents bijgewerkt worden.

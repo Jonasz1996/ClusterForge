@@ -181,6 +181,36 @@ func TestDatabaseMove(t *testing.T) {
 		t.Fatalf("bevindingen verhuizing: %s %v", got, p.MoveBlocked)
 	}
 
+	// De dump en de import draaien in de agent van nc1. Is dat niet die van
+	// de server, dan mist hij haar fixes: proef en verhuizing wachten tot hij
+	// bijgewerkt is, en het plan zegt waar de knop staat.
+	offerAgent(t, e, "nieuwe agent")
+	p = plan()
+	behind := ""
+	for _, f := range p.Findings {
+		if f.Code == "agent_behind" {
+			behind = f.Level + " " + f.Message
+		}
+	}
+	if !p.Blocked || !p.MoveBlocked || !strings.HasPrefix(behind, "blocked de agent op nc1 (") ||
+		!strings.Contains(behind, "is niet die van deze server: een andere build dan de agent van de server. De dump en de import draaien in die agent") ||
+		!strings.HasSuffix(behind, "Werk hem eerst bij: Nodes → nc1 → kaart Agent → Agent bijwerken, of wacht tot ClusterForge dat vanzelf doet") {
+		t.Fatalf("agent achter: %s %v %v %q", p.codes(), p.Blocked, p.MoveBlocked, behind)
+	}
+	for path, body := range map[string]map[string]any{
+		"/api/v1/databases/migration/trial": {"source": source, "database": "nextcloud", "component_id": lab.cid},
+		"/api/v1/databases/migration/move":  {"source": source, "database": "nextcloud", "component_id": lab.cid, "force": true},
+	} {
+		var ae apiErr
+		if s := c.do("POST", path, body, &ae); s != http.StatusConflict || !strings.Contains(ae.Message, "Nodes → nc1 → kaart Agent → Agent bijwerken") {
+			t.Fatalf("%s met een oude agent: %d %+v", path, s, ae)
+		}
+	}
+	offerSelf(t, e)
+	if p = plan(); p.Blocked || p.MoveBlocked || strings.Contains(p.codes(), "agent_behind") {
+		t.Fatalf("agent bij: %s %v %v", p.codes(), p.Blocked, p.MoveBlocked)
+	}
+
 	// Een kijker verhuist niet; met de app nog verbonden kan het niet
 	// zonder force.
 	e.createUser("kijker", "een-lang-wachtwoord", store.UserRoleViewer)

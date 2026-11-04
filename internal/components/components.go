@@ -26,6 +26,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/Jonasz1996/clusterforge/internal/agentupgrade"
 	"github.com/Jonasz1996/clusterforge/internal/databases"
 	"github.com/Jonasz1996/clusterforge/internal/deploy"
 	"github.com/Jonasz1996/clusterforge/internal/events"
@@ -116,6 +117,12 @@ type Service struct {
 	// Overview geeft de databaseservers die ClusterForge ziet, voor een
 	// verhuizing. Mag nil zijn; verhuizen kan dan niet.
 	Overview func(ctx context.Context) ([]databases.Group, error)
+	// Agent zegt hoe de agent van een node ervoor staat tegenover die van
+	// deze server (agentupgrade.Service.Agent). Een verhuizing draait in de
+	// agent van de importnode; loopt die achter, dan mist ze de fixes van
+	// de server, dus wacht ze tot hij bijgewerkt is. Mag nil zijn; dan
+	// kijkt ClusterForge dat niet na.
+	Agent func(ctx context.Context, nodeID uuid.UUID) (agentupgrade.Agent, bool, error)
 	// Changed wordt aangeroepen als een onderdeel toegepast is. Mag nil zijn.
 	Changed func()
 	// DBChanged wordt aangeroepen als er een database of gebruiker bij kwam
