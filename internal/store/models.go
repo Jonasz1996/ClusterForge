@@ -805,6 +805,7 @@ type EnrollmentToken struct {
 	ExpiresAt   time.Time
 	CreatedBy   *uuid.UUID
 	CreatedAt   time.Time
+	ClaimIp     *string
 }
 
 type Event struct {

@@ -12,8 +12,10 @@ package components
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
 	"github.com/Jonasz1996/clusterforge/internal/events"
@@ -59,7 +61,16 @@ func (s *Service) deployFinished(ctx context.Context, j store.Job) {
 	if w.RequestedBy != nil {
 		actor = events.User(*w.RequestedBy)
 	}
-	reason, hosts := s.addAfterDeploy(ctx, actor, w)
+	// Een template met een eigen database (zoals Zabbix) zet haar alleen op
+	// de nodes van één rol; de proxy ernaast krijgt er geen.
+	only, roleOnly, err := s.dep.DatabaseNodes(j)
+	if err != nil {
+		s.log.Error("uitrol lezen voor de database mislukt", "cluster", *j.ClusterID, "err", err)
+	}
+	if !roleOnly {
+		only = nil
+	}
+	reason, hosts := s.addAfterDeploy(ctx, actor, w, only)
 	if reason == "" {
 		return
 	}
@@ -75,9 +86,10 @@ func (s *Service) deployFinished(ctx context.Context, j store.Job) {
 	}
 }
 
-// addAfterDeploy plant de database op alle nodes van het cluster en voegt
-// haar toe; de reden als dat niet kan.
-func (s *Service) addAfterDeploy(ctx context.Context, actor events.Actor, w store.DeployDatabase) (string, []string) {
+// addAfterDeploy plant de database op alle nodes van het cluster, of alleen
+// op only als die niet leeg is, en voegt haar toe; de reden als dat niet
+// kan.
+func (s *Service) addAfterDeploy(ctx context.Context, actor events.Actor, w store.DeployDatabase, only []uuid.UUID) (string, []string) {
 	cands, err := s.q.ListComponentCandidates(ctx, &w.ClusterID)
 	if err != nil {
 		return err.Error(), nil
@@ -85,6 +97,9 @@ func (s *Service) addAfterDeploy(ctx context.Context, actor events.Actor, w stor
 	req := Request{Engine: w.Engine}
 	var hosts []string
 	for _, r := range cands {
+		if len(only) > 0 && !slices.Contains(only, r.ID) {
+			continue
+		}
 		req.Nodes = append(req.Nodes, r.ID)
 		hosts = append(hosts, r.Hostname)
 	}

@@ -40,8 +40,19 @@ type Template struct {
 	// Kubernetes zegt welke Kubernetes deze versie installeert; alleen bij
 	// cluster_type kubernetes, en daar verplicht.
 	Kubernetes *KubeInfo `yaml:"kubernetes"`
+	// Database zegt dat een uitrol altijd een database krijgt, op de nodes
+	// van één rol, zoals Database erbij; nil voor een template zonder.
+	Database *DatabaseInfo `yaml:"database"`
 
 	files *template.Template
+}
+
+// DatabaseInfo is de database die een template na de uitrol vanzelf krijgt.
+type DatabaseInfo struct {
+	// Engine is mariadb; PostgreSQL vraagt een eigen VIP en kan nog niet.
+	Engine string `yaml:"engine"`
+	// Role is de rol waarvan de nodes de database krijgen.
+	Role string `yaml:"role"`
 }
 
 // ComponentType is het cluster_type van een onderdeel: stappen die op de
@@ -195,6 +206,16 @@ func Parse(fsys fs.FS) (*Template, error) {
 		// Eén rol moet altijd nodes hebben, anders kan een cluster leeg zijn.
 		if i == 0 && r.minCount() == 0 {
 			return nil, fmt.Errorf("rol %s: de eerste rol heeft minstens één node", r.Name)
+		}
+	}
+	if d := t.Database; d != nil {
+		switch {
+		case d.Engine != protocol.DBMariaDB:
+			return nil, errors.New("database: engine is mariadb")
+		case !roles[d.Role]:
+			return nil, fmt.Errorf("database: onbekende rol %q", d.Role)
+		case t.ClusterType == "kubernetes":
+			return nil, errors.New("database: hoort niet bij cluster_type kubernetes")
 		}
 	}
 	if err := t.checkServices(); err != nil {

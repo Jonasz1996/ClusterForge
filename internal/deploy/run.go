@@ -52,27 +52,30 @@ func (s *Service) run(ctx context.Context, j *jobs.Job) error {
 		return fmt.Errorf("template %s %s zit niet meer in deze server", r.p.Template, r.p.Version)
 	}
 	r.tpl = tpl
-	api, err := s.pve.API(ctx, r.p.Target.ProxmoxID)
-	if err != nil {
-		return err
-	}
-	r.api = api
-	defer func() {
-		sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
-		defer cancel()
-		_ = s.pve.Sync(sctx, r.p.Target.ProxmoxID)
-	}()
-
-	for i := range r.p.Nodes {
-		n := &r.p.Nodes[i]
-		if err := j.Step(ctx, "VM "+n.Hostname+" maken", func(ctx context.Context, st *jobs.Step) error {
-			return r.createVM(ctx, st, n)
-		}); err != nil {
+	// Op bestaande nodes (CT's met een agent) komen er geen VM's.
+	if r.p.Target.Network != NetworkExisting {
+		api, err := s.pve.API(ctx, r.p.Target.ProxmoxID)
+		if err != nil {
 			return err
 		}
-	}
-	if err := j.Step(ctx, "Agents aanmelden", r.enrollAll); err != nil {
-		return err
+		r.api = api
+		defer func() {
+			sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+			defer cancel()
+			_ = s.pve.Sync(sctx, r.p.Target.ProxmoxID)
+		}()
+
+		for i := range r.p.Nodes {
+			n := &r.p.Nodes[i]
+			if err := j.Step(ctx, r.kind()+" "+n.Hostname+" maken", func(ctx context.Context, st *jobs.Step) error {
+				return r.createVM(ctx, st, n)
+			}); err != nil {
+				return err
+			}
+		}
+		if err := j.Step(ctx, "Agents aanmelden", r.enrollAll); err != nil {
+			return err
+		}
 	}
 	for i := range r.p.Nodes {
 		n := &r.p.Nodes[i]
@@ -89,7 +92,24 @@ func (s *Service) run(ctx context.Context, j *jobs.Job) error {
 }
 
 func (r *runCtx) guest(st vmState, n *plannedNode) proxmox.Guest {
-	return proxmox.Guest{Type: "qemu", Node: n.Host, VMID: st.VMID}
+	return proxmox.Guest{Type: r.guestType(), Node: n.Host, VMID: st.VMID}
+}
+
+// guestType is qemu voor VM's uit een golden image en lxc voor CT's uit een
+// CT-template.
+func (r *runCtx) guestType() string {
+	if r.p.Target.ImageType == "lxc" {
+		return "lxc"
+	}
+	return "qemu"
+}
+
+// kind is VM of CT, voor de stappen en het logboek.
+func (r *runCtx) kind() string {
+	if r.guestType() == "lxc" {
+		return "CT"
+	}
+	return "VM"
 }
 
 // vmState is de bewaarde voortgang van het maken van één VM.
@@ -173,19 +193,19 @@ func (r *runCtx) waitTask(ctx context.Context, st *jobs.Step, upid string) error
 func (r *runCtx) createVM(ctx context.Context, st *jobs.Step, n *plannedNode) error {
 	var vs vmState
 	st.State(&vs)
-	img := proxmox.Guest{Type: "qemu", VMID: r.p.Target.ImageVMID}
+	img := proxmox.Guest{Type: r.guestType(), VMID: r.p.Target.ImageVMID}
 	if vs.VMID == 0 {
 		res, err := r.api.Resources(ctx)
 		if err != nil {
 			return err
 		}
 		for _, x := range res {
-			if x.Type == "qemu" && x.VMID == img.VMID {
+			if x.Type == img.Type && x.VMID == img.VMID {
 				img.Node = x.Node
 			}
 		}
 		if img.Node == "" {
-			return fmt.Errorf("de golden image (VM %d) bestaat niet meer in Proxmox", img.VMID)
+			return fmt.Errorf("de template (%s %d) bestaat niet meer in Proxmox", r.kind(), img.VMID)
 		}
 		id, err := r.api.NextID(ctx)
 		if err != nil {
@@ -202,7 +222,7 @@ func (r *runCtx) createVM(ctx context.Context, st *jobs.Step, n *plannedNode) er
 			return err
 		}
 		for _, x := range res {
-			if x.Type == "qemu" && x.VMID == img.VMID {
+			if x.Type == img.Type && x.VMID == img.VMID {
 				img.Node = x.Node
 			}
 		}
@@ -210,7 +230,7 @@ func (r *runCtx) createVM(ctx context.Context, st *jobs.Step, n *plannedNode) er
 	g := r.guest(vs, n)
 
 	if vs.Phase == "clone" {
-		st.Logf("VM %d klonen uit %s naar %s", vs.VMID, r.p.ImageName, n.Host)
+		st.Logf("%s %d klonen uit %s naar %s", r.kind(), vs.VMID, r.p.ImageName, n.Host)
 		err := r.task(ctx, st, &vs, func() (string, error) {
 			return r.api.Clone(ctx, img, vs.VMID, n.Hostname, n.Host, r.p.Target.Storage)
 		})
@@ -230,8 +250,13 @@ func (r *runCtx) createVM(ctx context.Context, st *jobs.Step, n *plannedNode) er
 
 	if vs.Phase == "config" {
 		form := r.vmConfig(n)
+		if r.guestType() == "lxc" {
+			form = r.ctConfig(n)
+		}
 		st.Logf("%d vCPU, %d MB geheugen, netwerk %s", n.VM.CPU, n.VM.MemoryMiB, form.Get("net0"))
-		st.Logf("cloud-init: %s", form.Get("ipconfig0"))
+		if ip := form.Get("ipconfig0"); ip != "" {
+			st.Logf("cloud-init: %s", ip)
+		}
 		if err := r.task(ctx, st, &vs, func() (string, error) { return r.api.SetConfig(ctx, g, form) }); err != nil {
 			return fmt.Errorf("configureren: %w", err)
 		}
@@ -249,7 +274,7 @@ func (r *runCtx) createVM(ctx context.Context, st *jobs.Step, n *plannedNode) er
 		disk, _, size, ok := proxmox.BootDisk(cfg)
 		switch {
 		case !ok:
-			return errors.New("de nieuwe VM heeft geen schijf om van op te starten")
+			return fmt.Errorf("de nieuwe %s heeft geen schijf om van op te starten", r.kind())
 		case size >= n.VM.DiskGiB:
 			st.Logf("schijf %s is %d GB; groter dan gevraagd, dus zo gelaten", disk, size)
 		default:
@@ -270,13 +295,13 @@ func (r *runCtx) createVM(ctx context.Context, st *jobs.Step, n *plannedNode) er
 		running := false
 		if res, err := r.api.Resources(ctx); err == nil {
 			for _, x := range res {
-				if x.Type == "qemu" && x.VMID == vs.VMID {
+				if x.Type == g.Type && x.VMID == vs.VMID {
 					running = x.Status == "running"
 				}
 			}
 		}
 		if !running {
-			st.Logf("VM %d starten", vs.VMID)
+			st.Logf("%s %d starten", r.kind(), vs.VMID)
 			if err := r.task(ctx, st, &vs, func() (string, error) { return r.api.Power(ctx, g, "start") }); err != nil {
 				return fmt.Errorf("starten: %w", err)
 			}
@@ -286,7 +311,7 @@ func (r *runCtx) createVM(ctx context.Context, st *jobs.Step, n *plannedNode) er
 			return err
 		}
 	}
-	st.Logf("VM %d draait op %s", vs.VMID, n.Host)
+	st.Logf("%s %d draait op %s", r.kind(), vs.VMID, n.Host)
 	return nil
 }
 
@@ -319,6 +344,32 @@ func (r *runCtx) vmConfig(n *plannedNode) url.Values {
 	if t.SSHKeys != "" {
 		// Proxmox wil de sleutels nog eens URL-gecodeerd, met %20 voor spaties.
 		form.Set("sshkeys", strings.ReplaceAll(url.QueryEscape(t.SSHKeys+"\n"), "+", "%20"))
+	}
+	return form
+}
+
+// ctConfig is de configuratie van een nieuwe CT: vorm en netwerk. Een CT
+// heeft geen cloud-init; Proxmox zet hostname en adres zelf bij het starten.
+func (r *runCtx) ctConfig(n *plannedNode) url.Values {
+	t := r.p.Target
+	net0 := "name=eth0,bridge=" + t.Bridge
+	if t.VLAN != nil {
+		net0 += ",tag=" + strconv.Itoa(*t.VLAN)
+	}
+	// Een CT uit een CT-template kan alleen met een vast adres (checkTarget).
+	net0 += fmt.Sprintf(",ip=%s/%d,gw=%s", n.Address, n.Prefix, t.Gateway)
+	form := url.Values{
+		"hostname": {n.Hostname},
+		"cores":    {strconv.Itoa(n.VM.CPU)},
+		"memory":   {strconv.Itoa(n.VM.MemoryMiB)},
+		"net0":     {net0},
+		"onboot":   {"1"},
+		"tags":     {"clusterforge;" + r.p.Cluster.Slug},
+		"description": {fmt.Sprintf("Beheerd door ClusterForge: cluster %s, rol %s, template %s %s.",
+			r.p.Cluster.Name, n.Role, r.p.Template, r.p.Version)},
+	}
+	if len(t.DNS) > 0 {
+		form.Set("nameserver", strings.Join(t.DNS, " "))
 	}
 	return form
 }
@@ -363,7 +414,10 @@ func (r *runCtx) enroll(ctx context.Context, n *plannedNode, logf func(string, .
 		return err
 	}
 	if row.Node.PveVmid == nil {
-		return fmt.Errorf("%s heeft nog geen VM", n.Hostname)
+		return fmt.Errorf("%s heeft nog geen %s", n.Hostname, r.kind())
+	}
+	if r.guestType() == "lxc" {
+		return r.enrollCT(ctx, n, logf)
 	}
 	g := proxmox.Guest{Type: "qemu", Node: n.Host, VMID: int(*row.Node.PveVmid)}
 	// De VM kan intussen verhuisd zijn.
@@ -406,6 +460,34 @@ func (r *runCtx) enroll(ctx context.Context, n *plannedNode, logf func(string, .
 	start = time.Now()
 	if err := r.poll(ctx, r.s.EnrollTimeout, func(ctx context.Context) (bool, error) { return r.enrolled(ctx, n) }); err != nil {
 		return fmt.Errorf("%s: cf-agent meldt zich niet aan; kan de VM %s bereiken, en NATS op poort 4222? (%w)", n.Hostname, r.p.ServerURL, err)
+	}
+	logf("%s: agent aangemeld na %s", n.Hostname, seconds(time.Since(start)))
+	return nil
+}
+
+// enrollCT zet een token klaar waarmee de agent in de nieuwe CT zich zelf
+// aanmeldt (agents/claim): een CT heeft geen guest agent om een
+// aanmeldbestand in te zetten. Het token geldt alleen voor deze node, en
+// alleen vanaf het adres dat de CT van de uitrol kreeg.
+func (r *runCtx) enrollCT(ctx context.Context, n *plannedNode, logf func(string, ...any)) error {
+	if n.Address == "" {
+		return fmt.Errorf("%s heeft geen vast adres; een CT meldt zich alleen aan vanaf een vast adres", n.Hostname)
+	}
+	by := uuid.Nil
+	if r.j.RequestedBy != nil {
+		by = *r.j.RequestedBy
+	}
+	if _, _, err := r.s.agents.CreateToken(ctx, by, agents.TokenInput{
+		Description: "Uitrol " + r.p.Cluster.Name + " (CT)", NodeID: &n.ID, MaxUses: 1, TTL: time.Hour, ClaimIP: n.Address,
+	}); err != nil {
+		return err
+	}
+	logf("%s: wachten tot cf-agent in de CT zich aanmeldt vanaf %s", n.Hostname, n.Address)
+	start := time.Now()
+	if err := r.poll(ctx, r.s.GuestAgentTimeout+r.s.EnrollTimeout, func(ctx context.Context) (bool, error) { return r.enrolled(ctx, n) }); err != nil {
+		return fmt.Errorf("%s: cf-agent meldt zich niet aan. Is de CT gemaakt met ct-template.sh (claim.json met het adres van ClusterForge), "+
+			"kan hij ClusterForge bereiken, en NATS op poort 4222? Komt zijn verkeer bij ClusterForge aan vanaf %s, dus zonder NAT? (%w)",
+			n.Hostname, n.Address, err)
 	}
 	logf("%s: agent aangemeld na %s", n.Hostname, seconds(time.Since(start)))
 	return nil

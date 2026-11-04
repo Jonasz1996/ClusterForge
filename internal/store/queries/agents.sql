@@ -5,8 +5,8 @@ SELECT value FROM server_secrets WHERE name = $1;
 INSERT INTO server_secrets (name, value) VALUES ($1, $2) ON CONFLICT (name) DO NOTHING;
 
 -- name: CreateEnrollmentToken :one
-INSERT INTO enrollment_tokens (token_hash, description, node_id, cluster_id, max_uses, expires_at, created_by)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+INSERT INTO enrollment_tokens (token_hash, description, node_id, cluster_id, max_uses, expires_at, created_by, claim_ip)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 RETURNING *;
 
 -- name: ListActiveEnrollmentTokens :many
@@ -20,6 +20,15 @@ ORDER BY t.created_at DESC;
 
 -- name: LockEnrollmentTokenByHash :one
 SELECT * FROM enrollment_tokens WHERE token_hash = $1 FOR UPDATE;
+
+-- name: LockClaimToken :one
+-- Het nieuwste bruikbare token waarmee de agent van deze node zich zonder
+-- token mag aanmelden.
+SELECT * FROM enrollment_tokens
+WHERE node_id = $1 AND claim_ip IS NOT NULL AND expires_at > now() AND uses < max_uses
+ORDER BY created_at DESC
+LIMIT 1
+FOR UPDATE;
 
 -- name: UseEnrollmentToken :exec
 UPDATE enrollment_tokens SET uses = uses + 1 WHERE id = $1;

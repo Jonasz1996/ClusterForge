@@ -286,6 +286,7 @@ var sampleParams = map[string]map[string]any{
 	"cron":             {"vip": "10.0.20.100", "vrid": 52},
 	"generic":          {"vip": "10.0.20.100", "vrid": 53, "image": "ghcr.io/jonas/app:1.4.2", "port": 8080, "container_port": 3000},
 	"kubernetes":       {"vip": "10.0.20.100", "vrid": 54},
+	"zabbix":           {"vip": "10.0.20.100", "vrid": 55},
 }
 
 func renderBuiltin(t *testing.T, tpl *templates.Template, role string) []templates.Step {

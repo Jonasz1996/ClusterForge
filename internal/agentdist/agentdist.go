@@ -16,6 +16,9 @@ var installScript []byte
 //go:embed golden-image.sh
 var goldenImageScript []byte
 
+//go:embed ct-template.sh
+var ctTemplateScript []byte
+
 // downloadable zijn de enige bestanden die uit de agentmap geserveerd worden.
 var downloadable = map[string]bool{
 	"cf-agent-linux-amd64":        true,
@@ -37,6 +40,14 @@ func GoldenImageScript(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/x-shellscript; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-cache")
 	_, _ = w.Write(goldenImageScript)
+}
+
+// CTTemplateScript serveert /install/ct-template.sh, dat op een
+// Proxmox-host een CT-template met cf-agent maakt.
+func CTTemplateScript(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/x-shellscript; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-cache")
+	_, _ = w.Write(ctTemplateScript)
 }
 
 // Downloads serveert /downloads/<naam> uit dir.

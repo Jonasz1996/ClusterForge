@@ -56,9 +56,9 @@ func (q *Queries) CreateAgent(ctx context.Context, arg CreateAgentParams) (Agent
 }
 
 const createEnrollmentToken = `-- name: CreateEnrollmentToken :one
-INSERT INTO enrollment_tokens (token_hash, description, node_id, cluster_id, max_uses, expires_at, created_by)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, token_hash, description, node_id, cluster_id, max_uses, uses, expires_at, created_by, created_at
+INSERT INTO enrollment_tokens (token_hash, description, node_id, cluster_id, max_uses, expires_at, created_by, claim_ip)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+RETURNING id, token_hash, description, node_id, cluster_id, max_uses, uses, expires_at, created_by, created_at, claim_ip
 `
 
 type CreateEnrollmentTokenParams struct {
@@ -69,6 +69,7 @@ type CreateEnrollmentTokenParams struct {
 	MaxUses     int32
 	ExpiresAt   time.Time
 	CreatedBy   *uuid.UUID
+	ClaimIp     *string
 }
 
 func (q *Queries) CreateEnrollmentToken(ctx context.Context, arg CreateEnrollmentTokenParams) (EnrollmentToken, error) {
@@ -80,6 +81,7 @@ func (q *Queries) CreateEnrollmentToken(ctx context.Context, arg CreateEnrollmen
 		arg.MaxUses,
 		arg.ExpiresAt,
 		arg.CreatedBy,
+		arg.ClaimIp,
 	)
 	var i EnrollmentToken
 	err := row.Scan(
@@ -93,6 +95,7 @@ func (q *Queries) CreateEnrollmentToken(ctx context.Context, arg CreateEnrollmen
 		&i.ExpiresAt,
 		&i.CreatedBy,
 		&i.CreatedAt,
+		&i.ClaimIp,
 	)
 	return i, err
 }
@@ -274,7 +277,7 @@ func (q *Queries) InsertServerSecret(ctx context.Context, arg InsertServerSecret
 }
 
 const listActiveEnrollmentTokens = `-- name: ListActiveEnrollmentTokens :many
-SELECT t.id, t.token_hash, t.description, t.node_id, t.cluster_id, t.max_uses, t.uses, t.expires_at, t.created_by, t.created_at, n.hostname AS node_hostname, c.name AS cluster_name, u.username AS created_by_username
+SELECT t.id, t.token_hash, t.description, t.node_id, t.cluster_id, t.max_uses, t.uses, t.expires_at, t.created_by, t.created_at, t.claim_ip, n.hostname AS node_hostname, c.name AS cluster_name, u.username AS created_by_username
 FROM enrollment_tokens t
 LEFT JOIN nodes n ON n.id = t.node_id
 LEFT JOIN clusters c ON c.id = t.cluster_id
@@ -294,6 +297,7 @@ type ListActiveEnrollmentTokensRow struct {
 	ExpiresAt         time.Time
 	CreatedBy         *uuid.UUID
 	CreatedAt         time.Time
+	ClaimIp           *string
 	NodeHostname      *string
 	ClusterName       *string
 	CreatedByUsername *string
@@ -319,6 +323,7 @@ func (q *Queries) ListActiveEnrollmentTokens(ctx context.Context) ([]ListActiveE
 			&i.ExpiresAt,
 			&i.CreatedBy,
 			&i.CreatedAt,
+			&i.ClaimIp,
 			&i.NodeHostname,
 			&i.ClusterName,
 			&i.CreatedByUsername,
@@ -333,8 +338,37 @@ func (q *Queries) ListActiveEnrollmentTokens(ctx context.Context) ([]ListActiveE
 	return items, nil
 }
 
+const lockClaimToken = `-- name: LockClaimToken :one
+SELECT id, token_hash, description, node_id, cluster_id, max_uses, uses, expires_at, created_by, created_at, claim_ip FROM enrollment_tokens
+WHERE node_id = $1 AND claim_ip IS NOT NULL AND expires_at > now() AND uses < max_uses
+ORDER BY created_at DESC
+LIMIT 1
+FOR UPDATE
+`
+
+// Het nieuwste bruikbare token waarmee de agent van deze node zich zonder
+// token mag aanmelden.
+func (q *Queries) LockClaimToken(ctx context.Context, nodeID *uuid.UUID) (EnrollmentToken, error) {
+	row := q.db.QueryRow(ctx, lockClaimToken, nodeID)
+	var i EnrollmentToken
+	err := row.Scan(
+		&i.ID,
+		&i.TokenHash,
+		&i.Description,
+		&i.NodeID,
+		&i.ClusterID,
+		&i.MaxUses,
+		&i.Uses,
+		&i.ExpiresAt,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.ClaimIp,
+	)
+	return i, err
+}
+
 const lockEnrollmentTokenByHash = `-- name: LockEnrollmentTokenByHash :one
-SELECT id, token_hash, description, node_id, cluster_id, max_uses, uses, expires_at, created_by, created_at FROM enrollment_tokens WHERE token_hash = $1 FOR UPDATE
+SELECT id, token_hash, description, node_id, cluster_id, max_uses, uses, expires_at, created_by, created_at, claim_ip FROM enrollment_tokens WHERE token_hash = $1 FOR UPDATE
 `
 
 func (q *Queries) LockEnrollmentTokenByHash(ctx context.Context, tokenHash []byte) (EnrollmentToken, error) {
@@ -351,6 +385,7 @@ func (q *Queries) LockEnrollmentTokenByHash(ctx context.Context, tokenHash []byt
 		&i.ExpiresAt,
 		&i.CreatedBy,
 		&i.CreatedAt,
+		&i.ClaimIp,
 	)
 	return i, err
 }

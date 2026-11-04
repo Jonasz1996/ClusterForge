@@ -29,7 +29,9 @@ const usage = `cf-agent: de ClusterForge-agent
 Gebruik:
   cf-agent enroll -server https://clusterforge.example -token cfe_...
   cf-agent run       verbindt met ClusterForge (zo start systemd hem); nog niet
-                     aangemeld, dan wacht hij op /etc/clusterforge/enroll.json
+                     aangemeld, dan wacht hij op /etc/clusterforge/enroll.json;
+                     met /etc/clusterforge/claim.json (CT-template) meldt hij
+                     zich zonder token aan zodra een uitrol op zijn hostname wacht
   cf-agent facts     toont de facts van deze machine
   cf-agent check db [postgresql]
                      exit 0 als de database op deze node mag schrijven: MariaDB
@@ -222,6 +224,7 @@ func run(args []string, log *slog.Logger) error {
 	fl := flag.NewFlagSet("run", flag.ExitOnError)
 	config := fl.String("config", agent.DefaultConfigPath, "pad van het configuratiebestand")
 	enrollFile := fl.String("enroll-file", agent.DefaultEnrollPath, "eenmalig aanmeldbestand als er nog geen configuratie is")
+	claimFile := fl.String("claim-file", agent.DefaultClaimPath, "in een CT-template: zonder token aanmelden zodra een uitrol op deze hostname wacht")
 	statePath := fl.String("state", agent.DefaultStatePath, "bestand waarin de agent onderhoud en herstarts onthoudt")
 	_ = fl.Parse(args)
 
@@ -236,7 +239,7 @@ func run(args []string, log *slog.Logger) error {
 	}
 	c, err := agent.LoadConfig(*config)
 	if errors.Is(err, fs.ErrNotExist) {
-		c, err = waitEnroll(ctx, log, *config, *enrollFile)
+		c, err = waitEnroll(ctx, log, *config, *enrollFile, *claimFile)
 		if ctx.Err() != nil {
 			return nil
 		}
@@ -251,10 +254,12 @@ func run(args []string, log *slog.Logger) error {
 }
 
 // waitEnroll wacht tot de agent aangemeld is: via een aanmeldbestand, dat
-// ClusterForge in een nieuwe VM uit een golden image zet, of via cf-agent
-// enroll.
-func waitEnroll(ctx context.Context, log *slog.Logger, config, enrollFile string) (*agent.Config, error) {
+// ClusterForge in een nieuwe VM uit een golden image zet, via cf-agent
+// enroll, of in een CT uit een CT-template zonder token (claimFile).
+func waitEnroll(ctx context.Context, log *slog.Logger, config, enrollFile, claimFile string) (*agent.Config, error) {
 	log.Info("nog niet aangemeld; wachten op een aanmeldbestand of cf-agent enroll", "bestand", enrollFile)
+	var nextClaim time.Time
+	claimWaiting := false
 	for {
 		delay := 2 * time.Second
 		if c, err := agent.LoadConfig(config); err == nil {
@@ -275,6 +280,34 @@ func waitEnroll(ctx context.Context, log *slog.Logger, config, enrollFile string
 			// Misschien nog half geschreven.
 			log.Error("aanmeldbestand onleesbaar", "err", err)
 			delay = 5 * time.Second
+		case time.Now().After(nextClaim):
+			nextClaim = time.Now().Add(10 * time.Second)
+			cl, err := agent.LoadClaimFile(claimFile)
+			if errors.Is(err, fs.ErrNotExist) {
+				break
+			}
+			if err != nil {
+				log.Error("claimbestand onleesbaar", "err", err)
+				break
+			}
+			c, err := agent.Enroll(ctx, agent.EnrollOptions{ServerURL: cl.Server, Claim: true, Version: version, AllowHTTP: cl.AllowHTTP})
+			switch {
+			case errors.Is(err, agent.ErrNotClaimed):
+				if !claimWaiting {
+					log.Info("CT uit een CT-template: wachten tot een uitrol in ClusterForge deze hostname aanmeldt", "server", cl.Server)
+					claimWaiting = true
+				}
+			case err != nil:
+				log.Error("aanmelden zonder token mislukt; straks opnieuw", "err", err)
+				nextClaim = time.Now().Add(30 * time.Second)
+			default:
+				if err := c.Save(config); err != nil {
+					return nil, err
+				}
+				log.Info("aangemeld zonder token", "node", c.NodeID)
+				_ = os.Remove(claimFile)
+				return c, nil
+			}
 		}
 		select {
 		case <-ctx.Done():

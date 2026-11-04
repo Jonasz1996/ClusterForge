@@ -1,0 +1,61 @@
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}). Wijzigingen hier
+# worden bij de volgende uitrol overschreven.
+#
+# De webinterface van Zabbix op http://{{ .params.vip }}/.
+
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name _;
+
+    root /usr/local/lib/clusterforge/zabbix-web;
+    index index.php;
+    client_max_body_size 16m;
+
+    # De controle van ClusterForge na de uitrol.
+    location = /cf-health {
+        access_log off;
+        default_type text/plain;
+        return 200 "ok\n";
+    }
+
+    location = /favicon.ico {
+        log_not_found off;
+    }
+
+    location / {
+        try_files $uri $uri/ =404;
+    }
+
+    location /assets {
+        access_log off;
+        expires 10d;
+    }
+
+    location ~ /\.ht {
+        deny all;
+    }
+
+    location ~ ^/(api|conf|include|locale|vendor)/ {
+        deny all;
+        return 404;
+    }
+
+    location ~ [^/]\.php(/|$) {
+        fastcgi_pass unix:/run/php/php-fpm.sock;
+        fastcgi_split_path_info ^(.+\.php)(/.+)$;
+        fastcgi_index index.php;
+        include fastcgi_params;
+        fastcgi_param DOCUMENT_ROOT /usr/local/lib/clusterforge/zabbix-web;
+        fastcgi_param SCRIPT_FILENAME /usr/local/lib/clusterforge/zabbix-web$fastcgi_script_name;
+        fastcgi_param PATH_TRANSLATED /usr/local/lib/clusterforge/zabbix-web$fastcgi_script_name;
+        # De instellingen die Zabbix van PHP vraagt.
+        fastcgi_param PHP_VALUE "post_max_size=16M
+max_execution_time=300
+max_input_time=300
+max_input_vars=10000";
+        fastcgi_buffers 8 256k;
+        fastcgi_buffer_size 128k;
+        fastcgi_read_timeout 600;
+    }
+}

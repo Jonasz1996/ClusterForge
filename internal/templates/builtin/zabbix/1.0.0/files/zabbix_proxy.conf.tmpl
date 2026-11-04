@@ -1,0 +1,33 @@
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}). Wijzigingen hier
+# worden bij de volgende uitrol overschreven.
+#
+# Actieve proxy: hij haalt zijn configuratie bij de actieve Zabbix server en
+# stuurt de meetwaarden van de agents erheen. Voeg hem in Zabbix toe bij
+# Beheer → Proxy's als actieve proxy met de naam {{ .node.hostname }}.
+
+LogType=console
+PidFile=/run/cf-zabbix-proxy/zabbix_proxy.pid
+SocketDir=/run/cf-zabbix-proxy
+ListenPort=10051
+
+ProxyMode=0
+Hostname={{ .node.hostname }}
+Server={{ $first := true }}{{ range .nodes }}{{ if eq .role "server" }}{{ if not $first }};{{ end }}{{ .address }}{{ $first = false }}{{ end }}{{ end }}
+
+# SQLite: de proxy maakt het bestand zelf als het er niet is.
+DBName=/var/lib/cf-zabbix-proxy/zabbix_proxy.db
+
+# Zijn de servers weg, dan bewaart de proxy tot 24 uur aan meetwaarden.
+ProxyOfflineBuffer=24
+
+Timeout=10
+CacheSize=256M
+HistoryCacheSize=128M
+HistoryIndexCacheSize=32M
+StartPollers=20
+StartPollersUnreachable=4
+StartTrappers=10
+StartPingers=4
+StartPreprocessors=8
+FpingLocation=/usr/bin/fping
+LogSlowQueries=3000

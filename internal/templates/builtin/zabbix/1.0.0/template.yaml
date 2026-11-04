@@ -1,0 +1,267 @@
+name: zabbix
+version: 1.0.0
+title: Zabbix met HA
+description: >-
+  Zabbix uit Debian 13 (7.0 LTS) of, met een versie zoals 8.0, uit
+  repo.zabbix.com. Drie (of vijf) servers draaien elk de Zabbix
+  server in HA-modus (één actief, de andere stand-by), de webinterface met
+  Nginx en MariaDB Galera; het VIP staat op een node waarvan de database mag
+  schrijven, en zowel de Zabbix server als de webinterface verbinden via het
+  VIP. Daarnaast één zwaardere proxy (met SQLite) waar de agents op je hosts
+  naar sturen. De database komt er na de uitrol vanzelf bij, met de database
+  zabbix, de gebruiker zabbix en het schema van Zabbix.
+cluster_type: generic
+# Het VIP volgt de database; terugspringen naar de eerste server zou de
+# verbindingen van Zabbix zonder reden verbreken.
+failback: false
+
+# Na de uitrol zet ClusterForge MariaDB Galera op de nodes met deze rol,
+# zoals Database erbij; dat hoeft niet aangevinkt te worden.
+database:
+  engine: mariadb
+  role: server
+
+params:
+  - name: vip
+    type: ipv4
+    label: VIP
+    immutable: true
+    help: Het adres van de webinterface (http://VIP/) en van de database. Het moet vrij zijn en in hetzelfde netwerk liggen als de nodes.
+  - name: zabbix_version
+    type: string
+    label: Zabbix-versie
+    help: >-
+      debian is Zabbix 7.0 LTS uit Debian 13. Een versie zoals 8.0 of 7.4 haalt
+      Zabbix uit repo.zabbix.com, met hun pakket zabbix-release voor Debian 13.
+      Ligt vast na de uitrol.
+    default: debian
+    pattern: 'debian|[0-9]+\.[0-9]+'
+    immutable: true
+  - name: servers
+    type: int
+    label: Aantal servers
+    help: Galera wil een oneven aantal; met drie mag er één uitvallen.
+    default: 3
+    min: 3
+    max: 5
+  - name: server_cpu
+    type: int
+    label: vCPU per server
+    default: 2
+    min: 1
+    max: 32
+  - name: server_memory
+    type: size
+    label: Geheugen per server
+    default: 4G
+    min: 2G
+    max: 128G
+  - name: server_disk
+    type: size
+    label: Schijf per server
+    help: Voor Zabbix en de database samen.
+    default: 75G
+    min: 20G
+    max: 2T
+  - name: proxy_cpu
+    type: int
+    label: vCPU van de proxy
+    default: 4
+    min: 1
+    max: 32
+  - name: proxy_memory
+    type: size
+    label: Geheugen van de proxy
+    default: 8G
+    min: 2G
+    max: 128G
+  - name: proxy_disk
+    type: size
+    label: Schijf van de proxy
+    help: De proxy bewaart tot 24 uur aan meetwaarden als de servers onbereikbaar zijn.
+    default: 50G
+    min: 20G
+    max: 2T
+  - name: vrid
+    type: int
+    label: VRRP-id
+    immutable: true
+    help: Uniek per keepalived-groep in hetzelfde netwerk. Leeg laten kiest een vrij nummer.
+    optional: true
+    min: 1
+    max: 255
+  - name: auth_pass
+    type: secret
+    label: VRRP-wachtwoord
+    help: Leeg laten maakt er een. Keepalived gebruikt hoogstens 8 tekens.
+    length: 8
+  - name: db_password
+    type: secret
+    label: Wachtwoord van de databasegebruiker zabbix
+    help: Leeg laten maakt er een; je hebt het zelf niet nodig.
+    length: 32
+
+roles:
+  # De servers komen eerst en krijgen de eerste adressen; de proxy het adres
+  # erna.
+  - name: server
+    count: "{{ .params.servers }}"
+    vm:
+      cpu: "{{ .params.server_cpu }}"
+      memory: "{{ .params.server_memory }}"
+      disk: "{{ .params.server_disk }}"
+    steps:
+      # Eerst de webserver, zodat zabbix-frontend-php Nginx kiest en geen
+      # Apache meebrengt.
+      - package: { names: [nginx, php-fpm, php-mysql, php-gd, php-bcmath, php-mbstring, php-xml, php-ldap, php-curl, keepalived] }
+      # De voorcontrole van de webinterface eist de locale en_US; een kale
+      # Debian-CT heeft alleen C. locales-all brengt alle locales al
+      # gecompileerd mee, zonder locale-gen.
+      - package: { names: [locales-all] }
+      # Een versie van repo.zabbix.com: hun pakket zabbix-release zet de bron
+      # en de sleutel, zoals de installatiegids van Zabbix. Met debian doet
+      # deze stap niets.
+      - package: { names: [curl, ca-certificates] }
+      - directory: { path: /usr/local/lib/clusterforge, mode: "0755" }
+      - command:
+          title: "bron van Zabbix: {{ .params.zabbix_version }}"
+          run: |-
+            {{ if ne .params.zabbix_version "debian" }}set -e
+            v='{{ .params.zabbix_version }}'
+            d=$(mktemp -d)
+            trap 'rm -rf "$d"' EXIT
+            curl -fsSL -o "$d/zabbix-release.deb" "https://repo.zabbix.com/zabbix/$v/release/debian/pool/main/z/zabbix-release/zabbix-release_latest_${v}+debian13_all.deb"
+            dpkg -i "$d/zabbix-release.deb"
+            apt-get update
+            touch "/usr/local/lib/clusterforge/zabbix-repo-$v"{{ else }}true{{ end }}
+          creates: '{{ if ne .params.zabbix_version "debian" }}/usr/local/lib/clusterforge/zabbix-repo-{{ .params.zabbix_version }}{{ else }}/etc/debian_version{{ end }}'
+      # Uit repo.zabbix.com staat het schema in zabbix-sql-scripts.
+      - package:
+          names:
+            - zabbix-server-mysql
+            - zabbix-frontend-php
+            - '{{ if ne .params.zabbix_version "debian" }}zabbix-sql-scripts{{ else }}zabbix-server-mysql{{ end }}'
+
+      # De dienst van het pakket leest zijn eigen configuratie; ClusterForge
+      # draait de Zabbix server als cf-zabbix-server.
+      # Het pakket maakt de gebruiker zabbix zelf; dit zegt alleen dat
+      # ClusterForge hem nodig heeft.
+      - user: { name: zabbix, system: true, home: /var/lib/zabbix }
+      - service: { name: zabbix-server, enabled: false, state: stopped }
+      - file:
+          path: /etc/zabbix/cf-zabbix_server.conf
+          template: zabbix_server.conf.tmpl
+          mode: "0644"
+          notify: [service:cf-zabbix-server:restart]
+      # Het wachtwoord alleen voor root; systemd geeft het de Zabbix server
+      # als credential (LoadCredential).
+      - file:
+          path: /etc/zabbix/cf-zabbix_server-db.conf
+          content: "DBPassword={{ .params.db_password }}\n"
+          mode: "0600"
+          notify: [service:cf-zabbix-server:restart]
+      - file:
+          path: /etc/systemd/system/cf-zabbix-server.service
+          template: cf-zabbix-server.service.tmpl
+          notify: [service:cf-zabbix-server:restart]
+      - service: { name: cf-zabbix-server, enabled: true, state: started }
+      # Database, gebruiker en schema: zodra Galera er is (na de uitrol).
+      - directory: { path: /usr/local/lib/clusterforge, mode: "0755" }
+      - file:
+          path: /usr/local/lib/clusterforge/zabbix-db.sh
+          template: zabbix-db.sh.tmpl
+          mode: "0700"
+          notify: [service:cf-zabbix-db:restart]
+      - file:
+          path: /etc/systemd/system/cf-zabbix-db.service
+          template: cf-zabbix-db.service.tmpl
+          notify: [service:cf-zabbix-db:restart]
+      - service: { name: cf-zabbix-db, enabled: true, state: started }
+      # De webinterface: de configuratie van de frontend en een site voor
+      # Nginx die de standaardsite vervangt.
+      # PHP-FPM draait als www-data en moet het wachtwoord kunnen lezen; Nginx
+      # geeft conf/ nooit uit. Op deze VM logt alleen root in.
+      - file:
+          path: /usr/share/zabbix/conf/zabbix.conf.php
+          template: zabbix.conf.php.tmpl
+          mode: "0644"
+      # Debian laat de webinterface ook /etc/zabbix/web/zabbix.conf.php lezen
+      # (daar schrijft de setup-wizard hem); dezelfde inhoud op beide
+      # plaatsen, zodat de wizard nooit verschijnt.
+      - directory: { path: /etc/zabbix/web, mode: "0755" }
+      - file:
+          path: /etc/zabbix/web/zabbix.conf.php
+          template: zabbix.conf.php.tmpl
+          mode: "0644"
+      # De webinterface staat in /usr/share/zabbix, of in ui/ daaronder bij
+      # nieuwere versies van repo.zabbix.com; Nginx wijst naar deze link.
+      - command:
+          title: webinterface van Zabbix zoeken
+          run: d=/usr/share/zabbix; [ -f "$d/ui/index.php" ] && d=$d/ui; ln -sfn "$d" /usr/local/lib/clusterforge/zabbix-web
+          unless: d=/usr/share/zabbix; [ -f "$d/ui/index.php" ] && d=$d/ui; [ "$(readlink /usr/local/lib/clusterforge/zabbix-web)" = "$d" ]
+          notify: [service:nginx:reload]
+      - file:
+          path: /etc/nginx/sites-enabled/default
+          template: nginx.conf.tmpl
+          notify: [service:nginx:reload]
+      - service: { name: nginx, enabled: true, state: started }
+      - file:
+          path: /etc/keepalived/check-zabbix.sh
+          template: check-zabbix.sh.tmpl
+          mode: "0755"
+      - file:
+          path: /etc/keepalived/keepalived.conf
+          template: keepalived.conf.tmpl
+          mode: "0640"
+          notify: [service:keepalived:reload]
+      - service: { name: keepalived, enabled: true, state: started }
+
+  - name: proxy
+    count: "1"
+    vm:
+      cpu: "{{ .params.proxy_cpu }}"
+      memory: "{{ .params.proxy_memory }}"
+      disk: "{{ .params.proxy_disk }}"
+    steps:
+      # Een versie van repo.zabbix.com: hun pakket zabbix-release zet de bron
+      # en de sleutel, zoals de installatiegids van Zabbix. Met debian doet
+      # deze stap niets.
+      - package: { names: [curl, ca-certificates] }
+      - directory: { path: /usr/local/lib/clusterforge, mode: "0755" }
+      - command:
+          title: "bron van Zabbix: {{ .params.zabbix_version }}"
+          run: |-
+            {{ if ne .params.zabbix_version "debian" }}set -e
+            v='{{ .params.zabbix_version }}'
+            d=$(mktemp -d)
+            trap 'rm -rf "$d"' EXIT
+            curl -fsSL -o "$d/zabbix-release.deb" "https://repo.zabbix.com/zabbix/$v/release/debian/pool/main/z/zabbix-release/zabbix-release_latest_${v}+debian13_all.deb"
+            dpkg -i "$d/zabbix-release.deb"
+            apt-get update
+            touch "/usr/local/lib/clusterforge/zabbix-repo-$v"{{ else }}true{{ end }}
+          creates: '{{ if ne .params.zabbix_version "debian" }}/usr/local/lib/clusterforge/zabbix-repo-{{ .params.zabbix_version }}{{ else }}/etc/debian_version{{ end }}'
+      - package: { names: [zabbix-proxy-sqlite3, fping] }
+      - user: { name: zabbix, system: true, home: /var/lib/zabbix }
+      - service: { name: zabbix-proxy, enabled: false, state: stopped }
+      - file:
+          path: /etc/zabbix/cf-zabbix_proxy.conf
+          template: zabbix_proxy.conf.tmpl
+          mode: "0644"
+          notify: [service:cf-zabbix-proxy:restart]
+      - file:
+          path: /etc/systemd/system/cf-zabbix-proxy.service
+          template: cf-zabbix-proxy.service.tmpl
+          notify: [service:cf-zabbix-proxy:restart]
+      - service: { name: cf-zabbix-proxy, enabled: true, state: started }
+
+checks:
+  - vip_owned: { vip: "{{ .params.vip }}", within: 120s }
+  # Een vaste pagina van Nginx: de webinterface zelf werkt pas als de
+  # database er na de uitrol bij komt.
+  - http: { url: "http://{{ .params.vip }}/cf-health", expect: 200, within: 120s }
+
+services:
+  - { name: zabbix-web, kind: web, unit: nginx, port: 80, depends_on: [keepalived], strength: hard }
+  - { name: zabbix-server, kind: app, unit: cf-zabbix-server, port: 10051, depends_on: [keepalived], strength: hard }
+  - { name: zabbix-proxy, kind: app, unit: cf-zabbix-proxy, port: 10051, depends_on: [zabbix-server], strength: soft }
+  - { name: keepalived, kind: vip, unit: keepalived }
