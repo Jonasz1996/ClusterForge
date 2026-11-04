@@ -162,3 +162,65 @@ func recipeParsed(rec *recipes.Recipe) nullable.Nullable[gen.RecipeParsed] {
 	}
 	return nullable.NewNullableWithValue(p)
 }
+
+func (s *Server) ListBlueprints(w http.ResponseWriter, r *http.Request) {
+	list, err := s.recipes.Blueprints(r.Context())
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	out := make([]gen.Blueprint, 0, len(list))
+	for _, b := range list {
+		var c gen.Composition
+		if err := convertJSON(b.Composition, &c); err != nil {
+			s.internalError(w, r, err)
+			return
+		}
+		out = append(out, gen.Blueprint{Template: b.Template, Version: b.Version, Title: b.Title, Composition: c, CreatedAt: b.CreatedAt})
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) ComposeBlueprint(w http.ResponseWriter, r *http.Request) {
+	p, ok := requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	var in gen.Composition
+	if !decode(w, r, &in) {
+		return
+	}
+	var c recipes.Composition
+	if err := convertJSON(in, &c); err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	res, err := s.recipes.Compose(r.Context(), p.User.ID, c)
+	var ce *recipes.ComposeError
+	if errors.As(err, &ce) {
+		writeJSON(w, http.StatusBadRequest, gen.Error{Code: "validation", Message: ce.Msg, Field: optional(ce.Field)})
+		return
+	}
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	status := http.StatusOK
+	if res.Created {
+		status = http.StatusCreated
+	}
+	warnings := res.Warnings
+	if warnings == nil {
+		warnings = []string{}
+	}
+	writeJSON(w, status, gen.ComposeResult{Template: res.Template, Version: res.Version, Created: res.Created, Warnings: warnings})
+}
+
+// convertJSON zet een waarde om naar een type met dezelfde JSON-vorm.
+func convertJSON(in, out any) error {
+	b, err := json.Marshal(in)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(b, out)
+}

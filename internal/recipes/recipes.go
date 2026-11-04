@@ -152,7 +152,7 @@ var paramTypes = map[string]bool{"string": true, "int": true, "bool": true, "ipv
 // VersionPattern is de vorm van een PARAM van type version, zoals 7.0, 8.0
 // of 8.0.0beta1: cijfers en punten, met eventueel een achtervoegsel. Zo'n
 // versie kan veilig in een URL of commando staan.
-const VersionPattern = `^[0-9]+(\.[0-9]+)*[A-Za-z0-9.~+-]{0,32}$`
+const VersionPattern = `^[0-9]+(\.[0-9]+)*[A-Za-z0-9.+-]{0,32}$`
 
 var paramVersionRe = regexp.MustCompile(VersionPattern)
 

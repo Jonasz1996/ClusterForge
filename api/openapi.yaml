@@ -1897,6 +1897,46 @@ paths:
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
+  /blueprints:
+    get:
+      operationId: listBlueprints
+      summary: Zelf samengestelde clusters, elk in de nieuwste versie
+      responses:
+        "200":
+          description: Samengestelde clusters
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: "#/components/schemas/Blueprint" }
+        "401": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: composeBlueprint
+      summary: Een cluster samenstellen uit recepten
+      description: >-
+        Maakt van rollen met elk een recept, een VIP en een database een
+        template (eigen-<naam>) om mee uit te rollen. Verandert de
+        samenstelling niets, dan blijft de versie (200); anders komt er een
+        nieuwe versie (201). Alleen voor beheerders.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/Composition" }
+      responses:
+        "200":
+          description: Niets veranderd
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ComposeResult" }
+        "201":
+          description: Nieuwe versie
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ComposeResult" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
   /recipes/check:
     post:
       operationId: checkRecipe
@@ -5261,6 +5301,61 @@ components:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
   schemas:
+    Composition:
+      type: object
+      required: [name, title, roles]
+      properties:
+        name: { type: string, description: "Korte naam; de template heet eigen-<naam>" }
+        title: { type: string }
+        roles:
+          type: array
+          items: { $ref: "#/components/schemas/CompositionRole" }
+        vip: { $ref: "#/components/schemas/CompositionVIP" }
+        database: { $ref: "#/components/schemas/CompositionDatabase" }
+    CompositionRole:
+      type: object
+      required: [name, recipe, recipe_version, count]
+      properties:
+        name: { type: string }
+        recipe: { type: string }
+        recipe_version: { type: string }
+        recipe_role: { type: string, description: "De ROLE uit het recept; leeg voor een recept zonder" }
+        count: { type: integer }
+        cpu: { type: integer }
+        memory: { type: string }
+        disk: { type: string }
+    CompositionVIP:
+      type: object
+      required: [role]
+      properties:
+        role: { type: string }
+    CompositionDatabase:
+      type: object
+      required: [role]
+      properties:
+        role: { type: string }
+        buffer_pool: { type: string, description: "innodb_buffer_pool_size per node, zoals 1G; leeg is de standaard" }
+        max_connections: { type: integer, description: "0 is de standaard" }
+        extra: { type: string, description: "Regels voor [mysqld], zoals max_allowed_packet = 64M" }
+    Blueprint:
+      type: object
+      required: [template, version, title, composition, created_at]
+      properties:
+        template: { type: string }
+        version: { type: string }
+        title: { type: string }
+        composition: { $ref: "#/components/schemas/Composition" }
+        created_at: { type: string, format: date-time }
+    ComposeResult:
+      type: object
+      required: [template, version, created, warnings]
+      properties:
+        template: { type: string }
+        version: { type: string }
+        created: { type: boolean }
+        warnings:
+          type: array
+          items: { type: string }
     RecipeSource:
       type: object
       required: [source]

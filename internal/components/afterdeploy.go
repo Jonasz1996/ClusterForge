@@ -70,7 +70,7 @@ func (s *Service) deployFinished(ctx context.Context, j store.Job) {
 	if !roleOnly {
 		only = nil
 	}
-	reason, hosts := s.addAfterDeploy(ctx, actor, w, only)
+	reason, hosts := s.addAfterDeploy(ctx, actor, w, only, s.dep.DatabaseSettings(j))
 	if reason == "" {
 		return
 	}
@@ -87,14 +87,16 @@ func (s *Service) deployFinished(ctx context.Context, j store.Job) {
 }
 
 // addAfterDeploy plant de database op alle nodes van het cluster, of alleen
-// op only als die niet leeg is, en voegt haar toe; de reden als dat niet
-// kan.
-func (s *Service) addAfterDeploy(ctx context.Context, actor events.Actor, w store.DeployDatabase, only []uuid.UUID) (string, []string) {
+// op only als die niet leeg is, met settings als instellingen, en voegt haar
+// toe; de reden als dat niet kan.
+func (s *Service) addAfterDeploy(ctx context.Context, actor events.Actor, w store.DeployDatabase, only []uuid.UUID, settings map[string]any) (string, []string) {
 	cands, err := s.q.ListComponentCandidates(ctx, &w.ClusterID)
 	if err != nil {
 		return err.Error(), nil
 	}
-	req := Request{Engine: w.Engine}
+	// Een samengesteld cluster (fase 9) kiest de instellingen zelf, zoals
+	// buffer_pool; wat ontbreekt, krijgt de standaard.
+	req := Request{Engine: w.Engine, Settings: settings}
 	var hosts []string
 	for _, r := range cands {
 		if len(only) > 0 && !slices.Contains(only, r.ID) {

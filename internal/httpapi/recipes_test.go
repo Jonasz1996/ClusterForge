@@ -69,7 +69,7 @@ func TestRecipes(t *testing.T) {
 	if s := c.do("POST", "/api/v1/recipes/check", map[string]any{"source": zabbix}, &chk); s != 200 || !chk.Ok || chk.Recipe == nil {
 		t.Fatalf("check: %d %+v", s, chk)
 	}
-	if r := chk.Recipe; r.Name != "zabbix" || len(r.Roles) != 1 || len(r.Roles[0].Steps) != 12 || r.Needs[0].Engine != "mariadb" || r.Params[1].Type != "secret" {
+	if r := chk.Recipe; r.Name != "zabbix" || len(r.Roles) != 1 || len(r.Roles[0].Steps) != 14 || r.Needs[0].Engine != "mariadb" || r.Params[1].Type != "secret" {
 		t.Fatalf("recept: %+v", r)
 	}
 	var list []struct {

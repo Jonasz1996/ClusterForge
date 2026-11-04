@@ -16,6 +16,7 @@ import (
 
 	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/store"
+	"github.com/Jonasz1996/clusterforge/internal/templates"
 )
 
 // MaxSource is de grootste tekst van een recept.
@@ -46,7 +47,7 @@ func Examples() []Example {
 	return out
 }
 
-var exampleTitles = map[string]string{"zabbix": "Zabbix 8.0 met MariaDB Galera"}
+var exampleTitles = map[string]string{"zabbix": "Zabbix (7.0, 8.0 of nieuwer) met MariaDB Galera"}
 
 // InvalidError zegt dat een recept fouten heeft.
 type InvalidError struct{ Diags []Diag }
@@ -76,6 +77,9 @@ type Service struct {
 	pool *pgxpool.Pool
 	q    *store.Queries
 	ev   *events.Writer
+	// Registry krijgt de samengestelde templates; nil is het register van
+	// de ingebouwde templates.
+	Registry *templates.Registry
 }
 
 func NewService(pool *pgxpool.Pool, ev *events.Writer) *Service {

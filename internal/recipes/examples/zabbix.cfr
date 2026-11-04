@@ -22,6 +22,10 @@ IMPORT zabbix FROM /usr/share/zabbix/sql-scripts/mysql/server.sql.gz \
 # d. Configuratie
 SET /etc/zabbix/zabbix_server.conf DBHost={{ db.host }}
 SET /etc/zabbix/zabbix_server.conf DBPassword={{ secret.db_password }} MODE 0640 GROUP zabbix
+# HA: elke node draait de Zabbix server, één is actief; zonder HANodeName
+# zouden ze alle drie tegelijk in dezelfde database schrijven.
+SET /etc/zabbix/zabbix_server.conf HANodeName={{ node.name }}
+SET /etc/zabbix/zabbix_server.conf NodeAddress={{ node.ip }}
 
 # De webinterface leest /etc/zabbix/web/zabbix.conf.php; zo slaat ze de
 # installatiewizard over.

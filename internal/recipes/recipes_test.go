@@ -32,6 +32,10 @@ IMPORT zabbix FROM /usr/share/zabbix/sql-scripts/mysql/server.sql.gz \
 # d. Configuratie
 SET /etc/zabbix/zabbix_server.conf DBHost={{ db.host }}
 SET /etc/zabbix/zabbix_server.conf DBPassword={{ secret.db_password }} MODE 0640 GROUP zabbix
+# HA: elke node draait de Zabbix server, één is actief; zonder HANodeName
+# zouden ze alle drie tegelijk in dezelfde database schrijven.
+SET /etc/zabbix/zabbix_server.conf HANodeName={{ node.name }}
+SET /etc/zabbix/zabbix_server.conf NodeAddress={{ node.ip }}
 
 # De webinterface leest /etc/zabbix/web/zabbix.conf.php; zo slaat ze de
 # installatiewizard over.
@@ -106,7 +110,7 @@ func TestZabbix(t *testing.T) {
 	for _, s := range steps {
 		kinds = append(kinds, s.Kind)
 	}
-	want := "repo_deb package package db_database db_user db_import ini_set ini_set file service service service"
+	want := "repo_deb package package db_database db_user db_import ini_set ini_set ini_set ini_set file service service service"
 	if got := strings.Join(kinds, " "); got != want {
 		t.Fatalf("soorten:\n got %s\nwant %s", got, want)
 	}
@@ -146,10 +150,10 @@ func TestZabbix(t *testing.T) {
 	if u := steps[0].Spec["repo_deb"].(map[string]any)["url"]; u != "https://repo.zabbix.com/zabbix/{{ .params.zabbix_version }}/release/debian/pool/main/z/zabbix-release/zabbix-release_latest_{{ .params.zabbix_version }}+debian13_all.deb" {
 		t.Errorf("repo_deb: %v", u)
 	}
-	if f := steps[8]; !f.Secret || f.Spec["file"].(map[string]any)["path"] != "/etc/zabbix/web/zabbix.conf.php" {
+	if f := steps[10]; !f.Secret || f.Spec["file"].(map[string]any)["path"] != "/etc/zabbix/web/zabbix.conf.php" {
 		t.Errorf("zabbix.conf.php: %+v", f)
 	}
-	svc := steps[9].Spec["service"].(map[string]any)
+	svc := steps[11].Spec["service"].(map[string]any)
 	if svc["name"] != "zabbix-server" || svc["enabled"] != true || svc["state"] != "started" {
 		t.Errorf("service: %+v", svc)
 	}

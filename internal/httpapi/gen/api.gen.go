@@ -4059,6 +4059,15 @@ type BaselineResult struct {
 	Revision int `json:"revision"`
 }
 
+// Blueprint defines model for Blueprint.
+type Blueprint struct {
+	Composition Composition `json:"composition"`
+	CreatedAt   time.Time   `json:"created_at"`
+	Template    string      `json:"template"`
+	Title       string      `json:"title"`
+	Version     string      `json:"version"`
+}
+
 // ChangePasswordRequest defines model for ChangePasswordRequest.
 type ChangePasswordRequest struct {
 	CurrentPassword string `json:"current_password"`
@@ -5088,6 +5097,57 @@ type ComponentVIP struct {
 
 	// Vrid Het VRRP-id van een eigen VIP; 0 bij het VIP van de app
 	Vrid int `json:"vrid"`
+}
+
+// ComposeResult defines model for ComposeResult.
+type ComposeResult struct {
+	Created  bool     `json:"created"`
+	Template string   `json:"template"`
+	Version  string   `json:"version"`
+	Warnings []string `json:"warnings"`
+}
+
+// Composition defines model for Composition.
+type Composition struct {
+	Database *CompositionDatabase `json:"database,omitempty"`
+
+	// Name Korte naam; de template heet eigen-<naam>
+	Name  string            `json:"name"`
+	Roles []CompositionRole `json:"roles"`
+	Title string            `json:"title"`
+	Vip   *CompositionVIP   `json:"vip,omitempty"`
+}
+
+// CompositionDatabase defines model for CompositionDatabase.
+type CompositionDatabase struct {
+	// BufferPool innodb_buffer_pool_size per node, zoals 1G; leeg is de standaard
+	BufferPool *string `json:"buffer_pool,omitempty"`
+
+	// Extra Regels voor [mysqld], zoals max_allowed_packet = 64M
+	Extra *string `json:"extra,omitempty"`
+
+	// MaxConnections 0 is de standaard
+	MaxConnections *int   `json:"max_connections,omitempty"`
+	Role           string `json:"role"`
+}
+
+// CompositionRole defines model for CompositionRole.
+type CompositionRole struct {
+	Count  int     `json:"count"`
+	Cpu    *int    `json:"cpu,omitempty"`
+	Disk   *string `json:"disk,omitempty"`
+	Memory *string `json:"memory,omitempty"`
+	Name   string  `json:"name"`
+	Recipe string  `json:"recipe"`
+
+	// RecipeRole De ROLE uit het recept; leeg voor een recept zonder
+	RecipeRole    *string `json:"recipe_role,omitempty"`
+	RecipeVersion string  `json:"recipe_version"`
+}
+
+// CompositionVIP defines model for CompositionVIP.
+type CompositionVIP struct {
+	Role string `json:"role"`
 }
 
 // CronGroup De cronjobs van één cluster, of van de nodes zonder cluster.
@@ -11729,6 +11789,9 @@ type DisableTotpJSONRequestBody = TotpDisableRequest
 // EnableTotpJSONRequestBody defines body for EnableTotp for application/json ContentType.
 type EnableTotpJSONRequestBody = TotpCodeRequest
 
+// ComposeBlueprintJSONRequestBody defines body for ComposeBlueprint for application/json ContentType.
+type ComposeBlueprintJSONRequestBody = Composition
+
 // CreateClusterJSONRequestBody defines body for CreateCluster for application/json ContentType.
 type CreateClusterJSONRequestBody = ClusterInput
 
@@ -12085,6 +12148,12 @@ type ServerInterface interface {
 	// ListDatabaseBackups Per database van een cluster de nieuwste dump en hoe vers die is
 	// (GET /backups/databases)
 	ListDatabaseBackups(w http.ResponseWriter, r *http.Request)
+	// ListBlueprints Zelf samengestelde clusters, elk in de nieuwste versie
+	// (GET /blueprints)
+	ListBlueprints(w http.ResponseWriter, r *http.Request)
+	// ComposeBlueprint Een cluster samenstellen uit recepten
+	// (POST /blueprints)
+	ComposeBlueprint(w http.ResponseWriter, r *http.Request)
 	// ListClusters Alle clusters met aantallen nodes en VIP's
 	// (GET /clusters)
 	ListClusters(w http.ResponseWriter, r *http.Request)
@@ -12964,6 +13033,18 @@ func (_ Unimplemented) GetBackups(w http.ResponseWriter, r *http.Request) {
 // ListDatabaseBackups Per database van een cluster de nieuwste dump en hoe vers die is
 // (GET /backups/databases)
 func (_ Unimplemented) ListDatabaseBackups(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListBlueprints Zelf samengestelde clusters, elk in de nieuwste versie
+// (GET /blueprints)
+func (_ Unimplemented) ListBlueprints(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ComposeBlueprint Een cluster samenstellen uit recepten
+// (POST /blueprints)
+func (_ Unimplemented) ComposeBlueprint(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -15130,6 +15211,34 @@ func (siw *ServerInterfaceWrapper) ListDatabaseBackups(w http.ResponseWriter, r 
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListDatabaseBackups(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListBlueprints operation middleware
+func (siw *ServerInterfaceWrapper) ListBlueprints(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListBlueprints(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ComposeBlueprint operation middleware
+func (siw *ServerInterfaceWrapper) ComposeBlueprint(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ComposeBlueprint(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -22668,6 +22777,12 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/recipes", wrapper.SaveRecipe)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/blueprints", wrapper.ListBlueprints)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/blueprints", wrapper.ComposeBlueprint)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/recipes/check", wrapper.CheckRecipe)

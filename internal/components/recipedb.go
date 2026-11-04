@@ -8,10 +8,14 @@ package components
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 
+	"github.com/Jonasz1996/clusterforge/internal/events"
+	"github.com/Jonasz1996/clusterforge/internal/store"
 	"github.com/Jonasz1996/clusterforge/pkg/protocol"
 )
 
@@ -115,3 +119,71 @@ func (s *Service) RunRecipeDatabase(ctx context.Context, clusterID, id uuid.UUID
 	}
 	return out, nil
 }
+
+// RecipeDBTimeout is hoelang de database-instructies van een samengesteld
+// cluster na de uitrol mogen duren; een groot schema laden duurt even.
+const RecipeDBTimeout = 45 * time.Minute
+
+// recipeAfterAdd voert de database-instructies van een samengesteld cluster
+// (Template.Database.Steps) uit zodra de database er is. Ze zijn
+// idempotent, dus ook na een tweede 'Database toevoegen' verandert er
+// niets. Het resultaat staat in het logboek van het cluster.
+func (s *Service) recipeAfterAdd(ctx context.Context, j store.Job) {
+	if j.ClusterID == nil || j.Status != store.JobStatusSucceeded || s.dep == nil {
+		return
+	}
+	var p jobParams
+	if err := json.Unmarshal(j.Params, &p); err != nil {
+		return
+	}
+	d, err := s.dep.Desired(ctx, *j.ClusterID)
+	if err != nil || d.Template.Database == nil || len(d.Template.Database.Steps) == 0 {
+		return
+	}
+	tctx, err := d.Context()
+	if err != nil {
+		s.log.Error("database-instructies renderen mislukt", "cluster", *j.ClusterID, "err", err)
+		return
+	}
+	steps, err := d.Template.RenderDBSteps(tctx)
+	if err != nil {
+		s.log.Error("database-instructies renderen mislukt", "cluster", *j.ClusterID, "err", err)
+		return
+	}
+	run := make([]RecipeDBStep, len(steps))
+	for i, st := range steps {
+		run[i] = RecipeDBStep{Kind: st.Kind, Database: st.Database, Charset: st.Charset, Collation: st.Collation, User: st.User,
+			Password: st.Password, GrantOn: st.GrantOn, Path: st.Path, TrustFunctions: st.TrustFunctions, Unless: st.Unless}
+	}
+	clusterID, compID := *j.ClusterID, p.ComponentID
+	// Een schema laden duurt langer dan een taak mag wachten op wie hoort
+	// dat ze klaar is.
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), RecipeDBTimeout)
+		defer cancel()
+		res, err := s.RunRecipeDatabase(ctx, clusterID, compID, run)
+		var msgs []string
+		for _, r := range res {
+			msgs = append(msgs, r.Message)
+		}
+		ev := events.Event{Actor: events.System(), SubjectType: "cluster", SubjectID: clusterID.String(), ClusterID: &clusterID,
+			Action: "cluster.recipe_database", Payload: map[string]any{"steps": msgs}}
+		if err != nil {
+			ev.Action = "cluster.recipe_database_failed"
+			ev.Payload = map[string]any{"steps": msgs, "error": err.Error()}
+			s.log.Error("database-instructies van het recept mislukt", "cluster", clusterID, "err", err)
+		}
+		if err := s.ev.Write(ctx, s.q, ev); err != nil {
+			s.log.Error("event schrijven mislukt", "action", ev.Action, "err", err)
+		}
+		if s.Changed != nil {
+			s.Changed()
+		}
+	}()
+}
+
+// WaitRecipes wacht tot de database-instructies die na een uitrol lopen,
+// klaar zijn; voor tests en bij het stoppen.
+func (s *Service) WaitRecipes() { s.wg.Wait() }

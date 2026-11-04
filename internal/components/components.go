@@ -108,6 +108,9 @@ type Service struct {
 	jobs *jobs.Runner
 	bus  Bus
 	dep  *deploy.Service
+	// wg wacht op de database-instructies van recepten die na een uitrol
+	// lopen (recipeAfterAdd).
+	wg sync.WaitGroup
 
 	// Memory geeft per node het geheugengebruik in procent, zeven dagen
 	// lang 95% van de tijd niet overschreden. Mag nil zijn; het plan zegt
@@ -207,6 +210,8 @@ func NewService(pool *pgxpool.Pool, ev *events.Writer, log *slog.Logger, runner 
 	if dep != nil {
 		dep.OnFinished(s.deployFinished)
 	}
+	// De database-instructies van een samengesteld cluster (fase 9).
+	runner.OnFinished(Kind, s.recipeAfterAdd)
 	return s
 }
 

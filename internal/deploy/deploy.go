@@ -830,6 +830,20 @@ func (s *Service) DatabaseNodes(j store.Job) (nodes []uuid.UUID, ok bool, err er
 	return nodes, true, nil
 }
 
+// DatabaseSettings geeft de instellingen van de database die de template
+// van een uitrol vanzelf meebrengt, zoals buffer_pool; nil zonder.
+func (s *Service) DatabaseSettings(j store.Job) map[string]any {
+	var p params
+	if err := json.Unmarshal(j.Params, &p); err != nil {
+		return nil
+	}
+	tpl, found := s.Templates.Get(p.Template, p.Version)
+	if !found || tpl.Database == nil {
+		return nil
+	}
+	return tpl.Database.Settings
+}
+
 // planExisting zet bestaande nodes in de rollen van de template: per rol
 // precies zoveel als de template vraagt, elk met een verbonden agent, facts
 // met een adres en nog in geen enkel cluster. De hostname blijft.
@@ -875,6 +889,10 @@ func (s *Service) planExisting(ctx context.Context, tpl *templates.Template, p *
 			}
 			if dn.AgentProtocol == nil || *dn.AgentProtocol < protocol.ApplySince {
 				return invalid("existing", "%s heeft geen agent, of een te oude; installeer of werk hem bij via Nodes", node.Hostname)
+			}
+			if tpl.UsesRecipeSteps() && *dn.AgentProtocol < protocol.RecipeStepsSince {
+				return invalid("existing", "%s heeft een agent met protocol %d en de recepten van deze template vragen %d; werk hem bij via Nodes → Agents bijwerken",
+					node.Hostname, *dn.AgentProtocol, protocol.RecipeStepsSince)
 			}
 			pn := plannedNode{ID: id, Hostname: node.Hostname, Role: r.Name, Index: n + 1}
 			info, err := nodeInfo(SpecNode{Hostname: node.Hostname, Role: r.Name, Index: n + 1}, nodeState(dn.PrimaryIp, dn.Facts))

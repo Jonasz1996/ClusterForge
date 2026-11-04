@@ -1722,6 +1722,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/blueprints": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Zelf samengestelde clusters, elk in de nieuwste versie */
+        get: operations["listBlueprints"];
+        put?: never;
+        /**
+         * Een cluster samenstellen uit recepten
+         * @description Maakt van rollen met elk een recept, een VIP en een database een template (eigen-<naam>) om mee uit te rollen. Verandert de samenstelling niets, dan blijft de versie (200); anders komt er een nieuwe versie (201). Alleen voor beheerders.
+         */
+        post: operations["composeBlueprint"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/recipes/check": {
         parameters: {
             query?: never;
@@ -4790,6 +4811,51 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        Composition: {
+            /** @description Korte naam; de template heet eigen-<naam> */
+            name: string;
+            title: string;
+            roles: components["schemas"]["CompositionRole"][];
+            vip?: components["schemas"]["CompositionVIP"];
+            database?: components["schemas"]["CompositionDatabase"];
+        };
+        CompositionRole: {
+            name: string;
+            recipe: string;
+            recipe_version: string;
+            /** @description De ROLE uit het recept; leeg voor een recept zonder */
+            recipe_role?: string;
+            count: number;
+            cpu?: number;
+            memory?: string;
+            disk?: string;
+        };
+        CompositionVIP: {
+            role: string;
+        };
+        CompositionDatabase: {
+            role: string;
+            /** @description innodb_buffer_pool_size per node, zoals 1G; leeg is de standaard */
+            buffer_pool?: string;
+            /** @description 0 is de standaard */
+            max_connections?: number;
+            /** @description Regels voor [mysqld], zoals max_allowed_packet = 64M */
+            extra?: string;
+        };
+        Blueprint: {
+            template: string;
+            version: string;
+            title: string;
+            composition: components["schemas"]["Composition"];
+            /** Format: date-time */
+            created_at: string;
+        };
+        ComposeResult: {
+            template: string;
+            version: string;
+            created: boolean;
+            warnings: string[];
+        };
         RecipeSource: {
             /** @description De tekst van het recept (hoogstens 256 KiB) */
             source: string;
@@ -13984,6 +14050,63 @@ export interface operations {
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
             409: components["responses"]["Error"];
+        };
+    };
+    listBlueprints: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Samengestelde clusters */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Blueprint"][];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    composeBlueprint: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Composition"];
+            };
+        };
+        responses: {
+            /** @description Niets veranderd */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ComposeResult"];
+                };
+            };
+            /** @description Nieuwe versie */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ComposeResult"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
         };
     };
     checkRecipe: {
