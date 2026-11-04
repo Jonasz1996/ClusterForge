@@ -141,12 +141,12 @@ roles:
       - service: { name: cf-zabbix-db, enabled: true, state: started }
       # De webinterface: de configuratie van de frontend en een site voor
       # Nginx die de standaardsite vervangt.
+      # PHP-FPM draait als www-data en moet het wachtwoord kunnen lezen; Nginx
+      # geeft conf/ nooit uit. Op deze VM logt alleen root in.
       - file:
           path: /usr/share/zabbix/conf/zabbix.conf.php
           template: zabbix.conf.php.tmpl
-          mode: "0640"
-          owner: root
-          group: www-data
+          mode: "0644"
       - file:
           path: /etc/nginx/sites-enabled/default
           template: nginx.conf.tmpl
