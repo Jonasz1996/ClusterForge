@@ -590,6 +590,11 @@ func (c *Client) NextID(ctx context.Context) (int, error) {
 
 func (c *Client) Clone(ctx context.Context, src Guest, newID int, name, target, storage string) (string, error) {
 	form := url.Values{"newid": {strconv.Itoa(newID)}, "name": {name}, "full": {"1"}}
+	if src.Type == "lxc" {
+		// Een CT heeft een hostname, geen naam.
+		form.Del("name")
+		form.Set("hostname", name)
+	}
 	if target != "" && target != src.Node {
 		form.Set("target", target)
 	}
@@ -605,7 +610,12 @@ func (c *Client) Config(ctx context.Context, g Guest) (map[string]any, error) {
 	return out, c.do(ctx, http.MethodGet, g.path()+"/config", nil, &out)
 }
 
+// SetConfig wijzigt de configuratie. Bij een VM is dat een taak (upid); een
+// CT wijzigt meteen (PUT) en geeft een lege upid.
 func (c *Client) SetConfig(ctx context.Context, g Guest, form url.Values) (string, error) {
+	if g.Type == "lxc" {
+		return "", c.do(ctx, http.MethodPut, g.path()+"/config", form, nil)
+	}
 	var upid string
 	return upid, c.do(ctx, http.MethodPost, g.path()+"/config", form, &upid)
 }

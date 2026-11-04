@@ -145,6 +145,51 @@ func (s *Server) EnrollAgent(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// ClaimAgent is publiek: een agent in een CT uit een CT-template meldt zich
+// zonder token aan. Dat lukt alleen als een uitrol voor deze hostname een
+// token met het adres van de CT klaarzette, en de aanvraag van dat adres
+// komt (zie agents.Service.Claim).
+func (s *Server) ClaimAgent(w http.ResponseWriter, r *http.Request) {
+	ip := clientIP(r)
+	if !s.enrollLimiter.allow(ip) {
+		w.Header().Set("Retry-After", "6")
+		writeError(w, http.StatusTooManyRequests, "rate_limited", "te veel aanmeldpogingen, probeer het straks opnieuw")
+		return
+	}
+	var req gen.ClaimRequest
+	if !decode(w, r, &req) {
+		return
+	}
+	a, err := s.agents.Claim(r.Context(), protocol.EnrollRequest{
+		NkeyPublic: req.NkeyPublic, Hostname: req.Hostname, MachineID: req.MachineId,
+		AgentVersion: req.AgentVersion, ProtocolVersion: req.ProtocolVersion,
+	}, ip)
+	if errors.Is(err, agents.ErrNoClaim) {
+		// Wachten is gewoon: de agent vraagt het elke paar seconden. Alleen
+		// een verkeerd adres is het onthouden waard.
+		var ce agents.ClaimError
+		if errors.As(err, &ce) && ce.Reason == "wrong_ip" {
+			host := req.Hostname
+			if len(host) > 64 {
+				host = strings.ToValidUTF8(host[:64], "")
+			}
+			s.throttle.Write(r.Context(), ip, events.Event{
+				Actor: events.System(), SubjectType: "agent", SubjectID: "onbekend", Action: "agent.enroll_failed",
+				Payload: map[string]any{"ip": ip, "hostname": host, "reason": "claim_wrong_ip"},
+			})
+		}
+		writeError(w, http.StatusNotFound, "no_claim", err.Error())
+		return
+	}
+	if s.agentsError(w, r, err) {
+		return
+	}
+	s.log.InfoContext(r.Context(), "agent aangemeld zonder token", "node", a.NodeID, "hostname", req.Hostname, "ip", ip)
+	writeJSON(w, http.StatusOK, gen.EnrollResponse{
+		AgentId: a.ID, NodeId: a.NodeID, NatsUrl: s.natsURL(r), NatsCertSha256: s.bus.Fingerprint(),
+	})
+}
+
 // natsURL is het adres waarop de agent NATS bereikt: CF_NATS_ADVERTISE, of
 // anders de hostnaam van deze request met de NATS-poort.
 func (s *Server) natsURL(r *http.Request) string {

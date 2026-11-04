@@ -4071,6 +4071,15 @@ type ChangesNode struct {
 	NodeId   openapi_types.UUID `json:"node_id"`
 }
 
+// ClaimRequest defines model for ClaimRequest.
+type ClaimRequest struct {
+	AgentVersion    string `json:"agent_version"`
+	Hostname        string `json:"hostname"`
+	MachineId       string `json:"machine_id"`
+	NkeyPublic      string `json:"nkey_public"`
+	ProtocolVersion int    `json:"protocol_version"`
+}
+
 // Cluster defines model for Cluster.
 type Cluster struct {
 	// AppliedRevision De revisie die op alle nodes staat; lager dan spec_revision na een mislukte toepassing
@@ -11562,6 +11571,9 @@ type StartAgentUpgradesJSONRequestBody = AgentUpgradeInput
 // SetAgentUpgradeAutoJSONRequestBody defines body for SetAgentUpgradeAuto for application/json ContentType.
 type SetAgentUpgradeAutoJSONRequestBody SetAgentUpgradeAutoJSONBody
 
+// ClaimAgentJSONRequestBody defines body for ClaimAgent for application/json ContentType.
+type ClaimAgentJSONRequestBody = ClaimRequest
+
 // EnrollAgentJSONRequestBody defines body for EnrollAgent for application/json ContentType.
 type EnrollAgentJSONRequestBody = EnrollRequest
 
@@ -11864,6 +11876,9 @@ type ServerInterface interface {
 	// SetAgentUpgradeAuto Agents vanzelf bijwerken aan- of uitzetten (admin)
 	// (PUT /agent-upgrades/auto)
 	SetAgentUpgradeAuto(w http.ResponseWriter, r *http.Request)
+	// ClaimAgent Een agent in een CT uit een CT-template meldt zich aan zonder token (zonder sessie)
+	// (POST /agents/claim)
+	ClaimAgent(w http.ResponseWriter, r *http.Request)
 	// EnrollAgent Een agent meldt zich aan met een enrollmenttoken (zonder sessie)
 	// (POST /agents/enroll)
 	EnrollAgent(w http.ResponseWriter, r *http.Request)
@@ -12638,6 +12653,12 @@ func (_ Unimplemented) StartAgentUpgrades(w http.ResponseWriter, r *http.Request
 // SetAgentUpgradeAuto Agents vanzelf bijwerken aan- of uitzetten (admin)
 // (PUT /agent-upgrades/auto)
 func (_ Unimplemented) SetAgentUpgradeAuto(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ClaimAgent Een agent in een CT uit een CT-template meldt zich aan zonder token (zonder sessie)
+// (POST /agents/claim)
+func (_ Unimplemented) ClaimAgent(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -14189,6 +14210,20 @@ func (siw *ServerInterfaceWrapper) SetAgentUpgradeAuto(w http.ResponseWriter, r 
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.SetAgentUpgradeAuto(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ClaimAgent operation middleware
+func (siw *ServerInterfaceWrapper) ClaimAgent(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ClaimAgent(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -22098,6 +22133,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/agents/enroll", wrapper.EnrollAgent)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/agents/claim", wrapper.ClaimAgent)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/agents/{agentId}/revoke", wrapper.RevokeAgent)

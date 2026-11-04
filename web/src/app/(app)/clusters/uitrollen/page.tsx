@@ -44,9 +44,10 @@ type Form = {
   serverUrl: string | null;
   // database: na de uitrol MariaDB Galera op de nodes.
   database: boolean;
-  // where: nieuwe VM's uit de golden image, of bestaande nodes (zoals CT's
-  // met een agent), met per node-id een rol.
-  where: "vm" | "existing";
+  // where: nieuwe VM's uit de golden image, nieuwe CT's uit een
+  // CT-template, of bestaande nodes (zoals CT's met een agent), met per
+  // node-id een rol.
+  where: "vm" | "ct" | "existing";
   existing: Record<string, string>;
 };
 
@@ -108,6 +109,10 @@ function toInput(f: Form, t: Template | undefined): DeployInput {
       ...database,
     };
   }
+  // Een CT meldt zich aan vanaf zijn vaste adres, en SSH-sleutels kan
+  // Proxmox bij een kloon van een CT niet zetten.
+  const ct = f.where === "ct";
+  const network = ct ? "static" : f.network;
   return {
     template: f.template,
     cluster,
@@ -118,11 +123,11 @@ function toInput(f: Form, t: Template | undefined): DeployInput {
       storage: f.storage,
       bridge: f.bridge.trim(),
       vlan: f.vlan.trim() === "" ? null : Number(f.vlan),
-      network: f.network,
-      first_ip: f.network === "static" ? f.firstIp.trim() : "",
-      gateway: f.network === "static" ? f.gateway.trim() : "",
-      dns: f.network === "static" ? f.dns.split(/[\s,]+/).filter(Boolean) : [],
-      ssh_keys: f.sshKeys,
+      network,
+      first_ip: network === "static" ? f.firstIp.trim() : "",
+      gateway: network === "static" ? f.gateway.trim() : "",
+      dns: network === "static" ? f.dns.split(/[\s,]+/).filter(Boolean) : [],
+      ssh_keys: ct ? "" : f.sshKeys,
     },
     server_url: (f.serverUrl ?? "").trim(),
     ...database,
@@ -155,22 +160,27 @@ function DeployInner() {
     templates.data?.find((t) => t.name === (form.template || search.get("template"))) ?? templates.data?.[0];
   const proxmoxId = form.proxmoxId || conns.data?.items[0]?.id || "";
   const resources = useProxmoxResources(proxmoxId);
+  // Kubernetes komt altijd op nieuwe VM's.
+  const where = template?.cluster_type === "kubernetes" ? "vm" : form.where;
+  const ct = where === "ct";
   const images = useMemo(
-    () => (resources.data?.guests ?? []).filter((g) => g.type === "qemu" && g.template).sort((a, b) => a.vmid - b.vmid),
-    [resources.data],
+    () =>
+      (resources.data?.guests ?? [])
+        .filter((g) => g.type === (ct ? "lxc" : "qemu") && g.template)
+        .sort((a, b) => a.vmid - b.vmid),
+    [resources.data, ct],
   );
   const storages = useMemo(() => {
     const seen = new Map<string, boolean>();
     for (const s of resources.data?.storages ?? []) {
-      if (s.content === "" || s.content.split(",").includes("images")) seen.set(s.name, s.shared);
+      if (s.content === "" || s.content.split(",").includes(ct ? "rootdir" : "images")) seen.set(s.name, s.shared);
     }
     return [...seen.entries()].sort(([a], [b]) => a.localeCompare(b));
-  }, [resources.data]);
+  }, [resources.data, ct]);
 
   const imageVmid = form.imageVmid || (images[0] ? String(images[0].vmid) : "");
   const origin = typeof window === "undefined" ? "https://clusterforge.example" : window.location.origin;
-  // Kubernetes komt altijd op nieuwe VM's.
-  const where = template?.cluster_type === "kubernetes" ? "vm" : form.where;
+  const setWhere = (w: Form["where"]) => setForm((f) => ({ ...f, where: w, imageVmid: "", storage: "" }));
   const eff: Form = { ...form, template: template?.name ?? "", proxmoxId, imageVmid, serverUrl: form.serverUrl ?? origin, where };
 
   const set = <K extends keyof Form>(k: K, v: Form[K]) => setForm((f) => ({ ...f, [k]: v }));
@@ -345,15 +355,25 @@ function DeployInner() {
             <legend className="sr-only">Waar komt het cluster</legend>
             <div className="flex flex-wrap gap-4 text-sm">
               <label className="inline-flex items-center gap-2">
-                <input type="radio" checked={form.where === "vm"} onChange={() => set("where", "vm")} />
+                <input type="radio" checked={form.where === "vm"} onChange={() => setWhere("vm")} />
                 Nieuwe VM&apos;s in Proxmox
               </label>
               <label className="inline-flex items-center gap-2">
-                <input type="radio" id={fieldId("existing")} checked={form.where === "existing"} onChange={() => set("where", "existing")} />
+                <input type="radio" checked={form.where === "ct"} onChange={() => setWhere("ct")} />
+                Nieuwe CT&apos;s in Proxmox
+              </label>
+              <label className="inline-flex items-center gap-2">
+                <input type="radio" id={fieldId("existing")} checked={form.where === "existing"} onChange={() => setWhere("existing")} />
                 Bestaande nodes, zoals CT&apos;s
               </label>
             </div>
           </fieldset>
+          {form.where === "ct" && (
+            <p className="mt-4 text-sm text-slate-600 dark:text-slate-400">
+              ClusterForge kloont de CT&apos;s uit een CT-template met cf-agent, zet hostname, adres, CPU, geheugen en schijf, en start ze. De
+              agent in elke CT meldt zich dan zelf aan, alleen vanaf het vaste adres dat de uitrol hem geeft.
+            </p>
+          )}
           {form.where === "existing" && (
             <ExistingNodes
               template={template}
@@ -365,7 +385,7 @@ function DeployInner() {
         </Card>
       )}
 
-      {where === "vm" && (
+      {where !== "existing" && (
         <>
           <Card title="Proxmox">
             {noConnections ? (
@@ -392,24 +412,34 @@ function DeployInner() {
                       ))}
                     </Select>
                   </FieldRow>
-                  <FieldRow error={fieldError} field="target.image_vmid" label="Golden image" hint="Een VM-template met cloud-init, qemu-guest-agent en cf-agent.">
+                  <FieldRow
+                    error={fieldError}
+                    field="target.image_vmid"
+                    label={ct ? "CT-template" : "Golden image"}
+                    hint={ct ? "Een CT-template met cf-agent, gemaakt met ct-template.sh." : "Een VM-template met cloud-init, qemu-guest-agent en cf-agent."}
+                  >
                     <Select
                       id={fieldId("target.image_vmid")}
                       className={bad("target.image_vmid")}
                       value={imageVmid}
                       onChange={(e) => set("imageVmid", e.target.value)}
                     >
-                      {images.length === 0 && <option value="">Geen VM-templates gevonden</option>}
+                      {images.length === 0 && <option value="">{ct ? "Geen CT-templates gevonden" : "Geen VM-templates gevonden"}</option>}
                       {images.map((g) => (
                         <option key={g.vmid} value={g.vmid}>
-                          {g.name} (VM {g.vmid} op {g.host})
+                          {g.name} ({ct ? "CT" : "VM"} {g.vmid} op {g.host})
                         </option>
                       ))}
                     </Select>
                   </FieldRow>
-                  <FieldRow error={fieldError} field="target.storage" label="Storage" hint="Gedeelde storage laat ClusterForge de VM's over de hosts spreiden.">
+                  <FieldRow
+                    error={fieldError}
+                    field="target.storage"
+                    label="Storage"
+                    hint={`Gedeelde storage laat ClusterForge de ${ct ? "CT's" : "VM's"} over de hosts spreiden.`}
+                  >
                     <Select id={fieldId("target.storage")} className={bad("target.storage")} value={form.storage} onChange={(e) => set("storage", e.target.value)}>
-                      <option value="">Zoals de golden image</option>
+                      <option value="">{ct ? "Zoals de CT-template" : "Zoals de golden image"}</option>
                       {storages.map(([name, shared]) => (
                         <option key={name} value={name}>
                           {name}
@@ -434,7 +464,20 @@ function DeployInner() {
                     </FieldRow>
                   </div>
                 </div>
-                {resources.data && images.length === 0 && (
+                {resources.data && images.length === 0 && ct && (
+                  <div className="space-y-2 rounded-md border border-slate-200 p-4 text-sm dark:border-slate-800">
+                    <p>
+                      Er staat nog geen CT-template in deze Proxmox. Maak er een door dit als root op een Proxmox-host te draaien; daarna
+                      verschijnt hij hier na de volgende synchronisatie.
+                    </p>
+                    <CopyBlock
+                      text={`curl -fsSL ${origin}/install/ct-template.sh | bash -s -- --server ${origin}${
+                        origin.startsWith("http://") ? " --allow-http" : ""
+                      } --storage local-lvm`}
+                    />
+                  </div>
+                )}
+                {resources.data && images.length === 0 && !ct && (
                   <div className="space-y-2 rounded-md border border-slate-200 p-4 text-sm dark:border-slate-800">
                     <p>
                       Er staat nog geen golden image in deze Proxmox. Maak er een door dit als root op een Proxmox-host te draaien; daarna
@@ -449,7 +492,7 @@ function DeployInner() {
 
           <Card title="Netwerk en toegang">
             <div className="space-y-4">
-              <fieldset>
+              <fieldset hidden={ct}>
                 <legend className="mb-1 text-sm font-medium text-slate-700 dark:text-slate-300">Adressen van de nodes</legend>
                 <div className="flex flex-wrap gap-4 text-sm">
                   <label className="inline-flex items-center gap-2">
@@ -462,7 +505,8 @@ function DeployInner() {
                   </label>
                 </div>
               </fieldset>
-              {form.network === "static" ? (
+              {ct && <p className="text-sm text-slate-600 dark:text-slate-400">Een CT krijgt altijd een vast adres.</p>}
+              {ct || form.network === "static" ? (
                 <div className="grid gap-4 sm:grid-cols-3">
                   <FieldRow error={fieldError} field="target.first_ip" label="Eerste adres" hint="Met prefix; de volgende nodes krijgen de adressen erna.">
                     <Input
@@ -493,22 +537,33 @@ function DeployInner() {
                   De nodes krijgen hun adres van de DHCP-server. Zorg dat het VIP buiten de DHCP-pool valt.
                 </p>
               )}
+              {!ct && (
+                <FieldRow
+                  error={fieldError}
+                  field="target.ssh_keys"
+                  label="Publieke SSH-sleutels"
+                  hint="Eén per regel, voor de gebruiker debian. Zonder sleutel kom je alleen via de console van Proxmox binnen."
+                >
+                  <Textarea
+                    id={fieldId("target.ssh_keys")}
+                    className={cx("font-mono text-xs", bad("target.ssh_keys"))}
+                    rows={3}
+                    placeholder="ssh-ed25519 AAAA… jij@laptop"
+                    value={form.sshKeys}
+                    onChange={(e) => set("sshKeys", e.target.value)}
+                  />
+                </FieldRow>
+              )}
               <FieldRow
                 error={fieldError}
-                field="target.ssh_keys"
-                label="Publieke SSH-sleutels"
-                hint="Eén per regel, voor de gebruiker debian. Zonder sleutel kom je alleen via de console van Proxmox binnen."
+                field="server_url"
+                label="Adres van ClusterForge"
+                hint={
+                  ct
+                    ? "De CT's melden zich aan bij het adres uit de CT-template; ze moeten het kunnen bereiken, en NATS op poort 4222."
+                    : "Hiermee melden de nieuwe VM's zich aan; ze moeten het kunnen bereiken, en NATS op poort 4222."
+                }
               >
-                <Textarea
-                  id={fieldId("target.ssh_keys")}
-                  className={cx("font-mono text-xs", bad("target.ssh_keys"))}
-                  rows={3}
-                  placeholder="ssh-ed25519 AAAA… jij@laptop"
-                  value={form.sshKeys}
-                  onChange={(e) => set("sshKeys", e.target.value)}
-                />
-              </FieldRow>
-              <FieldRow error={fieldError} field="server_url" label="Adres van ClusterForge" hint="Hiermee melden de nieuwe VM's zich aan; ze moeten het kunnen bereiken, en NATS op poort 4222.">
                 <Input id={fieldId("server_url")} className={bad("server_url")} value={eff.serverUrl ?? ""} onChange={(e) => set("serverUrl", e.target.value)} />
               </FieldRow>
             </div>

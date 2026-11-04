@@ -21,8 +21,10 @@ func (s *Service) API(ctx context.Context, id uuid.UUID) (API, error) {
 }
 
 // Image beschrijft een golden image: een VM-template om nieuwe VM's uit te
-// klonen.
+// klonen, of een CT-template voor nieuwe CT's.
 type Image struct {
+	// Type is qemu (VM-template) of lxc (CT-template).
+	Type    string
 	VMID    int
 	Name    string
 	Node    string
@@ -42,22 +44,22 @@ func (s *Service) Image(ctx context.Context, connID uuid.UUID, vmid int) (Image,
 	if err != nil {
 		return Image{}, translate(err)
 	}
-	if r.Type != "qemu" || !r.Template {
-		return Image{}, ValidationError{fmt.Sprintf("VM %d is geen VM-template; maak er een met het golden-image-script", vmid)}
+	if (r.Type != "qemu" && r.Type != "lxc") || !r.Template {
+		return Image{}, ValidationError{fmt.Sprintf("%d is geen VM- of CT-template; maak er een met golden-image.sh of ct-template.sh", vmid)}
 	}
 	api, _, err := s.apiByID(ctx, connID)
 	if err != nil {
 		return Image{}, err
 	}
-	cfg, err := api.Config(ctx, Guest{Type: "qemu", Node: r.PveNode, VMID: vmid})
+	cfg, err := api.Config(ctx, Guest{Type: r.Type, Node: r.PveNode, VMID: vmid})
 	if err != nil {
 		return Image{}, &UpstreamError{err}
 	}
-	img := Image{VMID: vmid, Name: r.Name, Node: r.PveNode}
+	img := Image{Type: r.Type, VMID: vmid, Name: r.Name, Node: r.PveNode}
 	var ok bool
 	img.Disk, img.Storage, img.SizeGiB, ok = BootDisk(cfg)
 	if !ok {
-		return Image{}, ValidationError{fmt.Sprintf("VM-template %d heeft geen schijf om van op te starten", vmid)}
+		return Image{}, ValidationError{fmt.Sprintf("template %d heeft geen schijf om van op te starten", vmid)}
 	}
 	for _, v := range cfg {
 		if s, isStr := v.(string); isStr && strings.Contains(s, "cloudinit") {
@@ -72,14 +74,14 @@ func (s *Service) Image(ctx context.Context, connID uuid.UUID, vmid int) (Image,
 	return img, nil
 }
 
-// BootDisk zoekt de schijf waarvan de VM opstart: naam (scsi0), storage en
-// grootte in hele GB, naar boven afgerond.
+// BootDisk zoekt de schijf waarvan de VM opstart: naam (scsi0, of rootfs
+// bij een CT), storage en grootte in hele GB, naar boven afgerond.
 func BootDisk(cfg map[string]any) (disk, storage string, sizeGiB int, ok bool) {
 	var order []string
 	if boot, _ := cfg["boot"].(string); strings.HasPrefix(boot, "order=") {
 		order = strings.Split(strings.TrimPrefix(boot, "order="), ";")
 	}
-	order = append(order, "scsi0", "virtio0", "sata0", "ide0")
+	order = append(order, "scsi0", "virtio0", "sata0", "ide0", "rootfs")
 	for _, name := range order {
 		v, _ := cfg[name].(string)
 		if v == "" || strings.Contains(v, "media=cdrom") || strings.Contains(v, "cloudinit") {

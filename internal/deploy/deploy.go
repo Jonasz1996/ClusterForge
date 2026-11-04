@@ -153,8 +153,12 @@ type ClusterInput struct {
 // Target zegt waar en hoe de VM's komen.
 type Target struct {
 	ProxmoxID uuid.UUID `json:"proxmox_id"`
-	// ImageVMID is de VM-template (golden image) om uit te klonen.
-	ImageVMID int    `json:"image_vmid"`
+	// ImageVMID is de VM-template (golden image) of CT-template om uit te
+	// klonen.
+	ImageVMID int `json:"image_vmid"`
+	// ImageType is qemu (VM's, standaard) of lxc (CT's); de server zet het
+	// zelf uit de template in Proxmox.
+	ImageType string `json:"image_type,omitempty"`
 	Storage   string `json:"storage,omitempty"`
 	Bridge    string `json:"bridge"`
 	VLAN      *int   `json:"vlan,omitempty"`
@@ -288,6 +292,9 @@ func (s *Service) planVersion(ctx context.Context, req Request, version string, 
 		}
 		if err := s.checkTarget(ctx, &req.Target, p); err != nil {
 			return nil, nil, err
+		}
+		if req.Target.ImageType == "lxc" && tpl.ClusterType == "kubernetes" {
+			return nil, nil, invalid("target.image_vmid", "Kubernetes kan alleen op VM's; kies een golden image (VM-template)")
 		}
 		p.Target = req.Target
 		if err := s.planNodes(ctx, tpl, p, used); err != nil {
@@ -571,9 +578,19 @@ func (s *Service) checkTarget(ctx context.Context, t *Target, p *params) error {
 			return invalid("target.image_vmid", "%s", ve.Msg)
 		}
 		return err
+	case img.Type == "lxc":
+		// Een CT meldt zich zelf aan vanaf het adres dat de uitrol hem
+		// geeft; met DHCP weet ClusterForge dat adres niet.
+		if t.Network != "static" {
+			return invalid("target.network", "een CT uit een CT-template meldt zich aan vanaf zijn vaste adres; kies vaste adressen")
+		}
+		if t.SSHKeys != "" {
+			return invalid("target.ssh_keys", "SSH-sleutels kan Proxmox alleen bij het maken van een CT zetten, niet bij een kloon; zet ze in de CT-template")
+		}
 	case !img.CloudInit:
 		return invalid("target.image_vmid", "%s heeft geen cloud-init-schijf; maak de template met het golden-image-script", img.Name)
 	}
+	t.ImageType = img.Type
 	p.ImageName, p.ImageShared = img.Name, img.Shared
 	if t.Storage != "" {
 		storages, err := s.pve.Storages(ctx, t.ProxmoxID)

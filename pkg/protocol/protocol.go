@@ -598,7 +598,8 @@ type Ack struct {
 
 // EnrollRequest stuurt de agent naar POST /api/v1/agents/enroll.
 type EnrollRequest struct {
-	Token           string `json:"token"`
+	// Token is leeg bij aanmelden zonder token (agents/claim).
+	Token           string `json:"token,omitempty"`
 	NkeyPublic      string `json:"nkey_public"`
 	Hostname        string `json:"hostname"`
 	MachineID       string `json:"machine_id"`

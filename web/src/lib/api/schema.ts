@@ -681,6 +681,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/agents/claim": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Een agent in een CT uit een CT-template meldt zich aan zonder token (zonder sessie)
+         * @description Alleen tijdens een uitrol: die zette voor de node met deze hostname
+         *     een token klaar met het adres van de CT. De aanvraag moet van dat
+         *     adres komen. 404 no_claim betekent dat er (nog) niets klaarstaat;
+         *     de agent probeert het later opnieuw.
+         */
+        post: operations["claimAgent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/agents/{agentId}/revoke": {
         parameters: {
             query?: never;
@@ -9807,6 +9830,13 @@ export interface components {
             agent_version: string;
             protocol_version: number;
         };
+        ClaimRequest: {
+            nkey_public: string;
+            hostname: string;
+            machine_id: string;
+            agent_version: string;
+            protocol_version: number;
+        };
         EnrollResponse: {
             /** Format: uuid */
             agent_id: string;
@@ -12016,6 +12046,34 @@ export interface operations {
             };
             400: components["responses"]["Error"];
             401: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            429: components["responses"]["Error"];
+        };
+    };
+    claimAgent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClaimRequest"];
+            };
+        };
+        responses: {
+            /** @description Aangemeld */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EnrollResponse"];
+                };
+            };
+            400: components["responses"]["Error"];
+            404: components["responses"]["Error"];
             409: components["responses"]["Error"];
             429: components["responses"]["Error"];
         };
