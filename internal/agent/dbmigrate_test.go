@@ -16,6 +16,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -265,6 +266,21 @@ func TestDBMigrateRealMariaDB(t *testing.T) {
 	want := checksum(src, db)
 
 	old, nw := dockerAgent(t, src), dockerAgent(t, dst)
+	// Wat mariadb-dump van de nieuwe server schreef: zonder transactie per
+	// tabel, anders past een grote tabel niet in één writeset van Galera.
+	var dumpMu sync.Mutex
+	var dumped bytes.Buffer
+	stream := nw.Stream
+	nw.Stream = func(ctx context.Context, in io.Reader, out io.Writer, name string, args ...string) error {
+		if name == "mariadb-dump" {
+			out = io.MultiWriter(out, writerFunc(func(p []byte) (int, error) {
+				dumpMu.Lock()
+				defer dumpMu.Unlock()
+				return dumped.Write(p)
+			}))
+		}
+		return stream(ctx, in, out, name, args...)
+	}
 	info := migrate(t, old, protocol.DBMigrateRequest{Action: protocol.DBMigrateInspect, Database: db}).Info
 	if !info.Exists || info.Charset != "utf8mb4" || info.Collation != "utf8mb4_unicode_ci" || len(info.Tables) != 3 ||
 		info.Views != 1 || info.Routines != 1 || info.Triggers != 1 || info.Events != 1 {
@@ -323,6 +339,12 @@ func TestDBMigrateRealMariaDB(t *testing.T) {
 	}
 	if got := checksum(dst, target); got != want {
 		t.Fatalf("na de import: %s, wil %s", got, want)
+	}
+	dumpMu.Lock()
+	text := dumped.String()
+	dumpMu.Unlock()
+	if !strings.Contains(text, "INSERT INTO `files`") || strings.Contains(text, "AUTOCOMMIT=0") {
+		t.Errorf("de dump zet de rijen in één transactie per tabel:\n%s", text)
 	}
 	if got := sql(dst, "SELECT DEFAULT_COLLATION_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = '"+target+"'"); got != "utf8mb4_unicode_ci" {
 		t.Errorf("collatie: %s", got)
@@ -586,3 +608,7 @@ func TestDBMigrate(t *testing.T) {
 		t.Errorf("andere gebruiker weghalen: %s", e)
 	}
 }
+
+type writerFunc func([]byte) (int, error)
+
+func (f writerFunc) Write(p []byte) (int, error) { return f(p) }

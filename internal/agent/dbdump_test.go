@@ -126,7 +126,7 @@ func TestDBDump(t *testing.T) {
 		!d.Started.Equal(*now) || d.Database != "nextcloud" {
 		t.Fatalf("dump: %+v", d)
 	}
-	if !slices.Contains(h.Calls(), "mariadb-dump --single-transaction --quick --routines --events --triggers --hex-blob --default-character-set=utf8mb4 nextcloud") {
+	if !slices.Contains(h.Calls(), "mariadb-dump --single-transaction --quick --routines --events --triggers --hex-blob --default-character-set=utf8mb4 --skip-no-autocommit nextcloud") {
 		t.Errorf("mariadb-dump: %v", h.Calls())
 	}
 	// Alleen root mag erbij.
