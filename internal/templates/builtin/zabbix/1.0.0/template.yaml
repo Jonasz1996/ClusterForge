@@ -151,6 +151,14 @@ roles:
           path: /usr/share/zabbix/conf/zabbix.conf.php
           template: zabbix.conf.php.tmpl
           mode: "0644"
+      # Debian laat de webinterface ook /etc/zabbix/web/zabbix.conf.php lezen
+      # (daar schrijft de setup-wizard hem); dezelfde inhoud op beide
+      # plaatsen, zodat de wizard nooit verschijnt.
+      - directory: { path: /etc/zabbix/web, mode: "0755" }
+      - file:
+          path: /etc/zabbix/web/zabbix.conf.php
+          template: zabbix.conf.php.tmpl
+          mode: "0644"
       - file:
           path: /etc/nginx/sites-enabled/default
           template: nginx.conf.tmpl
