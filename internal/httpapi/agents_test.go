@@ -58,6 +58,9 @@ func fakeCollector(root string, addrs ...string) *agent.Collector {
 		},
 		Addresses:      func() []string { return addrs },
 		PrimaryAddress: func() string { return "192.0.2.50" },
+		// Een vaste schijf van 100 GiB met 80 GiB vrij, los van de runner:
+		// anders geeft een volle CI-machine extra waarschuwingen (disk_low).
+		Statfs: func(string) (uint64, uint64, uint64, bool) { return 100 << 30, 80 << 30, 80 << 30, true },
 	}
 }
 
