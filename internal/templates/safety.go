@@ -27,7 +27,8 @@ func (t *Template) checkUnsafe() error {
 		for i, raw := range r.Steps {
 			step, _ := raw.(map[string]any)
 			for kind, fields := range map[string][]string{
-				"command": {"run", "unless", "creates"}, "file": {"path"}, "directory": {"path"},
+				"command": {"run", "unless", "creates"}, "file": {"path"}, "directory": {"path"}, "ini_set": {"path", "key"},
+				"repo_deb": {"url"}, "repo": {"name", "url", "suite", "key"},
 			} {
 				m, _ := step[kind].(map[string]any)
 				for _, f := range fields {

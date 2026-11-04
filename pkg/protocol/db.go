@@ -76,6 +76,10 @@ const (
 	// DBDrop haalt een database of gebruiker weg, alleen als Confirm de naam
 	// is.
 	DBDrop = "drop"
+	// DBImport laadt een .sql- of .sql.gz-bestand van de node in een
+	// database, voor het schema van een app uit een recept (fase 9). Sinds
+	// RecipeStepsSince.
+	DBImport = "import"
 	// DBDump maakt een dump van een database, toont de dumps op de node,
 	// ruimt oude op, of zet een dump terug in een nieuwe database. Maken en
 	// terugzetten lopen op de achtergrond; DBDumpList toont de voortgang.
@@ -430,6 +434,31 @@ type DBRequest struct {
 	Probe *DBProbeRequest `json:"probe,omitempty"`
 	// Heal hoort bij DBHeal.
 	Heal *DBHealRequest `json:"heal,omitempty"`
+	// Import hoort bij DBImport.
+	Import *DBImportRequest `json:"import,omitempty"`
+}
+
+// DBImportTimeout is hoe lang de agent een schema mag laden.
+const DBImportTimeout = 15 * time.Minute
+
+// DBImportRequest laadt Path in Database als Unless geen rij geeft. Zonder
+// Unless laadt de agent alleen in een database zonder tabellen. Met
+// TrustFunctions staat log_bin_trust_function_creators aan tijdens het
+// laden, en daarna weer zoals ervoor, ook als het laden mislukt.
+type DBImportRequest struct {
+	Database       string `json:"database"`
+	Path           string `json:"path"`
+	TrustFunctions bool   `json:"trust_functions,omitempty"`
+	// Unless is één SELECT in Database; geeft ze een rij, dan gebeurt er
+	// niets.
+	Unless string `json:"unless,omitempty"`
+}
+
+// DBImportResult zegt of er iets geladen werd.
+type DBImportResult struct {
+	Imported bool `json:"imported"`
+	// Skipped zegt waarom niet.
+	Skipped string `json:"skipped,omitempty"`
 }
 
 // DBMigrateRequest zegt wat een DBMigrate doet.
@@ -690,8 +719,12 @@ type DBDumpRun struct {
 // DBEnsureRequest zegt wat er in MariaDB moet zijn. Namen voldoen aan
 // DBNamePattern; een host is een IP-adres, localhost of een patroon met %.
 type DBEnsureRequest struct {
-	// Database wordt aangemaakt als ze er niet is, met utf8mb4.
-	Database string `json:"database,omitempty"`
+	// Database wordt aangemaakt als ze er niet is, met utf8mb4, of met
+	// Charset en Collation (sinds RecipeStepsSince; een oudere agent negeert
+	// ze).
+	Database  string `json:"database,omitempty"`
+	Charset   string `json:"charset,omitempty"`
+	Collation string `json:"collation,omitempty"`
 	// User wordt aangemaakt op elke host in Hosts als hij er niet is. Met
 	// Password krijgt hij dat wachtwoord, ook als hij er al was.
 	User     string   `json:"user,omitempty"`
@@ -833,6 +866,8 @@ type DBResponse struct {
 	Probe *DBProbeResult `json:"probe,omitempty"`
 	// Heal is het antwoord op DBHeal.
 	Heal *DBHealResult `json:"heal,omitempty"`
+	// Import is het antwoord op DBImport.
+	Import *DBImportResult `json:"import,omitempty"`
 }
 
 // DBServer is één MariaDB of PostgreSQL op een node.

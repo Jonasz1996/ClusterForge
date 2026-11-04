@@ -42,6 +42,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/live"
 	"github.com/Jonasz1996/clusterforge/internal/metrics"
 	"github.com/Jonasz1996/clusterforge/internal/proxmox"
+	"github.com/Jonasz1996/clusterforge/internal/recipes"
 	"github.com/Jonasz1996/clusterforge/internal/reports"
 	"github.com/Jonasz1996/clusterforge/internal/risk"
 	"github.com/Jonasz1996/clusterforge/internal/rollout"
@@ -88,6 +89,7 @@ type Server struct {
 	lessons      *kubelessons.Engine
 	version      string
 	upgrades     *agentupgrade.Service
+	recipes      *recipes.Service
 	loginLimiter *ipLimiter
 	// loginTimeout en sessionTimeout begrenzen het databasewerk van een login
 	// en van de sessiecontrole voor elke API-call. Een volle pool of een slot
@@ -190,6 +192,7 @@ func New(d Deps) *Server {
 		git:      d.GitOps,
 		version:  d.Version,
 		upgrades: d.Upgrades,
+		recipes:  recipes.NewService(d.Pool, ev),
 		// 10 pogingen direct, daarna één per 6 seconden per IP-adres.
 		loginLimiter:   newIPLimiter(6*time.Second, 10),
 		loginTimeout:   20 * time.Second,

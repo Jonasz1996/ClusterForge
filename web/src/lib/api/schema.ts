@@ -1375,6 +1375,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/clusters/{clusterId}/connection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Hoe een app de database van een samengesteld cluster bereikt
+         * @description Adres, poort, databases en gebruikers uit de recepten; zonder wachtwoorden.
+         */
+        get: operations["getClusterConnection"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/clusters/{clusterId}/connection/reveal": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Het wachtwoord van een databasegebruiker tonen (admin)
+         * @description Vraagt je code van tweestapsverificatie, of je wachtwoord als je die niet hebt. Komt in het logboek.
+         */
+        post: operations["revealClusterConnectionSecret"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/clusters/{clusterId}/spec/edit": {
         parameters: {
             query?: never;
@@ -1699,6 +1743,125 @@ export interface paths {
         head?: never;
         /** Een dienst wijzigen, of een voorstel bevestigen, negeren of terugzetten (admin) */
         patch: operations["updateService"];
+        trace?: never;
+    };
+    "/recipes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Alle recepten met hun versies (fase 9) */
+        get: operations["listRecipes"];
+        put?: never;
+        /**
+         * Een recept als nieuwe versie bewaren (admin)
+         * @description Naam en versie komen van de RECIPE-regel. Dezelfde tekst nog eens bewaren geeft 200 en verandert niets; een andere tekst met een bestaande versie geeft 409. Een recept met fouten geeft 400 met de fouten per regel in details.
+         */
+        post: operations["saveRecipe"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/blueprints": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Zelf samengestelde clusters, elk in de nieuwste versie */
+        get: operations["listBlueprints"];
+        put?: never;
+        /**
+         * Een cluster samenstellen uit recepten
+         * @description Maakt van rollen met elk een recept, een VIP en een database een template (eigen-<naam>) om mee uit te rollen. Verandert de samenstelling niets, dan blijft de versie (200); anders komt er een nieuwe versie (201). Alleen voor beheerders.
+         */
+        post: operations["composeBlueprint"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/recipes/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Een recept controleren zonder het te bewaren
+         * @description Geeft de fouten en waarschuwingen per regel en, zonder fouten, wat het recept per node doet.
+         */
+        post: operations["checkRecipe"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/recipes/examples": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Ingebouwde voorbeeldrecepten om mee te beginnen */
+        get: operations["listRecipeExamples"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/recipes/{recipeName}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                recipeName: string;
+            };
+            cookie?: never;
+        };
+        /** Alle versies van een recept, nieuwste eerst */
+        get: operations["listRecipeVersions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/recipes/{recipeName}/versions/{recipeVersion}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                recipeName: string;
+                recipeVersion: string;
+            };
+            cookie?: never;
+        };
+        /** Eén versie van een recept, met wat ze per node doet */
+        get: operations["getRecipeVersion"];
+        put?: never;
+        post?: never;
+        /** Een versie van een recept verwijderen (admin) */
+        delete: operations["deleteRecipeVersion"];
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/dependencies": {
@@ -4692,6 +4855,174 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        ClusterConnection: {
+            /** @description false voor een cluster zonder database uit recepten */
+            available: boolean;
+            /** @description Waarom er geen verbinding is; leeg als available */
+            reason: string;
+            engine: string;
+            /** @description Het VIP, of localhost op de nodes met de database */
+            host: string;
+            port: number;
+            /** @description De rol met de database */
+            role: string;
+            databases: string[];
+            users: components["schemas"]["ConnectionUser"][];
+        };
+        ConnectionUser: {
+            name: string;
+            /** @description De database met alle rechten; leeg voor geen */
+            database: string;
+            /** @description De naam van het geheim met het wachtwoord */
+            secret: string;
+        };
+        ConnectionRevealInput: {
+            secret: string;
+            /** @description Je wachtwoord */
+            password?: string;
+            /** @description Je code */
+            totp_code?: string;
+        };
+        ConnectionSecret: {
+            secret: string;
+            value: string;
+        };
+        Composition: {
+            /** @description Korte naam; de template heet eigen-<naam> */
+            name: string;
+            title: string;
+            roles: components["schemas"]["CompositionRole"][];
+            vip?: components["schemas"]["CompositionVIP"];
+            database?: components["schemas"]["CompositionDatabase"];
+        };
+        CompositionRole: {
+            name: string;
+            recipe: string;
+            recipe_version: string;
+            /** @description De ROLE uit het recept; leeg voor een recept zonder */
+            recipe_role?: string;
+            count: number;
+            cpu?: number;
+            memory?: string;
+            disk?: string;
+        };
+        CompositionVIP: {
+            role: string;
+        };
+        CompositionDatabase: {
+            role: string;
+            /** @description innodb_buffer_pool_size per node, zoals 1G; leeg is de standaard */
+            buffer_pool?: string;
+            /** @description 0 is de standaard */
+            max_connections?: number;
+            /** @description Regels voor [mysqld], zoals max_allowed_packet = 64M */
+            extra?: string;
+        };
+        Blueprint: {
+            template: string;
+            version: string;
+            title: string;
+            composition: components["schemas"]["Composition"];
+            /** Format: date-time */
+            created_at: string;
+        };
+        ComposeResult: {
+            template: string;
+            version: string;
+            created: boolean;
+            warnings: string[];
+        };
+        RecipeSource: {
+            /** @description De tekst van het recept (hoogstens 256 KiB) */
+            source: string;
+        };
+        RecipeSummary: {
+            name: string;
+            /** @description Nieuwste eerst */
+            versions: string[];
+            /** Format: date-time */
+            updated_at: string;
+        };
+        RecipeVersion: {
+            name: string;
+            version: string;
+            source: string;
+            /** Format: date-time */
+            created_at: string;
+            /** @description Gebruikersnaam */
+            created_by: string | null;
+        };
+        RecipeVersionDetail: components["schemas"]["RecipeVersion"] & {
+            check: components["schemas"]["RecipeCheck"];
+        };
+        RecipeExample: {
+            name: string;
+            title: string;
+            source: string;
+        };
+        RecipeDiag: {
+            line: number;
+            message: string;
+            warning: boolean;
+        };
+        RecipeCheck: {
+            /** @description Geen fouten (waarschuwingen mogen) */
+            ok: boolean;
+            diagnostics: components["schemas"]["RecipeDiag"][];
+            /** @description null als er fouten zijn */
+            recipe: components["schemas"]["RecipeParsed"] | null;
+        };
+        RecipeParsed: {
+            name: string;
+            version: string;
+            from: string;
+            /** @description Instellingen van de databaseserver die het recept vraagt (DBCONFIG) */
+            db_config: {
+                key: string;
+                value: string;
+                /** @description Een ondergrens: een hogere waarde blijft */
+                min?: boolean;
+                line: number;
+            }[];
+            needs: {
+                /** @description vip of database */
+                service: string;
+                /** @description mariadb of postgresql bij database */
+                engine?: string;
+            }[];
+            params: {
+                name: string;
+                /** @description string, int, bool, ipv4, size, version of secret */
+                type: string;
+                default?: string;
+                length?: number;
+                line: number;
+            }[];
+            roles: {
+                /** @description Leeg: geldt voor de rol waar je het recept aan koppelt */
+                name: string;
+                steps: {
+                    line: number;
+                    kind: string;
+                    /** @description Loopt op één node */
+                    once: boolean;
+                    /** @description Er zit een geheim in; de inhoud staat alleen als {{ .params.naam }} */
+                    secret: boolean;
+                    title: string;
+                    /** @description De stap in de vorm van template.yaml */
+                    spec: {
+                        [key: string]: unknown;
+                    };
+                }[];
+                health: {
+                    line: number;
+                    /** @description service, http, port of db */
+                    kind: string;
+                    target?: string;
+                    expect?: number;
+                }[];
+            }[];
+        };
         Preferences: {
             /** @description De leermodus in het dashboard Kubernetes: uitleg en kubectl-commando's */
             kube_learning: boolean;
@@ -13217,6 +13548,61 @@ export interface operations {
             404: components["responses"]["Error"];
         };
     };
+    getClusterConnection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description De verbinding */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClusterConnection"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    revealClusterConnectionSecret: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ConnectionRevealInput"];
+            };
+        };
+        responses: {
+            /** @description Het wachtwoord */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConnectionSecret"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            429: components["responses"]["Error"];
+        };
+    };
     getClusterSpecEdit: {
         parameters: {
             query?: {
@@ -13729,6 +14115,249 @@ export interface operations {
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];
+        };
+    };
+    listRecipes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Recepten */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecipeSummary"][];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    saveRecipe: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecipeSource"];
+            };
+        };
+        responses: {
+            /** @description Bestond al met dezelfde tekst */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecipeVersion"];
+                };
+            };
+            /** @description Bewaard */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecipeVersion"];
+                };
+            };
+            /** @description Het recept heeft fouten */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecipeCheck"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    listBlueprints: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Samengestelde clusters */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Blueprint"][];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    composeBlueprint: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Composition"];
+            };
+        };
+        responses: {
+            /** @description Niets veranderd */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ComposeResult"];
+                };
+            };
+            /** @description Nieuwe versie */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ComposeResult"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+        };
+    };
+    checkRecipe: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RecipeSource"];
+            };
+        };
+        responses: {
+            /** @description Resultaat van de controle */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecipeCheck"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+        };
+    };
+    listRecipeExamples: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Voorbeelden */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecipeExample"][];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    listRecipeVersions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                recipeName: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Versies */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecipeVersion"][];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    getRecipeVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                recipeName: string;
+                recipeVersion: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Versie */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RecipeVersionDetail"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    deleteRecipeVersion: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                recipeName: string;
+                recipeVersion: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Verwijderd */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
         };
     };
     createDependency: {

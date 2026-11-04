@@ -58,6 +58,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/metrics"
 	"github.com/Jonasz1996/clusterforge/internal/planner"
 	"github.com/Jonasz1996/clusterforge/internal/proxmox"
+	"github.com/Jonasz1996/clusterforge/internal/recipes"
 	"github.com/Jonasz1996/clusterforge/internal/reports"
 	"github.com/Jonasz1996/clusterforge/internal/risk"
 	"github.com/Jonasz1996/clusterforge/internal/rollout"
@@ -219,6 +220,11 @@ func serve() error {
 	// overschakelen, daarna wachten tot de node weer meedoet.
 	life.DB = cmps
 	kn.Changed = eval.Kick
+	// Zelf samengestelde clusters (fase 9) staan als template in de
+	// database; ze komen in het register voor de controle hieronder.
+	if err := recipes.NewService(pool, ev).LoadBlueprints(ctx); err != nil {
+		log.Error("samengestelde templates laden mislukt", "err", err)
+	}
 	// Een cluster rendert alleen met de templateversie waarmee het is
 	// uitgerold; zit die niet in deze binary, dan moet de beheerder dat weten.
 	if missing, err := dep.MissingTemplates(ctx); err != nil {
@@ -325,6 +331,9 @@ func serve() error {
 	// GitOps leest de gekoppelde repository elke minuut; na een uitrol of
 	// toepassing kijkt het meteen of een plan verouderd is.
 	git := gitops.NewService(pool, ev, log, box, dep, ro)
+	// Een nieuwe versie van een samengesteld cluster met alleen een extra
+	// DATABASE verandert op geen node iets; de instructies lopen dan toch.
+	git.Applied = cmps.RecipeDatabaseFor
 	for _, kind := range []string{deploy.Kind, rollout.Kind} {
 		runner.OnFinished(kind, func(context.Context, store.Job) { git.Kick(false) })
 	}

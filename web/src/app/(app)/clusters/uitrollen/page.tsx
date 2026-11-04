@@ -240,6 +240,14 @@ function DeployInner() {
       <PageHeader
         title="Cluster uitrollen"
         description="ClusterForge kloont de VM's uit een golden image in Proxmox, of neemt je bestaande nodes (zoals CT's), installeert de software van de template en controleert of het cluster werkt."
+        actions={
+          <Link
+            href="/clusters/samenstellen"
+            className="rounded-md border border-slate-300 px-3 py-1.5 text-sm hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800"
+          >
+            Zelf samenstellen
+          </Link>
+        }
       />
       {error && !error.field && <Alert>{error.message}</Alert>}
       {error?.field && <Alert>Controleer het gemarkeerde veld: {error.message}</Alert>}

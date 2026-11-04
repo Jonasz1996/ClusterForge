@@ -472,6 +472,16 @@ type BackupWatch struct {
 	CreatedAt    time.Time
 }
 
+type Blueprint struct {
+	Name         string
+	Version      string
+	Title        string
+	Composition  []byte
+	TemplateYaml string
+	CreatedAt    time.Time
+	CreatedBy    *uuid.UUID
+}
+
 type Cluster struct {
 	ID               uuid.UUID
 	Slug             string
@@ -1311,6 +1321,14 @@ type ProxmoxTask struct {
 	Exitstatus   string
 	StartedAt    time.Time
 	EndedAt      *time.Time
+}
+
+type RecipeVersion struct {
+	Name      string
+	Version   string
+	Source    string
+	CreatedAt time.Time
+	CreatedBy *uuid.UUID
 }
 
 type RecoveryReport struct {
