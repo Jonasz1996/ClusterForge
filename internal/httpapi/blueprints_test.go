@@ -7,6 +7,7 @@ import (
 
 	"github.com/Jonasz1996/clusterforge/internal/recipes"
 	"github.com/Jonasz1996/clusterforge/internal/store"
+	"github.com/Jonasz1996/clusterforge/internal/templates"
 )
 
 func TestBlueprints(t *testing.T) {
@@ -17,11 +18,13 @@ func TestBlueprints(t *testing.T) {
 	if s, _, _ := c.login("admin", "een-lang-wachtwoord", ""); s != http.StatusOK {
 		t.Fatal(s)
 	}
+	// Het register van templates is gedeeld; andere tests verwachten alleen
+	// de ingebouwde.
+	t.Cleanup(func() { templates.BuiltinRegistry().Remove("eigen-zabbix-api-test") })
 	zabbix := recipes.Examples()[0].Source
 	if s := c.do("POST", "/api/v1/recipes", map[string]any{"source": zabbix}, nil); s != http.StatusCreated {
 		t.Fatal(s)
 	}
-	// Een unieke naam: het register van templates is gedeeld tussen tests.
 	comp := map[string]any{
 		"name": "zabbix-api-test", "title": "Zabbix (test)",
 		"roles":    []map[string]any{{"name": "server", "recipe": "zabbix", "recipe_version": "1.0", "count": 3}},
