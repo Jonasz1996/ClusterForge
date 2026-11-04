@@ -312,7 +312,8 @@ func (p *parser) run(src string) {
 		if i == 0 && op != "RECIPE" {
 			p.errorf("de eerste regel is RECIPE naam versie")
 		}
-		if l.heredoc != nil && op != "FILE" && !(op == "ONCE" && len(f) > 1 && strings.ToUpper(f[1]) == "FILE") {
+		onceFile := op == "ONCE" && len(f) > 1 && strings.ToUpper(f[1]) == "FILE"
+		if l.heredoc != nil && op != "FILE" && !onceFile {
 			p.errorf("<< kan alleen bij FILE")
 			continue
 		}
