@@ -299,3 +299,20 @@ func TestExamples(t *testing.T) {
 		t.Error("het voorbeeld zabbix wijkt af van het recept in de test")
 	}
 }
+
+func TestShellSafety(t *testing.T) {
+	base := "RECIPE app 1.0\nFROM debian:13\nSECRET pw\nPARAM naam string x\nPARAM workers int 4\n"
+	for src, part := range map[string]string{
+		base + "RUN CREATES /x echo {{ secret.pw }}\n":          "kan niet in een commando",
+		base + "RUN CREATES /x echo {{ param.naam }}\n":         "kan niet in een commando",
+		base + "RUN UNLESS \"test {{ param.naam }}\" echo x\n":  "CREATES of UNLESS",
+		base + "RUN CREATES /x echo {{ cluster.name }}\n":       "kan niet in een commando",
+		base + "FILE /etc/{{ node.name }}.conf <<EOF\nx\nEOF\n": "pad",
+		base + "SET /etc/../shadow a=b\n":                       "pad",
+	} {
+		if d := errs(t, src); !hasDiag(d, 6, part) {
+			t.Errorf("%q: wilde %q, kreeg %v", src, part, d)
+		}
+	}
+	mustParse(t, base+"RUN CREATES /x app --workers {{ param.workers }} --ip {{ node.ip }}\n")
+}

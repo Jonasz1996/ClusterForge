@@ -16,6 +16,7 @@ package recipes
 
 import (
 	"fmt"
+	"path"
 	"regexp"
 	"slices"
 	"strings"
@@ -619,6 +620,35 @@ func (p *parser) expandSecret(s string) (string, bool, bool) {
 	return out, secret, ok
 }
 
+// checkPath weigert een pad met {{ }}, .. of spaties: het pad bepaalt welk
+// bestand root schrijft.
+func (p *parser) checkPath(s string) bool {
+	if strings.Contains(s, "{{") || path.Clean(s) != s || strings.ContainsAny(s, " \t") {
+		p.errorf("pad %q: absoluut, zonder .. en zonder {{ }}", s)
+		return false
+	}
+	return true
+}
+
+// shellSafe weigert in een commando of pad een waarde waarvan de vorm niet
+// vastligt: een geheim of een tekst kan tekens bevatten waarmee ze uit het
+// commando breekt (zie templates.checkUnsafe).
+func (p *parser) shellSafe(what, s string) bool {
+	ok := true
+	for _, m := range exprRe.FindAllStringSubmatch(s, -1) {
+		e := strings.TrimSpace(m[1])
+		root, rest, _ := strings.Cut(e, ".")
+		switch {
+		case e == "vip" || e == "node.name" || e == "node.ip" || e == "db.host" || e == "db.port":
+		case root == "param" && p.params[rest] != nil && p.params[rest].Type != "string" && p.params[rest].Type != "secret":
+		default:
+			p.errorf("{{ %s }} kan niet in %s: alleen vip, node.name, node.ip, db.host, db.port en params van type int, bool, ipv4 of size; zet een tekst of geheim met SET of FILE", e, what)
+			ok = false
+		}
+	}
+	return ok
+}
+
 func (p *parser) needVIP() {
 	if !p.r.NeedsVIP() {
 		p.r.Needs = append(p.r.Needs, Need{Service: "vip"})
@@ -670,6 +700,9 @@ func (p *parser) add(s Step) {
 var ownerOpts = map[string]bool{"MODE": true, "OWNER": true, "GROUP": true}
 
 func (p *parser) step(op string, args []string, l line) {
+	if (op == "FILE" || op == "SET" || op == "DIR") && len(args) > 0 && strings.HasPrefix(args[0], "/") && !p.checkPath(args[0]) {
+		return
+	}
 	switch op {
 	case "REPO_DEB":
 		if len(args) != 1 {
@@ -964,6 +997,9 @@ func (p *parser) runStep(args []string, l line) {
 		p.errorf("RUN heeft CREATES /pad of UNLESS \"commando\" nodig, anders loopt het bij elke uitrol opnieuw")
 		return
 	}
+	if !p.shellSafe("een commando", cmd) || !p.shellSafe("CREATES of UNLESS", o["CREATES"]+" "+o["UNLESS"]) {
+		return
+	}
 	run, secret, ok := p.expandSecret(cmd)
 	if !ok {
 		return
@@ -986,9 +1022,6 @@ func (p *parser) runStep(args []string, l line) {
 		}
 	}
 	c["title"] = t
-	if secret {
-		p.warnf("een geheim in een commando kan in de proceslijst van de node staan; zet het liever met SET of FILE")
-	}
 	p.add(Step{Kind: "command", Secret: secret, Spec: map[string]any{"command": c}, Title: t})
 }
 

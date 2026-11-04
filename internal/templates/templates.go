@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"path"
 	"regexp"
 	"slices"
 	"strconv"
@@ -547,6 +548,18 @@ type stepSpec struct {
 	User      *protocol.UserStep      `json:"user"`
 	Directory *protocol.DirectoryStep `json:"directory"`
 	Command   *commandSpec            `json:"command"`
+	// RepoDeb, Repo en IniSet komen uit recepten (fase 9) en vragen een
+	// agent met protocol.RecipeStepsSince.
+	RepoDeb *protocol.RepoDebStep `json:"repo_deb"`
+	Repo    *protocol.RepoStep    `json:"repo"`
+	IniSet  *iniSetSpec           `json:"ini_set"`
+}
+
+// iniSetSpec is een ini_set met, zoals bij een bestand, de services die
+// herstarten als de waarde veranderde.
+type iniSetSpec struct {
+	protocol.IniSetStep
+	Notify []string `json:"notify"`
 }
 
 // commandSpec is een commando met, zoals bij een bestand, de services die
@@ -590,8 +603,12 @@ func (t *Template) Steps(role string, c Context) ([]Step, error) {
 		if err := decodeStrict(v, &spec); err != nil {
 			return nil, fmt.Errorf("stap %d: %w", i+1, err)
 		}
-		s := Step{Step: protocol.Step{Package: spec.Package, Service: spec.Service, User: spec.User, Directory: spec.Directory}}
+		s := Step{Step: protocol.Step{Package: spec.Package, Service: spec.Service, User: spec.User, Directory: spec.Directory,
+			RepoDeb: spec.RepoDeb, Repo: spec.Repo}}
 		var notify []string
+		if is := spec.IniSet; is != nil {
+			s.IniSet, notify = &is.IniSetStep, is.Notify
+		}
 		if c := spec.Command; c != nil {
 			s.Command, notify = &c.CommandStep, c.Notify
 		}
@@ -612,7 +629,7 @@ func (t *Template) Steps(role string, c Context) ([]Step, error) {
 			s.Notify = append(s.Notify, protocol.ServiceStep{Name: parts[1], State: notifyActions[parts[2]]})
 		}
 		if s.Kind() == "" {
-			return nil, fmt.Errorf("stap %d heeft precies één soort nodig (package, file, service, user, directory of command)", i+1)
+			return nil, fmt.Errorf("stap %d heeft precies één soort nodig (package, file, service, user, directory, command, repo_deb, repo of ini_set)", i+1)
 		}
 		s.Title = title(s.Step)
 		if c := spec.Command; c != nil && c.Title != "" {
@@ -665,6 +682,12 @@ func title(s protocol.Step) string {
 		return "map " + s.Directory.Path
 	case "command":
 		return "commando"
+	case "repo_deb":
+		return "pakketbron uit " + path.Base(s.RepoDeb.URL)
+	case "repo":
+		return "pakketbron " + s.Repo.Name
+	case "ini_set":
+		return s.IniSet.Key + " in " + s.IniSet.Path
 	}
 	return "stap"
 }

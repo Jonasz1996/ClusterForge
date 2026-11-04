@@ -133,6 +133,11 @@ Waarden in `{{ … }}`: `vip`, `node.name`, `node.ip`, `cluster.name`,
 ### Geheimen
 
 - Een geheim staat nooit in de tekst van een recept, alleen `{{ secret.x }}`.
+- In een `RUN` (en `CREATES`/`UNLESS`) mogen alleen waarden met een vaste
+  vorm: `vip`, `node.name`, `node.ip`, `db.host`, `db.port` en params van
+  type int, bool, ipv4 of size. Een geheim of tekst kan tekens bevatten die
+  uit het commando breken; zet die met `SET` of `FILE`. Paden hebben nooit
+  `{{ }}`. Dat is dezelfde regel als voor templates (`checkUnsafe`).
   De editor weigert een regel als `PASSWORD hunter2`: na `PASSWORD` moet een
   `{{ secret.… }}` komen.
 - De waarde staat versleuteld in Postgres (internal/secrets), per cluster,

@@ -426,6 +426,8 @@ func (h *Host) exec(name string, args []string) ([]byte, error) {
 	switch name {
 	case "dpkg-query":
 		return h.dpkgQuery(args)
+	case "dpkg-deb", "dpkg":
+		return h.dpkg(name, args)
 	case "apt-get":
 		return h.apt(args)
 	case "systemctl":
@@ -608,6 +610,40 @@ func (h *Host) dpkgQuery(args []string) ([]byte, error) {
 		return []byte(b.String()), errors.New("exit status 1")
 	}
 	return []byte(b.String()), nil
+}
+
+// dpkg speelt "dpkg-deb -f bestand Package Version" en "dpkg -i bestand"
+// na. Een nep-.deb is tekst met regels "Package: x" en "Version: y".
+func (h *Host) dpkg(name string, args []string) ([]byte, error) {
+	if len(args) == 0 {
+		return nil, errExit1
+	}
+	file := args[len(args)-1]
+	if name == "dpkg-deb" {
+		file = args[1]
+	}
+	b, err := os.ReadFile(file)
+	if err != nil {
+		return []byte(err.Error() + "\n"), errExit1
+	}
+	fields := map[string]string{}
+	for line := range strings.SplitSeq(string(b), "\n") {
+		if k, v, ok := strings.Cut(line, ":"); ok {
+			fields[strings.TrimSpace(k)] = strings.TrimSpace(v)
+		}
+	}
+	if fields["Package"] == "" {
+		return []byte("dpkg-deb: error: is not a Debian format archive\n"), errExit1
+	}
+	switch {
+	case name == "dpkg-deb" && len(args) >= 2 && args[0] == "-f":
+		return []byte("Package: " + fields["Package"] + "\nVersion: " + fields["Version"] + "\n"), nil
+	case name == "dpkg" && slices.Contains(args, "-i"):
+		h.packages[fields["Package"]] = true
+		h.versions[fields["Package"]] = fields["Version"]
+		return []byte("Setting up " + fields["Package"] + " (" + fields["Version"] + ") ...\n"), nil
+	}
+	return nil, fmt.Errorf("%s %s", name, strings.Join(args, " "))
 }
 
 // SetVersion zet de versie van een pakket, zoals dpkg-query hem meldt.
