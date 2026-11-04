@@ -128,7 +128,20 @@ type Request struct {
 	Target   Target
 	// ServerURL is het adres waarmee de nieuwe nodes ClusterForge bereiken.
 	ServerURL string
+	// Existing zijn bestaande nodes (bijvoorbeeld CT's met een agent) per
+	// rol, in plaats van nieuwe VM's. Target blijft dan leeg.
+	Existing []ExistingNode
 }
+
+// ExistingNode is een bestaande node die bij een uitrol een rol krijgt.
+type ExistingNode struct {
+	NodeID uuid.UUID
+	Role   string
+}
+
+// NetworkExisting is Target.Network van een uitrol op bestaande nodes: er
+// komen geen VM's, en Proxmox doet niet mee.
+const NetworkExisting = "existing"
 
 type ClusterInput struct {
 	Name        string `json:"name"`
@@ -256,21 +269,30 @@ func (s *Service) planVersion(ctx context.Context, req Request, version string, 
 	if err := s.checkCluster(ctx, p.Cluster); err != nil {
 		return nil, nil, err
 	}
-	if needServer || req.ServerURL != "" {
-		if p.ServerURL, err = serverURL(req.ServerURL); err != nil {
-			return nil, nil, err
-		}
-	}
-	if err := s.checkTarget(ctx, &req.Target, p); err != nil {
-		return nil, nil, err
-	}
-	p.Target = req.Target
 	used, err := s.usedAddresses(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := s.planNodes(ctx, tpl, p, used); err != nil {
-		return nil, nil, err
+	if len(req.Existing) > 0 {
+		// Bestaande nodes: geen VM's en geen aanmelding, dus geen Proxmox
+		// en geen adres van ClusterForge nodig.
+		p.Target = Target{Network: NetworkExisting}
+		if err := s.planExisting(ctx, tpl, p, req.Existing, used); err != nil {
+			return nil, nil, err
+		}
+	} else {
+		if needServer || req.ServerURL != "" {
+			if p.ServerURL, err = serverURL(req.ServerURL); err != nil {
+				return nil, nil, err
+			}
+		}
+		if err := s.checkTarget(ctx, &req.Target, p); err != nil {
+			return nil, nil, err
+		}
+		p.Target = req.Target
+		if err := s.planNodes(ctx, tpl, p, used); err != nil {
+			return nil, nil, err
+		}
 	}
 	if err := s.checkVIP(ctx, tpl, p, used); err != nil {
 		return nil, nil, err
@@ -345,6 +367,16 @@ func (s *Service) RequestWith(ctx context.Context, actor events.Actor, req Reque
 		}
 		for i := range p.Nodes {
 			n := &p.Nodes[i]
+			if p.Target.Network == NetworkExisting {
+				// De node bestaat al: hij komt in het nieuwe cluster met zijn
+				// rol, en is actief zodra de uitrol klaar is.
+				if _, err := s.inv.UpdateNodeTx(ctx, q, actor, n.ID, func(f *inventory.NodeFields) {
+					f.ClusterID, f.Role = &c.ID, n.Role
+				}); err != nil {
+					return err
+				}
+				continue
+			}
 			created, err := s.inv.CreateNodeTx(ctx, q, actor, inventory.NodeFields{
 				ClusterID: &c.ID, Hostname: n.Hostname, Role: n.Role, Lifecycle: store.NodeLifecycleProvisioning,
 				PrimaryIP: n.Address, Tags: []string{},
@@ -407,9 +439,13 @@ func (s *Service) RequestWith(ctx context.Context, actor events.Actor, req Reque
 				return err
 			}
 		}
+		var pve *uuid.UUID
+		if p.Target.ProxmoxID != uuid.Nil {
+			pve = &p.Target.ProxmoxID
+		}
 		job, err = s.jobs.EnqueueForClusterTx(ctx, q, jobs.Spec{
 			Kind: Kind, Title: "Uitrollen: " + p.Cluster.Name, Params: p, ClusterID: &c.ID,
-			ProxmoxID: &p.Target.ProxmoxID, Actor: actor,
+			ProxmoxID: pve, Actor: actor,
 		})
 		if err != nil || o.InTx == nil {
 			return err
@@ -775,4 +811,63 @@ func (s *Service) DatabaseNodes(j store.Job) (nodes []uuid.UUID, ok bool, err er
 		}
 	}
 	return nodes, true, nil
+}
+
+// planExisting zet bestaande nodes in de rollen van de template: per rol
+// precies zoveel als de template vraagt, elk met een verbonden agent, facts
+// met een adres en nog in geen enkel cluster. De hostname blijft.
+func (s *Service) planExisting(ctx context.Context, tpl *templates.Template, p *params, existing []ExistingNode, used map[string]bool) error {
+	counts, err := tpl.Counts(templates.Context{Params: p.Params, Cluster: p.Cluster})
+	if err != nil {
+		return invalid("params", "%s", err.Error())
+	}
+	byRole := map[string][]uuid.UUID{}
+	seen := map[uuid.UUID]bool{}
+	for _, e := range existing {
+		if !slices.ContainsFunc(tpl.Roles, func(r templates.Role) bool { return r.Name == e.Role }) {
+			return invalid("existing", "de template %s heeft geen rol %q", tpl.Name, e.Role)
+		}
+		if seen[e.NodeID] {
+			return invalid("existing", "een node staat er twee keer in")
+		}
+		seen[e.NodeID] = true
+		byRole[e.Role] = append(byRole[e.Role], e.NodeID)
+	}
+	for i, r := range tpl.Roles {
+		if len(byRole[r.Name]) != counts[i] {
+			return invalid("existing", "de rol %s vraagt %d nodes, je koos er %d", r.Name, counts[i], len(byRole[r.Name]))
+		}
+		for n, id := range byRole[r.Name] {
+			row, err := s.q.GetNode(ctx, id)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return invalid("existing", "onbekende node %s", id)
+			}
+			if err != nil {
+				return err
+			}
+			node := row.Node
+			switch {
+			case node.ClusterID != nil:
+				return invalid("existing", "%s zit al in een cluster; haal hem eruit of kies een node zonder cluster", node.Hostname)
+			case node.Lifecycle != store.NodeLifecycleActive:
+				return invalid("existing", "%s is niet actief (%s)", node.Hostname, node.Lifecycle)
+			}
+			dn, err := s.q.GetDeployNode(ctx, id)
+			if err != nil {
+				return err
+			}
+			if dn.AgentProtocol == nil || *dn.AgentProtocol < protocol.ApplySince {
+				return invalid("existing", "%s heeft geen agent, of een te oude; installeer of werk hem bij via Nodes", node.Hostname)
+			}
+			pn := plannedNode{ID: id, Hostname: node.Hostname, Role: r.Name, Index: n + 1}
+			info, err := nodeInfo(SpecNode{Hostname: node.Hostname, Role: r.Name, Index: n + 1}, nodeState(dn.PrimaryIp, dn.Facts))
+			if err != nil {
+				return invalid("existing", "%s", err.Error())
+			}
+			pn.Address, pn.Prefix = info.Address, info.Prefix
+			delete(used, info.Address) // het eigen adres telt niet als bezet
+			p.Nodes = append(p.Nodes, pn)
+		}
+	}
+	return nil
 }

@@ -52,27 +52,30 @@ func (s *Service) run(ctx context.Context, j *jobs.Job) error {
 		return fmt.Errorf("template %s %s zit niet meer in deze server", r.p.Template, r.p.Version)
 	}
 	r.tpl = tpl
-	api, err := s.pve.API(ctx, r.p.Target.ProxmoxID)
-	if err != nil {
-		return err
-	}
-	r.api = api
-	defer func() {
-		sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
-		defer cancel()
-		_ = s.pve.Sync(sctx, r.p.Target.ProxmoxID)
-	}()
-
-	for i := range r.p.Nodes {
-		n := &r.p.Nodes[i]
-		if err := j.Step(ctx, "VM "+n.Hostname+" maken", func(ctx context.Context, st *jobs.Step) error {
-			return r.createVM(ctx, st, n)
-		}); err != nil {
+	// Op bestaande nodes (CT's met een agent) komen er geen VM's.
+	if r.p.Target.Network != NetworkExisting {
+		api, err := s.pve.API(ctx, r.p.Target.ProxmoxID)
+		if err != nil {
 			return err
 		}
-	}
-	if err := j.Step(ctx, "Agents aanmelden", r.enrollAll); err != nil {
-		return err
+		r.api = api
+		defer func() {
+			sctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+			defer cancel()
+			_ = s.pve.Sync(sctx, r.p.Target.ProxmoxID)
+		}()
+
+		for i := range r.p.Nodes {
+			n := &r.p.Nodes[i]
+			if err := j.Step(ctx, "VM "+n.Hostname+" maken", func(ctx context.Context, st *jobs.Step) error {
+				return r.createVM(ctx, st, n)
+			}); err != nil {
+				return err
+			}
+		}
+		if err := j.Step(ctx, "Agents aanmelden", r.enrollAll); err != nil {
+			return err
+		}
 	}
 	for i := range r.p.Nodes {
 		n := &r.p.Nodes[i]

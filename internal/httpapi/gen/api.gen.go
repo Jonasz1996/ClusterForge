@@ -6168,6 +6168,16 @@ type DeployDatabase struct {
 	Engine string `json:"engine"`
 }
 
+// DeployExistingNode defines model for DeployExistingNode.
+type DeployExistingNode struct {
+	// Database Database erbij: als de uitrol lukt, zet ClusterForge deze database op alle nodes van het nieuwe cluster, zoals
+	// 'Database toevoegen', om er een app naartoe te verhuizen. Houdt het plan haar tegen, dan staat de reden in het
+	// logboek (cluster.database_not_added).
+	Database *DeployDatabase    `json:"database,omitempty"`
+	NodeId   openapi_types.UUID `json:"node_id"`
+	Role     string             `json:"role"`
+}
+
 // DeployInput defines model for DeployInput.
 type DeployInput struct {
 	Cluster DeployCluster `json:"cluster"`
@@ -6177,13 +6187,16 @@ type DeployInput struct {
 	// logboek (cluster.database_not_added).
 	Database *DeployDatabase `json:"database,omitempty"`
 
+	// ExistingNodes Bestaande nodes (zoals CT's met een agent) per rol, in plaats van nieuwe VM's. Ze zitten nog in geen cluster; target en server_url vallen dan weg. Per rol precies zoveel als de template vraagt.
+	ExistingNodes *[]DeployExistingNode `json:"existing_nodes,omitempty"`
+
 	// Params Waarden voor de parameters van de template
 	Params map[string]interface{} `json:"params"`
 
-	// ServerUrl Het adres waarmee de nieuwe nodes ClusterForge bereiken
-	ServerUrl string       `json:"server_url"`
-	Target    DeployTarget `json:"target"`
-	Template  string       `json:"template"`
+	// ServerUrl Het adres waarmee de nieuwe nodes ClusterForge bereiken; niet bij existing_nodes
+	ServerUrl *string       `json:"server_url,omitempty"`
+	Target    *DeployTarget `json:"target,omitempty"`
+	Template  string        `json:"template"`
 }
 
 // DeployPlan defines model for DeployPlan.

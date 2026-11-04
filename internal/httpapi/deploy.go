@@ -157,14 +157,21 @@ func deployRequest(in gen.DeployInput) deploy.Request {
 			Name: in.Cluster.Name, Slug: in.Cluster.Slug, Environment: string(in.Cluster.Environment),
 			Description: deref(in.Cluster.Description),
 		},
-		Params: in.Params,
-		Target: deploy.Target{
-			ProxmoxID: in.Target.ProxmoxId, ImageVMID: in.Target.ImageVmid, Storage: deref(in.Target.Storage),
-			Bridge: deref(in.Target.Bridge), VLAN: nullablePtr(in.Target.Vlan), Network: string(in.Target.Network),
-			FirstIP: deref(in.Target.FirstIp), Gateway: deref(in.Target.Gateway), DNS: deref(in.Target.Dns),
-			SSHKeys: deref(in.Target.SshKeys),
-		},
-		ServerURL: in.ServerUrl,
+		Params:    in.Params,
+		ServerURL: deref(in.ServerUrl),
+	}
+	if t := in.Target; t != nil {
+		req.Target = deploy.Target{
+			ProxmoxID: t.ProxmoxId, ImageVMID: t.ImageVmid, Storage: deref(t.Storage),
+			Bridge: deref(t.Bridge), VLAN: nullablePtr(t.Vlan), Network: string(t.Network),
+			FirstIP: deref(t.FirstIp), Gateway: deref(t.Gateway), DNS: deref(t.Dns),
+			SSHKeys: deref(t.SshKeys),
+		}
+	}
+	if in.ExistingNodes != nil {
+		for _, e := range *in.ExistingNodes {
+			req.Existing = append(req.Existing, deploy.ExistingNode{NodeID: e.NodeId, Role: e.Role})
+		}
 	}
 	if req.Params == nil {
 		req.Params = map[string]any{}

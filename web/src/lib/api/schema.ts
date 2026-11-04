@@ -10506,9 +10506,17 @@ export interface components {
             params: {
                 [key: string]: unknown;
             };
-            target: components["schemas"]["DeployTarget"];
-            /** @description Het adres waarmee de nieuwe nodes ClusterForge bereiken */
-            server_url: string;
+            target?: components["schemas"]["DeployTarget"];
+            /** @description Het adres waarmee de nieuwe nodes ClusterForge bereiken; niet bij existing_nodes */
+            server_url?: string;
+            /** @description Bestaande nodes (zoals CT's met een agent) per rol, in plaats van nieuwe VM's. Ze zitten nog in geen cluster; target en server_url vallen dan weg. Per rol precies zoveel als de template vraagt. */
+            existing_nodes?: components["schemas"]["DeployExistingNode"][];
+            database?: components["schemas"]["DeployDatabase"];
+        };
+        DeployExistingNode: {
+            /** Format: uuid */
+            node_id: string;
+            role: string;
             database?: components["schemas"]["DeployDatabase"];
         };
         /**
