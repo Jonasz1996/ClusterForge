@@ -23,6 +23,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/Jonasz1996/clusterforge/internal/events"
+	"github.com/Jonasz1996/clusterforge/internal/galera"
 	"github.com/Jonasz1996/clusterforge/internal/jobs"
 	"github.com/Jonasz1996/clusterforge/internal/store"
 	"github.com/Jonasz1996/clusterforge/internal/templates"
@@ -48,13 +49,15 @@ var manageTitles = map[string]string{ManageResync: "Opnieuw synchroniseren", Man
 
 // resyncStep stopt MariaDB, haalt de positie weg zodat Galera de node
 // helemaal opnieuw vult, en start MariaDB zonder te wachten: systemd wacht
-// anders tot de hele kopie klaar is. Het merkteken van de taak zorgt dat
+// anders tot de hele kopie klaar is. Zonder grastate.dat weigert Galera
+// een nieuw cluster niet meer, dus een achtergebleven vlag van
+// galera_new_cluster gaat eerst weg. Het merkteken van de taak zorgt dat
 // het één keer gebeurt, ook als de taak na een herstart verder gaat.
 func resyncStep(jobID uuid.UUID) templates.Step {
 	marker := "/var/lib/clusterforge/galera-resync-" + jobID.String()
 	return templates.Step{Step: protocol.Step{Command: &protocol.CommandStep{
 		Run: "rm -f /var/lib/clusterforge/galera-resync-* && systemctl stop mariadb && rm -f /var/lib/mysql/grastate.dat && touch " + marker +
-			" && systemctl start --no-block mariadb",
+			" && " + galera.ClearNewCluster + " && systemctl start --no-block mariadb",
 		Creates: marker,
 	}}, Title: "MariaDB stoppen, de positie weghalen en weer starten"}
 }

@@ -46,8 +46,17 @@ INSERT INTO db_databases (node_id, engine, name, size_bytes, tables) VALUES ($1,
 
 -- name: ListDBServers :many
 -- Alle databaseservers met hun node en cluster, voor het menu Databases.
+-- arbiter: de node is de scheidsrechter van het onderdeel van ClusterForge
+-- voor deze engine in zijn cluster, ook als dat nog niet uitgerold is; het
+-- onderdeel zet daar geen databaseserver.
 SELECT d.node_id, n.hostname, n.cluster_id, c.name AS cluster_name, c.slug AS cluster_slug, c.environment AS cluster_environment,
-       d.engine, d.unit, d.active, d.running, d.version, d.role, d.status, d.databases_total, d.error, d.error_kind, d.synced_at, d.ok_at
+       d.engine, d.unit, d.active, d.running, d.version, d.role, d.status, d.databases_total, d.error, d.error_kind, d.synced_at, d.ok_at,
+       EXISTS (
+         SELECT 1 FROM cluster_components cc
+         CROSS JOIN LATERAL jsonb_array_elements(cc.spec -> 'nodes') e
+         WHERE cc.cluster_id = n.cluster_id AND cc.engine = d.engine
+           AND e ->> 'role' = 'arbiter' AND (e ->> 'node_id')::uuid = d.node_id
+       )::boolean AS arbiter
 FROM db_servers d
 JOIN nodes n ON n.id = d.node_id
 LEFT JOIN clusters c ON c.id = n.cluster_id

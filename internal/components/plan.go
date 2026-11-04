@@ -290,7 +290,7 @@ func (s *Service) plan(ctx context.Context, clusterID uuid.UUID, req Request) (P
 		}
 		if req.Engine == protocol.DBMariaDB && n.Role == RoleData && n.Index == 1 && err == nil && !primaryIn(status, c.Slug) {
 			// Zo toont het plan dat de eerste node het cluster begint.
-			if b, err := bootstrap(steps, c.Slug, false); err == nil {
+			if b, err := bootstrap(steps, c.Slug, false, false); err == nil {
 				steps = b
 			}
 		}

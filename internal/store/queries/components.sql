@@ -74,6 +74,15 @@ JOIN clusters c ON c.id = cc.cluster_id
 WHERE cc.applied_revision IS NOT NULL
 ORDER BY c.name, cc.engine;
 
+-- name: ListUnfinishedComponents :many
+-- De onderdelen die nog nooit helemaal uitgerold zijn, met de laatste taak
+-- die ze toepaste, voor Zelfherstel.
+SELECT cc.id, cc.cluster_id, cc.engine, j.status AS job_status, j.error AS job_error
+FROM cluster_components cc
+LEFT JOIN jobs j ON j.id = cc.job_id
+WHERE cc.applied_revision IS NULL
+ORDER BY cc.cluster_id, cc.engine;
+
 -- name: ListDBComponents :many
 -- De toegepaste onderdelen met een database van deze soort, voor een
 -- verhuizing.

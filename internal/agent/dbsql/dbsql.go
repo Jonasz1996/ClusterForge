@@ -8,7 +8,7 @@ package dbsql
 // information_schema.
 const (
 	MariaVariables = "SHOW GLOBAL VARIABLES WHERE Variable_name IN " +
-		"('version', 'wsrep_on', 'wsrep_cluster_name', 'max_connections', 'read_only')"
+		"('version', 'wsrep_on', 'wsrep_cluster_name', 'max_connections', 'read_only', 'port')"
 	MariaStatus = "SHOW GLOBAL STATUS WHERE Variable_name IN ('Threads_connected', 'Uptime', " +
 		"'wsrep_cluster_size', 'wsrep_cluster_status', 'wsrep_cluster_state_uuid', 'wsrep_local_state', " +
 		"'wsrep_local_state_comment', 'wsrep_ready', 'wsrep_incoming_addresses')"

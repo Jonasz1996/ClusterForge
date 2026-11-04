@@ -73,16 +73,17 @@ function GroupCard({ g, heal }: { g: DatabaseGroup; heal?: HealReport }) {
   const title = (
     <span className="flex flex-wrap items-center gap-2">
       <span>
-        {engineLabel[g.engine]}{" "}
-        {g.cluster_id ? (
+        {engineLabel[g.engine]}
+        {/* Een losse server in een cluster, zoals een MariaDB op de scheidsrechter, heet naar zijn node. */}
+        {(g.node_id || !g.cluster_id) && <> op {g.servers[0]?.hostname}</>}
+        {g.cluster_id && (
           <>
-            van{" "}
+            {" "}
+            {g.node_id ? "in" : "van"}{" "}
             <Link href={`/clusters/detail?id=${g.cluster_id}`} className="text-brand-700 hover:underline dark:text-sky-300">
               {g.cluster_name}
             </Link>
           </>
-        ) : (
-          <>op {g.servers[0]?.hostname}</>
         )}
       </span>
       <Badge tone={health.tone}>{health.label}</Badge>

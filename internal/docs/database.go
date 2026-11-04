@@ -92,7 +92,8 @@ func database(c *Cluster, _ Opts) string {
 		d.p("Staat de database van een app van dit cluster nog op een andere server, zoals een gedeeld databasecluster, verhuis haar dan naar " + target + ".")
 		d.steps([]string{
 			"Kies in ClusterForge bij Databases **Verhuizen…** naast de database. Het plan verandert niets en " + block + ".",
-			"**Proefverhuizing starten** zet een kopie naast de bestaande en telt de rijen; de app merkt er niets van. Zo weet je hoe lang de app straks in onderhoud moet.",
+			"**Proefverhuizing starten** zet een kopie naast de bestaande en telt de rijen; de app merkt er niets van. Zo weet je hoe lang de app straks in onderhoud moet. " +
+				"Is de nieuwe MariaDB ouder dan de oude, dan kan de verhuizing pas na een geslaagde proef: die stopt bij de eerste fout die de oudere versie geeft.",
 			"Zet de app in onderhoud en kies **Verhuizing starten**. De database komt onder dezelfde naam, met dezelfde gebruikers en wachtwoorden, op " + esc(c.Name) + ".",
 			"Wijs de app naar " + addr + ", met dezelfde gebruiker en hetzelfde wachtwoord, en haal het onderhoud eraf. ClusterForge zet de oude database dan op slot: alleen nog lezen.",
 			"Zeven dagen nadat niemand de oude database nog gebruikte, kies je **Oude database afbouwen**: een laatste dump op het oude cluster, en daarna gaan de database en de gebruikers die niets anders hebben weg.",
@@ -195,10 +196,14 @@ func galeraRunbooks(d *doc, c *Cluster, cp DBComponent, db string) {
 		"Na een gewone stop van alle nodes, zoals een herstart van de Proxmox-host, begint Galera niet vanzelf: elke node wacht op een cluster dat er niet is.",
 		auto, "Kan ClusterForge er niet bij, doe het dan zo, als root:")
 	d.p("**1.** Kijk op " + all + " tot welke transactie elke node de data heeft. Staat er `seqno: -1`, dan stopte MariaDB niet netjes; " +
-		code("galera_recovery") + " haalt de positie dan uit InnoDB, alleen als MariaDB stilstaat.")
-	d.code("sh", "cat /var/lib/mysql/grastate.dat\ngalera_recovery")
-	d.p("**2.** Begin het cluster op de node met de hoogste seqno, en alleen daar: twee nodes die elk een cluster beginnen, geven twee clusters met dezelfde naam.")
-	d.code("sh", "sed -i 's/^safe_to_bootstrap:.*/safe_to_bootstrap: 1/' /var/lib/mysql/grastate.dat\ngalera_new_cluster")
+		code("galera_recovery") + " haalt de positie dan uit InnoDB, alleen als MariaDB stilstaat. Ontbreekt dat script, zoals op MariaDB 12.3.2 zonder het pakket " +
+		code("mariadb-server-galera") + ", dan doet de laatste regel hetzelfde.")
+	d.code("sh", "cat /var/lib/mysql/grastate.dat\ngalera_recovery\nmariadbd --user=mysql --wsrep-recover --disable-log-error 2>&1 | grep 'Recovered position'")
+	d.p("**2.** Begin het cluster op de node met de hoogste seqno, en alleen daar: twee nodes die elk een cluster beginnen, geven twee clusters met dezelfde naam. " +
+		"Ontbreekt " + code("galera_new_cluster") + ", installeer dan eerst " + code("mariadb-server-galera") + " in de versie van " + code("mariadb-server") +
+		"; dat geldt ook voor elke node die daarna aansluit, want zonder dat pakket sluit een node niet aan.")
+	d.code("sh", "command -v galera_new_cluster || apt-get install mariadb-server-galera=$(dpkg-query -W -f='${Version}' mariadb-server)\n"+
+		"sed -i 's/^safe_to_bootstrap:.*/safe_to_bootstrap: 1/' /var/lib/mysql/grastate.dat\ngalera_new_cluster")
 	d.p("**3.** Start MariaDB op de andere nodes, één voor één; elke node haalt wat hij mist bij de eerste.")
 	d.code("sh", "systemctl start mariadb")
 	members := len(cp.Data) + len(cp.Arbiters)

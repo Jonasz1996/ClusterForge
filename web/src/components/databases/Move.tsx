@@ -77,6 +77,14 @@ export function FindingItem({ f }: { f: ComponentFinding }) {
         <Badge tone={l.tone}>{l.label}</Badge> {f.message}
       </p>
       {f.command && <CopyBlock text={f.command} />}
+      {/* De knop Agent bijwerken staat op de pagina van de node. */}
+      {f.code === "agent_behind" && f.node_id && (
+        <p>
+          <Link href={`/nodes/detail?id=${f.node_id}`} className="underline">
+            Naar {f.hostname}
+          </Link>
+        </p>
+      )}
     </li>
   );
 }

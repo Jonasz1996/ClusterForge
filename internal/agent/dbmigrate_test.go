@@ -11,10 +11,12 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -139,7 +141,7 @@ func dockerAgent(t *testing.T, container string) *Agent {
 		}
 		return append(opts, args[1:]...)
 	}
-	a := &Agent{Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	a := &Agent{SpoolDir: filepath.Join(t.TempDir(), "verhuizing"), Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	a.Exec = func(ctx context.Context, name string, args ...string) ([]byte, error) {
 		switch name {
 		case "systemctl":
@@ -243,7 +245,7 @@ func TestDBMigrateRealMariaDB(t *testing.T) {
 	srcIP, dstIP := containerIP(t, src), containerIP(t, dst)
 	cleanup := func() {
 		sql(src, "DROP DATABASE IF EXISTS "+db+"; DROP USER IF EXISTS '"+user+"'@'"+dstIP+"'")
-		sql(dst, "DROP DATABASE IF EXISTS "+target+"; DROP DATABASE IF EXISTS "+target+"2")
+		sql(dst, "DROP DATABASE IF EXISTS "+target+"; DROP DATABASE IF EXISTS "+target+"2; DROP DATABASE IF EXISTS "+target+"3")
 	}
 	cleanup()
 	t.Cleanup(cleanup)
@@ -264,6 +266,21 @@ func TestDBMigrateRealMariaDB(t *testing.T) {
 	want := checksum(src, db)
 
 	old, nw := dockerAgent(t, src), dockerAgent(t, dst)
+	// Wat mariadb-dump van de nieuwe server schreef: zonder transactie per
+	// tabel, anders past een grote tabel niet in één writeset van Galera.
+	var dumpMu sync.Mutex
+	var dumped bytes.Buffer
+	stream := nw.Stream
+	nw.Stream = func(ctx context.Context, in io.Reader, out io.Writer, name string, args ...string) error {
+		if name == "mariadb-dump" {
+			out = io.MultiWriter(out, writerFunc(func(p []byte) (int, error) {
+				dumpMu.Lock()
+				defer dumpMu.Unlock()
+				return dumped.Write(p)
+			}))
+		}
+		return stream(ctx, in, out, name, args...)
+	}
 	info := migrate(t, old, protocol.DBMigrateRequest{Action: protocol.DBMigrateInspect, Database: db}).Info
 	if !info.Exists || info.Charset != "utf8mb4" || info.Collation != "utf8mb4_unicode_ci" || len(info.Tables) != 3 ||
 		info.Views != 1 || info.Routines != 1 || info.Triggers != 1 || info.Events != 1 {
@@ -323,6 +340,12 @@ func TestDBMigrateRealMariaDB(t *testing.T) {
 	if got := checksum(dst, target); got != want {
 		t.Fatalf("na de import: %s, wil %s", got, want)
 	}
+	dumpMu.Lock()
+	text := dumped.String()
+	dumpMu.Unlock()
+	if !strings.Contains(text, "INSERT INTO `files`") || strings.Contains(text, "AUTOCOMMIT=0") {
+		t.Errorf("de dump zet de rijen in één transactie per tabel:\n%s", text)
+	}
 	if got := sql(dst, "SELECT DEFAULT_COLLATION_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = '"+target+"'"); got != "utf8mb4_unicode_ci" {
 		t.Errorf("collatie: %s", got)
 	}
@@ -338,6 +361,22 @@ func TestDBMigrateRealMariaDB(t *testing.T) {
 	migrate(t, nw, pull)
 	if r := waitPull(t, nw, pull.Target); !strings.Contains(r.Error, "Access denied") {
 		t.Errorf("na revoke: %+v", r)
+	}
+
+	// Zonder events krijgt de tijdelijke gebruiker geen EVENT, en dan vraagt
+	// de server een dump zonder --events: SHOW EVENTS vraagt dat recht.
+	sql(src, "DROP EVENT "+db+".nachtelijk")
+	if i := migrate(t, old, protocol.DBMigrateRequest{Action: protocol.DBMigrateInspect, Database: db}).Info; i.Events != 0 {
+		t.Fatalf("inspect zonder events: %+v", i)
+	}
+	migrate(t, old, protocol.DBMigrateRequest{Action: protocol.DBMigrateGrant, Database: db, User: user, Hosts: []string{dstIP}, Password: password})
+	if grants := sql(src, "SHOW GRANTS FOR '"+user+"'@'"+dstIP+"'"); strings.Contains(grants, "EVENT") {
+		t.Errorf("rechten zonder events: %s", grants)
+	}
+	pull.Target, pull.SkipEvents = target+"3", true
+	migrate(t, nw, pull)
+	if r := waitPull(t, nw, pull.Target); r.Error != "" || r.Events != 0 || len(r.Tables) != 3 {
+		t.Errorf("zonder events: %+v", r)
 	}
 }
 
@@ -472,7 +511,8 @@ func TestDBMigrate(t *testing.T) {
 	}
 	old.Network, nw.Network = network, network
 	agent := func(h *agenttest.Host) *Agent {
-		return &Agent{Exec: h.Exec, ExecStdin: h.ExecStdin, Stream: h.Stream, Dial: h.Dial, Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
+		return &Agent{Exec: h.Exec, ExecStdin: h.ExecStdin, Stream: h.Stream, Dial: h.Dial, SpoolDir: filepath.Join(t.TempDir(), "verhuizing"),
+			Log: slog.New(slog.NewTextHandler(io.Discard, nil))}
 	}
 	a, b := agent(old), agent(nw)
 
@@ -510,11 +550,17 @@ func TestDBMigrate(t *testing.T) {
 	pull := protocol.DBMigrateRequest{
 		Action: protocol.DBMigratePull, Database: "nextcloud", Target: "nextcloud_proef", User: user, Password: password,
 		Host: "10.0.20.180", Port: 3306, Charset: "utf8mb4", Collation: "utf8mb4_unicode_ci", Total: info.SizeBytes,
+		SkipEvents: info.Events == 0,
 	}
 	migrate(t, b, pull)
 	r := waitPull(t, b, "nextcloud_proef")
 	if r.Error != "" || len(r.Tables) != 3 || r.Triggers != 1 || r.Imported.IsZero() || r.Bytes == 0 {
 		t.Fatalf("import: %+v", r)
+	}
+	for _, c := range nw.Calls() {
+		if strings.HasPrefix(c, "mariadb-dump") && strings.Contains(c, "--events") {
+			t.Errorf("dump met --events zonder events of recht EVENT: %s", c)
+		}
 	}
 	for _, c := range r.Tables {
 		if c.Source != 42 || c.Target != 42 {
@@ -562,3 +608,7 @@ func TestDBMigrate(t *testing.T) {
 		t.Errorf("andere gebruiker weghalen: %s", e)
 	}
 }
+
+type writerFunc func([]byte) (int, error)
+
+func (f writerFunc) Write(p []byte) (int, error) { return f(p) }

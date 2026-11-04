@@ -343,7 +343,8 @@ const (
 	DBFromRunning = "running"
 	// DBFromGrastate: grastate.dat, na een gewone stop.
 	DBFromGrastate = "grastate"
-	// DBFromRecovery: galera_recovery, na een crash.
+	// DBFromRecovery: uit InnoDB, na een crash; DBPositionResult.Via zegt
+	// waarmee.
 	DBFromRecovery = "recovery"
 )
 
@@ -392,8 +393,8 @@ const (
 	// DBTimeout is hoe lang een verzoek op de agent mag duren.
 	DBTimeout = 30 * time.Second
 	// DBRecoverTimeout is hoe lang een DBPosition met Recover mag duren:
-	// galera_recovery start mariadbd even zonder netwerk, en InnoDB kan na
-	// een crash lang bezig zijn.
+	// galera_recovery (of mariadbd --wsrep-recover) start mariadbd even
+	// zonder netwerk, en InnoDB kan na een crash lang bezig zijn.
 	DBRecoverTimeout = 10 * time.Minute
 )
 
@@ -454,6 +455,10 @@ type DBMigrateRequest struct {
 	// Total is ongeveer hoeveel SQL er komt, voor de voortgang; 0 als dat
 	// onbekend is.
 	Total int64 `json:"total,omitempty"`
+	// SkipEvents: de oude database heeft geen events, dus de tijdelijke
+	// gebruiker heeft geen recht EVENT en pull dumpt zonder --events.
+	// Zonder dat recht stopt mariadb-dump --events bij SHOW EVENTS.
+	SkipEvents bool `json:"skip_events,omitempty"`
 	// Secret: accounts geeft ook de hash van elk wachtwoord.
 	Secret bool `json:"secret,omitempty"`
 	// Accounts zijn de gebruikers bij adopt, lock en unlock: één per host.
@@ -581,6 +586,10 @@ type DBMigrateRun struct {
 	// Bytes is de SQL die al binnen is, Total wat er ongeveer komt.
 	Bytes int64 `json:"bytes"`
 	Total int64 `json:"total"`
+	// Buffered is wat daarvan op schijf op de import wacht: de agent leest
+	// de dump altijd door, ook als de import even stilstaat. 0 bij een
+	// agent van voor de buffer.
+	Buffered int64 `json:"buffered,omitempty"`
 	// Tables zijn de rijen per tabel aan beide kanten, na de import.
 	Tables []DBMigrateCount `json:"tables,omitempty"`
 	// Views, Routines, Triggers en Events staan in de nieuwe database.
@@ -728,9 +737,11 @@ type DBGrant struct {
 	Privileges []string `json:"privileges"`
 }
 
-// DBPositionRequest: Recover laat de agent galera_recovery draaien als
-// MariaDB stilstaat en grastate.dat geen seqno heeft. Zonder Recover is
-// de positie dan onbekend.
+// DBPositionRequest: Recover laat de agent de positie uit InnoDB halen
+// als MariaDB stilstaat en grastate.dat geen seqno heeft of ontbreekt: met
+// galera_recovery, of zonder dat script met mariadbd --wsrep-recover.
+// Zonder Recover is de positie dan onbekend. Een agent van voor
+// NeverInCluster leest InnoDB niet als grastate.dat ontbreekt.
 type DBPositionRequest struct {
 	Recover bool `json:"recover"`
 }
@@ -755,8 +766,21 @@ type DBPositionResult struct {
 	// bij een agent ouder dan DBMetricsSince.
 	UptimeSeconds int64 `json:"uptime_seconds,omitempty"`
 	// From is DBFromRunning, DBFromGrastate of DBFromRecovery.
-	From  string `json:"from,omitempty"`
+	From string `json:"from,omitempty"`
+	// Via is bij DBFromRecovery het programma dat de positie las:
+	// galera_recovery, of mariadbd --wsrep-recover als dat script
+	// ontbreekt. Leeg bij een oudere agent.
+	Via   string `json:"via,omitempty"`
 	Error string `json:"error,omitempty"`
+}
+
+// NeverInCluster is true als InnoDB zegt dat de node nog nooit in een
+// Galera-cluster zat: de agent las de positie met recovery, en die heeft
+// geen geschiedenis. Alleen grastate.dat zegt dat niet zeker: na een
+// teruggezette back-up ontbreekt het, en Galera zet er zelf nullen in als
+// een node een volledige kopie vraagt.
+func (p *DBPositionResult) NeverInCluster() bool {
+	return p != nil && p.From == DBFromRecovery && p.Error == "" && p.Seqno < 0 && strings.Trim(p.UUID, "0-") == ""
 }
 
 // DBTrackRequest zegt welk VIP keepalived met de database moet bewaken.
@@ -830,6 +854,8 @@ type DBServer struct {
 	Connections    int    `json:"connections"`
 	MaxConnections int    `json:"max_connections"`
 	UptimeSeconds  int64  `json:"uptime_seconds"`
+	// Port is waar MariaDB luistert; 0 bij een oudere agent of PostgreSQL.
+	Port int `json:"port,omitempty"`
 
 	Galera  *DBGalera  `json:"galera,omitempty"`
 	Patroni *DBPatroni `json:"patroni,omitempty"`

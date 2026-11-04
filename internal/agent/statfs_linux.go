@@ -3,6 +3,7 @@ package agent
 import (
 	"io/fs"
 	"os"
+	"path/filepath"
 	"syscall"
 )
 
@@ -37,4 +38,25 @@ func allocate(path string, n int64) error {
 		return writeZeros(path, n)
 	}
 	return f.Close()
+}
+
+// sameDevice zegt of a en b op hetzelfde bestandssysteem liggen; een pad
+// dat er nog niet is, telt via zijn bovenliggende map. Bij twijfel ja.
+func sameDevice(a, b string) bool {
+	dev := func(p string) (uint64, bool) {
+		for {
+			var st syscall.Stat_t
+			if err := syscall.Stat(p, &st); err == nil {
+				return st.Dev, true
+			}
+			parent := filepath.Dir(p)
+			if parent == p {
+				return 0, false
+			}
+			p = parent
+		}
+	}
+	da, oka := dev(a)
+	db, okb := dev(b)
+	return !oka || !okb || da == db
 }

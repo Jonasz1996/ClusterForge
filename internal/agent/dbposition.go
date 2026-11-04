@@ -3,7 +3,7 @@ package agent
 // Waar een Galera-node staat, voor het opnieuw beginnen van het cluster na
 // een volledige uitval. Draait MariaDB, dan zegt Galera het zelf. Staat hij
 // stil, dan staat de positie na een gewone stop in grastate.dat; na een
-// crash niet, en dan haalt galera_recovery haar uit InnoDB. Dat start
+// crash niet, en dan haalt recoverPosition haar uit InnoDB. Dat start
 // mariadbd even zonder netwerk en mag dus alleen als MariaDB echt stilstaat.
 
 import (
@@ -40,7 +40,7 @@ func (a *Agent) dbPosition(ctx context.Context, req *protocol.DBPositionRequest)
 		vars := keyValues(rows)
 		p.Running = true
 		if !strings.EqualFold(vars["wsrep_on"], "ON") {
-			p.Error = "MariaDB draait zonder Galera"
+			p.Error = galera.NoWsrep
 			return res
 		}
 		rows, err := a.maria(ctx, false, dbsql.MariaPosition)
@@ -66,36 +66,37 @@ func (a *Agent) dbPosition(ctx context.Context, req *protocol.DBPositionRequest)
 	b, err := os.ReadFile(path)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
-		p.Error = "deze node was nog nooit in een Galera-cluster: " + galera.GrastateFile + " ontbreekt"
-		return res
+		// Nog nooit met Galera gestart, of een teruggezette back-up: dat
+		// zegt alleen InnoDB.
+		if !req.Recover || u.Active != "inactive" && u.Active != "failed" {
+			p.Error = galera.NoGrastate
+			return res
+		}
 	case err != nil:
 		p.Error = err.Error()
 		return res
+	default:
+		pos, err := galera.ParseGrastate(string(b))
+		if err != nil {
+			p.Error = err.Error()
+			return res
+		}
+		p.UUID, p.Seqno, p.SafeToBootstrap, p.From = pos.UUID, pos.Seqno, pos.SafeToBootstrap, protocol.DBFromGrastate
+		if pos.Seqno >= 0 {
+			return res
+		}
+		// Na een crash.
+		switch {
+		case !req.Recover:
+			p.Error = "MariaDB stopte niet gewoon; de positie staat alleen nog in InnoDB"
+			return res
+		case u.Active != "inactive" && u.Active != "failed":
+			p.Error = "MariaDB is " + u.Active + "; de positie lezen kan pas als hij stilstaat"
+			return res
+		}
 	}
-	pos, err := galera.ParseGrastate(string(b))
-	if err != nil {
-		p.Error = err.Error()
-		return res
-	}
-	p.UUID, p.Seqno, p.SafeToBootstrap, p.From = pos.UUID, pos.Seqno, pos.SafeToBootstrap, protocol.DBFromGrastate
-	if pos.Seqno >= 0 {
-		return res
-	}
-	// Na een crash.
-	switch {
-	case !req.Recover:
-		p.Error = "MariaDB stopte niet gewoon; de positie staat alleen nog in InnoDB"
-		return res
-	case u.Active != "inactive" && u.Active != "failed":
-		p.Error = "MariaDB is " + u.Active + "; de positie lezen kan pas als hij stilstaat"
-		return res
-	}
-	out, err := a.dbRun(ctx, "galera_recovery")
-	if err != nil {
-		p.Error = "galera_recovery: " + dbError(err)
-		return res
-	}
-	r, err := galera.ParseRecovered(string(out))
+	r, via, err := a.recoverPosition(ctx)
+	p.Via = via
 	if err != nil {
 		p.Error = err.Error()
 		return res

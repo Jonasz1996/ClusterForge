@@ -181,6 +181,36 @@ func TestDatabaseMove(t *testing.T) {
 		t.Fatalf("bevindingen verhuizing: %s %v", got, p.MoveBlocked)
 	}
 
+	// De dump en de import draaien in de agent van nc1. Is dat niet die van
+	// de server, dan mist hij haar fixes: proef en verhuizing wachten tot hij
+	// bijgewerkt is, en het plan zegt waar de knop staat.
+	offerAgent(t, e, "nieuwe agent")
+	p = plan()
+	behind := ""
+	for _, f := range p.Findings {
+		if f.Code == "agent_behind" {
+			behind = f.Level + " " + f.Message
+		}
+	}
+	if !p.Blocked || !p.MoveBlocked || !strings.HasPrefix(behind, "blocked de agent op nc1 (") ||
+		!strings.Contains(behind, "is niet die van deze server: een andere build dan de agent van de server. De dump en de import draaien in die agent") ||
+		!strings.HasSuffix(behind, "Werk hem eerst bij: Nodes → nc1 → kaart Agent → Agent bijwerken, of wacht tot ClusterForge dat vanzelf doet") {
+		t.Fatalf("agent achter: %s %v %v %q", p.codes(), p.Blocked, p.MoveBlocked, behind)
+	}
+	for path, body := range map[string]map[string]any{
+		"/api/v1/databases/migration/trial": {"source": source, "database": "nextcloud", "component_id": lab.cid},
+		"/api/v1/databases/migration/move":  {"source": source, "database": "nextcloud", "component_id": lab.cid, "force": true},
+	} {
+		var ae apiErr
+		if s := c.do("POST", path, body, &ae); s != http.StatusConflict || !strings.Contains(ae.Message, "Nodes → nc1 → kaart Agent → Agent bijwerken") {
+			t.Fatalf("%s met een oude agent: %d %+v", path, s, ae)
+		}
+	}
+	offerSelf(t, e)
+	if p = plan(); p.Blocked || p.MoveBlocked || strings.Contains(p.codes(), "agent_behind") {
+		t.Fatalf("agent bij: %s %v %v", p.codes(), p.Blocked, p.MoveBlocked)
+	}
+
 	// Een kijker verhuist niet; met de app nog verbonden kan het niet
 	// zonder force.
 	e.createUser("kijker", "een-lang-wachtwoord", store.UserRoleViewer)
@@ -485,4 +515,124 @@ func sortedCopy(v []string) []string {
 	out := slices.Clone(v)
 	slices.Sort(out)
 	return out
+}
+
+// TestDatabaseMoveDowngrade: Jonas' oude Galera draait MariaDB 12.2 van
+// MariaDB.org, de nieuwe op nc1 tot nc3 de 11.8 van Debian 13. De proef mag,
+// met een waarschuwing; de verhuizing pas na een geslaagde proef met
+// dezelfde versies. Een fout bij de import maakt de proef rood. Zoals bij
+// Jonas luistert MariaDB op 3307, achter een HAProxy op 3306: de
+// verhuizing leest rechtstreeks van 3307.
+func TestDatabaseMoveDowngrade(t *testing.T) {
+	lab := newGaleraLab(t)
+	e, c, g := lab.e, lab.c, lab.g
+	ctx := context.Background()
+	var db1n node
+	if s := c.do("POST", "/api/v1/nodes", map[string]any{"hostname": "db1", "primary_ip": "10.0.20.181"}, &db1n); s != http.StatusCreated {
+		t.Fatalf("db1: %d", s)
+	}
+	var db1 *agenttest.Host
+	startAgentWith(t, e, c, db1n.ID, strings.Repeat("d", 32), &addrs{}, func(ag *agent.Agent, root string) {
+		db1 = agenttest.NewHost(root, "10.0.20.181")
+		db1.SetUnit("mariadb", agenttest.Unit{Enabled: true, Active: true})
+		db1.MariaDB = &agenttest.MariaDB{
+			Version: "12.2.2-MariaDB-deb13", MaxConnections: 151, Uptime: 86400, Users: agenttest.DebianUsers(), Port: 3307,
+			Databases: []agenttest.Database{{Name: "nextcloud", Size: 300 << 20, Tables: 6, Rows: 100}},
+		}
+		ag.Exec, ag.ExecStdin, ag.Stream, ag.Root, ag.Collector.Run = db1.Exec, db1.ExecStdin, db1.Stream, root, db1.Exec
+	})
+	network := func(addr string) *agenttest.Host {
+		if addr == "10.0.20.181:3307" {
+			return db1
+		}
+		return nil
+	}
+	for _, h := range g.hosts {
+		h.Locked(func() { h.Network = network })
+	}
+	nc1 := g.hosts["nc1"]
+	source := "mariadb/node/" + db1n.ID
+	eventually(t, "db1 onder Databases", func() bool {
+		if err := e.dbs.SyncAll(ctx); err != nil {
+			t.Fatal(err)
+		}
+		var n int
+		_ = e.pool.QueryRow(ctx, "SELECT count(*) FROM db_databases WHERE node_id = $1", db1n.ID).Scan(&n)
+		return n == 1
+	})
+	planURL := "/api/v1/databases/migration?source=" + url.QueryEscape(source) + "&database=nextcloud&component=" + lab.cid
+	plan := func() movePlanView {
+		t.Helper()
+		var p movePlanView
+		if s := c.do("GET", planURL, nil, &p); s != http.StatusOK {
+			t.Fatalf("plan: %d", s)
+		}
+		return p
+	}
+	finding := func(fs []struct{ Level, Code, Message string }, code string) string {
+		for _, f := range fs {
+			if f.Code == code {
+				return f.Level + ": " + f.Message
+			}
+		}
+		return ""
+	}
+	req := map[string]any{"source": source, "database": "nextcloud", "component_id": lab.cid}
+	trial := func() job {
+		t.Helper()
+		var j job
+		var ae apiErr
+		if s := c.do("POST", "/api/v1/databases/migration/trial", req, &j); s != http.StatusAccepted {
+			c.do("POST", "/api/v1/databases/migration/trial", req, &ae)
+			t.Fatalf("proef: %d %+v", s, ae)
+		}
+		return waitJobLong(t, c, j.ID)
+	}
+
+	// Het plan: een waarschuwing voor de proef, de verhuizing staat dicht.
+	p := plan()
+	if f := finding(p.Findings, "downgrade"); p.Blocked || !strings.HasPrefix(f, "warning: de nieuwe MariaDB (11.8 op nc1) is ouder dan de oude (12.2 op db1)") ||
+		!strings.Contains(f, "pas na een geslaagde proef") {
+		t.Fatalf("plan: %s %v %s", p.codes(), p.Blocked, f)
+	}
+	if f := finding(p.MoveFindings, "downgrade_trial"); !p.MoveBlocked || !strings.Contains(f, "pas na een geslaagde proef van MariaDB 12.2 naar 11.8 op Nextcloud") {
+		t.Fatalf("verhuizing zonder proef: %s %v %s", p.moveCodes(), p.MoveBlocked, f)
+	}
+	var ae apiErr
+	if s := c.do("POST", "/api/v1/databases/migration/move", req, &ae); s != http.StatusConflict || !strings.Contains(ae.Message, "geslaagde proef") {
+		t.Fatalf("verhuizing zonder proef: %d %+v", s, ae)
+	}
+
+	// 11.8 kent iets uit de dump van 12.2 niet: de proef wordt rood, en de
+	// verhuizing blijft dicht.
+	const syntax = "ERROR 1064 (42000) at line 57: You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version"
+	nc1.Locked(func() { nc1.MariaDB.ImportError = syntax })
+	j := trial()
+	if j.Status != "failed" || !strings.Contains(j.Error, "importeren: ") || !strings.Contains(j.Error, "ERROR 1064 (42000) at line 57") {
+		t.Fatalf("proef met fout: %s %s", j.Status, j.Error)
+	}
+	if !strings.Contains(strings.Join(stepLogs(j), "\n"), "Let op: de nieuwe MariaDB (11.8 op nc1) is ouder dan de oude (12.2 op db1)") {
+		t.Errorf("waarschuwing in de controle:\n%s", strings.Join(stepLogs(j), "\n"))
+	}
+	p = plan()
+	if f := finding(p.MoveFindings, "downgrade_trial"); !p.MoveBlocked || !strings.Contains(f, "de laatste proef van MariaDB 12.2 naar 11.8 mislukte") {
+		t.Fatalf("na een mislukte proef: %s", f)
+	}
+
+	// Zonder fout slaagt de proef, en de verhuizing kan.
+	nc1.Locked(func() { nc1.MariaDB.ImportError = "" })
+	if j = trial(); j.Status != "succeeded" {
+		t.Fatalf("proef: %s %s", j.Status, j.Error)
+	}
+	p = plan()
+	if p.MoveBlocked || finding(p.MoveFindings, "downgrade_trial") != "" || finding(p.MoveFindings, "no_trial") != "" {
+		t.Fatalf("na een geslaagde proef: %s %v", p.moveCodes(), p.MoveBlocked)
+	}
+
+	// De oude server kreeg 12.3: die proef zegt niets over 12.3.
+	db1.Locked(func() { db1.MariaDB.Version = "12.3.2-MariaDB-deb13" })
+	p = plan()
+	if f := finding(p.MoveFindings, "downgrade_trial"); !p.MoveBlocked || !strings.Contains(f, "van MariaDB 12.3 naar 11.8") {
+		t.Fatalf("na een nieuwere oude server: %s %v %s", p.moveCodes(), p.MoveBlocked, f)
+	}
 }

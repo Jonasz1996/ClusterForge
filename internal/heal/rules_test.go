@@ -1,6 +1,7 @@
 package heal
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -128,6 +129,184 @@ func TestDiagnoseRestartAll(t *testing.T) {
 	}
 }
 
+func TestDiagnoseGaleraPackage(t *testing.T) {
+	// Alles gestopt na een herstart; Node1 ging naar MariaDB 12.3.2 zonder
+	// mariadb-server-galera.
+	f := jonas()
+	for i, id := range f.ids {
+		n := f.in.Nodes[id]
+		n.Inspect.Galera.ClusterAddress = "gcomm://192.168.10.181,192.168.10.182,192.168.10.183"
+		n.Inspect.Galera.NodeAddress = ""
+		n.Inspect.Galera.PeerTimeouts = nil
+		n.Inspect.Active, n.Inspect.Processes, n.Inspect.Enabled = "inactive", nil, "enabled"
+		if i == 0 {
+			n.Inspect.Galera.MissingTools = []string{"galera_recovery"}
+		}
+		f.in.Group.Servers[i].Running, f.in.Group.Servers[i].Galera = false, nil
+		f.in.Nodes[id] = n
+	}
+	r := Diagnose(f.in)
+	want := "unit_stopped@DatabaseClusterNode1 galera_package@DatabaseClusterNode1 unit_stopped@DatabaseClusterNode2 unit_stopped@DatabaseClusterNode3 " +
+		"galera_no_primary@DatabaseClusterNode1+DatabaseClusterNode2+DatabaseClusterNode3"
+	if got := codes(r); got != want {
+		t.Errorf("problemen:\n%s\nverwacht:\n%s", got, want)
+	}
+	for _, p := range r.Problems {
+		if p.Code == CodeGaleraTools && (p.Level != LevelWarning || p.Title != "Op DatabaseClusterNode1 ontbreekt het pakket mariadb-server-galera" ||
+			!strings.HasPrefix(p.Why, "galera_recovery staat niet op DatabaseClusterNode1. Sinds MariaDB 12.3.2") || !strings.Contains(p.Why, "apt install mariadb-server-galera")) {
+			t.Errorf("probleem: %+v", p)
+		}
+	}
+	// Het plan kan, maar niet vanzelf: beginnen of aansluiten lukt op
+	// Node1 niet, en de taak slaat hem over.
+	p := r.Plan
+	if p == nil || p.Action != ActionGalera || p.Blocked != "" || p.Auto ||
+		p.AutoWhy != "Op DatabaseClusterNode1 ontbreekt mariadb-server-galera; die node kan het cluster niet beginnen en niet aansluiten. Installeer het eerst, of bevestig het plan." {
+		t.Fatalf("plan: %+v", p)
+	}
+	if steps := strings.Join(p.Steps, " "); !strings.Contains(steps, "mariadbd --wsrep-recover waar dat script ontbreekt") ||
+		!strings.Contains(steps, "Op DatabaseClusterNode1 ontbreekt mariadb-server-galera: de taak start MariaDB daar niet") {
+		t.Errorf("stappen: %q", p.Steps)
+	}
+	for i, n := range p.Nodes {
+		if n.NoGaleraTools != (i == 0) {
+			t.Errorf("node %s: NoGaleraTools %v", n.Hostname, n.NoGaleraTools)
+		}
+	}
+
+	// Draaien Node2 en Node3 in Primary, dan zou Node1 aansluiten; zonder
+	// het pakket lukt dat niet, en meer is er niet te doen.
+	for i, id := range f.ids[1:] {
+		n := f.in.Nodes[id]
+		n.Inspect.Active = "active"
+		f.in.Nodes[id] = n
+		f.in.Group.Servers[i+1].Running = true
+		f.in.Group.Servers[i+1].Galera = &protocol.DBGalera{ClusterStatus: "Primary", State: "Synced", StateCode: 4, ClusterSize: 2}
+	}
+	r = Diagnose(f.in)
+	if p := r.Plan; p == nil || p.Auto || p.Blocked != "Op DatabaseClusterNode1 ontbreekt mariadb-server-galera; zonder dat pakket sluit de node niet aan. Installeer het eerst, in de versie van mariadb-server" ||
+		len(p.Steps) != 0 {
+		t.Fatalf("aansluiten: %s %+v", codes(r), r.Plan)
+	}
+	// Staat ook Node2 stil, mét het pakket, dan start de taak alleen Node2.
+	n := f.in.Nodes[f.ids[1]]
+	n.Inspect.Active = "inactive"
+	f.in.Nodes[f.ids[1]] = n
+	f.in.Group.Servers[1].Running, f.in.Group.Servers[1].Galera = false, nil
+	r = Diagnose(f.in)
+	if p := r.Plan; p == nil || p.Auto || p.Blocked != "" || len(p.Steps) != 2 ||
+		!strings.HasPrefix(p.Steps[0], "Op DatabaseClusterNode2 MariaDB een voor een starten") ||
+		!strings.HasPrefix(p.Steps[1], "Op DatabaseClusterNode1 ontbreekt mariadb-server-galera: de taak start MariaDB daar niet") ||
+		!strings.HasPrefix(p.AutoWhy, "Op DatabaseClusterNode1 ontbreekt mariadb-server-galera; zonder dat pakket sluit die node niet aan") {
+		t.Fatalf("met Node2: %s %+v", codes(r), r.Plan)
+	}
+	n.Inspect.Active = "active"
+	f.in.Nodes[f.ids[1]] = n
+	f.in.Group.Servers[1].Running = true
+	f.in.Group.Servers[1].Galera = &protocol.DBGalera{ClusterStatus: "Primary", State: "Synced", StateCode: 4, ClusterSize: 2}
+	// Mist een draaiende node het pakket, dan kan hij geen donor zijn: niet
+	// vanzelf.
+	n = f.in.Nodes[f.ids[1]]
+	n.Inspect.Galera.MissingTools = []string{"galera_recovery"}
+	f.in.Nodes[f.ids[1]] = n
+	n = f.in.Nodes[f.ids[0]]
+	n.Inspect.Galera.MissingTools = nil
+	f.in.Nodes[f.ids[0]] = n
+	if r := Diagnose(f.in); r.Plan == nil || r.Plan.Auto || !strings.Contains(r.Plan.AutoWhy, "als donor") || !strings.Contains(codes(r), "galera_package@DatabaseClusterNode2") {
+		t.Fatalf("draaiende node zonder pakket: %s %+v", codes(r), r.Plan)
+	}
+
+	// Zonder Galera telt het niet.
+	f.in.Group.Kind = databases.KindSingle
+	for _, id := range f.ids {
+		f.in.Nodes[id].Inspect.Galera.On = false
+	}
+	if r := Diagnose(f.in); strings.Contains(codes(r), "galera_package") {
+		t.Errorf("zonder Galera: %s", codes(r))
+	}
+}
+
+func TestDiagnoseGaleraPackageEverywhere(t *testing.T) {
+	// Alle nodes naar 12.3 zonder mariadb-server-galera, en alles gestopt:
+	// geen node kan beginnen, dus geen knop.
+	f := jonas()
+	for i, id := range f.ids {
+		n := f.in.Nodes[id]
+		n.Inspect.Galera.ClusterAddress = "gcomm://192.168.10.181,192.168.10.182,192.168.10.183"
+		n.Inspect.Galera.NodeAddress, n.Inspect.Galera.PeerTimeouts = "", nil
+		n.Inspect.Active, n.Inspect.Processes = "inactive", nil
+		n.Inspect.Galera.MissingTools = []string{"galera_recovery"}
+		f.in.Group.Servers[i].Running, f.in.Group.Servers[i].Galera = false, nil
+		f.in.Nodes[id] = n
+	}
+	r := Diagnose(f.in)
+	if p := r.Plan; p == nil || p.Auto || !strings.HasPrefix(p.Blocked, "Op geen enkele node staat mariadb-server-galera") {
+		t.Fatalf("plan: %s %+v", codes(r), r.Plan)
+	}
+}
+
+func TestDiagnoseSST(t *testing.T) {
+	// Node1 haalt al een uur een volledige kopie bij Node2, die Primary is;
+	// Node3 staat stil, dus Galera meldt dat het die niet bereikt.
+	f := jonas()
+	for i, id := range f.ids {
+		n := f.in.Nodes[id]
+		n.Inspect.Galera.ClusterAddress = "gcomm://192.168.10.181,192.168.10.182,192.168.10.183"
+		n.Inspect.Galera.NodeAddress = ""
+		n.Inspect.Galera.PeerTimeouts = []string{"192.168.10.183"}
+		n.Inspect.Enabled = "enabled"
+		switch i {
+		case 0:
+			n.Inspect.Active, n.Inspect.StateSeconds, n.Inspect.Processes = "activating", 3600, []protocol.HealProcess{{PID: 900, Name: "mariadbd", Unit: "mariadb"}}
+			f.in.Group.Servers[i].Running, f.in.Group.Servers[i].Galera = false, nil
+		case 1:
+			n.Inspect.Active = "active"
+			f.in.Group.Servers[i].Running, f.in.Group.Servers[i].Active = true, "active"
+			f.in.Group.Servers[i].Galera = &protocol.DBGalera{ClusterName: "db", ClusterStatus: "Primary", State: "Donor/Desynced", ClusterSize: 2}
+		case 2:
+			n.Inspect.Active, n.Inspect.Processes = "inactive", nil
+			f.in.Group.Servers[i].Running, f.in.Group.Servers[i].Galera = false, nil
+		}
+		f.in.Nodes[id] = n
+	}
+	// Zonder SST-script lijkt Node1 te hangen.
+	if r := Diagnose(f.in); !strings.Contains(codes(r), "process_hung@DatabaseClusterNode1") {
+		t.Fatalf("zonder SST: %s", codes(r))
+	}
+	f.in.Nodes[f.ids[0]].Inspect.Galera.SST = "wsrep_sst_rsync"
+	r := Diagnose(f.in)
+	if strings.Contains(codes(r), "DatabaseClusterNode1") {
+		t.Errorf("Node1 haalt een kopie, toch: %s", codes(r))
+	}
+	// Node3 start pas als de kopie klaar is.
+	if p := r.Plan; p == nil || p.Auto || p.Blocked != "DatabaseClusterNode1 haalt nu een volledige kopie (SST); herstel de rest als die Synced is, zodat de donor niet twee kopieën tegelijk geeft" ||
+		slices.ContainsFunc(p.Nodes, func(n PlanNode) bool { return n.Hostname == "DatabaseClusterNode1" && (n.Kill || n.Start) }) {
+		t.Errorf("plan: %+v", p)
+	}
+}
+
+func TestDiagnoseNewClusterFlag(t *testing.T) {
+	f := jonas()
+	// Node3 draait; een afgebroken galera_new_cluster liet de vlag staan.
+	f.in.Nodes[f.ids[2]].Inspect.Galera.NewClusterFlag = true
+	r := Diagnose(f.in)
+	if !strings.Contains(codes(r), "galera_new_cluster_flag@DatabaseClusterNode3") {
+		t.Fatalf("problemen: %s", codes(r))
+	}
+	for _, p := range r.Problems {
+		if p.Code == CodeNewCluster && (p.Level != LevelWarning || p.Title != "Een volgende start van MariaDB op DatabaseClusterNode3 probeert een nieuw cluster te beginnen" ||
+			!strings.Contains(p.Why, "systemctl unset-environment _WSREP_NEW_CLUSTER")) {
+			t.Errorf("probleem: %+v", p)
+		}
+	}
+	// Zolang MariaDB start, hoort de vlag bij een galera_new_cluster die nog
+	// loopt.
+	f.in.Nodes[f.ids[2]].Inspect.Active = "activating"
+	if r := Diagnose(f.in); strings.Contains(codes(r), "galera_new_cluster_flag") {
+		t.Errorf("tijdens het starten: %s", codes(r))
+	}
+}
+
 func TestDiagnoseJoinPrimary(t *testing.T) {
 	// Node3 is Primary, Node1 staat stil: alleen starten, vanzelf mag.
 	f := jonas()
@@ -193,6 +372,249 @@ func TestDiagnoseHealthyAndManaged(t *testing.T) {
 	r := Diagnose(m.in)
 	if r.Plan == nil || r.Plan.Managed == nil || r.Plan.Action != "" || !strings.Contains(r.Plan.Steps[0], "Opnieuw starten") {
 		t.Errorf("onderdeel: %+v", r.Plan)
+	}
+}
+
+// zabbix is het zabbix-cluster van Jonas op 19 oktober: de uitrol van het
+// onderdeel kwam op ZabbixHa1 niet verder, zabbix2 heeft nog geen MariaDB,
+// dus de groep is alleen ZabbixHa1, die als enige draait.
+func zabbix() Input {
+	id, cid := uuid.New(), uuid.New()
+	return Input{
+		Group: databases.Group{ClusterID: &cid, ClusterName: "zabbix", ClusterSlug: "zabbix", ClusterEnv: "test", Engine: protocol.DBMariaDB, Kind: databases.KindGalera, Health: databases.HealthOK,
+			Servers: []databases.Server{{NodeID: id, Hostname: "ZabbixHa1", Unit: "mariadb", Active: "active", Running: true,
+				Galera: &protocol.DBGalera{ClusterName: "zabbix", ClusterStatus: "Primary", State: "Synced", StateCode: 4, ClusterSize: 1}}}},
+		Nodes: map[uuid.UUID]Node{id: {ID: id, Hostname: "ZabbixHa1", Protocol: protocol.Version, Online: true, Addresses: []string{"192.168.10.134"},
+			Inspect: &protocol.HealEngine{Engine: protocol.DBMariaDB, Unit: "mariadb", Active: "active", Enabled: "enabled", DataDir: "/var/lib/mysql", DataFree: 100 << 30, DataTotal: 200 << 30,
+				Galera: &protocol.HealGalera{On: true, ClusterName: "zabbix", ClusterAddress: "gcomm://192.168.10.134,192.168.10.135"}}}},
+		Known:      map[string]string{"192.168.10.134": "ZabbixHa1", "192.168.10.135": "zabbix2"},
+		Unfinished: &Unfinished{ComponentID: uuid.New(), Error: "zabbix2: MariaDB: pakketten: apt-get update: E: The repository 'https://repo.zabbix.com/zabbix/8.0/stable/debian trixie Release' does not have a Release file."},
+	}
+}
+
+func TestDiagnoseUnfinished(t *testing.T) {
+	// Draait ZabbixHa1, dan meldt Zelfherstel alleen dat de uitrol niet af
+	// is, met de fout van de taak en wat de uitrol afmaakt.
+	in := zabbix()
+	r := Diagnose(in)
+	if codes(r) != "component_unfinished@ZabbixHa1" || r.Plan != nil {
+		t.Fatalf("draait: %s %+v", codes(r), r.Plan)
+	}
+	p := r.Problems[0]
+	if p.Level != LevelWarning || p.Title != "De uitrol van MariaDB op zabbix is niet af" || !strings.Contains(p.Why, "stopte: zabbix2: MariaDB: pakketten: apt-get update") ||
+		!strings.Contains(p.Why, "Kies Opnieuw toepassen") || !strings.Contains(p.Why, "begint de eerste node het opnieuw") {
+		t.Errorf("probleem: %+v", p)
+	}
+
+	// Staat hij stil, dan is er een plan, maar niet vanzelf: de uitrol
+	// beslist.
+	srv := &in.Group.Servers[0]
+	srv.Running, srv.Active, srv.Galera = false, "failed", nil
+	n := in.Nodes[srv.NodeID]
+	n.Inspect.Active, n.Inspect.Result = "failed", "exit-code"
+	in.Nodes[srv.NodeID] = n
+	in.Group.Kind, in.Group.Health = databases.KindSingle, databases.HealthDown
+	r = Diagnose(in)
+	if codes(r) != "unit_stopped@ZabbixHa1 component_unfinished@ZabbixHa1 galera_no_primary@ZabbixHa1" {
+		t.Fatalf("stil: %s", codes(r))
+	}
+	if pl := r.Plan; pl == nil || pl.Action != ActionGalera || pl.Auto || pl.Blocked != "" || !strings.HasPrefix(pl.AutoWhy, "De uitrol van het onderdeel van ClusterForge is niet af") {
+		t.Errorf("plan: %+v", r.Plan)
+	}
+
+	// Loopt de uitrol nog, dan is er niets te melden, en nog steeds niets
+	// vanzelf.
+	in.Unfinished.Running = true
+	r = Diagnose(in)
+	if strings.Contains(codes(r), "component_unfinished") || r.Plan == nil || r.Plan.Auto {
+		t.Errorf("uitrol loopt: %s %+v", codes(r), r.Plan)
+	}
+}
+
+// zabbixProxy is zabbix() met Zabbixproxy erbij: de scheidsrechter van het
+// cluster, met zijn eigen MariaDB zonder Galera-config voor de Zabbix-proxy.
+// Op 20 oktober zag Zelfherstel die als Galera-node: het zette zijn adres in
+// wsrep_cluster_address van ZabbixHa1 en stopte hem om de positie te lezen.
+func zabbixProxy() Input {
+	in := zabbix()
+	id := uuid.New()
+	in.Group.Servers = append(in.Group.Servers, databases.Server{NodeID: id, Hostname: "Zabbixproxy", Unit: "mariadb", Active: "active", Running: true, Version: "11.8.3"})
+	in.Nodes[id] = Node{ID: id, Hostname: "Zabbixproxy", Protocol: protocol.Version, Online: true, Addresses: []string{"192.168.10.198"},
+		Inspect: &protocol.HealEngine{Engine: protocol.DBMariaDB, Unit: "mariadb", Active: "active", Enabled: "enabled", DataDir: "/var/lib/mysql",
+			DataFree: 10 << 30, DataTotal: 20 << 30, Processes: []protocol.HealProcess{{PID: 812, Name: "mariadbd", Unit: "mariadb", AgeSeconds: 3600}}}}
+	in.Known["192.168.10.198"] = "Zabbixproxy"
+	return in
+}
+
+// stop zet de server van host stil, zoals systemd na een fout.
+func stop(in *Input, host string) {
+	i := slices.IndexFunc(in.Group.Servers, func(s databases.Server) bool { return s.Hostname == host })
+	srv := &in.Group.Servers[i]
+	srv.Running, srv.Active, srv.Galera = false, "failed", nil
+	n := in.Nodes[srv.NodeID]
+	n.Inspect.Active, n.Inspect.Result, n.Inspect.Processes = "failed", "exit-code", nil
+	in.Nodes[srv.NodeID] = n
+}
+
+func nodeOf(in Input, host string) Node {
+	i := slices.IndexFunc(in.Group.Servers, func(s databases.Server) bool { return s.Hostname == host })
+	return in.Nodes[in.Group.Servers[i].NodeID]
+}
+
+func TestDiagnoseLooseServer(t *testing.T) {
+	// Draait alles, dan is er niets te doen: Zabbixproxy hoort niet bij het
+	// cluster en ontbreekt dus niet in wsrep_cluster_address.
+	in := zabbixProxy()
+	if r := Diagnose(in); codes(r) != "component_unfinished@ZabbixHa1" || r.Plan != nil {
+		t.Fatalf("draait: %s %+v", codes(r), r.Plan)
+	}
+
+	// Staat ZabbixHa1 stil, dan begint het plan het cluster alleen op
+	// ZabbixHa1; Zabbixproxy blijft draaien.
+	stop(&in, "ZabbixHa1")
+	in.Group.Kind, in.Group.Health = databases.KindSingle, databases.HealthWarning
+	r := Diagnose(in)
+	if codes(r) != "unit_stopped@ZabbixHa1 component_unfinished@ZabbixHa1 galera_no_primary@ZabbixHa1" {
+		t.Fatalf("ZabbixHa1 stil: %s", codes(r))
+	}
+	pl := r.Plan
+	if pl == nil || pl.Action != ActionGalera || pl.Blocked != "" || len(pl.Nodes) != 1 || pl.Nodes[0].Hostname != "ZabbixHa1" || pl.Nodes[0].SetAddress {
+		t.Fatalf("plan: %+v", pl)
+	}
+	if slices.ContainsFunc(pl.Steps, func(s string) bool { return strings.Contains(s, "Zabbixproxy") }) {
+		t.Errorf("stappen noemen Zabbixproxy: %q", pl.Steps)
+	}
+
+	// Staat Zabbixproxy ook stil, dan start de taak hem als gewone server,
+	// voor het cluster.
+	stop(&in, "Zabbixproxy")
+	r = Diagnose(in)
+	if !strings.Contains(codes(r), "unit_stopped@Zabbixproxy") || strings.Contains(codes(r), "galera_no_primary@ZabbixHa1+Zabbixproxy") {
+		t.Fatalf("beide stil: %s", codes(r))
+	}
+	pl = r.Plan
+	if pl == nil || len(pl.Nodes) != 2 || pl.Nodes[0].Hostname != "ZabbixHa1" || pl.Nodes[0].Loose ||
+		pl.Nodes[1].Hostname != "Zabbixproxy" || !pl.Nodes[1].Loose || !pl.Nodes[1].Start || pl.Nodes[1].Unit != "mariadb" {
+		t.Fatalf("plan: %+v", pl)
+	}
+	if first := pl.Steps[0]; !strings.HasPrefix(first, "Op Zabbixproxy MariaDB starten en wachten tot hij antwoordt.") || !strings.Contains(first, "zonder Galera-config") ||
+		slices.ContainsFunc(pl.Steps[1:], func(s string) bool { return strings.Contains(s, "Zabbixproxy") }) {
+		t.Errorf("stappen: %q", pl.Steps)
+	}
+	in.Unfinished = nil
+	if pl := Diagnose(in).Plan; pl == nil || !pl.Auto {
+		t.Errorf("vanzelf: %+v", pl)
+	}
+	// Een bijna volle schijf op Zabbixproxy: dan niet vanzelf.
+	nodeOf(in, "Zabbixproxy").Inspect.DataFree = 100 << 20
+	if pl := Diagnose(in).Plan; pl == nil || pl.Auto || pl.AutoWhy != "Een node heeft te weinig vrije ruimte voor een volledige kopie." {
+		t.Errorf("volle schijf: %+v", pl)
+	}
+	nodeOf(in, "Zabbixproxy").Inspect.DataFree = 10 << 30
+
+	// Draait ZabbixHa1 weer, dan start het plan alleen Zabbixproxy; vanzelf
+	// mag dat zodra de uitrol af is.
+	in = zabbixProxy()
+	stop(&in, "Zabbixproxy")
+	r = Diagnose(in)
+	pl = r.Plan
+	if pl == nil || pl.Action != ActionGalera || pl.Auto || len(pl.Nodes) != 2 || !pl.Nodes[0].Primary || !pl.Nodes[1].Loose || len(pl.Steps) != 1 {
+		t.Fatalf("alleen Zabbixproxy: %s %+v", codes(r), pl)
+	}
+	in.Unfinished = nil
+	if pl := Diagnose(in).Plan; pl == nil || !pl.Auto || pl.AutoWhy != "Alleen starten van wat stilstaat; er gaat geen data verloren." {
+		t.Errorf("vanzelf: %+v", pl)
+	}
+
+	// Een proces buiten systemd op Zabbixproxy houdt het cluster niet
+	// tegen; Zabbixproxy start de taak dan niet.
+	in = zabbixProxy()
+	stop(&in, "ZabbixHa1")
+	stop(&in, "Zabbixproxy")
+	nodeOf(in, "Zabbixproxy").Inspect.Processes = []protocol.HealProcess{{PID: 900, Name: "mariadbd"}}
+	r = Diagnose(in)
+	if pl := r.Plan; !strings.Contains(codes(r), "process_outside_unit@Zabbixproxy") || pl == nil || pl.Blocked != "" || len(pl.Nodes) != 1 {
+		t.Errorf("buiten systemd: %s %+v", codes(r), r.Plan)
+	}
+}
+
+func TestDiagnoseLooseListed(t *testing.T) {
+	// Na de mislukte taak van 20 oktober staat 192.168.10.198 in
+	// wsrep_cluster_address van ZabbixHa1. Zonder garb op Zabbixproxy kan
+	// die een Galera-node zijn die zijn config kwijt is: dan geen plan.
+	in := zabbixProxy()
+	stop(&in, "ZabbixHa1")
+	nodeOf(in, "ZabbixHa1").Inspect.Galera.ClusterAddress = "gcomm://192.168.10.134,192.168.10.198,192.168.10.135"
+	r := Diagnose(in)
+	if pl := r.Plan; pl == nil || !strings.HasPrefix(pl.Blocked, "Zabbixproxy staat in wsrep_cluster_address van een andere node") || pl.Auto {
+		t.Fatalf("zonder garb: %s %+v", codes(r), r.Plan)
+	}
+
+	// Met garb, de scheidsrechter, op Zabbixproxy is dat adres dat van garb:
+	// het plan begint het cluster op ZabbixHa1 en laat het adres staan.
+	n := nodeOf(in, "Zabbixproxy")
+	n.Garb = true
+	in.Nodes[n.ID] = n
+	r = Diagnose(in)
+	if pl := r.Plan; pl == nil || pl.Blocked != "" || len(pl.Nodes) != 1 || pl.Nodes[0].Hostname != "ZabbixHa1" || pl.Nodes[0].SetAddress || strings.Contains(codes(r), CodeWrongAddress) {
+		t.Fatalf("met garb: %s %+v", codes(r), r.Plan)
+	}
+
+	// Kan de agent de config van Zabbixproxy niet lezen, dan weet
+	// Zelfherstel niet wat hij is, ook niet met garb op de node.
+	for _, garb := range []bool{false, true} {
+		in = zabbixProxy()
+		stop(&in, "ZabbixHa1")
+		n := nodeOf(in, "Zabbixproxy")
+		n.Garb, n.Inspect.Error = garb, "my_print_defaults: exit status 1"
+		in.Nodes[n.ID] = n
+		r = Diagnose(in)
+		if pl := r.Plan; pl == nil || !strings.HasPrefix(pl.Blocked, "Zelfherstel kan de config van MariaDB op Zabbixproxy niet lezen") || pl.Auto {
+			t.Errorf("onleesbaar, garb %v: %s %+v", garb, codes(r), r.Plan)
+		}
+	}
+
+	// my_print_defaults van MySQL kent --mysqld niet: een node met
+	// mysql.service telt dan als Galera-node, zoals vroeger.
+	in = zabbixProxy()
+	stop(&in, "ZabbixHa1")
+	n = nodeOf(in, "Zabbixproxy")
+	n.Inspect.Unit, n.Inspect.Error = "mysql", "my_print_defaults: exit status 1"
+	in.Nodes[n.ID] = n
+	r = Diagnose(in)
+	if pl := r.Plan; pl == nil || strings.Contains(pl.Blocked, "niet lezen") || len(pl.Nodes) != 2 || pl.Nodes[1].Loose {
+		t.Errorf("MySQL: %s %+v", codes(r), r.Plan)
+	}
+	// Naast garb is zo'n MySQL de eigen database van de scheidsrechter.
+	n.Garb = true
+	in.Nodes[n.ID] = n
+	r = Diagnose(in)
+	if pl := r.Plan; pl == nil || pl.Blocked != "" || len(pl.Nodes) != 1 || pl.Nodes[0].Hostname != "ZabbixHa1" {
+		t.Errorf("MySQL naast garb: %s %+v", codes(r), r.Plan)
+	}
+}
+
+func TestDiagnoseLooseGaleraOnArbiter(t *testing.T) {
+	// Een losse groep op de scheidsrechter van het onderdeel met een
+	// Galera-config: Zelfherstel begint daar geen tweede cluster.
+	in := zabbixProxy()
+	stop(&in, "Zabbixproxy")
+	srv := in.Group.Servers[slices.IndexFunc(in.Group.Servers, func(s databases.Server) bool { return s.Hostname == "Zabbixproxy" })]
+	n := in.Nodes[srv.NodeID]
+	n.Inspect.Galera = &protocol.HealGalera{On: true, ClusterName: "zabbix", ClusterAddress: "gcomm://192.168.10.134,192.168.10.135,192.168.10.198", NodeAddress: "192.168.10.198"}
+	cluster := in.Group.ClusterID
+	in = Input{Group: databases.Group{ClusterID: cluster, NodeID: &srv.NodeID, ClusterName: "zabbix", Engine: protocol.DBMariaDB, Kind: databases.KindSingle,
+		Health: databases.HealthDown, Servers: []databases.Server{srv}}, Nodes: map[uuid.UUID]Node{srv.NodeID: n}, Known: map[string]string{}}
+	r := Diagnose(in)
+	if pl := r.Plan; pl == nil || pl.Action != ActionGalera || pl.Auto || !strings.HasPrefix(pl.Blocked, "Op Zabbixproxy staat de scheidsrechter van het onderdeel") {
+		t.Fatalf("plan: %s %+v", codes(r), r.Plan)
+	}
+
+	// Zonder Galera-config is het een gewone server: starten.
+	n.Inspect.Galera = nil
+	r = Diagnose(in)
+	if pl := r.Plan; pl == nil || pl.Action != ActionRestart || pl.Blocked != "" || len(pl.Nodes) != 1 || !pl.Nodes[0].Start {
+		t.Fatalf("zonder config: %s %+v", codes(r), r.Plan)
 	}
 }
 

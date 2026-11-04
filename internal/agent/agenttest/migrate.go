@@ -298,6 +298,13 @@ func (h *Host) remoteDump(cfg map[string]string, args []string) ([]byte, error) 
 		return nil, fmt.Errorf("mariadb-dump: Got error: 1044: \"Access denied for user '%s'@'%s' to database '%s'\" when selecting the database",
 			cfg["user"], h.Address, db)
 	}
+	// Zoals MariaDB: SHOW EVENTS vraagt het recht EVENT, ook zonder events.
+	if slices.Contains(args, "--events") && !slices.ContainsFunc(remote.MariaDB.Users, func(u MariaUser) bool {
+		return u.User == cfg["user"] && u.Host == h.Address && slices.Contains(u.Grants[strings.ReplaceAll(db, "_", `\_`)], "EVENT")
+	}) {
+		return nil, fmt.Errorf("mariadb-dump: Couldn't execute 'show events': Access denied for user '%s'@'%s' to database '%s' (1044)",
+			cfg["user"], h.Address, db)
+	}
 	return remote.mariaDump(args)
 }
 

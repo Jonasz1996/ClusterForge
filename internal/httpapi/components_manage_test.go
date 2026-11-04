@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Jonasz1996/clusterforge/internal/galera"
 	"github.com/Jonasz1996/clusterforge/internal/store"
 )
 
@@ -189,7 +190,7 @@ func TestDatabaseManageGalera(t *testing.T) {
 		t.Errorf("log:\n%s", log)
 	}
 	if !slices.Contains(g.hosts["nc2"].Calls(), "sh -c rm -f /var/lib/clusterforge/galera-resync-* && systemctl stop mariadb && rm -f /var/lib/mysql/grastate.dat && "+
-		"touch /var/lib/clusterforge/galera-resync-"+j.ID+" && systemctl start --no-block mariadb") {
+		"touch /var/lib/clusterforge/galera-resync-"+j.ID+" && "+galera.ClearNewCluster+" && systemctl start --no-block mariadb") {
 		t.Errorf("nc2: %v", g.hosts["nc2"].Calls())
 	}
 	if ev := clusterEvents(t, e, lab.cluster.ID, "cluster.database_resynced"); len(ev) != 1 || !strings.Contains(ev[0], `"hostname": "nc2"`) {

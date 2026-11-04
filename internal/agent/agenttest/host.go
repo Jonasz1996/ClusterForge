@@ -19,6 +19,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Jonasz1996/clusterforge/internal/galera"
 	"github.com/Jonasz1996/clusterforge/pkg/protocol"
 )
 
@@ -83,8 +84,10 @@ type Host struct {
 	users    map[string]bool
 	calls    []string
 	stdins   []string
-	fail     map[string]*failure
-	journal  map[string]string
+	// env is de omgeving van systemd (systemctl set-environment).
+	env     map[string]string
+	fail    map[string]*failure
+	journal map[string]string
 
 	// De storingen van de agent: de nft-tabel cf_fault, interfaces die down
 	// staan en de root-qdisc per interface.
@@ -102,7 +105,7 @@ func NewHost(root, address string) *Host {
 	return &Host{
 		Root: root, Address: address, Interface: "eth0",
 		packages: map[string]bool{}, versions: map[string]string{}, units: map[string]*Unit{}, users: map[string]bool{"root": true},
-		fail: map[string]*failure{}, linkDown: map[string]bool{}, qdisc: map[string]string{},
+		fail: map[string]*failure{}, linkDown: map[string]bool{}, qdisc: map[string]string{}, env: map[string]string{},
 	}
 }
 
@@ -184,6 +187,22 @@ func (h *Host) Calls() []string {
 	return slices.Clone(h.calls)
 }
 
+// SetEnvironment zet een variabele in de omgeving van systemd, zoals
+// galera_new_cluster dat doet.
+func (h *Host) SetEnvironment(key, value string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.env[key] = value
+}
+
+// Environment is een variabele uit de omgeving van systemd.
+func (h *Host) Environment(key string) (string, bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	v, ok := h.env[key]
+	return v, ok
+}
+
 // Installed is true als het pakket geïnstalleerd is.
 func (h *Host) Installed(name string) bool {
 	h.mu.Lock()
@@ -229,6 +248,10 @@ var queries = []string{
 }
 
 func (h *Host) record(call string) {
+	// sh -c 'command -v <naam>' zoekt alleen een programma.
+	if prog, ok := strings.CutPrefix(call, "sh -c command -v "); ok && !strings.ContainsAny(prog, " ;|&") {
+		return
+	}
 	if !slices.ContainsFunc(queries, func(q string) bool { return strings.HasPrefix(call, q) }) {
 		h.calls = append(h.calls, call)
 	}
@@ -427,6 +450,14 @@ func (h *Host) exec(name string, args []string) ([]byte, error) {
 		if len(args) == 2 && args[1] == protocol.DBCheckPGCommand && !h.patroniPrimary() {
 			return []byte("deze node is niet de primary in Patroni\n"), errExit1
 		}
+		if len(args) == 2 {
+			if prog, ok := strings.CutPrefix(args[1], "command -v "); ok && !strings.ContainsAny(prog, " ;|&") {
+				return h.commandV(prog)
+			}
+			if args[1] == galera.Bootstrap && h.MariaDB != nil && h.MariaDB.NoGaleraScripts {
+				return []byte(galera.NoNewCluster + "\n"), errExit1
+			}
+		}
 		return nil, nil
 	case "nft":
 		return h.nftExec(args)
@@ -458,6 +489,8 @@ func (h *Host) exec(name string, args []string) ([]byte, error) {
 		return h.pgRemoteQuery(args)
 	case "galera_recovery":
 		return h.galeraRecovery()
+	case "mariadbd", "mysqld":
+		return h.wsrepRecover(args)
 	case "my_print_defaults", "mariadb-print-defaults":
 		return h.printDefaults()
 	}
@@ -681,6 +714,25 @@ func (h *Host) apt(args []string) ([]byte, error) {
 func (h *Host) systemctl(args []string) ([]byte, error) {
 	if len(args) == 1 && args[0] == "daemon-reload" {
 		h.daemonReload()
+		return nil, nil
+	}
+	switch args[0] {
+	case "show-environment":
+		var b strings.Builder
+		for _, k := range slices.Sorted(maps.Keys(h.env)) {
+			fmt.Fprintf(&b, "%s=%s\n", k, h.env[k])
+		}
+		return []byte(b.String()), nil
+	case "set-environment":
+		for _, kv := range args[1:] {
+			k, v, _ := strings.Cut(kv, "=")
+			h.env[k] = v
+		}
+		return nil, nil
+	case "unset-environment":
+		for _, k := range args[1:] {
+			delete(h.env, k)
+		}
 		return nil, nil
 	}
 	if args[0] == "is-system-running" {

@@ -334,6 +334,7 @@ func (a *Agent) mariaStatus(ctx context.Context, u UnitInfo, quick bool) protoco
 	s.Running = true
 	s.Version = shortVersion(vars["version"])
 	s.MaxConnections, _ = strconv.Atoi(vars["max_connections"])
+	s.Port, _ = strconv.Atoi(vars["port"])
 	s.ReadOnly = strings.EqualFold(vars["read_only"], "ON")
 	var errs []string
 	if rows, err = a.maria(ctx, false, dbsql.MariaStatus); err != nil {

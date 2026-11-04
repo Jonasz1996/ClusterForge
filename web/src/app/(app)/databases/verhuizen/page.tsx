@@ -80,6 +80,8 @@ function retired(p: MigrationPlan) {
 
 function SourceCard({ p }: { p: MigrationPlan }) {
   const s = p.source;
+  // Een losse server heeft de sleutel engine/node/<node>.
+  const looseNode = s.key.split("/node/")[1];
   const i = p.info;
   const pg = isPG(p);
   const objects = i
@@ -98,7 +100,21 @@ function SourceCard({ p }: { p: MigrationPlan }) {
         <span className="flex flex-wrap items-center gap-2">
           <span>
             Van{" "}
-            {s.cluster_id ? (
+            {looseNode ? (
+              <>
+                <Link href={`/nodes/detail?id=${looseNode}`} className="text-brand-700 hover:underline dark:text-sky-300">
+                  {s.name}
+                </Link>
+                {s.cluster_id && (
+                  <>
+                    {" in "}
+                    <Link href={`/clusters/detail?id=${s.cluster_id}`} className="text-brand-700 hover:underline dark:text-sky-300">
+                      {s.slug}
+                    </Link>
+                  </>
+                )}
+              </>
+            ) : s.cluster_id ? (
               <Link href={`/clusters/detail?id=${s.cluster_id}`} className="text-brand-700 hover:underline dark:text-sky-300">
                 {s.name}
               </Link>

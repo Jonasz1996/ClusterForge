@@ -68,9 +68,16 @@ const (
 // zonder tabellen op slot, rij voor rij gelezen, met routines, events en
 // triggers, en binaire kolommen als hex. Zonder --databases, zodat de dump
 // in een database met een andere naam terug kan.
+//
+// --skip-no-autocommit: mariadb-dump van 11.8 (Debian 13) zet de rijen van
+// elke tabel standaard in één transactie (SET @@AUTOCOMMIT=0 … COMMIT), die
+// van 10.11 niet. Galera repliceert een transactie in één writeset van
+// hoogstens wsrep_max_ws_size (2 GB), dus een grotere tabel gaf bij het
+// inlezen "ERROR 1105: Maximum writeset size exceeded". Zo is elke INSERT
+// van ongeveer 1 MB een eigen transactie, zoals bij de dumps van 10.11.
 var dumpArgs = []string{
 	"--single-transaction", "--quick", "--routines", "--events", "--triggers", "--hex-blob",
-	"--default-character-set=utf8mb4",
+	"--default-character-set=utf8mb4", "--skip-no-autocommit",
 }
 
 // pgDumpArgs zijn de opties van pg_dump, als postgres via de socket: platte

@@ -1,6 +1,7 @@
 package components
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -14,6 +15,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/deploy"
 	"github.com/Jonasz1996/clusterforge/internal/deps"
 	"github.com/Jonasz1996/clusterforge/internal/events"
+	galerapkg "github.com/Jonasz1996/clusterforge/internal/galera"
 	"github.com/Jonasz1996/clusterforge/internal/jobs"
 	"github.com/Jonasz1996/clusterforge/internal/store"
 	"github.com/Jonasz1996/clusterforge/internal/templates"
@@ -207,8 +209,15 @@ func (s *Service) applyData(ctx context.Context, j *jobs.Job, st *jobs.Step, r *
 	if err != nil {
 		return err
 	}
-	before, _ := s.galera(ctx, n.NodeID)
+	srv, srvErr := s.mariadb(ctx, n.NodeID)
+	var before *protocol.DBGalera
+	if srvErr == nil && srv != nil && srv.Running {
+		before = srv.Galera
+	}
 	member := healthy(before, slug, 1)
+	// again: de eerste node begint het cluster ook opnieuw als hij het
+	// merkteken van een eerdere poging heeft.
+	again := false
 	if n.Index == 1 {
 		// De eerste node begint het cluster, maar alleen als er nog geen is:
 		// doet een andere node al mee in een Primary component met deze
@@ -218,7 +227,19 @@ func (s *Service) applyData(ctx context.Context, j *jobs.Job, st *jobs.Step, r *
 			return err
 		}
 		if !other {
-			if steps, err = bootstrap(steps, slug, member); err != nil {
+			// Na een uitrol die niet af kwam, staat het merkteken op de
+			// eerste node terwijl het cluster niet meer draait. Heeft geen
+			// andere datanode data van dit cluster, dan begint hij het
+			// opnieuw; anders kan een andere node nieuwere data hebben.
+			if !member && r.comp.AppliedRevision == nil {
+				var why string
+				if again, why = outside(srv, srvErr, n.Hostname); !again {
+					st.Logf("zat %s al in het cluster, dan begint de taak het daar niet opnieuw: %s", n.Hostname, why)
+				} else if again, why = onlyHolder(s.peers(ctx, r.spec, n.NodeID)); !again {
+					st.Logf("zat %s al in het cluster, dan begint de taak het daar niet opnieuw: %s. Begin het dan met Zelfherstel op de pagina Databases (Nu herstellen), dat eerst de positie van elke node vergelijkt", n.Hostname, why)
+				}
+			}
+			if steps, err = bootstrap(steps, slug, member, again); err != nil {
 				return err
 			}
 			if !member {
@@ -226,15 +247,38 @@ func (s *Service) applyData(ctx context.Context, j *jobs.Job, st *jobs.Step, r *
 			}
 		}
 	}
-	changed, err := deploy.ApplySteps(ctx, s.bus, options(ctx, j, st, n, "", s.Retry), steps)
+	o := options(ctx, j, st, n, "", s.Retry)
+	// tables zijn de databases die de stap dataTitle vond.
+	var tables string
+	if again {
+		logf := o.Logf
+		o.Logf = func(format string, a ...any) {
+			line := fmt.Sprintf(format, a...)
+			if v, ok := strings.CutPrefix(strings.TrimSpace(line), tablesPrefix); ok {
+				tables = strings.TrimSpace(v)
+			}
+			logf("%s", line)
+		}
+	}
+	changed, err := deploy.ApplySteps(ctx, s.bus, o, steps)
 	if err != nil {
+		if again && tables != "" && strings.HasPrefix(err.Error(), dataTitle+": ") {
+			return fmt.Errorf("op %s staan al databases met tabellen (%s). ClusterForge begint het cluster daar niet zonder je bevestiging opnieuw: "+
+				"die databases worden dan de data van het cluster, en de andere nodes krijgen er een kopie van. Wil je dat, begin het cluster dan met Zelfherstel op de pagina Databases (Nu herstellen) en kies daarna opnieuw Opnieuw toepassen",
+				n.Hostname, strings.Join(strings.Fields(tables), ", "))
+		}
 		return err
 	}
-	if member && changed > 0 && r.joining(n) {
+	switch {
+	case member && changed > 0 && r.joining(n):
 		// Er komt een node bij: zijn adres geldt hier bij de volgende start.
 		// MariaDB die draait, hoort de nieuwe node via Galera zelf.
 		st.Logf("%s krijgt de nieuwe node in zijn configuratie voor de volgende start; MariaDB herstart niet", n.Hostname)
-	} else if member && changed > 0 {
+	case member && changed > 0 && !s.joinable(ctx, r.spec, n.NodeID):
+		// Een node die als enige meedoet, vindt na een herstart niemand om
+		// bij aan te sluiten, en dan draait er geen cluster meer.
+		st.Logf("%s doet als enige mee. Een herstart zou het cluster stoppen, want bij het starten vindt hij geen andere node; MariaDB herstart dus niet, en de nieuwe configuratie geldt bij zijn volgende start", n.Hostname)
+	case member && changed > 0:
 		// De node deed al mee en kreeg een nieuwe configuratie: herstarten,
 		// en pas verder als hij weer Synced is.
 		st.Logf("%s deed al mee; MariaDB herstart om de nieuwe configuratie te lezen", n.Hostname)
@@ -244,6 +288,119 @@ func (s *Service) applyData(ctx context.Context, j *jobs.Job, st *jobs.Step, r *
 		}
 	}
 	return s.waitSynced(ctx, st, n, slug, want)
+}
+
+// joinable is true als een andere datanode meedoet in een Primary component
+// van dit cluster: een node die herstart, sluit daar weer bij aan. Een node
+// die niet antwoordt, telt niet mee.
+func (s *Service) joinable(ctx context.Context, spec Spec, self uuid.UUID) bool {
+	for _, n := range spec.Nodes {
+		if n.Role != RoleData || n.NodeID == self {
+			continue
+		}
+		if g, err := s.galera(ctx, n.NodeID); err == nil && g != nil && g.ClusterName == spec.Cluster.Slug && g.ClusterStatus == "Primary" {
+			return true
+		}
+	}
+	return false
+}
+
+// peer is wat een andere datanode over zijn MariaDB zegt, voor
+// onlyHolder.
+type peer struct {
+	host string
+	err  error
+	// server: er staat MariaDB; running: hij draait.
+	server  bool
+	running bool
+	// fresh: volgens InnoDB zat hij nog nooit in een Galera-cluster.
+	fresh bool
+}
+
+// peers vraagt de andere datanodes naar hun MariaDB.
+func (s *Service) peers(ctx context.Context, spec Spec, self uuid.UUID) []peer {
+	var out []peer
+	for _, n := range spec.order() {
+		if n.Role != RoleData || n.NodeID == self {
+			continue
+		}
+		srv, err := s.mariadb(ctx, n.NodeID)
+		out = append(out, peerOf(n.Hostname, srv, err, func() (*protocol.DBPositionResult, error) { return s.position(ctx, n, true) }))
+	}
+	return out
+}
+
+// peerOf maakt een peer van de status van zijn MariaDB, en van zijn
+// positie als die stilstaat; position mag die uit InnoDB lezen. Een unit
+// die nog draait of start, telt als draaiend, ook als de agent er niet in
+// kan. Alleen InnoDB zegt zeker dat een node nog nooit in een cluster zat;
+// een positie die onbekend is, zegt niet of er data staat.
+func peerOf(host string, srv *protocol.DBServer, err error, position func() (*protocol.DBPositionResult, error)) peer {
+	p := peer{host: host}
+	switch {
+	case err != nil:
+		p.err = err
+		return p
+	case srv == nil:
+		return p
+	}
+	p.server = true
+	if srv.Running || srv.Active == "active" || srv.Active == "activating" || srv.Active == "reloading" {
+		p.running = true
+		return p
+	}
+	pos, err := position()
+	switch {
+	case err != nil:
+		p.err = err
+	case pos.Running:
+		p.running = true
+	case pos.NeverInCluster():
+		p.fresh = true
+	case strings.Trim(pos.UUID, "0-") == "":
+		// Geen geschiedenis in grastate.dat, maar InnoDB is niet gelezen.
+		p.err = errors.New(cmp.Or(pos.Error, "de agent gaf geen positie"))
+	}
+	return p
+}
+
+// outside zegt of MariaDB op de eerste node zeker niet in een Primary
+// component zit: er staat geen MariaDB, hij staat stil, of hij draait
+// buiten een Primary component. Anders zegt why waarom niet; een donor
+// doet bijvoorbeeld nog mee, ook al is hij niet Synced.
+func outside(srv *protocol.DBServer, err error, host string) (ok bool, why string) {
+	switch {
+	case err != nil:
+		return false, fmt.Sprintf("%s zegt niet hoe MariaDB ervoor staat (%v)", host, err)
+	case srv == nil:
+		return true, ""
+	case srv.Running && srv.Galera != nil && srv.Galera.ClusterStatus == "Primary":
+		return false, fmt.Sprintf("MariaDB op %s zit nog in een Primary component (%s)", host, cmp.Or(srv.Galera.State, "niet Synced"))
+	case srv.Running && srv.Galera == nil && srv.Error != "":
+		// De status van Galera kwam niet: misschien doet hij nog mee.
+		return false, fmt.Sprintf("%s zegt niet of MariaDB in een Primary component zit (%s)", host, srv.Error)
+	case srv.Running, srv.Active == "inactive", srv.Active == "failed":
+		return true, ""
+	}
+	return false, fmt.Sprintf("MariaDB op %s is %s", host, cmp.Or(srv.Active, "in een onbekende toestand"))
+}
+
+// onlyHolder zegt of de eerste node als enige data van het cluster kan
+// hebben: op elke andere datanode staat geen MariaDB, of een die stilstaat
+// en nog nooit in een Galera-cluster zat. Anders zegt why waarom niet.
+func onlyHolder(peers []peer) (ok bool, why string) {
+	for _, p := range peers {
+		switch {
+		case p.err != nil:
+			return false, fmt.Sprintf("%s zegt niet of daar data staat (%v)", p.host, p.err)
+		case !p.server:
+		case p.running:
+			return false, "op " + p.host + " draait MariaDB"
+		case !p.fresh:
+			return false, p.host + " zat al in een Galera-cluster en kan nieuwere data hebben"
+		}
+	}
+	return true, ""
 }
 
 // applyArbiter zet garbd op de scheidsrechter en wacht tot het cluster
@@ -278,10 +435,26 @@ func (s *Service) applyArbiter(ctx context.Context, j *jobs.Job, st *jobs.Step, 
 	}, first.NodeID)
 }
 
+// dataTitle is de stap die nakijkt of er geen databases met tabellen op de
+// eerste node staan, voor hij het cluster opnieuw begint. Vindt ze er,
+// dan schrijft ze tablesPrefix met hun namen.
+const (
+	dataTitle    = "nakijken of er geen databases met tabellen staan"
+	tablesPrefix = "databases met tabellen: "
+)
+
+// userDatabases zet de databases met tabellen in de datamap van MariaDB op
+// één regel, zonder die van MariaDB zelf. Een database met alleen db.opt is
+// leeg. Het werkt ook als MariaDB stilstaat.
+const userDatabases = "for d in " + galerapkg.DataDir + "/*/; do n=${d%/}; n=${n##*/}; case $n in mysql|performance_schema|sys|lost+found|'#'*) continue;; esac; " +
+	`ls -A "$d" 2>/dev/null | grep -qvx db.opt && printf '%s ' "$n"; done`
+
 // bootstrap vervangt de stap die aansluit door een die het cluster begint.
 // Doet de node al mee in een Primary component met deze naam (een eerdere
-// poging begon het al), dan zet ze alleen het merkteken.
-func bootstrap(steps []templates.Step, slug string, member bool) ([]templates.Step, error) {
+// poging begon het al), dan zet ze alleen het merkteken. Met again begint
+// de node het cluster ook als het merkteken er al staat, maar niet als hij
+// al mag schrijven of als er databases met tabellen op staan.
+func bootstrap(steps []templates.Step, slug string, member, again bool) ([]templates.Step, error) {
 	m := Marker(slug)
 	i := slices.IndexFunc(steps, func(s templates.Step) bool { return s.Command != nil && s.Command.Creates == m })
 	if i < 0 {
@@ -294,7 +467,20 @@ func bootstrap(steps []templates.Step, slug string, member bool) ([]templates.St
 		c.Run = "touch " + m
 	}
 	out[i].Command, out[i].Title = &c, "het Galera-cluster beginnen"
-	return out, nil
+	if !again || member {
+		return out, nil
+	}
+	// Begon de stap hierboven het cluster, dan mag de node schrijven en
+	// slaan deze twee over.
+	extra := []templates.Step{
+		{Step: protocol.Step{Command: &protocol.CommandStep{
+			Run:    `echo "` + tablesPrefix + `$(` + userDatabases + `)"; exit 3`,
+			Unless: protocol.DBCheckCommand + ` || [ -z "$(` + userDatabases + `)" ]`,
+		}}, Title: dataTitle},
+		{Step: protocol.Step{Command: &protocol.CommandStep{Run: "(" + galerapkg.BootstrapAny + ") && touch " + m, Unless: protocol.DBCheckCommand}},
+			Title: "het Galera-cluster opnieuw beginnen"},
+	}
+	return slices.Insert(out, i+1, extra...), nil
 }
 
 // galera vraagt de toestand van Galera op een node; nil als er geen MariaDB

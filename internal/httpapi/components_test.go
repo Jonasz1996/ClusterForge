@@ -159,12 +159,18 @@ func (g *galeraHosts) update() {
 }
 
 // restart sluit een node die niet meedoet aan bij het cluster; zonder
-// cluster startt hij niet, zoals Galera zonder Primary component.
+// cluster startt hij niet, zoals Galera zonder Primary component. De enige
+// node die meedoet, stopt het cluster met zijn herstart, en vindt daarna
+// niemand om bij aan te sluiten.
 func (g *galeraHosts) restart(name string, h *agenttest.Host) {
 	g.mu.Lock()
 	member, alive := slices.Contains(g.members, name), len(g.members) > 0
+	alone := member && len(g.members) == 1
 	g.mu.Unlock()
 	switch {
+	case alone:
+		g.leave(name, h)
+		h.SetUnit("mariadb", agenttest.Unit{Enabled: true, Failed: true})
 	case member:
 	case alive:
 		g.join(name, h, false)
@@ -287,7 +293,7 @@ func TestClusterComponent(t *testing.T) {
 		}
 		if n.Hostname != []string{"nc1", "nc2", "nc3"}[i] || n.Role != "data" || n.Index != i+1 || n.Address != "10.0.20.18"+string(rune('6'+i)) ||
 			n.Os != "Debian GNU/Linux 13 (trixie)" || n.MemoryBytes != 4<<30 || n.NeedBytes != 812<<20 || n.DiskMount != "/" ||
-			!slices.Equal(n.Steps, []string{"pakketten: mariadb-server, mariadb-backup, galera-4, socat", "map /var/lib/clusterforge",
+			!slices.Equal(n.Steps, []string{"pakketten: mariadb-server, mariadb-backup, galera-4, socat", "de scripts van Galera (mariadb-server-galera)", "map /var/lib/clusterforge",
 				"bestand /etc/mysql/mariadb.conf.d/99-clusterforge-galera.cnf", join, "service mariadb",
 				"SST-gebruiker mysql via de socket"}) {
 			t.Errorf("plan voor %d: %+v", i, n)

@@ -137,7 +137,7 @@ function RunDialog({ r, p, onClose }: { r: HealReport; p: HealPlan; onClose: () 
   const prod = r.cluster_environment === "prod";
   const begins = p.action === "galera" && !p.nodes.some((n) => n.primary);
   return (
-    <Modal title={`${r.cluster_name || r.engine} herstellen`} onClose={onClose} wide>
+    <Modal title={`${r.hostname || r.cluster_name || r.engine} herstellen`} onClose={onClose} wide>
       <div className="space-y-4 text-sm">
         <p>ClusterForge doet dit, stap voor stap, als een taak die je kunt volgen:</p>
         <ol className="list-decimal space-y-1 pl-5">

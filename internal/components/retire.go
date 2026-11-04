@@ -253,7 +253,10 @@ func retireSource(members []databases.Group, rows []store.ListDoneDBMigrationsRo
 		if g.ClusterID != nil {
 			clusters[*g.ClusterID] = true
 			src.ClusterID = g.ClusterID
-			src.Name = cmp.Or(src.Name, g.ClusterName)
+			// Een losse server in een cluster heet naar zijn node.
+			if g.NodeID == nil {
+				src.Name = cmp.Or(src.Name, g.ClusterName)
+			}
 		}
 		for _, sv := range g.Servers {
 			if !slices.Contains(src.Servers, sv.Hostname) {

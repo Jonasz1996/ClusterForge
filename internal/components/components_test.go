@@ -2,6 +2,10 @@ package components
 
 import (
 	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -9,6 +13,7 @@ import (
 
 	"github.com/Jonasz1996/clusterforge/internal/deploy"
 	"github.com/Jonasz1996/clusterforge/internal/deps"
+	"github.com/Jonasz1996/clusterforge/internal/galera"
 	"github.com/Jonasz1996/clusterforge/internal/store"
 	"github.com/Jonasz1996/clusterforge/internal/templates"
 	"github.com/Jonasz1996/clusterforge/pkg/protocol"
@@ -119,6 +124,11 @@ func TestArbiter(t *testing.T) {
 	if !strings.Contains(garb, `GALERA_NODES="10.0.20.186:4567 10.0.20.187:4567"`) || !strings.Contains(garb, `GALERA_GROUP="nextcloud"`) {
 		t.Errorf("garb:\n%s", garb)
 	}
+	// garbd draait niet als root; een logbestand dat hij niet mag openen,
+	// laat hem meteen stoppen.
+	if regexp.MustCompile(`(?m)^\s*(export\s+)?LOG_FILE=`).MatchString(garb) {
+		t.Errorf("garb met een logbestand:\n%s", garb)
+	}
 	if steps[0].Package == nil || steps[0].Package.Names[0] != "galera-arbitrator-4" || steps[len(steps)-1].Service.Name != "garb" {
 		t.Errorf("stappen van de scheidsrechter: %+v", steps)
 	}
@@ -128,27 +138,200 @@ func TestArbiter(t *testing.T) {
 }
 
 // TestBootstrap: alleen de eerste node van een nieuw cluster begint het, en
-// een node die al Primary is, krijgt alleen het merkteken.
+// een node die al Primary is, krijgt alleen het merkteken. Met again komen
+// er twee stappen bij die het cluster ook met het merkteken beginnen, maar
+// niet op een node met databases met tabellen.
 func TestBootstrap(t *testing.T) {
 	tpl, spec, states := galeraSpec(t, false)
 	steps := render(t, tpl, spec, states, 0)
-	out, err := bootstrap(steps, "nextcloud", false)
+	out, err := bootstrap(steps, "nextcloud", false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	i := slicesIndex(out, func(s templates.Step) bool { return s.Command != nil && s.Command.Creates == Marker("nextcloud") })
-	if out[i].Command.Run != "systemctl stop mariadb && galera_new_cluster && touch /var/lib/clusterforge/galera-nextcloud" {
-		t.Errorf("beginnen: %q", out[i].Command.Run)
+	if out[i].Command.Run != "systemctl stop mariadb && galera_new_cluster && touch /var/lib/clusterforge/galera-nextcloud" || len(out) != len(steps) {
+		t.Errorf("beginnen: %q, %d stappen", out[i].Command.Run, len(out))
 	}
 	if steps[i].Command.Run == out[i].Command.Run {
 		t.Error("bootstrap veranderde de stappen van de aanroeper")
 	}
-	out, _ = bootstrap(steps, "nextcloud", true)
+	out, _ = bootstrap(steps, "nextcloud", true, false)
 	if out[i].Command.Run != "touch /var/lib/clusterforge/galera-nextcloud" {
 		t.Errorf("al Primary: %q", out[i].Command.Run)
 	}
-	if _, err := bootstrap(steps, "ander", false); err == nil {
+	// Al Primary: niets opnieuw beginnen, ook niet met again.
+	if out, _ = bootstrap(steps, "nextcloud", true, true); len(out) != len(steps) {
+		t.Errorf("al Primary met again: %d stappen", len(out))
+	}
+	if _, err := bootstrap(steps, "ander", false, false); err == nil {
 		t.Error("een ander merkteken gaf geen fout")
+	}
+
+	out, _ = bootstrap(steps, "nextcloud", false, true)
+	if len(out) != len(steps)+2 || out[i].Command.Creates != Marker("nextcloud") {
+		t.Fatalf("again: %+v", out)
+	}
+	data, begin := out[i+1], out[i+2]
+	if data.Title != dataTitle || data.Command.Creates != "" || !strings.HasPrefix(data.Command.Unless, protocol.DBCheckCommand+" || ") ||
+		!strings.Contains(data.Command.Run, "exit 3") || !strings.Contains(data.Command.Run, "/var/lib/mysql/*/") {
+		t.Errorf("nakijken: %+v %+v", data, data.Command)
+	}
+	if begin.Title != "het Galera-cluster opnieuw beginnen" || begin.Command.Creates != "" || begin.Command.Unless != protocol.DBCheckCommand ||
+		begin.Command.Run != "("+galera.BootstrapAny+") && touch /var/lib/clusterforge/galera-nextcloud" {
+		t.Errorf("opnieuw beginnen: %+v %+v", begin, begin.Command)
+	}
+	if out[i+3].Service == nil || out[i+3].Service.Name != "mariadb" {
+		t.Errorf("na het beginnen: %+v", out[i+3])
+	}
+}
+
+// TestUserDatabases speelt het script na dat de databases met tabellen in
+// de datamap noemt: die van MariaDB zelf en lege databases tellen niet.
+func TestUserDatabases(t *testing.T) {
+	if _, err := exec.LookPath("sh"); err != nil {
+		t.Skip("geen sh")
+	}
+	dir := t.TempDir()
+	script := strings.ReplaceAll(userDatabases, galera.DataDir, dir)
+	// De status telt niet: het script staat altijd in $(...).
+	run := func() string {
+		out, _ := exec.Command("sh", "-c", script).Output()
+		return string(out)
+	}
+	if got := run(); got != "" {
+		t.Errorf("lege datamap: %q", got)
+	}
+	for _, f := range []string{"mysql/user.MAI", "performance_schema/db.opt", "sys/sys_config.ibd", "#innodb_redo/#ib_redo1", "test/db.opt", "leeg/.keep"} {
+		writeTestFile(t, filepath.Join(dir, f))
+	}
+	_ = os.Remove(filepath.Join(dir, "leeg/.keep"))
+	writeTestFile(t, filepath.Join(dir, "grastate.dat"))
+	if got := run(); got != "" {
+		t.Errorf("alleen MariaDB zelf: %q", got)
+	}
+	writeTestFile(t, filepath.Join(dir, "zabbix_proef/history.ibd"))
+	writeTestFile(t, filepath.Join(dir, "zabbix_proef/db.opt"))
+	writeTestFile(t, filepath.Join(dir, "nextcloud/oc_users.frm"))
+	if got := run(); got != "nextcloud zabbix_proef " {
+		t.Errorf("met data: %q", got)
+	}
+}
+
+func writeTestFile(t *testing.T, p string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestOnlyHolder: de eerste node begint het cluster alleen opnieuw als
+// geen andere datanode data van het cluster kan hebben.
+func TestOnlyHolder(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		peers []peer
+		ok    bool
+		why   string
+	}{
+		{"geen andere datanodes", nil, true, ""},
+		{"nergens MariaDB", []peer{{host: "nc2"}, {host: "nc3"}}, true, ""},
+		{"nog nooit in een cluster", []peer{{host: "nc2", server: true, fresh: true}, {host: "nc3"}}, true, ""},
+		{"draait", []peer{{host: "nc2"}, {host: "nc3", server: true, running: true}}, false, "op nc3 draait MariaDB"},
+		{"zat in een cluster", []peer{{host: "nc2", server: true}}, false, "nc2 zat al in een Galera-cluster en kan nieuwere data hebben"},
+		{"antwoordt niet", []peer{{host: "nc2", err: errors.New("de agent is offline")}}, false, "nc2 zegt niet of daar data staat (de agent is offline)"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ok, why := onlyHolder(tc.peers)
+			if ok != tc.ok || why != tc.why {
+				t.Errorf("%v %q, verwacht %v %q", ok, why, tc.ok, tc.why)
+			}
+		})
+	}
+}
+
+// TestPeerOf: een andere datanode telt alleen als zonder data als zijn
+// MariaDB zeker stilstaat en hij zeker nog nooit in een cluster zat.
+func TestPeerOf(t *testing.T) {
+	const clusterUUID = "5c3a1e0e-0000-11f0-9a3b-7e1c2d3f4a5b"
+	stopped := &protocol.DBServer{Active: "failed"}
+	for _, tc := range []struct {
+		name   string
+		srv    *protocol.DBServer
+		err    error
+		pos    *protocol.DBPositionResult
+		posErr error
+		ok     bool
+		why    string
+	}{
+		{"geen MariaDB", nil, nil, nil, nil, true, ""},
+		{"volgens InnoDB nooit in een cluster", stopped, nil, &protocol.DBPositionResult{UUID: galera.NoUUID, Seqno: -1, From: protocol.DBFromRecovery, Via: "galera_recovery"}, nil, true, ""},
+		// Alleen grastate.dat zegt het niet zeker: een teruggezette
+		// back-up heeft er geen, en Galera zet er nullen in bij een
+		// volledige kopie.
+		{"geen grastate.dat, InnoDB niet gelezen", stopped, nil, &protocol.DBPositionResult{Seqno: -1, Error: galera.NoGrastate}, nil, false,
+			"nc2 zegt niet of daar data staat (" + galera.NoGrastate + ")"},
+		{"uuid van nullen in grastate.dat, recovery mislukt", stopped, nil, &protocol.DBPositionResult{UUID: galera.NoUUID, Seqno: -1, From: protocol.DBFromGrastate, Error: "galera_recovery: exit status 1"}, nil, false,
+			"nc2 zegt niet of daar data staat (galera_recovery: exit status 1)"},
+		{"teruggezette back-up", stopped, nil, &protocol.DBPositionResult{UUID: clusterUUID, Seqno: 9000, From: protocol.DBFromRecovery}, nil, false,
+			"nc2 zat al in een Galera-cluster en kan nieuwere data hebben"},
+		{"zat in een cluster, recovery mislukt", stopped, nil, &protocol.DBPositionResult{UUID: clusterUUID, Seqno: -1, From: protocol.DBFromGrastate, Error: "galera_recovery: exit status 1"}, nil, false,
+			"nc2 zat al in een Galera-cluster en kan nieuwere data hebben"},
+		{"grastate.dat leeg", stopped, nil, &protocol.DBPositionResult{Error: "grastate.dat heeft geen uuid"}, nil, false,
+			"nc2 zegt niet of daar data staat (grastate.dat heeft geen uuid)"},
+		{"grastate.dat niet te lezen", stopped, nil, &protocol.DBPositionResult{Error: "open /var/lib/mysql/grastate.dat: permission denied"}, nil, false,
+			"nc2 zegt niet of daar data staat (open /var/lib/mysql/grastate.dat: permission denied)"},
+		{"positie zonder antwoord", stopped, nil, nil, errors.New("de agent antwoordde niet op tijd"), false, "nc2 zegt niet of daar data staat (de agent antwoordde niet op tijd)"},
+		{"draait intussen", stopped, nil, &protocol.DBPositionResult{Running: true, Error: "status: geen antwoord"}, nil, false, "op nc2 draait MariaDB"},
+		{"start nog (volledige kopie)", &protocol.DBServer{Active: "activating", Error: "geen socket"}, nil, nil, nil, false, "op nc2 draait MariaDB"},
+		{"unit draait, agent kan er niet in", &protocol.DBServer{Active: "active", Error: "Access denied"}, nil, nil, nil, false, "op nc2 draait MariaDB"},
+		{"status zonder antwoord", nil, errors.New("de agent is offline"), nil, nil, false, "nc2 zegt niet of daar data staat (de agent is offline)"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			asked := false
+			p := peerOf("nc2", tc.srv, tc.err, func() (*protocol.DBPositionResult, error) {
+				asked = true
+				if tc.pos == nil && tc.posErr == nil {
+					t.Fatal("positie gevraagd")
+				}
+				return tc.pos, tc.posErr
+			})
+			if ok, why := onlyHolder([]peer{p}); ok != tc.ok || why != tc.why {
+				t.Errorf("%v %q, verwacht %v %q (%+v, positie gevraagd: %v)", ok, why, tc.ok, tc.why, p, asked)
+			}
+		})
+	}
+}
+
+// TestOutside: de eerste node begint het cluster alleen opnieuw als hij
+// zeker niet meer in een Primary component zit; een donor doet nog mee.
+func TestOutside(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		srv  *protocol.DBServer
+		err  error
+		ok   bool
+		why  string
+	}{
+		{"geen MariaDB", nil, nil, true, ""},
+		{"gestopt na een fout", &protocol.DBServer{Active: "failed"}, nil, true, ""},
+		{"gestopt", &protocol.DBServer{Active: "inactive"}, nil, true, ""},
+		{"draait zonder Galera", &protocol.DBServer{Active: "active", Running: true}, nil, true, ""},
+		{"status van Galera niet te lezen", &protocol.DBServer{Active: "active", Running: true, Error: "status: timeout"}, nil, false,
+			"ZabbixHa1 zegt niet of MariaDB in een Primary component zit (status: timeout)"},
+		{"non-Primary", &protocol.DBServer{Active: "active", Running: true, Galera: &protocol.DBGalera{ClusterName: "zabbix", ClusterStatus: "non-Primary", State: "Initialized"}}, nil, true, ""},
+		{"donor", &protocol.DBServer{Active: "active", Running: true, Galera: &protocol.DBGalera{ClusterName: "zabbix", ClusterStatus: "Primary", State: "Donor/Desynced"}}, nil, false,
+			"MariaDB op ZabbixHa1 zit nog in een Primary component (Donor/Desynced)"},
+		{"start nog", &protocol.DBServer{Active: "activating"}, nil, false, "MariaDB op ZabbixHa1 is activating"},
+		{"zonder antwoord", nil, errors.New("de agent is offline"), false, "ZabbixHa1 zegt niet hoe MariaDB ervoor staat (de agent is offline)"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if ok, why := outside(tc.srv, tc.err, "ZabbixHa1"); ok != tc.ok || why != tc.why {
+				t.Errorf("%v %q, verwacht %v %q", ok, why, tc.ok, tc.why)
+			}
+		})
 	}
 }
 

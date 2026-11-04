@@ -18,7 +18,7 @@ func (s *Server) ListDatabases(w http.ResponseWriter, r *http.Request) {
 	items := make([]gen.DatabaseGroup, 0, len(groups))
 	for _, g := range groups {
 		out := gen.DatabaseGroup{
-			ClusterId: nullableOf(g.ClusterID), ClusterName: g.ClusterName, ClusterSlug: g.ClusterSlug,
+			ClusterId: nullableOf(g.ClusterID), NodeId: nullableOf(g.NodeID), ClusterName: g.ClusterName, ClusterSlug: g.ClusterSlug,
 			ClusterEnvironment: nullable.NewNullNullable[gen.Environment](),
 			Engine:             gen.DatabaseGroupEngine(g.Engine), Kind: gen.DatabaseGroupKind(g.Kind), Health: gen.DatabaseGroupHealth(g.Health),
 			Summary: g.Summary, Version: g.Version, DatabasesFrom: g.DatabasesFrom, DatabasesTotal: g.DatabasesTotal,

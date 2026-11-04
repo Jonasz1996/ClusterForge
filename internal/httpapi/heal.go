@@ -91,7 +91,8 @@ func (s *Server) healError(w http.ResponseWriter, r *http.Request, err error) {
 
 func toAPIHealReport(rep heal.Report) gen.HealReport {
 	out := gen.HealReport{
-		Key: rep.Key, ClusterId: nullableOf(rep.ClusterID), ClusterName: rep.ClusterName, ClusterSlug: rep.ClusterSlug,
+		Key: rep.Key, ClusterId: nullableOf(rep.ClusterID), NodeId: nullableOf(rep.NodeID), Hostname: rep.Hostname,
+		ClusterName: rep.ClusterName, ClusterSlug: rep.ClusterSlug,
 		ClusterEnvironment: nullable.NewNullNullable[gen.Environment](), Engine: gen.HealReportEngine(rep.Engine), Kind: rep.Kind,
 		Health: rep.Health, Problems: make([]gen.HealProblem, 0, len(rep.Problems)), Plan: nullable.NewNullNullable[gen.HealPlan](),
 		LastRun: nullable.NewNullNullable[gen.HealRun](),

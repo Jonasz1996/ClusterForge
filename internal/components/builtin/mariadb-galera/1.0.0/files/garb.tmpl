@@ -1,6 +1,8 @@
 # Beheerd door ClusterForge: de scheidsrechter van de database van cluster
 # {{ .cluster.slug }}.
+# Geen LOG_FILE: garbd draait niet als root (op Debian 13 als _galera) en
+# mag niet in /var/log schrijven; met een logbestand daar stopt hij meteen.
+# Zonder logt hij naar de journal van garb.
 GALERA_NODES="{{ $first := true }}{{ range .nodes }}{{ if eq .role "data" }}{{ if not $first }} {{ end }}{{ .address }}:4567{{ $first = false }}{{ end }}{{ end }}"
 GALERA_GROUP="{{ .cluster.slug }}"
 GALERA_OPTIONS=""
-LOG_FILE="/var/log/garbd.log"

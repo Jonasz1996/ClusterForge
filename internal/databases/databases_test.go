@@ -388,3 +388,92 @@ func TestUsers(t *testing.T) {
 		t.Fatalf("nextcloud na dertig dagen: %+v", nc)
 	}
 }
+
+// TestOverviewArbiter: het zabbix-cluster van Jonas, met de uitrol van het
+// onderdeel MariaDB nog niet af. Zabbixproxy is de scheidsrechter en heeft
+// zijn eigen MariaDB zonder Galera, voor de Zabbix-proxy. Die is een losse
+// server in het cluster, niet een node van de database van het cluster.
+func TestOverviewArbiter(t *testing.T) {
+	pool := storetest.DB(t)
+	ctx := context.Background()
+	var zabbix uuid.UUID
+	if err := pool.QueryRow(ctx, `INSERT INTO clusters (slug, name, type, environment) VALUES ('zabbix', 'zabbix', 'generic', 'test') RETURNING id`).Scan(&zabbix); err != nil {
+		t.Fatal(err)
+	}
+	ha1 := seedNode(t, pool, "ZabbixHa1", &zabbix, 9, time.Second, "", "mariadb")
+	ha2 := seedNode(t, pool, "ZabbixHa2", &zabbix, 9, time.Second, "")
+	proxy := seedNode(t, pool, "Zabbixproxy", &zabbix, 9, time.Second, "", "mariadb", "garb")
+	spec, _ := json.Marshal(map[string]any{"nodes": []map[string]any{
+		{"node_id": ha1, "hostname": "ZabbixHa1", "role": "data", "index": 1},
+		{"node_id": ha2, "hostname": "ZabbixHa2", "role": "data", "index": 2},
+		{"node_id": proxy, "hostname": "Zabbixproxy", "role": "arbiter", "index": 1},
+	}})
+	if _, err := pool.Exec(ctx, `INSERT INTO cluster_components (cluster_id, engine, spec) VALUES ($1, 'mariadb', $2)`, zabbix, spec); err != nil {
+		t.Fatal(err)
+	}
+	ga := galeraNode("192.168.10.134", "Synced", 4)
+	ga.Galera.ClusterName, ga.Galera.ClusterSize, ga.Galera.Members = "zabbix", 1, nil
+	ga.Databases = []protocol.DBDatabase{{Name: "zabbix", SizeBytes: 1 << 30, Tables: 200}}
+	standalone := protocol.DBServer{
+		Engine: protocol.DBMariaDB, Unit: "mariadb", Active: "active", Running: true, Version: "11.8.3", Role: protocol.DBRoleStandalone,
+		Databases: []protocol.DBDatabase{{Name: "zabbix_proxy", SizeBytes: 64 << 20, Tables: 180}}, DatabasesTotal: 1,
+	}
+	bus := &fakeBus{res: map[uuid.UUID]protocol.DBResponse{}, err: map[uuid.UUID]error{}}
+	bus.set(ha1, protocol.DBResponse{Servers: []protocol.DBServer{ga}}, nil)
+	bus.set(proxy, protocol.DBResponse{Servers: []protocol.DBServer{standalone}}, nil)
+	s := NewService(pool, bus, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	if err := s.SyncAll(ctx); err != nil {
+		t.Fatal(err)
+	}
+	check := func(when string, wantCluster, wantProxy string) {
+		t.Helper()
+		groups, err := s.Overview(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(groups) != 2 {
+			t.Fatalf("%s: %d groepen: %+v", when, len(groups), groups)
+		}
+		gc, gp := groups[0], groups[1]
+		if gc.Key() != "mariadb/"+zabbix.String() || gc.NodeID != nil || len(gc.Servers) != 1 || gc.Servers[0].Hostname != "ZabbixHa1" ||
+			gc.Kind+" "+gc.Health+" "+gc.Summary != wantCluster {
+			t.Errorf("%s: cluster: %s %+v", when, gc.Key(), gc)
+		}
+		if gp.Key() != "mariadb/node/"+proxy.String() || gp.NodeID == nil || *gp.NodeID != proxy || gp.ClusterID == nil || *gp.ClusterID != zabbix ||
+			gp.ClusterName != "zabbix" || gp.ClusterEnv != "test" || len(gp.Servers) != 1 || gp.Kind+" "+gp.Health+" "+gp.Summary != wantProxy {
+			t.Errorf("%s: proxy: %s %+v", when, gp.Key(), gp)
+		}
+	}
+	check("beide draaien", "galera ok 1 van 1 nodes Synced.", "single ok Draait.")
+	g, _ := s.Overview(ctx)
+	if d := g[0].Databases; len(d) != 1 || d[0].Name != "zabbix" {
+		t.Errorf("databases van het cluster: %+v", d)
+	}
+	if d := g[1].Databases; len(d) != 1 || d[0].Name != "zabbix_proxy" || g[1].DatabasesFrom != "Zabbixproxy" {
+		t.Errorf("databases van de proxy: %+v", g[1])
+	}
+
+	// Staat ZabbixHa1 stil, dan komt de lijst van het cluster niet van de
+	// proxy, en een gestopte proxy blijft een losse server.
+	ga.Running, ga.Active, ga.Galera = false, "failed", nil
+	standalone.Running, standalone.Active = false, "inactive"
+	bus.set(ha1, protocol.DBResponse{Servers: []protocol.DBServer{ga}}, nil)
+	bus.set(proxy, protocol.DBResponse{Servers: []protocol.DBServer{standalone}}, nil)
+	if err := s.SyncAll(ctx); err != nil {
+		t.Fatal(err)
+	}
+	check("beide stil", "single down Geen enkele server antwoordt.", "single down Geen enkele server antwoordt.")
+
+	// Zonder onderdeel is er niets dat zegt dat Zabbixproxy de
+	// scheidsrechter is: dan hoort hij bij het cluster, zoals voorheen.
+	if _, err := pool.Exec(ctx, `DELETE FROM cluster_components`); err != nil {
+		t.Fatal(err)
+	}
+	groups, err := s.Overview(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(groups) != 1 || groups[0].NodeID != nil || len(groups[0].Servers) != 2 {
+		t.Errorf("zonder onderdeel: %+v", groups)
+	}
+}

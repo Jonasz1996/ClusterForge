@@ -6000,6 +6000,13 @@ export interface components {
             key: string;
             /** Format: uuid */
             cluster_id: string | null;
+            /**
+             * Format: uuid
+             * @description De node van een losse server, zoals bij DatabaseGroup
+             */
+            node_id: string | null;
+            /** @description De hostname van die node; leeg bij de database van een cluster */
+            hostname: string;
             cluster_name: string;
             cluster_slug: string;
             cluster_environment: components["schemas"]["Environment"] | null;
@@ -6011,7 +6018,7 @@ export interface components {
             plan: components["schemas"]["HealPlan"] | null;
             /** @description De laatste taak heal.run van deze database in het afgelopen etmaal. */
             last_run: components["schemas"]["HealRun"] | null;
-            /** @description Zelfherstel vanzelf van het cluster; null bij een losse node. */
+            /** @description Zelfherstel vanzelf van het cluster, ook voor een losse server in een cluster; null bij een node zonder cluster. */
             auto: components["schemas"]["HealAuto"] | null;
         };
         HealAutoSetting: {
@@ -6044,7 +6051,7 @@ export interface components {
         HealProblem: {
             /**
              * @description no_inspect, unit_stopped, process_hung, process_outside_unit, unit_disabled, galera_wrong_address,
-             *     galera_no_primary, disk_full of no_quorum.
+             *     galera_no_primary, galera_package, galera_new_cluster_flag, component_unfinished, disk_full of no_quorum.
              */
             code: string;
             /** @enum {string} */
@@ -6083,12 +6090,21 @@ export interface components {
             node_address: string;
             file: string;
         };
-        /** @description Eén databasecluster, de servers van één engine in één cluster, of één losse node. */
+        /**
+         * @description Eén databasecluster, de servers van één engine in één cluster, of één losse server: een node zonder cluster, of een server
+         *     op de scheidsrechter van het onderdeel van ClusterForge in een cluster. Het onderdeel zet daar geen databaseserver, dus die
+         *     hoort niet bij de database van het cluster.
+         */
         DatabaseGroup: {
             /** @description Uniek per groep, voor de webinterface */
             key: string;
             /** Format: uuid */
             cluster_id: string | null;
+            /**
+             * Format: uuid
+             * @description De node van een losse server; null bij de database van een cluster
+             */
+            node_id: string | null;
             cluster_name: string;
             cluster_slug: string;
             cluster_environment: components["schemas"]["Environment"] | null;
