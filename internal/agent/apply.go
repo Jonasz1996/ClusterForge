@@ -64,6 +64,12 @@ func (a *Agent) applyStep(ctx context.Context, s protocol.Step) (bool, []string,
 		return a.applyDirectory(s.Directory)
 	case "command":
 		return a.applyCommand(ctx, s.Command)
+	case "repo_deb":
+		return a.applyRepoDeb(ctx, s.RepoDeb)
+	case "repo":
+		return a.applyRepo(ctx, s.Repo)
+	case "ini_set":
+		return a.applyIniSet(ctx, s.IniSet)
 	}
 	return false, nil, errors.New("onbekende of lege stap")
 }

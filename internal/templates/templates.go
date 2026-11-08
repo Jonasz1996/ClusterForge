@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"path"
 	"regexp"
 	"slices"
 	"strconv"
@@ -53,6 +54,62 @@ type DatabaseInfo struct {
 	Engine string `yaml:"engine"`
 	// Role is de rol waarvan de nodes de database krijgen.
 	Role string `yaml:"role"`
+	// Settings zijn de instellingen van het onderdeel, zoals buffer_pool en
+	// max_connections; wat ontbreekt, krijgt de standaard.
+	Settings map[string]any `yaml:"settings"`
+	// Steps zijn de database-instructies van een recept (fase 9): ze lopen
+	// één keer, nadat de database er is.
+	Steps []DBStep `yaml:"steps"`
+	// Host is het adres waarmee de apps de database bereiken, zoals
+	// {{ .params.vip }} of localhost; leeg als de template het niet zegt.
+	Host string `yaml:"host,omitempty"`
+}
+
+// DBStep is een database-instructie van een recept: db_database, db_user
+// of db_import. Wachtwoord en andere tekst mogen {{ .params.x }} bevatten.
+type DBStep struct {
+	Kind           string `yaml:"kind" json:"kind"`
+	Database       string `yaml:"database,omitempty" json:"database,omitempty"`
+	Charset        string `yaml:"charset,omitempty" json:"charset,omitempty"`
+	Collation      string `yaml:"collation,omitempty" json:"collation,omitempty"`
+	User           string `yaml:"user,omitempty" json:"user,omitempty"`
+	Password       string `yaml:"password,omitempty" json:"password,omitempty"`
+	GrantOn        string `yaml:"grant_on,omitempty" json:"grant_on,omitempty"`
+	Path           string `yaml:"path,omitempty" json:"path,omitempty"`
+	TrustFunctions bool   `yaml:"trust_functions,omitempty" json:"trust_functions,omitempty"`
+	Unless         string `yaml:"unless,omitempty" json:"unless,omitempty"`
+}
+
+var dbStepKinds = map[string]bool{"db_database": true, "db_user": true, "db_import": true}
+
+// DBHost geeft het adres van de database voor de apps, met de parameters
+// ingevuld; leeg als de template het niet zegt.
+func (t *Template) DBHost(c Context) (string, error) {
+	if t.Database == nil {
+		return "", nil
+	}
+	return expandString(t.Database.Host, c.data())
+}
+
+// RenderDBSteps vult de parameters en geheimen in de database-instructies
+// in.
+func (t *Template) RenderDBSteps(c Context) ([]DBStep, error) {
+	if t.Database == nil {
+		return nil, nil
+	}
+	data := c.data()
+	out := make([]DBStep, 0, len(t.Database.Steps))
+	for i, st := range t.Database.Steps {
+		for _, f := range []*string{&st.Database, &st.Charset, &st.Collation, &st.User, &st.Password, &st.GrantOn, &st.Path, &st.Unless} {
+			v, err := expandString(*f, data)
+			if err != nil {
+				return nil, fmt.Errorf("database-instructie %d: %w", i+1, err)
+			}
+			*f = v
+		}
+		out = append(out, st)
+	}
+	return out, nil
 }
 
 // ComponentType is het cluster_type van een onderdeel: stappen die op de
@@ -216,6 +273,11 @@ func Parse(fsys fs.FS) (*Template, error) {
 			return nil, fmt.Errorf("database: onbekende rol %q", d.Role)
 		case t.ClusterType == "kubernetes":
 			return nil, errors.New("database: hoort niet bij cluster_type kubernetes")
+		}
+		for i, st := range d.Steps {
+			if !dbStepKinds[st.Kind] {
+				return nil, fmt.Errorf("database: instructie %d: kind is db_database, db_user of db_import", i+1)
+			}
 		}
 	}
 	if err := t.checkServices(); err != nil {
@@ -547,6 +609,21 @@ type stepSpec struct {
 	User      *protocol.UserStep      `json:"user"`
 	Directory *protocol.DirectoryStep `json:"directory"`
 	Command   *commandSpec            `json:"command"`
+	// RepoDeb, Repo en IniSet komen uit recepten (fase 9) en vragen een
+	// agent met protocol.RecipeStepsSince.
+	RepoDeb *protocol.RepoDebStep `json:"repo_deb"`
+	Repo    *protocol.RepoStep    `json:"repo"`
+	IniSet  *iniSetSpec           `json:"ini_set"`
+	// Once zet de stap alleen op de eerste node van de rol (ONCE in een
+	// recept), zoals een schema dat één keer in de gedeelde database komt.
+	Once bool `json:"once"`
+}
+
+// iniSetSpec is een ini_set met, zoals bij een bestand, de services die
+// herstarten als de waarde veranderde.
+type iniSetSpec struct {
+	protocol.IniSetStep
+	Notify []string `json:"notify"`
 }
 
 // commandSpec is een commando met, zoals bij een bestand, de services die
@@ -590,8 +667,15 @@ func (t *Template) Steps(role string, c Context) ([]Step, error) {
 		if err := decodeStrict(v, &spec); err != nil {
 			return nil, fmt.Errorf("stap %d: %w", i+1, err)
 		}
-		s := Step{Step: protocol.Step{Package: spec.Package, Service: spec.Service, User: spec.User, Directory: spec.Directory}}
+		if spec.Once && c.Node.Index != 1 {
+			continue
+		}
+		s := Step{Step: protocol.Step{Package: spec.Package, Service: spec.Service, User: spec.User, Directory: spec.Directory,
+			RepoDeb: spec.RepoDeb, Repo: spec.Repo}}
 		var notify []string
+		if is := spec.IniSet; is != nil {
+			s.IniSet, notify = &is.IniSetStep, is.Notify
+		}
 		if c := spec.Command; c != nil {
 			s.Command, notify = &c.CommandStep, c.Notify
 		}
@@ -612,7 +696,7 @@ func (t *Template) Steps(role string, c Context) ([]Step, error) {
 			s.Notify = append(s.Notify, protocol.ServiceStep{Name: parts[1], State: notifyActions[parts[2]]})
 		}
 		if s.Kind() == "" {
-			return nil, fmt.Errorf("stap %d heeft precies één soort nodig (package, file, service, user, directory of command)", i+1)
+			return nil, fmt.Errorf("stap %d heeft precies één soort nodig (package, file, service, user, directory, command, repo_deb, repo of ini_set)", i+1)
 		}
 		s.Title = title(s.Step)
 		if c := spec.Command; c != nil && c.Title != "" {
@@ -665,6 +749,12 @@ func title(s protocol.Step) string {
 		return "map " + s.Directory.Path
 	case "command":
 		return "commando"
+	case "repo_deb":
+		return "pakketbron uit " + path.Base(s.RepoDeb.URL)
+	case "repo":
+		return "pakketbron " + s.Repo.Name
+	case "ini_set":
+		return s.IniSet.Key + " in " + s.IniSet.Path
 	}
 	return "stap"
 }

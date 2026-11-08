@@ -11,6 +11,7 @@ import { ConfirmDelete } from "@/components/inventory/ConfirmDelete";
 import { NodeForm } from "@/components/inventory/NodeForm";
 import { SpecCard } from "@/components/inventory/SpecCard";
 import { ClusterDatabaseCard } from "@/components/databases/ClusterDatabase";
+import { ConnectionCard } from "@/components/recipes/ConnectionCard";
 import { ClusterDepsCard } from "@/components/deps/ClusterDeps";
 import { ClusterDocsCard } from "@/components/docs/ClusterDocsCard";
 import { DisasterCard } from "@/components/disaster/Disaster";
@@ -165,6 +166,7 @@ function ClusterDetailInner() {
           {cluster.data.template_name && <GitCard c={cluster.data} isAdmin={isAdmin} />}
           <VipsCard c={cluster.data} isAdmin={isAdmin} />
           <ClusterDatabaseCard c={cluster.data} isAdmin={isAdmin} />
+          {cluster.data.template_name?.startsWith("eigen-") && <ConnectionCard clusterId={id} isAdmin={isAdmin} />}
           <ClusterDepsCard clusterId={id} isAdmin={isAdmin} />
           <FailoverCard clusterId={id} isAdmin={isAdmin} />
           <DisasterCard clusterId={id} isAdmin={isAdmin} />

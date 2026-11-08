@@ -85,7 +85,18 @@ func Ensure(req protocol.DBEnsureRequest) (string, error) {
 		if err := CheckDatabase(req.Database); err != nil {
 			return "", err
 		}
-		fmt.Fprintf(&b, "CREATE DATABASE IF NOT EXISTS %s CHARACTER SET utf8mb4;\n", quoteDB(req.Database, false))
+		cs := "utf8mb4"
+		if req.Charset != "" {
+			cs = req.Charset
+		}
+		if !charsetRe.MatchString(cs) || (req.Collation != "" && !charsetRe.MatchString(req.Collation)) {
+			return "", fmt.Errorf("tekenset %q of collatie %q", req.Charset, req.Collation)
+		}
+		fmt.Fprintf(&b, "CREATE DATABASE IF NOT EXISTS %s CHARACTER SET %s", quoteDB(req.Database, false), cs)
+		if req.Collation != "" {
+			fmt.Fprintf(&b, " COLLATE %s", req.Collation)
+		}
+		b.WriteString(";\n")
 	}
 	switch {
 	case req.User == "" && (req.Password != "" || req.Grant || len(req.Hosts) > 0):

@@ -64,6 +64,11 @@ type Service struct {
 	dep  *deploy.Service
 	ro   *rollout.Service
 
+	// Applied hoort dat een nieuwe revisie toegepast is zonder taak, omdat
+	// er op geen node iets verandert; nil voor niemand. De database-
+	// instructies van een samengesteld cluster lopen dan nog (fase 9).
+	Applied func(ctx context.Context, clusterID uuid.UUID)
+
 	// Interval is de tijd tussen twee polls; 0 laat Run niet pollen, alleen
 	// op Kick reageren.
 	Interval time.Duration

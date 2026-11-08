@@ -299,9 +299,15 @@ func enginePort(engine string) int {
 // database van t. Een fout van de agent wordt een ConflictError met de
 // naam van de node.
 func (s *Service) dbRequest(ctx context.Context, t dbTarget, req protocol.DBRequest) (protocol.DBResponse, error) {
-	ctx, cancel := context.WithTimeout(ctx, s.Timeout)
+	return s.dbRequestWithin(ctx, t, req, s.Timeout)
+}
+
+// dbRequestWithin is dbRequest met een eigen tijdslimiet, zoals voor het
+// laden van een schema.
+func (s *Service) dbRequestWithin(ctx context.Context, t dbTarget, req protocol.DBRequest, timeout time.Duration) (protocol.DBResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	req.ID, req.Deadline = uuid.NewString(), time.Now().Add(s.Timeout)
+	req.ID, req.Deadline = uuid.NewString(), time.Now().Add(timeout)
 	if t.engine == protocol.DBPostgreSQL {
 		req.Engine = t.engine
 	}

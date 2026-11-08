@@ -4059,6 +4059,15 @@ type BaselineResult struct {
 	Revision int `json:"revision"`
 }
 
+// Blueprint defines model for Blueprint.
+type Blueprint struct {
+	Composition Composition `json:"composition"`
+	CreatedAt   time.Time   `json:"created_at"`
+	Template    string      `json:"template"`
+	Title       string      `json:"title"`
+	Version     string      `json:"version"`
+}
+
 // ChangePasswordRequest defines model for ChangePasswordRequest.
 type ChangePasswordRequest struct {
 	CurrentPassword string `json:"current_password"`
@@ -4177,6 +4186,25 @@ type ClusterComponent struct {
 
 // ClusterComponentHealth Wat de bewaking laatst zag; leeg als ze nog niet keek of al twee minuten niet, zoals tijdens een taak. Telt mee in de status van het cluster
 type ClusterComponentHealth string
+
+// ClusterConnection defines model for ClusterConnection.
+type ClusterConnection struct {
+	// Available false voor een cluster zonder database uit recepten
+	Available bool     `json:"available"`
+	Databases []string `json:"databases"`
+	Engine    string   `json:"engine"`
+
+	// Host Het VIP, of localhost op de nodes met de database
+	Host string `json:"host"`
+	Port int    `json:"port"`
+
+	// Reason Waarom er geen verbinding is; leeg als available
+	Reason string `json:"reason"`
+
+	// Role De rol met de database
+	Role  string           `json:"role"`
+	Users []ConnectionUser `json:"users"`
+}
 
 // ClusterDetail defines model for ClusterDetail.
 type ClusterDetail struct {
@@ -5088,6 +5116,83 @@ type ComponentVIP struct {
 
 	// Vrid Het VRRP-id van een eigen VIP; 0 bij het VIP van de app
 	Vrid int `json:"vrid"`
+}
+
+// ComposeResult defines model for ComposeResult.
+type ComposeResult struct {
+	Created  bool     `json:"created"`
+	Template string   `json:"template"`
+	Version  string   `json:"version"`
+	Warnings []string `json:"warnings"`
+}
+
+// Composition defines model for Composition.
+type Composition struct {
+	Database *CompositionDatabase `json:"database,omitempty"`
+
+	// Name Korte naam; de template heet eigen-<naam>
+	Name  string            `json:"name"`
+	Roles []CompositionRole `json:"roles"`
+	Title string            `json:"title"`
+	Vip   *CompositionVIP   `json:"vip,omitempty"`
+}
+
+// CompositionDatabase defines model for CompositionDatabase.
+type CompositionDatabase struct {
+	// BufferPool innodb_buffer_pool_size per node, zoals 1G; leeg is de standaard
+	BufferPool *string `json:"buffer_pool,omitempty"`
+
+	// Extra Regels voor [mysqld], zoals max_allowed_packet = 64M
+	Extra *string `json:"extra,omitempty"`
+
+	// MaxConnections 0 is de standaard
+	MaxConnections *int   `json:"max_connections,omitempty"`
+	Role           string `json:"role"`
+}
+
+// CompositionRole defines model for CompositionRole.
+type CompositionRole struct {
+	Count  int     `json:"count"`
+	Cpu    *int    `json:"cpu,omitempty"`
+	Disk   *string `json:"disk,omitempty"`
+	Memory *string `json:"memory,omitempty"`
+	Name   string  `json:"name"`
+	Recipe string  `json:"recipe"`
+
+	// RecipeRole De ROLE uit het recept; leeg voor een recept zonder
+	RecipeRole    *string `json:"recipe_role,omitempty"`
+	RecipeVersion string  `json:"recipe_version"`
+}
+
+// CompositionVIP defines model for CompositionVIP.
+type CompositionVIP struct {
+	Role string `json:"role"`
+}
+
+// ConnectionRevealInput defines model for ConnectionRevealInput.
+type ConnectionRevealInput struct {
+	// Password Je wachtwoord
+	Password *string `json:"password,omitempty"`
+	Secret   string  `json:"secret"`
+
+	// TotpCode Je code
+	TotpCode *string `json:"totp_code,omitempty"`
+}
+
+// ConnectionSecret defines model for ConnectionSecret.
+type ConnectionSecret struct {
+	Secret string `json:"secret"`
+	Value  string `json:"value"`
+}
+
+// ConnectionUser defines model for ConnectionUser.
+type ConnectionUser struct {
+	// Database De database met alle rechten; leeg voor geen
+	Database string `json:"database"`
+	Name     string `json:"name"`
+
+	// Secret De naam van het geheim met het wachtwoord
+	Secret string `json:"secret"`
 }
 
 // CronGroup De cronjobs van één cluster, of van de nodes zonder cluster.
@@ -9918,6 +10023,128 @@ type ProxmoxStorage struct {
 	Type    string `json:"type"`
 }
 
+// RecipeCheck defines model for RecipeCheck.
+type RecipeCheck struct {
+	Diagnostics []RecipeDiag `json:"diagnostics"`
+
+	// Ok Geen fouten (waarschuwingen mogen)
+	Ok bool `json:"ok"`
+
+	// Recipe null als er fouten zijn
+	Recipe nullable.Nullable[RecipeParsed] `json:"recipe"`
+}
+
+// RecipeDiag defines model for RecipeDiag.
+type RecipeDiag struct {
+	Line    int    `json:"line"`
+	Message string `json:"message"`
+	Warning bool   `json:"warning"`
+}
+
+// RecipeExample defines model for RecipeExample.
+type RecipeExample struct {
+	Name   string `json:"name"`
+	Source string `json:"source"`
+	Title  string `json:"title"`
+}
+
+// RecipeParsed defines model for RecipeParsed.
+type RecipeParsed struct {
+	// DbConfig Instellingen van de databaseserver die het recept vraagt (DBCONFIG)
+	DbConfig []struct {
+		Key  string `json:"key"`
+		Line int    `json:"line"`
+
+		// Min Een ondergrens: een hogere waarde blijft
+		Min   *bool  `json:"min,omitempty"`
+		Value string `json:"value"`
+	} `json:"db_config"`
+	From  string `json:"from"`
+	Name  string `json:"name"`
+	Needs []struct {
+		// Engine mariadb of postgresql bij database
+		Engine *string `json:"engine,omitempty"`
+
+		// Service vip of database
+		Service string `json:"service"`
+	} `json:"needs"`
+	Params []struct {
+		Default *string `json:"default,omitempty"`
+		Length  *int    `json:"length,omitempty"`
+		Line    int     `json:"line"`
+		Name    string  `json:"name"`
+
+		// Type string, int, bool, ipv4, size, version of secret
+		Type string `json:"type"`
+	} `json:"params"`
+	Roles []struct {
+		Health []struct {
+			Expect *int `json:"expect,omitempty"`
+
+			// Kind service, http, port of db
+			Kind   string  `json:"kind"`
+			Line   int     `json:"line"`
+			Target *string `json:"target,omitempty"`
+		} `json:"health"`
+
+		// Name Leeg: geldt voor de rol waar je het recept aan koppelt
+		Name  string `json:"name"`
+		Steps []struct {
+			Kind string `json:"kind"`
+			Line int    `json:"line"`
+
+			// Once Loopt op één node
+			Once bool `json:"once"`
+
+			// Secret Er zit een geheim in; de inhoud staat alleen als {{ .params.naam }}
+			Secret bool `json:"secret"`
+
+			// Spec De stap in de vorm van template.yaml
+			Spec  map[string]interface{} `json:"spec"`
+			Title string                 `json:"title"`
+		} `json:"steps"`
+	} `json:"roles"`
+	Version string `json:"version"`
+}
+
+// RecipeSource defines model for RecipeSource.
+type RecipeSource struct {
+	// Source De tekst van het recept (hoogstens 256 KiB)
+	Source string `json:"source"`
+}
+
+// RecipeSummary defines model for RecipeSummary.
+type RecipeSummary struct {
+	Name      string    `json:"name"`
+	UpdatedAt time.Time `json:"updated_at"`
+
+	// Versions Nieuwste eerst
+	Versions []string `json:"versions"`
+}
+
+// RecipeVersion defines model for RecipeVersion.
+type RecipeVersion struct {
+	CreatedAt time.Time `json:"created_at"`
+
+	// CreatedBy Gebruikersnaam
+	CreatedBy nullable.Nullable[string] `json:"created_by"`
+	Name      string                    `json:"name"`
+	Source    string                    `json:"source"`
+	Version   string                    `json:"version"`
+}
+
+// RecipeVersionDetail defines model for RecipeVersionDetail.
+type RecipeVersionDetail struct {
+	Check     RecipeCheck `json:"check"`
+	CreatedAt time.Time   `json:"created_at"`
+
+	// CreatedBy Gebruikersnaam
+	CreatedBy nullable.Nullable[string] `json:"created_by"`
+	Name      string                    `json:"name"`
+	Source    string                    `json:"source"`
+	Version   string                    `json:"version"`
+}
+
 // RecoveryReport defines model for RecoveryReport.
 type RecoveryReport struct {
 	Clusters    []RecoveryReportCluster `json:"clusters"`
@@ -11607,6 +11834,9 @@ type DisableTotpJSONRequestBody = TotpDisableRequest
 // EnableTotpJSONRequestBody defines body for EnableTotp for application/json ContentType.
 type EnableTotpJSONRequestBody = TotpCodeRequest
 
+// ComposeBlueprintJSONRequestBody defines body for ComposeBlueprint for application/json ContentType.
+type ComposeBlueprintJSONRequestBody = Composition
+
 // CreateClusterJSONRequestBody defines body for CreateCluster for application/json ContentType.
 type CreateClusterJSONRequestBody = ClusterInput
 
@@ -11672,6 +11902,9 @@ type DropComponentUserJSONRequestBody = ComponentDropInput
 
 // SetComponentUserPasswordJSONRequestBody defines body for SetComponentUserPassword for application/json ContentType.
 type SetComponentUserPasswordJSONRequestBody = ComponentConfirmInput
+
+// RevealClusterConnectionSecretJSONRequestBody defines body for RevealClusterConnectionSecret for application/json ContentType.
+type RevealClusterConnectionSecretJSONRequestBody = ConnectionRevealInput
 
 // CreateDisasterScenarioJSONRequestBody defines body for CreateDisasterScenario for application/json ContentType.
 type CreateDisasterScenarioJSONRequestBody = DisasterScenarioInput
@@ -11847,6 +12080,12 @@ type SetBackupWatchJSONRequestBody = BackupWatchInput
 // VmActionJSONRequestBody defines body for VmAction for application/json ContentType.
 type VmActionJSONRequestBody = VmActionInput
 
+// SaveRecipeJSONRequestBody defines body for SaveRecipe for application/json ContentType.
+type SaveRecipeJSONRequestBody = RecipeSource
+
+// CheckRecipeJSONRequestBody defines body for CheckRecipe for application/json ContentType.
+type CheckRecipeJSONRequestBody = RecipeSource
+
 // AcceptRiskFindingJSONRequestBody defines body for AcceptRiskFinding for application/json ContentType.
 type AcceptRiskFindingJSONRequestBody = RiskAcceptanceInput
 
@@ -11957,6 +12196,12 @@ type ServerInterface interface {
 	// ListDatabaseBackups Per database van een cluster de nieuwste dump en hoe vers die is
 	// (GET /backups/databases)
 	ListDatabaseBackups(w http.ResponseWriter, r *http.Request)
+	// ListBlueprints Zelf samengestelde clusters, elk in de nieuwste versie
+	// (GET /blueprints)
+	ListBlueprints(w http.ResponseWriter, r *http.Request)
+	// ComposeBlueprint Een cluster samenstellen uit recepten
+	// (POST /blueprints)
+	ComposeBlueprint(w http.ResponseWriter, r *http.Request)
 	// ListClusters Alle clusters met aantallen nodes en VIP's
 	// (GET /clusters)
 	ListClusters(w http.ResponseWriter, r *http.Request)
@@ -12062,6 +12307,12 @@ type ServerInterface interface {
 	// SetComponentUserPassword Een gebruiker een nieuw wachtwoord geven (admin)
 	// (POST /clusters/{clusterId}/components/{componentId}/users/{user}/password)
 	SetComponentUserPassword(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID, user string)
+	// GetClusterConnection Hoe een app de database van een samengesteld cluster bereikt
+	// (GET /clusters/{clusterId}/connection)
+	GetClusterConnection(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
+	// RevealClusterConnectionSecret Het wachtwoord van een databasegebruiker tonen (admin)
+	// (POST /clusters/{clusterId}/connection/reveal)
+	RevealClusterConnectionSecret(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
 	// ListDisasterScenarios Rampoefeningen van een cluster met hun laatste run
 	// (GET /clusters/{clusterId}/disaster-scenarios)
 	ListDisasterScenarios(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
@@ -12566,6 +12817,27 @@ type ServerInterface interface {
 	// ListVmSnapshots Snapshots van een VM of container, rechtstreeks uit Proxmox
 	// (GET /proxmox/{proxmoxId}/vms/{vmid}/snapshots)
 	ListVmSnapshots(w http.ResponseWriter, r *http.Request, proxmoxId openapi_types.UUID, vmid int)
+	// ListRecipes Alle recepten met hun versies (fase 9)
+	// (GET /recipes)
+	ListRecipes(w http.ResponseWriter, r *http.Request)
+	// SaveRecipe Een recept als nieuwe versie bewaren (admin)
+	// (POST /recipes)
+	SaveRecipe(w http.ResponseWriter, r *http.Request)
+	// CheckRecipe Een recept controleren zonder het te bewaren
+	// (POST /recipes/check)
+	CheckRecipe(w http.ResponseWriter, r *http.Request)
+	// ListRecipeExamples Ingebouwde voorbeeldrecepten om mee te beginnen
+	// (GET /recipes/examples)
+	ListRecipeExamples(w http.ResponseWriter, r *http.Request)
+	// ListRecipeVersions Alle versies van een recept, nieuwste eerst
+	// (GET /recipes/{recipeName})
+	ListRecipeVersions(w http.ResponseWriter, r *http.Request, recipeName string)
+	// DeleteRecipeVersion Een versie van een recept verwijderen (admin)
+	// (DELETE /recipes/{recipeName}/versions/{recipeVersion})
+	DeleteRecipeVersion(w http.ResponseWriter, r *http.Request, recipeName string, recipeVersion string)
+	// GetRecipeVersion Eén versie van een recept, met wat ze per node doet
+	// (GET /recipes/{recipeName}/versions/{recipeVersion})
+	GetRecipeVersion(w http.ResponseWriter, r *http.Request, recipeName string, recipeVersion string)
 	// GetRecoveryReport Het rapport Herstelbaarheid van een maand
 	// (GET /reports/recovery)
 	GetRecoveryReport(w http.ResponseWriter, r *http.Request, params GetRecoveryReportParams)
@@ -12818,6 +13090,18 @@ func (_ Unimplemented) ListDatabaseBackups(w http.ResponseWriter, r *http.Reques
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// ListBlueprints Zelf samengestelde clusters, elk in de nieuwste versie
+// (GET /blueprints)
+func (_ Unimplemented) ListBlueprints(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ComposeBlueprint Een cluster samenstellen uit recepten
+// (POST /blueprints)
+func (_ Unimplemented) ComposeBlueprint(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // ListClusters Alle clusters met aantallen nodes en VIP's
 // (GET /clusters)
 func (_ Unimplemented) ListClusters(w http.ResponseWriter, r *http.Request) {
@@ -13025,6 +13309,18 @@ func (_ Unimplemented) DropComponentUser(w http.ResponseWriter, r *http.Request,
 // SetComponentUserPassword Een gebruiker een nieuw wachtwoord geven (admin)
 // (POST /clusters/{clusterId}/components/{componentId}/users/{user}/password)
 func (_ Unimplemented) SetComponentUserPassword(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, componentId openapi_types.UUID, user string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetClusterConnection Hoe een app de database van een samengesteld cluster bereikt
+// (GET /clusters/{clusterId}/connection)
+func (_ Unimplemented) GetClusterConnection(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RevealClusterConnectionSecret Het wachtwoord van een databasegebruiker tonen (admin)
+// (POST /clusters/{clusterId}/connection/reveal)
+func (_ Unimplemented) RevealClusterConnectionSecret(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -14036,6 +14332,48 @@ func (_ Unimplemented) ListVmSnapshots(w http.ResponseWriter, r *http.Request, p
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// ListRecipes Alle recepten met hun versies (fase 9)
+// (GET /recipes)
+func (_ Unimplemented) ListRecipes(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SaveRecipe Een recept als nieuwe versie bewaren (admin)
+// (POST /recipes)
+func (_ Unimplemented) SaveRecipe(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CheckRecipe Een recept controleren zonder het te bewaren
+// (POST /recipes/check)
+func (_ Unimplemented) CheckRecipe(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListRecipeExamples Ingebouwde voorbeeldrecepten om mee te beginnen
+// (GET /recipes/examples)
+func (_ Unimplemented) ListRecipeExamples(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListRecipeVersions Alle versies van een recept, nieuwste eerst
+// (GET /recipes/{recipeName})
+func (_ Unimplemented) ListRecipeVersions(w http.ResponseWriter, r *http.Request, recipeName string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// DeleteRecipeVersion Een versie van een recept verwijderen (admin)
+// (DELETE /recipes/{recipeName}/versions/{recipeVersion})
+func (_ Unimplemented) DeleteRecipeVersion(w http.ResponseWriter, r *http.Request, recipeName string, recipeVersion string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetRecipeVersion Eén versie van een recept, met wat ze per node doet
+// (GET /recipes/{recipeName}/versions/{recipeVersion})
+func (_ Unimplemented) GetRecipeVersion(w http.ResponseWriter, r *http.Request, recipeName string, recipeVersion string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // GetRecoveryReport Het rapport Herstelbaarheid van een maand
 // (GET /reports/recovery)
 func (_ Unimplemented) GetRecoveryReport(w http.ResponseWriter, r *http.Request, params GetRecoveryReportParams) {
@@ -14939,6 +15277,34 @@ func (siw *ServerInterfaceWrapper) ListDatabaseBackups(w http.ResponseWriter, r 
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListDatabaseBackups(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListBlueprints operation middleware
+func (siw *ServerInterfaceWrapper) ListBlueprints(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListBlueprints(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ComposeBlueprint operation middleware
+func (siw *ServerInterfaceWrapper) ComposeBlueprint(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ComposeBlueprint(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -16165,6 +16531,58 @@ func (siw *ServerInterfaceWrapper) SetComponentUserPassword(w http.ResponseWrite
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.SetComponentUserPassword(w, r, clusterId, componentId, user)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetClusterConnection operation middleware
+func (siw *ServerInterfaceWrapper) GetClusterConnection(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetClusterConnection(w, r, clusterId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RevealClusterConnectionSecret operation middleware
+func (siw *ServerInterfaceWrapper) RevealClusterConnectionSecret(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RevealClusterConnectionSecret(w, r, clusterId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -21384,6 +21802,158 @@ func (siw *ServerInterfaceWrapper) ListVmSnapshots(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
+// ListRecipes operation middleware
+func (siw *ServerInterfaceWrapper) ListRecipes(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListRecipes(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SaveRecipe operation middleware
+func (siw *ServerInterfaceWrapper) SaveRecipe(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SaveRecipe(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CheckRecipe operation middleware
+func (siw *ServerInterfaceWrapper) CheckRecipe(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CheckRecipe(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListRecipeExamples operation middleware
+func (siw *ServerInterfaceWrapper) ListRecipeExamples(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListRecipeExamples(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListRecipeVersions operation middleware
+func (siw *ServerInterfaceWrapper) ListRecipeVersions(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "recipeName" -------------
+	var recipeName string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "recipeName", chi.URLParam(r, "recipeName"), &recipeName, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "recipeName", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListRecipeVersions(w, r, recipeName)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteRecipeVersion operation middleware
+func (siw *ServerInterfaceWrapper) DeleteRecipeVersion(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "recipeName" -------------
+	var recipeName string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "recipeName", chi.URLParam(r, "recipeName"), &recipeName, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "recipeName", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "recipeVersion" -------------
+	var recipeVersion string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "recipeVersion", chi.URLParam(r, "recipeVersion"), &recipeVersion, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "recipeVersion", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteRecipeVersion(w, r, recipeName, recipeVersion)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetRecipeVersion operation middleware
+func (siw *ServerInterfaceWrapper) GetRecipeVersion(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "recipeName" -------------
+	var recipeName string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "recipeName", chi.URLParam(r, "recipeName"), &recipeName, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "recipeName", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "recipeVersion" -------------
+	var recipeVersion string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "recipeVersion", chi.URLParam(r, "recipeVersion"), &recipeVersion, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "recipeVersion", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetRecipeVersion(w, r, recipeName, recipeVersion)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetRecoveryReport operation middleware
 func (siw *ServerInterfaceWrapper) GetRecoveryReport(w http.ResponseWriter, r *http.Request) {
 
@@ -22267,6 +22837,12 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Get(options.BaseURL+"/clusters/{clusterId}/spec-revisions", wrapper.ListSpecRevisions)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/clusters/{clusterId}/connection", wrapper.GetClusterConnection)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/clusters/{clusterId}/connection/reveal", wrapper.RevealClusterConnectionSecret)
+	})
+	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/clusters/{clusterId}/spec/edit", wrapper.GetClusterSpecEdit)
 	})
 	r.Group(func(r chi.Router) {
@@ -22319,6 +22895,33 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Patch(options.BaseURL+"/services/{serviceId}", wrapper.UpdateService)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/recipes", wrapper.ListRecipes)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/recipes", wrapper.SaveRecipe)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/blueprints", wrapper.ListBlueprints)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/blueprints", wrapper.ComposeBlueprint)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/recipes/check", wrapper.CheckRecipe)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/recipes/examples", wrapper.ListRecipeExamples)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/recipes/{recipeName}", wrapper.ListRecipeVersions)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/recipes/{recipeName}/versions/{recipeVersion}", wrapper.DeleteRecipeVersion)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/recipes/{recipeName}/versions/{recipeVersion}", wrapper.GetRecipeVersion)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/dependencies", wrapper.CreateDependency)

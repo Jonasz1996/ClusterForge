@@ -251,6 +251,8 @@ func (s *Service) ApplyEdit(ctx context.Context, actor events.Actor, clusterID u
 	}
 	if out.Job != nil {
 		s.ro.Kick()
+	} else if s.Applied != nil {
+		s.Applied(ctx, c.ID)
 	}
 	return out, nil
 }

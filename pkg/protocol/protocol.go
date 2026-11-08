@@ -10,7 +10,11 @@ import (
 
 // Version is de protocolversie. Een agent meldt die bij elke heartbeat, zodat
 // de server geen berichten stuurt die de agent niet kent.
-const Version = 23
+const Version = 24
+
+// RecipeStepsSince is de eerste protocolversie die de stappen van recepten
+// kent: repo_deb, repo en ini_set (fase 9).
+const RecipeStepsSince = 24
 
 // CommandsSince is de eerste protocolversie met commando's.
 const CommandsSince = 2
@@ -435,6 +439,44 @@ type Step struct {
 	User      *UserStep      `json:"user,omitempty"`
 	Directory *DirectoryStep `json:"directory,omitempty"`
 	Command   *CommandStep   `json:"command,omitempty"`
+	// RepoDeb, Repo en IniSet zijn er sinds RecipeStepsSince.
+	RepoDeb *RepoDebStep `json:"repo_deb,omitempty"`
+	Repo    *RepoStep    `json:"repo,omitempty"`
+	IniSet  *IniSetStep  `json:"ini_set,omitempty"`
+}
+
+// RepoDebStep installeert het release-pakket van een pakketbron, zoals
+// zabbix-release_*.deb, en draait daarna apt-get update. Is dat pakket al
+// in die versie geïnstalleerd, dan verandert er niets.
+type RepoDebStep struct {
+	URL string `json:"url"`
+}
+
+// RepoStep zet een apt-bron met een eigen sleutel: de sleutel in
+// /etc/apt/keyrings/cf-<naam>.asc en de bron in
+// /etc/apt/sources.list.d/cf-<naam>.sources. Bij een wijziging volgt
+// apt-get update.
+type RepoStep struct {
+	Name       string   `json:"name"`
+	URL        string   `json:"url"`
+	Suite      string   `json:"suite"`
+	Components []string `json:"components"`
+	// Key is een https-URL naar de publieke sleutel.
+	Key string `json:"key"`
+}
+
+// IniSetStep zet één sleutel=waarde in een configuratiebestand en laat de
+// rest staan. Een uitgecommentarieerde regel met die sleutel wordt de
+// plaats van de nieuwe regel; anders komt ze onderaan. Mode, Owner en
+// Group zijn zoals bij een bestand; een lege mode houdt die van het
+// bestand.
+type IniSetStep struct {
+	Path  string `json:"path"`
+	Key   string `json:"key"`
+	Value string `json:"value"`
+	Mode  string `json:"mode,omitempty"`
+	Owner string `json:"owner,omitempty"`
+	Group string `json:"group,omitempty"`
 }
 
 // PackageStep installeert of verwijdert apt-pakketten.
@@ -502,6 +544,7 @@ func (s Step) Kind() string {
 	for k, set := range map[string]bool{
 		"package": s.Package != nil, "file": s.File != nil, "service": s.Service != nil,
 		"user": s.User != nil, "directory": s.Directory != nil, "command": s.Command != nil,
+		"repo_deb": s.RepoDeb != nil, "repo": s.Repo != nil, "ini_set": s.IniSet != nil,
 	} {
 		if set {
 			if kind != "" {

@@ -54,6 +54,8 @@ type MariaDB struct {
 	// ImportError laat mariadb met een dump op stdin met deze fout stoppen,
 	// zoals een oudere MariaDB bij iets uit een nieuwere.
 	ImportError string
+	// TrustFunctions is log_bin_trust_function_creators.
+	TrustFunctions bool
 	// DropFails laat zoveel keer DROP DATABASE mislukken, zoals een grote
 	// database weghalen die langer duurt dan het verzoek mag.
 	DropFails int
@@ -419,7 +421,7 @@ func grantee(u MariaUser) string { return "'" + u.User + "'@'" + u.Host + "'" }
 
 // De opdrachten uit dbsql.Ensure en dbsql.Drop.
 var (
-	createDBRe   = regexp.MustCompile("^CREATE DATABASE IF NOT EXISTS `([^`]+)` CHARACTER SET utf8mb4;$")
+	createDBRe   = regexp.MustCompile("^CREATE DATABASE IF NOT EXISTS `([^`]+)` CHARACTER SET [a-z0-9_]+(?: COLLATE [a-z0-9_]+)?;$")
 	createUserRe = regexp.MustCompile(`^CREATE USER IF NOT EXISTS '([^']*)'@'([^']*)'(?: IDENTIFIED BY '([^']*)')?;$`)
 	alterUserRe  = regexp.MustCompile(`^ALTER USER '([^']*)'@'([^']*)' IDENTIFIED BY '([^']*)';$`)
 	grantRe      = regexp.MustCompile("^GRANT ALL PRIVILEGES ON `([^`]+)`\\.\\* TO '([^']*)'@'([^']*)';$")
@@ -440,6 +442,9 @@ func (h *Host) mariaWrite(stdin string) ([]byte, error) {
 	}
 	if g := m.Galera; g != nil && (g.Status != "Primary" || g.State != 4 || !g.Ready) {
 		return []byte("ERROR 1047 (08S01) at line 1: WSREP has not yet prepared node for application use\n"), errExit1
+	}
+	if out, err, ok := m.recipeQuery(stdin); ok {
+		return out, err
 	}
 	user := func(name, host string) int {
 		return slices.IndexFunc(m.Users, func(u MariaUser) bool { return u.User == name && u.Host == host })
@@ -504,6 +509,53 @@ func (h *Host) mariaWrite(stdin string) ([]byte, error) {
 		}
 	}
 	return nil, nil
+}
+
+var (
+	countTablesRe = regexp.MustCompile(`^SELECT COUNT\(\*\) FROM information_schema.tables WHERE table_schema = '([^']+)';$`)
+	setTrustRe    = regexp.MustCompile(`^SET GLOBAL log_bin_trust_function_creators = ([01]);$`)
+	useRe         = regexp.MustCompile("^USE `([^`]+)`;$")
+)
+
+// recipeQuery speelt de vragen van IMPORT na (fase 9): tabellen tellen,
+// log_bin_trust_function_creators, en een Unless-query, die een rij geeft
+// zodra de database tabellen heeft.
+func (m *MariaDB) recipeQuery(stdin string) ([]byte, error, bool) {
+	lines := strings.Split(strings.TrimRight(stdin, "\n"), "\n")
+	db := func(name string) *Database {
+		i := slices.IndexFunc(m.Databases, func(d Database) bool { return d.Name == name })
+		if i < 0 {
+			return nil
+		}
+		return &m.Databases[i]
+	}
+	switch {
+	case len(lines) == 1 && countTablesRe.MatchString(lines[0]):
+		n := 0
+		if d := db(countTablesRe.FindStringSubmatch(lines[0])[1]); d != nil {
+			n = d.Tables
+		}
+		return []byte(strconv.Itoa(n) + "\n"), nil, true
+	case len(lines) == 1 && lines[0] == "SELECT @@GLOBAL.log_bin_trust_function_creators;":
+		v := "0"
+		if m.TrustFunctions {
+			v = "1"
+		}
+		return []byte(v + "\n"), nil, true
+	case len(lines) == 1 && setTrustRe.MatchString(lines[0]):
+		m.TrustFunctions = setTrustRe.FindStringSubmatch(lines[0])[1] == "1"
+		return nil, nil, true
+	case len(lines) == 2 && useRe.MatchString(lines[0]) && strings.HasPrefix(lines[1], "SELECT "):
+		d := db(useRe.FindStringSubmatch(lines[0])[1])
+		if d == nil {
+			return []byte("ERROR 1049 (42000) at line 1: Unknown database\n"), errExit1, true
+		}
+		if d.Tables == 0 {
+			return []byte("ERROR 1146 (42S02) at line 2: Table doesn't exist\n"), errExit1, true
+		}
+		return []byte("1\n"), nil, true
+	}
+	return nil, nil, false
 }
 
 // galeraRecovery speelt galera_recovery na: alleen als MariaDB stilstaat.
