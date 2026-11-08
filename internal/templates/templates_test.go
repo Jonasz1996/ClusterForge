@@ -419,19 +419,30 @@ func TestRenderZabbix(t *testing.T) {
 	}
 	// Met debian (de standaard) doet de stap voor de bron niets, en komt er
 	// geen zabbix-sql-scripts.
-	if len(cmds) != 2 || cmds[0].Run != "true" || cmds[0].Creates != "/etc/debian_version" || slices.Contains(pkgs, "zabbix-sql-scripts") ||
-		!strings.Contains(cmds[1].Run, "ln -sfn") || cmds[1].Unless == "" {
+	// Daarna: de pakketdienst maskeren, herstarten na een pakketupdate en
+	// de link naar de webinterface.
+	if len(cmds) != 4 || cmds[0].Run != "true" || cmds[0].Creates != "/etc/debian_version" || slices.Contains(pkgs, "zabbix-sql-scripts") ||
+		!strings.Contains(cmds[1].Run, "systemctl mask zabbix-server") || !strings.Contains(cmds[1].Unless, "masked") ||
+		cmds[2].Run != "/usr/local/lib/clusterforge/zabbix-restart.sh" || cmds[2].Unless != "/usr/local/lib/clusterforge/zabbix-restart.sh --check" ||
+		!strings.Contains(cmds[3].Run, "ln -sfn") || cmds[3].Unless == "" {
 		t.Fatalf("commando's: %+v %v", cmds, pkgs)
+	}
+	for _, s := range steps {
+		if s.Service != nil && s.Service.Name == "zabbix-server" {
+			t.Fatalf("de pakketdienst hoort gemaskeerd, niet via een service-stap: %+v", s.Service)
+		}
 	}
 	for path, want := range map[string][]string{
 		"/etc/zabbix/cf-zabbix_server.conf": {"HANodeName=zabbix-server-02\n", "NodeAddress=10.0.30.12:10051\n", "DBHost=10.0.30.100\n",
 			"Include=/run/credentials/cf-zabbix-server.service/db.conf\n"},
-		"/etc/zabbix/cf-zabbix_server-db.conf":     {"DBPassword=Abcdefgh23456789Abcdefgh23456789\n"},
-		"/usr/local/lib/clusterforge/zabbix-db.sh": {"VIP=10.0.30.100\n", `HOSTS="10.0.30.11 10.0.30.12 10.0.30.13 $VIP"`},
-		"/usr/share/zabbix/conf/zabbix.conf.php":   {"$DB['SERVER']          = '10.0.30.100';", "$DB['PASSWORD']        = 'Abcdefgh23456789Abcdefgh23456789';"},
-		"/etc/keepalived/keepalived.conf":          {"priority 140\n", "        10.0.30.11\n        10.0.30.13\n    }", "nopreempt", "chk_zabbix\n    }"},
-		"/etc/nginx/sites-enabled/default":         {"location = /cf-health", "root /usr/local/lib/clusterforge/zabbix-web;"},
-		"/etc/keepalived/check-zabbix.sh":          {"exec /usr/local/bin/cf-agent check db mariadb"},
+		"/etc/zabbix/cf-zabbix_server-db.conf":          {"DBPassword=Abcdefgh23456789Abcdefgh23456789\n"},
+		"/usr/local/lib/clusterforge/zabbix-db.sh":      {"VIP=10.0.30.100\n", `HOSTS="10.0.30.11 10.0.30.12 10.0.30.13 $VIP"`},
+		"/usr/share/zabbix/conf/zabbix.conf.php":        {"$DB['SERVER']          = '10.0.30.100';", "$DB['PASSWORD']        = 'Abcdefgh23456789Abcdefgh23456789';"},
+		"/etc/keepalived/keepalived.conf":               {"priority 140\n", "        10.0.30.11\n        10.0.30.13\n    }", "nopreempt", "chk_zabbix\n    }"},
+		"/etc/nginx/sites-enabled/default":              {"location = /cf-health", "root /usr/local/lib/clusterforge/zabbix-web;"},
+		"/etc/keepalived/check-zabbix.sh":               {"exec /usr/local/bin/cf-agent check db mariadb"},
+		"/usr/local/lib/clusterforge/zabbix-restart.sh": {"cf-zabbix-server cf-zabbix-proxy", `*" (deleted)")`},
+		"/etc/apt/apt.conf.d/80clusterforge-zabbix":     {"DPkg::Post-Invoke", "zabbix-restart.sh --no-block"},
 	} {
 		got, ok := files[path]
 		if !ok {
@@ -445,7 +456,7 @@ func TestRenderZabbix(t *testing.T) {
 		}
 	}
 	// De scripts zijn geldige sh.
-	for _, path := range []string{"/usr/local/lib/clusterforge/zabbix-db.sh", "/etc/keepalived/check-zabbix.sh"} {
+	for _, path := range []string{"/usr/local/lib/clusterforge/zabbix-db.sh", "/etc/keepalived/check-zabbix.sh", "/usr/local/lib/clusterforge/zabbix-restart.sh"} {
 		cmd := exec.Command("sh", "-n")
 		cmd.Stdin = strings.NewReader(files[path])
 		if out, err := cmd.CombinedOutput(); err != nil {
