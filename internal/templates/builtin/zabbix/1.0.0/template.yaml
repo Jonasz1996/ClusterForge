@@ -165,6 +165,12 @@ roles:
           content: "DBPassword={{ .params.db_password }}\n"
           mode: "0600"
           notify: [service:cf-zabbix-server:restart]
+      # Een grote versie zet de database om; in HA-modus kan dat niet, dus
+      # doet de VIP-node het vlak voor zijn start, standalone.
+      - file:
+          path: /usr/local/lib/clusterforge/zabbix-dbupgrade.sh
+          template: zabbix-dbupgrade.sh.tmpl
+          mode: "0700"
       - file:
           path: /etc/systemd/system/cf-zabbix-server.service
           template: cf-zabbix-server.service.tmpl

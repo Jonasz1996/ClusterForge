@@ -14,6 +14,10 @@ Type=simple
 User=zabbix
 RuntimeDirectory=cf-zabbix-server
 LoadCredential=db.conf:/etc/zabbix/cf-zabbix_server-db.conf
+# Na een grote versie zet de VIP-node de database eerst om (standalone);
+# dat kan lang duren. + draait het script als root.
+ExecStartPre=+/usr/local/lib/clusterforge/zabbix-dbupgrade.sh
+TimeoutStartSec=6h
 ExecStart=/usr/sbin/zabbix_server -f -c /etc/zabbix/cf-zabbix_server.conf
 Restart=always
 RestartSec=15
