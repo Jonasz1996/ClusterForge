@@ -16,6 +16,7 @@ var released = map[string][]string{
 	"cron":             {"1.0.0"},
 	"generic":          {"1.0.0"},
 	"kubernetes":       {"1.0.0", "1.1.0"},
+	"zabbix":           {"1.0.0"},
 }
 
 func TestReleasedVersionsStay(t *testing.T) {

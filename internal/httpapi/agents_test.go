@@ -58,6 +58,9 @@ func fakeCollector(root string, addrs ...string) *agent.Collector {
 		},
 		Addresses:      func() []string { return addrs },
 		PrimaryAddress: func() string { return "192.0.2.50" },
+		// Een vaste schijf van 100 GiB met 80 GiB vrij, los van de runner:
+		// anders geeft een volle CI-machine extra waarschuwingen (disk_low).
+		Statfs: func(string) (uint64, uint64, uint64, bool) { return 100 << 30, 80 << 30, 80 << 30, true },
 	}
 }
 
@@ -322,6 +325,16 @@ func TestAgentDownloads(t *testing.T) {
 	_ = resp.Body.Close()
 	if resp.StatusCode != 200 || !strings.HasPrefix(string(body), "#!/bin/bash") || !strings.Contains(string(body), "qm template") {
 		t.Fatalf("golden-image-script: %d", resp.StatusCode)
+	}
+	resp, err = http.Get(e.srv.URL + "/install/ct-template.sh")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ = io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if resp.StatusCode != 200 || !strings.HasPrefix(string(body), "#!/bin/bash") || !strings.Contains(string(body), "pct template") ||
+		!strings.Contains(string(body), "/etc/clusterforge/claim.json") {
+		t.Fatalf("ct-template-script: %d", resp.StatusCode)
 	}
 	if err := os.WriteFile(filepath.Join(e.api.cfg.AgentDir, "cf-agent-linux-amd64"), []byte("binary"), 0o644); err != nil {
 		t.Fatal(err)

@@ -25,6 +25,9 @@ var WatchedServices = []string{
 	"cron", "qemu-guest-agent", "pve-cluster", "pveproxy", "cf-agent",
 	// De container van de template generic.
 	"cf-app",
+	// De template zabbix: ClusterForge en een uitrol wachten tot deze
+	// active zijn.
+	"cf-zabbix-server", "cf-zabbix-db", "cf-zabbix-proxy",
 	// Kubernetes: k3s op een server, k3s-agent op een worker.
 	"k3s", "k3s-agent",
 	// Databaseclusters: Patroni met etcd voor PostgreSQL, en garb, de
@@ -56,6 +59,10 @@ type Collector struct {
 	// Interfaces geeft de netwerkinterfaces voor de facts; nil leest ze van
 	// het systeem.
 	Interfaces func() []protocol.Interface
+	// Statfs geeft grootte, vrij en beschikbaar (bytes) van het
+	// bestandssysteem van een pad; nil leest het van het systeem. Tests geven
+	// zo een vaste schijf, los van de machine waarop ze draaien.
+	Statfs func(path string) (size, free, avail uint64, ok bool)
 	// OnUnits krijgt de units van elke heartbeat, voor het journaal. Mag
 	// nil zijn.
 	OnUnits func([]UnitInfo)
@@ -254,6 +261,14 @@ func (c *Collector) bootTime() time.Time {
 
 type fsStat struct{ size, free, avail uint64 }
 
+func (c *Collector) statfs(path string) (fsStat, bool) {
+	if c.Statfs != nil {
+		size, free, avail, ok := c.Statfs(path)
+		return fsStat{size: size, free: free, avail: avail}, ok
+	}
+	return statfs(path)
+}
+
 type mount struct{ device, path, fstype string }
 
 // mounts geeft de echte bestandssystemen uit /proc/mounts.
@@ -279,7 +294,7 @@ func (c *Collector) mounts() []mount {
 func (c *Collector) filesystems() []protocol.Filesystem {
 	var out []protocol.Filesystem
 	for _, m := range c.mounts() {
-		st, _ := statfs(c.path(m.path))
+		st, _ := c.statfs(c.path(m.path))
 		out = append(out, protocol.Filesystem{
 			Mount: m.path, Device: m.device, Type: m.fstype, SizeBytes: st.size, UsedBytes: st.size - st.free,
 		})

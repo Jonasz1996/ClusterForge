@@ -425,6 +425,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST "+p+"/nodes/{node}/{type}/{vmid}/clone", s.clone)
 	mux.HandleFunc("GET "+p+"/nodes/{node}/{type}/{vmid}/config", s.config)
 	mux.HandleFunc("POST "+p+"/nodes/{node}/{type}/{vmid}/config", s.setConfig)
+	mux.HandleFunc("PUT "+p+"/nodes/{node}/{type}/{vmid}/config", s.setConfig)
 	mux.HandleFunc("GET "+p+"/nodes/{node}/lxc/{vmid}/interfaces", s.interfaces)
 	mux.HandleFunc("GET "+p+"/nodes/{node}/network", s.network)
 	mux.HandleFunc("PUT "+p+"/nodes/{node}/{type}/{vmid}/resize", s.resize)
@@ -818,8 +819,16 @@ func (s *Server) freeID() int {
 
 // diskStorage geeft de storage van de bootschijf, zoals local-lvm.
 func diskStorage(cfg map[string]string) string {
-	st, _, _ := strings.Cut(cfg["scsi0"], ":")
+	st, _, _ := strings.Cut(cfg[rootDisk(cfg)], ":")
 	return st
+}
+
+// rootDisk is scsi0 bij een VM en rootfs bij een CT.
+func rootDisk(cfg map[string]string) string {
+	if _, ok := cfg["rootfs"]; ok {
+		return "rootfs"
+	}
+	return "scsi0"
 }
 
 func (s *Server) clone(w http.ResponseWriter, r *http.Request) {
@@ -853,19 +862,29 @@ func (s *Server) clone(w http.ResponseWriter, r *http.Request) {
 	if cfg == nil {
 		cfg = map[string]string{}
 	}
+	disk := rootDisk(cfg)
 	if st := r.PostForm.Get("storage"); st != "" {
-		_, rest, _ := strings.Cut(cfg["scsi0"], ":")
-		cfg["scsi0"] = st + ":" + rest
+		_, rest, _ := strings.Cut(cfg[disk], ":")
+		cfg[disk] = st + ":" + rest
 	}
-	name := r.PostForm.Get("name")
-	cfg["name"] = name
+	name, kind := r.PostForm.Get("name"), "qmclone"
+	if src.Type == "lxc" {
+		if r.PostForm.Has("name") {
+			fail(w, http.StatusBadRequest, "Parameter verification failed. name: property is not defined in schema")
+			return
+		}
+		name, kind = r.PostForm.Get("hostname"), "vzclone"
+		cfg["hostname"] = name
+	} else {
+		cfg["name"] = name
+	}
 	// Het id is meteen bezet, ook al loopt de kloon nog.
 	g := &Guest{
-		Type: "qemu", VMID: newID, Name: name, Node: target, Status: "stopped", MaxCPU: src.MaxCPU, MaxMem: src.MaxMem,
-		Config: cfg, Files: map[string]string{}, NoAgent: src.NoAgent,
+		Type: src.Type, VMID: newID, Name: name, Node: target, Status: "stopped", MaxCPU: src.MaxCPU, MaxMem: src.MaxMem,
+		Config: cfg, Files: map[string]string{}, NoAgent: src.NoAgent || src.Type == "lxc",
 	}
 	s.guests = append(s.guests, g)
-	upid := s.newTask(src.Node, "qmclone", src.VMID, nil, fmt.Sprintf("create full clone of drive scsi0 (%s)", cfg["scsi0"]))
+	upid := s.newTask(src.Node, kind, src.VMID, nil, fmt.Sprintf("create full clone of drive %s (%s)", disk, cfg[disk]))
 	if t := s.tasks[upid]; t.exit != "OK" {
 		// Een mislukte kloon laat geen VM achter.
 		s.guests = slices.DeleteFunc(s.guests, func(x *Guest) bool { return x == g })
@@ -971,6 +990,10 @@ func (s *Server) setConfig(w http.ResponseWriter, r *http.Request) {
 	if g == nil {
 		return
 	}
+	if g.Type == "lxc" && r.Method != http.MethodPut {
+		fail(w, http.StatusNotImplemented, "Method 'POST /nodes/"+g.Node+"/lxc/"+strconv.Itoa(g.VMID)+"/config' not implemented")
+		return
+	}
 	_ = r.ParseForm()
 	if g.Config == nil {
 		g.Config = map[string]string{}
@@ -995,11 +1018,16 @@ func (s *Server) setConfig(w http.ResponseWriter, r *http.Request) {
 		case "memory":
 			mb, _ := strconv.ParseInt(v[0], 10, 64)
 			g.MaxMem = mb << 20
-		case "name":
+		case "name", "hostname":
 			g.Name = v[0]
 		case "tags":
 			g.Tags = v[0]
 		}
+	}
+	// Een CT wijzigt meteen (PUT, geen taak); een VM via een taak (POST).
+	if g.Type == "lxc" || r.Method != http.MethodPost {
+		ok(w, nil)
+		return
 	}
 	ok(w, s.newTask(g.Node, "qmconfig", g.VMID, nil, "update VM "+strconv.Itoa(g.VMID)))
 }

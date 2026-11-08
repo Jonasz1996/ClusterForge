@@ -240,6 +240,7 @@ func (s *Server) Handler() http.Handler {
 	})
 	r.Get("/install/agent.sh", agentdist.InstallScript)
 	r.Get("/install/golden-image.sh", agentdist.GoldenImageScript)
+	r.Get("/install/ct-template.sh", agentdist.CTTemplateScript)
 	r.Get("/downloads/*", agentdist.Downloads(s.cfg.AgentDir))
 	r.Head("/downloads/*", agentdist.Downloads(s.cfg.AgentDir))
 	r.Handle("/*", webui.Handler())

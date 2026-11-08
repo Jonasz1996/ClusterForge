@@ -36,7 +36,7 @@ func TestTemplatesFleet(t *testing.T) {
 			} `json:"services"`
 		}
 	}
-	if s := c.do("GET", "/api/v1/templates", nil, &tpls); s != 200 || len(tpls.Items) != 5 {
+	if s := c.do("GET", "/api/v1/templates", nil, &tpls); s != 200 || len(tpls.Items) != 6 {
 		t.Fatalf("templates: %d %+v", s, tpls)
 	}
 	var list []string
@@ -44,7 +44,8 @@ func TestTemplatesFleet(t *testing.T) {
 		list = append(list, tp.Name+" "+tp.Version+" "+tp.ClusterType+" "+tp.Title)
 	}
 	if got := strings.Join(list, ", "); got != "cron 1.0.0 cron Cron-cluster, docker 1.0.0 docker Docker-hosts, "+
-		"generic 1.0.0 generic Eigen applicatie, keepalived-nginx 1.1.0 keepalived Nginx met keepalived, kubernetes 1.1.0 kubernetes Kubernetes (k3s)" {
+		"generic 1.0.0 generic Eigen applicatie, keepalived-nginx 1.1.0 keepalived Nginx met keepalived, kubernetes 1.1.0 kubernetes Kubernetes (k3s), "+
+		"zabbix 1.0.0 generic Zabbix met HA" {
 		t.Fatalf("templatelijst: %s", got)
 	}
 	app := tpls.Items[2].Services[0]

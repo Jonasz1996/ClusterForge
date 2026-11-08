@@ -42,6 +42,9 @@ var Provides = map[string]map[string]Unit{
 	// configuratie die zegt waar het cluster is.
 	"mariadb-server":      {"mariadb": {Enabled: true, Active: true}},
 	"galera-arbitrator-4": {"garb": {Enabled: true}},
+	// Zabbix start na het installeren met de configuratie van het pakket.
+	"zabbix-server-mysql":  {"zabbix-server": {Enabled: true, Active: true}},
+	"zabbix-proxy-sqlite3": {"zabbix-proxy": {Enabled: true, Active: true}},
 }
 
 // Host is een nagespeelde machine. Root is de map die de agent als / ziet;

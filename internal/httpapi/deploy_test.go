@@ -70,6 +70,14 @@ func (f *fleet) boot(_ int, name, file, content string) {
 		f.t.Errorf("aanmeldbestand: %v", err)
 		return
 	}
+	f.start(name, func(root, _ string) (*agent.Config, error) {
+		return agent.Enroll(context.Background(), agent.EnrollOptions{ServerURL: in.Server, Token: in.Token, AllowHTTP: in.AllowHTTP, Version: "test", Root: root})
+	})
+}
+
+// start zet een nagespeelde machine op met een agent die zich aanmeldt met
+// enroll.
+func (f *fleet) start(name string, enroll func(root, addr string) (*agent.Config, error)) {
 	f.mu.Lock()
 	f.seq++
 	machineID := fmt.Sprintf("%032x", 0xd0+f.seq)
@@ -89,7 +97,7 @@ func (f *fleet) boot(_ int, name, file, content string) {
 			return
 		}
 	}
-	cfg, err := agent.Enroll(context.Background(), agent.EnrollOptions{ServerURL: in.Server, Token: in.Token, AllowHTTP: in.AllowHTTP, Version: "test", Root: root})
+	cfg, err := enroll(root, addr)
 	if err != nil {
 		f.t.Errorf("aanmelden %s: %v", name, err)
 		return

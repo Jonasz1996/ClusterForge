@@ -82,6 +82,15 @@ type galeraHosts struct {
 	members []string
 	// bootFor is hoe lang een herstart duurt; 0 is 300 ms.
 	bootFor time.Duration
+	// slug is het cluster; leeg is nextcloud.
+	slug string
+}
+
+func (g *galeraHosts) cluster() string {
+	if g.slug == "" {
+		return "nextcloud"
+	}
+	return g.slug
 }
 
 const galeraUUID = "5c3a1e0e-0000-11f0-9a3b-7e1c2d3f4a5b"
@@ -136,7 +145,7 @@ func (g *galeraHosts) join(name string, h *agenttest.Host, first bool) {
 	h.Locked(func() { h.MariaDB.Down = false })
 	h.SetUnit("mariadb", agenttest.Unit{Enabled: true, Active: true})
 	g.update()
-	p := filepath.Join(h.Root, components.Marker("nextcloud"))
+	p := filepath.Join(h.Root, components.Marker(g.cluster()))
 	_ = os.MkdirAll(filepath.Dir(p), 0o755)
 	_ = os.WriteFile(p, nil, 0o644)
 }
@@ -151,7 +160,7 @@ func (g *galeraHosts) update() {
 		mh := g.hosts[m]
 		mh.Locked(func() {
 			mh.MariaDB.Galera = &agenttest.Galera{
-				ClusterName: "nextcloud", UUID: galeraUUID, Status: "Primary", Size: len(g.members),
+				ClusterName: g.cluster(), UUID: galeraUUID, Status: "Primary", Size: len(g.members),
 				State: 4, Comment: "Synced", Ready: true, Members: addrs,
 			}
 		})

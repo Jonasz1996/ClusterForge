@@ -4071,6 +4071,15 @@ type ChangesNode struct {
 	NodeId   openapi_types.UUID `json:"node_id"`
 }
 
+// ClaimRequest defines model for ClaimRequest.
+type ClaimRequest struct {
+	AgentVersion    string `json:"agent_version"`
+	Hostname        string `json:"hostname"`
+	MachineId       string `json:"machine_id"`
+	NkeyPublic      string `json:"nkey_public"`
+	ProtocolVersion int    `json:"protocol_version"`
+}
+
 // Cluster defines model for Cluster.
 type Cluster struct {
 	// AppliedRevision De revisie die op alle nodes staat; lager dan spec_revision na een mislukte toepassing
@@ -6168,6 +6177,16 @@ type DeployDatabase struct {
 	Engine string `json:"engine"`
 }
 
+// DeployExistingNode defines model for DeployExistingNode.
+type DeployExistingNode struct {
+	// Database Database erbij: als de uitrol lukt, zet ClusterForge deze database op alle nodes van het nieuwe cluster, zoals
+	// 'Database toevoegen', om er een app naartoe te verhuizen. Houdt het plan haar tegen, dan staat de reden in het
+	// logboek (cluster.database_not_added).
+	Database *DeployDatabase    `json:"database,omitempty"`
+	NodeId   openapi_types.UUID `json:"node_id"`
+	Role     string             `json:"role"`
+}
+
 // DeployInput defines model for DeployInput.
 type DeployInput struct {
 	Cluster DeployCluster `json:"cluster"`
@@ -6177,13 +6196,16 @@ type DeployInput struct {
 	// logboek (cluster.database_not_added).
 	Database *DeployDatabase `json:"database,omitempty"`
 
+	// ExistingNodes Bestaande nodes (zoals CT's met een agent) per rol, in plaats van nieuwe VM's. Ze zitten nog in geen cluster; target en server_url vallen dan weg. Per rol precies zoveel als de template vraagt.
+	ExistingNodes *[]DeployExistingNode `json:"existing_nodes,omitempty"`
+
 	// Params Waarden voor de parameters van de template
 	Params map[string]interface{} `json:"params"`
 
-	// ServerUrl Het adres waarmee de nieuwe nodes ClusterForge bereiken
-	ServerUrl string       `json:"server_url"`
-	Target    DeployTarget `json:"target"`
-	Template  string       `json:"template"`
+	// ServerUrl Het adres waarmee de nieuwe nodes ClusterForge bereiken; niet bij existing_nodes
+	ServerUrl *string       `json:"server_url,omitempty"`
+	Target    *DeployTarget `json:"target,omitempty"`
+	Template  string        `json:"template"`
 }
 
 // DeployPlan defines model for DeployPlan.
@@ -10655,16 +10677,25 @@ type Status string
 
 // Template defines model for Template.
 type Template struct {
-	ClusterType ClusterType     `json:"cluster_type"`
-	Description string          `json:"description"`
-	Name        string          `json:"name"`
-	Params      []TemplateParam `json:"params"`
-	Roles       []TemplateRole  `json:"roles"`
+	ClusterType ClusterType `json:"cluster_type"`
+
+	// Database De database die een uitrol altijd krijgt; null voor een template zonder
+	Database    nullable.Nullable[TemplateDatabase] `json:"database"`
+	Description string                              `json:"description"`
+	Name        string                              `json:"name"`
+	Params      []TemplateParam                     `json:"params"`
+	Roles       []TemplateRole                      `json:"roles"`
 
 	// Services De diensten die een uitrol in de afhankelijkheidsgraaf zet
 	Services []TemplateService `json:"services"`
 	Title    string            `json:"title"`
 	Version  string            `json:"version"`
+}
+
+// TemplateDatabase Zoals Database erbij, maar altijd en alleen op de nodes van role
+type TemplateDatabase struct {
+	Engine string `json:"engine"`
+	Role   string `json:"role"`
 }
 
 // TemplateParam defines model for TemplateParam.
@@ -11540,6 +11571,9 @@ type StartAgentUpgradesJSONRequestBody = AgentUpgradeInput
 // SetAgentUpgradeAutoJSONRequestBody defines body for SetAgentUpgradeAuto for application/json ContentType.
 type SetAgentUpgradeAutoJSONRequestBody SetAgentUpgradeAutoJSONBody
 
+// ClaimAgentJSONRequestBody defines body for ClaimAgent for application/json ContentType.
+type ClaimAgentJSONRequestBody = ClaimRequest
+
 // EnrollAgentJSONRequestBody defines body for EnrollAgent for application/json ContentType.
 type EnrollAgentJSONRequestBody = EnrollRequest
 
@@ -11842,6 +11876,9 @@ type ServerInterface interface {
 	// SetAgentUpgradeAuto Agents vanzelf bijwerken aan- of uitzetten (admin)
 	// (PUT /agent-upgrades/auto)
 	SetAgentUpgradeAuto(w http.ResponseWriter, r *http.Request)
+	// ClaimAgent Een agent in een CT uit een CT-template meldt zich aan zonder token (zonder sessie)
+	// (POST /agents/claim)
+	ClaimAgent(w http.ResponseWriter, r *http.Request)
 	// EnrollAgent Een agent meldt zich aan met een enrollmenttoken (zonder sessie)
 	// (POST /agents/enroll)
 	EnrollAgent(w http.ResponseWriter, r *http.Request)
@@ -12616,6 +12653,12 @@ func (_ Unimplemented) StartAgentUpgrades(w http.ResponseWriter, r *http.Request
 // SetAgentUpgradeAuto Agents vanzelf bijwerken aan- of uitzetten (admin)
 // (PUT /agent-upgrades/auto)
 func (_ Unimplemented) SetAgentUpgradeAuto(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ClaimAgent Een agent in een CT uit een CT-template meldt zich aan zonder token (zonder sessie)
+// (POST /agents/claim)
+func (_ Unimplemented) ClaimAgent(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -14167,6 +14210,20 @@ func (siw *ServerInterfaceWrapper) SetAgentUpgradeAuto(w http.ResponseWriter, r 
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.SetAgentUpgradeAuto(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ClaimAgent operation middleware
+func (siw *ServerInterfaceWrapper) ClaimAgent(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ClaimAgent(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -22076,6 +22133,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/agents/enroll", wrapper.EnrollAgent)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/agents/claim", wrapper.ClaimAgent)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/agents/{agentId}/revoke", wrapper.RevokeAgent)
