@@ -147,7 +147,12 @@ roles:
       # Het pakket maakt de gebruiker zabbix zelf; dit zegt alleen dat
       # ClusterForge hem nodig heeft.
       - user: { name: zabbix, system: true, home: /var/lib/zabbix }
-      - service: { name: zabbix-server, enabled: false, state: stopped }
+      # De dienst van het pakket gebruikt zijn eigen configuratie zonder
+      # wachtwoord; gemaskeerd start hij ook na een pakketupdate niet.
+      - command:
+          title: dienst zabbix-server van het pakket uitschakelen
+          run: systemctl disable --now zabbix-server 2>/dev/null; systemctl mask zabbix-server
+          unless: '[ "$(systemctl show -p LoadState --value zabbix-server)" = masked ]'
       - file:
           path: /etc/zabbix/cf-zabbix_server.conf
           template: zabbix_server.conf.tmpl
@@ -160,11 +165,32 @@ roles:
           content: "DBPassword={{ .params.db_password }}\n"
           mode: "0600"
           notify: [service:cf-zabbix-server:restart]
+      # Een grote versie zet de database om; in HA-modus kan dat niet, dus
+      # doet de VIP-node het vlak voor zijn start, standalone.
+      - file:
+          path: /usr/local/lib/clusterforge/zabbix-dbupgrade.sh
+          template: zabbix-dbupgrade.sh.tmpl
+          mode: "0700"
       - file:
           path: /etc/systemd/system/cf-zabbix-server.service
           template: cf-zabbix-server.service.tmpl
           notify: [service:cf-zabbix-server:restart]
       - service: { name: cf-zabbix-server, enabled: true, state: started }
+      # Na elke pakketupdate (ook buiten ClusterForge om) herstart apt de
+      # Zabbix-dienst die nog het oude programma draait; deze stap doet
+      # hetzelfde als dat nu al nodig is.
+      - file:
+          path: /usr/local/lib/clusterforge/zabbix-restart.sh
+          template: zabbix-restart.sh.tmpl
+          mode: "0755"
+      - file:
+          path: /etc/apt/apt.conf.d/80clusterforge-zabbix
+          content: "DPkg::Post-Invoke { \"if [ -x /usr/local/lib/clusterforge/zabbix-restart.sh ]; then /usr/local/lib/clusterforge/zabbix-restart.sh --no-block; fi\"; };\n"
+          mode: "0644"
+      - command:
+          title: Zabbix na een pakketupdate herstarten
+          run: /usr/local/lib/clusterforge/zabbix-restart.sh
+          unless: /usr/local/lib/clusterforge/zabbix-restart.sh --check
       # Database, gebruiker en schema: zodra Galera er is (na de uitrol).
       - directory: { path: /usr/local/lib/clusterforge, mode: "0755" }
       - file:
@@ -242,7 +268,12 @@ roles:
           creates: '{{ if ne .params.zabbix_version "debian" }}/usr/local/lib/clusterforge/zabbix-repo-{{ .params.zabbix_version }}{{ else }}/etc/debian_version{{ end }}'
       - package: { names: [zabbix-proxy-sqlite3, fping] }
       - user: { name: zabbix, system: true, home: /var/lib/zabbix }
-      - service: { name: zabbix-proxy, enabled: false, state: stopped }
+      # De dienst van het pakket gebruikt zijn eigen configuratie zonder
+      # wachtwoord; gemaskeerd start hij ook na een pakketupdate niet.
+      - command:
+          title: dienst zabbix-proxy van het pakket uitschakelen
+          run: systemctl disable --now zabbix-proxy 2>/dev/null; systemctl mask zabbix-proxy
+          unless: '[ "$(systemctl show -p LoadState --value zabbix-proxy)" = masked ]'
       - file:
           path: /etc/zabbix/cf-zabbix_proxy.conf
           template: zabbix_proxy.conf.tmpl
@@ -253,6 +284,21 @@ roles:
           template: cf-zabbix-proxy.service.tmpl
           notify: [service:cf-zabbix-proxy:restart]
       - service: { name: cf-zabbix-proxy, enabled: true, state: started }
+      # Na elke pakketupdate (ook buiten ClusterForge om) herstart apt de
+      # Zabbix-dienst die nog het oude programma draait; deze stap doet
+      # hetzelfde als dat nu al nodig is.
+      - file:
+          path: /usr/local/lib/clusterforge/zabbix-restart.sh
+          template: zabbix-restart.sh.tmpl
+          mode: "0755"
+      - file:
+          path: /etc/apt/apt.conf.d/80clusterforge-zabbix
+          content: "DPkg::Post-Invoke { \"if [ -x /usr/local/lib/clusterforge/zabbix-restart.sh ]; then /usr/local/lib/clusterforge/zabbix-restart.sh --no-block; fi\"; };\n"
+          mode: "0644"
+      - command:
+          title: Zabbix na een pakketupdate herstarten
+          run: /usr/local/lib/clusterforge/zabbix-restart.sh
+          unless: /usr/local/lib/clusterforge/zabbix-restart.sh --check
 
 checks:
   - vip_owned: { vip: "{{ .params.vip }}", within: 120s }
