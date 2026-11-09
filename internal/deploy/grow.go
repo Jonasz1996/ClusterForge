@@ -104,7 +104,8 @@ func (g *Grow) placeAll(ctx context.Context) error {
 			return
 		}
 		r.p.ImageName, r.p.ImageShared, r.p.Target.ImageType = img.Name, img.Shared, img.Type
-		p := &params{Target: r.p.Target, ImageShared: img.Shared}
+		r.p.ImageStorage, r.p.ImageSizeGiB = img.Storage, img.SizeGiB
+		p := &params{Target: r.p.Target, ImageShared: img.Shared, ImageStorage: img.Storage, ImageSizeGiB: img.SizeGiB}
 		var idx []int
 		for i, n := range r.p.Nodes {
 			row, err := r.s.q.GetNode(ctx, n.ID)
@@ -125,7 +126,7 @@ func (g *Grow) placeAll(ctx context.Context) error {
 			return
 		}
 		for k, i := range idx {
-			r.p.Nodes[i].Host = p.Nodes[k].Host
+			r.p.Nodes[i].Host, r.p.Nodes[i].Storage = p.Nodes[k].Host, p.Nodes[k].Storage
 		}
 	})
 	return g.place
