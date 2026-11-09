@@ -4352,6 +4352,66 @@ type ClusterRisk struct {
 // ClusterType defines model for ClusterType.
 type ClusterType string
 
+// Command defines model for Command.
+type Command struct {
+	Description    string                    `json:"description"`
+	Id             openapi_types.UUID        `json:"id"`
+	LastRun        nullable.Nullable[Job]    `json:"last_run"`
+	Name           string                    `json:"name"`
+	Revision       int                       `json:"revision"`
+	RunAs          string                    `json:"run_as"`
+	TimeoutSeconds int                       `json:"timeout_seconds"`
+	UpdatedAt      time.Time                 `json:"updated_at"`
+	UpdatedBy      nullable.Nullable[string] `json:"updated_by"`
+}
+
+// CommandDetail defines model for CommandDetail.
+type CommandDetail struct {
+	Description string                 `json:"description"`
+	Id          openapi_types.UUID     `json:"id"`
+	LastRun     nullable.Nullable[Job] `json:"last_run"`
+	Name        string                 `json:"name"`
+	Revision    int                    `json:"revision"`
+	Revisions   []struct {
+		CreatedAt time.Time                 `json:"created_at"`
+		CreatedBy nullable.Nullable[string] `json:"created_by"`
+		Revision  int                       `json:"revision"`
+		Script    string                    `json:"script"`
+		Sha256    string                    `json:"sha256"`
+	} `json:"revisions"`
+	RunAs          string                    `json:"run_as"`
+	Runs           []Job                     `json:"runs"`
+	Script         string                    `json:"script"`
+	TimeoutSeconds int                       `json:"timeout_seconds"`
+	UpdatedAt      time.Time                 `json:"updated_at"`
+	UpdatedBy      nullable.Nullable[string] `json:"updated_by"`
+}
+
+// CommandInput defines model for CommandInput.
+type CommandInput struct {
+	Description *string `json:"description,omitempty"`
+	Name        string  `json:"name"`
+
+	// RunAs Leeg is root
+	RunAs  *string `json:"run_as,omitempty"`
+	Script string  `json:"script"`
+
+	// TimeoutSeconds Nul is 30 minuten
+	TimeoutSeconds *int `json:"timeout_seconds,omitempty"`
+}
+
+// CommandRunInput defines model for CommandRunInput.
+type CommandRunInput struct {
+	ClusterId *openapi_types.UUID `json:"cluster_id,omitempty"`
+
+	// Confirm De slug van het prodcluster
+	Confirm *string `json:"confirm,omitempty"`
+
+	// ContinueOnError Ook op de volgende nodes draaien als het op een node mislukt
+	ContinueOnError *bool                 `json:"continue_on_error,omitempty"`
+	NodeIds         *[]openapi_types.UUID `json:"node_ids,omitempty"`
+}
+
 // ComponentApplyInput defines model for ComponentApplyInput.
 type ComponentApplyInput struct {
 	// Arbiter Een node die alleen meestemt (garbd of etcd); nodig bij twee datanodes
@@ -11125,6 +11185,70 @@ type TotpSetup struct {
 	Secret     string `json:"secret"`
 }
 
+// UpdateInput defines model for UpdateInput.
+type UpdateInput struct {
+	Apt *struct {
+		Autoremove *bool `json:"autoremove,omitempty"`
+
+		// Full full-upgrade in plaats van upgrade
+		Full *bool `json:"full,omitempty"`
+	} `json:"apt,omitempty"`
+	ClusterId *openapi_types.UUID `json:"cluster_id,omitempty"`
+
+	// Confirm De slug van het prodcluster
+	Confirm *string `json:"confirm,omitempty"`
+	Docker  *struct {
+		// Projects Leeg is elk Compose-project
+		Projects *[]string `json:"projects,omitempty"`
+		Prune    *bool     `json:"prune,omitempty"`
+	} `json:"docker,omitempty"`
+	NodeIds *[]openapi_types.UUID `json:"node_ids,omitempty"`
+
+	// Reboot Herstarten als de node daar na de update om vraagt
+	Reboot *bool `json:"reboot,omitempty"`
+}
+
+// UpdateNode defines model for UpdateNode.
+type UpdateNode struct {
+	AptUpdatedAt       nullable.Nullable[time.Time]          `json:"apt_updated_at"`
+	ClusterEnvironment string                                `json:"cluster_environment"`
+	ClusterId          nullable.Nullable[openapi_types.UUID] `json:"cluster_id"`
+	ClusterName        string                                `json:"cluster_name"`
+	ClusterSlug        string                                `json:"cluster_slug"`
+	ComposeProjects    []struct {
+		ConfigFiles []string `json:"config_files"`
+		Name        string   `json:"name"`
+		Status      string   `json:"status"`
+	} `json:"compose_projects"`
+
+	// DockerVersion Leeg zonder Docker
+	DockerVersion string                       `json:"docker_version"`
+	FactsAt       nullable.Nullable[time.Time] `json:"facts_at"`
+
+	// HasDatabase Het cluster heeft een database; die pakketten blijven staan
+	HasDatabase      bool               `json:"has_database"`
+	Hostname         string             `json:"hostname"`
+	NodeId           openapi_types.UUID `json:"node_id"`
+	Online           bool               `json:"online"`
+	Packages         []string           `json:"packages"`
+	Protocol         int                `json:"protocol"`
+	RebootRequired   bool               `json:"reboot_required"`
+	Supported        bool               `json:"supported"`
+	UpgradesSecurity int                `json:"upgrades_security"`
+
+	// UpgradesTotal Null als de agent het niet kon tellen
+	UpgradesTotal nullable.Nullable[int] `json:"upgrades_total"`
+	VipHolder     bool                   `json:"vip_holder"`
+}
+
+// UpdateOverview defines model for UpdateOverview.
+type UpdateOverview struct {
+	Nodes []UpdateNode `json:"nodes"`
+
+	// RunProtocol Het agentprotocol vanaf waar updates kunnen
+	RunProtocol int `json:"run_protocol"`
+}
+
 // User defines model for User.
 type User struct {
 	CreatedAt time.Time          `json:"created_at"`
@@ -11939,6 +12063,15 @@ type PlanClusterSpecJSONRequestBody = SpecEditInput
 // CreateVipJSONRequestBody defines body for CreateVip for application/json ContentType.
 type CreateVipJSONRequestBody = VipInput
 
+// CreateCommandJSONRequestBody defines body for CreateCommand for application/json ContentType.
+type CreateCommandJSONRequestBody = CommandInput
+
+// UpdateCommandJSONRequestBody defines body for UpdateCommand for application/json ContentType.
+type UpdateCommandJSONRequestBody = CommandInput
+
+// RunCommandJSONRequestBody defines body for RunCommand for application/json ContentType.
+type RunCommandJSONRequestBody = CommandRunInput
+
 // CreateCronJobJSONRequestBody defines body for CreateCronJob for application/json ContentType.
 type CreateCronJobJSONRequestBody = ManagedCronJobCreate
 
@@ -12100,6 +12233,9 @@ type CreateServiceJSONRequestBody = ServiceInput
 
 // UpdateServiceJSONRequestBody defines body for UpdateService for application/json ContentType.
 type UpdateServiceJSONRequestBody = ServicePatch
+
+// StartUpdatesJSONRequestBody defines body for StartUpdates for application/json ContentType.
+type StartUpdatesJSONRequestBody = UpdateInput
 
 // UpdateVipJSONRequestBody defines body for UpdateVip for application/json ContentType.
 type UpdateVipJSONRequestBody = VipPatch
@@ -12385,6 +12521,24 @@ type ServerInterface interface {
 	// CreateVip VIP toevoegen aan een cluster (admin)
 	// (POST /clusters/{clusterId}/vips)
 	CreateVip(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
+	// ListCommands Eigen commando's (fase 10)
+	// (GET /commands)
+	ListCommands(w http.ResponseWriter, r *http.Request)
+	// CreateCommand Een eigen commando maken (admin)
+	// (POST /commands)
+	CreateCommand(w http.ResponseWriter, r *http.Request)
+	// DeleteCommand Een eigen commando weghalen (admin); de taken van zijn runs blijven
+	// (DELETE /commands/{commandId})
+	DeleteCommand(w http.ResponseWriter, r *http.Request, commandId openapi_types.UUID)
+	// GetCommand Een eigen commando met zijn revisies en laatste runs
+	// (GET /commands/{commandId})
+	GetCommand(w http.ResponseWriter, r *http.Request, commandId openapi_types.UUID)
+	// UpdateCommand Een eigen commando wijzigen (admin); een andere tekst maakt een nieuwe revisie
+	// (PUT /commands/{commandId})
+	UpdateCommand(w http.ResponseWriter, r *http.Request, commandId openapi_types.UUID)
+	// RunCommand Een eigen commando draaien op nodes of een cluster (admin); taak command.run
+	// (POST /commands/{commandId}/run)
+	RunCommand(w http.ResponseWriter, r *http.Request, commandId openapi_types.UUID)
 	// ListComponentTemplates De databases die ClusterForge op de nodes van een cluster kan zetten, met hun instellingen
 	// (GET /component-templates)
 	ListComponentTemplates(w http.ResponseWriter, r *http.Request)
@@ -12895,6 +13049,12 @@ type ServerInterface interface {
 	// RestoreTestRun Opnieuw herstellen (admin)
 	// (POST /test-runs/{runId}/restore)
 	RestoreTestRun(w http.ResponseWriter, r *http.Request, runId openapi_types.UUID)
+	// ListUpdates Updates per node, uit de facts (fase 10)
+	// (GET /updates)
+	ListUpdates(w http.ResponseWriter, r *http.Request)
+	// StartUpdates Pakketten (apt) en/of Docker bijwerken (admin); één taak updates.run per cluster
+	// (POST /updates)
+	StartUpdates(w http.ResponseWriter, r *http.Request)
 	// ListUsers Actieve gebruikers, voor bijvoorbeeld de keuze van owners
 	// (GET /users)
 	ListUsers(w http.ResponseWriter, r *http.Request)
@@ -13465,6 +13625,42 @@ func (_ Unimplemented) GetClusterTimeline(w http.ResponseWriter, r *http.Request
 // CreateVip VIP toevoegen aan een cluster (admin)
 // (POST /clusters/{clusterId}/vips)
 func (_ Unimplemented) CreateVip(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListCommands Eigen commando's (fase 10)
+// (GET /commands)
+func (_ Unimplemented) ListCommands(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CreateCommand Een eigen commando maken (admin)
+// (POST /commands)
+func (_ Unimplemented) CreateCommand(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// DeleteCommand Een eigen commando weghalen (admin); de taken van zijn runs blijven
+// (DELETE /commands/{commandId})
+func (_ Unimplemented) DeleteCommand(w http.ResponseWriter, r *http.Request, commandId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetCommand Een eigen commando met zijn revisies en laatste runs
+// (GET /commands/{commandId})
+func (_ Unimplemented) GetCommand(w http.ResponseWriter, r *http.Request, commandId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// UpdateCommand Een eigen commando wijzigen (admin); een andere tekst maakt een nieuwe revisie
+// (PUT /commands/{commandId})
+func (_ Unimplemented) UpdateCommand(w http.ResponseWriter, r *http.Request, commandId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RunCommand Een eigen commando draaien op nodes of een cluster (admin); taak command.run
+// (POST /commands/{commandId}/run)
+func (_ Unimplemented) RunCommand(w http.ResponseWriter, r *http.Request, commandId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -14485,6 +14681,18 @@ func (_ Unimplemented) GetTestRun(w http.ResponseWriter, r *http.Request, runId 
 // RestoreTestRun Opnieuw herstellen (admin)
 // (POST /test-runs/{runId}/restore)
 func (_ Unimplemented) RestoreTestRun(w http.ResponseWriter, r *http.Request, runId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListUpdates Updates per node, uit de facts (fase 10)
+// (GET /updates)
+func (_ Unimplemented) ListUpdates(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// StartUpdates Pakketten (apt) en/of Docker bijwerken (admin); één taak updates.run per cluster
+// (POST /updates)
+func (_ Unimplemented) StartUpdates(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -17320,6 +17528,138 @@ func (siw *ServerInterfaceWrapper) CreateVip(w http.ResponseWriter, r *http.Requ
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CreateVip(w, r, clusterId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListCommands operation middleware
+func (siw *ServerInterfaceWrapper) ListCommands(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListCommands(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateCommand operation middleware
+func (siw *ServerInterfaceWrapper) CreateCommand(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateCommand(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteCommand operation middleware
+func (siw *ServerInterfaceWrapper) DeleteCommand(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "commandId" -------------
+	var commandId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "commandId", chi.URLParam(r, "commandId"), &commandId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "commandId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteCommand(w, r, commandId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetCommand operation middleware
+func (siw *ServerInterfaceWrapper) GetCommand(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "commandId" -------------
+	var commandId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "commandId", chi.URLParam(r, "commandId"), &commandId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "commandId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetCommand(w, r, commandId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateCommand operation middleware
+func (siw *ServerInterfaceWrapper) UpdateCommand(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "commandId" -------------
+	var commandId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "commandId", chi.URLParam(r, "commandId"), &commandId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "commandId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateCommand(w, r, commandId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RunCommand operation middleware
+func (siw *ServerInterfaceWrapper) RunCommand(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "commandId" -------------
+	var commandId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "commandId", chi.URLParam(r, "commandId"), &commandId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "commandId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RunCommand(w, r, commandId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -22402,6 +22742,34 @@ func (siw *ServerInterfaceWrapper) RestoreTestRun(w http.ResponseWriter, r *http
 	handler.ServeHTTP(w, r)
 }
 
+// ListUpdates operation middleware
+func (siw *ServerInterfaceWrapper) ListUpdates(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListUpdates(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// StartUpdates operation middleware
+func (siw *ServerInterfaceWrapper) StartUpdates(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StartUpdates(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListUsers operation middleware
 func (siw *ServerInterfaceWrapper) ListUsers(w http.ResponseWriter, r *http.Request) {
 
@@ -23201,6 +23569,30 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/heal/run", wrapper.RunHeal)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/updates", wrapper.ListUpdates)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/updates", wrapper.StartUpdates)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/commands", wrapper.ListCommands)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/commands", wrapper.CreateCommand)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/commands/{commandId}", wrapper.DeleteCommand)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/commands/{commandId}", wrapper.GetCommand)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/commands/{commandId}", wrapper.UpdateCommand)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/commands/{commandId}/run", wrapper.RunCommand)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/agent-upgrades", wrapper.ListAgentUpgrades)

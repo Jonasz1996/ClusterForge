@@ -33,6 +33,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/assistant"
 	"github.com/Jonasz1996/clusterforge/internal/auth"
 	"github.com/Jonasz1996/clusterforge/internal/backups"
+	"github.com/Jonasz1996/clusterforge/internal/commands"
 	"github.com/Jonasz1996/clusterforge/internal/components"
 	"github.com/Jonasz1996/clusterforge/internal/config"
 	"github.com/Jonasz1996/clusterforge/internal/cronjobs"
@@ -66,6 +67,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/status"
 	"github.com/Jonasz1996/clusterforge/internal/store"
 	"github.com/Jonasz1996/clusterforge/internal/topo"
+	"github.com/Jonasz1996/clusterforge/internal/updates"
 	"github.com/Jonasz1996/clusterforge/internal/whatbroke"
 	"github.com/Jonasz1996/clusterforge/pkg/protocol"
 )
@@ -205,6 +207,9 @@ func serve() error {
 	// Agents bijwerken: met de knop, en vanzelf na een serverupdate.
 	upg := agentupgrade.NewService(pool, ev, log, runner, bus, cfg.AgentDir, version)
 	upg.Changed = eval.Kick
+	// Fase 10: pakketten en Docker bijwerken, en eigen commando's draaien.
+	upd := updates.NewService(pool, ev, runner, bus)
+	cmds := commands.NewService(pool, ev, runner, bus, upd)
 	// Een database als onderdeel van een cluster: MariaDB Galera op de
 	// nodes die er al zijn, met het geheugengebruik uit VictoriaMetrics in
 	// het plan.
@@ -377,7 +382,7 @@ func serve() error {
 			Config: cfg, Log: log, Pool: pool, Auth: authSvc, Bus: bus, Hub: hub, Proxmox: pve, Jobs: runner,
 			Lifecycle: life, Deploy: dep, Backups: bk, Drift: drf, Failover: fo, Disaster: dis, Deps: dps, Rollout: ro,
 			GitOps: git, Assistant: asst, Risk: rsk, Topo: tp, Docs: dcs, Reports: rep, Kube: kub, KubeNodes: kn, Databases: dbs, Cronjobs: crons, Heal: hl,
-			Components: cmps, Upgrades: upg, Version: version,
+			Components: cmps, Upgrades: upg, Updates: upd, Commands: cmds, Version: version,
 		}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,

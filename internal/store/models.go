@@ -555,6 +555,27 @@ type ClusterSpecRevision struct {
 	CommitSha *string
 }
 
+type Command struct {
+	ID             uuid.UUID
+	Name           string
+	Description    string
+	Script         string
+	RunAs          string
+	TimeoutSeconds int32
+	Revision       int32
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+	UpdatedBy      *uuid.UUID
+}
+
+type CommandRevision struct {
+	CommandID uuid.UUID
+	Revision  int32
+	Script    string
+	CreatedAt time.Time
+	CreatedBy *uuid.UUID
+}
+
 type CronJob struct {
 	ID             uuid.UUID
 	ClusterID      uuid.UUID

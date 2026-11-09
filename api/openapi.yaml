@@ -3824,6 +3824,144 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
+  /updates:
+    get:
+      operationId: listUpdates
+      summary: Updates per node, uit de facts (fase 10)
+      description: |
+        Per node met een agent: de apt-updates (waarvan beveiliging), of de node om een herstart vraagt en de Docker
+        Compose-projecten. supported is false voor een agent ouder dan protocol 25; die kan nog niet bijwerken. Ook voor
+        viewers.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UpdateOverview" }
+        "401": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: startUpdates
+      summary: Pakketten (apt) en/of Docker bijwerken (admin); één taak updates.run per cluster
+      description: |
+        node_ids of cluster_id. Per cluster één node tegelijk, de VIP-houder als laatste; na elke node wacht de taak tot
+        de diensten van vóór de update weer draaien en de VIP's een vaste houder hebben, en stopt bij de eerste node die
+        niet gezond terugkomt. Op een databasecluster blijven de databasepakketten staan. Op prod vraagt het
+        tweestapsverificatie en de slug in confirm; één prodcluster tegelijk.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdateInput" }
+      responses:
+        "202":
+          description: Taken aangemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentUpgradeStarted" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /commands:
+    get:
+      operationId: listCommands
+      summary: Eigen commando's (fase 10)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/Command" } }
+        "401": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createCommand
+      summary: Een eigen commando maken (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CommandInput" }
+      responses:
+        "201":
+          description: Gemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CommandDetail" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /commands/{commandId}:
+    parameters:
+      - { name: commandId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getCommand
+      summary: Een eigen commando met zijn revisies en laatste runs
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CommandDetail" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    put:
+      operationId: updateCommand
+      summary: Een eigen commando wijzigen (admin); een andere tekst maakt een nieuwe revisie
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CommandInput" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CommandDetail" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteCommand
+      summary: Een eigen commando weghalen (admin); de taken van zijn runs blijven
+      responses:
+        "204": { description: Weg }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /commands/{commandId}/run:
+    parameters:
+      - { name: commandId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: runCommand
+      summary: Een eigen commando draaien op nodes of een cluster (admin); taak command.run
+      description: |
+        Eén node tegelijk, bij een cluster de VIP-houder als laatste. De uitvoer staat live in de stappen van de taak;
+        de taak annuleren stopt het commando op de node. Standaard stopt de taak bij de eerste node waar het commando
+        niet met exitcode 0 eindigt. Op prod vraagt het tweestapsverificatie en de slug in confirm.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CommandRunInput" }
+      responses:
+        "202":
+          description: Taak aangemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
   /agent-upgrades:
     get:
       operationId: listAgentUpgrades
@@ -10906,6 +11044,110 @@ components:
             server. unknown: de server heeft geen agent voor deze node of de agent meldde zijn binary nog niet.
         why: { type: string }
         auto: { type: boolean, description: ClusterForge werkt deze agent vanzelf bij }
+    UpdateOverview:
+      type: object
+      required: [nodes, run_protocol]
+      properties:
+        run_protocol: { type: integer, description: Het agentprotocol vanaf waar updates kunnen }
+        nodes: { type: array, items: { $ref: "#/components/schemas/UpdateNode" } }
+    UpdateNode:
+      type: object
+      required: [node_id, hostname, cluster_id, cluster_name, cluster_slug, cluster_environment, online, protocol, supported,
+        upgrades_total, upgrades_security, packages, reboot_required, apt_updated_at, docker_version, compose_projects,
+        has_database, vip_holder, facts_at]
+      properties:
+        node_id: { type: string, format: uuid }
+        hostname: { type: string }
+        cluster_id: { type: string, format: uuid, nullable: true }
+        cluster_name: { type: string }
+        cluster_slug: { type: string }
+        cluster_environment: { type: string }
+        online: { type: boolean }
+        protocol: { type: integer }
+        supported: { type: boolean }
+        upgrades_total: { type: integer, nullable: true, description: Null als de agent het niet kon tellen }
+        upgrades_security: { type: integer }
+        packages: { type: array, items: { type: string } }
+        reboot_required: { type: boolean }
+        apt_updated_at: { type: string, format: date-time, nullable: true }
+        docker_version: { type: string, description: Leeg zonder Docker }
+        compose_projects:
+          type: array
+          items:
+            type: object
+            required: [name, status, config_files]
+            properties:
+              name: { type: string }
+              status: { type: string }
+              config_files: { type: array, items: { type: string } }
+        has_database: { type: boolean, description: Het cluster heeft een database; die pakketten blijven staan }
+        vip_holder: { type: boolean }
+        facts_at: { type: string, format: date-time, nullable: true }
+    UpdateInput:
+      type: object
+      properties:
+        node_ids: { type: array, items: { type: string, format: uuid } }
+        cluster_id: { type: string, format: uuid }
+        apt:
+          type: object
+          properties:
+            full: { type: boolean, description: full-upgrade in plaats van upgrade }
+            autoremove: { type: boolean }
+        docker:
+          type: object
+          properties:
+            projects: { type: array, items: { type: string }, description: Leeg is elk Compose-project }
+            prune: { type: boolean }
+        reboot: { type: boolean, description: Herstarten als de node daar na de update om vraagt }
+        confirm: { type: string, description: De slug van het prodcluster, ter bevestiging }
+    Command:
+      type: object
+      required: [id, name, description, run_as, timeout_seconds, revision, updated_at, updated_by, last_run]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        description: { type: string }
+        run_as: { type: string }
+        timeout_seconds: { type: integer }
+        revision: { type: integer }
+        updated_at: { type: string, format: date-time }
+        updated_by: { type: string, nullable: true }
+        last_run: { allOf: [{ $ref: "#/components/schemas/Job" }], nullable: true }
+    CommandDetail:
+      allOf:
+        - { $ref: "#/components/schemas/Command" }
+        - type: object
+          required: [script, revisions, runs]
+          properties:
+            script: { type: string }
+            revisions:
+              type: array
+              items:
+                type: object
+                required: [revision, script, sha256, created_at, created_by]
+                properties:
+                  revision: { type: integer }
+                  script: { type: string }
+                  sha256: { type: string }
+                  created_at: { type: string, format: date-time }
+                  created_by: { type: string, nullable: true }
+            runs: { type: array, items: { $ref: "#/components/schemas/Job" } }
+    CommandInput:
+      type: object
+      required: [name, script]
+      properties:
+        name: { type: string }
+        description: { type: string }
+        script: { type: string }
+        run_as: { type: string, description: Leeg is root }
+        timeout_seconds: { type: integer, description: Nul is 30 minuten }
+    CommandRunInput:
+      type: object
+      properties:
+        node_ids: { type: array, items: { type: string, format: uuid } }
+        cluster_id: { type: string, format: uuid }
+        continue_on_error: { type: boolean, description: Ook op de volgende nodes draaien als het op een node mislukt }
+        confirm: { type: string, description: De slug van het prodcluster, ter bevestiging }
     AgentUpgradeInput:
       type: object
       properties:

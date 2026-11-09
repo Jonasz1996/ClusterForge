@@ -36,6 +36,8 @@ var classes = map[string]Class{
 	"cluster.database_not_added": ClassInfo, "cluster.database_retired": ClassChange,
 	"cluster.recipe_database": ClassChange, "cluster.recipe_database_failed": ClassSymptom,
 	"recipe.saved": ClassInfo, "recipe.deleted": ClassInfo, "blueprint.saved": ClassInfo,
+	"command.saved": ClassInfo, "command.deleted": ClassInfo,
+	"node.software_updated": ClassChange, "node.software_update_failed": ClassInfo, "node.command_ran": ClassChange,
 	"cluster.secret_revealed":      ClassInfo,
 	"cluster.database_move_copied": ClassChange, "cluster.database_move_failed": ClassInfo, "cluster.database_moved": ClassChange,
 	"cluster.database_move_cancelled": ClassChange, "cluster.database_locked": ClassChange, "cluster.database_unlocked": ClassChange,
