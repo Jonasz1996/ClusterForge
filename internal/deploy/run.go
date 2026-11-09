@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -117,6 +118,9 @@ type vmState struct {
 	VMID  int    `json:"vmid"`
 	Phase string `json:"phase"`
 	UPID  string `json:"upid,omitempty"`
+	// CloneHost is de host waar de kloon staat tot hij verhuist (fase
+	// migrate): de host van een template op niet-gedeelde storage.
+	CloneHost string `json:"clone_host,omitempty"`
 }
 
 func (r *runCtx) saveVM(ctx context.Context, st *jobs.Step, vs vmState) error {
@@ -228,11 +232,28 @@ func (r *runCtx) createVM(ctx context.Context, st *jobs.Step, n *plannedNode) er
 		}
 	}
 	g := r.guest(vs, n)
+	storage := or(n.Storage, r.p.Target.Storage)
 
 	if vs.Phase == "clone" {
-		st.Logf("%s %d klonen uit %s naar %s", r.kind(), vs.VMID, r.p.ImageName, n.Host)
+		// Een template op niet-gedeelde storage kan Proxmox alleen op zijn
+		// eigen host klonen; de kopie verhuist daarna.
+		if vs.UPID == "" && img.Node != "" && img.Node != n.Host && !r.imageShared(ctx) {
+			vs.CloneHost = img.Node
+		}
+		target, cloneStorage := n.Host, storage
+		if vs.CloneHost != "" {
+			target = vs.CloneHost
+			if !r.storageOn(ctx, storage, vs.CloneHost) {
+				cloneStorage = ""
+			}
+		}
+		if cloneStorage != "" {
+			st.Logf("%s %d klonen uit %s naar %s, schijf op %s", r.kind(), vs.VMID, r.p.ImageName, target, cloneStorage)
+		} else {
+			st.Logf("%s %d klonen uit %s naar %s", r.kind(), vs.VMID, r.p.ImageName, target)
+		}
 		err := r.task(ctx, st, &vs, func() (string, error) {
-			return r.api.Clone(ctx, img, vs.VMID, n.Hostname, n.Host, r.p.Target.Storage)
+			return r.api.Clone(ctx, img, vs.VMID, n.Hostname, target, cloneStorage)
 		})
 		if err != nil {
 			return fmt.Errorf("klonen: %w", err)
@@ -241,6 +262,37 @@ func (r *runCtx) createVM(ctx context.Context, st *jobs.Step, n *plannedNode) er
 			ID: n.ID, ProxmoxID: &r.p.Target.ProxmoxID, PveVmid: int32p(vs.VMID),
 		}); err != nil {
 			return err
+		}
+		vs.Phase = "config"
+		if vs.CloneHost != "" {
+			vs.Phase = "migrate"
+		}
+		if err := r.saveVM(ctx, st, vs); err != nil {
+			return err
+		}
+	}
+
+	if vs.Phase == "migrate" {
+		src := proxmox.Guest{Type: r.guestType(), Node: vs.CloneHost, VMID: vs.VMID}
+		// Bij een hervatting kan de verhuizing al klaar zijn.
+		done := false
+		if res, err := r.api.Resources(ctx); err == nil {
+			for _, x := range res {
+				if x.Type == src.Type && x.VMID == vs.VMID && x.Node == n.Host {
+					done = true
+				}
+			}
+		}
+		if !done {
+			// Op gedeelde storage verhuist alleen de configuratie.
+			to := storage
+			if r.storageShared(ctx, storage) {
+				to = ""
+			}
+			st.Logf("%s %d verhuizen van %s naar %s", r.kind(), vs.VMID, vs.CloneHost, n.Host)
+			if err := r.task(ctx, st, &vs, func() (string, error) { return r.api.MigrateTo(ctx, src, n.Host, to) }); err != nil {
+				return fmt.Errorf("verhuizen naar %s: %w", n.Host, err)
+			}
 		}
 		vs.Phase = "config"
 		if err := r.saveVM(ctx, st, vs); err != nil {
@@ -313,6 +365,34 @@ func (r *runCtx) createVM(ctx context.Context, st *jobs.Step, n *plannedNode) er
 	}
 	st.Logf("%s %d draait op %s", r.kind(), vs.VMID, n.Host)
 	return nil
+}
+
+// imageShared zegt of de schijf van de template op gedeelde storage staat.
+func (r *runCtx) imageShared(ctx context.Context) bool {
+	if r.p.ImageStorage == "" {
+		return r.p.ImageShared
+	}
+	return r.storageShared(ctx, r.p.ImageStorage)
+}
+
+func (r *runCtx) storageShared(ctx context.Context, name string) bool {
+	list, err := r.s.pve.Storages(ctx, r.p.Target.ProxmoxID)
+	if err != nil {
+		return false
+	}
+	return slices.ContainsFunc(list, func(st proxmox.StorageInfo) bool { return st.Name == name && st.Shared })
+}
+
+// storageOn zegt of een storage op host bestaat.
+func (r *runCtx) storageOn(ctx context.Context, name, host string) bool {
+	if name == "" {
+		return true
+	}
+	list, err := r.s.pve.Storages(ctx, r.p.Target.ProxmoxID)
+	if err != nil {
+		return false
+	}
+	return slices.ContainsFunc(list, func(st proxmox.StorageInfo) bool { return st.Name == name && st.On(host) })
 }
 
 // vmConfig is de configuratie van een nieuwe VM: vorm, netwerk en

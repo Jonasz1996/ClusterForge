@@ -709,8 +709,28 @@ func (s *Server) migrate(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusInternalServerError, "target node is not online")
 		return
 	}
+	disk := rootDisk(g.Config)
+	storage := r.PostForm.Get("targetstorage")
+	if g.Type == "lxc" {
+		storage = r.PostForm.Get("target-storage")
+	}
+	if storage == "" {
+		storage = diskStorage(g.Config)
+	} else if g.Status == "running" {
+		fail(w, http.StatusBadRequest, "targetstorage only for offline migration in fake")
+		return
+	}
+	if storage != "" && !s.reachable(storage, target) {
+		fail(w, http.StatusInternalServerError, fmt.Sprintf("storage '%s' is not available on node '%s'", storage, target))
+		return
+	}
 	kind := map[string]string{"qemu": "qm", "lxc": "vz"}[g.Type] + "migrate"
-	ok(w, s.newTask(g.Node, kind, g.VMID, func() { g.Node = target },
+	ok(w, s.newTask(g.Node, kind, g.VMID, func() {
+		g.Node = target
+		if _, rest, found := strings.Cut(g.Config[disk], ":"); found && storage != "" {
+			g.Config[disk] = storage + ":" + rest
+		}
+	},
 		fmt.Sprintf("starting migration of VM %d to node '%s'", g.VMID, target)))
 }
 

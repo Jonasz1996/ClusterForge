@@ -38,6 +38,9 @@ type API interface {
 	Snapshot(ctx context.Context, g Guest, name, description string, vmstate bool) (string, error)
 	Snapshots(ctx context.Context, g Guest) ([]Snapshot, error)
 	Migrate(ctx context.Context, g Guest, target string, online bool) (string, error)
+	// MigrateTo verhuist een gestopte VM of CT naar host target, met de
+	// schijven naar storage; leeg houdt de storage van de schijf.
+	MigrateTo(ctx context.Context, g Guest, target, storage string) (string, error)
 	TaskStatus(ctx context.Context, upid string) (TaskStatus, error)
 	TaskLog(ctx context.Context, upid string) ([]string, error)
 	StopTask(ctx context.Context, upid string) error
@@ -528,6 +531,19 @@ func (c *Client) Migrate(ctx context.Context, g Guest, target string, online boo
 		} else {
 			// Containers kunnen niet live; ze herstarten op de nieuwe host.
 			form.Set("restart", "1")
+		}
+	}
+	var upid string
+	return upid, c.do(ctx, http.MethodPost, g.path()+"/migrate", form, &upid)
+}
+
+func (c *Client) MigrateTo(ctx context.Context, g Guest, target, storage string) (string, error) {
+	form := url.Values{"target": {target}}
+	if storage != "" {
+		if g.Type == "lxc" {
+			form.Set("target-storage", storage)
+		} else {
+			form.Set("targetstorage", storage)
 		}
 	}
 	var upid string

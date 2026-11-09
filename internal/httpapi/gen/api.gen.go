@@ -6373,6 +6373,19 @@ type DeployInput struct {
 	Template  string        `json:"template"`
 }
 
+// DeployPlacement defines model for DeployPlacement.
+type DeployPlacement struct {
+	// Host Proxmox-host; leeg kiest ClusterForge
+	Host *string `json:"host,omitempty"`
+
+	// Index Volgnummer binnen de rol, vanaf 1
+	Index int    `json:"index"`
+	Role  string `json:"role"`
+
+	// Storage Storage voor de schijf; leeg is de standaard
+	Storage *string `json:"storage,omitempty"`
+}
+
 // DeployPlan defines model for DeployPlan.
 type DeployPlan struct {
 	Nodes []DeployPlanNode `json:"nodes"`
@@ -6390,10 +6403,20 @@ type DeployPlanNode struct {
 	DiskGib int    `json:"disk_gib"`
 
 	// Host De Proxmox-host voor de VM
-	Host      string `json:"host"`
-	Hostname  string `json:"hostname"`
+	Host string `json:"host"`
+
+	// HostChosen De host is gekozen in placement in plaats van door ClusterForge
+	HostChosen bool   `json:"host_chosen"`
+	Hostname   string `json:"hostname"`
+
+	// Index Volgnummer binnen de rol, vanaf 1; leeg (0) bij bestaande nodes
+	Index     int    `json:"index"`
 	MemoryMib int    `json:"memory_mib"`
 	Role      string `json:"role"`
+
+	// Storage De storage voor de schijf; leeg bij bestaande nodes
+	Storage       string `json:"storage"`
+	StorageChosen bool   `json:"storage_chosen"`
 }
 
 // DeployResult defines model for DeployResult.
@@ -6415,7 +6438,10 @@ type DeployTarget struct {
 	// ImageVmid De VM-template (golden image) om uit te klonen
 	ImageVmid int                 `json:"image_vmid"`
 	Network   DeployTargetNetwork `json:"network"`
-	ProxmoxId openapi_types.UUID  `json:"proxmox_id"`
+
+	// Placement Per node de Proxmox-host en de storage. Een node zonder keuze, of met een lege host of storage, krijgt die van ClusterForge: storage zoals het veld storage (of de template), hosts gespreid over de online hosts.
+	Placement *[]DeployPlacement `json:"placement,omitempty"`
+	ProxmoxId openapi_types.UUID `json:"proxmox_id"`
 
 	// SshKeys Publieke SSH-sleutels, één per regel
 	SshKeys *string `json:"ssh_keys,omitempty"`
@@ -10080,7 +10106,10 @@ type ProxmoxStorage struct {
 	Maxdisk int64  `json:"maxdisk"`
 	Name    string `json:"name"`
 	Shared  bool   `json:"shared"`
-	Type    string `json:"type"`
+
+	// Status available, of iets anders als Proxmox de storage niet bereikt
+	Status string `json:"status"`
+	Type   string `json:"type"`
 }
 
 // RecipeCheck defines model for RecipeCheck.

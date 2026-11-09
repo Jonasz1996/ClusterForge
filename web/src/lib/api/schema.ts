@@ -10432,6 +10432,8 @@ export interface components {
             disk: number;
             /** Format: int64 */
             maxdisk: number;
+            /** @description available, of iets anders als Proxmox de storage niet bereikt */
+            status: string;
         };
         ProxmoxSnapshot: {
             name: string;
@@ -11050,6 +11052,17 @@ export interface components {
             dns?: string[];
             /** @description Publieke SSH-sleutels, één per regel */
             ssh_keys?: string;
+            /** @description Per node de Proxmox-host en de storage. Een node zonder keuze, of met een lege host of storage, krijgt die van ClusterForge: storage zoals het veld storage (of de template), hosts gespreid over de online hosts. */
+            placement?: components["schemas"]["DeployPlacement"][];
+        };
+        DeployPlacement: {
+            role: string;
+            /** @description Volgnummer binnen de rol, vanaf 1 */
+            index: number;
+            /** @description Proxmox-host; leeg kiest ClusterForge */
+            host?: string;
+            /** @description Storage voor de schijf; leeg is de standaard */
+            storage?: string;
         };
         DeployInput: {
             template: string;
@@ -11083,10 +11096,17 @@ export interface components {
         DeployPlanNode: {
             hostname: string;
             role: string;
+            /** @description Volgnummer binnen de rol, vanaf 1; leeg (0) bij bestaande nodes */
+            index: number;
             /** @description Adres met prefix, zoals 10.0.20.11/24; leeg bij DHCP */
             address: string;
             /** @description De Proxmox-host voor de VM */
             host: string;
+            /** @description De storage voor de schijf; leeg bij bestaande nodes */
+            storage: string;
+            /** @description De host is gekozen in placement in plaats van door ClusterForge */
+            host_chosen: boolean;
+            storage_chosen: boolean;
             cpu: number;
             memory_mib: number;
             disk_gib: number;

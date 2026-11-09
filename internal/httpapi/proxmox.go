@@ -233,7 +233,7 @@ func (s *Server) GetProxmoxResources(w http.ResponseWriter, r *http.Request, id 
 		case "storage":
 			out.Storages = append(out.Storages, gen.ProxmoxStorage{
 				Name: res.Storage, Host: res.Node, Shared: res.Shared == 1, Type: res.Plugin, Content: res.Content,
-				Disk: res.Disk, Maxdisk: res.MaxDisk,
+				Disk: res.Disk, Maxdisk: res.MaxDisk, Status: res.Status,
 			})
 		}
 	}

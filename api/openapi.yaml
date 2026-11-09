@@ -10938,7 +10938,7 @@ components:
           description: Een tijdelijke sandbox van een back-upcontrole; daarop kan geen VM-actie
     ProxmoxStorage:
       type: object
-      required: [name, host, shared, type, content, disk, maxdisk]
+      required: [name, host, shared, type, content, disk, maxdisk, status]
       properties:
         name: { type: string }
         host: { type: string }
@@ -10947,6 +10947,7 @@ components:
         content: { type: string }
         disk: { type: integer, format: int64 }
         maxdisk: { type: integer, format: int64 }
+        status: { type: string, description: "available, of iets anders als Proxmox de storage niet bereikt" }
     ProxmoxSnapshot:
       type: object
       required: [name, description, parent, time, vmstate]
@@ -11517,6 +11518,20 @@ components:
         gateway: { type: string }
         dns: { type: array, items: { type: string } }
         ssh_keys: { type: string, description: "Publieke SSH-sleutels, één per regel" }
+        placement:
+          type: array
+          items: { $ref: "#/components/schemas/DeployPlacement" }
+          description: >-
+            Per node de Proxmox-host en de storage. Een node zonder keuze, of met een lege host of storage, krijgt die van
+            ClusterForge: storage zoals het veld storage (of de template), hosts gespreid over de online hosts.
+    DeployPlacement:
+      type: object
+      required: [role, index]
+      properties:
+        role: { type: string }
+        index: { type: integer, description: "Volgnummer binnen de rol, vanaf 1" }
+        host: { type: string, description: Proxmox-host; leeg kiest ClusterForge }
+        storage: { type: string, description: Storage voor de schijf; leeg is de standaard }
     DeployInput:
       type: object
       required: [template, cluster, params]
@@ -11554,12 +11569,16 @@ components:
         engine: { type: string, description: "mariadb; postgresql komt later" }
     DeployPlanNode:
       type: object
-      required: [hostname, role, address, host, cpu, memory_mib, disk_gib]
+      required: [hostname, role, index, address, host, storage, host_chosen, storage_chosen, cpu, memory_mib, disk_gib]
       properties:
         hostname: { type: string }
         role: { type: string }
+        index: { type: integer, description: "Volgnummer binnen de rol, vanaf 1; leeg (0) bij bestaande nodes" }
         address: { type: string, description: "Adres met prefix, zoals 10.0.20.11/24; leeg bij DHCP" }
         host: { type: string, description: De Proxmox-host voor de VM }
+        storage: { type: string, description: "De storage voor de schijf; leeg bij bestaande nodes" }
+        host_chosen: { type: boolean, description: De host is gekozen in placement in plaats van door ClusterForge }
+        storage_chosen: { type: boolean }
         cpu: { type: integer }
         memory_mib: { type: integer }
         disk_gib: { type: integer }
