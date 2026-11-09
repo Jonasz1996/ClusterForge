@@ -397,6 +397,9 @@ func (c *Collector) docker(ctx context.Context) *protocol.Docker {
 	if ps, err := c.run(ctx, "docker", "ps", "-q"); err == nil {
 		d.Containers = len(strings.Fields(string(ps)))
 	}
+	if ls, err := c.run(ctx, "docker", "compose", "ls", "-a", "--format", "json"); err == nil {
+		d.Projects = parseComposeLs(ls)
+	}
 	return d
 }
 
