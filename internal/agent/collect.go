@@ -66,6 +66,8 @@ type Collector struct {
 	// OnUnits krijgt de units van elke heartbeat, voor het journaal. Mag
 	// nil zijn.
 	OnUnits func([]UnitInfo)
+	// HTTPGet haalt een lokale URL op, voor SeaweedFS; nil gebruikt HTTP.
+	HTTPGet func(ctx context.Context, url string) ([]byte, error)
 }
 
 // UnitInfo is wat systemctl show over een gevolgde unit zegt.
@@ -190,6 +192,7 @@ func (c *Collector) Facts(ctx context.Context) protocol.Facts {
 	c.maintenanceFacts(&f)
 	f.Certificates = c.certificates()
 	f.Tools = c.tools()
+	f.Seaweed = c.seaweed(ctx)
 	return f
 }
 

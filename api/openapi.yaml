@@ -10732,6 +10732,93 @@ components:
               dns_names: { type: array, items: { type: string } }
               issuer: { type: string }
               not_after: { type: string, format: date-time }
+        seaweed:
+          $ref: '#/components/schemas/SeaweedFacts'
+    SeaweedFacts:
+      type: object
+      description: SeaweedFS op de node (vanaf protocol 26); zie pkg/protocol/seaweed.go. Geheimen staan er nooit in.
+      required: [processes]
+      properties:
+        version: { type: string }
+        processes:
+          type: array
+          items:
+            type: object
+            required: [role, pid, args]
+            properties:
+              role: { type: string, description: "master, volume, filer, s3, server, mount, …" }
+              pid: { type: integer }
+              unit: { type: string }
+              container: { type: string }
+              args: { type: array, items: { type: string } }
+              ip: { type: string }
+              ports: { type: object, additionalProperties: { type: integer } }
+              dirs: { type: array, items: { type: string } }
+              meta_dir: { type: string }
+              peers: { type: array, items: { type: string } }
+              masters: { type: array, items: { type: string } }
+              default_replication: { type: string }
+              data_center: { type: string }
+              rack: { type: string }
+              disks:
+                type: array
+                items:
+                  type: object
+                  required: [dir, total, free]
+                  properties:
+                    dir: { type: string }
+                    total: { type: integer, format: int64 }
+                    free: { type: integer, format: int64 }
+        configs:
+          type: array
+          items:
+            type: object
+            required: [path, kind]
+            properties:
+              path: { type: string }
+              container: { type: string }
+              kind: { type: string }
+              enabled: { type: array, items: { type: string } }
+              jwt: { type: boolean }
+        master:
+          type: object
+          required: [is_leader, max_volumes, free_volumes]
+          properties:
+            leader: { type: string }
+            is_leader: { type: boolean }
+            peers: { type: array, items: { type: string } }
+            max_volumes: { type: integer }
+            free_volumes: { type: integer }
+            data_nodes:
+              type: array
+              items:
+                type: object
+                required: [url, volumes, max]
+                properties:
+                  url: { type: string }
+                  data_center: { type: string }
+                  rack: { type: string }
+                  volumes: { type: integer }
+                  max: { type: integer }
+            layouts:
+              type: array
+              items:
+                type: object
+                required: [replication, writable]
+                properties:
+                  collection: { type: string }
+                  replication: { type: string }
+                  writable: { type: integer }
+        volume:
+          type: object
+          required: [volumes, bytes, files]
+          properties:
+            volumes: { type: integer }
+            read_only: { type: integer }
+            bytes: { type: integer, format: int64 }
+            files: { type: integer, format: int64 }
+            replications: { type: object, additionalProperties: { type: integer } }
+            collections: { type: array, items: { type: string } }
     EnrollmentToken:
       type: object
       required: [id, description, node_id, node_hostname, cluster_id, cluster_name, max_uses, uses, expires_at, created_at, created_by]

@@ -1304,6 +1304,12 @@ De pagina van een sync toont de kaart **Klaar voor de sync?**: per node of hij b
 
 De documentatie van elk cluster heeft een hoofdstuk **Cronjobs** met de beheerde jobs en syncs, de jobs die ClusterForge verder op de nodes vond (eerst wat je zelf maakte, dan wat met een pakket meekwam) en runbooks: een run nakijken, een sync terugdraaien (rsync heeft geen prullenbak: zet de sync uit, kopieer terug van een node die de goede versie nog heeft of zet de map terug uit een back-up), een sync weghalen en een uitgezette job weer aanzetten. De assistent leest cronjobs met de tool **cronjobs** en de runs van één job met **cron_runs**; vraag bijvoorbeeld "waarom mislukte de sync naar backup vannacht?".
 
+## SeaweedFS
+
+Draait er SeaweedFS op een node, dan leest de agent dat bij elke ronde facts (elk kwartier, of meteen met **Facts vernieuwen** op de kaart Agent) en staat op de pagina van de node de kaart **SeaweedFS**. Dat vraagt **agentprotocol 26**. De agent vindt elk `weed`-proces in `/proc`, ook in een Docker-container, met zijn rol (master, volume, filer, s3, server, mount, …), de systemd-unit of de container, de poorten, het IP, de datamappen met hun vrije ruimte, de raft-peers, de masters waarmee hij verbindt, de standaardreplicatie en het datacenter en rack. Hij leest de toml-bestanden (`filer.toml`, `master.toml`, `security.toml`, …) in `/etc/seaweedfs`, `/usr/local/etc/seaweedfs`, `/root/.seaweedfs`, de werkmap van het proces en `-config_dir`, in een container in diens eigen bestandssysteem. Daaruit komen alleen de namen van de secties die aanstaan, zoals de store van de filer (`leveldb2`, `mysql2`, `postgres2`), en of er een JWT-sleutel is. Waarden van vlaggen met pass, secret, key, token of jwt in de naam worden `***`; wachtwoorden en sleutels verlaten de node nooit.
+
+Antwoordt de master op de node (`/cluster/status` en `/dir/status`), dan toont de kaart of hij leider is, zijn peers, de volume servers die hij kent en de replicatie per collectie. Antwoordt de volume server (`/status`), dan het aantal volumes, de grootte, het aantal bestanden en hoeveel volumes elke replicatie hebben. De kaart waarschuwt voor wat een cluster in de weg staat: replicatie `000` (één kopie), één master zonder peers, minder dan drie volume servers voor `002`, een filer met een lokale store (leveldb2) en een datamap met minder dan 10% vrij.
+
 ## Updates en eigen commando's
 
 Vanaf agentprotocol 25 (fase 10) werken de agents de software op de nodes

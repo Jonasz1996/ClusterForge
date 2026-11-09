@@ -10204,6 +10204,75 @@ export interface components {
                 /** Format: date-time */
                 not_after: string;
             }[];
+            seaweed?: components["schemas"]["SeaweedFacts"];
+        };
+        /** @description SeaweedFS op de node (vanaf protocol 26); zie pkg/protocol/seaweed.go. Geheimen staan er nooit in. */
+        SeaweedFacts: {
+            version?: string;
+            processes: {
+                /** @description master, volume, filer, s3, server, mount, … */
+                role: string;
+                pid: number;
+                unit?: string;
+                container?: string;
+                args: string[];
+                ip?: string;
+                ports?: {
+                    [key: string]: number;
+                };
+                dirs?: string[];
+                meta_dir?: string;
+                peers?: string[];
+                masters?: string[];
+                default_replication?: string;
+                data_center?: string;
+                rack?: string;
+                disks?: {
+                    dir: string;
+                    /** Format: int64 */
+                    total: number;
+                    /** Format: int64 */
+                    free: number;
+                }[];
+            }[];
+            configs?: {
+                path: string;
+                container?: string;
+                kind: string;
+                enabled?: string[];
+                jwt?: boolean;
+            }[];
+            master?: {
+                leader?: string;
+                is_leader: boolean;
+                peers?: string[];
+                max_volumes: number;
+                free_volumes: number;
+                data_nodes?: {
+                    url: string;
+                    data_center?: string;
+                    rack?: string;
+                    volumes: number;
+                    max: number;
+                }[];
+                layouts?: {
+                    collection?: string;
+                    replication: string;
+                    writable: number;
+                }[];
+            };
+            volume?: {
+                volumes: number;
+                read_only?: number;
+                /** Format: int64 */
+                bytes: number;
+                /** Format: int64 */
+                files: number;
+                replications?: {
+                    [key: string]: number;
+                };
+                collections?: string[];
+            };
         };
         EnrollmentToken: {
             /** Format: uuid */

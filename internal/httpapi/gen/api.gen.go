@@ -7324,6 +7324,9 @@ type Facts struct {
 		Interface string  `json:"interface"`
 		Metric    *int    `json:"metric,omitempty"`
 	} `json:"routes,omitempty"`
+
+	// Seaweed SeaweedFS op de node (vanaf protocol 26); zie pkg/protocol/seaweed.go. Geheimen staan er nooit in.
+	Seaweed  *SeaweedFacts `json:"seaweed,omitempty"`
 	Services nullable.Nullable[[]struct {
 		Active  string `json:"active"`
 		Enabled string `json:"enabled"`
@@ -10722,6 +10725,68 @@ type RiskWhatIfInput struct {
 
 // Role defines model for Role.
 type Role string
+
+// SeaweedFacts SeaweedFS op de node (vanaf protocol 26); zie pkg/protocol/seaweed.go. Geheimen staan er nooit in.
+type SeaweedFacts struct {
+	Configs *[]struct {
+		Container *string   `json:"container,omitempty"`
+		Enabled   *[]string `json:"enabled,omitempty"`
+		Jwt       *bool     `json:"jwt,omitempty"`
+		Kind      string    `json:"kind"`
+		Path      string    `json:"path"`
+	} `json:"configs,omitempty"`
+	Master *struct {
+		DataNodes *[]struct {
+			DataCenter *string `json:"data_center,omitempty"`
+			Max        int     `json:"max"`
+			Rack       *string `json:"rack,omitempty"`
+			Url        string  `json:"url"`
+			Volumes    int     `json:"volumes"`
+		} `json:"data_nodes,omitempty"`
+		FreeVolumes int  `json:"free_volumes"`
+		IsLeader    bool `json:"is_leader"`
+		Layouts     *[]struct {
+			Collection  *string `json:"collection,omitempty"`
+			Replication string  `json:"replication"`
+			Writable    int     `json:"writable"`
+		} `json:"layouts,omitempty"`
+		Leader     *string   `json:"leader,omitempty"`
+		MaxVolumes int       `json:"max_volumes"`
+		Peers      *[]string `json:"peers,omitempty"`
+	} `json:"master,omitempty"`
+	Processes []struct {
+		Args               []string  `json:"args"`
+		Container          *string   `json:"container,omitempty"`
+		DataCenter         *string   `json:"data_center,omitempty"`
+		DefaultReplication *string   `json:"default_replication,omitempty"`
+		Dirs               *[]string `json:"dirs,omitempty"`
+		Disks              *[]struct {
+			Dir   string `json:"dir"`
+			Free  int64  `json:"free"`
+			Total int64  `json:"total"`
+		} `json:"disks,omitempty"`
+		Ip      *string         `json:"ip,omitempty"`
+		Masters *[]string       `json:"masters,omitempty"`
+		MetaDir *string         `json:"meta_dir,omitempty"`
+		Peers   *[]string       `json:"peers,omitempty"`
+		Pid     int             `json:"pid"`
+		Ports   *map[string]int `json:"ports,omitempty"`
+		Rack    *string         `json:"rack,omitempty"`
+
+		// Role master, volume, filer, s3, server, mount, …
+		Role string  `json:"role"`
+		Unit *string `json:"unit,omitempty"`
+	} `json:"processes"`
+	Version *string `json:"version,omitempty"`
+	Volume  *struct {
+		Bytes        int64           `json:"bytes"`
+		Collections  *[]string       `json:"collections,omitempty"`
+		Files        int64           `json:"files"`
+		ReadOnly     *int            `json:"read_only,omitempty"`
+		Replications *map[string]int `json:"replications,omitempty"`
+		Volumes      int             `json:"volumes"`
+	} `json:"volume,omitempty"`
+}
 
 // SelfGuest defines model for SelfGuest.
 type SelfGuest struct {

@@ -17,6 +17,7 @@ import { NodeLifecycleCard } from "@/components/inventory/NodeLifecycleCard";
 import { NodeProxmoxCard } from "@/components/proxmox/NodeProxmoxCard";
 import { NodeChangesCard } from "@/components/journal/Changes";
 import { NodeCronCard } from "@/components/cron/Cron";
+import { SeaweedCard } from "@/components/seaweed/SeaweedCard";
 import {
   AgentBadge,
   ago,
@@ -404,6 +405,8 @@ function FactsView({ facts: f, runtime }: { facts: Facts; runtime: NodeRuntime }
           </div>
         )}
       </Card>
+
+      {f.seaweed && <SeaweedCard seaweed={f.seaweed} />}
 
       <div className="grid gap-6 lg:grid-cols-2">
         <Card title="Netwerk">
