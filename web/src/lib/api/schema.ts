@@ -3600,6 +3600,98 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/updates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Updates per node, uit de facts (fase 10)
+         * @description Per node met een agent: de apt-updates (waarvan beveiliging), of de node om een herstart vraagt en de Docker
+         *     Compose-projecten. supported is false voor een agent ouder dan protocol 25; die kan nog niet bijwerken. Ook voor
+         *     viewers.
+         */
+        get: operations["listUpdates"];
+        put?: never;
+        /**
+         * Pakketten (apt) en/of Docker bijwerken (admin); één taak updates.run per cluster
+         * @description node_ids of cluster_id. Per cluster één node tegelijk, de VIP-houder als laatste; na elke node wacht de taak tot
+         *     de diensten van vóór de update weer draaien en de VIP's een vaste houder hebben, en stopt bij de eerste node die
+         *     niet gezond terugkomt. Op een databasecluster blijven de databasepakketten staan. Op prod vraagt het
+         *     tweestapsverificatie en de slug in confirm; één prodcluster tegelijk.
+         */
+        post: operations["startUpdates"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/commands": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Eigen commando's (fase 10) */
+        get: operations["listCommands"];
+        put?: never;
+        /** Een eigen commando maken (admin) */
+        post: operations["createCommand"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/commands/{commandId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                commandId: string;
+            };
+            cookie?: never;
+        };
+        /** Een eigen commando met zijn revisies en laatste runs */
+        get: operations["getCommand"];
+        /** Een eigen commando wijzigen (admin); een andere tekst maakt een nieuwe revisie */
+        put: operations["updateCommand"];
+        post?: never;
+        /** Een eigen commando weghalen (admin); de taken van zijn runs blijven */
+        delete: operations["deleteCommand"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/commands/{commandId}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                commandId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Een eigen commando draaien op nodes of een cluster (admin); taak command.run
+         * @description Eén node tegelijk, bij een cluster de VIP-houder als laatste. De uitvoer staat live in de stappen van de taak;
+         *     de taak annuleren stopt het commando op de node. Standaard stopt de taak bij de eerste node waar het commando
+         *     niet met exitcode 0 eindigt. Op prod vraagt het tweestapsverificatie en de slug in confirm.
+         */
+        post: operations["runCommand"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/agent-upgrades": {
         parameters: {
             query?: never;
@@ -10440,6 +10532,105 @@ export interface components {
             /** @description ClusterForge werkt deze agent vanzelf bij */
             auto: boolean;
         };
+        UpdateOverview: {
+            /** @description Het agentprotocol vanaf waar updates kunnen */
+            run_protocol: number;
+            nodes: components["schemas"]["UpdateNode"][];
+        };
+        UpdateNode: {
+            /** Format: uuid */
+            node_id: string;
+            hostname: string;
+            /** Format: uuid */
+            cluster_id: string | null;
+            cluster_name: string;
+            cluster_slug: string;
+            cluster_environment: string;
+            online: boolean;
+            protocol: number;
+            supported: boolean;
+            /** @description Null als de agent het niet kon tellen */
+            upgrades_total: number | null;
+            upgrades_security: number;
+            packages: string[];
+            reboot_required: boolean;
+            /** Format: date-time */
+            apt_updated_at: string | null;
+            /** @description Leeg zonder Docker */
+            docker_version: string;
+            compose_projects: {
+                name: string;
+                status: string;
+                config_files: string[];
+            }[];
+            /** @description Het cluster heeft een database; die pakketten blijven staan */
+            has_database: boolean;
+            vip_holder: boolean;
+            /** Format: date-time */
+            facts_at: string | null;
+        };
+        UpdateInput: {
+            node_ids?: string[];
+            /** Format: uuid */
+            cluster_id?: string;
+            apt?: {
+                /** @description full-upgrade in plaats van upgrade */
+                full?: boolean;
+                autoremove?: boolean;
+            };
+            docker?: {
+                /** @description Leeg is elk Compose-project */
+                projects?: string[];
+                prune?: boolean;
+            };
+            /** @description Herstarten als de node daar na de update om vraagt */
+            reboot?: boolean;
+            /** @description De slug van het prodcluster */
+            confirm?: string;
+        };
+        Command: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            description: string;
+            run_as: string;
+            timeout_seconds: number;
+            revision: number;
+            /** Format: date-time */
+            updated_at: string;
+            updated_by: string | null;
+            last_run: components["schemas"]["Job"] | null;
+        };
+        CommandDetail: components["schemas"]["Command"] & {
+            script: string;
+            revisions: {
+                revision: number;
+                script: string;
+                sha256: string;
+                /** Format: date-time */
+                created_at: string;
+                created_by: string | null;
+            }[];
+            runs: components["schemas"]["Job"][];
+        };
+        CommandInput: {
+            name: string;
+            description?: string;
+            script: string;
+            /** @description Leeg is root */
+            run_as?: string;
+            /** @description Nul is 30 minuten */
+            timeout_seconds?: number;
+        };
+        CommandRunInput: {
+            node_ids?: string[];
+            /** Format: uuid */
+            cluster_id?: string;
+            /** @description Ook op de volgende nodes draaien als het op een node mislukt */
+            continue_on_error?: boolean;
+            /** @description De slug van het prodcluster */
+            confirm?: string;
+        };
         AgentUpgradeInput: {
             node_ids?: string[];
             /** Format: uuid */
@@ -16841,6 +17032,215 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["HealRunInput"];
+            };
+        };
+        responses: {
+            /** @description Taak aangemaakt */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Job"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    listUpdates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpdateOverview"];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    startUpdates: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateInput"];
+            };
+        };
+        responses: {
+            /** @description Taken aangemaakt */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentUpgradeStarted"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    listCommands: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["Command"][];
+                    };
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    createCommand: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CommandInput"];
+            };
+        };
+        responses: {
+            /** @description Gemaakt */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CommandDetail"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    getCommand: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                commandId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CommandDetail"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    updateCommand: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                commandId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CommandInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CommandDetail"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    deleteCommand: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                commandId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Weg */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    runCommand: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                commandId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CommandRunInput"];
             };
         };
         responses: {
