@@ -82,8 +82,8 @@ type RunSpec struct {
 	Title          string `json:"title,omitempty"`
 	TimeoutSeconds int    `json:"timeout_seconds,omitempty"`
 	// Script en User horen bij RunScript. Leeg User is root.
-	Script string `json:"script,omitempty"`
-	User   string `json:"user,omitempty"`
+	Script string     `json:"script,omitempty"`
+	User   string     `json:"user,omitempty"`
 	Apt    *AptRun    `json:"apt,omitempty"`
 	Docker *DockerRun `json:"docker,omitempty"`
 }
