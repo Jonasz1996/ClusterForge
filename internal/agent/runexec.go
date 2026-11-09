@@ -372,7 +372,7 @@ func (r *RunExecutor) docker(ctx context.Context, d *protocol.DockerRun, out io.
 	for _, want := range d.Projects {
 		i := slices.IndexFunc(projects, func(p protocol.ComposeProject) bool { return p.Name == want })
 		if i < 0 {
-			return -1, fmt.Errorf("Compose-project %s staat niet op deze node", want)
+			return -1, fmt.Errorf("compose-project %s staat niet op deze node", want)
 		}
 		todo = append(todo, projects[i])
 	}
