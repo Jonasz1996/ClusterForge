@@ -37,10 +37,28 @@ func runCronCommand(ctx context.Context, name, command string, out io.Writer) (i
 
 // runCronArgv draait argv als name, zoals runCronCommand.
 func runCronArgv(ctx context.Context, name string, argv []string, out io.Writer) (int, error) {
+	return runArgvEnv(ctx, name, argv, nil, out)
+}
+
+// chownTo geeft een bestand aan een gebruiker en diens groep.
+func chownTo(p, name string) error {
+	u, err := user.Lookup(name)
+	if err != nil {
+		return err
+	}
+	uid, _ := strconv.Atoi(u.Uid)
+	gid, _ := strconv.Atoi(u.Gid)
+	return os.Chown(p, uid, gid)
+}
+
+// runArgvEnv draait argv als name (leeg is de eigen gebruiker), met extra
+// omgevingsvariabelen; afloop van ctx stopt de hele procesgroep.
+func runArgvEnv(ctx context.Context, name string, argv, extra []string, out io.Writer) (int, error) {
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Stdout, cmd.Stderr = out, out
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	env := []string{"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", "LANG=C.UTF-8"}
+	env = append(env, extra...)
 	// Zonder naam draait het als de gebruiker van cf-agent zelf.
 	var u *user.User
 	var err error

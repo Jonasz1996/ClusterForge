@@ -65,6 +65,10 @@ type Agent struct {
 	ProbeInterval time.Duration
 	// Now geeft de tijd voor de naam van een dump; nil is time.Now.
 	Now func() time.Time
+	// StartRun en StopRun starten en stoppen een run (fase 10); nil
+	// gebruikt systemd-run en systemctl stop. Tests vervangen ze.
+	StartRun func(ctx context.Context, id string) error
+	StopRun  func(ctx context.Context, id string) error
 	// Root is de bestandssysteemwortel voor deploystappen; leeg is "/".
 	// Tests gebruiken een map.
 	Root string
@@ -207,7 +211,10 @@ func (a *Agent) Connect() error {
 	if _, err = a.nc.Subscribe(protocol.Subject(a.Config.NodeID, protocol.SubjectDB), a.onDB); err != nil {
 		return err
 	}
-	_, err = a.nc.Subscribe(protocol.Subject(a.Config.NodeID, protocol.SubjectCron), a.onCron)
+	if _, err = a.nc.Subscribe(protocol.Subject(a.Config.NodeID, protocol.SubjectCron), a.onCron); err != nil {
+		return err
+	}
+	_, err = a.nc.Subscribe(protocol.Subject(a.Config.NodeID, protocol.SubjectRun), a.onRun)
 	return err
 }
 
@@ -244,6 +251,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	}
 
 	a.resumeUpgrade(ctx)
+	a.releaseHolds(ctx)
 	// Storingen die er nog staan, bijvoorbeeld na een crash, gaan eerst weg.
 	if res := a.faults.ClearAll(ctx); !res.OK {
 		a.Log.Error("achtergebleven storingen terugdraaien mislukt", "err", res.Error)

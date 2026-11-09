@@ -125,6 +125,8 @@ var Known = map[string]Spec{
 	"cluster.recipe_database":          {CategoryInventory, "Database-instructies van recept uitgevoerd"},
 	"cluster.recipe_database_failed":   {CategoryInventory, "Database-instructies van recept mislukt"},
 	"recipe.saved":                     {CategoryInventory, "Recept bewaard"},
+	"command.saved":                    {CategoryInventory, "Eigen commando bewaard"},
+	"command.deleted":                  {CategoryInventory, "Eigen commando weggehaald"},
 	"recipe.deleted":                   {CategoryInventory, "Receptversie weggehaald"},
 	"cluster.secret_revealed":          {CategorySecurity, "Wachtwoord van databasegebruiker getoond"},
 	"blueprint.saved":                  {CategoryInventory, "Cluster samengesteld uit recepten"},
@@ -135,7 +137,10 @@ var Known = map[string]Spec{
 	"vip.updated":                      {CategoryInventory, "VIP gewijzigd"},
 	"vip.deleted":                      {CategoryInventory, "VIP verwijderd"},
 
-	"node.lifecycle_changed": {CategoryLifecycle, "Lifecycle van node gewijzigd"},
+	"node.lifecycle_changed":      {CategoryLifecycle, "Lifecycle van node gewijzigd"},
+	"node.software_updated":       {CategoryLifecycle, "Pakketten of Docker op node bijgewerkt"},
+	"node.software_update_failed": {CategoryLifecycle, "Bijwerken van pakketten of Docker mislukt"},
+	"node.command_ran":            {CategoryLifecycle, "Eigen commando gedraaid op node"},
 
 	"job.queued":           {CategoryJobs, "Taak aangevraagd"},
 	"job.succeeded":        {CategoryJobs, "Taak gelukt"},

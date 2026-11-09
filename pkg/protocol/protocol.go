@@ -10,7 +10,7 @@ import (
 
 // Version is de protocolversie. Een agent meldt die bij elke heartbeat, zodat
 // de server geen berichten stuurt die de agent niet kent.
-const Version = 24
+const Version = 25
 
 // RecipeStepsSince is de eerste protocolversie die de stappen van recepten
 // kent: repo_deb, repo en ini_set (fase 9).
@@ -273,6 +273,8 @@ type Service struct {
 type Docker struct {
 	Version    string `json:"version"`
 	Containers int    `json:"containers"`
+	// Projects zijn de Docker Compose-projecten; vanaf RunSince.
+	Projects []ComposeProject `json:"projects,omitempty"`
 }
 
 // Keepalived beschrijft wat er in keepalived.conf staat.
@@ -670,6 +672,14 @@ func (f Facts) Stable() Facts {
 	if f.Docker != nil {
 		d := *f.Docker
 		d.Containers = 0
+		d.Projects = make([]ComposeProject, len(f.Docker.Projects))
+		for i, p := range f.Docker.Projects {
+			p.Status = ""
+			d.Projects[i] = p
+		}
+		if len(d.Projects) == 0 {
+			d.Projects = nil
+		}
 		out.Docker = &d
 	}
 	out.AptUpdatedAt = time.Time{}

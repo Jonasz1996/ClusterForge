@@ -46,6 +46,9 @@ Gebruik:
   cf-agent cron-run <id>
                      draait een beheerde cronjob van ClusterForge; de timer
                      cf-cron-<id>.timer start dit
+  cf-agent run-exec <id>
+                     voert een run van ClusterForge uit (script, apt of
+                     docker); de agent start dit met systemd-run
   cf-agent sync-receive --from <node>
                      ontvangt een bestandssync; alleen via de sleutel van
                      een bron in authorized_keys
@@ -78,6 +81,8 @@ func main() {
 		os.Exit(check(os.Args[2:]))
 	case "cron-run":
 		os.Exit(cronRun(os.Args[2:]))
+	case "run-exec":
+		os.Exit(runExec(os.Args[2:]))
 	case "sync-receive":
 		os.Exit(syncReceive(os.Args[2:]))
 	case "facts":
@@ -147,6 +152,18 @@ func cronRun(args []string) int {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	return (&agent.CronRunner{}).Main(ctx, args[0])
+}
+
+// runExec voert een run uit en geeft 0 als hij lukte. SIGTERM (systemctl
+// stop) stopt hem.
+func runExec(args []string) int {
+	if len(args) != 1 {
+		fmt.Fprintln(os.Stderr, "gebruik: cf-agent run-exec <id>")
+		return 2
+	}
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer cancel()
+	return (&agent.RunExecutor{}).Main(ctx, args[0])
 }
 
 func syncReceive(args []string) int {

@@ -106,6 +106,12 @@ Het technisch ontwerp staat in [docs/design/mvp-fase-1.md](docs/design/mvp-fase-
 | 4. Breder | PostgreSQL en Patroni: een gestopte of hangende unit, en een Patroni die etcd niet bereikt of een adres opgeeft dat de node niet heeft, met het bestand en de regel (die config wijzigt ClusterForge niet). MySQL zonder Galera starten en opvolgen. **Database toevoegen** weigert een node waarop MariaDB of PostgreSQL staat maar stilstaat, met de verwijzing naar Zelfherstel | klaar |
 | 5. Documentatie, What Broke en de assistent | Het hoofdstuk **Herstel** in de documentatie van elk cluster met een database heeft een sectie **Zelfherstel**: of Vanzelf herstellen aan staat, en wat Zelfherstel de laatste 30 dagen deed, met wat er mis was, met de hand of vanzelf, en hoe het afliep. Een herstel staat in de tijdlijn van What Broke als **zelfherstel** met een link naar de taak; begon het na de storing, dan is het een antwoord en geen oorzaak. Bij het incident van het cluster staan de herstelacties ook als ze na het halfuur van de analyse komen. De assistent leest Zelfherstel met de tool **heal**, die alleen leest | klaar |
 
+| Fase 10: updates en eigen commando's | Inhoud | Status |
+| --- | --- | --- |
+| 1. Agent | Runs (agentprotocol 25): een script, apt of Docker Compose als eigen unit `cf-run-<id>`, los van de agent, met de uitvoer op de node. De facts melden de Compose-projecten | klaar |
+| 2. Updates | Pagina **[Updates](#updates)**: apt en/of Docker per node of cluster, één node tegelijk met de VIP-houder als laatste, wachten op de diensten en de VIP's, databasepakketten blijven staan op een databasecluster | klaar |
+| 3. Commando's | Pagina **[Commando's](#commandos)**: eigen scripts met revisies, uitvoeren op nodes of een cluster met de uitvoer live in de taak | klaar |
+
 ## Draaien met Docker Compose
 
 Stap voor stap in een Debian-container op Proxmox: [docs/install-proxmox-lxc.md](docs/install-proxmox-lxc.md). Daar staan ook [back-up en herstel van ClusterForge zelf](docs/install-proxmox-lxc.md#back-up-en-herstel-van-clusterforge-zelf) en [bijwerken](docs/install-proxmox-lxc.md#bijwerken). `docker compose ps` toont de server als `healthy` zodra hij antwoordt (`clusterforge-server healthcheck`).
@@ -1297,6 +1303,69 @@ De pagina van een sync toont de kaart **Klaar voor de sync?**: per node of hij b
 #### Documentatie en assistent
 
 De documentatie van elk cluster heeft een hoofdstuk **Cronjobs** met de beheerde jobs en syncs, de jobs die ClusterForge verder op de nodes vond (eerst wat je zelf maakte, dan wat met een pakket meekwam) en runbooks: een run nakijken, een sync terugdraaien (rsync heeft geen prullenbak: zet de sync uit, kopieer terug van een node die de goede versie nog heeft of zet de map terug uit een back-up), een sync weghalen en een uitgezette job weer aanzetten. De assistent leest cronjobs met de tool **cronjobs** en de runs van één job met **cron_runs**; vraag bijvoorbeeld "waarom mislukte de sync naar backup vannacht?".
+
+## Updates en eigen commando's
+
+Vanaf agentprotocol 25 (fase 10) werken de agents de software op de nodes
+bij en draaien ze je eigen scripts. Op een node typ je zelf niets meer: alles
+gaat via de webinterface, met de uitvoer live in de taak (Taken).
+
+### Updates
+
+**Updates** toont per cluster en per node de beschikbare apt-updates (waarvan
+beveiliging), of de node om een herstart vraagt, en de Docker
+Compose-projecten. **Cluster bijwerken** of **Bijwerken** bij een node kiest:
+
+- **Pakketten**: `apt-get update` en `apt-get upgrade` (of `full-upgrade`),
+  eventueel `autoremove`. Een onderbroken dpkg maakt de agent eerst af; een
+  kapotte pakketbron buiten Debian is een waarschuwing.
+- **Docker**: per Compose-project `docker compose pull` en `up -d`, daarna
+  eventueel `docker image prune -f`. Losse containers zonder Compose blijven
+  zoals ze zijn.
+- **Herstarten als de node erom vraagt** (`/run/reboot-required`).
+
+Eén node tegelijk, de VIP-houder als laatste. Na elke node wacht de taak tot
+de diensten die ervoor draaiden weer `active` zijn en de VIP's een vaste
+houder hebben; lukt dat niet, dan stopt de taak en blijven de nodes erna
+zoals ze waren. Op een cluster met een database blijven de databasepakketten
+(`mariadb-*`, `galera-*`, `postgresql*`, `patroni`, …) tijdens de update
+staan, met een tijdelijke `apt-mark hold` die de agent daarna weghaalt (ook
+na een crash, bij zijn volgende start). Die werk je bij met **Bijwerken** op
+de databasekaart. Op prod vraagt het tweestapsverificatie en de slug van het
+cluster.
+
+### Commando's
+
+**Commando's** zijn je eigen scripts: naam, script, als welke gebruiker
+(standaard root) en een tijdslimiet. Elke andere tekst is een nieuwe
+revisie. **Uitvoeren…** kiest nodes of een heel cluster; het draait één node
+tegelijk (VIP-houder als laatste) en stopt bij de eerste node waar het niet
+met exitcode 0 eindigt, tenzij je "Verder bij een fout" aanvinkt. De uitvoer
+staat live in de taak; **Annuleren** stopt het script op de node (SIGTERM
+aan de hele procesgroep). Wachtwoorden in de uitvoer worden gemaskeerd zoals
+bij cronjobs. Het logboek krijgt elke wijziging en elke run met de sha256
+van de tekst; alleen een beheerder maakt of draait commando's.
+
+Het voorbeeld **Zabbix-database omzetten** zet de database na een grote
+Zabbix-versie om met een eigen configuratie zonder HA, zoals:
+
+```sh
+grep -v -e '^HANodeName' -e '^NodeAddress' -e '^Include=' -e '^PidFile' -e '^SocketDir' \
+  /etc/zabbix/cf-zabbix_server.conf > /root/zbx-upgrade.conf
+printf 'Include=/etc/zabbix/cf-zabbix_server-db.conf\nPidFile=/tmp/zbx-upgrade.pid\nSocketDir=/tmp\n' >> /root/zbx-upgrade.conf
+zabbix_server -f -c /root/zbx-upgrade.conf
+```
+
+`zabbix_server -f` blijft draaien; stop de run met Annuleren zodra de uitvoer
+zegt dat de database bij is.
+
+### Hoe het op de node loopt
+
+De agent start elke run als eigen unit (`systemd-run --unit cf-run-<id>`,
+`cf-agent run-exec <id>`), los van zijn eigen proces: een herstart of update
+van de agent of de server breekt de run niet af, en de taak leest daarna
+verder. Spec, uitvoer en stand staan in `/var/lib/clusterforge/runs/<id>`;
+de laatste twintig runs blijven bewaard.
 
 ## Zelfherstel
 

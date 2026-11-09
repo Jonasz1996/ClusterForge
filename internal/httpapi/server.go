@@ -19,6 +19,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/audit"
 	"github.com/Jonasz1996/clusterforge/internal/auth"
 	"github.com/Jonasz1996/clusterforge/internal/backups"
+	"github.com/Jonasz1996/clusterforge/internal/commands"
 	"github.com/Jonasz1996/clusterforge/internal/components"
 	"github.com/Jonasz1996/clusterforge/internal/config"
 	"github.com/Jonasz1996/clusterforge/internal/cronjobs"
@@ -48,6 +49,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/rollout"
 	"github.com/Jonasz1996/clusterforge/internal/store"
 	"github.com/Jonasz1996/clusterforge/internal/topo"
+	"github.com/Jonasz1996/clusterforge/internal/updates"
 	"github.com/Jonasz1996/clusterforge/internal/webui"
 )
 
@@ -89,6 +91,8 @@ type Server struct {
 	lessons      *kubelessons.Engine
 	version      string
 	upgrades     *agentupgrade.Service
+	updates      *updates.Service
+	commands     *commands.Service
 	recipes      *recipes.Service
 	loginLimiter *ipLimiter
 	// loginTimeout en sessionTimeout begrenzen het databasewerk van een login
@@ -159,6 +163,10 @@ type Deps struct {
 	Components *components.Service
 	// Upgrades werkt de agents bij.
 	Upgrades *agentupgrade.Service
+	// Updates en Commands werken de nodes bij en draaien eigen commando's
+	// (fase 10).
+	Updates  *updates.Service
+	Commands *commands.Service
 	Version  string
 }
 
@@ -192,6 +200,8 @@ func New(d Deps) *Server {
 		git:      d.GitOps,
 		version:  d.Version,
 		upgrades: d.Upgrades,
+		updates:  d.Updates,
+		commands: d.Commands,
 		recipes:  recipes.NewService(d.Pool, ev),
 		// 10 pogingen direct, daarna één per 6 seconden per IP-adres.
 		loginLimiter:   newIPLimiter(6*time.Second, 10),
