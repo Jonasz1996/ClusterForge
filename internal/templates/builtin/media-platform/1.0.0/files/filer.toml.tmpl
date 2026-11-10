@@ -14,8 +14,8 @@ createTable = """
     PRIMARY KEY (dirhash, name)
   );
 """
-hostname = "{{ .params.db_host }}"
-port = {{ .params.db_port }}
+hostname = "{{ .params.db_vip }}"
+port = 5432
 username = "{{ .params.db_user }}"
 password = "{{ .params.db_password }}"
 database = "{{ .params.files_db_name }}"

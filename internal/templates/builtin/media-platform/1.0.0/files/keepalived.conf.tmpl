@@ -43,3 +43,6 @@ vrrp_instance VI_{{ .params.vrid }} {
     notify_backup "/usr/local/lib/clusterforge/platform-ctl.sh backup"
     notify_fault "/usr/local/lib/clusterforge/platform-ctl.sh backup"
 }
+
+# Het eigen VIP van PostgreSQL (ClusterForge, Database).
+include /etc/keepalived/conf.d/*.conf

@@ -828,6 +828,21 @@ func (s *Service) DatabaseSettings(j store.Job) map[string]any {
 	return tpl.Database.Settings
 }
 
+// DatabaseVIP geeft het eigen VIP van de database die de template van een
+// uitrol vanzelf meebrengt (Template.Database.VIP), met de parameters van
+// de uitrol ingevuld; leeg zonder.
+func (s *Service) DatabaseVIP(j store.Job) (string, error) {
+	var p params
+	if err := json.Unmarshal(j.Params, &p); err != nil {
+		return "", err
+	}
+	tpl, found := s.Templates.Get(p.Template, p.Version)
+	if !found || tpl.Database == nil {
+		return "", nil
+	}
+	return tpl.DBVIP(templates.Context{Params: p.Params, Cluster: p.Cluster})
+}
+
 // planExisting zet bestaande nodes in de rollen van de template: per rol
 // precies zoveel als de template vraagt, elk met een verbonden agent, facts
 // met een adres en nog in geen enkel cluster. De hostname blijft.

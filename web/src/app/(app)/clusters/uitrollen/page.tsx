@@ -348,9 +348,13 @@ function DeployInner() {
       {template && template.database && (
         <Card title="Database">
           <p className="text-sm text-slate-600 dark:text-slate-400">
-            Deze template krijgt altijd MariaDB Galera, op de nodes met de rol {template.database.role}. Na de uitrol zet
-            ClusterForge de database er vanzelf op; de template maakt daarna zelf de database, de gebruiker en het schema
-            klaar. Volg het bij de taak van de database op de pagina van het cluster.
+            Deze template krijgt altijd{" "}
+            {template.database.engine === "postgresql"
+              ? "PostgreSQL met Patroni en etcd, met een eigen VIP op de primary,"
+              : "MariaDB Galera,"}{" "}
+            op de nodes met de rol {template.database.role}. Na de uitrol zet ClusterForge de database er vanzelf op; de
+            template maakt daarna zelf de database, de gebruiker en het schema klaar. Volg het bij de taak van de database
+            op de pagina van het cluster.
           </p>
         </Card>
       )}

@@ -25,10 +25,10 @@ import (
 
 // WithDeploy geeft wat de uitrol in zijn transactie doet om na afloop een
 // database met deze engine toe te voegen.
-func (s *Service) WithDeploy(engine string) (func(ctx context.Context, q *store.Queries, c store.Cluster, revision int32, j store.Job) error, error) {
-	// PostgreSQL heeft een eigen VIP nodig, en dat kiest de uitrol (nog)
-	// niet; voeg het toe als het cluster er is.
-	if engine != protocol.DBMariaDB {
+func (s *Service) WithDeploy(engine string, ownVIP bool) (func(ctx context.Context, q *store.Queries, c store.Cluster, revision int32, j store.Job) error, error) {
+	// PostgreSQL heeft een eigen VIP nodig: dat geeft alleen een template
+	// (Template.Database.VIP); anders voeg je het toe als het cluster er is.
+	if engine != protocol.DBMariaDB && (engine != protocol.DBPostgreSQL || !ownVIP) {
 		if engine == protocol.DBPostgreSQL {
 			return nil, &InvalidError{"database.engine", "PostgreSQL heeft een eigen VIP nodig; voeg het toe met Database toevoegen als het cluster er is"}
 		}
@@ -70,7 +70,11 @@ func (s *Service) deployFinished(ctx context.Context, j store.Job) {
 	if !roleOnly {
 		only = nil
 	}
-	reason, hosts := s.addAfterDeploy(ctx, actor, w, only, s.dep.DatabaseSettings(j))
+	vip, err := s.dep.DatabaseVIP(j)
+	if err != nil {
+		s.log.Error("VIP van de database lezen mislukt", "cluster", w.ClusterID, "err", err)
+	}
+	reason, hosts := s.addAfterDeploy(ctx, actor, w, only, s.dep.DatabaseSettings(j), vip)
 	if reason == "" {
 		return
 	}
@@ -89,14 +93,14 @@ func (s *Service) deployFinished(ctx context.Context, j store.Job) {
 // addAfterDeploy plant de database op alle nodes van het cluster, of alleen
 // op only als die niet leeg is, met settings als instellingen, en voegt haar
 // toe; de reden als dat niet kan.
-func (s *Service) addAfterDeploy(ctx context.Context, actor events.Actor, w store.DeployDatabase, only []uuid.UUID, settings map[string]any) (string, []string) {
+func (s *Service) addAfterDeploy(ctx context.Context, actor events.Actor, w store.DeployDatabase, only []uuid.UUID, settings map[string]any, vip string) (string, []string) {
 	cands, err := s.q.ListComponentCandidates(ctx, &w.ClusterID)
 	if err != nil {
 		return err.Error(), nil
 	}
 	// Een samengesteld cluster (fase 9) kiest de instellingen zelf, zoals
 	// buffer_pool; wat ontbreekt, krijgt de standaard.
-	req := Request{Engine: w.Engine, Settings: settings}
+	req := Request{Engine: w.Engine, Settings: settings, VIPAddress: vip}
 	var hosts []string
 	for _, r := range cands {
 		if len(only) > 0 && !slices.Contains(only, r.ID) {

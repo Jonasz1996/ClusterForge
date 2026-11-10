@@ -131,11 +131,15 @@ func (s *Server) DeployCluster(w http.ResponseWriter, r *http.Request) {
 	}
 	var o deploy.RequestOptions
 	// Een template met een eigen database (Zabbix) krijgt haar altijd.
-	if tpl, ok := s.deploy.Templates.Latest(in.Template); ok && tpl.Database != nil && in.Database == nil {
-		in.Database = &gen.DeployDatabase{Engine: tpl.Database.Engine}
+	ownVIP := false
+	if tpl, ok := s.deploy.Templates.Latest(in.Template); ok && tpl.Database != nil {
+		if in.Database == nil {
+			in.Database = &gen.DeployDatabase{Engine: tpl.Database.Engine}
+		}
+		ownVIP = tpl.Database.VIP != "" && in.Database.Engine == tpl.Database.Engine
 	}
 	if in.Database != nil {
-		inTx, err := s.components.WithDeploy(in.Database.Engine)
+		inTx, err := s.components.WithDeploy(in.Database.Engine, ownVIP)
 		if err != nil {
 			s.componentError(w, r, err)
 			return
