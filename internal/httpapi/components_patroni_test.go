@@ -34,6 +34,15 @@ type patroniHosts struct {
 	// nodes die Patroni herstartte, op volgorde.
 	params   map[string]any
 	restarts []string
+	// slug is het cluster; leeg is nextcloud.
+	slug string
+}
+
+func (g *patroniHosts) scope() string {
+	if g.slug == "" {
+		return "nextcloud"
+	}
+	return g.slug
 }
 
 func (g *patroniHosts) after(name string, h *agenttest.Host) func(call string, err error) {
@@ -46,7 +55,7 @@ func (g *patroniHosts) after(name string, h *agenttest.Host) func(call string, e
 			touchFile(h, "/usr/local/lib/clusterforge/etcd-v3.5.34")
 		case strings.HasPrefix(call, "sh -c systemctl enable etcd && systemctl start --no-block etcd && touch "):
 			h.SetUnit("etcd", agenttest.Unit{Enabled: true, Active: true})
-			touchFile(h, components.EtcdMarker("nextcloud"))
+			touchFile(h, components.EtcdMarker(g.scope()))
 		case call == "systemctl start patroni":
 			g.start(name, h)
 		case call == "systemctl reload-or-restart patroni":
@@ -200,7 +209,7 @@ func (g *patroniHosts) start(name string, h *agenttest.Host) {
 	g.mu.Unlock()
 	h.SetUnit("patroni", agenttest.Unit{Enabled: true, Active: true})
 	h.Locked(func() {
-		h.Patroni = &agenttest.Patroni{Scope: "nextcloud", Role: role, State: "running", Timeline: 1, Replication: repl, Sync: sync, Name: name}
+		h.Patroni = &agenttest.Patroni{Scope: g.scope(), Role: role, State: "running", Timeline: 1, Replication: repl, Sync: sync, Name: name}
 		h.PatroniAPI = g.api(name)
 		h.Postgres = &agenttest.Postgres{Version: "17.6 (Debian 17.6-1.pgdg13+1)", Recovery: role == "replica", MaxConnections: 100, Uptime: 5,
 			Databases: []agenttest.Database{{Name: "postgres", Size: 7 << 20}}, Roles: agenttest.PatroniRoles()}
@@ -374,7 +383,7 @@ func TestClusterComponentPatroni(t *testing.T) {
 	for _, p := range tpls.Items[1].Params {
 		params = append(params, p.Name)
 	}
-	if !slices.Equal(params, []string{"shared_buffers", "max_connections", "replication_password", "rewind_password", "rest_password"}) {
+	if !slices.Equal(params, []string{"shared_buffers", "max_connections", "client_networks", "replication_password", "rewind_password", "rest_password"}) {
 		t.Fatalf("instellingen van PostgreSQL: %v", params)
 	}
 

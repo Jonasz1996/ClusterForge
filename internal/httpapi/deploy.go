@@ -113,8 +113,8 @@ func (s *Server) PlanDeployment(w http.ResponseWriter, r *http.Request) {
 			addr = fmt.Sprintf("%s/%d", n.Address, n.Prefix)
 		}
 		out.Nodes = append(out.Nodes, gen.DeployPlanNode{
-			Hostname: n.Hostname, Role: n.Role, Address: addr, Host: n.Host,
-			Cpu: n.VM.CPU, MemoryMib: n.VM.MemoryMiB, DiskGib: n.VM.DiskGiB,
+			Hostname: n.Hostname, Role: n.Role, Index: n.Index, Address: addr, Host: n.Host, Storage: n.Storage,
+			HostChosen: n.HostChosen, StorageChosen: n.StorageChosen, Cpu: n.VM.CPU, MemoryMib: n.VM.MemoryMiB, DiskGib: n.VM.DiskGiB,
 		})
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -131,11 +131,15 @@ func (s *Server) DeployCluster(w http.ResponseWriter, r *http.Request) {
 	}
 	var o deploy.RequestOptions
 	// Een template met een eigen database (Zabbix) krijgt haar altijd.
-	if tpl, ok := s.deploy.Templates.Latest(in.Template); ok && tpl.Database != nil && in.Database == nil {
-		in.Database = &gen.DeployDatabase{Engine: tpl.Database.Engine}
+	ownVIP := false
+	if tpl, ok := s.deploy.Templates.Latest(in.Template); ok && tpl.Database != nil {
+		if in.Database == nil {
+			in.Database = &gen.DeployDatabase{Engine: tpl.Database.Engine}
+		}
+		ownVIP = tpl.Database.VIP != "" && in.Database.Engine == tpl.Database.Engine
 	}
 	if in.Database != nil {
-		inTx, err := s.components.WithDeploy(in.Database.Engine)
+		inTx, err := s.components.WithDeploy(in.Database.Engine, ownVIP)
 		if err != nil {
 			s.componentError(w, r, err)
 			return
@@ -166,6 +170,13 @@ func deployRequest(in gen.DeployInput) deploy.Request {
 			Bridge: deref(t.Bridge), VLAN: nullablePtr(t.Vlan), Network: string(t.Network),
 			FirstIP: deref(t.FirstIp), Gateway: deref(t.Gateway), DNS: deref(t.Dns),
 			SSHKeys: deref(t.SshKeys),
+		}
+		if t.Placement != nil {
+			for _, pl := range *t.Placement {
+				req.Target.Placement = append(req.Target.Placement, deploy.Placement{
+					Role: pl.Role, Index: pl.Index, Host: deref(pl.Host), Storage: deref(pl.Storage),
+				})
+			}
 		}
 	}
 	if in.ExistingNodes != nil {

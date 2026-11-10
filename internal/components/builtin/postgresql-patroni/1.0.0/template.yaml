@@ -43,6 +43,15 @@ params:
     optional: true
     immutable: true
     pattern: "[A-Za-z0-9][A-Za-z0-9._-]*( [A-Za-z0-9][A-Za-z0-9._-]*)*"
+  # Netwerken van containers op de nodes zelf, zoals 172.16.0.0/12 voor
+  # Docker: een container op de node met het VIP verbindt vanaf zijn eigen
+  # adres, niet vanaf de node. Een template kan het zetten (settings).
+  - name: client_networks
+    type: string
+    label: Netwerken van containers
+    help: Netwerken (CIDR) van containers op de nodes die PostgreSQL mogen bereiken, gescheiden door spaties, zoals 172.16.0.0/12 voor Docker.
+    optional: true
+    pattern: "[0-9./]+( [0-9./]+)*"
   - name: replication_password
     type: secret
     label: Wachtwoord van de replicatie

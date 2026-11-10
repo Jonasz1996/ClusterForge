@@ -10204,6 +10204,75 @@ export interface components {
                 /** Format: date-time */
                 not_after: string;
             }[];
+            seaweed?: components["schemas"]["SeaweedFacts"];
+        };
+        /** @description SeaweedFS op de node (vanaf protocol 26); zie pkg/protocol/seaweed.go. Geheimen staan er nooit in. */
+        SeaweedFacts: {
+            version?: string;
+            processes: {
+                /** @description master, volume, filer, s3, server, mount, … */
+                role: string;
+                pid: number;
+                unit?: string;
+                container?: string;
+                args: string[];
+                ip?: string;
+                ports?: {
+                    [key: string]: number;
+                };
+                dirs?: string[];
+                meta_dir?: string;
+                peers?: string[];
+                masters?: string[];
+                default_replication?: string;
+                data_center?: string;
+                rack?: string;
+                disks?: {
+                    dir: string;
+                    /** Format: int64 */
+                    total: number;
+                    /** Format: int64 */
+                    free: number;
+                }[];
+            }[];
+            configs?: {
+                path: string;
+                container?: string;
+                kind: string;
+                enabled?: string[];
+                jwt?: boolean;
+            }[];
+            master?: {
+                leader?: string;
+                is_leader: boolean;
+                peers?: string[];
+                max_volumes: number;
+                free_volumes: number;
+                data_nodes?: {
+                    url: string;
+                    data_center?: string;
+                    rack?: string;
+                    volumes: number;
+                    max: number;
+                }[];
+                layouts?: {
+                    collection?: string;
+                    replication: string;
+                    writable: number;
+                }[];
+            };
+            volume?: {
+                volumes: number;
+                read_only?: number;
+                /** Format: int64 */
+                bytes: number;
+                /** Format: int64 */
+                files: number;
+                replications?: {
+                    [key: string]: number;
+                };
+                collections?: string[];
+            };
         };
         EnrollmentToken: {
             /** Format: uuid */
@@ -10432,6 +10501,8 @@ export interface components {
             disk: number;
             /** Format: int64 */
             maxdisk: number;
+            /** @description available, of iets anders als Proxmox de storage niet bereikt */
+            status: string;
         };
         ProxmoxSnapshot: {
             name: string;
@@ -11050,6 +11121,17 @@ export interface components {
             dns?: string[];
             /** @description Publieke SSH-sleutels, één per regel */
             ssh_keys?: string;
+            /** @description Per node de Proxmox-host en de storage. Een node zonder keuze, of met een lege host of storage, krijgt die van ClusterForge: storage zoals het veld storage (of de template), hosts gespreid over de online hosts. */
+            placement?: components["schemas"]["DeployPlacement"][];
+        };
+        DeployPlacement: {
+            role: string;
+            /** @description Volgnummer binnen de rol, vanaf 1 */
+            index: number;
+            /** @description Proxmox-host; leeg kiest ClusterForge */
+            host?: string;
+            /** @description Storage voor de schijf; leeg is de standaard */
+            storage?: string;
         };
         DeployInput: {
             template: string;
@@ -11083,10 +11165,17 @@ export interface components {
         DeployPlanNode: {
             hostname: string;
             role: string;
+            /** @description Volgnummer binnen de rol, vanaf 1; leeg (0) bij bestaande nodes */
+            index: number;
             /** @description Adres met prefix, zoals 10.0.20.11/24; leeg bij DHCP */
             address: string;
             /** @description De Proxmox-host voor de VM */
             host: string;
+            /** @description De storage voor de schijf; leeg bij bestaande nodes */
+            storage: string;
+            /** @description De host is gekozen in placement in plaats van door ClusterForge */
+            host_chosen: boolean;
+            storage_chosen: boolean;
             cpu: number;
             memory_mib: number;
             disk_gib: number;

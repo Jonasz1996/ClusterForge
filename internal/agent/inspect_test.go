@@ -287,6 +287,9 @@ var sampleParams = map[string]map[string]any{
 	"generic":          {"vip": "10.0.20.100", "vrid": 53, "image": "ghcr.io/jonas/app:1.4.2", "port": 8080, "container_port": 3000},
 	"kubernetes":       {"vip": "10.0.20.100", "vrid": 54},
 	"zabbix":           {"vip": "10.0.20.100", "vrid": 55},
+	"media-platform": {"vip": "10.0.20.100", "vrid": 56, "auth_pass": "geheim12", "db_vip": "10.0.20.101",
+		"db_password": "Wachtwoord-123", "office_jwt_secret": "officegeheim1", "office_link_secret": "linkgeheim12",
+		"media_worker_key": "mediasleutel1"},
 }
 
 func renderBuiltin(t *testing.T, tpl *templates.Template, role string) []templates.Step {

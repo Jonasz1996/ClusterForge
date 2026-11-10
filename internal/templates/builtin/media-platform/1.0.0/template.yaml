@@ -1,0 +1,257 @@
+name: media-platform
+version: 1.0.0
+title: Bestanden-, office- en mediaplatform
+description: >-
+  Het alles-in-één platform (github.com/Jonasz1996/alles-in-1-file-office-media-platform)
+  op drie of meer nodes. Elke node draait SeaweedFS (master, volume server
+  en filer, met de metadata van de filer in PostgreSQL) en mount de
+  bestanden op /srv/platform-data. Na de uitrol zet ClusterForge PostgreSQL
+  met Patroni en etcd op dezelfde nodes, met een eigen VIP dat de primary
+  volgt, en maakt de databases platform en seaweedfs. Keepalived geeft het VIP aan
+  één node, en alleen daar draait het platform (app, office en media); valt
+  die weg, dan start het op de node die het VIP krijgt. Het platform start
+  pas nadat de overstap van één node klaar is (platform-ctl.sh overstap echt).
+cluster_type: generic
+
+# PostgreSQL (Patroni) op de nodes zelf, na de uitrol, met een eigen VIP op
+# de primary. Daarna maakt ClusterForge de gebruiker en zijn twee databases.
+database:
+  engine: postgresql
+  role: node
+  vip: "{{ .params.db_vip }}"
+  host: "{{ .params.db_vip }}"
+  settings:
+    shared_buffers: 512M
+    max_connections: 200
+    # Het platform draait in Docker; op de node met het VIP van de database
+    # verbindt het vanaf zijn container.
+    client_networks: 172.16.0.0/12
+  steps:
+    - { kind: db_user, user: "{{ .params.db_user }}", password: "{{ .params.db_password }}", grant_on: "{{ .params.db_name }}" }
+    - { kind: db_user, user: "{{ .params.db_user }}", password: "{{ .params.db_password }}", grant_on: "{{ .params.files_db_name }}" }
+# Terugspringen zou het platform zonder reden stoppen en elders starten.
+failback: false
+
+params:
+  - name: vip
+    type: ipv4
+    label: VIP
+    immutable: true
+    help: Het adres van het platform (poort 80 en 443). Stuur je router hierheen na de overstap.
+  - name: nodes
+    type: int
+    label: Aantal nodes
+    help: SeaweedFS wil een oneven aantal masters; met drie mag er één uitvallen.
+    default: 3
+    min: 3
+    max: 5
+  - name: replication
+    type: string
+    label: Replicatie van SeaweedFS
+    help: 001 is twee kopieën op verschillende nodes (B2 van het platform), 002 drie.
+    default: "001"
+    pattern: '00[12]'
+  - name: seaweedfs_image
+    type: string
+    label: Image van SeaweedFS
+    help: Met een dubbele punt voor de versie, zoals chrislusf/seaweedfs:3.97. Dezelfde weed komt op de node voor de mount.
+    default: chrislusf/seaweedfs:latest
+    pattern: '[a-z0-9]+([._-][a-z0-9]+)*(/[a-z0-9]+([._-][a-z0-9]+)*)*:[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}'
+  - name: platform_repo
+    type: string
+    label: Git-repository van het platform
+    default: https://github.com/Jonasz1996/alles-in-1-file-office-media-platform.git
+    pattern: 'https://[A-Za-z0-9.-]+(/[A-Za-z0-9._-]+)+'
+  - name: platform_ref
+    type: string
+    label: Branch of tag van het platform
+    help: Een versie met app.cli db-copy (voor de overstap). Een andere waarde rolt een nieuwe versie node voor node uit.
+    default: main
+    pattern: '[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*'
+  - name: db_vip
+    type: ipv4
+    label: VIP van de database
+    immutable: true
+    help: Een tweede vrij adres, naast het VIP van het platform. Het staat altijd op de primary van PostgreSQL.
+  - name: db_user
+    type: string
+    label: Databasegebruiker
+    help: ClusterForge maakt de gebruiker en de databases na de uitrol.
+    default: platform
+    pattern: '[a-z_][a-z0-9_]{0,30}'
+  - name: db_name
+    type: string
+    label: Database van het platform
+    default: platform
+    pattern: '[a-z_][a-z0-9_]{0,30}'
+  - name: files_db_name
+    type: string
+    label: Database van SeaweedFS (filer)
+    default: seaweedfs
+    pattern: '[a-z_][a-z0-9_]{0,30}'
+  - name: db_password
+    type: secret
+    label: Wachtwoord van de databasegebruiker
+    help: Leeg laten maakt er een.
+    length: 64
+  - name: secure_cookies
+    type: bool
+    label: Cookies alleen over https
+    help: Aan zodra het platform van buiten via https bereikbaar is.
+    default: false
+  - name: cpu
+    type: int
+    label: vCPU per node
+    default: 4
+    min: 2
+    max: 32
+  - name: memory
+    type: size
+    label: Geheugen per node
+    help: Het platform raadt 16 GB aan (office en media).
+    default: 16G
+    min: 4G
+    max: 128G
+  - name: disk
+    type: size
+    label: Schijf per node
+    help: Voor de volumes van SeaweedFS; met replicatie 001 staat elk bestand op twee nodes.
+    default: 700G
+    min: 50G
+    max: 8T
+  - name: vrid
+    type: int
+    label: VRRP-id
+    immutable: true
+    help: Uniek per keepalived-groep in hetzelfde netwerk. Leeg laten kiest een vrij nummer.
+    optional: true
+    min: 1
+    max: 255
+  - name: auth_pass
+    type: secret
+    label: VRRP-wachtwoord
+    help: Leeg laten maakt er een. Keepalived gebruikt hoogstens 8 tekens.
+    length: 8
+  - name: office_jwt_secret
+    type: secret
+    label: Geheim tussen platform en office
+    help: Leeg laten maakt er een; op elke node hetzelfde.
+    length: 64
+  - name: office_link_secret
+    type: secret
+    label: Geheim voor de links van office
+    length: 64
+  - name: media_worker_key
+    type: secret
+    label: Sleutel van de mediaworker
+    length: 64
+
+roles:
+  - name: node
+    count: "{{ .params.nodes }}"
+    vm:
+      cpu: "{{ .params.cpu }}"
+      memory: "{{ .params.memory }}"
+      disk: "{{ .params.disk }}"
+    steps:
+      - package: { names: [keepalived, fuse3, git, curl, rsync] }
+      # Docker: een node van het platform heeft al docker-ce van install.sh;
+      # alleen een nieuwe node krijgt docker.io van Debian.
+      - command:
+          title: Docker
+          run: DEBIAN_FRONTEND=noninteractive apt-get install -y docker.io docker-compose && systemctl enable --now docker
+          unless: command -v docker && docker compose version && systemctl is-active --quiet docker
+      - command:
+          title: FUSE in de container
+          run: echo "/dev/fuse ontbreekt. Zet in Proxmox bij deze CT Options, Features, FUSE aan en herstart de CT." >&2; exit 1
+          unless: test -c /dev/fuse
+      - directory: { path: /usr/local/lib/clusterforge, mode: "0755" }
+      - directory: { path: /etc/clusterforge, mode: "0755" }
+      - directory: { path: /etc/seaweedfs, mode: "0750" }
+      - directory: { path: /srv/seaweedfs, mode: "0750" }
+      - directory: { path: /srv/seaweedfs/master, mode: "0750" }
+      - directory: { path: /srv/seaweedfs/volume, mode: "0750" }
+      - directory: { path: /srv/platform-data, mode: "0755" }
+      - directory: { path: /var/cache/weed-mount, mode: "0700" }
+
+      # SeaweedFS: master (raft over alle nodes), volume server en filer, in
+      # het hostnetwerk.
+      - file:
+          path: /etc/seaweedfs/filer.toml
+          template: filer.toml.tmpl
+          mode: "0600"
+          notify: [service:cf-seaweedfs:restart]
+      - file:
+          path: /etc/clusterforge/seaweedfs.yaml
+          template: seaweedfs.yaml.tmpl
+          notify: [service:cf-seaweedfs:restart]
+      - file:
+          path: /etc/systemd/system/cf-seaweedfs.service
+          template: cf-seaweedfs.service.tmpl
+          notify: [service:cf-seaweedfs:restart]
+      - service: { name: cf-seaweedfs, enabled: true, state: started }
+      - file:
+          path: /usr/local/lib/clusterforge/platform-weed.sh
+          template: platform-weed.sh.tmpl
+          mode: "0755"
+      # weed voor de mount: dezelfde binary als in het image.
+      - command:
+          title: weed uit het image van SeaweedFS
+          run: /usr/local/lib/clusterforge/platform-weed.sh
+          unless: /usr/local/lib/clusterforge/platform-weed.sh --check
+          notify: [service:cf-platform-mount:restart]
+      - file:
+          path: /etc/systemd/system/cf-platform-mount.service
+          template: cf-platform-mount.service.tmpl
+          notify: [service:cf-platform-mount:restart]
+      - service: { name: cf-platform-mount, enabled: true, state: started }
+
+      # Het platform: de code, het image en de unit. cf-platform start alleen
+      # via keepalived, op de node met het VIP, en pas na de overstap.
+      - file:
+          path: /etc/clusterforge/platform.env
+          template: platform.env.tmpl
+          mode: "0600"
+      - file:
+          path: /etc/clusterforge/platform-cluster.yaml
+          template: platform-cluster.yaml.tmpl
+      - file:
+          path: /usr/local/lib/clusterforge/platform-src.sh
+          template: platform-src.sh.tmpl
+          mode: "0755"
+      - command:
+          title: code en image van het platform
+          run: /usr/local/lib/clusterforge/platform-src.sh
+          unless: /usr/local/lib/clusterforge/platform-src.sh --check
+      - file:
+          path: /usr/local/lib/clusterforge/platform-ctl.sh
+          template: platform-ctl.sh.tmpl
+          mode: "0755"
+      - file:
+          path: /etc/systemd/system/cf-platform.service
+          template: cf-platform.service.tmpl
+      # Veranderde er iets aan code, image of instellingen terwijl het
+      # platform hier draait: opnieuw starten (alleen hier, nooit elders).
+      - command:
+          title: platform herstarten na een wijziging
+          run: /usr/local/lib/clusterforge/platform-ctl.sh restart-if-changed
+          unless: /usr/local/lib/clusterforge/platform-ctl.sh unchanged
+      # Het eigen VIP van PostgreSQL komt in conf.d (ClusterForge, na de uitrol).
+      - directory: { path: /etc/keepalived/conf.d, mode: "0755" }
+      - file:
+          path: /etc/keepalived/keepalived.conf
+          template: keepalived.conf.tmpl
+          mode: "0640"
+          notify: [service:keepalived:reload]
+      - service: { name: keepalived, enabled: true, state: started }
+
+# Het VIP van het platform komt pas als de bestanden gemount zijn, en dat
+# wacht op de filer, dus op PostgreSQL, dat ClusterForge na de uitrol zet.
+# De uitrol controleert daarom alleen de masters van SeaweedFS.
+checks:
+  - http: { url: "http://{{ (index .nodes 0).address }}:9333/cluster/status", expect: 200, within: 180s }
+
+services:
+  - { name: platform, kind: app, unit: cf-platform, port: 80, depends_on: [seaweedfs, keepalived], strength: hard }
+  - { name: seaweedfs, kind: container, unit: cf-seaweedfs }
+  - { name: keepalived, kind: vip, unit: keepalived }

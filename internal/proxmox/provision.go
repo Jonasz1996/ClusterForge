@@ -136,7 +136,26 @@ type StorageInfo struct {
 	Name   string
 	Node   string
 	Shared bool
+	// Content is wat erop mag, zoals "images,rootdir".
+	Content string
+	// Active is false als Proxmox de storage niet kan bereiken.
+	Active bool
+	// Total en Free zijn bytes; 0 als Proxmox ze niet geeft.
+	Total int64
+	Free  int64
 }
+
+// Holds zegt of er schijven van een VM (qemu) of CT (lxc) op mogen.
+func (st StorageInfo) Holds(guestType string) bool {
+	want := "images"
+	if guestType == "lxc" {
+		want = "rootdir"
+	}
+	return st.Content == "" || slices.Contains(strings.Split(st.Content, ","), want)
+}
+
+// On zegt of de storage op host bereikbaar is.
+func (st StorageInfo) On(host string) bool { return st.Shared || st.Node == host }
 
 // Storages geeft de storages van een koppeling, één regel per host.
 func (s *Service) Storages(ctx context.Context, connID uuid.UUID) ([]StorageInfo, error) {
@@ -152,7 +171,10 @@ func (s *Service) Storages(ctx context.Context, connID uuid.UUID) ([]StorageInfo
 		}
 		var d Resource
 		_ = json.Unmarshal(r.Data, &d)
-		out = append(out, StorageInfo{Name: r.Name, Node: r.PveNode, Shared: d.Shared == 1})
+		out = append(out, StorageInfo{
+			Name: r.Name, Node: r.PveNode, Shared: d.Shared == 1, Content: d.Content,
+			Active: d.Status == "" || d.Status == "available", Total: d.MaxDisk, Free: max(0, d.MaxDisk-d.Disk),
+		})
 	}
 	return out, nil
 }

@@ -268,16 +268,17 @@ func TestCronSync(t *testing.T) {
 	}
 
 	// Een agent met protocol 20 op het doel krijgt een melding.
-	if _, err := e.pool.Exec(ctx, "UPDATE agents SET protocol_version = 20 WHERE node_id = $1", ids["bk1"]); err != nil {
-		t.Fatal(err)
-	}
-	if s := c.do("GET", "/api/v1/cron-jobs/"+job.ID+"/plan", nil, &plan); s != http.StatusOK {
-		t.Fatalf("plan: %d", s)
-	}
-	i := slices.IndexFunc(plan.Nodes, func(n planNodeView) bool {
-		return n.Hostname == "bk1"
+	// Een heartbeat zet het protocol terug, dus opnieuw tot het plan het ziet.
+	eventually(t, "oude agent in het plan", func() bool {
+		if _, err := e.pool.Exec(ctx, "UPDATE agents SET protocol_version = 20 WHERE node_id = $1", ids["bk1"]); err != nil {
+			t.Fatal(err)
+		}
+		if s := c.do("GET", "/api/v1/cron-jobs/"+job.ID+"/plan", nil, &plan); s != http.StatusOK {
+			t.Fatalf("plan: %d", s)
+		}
+		i := slices.IndexFunc(plan.Nodes, func(n planNodeView) bool {
+			return n.Hostname == "bk1"
+		})
+		return i >= 0 && !plan.Nodes[i].OK && strings.Contains(plan.Nodes[i].Checks[0].Text, "agent te oud")
 	})
-	if i < 0 || plan.Nodes[i].OK || !strings.Contains(plan.Nodes[i].Checks[0].Text, "agent te oud") {
-		t.Errorf("oude agent: %+v", plan.Nodes)
-	}
 }

@@ -14,7 +14,6 @@ import (
 	"net/url"
 	"regexp"
 	"slices"
-	"sort"
 	"strings"
 	"time"
 
@@ -170,6 +169,18 @@ type Target struct {
 	Gateway string   `json:"gateway,omitempty"`
 	DNS     []string `json:"dns,omitempty"`
 	SSHKeys string   `json:"ssh_keys,omitempty"`
+	// Placement kiest per node de Proxmox-host en de storage; wat er niet
+	// in staat, kiest ClusterForge zelf.
+	Placement []Placement `json:"placement,omitempty"`
+}
+
+// Placement zegt waar één node komt: de node met deze rol en dit
+// volgnummer (1, 2, …). Een lege host of storage kiest ClusterForge.
+type Placement struct {
+	Role    string `json:"role"`
+	Index   int    `json:"index"`
+	Host    string `json:"host,omitempty"`
+	Storage string `json:"storage,omitempty"`
 }
 
 // plannedNode is een node zoals de aanvraag hem plant.
@@ -179,9 +190,11 @@ type plannedNode struct {
 	Role     string    `json:"role"`
 	Index    int       `json:"index"`
 	// Address is leeg bij DHCP.
-	Address string            `json:"address,omitempty"`
-	Prefix  int               `json:"prefix,omitempty"`
-	Host    string            `json:"host"`
+	Address string `json:"address,omitempty"`
+	Prefix  int    `json:"prefix,omitempty"`
+	Host    string `json:"host"`
+	// Storage is de storage voor de schijf; leeg is die van de template.
+	Storage string            `json:"storage,omitempty"`
 	VM      templates.VMShape `json:"vm"`
 }
 
@@ -200,6 +213,10 @@ type params struct {
 	VIP         string                `json:"vip,omitempty"`
 	ImageName   string                `json:"image_name"`
 	ImageShared bool                  `json:"image_shared"`
+	// ImageStorage en ImageSizeGiB zijn de storage en grootte van de
+	// schijf van de template.
+	ImageStorage string `json:"image_storage,omitempty"`
+	ImageSizeGiB int    `json:"image_size_gib,omitempty"`
 }
 
 var (
@@ -221,8 +238,13 @@ type PlannedNode struct {
 	// Address is leeg bij DHCP.
 	Address string
 	Prefix  int
+	Index   int
 	Host    string
-	VM      templates.VMShape
+	// Storage is de storage van de schijf: gekozen, of die van de template.
+	Storage string
+	// Fixed zegt of host en storage gekozen zijn of door ClusterForge.
+	HostChosen, StorageChosen bool
+	VM                        templates.VMShape
 }
 
 // Plan controleert een aanvraag en zegt wat een uitrol zou maken, zonder
@@ -234,9 +256,12 @@ func (s *Service) Plan(ctx context.Context, req Request) (Plan, error) {
 	}
 	out := Plan{VIP: p.VIP}
 	out.VRID, _ = p.Params["vrid"].(int)
+	chosen := placementIndex(req.Target.Placement)
 	for _, n := range p.Nodes {
+		pl := chosen[placementKey(n.Role, n.Index)]
 		out.Nodes = append(out.Nodes, PlannedNode{
-			Hostname: n.Hostname, Role: n.Role, Address: n.Address, Prefix: n.Prefix, Host: n.Host, VM: n.VM,
+			Hostname: n.Hostname, Role: n.Role, Index: n.Index, Address: n.Address, Prefix: n.Prefix, Host: n.Host,
+			Storage: or(n.Storage, p.ImageStorage), HostChosen: pl.Host != "", StorageChosen: pl.Storage != "", VM: n.VM,
 		})
 	}
 	return out, nil
@@ -551,6 +576,9 @@ func (s *Service) checkTarget(ctx context.Context, t *Target, p *params) error {
 	if t.Storage != "" && !storageRe.MatchString(t.Storage) {
 		return invalid("target.storage", "ongeldige storage %q", t.Storage)
 	}
+	if err := checkPlacement(t); err != nil {
+		return err
+	}
 	var keys []string
 	for line := range strings.Lines(t.SSHKeys) {
 		if l := strings.TrimSpace(line); l != "" {
@@ -592,6 +620,7 @@ func (s *Service) checkTarget(ctx context.Context, t *Target, p *params) error {
 	}
 	t.ImageType = img.Type
 	p.ImageName, p.ImageShared = img.Name, img.Shared
+	p.ImageStorage, p.ImageSizeGiB = img.Storage, img.SizeGiB
 	if t.Storage != "" {
 		storages, err := s.pve.Storages(ctx, t.ProxmoxID)
 		if err != nil {
@@ -714,51 +743,6 @@ func lastAddr(pf netip.Prefix) netip.Addr {
 	return netip.AddrFrom4(a)
 }
 
-// placeNodes verdeelt de VM's over de online hosts, zodat twee nodes van
-// een cluster niet op dezelfde host staan als het kan. Zonder gedeelde
-// storage kan een kloon alleen op de host van de template.
-func (s *Service) placeNodes(ctx context.Context, p *params) error {
-	hosts, err := s.pve.Hosts(ctx, p.Target.ProxmoxID)
-	if err != nil {
-		return err
-	}
-	img, err := s.q.GetProxmoxGuest(ctx, store.GetProxmoxGuestParams{ConnectionID: p.Target.ProxmoxID, Vmid: int32p(p.Target.ImageVMID)})
-	if err != nil {
-		return err
-	}
-	var online []proxmox.HostInfo
-	for _, h := range hosts {
-		if h.Online && (p.ImageShared || h.Name == img.PveNode) {
-			online = append(online, h)
-		}
-	}
-	if len(online) == 0 {
-		return invalid("target.image_vmid", "host %s van de template is niet online", img.PveNode)
-	}
-	sort.SliceStable(online, func(i, j int) bool { return online[i].FreeMem > online[j].FreeMem })
-	need := map[string]int64{}
-	for i := range p.Nodes {
-		h := online[i%len(online)]
-		p.Nodes[i].Host = h.Name
-		need[h.Name] += int64(p.Nodes[i].VM.MemoryMiB) << 20
-	}
-	for _, h := range online {
-		if need[h.Name] > h.FreeMem {
-			// Het veld met het geheugen van de eerste rol, zoals memory of
-			// server_memory.
-			field := "params.memory"
-			if tpl, ok := s.Templates.Get(p.Template, p.Version); ok {
-				if name := tpl.MemoryParam(); name != "" {
-					field = "params." + name
-				}
-			}
-			return invalid(field, "op %s is maar %d MB geheugen vrij; de nieuwe VM's vragen %d MB",
-				h.Name, h.FreeMem>>20, need[h.Name]>>20)
-		}
-	}
-	return nil
-}
-
 func int32p(n int) *int32 {
 	v := int32(n)
 	return &v
@@ -842,6 +826,21 @@ func (s *Service) DatabaseSettings(j store.Job) map[string]any {
 		return nil
 	}
 	return tpl.Database.Settings
+}
+
+// DatabaseVIP geeft het eigen VIP van de database die de template van een
+// uitrol vanzelf meebrengt (Template.Database.VIP), met de parameters van
+// de uitrol ingevuld; leeg zonder.
+func (s *Service) DatabaseVIP(j store.Job) (string, error) {
+	var p params
+	if err := json.Unmarshal(j.Params, &p); err != nil {
+		return "", err
+	}
+	tpl, found := s.Templates.Get(p.Template, p.Version)
+	if !found || tpl.Database == nil {
+		return "", nil
+	}
+	return tpl.DBVIP(templates.Context{Params: p.Params, Cluster: p.Cluster})
 }
 
 // planExisting zet bestaande nodes in de rollen van de template: per rol

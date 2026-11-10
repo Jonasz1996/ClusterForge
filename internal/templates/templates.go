@@ -50,8 +50,13 @@ type Template struct {
 
 // DatabaseInfo is de database die een template na de uitrol vanzelf krijgt.
 type DatabaseInfo struct {
-	// Engine is mariadb; PostgreSQL vraagt een eigen VIP en kan nog niet.
+	// Engine is mariadb of postgresql. PostgreSQL (Patroni) vraagt een
+	// eigen VIP in VIP.
 	Engine string `yaml:"engine"`
+	// VIP is het eigen VIP van de database, zoals {{ .params.db_vip }}:
+	// het staat op de node waar de database schrijft. Verplicht bij
+	// postgresql; leeg bij mariadb volgt Galera het VIP van de app.
+	VIP string `yaml:"vip,omitempty"`
 	// Role is de rol waarvan de nodes de database krijgen.
 	Role string `yaml:"role"`
 	// Settings zijn de instellingen van het onderdeel, zoals buffer_pool en
@@ -89,6 +94,15 @@ func (t *Template) DBHost(c Context) (string, error) {
 		return "", nil
 	}
 	return expandString(t.Database.Host, c.data())
+}
+
+// DBVIP geeft het eigen VIP van de database, met de parameters ingevuld;
+// leeg als de template er geen heeft.
+func (t *Template) DBVIP(c Context) (string, error) {
+	if t.Database == nil || t.Database.VIP == "" {
+		return "", nil
+	}
+	return expandString(t.Database.VIP, c.data())
 }
 
 // RenderDBSteps vult de parameters en geheimen in de database-instructies
@@ -267,8 +281,10 @@ func Parse(fsys fs.FS) (*Template, error) {
 	}
 	if d := t.Database; d != nil {
 		switch {
-		case d.Engine != protocol.DBMariaDB:
-			return nil, errors.New("database: engine is mariadb")
+		case d.Engine != protocol.DBMariaDB && d.Engine != protocol.DBPostgreSQL:
+			return nil, errors.New("database: engine is mariadb of postgresql")
+		case d.Engine == protocol.DBPostgreSQL && d.VIP == "":
+			return nil, errors.New("database: postgresql heeft een eigen vip nodig")
 		case !roles[d.Role]:
 			return nil, fmt.Errorf("database: onbekende rol %q", d.Role)
 		case t.ClusterType == "kubernetes":

@@ -1,0 +1,42 @@
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}). Wijzigingen hier
+# worden bij de volgende uitrol overschreven.
+#
+# SeaweedFS op {{ .node.hostname }}: master (raft over alle nodes), volume
+# server en filer, in het hostnetwerk. Poorten: 9333/19333 master, 8081/18081
+# volume, 8888/18888 filer.
+name: cf-seaweedfs
+
+x-weed: &weed
+  image: {{ .params.seaweedfs_image }}
+  network_mode: host
+  restart: unless-stopped
+
+services:
+  master:
+    <<: *weed
+    command: >-
+      master -ip={{ .node.address }} -ip.bind=0.0.0.0 -port=9333 -mdir=/data
+      -peers={{ range $i, $n := .nodes }}{{ if $i }},{{ end }}{{ $n.address }}:9333{{ end }}
+      -defaultReplication={{ .params.replication }} -volumeSizeLimitMB=1024
+    volumes:
+      - /srv/seaweedfs/master:/data
+
+  volume:
+    <<: *weed
+    depends_on: [master]
+    command: >-
+      volume -ip={{ .node.address }} -ip.bind=0.0.0.0 -port=8081 -dir=/data -max=0
+      -mserver={{ range $i, $n := .nodes }}{{ if $i }},{{ end }}{{ $n.address }}:9333{{ end }}
+      -dataCenter=dc1 -rack=rack1
+    volumes:
+      - /srv/seaweedfs/volume:/data
+
+  filer:
+    <<: *weed
+    depends_on: [master]
+    command: >-
+      filer -ip={{ .node.address }} -ip.bind=0.0.0.0 -port=8888
+      -master={{ range $i, $n := .nodes }}{{ if $i }},{{ end }}{{ $n.address }}:9333{{ end }}
+      -defaultReplicaPlacement={{ .params.replication }}
+    volumes:
+      - /etc/seaweedfs/filer.toml:/etc/seaweedfs/filer.toml:ro

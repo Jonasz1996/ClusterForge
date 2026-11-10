@@ -6373,6 +6373,19 @@ type DeployInput struct {
 	Template  string        `json:"template"`
 }
 
+// DeployPlacement defines model for DeployPlacement.
+type DeployPlacement struct {
+	// Host Proxmox-host; leeg kiest ClusterForge
+	Host *string `json:"host,omitempty"`
+
+	// Index Volgnummer binnen de rol, vanaf 1
+	Index int    `json:"index"`
+	Role  string `json:"role"`
+
+	// Storage Storage voor de schijf; leeg is de standaard
+	Storage *string `json:"storage,omitempty"`
+}
+
 // DeployPlan defines model for DeployPlan.
 type DeployPlan struct {
 	Nodes []DeployPlanNode `json:"nodes"`
@@ -6390,10 +6403,20 @@ type DeployPlanNode struct {
 	DiskGib int    `json:"disk_gib"`
 
 	// Host De Proxmox-host voor de VM
-	Host      string `json:"host"`
-	Hostname  string `json:"hostname"`
+	Host string `json:"host"`
+
+	// HostChosen De host is gekozen in placement in plaats van door ClusterForge
+	HostChosen bool   `json:"host_chosen"`
+	Hostname   string `json:"hostname"`
+
+	// Index Volgnummer binnen de rol, vanaf 1; leeg (0) bij bestaande nodes
+	Index     int    `json:"index"`
 	MemoryMib int    `json:"memory_mib"`
 	Role      string `json:"role"`
+
+	// Storage De storage voor de schijf; leeg bij bestaande nodes
+	Storage       string `json:"storage"`
+	StorageChosen bool   `json:"storage_chosen"`
 }
 
 // DeployResult defines model for DeployResult.
@@ -6415,7 +6438,10 @@ type DeployTarget struct {
 	// ImageVmid De VM-template (golden image) om uit te klonen
 	ImageVmid int                 `json:"image_vmid"`
 	Network   DeployTargetNetwork `json:"network"`
-	ProxmoxId openapi_types.UUID  `json:"proxmox_id"`
+
+	// Placement Per node de Proxmox-host en de storage. Een node zonder keuze, of met een lege host of storage, krijgt die van ClusterForge: storage zoals het veld storage (of de template), hosts gespreid over de online hosts.
+	Placement *[]DeployPlacement `json:"placement,omitempty"`
+	ProxmoxId openapi_types.UUID `json:"proxmox_id"`
 
 	// SshKeys Publieke SSH-sleutels, één per regel
 	SshKeys *string `json:"ssh_keys,omitempty"`
@@ -7324,6 +7350,9 @@ type Facts struct {
 		Interface string  `json:"interface"`
 		Metric    *int    `json:"metric,omitempty"`
 	} `json:"routes,omitempty"`
+
+	// Seaweed SeaweedFS op de node (vanaf protocol 26); zie pkg/protocol/seaweed.go. Geheimen staan er nooit in.
+	Seaweed  *SeaweedFacts `json:"seaweed,omitempty"`
 	Services nullable.Nullable[[]struct {
 		Active  string `json:"active"`
 		Enabled string `json:"enabled"`
@@ -10080,7 +10109,10 @@ type ProxmoxStorage struct {
 	Maxdisk int64  `json:"maxdisk"`
 	Name    string `json:"name"`
 	Shared  bool   `json:"shared"`
-	Type    string `json:"type"`
+
+	// Status available, of iets anders als Proxmox de storage niet bereikt
+	Status string `json:"status"`
+	Type   string `json:"type"`
 }
 
 // RecipeCheck defines model for RecipeCheck.
@@ -10722,6 +10754,68 @@ type RiskWhatIfInput struct {
 
 // Role defines model for Role.
 type Role string
+
+// SeaweedFacts SeaweedFS op de node (vanaf protocol 26); zie pkg/protocol/seaweed.go. Geheimen staan er nooit in.
+type SeaweedFacts struct {
+	Configs *[]struct {
+		Container *string   `json:"container,omitempty"`
+		Enabled   *[]string `json:"enabled,omitempty"`
+		Jwt       *bool     `json:"jwt,omitempty"`
+		Kind      string    `json:"kind"`
+		Path      string    `json:"path"`
+	} `json:"configs,omitempty"`
+	Master *struct {
+		DataNodes *[]struct {
+			DataCenter *string `json:"data_center,omitempty"`
+			Max        int     `json:"max"`
+			Rack       *string `json:"rack,omitempty"`
+			Url        string  `json:"url"`
+			Volumes    int     `json:"volumes"`
+		} `json:"data_nodes,omitempty"`
+		FreeVolumes int  `json:"free_volumes"`
+		IsLeader    bool `json:"is_leader"`
+		Layouts     *[]struct {
+			Collection  *string `json:"collection,omitempty"`
+			Replication string  `json:"replication"`
+			Writable    int     `json:"writable"`
+		} `json:"layouts,omitempty"`
+		Leader     *string   `json:"leader,omitempty"`
+		MaxVolumes int       `json:"max_volumes"`
+		Peers      *[]string `json:"peers,omitempty"`
+	} `json:"master,omitempty"`
+	Processes []struct {
+		Args               []string  `json:"args"`
+		Container          *string   `json:"container,omitempty"`
+		DataCenter         *string   `json:"data_center,omitempty"`
+		DefaultReplication *string   `json:"default_replication,omitempty"`
+		Dirs               *[]string `json:"dirs,omitempty"`
+		Disks              *[]struct {
+			Dir   string `json:"dir"`
+			Free  int64  `json:"free"`
+			Total int64  `json:"total"`
+		} `json:"disks,omitempty"`
+		Ip      *string         `json:"ip,omitempty"`
+		Masters *[]string       `json:"masters,omitempty"`
+		MetaDir *string         `json:"meta_dir,omitempty"`
+		Peers   *[]string       `json:"peers,omitempty"`
+		Pid     int             `json:"pid"`
+		Ports   *map[string]int `json:"ports,omitempty"`
+		Rack    *string         `json:"rack,omitempty"`
+
+		// Role master, volume, filer, s3, server, mount, …
+		Role string  `json:"role"`
+		Unit *string `json:"unit,omitempty"`
+	} `json:"processes"`
+	Version *string `json:"version,omitempty"`
+	Volume  *struct {
+		Bytes        int64           `json:"bytes"`
+		Collections  *[]string       `json:"collections,omitempty"`
+		Files        int64           `json:"files"`
+		ReadOnly     *int            `json:"read_only,omitempty"`
+		Replications *map[string]int `json:"replications,omitempty"`
+		Volumes      int             `json:"volumes"`
+	} `json:"volume,omitempty"`
+}
 
 // SelfGuest defines model for SelfGuest.
 type SelfGuest struct {

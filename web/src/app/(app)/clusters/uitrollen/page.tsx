@@ -10,9 +10,9 @@ import { fieldId, ParamInput, paramHint } from "@/components/inventory/ParamInpu
 import { QueryState, tableClass, tdClass, thClass } from "@/components/inventory/bits";
 import { Alert, Button, Card, cx, Input, Label, PageHeader, Select, Textarea } from "@/components/ui";
 import { ApiError } from "@/lib/api/client";
-import { mib, planDeployment, useDeploy, useTemplates, type DeployInput, type Template, type TemplateParam } from "@/lib/deploy";
+import { mib, planDeployment, useDeploy, useTemplates, type DeployInput, type DeployPlan, type Template, type TemplateParam } from "@/lib/deploy";
 import { environments, useIsAdmin, useNodes, type Environment } from "@/lib/inventory";
-import { useProxmoxConnections, useProxmoxResources } from "@/lib/proxmox";
+import { useProxmoxConnections, useProxmoxResources, useSyncProxmox, type ProxmoxResources, type ProxmoxStorage } from "@/lib/proxmox";
 
 export default function DeployPage() {
   return (
@@ -49,7 +49,14 @@ type Form = {
   // node-id een rol.
   where: "vm" | "ct" | "existing";
   existing: Record<string, string>;
+  // placement: per node (rol/volgnummer) de gekozen Proxmox-host en
+  // storage; leeg kiest ClusterForge.
+  placement: Record<string, Placement>;
 };
+
+type Placement = { host: string; storage: string };
+
+const placementKey = (role: string, index: number) => `${role}/${index}`;
 
 const emptyForm: Form = {
   template: "",
@@ -73,6 +80,7 @@ const emptyForm: Form = {
   database: false,
   where: "vm",
   existing: {},
+  placement: {},
 };
 
 // paramValue is de ingevulde waarde, of de standaard van de template.
@@ -128,6 +136,12 @@ function toInput(f: Form, t: Template | undefined): DeployInput {
       gateway: network === "static" ? f.gateway.trim() : "",
       dns: network === "static" ? f.dns.split(/[\s,]+/).filter(Boolean) : [],
       ssh_keys: ct ? "" : f.sshKeys,
+      placement: Object.entries(f.placement)
+        .filter(([, p]) => p.host !== "" || p.storage !== "")
+        .map(([key, p]) => {
+          const cut = key.lastIndexOf("/");
+          return { role: key.slice(0, cut), index: Number(key.slice(cut + 1)), host: p.host, storage: p.storage };
+        }),
     },
     server_url: (f.serverUrl ?? "").trim(),
     ...database,
@@ -171,16 +185,17 @@ function DeployInner() {
     [resources.data, ct],
   );
   const storages = useMemo(() => {
-    const seen = new Map<string, boolean>();
+    const seen = new Map<string, ProxmoxStorage>();
     for (const s of resources.data?.storages ?? []) {
-      if (s.content === "" || s.content.split(",").includes(ct ? "rootdir" : "images")) seen.set(s.name, s.shared);
+      if (holds(s, ct) && !seen.has(s.name)) seen.set(s.name, s);
     }
-    return [...seen.entries()].sort(([a], [b]) => a.localeCompare(b));
+    return [...seen.values()].sort((a, b) => a.name.localeCompare(b.name));
   }, [resources.data, ct]);
+  const sync = useSyncProxmox();
 
   const imageVmid = form.imageVmid || (images[0] ? String(images[0].vmid) : "");
   const origin = typeof window === "undefined" ? "https://clusterforge.example" : window.location.origin;
-  const setWhere = (w: Form["where"]) => setForm((f) => ({ ...f, where: w, imageVmid: "", storage: "" }));
+  const setWhere = (w: Form["where"]) => setForm((f) => ({ ...f, where: w, imageVmid: "", storage: "", placement: {} }));
   const eff: Form = { ...form, template: template?.name ?? "", proxmoxId, imageVmid, serverUrl: form.serverUrl ?? origin, where };
 
   const set = <K extends keyof Form>(k: K, v: Form[K]) => setForm((f) => ({ ...f, [k]: v }));
@@ -202,6 +217,11 @@ function DeployInner() {
     placeholderData: keepPreviousData,
   });
   const planError = plan.error instanceof ApiError ? plan.error : null;
+  // Het laatste geslaagde voorbeeld blijft staan bij een fout, zodat je de
+  // keuze per node kunt aanpassen.
+  const [lastPlan, setLastPlan] = useState<DeployPlan | undefined>(undefined);
+  if (plan.data && plan.data !== lastPlan) setLastPlan(plan.data);
+  const setPlacement = (key: string, p: Placement) => setForm((f) => ({ ...f, placement: { ...f.placement, [key]: p } }));
   // Een fout van het voorbeeld markeert het veld al tijdens het invullen; een
   // fout bij het uitrollen gaat voor.
   const fieldError = error?.field ? error : planError?.field ? planError : null;
@@ -328,9 +348,13 @@ function DeployInner() {
       {template && template.database && (
         <Card title="Database">
           <p className="text-sm text-slate-600 dark:text-slate-400">
-            Deze template krijgt altijd MariaDB Galera, op de nodes met de rol {template.database.role}. Na de uitrol zet
-            ClusterForge de database er vanzelf op; de template maakt daarna zelf de database, de gebruiker en het schema
-            klaar. Volg het bij de taak van de database op de pagina van het cluster.
+            Deze template krijgt altijd{" "}
+            {template.database.engine === "postgresql"
+              ? "PostgreSQL met Patroni en etcd, met een eigen VIP op de primary,"
+              : "MariaDB Galera,"}{" "}
+            op de nodes met de rol {template.database.role}. Na de uitrol zet ClusterForge de database er vanzelf op; de
+            template maakt daarna zelf de database, de gebruiker en het schema klaar. Volg het bij de taak van de database
+            op de pagina van het cluster.
           </p>
         </Card>
       )}
@@ -411,7 +435,7 @@ function DeployInner() {
                     <Select
                       id={fieldId("target.proxmox_id")}
                       value={proxmoxId}
-                      onChange={(e) => setForm((f) => ({ ...f, proxmoxId: e.target.value, imageVmid: "", storage: "" }))}
+                      onChange={(e) => setForm((f) => ({ ...f, proxmoxId: e.target.value, imageVmid: "", storage: "", placement: {} }))}
                     >
                       {conns.data?.items.map((c) => (
                         <option key={c.id} value={c.id}>
@@ -444,14 +468,14 @@ function DeployInner() {
                     error={fieldError}
                     field="target.storage"
                     label="Storage"
-                    hint={`Gedeelde storage laat ClusterForge de ${ct ? "CT's" : "VM's"} over de hosts spreiden.`}
+                    hint={`Voor alle ${ct ? "CT's" : "VM's"}; per node kies je host en storage in het voorbeeld onderaan.`}
                   >
                     <Select id={fieldId("target.storage")} className={bad("target.storage")} value={form.storage} onChange={(e) => set("storage", e.target.value)}>
                       <option value="">{ct ? "Zoals de CT-template" : "Zoals de golden image"}</option>
-                      {storages.map(([name, shared]) => (
-                        <option key={name} value={name}>
-                          {name}
-                          {shared ? " (gedeeld)" : ""}
+                      {storages.map((st) => (
+                        <option key={st.name} value={st.name}>
+                          {st.name}
+                          {st.shared ? ` (gedeeld, ${gb(st.maxdisk - st.disk)} vrij)` : ""}
                         </option>
                       ))}
                     </Select>
@@ -580,7 +604,26 @@ function DeployInner() {
       )}
 
       <Card title="Voorbeeld">
-        <Preview ready={ready} existing={where === "existing"} loading={plan.isFetching} plan={plan.data} error={plan.error} />
+        <Preview
+          ready={ready}
+          existing={where === "existing"}
+          loading={plan.isFetching}
+          plan={plan.data ?? (where === "existing" ? undefined : lastPlan)}
+          error={plan.error}
+          placement={
+            where === "existing"
+              ? undefined
+              : {
+                  ct,
+                  value: form.placement,
+                  onChange: setPlacement,
+                  resources: resources.data,
+                  defaultStorage: form.storage,
+                  refreshing: sync.isPending,
+                  onRefresh: () => proxmoxId && sync.mutate(proxmoxId),
+                }
+          }
+        />
       </Card>
 
       <div className="flex flex-wrap items-center justify-end gap-2">
@@ -629,18 +672,41 @@ function slugHint(slug: string, t: Template | undefined) {
   return `De nodes heten ${slug}-01, ${slug}-02, …`;
 }
 
+type PlacementProps = {
+  ct: boolean;
+  value: Record<string, Placement>;
+  onChange: (key: string, p: Placement) => void;
+  resources: ProxmoxResources | undefined;
+  defaultStorage: string;
+  refreshing: boolean;
+  onRefresh: () => void;
+};
+
+// holds zegt of er schijven van een CT (rootdir) of VM (images) op een
+// storage mogen.
+function holds(s: ProxmoxStorage, ct: boolean) {
+  return s.content === "" || s.content.split(",").includes(ct ? "rootdir" : "images");
+}
+
+function gb(bytes: number) {
+  const g = bytes / 2 ** 30;
+  return g >= 1000 ? `${(g / 1024).toFixed(1)} TB` : `${Math.floor(g)} GB`;
+}
+
 function Preview({
   ready,
   existing,
   loading,
   plan,
   error,
+  placement,
 }: {
   ready: boolean;
   existing: boolean;
   loading: boolean;
-  plan: Awaited<ReturnType<typeof planDeployment>> | undefined;
+  plan: DeployPlan | undefined;
   error: unknown;
+  placement?: PlacementProps;
 }) {
   if (!ready)
     return (
@@ -650,10 +716,22 @@ function Preview({
           : "Vul een naam in en kies Proxmox en een golden image; dan verschijnt hier wat er gemaakt wordt."}
       </p>
     );
-  if (error) return <Alert>{error instanceof Error ? error.message : "Controleren mislukt"}</Alert>;
-  if (!plan) return <p className="text-sm text-slate-500">{loading ? "Controleren…" : ""}</p>;
+  const errorAlert = error ? <Alert>{error instanceof Error ? error.message : "Controleren mislukt"}</Alert> : null;
+  if (!plan || (error && !placement)) return errorAlert ?? <p className="text-sm text-slate-500">{loading ? "Controleren…" : ""}</p>;
+  const hosts = [...(placement?.resources?.hosts ?? [])].sort((a, b) => a.name.localeCompare(b.name));
   return (
     <div className={cx("space-y-3", loading && "opacity-60")}>
+      {errorAlert}
+      {placement && (
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-sm text-slate-600 dark:text-slate-400">
+            Kies per node de Proxmox-host en de storage, of laat ClusterForge kiezen: die spreidt de nodes over de online hosts.
+          </p>
+          <Button type="button" variant="secondary" onClick={placement.onRefresh} disabled={placement.refreshing}>
+            {placement.refreshing ? "Proxmox lezen…" : "Proxmox opnieuw lezen"}
+          </Button>
+        </div>
+      )}
       <div className="overflow-x-auto">
         <table className={tableClass}>
           <thead className="border-b border-slate-200 dark:border-slate-800">
@@ -664,6 +742,7 @@ function Preview({
               {!existing && (
                 <>
                   <th className={thClass}>Proxmox-host</th>
+                  <th className={thClass}>Storage</th>
                   <th className={`${thClass} text-right`}>vCPU</th>
                   <th className={`${thClass} text-right`}>Geheugen</th>
                   <th className={`${thClass} text-right`}>Schijf</th>
@@ -679,7 +758,14 @@ function Preview({
                 <td className={tdClass}>{n.address || <span className="text-slate-500">DHCP</span>}</td>
                 {!existing && (
                   <>
-                    <td className={tdClass}>{n.host}</td>
+                    {placement ? (
+                      <PlacementCells n={n} hosts={hosts} p={placement} />
+                    ) : (
+                      <>
+                        <td className={tdClass}>{n.host}</td>
+                        <td className={tdClass}>{n.storage}</td>
+                      </>
+                    )}
                     <td className={`${tdClass} text-right tabular-nums`}>{n.cpu}</td>
                     <td className={`${tdClass} text-right tabular-nums`}>{mib(n.memory_mib)}</td>
                     <td className={`${tdClass} text-right tabular-nums`}>{n.disk_gib} GB</td>
@@ -697,6 +783,67 @@ function Preview({
         </p>
       )}
     </div>
+  );
+}
+
+// PlacementCells kiest de Proxmox-host en de storage van één node. De
+// keuzes komen uit de laatste lezing van Proxmox (elke 20 s).
+function PlacementCells({
+  n,
+  hosts,
+  p,
+}: {
+  n: DeployPlan["nodes"][number];
+  hosts: ProxmoxResources["hosts"];
+  p: PlacementProps;
+}) {
+  const key = placementKey(n.role, n.index);
+  const cur = p.value[key] ?? { host: "", storage: "" };
+  const host = cur.host || n.host;
+  const storages = (p.resources?.storages ?? [])
+    .filter((s) => (s.shared || s.host === host) && holds(s, p.ct))
+    .filter((s, i, all) => all.findIndex((x) => x.name === s.name) === i)
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const standard = cur.storage ? p.defaultStorage || "zoals de template" : n.storage || "zoals de template";
+  return (
+    <>
+      <td className={tdClass}>
+        <Select
+          aria-label={`Proxmox-host van ${n.hostname}`}
+          className="min-w-40"
+          value={cur.host}
+          onChange={(e) => {
+            const h = e.target.value || n.host;
+            // Een storage die op de nieuwe host niet bestaat, valt weg.
+            const keep = (p.resources?.storages ?? []).some((s) => s.name === cur.storage && (s.shared || s.host === h));
+            p.onChange(key, { host: e.target.value, storage: keep ? cur.storage : "" });
+          }}
+        >
+          <option value="">{cur.host ? "Automatisch" : `Automatisch (${n.host})`}</option>
+          {hosts.map((h) => (
+            <option key={h.name} value={h.name} disabled={h.status !== "online"}>
+              {h.name} · {h.status === "online" ? `${gb(h.maxmem - h.mem)} geheugen vrij` : "offline"}
+            </option>
+          ))}
+        </Select>
+      </td>
+      <td className={tdClass}>
+        <Select
+          aria-label={`Storage van ${n.hostname}`}
+          className="min-w-48"
+          value={cur.storage}
+          onChange={(e) => p.onChange(key, { host: cur.host, storage: e.target.value })}
+        >
+          <option value="">Standaard ({standard})</option>
+          {storages.map((s) => (
+            <option key={s.name} value={s.name} disabled={s.status !== "" && s.status !== "available"}>
+              {s.name} · {s.maxdisk > 0 ? `${gb(s.maxdisk - s.disk)} vrij` : "ruimte onbekend"}
+              {s.shared ? " · gedeeld" : ""}
+            </option>
+          ))}
+        </Select>
+      </td>
+    </>
   );
 }
 

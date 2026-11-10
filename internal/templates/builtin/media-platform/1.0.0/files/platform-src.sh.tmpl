@@ -1,0 +1,29 @@
+#!/bin/sh
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}).
+# De code van het platform op de gekozen branch of tag, en het image
+# cf-platform:local. Naast een single-node (/opt/platform, platform:local),
+# die dit niet raakt. --check: staat de code al op die versie en is het image
+# ervan gebouwd?
+set -eu
+REPO='{{ .params.platform_repo }}'
+REF='{{ .params.platform_ref }}'
+SRC=/opt/cf-platform/src
+STATE=/var/lib/clusterforge/platform-image.rev
+want() { git ls-remote "$REPO" "refs/heads/$REF" "refs/tags/$REF^{}" "refs/tags/$REF" | head -n 1 | cut -f1; }
+if [ "${1:-}" = --check ]; then
+  rev=$(want) || exit 1
+  [ -n "$rev" ] && [ "$(git -C "$SRC" rev-parse HEAD 2>/dev/null)" = "$rev" ] &&
+    [ "$(cat "$STATE" 2>/dev/null)" = "$rev" ] && docker image inspect cf-platform:local >/dev/null 2>&1
+  exit $?
+fi
+mkdir -p /opt/cf-platform /var/lib/clusterforge
+[ -d "$SRC/.git" ] || git clone "$REPO" "$SRC"
+git -C "$SRC" fetch --tags origin "$REF"
+git -C "$SRC" checkout -q --detach FETCH_HEAD
+rev=$(git -C "$SRC" rev-parse HEAD)
+S=$SRC/infra/single
+docker compose -p cf-platform --project-directory "$S" --env-file /etc/clusterforge/platform.env \
+  -f "$S/compose.yaml" -f "$S/compose.office.yaml" -f "$S/compose.media.yaml" \
+  -f /etc/clusterforge/platform-cluster.yaml build platform
+echo "$rev" > "$STATE"
+echo "platform $REF op $rev gebouwd"

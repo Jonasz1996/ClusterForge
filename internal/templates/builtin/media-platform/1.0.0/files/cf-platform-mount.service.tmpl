@@ -1,0 +1,18 @@
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}).
+# De bestanden van het platform: de filer van SeaweedFS op /srv/platform-data.
+[Unit]
+Description=Bestanden van het platform op SeaweedFS (/srv/platform-data)
+Requires=cf-seaweedfs.service
+After=cf-seaweedfs.service
+
+[Service]
+# Het wachten op de filer zit in ExecStart, niet in ExecStartPre: de filer
+# komt pas als PostgreSQL er is, en dat zet ClusterForge na de uitrol. Zo
+# geldt de mount meteen als gestart en houdt hij de uitrol niet tegen.
+ExecStart=/bin/sh -c 'until curl -fsS -o /dev/null http://127.0.0.1:8888/; do sleep 5; done; exec /usr/local/bin/weed mount -filer=127.0.0.1:8888 -filer.path=/ -dir=/srv/platform-data -allowOthers -cacheDir=/var/cache/weed-mount -replication={{ .params.replication }}'
+ExecStopPost=-/bin/fusermount3 -uz /srv/platform-data
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

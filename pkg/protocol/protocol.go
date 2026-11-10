@@ -10,7 +10,7 @@ import (
 
 // Version is de protocolversie. Een agent meldt die bij elke heartbeat, zodat
 // de server geen berichten stuurt die de agent niet kent.
-const Version = 25
+const Version = 26
 
 // RecipeStepsSince is de eerste protocolversie die de stappen van recepten
 // kent: repo_deb, repo en ini_set (fase 9).
@@ -194,6 +194,11 @@ type Facts struct {
 
 	// Kube beschrijft k3s op de node; nil zonder k3s.
 	Kube *KubeFacts `json:"kube,omitempty"`
+
+	// Vanaf SeaweedSince.
+
+	// Seaweed beschrijft SeaweedFS op de node; nil zonder.
+	Seaweed *SeaweedFacts `json:"seaweed,omitempty"`
 }
 
 // Tools zijn de gereedschappen die storingsinjectie nodig heeft: nft voor
@@ -683,6 +688,7 @@ func (f Facts) Stable() Facts {
 		out.Docker = &d
 	}
 	out.AptUpdatedAt = time.Time{}
+	out.Seaweed = f.Seaweed.Stable()
 	return out
 }
 
