@@ -15,8 +15,9 @@
 #   npm-ctl.sh pull | pulled    het image van NPM halen / staat het er?
 #   npm-ctl.sh unchanged        draait NPM hier met de huidige image en compose.yaml?
 #   npm-ctl.sh restart-if-changed
-#   npm-ctl.sh overnemen <map> [letsencrypt-map]
-#                               een bestaande NPM (map met data/ en letsencrypt/) naar het cluster
+#   npm-ctl.sh overnemen [<map> [letsencrypt-map]]
+#                               een bestaande NPM naar het cluster; zonder map die
+#                               die hier draait (mappen uit zijn mounts)
 #
 # Waarom zo: SQLite mag je niet kopiëren terwijl NPM erin schrijft, en een
 # database vervangen onder een draaiende NPM geeft "attempt to write a
@@ -48,6 +49,12 @@ fail() { echo "FOUT: $*" >&2; exit 1; }
 when() { date -d "@$1" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo "$1"; }
 field() { sed -n "s/^$1=//p" "$2" 2>/dev/null | head -n 1; }
 integrity() { [ "$(sqlite3 "$1" 'PRAGMA integrity_check;' 2>&1)" = ok ]; }
+# De containers van een andere NPM op deze machine (zoals de NPM die je nog
+# moet overnemen); die houdt poort 80 en 443 vast.
+foreign() {
+  docker ps --format '{{"{{"}}.ID{{"}}"}} {{"{{"}}.Image{{"}}"}} {{"{{"}}.Label "com.docker.compose.project"{{"}}"}}' 2>/dev/null |
+    awk '$2 ~ /nginx-proxy-manager/ && $3 != "cf-npm" {print $1}'
+}
 fingerprint() {
   { cat "$BASE/compose.yaml"; docker image inspect -f '{{"{{"}}.Id{{"}}"}}' "$IMAGE" 2>/dev/null; } | sha256sum | cut -d' ' -f1
 }
@@ -114,18 +121,27 @@ snapshot() {
 
 # Een bestaande NPM naar het cluster halen, op de VIP-node.
 overnemen() {
-  src=${1:-}
-  le=${2:-${src%/}/letsencrypt}
-  [ -n "$src" ] || fail "gebruik: $0 overnemen <map met data/ en letsencrypt/> [letsencrypt-map]"
-  src=${src%/}
-  [ -f "$src/data/database.sqlite" ] || fail "geen $src/data/database.sqlite"
+  if [ -n "${1:-}" ]; then
+    srcdata=${1%/}/data
+    le=${2:-${1%/}/letsencrypt}
+  else
+    # Zonder map: de mappen van de andere NPM die hier draait, uit zijn mounts.
+    c=$(foreign | head -n 1)
+    [ -n "$c" ] || fail "hier draait geen andere NPM; geef de map: $0 overnemen <map met data/ en letsencrypt/>"
+    mounts=$(docker inspect -f '{{"{{"}}range .Mounts{{"}}"}}{{"{{"}}.Destination{{"}}"}} {{"{{"}}.Source{{"}}"}}{{"{{"}}"\n"{{"}}"}}{{"{{"}}end{{"}}"}}' "$c")
+    srcdata=$(echo "$mounts" | awk '$1 == "/data" {print $2}')
+    le=$(echo "$mounts" | awk '$1 == "/etc/letsencrypt" {print $2}')
+    echo "Andere NPM $c: data in $srcdata, certificaten in ${le:-(geen)}"
+    [ -n "$le" ] || { le=$STATE/geen-letsencrypt; mkdir -p "$le"; }
+  fi
+  srcdata=${srcdata%/}
+  [ -f "$srcdata/database.sqlite" ] || fail "geen $srcdata/database.sqlite"
   [ -d "$le" ] || fail "geen map $le met de certificaten"
   has_vip || fail "doe dit op de node met het VIP ($VIP)"
   command -v sqlite3 >/dev/null || fail "sqlite3 ontbreekt"
   # Een oude NPM op deze machine houdt poort 80 en 443 vast: stoppen, en
   # niet meer vanzelf laten starten.
-  old=$(docker ps --format '{{"{{"}}.ID{{"}}"}} {{"{{"}}.Image{{"}}"}} {{"{{"}}.Label "com.docker.compose.project"{{"}}"}}' |
-    awk '$2 ~ /nginx-proxy-manager/ && $3 != "cf-npm" {print $1}')
+  old=$(foreign)
   say "NPM van het cluster stoppen"
   systemctl stop cf-npm
   if [ -n "$old" ]; then
@@ -135,10 +151,10 @@ overnemen() {
   fi
   say "Database kopiëren (sqlite3 .backup)"
   rm -f "$DB" "$DB-wal" "$DB-shm" "$DB-journal"
-  sqlite3 "$src/data/database.sqlite" '.timeout 30000' ".backup '$DB'" || fail "sqlite3 .backup"
+  sqlite3 "$srcdata/database.sqlite" '.timeout 30000' ".backup '$DB'" || fail "sqlite3 .backup"
   integrity "$DB" || fail "de overgenomen database is niet in orde (integrity_check)"
   say "Rest van data/ en de certificaten kopiëren"
-  rsync -a --delete --exclude='/database.sqlite*' --exclude=/logs/ "$src/data/" "$DATA/" || fail "rsync data"
+  rsync -a --delete --exclude='/database.sqlite*' --exclude=/logs/ "$srcdata/" "$DATA/" || fail "rsync data"
   rsync -a --delete "${le%/}/" "$LE/" || fail "rsync letsencrypt"
   # Wat hier staat, is nu nieuwer dan elke ontvangen kopie.
   date +%s > "$STAMP"
@@ -161,6 +177,11 @@ status() {
 
 case "${1:-}" in
   up)
+    # Een andere NPM hier (nog niet overgenomen) houdt de poorten vast en
+    # bedient het VIP zelf: niet starten.
+    if [ -n "$(foreign)" ]; then
+      fail "hier draait nog een andere NPM ($(foreign | tr '\n' ' ')); neem hem over met: $0 overnemen <map>"
+    fi
     # Nooit over een draaiende NPM heen kopiëren.
     compose rm -sf >/dev/null 2>&1
     install_incoming
@@ -180,14 +201,15 @@ case "${1:-}" in
     systemctl is-active --quiet docker || exit 1
     # Draait NPM hier maar faalt het, dan geeft deze node het VIP af.
     systemctl is-failed --quiet cf-npm && exit 1
-    # Na een herstart start de node met het VIP het zelf.
-    if has_vip && ! systemctl is-active --quiet cf-npm; then
+    # Na een herstart start de node met het VIP het zelf; niet zolang hier
+    # nog een andere NPM draait (die bedient het VIP tot de overname).
+    if has_vip && ! systemctl is-active --quiet cf-npm && [ -z "$(foreign)" ]; then
       systemctl start --no-block cf-npm
     fi
     exit 0
     ;;
   master)
-    systemctl start --no-block cf-npm
+    [ -z "$(foreign)" ] && systemctl start --no-block cf-npm
     exit 0
     ;;
   backup)

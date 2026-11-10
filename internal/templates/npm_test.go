@@ -140,7 +140,13 @@ func newNPMNode(t *testing.T, script, name string) *npmNode {
 		"ip": `[ -f "$CF_TEST_DIR/vip" ] && echo "2: eth0    inet 192.0.2.50/24 scope global secondary eth0"; exit 0`,
 		"systemctl": `case "$1 $2" in "is-active --quiet") [ "$3" = cf-npm ] && { [ -f "$CF_TEST_DIR/active" ]; exit $?; }; exit 0;;
 "is-failed --quiet") exit 1;; esac; echo "systemctl $*" >> "$CF_TEST_DIR/log"; exit 0`,
-		"docker":   `echo "docker $*" >> "$CF_TEST_DIR/log"; exit 0`,
+		"docker": `echo "docker $*" >> "$CF_TEST_DIR/log"
+case "$1" in
+ps) [ -f "$CF_TEST_DIR/foreign" ] && cat "$CF_TEST_DIR/foreign";;
+inspect) case "$3" in *Mounts*) cat "$CF_TEST_DIR/mounts";; esac;;
+stop) rm -f "$CF_TEST_DIR/foreign";;
+esac
+exit 0`,
 		"hostname": `echo ` + name,
 	}
 	for cmd, body := range stubs {
@@ -321,5 +327,46 @@ func TestNPMSnapshotFailover(t *testing.T) {
 	// status vertelt wat er staat.
 	if out, err := b.run("status"); err != nil || !strings.Contains(out, "ontvangen: kopie van npm-01") {
 		t.Errorf("status: %v %s", err, out)
+	}
+
+	// Een node met een NPM die nog niet overgenomen is: cf-npm start niet
+	// (de oude bedient het VIP), en overnemen haalt zijn mappen uit de mounts.
+	o := newNPMNode(t, script, "npm-oud")
+	dir := filepath.Dir(o.script)
+	old := t.TempDir()
+	write(t, map[string]string{
+		dir + "/foreign":                "abc123 jc21/nginx-proxy-manager:latest npm\n",
+		dir + "/mounts":                 "/data " + old + "/data\n/etc/letsencrypt " + old + "/le\n",
+		old + "/le/archive/x/cert1.pem": "OUD",
+		old + "/data/keys.json":         "{}",
+	})
+	if out, err := exec.Command("sqlite3", old+"/data/database.sqlite", "CREATE TABLE proxy_host (id INTEGER PRIMARY KEY, domain TEXT); INSERT INTO proxy_host (domain) VALUES ('oud-thuis.example.org');").CombinedOutput(); err != nil {
+		t.Fatalf("%v %s", err, out)
+	}
+	o.vip = true
+	if out, err := o.run("master"); err != nil {
+		t.Fatalf("master: %v %s", err, out)
+	}
+	if out, err := o.run("check"); err != nil {
+		t.Fatalf("check: %v %s", err, out)
+	}
+	if log, _ := os.ReadFile(dir + "/log"); strings.Contains(string(log), "systemctl start") {
+		t.Errorf("cf-npm gestart naast de oude NPM: %s", log)
+	}
+	if out, err := o.run("up"); err == nil || !strings.Contains(out, "andere NPM") {
+		t.Errorf("up naast de oude NPM: %v %s", err, out)
+	}
+	out, err = o.run("overnemen")
+	if err != nil {
+		t.Fatalf("overnemen: %v %s", err, out)
+	}
+	if got := o.sql("SELECT domain FROM proxy_host;"); got != "oud-thuis.example.org" {
+		t.Errorf("overgenomen database: %q", got)
+	}
+	if d, _ := os.ReadFile(o.base + "/letsencrypt/archive/x/cert1.pem"); string(d) != "OUD" {
+		t.Error("certificaten niet overgenomen")
+	}
+	if log, _ := os.ReadFile(dir + "/log"); !strings.Contains(string(log), "docker update --restart=no abc123") || !strings.Contains(string(log), "systemctl start cf-npm") {
+		t.Errorf("overnemen: %s", log)
 	}
 }

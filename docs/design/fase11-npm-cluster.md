@@ -115,6 +115,9 @@ Op de VIP-node, via Commando's (fase 10) of een shell:
 /usr/local/lib/clusterforge/npm-ctl.sh overnemen /pad/naar/npm   # map met data/ en letsencrypt/
 ```
 
+Zonder map neemt het script de NPM over die op deze machine draait, met de
+mappen uit zijn mounts. Zolang zo'n andere NPM draait, start cf-npm daar niet:
+de oude NPM bedient het VIP tot de overname, zonder onderbreking.
 Draait de oude NPM op dezelfde machine, dan stopt het script hem eerst
 (`restart=no`, terug te starten met `docker start`). Database met `sqlite3
 .backup`, de rest met rsync; daarna start NPM van het cluster en gaat de
