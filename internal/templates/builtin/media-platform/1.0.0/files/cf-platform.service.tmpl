@@ -1,9 +1,10 @@
 # Beheerd door ClusterForge (cluster {{ .cluster.slug }}).
 # Het platform (app, office en media). Niet enabled: keepalived start het op
-# de node met het VIP (platform-ctl.sh master), en pas na de overstap.
+# de node met het VIP (platform-ctl.sh master of check), en pas na de overstap
+# (platform-ctl.sh overstap echt zet de markering op de gedeelde datamap).
 [Unit]
 Description=Platform van {{ .cluster.slug }} (actief op de node met het VIP)
-ConditionPathExists=/etc/clusterforge/platform-active
+ConditionPathExists=/srv/platform-data/.cf-platform-active
 Requires=docker.service cf-platform-mount.service
 After=docker.service cf-platform-mount.service
 

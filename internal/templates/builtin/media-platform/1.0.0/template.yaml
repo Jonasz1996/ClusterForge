@@ -47,7 +47,7 @@ params:
   - name: platform_ref
     type: string
     label: Branch of tag van het platform
-    help: Dezelfde als op de node die nu draait. Een andere waarde rolt een nieuwe versie node voor node uit.
+    help: Een versie met app.cli db-copy (voor de overstap). Een andere waarde rolt een nieuwe versie node voor node uit.
     default: main
     pattern: '[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*'
   - name: db_host
@@ -141,7 +141,7 @@ roles:
       memory: "{{ .params.memory }}"
       disk: "{{ .params.disk }}"
     steps:
-      - package: { names: [keepalived, fuse3, git, curl] }
+      - package: { names: [keepalived, fuse3, git, curl, rsync] }
       # Docker: een node van het platform heeft al docker-ce van install.sh;
       # alleen een nieuwe node krijgt docker.io van Debian.
       - command:
@@ -200,6 +200,9 @@ roles:
           template: platform.env.tmpl
           mode: "0600"
       - file:
+          path: /etc/clusterforge/platform-cluster.yaml
+          template: platform-cluster.yaml.tmpl
+      - file:
           path: /usr/local/lib/clusterforge/platform-src.sh
           template: platform-src.sh.tmpl
           mode: "0755"
@@ -207,9 +210,6 @@ roles:
           title: code en image van het platform
           run: /usr/local/lib/clusterforge/platform-src.sh
           unless: /usr/local/lib/clusterforge/platform-src.sh --check
-      - file:
-          path: /etc/clusterforge/platform-cluster.yaml
-          template: platform-cluster.yaml.tmpl
       - file:
           path: /usr/local/lib/clusterforge/platform-ctl.sh
           template: platform-ctl.sh.tmpl

@@ -57,12 +57,13 @@ func TestRenderMediaPlatform(t *testing.T) {
 			"PLATFORM_DATABASE_URL=postgresql+asyncpg://platform:Wachtwoord-123@192.168.10.180:5433/platform\n",
 			"PLATFORM_CLUSTER_NODES=media-01=192.168.10.146,media-02=192.168.10.147,media-03=192.168.10.148\n",
 			"OFFICE_JWT_SECRET=officegeheim1\n"},
-		"/etc/clusterforge/platform-cluster.yaml":         {"PLATFORM_MODE: cluster", `restart: "no"`},
-		"/usr/local/lib/clusterforge/platform-src.sh":     {"REF='claude/stappenplan-uitwerken-lu4uv3'"},
-		"/usr/local/lib/clusterforge/platform-ctl.sh":     {"docker image inspect -f '{{.Id}}'", "-f /etc/clusterforge/platform-cluster.yaml"},
-		"/etc/systemd/system/cf-platform.service":         {"ConditionPathExists=/etc/clusterforge/platform-active"},
-		"/etc/systemd/system/cf-platform-mount.service":   {"-dir=/srv/platform-data", "-replication=001"},
-		"/etc/keepalived/keepalived.conf":                 {"priority 140\n", "nopreempt", "notify_master", "192.168.10.146\n        192.168.10.148\n"},
+		"/etc/clusterforge/platform-cluster.yaml":     {"PLATFORM_MODE: cluster", `restart: "no"`, "image: cf-platform:local"},
+		"/usr/local/lib/clusterforge/platform-src.sh": {"REF='claude/stappenplan-uitwerken-lu4uv3'", "SRC=/opt/cf-platform/src", "-p cf-platform"},
+		"/usr/local/lib/clusterforge/platform-ctl.sh": {"docker image inspect -f '{{.Id}}' cf-platform:local", "-f /etc/clusterforge/platform-cluster.yaml",
+			"docker compose -p cf-platform", "VIP='192.168.10.150'", "overstap proef|echt", "db-copy \"$url\" --leegmaken"},
+		"/etc/systemd/system/cf-platform.service":       {"ConditionPathExists=/srv/platform-data/.cf-platform-active"},
+		"/etc/systemd/system/cf-platform-mount.service": {"-dir=/srv/platform-data", "-replication=001"},
+		"/etc/keepalived/keepalived.conf":               {"priority 140\n", "nopreempt", "notify_master", "192.168.10.146\n        192.168.10.148\n"},
 	} {
 		got, ok := files[path]
 		if !ok {

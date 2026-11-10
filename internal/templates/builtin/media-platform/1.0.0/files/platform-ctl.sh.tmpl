@@ -6,22 +6,87 @@
 #   platform-ctl.sh master|backup    keepalived: deze node kreeg of verloor het VIP
 #   platform-ctl.sh unchanged        draait het hier met de huidige code en instellingen?
 #   platform-ctl.sh restart-if-changed
+#   platform-ctl.sh overstap proef|echt [datamap]
+#                                    van de single-node op deze machine naar het cluster
+#
+# Het cluster staat los van een single-node op dezelfde machine: eigen code
+# (/opt/cf-platform), image (cf-platform:local), project (cf-platform) en
+# datamap (/srv/platform-data, SeaweedFS). Het platform start nergens zolang
+# de markering op de gedeelde datamap ontbreekt; die zet de overstap.
 set -u
-SRC=/opt/platform/src/infra/single
-ACTIVE=/etc/clusterforge/platform-active
+SRC=/opt/cf-platform/src/infra/single
+DATA=/srv/platform-data
+ACTIVE=$DATA/.cf-platform-active
 HASH=/run/cf-platform.hash
+VIP='{{ .params.vip }}'
 compose() {
-  docker compose -p platform --project-directory "$SRC" --env-file /etc/clusterforge/platform.env \
+  docker compose -p cf-platform --project-directory "$SRC" --env-file /etc/clusterforge/platform.env \
     -f "$SRC/compose.yaml" -f "$SRC/compose.office.yaml" -f "$SRC/compose.media.yaml" \
     -f /etc/clusterforge/platform-cluster.yaml "$@"
 }
 fingerprint() {
   { cat /etc/clusterforge/platform.env /etc/clusterforge/platform-cluster.yaml
-    docker image inspect -f '{{"{{"}}.Id{{"}}"}}' platform:local 2>/dev/null; } | sha256sum | cut -d' ' -f1
+    docker image inspect -f '{{"{{"}}.Id{{"}}"}}' cf-platform:local 2>/dev/null; } | sha256sum | cut -d' ' -f1
 }
+has_vip() { ip -o addr show | grep -q " $VIP/"; }
+say() { echo "== $*"; }
+fail() { echo "FOUT: $*" >&2; exit 1; }
+
+# De database van de single (SQLite in de datamap) naar PostgreSQL, met de
+# code van het cluster (app.cli db-copy). --leegmaken: wat er in PostgreSQL
+# staat, gaat eerst weg.
+db_copy() {
+  url=$(sed -n 's/^PLATFORM_DATABASE_URL=//p' /etc/clusterforge/platform.env)
+  docker run --rm --user 10001:10001 -v "$1:/data" -e PLATFORM_DATA_DIR=/data \
+    cf-platform:local python -m app.cli db-copy "$url" --leegmaken
+}
+
+# De bestanden (blobs, media, office) naar SeaweedFS, zonder de SQLite.
+sync_data() {
+  rsync -aH --delete --info=stats1 --exclude=/platform.db --exclude=/platform.db-wal \
+    --exclude=/platform.db-shm --exclude=/backup/ --exclude=/.cf-platform-active "$1/" "$DATA/"
+}
+
+overstap() {
+  mode=${1:-}
+  bron=${2:-/opt/platform/data/platform}
+  case "$mode" in proef|echt) ;; *) fail "gebruik: $0 overstap proef|echt [datamap]" ;; esac
+  say "Controles"
+  [ -f "$ACTIVE" ] && fail "het cluster draait al (overstap gedaan op $(cat "$ACTIVE"))"
+  mountpoint -q "$DATA" || fail "$DATA is niet gemount (journalctl -u cf-platform-mount)"
+  [ -f "$bron/platform.db" ] || fail "geen $bron/platform.db: draait de single-node op deze machine?"
+  docker image inspect cf-platform:local >/dev/null 2>&1 || fail "image cf-platform:local ontbreekt; rol het cluster eerst uit"
+  command -v rsync >/dev/null || fail "rsync ontbreekt"
+  echo "bron $bron ($(du -sh "$bron" | cut -f1)), doel $DATA"
+  if [ "$mode" = proef ]; then
+    say "Bestanden kopiëren (de single draait door)"
+    sync_data "$bron" || fail "rsync"
+    say "Database kopiëren naar PostgreSQL (proef)"
+    db_copy "$bron" || fail "db-copy"
+    say "Proef gelukt. Niets gestart; de single draait door. De echte overstap kopieert alleen nog wat erbij kwam."
+    return 0
+  fi
+  single=$(docker ps -aq --filter label=com.docker.compose.project=platform)
+  say "Bestanden kopiëren terwijl de single nog draait"
+  sync_data "$bron" || fail "rsync"
+  if [ -n "$single" ]; then
+    say "Single stoppen (platform-platform-1 en co); start niet meer vanzelf"
+    # shellcheck disable=SC2086
+    docker update --restart=no $single >/dev/null && docker stop $single || fail "single stoppen"
+  fi
+  say "Laatste bestanden kopiëren"
+  sync_data "$bron" || fail "rsync"
+  say "Database kopiëren naar PostgreSQL"
+  db_copy "$bron" || fail "db-copy (de single staat stil: start hem terug met: docker start $(echo $single))"
+  date -Iseconds > "$ACTIVE"
+  say "Overgestapt. Het platform start op de node met het VIP ($VIP)."
+  if has_vip; then systemctl start cf-platform && systemctl --no-pager status cf-platform | head -n 3; fi
+  echo "Terug naar de single: rm $ACTIVE op een node, systemctl stop cf-platform op de VIP-node, docker start $(echo $single)"
+}
+
 case "${1:-}" in
   up)
-    mountpoint -q /srv/platform-data || { echo "/srv/platform-data is niet gemount" >&2; exit 1; }
+    mountpoint -q "$DATA" || { echo "$DATA is niet gemount" >&2; exit 1; }
     fingerprint > "$HASH"
     compose up --no-build --remove-orphans
     ;;
@@ -31,9 +96,14 @@ case "${1:-}" in
     ;;
   check)
     systemctl is-active --quiet cf-platform-mount || exit 1
-    mountpoint -q /srv/platform-data || exit 1
+    mountpoint -q "$DATA" || exit 1
+    [ -f "$ACTIVE" ] || exit 0
     # Draait het platform hier maar faalt het, dan geeft deze node het VIP af.
-    if [ -f "$ACTIVE" ] && systemctl is-failed --quiet cf-platform; then exit 1; fi
+    systemctl is-failed --quiet cf-platform && exit 1
+    # Na de overstap (of na een herstart) start de node met het VIP het zelf.
+    if has_vip && ! systemctl is-active --quiet cf-platform; then
+      systemctl start --no-block cf-platform
+    fi
     exit 0
     ;;
   master)
@@ -51,8 +121,12 @@ case "${1:-}" in
   restart-if-changed)
     systemctl try-restart cf-platform
     ;;
+  overstap)
+    shift
+    overstap "$@"
+    ;;
   *)
-    echo "gebruik: $0 up|down|check|master|backup|unchanged|restart-if-changed" >&2
+    echo "gebruik: $0 up|down|check|master|backup|unchanged|restart-if-changed|overstap" >&2
     exit 2
     ;;
 esac
