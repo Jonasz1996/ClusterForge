@@ -112,16 +112,17 @@ func TestCronToggleFound(t *testing.T) {
 	if s := c.do("POST", "/api/v1/nodes/"+ids["nc1"]+"/crons/bestaat-niet/toggle", map[string]any{"enabled": true}, nil); s != http.StatusNotFound {
 		t.Errorf("onbekende job: %d", s)
 	}
-	if _, err := e.pool.Exec(ctx, "UPDATE agents SET protocol_version = 19 WHERE node_id = $1", ids["nc2"]); err != nil {
-		t.Fatal(err)
-	}
-	var bad struct {
-		Message string `json:"message"`
-	}
-	if s := c.do("POST", "/api/v1/nodes/"+ids["nc2"]+"/crons/"+j.Key+"/toggle", map[string]any{"enabled": true}, &bad); s != http.StatusConflict ||
-		!strings.Contains(bad.Message, "protocol 20") {
-		t.Errorf("oude agent: %d %+v", s, bad)
-	}
+	// Een heartbeat zet het protocol terug, dus opnieuw tot de server het ziet.
+	eventually(t, "oude agent geweigerd", func() bool {
+		if _, err := e.pool.Exec(ctx, "UPDATE agents SET protocol_version = 19 WHERE node_id = $1", ids["nc2"]); err != nil {
+			t.Fatal(err)
+		}
+		var bad struct {
+			Message string `json:"message"`
+		}
+		s := c.do("POST", "/api/v1/nodes/"+ids["nc2"]+"/crons/"+j.Key+"/toggle", map[string]any{"enabled": true}, &bad)
+		return s == http.StatusConflict && strings.Contains(bad.Message, "protocol 20")
+	})
 
 	// Weer aan op nc1.
 	if s := c.do("POST", "/api/v1/nodes/"+ids["nc1"]+"/crons/"+j.Key+"/toggle", map[string]any{"enabled": true}, nil); s != http.StatusOK {
