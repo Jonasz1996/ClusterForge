@@ -1,19 +1,27 @@
 #!/bin/sh
 # Beheerd door ClusterForge (cluster {{ .cluster.slug }}).
-# Zet weed uit de draaiende master van SeaweedFS op /usr/local/bin, voor de
-# mount. --check: is hij er al, en dezelfde als in het image?
+# Zet weed uit het image van SeaweedFS op /usr/local/bin, voor de mount.
+# Haalt hem uit het image zelf (docker create + cp), dus het hangt niet af
+# van een draaiende master. --check: is hij er al, en dezelfde als in het
+# image?
 set -eu
-C="docker compose -f /etc/clusterforge/seaweedfs.yaml"
+IMAGE='{{ .params.seaweedfs_image }}'
+extract() {
+  id=$(docker create "$IMAGE")
+  trap 'docker rm -f "$id" >/dev/null 2>&1 || true' EXIT
+  docker cp "$id:/usr/bin/weed" "$1"
+}
 if [ "${1:-}" = --check ]; then
   [ -x /usr/local/bin/weed ] || exit 1
-  $C exec -T master cat /usr/bin/weed | cmp -s - /usr/local/bin/weed
-  exit $?
+  docker image inspect "$IMAGE" >/dev/null 2>&1 || exit 1
+  tmp=$(mktemp)
+  extract "$tmp" || { rm -f "$tmp"; exit 1; }
+  cmp -s "$tmp" /usr/local/bin/weed; rc=$?
+  rm -f "$tmp"
+  exit $rc
 fi
-for i in $(seq 60); do
-  $C exec -T master true 2>/dev/null && break
-  sleep 2
-done
-$C exec -T master cat /usr/bin/weed > /usr/local/bin/weed.new
+docker image inspect "$IMAGE" >/dev/null 2>&1 || docker pull "$IMAGE"
+extract /usr/local/bin/weed.new
 chmod 755 /usr/local/bin/weed.new
 mv /usr/local/bin/weed.new /usr/local/bin/weed
 /usr/local/bin/weed version
