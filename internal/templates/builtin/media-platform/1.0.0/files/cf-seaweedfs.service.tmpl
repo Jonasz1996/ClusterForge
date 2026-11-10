@@ -1,0 +1,16 @@
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}).
+[Unit]
+Description=SeaweedFS van {{ .cluster.slug }} (master, volume, filer)
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/bin/docker compose -f /etc/clusterforge/seaweedfs.yaml up --remove-orphans
+ExecStop=/usr/bin/docker compose -f /etc/clusterforge/seaweedfs.yaml stop
+Restart=always
+RestartSec=5
+TimeoutStartSec=600
+
+[Install]
+WantedBy=multi-user.target

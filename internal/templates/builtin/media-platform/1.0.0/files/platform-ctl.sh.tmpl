@@ -1,0 +1,58 @@
+#!/bin/sh
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}).
+#
+#   platform-ctl.sh up | down        het platform starten of stoppen (cf-platform)
+#   platform-ctl.sh check            mag deze node het VIP hebben? (keepalived)
+#   platform-ctl.sh master|backup    keepalived: deze node kreeg of verloor het VIP
+#   platform-ctl.sh unchanged        draait het hier met de huidige code en instellingen?
+#   platform-ctl.sh restart-if-changed
+set -u
+SRC=/opt/platform/src/infra/single
+ACTIVE=/etc/clusterforge/platform-active
+HASH=/run/cf-platform.hash
+compose() {
+  docker compose -p platform --project-directory "$SRC" --env-file /etc/clusterforge/platform.env \
+    -f "$SRC/compose.yaml" -f "$SRC/compose.office.yaml" -f "$SRC/compose.media.yaml" \
+    -f /etc/clusterforge/platform-cluster.yaml "$@"
+}
+fingerprint() {
+  { cat /etc/clusterforge/platform.env /etc/clusterforge/platform-cluster.yaml
+    docker image inspect -f '{{"{{"}}.Id{{"}}"}}' platform:local 2>/dev/null; } | sha256sum | cut -d' ' -f1
+}
+case "${1:-}" in
+  up)
+    mountpoint -q /srv/platform-data || { echo "/srv/platform-data is niet gemount" >&2; exit 1; }
+    fingerprint > "$HASH"
+    compose up --no-build --remove-orphans
+    ;;
+  down)
+    compose stop
+    rm -f "$HASH"
+    ;;
+  check)
+    systemctl is-active --quiet cf-platform-mount || exit 1
+    mountpoint -q /srv/platform-data || exit 1
+    # Draait het platform hier maar faalt het, dan geeft deze node het VIP af.
+    if [ -f "$ACTIVE" ] && systemctl is-failed --quiet cf-platform; then exit 1; fi
+    exit 0
+    ;;
+  master)
+    [ -f "$ACTIVE" ] && systemctl start --no-block cf-platform
+    exit 0
+    ;;
+  backup)
+    systemctl stop --no-block cf-platform
+    exit 0
+    ;;
+  unchanged)
+    systemctl is-active --quiet cf-platform || exit 0
+    [ "$(cat "$HASH" 2>/dev/null)" = "$(fingerprint)" ]
+    ;;
+  restart-if-changed)
+    systemctl try-restart cf-platform
+    ;;
+  *)
+    echo "gebruik: $0 up|down|check|master|backup|unchanged|restart-if-changed" >&2
+    exit 2
+    ;;
+esac

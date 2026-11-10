@@ -1,0 +1,15 @@
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}).
+# Bovenop de compose-bestanden van het platform: clustermodus, de database in
+# PostgreSQL, en geen herstart door Docker zelf (alleen cf-platform start het,
+# op de node met het VIP).
+services:
+  platform:
+    restart: "no"
+    environment:
+      PLATFORM_MODE: cluster
+      PLATFORM_DATABASE_URL: ${PLATFORM_DATABASE_URL:?}
+      PLATFORM_CLUSTER_NODES: ${PLATFORM_CLUSTER_NODES:?}
+  office:
+    restart: "no"
+  media:
+    restart: "no"

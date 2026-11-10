@@ -1,0 +1,19 @@
+#!/bin/sh
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}).
+# Zet weed uit de draaiende master van SeaweedFS op /usr/local/bin, voor de
+# mount. --check: is hij er al, en dezelfde als in het image?
+set -eu
+C="docker compose -f /etc/clusterforge/seaweedfs.yaml"
+if [ "${1:-}" = --check ]; then
+  [ -x /usr/local/bin/weed ] || exit 1
+  $C exec -T master cat /usr/bin/weed | cmp -s - /usr/local/bin/weed
+  exit $?
+fi
+for i in $(seq 60); do
+  $C exec -T master true 2>/dev/null && break
+  sleep 2
+done
+$C exec -T master cat /usr/bin/weed > /usr/local/bin/weed.new
+chmod 755 /usr/local/bin/weed.new
+mv /usr/local/bin/weed.new /usr/local/bin/weed
+/usr/local/bin/weed version

@@ -1,0 +1,18 @@
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}).
+# Het platform (app, office en media). Niet enabled: keepalived start het op
+# de node met het VIP (platform-ctl.sh master), en pas na de overstap.
+[Unit]
+Description=Platform van {{ .cluster.slug }} (actief op de node met het VIP)
+ConditionPathExists=/etc/clusterforge/platform-active
+Requires=docker.service cf-platform-mount.service
+After=docker.service cf-platform-mount.service
+
+[Service]
+ExecStart=/usr/local/lib/clusterforge/platform-ctl.sh up
+ExecStop=/usr/local/lib/clusterforge/platform-ctl.sh down
+Restart=on-failure
+RestartSec=10
+StartLimitIntervalSec=600
+StartLimitBurst=5
+TimeoutStartSec=900
+TimeoutStopSec=120

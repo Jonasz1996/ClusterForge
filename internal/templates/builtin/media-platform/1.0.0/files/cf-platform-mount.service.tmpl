@@ -1,0 +1,17 @@
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}).
+# De bestanden van het platform: de filer van SeaweedFS op /srv/platform-data.
+[Unit]
+Description=Bestanden van het platform op SeaweedFS (/srv/platform-data)
+Requires=cf-seaweedfs.service
+After=cf-seaweedfs.service
+
+[Service]
+ExecStartPre=/bin/sh -c 'for i in $(seq 90); do curl -fsS -o /dev/null http://127.0.0.1:8888/ && exit 0; sleep 2; done; echo "filer antwoordt niet" >&2; exit 1'
+ExecStart=/usr/local/bin/weed mount -filer=127.0.0.1:8888 -filer.path=/ -dir=/srv/platform-data -allowOthers -cacheDir=/var/cache/weed-mount -replication={{ .params.replication }}
+ExecStopPost=-/bin/fusermount3 -uz /srv/platform-data
+Restart=always
+RestartSec=5
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target
