@@ -116,11 +116,14 @@ HEALTH service nginx
 	if b, _ := os.ReadFile(filepath.Join(f.host("app-01").Root, "etc/mysql/mariadb.conf.d/99-clusterforge-galera.cnf")); !strings.Contains(string(b), "512M") {
 		t.Errorf("buffer pool niet uit de samenstelling:\n%s", b)
 	}
+	// De instructies van het recept starten na de taak van de database, dus
+	// misschien pas na WaitRecipes hierboven.
 	var v componentDatabasesView
-	c.do("GET", base+"/"+comps.Items[0].ID+"/databases", nil, &v)
-	if dbs, _ := v.names(); !strings.Contains(strings.Join(dbs, " "), "app(app)") {
-		t.Fatalf("databases: %v", dbs)
-	}
+	eventually(t, "database app van het recept", func() bool {
+		c.do("GET", base+"/"+comps.Items[0].ID+"/databases", nil, &v)
+		dbs, _ := v.names()
+		return strings.Contains(strings.Join(dbs, " "), "app(app)")
+	})
 
 	// De kaart Verbinding.
 	var cc struct {
