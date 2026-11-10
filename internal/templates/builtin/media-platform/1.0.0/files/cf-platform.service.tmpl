@@ -7,13 +7,13 @@ Description=Platform van {{ .cluster.slug }} (actief op de node met het VIP)
 ConditionPathExists=/srv/platform-data/.cf-platform-active
 Requires=docker.service cf-platform-mount.service
 After=docker.service cf-platform-mount.service
+StartLimitIntervalSec=600
+StartLimitBurst=5
 
 [Service]
 ExecStart=/usr/local/lib/clusterforge/platform-ctl.sh up
 ExecStop=/usr/local/lib/clusterforge/platform-ctl.sh down
 Restart=on-failure
 RestartSec=10
-StartLimitIntervalSec=600
-StartLimitBurst=5
 TimeoutStartSec=900
 TimeoutStopSec=120
