@@ -54,9 +54,9 @@ params:
   - name: seaweedfs_image
     type: string
     label: Image van SeaweedFS
-    help: Pin een versie, zoals chrislusf/seaweedfs:3.97. Dezelfde weed komt op de node voor de mount.
+    help: Met een dubbele punt voor de versie, zoals chrislusf/seaweedfs:3.97. Dezelfde weed komt op de node voor de mount.
     default: chrislusf/seaweedfs:latest
-    pattern: '[a-z0-9]+([._-][a-z0-9]+)*(/[a-z0-9]+([._-][a-z0-9]+)*)*(:[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?'
+    pattern: '[a-z0-9]+([._-][a-z0-9]+)*(/[a-z0-9]+([._-][a-z0-9]+)*)*:[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}'
   - name: platform_repo
     type: string
     label: Git-repository van het platform
