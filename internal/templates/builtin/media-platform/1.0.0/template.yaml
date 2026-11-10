@@ -23,6 +23,9 @@ database:
   settings:
     shared_buffers: 512M
     max_connections: 200
+    # Het platform draait in Docker; op de node met het VIP van de database
+    # verbindt het vanaf zijn container.
+    client_networks: 172.16.0.0/12
   steps:
     - { kind: db_user, user: "{{ .params.db_user }}", password: "{{ .params.db_password }}", grant_on: "{{ .params.db_name }}" }
     - { kind: db_user, user: "{{ .params.db_user }}", password: "{{ .params.db_password }}", grant_on: "{{ .params.files_db_name }}" }

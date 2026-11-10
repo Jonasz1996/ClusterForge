@@ -84,3 +84,6 @@ postgresql:
 {{- with .params.vip }}
     - host all all {{ . }}/32 scram-sha-256
 {{- end }}
+{{- with .params.client_networks }}{{ range fields . }}
+    - host all all {{ . }} scram-sha-256
+{{- end }}{{ end }}

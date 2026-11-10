@@ -383,7 +383,7 @@ func TestClusterComponentPatroni(t *testing.T) {
 	for _, p := range tpls.Items[1].Params {
 		params = append(params, p.Name)
 	}
-	if !slices.Equal(params, []string{"shared_buffers", "max_connections", "replication_password", "rewind_password", "rest_password"}) {
+	if !slices.Equal(params, []string{"shared_buffers", "max_connections", "client_networks", "replication_password", "rewind_password", "rest_password"}) {
 		t.Fatalf("instellingen van PostgreSQL: %v", params)
 	}
 

@@ -115,6 +115,11 @@ func TestDeployMediaPlatformExisting(t *testing.T) {
 		}
 		return false
 	})
+	// Het platform in Docker mag erbij, ook op de node met het VIP.
+	if b, err := os.ReadFile(filepath.Join(g.hosts["mp1"].Root, "etc/patroni/clusterforge.yml")); err != nil ||
+		!strings.Contains(string(b), "- host all all 172.16.0.0/12 scram-sha-256\n") || !strings.Contains(string(b), "- host all all 10.0.20.69/32 scram-sha-256\n") {
+		t.Fatalf("pg_hba: %v\n%s", err, b)
+	}
 	// De gebruiker platform met zijn databases, op de primary.
 	eventually(t, "gebruiker en databases", func() bool {
 		var ok bool
