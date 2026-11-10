@@ -276,6 +276,14 @@ function JobForm({
                 />
                 {err("sync.exclude")}
               </Field>
+              <Field
+                label="Voorbereiding op de bron"
+                htmlFor="before"
+                hint="Optioneel. Een commando dat de bron eerst draait, als root, zoals een kopie van een SQLite-database met sqlite3 .backup. Faalt het, dan kopieert de sync niets."
+              >
+                <Input id="before" className="font-mono" value={sync.before ?? ""} onChange={(e) => setSync({ before: e.target.value })} />
+                {err("sync.before")}
+              </Field>
               <Field label="Bandbreedte in MB/s" htmlFor="bwlimit" hint="0 is onbeperkt.">
                 <Input id="bwlimit" type="number" min={0} className="w-32" value={sync.bwlimit_mb ?? 0} onChange={(e) => setSync({ bwlimit_mb: Number(e.target.value) })} />
                 {err("sync.bwlimit_mb")}

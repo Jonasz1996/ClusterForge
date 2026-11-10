@@ -11,13 +11,14 @@ import (
 // versie die hier staat, mag nooit uit builtin/ verdwijnen. Voeg een nieuwe
 // versie toe zodra ze uitgebracht is.
 var released = map[string][]string{
-	"keepalived-nginx": {"1.0.0", "1.1.0"},
-	"docker":           {"1.0.0"},
-	"cron":             {"1.0.0"},
-	"generic":          {"1.0.0"},
-	"kubernetes":       {"1.0.0", "1.1.0"},
-	"zabbix":           {"1.0.0"},
-	"media-platform":   {"1.0.0"},
+	"keepalived-nginx":    {"1.0.0", "1.1.0"},
+	"docker":              {"1.0.0"},
+	"cron":                {"1.0.0"},
+	"generic":             {"1.0.0"},
+	"kubernetes":          {"1.0.0", "1.1.0"},
+	"zabbix":              {"1.0.0"},
+	"media-platform":      {"1.0.0"},
+	"nginx-proxy-manager": {"1.0.0"},
 }
 
 func TestReleasedVersionsStay(t *testing.T) {

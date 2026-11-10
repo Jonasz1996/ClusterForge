@@ -44,6 +44,9 @@ type SyncInput struct {
 	Delete    bool
 	Exclude   []string
 	BwLimitMB int
+	// Before draait de bron vóór rsync (als root, met /bin/sh); faalt het,
+	// dan kopieert hij niets. Leeg: niets.
+	Before string
 }
 
 // validateSync controleert een sync. Een sync draait als root, op de node met
@@ -72,6 +75,7 @@ func validateSync(ctx context.Context, q *store.Queries, clusterID uuid.UUID, in
 		}
 	}
 	s.Exclude = ex
+	s.Before = strings.TrimSpace(s.Before)
 	switch {
 	case !protocol.ValidSyncPath(s.Source):
 		return &InvalidError{"sync.source", "een volledige map zoals /var/www/nextcloud/data/, niet / zelf en zonder tekens als * of $"}
@@ -83,6 +87,8 @@ func validateSync(ctx context.Context, q *store.Queries, clusterID uuid.UUID, in
 		return &InvalidError{"sync.exclude", "één patroon per regel, zoals *.part"}
 	case s.BwLimitMB < 0 || s.BwLimitMB > maxSyncBwLimit:
 		return &InvalidError{"sync.bwlimit_mb", "een bandbreedte van 0 (onbeperkt) tot 10000 MB/s"}
+	case len(s.Before) > protocol.MaxSyncBefore || strings.ContainsRune(s.Before, 0):
+		return &InvalidError{"sync.before", fmt.Sprintf("hoogstens %d tekens", protocol.MaxSyncBefore)}
 	case in.RunOn == protocol.CronOnAll:
 		return &InvalidError{"run_on", "een sync draait op de node met het VIP of op één vaste node; op alle nodes tegelijk schrijven ze over elkaar"}
 	}
@@ -126,6 +132,14 @@ func syncParams(in JobInput) (src, dst string, to *uuid.UUID, del bool, ex []str
 	return in.Sync.Source, in.Sync.Target, in.Sync.ToCluster, in.Sync.Delete, ex, int32(in.Sync.BwLimitMB)
 }
 
+// syncBefore is de voorbereiding van een sync, leeg zonder.
+func syncBefore(in JobInput) string {
+	if in.Sync == nil {
+		return ""
+	}
+	return in.Sync.Before
+}
+
 // isSync zegt of een job een sync is.
 func isSync(j store.ListCronJobsRow) bool { return j.Kind == protocol.CronKindSync }
 
@@ -153,7 +167,7 @@ func (w world) syncTargets(j store.ListCronJobsRow, src uuid.UUID) []store.ListC
 func (w world) syncSpec(j store.ListCronJobsRow, n store.ListCronCandidateNodesRow) *protocol.SyncSpec {
 	spec := &protocol.SyncSpec{
 		Source: j.SyncSource, Target: j.SyncTarget, Delete: j.SyncDelete, Exclude: j.SyncExclude, BwLimitKB: int(j.SyncBwlimitMb) * 1024,
-		Targets: []protocol.SyncTarget{},
+		Before: j.SyncBefore, Targets: []protocol.SyncTarget{},
 	}
 	for _, t := range w.syncTargets(j, n.ID) {
 		if t.PrimaryIp == nil {
@@ -350,6 +364,8 @@ func (s *Service) SyncPlan(ctx context.Context, id uuid.UUID) (Plan, error) {
 		switch {
 		case n.AgentProtocol < protocol.CronSyncSince:
 			add("agent", false, fmt.Sprintf("agent te oud: protocol %d, een sync vraagt %d", n.AgentProtocol, protocol.CronSyncSince))
+		case src && j.SyncBefore != "" && n.AgentProtocol < protocol.SyncBeforeSince:
+			add("agent", false, fmt.Sprintf("agent te oud: protocol %d, een sync met voorbereiding vraagt %d (Nodes, Agents bijwerken)", n.AgentProtocol, protocol.SyncBeforeSince))
 		case n.HeartbeatAt == nil || now.Sub(*n.HeartbeatAt) > status.HeartbeatLate:
 			add("agent", false, "de agent is niet verbonden")
 		default:
@@ -437,6 +453,9 @@ func (s *Service) DryRun(ctx context.Context, actor events.Actor, id, target uui
 	}
 	if src == nil {
 		return "", nil, &AgentError{"geen node heeft nu het VIP van " + j.ClusterName}
+	}
+	if j.SyncBefore != "" && src.AgentProtocol < protocol.SyncBeforeSince {
+		return src.Hostname, nil, fmt.Errorf("%w: de agent op %s heeft protocol %d; een sync met voorbereiding vraagt protocol %d", ErrAgentTooOld, src.Hostname, src.AgentProtocol, protocol.SyncBeforeSince)
 	}
 	if src.AgentProtocol < protocol.CronSyncSince {
 		return src.Hostname, nil, fmt.Errorf("%w: de agent op %s heeft protocol %d; een sync vraagt protocol %d", ErrAgentTooOld, src.Hostname, src.AgentProtocol, protocol.CronSyncSince)

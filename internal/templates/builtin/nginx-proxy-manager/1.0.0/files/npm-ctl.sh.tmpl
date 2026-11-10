@@ -1,0 +1,223 @@
+#!/bin/sh
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}).
+#
+# Nginx Proxy Manager als cluster. NPM draait alleen op de node met het VIP
+# ({{ .params.vip }}). Elke paar minuten maakt die node een consistente kopie
+# (snapshot) en zet ClusterForge die met de sync NPM-configuratie op de andere
+# nodes, in $IN. Krijgt een node het VIP, dan zet hij eerst de nieuwste
+# geldige kopie op zijn plaats en start dan NPM.
+#
+#   npm-ctl.sh up | down        NPM starten of stoppen (via cf-npm, systemd)
+#   npm-ctl.sh snapshot         de kopie voor de sync maken (alleen op de VIP-node)
+#   npm-ctl.sh check            keepalived: mag deze node het VIP hebben?
+#   npm-ctl.sh master | backup  keepalived: deze node kreeg of verloor het VIP
+#   npm-ctl.sh status           wat er op deze node staat
+#   npm-ctl.sh pull | pulled    het image van NPM halen / staat het er?
+#   npm-ctl.sh unchanged        draait NPM hier met de huidige image en compose.yaml?
+#   npm-ctl.sh restart-if-changed
+#   npm-ctl.sh overnemen <map> [letsencrypt-map]
+#                               een bestaande NPM (map met data/ en letsencrypt/) naar het cluster
+#
+# Waarom zo: SQLite mag je niet kopiëren terwijl NPM erin schrijft, en een
+# database vervangen onder een draaiende NPM geeft "attempt to write a
+# readonly database". Daarom draait NPM nooit op een node die een kopie
+# ontvangt, maakt sqlite3 .backup de kopie, en komt een ontvangen kopie er
+# alleen in vóór NPM start, zonder de -wal/-shm/-journal van de vorige.
+set -u
+# CF_NPM_BASE en CF_NPM_STATE zijn er alleen voor de tests van ClusterForge.
+BASE=${CF_NPM_BASE:-/opt/cf-npm}
+DATA=$BASE/data
+LE=$BASE/letsencrypt
+DB=$DATA/database.sqlite
+STATE=${CF_NPM_STATE:-/var/lib/cf-npm}
+OUT=$STATE/outgoing
+IN=$STATE/incoming
+# STAMP: tot wanneer de data hier zeker actueel is (seconden sinds 1970). Een
+# ontvangen kopie die niet nieuwer is, komt er niet in.
+STAMP=$STATE/stamp
+HASH=${CF_NPM_HASH:-/run/cf-npm.hash}
+VIP='{{ .params.vip }}'
+IMAGE='{{ .params.npm_image }}'
+
+compose() { docker compose -p cf-npm --project-directory "$BASE" -f "$BASE/compose.yaml" "$@"; }
+has_vip() { ip -o addr show | grep -q " $VIP/"; }
+running() { [ "$(docker inspect -f '{{"{{"}}.State.Running{{"}}"}}' cf-npm 2>/dev/null)" = true ]; }
+say() { echo "== $*"; }
+warn() { echo "WAARSCHUWING: $*" >&2; }
+fail() { echo "FOUT: $*" >&2; exit 1; }
+when() { date -d "@$1" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo "$1"; }
+field() { sed -n "s/^$1=//p" "$2" 2>/dev/null | head -n 1; }
+integrity() { [ "$(sqlite3 "$1" 'PRAGMA integrity_check;' 2>&1)" = ok ]; }
+fingerprint() {
+  { cat "$BASE/compose.yaml"; docker image inspect -f '{{"{{"}}.Id{{"}}"}}' "$IMAGE" 2>/dev/null; } | sha256sum | cut -d' ' -f1
+}
+
+# De ontvangen kopie op zijn plaats zetten, als ze nieuwer is dan wat hier
+# staat en volledig klopt. Anders start NPM met wat hier staat.
+install_incoming() {
+  if [ ! -f "$IN/MANIFEST" ]; then
+    echo "Geen ontvangen kopie; NPM start met wat hier staat."
+    return 0
+  fi
+  created=$(field created "$IN/MANIFEST")
+  from=$(field host "$IN/MANIFEST")
+  case "$created" in
+    '' | *[!0-9]*) warn "ongeldige $IN/MANIFEST; NPM start met wat hier staat"; return 0 ;;
+  esac
+  stamp=$(cat "$STAMP" 2>/dev/null || echo 0)
+  case "$stamp" in '' | *[!0-9]*) stamp=0 ;; esac
+  if [ "$created" -le "$stamp" ]; then
+    echo "De data hier ($(when "$stamp")) is niet ouder dan de kopie van $from ($(when "$created")); niets overgezet."
+    return 0
+  fi
+  if ! (cd "$IN" && sha256sum --quiet --strict -c SHA256SUMS >/dev/null 2>&1); then
+    warn "de kopie van $from ($(when "$created")) is onvolledig (sync onderbroken?); NPM start met wat hier staat"
+    return 0
+  fi
+  if ! integrity "$IN/data/database.sqlite"; then
+    warn "de database in de kopie van $from is niet in orde (integrity_check); NPM start met wat hier staat"
+    return 0
+  fi
+  say "Kopie van $from ($(when "$created")) op zijn plaats zetten"
+  # De -wal, -shm en -journal horen bij de vorige database: weg, anders past
+  # SQLite ze toe op de nieuwe of opent hij haar alleen-lezen.
+  rm -f "$DB-wal" "$DB-shm" "$DB-journal"
+  # --checksum: een database met dezelfde grootte en tijd is nog niet dezelfde.
+  rsync -a --checksum --delete --exclude=/logs/ "$IN/data/" "$DATA/" || fail "rsync naar $DATA"
+  rsync -a --checksum --delete "$IN/letsencrypt/" "$LE/" || fail "rsync naar $LE"
+  echo "$created" > "$STAMP"
+}
+
+# Een consistente kopie maken in $OUT, voor de sync. Alleen op de VIP-node
+# waar NPM draait; faalt er iets, dan houden de andere nodes hun vorige kopie.
+snapshot() {
+  has_vip || fail "deze node heeft het VIP $VIP niet; alleen de VIP-node maakt de kopie"
+  systemctl is-active --quiet cf-npm || fail "NPM draait hier niet (systemctl status cf-npm); geen kopie, de andere nodes houden hun vorige"
+  [ -f "$DB" ] || fail "$DB ontbreekt; is NPM al eens gestart?"
+  t=$(date +%s)
+  new=$STATE/outgoing.new
+  rm -rf "$new" && mkdir -p "$new/data" "$new/letsencrypt" && chmod 0700 "$new" || fail "map $new"
+  # Online backup van SQLite: klopt ook terwijl NPM schrijft.
+  sqlite3 "$DB" '.timeout 30000' ".backup '$new/data/database.sqlite'" || fail "sqlite3 .backup"
+  integrity "$new/data/database.sqlite" || fail "de kopie van de database is niet in orde (integrity_check)"
+  rsync -a --exclude='/database.sqlite*' --exclude=/logs/ "$DATA/" "$new/data/" || fail "rsync van $DATA"
+  rsync -a "$LE/" "$new/letsencrypt/" || fail "rsync van $LE"
+  printf 'created=%s\nhost=%s\nimage=%s\n' "$t" "$(hostname)" "$IMAGE" > "$new/MANIFEST"
+  (cd "$new" && find data letsencrypt MANIFEST -type f -print0 | sort -z | xargs -0 -r sha256sum) > "$new/SHA256SUMS" || fail "sha256sum"
+  rm -rf "$OUT.old"
+  if [ -d "$OUT" ]; then mv "$OUT" "$OUT.old" || fail "mv $OUT"; fi
+  mv "$new" "$OUT" || fail "mv $new"
+  rm -rf "$OUT.old"
+  echo "$t" > "$STAMP"
+  echo "Kopie van $(when "$t"): $(wc -l < "$OUT/SHA256SUMS") bestanden, database $(du -h "$OUT/data/database.sqlite" | cut -f1)."
+}
+
+# Een bestaande NPM naar het cluster halen, op de VIP-node.
+overnemen() {
+  src=${1:-}
+  le=${2:-${src%/}/letsencrypt}
+  [ -n "$src" ] || fail "gebruik: $0 overnemen <map met data/ en letsencrypt/> [letsencrypt-map]"
+  src=${src%/}
+  [ -f "$src/data/database.sqlite" ] || fail "geen $src/data/database.sqlite"
+  [ -d "$le" ] || fail "geen map $le met de certificaten"
+  has_vip || fail "doe dit op de node met het VIP ($VIP)"
+  command -v sqlite3 >/dev/null || fail "sqlite3 ontbreekt"
+  # Een oude NPM op deze machine houdt poort 80 en 443 vast: stoppen, en
+  # niet meer vanzelf laten starten.
+  old=$(docker ps --format '{{"{{"}}.ID{{"}}"}} {{"{{"}}.Image{{"}}"}} {{"{{"}}.Label "com.docker.compose.project"{{"}}"}}' |
+    awk '$2 ~ /nginx-proxy-manager/ && $3 != "cf-npm" {print $1}')
+  say "NPM van het cluster stoppen"
+  systemctl stop cf-npm
+  if [ -n "$old" ]; then
+    say "Oude NPM stoppen ($old); start niet meer vanzelf"
+    # shellcheck disable=SC2086
+    docker update --restart=no $old >/dev/null && docker stop $old >/dev/null || fail "oude NPM stoppen"
+  fi
+  say "Database kopiëren (sqlite3 .backup)"
+  rm -f "$DB" "$DB-wal" "$DB-shm" "$DB-journal"
+  sqlite3 "$src/data/database.sqlite" '.timeout 30000' ".backup '$DB'" || fail "sqlite3 .backup"
+  integrity "$DB" || fail "de overgenomen database is niet in orde (integrity_check)"
+  say "Rest van data/ en de certificaten kopiëren"
+  rsync -a --delete --exclude='/database.sqlite*' --exclude=/logs/ "$src/data/" "$DATA/" || fail "rsync data"
+  rsync -a --delete "${le%/}/" "$LE/" || fail "rsync letsencrypt"
+  # Wat hier staat, is nu nieuwer dan elke ontvangen kopie.
+  date +%s > "$STAMP"
+  say "NPM van het cluster starten"
+  systemctl start cf-npm || fail "systemctl start cf-npm (journalctl -u cf-npm)"
+  echo "Overgenomen. Binnen enkele minuten staat de eerste kopie op de andere nodes (Cronjobs, NPM-configuratie)."
+  [ -n "$old" ] && echo "Terug naar de oude NPM: systemctl stop cf-npm; docker start $(echo $old)"
+  return 0
+}
+
+status() {
+  echo "node:      $(hostname)"
+  if has_vip; then echo "VIP:       $VIP staat hier"; else echo "VIP:       $VIP staat elders"; fi
+  echo "cf-npm:    $(systemctl is-active cf-npm 2>/dev/null)"
+  echo "data:      actueel tot $(when "$(cat "$STAMP" 2>/dev/null || echo 0)")"
+  [ -f "$OUT/MANIFEST" ] && echo "verstuurd: kopie van $(when "$(field created "$OUT/MANIFEST")")"
+  [ -f "$IN/MANIFEST" ] && echo "ontvangen: kopie van $(field host "$IN/MANIFEST") van $(when "$(field created "$IN/MANIFEST")")"
+  return 0
+}
+
+case "${1:-}" in
+  up)
+    # Nooit over een draaiende NPM heen kopiëren.
+    compose rm -sf >/dev/null 2>&1
+    install_incoming
+    fingerprint > "$HASH"
+    exec docker compose -p cf-npm --project-directory "$BASE" -f "$BASE/compose.yaml" up --no-build --remove-orphans
+    ;;
+  down)
+    # NPM draaide hier tot nu: wat hier staat, is het nieuwste.
+    if running; then date +%s > "$STAMP"; fi
+    compose stop
+    rm -f "$HASH"
+    ;;
+  snapshot)
+    snapshot
+    ;;
+  check)
+    systemctl is-active --quiet docker || exit 1
+    # Draait NPM hier maar faalt het, dan geeft deze node het VIP af.
+    systemctl is-failed --quiet cf-npm && exit 1
+    # Na een herstart start de node met het VIP het zelf.
+    if has_vip && ! systemctl is-active --quiet cf-npm; then
+      systemctl start --no-block cf-npm
+    fi
+    exit 0
+    ;;
+  master)
+    systemctl start --no-block cf-npm
+    exit 0
+    ;;
+  backup)
+    systemctl stop --no-block cf-npm
+    # Een gefaalde NPM mag later weer: de node kan het VIP dan terugkrijgen.
+    systemctl reset-failed cf-npm 2>/dev/null
+    exit 0
+    ;;
+  status)
+    status
+    ;;
+  pull)
+    docker pull "$IMAGE"
+    ;;
+  pulled)
+    docker image inspect "$IMAGE" >/dev/null 2>&1
+    ;;
+  unchanged)
+    systemctl is-active --quiet cf-npm || exit 0
+    [ "$(cat "$HASH" 2>/dev/null)" = "$(fingerprint)" ]
+    ;;
+  restart-if-changed)
+    systemctl try-restart cf-npm
+    ;;
+  overnemen)
+    shift
+    overnemen "$@"
+    ;;
+  *)
+    echo "gebruik: $0 up|down|snapshot|check|master|backup|status|pull|pulled|unchanged|restart-if-changed|overnemen" >&2
+    exit 2
+    ;;
+esac

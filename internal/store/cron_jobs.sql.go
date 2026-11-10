@@ -82,7 +82,7 @@ func (q *Queries) DeleteOldCronRuns(ctx context.Context) (int64, error) {
 }
 
 const getCronJob = `-- name: GetCronJob :one
-SELECT j.id, j.cluster_id, j.name, j.kind, j.schedule, j.run_on, j.node_id, j.user_name, j.command, j.timeout_seconds, j.enabled, j.revision, j.created_by, j.created_at, j.updated_at, j.retries, j.alert, j.sync_source, j.sync_target, j.sync_to_cluster, j.sync_delete, j.sync_exclude, j.sync_bwlimit_mb, c.name AS cluster_name, c.slug AS cluster_slug, c.environment AS cluster_environment, n.hostname AS node_hostname,
+SELECT j.id, j.cluster_id, j.name, j.kind, j.schedule, j.run_on, j.node_id, j.user_name, j.command, j.timeout_seconds, j.enabled, j.revision, j.created_by, j.created_at, j.updated_at, j.retries, j.alert, j.sync_source, j.sync_target, j.sync_to_cluster, j.sync_delete, j.sync_exclude, j.sync_bwlimit_mb, j.sync_before, c.name AS cluster_name, c.slug AS cluster_slug, c.environment AS cluster_environment, n.hostname AS node_hostname,
        coalesce(tc.name, '')::text AS sync_to_cluster_name
 FROM cron_jobs j
 JOIN clusters c ON c.id = j.cluster_id
@@ -115,6 +115,7 @@ type GetCronJobRow struct {
 	SyncDelete         bool
 	SyncExclude        []string
 	SyncBwlimitMb      int32
+	SyncBefore         string
 	ClusterName        string
 	ClusterSlug        string
 	ClusterEnvironment Environment
@@ -149,6 +150,7 @@ func (q *Queries) GetCronJob(ctx context.Context, id uuid.UUID) (GetCronJobRow, 
 		&i.SyncDelete,
 		&i.SyncExclude,
 		&i.SyncBwlimitMb,
+		&i.SyncBefore,
 		&i.ClusterName,
 		&i.ClusterSlug,
 		&i.ClusterEnvironment,
@@ -224,9 +226,9 @@ func (q *Queries) GetCronRunState(ctx context.Context, id uuid.UUID) (string, er
 
 const insertCronJob = `-- name: InsertCronJob :one
 INSERT INTO cron_jobs (cluster_id, name, schedule, run_on, node_id, user_name, command, timeout_seconds, enabled, created_by, retries, alert,
-                       kind, sync_source, sync_target, sync_to_cluster, sync_delete, sync_exclude, sync_bwlimit_mb)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
-RETURNING id, cluster_id, name, kind, schedule, run_on, node_id, user_name, command, timeout_seconds, enabled, revision, created_by, created_at, updated_at, retries, alert, sync_source, sync_target, sync_to_cluster, sync_delete, sync_exclude, sync_bwlimit_mb
+                       kind, sync_source, sync_target, sync_to_cluster, sync_delete, sync_exclude, sync_bwlimit_mb, sync_before)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
+RETURNING id, cluster_id, name, kind, schedule, run_on, node_id, user_name, command, timeout_seconds, enabled, revision, created_by, created_at, updated_at, retries, alert, sync_source, sync_target, sync_to_cluster, sync_delete, sync_exclude, sync_bwlimit_mb, sync_before
 `
 
 type InsertCronJobParams struct {
@@ -249,6 +251,7 @@ type InsertCronJobParams struct {
 	SyncDelete     bool
 	SyncExclude    []string
 	SyncBwlimitMb  int32
+	SyncBefore     string
 }
 
 func (q *Queries) InsertCronJob(ctx context.Context, arg InsertCronJobParams) (CronJob, error) {
@@ -272,6 +275,7 @@ func (q *Queries) InsertCronJob(ctx context.Context, arg InsertCronJobParams) (C
 		arg.SyncDelete,
 		arg.SyncExclude,
 		arg.SyncBwlimitMb,
+		arg.SyncBefore,
 	)
 	var i CronJob
 	err := row.Scan(
@@ -298,6 +302,7 @@ func (q *Queries) InsertCronJob(ctx context.Context, arg InsertCronJobParams) (C
 		&i.SyncDelete,
 		&i.SyncExclude,
 		&i.SyncBwlimitMb,
+		&i.SyncBefore,
 	)
 	return i, err
 }
@@ -336,7 +341,7 @@ func (q *Queries) ListCronJobRunStarts(ctx context.Context, since time.Time) ([]
 }
 
 const listCronJobs = `-- name: ListCronJobs :many
-SELECT j.id, j.cluster_id, j.name, j.kind, j.schedule, j.run_on, j.node_id, j.user_name, j.command, j.timeout_seconds, j.enabled, j.revision, j.created_by, j.created_at, j.updated_at, j.retries, j.alert, j.sync_source, j.sync_target, j.sync_to_cluster, j.sync_delete, j.sync_exclude, j.sync_bwlimit_mb, c.name AS cluster_name, c.slug AS cluster_slug, c.environment AS cluster_environment, n.hostname AS node_hostname,
+SELECT j.id, j.cluster_id, j.name, j.kind, j.schedule, j.run_on, j.node_id, j.user_name, j.command, j.timeout_seconds, j.enabled, j.revision, j.created_by, j.created_at, j.updated_at, j.retries, j.alert, j.sync_source, j.sync_target, j.sync_to_cluster, j.sync_delete, j.sync_exclude, j.sync_bwlimit_mb, j.sync_before, c.name AS cluster_name, c.slug AS cluster_slug, c.environment AS cluster_environment, n.hostname AS node_hostname,
        coalesce(tc.name, '')::text AS sync_to_cluster_name
 FROM cron_jobs j
 JOIN clusters c ON c.id = j.cluster_id
@@ -369,6 +374,7 @@ type ListCronJobsRow struct {
 	SyncDelete         bool
 	SyncExclude        []string
 	SyncBwlimitMb      int32
+	SyncBefore         string
 	ClusterName        string
 	ClusterSlug        string
 	ClusterEnvironment Environment
@@ -409,6 +415,7 @@ func (q *Queries) ListCronJobs(ctx context.Context) ([]ListCronJobsRow, error) {
 			&i.SyncDelete,
 			&i.SyncExclude,
 			&i.SyncBwlimitMb,
+			&i.SyncBefore,
 			&i.ClusterName,
 			&i.ClusterSlug,
 			&i.ClusterEnvironment,
@@ -734,9 +741,9 @@ const updateCronJob = `-- name: UpdateCronJob :one
 UPDATE cron_jobs
 SET name = $2, schedule = $3, run_on = $4, node_id = $5, user_name = $6, command = $7, timeout_seconds = $8, enabled = $9,
     retries = $10, alert = $11, sync_source = $12, sync_target = $13, sync_to_cluster = $14, sync_delete = $15, sync_exclude = $16,
-    sync_bwlimit_mb = $17, revision = revision + 1, updated_at = now()
+    sync_bwlimit_mb = $17, sync_before = $18, revision = revision + 1, updated_at = now()
 WHERE id = $1
-RETURNING id, cluster_id, name, kind, schedule, run_on, node_id, user_name, command, timeout_seconds, enabled, revision, created_by, created_at, updated_at, retries, alert, sync_source, sync_target, sync_to_cluster, sync_delete, sync_exclude, sync_bwlimit_mb
+RETURNING id, cluster_id, name, kind, schedule, run_on, node_id, user_name, command, timeout_seconds, enabled, revision, created_by, created_at, updated_at, retries, alert, sync_source, sync_target, sync_to_cluster, sync_delete, sync_exclude, sync_bwlimit_mb, sync_before
 `
 
 type UpdateCronJobParams struct {
@@ -757,6 +764,7 @@ type UpdateCronJobParams struct {
 	SyncDelete     bool
 	SyncExclude    []string
 	SyncBwlimitMb  int32
+	SyncBefore     string
 }
 
 func (q *Queries) UpdateCronJob(ctx context.Context, arg UpdateCronJobParams) (CronJob, error) {
@@ -778,6 +786,7 @@ func (q *Queries) UpdateCronJob(ctx context.Context, arg UpdateCronJobParams) (C
 		arg.SyncDelete,
 		arg.SyncExclude,
 		arg.SyncBwlimitMb,
+		arg.SyncBefore,
 	)
 	var i CronJob
 	err := row.Scan(
@@ -804,6 +813,7 @@ func (q *Queries) UpdateCronJob(ctx context.Context, arg UpdateCronJobParams) (C
 		&i.SyncDelete,
 		&i.SyncExclude,
 		&i.SyncBwlimitMb,
+		&i.SyncBefore,
 	)
 	return i, err
 }

@@ -69,7 +69,7 @@ func toAPIManagedJob(j cronjobs.ManagedJob) gen.ManagedCronJob {
 	if j.Kind == protocol.CronKindSync {
 		out.Sync = nullable.NewNullableWithValue(gen.ManagedCronSync{
 			Source: j.SyncSource, Target: j.SyncTarget, ToClusterId: nullableOf(j.SyncToCluster), ToClusterName: j.SyncToClusterName,
-			Delete: j.SyncDelete, Exclude: j.SyncExclude, BwlimitMb: int(j.SyncBwlimitMb),
+			Delete: j.SyncDelete, Exclude: j.SyncExclude, BwlimitMb: int(j.SyncBwlimitMb), Before: j.SyncBefore,
 		})
 	}
 	for _, n := range j.Nodes {
@@ -126,6 +126,7 @@ func jobInput(in gen.ManagedCronJobInput) cronjobs.JobInput {
 		if sy.BwlimitMb != nil {
 			out.Sync.BwLimitMB = *sy.BwlimitMb
 		}
+		out.Sync.Before = deref(sy.Before)
 	}
 	if in.Retries != nil {
 		out.Retries = *in.Retries

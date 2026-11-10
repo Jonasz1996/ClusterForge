@@ -1,0 +1,20 @@
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}). Wijzigingen hier
+# worden bij de volgende uitrol overschreven.
+#
+# Start alleen via cf-npm (systemd), op de node met het VIP. Docker start het
+# nooit zelf (restart: "no"), ook niet na een herstart van de node.
+services:
+  npm:
+    image: {{ .params.npm_image }}
+    container_name: cf-npm
+    restart: "no"
+    ports:
+      - "80:80"
+      - "443:443"
+      - "{{ .params.admin_port }}:81"
+    environment:
+      TZ: "{{ .params.timezone }}"
+      DB_SQLITE_FILE: /data/database.sqlite
+    volumes:
+      - /opt/cf-npm/data:/data
+      - /opt/cf-npm/letsencrypt:/etc/letsencrypt
