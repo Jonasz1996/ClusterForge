@@ -193,7 +193,9 @@ func (s *Service) recipeDatabase(ctx context.Context, clusterID, compID uuid.UUI
 	}
 	// Een schema laden duurt langer dan een taak mag wachten op wie hoort
 	// dat ze klaar is.
+	s.wgMu.Lock()
 	s.wg.Add(1)
+	s.wgMu.Unlock()
 	go func() {
 		defer s.wg.Done()
 		ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), RecipeDBTimeout)
@@ -221,4 +223,8 @@ func (s *Service) recipeDatabase(ctx context.Context, clusterID, compID uuid.UUI
 
 // WaitRecipes wacht tot de database-instructies die na een uitrol lopen,
 // klaar zijn; voor tests en bij het stoppen.
-func (s *Service) WaitRecipes() { s.wg.Wait() }
+func (s *Service) WaitRecipes() {
+	s.wgMu.Lock()
+	defer s.wgMu.Unlock()
+	s.wg.Wait()
+}
