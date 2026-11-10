@@ -9,7 +9,7 @@ description: >-
   bestaand PostgreSQL-cluster (zoals Patroni). Keepalived geeft het VIP aan
   één node, en alleen daar draait het platform (app, office en media); valt
   die weg, dan start het op de node die het VIP krijgt. Het platform start
-  pas nadat de overstap van één node klaar is (/etc/clusterforge/platform-active).
+  pas nadat de overstap van één node klaar is (platform-ctl.sh overstap echt). Database erbij: uit.
 cluster_type: generic
 # Terugspringen zou het platform zonder reden stoppen en elders starten.
 failback: false
