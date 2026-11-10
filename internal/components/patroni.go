@@ -256,7 +256,11 @@ func (s *Service) verifyPatroni(ctx context.Context, st *jobs.Step, spec Spec) (
 		if p.Sync {
 			syncs = append(syncs, n.Hostname)
 		}
-		timelines[p.Timeline] = append(timelines[p.Timeline], n.Hostname)
+		// Een replica die net bijhoudt, meldt soms nog geen tijdlijn (0):
+		// die telt niet als een andere tijdlijn.
+		if p.Timeline > 0 || p.Role == "primary" {
+			timelines[p.Timeline] = append(timelines[p.Timeline], n.Hostname)
+		}
 	}
 	switch {
 	case len(primaries) == 0:
