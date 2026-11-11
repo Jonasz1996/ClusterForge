@@ -193,6 +193,9 @@ func jobPayload(j store.CronJob, cluster string) map[string]any {
 	if j.Kind == protocol.CronKindSync {
 		delete(p, "command")
 		p["source"], p["target"], p["delete"], p["exclude"], p["bwlimit_mb"] = j.SyncSource, j.SyncTarget, j.SyncDelete, j.SyncExclude, j.SyncBwlimitMb
+		if j.SyncBefore != "" {
+			p["before"] = j.SyncBefore
+		}
 		if j.SyncToCluster != nil {
 			p["to_cluster_id"] = j.SyncToCluster.String()
 		}
@@ -214,7 +217,7 @@ func (s *Service) CreateJob(ctx context.Context, actor events.Actor, createdBy *
 			ClusterID: clusterID, Name: in.Name, Schedule: in.Schedule, RunOn: in.RunOn, NodeID: in.NodeID, UserName: in.User,
 			Command: in.Command, TimeoutSeconds: int32(in.TimeoutSeconds), Enabled: in.Enabled, CreatedBy: createdBy,
 			Retries: int32(in.Retries), Alert: in.Alert, Kind: in.Kind, SyncSource: src, SyncTarget: dst, SyncToCluster: to,
-			SyncDelete: del, SyncExclude: ex, SyncBwlimitMb: bw,
+			SyncDelete: del, SyncExclude: ex, SyncBwlimitMb: bw, SyncBefore: syncBefore(in),
 		})
 		if isUnique(err) {
 			return &InvalidError{"name", "er is al een cronjob met die naam in dit cluster"}
@@ -258,6 +261,7 @@ func (s *Service) UpdateJob(ctx context.Context, actor events.Actor, id uuid.UUI
 			ID: id, Name: in.Name, Schedule: in.Schedule, RunOn: in.RunOn, NodeID: in.NodeID, UserName: in.User,
 			Command: in.Command, TimeoutSeconds: int32(in.TimeoutSeconds), Enabled: in.Enabled, Retries: int32(in.Retries), Alert: in.Alert,
 			SyncSource: src, SyncTarget: dst, SyncToCluster: to, SyncDelete: del, SyncExclude: ex, SyncBwlimitMb: bw,
+			SyncBefore: syncBefore(in),
 		})
 		if isUnique(err) {
 			return &InvalidError{"name", "er is al een cronjob met die naam in dit cluster"}
@@ -269,7 +273,7 @@ func (s *Service) UpdateJob(ctx context.Context, actor events.Actor, id uuid.UUI
 			Name: old.Name, Schedule: old.Schedule, RunOn: old.RunOn, NodeID: old.NodeID, UserName: old.UserName, Command: old.Command,
 			TimeoutSeconds: old.TimeoutSeconds, Enabled: old.Enabled, Revision: old.Revision, Retries: old.Retries, Alert: old.Alert,
 			Kind: old.Kind, SyncSource: old.SyncSource, SyncTarget: old.SyncTarget, SyncToCluster: old.SyncToCluster, SyncDelete: old.SyncDelete,
-			SyncExclude: old.SyncExclude, SyncBwlimitMb: old.SyncBwlimitMb,
+			SyncExclude: old.SyncExclude, SyncBwlimitMb: old.SyncBwlimitMb, SyncBefore: old.SyncBefore,
 		}, old.ClusterName)
 		after := jobPayload(job, old.ClusterName)
 		changes := map[string]any{}
@@ -406,6 +410,11 @@ func (w world) desired(n store.ListCronCandidateNodesRow) []protocol.ManagedCron
 			Retries: int(j.Retries), RetryDelaySeconds: w.retryDelay,
 		}
 		if isSync(j) {
+			// Een oudere agent kent de voorbereiding niet en zou een oude of
+			// halve map kopiëren: zo'n sync komt pas na de update van de agent.
+			if j.SyncBefore != "" && n.AgentProtocol < protocol.SyncBeforeSince {
+				continue
+			}
 			m.Kind, m.Sync = protocol.CronKindSync, w.syncSpec(j, n)
 		}
 		if j.RunOn == protocol.CronOnVIP {

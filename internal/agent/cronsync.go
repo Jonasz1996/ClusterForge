@@ -86,6 +86,9 @@ func (r *CronRunner) runSync(ctx context.Context, job protocol.ManagedCron, out 
 		_, _ = fmt.Fprintln(out, "Deze sync heeft geen doelen.")
 		return 1, nil, nil
 	}
+	if code, ok := syncBefore(ctx, spec, out); !ok {
+		return code, nil, nil
+	}
 	sshCmd := r.SSH
 	if sshCmd == "" {
 		sshCmd = syncSSH(r.Root)
@@ -126,6 +129,27 @@ func (r *CronRunner) runSync(ctx context.Context, job protocol.ManagedCron, out 
 	return exit, results, nil
 }
 
+// syncBefore draait de voorbereiding van een sync, als die er is. ok is
+// false als ze faalde; rsync draait dan niet, want de bronmap kan oud of half
+// zijn.
+func syncBefore(ctx context.Context, spec *protocol.SyncSpec, out io.Writer) (int, bool) {
+	if strings.TrimSpace(spec.Before) == "" {
+		return 0, true
+	}
+	_, _ = fmt.Fprintf(out, "== voorbereiding: %s ==\n", spec.Before)
+	code, err := runCronArgv(ctx, "", []string{"/bin/sh", "-c", spec.Before}, out)
+	if err != nil {
+		_, _ = fmt.Fprintf(out, "Voorbereiding niet gestart: %v. Niets gekopieerd.\n", err)
+		return max(code, 1), false
+	}
+	if code != 0 {
+		_, _ = fmt.Fprintf(out, "Voorbereiding stopte met code %d. Niets gekopieerd.\n", code)
+		return code, false
+	}
+	_, _ = fmt.Fprintln(out)
+	return 0, true
+}
+
 // lastLineWith is de laatste regel van s met needle, zonder de rest.
 func lastLineWith(s, needle string) string {
 	lines := strings.Split(strings.TrimSpace(s), "\n")
@@ -147,6 +171,8 @@ func validSync(j protocol.ManagedCron) error {
 		return fmt.Errorf("job %s: een sync draait als root", j.ID)
 	case !protocol.ValidSyncPath(s.Source) || !protocol.ValidSyncPath(s.Target):
 		return fmt.Errorf("job %s: ongeldige map", j.ID)
+	case len(s.Before) > protocol.MaxSyncBefore || strings.ContainsRune(s.Before, 0):
+		return fmt.Errorf("job %s: ongeldige voorbereiding", j.ID)
 	}
 	for _, ex := range s.Exclude {
 		if ex == "" || strings.ContainsAny(ex, "\n\r") {
@@ -477,6 +503,14 @@ func (a *Agent) cronDryRun(ctx context.Context, jobID, target string) protocol.C
 		sshCmd = syncSSH(a.Root)
 	}
 	var buf bytes.Buffer
+	// De proefrun kijkt naar wat de echte run zou kopiëren: eerst de
+	// voorbereiding (die schrijft alleen de bronmap).
+	if _, ok := syncBefore(ctx, job.Sync, &buf); !ok {
+		res.Error = "de voorbereiding faalde: " + lastLineWith(protocol.MaskSecrets(buf.String()), "")
+		res.Output = strings.Split(strings.TrimRight(protocol.MaskSecrets(buf.String()), "\n"), "\n")
+		return res
+	}
+	buf.Reset()
 	code, err := runCronArgv(ctx, "", syncArgv(job.Sync, job.Sync.Targets[i], sshCmd, "--dry-run", "--itemize-changes"), &buf)
 	text := protocol.MaskSecrets(buf.String())
 	switch {

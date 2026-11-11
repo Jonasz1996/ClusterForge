@@ -112,6 +112,9 @@ type Service struct {
 	// wg wacht op de database-instructies van recepten die na een uitrol
 	// lopen (recipeAfterAdd).
 	wg sync.WaitGroup
+	// wgMu houdt wg.Add en WaitRecipes uit elkaar: een Add terwijl Wait op
+	// nul wacht, is een race.
+	wgMu sync.Mutex
 
 	// Memory geeft per node het geheugengebruik in procent, zeven dagen
 	// lang 95% van de tijd niet overschreden. Mag nil zijn; het plan zegt

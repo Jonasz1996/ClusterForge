@@ -18,6 +18,16 @@ import (
 // CronDryRun, Receives bij CronApply en `cf-agent sync-receive`.
 const CronSyncSince = 21
 
+// SyncBeforeSince is de eerste protocolversie die SyncSpec.Before kent: een
+// commando dat de bron vóór rsync draait, zoals een consistente kopie van
+// een SQLite-database (fase 11, Nginx Proxy Manager als cluster). Een
+// oudere agent zou het negeren en een oude of halve map kopiëren; de server
+// zet zo'n sync daarom niet op een node met een oudere agent.
+const SyncBeforeSince = 27
+
+// MaxSyncBefore is de langste voorbereiding van een sync.
+const MaxSyncBefore = 1000
+
 // Soorten beheerde job.
 const (
 	CronKindCommand = "command"
@@ -50,8 +60,11 @@ type SyncSpec struct {
 	Delete  bool     `json:"delete,omitempty"`
 	Exclude []string `json:"exclude,omitempty"`
 	// BwLimitKB is de bandbreedte in KiB/s; 0 is onbeperkt.
-	BwLimitKB int          `json:"bwlimit_kb,omitempty"`
-	Targets   []SyncTarget `json:"targets"`
+	BwLimitKB int `json:"bwlimit_kb,omitempty"`
+	// Before draait de bron met /bin/sh als root vóór rsync; faalt het, dan
+	// kopieert hij niets. Leeg: niets.
+	Before  string       `json:"before,omitempty"`
+	Targets []SyncTarget `json:"targets"`
 }
 
 // SyncTarget is een doel van een sync.

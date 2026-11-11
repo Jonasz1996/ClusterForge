@@ -351,3 +351,23 @@ func (s *Service) MissingTemplates(ctx context.Context) ([]string, error) {
 	}
 	return out, nil
 }
+
+// TemplateSyncs geeft de syncs van de template van een cluster (fase 11),
+// met de parameters ingevuld; nil zonder spec of zonder syncs.
+func (s *Service) TemplateSyncs(ctx context.Context, clusterID uuid.UUID) ([]templates.SyncInfo, error) {
+	d, err := s.Desired(ctx, clusterID)
+	if errors.Is(err, ErrNoSpec) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if len(d.Template.Syncs) == 0 {
+		return nil, nil
+	}
+	c, err := d.Context()
+	if err != nil {
+		return nil, err
+	}
+	return d.Template.RenderSyncs(c)
+}

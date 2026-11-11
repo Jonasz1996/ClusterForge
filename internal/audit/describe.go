@@ -469,6 +469,8 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 		return fmt.Sprintf("Gebruiker %s van %s van cluster %s kreeg een nieuw wachtwoord", str(p, "user"), str(p, "component"), name)
 	case "cluster.database_user_dropped":
 		return fmt.Sprintf("Gebruiker %s weggehaald uit %s van cluster %s", str(p, "user"), str(p, "component"), name)
+	case "cluster.sync_not_added":
+		return fmt.Sprintf("Sync %s van de template van cluster %s niet gezet", str(p, "sync"), name) + colon(str(p, "reason"))
 	case "cluster.database_not_added":
 		return fmt.Sprintf("Database van cluster %s na het uitrollen niet toegevoegd op %s", name, list(p["nodes"])) + colon(str(p, "reason"))
 	case "cluster.database_trial_ok", "cluster.database_trial_failed":
@@ -1562,7 +1564,7 @@ func changedFields(p map[string]any) []string {
 		"name": "naam", "schedule": "schema", "run_on": "waar", "node_id": "node", "user": "gebruiker", "command": "commando",
 		"timeout_seconds": "tijdslimiet", "enabled": "aan of uit", "retries": "herhalen", "alert": "incident",
 		"source": "bronmap", "target": "doelmap", "to_cluster_id": "doelcluster", "delete": "verwijderen op het doel", "exclude": "uitzonderingen",
-		"bwlimit_mb": "bandbreedte",
+		"bwlimit_mb": "bandbreedte", "before": "voorbereiding",
 	}
 	c, _ := p["changes"].(map[string]any)
 	var out []string

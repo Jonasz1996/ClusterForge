@@ -6197,6 +6197,8 @@ export interface components {
             exclude?: string[];
             /** @description Bandbreedte in MB/s; 0 is onbeperkt */
             bwlimit_mb?: number;
+            /** @description Voorbereiding: een commando (sh, als root) dat de bron vóór rsync draait, zoals een kopie van een SQLite-database. Faalt het, dan kopieert de sync niets. Leeg: geen. */
+            before?: string;
         };
         ManagedCronSync: {
             source: string;
@@ -6208,6 +6210,8 @@ export interface components {
             delete: boolean;
             exclude: string[];
             bwlimit_mb: number;
+            /** @description Voorbereiding op de bron vóór rsync; leeg zonder */
+            before: string;
         };
         CronSyncResult: {
             /** Format: uuid */

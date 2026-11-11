@@ -18,15 +18,15 @@ WHERE j.id = $1;
 
 -- name: InsertCronJob :one
 INSERT INTO cron_jobs (cluster_id, name, schedule, run_on, node_id, user_name, command, timeout_seconds, enabled, created_by, retries, alert,
-                       kind, sync_source, sync_target, sync_to_cluster, sync_delete, sync_exclude, sync_bwlimit_mb)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+                       kind, sync_source, sync_target, sync_to_cluster, sync_delete, sync_exclude, sync_bwlimit_mb, sync_before)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
 RETURNING *;
 
 -- name: UpdateCronJob :one
 UPDATE cron_jobs
 SET name = $2, schedule = $3, run_on = $4, node_id = $5, user_name = $6, command = $7, timeout_seconds = $8, enabled = $9,
     retries = $10, alert = $11, sync_source = $12, sync_target = $13, sync_to_cluster = $14, sync_delete = $15, sync_exclude = $16,
-    sync_bwlimit_mb = $17, revision = revision + 1, updated_at = now()
+    sync_bwlimit_mb = $17, sync_before = $18, revision = revision + 1, updated_at = now()
 WHERE id = $1
 RETURNING *;
 

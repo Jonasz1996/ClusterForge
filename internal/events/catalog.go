@@ -122,6 +122,7 @@ var Known = map[string]Spec{
 	"cluster.database_unlocked":        {CategoryInventory, "Slot van oude database gehaald"},
 	"cluster.database_retired":         {CategoryInventory, "Oude database afgebouwd"},
 	"cluster.database_not_added":       {CategoryInventory, "Database na uitrol niet toegevoegd"},
+	"cluster.sync_not_added":           {CategoryInventory, "Sync van de template niet gezet"},
 	"cluster.recipe_database":          {CategoryInventory, "Database-instructies van recept uitgevoerd"},
 	"cluster.recipe_database_failed":   {CategoryInventory, "Database-instructies van recept mislukt"},
 	"recipe.saved":                     {CategoryInventory, "Recept bewaard"},

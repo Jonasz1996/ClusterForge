@@ -114,6 +114,12 @@ function CronJobInner() {
                       .filter((x) => x !== "")
                       .join("; ")}
                   </dd>
+                  {j.sync.before ? (
+                    <>
+                      <dt className="text-slate-500">Eerst op de bron</dt>
+                      <dd className="font-mono text-xs break-all">{j.sync.before}</dd>
+                    </>
+                  ) : null}
                 </>
               ) : (
                 <>

@@ -44,6 +44,9 @@ type Template struct {
 	// Database zegt dat een uitrol altijd een database krijgt, op de nodes
 	// van één rol, zoals Database erbij; nil voor een template zonder.
 	Database *DatabaseInfo `yaml:"database"`
+	// Syncs zijn bestandssyncs die ClusterForge na de uitrol als beheerde
+	// cronjob zet, van de node met het VIP naar de andere nodes.
+	Syncs []SyncInfo `yaml:"syncs"`
 
 	files *template.Template
 }
@@ -297,6 +300,9 @@ func Parse(fsys fs.FS) (*Template, error) {
 		}
 	}
 	if err := t.checkServices(); err != nil {
+		return nil, err
+	}
+	if err := t.checkSyncs(); err != nil {
 		return nil, err
 	}
 	if err := t.checkUnsafe(); err != nil {
@@ -883,6 +889,9 @@ func (t *Template) selfTest() error {
 	}
 	c.Node = nil
 	if _, err := t.RenderChecks(c); err != nil {
+		return err
+	}
+	if _, err := t.RenderSyncs(c); err != nil {
 		return err
 	}
 	_, err = t.RenderServices(params)

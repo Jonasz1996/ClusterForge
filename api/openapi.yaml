@@ -6634,9 +6634,10 @@ components:
         delete: { type: boolean, description: "Bestanden op het doel weghalen die op de bron weg zijn" }
         exclude: { type: array, items: { type: string }, description: "Patronen zoals *.part" }
         bwlimit_mb: { type: integer, description: "Bandbreedte in MB/s; 0 is onbeperkt" }
+        before: { type: string, description: "Voorbereiding: een commando (sh, als root) dat de bron vóór rsync draait, zoals een kopie van een SQLite-database. Faalt het, dan kopieert de sync niets. Leeg: geen." }
     ManagedCronSync:
       type: object
-      required: [source, target, to_cluster_id, to_cluster_name, delete, exclude, bwlimit_mb]
+      required: [source, target, to_cluster_id, to_cluster_name, delete, exclude, bwlimit_mb, before]
       properties:
         source: { type: string }
         target: { type: string }
@@ -6645,6 +6646,7 @@ components:
         delete: { type: boolean }
         exclude: { type: array, items: { type: string } }
         bwlimit_mb: { type: integer }
+        before: { type: string, description: "Voorbereiding op de bron vóór rsync; leeg zonder" }
     CronSyncResult:
       type: object
       required: [node_id, hostname, result, exit, files, bytes, deleted, error]

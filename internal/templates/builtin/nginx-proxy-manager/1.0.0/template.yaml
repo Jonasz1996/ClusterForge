@@ -1,0 +1,155 @@
+name: nginx-proxy-manager
+version: 1.0.0
+title: Nginx Proxy Manager (HA)
+description: >-
+  Nginx Proxy Manager (Docker, SQLite) op twee of meer nodes met een VIP van
+  keepalived. NPM draait alleen op de node met het VIP; de andere nodes staan
+  klaar. Elke paar minuten maakt de VIP-node een consistente kopie van de
+  database (sqlite3 .backup, nooit het open bestand), de rest van /data en de
+  certificaten, en ClusterForge zet die met een sync op de andere nodes. Krijgt
+  een andere node het VIP, dan zet die de nieuwste geldige kopie op zijn
+  plaats en start NPM. Een kopie die half aankwam of niet klopt
+  (sha256, integrity_check), komt er nooit in.
+cluster_type: generic
+
+# Terugspringen zou NPM zonder reden stoppen en elders starten.
+failback: false
+
+params:
+  - name: vip
+    type: ipv4
+    label: VIP
+    immutable: true
+    help: Het adres van NPM (poort 80 en 443, beheer op de beheerpoort). Stuur je router hierheen.
+  - name: nodes
+    type: int
+    label: Aantal nodes
+    help: NPM draait op één node tegelijk; de andere staan klaar met een kopie.
+    default: 2
+    min: 2
+    max: 5
+  - name: npm_image
+    type: string
+    label: Image van NPM
+    help: Met een dubbele punt voor de versie, zoals jc21/nginx-proxy-manager:2.12.6. Een andere waarde start NPM opnieuw op de VIP-node.
+    default: jc21/nginx-proxy-manager:latest
+    pattern: '[a-z0-9]+([._-][a-z0-9]+)*(/[a-z0-9]+([._-][a-z0-9]+)*)*:[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}'
+  - name: sync_minutes
+    type: int
+    label: Sync elke zoveel minuten
+    help: Zo oud is een kopie hoogstens als de VIP-node wegvalt; wat je daarna aanpaste, mist de andere node na een failover. Een kopie is klein, elke minuut kan gerust.
+    default: 1
+    choices: [1, 2, 5, 10, 15, 30, 60]
+  - name: admin_port
+    type: int
+    label: Beheerpoort
+    help: De webinterface van NPM, op het VIP.
+    default: 81
+    min: 1
+    max: 65535
+  - name: timezone
+    type: string
+    label: Tijdzone
+    default: Europe/Brussels
+    pattern: '[A-Za-z]+(/[A-Za-z0-9_+-]+)*'
+  - name: vrid
+    type: int
+    label: VRRP-id
+    immutable: true
+    help: Uniek per keepalived-groep in hetzelfde netwerk. Leeg laten kiest een vrij nummer.
+    optional: true
+    min: 1
+    max: 255
+  - name: auth_pass
+    type: secret
+    label: VRRP-wachtwoord
+    help: Leeg laten maakt er een. Keepalived gebruikt hoogstens 8 tekens.
+    length: 8
+  - name: cpu
+    type: int
+    label: vCPU per node
+    default: 1
+    min: 1
+    max: 16
+  - name: memory
+    type: size
+    label: Geheugen per node
+    default: 1G
+    min: 512M
+    max: 32G
+  - name: disk
+    type: size
+    label: Schijf per node
+    default: 10G
+    min: 4G
+    max: 500G
+
+roles:
+  - name: node
+    count: "{{ .params.nodes }}"
+    vm:
+      cpu: "{{ .params.cpu }}"
+      memory: "{{ .params.memory }}"
+      disk: "{{ .params.disk }}"
+    steps:
+      # sqlite3 voor de kopie, rsync en sshd voor de sync van ClusterForge.
+      - package: { names: [keepalived, sqlite3, rsync, openssh-server, curl, iputils-arping, iputils-ping] }
+      - command:
+          title: Docker
+          run: DEBIAN_FRONTEND=noninteractive apt-get install -y docker.io docker-compose && systemctl enable --now docker
+          unless: command -v docker && docker compose version && systemctl is-active --quiet docker
+      - directory: { path: /usr/local/lib/clusterforge, mode: "0755" }
+      - directory: { path: /opt/cf-npm, mode: "0755" }
+      - directory: { path: /opt/cf-npm/data, mode: "0755" }
+      - directory: { path: /opt/cf-npm/letsencrypt, mode: "0755" }
+      # outgoing: de kopie van de VIP-node; incoming: wat de sync brengt.
+      - directory: { path: /var/lib/cf-npm, mode: "0700" }
+      - directory: { path: /var/lib/cf-npm/incoming, mode: "0700" }
+      - file:
+          path: /opt/cf-npm/compose.yaml
+          template: compose.yaml.tmpl
+      - file:
+          path: /usr/local/lib/clusterforge/npm-ctl.sh
+          template: npm-ctl.sh.tmpl
+          mode: "0755"
+      - command:
+          title: image van NPM
+          run: /usr/local/lib/clusterforge/npm-ctl.sh pull
+          unless: /usr/local/lib/clusterforge/npm-ctl.sh pulled
+      # cf-npm is niet enabled: keepalived start NPM op de node met het VIP.
+      - file:
+          path: /etc/systemd/system/cf-npm.service
+          template: cf-npm.service.tmpl
+      # Veranderde image of compose.yaml terwijl NPM hier draait: opnieuw
+      # starten (alleen hier, nooit elders).
+      - command:
+          title: NPM herstarten na een wijziging
+          run: /usr/local/lib/clusterforge/npm-ctl.sh restart-if-changed
+          unless: /usr/local/lib/clusterforge/npm-ctl.sh unchanged
+      - file:
+          path: /etc/keepalived/keepalived.conf
+          template: keepalived.conf.tmpl
+          mode: "0640"
+          notify: [service:keepalived:reload]
+      - service: { name: keepalived, enabled: true, state: started }
+
+# De kopie gaat van de VIP-node naar de andere nodes. ClusterForge zet deze
+# sync na de uitrol zelf bij Cronjobs; een volgende uitrol of wijziging past
+# hem aan. Een doel met het VIP weigert altijd.
+syncs:
+  - name: NPM-configuratie
+    schedule: "{{ if eq .params.sync_minutes 60 }}0 * * * *{{ else if eq .params.sync_minutes 1 }}* * * * *{{ else }}*/{{ .params.sync_minutes }} * * * *{{ end }}"
+    before: /usr/local/lib/clusterforge/npm-ctl.sh snapshot
+    source: /var/lib/cf-npm/outgoing/
+    target: /var/lib/cf-npm/incoming/
+    delete: true
+    alert: true
+    timeout_seconds: 900
+
+checks:
+  - vip_owned: { vip: "{{ .params.vip }}", within: 120s }
+  - http: { url: "http://{{ .params.vip }}:{{ .params.admin_port }}/", expect: 200, within: 300s }
+
+services:
+  - { name: npm, kind: web, unit: cf-npm, port: 443, depends_on: [keepalived], strength: hard }
+  - { name: keepalived, kind: vip, unit: keepalived }

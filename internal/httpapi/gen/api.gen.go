@@ -9578,6 +9578,8 @@ type ManagedCronJobNode struct {
 
 // ManagedCronSync defines model for ManagedCronSync.
 type ManagedCronSync struct {
+	// Before Voorbereiding op de bron vóór rsync; leeg zonder
+	Before      string                                `json:"before"`
 	BwlimitMb   int                                   `json:"bwlimit_mb"`
 	Delete      bool                                  `json:"delete"`
 	Exclude     []string                              `json:"exclude"`
@@ -9591,6 +9593,9 @@ type ManagedCronSync struct {
 
 // ManagedCronSyncInput Een bestandssync met rsync over SSH, van de node met het VIP (of één node) naar de doelen. Command blijft leeg.
 type ManagedCronSyncInput struct {
+	// Before Voorbereiding: een commando (sh, als root) dat de bron vóór rsync draait, zoals een kopie van een SQLite-database. Faalt het, dan kopieert de sync niets. Leeg: geen.
+	Before *string `json:"before,omitempty"`
+
 	// BwlimitMb Bandbreedte in MB/s; 0 is onbeperkt
 	BwlimitMb *int `json:"bwlimit_mb,omitempty"`
 

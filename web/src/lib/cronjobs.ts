@@ -199,6 +199,7 @@ export function jobInputOf(j: ManagedCronJob): ManagedCronJobInput {
           delete: j.sync.delete,
           exclude: j.sync.exclude,
           bwlimit_mb: j.sync.bwlimit_mb,
+          before: j.sync.before,
         }
       : undefined,
   };

@@ -600,6 +600,7 @@ type CronJob struct {
 	SyncDelete     bool
 	SyncExclude    []string
 	SyncBwlimitMb  int32
+	SyncBefore     string
 }
 
 type CronNodeSet struct {

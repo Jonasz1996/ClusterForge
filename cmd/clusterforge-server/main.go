@@ -299,6 +299,26 @@ func serve() error {
 	}
 	ro := rollout.NewService(pool, ev, log, runner, bus, dep, drf)
 	ro.Changed = eval.Kick
+	// Syncs die de template vraagt (fase 11, zoals Nginx Proxy Manager):
+	// na een gelukte uitrol of wijziging als beheerde cronjob.
+	templateSyncs := func(ctx context.Context, j store.Job) {
+		if j.ClusterID == nil || j.Status != store.JobStatusSucceeded {
+			return
+		}
+		syncs, err := dep.TemplateSyncs(ctx, *j.ClusterID)
+		if err != nil {
+			log.Error("syncs van de template lezen mislukt", "cluster", *j.ClusterID, "err", err)
+			return
+		}
+		ts := make([]cronjobs.TemplateSync, len(syncs))
+		for i, sy := range syncs {
+			ts[i] = cronjobs.TemplateSync{Name: sy.Name, Schedule: sy.Schedule, Source: sy.Source, Target: sy.Target, Before: sy.Before,
+				Delete: sy.Delete, Exclude: sy.Exclude, Alert: sy.Alert, TimeoutSeconds: sy.TimeoutSeconds}
+		}
+		crons.EnsureTemplateSyncs(ctx, *j.ClusterID, ts)
+	}
+	dep.OnFinished(templateSyncs)
+	ro.OnFinished(templateSyncs)
 	// Een node die een nieuwe k3s krijgt, gaat eerst leeg.
 	ro.Kube = kub
 	for _, kind := range []string{deploy.Kind, lifecycle.KindNodeAction, proxmox.KindVMAction, failover.KindTest, failover.KindRestore,

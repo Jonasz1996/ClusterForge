@@ -162,6 +162,40 @@ func TestSync(t *testing.T) {
 		t.Fatalf("VIP: %+v", runs)
 	}
 
+	(cronSpool{filepath.Join(srcRoot, protocol.CronStateDir, "spool")}).sent(runs)
+
+	// Een voorbereiding (zoals een kopie van een SQLite-database) draait
+	// vóór rsync; wat ze schrijft, gaat mee.
+	r.SSH = FakeSyncSSH(t, dstRoot, nodeSrc, "192.0.2.2")
+	job.Sync.Before = "echo kopie > '" + src + "momentopname.txt'"
+	writeJob(t, srcRoot, job)
+	if code := r.Main(ctx, jobA); code != 0 {
+		t.Fatalf("met voorbereiding: %d %+v", code, spooled(t, srcRoot))
+	}
+	runs = spooled(t, srcRoot)
+	if b, _ := os.ReadFile(dst + "momentopname.txt"); string(b) != "kopie\n" || len(runs) != 1 || runs[0].Result != protocol.CronOK {
+		t.Errorf("voorbereiding: %q %+v", b, runs)
+	}
+	(cronSpool{filepath.Join(srcRoot, protocol.CronStateDir, "spool")}).sent(runs)
+
+	// Faalt de voorbereiding, dan kopieert rsync niets.
+	job.Sync.Before = "echo kapot > '" + src + "half.txt'; exit 3"
+	writeJob(t, srcRoot, job)
+	if code := r.Main(ctx, jobA); code == 0 {
+		t.Error("een mislukte voorbereiding gaf 0")
+	}
+	runs = spooled(t, srcRoot)
+	if len(runs) != 1 || runs[0].Result != protocol.CronFailed || len(runs[0].Sync) != 0 || !strings.Contains(runs[0].Output, "Niets gekopieerd") {
+		t.Errorf("mislukte voorbereiding: %+v", runs)
+	}
+	if _, err := os.Stat(dst + "half.txt"); !os.IsNotExist(err) {
+		t.Error("na een mislukte voorbereiding toch gekopieerd")
+	}
+	source.SyncSSH = r.SSH
+	if dry := source.cronDryRun(ctx, jobA, nodeDst); !strings.Contains(dry.Error, "voorbereiding") {
+		t.Errorf("proefrun met mislukte voorbereiding: %+v", dry)
+	}
+
 	// Zonder syncs gaat het blok weg; de eigen sleutel van Jonas blijft.
 	if res := target.cronApply(ctx, nil, nil); res.Error != "" {
 		t.Fatal(res.Error)
