@@ -42,6 +42,12 @@ IMAGE='{{ .params.npm_image }}'
 # De eerste node mag NPM leeg starten (een nieuw cluster); een andere node
 # alleen met een configuratie, anders zou een lege NPM bron van de sync worden.
 INDEX='{{ .node.index }}'
+IFACE='{{ .node.interface }}'
+# De nodes met een hogere prioriteit (lagere index). Hebben zo'n node en deze
+# allebei het VIP (ze horen elkaars VRRP niet, bv. door een firewall), dan
+# geeft deze node het af: zie better_has_vip en check.
+BETTER='{{ range .peers }}{{ if lt .index $.node.index }}{{ .address }} {{ end }}{{ end }}'
+YIELD=$STATE/yielded
 
 compose() { docker compose -p cf-npm --project-directory "$BASE" -f "$BASE/compose.yaml" "$@"; }
 has_vip() { ip -o addr show | grep -q " $VIP/"; }
@@ -51,6 +57,23 @@ warn() { echo "WAARSCHUWING: $*" >&2; }
 fail() { echo "FOUT: $*" >&2; exit 1; }
 when() { date -d "@$1" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo "$1"; }
 field() { sed -n "s/^$1=//p" "$2" 2>/dev/null | head -n 1; }
+# Het adres van een node met een hogere prioriteit die het VIP ook heeft
+# (arping in DAD-modus: wie antwoordt, heeft het adres).
+better_has_vip() {
+  [ -n "$BETTER" ] || return 1
+  macs=$(arping -D -c 2 -w 3 -I "$IFACE" "$VIP" 2>/dev/null |
+    sed -n 's/.*\[\([0-9A-Fa-f:]*\)\].*/\1/p' | tr 'A-F' 'a-f')
+  [ -n "$macs" ] || return 1
+  for p in $BETTER; do
+    ping -c 1 -W 1 "$p" >/dev/null 2>&1
+    mac=$(ip neigh show "$p" 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "lladdr") print tolower($(i + 1))}')
+    if [ -n "$mac" ] && echo "$macs" | grep -qx "$mac"; then
+      echo "$p"
+      return 0
+    fi
+  done
+  return 1
+}
 integrity() { [ "$(sqlite3 "$1" 'PRAGMA integrity_check;' 2>&1)" = ok ]; }
 # De containers van een andere NPM op deze machine (zoals de NPM die je nog
 # moet overnemen); die houdt poort 80 en 443 vast.
@@ -207,6 +230,17 @@ case "${1:-}" in
     systemctl is-active --quiet docker || exit 1
     # Draait NPM hier maar faalt het, dan geeft deze node het VIP af.
     systemctl is-failed --quiet cf-npm && exit 1
+    # Split-brain: heeft een node met een hogere prioriteit het VIP ook, dan
+    # geeft deze node het af (FAULT, NPM stopt) tot die node het niet meer
+    # heeft. Zonder VIP alleen nakijken als deze node daarvoor afgaf.
+    if has_vip || [ -f "$YIELD" ]; then
+      if peer=$(better_has_vip); then
+        [ -f "$YIELD" ] || logger -t cf-npm "split-brain: $peer heeft het VIP $VIP ook, deze node geeft het af" 2>/dev/null
+        date +%s > "$YIELD"
+        exit 1
+      fi
+      rm -f "$YIELD"
+    fi
     # Na een herstart start de node met het VIP het zelf; niet zolang hier
     # nog een andere NPM draait (die bedient het VIP tot de overname).
     if has_vip && ! systemctl is-active --quiet cf-npm && [ -z "$(foreign)" ]; then

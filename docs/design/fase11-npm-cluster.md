@@ -85,6 +85,14 @@ geen van beide overschrijft de ander. Na het herstel stopt de verliezer NPM
 (stamp = dat moment) en krijgt hij bij de volgende sync de kopie van de
 winnaar.
 
+Horen de nodes elkaars VRRP niet (bv. een firewall die IP-protocol 112
+tegenhoudt), dan blijven ze allebei master. Daarom kijkt `npm-ctl.sh check`
+op de VIP-node met `arping -D` wie het VIP nog beantwoordt: is dat een node
+met een hogere prioriteit (lagere index), dan faalt de check (FAULT, NPM
+stopt) tot die node het VIP niet meer heeft (`/var/lib/cf-npm/yielded`).
+En `cf-npm.service` heeft `BindsTo=keepalived.service`: stopt keepalived, dan
+stopt NPM ook.
+
 ### Certificaten
 
 Let's Encrypt vernieuwt alleen op de VIP-node (daar draait NPM, en daar komt

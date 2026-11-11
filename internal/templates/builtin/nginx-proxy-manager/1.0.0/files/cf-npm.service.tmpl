@@ -5,7 +5,9 @@
 [Unit]
 Description=Nginx Proxy Manager van {{ .cluster.slug }} (actief op de node met het VIP)
 Requires=docker.service
-After=docker.service network-online.target
+# Stopt keepalived, dan stopt NPM ook: anders draait het verder zonder VIP.
+BindsTo=keepalived.service
+After=docker.service keepalived.service network-online.target
 StartLimitIntervalSec=600
 StartLimitBurst=5
 

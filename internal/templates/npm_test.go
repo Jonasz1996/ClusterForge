@@ -137,7 +137,11 @@ func newNPMNode(t *testing.T, script, name string) *npmNode {
 		}
 	}
 	stubs := map[string]string{
-		"ip": `[ -f "$CF_TEST_DIR/vip" ] && echo "2: eth0    inet 192.0.2.50/24 scope global secondary eth0"; exit 0`,
+		"ip": `[ "$1" = neigh ] && { cat "$CF_TEST_DIR/neigh" 2>/dev/null; exit 0; }
+[ -f "$CF_TEST_DIR/vip" ] && echo "2: eth0    inet 192.0.2.50/24 scope global secondary eth0"; exit 0`,
+		"arping": `cat "$CF_TEST_DIR/arping" 2>/dev/null; exit 0`,
+		"ping":   `exit 0`,
+		"logger": `echo "logger $*" >> "$CF_TEST_DIR/log"`,
 		"systemctl": `case "$1 $2" in "is-active --quiet") [ "$3" = cf-npm ] && { [ -f "$CF_TEST_DIR/active" ]; exit $?; }; exit 0;;
 "is-failed --quiet") exit 1;; esac; echo "systemctl $*" >> "$CF_TEST_DIR/log"; exit 0`,
 		"docker": `echo "docker $*" >> "$CF_TEST_DIR/log"
@@ -381,5 +385,35 @@ func TestNPMSnapshotFailover(t *testing.T) {
 	write(t, map[string]string{e.state + "/allow-empty": ""})
 	if out, err := e.run("up"); err != nil {
 		t.Errorf("met allow-empty: %v %s", err, out)
+	}
+
+	// Split-brain: node 1 (192.0.2.51) heeft het VIP ook. Node 2 geeft het af
+	// tot node 1 het niet meer heeft; een ander antwoord telt niet.
+	edir := filepath.Dir(e.script)
+	write(t, map[string]string{
+		edir + "/neigh":  "192.0.2.51 dev eth0 lladdr BC:24:11:00:00:01 REACHABLE\n",
+		edir + "/arping": "Unicast reply from 192.0.2.50 [BC:24:11:00:00:01]  0.6ms\n",
+	})
+	if out, err := e.run("check"); err == nil {
+		t.Errorf("check bij split-brain: %s", out)
+	}
+	if _, err := os.Stat(e.state + "/yielded"); err != nil {
+		t.Error("geen yielded na split-brain")
+	}
+	e.vip = false
+	if _, err := e.run("check"); err == nil {
+		t.Error("check zonder VIP terwijl node 1 het nog heeft")
+	}
+	write(t, map[string]string{edir + "/arping": "Unicast reply from 192.0.2.50 [BC:24:11:00:00:99]  0.6ms\n"})
+	if out, err := e.run("check"); err != nil {
+		t.Errorf("check na split-brain: %v %s", err, out)
+	}
+	if _, err := os.Stat(e.state + "/yielded"); err == nil {
+		t.Error("yielded blijft staan")
+	}
+	// Node 1 geeft nooit af: hij heeft geen node met een hogere prioriteit.
+	write(t, map[string]string{dir + "/arping": "Unicast reply from 192.0.2.50 [BC:24:11:00:00:02]  0.6ms\n"})
+	if out, err := o.run("check"); err != nil {
+		t.Errorf("check node 1: %v %s", err, out)
 	}
 }

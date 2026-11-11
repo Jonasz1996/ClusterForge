@@ -7,11 +7,12 @@ global_defs {
     script_user root
 }
 
-# Zonder Docker, of als NPM hier faalt,
-# geeft deze node het VIP af.
+# Zonder Docker, als NPM hier faalt, of als een node met een hogere
+# prioriteit het VIP ook heeft (split-brain), geeft deze node het VIP af.
 vrrp_script chk_npm {
     script "/usr/local/lib/clusterforge/npm-ctl.sh check"
     interval 3
+    timeout 10
     fall 2
     rise 2
 }

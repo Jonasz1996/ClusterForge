@@ -93,7 +93,7 @@ roles:
       disk: "{{ .params.disk }}"
     steps:
       # sqlite3 voor de kopie, rsync en sshd voor de sync van ClusterForge.
-      - package: { names: [keepalived, sqlite3, rsync, openssh-server, curl] }
+      - package: { names: [keepalived, sqlite3, rsync, openssh-server, curl, iputils-arping, iputils-ping] }
       - command:
           title: Docker
           run: DEBIAN_FRONTEND=noninteractive apt-get install -y docker.io docker-compose && systemctl enable --now docker
