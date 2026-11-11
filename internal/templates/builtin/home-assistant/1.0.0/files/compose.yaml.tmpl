@@ -1,0 +1,21 @@
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}). Wijzigingen hier
+# worden bij de volgende uitrol overschreven.
+#
+# Start alleen via cf-homeassistant (systemd), op de node met het VIP. Docker
+# start het nooit zelf (restart: "no"), ook niet na een herstart van de node.
+# Netwerk van de host: zo werken ontdekking (mDNS, SSDP) en het VIP gewoon.
+services:
+  homeassistant:
+    image: {{ .params.ha_image }}
+    container_name: cf-homeassistant
+    restart: "no"
+    network_mode: host
+    environment:
+      TZ: "{{ .params.timezone }}"
+    volumes:
+      - /opt/cf-homeassistant/config:/config
+      # Per node, niet in de sync: de recorder (MariaDB Galera via het VIP)
+      # en http (poort, proxy's).
+      - /etc/cf-homeassistant/recorder.yaml:/config/cf-recorder.yaml:ro
+      - /etc/cf-homeassistant/http.yaml:/config/cf-http.yaml:ro
+      - /etc/localtime:/etc/localtime:ro

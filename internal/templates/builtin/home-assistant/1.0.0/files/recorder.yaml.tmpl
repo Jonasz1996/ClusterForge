@@ -1,0 +1,6 @@
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}). In Home Assistant
+# als /config/cf-recorder.yaml (recorder: !include cf-recorder.yaml).
+# De geschiedenis staat in MariaDB Galera op alle nodes; Home Assistant
+# verbindt via het VIP, dus altijd met de node waar het zelf draait.
+db_url: mysql://homeassistant:{{ .params.db_password }}@{{ .params.vip }}:3306/homeassistant?charset=utf8mb4
+purge_keep_days: {{ .params.keep_days }}

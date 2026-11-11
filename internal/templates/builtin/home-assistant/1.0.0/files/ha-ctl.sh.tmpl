@@ -1,0 +1,369 @@
+#!/bin/sh
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}).
+#
+# Home Assistant als cluster. Home Assistant draait alleen op de node met het
+# VIP ({{ .params.vip }}); de geschiedenis (recorder) staat in MariaDB Galera
+# op alle nodes, dus die is er op elke node meteen. De rest van /config
+# (.storage, YAML, de SQLite-bestanden van integraties zoals zigbee.db) kopieert
+# de VIP-node elke paar minuten (snapshot), en ClusterForge zet die kopie met
+# de sync Home Assistant-configuratie op de andere nodes, in $IN. Krijgt een
+# node het VIP, dan zet hij eerst de nieuwste geldige kopie op zijn plaats en
+# start dan Home Assistant.
+#
+#   ha-ctl.sh up | down        Home Assistant starten of stoppen (via cf-homeassistant)
+#   ha-ctl.sh snapshot         de kopie voor de sync maken (alleen op de VIP-node)
+#   ha-ctl.sh check            keepalived: mag deze node het VIP hebben?
+#   ha-ctl.sh master | backup  keepalived: deze node kreeg of verloor het VIP
+#   ha-ctl.sh status           wat er op deze node staat
+#   ha-ctl.sh pull | pulled    het image van Home Assistant halen / staat het er?
+#   ha-ctl.sh unchanged        draait Home Assistant hier met de huidige image en compose.yaml?
+#   ha-ctl.sh restart-if-changed
+#   ha-ctl.sh overnemen [<map>]
+#                              een bestaande /config naar het cluster; zonder map de
+#                              Home Assistant (Docker) die hier draait
+set -u
+# Geen globbing: de --exclude-patronen in EXCLUDES blijven zoals ze zijn.
+set -f
+# CF_HA_BASE, CF_HA_STATE, CF_HA_ETC en CF_HA_HASH zijn er alleen voor de tests
+# van ClusterForge.
+BASE=${CF_HA_BASE:-/opt/cf-homeassistant}
+CONF=$BASE/config
+ETC=${CF_HA_ETC:-/etc/cf-homeassistant}
+STATE=${CF_HA_STATE:-/var/lib/cf-homeassistant}
+OUT=$STATE/outgoing
+IN=$STATE/incoming
+# STAMP: tot wanneer /config hier zeker actueel is (seconden sinds 1970). Een
+# ontvangen kopie die niet nieuwer is, komt er niet in.
+STAMP=$STATE/stamp
+HASH=${CF_HA_HASH:-/run/cf-homeassistant.hash}
+VIP='{{ .params.vip }}'
+IMAGE='{{ .params.ha_image }}'
+# De eerste node mag Home Assistant leeg starten (een nieuw cluster); een
+# andere node alleen met een configuratie, anders wordt een lege Home
+# Assistant de bron van de sync.
+INDEX='{{ .node.index }}'
+IFACE='{{ .node.interface }}'
+# De nodes met een hogere prioriteit (lagere index); zie better_has_vip.
+BETTER='{{ range .peers }}{{ if lt .index $.node.index }}{{ .address }} {{ end }}{{ end }}'
+YIELD=$STATE/yielded
+GALERA=${CF_HA_GALERA:-/etc/mysql/mariadb.conf.d/99-clusterforge-galera.cnf}
+
+# Wat nooit mee gaat met de kopie en nooit overschreven wordt: logs, de
+# SQLite van de recorder (die staat in MariaDB), de back-ups van Home
+# Assistant zelf (groot; elke node houdt de zijne), caches, en de bestanden
+# die ClusterForge per node in /config legt.
+EXCLUDES='--exclude=/home-assistant.log* --exclude=/home-assistant_v2.db* --exclude=/backups/ --exclude=/tts/ --exclude=/deps/ --exclude=/.cache/ --exclude=__pycache__/ --exclude=/cf-recorder.yaml --exclude=/cf-http.yaml'
+
+compose() { docker compose -p cf-homeassistant --project-directory "$BASE" -f "$BASE/compose.yaml" "$@"; }
+has_vip() { ip -o addr show | grep -q " $VIP/"; }
+running() { [ "$(docker inspect -f '{{"{{"}}.State.Running{{"}}"}}' cf-homeassistant 2>/dev/null)" = true ]; }
+say() { echo "== $*"; }
+warn() { echo "WAARSCHUWING: $*" >&2; }
+fail() { echo "FOUT: $*" >&2; exit 1; }
+when() { date -d "@$1" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo "$1"; }
+field() { sed -n "s/^$1=//p" "$2" 2>/dev/null | head -n 1; }
+integrity() { [ "$(sqlite3 "$1" 'PRAGMA integrity_check;' 2>&1)" = ok ]; }
+# De SQLite-bestanden in een map (zoals zigbee.db van ZHA), relatief, zonder
+# de recorder; één per regel.
+sqlite_files() {
+  (cd "$1" && find . -path ./backups -prune -o -path ./deps -prune -o -type f -name '*.db' ! -name 'home-assistant_v2.db' -print) 2>/dev/null | sed 's|^\./||' | sort
+}
+# Het adres van een node met een hogere prioriteit die het VIP ook heeft
+# (arping in DAD-modus: wie antwoordt, heeft het adres).
+better_has_vip() {
+  [ -n "$BETTER" ] || return 1
+  macs=$(arping -D -c 2 -w 3 -I "$IFACE" "$VIP" 2>/dev/null |
+    sed -n 's/.*\[\([0-9A-Fa-f:]*\)\].*/\1/p' | tr 'A-F' 'a-f')
+  [ -n "$macs" ] || return 1
+  for p in $BETTER; do
+    ping -c 1 -W 1 "$p" >/dev/null 2>&1
+    mac=$(ip neigh show "$p" 2>/dev/null | awk '{for (i = 1; i < NF; i++) if ($i == "lladdr") print tolower($(i + 1))}')
+    if [ -n "$mac" ] && echo "$macs" | grep -qx "$mac"; then
+      echo "$p"
+      return 0
+    fi
+  done
+  return 1
+}
+# De containers van een andere Home Assistant op deze machine (zoals die je
+# nog moet overnemen); die houdt poort 8123 vast.
+foreign() {
+  docker ps --format '{{"{{"}}.ID{{"}}"}} {{"{{"}}.Image{{"}}"}} {{"{{"}}.Label "com.docker.compose.project"{{"}}"}}' 2>/dev/null |
+    awk '$2 ~ /home-assistant/ && $3 != "cf-homeassistant" {print $1}'
+}
+fingerprint() {
+  { cat "$BASE/compose.yaml" "$ETC/recorder.yaml" "$ETC/http.yaml" 2>/dev/null; docker image inspect -f '{{"{{"}}.Id{{"}}"}}' "$IMAGE" 2>/dev/null; } | sha256sum | cut -d' ' -f1
+}
+# Kan Home Assistant bij zijn database (via het VIP, zoals de recorder)?
+db_ready() {
+  [ -n "${CF_HA_DB_READY:-}" ] && { [ -f "$CF_HA_DB_READY" ]; return $?; }
+  command -v mariadb >/dev/null 2>&1 || return 1
+  mariadb --defaults-extra-file="$ETC/db.cnf" --connect-timeout=5 -N -B -e 'SELECT 1' >/dev/null 2>&1
+}
+
+# configuration.yaml: de recorder en http komen uit de bestanden die
+# ClusterForge per node in /config zet. Een nieuwe configuratie krijgt de
+# standaard van Home Assistant; een bestaande krijgt alleen de ontbrekende
+# regels.
+ensure_config() {
+  y=$CONF/configuration.yaml
+  if [ ! -f "$y" ]; then
+    say "Nieuwe configuration.yaml"
+    cat > "$y" <<'EOF'
+# Loads default set of integrations. Do not remove.
+default_config:
+
+# Load frontend themes from the themes folder
+frontend:
+  themes: !include_dir_merge_named themes
+
+automation: !include automations.yaml
+script: !include scripts.yaml
+scene: !include scenes.yaml
+
+# ClusterForge: de geschiedenis staat in MariaDB Galera op alle nodes, en http
+# (poort, proxy's) komt uit de template. Laat deze twee regels staan.
+recorder: !include cf-recorder.yaml
+http: !include cf-http.yaml
+EOF
+    [ -f "$CONF/automations.yaml" ] || echo '[]' > "$CONF/automations.yaml"
+    [ -f "$CONF/scripts.yaml" ] || : > "$CONF/scripts.yaml"
+    [ -f "$CONF/scenes.yaml" ] || echo '[]' > "$CONF/scenes.yaml"
+    mkdir -p "$CONF/themes"
+    return 0
+  fi
+  for key in recorder http; do
+    if grep -q "^$key:.*cf-$key\.yaml" "$y"; then
+      continue
+    fi
+    if grep -q "^$key:" "$y"; then
+      case $key in
+        recorder) warn "configuration.yaml heeft een eigen recorder:; de geschiedenis gaat dan niet naar MariaDB Galera en is na een failover weg. Vervang die door: recorder: !include cf-recorder.yaml" ;;
+        http) warn "configuration.yaml heeft een eigen http:; de poort en proxy's van ClusterForge gelden niet. Vervang die door: http: !include cf-http.yaml" ;;
+      esac
+      continue
+    fi
+    say "configuration.yaml: $key: !include cf-$key.yaml erbij"
+    printf '\n# ClusterForge: laat deze regel staan.\n%s: !include cf-%s.yaml\n' "$key" "$key" >> "$y"
+  done
+}
+
+# De ontvangen kopie op zijn plaats zetten, als ze nieuwer is dan wat hier
+# staat en volledig klopt. Anders start Home Assistant met wat hier staat.
+install_incoming() {
+  if [ ! -f "$IN/MANIFEST" ]; then
+    echo "Geen ontvangen kopie; Home Assistant start met wat hier staat."
+    return 0
+  fi
+  created=$(field created "$IN/MANIFEST")
+  from=$(field host "$IN/MANIFEST")
+  case "$created" in
+    '' | *[!0-9]*) warn "ongeldige $IN/MANIFEST; Home Assistant start met wat hier staat"; return 0 ;;
+  esac
+  stamp=$(cat "$STAMP" 2>/dev/null || echo 0)
+  case "$stamp" in '' | *[!0-9]*) stamp=0 ;; esac
+  if [ "$created" -le "$stamp" ]; then
+    echo "/config hier ($(when "$stamp")) is niet ouder dan de kopie van $from ($(when "$created")); niets overgezet."
+    return 0
+  fi
+  if ! (cd "$IN" && sha256sum --quiet --strict -c SHA256SUMS >/dev/null 2>&1); then
+    warn "de kopie van $from ($(when "$created")) is onvolledig (sync onderbroken?); Home Assistant start met wat hier staat"
+    return 0
+  fi
+  for f in $(sqlite_files "$IN/config"); do
+    if ! integrity "$IN/config/$f"; then
+      warn "$f in de kopie van $from is niet in orde (integrity_check); Home Assistant start met wat hier staat"
+      return 0
+    fi
+  done
+  say "Kopie van $from ($(when "$created")) op zijn plaats zetten"
+  # De -wal, -shm en -journal horen bij de vorige databases: weg, anders past
+  # SQLite ze toe op de nieuwe.
+  for f in $(sqlite_files "$CONF"); do
+    rm -f "$CONF/$f-wal" "$CONF/$f-shm" "$CONF/$f-journal"
+  done
+  # shellcheck disable=SC2086
+  rsync -a --checksum --delete $EXCLUDES "$IN/config/" "$CONF/" || fail "rsync naar $CONF"
+  echo "$created" > "$STAMP"
+}
+
+# Een consistente kopie van /config maken in $OUT, voor de sync. Alleen op de
+# VIP-node waar Home Assistant draait; faalt er iets, dan houden de andere
+# nodes hun vorige kopie.
+snapshot() {
+  has_vip || fail "deze node heeft het VIP $VIP niet; alleen de VIP-node maakt de kopie"
+  systemctl is-active --quiet cf-homeassistant || fail "Home Assistant draait hier niet (systemctl status cf-homeassistant); geen kopie, de andere nodes houden hun vorige"
+  [ -d "$CONF/.storage" ] || fail "$CONF/.storage ontbreekt; is Home Assistant al eens gestart?"
+  t=$(date +%s)
+  new=$STATE/outgoing.new
+  rm -rf "$new" && mkdir -p "$new/config" && chmod 0700 "$new" || fail "map $new"
+  # Home Assistant schrijft .storage en zijn YAML atomair (nieuw bestand,
+  # dan hernoemen), dus rsync leest altijd een heel bestand. SQLite niet:
+  # die kopieert sqlite3 .backup, ook terwijl Home Assistant schrijft.
+  # shellcheck disable=SC2086
+  rsync -a $EXCLUDES --exclude='*.db' --exclude='*.db-wal' --exclude='*.db-shm' --exclude='*.db-journal' "$CONF/" "$new/config/" || fail "rsync van $CONF"
+  for f in $(sqlite_files "$CONF"); do
+    mkdir -p "$(dirname "$new/config/$f")"
+    sqlite3 "$CONF/$f" '.timeout 30000' ".backup '$new/config/$f'" || fail "sqlite3 .backup van $f"
+    integrity "$new/config/$f" || fail "de kopie van $f is niet in orde (integrity_check)"
+  done
+  printf 'created=%s\nhost=%s\nimage=%s\n' "$t" "$(hostname)" "$IMAGE" > "$new/MANIFEST"
+  (cd "$new" && find config MANIFEST -type f -print0 | sort -z | xargs -0 -r sha256sum) > "$new/SHA256SUMS" || fail "sha256sum"
+  rm -rf "$OUT.old"
+  if [ -d "$OUT" ]; then mv "$OUT" "$OUT.old" || fail "mv $OUT"; fi
+  mv "$new" "$OUT" || fail "mv $new"
+  rm -rf "$OUT.old"
+  echo "$t" > "$STAMP"
+  echo "Kopie van $(when "$t"): $(wc -l < "$OUT/SHA256SUMS") bestanden, $(du -sh "$OUT/config" | cut -f1)."
+}
+
+# Een bestaande Home Assistant naar het cluster halen, op de VIP-node.
+overnemen() {
+  if [ -n "${1:-}" ]; then
+    src=${1%/}
+  else
+    c=$(foreign | head -n 1)
+    [ -n "$c" ] || fail "hier draait geen andere Home Assistant; geef de map: $0 overnemen <map met configuration.yaml en .storage>"
+    src=$(docker inspect -f '{{"{{"}}range .Mounts{{"}}"}}{{"{{"}}.Destination{{"}}"}} {{"{{"}}.Source{{"}}"}}{{"{{"}}"\n"{{"}}"}}{{"{{"}}end{{"}}"}}' "$c" | awk '$1 == "/config" {print $2}')
+    echo "Andere Home Assistant $c: /config in ${src:-(geen)}"
+    [ -n "$src" ] || fail "de container $c heeft geen map op /config"
+  fi
+  [ -f "$src/configuration.yaml" ] || fail "geen $src/configuration.yaml"
+  [ -d "$src/.storage" ] || fail "geen $src/.storage"
+  has_vip || fail "doe dit op de node met het VIP ($VIP)"
+  command -v sqlite3 >/dev/null || fail "sqlite3 ontbreekt"
+  old=$(foreign)
+  say "Home Assistant van het cluster stoppen"
+  systemctl stop cf-homeassistant
+  if [ -n "$old" ]; then
+    say "Oude Home Assistant stoppen ($old); start niet meer vanzelf"
+    # shellcheck disable=SC2086
+    docker update --restart=no $old >/dev/null && docker stop $old >/dev/null || fail "oude Home Assistant stoppen"
+  fi
+  say "/config kopiëren"
+  # shellcheck disable=SC2086
+  rsync -a --delete $EXCLUDES --exclude='*.db' --exclude='*.db-wal' --exclude='*.db-shm' --exclude='*.db-journal' "$src/" "$CONF/" || fail "rsync van $src"
+  for f in $(sqlite_files "$src"); do
+    mkdir -p "$(dirname "$CONF/$f")"
+    rm -f "$CONF/$f" "$CONF/$f-wal" "$CONF/$f-shm" "$CONF/$f-journal"
+    sqlite3 "$src/$f" '.timeout 30000' ".backup '$CONF/$f'" || fail "sqlite3 .backup van $f"
+    integrity "$CONF/$f" || fail "$f is niet in orde (integrity_check)"
+  done
+  if [ -f "$src/home-assistant_v2.db" ]; then
+    echo "De oude geschiedenis (home-assistant_v2.db) gaat niet mee; Home Assistant begint een nieuwe in MariaDB Galera. Het bestand blijft staan in $src."
+  fi
+  ensure_config
+  # Wat hier staat, is nu nieuwer dan elke ontvangen kopie.
+  date +%s > "$STAMP"
+  say "Home Assistant van het cluster starten"
+  systemctl start cf-homeassistant || fail "systemctl start cf-homeassistant (journalctl -u cf-homeassistant)"
+  echo "Overgenomen. Binnen enkele minuten staat de eerste kopie op de andere nodes (Cronjobs, Home Assistant-configuratie)."
+  [ -n "$old" ] && echo "Terug naar de oude Home Assistant: systemctl stop cf-homeassistant; docker start $(echo $old)"
+  return 0
+}
+
+status() {
+  echo "node:      $(hostname)"
+  if has_vip; then echo "VIP:       $VIP staat hier"; else echo "VIP:       $VIP staat elders"; fi
+  echo "cf-homeassistant: $(systemctl is-active cf-homeassistant 2>/dev/null)"
+  if db_ready; then echo "database:  bereikbaar via $VIP"; else echo "database:  niet bereikbaar via $VIP"; fi
+  echo "config:    actueel tot $(when "$(cat "$STAMP" 2>/dev/null || echo 0)")"
+  [ -f "$OUT/MANIFEST" ] && echo "verstuurd: kopie van $(when "$(field created "$OUT/MANIFEST")")"
+  [ -f "$IN/MANIFEST" ] && echo "ontvangen: kopie van $(field host "$IN/MANIFEST") van $(when "$(field created "$IN/MANIFEST")")"
+  return 0
+}
+
+case "${1:-}" in
+  up)
+    # Een andere Home Assistant hier (nog niet overgenomen) houdt poort 8123
+    # vast en heeft het VIP: niet starten.
+    if [ -n "$(foreign)" ]; then
+      fail "hier draait nog een andere Home Assistant ($(foreign | tr '\n' ' ')); neem hem over met: $0 overnemen"
+    fi
+    # Nooit over een draaiende Home Assistant heen kopiëren.
+    compose rm -sf >/dev/null 2>&1
+    install_incoming
+    if [ ! -d "$CONF/.storage" ] && [ "$INDEX" != 1 ] && [ ! -f "$STATE/allow-empty" ]; then
+      fail "hier staat nog geen configuratie (geen kopie ontvangen); Home Assistant start niet leeg op deze node. Wil je toch een lege Home Assistant hier: touch $STATE/allow-empty"
+    fi
+    ensure_config
+    # Zonder database zou de recorder uitvallen en Home Assistant zonder
+    # geschiedenis draaien. MariaDB Galera komt na de uitrol; tot dan wachten.
+    waited=""
+    while ! db_ready; do
+      if [ -e "$GALERA" ]; then msg="wachten tot de database homeassistant via $VIP bereikbaar is"; else msg="wachten op MariaDB Galera; die zet ClusterForge er na de uitrol op"; fi
+      [ "$msg" = "$waited" ] || { echo "$msg"; waited=$msg; }
+      [ -n "${CF_HA_NO_WAIT:-}" ] && exit 3
+      sleep 10
+    done
+    fingerprint > "$HASH"
+    exec docker compose -p cf-homeassistant --project-directory "$BASE" -f "$BASE/compose.yaml" up --no-build --remove-orphans
+    ;;
+  down)
+    # Home Assistant draaide hier tot nu: wat hier staat, is het nieuwste.
+    if running; then date +%s > "$STAMP"; fi
+    compose stop
+    rm -f "$HASH"
+    ;;
+  snapshot)
+    snapshot
+    ;;
+  check)
+    systemctl is-active --quiet docker || exit 1
+    systemctl is-failed --quiet cf-homeassistant && exit 1
+    # Zodra Galera er is: alleen een node waarvan MariaDB mag schrijven
+    # (Synced in een Primary component).
+    if [ -e "$GALERA" ] && [ -z "${CF_HA_GALERA_OK:-}" ]; then
+      /usr/local/bin/cf-agent check db mariadb >/dev/null 2>&1 || exit 1
+    fi
+    # Split-brain: heeft een node met een hogere prioriteit het VIP ook, dan
+    # geeft deze node het af tot die node het niet meer heeft.
+    if has_vip || [ -f "$YIELD" ]; then
+      if peer=$(better_has_vip); then
+        [ -f "$YIELD" ] || logger -t cf-homeassistant "split-brain: $peer heeft het VIP $VIP ook, deze node geeft het af" 2>/dev/null
+        date +%s > "$YIELD"
+        exit 1
+      fi
+      rm -f "$YIELD"
+    fi
+    # Na een herstart start de node met het VIP het zelf; niet zolang hier
+    # nog een andere Home Assistant draait.
+    if has_vip && ! systemctl is-active --quiet cf-homeassistant && [ -z "$(foreign)" ]; then
+      systemctl start --no-block cf-homeassistant
+    fi
+    exit 0
+    ;;
+  master)
+    [ -z "$(foreign)" ] && systemctl start --no-block cf-homeassistant
+    exit 0
+    ;;
+  backup)
+    systemctl stop --no-block cf-homeassistant
+    systemctl reset-failed cf-homeassistant 2>/dev/null
+    exit 0
+    ;;
+  status)
+    status
+    ;;
+  pull)
+    docker pull "$IMAGE"
+    ;;
+  pulled)
+    docker image inspect "$IMAGE" >/dev/null 2>&1
+    ;;
+  unchanged)
+    systemctl is-active --quiet cf-homeassistant || exit 0
+    [ "$(cat "$HASH" 2>/dev/null)" = "$(fingerprint)" ]
+    ;;
+  restart-if-changed)
+    systemctl try-restart cf-homeassistant
+    ;;
+  overnemen)
+    shift
+    overnemen "$@"
+    ;;
+  *)
+    echo "gebruik: $0 up|down|snapshot|check|master|backup|status|pull|pulled|unchanged|restart-if-changed|overnemen" >&2
+    exit 2
+    ;;
+esac
