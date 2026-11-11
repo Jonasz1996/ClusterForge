@@ -55,7 +55,7 @@ func npmFiles(t *testing.T, tpl *Template, c Context) (map[string]string, []stri
 
 func TestRenderNPM(t *testing.T) {
 	tpl, c := npmContext(t, nil)
-	if c.Params["sync_minutes"] != 5 || c.Params["npm_image"] != "jc21/nginx-proxy-manager:latest" || c.Params["nodes"] != 2 {
+	if c.Params["sync_minutes"] != 1 || c.Params["npm_image"] != "jc21/nginx-proxy-manager:latest" || c.Params["nodes"] != 2 {
 		t.Fatalf("standaarden: %+v", c.Params)
 	}
 	files, services := npmFiles(t, tpl, c)
@@ -96,7 +96,7 @@ func TestRenderNPM(t *testing.T) {
 		t.Fatalf("syncs: %+v", syncs)
 	}
 	s := syncs[0]
-	if s.Name != "NPM-configuratie" || s.Schedule != "*/5 * * * *" || s.Source != "/var/lib/cf-npm/outgoing/" ||
+	if s.Name != "NPM-configuratie" || s.Schedule != "* * * * *" || s.Source != "/var/lib/cf-npm/outgoing/" ||
 		s.Target != "/var/lib/cf-npm/incoming/" || s.Before != "/usr/local/lib/clusterforge/npm-ctl.sh snapshot" || !s.Delete || !s.Alert {
 		t.Errorf("sync: %+v", s)
 	}
@@ -496,6 +496,14 @@ func TestNPMHealth(t *testing.T) {
 	check(true, "zonder VIP")
 	if !logged("systemctl stop --no-block cf-npm") {
 		t.Error("NPM blijft draaien zonder VIP")
+	}
+
+	// Een container die buiten systemd draait (docker start) op een node
+	// zonder VIP: ook stoppen.
+	n.vip, n.active = false, false
+	check(true, "container buiten systemd")
+	if !logged("compose.yaml stop") {
+		t.Error("container buiten systemd blijft draaien zonder VIP")
 	}
 
 	// Een oude NPM-container naast een node met configuratie: VIP afgeven.

@@ -270,6 +270,10 @@ case "${1:-}" in
       if systemctl is-active --quiet cf-npm; then
         log "NPM draait hier zonder het VIP; stoppen"
         systemctl stop --no-block cf-npm
+      elif running; then
+        # Buiten systemd gestart (docker start, compose up -d): ook stoppen.
+        log "de container cf-npm draait hier zonder het VIP en buiten cf-npm.service; stoppen"
+        compose stop >/dev/null 2>&1
       fi
       rm -f "$UNHEALTHY"
       exit 0

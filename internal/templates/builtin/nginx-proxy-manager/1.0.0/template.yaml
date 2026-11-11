@@ -37,8 +37,8 @@ params:
   - name: sync_minutes
     type: int
     label: Sync elke zoveel minuten
-    help: Zo oud is een kopie hoogstens als de VIP-node wegvalt. De configuratie verandert alleen als je iets aanpast.
-    default: 5
+    help: Zo oud is een kopie hoogstens als de VIP-node wegvalt; wat je daarna aanpaste, mist de andere node na een failover. Een kopie is klein, elke minuut kan gerust.
+    default: 1
     choices: [1, 2, 5, 10, 15, 30, 60]
   - name: admin_port
     type: int
@@ -138,7 +138,7 @@ roles:
 # hem aan. Een doel met het VIP weigert altijd.
 syncs:
   - name: NPM-configuratie
-    schedule: "{{ if eq .params.sync_minutes 60 }}0 * * * *{{ else }}*/{{ .params.sync_minutes }} * * * *{{ end }}"
+    schedule: "{{ if eq .params.sync_minutes 60 }}0 * * * *{{ else if eq .params.sync_minutes 1 }}* * * * *{{ else }}*/{{ .params.sync_minutes }} * * * *{{ end }}"
     before: /usr/local/lib/clusterforge/npm-ctl.sh snapshot
     source: /var/lib/cf-npm/outgoing/
     target: /var/lib/cf-npm/incoming/
