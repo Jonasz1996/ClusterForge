@@ -39,6 +39,9 @@ STAMP=$STATE/stamp
 HASH=${CF_NPM_HASH:-/run/cf-npm.hash}
 VIP='{{ .params.vip }}'
 IMAGE='{{ .params.npm_image }}'
+# De eerste node mag NPM leeg starten (een nieuw cluster); een andere node
+# alleen met een configuratie, anders zou een lege NPM bron van de sync worden.
+INDEX='{{ .node.index }}'
 
 compose() { docker compose -p cf-npm --project-directory "$BASE" -f "$BASE/compose.yaml" "$@"; }
 has_vip() { ip -o addr show | grep -q " $VIP/"; }
@@ -185,6 +188,9 @@ case "${1:-}" in
     # Nooit over een draaiende NPM heen kopiëren.
     compose rm -sf >/dev/null 2>&1
     install_incoming
+    if [ ! -f "$DB" ] && [ "$INDEX" != 1 ] && [ ! -f "$STATE/allow-empty" ]; then
+      fail "hier staat nog geen configuratie (geen kopie ontvangen); NPM start niet leeg op deze node. Wil je toch een lege NPM hier: touch $STATE/allow-empty"
+    fi
     fingerprint > "$HASH"
     exec docker compose -p cf-npm --project-directory "$BASE" -f "$BASE/compose.yaml" up --no-build --remove-orphans
     ;;

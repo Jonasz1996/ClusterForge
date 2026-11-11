@@ -369,4 +369,17 @@ func TestNPMSnapshotFailover(t *testing.T) {
 	if log, _ := os.ReadFile(dir + "/log"); !strings.Contains(string(log), "docker update --restart=no abc123") || !strings.Contains(string(log), "systemctl start cf-npm") {
 		t.Errorf("overnemen: %s", log)
 	}
+
+	// Een tweede node zonder configuratie start NPM niet leeg.
+	c.Node = &c.Nodes[1]
+	files2, _ := npmFiles(t, tpl, c)
+	e := newNPMNode(t, files2["/usr/local/lib/clusterforge/npm-ctl.sh"], "npm-02")
+	e.vip = true
+	if out, err := e.run("up"); err == nil || !strings.Contains(out, "niet leeg") {
+		t.Errorf("lege tweede node: %v %s", err, out)
+	}
+	write(t, map[string]string{e.state + "/allow-empty": ""})
+	if out, err := e.run("up"); err != nil {
+		t.Errorf("met allow-empty: %v %s", err, out)
+	}
 }
