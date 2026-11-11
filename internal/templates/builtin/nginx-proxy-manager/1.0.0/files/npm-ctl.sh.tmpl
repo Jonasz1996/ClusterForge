@@ -39,6 +39,13 @@ STAMP=$STATE/stamp
 HASH=${CF_NPM_HASH:-/run/cf-npm.hash}
 VIP='{{ .params.vip }}'
 IMAGE='{{ .params.npm_image }}'
+ADMIN='{{ .params.admin_port }}'
+# Gezondheid op de VIP-node: STARTED is wanneer NPM hier startte (na GRACE
+# seconden moet de API antwoorden), UNHEALTHY telt de checks op rij waarin
+# NPM niet draaide of niet antwoordde.
+STARTED=$STATE/started
+UNHEALTHY=$STATE/unhealthy
+GRACE=180
 # De eerste node mag NPM leeg starten (een nieuw cluster); een andere node
 # alleen met een configuratie, anders zou een lege NPM bron van de sync worden.
 INDEX='{{ .node.index }}'
@@ -74,6 +81,9 @@ better_has_vip() {
   done
   return 1
 }
+# Draait de container van NPM en antwoordt zijn API?
+healthy() { running && curl -fsS -m 4 -o /dev/null "http://127.0.0.1:$ADMIN/api/" 2>/dev/null; }
+log() { logger -t cf-npm "$*" 2>/dev/null; echo "$*" >&2; }
 integrity() { [ "$(sqlite3 "$1" 'PRAGMA integrity_check;' 2>&1)" = ok ]; }
 # De containers van een andere NPM op deze machine (zoals de NPM die je nog
 # moet overnemen); die houdt poort 80 en 443 vast.
@@ -195,6 +205,10 @@ status() {
   echo "node:      $(hostname)"
   if has_vip; then echo "VIP:       $VIP staat hier"; else echo "VIP:       $VIP staat elders"; fi
   echo "cf-npm:    $(systemctl is-active cf-npm 2>/dev/null)"
+  if running; then
+    if healthy; then echo "NPM:       draait, API antwoordt"; else echo "NPM:       draait, API antwoordt NIET (poort $ADMIN)"; fi
+  fi
+  [ -n "$(foreign)" ] && echo "LET OP:    een andere NPM draait hier: $(foreign | tr '\n' ' ')"
   echo "data:      actueel tot $(when "$(cat "$STAMP" 2>/dev/null || echo 0)")"
   [ -f "$OUT/MANIFEST" ] && echo "verstuurd: kopie van $(when "$(field created "$OUT/MANIFEST")")"
   [ -f "$IN/MANIFEST" ] && echo "ontvangen: kopie van $(field host "$IN/MANIFEST") van $(when "$(field created "$IN/MANIFEST")")"
@@ -215,6 +229,8 @@ case "${1:-}" in
       fail "hier staat nog geen configuratie (geen kopie ontvangen); NPM start niet leeg op deze node. Wil je toch een lege NPM hier: touch $STATE/allow-empty"
     fi
     fingerprint > "$HASH"
+    date +%s > "$STARTED"
+    rm -f "$UNHEALTHY"
     exec docker compose -p cf-npm --project-directory "$BASE" -f "$BASE/compose.yaml" up --no-build --remove-orphans
     ;;
   down)
@@ -230,21 +246,54 @@ case "${1:-}" in
     systemctl is-active --quiet docker || exit 1
     # Draait NPM hier maar faalt het, dan geeft deze node het VIP af.
     systemctl is-failed --quiet cf-npm && exit 1
+    # Een andere NPM terwijl hier al een configuratie van het cluster staat:
+    # een overblijfsel (bv. de oude NPM na een herstart). Die houdt de poorten
+    # vast met oude data; deze node mag het VIP dan niet hebben.
+    if [ -n "$(foreign)" ] && [ -f "$DB" ]; then
+      log "een andere NPM draait hier ($(foreign | tr '\n' ' ')); deze node geeft het VIP af. Weghalen: docker rm -f <id>"
+      exit 1
+    fi
     # Split-brain: heeft een node met een hogere prioriteit het VIP ook, dan
     # geeft deze node het af (FAULT, NPM stopt) tot die node het niet meer
     # heeft. Zonder VIP alleen nakijken als deze node daarvoor afgaf.
     if has_vip || [ -f "$YIELD" ]; then
       if peer=$(better_has_vip); then
-        [ -f "$YIELD" ] || logger -t cf-npm "split-brain: $peer heeft het VIP $VIP ook, deze node geeft het af" 2>/dev/null
+        [ -f "$YIELD" ] || log "split-brain: $peer heeft het VIP $VIP ook, deze node geeft het af"
         date +%s > "$YIELD"
         exit 1
       fi
       rm -f "$YIELD"
     fi
-    # Na een herstart start de node met het VIP het zelf; niet zolang hier
-    # nog een andere NPM draait (die bedient het VIP tot de overname).
-    if has_vip && ! systemctl is-active --quiet cf-npm && [ -z "$(foreign)" ]; then
-      systemctl start --no-block cf-npm
+    if ! has_vip; then
+      # NPM draait alleen op de node met het VIP; een NPM die hier nog draait
+      # (gemiste notify, keepalived herstart) zou oude data tonen.
+      if systemctl is-active --quiet cf-npm; then
+        log "NPM draait hier zonder het VIP; stoppen"
+        systemctl stop --no-block cf-npm
+      fi
+      rm -f "$UNHEALTHY"
+      exit 0
+    fi
+    # Na een herstart, of als de container stopte, start de node met het VIP
+    # NPM opnieuw; niet zolang hier nog een andere NPM draait (die bedient
+    # het VIP tot de overname).
+    if ! systemctl is-active --quiet cf-npm; then
+      [ -z "$(foreign)" ] && systemctl start --no-block cf-npm
+      exit 0
+    fi
+    # NPM draait volgens systemd: antwoordt het ook? Na de opstarttijd geeft
+    # deze node het VIP af als NPM 3 checks op rij (±10 s) niet draait of niet
+    # antwoordt; de andere node neemt dan over met de laatste kopie.
+    started=$(cat "$STARTED" 2>/dev/null || echo 0)
+    if [ $(($(date +%s) - started)) -lt "$GRACE" ] || healthy; then
+      rm -f "$UNHEALTHY"
+      exit 0
+    fi
+    n=$(($(cat "$UNHEALTHY" 2>/dev/null || echo 0) + 1))
+    echo "$n" > "$UNHEALTHY"
+    if [ "$n" -ge 3 ]; then
+      log "NPM draait niet of antwoordt niet op poort $ADMIN ($n checks); deze node geeft het VIP af"
+      exit 1
     fi
     exit 0
     ;;
@@ -254,6 +303,7 @@ case "${1:-}" in
     ;;
   backup)
     systemctl stop --no-block cf-npm
+    rm -f "$UNHEALTHY"
     # Een gefaalde NPM mag later weer: de node kan het VIP dan terugkrijgen.
     systemctl reset-failed cf-npm 2>/dev/null
     exit 0

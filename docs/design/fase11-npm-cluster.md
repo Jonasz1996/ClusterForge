@@ -34,7 +34,7 @@ een node die een kopie ontvangt, draait nooit NPM.**
 
 | Stap | Waar | Hoe |
 | --- | --- | --- |
-| VIP | keepalived op elke node | `nopreempt`, failback uit; `npm-ctl.sh check` geeft het VIP af als Docker of NPM hier faalt |
+| VIP | keepalived op elke node | `nopreempt`, failback uit; `npm-ctl.sh check` geeft het VIP af als Docker of NPM hier faalt, als NPM na de opstarttijd (180 s) 3 checks op rij niet draait of de API op de beheerpoort niet antwoordt, of als er naast de configuratie nog een andere NPM-container draait; is NPM gestopt, dan start de VIP-node het opnieuw; een node zonder VIP stopt een NPM die er nog draait |
 | NPM starten/stoppen | `cf-npm.service` (niet enabled) | keepalived `notify_master` start, `notify_backup`/`fault` stopt; `restart: "no"` in compose, zodat Docker het nooit zelf start |
 | Kopie maken | VIP-node, `npm-ctl.sh snapshot` | `sqlite3 .backup` (online backup-API, klopt terwijl NPM schrijft), `PRAGMA integrity_check`, de rest van `/data` zonder `database.sqlite*` en `logs/`, `letsencrypt/`, dan `MANIFEST` (tijd, node, image) en `SHA256SUMS` over alles; atomisch naar `/var/lib/cf-npm/outgoing` |
 | Kopie versturen | ClusterForge-sync (fase 6) | beheerde cronjob `NPM-configuratie`, soort sync, vanaf het VIP, `--delete`, naar `/var/lib/cf-npm/incoming` op de andere nodes; elke 1–60 min (param `sync_minutes`, standaard 5) |
@@ -92,6 +92,13 @@ met een hogere prioriteit (lagere index), dan faalt de check (FAULT, NPM
 stopt) tot die node het VIP niet meer heeft (`/var/lib/cf-npm/yielded`).
 En `cf-npm.service` heeft `BindsTo=keepalived.service`: stopt keepalived, dan
 stopt NPM ook.
+
+### Hoe oud is de data na een failover?
+
+De nieuwe VIP-node start met de laatste kopie: wat op de vorige VIP-node
+veranderde na zijn laatste sync, staat er niet in (hoogstens `sync_minutes`).
+Wie veel aanpast, zet `sync_minutes` op 1 of 2. `npm-ctl.sh status` toont
+tot wanneer de data op een node actueel is.
 
 ### Certificaten
 

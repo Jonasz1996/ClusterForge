@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // npmContext is een cluster van twee NPM-nodes.
@@ -141,13 +142,14 @@ func newNPMNode(t *testing.T, script, name string) *npmNode {
 [ -f "$CF_TEST_DIR/vip" ] && echo "2: eth0    inet 192.0.2.50/24 scope global secondary eth0"; exit 0`,
 		"arping": `cat "$CF_TEST_DIR/arping" 2>/dev/null; exit 0`,
 		"ping":   `exit 0`,
+		"curl":   `[ -f "$CF_TEST_DIR/api" ]`,
 		"logger": `echo "logger $*" >> "$CF_TEST_DIR/log"`,
 		"systemctl": `case "$1 $2" in "is-active --quiet") [ "$3" = cf-npm ] && { [ -f "$CF_TEST_DIR/active" ]; exit $?; }; exit 0;;
 "is-failed --quiet") exit 1;; esac; echo "systemctl $*" >> "$CF_TEST_DIR/log"; exit 0`,
 		"docker": `echo "docker $*" >> "$CF_TEST_DIR/log"
 case "$1" in
 ps) [ -f "$CF_TEST_DIR/foreign" ] && cat "$CF_TEST_DIR/foreign";;
-inspect) case "$3" in *Mounts*) cat "$CF_TEST_DIR/mounts";; esac;;
+inspect) case "$3" in *Mounts*) cat "$CF_TEST_DIR/mounts";; *Running*) cat "$CF_TEST_DIR/running" 2>/dev/null;; esac;;
 stop) rm -f "$CF_TEST_DIR/foreign";;
 esac
 exit 0`,
@@ -415,5 +417,92 @@ func TestNPMSnapshotFailover(t *testing.T) {
 	write(t, map[string]string{dir + "/arping": "Unicast reply from 192.0.2.50 [BC:24:11:00:00:02]  0.6ms\n"})
 	if out, err := o.run("check"); err != nil {
 		t.Errorf("check node 1: %v %s", err, out)
+	}
+}
+
+// TestNPMHealth: de VIP-node geeft het VIP af als NPM stopt of niet meer
+// antwoordt (na de opstarttijd, 3 checks op rij), start NPM opnieuw als het
+// niet draait, en een node zonder VIP of met een oude NPM-container houdt
+// het niet.
+func TestNPMHealth(t *testing.T) {
+	tpl, c := npmContext(t, nil)
+	files, _ := npmFiles(t, tpl, c)
+	n := newNPMNode(t, files["/usr/local/lib/clusterforge/npm-ctl.sh"], "npm-01")
+	dir := filepath.Dir(n.script)
+	write(t, map[string]string{
+		n.base + "/data/database.sqlite": "",
+		n.state + "/started":             "1",
+		dir + "/running":                 "true",
+		dir + "/api":                     "",
+	})
+	n.vip, n.active = true, true
+	check := func(want bool, what string) {
+		t.Helper()
+		out, err := n.run("check")
+		if (err == nil) != want {
+			t.Errorf("%s: check %v, wil ok=%v: %s", what, err, want, out)
+		}
+	}
+	logged := func(s string) bool {
+		b, _ := os.ReadFile(dir + "/log")
+		_ = os.Remove(dir + "/log")
+		return strings.Contains(string(b), s)
+	}
+	check(true, "gezond")
+
+	// De container stopt (of de API antwoordt niet) terwijl cf-npm actief is.
+	_ = os.Remove(dir + "/running")
+	check(true, "1e mislukte check")
+	check(true, "2e mislukte check")
+	check(false, "3e mislukte check")
+	if !logged("geeft het VIP af") {
+		t.Error("geen melding bij het afgeven")
+	}
+	if out, err := n.run("status"); err != nil || strings.Contains(out, "API antwoordt\n") {
+		t.Errorf("status: %v %s", err, out)
+	}
+	// keepalived: backup; daarna begint de telling opnieuw.
+	if _, err := n.run("backup"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(n.state + "/unhealthy"); err == nil {
+		t.Error("unhealthy blijft na backup")
+	}
+	write(t, map[string]string{dir + "/running": "true"})
+	_ = os.Remove(dir + "/api")
+	check(true, "API 1")
+	check(true, "API 2")
+	check(false, "API antwoordt 3 checks niet")
+
+	// Binnen de opstarttijd telt het niet.
+	write(t, map[string]string{n.state + "/started": fmt.Sprint(time.Now().Unix()), n.state + "/unhealthy": "5"})
+	check(true, "net gestart")
+	write(t, map[string]string{n.state + "/started": "1", dir + "/api": ""})
+	check(true, "weer gezond")
+	if _, err := os.Stat(n.state + "/unhealthy"); err == nil {
+		t.Error("unhealthy blijft na een gezonde check")
+	}
+
+	// cf-npm stopte (container weg, compose klaar): de VIP-node start het opnieuw.
+	_ = os.Remove(dir + "/log")
+	n.active = false
+	check(true, "gestopt")
+	if !logged("systemctl start --no-block cf-npm") {
+		t.Error("NPM niet opnieuw gestart op de VIP-node")
+	}
+
+	// Zonder VIP draait NPM hier niet.
+	n.vip, n.active = false, true
+	check(true, "zonder VIP")
+	if !logged("systemctl stop --no-block cf-npm") {
+		t.Error("NPM blijft draaien zonder VIP")
+	}
+
+	// Een oude NPM-container naast een node met configuratie: VIP afgeven.
+	n.vip, n.active = true, true
+	write(t, map[string]string{dir + "/foreign": "abc123 jc21/nginx-proxy-manager:latest npm\n"})
+	check(false, "oude NPM naast de configuratie")
+	if out, _ := n.run("status"); !strings.Contains(out, "andere NPM draait hier: abc123") {
+		t.Errorf("status zonder oude NPM: %s", out)
 	}
 }
