@@ -400,7 +400,6 @@ func minimal(froms []string) []string {
 	type src struct {
 		raw string
 		p   netip.Prefix
-		any bool
 	}
 	var list []src
 	for _, f := range froms {

@@ -1449,6 +1449,30 @@ Wat ClusterForge op de node schrijft: `/etc/crowdsec/acquis.d/cf-*.yaml` (de sta
 `/var/lib/clusterforge/crowdsec.json`. Collections die je zelf installeerde, haalt het nooit weg. "Beheer uit"
 laat CrowdSec staan; "Verwijderen" doet `apt-get purge`.
 
+## Firewall
+
+ClusterForge beheert ufw op de nodes (fase 16, agentprotocol 30; ontwerp in
+[docs/design/fase16-firewall.md](docs/design/fase16-firewall.md)). De agent kijkt welke software en containers
+er draaien en op welke poorten ze luisteren; de server maakt daaruit per node een plan en zet de rest dicht.
+
+- **Plan per node.** SSH blijft altijd open. Poorten van de clustertemplate en van bekende systemd-units gaan open,
+  ook als de dienst even niet draait (etcd 2379/2380, Patroni 8008, PostgreSQL 5432, Galera, Redis …).
+  Clusterpoorten gaan alleen open voor de andere leden en de VIP's, VRRP alleen van de keepalived-peers.
+  Een onbekende poort gaat naar het eigen netwerk of dicht (instelling). Poorten die Docker publiceert gaan buiten
+  ufw om en worden alleen getoond.
+- **Standen.** *uit* (niets), *voorbeeld* (plan en verschil tonen, niets wijzigen) en *beheerd* (toepassen als het
+  plan verandert). Eigen regels per cluster of node: een poort openzetten of dichthouden.
+- **Veilig toepassen.** Eerst een back-up en een terugdraaitimer (`cf-firewall-rollback`, standaard 120 s). Daarna
+  controleert de agent of hij de server nog bereikt en testen de andere clusterleden de clusterpoorten. Pas dan
+  bevestigt de server; anders draait de node zelf terug, ook na een herstart. Regels die niet van ClusterForge zijn
+  (zonder `cf:`) blijven staan, tenzij Strikt aanstaat. De nftables-tabellen van CrowdSec blijven onaangeroerd.
+- **Monitoring.** Nieuwe pogingen naar dichte poorten gaan via NFLOG (groep 4711) naar de agent; in LXC-containers
+  komt de kernellog niet binnen. Lukt NFLOG niet, dan leest de agent `[UFW BLOCK]` uit de journal en toont de pagina
+  een waarschuwing (laad dan `nfnetlink_log` op de Proxmox-host). De server telt per uur en bewaart 30 dagen.
+- **Pagina Firewall.** Overzicht met per cluster een matrix van poorten × nodes (open voor wie, dicht, pogingen),
+  het verkeer naar dichte poorten (met de knop *Openzetten voor het cluster* als de bron een clusterlid is),
+  nodes, eigen regels, de softwarecatalogus en de instellingen. Op de pagina van een node staat de kaart Firewall.
+
 ## Zelfherstel
 
 Bij elke database op de pagina **Databases** staat de kaart **Zelfherstel**: wat er mis is, op welke node, waarom, en wat ClusterForge eraan zou doen. Dat werkt voor elke MariaDB, MySQL en PostgreSQL die de agent ziet, ook als ClusterForge haar niet zelf toepaste, zoals een Galera-cluster dat je met de hand opzette. ClusterForge herstelt met vaste acties in de agent en de server, niet met scripts: eerst vaststellen, dan een plan in gewone taal, en pas met **Nu herstellen**, of vanzelf als je dat per cluster aanzet, een taak met een stap per node, in het logboek en in de tijdlijn van het incident. Een kijker ziet de kaart ook; alleen een beheerder herstelt.
