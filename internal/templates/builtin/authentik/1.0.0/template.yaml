@@ -143,6 +143,12 @@ roles:
           path: /usr/local/lib/clusterforge/authentik-ctl.sh
           template: authentik-ctl.sh.tmpl
           mode: "0755"
+      # Met een actieve ufw: etcd, Patroni, PostgreSQL en VRRP tussen de nodes
+      # toelaten (anders vormt etcd nooit een cluster).
+      - command:
+          title: ufw-regels voor het cluster
+          run: /usr/local/lib/clusterforge/authentik-ctl.sh firewall
+          unless: /usr/local/lib/clusterforge/authentik-ctl.sh firewall-ok
       # Een oude Authentik op deze node: op node 1 verhuist zijn PostgreSQL
       # (network_mode: host) van poort 5432 naar 5433 voor Patroni, op de
       # andere nodes stopt hij (de kloon wordt niet overgenomen).
