@@ -13,7 +13,7 @@ const CrowdSecSince = 28
 
 // CrowdSecEnrollSince is de eerste protocolversie die een node bij de
 // CrowdSec Console aanmeldt (op enroll).
-const CrowdSecEnrollSince = 29
+const CrowdSecEnrollSince = 31
 
 // SubjectCrowdSec draagt de CrowdSec-verzoeken: cf.node.<id>.crowdsec.
 const SubjectCrowdSec = "crowdsec"

@@ -209,12 +209,12 @@ Rechten: het onderwerp komt bij de subscribe-rechten van de agent.
 - M3 migratie 00065, taak `crowdsec.apply`, poller, bans delen, API.
 - M4 GUI: pagina CrowdSec, kaart op de node, README.
 
-## Aanvulling: CrowdSec Console (protocol 29)
+## Aanvulling: CrowdSec Console (protocol 31)
 
 Jonas wil ook de Console-aanmelding via de agent. De enroll-sleutel staat in `crowdsec_settings.console_key_enc`
 (AES-GCM met de masterkey, aad `crowdsec:console`), met een HMAC-vingerafdruk in `console_key_hash`. Per node
-onthoudt `crowdsec_nodes.console_hash` met welke sleutel hij aangemeld is (migratie 00066). De poller meldt een
-beheerde node met protocol 29 aan als CrowdSec draait en de vingerafdruk verschilt: op `enroll` van onderwerp
+onthoudt `crowdsec_nodes.console_hash` met welke sleutel hij aangemeld is (migratie 00068). De poller meldt een
+beheerde node met protocol 31 aan als CrowdSec draait en de vingerafdruk verschilt: op `enroll` van onderwerp
 `crowdsec`, met de sleutel alleen in het NATS-verzoek. De agent draait `cscli console enroll --name <host>
 --overwrite <sleutel>` en herstart CrowdSec; een fout gaat terug zonder de sleutel. Een mislukte aanmelding wacht
 een uur (`RetryFailed`). API: `PUT /crowdsec/console` (sleutel, leeg = weg) en `POST /crowdsec/console/enroll`

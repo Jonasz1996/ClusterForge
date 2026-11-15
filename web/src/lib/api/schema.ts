@@ -3679,7 +3679,7 @@ export interface paths {
          * Enroll-sleutel van de CrowdSec Console bewaren of weghalen (admin)
          * @description De sleutel uit `cscli console enroll <sleutel>` op app.crowdsec.net. Versleuteld bewaard met de masterkey en
          *     nooit teruggegeven. Leeg haalt hem weg. Met een sleutel meldt ClusterForge elke beheerde node aan zodra CrowdSec
-         *     er draait (agent protocol 29).
+         *     er draait (agent protocol 31).
          */
         put: operations["setCrowdSecConsoleKey"];
         post?: never;

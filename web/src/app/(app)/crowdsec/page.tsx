@@ -756,7 +756,7 @@ function ConsoleSettings({ o, isAdmin }: { o: CrowdSecOverview; isAdmin: boolean
   const [key, setKeyValue] = useState("");
   const managed = o.nodes.filter((n) => n.managed);
   const enrolled = managed.filter((n) => n.console_enrolled).length;
-  const old = managed.filter((n) => n.protocol < 29).length;
+  const old = managed.filter((n) => n.protocol < 31).length;
   const failed = managed.filter((n) => n.console_error);
   return (
     <div className="mt-6 max-w-2xl space-y-3 border-t border-slate-200 pt-4 text-sm dark:border-slate-700">
@@ -777,7 +777,7 @@ function ConsoleSettings({ o, isAdmin }: { o: CrowdSecOverview; isAdmin: boolean
         ) : (
           "Nog geen sleutel."
         )}
-        {old > 0 && <span className="block text-xs text-amber-700 dark:text-amber-400">{old} node(s) hebben een oudere agent: Nodes → Agents bijwerken (protocol 29).</span>}
+        {old > 0 && <span className="block text-xs text-amber-700 dark:text-amber-400">{old} node(s) hebben een oudere agent: Nodes → Agents bijwerken (protocol 31).</span>}
       </p>
       {failed.length > 0 && (
         <Alert>

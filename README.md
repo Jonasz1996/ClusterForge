@@ -1395,7 +1395,7 @@ Nextcloud, Grafana, Gitea, Vaultwarden, Jellyfin, Immich, Plex en Proxmox. Herke
 ClusterForge niet zelf uitrolde. Per node zet je een profiel uit of bij met Wijzigen. PostgreSQL onder Patroni logt
 via Patroni; die regels herkent de pgsql-parser niet (de kaart zegt dat).
 
-**CrowdSec Console** (Instellingen, agentprotocol 29): plak de enroll-sleutel van app.crowdsec.net (het laatste
+**CrowdSec Console** (Instellingen, agentprotocol 31): plak de enroll-sleutel van app.crowdsec.net (het laatste
 woord van `cscli console enroll <sleutel>`). ClusterForge meldt elke beheerde node aan zodra CrowdSec er draait
 (`cscli console enroll --name <hostnaam> --overwrite`, daarna een herstart van CrowdSec); accepteer de nodes in de
 Console. De sleutel staat versleuteld met de masterkey (CF_MASTER_KEY) en gaat alleen in het verzoek naar de agent,
