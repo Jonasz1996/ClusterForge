@@ -17,6 +17,7 @@ import { NodeLifecycleCard } from "@/components/inventory/NodeLifecycleCard";
 import { NodeProxmoxCard } from "@/components/proxmox/NodeProxmoxCard";
 import { NodeChangesCard } from "@/components/journal/Changes";
 import { NodeCronCard } from "@/components/cron/Cron";
+import { CrowdSecNodeCard } from "@/components/crowdsec/CrowdSecNodeCard";
 import { SeaweedCard } from "@/components/seaweed/SeaweedCard";
 import {
   AgentBadge,
@@ -181,6 +182,8 @@ function NodeDetailInner() {
           )}
 
           {node.data.proxmox && <NodeBackupsCard nodeId={id} isAdmin={isAdmin} />}
+
+          {node.data.agent && <CrowdSecNodeCard nodeId={id} isAdmin={isAdmin} />}
 
           {node.data.agent && (
             <MetricsPanels

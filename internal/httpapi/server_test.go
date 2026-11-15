@@ -31,6 +31,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/components"
 	"github.com/Jonasz1996/clusterforge/internal/config"
 	"github.com/Jonasz1996/clusterforge/internal/cronjobs"
+	"github.com/Jonasz1996/clusterforge/internal/crowdsec"
 	"github.com/Jonasz1996/clusterforge/internal/databases"
 	"github.com/Jonasz1996/clusterforge/internal/deploy"
 	"github.com/Jonasz1996/clusterforge/internal/deps"
@@ -273,6 +274,8 @@ func newTestEnv(t *testing.T) *testEnv {
 	upd.Run.Poll, upd.ReadyTimeout, upd.Gate.Poll = 20*time.Millisecond, 5*time.Second, 20*time.Millisecond
 	cmds := commands.NewService(pool, ev, runner, bus, upd)
 	cmds.Run.Poll = 20 * time.Millisecond
+	csec := crowdsec.NewService(pool, ev, runner, bus, log)
+	csec.Run.Poll = 20 * time.Millisecond
 	var wg sync.WaitGroup
 	wg.Add(3)
 	go func() { defer wg.Done(); hub.Run(runCtx) }()
@@ -285,7 +288,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	api := New(Deps{
 		Config: cfg, Log: log, Pool: pool, Auth: a, Bus: bus, Hub: hub, Proxmox: pve, Jobs: runner, Lifecycle: life,
 		Deploy: dep, Backups: bk, Drift: drf, Failover: fo, Disaster: dis, Deps: dps, Rollout: ro, GitOps: git, Assistant: asst,
-		Risk: rsk, Topo: tp, Docs: dcs, Reports: rep, Kube: kub, KubeNodes: kn, Databases: dbs, Cronjobs: crons, Heal: hl, Components: cmps, Upgrades: upg, Updates: upd, Commands: cmds, Version: "test",
+		Risk: rsk, Topo: tp, Docs: dcs, Reports: rep, Kube: kub, KubeNodes: kn, Databases: dbs, Cronjobs: crons, Heal: hl, Components: cmps, Upgrades: upg, Updates: upd, Commands: cmds, CrowdSec: csec, Version: "test",
 	})
 	srv := httptest.NewServer(api.Handler())
 	t.Cleanup(srv.Close)

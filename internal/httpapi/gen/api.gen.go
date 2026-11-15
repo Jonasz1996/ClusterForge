@@ -768,6 +768,87 @@ func (e CronWarningLevel) Valid() bool {
 	}
 }
 
+// Defines values for CrowdSecDecisionInputScope.
+const (
+	Ip    CrowdSecDecisionInputScope = "ip"
+	Range CrowdSecDecisionInputScope = "range"
+)
+
+// Valid indicates whether the value is a known member of the CrowdSecDecisionInputScope enum.
+func (e CrowdSecDecisionInputScope) Valid() bool {
+	switch e {
+	case Ip:
+		return true
+	case Range:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CrowdSecProfileOrigin.
+const (
+	CrowdSecProfileOriginAuto  CrowdSecProfileOrigin = "auto"
+	CrowdSecProfileOriginExtra CrowdSecProfileOrigin = "extra"
+	CrowdSecProfileOriginOff   CrowdSecProfileOrigin = "off"
+)
+
+// Valid indicates whether the value is a known member of the CrowdSecProfileOrigin enum.
+func (e CrowdSecProfileOrigin) Valid() bool {
+	switch e {
+	case CrowdSecProfileOriginAuto:
+		return true
+	case CrowdSecProfileOriginExtra:
+		return true
+	case CrowdSecProfileOriginOff:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CrowdSecSettingsShareBans.
+const (
+	CrowdSecSettingsShareBansAll     CrowdSecSettingsShareBans = "all"
+	CrowdSecSettingsShareBansCluster CrowdSecSettingsShareBans = "cluster"
+	CrowdSecSettingsShareBansOff     CrowdSecSettingsShareBans = "off"
+)
+
+// Valid indicates whether the value is a known member of the CrowdSecSettingsShareBans enum.
+func (e CrowdSecSettingsShareBans) Valid() bool {
+	switch e {
+	case CrowdSecSettingsShareBansAll:
+		return true
+	case CrowdSecSettingsShareBansCluster:
+		return true
+	case CrowdSecSettingsShareBansOff:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for CrowdSecSettingsInputShareBans.
+const (
+	CrowdSecSettingsInputShareBansAll     CrowdSecSettingsInputShareBans = "all"
+	CrowdSecSettingsInputShareBansCluster CrowdSecSettingsInputShareBans = "cluster"
+	CrowdSecSettingsInputShareBansOff     CrowdSecSettingsInputShareBans = "off"
+)
+
+// Valid indicates whether the value is a known member of the CrowdSecSettingsInputShareBans enum.
+func (e CrowdSecSettingsInputShareBans) Valid() bool {
+	switch e {
+	case CrowdSecSettingsInputShareBansAll:
+		return true
+	case CrowdSecSettingsInputShareBansCluster:
+		return true
+	case CrowdSecSettingsInputShareBansOff:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for DRSchedule.
 const (
 	DRScheduleEmpty   DRSchedule = ""
@@ -5475,6 +5556,286 @@ type CronWarningKind string
 
 // CronWarningLevel defines model for CronWarning.Level.
 type CronWarningLevel string
+
+// CrowdSecAlert defines model for CrowdSecAlert.
+type CrowdSecAlert struct {
+	As          string                                `json:"as"`
+	ClusterId   nullable.Nullable[openapi_types.UUID] `json:"cluster_id"`
+	ClusterName string                                `json:"cluster_name"`
+	Country     string                                `json:"country"`
+	Decisions   int                                   `json:"decisions"`
+	Events      int                                   `json:"events"`
+	Hostname    string                                `json:"hostname"`
+	Id          int64                                 `json:"id"`
+	Message     string                                `json:"message"`
+	NodeId      openapi_types.UUID                    `json:"node_id"`
+	Scenario    string                                `json:"scenario"`
+	Scope       string                                `json:"scope"`
+	Simulated   bool                                  `json:"simulated"`
+	StartedAt   time.Time                             `json:"started_at"`
+	StoppedAt   time.Time                             `json:"stopped_at"`
+	Value       string                                `json:"value"`
+}
+
+// CrowdSecBan defines model for CrowdSecBan.
+type CrowdSecBan struct {
+	As       string   `json:"as"`
+	Country  string   `json:"country"`
+	Nodes    []string `json:"nodes"`
+	Origin   string   `json:"origin"`
+	Scenario string   `json:"scenario"`
+	Scope    string   `json:"scope"`
+
+	// Shared ClusterForge zette deze ban ook op andere nodes
+	Shared bool      `json:"shared"`
+	Type   string    `json:"type"`
+	Until  time.Time `json:"until"`
+	Value  string    `json:"value"`
+}
+
+// CrowdSecBanResult defines model for CrowdSecBanResult.
+type CrowdSecBanResult struct {
+	Count  int      `json:"count"`
+	Errors []string `json:"errors"`
+	Nodes  []string `json:"nodes"`
+}
+
+// CrowdSecConsoleKeyInput defines model for CrowdSecConsoleKeyInput.
+type CrowdSecConsoleKeyInput struct {
+	// Key Leeg haalt de sleutel weg
+	Key string `json:"key"`
+}
+
+// CrowdSecDecisionInput defines model for CrowdSecDecisionInput.
+type CrowdSecDecisionInput struct {
+	ClusterId *openapi_types.UUID `json:"cluster_id,omitempty"`
+	Delete    *bool               `json:"delete,omitempty"`
+
+	// Duration Zoals 4h of 30m
+	Duration *string                    `json:"duration,omitempty"`
+	NodeIds  *[]openapi_types.UUID      `json:"node_ids,omitempty"`
+	Reason   *string                    `json:"reason,omitempty"`
+	Scope    CrowdSecDecisionInputScope `json:"scope"`
+	Value    string                     `json:"value"`
+}
+
+// CrowdSecDecisionInputScope defines model for CrowdSecDecisionInput.Scope.
+type CrowdSecDecisionInputScope string
+
+// CrowdSecEnrollInput defines model for CrowdSecEnrollInput.
+type CrowdSecEnrollInput struct {
+	NodeId *openapi_types.UUID `json:"node_id,omitempty"`
+}
+
+// CrowdSecEnrollResult defines model for CrowdSecEnrollResult.
+type CrowdSecEnrollResult struct {
+	Nodes int `json:"nodes"`
+}
+
+// CrowdSecNode defines model for CrowdSecNode.
+type CrowdSecNode struct {
+	AppliedAt     nullable.Nullable[time.Time]          `json:"applied_at"`
+	AppliedHash   string                                `json:"applied_hash"`
+	ApplyError    string                                `json:"apply_error"`
+	ApplyFailedAt nullable.Nullable[time.Time]          `json:"apply_failed_at"`
+	ApplyJobId    nullable.Nullable[openapi_types.UUID] `json:"apply_job_id"`
+	ApplyRunning  bool                                  `json:"apply_running"`
+
+	// Blocklist Bans van de community-blocklist
+	Blocklist          int                                   `json:"blocklist"`
+	Bouncer            bool                                  `json:"bouncer"`
+	ClusterEnvironment string                                `json:"cluster_environment"`
+	ClusterId          nullable.Nullable[openapi_types.UUID] `json:"cluster_id"`
+	ClusterName        string                                `json:"cluster_name"`
+	ClusterSlug        string                                `json:"cluster_slug"`
+	ClusterTemplate    string                                `json:"cluster_template"`
+
+	// ConsoleEnrolled Aangemeld bij de CrowdSec Console met de huidige sleutel
+	ConsoleEnrolled   bool                         `json:"console_enrolled"`
+	ConsoleEnrolledAt nullable.Nullable[time.Time] `json:"console_enrolled_at"`
+	ConsoleError      string                       `json:"console_error"`
+	ConsoleFailedAt   nullable.Nullable[time.Time] `json:"console_failed_at"`
+	DisabledProfiles  []string                     `json:"disabled_profiles"`
+
+	// Enabled CrowdSec staat aan in ClusterForge
+	Enabled       bool                              `json:"enabled"`
+	ExtraProfiles []string                          `json:"extra_profiles"`
+	Hostname      string                            `json:"hostname"`
+	Managed       bool                              `json:"managed"`
+	NodeId        openapi_types.UUID                `json:"node_id"`
+	Online        bool                              `json:"online"`
+	Plan          nullable.Nullable[CrowdSecPlan]   `json:"plan"`
+	PlanHash      string                            `json:"plan_hash"`
+	PollAt        nullable.Nullable[time.Time]      `json:"poll_at"`
+	PollError     string                            `json:"poll_error"`
+	Protocol      int                               `json:"protocol"`
+	Status        nullable.Nullable[CrowdSecStatus] `json:"status"`
+	StatusAt      nullable.Nullable[time.Time]      `json:"status_at"`
+
+	// Supported De agent kent CrowdSec (protocol 28)
+	Supported bool `json:"supported"`
+}
+
+// CrowdSecNodeDetail defines model for CrowdSecNodeDetail.
+type CrowdSecNodeDetail struct {
+	Alerts []CrowdSecAlert `json:"alerts"`
+	Node   CrowdSecNode    `json:"node"`
+}
+
+// CrowdSecNodeInput defines model for CrowdSecNodeInput.
+type CrowdSecNodeInput struct {
+	Bouncer          bool     `json:"bouncer"`
+	DisabledProfiles []string `json:"disabled_profiles"`
+	ExtraProfiles    []string `json:"extra_profiles"`
+}
+
+// CrowdSecNodesInput defines model for CrowdSecNodesInput.
+type CrowdSecNodesInput struct {
+	All *bool `json:"all,omitempty"`
+
+	// Bouncer Bij aanzetten; zonder geldt de instelling bouncer_default
+	Bouncer   *bool                 `json:"bouncer,omitempty"`
+	ClusterId *openapi_types.UUID   `json:"cluster_id,omitempty"`
+	Managed   bool                  `json:"managed"`
+	NodeIds   *[]openapi_types.UUID `json:"node_ids,omitempty"`
+}
+
+// CrowdSecOverview defines model for CrowdSecOverview.
+type CrowdSecOverview struct {
+	Catalog []struct {
+		Collections []string `json:"collections"`
+		Community   bool     `json:"community"`
+		Description string   `json:"description"`
+		Key         string   `json:"key"`
+		Name        string   `json:"name"`
+		Nodes       []string `json:"nodes"`
+	} `json:"catalog"`
+	Hourly []struct {
+		Count int       `json:"count"`
+		Hour  time.Time `json:"hour"`
+	} `json:"hourly"`
+	Nodes    []CrowdSecNode   `json:"nodes"`
+	Protocol int              `json:"protocol"`
+	Settings CrowdSecSettings `json:"settings"`
+	Stats    struct {
+		ActiveBans   int `json:"active_bans"`
+		Alerts24h    int `json:"alerts_24h"`
+		Blocklist    int `json:"blocklist"`
+		Bouncers     int `json:"bouncers"`
+		BouncersDown int `json:"bouncers_down"`
+		Managed      int `json:"managed"`
+		Running      int `json:"running"`
+	} `json:"stats"`
+	TopIps       []CrowdSecTopEntry `json:"top_ips"`
+	TopScenarios []CrowdSecTopEntry `json:"top_scenarios"`
+	Warnings     []struct {
+		Hostname string             `json:"hostname"`
+		NodeId   openapi_types.UUID `json:"node_id"`
+		Text     string             `json:"text"`
+	} `json:"warnings"`
+}
+
+// CrowdSecPlan defines model for CrowdSecPlan.
+type CrowdSecPlan struct {
+	Bouncer     bool              `json:"bouncer"`
+	Collections []string          `json:"collections"`
+	Hash        string            `json:"hash"`
+	Profiles    []CrowdSecProfile `json:"profiles"`
+	Whitelist   []string          `json:"whitelist"`
+}
+
+// CrowdSecProfile defines model for CrowdSecProfile.
+type CrowdSecProfile struct {
+	Key     string                `json:"key"`
+	Name    string                `json:"name"`
+	Note    *string               `json:"note,omitempty"`
+	Origin  CrowdSecProfileOrigin `json:"origin"`
+	Reason  *string               `json:"reason,omitempty"`
+	Sources *[]string             `json:"sources,omitempty"`
+}
+
+// CrowdSecProfileOrigin defines model for CrowdSecProfile.Origin.
+type CrowdSecProfileOrigin string
+
+// CrowdSecSettings defines model for CrowdSecSettings.
+type CrowdSecSettings struct {
+	AutoApply      bool `json:"auto_apply"`
+	BouncerDefault bool `json:"bouncer_default"`
+
+	// ConsoleAvailable De server heeft een masterkey om de sleutel te bewaren
+	ConsoleAvailable bool `json:"console_available"`
+
+	// ConsoleKeySet Er is een enroll-sleutel voor de CrowdSec Console
+	ConsoleKeySet bool                      `json:"console_key_set"`
+	ShareBans     CrowdSecSettingsShareBans `json:"share_bans"`
+	UpdatedAt     time.Time                 `json:"updated_at"`
+	Whitelist     []string                  `json:"whitelist"`
+}
+
+// CrowdSecSettingsShareBans defines model for CrowdSecSettings.ShareBans.
+type CrowdSecSettingsShareBans string
+
+// CrowdSecSettingsInput defines model for CrowdSecSettingsInput.
+type CrowdSecSettingsInput struct {
+	AutoApply      bool                           `json:"auto_apply"`
+	BouncerDefault bool                           `json:"bouncer_default"`
+	ShareBans      CrowdSecSettingsInputShareBans `json:"share_bans"`
+	Whitelist      []string                       `json:"whitelist"`
+}
+
+// CrowdSecSettingsInputShareBans defines model for CrowdSecSettingsInput.ShareBans.
+type CrowdSecSettingsInputShareBans string
+
+// CrowdSecStatus defines model for CrowdSecStatus.
+type CrowdSecStatus struct {
+	Active  *string `json:"active,omitempty"`
+	Applied *struct {
+		AppliedAt   time.Time `json:"applied_at"`
+		Collections []string  `json:"collections"`
+		Hash        string    `json:"hash"`
+	} `json:"applied,omitempty"`
+
+	// Bouncer Leeg zonder bouncer
+	Bouncer  *string `json:"bouncer,omitempty"`
+	Bouncers *[]struct {
+		Ip       *string    `json:"ip,omitempty"`
+		LastPull *time.Time `json:"last_pull,omitempty"`
+		Name     string     `json:"name"`
+		Type     *string    `json:"type,omitempty"`
+		Valid    bool       `json:"valid"`
+		Version  *string    `json:"version,omitempty"`
+	} `json:"bouncers,omitempty"`
+	Capi        bool `json:"capi"`
+	Collections *[]struct {
+		Name    string  `json:"name"`
+		Status  *string `json:"status,omitempty"`
+		Version *string `json:"version,omitempty"`
+	} `json:"collections,omitempty"`
+	Containers *[]struct {
+		Image  string             `json:"image"`
+		Mounts *map[string]string `json:"mounts,omitempty"`
+		Name   string             `json:"name"`
+	} `json:"containers,omitempty"`
+	Errors    *[]string            `json:"errors,omitempty"`
+	Installed bool                 `json:"installed"`
+	Probes    *map[string][]string `json:"probes,omitempty"`
+	Sources   *[]struct {
+		Parsed   int64  `json:"parsed"`
+		Poured   int64  `json:"poured"`
+		Read     int64  `json:"read"`
+		Source   string `json:"source"`
+		Unparsed int64  `json:"unparsed"`
+	} `json:"sources,omitempty"`
+	Version *string `json:"version,omitempty"`
+}
+
+// CrowdSecTopEntry defines model for CrowdSecTopEntry.
+type CrowdSecTopEntry struct {
+	As      string `json:"as"`
+	Count   int    `json:"count"`
+	Country string `json:"country"`
+	Key     string `json:"key"`
+}
 
 // DRPlan defines model for DRPlan.
 type DRPlan struct {
@@ -11664,6 +12025,22 @@ type StopCronRunJSONBody struct {
 	Confirm *string `json:"confirm,omitempty"`
 }
 
+// ListCrowdSecAlertsParams defines parameters for ListCrowdSecAlerts.
+type ListCrowdSecAlertsParams struct {
+	NodeId    *openapi_types.UUID `form:"node_id,omitempty" json:"node_id,omitempty"`
+	ClusterId *openapi_types.UUID `form:"cluster_id,omitempty" json:"cluster_id,omitempty"`
+	Scenario  *string             `form:"scenario,omitempty" json:"scenario,omitempty"`
+
+	// Value IP of begin ervan
+	Value *string `form:"value,omitempty" json:"value,omitempty"`
+	Limit *int    `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
+// ApplyCrowdSecNodeJSONBody defines parameters for ApplyCrowdSecNode.
+type ApplyCrowdSecNodeJSONBody struct {
+	Remove *bool `json:"remove,omitempty"`
+}
+
 // GetDatabaseMigrationParams defines parameters for GetDatabaseMigration.
 type GetDatabaseMigrationParams struct {
 	// Source De sleutel van de server onder Databases, zoals mariadb/<cluster>
@@ -12186,6 +12563,27 @@ type RunCronJobJSONRequestBody RunCronJobJSONBody
 // StopCronRunJSONRequestBody defines body for StopCronRun for application/json ContentType.
 type StopCronRunJSONRequestBody StopCronRunJSONBody
 
+// SetCrowdSecConsoleKeyJSONRequestBody defines body for SetCrowdSecConsoleKey for application/json ContentType.
+type SetCrowdSecConsoleKeyJSONRequestBody = CrowdSecConsoleKeyInput
+
+// EnrollCrowdSecConsoleJSONRequestBody defines body for EnrollCrowdSecConsole for application/json ContentType.
+type EnrollCrowdSecConsoleJSONRequestBody = CrowdSecEnrollInput
+
+// DecideCrowdSecJSONRequestBody defines body for DecideCrowdSec for application/json ContentType.
+type DecideCrowdSecJSONRequestBody = CrowdSecDecisionInput
+
+// SetCrowdSecNodesJSONRequestBody defines body for SetCrowdSecNodes for application/json ContentType.
+type SetCrowdSecNodesJSONRequestBody = CrowdSecNodesInput
+
+// ConfigureCrowdSecNodeJSONRequestBody defines body for ConfigureCrowdSecNode for application/json ContentType.
+type ConfigureCrowdSecNodeJSONRequestBody = CrowdSecNodeInput
+
+// ApplyCrowdSecNodeJSONRequestBody defines body for ApplyCrowdSecNode for application/json ContentType.
+type ApplyCrowdSecNodeJSONRequestBody ApplyCrowdSecNodeJSONBody
+
+// UpdateCrowdSecSettingsJSONRequestBody defines body for UpdateCrowdSecSettings for application/json ContentType.
+type UpdateCrowdSecSettingsJSONRequestBody = CrowdSecSettingsInput
+
 // StartDatabaseMoveJSONRequestBody defines body for StartDatabaseMove for application/json ContentType.
 type StartDatabaseMoveJSONRequestBody = DatabaseMoveInput
 
@@ -12680,6 +13078,42 @@ type ServerInterface interface {
 	// RefreshCronjobs De cronjobs van alle nodes meteen opnieuw lezen
 	// (POST /cronjobs/refresh)
 	RefreshCronjobs(w http.ResponseWriter, r *http.Request)
+	// GetCrowdSec CrowdSec op alle nodes (fase 14)
+	// (GET /crowdsec)
+	GetCrowdSec(w http.ResponseWriter, r *http.Request)
+	// ListCrowdSecAlerts Alerts van de nodes, nieuwste eerst (90 dagen)
+	// (GET /crowdsec/alerts)
+	ListCrowdSecAlerts(w http.ResponseWriter, r *http.Request, params ListCrowdSecAlertsParams)
+	// SetCrowdSecConsoleKey Enroll-sleutel van de CrowdSec Console bewaren of weghalen (admin)
+	// (PUT /crowdsec/console)
+	SetCrowdSecConsoleKey(w http.ResponseWriter, r *http.Request)
+	// EnrollCrowdSecConsole Nodes opnieuw aanmelden bij de CrowdSec Console (admin)
+	// (POST /crowdsec/console/enroll)
+	EnrollCrowdSecConsole(w http.ResponseWriter, r *http.Request)
+	// ListCrowdSecDecisions Actieve bans, samengevoegd per adres (zonder de community-blocklist)
+	// (GET /crowdsec/decisions)
+	ListCrowdSecDecisions(w http.ResponseWriter, r *http.Request)
+	// DecideCrowdSec IP of range blokkeren of deblokkeren (admin)
+	// (POST /crowdsec/decisions)
+	DecideCrowdSec(w http.ResponseWriter, r *http.Request)
+	// SetCrowdSecNodes CrowdSec aan- of uitzetten op nodes (admin)
+	// (POST /crowdsec/nodes)
+	SetCrowdSecNodes(w http.ResponseWriter, r *http.Request)
+	// GetCrowdSecNode CrowdSec op één node, met de laatste alerts
+	// (GET /crowdsec/nodes/{nodeId})
+	GetCrowdSecNode(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// ConfigureCrowdSecNode Bouncer en profielen van een node (admin)
+	// (PUT /crowdsec/nodes/{nodeId})
+	ConfigureCrowdSecNode(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// ApplyCrowdSecNode Het plan nu toepassen, of CrowdSec verwijderen (remove), als taak crowdsec.apply (admin)
+	// (POST /crowdsec/nodes/{nodeId}/apply)
+	ApplyCrowdSecNode(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// RefreshCrowdSecNode De stand van een node meteen ophalen (admin)
+	// (POST /crowdsec/nodes/{nodeId}/refresh)
+	RefreshCrowdSecNode(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// UpdateCrowdSecSettings CrowdSec-instellingen bewaren (admin)
+	// (PUT /crowdsec/settings)
+	UpdateCrowdSecSettings(w http.ResponseWriter, r *http.Request)
 	// ListDatabases De MariaDB- en PostgreSQL-servers die de agents melden
 	// (GET /databases)
 	ListDatabases(w http.ResponseWriter, r *http.Request)
@@ -13844,6 +14278,78 @@ func (_ Unimplemented) ListCronjobs(w http.ResponseWriter, r *http.Request) {
 // RefreshCronjobs De cronjobs van alle nodes meteen opnieuw lezen
 // (POST /cronjobs/refresh)
 func (_ Unimplemented) RefreshCronjobs(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetCrowdSec CrowdSec op alle nodes (fase 14)
+// (GET /crowdsec)
+func (_ Unimplemented) GetCrowdSec(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListCrowdSecAlerts Alerts van de nodes, nieuwste eerst (90 dagen)
+// (GET /crowdsec/alerts)
+func (_ Unimplemented) ListCrowdSecAlerts(w http.ResponseWriter, r *http.Request, params ListCrowdSecAlertsParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SetCrowdSecConsoleKey Enroll-sleutel van de CrowdSec Console bewaren of weghalen (admin)
+// (PUT /crowdsec/console)
+func (_ Unimplemented) SetCrowdSecConsoleKey(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// EnrollCrowdSecConsole Nodes opnieuw aanmelden bij de CrowdSec Console (admin)
+// (POST /crowdsec/console/enroll)
+func (_ Unimplemented) EnrollCrowdSecConsole(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListCrowdSecDecisions Actieve bans, samengevoegd per adres (zonder de community-blocklist)
+// (GET /crowdsec/decisions)
+func (_ Unimplemented) ListCrowdSecDecisions(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// DecideCrowdSec IP of range blokkeren of deblokkeren (admin)
+// (POST /crowdsec/decisions)
+func (_ Unimplemented) DecideCrowdSec(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SetCrowdSecNodes CrowdSec aan- of uitzetten op nodes (admin)
+// (POST /crowdsec/nodes)
+func (_ Unimplemented) SetCrowdSecNodes(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetCrowdSecNode CrowdSec op één node, met de laatste alerts
+// (GET /crowdsec/nodes/{nodeId})
+func (_ Unimplemented) GetCrowdSecNode(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ConfigureCrowdSecNode Bouncer en profielen van een node (admin)
+// (PUT /crowdsec/nodes/{nodeId})
+func (_ Unimplemented) ConfigureCrowdSecNode(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ApplyCrowdSecNode Het plan nu toepassen, of CrowdSec verwijderen (remove), als taak crowdsec.apply (admin)
+// (POST /crowdsec/nodes/{nodeId}/apply)
+func (_ Unimplemented) ApplyCrowdSecNode(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RefreshCrowdSecNode De stand van een node meteen ophalen (admin)
+// (POST /crowdsec/nodes/{nodeId}/refresh)
+func (_ Unimplemented) RefreshCrowdSecNode(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// UpdateCrowdSecSettings CrowdSec-instellingen bewaren (admin)
+// (PUT /crowdsec/settings)
+func (_ Unimplemented) UpdateCrowdSecSettings(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -18086,6 +18592,293 @@ func (siw *ServerInterfaceWrapper) RefreshCronjobs(w http.ResponseWriter, r *htt
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RefreshCronjobs(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetCrowdSec operation middleware
+func (siw *ServerInterfaceWrapper) GetCrowdSec(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetCrowdSec(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListCrowdSecAlerts operation middleware
+func (siw *ServerInterfaceWrapper) ListCrowdSecAlerts(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListCrowdSecAlertsParams
+
+	// ------------- Optional query parameter "node_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "node_id", r.URL.Query(), &params.NodeId, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "node_id"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "node_id", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cluster_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cluster_id", r.URL.Query(), &params.ClusterId, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cluster_id"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cluster_id", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "scenario" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "scenario", r.URL.Query(), &params.Scenario, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "scenario"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "scenario", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "value" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "value", r.URL.Query(), &params.Value, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "value"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "value", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListCrowdSecAlerts(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetCrowdSecConsoleKey operation middleware
+func (siw *ServerInterfaceWrapper) SetCrowdSecConsoleKey(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetCrowdSecConsoleKey(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// EnrollCrowdSecConsole operation middleware
+func (siw *ServerInterfaceWrapper) EnrollCrowdSecConsole(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.EnrollCrowdSecConsole(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListCrowdSecDecisions operation middleware
+func (siw *ServerInterfaceWrapper) ListCrowdSecDecisions(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListCrowdSecDecisions(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DecideCrowdSec operation middleware
+func (siw *ServerInterfaceWrapper) DecideCrowdSec(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DecideCrowdSec(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetCrowdSecNodes operation middleware
+func (siw *ServerInterfaceWrapper) SetCrowdSecNodes(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetCrowdSecNodes(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetCrowdSecNode operation middleware
+func (siw *ServerInterfaceWrapper) GetCrowdSecNode(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetCrowdSecNode(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ConfigureCrowdSecNode operation middleware
+func (siw *ServerInterfaceWrapper) ConfigureCrowdSecNode(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ConfigureCrowdSecNode(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ApplyCrowdSecNode operation middleware
+func (siw *ServerInterfaceWrapper) ApplyCrowdSecNode(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ApplyCrowdSecNode(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RefreshCrowdSecNode operation middleware
+func (siw *ServerInterfaceWrapper) RefreshCrowdSecNode(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RefreshCrowdSecNode(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateCrowdSecSettings operation middleware
+func (siw *ServerInterfaceWrapper) UpdateCrowdSecSettings(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateCrowdSecSettings(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -23674,6 +24467,42 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/updates", wrapper.StartUpdates)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/crowdsec", wrapper.GetCrowdSec)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/crowdsec/settings", wrapper.UpdateCrowdSecSettings)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/crowdsec/console", wrapper.SetCrowdSecConsoleKey)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/crowdsec/console/enroll", wrapper.EnrollCrowdSecConsole)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/crowdsec/nodes", wrapper.SetCrowdSecNodes)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/crowdsec/nodes/{nodeId}", wrapper.GetCrowdSecNode)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/crowdsec/nodes/{nodeId}", wrapper.ConfigureCrowdSecNode)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/crowdsec/nodes/{nodeId}/apply", wrapper.ApplyCrowdSecNode)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/crowdsec/nodes/{nodeId}/refresh", wrapper.RefreshCrowdSecNode)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/crowdsec/alerts", wrapper.ListCrowdSecAlerts)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/crowdsec/decisions", wrapper.ListCrowdSecDecisions)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/crowdsec/decisions", wrapper.DecideCrowdSec)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/commands", wrapper.ListCommands)

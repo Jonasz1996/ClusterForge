@@ -37,6 +37,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/components"
 	"github.com/Jonasz1996/clusterforge/internal/config"
 	"github.com/Jonasz1996/clusterforge/internal/cronjobs"
+	"github.com/Jonasz1996/clusterforge/internal/crowdsec"
 	"github.com/Jonasz1996/clusterforge/internal/databases"
 	"github.com/Jonasz1996/clusterforge/internal/deploy"
 	"github.com/Jonasz1996/clusterforge/internal/deps"
@@ -210,6 +211,9 @@ func serve() error {
 	// Fase 10: pakketten en Docker bijwerken, en eigen commando's draaien.
 	upd := updates.NewService(pool, ev, runner, bus)
 	cmds := commands.NewService(pool, ev, runner, bus, upd)
+	// Fase 14: CrowdSec op de nodes, via agentprotocol 28 en runs.
+	csec := crowdsec.NewService(pool, ev, runner, bus, log)
+	csec.Box = box
 	// Een database als onderdeel van een cluster: MariaDB Galera op de
 	// nodes die er al zijn, met het geheugengebruik uit VictoriaMetrics in
 	// het plan.
@@ -385,6 +389,7 @@ func serve() error {
 	goLoop(ctx, log, "heal", hl.Run)
 	goLoop(ctx, log, "upg", upg.Run)
 	goLoop(ctx, log, "cmps", cmps.Run)
+	goLoop(ctx, log, "crowdsec", csec.Loop)
 	if git.Enabled() {
 		goLoop(ctx, log, "git", git.Run)
 	}
@@ -402,7 +407,7 @@ func serve() error {
 			Config: cfg, Log: log, Pool: pool, Auth: authSvc, Bus: bus, Hub: hub, Proxmox: pve, Jobs: runner,
 			Lifecycle: life, Deploy: dep, Backups: bk, Drift: drf, Failover: fo, Disaster: dis, Deps: dps, Rollout: ro,
 			GitOps: git, Assistant: asst, Risk: rsk, Topo: tp, Docs: dcs, Reports: rep, Kube: kub, KubeNodes: kn, Databases: dbs, Cronjobs: crons, Heal: hl,
-			Components: cmps, Upgrades: upg, Updates: upd, Commands: cmds, Version: version,
+			Components: cmps, Upgrades: upg, Updates: upd, Commands: cmds, CrowdSec: csec, Version: version,
 		}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,

@@ -1374,6 +1374,48 @@ van de agent of de server breekt de run niet af, en de taak leest daarna
 verder. Spec, uitvoer en stand staan in `/var/lib/clusterforge/runs/<id>`;
 de laatste twintig runs blijven bewaard.
 
+## CrowdSec
+
+ClusterForge installeert en beheert [CrowdSec](https://www.crowdsec.net/) op de nodes, met een eigen pagina
+**CrowdSec** voor alerts, bans en profielen (fase 14, agentprotocol 28; ontwerp in
+`docs/design/fase14-crowdsec.md`). Op de node typ je niets.
+
+1. **CrowdSec → Nodes**: "CrowdSec op alle nodes", "Cluster aanzetten" of "Aanzetten" per node (ook op de kaart
+   CrowdSec van een node). Een agent ouder dan protocol 28 krijgt "agent te oud": Nodes → Agents bijwerken.
+2. ClusterForge haalt de stand op, herkent de software en past het plan toe als taak `crowdsec.apply` met live
+   uitvoer: CrowdSec uit de officiële repo, de nftables-bouncer, de collections en `acquis.d/cf-*.yaml`. Het script
+   test de configuratie (`crowdsec -t`) en zet bij een fout de vorige terug.
+3. Komt er software bij (bv. NPM op een node), dan past ClusterForge de node vanzelf aan (Instellingen →
+   Automatisch toepassen). Een mislukte poging wacht een uur, of je drukt Toepassen.
+
+**Profielen** (tab Profielen): Linux + SSH (altijd; journald op Debian 13), nginx, Apache (ook Zabbix-web),
+HAProxy, Nginx Proxy Manager, Traefik, Caddy, MariaDB/Galera, MySQL, PostgreSQL, Authentik, Home Assistant,
+Nextcloud, Grafana, Gitea, Vaultwarden, Jellyfin, Immich, Plex en Proxmox. Herkend aan systemd-units, Docker-images
+(met de mounts voor de logmap), bestanden en het clustertemplate; zo werkt het ook voor Docker-apps die
+ClusterForge niet zelf uitrolde. Per node zet je een profiel uit of bij met Wijzigen. PostgreSQL onder Patroni logt
+via Patroni; die regels herkent de pgsql-parser niet (de kaart zegt dat).
+
+**CrowdSec Console** (Instellingen, agentprotocol 31): plak de enroll-sleutel van app.crowdsec.net (het laatste
+woord van `cscli console enroll <sleutel>`). ClusterForge meldt elke beheerde node aan zodra CrowdSec er draait
+(`cscli console enroll --name <hostnaam> --overwrite`, daarna een herstart van CrowdSec); accepteer de nodes in de
+Console. De sleutel staat versleuteld met de masterkey (CF_MASTER_KEY) en gaat alleen in het verzoek naar de agent,
+niet in een script, taak of event. "Alle nodes opnieuw aanmelden" en "Console aanmelden" op de kaart van een node
+melden opnieuw aan. Een mislukte aanmelding staat op de kaart en wacht een uur.
+
+**Whitelist** (Instellingen): standaard 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, loopback en fc00::/7. CrowdSec
+bant die nooit, zodat de proxy voor een backend, een clusternode of je pc nooit buitengesloten raakt.
+
+**Bans delen** (standaard op alle beheerde nodes, of binnen het cluster, of uit): bant een scenario een IP op één
+node, dan zet ClusterForge dezelfde ban met de resterende duur op de andere nodes. **Bans → IP blokkeren** en
+**Deblokkeren** werken op alle nodes tegelijk (of een cluster of node). Alerts blijven 90 dagen; de
+community-blocklist krijgt elke node zelf en staat niet in de lijsten.
+
+Wat ClusterForge op de node schrijft: `/etc/crowdsec/acquis.d/cf-*.yaml` (de standaard `acquis.yaml` gaat opzij naar
+`acquis.yaml.cf-orig`), `/etc/crowdsec/parsers/s02-enrich/cf-whitelist.yaml`,
+`/etc/crowdsec/bouncers/crowdsec-firewall-bouncer.yaml.local` (met Docker ook de forward-hook) en
+`/var/lib/clusterforge/crowdsec.json`. Collections die je zelf installeerde, haalt het nooit weg. "Beheer uit"
+laat CrowdSec staan; "Verwijderen" doet `apt-get purge`.
+
 ## Zelfherstel
 
 Bij elke database op de pagina **Databases** staat de kaart **Zelfherstel**: wat er mis is, op welke node, waarom, en wat ClusterForge eraan zou doen. Dat werkt voor elke MariaDB, MySQL en PostgreSQL die de agent ziet, ook als ClusterForge haar niet zelf toepaste, zoals een Galera-cluster dat je met de hand opzette. ClusterForge herstelt met vaste acties in de agent en de server, niet met scripts: eerst vaststellen, dan een plan in gewone taal, en pas met **Nu herstellen**, of vanzelf als je dat per cluster aanzet, een taak met een stap per node, in het logboek en in de tijdlijn van het incident. Een kijker ziet de kaart ook; alleen een beheerder herstelt.
