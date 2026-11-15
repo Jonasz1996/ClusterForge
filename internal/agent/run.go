@@ -214,7 +214,10 @@ func (a *Agent) Connect() error {
 	if _, err = a.nc.Subscribe(protocol.Subject(a.Config.NodeID, protocol.SubjectCron), a.onCron); err != nil {
 		return err
 	}
-	_, err = a.nc.Subscribe(protocol.Subject(a.Config.NodeID, protocol.SubjectRun), a.onRun)
+	if _, err = a.nc.Subscribe(protocol.Subject(a.Config.NodeID, protocol.SubjectRun), a.onRun); err != nil {
+		return err
+	}
+	_, err = a.nc.Subscribe(protocol.Subject(a.Config.NodeID, protocol.SubjectCrowdSec), a.onCrowdSec)
 	return err
 }
 
