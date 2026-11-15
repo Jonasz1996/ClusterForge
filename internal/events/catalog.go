@@ -141,6 +141,9 @@ var Known = map[string]Spec{
 	"node.lifecycle_changed":      {CategoryLifecycle, "Lifecycle van node gewijzigd"},
 	"node.software_updated":       {CategoryLifecycle, "Pakketten of Docker op node bijgewerkt"},
 	"node.software_update_failed": {CategoryLifecycle, "Bijwerken van pakketten of Docker mislukt"},
+	"settings.update_policy":      {CategoryLifecycle, "Beleid voor automatisch bijwerken van omgeving gewijzigd"},
+	"cluster.update_policy":       {CategoryLifecycle, "Beleid voor automatisch bijwerken van cluster gewijzigd"},
+	"cluster.auto_update_skipped": {CategoryLifecycle, "Automatisch bijwerken overgeslagen"},
 	"node.command_ran":            {CategoryLifecycle, "Eigen commando gedraaid op node"},
 
 	"crowdsec.settings_changed": {CategorySecurity, "CrowdSec-instellingen gewijzigd"},

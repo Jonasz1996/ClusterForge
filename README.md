@@ -1341,6 +1341,46 @@ na een crash, bij zijn volgende start). Die werk je bij met **Bijwerken** op
 de databasekaart. Op prod vraagt het tweestapsverificatie en de slug van het
 cluster.
 
+### Slim bijwerken en automatisch (fase 15)
+
+Vanaf agentprotocol 29 werkt de agent slimmer bij:
+
+- **apt** draait altijd zonder vragen: `full-upgrade` met
+  `--force-confdef --force-confold` (je eigen configbestanden blijven staan,
+  de nieuwe versie komt ernaast als `.dpkg-dist`; de taak noemt ze), wacht
+  tot 10 minuten op een dpkg-lock in plaats van te falen, en herstelt een
+  half kapotte dpkg (`dpkg --configure -a`, `apt-get -f install`). Na de run
+  moet `dpkg --audit` leeg zijn.
+- **Docker** zoekt de projecten via `docker ps -a` en `docker inspect`
+  (labels: map, compose-bestanden, env-bestanden; mounts). Per project:
+  `pull`; is er een nieuw image (of kies je een nieuwe tag), dan `down` en
+  `up -d`, en daarna moet elke container draaien en gezond zijn (standaard
+  2 minuten, healthcheck als die er is). Lukt dat niet, dan bewaart de agent
+  de logs, zet hij het oude compose-bestand en de oude images terug en start
+  hij opnieuw. Het rapport (oude en nieuwe versie, gewijzigde
+  omgevingsvariabelen in het image, logs) staat bij het project.
+
+Bij een cluster met VIP's gaan de reservenodes eerst. Voor de VIP-houder aan
+de beurt is, gaan zijn VIP's naar een al bijgewerkte node (keepalived uit,
+zoals Onderhoud; bij Patroni eerst overschakelen), en daarna zet de taak
+keepalived weer aan. Mislukt een node, dan stopt alles en blijft de master
+zoals hij was.
+
+Bij een project op **Updates**: **Compose-bestand** opent de bestanden in
+de browser (geheimen als «geheim-1», die de agent bij het opslaan terugzet);
+**Opslaan** start het project opnieuw met test en terugdraaien. **Fix
+voorstellen** laat de assistent het rapport, de logs, het compose-bestand en
+de release notes van de bron (GitHub of Docker Hub) lezen en een aangepast
+bestand voorstellen, dat je in de editor nakijkt.
+
+Tab **Automatisch**: per omgeving (dev/test/acc/prod) een beleid (aan/uit,
+apt, Docker, herstarten, venster zoals `zo 03:00-05:00`), per cluster
+"zoals de omgeving", een eigen beleid of uit. In het venster start de server
+één keer een taak per cluster; staat een node offline of heeft een agent een
+oud protocol, dan slaat hij het cluster over met een melding in het logboek.
+Mislukt een automatische Docker-update, dan stelt de assistent vanzelf een
+fix voor. Prod vraagt tweestapsverificatie.
+
 ### Commando's
 
 **Commando's** zijn je eigen scripts: naam, script, als welke gebruiker
