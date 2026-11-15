@@ -1,0 +1,46 @@
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}). Wijzigingen hier
+# worden bij de volgende uitrol overschreven.
+#
+# Start alleen via cf-authentik (systemd); Docker start het nooit zelf
+# (restart: "no"). De database is PostgreSQL met Patroni op het VIP
+# {{ .params.db_vip }}; Redis is er alleen voor versies van vóór 2025.10 en
+# per node (cache).
+services:
+  redis:
+    image: docker.io/library/redis:7-alpine
+    container_name: cf-authentik-redis
+    restart: "no"
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+  server:
+    image: ghcr.io/goauthentik/server:{{ .params.version }}
+    container_name: cf-authentik-server
+    command: server
+    restart: "no"
+    depends_on: [redis]
+    env_file:
+      - /etc/cf-authentik/authentik.env
+      - /run/cf-authentik/key.env
+    ports:
+      - "9000:9000"
+      - "9443:9443"
+    shm_size: 512mb
+    volumes:
+      - /opt/cf-authentik/files/data:/data
+      - /opt/cf-authentik/files/media:/media
+      - /opt/cf-authentik/files/templates:/templates
+  worker:
+    image: ghcr.io/goauthentik/server:{{ .params.version }}
+    container_name: cf-authentik-worker
+    command: worker
+    restart: "no"
+    user: root
+    depends_on: [redis]
+    env_file:
+      - /etc/cf-authentik/authentik.env
+      - /run/cf-authentik/key.env
+    shm_size: 512mb
+    volumes:
+      - /opt/cf-authentik/files/data:/data
+      - /opt/cf-authentik/files/media:/media
+      - /opt/cf-authentik/files/templates:/templates
+      - /opt/cf-authentik/files/certs:/certs

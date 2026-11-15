@@ -1,0 +1,21 @@
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}).
+# Authentik (server, worker en een Redis per node). Draait op elke node van
+# het cluster tegen dezelfde PostgreSQL. authentik-ctl.sh up wacht tot de
+# database klaar is; tot dan probeert systemd het elke 15 seconden opnieuw.
+[Unit]
+Description=Authentik van {{ .cluster.slug }}
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+ExecStart=/usr/local/lib/clusterforge/authentik-ctl.sh up
+ExecStop=/usr/local/lib/clusterforge/authentik-ctl.sh down
+Restart=always
+RestartSec=15
+TimeoutStartSec=600
+TimeoutStopSec=90
+
+[Install]
+WantedBy=multi-user.target
