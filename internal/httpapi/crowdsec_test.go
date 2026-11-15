@@ -253,9 +253,12 @@ func TestCrowdSecEndToEnd(t *testing.T) {
 	var started struct {
 		JobID string `json:"job_id"`
 	}
-	if s := c.do("POST", "/api/v1/crowdsec/nodes/"+web01.ID+"/apply", map[string]any{}, &started); s != http.StatusAccepted {
-		t.Fatalf("toepassen: %d", s)
-	}
+	// Een tik van de lus kan net nog een taak gestart hebben (automatisch
+	// toepassen stond aan tot de PUT hierboven); dan antwoordt de API 400
+	// "loopt al een CrowdSec-taak". Probeer tot de node vrij is.
+	eventually(t, "toepassen gestart", func() bool {
+		return c.do("POST", "/api/v1/crowdsec/nodes/"+web01.ID+"/apply", map[string]any{}, &started) == http.StatusAccepted
+	})
 	if j := waitJob(t, c, started.JobID); j.Status != "succeeded" {
 		t.Fatalf("taak %+v", j)
 	}
