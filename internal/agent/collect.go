@@ -403,7 +403,14 @@ func (c *Collector) docker(ctx context.Context) *protocol.Docker {
 	if ps, err := c.run(ctx, "docker", "ps", "-q"); err == nil {
 		d.Containers = len(strings.Fields(string(ps)))
 	}
-	if ls, err := c.run(ctx, "docker", "compose", "ls", "-a", "--format", "json"); err == nil {
+	run := func(ctx context.Context, argv ...string) ([]byte, error) { return c.run(ctx, argv[0], argv[1:]...) }
+	exists := func(p string) bool {
+		_, err := os.Stat(c.path(p))
+		return err == nil
+	}
+	if ps, err := discoverCompose(ctx, run, exists, ""); err == nil {
+		d.Projects = ps
+	} else if ls, err := c.run(ctx, "docker", "compose", "ls", "-a", "--format", "json"); err == nil {
 		d.Projects = parseComposeLs(ls)
 	}
 	return d

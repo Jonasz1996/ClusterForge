@@ -96,3 +96,10 @@ func runArgvEnv(ctx context.Context, name string, argv, extra []string, out io.W
 	}
 	return -1, err
 }
+
+// keepOwner geeft een herschreven bestand de eigenaar en groep van fi terug.
+func keepOwner(p string, fi os.FileInfo) {
+	if st, ok := fi.Sys().(*syscall.Stat_t); ok && os.Getuid() == 0 {
+		_ = os.Chown(p, int(st.Uid), int(st.Gid))
+	}
+}
