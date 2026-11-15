@@ -1,0 +1,8 @@
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}). Voor ha-ctl.sh: kan
+# Home Assistant bij zijn database?
+[client]
+host={{ .params.vip }}
+port=3306
+user=homeassistant
+password={{ .params.db_password }}
+database=homeassistant

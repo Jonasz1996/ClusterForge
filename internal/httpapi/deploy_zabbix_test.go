@@ -57,7 +57,7 @@ func TestDeployZabbix(t *testing.T) {
 	}]
 	c.do("GET", "/api/v1/templates", nil, &tpls)
 	for _, tp := range tpls.Items {
-		want := map[string]string{"zabbix": "mariadb/server", "media-platform": "postgresql/node"}[tp.Name]
+		want := map[string]string{"zabbix": "mariadb/server", "media-platform": "postgresql/node", "home-assistant": "mariadb/node"}[tp.Name]
 		got := ""
 		if tp.Database != nil {
 			got = tp.Database.Engine + "/" + tp.Database.Role

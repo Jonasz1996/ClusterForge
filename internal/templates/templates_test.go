@@ -238,7 +238,7 @@ func TestBuiltinList(t *testing.T) {
 	for _, tpl := range Builtin() {
 		names = append(names, tpl.Name+" "+tpl.Version)
 	}
-	if got := strings.Join(names, ", "); got != "cron 1.0.0, docker 1.0.0, generic 1.0.0, keepalived-nginx 1.1.0, kubernetes 1.1.0, media-platform 1.0.0, nginx-proxy-manager 1.0.0, zabbix 1.0.0" {
+	if got := strings.Join(names, ", "); got != "cron 1.0.0, docker 1.0.0, generic 1.0.0, home-assistant 1.0.0, keepalived-nginx 1.1.0, kubernetes 1.1.0, media-platform 1.0.0, nginx-proxy-manager 1.0.0, zabbix 1.0.0" {
 		t.Fatalf("ingebouwde templates: %s", got)
 	}
 }

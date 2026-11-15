@@ -1,0 +1,11 @@
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}). In Home Assistant
+# als /config/cf-http.yaml (http: !include cf-http.yaml).
+server_port: {{ .params.port }}
+{{- with .params.trusted_proxies }}
+# Achter een reverse proxy (zoals Nginx Proxy Manager).
+use_x_forwarded_for: true
+trusted_proxies:
+{{- range fields . }}
+  - {{ . }}
+{{- end }}
+{{- end }}
