@@ -314,7 +314,7 @@ func (r *runCtx) createCT(ctx context.Context, st *jobs.Step, n *plannedNode) er
 			Hostname: n.Hostname, OSTemplate: vs.OSTemplate, Cores: n.VM.CPU, MemoryMiB: n.VM.MemoryMiB,
 			SwapMiB: min(512, n.VM.MemoryMiB), Storage: storage, DiskGiB: n.VM.DiskGiB, Bridge: t.Bridge,
 			DNS: t.DNS, HostKeys: true, Privileged: t.Privileged, Nesting: true, Keyctl: r.docker, OnBoot: true,
-			Tags: []string{"clusterforge", strings.ToLower(r.p.Cluster.Slug)},
+			Tags:        []string{"clusterforge", strings.ToLower(r.p.Cluster.Slug)},
 			Description: fmt.Sprintf("Beheerd door ClusterForge: cluster %s, rol %s, template %s %s.", r.p.Cluster.Name, n.Role, r.p.Template, r.p.Version),
 		}
 		if t.VLAN != nil {
