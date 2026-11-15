@@ -14,6 +14,7 @@ import {
   useConfigureCrowdSecNode,
   useCrowdSec,
   useCrowdSecNode,
+  useEnrollCrowdSecConsole,
   useRefreshCrowdSecNode,
   useSetCrowdSecNodes,
   type CrowdSecNode,
@@ -33,6 +34,8 @@ export function CrowdSecNodeCard({ nodeId, isAdmin }: { nodeId: string; isAdmin:
   const set = useSetCrowdSecNodes();
   const apply = useApplyCrowdSecNode();
   const refresh = useRefreshCrowdSecNode();
+  const enroll = useEnrollCrowdSecConsole();
+  const consoleKey = overview.data?.settings.console_key_set ?? false;
   const [edit, setEdit] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   if (!d.data) return null;
@@ -72,6 +75,15 @@ export function CrowdSecNodeCard({ nodeId, isAdmin }: { nodeId: string; isAdmin:
                 >
                   Toepassen
                 </Button>
+                {consoleKey && (
+                  <Button
+                    variant="secondary"
+                    disabled={enroll.isPending || !n.online}
+                    onClick={() => enroll.mutate(n.node_id, { onSuccess: () => setMsg("Wordt nu aangemeld bij de CrowdSec Console."), onError: onErr })}
+                  >
+                    Console aanmelden
+                  </Button>
+                )}
               </>
             )}
             <Link href={`/crowdsec?tab=alerts&node_id=${n.node_id}`} className="self-center text-sm text-brand-700 hover:underline dark:text-sky-300">
@@ -101,6 +113,11 @@ export function CrowdSecNodeCard({ nodeId, isAdmin }: { nodeId: string; isAdmin:
           )}
         </Alert>
       )}
+      {n.console_error && (
+        <Alert>
+          Aanmelden bij de CrowdSec Console mislukt{n.console_failed_at && ` (${ago(n.console_failed_at)})`}: {n.console_error}
+        </Alert>
+      )}
       {n.enabled && (
         <div className="space-y-4">
           {n.plan && (
@@ -127,6 +144,7 @@ export function CrowdSecNodeCard({ nodeId, isAdmin }: { nodeId: string; isAdmin:
                 Bouncer {n.bouncer ? "aan" : "uit"} · toegepast {n.applied_at ? ago(n.applied_at) : "nog niet"}
                 {n.plan_hash && n.plan_hash !== n.applied_hash && " · een nieuwe wijziging is klaar"}
                 {n.status?.capi && " · community-blocklist aan"}
+                {consoleKey && (n.console_enrolled ? ` · Console aangemeld ${n.console_enrolled_at ? ago(n.console_enrolled_at) : ""}` : " · nog niet bij de Console aangemeld")}
               </div>
             </div>
           )}

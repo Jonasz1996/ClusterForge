@@ -11,6 +11,10 @@ import (
 // (fase 14). Installeren en configureren gaat via een run (RunSince).
 const CrowdSecSince = 28
 
+// CrowdSecEnrollSince is de eerste protocolversie die een node bij de
+// CrowdSec Console aanmeldt (op enroll).
+const CrowdSecEnrollSince = 29
+
 // SubjectCrowdSec draagt de CrowdSec-verzoeken: cf.node.<id>.crowdsec.
 const SubjectCrowdSec = "crowdsec"
 
@@ -29,6 +33,10 @@ const (
 	CrowdSecOpPoll = "poll"
 	// CrowdSecDecide zet of verwijdert een ban.
 	CrowdSecOpDecide = "decide"
+	// CrowdSecOpEnroll meldt de node aan bij de CrowdSec Console
+	// (cscli console enroll). De sleutel gaat alleen in dit verzoek mee en
+	// komt niet in een script, log of bestand van ClusterForge.
+	CrowdSecOpEnroll = "enroll"
 )
 
 // CrowdSecRequestTimeout is hoe lang een CrowdSec-verzoek mag duren.
@@ -54,7 +62,37 @@ type CrowdSecRequest struct {
 	// Since hoort bij poll; nul is het afgelopen uur.
 	Since  time.Time         `json:"since,omitzero"`
 	Decide *CrowdSecDecision `json:"decide,omitempty"`
+	Enroll *CrowdSecEnroll   `json:"enroll,omitempty"`
 }
+
+// CrowdSecEnroll meldt een node aan bij de CrowdSec Console.
+type CrowdSecEnroll struct {
+	Key string `json:"key"`
+	// Name is de naam in de Console; meestal de hostnaam.
+	Name string `json:"name"`
+	// Overwrite meldt opnieuw aan, ook als de node al aangemeld was.
+	Overwrite bool `json:"overwrite,omitempty"`
+}
+
+var (
+	crowdSecEnrollKey  = regexp.MustCompile(`^[A-Za-z0-9_-]{8,128}$`)
+	crowdSecEnrollName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$`)
+)
+
+// Validate controleert een aanmelding; de waarden gaan als argumenten naar
+// cscli.
+func (e CrowdSecEnroll) Validate() error {
+	if !crowdSecEnrollKey.MatchString(e.Key) {
+		return fmt.Errorf("ongeldige enroll-sleutel (letters, cijfers, - en _)")
+	}
+	if !crowdSecEnrollName.MatchString(e.Name) {
+		return fmt.Errorf("ongeldige naam %q", e.Name)
+	}
+	return nil
+}
+
+// ValidEnrollKey zegt of een enroll-sleutel er geldig uitziet.
+func ValidEnrollKey(k string) bool { return crowdSecEnrollKey.MatchString(k) }
 
 // CrowdSecDecision is een ban die de server zet (Delete false) of weghaalt
 // (Delete true: alle bans op Value).

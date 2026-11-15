@@ -3667,6 +3667,48 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/crowdsec/console": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Enroll-sleutel van de CrowdSec Console bewaren of weghalen (admin)
+         * @description De sleutel uit `cscli console enroll <sleutel>` op app.crowdsec.net. Versleuteld bewaard met de masterkey en
+         *     nooit teruggegeven. Leeg haalt hem weg. Met een sleutel meldt ClusterForge elke beheerde node aan zodra CrowdSec
+         *     er draait (agent protocol 29).
+         */
+        put: operations["setCrowdSecConsoleKey"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/crowdsec/console/enroll": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Nodes opnieuw aanmelden bij de CrowdSec Console (admin)
+         * @description Zonder node_id alle beheerde nodes. De aanmelding volgt meteen in een ronde op de achtergrond.
+         */
+        post: operations["enrollCrowdSecConsole"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/crowdsec/nodes": {
         parameters: {
             query?: never;
@@ -11643,6 +11685,21 @@ export interface components {
             whitelist: string[];
             /** Format: date-time */
             updated_at: string;
+            /** @description Er is een enroll-sleutel voor de CrowdSec Console */
+            console_key_set: boolean;
+            /** @description De server heeft een masterkey om de sleutel te bewaren */
+            console_available: boolean;
+        };
+        CrowdSecConsoleKeyInput: {
+            /** @description Leeg haalt de sleutel weg */
+            key: string;
+        };
+        CrowdSecEnrollInput: {
+            /** Format: uuid */
+            node_id?: string;
+        };
+        CrowdSecEnrollResult: {
+            nodes: number;
         };
         CrowdSecSettingsInput: {
             auto_apply: boolean;
@@ -11787,6 +11844,13 @@ export interface components {
             /** Format: date-time */
             poll_at: string | null;
             poll_error: string;
+            /** @description Aangemeld bij de CrowdSec Console met de huidige sleutel */
+            console_enrolled: boolean;
+            /** Format: date-time */
+            console_enrolled_at: string | null;
+            console_error: string;
+            /** Format: date-time */
+            console_failed_at: string | null;
         };
         CrowdSecAlert: {
             /** Format: int64 */
@@ -17624,6 +17688,60 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["CrowdSecSettings"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+        };
+    };
+    setCrowdSecConsoleKey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CrowdSecConsoleKeyInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CrowdSecSettings"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+        };
+    };
+    enrollCrowdSecConsole: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CrowdSecEnrollInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CrowdSecEnrollResult"];
                 };
             };
             400: components["responses"]["Error"];

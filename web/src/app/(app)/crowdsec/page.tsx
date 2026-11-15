@@ -17,6 +17,8 @@ import {
   useCrowdSecBans,
   useCrowdSecDecide,
   useCrowdSecSettings,
+  useEnrollCrowdSecConsole,
+  useSetCrowdSecConsoleKey,
   useSetCrowdSecNodes,
   type CrowdSecNode,
   type CrowdSecOverview,
@@ -743,6 +745,72 @@ function SettingsTab({ o, isAdmin }: { o: CrowdSecOverview; isAdmin: boolean }) 
           </Button>
         )}
       </div>
+      <ConsoleSettings o={o} isAdmin={isAdmin} />
     </Card>
+  );
+}
+
+function ConsoleSettings({ o, isAdmin }: { o: CrowdSecOverview; isAdmin: boolean }) {
+  const setKey = useSetCrowdSecConsoleKey();
+  const enroll = useEnrollCrowdSecConsole();
+  const [key, setKeyValue] = useState("");
+  const managed = o.nodes.filter((n) => n.managed);
+  const enrolled = managed.filter((n) => n.console_enrolled).length;
+  const old = managed.filter((n) => n.protocol < 29).length;
+  const failed = managed.filter((n) => n.console_error);
+  return (
+    <div className="mt-6 max-w-2xl space-y-3 border-t border-slate-200 pt-4 text-sm dark:border-slate-700">
+      <div>
+        <h3 className="font-medium">CrowdSec Console</h3>
+        <p className="text-xs text-slate-500">
+          Plak de enroll-sleutel van app.crowdsec.net (het laatste woord van <code>cscli console enroll …</code>). ClusterForge meldt dan elke beheerde node aan
+          zodra CrowdSec er draait, met de hostnaam als naam. Accepteer de nodes daarna in de Console, tenzij je daar automatisch accepteren aanzette. De sleutel
+          staat versleuteld in ClusterForge en is hier niet meer te lezen.
+        </p>
+      </div>
+      {!o.settings.console_available && <Alert>De server heeft geen masterkey (CF_MASTER_KEY), dus hij kan de sleutel niet bewaren.</Alert>}
+      <p>
+        {o.settings.console_key_set ? (
+          <>
+            Sleutel ingesteld. <span className="text-slate-500">{enrolled} van {managed.length} beheerde nodes aangemeld.</span>
+          </>
+        ) : (
+          "Nog geen sleutel."
+        )}
+        {old > 0 && <span className="block text-xs text-amber-700 dark:text-amber-400">{old} node(s) hebben een oudere agent: Nodes → Agents bijwerken (protocol 29).</span>}
+      </p>
+      {failed.length > 0 && (
+        <Alert>
+          {failed.map((n) => (
+            <span key={n.node_id} className="block">
+              {n.hostname}: {n.console_error}
+            </span>
+          ))}
+        </Alert>
+      )}
+      {isAdmin && o.settings.console_available && (
+        <div className="flex flex-wrap items-end gap-2">
+          <Field label={o.settings.console_key_set ? "Nieuwe sleutel" : "Enroll-sleutel"} htmlFor="cs-console-key">
+            <Input id="cs-console-key" type="password" autoComplete="off" className="w-72 font-mono" value={key} onChange={(e) => setKeyValue(e.target.value)} />
+          </Field>
+          <Button disabled={!key.trim() || setKey.isPending} onClick={() => setKey.mutate(key.trim(), { onSuccess: () => setKeyValue("") })}>
+            Sleutel bewaren
+          </Button>
+          {o.settings.console_key_set && (
+            <>
+              <Button variant="secondary" disabled={enroll.isPending} onClick={() => enroll.mutate(undefined)}>
+                Alle nodes opnieuw aanmelden
+              </Button>
+              <Button variant="ghost" disabled={setKey.isPending} onClick={() => setKey.mutate("")}>
+                Sleutel weghalen
+              </Button>
+            </>
+          )}
+        </div>
+      )}
+      {setKey.isError && <Alert>{errText(setKey.error)}</Alert>}
+      {enroll.isError && <Alert>{errText(enroll.error)}</Alert>}
+      {enroll.isSuccess && <Alert kind="success">{enroll.data.nodes} node(s) worden nu aangemeld.</Alert>}
+    </div>
   );
 }

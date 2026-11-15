@@ -673,25 +673,29 @@ type CrowdsecDecision struct {
 }
 
 type CrowdsecNode struct {
-	NodeID           uuid.UUID
-	Managed          bool
-	Bouncer          bool
-	ExtraProfiles    []string
-	DisabledProfiles []string
-	Status           []byte
-	StatusAt         *time.Time
-	Plan             []byte
-	PlanHash         string
-	AppliedHash      string
-	AppliedAt        *time.Time
-	ApplyJobID       *uuid.UUID
-	ApplyError       string
-	ApplyFailedAt    *time.Time
-	Blocklist        int32
-	PollAt           *time.Time
-	PollError        string
-	LastAlertAt      *time.Time
-	CreatedAt        time.Time
+	NodeID            uuid.UUID
+	Managed           bool
+	Bouncer           bool
+	ExtraProfiles     []string
+	DisabledProfiles  []string
+	Status            []byte
+	StatusAt          *time.Time
+	Plan              []byte
+	PlanHash          string
+	AppliedHash       string
+	AppliedAt         *time.Time
+	ApplyJobID        *uuid.UUID
+	ApplyError        string
+	ApplyFailedAt     *time.Time
+	Blocklist         int32
+	PollAt            *time.Time
+	PollError         string
+	LastAlertAt       *time.Time
+	CreatedAt         time.Time
+	ConsoleHash       string
+	ConsoleEnrolledAt *time.Time
+	ConsoleError      string
+	ConsoleFailedAt   *time.Time
 }
 
 type CrowdsecSetting struct {
@@ -702,6 +706,9 @@ type CrowdsecSetting struct {
 	Whitelist      []string
 	UpdatedAt      time.Time
 	UpdatedBy      *uuid.UUID
+	ConsoleKeyEnc  []byte
+	ConsoleKeyID   string
+	ConsoleKeyHash string
 }
 
 type CrowdsecShared struct {
