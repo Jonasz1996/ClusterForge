@@ -33,6 +33,9 @@ var WatchedServices = []string{
 	// Databaseclusters: Patroni met etcd voor PostgreSQL, en garb, de
 	// scheidsrechter van Galera.
 	"patroni", "etcd", "garb",
+	// CrowdSec (fase 14) en software waarvoor ClusterForge een
+	// CrowdSec-profiel heeft.
+	"crowdsec", "crowdsec-firewall-bouncer", "caddy", "traefik", "grafana-server", "plexmediaserver", "pvedaemon",
 }
 
 // WatchedPatterns zijn units met een variabel deel. postgresql.service is op
