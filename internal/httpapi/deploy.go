@@ -115,6 +115,7 @@ func (s *Server) PlanDeployment(w http.ResponseWriter, r *http.Request) {
 		out.Nodes = append(out.Nodes, gen.DeployPlanNode{
 			Hostname: n.Hostname, Role: n.Role, Index: n.Index, Address: addr, Host: n.Host, Storage: n.Storage,
 			HostChosen: n.HostChosen, StorageChosen: n.StorageChosen, Cpu: n.VM.CPU, MemoryMib: n.VM.MemoryMiB, DiskGib: n.VM.DiskGiB,
+			Vmid: n.VMID, VmidChosen: n.VMIDChosen,
 		})
 	}
 	writeJSON(w, http.StatusOK, out)
@@ -166,15 +167,20 @@ func deployRequest(in gen.DeployInput) deploy.Request {
 	}
 	if t := in.Target; t != nil {
 		req.Target = deploy.Target{
-			ProxmoxID: t.ProxmoxId, ImageVMID: t.ImageVmid, Storage: deref(t.Storage),
+			ProxmoxID: t.ProxmoxId, ImageVMID: deref(t.ImageVmid), Storage: deref(t.Storage),
 			Bridge: deref(t.Bridge), VLAN: nullablePtr(t.Vlan), Network: string(t.Network),
 			FirstIP: deref(t.FirstIp), Gateway: deref(t.Gateway), DNS: deref(t.Dns),
-			SSHKeys: deref(t.SshKeys),
+			SSHKeys: deref(t.SshKeys), OSTemplate: deref(t.Ostemplate), TemplateStorage: deref(t.TemplateStorage),
+			Privileged: deref(t.Privileged),
+		}
+		if t.Create != nil {
+			req.Target.Create = string(*t.Create)
 		}
 		if t.Placement != nil {
 			for _, pl := range *t.Placement {
 				req.Target.Placement = append(req.Target.Placement, deploy.Placement{
 					Role: pl.Role, Index: pl.Index, Host: deref(pl.Host), Storage: deref(pl.Storage),
+					VMID: deref(pl.Vmid), Address: deref(pl.Address), CPU: deref(pl.Cpu), MemoryMiB: deref(pl.MemoryMib), DiskGiB: deref(pl.DiskGib),
 				})
 			}
 		}

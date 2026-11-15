@@ -1098,6 +1098,21 @@ func (e DependencyStrength) Valid() bool {
 	}
 }
 
+// Defines values for DeployTargetCreate.
+const (
+	Ct DeployTargetCreate = "ct"
+)
+
+// Valid indicates whether the value is a known member of the DeployTargetCreate enum.
+func (e DeployTargetCreate) Valid() bool {
+	switch e {
+	case Ct:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for DeployTargetNetwork.
 const (
 	Dhcp   DeployTargetNetwork = "dhcp"
@@ -6910,15 +6925,30 @@ type DeployInput struct {
 
 // DeployPlacement defines model for DeployPlacement.
 type DeployPlacement struct {
+	// Address Vast IPv4-adres zonder prefix; leeg is het volgende vrije na first_ip
+	Address *string `json:"address,omitempty"`
+
+	// Cpu vCPU's; leeg volgt de template
+	Cpu *int `json:"cpu,omitempty"`
+
+	// DiskGib Schijf in GB; leeg volgt de template
+	DiskGib *int `json:"disk_gib,omitempty"`
+
 	// Host Proxmox-host; leeg kiest ClusterForge
 	Host *string `json:"host,omitempty"`
 
 	// Index Volgnummer binnen de rol, vanaf 1
-	Index int    `json:"index"`
-	Role  string `json:"role"`
+	Index int `json:"index"`
+
+	// MemoryMib Geheugen in MB; leeg volgt de template
+	MemoryMib *int   `json:"memory_mib,omitempty"`
+	Role      string `json:"role"`
 
 	// Storage Storage voor de schijf; leeg is de standaard
 	Storage *string `json:"storage,omitempty"`
+
+	// Vmid Nummer van de nieuwe VM of CT; leeg kiest ClusterForge
+	Vmid *int `json:"vmid,omitempty"`
 }
 
 // DeployPlan defines model for DeployPlan.
@@ -6952,6 +6982,10 @@ type DeployPlanNode struct {
 	// Storage De storage voor de schijf; leeg bij bestaande nodes
 	Storage       string `json:"storage"`
 	StorageChosen bool   `json:"storage_chosen"`
+
+	// Vmid Nummer van de nieuwe VM of CT; 0 als Proxmox het bij het maken kiest
+	Vmid       int  `json:"vmid"`
+	VmidChosen bool `json:"vmid_chosen"`
 }
 
 // DeployResult defines model for DeployResult.
@@ -6963,28 +6997,43 @@ type DeployResult struct {
 // DeployTarget defines model for DeployTarget.
 type DeployTarget struct {
 	// Bridge Standaard vmbr0
-	Bridge *string   `json:"bridge,omitempty"`
-	Dns    *[]string `json:"dns,omitempty"`
+	Bridge *string `json:"bridge,omitempty"`
+
+	// Create ct - nieuwe CT's die de agent op de Proxmox-host maakt (fase 17), met cf-agent erin; image_vmid valt dan weg.
+	Create *DeployTargetCreate `json:"create,omitempty"`
+	Dns    *[]string           `json:"dns,omitempty"`
 
 	// FirstIp Adres van de eerste node met prefix, zoals 10.0.20.11/24; de volgende nodes krijgen de adressen erna
 	FirstIp *string `json:"first_ip,omitempty"`
 	Gateway *string `json:"gateway,omitempty"`
 
-	// ImageVmid De VM-template (golden image) om uit te klonen
-	ImageVmid int                 `json:"image_vmid"`
+	// ImageVmid De VM-template (golden image) of CT-template om uit te klonen; niet bij create ct
+	ImageVmid *int                `json:"image_vmid,omitempty"`
 	Network   DeployTargetNetwork `json:"network"`
+
+	// Ostemplate Containertemplate bij create ct, zoals local:vztmpl/debian-13-standard_13.1-2_amd64.tar.zst; leeg is de nieuwste debian-13-standard
+	Ostemplate *string `json:"ostemplate,omitempty"`
 
 	// Placement Per node de Proxmox-host en de storage. Een node zonder keuze, of met een lege host of storage, krijgt die van ClusterForge: storage zoals het veld storage (of de template), hosts gespreid over de online hosts.
 	Placement *[]DeployPlacement `json:"placement,omitempty"`
-	ProxmoxId openapi_types.UUID `json:"proxmox_id"`
+
+	// Privileged Bevoegde CT's in plaats van onbevoegde
+	Privileged *bool              `json:"privileged,omitempty"`
+	ProxmoxId  openapi_types.UUID `json:"proxmox_id"`
 
 	// SshKeys Publieke SSH-sleutels, één per regel
 	SshKeys *string `json:"ssh_keys,omitempty"`
 
 	// Storage Storage voor de schijven; leeg is die van de template
-	Storage *string                `json:"storage,omitempty"`
-	Vlan    nullable.Nullable[int] `json:"vlan,omitempty"`
+	Storage *string `json:"storage,omitempty"`
+
+	// TemplateStorage Storage voor de containertemplate als de host hem downloadt; standaard local
+	TemplateStorage *string                `json:"template_storage,omitempty"`
+	Vlan            nullable.Nullable[int] `json:"vlan,omitempty"`
 }
+
+// DeployTargetCreate ct - nieuwe CT's die de agent op de Proxmox-host maakt (fase 17), met cf-agent erin; image_vmid valt dan weg.
+type DeployTargetCreate string
 
 // DeployTargetNetwork defines model for DeployTarget.Network.
 type DeployTargetNetwork string
@@ -10756,6 +10805,21 @@ type ProxmoxStorage struct {
 	Type   string `json:"type"`
 }
 
+// PveActionInput defines model for PveActionInput.
+type PveActionInput struct {
+	// Confirm Bij verwijderen de naam of het nummer van de gast
+	Confirm *string `json:"confirm,omitempty"`
+
+	// Op Een object van de Proxmox-hosts (fase 17); de velden staan in web/src/lib/pvehosts.ts en pkg/protocol/pve.go.
+	Op PveObject `json:"op"`
+
+	// ServerUrl Bij bootstrap het adres waarmee de CT ClusterForge bereikt
+	ServerUrl *string `json:"server_url,omitempty"`
+}
+
+// PveObject Een object van de Proxmox-hosts (fase 17); de velden staan in web/src/lib/pvehosts.ts en pkg/protocol/pve.go.
+type PveObject map[string]interface{}
+
 // RecipeCheck defines model for RecipeCheck.
 type RecipeCheck struct {
 	Diagnostics []RecipeDiag `json:"diagnostics"`
@@ -13095,6 +13159,9 @@ type SetBackupWatchJSONRequestBody = BackupWatchInput
 // VmActionJSONRequestBody defines body for VmAction for application/json ContentType.
 type VmActionJSONRequestBody = VmActionInput
 
+// StartPveHostActionJSONRequestBody defines body for StartPveHostAction for application/json ContentType.
+type StartPveHostActionJSONRequestBody = PveActionInput
+
 // SaveRecipeJSONRequestBody defines body for SaveRecipe for application/json ContentType.
 type SaveRecipeJSONRequestBody = RecipeSource
 
@@ -13931,6 +13998,18 @@ type ServerInterface interface {
 	// ListVmSnapshots Snapshots van een VM of container, rechtstreeks uit Proxmox
 	// (GET /proxmox/{proxmoxId}/vms/{vmid}/snapshots)
 	ListVmSnapshots(w http.ResponseWriter, r *http.Request, proxmoxId openapi_types.UUID, vmid int)
+	// ListPveHosts Proxmox-hosts met een agent (fase 17), en hosts uit de koppelingen zonder agent
+	// (GET /pve-hosts)
+	ListPveHosts(w http.ResponseWriter, r *http.Request)
+	// StartPveHostAction Een actie met pct, qm of pveam op de host, als taak pvehost.action (admin)
+	// (POST /pve-hosts/{nodeId}/actions)
+	StartPveHostAction(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// GetPveHostAvailable Containertemplates die de host met pveam kan downloaden
+	// (GET /pve-hosts/{nodeId}/available)
+	GetPveHostAvailable(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// GetPveHostInventory Wat de agent op de host ziet - CT's en VM's met configuratie en snapshots, storages, bridges, containertemplates
+	// (GET /pve-hosts/{nodeId}/inventory)
+	GetPveHostInventory(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
 	// ListRecipes Alle recepten met hun versies (fase 9)
 	// (GET /recipes)
 	ListRecipes(w http.ResponseWriter, r *http.Request)
@@ -15629,6 +15708,30 @@ func (_ Unimplemented) VmAction(w http.ResponseWriter, r *http.Request, proxmoxI
 // ListVmSnapshots Snapshots van een VM of container, rechtstreeks uit Proxmox
 // (GET /proxmox/{proxmoxId}/vms/{vmid}/snapshots)
 func (_ Unimplemented) ListVmSnapshots(w http.ResponseWriter, r *http.Request, proxmoxId openapi_types.UUID, vmid int) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListPveHosts Proxmox-hosts met een agent (fase 17), en hosts uit de koppelingen zonder agent
+// (GET /pve-hosts)
+func (_ Unimplemented) ListPveHosts(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// StartPveHostAction Een actie met pct, qm of pveam op de host, als taak pvehost.action (admin)
+// (POST /pve-hosts/{nodeId}/actions)
+func (_ Unimplemented) StartPveHostAction(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetPveHostAvailable Containertemplates die de host met pveam kan downloaden
+// (GET /pve-hosts/{nodeId}/available)
+func (_ Unimplemented) GetPveHostAvailable(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetPveHostInventory Wat de agent op de host ziet - CT's en VM's met configuratie en snapshots, storages, bridges, containertemplates
+// (GET /pve-hosts/{nodeId}/inventory)
+func (_ Unimplemented) GetPveHostInventory(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -23838,6 +23941,98 @@ func (siw *ServerInterfaceWrapper) ListVmSnapshots(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
+// ListPveHosts operation middleware
+func (siw *ServerInterfaceWrapper) ListPveHosts(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListPveHosts(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// StartPveHostAction operation middleware
+func (siw *ServerInterfaceWrapper) StartPveHostAction(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StartPveHostAction(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetPveHostAvailable operation middleware
+func (siw *ServerInterfaceWrapper) GetPveHostAvailable(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetPveHostAvailable(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetPveHostInventory operation middleware
+func (siw *ServerInterfaceWrapper) GetPveHostInventory(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetPveHostInventory(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListRecipes operation middleware
 func (siw *ServerInterfaceWrapper) ListRecipes(w http.ResponseWriter, r *http.Request) {
 
@@ -25427,6 +25622,18 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/crowdsec/decisions", wrapper.DecideCrowdSec)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/pve-hosts", wrapper.ListPveHosts)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/pve-hosts/{nodeId}/inventory", wrapper.GetPveHostInventory)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/pve-hosts/{nodeId}/available", wrapper.GetPveHostAvailable)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/pve-hosts/{nodeId}/actions", wrapper.StartPveHostAction)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/firewall", wrapper.GetFirewall)

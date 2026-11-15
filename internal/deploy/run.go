@@ -36,6 +36,9 @@ type runCtx struct {
 	tpl   *templates.Template
 	api   proxmox.API
 	actor events.Actor
+	// docker: de template installeert Docker, dus een nieuwe CT krijgt
+	// keyctl=1.
+	docker bool
 }
 
 func (s *Service) run(ctx context.Context, j *jobs.Job) error {
@@ -66,9 +69,13 @@ func (s *Service) run(ctx context.Context, j *jobs.Job) error {
 			_ = s.pve.Sync(sctx, r.p.Target.ProxmoxID)
 		}()
 
+		r.docker = r.p.Target.NewCT() && usesDocker(tpl, &r.p)
 		for i := range r.p.Nodes {
 			n := &r.p.Nodes[i]
 			if err := j.Step(ctx, r.kind()+" "+n.Hostname+" maken", func(ctx context.Context, st *jobs.Step) error {
+				if r.p.Target.NewCT() {
+					return r.createCT(ctx, st, n)
+				}
 				return r.createVM(ctx, st, n)
 			}); err != nil {
 				return err
@@ -99,7 +106,7 @@ func (r *runCtx) guest(st vmState, n *plannedNode) proxmox.Guest {
 // guestType is qemu voor VM's uit een golden image en lxc voor CT's uit een
 // CT-template.
 func (r *runCtx) guestType() string {
-	if r.p.Target.ImageType == "lxc" {
+	if r.p.Target.ImageType == "lxc" || r.p.Target.NewCT() {
 		return "lxc"
 	}
 	return "qemu"
@@ -121,6 +128,10 @@ type vmState struct {
 	// CloneHost is de host waar de kloon staat tot hij verhuist (fase
 	// migrate): de host van een template op niet-gedeelde storage.
 	CloneHost string `json:"clone_host,omitempty"`
+	// OSTemplate en Run horen bij een nieuwe CT (fase 17): de
+	// containertemplate, en de state van de run die op de host loopt.
+	OSTemplate string          `json:"ostemplate,omitempty"`
+	Run        json.RawMessage `json:"run,omitempty"`
 }
 
 func (r *runCtx) saveVM(ctx context.Context, st *jobs.Step, vs vmState) error {
@@ -211,9 +222,12 @@ func (r *runCtx) createVM(ctx context.Context, st *jobs.Step, n *plannedNode) er
 		if img.Node == "" {
 			return fmt.Errorf("de template (%s %d) bestaat niet meer in Proxmox", r.kind(), img.VMID)
 		}
-		id, err := r.api.NextID(ctx)
-		if err != nil {
-			return err
+		id := n.VMID
+		if !n.VMIDChosen || id == 0 {
+			var err error
+			if id, err = r.api.NextID(ctx); err != nil {
+				return err
+			}
 		}
 		vs = vmState{VMID: id, Phase: "clone"}
 		if err := r.saveVM(ctx, st, vs); err != nil {
@@ -495,6 +509,18 @@ func (r *runCtx) enroll(ctx context.Context, n *plannedNode, logf func(string, .
 	}
 	if row.Node.PveVmid == nil {
 		return fmt.Errorf("%s heeft nog geen %s", n.Hostname, r.kind())
+	}
+	if r.p.Target.NewCT() {
+		// De agent op de host zette cf-agent met een aanmeldbestand in de CT
+		// (createCT); hier alleen wachten tot hij zich meldt.
+		logf("%s: wachten tot cf-agent in de CT zich aanmeldt", n.Hostname)
+		start := time.Now()
+		if err := r.poll(ctx, r.s.EnrollTimeout, func(ctx context.Context) (bool, error) { return r.enrolled(ctx, n) }); err != nil {
+			return fmt.Errorf("%s: cf-agent meldt zich niet aan; kan de CT %s bereiken, en NATS op poort 4222? Zie journalctl -u cf-agent in de CT (pct enter %d). (%w)",
+				n.Hostname, r.p.ServerURL, *row.Node.PveVmid, err)
+		}
+		logf("%s: agent aangemeld na %s", n.Hostname, seconds(time.Since(start)))
+		return nil
 	}
 	if r.guestType() == "lxc" {
 		return r.enrollCT(ctx, n, logf)

@@ -221,6 +221,20 @@ func (s *Service) capacity(ctx context.Context, t Target, nodes []SpecNode) ([]s
 	if s.pve == nil || t.ProxmoxID == uuid.Nil {
 		return []string{"De capaciteit in Proxmox is niet gecontroleerd: de spec noemt geen Proxmox-koppeling."}, nil
 	}
+	if t.NewCT() {
+		p := &params{Target: t, ImageShared: true}
+		for _, n := range nodes {
+			p.Nodes = append(p.Nodes, plannedNode{Hostname: n.Hostname, Role: n.Role, Index: n.Index, VM: n.VM})
+		}
+		if err := s.placeNodes(ctx, p); err != nil {
+			var dv ValidationError
+			if errors.As(err, &dv) {
+				return nil, err
+			}
+			return []string{"De capaciteit in Proxmox is niet gecontroleerd: " + err.Error() + "."}, nil
+		}
+		return nil, nil
+	}
 	img, err := s.pve.Image(ctx, t.ProxmoxID, t.ImageVMID)
 	var ve proxmox.ValidationError
 	switch {
