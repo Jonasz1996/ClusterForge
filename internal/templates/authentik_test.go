@@ -228,7 +228,7 @@ func TestAuthentikOvernemen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer admin.Close(ctx)
+	defer func() { _ = admin.Close(ctx) }()
 	cfg := admin.Config()
 	exe := func(conn *pgx.Conn, q string) {
 		t.Helper()
@@ -253,7 +253,7 @@ func TestAuthentikOvernemen(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer src.Close(ctx)
+	defer func() { _ = src.Close(ctx) }()
 	exe(src, `CREATE TABLE authentik_core_user (id serial PRIMARY KEY, username text UNIQUE NOT NULL);
 CREATE TABLE authentik_core_provider (id serial PRIMARY KEY, name text NOT NULL);
 CREATE TABLE authentik_providers_proxy_proxyprovider (provider_ptr_id int PRIMARY KEY REFERENCES authentik_core_provider(id), external_host text);
@@ -409,7 +409,7 @@ INSERT INTO authentik_core_application (slug, provider_id) SELECT 'app' || id, i
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer dst.Close(ctx)
+	defer func() { _ = dst.Close(ctx) }()
 	var proxies int
 	var owner string
 	if err := dst.QueryRow(ctx, "SELECT count(*), (SELECT tableowner FROM pg_tables WHERE tablename = 'authentik_core_user') FROM authentik_providers_proxy_proxyprovider").Scan(&proxies, &owner); err != nil || proxies != 100 || owner != "cf_ak_eigenaar" {
@@ -464,7 +464,7 @@ func TestAuthentikNieuwCluster(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer admin.Close(ctx)
+	defer func() { _ = admin.Close(ctx) }()
 	cfg := admin.Config()
 	for _, q := range []string{"DROP DATABASE IF EXISTS cf_ak_nieuw", "DROP ROLE IF EXISTS cf_ak_nieuw", "CREATE ROLE cf_ak_nieuw LOGIN PASSWORD 'Wachtwoord123'", "CREATE DATABASE cf_ak_nieuw OWNER cf_ak_nieuw"} {
 		if _, err := admin.Exec(ctx, q); err != nil {
