@@ -312,6 +312,27 @@ func (e ClusterType) Valid() bool {
 	}
 }
 
+// Defines values for ClusterUpdatePolicyInputMode.
+const (
+	ClusterUpdatePolicyInputModeInherit ClusterUpdatePolicyInputMode = "inherit"
+	ClusterUpdatePolicyInputModeOff     ClusterUpdatePolicyInputMode = "off"
+	ClusterUpdatePolicyInputModeOwn     ClusterUpdatePolicyInputMode = "own"
+)
+
+// Valid indicates whether the value is a known member of the ClusterUpdatePolicyInputMode enum.
+func (e ClusterUpdatePolicyInputMode) Valid() bool {
+	switch e {
+	case ClusterUpdatePolicyInputModeInherit:
+		return true
+	case ClusterUpdatePolicyInputModeOff:
+		return true
+	case ClusterUpdatePolicyInputModeOwn:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ComponentDatabaseDumpsFreshness.
 const (
 	ComponentDatabaseDumpsFreshnessMissing ComponentDatabaseDumpsFreshness = "missing"
@@ -1299,6 +1320,30 @@ func (e DocMetaScope) Valid() bool {
 	case DocMetaScopeCluster:
 		return true
 	case DocMetaScopeOverview:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DockerReportResult.
+const (
+	DockerReportResultFailed     DockerReportResult = "failed"
+	DockerReportResultRolledBack DockerReportResult = "rolled_back"
+	DockerReportResultUpToDate   DockerReportResult = "up_to_date"
+	DockerReportResultUpdated    DockerReportResult = "updated"
+)
+
+// Valid indicates whether the value is a known member of the DockerReportResult enum.
+func (e DockerReportResult) Valid() bool {
+	switch e {
+	case DockerReportResultFailed:
+		return true
+	case DockerReportResultRolledBack:
+		return true
+	case DockerReportResultUpToDate:
+		return true
+	case DockerReportResultUpdated:
 		return true
 	default:
 		return false
@@ -3360,6 +3405,27 @@ func (e TimelineEntrySource) Valid() bool {
 	}
 }
 
+// Defines values for UpdatePoliciesClustersMode.
+const (
+	UpdatePoliciesClustersModeInherit UpdatePoliciesClustersMode = "inherit"
+	UpdatePoliciesClustersModeOff     UpdatePoliciesClustersMode = "off"
+	UpdatePoliciesClustersModeOwn     UpdatePoliciesClustersMode = "own"
+)
+
+// Valid indicates whether the value is a known member of the UpdatePoliciesClustersMode enum.
+func (e UpdatePoliciesClustersMode) Valid() bool {
+	switch e {
+	case UpdatePoliciesClustersModeInherit:
+		return true
+	case UpdatePoliciesClustersModeOff:
+		return true
+	case UpdatePoliciesClustersModeOwn:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for VmAction.
 const (
 	VmActionMigrate  VmAction = "migrate"
@@ -4433,6 +4499,16 @@ type ClusterRisk struct {
 // ClusterType defines model for ClusterType.
 type ClusterType string
 
+// ClusterUpdatePolicyInput defines model for ClusterUpdatePolicyInput.
+type ClusterUpdatePolicyInput struct {
+	Confirm *string                      `json:"confirm,omitempty"`
+	Mode    ClusterUpdatePolicyInputMode `json:"mode"`
+	Policy  *UpdatePolicy                `json:"policy,omitempty"`
+}
+
+// ClusterUpdatePolicyInputMode defines model for ClusterUpdatePolicyInput.Mode.
+type ClusterUpdatePolicyInputMode string
+
 // Command defines model for Command.
 type Command struct {
 	Description    string                    `json:"description"`
@@ -5259,12 +5335,42 @@ type ComponentVIP struct {
 	Vrid int `json:"vrid"`
 }
 
+// ComposeFiles defines model for ComposeFiles.
+type ComposeFiles struct {
+	Files []struct {
+		Content string `json:"content"`
+		Env     bool   `json:"env"`
+		Path    string `json:"path"`
+
+		// Secrets Aantal plaatshouders «geheim-N»
+		Secrets int    `json:"secrets"`
+		Sha256  string `json:"sha256"`
+	} `json:"files"`
+}
+
+// ComposeRef defines model for ComposeRef.
+type ComposeRef struct {
+	NodeId  openapi_types.UUID `json:"node_id"`
+	Project string             `json:"project"`
+}
+
 // ComposeResult defines model for ComposeResult.
 type ComposeResult struct {
 	Created  bool     `json:"created"`
 	Template string   `json:"template"`
 	Version  string   `json:"version"`
 	Warnings []string `json:"warnings"`
+}
+
+// ComposeWriteInput defines model for ComposeWriteInput.
+type ComposeWriteInput struct {
+	Confirm       *string            `json:"confirm,omitempty"`
+	Content       string             `json:"content"`
+	HealthSeconds *int               `json:"health_seconds,omitempty"`
+	NodeId        openapi_types.UUID `json:"node_id"`
+	OldSha256     string             `json:"old_sha256"`
+	Path          string             `json:"path"`
+	Project       string             `json:"project"`
 }
 
 // Composition defines model for Composition.
@@ -7287,6 +7393,35 @@ type DocVersion struct {
 	Id          int64     `json:"id"`
 	Sha256      string    `json:"sha256"`
 }
+
+// DockerReport defines model for DockerReport.
+type DockerReport struct {
+	// ConversationId Het gesprek met het voorstel voor een fix
+	ConversationId nullable.Nullable[openapi_types.UUID] `json:"conversation_id"`
+	CreatedAt      time.Time                             `json:"created_at"`
+	Edited         []string                              `json:"edited"`
+	JobId          nullable.Nullable[openapi_types.UUID] `json:"job_id"`
+	Logs           string                                `json:"logs"`
+	NodeId         openapi_types.UUID                    `json:"node_id"`
+	Problem        string                                `json:"problem"`
+	Project        string                                `json:"project"`
+	Result         DockerReportResult                    `json:"result"`
+	Services       []struct {
+		Changed    bool     `json:"changed"`
+		EnvAdded   []string `json:"env_added"`
+		EnvRemoved []string `json:"env_removed"`
+		Health     string   `json:"health"`
+		Image      string   `json:"image"`
+		NewVersion string   `json:"new_version"`
+		OldVersion string   `json:"old_version"`
+		Service    string   `json:"service"`
+		Source     string   `json:"source"`
+		State      string   `json:"state"`
+	} `json:"services"`
+}
+
+// DockerReportResult defines model for DockerReport.Result.
+type DockerReportResult string
 
 // DocsCommit defines model for DocsCommit.
 type DocsCommit struct {
@@ -11630,11 +11765,28 @@ type UpdateInput struct {
 	// Confirm De slug van het prodcluster
 	Confirm *string `json:"confirm,omitempty"`
 	Docker  *struct {
+		// Always Ook zonder nieuw image down en up -d
+		Always *bool `json:"always,omitempty"`
+
+		// HealthSeconds Hoe lang de test mag duren; 0 is 120 s
+		HealthSeconds *int `json:"health_seconds,omitempty"`
+
 		// Projects Leeg is elk Compose-project
 		Projects *[]string `json:"projects,omitempty"`
 		Prune    *bool     `json:"prune,omitempty"`
+
+		// Rollback Bij een mislukte test de vorige versie terugzetten (standaard aan)
+		Rollback *bool `json:"rollback,omitempty"`
+		Tags     *[]struct {
+			From    string `json:"from"`
+			Project string `json:"project"`
+			To      string `json:"to"`
+		} `json:"tags,omitempty"`
 	} `json:"docker,omitempty"`
-	NodeIds *[]openapi_types.UUID `json:"node_ids,omitempty"`
+
+	// Failover De VIP-houder eerst failoveren naar een bijgewerkte node (standaard aan)
+	Failover *bool                 `json:"failover,omitempty"`
+	NodeIds  *[]openapi_types.UUID `json:"node_ids,omitempty"`
 
 	// Reboot Herstarten als de node daar na de update om vraagt
 	Reboot *bool `json:"reboot,omitempty"`
@@ -11649,24 +11801,44 @@ type UpdateNode struct {
 	ClusterSlug        string                                `json:"cluster_slug"`
 	ComposeProjects    []struct {
 		ConfigFiles []string `json:"config_files"`
-		Name        string   `json:"name"`
-		Status      string   `json:"status"`
+		EnvFiles    []string `json:"env_files"`
+
+		// Missing Compose-bestanden die niet meer bestaan
+		Missing  []string `json:"missing"`
+		Name     string   `json:"name"`
+		Services []struct {
+			Container string   `json:"container"`
+			Health    string   `json:"health"`
+			Image     string   `json:"image"`
+			Mounts    []string `json:"mounts"`
+			Restarts  int      `json:"restarts"`
+			Service   string   `json:"service"`
+			State     string   `json:"state"`
+		} `json:"services"`
+		Status     string `json:"status"`
+		WorkingDir string `json:"working_dir"`
 	} `json:"compose_projects"`
+
+	// DockerReports Het rapport van de laatste Docker-update per project
+	DockerReports []DockerReport `json:"docker_reports"`
 
 	// DockerVersion Leeg zonder Docker
 	DockerVersion string                       `json:"docker_version"`
 	FactsAt       nullable.Nullable[time.Time] `json:"facts_at"`
 
 	// HasDatabase Het cluster heeft een database; die pakketten blijven staan
-	HasDatabase      bool               `json:"has_database"`
-	Hostname         string             `json:"hostname"`
-	NodeId           openapi_types.UUID `json:"node_id"`
-	Online           bool               `json:"online"`
-	Packages         []string           `json:"packages"`
-	Protocol         int                `json:"protocol"`
-	RebootRequired   bool               `json:"reboot_required"`
-	Supported        bool               `json:"supported"`
-	UpgradesSecurity int                `json:"upgrades_security"`
+	HasDatabase    bool               `json:"has_database"`
+	Hostname       string             `json:"hostname"`
+	NodeId         openapi_types.UUID `json:"node_id"`
+	Online         bool               `json:"online"`
+	Packages       []string           `json:"packages"`
+	Protocol       int                `json:"protocol"`
+	RebootRequired bool               `json:"reboot_required"`
+
+	// Smart De agent kent de updates van fase 15 (protocol 29)
+	Smart            bool `json:"smart"`
+	Supported        bool `json:"supported"`
+	UpgradesSecurity int  `json:"upgrades_security"`
 
 	// UpgradesTotal Null als de agent het niet kon tellen
 	UpgradesTotal nullable.Nullable[int] `json:"upgrades_total"`
@@ -11679,6 +11851,67 @@ type UpdateOverview struct {
 
 	// RunProtocol Het agentprotocol vanaf waar updates kunnen
 	RunProtocol int `json:"run_protocol"`
+
+	// SmartProtocol Het agentprotocol vanaf waar de updates van fase 15 kunnen
+	SmartProtocol int `json:"smart_protocol"`
+}
+
+// UpdatePolicies defines model for UpdatePolicies.
+type UpdatePolicies struct {
+	Clusters []struct {
+		ClusterId   openapi_types.UUID                    `json:"cluster_id"`
+		Effective   UpdatePolicy                          `json:"effective"`
+		Environment string                                `json:"environment"`
+		LastJobId   nullable.Nullable[openapi_types.UUID] `json:"last_job_id"`
+		LastNote    string                                `json:"last_note"`
+		LastRunAt   nullable.Nullable[time.Time]          `json:"last_run_at"`
+		Mode        UpdatePoliciesClustersMode            `json:"mode"`
+		Name        string                                `json:"name"`
+		NextStart   nullable.Nullable[time.Time]          `json:"next_start"`
+		Own         nullable.Nullable[UpdatePolicy]       `json:"own"`
+		Slug        string                                `json:"slug"`
+	} `json:"clusters"`
+	Environments []struct {
+		Environment string                       `json:"environment"`
+		Policy      UpdatePolicy                 `json:"policy"`
+		UpdatedAt   nullable.Nullable[time.Time] `json:"updated_at"`
+		UpdatedBy   nullable.Nullable[string]    `json:"updated_by"`
+	} `json:"environments"`
+	Timezone string `json:"timezone"`
+}
+
+// UpdatePoliciesClustersMode defines model for UpdatePolicies.Clusters.Mode.
+type UpdatePoliciesClustersMode string
+
+// UpdatePolicy defines model for UpdatePolicy.
+type UpdatePolicy struct {
+	Apt           bool `json:"apt"`
+	AptAutoremove bool `json:"apt_autoremove"`
+	AptFull       bool `json:"apt_full"`
+	Docker        bool `json:"docker"`
+	DockerPrune   bool `json:"docker_prune"`
+	Enabled       bool `json:"enabled"`
+	Reboot        bool `json:"reboot"`
+
+	// Window Zoals "zo 03:00-05:00" of "dagelijks 02:00-04:00"
+	Window string `json:"window"`
+}
+
+// UpdatePolicyInput defines model for UpdatePolicyInput.
+type UpdatePolicyInput struct {
+	Apt           bool `json:"apt"`
+	AptAutoremove bool `json:"apt_autoremove"`
+	AptFull       bool `json:"apt_full"`
+
+	// Confirm Bij prod "prod" of de slug van het cluster
+	Confirm     *string `json:"confirm,omitempty"`
+	Docker      bool    `json:"docker"`
+	DockerPrune bool    `json:"docker_prune"`
+	Enabled     bool    `json:"enabled"`
+	Reboot      bool    `json:"reboot"`
+
+	// Window Zoals "zo 03:00-05:00" of "dagelijks 02:00-04:00"
+	Window string `json:"window"`
 }
 
 // User defines model for User.
@@ -12700,6 +12933,21 @@ type UpdateServiceJSONRequestBody = ServicePatch
 // StartUpdatesJSONRequestBody defines body for StartUpdates for application/json ContentType.
 type StartUpdatesJSONRequestBody = UpdateInput
 
+// ReadComposeFilesJSONRequestBody defines body for ReadComposeFiles for application/json ContentType.
+type ReadComposeFilesJSONRequestBody = ComposeRef
+
+// WriteComposeFileJSONRequestBody defines body for WriteComposeFile for application/json ContentType.
+type WriteComposeFileJSONRequestBody = ComposeWriteInput
+
+// ProposeDockerFixJSONRequestBody defines body for ProposeDockerFix for application/json ContentType.
+type ProposeDockerFixJSONRequestBody = ComposeRef
+
+// SetClusterUpdatePolicyJSONRequestBody defines body for SetClusterUpdatePolicy for application/json ContentType.
+type SetClusterUpdatePolicyJSONRequestBody = ClusterUpdatePolicyInput
+
+// SetEnvUpdatePolicyJSONRequestBody defines body for SetEnvUpdatePolicy for application/json ContentType.
+type SetEnvUpdatePolicyJSONRequestBody = UpdatePolicyInput
+
 // UpdateVipJSONRequestBody defines body for UpdateVip for application/json ContentType.
 type UpdateVipJSONRequestBody = VipPatch
 
@@ -13548,6 +13796,24 @@ type ServerInterface interface {
 	// StartUpdates Pakketten (apt) en/of Docker bijwerken (admin); één taak updates.run per cluster
 	// (POST /updates)
 	StartUpdates(w http.ResponseWriter, r *http.Request)
+	// ReadComposeFiles De compose- en env-bestanden van een project lezen (admin); geheime waarden zijn plaatshouders
+	// (POST /updates/compose)
+	ReadComposeFiles(w http.ResponseWriter, r *http.Request)
+	// WriteComposeFile Een bestand van een project opslaan en het project opnieuw opstarten, met test en terugzetten (admin)
+	// (PUT /updates/compose)
+	WriteComposeFile(w http.ResponseWriter, r *http.Request)
+	// ProposeDockerFix De assistent een fix laten voorstellen voor een Docker-update; het antwoord stroomt als server-sent events
+	// (POST /updates/fix)
+	ProposeDockerFix(w http.ResponseWriter, r *http.Request)
+	// GetUpdatePolicies Automatisch bijwerken, per omgeving en per cluster (fase 15)
+	// (GET /updates/policies)
+	GetUpdatePolicies(w http.ResponseWriter, r *http.Request)
+	// SetClusterUpdatePolicy Een cluster zoals de omgeving, met een eigen beleid of uit (admin); een prodcluster vraagt TOTP en de slug
+	// (PUT /updates/policies/clusters/{clusterId})
+	SetClusterUpdatePolicy(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
+	// SetEnvUpdatePolicy Het beleid van een omgeving bewaren (admin); prod vraagt TOTP en confirm "prod"
+	// (PUT /updates/policies/environments/{environment})
+	SetEnvUpdatePolicy(w http.ResponseWriter, r *http.Request, environment string)
 	// ListUsers Actieve gebruikers, voor bijvoorbeeld de keuze van owners
 	// (GET /users)
 	ListUsers(w http.ResponseWriter, r *http.Request)
@@ -15246,6 +15512,42 @@ func (_ Unimplemented) ListUpdates(w http.ResponseWriter, r *http.Request) {
 // StartUpdates Pakketten (apt) en/of Docker bijwerken (admin); één taak updates.run per cluster
 // (POST /updates)
 func (_ Unimplemented) StartUpdates(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ReadComposeFiles De compose- en env-bestanden van een project lezen (admin); geheime waarden zijn plaatshouders
+// (POST /updates/compose)
+func (_ Unimplemented) ReadComposeFiles(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// WriteComposeFile Een bestand van een project opslaan en het project opnieuw opstarten, met test en terugzetten (admin)
+// (PUT /updates/compose)
+func (_ Unimplemented) WriteComposeFile(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ProposeDockerFix De assistent een fix laten voorstellen voor een Docker-update; het antwoord stroomt als server-sent events
+// (POST /updates/fix)
+func (_ Unimplemented) ProposeDockerFix(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetUpdatePolicies Automatisch bijwerken, per omgeving en per cluster (fase 15)
+// (GET /updates/policies)
+func (_ Unimplemented) GetUpdatePolicies(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SetClusterUpdatePolicy Een cluster zoals de omgeving, met een eigen beleid of uit (admin); een prodcluster vraagt TOTP en de slug
+// (PUT /updates/policies/clusters/{clusterId})
+func (_ Unimplemented) SetClusterUpdatePolicy(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SetEnvUpdatePolicy Het beleid van een omgeving bewaren (admin); prod vraagt TOTP en confirm "prod"
+// (PUT /updates/policies/environments/{environment})
+func (_ Unimplemented) SetEnvUpdatePolicy(w http.ResponseWriter, r *http.Request, environment string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -23582,6 +23884,114 @@ func (siw *ServerInterfaceWrapper) StartUpdates(w http.ResponseWriter, r *http.R
 	handler.ServeHTTP(w, r)
 }
 
+// ReadComposeFiles operation middleware
+func (siw *ServerInterfaceWrapper) ReadComposeFiles(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ReadComposeFiles(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// WriteComposeFile operation middleware
+func (siw *ServerInterfaceWrapper) WriteComposeFile(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.WriteComposeFile(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ProposeDockerFix operation middleware
+func (siw *ServerInterfaceWrapper) ProposeDockerFix(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ProposeDockerFix(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetUpdatePolicies operation middleware
+func (siw *ServerInterfaceWrapper) GetUpdatePolicies(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetUpdatePolicies(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetClusterUpdatePolicy operation middleware
+func (siw *ServerInterfaceWrapper) SetClusterUpdatePolicy(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetClusterUpdatePolicy(w, r, clusterId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetEnvUpdatePolicy operation middleware
+func (siw *ServerInterfaceWrapper) SetEnvUpdatePolicy(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "environment" -------------
+	var environment string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "environment", chi.URLParam(r, "environment"), &environment, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "environment", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetEnvUpdatePolicy(w, r, environment)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListUsers operation middleware
 func (siw *ServerInterfaceWrapper) ListUsers(w http.ResponseWriter, r *http.Request) {
 
@@ -24387,6 +24797,24 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/updates", wrapper.StartUpdates)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/updates/policies", wrapper.GetUpdatePolicies)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/updates/policies/environments/{environment}", wrapper.SetEnvUpdatePolicy)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/updates/policies/clusters/{clusterId}", wrapper.SetClusterUpdatePolicy)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/updates/compose", wrapper.ReadComposeFiles)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/updates/compose", wrapper.WriteComposeFile)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/updates/fix", wrapper.ProposeDockerFix)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/crowdsec", wrapper.GetCrowdSec)

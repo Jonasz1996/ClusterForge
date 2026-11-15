@@ -3862,6 +3862,127 @@ paths:
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
+  /updates/policies:
+    get:
+      operationId: getUpdatePolicies
+      summary: Automatisch bijwerken, per omgeving en per cluster (fase 15)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UpdatePolicies" }
+        "401": { $ref: "#/components/responses/Error" }
+  /updates/policies/environments/{environment}:
+    parameters:
+      - { name: environment, in: path, required: true, schema: { type: string, enum: [lab, test, prod] } }
+    put:
+      operationId: setEnvUpdatePolicy
+      summary: Het beleid van een omgeving bewaren (admin); prod vraagt TOTP en confirm "prod"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/UpdatePolicyInput" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UpdatePolicies" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /updates/policies/clusters/{clusterId}:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+    put:
+      operationId: setClusterUpdatePolicy
+      summary: Een cluster zoals de omgeving, met een eigen beleid of uit (admin); een prodcluster vraagt TOTP en de slug
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ClusterUpdatePolicyInput" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UpdatePolicies" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /updates/compose:
+    post:
+      operationId: readComposeFiles
+      summary: De compose- en env-bestanden van een project lezen (admin); geheime waarden zijn plaatshouders
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ComposeRef" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ComposeFiles" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+    put:
+      operationId: writeComposeFile
+      summary: Een bestand van een project opslaan en het project opnieuw opstarten, met test en terugzetten (admin)
+      description: |
+        Een taak updates.run op die ene node. De plaatshouders «geheim-N» zet de agent terug; is het bestand op de node
+        intussen veranderd (old_sha256), dan weigert hij. Op prod tweestapsverificatie en de slug in confirm.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ComposeWriteInput" }
+      responses:
+        "202":
+          description: Taak aangemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /updates/fix:
+    post:
+      operationId: proposeDockerFix
+      summary: De assistent een fix laten voorstellen voor een Docker-update; het antwoord stroomt als server-sent events
+      description: |
+        Voor een beheerder die de assistent mag gebruiken. ClusterForge haalt de release notes van GitHub of Docker Hub op
+        en geeft ze met het rapport, de logs en het compose-bestand (zonder geheimen) aan de assistent. Het laatste event,
+        done, noemt het gesprek (conversation_id).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ComposeRef" }
+      responses:
+        "200":
+          description: De stroom van het antwoord
+          content:
+            text/event-stream:
+              schema: { type: string }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
   /crowdsec:
     get:
       operationId: getCrowdSec
@@ -11323,15 +11444,16 @@ components:
         auto: { type: boolean, description: ClusterForge werkt deze agent vanzelf bij }
     UpdateOverview:
       type: object
-      required: [nodes, run_protocol]
+      required: [nodes, run_protocol, smart_protocol]
       properties:
         run_protocol: { type: integer, description: Het agentprotocol vanaf waar updates kunnen }
+        smart_protocol: { type: integer, description: Het agentprotocol vanaf waar de updates van fase 15 kunnen }
         nodes: { type: array, items: { $ref: "#/components/schemas/UpdateNode" } }
     UpdateNode:
       type: object
       required: [node_id, hostname, cluster_id, cluster_name, cluster_slug, cluster_environment, online, protocol, supported,
         upgrades_total, upgrades_security, packages, reboot_required, apt_updated_at, docker_version, compose_projects,
-        has_database, vip_holder, facts_at]
+        has_database, vip_holder, facts_at, smart, docker_reports]
       properties:
         node_id: { type: string, format: uuid }
         hostname: { type: string }
@@ -11342,6 +11464,7 @@ components:
         online: { type: boolean }
         protocol: { type: integer }
         supported: { type: boolean }
+        smart: { type: boolean, description: De agent kent de updates van fase 15 (protocol 29) }
         upgrades_total: { type: integer, nullable: true, description: Null als de agent het niet kon tellen }
         upgrades_security: { type: integer }
         packages: { type: array, items: { type: string } }
@@ -11352,11 +11475,31 @@ components:
           type: array
           items:
             type: object
-            required: [name, status, config_files]
+            required: [name, status, config_files, working_dir, env_files, missing, services]
             properties:
               name: { type: string }
               status: { type: string }
               config_files: { type: array, items: { type: string } }
+              working_dir: { type: string }
+              env_files: { type: array, items: { type: string } }
+              missing: { type: array, items: { type: string }, description: Compose-bestanden die niet meer bestaan }
+              services:
+                type: array
+                items:
+                  type: object
+                  required: [service, container, image, state, health, restarts, mounts]
+                  properties:
+                    service: { type: string }
+                    container: { type: string }
+                    image: { type: string }
+                    state: { type: string }
+                    health: { type: string }
+                    restarts: { type: integer }
+                    mounts: { type: array, items: { type: string } }
+        docker_reports:
+          type: array
+          description: Het rapport van de laatste Docker-update per project
+          items: { $ref: "#/components/schemas/DockerReport" }
         has_database: { type: boolean, description: Het cluster heeft een database; die pakketten blijven staan }
         vip_holder: { type: boolean }
         facts_at: { type: string, format: date-time, nullable: true }
@@ -11375,8 +11518,139 @@ components:
           properties:
             projects: { type: array, items: { type: string }, description: Leeg is elk Compose-project }
             prune: { type: boolean }
+            always: { type: boolean, description: Ook zonder nieuw image down en up -d }
+            health_seconds: { type: integer, description: Hoe lang de test mag duren; 0 is 120 s }
+            rollback: { type: boolean, description: Bij een mislukte test de vorige versie terugzetten (standaard aan) }
+            tags:
+              type: array
+              items:
+                type: object
+                required: [project, from, to]
+                properties:
+                  project: { type: string }
+                  from: { type: string }
+                  to: { type: string }
         reboot: { type: boolean, description: Herstarten als de node daar na de update om vraagt }
+        failover: { type: boolean, description: De VIP-houder eerst failoveren naar een bijgewerkte node (standaard aan) }
         confirm: { type: string, description: De slug van het prodcluster, ter bevestiging }
+    DockerReport:
+      type: object
+      required: [node_id, project, result, problem, created_at, job_id, conversation_id, services, logs, edited]
+      properties:
+        node_id: { type: string, format: uuid }
+        project: { type: string }
+        result: { type: string, enum: [up_to_date, updated, failed, rolled_back] }
+        problem: { type: string }
+        created_at: { type: string, format: date-time }
+        job_id: { type: string, format: uuid, nullable: true }
+        conversation_id: { type: string, format: uuid, nullable: true, description: Het gesprek met het voorstel voor een fix }
+        logs: { type: string }
+        edited: { type: array, items: { type: string } }
+        services:
+          type: array
+          items:
+            type: object
+            required: [service, image, old_version, new_version, source, env_added, env_removed, state, health, changed]
+            properties:
+              service: { type: string }
+              image: { type: string }
+              changed: { type: boolean }
+              old_version: { type: string }
+              new_version: { type: string }
+              source: { type: string }
+              env_added: { type: array, items: { type: string } }
+              env_removed: { type: array, items: { type: string } }
+              state: { type: string }
+              health: { type: string }
+    UpdatePolicy:
+      type: object
+      required: [enabled, apt, apt_full, apt_autoremove, docker, docker_prune, reboot, window]
+      properties:
+        enabled: { type: boolean }
+        apt: { type: boolean }
+        apt_full: { type: boolean }
+        apt_autoremove: { type: boolean }
+        docker: { type: boolean }
+        docker_prune: { type: boolean }
+        reboot: { type: boolean }
+        window: { type: string, description: Zoals "zo 03:00-05:00" of "dagelijks 02:00-04:00", in de tijdzone van de server }
+    UpdatePolicyInput:
+      allOf:
+        - { $ref: "#/components/schemas/UpdatePolicy" }
+        - type: object
+          properties:
+            confirm: { type: string, description: Bij prod "prod" of de slug van het cluster }
+    ClusterUpdatePolicyInput:
+      type: object
+      required: [mode]
+      properties:
+        mode: { type: string, enum: [inherit, own, off] }
+        policy: { $ref: "#/components/schemas/UpdatePolicy" }
+        confirm: { type: string }
+    UpdatePolicies:
+      type: object
+      required: [timezone, environments, clusters]
+      properties:
+        timezone: { type: string }
+        environments:
+          type: array
+          items:
+            type: object
+            required: [environment, policy, updated_at, updated_by]
+            properties:
+              environment: { type: string }
+              policy: { $ref: "#/components/schemas/UpdatePolicy" }
+              updated_at: { type: string, format: date-time, nullable: true }
+              updated_by: { type: string, nullable: true }
+        clusters:
+          type: array
+          items:
+            type: object
+            required: [cluster_id, name, slug, environment, mode, own, effective, next_start, last_run_at, last_job_id, last_note]
+            properties:
+              cluster_id: { type: string, format: uuid }
+              name: { type: string }
+              slug: { type: string }
+              environment: { type: string }
+              mode: { type: string, enum: [inherit, own, off] }
+              own: { allOf: [{ $ref: "#/components/schemas/UpdatePolicy" }], nullable: true }
+              effective: { $ref: "#/components/schemas/UpdatePolicy" }
+              next_start: { type: string, format: date-time, nullable: true }
+              last_run_at: { type: string, format: date-time, nullable: true }
+              last_job_id: { type: string, format: uuid, nullable: true }
+              last_note: { type: string }
+    ComposeRef:
+      type: object
+      required: [node_id, project]
+      properties:
+        node_id: { type: string, format: uuid }
+        project: { type: string }
+    ComposeFiles:
+      type: object
+      required: [files]
+      properties:
+        files:
+          type: array
+          items:
+            type: object
+            required: [path, content, sha256, env, secrets]
+            properties:
+              path: { type: string }
+              content: { type: string }
+              sha256: { type: string }
+              env: { type: boolean }
+              secrets: { type: integer, description: Aantal plaatshouders «geheim-N» }
+    ComposeWriteInput:
+      type: object
+      required: [node_id, project, path, content, old_sha256]
+      properties:
+        node_id: { type: string, format: uuid }
+        project: { type: string }
+        path: { type: string }
+        content: { type: string }
+        old_sha256: { type: string }
+        health_seconds: { type: integer }
+        confirm: { type: string }
     Command:
       type: object
       required: [id, name, description, run_as, timeout_seconds, revision, updated_at, updated_by, last_run]

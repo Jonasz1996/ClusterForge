@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"encoding/json"
 	"errors"
 	"net/http"
 	"time"
@@ -17,19 +18,26 @@ import (
 	"github.com/Jonasz1996/clusterforge/pkg/protocol"
 )
 
-// ListUpdates toont per node de updates uit de facts (fase 10).
+// ListUpdates toont per node de updates uit de facts (fase 10), met de
+// Compose-projecten en het laatste rapport per project (fase 15).
 func (s *Server) ListUpdates(w http.ResponseWriter, r *http.Request) {
-	nodes, err := s.updates.Overview(r.Context())
+	ctx := r.Context()
+	nodes, err := s.updates.Overview(ctx)
 	if err != nil {
 		s.internalError(w, r, err)
 		return
 	}
-	out := gen.UpdateOverview{RunProtocol: protocol.RunSince, Nodes: make([]gen.UpdateNode, 0, len(nodes))}
+	reports, err := s.updates.Reports(ctx)
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	out := gen.UpdateOverview{RunProtocol: protocol.RunSince, SmartProtocol: protocol.UpdatesSince, Nodes: make([]gen.UpdateNode, 0, len(nodes))}
 	for _, n := range nodes {
 		un := gen.UpdateNode{
 			NodeId: n.NodeID, Hostname: n.Hostname, ClusterId: nullableOf(n.ClusterID), ClusterName: n.ClusterName,
 			ClusterSlug: n.ClusterSlug, ClusterEnvironment: n.ClusterEnv, Online: n.Online, Protocol: n.Protocol,
-			Supported: n.Supported, Packages: []string{}, RebootRequired: n.RebootRequired, HasDatabase: n.HasDatabase,
+			Supported: n.Supported, Smart: n.Smart, Packages: []string{}, RebootRequired: n.RebootRequired, HasDatabase: n.HasDatabase,
 			VipHolder: n.VIPHolder, FactsAt: nullableOf(n.FactsAt), UpgradesTotal: nullable.NewNullNullable[int](),
 			AptUpdatedAt: nullable.NewNullNullable[time.Time](),
 		}
@@ -43,28 +51,106 @@ func (s *Server) ListUpdates(w http.ResponseWriter, r *http.Request) {
 				un.Packages = u.Packages
 			}
 		}
-		un.ComposeProjects = make([]struct {
-			ConfigFiles []string `json:"config_files"`
-			Name        string   `json:"name"`
-			Status      string   `json:"status"`
-		}, 0)
+		projects := []composeProjectView{}
 		if d := n.Docker; d != nil {
 			un.DockerVersion = d.Version
 			for _, p := range d.Projects {
-				files := p.ConfigFiles
-				if files == nil {
-					files = []string{}
-				}
-				un.ComposeProjects = append(un.ComposeProjects, struct {
-					ConfigFiles []string `json:"config_files"`
-					Name        string   `json:"name"`
-					Status      string   `json:"status"`
-				}{files, p.Name, p.Status})
+				projects = append(projects, toComposeView(p))
 			}
 		}
+		jsonCopy(projects, &un.ComposeProjects)
+		views := []dockerReportView{}
+		for _, rep := range reports[n.NodeID] {
+			views = append(views, toReportView(rep))
+		}
+		jsonCopy(views, &un.DockerReports)
 		out.Nodes = append(out.Nodes, un)
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// jsonCopy zet src via JSON om in dst, voor de naamloze structs van de
+// gegenereerde types.
+func jsonCopy(src, dst any) {
+	b, err := json.Marshal(src)
+	if err == nil {
+		_ = json.Unmarshal(b, dst)
+	}
+}
+
+type composeServiceView struct {
+	Service   string   `json:"service"`
+	Container string   `json:"container"`
+	Image     string   `json:"image"`
+	State     string   `json:"state"`
+	Health    string   `json:"health"`
+	Restarts  int      `json:"restarts"`
+	Mounts    []string `json:"mounts"`
+}
+
+type composeProjectView struct {
+	Name        string               `json:"name"`
+	Status      string               `json:"status"`
+	ConfigFiles []string             `json:"config_files"`
+	WorkingDir  string               `json:"working_dir"`
+	EnvFiles    []string             `json:"env_files"`
+	Missing     []string             `json:"missing"`
+	Services    []composeServiceView `json:"services"`
+}
+
+func toComposeView(p protocol.ComposeProject) composeProjectView {
+	v := composeProjectView{
+		Name: p.Name, Status: p.Status, ConfigFiles: orEmpty(p.ConfigFiles), WorkingDir: p.WorkingDir,
+		EnvFiles: orEmpty(p.EnvFiles), Missing: orEmpty(p.Missing), Services: []composeServiceView{},
+	}
+	for _, sv := range p.Services {
+		v.Services = append(v.Services, composeServiceView{
+			Service: sv.Service, Container: sv.Container, Image: sv.Image, State: sv.State, Health: sv.Health,
+			Restarts: sv.Restarts, Mounts: orEmpty(sv.Mounts),
+		})
+	}
+	return v
+}
+
+type serviceReportView struct {
+	Service    string   `json:"service"`
+	Image      string   `json:"image"`
+	Changed    bool     `json:"changed"`
+	OldVersion string   `json:"old_version"`
+	NewVersion string   `json:"new_version"`
+	Source     string   `json:"source"`
+	EnvAdded   []string `json:"env_added"`
+	EnvRemoved []string `json:"env_removed"`
+	State      string   `json:"state"`
+	Health     string   `json:"health"`
+}
+
+type dockerReportView struct {
+	NodeID         uuid.UUID           `json:"node_id"`
+	Project        string              `json:"project"`
+	Result         string              `json:"result"`
+	Problem        string              `json:"problem"`
+	CreatedAt      time.Time           `json:"created_at"`
+	JobID          *uuid.UUID          `json:"job_id"`
+	ConversationID *uuid.UUID          `json:"conversation_id"`
+	Logs           string              `json:"logs"`
+	Edited         []string            `json:"edited"`
+	Services       []serviceReportView `json:"services"`
+}
+
+func toReportView(r updates.Report) dockerReportView {
+	v := dockerReportView{
+		NodeID: r.NodeID, Project: r.Project, Result: r.Result, Problem: r.Problem, CreatedAt: r.CreatedAt, JobID: r.JobID,
+		ConversationID: r.ConversationID, Logs: r.Logs, Edited: orEmpty(r.Edited), Services: []serviceReportView{},
+	}
+	for _, sv := range r.Services {
+		v.Services = append(v.Services, serviceReportView{
+			Service: sv.Service, Image: sv.Image, Changed: sv.NewID != "" && sv.NewID != sv.OldID, OldVersion: sv.OldVersion,
+			NewVersion: sv.NewVersion, Source: sv.Source, EnvAdded: orEmpty(sv.EnvAdded), EnvRemoved: orEmpty(sv.EnvRemoved),
+			State: sv.State, Health: sv.Health,
+		})
+	}
+	return v
 }
 
 // StartUpdates werkt pakketten en/of Docker bij, met per cluster één taak.
@@ -77,7 +163,7 @@ func (s *Server) StartUpdates(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &in) {
 		return
 	}
-	req := updates.Request{ClusterID: in.ClusterId, Reboot: in.Reboot != nil && *in.Reboot}
+	req := updates.Request{ClusterID: in.ClusterId, Reboot: in.Reboot != nil && *in.Reboot, NoFailover: in.Failover != nil && !*in.Failover}
 	if in.NodeIds != nil {
 		req.NodeIDs = *in.NodeIds
 	}
@@ -88,6 +174,21 @@ func (s *Server) StartUpdates(w http.ResponseWriter, r *http.Request) {
 		req.Docker = &updates.Docker{Prune: in.Docker.Prune != nil && *in.Docker.Prune}
 		if in.Docker.Projects != nil {
 			req.Docker.Projects = *in.Docker.Projects
+		}
+		req.Docker.Always = in.Docker.Always != nil && *in.Docker.Always
+		req.Docker.NoRollback = in.Docker.Rollback != nil && !*in.Docker.Rollback
+		if in.Docker.HealthSeconds != nil {
+			req.Docker.HealthSeconds = *in.Docker.HealthSeconds
+		}
+		if in.Docker.Tags != nil {
+			for _, t := range *in.Docker.Tags {
+				req.Docker.Tags = append(req.Docker.Tags, protocol.ImageTag{Project: t.Project, From: t.From, To: t.To})
+			}
+		}
+		check := protocol.DockerRun{Smart: true, Projects: req.Docker.Projects, HealthSeconds: req.Docker.HealthSeconds, Tags: req.Docker.Tags}
+		if err := (protocol.RunSpec{ID: "x", Kind: protocol.RunDocker, Docker: &check}).Validate(); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid", err.Error())
+			return
 		}
 		for _, name := range req.Docker.Projects {
 			if err := (protocol.RunSpec{ID: "x", Kind: protocol.RunDocker, Docker: &protocol.DockerRun{Projects: []string{name}}}).Validate(); err != nil {

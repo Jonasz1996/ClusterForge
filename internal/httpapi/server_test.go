@@ -92,6 +92,7 @@ type testEnv struct {
 	ana       *whatbroke.Analyzer
 	conns     *testConns
 	asst      *assistant.Service
+	upd       *updates.Service
 	risk      *risk.Service
 	topo      *topo.Service
 	docs      *docs.Service
@@ -272,6 +273,8 @@ func newTestEnv(t *testing.T) *testEnv {
 	upg.Changed = eval.Kick
 	upd := updates.NewService(pool, ev, runner, bus)
 	upd.Run.Poll, upd.ReadyTimeout, upd.Gate.Poll = 20*time.Millisecond, 5*time.Second, 20*time.Millisecond
+	upd.MoveTimeout = 5 * time.Second
+	upd.DB = cmps
 	cmds := commands.NewService(pool, ev, runner, bus, upd)
 	cmds.Run.Poll = 20 * time.Millisecond
 	csec := crowdsec.NewService(pool, ev, runner, bus, log)
@@ -293,7 +296,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	srv := httptest.NewServer(api.Handler())
 	t.Cleanup(srv.Close)
 	e := &testEnv{t: t, srv: srv, auth: a, pool: pool, api: api, bus: bus, eval: eval, vm: vm, pve: pve, jobs: runner, life: life, deploy: dep,
-		backups: bk, drift: drf, fo: fo, dis: dis, evalClock: evalClock, deps: dps, ro: ro, git: git, det: det, ana: ana, conns: conns, asst: asst, risk: rsk, topo: tp, docs: dcs, reports: rep, kube: kub, dbs: dbs, crons: crons, heal: hl, cmps: cmps, upg: upg, ingest: ingest, runCtx: runCtx}
+		backups: bk, drift: drf, fo: fo, dis: dis, evalClock: evalClock, deps: dps, ro: ro, git: git, det: det, ana: ana, conns: conns, asst: asst, risk: rsk, topo: tp, docs: dcs, reports: rep, kube: kub, dbs: dbs, crons: crons, heal: hl, cmps: cmps, upg: upg, upd: upd, ingest: ingest, runCtx: runCtx}
 	e.startRunner()
 	t.Cleanup(func() {
 		stop()
