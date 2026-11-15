@@ -34,6 +34,9 @@ type RunExecutor struct {
 	Stderr io.Writer
 	// Sleep wacht tussen twee keer kijken bij de Docker-test; nil wacht echt.
 	Sleep func(ctx context.Context, d time.Duration) error
+	// Download haalt een URL naar w (cf-agent voor een nieuwe CT); nil
+	// gebruikt HTTP.
+	Download func(ctx context.Context, url string, w io.Writer) error
 	// Stable en Poll zijn voor tests: hoe lang een container aan één stuk
 	// moet draaien (0 is protocol.DockerStable) en hoe vaak de test kijkt.
 	Stable, Poll time.Duration
@@ -143,6 +146,9 @@ func (r *RunExecutor) Main(ctx context.Context, id string) int {
 	}
 
 	timeout := spec.Timeout()
+	if spec.PVE != nil && spec.TimeoutSeconds == 0 {
+		timeout = spec.PVE.Timeout()
+	}
 	rctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	var exit int
@@ -157,6 +163,11 @@ func (r *RunExecutor) Main(ctx context.Context, id string) int {
 		}
 	case spec.Kind == protocol.RunApt:
 		exit, err = r.apt(rctx, id, spec.Apt, out, &st)
+		if err != nil {
+			st.Error = err.Error()
+		}
+	case spec.Kind == protocol.RunPVE:
+		exit, err = r.pve(rctx, dir, spec.PVE, out, &st)
 		if err != nil {
 			st.Error = err.Error()
 		}

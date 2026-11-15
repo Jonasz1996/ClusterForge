@@ -25,7 +25,7 @@ volgen in de GUI.
 
 | Waar | Wat |
 | --- | --- |
-| Agent (protocol 31) | facts `proxmox` (versie, hostnaam in Proxmox, clusternaam) als `pveversion` bestaat. Nieuw onderwerp `cf.node.<id>.pve` voor snelle lees-verzoeken; nieuwe soort run `pve` (fase 10) voor alles wat iets verandert, met live uitvoer |
+| Agent (protocol 32) | facts `proxmox` (versie, hostnaam in Proxmox, clusternaam) als `pveversion` bestaat. Nieuw onderwerp `cf.node.<id>.pve` voor snelle lees-verzoeken; nieuwe soort run `pve` (fase 10) voor alles wat iets verandert, met live uitvoer |
 | Server | `internal/pvehost`: welke node de agent van welke Proxmox-host is (uit de facts, gekoppeld aan de hosts van de Proxmox-koppeling), inventaris per host, taak `pvehost.action` |
 | Uitrol | `target.create: "ct"`: nieuwe CT's via de agent op de gekozen host, per node CTID, IP, CPU, geheugen, schijf, host en storage; daarna zoals nu |
 | GUI | pagina **Proxmox → Hosts** (CT's en VM's per host met acties, CT maken, containertemplates), formulier **Cluster uitrollen** met de keuze "Nieuwe CT's (agent op de host)" |
@@ -159,7 +159,7 @@ geprobeerde uitrol gaat verder waar hij was.
 
 ## Mijlpalen
 
-1. **M1** protocol 31 + agent: facts, `pve`-verzoeken, run `pve` met alle
+1. **M1** protocol 32 + agent: facts, `pve`-verzoeken, run `pve` met alle
    acties, tests met een nep-`pct`/`qm`/`pveam`.
 2. **M2** server en GUI: `internal/pvehost`, API `/pve-hosts`, taak
    `pvehost.action`, pagina Proxmox → Hosts.

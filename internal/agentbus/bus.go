@@ -358,6 +358,7 @@ func agentPermissions(nodeID uuid.UUID) *server.Permissions {
 			protocol.Subject(id, protocol.SubjectRun),
 			protocol.Subject(id, protocol.SubjectCrowdSec),
 			protocol.Subject(id, protocol.SubjectFirewall),
+			protocol.Subject(id, protocol.SubjectPVE),
 			protocol.InboxPrefix(id) + ".>",
 		}},
 		// Eén antwoord op elk commando, kube-, database- en cronverzoek van de server, naar
