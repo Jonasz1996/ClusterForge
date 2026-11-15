@@ -853,6 +853,16 @@ type DocSummary struct {
 	ConversationID *uuid.UUID
 }
 
+type DockerUpdateReport struct {
+	NodeID         uuid.UUID
+	Project        string
+	JobID          *uuid.UUID
+	Result         string
+	Report         []byte
+	CreatedAt      time.Time
+	ConversationID *uuid.UUID
+}
+
 type DocsTarget struct {
 	ID              uuid.UUID
 	ApiUrl          string
@@ -1554,6 +1564,29 @@ type TestRun struct {
 	FinishedAt   *time.Time
 	ScenarioID   *uuid.UUID
 	ClusterIds   []uuid.UUID
+}
+
+type UpdateAutoRun struct {
+	ClusterID uuid.UUID
+	StartedAt time.Time
+	JobID     *uuid.UUID
+	Note      string
+}
+
+type UpdatePolicy struct {
+	ID            uuid.UUID
+	Environment   NullEnvironment
+	ClusterID     *uuid.UUID
+	Enabled       bool
+	Apt           bool
+	AptFull       bool
+	AptAutoremove bool
+	Docker        bool
+	DockerPrune   bool
+	Reboot        bool
+	UpdateWindow  string
+	UpdatedAt     time.Time
+	UpdatedBy     *uuid.UUID
 }
 
 type User struct {

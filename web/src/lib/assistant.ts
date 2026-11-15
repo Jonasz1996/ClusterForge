@@ -136,6 +136,12 @@ export function explainKube(clusterId: string, ref: KubeRef, onEvent: (ev: Strea
   return streamPost(`/api/v1/kubernetes/clusters/${encodeURIComponent(clusterId)}/explain`, ref, onEvent, signal);
 }
 
+// proposeDockerFix laat de assistent een fix voorstellen voor een
+// Docker-update, met de release notes van de bron.
+export function proposeDockerFix(nodeId: string, project: string, onEvent: (ev: StreamEvent) => void, signal?: AbortSignal) {
+  return streamPost("/api/v1/updates/fix", { node_id: nodeId, project }, onEvent, signal);
+}
+
 // hintLesson is Ik zit vast: een hint bij de opdracht die aan de beurt is.
 export function hintLesson(clusterId: string, lesson: string, onEvent: (ev: StreamEvent) => void, signal?: AbortSignal) {
   const url = `/api/v1/kubernetes/clusters/${encodeURIComponent(clusterId)}/lessons/${encodeURIComponent(lesson)}/hint`;

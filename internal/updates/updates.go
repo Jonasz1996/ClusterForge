@@ -21,6 +21,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/health"
 	"github.com/Jonasz1996/clusterforge/internal/jobs"
+	"github.com/Jonasz1996/clusterforge/internal/lifecycle"
 	"github.com/Jonasz1996/clusterforge/internal/noderun"
 	"github.com/Jonasz1996/clusterforge/internal/status"
 	"github.com/Jonasz1996/clusterforge/internal/store"
@@ -61,6 +62,16 @@ type Service struct {
 	bus    Commander
 	Run    *noderun.Runner
 	Gate   *health.Gate
+	// DB schakelt bij PostgreSQL over voor de failover van de master. Mag
+	// nil zijn.
+	DB lifecycle.DB
+	// Assist start na een mislukte automatische Docker-update een voorstel
+	// voor een fix. Mag nil zijn.
+	Assist func(ctx context.Context, nodeID uuid.UUID, jobID uuid.UUID, rep protocol.DockerReport)
+	// MoveTimeout is hoe lang de VIP's mogen doen over verhuizen.
+	MoveTimeout time.Duration
+	// Notes haalt release notes op voor Fix voorstellen.
+	Notes *Sources
 	// ReadyTimeout is hoe lang een node na de update mag doen over gezond
 	// terugkomen; RebootTimeout na een herstart.
 	ReadyTimeout  time.Duration
@@ -72,7 +83,7 @@ func NewService(pool *pgxpool.Pool, ev *events.Writer, runner *jobs.Runner, bus 
 	s := &Service{
 		pool: pool, q: store.New(pool), ev: ev, runner: runner, bus: bus,
 		Run: &noderun.Runner{Bus: bus}, Gate: health.NewGate(pool),
-		ReadyTimeout: 3 * time.Minute, RebootTimeout: 10 * time.Minute, Now: time.Now,
+		ReadyTimeout: 3 * time.Minute, RebootTimeout: 10 * time.Minute, MoveTimeout: 2 * time.Minute, Now: time.Now,
 	}
 	if runner != nil {
 		runner.Register(Kind, s.run)
@@ -91,7 +102,9 @@ type Node struct {
 	Online      bool
 	Protocol    int
 	// Supported: de agent kent runs (protocol 25).
-	Supported      bool
+	Supported bool
+	// Smart: de agent kent de updates van fase 15 (protocol 29).
+	Smart          bool
 	Upgrades       *protocol.Upgrades
 	RebootRequired bool
 	AptUpdatedAt   time.Time
@@ -120,6 +133,7 @@ func (s *Service) Overview(ctx context.Context) ([]Node, error) {
 			Online: r.HeartbeatAt != nil && now.Sub(*r.HeartbeatAt) <= status.HeartbeatLate,
 		}
 		n.Supported = n.Protocol >= protocol.RunSince
+		n.Smart = n.Protocol >= protocol.UpdatesSince
 		if len(r.Facts) > 0 {
 			var f protocol.Facts
 			if json.Unmarshal(r.Facts, &f) == nil {
@@ -164,6 +178,19 @@ type Docker struct {
 	// Projects: leeg is alle projecten op elke node.
 	Projects []string `json:"projects,omitempty"`
 	Prune    bool     `json:"prune,omitempty"`
+	// Vanaf fase 15 (protocol 29): ook bij geen nieuw image opnieuw maken,
+	// hoe lang de test duurt, niet terugzetten, en nieuwe tags.
+	Always        bool                `json:"always,omitempty"`
+	HealthSeconds int                 `json:"health_seconds,omitempty"`
+	NoRollback    bool                `json:"no_rollback,omitempty"`
+	Tags          []protocol.ImageTag `json:"tags,omitempty"`
+	// Edit schrijft een bestand uit de editor (één node, één project).
+	Edit *protocol.ComposeEdit `json:"edit,omitempty"`
+}
+
+// needsSmart is true als de Docker-opties protocol 29 vragen.
+func (d *Docker) needsSmart() bool {
+	return d != nil && (d.Always || d.HealthSeconds > 0 || d.NoRollback || len(d.Tags) > 0 || d.Edit != nil)
 }
 
 // Request is wat de beheerder vraagt.
@@ -175,6 +202,11 @@ type Request struct {
 	Docker    *Docker
 	// Reboot herstart een node als hij daar na de update om vraagt.
 	Reboot bool
+	// NoFailover werkt de VIP-houder bij zonder eerst zijn VIP's naar een
+	// bijgewerkte node te verhuizen (zoals in fase 10).
+	NoFailover bool
+	// Auto: gestart door automatisch bijwerken.
+	Auto bool
 }
 
 // Select geeft de nodes van een verzoek, in de volgorde van de taak per
@@ -203,6 +235,8 @@ func (s *Service) Select(ctx context.Context, req Request) ([]Node, error) {
 			return nil, &ConflictError{fmt.Sprintf("de agent op %s heeft protocol %d en kent updates nog niet (vanaf %d); werk de agents eerst bij", n.Hostname, n.Protocol, protocol.RunSince)}
 		case !n.Online:
 			return nil, &ConflictError{"de agent op " + n.Hostname + " is niet verbonden"}
+		case !n.Smart && req.Docker.needsSmart():
+			return nil, &ConflictError{fmt.Sprintf("de agent op %s heeft protocol %d; nieuwe tags, de test en terugzetten vragen protocol %d. Werk de agents eerst bij", n.Hostname, n.Protocol, protocol.UpdatesSince)}
 		}
 		out = append(out, n)
 	}
@@ -248,10 +282,12 @@ func Order(nodes []Node) []Node {
 
 // params zijn de parameters van de taak.
 type params struct {
-	Nodes  []jobNode `json:"nodes"`
-	Apt    *Apt      `json:"apt,omitempty"`
-	Docker *Docker   `json:"docker,omitempty"`
-	Reboot bool      `json:"reboot,omitempty"`
+	Nodes      []jobNode `json:"nodes"`
+	Apt        *Apt      `json:"apt,omitempty"`
+	Docker     *Docker   `json:"docker,omitempty"`
+	Reboot     bool      `json:"reboot,omitempty"`
+	NoFailover bool      `json:"no_failover,omitempty"`
+	Auto       bool      `json:"auto,omitempty"`
 }
 
 type jobNode struct {
@@ -259,6 +295,8 @@ type jobNode struct {
 	Hostname    string    `json:"hostname"`
 	VIPHolder   bool      `json:"vip_holder,omitempty"`
 	HasDatabase bool      `json:"has_database,omitempty"`
+	// Smart: de agent had protocol 29 toen de taak begon.
+	Smart bool `json:"smart,omitempty"`
 }
 
 // Start zet per cluster één taak in de wachtrij. Een cluster waar al een
@@ -286,9 +324,9 @@ func (s *Service) Start(ctx context.Context, actor events.Actor, req Request, no
 	}
 	what := whatText(req.Apt, req.Docker)
 	for _, g := range groups {
-		p := params{Apt: req.Apt, Docker: req.Docker, Reboot: req.Reboot}
+		p := params{Apt: req.Apt, Docker: req.Docker, Reboot: req.Reboot, NoFailover: req.NoFailover, Auto: req.Auto}
 		for _, n := range g.nodes {
-			p.Nodes = append(p.Nodes, jobNode{ID: n.NodeID, Hostname: n.Hostname, VIPHolder: n.VIPHolder, HasDatabase: n.HasDatabase})
+			p.Nodes = append(p.Nodes, jobNode{ID: n.NodeID, Hostname: n.Hostname, VIPHolder: n.VIPHolder, HasDatabase: n.HasDatabase, Smart: n.Smart})
 		}
 		spec := jobs.Spec{Kind: Kind, Params: p, ClusterID: g.cluster, Actor: actor}
 		switch {
@@ -298,6 +336,9 @@ func (s *Service) Start(ctx context.Context, actor events.Actor, req Request, no
 			spec.Title = fmt.Sprintf("%s bijwerken in %s", what, g.name)
 		default:
 			spec.Title = what + " bijwerken op nodes zonder cluster"
+		}
+		if req.Auto {
+			spec.Title = "Automatisch: " + spec.Title
 		}
 		var j store.Job
 		var err error
@@ -345,22 +386,37 @@ func (s *Service) run(ctx context.Context, j *jobs.Job) error {
 	if err := j.Decode(&p); err != nil {
 		return err
 	}
+	failover := !p.NoFailover && len(p.Nodes) > 1
 	for i, n := range p.Nodes {
 		name := n.Hostname
 		if n.VIPHolder {
 			name += " (VIP-houder)"
 		}
+		// De state van een stap uit deze poging; een stap uit een eerdere
+		// poging wordt overgeslagen en komt uit j.Done.
+		var fs failState
+		if n.VIPHolder && failover {
+			if err := s.failoverStep(ctx, j, name, n, p.Nodes[:i], &fs); err != nil {
+				return stop(ctx, err, n)
+			}
+		}
 		prepStep := name + ": voorbereiden"
+		var pr prep
+		j.Done(prepStep, &pr)
 		if err := j.Step(ctx, prepStep, func(ctx context.Context, st *jobs.Step) error {
-			return s.prepare(ctx, st, n)
+			var err error
+			pr, err = s.prepare(ctx, st, n)
+			return err
 		}); err != nil {
 			return stop(ctx, err, n)
 		}
+		var aptRes protocol.RunStatus
+		aptDone := false
 		if p.Apt != nil {
 			spec := protocol.RunSpec{
 				ID: runID(j, i, "apt"), Kind: protocol.RunApt, Title: "Pakketten bijwerken op " + n.Hostname,
 				TimeoutSeconds: int((time.Hour).Seconds()),
-				Apt:            &protocol.AptRun{Full: p.Apt.Full, Autoremove: p.Apt.Autoremove},
+				Apt:            &protocol.AptRun{Full: p.Apt.Full, Autoremove: p.Apt.Autoremove, Smart: n.Smart},
 			}
 			if n.HasDatabase {
 				spec.Apt.Hold = DatabasePackages
@@ -369,7 +425,9 @@ func (s *Service) run(ctx context.Context, j *jobs.Job) error {
 				if n.HasDatabase {
 					st.Logf("dit cluster heeft een database: de databasepakketten blijven staan; werk die bij met Bijwerken op de databasekaart")
 				}
-				return s.runOne(ctx, j, st, n, spec)
+				res, err := s.runOne(ctx, j, st, n, spec)
+				aptRes, aptDone = res, true
+				return err
 			}); err != nil {
 				return stop(ctx, err, n)
 			}
@@ -380,8 +438,21 @@ func (s *Service) run(ctx context.Context, j *jobs.Job) error {
 				TimeoutSeconds: int((time.Hour).Seconds()),
 				Docker:         &protocol.DockerRun{Projects: p.Docker.Projects, Prune: p.Docker.Prune},
 			}
+			if n.Smart {
+				d := spec.Docker
+				d.Smart, d.Always, d.HealthSeconds, d.NoRollback, d.Tags, d.Edit = true, p.Docker.Always, p.Docker.HealthSeconds, p.Docker.NoRollback, p.Docker.Tags, p.Docker.Edit
+			}
 			if err := j.Step(ctx, name+": Docker", func(ctx context.Context, st *jobs.Step) error {
-				return s.runOne(ctx, j, st, n, spec)
+				res, err := s.runOne(ctx, j, st, n, spec)
+				s.saveReports(ctx, j, n, res.Docker)
+				if err != nil && p.Auto && s.Assist != nil {
+					for _, d := range res.Docker {
+						if d.Result == protocol.DockerFailed || d.Result == protocol.DockerRolledBack {
+							s.Assist(context.WithoutCancel(ctx), n.ID, j.ID, d)
+						}
+					}
+				}
+				return err
 			}); err != nil {
 				return stop(ctx, err, n)
 			}
@@ -389,7 +460,10 @@ func (s *Service) run(ctx context.Context, j *jobs.Job) error {
 		if p.Reboot {
 			aptStep := name + ": pakketten (apt)"
 			if err := j.Step(ctx, name+": herstarten als het nodig is", func(ctx context.Context, st *jobs.Step) error {
-				res, ok := noderun.Result(j, aptStep)
+				res, ok := aptRes, aptDone
+				if !ok {
+					res, ok = noderun.Result(j, aptStep)
+				}
 				if !ok || !res.RebootRequired {
 					st.Logf("%s vraagt geen herstart", n.Hostname)
 					return nil
@@ -399,9 +473,12 @@ func (s *Service) run(ctx context.Context, j *jobs.Job) error {
 				return stop(ctx, err, n)
 			}
 		}
+		if n.VIPHolder && failover {
+			if err := s.rejoinStep(ctx, j, name, n, fs); err != nil {
+				return stop(ctx, err, n)
+			}
+		}
 		if err := j.Step(ctx, name+": gezond terug", func(ctx context.Context, st *jobs.Step) error {
-			var pr prep
-			j.Done(prepStep, &pr)
 			return s.settle(ctx, st, n, pr)
 		}); err != nil {
 			return stop(ctx, err, n)
@@ -425,21 +502,21 @@ func runID(j *jobs.Job, i int, kind string) string {
 
 // prepare onthoudt welke gevolgde diensten nu draaien en controleert dat
 // de agent er is.
-func (s *Service) prepare(ctx context.Context, st *jobs.Step, n jobNode) error {
+func (s *Service) prepare(ctx context.Context, st *jobs.Step, n jobNode) (prep, error) {
 	rt, err := s.q.GetNodeRuntime(ctx, n.ID)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return errors.New("de node bestaat niet meer")
+		return prep{}, errors.New("de node bestaat niet meer")
 	}
 	if err != nil {
-		return err
+		return prep{}, err
 	}
 	switch {
 	case !rt.HasAgent:
-		return errors.New("de node heeft geen agent meer")
+		return prep{}, errors.New("de node heeft geen agent meer")
 	case rt.AgentProtocol < protocol.RunSince:
-		return fmt.Errorf("de agent heeft protocol %d en kent updates nog niet (vanaf %d)", rt.AgentProtocol, protocol.RunSince)
+		return prep{}, fmt.Errorf("de agent heeft protocol %d en kent updates nog niet (vanaf %d)", rt.AgentProtocol, protocol.RunSince)
 	case rt.HeartbeatAt == nil || s.Now().Sub(*rt.HeartbeatAt) > status.HeartbeatLate:
-		return errors.New("de agent is niet verbonden")
+		return prep{}, errors.New("de agent is niet verbonden")
 	}
 	var active []string
 	for name, state := range health.ServiceStates(rt.Services) {
@@ -451,14 +528,15 @@ func (s *Service) prepare(ctx context.Context, st *jobs.Step, n jobNode) error {
 	if len(active) > 0 {
 		st.Logf("draait nu: %s; daar wacht ClusterForge na de update op", strings.Join(active, ", "))
 	}
-	return st.SetState(ctx, prep{Services: active, At: s.Now()})
+	pr := prep{Services: active, At: s.Now()}
+	return pr, st.SetState(ctx, pr)
 }
 
 // runOne voert een run uit; alles behalve ok is een fout.
-func (s *Service) runOne(ctx context.Context, j *jobs.Job, st *jobs.Step, n jobNode, spec protocol.RunSpec) error {
+func (s *Service) runOne(ctx context.Context, j *jobs.Job, st *jobs.Step, n jobNode, spec protocol.RunSpec) (protocol.RunStatus, error) {
 	res, err := s.Run.Do(ctx, st, n.ID, spec)
 	if err != nil {
-		return err
+		return res, err
 	}
 	if s.ev != nil {
 		actor := events.System()
@@ -478,13 +556,19 @@ func (s *Service) runOne(ctx context.Context, j *jobs.Job, st *jobs.Step, n jobN
 	if len(res.Held) > 0 {
 		st.Logf("bleven staan: %s", strings.Join(res.Held, ", "))
 	}
+	for _, f := range res.ConfNew {
+		st.Logf("nieuwe standaardconfiguratie naast de jouwe: %s", f)
+	}
+	for _, d := range res.Docker {
+		st.Logf("%s", DescribeDocker(d))
+	}
 	if res.RebootRequired {
 		st.Logf("%s vraagt om een herstart", n.Hostname)
 	}
 	if res.State != protocol.RunOK {
-		return errors.New(noderun.Describe(res))
+		return res, errors.New(noderun.Describe(res))
 	}
-	return nil
+	return res, nil
 }
 
 // reboot herstart de node en wacht tot hij terug is.

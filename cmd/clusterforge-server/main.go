@@ -227,6 +227,8 @@ func serve() error {
 	// Onderhoud en herstarten van een node met een database: eerst
 	// overschakelen, daarna wachten tot de node weer meedoet.
 	life.DB = cmps
+	// Fase 15: de failover van de master schakelt bij Patroni eerst over.
+	upd.DB = cmps
 	kn.Changed = eval.Kick
 	// Zelf samengestelde clusters (fase 9) staan als template in de
 	// database; ze komen in het register voor de controle hieronder.
@@ -269,6 +271,10 @@ func serve() error {
 	// De assistent; zonder masterkey kan hij niet aan en zeggen de
 	// instellingen waarom.
 	asst := assistant.NewService(pool, ev, log, box)
+	// Fase 15: release notes voor Fix voorstellen, en na een mislukte
+	// automatische Docker-update vanzelf een voorstel.
+	upd.Notes = &updates.Sources{}
+	upd.Assist = upd.AutoFix(asst)
 	// De health score rekent elke minuut; de planner legt elke dag een
 	// momentopname vast voor de trend.
 	rsk := risk.NewService(pool, ev, log, metrics.NewClient(cfg.VictoriaMetricsURL), bk)
@@ -282,6 +288,7 @@ func serve() error {
 	var dis *disaster.Service
 	sched := planner.NewScheduler(pool, log,
 		planner.Task{Name: "failovertests", Tick: fo.RunScheduled},
+		planner.Task{Name: "automatisch bijwerken", Tick: upd.AutoTick},
 		planner.Task{Name: "back-upcontroles", Tick: bk.RunScheduled},
 		planner.Task{Name: "DR-repetities", Tick: func(ctx context.Context, now time.Time) error { return dis.RunScheduled(ctx, now) }},
 		planner.Task{Name: "journaal opruimen", Tick: journal.NewPruner(q).Tick},

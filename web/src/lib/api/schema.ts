@@ -3629,6 +3629,105 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/updates/policies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Automatisch bijwerken, per omgeving en per cluster (fase 15) */
+        get: operations["getUpdatePolicies"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/updates/policies/environments/{environment}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                environment: "lab" | "test" | "prod";
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** Het beleid van een omgeving bewaren (admin); prod vraagt TOTP en confirm "prod" */
+        put: operations["setEnvUpdatePolicy"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/updates/policies/clusters/{clusterId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** Een cluster zoals de omgeving, met een eigen beleid of uit (admin); een prodcluster vraagt TOTP en de slug */
+        put: operations["setClusterUpdatePolicy"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/updates/compose": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Een bestand van een project opslaan en het project opnieuw opstarten, met test en terugzetten (admin)
+         * @description Een taak updates.run op die ene node. De plaatshouders «geheim-N» zet de agent terug; is het bestand op de node
+         *     intussen veranderd (old_sha256), dan weigert hij. Op prod tweestapsverificatie en de slug in confirm.
+         */
+        put: operations["writeComposeFile"];
+        /** De compose- en env-bestanden van een project lezen (admin); geheime waarden zijn plaatshouders */
+        post: operations["readComposeFiles"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/updates/fix": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * De assistent een fix laten voorstellen voor een Docker-update; het antwoord stroomt als server-sent events
+         * @description Voor een beheerder die de assistent mag gebruiken. ClusterForge haalt de release notes van GitHub of Docker Hub op
+         *     en geeft ze met het rapport, de logs en het compose-bestand (zonder geheimen) aan de assistent. Het laatste event,
+         *     done, noemt het gesprek (conversation_id).
+         */
+        post: operations["proposeDockerFix"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/crowdsec": {
         parameters: {
             query?: never;
@@ -10765,6 +10864,8 @@ export interface components {
         UpdateOverview: {
             /** @description Het agentprotocol vanaf waar updates kunnen */
             run_protocol: number;
+            /** @description Het agentprotocol vanaf waar de updates van fase 15 kunnen */
+            smart_protocol: number;
             nodes: components["schemas"]["UpdateNode"][];
         };
         UpdateNode: {
@@ -10779,6 +10880,8 @@ export interface components {
             online: boolean;
             protocol: number;
             supported: boolean;
+            /** @description De agent kent de updates van fase 15 (protocol 29) */
+            smart: boolean;
             /** @description Null als de agent het niet kon tellen */
             upgrades_total: number | null;
             upgrades_security: number;
@@ -10792,7 +10895,22 @@ export interface components {
                 name: string;
                 status: string;
                 config_files: string[];
+                working_dir: string;
+                env_files: string[];
+                /** @description Compose-bestanden die niet meer bestaan */
+                missing: string[];
+                services: {
+                    service: string;
+                    container: string;
+                    image: string;
+                    state: string;
+                    health: string;
+                    restarts: number;
+                    mounts: string[];
+                }[];
             }[];
+            /** @description Het rapport van de laatste Docker-update per project */
+            docker_reports: components["schemas"]["DockerReport"][];
             /** @description Het cluster heeft een database; die pakketten blijven staan */
             has_database: boolean;
             vip_holder: boolean;
@@ -10812,10 +10930,128 @@ export interface components {
                 /** @description Leeg is elk Compose-project */
                 projects?: string[];
                 prune?: boolean;
+                /** @description Ook zonder nieuw image down en up -d */
+                always?: boolean;
+                /** @description Hoe lang de test mag duren; 0 is 120 s */
+                health_seconds?: number;
+                /** @description Bij een mislukte test de vorige versie terugzetten (standaard aan) */
+                rollback?: boolean;
+                tags?: {
+                    project: string;
+                    from: string;
+                    to: string;
+                }[];
             };
             /** @description Herstarten als de node daar na de update om vraagt */
             reboot?: boolean;
+            /** @description De VIP-houder eerst failoveren naar een bijgewerkte node (standaard aan) */
+            failover?: boolean;
             /** @description De slug van het prodcluster */
+            confirm?: string;
+        };
+        DockerReport: {
+            /** Format: uuid */
+            node_id: string;
+            project: string;
+            /** @enum {string} */
+            result: "up_to_date" | "updated" | "failed" | "rolled_back";
+            problem: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: uuid */
+            job_id: string | null;
+            /**
+             * Format: uuid
+             * @description Het gesprek met het voorstel voor een fix
+             */
+            conversation_id: string | null;
+            logs: string;
+            edited: string[];
+            services: {
+                service: string;
+                image: string;
+                changed: boolean;
+                old_version: string;
+                new_version: string;
+                source: string;
+                env_added: string[];
+                env_removed: string[];
+                state: string;
+                health: string;
+            }[];
+        };
+        UpdatePolicy: {
+            enabled: boolean;
+            apt: boolean;
+            apt_full: boolean;
+            apt_autoremove: boolean;
+            docker: boolean;
+            docker_prune: boolean;
+            reboot: boolean;
+            /** @description Zoals "zo 03:00-05:00" of "dagelijks 02:00-04:00" */
+            window: string;
+        };
+        UpdatePolicyInput: components["schemas"]["UpdatePolicy"] & {
+            /** @description Bij prod "prod" of de slug van het cluster */
+            confirm?: string;
+        };
+        ClusterUpdatePolicyInput: {
+            /** @enum {string} */
+            mode: "inherit" | "own" | "off";
+            policy?: components["schemas"]["UpdatePolicy"];
+            confirm?: string;
+        };
+        UpdatePolicies: {
+            timezone: string;
+            environments: {
+                environment: string;
+                policy: components["schemas"]["UpdatePolicy"];
+                /** Format: date-time */
+                updated_at: string | null;
+                updated_by: string | null;
+            }[];
+            clusters: {
+                /** Format: uuid */
+                cluster_id: string;
+                name: string;
+                slug: string;
+                environment: string;
+                /** @enum {string} */
+                mode: "inherit" | "own" | "off";
+                own: components["schemas"]["UpdatePolicy"] | null;
+                effective: components["schemas"]["UpdatePolicy"];
+                /** Format: date-time */
+                next_start: string | null;
+                /** Format: date-time */
+                last_run_at: string | null;
+                /** Format: uuid */
+                last_job_id: string | null;
+                last_note: string;
+            }[];
+        };
+        ComposeRef: {
+            /** Format: uuid */
+            node_id: string;
+            project: string;
+        };
+        ComposeFiles: {
+            files: {
+                path: string;
+                content: string;
+                sha256: string;
+                env: boolean;
+                /** @description Aantal plaatshouders «geheim-N» */
+                secrets: number;
+            }[];
+        };
+        ComposeWriteInput: {
+            /** Format: uuid */
+            node_id: string;
+            project: string;
+            path: string;
+            content: string;
+            old_sha256: string;
+            health_seconds?: number;
             confirm?: string;
         };
         Command: {
@@ -17581,6 +17817,176 @@ export interface operations {
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
             409: components["responses"]["Error"];
+        };
+    };
+    getUpdatePolicies: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpdatePolicies"];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    setEnvUpdatePolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                environment: "lab" | "test" | "prod";
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdatePolicyInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpdatePolicies"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    setClusterUpdatePolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ClusterUpdatePolicyInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UpdatePolicies"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    writeComposeFile: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ComposeWriteInput"];
+            };
+        };
+        responses: {
+            /** @description Taak aangemaakt */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Job"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    readComposeFiles: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ComposeRef"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ComposeFiles"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+        };
+    };
+    proposeDockerFix: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ComposeRef"];
+            };
+        };
+        responses: {
+            /** @description De stroom van het antwoord */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "text/event-stream": string;
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            429: components["responses"]["Error"];
         };
     };
     getCrowdSec: {

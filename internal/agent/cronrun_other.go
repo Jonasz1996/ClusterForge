@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
 )
 
 var errCronLinux = errors.New("beheerde cronjobs draaien alleen op Linux")
@@ -21,3 +22,5 @@ func runArgvEnv(context.Context, string, []string, []string, io.Writer) (int, er
 }
 
 func chownTo(string, string) error { return errCronLinux }
+
+func keepOwner(string, os.FileInfo) {}

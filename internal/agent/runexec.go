@@ -10,6 +10,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -31,6 +32,11 @@ type RunExecutor struct {
 	Cmd func(ctx context.Context, user string, argv, env []string, out io.Writer) (int, error)
 	// Stderr krijgt wat run-exec zelf meldt; nil is os.Stderr.
 	Stderr io.Writer
+	// Sleep wacht tussen twee keer kijken bij de Docker-test; nil wacht echt.
+	Sleep func(ctx context.Context, d time.Duration) error
+	// Stable en Poll zijn voor tests: hoe lang een container aan één stuk
+	// moet draaien (0 is protocol.DockerStable) en hoe vaak de test kijkt.
+	Stable, Poll time.Duration
 }
 
 func (r *RunExecutor) path(p string) string {
@@ -154,6 +160,11 @@ func (r *RunExecutor) Main(ctx context.Context, id string) int {
 		if err != nil {
 			st.Error = err.Error()
 		}
+	case spec.Kind == protocol.RunDocker && spec.Docker.Smart:
+		exit, err = r.dockerSmart(rctx, dir, spec.Docker, out, &st)
+		if err != nil {
+			st.Error = err.Error()
+		}
 	case spec.Kind == protocol.RunDocker:
 		exit, err = r.docker(rctx, spec.Docker, out)
 		if err != nil {
@@ -223,7 +234,23 @@ func (r *RunExecutor) script(ctx context.Context, dir string, spec protocol.RunS
 	return r.cmd(ctx, spec.User, argv, nil, out)
 }
 
-var aptEnv = []string{"DEBIAN_FRONTEND=noninteractive", "APT_LISTCHANGES_FRONTEND=none", "NEEDRESTART_MODE=a"}
+// aptEnv laat apt, dpkg, debconf, ucf en needrestart nooit iets vragen.
+var aptEnv = []string{
+	"DEBIAN_FRONTEND=noninteractive", "DEBCONF_NONINTERACTIVE_SEEN=true", "UCF_FORCE_CONFFOLD=1",
+	"APT_LISTCHANGES_FRONTEND=none", "NEEDRESTART_MODE=a",
+}
+
+// aptOpts: bij een gewijzigd configuratiebestand blijft de eigen versie
+// staan, en een slot van een andere apt (unattended-upgrades) wacht tot
+// tien minuten in plaats van te falen.
+var aptOpts = []string{
+	"-o", "Dpkg::Options::=--force-confdef", "-o", "Dpkg::Options::=--force-confold",
+	"-o", "DPkg::Lock::Timeout=600", "-o", "APT::Get::Assume-Yes=true",
+}
+
+func aptGet(args ...string) []string {
+	return append(append([]string{"apt-get"}, args...), aptOpts...)
+}
 
 // step draait één commando met een kopregel en geeft een fout als het niet
 // met 0 eindigt.
@@ -258,7 +285,11 @@ func (r *RunExecutor) apt(ctx context.Context, id string, a *protocol.AptRun, ou
 	// apt-get update, met de uitvoer ook in een buffer voor de bronnen.
 	var buf bytes.Buffer
 	_, _ = fmt.Fprintf(out, "$ apt-get update\n")
-	code, err := r.cmd(ctx, "", []string{"apt-get", "update", "-q"}, aptEnv, io.MultiWriter(out, &buf))
+	updArgv := []string{"apt-get", "update", "-q"}
+	if a.Smart {
+		updArgv = append(updArgv, "-o", "DPkg::Lock::Timeout=600")
+	}
+	code, err := r.cmd(ctx, "", updArgv, aptEnv, io.MultiWriter(out, &buf))
 	if err != nil {
 		return code, err
 	}
@@ -272,8 +303,8 @@ func (r *RunExecutor) apt(ctx context.Context, id string, a *protocol.AptRun, ou
 		}
 	}
 	if audit, _, _ := r.capture(ctx, "dpkg", "--audit"); len(bytes.TrimSpace(audit)) > 0 {
-		_, _ = fmt.Fprintf(out, "ClusterForge: dpkg was onderbroken; eerst dpkg --configure -a\n")
-		if code, err := r.step(ctx, out, aptEnv, "dpkg", "--configure", "-a", "--force-confdef", "--force-confold"); err != nil {
+		_, _ = fmt.Fprintf(out, "ClusterForge: dpkg was onderbroken; eerst herstellen\n")
+		if code, err := r.repair(ctx, out, a.Smart); err != nil {
 			return code, err
 		}
 	}
@@ -287,16 +318,88 @@ func (r *RunExecutor) apt(ctx context.Context, id string, a *protocol.AptRun, ou
 	if a.Full {
 		verb = "full-upgrade"
 	}
-	if code, err := r.step(ctx, out, aptEnv, "apt-get", verb, "-y", "-q",
-		"-o", "Dpkg::Options::=--force-confdef", "-o", "Dpkg::Options::=--force-confold"); err != nil {
+	if !a.Smart {
+		if code, err := r.step(ctx, out, aptEnv, "apt-get", verb, "-y", "-q",
+			"-o", "Dpkg::Options::=--force-confdef", "-o", "Dpkg::Options::=--force-confold"); err != nil {
+			return code, err
+		}
+		if a.Autoremove {
+			if code, err := r.step(ctx, out, aptEnv, "apt-get", "autoremove", "-y", "-q"); err != nil {
+				return code, err
+			}
+		}
+		return 0, nil
+	}
+	began := r.now().Add(-time.Second)
+	var ubuf bytes.Buffer
+	code, err = r.stepTee(ctx, out, &ubuf, aptGet(verb, "-q")...)
+	if err != nil && dpkgBroken.Match(ubuf.Bytes()) && ctx.Err() == nil {
+		_, _ = fmt.Fprintf(out, "ClusterForge: dpkg raakte in de knoop; herstellen en één keer opnieuw\n")
+		if code, err := r.repair(ctx, out, true); err != nil {
+			return code, err
+		}
+		code, err = r.step(ctx, out, aptEnv, aptGet(verb, "-q")...)
+	}
+	if err != nil {
 		return code, err
 	}
 	if a.Autoremove {
-		if code, err := r.step(ctx, out, aptEnv, "apt-get", "autoremove", "-y", "-q"); err != nil {
+		if code, err := r.step(ctx, out, aptEnv, aptGet("autoremove", "-q")...); err != nil {
 			return code, err
 		}
 	}
+	if audit, _, _ := r.capture(ctx, "dpkg", "--audit"); len(bytes.TrimSpace(audit)) > 0 {
+		_, _ = out.Write(audit)
+		return -1, errors.New("dpkg is na de update niet in orde (dpkg --audit); kijk de uitvoer hierboven na")
+	}
+	st.ConfNew = r.newConfFiles(began)
+	for _, f := range st.ConfNew {
+		_, _ = fmt.Fprintf(out, "ClusterForge: je eigen configuratie bleef staan; de nieuwe standaard staat ernaast in %s\n", f)
+	}
 	return 0, nil
+}
+
+// dpkgBroken herkent een upgrade die strandde op dpkg zelf.
+var dpkgBroken = regexp.MustCompile(`(?i)dpkg was interrupted|unmet dependencies|--fix-broken|Sub-process /usr/bin/dpkg returned an error|dpkg --configure -a`)
+
+// repair maakt een onderbroken dpkg af en lost gebroken afhankelijkheden
+// op, telkens met de eigen configuratie die blijft staan.
+func (r *RunExecutor) repair(ctx context.Context, out io.Writer, full bool) (int, error) {
+	if code, err := r.step(ctx, out, aptEnv, "dpkg", "--configure", "-a", "--force-confdef", "--force-confold"); err != nil {
+		return code, err
+	}
+	if !full {
+		return 0, nil
+	}
+	return r.step(ctx, out, aptEnv, aptGet("-f", "install", "-q")...)
+}
+
+// stepTee is step met de uitvoer ook in buf.
+func (r *RunExecutor) stepTee(ctx context.Context, out io.Writer, buf *bytes.Buffer, argv ...string) (int, error) {
+	return r.step(ctx, io.MultiWriter(out, buf), aptEnv, argv...)
+}
+
+// newConfFiles zoekt in /etc de nieuwe standaardconfiguraties die dpkg of
+// ucf na since naast een eigen bestand zette.
+func (r *RunExecutor) newConfFiles(since time.Time) []string {
+	var found []string
+	root := r.path("/etc")
+	_ = filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
+		if err != nil || d.IsDir() || len(found) >= 50 {
+			return nil
+		}
+		n := d.Name()
+		if !strings.HasSuffix(n, ".dpkg-dist") && !strings.HasSuffix(n, ".ucf-dist") && !strings.HasSuffix(n, ".dpkg-new") {
+			return nil
+		}
+		if fi, err := d.Info(); err == nil && !fi.ModTime().Before(since) {
+			rel, _ := filepath.Rel(root, p)
+			found = append(found, path.Join("/etc", filepath.ToSlash(rel)))
+		}
+		return nil
+	})
+	slices.Sort(found)
+	return found
 }
 
 // hold zet een apt-mark hold op de geïnstalleerde pakketten die op een

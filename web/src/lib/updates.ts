@@ -6,6 +6,12 @@ import type { components } from "./api/schema";
 
 export type UpdateNode = components["schemas"]["UpdateNode"];
 export type UpdateInput = components["schemas"]["UpdateInput"];
+export type DockerReport = components["schemas"]["DockerReport"];
+export type ComposeProject = UpdateNode["compose_projects"][number];
+export type UpdatePolicy = components["schemas"]["UpdatePolicy"];
+export type UpdatePolicies = components["schemas"]["UpdatePolicies"];
+export type ClusterPolicy = UpdatePolicies["clusters"][number];
+export type ComposeFile = components["schemas"]["ComposeFiles"]["files"][number];
 export type Command = components["schemas"]["Command"];
 export type CommandDetail = components["schemas"]["CommandDetail"];
 export type CommandInput = components["schemas"]["CommandInput"];
@@ -29,6 +35,69 @@ export function useStartUpdates() {
     },
   });
 }
+
+export function useUpdatePolicies() {
+  return useQuery({
+    queryKey: ["updates", "policies"],
+    queryFn: async () => unwrap(await api.GET("/updates/policies")),
+    refetchInterval: 60_000,
+  });
+}
+
+export function useSetEnvPolicy() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ env, body }: { env: "lab" | "test" | "prod"; body: UpdatePolicy & { confirm?: string } }) =>
+      unwrap(await api.PUT("/updates/policies/environments/{environment}", { params: { path: { environment: env } }, body })),
+    onSuccess: (data) => qc.setQueryData(["updates", "policies"], data),
+  });
+}
+
+export function useSetClusterPolicy() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ id, body }: { id: string; body: components["schemas"]["ClusterUpdatePolicyInput"] }) =>
+      unwrap(await api.PUT("/updates/policies/clusters/{clusterId}", { params: { path: { clusterId: id } }, body })),
+    onSuccess: (data) => qc.setQueryData(["updates", "policies"], data),
+  });
+}
+
+export function useReadCompose() {
+  return useMutation({
+    mutationFn: async (body: { node_id: string; project: string }) => unwrap(await api.POST("/updates/compose", { body })),
+  });
+}
+
+export function useWriteCompose() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: components["schemas"]["ComposeWriteInput"]) => unwrap(await api.PUT("/updates/compose", { body })),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["updates"] });
+      void qc.invalidateQueries({ queryKey: ["jobs"] });
+    },
+  });
+}
+
+// proposalFile haalt het aangepaste bestand uit het voorstel van de
+// assistent: het laatste codeblok, met het pad in de eerste regel.
+export function proposalFile(text: string): { path: string; content: string } | null {
+  const blocks = [...text.matchAll(/```(?:ya?ml|sh|env|dotenv)?\n([\s\S]*?)```/g)];
+  if (blocks.length === 0) return null;
+  let content = blocks[blocks.length - 1][1];
+  const first = content.split("\n", 1)[0];
+  const m = first.match(/^#\s*(\/\S+)\s*$/);
+  if (!m) return { path: "", content };
+  content = content.slice(first.length + 1);
+  return { path: m[1], content };
+}
+
+export const resultLabels: Record<DockerReport["result"], { text: string; tone: "green" | "slate" | "amber" | "red" }> = {
+  up_to_date: { text: "al bij", tone: "slate" },
+  updated: { text: "bijgewerkt", tone: "green" },
+  rolled_back: { text: "teruggezet", tone: "amber" },
+  failed: { text: "mislukt", tone: "red" },
+};
 
 export function useCommands() {
   return useQuery({

@@ -120,7 +120,7 @@ func TestUpdatesAndCommands(t *testing.T) {
 		Jobs    []job    `json:"jobs"`
 		Skipped []string `json:"skipped"`
 	}
-	if s := c.do("POST", "/api/v1/updates", map[string]any{"cluster_id": lab.ID, "apt": map[string]any{"autoremove": true}}, &started); s != http.StatusAccepted || len(started.Jobs) != 1 {
+	if s := c.do("POST", "/api/v1/updates", map[string]any{"cluster_id": lab.ID, "apt": map[string]any{"autoremove": true}, "failover": false}, &started); s != http.StatusAccepted || len(started.Jobs) != 1 {
 		t.Fatalf("bijwerken: %d %+v", s, started)
 	}
 	j := waitJob(t, c, started.Jobs[0].ID)
@@ -135,7 +135,7 @@ func TestUpdatesAndCommands(t *testing.T) {
 	if got := strings.Join(names, "|"); got != want {
 		t.Fatalf("stappen:\n%s\nwil\n%s", got, want)
 	}
-	if log := strings.Join(j.Steps[1].Log, "\n"); !strings.Contains(log, "Setting up openssl") || !strings.Contains(log, "$ apt-get autoremove -y -q") {
+	if log := strings.Join(j.Steps[1].Log, "\n"); !strings.Contains(log, "Setting up openssl") || !strings.Contains(log, "$ apt-get autoremove -q -o Dpkg::Options::=--force-confdef") {
 		t.Fatalf("log: %s", log)
 	}
 	if n1.got("apt-get upgrade") != 1 || n2.got("apt-get upgrade") != 1 || n1.got("apt-mark hold") != 0 {
