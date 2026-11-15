@@ -640,6 +640,79 @@ type CronSyncNode struct {
 	CheckedAt       time.Time
 }
 
+type CrowdsecAlert struct {
+	ID         int64
+	NodeID     uuid.UUID
+	AlertID    int64
+	Scenario   string
+	Message    string
+	Scope      string
+	Value      string
+	Country    string
+	AsName     string
+	Events     int32
+	Decisions  int32
+	Simulated  bool
+	StartedAt  time.Time
+	StoppedAt  time.Time
+	ReceivedAt time.Time
+}
+
+type CrowdsecDecision struct {
+	NodeID     uuid.UUID
+	DecisionID int64
+	Origin     string
+	Type       string
+	Scope      string
+	Value      string
+	Scenario   string
+	Until      time.Time
+	Country    string
+	AsName     string
+	FirstSeen  time.Time
+}
+
+type CrowdsecNode struct {
+	NodeID           uuid.UUID
+	Managed          bool
+	Bouncer          bool
+	ExtraProfiles    []string
+	DisabledProfiles []string
+	Status           []byte
+	StatusAt         *time.Time
+	Plan             []byte
+	PlanHash         string
+	AppliedHash      string
+	AppliedAt        *time.Time
+	ApplyJobID       *uuid.UUID
+	ApplyError       string
+	ApplyFailedAt    *time.Time
+	Blocklist        int32
+	PollAt           *time.Time
+	PollError        string
+	LastAlertAt      *time.Time
+	CreatedAt        time.Time
+}
+
+type CrowdsecSetting struct {
+	ID             bool
+	AutoApply      bool
+	BouncerDefault bool
+	ShareBans      string
+	Whitelist      []string
+	UpdatedAt      time.Time
+	UpdatedBy      *uuid.UUID
+}
+
+type CrowdsecShared struct {
+	Scope      string
+	Value      string
+	SourceNode *uuid.UUID
+	Scenario   string
+	Until      time.Time
+	SharedAt   time.Time
+}
+
 type DbClient struct {
 	NodeID      uuid.UUID
 	Engine      string

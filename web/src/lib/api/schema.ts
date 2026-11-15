@@ -3629,6 +3629,161 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/crowdsec": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * CrowdSec op alle nodes (fase 14)
+         * @description Instellingen, cijfers, alerts per uur (24 u), top-scenario's en -IP's (7 dagen), waarschuwingen, elke node met
+         *     een agent met zijn CrowdSec-stand en plan, en de catalogus met profielen. Ook voor viewers.
+         */
+        get: operations["getCrowdSec"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/crowdsec/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** CrowdSec-instellingen bewaren (admin) */
+        put: operations["updateCrowdSecSettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/crowdsec/nodes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * CrowdSec aan- of uitzetten op nodes (admin)
+         * @description node_ids, cluster_id of all. Aanzetten: de volgende ronde (meteen) haalt de stand, rekent het plan uit en past
+         *     het toe als automatisch toepassen aan staat. Uitzetten stopt het beheer; CrowdSec blijft op de node staan.
+         */
+        post: operations["setCrowdSecNodes"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/crowdsec/nodes/{nodeId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        /** CrowdSec op één node, met de laatste alerts */
+        get: operations["getCrowdSecNode"];
+        /** Bouncer en profielen van een node (admin) */
+        put: operations["configureCrowdSecNode"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/crowdsec/nodes/{nodeId}/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Het plan nu toepassen, of CrowdSec verwijderen (remove), als taak crowdsec.apply (admin) */
+        post: operations["applyCrowdSecNode"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/crowdsec/nodes/{nodeId}/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** De stand van een node meteen ophalen (admin) */
+        post: operations["refreshCrowdSecNode"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/crowdsec/alerts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Alerts van de nodes, nieuwste eerst (90 dagen) */
+        get: operations["listCrowdSecAlerts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/crowdsec/decisions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Actieve bans, samengevoegd per adres (zonder de community-blocklist) */
+        get: operations["listCrowdSecDecisions"];
+        put?: never;
+        /**
+         * IP of range blokkeren of deblokkeren (admin)
+         * @description Zonder node_ids of cluster_id op alle nodes met CrowdSec. delete haalt alle bans op het adres weg.
+         */
+        post: operations["decideCrowdSec"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/commands": {
         parameters: {
             query?: never;
@@ -11480,6 +11635,241 @@ export interface components {
             /** @description null als er op geen node iets verandert */
             job: components["schemas"]["Job"] | null;
         };
+        CrowdSecSettings: {
+            auto_apply: boolean;
+            bouncer_default: boolean;
+            /** @enum {string} */
+            share_bans: "off" | "cluster" | "all";
+            whitelist: string[];
+            /** Format: date-time */
+            updated_at: string;
+        };
+        CrowdSecSettingsInput: {
+            auto_apply: boolean;
+            bouncer_default: boolean;
+            /** @enum {string} */
+            share_bans: "off" | "cluster" | "all";
+            whitelist: string[];
+        };
+        CrowdSecNodesInput: {
+            node_ids?: string[];
+            /** Format: uuid */
+            cluster_id?: string;
+            all?: boolean;
+            managed: boolean;
+            /** @description Bij aanzetten; zonder geldt de instelling bouncer_default */
+            bouncer?: boolean;
+        };
+        CrowdSecNodeInput: {
+            bouncer: boolean;
+            extra_profiles: string[];
+            disabled_profiles: string[];
+        };
+        CrowdSecDecisionInput: {
+            delete?: boolean;
+            /** @enum {string} */
+            scope: "ip" | "range";
+            value: string;
+            /** @description Zoals 4h of 30m */
+            duration?: string;
+            reason?: string;
+            node_ids?: string[];
+            /** Format: uuid */
+            cluster_id?: string;
+        };
+        CrowdSecBanResult: {
+            count: number;
+            nodes: string[];
+            errors: string[];
+        };
+        CrowdSecProfile: {
+            key: string;
+            name: string;
+            /** @enum {string} */
+            origin: "auto" | "extra" | "off";
+            reason?: string;
+            note?: string;
+            sources?: string[];
+        };
+        CrowdSecPlan: {
+            profiles: components["schemas"]["CrowdSecProfile"][];
+            collections: string[];
+            bouncer: boolean;
+            whitelist: string[];
+            hash: string;
+        };
+        CrowdSecStatus: {
+            installed: boolean;
+            version?: string;
+            active?: string;
+            /** @description Leeg zonder bouncer */
+            bouncer?: string;
+            capi: boolean;
+            collections?: {
+                name: string;
+                status?: string;
+                version?: string;
+            }[];
+            bouncers?: {
+                name: string;
+                ip?: string;
+                type?: string;
+                version?: string;
+                valid: boolean;
+                /** Format: date-time */
+                last_pull?: string;
+            }[];
+            sources?: {
+                source: string;
+                /** Format: int64 */
+                read: number;
+                /** Format: int64 */
+                parsed: number;
+                /** Format: int64 */
+                unparsed: number;
+                /** Format: int64 */
+                poured: number;
+            }[];
+            containers?: {
+                name: string;
+                image: string;
+                mounts?: {
+                    [key: string]: string;
+                };
+            }[];
+            probes?: {
+                [key: string]: string[];
+            };
+            applied?: {
+                hash: string;
+                collections: string[];
+                /** Format: date-time */
+                applied_at: string;
+            };
+            errors?: string[];
+        };
+        CrowdSecNode: {
+            /** Format: uuid */
+            node_id: string;
+            hostname: string;
+            /** Format: uuid */
+            cluster_id: string | null;
+            cluster_name: string;
+            cluster_slug: string;
+            cluster_environment: string;
+            cluster_template: string;
+            online: boolean;
+            protocol: number;
+            /** @description De agent kent CrowdSec (protocol 28) */
+            supported: boolean;
+            /** @description CrowdSec staat aan in ClusterForge */
+            enabled: boolean;
+            managed: boolean;
+            bouncer: boolean;
+            extra_profiles: string[];
+            disabled_profiles: string[];
+            status: components["schemas"]["CrowdSecStatus"] | null;
+            /** Format: date-time */
+            status_at: string | null;
+            plan: components["schemas"]["CrowdSecPlan"] | null;
+            plan_hash: string;
+            applied_hash: string;
+            /** Format: date-time */
+            applied_at: string | null;
+            /** Format: uuid */
+            apply_job_id: string | null;
+            apply_running: boolean;
+            apply_error: string;
+            /** Format: date-time */
+            apply_failed_at: string | null;
+            /** @description Bans van de community-blocklist */
+            blocklist: number;
+            /** Format: date-time */
+            poll_at: string | null;
+            poll_error: string;
+        };
+        CrowdSecAlert: {
+            /** Format: int64 */
+            id: number;
+            /** Format: uuid */
+            node_id: string;
+            hostname: string;
+            /** Format: uuid */
+            cluster_id: string | null;
+            cluster_name: string;
+            scenario: string;
+            message: string;
+            scope: string;
+            value: string;
+            country: string;
+            as: string;
+            events: number;
+            decisions: number;
+            simulated: boolean;
+            /** Format: date-time */
+            started_at: string;
+            /** Format: date-time */
+            stopped_at: string;
+        };
+        CrowdSecBan: {
+            scope: string;
+            value: string;
+            type: string;
+            scenario: string;
+            origin: string;
+            country: string;
+            as: string;
+            /** Format: date-time */
+            until: string;
+            nodes: string[];
+            /** @description ClusterForge zette deze ban ook op andere nodes */
+            shared: boolean;
+        };
+        CrowdSecTopEntry: {
+            key: string;
+            country: string;
+            as: string;
+            count: number;
+        };
+        CrowdSecOverview: {
+            protocol: number;
+            settings: components["schemas"]["CrowdSecSettings"];
+            stats: {
+                managed: number;
+                running: number;
+                alerts_24h: number;
+                active_bans: number;
+                blocklist: number;
+                bouncers: number;
+                bouncers_down: number;
+            };
+            hourly: {
+                /** Format: date-time */
+                hour: string;
+                count: number;
+            }[];
+            top_scenarios: components["schemas"]["CrowdSecTopEntry"][];
+            top_ips: components["schemas"]["CrowdSecTopEntry"][];
+            warnings: {
+                /** Format: uuid */
+                node_id: string;
+                hostname: string;
+                text: string;
+            }[];
+            nodes: components["schemas"]["CrowdSecNode"][];
+            catalog: {
+                key: string;
+                name: string;
+                description: string;
+                collections: string[];
+                community: boolean;
+                nodes: string[];
+            }[];
+        };
+        CrowdSecNodeDetail: {
+            node: components["schemas"]["CrowdSecNode"];
+            alerts: components["schemas"]["CrowdSecAlert"][];
+        };
     };
     responses: {
         /** @description Fout */
@@ -17191,6 +17581,278 @@ export interface operations {
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
             409: components["responses"]["Error"];
+        };
+    };
+    getCrowdSec: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CrowdSecOverview"];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    updateCrowdSecSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CrowdSecSettingsInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CrowdSecSettings"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+        };
+    };
+    setCrowdSecNodes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CrowdSecNodesInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        skipped: string[];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+        };
+    };
+    getCrowdSecNode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CrowdSecNodeDetail"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    configureCrowdSecNode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CrowdSecNodeInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CrowdSecNode"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    applyCrowdSecNode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": {
+                    remove?: boolean;
+                };
+            };
+        };
+        responses: {
+            /** @description Taak aangemaakt */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        job_id: string;
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    refreshCrowdSecNode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CrowdSecNode"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    listCrowdSecAlerts: {
+        parameters: {
+            query?: {
+                node_id?: string;
+                cluster_id?: string;
+                scenario?: string;
+                /** @description IP of begin ervan */
+                value?: string;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["CrowdSecAlert"][];
+                    };
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    listCrowdSecDecisions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["CrowdSecBan"][];
+                    };
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    decideCrowdSec: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CrowdSecDecisionInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CrowdSecBanResult"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
         };
     };
     listCommands: {

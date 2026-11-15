@@ -119,9 +119,9 @@ func Build(s Signals, cfg NodeConfig, whitelist []string) Plan {
 
 func (p Plan) hash() string {
 	h := sha256.New()
-	fmt.Fprintf(h, "v1\nbouncer=%v\n", p.Bouncer)
+	_, _ = fmt.Fprintf(h, "v1\nbouncer=%v\n", p.Bouncer)
 	for _, c := range p.Collections {
-		fmt.Fprintf(h, "col %s\n", c)
+		_, _ = fmt.Fprintf(h, "col %s\n", c)
 	}
 	keys := make([]string, 0, len(p.Files))
 	for k := range p.Files {
@@ -129,7 +129,7 @@ func (p Plan) hash() string {
 	}
 	sort.Strings(keys)
 	for _, k := range keys {
-		fmt.Fprintf(h, "file %s %d\n%s\n", k, len(p.Files[k]), p.Files[k])
+		_, _ = fmt.Fprintf(h, "file %s %d\n%s\n", k, len(p.Files[k]), p.Files[k])
 	}
 	return hex.EncodeToString(h.Sum(nil))[:16]
 }

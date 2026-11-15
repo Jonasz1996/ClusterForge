@@ -213,10 +213,7 @@ func (a *Agent) dockerContainers(ctx context.Context) []protocol.CrowdSecContain
 	if err != nil {
 		return nil
 	}
-	args := []string{"inspect"}
-	for _, id := range strings.Fields(string(ids)) {
-		args = append(args, id)
-	}
+	args := append([]string{"inspect"}, strings.Fields(string(ids))...)
 	if len(args) == 1 {
 		return nil
 	}
