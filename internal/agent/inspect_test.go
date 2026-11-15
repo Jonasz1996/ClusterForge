@@ -292,6 +292,7 @@ var sampleParams = map[string]map[string]any{
 		"media_worker_key": "mediasleutel1"},
 	"nginx-proxy-manager": {"vip": "10.0.20.100", "vrid": 57, "auth_pass": "geheim12"},
 	"home-assistant":      {"vip": "10.0.20.100", "vrid": 58, "auth_pass": "geheim12", "db_password": "Wachtwoord-123"},
+	"authentik":           {"vip": "10.0.20.100", "db_vip": "10.0.20.101", "vrid": 59, "auth_pass": "geheim12", "db_password": "Wachtwoord-123"},
 }
 
 func renderBuiltin(t *testing.T, tpl *templates.Template, role string) []templates.Step {

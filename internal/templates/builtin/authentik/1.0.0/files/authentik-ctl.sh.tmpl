@@ -1,0 +1,331 @@
+#!/bin/sh
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}).
+#
+# Authentik als cluster. Authentik draait op elke node tegelijk tegen één
+# PostgreSQL (Patroni, VIP {{ .params.db_vip }}); keepalived zet het VIP
+# ({{ .params.vip }}) op een gezonde node. Media, sjablonen en certificaten
+# (en na een overname de geheime sleutel) staan in $FILES en gaan met de
+# sync Authentik-media van de VIP-node naar de andere nodes.
+#
+#   authentik-ctl.sh up | down     Authentik starten of stoppen (via cf-authentik, systemd)
+#   authentik-ctl.sh check         keepalived: antwoordt Authentik hier gezond?
+#   authentik-ctl.sh status        wat er op deze node staat
+#   authentik-ctl.sh overnemen [--andere-versie]
+#                                  de Authentik die hier nog los draait (Docker
+#                                  Compose met eigen PostgreSQL) naar het cluster:
+#                                  database, media en geheime sleutel
+#   authentik-ctl.sh vrijgeven     een database die je zelf terugzette, in gebruik nemen
+#   authentik-ctl.sh pull | pulled de images halen / staan ze er?
+#   authentik-ctl.sh unchanged | restart-if-changed
+#
+# De database krijgt een markering (commentaar op de database) met een
+# vingerafdruk van de geheime sleutel. Zonder markering start Authentik
+# alleen op node 1 van een nieuw cluster met een lege database; met een
+# markering alleen met dezelfde sleutel. Zo begint nooit een node een lege
+# Authentik naast een overname, en draait nooit een node met een andere
+# sleutel dan de rest.
+set -u
+# CF_AK_* zijn er alleen voor de tests van ClusterForge.
+BASE=${CF_AK_BASE:-/opt/cf-authentik}
+FILES=$BASE/files
+KEYFILE=$FILES/.cf/secret_key
+STATE=${CF_AK_STATE:-/var/lib/cf-authentik}
+ETC=${CF_AK_ETC:-/etc/cf-authentik}
+RUN=${CF_AK_RUN:-/run/cf-authentik}
+HASH=$RUN/hash
+VIP='{{ .params.vip }}'
+VERSION='{{ .params.version }}'
+IMAGE="ghcr.io/goauthentik/server:$VERSION"
+REDIS_IMAGE=docker.io/library/redis:7-alpine
+PARAM_KEY='{{ .params.secret_key }}'
+INDEX='{{ .node.index }}'
+HTTP=9000
+# Tellingen vóór en na een overname.
+TABLES='authentik_core_user authentik_core_group authentik_core_application authentik_core_provider authentik_providers_proxy_proxyprovider authentik_providers_oauth2_oauth2provider authentik_outposts_outpost authentik_flows_flow authentik_crypto_certificatekeypair'
+# Voor docker inspect/ps: de accolades van Go-templates.
+LB='{{"{{"}}'
+RB='{{"}}"}}'
+
+say() { echo "== $*"; }
+warn() { echo "WAARSCHUWING: $*" >&2; }
+fail() { echo "FOUT: $*" >&2; exit 1; }
+log() { logger -t cf-authentik "$*" 2>/dev/null; echo "$*" >&2; }
+when() { date -d "@$1" '+%Y-%m-%d %H:%M:%S' 2>/dev/null || echo "$1"; }
+envval() { sed -n "s/^$1=//p" "$2" 2>/dev/null | tail -n 1; }
+has_vip() { ip -o addr show 2>/dev/null | grep -q " $VIP/"; }
+compose() { docker compose -p cf-authentik --project-directory "$BASE" -f "$BASE/compose.yaml" "$@"; }
+
+# psql naar de database van het cluster, met de gegevens uit authentik.env.
+pg() {
+  PGPASSWORD=$(envval AUTHENTIK_POSTGRESQL__PASSWORD "$ETC/authentik.env") PGCONNECT_TIMEOUT=5 \
+    psql -X -q -At -v ON_ERROR_STOP=1 \
+    -h "$(envval AUTHENTIK_POSTGRESQL__HOST "$ETC/authentik.env")" \
+    -p "$(envval AUTHENTIK_POSTGRESQL__PORT "$ETC/authentik.env")" \
+    -U "$(envval AUTHENTIK_POSTGRESQL__USER "$ETC/authentik.env")" \
+    -d "$(envval AUTHENTIK_POSTGRESQL__NAME "$ETC/authentik.env")" "$@"
+}
+db_meta() { pg -c "SELECT coalesce(shobj_description(oid, 'pg_database'), '') FROM pg_database WHERE datname = current_database()"; }
+db_tables() { pg -c "SELECT count(*) FROM pg_tables WHERE schemaname = 'public'"; }
+db_mark() { printf "SELECT format('COMMENT ON DATABASE %%I IS %%L', current_database(), '%s')\n\\\\gexec\n" "$1" | pg -f -; }
+metafield() { echo "$1" | tr ' ' '\n' | sed -n "s/^$2=//p" | head -n 1; }
+
+# De geheime sleutel: de overgenomen (sync) of die van de template.
+key() { if [ -s "$KEYFILE" ]; then cat "$KEYFILE"; else printf %s "$PARAM_KEY"; fi; }
+keyhash() { key | sha256sum | cut -c1-16; }
+
+# De server- en workercontainers van een andere Authentik op deze machine
+# (zoals de Authentik die je nog moet overnemen). Outposts tellen niet mee.
+foreign() {
+  docker ps --format "${LB}.ID${RB} ${LB}.Image${RB} ${LB}.Label \"com.docker.compose.project\"${RB}" 2>/dev/null |
+    awk '$2 ~ /(goauthentik|beryju)\/(server|authentik)(:|@|$)/ && $3 != "cf-authentik" {print $1}'
+}
+project_of() { docker inspect -f "${LB}index .Config.Labels \"com.docker.compose.project\"${RB}" "$1" 2>/dev/null; }
+# Alle containers van een compose-project, ook gestopte.
+project_containers() { docker ps -aq --filter "label=com.docker.compose.project=$1" 2>/dev/null; }
+# Een Authentik die hier draait buiten het cluster: stoppen en nooit meer
+# vanzelf laten starten (de data blijft staan).
+stop_foreign() {
+  for c in $(foreign); do
+    p=$(project_of "$c")
+    for x in $(if [ -n "$p" ]; then project_containers "$p"; else echo "$c"; fi); do
+      docker update --restart=no "$x" >/dev/null 2>&1
+      docker stop "$x" >/dev/null 2>&1
+    done
+    log "oude Authentik (project ${p:-?}) gestopt; start niet meer vanzelf. Terug: docker start \$(docker ps -aq --filter label=com.docker.compose.project=${p:-?})"
+  done
+}
+
+healthy() { curl -fsS -m 4 -o /dev/null "http://127.0.0.1:$HTTP/-/health/ready/" 2>/dev/null; }
+fingerprint() {
+  { cat "$BASE/compose.yaml" "$ETC/authentik.env"; keyhash
+    docker image inspect -f "${LB}.Id${RB}" "$IMAGE" "$REDIS_IMAGE" 2>/dev/null; } | sha256sum | cut -d' ' -f1
+}
+
+up() {
+  meta=$(db_meta) || fail "de database op $(envval AUTHENTIK_POSTGRESQL__HOST "$ETC/authentik.env") antwoordt niet (nog niet uitgerold, of Patroni zonder primary); cf-authentik probeert het over 15 s opnieuw"
+  if [ -n "$(metafield "$meta" ready)" ]; then
+    want=$(metafield "$meta" key)
+    if [ "$want" != "$(keyhash)" ]; then
+      fail "de geheime sleutel hier ($(keyhash)) is niet die van het cluster ($want). Na een overname komt de sleutel met de sync Authentik-media van de VIP-node (Cronjobs); cf-authentik wacht erop"
+    fi
+    # Na de overname hoort hier geen oude Authentik meer te draaien.
+    [ -n "$(foreign)" ] && stop_foreign
+  else
+    if [ -n "$(foreign)" ]; then
+      fail "hier draait nog een Authentik buiten het cluster; die blijft het VIP bedienen tot je hem overneemt (Commando's: /usr/local/lib/clusterforge/authentik-ctl.sh overnemen, op de node met de juiste configuratie)"
+    fi
+    tables=$(db_tables) || fail "tabellen tellen in de database"
+    if [ "$INDEX" != 1 ] || [ "$tables" != 0 ]; then
+      fail "de database is nog niet in gebruik genomen ($tables tabellen, geen markering). Neem eerst een bestaande Authentik over (authentik-ctl.sh overnemen), of laat node 1 een nieuw cluster beginnen; cf-authentik wacht"
+    fi
+    say "Nieuw cluster: de lege database in gebruik nemen"
+    db_mark "cf-authentik key=$(keyhash) ready=$(date +%s) new=$(hostname)" || fail "markering zetten"
+  fi
+  [ -n "$(key)" ] || fail "geen geheime sleutel"
+  mkdir -p "$RUN" && chmod 0700 "$RUN" || fail "map $RUN"
+  (umask 077 && printf 'AUTHENTIK_SECRET_KEY=%s\n' "$(key)" > "$RUN/key.env") || fail "$RUN/key.env"
+  fingerprint > "$HASH"
+  exec docker compose -p cf-authentik --project-directory "$BASE" -f "$BASE/compose.yaml" up --no-build --remove-orphans --abort-on-container-exit
+}
+
+# Een oude Authentik die hier draait (Docker Compose, met een eigen
+# PostgreSQL-container) naar het cluster halen.
+overnemen() {
+  force=
+  [ "${1:-}" = --andere-versie ] && force=1
+  srv=''
+  wrk=''
+  for c in $(foreign); do
+    cmd=$(docker inspect -f "${LB}join .Config.Cmd \" \"${RB}" "$c" 2>/dev/null)
+    case "$cmd" in
+      *worker*) wrk=$c ;;
+      *server*) srv=$c ;;
+    esac
+  done
+  [ -n "$srv" ] || fail "hier draait geen Authentik-server buiten het cluster (docker ps); doe dit op de node waar je oude Authentik met de juiste configuratie draait"
+  proj=$(project_of "$srv")
+  [ -n "$proj" ] || fail "de oude Authentik ($srv) is niet met Docker Compose gestart; neem hem met de hand over"
+  pgc=
+  for c in $(project_containers "$proj"); do
+    case "$(docker inspect -f "${LB}.Config.Image${RB}" "$c" 2>/dev/null)" in
+      *postgres*) pgc=$c ;;
+    esac
+  done
+  [ -n "$pgc" ] || fail "geen PostgreSQL-container in het project $proj; staat de database van je oude Authentik elders?"
+  [ "$(docker inspect -f "${LB}.State.Running${RB}" "$pgc" 2>/dev/null)" = true ] || fail "de PostgreSQL-container $pgc draait niet"
+
+  envs=$(docker inspect -f "${LB}range .Config.Env${RB}${LB}println .${RB}${LB}end${RB}" "$srv")
+  oldkey=$(echo "$envs" | sed -n 's/^AUTHENTIK_SECRET_KEY=//p' | head -n 1)
+  oname=$(echo "$envs" | sed -n 's/^AUTHENTIK_POSTGRESQL__NAME=//p' | head -n 1)
+  ouser=$(echo "$envs" | sed -n 's/^AUTHENTIK_POSTGRESQL__USER=//p' | head -n 1)
+  oname=${oname:-authentik}
+  ouser=${ouser:-authentik}
+  [ -n "$oldkey" ] || fail "de oude Authentik heeft geen AUTHENTIK_SECRET_KEY"
+  case "$oldkey" in *"
+"*) fail "AUTHENTIK_SECRET_KEY van de oude Authentik heeft meer dan één regel" ;; esac
+
+  oldimg=$(docker inspect -f "${LB}.Config.Image${RB}" "$srv")
+  oldtag=${oldimg##*:}
+  echo "Oude Authentik: project $proj, $oldimg, database $oname (gebruiker $ouser) in $pgc"
+  if [ "${oldtag%.*}" != "${VERSION%.*}" ] && [ -z "$force" ]; then
+    fail "de oude Authentik is $oldtag en het cluster $VERSION. Geef het cluster dezelfde jaar.maand (Wijzigen → Versie van Authentik: $oldtag) en werk daarna bij, of werk de oude eerst bij. Zeker van je stuk: $0 overnemen --andere-versie"
+  fi
+
+  meta=$(db_meta) || fail "de database van het cluster antwoordt niet; is ze er al (Databases)?"
+  [ -z "$(metafield "$meta" ready)" ] || fail "de database van het cluster is al in gebruik ($meta); een tweede overname zou haar overschrijven"
+  tables=$(db_tables) || fail "tabellen tellen"
+  [ "$tables" = 0 ] || fail "de database van het cluster is niet leeg ($tables tabellen)"
+
+  # De mappen van de oude Authentik, uit zijn mounts.
+  fmt="${LB}range .Mounts${RB}${LB}.Destination${RB} ${LB}.Source${RB}${LB}println${RB}${LB}end${RB}"
+  mounts=$(docker inspect -f "$fmt" "$srv"; [ -n "$wrk" ] && docker inspect -f "$fmt" "$wrk")
+
+  mkdir -p "$STATE/overname" && chmod 0700 "$STATE/overname" || fail "map $STATE/overname"
+  t=$(date +%s)
+  dump=$STATE/overname/authentik-$t.sql
+
+  say "Oude Authentik-server en -worker stoppen (de database blijft draaien)"
+  # shellcheck disable=SC2086
+  docker stop $srv $wrk >/dev/null || fail "oude Authentik stoppen"
+
+  say "Tellen in de oude database"
+  before=
+  for tb in $TABLES; do
+    n=$(docker exec "$pgc" psql -X -At -U "$ouser" -d "$oname" -c "SELECT CASE WHEN to_regclass('public.$tb') IS NULL THEN -1 ELSE (xpath('/row/n/text()', query_to_xml('SELECT count(*) AS n FROM public.$tb', false, true, '')))[1]::text::int END") ||
+      back "tellen in de oude database"
+    before="$before $tb=$n"
+  done
+
+  say "Dump maken (pg_dump in $pgc)"
+  docker exec "$pgc" pg_dump -U "$ouser" -d "$oname" --no-owner --no-privileges > "$dump" || back "pg_dump"
+  [ -s "$dump" ] || back "de dump is leeg"
+  echo "Dump: $(du -h "$dump" | cut -f1)"
+
+  say "Terugzetten in de database van het cluster (één transactie)"
+  pg -1 -f "$dump" >/dev/null || back "terugzetten (psql); de database van het cluster is leeg gebleven"
+
+  say "Tellen in de database van het cluster"
+  bad=
+  for kv in $before; do
+    tb=${kv%%=*}
+    n=${kv#*=}
+    [ "$n" = -1 ] && continue
+    m=$(pg -c "SELECT count(*) FROM public.$tb") || m='?'
+    printf '  %-45s %8s -> %s\n' "$tb" "$n" "$m"
+    [ "$m" = "$n" ] || bad="$bad $tb"
+  done
+  [ -z "$bad" ] || back "andere aantallen in:$bad"
+
+  say "Media, sjablonen en certificaten kopiëren"
+  echo "$mounts" | while read -r dest src; do
+    case "$dest" in
+      /media) to=$FILES/media ;;
+      /data) to=$FILES/data ;;
+      /templates) to=$FILES/templates ;;
+      /certs) to=$FILES/certs ;;
+      *) continue ;;
+    esac
+    [ -d "$src" ] || continue
+    rsync -a "${src%/}/" "$to/" || exit 1
+    echo "  $src -> $to ($(du -sh "$to" | cut -f1))"
+  done || back "rsync van de media"
+
+  say "Geheime sleutel meenemen"
+  (umask 077 && mkdir -p "$FILES/.cf" && printf '%s' "$oldkey" > "$KEYFILE") || back "$KEYFILE"
+  chmod 0700 "$FILES/.cf"
+  db_mark "cf-authentik key=$(keyhash) ready=$(date +%s) from=$(hostname) project=$proj" || back "markering zetten"
+
+  say "Oude Authentik helemaal stoppen; start niet meer vanzelf"
+  for x in $(project_containers "$proj"); do
+    docker update --restart=no "$x" >/dev/null 2>&1
+    docker stop "$x" >/dev/null 2>&1
+  done
+  gzip -f "$dump"
+
+  say "Authentik van het cluster starten"
+  systemctl restart cf-authentik || warn "systemctl restart cf-authentik (journalctl -u cf-authentik)"
+  echo
+  echo "Overgenomen. De andere nodes starten Authentik zodra de sync Authentik-media de sleutel bracht (binnen een paar minuten; Cronjobs)."
+  echo "Dump bewaard: $dump.gz"
+  echo "Terug naar de oude Authentik: op elke node systemctl disable --now cf-authentik, dan hier: docker start \$(docker ps -aq --filter label=com.docker.compose.project=$proj)"
+  return 0
+}
+
+# Iets ging mis tijdens de overname: de database van het cluster weer leeg,
+# de oude Authentik weer aan.
+back() {
+  echo "FOUT: $1" >&2
+  echo "== Terugdraaien: database van het cluster leegmaken, oude Authentik weer starten" >&2
+  if [ "$(db_tables 2>/dev/null)" != 0 ]; then
+    pg -c 'DROP SCHEMA public CASCADE' -c 'CREATE SCHEMA public' >/dev/null 2>&1 || echo "WAARSCHUWING: de database van het cluster leegmaken mislukte" >&2
+  fi
+  rm -f "$KEYFILE"
+  # shellcheck disable=SC2086
+  docker start $srv $wrk >/dev/null 2>&1
+  echo "De oude Authentik draait weer; er is niets veranderd." >&2
+  exit 1
+}
+
+status() {
+  echo "node:       $(hostname) (index $INDEX)"
+  if has_vip; then echo "VIP:        $VIP staat hier"; else echo "VIP:        $VIP staat elders"; fi
+  echo "cf-authentik: $(systemctl is-active cf-authentik 2>/dev/null)"
+  if healthy; then echo "Authentik:  antwoordt gezond op poort $HTTP"; else echo "Authentik:  antwoordt NIET op poort $HTTP"; fi
+  [ -n "$(foreign)" ] && echo "LET OP:     een Authentik buiten het cluster draait hier: $(foreign | tr '\n' ' ')"
+  if meta=$(db_meta 2>/dev/null); then
+    echo "database:   ${meta:-geen markering} ($(db_tables) tabellen)"
+  else
+    echo "database:   antwoordt niet"
+  fi
+  if [ -s "$KEYFILE" ]; then echo "sleutel:    overgenomen ($(keyhash))"; else echo "sleutel:    van de template ($(keyhash))"; fi
+  echo "versie:     $VERSION"
+  return 0
+}
+
+case "${1:-}" in
+  up)
+    up
+    ;;
+  down)
+    compose stop
+    rm -f "$HASH"
+    ;;
+  check)
+    systemctl is-active --quiet docker || exit 1
+    # Een oude Authentik op een andere node dan node 1 telt niet: alleen de
+    # eerste node bedient het VIP tot de overname.
+    if [ -n "$(foreign)" ] && [ "$INDEX" != 1 ]; then exit 1; fi
+    healthy
+    ;;
+  status)
+    status
+    ;;
+  overnemen)
+    shift
+    overnemen "$@"
+    ;;
+  vrijgeven)
+    meta=$(db_meta) || fail "de database antwoordt niet"
+    [ -z "$(metafield "$meta" ready)" ] || fail "de database is al in gebruik ($meta)"
+    [ "$(db_tables)" != 0 ] || fail "de database is leeg; node 1 begint een nieuw cluster vanzelf"
+    db_mark "cf-authentik key=$(keyhash) ready=$(date +%s) released=$(hostname)" || fail "markering zetten"
+    echo "Vrijgegeven met de sleutel $(keyhash); Authentik start op de nodes met dezelfde sleutel."
+    ;;
+  pull)
+    docker pull "$IMAGE" && docker pull "$REDIS_IMAGE"
+    ;;
+  pulled)
+    docker image inspect "$IMAGE" "$REDIS_IMAGE" >/dev/null 2>&1
+    ;;
+  unchanged)
+    systemctl is-active --quiet cf-authentik || exit 0
+    [ "$(cat "$HASH" 2>/dev/null)" = "$(fingerprint)" ]
+    ;;
+  restart-if-changed)
+    systemctl try-restart cf-authentik
+    ;;
+  *)
+    echo "gebruik: $0 up|down|check|status|overnemen|vrijgeven|pull|pulled|unchanged|restart-if-changed" >&2
+    exit 2
+    ;;
+esac

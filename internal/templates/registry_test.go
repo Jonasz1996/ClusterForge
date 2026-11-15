@@ -20,6 +20,7 @@ var released = map[string][]string{
 	"media-platform":      {"1.0.0"},
 	"nginx-proxy-manager": {"1.0.0"},
 	"home-assistant":      {"1.0.0"},
+	"authentik":           {"1.0.0"},
 }
 
 func TestReleasedVersionsStay(t *testing.T) {
