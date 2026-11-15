@@ -21,6 +21,16 @@ type Settings struct {
 	Whitelist      []string   `json:"whitelist"`
 	UpdatedAt      time.Time  `json:"updated_at"`
 	UpdatedBy      *uuid.UUID `json:"-"`
+	// ConsoleKeySet: er is een enroll-sleutel voor de CrowdSec Console. De
+	// sleutel zelf gaat nooit naar de browser.
+	ConsoleKeySet bool `json:"console_key_set"`
+	// ConsoleAvailable: de server heeft een masterkey om de sleutel te
+	// bewaren.
+	ConsoleAvailable bool `json:"console_available"`
+
+	consoleKeyEnc  []byte
+	consoleKeyID   string
+	consoleKeyHash string
 }
 
 // Node is een node met een agent, met zijn CrowdSec-stand.
@@ -55,7 +65,14 @@ type Node struct {
 	Blocklist        int                      `json:"blocklist"`
 	PollAt           *time.Time               `json:"poll_at"`
 	PollError        string                   `json:"poll_error"`
+	// ConsoleEnrolled: aangemeld bij de CrowdSec Console met de huidige
+	// sleutel.
+	ConsoleEnrolled   bool       `json:"console_enrolled"`
+	ConsoleEnrolledAt *time.Time `json:"console_enrolled_at"`
+	ConsoleError      string     `json:"console_error"`
+	ConsoleFailedAt   *time.Time `json:"console_failed_at"`
 
+	consoleHash string
 	facts       *protocol.Facts
 	lastAlertAt *time.Time
 }
@@ -87,11 +104,15 @@ func (n Node) Config() NodeConfig {
 
 func (s *Service) Settings(ctx context.Context) (Settings, error) {
 	var st Settings
-	err := s.pool.QueryRow(ctx, `SELECT auto_apply, bouncer_default, share_bans, whitelist, updated_at, updated_by FROM crowdsec_settings`).
-		Scan(&st.AutoApply, &st.BouncerDefault, &st.ShareBans, &st.Whitelist, &st.UpdatedAt, &st.UpdatedBy)
+	err := s.pool.QueryRow(ctx, `SELECT auto_apply, bouncer_default, share_bans, whitelist, updated_at, updated_by,
+		console_key_enc, console_key_id, console_key_hash FROM crowdsec_settings`).
+		Scan(&st.AutoApply, &st.BouncerDefault, &st.ShareBans, &st.Whitelist, &st.UpdatedAt, &st.UpdatedBy,
+			&st.consoleKeyEnc, &st.consoleKeyID, &st.consoleKeyHash)
 	if errors.Is(err, pgx.ErrNoRows) {
-		return Settings{AutoApply: true, BouncerDefault: true, ShareBans: "all", Whitelist: DefaultWhitelist}, nil
+		st, err = Settings{AutoApply: true, BouncerDefault: true, ShareBans: "all", Whitelist: DefaultWhitelist}, nil
 	}
+	st.ConsoleKeySet = len(st.consoleKeyEnc) > 0
+	st.ConsoleAvailable = s.Box != nil
 	return st, err
 }
 
@@ -104,7 +125,9 @@ SELECT n.id, n.hostname, n.cluster_id,
        cn.status, cn.status_at, cn.plan, coalesce(cn.plan_hash, ''), coalesce(cn.applied_hash, ''), cn.applied_at,
        cn.apply_job_id, coalesce(j.status::text IN ('queued', 'running'), false),
        coalesce(cn.apply_error, ''), cn.apply_failed_at, coalesce(cn.blocklist, -1),
-       cn.poll_at, coalesce(cn.poll_error, ''), cn.last_alert_at
+       cn.poll_at, coalesce(cn.poll_error, ''), cn.last_alert_at,
+       coalesce(cn.console_hash, ''), cn.console_enrolled_at, coalesce(cn.console_error, ''), cn.console_failed_at,
+       coalesce((SELECT console_key_hash FROM crowdsec_settings), '')
 FROM nodes n
 JOIN agents a ON a.node_id = n.id AND a.revoked_at IS NULL
 LEFT JOIN clusters c ON c.id = n.cluster_id
@@ -147,13 +170,16 @@ func (s *Service) nodes(ctx context.Context, sql string, args ...any) ([]Node, e
 		var proto int32
 		var hb *time.Time
 		var facts, st, plan []byte
+		var curKey string
 		if err := rows.Scan(&n.NodeID, &n.Hostname, &n.ClusterID, &n.ClusterName, &n.ClusterSlug, &n.ClusterEnv, &n.Template,
 			&proto, &hb, &facts, &n.Enabled, &n.Managed, &n.Bouncer, &n.ExtraProfiles, &n.DisabledProfiles,
 			&st, &n.StatusAt, &plan, &n.PlanHash, &n.AppliedHash, &n.AppliedAt, &n.ApplyJobID, &n.ApplyRunning,
-			&n.ApplyError, &n.ApplyFailedAt, &n.Blocklist, &n.PollAt, &n.PollError, &n.lastAlertAt); err != nil {
+			&n.ApplyError, &n.ApplyFailedAt, &n.Blocklist, &n.PollAt, &n.PollError, &n.lastAlertAt,
+			&n.consoleHash, &n.ConsoleEnrolledAt, &n.ConsoleError, &n.ConsoleFailedAt, &curKey); err != nil {
 			return nil, err
 		}
 		n.Protocol = int(proto)
+		n.ConsoleEnrolled = curKey != "" && n.consoleHash == curKey
 		n.Supported = n.Protocol >= protocol.CrowdSecSince
 		n.Online = hb != nil && now.Sub(*hb) <= status.HeartbeatLate
 		if len(facts) > 0 {

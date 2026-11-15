@@ -15,6 +15,7 @@ import (
 
 	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/jobs"
+	"github.com/Jonasz1996/clusterforge/internal/secrets"
 	"github.com/Jonasz1996/clusterforge/internal/store"
 	"github.com/Jonasz1996/clusterforge/internal/store/storetest"
 	"github.com/Jonasz1996/clusterforge/pkg/protocol"
@@ -29,12 +30,14 @@ type fakeBus struct {
 	bans      map[uuid.UUID][]protocol.CrowdSecActive
 	decided   map[uuid.UUID][]protocol.CrowdSecDecision
 	scripts   map[uuid.UUID]string
+	enrolled  map[uuid.UUID][]protocol.CrowdSecEnroll
 	failRun   bool
 }
 
 func newFakeBus() *fakeBus {
 	return &fakeBus{installed: map[uuid.UUID]bool{}, applied: map[uuid.UUID]string{}, alerts: map[uuid.UUID][]protocol.CrowdSecAlert{},
-		bans: map[uuid.UUID][]protocol.CrowdSecActive{}, decided: map[uuid.UUID][]protocol.CrowdSecDecision{}, scripts: map[uuid.UUID]string{}}
+		bans: map[uuid.UUID][]protocol.CrowdSecActive{}, decided: map[uuid.UUID][]protocol.CrowdSecDecision{}, scripts: map[uuid.UUID]string{},
+		enrolled: map[uuid.UUID][]protocol.CrowdSecEnroll{}}
 }
 
 func (b *fakeBus) CrowdSec(_ context.Context, id uuid.UUID, req protocol.CrowdSecRequest) (protocol.CrowdSecResponse, error) {
@@ -54,6 +57,12 @@ func (b *fakeBus) CrowdSec(_ context.Context, id uuid.UUID, req protocol.CrowdSe
 		return protocol.CrowdSecResponse{Poll: &protocol.CrowdSecPoll{Alerts: b.alerts[id], Decisions: b.bans[id], Blocklist: 15000}}, nil
 	case protocol.CrowdSecOpDecide:
 		b.decided[id] = append(b.decided[id], *req.Decide)
+		return protocol.CrowdSecResponse{Count: 1}, nil
+	case protocol.CrowdSecOpEnroll:
+		b.enrolled[id] = append(b.enrolled[id], *req.Enroll)
+		if strings.HasPrefix(req.Enroll.Key, "weigert") {
+			return protocol.CrowdSecResponse{Error: "aanmelden bij de Console: cscli: key " + req.Enroll.Key + " is invalid"}, nil
+		}
 		return protocol.CrowdSecResponse{Count: 1}, nil
 	}
 	return protocol.CrowdSecResponse{Error: "?"}, nil
@@ -296,5 +305,114 @@ func TestServiceFlow(t *testing.T) {
 	}
 	if n, _ := s.Node(ctx, c); n.Managed {
 		t.Error("nog beheerd na uitzetten")
+	}
+}
+
+func TestConsoleEnroll(t *testing.T) {
+	pool := storetest.DB(t)
+	ctx := context.Background()
+	log := slog.New(slog.DiscardHandler)
+	ev := events.NewWriter(store.New(pool), log)
+	bus := newFakeBus()
+	s := NewService(pool, ev, jobs.NewRunner(pool, ev, log), bus, log)
+
+	a := seed(t, pool, "nc1", nil, protocol.CrowdSecEnrollSince, "ssh")
+	old := seed(t, pool, "nc2", nil, protocol.CrowdSecSince, "ssh")
+	set, err := s.Settings(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	set.AutoApply = false
+	if _, err := s.UpdateSettings(ctx, events.System(), nil, set); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Enable(ctx, events.System(), []uuid.UUID{a, old}, nil); err != nil {
+		t.Fatal(err)
+	}
+	bus.installed[a], bus.installed[old] = true, true
+
+	// Zonder masterkey geen sleutel.
+	if _, err := s.SetConsoleKey(ctx, events.System(), nil, "sleutel0123456789"); err == nil {
+		t.Fatal("sleutel bewaard zonder masterkey")
+	}
+	box, err := secrets.New(make([]byte, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Box = box
+	if _, err := s.SetConsoleKey(ctx, events.System(), nil, "geen geldige; sleutel"); err == nil {
+		t.Error("ongeldige sleutel aanvaard")
+	}
+	got, err := s.SetConsoleKey(ctx, events.System(), nil, "  sleutel0123456789 ")
+	if err != nil || !got.ConsoleKeySet || !got.ConsoleAvailable {
+		t.Fatalf("sleutel bewaren %+v %v", got, err)
+	}
+	var enc []byte
+	if err := pool.QueryRow(ctx, `SELECT console_key_enc FROM crowdsec_settings`).Scan(&enc); err != nil || strings.Contains(string(enc), "sleutel0123456789") {
+		t.Fatalf("sleutel niet versleuteld: %v", err)
+	}
+
+	if err := s.Tick(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if e := bus.enrolled[a]; len(e) != 1 || e[0].Key != "sleutel0123456789" || e[0].Name != "nc1" || !e[0].Overwrite {
+		t.Errorf("aanmelding nc1 %+v", e)
+	}
+	if len(bus.enrolled[old]) != 0 {
+		t.Error("oude agent aangemeld")
+	}
+	n, _ := s.Node(ctx, a)
+	if !n.ConsoleEnrolled || n.ConsoleEnrolledAt == nil {
+		t.Errorf("na aanmelden %+v", n)
+	}
+	// Een tweede ronde meldt niet opnieuw aan.
+	if err := s.Tick(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(bus.enrolled[a]) != 1 {
+		t.Errorf("opnieuw aangemeld: %d", len(bus.enrolled[a]))
+	}
+	// De knop meldt opnieuw aan.
+	if c, err := s.ConsoleEnroll(ctx, events.System(), &a); err != nil || c != 1 {
+		t.Fatalf("opnieuw aanmelden %d %v", c, err)
+	}
+	if err := s.Tick(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(bus.enrolled[a]) != 2 {
+		t.Errorf("knop: %d aanmeldingen", len(bus.enrolled[a]))
+	}
+
+	// Een geweigerde sleutel: fout zonder de sleutel, geen nieuwe poging binnen het uur.
+	if _, err := s.SetConsoleKey(ctx, events.System(), nil, "weigert0123456789"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Tick(ctx); err != nil {
+		t.Fatal(err)
+	}
+	n, _ = s.Node(ctx, a)
+	if n.ConsoleEnrolled || n.ConsoleError == "" || strings.Contains(n.ConsoleError, "weigert0123456789") {
+		t.Errorf("geweigerd: %+v", n.ConsoleError)
+	}
+	if err := s.Tick(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(bus.enrolled[a]) != 3 {
+		t.Errorf("na fout meteen opnieuw: %d", len(bus.enrolled[a]))
+	}
+	var payloads []byte
+	if err := pool.QueryRow(ctx, `SELECT coalesce(string_agg(payload::text, ' '), '') FROM events`).Scan(&payloads); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(payloads), "0123456789") {
+		t.Error("sleutel staat in een event")
+	}
+
+	// Weghalen.
+	if got, err := s.SetConsoleKey(ctx, events.System(), nil, ""); err != nil || got.ConsoleKeySet {
+		t.Fatalf("weghalen %+v %v", got, err)
+	}
+	if _, err := s.ConsoleEnroll(ctx, events.System(), nil); err == nil {
+		t.Error("aanmelden zonder sleutel aanvaard")
 	}
 }

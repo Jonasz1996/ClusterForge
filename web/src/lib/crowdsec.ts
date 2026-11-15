@@ -107,6 +107,22 @@ export function useCrowdSecSettings() {
   });
 }
 
+export function useSetCrowdSecConsoleKey() {
+  const done = useInvalidate();
+  return useMutation({
+    mutationFn: async (key: string) => unwrap(await api.PUT("/crowdsec/console", { body: { key } })),
+    onSuccess: done,
+  });
+}
+
+export function useEnrollCrowdSecConsole() {
+  const done = useInvalidate();
+  return useMutation({
+    mutationFn: async (nodeId?: string) => unwrap(await api.POST("/crowdsec/console/enroll", { body: nodeId ? { node_id: nodeId } : {} })),
+    onSuccess: done,
+  });
+}
+
 /** De stand van CrowdSec op een node in een paar woorden. */
 export function crowdSecState(n: CrowdSecNode): { label: string; tone: "slate" | "green" | "amber" | "red" | "blue" } {
   if (!n.supported) return { label: `agent te oud (protocol ${n.protocol})`, tone: "amber" };

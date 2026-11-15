@@ -214,6 +214,7 @@ func serve() error {
 	cmds := commands.NewService(pool, ev, runner, bus, upd)
 	// Fase 14: CrowdSec op de nodes, via agentprotocol 28 en runs.
 	csec := crowdsec.NewService(pool, ev, runner, bus, log)
+	csec.Box = box
 	// Fase 16: ufw op de nodes, via agentprotocol 30.
 	fw := firewall.NewService(pool, ev, runner, bus, log)
 	// Een database als onderdeel van een cluster: MariaDB Galera op de

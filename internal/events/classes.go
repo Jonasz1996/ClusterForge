@@ -43,6 +43,7 @@ var classes = map[string]Class{
 	"firewall.settings_changed": ClassChange, "firewall.mode_changed": ClassChange, "firewall.applied": ClassChange,
 	"firewall.apply_failed": ClassSymptom, "firewall.rolled_back": ClassSymptom, "firewall.disabled": ClassChange,
 	"firewall.rule_added": ClassChange, "firewall.rule_removed": ClassChange,
+	"crowdsec.console_key_changed": ClassChange, "crowdsec.console_enrolled": ClassChange, "crowdsec.console_enroll_failed": ClassSymptom,
 	"node.software_updated": ClassChange, "node.software_update_failed": ClassInfo, "node.command_ran": ClassChange,
 	"settings.update_policy": ClassChange, "cluster.update_policy": ClassChange, "cluster.auto_update_skipped": ClassInfo,
 	"cluster.secret_revealed":      ClassInfo,
