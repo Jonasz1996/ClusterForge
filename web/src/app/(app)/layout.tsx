@@ -19,6 +19,7 @@ const nav: NavItem[] = [
   { href: "/cronjobs", label: "Cronjobs" },
   { href: "/updates", label: "Updates" },
   { href: "/commandos", label: "Commando's" },
+  { href: "/crowdsec", label: "CrowdSec" },
   { href: "/monitoring", label: "Monitoring" },
   { href: "/incidenten", label: "Incidenten" },
   { href: "/risico", label: "Risico" },
