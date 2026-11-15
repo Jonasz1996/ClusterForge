@@ -14,6 +14,9 @@
 #                                  de Authentik die hier nog los draait (Docker
 #                                  Compose met eigen PostgreSQL) naar het cluster:
 #                                  database, media en geheime sleutel
+#   authentik-ctl.sh voorbereiden | voorbereid
+#                                  tijdens de uitrol: een oude Authentik laat poort
+#                                  5432 vrij voor Patroni (node 1) of stopt (kloon)
 #   authentik-ctl.sh vrijgeven     een database die je zelf terugzette, in gebruik nemen
 #   authentik-ctl.sh pull | pulled de images halen / staan ze er?
 #   authentik-ctl.sh unchanged | restart-if-changed
@@ -158,7 +161,9 @@ overnemen() {
   oldkey=$(echo "$envs" | sed -n 's/^AUTHENTIK_SECRET_KEY=//p' | head -n 1)
   oname=$(echo "$envs" | sed -n 's/^AUTHENTIK_POSTGRESQL__NAME=//p' | head -n 1)
   ouser=$(echo "$envs" | sed -n 's/^AUTHENTIK_POSTGRESQL__USER=//p' | head -n 1)
+  oport=$(echo "$envs" | sed -n 's/^AUTHENTIK_POSTGRESQL__PORT=//p' | head -n 1)
   oname=${oname:-authentik}
+  oport=${oport:-5432}
   ouser=${ouser:-authentik}
   [ -n "$oldkey" ] || fail "de oude Authentik heeft geen AUTHENTIK_SECRET_KEY"
   case "$oldkey" in *"
@@ -191,13 +196,13 @@ overnemen() {
   say "Tellen in de oude database"
   before=
   for tb in $TABLES; do
-    n=$(docker exec "$pgc" psql -X -At -U "$ouser" -d "$oname" -c "SELECT CASE WHEN to_regclass('public.$tb') IS NULL THEN -1 ELSE (xpath('/row/n/text()', query_to_xml('SELECT count(*) AS n FROM public.$tb', false, true, '')))[1]::text::int END") ||
+    n=$(docker exec "$pgc" psql -X -At -p "$oport" -U "$ouser" -d "$oname" -c "SELECT CASE WHEN to_regclass('public.$tb') IS NULL THEN -1 ELSE (xpath('/row/n/text()', query_to_xml('SELECT count(*) AS n FROM public.$tb', false, true, '')))[1]::text::int END") ||
       back "tellen in de oude database"
     before="$before $tb=$n"
   done
 
   say "Dump maken (pg_dump in $pgc)"
-  docker exec "$pgc" pg_dump -U "$ouser" -d "$oname" --no-owner --no-privileges > "$dump" || back "pg_dump"
+  docker exec "$pgc" pg_dump -p "$oport" -U "$ouser" -d "$oname" --no-owner --no-privileges > "$dump" || back "pg_dump"
   [ -s "$dump" ] || back "de dump is leeg"
   echo "Dump: $(du -h "$dump" | cut -f1)"
 
@@ -266,6 +271,87 @@ back() {
   exit 1
 }
 
+# De PostgreSQL-container van een oude Authentik (zelfde compose-project).
+old_pg() {
+  for c in $(project_containers "$1"); do
+    case "$(docker inspect -f "${LB}.Config.Image${RB}" "$c" 2>/dev/null)" in
+      *postgres*) echo "$c"; return 0 ;;
+    esac
+  done
+  return 1
+}
+label() { docker inspect -f "${LB}index .Config.Labels \"$2\"${RB}" "$1" 2>/dev/null; }
+# Houdt de oude PostgreSQL poort 5432 van de node vast (network_mode: host)?
+# Dan kan Patroni er niet bij.
+pg_on_host_5432() {
+  [ "$(docker inspect -f "${LB}.HostConfig.NetworkMode${RB}" "$1" 2>/dev/null)" = host ] || return 1
+  case " $(docker inspect -f "${LB}join .Config.Cmd \" \"${RB}" "$1" 2>/dev/null) " in
+    *" -p "*) return 1 ;;
+  esac
+  return 0
+}
+
+# Vóór PostgreSQL met Patroni (tijdens de uitrol): een oude Authentik op
+# deze node mag poort 5432 niet vasthouden. Op node 1 verhuist zijn
+# PostgreSQL naar 5433 (een override naast zijn compose-bestand; de data
+# blijft); hij blijft het VIP bedienen tot de overname. Op de andere nodes
+# (de kloon) stopt de oude Authentik: die wordt niet overgenomen.
+voorbereid() {
+  c=$(foreign | head -n 1)
+  [ -n "$c" ] || return 0
+  [ "$INDEX" = 1 ] || return 1
+  pgc=$(old_pg "$(project_of "$c")") || return 0
+  ! pg_on_host_5432 "$pgc"
+}
+voorbereiden() {
+  c=$(foreign | head -n 1)
+  if [ -z "$c" ]; then echo "Geen oude Authentik op deze node."; return 0; fi
+  proj=$(project_of "$c")
+  if [ "$INDEX" != 1 ]; then
+    say "Oude Authentik (project ${proj:-?}) stoppen: alleen die op node 1 wordt overgenomen"
+    stop_foreign
+    return 0
+  fi
+  [ -n "$proj" ] || fail "de oude Authentik ($c) is niet met Docker Compose gestart"
+  pgc=$(old_pg "$proj") || { echo "De oude Authentik heeft geen PostgreSQL-container; niets te doen."; return 0; }
+  if ! pg_on_host_5432 "$pgc"; then echo "De oude PostgreSQL houdt poort 5432 van de node niet vast; niets te doen."; return 0; fi
+  dir=$(label "$pgc" com.docker.compose.project.working_dir)
+  cfgs=$(label "$pgc" com.docker.compose.project.config_files)
+  pgsvc=$(label "$pgc" com.docker.compose.service)
+  { [ -d "$dir" ] && [ -n "$cfgs" ] && [ -n "$pgsvc" ]; } || fail "map of compose-bestand van het project $proj niet gevonden"
+  ov=$dir/docker-compose.cf-poort.yml
+  say "Oude PostgreSQL (project $proj, dienst $pgsvc) naar poort 5433, voor Patroni; de data blijft"
+  {
+    echo "# ClusterForge: de oude PostgreSQL op 5433, zodat Patroni 5432 krijgt."
+    echo "services:"
+    echo "  $pgsvc:"
+    echo '    command: ["postgres", "-p", "5433"]'
+    echo "    healthcheck:"
+    echo '      test: ["CMD-SHELL", "pg_isready -p 5433 -d $${POSTGRES_DB} -U $${POSTGRES_USER}"]'
+    for x in $(project_containers "$proj"); do
+      case "$(docker inspect -f "${LB}.Config.Image${RB}" "$x" 2>/dev/null)" in
+        *authentik*)
+          echo "  $(label "$x" com.docker.compose.service):"
+          echo "    environment:"
+          echo '      AUTHENTIK_POSTGRESQL__PORT: "5433"'
+          ;;
+      esac
+    done
+  } > "$ov" || fail "$ov schrijven"
+  set --
+  for f in $(echo "$cfgs" | tr ',' ' '); do set -- "$@" -f "$f"; done
+  docker compose -p "$proj" --project-directory "$dir" "$@" -f "$ov" up -d || fail "docker compose up -d in $dir (de override staat in $ov)"
+  say "Wachten tot de oude Authentik weer antwoordt"
+  i=0
+  while [ $i -lt 60 ]; do
+    if healthy; then echo "Oude Authentik antwoordt weer, met PostgreSQL op 5433."; return 0; fi
+    i=$((i + 1))
+    sleep "${CF_AK_SLEEP:-3}"
+  done
+  warn "de oude Authentik antwoordt nog niet op poort $HTTP (docker compose -p $proj logs)"
+  return 0
+}
+
 status() {
   echo "node:       $(hostname) (index $INDEX)"
   if has_vip; then echo "VIP:        $VIP staat hier"; else echo "VIP:        $VIP staat elders"; fi
@@ -304,6 +390,12 @@ case "${1:-}" in
     shift
     overnemen "$@"
     ;;
+  voorbereiden)
+    voorbereiden
+    ;;
+  voorbereid)
+    voorbereid
+    ;;
   vrijgeven)
     meta=$(db_meta) || fail "de database antwoordt niet"
     [ -z "$(metafield "$meta" ready)" ] || fail "de database is al in gebruik ($meta)"
@@ -325,7 +417,7 @@ case "${1:-}" in
     systemctl try-restart cf-authentik
     ;;
   *)
-    echo "gebruik: $0 up|down|check|status|overnemen|vrijgeven|pull|pulled|unchanged|restart-if-changed" >&2
+    echo "gebruik: $0 up|down|check|status|overnemen|voorbereiden|voorbereid|vrijgeven|pull|pulled|unchanged|restart-if-changed" >&2
     exit 2
     ;;
 esac

@@ -143,6 +143,13 @@ roles:
           path: /usr/local/lib/clusterforge/authentik-ctl.sh
           template: authentik-ctl.sh.tmpl
           mode: "0755"
+      # Een oude Authentik op deze node: op node 1 verhuist zijn PostgreSQL
+      # (network_mode: host) van poort 5432 naar 5433 voor Patroni, op de
+      # andere nodes stopt hij (de kloon wordt niet overgenomen).
+      - command:
+          title: oude Authentik klaarzetten
+          run: /usr/local/lib/clusterforge/authentik-ctl.sh voorbereiden
+          unless: /usr/local/lib/clusterforge/authentik-ctl.sh voorbereid
       - command:
           title: images van Authentik
           run: /usr/local/lib/clusterforge/authentik-ctl.sh pull

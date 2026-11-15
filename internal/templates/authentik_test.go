@@ -152,7 +152,11 @@ ps)
 inspect)
   c=$d/$4
   case "$3" in
+  *working_dir*) cat "$c/workdir" ;;
+  *config_files*) cat "$c/configs" ;;
+  *compose.service*) cat "$c/service" ;;
   *Labels*) cat "$c/project" ;;
+  *NetworkMode*) cat "$c/netmode" 2>/dev/null ;;
   *Config.Cmd*) cat "$c/cmd" ;;
   *Config.Image*) cat "$c/image" ;;
   *State.Running*) [ -f "$c/running" ] && echo true || echo false ;;
@@ -278,12 +282,17 @@ INSERT INTO authentik_core_application (slug, provider_id) SELECT 'app' || id, i
 	oldMedia := t.TempDir()
 	oldCerts := t.TempDir()
 	write(t, map[string]string{oldMedia + "/application-icons/grafana.png": "png", oldCerts + "/thuis.pem": "cert"})
-	oldEnv := "AUTHENTIK_SECRET_KEY=oude+sleutel/met=base64tekens\nAUTHENTIK_POSTGRESQL__NAME=cf_ak_bron\nAUTHENTIK_POSTGRESQL__USER=" + cfg.User + "\nPATH=/usr/bin\n"
+	oldEnv := fmt.Sprintf("AUTHENTIK_SECRET_KEY=oude+sleutel/met=base64tekens\nAUTHENTIK_POSTGRESQL__NAME=cf_ak_bron\nAUTHENTIK_POSTGRESQL__USER=%s\nAUTHENTIK_POSTGRESQL__PORT=%d\nPATH=/usr/bin\n", cfg.User, cfg.Port)
+	oldDir := t.TempDir()
 	a.container("srv1", map[string]string{"project": "authentik", "image": "ghcr.io/goauthentik/server:2026.5.2", "cmd": "server",
 		"env": oldEnv, "mounts": "/media " + oldMedia + "\n/templates " + oldMedia + "/geen\n", "running": ""})
 	a.container("wrk1", map[string]string{"project": "authentik", "image": "ghcr.io/goauthentik/server:2026.5.2", "cmd": "worker",
 		"env": oldEnv, "mounts": "/certs " + oldCerts + "\n/var/run/docker.sock /var/run/docker.sock\n", "running": ""})
-	a.container("pg1", map[string]string{"project": "authentik", "image": "docker.io/library/postgres:16-alpine", "cmd": "postgres", "running": ""})
+	a.container("pg1", map[string]string{"project": "authentik", "image": "docker.io/library/postgres:16-alpine", "cmd": "postgres", "running": "",
+		"netmode": "host", "service": "postgresql", "workdir": oldDir, "configs": oldDir + "/docker-compose.yml"})
+	for id, svc := range map[string]string{"srv1": "server", "wrk1": "worker"} {
+		a.container(id, map[string]string{"service": svc})
+	}
 	a.container("rd1", map[string]string{"project": "authentik", "image": "docker.io/library/redis:alpine", "cmd": "redis-server", "running": ""})
 	// Een outpost is geen oude Authentik.
 	a.container("out1", map[string]string{"project": "outposts", "image": "ghcr.io/goauthentik/proxy:2026.5.2", "cmd": "", "running": ""})
@@ -300,6 +309,29 @@ INSERT INTO authentik_core_application (slug, provider_id) SELECT 'app' || id, i
 	}
 	if _, err := a.run(nil, "check"); err != nil {
 		t.Error("check op node 1 met een gezonde oude Authentik")
+	}
+
+	// Tijdens de uitrol: de oude PostgreSQL (network_mode: host) gaat van
+	// 5432 naar 5433, zodat Patroni de poort krijgt.
+	if _, err := a.run(nil, "voorbereid"); err == nil {
+		t.Error("voorbereid met de oude PostgreSQL op 5432")
+	}
+	if out, err := a.run([]string{"CF_AK_SLEEP=0"}, "voorbereiden"); err != nil || !strings.Contains(out, "antwoordt weer") {
+		t.Fatalf("voorbereiden: %v %s", err, out)
+	}
+	ov, _ := os.ReadFile(oldDir + "/docker-compose.cf-poort.yml")
+	for _, w := range []string{"  postgresql:\n    command: [\"postgres\", \"-p\", \"5433\"]", "pg_isready -p 5433 -d $${POSTGRES_DB}",
+		"  server:\n    environment:\n      AUTHENTIK_POSTGRESQL__PORT: \"5433\"", "  worker:\n"} {
+		if !strings.Contains(string(ov), w) {
+			t.Errorf("override mist %q:\n%s", w, ov)
+		}
+	}
+	if !strings.Contains(a.log(), "docker compose -p authentik --project-directory "+oldDir+" -f "+oldDir+"/docker-compose.yml -f "+oldDir+"/docker-compose.cf-poort.yml up -d") {
+		t.Errorf("compose: %s", a.log())
+	}
+	a.container("pg1", map[string]string{"cmd": "postgres -p 5433"})
+	if out, err := a.run(nil, "voorbereid"); err != nil {
+		t.Errorf("voorbereid na de verhuizing: %v %s", err, out)
 	}
 
 	// Andere versie: weigeren met de juiste raad.
@@ -408,6 +440,9 @@ INSERT INTO authentik_core_application (slug, provider_id) SELECT 'app' || id, i
 	}
 	if k, _ := os.ReadFile(b.runDir + "/key.env"); string(k) != "AUTHENTIK_SECRET_KEY=oude+sleutel/met=base64tekens\n" {
 		t.Errorf("key.env: %q", k)
+	}
+	if out, err := b.run(nil, "voorbereiden"); err != nil || !strings.Contains(out, "Geen oude Authentik") {
+		t.Errorf("voorbereiden na de start: %v %s", err, out)
 	}
 	if out, err := b.run(nil, "status"); err != nil || !strings.Contains(out, "overgenomen") || !strings.Contains(out, "ready=") {
 		t.Errorf("status: %v %s", err, out)
