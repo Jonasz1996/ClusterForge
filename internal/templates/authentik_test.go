@@ -236,19 +236,19 @@ func TestAuthentikOvernemen(t *testing.T) {
 			t.Fatalf("%s: %v", q, err)
 		}
 	}
-	for _, q := range []string{"DROP DATABASE IF EXISTS cf_ak_bron", "DROP DATABASE IF EXISTS cf_ak_doel", "DROP ROLE IF EXISTS cf_ak_eigenaar"} {
+	for _, q := range []string{akn("DROP DATABASE IF EXISTS cf_ak_bron"), akn("DROP DATABASE IF EXISTS cf_ak_doel"), akn("DROP ROLE IF EXISTS cf_ak_eigenaar")} {
 		exe(admin, q)
 	}
-	exe(admin, "CREATE ROLE cf_ak_eigenaar LOGIN PASSWORD 'Wachtwoord123'")
-	exe(admin, "CREATE DATABASE cf_ak_bron")
-	exe(admin, "CREATE DATABASE cf_ak_doel OWNER cf_ak_eigenaar")
+	exe(admin, akn("CREATE ROLE cf_ak_eigenaar LOGIN PASSWORD 'Wachtwoord123'"))
+	exe(admin, akn("CREATE DATABASE cf_ak_bron"))
+	exe(admin, akn("CREATE DATABASE cf_ak_doel OWNER cf_ak_eigenaar"))
 	t.Cleanup(func() {
-		for _, q := range []string{"DROP DATABASE IF EXISTS cf_ak_bron WITH (FORCE)", "DROP DATABASE IF EXISTS cf_ak_doel WITH (FORCE)", "DROP ROLE IF EXISTS cf_ak_eigenaar"} {
+		for _, q := range []string{akn("DROP DATABASE IF EXISTS cf_ak_bron WITH (FORCE)"), akn("DROP DATABASE IF EXISTS cf_ak_doel WITH (FORCE)"), akn("DROP ROLE IF EXISTS cf_ak_eigenaar")} {
 			_, _ = admin.Exec(context.Background(), q)
 		}
 	})
 	srcCfg := cfg.Copy()
-	srcCfg.Database = "cf_ak_bron"
+	srcCfg.Database = akn("cf_ak_bron")
 	src, err := pgx.ConnectConfig(ctx, srcCfg)
 	if err != nil {
 		t.Fatal(err)
@@ -267,7 +267,7 @@ INSERT INTO authentik_core_application (slug, provider_id) SELECT 'app' || id, i
 	if host == "" || strings.HasPrefix(host, "/") {
 		host = "127.0.0.1"
 	}
-	dbEnv := fmt.Sprintf("AUTHENTIK_POSTGRESQL__HOST=%s\nAUTHENTIK_POSTGRESQL__PORT=%d\nAUTHENTIK_POSTGRESQL__NAME=cf_ak_doel\nAUTHENTIK_POSTGRESQL__USER=cf_ak_eigenaar\nAUTHENTIK_POSTGRESQL__PASSWORD=Wachtwoord123\n", host, cfg.Port)
+	dbEnv := fmt.Sprintf(akn("AUTHENTIK_POSTGRESQL__HOST=%s\nAUTHENTIK_POSTGRESQL__PORT=%d\nAUTHENTIK_POSTGRESQL__NAME=cf_ak_doel\nAUTHENTIK_POSTGRESQL__USER=cf_ak_eigenaar\nAUTHENTIK_POSTGRESQL__PASSWORD=Wachtwoord123\n"), host, cfg.Port)
 	// De bron: wat docker exec in de oude PostgreSQL-container draait.
 	srcEnv := []string{"PGHOST=" + host, fmt.Sprintf("PGPORT=%d", cfg.Port), "PGPASSWORD=" + cfg.Password}
 
@@ -282,7 +282,7 @@ INSERT INTO authentik_core_application (slug, provider_id) SELECT 'app' || id, i
 	oldMedia := t.TempDir()
 	oldCerts := t.TempDir()
 	write(t, map[string]string{oldMedia + "/application-icons/grafana.png": "png", oldCerts + "/thuis.pem": "cert"})
-	oldEnv := fmt.Sprintf("AUTHENTIK_SECRET_KEY=oude+sleutel/met=base64tekens\nAUTHENTIK_POSTGRESQL__NAME=cf_ak_bron\nAUTHENTIK_POSTGRESQL__USER=%s\nAUTHENTIK_POSTGRESQL__PORT=%d\nPATH=/usr/bin\n", cfg.User, cfg.Port)
+	oldEnv := fmt.Sprintf(akn("AUTHENTIK_SECRET_KEY=oude+sleutel/met=base64tekens\nAUTHENTIK_POSTGRESQL__NAME=cf_ak_bron\nAUTHENTIK_POSTGRESQL__USER=%s\nAUTHENTIK_POSTGRESQL__PORT=%d\nPATH=/usr/bin\n"), cfg.User, cfg.Port)
 	oldDir := t.TempDir()
 	a.container("srv1", map[string]string{"project": "authentik", "image": "ghcr.io/goauthentik/server:2026.5.2", "cmd": "server",
 		"env": oldEnv, "mounts": "/media " + oldMedia + "\n/templates " + oldMedia + "/geen\n", "running": ""})
@@ -362,7 +362,7 @@ INSERT INTO authentik_core_application (slug, provider_id) SELECT 'app' || id, i
 		}
 		// De volgende overname kijkt na dat de database weer leeg is.
 		var meta *string
-		if err := admin.QueryRow(ctx, "SELECT shobj_description(oid, 'pg_database') FROM pg_database WHERE datname = 'cf_ak_doel'").Scan(&meta); err != nil || meta != nil {
+		if err := admin.QueryRow(ctx, akn("SELECT shobj_description(oid, 'pg_database') FROM pg_database WHERE datname = 'cf_ak_doel'")).Scan(&meta); err != nil || meta != nil {
 			t.Errorf("markering na een mislukte overname: %v %v", meta, err)
 		}
 		exe(src, "DROP EXTENSION file_fdw")
@@ -404,7 +404,7 @@ INSERT INTO authentik_core_application (slug, provider_id) SELECT 'app' || id, i
 		t.Errorf("dump: %v", m)
 	}
 	dstCfg := cfg.Copy()
-	dstCfg.Database = "cf_ak_doel"
+	dstCfg.Database = akn("cf_ak_doel")
 	dst, err := pgx.ConnectConfig(ctx, dstCfg)
 	if err != nil {
 		t.Fatal(err)
@@ -412,7 +412,7 @@ INSERT INTO authentik_core_application (slug, provider_id) SELECT 'app' || id, i
 	defer func() { _ = dst.Close(ctx) }()
 	var proxies int
 	var owner string
-	if err := dst.QueryRow(ctx, "SELECT count(*), (SELECT tableowner FROM pg_tables WHERE tablename = 'authentik_core_user') FROM authentik_providers_proxy_proxyprovider").Scan(&proxies, &owner); err != nil || proxies != 100 || owner != "cf_ak_eigenaar" {
+	if err := dst.QueryRow(ctx, "SELECT count(*), (SELECT tableowner FROM pg_tables WHERE tablename = 'authentik_core_user') FROM authentik_providers_proxy_proxyprovider").Scan(&proxies, &owner); err != nil || proxies != 100 || owner != akn("cf_ak_eigenaar") {
 		t.Errorf("doel: %d proxy's, eigenaar %s, %v", proxies, owner, err)
 	}
 
@@ -466,20 +466,20 @@ func TestAuthentikNieuwCluster(t *testing.T) {
 	}
 	defer func() { _ = admin.Close(ctx) }()
 	cfg := admin.Config()
-	for _, q := range []string{"DROP DATABASE IF EXISTS cf_ak_nieuw", "DROP ROLE IF EXISTS cf_ak_nieuw", "CREATE ROLE cf_ak_nieuw LOGIN PASSWORD 'Wachtwoord123'", "CREATE DATABASE cf_ak_nieuw OWNER cf_ak_nieuw"} {
+	for _, q := range []string{akn("DROP DATABASE IF EXISTS cf_ak_nieuw"), akn("DROP ROLE IF EXISTS cf_ak_nieuw"), akn("CREATE ROLE cf_ak_nieuw LOGIN PASSWORD 'Wachtwoord123'"), akn("CREATE DATABASE cf_ak_nieuw OWNER cf_ak_nieuw")} {
 		if _, err := admin.Exec(ctx, q); err != nil {
 			t.Fatal(err)
 		}
 	}
 	t.Cleanup(func() {
-		_, _ = admin.Exec(context.Background(), "DROP DATABASE IF EXISTS cf_ak_nieuw WITH (FORCE)")
-		_, _ = admin.Exec(context.Background(), "DROP ROLE IF EXISTS cf_ak_nieuw")
+		_, _ = admin.Exec(context.Background(), akn("DROP DATABASE IF EXISTS cf_ak_nieuw WITH (FORCE)"))
+		_, _ = admin.Exec(context.Background(), akn("DROP ROLE IF EXISTS cf_ak_nieuw"))
 	})
 	host := cfg.Host
 	if host == "" || strings.HasPrefix(host, "/") {
 		host = "127.0.0.1"
 	}
-	dbEnv := fmt.Sprintf("AUTHENTIK_POSTGRESQL__HOST=%s\nAUTHENTIK_POSTGRESQL__PORT=%d\nAUTHENTIK_POSTGRESQL__NAME=cf_ak_nieuw\nAUTHENTIK_POSTGRESQL__USER=cf_ak_nieuw\nAUTHENTIK_POSTGRESQL__PASSWORD=Wachtwoord123\n", host, cfg.Port)
+	dbEnv := fmt.Sprintf(akn("AUTHENTIK_POSTGRESQL__HOST=%s\nAUTHENTIK_POSTGRESQL__PORT=%d\nAUTHENTIK_POSTGRESQL__NAME=cf_ak_nieuw\nAUTHENTIK_POSTGRESQL__USER=cf_ak_nieuw\nAUTHENTIK_POSTGRESQL__PASSWORD=Wachtwoord123\n"), host, cfg.Port)
 	tpl, c := akContext(t, nil)
 	c.Node = &c.Nodes[1]
 	files2, _ := npmFiles(t, tpl, c)
@@ -501,13 +501,19 @@ func TestAuthentikNieuwCluster(t *testing.T) {
 	}
 	// Een database met tabellen maar zonder markering (zelf teruggezet):
 	// vrijgeven.
-	if _, err := admin.Exec(ctx, "COMMENT ON DATABASE cf_ak_nieuw IS NULL"); err != nil {
+	if _, err := admin.Exec(ctx, akn("COMMENT ON DATABASE cf_ak_nieuw IS NULL")); err != nil {
 		t.Fatal(err)
 	}
 	if out, err := a.run(nil, "vrijgeven"); err == nil || !strings.Contains(out, "leeg") {
 		t.Errorf("vrijgeven van een lege database: %v %s", err, out)
 	}
 }
+
+// akPrefix maakt namen van databases en rollen uniek per testproces: rollen
+// gelden voor de hele server, ook voor een andere testrun ernaast.
+var akPrefix = fmt.Sprintf("cf_ak%d_", os.Getpid())
+
+func akn(s string) string { return strings.ReplaceAll(s, "cf_ak_", akPrefix) }
 
 func fileExists(p string) bool {
 	_, err := os.Stat(p)
