@@ -147,9 +147,9 @@ function OverviewTab({ o, isAdmin, goNodes }: { o: CrowdSecOverview; isAdmin: bo
         </Card>
       )}
       <Card title="Alerts per uur (24 u)">
-        <div className="flex h-32 items-end gap-1" role="img" aria-label="Alerts per uur">
+        <div className="flex h-32 gap-1" role="img" aria-label="Alerts per uur">
           {o.hourly.map((h) => (
-            <div key={h.hour} className="flex flex-1 flex-col items-center justify-end gap-1" title={`${hourFmt.format(new Date(h.hour))}: ${h.count}`}>
+            <div key={h.hour} className="flex h-full flex-1 flex-col justify-end" title={`${hourFmt.format(new Date(h.hour))}: ${h.count}`}>
               <div className="w-full rounded-t bg-brand-500/80" style={{ height: `${(h.count / max) * 100}%`, minHeight: h.count > 0 ? 2 : 0 }} />
             </div>
           ))}
