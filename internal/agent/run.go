@@ -67,8 +67,11 @@ type Agent struct {
 	Now func() time.Time
 	// StartRun en StopRun starten en stoppen een run (fase 10); nil
 	// gebruikt systemd-run en systemctl stop. Tests vervangen ze.
-	StartRun func(ctx context.Context, id string) error
-	StopRun  func(ctx context.Context, id string) error
+	// OpenNflog luistert op de NFLOG-groep van de firewall (fase 16); nil
+	// gebruikt netlink. Tests vervangen het.
+	OpenNflog OpenNflog
+	StartRun  func(ctx context.Context, id string) error
+	StopRun   func(ctx context.Context, id string) error
 	// Root is de bestandssysteemwortel voor deploystappen; leeg is "/".
 	// Tests gebruiken een map.
 	Root string
@@ -121,7 +124,11 @@ type Agent struct {
 	db      *dbState
 	// cronMu bewaakt cron, wat de agent uit de journal over cron las.
 	cronMu sync.Mutex
-	cron   *cronLog
+	// fw telt het verkeer dat ufw weggooit; fwMu laat één
+	// firewallwijziging tegelijk toe (fase 16).
+	fw   fwMonitor
+	fwMu sync.Mutex
+	cron *cronLog
 	// self is de binary die draait; rolledBack de sha256 van een update die
 	// teruggezet werd, confirmed of deze agent zijn update bevestigde en
 	// unconfirmed of hij de nieuwe van een update is die dat nog moet.
@@ -217,7 +224,10 @@ func (a *Agent) Connect() error {
 	if _, err = a.nc.Subscribe(protocol.Subject(a.Config.NodeID, protocol.SubjectRun), a.onRun); err != nil {
 		return err
 	}
-	_, err = a.nc.Subscribe(protocol.Subject(a.Config.NodeID, protocol.SubjectCrowdSec), a.onCrowdSec)
+	if _, err = a.nc.Subscribe(protocol.Subject(a.Config.NodeID, protocol.SubjectCrowdSec), a.onCrowdSec); err != nil {
+		return err
+	}
+	_, err = a.nc.Subscribe(protocol.Subject(a.Config.NodeID, protocol.SubjectFirewall), a.onFirewall)
 	return err
 }
 
@@ -254,6 +264,8 @@ func (a *Agent) Run(ctx context.Context) error {
 	}
 
 	a.resumeUpgrade(ctx)
+	a.firewallResume(ctx)
+	a.firewallMonitor(ctx)
 	a.releaseHolds(ctx)
 	// Storingen die er nog staan, bijvoorbeeld na een crash, gaan eerst weg.
 	if res := a.faults.ClearAll(ctx); !res.OK {
