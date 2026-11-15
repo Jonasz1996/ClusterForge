@@ -90,6 +90,7 @@ var Catalog = []Software{
 	{Key: "mariadb", Name: "MariaDB / Galera", Procs: []string{"mariadbd", "mysqld"}, Units: []string{"mariadb", "mysql"},
 		Ports: slices.Concat(tcp(ClassLAN, "3306", "3307"), lbl("Galera", tcp(ClassCluster, "4567", "4568", "4444")), lbl("Galera", udp(ClassCluster, "4567"))),
 		Fixed: true, Default: ClassLAN},
+	{Key: "garb", Name: "Galera-scheidsrechter (garb)", Procs: []string{"garbd"}, Units: []string{"garb"}, Ports: tcp(ClassCluster, "4567"), Fixed: true, Default: ClassCluster},
 	{Key: "postgresql", Name: "PostgreSQL", Procs: []string{"postgres"}, Units: []string{"postgresql@", "postgresql"}, Ports: tcp(ClassLAN, "5432", "5433"), Default: ClassLAN},
 	{Key: "patroni", Name: "Patroni", Procs: []string{"patroni"}, Units: []string{"patroni"},
 		Ports: slices.Concat(lbl("REST", tcp(ClassCluster, "8008")), tcp(ClassLAN, "5432")), Fixed: true, Default: ClassCluster},

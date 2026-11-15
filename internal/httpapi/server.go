@@ -32,6 +32,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/drift"
 	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/failover"
+	"github.com/Jonasz1996/clusterforge/internal/firewall"
 	"github.com/Jonasz1996/clusterforge/internal/gitops"
 	"github.com/Jonasz1996/clusterforge/internal/heal"
 	"github.com/Jonasz1996/clusterforge/internal/httpapi/gen"
@@ -94,6 +95,7 @@ type Server struct {
 	upgrades     *agentupgrade.Service
 	updates      *updates.Service
 	crowdsec     *crowdsec.Service
+	firewall     *firewall.Service
 	commands     *commands.Service
 	recipes      *recipes.Service
 	loginLimiter *ipLimiter
@@ -171,6 +173,8 @@ type Deps struct {
 	Commands *commands.Service
 	// CrowdSec beheert CrowdSec op de nodes (fase 14).
 	CrowdSec *crowdsec.Service
+	// Firewall beheert ufw op de nodes (fase 16).
+	Firewall *firewall.Service
 	Version  string
 }
 
@@ -207,6 +211,7 @@ func New(d Deps) *Server {
 		updates:  d.Updates,
 		commands: d.Commands,
 		crowdsec: d.CrowdSec,
+		firewall: d.Firewall,
 		recipes:  recipes.NewService(d.Pool, ev),
 		// 10 pogingen direct, daarna één per 6 seconden per IP-adres.
 		loginLimiter:   newIPLimiter(6*time.Second, 10),
