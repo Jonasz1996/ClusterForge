@@ -15512,6 +15512,9 @@ type ServerInterface interface {
 	// ReopenSecurityFinding Aanvaarde bevinding heropenen (admin)
 	// (POST /security/findings/{findingId}/reopen)
 	ReopenSecurityFinding(w http.ResponseWriter, r *http.Request, findingId openapi_types.UUID)
+	// GetSecurityHardening Verharding per node (fase 27 M2)
+	// (GET /security/hardening)
+	GetSecurityHardening(w http.ResponseWriter, r *http.Request)
 	// RefreshSecurity Feeds en/of pakketlijsten nu verversen (admin)
 	// (POST /security/refresh)
 	RefreshSecurity(w http.ResponseWriter, r *http.Request)
@@ -17510,6 +17513,12 @@ func (_ Unimplemented) AcceptSecurityFinding(w http.ResponseWriter, r *http.Requ
 // ReopenSecurityFinding Aanvaarde bevinding heropenen (admin)
 // (POST /security/findings/{findingId}/reopen)
 func (_ Unimplemented) ReopenSecurityFinding(w http.ResponseWriter, r *http.Request, findingId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetSecurityHardening Verharding per node (fase 27 M2)
+// (GET /security/hardening)
+func (_ Unimplemented) GetSecurityHardening(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -26922,6 +26931,20 @@ func (siw *ServerInterfaceWrapper) ReopenSecurityFinding(w http.ResponseWriter, 
 	handler.ServeHTTP(w, r)
 }
 
+// GetSecurityHardening operation middleware
+func (siw *ServerInterfaceWrapper) GetSecurityHardening(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetSecurityHardening(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // RefreshSecurity operation middleware
 func (siw *ServerInterfaceWrapper) RefreshSecurity(w http.ResponseWriter, r *http.Request) {
 
@@ -28542,6 +28565,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/security/refresh", wrapper.RefreshSecurity)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/security/hardening", wrapper.GetSecurityHardening)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/security/findings", wrapper.ListSecurityFindings)

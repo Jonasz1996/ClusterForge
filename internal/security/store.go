@@ -44,6 +44,15 @@ type Node struct {
 	Counts  map[string]int `json:"counts"`
 	KEV     int            `json:"kev"`
 	Fixable int            `json:"fixable"`
+
+	// Verharding (M2, protocol 41).
+	AuditSupported bool       `json:"audit_supported"`
+	AuditAt        *time.Time `json:"audit_at"`
+	AuditError     string     `json:"audit_error"`
+	auditErrorAt   *time.Time
+	HardeningScore *int   `json:"hardening_score"`
+	Virtualization string `json:"virtualization"`
+	docker, router bool
 }
 
 const nodesSQL = `
@@ -51,13 +60,18 @@ SELECT n.id, n.hostname, coalesce(host(n.primary_ip), ''), n.cluster_id, coalesc
        a.protocol_version, s.heartbeat_at,
        coalesce(i.os_id, ''), coalesce(i.codename, ''), coalesce(i.kernel, ''), coalesce(i.dpkg, false),
        coalesce(jsonb_array_length(i.packages), 0), i.collected_at, coalesce(i.error, ''), i.error_at,
-       coalesce(f.facts->'os'->>'id', ''), coalesce(f.facts->'os'->>'codename', '')
+       coalesce(f.facts->'os'->>'id', ''), coalesce(f.facts->'os'->>'codename', ''),
+       h.collected_at, coalesce(h.error, ''), h.error_at, h.score, coalesce(f.facts->>'virtualization', ''),
+       coalesce(jsonb_typeof(f.facts->'docker') = 'object', false),
+       coalesce(jsonb_typeof(f.facts->'keepalived') = 'object', false)
+         OR coalesce(f.facts->'services' @> '[{"name":"k3s"}]', false) OR coalesce(f.facts->'services' @> '[{"name":"k3s-agent"}]', false)
 FROM nodes n
 JOIN agents a ON a.node_id = n.id AND a.revoked_at IS NULL
 LEFT JOIN clusters c ON c.id = n.cluster_id
 LEFT JOIN node_status s ON s.node_id = n.id
 LEFT JOIN node_facts f ON f.node_id = n.id
 LEFT JOIN security_inventory i ON i.node_id = n.id
+LEFT JOIN security_hardening h ON h.node_id = n.id
 `
 
 func (s *Service) nodes(ctx context.Context, where string, args ...any) ([]Node, error) {
@@ -74,11 +88,13 @@ func (s *Service) nodes(ctx context.Context, where string, args ...any) ([]Node,
 		var hb *time.Time
 		var factsOS, factsCode string
 		if err := rows.Scan(&n.NodeID, &n.Hostname, &n.Address, &n.ClusterID, &n.ClusterName, &n.ClusterSlug, &proto, &hb,
-			&n.OS, &n.Codename, &n.Kernel, &n.Dpkg, &n.Packages, &n.CollectedAt, &n.Error, &n.ErrorAt, &factsOS, &factsCode); err != nil {
+			&n.OS, &n.Codename, &n.Kernel, &n.Dpkg, &n.Packages, &n.CollectedAt, &n.Error, &n.ErrorAt, &factsOS, &factsCode,
+			&n.AuditAt, &n.AuditError, &n.auditErrorAt, &n.HardeningScore, &n.Virtualization, &n.docker, &n.router); err != nil {
 			return nil, err
 		}
 		n.Protocol = int(proto)
 		n.Supported = n.Protocol >= protocol.SecuritySince
+		n.AuditSupported = n.Protocol >= protocol.SecurityAuditSince
 		n.Online = hb != nil && now.Sub(*hb) <= status.HeartbeatLate
 		if n.OS == "" {
 			n.OS, n.Codename = factsOS, factsCode
@@ -172,5 +188,29 @@ ON CONFLICT (name) DO UPDATE SET fetched_at = $2, error = $3`, name, now, trimTe
 INSERT INTO security_feeds (name, fetched_at, ok_at, error, entries, etag) VALUES ($1, $2, $2, '', $3, $4)
 ON CONFLICT (name) DO UPDATE SET fetched_at = $2, ok_at = $2, error = '',
     entries = CASE WHEN $3 < 0 THEN security_feeds.entries ELSE $3 END, etag = $4`, name, now, entries, etag)
+	return err
+}
+
+func (s *Service) saveAudit(ctx context.Context, id uuid.UUID, au *protocol.SecurityAudit, results []RuleResult, score int) error {
+	a, err := json.Marshal(au)
+	if err != nil {
+		return err
+	}
+	r, err := json.Marshal(results)
+	if err != nil {
+		return err
+	}
+	_, err = s.pool.Exec(ctx, `
+INSERT INTO security_hardening (node_id, collected_at, audit, results, score, error, error_at)
+VALUES ($1, $2, $3, $4, $5, '', NULL)
+ON CONFLICT (node_id) DO UPDATE SET collected_at = $2, audit = $3, results = $4, score = $5, error = '', error_at = NULL`,
+		id, s.Now(), a, r, score)
+	return err
+}
+
+func (s *Service) auditFailed(ctx context.Context, id uuid.UUID, msg string) error {
+	_, err := s.pool.Exec(ctx, `
+INSERT INTO security_hardening (node_id, error, error_at) VALUES ($1, $2, $3)
+ON CONFLICT (node_id) DO UPDATE SET error = $2, error_at = $3`, id, msg, s.Now())
 	return err
 }

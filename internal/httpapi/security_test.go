@@ -46,6 +46,9 @@ func TestSecurityEndToEnd(t *testing.T) {
 			if name == "dpkg-query" {
 				return []byte("ii \topenssl\t3.5.1-1\tamd64\topenssl\t3.5.1-1\nii \tlibssl3t64\t3.5.1-1\tamd64\topenssl\t3.5.1-1\n"), nil
 			}
+			if name == "sshd" {
+				return []byte("permitrootlogin yes\npermitemptypasswords no\n"), nil
+			}
 			return nil, nil
 		},
 	}
@@ -68,7 +71,7 @@ func TestSecurityEndToEnd(t *testing.T) {
 		if s := c.do("POST", "/api/v1/security/refresh", map[string]any{}, nil); s != http.StatusAccepted {
 			t.Fatalf("verversen: %d", s)
 		}
-		c.do("GET", "/api/v1/security/findings", nil, &list)
+		c.do("GET", "/api/v1/security/findings?kind=cve", nil, &list)
 		return len(list.Items) == 1
 	})
 	if f := list.Items[0]; f.Key != "openssl" || f.Severity != "hoog" || f.Hostname != "web01" {
@@ -86,6 +89,25 @@ func TestSecurityEndToEnd(t *testing.T) {
 	}
 	if s := c.do("GET", "/api/v1/security", nil, &o); s != 200 || o.Stats.Open != 1 || o.Stats.NodesChecked != 1 || o.Feeds[0].Entries != 1 {
 		t.Fatalf("overzicht: %d %+v", s, o)
+	}
+	var h struct {
+		Rules []struct {
+			ID string `json:"id"`
+		} `json:"rules"`
+		Nodes []struct {
+			HardeningScore *int `json:"hardening_score"`
+			Results        []struct {
+				ID     string `json:"id"`
+				Result string `json:"result"`
+			} `json:"results"`
+		} `json:"nodes"`
+	}
+	eventually(t, "verharding", func() bool {
+		c.do("GET", "/api/v1/security/hardening", nil, &h)
+		return len(h.Nodes) == 1 && h.Nodes[0].HardeningScore != nil
+	})
+	if len(h.Nodes[0].Results) != len(h.Rules) || h.Nodes[0].Results[0].ID != "ssh-root-login" || h.Nodes[0].Results[0].Result != "fout" {
+		t.Fatalf("verharding = %+v", h.Nodes[0])
 	}
 	var f finding
 	if s := c.do("POST", "/api/v1/security/findings/"+list.Items[0].ID+"/accept", map[string]any{"note": "Alleen intern", "days": 30}, &f); s != 200 || f.Status != "aanvaard" {

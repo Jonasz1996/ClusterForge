@@ -4785,6 +4785,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/security/hardening": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Verharding per node (fase 27 M2)
+         * @description De verhardingsregels en per node met een agent de score, de uitkomst van elke regel en het Lynis-rapport. Ook
+         *     voor viewers.
+         */
+        get: operations["getSecurityHardening"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/security/findings": {
         parameters: {
             query?: never;
@@ -21390,6 +21411,27 @@ export interface operations {
             };
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
+        };
+    };
+    getSecurityHardening: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SecurityObject"];
+                };
+            };
+            401: components["responses"]["Error"];
         };
     };
     listSecurityFindings: {

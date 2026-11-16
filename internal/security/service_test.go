@@ -30,6 +30,11 @@ func (b *fakeBus) Security(_ context.Context, id uuid.UUID, req protocol.Securit
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.reqs++
+	if req.Op == protocol.SecurityOpAudit {
+		a := goodAudit()
+		a.SSHD["permitrootlogin"] = "yes"
+		return protocol.SecurityResponse{Audit: a}, nil
+	}
 	if req.Op != protocol.SecurityOpInventory {
 		return protocol.SecurityResponse{Error: "?"}, nil
 	}
@@ -88,7 +93,7 @@ func TestServiceFlow(t *testing.T) {
 	}))
 	defer feeds.Close()
 
-	web := seed(t, pool, "web01", protocol.SecuritySince)
+	web := seed(t, pool, "web01", protocol.SecurityAuditSince)
 	old := seed(t, pool, "oud", 39)
 	bus := &fakeBus{inv: map[uuid.UUID]*protocol.SecurityInventory{
 		web: {OS: protocol.OSInfo{ID: "debian", Codename: "trixie"}, Dpkg: true, Packages: []protocol.DebPackage{
@@ -102,7 +107,18 @@ func TestServiceFlow(t *testing.T) {
 	if err := s.Tick(ctx); err != nil {
 		t.Fatal(err)
 	}
-	fs, err := s.Findings(ctx, FindingFilter{})
+	fs, err := s.Findings(ctx, FindingFilter{Kind: KindHardening})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fs) != 1 || fs[0].Key != "ssh-root-login" {
+		t.Fatalf("verharding = %+v", fs)
+	}
+	h, err := s.Hardening(ctx)
+	if err != nil || len(h.Nodes) != 2 || h.Nodes[1].HardeningScore == nil || *h.Nodes[1].HardeningScore >= 100 || len(h.Nodes[1].Results) != len(Rules) {
+		t.Fatalf("verharding: %v %+v", err, h.Nodes)
+	}
+	fs, err = s.Findings(ctx, FindingFilter{Kind: KindCVE})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +173,7 @@ func TestServiceFlow(t *testing.T) {
 	if err := s.Tick(ctx); err != nil {
 		t.Fatal(err)
 	}
-	fs, _ = s.Findings(ctx, FindingFilter{Status: "alle"})
+	fs, _ = s.Findings(ctx, FindingFilter{Status: "alle", Kind: KindCVE})
 	if len(fs) != 2 {
 		t.Fatalf("na update = %+v", fs)
 	}

@@ -58,6 +58,8 @@ func (a *Agent) handleSecurity(data []byte) protocol.SecurityResponse {
 			return protocol.SecurityResponse{Error: err.Error()}
 		}
 		return protocol.SecurityResponse{Inventory: inv}
+	case protocol.SecurityOpAudit:
+		return protocol.SecurityResponse{Audit: a.audit(ctx)}
 	default:
 		return protocol.SecurityResponse{Error: "onbekend beveiligingsverzoek: " + req.Op}
 	}

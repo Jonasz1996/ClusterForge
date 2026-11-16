@@ -205,3 +205,15 @@ func (s *Server) DeleteSecurityScope(w http.ResponseWriter, r *http.Request, id 
 	}
 	w.WriteHeader(http.StatusNoContent)
 }
+
+func (s *Server) GetSecurityHardening(w http.ResponseWriter, r *http.Request) {
+	if !s.securityReady(w) {
+		return
+	}
+	o, err := s.security.Hardening(r.Context())
+	if err != nil {
+		s.securityError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, o)
+}

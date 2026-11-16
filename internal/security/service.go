@@ -197,6 +197,18 @@ func (s *Service) Tick(ctx context.Context) error {
 	}
 
 	for _, n := range nodes {
+		if !n.AuditSupported || !n.Online {
+			continue
+		}
+		force := forceAll || forceNodes[n.NodeID]
+		if !force && (n.AuditAt != nil && now.Sub(*n.AuditAt) < s.InventoryEvery || n.auditErrorAt != nil && now.Sub(*n.auditErrorAt) < s.InventoryRetry) {
+			continue
+		}
+		if err := s.harden(ctx, n); err != nil {
+			s.log.Debug("verharding uitlezen mislukt", "node", n.Hostname, "err", err)
+		}
+	}
+	for _, n := range nodes {
 		if !n.Supported || !n.Online {
 			continue
 		}
@@ -251,6 +263,30 @@ func (s *Service) collect(ctx context.Context, n Node) error {
 		return err
 	}
 	return s.saveInventory(ctx, n.NodeID, res.Inventory)
+}
+
+// harden leest de verharding van een node uit en legt de regels erop.
+func (s *Service) harden(ctx context.Context, n Node) error {
+	rctx, cancel := context.WithTimeout(ctx, protocol.SecurityRequestTimeout)
+	defer cancel()
+	res, err := s.bus.Security(rctx, n.NodeID, protocol.SecurityRequest{Op: protocol.SecurityOpAudit})
+	if err == nil && res.Error != "" {
+		err = errors.New(res.Error)
+	}
+	if err == nil && res.Audit == nil {
+		err = errors.New("de agent stuurde geen verharding")
+	}
+	if err != nil {
+		if e := s.auditFailed(ctx, n.NodeID, err.Error()); e != nil {
+			return e
+		}
+		return err
+	}
+	results, drafts, score := EvaluateHardening(HardeningContext{Audit: res.Audit, LXC: n.Virtualization == "lxc", Docker: n.docker, Router: n.router})
+	if err := s.saveAudit(ctx, n.NodeID, res.Audit, results, score); err != nil {
+		return err
+	}
+	return s.sync(ctx, n, KindHardening, drafts)
 }
 
 // releases zijn de Debian-releases op de nodes, plus DefaultReleases.

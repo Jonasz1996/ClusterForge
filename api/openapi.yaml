@@ -5093,6 +5093,20 @@ paths:
         "202": { description: Gestart }
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
+  /security/hardening:
+    get:
+      operationId: getSecurityHardening
+      summary: Verharding per node (fase 27 M2)
+      description: |
+        De verhardingsregels en per node met een agent de score, de uitkomst van elke regel en het Lynis-rapport. Ook
+        voor viewers.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SecurityObject" }
+        "401": { $ref: "#/components/responses/Error" }
   /security/findings:
     get:
       operationId: listSecurityFindings

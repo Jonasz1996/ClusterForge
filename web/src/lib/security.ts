@@ -257,3 +257,43 @@ export const urgencyLabel: Record<string, string> = {
 export function isCVEDetail(d: SecurityFinding["detail"]): d is CVEDetail {
   return typeof d === "object" && d !== null && Array.isArray((d as CVEDetail).cves);
 }
+
+// Verharding (M2).
+
+export type HardeningRule = { id: string; category: string; title: string; severity: Severity; fix: string };
+export type RuleResult = { id: string; result: "ok" | "fout" | "nvt"; value: string; expected: string };
+export type LynisReport = {
+  date: string;
+  hardening_index: number;
+  warnings: string[];
+  suggestions: string[];
+  tests_done: number;
+  lynis_version: string;
+};
+
+export type HardeningNode = SecurityNode & {
+  audit_supported: boolean;
+  audit_at: string | null;
+  audit_error: string;
+  hardening_score: number | null;
+  virtualization: string;
+  results: RuleResult[];
+  lynis: LynisReport | null;
+};
+
+export type HardeningOverview = { protocol: number; rules: HardeningRule[]; nodes: HardeningNode[] };
+
+export function useHardening() {
+  return useQuery({
+    queryKey: [...key, "hardening"],
+    queryFn: async () => unwrap(await api.GET("/security/hardening")) as unknown as HardeningOverview,
+    refetchInterval: 30_000,
+  });
+}
+
+export function scoreTone(score: number | null): Tone {
+  if (score === null) return "slate";
+  if (score >= 90) return "green";
+  if (score >= 70) return "amber";
+  return "red";
+}

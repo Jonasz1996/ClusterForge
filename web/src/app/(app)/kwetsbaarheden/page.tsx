@@ -142,7 +142,7 @@ function FindingsTab({ o, isAdmin, initialNode }: { o: SecurityOverview; isAdmin
   const [search, setSearch] = useState("");
   const [open, setOpen] = useState<string | null>(null);
   const [grouped, setGrouped] = useState(true);
-  const findings = useSecurityFindings({ status, node_id: node || undefined });
+  const findings = useSecurityFindings({ status, node_id: node || undefined, kind: "cve" });
   const rank = (x: Severity) => severities.length - severities.indexOf(x);
 
   const list = useMemo(() => {

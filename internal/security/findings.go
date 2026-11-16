@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -303,7 +304,7 @@ func (s *Service) Overview(ctx context.Context) (Overview, error) {
 		byNode[nodes[i].NodeID] = i
 	}
 	rows, err := s.pool.Query(ctx, `SELECT node_id, status, severity, coalesce((detail->>'kev')::int, 0), coalesce((detail->>'fixable')::int, 0)
-FROM security_findings WHERE status <> 'opgelost'`)
+FROM security_findings WHERE status <> 'opgelost' AND kind = 'cve'`)
 	if err != nil {
 		return o, err
 	}
@@ -343,7 +344,7 @@ FROM security_findings WHERE status <> 'opgelost'`)
 	if err := rows.Err(); err != nil {
 		return o, err
 	}
-	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM security_findings WHERE status = 'opgelost' AND resolved_at > $1`,
+	if err := s.pool.QueryRow(ctx, `SELECT count(*) FROM security_findings WHERE status = 'opgelost' AND kind = 'cve' AND resolved_at > $1`,
 		s.Now().Add(-7*24*time.Hour)).Scan(&o.Stats.ResolvedWeek); err != nil {
 		return o, err
 	}
@@ -466,4 +467,55 @@ func (s *Service) DeleteScope(ctx context.Context, actor events.Actor, id uuid.U
 	}
 	s.event(ctx, actor, "security_scope", id.String(), nil, "security.scope_deleted", map[string]any{"name": name})
 	return nil
+}
+
+// Hardening geeft de verharding van alle nodes.
+func (s *Service) Hardening(ctx context.Context) (HardeningOverview, error) {
+	o := HardeningOverview{Protocol: protocol.SecurityAuditSince, Rules: Rules, Nodes: []HardeningNode{}}
+	nodes, err := s.nodes(ctx, "")
+	if err != nil {
+		return o, err
+	}
+	type row struct {
+		results []byte
+		lynis   []byte
+	}
+	rows, err := s.pool.Query(ctx, `SELECT node_id, results, audit->'lynis' FROM security_hardening WHERE collected_at IS NOT NULL`)
+	if err != nil {
+		return o, err
+	}
+	data := map[uuid.UUID]row{}
+	for rows.Next() {
+		var id uuid.UUID
+		var r row
+		if err := rows.Scan(&id, &r.results, &r.lynis); err != nil {
+			rows.Close()
+			return o, err
+		}
+		data[id] = r
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return o, err
+	}
+	for _, n := range nodes {
+		h := HardeningNode{Node: n, Results: []RuleResult{}}
+		if r, ok := data[n.NodeID]; ok {
+			_ = json.Unmarshal(r.results, &h.Results)
+			if len(r.lynis) > 0 && string(r.lynis) != "null" {
+				h.Lynis = &protocol.LynisReport{}
+				_ = json.Unmarshal(r.lynis, h.Lynis)
+			}
+		}
+		switch {
+		case !n.AuditSupported:
+			h.Note = fmt.Sprintf("Agent te oud (protocol %d nodig): Nodes → Agents bijwerken.", protocol.SecurityAuditSince)
+		case n.AuditAt == nil && n.AuditError != "":
+			h.Note = "Uitlezen mislukt: " + n.AuditError
+		case n.AuditAt == nil:
+			h.Note = "Wacht op de eerste controle."
+		}
+		o.Nodes = append(o.Nodes, h)
+	}
+	return o, nil
 }
