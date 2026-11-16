@@ -52,7 +52,7 @@ function subscribe(l: () => void) {
 // guessDanger herkent een vraag over iets dat weg of kapot gaat, zodat de knop
 // rood wordt zonder dat elke plek het zelf moet zeggen.
 function guessDanger(message: ReactNode) {
-  return typeof message === "string" && /verwijder|intrek|weghal|uit dit cluster|stop|annuleer|annuleren|wissen|afbreken|vergeet/i.test(message);
+  return typeof message === "string" && /verwijder|intrek|weghal|beëindig|loslat|ontkoppel|terugzet|weggooi|uit dit cluster|stop|annuleer|annuleren|wissen|afbreken|vergeet/i.test(message);
 }
 
 // ConfirmHost staat één keer in de layout en toont de open vraag.

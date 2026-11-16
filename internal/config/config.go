@@ -25,6 +25,10 @@ type Config struct {
 	// SessionTTL is hoe lang een sessie zonder activiteit geldig blijft
 	// (CF_SESSION_TTL, standaard 12h).
 	SessionTTL time.Duration
+	// SessionMaxAge is hoe lang een sessie hoogstens bestaat, ook als ze
+	// steeds gebruikt wordt (CF_SESSION_MAX_AGE, standaard 720h = 30 dagen).
+	// Daarna moet je opnieuw inloggen, met TOTP.
+	SessionMaxAge time.Duration
 	// TrustProxyHeaders laat de server het client-IP uit het laatste adres in
 	// X-Forwarded-For halen (CF_TRUST_PROXY_HEADERS, standaard false). Alleen
 	// aanzetten als de server uitsluitend via je eigen reverse proxy bereikbaar is.
@@ -86,6 +90,7 @@ func FromEnv() (Config, error) {
 		JournalLogins:      true,
 		DocsUsernames:      true,
 		SessionTTL:         12 * time.Hour,
+		SessionMaxAge:      30 * 24 * time.Hour,
 		DriftInterval:      15 * time.Minute,
 		SandboxBootTimeout: 10 * time.Minute,
 		SandboxStorage:     strings.TrimSpace(os.Getenv("CF_SANDBOX_STORAGE")),
@@ -149,6 +154,19 @@ func FromEnv() (Config, error) {
 			return c, fmt.Errorf("CF_SESSION_TTL moet minstens 1m zijn")
 		}
 		c.SessionTTL = d
+	}
+	if v := os.Getenv("CF_SESSION_MAX_AGE"); v != "" {
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			return c, fmt.Errorf("CF_SESSION_MAX_AGE: %w", err)
+		}
+		if d < time.Hour {
+			return c, fmt.Errorf("CF_SESSION_MAX_AGE moet minstens 1h zijn")
+		}
+		c.SessionMaxAge = d
+	}
+	if c.SessionMaxAge < c.SessionTTL {
+		c.SessionMaxAge = c.SessionTTL
 	}
 	if v := os.Getenv("CF_DRIFT_INTERVAL"); v != "" {
 		d, err := time.ParseDuration(v)

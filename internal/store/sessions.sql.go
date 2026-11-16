@@ -59,6 +59,40 @@ func (q *Queries) DeleteSession(ctx context.Context, id []byte) error {
 	return err
 }
 
+const deleteUserOtherSessions = `-- name: DeleteUserOtherSessions :execrows
+DELETE FROM sessions WHERE user_id = $1 AND id <> $2
+`
+
+type DeleteUserOtherSessionsParams struct {
+	UserID uuid.UUID
+	ID     []byte
+}
+
+func (q *Queries) DeleteUserOtherSessions(ctx context.Context, arg DeleteUserOtherSessionsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteUserOtherSessions, arg.UserID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteUserSession = `-- name: DeleteUserSession :execrows
+DELETE FROM sessions WHERE user_id = $1 AND id = $2
+`
+
+type DeleteUserSessionParams struct {
+	UserID uuid.UUID
+	ID     []byte
+}
+
+func (q *Queries) DeleteUserSession(ctx context.Context, arg DeleteUserSessionParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteUserSession, arg.UserID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deleteUserSessionsExcept = `-- name: DeleteUserSessionsExcept :exec
 DELETE FROM sessions WHERE user_id = $1 AND id <> $2
 `
@@ -112,6 +146,49 @@ func (q *Queries) GetSessionWithUser(ctx context.Context, id []byte) (GetSession
 		&i.User.KubeLearning,
 	)
 	return i, err
+}
+
+const listUserSessions = `-- name: ListUserSessions :many
+SELECT id, ip, user_agent, created_at, last_seen_at, expires_at
+FROM sessions
+WHERE user_id = $1 AND expires_at > now()
+ORDER BY last_seen_at DESC
+`
+
+type ListUserSessionsRow struct {
+	ID         []byte
+	Ip         string
+	UserAgent  string
+	CreatedAt  time.Time
+	LastSeenAt time.Time
+	ExpiresAt  time.Time
+}
+
+func (q *Queries) ListUserSessions(ctx context.Context, userID uuid.UUID) ([]ListUserSessionsRow, error) {
+	rows, err := q.db.Query(ctx, listUserSessions, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListUserSessionsRow{}
+	for rows.Next() {
+		var i ListUserSessionsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Ip,
+			&i.UserAgent,
+			&i.CreatedAt,
+			&i.LastSeenAt,
+			&i.ExpiresAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const touchSession = `-- name: TouchSession :exec

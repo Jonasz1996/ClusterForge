@@ -14,6 +14,7 @@ import { useLogout, useRequireMe } from "@/lib/auth";
 import { useLiveUpdates } from "@/lib/live";
 import { titleFor } from "@/lib/nav";
 import { useTheme, type Theme } from "@/lib/theme";
+import { useReloadOnStaleChunks, useServerUpdated } from "@/lib/version";
 
 const themeNext: Record<Theme, Theme> = { system: "light", light: "dark", dark: "system" };
 const themeLabel: Record<Theme, string> = { system: "Thema: zoals het systeem", light: "Thema: licht", dark: "Thema: donker" };
@@ -33,6 +34,8 @@ export default function AppLayout({ children }: { children: ReactNode }) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [theme, setTheme] = useTheme();
   const badges = useAttentionBadges(!!me.data);
+  const updated = useServerUpdated(!!me.data);
+  useReloadOnStaleChunks();
 
   // De titel van het tabblad volgt de pagina (React zet <title> in <head>).
   const pageTitle = titleFor(pathname);
@@ -171,6 +174,14 @@ export default function AppLayout({ children }: { children: ReactNode }) {
             </span>
           </div>
         </header>
+        {updated && (
+          <div role="status" className="flex flex-wrap items-center justify-center gap-3 bg-brand-600 px-4 py-2 text-sm text-white print:hidden">
+            ClusterForge is bijgewerkt. Vernieuw de pagina om de nieuwe versie te gebruiken.
+            <button type="button" onClick={() => window.location.reload()} className="rounded bg-white/15 px-2.5 py-1 font-medium hover:bg-white/25">
+              Vernieuwen
+            </button>
+          </div>
+        )}
         {/* De graaf van Afhankelijkheden krijgt de volle breedte. */}
         <main
           className={`mx-auto w-full flex-1 px-4 py-6 sm:px-6 sm:py-8 print:max-w-none print:p-0 ${

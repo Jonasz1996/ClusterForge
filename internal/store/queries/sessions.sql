@@ -21,3 +21,15 @@ DELETE FROM sessions WHERE user_id = $1 AND id <> $2;
 
 -- name: DeleteExpiredSessions :execrows
 DELETE FROM sessions WHERE expires_at <= now();
+
+-- name: ListUserSessions :many
+SELECT id, ip, user_agent, created_at, last_seen_at, expires_at
+FROM sessions
+WHERE user_id = $1 AND expires_at > now()
+ORDER BY last_seen_at DESC;
+
+-- name: DeleteUserSession :execrows
+DELETE FROM sessions WHERE user_id = $1 AND id = $2;
+
+-- name: DeleteUserOtherSessions :execrows
+DELETE FROM sessions WHERE user_id = $1 AND id <> $2;

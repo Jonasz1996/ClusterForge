@@ -40,7 +40,9 @@ type Service struct {
 	q   *store.Queries
 	ev  *events.Writer
 	ttl time.Duration
-	now func() time.Time
+	// maxAge is de absolute levensduur van een sessie; 0 = geen grens.
+	maxAge time.Duration
+	now    func() time.Time
 	// dummyHash wordt gecontroleerd bij een onbekende gebruiker, zodat de
 	// responstijd niet verraadt of een gebruikersnaam bestaat.
 	dummyHash string
@@ -53,6 +55,20 @@ func NewService(q *store.Queries, ev *events.Writer, sessionTTL time.Duration) (
 		return nil, err
 	}
 	return &Service{q: q, ev: ev, ttl: sessionTTL, now: time.Now, dummyHash: h}, nil
+}
+
+// SetMaxAge zet de absolute levensduur van een sessie: hoe vaak ze ook
+// gebruikt wordt, na maxAge sinds het inloggen is ze verlopen.
+func (s *Service) SetMaxAge(d time.Duration) { s.maxAge = d }
+
+// capExpiry houdt een vervaldatum binnen de absolute levensduur.
+func (s *Service) capExpiry(created, expires time.Time) time.Time {
+	if s.maxAge > 0 {
+		if limit := created.Add(s.maxAge); expires.After(limit) {
+			return limit
+		}
+	}
+	return expires
 }
 
 // Session is een net aangemaakte sessie. Token gaat in de cookie en wordt
@@ -125,7 +141,8 @@ func (s *Service) Login(ctx context.Context, in LoginInput) (Session, error) {
 	if err != nil {
 		return Session{}, err
 	}
-	expires := s.now().Add(s.ttl)
+	now := s.now()
+	expires := s.capExpiry(now, now.Add(s.ttl))
 	err = s.q.CreateSession(ctx, store.CreateSessionParams{
 		ID:        hashToken(token),
 		UserID:    user.ID,
@@ -179,8 +196,11 @@ func (s *Service) Authenticate(ctx context.Context, token string) (Principal, er
 	}
 	p := Principal{User: row.User, SessionID: id, CSRFToken: row.Session.CsrfToken, ExpiresAt: row.Session.ExpiresAt}
 	now := s.now()
+	if !now.Before(row.Session.ExpiresAt) || (s.maxAge > 0 && !now.Before(row.Session.CreatedAt.Add(s.maxAge))) {
+		return Principal{}, ErrNoSession
+	}
 	if now.Sub(row.Session.LastSeenAt) > touchInterval {
-		p.ExpiresAt = now.Add(s.ttl)
+		p.ExpiresAt = s.capExpiry(row.Session.CreatedAt, now.Add(s.ttl))
 		p.Refreshed = true
 		if err := s.q.TouchSession(ctx, store.TouchSessionParams{ID: id, ExpiresAt: p.ExpiresAt}); err != nil {
 			return Principal{}, err
@@ -440,4 +460,65 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n]
+}
+
+// SessionInfo is een actieve sessie van een gebruiker, voor Instellingen →
+// Sessies. ID is de hash van het token (niet het token zelf).
+type SessionInfo struct {
+	ID         []byte
+	IP         string
+	UserAgent  string
+	CreatedAt  time.Time
+	LastSeenAt time.Time
+	ExpiresAt  time.Time
+	Current    bool
+}
+
+// Sessions geeft de actieve sessies van de ingelogde gebruiker, de nieuwste
+// activiteit eerst.
+func (s *Service) Sessions(ctx context.Context, p Principal) ([]SessionInfo, error) {
+	rows, err := s.q.ListUserSessions(ctx, p.User.ID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]SessionInfo, 0, len(rows))
+	for _, r := range rows {
+		if s.maxAge > 0 && !s.now().Before(r.CreatedAt.Add(s.maxAge)) {
+			continue
+		}
+		out = append(out, SessionInfo{
+			ID: r.ID, IP: r.Ip, UserAgent: r.UserAgent, CreatedAt: r.CreatedAt, LastSeenAt: r.LastSeenAt,
+			ExpiresAt: s.capExpiry(r.CreatedAt, r.ExpiresAt), Current: string(r.ID) == string(p.SessionID),
+		})
+	}
+	return out, nil
+}
+
+// EndSession beëindigt één eigen sessie (niet de huidige: daarvoor is
+// uitloggen). Geeft false als ze niet (meer) bestaat.
+func (s *Service) EndSession(ctx context.Context, p Principal, id []byte) (bool, error) {
+	if string(id) == string(p.SessionID) {
+		return false, ValidationError{Msg: "dit is je huidige sessie; gebruik Uitloggen"}
+	}
+	n, err := s.q.DeleteUserSession(ctx, store.DeleteUserSessionParams{UserID: p.User.ID, ID: id})
+	if err != nil || n == 0 {
+		return false, err
+	}
+	return true, s.ev.Write(ctx, nil, events.Event{
+		Actor: events.User(p.User.ID), SubjectType: "user", SubjectID: p.User.ID.String(),
+		Action: "auth.session_ended", Payload: map[string]any{"sessies": 1},
+	})
+}
+
+// EndOtherSessions beëindigt alle sessies van de gebruiker behalve de
+// huidige, bv. na inloggen op een vreemde pc.
+func (s *Service) EndOtherSessions(ctx context.Context, p Principal) (int64, error) {
+	n, err := s.q.DeleteUserOtherSessions(ctx, store.DeleteUserOtherSessionsParams{UserID: p.User.ID, ID: p.SessionID})
+	if err != nil || n == 0 {
+		return n, err
+	}
+	return n, s.ev.Write(ctx, nil, events.Event{
+		Actor: events.User(p.User.ID), SubjectType: "user", SubjectID: p.User.ID.String(),
+		Action: "auth.session_ended", Payload: map[string]any{"sessies": n, "andere": true},
+	})
 }

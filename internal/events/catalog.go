@@ -65,6 +65,7 @@ var Known = map[string]Spec{
 	"auth.login":              {CategorySecurity, "Ingelogd"},
 	"auth.login_failed":       {CategorySecurity, "Mislukte inlogpoging"},
 	"auth.logout":             {CategorySecurity, "Uitgelogd"},
+	"auth.session_ended":      {CategorySecurity, "Sessie beëindigd"},
 	"auth.password_changed":   {CategorySecurity, "Wachtwoord gewijzigd"},
 	"auth.totp_enabled":       {CategorySecurity, "Tweestapsverificatie aangezet"},
 	"auth.totp_disabled":      {CategorySecurity, "Tweestapsverificatie uitgezet"},

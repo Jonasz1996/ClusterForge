@@ -6,6 +6,7 @@ import { useState, type FormEvent } from "react";
 import { AssistantSettingsCard } from "@/components/assistant/AssistantSettings";
 import { AgentUpgradeSettingsCard } from "@/components/inventory/AgentUpgrades";
 import { ApiTokensCard } from "@/components/settings/ApiTokensCard";
+import { SessionsCard } from "@/components/settings/SessionsCard";
 import { DocsTargetCard } from "@/components/docs/DocsTargetCard";
 import { SelfLocationCard } from "@/components/risk/SelfLocationCard";
 import { Alert, Button, Card, Input, Label, PageHeader } from "@/components/ui";
@@ -14,9 +15,10 @@ import { meQueryKey, useMe } from "@/lib/auth";
 import { useIsAdmin } from "@/lib/inventory";
 import { useTheme, type Theme } from "@/lib/theme";
 
-const sections: { id: string; label: string; admin?: boolean }[] = [
+const sections: { id: string; label: string }[] = [
   { id: "tweestap", label: "Tweestapsverificatie" },
   { id: "wachtwoord", label: "Wachtwoord" },
+  { id: "sessies", label: "Sessies" },
   { id: "weergave", label: "Weergave" },
   { id: "assistent", label: "Assistent" },
   { id: "documentatie-github", label: "Documentatie naar GitHub" },
@@ -42,6 +44,9 @@ export default function SettingsPage() {
       </div>
       <div id="wachtwoord" className="scroll-mt-20">
         <PasswordCard />
+      </div>
+      <div id="sessies" className="scroll-mt-20">
+        <SessionsCard />
       </div>
       <div id="weergave" className="scroll-mt-20">
         <AppearanceCard />

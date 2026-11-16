@@ -122,8 +122,9 @@ function Highlight({ text, re }: { text: string; re: RegExp | null }) {
 function Logs() {
   const params = useSearchParams();
   const isAdmin = useIsAdmin();
-  const nodesQ = useLogNodes();
-  const viewsQ = useLogViews();
+  // Logs zijn alleen voor beheerders; een kijker vraagt ze niet op.
+  const nodesQ = useLogNodes(isAdmin);
+  const viewsQ = useLogViews(isAdmin);
   const [picked, setPicked] = useState<string[]>([]);
   const [sources, setSources] = useState<LogSource[]>([]);
   const [draft, setDraft] = useState<LogFilterState>(defaultFilter);

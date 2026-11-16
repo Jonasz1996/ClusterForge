@@ -12819,6 +12819,21 @@ type UserRef struct {
 	Username string             `json:"username"`
 }
 
+// UserSession defines model for UserSession.
+type UserSession struct {
+	CreatedAt time.Time `json:"created_at"`
+
+	// Current De sessie van deze request
+	Current   bool      `json:"current"`
+	ExpiresAt time.Time `json:"expires_at"`
+
+	// Id Kenmerk van de sessie (hash van het token, niet het token)
+	Id         string    `json:"id"`
+	Ip         string    `json:"ip"`
+	LastSeenAt time.Time `json:"last_seen_at"`
+	UserAgent  string    `json:"user_agent"`
+}
+
 // Vip defines model for Vip.
 type Vip struct {
 	Address       string                                `json:"address"`
@@ -13979,6 +13994,15 @@ type ServerInterface interface {
 	// SetPreferences Voorkeuren van de ingelogde gebruiker, zoals de leermodus van Kubernetes
 	// (PUT /auth/preferences)
 	SetPreferences(w http.ResponseWriter, r *http.Request)
+	// ListMySessions De actieve sessies van de ingelogde gebruiker
+	// (GET /auth/sessions)
+	ListMySessions(w http.ResponseWriter, r *http.Request)
+	// EndOtherSessions Alle andere sessies van de ingelogde gebruiker beëindigen
+	// (DELETE /auth/sessions/others)
+	EndOtherSessions(w http.ResponseWriter, r *http.Request)
+	// EndMySession Eén eigen sessie beëindigen (niet de huidige)
+	// (DELETE /auth/sessions/{id})
+	EndMySession(w http.ResponseWriter, r *http.Request, id string)
 	// DisableTotp TOTP uitzetten met wachtwoord en een geldige code
 	// (POST /auth/totp/disable)
 	DisableTotp(w http.ResponseWriter, r *http.Request)
@@ -15041,6 +15065,24 @@ func (_ Unimplemented) ChangePassword(w http.ResponseWriter, r *http.Request) {
 // SetPreferences Voorkeuren van de ingelogde gebruiker, zoals de leermodus van Kubernetes
 // (PUT /auth/preferences)
 func (_ Unimplemented) SetPreferences(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListMySessions De actieve sessies van de ingelogde gebruiker
+// (GET /auth/sessions)
+func (_ Unimplemented) ListMySessions(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// EndOtherSessions Alle andere sessies van de ingelogde gebruiker beëindigen
+// (DELETE /auth/sessions/others)
+func (_ Unimplemented) EndOtherSessions(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// EndMySession Eén eigen sessie beëindigen (niet de huidige)
+// (DELETE /auth/sessions/{id})
+func (_ Unimplemented) EndMySession(w http.ResponseWriter, r *http.Request, id string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -17569,6 +17611,60 @@ func (siw *ServerInterfaceWrapper) SetPreferences(w http.ResponseWriter, r *http
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.SetPreferences(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListMySessions operation middleware
+func (siw *ServerInterfaceWrapper) ListMySessions(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListMySessions(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// EndOtherSessions operation middleware
+func (siw *ServerInterfaceWrapper) EndOtherSessions(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.EndOtherSessions(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// EndMySession operation middleware
+func (siw *ServerInterfaceWrapper) EndMySession(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.EndMySession(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -26285,6 +26381,15 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/auth/password", wrapper.ChangePassword)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/auth/sessions", wrapper.ListMySessions)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/auth/sessions/others", wrapper.EndOtherSessions)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/auth/sessions/{id}", wrapper.EndMySession)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/auth/totp/setup", wrapper.BeginTotpSetup)

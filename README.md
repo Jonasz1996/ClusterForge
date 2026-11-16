@@ -122,6 +122,7 @@ Het technisch ontwerp staat in [docs/design/mvp-fase-1.md](docs/design/mvp-fase-
 | Fase 24: revisie | Inhoud | Status |
 | --- | --- | --- |
 | 1. Navigatie en mobiel | Menu in groepen (Infrastructuur, Software, Beveiliging, Bewaking, Herstel, Beheer) die inklappen; op mobiel een lade met ☰; **Ctrl K** (of **/**) zoekt overal in pagina's, clusters, nodes en IP-adressen; licht, donker of zoals het systeem; eigen bevestigingsvensters in plaats van browsermeldingen; titel per tabblad; inhoudsopgave bij Instellingen | klaar |
+| 2. Sessies en updates | Een sessie bestaat hoogstens `CF_SESSION_MAX_AGE` (standaard 30 dagen) na het inloggen; **Instellingen → Sessies** toont waar je ingelogd bent (apparaat, IP, laatst actief) en beëindigt er één of alle andere. Na een serverupdate meldt een open tabblad "ClusterForge is bijgewerkt" en herlaadt het vanzelf als oude bestanden niet meer laden, in plaats van op "Laden…" te blijven hangen. Een verlopen sessie stuurt naar de login en daarna terug naar dezelfde pagina | klaar |
 
 ## Draaien met Docker Compose
 
@@ -149,6 +150,7 @@ Agents verbinden zelf naar de server, op poort 4222 (NATS met TLS). Die poort mo
 | `CF_SECURE_COOKIES` | `true` | `Secure`-vlag op de sessiecookie |
 | `CF_TRUST_PROXY_HEADERS` | `false` | Client-IP uit `X-Forwarded-For` halen; alleen achter je eigen proxy |
 | `CF_SESSION_TTL` | `12h` | Sessie verloopt na zoveel tijd zonder activiteit |
+| `CF_SESSION_MAX_AGE` | `720h` | Sessie verloopt hoogstens zo lang na het inloggen, ook als ze steeds gebruikt wordt; je actieve sessies zie en beëindig je bij Instellingen → Sessies |
 | `CF_LOG_LEVEL` | `info` | `debug`, `info`, `warn` of `error` |
 | `CF_NATS_LISTEN` | `:4222` | Adres waarop agents met NATS verbinden |
 | `CF_NATS_ADVERTISE` | (leeg) | `host[:poort]` waarmee agents NATS bereiken; leeg betekent de hostnaam waarmee de agent zich aanmeldt |
