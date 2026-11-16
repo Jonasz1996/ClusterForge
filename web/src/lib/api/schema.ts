@@ -4257,6 +4257,90 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/pve-hosts/{nodeId}/hardware": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        /** Hardwarescan van een Proxmox-host (fase 26) - PCI met IOMMU-groepen en drivers, USB, vfio, herstart nodig, temperaturen, ECC */
+        get: operations["getPveHostHardware"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/pve/datacenters": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** De Proxmox-clusters (en losse hosts) met hun hosts met een agent (fase 26) */
+        get: operations["listPveDatacenters"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/pve/datacenters/{dcId}/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                dcId: string;
+            };
+            cookie?: never;
+        };
+        /** Overzicht van een Proxmox-cluster - quorum, corosync, hosts, storage, HA, capaciteit en waarschuwingen */
+        get: operations["getPveOverview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/pve/datacenters/{dcId}/api": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                dcId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Een pad van de Proxmox-API lezen via de agent (pvesh get)
+         * @description Een pad onder /nodes/<host> gaat naar de agent op die host, de rest naar een agent in het cluster.
+         *     Een kijker kan /access, ACME-plugins en certificaten niet lezen.
+         */
+        get: operations["getPveApi"];
+        put?: never;
+        /**
+         * Iets veranderen via de Proxmox-API, als taak pvehost.action (admin)
+         * @description Alleen de aanroepen in internal/pvehost/policy.go. Gevaarlijke aanroepen (terugzetten over een gast, een host
+         *     herstarten, storage of een back-up verwijderen, netwerk toepassen) vragen confirm. Wachtwoorden en sleutels gaan
+         *     versleuteld in de taak.
+         */
+        post: operations["callPveApi"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/clusters/{clusterId}/stacks": {
         parameters: {
             query?: never;
@@ -13265,6 +13349,16 @@ export interface components {
             /** @description Bij bootstrap het adres waarmee de CT ClusterForge bereikt */
             server_url?: string;
         };
+        PveCallInput: {
+            /** @enum {string} */
+            method: "create" | "set" | "delete";
+            path: string;
+            params?: {
+                [key: string]: string;
+            };
+            /** @description Wat overgetikt moet worden bij een gevaarlijke aanroep */
+            confirm?: string;
+        };
         /** @description Een object van de firewall (fase 16); de velden staan in web/src/lib/firewall.ts en internal/firewall. */
         FirewallObject: {
             [key: string]: unknown;
@@ -20174,6 +20268,139 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["PveActionInput"];
+            };
+        };
+        responses: {
+            /** @description Taak aangemaakt */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Job"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    getPveHostHardware: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PveObject"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+        };
+    };
+    listPveDatacenters: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PveObject"];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    getPveOverview: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                dcId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PveObject"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+        };
+    };
+    getPveApi: {
+        parameters: {
+            query: {
+                path: string;
+                /** @description JSON-object met velden, zoals {"content":"backup"} */
+                params?: string;
+            };
+            header?: never;
+            path: {
+                dcId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Het antwoord van Proxmox onder data */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PveObject"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+        };
+    };
+    callPveApi: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                dcId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PveCallInput"];
             };
         };
         responses: {

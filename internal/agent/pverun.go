@@ -62,6 +62,8 @@ func (r *RunExecutor) pve(ctx context.Context, dir string, p *protocol.PVERun, o
 	}
 	tool, id := pveTool(p.Type), strconv.Itoa(p.VMID)
 	switch p.Action {
+	case protocol.PVEAPI, protocol.PVEPassthrough, protocol.PVEVolumeFree, protocol.PVEZpoolScrub, protocol.PVEMaintenance:
+		return r.pveHostAction(ctx, dir, p, out, st)
 	case protocol.PVEStart, protocol.PVEStop, protocol.PVEReboot, protocol.PVESuspend, protocol.PVEResume:
 		return r.step(ctx, out, nil, tool, p.Action, id)
 	case protocol.PVEShutdown:

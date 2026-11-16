@@ -10,6 +10,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/httpapi/gen"
 	"github.com/Jonasz1996/clusterforge/internal/pvehost"
+	"github.com/Jonasz1996/clusterforge/internal/store"
 	"github.com/Jonasz1996/clusterforge/pkg/protocol"
 )
 
@@ -80,6 +81,73 @@ func (s *Server) StartPveHostAction(w http.ResponseWriter, r *http.Request, node
 	j, err := s.pvehosts.Start(r.Context(), events.User(p.User.ID), pvehost.Request{
 		NodeID: nodeId, Op: op, Confirm: deref(in.Confirm), ServerURL: deref(in.ServerUrl),
 	})
+	if err != nil {
+		s.pveHostError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, toAPIJob(j, &p.User.Username))
+}
+
+// --- Fase 26: de Proxmox-API via de agents ---
+
+func (s *Server) GetPveHostHardware(w http.ResponseWriter, r *http.Request, nodeId uuid.UUID) {
+	hw, err := s.pvehosts.Hardware(r.Context(), nodeId)
+	if err != nil {
+		s.pveHostError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, hw)
+}
+
+func (s *Server) ListPveDatacenters(w http.ResponseWriter, r *http.Request) {
+	list, err := s.pvehosts.Datacenters(r.Context())
+	if err != nil {
+		s.internalError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": list, "protocol": protocol.PVEAPISince})
+}
+
+func (s *Server) GetPveOverview(w http.ResponseWriter, r *http.Request, dcId string) {
+	o, err := s.pvehosts.Overview(r.Context(), dcId)
+	if err != nil {
+		s.pveHostError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, o)
+}
+
+func (s *Server) GetPveApi(w http.ResponseWriter, r *http.Request, dcId string, params gen.GetPveApiParams) {
+	p, _ := principalFrom(r.Context())
+	var fields map[string]string
+	if params.Params != nil && *params.Params != "" {
+		if err := json.Unmarshal([]byte(*params.Params), &fields); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid", "params is geen JSON-object met tekst: "+err.Error())
+			return
+		}
+	}
+	data, err := s.pvehosts.Get(r.Context(), dcId, params.Path, fields, p.User.Role == store.UserRoleAdmin)
+	if err != nil {
+		s.pveHostError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"data": data})
+}
+
+func (s *Server) CallPveApi(w http.ResponseWriter, r *http.Request, dcId string) {
+	p, ok := requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	var in gen.PveCallInput
+	if !decode(w, r, &in) {
+		return
+	}
+	c := pvehost.Call{Datacenter: dcId, Method: string(in.Method), Path: in.Path, Confirm: deref(in.Confirm)}
+	if in.Params != nil {
+		c.Params = *in.Params
+	}
+	j, err := s.pvehosts.StartCall(r.Context(), events.User(p.User.ID), c)
 	if err != nil {
 		s.pveHostError(w, r, err)
 		return

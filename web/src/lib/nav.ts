@@ -20,11 +20,19 @@ export const navGroups: NavGroup[] = [
     items: [
       { href: "/clusters", label: "Clusters", keywords: "vip keepalived uitrollen" },
       { href: "/nodes", label: "Nodes", keywords: "servers agents machines ct lxc vm" },
-      { href: "/proxmox", label: "Proxmox", keywords: "vm ct snapshot pve" },
-      { href: "/proxmox/hosts", label: "Proxmox-hosts", keywords: "hypervisor pve host" },
       { href: "/kubernetes", label: "Kubernetes", keywords: "k3s pods" },
       { href: "/kaart", label: "Kaart", keywords: "netwerk vlan map" },
       { href: "/afhankelijkheden", label: "Afhankelijkheden", keywords: "graaf dependencies" },
+    ],
+  },
+  {
+    id: "proxmox",
+    label: "Proxmox",
+    items: [
+      { href: "/proxmox/datacenter", label: "Datacenter", keywords: "pve proxmox quorum corosync capaciteit overcommit onderhoudsmodus host herstarten" },
+      { href: "/proxmox/hosts", label: "Hosts en gasten", keywords: "pve hypervisor vm ct lxc qemu pct qm snapshot verhuizen migreren" },
+      { href: "/proxmox/taken", label: "Proxmox-taken", keywords: "pve task log upid vzdump" },
+      { href: "/proxmox", label: "Via de API-koppeling", keywords: "pve proxmox token api koppeling" },
     ],
   },
   {

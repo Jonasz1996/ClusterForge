@@ -30,6 +30,9 @@ type pveSim struct {
 	root string
 	// onEnroll krijgt het aanmeldbestand dat in een CT gezet wordt.
 	onEnroll func(name string, e agent.EnrollFile)
+	// extra beantwoordt commando's voor de rest (fase 26); ok false laat
+	// ze aan de gewone naspeling.
+	extra func(c string, out io.Writer) (code int, ok bool)
 
 	mu    sync.Mutex
 	calls []string
@@ -99,6 +102,11 @@ func (p *pveSim) cmd(_ context.Context, _ string, argv, _ []string, out io.Write
 	p.mu.Lock()
 	p.calls = append(p.calls, c)
 	p.mu.Unlock()
+	if p.extra != nil {
+		if code, ok := p.extra(c, out); ok {
+			return code, nil
+		}
+	}
 	tmpl := "debian-13-standard_13.1-2_" + runtime.GOARCH + ".tar.zst"
 	id := 0
 	if len(argv) > 2 {

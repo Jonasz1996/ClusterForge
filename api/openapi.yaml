@@ -4550,6 +4550,93 @@ paths:
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /pve-hosts/{nodeId}/hardware:
+    parameters:
+      - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getPveHostHardware
+      summary: Hardwarescan van een Proxmox-host (fase 26) - PCI met IOMMU-groepen en drivers, USB, vfio, herstart nodig, temperaturen, ECC
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+  /pve/datacenters:
+    get:
+      operationId: listPveDatacenters
+      summary: De Proxmox-clusters (en losse hosts) met hun hosts met een agent (fase 26)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "401": { $ref: "#/components/responses/Error" }
+  /pve/datacenters/{dcId}/overview:
+    parameters:
+      - { name: dcId, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: getPveOverview
+      summary: Overzicht van een Proxmox-cluster - quorum, corosync, hosts, storage, HA, capaciteit en waarschuwingen
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+  /pve/datacenters/{dcId}/api:
+    parameters:
+      - { name: dcId, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: getPveApi
+      summary: Een pad van de Proxmox-API lezen via de agent (pvesh get)
+      description: |
+        Een pad onder /nodes/<host> gaat naar de agent op die host, de rest naar een agent in het cluster.
+        Een kijker kan /access, ACME-plugins en certificaten niet lezen.
+      parameters:
+        - { name: path, in: query, required: true, schema: { type: string } }
+        - { name: params, in: query, required: false, description: "JSON-object met velden, zoals {\"content\":\"backup\"}", schema: { type: string } }
+      responses:
+        "200":
+          description: Het antwoord van Proxmox onder data
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: callPveApi
+      summary: Iets veranderen via de Proxmox-API, als taak pvehost.action (admin)
+      description: |
+        Alleen de aanroepen in internal/pvehost/policy.go. Gevaarlijke aanroepen (terugzetten over een gast, een host
+        herstarten, storage of een back-up verwijderen, netwerk toepassen) vragen confirm. Wachtwoorden en sleutels gaan
+        versleuteld in de taak.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PveCallInput" }
+      responses:
+        "202":
+          description: Taak aangemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
   /clusters/{clusterId}/stacks:
     parameters:
       - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -13880,6 +13967,16 @@ components:
         op: { $ref: "#/components/schemas/PveObject" }
         confirm: { type: string, description: Bij verwijderen de naam of het nummer van de gast }
         server_url: { type: string, description: Bij bootstrap het adres waarmee de CT ClusterForge bereikt }
+    PveCallInput:
+      type: object
+      required: [method, path]
+      properties:
+        method: { type: string, enum: [create, set, delete] }
+        path: { type: string }
+        params:
+          type: object
+          additionalProperties: { type: string }
+        confirm: { type: string, description: Wat overgetikt moet worden bij een gevaarlijke aanroep }
     FirewallObject:
       type: object
       description: Een object van de firewall (fase 16); de velden staan in web/src/lib/firewall.ts en internal/firewall.
