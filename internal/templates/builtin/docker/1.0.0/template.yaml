@@ -5,8 +5,9 @@ description: >-
   Een of meer servers met Docker Engine en Docker Compose uit Debian, klaar
   voor je eigen containers en compose-stacks in /opt/stacks. ClusterForge
   beheert de installatie en /etc/docker/daemon.json, met logrotatie zodat
-  containerlogs de schijf niet vullen. Wat er in de containers draait,
-  beheer je zelf.
+  containerlogs de schijf niet vullen. Een node die al Docker heeft, houdt
+  zijn Docker en instellingen. Wat er in de containers draait, beheer je
+  zelf; voor Docker-hosts met keepalived en beheerde stacks is er docker-ha.
 cluster_type: docker
 
 params:
@@ -57,14 +58,40 @@ roles:
       memory: "{{ .params.memory }}"
       disk: "{{ .params.disk }}"
     steps:
-      - package: { names: [docker.io, docker-compose] }
-      # Een nieuwe daemon.json geldt na een herstart van Docker. Met
+      - directory: { path: /usr/local/lib/clusterforge, mode: "0755" }
+      # Docker alleen op een node zonder Docker. Een bestaande Docker CE of
+      # docker.io blijft zoals hij is (docker.io zou Docker CE verdringen).
+      - command:
+          title: Docker
+          run: |-
+            set -e
+            export DEBIAN_FRONTEND=noninteractive
+            ce() { dpkg-query -W -f='${Status}' docker-ce 2>/dev/null | grep -q 'ok installed'; }
+            if command -v dockerd >/dev/null 2>&1 || ce; then
+              # Er staat al Docker (Docker CE of docker.io): nooit herinstalleren.
+              # Alleen Compose als het ontbreekt, uit dezelfde bron.
+              if ! docker compose version >/dev/null 2>&1; then
+                if ce; then apt-get install -y docker-compose-plugin; else apt-get install -y docker-compose; fi
+              fi
+              systemctl is-active --quiet docker || systemctl start docker
+            else
+              apt-get install -y docker.io docker-compose
+              mkdir -p /etc/clusterforge
+              touch /etc/clusterforge/docker-door-clusterforge
+              systemctl enable --now docker
+            fi
+          unless: command -v dockerd >/dev/null 2>&1 && docker compose version >/dev/null 2>&1 && systemctl is-active --quiet docker
+      # daemon.json alleen op een node waar ClusterForge Docker installeerde:
+      # een bestaande Docker houdt zijn eigen instellingen en wordt nooit
+      # herstart. Een nieuwe daemon.json geldt na een herstart; met
       # live-restore blijven de containers daarbij draaien.
       - file:
-          path: /etc/docker/daemon.json
+          path: /usr/local/lib/clusterforge/docker-daemon.json
           template: daemon.json.tmpl
-          notify: [service:docker:restart]
-      - service: { name: docker, enabled: true, state: started }
+      - command:
+          title: daemon.json van Docker
+          run: install -D -m 0644 /usr/local/lib/clusterforge/docker-daemon.json /etc/docker/daemon.json && systemctl restart docker
+          unless: '[ ! -f /etc/clusterforge/docker-door-clusterforge ] || cmp -s /usr/local/lib/clusterforge/docker-daemon.json /etc/docker/daemon.json'
       - directory: { path: /opt/stacks, mode: "0750" }
 
 # De Docker-daemon zelf; containers en stacks voeg je met de hand toe aan de
