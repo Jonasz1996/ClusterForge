@@ -134,6 +134,17 @@ paths:
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /attention:
+    get:
+      operationId: getAttention
+      summary: Wat nu aandacht vraagt (offline agents, clusters in storing, open incidenten, …), met tellers voor het menu
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Attention" }
+        "401": { $ref: "#/components/responses/Error" }
   /auth/totp/setup:
     post:
       operationId: beginTotpSetup
@@ -9298,6 +9309,33 @@ components:
         user: { $ref: "#/components/schemas/User" }
         csrf_token: { type: string }
         session_expires_at: { type: string, format: date-time }
+    Attention:
+      type: object
+      required: [items, badges]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/AttentionItem" }
+        badges:
+          type: object
+          description: Teller per menu-item (href), met de ernstigste toon
+          additionalProperties: { $ref: "#/components/schemas/AttentionBadge" }
+    AttentionBadge:
+      type: object
+      required: [count, tone]
+      properties:
+        count: { type: integer }
+        tone: { type: string, enum: [red, amber] }
+    AttentionItem:
+      type: object
+      required: [id, tone, title, detail, href, count]
+      properties:
+        id: { type: string, description: Vast kenmerk van het soort melding }
+        tone: { type: string, enum: [red, amber] }
+        title: { type: string }
+        detail: { type: string, description: "De betrokken clusters of nodes, kort" }
+        href: { type: string, description: Pagina waar je het oplost }
+        count: { type: integer }
     UserSession:
       type: object
       required: [id, ip, user_agent, created_at, last_seen_at, expires_at, current]

@@ -111,6 +111,42 @@ func (e AssistantConversationInputSubjectType) Valid() bool {
 	}
 }
 
+// Defines values for AttentionBadgeTone.
+const (
+	AttentionBadgeToneAmber AttentionBadgeTone = "amber"
+	AttentionBadgeToneRed   AttentionBadgeTone = "red"
+)
+
+// Valid indicates whether the value is a known member of the AttentionBadgeTone enum.
+func (e AttentionBadgeTone) Valid() bool {
+	switch e {
+	case AttentionBadgeToneAmber:
+		return true
+	case AttentionBadgeToneRed:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AttentionItemTone.
+const (
+	AttentionItemToneAmber AttentionItemTone = "amber"
+	AttentionItemToneRed   AttentionItemTone = "red"
+)
+
+// Valid indicates whether the value is a known member of the AttentionItemTone enum.
+func (e AttentionItemTone) Valid() bool {
+	switch e {
+	case AttentionItemToneAmber:
+		return true
+	case AttentionItemToneRed:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AuditEntryActorType.
 const (
 	AuditEntryActorTypeAgent  AuditEntryActorType = "agent"
@@ -4117,6 +4153,41 @@ type AssistantUsage struct {
 		Username  string  `json:"username"`
 	} `json:"users"`
 }
+
+// Attention defines model for Attention.
+type Attention struct {
+	// Badges Teller per menu-item (href), met de ernstigste toon
+	Badges map[string]AttentionBadge `json:"badges"`
+	Items  []AttentionItem           `json:"items"`
+}
+
+// AttentionBadge defines model for AttentionBadge.
+type AttentionBadge struct {
+	Count int                `json:"count"`
+	Tone  AttentionBadgeTone `json:"tone"`
+}
+
+// AttentionBadgeTone defines model for AttentionBadge.Tone.
+type AttentionBadgeTone string
+
+// AttentionItem defines model for AttentionItem.
+type AttentionItem struct {
+	Count int `json:"count"`
+
+	// Detail De betrokken clusters of nodes, kort
+	Detail string `json:"detail"`
+
+	// Href Pagina waar je het oplost
+	Href string `json:"href"`
+
+	// Id Vast kenmerk van het soort melding
+	Id    string            `json:"id"`
+	Title string            `json:"title"`
+	Tone  AttentionItemTone `json:"tone"`
+}
+
+// AttentionItemTone defines model for AttentionItem.Tone.
+type AttentionItemTone string
 
 // AuditChange Eén gewijzigd veld; een lege waarde betekent geen waarde.
 type AuditChange struct {
@@ -13970,6 +14041,9 @@ type ServerInterface interface {
 	// GetAssistantUsage Het verbruik van deze maand; per gebruiker alleen voor admins
 	// (GET /assistant/usage)
 	GetAssistantUsage(w http.ResponseWriter, r *http.Request)
+	// GetAttention Wat nu aandacht vraagt (offline agents, clusters in storing, open incidenten, …), met tellers voor het menu
+	// (GET /attention)
+	GetAttention(w http.ResponseWriter, r *http.Request)
 	// ListAudit Het logboek, nieuwste eerst, met een zin per regel (alleen admin)
 	// (GET /audit)
 	ListAudit(w http.ResponseWriter, r *http.Request, params ListAuditParams)
@@ -15017,6 +15091,12 @@ func (_ Unimplemented) TestAssistantKey(w http.ResponseWriter, r *http.Request) 
 // GetAssistantUsage Het verbruik van deze maand; per gebruiker alleen voor admins
 // (GET /assistant/usage)
 func (_ Unimplemented) GetAssistantUsage(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetAttention Wat nu aandacht vraagt (offline agents, clusters in storing, open incidenten, …), met tellers voor het menu
+// (GET /attention)
+func (_ Unimplemented) GetAttention(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -17227,6 +17307,20 @@ func (siw *ServerInterfaceWrapper) GetAssistantUsage(w http.ResponseWriter, r *h
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetAssistantUsage(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetAttention operation middleware
+func (siw *ServerInterfaceWrapper) GetAttention(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetAttention(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -26390,6 +26484,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Delete(options.BaseURL+"/auth/sessions/{id}", wrapper.EndMySession)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/attention", wrapper.GetAttention)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/auth/totp/setup", wrapper.BeginTotpSetup)
