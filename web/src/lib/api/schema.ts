@@ -5073,10 +5073,12 @@ export interface paths {
         /**
          * Agents bijwerken (admin); één taak agents.upgrade per cluster, één node tegelijk
          * @description node_ids werkt die nodes bij, cluster_id elke verouderde agent van dat cluster, all elke verouderde agent buiten
-         *     prod. Per cluster één node tegelijk: de volgende pas als de vorige met de nieuwe agent terug is. Komt een node niet
-         *     terug of zet hij de oude agent terug, dan stopt de taak van dat cluster. Op prod vraagt het tweestapsverificatie en
-         *     de slug van het cluster in confirm; nodes uit meer dan één prodcluster tegelijk kan niet (400). Een cluster waar al
-         *     een taak loopt, staat in skipped; is er niets gestart, dan 409.
+         *     prod; all met include_prod ook die op prod. Per cluster één node tegelijk: de volgende pas als de vorige met de
+         *     nieuwe agent terug is. Komt een node niet terug of zet hij de oude agent terug, dan stopt de taak van dat cluster.
+         *     Op prod vraagt het tweestapsverificatie en één code in totp_code voor de hele klik (of, voor één prodcluster, de
+         *     slug in confirm). Met include_prod starten de clusters buiten prod meteen; de prodclusters komen in een rij
+         *     (queued_prod) en gaan één voor één: het volgende pas als het vorige gelukt is, bij een fout stopt de rij. Een
+         *     cluster waar al een taak loopt, staat in skipped; is er niets gestart of in de rij gezet, dan 409.
          */
         post: operations["startAgentUpgrades"];
         delete?: never;
@@ -5106,6 +5108,48 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/agent-upgrades/prod-auto": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Agents op prod ook vanzelf bijwerken aan- of uitzetten (admin)
+         * @description Aan werkt ClusterForge verouderde agents op prod ook vanzelf bij, één prodcluster tegelijk en één node tegelijk.
+         *     Mislukt een update op prod, dan staat het op prod stil tot die node met de knop bijgewerkt is. Aanzetten vraagt
+         *     tweestapsverificatie en een code in totp_code; uitzetten niet. Geldt alleen als vanzelf bijwerken (auto) aan staat.
+         */
+        put: operations["setAgentUpgradeProdAuto"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agent-upgrades/prod-queue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * De rij prodclusters van "ook productie" stoppen (admin)
+         * @description Haalt de prodclusters die nog niet begonnen zijn uit de rij. Een taak die al loopt, annuleer je bij Taken.
+         */
+        delete: operations["clearAgentUpgradeProdQueue"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/clusters/{clusterId}/agent-upgrade-auto": {
         parameters: {
             query?: never;
@@ -5118,7 +5162,7 @@ export interface paths {
         get?: never;
         /**
          * Agents vanzelf bijwerken op één cluster aan- of uitzetten (admin)
-         * @description Uit werkt ClusterForge de agents van dit cluster alleen met de knop bij. Prod gaat nooit vanzelf.
+         * @description Uit werkt ClusterForge de agents van dit cluster alleen met de knop bij. Prod gaat alleen vanzelf met prod_auto.
          */
         put: operations["setClusterAgentUpgradeAuto"];
         post?: never;
@@ -12212,6 +12256,20 @@ export interface components {
             archs: string[];
             /** @description Agents vanzelf bijwerken staat aan */
             auto: boolean;
+            /** @description Ook agents op prod vanzelf bijwerken */
+            prod_auto: boolean;
+            /** @description Een update op prod mislukte; vanzelf bijwerken op prod staat stil */
+            prod_halted: boolean;
+            /** @description De node waar de update op prod mislukte */
+            halted_by: string;
+            /** @description Prodclusters van een klik "ook productie" die nog aan de beurt komen, in volgorde */
+            prod_queue: {
+                /** Format: uuid */
+                cluster_id: string;
+                cluster_name: string;
+                /** Format: uuid */
+                job_id: string | null;
+            }[];
             /** @description Clusters waar vanzelf bijwerken uitstaat */
             off_cluster_ids: string[];
             agents: components["schemas"]["AgentUpgradeAgent"][];
@@ -12489,12 +12547,18 @@ export interface components {
             /** Format: uuid */
             cluster_id?: string;
             all?: boolean;
+            /** @description Met all: ook de agents op prod, één prodcluster na het andere */
+            include_prod?: boolean;
+            /** @description Code van tweestapsverificatie; één code bevestigt alle prodnodes van deze klik */
+            totp_code?: string;
             /** @description De slug van het prodcluster */
             confirm?: string;
         };
         AgentUpgradeStarted: {
             jobs: components["schemas"]["Job"][];
             skipped: string[];
+            /** @description Prodclusters in de rij, één voor één */
+            queued_prod: string[];
         };
         Job: {
             /** Format: uuid */
@@ -22138,6 +22202,60 @@ export interface operations {
                 };
             };
             400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+        };
+    };
+    setAgentUpgradeProdAuto: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    enabled: boolean;
+                    totp_code?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentUpgradeOverview"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            429: components["responses"]["Error"];
+        };
+    };
+    clearAgentUpgradeProdQueue: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentUpgradeOverview"];
+                };
+            };
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
         };

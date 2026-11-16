@@ -382,11 +382,20 @@ type AgentUpgradeOff struct {
 	UpdatedAt time.Time
 }
 
+type AgentUpgradeProdQueue struct {
+	ClusterID   uuid.UUID
+	Position    int32
+	JobID       *uuid.UUID
+	RequestedBy *uuid.UUID
+	CreatedAt   time.Time
+}
+
 type AgentUpgradeSetting struct {
 	ID        uuid.UUID
 	Auto      bool
 	UpdatedBy *uuid.UUID
 	UpdatedAt time.Time
+	ProdAuto  bool
 }
 
 type ApiToken struct {

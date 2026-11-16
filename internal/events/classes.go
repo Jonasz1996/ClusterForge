@@ -69,6 +69,7 @@ var classes = map[string]Class{
 	"agent.enrolled": ClassChange, "agent.enroll_failed": ClassInfo, "agent.command": ClassChange,
 	"node.agent_upgraded": ClassChange, "node.agent_upgrade_failed": ClassInfo,
 	"settings.agent_upgrade_auto": ClassChange, "cluster.agent_upgrade_auto": ClassChange,
+	"settings.agent_upgrade_prod_auto": ClassChange, "agents.prod_upgrade_queued": ClassChange, "agents.prod_upgrade_stopped": ClassChange,
 	"agent.revoked": ClassChange, "enrollment_token.created": ClassInfo, "enrollment_token.deleted": ClassInfo,
 	"api_token.created": ClassInfo, "api_token.deleted": ClassInfo,
 	"node.facts_changed": ClassInfo,

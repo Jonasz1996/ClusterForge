@@ -5450,10 +5450,12 @@ paths:
       summary: Agents bijwerken (admin); één taak agents.upgrade per cluster, één node tegelijk
       description: |
         node_ids werkt die nodes bij, cluster_id elke verouderde agent van dat cluster, all elke verouderde agent buiten
-        prod. Per cluster één node tegelijk: de volgende pas als de vorige met de nieuwe agent terug is. Komt een node niet
-        terug of zet hij de oude agent terug, dan stopt de taak van dat cluster. Op prod vraagt het tweestapsverificatie en
-        de slug van het cluster in confirm; nodes uit meer dan één prodcluster tegelijk kan niet (400). Een cluster waar al
-        een taak loopt, staat in skipped; is er niets gestart, dan 409.
+        prod; all met include_prod ook die op prod. Per cluster één node tegelijk: de volgende pas als de vorige met de
+        nieuwe agent terug is. Komt een node niet terug of zet hij de oude agent terug, dan stopt de taak van dat cluster.
+        Op prod vraagt het tweestapsverificatie en één code in totp_code voor de hele klik (of, voor één prodcluster, de
+        slug in confirm). Met include_prod starten de clusters buiten prod meteen; de prodclusters komen in een rij
+        (queued_prod) en gaan één voor één: het volgende pas als het vorige gelukt is, bij een fout stopt de rij. Een
+        cluster waar al een taak loopt, staat in skipped; is er niets gestart of in de rij gezet, dan 409.
       requestBody:
         required: true
         content:
@@ -5494,13 +5496,55 @@ paths:
         "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
+  /agent-upgrades/prod-auto:
+    put:
+      operationId: setAgentUpgradeProdAuto
+      summary: Agents op prod ook vanzelf bijwerken aan- of uitzetten (admin)
+      description: |
+        Aan werkt ClusterForge verouderde agents op prod ook vanzelf bij, één prodcluster tegelijk en één node tegelijk.
+        Mislukt een update op prod, dan staat het op prod stil tot die node met de knop bijgewerkt is. Aanzetten vraagt
+        tweestapsverificatie en een code in totp_code; uitzetten niet. Geldt alleen als vanzelf bijwerken (auto) aan staat.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled]
+              properties:
+                enabled: { type: boolean }
+                totp_code: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentUpgradeOverview" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+  /agent-upgrades/prod-queue:
+    delete:
+      operationId: clearAgentUpgradeProdQueue
+      summary: De rij prodclusters van "ook productie" stoppen (admin)
+      description: Haalt de prodclusters die nog niet begonnen zijn uit de rij. Een taak die al loopt, annuleer je bij Taken.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentUpgradeOverview" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
   /clusters/{clusterId}/agent-upgrade-auto:
     parameters:
       - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
     put:
       operationId: setClusterAgentUpgradeAuto
       summary: Agents vanzelf bijwerken op één cluster aan- of uitzetten (admin)
-      description: Uit werkt ClusterForge de agents van dit cluster alleen met de knop bij. Prod gaat nooit vanzelf.
+      description: Uit werkt ClusterForge de agents van dit cluster alleen met de knop bij. Prod gaat alleen vanzelf met prod_auto.
       requestBody:
         required: true
         content:
@@ -12859,12 +12903,25 @@ components:
       enum: [queued, running, succeeded, failed, canceled]
     AgentUpgradeOverview:
       type: object
-      required: [version, protocol, archs, auto, off_cluster_ids, agents, running]
+      required: [version, protocol, archs, auto, prod_auto, prod_halted, halted_by, prod_queue, off_cluster_ids, agents, running]
       properties:
         version: { type: string, description: De versie van de agent die deze server aanbiedt }
         protocol: { type: integer }
         archs: { type: array, items: { type: string }, description: "Architecturen waarvoor de server een agent heeft" }
         auto: { type: boolean, description: Agents vanzelf bijwerken staat aan }
+        prod_auto: { type: boolean, description: Ook agents op prod vanzelf bijwerken, één prodcluster tegelijk }
+        prod_halted: { type: boolean, description: Een update op prod mislukte; vanzelf bijwerken op prod staat stil }
+        halted_by: { type: string, description: De node waar de update op prod mislukte }
+        prod_queue:
+          type: array
+          description: Prodclusters van een klik "ook productie" die nog aan de beurt komen, in volgorde
+          items:
+            type: object
+            required: [cluster_id, cluster_name, job_id]
+            properties:
+              cluster_id: { type: string, format: uuid }
+              cluster_name: { type: string }
+              job_id: { type: string, format: uuid, nullable: true }
         off_cluster_ids: { type: array, items: { type: string, format: uuid }, description: Clusters waar vanzelf bijwerken uitstaat }
         agents: { type: array, items: { $ref: "#/components/schemas/AgentUpgradeAgent" } }
         running:
@@ -13162,13 +13219,16 @@ components:
         node_ids: { type: array, items: { type: string, format: uuid } }
         cluster_id: { type: string, format: uuid }
         all: { type: boolean }
-        confirm: { type: string, description: De slug van het prodcluster, ter bevestiging }
+        include_prod: { type: boolean, description: "Met all: ook de agents op prod, één prodcluster na het andere" }
+        totp_code: { type: string, description: "Code van tweestapsverificatie; één code bevestigt alle prodnodes van deze klik" }
+        confirm: { type: string, description: De slug van het prodcluster, ter bevestiging (alleen voor één prodcluster) }
     AgentUpgradeStarted:
       type: object
-      required: [jobs, skipped]
+      required: [jobs, skipped, queued_prod]
       properties:
         jobs: { type: array, items: { $ref: "#/components/schemas/Job" } }
         skipped: { type: array, items: { type: string } }
+        queued_prod: { type: array, items: { type: string }, description: "Prodclusters in de rij, één voor één" }
     Job:
       type: object
       required: [id, kind, title, status, error, cluster_id, node_id, proxmox_id, requested_by, attempts, cancel_requested, retryable, created_at, started_at, finished_at]

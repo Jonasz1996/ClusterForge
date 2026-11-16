@@ -4240,8 +4240,14 @@ type AgentUpgradeInput struct {
 	ClusterId *openapi_types.UUID `json:"cluster_id,omitempty"`
 
 	// Confirm De slug van het prodcluster
-	Confirm *string               `json:"confirm,omitempty"`
-	NodeIds *[]openapi_types.UUID `json:"node_ids,omitempty"`
+	Confirm *string `json:"confirm,omitempty"`
+
+	// IncludeProd Met all: ook de agents op prod, één prodcluster na het andere
+	IncludeProd *bool                 `json:"include_prod,omitempty"`
+	NodeIds     *[]openapi_types.UUID `json:"node_ids,omitempty"`
+
+	// TotpCode Code van tweestapsverificatie; één code bevestigt alle prodnodes van deze klik
+	TotpCode *string `json:"totp_code,omitempty"`
 }
 
 // AgentUpgradeOverview defines model for AgentUpgradeOverview.
@@ -4254,9 +4260,25 @@ type AgentUpgradeOverview struct {
 	// Auto Agents vanzelf bijwerken staat aan
 	Auto bool `json:"auto"`
 
+	// HaltedBy De node waar de update op prod mislukte
+	HaltedBy string `json:"halted_by"`
+
 	// OffClusterIds Clusters waar vanzelf bijwerken uitstaat
 	OffClusterIds []openapi_types.UUID `json:"off_cluster_ids"`
-	Protocol      int                  `json:"protocol"`
+
+	// ProdAuto Ook agents op prod vanzelf bijwerken
+	ProdAuto bool `json:"prod_auto"`
+
+	// ProdHalted Een update op prod mislukte; vanzelf bijwerken op prod staat stil
+	ProdHalted bool `json:"prod_halted"`
+
+	// ProdQueue Prodclusters van een klik "ook productie" die nog aan de beurt komen, in volgorde
+	ProdQueue []struct {
+		ClusterId   openapi_types.UUID                    `json:"cluster_id"`
+		ClusterName string                                `json:"cluster_name"`
+		JobId       nullable.Nullable[openapi_types.UUID] `json:"job_id"`
+	} `json:"prod_queue"`
+	Protocol int `json:"protocol"`
 
 	// Running Taken agents.upgrade die wachten of lopen
 	Running []struct {
@@ -4270,8 +4292,11 @@ type AgentUpgradeOverview struct {
 
 // AgentUpgradeStarted defines model for AgentUpgradeStarted.
 type AgentUpgradeStarted struct {
-	Jobs    []Job    `json:"jobs"`
-	Skipped []string `json:"skipped"`
+	Jobs []Job `json:"jobs"`
+
+	// QueuedProd Prodclusters in de rij, één voor één
+	QueuedProd []string `json:"queued_prod"`
+	Skipped    []string `json:"skipped"`
 }
 
 // ApiToken defines model for ApiToken.
@@ -13634,6 +13659,12 @@ type SetAgentUpgradeAutoJSONBody struct {
 	Enabled bool `json:"enabled"`
 }
 
+// SetAgentUpgradeProdAutoJSONBody defines parameters for SetAgentUpgradeProdAuto.
+type SetAgentUpgradeProdAutoJSONBody struct {
+	Enabled  bool    `json:"enabled"`
+	TotpCode *string `json:"totp_code,omitempty"`
+}
+
 // ListAssistantConversationsParams defines parameters for ListAssistantConversations.
 type ListAssistantConversationsParams struct {
 	// All Ook die van anderen (admin)
@@ -14205,6 +14236,9 @@ type StartAgentUpgradesJSONRequestBody = AgentUpgradeInput
 // SetAgentUpgradeAutoJSONRequestBody defines body for SetAgentUpgradeAuto for application/json ContentType.
 type SetAgentUpgradeAutoJSONRequestBody SetAgentUpgradeAutoJSONBody
 
+// SetAgentUpgradeProdAutoJSONRequestBody defines body for SetAgentUpgradeProdAuto for application/json ContentType.
+type SetAgentUpgradeProdAutoJSONRequestBody SetAgentUpgradeProdAutoJSONBody
+
 // ClaimAgentJSONRequestBody defines body for ClaimAgent for application/json ContentType.
 type ClaimAgentJSONRequestBody = ClaimRequest
 
@@ -14636,6 +14670,12 @@ type ServerInterface interface {
 	// SetAgentUpgradeAuto Agents vanzelf bijwerken aan- of uitzetten (admin)
 	// (PUT /agent-upgrades/auto)
 	SetAgentUpgradeAuto(w http.ResponseWriter, r *http.Request)
+	// SetAgentUpgradeProdAuto Agents op prod ook vanzelf bijwerken aan- of uitzetten (admin)
+	// (PUT /agent-upgrades/prod-auto)
+	SetAgentUpgradeProdAuto(w http.ResponseWriter, r *http.Request)
+	// ClearAgentUpgradeProdQueue De rij prodclusters van "ook productie" stoppen (admin)
+	// (DELETE /agent-upgrades/prod-queue)
+	ClearAgentUpgradeProdQueue(w http.ResponseWriter, r *http.Request)
 	// ClaimAgent Een agent in een CT uit een CT-template meldt zich aan zonder token (zonder sessie)
 	// (POST /agents/claim)
 	ClaimAgent(w http.ResponseWriter, r *http.Request)
@@ -15716,6 +15756,18 @@ func (_ Unimplemented) StartAgentUpgrades(w http.ResponseWriter, r *http.Request
 // SetAgentUpgradeAuto Agents vanzelf bijwerken aan- of uitzetten (admin)
 // (PUT /agent-upgrades/auto)
 func (_ Unimplemented) SetAgentUpgradeAuto(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SetAgentUpgradeProdAuto Agents op prod ook vanzelf bijwerken aan- of uitzetten (admin)
+// (PUT /agent-upgrades/prod-auto)
+func (_ Unimplemented) SetAgentUpgradeProdAuto(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ClearAgentUpgradeProdQueue De rij prodclusters van "ook productie" stoppen (admin)
+// (DELETE /agent-upgrades/prod-queue)
+func (_ Unimplemented) ClearAgentUpgradeProdQueue(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -17879,6 +17931,34 @@ func (siw *ServerInterfaceWrapper) SetAgentUpgradeAuto(w http.ResponseWriter, r 
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.SetAgentUpgradeAuto(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetAgentUpgradeProdAuto operation middleware
+func (siw *ServerInterfaceWrapper) SetAgentUpgradeProdAuto(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetAgentUpgradeProdAuto(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ClearAgentUpgradeProdQueue operation middleware
+func (siw *ServerInterfaceWrapper) ClearAgentUpgradeProdQueue(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ClearAgentUpgradeProdQueue(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -28912,6 +28992,12 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Put(options.BaseURL+"/agent-upgrades/auto", wrapper.SetAgentUpgradeAuto)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/agent-upgrades/prod-auto", wrapper.SetAgentUpgradeProdAuto)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/agent-upgrades/prod-queue", wrapper.ClearAgentUpgradeProdQueue)
 	})
 	r.Group(func(r chi.Router) {
 		r.Put(options.BaseURL+"/clusters/{clusterId}/agent-upgrade-auto", wrapper.SetClusterAgentUpgradeAuto)

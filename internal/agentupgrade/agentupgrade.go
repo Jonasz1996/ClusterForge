@@ -192,6 +192,8 @@ func NewService(pool *pgxpool.Pool, ev *events.Writer, log *slog.Logger, runner 
 	}
 	if runner != nil {
 		runner.Register(Kind, s.run)
+		// Een prodcluster uit de rij is klaar: meteen naar het volgende.
+		runner.OnFinished(Kind, func(context.Context, store.Job) { s.Kick() })
 	}
 	return s
 }
@@ -201,10 +203,21 @@ func (s *Service) Offer() Offer { return LoadOffer(s.Dir, s.Version) }
 
 // Overview is de toestand van alle agents.
 type Overview struct {
-	Offer  Offer
-	Auto   bool
-	Off    []uuid.UUID
-	Agents []Agent
+	Offer Offer
+	Auto  bool
+	// ProdAuto: ook agents op prod vanzelf bijwerken, één prodcluster
+	// tegelijk.
+	ProdAuto bool
+	// ProdHalted: op prod mislukte een update naar de agent van nu;
+	// vanzelf bijwerken op prod staat stil tot die node met de knop
+	// bijgewerkt is. HaltedBy is die node.
+	ProdHalted bool
+	HaltedBy   string
+	// ProdQueue: de prodclusters van een klik "ook productie" die nog aan
+	// de beurt komen, één voor één.
+	ProdQueue []QueuedCluster
+	Off       []uuid.UUID
+	Agents    []Agent
 	// Running zijn de taken agents.upgrade die wachten of lopen, per
 	// cluster; uuid.Nil voor nodes zonder cluster.
 	Running map[uuid.UUID]uuid.UUID
@@ -216,7 +229,14 @@ func (s *Service) Overview(ctx context.Context) (Overview, error) {
 	if err != nil {
 		return ov, err
 	}
-	ov.Auto = settings
+	ov.Auto, ov.ProdAuto = settings.Auto, settings.ProdAuto
+	queue, err := s.q.ListAgentUpgradeProdQueue(ctx)
+	if err != nil {
+		return ov, err
+	}
+	for _, q := range queue {
+		ov.ProdQueue = append(ov.ProdQueue, QueuedCluster{ClusterID: q.ClusterID, Name: q.ClusterName, JobID: q.JobID, RequestedBy: q.RequestedBy})
+	}
 	if ov.Off, err = s.q.ListAgentUpgradeOff(ctx); err != nil {
 		return ov, err
 	}
@@ -230,8 +250,15 @@ func (s *Service) Overview(ctx context.Context) (Overview, error) {
 		if f, ok := s.lastFailure(r.ID); ok && a.State == StateOutdated && f.To == ov.Offer.SHA256[a.Arch] {
 			a.State, a.Why = StateFailed, "bijwerken naar deze agent mislukte: "+f.Msg+". ClusterForge probeert het niet vanzelf opnieuw; Bijwerken wel"
 		}
-		a.Auto = ov.Auto && a.State == StateOutdated && !a.Prod() && (a.ClusterID == nil || !slices.Contains(ov.Off, *a.ClusterID))
+		if a.Prod() && a.State == StateFailed && !ov.ProdHalted {
+			ov.ProdHalted, ov.HaltedBy = true, a.Hostname
+		}
 		ov.Agents = append(ov.Agents, a)
+	}
+	for i := range ov.Agents {
+		a := &ov.Agents[i]
+		a.Auto = ov.Auto && a.State == StateOutdated && (a.ClusterID == nil || !slices.Contains(ov.Off, *a.ClusterID)) &&
+			(!a.Prod() || (ov.ProdAuto && !ov.ProdHalted))
 	}
 	running, err := s.q.ListActiveAgentUpgradeJobs(ctx)
 	if err != nil {
@@ -247,13 +274,23 @@ func (s *Service) Overview(ctx context.Context) (Overview, error) {
 	return ov, nil
 }
 
+// QueuedCluster is een prodcluster in de rij van "ook productie".
+type QueuedCluster struct {
+	ClusterID   uuid.UUID
+	Name        string
+	JobID       *uuid.UUID
+	RequestedBy *uuid.UUID
+}
+
 // Request zegt welke agents bijgewerkt worden.
 type Request struct {
 	// NodeIDs: deze nodes. ClusterID: elke verouderde agent van dit
-	// cluster. All: elke verouderde agent buiten prod.
-	NodeIDs   []uuid.UUID
-	ClusterID *uuid.UUID
-	All       bool
+	// cluster. All: elke verouderde agent buiten prod, met IncludeProd ook
+	// die op prod.
+	NodeIDs     []uuid.UUID
+	ClusterID   *uuid.UUID
+	All         bool
+	IncludeProd bool
 }
 
 // ConflictError: het verzoek kan nu niet.
@@ -283,7 +320,7 @@ func (s *Service) Select(ctx context.Context, req Request) ([]Agent, error) {
 				continue
 			}
 		case req.All:
-			if a.Prod() || !a.Upgradable() {
+			if (a.Prod() && !req.IncludeProd) || !a.Upgradable() {
 				continue
 			}
 		}

@@ -10,6 +10,7 @@ import (
 	"github.com/oapi-codegen/nullable"
 
 	"github.com/Jonasz1996/clusterforge/internal/agentupgrade"
+	"github.com/Jonasz1996/clusterforge/internal/auth"
 	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/httpapi/gen"
 )
@@ -28,8 +29,9 @@ func (s *Server) writeAgentUpgrades(w http.ResponseWriter, r *http.Request, code
 }
 
 // StartAgentUpgrades werkt agents bij: per cluster één taak, één node
-// tegelijk. Prod vraagt de slug van het cluster, en dan maar één
-// prodcluster per keer.
+// tegelijk. Prod vraagt tweestapsverificatie: één code voor de hele klik.
+// Met all + include_prod starten de clusters buiten prod meteen en komen de
+// prodclusters in een rij, één voor één.
 func (s *Server) StartAgentUpgrades(w http.ResponseWriter, r *http.Request) {
 	p, ok := requireAdmin(w, r)
 	if !ok {
@@ -39,7 +41,7 @@ func (s *Server) StartAgentUpgrades(w http.ResponseWriter, r *http.Request) {
 	if !decode(w, r, &in) {
 		return
 	}
-	req := agentupgrade.Request{ClusterID: in.ClusterId, All: in.All != nil && *in.All}
+	req := agentupgrade.Request{ClusterID: in.ClusterId, All: in.All != nil && *in.All, IncludeProd: in.IncludeProd != nil && *in.IncludeProd}
 	if in.NodeIds != nil {
 		req.NodeIDs = *in.NodeIds
 	}
@@ -59,32 +61,110 @@ func (s *Server) StartAgentUpgrades(w http.ResponseWriter, r *http.Request) {
 		s.upgradeError(w, r, err)
 		return
 	}
-	var prod []agentupgrade.Agent
+	var now []agentupgrade.Agent
+	var prod []agentupgrade.QueuedCluster
+	slug := ""
 	for _, a := range agents {
-		if a.Prod() && !slices.ContainsFunc(prod, func(b agentupgrade.Agent) bool { return *b.ClusterID == *a.ClusterID }) {
-			prod = append(prod, a)
+		if !a.Prod() {
+			now = append(now, a)
+			continue
+		}
+		if !slices.ContainsFunc(prod, func(c agentupgrade.QueuedCluster) bool { return c.ClusterID == *a.ClusterID }) {
+			prod = append(prod, agentupgrade.QueuedCluster{ClusterID: *a.ClusterID, Name: a.ClusterName})
+			slug = a.ClusterSlug
 		}
 	}
-	if len(prod) > 1 {
-		writeError(w, http.StatusBadRequest, "invalid", "werk de agents van één prodcluster tegelijk bij")
+	if len(prod) > 0 && !s.confirmProdUpgrade(w, r, p, prod, slug, in.TotpCode, in.Confirm) {
 		return
 	}
-	if len(prod) == 1 && !confirmProd(w, p, true, prod[0].ClusterSlug, in.Confirm, "agents bijwerken") {
+	out := gen.AgentUpgradeStarted{Jobs: []gen.Job{}, Skipped: []string{}, QueuedProd: []string{}}
+	if req.All && len(prod) > 0 {
+		// Prod gaat via de rij: één prodcluster tegelijk, stop bij een fout.
+		if err := s.upgrades.QueueProd(ctx, events.User(p.User.ID), &p.User.ID, prod); err != nil {
+			s.internalError(w, r, err)
+			return
+		}
+		for _, c := range prod {
+			out.QueuedProd = append(out.QueuedProd, c.Name)
+		}
+	} else {
+		now = agents
+	}
+	if len(now) > 0 {
+		started, skipped, err := s.upgrades.Start(ctx, events.User(p.User.ID), now, false)
+		var ce *agentupgrade.ConflictError
+		if err != nil && (len(out.QueuedProd) == 0 || !errors.As(err, &ce)) {
+			s.upgradeError(w, r, err)
+			return
+		}
+		out.Skipped = append(out.Skipped, skipped...)
+		for _, j := range started {
+			out.Jobs = append(out.Jobs, toAPIJob(j, &p.User.Username))
+		}
+	}
+	writeJSON(w, http.StatusAccepted, out)
+}
+
+// confirmProdUpgrade controleert de bevestiging voor agents op prod: een
+// code van tweestapsverificatie voor de hele klik, of voor één prodcluster
+// ook nog de slug.
+func (s *Server) confirmProdUpgrade(w http.ResponseWriter, r *http.Request, p auth.Principal, prod []agentupgrade.QueuedCluster, slug string, code, confirm *string) bool {
+	if p.User.TotpEnabledAt == nil {
+		writeError(w, http.StatusForbidden, "totp_required", "op prod kan alleen een beheerder met tweestapsverificatie agents bijwerken; zet die aan bij Instellingen")
+		return false
+	}
+	if code != nil && *code != "" {
+		return !s.authError(w, r, s.auth.Confirm(r.Context(), p, "", *code, "agent_upgrade_prod"))
+	}
+	if len(prod) == 1 && confirm != nil && *confirm == slug {
+		return true
+	}
+	writeError(w, http.StatusConflict, "needs_confirmation", "dit raakt prod; geef de code van je tweestapsverificatie")
+	return false
+}
+
+// SetAgentUpgradeProdAuto zet vanzelf bijwerken op prod aan (met een code
+// van tweestapsverificatie) of uit.
+func (s *Server) SetAgentUpgradeProdAuto(w http.ResponseWriter, r *http.Request) {
+	p, ok := requireAdmin(w, r)
+	if !ok {
 		return
 	}
-	started, skipped, err := s.upgrades.Start(ctx, events.User(p.User.ID), agents, false)
-	if err != nil {
+	var in gen.SetAgentUpgradeProdAutoJSONRequestBody
+	if !decode(w, r, &in) {
+		return
+	}
+	if in.Enabled {
+		if p.User.TotpEnabledAt == nil {
+			writeError(w, http.StatusForbidden, "totp_required", "prod vanzelf bijwerken kan alleen een beheerder met tweestapsverificatie aanzetten; zet die aan bij Instellingen")
+			return
+		}
+		if in.TotpCode == nil || *in.TotpCode == "" {
+			writeError(w, http.StatusConflict, "needs_confirmation", "geef de code van je tweestapsverificatie")
+			return
+		}
+		if s.authError(w, r, s.auth.Confirm(r.Context(), p, "", *in.TotpCode, "agent_upgrade_prod_auto")) {
+			return
+		}
+	}
+	if err := s.upgrades.SetProdAuto(r.Context(), events.User(p.User.ID), &p.User.ID, in.Enabled); err != nil {
 		s.upgradeError(w, r, err)
 		return
 	}
-	out := gen.AgentUpgradeStarted{Jobs: make([]gen.Job, 0, len(started)), Skipped: skipped}
-	if out.Skipped == nil {
-		out.Skipped = []string{}
+	s.writeAgentUpgrades(w, r, http.StatusOK)
+}
+
+// ClearAgentUpgradeProdQueue stopt de rij van "ook productie".
+func (s *Server) ClearAgentUpgradeProdQueue(w http.ResponseWriter, r *http.Request) {
+	p, ok := requireAdmin(w, r)
+	if !ok {
+		return
 	}
-	for _, j := range started {
-		out.Jobs = append(out.Jobs, toAPIJob(j, &p.User.Username))
+	if err := s.upgrades.ClearProdQueue(r.Context(), events.User(p.User.ID)); err != nil {
+		s.internalError(w, r, err)
+		return
 	}
-	writeJSON(w, http.StatusAccepted, out)
+	s.writeAgentUpgrades(w, r, http.StatusOK)
 }
 
 func (s *Server) SetAgentUpgradeAuto(w http.ResponseWriter, r *http.Request) {
@@ -134,6 +214,7 @@ func (s *Server) upgradeError(w http.ResponseWriter, r *http.Request, err error)
 func toAPIAgentUpgrades(ov agentupgrade.Overview) gen.AgentUpgradeOverview {
 	out := gen.AgentUpgradeOverview{
 		Version: ov.Offer.Version, Protocol: ov.Offer.Protocol, Archs: []string{}, Auto: ov.Auto, OffClusterIds: ov.Off,
+		ProdAuto: ov.ProdAuto, ProdHalted: ov.ProdHalted, HaltedBy: ov.HaltedBy,
 		Agents: make([]gen.AgentUpgradeAgent, 0, len(ov.Agents)),
 	}
 	if out.OffClusterIds == nil {
@@ -150,6 +231,22 @@ func toAPIAgentUpgrades(ov agentupgrade.Overview) gen.AgentUpgradeOverview {
 			ClusterSlug: a.ClusterSlug, ClusterEnvironment: a.ClusterEnv, Version: a.Version, Protocol: a.Protocol, Arch: a.Arch,
 			Online: a.Online, State: gen.AgentUpgradeAgentState(a.State), Why: a.Why, Auto: a.Auto,
 		})
+	}
+	out.ProdQueue = make([]struct {
+		ClusterId   uuid.UUID                    `json:"cluster_id"`
+		ClusterName string                       `json:"cluster_name"`
+		JobId       nullable.Nullable[uuid.UUID] `json:"job_id"`
+	}, 0, len(ov.ProdQueue))
+	for _, q := range ov.ProdQueue {
+		job := nullable.NewNullNullable[uuid.UUID]()
+		if q.JobID != nil {
+			job = nullable.NewNullableWithValue(*q.JobID)
+		}
+		out.ProdQueue = append(out.ProdQueue, struct {
+			ClusterId   uuid.UUID                    `json:"cluster_id"`
+			ClusterName string                       `json:"cluster_name"`
+			JobId       nullable.Nullable[uuid.UUID] `json:"job_id"`
+		}{q.ClusterID, q.Name, job})
 	}
 	out.Running = make([]struct {
 		ClusterId nullable.Nullable[uuid.UUID] `json:"cluster_id"`

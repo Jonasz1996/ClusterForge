@@ -713,6 +713,15 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 			return "Agents vanzelf bijwerken aangezet"
 		}
 		return "Agents vanzelf bijwerken uitgezet"
+	case "settings.agent_upgrade_prod_auto":
+		if p["enabled"] == true {
+			return "Agents op prod vanzelf bijwerken aangezet"
+		}
+		return "Agents op prod vanzelf bijwerken uitgezet"
+	case "agents.prod_upgrade_queued":
+		return "Agents bijwerken op prod, één cluster na het andere" + colon(list(p["clusters"]))
+	case "agents.prod_upgrade_stopped":
+		return "Agents bijwerken op prod gestopt" + colon(str(p, "why"))
 	case "cluster.agent_upgrade_auto":
 		if p["enabled"] == true {
 			return "Agents vanzelf bijwerken aangezet op cluster " + name
