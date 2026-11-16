@@ -134,7 +134,10 @@ roles:
       # die komt van Patroni), plus psql/pg_dump/pg_restore voor de
       # overname en rsync en sshd voor de sync.
       - package: { names: [keepalived, nginx, redis-server, git, curl, ca-certificates, xz-utils, openssl, python3, python3-venv, postgresql-client, rsync, openssh-server, openssh-client] }
-      - service: { name: redis-server, enabled: true, state: started }
+      - command:
+          title: Redis aan
+          run: systemctl enable --now redis-server
+          unless: systemctl is-enabled --quiet redis-server && systemctl is-active --quiet redis-server
       - command:
           title: gebruiker cssthema
           run: useradd --system --home-dir /var/lib/cssthema --shell /usr/sbin/nologin cssthema

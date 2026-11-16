@@ -36,7 +36,7 @@ func TestTemplatesFleet(t *testing.T) {
 			} `json:"services"`
 		}
 	}
-	if s := c.do("GET", "/api/v1/templates", nil, &tpls); s != 200 || len(tpls.Items) != 11 {
+	if s := c.do("GET", "/api/v1/templates", nil, &tpls); s != 200 || len(tpls.Items) != 12 {
 		t.Fatalf("templates: %d %+v", s, tpls)
 	}
 	var list []string
@@ -53,7 +53,7 @@ func TestTemplatesFleet(t *testing.T) {
 		!slices.Equal(app.DependsOn, []string{"docker", "keepalived"}) {
 		t.Fatalf("dienst app in de templatelijst: %+v", app)
 	}
-	if nginx := tpls.Items[5].Services[0]; nginx.Port == nil || *nginx.Port != 80 || nginx.PortParam != nil {
+	if nginx := tpls.Items[6].Services[0]; nginx.Port == nil || *nginx.Port != 80 || nginx.PortParam != nil {
 		t.Fatalf("dienst nginx in de templatelijst: %+v", nginx)
 	}
 
