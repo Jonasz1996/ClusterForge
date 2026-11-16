@@ -152,6 +152,8 @@ var Known = map[string]Spec{
 	"stack.imported":                 {CategoryInventory, "Docker-stack overgenomen"},
 	"stack.saved":                    {CategoryInventory, "Docker-stack aangepast"},
 	"stack.released":                 {CategoryInventory, "Docker-stack losgelaten"},
+	"docker.action_requested":        {CategoryInventory, "Docker-actie gevraagd"},
+	"docker.console_opened":          {CategoryInventory, "Console in een container geopend"},
 	"stack.action":                   {CategoryJobs, "Actie op Docker-stacks"},
 	"crowdsec.settings_changed":      {CategorySecurity, "CrowdSec-instellingen gewijzigd"},
 	"crowdsec.node_managed":          {CategorySecurity, "CrowdSec aangezet op node"},

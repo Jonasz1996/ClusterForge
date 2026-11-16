@@ -4293,6 +4293,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/docker/all": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Een lijst (containers, images, volumes, netwerken, system df, info) van elke node met Docker tegelijk (fase 28) */
+        get: operations["getDockerAll"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/docker/nodes/{nodeId}/api": {
         parameters: {
             query?: never;
@@ -21075,6 +21092,34 @@ export interface operations {
                     "application/json": components["schemas"]["DockerObject"];
                 };
             };
+            401: components["responses"]["Error"];
+        };
+    };
+    getDockerAll: {
+        parameters: {
+            query: {
+                path: string;
+                /** @description JSON-object met queryvelden */
+                query?: string;
+                /** @description Komma-lijst van node-ids; leeg is elke node */
+                nodes?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Per node {node_id, hostname, data, error} onder results */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DockerObject"];
+                };
+            };
+            400: components["responses"]["Error"];
             401: components["responses"]["Error"];
         };
     };

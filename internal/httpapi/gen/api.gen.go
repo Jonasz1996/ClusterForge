@@ -13948,6 +13948,17 @@ type GetDependencyGraphParams struct {
 // GetDependencyGraphParamsLevel defines parameters for GetDependencyGraph.
 type GetDependencyGraphParamsLevel string
 
+// GetDockerAllParams defines parameters for GetDockerAll.
+type GetDockerAllParams struct {
+	Path string `form:"path" json:"path"`
+
+	// Query JSON-object met queryvelden
+	Query *string `form:"query,omitempty" json:"query,omitempty"`
+
+	// Nodes Komma-lijst van node-ids; leeg is elke node
+	Nodes *string `form:"nodes,omitempty" json:"nodes,omitempty"`
+}
+
 // ListDockerHostsParams defines parameters for ListDockerHosts.
 type ListDockerHostsParams struct {
 	// Refresh Eerst de samenvattingen opnieuw lezen
@@ -15224,6 +15235,9 @@ type ServerInterface interface {
 	// RunDisasterScenario Rampoefening starten (admin)
 	// (POST /disaster-scenarios/{scenarioId}/run)
 	RunDisasterScenario(w http.ResponseWriter, r *http.Request, scenarioId openapi_types.UUID)
+	// GetDockerAll Een lijst (containers, images, volumes, netwerken, system df, info) van elke node met Docker tegelijk (fase 28)
+	// (GET /docker/all)
+	GetDockerAll(w http.ResponseWriter, r *http.Request, params GetDockerAllParams)
 	// ListDockerHosts Elke node met Docker, met cluster, agent en de laatste samenvatting (fase 28)
 	// (GET /docker/hosts)
 	ListDockerHosts(w http.ResponseWriter, r *http.Request, params ListDockerHostsParams)
@@ -16811,6 +16825,12 @@ func (_ Unimplemented) PreviewDisasterScenario(w http.ResponseWriter, r *http.Re
 // RunDisasterScenario Rampoefening starten (admin)
 // (POST /disaster-scenarios/{scenarioId}/run)
 func (_ Unimplemented) RunDisasterScenario(w http.ResponseWriter, r *http.Request, scenarioId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetDockerAll Een lijst (containers, images, volumes, netwerken, system df, info) van elke node met Docker tegelijk (fase 28)
+// (GET /docker/all)
+func (_ Unimplemented) GetDockerAll(w http.ResponseWriter, r *http.Request, params GetDockerAllParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -22471,6 +22491,65 @@ func (siw *ServerInterfaceWrapper) RunDisasterScenario(w http.ResponseWriter, r 
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RunDisasterScenario(w, r, scenarioId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetDockerAll operation middleware
+func (siw *ServerInterfaceWrapper) GetDockerAll(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetDockerAllParams
+
+	// ------------- Required query parameter "path" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "path", r.URL.Query(), &params.Path, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "path"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "path", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "query" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "query", r.URL.Query(), &params.Query, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "query"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "query", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "nodes" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "nodes", r.URL.Query(), &params.Nodes, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "nodes"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodes", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetDockerAll(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -29398,6 +29477,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/docker/hosts", wrapper.ListDockerHosts)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/docker/all", wrapper.GetDockerAll)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/docker/nodes/{nodeId}/api", wrapper.GetDockerApi)

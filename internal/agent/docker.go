@@ -88,7 +88,7 @@ func (d dockerAPI) do(ctx context.Context, method, path string, query map[string
 	}
 	res, err := d.client.Do(req)
 	if err != nil {
-		return 0, nil, fmt.Errorf("Docker niet bereikbaar: %w", err)
+		return 0, nil, fmt.Errorf("docker niet bereikbaar: %w", err)
 	}
 	defer func() { _ = res.Body.Close() }()
 	data, err := io.ReadAll(io.LimitReader(res.Body, max+1))

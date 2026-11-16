@@ -187,7 +187,7 @@ func (r DockerRequest) Validate() error {
 			return err
 		}
 		if !matchAny(dockerReads, r.Path) {
-			return fmt.Errorf("Docker-pad %q mag niet gelezen worden", r.Path)
+			return fmt.Errorf("pad %q van de Docker-API mag niet gelezen worden", r.Path)
 		}
 		if r.Path == "/events" && r.Query["until"] == "" {
 			return errors.New("gebeurtenissen lezen vraagt until, anders stopt de stroom niet")

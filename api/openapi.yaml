@@ -4579,6 +4579,22 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/DockerObject" }
         "401": { $ref: "#/components/responses/Error" }
+  /docker/all:
+    get:
+      operationId: getDockerAll
+      summary: Een lijst (containers, images, volumes, netwerken, system df, info) van elke node met Docker tegelijk (fase 28)
+      parameters:
+        - { name: path, in: query, required: true, schema: { type: string } }
+        - { name: query, in: query, required: false, description: JSON-object met queryvelden, schema: { type: string } }
+        - { name: nodes, in: query, required: false, description: Komma-lijst van node-ids; leeg is elke node, schema: { type: string } }
+      responses:
+        "200":
+          description: "Per node {node_id, hostname, data, error} onder results"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DockerObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
   /docker/nodes/{nodeId}/api:
     parameters:
       - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }

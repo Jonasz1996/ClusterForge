@@ -23,3 +23,8 @@ VALUES (@node_id, @summary, @error, now())
 ON CONFLICT (node_id) DO UPDATE
 SET summary = CASE WHEN EXCLUDED.error = '' THEN EXCLUDED.summary ELSE docker_hosts.summary END,
     error = EXCLUDED.error, checked_at = now();
+
+-- name: ListDockerManagedStacks :many
+-- De stacks die ClusterForge beheert (fase 21), per cluster: hun containers
+-- worden via de stack gestopt of verwijderd, niet los.
+SELECT id, cluster_id, name FROM docker_stacks ORDER BY name;

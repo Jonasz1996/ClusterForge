@@ -82,6 +82,38 @@ func (q *Queries) ListDockerHosts(ctx context.Context) ([]ListDockerHostsRow, er
 	return items, nil
 }
 
+const listDockerManagedStacks = `-- name: ListDockerManagedStacks :many
+SELECT id, cluster_id, name FROM docker_stacks ORDER BY name
+`
+
+type ListDockerManagedStacksRow struct {
+	ID        uuid.UUID
+	ClusterID uuid.UUID
+	Name      string
+}
+
+// De stacks die ClusterForge beheert (fase 21), per cluster: hun containers
+// worden via de stack gestopt of verwijderd, niet los.
+func (q *Queries) ListDockerManagedStacks(ctx context.Context) ([]ListDockerManagedStacksRow, error) {
+	rows, err := q.db.Query(ctx, listDockerManagedStacks)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDockerManagedStacksRow{}
+	for rows.Next() {
+		var i ListDockerManagedStacksRow
+		if err := rows.Scan(&i.ID, &i.ClusterID, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const upsertDockerHost = `-- name: UpsertDockerHost :exec
 INSERT INTO docker_hosts (node_id, summary, error, checked_at)
 VALUES ($1, $2, $3, now())

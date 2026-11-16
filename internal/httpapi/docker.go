@@ -99,3 +99,30 @@ func (s *Server) CallDockerApi(w http.ResponseWriter, r *http.Request, nodeId uu
 	}
 	writeJSON(w, http.StatusAccepted, toAPIJob(j, &p.User.Username))
 }
+
+func (s *Server) GetDockerAll(w http.ResponseWriter, r *http.Request, params gen.GetDockerAllParams) {
+	var query map[string]string
+	if params.Query != nil && *params.Query != "" {
+		if err := json.Unmarshal([]byte(*params.Query), &query); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid", "query is geen JSON-object met tekst: "+err.Error())
+			return
+		}
+	}
+	var nodes []uuid.UUID
+	if params.Nodes != nil && *params.Nodes != "" {
+		for _, n := range strings.Split(*params.Nodes, ",") {
+			id, err := uuid.Parse(strings.TrimSpace(n))
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "invalid", "ongeldig node-id "+n)
+				return
+			}
+			nodes = append(nodes, id)
+		}
+	}
+	res, err := s.docker.All(r.Context(), params.Path, query, nodes)
+	if err != nil {
+		s.dockerError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"results": res})
+}

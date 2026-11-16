@@ -141,6 +141,9 @@ func (s *Service) StartCall(ctx context.Context, actor events.Actor, nodeID uuid
 	if err != nil {
 		return store.Job{}, err
 	}
+	if err := s.guardStacks(ctx, h, c.Calls); err != nil {
+		return store.Job{}, err
+	}
 	title := strings.TrimSpace(c.Title)
 	if title == "" {
 		title = Title(c.Calls, h.Hostname)

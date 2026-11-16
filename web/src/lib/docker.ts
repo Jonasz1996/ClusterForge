@@ -47,6 +47,8 @@ export type DockerHost = {
   heartbeat_at?: string;
   supported: boolean;
   summary?: DockerSummary;
+  // stacks die ClusterForge in het cluster beheert (fase 21).
+  stacks?: { id: string; name: string }[];
   check_error?: string;
   checked_at?: string;
 };
@@ -190,3 +192,41 @@ export function hostReady(h: DockerHost, need: number) {
 }
 
 export const envLabel: Record<string, string> = { prod: "Productie", test: "Test", lab: "Lab" };
+
+// Een rij uit /containers/json (Docker Engine API).
+export type DockerPort = { IP?: string; PrivatePort: number; PublicPort?: number; Type: string };
+export type DockerMount = { Type: string; Name?: string; Source: string; Destination: string; RW?: boolean; Mode?: string; Driver?: string };
+export type ContainerSummary = {
+  Id: string;
+  Names: string[];
+  Image: string;
+  ImageID: string;
+  Command?: string;
+  Created: number;
+  State: string;
+  Status: string;
+  Ports: DockerPort[];
+  Labels: Record<string, string>;
+  Mounts?: DockerMount[];
+  NetworkSettings?: { Networks?: Record<string, { IPAddress?: string; NetworkID?: string }> };
+};
+
+export const containerName = (c: { Names?: string[]; Id: string }) => (c.Names?.[0] ?? c.Id.slice(0, 12)).replace(/^\//, "");
+export const composeProject = (c: { Labels?: Record<string, string> | null }) => c.Labels?.["com.docker.compose.project"] ?? "";
+
+// ports maakt van de poorten een korte tekst: 8080→80/tcp.
+export function portsText(ports: DockerPort[] | undefined) {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const p of ports ?? []) {
+    const s = p.PublicPort ? `${p.PublicPort}→${p.PrivatePort}${p.Type === "tcp" ? "" : "/" + p.Type}` : `${p.PrivatePort}/${p.Type}`;
+    if (!seen.has(s)) {
+      seen.add(s);
+      out.push(s);
+    }
+  }
+  return out.join(", ");
+}
+
+// containerPath maakt een pad naar een container (id is altijd veilig).
+export const cpath = (id: string, rest = "") => `/containers/${id}${rest}`;

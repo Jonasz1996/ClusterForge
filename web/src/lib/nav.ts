@@ -110,6 +110,7 @@ export const navGroups: NavGroup[] = [
         keywords: "docker containers compose portainer",
         tabs: [
           { href: "/docker", label: "Overzicht" },
+          { href: "/docker/containers", label: "Containers", keywords: "docker container start stop herstart logs stats" },
           { href: "/containers", label: "Stacks", keywords: "docker compose stacks" },
         ],
       },
@@ -208,7 +209,11 @@ export const navGroups: NavGroup[] = [
 ];
 
 // Detailpagina's die bij een menu-item horen maar niet onder zijn pad staan.
-const parentOf: Record<string, string> = { "/proxmox/gast": "/proxmox/gasten", "/proxmox/console": "/proxmox/gasten" };
+const parentOf: Record<string, string> = {
+  "/proxmox/gast": "/proxmox/gasten",
+  "/proxmox/console": "/proxmox/gasten",
+  "/docker/container": "/docker/containers",
+};
 
 // Elke pagina (item of tabblad) met het menu-item waar ze onder valt.
 type Entry = { href: string; label: string; item: NavItem; group: NavGroup; tab?: NavTab };

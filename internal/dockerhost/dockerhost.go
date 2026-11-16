@@ -106,10 +106,13 @@ type Host struct {
 	Online        bool       `json:"online"`
 	HeartbeatAt   *time.Time `json:"heartbeat_at,omitempty"`
 	// Supported: de agent kent de Docker-API (protocol DockerSince).
-	Supported  bool       `json:"supported"`
-	Summary    *Summary   `json:"summary,omitempty"`
-	CheckError string     `json:"check_error,omitempty"`
-	CheckedAt  *time.Time `json:"checked_at,omitempty"`
+	Supported bool     `json:"supported"`
+	Summary   *Summary `json:"summary,omitempty"`
+	// Stacks zijn de stacks die ClusterForge in het cluster van deze node
+	// beheert (fase 21); hun containers stop of verwijder je via de stack.
+	Stacks     []ManagedStack `json:"stacks,omitempty"`
+	CheckError string         `json:"check_error,omitempty"`
+	CheckedAt  *time.Time     `json:"checked_at,omitempty"`
 }
 
 // Ready zegt waarom de node geen Docker-verzoek kan doen; leeg als het kan.
@@ -121,6 +124,12 @@ func (h Host) Ready() string {
 		return fmt.Sprintf("de agent op %s is te oud (protocol %d, %d nodig); werk hem bij via Nodes → Agents bijwerken", h.Hostname, h.Protocol, protocol.DockerSince)
 	}
 	return ""
+}
+
+// ManagedStack is een stack van fase 21.
+type ManagedStack struct {
+	ID   uuid.UUID `json:"id"`
+	Name string    `json:"name"`
 }
 
 // Summary is wat de pagina Docker per node bovenaan toont.
@@ -173,6 +182,10 @@ func (s *Service) Hosts(ctx context.Context) ([]Host, error) {
 	if err != nil {
 		return nil, err
 	}
+	stacks, err := s.q.ListDockerManagedStacks(ctx)
+	if err != nil {
+		return nil, err
+	}
 	out := make([]Host, 0, len(rows))
 	for _, r := range rows {
 		h := Host{
@@ -189,6 +202,11 @@ func (s *Service) Hosts(ctx context.Context) ([]Host, error) {
 		h.Supported = h.Protocol >= protocol.DockerSince
 		if r.CheckError != nil {
 			h.CheckError = *r.CheckError
+		}
+		for _, st := range stacks {
+			if r.ClusterID != nil && st.ClusterID == *r.ClusterID {
+				h.Stacks = append(h.Stacks, ManagedStack{ID: st.ID, Name: st.Name})
+			}
 		}
 		if len(r.Summary) > 2 {
 			var sum Summary
@@ -293,7 +311,8 @@ func canonical(m map[string]string) string {
 // maskEnv vervangt de waarden van omgevingsvariabelen in een inspect van
 // een container of image door •••.
 func maskEnv(path string, data json.RawMessage) json.RawMessage {
-	if !strings.HasSuffix(path, "/json") || !(strings.HasPrefix(path, "/containers/") || strings.HasPrefix(path, "/images/")) || path == "/containers/json" || path == "/images/json" {
+	inspect := strings.HasPrefix(path, "/containers/") || strings.HasPrefix(path, "/images/")
+	if !strings.HasSuffix(path, "/json") || !inspect || path == "/containers/json" || path == "/images/json" {
 		return data
 	}
 	var m map[string]any
