@@ -4235,6 +4235,25 @@ paths:
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
         "429": { $ref: "#/components/responses/Error" }
+  /soc:
+    get:
+      operationId: getSoc
+      summary: Beveiligingsoverzicht (SOC, fase 25)
+      description: |
+        Dreigingsniveau met de reden, beveiligingsscore met aftrekposten, cijfers met de vorige periode, wat nu belangrijk is,
+        activiteit per uur (24 u) of per 4 uur (7 d), aanvallers samengevoegd over CrowdSec, de firewall en de login van
+        ClusterForge, doelwitten en de bescherming per node. Hoogstens 15 s gecachet. Ook voor viewers.
+      parameters:
+        - name: window
+          in: query
+          schema: { type: string, enum: ["24h", "7d"], default: "24h", x-enum-varnames: [SocWindowParam24h, SocWindowParam7d] }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SocOverview" }
+        "401": { $ref: "#/components/responses/Error" }
   /crowdsec:
     get:
       operationId: getCrowdSec
@@ -13919,6 +13938,150 @@ components:
         country: { type: string }
         as: { type: string }
         count: { type: integer }
+    SocOverview:
+      type: object
+      required: [generated_at, window, level, score, stats, now, activity, attackers, targets, coverage]
+      properties:
+        generated_at: { type: string, format: date-time }
+        window: { type: string, enum: ["24h", "7d"], x-enum-varnames: [SocWindow24h, SocWindow7d] }
+        level:
+          type: object
+          required: [level, reasons]
+          properties:
+            level: { type: string, enum: [normaal, waakzaam, verhoogd, kritiek], x-enum-varnames: [SocLevelNormaal, SocLevelWaakzaam, SocLevelVerhoogd, SocLevelKritiek] }
+            reasons: { type: array, items: { type: string } }
+        score:
+          type: object
+          required: [score, parts, previous, trend]
+          properties:
+            score: { type: integer }
+            previous: { type: integer, nullable: true }
+            parts:
+              type: array
+              items:
+                type: object
+                required: [key, label, max, points, deductions]
+                properties:
+                  key: { type: string }
+                  label: { type: string }
+                  max: { type: integer }
+                  points: { type: number }
+                  deductions:
+                    type: array
+                    items:
+                      type: object
+                      required: [text, points, href]
+                      properties:
+                        text: { type: string }
+                        points: { type: number }
+                        href: { type: string }
+            trend:
+              type: array
+              items:
+                type: object
+                required: [at, score]
+                properties:
+                  at: { type: string, format: date-time }
+                  score: { type: integer }
+        stats:
+          type: object
+          required: [attacks, attacks_prev, active_bans, blocked, blocked_prev, login_failures, login_failures_prev, security_updates, security_nodes, nodes, protected]
+          properties:
+            attacks: { type: integer }
+            attacks_prev: { type: integer }
+            active_bans: { type: integer }
+            blocked: { type: integer, format: int64 }
+            blocked_prev: { type: integer, format: int64 }
+            login_failures: { type: integer }
+            login_failures_prev: { type: integer }
+            security_updates: { type: integer }
+            security_nodes: { type: integer }
+            nodes: { type: integer }
+            protected: { type: integer }
+        now:
+          type: array
+          items: { $ref: "#/components/schemas/SocItem" }
+        activity:
+          type: array
+          items:
+            type: object
+            required: [at, crowdsec, firewall, logins]
+            properties:
+              at: { type: string, format: date-time }
+              crowdsec: { type: integer }
+              firewall: { type: integer, format: int64 }
+              logins: { type: integer }
+        attackers:
+          type: array
+          items: { $ref: "#/components/schemas/SocAttacker" }
+        targets:
+          type: object
+          required: [nodes, ports, scenarios]
+          properties:
+            nodes: { type: array, items: { $ref: "#/components/schemas/SocCount" } }
+            ports: { type: array, items: { $ref: "#/components/schemas/SocCount" } }
+            scenarios: { type: array, items: { $ref: "#/components/schemas/SocCount" } }
+        coverage:
+          type: array
+          items: { $ref: "#/components/schemas/SocCoverage" }
+    SocItem:
+      type: object
+      required: [key, tone, prio, title, detail, href, action]
+      properties:
+        key: { type: string }
+        tone: { type: string, enum: [red, amber, info], x-enum-varnames: [SocToneRed, SocToneAmber, SocToneInfo] }
+        prio: { type: number }
+        title: { type: string }
+        detail: { type: string }
+        href: { type: string }
+        action: { type: string }
+    SocAttacker:
+      type: object
+      required: [ip, kind, node, country, as, sources, alerts, blocked, logins, nodes, scenarios, ports, first_seen, last_seen, banned, ban_until]
+      properties:
+        ip: { type: string }
+        kind: { type: string, enum: [extern, intern, node] }
+        node: { type: string, description: "Hostnaam (of 'VIP cluster') als het adres van een eigen node is." }
+        country: { type: string }
+        as: { type: string }
+        sources: { type: array, items: { type: string, enum: [crowdsec, firewall, login], x-enum-varnames: [SocSourceCrowdsec, SocSourceFirewall, SocSourceLogin] } }
+        alerts: { type: integer }
+        blocked: { type: integer, format: int64 }
+        logins: { type: integer }
+        nodes: { type: array, items: { type: string } }
+        scenarios: { type: array, items: { type: string } }
+        ports: { type: array, items: { type: string } }
+        first_seen: { type: string, format: date-time }
+        last_seen: { type: string, format: date-time }
+        banned: { type: boolean }
+        ban_until: { type: string, format: date-time, nullable: true }
+    SocCount:
+      type: object
+      required: [key, label, count, detail]
+      properties:
+        key: { type: string }
+        label: { type: string }
+        count: { type: integer, format: int64 }
+        detail: { type: string }
+    SocCoverage:
+      type: object
+      required: [node_id, hostname, cluster_id, cluster_name, online, firewall, crowdsec, bouncer, security_updates, gaps]
+      properties:
+        node_id: { type: string, format: uuid }
+        hostname: { type: string }
+        cluster_id: { type: string, format: uuid, nullable: true }
+        cluster_name: { type: string }
+        online: { type: boolean }
+        firewall: { $ref: "#/components/schemas/SocState" }
+        crowdsec: { $ref: "#/components/schemas/SocState" }
+        bouncer:
+          type: string
+          description: Leeg als CrowdSec er niet (beheerd) staat; anders een SocState.
+        security_updates: { type: integer }
+        gaps: { type: array, items: { type: string } }
+    SocState:
+      type: string
+      enum: ["on", preview, "off", missing, down, error, unsupported, unknown, unmanaged]
     CrowdSecOverview:
       type: object
       required: [protocol, settings, stats, hourly, top_scenarios, top_ips, warnings, nodes, catalog]

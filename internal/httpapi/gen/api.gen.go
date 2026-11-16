@@ -3315,6 +3315,150 @@ func (e ServiceStatus) Valid() bool {
 	}
 }
 
+// Defines values for SocAttackerKind.
+const (
+	SocAttackerKindExtern SocAttackerKind = "extern"
+	SocAttackerKindIntern SocAttackerKind = "intern"
+	SocAttackerKindNode   SocAttackerKind = "node"
+)
+
+// Valid indicates whether the value is a known member of the SocAttackerKind enum.
+func (e SocAttackerKind) Valid() bool {
+	switch e {
+	case SocAttackerKindExtern:
+		return true
+	case SocAttackerKindIntern:
+		return true
+	case SocAttackerKindNode:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SocAttackerSources.
+const (
+	SocSourceCrowdsec SocAttackerSources = "crowdsec"
+	SocSourceFirewall SocAttackerSources = "firewall"
+	SocSourceLogin    SocAttackerSources = "login"
+)
+
+// Valid indicates whether the value is a known member of the SocAttackerSources enum.
+func (e SocAttackerSources) Valid() bool {
+	switch e {
+	case SocSourceCrowdsec:
+		return true
+	case SocSourceFirewall:
+		return true
+	case SocSourceLogin:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SocItemTone.
+const (
+	SocToneAmber SocItemTone = "amber"
+	SocToneInfo  SocItemTone = "info"
+	SocToneRed   SocItemTone = "red"
+)
+
+// Valid indicates whether the value is a known member of the SocItemTone enum.
+func (e SocItemTone) Valid() bool {
+	switch e {
+	case SocToneAmber:
+		return true
+	case SocToneInfo:
+		return true
+	case SocToneRed:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SocOverviewLevelLevel.
+const (
+	SocLevelKritiek  SocOverviewLevelLevel = "kritiek"
+	SocLevelNormaal  SocOverviewLevelLevel = "normaal"
+	SocLevelVerhoogd SocOverviewLevelLevel = "verhoogd"
+	SocLevelWaakzaam SocOverviewLevelLevel = "waakzaam"
+)
+
+// Valid indicates whether the value is a known member of the SocOverviewLevelLevel enum.
+func (e SocOverviewLevelLevel) Valid() bool {
+	switch e {
+	case SocLevelKritiek:
+		return true
+	case SocLevelNormaal:
+		return true
+	case SocLevelVerhoogd:
+		return true
+	case SocLevelWaakzaam:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SocOverviewWindow.
+const (
+	SocWindow24h SocOverviewWindow = "24h"
+	SocWindow7d  SocOverviewWindow = "7d"
+)
+
+// Valid indicates whether the value is a known member of the SocOverviewWindow enum.
+func (e SocOverviewWindow) Valid() bool {
+	switch e {
+	case SocWindow24h:
+		return true
+	case SocWindow7d:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SocState.
+const (
+	SocStateDown        SocState = "down"
+	SocStateError       SocState = "error"
+	SocStateMissing     SocState = "missing"
+	SocStateOff         SocState = "off"
+	SocStateOn          SocState = "on"
+	SocStatePreview     SocState = "preview"
+	SocStateUnknown     SocState = "unknown"
+	SocStateUnmanaged   SocState = "unmanaged"
+	SocStateUnsupported SocState = "unsupported"
+)
+
+// Valid indicates whether the value is a known member of the SocState enum.
+func (e SocState) Valid() bool {
+	switch e {
+	case SocStateDown:
+		return true
+	case SocStateError:
+		return true
+	case SocStateMissing:
+		return true
+	case SocStateOff:
+		return true
+	case SocStateOn:
+		return true
+	case SocStatePreview:
+		return true
+	case SocStateUnknown:
+		return true
+	case SocStateUnmanaged:
+		return true
+	case SocStateUnsupported:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for SpecRevisionSource.
 const (
 	Api SpecRevisionSource = "api"
@@ -3867,6 +4011,24 @@ func (e GetMapParamsLayer) Valid() bool {
 	case GetMapParamsLayerNetwork:
 		return true
 	case GetMapParamsLayerPhysical:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for GetSocParamsWindow.
+const (
+	SocWindowParam24h GetSocParamsWindow = "24h"
+	SocWindowParam7d  GetSocParamsWindow = "7d"
+)
+
+// Valid indicates whether the value is a known member of the GetSocParamsWindow enum.
+func (e GetSocParamsWindow) Valid() bool {
+	switch e {
+	case SocWindowParam24h:
+		return true
+	case SocWindowParam7d:
 		return true
 	default:
 		return false
@@ -12139,6 +12301,136 @@ type ServiceState string
 // ServiceStatus De eigen status uit de heartbeats; unknown zonder unit, zonder instanties of extern
 type ServiceStatus string
 
+// SocAttacker defines model for SocAttacker.
+type SocAttacker struct {
+	Alerts    int                          `json:"alerts"`
+	As        string                       `json:"as"`
+	BanUntil  nullable.Nullable[time.Time] `json:"ban_until"`
+	Banned    bool                         `json:"banned"`
+	Blocked   int64                        `json:"blocked"`
+	Country   string                       `json:"country"`
+	FirstSeen time.Time                    `json:"first_seen"`
+	Ip        string                       `json:"ip"`
+	Kind      SocAttackerKind              `json:"kind"`
+	LastSeen  time.Time                    `json:"last_seen"`
+	Logins    int                          `json:"logins"`
+
+	// Node Hostnaam (of 'VIP cluster') als het adres van een eigen node is.
+	Node      string               `json:"node"`
+	Nodes     []string             `json:"nodes"`
+	Ports     []string             `json:"ports"`
+	Scenarios []string             `json:"scenarios"`
+	Sources   []SocAttackerSources `json:"sources"`
+}
+
+// SocAttackerKind defines model for SocAttacker.Kind.
+type SocAttackerKind string
+
+// SocAttackerSources defines model for SocAttacker.Sources.
+type SocAttackerSources string
+
+// SocCount defines model for SocCount.
+type SocCount struct {
+	Count  int64  `json:"count"`
+	Detail string `json:"detail"`
+	Key    string `json:"key"`
+	Label  string `json:"label"`
+}
+
+// SocCoverage defines model for SocCoverage.
+type SocCoverage struct {
+	// Bouncer Leeg als CrowdSec er niet (beheerd) staat; anders een SocState.
+	Bouncer         string                                `json:"bouncer"`
+	ClusterId       nullable.Nullable[openapi_types.UUID] `json:"cluster_id"`
+	ClusterName     string                                `json:"cluster_name"`
+	Crowdsec        SocState                              `json:"crowdsec"`
+	Firewall        SocState                              `json:"firewall"`
+	Gaps            []string                              `json:"gaps"`
+	Hostname        string                                `json:"hostname"`
+	NodeId          openapi_types.UUID                    `json:"node_id"`
+	Online          bool                                  `json:"online"`
+	SecurityUpdates int                                   `json:"security_updates"`
+}
+
+// SocItem defines model for SocItem.
+type SocItem struct {
+	Action string      `json:"action"`
+	Detail string      `json:"detail"`
+	Href   string      `json:"href"`
+	Key    string      `json:"key"`
+	Prio   float32     `json:"prio"`
+	Title  string      `json:"title"`
+	Tone   SocItemTone `json:"tone"`
+}
+
+// SocItemTone defines model for SocItem.Tone.
+type SocItemTone string
+
+// SocOverview defines model for SocOverview.
+type SocOverview struct {
+	Activity []struct {
+		At       time.Time `json:"at"`
+		Crowdsec int       `json:"crowdsec"`
+		Firewall int64     `json:"firewall"`
+		Logins   int       `json:"logins"`
+	} `json:"activity"`
+	Attackers   []SocAttacker `json:"attackers"`
+	Coverage    []SocCoverage `json:"coverage"`
+	GeneratedAt time.Time     `json:"generated_at"`
+	Level       struct {
+		Level   SocOverviewLevelLevel `json:"level"`
+		Reasons []string              `json:"reasons"`
+	} `json:"level"`
+	Now   []SocItem `json:"now"`
+	Score struct {
+		Parts []struct {
+			Deductions []struct {
+				Href   string  `json:"href"`
+				Points float32 `json:"points"`
+				Text   string  `json:"text"`
+			} `json:"deductions"`
+			Key    string  `json:"key"`
+			Label  string  `json:"label"`
+			Max    int     `json:"max"`
+			Points float32 `json:"points"`
+		} `json:"parts"`
+		Previous nullable.Nullable[int] `json:"previous"`
+		Score    int                    `json:"score"`
+		Trend    []struct {
+			At    time.Time `json:"at"`
+			Score int       `json:"score"`
+		} `json:"trend"`
+	} `json:"score"`
+	Stats struct {
+		ActiveBans        int   `json:"active_bans"`
+		Attacks           int   `json:"attacks"`
+		AttacksPrev       int   `json:"attacks_prev"`
+		Blocked           int64 `json:"blocked"`
+		BlockedPrev       int64 `json:"blocked_prev"`
+		LoginFailures     int   `json:"login_failures"`
+		LoginFailuresPrev int   `json:"login_failures_prev"`
+		Nodes             int   `json:"nodes"`
+		Protected         int   `json:"protected"`
+		SecurityNodes     int   `json:"security_nodes"`
+		SecurityUpdates   int   `json:"security_updates"`
+	} `json:"stats"`
+	Targets struct {
+		Nodes     []SocCount `json:"nodes"`
+		Ports     []SocCount `json:"ports"`
+		Scenarios []SocCount `json:"scenarios"`
+	} `json:"targets"`
+	Window SocOverviewWindow `json:"window"`
+}
+
+// SocOverviewLevelLevel defines model for SocOverview.Level.Level.
+type SocOverviewLevelLevel string
+
+// SocOverviewWindow defines model for SocOverview.Window.
+type SocOverviewWindow string
+
+// SocState defines model for SocState.
+type SocState string
+
 // SpecApplied defines model for SpecApplied.
 type SpecApplied struct {
 	// Job null als er op geen node iets verandert
@@ -13577,6 +13869,14 @@ type GetRiskHistoryParams struct {
 	Days    *int                `form:"days,omitempty" json:"days,omitempty"`
 }
 
+// GetSocParams defines parameters for GetSoc.
+type GetSocParams struct {
+	Window *GetSocParamsWindow `form:"window,omitempty" json:"window,omitempty"`
+}
+
+// GetSocParamsWindow defines parameters for GetSoc.
+type GetSocParamsWindow string
+
 // ListTestRunsParams defines parameters for ListTestRuns.
 type ListTestRunsParams struct {
 	Kind      *TestRunKind        `form:"kind,omitempty" json:"kind,omitempty"`
@@ -14911,6 +15211,9 @@ type ServerInterface interface {
 	// UpdateService Een dienst wijzigen, of een voorstel bevestigen, negeren of terugzetten (admin)
 	// (PATCH /services/{serviceId})
 	UpdateService(w http.ResponseWriter, r *http.Request, serviceId openapi_types.UUID)
+	// GetSoc Beveiligingsoverzicht (SOC, fase 25)
+	// (GET /soc)
+	GetSoc(w http.ResponseWriter, r *http.Request, params GetSocParams)
 	// DeleteStack Een stack loslaten; op de nodes blijft alles draaien (admin)
 	// (DELETE /stacks/{stackId})
 	DeleteStack(w http.ResponseWriter, r *http.Request, stackId openapi_types.UUID)
@@ -16831,6 +17134,12 @@ func (_ Unimplemented) DeleteService(w http.ResponseWriter, r *http.Request, ser
 // UpdateService Een dienst wijzigen, of een voorstel bevestigen, negeren of terugzetten (admin)
 // (PATCH /services/{serviceId})
 func (_ Unimplemented) UpdateService(w http.ResponseWriter, r *http.Request, serviceId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetSoc Beveiligingsoverzicht (SOC, fase 25)
+// (GET /soc)
+func (_ Unimplemented) GetSoc(w http.ResponseWriter, r *http.Request, params GetSocParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -25903,6 +26212,39 @@ func (siw *ServerInterfaceWrapper) UpdateService(w http.ResponseWriter, r *http.
 	handler.ServeHTTP(w, r)
 }
 
+// GetSoc operation middleware
+func (siw *ServerInterfaceWrapper) GetSoc(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetSocParams
+
+	// ------------- Optional query parameter "window" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "window", r.URL.Query(), &params.Window, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "window"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "window", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetSoc(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // DeleteStack operation middleware
 func (siw *ServerInterfaceWrapper) DeleteStack(w http.ResponseWriter, r *http.Request) {
 
@@ -27150,6 +27492,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/updates/fix", wrapper.ProposeDockerFix)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/soc", wrapper.GetSoc)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/crowdsec", wrapper.GetCrowdSec)

@@ -51,6 +51,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/reports"
 	"github.com/Jonasz1996/clusterforge/internal/risk"
 	"github.com/Jonasz1996/clusterforge/internal/rollout"
+	"github.com/Jonasz1996/clusterforge/internal/soc"
 	"github.com/Jonasz1996/clusterforge/internal/stacks"
 	"github.com/Jonasz1996/clusterforge/internal/store"
 	"github.com/Jonasz1996/clusterforge/internal/topo"
@@ -98,6 +99,7 @@ type Server struct {
 	upgrades     *agentupgrade.Service
 	updates      *updates.Service
 	crowdsec     *crowdsec.Service
+	soc          *soc.Service
 	stacks       *stacks.Service
 	logs         *logs.Service
 	firewall     *firewall.Service
@@ -181,6 +183,8 @@ type Deps struct {
 	Commands *commands.Service
 	// CrowdSec beheert CrowdSec op de nodes (fase 14).
 	CrowdSec *crowdsec.Service
+	// SOC is het beveiligingsoverzicht (fase 25).
+	SOC *soc.Service
 	// Stacks beheert de Docker-stacks van de clusters (fase 21).
 	Stacks *stacks.Service
 	// Logs leest de logs op de nodes (fase 23).
@@ -224,6 +228,7 @@ func New(d Deps) *Server {
 		updates:  d.Updates,
 		commands: d.Commands,
 		crowdsec: d.CrowdSec,
+		soc:      d.SOC,
 		stacks:   d.Stacks,
 		logs:     d.Logs,
 		firewall: d.Firewall,

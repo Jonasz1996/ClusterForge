@@ -252,6 +252,9 @@ func (s *Server) DecideCrowdSec(w http.ResponseWriter, r *http.Request) {
 		s.crowdSecError(w, r, err)
 		return
 	}
+	if s.soc != nil {
+		s.soc.Forget()
+	}
 	writeJSON(w, http.StatusOK, res)
 }
 
