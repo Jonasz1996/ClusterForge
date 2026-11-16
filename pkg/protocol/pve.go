@@ -453,7 +453,7 @@ func (p PVERun) Validate() error {
 		if !ct || b == nil {
 			return fmt.Errorf("bootstrap vraagt een CT met instellingen")
 		}
-		if !strings.HasPrefix(b.Server, "https://") && !(b.AllowHTTP && strings.HasPrefix(b.Server, "http://")) {
+		if !strings.HasPrefix(b.Server, "https://") && (!b.AllowHTTP || !strings.HasPrefix(b.Server, "http://")) {
 			return fmt.Errorf("ongeldig adres van ClusterForge %q", b.Server)
 		}
 		if strings.ContainsAny(b.Server, " \"'\n") {

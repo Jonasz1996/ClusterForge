@@ -232,7 +232,7 @@ func (r *runCtx) hostAgent(ctx context.Context, host string) (pvehost.Host, erro
 	}
 	h, ok := all[host]
 	if !ok {
-		return pvehost.Host{}, fmt.Errorf("Proxmox-host %s heeft geen agent; installeer hem via Nodes → Agent installeren", host)
+		return pvehost.Host{}, fmt.Errorf("de Proxmox-host %s heeft geen agent; installeer hem via Nodes → Agent installeren", host)
 	}
 	if why := h.Ready(); why != "" {
 		return pvehost.Host{}, errors.New(why)
