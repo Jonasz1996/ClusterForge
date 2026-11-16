@@ -118,7 +118,7 @@ func (s *Service) readVia(ctx context.Context, dcID, skip, path string, v any) e
 	if err != nil {
 		return err
 	}
-	var last error = errors.New("geen andere host met een agent")
+	last := errors.New("geen andere host met een agent")
 	for _, h := range dc.Hosts {
 		if h.PVENode == skip || h.APIReady() != "" {
 			continue
