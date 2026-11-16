@@ -38,7 +38,7 @@ var WatchedServices = []string{
 	"crowdsec", "crowdsec-firewall-bouncer", "caddy", "traefik", "grafana-server", "plexmediaserver", "pvedaemon",
 	// Firewall (fase 16): ufw zelf en units waarvan de poorten open moeten
 	// staan, ook als ze even niet luisteren.
-	"ufw", "cf-npm", "cf-authentik", "cf-vaultx", "cf-homeassistant", "cf-seaweedfs", "zabbix-server", "zabbix-agent", "zabbix-agent2",
+	"ufw", "cf-npm", "cf-authentik", "cf-vaultx", "cf-cssthema-api", "cf-cssthema-worker", "cf-homeassistant", "cf-seaweedfs", "zabbix-server", "zabbix-agent", "zabbix-agent2",
 	"mosquitto", "smbd", "nfs-server",
 }
 

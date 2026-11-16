@@ -1,0 +1,20 @@
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}).
+# De worker van cssthema (arq) draait alleen op de node met het VIP
+# ({{ .params.vip }}): keepalived start en stopt hem (cssthema-ctl.sh master
+# en backup). Daarom niet enabled.
+[Unit]
+Description=cssthema worker van {{ .cluster.slug }}
+After=network-online.target redis-server.service cf-cssthema-api.service
+Wants=network-online.target
+
+[Service]
+User=cssthema
+Group=cssthema
+WorkingDirectory=/opt/cssthema/backend
+# Alleen op de VIP-node, en pas na de overname.
+ExecCondition=+/usr/local/lib/clusterforge/cssthema-ctl.sh worker-mag
+EnvironmentFile=-/etc/cf-cssthema/cssthema.env
+ExecStart=/usr/local/lib/cssthema/venv/bin/arq cssthema.worker.WorkerSettings
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=yes

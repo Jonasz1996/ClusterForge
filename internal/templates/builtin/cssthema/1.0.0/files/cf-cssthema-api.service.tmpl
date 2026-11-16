@@ -1,0 +1,29 @@
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}).
+# De api van cssthema op elke node van het cluster tegen dezelfde PostgreSQL
+# ({{ .params.db_vip }}). Zolang de database er niet is of de installatie
+# nog niet is overgenomen, faalt voorstart en probeert systemd het elke 15 s
+# opnieuw. Zoals cssthema-api.service van cssthema zelf.
+[Unit]
+Description=cssthema api van {{ .cluster.slug }}
+After=network-online.target redis-server.service
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+User=cssthema
+Group=cssthema
+WorkingDirectory=/opt/cssthema/backend
+# Als root: markering en sleutel nakijken, de configuratie en nginx schrijven.
+ExecStartPre=+/usr/local/lib/clusterforge/cssthema-ctl.sh voorstart
+EnvironmentFile=-/etc/cf-cssthema/cssthema.env
+# Migraties draaien onder een advisory lock (migrations/env.py van
+# cssthema): nooit twee nodes tegelijk.
+ExecStartPre=/usr/local/lib/cssthema/venv/bin/alembic upgrade head
+ExecStart=/usr/local/lib/cssthema/venv/bin/uvicorn cssthema.main:app --host 127.0.0.1 --port 8000 --proxy-headers --forwarded-allow-ips 127.0.0.1 --no-access-log
+Restart=always
+RestartSec=15
+TimeoutStartSec=600
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

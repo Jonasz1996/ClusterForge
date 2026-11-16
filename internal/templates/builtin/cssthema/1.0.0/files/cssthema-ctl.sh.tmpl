@@ -1,0 +1,734 @@
+#!/bin/sh
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}).
+#
+# cssthema als cluster. De api draait op elke node tegen één PostgreSQL
+# (Patroni, VIP {{ .params.db_vip }}); keepalived zet het VIP ({{ .params.vip }})
+# op een gezonde node en start daar de worker. De eigen CSS, scripts en
+# opslag (/var/lib/cssthema) en, na een overname, de instellingen van de
+# oude node ($FILES/.cf, 0600) gaan met de syncs van de VIP-node naar de
+# andere nodes. Code, venv en frontend staan waar install.sh van cssthema
+# ze zet (/opt/cssthema, /usr/local/lib/cssthema).
+#
+#   cssthema-ctl.sh voorstart          (cf-cssthema-api, als root) markering en
+#                                      sleutel nakijken, configuratie schrijven
+#   cssthema-ctl.sh check              keepalived: antwoordt cssthema hier gezond?
+#   cssthema-ctl.sh master | vip-weg   keepalived: worker starten / stoppen
+#   cssthema-ctl.sh status             wat er op deze node staat
+#   cssthema-ctl.sh voorbereiden | voorbereid
+#                                      (uitrol) de oude cssthema op deze node: zijn
+#                                      PostgreSQL wordt cluster cssthemaoud op
+#                                      poort 5433, zodat Patroni 5432 krijgt
+#   cssthema-ctl.sh overnemen [--andere-versie]
+#                                      de database van de oude cssthema (op deze
+#                                      node) naar het cluster
+#   cssthema-ctl.sh afronden           de oude PostgreSQL stoppen (data blijft)
+#   cssthema-ctl.sh terug              terug naar de oude cssthema op deze node
+#   cssthema-ctl.sh backup             nachtelijke back-up (alleen op de node met
+#                                      het VIP van de database)
+#   cssthema-ctl.sh bouwen | gebouwd   cssthema ophalen en bouwen / is het gebouwd?
+#   cssthema-ctl.sh nginx | nginx-ok   nginx-site van cssthema
+#   cssthema-ctl.sh mappen | mappen-ok
+#   cssthema-ctl.sh firewall | firewall-ok
+#   cssthema-ctl.sh unchanged | restart-if-changed
+#
+# Markering: COMMENT ON DATABASE cssthema = "cf-cssthema key=<vingerafdruk>
+# ready=<tijd> ...". cssthema start alleen met een markering en dezelfde
+# sleutel; zonder markering alleen node 1 van een NIEUW cluster met een lege
+# database. Geheimen komen nooit in de uitvoer: alleen de vingerafdruk.
+set -u
+umask 022
+# CF_CT_* zijn er alleen voor de tests van ClusterForge.
+BASE=${CF_CT_BASE:-/opt/cf-cssthema}
+FILES=$BASE/files
+CF=$FILES/.cf
+STATE=${CF_CT_STATE:-/var/lib/cf-cssthema}
+ETC=${CF_CT_ETC:-/etc/cf-cssthema}
+APPENV=$ETC/cssthema.env
+DATA=${CF_CT_DATA:-/var/lib/cssthema}
+CODE=${CF_CT_CODE:-/opt/cssthema}
+RUNTIME=${CF_CT_RUNTIME:-/usr/local/lib/cssthema}
+VENV=$RUNTIME/venv
+NODE_DIR=$RUNTIME/node
+NODE_MAJOR=22
+BACKUPS=${CF_CT_BACKUPS:-/var/backups/cf-cssthema}
+OUD_BACKUPS=${CF_CT_OUD_BACKUPS:-/var/backups/cssthema}
+RUN=${CF_CT_RUN:-/run/cf-cssthema}
+HASH=$RUN/hash
+NGINX=${CF_CT_NGINX:-/etc/nginx}
+REPO=https://github.com/Jonasz1996/cssthema.git
+VIP='{{ .params.vip }}'
+DB_VIP='{{ .params.db_vip }}'
+VERSION='{{ .params.version }}'
+NIEUW='{{ .params.nieuw }}'
+INDEX='{{ .node.index }}'
+# De andere nodes van het cluster (voor ufw).
+PEERS='{{ range .peers }}{{ .address }} {{ end }}'
+KEEP=${CF_CT_KEEP:-14}
+API=cf-cssthema-api
+WORKER=cf-cssthema-worker
+
+say() { echo "== $*"; }
+fail() { echo "FOUT: $*" >&2; exit 1; }
+envval() { sed -n "s/^$1=//p" "$2" 2>/dev/null | tail -n 1; }
+has_ip() { [ -n "${CF_CT_TEST:-}" ] && return 0; ip -o addr show 2>/dev/null | grep -q " $1/"; }
+sysctl_() { ${CF_CT_SYSTEMCTL:-systemctl} "$@"; }
+runpg() { if [ -n "${CF_CT_TEST:-}" ]; then "$@"; else runuser -u postgres -- "$@"; fi; }
+
+# De database van het cluster, uit base.env.
+b() { envval "$1" "$ETC/base.env"; }
+pg() {
+  PGPASSWORD=$(b POSTGRES_PASSWORD) PGCONNECT_TIMEOUT=5 \
+    psql -X -q -At -v ON_ERROR_STOP=1 -h "$(b POSTGRES_HOST)" -p "$(b POSTGRES_PORT)" -U "$(b POSTGRES_USER)" -d "$(b POSTGRES_DB)" "$@"
+}
+pgtool() {
+  tool=$1
+  shift
+  PGPASSWORD=$(b POSTGRES_PASSWORD) "$tool" -h "$(b POSTGRES_HOST)" -p "$(b POSTGRES_PORT)" -U "$(b POSTGRES_USER)" -d "$(b POSTGRES_DB)" "$@"
+}
+db_meta() { pg -c "SELECT coalesce(shobj_description(oid, 'pg_database'), '') FROM pg_database WHERE datname = current_database()"; }
+db_tables() { pg -c "SELECT count(*) FROM pg_tables WHERE schemaname = 'public'"; }
+db_mark() { printf "SELECT format('COMMENT ON DATABASE %%I IS %%L', current_database(), '%s')\n\\\\gexec\n" "$1" | pg -f -; }
+metafield() { echo "$1" | tr ' ' '\n' | sed -n "s/^$2=//p" | head -n 1; }
+
+# De instellingen zoals cssthema ze krijgt: base.env, met daarover de
+# overgenomen regels (behalve database en Redis).
+NOT_TAKEN='^(POSTGRES_[A-Z_]*|DATABASE_URL|REDIS_URL|BACKUP_[A-Z_]*)='
+settings() {
+  if [ -s "$CF/cssthema.env" ]; then
+    grep -E '^[A-Z][A-Z0-9_]*=' "$CF/cssthema.env" | grep -Ev "$NOT_TAKEN"
+    grep -E '^(POSTGRES_[A-Z_]*|REDIS_URL)=' "$ETC/base.env"
+  else
+    grep -E '^[A-Z][A-Z0-9_]*=' "$ETC/base.env"
+  fi
+}
+key() { settings | sed -n 's/^SECRET_KEY=//p' | tail -n 1; }
+keyhash() { key | sha256sum | cut -c1-16; }
+
+# cssthema antwoordt gezond via nginx (database en Redis bereikbaar).
+healthy() { curl -fsS -m 4 -o /dev/null "http://127.0.0.1/readyz" 2>/dev/null; }
+fingerprint() {
+  { settings; cat "$STATE/gebouwd" 2>/dev/null; } | sha256sum | cut -d' ' -f1
+}
+
+# ------------------------------------------------ de oude cssthema op deze node
+OUD_ENV=${CF_CT_OUD_ENV:-/etc/cssthema/cssthema.env}
+OUD_UNIT=${CF_CT_OUD_UNIT:-/etc/systemd/system/cssthema-api.service}
+OUD_UNITS="cssthema-api cssthema-worker"
+# Zonder streepje: systemd leest postgresql@17-cssthema-oud als 17/cssthema/oud.
+OUD_NAME=cssthemaoud
+OUD_DB=${CF_CT_OUD_DB:-cssthema}
+OUD_PORT_NEW=${CF_CT_OUD_PORT_NEW:-5433}
+has_oud() { [ -e "$OUD_UNIT" ]; }
+oud_enabled() { sysctl_ is-enabled --quiet cssthema-api; }
+oud_port() { p=$(envval POSTGRES_PORT "$OUD_ENV"); echo "${p:-5432}"; }
+oud_pg() { runpg psql -X -q -At -v ON_ERROR_STOP=1 -p "$(oud_port)" -d "$OUD_DB" "$@"; }
+
+# Met alleen het cluster cssthemaoud kiest psql zonder poort (pg_wrapper)
+# dat cluster; de agent van ClusterForge moet zonder poort bij Patroni op
+# 5432 uitkomen. Daarom een regel in user_clusters.
+UC=${CF_CT_USER_CLUSTERS:-/etc/postgresql-common/user_clusters}
+UC_MARK="# cf-cssthema: standaard Patroni op 5432, niet $OUD_NAME"
+uc_ok() { grep -qF "$UC_MARK" "$UC" 2>/dev/null; }
+uc_set() {
+  uc_ok && return 0
+  mkdir -p "$(dirname "$UC")" || return 1
+  printf '%s\n* * %s /var/run/postgresql:5432 *\n' "$UC_MARK" "$1" >> "$UC"
+}
+uc_unset() {
+  [ -f "$UC" ] || return 0
+  awk -v m="$UC_MARK" '$0 == m {skip = 1; next} skip {skip = 0; next} {print}' "$UC" > "$UC.cf" && mv -f "$UC.cf" "$UC"
+}
+
+voorbereid() {
+  has_oud || return 0
+  [ "$(oud_port)" = "$OUD_PORT_NEW" ] || return 1
+  ! pg_lsclusters -h 2>/dev/null | awk '{print $2}' | grep -qx main || return 1
+  uc_ok
+}
+
+# Vóór Patroni (tijdens de uitrol): de PostgreSQL van de oude cssthema
+# houdt het cluster main op poort 5432 vast. Hij wordt cluster cssthemaoud
+# op 5433 (pg_renamecluster; de data blijft), cssthema krijgt de nieuwe
+# poort en blijft het VIP bedienen tot de overname. Eerst een gecontroleerde
+# back-up; bij een fout gaat alles terug zoals het was.
+voorbereiden() {
+  if ! has_oud; then echo "Geen oude cssthema op deze node."; return 0; fi
+  if voorbereid; then echo "De oude cssthema is al klaargezet (PostgreSQL $OUD_NAME op 5433)."; return 0; fi
+  [ -s "$OUD_ENV" ] || fail "$OUD_ENV ontbreekt"
+  line=$(pg_lsclusters -h | awk '$2 == "main"' | head -n 1)
+  [ -n "$line" ] || fail "geen PostgreSQL-cluster main gevonden voor de oude cssthema (pg_lsclusters)"
+  v=$(echo "$line" | awk '{print $1}')
+  port=$(echo "$line" | awk '{print $3}')
+  conf=/etc/postgresql/$v
+  case "$(envval POSTGRES_HOST "$OUD_ENV")" in localhost | 127.0.0.1 | '') ;; *) fail "de oude cssthema gebruikt geen lokale PostgreSQL" ;; esac
+  [ "$(oud_port)" = "$port" ] || fail "de oude cssthema gebruikt poort $(oud_port), cluster main staat op $port"
+
+  say "Back-up van de oude cssthema"
+  mkdir -p "$OUD_BACKUPS" && chmod 0700 "$OUD_BACKUPS" || fail "map $OUD_BACKUPS"
+  t=$(date +%Y%m%d-%H%M%S)
+  f=$OUD_BACKUPS/cf-voorbereiden-$t.dump
+  (umask 077 && runuser -u postgres -- pg_dump -p "$port" -Fc "$OUD_DB" > "$f") && [ -s "$f" ] && pg_restore --list "$f" > /dev/null ||
+    fail "back-up (pg_dump) mislukte; er is niets veranderd"
+  install -m 0600 "$OUD_ENV" "$OUD_BACKUPS/cf-voorbereiden-$t.env"
+  echo "  $f"
+
+  say "PostgreSQL $v/main wordt $v/$OUD_NAME op poort 5433 (de data blijft)"
+  # shellcheck disable=SC2086
+  sysctl_ stop $OUD_UNITS
+  undo_prep() {
+    echo "FOUT: $1" >&2
+    echo "== Terugzetten zoals het was" >&2
+    pg_ctlcluster "$v" "$OUD_NAME" stop 2>/dev/null
+    if [ -d "$conf/$OUD_NAME" ]; then
+      pg_renamecluster "$v" "$OUD_NAME" main >&2
+      sed -i -E "s/^port = 5433.*/port = $port/" "$conf/main/postgresql.conf"
+    fi
+    pg_ctlcluster "$v" main start >&2
+    install -m 0640 "$OUD_BACKUPS/cf-voorbereiden-$t.env" "$OUD_ENV" && chgrp cssthema "$OUD_ENV" 2>/dev/null
+    rm -f /etc/systemd/system/cssthema-backup.service.d/cf-poort.conf
+    uc_unset
+    sysctl_ daemon-reload
+    # shellcheck disable=SC2086
+    sysctl_ start $OUD_UNITS
+    exit 1
+  }
+  pg_ctlcluster "$v" main stop || undo_prep "PostgreSQL $v/main stoppen"
+  pg_renamecluster "$v" main "$OUD_NAME" || undo_prep "pg_renamecluster"
+  sed -i -E 's/^#?port = [0-9]+/port = 5433/' "$conf/$OUD_NAME/postgresql.conf" || undo_prep "poort zetten"
+  pg_ctlcluster "$v" "$OUD_NAME" start || undo_prep "PostgreSQL $v/$OUD_NAME starten"
+  if grep -q '^POSTGRES_PORT=' "$OUD_ENV"; then
+    sed -i 's/^POSTGRES_PORT=.*/POSTGRES_PORT=5433/' "$OUD_ENV" || undo_prep "$OUD_ENV"
+  else
+    echo "POSTGRES_PORT=5433" >> "$OUD_ENV" || undo_prep "$OUD_ENV"
+  fi
+  uc_set "$v" || undo_prep "$UC"
+  # De nachtelijke back-up van de oude cssthema (cssthema-backup): ook naar 5433.
+  mkdir -p /etc/systemd/system/cssthema-backup.service.d &&
+    printf '[Service]\nEnvironment=PGPORT=5433\n' > /etc/systemd/system/cssthema-backup.service.d/cf-poort.conf
+  sysctl_ daemon-reload
+  # shellcheck disable=SC2086
+  sysctl_ start $OUD_UNITS || undo_prep "cssthema starten"
+  i=0
+  while ! healthy; do
+    i=$((i + 1))
+    [ $i -le 60 ] || undo_prep "de oude cssthema antwoordt niet gezond na de verhuizing van PostgreSQL (journalctl -u cssthema-api)"
+    sleep 2
+  done
+  echo "De oude cssthema draait weer, met PostgreSQL $OUD_NAME op 5433. Ze bedient het VIP tot de overname."
+  echo "Draai op deze node nooit meer deploy/debian/install.sh van cssthema: bijwerken gaat via ClusterForge (Wijzigen → Versie)."
+}
+
+# ---------------------------------------------------------------- configuratie
+# Waar nginx DASHBOARD_HOST en TRUSTED_PROXIES vandaan haalt: na een overname
+# (of in een nieuw cluster) de instellingen van het cluster, daarvoor die van
+# de oude cssthema op deze node, anders de standaard.
+nginx_settings() {
+  if [ -s "$CF/cssthema.env" ] || [ "$NIEUW" = true ]; then
+    settings
+  elif has_oud && [ -s "$OUD_ENV" ]; then
+    grep -E '^[A-Z][A-Z0-9_]*=' "$OUD_ENV"
+  fi
+}
+# De twee conf.d-bestanden van cssthema in een map ($1).
+nginx_confd() {
+  s=$(nginx_settings)
+  tp=$(echo "$s" | sed -n 's/^TRUSTED_PROXIES=//p' | tail -n 1)
+  dh=$(echo "$s" | sed -n 's/^DASHBOARD_HOST=//p' | tail -n 1)
+  TRUSTED_PROXIES=${tp:-127.0.0.1} CSSTHEMA_REAL_IP_CONF=$1/cssthema-real-ip.conf \
+    sh "$CODE/docker/nginx/entrypoint/40-cssthema-real-ip.sh" &&
+    DASHBOARD_HOST=${dh:-localhost} CSSTHEMA_DASHBOARD_HOST_CONF=$1/cssthema-dashboard-host.conf \
+      sh "$CODE/docker/nginx/entrypoint/41-cssthema-dashboard-host.sh"
+}
+# De site zoals install.sh van cssthema hem schrijft.
+nginx_site() {
+  sed -e 's|server api:8000 resolve;|server 127.0.0.1:8000;|' \
+    -e "s|root /usr/share/nginx/html;|root $CODE/frontend/dist;|" \
+    -e 's|include /etc/nginx/snippets/|include /etc/nginx/snippets/cssthema/|' \
+    -e 's|listen 8081;|listen 127.0.0.1:8081;|' \
+    "$CODE/docker/nginx/conf.d/cssthema.conf"
+}
+# confd_sync: conf.d bijwerken als het anders is; 0 als er iets veranderde.
+confd_sync() {
+  tmp=$(mktemp -d) || return 1
+  nginx_confd "$tmp" || { rm -rf "$tmp"; return 1; }
+  changed=1
+  for f in cssthema-real-ip.conf cssthema-dashboard-host.conf; do
+    if ! cmp -s "$tmp/$f" "$NGINX/conf.d/$f"; then
+      install -m 0644 "$tmp/$f" "$NGINX/conf.d/$f" && changed=0
+    fi
+  done
+  rm -rf "$tmp"
+  return $changed
+}
+
+voorstart() {
+  [ -s "$ETC/base.env" ] || fail "$ETC/base.env ontbreekt (uitrol niet af)"
+  [ -x "$VENV/bin/uvicorn" ] || fail "cssthema is nog niet gebouwd ($VENV)"
+  if has_oud && oud_enabled; then
+    fail "de oude cssthema draait nog op deze node; cf-cssthema-api start pas na cssthema-ctl.sh overnemen"
+  fi
+  meta=$(db_meta) || fail "de database op $DB_VIP antwoordt niet (nog niet toegevoegd, of Patroni zonder primary); cf-cssthema-api probeert het over 15 s opnieuw"
+  if [ -n "$(metafield "$meta" ready)" ]; then
+    want=$(metafield "$meta" key)
+    [ -n "$(key)" ] || fail "geen SECRET_KEY op deze node; na een overname komt hij met de sync cssthema-instellingen van de VIP-node"
+    if [ "$want" != "$(keyhash)" ]; then
+      fail "de sleutel hier ($(keyhash)) is niet die van het cluster ($want); na een overname komt hij met de sync cssthema-instellingen (Cronjobs); cf-cssthema-api wacht erop"
+    fi
+  else
+    tables=$(db_tables) || fail "tabellen tellen in de database"
+    if [ "$NIEUW" != true ]; then
+      fail "cssthema is nog niet overgenomen ($tables tabellen, geen markering). Commando's op de node met de oude cssthema: cssthema-ctl.sh overnemen; cf-cssthema-api wacht"
+    fi
+    if [ "$INDEX" != 1 ] || [ "$tables" != 0 ]; then
+      fail "nieuw cluster: alleen node 1 neemt een lege database in gebruik ($tables tabellen); cf-cssthema-api wacht"
+    fi
+    for v in SECRET_KEY DASHBOARD_HOST PUBLIC_BASE_URL; do
+      [ -n "$(settings | sed -n "s/^$v=//p")" ] || fail "nieuw cluster: $v ontbreekt (Wijzigen → parameters)"
+    done
+    say "Nieuw cluster: de lege database in gebruik nemen"
+    db_mark "cf-cssthema key=$(keyhash) ready=$(date +%s) new=$(hostname)" || fail "markering zetten"
+  fi
+  mkdir -p "$ETC" "$RUN" && chmod 0700 "$RUN" || fail "mappen"
+  tmp=$ETC/.cssthema.env.$$
+  (umask 077 && settings > "$tmp") || { rm -f "$tmp"; fail "$APPENV schrijven"; }
+  chgrp cssthema "$tmp" 2>/dev/null
+  chmod 0640 "$tmp" && mv -f "$tmp" "$APPENV" || fail "$APPENV"
+  if [ -x "$CODE/docker/nginx/entrypoint/40-cssthema-real-ip.sh" ] || [ -f "$CODE/docker/nginx/entrypoint/40-cssthema-real-ip.sh" ]; then
+    if confd_sync; then
+      nginx -t >/dev/null 2>&1 && sysctl_ reload nginx >/dev/null 2>&1
+    fi
+  fi
+  fingerprint > "$HASH"
+  return 0
+}
+
+# De worker en de caches volgen het VIP. Op een nieuwe VIP-node eerst de
+# caches leeg: Redis en de microcache van nginx kunnen nog CSS van vóór de
+# laatste wijziging hebben.
+worker_mag() {
+  has_ip "$VIP" || return 1
+  [ -s "$APPENV" ] || return 1
+  if has_oud && oud_enabled; then return 1; fi
+  [ -n "$(metafield "$(db_meta 2>/dev/null)" ready)" ]
+}
+master() {
+  worker_mag || return 0
+  redis-cli -n 0 FLUSHDB >/dev/null 2>&1
+  rm -rf /var/cache/nginx/css/* 2>/dev/null
+  sysctl_ start --no-block "$WORKER"
+  return 0
+}
+
+# ---------------------------------------------------------------- overname
+# Dezelfde telling op beide kanten: vaste sessie-instellingen zodat de tekst
+# van een rij gelijk is. Tabellen tot MD5_MAX bytes krijgen een md5.
+MD5_MAX=${CF_CT_MD5_MAX:-67108864}
+SESSION="SET TimeZone='UTC'; SET DateStyle='ISO, YMD'; SET IntervalStyle='postgres'; SET extra_float_digits=3; SET bytea_output='hex';"
+telling_oud() {
+  for tb in $(oud_pg -c "SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename"); do
+    size=$(oud_pg -c "SELECT pg_total_relation_size(format('public.%I', '$tb'))") || return 1
+    if [ "$size" -lt "$MD5_MAX" ]; then
+      r=$(oud_pg -c "$SESSION" -c "SELECT count(*) || ' ' || md5(coalesce(string_agg(md5(t::text), '' ORDER BY md5(t::text)), '')) FROM public.\"$tb\" t") || return 1
+    else
+      r="$(oud_pg -c "SELECT count(*) FROM public.\"$tb\"") -" || return 1
+    fi
+    echo "$tb $r"
+  done
+}
+telling_cluster() {
+  while read -r tb n sum; do
+    if [ "$(pg -c "SELECT to_regclass(format('public.%I', '$tb')) IS NULL")" = t ]; then echo "$tb ontbreekt -"; continue; fi
+    if [ "$sum" = - ]; then
+      r="$(pg -c "SELECT count(*) FROM public.\"$tb\"") -" || return 1
+    else
+      r=$(pg -c "$SESSION" -c "SELECT count(*) || ' ' || md5(coalesce(string_agg(md5(t::text), '' ORDER BY md5(t::text)), '')) FROM public.\"$tb\" t") || return 1
+    fi
+    echo "$tb $r"
+  done < "$1"
+}
+oud_commit() {
+  c=$(cat "$DATA/geinstalleerde-commit" 2>/dev/null)
+  case "$c" in "" | onbekend) git -C "$CODE" rev-parse HEAD 2>/dev/null || echo onbekend ;; *) echo "$c" ;; esac
+}
+
+overnemen() {
+  force=
+  [ "${1:-}" = --andere-versie ] && force=1
+  has_oud || fail "hier draait geen oude cssthema ($OUD_UNIT); doe de overname op de node waar de oude cssthema draait"
+  voorbereid || fail "de oude cssthema is nog niet klaargezet (cssthema-ctl.sh voorbereiden, normaal een stap van de uitrol)"
+  [ "$NIEUW" != true ] || fail "dit cluster is als nieuw cluster uitgerold; een overname kan alleen in een cluster zonder die keuze"
+  has_ip "$VIP" || fail "het VIP $VIP staat niet op deze node; de oude cssthema hoort het VIP te bedienen tot de overname (keepalived?)"
+  [ -s "$STATE/gebouwd" ] || fail "cssthema is op deze node nog niet gebouwd"
+  built=$(cut -d' ' -f2 "$STATE/gebouwd")
+
+  say "Database van het cluster nakijken"
+  meta=$(db_meta) || fail "de database van het cluster antwoordt niet; is ze er al (Databases → Database toevoegen)?"
+  [ -z "$(metafield "$meta" ready)" ] || fail "de database van het cluster is al in gebruik ($meta); een tweede overname zou haar overschrijven"
+  tables=$(db_tables) || fail "tabellen tellen"
+  [ "$tables" = 0 ] || fail "de database van het cluster is niet leeg ($tables tabellen)"
+
+  say "Oude cssthema op deze node"
+  commit=$(oud_commit)
+  alembic=$(oud_pg -c 'SELECT version_num FROM alembic_version' 2>/dev/null | head -n 1)
+  echo "  commit $commit, migratie ${alembic:-?}, PostgreSQL $OUD_NAME op 5433"
+  [ -n "$alembic" ] || fail "de oude database gaf geen alembic-versie; is dat wel cssthema?"
+  if [ "$commit" != "$built" ] && [ -z "$force" ]; then
+    fail "de oude cssthema is commit $commit en het cluster $built. Zet Versie van cssthema op $commit (Wijzigen) en rol uit, of: overnemen --andere-versie (de code van het cluster moet dan nieuwer zijn)"
+  fi
+  grep -lqsE "^revision[^=]*= *['\"]${alembic}['\"]" "$CODE"/backend/migrations/versions/*.py ||
+    fail "de oude database staat op migratie $alembic, die de code van het cluster ($built) niet kent"
+
+  mkdir -p "$STATE/overname" && chmod 0700 "$STATE/overname" || fail "map $STATE/overname"
+  t=$(date +%Y%m%d-%H%M%S)
+  dir=$STATE/overname/$t-$$
+  mkdir -m 0700 "$dir" || fail "map $dir"
+  DIR=$dir
+
+  say "Oude cssthema stoppen (nginx, Redis en PostgreSQL blijven draaien; er wordt niets gewist)"
+  # shellcheck disable=SC2086
+  sysctl_ disable --now $OUD_UNITS >/dev/null 2>&1
+  # shellcheck disable=SC2086
+  sysctl_ is-active --quiet $OUD_UNITS && back "de oude cssthema stoppen"
+
+  say "Tellen in de oude database"
+  telling_oud > "$dir/telling-oud" || back "tellen in de oude database"
+  [ -s "$dir/telling-oud" ] || back "de oude database heeft geen tabellen"
+  echo "  $(wc -l < "$dir/telling-oud") tabellen"
+
+  say "Back-up van de oude database"
+  mkdir -p "$OUD_BACKUPS" && chmod 0700 "$OUD_BACKUPS" || back "map $OUD_BACKUPS"
+  f=$OUD_BACKUPS/cf-overname-$t.dump
+  (umask 077 && runpg pg_dump -p "$(oud_port)" -Fc -d "$OUD_DB" > "$f") && [ -s "$f" ] || back "back-up (pg_dump)"
+  pg_restore --list "$f" > "$dir/lijst" || back "pg_restore leest de back-up niet"
+  (umask 077 && cp "$OUD_ENV" "$OUD_BACKUPS/cf-overname-$t.env")
+  echo "  $f ($(du -h "$f" | cut -f1)), sha256 $(sha256sum "$f" | cut -c1-16)"
+
+  say "Terugzetten in de database van het cluster (één transactie)"
+  # Een opmerking op een extensie (pg_trgm) mag alleen een superuser zetten.
+  grep -v ' COMMENT - EXTENSION ' "$dir/lijst" > "$dir/lijst-cluster"
+  pgtool pg_restore --no-owner --no-privileges --single-transaction --exit-on-error -L "$dir/lijst-cluster" "$f" || back "terugzetten (pg_restore)"
+
+  say "Tellen in de database van het cluster"
+  telling_cluster "$dir/telling-oud" > "$dir/telling-cluster" || back "tellen in het cluster"
+  bad=
+  while read -r tb n sum; do
+    line=$(grep "^$tb " "$dir/telling-cluster")
+    m=$(echo "$line" | cut -d' ' -f2)
+    s=$(echo "$line" | cut -d' ' -f3)
+    ok=ja
+    [ "$m" = "$n" ] || ok=NEE
+    [ "$sum" = - ] || [ "$s" = "$sum" ] || ok=NEE
+    printf '  %-32s %8s -> %-8s %s\n' "$tb" "$n" "$m" "$( [ "$sum" = - ] && echo 'aantal' || echo 'aantal+md5') $ok"
+    [ "$ok" = ja ] || bad="$bad $tb"
+  done < "$dir/telling-oud"
+  [ -z "$bad" ] || back "verschil in:$bad"
+
+  say "Instellingen overnemen en de database in gebruik nemen"
+  grep -q '^SECRET_KEY=.' "$OUD_ENV" || back "de oude cssthema heeft geen SECRET_KEY"
+  (umask 077 && mkdir -p "$CF" && chmod 0700 "$CF" &&
+    grep -E '^[A-Z][A-Z0-9_]*=' "$OUD_ENV" | grep -Ev "$NOT_TAKEN" > "$CF/cssthema.env") || back "$CF/cssthema.env"
+  echo "  $(wc -l < "$CF/cssthema.env") instellingen, sleutel $(keyhash)"
+  db_mark "cf-cssthema key=$(keyhash) ready=$(date +%s) from=$(hostname) commit=$commit" || back "markering zetten"
+
+  say "cssthema van het cluster starten"
+  sysctl_ restart "$API" || back "systemctl restart $API (journalctl -u $API)"
+  i=0
+  while ! healthy; do
+    i=$((i + 1))
+    [ $i -le "${CF_CT_WAIT:-90}" ] || back "cssthema van het cluster antwoordt niet gezond (journalctl -u $API)"
+    sleep "${CF_CT_SLEEP:-2}"
+  done
+  sysctl_ start "$WORKER"
+  sysctl_ disable --now cssthema-backup.timer >/dev/null 2>&1
+  echo
+  echo "Overgenomen: cssthema draait op het cluster met de database van $(hostname)."
+  echo "- De andere nodes starten zodra de sync cssthema-instellingen ze bereikte (binnen een paar minuten; Cronjobs)."
+  echo "- Zet nu in Nginx Proxy Manager de proxy hosts van cssthema (dashboard en CSS-domein) naar $VIP poort 80."
+  echo "- Back-up van de oude database: $f"
+  echo "- De oude cssthema staat gestopt en uitgeschakeld; PostgreSQL $OUD_NAME met de data draait nog op 5433. Terugweg: cssthema-ctl.sh terug"
+  echo "- Alles goed? cssthema-ctl.sh afronden stopt PostgreSQL $OUD_NAME (de data blijft staan)."
+  return 0
+}
+
+# Iets ging mis tijdens de overname: database van het cluster weer leeg,
+# overgenomen instellingen weg, oude cssthema weer aan.
+back() {
+  echo "FOUT: $1" >&2
+  echo "== Terugdraaien: database van het cluster leegmaken, oude cssthema weer starten" >&2
+  sysctl_ stop "$WORKER" "$API" >/dev/null 2>&1
+  if [ "$(db_tables 2>/dev/null)" != 0 ] || [ -n "$(metafield "$(db_meta 2>/dev/null)" ready)" ]; then
+    pg -c 'DROP SCHEMA public CASCADE' -c 'CREATE SCHEMA public' >/dev/null 2>&1 || echo "WAARSCHUWING: de database van het cluster leegmaken mislukte" >&2
+    pg -c 'DROP EXTENSION IF EXISTS pg_trgm' >/dev/null 2>&1
+    db_mark '' >/dev/null 2>&1 || echo "WAARSCHUWING: markering weghalen mislukte" >&2
+  fi
+  rm -f "$CF/cssthema.env" "$APPENV"
+  [ -n "${DIR:-}" ] && rm -f "$DIR/lijst-cluster"
+  # shellcheck disable=SC2086
+  if sysctl_ enable --now $OUD_UNITS >&2; then
+    echo "De oude cssthema draait weer; aan de oude database is niets veranderd." >&2
+  else
+    echo "WAARSCHUWING: de oude cssthema starten mislukte: systemctl enable --now $OUD_UNITS" >&2
+  fi
+  exit 1
+}
+
+oud_version() { pg_lsclusters -h 2>/dev/null | awk -v n="$OUD_NAME" '$2 == n {print $1}' | head -n 1; }
+
+afronden() {
+  meta=$(db_meta) || fail "de database antwoordt niet"
+  [ -n "$(metafield "$meta" ready)" ] || fail "er is nog niets overgenomen"
+  if has_oud && oud_enabled; then fail "de oude cssthema draait nog"; fi
+  v=$(oud_version)
+  [ -n "$v" ] || { echo "Geen PostgreSQL $OUD_NAME op deze node."; return 0; }
+  pg_ctlcluster "$v" "$OUD_NAME" stop 2>/dev/null
+  [ -d "/etc/postgresql/$v/$OUD_NAME" ] && echo manual > "/etc/postgresql/$v/$OUD_NAME/start.conf"
+  echo "PostgreSQL $v/$OUD_NAME is gestopt en start niet meer vanzelf; de data blijft staan als terugweg (cssthema-ctl.sh terug start hem weer)."
+}
+
+terug() {
+  has_oud || fail "hier staat geen oude cssthema ($OUD_UNIT)"
+  meta=$(db_meta) || fail "de database van het cluster antwoordt niet; start de oude dan met de hand: systemctl enable --now $OUD_UNITS"
+  mkdir -p "$STATE/overname" && chmod 0700 "$STATE/overname"
+  f=$STATE/overname/cluster-$(date +%Y%m%d-%H%M%S).dump
+  say "Eerst een dump van cssthema zoals het nu op het cluster staat"
+  (umask 077 && pgtool pg_dump -Fc > "$f") && [ -s "$f" ] || fail "dump van het cluster (er is niets veranderd)"
+  echo "  $f"
+  say "Markering weghalen: geen node van het cluster start cssthema nog"
+  db_mark "cf-cssthema terug=$(date +%s) was:$(echo "$meta" | tr ' ' ',')" || fail "markering"
+  sysctl_ stop "$WORKER" "$API"
+  sysctl_ disable "$API" >/dev/null 2>&1
+  v=$(oud_version)
+  if [ -n "$v" ]; then
+    [ -d "/etc/postgresql/$v/$OUD_NAME" ] && echo auto > "/etc/postgresql/$v/$OUD_NAME/start.conf"
+    pg_ctlcluster "$v" "$OUD_NAME" start 2>/dev/null
+  fi
+  say "Oude cssthema starten"
+  # shellcheck disable=SC2086
+  sysctl_ enable --now $OUD_UNITS || fail "de oude cssthema starten: systemctl enable --now $OUD_UNITS"
+  sysctl_ enable --now cssthema-backup.timer >/dev/null 2>&1
+  echo
+  echo "Terug op de oude cssthema van $(hostname). Nog te doen:"
+  echo "- op de andere nodes van het cluster: systemctl stop $API (Commando's); ze starten niet meer zonder markering"
+  echo "- Nginx Proxy Manager: het VIP wijst naar deze node zolang ze gezond is; anders terug naar haar eigen IP"
+  echo "- wijzigingen in de database sinds de overname staan alleen in $f"
+}
+
+backup() {
+  has_ip "$DB_VIP" || { echo "Het VIP van de database staat niet hier; geen back-up op deze node."; return 0; }
+  mkdir -p "$BACKUPS" && chmod 0700 "$BACKUPS" || fail "map $BACKUPS"
+  t=$(date +%Y%m%d-%H%M%S)
+  d=$BACKUPS/cssthema-$t
+  mkdir -m 0700 "$d.part" || fail "map $d.part"
+  (umask 077 && pgtool pg_dump -Fc > "$d.part/database.dump") || { rm -rf "$d.part"; fail "pg_dump"; }
+  [ -s "$d.part/database.dump" ] && pg_restore --list "$d.part/database.dump" > /dev/null || { rm -rf "$d.part"; fail "de dump is leeg of onleesbaar"; }
+  for sub in css-files storage; do
+    [ -d "$DATA/$sub" ] && tar -C "$DATA" -czf "$d.part/$sub.tar.gz" "$sub"
+  done
+  (umask 077 && settings > "$d.part/cssthema.env")
+  cut -d' ' -f2 "$STATE/gebouwd" > "$d.part/commit" 2>/dev/null
+  mv "$d.part" "$d" || fail "back-up"
+  # shellcheck disable=SC2012
+  ls -1d "$BACKUPS"/cssthema-2* 2>/dev/null | sort -r | tail -n +"$((KEEP + 1))" | while read -r old; do rm -rf "$old"; done
+  echo "back-up klaar: $d"
+}
+
+# ---------------------------------------------------------------- installatie
+mappen_ok() {
+  [ -d "$DATA/css-files" ] && [ -d "$DATA/storage" ] && [ -d /var/cache/nginx/css ] &&
+    [ "$(stat -c %U "$DATA/css-files")" = cssthema ] && [ "$(stat -c %U "$DATA/storage")" = cssthema ]
+}
+mappen() {
+  install -d -m 0755 "$DATA" || fail "$DATA"
+  install -d -m 0775 -o cssthema -g cssthema "$DATA/css-files" || fail "$DATA/css-files"
+  install -d -m 0750 -o cssthema -g cssthema "$DATA/storage" || fail "$DATA/storage"
+  install -d -m 0700 -o www-data -g www-data /var/cache/nginx/css || fail "/var/cache/nginx/css"
+}
+
+node_ok() { [ "$("$NODE_DIR/bin/node" --version 2>/dev/null | cut -d. -f1)" = "v$NODE_MAJOR" ]; }
+node_install() {
+  case "$(uname -m)" in
+    x86_64) arch=x64 ;;
+    aarch64) arch=arm64 ;;
+    *) return 1 ;;
+  esac
+  base=https://nodejs.org/dist/latest-v$NODE_MAJOR.x
+  line=$(curl -fsSL "$base/SHASUMS256.txt" | grep " node-v.*-linux-$arch.tar.xz\$") || return 1
+  tarball=${line##* }
+  tmp=$(mktemp -d) || return 1
+  curl -fsSL "$base/$tarball" -o "$tmp/$tarball" && (cd "$tmp" && echo "$line" | sha256sum -c --quiet -) || { rm -rf "$tmp"; return 1; }
+  rm -rf "$NODE_DIR" && mkdir -p "$NODE_DIR" && tar -xJf "$tmp/$tarball" -C "$NODE_DIR" --strip-components=1 --no-same-owner
+  r=$?
+  rm -rf "$tmp"
+  chown -R root:root "$NODE_DIR"
+  return $r
+}
+
+bouwen() {
+  if [ ! -d "$CODE/.git" ]; then
+    say "cssthema ophalen ($REPO)"
+    git clone -q "$REPO" "$CODE" || fail "git clone"
+  fi
+  git -C "$CODE" fetch -q --tags --force origin || fail "git fetch"
+  commit=$(git -C "$CODE" rev-parse -q --verify "origin/$VERSION^{commit}" 2>/dev/null ||
+    git -C "$CODE" rev-parse -q --verify "$VERSION^{commit}" 2>/dev/null) || fail "versie $VERSION bestaat niet in $REPO"
+  prev=$(git -C "$CODE" rev-parse -q HEAD 2>/dev/null)
+  # De oude cssthema die hier nog draait, krijgt geen andere code onder zich.
+  if has_oud && oud_enabled && [ -n "$prev" ] && [ "$prev" != "$commit" ]; then
+    fail "de oude cssthema draait hier op $prev; zet Versie van cssthema op die commit (andere code komt na de overname)"
+  fi
+  say "Versie $VERSION = $commit"
+  git -C "$CODE" checkout -q --detach "$commit" || fail "git checkout $commit"
+  undo() { [ -n "$prev" ] && git -C "$CODE" checkout -q --detach "$prev"; rm -rf "$CODE/frontend/dist.nieuw"; fail "$1 (vorige code teruggezet)"; }
+  uv=$(sed -n 's/^UV_VERSION="\([^"]*\)".*/\1/p' "$CODE/deploy/debian/install.sh" | head -n 1)
+  mkdir -p "$RUNTIME" || undo "map $RUNTIME"
+  say "Python-venv ($VENV)"
+  [ -x "$VENV/bin/python" ] || python3 -m venv "$VENV" || undo "python3 -m venv"
+  "$VENV/bin/pip" install --quiet --disable-pip-version-check "${uv:-uv}" || undo "pip install uv"
+  (cd "$CODE/backend" && UV_PROJECT_ENVIRONMENT=$VENV UV_PYTHON_DOWNLOADS=never \
+    "$VENV/bin/uv" sync --frozen --no-dev --inexact --python "$VENV/bin/python") || undo "uv sync"
+  say "Frontend bouwen (Node.js $NODE_MAJOR)"
+  node_ok || node_install || undo "Node.js $NODE_MAJOR installeren"
+  (cd "$CODE/frontend" && export PATH="$NODE_DIR/bin:$PATH" CI=true COREPACK_ENABLE_DOWNLOAD_PROMPT=0 &&
+    corepack pnpm install --frozen-lockfile >/dev/null &&
+    rm -rf dist.nieuw && corepack pnpm exec tsc -b && corepack pnpm exec vite build --outDir dist.nieuw --emptyOutDir >/dev/null) || undo "frontend bouwen"
+  [ -s "$CODE/frontend/dist.nieuw/index.html" ] || undo "de frontend-build gaf geen index.html"
+  rm -rf "$CODE/frontend/dist.oud"
+  [ -d "$CODE/frontend/dist" ] && mv "$CODE/frontend/dist" "$CODE/frontend/dist.oud"
+  mv "$CODE/frontend/dist.nieuw" "$CODE/frontend/dist" || fail "dist"
+  rm -rf "$CODE/frontend/dist.oud"
+  mkdir -p "$STATE" && echo "$VERSION $commit" > "$STATE/gebouwd"
+  # Zoals install.sh: de back-ups van cssthema noteren welke code draait.
+  echo "$commit" > "$DATA/geinstalleerde-commit" 2>/dev/null
+  echo "Gebouwd: $commit"
+}
+gebouwd() {
+  [ "$(cut -d' ' -f1 "$STATE/gebouwd" 2>/dev/null)" = "$VERSION" ] &&
+    [ "$(git -C "$CODE" rev-parse -q HEAD 2>/dev/null)" = "$(cut -d' ' -f2 "$STATE/gebouwd")" ] &&
+    [ -x "$VENV/bin/uvicorn" ] && [ -x "$VENV/bin/arq" ] && [ -s "$CODE/frontend/dist/index.html" ]
+}
+
+SITE=$NGINX/sites-available/cssthema
+nginx_ok() {
+  nginx_site 2>/dev/null | cmp -s - "$SITE" && [ -L "$NGINX/sites-enabled/cssthema" ] && [ ! -e "$NGINX/sites-enabled/default" ] || return 1
+  for f in "$CODE"/docker/nginx/snippets/*.conf; do
+    cmp -s "$f" "$NGINX/snippets/cssthema/$(basename "$f")" || return 1
+  done
+  tmp=$(mktemp -d) || return 1
+  nginx_confd "$tmp" >/dev/null 2>&1
+  r=0
+  for f in cssthema-real-ip.conf cssthema-dashboard-host.conf; do cmp -s "$tmp/$f" "$NGINX/conf.d/$f" || r=1; done
+  rm -rf "$tmp"
+  [ $r = 0 ] && sysctl_ is-active --quiet nginx
+}
+nginx_() {
+  [ -s "$CODE/docker/nginx/conf.d/cssthema.conf" ] || fail "cssthema is nog niet opgehaald"
+  for pattern in 'server api:8000 resolve;' 'root /usr/share/nginx/html;' 'include /etc/nginx/snippets/' 'listen 8081;'; do
+    grep -qF "$pattern" "$CODE/docker/nginx/conf.d/cssthema.conf" || fail "nginx-config van cssthema veranderd: '$pattern' niet gevonden"
+  done
+  mkdir -p "$NGINX/snippets/cssthema" "$NGINX/conf.d" || fail "mappen van nginx"
+  [ -e "$SITE" ] && cp -a "$SITE" "$SITE.bak-cf"
+  install -m 0644 "$CODE"/docker/nginx/snippets/*.conf "$NGINX/snippets/cssthema/" || fail "snippets"
+  nginx_site > "$SITE.cf" && mv -f "$SITE.cf" "$SITE" || fail "$SITE"
+  ln -sf "$SITE" "$NGINX/sites-enabled/cssthema"
+  rm -f "$NGINX/sites-enabled/default"
+  confd_sync
+  if ! nginx -t; then
+    [ -e "$SITE.bak-cf" ] && mv -f "$SITE.bak-cf" "$SITE"
+    fail "nginx -t weigert de site van cssthema (vorige teruggezet)"
+  fi
+  sysctl_ enable nginx >/dev/null 2>&1
+  sysctl_ reload-or-restart nginx || fail "nginx herladen"
+}
+
+# Met een actieve ufw (default deny): etcd, Patroni, PostgreSQL, SSH (de
+# syncs) en VRRP tussen de nodes.
+ufw_active() { command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q '^Status: active'; }
+ufw_rules() {
+  for ip in $PEERS; do
+    echo "allow from $ip to any port 2379:2380 proto tcp"
+    echo "allow from $ip to any port 5432 proto tcp"
+    echo "allow from $ip to any port 8008 proto tcp"
+    echo "allow from $ip to any port 22 proto tcp"
+    echo "allow from $ip proto vrrp"
+  done
+}
+firewall_ok() {
+  ufw_active || return 0
+  added=$(ufw show added 2>/dev/null)
+  ufw_rules | grep -v vrrp | while read -r r; do
+    echo "$added" | grep -qxF "ufw $r" || exit 1
+  done
+}
+firewall() {
+  if ! ufw_active; then echo "ufw staat niet aan; niets te doen."; return 0; fi
+  ufw_rules | while read -r r; do
+    # shellcheck disable=SC2086
+    ufw $r >/dev/null || exit 1
+    echo "ufw $r"
+  done || fail "ufw-regel zetten"
+}
+
+status() {
+  echo "node:        $(hostname) (index $INDEX)"
+  if has_ip "$VIP"; then echo "VIP:         $VIP staat hier"; else echo "VIP:         $VIP staat elders"; fi
+  if has_ip "$DB_VIP"; then echo "db-VIP:      $DB_VIP staat hier (primary)"; else echo "db-VIP:      $DB_VIP staat elders"; fi
+  echo "api:         $(sysctl_ is-active "$API" 2>/dev/null)"
+  echo "worker:      $(sysctl_ is-active "$WORKER" 2>/dev/null)"
+  if has_oud; then
+    echo "oude:        cssthema-api $(sysctl_ is-active cssthema-api 2>/dev/null), commit $(oud_commit), PostgreSQL-poort $(oud_port)"
+  fi
+  if healthy; then echo "cssthema:    antwoordt gezond (/readyz)"; else echo "cssthema:    antwoordt NIET op http://127.0.0.1/readyz"; fi
+  if meta=$(db_meta 2>/dev/null); then
+    echo "database:    ${meta:-geen markering} ($(db_tables) tabellen)"
+  else
+    echo "database:    antwoordt niet"
+  fi
+  if [ -s "$CF/cssthema.env" ]; then echo "sleutel:     overgenomen ($(keyhash))"; elif [ -n "$(key)" ]; then echo "sleutel:     van de template ($(keyhash))"; else echo "sleutel:     nog geen (wacht op de overname)"; fi
+  echo "versie:      $VERSION ($(cut -d' ' -f2 "$STATE/gebouwd" 2>/dev/null || echo nog niet gebouwd))"
+  echo "bestanden:   $(find "$DATA/css-files" "$DATA/storage" -type f 2>/dev/null | wc -l) in $DATA"
+  # shellcheck disable=SC2012
+  echo "back-up:     $(ls -1dt "$BACKUPS"/cssthema-2* 2>/dev/null | head -n 1)"
+  return 0
+}
+
+case "${1:-}" in
+  voorstart) voorstart ;;
+  check)
+    sysctl_ is-active --quiet nginx || exit 1
+    healthy
+    ;;
+  master) master ;;
+  vip-weg)
+    sysctl_ stop --no-block "$WORKER"
+    exit 0
+    ;;
+  backup) backup ;;
+  worker-mag) worker_mag ;;
+  status) status ;;
+  overnemen) overnemen "${2:-}" ;;
+  voorbereiden) voorbereiden ;;
+  voorbereid) voorbereid ;;
+  afronden) afronden ;;
+  terug) terug ;;
+  bouwen) bouwen ;;
+  gebouwd) gebouwd ;;
+  nginx) nginx_ ;;
+  nginx-ok) nginx_ok ;;
+  mappen) mappen ;;
+  mappen-ok) mappen_ok ;;
+  firewall) firewall ;;
+  firewall-ok) firewall_ok ;;
+  unchanged)
+    sysctl_ is-active --quiet "$API" || exit 0
+    [ "$(cat "$HASH" 2>/dev/null)" = "$(fingerprint)" ]
+    ;;
+  restart-if-changed)
+    sysctl_ try-restart "$API"
+    worker_mag && sysctl_ try-restart "$WORKER"
+    exit 0
+    ;;
+  *)
+    echo "gebruik: $0 voorstart|check|master|vip-weg|worker-mag|status|voorbereiden|voorbereid|overnemen|afronden|terug|backup|bouwen|gebouwd|nginx|nginx-ok|mappen|mappen-ok|firewall|firewall-ok|unchanged|restart-if-changed" >&2
+    exit 2
+    ;;
+esac

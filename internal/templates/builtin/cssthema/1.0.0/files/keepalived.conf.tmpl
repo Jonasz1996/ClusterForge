@@ -1,0 +1,50 @@
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}). Wijzigingen hier
+# worden bij de volgende uitrol overschreven.
+
+global_defs {
+    router_id {{ .node.hostname }}
+    enable_script_security
+    script_user root
+}
+
+# Antwoordt cssthema hier niet gezond (nginx en /readyz), dan geeft deze
+# node het VIP af. nopreempt: een gezonde VIP-node houdt het VIP, want de
+# bestanden (css-files, storage) gaan van de VIP-node naar de andere.
+vrrp_script chk_cssthema {
+    script "/usr/local/lib/clusterforge/cssthema-ctl.sh check"
+    interval 3
+    timeout 8
+    fall 2
+    rise 2
+}
+
+vrrp_instance VI_{{ .params.vrid }} {
+    state BACKUP
+    nopreempt
+    interface {{ .node.interface }}
+    virtual_router_id {{ .params.vrid }}
+    priority {{ sub 160 (mul .node.index 10) }}
+    advert_int 1
+    unicast_src_ip {{ .node.address }}
+    unicast_peer {
+{{- range .peers }}
+        {{ .address }}
+{{- end }}
+    }
+    authentication {
+        auth_type PASS
+        auth_pass {{ .params.auth_pass }}
+    }
+    virtual_ipaddress {
+        {{ .params.vip }}/{{ .node.prefix }} dev {{ .node.interface }}
+    }
+    track_script {
+        chk_cssthema
+    }
+    notify_master "/usr/local/lib/clusterforge/cssthema-ctl.sh master"
+    notify_backup "/usr/local/lib/clusterforge/cssthema-ctl.sh vip-weg"
+    notify_fault "/usr/local/lib/clusterforge/cssthema-ctl.sh vip-weg"
+}
+
+# Het eigen VIP van PostgreSQL (ClusterForge, Database).
+include /etc/keepalived/conf.d/*.conf

@@ -1,0 +1,239 @@
+name: cssthema
+version: 1.0.0
+title: cssthema (HA)
+description: >-
+  cssthema, de centrale CSS-themabouwer, op drie of vijf nodes met één
+  gedeelde PostgreSQL (Patroni, met een eigen VIP op de primary) en een VIP
+  van keepalived. De api draait op elke node tegen dezelfde database; de
+  worker, de eigen CSS-bestanden en de opslag volgen het VIP (een sync
+  brengt ze elke minuut naar de andere nodes). Een bestaande cssthema neem
+  je over met cssthema-ctl.sh overnemen op die node zelf, met een
+  gecontroleerde back-up vooraf, een telling en controlesom per tabel en
+  terugdraaien bij een fout. De bestaande node is node 1; zijn PostgreSQL
+  blijft ernaast staan als terugweg.
+cluster_type: generic
+
+# Bestanden (css-files, storage) gaan van de VIP-node naar de andere nodes.
+# Terugspringen zou het VIP naar een node brengen die de nieuwste bestanden
+# nog niet heeft; het VIP blijft dus waar het is zolang die node gezond is.
+failback: false
+
+# PostgreSQL (Patroni) op alle nodes, met een eigen VIP op de primary.
+# ClusterForge maakt daarna de gebruiker en de database cssthema (eigenaar).
+database:
+  engine: postgresql
+  role: node
+  vip: "{{ .params.db_vip }}"
+  host: "{{ .params.db_vip }}"
+  settings:
+    shared_buffers: 128M
+    max_connections: 200
+  steps:
+    - { kind: db_user, user: cssthema, password: "{{ .params.db_password }}", grant_on: cssthema }
+
+params:
+  - name: vip
+    type: ipv4
+    label: VIP
+    immutable: true
+    help: Het adres van cssthema (http://VIP). Zet daarna de proxy hosts in Nginx Proxy Manager (dashboard en CSS-domein) naar dit adres, poort 80. Niet .1 tot .3 van het VLAN (gateways).
+  - name: db_vip
+    type: ipv4
+    label: VIP van de database
+    immutable: true
+    help: Een tweede vrij adres; het staat altijd op de primary van PostgreSQL.
+  - name: nodes
+    type: int
+    label: Aantal nodes
+    help: Patroni wil een meerderheid; met drie mag er één uitvallen.
+    default: 3
+    choices: [3, 5]
+  - name: version
+    type: string
+    label: Versie van cssthema
+    help: Een commit, tag of branch van github.com/Jonasz1996/cssthema. Neem je een bestaande cssthema over, geef dan zijn commit (cat /var/lib/cssthema/geinstalleerde-commit op de oude node; cssthema-ctl.sh status toont hem). Een andere waarde bouwt cssthema op elke node opnieuw en herstart het.
+    default: main
+    pattern: '[A-Za-z0-9][A-Za-z0-9._/-]{0,99}'
+  - name: nieuw
+    type: bool
+    label: Nieuw cluster zonder bestaande cssthema
+    immutable: true
+    help: Uit (standaard) wacht cssthema op de overname van een bestaande installatie en start geen enkele node met een lege database. Alleen aanzetten als er nog geen cssthema bestaat.
+    default: false
+  - name: dashboard_host
+    type: string
+    label: Hostnaam van het dashboard (nieuw cluster)
+    help: Zoals cssthema.jouwdomein.be. Bij een overname komen de instellingen van de oude node en geldt dit niet.
+    optional: true
+    pattern: '[a-z0-9][a-z0-9.-]{0,252}'
+  - name: public_base_url
+    type: string
+    label: Publiek CSS-domein (nieuw cluster)
+    help: Zoals https://css.jouwdomein.be. Bij een overname komt de waarde van de oude node.
+    optional: true
+    pattern: 'https?://[A-Za-z0-9.:-]+'
+  - name: trusted_proxies
+    type: string
+    label: IP's van Nginx Proxy Manager (nieuw cluster)
+    help: Komma-gescheiden. Bij een overname komt de waarde van de oude node.
+    optional: true
+    pattern: '[0-9A-Fa-f.:/,]{1,500}'
+  - name: secret_key
+    type: secret
+    label: Geheime sleutel (nieuw cluster)
+    immutable: true
+    help: SECRET_KEY voor een nieuw cluster. Leeg laten maakt er een. Bij een overname neemt het cluster de sleutel van de oude node over en geldt deze niet.
+    length: 64
+  - name: db_password
+    type: secret
+    label: Wachtwoord van de databasegebruiker cssthema
+    help: Leeg laten maakt er een; je ziet het bij Verbinding.
+    length: 32
+  - name: vrid
+    type: int
+    label: VRRP-id
+    immutable: true
+    help: Uniek per keepalived-groep in hetzelfde netwerk. Leeg laten kiest een vrij nummer.
+    optional: true
+    min: 1
+    max: 255
+  - name: auth_pass
+    type: secret
+    label: VRRP-wachtwoord
+    help: Leeg laten maakt er een. Keepalived gebruikt hoogstens 8 tekens.
+    length: 8
+  - name: cpu
+    type: int
+    label: vCPU per node
+    default: 2
+    min: 1
+    max: 16
+  - name: memory
+    type: size
+    label: Geheugen per node
+    help: Voor cssthema, PostgreSQL, Redis en het bouwen van de frontend (Node).
+    default: 2G
+    min: 2G
+    max: 64G
+  - name: disk
+    type: size
+    label: Schijf per node
+    default: 16G
+    min: 8G
+    max: 1T
+
+roles:
+  - name: node
+    count: "{{ .params.nodes }}"
+    vm:
+      cpu: "{{ .params.cpu }}"
+      memory: "{{ .params.memory }}"
+      disk: "{{ .params.disk }}"
+    steps:
+      # Wat install.sh van cssthema installeert (zonder PostgreSQL-server:
+      # die komt van Patroni), plus psql/pg_dump/pg_restore voor de
+      # overname en rsync en sshd voor de sync.
+      - package: { names: [keepalived, nginx, redis-server, git, curl, ca-certificates, xz-utils, openssl, python3, python3-venv, postgresql-client, rsync, openssh-server, openssh-client] }
+      - service: { name: redis-server, enabled: true, state: started }
+      - command:
+          title: gebruiker cssthema
+          run: useradd --system --home-dir /var/lib/cssthema --shell /usr/sbin/nologin cssthema
+          unless: id cssthema
+      - directory: { path: /usr/local/lib/clusterforge, mode: "0755" }
+      # files: wat de sync cssthema-instellingen naar de andere nodes brengt
+      # (na een overname de instellingen van de oude node in .cf, 0600).
+      - directory: { path: /opt/cf-cssthema, mode: "0755" }
+      - directory: { path: /opt/cf-cssthema/files, mode: "0755" }
+      - directory: { path: /var/lib/cf-cssthema, mode: "0700" }
+      - directory: { path: /etc/cf-cssthema, mode: "0750" }
+      - file:
+          path: /etc/cf-cssthema/base.env
+          template: base.env.tmpl
+          mode: "0600"
+      - file:
+          path: /usr/local/lib/clusterforge/cssthema-ctl.sh
+          template: cssthema-ctl.sh.tmpl
+          mode: "0755"
+      - command:
+          title: mappen voor de bestanden van cssthema
+          run: /usr/local/lib/clusterforge/cssthema-ctl.sh mappen
+          unless: /usr/local/lib/clusterforge/cssthema-ctl.sh mappen-ok
+      - command:
+          title: ufw-regels voor het cluster
+          run: /usr/local/lib/clusterforge/cssthema-ctl.sh firewall
+          unless: /usr/local/lib/clusterforge/cssthema-ctl.sh firewall-ok
+      # Een oude cssthema op deze node (de bestaande node, node 1): zijn
+      # PostgreSQL verhuist van cluster main op 5432 naar cssthemaoud op
+      # 5433, met een back-up vooraf, zodat Patroni 5432 krijgt. cssthema
+      # blijft draaien en bedient het VIP tot de overname.
+      - command:
+          title: oude cssthema klaarzetten
+          run: /usr/local/lib/clusterforge/cssthema-ctl.sh voorbereiden
+          unless: /usr/local/lib/clusterforge/cssthema-ctl.sh voorbereid
+      # Code ophalen en bouwen, in dezelfde mappen als install.sh. Een
+      # andere versie bouwt opnieuw; de vorige build blijft tot de nieuwe lukt.
+      - command:
+          title: cssthema ophalen en bouwen (enkele minuten)
+          run: /usr/local/lib/clusterforge/cssthema-ctl.sh bouwen
+          unless: /usr/local/lib/clusterforge/cssthema-ctl.sh gebouwd
+      - command:
+          title: nginx voor cssthema
+          run: /usr/local/lib/clusterforge/cssthema-ctl.sh nginx
+          unless: /usr/local/lib/clusterforge/cssthema-ctl.sh nginx-ok
+      # De api is enabled op elke node. Zolang de database er niet is of de
+      # installatie nog niet is overgenomen, wacht hij en probeert opnieuw.
+      # De worker start keepalived op de VIP-node.
+      - file:
+          path: /etc/systemd/system/cf-cssthema-api.service
+          template: cf-cssthema-api.service.tmpl
+      - file:
+          path: /etc/systemd/system/cf-cssthema-worker.service
+          template: cf-cssthema-worker.service.tmpl
+      - file:
+          path: /etc/systemd/system/cf-cssthema-backup.service
+          template: cf-cssthema-backup.service.tmpl
+      - file:
+          path: /etc/systemd/system/cf-cssthema-backup.timer
+          template: cf-cssthema-backup.timer.tmpl
+      - command:
+          title: cf-cssthema inschakelen
+          run: systemctl daemon-reload && systemctl enable cf-cssthema-api cf-cssthema-backup.timer && systemctl start --no-block cf-cssthema-api cf-cssthema-backup.timer
+          unless: systemctl is-enabled --quiet cf-cssthema-api && systemctl is-enabled --quiet cf-cssthema-backup.timer
+      - command:
+          title: cssthema herstarten na een wijziging
+          run: /usr/local/lib/clusterforge/cssthema-ctl.sh restart-if-changed
+          unless: /usr/local/lib/clusterforge/cssthema-ctl.sh unchanged
+      - directory: { path: /etc/keepalived/conf.d, mode: "0755" }
+      - file:
+          path: /etc/keepalived/keepalived.conf
+          template: keepalived.conf.tmpl
+          mode: "0640"
+          notify: [service:keepalived:reload]
+      - service: { name: keepalived, enabled: true, state: started }
+
+# Van de VIP-node naar de andere nodes, zonder --delete: de overgenomen
+# instellingen, en de eigen CSS, scripts en opslag van cssthema.
+syncs:
+  - name: cssthema-instellingen
+    schedule: "* * * * *"
+    source: /opt/cf-cssthema/files/
+    target: /opt/cf-cssthema/files/
+    delete: false
+    alert: true
+    timeout_seconds: 300
+  - name: cssthema-bestanden
+    schedule: "* * * * *"
+    source: /var/lib/cssthema/
+    target: /var/lib/cssthema/
+    delete: false
+    exclude: [/geinstalleerde-commit, /laatste-backup]
+    alert: true
+    timeout_seconds: 600
+
+# cssthema start pas na de overname; daarom controleert de uitrol alleen het VIP.
+checks:
+  - vip_owned: { vip: "{{ .params.vip }}", within: 120s }
+
+services:
+  - { name: cssthema, kind: app, unit: cf-cssthema-api, port: 80 }
+  - { name: keepalived, kind: vip, unit: keepalived }

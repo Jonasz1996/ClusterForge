@@ -43,12 +43,12 @@ func TestTemplatesFleet(t *testing.T) {
 	for _, tp := range tpls.Items {
 		list = append(list, tp.Name+" "+tp.Version+" "+tp.ClusterType+" "+tp.Title)
 	}
-	if got := strings.Join(list, ", "); got != "authentik 1.0.0 generic Authentik (HA), cron 1.0.0 cron Cron-cluster, docker 1.0.0 docker Docker-hosts, "+
+	if got := strings.Join(list, ", "); got != "authentik 1.0.0 generic Authentik (HA), cron 1.0.0 cron Cron-cluster, cssthema 1.0.0 generic cssthema (HA), docker 1.0.0 docker Docker-hosts, "+
 		"generic 1.0.0 generic Eigen applicatie, home-assistant 1.0.0 generic Home Assistant (HA), keepalived-nginx 1.1.0 keepalived Nginx met keepalived, kubernetes 1.1.0 kubernetes Kubernetes (k3s), "+
 		"media-platform 1.0.0 generic Bestanden-, office- en mediaplatform, nginx-proxy-manager 1.0.0 generic Nginx Proxy Manager (HA), vaultx 1.0.0 generic VaultX (HA), zabbix 1.0.0 generic Zabbix met HA" {
 		t.Fatalf("templatelijst: %s", got)
 	}
-	app := tpls.Items[3].Services[0]
+	app := tpls.Items[4].Services[0]
 	if app.Name != "app" || app.Unit == nil || *app.Unit != "cf-app" || app.Port != nil || app.PortParam == nil || *app.PortParam != "port" ||
 		!slices.Equal(app.DependsOn, []string{"docker", "keepalived"}) {
 		t.Fatalf("dienst app in de templatelijst: %+v", app)

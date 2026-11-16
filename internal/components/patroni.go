@@ -100,7 +100,7 @@ func checkExistingPG(pn *PlanNode, n *Node, st dbStatus, slug string, add func(s
 // vóór Patroni opzij zet: hernoemd van main, op een andere poort, en psql
 // zonder poort wijst via user_clusters naar 5432. Alleen die mogen blijven
 // staan naast Patroni.
-var asideClusters = []string{"vaultxoud"}
+var asideClusters = []string{"vaultxoud", "cssthemaoud"}
 
 // asideCluster geeft de naam van het opzijgezette cluster van een unit als
 // postgresql@17-vaultxoud, anders "".

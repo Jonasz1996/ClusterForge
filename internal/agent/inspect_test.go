@@ -294,6 +294,7 @@ var sampleParams = map[string]map[string]any{
 	"home-assistant":      {"vip": "10.0.20.100", "vrid": 58, "auth_pass": "geheim12", "db_password": "Wachtwoord-123"},
 	"authentik":           {"vip": "10.0.20.100", "db_vip": "10.0.20.101", "vrid": 59, "auth_pass": "geheim12", "db_password": "Wachtwoord-123"},
 	"vaultx":              {"vip": "10.0.20.110", "db_vip": "10.0.20.111", "vrid": 60, "auth_pass": "geheim12", "db_password": "Wachtwoord-123"},
+	"cssthema":            {"vip": "10.0.20.120", "db_vip": "10.0.20.121", "vrid": 61, "auth_pass": "geheim12", "db_password": "Wachtwoord-123"},
 }
 
 func renderBuiltin(t *testing.T, tpl *templates.Template, role string) []templates.Step {
