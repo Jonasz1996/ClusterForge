@@ -10,6 +10,7 @@ import { Alert, Badge, Card, cx, PageHeader } from "@/components/ui";
 import { useIsAdmin } from "@/lib/inventory";
 import { pct, pveHostAction, usePveGet, usePveOverview, type Datacenter, type Overview, type OverviewNode, type PveTask } from "@/lib/pve";
 import { useQueryClient } from "@tanstack/react-query";
+import { useRouter } from "next/navigation";
 
 export default function DatacenterPage() {
   return (
@@ -123,6 +124,7 @@ function HostsCard({ dc, o }: { dc: Datacenter; o: Overview }) {
   const { run, pending, banner } = useCallRunner(dc.id);
   const [dialog, setDialog] = useState<HostDialog>(null);
   const qc = useQueryClient();
+  const router = useRouter();
   const [maintResult, setMaintResult] = useState<{ ok: boolean; text: string } | null>(null);
   const maintenance = async (n: OverviewNode, on: boolean) => {
     const ok = await askConfirm(
@@ -176,6 +178,11 @@ function HostsCard({ dc, o }: { dc: Datacenter; o: Overview }) {
                         <Badge tone="green">Online</Badge>
                       )}
                       {!n.has_agent && <Badge tone="slate">Geen agent</Badge>}
+                      {n.reboot_required && (
+                        <span title={(n.reboot_reasons ?? []).join("; ")}>
+                          <Badge tone="amber">Herstart nodig</Badge>
+                        </span>
+                      )}
                     </div>
                     <div className="mt-0.5 text-xs text-slate-500">
                       {[n.ip, n.online && `up ${uptime(n.uptime)}`, n.load?.length ? `load ${n.load.join(" ")}` : ""].filter(Boolean).join(" · ")}
@@ -214,6 +221,7 @@ function HostsCard({ dc, o }: { dc: Datacenter; o: Overview }) {
                       <ActionMenu
                         disabled={pending}
                         items={[
+                          { label: "Hardware en passthrough", onClick: () => router.push(`/proxmox/hardware?dc=${encodeURIComponent(dc.id)}&node=${encodeURIComponent(n.name)}`) },
                           ...(n.agent_node_id
                             ? [
                                 {
@@ -242,7 +250,11 @@ function HostsCard({ dc, o }: { dc: Datacenter; o: Overview }) {
           </table>
         </div>
         <p className="text-xs text-slate-500">
-          Gasten per host beheren, CT&apos;s maken en snapshots: <Link href="/proxmox/hosts" className="underline">Hosts en gasten</Link>.
+          Alle VM&apos;s en CT&apos;s beheren, aanmaken en taggen:{" "}
+          <Link href="/proxmox/gasten" className="underline">
+            Gasten
+          </Link>
+          .
         </p>
       </div>
       {dialog && (

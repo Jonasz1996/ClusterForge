@@ -30,6 +30,8 @@ func TestPolicy(t *testing.T) {
 		{method: "delete", path: "/access/users/root@pam", err: "root@pam"},
 		{method: "create", path: "/nodes/pve1/execute", err: "kent"},
 		{method: "create", path: "/cluster/ha/resources/vm:101/migrate", params: map[string]string{"node": "pve2", "x": "1"}, err: "hoort niet"},
+		{method: "set", path: "/nodes/pve1/lxc/105/config", params: map[string]string{"delete": "mp1,unused0"}, title: "CT 105 configuratie wijzigen", confirm: "105"},
+		{method: "create", path: "/nodes/pve1/qemu/101/snapshot/voor-update/rollback", title: "VM 101 terugzetten naar snapshot voor-update", confirm: "voor-update"},
 		{method: "set", path: "/cluster/firewall/options", params: map[string]string{"enable": "1"}, title: "firewall van het datacenter wijzigen"},
 		{method: "delete", path: "/nodes/pve1/qemu/101/firewall/rules/3", title: "firewall van VM 101 wijzigen"},
 	}

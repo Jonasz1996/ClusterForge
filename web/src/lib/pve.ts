@@ -47,6 +47,8 @@ export type OverviewNode = {
   mem_assigned_all: number;
   has_agent: boolean;
   agent_node_id?: string;
+  reboot_required?: boolean;
+  reboot_reasons?: string[];
 };
 
 export type OverviewStorage = { name: string; node?: string; shared: boolean; type: string; used: number; total: number; status: string; content?: string };
@@ -334,4 +336,74 @@ const taskTypes: Record<string, string> = {
 
 export function taskFailed(t: PveTask) {
   return !!t.status && t.status !== "OK" && !t.status.startsWith("WARNINGS") && t.endtime !== undefined;
+}
+
+// --- Gasten (fase 26 M2) ---
+
+// Een regel van /cluster/resources.
+export type PveResource = {
+  id: string;
+  type: "qemu" | "lxc" | "node" | "storage" | "pool" | "sdn";
+  node: string;
+  status: string;
+  name?: string;
+  vmid?: number;
+  cpu?: number;
+  maxcpu?: number;
+  mem?: number;
+  maxmem?: number;
+  disk?: number;
+  maxdisk?: number;
+  uptime?: number;
+  template?: number;
+  hastate?: string;
+  tags?: string;
+  lock?: string;
+  pool?: string;
+  storage?: string;
+  plugintype?: string;
+  content?: string;
+  shared?: number;
+};
+
+export type GuestType = "qemu" | "lxc";
+
+export const guestPath = (node: string, type: GuestType, vmid: number | string) => `/nodes/${node}/${type}/${vmid}`;
+export const guestLabel = (type: string) => (type === "lxc" ? "CT" : "VM");
+export const guestHref = (dc: string, r: { node: string; type: string; vmid?: number }) =>
+  `/proxmox/gast?dc=${encodeURIComponent(dc)}&node=${encodeURIComponent(r.node)}&type=${r.type}&vmid=${r.vmid}`;
+
+// Proxmox scheidt tags met ; (ook , en spatie komen voor).
+export const splitTags = (s?: string) => (s ?? "").split(/[;, ]+/).filter(Boolean);
+
+export type GuestConfig = Record<string, string | number | undefined>;
+
+export type PveSnapshotEntry = { name: string; description?: string; snaptime?: number; parent?: string; vmstate?: number; running?: number };
+
+// parseProps leest "virtio=BC:24:..,bridge=vmbr0,tag=20" als sleutels.
+export function parseProps(v: string | number | undefined): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const part of String(v ?? "").split(",")) {
+    const i = part.indexOf("=");
+    if (i < 0) {
+      if (part) out[""] = part;
+      continue;
+    }
+    out[part.slice(0, i)] = part.slice(i + 1);
+  }
+  return out;
+}
+
+export const diskKeys = /^(scsi|virtio|sata|ide|efidisk|tpmstate|rootfs|mp|unused)\d*$/;
+
+// Kleuren van tags uit de datacenter-opties (tag-style color-map).
+export function tagColors(tagStyle?: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  const m = /color-map=([^,]*)/.exec(tagStyle ?? "");
+  if (!m) return out;
+  for (const item of m[1].split(";")) {
+    const [tag, bg] = item.split(":");
+    if (tag && bg && /^[0-9a-fA-F]{6}$/.test(bg)) out[tag] = "#" + bg;
+  }
+  return out;
 }

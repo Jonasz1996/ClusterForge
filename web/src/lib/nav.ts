@@ -30,6 +30,8 @@ export const navGroups: NavGroup[] = [
     label: "Proxmox",
     items: [
       { href: "/proxmox/datacenter", label: "Datacenter", keywords: "pve proxmox quorum corosync capaciteit overcommit onderhoudsmodus host herstarten" },
+      { href: "/proxmox/gasten", label: "Gasten", keywords: "pve vm ct lxc qemu aanmaken klonen tags cloud-init template snapshot verhuizen" },
+      { href: "/proxmox/hardware", label: "Hardware", keywords: "pve passthrough gpu pci usb iommu vfio temperatuur ecc herstart" },
       { href: "/proxmox/hosts", label: "Hosts en gasten", keywords: "pve hypervisor vm ct lxc qemu pct qm snapshot verhuizen migreren" },
       { href: "/proxmox/taken", label: "Proxmox-taken", keywords: "pve task log upid vzdump" },
       { href: "/proxmox", label: "Via de API-koppeling", keywords: "pve proxmox token api koppeling" },
@@ -93,6 +95,9 @@ export const navGroups: NavGroup[] = [
 // Pagina's die niet in de zijbalk staan maar wel een eigen titel hebben.
 const extraTitles: { href: string; label: string }[] = [{ href: "/tijdlijn", label: "Tijdlijn" }];
 
+// Detailpagina's die bij een menu-item horen maar niet onder zijn pad staan.
+const parentOf: Record<string, string> = { "/proxmox/gast": "/proxmox/gasten" };
+
 export function allNavItems(isAdmin: boolean): (NavItem & { group: string })[] {
   const out: (NavItem & { group: string })[] = [{ ...navHome, group: "" }];
   for (const g of navGroups) {
@@ -108,6 +113,8 @@ export function allNavItems(isAdmin: boolean): (NavItem & { group: string })[] {
 // /clusters/detail bij Clusters hoort.
 export function activeHref(pathname: string): string | null {
   if (pathname === "/" || pathname === "") return "/";
+  const parent = parentOf[pathname.replace(/\/$/, "")];
+  if (parent) return parent;
   let best: string | null = null;
   const all = [...navGroups.flatMap((g) => g.items), ...extraTitles];
   for (const i of all) {

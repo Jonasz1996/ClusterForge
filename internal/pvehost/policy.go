@@ -96,7 +96,7 @@ var rules = []*rule{
 			return "VM " + p["vmid"] + " terugzetten uit back-up" + on(m)
 		}
 		return "VM " + p["vmid"] + " maken" + on(m)
-	}).confirmWith(restoreOverExisting),
+	}).confirmWith(restoreOverExisting).secrets("cipassword"),
 	r("create", `/nodes/`+segNode+`/lxc`, anyKey, func(m, p map[string]string) string {
 		if p["restore"] == "1" {
 			return "CT " + p["vmid"] + " terugzetten uit back-up" + on(m)
@@ -104,7 +104,7 @@ var rules = []*rule{
 		return "CT " + p["vmid"] + " maken" + on(m)
 	}).confirmWith(restoreOverExisting).secrets("password"),
 	r("set", guestPath+`/config`, anyKey, func(m, _ map[string]string) string { return guestName(m) + " configuratie wijzigen" }).
-		secrets("cipassword", "password"),
+		confirmWith(deleteUnused).secrets("cipassword", "password"),
 	r("create", guestPath+`/status/(?P<cmd>start|stop|shutdown|reboot|reset|suspend|resume)`, `timeout|forceStop|overrule-shutdown|todisk`,
 		func(m, _ map[string]string) string { return guestName(m) + " " + statusWord[m["cmd"]] }),
 	r("create", guestPath+`/clone`, `newid|name|hostname|full|target|storage|pool|description|snapname|format`,
@@ -135,7 +135,7 @@ var rules = []*rule{
 		}),
 	r("create", `/nodes/`+segNode+`/qemu/`+segVMID+`/agent/(?P<cmd>fsfreeze-thaw|fstrim|ping)`, ``,
 		func(m, _ map[string]string) string { return "VM " + m["vmid"] + " guest agent " + m["cmd"] }),
-	r("create", `/nodes/`+segNode+`/qemu/`+segVMID+`/cloudinit`, ``,
+	r("set", `/nodes/`+segNode+`/qemu/`+segVMID+`/cloudinit`, ``,
 		func(m, _ map[string]string) string { return "VM " + m["vmid"] + " cloud-init opnieuw maken" }),
 	r("set", `/nodes/`+segNode+`/qemu/`+segVMID+`/unlink`, `idlist|force`,
 		func(m, p map[string]string) string {
@@ -290,6 +290,17 @@ func firstNonEmpty(s ...string) string {
 func restoreOverExisting(_, p map[string]string) string {
 	if p["force"] == "1" {
 		return p["vmid"]
+	}
+	return ""
+}
+
+// deleteUnused vraagt het VMID overtikken als een ongebruikte schijf
+// weggehaald wordt: Proxmox wist dan het volume.
+func deleteUnused(m, p map[string]string) string {
+	for _, k := range strings.Split(p["delete"], ",") {
+		if strings.HasPrefix(strings.TrimSpace(k), "unused") {
+			return m["vmid"]
+		}
 	}
 	return ""
 }

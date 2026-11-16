@@ -131,14 +131,18 @@ type OverviewNode struct {
 	Boot     string   `json:"boot,omitempty"`
 	KSM      int64    `json:"ksm,omitempty"`
 	// Gasten op deze host.
-	Running   int    `json:"running"`
-	Guests    int    `json:"guests"`
-	VCPURun   int    `json:"vcpu_running"`
-	VCPUAll   int    `json:"vcpu_all"`
-	MemRun    int64  `json:"mem_assigned_running"`
-	MemAll    int64  `json:"mem_assigned_all"`
-	HasAgent  bool   `json:"has_agent"`
-	AgentNode string `json:"agent_node_id,omitempty"`
+	Running  int   `json:"running"`
+	Guests   int   `json:"guests"`
+	VCPURun  int   `json:"vcpu_running"`
+	VCPUAll  int   `json:"vcpu_all"`
+	MemRun   int64 `json:"mem_assigned_running"`
+	MemAll   int64 `json:"mem_assigned_all"`
+	HasAgent bool  `json:"has_agent"`
+	// RebootRequired: de hardwarescan zegt dat de host moet herstarten
+	// (passthrough, kernel-update).
+	RebootRequired bool     `json:"reboot_required,omitempty"`
+	RebootReasons  []string `json:"reboot_reasons,omitempty"`
+	AgentNode      string   `json:"agent_node_id,omitempty"`
 }
 
 type OverviewStorage struct {
@@ -246,10 +250,20 @@ func (s *Service) Overview(ctx context.Context, dcID string) (Overview, error) {
 		}()
 	}
 	in.nodeStatus = map[string]nodeStatus{}
+	in.reboot = map[string][]string{}
 	for _, h := range dc.Hosts {
 		if h.APIReady() != "" {
 			continue
 		}
+		wg.Add(1)
+		go func(h Host) {
+			defer wg.Done()
+			if hw, err := s.Hardware(ctx, h.NodeID); err == nil && hw.RebootRequired {
+				mu.Lock()
+				in.reboot[h.PVENode] = hw.RebootReasons
+				mu.Unlock()
+			}
+		}(h)
 		wg.Add(1)
 		go func(node string) {
 			defer wg.Done()
@@ -272,6 +286,7 @@ type overviewInput struct {
 	ha         []haEntry
 	corosync   []corosyncNode
 	nodeStatus map[string]nodeStatus
+	reboot     map[string][]string
 	errors     []string
 	qdevice    bool
 }
@@ -374,6 +389,10 @@ func analyze(in overviewInput) Overview {
 		n.HasAgent = true
 		n.AgentNode = h.NodeID.String()
 	}
+	for name, why := range in.reboot {
+		n := node(name)
+		n.RebootRequired, n.RebootReasons = true, why
+	}
 	for name, ns := range in.nodeStatus {
 		n := node(name)
 		n.CPUModel, n.Kernel, n.Load, n.Boot, n.KSM = ns.CPUInfo.Model, ns.Kernel, ns.LoadAvg, ns.Boot.Mode, int64(ns.KSM.Shared)
@@ -469,6 +488,9 @@ func warnings(o Overview) []Warning {
 			continue
 		}
 		online++
+		if n.RebootRequired {
+			add("warn", "reboot", "%s moet herstarten: %s", n.Name, strings.Join(n.RebootReasons, "; "))
+		}
 		if n.LRM != "" && strings.Contains(n.LRM, "maintenance") {
 			add("warn", "node", "%s staat in onderhoudsmodus", n.Name)
 		}
