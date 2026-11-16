@@ -360,6 +360,7 @@ func agentPermissions(nodeID uuid.UUID) *server.Permissions {
 			protocol.Subject(id, protocol.SubjectFirewall),
 			protocol.Subject(id, protocol.SubjectStacks),
 			protocol.Subject(id, protocol.SubjectPVE),
+			protocol.Subject(id, protocol.SubjectDocker),
 			protocol.Subject(id, protocol.SubjectLogs),
 			protocol.Subject(id, protocol.SubjectSecurity),
 			protocol.Subject(id, protocol.SubjectConsole),

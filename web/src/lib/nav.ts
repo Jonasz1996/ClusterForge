@@ -104,7 +104,15 @@ export const navGroups: NavGroup[] = [
     id: "services",
     label: "Diensten",
     items: [
-      { href: "/containers", label: "Docker", keywords: "docker containers compose stacks portainer" },
+      {
+        href: "/docker",
+        label: "Docker",
+        keywords: "docker containers compose portainer",
+        tabs: [
+          { href: "/docker", label: "Overzicht" },
+          { href: "/containers", label: "Stacks", keywords: "docker compose stacks" },
+        ],
+      },
       { href: "/databases", label: "Databases", keywords: "mariadb galera postgresql patroni dump" },
       { href: "/cronjobs", label: "Cronjobs", keywords: "cron rsync planning" },
     ],

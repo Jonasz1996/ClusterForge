@@ -882,6 +882,13 @@ type DocSummary struct {
 	ConversationID *uuid.UUID
 }
 
+type DockerHost struct {
+	NodeID    uuid.UUID
+	Summary   []byte
+	Error     string
+	CheckedAt time.Time
+}
+
 type DockerStack struct {
 	ID           uuid.UUID
 	ClusterID    uuid.UUID

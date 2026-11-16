@@ -4276,6 +4276,89 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/docker/hosts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Elke node met Docker, met cluster, agent en de laatste samenvatting (fase 28) */
+        get: operations["listDockerHosts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/docker/nodes/{nodeId}/api": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Een pad van de Docker-API lezen via de agent (fase 28)
+         * @description Alleen de paden uit pkg/protocol/docker.go. De agent praat met de lokale socket, nooit over TCP. Een kijker ziet
+         *     geen waarden van omgevingsvariabelen.
+         */
+        get: operations["getDockerApi"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/docker/nodes/{nodeId}/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        /** CPU, geheugen, netwerk en schijf van de draaiende containers van een node (fase 28) */
+        get: operations["getDockerStats"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/docker/nodes/{nodeId}/calls": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Iets aan Docker veranderen, als taak docker.action (admin, fase 28)
+         * @description Alleen de aanroepen uit pkg/protocol/docker.go (starten, stoppen, verwijderen, pullen, opruimen, volumes en
+         *     netwerken). Verwijderen, hard stoppen en opruimen vragen confirm: de naam, of verwijderen bij meer dingen, of
+         *     opruimen.
+         */
+        post: operations["callDockerApi"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/pve/datacenters": {
         parameters: {
             query?: never;
@@ -13871,6 +13954,17 @@ export interface components {
             /** @description ClusterForge zette deze ban ook op andere nodes */
             shared: boolean;
         };
+        /** @description Een object van Docker zoals Portainer (fase 28); de velden staan in web/src/lib/docker.ts. */
+        DockerObject: {
+            [key: string]: unknown;
+        };
+        DockerCallInput: {
+            /** @description Aanroepen {method, path, query, body} die na elkaar lopen */
+            calls: components["schemas"]["DockerObject"][];
+            title?: string;
+            /** @description Wat overgetikt moet worden bij verwijderen, hard stoppen of opruimen */
+            confirm?: string;
+        };
         /** @description Een object van de Proxmox-hosts (fase 17); de velden staan in web/src/lib/pvehosts.ts en pkg/protocol/pve.go. */
         PveObject: {
             [key: string]: unknown;
@@ -20958,6 +21052,119 @@ export interface operations {
             401: components["responses"]["Error"];
             404: components["responses"]["Error"];
             502: components["responses"]["Error"];
+        };
+    };
+    listDockerHosts: {
+        parameters: {
+            query?: {
+                /** @description Eerst de samenvattingen opnieuw lezen */
+                refresh?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description De nodes; velden in web/src/lib/docker.ts en internal/dockerhost */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DockerObject"];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    getDockerApi: {
+        parameters: {
+            query: {
+                path: string;
+                /** @description JSON-object met queryvelden, zoals {"all":"1"} */
+                query?: string;
+            };
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Het antwoord van Docker onder data */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DockerObject"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+        };
+    };
+    getDockerStats: {
+        parameters: {
+            query?: {
+                /** @description Komma-lijst van ids of namen; leeg is elke draaiende container */
+                containers?: string;
+            };
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description De metingen onder stats */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DockerObject"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+        };
+    };
+    callDockerApi: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DockerCallInput"];
+            };
+        };
+        responses: {
+            /** @description Taak aangemaakt */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Job"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
         };
     };
     listPveDatacenters: {

@@ -91,6 +91,8 @@ type RunSpec struct {
 	PVE *PVERun `json:"pve,omitempty"`
 	// Stack hoort bij RunStack (vanaf StacksSince).
 	Stack *StackRun `json:"stack,omitempty"`
+	// DockerAPI hoort bij RunDockerAPI (vanaf DockerSince).
+	DockerAPI *DockerAPIRun `json:"docker_api,omitempty"`
 }
 
 // AptRun zegt hoe apt bijwerkt.
@@ -227,7 +229,7 @@ func (s RunSpec) Validate() error {
 		return fmt.Errorf("de tijdslimiet moet tussen 0 en %s liggen", RunTimeoutMax)
 	}
 	set := 0
-	for _, b := range []bool{s.Script != "", s.Apt != nil, s.Docker != nil, s.PVE != nil, s.Stack != nil} {
+	for _, b := range []bool{s.Script != "", s.Apt != nil, s.Docker != nil, s.PVE != nil, s.Stack != nil, s.DockerAPI != nil} {
 		if b {
 			set++
 		}
@@ -272,6 +274,10 @@ func (s RunSpec) Validate() error {
 		}
 	case RunStack:
 		if err := s.Stack.Validate(); err != nil {
+			return err
+		}
+	case RunDockerAPI:
+		if err := s.DockerAPI.Validate(); err != nil {
 			return err
 		}
 	case RunPVE:

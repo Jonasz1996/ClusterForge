@@ -43,6 +43,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/deploy"
 	"github.com/Jonasz1996/clusterforge/internal/deps"
 	"github.com/Jonasz1996/clusterforge/internal/disaster"
+	"github.com/Jonasz1996/clusterforge/internal/dockerhost"
 	"github.com/Jonasz1996/clusterforge/internal/docs"
 	"github.com/Jonasz1996/clusterforge/internal/drift"
 	"github.com/Jonasz1996/clusterforge/internal/events"
@@ -247,6 +248,8 @@ func serve() error {
 	// Fase 17: de agent op de Proxmox-hosts (pct, qm, pveam), via
 	// agentprotocol 32; een uitrol maakt er nieuwe CT's mee.
 	pvh := pvehost.NewService(pool, ev, log, runner, bus, agents.NewService(pool, ev, bus))
+	// Docker zoals Portainer (fase 28): lezen en wijzigen via de agent.
+	dkr := dockerhost.NewService(pool, ev, log, runner, bus)
 	pvh.Sync = pve
 	pvh.AgentSHA256 = func() map[string]string { return upg.Offer().SHA256 }
 	pvh.Box = box
@@ -437,6 +440,7 @@ func serve() error {
 	goLoop(ctx, log, "firewall", fw.Loop)
 	goLoop(ctx, log, "security", secs.Loop)
 	goLoop(ctx, log, "soc", socs.Run)
+	goLoop(ctx, log, "docker", dkr.Loop)
 	if git.Enabled() {
 		goLoop(ctx, log, "git", git.Run)
 	}
@@ -454,7 +458,7 @@ func serve() error {
 			Config: cfg, Log: log, Pool: pool, Auth: authSvc, Bus: bus, Hub: hub, Proxmox: pve, Jobs: runner,
 			Lifecycle: life, Deploy: dep, Backups: bk, Drift: drf, Failover: fo, Disaster: dis, Deps: dps, Rollout: ro,
 			GitOps: git, Assistant: asst, Risk: rsk, Topo: tp, Docs: dcs, Reports: rep, Kube: kub, KubeNodes: kn, Databases: dbs, Cronjobs: crons, Heal: hl,
-			Components: cmps, Upgrades: upg, Updates: upd, Commands: cmds, CrowdSec: csec, SOC: socs, Security: secs, Stacks: stk, Logs: lgs, Firewall: fw, PVEHosts: pvh, Version: version,
+			Components: cmps, Upgrades: upg, Updates: upd, Commands: cmds, CrowdSec: csec, SOC: socs, Security: secs, Stacks: stk, Logs: lgs, Firewall: fw, PVEHosts: pvh, Docker: dkr, Version: version,
 		}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,

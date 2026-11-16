@@ -28,6 +28,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/deploy"
 	"github.com/Jonasz1996/clusterforge/internal/deps"
 	"github.com/Jonasz1996/clusterforge/internal/disaster"
+	"github.com/Jonasz1996/clusterforge/internal/dockerhost"
 	"github.com/Jonasz1996/clusterforge/internal/docs"
 	"github.com/Jonasz1996/clusterforge/internal/drift"
 	"github.com/Jonasz1996/clusterforge/internal/events"
@@ -106,6 +107,7 @@ type Server struct {
 	logs         *logs.Service
 	firewall     *firewall.Service
 	pvehosts     *pvehost.Service
+	docker       *dockerhost.Service
 	commands     *commands.Service
 	recipes      *recipes.Service
 	loginLimiter *ipLimiter
@@ -196,7 +198,9 @@ type Deps struct {
 	// Firewall beheert ufw op de nodes (fase 16).
 	Firewall *firewall.Service
 	PVEHosts *pvehost.Service
-	Version  string
+	// Docker is Docker zoals Portainer (fase 28).
+	Docker  *dockerhost.Service
+	Version string
 }
 
 func New(d Deps) *Server {
@@ -238,6 +242,7 @@ func New(d Deps) *Server {
 		firewall: d.Firewall,
 		security: d.Security,
 		pvehosts: d.PVEHosts,
+		docker:   d.Docker,
 		recipes:  recipes.NewService(d.Pool, ev),
 		// 10 pogingen direct, daarna één per 6 seconden per IP-adres.
 		loginLimiter:   newIPLimiter(6*time.Second, 10),

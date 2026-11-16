@@ -88,6 +88,11 @@ func (a *Agent) startConsole(req protocol.ConsoleRequest) (*consoleSession, stri
 	var cmd *exec.Cmd
 	if a.ConsoleCommand != nil {
 		cmd = a.ConsoleCommand(req, pw)
+	} else if req.Kind == protocol.ConsoleDocker {
+		if err := a.dockerRunning(req.Container); err != nil {
+			return nil, "", err
+		}
+		cmd = dockerConsoleCommand(req)
 	} else {
 		var err error
 		if cmd, err = a.pveHost().consoleCommand(req, pw); err != nil {

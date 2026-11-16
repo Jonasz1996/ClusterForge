@@ -36,6 +36,10 @@ type Agent struct {
 
 	// consoles telt de open consolesessies (fase 26 M7).
 	consoles atomic.Int32
+	// dockerMu en dockerC: de client voor de Docker-socket (fase 28),
+	// gedeeld zodat verbindingen hergebruikt worden.
+	dockerMu sync.Mutex
+	dockerC  *dockerAPI
 	// ConsoleCommand maakt het programma van een consolesessie; nil
 	// gebruikt qm, pct en login. Tests vervangen het.
 	ConsoleCommand func(req protocol.ConsoleRequest, password string) *exec.Cmd
@@ -239,6 +243,9 @@ func (a *Agent) Connect() error {
 		return err
 	}
 	if _, err = a.nc.Subscribe(protocol.Subject(a.Config.NodeID, protocol.SubjectStacks), a.onStacks); err != nil {
+		return err
+	}
+	if _, err = a.nc.Subscribe(protocol.Subject(a.Config.NodeID, protocol.SubjectDocker), a.onDocker); err != nil {
 		return err
 	}
 	if _, err = a.nc.Subscribe(protocol.Subject(a.Config.NodeID, protocol.SubjectPVE), a.onPVE); err != nil {

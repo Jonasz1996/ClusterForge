@@ -4566,6 +4566,84 @@ paths:
         "401": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "502": { $ref: "#/components/responses/Error" }
+  /docker/hosts:
+    get:
+      operationId: listDockerHosts
+      summary: Elke node met Docker, met cluster, agent en de laatste samenvatting (fase 28)
+      parameters:
+        - { name: refresh, in: query, required: false, description: Eerst de samenvattingen opnieuw lezen, schema: { type: boolean } }
+      responses:
+        "200":
+          description: De nodes; velden in web/src/lib/docker.ts en internal/dockerhost
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DockerObject" }
+        "401": { $ref: "#/components/responses/Error" }
+  /docker/nodes/{nodeId}/api:
+    parameters:
+      - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getDockerApi
+      summary: Een pad van de Docker-API lezen via de agent (fase 28)
+      description: |
+        Alleen de paden uit pkg/protocol/docker.go. De agent praat met de lokale socket, nooit over TCP. Een kijker ziet
+        geen waarden van omgevingsvariabelen.
+      parameters:
+        - { name: path, in: query, required: true, schema: { type: string } }
+        - { name: query, in: query, required: false, description: "JSON-object met queryvelden, zoals {\"all\":\"1\"}", schema: { type: string } }
+      responses:
+        "200":
+          description: Het antwoord van Docker onder data
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DockerObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+  /docker/nodes/{nodeId}/stats:
+    parameters:
+      - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getDockerStats
+      summary: CPU, geheugen, netwerk en schijf van de draaiende containers van een node (fase 28)
+      parameters:
+        - { name: containers, in: query, required: false, description: Komma-lijst van ids of namen; leeg is elke draaiende container, schema: { type: string } }
+      responses:
+        "200":
+          description: De metingen onder stats
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DockerObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+  /docker/nodes/{nodeId}/calls:
+    parameters:
+      - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: callDockerApi
+      summary: Iets aan Docker veranderen, als taak docker.action (admin, fase 28)
+      description: |
+        Alleen de aanroepen uit pkg/protocol/docker.go (starten, stoppen, verwijderen, pullen, opruimen, volumes en
+        netwerken). Verwijderen, hard stoppen en opruimen vragen confirm: de naam, of verwijderen bij meer dingen, of
+        opruimen.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DockerCallInput" }
+      responses:
+        "202":
+          description: Taak aangemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
   /pve/datacenters:
     get:
       operationId: listPveDatacenters
@@ -14504,6 +14582,20 @@ components:
         until: { type: string, format: date-time }
         nodes: { type: array, items: { type: string } }
         shared: { type: boolean, description: ClusterForge zette deze ban ook op andere nodes }
+    DockerObject:
+      type: object
+      description: Een object van Docker zoals Portainer (fase 28); de velden staan in web/src/lib/docker.ts.
+      additionalProperties: true
+    DockerCallInput:
+      type: object
+      required: [calls]
+      properties:
+        calls:
+          type: array
+          items: { $ref: "#/components/schemas/DockerObject" }
+          description: Aanroepen {method, path, query, body} die na elkaar lopen
+        title: { type: string }
+        confirm: { type: string, description: "Wat overgetikt moet worden bij verwijderen, hard stoppen of opruimen" }
     PveObject:
       type: object
       description: Een object van de Proxmox-hosts (fase 17); de velden staan in web/src/lib/pvehosts.ts en pkg/protocol/pve.go.
