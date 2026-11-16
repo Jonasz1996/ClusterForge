@@ -4661,6 +4661,30 @@ paths:
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /pve/datacenters/{dcId}/tokens:
+    parameters:
+      - { name: dcId, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: createPveToken
+      summary: Een API-token van Proxmox maken (admin)
+      description: |
+        Proxmox toont de waarde van een nieuw token maar één keer. ClusterForge geeft hem in dit antwoord terug en
+        bewaart hem nergens (geen taak, geen logboek). Vraagt een agent met protocol 36 op een host.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PveTokenInput" }
+      responses:
+        "201":
+          description: Het token, met zijn waarde
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveTokenCreated" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
   /pve/datacenters/{dcId}/host-update:
     parameters:
       - { name: dcId, in: path, required: true, schema: { type: string } }
@@ -14039,6 +14063,21 @@ components:
         shutdown_stuck: { type: boolean, description: Gasten die niet kunnen verhuizen afsluiten en na de update weer starten }
         dry_run: { type: boolean }
         confirm: { type: string, description: De naam van het datacenter }
+    PveTokenInput:
+      type: object
+      required: [userid, tokenid]
+      properties:
+        userid: { type: string, description: Bijvoorbeeld homepage@pve }
+        tokenid: { type: string }
+        comment: { type: string }
+        expire: { type: integer, format: int64, description: Unix-tijd; 0 of leeg is nooit }
+        privsep: { type: boolean, description: Eigen rechten in plaats van die van de gebruiker, standaard aan }
+    PveTokenCreated:
+      type: object
+      required: [full_tokenid, value]
+      properties:
+        full_tokenid: { type: string }
+        value: { type: string }
     PveRestoreTestInput:
       type: object
       required: [node, archive, type, storage]

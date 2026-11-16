@@ -4364,6 +4364,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/pve/datacenters/{dcId}/tokens": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                dcId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Een API-token van Proxmox maken (admin)
+         * @description Proxmox toont de waarde van een nieuw token maar één keer. ClusterForge geeft hem in dit antwoord terug en
+         *     bewaart hem nergens (geen taak, geen logboek). Vraagt een agent met protocol 36 op een host.
+         */
+        post: operations["createPveToken"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/pve/datacenters/{dcId}/host-update": {
         parameters: {
             query?: never;
@@ -13419,6 +13442,23 @@ export interface components {
             /** @description De naam van het datacenter */
             confirm?: string;
         };
+        PveTokenInput: {
+            /** @description Bijvoorbeeld homepage@pve */
+            userid: string;
+            tokenid: string;
+            comment?: string;
+            /**
+             * Format: int64
+             * @description Unix-tijd; 0 of leeg is nooit
+             */
+            expire?: number;
+            /** @description Eigen rechten in plaats van die van de gebruiker */
+            privsep?: boolean;
+        };
+        PveTokenCreated: {
+            full_tokenid: string;
+            value: string;
+        };
         PveRestoreTestInput: {
             /** @description Proxmox-host waarop de test draait */
             node: string;
@@ -20511,6 +20551,36 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Job"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    createPveToken: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                dcId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PveTokenInput"];
+            };
+        };
+        responses: {
+            /** @description Het token, met zijn waarde */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PveTokenCreated"];
                 };
             };
             400: components["responses"]["Error"];

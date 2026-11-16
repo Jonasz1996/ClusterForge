@@ -17,6 +17,11 @@ import (
 // Proxmox-functie in ClusterForge meestal geen agentupdate.
 const PVEAPISince = 35
 
+// PVEQuietSince is de eerste protocolversie die PVEAPICall.Quiet kent
+// (fase 26 M6): een aanroep waarvan het antwoord een geheim is, zoals een
+// nieuw API-token.
+const PVEQuietSince = 36
+
 // Leesverzoeken vanaf PVEAPISince.
 const (
 	// PVEOpGet is pvesh get <Path> met Params.
@@ -67,6 +72,10 @@ type PVEAPICall struct {
 	// Secret zijn de sleutels van Params die nooit in de uitvoer komen,
 	// zoals password.
 	Secret []string `json:"secret,omitempty"`
+	// Quiet: het antwoord van Proxmox komt niet in de uitvoer, alleen in
+	// RunStatus.PVE.Data (vanaf PVEQuietSince). Voor een antwoord met een
+	// geheim, zoals de waarde van een nieuw API-token.
+	Quiet bool `json:"quiet,omitempty"`
 }
 
 // PVEPassthroughSpec is hoe de host voor passthrough staat. De agent

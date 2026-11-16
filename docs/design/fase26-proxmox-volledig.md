@@ -100,3 +100,13 @@ voor de GUI verboden, net als `args` en `hookscript`.
 - **ISO's en templates**: inhoud van alle opslag met iso/vztmpl, downloaden van URL met checksum, CT-template uit de Proxmox-lijst (`aplinfo`), weghalen met getypt volume-id.
 - **Opruimen**: schijven van een ID dat niet bestaat, `unusedN`-schijven (link naar Hardware van de gast), ISO's die in geen cd-station zitten (alleen als elke gastconfig gelezen is) en achtergebleven terugzettests.
 - Geen agentupdate en geen migratie.
+
+## Netwerk, firewall, certificaten, toegang en syslog (M6)
+
+- **Netwerk** (`/proxmox/netwerk`): interfaces per host (bridge, bond, VLAN; adres, gateway, MTU, VLAN-bewust). Wijzigingen staan klaar tot "Toepassen" (getypte hostnaam, ifreload) of "Vergeten". Adressen op .1-.3 van een /24 weigert de GUI (gateway en CARP-firewalls). Tabblad SDN: zones (VLAN, simple, QinQ), VNets, subnets en "SDN toepassen" (getypt "sdn").
+- **Proxmox-firewall** (`/proxmox/firewall`): datacenter, host of gast; aan/uit, standaardbeleid, regels (dienst of protocol/poort, van/naar, interface, loggen, volgorde), aliassen en IP-sets. De datacenterfirewall aanzetten vraagt "firewall" (ook in de policy).
+- **Certificaten** (`/proxmox/certificaten`): certificaat per host met vervaldatum, ACME-domeinen per host (HTTP of DNS-plugin), nu bestellen, eigen PEM-certificaat (sleutel als geheim), ACME-accounts en DNS-plugins (gegevens als geheim).
+- **Gebruikers en tokens** (`/proxmox/toegang`, alleen beheerders): gebruikers, groepen, rechten (ACL), wachtwoord, API-tokens intrekken.
+- **API-token maken**: `POST /pve/datacenters/{dc}/tokens` loopt synchroon zonder taak. De agent krijgt `PVEAPICall.Quiet` (protocol 36): het antwoord van Proxmox komt niet in de uitvoer, alleen in `RunStatus.PVE.Data`; de server gebruikt een run in het geheugen (geen taak, geen stap in de database) en geeft de waarde één keer terug. Een token via de gewone aanroep kan niet (geen policyregel). Vraagt minstens één host met agentprotocol 36.
+- **Syslog** (`/proxmox/syslog`): `journal` van een host, filter op tekst of fouten/waarschuwingen, live volgen.
+- Agentprotocol 36 (alleen voor tokens); geen migratie.

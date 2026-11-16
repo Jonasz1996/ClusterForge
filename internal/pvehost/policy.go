@@ -234,6 +234,15 @@ var rules = []*rule{
 	r("set", `/cluster/sdn`, `lock-token|release-lock`, fixed("SDN-wijzigingen toepassen")).confirmWith(fixed("sdn")),
 
 	// --- Firewall van Proxmox ---------------------------------------
+	// De firewall van het datacenter aanzetten kan alle hosts afsluiten:
+	// dat vraagt het woord "firewall".
+	r("set", `/cluster/firewall/options`, anyKey, fixed("firewall van het datacenter wijzigen")).
+		confirmWith(func(_, p map[string]string) string {
+			if p["enable"] == "1" {
+				return "firewall"
+			}
+			return ""
+		}),
 	r("create|set|delete", `/cluster`+fwRules, anyKey, fixed("firewall van het datacenter wijzigen")),
 	r("create|set|delete", `/nodes/`+segNode+fwRules, anyKey, func(m, _ map[string]string) string { return "firewall van " + m["node"] + " wijzigen" }),
 	r("create|set|delete", guestPath+fwRules, anyKey, func(m, _ map[string]string) string { return "firewall van " + guestName(m) + " wijzigen" }),

@@ -11606,6 +11606,27 @@ type PveRestoreTestInput struct {
 // PveRestoreTestInputType defines model for PveRestoreTestInput.Type.
 type PveRestoreTestInputType string
 
+// PveTokenCreated defines model for PveTokenCreated.
+type PveTokenCreated struct {
+	FullTokenid string `json:"full_tokenid"`
+	Value       string `json:"value"`
+}
+
+// PveTokenInput defines model for PveTokenInput.
+type PveTokenInput struct {
+	Comment *string `json:"comment,omitempty"`
+
+	// Expire Unix-tijd; 0 of leeg is nooit
+	Expire *int64 `json:"expire,omitempty"`
+
+	// Privsep Eigen rechten in plaats van die van de gebruiker
+	Privsep *bool  `json:"privsep,omitempty"`
+	Tokenid string `json:"tokenid"`
+
+	// Userid Bijvoorbeeld homepage@pve
+	Userid string `json:"userid"`
+}
+
 // RecipeCheck defines model for RecipeCheck.
 type RecipeCheck struct {
 	Diagnostics []RecipeDiag `json:"diagnostics"`
@@ -14356,6 +14377,9 @@ type StartPveHostUpdateJSONRequestBody = PveHostUpdateInput
 // StartPveRestoreTestJSONRequestBody defines body for StartPveRestoreTest for application/json ContentType.
 type StartPveRestoreTestJSONRequestBody = PveRestoreTestInput
 
+// CreatePveTokenJSONRequestBody defines body for CreatePveToken for application/json ContentType.
+type CreatePveTokenJSONRequestBody = PveTokenInput
+
 // SaveRecipeJSONRequestBody defines body for SaveRecipe for application/json ContentType.
 type SaveRecipeJSONRequestBody = RecipeSource
 
@@ -15291,6 +15315,9 @@ type ServerInterface interface {
 	// StartPveRestoreTest Een back-up op proef terugzetten, starten en weer opruimen (admin)
 	// (POST /pve/datacenters/{dcId}/restore-test)
 	StartPveRestoreTest(w http.ResponseWriter, r *http.Request, dcId string)
+	// CreatePveToken Een API-token van Proxmox maken (admin)
+	// (POST /pve/datacenters/{dcId}/tokens)
+	CreatePveToken(w http.ResponseWriter, r *http.Request, dcId string)
 	// ListRecipes Alle recepten met hun versies (fase 9)
 	// (GET /recipes)
 	ListRecipes(w http.ResponseWriter, r *http.Request)
@@ -17193,6 +17220,12 @@ func (_ Unimplemented) GetPveOverview(w http.ResponseWriter, r *http.Request, dc
 // StartPveRestoreTest Een back-up op proef terugzetten, starten en weer opruimen (admin)
 // (POST /pve/datacenters/{dcId}/restore-test)
 func (_ Unimplemented) StartPveRestoreTest(w http.ResponseWriter, r *http.Request, dcId string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CreatePveToken Een API-token van Proxmox maken (admin)
+// (POST /pve/datacenters/{dcId}/tokens)
+func (_ Unimplemented) CreatePveToken(w http.ResponseWriter, r *http.Request, dcId string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -26161,6 +26194,32 @@ func (siw *ServerInterfaceWrapper) StartPveRestoreTest(w http.ResponseWriter, r 
 	handler.ServeHTTP(w, r)
 }
 
+// CreatePveToken operation middleware
+func (siw *ServerInterfaceWrapper) CreatePveToken(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "dcId" -------------
+	var dcId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "dcId", chi.URLParam(r, "dcId"), &dcId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "dcId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreatePveToken(w, r, dcId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListRecipes operation middleware
 func (siw *ServerInterfaceWrapper) ListRecipes(w http.ResponseWriter, r *http.Request) {
 
@@ -27945,6 +28004,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/pve/datacenters/{dcId}/restore-test", wrapper.StartPveRestoreTest)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/pve/datacenters/{dcId}/tokens", wrapper.CreatePveToken)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/pve/datacenters/{dcId}/host-update", wrapper.StartPveHostUpdate)

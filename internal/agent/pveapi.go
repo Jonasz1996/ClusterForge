@@ -128,13 +128,20 @@ func (r *RunExecutor) pveAPI(ctx context.Context, dir string, c *protocol.PVEAPI
 	argv := append([]string{"pvesh", c.Method, c.Path, "--output-format", "json"}, pveshArgs(c.Params)...)
 	_, _ = fmt.Fprintf(out, "\n$ %s\n", strings.Join(append([]string{"pvesh", c.Method, c.Path}, pveshArgs(shown)...), " "))
 	var buf bytes.Buffer
-	sw := secretWriter{w: io.MultiWriter(out, &buf), secrets: secrets}
+	sink := io.MultiWriter(out, &buf)
+	if c.Quiet {
+		// Het antwoord bevat een geheim: alleen in RunStatus, nooit in de uitvoer.
+		sink = &buf
+		_, _ = io.WriteString(out, "(antwoord verborgen: het bevat een geheim)\n")
+	}
+	sw := secretWriter{w: sink, secrets: secrets}
 	code, err := r.cmd(ctx, "", argv, nil, sw)
 	if err != nil {
 		return code, err
 	}
 	text := buf.String()
 	if code != 0 {
+		// Mislukt is er geen geheim gemaakt; de foutmelding mag mee.
 		return code, fmt.Errorf("pvesh %s %s mislukte: %s", c.Method, c.Path, lastLines(strings.TrimSpace(text), 2))
 	}
 	res := &protocol.PVERunResult{}

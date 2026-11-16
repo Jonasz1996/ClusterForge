@@ -637,3 +637,101 @@ export function useGuestConfigs(dc: string, guests: PveResource[], enabled = tru
   });
   return { configs: guests.map((g, i) => ({ guest: g, config: qs[i]?.data })), loading: qs.some((q) => q.isLoading) };
 }
+
+// --- Netwerk, SDN, firewall, certificaten, toegang (fase 26 M6) ---
+
+export type NetIface = {
+  iface: string;
+  type: string;
+  method?: string;
+  method6?: string;
+  cidr?: string;
+  address?: string;
+  gateway?: string;
+  cidr6?: string;
+  gateway6?: string;
+  bridge_ports?: string;
+  bridge_vlan_aware?: number;
+  slaves?: string;
+  bond_mode?: string;
+  "vlan-raw-device"?: string;
+  "vlan-id"?: number;
+  mtu?: number;
+  autostart?: number;
+  active?: number;
+  exists?: number;
+  comments?: string;
+};
+
+export type SdnZone = { zone: string; type: string; bridge?: string; tag?: number; mtu?: number; nodes?: string; ipam?: string; pending?: unknown; state?: string };
+export type SdnVnet = { vnet: string; zone: string; tag?: number; alias?: string; vlanaware?: number; pending?: unknown; state?: string };
+export type SdnSubnet = { subnet: string; cidr?: string; gateway?: string; snat?: number; vnet?: string; state?: string };
+
+// isGatewayAddress zegt of een IPv4-adres op .1-.3 van een /24 valt: daar
+// staan bij Jonas de CARP-VIP en de twee firewalls.
+export function isGatewayAddress(cidr?: string) {
+  const m = /^(\d+)\.(\d+)\.(\d+)\.(\d+)\/(\d+)$/.exec(cidr ?? "");
+  return !!m && Number(m[5]) >= 24 && ["1", "2", "3"].includes(m[4]);
+}
+
+export type FwRule = {
+  pos: number;
+  type: "in" | "out" | "group" | string;
+  action: string;
+  enable?: number;
+  macro?: string;
+  source?: string;
+  dest?: string;
+  proto?: string;
+  dport?: string;
+  sport?: string;
+  iface?: string;
+  log?: string;
+  comment?: string;
+};
+export type FwOptions = { enable?: number; policy_in?: string; policy_out?: string; policy_forward?: string; log_level_in?: string; ebtables?: number; dhcp?: number; macfilter?: number; ipfilter?: number; nosmurfs?: number; tcpflags?: number; ndp?: number; radv?: number };
+export type FwAlias = { name: string; cidr: string; comment?: string };
+export type FwIpset = { name: string; comment?: string };
+export type FwIpsetEntry = { cidr: string; comment?: string; nomatch?: number };
+export type FwGroup = { group: string; comment?: string };
+
+export type CertInfo = { filename: string; subject?: string; issuer?: string; notbefore?: number; notafter?: number; san?: string[]; fingerprint?: string };
+export type NodeConfig = { acme?: string; [k: `acmedomain${number}`]: string | undefined; description?: string; wakeonlan?: string };
+export type AcmeAccount = { name: string };
+export type AcmePlugin = { plugin: string; type: string; api?: string; data?: string; disable?: number };
+export type AcmeDirectory = { name: string; url: string };
+export type AcmeChallenge = { id: string; name?: string; type: string };
+
+export type PveUser = {
+  userid: string;
+  enable?: number;
+  expire?: number;
+  firstname?: string;
+  lastname?: string;
+  email?: string;
+  comment?: string;
+  groups?: string | string[];
+  tokens?: { tokenid: string; expire?: number; privsep?: number; comment?: string }[];
+  "realm-type"?: string;
+};
+export type PveGroup = { groupid: string; comment?: string; users?: string };
+export type PveAcl = { path: string; type: "user" | "group" | "token"; ugid: string; roleid: string; propagate?: number };
+export type PveRole = { roleid: string; special?: number; privs?: string };
+export type PveRealm = { realm: string; type: string; comment?: string };
+
+// propKV leest "a=1,b=2" uit Proxmox in een object.
+export function propKV(s?: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const part of (s ?? "").split(",")) {
+    const i = part.indexOf("=");
+    if (i > 0) out[part.slice(0, i)] = part.slice(i + 1);
+    else if (part) out[""] = part;
+  }
+  return out;
+}
+
+export type PveTokenCreated = { full_tokenid: string; value: string };
+
+export async function createPveToken(dc: string, body: { userid: string; tokenid: string; comment?: string; expire?: number; privsep?: boolean }): Promise<PveTokenCreated> {
+  return unwrap(await api.POST("/pve/datacenters/{dcId}/tokens", { params: { path: { dcId: dc } }, body })) as PveTokenCreated;
+}

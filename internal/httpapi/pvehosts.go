@@ -205,3 +205,30 @@ func (s *Server) StartPveHostUpdate(w http.ResponseWriter, r *http.Request, dcId
 	}
 	writeJSON(w, http.StatusAccepted, toAPIJob(j, &p.User.Username))
 }
+
+// CreatePveToken maakt een API-token van Proxmox en geeft zijn waarde één
+// keer terug (fase 26 M6).
+func (s *Server) CreatePveToken(w http.ResponseWriter, r *http.Request, dcId string) {
+	p, ok := requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	var in gen.PveTokenInput
+	if !decode(w, r, &in) {
+		return
+	}
+	t := pvehost.NewToken{Datacenter: dcId, UserID: in.Userid, TokenID: in.Tokenid, Privsep: in.Privsep == nil || *in.Privsep}
+	if in.Comment != nil {
+		t.Comment = *in.Comment
+	}
+	if in.Expire != nil {
+		t.Expire = *in.Expire
+	}
+	tok, err := s.pvehosts.CreateToken(r.Context(), events.User(p.User.ID), t)
+	if err != nil {
+		s.pveHostError(w, r, err)
+		return
+	}
+	w.Header().Set("Cache-Control", "no-store")
+	writeJSON(w, http.StatusCreated, tok)
+}

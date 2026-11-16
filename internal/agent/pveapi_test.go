@@ -309,3 +309,31 @@ func TestPVEPassthroughSetup(t *testing.T) {
 		t.Error("vfio.conf staat er nog")
 	}
 }
+
+// Een stille aanroep (een nieuw API-token) zet het antwoord alleen in
+// RunStatus, niet in de uitvoer.
+func TestPVEAPIQuietHidesAnswer(t *testing.T) {
+	root := pveRoot(t)
+	const value = "3f1c2a9e-7b6d-4e0f-9a8b-1c2d3e4f5a6b"
+	h := &fakeHost{reply: func(c string) (string, int) {
+		if strings.HasPrefix(c, "pvesh create /access/users/homepage@pve/token/dashboard") {
+			return `{"full-tokenid":"homepage@pve!dashboard","info":{"privsep":1},"value":"` + value + `"}` + "\n", 0
+		}
+		return "", 0
+	}}
+	out, st := pveRun(t, root, h, nil, protocol.PVERun{Action: protocol.PVEAPI, API: &protocol.PVEAPICall{
+		Method: "create", Path: "/access/users/homepage@pve/token/dashboard", Params: map[string]string{"privsep": "1"}, Quiet: true,
+	}})
+	if st.State != protocol.RunOK {
+		t.Fatalf("stand %s: %s\n%s", st.State, st.Error, out)
+	}
+	if strings.Contains(out, value) {
+		t.Errorf("de tokenwaarde staat in de uitvoer:\n%s", out)
+	}
+	var got struct {
+		Value string `json:"value"`
+	}
+	if st.PVE == nil || json.Unmarshal(st.PVE.Data, &got) != nil || got.Value != value {
+		t.Errorf("de tokenwaarde ontbreekt in RunStatus: %+v", st.PVE)
+	}
+}

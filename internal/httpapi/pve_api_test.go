@@ -45,6 +45,8 @@ func TestPVEAPI(t *testing.T) {
 			_, _ = io.WriteString(out, "null\n")
 		case strings.HasPrefix(cmd, "pvesh get /cluster/"), strings.HasPrefix(cmd, "pvesh get /nodes/pve1/status "):
 			_, _ = io.WriteString(out, `[]`)
+		case strings.HasPrefix(cmd, "pvesh create /access/users/homepage@pve/token/dash "):
+			_, _ = io.WriteString(out, `{"full-tokenid":"homepage@pve!dash","info":{"privsep":1},"value":"9d4e1b2c-aaaa-bbbb-cccc-0123456789ab"}`+"\n")
 		case strings.HasPrefix(cmd, "pvesh create /nodes/pve1/status "), strings.HasPrefix(cmd, "pvesh create /storage "):
 			_, _ = io.WriteString(out, "null\n")
 		default:
@@ -202,5 +204,36 @@ func TestPVEAPI(t *testing.T) {
 	}
 	if strings.Index(all, "node-maintenance enable") > strings.Index(all, "full-upgrade") || strings.Index(all, "full-upgrade") > strings.Index(all, "node-maintenance disable") {
 		t.Errorf("verkeerde volgorde:\n%s", all)
+	}
+
+	// Een API-token: de waarde komt één keer terug en staat in geen taak.
+	var tok struct {
+		Full  string `json:"full_tokenid"`
+		Value string `json:"value"`
+	}
+	if s := c.do("POST", "/api/v1/pve/datacenters/thuislab/tokens", map[string]any{"userid": "homepage@pve", "tokenid": "dash"}, &tok); s != http.StatusCreated ||
+		tok.Value != "9d4e1b2c-aaaa-bbbb-cccc-0123456789ab" || tok.Full != "homepage@pve!dash" {
+		t.Fatalf("token: %d %+v", s, tok)
+	}
+	if !strings.Contains(strings.Join(sim.called("pvesh create /access/users/homepage@pve/token/dash"), ""), "--privsep=1") {
+		t.Errorf("token zonder privsep: %v", sim.called("pvesh create /access"))
+	}
+	var jobs struct {
+		Items []struct {
+			Title string `json:"title"`
+		} `json:"items"`
+	}
+	c.do("GET", "/api/v1/jobs?limit=200", nil, &jobs)
+	for _, j := range jobs.Items {
+		if strings.Contains(j.Title, "token") {
+			t.Errorf("het token kwam in een taak: %s", j.Title)
+		}
+	}
+	if s := c.do("POST", "/api/v1/pve/datacenters/thuislab/tokens", map[string]any{"userid": "homepage", "tokenid": "dash"}, &de); s != http.StatusBadRequest {
+		t.Errorf("ongeldige gebruiker: %d", s)
+	}
+	// Een token maken gaat niet langs de gewone aanroep (dan kwam de waarde in het logboek).
+	if s := c.do("POST", "/api/v1/pve/datacenters/thuislab/api", map[string]any{"method": "create", "path": "/access/users/homepage@pve/token/x"}, &de); s != http.StatusBadRequest {
+		t.Errorf("token via calls: %d", s)
 	}
 }
