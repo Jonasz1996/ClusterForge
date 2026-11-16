@@ -185,6 +185,27 @@ func TestDashboardAPI(t *testing.T) {
 		t.Fatalf("token voor web ziet db: %d", s)
 	}
 
+	// Het beveiligingsoverzicht (fase 25): alleen met een token voor alle clusters.
+	var sec struct {
+		OK         bool   `json:"ok"`
+		Level      string `json:"level"`
+		LevelLabel string `json:"level_label"`
+		Score      int    `json:"score"`
+		Protected  string `json:"protected"`
+		URL        string `json:"url"`
+	}
+	if s := dashboardGet(t, e, "/api/dashboard/v1/soc", "Authorization", "Bearer "+created.Token, &sec); s != 200 ||
+		sec.LevelLabel == "" || !strings.HasSuffix(sec.URL, "/soc") || sec.Protected == "" {
+		t.Fatalf("soc: %d %+v", s, sec)
+	}
+	// Het open incident van db maakt het niveau verhoogd: met strict een 503.
+	if s := dashboardGet(t, e, "/api/dashboard/v1/soc?strict=1", "Authorization", "Bearer "+created.Token, nil); sec.OK || s != 503 {
+		t.Fatalf("soc strict: %d, niveau %s", s, sec.Level)
+	}
+	if s := dashboardGet(t, e, "/api/dashboard/v1/soc", "Authorization", "Bearer "+scoped.Token, nil); s != 403 {
+		t.Fatalf("soc met een token voor één cluster: %d", s)
+	}
+
 	// De lijst toont geen token, wel het laatste gebruik; het voorbeeld werkt voor een viewer.
 	var list struct {
 		Items []struct {

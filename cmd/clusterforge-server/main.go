@@ -69,6 +69,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/risk"
 	"github.com/Jonasz1996/clusterforge/internal/rollout"
 	"github.com/Jonasz1996/clusterforge/internal/secrets"
+	"github.com/Jonasz1996/clusterforge/internal/soc"
 	"github.com/Jonasz1996/clusterforge/internal/stacks"
 	"github.com/Jonasz1996/clusterforge/internal/status"
 	"github.com/Jonasz1996/clusterforge/internal/store"
@@ -228,6 +229,9 @@ func serve() error {
 	lgs := logs.NewService(pool, ev, bus, log)
 	// Fase 16: ufw op de nodes, via agentprotocol 30.
 	fw := firewall.NewService(pool, ev, runner, bus, log)
+	// Fase 25: het beveiligingsoverzicht (SOC) over CrowdSec, de firewall
+	// en de logins heen; elk kwartier een momentopname voor de trend.
+	socs := soc.NewService(pool, log)
 	// Fase 17: de agent op de Proxmox-hosts (pct, qm, pveam), via
 	// agentprotocol 32; een uitrol maakt er nieuwe CT's mee.
 	pvh := pvehost.NewService(pool, ev, log, runner, bus, agents.NewService(pool, ev, bus))
@@ -418,6 +422,7 @@ func serve() error {
 	goLoop(ctx, log, "cmps", cmps.Run)
 	goLoop(ctx, log, "crowdsec", csec.Loop)
 	goLoop(ctx, log, "firewall", fw.Loop)
+	goLoop(ctx, log, "soc", socs.Run)
 	if git.Enabled() {
 		goLoop(ctx, log, "git", git.Run)
 	}
@@ -435,7 +440,7 @@ func serve() error {
 			Config: cfg, Log: log, Pool: pool, Auth: authSvc, Bus: bus, Hub: hub, Proxmox: pve, Jobs: runner,
 			Lifecycle: life, Deploy: dep, Backups: bk, Drift: drf, Failover: fo, Disaster: dis, Deps: dps, Rollout: ro,
 			GitOps: git, Assistant: asst, Risk: rsk, Topo: tp, Docs: dcs, Reports: rep, Kube: kub, KubeNodes: kn, Databases: dbs, Cronjobs: crons, Heal: hl,
-			Components: cmps, Upgrades: upg, Updates: upd, Commands: cmds, CrowdSec: csec, Stacks: stk, Logs: lgs, Firewall: fw, PVEHosts: pvh, Version: version,
+			Components: cmps, Upgrades: upg, Updates: upd, Commands: cmds, CrowdSec: csec, SOC: socs, Stacks: stk, Logs: lgs, Firewall: fw, PVEHosts: pvh, Version: version,
 		}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,

@@ -44,6 +44,7 @@ export const navGroups: NavGroup[] = [
     id: "security",
     label: "Beveiliging",
     items: [
+      { href: "/soc", label: "SOC", keywords: "beveiliging dreiging aanvallers security dashboard score" },
       { href: "/firewall", label: "Firewall", keywords: "ufw poorten" },
       { href: "/crowdsec", label: "CrowdSec", keywords: "bans bouncer alerts" },
     ],

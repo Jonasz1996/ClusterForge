@@ -1688,6 +1688,12 @@ type Session struct {
 	ExpiresAt  time.Time
 }
 
+type SocSnapshot struct {
+	Hour  time.Time
+	Score int32
+	Level string
+}
+
 type TestRun struct {
 	ID           uuid.UUID
 	Kind         string

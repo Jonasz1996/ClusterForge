@@ -6,6 +6,7 @@ import { AttentionCard } from "@/components/AttentionCard";
 import { AuditList } from "@/components/audit/AuditList";
 import { OpenIncidentsCard } from "@/components/incidents/Incidents";
 import { ClusterHealth } from "@/components/monitoring/ClusterHealth";
+import { SocStrip } from "@/components/soc/SocStrip";
 import { FleetRiskCard } from "@/components/risk/Risk";
 import { Alert, Card, PageHeader } from "@/components/ui";
 import { api } from "@/lib/api/client";
@@ -30,6 +31,8 @@ export default function OverviewPage() {
       <PageHeader title="Overzicht" description="De status van je clusters en wie elk VIP heeft, live bijgewerkt." />
 
       <AttentionCard />
+
+      <SocStrip />
 
       <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
         <Link href="/clusters">

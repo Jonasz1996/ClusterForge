@@ -45,8 +45,40 @@ export function useDeleteApiToken() {
 // homepageYaml is een services.yaml-blok voor homepage (customapi), één tegel
 // per cluster. In de eigen homepage komt "token" versleuteld in de geheimen;
 // homepage.dev zelf gebruikt de header eronder.
-export function homepageYaml(origin: string, base: string, token: string, clusters: { name: string; slug: string; id: string }[]) {
+export function homepageYaml(
+  origin: string,
+  base: string,
+  token: string,
+  clusters: { name: string; slug: string; id: string }[],
+  soc = false,
+) {
   const lines = ["- ClusterForge:"];
+  // Het beveiligingsoverzicht (fase 25) kan alleen met een token voor alle
+  // clusters.
+  if (soc) {
+    lines.push(
+      `    - Beveiliging:`,
+      `        icon: mdi-shield-check`,
+      `        href: ${origin}/soc`,
+      `        description: ClusterForge SOC`,
+      `        widget:`,
+      `          type: customapi`,
+      `          url: ${origin}${base}/soc`,
+      `          token: ${token}`,
+      `          refreshInterval: 60000`,
+      `          mappings:`,
+      `            - field: level_label`,
+      `              label: Niveau`,
+      `            - field: score`,
+      `              label: Score`,
+      `            - field: attacks_24h`,
+      `              label: Aanvallen 24 u`,
+      `            - field: active_bans`,
+      `              label: Bans`,
+      `            - field: protected`,
+      `              label: Beschermd`,
+    );
+  }
   for (const c of clusters) {
     lines.push(
       `    - ${yamlKey(c.name)}:`,

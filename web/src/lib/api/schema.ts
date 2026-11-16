@@ -3959,6 +3959,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/soc": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Beveiligingsoverzicht (SOC, fase 25)
+         * @description Dreigingsniveau met de reden, beveiligingsscore met aftrekposten, cijfers met de vorige periode, wat nu belangrijk is,
+         *     activiteit per uur (24 u) of per 4 uur (7 d), aanvallers samengevoegd over CrowdSec, de firewall en de login van
+         *     ClusterForge, doelwitten en de bescherming per node. Hoogstens 15 s gecachet. Ook voor viewers.
+         */
+        get: operations["getSoc"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/crowdsec": {
         parameters: {
             query?: never;
@@ -13301,6 +13323,126 @@ export interface components {
             as: string;
             count: number;
         };
+        SocOverview: {
+            /** Format: date-time */
+            generated_at: string;
+            /** @enum {string} */
+            window: "24h" | "7d";
+            level: {
+                /** @enum {string} */
+                level: "normaal" | "waakzaam" | "verhoogd" | "kritiek";
+                reasons: string[];
+            };
+            score: {
+                score: number;
+                previous: number | null;
+                parts: {
+                    key: string;
+                    label: string;
+                    max: number;
+                    points: number;
+                    deductions: {
+                        text: string;
+                        points: number;
+                        href: string;
+                    }[];
+                }[];
+                trend: {
+                    /** Format: date-time */
+                    at: string;
+                    score: number;
+                }[];
+            };
+            stats: {
+                attacks: number;
+                attacks_prev: number;
+                active_bans: number;
+                /** Format: int64 */
+                blocked: number;
+                /** Format: int64 */
+                blocked_prev: number;
+                login_failures: number;
+                login_failures_prev: number;
+                security_updates: number;
+                security_nodes: number;
+                nodes: number;
+                protected: number;
+            };
+            now: components["schemas"]["SocItem"][];
+            activity: {
+                /** Format: date-time */
+                at: string;
+                crowdsec: number;
+                /** Format: int64 */
+                firewall: number;
+                logins: number;
+            }[];
+            attackers: components["schemas"]["SocAttacker"][];
+            targets: {
+                nodes: components["schemas"]["SocCount"][];
+                ports: components["schemas"]["SocCount"][];
+                scenarios: components["schemas"]["SocCount"][];
+            };
+            coverage: components["schemas"]["SocCoverage"][];
+        };
+        SocItem: {
+            key: string;
+            /** @enum {string} */
+            tone: "red" | "amber" | "info";
+            prio: number;
+            title: string;
+            detail: string;
+            href: string;
+            action: string;
+        };
+        SocAttacker: {
+            ip: string;
+            /** @enum {string} */
+            kind: "extern" | "intern" | "node";
+            /** @description Hostnaam (of 'VIP cluster') als het adres van een eigen node is. */
+            node: string;
+            country: string;
+            as: string;
+            sources: ("crowdsec" | "firewall" | "login")[];
+            alerts: number;
+            /** Format: int64 */
+            blocked: number;
+            logins: number;
+            nodes: string[];
+            scenarios: string[];
+            ports: string[];
+            /** Format: date-time */
+            first_seen: string;
+            /** Format: date-time */
+            last_seen: string;
+            banned: boolean;
+            /** Format: date-time */
+            ban_until: string | null;
+        };
+        SocCount: {
+            key: string;
+            label: string;
+            /** Format: int64 */
+            count: number;
+            detail: string;
+        };
+        SocCoverage: {
+            /** Format: uuid */
+            node_id: string;
+            hostname: string;
+            /** Format: uuid */
+            cluster_id: string | null;
+            cluster_name: string;
+            online: boolean;
+            firewall: components["schemas"]["SocState"];
+            crowdsec: components["schemas"]["SocState"];
+            /** @description Leeg als CrowdSec er niet (beheerd) staat; anders een SocState. */
+            bouncer: string;
+            security_updates: number;
+            gaps: string[];
+        };
+        /** @enum {string} */
+        SocState: "on" | "preview" | "off" | "missing" | "down" | "error" | "unsupported" | "unknown" | "unmanaged";
         CrowdSecOverview: {
             protocol: number;
             settings: components["schemas"]["CrowdSecSettings"];
@@ -19596,6 +19738,29 @@ export interface operations {
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];
             429: components["responses"]["Error"];
+        };
+    };
+    getSoc: {
+        parameters: {
+            query?: {
+                window?: "24h" | "7d";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SocOverview"];
+                };
+            };
+            401: components["responses"]["Error"];
         };
     };
     getCrowdSec: {
