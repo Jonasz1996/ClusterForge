@@ -690,6 +690,130 @@ paths:
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /logs/nodes:
+    get:
+      operationId: listLogNodes
+      summary: De nodes met een agent, voor de logpagina (admin)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [nodes, protocol]
+                properties:
+                  nodes:
+                    type: array
+                    items: { $ref: "#/components/schemas/LogNode" }
+                  protocol: { type: integer, description: De agentprotocolversie die logs kan lezen }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /logs/query:
+    post:
+      operationId: queryLogs
+      summary: De regels van een of meer logbronnen op één tijdlijn, gefilterd (admin)
+      description: |
+        De agents lezen de bronnen tegelijk (een bestand onder /var/log, het
+        journaal of de log van een container), ontleden tijd, niveau en
+        programma en maskeren geheimen. Een bron die faalt staat met zijn fout
+        in sources; de andere komen gewoon mee. ClusterForge bewaart de logs
+        niet.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LogQueryInput" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LogQueryResult" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /logs/views:
+    get:
+      operationId: listLogViews
+      summary: Bewaarde logweergaven (admin)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [views]
+                properties:
+                  views:
+                    type: array
+                    items: { $ref: "#/components/schemas/LogView" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createLogView
+      summary: Een logweergave bewaren (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LogViewInput" }
+      responses:
+        "201":
+          description: Aangemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LogView" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /logs/views/{viewId}:
+    parameters:
+      - { name: viewId, in: path, required: true, schema: { type: string, format: uuid } }
+    put:
+      operationId: updateLogView
+      summary: Een logweergave aanpassen (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/LogViewInput" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LogView" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteLogView
+      summary: Een logweergave verwijderen (admin)
+      responses:
+        "204": { description: Verwijderd }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /nodes/{nodeId}/log-sources:
+    parameters:
+      - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getNodeLogSources
+      summary: Welke logs er op een node zijn, gevraagd aan de agent (admin)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LogSources" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
   /api-tokens:
     get:
       operationId: listApiTokens
@@ -6287,6 +6411,147 @@ components:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
   schemas:
+    LogNode:
+      type: object
+      required: [id, hostname, cluster_id, cluster_name, primary_ip, protocol, online, supported, holds_vip]
+      properties:
+        id: { type: string, format: uuid }
+        hostname: { type: string }
+        cluster_id: { type: string, format: uuid, nullable: true }
+        cluster_name: { type: string }
+        primary_ip: { type: string }
+        protocol: { type: integer }
+        online: { type: boolean }
+        supported: { type: boolean, description: De agent kan logs lezen (protocol 34 of hoger) }
+        holds_vip: { type: boolean }
+    LogSources:
+      type: object
+      required: [node_id, hostname, files, units, containers, journal, docker]
+      properties:
+        node_id: { type: string, format: uuid }
+        hostname: { type: string }
+        files:
+          type: array
+          items:
+            type: object
+            required: [path, size, modified]
+            properties:
+              path: { type: string }
+              size: { type: integer, format: int64 }
+              modified: { type: string, format: date-time }
+              gzip: { type: boolean }
+        units:
+          type: array
+          items: { type: string }
+        containers:
+          type: array
+          items:
+            type: object
+            required: [name]
+            properties:
+              name: { type: string }
+              image: { type: string }
+              state: { type: string }
+              project: { type: string }
+        journal: { type: boolean, description: journalctl werkt op de node }
+        docker: { type: boolean, description: Docker antwoordt op de node }
+    LogSource:
+      type: object
+      required: [node_id, kind, name]
+      properties:
+        node_id: { type: string, format: uuid }
+        kind: { type: string, enum: [file, journal, docker] }
+        name:
+          type: string
+          description: Pad onder /var/log, unit (leeg = heel het journaal) of containernaam
+    LogLevel:
+      type: string
+      description: error, warn, info, debug, of leeg voor een regel zonder herkenbaar niveau
+    LogQueryInput:
+      type: object
+      required: [sources]
+      properties:
+        sources:
+          type: array
+          minItems: 1
+          maxItems: 12
+          items: { $ref: "#/components/schemas/LogSource" }
+        since: { type: string, format: date-time }
+        until: { type: string, format: date-time }
+        pattern: { type: string, maxLength: 500 }
+        regex: { type: boolean }
+        ignore_case: { type: boolean }
+        exclude: { type: string, maxLength: 500 }
+        levels:
+          type: array
+          items: { $ref: "#/components/schemas/LogLevel" }
+        limit: { type: integer, minimum: 1, maximum: 5000, description: Regels per bron (de nieuwste) }
+    LogSourceResult:
+      type: object
+      required: [node_id, hostname, cluster_id, cluster_name, kind, name, label, count, truncated, scanned]
+      properties:
+        node_id: { type: string, format: uuid }
+        hostname: { type: string }
+        cluster_id: { type: string, format: uuid, nullable: true }
+        cluster_name: { type: string }
+        kind: { type: string }
+        name: { type: string }
+        label: { type: string }
+        error: { type: string }
+        count: { type: integer }
+        truncated: { type: boolean, description: Er waren meer passende regels dan de limiet }
+        scanned: { type: integer }
+        first: { type: string, format: date-time }
+        last: { type: string, format: date-time }
+    LogEntry:
+      type: object
+      required: [source, level, proc, msg]
+      properties:
+        source: { type: integer, description: Index in sources }
+        ts: { type: string, format: date-time }
+        inherited: { type: boolean, description: Geen eigen tijd; die van de regel ervoor }
+        level: { $ref: "#/components/schemas/LogLevel" }
+        proc: { type: string }
+        msg: { type: string }
+    LogQueryResult:
+      type: object
+      required: [sources, entries, truncated, levels]
+      properties:
+        sources:
+          type: array
+          items: { $ref: "#/components/schemas/LogSourceResult" }
+        entries:
+          type: array
+          items: { $ref: "#/components/schemas/LogEntry" }
+        truncated: { type: boolean }
+        levels:
+          type: object
+          additionalProperties: { type: integer }
+    LogView:
+      type: object
+      required: [id, name, cluster_id, sources, filter, created_at, updated_at]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        cluster_id: { type: string, format: uuid, nullable: true }
+        sources:
+          type: array
+          items: { $ref: "#/components/schemas/LogSource" }
+        filter: { type: object, additionalProperties: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    LogViewInput:
+      type: object
+      required: [name, sources]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100 }
+        cluster_id: { type: string, format: uuid, nullable: true }
+        sources:
+          type: array
+          minItems: 1
+          maxItems: 12
+          items: { $ref: "#/components/schemas/LogSource" }
+        filter: { type: object, additionalProperties: true }
     ApiToken:
       type: object
       required: [id, name, prefix, cluster_ids, cluster_names, expires_at, created_at, created_by, last_used_at, last_used_ip]

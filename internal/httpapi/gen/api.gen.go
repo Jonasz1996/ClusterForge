@@ -2499,6 +2499,27 @@ func (e KubeWorkloadState) Valid() bool {
 	}
 }
 
+// Defines values for LogSourceKind.
+const (
+	LogSourceKindDocker  LogSourceKind = "docker"
+	LogSourceKindFile    LogSourceKind = "file"
+	LogSourceKindJournal LogSourceKind = "journal"
+)
+
+// Valid indicates whether the value is a known member of the LogSourceKind enum.
+func (e LogSourceKind) Valid() bool {
+	switch e {
+	case LogSourceKindDocker:
+		return true
+	case LogSourceKindFile:
+		return true
+	case LogSourceKindJournal:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ManagedCronJobKind.
 const (
 	ManagedCronJobKindCommand ManagedCronJobKind = "command"
@@ -10408,6 +10429,137 @@ type KubeWorkloadKind string
 // KubeWorkloadState defines model for KubeWorkload.State.
 type KubeWorkloadState string
 
+// LogEntry defines model for LogEntry.
+type LogEntry struct {
+	// Inherited Geen eigen tijd; die van de regel ervoor
+	Inherited *bool `json:"inherited,omitempty"`
+
+	// Level error, warn, info, debug, of leeg voor een regel zonder herkenbaar niveau
+	Level LogLevel `json:"level"`
+	Msg   string   `json:"msg"`
+	Proc  string   `json:"proc"`
+
+	// Source Index in sources
+	Source int        `json:"source"`
+	Ts     *time.Time `json:"ts,omitempty"`
+}
+
+// LogLevel error, warn, info, debug, of leeg voor een regel zonder herkenbaar niveau
+type LogLevel = string
+
+// LogNode defines model for LogNode.
+type LogNode struct {
+	ClusterId   nullable.Nullable[openapi_types.UUID] `json:"cluster_id"`
+	ClusterName string                                `json:"cluster_name"`
+	HoldsVip    bool                                  `json:"holds_vip"`
+	Hostname    string                                `json:"hostname"`
+	Id          openapi_types.UUID                    `json:"id"`
+	Online      bool                                  `json:"online"`
+	PrimaryIp   string                                `json:"primary_ip"`
+	Protocol    int                                   `json:"protocol"`
+
+	// Supported De agent kan logs lezen (protocol 34 of hoger)
+	Supported bool `json:"supported"`
+}
+
+// LogQueryInput defines model for LogQueryInput.
+type LogQueryInput struct {
+	Exclude    *string     `json:"exclude,omitempty"`
+	IgnoreCase *bool       `json:"ignore_case,omitempty"`
+	Levels     *[]LogLevel `json:"levels,omitempty"`
+
+	// Limit Regels per bron (de nieuwste)
+	Limit   *int        `json:"limit,omitempty"`
+	Pattern *string     `json:"pattern,omitempty"`
+	Regex   *bool       `json:"regex,omitempty"`
+	Since   *time.Time  `json:"since,omitempty"`
+	Sources []LogSource `json:"sources"`
+	Until   *time.Time  `json:"until,omitempty"`
+}
+
+// LogQueryResult defines model for LogQueryResult.
+type LogQueryResult struct {
+	Entries   []LogEntry        `json:"entries"`
+	Levels    map[string]int    `json:"levels"`
+	Sources   []LogSourceResult `json:"sources"`
+	Truncated bool              `json:"truncated"`
+}
+
+// LogSource defines model for LogSource.
+type LogSource struct {
+	Kind LogSourceKind `json:"kind"`
+
+	// Name Pad onder /var/log, unit (leeg = heel het journaal) of containernaam
+	Name   string             `json:"name"`
+	NodeId openapi_types.UUID `json:"node_id"`
+}
+
+// LogSourceKind defines model for LogSource.Kind.
+type LogSourceKind string
+
+// LogSourceResult defines model for LogSourceResult.
+type LogSourceResult struct {
+	ClusterId   nullable.Nullable[openapi_types.UUID] `json:"cluster_id"`
+	ClusterName string                                `json:"cluster_name"`
+	Count       int                                   `json:"count"`
+	Error       *string                               `json:"error,omitempty"`
+	First       *time.Time                            `json:"first,omitempty"`
+	Hostname    string                                `json:"hostname"`
+	Kind        string                                `json:"kind"`
+	Label       string                                `json:"label"`
+	Last        *time.Time                            `json:"last,omitempty"`
+	Name        string                                `json:"name"`
+	NodeId      openapi_types.UUID                    `json:"node_id"`
+	Scanned     int                                   `json:"scanned"`
+
+	// Truncated Er waren meer passende regels dan de limiet
+	Truncated bool `json:"truncated"`
+}
+
+// LogSources defines model for LogSources.
+type LogSources struct {
+	Containers []struct {
+		Image   *string `json:"image,omitempty"`
+		Name    string  `json:"name"`
+		Project *string `json:"project,omitempty"`
+		State   *string `json:"state,omitempty"`
+	} `json:"containers"`
+
+	// Docker Docker antwoordt op de node
+	Docker bool `json:"docker"`
+	Files  []struct {
+		Gzip     *bool     `json:"gzip,omitempty"`
+		Modified time.Time `json:"modified"`
+		Path     string    `json:"path"`
+		Size     int64     `json:"size"`
+	} `json:"files"`
+	Hostname string `json:"hostname"`
+
+	// Journal journalctl werkt op de node
+	Journal bool               `json:"journal"`
+	NodeId  openapi_types.UUID `json:"node_id"`
+	Units   []string           `json:"units"`
+}
+
+// LogView defines model for LogView.
+type LogView struct {
+	ClusterId nullable.Nullable[openapi_types.UUID] `json:"cluster_id"`
+	CreatedAt time.Time                             `json:"created_at"`
+	Filter    map[string]interface{}                `json:"filter"`
+	Id        openapi_types.UUID                    `json:"id"`
+	Name      string                                `json:"name"`
+	Sources   []LogSource                           `json:"sources"`
+	UpdatedAt time.Time                             `json:"updated_at"`
+}
+
+// LogViewInput defines model for LogViewInput.
+type LogViewInput struct {
+	ClusterId nullable.Nullable[openapi_types.UUID] `json:"cluster_id,omitempty"`
+	Filter    *map[string]interface{}               `json:"filter,omitempty"`
+	Name      string                                `json:"name"`
+	Sources   []LogSource                           `json:"sources"`
+}
+
 // LoginRequest defines model for LoginRequest.
 type LoginRequest struct {
 	Password string `json:"password"`
@@ -13651,6 +13803,15 @@ type RemoveKubeNodeJSONRequestBody = KubeRemoveNodeInput
 // RestoreKubeSnapshotJSONRequestBody defines body for RestoreKubeSnapshot for application/json ContentType.
 type RestoreKubeSnapshotJSONRequestBody = KubeRestoreInput
 
+// QueryLogsJSONRequestBody defines body for QueryLogs for application/json ContentType.
+type QueryLogsJSONRequestBody = LogQueryInput
+
+// CreateLogViewJSONRequestBody defines body for CreateLogView for application/json ContentType.
+type CreateLogViewJSONRequestBody = LogViewInput
+
+// UpdateLogViewJSONRequestBody defines body for UpdateLogView for application/json ContentType.
+type UpdateLogViewJSONRequestBody = LogViewInput
+
 // CreateNodeJSONRequestBody defines body for CreateNode for application/json ContentType.
 type CreateNodeJSONRequestBody = NodeInput
 
@@ -14457,6 +14618,24 @@ type ServerInterface interface {
 	// ListKubeSnapshotClusters Per Kubernetes-cluster hoe het met de etcd-snapshots staat, voor Back-ups
 	// (GET /kubernetes/snapshots)
 	ListKubeSnapshotClusters(w http.ResponseWriter, r *http.Request)
+	// ListLogNodes De nodes met een agent, voor de logpagina (admin)
+	// (GET /logs/nodes)
+	ListLogNodes(w http.ResponseWriter, r *http.Request)
+	// QueryLogs De regels van een of meer logbronnen op één tijdlijn, gefilterd (admin)
+	// (POST /logs/query)
+	QueryLogs(w http.ResponseWriter, r *http.Request)
+	// ListLogViews Bewaarde logweergaven (admin)
+	// (GET /logs/views)
+	ListLogViews(w http.ResponseWriter, r *http.Request)
+	// CreateLogView Een logweergave bewaren (admin)
+	// (POST /logs/views)
+	CreateLogView(w http.ResponseWriter, r *http.Request)
+	// DeleteLogView Een logweergave verwijderen (admin)
+	// (DELETE /logs/views/{viewId})
+	DeleteLogView(w http.ResponseWriter, r *http.Request, viewId openapi_types.UUID)
+	// UpdateLogView Een logweergave aanpassen (admin)
+	// (PUT /logs/views/{viewId})
+	UpdateLogView(w http.ResponseWriter, r *http.Request, viewId openapi_types.UUID)
 	// GetMap Een laag van de infrastructuurkaart
 	// (GET /map)
 	GetMap(w http.ResponseWriter, r *http.Request, params GetMapParams)
@@ -14514,6 +14693,9 @@ type ServerInterface interface {
 	// GetNodeFacts Facts en laatste heartbeat van de agent op deze node
 	// (GET /nodes/{nodeId}/facts)
 	GetNodeFacts(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// GetNodeLogSources Welke logs er op een node zijn, gevraagd aan de agent (admin)
+	// (GET /nodes/{nodeId}/log-sources)
+	GetNodeLogSources(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
 	// GetNodeMetrics Grafieken van één node uit VictoriaMetrics
 	// (GET /nodes/{nodeId}/metrics)
 	GetNodeMetrics(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID, params GetNodeMetricsParams)
@@ -16140,6 +16322,42 @@ func (_ Unimplemented) ListKubeSnapshotClusters(w http.ResponseWriter, r *http.R
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// ListLogNodes De nodes met een agent, voor de logpagina (admin)
+// (GET /logs/nodes)
+func (_ Unimplemented) ListLogNodes(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// QueryLogs De regels van een of meer logbronnen op één tijdlijn, gefilterd (admin)
+// (POST /logs/query)
+func (_ Unimplemented) QueryLogs(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListLogViews Bewaarde logweergaven (admin)
+// (GET /logs/views)
+func (_ Unimplemented) ListLogViews(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CreateLogView Een logweergave bewaren (admin)
+// (POST /logs/views)
+func (_ Unimplemented) CreateLogView(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// DeleteLogView Een logweergave verwijderen (admin)
+// (DELETE /logs/views/{viewId})
+func (_ Unimplemented) DeleteLogView(w http.ResponseWriter, r *http.Request, viewId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// UpdateLogView Een logweergave aanpassen (admin)
+// (PUT /logs/views/{viewId})
+func (_ Unimplemented) UpdateLogView(w http.ResponseWriter, r *http.Request, viewId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // GetMap Een laag van de infrastructuurkaart
 // (GET /map)
 func (_ Unimplemented) GetMap(w http.ResponseWriter, r *http.Request, params GetMapParams) {
@@ -16251,6 +16469,12 @@ func (_ Unimplemented) CheckNodeDrift(w http.ResponseWriter, r *http.Request, no
 // GetNodeFacts Facts en laatste heartbeat van de agent op deze node
 // (GET /nodes/{nodeId}/facts)
 func (_ Unimplemented) GetNodeFacts(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetNodeLogSources Welke logs er op een node zijn, gevraagd aan de agent (admin)
+// (GET /nodes/{nodeId}/log-sources)
+func (_ Unimplemented) GetNodeLogSources(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -23830,6 +24054,114 @@ func (siw *ServerInterfaceWrapper) ListKubeSnapshotClusters(w http.ResponseWrite
 	handler.ServeHTTP(w, r)
 }
 
+// ListLogNodes operation middleware
+func (siw *ServerInterfaceWrapper) ListLogNodes(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListLogNodes(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// QueryLogs operation middleware
+func (siw *ServerInterfaceWrapper) QueryLogs(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.QueryLogs(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListLogViews operation middleware
+func (siw *ServerInterfaceWrapper) ListLogViews(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListLogViews(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateLogView operation middleware
+func (siw *ServerInterfaceWrapper) CreateLogView(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateLogView(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteLogView operation middleware
+func (siw *ServerInterfaceWrapper) DeleteLogView(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "viewId" -------------
+	var viewId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "viewId", chi.URLParam(r, "viewId"), &viewId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "viewId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteLogView(w, r, viewId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateLogView operation middleware
+func (siw *ServerInterfaceWrapper) UpdateLogView(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "viewId" -------------
+	var viewId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "viewId", chi.URLParam(r, "viewId"), &viewId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "viewId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateLogView(w, r, viewId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetMap operation middleware
 func (siw *ServerInterfaceWrapper) GetMap(w http.ResponseWriter, r *http.Request) {
 
@@ -24376,6 +24708,32 @@ func (siw *ServerInterfaceWrapper) GetNodeFacts(w http.ResponseWriter, r *http.R
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetNodeFacts(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetNodeLogSources operation middleware
+func (siw *ServerInterfaceWrapper) GetNodeLogSources(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetNodeLogSources(w, r, nodeId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -26032,6 +26390,27 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Delete(options.BaseURL+"/enrollment-tokens/{tokenId}", wrapper.DeleteEnrollmentToken)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/logs/nodes", wrapper.ListLogNodes)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/logs/query", wrapper.QueryLogs)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/logs/views", wrapper.ListLogViews)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/logs/views", wrapper.CreateLogView)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/logs/views/{viewId}", wrapper.DeleteLogView)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/logs/views/{viewId}", wrapper.UpdateLogView)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/nodes/{nodeId}/log-sources", wrapper.GetNodeLogSources)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/api-tokens", wrapper.ListApiTokens)

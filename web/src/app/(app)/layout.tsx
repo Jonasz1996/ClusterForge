@@ -20,6 +20,7 @@ const nav: NavItem[] = [
   { href: "/updates", label: "Updates" },
   { href: "/commandos", label: "Commando's" },
   { href: "/containers", label: "Containers" },
+  { href: "/logs", label: "Logs", adminOnly: true },
   { href: "/crowdsec", label: "CrowdSec" },
   { href: "/firewall", label: "Firewall" },
   { href: "/monitoring", label: "Monitoring" },

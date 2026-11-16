@@ -1365,6 +1365,12 @@ function LogsModal({
               </option>
             ))}
           </Select>
+          <Link
+            className="ml-auto text-brand-600 hover:underline"
+            href={`/logs?node=${nodeId}&kind=docker&name=${encodeURIComponent(container)}&cluster=1`}
+          >
+            Filteren en vergelijken met de andere nodes →
+          </Link>
         </div>
         {err && <Alert>{err}</Alert>}
         {text === null && !err ? (

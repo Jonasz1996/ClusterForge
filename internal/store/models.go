@@ -1339,6 +1339,17 @@ type KubeWorkload struct {
 	NoMemoryLimit []string
 }
 
+type LogView struct {
+	ID        uuid.UUID
+	Name      string
+	ClusterID *uuid.UUID
+	Sources   []byte
+	Filter    []byte
+	CreatedBy *uuid.UUID
+	CreatedAt time.Time
+	UpdatedAt time.Time
+}
+
 type Node struct {
 	ID           uuid.UUID
 	ClusterID    *uuid.UUID

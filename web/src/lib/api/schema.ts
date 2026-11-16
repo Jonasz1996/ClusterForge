@@ -664,6 +664,104 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/logs/nodes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** De nodes met een agent, voor de logpagina (admin) */
+        get: operations["listLogNodes"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/logs/query": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * De regels van een of meer logbronnen op één tijdlijn, gefilterd (admin)
+         * @description De agents lezen de bronnen tegelijk (een bestand onder /var/log, het
+         *     journaal of de log van een container), ontleden tijd, niveau en
+         *     programma en maskeren geheimen. Een bron die faalt staat met zijn fout
+         *     in sources; de andere komen gewoon mee. ClusterForge bewaart de logs
+         *     niet.
+         */
+        post: operations["queryLogs"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/logs/views": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Bewaarde logweergaven (admin) */
+        get: operations["listLogViews"];
+        put?: never;
+        /** Een logweergave bewaren (admin) */
+        post: operations["createLogView"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/logs/views/{viewId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                viewId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** Een logweergave aanpassen (admin) */
+        put: operations["updateLogView"];
+        post?: never;
+        /** Een logweergave verwijderen (admin) */
+        delete: operations["deleteLogView"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/nodes/{nodeId}/log-sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        /** Welke logs er op een node zijn, gevraagd aan de agent (admin) */
+        get: operations["getNodeLogSources"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api-tokens": {
         parameters: {
             query?: never;
@@ -5700,6 +5798,131 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        LogNode: {
+            /** Format: uuid */
+            id: string;
+            hostname: string;
+            /** Format: uuid */
+            cluster_id: string | null;
+            cluster_name: string;
+            primary_ip: string;
+            protocol: number;
+            online: boolean;
+            /** @description De agent kan logs lezen (protocol 34 of hoger) */
+            supported: boolean;
+            holds_vip: boolean;
+        };
+        LogSources: {
+            /** Format: uuid */
+            node_id: string;
+            hostname: string;
+            files: {
+                path: string;
+                /** Format: int64 */
+                size: number;
+                /** Format: date-time */
+                modified: string;
+                gzip?: boolean;
+            }[];
+            units: string[];
+            containers: {
+                name: string;
+                image?: string;
+                state?: string;
+                project?: string;
+            }[];
+            /** @description journalctl werkt op de node */
+            journal: boolean;
+            /** @description Docker antwoordt op de node */
+            docker: boolean;
+        };
+        LogSource: {
+            /** Format: uuid */
+            node_id: string;
+            /** @enum {string} */
+            kind: "file" | "journal" | "docker";
+            /** @description Pad onder /var/log, unit (leeg = heel het journaal) of containernaam */
+            name: string;
+        };
+        /** @description error, warn, info, debug, of leeg voor een regel zonder herkenbaar niveau */
+        LogLevel: string;
+        LogQueryInput: {
+            sources: components["schemas"]["LogSource"][];
+            /** Format: date-time */
+            since?: string;
+            /** Format: date-time */
+            until?: string;
+            pattern?: string;
+            regex?: boolean;
+            ignore_case?: boolean;
+            exclude?: string;
+            levels?: components["schemas"]["LogLevel"][];
+            /** @description Regels per bron (de nieuwste) */
+            limit?: number;
+        };
+        LogSourceResult: {
+            /** Format: uuid */
+            node_id: string;
+            hostname: string;
+            /** Format: uuid */
+            cluster_id: string | null;
+            cluster_name: string;
+            kind: string;
+            name: string;
+            label: string;
+            error?: string;
+            count: number;
+            /** @description Er waren meer passende regels dan de limiet */
+            truncated: boolean;
+            scanned: number;
+            /** Format: date-time */
+            first?: string;
+            /** Format: date-time */
+            last?: string;
+        };
+        LogEntry: {
+            /** @description Index in sources */
+            source: number;
+            /** Format: date-time */
+            ts?: string;
+            /** @description Geen eigen tijd; die van de regel ervoor */
+            inherited?: boolean;
+            level: components["schemas"]["LogLevel"];
+            proc: string;
+            msg: string;
+        };
+        LogQueryResult: {
+            sources: components["schemas"]["LogSourceResult"][];
+            entries: components["schemas"]["LogEntry"][];
+            truncated: boolean;
+            levels: {
+                [key: string]: number;
+            };
+        };
+        LogView: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            /** Format: uuid */
+            cluster_id: string | null;
+            sources: components["schemas"]["LogSource"][];
+            filter: {
+                [key: string]: unknown;
+            };
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        LogViewInput: {
+            name: string;
+            /** Format: uuid */
+            cluster_id?: string | null;
+            sources: components["schemas"]["LogSource"][];
+            filter?: {
+                [key: string]: unknown;
+            };
+        };
         ApiToken: {
             /** Format: uuid */
             id: string;
@@ -14163,6 +14386,190 @@ export interface operations {
                 };
                 content?: never;
             };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    listLogNodes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        nodes: components["schemas"]["LogNode"][];
+                        /** @description De agentprotocolversie die logs kan lezen */
+                        protocol: number;
+                    };
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+        };
+    };
+    queryLogs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LogQueryInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LogQueryResult"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    listLogViews: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        views: components["schemas"]["LogView"][];
+                    };
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+        };
+    };
+    createLogView: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LogViewInput"];
+            };
+        };
+        responses: {
+            /** @description Aangemaakt */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LogView"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+        };
+    };
+    updateLogView: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                viewId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LogViewInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LogView"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    deleteLogView: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                viewId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Verwijderd */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    getNodeLogSources: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LogSources"];
+                };
+            };
+            400: components["responses"]["Error"];
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];

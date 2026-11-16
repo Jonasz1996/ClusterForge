@@ -43,6 +43,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/kubenodes"
 	"github.com/Jonasz1996/clusterforge/internal/lifecycle"
 	"github.com/Jonasz1996/clusterforge/internal/live"
+	"github.com/Jonasz1996/clusterforge/internal/logs"
 	"github.com/Jonasz1996/clusterforge/internal/metrics"
 	"github.com/Jonasz1996/clusterforge/internal/proxmox"
 	"github.com/Jonasz1996/clusterforge/internal/pvehost"
@@ -98,6 +99,7 @@ type Server struct {
 	updates      *updates.Service
 	crowdsec     *crowdsec.Service
 	stacks       *stacks.Service
+	logs         *logs.Service
 	firewall     *firewall.Service
 	pvehosts     *pvehost.Service
 	commands     *commands.Service
@@ -181,6 +183,8 @@ type Deps struct {
 	CrowdSec *crowdsec.Service
 	// Stacks beheert de Docker-stacks van de clusters (fase 21).
 	Stacks *stacks.Service
+	// Logs leest de logs op de nodes (fase 23).
+	Logs *logs.Service
 	// Firewall beheert ufw op de nodes (fase 16).
 	Firewall *firewall.Service
 	PVEHosts *pvehost.Service
@@ -221,6 +225,7 @@ func New(d Deps) *Server {
 		commands: d.Commands,
 		crowdsec: d.CrowdSec,
 		stacks:   d.Stacks,
+		logs:     d.Logs,
 		firewall: d.Firewall,
 		pvehosts: d.PVEHosts,
 		recipes:  recipes.NewService(d.Pool, ev),

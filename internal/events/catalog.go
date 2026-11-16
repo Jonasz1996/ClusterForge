@@ -146,6 +146,8 @@ var Known = map[string]Spec{
 	"cluster.auto_update_skipped": {CategoryLifecycle, "Automatisch bijwerken overgeslagen"},
 	"node.command_ran":            {CategoryLifecycle, "Eigen commando gedraaid op node"},
 
+	"logs.view_saved":                {CategoryInventory, "Logweergave bewaard"},
+	"logs.view_deleted":              {CategoryInventory, "Logweergave verwijderd"},
 	"stack.imported":                 {CategoryInventory, "Docker-stack overgenomen"},
 	"stack.saved":                    {CategoryInventory, "Docker-stack aangepast"},
 	"stack.released":                 {CategoryInventory, "Docker-stack losgelaten"},
