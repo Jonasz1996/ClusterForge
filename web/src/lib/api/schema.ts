@@ -664,6 +664,71 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api-tokens": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * API-tokens voor een eigen dashboard (admin)
+         * @description Het token zelf komt nooit terug, alleen het begin ervan.
+         */
+        get: operations["listApiTokens"];
+        put?: never;
+        /**
+         * API-token aanmaken (admin); het token zelf staat alleen in dit antwoord
+         * @description Een API-token kan alleen lezen, zoals een viewer, en alleen de
+         *     dashboard-API onder /api/dashboard/v1. Geen cluster gekozen = alle
+         *     clusters.
+         */
+        post: operations["createApiToken"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api-tokens/{tokenId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tokenId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** API-token intrekken (admin) */
+        delete: operations["deleteApiToken"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api-tokens/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Wat de dashboard-API nu teruggeeft, met de sessie van de gebruiker
+         * @description Voor het voorbeeld in Instellingen; ook voor viewers.
+         */
+        get: operations["previewDashboardApi"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/agents/enroll": {
         parameters: {
             query?: never;
@@ -5530,6 +5595,121 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        ApiToken: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+            /** @description Het begin van het token */
+            prefix: string;
+            /** @description Leeg = alle clusters */
+            cluster_ids: string[];
+            cluster_names: string[];
+            /** Format: date-time */
+            expires_at: string | null;
+            /** Format: date-time */
+            created_at: string;
+            created_by: string;
+            /** Format: date-time */
+            last_used_at: string | null;
+            last_used_ip: string;
+        };
+        ApiTokenInput: {
+            name: string;
+            /** @description Leeg of weg = alle clusters */
+            cluster_ids?: string[];
+            /** @description 0 of weg = verloopt nooit */
+            ttl_days?: number;
+        };
+        NewApiToken: {
+            /** @description Het token (cfa_…); wordt niet opnieuw getoond */
+            token: string;
+            item: components["schemas"]["ApiToken"];
+        };
+        /**
+         * @description Eén cluster voor een eigen dashboard: vaste, platte velden zodat de
+         *     customapi-widget van homepage ze met één naam kan tonen.
+         */
+        DashboardCluster: {
+            /** Format: uuid */
+            id: string;
+            slug: string;
+            name: string;
+            environment: string;
+            type: string;
+            /** @description Het pad naar het cluster in ClusterForge */
+            url: string;
+            /** @description healthy, degraded, down, split_brain of unknown */
+            status: string;
+            /** @description Gezond, Verminderd, Down, Split-brain of Onbekend */
+            status_label: string;
+            status_reason: string;
+            /** @description true als het cluster gezond is en er geen open incident is */
+            ok: boolean;
+            /** @description Health score 0-100 */
+            score: number | null;
+            grade: string;
+            nodes_online: number;
+            nodes_total: number;
+            /** @description nodes_online/nodes_total, bv. 3/3 */
+            nodes: string;
+            nodes_down: string[];
+            /** @description Het eerste VIP-adres */
+            vip: string;
+            /** @description De node die het eerste VIP nu heeft */
+            vip_owner: string;
+            vips: components["schemas"]["DashboardVip"][];
+            /** @description ok, degraded, down of none */
+            db: string;
+            /** @description bv. MariaDB 3/3 of — */
+            db_label: string;
+            db_running: number;
+            db_total: number;
+            incidents_open: number;
+            /** @description critical, high, low of leeg */
+            incidents_worst: string;
+            /** @description Pakketupdates over alle nodes */
+            updates: number;
+            updates_security: number;
+            /** @description Aantal nodes dat een herstart wil */
+            reboot_required: number;
+            nodes_with_updates: number;
+            /** @description bv. 3/3 actief, of — als CrowdSec niet beheerd wordt */
+            crowdsec: string;
+            crowdsec_running: number;
+            crowdsec_managed: number;
+            crowdsec_bans: number;
+            crowdsec_alerts_24h: number;
+            /** @description bv. 3/3 actief, of — zonder firewallbeheer */
+            firewall: string;
+            firewall_active: number;
+            firewall_managed: number;
+            /** Format: int64 */
+            firewall_blocked_24h: number;
+            /** @description Korte zinnen over wat er mis is */
+            problems: string[];
+        };
+        DashboardVip: {
+            address: string;
+            /** @description De node die het VIP nu heeft */
+            owner: string;
+        };
+        DashboardOverview: {
+            /** Format: date-time */
+            generated_at: string;
+            clusters_total: number;
+            clusters_healthy: number;
+            clusters_degraded: number;
+            clusters_down: number;
+            nodes_online: number;
+            nodes_total: number;
+            nodes: string;
+            incidents_open: number;
+            updates: number;
+            updates_security: number;
+            crowdsec_bans: number;
+            crowdsec_alerts_24h: number;
+            clusters: components["schemas"]["DashboardCluster"][];
+        };
         ClusterConnection: {
             /** @description false voor een cluster zonder database uit recepten */
             available: boolean;
@@ -13699,6 +13879,103 @@ export interface operations {
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
+        };
+    };
+    listApiTokens: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["ApiToken"][];
+                        /** @description Het pad van de dashboard-API, bv. /api/dashboard/v1 */
+                        base_path: string;
+                    };
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+        };
+    };
+    createApiToken: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ApiTokenInput"];
+            };
+        };
+        responses: {
+            /** @description Aangemaakt */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NewApiToken"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+        };
+    };
+    deleteApiToken: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                tokenId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Verwijderd */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    previewDashboardApi: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DashboardOverview"];
+                };
+            };
+            401: components["responses"]["Error"];
         };
     };
     enrollAgent: {

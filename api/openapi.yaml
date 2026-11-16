@@ -690,6 +690,72 @@ paths:
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /api-tokens:
+    get:
+      operationId: listApiTokens
+      summary: API-tokens voor een eigen dashboard (admin)
+      description: Het token zelf komt nooit terug, alleen het begin ervan.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, base_path]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/ApiToken" }
+                  base_path:
+                    type: string
+                    description: Het pad van de dashboard-API, bv. /api/dashboard/v1
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createApiToken
+      summary: API-token aanmaken (admin); het token zelf staat alleen in dit antwoord
+      description: |
+        Een API-token kan alleen lezen, zoals een viewer, en alleen de
+        dashboard-API onder /api/dashboard/v1. Geen cluster gekozen = alle
+        clusters.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ApiTokenInput" }
+      responses:
+        "201":
+          description: Aangemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/NewApiToken" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /api-tokens/{tokenId}:
+    parameters:
+      - { name: tokenId, in: path, required: true, schema: { type: string, format: uuid } }
+    delete:
+      operationId: deleteApiToken
+      summary: API-token intrekken (admin)
+      responses:
+        "204": { description: Verwijderd }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /api-tokens/preview:
+    get:
+      operationId: previewDashboardApi
+      summary: Wat de dashboard-API nu teruggeeft, met de sessie van de gebruiker
+      description: Voor het voorbeeld in Instellingen; ook voor viewers.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DashboardOverview" }
+        "401": { $ref: "#/components/responses/Error" }
   /agents/enroll:
     post:
       operationId: enrollAgent
@@ -6077,6 +6143,124 @@ components:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
   schemas:
+    ApiToken:
+      type: object
+      required: [id, name, prefix, cluster_ids, cluster_names, expires_at, created_at, created_by, last_used_at, last_used_ip]
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        prefix: { type: string, description: Het begin van het token, om het te herkennen }
+        cluster_ids:
+          type: array
+          items: { type: string, format: uuid }
+          description: Leeg = alle clusters
+        cluster_names:
+          type: array
+          items: { type: string }
+        expires_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+        created_by: { type: string }
+        last_used_at: { type: string, format: date-time, nullable: true }
+        last_used_ip: { type: string }
+    ApiTokenInput:
+      type: object
+      required: [name]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 100 }
+        cluster_ids:
+          type: array
+          items: { type: string, format: uuid }
+          description: Leeg of weg = alle clusters
+        ttl_days:
+          type: integer
+          minimum: 0
+          maximum: 3650
+          description: 0 of weg = verloopt nooit
+    NewApiToken:
+      type: object
+      required: [token, item]
+      properties:
+        token: { type: string, description: "Het token (cfa_…); wordt niet opnieuw getoond" }
+        item: { $ref: "#/components/schemas/ApiToken" }
+    DashboardCluster:
+      type: object
+      description: |
+        Eén cluster voor een eigen dashboard: vaste, platte velden zodat de
+        customapi-widget van homepage ze met één naam kan tonen.
+      required: [id, slug, name, environment, type, url, status, status_label, status_reason, ok, score, grade,
+        nodes_online, nodes_total, nodes, nodes_down, vip, vip_owner, vips, db, db_label, db_running, db_total,
+        incidents_open, incidents_worst, updates, updates_security, reboot_required, nodes_with_updates,
+        crowdsec, crowdsec_running, crowdsec_managed, crowdsec_bans, crowdsec_alerts_24h,
+        firewall, firewall_active, firewall_managed, firewall_blocked_24h, problems]
+      properties:
+        id: { type: string, format: uuid }
+        slug: { type: string }
+        name: { type: string }
+        environment: { type: string }
+        type: { type: string }
+        url: { type: string, description: Het pad naar het cluster in ClusterForge }
+        status: { type: string, description: "healthy, degraded, down, split_brain of unknown" }
+        status_label: { type: string, description: "Gezond, Verminderd, Down, Split-brain of Onbekend" }
+        status_reason: { type: string }
+        ok: { type: boolean, description: true als het cluster gezond is en er geen open incident is }
+        score: { type: integer, nullable: true, description: Health score 0-100 }
+        grade: { type: string }
+        nodes_online: { type: integer }
+        nodes_total: { type: integer }
+        nodes: { type: string, description: "nodes_online/nodes_total, bv. 3/3" }
+        nodes_down: { type: array, items: { type: string } }
+        vip: { type: string, description: Het eerste VIP-adres, of leeg }
+        vip_owner: { type: string, description: De node die het eerste VIP nu heeft, of leeg }
+        vips:
+          type: array
+          items: { $ref: "#/components/schemas/DashboardVip" }
+        db: { type: string, description: "ok, degraded, down of none" }
+        db_label: { type: string, description: "bv. MariaDB 3/3 of —" }
+        db_running: { type: integer }
+        db_total: { type: integer }
+        incidents_open: { type: integer }
+        incidents_worst: { type: string, description: "critical, high, low of leeg" }
+        updates: { type: integer, description: Pakketupdates over alle nodes }
+        updates_security: { type: integer }
+        reboot_required: { type: integer, description: Aantal nodes dat een herstart wil }
+        nodes_with_updates: { type: integer }
+        crowdsec: { type: string, description: "bv. 3/3 actief, of — als CrowdSec niet beheerd wordt" }
+        crowdsec_running: { type: integer }
+        crowdsec_managed: { type: integer }
+        crowdsec_bans: { type: integer }
+        crowdsec_alerts_24h: { type: integer }
+        firewall: { type: string, description: "bv. 3/3 actief, of — zonder firewallbeheer" }
+        firewall_active: { type: integer }
+        firewall_managed: { type: integer }
+        firewall_blocked_24h: { type: integer, format: int64 }
+        problems: { type: array, items: { type: string }, description: Korte zinnen over wat er mis is }
+    DashboardVip:
+      type: object
+      required: [address, owner]
+      properties:
+        address: { type: string }
+        owner: { type: string, description: De node die het VIP nu heeft, of leeg }
+    DashboardOverview:
+      type: object
+      required: [generated_at, clusters_total, clusters_healthy, clusters_degraded, clusters_down, nodes_online,
+        nodes_total, nodes, incidents_open, updates, updates_security, crowdsec_bans, crowdsec_alerts_24h, clusters]
+      properties:
+        generated_at: { type: string, format: date-time }
+        clusters_total: { type: integer }
+        clusters_healthy: { type: integer }
+        clusters_degraded: { type: integer }
+        clusters_down: { type: integer }
+        nodes_online: { type: integer }
+        nodes_total: { type: integer }
+        nodes: { type: string }
+        incidents_open: { type: integer }
+        updates: { type: integer }
+        updates_security: { type: integer }
+        crowdsec_bans: { type: integer }
+        crowdsec_alerts_24h: { type: integer }
+        clusters:
+          type: array
+          items: { $ref: "#/components/schemas/DashboardCluster" }
     ClusterConnection:
       type: object
       required: [available, reason, engine, host, port, role, databases, users]

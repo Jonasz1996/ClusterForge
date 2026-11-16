@@ -389,6 +389,19 @@ type AgentUpgradeSetting struct {
 	UpdatedAt time.Time
 }
 
+type ApiToken struct {
+	ID         uuid.UUID
+	Name       string
+	TokenHash  []byte
+	Prefix     string
+	ClusterIds []uuid.UUID
+	ExpiresAt  *time.Time
+	CreatedAt  time.Time
+	CreatedBy  *uuid.UUID
+	LastUsedAt *time.Time
+	LastUsedIp string
+}
+
 type AssistantConversation struct {
 	ID          uuid.UUID
 	UserID      *uuid.UUID
