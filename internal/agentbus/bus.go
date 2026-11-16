@@ -361,6 +361,7 @@ func agentPermissions(nodeID uuid.UUID) *server.Permissions {
 			protocol.Subject(id, protocol.SubjectStacks),
 			protocol.Subject(id, protocol.SubjectPVE),
 			protocol.Subject(id, protocol.SubjectLogs),
+			protocol.Subject(id, protocol.SubjectSecurity),
 			protocol.Subject(id, protocol.SubjectConsole),
 			protocol.Subject(id, protocol.SubjectConsole) + ".*.in",
 			protocol.InboxPrefix(id) + ".>",

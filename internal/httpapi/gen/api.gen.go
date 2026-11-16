@@ -4101,6 +4101,33 @@ func (e GetMapParamsLayer) Valid() bool {
 	}
 }
 
+// Defines values for ListSecurityFindingsParamsStatus.
+const (
+	ListSecurityFindingsParamsStatusAanvaard ListSecurityFindingsParamsStatus = "aanvaard"
+	ListSecurityFindingsParamsStatusActueel  ListSecurityFindingsParamsStatus = "actueel"
+	ListSecurityFindingsParamsStatusAlle     ListSecurityFindingsParamsStatus = "alle"
+	ListSecurityFindingsParamsStatusOpen     ListSecurityFindingsParamsStatus = "open"
+	ListSecurityFindingsParamsStatusOpgelost ListSecurityFindingsParamsStatus = "opgelost"
+)
+
+// Valid indicates whether the value is a known member of the ListSecurityFindingsParamsStatus enum.
+func (e ListSecurityFindingsParamsStatus) Valid() bool {
+	switch e {
+	case ListSecurityFindingsParamsStatusAanvaard:
+		return true
+	case ListSecurityFindingsParamsStatusActueel:
+		return true
+	case ListSecurityFindingsParamsStatusAlle:
+		return true
+	case ListSecurityFindingsParamsStatusOpen:
+		return true
+	case ListSecurityFindingsParamsStatusOpgelost:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for GetSocParamsWindow.
 const (
 	SocWindowParam24h GetSocParamsWindow = "24h"
@@ -12379,6 +12406,38 @@ type SeaweedFacts struct {
 	} `json:"volume,omitempty"`
 }
 
+// SecurityAcceptInput defines model for SecurityAcceptInput.
+type SecurityAcceptInput struct {
+	// Days Na zoveel dagen weer open; leeg is voor altijd
+	Days *int   `json:"days,omitempty"`
+	Note string `json:"note"`
+}
+
+// SecurityObject Een object van de beveiligingsmodule (fase 27); de velden staan in web/src/lib/security.ts en internal/security.
+type SecurityObject map[string]interface{}
+
+// SecurityRefreshInput defines model for SecurityRefreshInput.
+type SecurityRefreshInput struct {
+	// Feeds Feeds opnieuw ophalen
+	Feeds *bool `json:"feeds,omitempty"`
+
+	// NodeId Alleen deze node (met nodes)
+	NodeId *openapi_types.UUID `json:"node_id,omitempty"`
+
+	// Nodes Pakketlijsten opnieuw ophalen
+	Nodes *bool `json:"nodes,omitempty"`
+}
+
+// SecurityScopeInput defines model for SecurityScopeInput.
+type SecurityScopeInput struct {
+	Cidrs         []string  `json:"cidrs"`
+	Description   *string   `json:"description,omitempty"`
+	Exclude       *[]string `json:"exclude,omitempty"`
+	Name          string    `json:"name"`
+	PublicConfirm *string   `json:"public_confirm,omitempty"`
+	PublicNote    *string   `json:"public_note,omitempty"`
+}
+
 // SelfGuest defines model for SelfGuest.
 type SelfGuest struct {
 	Connection   string             `json:"connection"`
@@ -14053,6 +14112,16 @@ type GetRiskHistoryParams struct {
 	Days    *int                `form:"days,omitempty" json:"days,omitempty"`
 }
 
+// ListSecurityFindingsParams defines parameters for ListSecurityFindings.
+type ListSecurityFindingsParams struct {
+	Status *ListSecurityFindingsParamsStatus `form:"status,omitempty" json:"status,omitempty"`
+	NodeId *openapi_types.UUID               `form:"node_id,omitempty" json:"node_id,omitempty"`
+	Kind   *string                           `form:"kind,omitempty" json:"kind,omitempty"`
+}
+
+// ListSecurityFindingsParamsStatus defines parameters for ListSecurityFindings.
+type ListSecurityFindingsParamsStatus string
+
 // GetSocParams defines parameters for GetSoc.
 type GetSocParams struct {
 	Window *GetSocParamsWindow `form:"window,omitempty" json:"window,omitempty"`
@@ -14444,6 +14513,18 @@ type AcceptRiskFindingJSONRequestBody = RiskAcceptanceInput
 
 // RiskWhatIfJSONRequestBody defines body for RiskWhatIf for application/json ContentType.
 type RiskWhatIfJSONRequestBody = RiskWhatIfInput
+
+// AcceptSecurityFindingJSONRequestBody defines body for AcceptSecurityFinding for application/json ContentType.
+type AcceptSecurityFindingJSONRequestBody = SecurityAcceptInput
+
+// RefreshSecurityJSONRequestBody defines body for RefreshSecurity for application/json ContentType.
+type RefreshSecurityJSONRequestBody = SecurityRefreshInput
+
+// CreateSecurityScopeJSONRequestBody defines body for CreateSecurityScope for application/json ContentType.
+type CreateSecurityScopeJSONRequestBody = SecurityScopeInput
+
+// UpdateSecurityScopeJSONRequestBody defines body for UpdateSecurityScope for application/json ContentType.
+type UpdateSecurityScopeJSONRequestBody = SecurityScopeInput
 
 // SetSelfLocationJSONRequestBody defines body for SetSelfLocation for application/json ContentType.
 type SetSelfLocationJSONRequestBody = SelfLocationInput
@@ -15419,6 +15500,33 @@ type ServerInterface interface {
 	// RiskWhatIf Rekenen wat er gebeurt als onderdelen tegelijk uitvallen
 	// (POST /risk/what-if)
 	RiskWhatIf(w http.ResponseWriter, r *http.Request)
+	// GetSecurity Kwetsbaarheden en verharding (fase 27)
+	// (GET /security)
+	GetSecurity(w http.ResponseWriter, r *http.Request)
+	// ListSecurityFindings Bevindingen, ernstigste eerst
+	// (GET /security/findings)
+	ListSecurityFindings(w http.ResponseWriter, r *http.Request, params ListSecurityFindingsParams)
+	// AcceptSecurityFinding Bevinding aanvaarden met een reden (admin)
+	// (POST /security/findings/{findingId}/accept)
+	AcceptSecurityFinding(w http.ResponseWriter, r *http.Request, findingId openapi_types.UUID)
+	// ReopenSecurityFinding Aanvaarde bevinding heropenen (admin)
+	// (POST /security/findings/{findingId}/reopen)
+	ReopenSecurityFinding(w http.ResponseWriter, r *http.Request, findingId openapi_types.UUID)
+	// RefreshSecurity Feeds en/of pakketlijsten nu verversen (admin)
+	// (POST /security/refresh)
+	RefreshSecurity(w http.ResponseWriter, r *http.Request)
+	// ListSecurityScopes Eigen scopes (netwerken die van jou zijn)
+	// (GET /security/scopes)
+	ListSecurityScopes(w http.ResponseWriter, r *http.Request)
+	// CreateSecurityScope Scope aanmaken (admin)
+	// (POST /security/scopes)
+	CreateSecurityScope(w http.ResponseWriter, r *http.Request)
+	// DeleteSecurityScope Scope verwijderen (admin)
+	// (DELETE /security/scopes/{scopeId})
+	DeleteSecurityScope(w http.ResponseWriter, r *http.Request, scopeId openapi_types.UUID)
+	// UpdateSecurityScope Scope bijwerken (admin)
+	// (PUT /security/scopes/{scopeId})
+	UpdateSecurityScope(w http.ResponseWriter, r *http.Request, scopeId openapi_types.UUID)
 	// DeleteSelfLocation De ingevulde VM weghalen, zodat ClusterForge zelf zoekt (admin)
 	// (DELETE /self-location)
 	DeleteSelfLocation(w http.ResponseWriter, r *http.Request)
@@ -17378,6 +17486,60 @@ func (_ Unimplemented) ListRiskSPOFs(w http.ResponseWriter, r *http.Request) {
 // RiskWhatIf Rekenen wat er gebeurt als onderdelen tegelijk uitvallen
 // (POST /risk/what-if)
 func (_ Unimplemented) RiskWhatIf(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetSecurity Kwetsbaarheden en verharding (fase 27)
+// (GET /security)
+func (_ Unimplemented) GetSecurity(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListSecurityFindings Bevindingen, ernstigste eerst
+// (GET /security/findings)
+func (_ Unimplemented) ListSecurityFindings(w http.ResponseWriter, r *http.Request, params ListSecurityFindingsParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// AcceptSecurityFinding Bevinding aanvaarden met een reden (admin)
+// (POST /security/findings/{findingId}/accept)
+func (_ Unimplemented) AcceptSecurityFinding(w http.ResponseWriter, r *http.Request, findingId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ReopenSecurityFinding Aanvaarde bevinding heropenen (admin)
+// (POST /security/findings/{findingId}/reopen)
+func (_ Unimplemented) ReopenSecurityFinding(w http.ResponseWriter, r *http.Request, findingId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RefreshSecurity Feeds en/of pakketlijsten nu verversen (admin)
+// (POST /security/refresh)
+func (_ Unimplemented) RefreshSecurity(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListSecurityScopes Eigen scopes (netwerken die van jou zijn)
+// (GET /security/scopes)
+func (_ Unimplemented) ListSecurityScopes(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CreateSecurityScope Scope aanmaken (admin)
+// (POST /security/scopes)
+func (_ Unimplemented) CreateSecurityScope(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// DeleteSecurityScope Scope verwijderen (admin)
+// (DELETE /security/scopes/{scopeId})
+func (_ Unimplemented) DeleteSecurityScope(w http.ResponseWriter, r *http.Request, scopeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// UpdateSecurityScope Scope bijwerken (admin)
+// (PUT /security/scopes/{scopeId})
+func (_ Unimplemented) UpdateSecurityScope(w http.ResponseWriter, r *http.Request, scopeId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -26635,6 +26797,225 @@ func (siw *ServerInterfaceWrapper) RiskWhatIf(w http.ResponseWriter, r *http.Req
 	handler.ServeHTTP(w, r)
 }
 
+// GetSecurity operation middleware
+func (siw *ServerInterfaceWrapper) GetSecurity(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetSecurity(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListSecurityFindings operation middleware
+func (siw *ServerInterfaceWrapper) ListSecurityFindings(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListSecurityFindingsParams
+
+	// ------------- Optional query parameter "status" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "status", r.URL.Query(), &params.Status, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "status"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "status", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "node_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "node_id", r.URL.Query(), &params.NodeId, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "node_id"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "node_id", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "kind" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "kind", r.URL.Query(), &params.Kind, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "kind"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "kind", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListSecurityFindings(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AcceptSecurityFinding operation middleware
+func (siw *ServerInterfaceWrapper) AcceptSecurityFinding(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "findingId" -------------
+	var findingId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "findingId", chi.URLParam(r, "findingId"), &findingId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "findingId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AcceptSecurityFinding(w, r, findingId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ReopenSecurityFinding operation middleware
+func (siw *ServerInterfaceWrapper) ReopenSecurityFinding(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "findingId" -------------
+	var findingId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "findingId", chi.URLParam(r, "findingId"), &findingId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "findingId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ReopenSecurityFinding(w, r, findingId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RefreshSecurity operation middleware
+func (siw *ServerInterfaceWrapper) RefreshSecurity(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RefreshSecurity(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListSecurityScopes operation middleware
+func (siw *ServerInterfaceWrapper) ListSecurityScopes(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListSecurityScopes(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateSecurityScope operation middleware
+func (siw *ServerInterfaceWrapper) CreateSecurityScope(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateSecurityScope(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteSecurityScope operation middleware
+func (siw *ServerInterfaceWrapper) DeleteSecurityScope(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "scopeId" -------------
+	var scopeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "scopeId", chi.URLParam(r, "scopeId"), &scopeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "scopeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteSecurityScope(w, r, scopeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateSecurityScope operation middleware
+func (siw *ServerInterfaceWrapper) UpdateSecurityScope(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "scopeId" -------------
+	var scopeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "scopeId", chi.URLParam(r, "scopeId"), &scopeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "scopeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateSecurityScope(w, r, scopeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // DeleteSelfLocation operation middleware
 func (siw *ServerInterfaceWrapper) DeleteSelfLocation(w http.ResponseWriter, r *http.Request) {
 
@@ -28155,6 +28536,33 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Delete(options.BaseURL+"/firewall/rules/{ruleId}", wrapper.DeleteFirewallRule)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/security", wrapper.GetSecurity)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/security/refresh", wrapper.RefreshSecurity)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/security/findings", wrapper.ListSecurityFindings)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/security/findings/{findingId}/accept", wrapper.AcceptSecurityFinding)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/security/findings/{findingId}/reopen", wrapper.ReopenSecurityFinding)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/security/scopes", wrapper.ListSecurityScopes)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/security/scopes", wrapper.CreateSecurityScope)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/security/scopes/{scopeId}", wrapper.DeleteSecurityScope)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/security/scopes/{scopeId}", wrapper.UpdateSecurityScope)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/commands", wrapper.ListCommands)

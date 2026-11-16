@@ -67,6 +67,8 @@ export const navGroups: NavGroup[] = [
       { href: "/soc", label: "SOC", keywords: "beveiliging dreiging aanvallers security dashboard score" },
       { href: "/firewall", label: "Firewall", keywords: "ufw poorten" },
       { href: "/crowdsec", label: "CrowdSec", keywords: "bans bouncer alerts" },
+      { href: "/kwetsbaarheden", label: "Kwetsbaarheden", keywords: "cve kev exploit debian security tracker pakketten lek patch" },
+      { href: "/scopes", label: "Eigen scopes", keywords: "scan nmap netwerk subnet vlan pentest eigen bereik" },
     ],
   },
   {

@@ -4747,6 +4747,137 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/security": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Kwetsbaarheden en verharding (fase 27)
+         * @description Stand van de feeds (Debian Security Tracker, CISA KEV), cijfers, elke node met een agent met zijn pakketlijst en
+         *     aantallen bevindingen, en het aantal eigen scopes. Ook voor viewers.
+         */
+        get: operations["getSecurity"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/security/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Feeds en/of pakketlijsten nu verversen (admin) */
+        post: operations["refreshSecurity"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/security/findings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Bevindingen, ernstigste eerst */
+        get: operations["listSecurityFindings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/security/findings/{findingId}/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                findingId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Bevinding aanvaarden met een reden (admin) */
+        post: operations["acceptSecurityFinding"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/security/findings/{findingId}/reopen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                findingId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Aanvaarde bevinding heropenen (admin) */
+        post: operations["reopenSecurityFinding"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/security/scopes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Eigen scopes (netwerken die van jou zijn) */
+        get: operations["listSecurityScopes"];
+        put?: never;
+        /** Scope aanmaken (admin) */
+        post: operations["createSecurityScope"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/security/scopes/{scopeId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scopeId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** Scope bijwerken (admin) */
+        put: operations["updateSecurityScope"];
+        post?: never;
+        /** Scope verwijderen (admin) */
+        delete: operations["deleteSecurityScope"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/commands": {
         parameters: {
             query?: never;
@@ -13510,6 +13641,34 @@ export interface components {
             /** @description Storage voor de schijven van de test */
             storage: string;
         };
+        /** @description Een object van de beveiligingsmodule (fase 27); de velden staan in web/src/lib/security.ts en internal/security. */
+        SecurityObject: {
+            [key: string]: unknown;
+        };
+        SecurityRefreshInput: {
+            /** @description Feeds opnieuw ophalen */
+            feeds?: boolean;
+            /** @description Pakketlijsten opnieuw ophalen */
+            nodes?: boolean;
+            /**
+             * Format: uuid
+             * @description Alleen deze node (met nodes)
+             */
+            node_id?: string;
+        };
+        SecurityAcceptInput: {
+            note: string;
+            /** @description Na zoveel dagen weer open; leeg is voor altijd */
+            days?: number;
+        };
+        SecurityScopeInput: {
+            name: string;
+            description?: string;
+            cidrs: string[];
+            exclude?: string[];
+            public_confirm?: string;
+            public_note?: string;
+        };
         /** @description Een object van de firewall (fase 16); de velden staan in web/src/lib/firewall.ts en internal/firewall. */
         FirewallObject: {
             [key: string]: unknown;
@@ -21171,6 +21330,237 @@ export interface operations {
             header?: never;
             path: {
                 ruleId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Verwijderd */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    getSecurity: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SecurityObject"];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    refreshSecurity: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SecurityRefreshInput"];
+            };
+        };
+        responses: {
+            /** @description Gestart */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+        };
+    };
+    listSecurityFindings: {
+        parameters: {
+            query?: {
+                status?: "open" | "aanvaard" | "opgelost" | "alle" | "actueel";
+                node_id?: string;
+                kind?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["SecurityObject"][];
+                    };
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    acceptSecurityFinding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                findingId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SecurityAcceptInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SecurityObject"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    reopenSecurityFinding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                findingId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SecurityObject"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    listSecurityScopes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["SecurityObject"][];
+                        confirm_text: string;
+                    };
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    createSecurityScope: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SecurityScopeInput"];
+            };
+        };
+        responses: {
+            /** @description Aangemaakt */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SecurityObject"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+        };
+    };
+    updateSecurityScope: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scopeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SecurityScopeInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SecurityObject"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    deleteSecurityScope: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scopeId: string;
             };
             cookie?: never;
         };

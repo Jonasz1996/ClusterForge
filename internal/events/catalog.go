@@ -174,6 +174,11 @@ var Known = map[string]Spec{
 	"firewall.disabled":              {CategorySecurity, "ufw uitgeschakeld op node"},
 	"firewall.rule_added":            {CategorySecurity, "Eigen firewallregel toegevoegd"},
 	"firewall.rule_removed":          {CategorySecurity, "Eigen firewallregel verwijderd"},
+	"security.scope_saved":           {CategorySecurity, "Eigen scope voor beveiligingsscans bewaard"},
+	"security.scope_deleted":         {CategorySecurity, "Eigen scope voor beveiligingsscans verwijderd"},
+	"security.finding_accepted":      {CategorySecurity, "Beveiligingsbevinding aanvaard"},
+	"security.finding_reopened":      {CategorySecurity, "Beveiligingsbevinding heropend"},
+	"security.kev_found":             {CategorySecurity, "Actief misbruikte kwetsbaarheid gevonden"},
 
 	"job.queued":           {CategoryJobs, "Taak aangevraagd"},
 	"job.succeeded":        {CategoryJobs, "Taak gelukt"},

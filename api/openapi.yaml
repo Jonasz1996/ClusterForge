@@ -5066,6 +5066,152 @@ paths:
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /security:
+    get:
+      operationId: getSecurity
+      summary: Kwetsbaarheden en verharding (fase 27)
+      description: |
+        Stand van de feeds (Debian Security Tracker, CISA KEV), cijfers, elke node met een agent met zijn pakketlijst en
+        aantallen bevindingen, en het aantal eigen scopes. Ook voor viewers.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SecurityObject" }
+        "401": { $ref: "#/components/responses/Error" }
+  /security/refresh:
+    post:
+      operationId: refreshSecurity
+      summary: Feeds en/of pakketlijsten nu verversen (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SecurityRefreshInput" }
+      responses:
+        "202": { description: Gestart }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /security/findings:
+    get:
+      operationId: listSecurityFindings
+      summary: Bevindingen, ernstigste eerst
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [open, aanvaard, opgelost, alle, actueel] }
+        - { name: node_id, in: query, schema: { type: string, format: uuid } }
+        - { name: kind, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/SecurityObject" } }
+        "401": { $ref: "#/components/responses/Error" }
+  /security/findings/{findingId}/accept:
+    parameters:
+      - { name: findingId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: acceptSecurityFinding
+      summary: Bevinding aanvaarden met een reden (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SecurityAcceptInput" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SecurityObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /security/findings/{findingId}/reopen:
+    parameters:
+      - { name: findingId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: reopenSecurityFinding
+      summary: Aanvaarde bevinding heropenen (admin)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SecurityObject" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /security/scopes:
+    get:
+      operationId: listSecurityScopes
+      summary: Eigen scopes (netwerken die van jou zijn)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, confirm_text]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/SecurityObject" } }
+                  confirm_text: { type: string }
+        "401": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createSecurityScope
+      summary: Scope aanmaken (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SecurityScopeInput" }
+      responses:
+        "201":
+          description: Aangemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SecurityObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /security/scopes/{scopeId}:
+    parameters:
+      - { name: scopeId, in: path, required: true, schema: { type: string, format: uuid } }
+    put:
+      operationId: updateSecurityScope
+      summary: Scope bijwerken (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SecurityScopeInput" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SecurityObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteSecurityScope
+      summary: Scope verwijderen (admin)
+      responses:
+        "204": { description: Verwijderd }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
   /commands:
     get:
       operationId: listCommands
@@ -14128,6 +14274,32 @@ components:
         archive: { type: string, description: Volume van de back-up }
         type: { type: string, enum: [qemu, lxc] }
         storage: { type: string, description: Storage voor de schijven van de test }
+    SecurityObject:
+      type: object
+      description: Een object van de beveiligingsmodule (fase 27); de velden staan in web/src/lib/security.ts en internal/security.
+      additionalProperties: true
+    SecurityRefreshInput:
+      type: object
+      properties:
+        feeds: { type: boolean, description: Feeds opnieuw ophalen }
+        nodes: { type: boolean, description: Pakketlijsten opnieuw ophalen }
+        node_id: { type: string, format: uuid, description: Alleen deze node (met nodes) }
+    SecurityAcceptInput:
+      type: object
+      required: [note]
+      properties:
+        note: { type: string, maxLength: 500 }
+        days: { type: integer, minimum: 1, maximum: 365, description: Na zoveel dagen weer open; leeg is voor altijd }
+    SecurityScopeInput:
+      type: object
+      required: [name, cidrs]
+      properties:
+        name: { type: string, maxLength: 60 }
+        description: { type: string, maxLength: 300 }
+        cidrs: { type: array, items: { type: string } }
+        exclude: { type: array, items: { type: string } }
+        public_confirm: { type: string }
+        public_note: { type: string, maxLength: 300 }
     FirewallObject:
       type: object
       description: Een object van de firewall (fase 16); de velden staan in web/src/lib/firewall.ts en internal/firewall.
