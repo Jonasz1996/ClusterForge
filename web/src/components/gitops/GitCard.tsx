@@ -1,5 +1,6 @@
 "use client";
 
+import { askConfirm } from "@/components/Confirm";
 import Link from "next/link";
 import { useState } from "react";
 import { Badge, Button, Card } from "@/components/ui";
@@ -44,9 +45,9 @@ export function GitCard({ c, isAdmin }: { c: ClusterDetail; isAdmin: boolean }) 
               <Button
                 variant="secondary"
                 disabled={unlink.isPending}
-                onClick={() => {
+                onClick={async () => {
                   if (
-                    window.confirm(
+                    await askConfirm(
                       `${c.name} van Git ontkoppelen? ClusterForge negeert het bestand daarna en het cluster is weer hier te wijzigen. Een wachtend plan vervalt.`,
                     )
                   )

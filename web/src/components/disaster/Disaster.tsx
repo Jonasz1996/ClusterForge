@@ -1,5 +1,6 @@
 "use client";
 
+import { askConfirm } from "@/components/Confirm";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent, type ReactNode } from "react";
@@ -673,7 +674,7 @@ function DisasterForm({
             variant="secondary-danger"
             disabled={busy}
             onClick={async () => {
-              if (!window.confirm(`Rampoefening ${initial.name} verwijderen? De rapporten van eerdere runs blijven bewaard.`))
+              if (!await askConfirm(`Rampoefening ${initial.name} verwijderen? De rapporten van eerdere runs blijven bewaard.`))
                 return;
               try {
                 await remove.mutateAsync(initial.id);

@@ -6,7 +6,7 @@ import { AuditList } from "@/components/audit/AuditList";
 import { OpenIncidentsCard } from "@/components/incidents/Incidents";
 import { ClusterHealth } from "@/components/monitoring/ClusterHealth";
 import { FleetRiskCard } from "@/components/risk/Risk";
-import { Alert, Card } from "@/components/ui";
+import { Alert, Card, PageHeader } from "@/components/ui";
 import { api } from "@/lib/api/client";
 import { useAuditRecent } from "@/lib/audit";
 import { useMe } from "@/lib/auth";
@@ -29,12 +29,7 @@ export default function OverviewPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Overzicht</h1>
-        <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
-          De status van je clusters en wie elk VIP heeft, live bijgewerkt.
-        </p>
-      </div>
+      <PageHeader title="Overzicht" description="De status van je clusters en wie elk VIP heeft, live bijgewerkt." />
 
       {me.data && !me.data.user.totp_enabled && (
         <Alert kind="info">
@@ -55,7 +50,7 @@ export default function OverviewPage() {
         </Alert>
       )}
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
         <Link href="/clusters">
           <Stat
             label="Clusters"

@@ -119,6 +119,10 @@ Het technisch ontwerp staat in [docs/design/mvp-fase-1.md](docs/design/mvp-fase-
 | 3. Volledig automatisch uitrollen | Cluster uitrollen met **Nieuwe CT's, volledig automatisch**: per node host, storage, CTID, adres, CPU, RAM en schijf; de host maakt de CT's, zet de agent erin en ClusterForge rolt het cluster uit | klaar |
 | 4. Webinterface | Pagina **[Proxmox-hosts](#proxmox-hosts-met-een-agent)** | klaar |
 
+| Fase 24: revisie | Inhoud | Status |
+| --- | --- | --- |
+| 1. Navigatie en mobiel | Menu in groepen (Infrastructuur, Software, Beveiliging, Bewaking, Herstel, Beheer) die inklappen; op mobiel een lade met ☰; **Ctrl K** (of **/**) zoekt overal in pagina's, clusters, nodes en IP-adressen; licht, donker of zoals het systeem; eigen bevestigingsvensters in plaats van browsermeldingen; titel per tabblad; inhoudsopgave bij Instellingen | klaar |
+
 ## Draaien met Docker Compose
 
 Stap voor stap in een Debian-container op Proxmox: [docs/install-proxmox-lxc.md](docs/install-proxmox-lxc.md). Daar staan ook [back-up en herstel van ClusterForge zelf](docs/install-proxmox-lxc.md#back-up-en-herstel-van-clusterforge-zelf) en [bijwerken](docs/install-proxmox-lxc.md#bijwerken). `docker compose ps` toont de server als `healthy` zodra hij antwoordt (`clusterforge-server healthcheck`).

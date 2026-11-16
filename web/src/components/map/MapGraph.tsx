@@ -18,6 +18,7 @@ import "@xyflow/react/dist/style.css";
 import { useEffect, useMemo } from "react";
 import { cx } from "@/components/ui";
 import { markInfo, markOf, type MapEdge, type MapItem, type MapLayer, type Mark, type Overlay } from "@/lib/map";
+import { useTheme } from "@/lib/theme";
 
 // De kaart: Proxmox-hosts zijn vakken met hun VM's en lokale storage
 // (fysiek) of hun bridges (netwerk). De fysieke laag staat in een vast
@@ -265,6 +266,7 @@ export default function MapGraph(props: MapGraphProps) {
 }
 
 function Inner({ map, colors, overlay, selected, onSelect, fitKey }: MapGraphProps) {
+  const [theme] = useTheme();
   const topo = topology(map);
   // De layout hangt alleen af van de topologie.
   const boxes = useMemo(
@@ -374,7 +376,7 @@ function Inner({ map, colors, overlay, selected, onSelect, fitKey }: MapGraphPro
       minZoom={0.15}
       maxZoom={1.75}
       proOptions={{ hideAttribution: true }}
-      colorMode="system"
+      colorMode={theme}
       fitView
     >
       <Background gap={20} size={1} />

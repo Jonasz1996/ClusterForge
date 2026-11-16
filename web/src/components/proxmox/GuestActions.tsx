@@ -1,5 +1,6 @@
 "use client";
 
+import { askConfirm } from "@/components/Confirm";
 import { useState } from "react";
 import { Modal } from "@/components/Modal";
 import { Alert, Button, Field, Input, Select } from "@/components/ui";
@@ -45,9 +46,9 @@ export function GuestActions({
       return false;
     }
   };
-  const quick = (a: VmAction) => {
+  const quick = async (a: VmAction) => {
     const ask = confirmText[a];
-    if (ask && !window.confirm(ask(guest.name || `VM ${guest.vmid}`))) return;
+    if (ask && !await askConfirm(ask(guest.name || `VM ${guest.vmid}`))) return;
     void run({ action: a });
   };
 

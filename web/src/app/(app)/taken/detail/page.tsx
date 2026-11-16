@@ -1,5 +1,6 @@
 "use client";
 
+import { askConfirm } from "@/components/Confirm";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense } from "react";
@@ -56,8 +57,8 @@ function JobDetailInner() {
                     <Button
                       variant="secondary"
                       disabled={cancel.isPending}
-                      onClick={() => {
-                        if (window.confirm("Taak annuleren? Een lopende Proxmox-taak wordt gestopt.")) cancel.mutate(job.data!.id);
+                      onClick={async () => {
+                        if (await askConfirm("Taak annuleren? Een lopende Proxmox-taak wordt gestopt.")) cancel.mutate(job.data!.id);
                       }}
                     >
                       Annuleren

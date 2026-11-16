@@ -1,5 +1,6 @@
 "use client";
 
+import { askConfirm } from "@/components/Confirm";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState, type FormEvent } from "react";
@@ -365,8 +366,8 @@ function NodesCard({ c, isAdmin: admin }: { c: ClusterDetail; isAdmin: boolean }
                         <Button
                           variant="ghost"
                           className="px-2 py-1 text-xs"
-                          onClick={() => {
-                            if (window.confirm(`${n.hostname} uit dit cluster halen? De node zelf blijft bestaan.`))
+                          onClick={async () => {
+                            if (await askConfirm(`${n.hostname} uit dit cluster halen? De node zelf blijft bestaan.`))
                               void updateNode.mutateAsync({ id: n.id, body: { cluster_id: null } });
                           }}
                         >
@@ -478,8 +479,8 @@ function VipRow({ v, isAdmin }: { v: Vip; isAdmin: boolean }) {
           <Button
             variant="ghost"
             className="px-2 py-1 text-xs text-red-600!"
-            onClick={() => {
-              if (window.confirm(`VIP ${v.address} verwijderen?`)) void remove.mutateAsync(v.id);
+            onClick={async () => {
+              if (await askConfirm(`VIP ${v.address} verwijderen?`)) void remove.mutateAsync(v.id);
             }}
           >
             Verwijderen

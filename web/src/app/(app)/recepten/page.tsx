@@ -1,5 +1,6 @@
 "use client";
 
+import { askConfirm } from "@/components/Confirm";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
 import { Alert, Badge, Button, Card, PageHeader, Select, cx } from "@/components/ui";
@@ -141,8 +142,8 @@ function Recipes() {
                       <Button
                         variant="secondary-danger"
                         disabled={remove.isPending}
-                        onClick={() => {
-                          if (confirm(`Versie ${version} van ${name} verwijderen?`)) {
+                        onClick={async () => {
+                          if (await askConfirm(`Versie ${version} van ${name} verwijderen?`)) {
                             remove.mutate({ name, version }, { onSuccess: () => startNew("") });
                           }
                         }}

@@ -1,5 +1,6 @@
 "use client";
 
+import { askConfirm } from "@/components/Confirm";
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Answer, LiveAnswer, useStream } from "@/components/assistant/parts";
@@ -42,8 +43,8 @@ export function DocSummaryButtons({ cluster, name, summary }: { cluster: string;
         <Button
           variant="ghost"
           disabled={remove.isPending || stream.busy}
-          onClick={() => {
-            if (window.confirm(`De samenvatting 'In het kort' van ${name} weghalen?`)) remove.mutate(cluster);
+          onClick={async () => {
+            if (await askConfirm(`De samenvatting 'In het kort' van ${name} weghalen?`)) remove.mutate(cluster);
           }}
         >
           Weghalen

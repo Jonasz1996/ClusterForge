@@ -6,6 +6,7 @@ import "uplot/dist/uPlot.min.css";
 import { formatBytes } from "@/components/inventory/bits";
 import type { MetricPanel } from "@/lib/inventory";
 import { formatCPU } from "@/lib/kube";
+import { isDarkNow } from "@/lib/theme";
 
 type Unit = MetricPanel["unit"];
 type Series = MetricPanel["series"][number];
@@ -56,7 +57,7 @@ export function formatValue(v: number, unit: Unit) {
 }
 
 function isDark() {
-  return typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches;
+  return isDarkNow();
 }
 
 // TimeChart tekent lijnen op een gedeelde tijdas met uPlot. De grafiek wordt
