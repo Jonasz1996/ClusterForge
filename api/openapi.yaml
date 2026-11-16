@@ -4345,6 +4345,150 @@ paths:
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /clusters/{clusterId}/stacks:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getClusterStacks
+      summary: Docker-stacks van een cluster met wat er nu op de nodes draait (fase 21)
+      description: |
+        De stacks die ClusterForge beheert, per node met de containers nu, plus de Compose-projecten en losse
+        containers die nog niet beheerd zijn. De nodes worden live bevraagd (hoogstens 12 s). Ook voor viewers.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StackOverview" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /clusters/{clusterId}/stacks/import:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: importClusterStacks
+      summary: Compose-projecten van een node overnemen (admin)
+      description: |
+        De agent leest de bestanden van elk project (compose, env, kleine configuratie in de map); ClusterForge
+        bewaart ze versleuteld. Op de node verandert niets; Toepassen brengt ze naar de andere nodes.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/StackImportInput" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [results]
+                properties:
+                  results: { type: array, items: { $ref: "#/components/schemas/StackImportResult" } }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /clusters/{clusterId}/stacks/jobs:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: startClusterStackJob
+      summary: Stacks toepassen, starten, stoppen, herstarten, bijwerken of weghalen als taak stacks.apply (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/StackJobInput" }
+      responses:
+        "202":
+          description: Taak aangemaakt
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [job_id]
+                properties:
+                  job_id: { type: string, format: uuid }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /clusters/{clusterId}/stacks/logs:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getClusterStackLogs
+      summary: De laatste regels van een container op een node, met geheimen gemaskeerd (admin)
+      parameters:
+        - { name: node_id, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: container, in: query, required: true, schema: { type: string } }
+        - { name: tail, in: query, schema: { type: integer, minimum: 1, maximum: 2000 } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [logs]
+                properties:
+                  logs: { type: string }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /stacks/{stackId}:
+    parameters:
+      - { name: stackId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getStack
+      summary: Een stack met zijn bestanden (geheime waarden als «geheim-N») en versies (admin)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/StackDetail" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    put:
+      operationId: updateStack
+      summary: Een stack aanpassen (bestanden, plaatsing, keepalived, sync); toepassen is een aparte taak (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/StackUpdateInput" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Stack" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteStack
+      summary: Een stack loslaten; op de nodes blijft alles draaien (admin)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [job_id]
+                properties:
+                  job_id: { type: string, format: uuid, nullable: true }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
   /firewall:
     get:
       operationId: getFirewall
@@ -13069,6 +13213,200 @@ components:
             collections: { type: array, items: { type: string } }
             applied_at: { type: string, format: date-time }
         errors: { type: array, items: { type: string } }
+    StackMount:
+      type: object
+      required: [type, source, destination, rw]
+      properties:
+        type: { type: string }
+        name: { type: string }
+        source: { type: string }
+        destination: { type: string }
+        rw: { type: boolean }
+    StackContainer:
+      type: object
+      required: [name, id, image, state]
+      properties:
+        name: { type: string }
+        id: { type: string }
+        image: { type: string }
+        state: { type: string }
+        health: { type: string }
+        restarts: { type: integer }
+        status: { type: string }
+        project: { type: string }
+        service: { type: string }
+        ports: { type: array, items: { type: string } }
+        mounts: { type: array, items: { $ref: "#/components/schemas/StackMount" } }
+        network: { type: string }
+        restart: { type: string }
+        started_at: { type: string, format: date-time }
+    StackProjectInfo:
+      type: object
+      required: [name, working_dir, config_files, status]
+      properties:
+        name: { type: string }
+        working_dir: { type: string }
+        config_files: { type: array, items: { type: string } }
+        env_files: { type: array, items: { type: string } }
+        status: { type: string }
+        missing: { type: array, items: { type: string } }
+        managed: { type: boolean }
+    StackNode:
+      type: object
+      required: [node_id, hostname, should, revision, applied_at, error, failed_at, containers]
+      properties:
+        node_id: { type: string, format: uuid }
+        hostname: { type: string }
+        should: { type: boolean, description: De stack hoort hier te draaien }
+        revision: { type: integer }
+        applied_at: { type: string, format: date-time, nullable: true }
+        error: { type: string }
+        failed_at: { type: string, format: date-time, nullable: true }
+        containers: { type: array, items: { $ref: "#/components/schemas/StackContainer" } }
+    Stack:
+      type: object
+      required: [id, cluster_id, name, dir, compose_files, placement, node_ids, desired, critical, sync_paths, sync_schedule,
+        revision, notes, imported_from, created_at, updated_at, file_count, nodes]
+      properties:
+        id: { type: string, format: uuid }
+        cluster_id: { type: string, format: uuid }
+        name: { type: string }
+        dir: { type: string }
+        compose_files: { type: array, items: { type: string } }
+        placement: { type: string, enum: [alle, vip, node] }
+        node_ids: { type: array, items: { type: string, format: uuid } }
+        desired: { type: string, enum: [running, stopped] }
+        critical: { type: boolean }
+        sync_paths: { type: array, items: { type: string } }
+        sync_schedule: { type: string }
+        revision: { type: integer }
+        notes: { type: string }
+        imported_from: { type: string, format: uuid, nullable: true }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        file_count: { type: integer }
+        nodes: { type: array, items: { $ref: "#/components/schemas/StackNode" } }
+    StackClusterNode:
+      type: object
+      required: [id, hostname, online, protocol, supported, holds_vip, docker, error]
+      properties:
+        id: { type: string, format: uuid }
+        hostname: { type: string }
+        online: { type: boolean }
+        protocol: { type: integer }
+        supported: { type: boolean }
+        holds_vip: { type: boolean }
+        docker: { type: boolean }
+        error: { type: string }
+    StackUnmanaged:
+      type: object
+      required: [node_id, hostname, project, containers, sync_paths]
+      properties:
+        node_id: { type: string, format: uuid }
+        hostname: { type: string }
+        project: { $ref: "#/components/schemas/StackProjectInfo" }
+        containers: { type: array, items: { $ref: "#/components/schemas/StackContainer" } }
+        sync_paths: { type: array, items: { type: string } }
+    StackOverview:
+      type: object
+      required: [cluster, nodes, stacks, unmanaged, others, available, job_id]
+      properties:
+        cluster:
+          type: object
+          required: [id, name, slug, environment, template, vip, vip_owner]
+          properties:
+            id: { type: string, format: uuid }
+            name: { type: string }
+            slug: { type: string }
+            environment: { type: string }
+            template: { type: string }
+            vip: { type: string }
+            vip_owner: { type: string, format: uuid, nullable: true }
+        nodes: { type: array, items: { $ref: "#/components/schemas/StackClusterNode" } }
+        stacks: { type: array, items: { $ref: "#/components/schemas/Stack" } }
+        unmanaged: { type: array, items: { $ref: "#/components/schemas/StackUnmanaged" } }
+        others: { type: array, items: { $ref: "#/components/schemas/StackUnmanaged" } }
+        available: { type: boolean, description: Er is een masterkey om stacks te bewaren }
+        job_id: { type: string, format: uuid, nullable: true }
+    StackImportInput:
+      type: object
+      required: [node_id, items]
+      properties:
+        node_id: { type: string, format: uuid }
+        items:
+          type: array
+          items:
+            type: object
+            required: [name]
+            properties:
+              name: { type: string }
+              placement: { type: string, enum: [alle, vip, node] }
+              node_ids: { type: array, items: { type: string, format: uuid } }
+              critical: { type: boolean }
+              sync_paths: { type: array, items: { type: string } }
+    StackImportResult:
+      type: object
+      required: [name, stack_id, files, skipped, error]
+      properties:
+        name: { type: string }
+        stack_id: { type: string, format: uuid, nullable: true }
+        files: { type: array, items: { type: string } }
+        skipped: { type: array, items: { type: string } }
+        error: { type: string }
+    StackJobInput:
+      type: object
+      required: [action]
+      properties:
+        action: { type: string, enum: [apply, start, stop, restart, update, down, lists] }
+        stack_ids: { type: array, items: { type: string, format: uuid } }
+        node_id: { type: string, format: uuid }
+        services: { type: array, items: { type: string } }
+        confirm: { type: string, description: De slug van een prodcluster }
+    StackFile:
+      type: object
+      required: [path, content, mode, secrets]
+      properties:
+        path: { type: string }
+        content: { type: string }
+        mode: { type: integer }
+        secrets: { type: integer }
+    StackRevision:
+      type: object
+      required: [revision, note, created_at, created_by, username]
+      properties:
+        revision: { type: integer }
+        note: { type: string }
+        created_at: { type: string, format: date-time }
+        created_by: { type: string, format: uuid, nullable: true }
+        username: { type: string }
+    StackDetail:
+      type: object
+      required: [stack, files, revisions]
+      properties:
+        stack: { $ref: "#/components/schemas/Stack" }
+        files: { type: array, items: { $ref: "#/components/schemas/StackFile" } }
+        revisions: { type: array, items: { $ref: "#/components/schemas/StackRevision" } }
+    StackUpdateInput:
+      type: object
+      properties:
+        files:
+          type: array
+          items:
+            type: object
+            required: [path, content]
+            properties:
+              path: { type: string }
+              content: { type: string }
+              mode: { type: integer }
+        compose_files: { type: array, items: { type: string } }
+        placement: { type: string, enum: [alle, vip, node] }
+        node_ids: { type: array, items: { type: string, format: uuid } }
+        desired: { type: string, enum: [running, stopped] }
+        critical: { type: boolean }
+        sync_paths: { type: array, items: { type: string } }
+        sync_schedule: { type: string }
+        notes: { type: string }
+        note: { type: string }
     CrowdSecNode:
       type: object
       required: [node_id, hostname, cluster_id, cluster_name, cluster_slug, cluster_environment, cluster_template, online,

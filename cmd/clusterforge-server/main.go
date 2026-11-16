@@ -68,6 +68,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/risk"
 	"github.com/Jonasz1996/clusterforge/internal/rollout"
 	"github.com/Jonasz1996/clusterforge/internal/secrets"
+	"github.com/Jonasz1996/clusterforge/internal/stacks"
 	"github.com/Jonasz1996/clusterforge/internal/status"
 	"github.com/Jonasz1996/clusterforge/internal/store"
 	"github.com/Jonasz1996/clusterforge/internal/topo"
@@ -217,6 +218,10 @@ func serve() error {
 	// Fase 14: CrowdSec op de nodes, via agentprotocol 28 en runs.
 	csec := crowdsec.NewService(pool, ev, runner, bus, log)
 	csec.Box = box
+	// Fase 21: Docker-stacks via agentprotocol 33 en runs.
+	stk := stacks.NewService(pool, ev, runner, bus, log)
+	stk.Box = box
+	stk.Syncs = crons
 	// Fase 16: ufw op de nodes, via agentprotocol 30.
 	fw := firewall.NewService(pool, ev, runner, bus, log)
 	// Fase 17: de agent op de Proxmox-hosts (pct, qm, pveam), via
@@ -426,7 +431,7 @@ func serve() error {
 			Config: cfg, Log: log, Pool: pool, Auth: authSvc, Bus: bus, Hub: hub, Proxmox: pve, Jobs: runner,
 			Lifecycle: life, Deploy: dep, Backups: bk, Drift: drf, Failover: fo, Disaster: dis, Deps: dps, Rollout: ro,
 			GitOps: git, Assistant: asst, Risk: rsk, Topo: tp, Docs: dcs, Reports: rep, Kube: kub, KubeNodes: kn, Databases: dbs, Cronjobs: crons, Heal: hl,
-			Components: cmps, Upgrades: upg, Updates: upd, Commands: cmds, CrowdSec: csec, Firewall: fw, PVEHosts: pvh, Version: version,
+			Components: cmps, Upgrades: upg, Updates: upd, Commands: cmds, CrowdSec: csec, Stacks: stk, Firewall: fw, PVEHosts: pvh, Version: version,
 		}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,

@@ -159,6 +159,14 @@ func (r *RunExecutor) stackOne(ctx context.Context, dir string, s protocol.Stack
 	}
 	svc := s.Services
 	restarts := r.stackRestarts(ctx, s.Name)
+	// Bijwerken op een node waar de stack niet draait (een reserve bij
+	// plaatsing vip): alleen de nieuwe images ophalen, zodat een failover
+	// meteen de nieuwe versie start.
+	if s.Pull && (s.Want == protocol.StackFiles || s.Want == protocol.StackStop) {
+		if _, err := r.step(ctx, out, nil, append(slices.Clone(base), "pull", "--ignore-buildable")...); err != nil {
+			return fail("docker compose pull mislukte")
+		}
+	}
 	switch s.Want {
 	case protocol.StackFiles:
 		if len(written) == 0 {
