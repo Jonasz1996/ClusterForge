@@ -181,6 +181,8 @@ func newVXNode(t *testing.T, ctl, bron, baseEnv, oudEnv, commit string, pgArgs, 
 		"hostname": `echo vx-test`,
 		"curl":     `[ -f "$CF_TEST_DIR/gezond" ]`,
 		"nginx":    `exit 0`,
+		// Na voorbereiden: alleen het hernoemde cluster van de oude VaultX.
+		"pg_lsclusters": `echo "17 vaultx-oud 5433 online postgres /var/lib/postgresql/17/vaultx-oud /var/log/postgresql/x.log"`,
 		// systemctl van de clusternode en van de oude node; de oude VaultX
 		// is "actief" zolang $CF_TEST_DIR/oud-actief bestaat.
 		"systemctl": `echo "systemctl $*" >> "$CF_TEST_DIR/log"
@@ -354,6 +356,27 @@ func TestVaultXOvernemen(t *testing.T) {
 		t.Fatalf("voorstart vóór de overname: %v\n%s", err, out)
 	}
 
+	// 0. De oude VaultX draait op deze node zelf (lokaal): een mislukte
+	// overname zet ook zijn eigen vaultx.env terug, die voorstart intussen
+	// kon overschrijven.
+	oudUnit := filepath.Join(n.dir, "vaultx.service")
+	oudLokaal := "VAULTX_DATABASE_URL=postgresql+psycopg://vaultx:oud@127.0.0.1:5433/vaultx\nVAULTX_SECRET_KEY=" + vxSecret + "\n"
+	write(t, map[string]string{oudUnit: "[Service]\n", filepath.Join(n.dir, "state", "oud", "vaultx.env"): oudLokaal,
+		filepath.Join(n.dir, "vxetc", "vaultx.env"): "door voorstart overschreven\n"})
+	n.env = append(n.env, "CF_VX_OUD_UNIT="+oudUnit)
+	if out, err := n.run("overnemen"); err == nil || !strings.Contains(out, "oude VaultX draait weer") {
+		t.Fatalf("lokale overname zonder gezonde VaultX: %v\n%s", err, out)
+	}
+	if b, _ := os.ReadFile(filepath.Join(n.dir, "vxetc", "vaultx.env")); string(b) != oudLokaal {
+		t.Errorf("vaultx.env van de oude VaultX niet teruggezet:\n%s", b)
+	}
+	if out, err := n.run("voorbereid"); err != nil {
+		t.Errorf("voorbereid met vaultx-oud: %v %s", err, out)
+	}
+	if err := os.Remove(oudUnit); err != nil {
+		t.Fatal(err)
+	}
+
 	// 1. VaultX van het cluster wordt niet gezond: alles terugdraaien.
 	out, err := n.run("overnemen", "192.0.2.157")
 	if err == nil || !strings.Contains(out, "antwoordt niet gezond") || !strings.Contains(out, "oude VaultX draait weer") {
@@ -377,7 +400,7 @@ func TestVaultXOvernemen(t *testing.T) {
 		t.Fatalf("database van het cluster na het terugdraaien: %d tabellen %v", tables, err)
 	}
 	// De back-up op de oude node is er wel.
-	if m, _ := filepath.Glob(filepath.Join(n.dir, "oud", "backups", "cf-overname-*.dump")); len(m) != 1 {
+	if m, _ := filepath.Glob(filepath.Join(n.dir, "oud", "backups", "cf-overname-*.dump")); len(m) == 0 {
 		t.Errorf("back-up op de oude node: %v", m)
 	}
 

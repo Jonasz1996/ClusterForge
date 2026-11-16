@@ -14,8 +14,14 @@
 #   vaultx-ctl.sh bron-koppelen <IP> een sleutel voor de oude node maken; toont
 #                                    de regel om op de oude node uit te voeren
 #   vaultx-ctl.sh bron-info <IP>     wat er op de oude node staat
-#   vaultx-ctl.sh overnemen <IP> [--andere-versie]
-#                                    de kluis van de oude node naar het cluster
+#   vaultx-ctl.sh overnemen [<IP>|lokaal] [--andere-versie]
+#                                    de kluis van de oude node naar het cluster;
+#                                    lokaal (of zonder IP op de node waar de oude
+#                                    VaultX zelf draait): deze node is de bron
+#   vaultx-ctl.sh voorbereiden | voorbereid
+#                                    (uitrol) een oude VaultX op deze node: zijn
+#                                    PostgreSQL wordt cluster vaultx-oud op poort
+#                                    5433, zodat Patroni 5432 krijgt
 #   vaultx-ctl.sh afronden <IP>      de sleutel op de oude node weer weghalen
 #   vaultx-ctl.sh terug <IP>         terug naar de oude node (terugweg)
 #   vaultx-ctl.sh backup             nachtelijke back-up (alleen op de node met
@@ -132,10 +138,103 @@ bron() {
   oud=$1
   shift
   if [ -n "${CF_VX_BRON:-}" ]; then "$CF_VX_BRON" "$@"; return; fi
+  if [ "$oud" = lokaal ]; then
+    SSH_ORIGINAL_COMMAND="$*" PGPORT=$(oud_port) /bin/sh "$(dirname "$0")/vaultx-bron.sh"
+    return
+  fi
   ssh -i "$BRON_KEY" -o BatchMode=yes -o IdentitiesOnly=yes -o ConnectTimeout=10 \
     -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile="$STATE/known_hosts" "root@$oud" "$@"
 }
-check_ip() { echo "$1" | grep -Eq '^[0-9]{1,3}(\.[0-9]{1,3}){3}$' || fail "geef het IP van de oude VaultX-node, zoals 192.168.115.157"; }
+check_ip() { [ "$1" = lokaal ] || echo "$1" | grep -Eq '^[0-9]{1,3}(\.[0-9]{1,3}){3}$' || fail "geef het IP van de oude VaultX-node, zoals 192.168.115.157"; }
+
+# ------------------------------------------------- een oude VaultX op deze node
+OUD_ENV=$STATE/oud/vaultx.env
+OUD_UNIT=${CF_VX_OUD_UNIT:-/etc/systemd/system/vaultx.service}
+OUD_NAME=vaultx-oud
+has_oud() { [ -e "$OUD_UNIT" ]; }
+oud_port() {
+  p=$(envval VAULTX_DATABASE_URL "$OUD_ENV" | sed -nE 's#.*@[^/:]+:([0-9]+)/.*#\1#p')
+  echo "${p:-5433}"
+}
+# De instellingen van de oude VaultX terugzetten (na een mislukte overname of
+# bij terug); voorstart kan /etc/vaultx/vaultx.env intussen overschreven hebben.
+restore_oud_env() {
+  [ -s "$OUD_ENV" ] || return 0
+  install -m 0640 "$OUD_ENV" "$VXETC/vaultx.env" && chgrp vaultx "$VXETC/vaultx.env" 2>/dev/null
+  return 0
+}
+
+voorbereid() {
+  has_oud || return 0
+  [ -s "$OUD_ENV" ] || return 1
+  ! pg_lsclusters -h 2>/dev/null | awk '{print $2}' | grep -qx main
+}
+
+# Vóór Patroni (tijdens de uitrol): de PostgreSQL van de oude VaultX houdt
+# het cluster main op poort 5432 vast. Hij wordt cluster vaultx-oud op 5433
+# (pg_renamecluster; de data blijft), VaultX krijgt de nieuwe poort en blijft
+# het VIP bedienen tot de overname. Eerst een gecontroleerde back-up; bij een
+# fout gaat alles terug zoals het was.
+voorbereiden() {
+  if ! has_oud; then echo "Geen oude VaultX op deze node."; return 0; fi
+  if voorbereid; then echo "De oude VaultX is al klaargezet (PostgreSQL $OUD_NAME op $(oud_port))."; return 0; fi
+  line=$(pg_lsclusters -h | awk '$2 == "main"' | head -n 1)
+  [ -n "$line" ] || fail "geen PostgreSQL-cluster main gevonden voor de oude VaultX (pg_lsclusters)"
+  v=$(echo "$line" | awk '{print $1}')
+  port=$(echo "$line" | awk '{print $3}')
+  conf=/etc/postgresql/$v
+  [ -s "$VXETC/vaultx.env" ] || fail "$VXETC/vaultx.env ontbreekt"
+  url=$(envval VAULTX_DATABASE_URL "$VXETC/vaultx.env")
+  echo "$url" | grep -Eq "@(127\.0\.0\.1|localhost)(:$port)?/" || fail "de oude VaultX gebruikt geen lokale PostgreSQL op poort $port ($(echo "$url" | sed -E 's#://[^@]*@#://***@#'))"
+
+  say "Back-up van de oude VaultX"
+  mkdir -p /var/backups/vaultx "$STATE/oud" && chmod 0700 /var/backups/vaultx "$STATE/oud" || fail "mappen"
+  t=$(date +%Y%m%d-%H%M%S)
+  f=/var/backups/vaultx/cf-voorbereiden-$t.dump
+  (umask 077 && runuser -u postgres -- pg_dump -p "$port" -Fc vaultx > "$f") && [ -s "$f" ] && pg_restore --list "$f" > /dev/null ||
+    fail "back-up (pg_dump) mislukte; er is niets veranderd"
+  install -m 0600 "$VXETC/vaultx.env" "/var/backups/vaultx/cf-voorbereiden-$t.env"
+  echo "  $f"
+
+  say "PostgreSQL $v/main wordt $v/$OUD_NAME op poort 5433 (de data blijft)"
+  sysctl_ stop vaultx
+  undo_prep() {
+    echo "FOUT: $1" >&2
+    echo "== Terugzetten zoals het was" >&2
+    pg_ctlcluster "$v" "$OUD_NAME" stop 2>/dev/null
+    if [ -d "$conf/$OUD_NAME" ]; then
+      pg_renamecluster "$v" "$OUD_NAME" main >&2
+      sed -i -E "s/^port = 5433.*/port = $port/" "$conf/main/postgresql.conf"
+    fi
+    pg_ctlcluster "$v" main start >&2
+    install -m 0640 "/var/backups/vaultx/cf-voorbereiden-$t.env" "$VXETC/vaultx.env" && chgrp vaultx "$VXETC/vaultx.env" 2>/dev/null
+    rm -f "$OUD_ENV" /etc/systemd/system/vaultx-backup.service.d/cf-poort.conf
+    sysctl_ daemon-reload
+    sysctl_ start vaultx
+    exit 1
+  }
+  pg_ctlcluster "$v" main stop || undo_prep "PostgreSQL $v/main stoppen"
+  pg_renamecluster "$v" main "$OUD_NAME" || undo_prep "pg_renamecluster"
+  sed -i -E 's/^#?port = [0-9]+/port = 5433/' "$conf/$OUD_NAME/postgresql.conf" || undo_prep "poort zetten"
+  pg_ctlcluster "$v" "$OUD_NAME" start || undo_prep "PostgreSQL $v/$OUD_NAME starten"
+  newurl=$(echo "$url" | sed -E "s#@(127\.0\.0\.1|localhost)(:[0-9]+)?/#@\1:5433/#")
+  tmp=$VXETC/.vaultx.env.$$
+  { grep -v '^VAULTX_DATABASE_URL=' "$VXETC/vaultx.env"; echo "VAULTX_DATABASE_URL=$newurl"; } > "$tmp" &&
+    chmod 0640 "$tmp" && chgrp vaultx "$tmp" 2>/dev/null; mv -f "$tmp" "$VXETC/vaultx.env" || undo_prep "$VXETC/vaultx.env"
+  (umask 077 && cp "$VXETC/vaultx.env" "$OUD_ENV") || undo_prep "$OUD_ENV"
+  # De nachtelijke back-up van de oude VaultX: ook naar 5433.
+  mkdir -p /etc/systemd/system/vaultx-backup.service.d &&
+    printf '[Service]\nEnvironment=PGPORT=5433\n' > /etc/systemd/system/vaultx-backup.service.d/cf-poort.conf
+  sysctl_ daemon-reload
+  sysctl_ start vaultx || undo_prep "VaultX starten"
+  i=0
+  while ! healthy; do
+    i=$((i + 1))
+    [ $i -le 60 ] || undo_prep "de oude VaultX antwoordt niet gezond na de verhuizing van PostgreSQL (journalctl -u vaultx)"
+    sleep 2
+  done
+  echo "De oude VaultX draait weer, met PostgreSQL $OUD_NAME op 5433. Ze bedient het VIP tot de overname."
+}
 
 bron_koppelen() {
   check_ip "$1"
@@ -178,6 +277,15 @@ bron_info() {
 
 overnemen() {
   oud=${1:-}
+  if [ -z "$oud" ] || [ "$oud" = --andere-versie ]; then
+    has_oud || fail "geef het IP van de oude VaultX-node (of doe dit op de node waar de oude VaultX zelf draait)"
+    [ "$oud" = --andere-versie ] && set -- lokaal --andere-versie
+    oud=lokaal
+  fi
+  if [ "$oud" = lokaal ]; then
+    has_oud || fail "hier draait geen oude VaultX ($OUD_UNIT)"
+    [ -s "$OUD_ENV" ] || fail "de oude VaultX is nog niet klaargezet (vaultx-ctl.sh voorbereiden, normaal een stap van de uitrol)"
+  fi
   check_ip "$oud"
   force=
   [ "${2:-}" = --andere-versie ] && force=1
@@ -271,6 +379,7 @@ overnemen() {
     sleep "${CF_VX_SLEEP:-2}"
   done
   rm -f "$dir/vaultx.env" "$dir/nginx-realip.conf"
+  [ "$oud" = lokaal ] && sysctl_ disable --now vaultx-backup.timer >/dev/null 2>&1
   echo
   echo "Overgenomen: VaultX draait op het cluster met de kluis van $oud."
   echo "- De andere nodes starten zodra de sync VaultX-instellingen ze bereikte (binnen een paar minuten; Cronjobs)."
@@ -292,6 +401,7 @@ back() {
     db_mark '' >/dev/null 2>&1 || echo "WAARSCHUWING: markering weghalen mislukte" >&2
   fi
   rm -f "$CF/vaultx.env" "$CF/nginx-realip.conf" "$DIR/vaultx.env"
+  [ "$OUD" = lokaal ] && restore_oud_env
   if bron "$OUD" start >&2; then
     echo "De oude VaultX draait weer; aan de kluis is niets veranderd." >&2
   else
@@ -310,6 +420,7 @@ afronden() {
 
 terug() {
   oud=${1:-}
+  if [ -z "$oud" ] && has_oud; then oud=lokaal; fi
   check_ip "$oud"
   OUD=$oud
   meta=$(db_meta) || fail "de database van het cluster antwoordt niet; start de oude dan met de hand: systemctl enable --now vaultx op $oud"
@@ -322,6 +433,11 @@ terug() {
   say "Markering weghalen: geen node van het cluster start VaultX nog"
   db_mark "cf-vaultx terug=$(date +%s) naar=$oud was:$(echo "$meta" | tr ' ' ',')" || fail "markering"
   sysctl_ stop cf-vaultx
+  if [ "$oud" = lokaal ]; then
+    sysctl_ disable cf-vaultx >/dev/null 2>&1
+    restore_oud_env
+    sysctl_ enable --now vaultx-backup.timer >/dev/null 2>&1
+  fi
   say "Oude VaultX starten"
   bron "$oud" start || fail "de oude VaultX starten; op $oud: systemctl enable --now vaultx"
   echo
@@ -358,6 +474,10 @@ bouwen() {
   commit=$(git -C "$CODE" rev-parse -q --verify "origin/$VERSION^{commit}" 2>/dev/null ||
     git -C "$CODE" rev-parse -q --verify "$VERSION^{commit}" 2>/dev/null) || fail "versie $VERSION bestaat niet in $REPO"
   prev=$(git -C "$CODE" rev-parse -q HEAD 2>/dev/null)
+  # Een oude VaultX die hier nog draait, krijgt geen andere code onder zich.
+  if has_oud && sysctl_ is-enabled --quiet vaultx && [ -n "$prev" ] && [ "$prev" != "$commit" ]; then
+    fail "de oude VaultX draait hier op $prev; zet Versie van VaultX op die commit (andere code komt na de overname)"
+  fi
   say "Versie $VERSION = $commit"
   git -C "$CODE" checkout -q --detach "$commit" || fail "git checkout $commit"
   undo() { [ -n "$prev" ] && git -C "$CODE" checkout -q --detach "$prev"; rm -rf "$CODE/frontend/dist.new"; fail "$1 (vorige code teruggezet)"; }
@@ -468,6 +588,8 @@ case "${1:-}" in
   bron-koppelen) bron_koppelen "${2:-}" ;;
   bron-info) bron_info "${2:-}" ;;
   overnemen) overnemen "${2:-}" "${3:-}" ;;
+  voorbereiden) voorbereiden ;;
+  voorbereid) voorbereid ;;
   afronden) afronden "${2:-}" ;;
   terug) terug "${2:-}" ;;
   backup) backup ;;
@@ -486,7 +608,7 @@ case "${1:-}" in
     sysctl_ try-restart cf-vaultx
     ;;
   *)
-    echo "gebruik: $0 voorstart|check|status|bron-koppelen|bron-info|overnemen|afronden|terug|backup|bouwen|gebouwd|nginx|nginx-ok|firewall|firewall-ok|unchanged|restart-if-changed" >&2
+    echo "gebruik: $0 voorstart|check|status|voorbereiden|voorbereid|bron-koppelen|bron-info|overnemen|afronden|terug|backup|bouwen|gebouwd|nginx|nginx-ok|firewall|firewall-ok|unchanged|restart-if-changed" >&2
     exit 2
     ;;
 esac

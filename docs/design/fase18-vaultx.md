@@ -107,6 +107,30 @@ Op de **VIP-node** van het cluster, via Commando's:
 4. `vaultx-ctl.sh afronden 192.168.115.157` haalt de sleutel van de oude
    node weg. De oude node blijft staan (gestopt) als terugweg.
 
+## De bestaande node als clusternode
+
+Jonas wil de bestaande node houden en uitbreiden naar drie (2026-11-16).
+Dat kan ook: rol uit op bestaande nodes, met de oude VaultX-node erbij.
+
+- De uitrolstap `vaultx-ctl.sh voorbereiden` (alleen op een node met
+  `/etc/systemd/system/vaultx.service`): eerst een gecontroleerde
+  `pg_dump` naar `/var/backups/vaultx/cf-voorbereiden-*.dump`, dan
+  `pg_renamecluster <v> main vaultx-oud` en poort 5433 (de data blijft
+  staan), `VAULTX_DATABASE_URL` naar 5433, een drop-in `PGPORT=5433` voor de
+  oude back-uptimer, VaultX weer starten en wachten op `/health/ready`.
+  Mislukt iets, dan gaat alles terug zoals het was. Zonder die stap zou
+  `drop-main.sh` van Patroni weigeren (main heeft eigen databases).
+- Tot de overname bedient de oude VaultX op die node het VIP (hij is de
+  enige gezonde). NPM kan dus al vóór de overname naar het VIP wijzen.
+- `vaultx-ctl.sh overnemen` zonder IP op die node: de bron is lokaal
+  (`cf-vaultx-bron` met `PGPORT=5433`, zonder SSH). Na de overname staan
+  `vaultx.service` en de oude back-uptimer uit; het cluster `vaultx-oud`
+  blijft met zijn data staan als terugweg.
+- `bouwen` weigert op die node andere code dan de commit van de oude
+  VaultX zolang die nog draait.
+- `terug` zonder IP op die node: `cf-vaultx` uit, de instellingen van de oude
+  VaultX terug, `vaultx.service` en de back-uptimer weer aan.
+
 ## Terugweg
 
 Zolang de oude node bestaat: `vaultx-ctl.sh terug 192.168.115.157` op de

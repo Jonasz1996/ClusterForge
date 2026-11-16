@@ -6,10 +6,11 @@ description: >-
   PostgreSQL (Patroni, met een eigen VIP op de primary) en een VIP van
   keepalived. VaultX draait op elke node tegelijk tegen dezelfde database;
   valt een node weg, dan neemt een andere het VIP over zonder dat er iets
-  gekopieerd moet worden. Een bestaande VaultX op een losse node neem je
-  over met vaultx-ctl.sh overnemen: met een gecontroleerde back-up vooraf,
-  een telling en controlesom per tabel, terugdraaien bij een fout, en de
-  oude node blijft staan als terugweg.
+  gekopieerd moet worden. Een bestaande VaultX neem je over met
+  vaultx-ctl.sh overnemen, met een gecontroleerde back-up vooraf, een
+  telling en controlesom per tabel en terugdraaien bij een fout. De
+  bestaande node mag zelf een van de nodes zijn (zijn PostgreSQL blijft
+  ernaast staan als terugweg), of erbuiten blijven.
 cluster_type: generic
 
 # VaultX draait op elke node; het VIP hoort bij de gezondste node met de
@@ -173,6 +174,14 @@ roles:
           title: ufw-regels voor het cluster
           run: /usr/local/lib/clusterforge/vaultx-ctl.sh firewall
           unless: /usr/local/lib/clusterforge/vaultx-ctl.sh firewall-ok
+      # Een oude VaultX op deze node (de bestaande node die mee in het
+      # cluster gaat): zijn PostgreSQL verhuist van cluster main op 5432 naar
+      # vaultx-oud op 5433, met een back-up vooraf, zodat Patroni 5432 krijgt.
+      # VaultX blijft draaien en bedient het VIP tot de overname.
+      - command:
+          title: oude VaultX klaarzetten
+          run: /usr/local/lib/clusterforge/vaultx-ctl.sh voorbereiden
+          unless: /usr/local/lib/clusterforge/vaultx-ctl.sh voorbereid
       # Code ophalen en bouwen; een andere versie bouwt opnieuw. De vorige
       # build blijft staan tot de nieuwe lukt.
       - command:
