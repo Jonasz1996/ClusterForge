@@ -325,7 +325,7 @@ overnemen() {
 
   mkdir -p "$STATE/overname" && chmod 0700 "$STATE/overname" || fail "map $STATE/overname"
   t=$(date +%Y%m%d-%H%M%S)
-  dir=$STATE/overname/$t
+  dir=$STATE/overname/$t-$$
   mkdir -m 0700 "$dir" || fail "map $dir"
   OUD=$oud
   DIR=$dir
