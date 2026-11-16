@@ -1628,6 +1628,95 @@ type Secret struct {
 	CreatedAt time.Time
 }
 
+type SecurityCfe struct {
+	Cve         string
+	Description string
+	Scope       string
+}
+
+type SecurityDebian struct {
+	Release      string
+	Package      string
+	Cve          string
+	Status       string
+	FixedVersion string
+	Urgency      string
+}
+
+type SecurityFeed struct {
+	Name      string
+	FetchedAt *time.Time
+	OkAt      *time.Time
+	Error     string
+	Entries   int32
+	Etag      string
+}
+
+type SecurityFinding struct {
+	ID            uuid.UUID
+	Kind          string
+	Subject       string
+	Key           string
+	NodeID        *uuid.UUID
+	Severity      string
+	Title         string
+	Summary       string
+	Fix           string
+	Detail        []byte
+	Status        string
+	FirstSeen     time.Time
+	LastSeen      time.Time
+	ResolvedAt    *time.Time
+	AcceptedBy    *uuid.UUID
+	AcceptedAt    *time.Time
+	AcceptedUntil *time.Time
+	AcceptedNote  string
+}
+
+type SecurityHardening struct {
+	NodeID      uuid.UUID
+	CollectedAt *time.Time
+	Audit       []byte
+	Results     []byte
+	Score       *int32
+	Error       string
+	ErrorAt     *time.Time
+}
+
+type SecurityInventory struct {
+	NodeID      uuid.UUID
+	CollectedAt *time.Time
+	OsID        string
+	Codename    string
+	Kernel      string
+	Dpkg        bool
+	Packages    []byte
+	Error       string
+	ErrorAt     *time.Time
+}
+
+type SecurityKev struct {
+	Cve        string
+	Vendor     string
+	Product    string
+	Name       string
+	DateAdded  pgtype.Date
+	Ransomware bool
+}
+
+type SecurityScope struct {
+	ID          uuid.UUID
+	Name        string
+	Description string
+	Cidrs       []string
+	Exclude     []string
+	Public      bool
+	PublicNote  string
+	CreatedAt   time.Time
+	UpdatedAt   time.Time
+	UpdatedBy   *uuid.UUID
+}
+
 type SelfLocation struct {
 	Singleton    bool
 	ConnectionID uuid.UUID
