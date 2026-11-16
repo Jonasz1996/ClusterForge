@@ -50,6 +50,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/reports"
 	"github.com/Jonasz1996/clusterforge/internal/risk"
 	"github.com/Jonasz1996/clusterforge/internal/rollout"
+	"github.com/Jonasz1996/clusterforge/internal/stacks"
 	"github.com/Jonasz1996/clusterforge/internal/store"
 	"github.com/Jonasz1996/clusterforge/internal/topo"
 	"github.com/Jonasz1996/clusterforge/internal/updates"
@@ -96,6 +97,7 @@ type Server struct {
 	upgrades     *agentupgrade.Service
 	updates      *updates.Service
 	crowdsec     *crowdsec.Service
+	stacks       *stacks.Service
 	firewall     *firewall.Service
 	pvehosts     *pvehost.Service
 	commands     *commands.Service
@@ -177,6 +179,8 @@ type Deps struct {
 	Commands *commands.Service
 	// CrowdSec beheert CrowdSec op de nodes (fase 14).
 	CrowdSec *crowdsec.Service
+	// Stacks beheert de Docker-stacks van de clusters (fase 21).
+	Stacks *stacks.Service
 	// Firewall beheert ufw op de nodes (fase 16).
 	Firewall *firewall.Service
 	PVEHosts *pvehost.Service
@@ -216,6 +220,7 @@ func New(d Deps) *Server {
 		updates:  d.Updates,
 		commands: d.Commands,
 		crowdsec: d.CrowdSec,
+		stacks:   d.Stacks,
 		firewall: d.Firewall,
 		pvehosts: d.PVEHosts,
 		recipes:  recipes.NewService(d.Pool, ev),

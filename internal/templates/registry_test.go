@@ -23,6 +23,7 @@ var released = map[string][]string{
 	"authentik":           {"1.0.0"},
 	"vaultx":              {"1.0.0"},
 	"cssthema":            {"1.0.0"},
+	"docker-ha":           {"1.0.0"},
 }
 
 func TestReleasedVersionsStay(t *testing.T) {

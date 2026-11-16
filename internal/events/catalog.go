@@ -146,6 +146,10 @@ var Known = map[string]Spec{
 	"cluster.auto_update_skipped": {CategoryLifecycle, "Automatisch bijwerken overgeslagen"},
 	"node.command_ran":            {CategoryLifecycle, "Eigen commando gedraaid op node"},
 
+	"stack.imported":                 {CategoryInventory, "Docker-stack overgenomen"},
+	"stack.saved":                    {CategoryInventory, "Docker-stack aangepast"},
+	"stack.released":                 {CategoryInventory, "Docker-stack losgelaten"},
+	"stack.action":                   {CategoryJobs, "Actie op Docker-stacks"},
 	"crowdsec.settings_changed":      {CategorySecurity, "CrowdSec-instellingen gewijzigd"},
 	"crowdsec.node_managed":          {CategorySecurity, "CrowdSec aangezet op node"},
 	"crowdsec.node_unmanaged":        {CategorySecurity, "CrowdSec-beheer uitgezet op node"},

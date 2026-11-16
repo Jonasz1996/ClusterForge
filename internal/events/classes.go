@@ -37,6 +37,7 @@ var classes = map[string]Class{
 	"cluster.recipe_database": ClassChange, "cluster.recipe_database_failed": ClassSymptom,
 	"recipe.saved": ClassInfo, "recipe.deleted": ClassInfo, "blueprint.saved": ClassInfo,
 	"command.saved": ClassInfo, "command.deleted": ClassInfo,
+	"stack.imported": ClassInfo, "stack.saved": ClassChange, "stack.released": ClassChange, "stack.action": ClassChange,
 	"crowdsec.settings_changed": ClassChange, "crowdsec.node_managed": ClassChange, "crowdsec.node_unmanaged": ClassChange,
 	"crowdsec.node_configured": ClassChange, "crowdsec.applied": ClassChange, "crowdsec.apply_failed": ClassSymptom,
 	"crowdsec.removed": ClassChange, "crowdsec.ban_added": ClassInfo, "crowdsec.ban_removed": ClassInfo, "crowdsec.ban_shared": ClassInfo,

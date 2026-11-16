@@ -1,0 +1,127 @@
+name: docker-ha
+version: 1.0.0
+title: Docker-hosts met containers (HA)
+description: >-
+  Een of meer Docker-hosts waarop ClusterForge de Compose-projecten beheert
+  (pagina Containers): de bestanden als gewenste staat, op elke node gelijk,
+  starten, stoppen en bijwerken vanuit de GUI, met gezondheid per container.
+  Met een VIP draait keepalived: een stack met plaatsing VIP draait alleen op
+  de node met het VIP en zijn mappen gaan met een sync (containers kort
+  gepauzeerd) naar de andere nodes. Faalt een kritieke stack op de VIP-node,
+  dan gaat het VIP naar een andere node, die de stack start. Bestaande
+  Docker-hosts neem je over zonder dataverlies: Docker en de containers
+  blijven zoals ze zijn tot je ze bij Containers overneemt.
+cluster_type: docker
+
+# Terugspringen zou de containers zonder reden stoppen en elders starten.
+failback: false
+
+params:
+  - name: vip
+    type: ipv4
+    label: VIP
+    immutable: true
+    optional: true
+    help: Leeg voor losse Docker-hosts zonder keepalived. Neem je hosts met keepalived over, dan kan het oude VIP blijven als het in het netwerk van de nodes ligt.
+  - name: nodes
+    type: int
+    label: Aantal nodes
+    default: 2
+    min: 1
+    max: 5
+  - name: grace_seconds
+    type: int
+    label: Opstarttijd na een VIP-wissel
+    help: Zo lang na het krijgen van het VIP telt een kritieke stack die nog opstart niet als fout.
+    default: 180
+    min: 30
+    max: 1800
+  - name: vrid
+    type: int
+    label: VRRP-id
+    immutable: true
+    help: Uniek per keepalived-groep in hetzelfde netwerk. Leeg laten kiest een vrij nummer.
+    optional: true
+    min: 1
+    max: 255
+  - name: auth_pass
+    type: secret
+    label: VRRP-wachtwoord
+    help: Leeg laten maakt er een. Keepalived gebruikt hoogstens 8 tekens.
+    length: 8
+  - name: cpu
+    type: int
+    label: vCPU per node
+    default: 4
+    min: 1
+    max: 32
+  - name: memory
+    type: size
+    label: Geheugen per node
+    default: 8G
+    min: 1G
+    max: 128G
+  - name: disk
+    type: size
+    label: Schijf per node
+    default: 100G
+    min: 10G
+    max: 4T
+
+roles:
+  - name: node
+    count: "{{ .params.nodes }}"
+    vm:
+      cpu: "{{ .params.cpu }}"
+      memory: "{{ .params.memory }}"
+      disk: "{{ .params.disk }}"
+    steps:
+      # rsync en sshd voor de syncs van ClusterForge.
+      - package: { names: [rsync, openssh-server, curl, util-linux] }
+      # Docker alleen op een node zonder Docker. Een bestaande Docker CE of
+      # docker.io blijft zoals hij is (docker.io zou Docker CE verdringen).
+      - command:
+          title: Docker
+          run: |-
+            set -e
+            export DEBIAN_FRONTEND=noninteractive
+            ce() { dpkg-query -W -f='${Status}' docker-ce 2>/dev/null | grep -q 'ok installed'; }
+            if command -v dockerd >/dev/null 2>&1 || ce; then
+              # Er staat al Docker (Docker CE of docker.io): nooit herinstalleren.
+              # Alleen Compose als het ontbreekt, uit dezelfde bron.
+              if ! docker compose version >/dev/null 2>&1; then
+                if ce; then apt-get install -y docker-compose-plugin; else apt-get install -y docker-compose; fi
+              fi
+              systemctl is-active --quiet docker || systemctl start docker
+            else
+              apt-get install -y docker.io docker-compose
+              mkdir -p /etc/clusterforge
+              touch /etc/clusterforge/docker-door-clusterforge
+              systemctl enable --now docker
+            fi
+          unless: command -v dockerd >/dev/null 2>&1 && docker compose version >/dev/null 2>&1 && systemctl is-active --quiet docker
+      - directory: { path: /usr/local/lib/clusterforge, mode: "0755" }
+      - directory: { path: /usr/local/lib/clusterforge/docker-ha, mode: "0755" }
+      - file:
+          path: /usr/local/lib/clusterforge/docker-ha.sh
+          template: docker-ha.sh.tmpl
+          mode: "0755"
+      # De configuratie van keepalived staat eerst hier; docker-ha.sh
+      # keepalived zet ze op haar plaats, alleen als het cluster een VIP heeft.
+      - file:
+          path: /usr/local/lib/clusterforge/docker-ha/keepalived.conf
+          template: keepalived.conf.tmpl
+          mode: "0640"
+      - command:
+          title: keepalived
+          run: /usr/local/lib/clusterforge/docker-ha.sh keepalived
+          unless: /usr/local/lib/clusterforge/docker-ha.sh keepalived-ok
+      # Een oude sync van /docker in de crontab van root (zoals sync_docker.sh)
+      # zou de stacks overschrijven; ClusterForge synct nu zelf.
+      - command:
+          title: oude Docker-sync in crontab uitzetten
+          run: /usr/local/lib/clusterforge/docker-ha.sh old-sync-off
+          unless: /usr/local/lib/clusterforge/docker-ha.sh old-sync-ok
+
+services:
+  - { name: docker, kind: container, unit: docker }

@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"errors"
+	"github.com/Jonasz1996/clusterforge/internal/agent/agenttest"
 	"net/http"
 	"net/url"
 	"os"
@@ -36,24 +37,24 @@ func TestTemplatesFleet(t *testing.T) {
 			} `json:"services"`
 		}
 	}
-	if s := c.do("GET", "/api/v1/templates", nil, &tpls); s != 200 || len(tpls.Items) != 12 {
+	if s := c.do("GET", "/api/v1/templates", nil, &tpls); s != 200 || len(tpls.Items) != 13 {
 		t.Fatalf("templates: %d %+v", s, tpls)
 	}
 	var list []string
 	for _, tp := range tpls.Items {
 		list = append(list, tp.Name+" "+tp.Version+" "+tp.ClusterType+" "+tp.Title)
 	}
-	if got := strings.Join(list, ", "); got != "authentik 1.0.0 generic Authentik (HA), cron 1.0.0 cron Cron-cluster, cssthema 1.0.0 generic cssthema (HA), docker 1.0.0 docker Docker-hosts, "+
+	if got := strings.Join(list, ", "); got != "authentik 1.0.0 generic Authentik (HA), cron 1.0.0 cron Cron-cluster, cssthema 1.0.0 generic cssthema (HA), docker 1.0.0 docker Docker-hosts, docker-ha 1.0.0 docker Docker-hosts met containers (HA), "+
 		"generic 1.0.0 generic Eigen applicatie, home-assistant 1.0.0 generic Home Assistant (HA), keepalived-nginx 1.1.0 keepalived Nginx met keepalived, kubernetes 1.1.0 kubernetes Kubernetes (k3s), "+
 		"media-platform 1.0.0 generic Bestanden-, office- en mediaplatform, nginx-proxy-manager 1.0.0 generic Nginx Proxy Manager (HA), vaultx 1.0.0 generic VaultX (HA), zabbix 1.0.0 generic Zabbix met HA" {
 		t.Fatalf("templatelijst: %s", got)
 	}
-	app := tpls.Items[4].Services[0]
+	app := tpls.Items[5].Services[0]
 	if app.Name != "app" || app.Unit == nil || *app.Unit != "cf-app" || app.Port != nil || app.PortParam == nil || *app.PortParam != "port" ||
 		!slices.Equal(app.DependsOn, []string{"docker", "keepalived"}) {
 		t.Fatalf("dienst app in de templatelijst: %+v", app)
 	}
-	if nginx := tpls.Items[6].Services[0]; nginx.Port == nil || *nginx.Port != 80 || nginx.PortParam != nil {
+	if nginx := tpls.Items[7].Services[0]; nginx.Port == nil || *nginx.Port != 80 || nginx.PortParam != nil {
 		t.Fatalf("dienst nginx in de templatelijst: %+v", nginx)
 	}
 
@@ -70,6 +71,14 @@ func TestTemplatesFleet(t *testing.T) {
 		"taken-01": "10.0.40.21", "taken-02": "10.0.40.22",
 		"app-01": "10.0.40.31", "app-02": "10.0.40.32",
 	})
+	// De simulator voert geen scripts uit: de stap Docker (een script dat
+	// alleen zonder Docker installeert) slaat hij over. Docker staat er
+	// daarom al, zoals op een bestaande Docker-host.
+	f.setup = func(name string, h *agenttest.Host) {
+		if strings.HasPrefix(name, "docker-") {
+			_, _ = h.Exec(context.Background(), "apt-get", "install", "-y", "docker.io", "docker-compose")
+		}
+	}
 	pve.OnFileWrite(f.boot)
 	var conn pveConn
 	if s := c.do("POST", "/api/v1/proxmox", map[string]any{
@@ -98,14 +107,18 @@ func TestTemplatesFleet(t *testing.T) {
 		template, name, slug, first string
 		params                      map[string]any
 		vip                         string
+		unchecked                   int
 		services                    []string
 		logs                        []string
 	}{
 		{
 			template: "docker", name: "Docker", slug: "docker", first: "10.0.40.11/24",
-			params:   map[string]any{"memory": "2G"},
-			services: []string{"docker container docker -"},
-			logs:     []string{"pakketten: docker.io, docker-compose: aangepast", "map /opt/stacks: aangepast"},
+			params: map[string]any{"memory": "2G"},
+			// Docker installeren en daemon.json zijn scripts met unless:
+			// alleen zonder bestaande Docker doen ze iets.
+			unchecked: 2,
+			services:  []string{"docker container docker -"},
+			logs:      []string{"map /usr/local/lib/clusterforge: aangepast", "Docker: ongewijzigd", "map /opt/stacks: aangepast"},
 		},
 		{
 			template: "cron", name: "Taken", slug: "taken", first: "10.0.40.21/24",
@@ -224,7 +237,7 @@ func TestTemplatesFleet(t *testing.T) {
 				t.Fatalf("driftcontrole: %d %+v", s, rep)
 			}
 			for _, n := range rep.Nodes {
-				if n.Status != "in_sync" || len(n.Findings) != 0 || len(n.Unchecked) != 0 || n.Error != "" {
+				if n.Status != "in_sync" || len(n.Findings) != 0 || len(n.Unchecked) != tc.unchecked || n.Error != "" {
 					t.Fatalf("%s na de uitrol: %+v", n.Hostname, n)
 				}
 			}

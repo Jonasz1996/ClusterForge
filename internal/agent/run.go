@@ -230,6 +230,9 @@ func (a *Agent) Connect() error {
 	if _, err = a.nc.Subscribe(protocol.Subject(a.Config.NodeID, protocol.SubjectFirewall), a.onFirewall); err != nil {
 		return err
 	}
+	if _, err = a.nc.Subscribe(protocol.Subject(a.Config.NodeID, protocol.SubjectStacks), a.onStacks); err != nil {
+		return err
+	}
 	_, err = a.nc.Subscribe(protocol.Subject(a.Config.NodeID, protocol.SubjectPVE), a.onPVE)
 	return err
 }

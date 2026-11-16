@@ -4069,6 +4069,111 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/clusters/{clusterId}/stacks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Docker-stacks van een cluster met wat er nu op de nodes draait (fase 21)
+         * @description De stacks die ClusterForge beheert, per node met de containers nu, plus de Compose-projecten en losse
+         *     containers die nog niet beheerd zijn. De nodes worden live bevraagd (hoogstens 12 s). Ook voor viewers.
+         */
+        get: operations["getClusterStacks"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/clusters/{clusterId}/stacks/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Compose-projecten van een node overnemen (admin)
+         * @description De agent leest de bestanden van elk project (compose, env, kleine configuratie in de map); ClusterForge
+         *     bewaart ze versleuteld. Op de node verandert niets; Toepassen brengt ze naar de andere nodes.
+         */
+        post: operations["importClusterStacks"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/clusters/{clusterId}/stacks/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Stacks toepassen, starten, stoppen, herstarten, bijwerken of weghalen als taak stacks.apply (admin) */
+        post: operations["startClusterStackJob"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/clusters/{clusterId}/stacks/logs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        /** De laatste regels van een container op een node, met geheimen gemaskeerd (admin) */
+        get: operations["getClusterStackLogs"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/stacks/{stackId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                stackId: string;
+            };
+            cookie?: never;
+        };
+        /** Een stack met zijn bestanden (geheime waarden als «geheim-N») en versies (admin) */
+        get: operations["getStack"];
+        /** Een stack aanpassen (bestanden, plaatsing, keepalived, sync); toepassen is een aparte taak (admin) */
+        put: operations["updateStack"];
+        post?: never;
+        /** Een stack loslaten; op de nodes blijft alles draaien (admin) */
+        delete: operations["deleteStack"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/firewall": {
         parameters: {
             query?: never;
@@ -12532,6 +12637,188 @@ export interface components {
             };
             errors?: string[];
         };
+        StackMount: {
+            type: string;
+            name?: string;
+            source: string;
+            destination: string;
+            rw: boolean;
+        };
+        StackContainer: {
+            name: string;
+            id: string;
+            image: string;
+            state: string;
+            health?: string;
+            restarts?: number;
+            status?: string;
+            project?: string;
+            service?: string;
+            ports?: string[];
+            mounts?: components["schemas"]["StackMount"][];
+            network?: string;
+            restart?: string;
+            /** Format: date-time */
+            started_at?: string;
+        };
+        StackProjectInfo: {
+            name: string;
+            working_dir: string;
+            config_files: string[];
+            env_files?: string[];
+            status: string;
+            missing?: string[];
+            managed?: boolean;
+        };
+        StackNode: {
+            /** Format: uuid */
+            node_id: string;
+            hostname: string;
+            /** @description De stack hoort hier te draaien */
+            should: boolean;
+            revision: number;
+            /** Format: date-time */
+            applied_at: string | null;
+            error: string;
+            /** Format: date-time */
+            failed_at: string | null;
+            containers: components["schemas"]["StackContainer"][];
+        };
+        Stack: {
+            /** Format: uuid */
+            id: string;
+            /** Format: uuid */
+            cluster_id: string;
+            name: string;
+            dir: string;
+            compose_files: string[];
+            /** @enum {string} */
+            placement: "alle" | "vip" | "node";
+            node_ids: string[];
+            /** @enum {string} */
+            desired: "running" | "stopped";
+            critical: boolean;
+            sync_paths: string[];
+            sync_schedule: string;
+            revision: number;
+            notes: string;
+            /** Format: uuid */
+            imported_from: string | null;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at: string;
+            file_count: number;
+            nodes: components["schemas"]["StackNode"][];
+        };
+        StackClusterNode: {
+            /** Format: uuid */
+            id: string;
+            hostname: string;
+            online: boolean;
+            protocol: number;
+            supported: boolean;
+            holds_vip: boolean;
+            docker: boolean;
+            error: string;
+        };
+        StackUnmanaged: {
+            /** Format: uuid */
+            node_id: string;
+            hostname: string;
+            project: components["schemas"]["StackProjectInfo"];
+            containers: components["schemas"]["StackContainer"][];
+            sync_paths: string[];
+        };
+        StackOverview: {
+            cluster: {
+                /** Format: uuid */
+                id: string;
+                name: string;
+                slug: string;
+                environment: string;
+                template: string;
+                vip: string;
+                /** Format: uuid */
+                vip_owner: string | null;
+            };
+            nodes: components["schemas"]["StackClusterNode"][];
+            stacks: components["schemas"]["Stack"][];
+            unmanaged: components["schemas"]["StackUnmanaged"][];
+            others: components["schemas"]["StackUnmanaged"][];
+            /** @description Er is een masterkey om stacks te bewaren */
+            available: boolean;
+            /** Format: uuid */
+            job_id: string | null;
+        };
+        StackImportInput: {
+            /** Format: uuid */
+            node_id: string;
+            items: {
+                name: string;
+                /** @enum {string} */
+                placement?: "alle" | "vip" | "node";
+                node_ids?: string[];
+                critical?: boolean;
+                sync_paths?: string[];
+            }[];
+        };
+        StackImportResult: {
+            name: string;
+            /** Format: uuid */
+            stack_id: string | null;
+            files: string[];
+            skipped: string[];
+            error: string;
+        };
+        StackJobInput: {
+            /** @enum {string} */
+            action: "apply" | "start" | "stop" | "restart" | "update" | "down" | "lists";
+            stack_ids?: string[];
+            /** Format: uuid */
+            node_id?: string;
+            services?: string[];
+            /** @description De slug van een prodcluster */
+            confirm?: string;
+        };
+        StackFile: {
+            path: string;
+            content: string;
+            mode: number;
+            secrets: number;
+        };
+        StackRevision: {
+            revision: number;
+            note: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: uuid */
+            created_by: string | null;
+            username: string;
+        };
+        StackDetail: {
+            stack: components["schemas"]["Stack"];
+            files: components["schemas"]["StackFile"][];
+            revisions: components["schemas"]["StackRevision"][];
+        };
+        StackUpdateInput: {
+            files?: {
+                path: string;
+                content: string;
+                mode?: number;
+            }[];
+            compose_files?: string[];
+            /** @enum {string} */
+            placement?: "alle" | "vip" | "node";
+            node_ids?: string[];
+            /** @enum {string} */
+            desired?: "running" | "stopped";
+            critical?: boolean;
+            sync_paths?: string[];
+            sync_schedule?: string;
+            notes?: string;
+            note?: string;
+        };
         CrowdSecNode: {
             /** Format: uuid */
             node_id: string;
@@ -19128,6 +19415,211 @@ export interface operations {
                 };
             };
             400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    getClusterStacks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StackOverview"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    importClusterStacks: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StackImportInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        results: components["schemas"]["StackImportResult"][];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    startClusterStackJob: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StackJobInput"];
+            };
+        };
+        responses: {
+            /** @description Taak aangemaakt */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        job_id: string;
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    getClusterStackLogs: {
+        parameters: {
+            query: {
+                node_id: string;
+                container: string;
+                tail?: number;
+            };
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        logs: string;
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    getStack: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                stackId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StackDetail"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    updateStack: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                stackId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StackUpdateInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Stack"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    deleteStack: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                stackId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        job_id: string | null;
+                    };
+                };
+            };
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];

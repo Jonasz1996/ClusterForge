@@ -1,0 +1,51 @@
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}). Wijzigingen hier
+# worden bij de volgende uitrol overschreven.
+{{- if .params.vip }}
+
+global_defs {
+    router_id {{ .node.hostname }}
+    enable_script_security
+    script_user root
+}
+
+# Zonder Docker, of als een kritieke stack op de VIP-node na de opstarttijd
+# niet gezond draait, geeft deze node het VIP af (FAULT). Een andere node
+# neemt het over en start de stacks met plaatsing VIP.
+vrrp_script chk_stacks {
+    script "/usr/local/lib/clusterforge/docker-ha.sh check"
+    interval 5
+    timeout 20
+    fall 3
+    rise 2
+}
+
+vrrp_instance VI_{{ .params.vrid }} {
+    state BACKUP
+    nopreempt
+    interface {{ .node.interface }}
+    virtual_router_id {{ .params.vrid }}
+    priority {{ sub 160 (mul .node.index 10) }}
+    advert_int 1
+    unicast_src_ip {{ .node.address }}
+    unicast_peer {
+{{- range .peers }}
+        {{ .address }}
+{{- end }}
+    }
+    authentication {
+        auth_type PASS
+        auth_pass {{ .params.auth_pass }}
+    }
+    virtual_ipaddress {
+        {{ .params.vip }}/{{ .node.prefix }} dev {{ .node.interface }}
+    }
+    track_script {
+        chk_stacks
+    }
+    notify_master "/usr/local/lib/clusterforge/docker-ha.sh master"
+    notify_backup "/usr/local/lib/clusterforge/docker-ha.sh backup"
+    notify_fault "/usr/local/lib/clusterforge/docker-ha.sh backup"
+}
+{{- else }}
+# Dit cluster heeft geen VIP: keepalived wordt niet gebruikt.
+{{- end }}

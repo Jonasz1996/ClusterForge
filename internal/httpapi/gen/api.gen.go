@@ -3279,6 +3279,138 @@ func (e SpecRevisionSource) Valid() bool {
 	}
 }
 
+// Defines values for StackDesired.
+const (
+	StackDesiredRunning StackDesired = "running"
+	StackDesiredStopped StackDesired = "stopped"
+)
+
+// Valid indicates whether the value is a known member of the StackDesired enum.
+func (e StackDesired) Valid() bool {
+	switch e {
+	case StackDesiredRunning:
+		return true
+	case StackDesiredStopped:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for StackPlacement.
+const (
+	StackPlacementAlle StackPlacement = "alle"
+	StackPlacementNode StackPlacement = "node"
+	StackPlacementVip  StackPlacement = "vip"
+)
+
+// Valid indicates whether the value is a known member of the StackPlacement enum.
+func (e StackPlacement) Valid() bool {
+	switch e {
+	case StackPlacementAlle:
+		return true
+	case StackPlacementNode:
+		return true
+	case StackPlacementVip:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for StackImportInputItemsPlacement.
+const (
+	StackImportInputItemsPlacementAlle StackImportInputItemsPlacement = "alle"
+	StackImportInputItemsPlacementNode StackImportInputItemsPlacement = "node"
+	StackImportInputItemsPlacementVip  StackImportInputItemsPlacement = "vip"
+)
+
+// Valid indicates whether the value is a known member of the StackImportInputItemsPlacement enum.
+func (e StackImportInputItemsPlacement) Valid() bool {
+	switch e {
+	case StackImportInputItemsPlacementAlle:
+		return true
+	case StackImportInputItemsPlacementNode:
+		return true
+	case StackImportInputItemsPlacementVip:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for StackJobInputAction.
+const (
+	StackJobInputActionApply   StackJobInputAction = "apply"
+	StackJobInputActionDown    StackJobInputAction = "down"
+	StackJobInputActionLists   StackJobInputAction = "lists"
+	StackJobInputActionRestart StackJobInputAction = "restart"
+	StackJobInputActionStart   StackJobInputAction = "start"
+	StackJobInputActionStop    StackJobInputAction = "stop"
+	StackJobInputActionUpdate  StackJobInputAction = "update"
+)
+
+// Valid indicates whether the value is a known member of the StackJobInputAction enum.
+func (e StackJobInputAction) Valid() bool {
+	switch e {
+	case StackJobInputActionApply:
+		return true
+	case StackJobInputActionDown:
+		return true
+	case StackJobInputActionLists:
+		return true
+	case StackJobInputActionRestart:
+		return true
+	case StackJobInputActionStart:
+		return true
+	case StackJobInputActionStop:
+		return true
+	case StackJobInputActionUpdate:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for StackUpdateInputDesired.
+const (
+	StackUpdateInputDesiredRunning StackUpdateInputDesired = "running"
+	StackUpdateInputDesiredStopped StackUpdateInputDesired = "stopped"
+)
+
+// Valid indicates whether the value is a known member of the StackUpdateInputDesired enum.
+func (e StackUpdateInputDesired) Valid() bool {
+	switch e {
+	case StackUpdateInputDesiredRunning:
+		return true
+	case StackUpdateInputDesiredStopped:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for StackUpdateInputPlacement.
+const (
+	StackUpdateInputPlacementAlle StackUpdateInputPlacement = "alle"
+	StackUpdateInputPlacementNode StackUpdateInputPlacement = "node"
+	StackUpdateInputPlacementVip  StackUpdateInputPlacement = "vip"
+)
+
+// Valid indicates whether the value is a known member of the StackUpdateInputPlacement enum.
+func (e StackUpdateInputPlacement) Valid() bool {
+	switch e {
+	case StackUpdateInputPlacementAlle:
+		return true
+	case StackUpdateInputPlacementNode:
+		return true
+	case StackUpdateInputPlacementVip:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for Status.
 const (
 	StatusDegraded   Status = "degraded"
@@ -11921,6 +12053,213 @@ type SpecTemplate struct {
 	Version string                    `json:"version"`
 }
 
+// Stack defines model for Stack.
+type Stack struct {
+	ClusterId    openapi_types.UUID                    `json:"cluster_id"`
+	ComposeFiles []string                              `json:"compose_files"`
+	CreatedAt    time.Time                             `json:"created_at"`
+	Critical     bool                                  `json:"critical"`
+	Desired      StackDesired                          `json:"desired"`
+	Dir          string                                `json:"dir"`
+	FileCount    int                                   `json:"file_count"`
+	Id           openapi_types.UUID                    `json:"id"`
+	ImportedFrom nullable.Nullable[openapi_types.UUID] `json:"imported_from"`
+	Name         string                                `json:"name"`
+	NodeIds      []openapi_types.UUID                  `json:"node_ids"`
+	Nodes        []StackNode                           `json:"nodes"`
+	Notes        string                                `json:"notes"`
+	Placement    StackPlacement                        `json:"placement"`
+	Revision     int                                   `json:"revision"`
+	SyncPaths    []string                              `json:"sync_paths"`
+	SyncSchedule string                                `json:"sync_schedule"`
+	UpdatedAt    time.Time                             `json:"updated_at"`
+}
+
+// StackDesired defines model for Stack.Desired.
+type StackDesired string
+
+// StackPlacement defines model for Stack.Placement.
+type StackPlacement string
+
+// StackClusterNode defines model for StackClusterNode.
+type StackClusterNode struct {
+	Docker    bool               `json:"docker"`
+	Error     string             `json:"error"`
+	HoldsVip  bool               `json:"holds_vip"`
+	Hostname  string             `json:"hostname"`
+	Id        openapi_types.UUID `json:"id"`
+	Online    bool               `json:"online"`
+	Protocol  int                `json:"protocol"`
+	Supported bool               `json:"supported"`
+}
+
+// StackContainer defines model for StackContainer.
+type StackContainer struct {
+	Health    *string       `json:"health,omitempty"`
+	Id        string        `json:"id"`
+	Image     string        `json:"image"`
+	Mounts    *[]StackMount `json:"mounts,omitempty"`
+	Name      string        `json:"name"`
+	Network   *string       `json:"network,omitempty"`
+	Ports     *[]string     `json:"ports,omitempty"`
+	Project   *string       `json:"project,omitempty"`
+	Restart   *string       `json:"restart,omitempty"`
+	Restarts  *int          `json:"restarts,omitempty"`
+	Service   *string       `json:"service,omitempty"`
+	StartedAt *time.Time    `json:"started_at,omitempty"`
+	State     string        `json:"state"`
+	Status    *string       `json:"status,omitempty"`
+}
+
+// StackDetail defines model for StackDetail.
+type StackDetail struct {
+	Files     []StackFile     `json:"files"`
+	Revisions []StackRevision `json:"revisions"`
+	Stack     Stack           `json:"stack"`
+}
+
+// StackFile defines model for StackFile.
+type StackFile struct {
+	Content string `json:"content"`
+	Mode    int    `json:"mode"`
+	Path    string `json:"path"`
+	Secrets int    `json:"secrets"`
+}
+
+// StackImportInput defines model for StackImportInput.
+type StackImportInput struct {
+	Items []struct {
+		Critical  *bool                           `json:"critical,omitempty"`
+		Name      string                          `json:"name"`
+		NodeIds   *[]openapi_types.UUID           `json:"node_ids,omitempty"`
+		Placement *StackImportInputItemsPlacement `json:"placement,omitempty"`
+		SyncPaths *[]string                       `json:"sync_paths,omitempty"`
+	} `json:"items"`
+	NodeId openapi_types.UUID `json:"node_id"`
+}
+
+// StackImportInputItemsPlacement defines model for StackImportInput.Items.Placement.
+type StackImportInputItemsPlacement string
+
+// StackImportResult defines model for StackImportResult.
+type StackImportResult struct {
+	Error   string                                `json:"error"`
+	Files   []string                              `json:"files"`
+	Name    string                                `json:"name"`
+	Skipped []string                              `json:"skipped"`
+	StackId nullable.Nullable[openapi_types.UUID] `json:"stack_id"`
+}
+
+// StackJobInput defines model for StackJobInput.
+type StackJobInput struct {
+	Action StackJobInputAction `json:"action"`
+
+	// Confirm De slug van een prodcluster
+	Confirm  *string               `json:"confirm,omitempty"`
+	NodeId   *openapi_types.UUID   `json:"node_id,omitempty"`
+	Services *[]string             `json:"services,omitempty"`
+	StackIds *[]openapi_types.UUID `json:"stack_ids,omitempty"`
+}
+
+// StackJobInputAction defines model for StackJobInput.Action.
+type StackJobInputAction string
+
+// StackMount defines model for StackMount.
+type StackMount struct {
+	Destination string  `json:"destination"`
+	Name        *string `json:"name,omitempty"`
+	Rw          bool    `json:"rw"`
+	Source      string  `json:"source"`
+	Type        string  `json:"type"`
+}
+
+// StackNode defines model for StackNode.
+type StackNode struct {
+	AppliedAt  nullable.Nullable[time.Time] `json:"applied_at"`
+	Containers []StackContainer             `json:"containers"`
+	Error      string                       `json:"error"`
+	FailedAt   nullable.Nullable[time.Time] `json:"failed_at"`
+	Hostname   string                       `json:"hostname"`
+	NodeId     openapi_types.UUID           `json:"node_id"`
+	Revision   int                          `json:"revision"`
+
+	// Should De stack hoort hier te draaien
+	Should bool `json:"should"`
+}
+
+// StackOverview defines model for StackOverview.
+type StackOverview struct {
+	// Available Er is een masterkey om stacks te bewaren
+	Available bool `json:"available"`
+	Cluster   struct {
+		Environment string                                `json:"environment"`
+		Id          openapi_types.UUID                    `json:"id"`
+		Name        string                                `json:"name"`
+		Slug        string                                `json:"slug"`
+		Template    string                                `json:"template"`
+		Vip         string                                `json:"vip"`
+		VipOwner    nullable.Nullable[openapi_types.UUID] `json:"vip_owner"`
+	} `json:"cluster"`
+	JobId     nullable.Nullable[openapi_types.UUID] `json:"job_id"`
+	Nodes     []StackClusterNode                    `json:"nodes"`
+	Others    []StackUnmanaged                      `json:"others"`
+	Stacks    []Stack                               `json:"stacks"`
+	Unmanaged []StackUnmanaged                      `json:"unmanaged"`
+}
+
+// StackProjectInfo defines model for StackProjectInfo.
+type StackProjectInfo struct {
+	ConfigFiles []string  `json:"config_files"`
+	EnvFiles    *[]string `json:"env_files,omitempty"`
+	Managed     *bool     `json:"managed,omitempty"`
+	Missing     *[]string `json:"missing,omitempty"`
+	Name        string    `json:"name"`
+	Status      string    `json:"status"`
+	WorkingDir  string    `json:"working_dir"`
+}
+
+// StackRevision defines model for StackRevision.
+type StackRevision struct {
+	CreatedAt time.Time                             `json:"created_at"`
+	CreatedBy nullable.Nullable[openapi_types.UUID] `json:"created_by"`
+	Note      string                                `json:"note"`
+	Revision  int                                   `json:"revision"`
+	Username  string                                `json:"username"`
+}
+
+// StackUnmanaged defines model for StackUnmanaged.
+type StackUnmanaged struct {
+	Containers []StackContainer   `json:"containers"`
+	Hostname   string             `json:"hostname"`
+	NodeId     openapi_types.UUID `json:"node_id"`
+	Project    StackProjectInfo   `json:"project"`
+	SyncPaths  []string           `json:"sync_paths"`
+}
+
+// StackUpdateInput defines model for StackUpdateInput.
+type StackUpdateInput struct {
+	ComposeFiles *[]string                `json:"compose_files,omitempty"`
+	Critical     *bool                    `json:"critical,omitempty"`
+	Desired      *StackUpdateInputDesired `json:"desired,omitempty"`
+	Files        *[]struct {
+		Content string `json:"content"`
+		Mode    *int   `json:"mode,omitempty"`
+		Path    string `json:"path"`
+	} `json:"files,omitempty"`
+	NodeIds      *[]openapi_types.UUID      `json:"node_ids,omitempty"`
+	Note         *string                    `json:"note,omitempty"`
+	Notes        *string                    `json:"notes,omitempty"`
+	Placement    *StackUpdateInputPlacement `json:"placement,omitempty"`
+	SyncPaths    *[]string                  `json:"sync_paths,omitempty"`
+	SyncSchedule *string                    `json:"sync_schedule,omitempty"`
+}
+
+// StackUpdateInputDesired defines model for StackUpdateInput.Desired.
+type StackUpdateInputDesired string
+
+// StackUpdateInputPlacement defines model for StackUpdateInput.Placement.
+type StackUpdateInputPlacement string
+
 // Status Berekend uit heartbeats, metrics en VIP's (zie internal/status).
 // unknown betekent: geen agent of nog geen gegevens.
 type Status string
@@ -12585,6 +12924,13 @@ type GetClusterSpecEditParams struct {
 	Version *string `form:"version,omitempty" json:"version,omitempty"`
 }
 
+// GetClusterStackLogsParams defines parameters for GetClusterStackLogs.
+type GetClusterStackLogsParams struct {
+	NodeId    openapi_types.UUID `form:"node_id" json:"node_id"`
+	Container string             `form:"container" json:"container"`
+	Tail      *int               `form:"tail,omitempty" json:"tail,omitempty"`
+}
+
 // GetClusterTimelineParams defines parameters for GetClusterTimeline.
 type GetClusterTimelineParams struct {
 	// From Vanaf dit tijdstip; standaard 24 uur geleden
@@ -13149,6 +13495,12 @@ type ApplyClusterSpecJSONRequestBody = SpecApplyInput
 // PlanClusterSpecJSONRequestBody defines body for PlanClusterSpec for application/json ContentType.
 type PlanClusterSpecJSONRequestBody = SpecEditInput
 
+// ImportClusterStacksJSONRequestBody defines body for ImportClusterStacks for application/json ContentType.
+type ImportClusterStacksJSONRequestBody = StackImportInput
+
+// StartClusterStackJobJSONRequestBody defines body for StartClusterStackJob for application/json ContentType.
+type StartClusterStackJobJSONRequestBody = StackJobInput
+
 // CreateVipJSONRequestBody defines body for CreateVip for application/json ContentType.
 type CreateVipJSONRequestBody = VipInput
 
@@ -13355,6 +13707,9 @@ type CreateServiceJSONRequestBody = ServiceInput
 
 // UpdateServiceJSONRequestBody defines body for UpdateService for application/json ContentType.
 type UpdateServiceJSONRequestBody = ServicePatch
+
+// UpdateStackJSONRequestBody defines body for UpdateStack for application/json ContentType.
+type UpdateStackJSONRequestBody = StackUpdateInput
 
 // StartUpdatesJSONRequestBody defines body for StartUpdates for application/json ContentType.
 type StartUpdatesJSONRequestBody = UpdateInput
@@ -13664,6 +14019,18 @@ type ServerInterface interface {
 	// PlanClusterSpec Het plan van een wijziging van de spec (admin); er verandert niets
 	// (POST /clusters/{clusterId}/spec/plan)
 	PlanClusterSpec(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
+	// GetClusterStacks Docker-stacks van een cluster met wat er nu op de nodes draait (fase 21)
+	// (GET /clusters/{clusterId}/stacks)
+	GetClusterStacks(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
+	// ImportClusterStacks Compose-projecten van een node overnemen (admin)
+	// (POST /clusters/{clusterId}/stacks/import)
+	ImportClusterStacks(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
+	// StartClusterStackJob Stacks toepassen, starten, stoppen, herstarten, bijwerken of weghalen als taak stacks.apply (admin)
+	// (POST /clusters/{clusterId}/stacks/jobs)
+	StartClusterStackJob(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
+	// GetClusterStackLogs De laatste regels van een container op een node, met geheimen gemaskeerd (admin)
+	// (GET /clusters/{clusterId}/stacks/logs)
+	GetClusterStackLogs(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params GetClusterStackLogsParams)
 	// GetClusterTimeline De tijdlijn van een cluster en zijn nodes, oudste eerst
 	// (GET /clusters/{clusterId}/timeline)
 	GetClusterTimeline(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params GetClusterTimelineParams)
@@ -14264,6 +14631,15 @@ type ServerInterface interface {
 	// UpdateService Een dienst wijzigen, of een voorstel bevestigen, negeren of terugzetten (admin)
 	// (PATCH /services/{serviceId})
 	UpdateService(w http.ResponseWriter, r *http.Request, serviceId openapi_types.UUID)
+	// DeleteStack Een stack loslaten; op de nodes blijft alles draaien (admin)
+	// (DELETE /stacks/{stackId})
+	DeleteStack(w http.ResponseWriter, r *http.Request, stackId openapi_types.UUID)
+	// GetStack Een stack met zijn bestanden (geheime waarden als «geheim-N») en versies (admin)
+	// (GET /stacks/{stackId})
+	GetStack(w http.ResponseWriter, r *http.Request, stackId openapi_types.UUID)
+	// UpdateStack Een stack aanpassen (bestanden, plaatsing, keepalived, sync); toepassen is een aparte taak (admin)
+	// (PUT /stacks/{stackId})
+	UpdateStack(w http.ResponseWriter, r *http.Request, stackId openapi_types.UUID)
 	// Stream Live wijzigingen als Server-Sent Events
 	// (GET /stream)
 	Stream(w http.ResponseWriter, r *http.Request)
@@ -14885,6 +15261,30 @@ func (_ Unimplemented) GetClusterSpecEdit(w http.ResponseWriter, r *http.Request
 // PlanClusterSpec Het plan van een wijziging van de spec (admin); er verandert niets
 // (POST /clusters/{clusterId}/spec/plan)
 func (_ Unimplemented) PlanClusterSpec(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetClusterStacks Docker-stacks van een cluster met wat er nu op de nodes draait (fase 21)
+// (GET /clusters/{clusterId}/stacks)
+func (_ Unimplemented) GetClusterStacks(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ImportClusterStacks Compose-projecten van een node overnemen (admin)
+// (POST /clusters/{clusterId}/stacks/import)
+func (_ Unimplemented) ImportClusterStacks(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// StartClusterStackJob Stacks toepassen, starten, stoppen, herstarten, bijwerken of weghalen als taak stacks.apply (admin)
+// (POST /clusters/{clusterId}/stacks/jobs)
+func (_ Unimplemented) StartClusterStackJob(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetClusterStackLogs De laatste regels van een container op een node, met geheimen gemaskeerd (admin)
+// (GET /clusters/{clusterId}/stacks/logs)
+func (_ Unimplemented) GetClusterStackLogs(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID, params GetClusterStackLogsParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -16085,6 +16485,24 @@ func (_ Unimplemented) DeleteService(w http.ResponseWriter, r *http.Request, ser
 // UpdateService Een dienst wijzigen, of een voorstel bevestigen, negeren of terugzetten (admin)
 // (PATCH /services/{serviceId})
 func (_ Unimplemented) UpdateService(w http.ResponseWriter, r *http.Request, serviceId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// DeleteStack Een stack loslaten; op de nodes blijft alles draaien (admin)
+// (DELETE /stacks/{stackId})
+func (_ Unimplemented) DeleteStack(w http.ResponseWriter, r *http.Request, stackId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetStack Een stack met zijn bestanden (geheime waarden als «geheim-N») en versies (admin)
+// (GET /stacks/{stackId})
+func (_ Unimplemented) GetStack(w http.ResponseWriter, r *http.Request, stackId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// UpdateStack Een stack aanpassen (bestanden, plaatsing, keepalived, sync); toepassen is een aparte taak (admin)
+// (PUT /stacks/{stackId})
+func (_ Unimplemented) UpdateStack(w http.ResponseWriter, r *http.Request, stackId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -18959,6 +19377,152 @@ func (siw *ServerInterfaceWrapper) PlanClusterSpec(w http.ResponseWriter, r *htt
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.PlanClusterSpec(w, r, clusterId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetClusterStacks operation middleware
+func (siw *ServerInterfaceWrapper) GetClusterStacks(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetClusterStacks(w, r, clusterId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ImportClusterStacks operation middleware
+func (siw *ServerInterfaceWrapper) ImportClusterStacks(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ImportClusterStacks(w, r, clusterId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// StartClusterStackJob operation middleware
+func (siw *ServerInterfaceWrapper) StartClusterStackJob(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StartClusterStackJob(w, r, clusterId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetClusterStackLogs operation middleware
+func (siw *ServerInterfaceWrapper) GetClusterStackLogs(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetClusterStackLogsParams
+
+	// ------------- Required query parameter "node_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "node_id", r.URL.Query(), &params.NodeId, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "node_id"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "node_id", Err: err})
+		}
+		return
+	}
+
+	// ------------- Required query parameter "container" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "container", r.URL.Query(), &params.Container, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "container"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "container", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "tail" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "tail", r.URL.Query(), &params.Tail, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "tail"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tail", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetClusterStackLogs(w, r, clusterId, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -24791,6 +25355,84 @@ func (siw *ServerInterfaceWrapper) UpdateService(w http.ResponseWriter, r *http.
 	handler.ServeHTTP(w, r)
 }
 
+// DeleteStack operation middleware
+func (siw *ServerInterfaceWrapper) DeleteStack(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "stackId" -------------
+	var stackId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "stackId", chi.URLParam(r, "stackId"), &stackId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "stackId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteStack(w, r, stackId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetStack operation middleware
+func (siw *ServerInterfaceWrapper) GetStack(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "stackId" -------------
+	var stackId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "stackId", chi.URLParam(r, "stackId"), &stackId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "stackId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetStack(w, r, stackId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateStack operation middleware
+func (siw *ServerInterfaceWrapper) UpdateStack(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "stackId" -------------
+	var stackId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "stackId", chi.URLParam(r, "stackId"), &stackId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "stackId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateStack(w, r, stackId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // Stream operation middleware
 func (siw *ServerInterfaceWrapper) Stream(w http.ResponseWriter, r *http.Request) {
 
@@ -25975,6 +26617,27 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/pve-hosts/{nodeId}/actions", wrapper.StartPveHostAction)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/clusters/{clusterId}/stacks", wrapper.GetClusterStacks)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/clusters/{clusterId}/stacks/import", wrapper.ImportClusterStacks)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/clusters/{clusterId}/stacks/jobs", wrapper.StartClusterStackJob)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/clusters/{clusterId}/stacks/logs", wrapper.GetClusterStackLogs)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/stacks/{stackId}", wrapper.DeleteStack)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/stacks/{stackId}", wrapper.GetStack)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/stacks/{stackId}", wrapper.UpdateStack)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/firewall", wrapper.GetFirewall)

@@ -873,6 +873,50 @@ type DocSummary struct {
 	ConversationID *uuid.UUID
 }
 
+type DockerStack struct {
+	ID           uuid.UUID
+	ClusterID    uuid.UUID
+	Name         string
+	Dir          string
+	ComposeFiles []string
+	FilesEnc     []byte
+	FilesKeyID   string
+	FilesSha256  string
+	Placement    string
+	NodeIds      []uuid.UUID
+	Desired      string
+	Critical     bool
+	SyncPaths    []string
+	SyncSchedule string
+	Revision     int32
+	Notes        string
+	ImportedFrom *uuid.UUID
+	CreatedAt    time.Time
+	CreatedBy    *uuid.UUID
+	UpdatedAt    time.Time
+	UpdatedBy    *uuid.UUID
+}
+
+type DockerStackNode struct {
+	StackID   uuid.UUID
+	NodeID    uuid.UUID
+	Revision  int32
+	AppliedAt *time.Time
+	Error     string
+	FailedAt  *time.Time
+}
+
+type DockerStackRevision struct {
+	StackID     uuid.UUID
+	Revision    int32
+	FilesEnc    []byte
+	FilesKeyID  string
+	FilesSha256 string
+	Note        string
+	CreatedAt   time.Time
+	CreatedBy   *uuid.UUID
+}
+
 type DockerUpdateReport struct {
 	NodeID         uuid.UUID
 	Project        string

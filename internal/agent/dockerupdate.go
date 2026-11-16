@@ -814,43 +814,16 @@ func (r *RunExecutor) tagViaEnv(b *backup, p protocol.ComposeProject, pattern st
 	return "", false, nil
 }
 
-// secretLine herkent een sleutel die op een wachtwoord lijkt, in YAML
-// (KEY: waarde, - KEY=waarde) en in een env-bestand (KEY=waarde).
-var secretLine = regexp.MustCompile(`(?i)^(\s*(?:-\s*)?["']?(?:export\s+)?[A-Za-z0-9_.-]*(?:PASS|PWD|SECRET|TOKEN|API_?KEY|PRIVATE_?KEY|ACCESS_?KEY|CREDENTIAL|AUTH_?KEY)[A-Za-z0-9_.-]*["']?\s*[:=]\s*)(\S.*?)(\s*)$`)
+// maskFile en unmaskFile staan in protocol (fase 21 gebruikt ze ook in de
+// server).
+func maskFile(content string) (string, []string) { return protocol.MaskFile(content) }
 
-// maskFile vervangt de geheime waarden door «geheim-N» en geeft ze terug.
-func maskFile(content string) (string, []string) {
-	lines := strings.Split(content, "\n")
-	var secrets []string
-	for i, l := range lines {
-		m := secretLine.FindStringSubmatchIndex(l)
-		if m == nil {
-			continue
-		}
-		val := l[m[4]:m[5]]
-		if strings.HasPrefix(val, "${") || strings.HasPrefix(val, protocol.SecretPlaceholder) || val == `""` || val == "''" || strings.HasPrefix(val, "#") {
-			continue
-		}
-		secrets = append(secrets, val)
-		lines[i] = l[:m[4]] + fmt.Sprintf("%s%d»", protocol.SecretPlaceholder, len(secrets)) + l[m[5]:]
-	}
-	return strings.Join(lines, "\n"), secrets
-}
-
-var placeholder = regexp.MustCompile(regexp.QuoteMeta(protocol.SecretPlaceholder) + `(\d+)»`)
-
-// unmaskFile zet de echte waarden terug in plaats van de plaatshouders.
 func unmaskFile(content string, secrets []string) (string, error) {
-	var bad error
-	outStr := placeholder.ReplaceAllStringFunc(content, func(m string) string {
-		n, _ := strconv.Atoi(placeholder.FindStringSubmatch(m)[1])
-		if n < 1 || n > len(secrets) {
-			bad = fmt.Errorf("de plaatshouder %s bestaat niet in het bestand op de node", m)
-			return m
-		}
-		return secrets[n-1]
-	})
-	return outStr, bad
+	out, err := protocol.UnmaskFile(content, secrets)
+	if err != nil {
+		err = fmt.Errorf("%s", strings.Replace(err.Error(), "in het bewaarde bestand", "in het bestand op de node", 1))
+	}
+	return out, err
 }
 
 func sha(data []byte) string {

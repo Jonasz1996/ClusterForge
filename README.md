@@ -2101,6 +2101,34 @@ gebruikt de header):
             - { field: updates, label: Updates }
 ```
 
+## Containers (Docker-stacks)
+
+Op de pagina **Containers** beheert ClusterForge de Compose-projecten van
+een cluster als gewenste staat. De bestanden (compose, `.env`, kleine
+configuratie) staan versleuteld in de database, met een revisie per
+wijziging; in de editor staan wachtwoorden als «geheim-N».
+
+- **Overnemen**: de agents melden welke Compose-projecten al draaien. Kies
+  per project de bronnode, de plaatsing (alle nodes, alleen de VIP-node of
+  gekozen nodes), of het kritiek is en welke mappen mee moeten met de sync.
+  Overnemen leest alleen; er verandert niets tot je **Toepassen** kiest.
+- **Toepassen** zet de bestanden op elke node, start de stack waar hij hoort
+  en stopt hem op de andere nodes. De VIP-node komt als laatste. Een stack
+  die na een wijziging niet gezond wordt, krijgt zijn vorige bestanden terug.
+- **Starten, Stoppen, Herstarten, Bijwerken** (images halen) en **down** per
+  stack; logs per container (geheimen gemaskeerd).
+- Een stack met plaatsing VIP krijgt een sync per map (`cf-stack-<naam>` bij
+  Cronjobs): eerst live, dan nog eens met de containers kort gepauzeerd.
+- De template **docker-ha** zet keepalived op Docker-hosts: een kritieke
+  stack die op de VIP-node niet gezond draait, stuurt het VIP naar een
+  andere node, en die start de stacks met plaatsing VIP. Zonder VIP zijn het
+  losse Docker-hosts. Bestaande hosts neem je over via Cluster uitrollen →
+  Bestaande nodes; een oude `sync_docker.sh` in de crontab van root gaat in
+  commentaar.
+
+Agents met protocol 33 of hoger. Ontwerp:
+[docs/design/fase21-docker-stacks.md](docs/design/fase21-docker-stacks.md).
+
 ## Ontwikkelen
 
 Nodig: Go 1.26, Node 22 met pnpm, Docker.
