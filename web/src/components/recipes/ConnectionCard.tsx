@@ -1,5 +1,6 @@
 "use client";
 
+import { copyText } from "@/lib/clipboard";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { Alert, Button, Card, Input } from "@/components/ui";
@@ -68,7 +69,7 @@ export function ConnectionCard({ clusterId, isAdmin }: { clusterId: string; isAd
                   {shown[u.secret] ? (
                     <span className="flex flex-wrap items-center gap-2">
                       <code className="break-all">{shown[u.secret]}</code>
-                      <Button variant="ghost" onClick={() => void navigator.clipboard?.writeText(shown[u.secret])}>
+                      <Button variant="ghost" onClick={() => void copyText(shown[u.secret])}>
                         Kopiëren
                       </Button>
                     </span>

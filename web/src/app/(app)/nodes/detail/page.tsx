@@ -1,5 +1,6 @@
 "use client";
 
+import { SectionNav } from "@/components/shell/SectionNav";
 import { askConfirm } from "@/components/Confirm";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -128,6 +129,7 @@ function NodeDetailInner() {
               )
             }
           />
+          <SectionNav />
 
           {deleting && (
             <ConfirmDelete

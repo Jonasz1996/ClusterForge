@@ -1,5 +1,6 @@
 "use client";
 
+import { copyText } from "@/lib/clipboard";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
@@ -1130,7 +1131,7 @@ function Timeline({
                                 </Button>
                               </>
                             )}
-                            <Button variant="ghost" className="px-2 py-1 text-xs" onClick={() => void navigator.clipboard?.writeText(e.msg)}>
+                            <Button variant="ghost" className="px-2 py-1 text-xs" onClick={() => void copyText(e.msg)}>
                               Kopiëren
                             </Button>
                           </div>
