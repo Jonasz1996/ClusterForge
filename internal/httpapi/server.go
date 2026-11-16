@@ -111,6 +111,8 @@ type Server struct {
 	enrollLimiter *ipLimiter
 	// throttle remt events die een aanvaller gratis kan laten schrijven.
 	throttle *events.Throttle
+	// dashCache houdt de cijfers van de dashboard-API even bij.
+	dashCache dashboardCache
 }
 
 var _ gen.ServerInterface = (*Server)(nil)
@@ -264,6 +266,10 @@ func (s *Server) Handler() http.Handler {
 		api.MethodNotAllowed(func(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusMethodNotAllowed, "method_not_allowed", "methode niet toegestaan")
 		})
+	})
+	r.Route(dashboardBase, func(api chi.Router) {
+		api.Use(middleware.NoCache)
+		s.dashboardRoutes(api)
 	})
 	r.Get("/install/agent.sh", agentdist.InstallScript)
 	r.Get("/install/golden-image.sh", agentdist.GoldenImageScript)

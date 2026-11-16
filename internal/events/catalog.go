@@ -185,6 +185,8 @@ var Known = map[string]Spec{
 	"cluster.agent_upgrade_auto":  {CategoryAgents, "Agents vanzelf bijwerken op een cluster aan- of uitgezet"},
 	"enrollment_token.created":    {CategoryAgents, "Aanmeldtoken gemaakt"},
 	"enrollment_token.deleted":    {CategoryAgents, "Aanmeldtoken ingetrokken"},
+	"api_token.created":           {CategorySecurity, "API-token voor dashboard gemaakt"},
+	"api_token.deleted":           {CategorySecurity, "API-token voor dashboard ingetrokken"},
 	"node.facts_changed":          {CategoryAgents, "Facts van node gewijzigd"},
 	"node.cron_added":             {CategoryCron, "Cronjob verschenen op node"},
 	"node.cron_removed":           {CategoryCron, "Cronjob verdwenen van node"},

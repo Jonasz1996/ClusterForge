@@ -2040,6 +2040,67 @@ Naast vragen beantwoorden doet de assistent drie vaste opdrachten. Elk antwoord 
 
 **Automatisch analyseren.** Standaard uit. Zet een beheerder bij Instellingen, Assistent 'Nieuwe prod-incidenten met ernst hoog of kritiek automatisch analyseren' aan, dan analyseert ClusterForge zo'n incident twee minuten nadat het ontdekt is, zodat de tijdlijn en de metrics van het begin er zijn. Alleen incidenten die een prod-cluster raken en niet door een test komen, elk één keer, hoogstens tien per dag en binnen het maandbudget. Zo'n analyse leest met de rechten van een beheerder, staat bij het incident als automatisch, en het gesprek staat bij de gesprekken van iedereen zonder gebruiker.
 
+## Dashboard-API (homepage)
+
+Een eigen dashboard, zoals homepage of homepage.dev, leest per cluster de belangrijkste cijfers uit ClusterForge.
+De API kan alleen lezen en staat los van de gewone API: `/api/dashboard/v1`, met een API-token in plaats van een
+sessie. Tokens maak je bij **Instellingen → Dashboard-API (homepage) → Token maken** (beheerder): een naam, de
+clusters die het token mag zien (niets aangevinkt = alle, ook nieuwe) en hoe lang het geldt. Het token (`cfa_…`)
+staat er één keer, samen met een kant-en-klare `services.yaml` met een tegel per cluster. In de lijst staan per
+token het begin, de clusters, wanneer het verloopt en wanneer en vanaf welk adres het laatst gebruikt is;
+**Intrekken** werkt meteen. Een fout token remt het IP-adres zoals een foute login. Aanmaken en intrekken staan in
+het logboek.
+
+Het token gaat mee als `Authorization: Bearer cfa_…` (of `X-API-Key: cfa_…`).
+
+| Pad | Geeft |
+| --- | --- |
+| `GET /api/dashboard/v1/clusters/<cluster>` | één cluster, op slug, id of naam; met `?strict=1` HTTP 503 zolang het cluster niet in orde is, zodat de check van een tegel vanzelf rood wordt |
+| `GET /api/dashboard/v1/clusters` | een lijst met alle clusters die het token mag zien |
+| `GET /api/dashboard/v1/` | de samenvatting (clusters gezond/verminderd/down, nodes, incidenten, updates, bans) plus de clusters |
+
+De velden zijn plat en vast, zodat de customapi-widget ze met één naam toont en niets hoeft op te tellen:
+
+| Veld | Voorbeeld |
+| --- | --- |
+| `status`, `status_label`, `status_reason`, `ok` | `degraded`, `Verminderd`, `node3 reageert niet`, `false` (`ok`: gezond en geen open incident) |
+| `score`, `grade` | health score 0-100 en het cijfer, `null` zolang er geen score is |
+| `nodes`, `nodes_online`, `nodes_total`, `nodes_down` | `2/3`, `2`, `3`, `["db3"]` (een node in onderhoud telt niet als down) |
+| `vip`, `vip_owner`, `vips` | het eerste VIP en de node die het heeft; `vips` met alle VIP's |
+| `db`, `db_label`, `db_running`, `db_total` | `degraded`, `MariaDB 2/3 · PostgreSQL 3/3`; `none` en `—` zonder database |
+| `incidents_open`, `incidents_worst` | open incidenten zonder die van een failovertest, en de ergste ernst |
+| `updates`, `updates_security`, `nodes_with_updates`, `reboot_required` | pakketupdates over alle nodes, en hoeveel nodes een herstart willen |
+| `crowdsec`, `crowdsec_bans`, `crowdsec_alerts_24h` | `3/3 actief`, actieve bans, alerts van 24 uur; `—` zonder CrowdSec-beheer |
+| `firewall`, `firewall_blocked_24h` | `3/3 actief` of `voorbeeld`, tegengehouden pakketten van 24 uur; `—` zonder firewallbeheer |
+| `problems` | korte zinnen over wat er mis is, voor een lijst of tooltip |
+| `url` | de pagina van het cluster in ClusterForge |
+
+De cijfers worden hoogstens elke 15 seconden opnieuw berekend; een dashboard dat elke paar seconden vraagt, belast de
+database niet. **Voorbeeld van het antwoord** op dezelfde kaart toont het antwoord per cluster, ook voor een viewer.
+
+Voorbeeld voor `services.yaml` (de eigen homepage zet `token` versleuteld bij de geheimen; homepage.dev zelf
+gebruikt de header):
+
+```yaml
+- ClusterForge:
+    - Databasecluster:
+        icon: mdi-server-network
+        href: http://192.168.113.153:8080/clusters/detail?id=<id>
+        widget:
+          type: customapi
+          url: http://192.168.113.153:8080/api/dashboard/v1/clusters/databasecluster
+          token: cfa_…
+          # homepage.dev: headers: { Authorization: "Bearer cfa_…" }
+          refreshInterval: 30000
+          mappings:
+            - { field: status_label, label: Status }
+            - { field: nodes, label: Nodes }
+            - { field: vip_owner, label: VIP }
+            - { field: db_label, label: Database }
+            - { field: incidents_open, label: Incidenten }
+            - { field: updates, label: Updates }
+```
+
 ## Ontwikkelen
 
 Nodig: Go 1.26, Node 22 met pnpm, Docker.

@@ -3770,6 +3770,33 @@ type AgentUpgradeStarted struct {
 	Skipped []string `json:"skipped"`
 }
 
+// ApiToken defines model for ApiToken.
+type ApiToken struct {
+	// ClusterIds Leeg = alle clusters
+	ClusterIds   []openapi_types.UUID         `json:"cluster_ids"`
+	ClusterNames []string                     `json:"cluster_names"`
+	CreatedAt    time.Time                    `json:"created_at"`
+	CreatedBy    string                       `json:"created_by"`
+	ExpiresAt    nullable.Nullable[time.Time] `json:"expires_at"`
+	Id           openapi_types.UUID           `json:"id"`
+	LastUsedAt   nullable.Nullable[time.Time] `json:"last_used_at"`
+	LastUsedIp   string                       `json:"last_used_ip"`
+	Name         string                       `json:"name"`
+
+	// Prefix Het begin van het token
+	Prefix string `json:"prefix"`
+}
+
+// ApiTokenInput defines model for ApiTokenInput.
+type ApiTokenInput struct {
+	// ClusterIds Leeg of weg = alle clusters
+	ClusterIds *[]openapi_types.UUID `json:"cluster_ids,omitempty"`
+	Name       string                `json:"name"`
+
+	// TtlDays 0 of weg = verloopt nooit
+	TtlDays *int `json:"ttl_days,omitempty"`
+}
+
 // AssistantConversation defines model for AssistantConversation.
 type AssistantConversation struct {
 	// CanAsk Of jij in dit gesprek verder kunt vragen; alleen in je eigen gesprekken
@@ -6168,6 +6195,107 @@ type DRReportVIP struct {
 
 // DRSchedule Leeg: alleen met de hand; weekly: elke week in het testvenster; monthly: in het eerste testvenster van de maand
 type DRSchedule string
+
+// DashboardCluster Eén cluster voor een eigen dashboard: vaste, platte velden zodat de
+// customapi-widget van homepage ze met één naam kan tonen.
+type DashboardCluster struct {
+	// Crowdsec bv. 3/3 actief, of — als CrowdSec niet beheerd wordt
+	Crowdsec          string `json:"crowdsec"`
+	CrowdsecAlerts24h int    `json:"crowdsec_alerts_24h"`
+	CrowdsecBans      int    `json:"crowdsec_bans"`
+	CrowdsecManaged   int    `json:"crowdsec_managed"`
+	CrowdsecRunning   int    `json:"crowdsec_running"`
+
+	// Db ok, degraded, down of none
+	Db string `json:"db"`
+
+	// DbLabel bv. MariaDB 3/3 of —
+	DbLabel     string `json:"db_label"`
+	DbRunning   int    `json:"db_running"`
+	DbTotal     int    `json:"db_total"`
+	Environment string `json:"environment"`
+
+	// Firewall bv. 3/3 actief, of — zonder firewallbeheer
+	Firewall           string             `json:"firewall"`
+	FirewallActive     int                `json:"firewall_active"`
+	FirewallBlocked24h int64              `json:"firewall_blocked_24h"`
+	FirewallManaged    int                `json:"firewall_managed"`
+	Grade              string             `json:"grade"`
+	Id                 openapi_types.UUID `json:"id"`
+	IncidentsOpen      int                `json:"incidents_open"`
+
+	// IncidentsWorst critical, high, low of leeg
+	IncidentsWorst string `json:"incidents_worst"`
+	Name           string `json:"name"`
+
+	// Nodes nodes_online/nodes_total, bv. 3/3
+	Nodes            string   `json:"nodes"`
+	NodesDown        []string `json:"nodes_down"`
+	NodesOnline      int      `json:"nodes_online"`
+	NodesTotal       int      `json:"nodes_total"`
+	NodesWithUpdates int      `json:"nodes_with_updates"`
+
+	// Ok true als het cluster gezond is en er geen open incident is
+	Ok bool `json:"ok"`
+
+	// Problems Korte zinnen over wat er mis is
+	Problems []string `json:"problems"`
+
+	// RebootRequired Aantal nodes dat een herstart wil
+	RebootRequired int `json:"reboot_required"`
+
+	// Score Health score 0-100
+	Score nullable.Nullable[int] `json:"score"`
+	Slug  string                 `json:"slug"`
+
+	// Status healthy, degraded, down, split_brain of unknown
+	Status string `json:"status"`
+
+	// StatusLabel Gezond, Verminderd, Down, Split-brain of Onbekend
+	StatusLabel  string `json:"status_label"`
+	StatusReason string `json:"status_reason"`
+	Type         string `json:"type"`
+
+	// Updates Pakketupdates over alle nodes
+	Updates         int `json:"updates"`
+	UpdatesSecurity int `json:"updates_security"`
+
+	// Url Het pad naar het cluster in ClusterForge
+	Url string `json:"url"`
+
+	// Vip Het eerste VIP-adres
+	Vip string `json:"vip"`
+
+	// VipOwner De node die het eerste VIP nu heeft
+	VipOwner string         `json:"vip_owner"`
+	Vips     []DashboardVip `json:"vips"`
+}
+
+// DashboardOverview defines model for DashboardOverview.
+type DashboardOverview struct {
+	Clusters          []DashboardCluster `json:"clusters"`
+	ClustersDegraded  int                `json:"clusters_degraded"`
+	ClustersDown      int                `json:"clusters_down"`
+	ClustersHealthy   int                `json:"clusters_healthy"`
+	ClustersTotal     int                `json:"clusters_total"`
+	CrowdsecAlerts24h int                `json:"crowdsec_alerts_24h"`
+	CrowdsecBans      int                `json:"crowdsec_bans"`
+	GeneratedAt       time.Time          `json:"generated_at"`
+	IncidentsOpen     int                `json:"incidents_open"`
+	Nodes             string             `json:"nodes"`
+	NodesOnline       int                `json:"nodes_online"`
+	NodesTotal        int                `json:"nodes_total"`
+	Updates           int                `json:"updates"`
+	UpdatesSecurity   int                `json:"updates_security"`
+}
+
+// DashboardVip defines model for DashboardVip.
+type DashboardVip struct {
+	Address string `json:"address"`
+
+	// Owner De node die het VIP nu heeft
+	Owner string `json:"owner"`
+}
 
 // DatabaseBackup defines model for DatabaseBackup.
 type DatabaseBackup struct {
@@ -10437,6 +10565,14 @@ type Metrics struct {
 // MetricsRange defines model for MetricsRange.
 type MetricsRange string
 
+// NewApiToken defines model for NewApiToken.
+type NewApiToken struct {
+	Item ApiToken `json:"item"`
+
+	// Token Het token (cfa_…); wordt niet opnieuw getoond
+	Token string `json:"token"`
+}
+
 // NewEnrollmentToken defines model for NewEnrollmentToken.
 type NewEnrollmentToken struct {
 	ClusterId   nullable.Nullable[openapi_types.UUID] `json:"cluster_id"`
@@ -12878,6 +13014,9 @@ type ClaimAgentJSONRequestBody = ClaimRequest
 // EnrollAgentJSONRequestBody defines body for EnrollAgent for application/json ContentType.
 type EnrollAgentJSONRequestBody = EnrollRequest
 
+// CreateApiTokenJSONRequestBody defines body for CreateApiToken for application/json ContentType.
+type CreateApiTokenJSONRequestBody = ApiTokenInput
+
 // CreateAssistantConversationJSONRequestBody defines body for CreateAssistantConversation for application/json ContentType.
 type CreateAssistantConversationJSONRequestBody = AssistantConversationInput
 
@@ -13258,6 +13397,18 @@ type ServerInterface interface {
 	// RevokeAgent Agent intrekken (admin); de verbinding wordt meteen verbroken
 	// (POST /agents/{agentId}/revoke)
 	RevokeAgent(w http.ResponseWriter, r *http.Request, agentId openapi_types.UUID)
+	// ListApiTokens API-tokens voor een eigen dashboard (admin)
+	// (GET /api-tokens)
+	ListApiTokens(w http.ResponseWriter, r *http.Request)
+	// CreateApiToken API-token aanmaken (admin); het token zelf staat alleen in dit antwoord
+	// (POST /api-tokens)
+	CreateApiToken(w http.ResponseWriter, r *http.Request)
+	// PreviewDashboardApi Wat de dashboard-API nu teruggeeft, met de sessie van de gebruiker
+	// (GET /api-tokens/preview)
+	PreviewDashboardApi(w http.ResponseWriter, r *http.Request)
+	// DeleteApiToken API-token intrekken (admin)
+	// (DELETE /api-tokens/{tokenId})
+	DeleteApiToken(w http.ResponseWriter, r *http.Request, tokenId openapi_types.UUID)
 	// ListAssistantConversations Je gesprekken, nieuwste eerst
 	// (GET /assistant/conversations)
 	ListAssistantConversations(w http.ResponseWriter, r *http.Request, params ListAssistantConversationsParams)
@@ -14200,6 +14351,30 @@ func (_ Unimplemented) EnrollAgent(w http.ResponseWriter, r *http.Request) {
 // RevokeAgent Agent intrekken (admin); de verbinding wordt meteen verbroken
 // (POST /agents/{agentId}/revoke)
 func (_ Unimplemented) RevokeAgent(w http.ResponseWriter, r *http.Request, agentId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListApiTokens API-tokens voor een eigen dashboard (admin)
+// (GET /api-tokens)
+func (_ Unimplemented) ListApiTokens(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CreateApiToken API-token aanmaken (admin); het token zelf staat alleen in dit antwoord
+// (POST /api-tokens)
+func (_ Unimplemented) CreateApiToken(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// PreviewDashboardApi Wat de dashboard-API nu teruggeeft, met de sessie van de gebruiker
+// (GET /api-tokens/preview)
+func (_ Unimplemented) PreviewDashboardApi(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// DeleteApiToken API-token intrekken (admin)
+// (DELETE /api-tokens/{tokenId})
+func (_ Unimplemented) DeleteApiToken(w http.ResponseWriter, r *http.Request, tokenId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -16105,6 +16280,74 @@ func (siw *ServerInterfaceWrapper) RevokeAgent(w http.ResponseWriter, r *http.Re
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RevokeAgent(w, r, agentId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListApiTokens operation middleware
+func (siw *ServerInterfaceWrapper) ListApiTokens(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListApiTokens(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateApiToken operation middleware
+func (siw *ServerInterfaceWrapper) CreateApiToken(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateApiToken(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PreviewDashboardApi operation middleware
+func (siw *ServerInterfaceWrapper) PreviewDashboardApi(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PreviewDashboardApi(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteApiToken operation middleware
+func (siw *ServerInterfaceWrapper) DeleteApiToken(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "tokenId" -------------
+	var tokenId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "tokenId", chi.URLParam(r, "tokenId"), &tokenId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tokenId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteApiToken(w, r, tokenId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -25147,6 +25390,18 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Delete(options.BaseURL+"/enrollment-tokens/{tokenId}", wrapper.DeleteEnrollmentToken)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api-tokens", wrapper.ListApiTokens)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/api-tokens", wrapper.CreateApiToken)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/api-tokens/{tokenId}", wrapper.DeleteApiToken)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/api-tokens/preview", wrapper.PreviewDashboardApi)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/agents/enroll", wrapper.EnrollAgent)
