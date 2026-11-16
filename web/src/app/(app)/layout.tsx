@@ -30,6 +30,7 @@ const nav: NavItem[] = [
   { href: "/documentatie", label: "Documentatie" },
   { href: "/rapporten", label: "Rapporten" },
   { href: "/proxmox", label: "Proxmox" },
+  { href: "/proxmox/hosts", label: "Proxmox-hosts" },
   { href: "/back-ups", label: "Back-ups" },
   { href: "/tests", label: "Tests" },
   { href: "/taken", label: "Taken" },

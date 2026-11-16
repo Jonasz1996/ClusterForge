@@ -12,6 +12,7 @@ import { Alert, Button, Card, cx, Input, Label, PageHeader, Select, Textarea } f
 import { ApiError } from "@/lib/api/client";
 import { mib, planDeployment, useDeploy, useTemplates, type DeployInput, type DeployPlan, type Template, type TemplateParam } from "@/lib/deploy";
 import { environments, useIsAdmin, useNodes, type Environment } from "@/lib/inventory";
+import { usePveHosts } from "@/lib/pvehosts";
 import { useProxmoxConnections, useProxmoxResources, useSyncProxmox, type ProxmoxResources, type ProxmoxStorage } from "@/lib/proxmox";
 
 export default function DeployPage() {
@@ -47,14 +48,25 @@ type Form = {
   // where: nieuwe VM's uit de golden image, nieuwe CT's uit een
   // CT-template, of bestaande nodes (zoals CT's met een agent), met per
   // node-id een rol.
-  where: "vm" | "ct" | "existing";
+  // newct: nieuwe CT's die de agent op de Proxmox-host maakt (fase 17), met
+  // cf-agent er meteen in.
+  where: "vm" | "ct" | "newct" | "existing";
+  // Bij newct: containertemplate (leeg is de nieuwste Debian 13) en
+  // privileged.
+  ostemplate: string;
+  privileged: boolean;
   existing: Record<string, string>;
   // placement: per node (rol/volgnummer) de gekozen Proxmox-host en
   // storage; leeg kiest ClusterForge.
   placement: Record<string, Placement>;
 };
 
-type Placement = { host: string; storage: string };
+// Placement: bij newct ook CTID, adres en resources per node; leeg kiest
+// ClusterForge (of de template).
+type Placement = { host: string; storage: string; vmid?: string; address?: string; cpu?: string; memory?: string; disk?: string };
+
+const placementEmpty = (p: Placement) => Object.values(p).every((v) => v === undefined || v === "");
+const num = (v: string | undefined) => (v && /^\d+$/.test(v.trim()) ? Number(v.trim()) : undefined);
 
 const placementKey = (role: string, index: number) => `${role}/${index}`;
 
@@ -79,6 +91,8 @@ const emptyForm: Form = {
   serverUrl: null,
   database: false,
   where: "vm",
+  ostemplate: "",
+  privileged: false,
   existing: {},
   placement: {},
 };
@@ -120,14 +134,17 @@ function toInput(f: Form, t: Template | undefined): DeployInput {
   // Een CT meldt zich aan vanaf zijn vaste adres, en SSH-sleutels kan
   // Proxmox bij een kloon van een CT niet zetten.
   const ct = f.where === "ct";
-  const network = ct ? "static" : f.network;
+  const newct = f.where === "newct";
+  const network = ct || newct ? "static" : f.network;
   return {
     template: f.template,
     cluster,
     params,
     target: {
       proxmox_id: f.proxmoxId,
-      image_vmid: Number(f.imageVmid) || 0,
+      ...(newct
+        ? { create: "ct" as const, ostemplate: f.ostemplate.trim(), privileged: f.privileged }
+        : { image_vmid: Number(f.imageVmid) || 0 }),
       storage: f.storage,
       bridge: f.bridge.trim(),
       vlan: f.vlan.trim() === "" ? null : Number(f.vlan),
@@ -137,10 +154,19 @@ function toInput(f: Form, t: Template | undefined): DeployInput {
       dns: network === "static" ? f.dns.split(/[\s,]+/).filter(Boolean) : [],
       ssh_keys: ct ? "" : f.sshKeys,
       placement: Object.entries(f.placement)
-        .filter(([, p]) => p.host !== "" || p.storage !== "")
+        .filter(([, p]) => !placementEmpty(p))
         .map(([key, p]) => {
           const cut = key.lastIndexOf("/");
-          return { role: key.slice(0, cut), index: Number(key.slice(cut + 1)), host: p.host, storage: p.storage };
+          const base = { role: key.slice(0, cut), index: Number(key.slice(cut + 1)), host: p.host, storage: p.storage };
+          if (!newct) return base;
+          return {
+            ...base,
+            vmid: num(p.vmid),
+            address: p.address?.trim() || undefined,
+            cpu: num(p.cpu),
+            memory_mib: num(p.memory),
+            disk_gib: num(p.disk),
+          };
         }),
     },
     server_url: (f.serverUrl ?? "").trim(),
@@ -177,6 +203,11 @@ function DeployInner() {
   // Kubernetes komt altijd op nieuwe VM's.
   const where = template?.cluster_type === "kubernetes" ? "vm" : form.where;
   const ct = where === "ct";
+  const newct = where === "newct";
+  // CT's (kloon of nieuw) gebruiken storage met rootdir.
+  const ctDisk = ct || newct;
+  const pveHosts = usePveHosts();
+  const pveReady = useMemo(() => (pveHosts.data?.hosts ?? []).filter((h) => h.online && h.supported), [pveHosts.data]);
   const images = useMemo(
     () =>
       (resources.data?.guests ?? [])
@@ -187,10 +218,10 @@ function DeployInner() {
   const storages = useMemo(() => {
     const seen = new Map<string, ProxmoxStorage>();
     for (const s of resources.data?.storages ?? []) {
-      if (holds(s, ct) && !seen.has(s.name)) seen.set(s.name, s);
+      if (holds(s, ctDisk) && !seen.has(s.name)) seen.set(s.name, s);
     }
     return [...seen.values()].sort((a, b) => a.name.localeCompare(b.name));
-  }, [resources.data, ct]);
+  }, [resources.data, ctDisk]);
   const sync = useSyncProxmox();
 
   const imageVmid = form.imageVmid || (images[0] ? String(images[0].vmid) : "");
@@ -206,7 +237,9 @@ function DeployInner() {
     template !== undefined &&
     form.name.trim() !== "" &&
     form.slug !== "" &&
-    (where === "existing" ? Object.keys(form.existing).length > 0 : proxmoxId !== "" && imageVmid !== "");
+    (where === "existing"
+      ? Object.keys(form.existing).length > 0
+      : proxmoxId !== "" && (where === "newct" ? pveReady.length > 0 : imageVmid !== ""));
   const planInput = useDebounced(ready ? JSON.stringify(input) : "", 600);
   const plan = useQuery({
     queryKey: ["deploy-plan", planInput],
@@ -392,7 +425,11 @@ function DeployInner() {
               </label>
               <label className="inline-flex items-center gap-2">
                 <input type="radio" checked={form.where === "ct"} onChange={() => setWhere("ct")} />
-                Nieuwe CT&apos;s in Proxmox
+                Nieuwe CT&apos;s uit een CT-template
+              </label>
+              <label className="inline-flex items-center gap-2">
+                <input type="radio" checked={form.where === "newct"} onChange={() => setWhere("newct")} />
+                Nieuwe CT&apos;s, volledig automatisch (agent op de host)
               </label>
               <label className="inline-flex items-center gap-2">
                 <input type="radio" id={fieldId("existing")} checked={form.where === "existing"} onChange={() => setWhere("existing")} />
@@ -405,6 +442,30 @@ function DeployInner() {
               ClusterForge kloont de CT&apos;s uit een CT-template met cf-agent, zet hostname, adres, CPU, geheugen en schijf, en start ze. De
               agent in elke CT meldt zich dan zelf aan, alleen vanaf het vaste adres dat de uitrol hem geeft.
             </p>
+          )}
+          {form.where === "newct" && (
+            <div className="mt-4 space-y-3 text-sm text-slate-600 dark:text-slate-400">
+              <p>
+                De agent op de Proxmox-host maakt elke CT met pct create (CPU, RAM, schijf, CTID en adres kies je per node in het voorbeeld
+                onderaan), haalt zo nodig de nieuwste Debian 13-template op, zet de SSH-sleutels van de host en die van hieronder erin, zet
+                cf-agent in de CT en meldt hem aan. Daarna rolt ClusterForge het cluster uit zoals altijd.
+              </p>
+              {pveHosts.data && pveReady.length === 0 && (
+                <Alert kind="info">
+                  Nog geen Proxmox-host met een agent die dit kan. Installeer de agent één keer op je Proxmox-hosts (Nodes → Agent
+                  installeren) of werk hem bij (Nodes → Agents bijwerken). Zie{" "}
+                  <Link href="/proxmox/hosts" className="font-medium underline">
+                    Proxmox-hosts
+                  </Link>
+                  .
+                </Alert>
+              )}
+              {pveReady.length > 0 && (
+                <p>
+                  Hosts die klaar zijn: <strong>{pveReady.map((h) => h.pve_node).join(", ")}</strong>.
+                </p>
+              )}
+            </div>
           )}
           {form.where === "existing" && (
             <ExistingNodes
@@ -444,34 +505,51 @@ function DeployInner() {
                       ))}
                     </Select>
                   </FieldRow>
-                  <FieldRow
-                    error={fieldError}
-                    field="target.image_vmid"
-                    label={ct ? "CT-template" : "Golden image"}
-                    hint={ct ? "Een CT-template met cf-agent, gemaakt met ct-template.sh." : "Een VM-template met cloud-init, qemu-guest-agent en cf-agent."}
-                  >
-                    <Select
-                      id={fieldId("target.image_vmid")}
-                      className={bad("target.image_vmid")}
-                      value={imageVmid}
-                      onChange={(e) => set("imageVmid", e.target.value)}
+                  {newct ? (
+                    <FieldRow
+                      error={fieldError}
+                      field="target.ostemplate"
+                      label="Containertemplate"
+                      hint="Leeg is de nieuwste debian-13-standard; de host haalt hem zelf op als hij er nog niet staat."
                     >
-                      {images.length === 0 && <option value="">{ct ? "Geen CT-templates gevonden" : "Geen VM-templates gevonden"}</option>}
-                      {images.map((g) => (
-                        <option key={g.vmid} value={g.vmid}>
-                          {g.name} ({ct ? "CT" : "VM"} {g.vmid} op {g.host})
-                        </option>
-                      ))}
-                    </Select>
-                  </FieldRow>
+                      <Input
+                        id={fieldId("target.ostemplate")}
+                        className={bad("target.ostemplate")}
+                        placeholder="nieuwste Debian 13"
+                        value={form.ostemplate}
+                        onChange={(e) => set("ostemplate", e.target.value)}
+                      />
+                    </FieldRow>
+                  ) : (
+                    <FieldRow
+                      error={fieldError}
+                      field="target.image_vmid"
+                      label={ct ? "CT-template" : "Golden image"}
+                      hint={ct ? "Een CT-template met cf-agent, gemaakt met ct-template.sh." : "Een VM-template met cloud-init, qemu-guest-agent en cf-agent."}
+                    >
+                      <Select
+                        id={fieldId("target.image_vmid")}
+                        className={bad("target.image_vmid")}
+                        value={imageVmid}
+                        onChange={(e) => set("imageVmid", e.target.value)}
+                      >
+                        {images.length === 0 && <option value="">{ct ? "Geen CT-templates gevonden" : "Geen VM-templates gevonden"}</option>}
+                        {images.map((g) => (
+                          <option key={g.vmid} value={g.vmid}>
+                            {g.name} ({ct ? "CT" : "VM"} {g.vmid} op {g.host})
+                          </option>
+                        ))}
+                      </Select>
+                    </FieldRow>
+                  )}
                   <FieldRow
                     error={fieldError}
                     field="target.storage"
                     label="Storage"
-                    hint={`Voor alle ${ct ? "CT's" : "VM's"}; per node kies je host en storage in het voorbeeld onderaan.`}
+                    hint={`Voor alle ${ctDisk ? "CT's" : "VM's"}; per node kies je host en storage in het voorbeeld onderaan.`}
                   >
                     <Select id={fieldId("target.storage")} className={bad("target.storage")} value={form.storage} onChange={(e) => set("storage", e.target.value)}>
-                      <option value="">{ct ? "Zoals de CT-template" : "Zoals de golden image"}</option>
+                      <option value="">{newct ? "Automatisch (meeste ruimte)" : ct ? "Zoals de CT-template" : "Zoals de golden image"}</option>
                       {storages.map((st) => (
                         <option key={st.name} value={st.name}>
                           {st.name}
@@ -495,6 +573,12 @@ function DeployInner() {
                       />
                     </FieldRow>
                   </div>
+                  {newct && (
+                    <label className="inline-flex items-center gap-2 text-sm text-slate-700 dark:text-slate-300">
+                      <input type="checkbox" checked={form.privileged} onChange={(e) => set("privileged", e.target.checked)} />
+                      Privileged CT&apos;s (alleen als de software het echt vraagt)
+                    </label>
+                  )}
                 </div>
                 {resources.data && images.length === 0 && ct && (
                   <div className="space-y-2 rounded-md border border-slate-200 p-4 text-sm dark:border-slate-800">
@@ -524,7 +608,7 @@ function DeployInner() {
 
           <Card title="Netwerk en toegang">
             <div className="space-y-4">
-              <fieldset hidden={ct}>
+              <fieldset hidden={ct || newct}>
                 <legend className="mb-1 text-sm font-medium text-slate-700 dark:text-slate-300">Adressen van de nodes</legend>
                 <div className="flex flex-wrap gap-4 text-sm">
                   <label className="inline-flex items-center gap-2">
@@ -537,8 +621,13 @@ function DeployInner() {
                   </label>
                 </div>
               </fieldset>
-              {ct && <p className="text-sm text-slate-600 dark:text-slate-400">Een CT krijgt altijd een vast adres.</p>}
-              {ct || form.network === "static" ? (
+              {(ct || newct) && (
+                <p className="text-sm text-slate-600 dark:text-slate-400">
+                  Een CT krijgt altijd een vast adres. Laat je de gateway leeg, dan is het het eerste adres van het subnet; de eerste drie
+                  adressen (gateway en firewalls) krijgt geen node.
+                </p>
+              )}
+              {ct || newct || form.network === "static" ? (
                 <div className="grid gap-4 sm:grid-cols-3">
                   <FieldRow error={fieldError} field="target.first_ip" label="Eerste adres" hint="Met prefix; de volgende nodes krijgen de adressen erna.">
                     <Input
@@ -574,7 +663,11 @@ function DeployInner() {
                   error={fieldError}
                   field="target.ssh_keys"
                   label="Publieke SSH-sleutels"
-                  hint="Eén per regel, voor de gebruiker debian. Zonder sleutel kom je alleen via de console van Proxmox binnen."
+                  hint={
+                    newct
+                      ? "Eén per regel, voor root in de CT. De sleutels van root op de Proxmox-host gaan er altijd in, zodat de host de CT kan bereiken."
+                      : "Eén per regel, voor de gebruiker debian. Zonder sleutel kom je alleen via de console van Proxmox binnen."
+                  }
                 >
                   <Textarea
                     id={fieldId("target.ssh_keys")}
@@ -591,7 +684,9 @@ function DeployInner() {
                 field="server_url"
                 label="Adres van ClusterForge"
                 hint={
-                  ct
+                  newct
+                    ? "Hiermee meldt cf-agent in elke nieuwe CT zich aan; de CT's moeten het kunnen bereiken, en NATS op poort 4222."
+                    : ct
                     ? "De CT's melden zich aan bij het adres uit de CT-template; ze moeten het kunnen bereiken, en NATS op poort 4222."
                     : "Hiermee melden de nieuwe VM's zich aan; ze moeten het kunnen bereiken, en NATS op poort 4222."
                 }
@@ -614,7 +709,9 @@ function DeployInner() {
             where === "existing"
               ? undefined
               : {
-                  ct,
+                  ct: ctDisk,
+                  newct,
+                  ready: pveReady.map((h) => h.pve_node),
                   value: form.placement,
                   onChange: setPlacement,
                   resources: resources.data,
@@ -674,6 +771,10 @@ function slugHint(slug: string, t: Template | undefined) {
 
 type PlacementProps = {
   ct: boolean;
+  // newct: CTID, adres en resources zijn per node in te vullen, en alleen
+  // hosts met een agent (ready) kunnen.
+  newct: boolean;
+  ready: string[];
   value: Record<string, Placement>;
   onChange: (key: string, p: Placement) => void;
   resources: ProxmoxResources | undefined;
@@ -738,14 +839,15 @@ function Preview({
             <tr>
               <th className={thClass}>Node</th>
               {existing && <th className={thClass}>Rol</th>}
+              {placement?.newct && <th className={thClass}>CTID</th>}
               <th className={thClass}>Adres</th>
               {!existing && (
                 <>
                   <th className={thClass}>Proxmox-host</th>
                   <th className={thClass}>Storage</th>
                   <th className={`${thClass} text-right`}>vCPU</th>
-                  <th className={`${thClass} text-right`}>Geheugen</th>
-                  <th className={`${thClass} text-right`}>Schijf</th>
+                  <th className={`${thClass} text-right`}>{placement?.newct ? "RAM (MB)" : "Geheugen"}</th>
+                  <th className={`${thClass} text-right`}>{placement?.newct ? "Schijf (GB)" : "Schijf"}</th>
                 </>
               )}
             </tr>
@@ -755,7 +857,11 @@ function Preview({
               <tr key={n.hostname}>
                 <td className={`${tdClass} font-medium`}>{n.hostname}</td>
                 {existing && <td className={tdClass}>{n.role}</td>}
-                <td className={tdClass}>{n.address || <span className="text-slate-500">DHCP</span>}</td>
+                {placement?.newct ? (
+                  <NewCTCells n={n} p={placement} />
+                ) : (
+                  <td className={tdClass}>{n.address || <span className="text-slate-500">DHCP</span>}</td>
+                )}
                 {!existing && (
                   <>
                     {placement ? (
@@ -766,9 +872,15 @@ function Preview({
                         <td className={tdClass}>{n.storage}</td>
                       </>
                     )}
-                    <td className={`${tdClass} text-right tabular-nums`}>{n.cpu}</td>
-                    <td className={`${tdClass} text-right tabular-nums`}>{mib(n.memory_mib)}</td>
-                    <td className={`${tdClass} text-right tabular-nums`}>{n.disk_gib} GB</td>
+                    {placement?.newct ? (
+                      <ResourceCells n={n} p={placement} />
+                    ) : (
+                      <>
+                        <td className={`${tdClass} text-right tabular-nums`}>{n.cpu}</td>
+                        <td className={`${tdClass} text-right tabular-nums`}>{mib(n.memory_mib)}</td>
+                        <td className={`${tdClass} text-right tabular-nums`}>{n.disk_gib} GB</td>
+                      </>
+                    )}
                   </>
                 )}
               </tr>
@@ -783,6 +895,62 @@ function Preview({
         </p>
       )}
     </div>
+  );
+}
+
+// NewCTCells: CTID en adres van een nieuwe CT; leeg neemt wat
+// ClusterForge voorstelt (het eerste vrije nummer, het volgende adres).
+function NewCTCells({ n, p }: { n: DeployPlan["nodes"][number]; p: PlacementProps }) {
+  const key = placementKey(n.role, n.index);
+  const cur = p.value[key] ?? { host: "", storage: "" };
+  return (
+    <>
+      <td className={tdClass}>
+        <Input
+          aria-label={`CTID van ${n.hostname}`}
+          className="w-24"
+          inputMode="numeric"
+          placeholder={n.vmid ? String(n.vmid) : "auto"}
+          value={cur.vmid ?? ""}
+          onChange={(e) => p.onChange(key, { ...cur, vmid: e.target.value })}
+        />
+      </td>
+      <td className={tdClass}>
+        <Input
+          aria-label={`Adres van ${n.hostname}`}
+          className="w-44"
+          placeholder={n.address}
+          value={cur.address ?? ""}
+          onChange={(e) => p.onChange(key, { ...cur, address: e.target.value })}
+        />
+      </td>
+    </>
+  );
+}
+
+// ResourceCells: CPU, RAM (MB) en schijf (GB) van een nieuwe CT; leeg is
+// wat de template vraagt.
+function ResourceCells({ n, p }: { n: DeployPlan["nodes"][number]; p: PlacementProps }) {
+  const key = placementKey(n.role, n.index);
+  const cur = p.value[key] ?? { host: "", storage: "" };
+  const cell = (field: "cpu" | "memory" | "disk", ph: number, label: string) => (
+    <td className={`${tdClass} text-right`}>
+      <Input
+        aria-label={`${label} van ${n.hostname}`}
+        className="w-20 text-right"
+        inputMode="numeric"
+        placeholder={String(ph)}
+        value={cur[field] ?? ""}
+        onChange={(e) => p.onChange(key, { ...cur, [field]: e.target.value })}
+      />
+    </td>
+  );
+  return (
+    <>
+      {cell("cpu", n.cpu, "vCPU")}
+      {cell("memory", n.memory_mib, "Geheugen (MB)")}
+      {cell("disk", n.disk_gib, "Schijf (GB)")}
+    </>
   );
 }
 
@@ -816,13 +984,18 @@ function PlacementCells({
             const h = e.target.value || n.host;
             // Een storage die op de nieuwe host niet bestaat, valt weg.
             const keep = (p.resources?.storages ?? []).some((s) => s.name === cur.storage && (s.shared || s.host === h));
-            p.onChange(key, { host: e.target.value, storage: keep ? cur.storage : "" });
+            p.onChange(key, { ...cur, host: e.target.value, storage: keep ? cur.storage : "" });
           }}
         >
           <option value="">{cur.host ? "Automatisch" : `Automatisch (${n.host})`}</option>
           {hosts.map((h) => (
-            <option key={h.name} value={h.name} disabled={h.status !== "online"}>
-              {h.name} · {h.status === "online" ? `${gb(h.maxmem - h.mem)} geheugen vrij` : "offline"}
+            <option key={h.name} value={h.name} disabled={h.status !== "online" || (p.newct && !p.ready.includes(h.name))}>
+              {h.name} ·{" "}
+              {h.status !== "online"
+                ? "offline"
+                : p.newct && !p.ready.includes(h.name)
+                  ? "geen agent"
+                  : `${gb(h.maxmem - h.mem)} geheugen vrij`}
             </option>
           ))}
         </Select>
@@ -832,7 +1005,7 @@ function PlacementCells({
           aria-label={`Storage van ${n.hostname}`}
           className="min-w-48"
           value={cur.storage}
-          onChange={(e) => p.onChange(key, { host: cur.host, storage: e.target.value })}
+          onChange={(e) => p.onChange(key, { ...cur, storage: e.target.value })}
         >
           <option value="">Standaard ({standard})</option>
           {storages.map((s) => (
