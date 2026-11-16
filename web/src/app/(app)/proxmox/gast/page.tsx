@@ -74,7 +74,8 @@ function GuestInner({ dc }: { dc: Datacenter }) {
   const status = usePveGet<GuestStatus>(dc.id, path + "/status/current", { refetch: 5_000, enabled: vmid > 0 });
   const isAdmin = useIsAdmin();
   const { run, pending, banner } = useCallRunner(dc.id);
-  const [tab, setTab] = useState<Tab>("overview");
+  const tabKeys: Tab[] = ["overview", "hardware", "cloudinit", "options", "snapshots", "backups", "passthrough", "tasks"];
+  const [tab, setTab] = useState<Tab>(tabKeys.find((t) => t === sp.get("tab")) ?? "overview");
   const [dialog, setDialog] = useState<"migrate" | "clone" | "template" | "destroy" | "stop" | null>(null);
   const [destroyMsg, setDestroyMsg] = useState<string | null>(null);
   const colors = useTagColors(dc.id);

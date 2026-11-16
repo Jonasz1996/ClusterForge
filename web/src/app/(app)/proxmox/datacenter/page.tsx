@@ -1,5 +1,6 @@
 "use client";
 
+import { DiskHealthSummary } from "@/components/pve/Disks";
 import Link from "next/link";
 import { Suspense, useState } from "react";
 import { askConfirm } from "@/components/Confirm";
@@ -34,6 +35,7 @@ function DatacenterView({ dc }: { dc: Datacenter }) {
         <div className="space-y-6">
           <Strip o={o.data} />
           {o.data.warnings.length > 0 && <WarningsCard o={o.data} />}
+          <DiskHealthSummary dc={dc} />
           <HostsCard dc={dc} o={o.data} />
           <div className="grid gap-6 lg:grid-cols-2">
             <CapacityCard o={o.data} />

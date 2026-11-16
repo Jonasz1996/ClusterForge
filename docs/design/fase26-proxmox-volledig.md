@@ -91,3 +91,12 @@ voor de GUI verboden, net als `args` en `hookscript`.
 - **Replicatie** (`/proxmox/replicatie`): jobs uit `/cluster/replication`, status per host uit `/nodes/{node}/replication`, nu synchroniseren, aan/uit, wijzigen. Verwijderen vraagt de job-id getypt, omdat Proxmox dan de kopie op de doelhost wist. Id is `<vmid>-<n>` met het eerste vrije n.
 - **Host-updates** (`/proxmox/host-updates`, `POST /pve/datacenters/{dc}/host-update`): per host wachtende pakketten (`apt/update`) en of een herstart nodig is. Een ronde werkt hosts na elkaar bij: onderhoudsmodus aan, gasten verhuizen naar de host met het meeste vrije geheugen (HA-gasten doet Proxmox zelf), wachten tot de host leeg is, apt full-upgrade via de agent, herstarten (nodig/altijd/nooit), wachten tot de host terug is, onderhoudsmodus uit, gasten terug. Gasten die niet kunnen verhuizen (lokale resources) laten de ronde stoppen, tenzij "stilleggen" aan staat. `dry_run` geeft het plan zonder iets te veranderen; starten vraagt de datacenternaam getypt.
 - Geen agentupdate (generieke pvesh, protocol 35) en geen migratie.
+
+## Opslag, schijven, ISO's en opruimen (M5)
+
+- Pagina `/proxmox/opslag` met vier tabbladen.
+- **Opslag**: `/storage` met gebruik per host uit `/cluster/resources`; toevoegen/wijzigen voor map, NFS, SMB/CIFS, PBS, ZFS, LVM-thin en LVM (wachtwoorden gaan als geheim door de policy), aan/uit, weghalen met getypte naam.
+- **Schijven**: per host `disks/list` (SMART-uitslag, slijtage), SMART-details, ZFS-pools met vdev-boom, laatste scrub en scrub starten/stoppen (bestaande agentactie zpool_scrub), LVM-thinpools met metadata. Nieuwe ZFS/LVM/LVM-thin/map op lege schijven, GPT en wissen: alle drie met getypte bevestiging (de policy eist die ook). Een kaart "Schijven vragen aandacht" (SMART niet in orde, SSD onder 10% levensduur, ZFS niet ONLINE) staat ook op de Datacenter-pagina. Temperaturen en ECC staan al op Hardware (M2).
+- **ISO's en templates**: inhoud van alle opslag met iso/vztmpl, downloaden van URL met checksum, CT-template uit de Proxmox-lijst (`aplinfo`), weghalen met getypt volume-id.
+- **Opruimen**: schijven van een ID dat niet bestaat, `unusedN`-schijven (link naar Hardware van de gast), ISO's die in geen cd-station zitten (alleen als elke gastconfig gelezen is) en achtergebleven terugzettests.
+- Geen agentupdate en geen migratie.

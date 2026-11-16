@@ -32,6 +32,7 @@ export const navGroups: NavGroup[] = [
       { href: "/proxmox/datacenter", label: "Datacenter", keywords: "pve proxmox quorum corosync capaciteit overcommit onderhoudsmodus host herstarten" },
       { href: "/proxmox/gasten", label: "Gasten", keywords: "pve vm ct lxc qemu aanmaken klonen tags cloud-init template snapshot verhuizen" },
       { href: "/proxmox/backups", label: "Back-ups", keywords: "pve vzdump pbs proxmox backup server terugzetten restore terugzettest retentie" },
+      { href: "/proxmox/opslag", label: "Opslag", keywords: "pve storage nfs smb cifs pbs zfs lvm schijf smart slijtage iso template opruimen wees" },
       { href: "/proxmox/ha", label: "HA", keywords: "pve high availability ha-groep regel affiniteit fencing herstart" },
       { href: "/proxmox/replicatie", label: "Replicatie", keywords: "pve zfs replicatie storage replication schema" },
       { href: "/proxmox/host-updates", label: "Host-updates", keywords: "pve apt upgrade bijwerken kernel herstart onderhoudsmodus rolling" },

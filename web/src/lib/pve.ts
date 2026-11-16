@@ -541,3 +541,99 @@ export function usePerNode<T>(dc: string, nodes: string[], sub: string, refetch:
 export async function startHostUpdate(dc: string, body: HostUpdateInput): Promise<Job> {
   return unwrap(await api.POST("/pve/datacenters/{dcId}/host-update", { params: { path: { dcId: dc } }, body: { ...body, dry_run: false } })) as unknown as Job;
 }
+
+// --- Opslag, schijven, ISO's en opruimen (fase 26 M5) ---
+
+export type StorageCfg = {
+  storage: string;
+  type: string;
+  content?: string;
+  path?: string;
+  server?: string;
+  export?: string;
+  share?: string;
+  pool?: string;
+  vgname?: string;
+  thinpool?: string;
+  datastore?: string;
+  username?: string;
+  fingerprint?: string;
+  namespace?: string;
+  nodes?: string;
+  shared?: number;
+  disable?: number;
+  sparse?: number;
+};
+
+export type DiskInfo = {
+  devpath: string;
+  type?: string;
+  size: number;
+  model?: string;
+  serial?: string;
+  vendor?: string;
+  health?: string;
+  wearout?: number | string;
+  used?: string;
+  gpt?: number;
+  rpm?: number;
+};
+
+export type SmartData = {
+  health?: string;
+  type?: "ata" | "text" | string;
+  text?: string;
+  attributes?: { id?: string | number; name: string; value?: string | number; worst?: string | number; threshold?: string | number; raw?: string; fail?: string; flags?: string }[];
+};
+
+export type ZfsPool = { name: string; size: number; alloc: number; free: number; frag?: number; dedup?: number; health: string };
+export type ZfsVdev = { name: string; state?: string; read?: number; write?: number; cksum?: number; msg?: string; leaf?: number; children?: ZfsVdev[] };
+export type ZfsDetail = { name: string; state: string; status?: string; action?: string; scan?: string; errors?: string; children?: ZfsVdev[] };
+export type LvmThin = { lv: string; vg: string; lv_size: number; used: number; metadata_size?: number; metadata_used?: number };
+
+export type StorageItem = { volid: string; format?: string; size: number; content: string; ctime?: number; vmid?: number; notes?: string; used?: number };
+export type AplTemplate = { template: string; package?: string; version?: string; os?: string; section?: string; headline?: string; description?: string; type?: string };
+
+// diskHealthy zegt of een SMART-uitslag in orde is ("PASSED" bij ATA, "OK"
+// bij SAS/NVMe); onbekend telt niet als fout.
+export const diskHealthy = (h?: string) => !h || /^(PASSED|OK|UNKNOWN)$/i.test(h);
+
+// usePerStorage leest dezelfde inhoud van meerdere opslagen (gedeelde één
+// keer, lokale per host).
+export function usePerStorage<T, S extends { node: string; storage: string } = { node: string; storage: string }>(dc: string, stores: S[], params: Record<string, string>, enabled = true) {
+  const qs = useQueries({
+    queries: stores.map((s) => {
+      const path = `/nodes/${s.node}/storage/${s.storage}/content`;
+      return { queryKey: keys.get(dc, path, params), queryFn: () => pveGet<T[]>(dc, path, params), refetchInterval: 60_000, retry: false, enabled };
+    }),
+  });
+  return stores.map((s, i) => ({ ...s, data: qs[i]?.data, error: qs[i]?.error instanceof Error ? qs[i].error.message : qs[i]?.error ? "fout" : "", loading: !!qs[i]?.isLoading }));
+}
+
+// storesWith zoekt de beschikbare opslag met een bepaald soort inhoud.
+export function storesWith(res: PveResource[] | undefined, content: string[]): { node: string; storage: string; shared: boolean }[] {
+  const out: { node: string; storage: string; shared: boolean }[] = [];
+  const seen = new Set<string>();
+  for (const r of res ?? []) {
+    if (r.type !== "storage" || r.status !== "available") continue;
+    const have = (r.content ?? "").split(",");
+    if (!content.some((c) => have.includes(c))) continue;
+    const key = r.shared ? r.storage! : `${r.node}/${r.storage}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ node: r.node, storage: r.storage!, shared: !!r.shared });
+  }
+  return out.sort((a, b) => a.storage.localeCompare(b.storage) || a.node.localeCompare(b.node));
+}
+
+// useGuestConfigs leest de configuratie van veel gasten tegelijk (voor
+// opruimen: ongebruikte schijven en ISO's in cd-stations).
+export function useGuestConfigs(dc: string, guests: PveResource[], enabled = true) {
+  const qs = useQueries({
+    queries: guests.map((g) => {
+      const path = `/nodes/${g.node}/${g.type}/${g.vmid}/config`;
+      return { queryKey: keys.get(dc, path, undefined), queryFn: () => pveGet<Record<string, unknown>>(dc, path), refetchInterval: 120_000, retry: false, enabled };
+    }),
+  });
+  return { configs: guests.map((g, i) => ({ guest: g, config: qs[i]?.data })), loading: qs.some((q) => q.isLoading) };
+}
