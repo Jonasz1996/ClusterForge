@@ -1,5 +1,6 @@
 "use client";
 
+import { askConfirm } from "@/components/Confirm";
 import Link from "next/link";
 import { useState } from "react";
 import { formatDuration } from "@/components/inventory/bits";
@@ -113,8 +114,8 @@ export function NodeProxmoxCard({ node, isAdmin }: { node: Node; isAdmin: boolea
             variant="ghost"
             className="px-2 py-1 text-xs"
             disabled={update.isPending}
-            onClick={() => {
-              if (window.confirm("Koppeling met deze VM verwijderen? De VM zelf blijft ongemoeid."))
+            onClick={async () => {
+              if (await askConfirm("Koppeling met deze VM verwijderen? De VM zelf blijft ongemoeid."))
                 update.mutate({ id: node.id, body: { proxmox: null } });
             }}
           >

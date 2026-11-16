@@ -3,6 +3,7 @@ import type {
   InputHTMLAttributes,
   LabelHTMLAttributes,
   ReactNode,
+  Ref,
   SelectHTMLAttributes,
   TextareaHTMLAttributes,
 } from "react";
@@ -15,7 +16,7 @@ export function Button({
   variant = "primary",
   className,
   ...props
-}: ButtonHTMLAttributes<HTMLButtonElement> & { variant?: "primary" | "secondary" | "secondary-danger" | "ghost" | "danger" }) {
+}: ButtonHTMLAttributes<HTMLButtonElement> & { ref?: Ref<HTMLButtonElement>; variant?: "primary" | "secondary" | "secondary-danger" | "ghost" | "danger" }) {
   return (
     <button
       className={cx(

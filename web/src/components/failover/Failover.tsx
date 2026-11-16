@@ -1,5 +1,6 @@
 "use client";
 
+import { askConfirm } from "@/components/Confirm";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
@@ -707,7 +708,7 @@ function FailoverForm({
             variant="secondary-danger"
             disabled={busy}
             onClick={async () => {
-              if (!window.confirm(`Failovertest ${initial.name} verwijderen? De rapporten van eerdere runs blijven bewaard.`)) return;
+              if (!await askConfirm(`Failovertest ${initial.name} verwijderen? De rapporten van eerdere runs blijven bewaard.`)) return;
               try {
                 await remove.mutateAsync(initial.id);
                 onDone();

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState, type FormEvent } from "react";
 import { Alert, Button, Input, Label } from "@/components/ui";
 import { api, ApiError, setCsrfToken, unwrap } from "@/lib/api/client";
-import { meQueryKey, useMe } from "@/lib/auth";
+import { meQueryKey, returnPath, useMe } from "@/lib/auth";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -18,9 +18,16 @@ export default function LoginPage() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // Kwam je hier vanaf een andere pagina, dan was je sessie verlopen.
+  const [expired, setExpired] = useState(false);
   useEffect(() => {
-    if (me.data) router.replace("/");
+    if (me.data) router.replace(returnPath(window.location.search));
   }, [me.data, router]);
+  useEffect(() => {
+    // Alleen in de browser leesbaar; bij de statische export is er geen URL.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setExpired(new URLSearchParams(window.location.search).has("terug"));
+  }, []);
 
   async function onSubmit(e: FormEvent) {
     e.preventDefault();
@@ -34,7 +41,7 @@ export default function LoginPage() {
       );
       setCsrfToken(res.csrf_token);
       qc.setQueryData(meQueryKey, res);
-      router.replace("/");
+      router.replace(returnPath(window.location.search));
     } catch (err) {
       if (err instanceof ApiError && err.code === "totp_required") {
         setNeedsCode(true);
@@ -57,6 +64,7 @@ export default function LoginPage() {
 
   return (
     <main className="flex min-h-screen items-center justify-center px-4">
+      <title>Inloggen · ClusterForge</title>
       <div className="w-full max-w-sm">
         <div className="mb-8 text-center">
           <Logo />
@@ -67,6 +75,7 @@ export default function LoginPage() {
           className="space-y-4 rounded-lg border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-900"
         >
           {error && <Alert>{error}</Alert>}
+          {!error && expired && <Alert kind="info">Je sessie is verlopen of beëindigd. Log opnieuw in; daarna ga je terug naar waar je was.</Alert>}
           {!needsCode ? (
             <>
               <div>

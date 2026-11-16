@@ -1,5 +1,6 @@
 "use client";
 
+import { askConfirm } from "@/components/Confirm";
 import { useState, type FormEvent } from "react";
 import { ago } from "@/components/inventory/bits";
 import { CopyBlock } from "@/components/inventory/InstallAgent";
@@ -121,8 +122,8 @@ function TokenList({ items }: { items: ApiToken[] }) {
                     variant="secondary-danger"
                     className="px-2 py-1 text-xs"
                     disabled={remove.isPending}
-                    onClick={() => {
-                      if (window.confirm(`Token "${t.name}" intrekken? Het dashboard dat het gebruikt, krijgt meteen 401.`))
+                    onClick={async () => {
+                      if (await askConfirm(`Token "${t.name}" intrekken? Het dashboard dat het gebruikt, krijgt meteen 401.`))
                         remove.mutate(t.id);
                     }}
                   >

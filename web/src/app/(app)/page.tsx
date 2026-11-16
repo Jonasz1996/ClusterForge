@@ -2,15 +2,15 @@
 
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
+import { AttentionCard } from "@/components/AttentionCard";
 import { AuditList } from "@/components/audit/AuditList";
 import { OpenIncidentsCard } from "@/components/incidents/Incidents";
 import { ClusterHealth } from "@/components/monitoring/ClusterHealth";
 import { FleetRiskCard } from "@/components/risk/Risk";
-import { Alert, Card } from "@/components/ui";
+import { Alert, Card, PageHeader } from "@/components/ui";
 import { api } from "@/lib/api/client";
 import { useAuditRecent } from "@/lib/audit";
 import { useMe } from "@/lib/auth";
-import { useGitRepo } from "@/lib/gitops";
 import { useClusters, useNodes } from "@/lib/inventory";
 
 export default function OverviewPage() {
@@ -24,38 +24,14 @@ export default function OverviewPage() {
   const clusters = useClusters();
   const nodes = useNodes(true);
   const events = useAuditRecent({}, 20, isAdmin);
-  const git = useGitRepo();
-  const waiting = git.data?.pending_changes ?? 0;
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Overzicht</h1>
-        <p className="mt-1 text-sm text-slate-600 dark:text-slate-400">
-          De status van je clusters en wie elk VIP heeft, live bijgewerkt.
-        </p>
-      </div>
+      <PageHeader title="Overzicht" description="De status van je clusters en wie elk VIP heeft, live bijgewerkt." />
 
-      {me.data && !me.data.user.totp_enabled && (
-        <Alert kind="info">
-          Tweestapsverificatie staat nog uit.{" "}
-          <Link href="/instellingen" className="font-medium underline">
-            Zet het aan bij Instellingen
-          </Link>
-          .
-        </Alert>
-      )}
+      <AttentionCard />
 
-      {waiting > 0 && (
-        <Alert kind="info">
-          <Link href="/gitops" className="font-medium underline">
-            {waiting === 1 ? "1 wijziging uit Git wacht" : `${waiting} wijzigingen uit Git wachten`} op goedkeuring
-          </Link>
-          .
-        </Alert>
-      )}
-
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
         <Link href="/clusters">
           <Stat
             label="Clusters"

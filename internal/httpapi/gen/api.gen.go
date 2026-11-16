@@ -111,6 +111,42 @@ func (e AssistantConversationInputSubjectType) Valid() bool {
 	}
 }
 
+// Defines values for AttentionBadgeTone.
+const (
+	AttentionBadgeToneAmber AttentionBadgeTone = "amber"
+	AttentionBadgeToneRed   AttentionBadgeTone = "red"
+)
+
+// Valid indicates whether the value is a known member of the AttentionBadgeTone enum.
+func (e AttentionBadgeTone) Valid() bool {
+	switch e {
+	case AttentionBadgeToneAmber:
+		return true
+	case AttentionBadgeToneRed:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AttentionItemTone.
+const (
+	AttentionItemToneAmber AttentionItemTone = "amber"
+	AttentionItemToneRed   AttentionItemTone = "red"
+)
+
+// Valid indicates whether the value is a known member of the AttentionItemTone enum.
+func (e AttentionItemTone) Valid() bool {
+	switch e {
+	case AttentionItemToneAmber:
+		return true
+	case AttentionItemToneRed:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AuditEntryActorType.
 const (
 	AuditEntryActorTypeAgent  AuditEntryActorType = "agent"
@@ -4117,6 +4153,41 @@ type AssistantUsage struct {
 		Username  string  `json:"username"`
 	} `json:"users"`
 }
+
+// Attention defines model for Attention.
+type Attention struct {
+	// Badges Teller per menu-item (href), met de ernstigste toon
+	Badges map[string]AttentionBadge `json:"badges"`
+	Items  []AttentionItem           `json:"items"`
+}
+
+// AttentionBadge defines model for AttentionBadge.
+type AttentionBadge struct {
+	Count int                `json:"count"`
+	Tone  AttentionBadgeTone `json:"tone"`
+}
+
+// AttentionBadgeTone defines model for AttentionBadge.Tone.
+type AttentionBadgeTone string
+
+// AttentionItem defines model for AttentionItem.
+type AttentionItem struct {
+	Count int `json:"count"`
+
+	// Detail De betrokken clusters of nodes, kort
+	Detail string `json:"detail"`
+
+	// Href Pagina waar je het oplost
+	Href string `json:"href"`
+
+	// Id Vast kenmerk van het soort melding
+	Id    string            `json:"id"`
+	Title string            `json:"title"`
+	Tone  AttentionItemTone `json:"tone"`
+}
+
+// AttentionItemTone defines model for AttentionItem.Tone.
+type AttentionItemTone string
 
 // AuditChange Eén gewijzigd veld; een lege waarde betekent geen waarde.
 type AuditChange struct {
@@ -12819,6 +12890,21 @@ type UserRef struct {
 	Username string             `json:"username"`
 }
 
+// UserSession defines model for UserSession.
+type UserSession struct {
+	CreatedAt time.Time `json:"created_at"`
+
+	// Current De sessie van deze request
+	Current   bool      `json:"current"`
+	ExpiresAt time.Time `json:"expires_at"`
+
+	// Id Kenmerk van de sessie (hash van het token, niet het token)
+	Id         string    `json:"id"`
+	Ip         string    `json:"ip"`
+	LastSeenAt time.Time `json:"last_seen_at"`
+	UserAgent  string    `json:"user_agent"`
+}
+
 // Vip defines model for Vip.
 type Vip struct {
 	Address       string                                `json:"address"`
@@ -13955,6 +14041,9 @@ type ServerInterface interface {
 	// GetAssistantUsage Het verbruik van deze maand; per gebruiker alleen voor admins
 	// (GET /assistant/usage)
 	GetAssistantUsage(w http.ResponseWriter, r *http.Request)
+	// GetAttention Wat nu aandacht vraagt (offline agents, clusters in storing, open incidenten, …), met tellers voor het menu
+	// (GET /attention)
+	GetAttention(w http.ResponseWriter, r *http.Request)
 	// ListAudit Het logboek, nieuwste eerst, met een zin per regel (alleen admin)
 	// (GET /audit)
 	ListAudit(w http.ResponseWriter, r *http.Request, params ListAuditParams)
@@ -13979,6 +14068,15 @@ type ServerInterface interface {
 	// SetPreferences Voorkeuren van de ingelogde gebruiker, zoals de leermodus van Kubernetes
 	// (PUT /auth/preferences)
 	SetPreferences(w http.ResponseWriter, r *http.Request)
+	// ListMySessions De actieve sessies van de ingelogde gebruiker
+	// (GET /auth/sessions)
+	ListMySessions(w http.ResponseWriter, r *http.Request)
+	// EndOtherSessions Alle andere sessies van de ingelogde gebruiker beëindigen
+	// (DELETE /auth/sessions/others)
+	EndOtherSessions(w http.ResponseWriter, r *http.Request)
+	// EndMySession Eén eigen sessie beëindigen (niet de huidige)
+	// (DELETE /auth/sessions/{id})
+	EndMySession(w http.ResponseWriter, r *http.Request, id string)
 	// DisableTotp TOTP uitzetten met wachtwoord en een geldige code
 	// (POST /auth/totp/disable)
 	DisableTotp(w http.ResponseWriter, r *http.Request)
@@ -14996,6 +15094,12 @@ func (_ Unimplemented) GetAssistantUsage(w http.ResponseWriter, r *http.Request)
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// GetAttention Wat nu aandacht vraagt (offline agents, clusters in storing, open incidenten, …), met tellers voor het menu
+// (GET /attention)
+func (_ Unimplemented) GetAttention(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // ListAudit Het logboek, nieuwste eerst, met een zin per regel (alleen admin)
 // (GET /audit)
 func (_ Unimplemented) ListAudit(w http.ResponseWriter, r *http.Request, params ListAuditParams) {
@@ -15041,6 +15145,24 @@ func (_ Unimplemented) ChangePassword(w http.ResponseWriter, r *http.Request) {
 // SetPreferences Voorkeuren van de ingelogde gebruiker, zoals de leermodus van Kubernetes
 // (PUT /auth/preferences)
 func (_ Unimplemented) SetPreferences(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListMySessions De actieve sessies van de ingelogde gebruiker
+// (GET /auth/sessions)
+func (_ Unimplemented) ListMySessions(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// EndOtherSessions Alle andere sessies van de ingelogde gebruiker beëindigen
+// (DELETE /auth/sessions/others)
+func (_ Unimplemented) EndOtherSessions(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// EndMySession Eén eigen sessie beëindigen (niet de huidige)
+// (DELETE /auth/sessions/{id})
+func (_ Unimplemented) EndMySession(w http.ResponseWriter, r *http.Request, id string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -17194,6 +17316,20 @@ func (siw *ServerInterfaceWrapper) GetAssistantUsage(w http.ResponseWriter, r *h
 	handler.ServeHTTP(w, r)
 }
 
+// GetAttention operation middleware
+func (siw *ServerInterfaceWrapper) GetAttention(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetAttention(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListAudit operation middleware
 func (siw *ServerInterfaceWrapper) ListAudit(w http.ResponseWriter, r *http.Request) {
 
@@ -17569,6 +17705,60 @@ func (siw *ServerInterfaceWrapper) SetPreferences(w http.ResponseWriter, r *http
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.SetPreferences(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListMySessions operation middleware
+func (siw *ServerInterfaceWrapper) ListMySessions(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListMySessions(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// EndOtherSessions operation middleware
+func (siw *ServerInterfaceWrapper) EndOtherSessions(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.EndOtherSessions(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// EndMySession operation middleware
+func (siw *ServerInterfaceWrapper) EndMySession(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "id" -------------
+	var id string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "id", chi.URLParam(r, "id"), &id, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "id", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.EndMySession(w, r, id)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -26285,6 +26475,18 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/auth/password", wrapper.ChangePassword)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/auth/sessions", wrapper.ListMySessions)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/auth/sessions/others", wrapper.EndOtherSessions)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/auth/sessions/{id}", wrapper.EndMySession)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/attention", wrapper.GetAttention)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/auth/totp/setup", wrapper.BeginTotpSetup)

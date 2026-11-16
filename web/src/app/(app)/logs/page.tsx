@@ -1,5 +1,6 @@
 "use client";
 
+import { copyText } from "@/lib/clipboard";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
@@ -122,8 +123,9 @@ function Highlight({ text, re }: { text: string; re: RegExp | null }) {
 function Logs() {
   const params = useSearchParams();
   const isAdmin = useIsAdmin();
-  const nodesQ = useLogNodes();
-  const viewsQ = useLogViews();
+  // Logs zijn alleen voor beheerders; een kijker vraagt ze niet op.
+  const nodesQ = useLogNodes(isAdmin);
+  const viewsQ = useLogViews(isAdmin);
   const [picked, setPicked] = useState<string[]>([]);
   const [sources, setSources] = useState<LogSource[]>([]);
   const [draft, setDraft] = useState<LogFilterState>(defaultFilter);
@@ -1129,7 +1131,7 @@ function Timeline({
                                 </Button>
                               </>
                             )}
-                            <Button variant="ghost" className="px-2 py-1 text-xs" onClick={() => void navigator.clipboard?.writeText(e.msg)}>
+                            <Button variant="ghost" className="px-2 py-1 text-xs" onClick={() => void copyText(e.msg)}>
                               Kopiëren
                             </Button>
                           </div>

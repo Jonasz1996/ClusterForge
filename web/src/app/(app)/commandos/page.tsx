@@ -1,5 +1,6 @@
 "use client";
 
+import { askConfirm } from "@/components/Confirm";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
@@ -147,8 +148,8 @@ function Commands() {
                       <Button
                         variant="secondary-danger"
                         disabled={remove.isPending}
-                        onClick={() => {
-                          if (confirm(`${current.data?.name ?? "Dit commando"} weghalen? De taken van de runs blijven.`)) {
+                        onClick={async () => {
+                          if (await askConfirm(`${current.data?.name ?? "Dit commando"} weghalen? De taken van de runs blijven.`)) {
                             remove.mutate(id, { onSuccess: () => open(null) });
                           }
                         }}

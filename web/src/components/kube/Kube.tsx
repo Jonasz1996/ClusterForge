@@ -1,5 +1,6 @@
 "use client";
 
+import { copyText } from "@/lib/clipboard";
 import Link from "next/link";
 import { useState, type ReactNode } from "react";
 import { ExplainButton } from "@/components/assistant/ExplainButton";
@@ -197,7 +198,7 @@ export function CodeBlock({ text, className }: { text: string; className?: strin
         variant="secondary"
         className="absolute top-2 right-2 px-2 py-1 text-xs"
         onClick={async () => {
-          await navigator.clipboard.writeText(text);
+          if (!(await copyText(text))) return;
           setCopied(true);
           setTimeout(() => setCopied(false), 2000);
         }}

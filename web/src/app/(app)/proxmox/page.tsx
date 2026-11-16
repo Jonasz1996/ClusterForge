@@ -1,5 +1,6 @@
 "use client";
 
+import { askConfirm } from "@/components/Confirm";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { JobList } from "@/components/jobs/JobList";
@@ -130,8 +131,8 @@ function ConnectionSection({ conn, isAdmin }: { conn: ProxmoxConnection; isAdmin
             <Button
               variant="ghost"
               disabled={remove.isPending}
-              onClick={() => {
-                if (window.confirm(`Koppeling met ${conn.name} verwijderen? Nodes blijven bestaan, alleen hun koppeling met Proxmox verdwijnt.`))
+              onClick={async () => {
+                if (await askConfirm(`Koppeling met ${conn.name} verwijderen? Nodes blijven bestaan, alleen hun koppeling met Proxmox verdwijnt.`))
                   remove.mutate(conn.id);
               }}
             >

@@ -9,11 +9,30 @@
   --color-brand-700: oklch(0.45 0.14 250);
 }
 
-/* Donker alleen op het scherm: afgedrukt is alles licht, ook in donkere modus. */
-@custom-variant dark (@media screen and (prefers-color-scheme: dark));
+/* Donker alleen op het scherm: afgedrukt is alles licht, ook in donkere modus.
+   Zonder keuze volgt het thema het systeem; Instellingen of de knop rechtsboven
+   zet data-theme="light" of "dark" op <html>. */
+@custom-variant dark {
+  @media screen {
+    &:where([data-theme="dark"], [data-theme="dark"] *) {
+      @slot;
+    }
+  }
+  @media screen and (prefers-color-scheme: dark) {
+    &:where(:root:not([data-theme="light"]), :root:not([data-theme="light"]) *) {
+      @slot;
+    }
+  }
+}
 
 html {
   color-scheme: light dark;
+}
+html[data-theme="light"] {
+  color-scheme: light;
+}
+html[data-theme="dark"] {
+  color-scheme: dark;
 }
 
 @media print {

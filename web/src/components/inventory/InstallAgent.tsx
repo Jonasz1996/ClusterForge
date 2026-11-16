@@ -1,5 +1,6 @@
 "use client";
 
+import { copyText } from "@/lib/clipboard";
 import { useState, type FormEvent } from "react";
 import { Alert, Button, Field, Input, Select } from "@/components/ui";
 import { useClusters, useCreateEnrollmentToken, type EnrollmentToken } from "@/lib/inventory";
@@ -30,7 +31,7 @@ export function CopyBlock({ text }: { text: string }) {
         variant="secondary"
         className="absolute top-2 right-2 px-2 py-1 text-xs"
         onClick={async () => {
-          await navigator.clipboard.writeText(text);
+          if (!(await copyText(text))) return;
           setCopied(true);
           setTimeout(() => setCopied(false), 2000);
         }}

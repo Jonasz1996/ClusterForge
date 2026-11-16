@@ -119,6 +119,13 @@ Het technisch ontwerp staat in [docs/design/mvp-fase-1.md](docs/design/mvp-fase-
 | 3. Volledig automatisch uitrollen | Cluster uitrollen met **Nieuwe CT's, volledig automatisch**: per node host, storage, CTID, adres, CPU, RAM en schijf; de host maakt de CT's, zet de agent erin en ClusterForge rolt het cluster uit | klaar |
 | 4. Webinterface | Pagina **[Proxmox-hosts](#proxmox-hosts-met-een-agent)** | klaar |
 
+| Fase 24: revisie | Inhoud | Status |
+| --- | --- | --- |
+| 1. Navigatie en mobiel | Menu in groepen (Infrastructuur, Software, Beveiliging, Bewaking, Herstel, Beheer) die inklappen; op mobiel een lade met ☰; **Ctrl K** (of **/**) zoekt overal in pagina's, clusters, nodes en IP-adressen; licht, donker of zoals het systeem; eigen bevestigingsvensters in plaats van browsermeldingen; titel per tabblad; inhoudsopgave bij Instellingen | klaar |
+| 2. Sessies en updates | Een sessie bestaat hoogstens `CF_SESSION_MAX_AGE` (standaard 30 dagen) na het inloggen; **Instellingen → Sessies** toont waar je ingelogd bent (apparaat, IP, laatst actief) en beëindigt er één of alle andere. Na een serverupdate meldt een open tabblad "ClusterForge is bijgewerkt" en herlaadt het vanzelf als oude bestanden niet meer laden, in plaats van op "Laden…" te blijven hangen. Een verlopen sessie stuurt naar de login en daarna terug naar dezelfde pagina | klaar |
+| 3. Aandacht nodig | Bovenaan **Overzicht** één lijst met wat nu een actie vraagt, rood eerst: clusters plat, verminderd of met split-brain, agents die niet antwoorden, open incidenten, agents waarvan bijwerken mislukte of die niet vanzelf bijwerken, mislukte taken (24 u), drift, wachtende Git-wijzigingen en tweestapsverificatie die uit staat; elke regel linkt naar de pagina om het op te lossen. Dezelfde tellers staan rood of oranje naast het menu-item, ook als de groep dicht is (`GET /api/v1/attention`) | klaar |
+| 4. Kleine dingen die in de weg zaten | **Kopiëren** (installatiecommando, wachtwoorden, logregels, kubeconfig) werkt ook als je ClusterForge over http opent; de browser kent het klembord daar niet, dus faalde het vroeger stil. Op de node- en clusterpagina een sprongbalk naar elke kaart (Agent, Firewall, Facts, Netwerk, Geschiedenis, …) | klaar |
+
 ## Draaien met Docker Compose
 
 Stap voor stap in een Debian-container op Proxmox: [docs/install-proxmox-lxc.md](docs/install-proxmox-lxc.md). Daar staan ook [back-up en herstel van ClusterForge zelf](docs/install-proxmox-lxc.md#back-up-en-herstel-van-clusterforge-zelf) en [bijwerken](docs/install-proxmox-lxc.md#bijwerken). `docker compose ps` toont de server als `healthy` zodra hij antwoordt (`clusterforge-server healthcheck`).
@@ -145,6 +152,7 @@ Agents verbinden zelf naar de server, op poort 4222 (NATS met TLS). Die poort mo
 | `CF_SECURE_COOKIES` | `true` | `Secure`-vlag op de sessiecookie |
 | `CF_TRUST_PROXY_HEADERS` | `false` | Client-IP uit `X-Forwarded-For` halen; alleen achter je eigen proxy |
 | `CF_SESSION_TTL` | `12h` | Sessie verloopt na zoveel tijd zonder activiteit |
+| `CF_SESSION_MAX_AGE` | `720h` | Sessie verloopt hoogstens zo lang na het inloggen, ook als ze steeds gebruikt wordt; je actieve sessies zie en beëindig je bij Instellingen → Sessies |
 | `CF_LOG_LEVEL` | `info` | `debug`, `info`, `warn` of `error` |
 | `CF_NATS_LISTEN` | `:4222` | Adres waarop agents met NATS verbinden |
 | `CF_NATS_ADVERTISE` | (leeg) | `host[:poort]` waarmee agents NATS bereiken; leeg betekent de hostnaam waarmee de agent zich aanmeldt |

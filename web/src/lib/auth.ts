@@ -27,7 +27,11 @@ export function useRequireMe() {
   const router = useRouter();
   const q = useMe();
   useEffect(() => {
-    if (q.isSuccess && q.data === null) router.replace("/login");
+    if (q.isSuccess && q.data === null) {
+      // Na het inloggen terug naar de pagina waar je was.
+      const here = window.location.pathname + window.location.search;
+      router.replace(here === "/" ? "/login" : `/login?terug=${encodeURIComponent(here)}`);
+    }
   }, [q.isSuccess, q.data, router]);
   return q;
 }
@@ -45,4 +49,11 @@ export function useLogout() {
     qc.setQueryData(meQueryKey, null);
     router.replace("/login");
   };
+}
+
+// returnPath is de pagina om na het inloggen naar terug te keren: alleen een
+// pad binnen ClusterForge, nooit een ander adres.
+export function returnPath(search: string): string {
+  const t = new URLSearchParams(search).get("terug") ?? "";
+  return t.startsWith("/") && !t.startsWith("//") && !t.startsWith("/\\") && !t.startsWith("/login") ? t : "/";
 }

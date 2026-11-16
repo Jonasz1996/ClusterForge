@@ -1,5 +1,6 @@
 "use client";
 
+import { askConfirm } from "@/components/Confirm";
 import { useState, type ReactNode } from "react";
 import { Diff } from "@/components/gitops/bits";
 import { useConfirm } from "@/components/kube/Actions";
@@ -1116,11 +1117,11 @@ function YamlForm({ id, o }: { id: string; o: KubeOverview }) {
   const all = examples(o.vip ?? "");
   const example = all.find((e) => e.id === picked);
   const ownNamespaces = o.namespaces.filter((x) => !systemNamespaces.includes(x) || x === ns);
-  const load = (key: string) => {
+  const load = async (key: string) => {
     const ex = all.find((e) => e.id === key);
     if (!ex) return;
     const own = text.trim() !== "" && !all.some((e) => e.yaml === text);
-    if (own && !window.confirm("De YAML in het vak vervangen door het voorbeeld?")) return;
+    if (own && !await askConfirm("De YAML in het vak vervangen door het voorbeeld?")) return;
     setText(ex.yaml);
     setPicked(ex.id);
   };

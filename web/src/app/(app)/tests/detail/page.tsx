@@ -1,5 +1,6 @@
 "use client";
 
+import { askConfirm } from "@/components/Confirm";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense } from "react";
@@ -100,7 +101,7 @@ function TestRunInner() {
                     <Button
                       variant="danger"
                       disabled={cancel.isPending}
-                      onClick={() => {
+                      onClick={async () => {
                         const question = isBackup
                           ? "Controle afbreken? ClusterForge zet de sandbox-VM uit en verwijdert hem."
                           : rehearsal
@@ -116,7 +117,7 @@ function TestRunInner() {
                             : restartAll
                             ? "Test afbreken? De herstart is al gebeurd; ClusterForge wacht tot de nodes terug zijn en zet de database recht."
                             : `Test afbreken? ClusterForge zet ${run.data?.definition?.unit || "de dienst"} meteen weer aan.`;
-                        if (window.confirm(question)) cancel.mutate(job.data!.id);
+                        if (await askConfirm(question)) cancel.mutate(job.data!.id);
                       }}
                     >
                       Afbreken

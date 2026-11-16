@@ -1,5 +1,6 @@
 "use client";
 
+import { askConfirm } from "@/components/Confirm";
 import { useState, type FormEvent } from "react";
 import { prodConfirmed, ProdConfirm, useProdTotp } from "@/components/ProdConfirm";
 import { Empty, tableClass, tdClass, thClass } from "@/components/inventory/bits";
@@ -297,9 +298,9 @@ function AccessList({ id }: { id: string }) {
                           variant="secondary"
                           className="px-2 py-1 text-xs"
                           disabled={revoke.isPending}
-                          onClick={() => {
+                          onClick={async () => {
                             if (
-                              window.confirm(
+                              await askConfirm(
                                 `Kubeconfig ${a.name} van ${a.user} intrekken? Het token werkt daarna meteen niet meer.`,
                               )
                             )

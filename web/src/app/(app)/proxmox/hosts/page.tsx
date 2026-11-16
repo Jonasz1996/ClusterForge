@@ -1,5 +1,6 @@
 "use client";
 
+import { askConfirm } from "@/components/Confirm";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { JobList } from "@/components/jobs/JobList";
@@ -185,8 +186,8 @@ function GuestTable({
       .sort((a, b) => a.vmid - b.vmid);
   }, [inv.guests, filter]);
 
-  const quick = (g: PveGuest, a: PveRun["action"], ask?: string) => {
-    if (ask && !window.confirm(ask)) return;
+  const quick = async (g: PveGuest, a: PveRun["action"], ask?: string) => {
+    if (ask && !await askConfirm(ask)) return;
     void submit({ op: { action: a, type: g.type, vmid: g.vmid } });
   };
 
@@ -484,7 +485,7 @@ function SnapshotsDialog({ guest, pending, submit, onClose }: { guest: PveGuest;
                       variant="secondary"
                       disabled={pending}
                       onClick={async () => {
-                        if (!window.confirm(`${title(guest)} terugzetten naar ${s.name}? Wat sindsdien veranderde, gaat verloren.`)) return;
+                        if (!await askConfirm(`${title(guest)} terugzetten naar ${s.name}? Wat sindsdien veranderde, gaat verloren.`)) return;
                         if (await submit({ op: { action: "rollback", ...ref(guest), snapshot: s.name } })) onClose();
                       }}
                     >
@@ -494,7 +495,7 @@ function SnapshotsDialog({ guest, pending, submit, onClose }: { guest: PveGuest;
                       variant="secondary-danger"
                       disabled={pending}
                       onClick={async () => {
-                        if (!window.confirm(`Snapshot ${s.name} weggooien?`)) return;
+                        if (!await askConfirm(`Snapshot ${s.name} weggooien?`)) return;
                         if (await submit({ op: { action: "delsnapshot", ...ref(guest), snapshot: s.name } })) onClose();
                       }}
                     >

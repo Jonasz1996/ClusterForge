@@ -15,7 +15,7 @@ const (
 // er een ontbreekt. Voor een paar actions hangt het af van de payload; zie
 // ClassOf.
 var classes = map[string]Class{
-	"auth.login": ClassInfo, "auth.login_failed": ClassInfo, "auth.logout": ClassInfo,
+	"auth.login": ClassInfo, "auth.login_failed": ClassInfo, "auth.logout": ClassInfo, "auth.session_ended": ClassInfo,
 	"auth.password_changed": ClassInfo, "auth.totp_enabled": ClassInfo, "auth.totp_disabled": ClassInfo,
 	"auth.reauth_failed": ClassInfo, "auth.totp_setup_started": ClassInfo, "auth.rate_limited": ClassInfo,
 	"user.created": ClassInfo, "user.disabled": ClassInfo, "user.enabled": ClassInfo, "user.role_changed": ClassInfo,

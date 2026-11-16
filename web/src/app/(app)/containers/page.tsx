@@ -1,5 +1,6 @@
 "use client";
 
+import { askConfirm } from "@/components/Confirm";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
@@ -439,9 +440,9 @@ function ClusterView({ o, isAdmin }: { o: StackOverview; isAdmin: boolean }) {
                               <Button
                                 variant="ghost"
                                 disabled={release.isPending}
-                                onClick={() => {
+                                onClick={async () => {
                                   if (
-                                    !window.confirm(
+                                    !await askConfirm(
                                       `${s.name} loslaten? De containers en bestanden op de nodes blijven, ClusterForge beheert hem niet meer.`,
                                     )
                                   )

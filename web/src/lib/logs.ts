@@ -96,8 +96,9 @@ export function sourceLabel(kind: string, name: string) {
   return name;
 }
 
-export function useLogNodes() {
+export function useLogNodes(enabled = true) {
   return useQuery({
+    enabled,
     queryKey: ["logs", "nodes"],
     queryFn: async () => unwrap(await api.GET("/logs/nodes")) as unknown as { nodes: LogNode[]; protocol: number },
     refetchInterval: 30_000,
@@ -121,8 +122,9 @@ export async function fetchLogs(q: LogQueryInput) {
   return unwrap(await api.POST("/logs/query", { body: q })) as unknown as LogQueryResult;
 }
 
-export function useLogViews() {
+export function useLogViews(enabled = true) {
   return useQuery({
+    enabled,
     queryKey: ["logs", "views"],
     queryFn: async () => (unwrap(await api.GET("/logs/views")) as unknown as { views: LogView[] }).views,
   });

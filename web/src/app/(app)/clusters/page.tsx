@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
+import { useOpenFlag } from "@/lib/openFlag";
 import { ClusterForm } from "@/components/inventory/ClusterForm";
 import { Empty, EnvBadge, QueryState, StatusBadge, Tags, tableClass, tdClass, thClass } from "@/components/inventory/bits";
 import { Button, Card, Input, PageHeader, Select } from "@/components/ui";
@@ -23,6 +24,7 @@ export default function ClustersPage() {
   const [adding, setAdding] = useState(false);
   const [search, setSearch] = useState("");
   const [env, setEnv] = useState("");
+  useOpenFlag("nieuw", isAdmin, () => setAdding(true));
 
   const filtered = useMemo(() => {
     const s = search.trim().toLowerCase();

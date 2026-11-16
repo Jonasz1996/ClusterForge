@@ -6,32 +6,103 @@ import { useState, type FormEvent } from "react";
 import { AssistantSettingsCard } from "@/components/assistant/AssistantSettings";
 import { AgentUpgradeSettingsCard } from "@/components/inventory/AgentUpgrades";
 import { ApiTokensCard } from "@/components/settings/ApiTokensCard";
+import { SessionsCard } from "@/components/settings/SessionsCard";
 import { DocsTargetCard } from "@/components/docs/DocsTargetCard";
 import { SelfLocationCard } from "@/components/risk/SelfLocationCard";
-import { Alert, Button, Card, Input, Label } from "@/components/ui";
+import { Alert, Button, Card, Input, Label, PageHeader } from "@/components/ui";
 import { api, ApiError, unwrap } from "@/lib/api/client";
 import { meQueryKey, useMe } from "@/lib/auth";
 import { useIsAdmin } from "@/lib/inventory";
+import { useTheme, type Theme } from "@/lib/theme";
+
+const sections: { id: string; label: string }[] = [
+  { id: "tweestap", label: "Tweestapsverificatie" },
+  { id: "wachtwoord", label: "Wachtwoord" },
+  { id: "sessies", label: "Sessies" },
+  { id: "weergave", label: "Weergave" },
+  { id: "assistent", label: "Assistent" },
+  { id: "documentatie-github", label: "Documentatie naar GitHub" },
+  { id: "locatie", label: "Locatie van ClusterForge" },
+  { id: "agents-bijwerken", label: "Agents bijwerken" },
+  { id: "dashboard-api", label: "Dashboard-API" },
+];
 
 export default function SettingsPage() {
   const isAdmin = useIsAdmin();
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-semibold tracking-tight">Instellingen</h1>
-      <TotpCard />
-      <PasswordCard />
-      <AssistantSettingsCard isAdmin={isAdmin} />
-      <div id="documentatie-github" className="scroll-mt-6">
+      <PageHeader title="Instellingen" description="Je eigen account bovenaan, daaronder de instellingen van ClusterForge zelf." />
+      <nav aria-label="Onderdelen" className="flex flex-wrap gap-x-4 gap-y-1 text-sm">
+        {sections.map((s) => (
+          <a key={s.id} href={`#${s.id}`} className="text-brand-700 hover:underline dark:text-sky-300">
+            {s.label}
+          </a>
+        ))}
+      </nav>
+      <div id="tweestap" className="scroll-mt-20">
+        <TotpCard />
+      </div>
+      <div id="wachtwoord" className="scroll-mt-20">
+        <PasswordCard />
+      </div>
+      <div id="sessies" className="scroll-mt-20">
+        <SessionsCard />
+      </div>
+      <div id="weergave" className="scroll-mt-20">
+        <AppearanceCard />
+      </div>
+      <div id="assistent" className="scroll-mt-20">
+        <AssistantSettingsCard isAdmin={isAdmin} />
+      </div>
+      <div id="documentatie-github" className="scroll-mt-20">
         <DocsTargetCard isAdmin={isAdmin} />
       </div>
-      <SelfLocationCard isAdmin={isAdmin} />
-      <div id="agents-bijwerken" className="scroll-mt-6">
+      <div id="locatie" className="scroll-mt-20">
+        <SelfLocationCard isAdmin={isAdmin} />
+      </div>
+      <div id="agents-bijwerken" className="scroll-mt-20">
         <AgentUpgradeSettingsCard isAdmin={isAdmin} />
       </div>
-      <div id="dashboard-api" className="scroll-mt-6">
+      <div id="dashboard-api" className="scroll-mt-20">
         <ApiTokensCard isAdmin={isAdmin} />
       </div>
     </div>
+  );
+}
+
+// AppearanceCard kiest het thema; de keuze geldt voor deze browser.
+function AppearanceCard() {
+  const [theme, setTheme] = useTheme();
+  const opts: { v: Theme; label: string }[] = [
+    { v: "system", label: "Zoals het systeem" },
+    { v: "light", label: "Licht" },
+    { v: "dark", label: "Donker" },
+  ];
+  return (
+    <Card title="Weergave">
+      <fieldset>
+        <legend className="mb-2 text-sm text-slate-600 dark:text-slate-400">
+          Thema van de interface, voor deze browser. Ook te wisselen met de knop rechtsboven. Zoeken kan overal met{" "}
+          <kbd className="rounded border border-slate-300 px-1 text-xs dark:border-slate-700">Ctrl K</kbd> of{" "}
+          <kbd className="rounded border border-slate-300 px-1 text-xs dark:border-slate-700">/</kbd>.
+        </legend>
+        <div className="flex flex-wrap gap-2">
+          {opts.map((o) => (
+            <label
+              key={o.v}
+              className={`cursor-pointer rounded-md border px-3 py-2 text-sm ${
+                theme === o.v
+                  ? "border-brand-500 bg-brand-50 font-medium text-brand-700 dark:bg-slate-800 dark:text-white"
+                  : "border-slate-300 dark:border-slate-700"
+              }`}
+            >
+              <input type="radio" name="theme" value={o.v} checked={theme === o.v} onChange={() => setTheme(o.v)} className="sr-only" />
+              {o.label}
+            </label>
+          ))}
+        </div>
+      </fieldset>
+    </Card>
   );
 }
 

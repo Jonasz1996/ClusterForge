@@ -1,5 +1,6 @@
 "use client";
 
+import { askConfirm } from "@/components/Confirm";
 import Link from "next/link";
 import { useState } from "react";
 import { ChangeStatusBadge, CommitLine, CommitLink, FileStateBadge } from "@/components/gitops/bits";
@@ -90,9 +91,9 @@ function RepoCard({ repo, isAdmin, interval }: { repo: GitRepo | null; isAdmin: 
               <Button
                 variant="ghost"
                 disabled={remove.isPending}
-                onClick={() => {
+                onClick={async () => {
                   if (
-                    window.confirm(
+                    await askConfirm(
                       `Koppeling met ${repo.repository} verwijderen? Alle clusters worden ontkoppeld en zijn daarna weer in ClusterForge te wijzigen; wachtende wijzigingen vervallen.`,
                     )
                   )

@@ -83,6 +83,68 @@ paths:
         "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
+  /auth/sessions:
+    get:
+      operationId: listMySessions
+      summary: De actieve sessies van de ingelogde gebruiker
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, max_age_hours]
+                properties:
+                  items:
+                    type: array
+                    items: { $ref: "#/components/schemas/UserSession" }
+                  max_age_hours:
+                    type: integer
+                    description: Hoogstens zo lang blijft een sessie bestaan na het inloggen (CF_SESSION_MAX_AGE); 0 = geen grens
+        "401": { $ref: "#/components/responses/Error" }
+  /auth/sessions/others:
+    delete:
+      operationId: endOtherSessions
+      summary: Alle andere sessies van de ingelogde gebruiker beëindigen
+      responses:
+        "200":
+          description: Beëindigd
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [ended]
+                properties:
+                  ended: { type: integer }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /auth/sessions/{id}:
+    delete:
+      operationId: endMySession
+      summary: Eén eigen sessie beëindigen (niet de huidige)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "204": { description: Beëindigd }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /attention:
+    get:
+      operationId: getAttention
+      summary: Wat nu aandacht vraagt (offline agents, clusters in storing, open incidenten, …), met tellers voor het menu
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Attention" }
+        "401": { $ref: "#/components/responses/Error" }
   /auth/totp/setup:
     post:
       operationId: beginTotpSetup
@@ -9247,6 +9309,44 @@ components:
         user: { $ref: "#/components/schemas/User" }
         csrf_token: { type: string }
         session_expires_at: { type: string, format: date-time }
+    Attention:
+      type: object
+      required: [items, badges]
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/AttentionItem" }
+        badges:
+          type: object
+          description: Teller per menu-item (href), met de ernstigste toon
+          additionalProperties: { $ref: "#/components/schemas/AttentionBadge" }
+    AttentionBadge:
+      type: object
+      required: [count, tone]
+      properties:
+        count: { type: integer }
+        tone: { type: string, enum: [red, amber] }
+    AttentionItem:
+      type: object
+      required: [id, tone, title, detail, href, count]
+      properties:
+        id: { type: string, description: Vast kenmerk van het soort melding }
+        tone: { type: string, enum: [red, amber] }
+        title: { type: string }
+        detail: { type: string, description: "De betrokken clusters of nodes, kort" }
+        href: { type: string, description: Pagina waar je het oplost }
+        count: { type: integer }
+    UserSession:
+      type: object
+      required: [id, ip, user_agent, created_at, last_seen_at, expires_at, current]
+      properties:
+        id: { type: string, description: "Kenmerk van de sessie (hash van het token, niet het token)" }
+        ip: { type: string }
+        user_agent: { type: string }
+        created_at: { type: string, format: date-time }
+        last_seen_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        current: { type: boolean, description: De sessie van deze request }
     ChangePasswordRequest:
       type: object
       required: [current_password, new_password]

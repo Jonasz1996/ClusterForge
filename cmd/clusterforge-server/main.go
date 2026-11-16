@@ -148,6 +148,7 @@ func serve() error {
 	if err != nil {
 		return err
 	}
+	authSvc.SetMaxAge(cfg.SessionMaxAge)
 	if n, err := q.CountUsers(ctx); err == nil && n == 0 {
 		log.Warn("er bestaan nog geen gebruikers; maak een beheerder aan met: clusterforge-server admin create -username <naam>")
 	}

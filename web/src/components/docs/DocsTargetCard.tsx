@@ -1,5 +1,6 @@
 "use client";
 
+import { askConfirm } from "@/components/Confirm";
 import { useState, type FormEvent } from "react";
 import { CommitLink } from "@/components/gitops/bits";
 import { ago } from "@/components/inventory/bits";
@@ -123,8 +124,8 @@ function TargetStatus({
               <Button
                 variant="ghost"
                 disabled={remove.isPending}
-                onClick={() => {
-                  if (window.confirm(`Koppeling met ${t.repository} verwijderen? Wat al in de repository staat, blijft daar.`))
+                onClick={async () => {
+                  if (await askConfirm(`Koppeling met ${t.repository} verwijderen? Wat al in de repository staat, blijft daar.`))
                     remove.mutate();
                 }}
               >

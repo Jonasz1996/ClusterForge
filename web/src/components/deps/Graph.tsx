@@ -19,6 +19,7 @@ import { useEffect, useMemo } from "react";
 import { cx } from "@/components/ui";
 import { envInfo } from "@/lib/inventory";
 import { kindLabel, serviceStatuses, timesSeen, topology, visibleEdges, type DepGraph, type DepGroup, type DepService } from "@/lib/deps";
+import { useTheme } from "@/lib/theme";
 
 // De graaf: clusters zijn vakken, diensten kaartjes, en een pijl loopt van
 // afnemer naar leverancier, van links naar rechts. De layout wordt alleen
@@ -183,6 +184,7 @@ export default function DepGraphView(props: GraphProps) {
 }
 
 function Inner({ graph, internal, selected, highlight, onSelect, fitKey }: GraphProps) {
+  const [theme] = useTheme();
   const topo = topology(graph) + (internal ? "|i" : "");
   // De layout hangt alleen af van de topologie.
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -272,7 +274,7 @@ function Inner({ graph, internal, selected, highlight, onSelect, fitKey }: Graph
       minZoom={0.2}
       maxZoom={1.75}
       proOptions={{ hideAttribution: true }}
-      colorMode="system"
+      colorMode={theme}
       fitView
     >
       <Background gap={20} size={1} />

@@ -1,5 +1,6 @@
 "use client";
 
+import { askConfirm } from "@/components/Confirm";
 import Link from "next/link";
 import { useState, type FormEvent, type ReactNode } from "react";
 import { ExplainButton } from "@/components/assistant/ExplainButton";
@@ -201,9 +202,9 @@ function LessonView({
             type="button"
             variant="secondary"
             disabled={reset.isPending}
-            onClick={() => {
+            onClick={async () => {
               if (
-                window.confirm("Deze les opnieuw beginnen? Je voortgang in de les gaat weg; wat er op het cluster staat, blijft.")
+                await askConfirm("Deze les opnieuw beginnen? Je voortgang in de les gaat weg; wat er op het cluster staat, blijft.")
               )
                 reset.mutate(undefined, { onSuccess: () => void q.refetch() });
             }}

@@ -1,8 +1,10 @@
 "use client";
 
+import { askConfirm } from "@/components/Confirm";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
+import { useOpenFlag } from "@/lib/openFlag";
 import { BackupBadge } from "@/components/backups/Backups";
 import { AgentUpgradeCard } from "@/components/inventory/AgentUpgrades";
 import { InstallAgent } from "@/components/inventory/InstallAgent";
@@ -36,6 +38,7 @@ export default function NodesPage() {
   const [installing, setInstalling] = useState(false);
   const [search, setSearch] = useState("");
   const [lifecycle, setLifecycle] = useState("");
+  useOpenFlag("agent", isAdmin, () => setInstalling(true));
 
   // Nodes gegroepeerd per cluster, als boom; losse nodes onderaan.
   const groups = useMemo(() => {
@@ -210,8 +213,8 @@ function ActiveTokens() {
             <Button
               variant="ghost"
               className="px-2 py-1 text-xs text-red-600!"
-              onClick={() => {
-                if (window.confirm("Dit token intrekken? Servers die het nog niet gebruikten kunnen zich er dan niet meer mee aanmelden."))
+              onClick={async () => {
+                if (await askConfirm("Dit token intrekken? Servers die het nog niet gebruikten kunnen zich er dan niet meer mee aanmelden."))
                   void remove.mutateAsync(t.id);
               }}
             >

@@ -89,6 +89,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/auth/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** De actieve sessies van de ingelogde gebruiker */
+        get: operations["listMySessions"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/sessions/others": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Alle andere sessies van de ingelogde gebruiker beëindigen */
+        delete: operations["endOtherSessions"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/auth/sessions/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Eén eigen sessie beëindigen (niet de huidige) */
+        delete: operations["endMySession"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/attention": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Wat nu aandacht vraagt (offline agents, clusters in storing, open incidenten, …), met tellers voor het menu */
+        get: operations["getAttention"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/auth/totp/setup": {
         parameters: {
             query?: never;
@@ -8777,6 +8845,44 @@ export interface components {
             /** Format: date-time */
             session_expires_at: string;
         };
+        Attention: {
+            items: components["schemas"]["AttentionItem"][];
+            /** @description Teller per menu-item (href), met de ernstigste toon */
+            badges: {
+                [key: string]: components["schemas"]["AttentionBadge"];
+            };
+        };
+        AttentionBadge: {
+            count: number;
+            /** @enum {string} */
+            tone: "red" | "amber";
+        };
+        AttentionItem: {
+            /** @description Vast kenmerk van het soort melding */
+            id: string;
+            /** @enum {string} */
+            tone: "red" | "amber";
+            title: string;
+            /** @description De betrokken clusters of nodes, kort */
+            detail: string;
+            /** @description Pagina waar je het oplost */
+            href: string;
+            count: number;
+        };
+        UserSession: {
+            /** @description Kenmerk van de sessie (hash van het token, niet het token) */
+            id: string;
+            ip: string;
+            user_agent: string;
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            last_seen_at: string;
+            /** Format: date-time */
+            expires_at: string;
+            /** @description De sessie van deze request */
+            current: boolean;
+        };
         ChangePasswordRequest: {
             /** Format: password */
             current_password: string;
@@ -13426,6 +13532,100 @@ export interface operations {
             400: components["responses"]["Error"];
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
+        };
+    };
+    listMySessions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["UserSession"][];
+                        /** @description Hoogstens zo lang blijft een sessie bestaan na het inloggen (CF_SESSION_MAX_AGE); 0 = geen grens */
+                        max_age_hours: number;
+                    };
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    endOtherSessions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Beëindigd */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        ended: number;
+                    };
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+        };
+    };
+    endMySession: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Beëindigd */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    getAttention: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Attention"];
+                };
+            };
+            401: components["responses"]["Error"];
         };
     };
     beginTotpSetup: {

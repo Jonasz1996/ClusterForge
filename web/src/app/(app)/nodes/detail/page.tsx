@@ -1,5 +1,7 @@
 "use client";
 
+import { SectionNav } from "@/components/shell/SectionNav";
+import { askConfirm } from "@/components/Confirm";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState, type ReactNode } from "react";
@@ -127,6 +129,7 @@ function NodeDetailInner() {
               )
             }
           />
+          <SectionNav />
 
           {deleting && (
             <ConfirmDelete
@@ -284,9 +287,9 @@ function AgentCard({ node, runtime, isAdmin }: { node: Node; runtime?: NodeRunti
           <Button
             variant="secondary"
             disabled={revoke.isPending}
-            onClick={() => {
+            onClick={async () => {
               if (
-                window.confirm(
+                await askConfirm(
                   "Agent intrekken? De verbinding wordt meteen verbroken en deze agent kan niet meer inloggen. Daarna kun je opnieuw installeren.",
                 )
               )
