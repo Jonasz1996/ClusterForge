@@ -70,6 +70,8 @@ type Service struct {
 	cache getCache
 	// RestorePoll is hoe vaak een terugzettest kijkt of de gast draait (tests korter).
 	RestorePoll time.Duration
+	// HostWait vervangt de wachttijden van host-updates (tests).
+	HostWait time.Duration
 }
 
 func NewService(pool *pgxpool.Pool, ev *events.Writer, log *slog.Logger, runner *jobs.Runner, bus Bus, ag *agents.Service) *Service {
@@ -334,6 +336,8 @@ type params struct {
 	Sealed *sealed `json:"sealed,omitempty"`
 	// RestoreTest is een terugzettest (fase 26 M3) in plaats van Op.
 	RestoreTest *RestoreTest `json:"restore_test,omitempty"`
+	// HostUpdate is een ronde host-updates (fase 26 M4).
+	HostUpdate *HostUpdate `json:"host_update,omitempty"`
 }
 
 // Start zet een actie in de wachtrij.
@@ -504,6 +508,9 @@ func (s *Service) run(ctx context.Context, j *jobs.Job) error {
 	}
 	if p.RestoreTest != nil {
 		return s.runRestoreTest(ctx, j, p)
+	}
+	if p.HostUpdate != nil {
+		return s.runHostUpdate(ctx, j, p)
 	}
 	if err := s.openSealed(&p); err != nil {
 		return err

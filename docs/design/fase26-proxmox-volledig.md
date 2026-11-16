@@ -84,3 +84,10 @@ stopt en verwijdert ClusterForge hem altijd, maar alleen als de beschrijving de
 markering `clusterforge-terugzettest` draagt. De stappen staan in de taak; de
 pagina Back-ups → Terugzettests toont de uitkomsten. `script` (vzdump-hook) is
 voor de GUI verboden, net als `args` en `hookscript`.
+
+## HA, replicatie en host-updates (M4)
+
+- **HA** (`/proxmox/ha`): status (quorum, manager, LRM per host), gasten onder HA met verhuizen/verplaatsen/stoppen, en regels (PVE 9 `/cluster/ha/rules`: node- en resource-affiniteit). Op PVE 8 valt de pagina terug op HA-groepen.
+- **Replicatie** (`/proxmox/replicatie`): jobs uit `/cluster/replication`, status per host uit `/nodes/{node}/replication`, nu synchroniseren, aan/uit, wijzigen. Verwijderen vraagt de job-id getypt, omdat Proxmox dan de kopie op de doelhost wist. Id is `<vmid>-<n>` met het eerste vrije n.
+- **Host-updates** (`/proxmox/host-updates`, `POST /pve/datacenters/{dc}/host-update`): per host wachtende pakketten (`apt/update`) en of een herstart nodig is. Een ronde werkt hosts na elkaar bij: onderhoudsmodus aan, gasten verhuizen naar de host met het meeste vrije geheugen (HA-gasten doet Proxmox zelf), wachten tot de host leeg is, apt full-upgrade via de agent, herstarten (nodig/altijd/nooit), wachten tot de host terug is, onderhoudsmodus uit, gasten terug. Gasten die niet kunnen verhuizen (lokale resources) laten de ronde stoppen, tenzij "stilleggen" aan staat. `dry_run` geeft het plan zonder iets te veranderen; starten vraagt de datacenternaam getypt.
+- Geen agentupdate (generieke pvesh, protocol 35) en geen migratie.

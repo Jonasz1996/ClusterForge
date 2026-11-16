@@ -174,3 +174,34 @@ func (s *Server) StartPveRestoreTest(w http.ResponseWriter, r *http.Request, dcI
 	}
 	writeJSON(w, http.StatusAccepted, toAPIJob(j, &p.User.Username))
 }
+
+// StartPveHostUpdate werkt Proxmox-hosts één voor één bij (fase 26 M4).
+func (s *Server) StartPveHostUpdate(w http.ResponseWriter, r *http.Request, dcId string) {
+	p, ok := requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	var in gen.PveHostUpdateInput
+	if !decode(w, r, &in) {
+		return
+	}
+	u := pvehost.HostUpdate{Datacenter: dcId, Hosts: in.Hosts, Reboot: "needed", ShutdownStuck: deref(in.ShutdownStuck)}
+	if in.Reboot != nil {
+		u.Reboot = string(*in.Reboot)
+	}
+	if deref(in.DryRun) {
+		plan, lines, err := s.pvehosts.PlanHostUpdate(r.Context(), u)
+		if err != nil {
+			s.pveHostError(w, r, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"plan": plan, "lines": lines})
+		return
+	}
+	j, err := s.pvehosts.StartHostUpdate(r.Context(), events.User(p.User.ID), u, deref(in.Confirm))
+	if err != nil {
+		s.pveHostError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, toAPIJob(j, &p.User.Username))
+}

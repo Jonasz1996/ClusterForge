@@ -4661,6 +4661,35 @@ paths:
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /pve/datacenters/{dcId}/host-update:
+    parameters:
+      - { name: dcId, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: startPveHostUpdate
+      summary: Proxmox-hosts één voor één bijwerken, clusterbewust (admin)
+      description: |
+        Per host: onderhoudsmodus aan, draaiende gasten verhuizen, wachten tot de host leeg is, apt full-upgrade,
+        herstarten als het moet, wachten tot hij terug is, onderhoudsmodus uit, gasten terug. Met dry_run alleen het plan.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PveHostUpdateInput" }
+      responses:
+        "200":
+          description: Het plan (dry_run)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "202":
+          description: Taak aangemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
   /clusters/{clusterId}/stacks:
     parameters:
       - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -14001,6 +14030,15 @@ components:
           type: object
           additionalProperties: { type: string }
         confirm: { type: string, description: Wat overgetikt moet worden bij een gevaarlijke aanroep }
+    PveHostUpdateInput:
+      type: object
+      required: [hosts]
+      properties:
+        hosts: { type: array, items: { type: string }, description: Proxmox-namen in volgorde }
+        reboot: { type: string, enum: [needed, always, never], default: needed }
+        shutdown_stuck: { type: boolean, description: Gasten die niet kunnen verhuizen afsluiten en na de update weer starten }
+        dry_run: { type: boolean }
+        confirm: { type: string, description: De naam van het datacenter }
     PveRestoreTestInput:
       type: object
       required: [node, archive, type, storage]

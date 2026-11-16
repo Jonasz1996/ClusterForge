@@ -2988,6 +2988,27 @@ func (e PveCallInputMethod) Valid() bool {
 	}
 }
 
+// Defines values for PveHostUpdateInputReboot.
+const (
+	Always PveHostUpdateInputReboot = "always"
+	Needed PveHostUpdateInputReboot = "needed"
+	Never  PveHostUpdateInputReboot = "never"
+)
+
+// Valid indicates whether the value is a known member of the PveHostUpdateInputReboot enum.
+func (e PveHostUpdateInputReboot) Valid() bool {
+	switch e {
+	case Always:
+		return true
+	case Needed:
+		return true
+	case Never:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for PveRestoreTestInputType.
 const (
 	PveRestoreTestInputTypeLxc  PveRestoreTestInputType = "lxc"
@@ -11549,6 +11570,23 @@ type PveCallInput struct {
 // PveCallInputMethod defines model for PveCallInput.Method.
 type PveCallInputMethod string
 
+// PveHostUpdateInput defines model for PveHostUpdateInput.
+type PveHostUpdateInput struct {
+	// Confirm De naam van het datacenter
+	Confirm *string `json:"confirm,omitempty"`
+	DryRun  *bool   `json:"dry_run,omitempty"`
+
+	// Hosts Proxmox-namen in volgorde
+	Hosts  []string                  `json:"hosts"`
+	Reboot *PveHostUpdateInputReboot `json:"reboot,omitempty"`
+
+	// ShutdownStuck Gasten die niet kunnen verhuizen afsluiten en na de update weer starten
+	ShutdownStuck *bool `json:"shutdown_stuck,omitempty"`
+}
+
+// PveHostUpdateInputReboot defines model for PveHostUpdateInput.Reboot.
+type PveHostUpdateInputReboot string
+
 // PveObject Een object van de Proxmox-hosts (fase 17); de velden staan in web/src/lib/pvehosts.ts en pkg/protocol/pve.go.
 type PveObject map[string]interface{}
 
@@ -14312,6 +14350,9 @@ type StartPveHostActionJSONRequestBody = PveActionInput
 // CallPveApiJSONRequestBody defines body for CallPveApi for application/json ContentType.
 type CallPveApiJSONRequestBody = PveCallInput
 
+// StartPveHostUpdateJSONRequestBody defines body for StartPveHostUpdate for application/json ContentType.
+type StartPveHostUpdateJSONRequestBody = PveHostUpdateInput
+
 // StartPveRestoreTestJSONRequestBody defines body for StartPveRestoreTest for application/json ContentType.
 type StartPveRestoreTestJSONRequestBody = PveRestoreTestInput
 
@@ -15241,6 +15282,9 @@ type ServerInterface interface {
 	// CallPveApi Iets veranderen via de Proxmox-API, als taak pvehost.action (admin)
 	// (POST /pve/datacenters/{dcId}/api)
 	CallPveApi(w http.ResponseWriter, r *http.Request, dcId string)
+	// StartPveHostUpdate Proxmox-hosts één voor één bijwerken, clusterbewust (admin)
+	// (POST /pve/datacenters/{dcId}/host-update)
+	StartPveHostUpdate(w http.ResponseWriter, r *http.Request, dcId string)
 	// GetPveOverview Overzicht van een Proxmox-cluster - quorum, corosync, hosts, storage, HA, capaciteit en waarschuwingen
 	// (GET /pve/datacenters/{dcId}/overview)
 	GetPveOverview(w http.ResponseWriter, r *http.Request, dcId string)
@@ -17131,6 +17175,12 @@ func (_ Unimplemented) GetPveApi(w http.ResponseWriter, r *http.Request, dcId st
 // CallPveApi Iets veranderen via de Proxmox-API, als taak pvehost.action (admin)
 // (POST /pve/datacenters/{dcId}/api)
 func (_ Unimplemented) CallPveApi(w http.ResponseWriter, r *http.Request, dcId string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// StartPveHostUpdate Proxmox-hosts één voor één bijwerken, clusterbewust (admin)
+// (POST /pve/datacenters/{dcId}/host-update)
+func (_ Unimplemented) StartPveHostUpdate(w http.ResponseWriter, r *http.Request, dcId string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -26033,6 +26083,32 @@ func (siw *ServerInterfaceWrapper) CallPveApi(w http.ResponseWriter, r *http.Req
 	handler.ServeHTTP(w, r)
 }
 
+// StartPveHostUpdate operation middleware
+func (siw *ServerInterfaceWrapper) StartPveHostUpdate(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "dcId" -------------
+	var dcId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "dcId", chi.URLParam(r, "dcId"), &dcId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "dcId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StartPveHostUpdate(w, r, dcId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetPveOverview operation middleware
 func (siw *ServerInterfaceWrapper) GetPveOverview(w http.ResponseWriter, r *http.Request) {
 
@@ -27869,6 +27945,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/pve/datacenters/{dcId}/restore-test", wrapper.StartPveRestoreTest)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/pve/datacenters/{dcId}/host-update", wrapper.StartPveHostUpdate)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/clusters/{clusterId}/stacks", wrapper.GetClusterStacks)

@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"testing"
 )
 
@@ -15,11 +16,19 @@ func TestPVEAPI(t *testing.T) {
 	e, c := adminClient(t)
 	pve, _, _ := newPVE(t)
 	sim := &pveSim{t: t, pve: pve}
+	var ctStopped atomic.Bool
 	sim.extra = func(cmd string, out io.Writer) (int, bool) {
 		switch {
+		case strings.HasPrefix(cmd, "pvesh create /nodes/pve1/lxc/101/status/shutdown "):
+			ctStopped.Store(true)
+			_, _ = io.WriteString(out, "null\n")
 		case strings.HasPrefix(cmd, "pvesh get /cluster/resources "):
+			st := "running"
+			if ctStopped.Load() {
+				st = "stopped"
+			}
 			_, _ = io.WriteString(out, `[{"type":"node","node":"pve1","status":"online","maxcpu":8,"maxmem":34359738368,"mem":1073741824},
-				{"type":"lxc","node":"pve1","vmid":101,"status":"running","maxcpu":2,"maxmem":2147483648},
+				{"type":"lxc","node":"pve1","vmid":101,"status":"`+st+`","maxcpu":2,"maxmem":2147483648},
 				{"type":"storage","node":"pve1","storage":"local","plugintype":"dir","disk":97,"maxdisk":100,"status":"available"}]`)
 		case strings.HasPrefix(cmd, "pvesh get /cluster/status "):
 			_, _ = io.WriteString(out, `[{"type":"cluster","name":"thuislab","quorate":1,"version":3},{"type":"node","name":"pve1","online":1,"ip":"10.0.0.11"}]`)
@@ -153,5 +162,45 @@ func TestPVEAPI(t *testing.T) {
 		"node": "pve1", "archive": "pbs:../../etc", "type": "qemu", "storage": "local-zfs",
 	}, &de); s != http.StatusBadRequest {
 		t.Errorf("rare back-up: %d", s)
+	}
+
+	// Host-updates: CT 101 kan nergens heen (één host), dus eerst het plan
+	// weigeren, daarna met afsluiten de hele ronde.
+	upd := map[string]any{"hosts": []string{"pve1"}, "reboot": "never", "dry_run": true}
+	if s := c.do("POST", "/api/v1/pve/datacenters/thuislab/host-update", upd, &de); s != http.StatusBadRequest || !strings.Contains(de.Message, "kunnen niet verhuizen") {
+		t.Fatalf("plan zonder afsluiten: %d %+v", s, de)
+	}
+	upd["shutdown_stuck"] = true
+	var plan struct {
+		Lines []string `json:"lines"`
+	}
+	if s := c.do("POST", "/api/v1/pve/datacenters/thuislab/host-update", upd, &plan); s != 200 || len(plan.Lines) == 0 || !strings.Contains(strings.Join(plan.Lines, "\n"), "CT 101 gaat even uit") {
+		t.Fatalf("plan: %d %+v", s, plan)
+	}
+	upd["dry_run"] = false
+	if s := c.do("POST", "/api/v1/pve/datacenters/thuislab/host-update", upd, &de); s != http.StatusBadRequest || !strings.Contains(de.Message, "thuislab") {
+		t.Fatalf("zonder bevestiging: %d %+v", s, de)
+	}
+	upd["confirm"] = "thuislab"
+	if s := c.do("POST", "/api/v1/pve/datacenters/thuislab/host-update", upd, &j); s != http.StatusAccepted {
+		t.Fatalf("host-update: %d %+v", s, j)
+	}
+	if j = waitJob(t, c, j.ID); j.Status != "succeeded" {
+		t.Fatalf("host-update: %s %s", j.Status, j.Error)
+	}
+	all := strings.Join(sim.called(""), "\n")
+	for _, want := range []string{
+		"ha-manager crm-command node-maintenance enable pve1",
+		"pvesh create /nodes/pve1/lxc/101/status/shutdown",
+		"full-upgrade",
+		"ha-manager crm-command node-maintenance disable pve1",
+		"pvesh create /nodes/pve1/lxc/101/status/start",
+	} {
+		if !strings.Contains(all, want) {
+			t.Errorf("niet aangeroepen: %s", want)
+		}
+	}
+	if strings.Index(all, "node-maintenance enable") > strings.Index(all, "full-upgrade") || strings.Index(all, "full-upgrade") > strings.Index(all, "node-maintenance disable") {
+		t.Errorf("verkeerde volgorde:\n%s", all)
 	}
 }

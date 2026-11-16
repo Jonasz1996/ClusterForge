@@ -492,3 +492,52 @@ export function useRestoreTest(dc: string) {
     onSuccess: () => void qc.invalidateQueries({ queryKey: ["jobs"] }),
   });
 }
+
+// --- HA, replicatie en host-updates (fase 26 M4) ---
+
+export type HaStatusEntry = {
+  id: string;
+  type: "quorum" | "master" | "lrm" | "service" | string;
+  status?: string;
+  node?: string;
+  sid?: string;
+  state?: string;
+  crm_state?: string;
+  request_state?: string;
+  quorate?: number;
+  timestamp?: number;
+};
+
+export type HaResource = { sid: string; state?: string; group?: string; max_restart?: number; max_relocate?: number; comment?: string; failback?: number; type?: string };
+export type HaRule = { rule: string; type: string; resources: string; nodes?: string; strict?: number; affinity?: string; disable?: number; comment?: string };
+export type HaGroup = { group: string; nodes: string; restricted?: number; nofailback?: number; comment?: string };
+
+export type ReplicationJob = { id: string; guest: number; target: string; schedule?: string; rate?: number; comment?: string; disable?: number; source?: string; type?: string };
+export type ReplicationState = ReplicationJob & { last_sync?: number; next_sync?: number; duration?: number; fail_count?: number; error?: string; state?: string };
+
+export type HostUpdateInput = { hosts: string[]; reboot: "needed" | "always" | "never"; shutdown_stuck: boolean; dry_run?: boolean; confirm?: string };
+
+export type PlanGuest = { type: string; vmid: number; name: string; target?: string };
+export type HostUpdatePlan = { plan: { hosts: { host: string; moves: PlanGuest[] | null; stops: PlanGuest[] | null; ha: string[] | null }[] }; lines: string[] };
+
+export async function hostUpdatePlan(dc: string, body: HostUpdateInput): Promise<HostUpdatePlan> {
+  return unwrap(await api.POST("/pve/datacenters/{dcId}/host-update", { params: { path: { dcId: dc } }, body: { ...body, dry_run: true } })) as unknown as HostUpdatePlan;
+}
+
+export type AptPackage = { Package: string; Version: string; OldVersion?: string; Priority?: string; Section?: string; Title?: string; Origin?: string };
+
+// usePerNode leest hetzelfde pad op elke host (bijvoorbeeld apt/update of
+// replication); een host die niet antwoordt geeft een fout per host.
+export function usePerNode<T>(dc: string, nodes: string[], sub: string, refetch: number | false = 60_000) {
+  const qs = useQueries({
+    queries: nodes.map((n) => {
+      const path = `/nodes/${n}/${sub}`;
+      return { queryKey: keys.get(dc, path, undefined), queryFn: () => pveGet<T>(dc, path), refetchInterval: refetch, retry: false };
+    }),
+  });
+  return nodes.map((n, i) => ({ node: n, data: qs[i]?.data, error: qs[i]?.error instanceof Error ? qs[i].error.message : qs[i]?.error ? "fout" : "", loading: !!qs[i]?.isLoading }));
+}
+
+export async function startHostUpdate(dc: string, body: HostUpdateInput): Promise<Job> {
+  return unwrap(await api.POST("/pve/datacenters/{dcId}/host-update", { params: { path: { dcId: dc } }, body: { ...body, dry_run: false } })) as unknown as Job;
+}

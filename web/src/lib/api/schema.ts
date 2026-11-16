@@ -4364,6 +4364,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/pve/datacenters/{dcId}/host-update": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                dcId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Proxmox-hosts één voor één bijwerken, clusterbewust (admin)
+         * @description Per host: onderhoudsmodus aan, draaiende gasten verhuizen, wachten tot de host leeg is, apt full-upgrade,
+         *     herstarten als het moet, wachten tot hij terug is, onderhoudsmodus uit, gasten terug. Met dry_run alleen het plan.
+         */
+        post: operations["startPveHostUpdate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/clusters/{clusterId}/stacks": {
         parameters: {
             query?: never;
@@ -13382,6 +13405,20 @@ export interface components {
             /** @description Wat overgetikt moet worden bij een gevaarlijke aanroep */
             confirm?: string;
         };
+        PveHostUpdateInput: {
+            /** @description Proxmox-namen in volgorde */
+            hosts: string[];
+            /**
+             * @default needed
+             * @enum {string}
+             */
+            reboot: "needed" | "always" | "never";
+            /** @description Gasten die niet kunnen verhuizen afsluiten en na de update weer starten */
+            shutdown_stuck?: boolean;
+            dry_run?: boolean;
+            /** @description De naam van het datacenter */
+            confirm?: string;
+        };
         PveRestoreTestInput: {
             /** @description Proxmox-host waarop de test draait */
             node: string;
@@ -20467,6 +20504,45 @@ export interface operations {
             };
         };
         responses: {
+            /** @description Taak aangemaakt */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Job"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    startPveHostUpdate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                dcId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PveHostUpdateInput"];
+            };
+        };
+        responses: {
+            /** @description Het plan (dry_run) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PveObject"];
+                };
+            };
             /** @description Taak aangemaakt */
             202: {
                 headers: {
