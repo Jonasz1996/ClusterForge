@@ -5817,6 +5817,12 @@ type CrowdSecBanResult struct {
 	Nodes  []string `json:"nodes"`
 }
 
+// CrowdSecConsoleKeyInput defines model for CrowdSecConsoleKeyInput.
+type CrowdSecConsoleKeyInput struct {
+	// Key Leeg haalt de sleutel weg
+	Key string `json:"key"`
+}
+
 // CrowdSecDecisionInput defines model for CrowdSecDecisionInput.
 type CrowdSecDecisionInput struct {
 	ClusterId *openapi_types.UUID `json:"cluster_id,omitempty"`
@@ -5832,6 +5838,16 @@ type CrowdSecDecisionInput struct {
 
 // CrowdSecDecisionInputScope defines model for CrowdSecDecisionInput.Scope.
 type CrowdSecDecisionInputScope string
+
+// CrowdSecEnrollInput defines model for CrowdSecEnrollInput.
+type CrowdSecEnrollInput struct {
+	NodeId *openapi_types.UUID `json:"node_id,omitempty"`
+}
+
+// CrowdSecEnrollResult defines model for CrowdSecEnrollResult.
+type CrowdSecEnrollResult struct {
+	Nodes int `json:"nodes"`
+}
 
 // CrowdSecNode defines model for CrowdSecNode.
 type CrowdSecNode struct {
@@ -5850,7 +5866,13 @@ type CrowdSecNode struct {
 	ClusterName        string                                `json:"cluster_name"`
 	ClusterSlug        string                                `json:"cluster_slug"`
 	ClusterTemplate    string                                `json:"cluster_template"`
-	DisabledProfiles   []string                              `json:"disabled_profiles"`
+
+	// ConsoleEnrolled Aangemeld bij de CrowdSec Console met de huidige sleutel
+	ConsoleEnrolled   bool                         `json:"console_enrolled"`
+	ConsoleEnrolledAt nullable.Nullable[time.Time] `json:"console_enrolled_at"`
+	ConsoleError      string                       `json:"console_error"`
+	ConsoleFailedAt   nullable.Nullable[time.Time] `json:"console_failed_at"`
+	DisabledProfiles  []string                     `json:"disabled_profiles"`
 
 	// Enabled CrowdSec staat aan in ClusterForge
 	Enabled       bool                              `json:"enabled"`
@@ -5954,11 +5976,17 @@ type CrowdSecProfileOrigin string
 
 // CrowdSecSettings defines model for CrowdSecSettings.
 type CrowdSecSettings struct {
-	AutoApply      bool                      `json:"auto_apply"`
-	BouncerDefault bool                      `json:"bouncer_default"`
-	ShareBans      CrowdSecSettingsShareBans `json:"share_bans"`
-	UpdatedAt      time.Time                 `json:"updated_at"`
-	Whitelist      []string                  `json:"whitelist"`
+	AutoApply      bool `json:"auto_apply"`
+	BouncerDefault bool `json:"bouncer_default"`
+
+	// ConsoleAvailable De server heeft een masterkey om de sleutel te bewaren
+	ConsoleAvailable bool `json:"console_available"`
+
+	// ConsoleKeySet Er is een enroll-sleutel voor de CrowdSec Console
+	ConsoleKeySet bool                      `json:"console_key_set"`
+	ShareBans     CrowdSecSettingsShareBans `json:"share_bans"`
+	UpdatedAt     time.Time                 `json:"updated_at"`
+	Whitelist     []string                  `json:"whitelist"`
 }
 
 // CrowdSecSettingsShareBans defines model for CrowdSecSettings.ShareBans.
@@ -13009,6 +13037,12 @@ type RunCronJobJSONRequestBody RunCronJobJSONBody
 // StopCronRunJSONRequestBody defines body for StopCronRun for application/json ContentType.
 type StopCronRunJSONRequestBody StopCronRunJSONBody
 
+// SetCrowdSecConsoleKeyJSONRequestBody defines body for SetCrowdSecConsoleKey for application/json ContentType.
+type SetCrowdSecConsoleKeyJSONRequestBody = CrowdSecConsoleKeyInput
+
+// EnrollCrowdSecConsoleJSONRequestBody defines body for EnrollCrowdSecConsole for application/json ContentType.
+type EnrollCrowdSecConsoleJSONRequestBody = CrowdSecEnrollInput
+
 // DecideCrowdSecJSONRequestBody defines body for DecideCrowdSec for application/json ContentType.
 type DecideCrowdSecJSONRequestBody = CrowdSecDecisionInput
 
@@ -13551,6 +13585,12 @@ type ServerInterface interface {
 	// ListCrowdSecAlerts Alerts van de nodes, nieuwste eerst (90 dagen)
 	// (GET /crowdsec/alerts)
 	ListCrowdSecAlerts(w http.ResponseWriter, r *http.Request, params ListCrowdSecAlertsParams)
+	// SetCrowdSecConsoleKey Enroll-sleutel van de CrowdSec Console bewaren of weghalen (admin)
+	// (PUT /crowdsec/console)
+	SetCrowdSecConsoleKey(w http.ResponseWriter, r *http.Request)
+	// EnrollCrowdSecConsole Nodes opnieuw aanmelden bij de CrowdSec Console (admin)
+	// (POST /crowdsec/console/enroll)
+	EnrollCrowdSecConsole(w http.ResponseWriter, r *http.Request)
 	// ListCrowdSecDecisions Actieve bans, samengevoegd per adres (zonder de community-blocklist)
 	// (GET /crowdsec/decisions)
 	ListCrowdSecDecisions(w http.ResponseWriter, r *http.Request)
@@ -14814,6 +14854,18 @@ func (_ Unimplemented) GetCrowdSec(w http.ResponseWriter, r *http.Request) {
 // ListCrowdSecAlerts Alerts van de nodes, nieuwste eerst (90 dagen)
 // (GET /crowdsec/alerts)
 func (_ Unimplemented) ListCrowdSecAlerts(w http.ResponseWriter, r *http.Request, params ListCrowdSecAlertsParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SetCrowdSecConsoleKey Enroll-sleutel van de CrowdSec Console bewaren of weghalen (admin)
+// (PUT /crowdsec/console)
+func (_ Unimplemented) SetCrowdSecConsoleKey(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// EnrollCrowdSecConsole Nodes opnieuw aanmelden bij de CrowdSec Console (admin)
+// (POST /crowdsec/console/enroll)
+func (_ Unimplemented) EnrollCrowdSecConsole(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -19329,6 +19381,34 @@ func (siw *ServerInterfaceWrapper) ListCrowdSecAlerts(w http.ResponseWriter, r *
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListCrowdSecAlerts(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetCrowdSecConsoleKey operation middleware
+func (siw *ServerInterfaceWrapper) SetCrowdSecConsoleKey(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetCrowdSecConsoleKey(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// EnrollCrowdSecConsole operation middleware
+func (siw *ServerInterfaceWrapper) EnrollCrowdSecConsole(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.EnrollCrowdSecConsole(w, r)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -25598,6 +25678,12 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Put(options.BaseURL+"/crowdsec/settings", wrapper.UpdateCrowdSecSettings)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/crowdsec/console", wrapper.SetCrowdSecConsoleKey)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/crowdsec/console/enroll", wrapper.EnrollCrowdSecConsole)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/crowdsec/nodes", wrapper.SetCrowdSecNodes)

@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -84,6 +85,17 @@ func (a *Agent) handleCrowdSec(data []byte) protocol.CrowdSecResponse {
 			return protocol.CrowdSecResponse{Error: err.Error()}
 		}
 		return protocol.CrowdSecResponse{Count: n}
+	case protocol.CrowdSecOpEnroll:
+		if req.Enroll == nil {
+			return protocol.CrowdSecResponse{Error: "enroll zonder sleutel"}
+		}
+		if !a.crowdSecInstalled() {
+			return protocol.CrowdSecResponse{Error: "CrowdSec staat niet op deze node"}
+		}
+		if err := a.crowdSecEnroll(ctx, *req.Enroll); err != nil {
+			return protocol.CrowdSecResponse{Error: err.Error()}
+		}
+		return protocol.CrowdSecResponse{Count: 1}
 	}
 	return protocol.CrowdSecResponse{Error: "onbekend CrowdSec-verzoek " + req.Op}
 }
@@ -521,4 +533,28 @@ func (a *Agent) crowdSecDecide(ctx context.Context, d protocol.CrowdSecDecision)
 		return 0, fmt.Errorf("ban zetten: %w", err)
 	}
 	return 1, nil
+}
+
+// crowdSecEnroll meldt de node aan bij de CrowdSec Console en herstart
+// CrowdSec, zodat de aanmelding meteen doorgaat. De sleutel komt nooit in
+// een foutmelding terug.
+func (a *Agent) crowdSecEnroll(ctx context.Context, e protocol.CrowdSecEnroll) error {
+	if err := e.Validate(); err != nil {
+		return err
+	}
+	hide := func(err error) error {
+		return errors.New(strings.ReplaceAll(err.Error(), e.Key, "…"))
+	}
+	args := []string{"console", "enroll", "--name", e.Name}
+	if e.Overwrite {
+		args = append(args, "--overwrite")
+	}
+	args = append(args, e.Key)
+	if _, err := a.stdout(ctx, "cscli", args...); err != nil {
+		return fmt.Errorf("aanmelden bij de Console: %w", hide(err))
+	}
+	if _, err := a.stdout(ctx, "systemctl", "restart", "crowdsec"); err != nil {
+		return fmt.Errorf("aangemeld, maar CrowdSec herstarten mislukte: %w", err)
+	}
+	return nil
 }
