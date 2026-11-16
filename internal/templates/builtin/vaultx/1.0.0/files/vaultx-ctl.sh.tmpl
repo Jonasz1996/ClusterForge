@@ -20,7 +20,7 @@
 #                                    VaultX zelf draait): deze node is de bron
 #   vaultx-ctl.sh voorbereiden | voorbereid
 #                                    (uitrol) een oude VaultX op deze node: zijn
-#                                    PostgreSQL wordt cluster vaultx-oud op poort
+#                                    PostgreSQL wordt cluster vaultxoud op poort
 #                                    5433, zodat Patroni 5432 krijgt
 #   vaultx-ctl.sh afronden <IP>      de sleutel op de oude node weer weghalen
 #   vaultx-ctl.sh terug <IP>         terug naar de oude node (terugweg)
@@ -150,7 +150,8 @@ check_ip() { [ "$1" = lokaal ] || echo "$1" | grep -Eq '^[0-9]{1,3}(\.[0-9]{1,3}
 # ------------------------------------------------- een oude VaultX op deze node
 OUD_ENV=$STATE/oud/vaultx.env
 OUD_UNIT=${CF_VX_OUD_UNIT:-/etc/systemd/system/vaultx.service}
-OUD_NAME=vaultx-oud
+# Zonder streepje: systemd leest postgresql@17-vaultx-oud als 17/vaultx/oud.
+OUD_NAME=vaultxoud
 has_oud() { [ -e "$OUD_UNIT" ]; }
 oud_port() {
   p=$(envval VAULTX_DATABASE_URL "$OUD_ENV" | sed -nE 's#.*@[^/:]+:([0-9]+)/.*#\1#p')
@@ -171,13 +172,20 @@ voorbereid() {
 }
 
 # Vóór Patroni (tijdens de uitrol): de PostgreSQL van de oude VaultX houdt
-# het cluster main op poort 5432 vast. Hij wordt cluster vaultx-oud op 5433
+# het cluster main op poort 5432 vast. Hij wordt cluster vaultxoud op 5433
 # (pg_renamecluster; de data blijft), VaultX krijgt de nieuwe poort en blijft
 # het VIP bedienen tot de overname. Eerst een gecontroleerde back-up; bij een
 # fout gaat alles terug zoals het was.
 voorbereiden() {
   if ! has_oud; then echo "Geen oude VaultX op deze node."; return 0; fi
   if voorbereid; then echo "De oude VaultX is al klaargezet (PostgreSQL $OUD_NAME op $(oud_port))."; return 0; fi
+  # Een cluster vaultx-oud van een eerdere versie van dit script (systemd
+  # start het niet): eerst terug naar main.
+  bad=$(pg_lsclusters -h | awk '$2 == "vaultx-oud" {print $1}' | head -n 1)
+  if [ -n "$bad" ] && ! pg_lsclusters -h | awk '{print $2}' | grep -qx main; then
+    say "PostgreSQL $bad/vaultx-oud terug naar main"
+    pg_renamecluster "$bad" vaultx-oud main || fail "pg_renamecluster $bad vaultx-oud main"
+  fi
   line=$(pg_lsclusters -h | awk '$2 == "main"' | head -n 1)
   [ -n "$line" ] || fail "geen PostgreSQL-cluster main gevonden voor de oude VaultX (pg_lsclusters)"
   v=$(echo "$line" | awk '{print $1}')

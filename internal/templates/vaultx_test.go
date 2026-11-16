@@ -182,7 +182,7 @@ func newVXNode(t *testing.T, ctl, bron, baseEnv, oudEnv, commit string, pgArgs, 
 		"curl":     `[ -f "$CF_TEST_DIR/gezond" ]`,
 		"nginx":    `exit 0`,
 		// Na voorbereiden: alleen het hernoemde cluster van de oude VaultX.
-		"pg_lsclusters": `echo "17 vaultx-oud 5433 online postgres /var/lib/postgresql/17/vaultx-oud /var/log/postgresql/x.log"`,
+		"pg_lsclusters": `echo "17 vaultxoud 5433 online postgres /var/lib/postgresql/17/vaultxoud /var/log/postgresql/x.log"`,
 		// systemctl van de clusternode en van de oude node; de oude VaultX
 		// is "actief" zolang $CF_TEST_DIR/oud-actief bestaat.
 		"systemctl": `echo "systemctl $*" >> "$CF_TEST_DIR/log"
@@ -371,7 +371,7 @@ func TestVaultXOvernemen(t *testing.T) {
 		t.Errorf("vaultx.env van de oude VaultX niet teruggezet:\n%s", b)
 	}
 	if out, err := n.run("voorbereid"); err != nil {
-		t.Errorf("voorbereid met vaultx-oud: %v %s", err, out)
+		t.Errorf("voorbereid met vaultxoud: %v %s", err, out)
 	}
 	if err := os.Remove(oudUnit); err != nil {
 		t.Fatal(err)

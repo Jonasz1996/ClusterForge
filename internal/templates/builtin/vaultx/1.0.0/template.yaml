@@ -176,7 +176,7 @@ roles:
           unless: /usr/local/lib/clusterforge/vaultx-ctl.sh firewall-ok
       # Een oude VaultX op deze node (de bestaande node die mee in het
       # cluster gaat): zijn PostgreSQL verhuist van cluster main op 5432 naar
-      # vaultx-oud op 5433, met een back-up vooraf, zodat Patroni 5432 krijgt.
+      # vaultxoud op 5433, met een back-up vooraf, zodat Patroni 5432 krijgt.
       # VaultX blijft draaien en bedient het VIP tot de overname.
       - command:
           title: oude VaultX klaarzetten

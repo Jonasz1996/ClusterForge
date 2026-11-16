@@ -115,7 +115,7 @@ Dat kan ook: rol uit op bestaande nodes, met de oude VaultX-node erbij.
 - De uitrolstap `vaultx-ctl.sh voorbereiden` (alleen op een node met
   `/etc/systemd/system/vaultx.service`): eerst een gecontroleerde
   `pg_dump` naar `/var/backups/vaultx/cf-voorbereiden-*.dump`, dan
-  `pg_renamecluster <v> main vaultx-oud` en poort 5433 (de data blijft
+  `pg_renamecluster <v> main vaultxoud` en poort 5433 (de data blijft
   staan), `VAULTX_DATABASE_URL` naar 5433, een drop-in `PGPORT=5433` voor de
   oude back-uptimer, VaultX weer starten en wachten op `/health/ready`.
   Mislukt iets, dan gaat alles terug zoals het was. Zonder die stap zou
@@ -124,7 +124,7 @@ Dat kan ook: rol uit op bestaande nodes, met de oude VaultX-node erbij.
   enige gezonde). NPM kan dus al vóór de overname naar het VIP wijzen.
 - `vaultx-ctl.sh overnemen` zonder IP op die node: de bron is lokaal
   (`cf-vaultx-bron` met `PGPORT=5433`, zonder SSH). Na de overname staan
-  `vaultx.service` en de oude back-uptimer uit; het cluster `vaultx-oud`
+  `vaultx.service` en de oude back-uptimer uit; het cluster `vaultxoud`
   blijft met zijn data staan als terugweg.
 - `bouwen` weigert op die node andere code dan de commit van de oude
   VaultX zolang die nog draait.
