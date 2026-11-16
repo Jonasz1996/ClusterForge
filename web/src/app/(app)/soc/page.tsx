@@ -3,12 +3,14 @@
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
+import { AuditList } from "@/components/audit/AuditList";
 import { askConfirm } from "@/components/Confirm";
 import { Modal } from "@/components/Modal";
 import { toast } from "@/components/Toast";
 import { ago, tableClass, tdClass, thClass } from "@/components/inventory/bits";
 import { Alert, Badge, Button, Card, PageHeader, Select, cx } from "@/components/ui";
 import { ApiError } from "@/lib/api/client";
+import { useAuditRecent } from "@/lib/audit";
 import { copyText } from "@/lib/clipboard";
 import { flag, useCrowdSecDecide } from "@/lib/crowdsec";
 import { useIsAdmin } from "@/lib/inventory";
@@ -96,6 +98,7 @@ function Soc() {
           <AttackersCard o={o} onOpen={openIP} />
           <TargetsCard o={o} />
           <CoverageCard rows={o.coverage} />
+          <SecurityLog />
           {ip && <AttackerDialog ip={ip} o={o} onClose={() => openIP("")} />}
         </>
       )}
@@ -838,5 +841,32 @@ function AttackerDialog({ ip, o, onClose }: { ip: string; o: SocOverview; onClos
         )}
       </div>
     </Modal>
+  );
+}
+
+// --- beveiligingslogboek ---------------------------------------------------------------------
+
+// SecurityLog toont de laatste beveiligingsevents: logins, bans, firewall- en
+// CrowdSec-wijzigingen. Het logboek is alleen voor beheerders.
+function SecurityLog() {
+  const isAdmin = useIsAdmin();
+  const events = useAuditRecent({ category: "security" }, 15, isAdmin);
+  if (!isAdmin) return null;
+  return (
+    <Card
+      title={
+        <span className="flex flex-wrap items-center justify-between gap-2">
+          <span>Beveiligingslogboek</span>
+          <Link href="/logboek?category=security" className="text-sm font-medium text-brand-700 hover:underline dark:text-sky-300">
+            Alles in het logboek
+          </Link>
+        </span>
+      }
+    >
+      {events.isLoading && <p className="text-sm text-slate-500">Laden…</p>}
+      {events.isError && <Alert>Het logboek laden mislukte.</Alert>}
+      {events.data && events.data.length === 0 && <p className="text-sm text-slate-500">Nog geen beveiligingsevents.</p>}
+      {events.data && events.data.length > 0 && <AuditList items={events.data} />}
+    </Card>
   );
 }

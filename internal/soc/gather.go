@@ -231,13 +231,12 @@ func (s *Service) networks(ctx context.Context) (nets, error) {
 
 func (s *Service) coverage(ctx context.Context, now time.Time) ([]CoverageRow, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT n.id, n.hostname, n.cluster_id, coalesce(c.name, ''), a.protocol_version, s.heartbeat_at, f.facts,
+		SELECT n.id, n.hostname, n.cluster_id, coalesce(c.name, ''), a.protocol_version, a.last_seen_at, f.facts,
 		       fn.node_id IS NOT NULL, coalesce(fn.mode, ''), fn.status, coalesce(fn.apply_error, ''),
 		       cn.node_id IS NOT NULL, coalesce(cn.managed, false), coalesce(cn.bouncer, false), cn.status, coalesce(cn.apply_error, '')
 		FROM nodes n
 		JOIN agents a ON a.node_id = n.id AND a.revoked_at IS NULL
 		LEFT JOIN clusters c ON c.id = n.cluster_id
-		LEFT JOIN node_status s ON s.node_id = n.id
 		LEFT JOIN node_facts f ON f.node_id = n.id
 		LEFT JOIN firewall_nodes fn ON fn.node_id = n.id
 		LEFT JOIN crowdsec_nodes cn ON cn.node_id = n.id
@@ -260,6 +259,7 @@ func (s *Service) coverage(ctx context.Context, now time.Time) ([]CoverageRow, e
 			&cs.row, &cs.managed, &cs.bouncer, &csStatus, &cs.applyError); err != nil {
 			return nil, err
 		}
+		// Zoals de pagina Nodes: offline na HeartbeatDown zonder teken van leven.
 		r.Online = hb != nil && now.Sub(*hb) <= status.HeartbeatDown
 		var f protocol.Facts
 		if len(facts) > 0 && json.Unmarshal(facts, &f) == nil {

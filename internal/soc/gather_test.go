@@ -23,7 +23,7 @@ func seedNode(t *testing.T, pool *pgxpool.Pool, host, ip string, cluster *uuid.U
 	if err := pool.QueryRow(ctx, `INSERT INTO nodes (hostname, cluster_id, primary_ip) VALUES ($1, $2, $3) RETURNING id`, host, cluster, ip).Scan(&id); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(ctx, `INSERT INTO agents (id, node_id, nkey_public, protocol_version) VALUES (gen_random_uuid(), $1, $2, $3)`,
+	if _, err := pool.Exec(ctx, `INSERT INTO agents (id, node_id, nkey_public, protocol_version, last_seen_at) VALUES (gen_random_uuid(), $1, $2, $3, now())`,
 		id, "U"+strings.ToUpper(host), proto); err != nil {
 		t.Fatal(err)
 	}

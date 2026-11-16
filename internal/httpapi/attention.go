@@ -14,6 +14,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/agentupgrade"
 	"github.com/Jonasz1996/clusterforge/internal/auth"
 	"github.com/Jonasz1996/clusterforge/internal/httpapi/gen"
+	"github.com/Jonasz1996/clusterforge/internal/soc"
 )
 
 // "Aandacht nodig" (fase 24): één lijst met wat nu een actie vraagt, voor
@@ -128,6 +129,23 @@ func (s *Server) attention(ctx context.Context, p auth.Principal) (gen.Attention
 		add("git-pending", amber, plural(int(pending), "wijziging", "wijzigingen")+" uit Git wacht op goedkeuring", "", "/gitops", int(pending))
 	} else if !errors.Is(err, pgx.ErrNoRows) {
 		return gen.Attention{}, err
+	}
+
+	// Het beveiligingsoverzicht (fase 25): vanaf verhoogd een regel met de
+	// reden. Het overzicht is gecachet, dus dit kost bijna niets.
+	if s.soc != nil {
+		o, err := s.soc.Overview(ctx, soc.Window24h)
+		if err != nil {
+			return gen.Attention{}, err
+		}
+		switch o.Level.Level {
+		case soc.LevelCritical, soc.LevelElevated:
+			tone := amber
+			if o.Level.Level == soc.LevelCritical {
+				tone = red
+			}
+			add("soc", tone, "Dreigingsniveau "+o.Level.Level, strings.Join(o.Level.Reasons, " · "), "/soc", 1)
+		}
 	}
 
 	if p.User.TotpEnabledAt == nil {

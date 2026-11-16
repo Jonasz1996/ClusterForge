@@ -60,6 +60,14 @@ export function ApiTokensCard({ isAdmin }: { isAdmin: boolean }) {
               {base}/clusters
             </code>
           </dd>
+          <dt className="text-slate-500">Beveiliging (SOC)</dt>
+          <dd>
+            <code className="text-xs break-all">
+              {origin}
+              {base}/soc
+            </code>
+            <span className="text-slate-500"> (alleen met een token voor alle clusters; ?strict=1: HTTP 503 vanaf niveau verhoogd)</span>
+          </dd>
           <dt className="text-slate-500">Samenvatting + clusters</dt>
           <dd>
             <code className="text-xs break-all">
@@ -169,7 +177,7 @@ function CreateToken({ origin, base, onClose }: { origin: string; base: string; 
           Voor homepage: plak dit in Dashboard bewerken → importeren (services.yaml). Elke cluster wordt een tegel; het token
           komt versleuteld bij de geheimen. Kies zelf welke velden je wilt (hoogstens 8 per tegel).
         </p>
-        <CopyBlock text={homepageYaml(origin, base, token, shown)} />
+        <CopyBlock text={homepageYaml(origin, base, token, shown, picked.length === 0)} />
         <Button variant="secondary" onClick={onClose}>
           Sluiten
         </Button>
