@@ -1,0 +1,142 @@
+#!/bin/sh
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}).
+#
+# cf-vaultx-bron: draait op de OUDE VaultX-node (de bron van een overname),
+# niet op het cluster. vaultx-ctl.sh bron-koppelen op de VIP-node van het
+# cluster toont de regel die dit script hier installeert, samen met een
+# SSH-sleutel die alleen dit script mag aanroepen (command=, restrict,
+# from=<VIP-node>). Het kan alleen de vaste opdrachten hieronder; het wist
+# niets en verandert niets aan de database van de oude node.
+#
+#   info      versie, alembic, PostgreSQL, grootte (geen geheimen)
+#   stop      VaultX stoppen en uitschakelen (nginx en PostgreSQL blijven)
+#   start     VaultX weer inschakelen en starten (terugdraaien, terugweg)
+#   telling   per tabel: aantal rijen en md5 (alleen als VaultX gestopt is)
+#   dump      back-up hier (/var/backups/vaultx/cf-overname-*.dump, gecontroleerd)
+#             en dezelfde dump naar stdout (alleen als VaultX gestopt is)
+#   sha       sha256 van de laatste dump
+#   env       de VAULTX_*-instellingen (zonder de database) naar stdout
+#   realip    /etc/vaultx/nginx-realip.conf naar stdout
+#   opruimen  de sleutel van het cluster weer weghalen
+#
+# Lokaal (als root, niet via SSH): cf-vaultx-bron sleutel '<authorized_keys-regel>'
+set -u
+umask 077
+# CF_VXB_* zijn er alleen voor de tests van ClusterForge.
+ENV=${CF_VXB_ENV:-/etc/vaultx/vaultx.env}
+CODE=${CF_VXB_CODE:-/opt/vaultx}
+DB=${CF_VXB_DB:-vaultx}
+UNIT=${CF_VXB_UNIT:-vaultx}
+BACKUPS=${CF_VXB_BACKUPS:-/var/backups/vaultx}
+STATE=${CF_VXB_STATE:-/var/lib/cf-vaultx-bron}
+AUTH=${CF_VXB_AUTH:-/root/.ssh/authorized_keys}
+REALIP=${CF_VXB_REALIP:-/etc/vaultx/nginx-realip.conf}
+# Tabellen tot zoveel bytes krijgen ook een md5 over alle rijen.
+MD5_MAX=${CF_VXB_MD5_MAX:-67108864}
+MARK=cf-vaultx-bron
+
+fail() { echo "FOUT: $*" >&2; exit 1; }
+psql_() { if [ -n "${CF_VXB_PSQL:-}" ]; then $CF_VXB_PSQL "$@"; else runuser -u postgres -- psql "$@"; fi; }
+pgdump_() { if [ -n "${CF_VXB_PGDUMP:-}" ]; then $CF_VXB_PGDUMP "$@"; else runuser -u postgres -- pg_dump "$@"; fi; }
+sysctl_() { ${CF_VXB_SYSTEMCTL:-systemctl} "$@"; }
+q() { psql_ -X -q -At -v ON_ERROR_STOP=1 -d "$DB" "$@"; }
+stopped() { ! sysctl_ is-active --quiet "$UNIT"; }
+
+# Dezelfde telling als vaultx-ctl.sh op het cluster: vaste sessie-instellingen
+# zodat de tekst van een rij op beide kanten gelijk is.
+SESSION="SET TimeZone='UTC'; SET DateStyle='ISO, YMD'; SET IntervalStyle='postgres'; SET extra_float_digits=3; SET bytea_output='hex';"
+telling() {
+  for tb in $(q -c "SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename"); do
+    size=$(q -c "SELECT pg_total_relation_size(format('public.%I', '$tb'))") || return 1
+    if [ "$size" -lt "$MD5_MAX" ]; then
+      r=$(q -c "$SESSION" -c "SELECT count(*) || ' ' || md5(coalesce(string_agg(md5(t::text), '' ORDER BY md5(t::text)), '')) FROM public.\"$tb\" t") || return 1
+    else
+      r="$(q -c "SELECT count(*) FROM public.\"$tb\"") -" || return 1
+    fi
+    echo "$tb $r"
+  done
+}
+
+cmd=${SSH_ORIGINAL_COMMAND:-${1:-}}
+case "$cmd" in
+  info)
+    commit=$(git -C "$CODE" rev-parse HEAD 2>/dev/null || echo onbekend)
+    echo "mode=native"
+    echo "commit=$commit"
+    echo "alembic=$(q -c 'SELECT version_num FROM alembic_version' 2>/dev/null | head -n 1)"
+    echo "pg=$(q -c 'SHOW server_version_num' 2>/dev/null)"
+    echo "size=$(q -c 'SELECT pg_size_pretty(pg_database_size(current_database()))' 2>/dev/null | tr -d ' ')"
+    echo "tables=$(q -c "SELECT count(*) FROM pg_tables WHERE schemaname = 'public'" 2>/dev/null)"
+    echo "active=$(sysctl_ is-active "$UNIT" 2>/dev/null)"
+    echo "url=$(sed -n 's/^VAULTX_PUBLIC_URL=//p' "$ENV" 2>/dev/null | tail -n 1)"
+    echo "host=$(hostname)"
+    ;;
+  stop)
+    mkdir -p "$STATE" || fail "map $STATE"
+    if [ ! -e "$STATE/was-enabled" ]; then
+      if sysctl_ is-enabled --quiet "$UNIT"; then echo yes > "$STATE/was-enabled"; else echo no > "$STATE/was-enabled"; fi
+    fi
+    sysctl_ disable --now "$UNIT" >/dev/null 2>&1 || sysctl_ stop "$UNIT" || fail "VaultX stoppen"
+    stopped || fail "VaultX draait nog"
+    logger -t cf-vaultx-bron "VaultX gestopt voor een overname naar ClusterForge" 2>/dev/null
+    echo "VaultX gestopt op $(hostname)"
+    ;;
+  start)
+    sysctl_ enable --now "$UNIT" >/dev/null 2>&1 || sysctl_ start "$UNIT" || fail "VaultX starten"
+    rm -f "$STATE/was-enabled"
+    logger -t cf-vaultx-bron "VaultX weer gestart" 2>/dev/null
+    echo "VaultX gestart op $(hostname)"
+    ;;
+  telling)
+    stopped || fail "VaultX draait nog; tellen kan alleen na stop"
+    telling || fail "tellen"
+    ;;
+  dump)
+    stopped || fail "VaultX draait nog; een dump kan alleen na stop (anders kan er tijdens de kopie iets veranderen)"
+    mkdir -p "$BACKUPS" "$STATE" && chmod 700 "$BACKUPS" || fail "map $BACKUPS"
+    t=$(date +%Y%m%d-%H%M%S)
+    f=$BACKUPS/cf-overname-$t.dump
+    pgdump_ -Fc -d "$DB" > "$f.part" || { rm -f "$f.part"; fail "pg_dump"; }
+    [ -s "$f.part" ] || { rm -f "$f.part"; fail "de dump is leeg"; }
+    pg_restore --list "$f.part" > /dev/null || { rm -f "$f.part"; fail "pg_restore --list leest de dump niet"; }
+    mv "$f.part" "$f" || fail "dump"
+    [ -f "$ENV" ] && install -m 600 "$ENV" "$BACKUPS/cf-overname-$t.env"
+    echo "$f" > "$STATE/laatste"
+    logger -t cf-vaultx-bron "back-up voor de overname: $f" 2>/dev/null
+    cat "$f"
+    ;;
+  sha)
+    f=$(cat "$STATE/laatste" 2>/dev/null) || fail "nog geen dump"
+    sha256sum "$f" | cut -d' ' -f1
+    echo "$f"
+    ;;
+  env)
+    [ -r "$ENV" ] || fail "$ENV ontbreekt"
+    grep -E '^VAULTX_[A-Z0-9_]+=' "$ENV" | grep -v '^VAULTX_DATABASE_URL='
+    ;;
+  realip)
+    [ -r "$REALIP" ] && cat "$REALIP"
+    exit 0
+    ;;
+  opruimen)
+    [ -f "$AUTH" ] || exit 0
+    grep -v " $MARK\$" "$AUTH" > "$AUTH.cf" ; mv "$AUTH.cf" "$AUTH" && chmod 600 "$AUTH"
+    echo "sleutel van ClusterForge weggehaald op $(hostname)"
+    ;;
+  sleutel)
+    [ -z "${SSH_ORIGINAL_COMMAND:-}" ] || fail "niet via SSH"
+    line=${2:-}
+    case "$line" in
+      *"command=\""*"$MARK\""*" $MARK") ;;
+      *) fail "dat is geen sleutelregel van vaultx-ctl.sh bron-koppelen" ;;
+    esac
+    mkdir -p "$(dirname "$AUTH")" && chmod 700 "$(dirname "$AUTH")" || fail "map van $AUTH"
+    touch "$AUTH" && chmod 600 "$AUTH" || fail "$AUTH"
+    grep -v " $MARK\$" "$AUTH" > "$AUTH.cf"; mv "$AUTH.cf" "$AUTH" && chmod 600 "$AUTH"
+    echo "$line" >> "$AUTH" || fail "$AUTH"
+    echo "Klaar: de VIP-node van het cluster kan nu vaultx-ctl.sh overnemen doen. Weghalen: cf-vaultx-bron opruimen"
+    ;;
+  *)
+    fail "onbekende opdracht: $cmd"
+    ;;
+esac

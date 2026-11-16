@@ -1,0 +1,492 @@
+#!/bin/sh
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}).
+#
+# VaultX als cluster. VaultX draait op elke node tegelijk tegen één
+# PostgreSQL (Patroni, VIP {{ .params.db_vip }}); keepalived zet het VIP
+# ({{ .params.vip }}) op een gezonde node. Na een overname staan de
+# instellingen van de oude node in $FILES/.cf (0600); de sync
+# VaultX-instellingen brengt ze van de VIP-node naar de andere nodes.
+#
+#   vaultx-ctl.sh voorstart          (cf-vaultx, als root) markering en sleutel
+#                                    nakijken, /etc/vaultx/vaultx.env schrijven
+#   vaultx-ctl.sh check              keepalived: antwoordt VaultX hier gezond?
+#   vaultx-ctl.sh status             wat er op deze node staat
+#   vaultx-ctl.sh bron-koppelen <IP> een sleutel voor de oude node maken; toont
+#                                    de regel om op de oude node uit te voeren
+#   vaultx-ctl.sh bron-info <IP>     wat er op de oude node staat
+#   vaultx-ctl.sh overnemen <IP> [--andere-versie]
+#                                    de kluis van de oude node naar het cluster
+#   vaultx-ctl.sh afronden <IP>      de sleutel op de oude node weer weghalen
+#   vaultx-ctl.sh terug <IP>         terug naar de oude node (terugweg)
+#   vaultx-ctl.sh backup             nachtelijke back-up (alleen op de node met
+#                                    het VIP van de database)
+#   vaultx-ctl.sh bouwen | gebouwd   VaultX ophalen en bouwen / is het gebouwd?
+#   vaultx-ctl.sh nginx | nginx-ok   nginx-site van VaultX
+#   vaultx-ctl.sh firewall | firewall-ok
+#   vaultx-ctl.sh unchanged | restart-if-changed
+#
+# Markering: COMMENT ON DATABASE vaultx = "cf-vaultx key=<vingerafdruk>
+# ready=<tijd> ...". VaultX start alleen met een markering en dezelfde
+# sleutel; zonder markering alleen node 1 van een NIEUW cluster met een lege
+# database. Geheimen komen nooit in de uitvoer: alleen de vingerafdruk.
+set -u
+umask 022
+# CF_VX_* zijn er alleen voor de tests van ClusterForge.
+BASE=${CF_VX_BASE:-/opt/cf-vaultx}
+FILES=$BASE/files
+CF=$FILES/.cf
+STATE=${CF_VX_STATE:-/var/lib/cf-vaultx}
+ETC=${CF_VX_ETC:-/etc/cf-vaultx}
+VXETC=${CF_VX_VXETC:-/etc/vaultx}
+CODE=${CF_VX_CODE:-/opt/vaultx}
+BACKUPS=${CF_VX_BACKUPS:-/var/backups/cf-vaultx}
+RUN=${CF_VX_RUN:-/run/cf-vaultx}
+HASH=$RUN/hash
+REPO=https://github.com/Jonasz1996/vaultx.git
+VIP='{{ .params.vip }}'
+DB_VIP='{{ .params.db_vip }}'
+VERSION='{{ .params.version }}'
+NIEUW='{{ .params.nieuw }}'
+INDEX='{{ .node.index }}'
+ADDRESS='{{ .node.address }}'
+# De andere nodes van het cluster (voor ufw).
+PEERS='{{ range .peers }}{{ .address }} {{ end }}'
+KEEP=${CF_VX_KEEP:-14}
+
+say() { echo "== $*"; }
+warn() { echo "WAARSCHUWING: $*" >&2; }
+fail() { echo "FOUT: $*" >&2; exit 1; }
+log() { logger -t cf-vaultx "$*" 2>/dev/null; echo "$*" >&2; }
+envval() { sed -n "s/^$1=//p" "$2" 2>/dev/null | tail -n 1; }
+has_ip() { ip -o addr show 2>/dev/null | grep -q " $1/"; }
+sysctl_() { ${CF_VX_SYSTEMCTL:-systemctl} "$@"; }
+
+# De database uit base.env: postgresql+psycopg://gebruiker:wachtwoord@host:poort/db
+dburl() { envval VAULTX_DATABASE_URL "$ETC/base.env"; }
+dbpart() { dburl | sed -E 's#^[a-z+]+://([^:]+):([^@]*)@([^:/]+):?([0-9]*)/([^?]+).*#'"$1"'#'; }
+pg() {
+  PGPASSWORD=$(dbpart '\2') PGCONNECT_TIMEOUT=5 \
+    psql -X -q -At -v ON_ERROR_STOP=1 -h "$(dbpart '\3')" -p "$(dbpart '\4')" -U "$(dbpart '\1')" -d "$(dbpart '\5')" "$@"
+}
+db_meta() { pg -c "SELECT coalesce(shobj_description(oid, 'pg_database'), '') FROM pg_database WHERE datname = current_database()"; }
+db_tables() { pg -c "SELECT count(*) FROM pg_tables WHERE schemaname = 'public'"; }
+db_mark() { printf "SELECT format('COMMENT ON DATABASE %%I IS %%L', current_database(), '%s')\n\\\\gexec\n" "$1" | pg -f -; }
+metafield() { echo "$1" | tr ' ' '\n' | sed -n "s/^$2=//p" | head -n 1; }
+
+# De instellingen zoals VaultX ze krijgt: base.env, met daarover de
+# overgenomen VAULTX_*-regels (behalve de database).
+settings() {
+  if [ -s "$CF/vaultx.env" ]; then
+    grep -v '^VAULTX_DATABASE_URL=' "$CF/vaultx.env" | grep -E '^VAULTX_[A-Z0-9_]+='
+    echo "VAULTX_DATABASE_URL=$(dburl)"
+  else
+    grep -E '^VAULTX_[A-Z0-9_]+=' "$ETC/base.env"
+  fi
+}
+key() { settings | sed -n 's/^VAULTX_SECRET_KEY=//p' | tail -n 1; }
+keyhash() { key | sha256sum | cut -c1-16; }
+
+# Een VaultX-api die gezond antwoordt (database bereikbaar).
+healthy() { curl -fsS -m 4 -o /dev/null "http://127.0.0.1:8000/health/ready" 2>/dev/null; }
+fingerprint() {
+  { settings; cat "$STATE/gebouwd" 2>/dev/null; } | sha256sum | cut -d' ' -f1
+}
+
+voorstart() {
+  [ -s "$ETC/base.env" ] || fail "$ETC/base.env ontbreekt (uitrol niet af)"
+  [ -x "$CODE/venv/bin/uvicorn" ] || fail "VaultX is nog niet gebouwd ($CODE)"
+  meta=$(db_meta) || fail "de database op $DB_VIP antwoordt niet (nog niet uitgerold, of Patroni zonder primary); cf-vaultx probeert het over 15 s opnieuw"
+  if [ -n "$(metafield "$meta" ready)" ]; then
+    want=$(metafield "$meta" key)
+    [ -n "$(key)" ] || fail "geen VAULTX_SECRET_KEY op deze node; na een overname komt hij met de sync VaultX-instellingen van de VIP-node"
+    if [ "$want" != "$(keyhash)" ]; then
+      fail "de sleutel hier ($(keyhash)) is niet die van het cluster ($want); na een overname komt hij met de sync VaultX-instellingen (Cronjobs); cf-vaultx wacht erop"
+    fi
+  else
+    tables=$(db_tables) || fail "tabellen tellen in de database"
+    if [ "$NIEUW" != true ]; then
+      fail "de kluis is nog niet overgenomen ($tables tabellen, geen markering). Commando's op de VIP-node: vaultx-ctl.sh overnemen <IP van de oude node>; cf-vaultx wacht"
+    fi
+    if [ "$INDEX" != 1 ] || [ "$tables" != 0 ]; then
+      fail "nieuw cluster: alleen node 1 neemt een lege database in gebruik ($tables tabellen); cf-vaultx wacht"
+    fi
+    for v in VAULTX_SECRET_KEY VAULTX_PUBLIC_URL VAULTX_OIDC_ISSUER VAULTX_OIDC_CLIENT_ID; do
+      [ -n "$(settings | sed -n "s/^$v=//p")" ] || fail "nieuw cluster: $v ontbreekt (Wijzigen → parameters)"
+    done
+    say "Nieuw cluster: de lege database in gebruik nemen"
+    db_mark "cf-vaultx key=$(keyhash) ready=$(date +%s) new=$(hostname)" || fail "markering zetten"
+  fi
+  mkdir -p "$VXETC" "$RUN" && chmod 0700 "$RUN" || fail "mappen"
+  tmp=$VXETC/.vaultx.env.$$
+  (umask 077 && settings > "$tmp") || { rm -f "$tmp"; fail "$VXETC/vaultx.env schrijven"; }
+  chgrp vaultx "$tmp" 2>/dev/null
+  chmod 0640 "$tmp" && mv -f "$tmp" "$VXETC/vaultx.env" || fail "$VXETC/vaultx.env"
+  fingerprint > "$HASH"
+  return 0
+}
+
+# ---------------------------------------------------------------- de oude node
+BRON_KEY=$STATE/bron_ed25519
+BRON_MARK=cf-vaultx-bron
+bron() {
+  oud=$1
+  shift
+  if [ -n "${CF_VX_BRON:-}" ]; then "$CF_VX_BRON" "$@"; return; fi
+  ssh -i "$BRON_KEY" -o BatchMode=yes -o IdentitiesOnly=yes -o ConnectTimeout=10 \
+    -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile="$STATE/known_hosts" "root@$oud" "$@"
+}
+check_ip() { echo "$1" | grep -Eq '^[0-9]{1,3}(\.[0-9]{1,3}){3}$' || fail "geef het IP van de oude VaultX-node, zoals 192.168.115.157"; }
+
+bron_koppelen() {
+  check_ip "$1"
+  mkdir -p "$STATE" && chmod 0700 "$STATE" || fail "map $STATE"
+  [ -s "$BRON_KEY" ] || ssh-keygen -q -t ed25519 -N '' -C "$BRON_MARK" -f "$BRON_KEY" || fail "ssh-keygen"
+  pub=$(cut -d' ' -f1,2 "$BRON_KEY.pub")
+  line="restrict,from=\"$ADDRESS,$VIP\",command=\"/usr/local/sbin/$BRON_MARK\" $pub $BRON_MARK"
+  b64=$(gzip -9c "$(dirname "$0")/vaultx-bron.sh" | base64 -w0) || fail "vaultx-bron.sh inpakken"
+  echo "Voer dit uit op de oude VaultX-node ($1), bv. via Commando's van die node (één regel):"
+  echo
+  echo "printf %s '$b64' | base64 -d | gunzip > /usr/local/sbin/$BRON_MARK && chmod 0700 /usr/local/sbin/$BRON_MARK && /usr/local/sbin/$BRON_MARK sleutel '$line'"
+  echo
+  echo "De sleutel kan alleen vaste opdrachten van $BRON_MARK doen (info, stop, start, telling, dump, env), alleen vanaf $ADDRESS."
+  echo "Daarna hier: vaultx-ctl.sh bron-info $1"
+}
+
+# telling_cluster <bestand met de telling van de oude node>: dezelfde
+# telling op het cluster, met een md5 waar de oude node er een gaf.
+SESSION="SET TimeZone='UTC'; SET DateStyle='ISO, YMD'; SET IntervalStyle='postgres'; SET extra_float_digits=3; SET bytea_output='hex';"
+telling_cluster() {
+  while read -r tb n sum; do
+    if [ "$(pg -c "SELECT to_regclass(format('public.%I', '$tb')) IS NULL")" = t ]; then echo "$tb ontbreekt -"; continue; fi
+    if [ "$sum" = - ]; then
+      r="$(pg -c "SELECT count(*) FROM public.\"$tb\"") -" || return 1
+    else
+      r=$(pg -c "$SESSION" -c "SELECT count(*) || ' ' || md5(coalesce(string_agg(md5(t::text), '' ORDER BY md5(t::text)), '')) FROM public.\"$tb\" t") || return 1
+    fi
+    echo "$tb $r"
+  done < "$1"
+}
+
+bron_info() {
+  check_ip "$1"
+  out=$(bron "$1" info) || fail "de oude node antwoordt niet via SSH (bron-koppelen gedaan? sshd aan? poort 22 open vanaf $ADDRESS?)"
+  echo "$out"
+  commit=$(echo "$out" | sed -n 's/^commit=//p')
+  echo "cluster: versie $VERSION, gebouwd $(cut -d' ' -f2 "$STATE/gebouwd" 2>/dev/null || echo nog-niet)"
+  [ "$commit" = "$(cut -d' ' -f2 "$STATE/gebouwd" 2>/dev/null)" ] || echo "LET OP: andere commit dan het cluster; zet Versie van VaultX op $commit (Wijzigen) of gebruik overnemen --andere-versie"
+}
+
+overnemen() {
+  oud=${1:-}
+  check_ip "$oud"
+  force=
+  [ "${2:-}" = --andere-versie ] && force=1
+  [ "$NIEUW" != true ] || fail "dit cluster is als nieuw cluster uitgerold (Nieuw cluster met een lege kluis); een overname kan alleen in een cluster zonder die keuze"
+  [ -n "${CF_VX_TEST:-}" ] || has_ip "$VIP" || fail "het VIP $VIP staat niet op deze node; doe de overname op de node met het VIP (de instellingen gaan van daar naar de andere nodes)"
+  [ -s "$STATE/gebouwd" ] || fail "VaultX is op deze node nog niet gebouwd"
+  built=$(cut -d' ' -f2 "$STATE/gebouwd")
+
+  say "Database van het cluster nakijken"
+  meta=$(db_meta) || fail "de database van het cluster antwoordt niet; is ze er al (Databases)?"
+  [ -z "$(metafield "$meta" ready)" ] || fail "de database van het cluster is al in gebruik ($meta); een tweede overname zou haar overschrijven"
+  tables=$(db_tables) || fail "tabellen tellen"
+  [ "$tables" = 0 ] || fail "de database van het cluster is niet leeg ($tables tabellen)"
+
+  say "Oude node $oud"
+  info=$(bron "$oud" info) || fail "de oude node antwoordt niet via SSH (eerst vaultx-ctl.sh bron-koppelen $oud)"
+  echo "$info" | sed 's/^/  /'
+  commit=$(echo "$info" | sed -n 's/^commit=//p')
+  alembic=$(echo "$info" | sed -n 's/^alembic=//p')
+  pgv=$(echo "$info" | sed -n 's/^pg=//p')
+  [ -n "$alembic" ] || fail "de oude node gaf geen alembic-versie; is dat wel VaultX?"
+  if [ "$commit" != "$built" ] && [ -z "$force" ]; then
+    fail "de oude VaultX is commit $commit en het cluster $built. Zet Versie van VaultX op $commit (Wijzigen) en rol uit, of: overnemen $oud --andere-versie (de code van het cluster moet dan nieuwer zijn)"
+  fi
+  grep -lqsE "^revision[^=]*= *['\"]${alembic}['\"]" "$CODE"/backend/alembic/versions/*.py ||
+    fail "de database van de oude node staat op migratie $alembic, die de code van het cluster ($built) niet kent; het cluster moet minstens dezelfde versie hebben"
+  mine=$(pg_restore --version | grep -Eo '[0-9]+' | head -n 1)
+  [ "$mine" -ge "$((pgv / 10000))" ] 2>/dev/null || fail "pg_restore $mine is ouder dan PostgreSQL $((pgv / 10000)) van de oude node"
+
+  mkdir -p "$STATE/overname" && chmod 0700 "$STATE/overname" || fail "map $STATE/overname"
+  t=$(date +%Y%m%d-%H%M%S)
+  dir=$STATE/overname/$t
+  mkdir -m 0700 "$dir" || fail "map $dir"
+  OUD=$oud
+  DIR=$dir
+
+  say "Oude VaultX stoppen (nginx en PostgreSQL blijven draaien; er wordt niets gewist)"
+  bron "$oud" stop || back "VaultX stoppen op de oude node"
+
+  say "Tellen in de oude database"
+  bron "$oud" telling > "$dir/telling-oud" || back "tellen op de oude node"
+  [ -s "$dir/telling-oud" ] || back "de oude database heeft geen tabellen"
+  echo "  $(wc -l < "$dir/telling-oud") tabellen"
+
+  say "Back-up op de oude node en kopie hierheen"
+  bron "$oud" dump > "$dir/vaultx.dump" || back "back-up op de oude node (pg_dump)"
+  sha=$(bron "$oud" sha) || back "sha256 van de back-up opvragen"
+  want=$(echo "$sha" | head -n 1)
+  echo "  back-up op de oude node: $(echo "$sha" | sed -n 2p)"
+  [ "$(sha256sum "$dir/vaultx.dump" | cut -d' ' -f1)" = "$want" ] || back "de kopie hier verschilt van de back-up op de oude node (sha256)"
+  pg_restore --list "$dir/vaultx.dump" > /dev/null || back "pg_restore leest de kopie niet"
+  echo "  kopie: $dir/vaultx.dump ($(du -h "$dir/vaultx.dump" | cut -f1)), sha256 gelijk"
+
+  say "Instellingen van de oude node"
+  (umask 077 && bron "$oud" env > "$dir/vaultx.env") || back "instellingen ophalen"
+  grep -q '^VAULTX_SECRET_KEY=.' "$dir/vaultx.env" || back "de oude node heeft geen VAULTX_SECRET_KEY"
+  bron "$oud" realip > "$dir/nginx-realip.conf" 2>/dev/null || :
+  echo "  $(grep -c '^VAULTX_' "$dir/vaultx.env") instellingen, sleutel $(sed -n 's/^VAULTX_SECRET_KEY=//p' "$dir/vaultx.env" | tail -n 1 | sha256sum | cut -c1-16)"
+
+  say "Terugzetten in de database van het cluster (één transactie)"
+  PGPASSWORD=$(dbpart '\2') pg_restore -h "$(dbpart '\3')" -p "$(dbpart '\4')" -U "$(dbpart '\1')" -d "$(dbpart '\5')" \
+    --no-owner --no-privileges --single-transaction --exit-on-error "$dir/vaultx.dump" || back "terugzetten (pg_restore)"
+
+  say "Tellen in de database van het cluster"
+  telling_cluster "$dir/telling-oud" > "$dir/telling-cluster" || back "tellen in het cluster"
+  bad=
+  while read -r tb n sum; do
+    line=$(grep "^$tb " "$dir/telling-cluster")
+    m=$(echo "$line" | cut -d' ' -f2)
+    s=$(echo "$line" | cut -d' ' -f3)
+    ok=ja
+    [ "$m" = "$n" ] || ok=NEE
+    [ "$sum" = - ] || [ "$s" = "$sum" ] || ok=NEE
+    printf '  %-32s %8s -> %-8s %s\n' "$tb" "$n" "$m" "$( [ "$sum" = - ] && echo 'aantal' || echo 'aantal+md5') $ok"
+    [ "$ok" = ja ] || bad="$bad $tb"
+  done < "$dir/telling-oud"
+  [ -z "$bad" ] || back "verschil in:$bad"
+
+  say "Instellingen overnemen en de database in gebruik nemen"
+  (umask 077 && mkdir -p "$CF" && chmod 0700 "$CF" && cp "$dir/vaultx.env" "$CF/vaultx.env") || back "$CF/vaultx.env"
+  [ -s "$dir/nginx-realip.conf" ] && cp "$dir/nginx-realip.conf" "$CF/nginx-realip.conf"
+  db_mark "cf-vaultx key=$(keyhash) ready=$(date +%s) from=$oud commit=$commit" || back "markering zetten"
+
+  say "VaultX van het cluster starten"
+  [ -s "$CF/nginx-realip.conf" ] && install_realip
+  sysctl_ restart cf-vaultx || back "systemctl restart cf-vaultx (journalctl -u cf-vaultx)"
+  i=0
+  while ! healthy; do
+    i=$((i + 1))
+    [ $i -le "${CF_VX_WAIT:-60}" ] || back "VaultX van het cluster antwoordt niet gezond (journalctl -u cf-vaultx)"
+    sleep "${CF_VX_SLEEP:-2}"
+  done
+  rm -f "$dir/vaultx.env" "$dir/nginx-realip.conf"
+  echo
+  echo "Overgenomen: VaultX draait op het cluster met de kluis van $oud."
+  echo "- De andere nodes starten zodra de sync VaultX-instellingen ze bereikte (binnen een paar minuten; Cronjobs)."
+  echo "- Zet nu in Nginx Proxy Manager de proxy host naar $VIP poort 80."
+  echo "- Back-up op de oude node: $(echo "$sha" | sed -n 2p); kopie hier: $dir/vaultx.dump"
+  echo "- De oude VaultX staat gestopt en uitgeschakeld; de data staat er nog. Terugweg: vaultx-ctl.sh terug $oud"
+  echo "- Alles goed? vaultx-ctl.sh afronden $oud haalt de sleutel van de oude node weg."
+  return 0
+}
+
+# Iets ging mis tijdens de overname: database van het cluster weer leeg,
+# overgenomen instellingen weg, oude VaultX weer aan.
+back() {
+  echo "FOUT: $1" >&2
+  echo "== Terugdraaien: database van het cluster leegmaken, oude VaultX weer starten" >&2
+  sysctl_ stop cf-vaultx >/dev/null 2>&1
+  if [ "$(db_tables 2>/dev/null)" != 0 ] || [ -n "$(metafield "$(db_meta 2>/dev/null)" ready)" ]; then
+    pg -c 'DROP SCHEMA public CASCADE' -c 'CREATE SCHEMA public' >/dev/null 2>&1 || echo "WAARSCHUWING: de database van het cluster leegmaken mislukte" >&2
+    db_mark '' >/dev/null 2>&1 || echo "WAARSCHUWING: markering weghalen mislukte" >&2
+  fi
+  rm -f "$CF/vaultx.env" "$CF/nginx-realip.conf" "$DIR/vaultx.env"
+  if bron "$OUD" start >&2; then
+    echo "De oude VaultX draait weer; aan de kluis is niets veranderd." >&2
+  else
+    echo "WAARSCHUWING: de oude VaultX starten mislukte; op de oude node: systemctl enable --now vaultx" >&2
+  fi
+  exit 1
+}
+
+afronden() {
+  check_ip "$1"
+  meta=$(db_meta) || fail "de database antwoordt niet"
+  [ -n "$(metafield "$meta" ready)" ] || fail "er is nog niets overgenomen"
+  bron "$1" opruimen || fail "de sleutel weghalen op de oude node"
+  echo "De oude node $1 blijft gestopt staan. Weggooien kan wanneer je wil; tot dan is ze de terugweg (met de kluis van vóór de overname)."
+}
+
+terug() {
+  oud=${1:-}
+  check_ip "$oud"
+  OUD=$oud
+  meta=$(db_meta) || fail "de database van het cluster antwoordt niet; start de oude dan met de hand: systemctl enable --now vaultx op $oud"
+  mkdir -p "$STATE/overname" && chmod 0700 "$STATE/overname"
+  f=$STATE/overname/cluster-$(date +%Y%m%d-%H%M%S).dump
+  say "Eerst een dump van de kluis zoals ze nu op het cluster staat"
+  PGPASSWORD=$(dbpart '\2') pg_dump -Fc -h "$(dbpart '\3')" -p "$(dbpart '\4')" -U "$(dbpart '\1')" -d "$(dbpart '\5')" > "$f" &&
+    [ -s "$f" ] || fail "dump van het cluster (er is niets veranderd)"
+  echo "  $f"
+  say "Markering weghalen: geen node van het cluster start VaultX nog"
+  db_mark "cf-vaultx terug=$(date +%s) naar=$oud was:$(echo "$meta" | tr ' ' ',')" || fail "markering"
+  sysctl_ stop cf-vaultx
+  say "Oude VaultX starten"
+  bron "$oud" start || fail "de oude VaultX starten; op $oud: systemctl enable --now vaultx"
+  echo
+  echo "Terug op $oud. Nog te doen:"
+  echo "- op de andere nodes van het cluster: systemctl stop cf-vaultx (Commando's); ze starten niet meer zonder markering"
+  echo "- Nginx Proxy Manager terug naar $oud poort 80"
+  echo "- wijzigingen sinds de overname staan alleen in $f"
+}
+
+backup() {
+  [ -n "${CF_VX_TEST:-}" ] || has_ip "$DB_VIP" || { echo "Het VIP van de database staat niet hier; geen back-up op deze node."; return 0; }
+  mkdir -p "$BACKUPS" && chmod 0700 "$BACKUPS" || fail "map $BACKUPS"
+  t=$(date +%Y%m%d-%H%M%S)
+  f=$BACKUPS/vaultx-$t.dump
+  (umask 077 && PGPASSWORD=$(dbpart '\2') pg_dump -Fc -h "$(dbpart '\3')" -p "$(dbpart '\4')" -U "$(dbpart '\1')" -d "$(dbpart '\5')" > "$f.part") ||
+    { rm -f "$f.part"; fail "pg_dump"; }
+  [ -s "$f.part" ] && pg_restore --list "$f.part" > /dev/null || { rm -f "$f.part"; fail "de dump is leeg of onleesbaar"; }
+  mv "$f.part" "$f"
+  (umask 077 && settings > "$BACKUPS/vaultx-$t.env")
+  for ext in dump env; do
+    # shellcheck disable=SC2012
+    ls -1 "$BACKUPS"/vaultx-*."$ext" 2>/dev/null | sort -r | tail -n +"$((KEEP + 1))" | while read -r old; do rm -f "$old"; done
+  done
+  echo "back-up klaar: $f"
+}
+
+# ---------------------------------------------------------------- installatie
+bouwen() {
+  if [ ! -d "$CODE/.git" ]; then
+    say "VaultX ophalen ($REPO)"
+    git clone -q "$REPO" "$CODE" || fail "git clone"
+  fi
+  git -C "$CODE" fetch -q --tags --force origin || fail "git fetch"
+  commit=$(git -C "$CODE" rev-parse -q --verify "origin/$VERSION^{commit}" 2>/dev/null ||
+    git -C "$CODE" rev-parse -q --verify "$VERSION^{commit}" 2>/dev/null) || fail "versie $VERSION bestaat niet in $REPO"
+  prev=$(git -C "$CODE" rev-parse -q HEAD 2>/dev/null)
+  say "Versie $VERSION = $commit"
+  git -C "$CODE" checkout -q --detach "$commit" || fail "git checkout $commit"
+  undo() { [ -n "$prev" ] && git -C "$CODE" checkout -q --detach "$prev"; rm -rf "$CODE/frontend/dist.new"; fail "$1 (vorige code teruggezet)"; }
+  [ -x "$CODE/venv/bin/python" ] || python3 -m venv "$CODE/venv" || undo "python3 -m venv"
+  say "Python-pakketten"
+  "$CODE/venv/bin/pip" install -q --disable-pip-version-check -r "$CODE/backend/requirements.txt" || undo "pip install"
+  say "Frontend bouwen"
+  (cd "$CODE/frontend" && npm ci --no-audit --no-fund --loglevel=error && npm run build -- --outDir dist.new --emptyOutDir) || undo "frontend bouwen"
+  [ -s "$CODE/frontend/dist.new/index.html" ] || undo "de frontend-build gaf geen index.html"
+  rm -rf "$CODE/frontend/dist.old"
+  [ -d "$CODE/frontend/dist" ] && mv "$CODE/frontend/dist" "$CODE/frontend/dist.old"
+  mv "$CODE/frontend/dist.new" "$CODE/frontend/dist" || fail "dist"
+  rm -rf "$CODE/frontend/dist.old"
+  mkdir -p "$STATE" && echo "$VERSION $commit" > "$STATE/gebouwd"
+  echo "Gebouwd: $commit"
+}
+gebouwd() {
+  [ "$(cut -d' ' -f1 "$STATE/gebouwd" 2>/dev/null)" = "$VERSION" ] &&
+    [ "$(git -C "$CODE" rev-parse -q HEAD 2>/dev/null)" = "$(cut -d' ' -f2 "$STATE/gebouwd")" ] &&
+    [ -x "$CODE/venv/bin/uvicorn" ] && [ -s "$CODE/frontend/dist/index.html" ]
+}
+
+SITE=/etc/nginx/sites-available/vaultx
+install_realip() {
+  mkdir -p "$VXETC" || return 1
+  if [ -s "$CF/nginx-realip.conf" ]; then
+    cmp -s "$CF/nginx-realip.conf" "$VXETC/nginx-realip.conf" || install -m 644 "$CF/nginx-realip.conf" "$VXETC/nginx-realip.conf"
+  elif [ ! -e "$VXETC/nginx-realip.conf" ]; then
+    install -m 644 "$CODE/deploy/debian/nginx-realip.conf" "$VXETC/nginx-realip.conf"
+  fi
+  nginx -t >/dev/null 2>&1 && sysctl_ reload nginx >/dev/null 2>&1
+  return 0
+}
+nginx_ok() {
+  cmp -s "$CODE/deploy/debian/nginx-vaultx.conf" "$SITE" && [ -L /etc/nginx/sites-enabled/vaultx ] &&
+    [ ! -e /etc/nginx/sites-enabled/default ] && [ -s "$VXETC/tls/nginx-tls.conf" ] && [ -e "$VXETC/nginx-realip.conf" ] &&
+    { [ ! -s "$CF/nginx-realip.conf" ] || cmp -s "$CF/nginx-realip.conf" "$VXETC/nginx-realip.conf"; } &&
+    sysctl_ is-active --quiet nginx
+}
+nginx_() {
+  mkdir -p "$VXETC" || fail "map $VXETC"
+  VAULTX_TLS_NO_RELOAD=1 bash "$CODE/deploy/debian/tls-cert.sh" || fail "tls-cert.sh"
+  install_realip
+  [ -e "$SITE" ] && cp -a "$SITE" "$SITE.bak-cf"
+  install -m 644 "$CODE/deploy/debian/nginx-vaultx.conf" "$SITE" || fail "$SITE"
+  ln -sf "$SITE" /etc/nginx/sites-enabled/vaultx
+  rm -f /etc/nginx/sites-enabled/default
+  if ! nginx -t; then
+    [ -e "$SITE.bak-cf" ] && mv -f "$SITE.bak-cf" "$SITE"
+    fail "nginx -t weigert de site van VaultX (vorige teruggezet)"
+  fi
+  sysctl_ enable nginx >/dev/null 2>&1
+  sysctl_ reload-or-restart nginx || fail "nginx herladen"
+}
+
+# Met een actieve ufw (default deny): etcd, Patroni, PostgreSQL en VRRP
+# tussen de nodes.
+ufw_active() { command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q '^Status: active'; }
+ufw_rules() {
+  for ip in $PEERS; do
+    echo "allow from $ip to any port 2379:2380 proto tcp"
+    echo "allow from $ip to any port 5432 proto tcp"
+    echo "allow from $ip to any port 8008 proto tcp"
+    echo "allow from $ip proto vrrp"
+  done
+}
+firewall_ok() {
+  ufw_active || return 0
+  added=$(ufw show added 2>/dev/null)
+  ufw_rules | grep -v vrrp | while read -r r; do
+    echo "$added" | grep -qxF "ufw $r" || exit 1
+  done
+}
+firewall() {
+  if ! ufw_active; then echo "ufw staat niet aan; niets te doen."; return 0; fi
+  ufw_rules | while read -r r; do
+    # shellcheck disable=SC2086
+    ufw $r >/dev/null || exit 1
+    echo "ufw $r"
+  done || fail "ufw-regel zetten"
+}
+
+status() {
+  echo "node:       $(hostname) (index $INDEX)"
+  if has_ip "$VIP"; then echo "VIP:        $VIP staat hier"; else echo "VIP:        $VIP staat elders"; fi
+  if has_ip "$DB_VIP"; then echo "db-VIP:     $DB_VIP staat hier (primary)"; else echo "db-VIP:     $DB_VIP staat elders"; fi
+  echo "cf-vaultx:  $(sysctl_ is-active cf-vaultx 2>/dev/null)"
+  if healthy; then echo "VaultX:     antwoordt gezond"; else echo "VaultX:     antwoordt NIET op 127.0.0.1:8000"; fi
+  if meta=$(db_meta 2>/dev/null); then
+    echo "database:   ${meta:-geen markering} ($(db_tables) tabellen)"
+  else
+    echo "database:   antwoordt niet"
+  fi
+  if [ -s "$CF/vaultx.env" ]; then echo "sleutel:    overgenomen ($(keyhash))"; elif [ -n "$(key)" ]; then echo "sleutel:    van de template ($(keyhash))"; else echo "sleutel:    nog geen (wacht op de overname)"; fi
+  echo "versie:     $VERSION ($(cut -d' ' -f2 "$STATE/gebouwd" 2>/dev/null || echo nog niet gebouwd))"
+  # shellcheck disable=SC2012
+  echo "back-up:    $(ls -1t "$BACKUPS"/vaultx-*.dump 2>/dev/null | head -n 1)"
+  return 0
+}
+
+case "${1:-}" in
+  voorstart) voorstart ;;
+  check)
+    sysctl_ is-active --quiet nginx || exit 1
+    healthy
+    ;;
+  status) status ;;
+  bron-koppelen) bron_koppelen "${2:-}" ;;
+  bron-info) bron_info "${2:-}" ;;
+  overnemen) overnemen "${2:-}" "${3:-}" ;;
+  afronden) afronden "${2:-}" ;;
+  terug) terug "${2:-}" ;;
+  backup) backup ;;
+  bouwen) bouwen ;;
+  gebouwd) gebouwd ;;
+  nginx) nginx_ ;;
+  nginx-ok) nginx_ok ;;
+  firewall) firewall ;;
+  firewall-ok) firewall_ok ;;
+  unchanged)
+    sysctl_ is-active --quiet cf-vaultx || exit 0
+    [ "$(cat "$HASH" 2>/dev/null)" = "$(fingerprint)" ]
+    ;;
+  restart-if-changed)
+    [ -s "$CF/nginx-realip.conf" ] && install_realip
+    sysctl_ try-restart cf-vaultx
+    ;;
+  *)
+    echo "gebruik: $0 voorstart|check|status|bron-koppelen|bron-info|overnemen|afronden|terug|backup|bouwen|gebouwd|nginx|nginx-ok|firewall|firewall-ok|unchanged|restart-if-changed" >&2
+    exit 2
+    ;;
+esac

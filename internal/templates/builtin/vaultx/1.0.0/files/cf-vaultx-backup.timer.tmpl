@@ -1,0 +1,11 @@
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}).
+[Unit]
+Description=Nachtelijke back-up van VaultX ({{ .cluster.slug }})
+
+[Timer]
+OnCalendar=*-*-* 03:15
+RandomizedDelaySec=15m
+Persistent=true
+
+[Install]
+WantedBy=timers.target

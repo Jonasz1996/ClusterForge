@@ -1,0 +1,43 @@
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}).
+# VaultX op elke node van het cluster tegen dezelfde PostgreSQL
+# ({{ .params.db_vip }}). Zolang de database er niet is of de kluis nog niet
+# is overgenomen, faalt voorstart en probeert systemd het elke 15 s opnieuw.
+# Dezelfde hardening als vaultx.service van VaultX zelf.
+[Unit]
+Description=VaultX van {{ .cluster.slug }}
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=vaultx
+Group=vaultx
+WorkingDirectory=/opt/vaultx/backend
+# Als root: markering en sleutel controleren, /etc/vaultx/vaultx.env schrijven.
+ExecStartPre=+/usr/local/lib/clusterforge/vaultx-ctl.sh voorstart
+EnvironmentFile=-/etc/vaultx/vaultx.env
+# Migraties onder een advisory lock: nooit twee nodes tegelijk.
+ExecStartPre=/opt/vaultx/venv/bin/python /usr/local/lib/clusterforge/vaultx-migreer.py
+ExecStart=/opt/vaultx/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --proxy-headers --forwarded-allow-ips 127.0.0.1 --no-server-header
+Restart=always
+RestartSec=15
+TimeoutStartSec=600
+
+UMask=0077
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+ReadOnlyPaths=/opt/vaultx
+
+[Install]
+WantedBy=multi-user.target
