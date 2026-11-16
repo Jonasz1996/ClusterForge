@@ -12480,6 +12480,15 @@ type SecurityAcceptInput struct {
 	Note string `json:"note"`
 }
 
+// SecurityFixInput defines model for SecurityFixInput.
+type SecurityFixInput struct {
+	NodeId openapi_types.UUID `json:"node_id"`
+
+	// RollbackMinutes SSH: na zoveel minuten terugdraaien tenzij bevestigd (standaard 10).
+	RollbackMinutes *int     `json:"rollback_minutes,omitempty"`
+	Rules           []string `json:"rules"`
+}
+
 // SecurityObject Een object van de beveiligingsmodule (fase 27); de velden staan in web/src/lib/security.ts en internal/security.
 type SecurityObject map[string]interface{}
 
@@ -14618,6 +14627,9 @@ type RiskWhatIfJSONRequestBody = RiskWhatIfInput
 // AcceptSecurityFindingJSONRequestBody defines body for AcceptSecurityFinding for application/json ContentType.
 type AcceptSecurityFindingJSONRequestBody = SecurityAcceptInput
 
+// ApplySecurityFixesJSONRequestBody defines body for ApplySecurityFixes for application/json ContentType.
+type ApplySecurityFixesJSONRequestBody = SecurityFixInput
+
 // RefreshSecurityJSONRequestBody defines body for RefreshSecurity for application/json ContentType.
 type RefreshSecurityJSONRequestBody = SecurityRefreshInput
 
@@ -15625,6 +15637,18 @@ type ServerInterface interface {
 	// ReopenSecurityFinding Aanvaarde bevinding heropenen (admin)
 	// (POST /security/findings/{findingId}/reopen)
 	ReopenSecurityFinding(w http.ResponseWriter, r *http.Request, findingId openapi_types.UUID)
+	// ListSecurityFixes De laatste 50 toegepaste oplossingen (fase 27 M6)
+	// (GET /security/fixes)
+	ListSecurityFixes(w http.ResponseWriter, r *http.Request)
+	// ApplySecurityFixes Veilige oplossingen toepassen op één node (admin); SSH wordt teruggedraaid tenzij bevestigd
+	// (POST /security/fixes)
+	ApplySecurityFixes(w http.ResponseWriter, r *http.Request)
+	// ConfirmSecurityFix SSH-wijziging houden; de terugdraaitimer stopt (admin)
+	// (POST /security/fixes/{fixId}/confirm)
+	ConfirmSecurityFix(w http.ResponseWriter, r *http.Request, fixId openapi_types.UUID)
+	// RollbackSecurityFix SSH-wijziging meteen terugdraaien (admin)
+	// (POST /security/fixes/{fixId}/rollback)
+	RollbackSecurityFix(w http.ResponseWriter, r *http.Request, fixId openapi_types.UUID)
 	// GetSecurityHardening Verharding per node (fase 27 M2)
 	// (GET /security/hardening)
 	GetSecurityHardening(w http.ResponseWriter, r *http.Request)
@@ -17662,6 +17686,30 @@ func (_ Unimplemented) AcceptSecurityFinding(w http.ResponseWriter, r *http.Requ
 // ReopenSecurityFinding Aanvaarde bevinding heropenen (admin)
 // (POST /security/findings/{findingId}/reopen)
 func (_ Unimplemented) ReopenSecurityFinding(w http.ResponseWriter, r *http.Request, findingId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListSecurityFixes De laatste 50 toegepaste oplossingen (fase 27 M6)
+// (GET /security/fixes)
+func (_ Unimplemented) ListSecurityFixes(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ApplySecurityFixes Veilige oplossingen toepassen op één node (admin); SSH wordt teruggedraaid tenzij bevestigd
+// (POST /security/fixes)
+func (_ Unimplemented) ApplySecurityFixes(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ConfirmSecurityFix SSH-wijziging houden; de terugdraaitimer stopt (admin)
+// (POST /security/fixes/{fixId}/confirm)
+func (_ Unimplemented) ConfirmSecurityFix(w http.ResponseWriter, r *http.Request, fixId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RollbackSecurityFix SSH-wijziging meteen terugdraaien (admin)
+// (POST /security/fixes/{fixId}/rollback)
+func (_ Unimplemented) RollbackSecurityFix(w http.ResponseWriter, r *http.Request, fixId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -27156,6 +27204,86 @@ func (siw *ServerInterfaceWrapper) ReopenSecurityFinding(w http.ResponseWriter, 
 	handler.ServeHTTP(w, r)
 }
 
+// ListSecurityFixes operation middleware
+func (siw *ServerInterfaceWrapper) ListSecurityFixes(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListSecurityFixes(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ApplySecurityFixes operation middleware
+func (siw *ServerInterfaceWrapper) ApplySecurityFixes(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ApplySecurityFixes(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ConfirmSecurityFix operation middleware
+func (siw *ServerInterfaceWrapper) ConfirmSecurityFix(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "fixId" -------------
+	var fixId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "fixId", chi.URLParam(r, "fixId"), &fixId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "fixId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ConfirmSecurityFix(w, r, fixId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RollbackSecurityFix operation middleware
+func (siw *ServerInterfaceWrapper) RollbackSecurityFix(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "fixId" -------------
+	var fixId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "fixId", chi.URLParam(r, "fixId"), &fixId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "fixId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RollbackSecurityFix(w, r, fixId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetSecurityHardening operation middleware
 func (siw *ServerInterfaceWrapper) GetSecurityHardening(w http.ResponseWriter, r *http.Request) {
 
@@ -29014,6 +29142,18 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/security/report", wrapper.GetSecurityReport)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/security/fixes", wrapper.ListSecurityFixes)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/security/fixes", wrapper.ApplySecurityFixes)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/security/fixes/{fixId}/confirm", wrapper.ConfirmSecurityFix)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/security/fixes/{fixId}/rollback", wrapper.RollbackSecurityFix)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/security/scanner", wrapper.LinkSecurityScanner)

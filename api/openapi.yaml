@@ -5331,6 +5331,70 @@ paths:
               schema: { $ref: "#/components/schemas/SecurityObject" }
         "401": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /security/fixes:
+    get:
+      operationId: listSecurityFixes
+      summary: De laatste 50 toegepaste oplossingen (fase 27 M6)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/SecurityObject" } }
+        "401": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: applySecurityFixes
+      summary: Veilige oplossingen toepassen op één node (admin); SSH wordt teruggedraaid tenzij bevestigd
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SecurityFixInput" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SecurityObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /security/fixes/{fixId}/confirm:
+    parameters:
+      - { name: fixId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: confirmSecurityFix
+      summary: SSH-wijziging houden; de terugdraaitimer stopt (admin)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SecurityObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /security/fixes/{fixId}/rollback:
+    parameters:
+      - { name: fixId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: rollbackSecurityFix
+      summary: SSH-wijziging meteen terugdraaien (admin)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SecurityObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
   /security/scanner:
     post:
       operationId: linkSecurityScanner
@@ -14505,6 +14569,13 @@ components:
         schedule: { type: string, enum: [uit, dagelijks, wekelijks] }
         weekday: { type: integer, minimum: 0, maximum: 6 }
         hour: { type: integer, minimum: 0, maximum: 23 }
+    SecurityFixInput:
+      type: object
+      required: [node_id, rules]
+      properties:
+        node_id: { type: string, format: uuid }
+        rules: { type: array, items: { type: string }, minItems: 1 }
+        rollback_minutes: { type: integer, minimum: 2, maximum: 60, description: "SSH: na zoveel minuten terugdraaien tenzij bevestigd (standaard 10)." }
     FirewallObject:
       type: object
       description: Een object van de firewall (fase 16); de velden staan in web/src/lib/firewall.ts en internal/firewall.

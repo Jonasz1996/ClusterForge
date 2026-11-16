@@ -23,6 +23,10 @@ const SecurityScanSince = 42
 // als de beheerder het aanzet, één standaardwachtwoord per dienst.
 const SecurityProbeSince = 43
 
+// SecurityFixSince is de eerste protocolversie die veilige oplossingen
+// uit FixableRules zelf toepast (verzoek fix, fix_confirm, fix_rollback).
+const SecurityFixSince = 44
+
 // SubjectSecurity draagt de beveiligingsverzoeken: cf.node.<id>.security.
 const SubjectSecurity = "security"
 
@@ -49,7 +53,58 @@ const (
 	// aanvraag (en hoogstens één aanmeldpoging met een standaardwachtwoord
 	// als DefaultPasswords aanstaat). Ook hier alleen binnen Allowed.
 	SecurityOpProbe = "probe"
+	// SecurityOpFix past de oplossingen van Fix.Rules toe. De agent kent
+	// zelf wat elke regel schrijft (vaste lijst, geen vrije tekst van de
+	// server). SSH-wijzigingen krijgen een terugdraaitimer: zonder
+	// fix_confirm zet de node na Fix.RollbackAfter de oude instellingen terug.
+	SecurityOpFix = "fix"
+	// SecurityOpFixConfirm houdt de SSH-wijziging en stopt de timer.
+	SecurityOpFixConfirm = "fix_confirm"
+	// SecurityOpFixRollback zet de SSH-wijziging meteen terug.
+	SecurityOpFixRollback = "fix_rollback"
 )
+
+// FixableRules zijn de verhardingsregels die de agent met één klik kan
+// oplossen. Bewust niet: IP-doorsturen (Docker, VPN), mounts, accounts,
+// setuid en diensten die iemand nodig kan hebben.
+var FixableRules = []string{
+	"ssh-root-login", "ssh-empty-passwords", "ssh-password-auth", "ssh-max-auth-tries", "ssh-x11", "ssh-weak-crypto",
+	"file-shadow", "file-gshadow", "file-passwd", "file-sshd-config", "file-sudoers",
+	"net-redirects", "net-redirects6", "net-source-route", "net-send-redirects", "net-rp-filter", "net-syncookies", "net-martians",
+	"net-icmp-broadcast",
+	"kern-aslr", "kern-bpf", "kern-links", "kern-kptr", "kern-dmesg", "kern-ptrace", "kern-suid-dump",
+	"svc-telnet", "svc-fail2ban",
+}
+
+// Grenzen van de SSH-terugdraaitimer.
+const (
+	FixRollbackMin     = 2 * time.Minute
+	FixRollbackDefault = 10 * time.Minute
+	FixRollbackMax     = 60 * time.Minute
+)
+
+type FixSpec struct {
+	Rules []string `json:"rules"`
+	// RollbackAfter in seconden; 0 is FixRollbackDefault.
+	RollbackAfter int `json:"rollback_after,omitempty"`
+}
+
+// FixResult is wat de agent deed.
+type FixResult struct {
+	Outcomes []FixOutcome `json:"outcomes"`
+	// SSHPending: de SSH-instellingen zijn gewijzigd en worden op
+	// RollbackAt teruggezet tenzij de beheerder bevestigt.
+	SSHPending bool       `json:"ssh_pending"`
+	RollbackAt *time.Time `json:"rollback_at,omitempty"`
+}
+
+type FixOutcome struct {
+	Rule string `json:"rule"`
+	OK   bool   `json:"ok"`
+	// Changed zegt in mensentaal wat er veranderde.
+	Changed []string `json:"changed,omitempty"`
+	Error   string   `json:"error,omitempty"`
+}
 
 // Soorten diensten voor een probe.
 const (
@@ -174,6 +229,7 @@ type SecurityRequest struct {
 	Deadline time.Time  `json:"deadline"`
 	Scan     *ScanSpec  `json:"scan,omitempty"`
 	Probe    *ProbeSpec `json:"probe,omitempty"`
+	Fix      *FixSpec   `json:"fix,omitempty"`
 }
 
 type SecurityResponse struct {
@@ -182,6 +238,7 @@ type SecurityResponse struct {
 	Audit     *SecurityAudit     `json:"audit,omitempty"`
 	Scan      *ScanResult        `json:"scan,omitempty"`
 	Probe     []ProbeResult      `json:"probe,omitempty"`
+	Fix       *FixResult         `json:"fix,omitempty"`
 }
 
 // SecurityAudit is wat de agent over de verharding van zijn node ziet.

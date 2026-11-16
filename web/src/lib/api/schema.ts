@@ -4992,6 +4992,62 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/security/fixes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** De laatste 50 toegepaste oplossingen (fase 27 M6) */
+        get: operations["listSecurityFixes"];
+        put?: never;
+        /** Veilige oplossingen toepassen op één node (admin); SSH wordt teruggedraaid tenzij bevestigd */
+        post: operations["applySecurityFixes"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/security/fixes/{fixId}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                fixId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** SSH-wijziging houden; de terugdraaitimer stopt (admin) */
+        post: operations["confirmSecurityFix"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/security/fixes/{fixId}/rollback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                fixId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** SSH-wijziging meteen terugdraaien (admin) */
+        post: operations["rollbackSecurityFix"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/security/scanner": {
         parameters: {
             query?: never;
@@ -13880,6 +13936,13 @@ export interface components {
             weekday?: number;
             hour?: number;
         };
+        SecurityFixInput: {
+            /** Format: uuid */
+            node_id: string;
+            rules: string[];
+            /** @description SSH: na zoveel minuten terugdraaien tenzij bevestigd (standaard 10). */
+            rollback_minutes?: number;
+        };
         /** @description Een object van de firewall (fase 16); de velden staan in web/src/lib/firewall.ts en internal/firewall. */
         FirewallObject: {
             [key: string]: unknown;
@@ -21986,6 +22049,110 @@ export interface operations {
             };
             401: components["responses"]["Error"];
             404: components["responses"]["Error"];
+        };
+    };
+    listSecurityFixes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SecurityObject"][];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    applySecurityFixes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SecurityFixInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SecurityObject"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    confirmSecurityFix: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                fixId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SecurityObject"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    rollbackSecurityFix: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                fixId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SecurityObject"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
         };
     };
     linkSecurityScanner: {

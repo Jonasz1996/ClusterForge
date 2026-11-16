@@ -41,6 +41,8 @@ type Rule struct {
 	Title    string `json:"title"`
 	Severity string `json:"severity"`
 	Fix      string `json:"fix"`
+	// Auto: ClusterForge kan dit met één klik oplossen (M6, protocol 44).
+	Auto bool `json:"auto"`
 	// check geeft de uitkomst, wat er staat en wat er hoort te staan.
 	check func(h HardeningContext) (result, value, expected string)
 }
@@ -53,7 +55,7 @@ type RuleResult struct {
 	Expected string `json:"expected"`
 }
 
-const sshdDropIn = "Zet het in /etc/ssh/sshd_config.d/50-clusterforge.conf en controleer met `sshd -t && systemctl reload ssh`."
+const sshdDropIn = "Zet het in /etc/ssh/sshd_config.d/01-clusterforge.conf (ClusterForge doet dat met Oplossen) en controleer met `sshd -t && systemctl reload ssh`."
 
 func sshdRule(key string, ok func(v string) bool, expected string) func(h HardeningContext) (string, string, string) {
 	return func(h HardeningContext) (string, string, string) {
@@ -461,7 +463,9 @@ type HardeningNode struct {
 
 // HardeningOverview is de pagina Verharding.
 type HardeningOverview struct {
-	Protocol int             `json:"protocol"`
-	Rules    []Rule          `json:"rules"`
-	Nodes    []HardeningNode `json:"nodes"`
+	Protocol int `json:"protocol"`
+	// FixProtocol: vanaf deze agentversie werkt "Oplossen".
+	FixProtocol int             `json:"fix_protocol"`
+	Rules       []Rule          `json:"rules"`
+	Nodes       []HardeningNode `json:"nodes"`
 }

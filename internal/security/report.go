@@ -170,10 +170,13 @@ type Summary struct {
 	CriticalNet  []string       `json:"critical_network"`
 	HardeningAvg *int           `json:"hardening_avg"`
 	LowHardening []string       `json:"low_hardening"`
+	// SSHWaiting: nodes met een SSH-wijziging die op bevestiging wacht.
+	SSHWaiting []string `json:"ssh_waiting"`
 }
 
 func (s *Service) Summary(ctx context.Context) (Summary, error) {
-	out := Summary{CVE: map[string]int{}, Hardening: map[string]int{}, Network: map[string]int{}, KEVNodes: []string{}, CriticalNet: []string{}, LowHardening: []string{}}
+	out := Summary{CVE: map[string]int{}, Hardening: map[string]int{}, Network: map[string]int{}, KEVNodes: []string{}, CriticalNet: []string{}, LowHardening: []string{},
+		SSHWaiting: []string{}}
 	rows, err := s.pool.Query(ctx, `
 SELECT f.kind, f.severity, coalesce((f.detail->>'kev')::int, 0) > 0, coalesce(n.hostname, f.subject), f.title
 FROM security_findings f LEFT JOIN nodes n ON n.id = f.node_id WHERE f.status = 'open'`)
@@ -208,6 +211,24 @@ FROM security_findings f LEFT JOIN nodes n ON n.id = f.node_id WHERE f.status = 
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
+		return out, err
+	}
+	if err := func() error {
+		rows, err := s.pool.Query(ctx, `SELECT DISTINCT n.hostname FROM security_fix_runs r JOIN nodes n ON n.id = r.node_id
+			WHERE r.ssh_pending AND r.confirmed_at IS NULL AND r.rolled_back_at IS NULL AND r.rollback_at > now()`)
+		if err != nil {
+			return err
+		}
+		defer rows.Close()
+		for rows.Next() {
+			var h string
+			if err := rows.Scan(&h); err != nil {
+				return err
+			}
+			out.SSHWaiting = append(out.SSHWaiting, h)
+		}
+		return rows.Err()
+	}(); err != nil {
 		return out, err
 	}
 	rows, err = s.pool.Query(ctx, `SELECT n.hostname, h.score FROM security_hardening h JOIN nodes n ON n.id = h.node_id WHERE h.score IS NOT NULL`)

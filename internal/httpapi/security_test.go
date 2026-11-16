@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/Jonasz1996/clusterforge/internal/agent"
@@ -25,6 +26,8 @@ const scanXML = `<nmaprun><host><status state="up"/><address addr="192.168.10.19
 
 func TestSecurityEndToEnd(t *testing.T) {
 	var nmapArgs string
+	var sysMu sync.Mutex
+	rootLogin, timer := "yes", ""
 	e, c := adminClient(t)
 	feeds := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -44,6 +47,7 @@ func TestSecurityEndToEnd(t *testing.T) {
 		t.Fatalf("token: %d", s)
 	}
 	root := procRoot(t, strings.Repeat("5", 32))
+	writeFile(t, filepath.Join(root, "etc/ssh/sshd_config"), "Include /etc/ssh/sshd_config.d/*.conf\n", 0o644)
 	writeFile(t, filepath.Join(root, "etc/os-release"), "ID=debian\nVERSION_ID=\"13\"\nVERSION_CODENAME=trixie\n", 0o644)
 	cfg, err := agent.Enroll(context.Background(), agent.EnrollOptions{ServerURL: e.srv.URL, AllowHTTP: true, Token: tok.Token, Root: root})
 	if err != nil {
@@ -64,8 +68,19 @@ func TestSecurityEndToEnd(t *testing.T) {
 				nmapArgs = strings.Join(args, " ")
 				return nil, os.WriteFile(args[slices.Index(args, "-oX")+1], []byte(scanXML), 0o600)
 			}
-			if name == "sshd" {
-				return []byte("permitrootlogin yes\npermitemptypasswords no\n"), nil
+			sysMu.Lock()
+			defer sysMu.Unlock()
+			switch c := name + " " + strings.Join(args, " "); {
+			case c == "sshd -T":
+				return []byte("permitrootlogin " + rootLogin + "\npermitemptypasswords no\n"), nil
+			case c == "systemctl reload ssh":
+				rootLogin = "without-password"
+			case strings.HasPrefix(c, "systemd-run"):
+				timer = "active"
+			case c == "systemctl stop cf-ssh-rollback.timer":
+				timer = ""
+			case c == "systemctl is-active cf-ssh-rollback.timer":
+				return []byte(timer + "\n"), nil
 			}
 			return nil, nil
 		},
@@ -233,6 +248,42 @@ func TestSecurityEndToEnd(t *testing.T) {
 	if att.Badges["/kwetsbaarheden"].Count == 0 {
 		t.Errorf("aandacht: %+v", att)
 	}
+
+	// M6: oplossen met één klik; SSH wacht op bevestiging.
+	type fixRun struct {
+		ID       string `json:"id"`
+		Status   string `json:"status"`
+		Outcomes []struct {
+			Rule  string `json:"rule"`
+			OK    bool   `json:"ok"`
+			Error string `json:"error"`
+		} `json:"outcomes"`
+	}
+	var fr fixRun
+	if s := c.do("POST", "/api/v1/security/fixes", map[string]any{"node_id": web01.ID, "rules": []string{"rm -rf"}}, nil); s != 400 {
+		t.Fatalf("onbekende regel: %d", s)
+	}
+	if s := c.do("POST", "/api/v1/security/fixes", map[string]any{"node_id": web01.ID, "rules": []string{"ssh-root-login", "net-syncookies"}}, &fr); s != 200 ||
+		fr.Status != "wacht op bevestiging" || len(fr.Outcomes) != 2 || !fr.Outcomes[0].OK || !fr.Outcomes[1].OK {
+		t.Fatalf("oplossen: %d %+v", s, fr)
+	}
+	if b, err := os.ReadFile(filepath.Join(root, "etc/ssh/sshd_config.d/01-clusterforge.conf")); err != nil || !strings.Contains(string(b), "PermitRootLogin prohibit-password") {
+		t.Fatalf("drop-in: %q %v", b, err)
+	}
+	if s := c.do("GET", "/api/v1/security/hardening", nil, &h); s != 200 || h.Nodes[0].Results[0].Result != "ok" {
+		t.Fatalf("na oplossen niet opnieuw gecontroleerd: %+v", h.Nodes[0].Results[0])
+	}
+	if s := c.do("POST", "/api/v1/security/fixes/"+fr.ID+"/confirm", nil, &fr); s != 200 || fr.Status != "bevestigd" {
+		t.Fatalf("bevestigen: %d %+v", s, fr)
+	}
+	if s := c.do("POST", "/api/v1/security/fixes/"+fr.ID+"/rollback", nil, nil); s != 409 {
+		t.Fatalf("terugdraaien na bevestigen: %d", s)
+	}
+	var runs []fixRun
+	if c.do("GET", "/api/v1/security/fixes", nil, &runs); len(runs) != 1 {
+		t.Fatalf("lijst: %+v", runs)
+	}
+
 	e.api.security.Wait()
 	if s := c.do("DELETE", "/api/v1/security/scopes/"+sc.ID, nil, nil); s != 204 {
 		t.Fatalf("verwijderen: %d", s)

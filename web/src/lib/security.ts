@@ -260,7 +260,7 @@ export function isCVEDetail(d: SecurityFinding["detail"]): d is CVEDetail {
 
 // Verharding (M2).
 
-export type HardeningRule = { id: string; category: string; title: string; severity: Severity; fix: string };
+export type HardeningRule = { id: string; category: string; title: string; severity: Severity; fix: string; auto: boolean };
 export type RuleResult = { id: string; result: "ok" | "fout" | "nvt"; value: string; expected: string };
 export type LynisReport = {
   date: string;
@@ -281,13 +281,69 @@ export type HardeningNode = SecurityNode & {
   lynis: LynisReport | null;
 };
 
-export type HardeningOverview = { protocol: number; rules: HardeningRule[]; nodes: HardeningNode[] };
+export type HardeningOverview = { protocol: number; fix_protocol: number; rules: HardeningRule[]; nodes: HardeningNode[] };
 
 export function useHardening() {
   return useQuery({
     queryKey: [...key, "hardening"],
     queryFn: async () => unwrap(await api.GET("/security/hardening")) as unknown as HardeningOverview,
     refetchInterval: 30_000,
+  });
+}
+
+// Oplossen met één klik (M6).
+
+export type FixOutcome = { rule: string; ok: boolean; changed?: string[]; error?: string };
+export type FixStatus = "klaar" | "mislukt" | "wacht op bevestiging" | "bevestigd" | "teruggedraaid" | "verlopen";
+export type FixRun = {
+  id: string;
+  node_id: string;
+  hostname: string;
+  rules: string[];
+  outcomes: FixOutcome[];
+  error: string;
+  ssh_pending: boolean;
+  rollback_at: string | null;
+  confirmed_at: string | null;
+  rolled_back_at: string | null;
+  created_by: string;
+  created_at: string;
+  status: FixStatus;
+};
+
+export const fixStatusTone: Record<FixStatus, Tone> = {
+  klaar: "green",
+  mislukt: "red",
+  "wacht op bevestiging": "amber",
+  bevestigd: "green",
+  teruggedraaid: "slate",
+  verlopen: "slate",
+};
+
+export function useFixRuns() {
+  return useQuery({
+    queryKey: [...key, "fixes"],
+    queryFn: async () => unwrap(await api.GET("/security/fixes")) as unknown as FixRun[],
+    refetchInterval: 15_000,
+  });
+}
+
+export function useApplyFixes() {
+  const done = useInvalidate();
+  return useMutation({
+    mutationFn: async (body: components["schemas"]["SecurityFixInput"]) => unwrap(await api.POST("/security/fixes", { body })) as unknown as FixRun,
+    onSuccess: done,
+  });
+}
+
+export function useFinishFix() {
+  const done = useInvalidate();
+  return useMutation({
+    mutationFn: async ({ id, keep }: { id: string; keep: boolean }) =>
+      (keep
+        ? unwrap(await api.POST("/security/fixes/{fixId}/confirm", { params: { path: { fixId: id } } }))
+        : unwrap(await api.POST("/security/fixes/{fixId}/rollback", { params: { path: { fixId: id } } }))) as unknown as FixRun,
+    onSuccess: done,
   });
 }
 

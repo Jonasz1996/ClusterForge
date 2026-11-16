@@ -1682,6 +1682,20 @@ type SecurityFinding struct {
 	AcceptedNote  string
 }
 
+type SecurityFixRun struct {
+	ID           uuid.UUID
+	NodeID       uuid.UUID
+	Rules        []string
+	Outcomes     []byte
+	Error        string
+	SshPending   bool
+	RollbackAt   *time.Time
+	ConfirmedAt  *time.Time
+	RolledBackAt *time.Time
+	CreatedBy    *uuid.UUID
+	CreatedAt    time.Time
+}
+
 type SecurityHardening struct {
 	NodeID      uuid.UUID
 	CollectedAt *time.Time

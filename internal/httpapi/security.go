@@ -398,3 +398,71 @@ func (s *Server) GetSecurityReport(w http.ResponseWriter, r *http.Request, param
 	}
 	writeJSON(w, http.StatusOK, rep)
 }
+
+// Veilige oplossingen (fase 27 M6).
+
+func (s *Server) fixError(w http.ResponseWriter, r *http.Request, err error) {
+	switch {
+	case errors.Is(err, security.ErrFixUnsupported):
+		writeError(w, http.StatusConflict, "unsupported", err.Error())
+	case errors.Is(err, security.ErrFixNotWaiting):
+		writeError(w, http.StatusConflict, "not_waiting", "Deze wijziging wacht niet meer op bevestiging.")
+	default:
+		s.securityError(w, r, err)
+	}
+}
+
+func (s *Server) ListSecurityFixes(w http.ResponseWriter, r *http.Request) {
+	if !s.securityReady(w) {
+		return
+	}
+	list, err := s.security.FixRuns(r.Context())
+	if err != nil {
+		s.securityError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, list)
+}
+
+func (s *Server) ApplySecurityFixes(w http.ResponseWriter, r *http.Request) {
+	p, ok := requireAdmin(w, r)
+	if !ok || !s.securityReady(w) {
+		return
+	}
+	var in gen.SecurityFixInput
+	if !decode(w, r, &in) {
+		return
+	}
+	var rollback time.Duration
+	if in.RollbackMinutes != nil {
+		rollback = time.Duration(*in.RollbackMinutes) * time.Minute
+	}
+	uid := p.User.ID
+	run, err := s.security.ApplyFixes(r.Context(), events.User(p.User.ID), &uid, in.NodeId, in.Rules, rollback)
+	if err != nil {
+		s.fixError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, run)
+}
+
+func (s *Server) ConfirmSecurityFix(w http.ResponseWriter, r *http.Request, id uuid.UUID) {
+	s.finishFix(w, r, id, true)
+}
+
+func (s *Server) RollbackSecurityFix(w http.ResponseWriter, r *http.Request, id uuid.UUID) {
+	s.finishFix(w, r, id, false)
+}
+
+func (s *Server) finishFix(w http.ResponseWriter, r *http.Request, id uuid.UUID, keep bool) {
+	p, ok := requireAdmin(w, r)
+	if !ok || !s.securityReady(w) {
+		return
+	}
+	run, err := s.security.FinishFix(r.Context(), events.User(p.User.ID), id, keep)
+	if err != nil {
+		s.fixError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, run)
+}

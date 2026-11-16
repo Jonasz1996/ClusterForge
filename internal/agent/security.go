@@ -16,7 +16,8 @@ import (
 )
 
 // Beveiliging (fase 27): de agent geeft zijn pakketlijst; de server stelt
-// de kwetsbaarheden vast. Alleen lezen.
+// de kwetsbaarheden vast. Alleen lezen, behalve fix (M6): vaste, veilige
+// oplossingen uit protocol.FixableRules (zie fix.go).
 
 func (a *Agent) onSecurity(m *nats.Msg) {
 	go func() {
@@ -75,6 +76,22 @@ func (a *Agent) handleSecurity(data []byte) protocol.SecurityResponse {
 			return protocol.SecurityResponse{Error: err.Error()}
 		}
 		return protocol.SecurityResponse{Probe: res}
+	case protocol.SecurityOpFix:
+		res, err := a.fix(ctx, req.Fix)
+		if err != nil {
+			return protocol.SecurityResponse{Error: err.Error()}
+		}
+		return protocol.SecurityResponse{Fix: res}
+	case protocol.SecurityOpFixConfirm:
+		if err := a.fixConfirm(ctx); err != nil {
+			return protocol.SecurityResponse{Error: err.Error()}
+		}
+		return protocol.SecurityResponse{Fix: &protocol.FixResult{Outcomes: []protocol.FixOutcome{}}}
+	case protocol.SecurityOpFixRollback:
+		if err := a.fixRollback(ctx); err != nil {
+			return protocol.SecurityResponse{Error: err.Error()}
+		}
+		return protocol.SecurityResponse{Fix: &protocol.FixResult{Outcomes: []protocol.FixOutcome{}}}
 	default:
 		return protocol.SecurityResponse{Error: "onbekend beveiligingsverzoek: " + req.Op}
 	}

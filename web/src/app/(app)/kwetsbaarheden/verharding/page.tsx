@@ -8,11 +8,16 @@ import { ago, tableClass, tdClass, thClass } from "@/components/inventory/bits";
 import { Alert, Badge, Button, Card, PageHeader, cx } from "@/components/ui";
 import { useIsAdmin } from "@/lib/inventory";
 import {
+  fixStatusTone,
   scoreTone,
   severities,
   severityTone,
+  useApplyFixes,
+  useFinishFix,
+  useFixRuns,
   useHardening,
   useRefreshSecurity,
+  type FixRun,
   type HardeningNode,
   type HardeningOverview,
   type HardeningRule,
@@ -20,11 +25,14 @@ import {
 } from "@/lib/security";
 
 // Verharding (fase 27 M2): per node vaste regels op SSH, accounts, rechten,
-// kernel, netwerk en diensten, met een score en wat je eraan doet.
+// kernel, netwerk en diensten, met een score en wat je eraan doet. M6:
+// veilige oplossingen met één klik; SSH wordt teruggedraaid tenzij je
+// bevestigt dat je nog kan inloggen.
 
 const tabs = [
   { key: "nodes", label: "Per node" },
   { key: "regels", label: "Per regel" },
+  { key: "oplossingen", label: "Oplossingen" },
 ] as const;
 type Tab = (typeof tabs)[number]["key"];
 
@@ -58,9 +66,11 @@ function Hardening() {
       />
       <Tabs tabs={tabs} value={tab} onChange={(t) => router.replace(`/kwetsbaarheden/verharding?tab=${t}`)} />
       {data.isError && <Alert>Verharding laden mislukte.</Alert>}
+      <WaitingFixes isAdmin={isAdmin} />
       {data.data && <Summary o={data.data} />}
       {data.data && tab === "nodes" && <NodesTab o={data.data} isAdmin={isAdmin} />}
       {data.data && tab === "regels" && <RulesTab o={data.data} />}
+      {data.data && tab === "oplossingen" && <FixHistory o={data.data} />}
     </div>
   );
 }
@@ -179,7 +189,7 @@ function NodesTab({ o, isAdmin }: { o: HardeningOverview; isAdmin: boolean }) {
             </button>
             {isOpen && (
               <div className="space-y-4 border-t border-slate-200 p-3 text-sm dark:border-slate-800">
-                {n.results.length === 0 ? <p className="text-slate-500">Nog geen controle.</p> : <Checks o={o} n={n} />}
+                {n.results.length === 0 ? <p className="text-slate-500">Nog geen controle.</p> : <NodeChecks o={o} n={n} isAdmin={isAdmin} />}
                 {n.lynis && <Lynis n={n} />}
                 {isAdmin && n.audit_supported && n.online && (
                   <Button variant="secondary" onClick={() => refresh.mutate({ nodes: true, node_id: n.node_id })} disabled={refresh.isPending}>
@@ -195,7 +205,191 @@ function NodesTab({ o, isAdmin }: { o: HardeningOverview; isAdmin: boolean }) {
   );
 }
 
-function Checks({ o, n }: { o: HardeningOverview; n: HardeningNode }) {
+function NodeChecks({ o, n, isAdmin }: { o: HardeningOverview; n: HardeningNode; isAdmin: boolean }) {
+  const fixable = failsOf(o, n)
+    .filter((f) => f.rule.auto)
+    .map((f) => f.rule.id);
+  const canFix = isAdmin && n.online && n.protocol >= o.fix_protocol;
+  const [sel, setSel] = useState<string[]>([]);
+  const [minutes, setMinutes] = useState(10);
+  const apply = useApplyFixes();
+  const chosen = sel.filter((id) => fixable.includes(id));
+  const ssh = chosen.some((id) => id.startsWith("ssh-"));
+  const toggle = (id: string) => setSel((s) => (s.includes(id) ? s.filter((x) => x !== id) : [...s, id]));
+  return (
+    <div className="space-y-3">
+      {isAdmin && fixable.length > 0 && !canFix && (
+        <p className="text-xs text-slate-500">
+          {n.online
+            ? `Werk de agent bij naar protocol ${o.fix_protocol} om ${fixable.length} van deze punten hier met één klik op te lossen.`
+            : "De node is offline; oplossen kan pas als de agent weer verbonden is."}
+        </p>
+      )}
+      {canFix && fixable.length > 0 && (
+        <div className="flex flex-wrap items-center gap-3 rounded-md border border-sky-200 bg-sky-50 p-3 dark:border-sky-900 dark:bg-sky-950/30">
+          <span className="flex-1 text-sm">
+            {chosen.length === 0
+              ? `${fixable.length} ${fixable.length === 1 ? "punt kan" : "punten kunnen"} ClusterForge zelf oplossen. Vink aan wat je wil.`
+              : `${chosen.length} gekozen.`}
+            {ssh && (
+              <span className="mt-1 block text-xs text-slate-600 dark:text-slate-400">
+                SSH: de node zet de oude instellingen na{" "}
+                <select
+                  className="rounded border border-slate-300 bg-white px-1 dark:border-slate-700 dark:bg-slate-900"
+                  value={minutes}
+                  onChange={(e) => setMinutes(Number(e.target.value))}
+                  aria-label="Minuten tot terugdraaien"
+                >
+                  {[5, 10, 15, 30].map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
+                </select>{" "}
+                minuten terug, tenzij je bevestigt dat je nog kan inloggen. Test in een nieuw venster voor je bevestigt.
+              </span>
+            )}
+          </span>
+          <Button variant="secondary" onClick={() => setSel(fixable)} disabled={chosen.length === fixable.length}>
+            Alles aanvinken
+          </Button>
+          <Button
+            onClick={() =>
+              apply.mutate({ node_id: n.node_id, rules: chosen, rollback_minutes: ssh ? minutes : undefined }, { onSuccess: () => setSel([]) })
+            }
+            disabled={chosen.length === 0 || apply.isPending}
+          >
+            {apply.isPending ? "Bezig…" : "Oplossen"}
+          </Button>
+        </div>
+      )}
+      {apply.isError && <Alert>{(apply.error as Error).message}</Alert>}
+      {apply.data && <FixOutcomes run={apply.data} o={o} />}
+      <Checks o={o} n={n} select={canFix ? { fixable, sel: chosen, toggle } : undefined} />
+    </div>
+  );
+}
+
+function FixOutcomes({ run, o }: { run: FixRun; o: HardeningOverview }) {
+  const title = new Map(o.rules.map((r) => [r.id, r.title]));
+  return (
+    <div className="space-y-1 rounded-md border border-slate-200 p-3 text-sm dark:border-slate-800">
+      {run.error && <p className="text-red-600">{run.error}</p>}
+      {run.outcomes.map((x) => (
+        <div key={x.rule} className="flex items-start gap-2">
+          <span className={cx("w-4 shrink-0 text-center font-bold", x.ok ? "text-emerald-600" : "text-red-600")}>{x.ok ? "✓" : "✗"}</span>
+          <span>
+            <span className="font-medium">{title.get(x.rule) ?? x.rule}</span>
+            {x.changed && x.changed.length > 0 && <span className="block text-xs text-slate-500">{x.changed.join(" · ")}</span>}
+            {x.error && <span className="block text-xs text-red-600">{x.error}</span>}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/** WaitingFixes: SSH-wijzigingen die op bevestiging wachten, bovenaan. */
+function WaitingFixes({ isAdmin }: { isAdmin: boolean }) {
+  const runs = useFixRuns();
+  const finish = useFinishFix();
+  const waiting = (runs.data ?? []).filter((r) => r.status === "wacht op bevestiging");
+  if (waiting.length === 0) return null;
+  return (
+    <div className="space-y-2">
+      {waiting.map((r) => (
+        <div key={r.id} role="status" className="rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="flex-1">
+              <span className="font-medium">{r.hostname}: SSH-wijziging wacht op bevestiging.</span> Kun je nog inloggen met SSH? Bevestig dan; anders
+              zet de node om {r.rollback_at ? new Date(r.rollback_at).toLocaleTimeString("nl-BE", { hour: "2-digit", minute: "2-digit" }) : "?"}{" "}
+              vanzelf de oude instellingen terug.
+            </span>
+            {isAdmin && (
+              <>
+                <Button onClick={() => finish.mutate({ id: r.id, keep: true })} disabled={finish.isPending}>
+                  Ik kan nog inloggen, houden
+                </Button>
+                <Button variant="secondary" onClick={() => finish.mutate({ id: r.id, keep: false })} disabled={finish.isPending}>
+                  Nu terugdraaien
+                </Button>
+              </>
+            )}
+          </div>
+        </div>
+      ))}
+      {finish.isError && <Alert>{(finish.error as Error).message}</Alert>}
+    </div>
+  );
+}
+
+function FixHistory({ o }: { o: HardeningOverview }) {
+  const runs = useFixRuns();
+  const title = new Map(o.rules.map((r) => [r.id, r.title]));
+  if (!runs.data) return null;
+  if (runs.data.length === 0)
+    return (
+      <Card>
+        <p className="text-sm text-slate-500">
+          Nog niets opgelost. Open een node onder Per node en vink aan wat ClusterForge zelf mag oplossen: SSH-instellingen (met terugdraaitimer),
+          kernel- en netwerkinstellingen, rechten op gevoelige bestanden, telnet en fail2ban naast CrowdSec.
+        </p>
+      </Card>
+    );
+  return (
+    <Card>
+      <div className="overflow-x-auto">
+        <table className={tableClass}>
+          <thead>
+            <tr>
+              <th className={thClass}>Wanneer</th>
+              <th className={thClass}>Node</th>
+              <th className={thClass}>Wat</th>
+              <th className={thClass}>Stand</th>
+              <th className={thClass}>Door</th>
+            </tr>
+          </thead>
+          <tbody>
+            {runs.data.map((r) => (
+              <tr key={r.id} className="border-t border-slate-100 align-top dark:border-slate-800">
+                <td className={cx(tdClass, "whitespace-nowrap")}>{ago(r.created_at)}</td>
+                <td className={tdClass}>{r.hostname}</td>
+                <td className={tdClass}>
+                  <ul className="space-y-0.5">
+                    {r.rules.map((id) => {
+                      const out = r.outcomes.find((x) => x.rule === id);
+                      return (
+                        <li key={id}>
+                          <span className={cx(out?.ok ? "text-emerald-600" : "text-red-600")}>{out?.ok ? "✓" : "✗"}</span> {title.get(id) ?? id}
+                          {out?.error && <span className="block text-xs text-red-600">{out.error}</span>}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  {r.error && <div className="text-xs text-red-600">{r.error}</div>}
+                </td>
+                <td className={tdClass}>
+                  <Badge tone={fixStatusTone[r.status]}>{r.status}</Badge>
+                </td>
+                <td className={tdClass}>{r.created_by || "–"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </Card>
+  );
+}
+
+function Checks({
+  o,
+  n,
+  select,
+}: {
+  o: HardeningOverview;
+  n: HardeningNode;
+  select?: { fixable: string[]; sel: string[]; toggle: (id: string) => void };
+}) {
   const res = new Map(n.results.map((r) => [r.id, r]));
   const cats = [...new Set(o.rules.map((r) => r.category))];
   return (
@@ -233,6 +427,12 @@ function Checks({ o, n }: { o: HardeningOverview; n: HardeningNode }) {
                         {x.result === "fout" && <span className="mt-1 block text-xs text-slate-700 dark:text-slate-300">{r.fix}</span>}
                       </span>
                       {x.result === "fout" && <Badge tone={severityTone[r.severity]}>{r.severity}</Badge>}
+                      {x.result === "fout" && select?.fixable.includes(r.id) && (
+                        <label className="flex shrink-0 items-center gap-1 text-xs text-slate-600 dark:text-slate-300">
+                          <input type="checkbox" checked={select.sel.includes(r.id)} onChange={() => select.toggle(r.id)} />
+                          oplossen
+                        </label>
+                      )}
                     </div>
                   </li>
                 );

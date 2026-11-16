@@ -477,7 +477,7 @@ func (s *Service) DeleteScope(ctx context.Context, actor events.Actor, id uuid.U
 
 // Hardening geeft de verharding van alle nodes.
 func (s *Service) Hardening(ctx context.Context) (HardeningOverview, error) {
-	o := HardeningOverview{Protocol: protocol.SecurityAuditSince, Rules: Rules, Nodes: []HardeningNode{}}
+	o := HardeningOverview{Protocol: protocol.SecurityAuditSince, FixProtocol: protocol.SecurityFixSince, Rules: Rules, Nodes: []HardeningNode{}}
 	nodes, err := s.nodes(ctx, "")
 	if err != nil {
 		return o, err
