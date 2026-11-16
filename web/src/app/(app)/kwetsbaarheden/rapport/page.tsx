@@ -11,7 +11,7 @@ import { scoreTone, severities, severityTone, useSecurityReport, useSecurityScop
 // netwerk zou zeggen, uit wat ClusterForge al weet. Af te drukken of als
 // PDF te bewaren.
 
-const kindLabel: Record<string, string> = { cve: "Pakketten", hardening: "Verharding", netwerk: "Netwerk" };
+const kindLabel: Record<string, string> = { cve: "Pakketten", hardening: "Verharding", netwerk: "Netwerk", tools: "Tools" };
 
 export default function ReportPage() {
   return (

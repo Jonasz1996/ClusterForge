@@ -2,6 +2,7 @@ package httpapi
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -27,7 +28,7 @@ const scanXML = `<nmaprun><host><status state="up"/><address addr="192.168.10.19
 func TestSecurityEndToEnd(t *testing.T) {
 	var nmapArgs string
 	var sysMu sync.Mutex
-	rootLogin, timer := "yes", ""
+	rootLogin, timer, clam := "yes", "", ""
 	e, c := adminClient(t)
 	feeds := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -57,6 +58,12 @@ func TestSecurityEndToEnd(t *testing.T) {
 		Config: cfg, Version: "test", Log: slog.New(slog.NewTextHandler(io.Discard, nil)), Collector: fakeCollector(root),
 		HeartbeatInterval: 100_000_000, StatePath: filepath.Join(root, "var/lib/clusterforge/agent-state.json"), Root: root,
 		Exec: func(_ context.Context, name string, args ...string) ([]byte, error) {
+			if name == "dpkg-query" && len(args) == 3 && args[1] == "-f=${db:Status-Abbrev} ${Version}" {
+				if args[2] == "clamav" {
+					return []byte("ii  1.4.3+dfsg-1"), nil
+				}
+				return nil, errors.New("niet geïnstalleerd")
+			}
 			if name == "dpkg-query" {
 				return []byte("ii \topenssl\t3.5.1-1\tamd64\topenssl\t3.5.1-1\nii \tlibssl3t64\t3.5.1-1\tamd64\topenssl\t3.5.1-1\n" +
 					"ii \tnmap\t7.95+dfsg-3\tamd64\tnmap\t7.95+dfsg-3\n"), nil
@@ -75,10 +82,14 @@ func TestSecurityEndToEnd(t *testing.T) {
 				return []byte("permitrootlogin " + rootLogin + "\npermitemptypasswords no\n"), nil
 			case c == "systemctl reload ssh":
 				rootLogin = "without-password"
-			case strings.HasPrefix(c, "systemd-run"):
+			case strings.HasPrefix(c, "systemd-run --unit=cf-ssh-rollback"):
 				timer = "active"
 			case c == "systemctl stop cf-ssh-rollback.timer":
 				timer = ""
+			case c == "systemctl is-active cf-tool-clamav.service":
+				return []byte(clam + "\n"), nil
+			case strings.HasPrefix(c, "systemd-run --unit=cf-tool-clamav"):
+				clam = "active"
 			case c == "systemctl is-active cf-ssh-rollback.timer":
 				return []byte(timer + "\n"), nil
 			}
@@ -282,6 +293,61 @@ func TestSecurityEndToEnd(t *testing.T) {
 	var runs []fixRun
 	if c.do("GET", "/api/v1/security/fixes", nil, &runs); len(runs) != 1 {
 		t.Fatalf("lijst: %+v", runs)
+	}
+
+	// M7: tools. Run start op de achtergrond; het resultaat komt bij de
+	// volgende stand en wordt een bevinding.
+	if s := c.do("POST", "/api/v1/security/tools/"+web01.ID+"/clamav/baseline", nil, nil); s != 400 {
+		t.Fatalf("baseline voor clamav: %d", s)
+	}
+	if s := c.do("POST", "/api/v1/security/tools/"+web01.ID+"/trivy/install", nil, nil); s != 400 {
+		t.Fatalf("trivy zonder docker: %d", s)
+	}
+	if s := c.do("POST", "/api/v1/security/tools/"+web01.ID+"/clamav/run", nil, nil); s != 202 {
+		t.Fatalf("clamav run: %d", s)
+	}
+	if s := c.do("POST", "/api/v1/security/tools/"+web01.ID+"/clamav/run", nil, nil); s != 409 {
+		t.Fatalf("tweede run: %d", s)
+	}
+	if s := c.do("PUT", "/api/v1/security/tools/"+web01.ID+"/clamav/schedule", map[string]any{"schedule": "wekelijks", "weekday": 0, "hour": 2}, nil); s != 204 {
+		t.Fatalf("plannen: %d", s)
+	}
+	td := filepath.Join(root, "var/lib/clusterforge/tools/clamav")
+	writeFile(t, filepath.Join(td, "run.started"), "2026-11-16T22:00:00Z\n", 0o600)
+	writeFile(t, filepath.Join(td, "run.ended"), "2026-11-16T22:30:00Z\n", 0o600)
+	writeFile(t, filepath.Join(td, "run.exit"), "1\n", 0o600)
+	writeFile(t, filepath.Join(td, "run.log"), "/srv/www/shell.php: Php.Webshell-1 FOUND\n", 0o600)
+	sysMu.Lock()
+	clam = ""
+	sysMu.Unlock()
+	if err := e.api.security.Tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	var tools struct {
+		Nodes []struct {
+			Tools []struct {
+				Tool      string `json:"tool"`
+				Installed bool   `json:"installed"`
+				Running   string `json:"running"`
+				Schedule  string `json:"schedule"`
+			} `json:"tools"`
+		} `json:"nodes"`
+	}
+	if c.do("GET", "/api/v1/security/tools", nil, &tools); len(tools.Nodes) != 1 || tools.Nodes[0].Tools[0].Tool != "clamav" ||
+		!tools.Nodes[0].Tools[0].Installed || tools.Nodes[0].Tools[0].Running != "" || tools.Nodes[0].Tools[0].Schedule != "wekelijks" {
+		t.Fatalf("tools: %+v", tools)
+	}
+	c.do("GET", "/api/v1/security/findings?kind=tools", nil, &list)
+	if len(list.Items) != 1 || list.Items[0].Severity != "kritiek" {
+		t.Fatalf("malwarebevinding: %+v", list.Items)
+	}
+	c.do("GET", "/api/v1/attention", nil, &att)
+	found := false
+	for _, it := range att.Items {
+		found = found || it.ID == "security-malware"
+	}
+	if !found {
+		t.Errorf("geen aandacht voor malware: %+v", att.Items)
 	}
 
 	e.api.security.Wait()

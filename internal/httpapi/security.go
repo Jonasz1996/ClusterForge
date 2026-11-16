@@ -466,3 +466,57 @@ func (s *Server) finishFix(w http.ResponseWriter, r *http.Request, id uuid.UUID,
 	}
 	writeJSON(w, http.StatusOK, run)
 }
+
+// Beveiligingstools (fase 27 M7).
+
+func (s *Server) GetSecurityTools(w http.ResponseWriter, r *http.Request) {
+	if !s.securityReady(w) {
+		return
+	}
+	o, err := s.security.Tools(r.Context())
+	if err != nil {
+		s.securityError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, o)
+}
+
+func (s *Server) SecurityToolAction(w http.ResponseWriter, r *http.Request, nodeID uuid.UUID, tool string, action string) {
+	p, ok := requireAdmin(w, r)
+	if !ok || !s.securityReady(w) {
+		return
+	}
+	err := s.security.ToolAction(r.Context(), events.User(p.User.ID), nodeID, tool, action)
+	switch {
+	case errors.Is(err, security.ErrToolBusy):
+		writeError(w, http.StatusConflict, "busy", "Deze tool is al bezig op die node.")
+		return
+	case err != nil:
+		s.securityError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusAccepted)
+}
+
+func (s *Server) SetSecurityToolSchedule(w http.ResponseWriter, r *http.Request, nodeID uuid.UUID, tool string) {
+	p, ok := requireAdmin(w, r)
+	if !ok || !s.securityReady(w) {
+		return
+	}
+	var in gen.SecurityToolSchedule
+	if !decode(w, r, &in) {
+		return
+	}
+	weekday, hour := 0, 3
+	if in.Weekday != nil {
+		weekday = *in.Weekday
+	}
+	if in.Hour != nil {
+		hour = *in.Hour
+	}
+	if err := s.security.SetToolSchedule(r.Context(), events.User(p.User.ID), nodeID, tool, string(in.Schedule), weekday, hour); err != nil {
+		s.securityError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}

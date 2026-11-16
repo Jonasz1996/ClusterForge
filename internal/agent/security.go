@@ -92,6 +92,12 @@ func (a *Agent) handleSecurity(data []byte) protocol.SecurityResponse {
 			return protocol.SecurityResponse{Error: err.Error()}
 		}
 		return protocol.SecurityResponse{Fix: &protocol.FixResult{Outcomes: []protocol.FixOutcome{}}}
+	case protocol.SecurityOpTools:
+		res, err := a.tools(ctx, req.Tools)
+		if err != nil {
+			return protocol.SecurityResponse{Error: err.Error()}
+		}
+		return protocol.SecurityResponse{Tools: res}
 	default:
 		return protocol.SecurityResponse{Error: "onbekend beveiligingsverzoek: " + req.Op}
 	}

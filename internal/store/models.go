@@ -1774,6 +1774,26 @@ type SecurityScope struct {
 	UpdatedBy   *uuid.UUID
 }
 
+type SecurityTool struct {
+	NodeID    uuid.UUID
+	Tool      string
+	Installed bool
+	Version   string
+	Running   string
+	State     []byte
+	Schedule  string
+	Weekday   int32
+	Hour      int32
+	NextRunAt *time.Time
+	UpdatedAt time.Time
+}
+
+type SecurityToolNode struct {
+	NodeID    uuid.UUID
+	FetchedAt *time.Time
+	Error     string
+}
+
 type SelfLocation struct {
 	Singleton    bool
 	ConnectionID uuid.UUID

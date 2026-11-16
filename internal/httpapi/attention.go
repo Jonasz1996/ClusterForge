@@ -158,6 +158,8 @@ func (s *Server) attention(ctx context.Context, p auth.Principal) (gen.Attention
 			names(sm.CriticalNet), "/kwetsbaarheden/scans?tab=bevindingen", len(sm.CriticalNet))
 		add("security-kev", red, plural(len(sm.KEVNodes), "node heeft", "nodes hebben")+" een actief misbruikte kwetsbaarheid",
 			names(sm.KEVNodes), "/kwetsbaarheden", len(sm.KEVNodes))
+		add("security-malware", red, plural(len(sm.Malware), "node heeft", "nodes hebben")+" malware of een rootkit volgens ClamAV of chkrootkit",
+			names(sm.Malware), "/kwetsbaarheden/tools", len(sm.Malware))
 		add("security-ssh-waiting", amber, plural(len(sm.SSHWaiting), "node wacht", "nodes wachten")+" op bevestiging van een SSH-wijziging",
 			names(sm.SSHWaiting)+". Kun je nog inloggen? Bevestig, anders zet de node de oude instellingen terug.", "/kwetsbaarheden/verharding", len(sm.SSHWaiting))
 	}

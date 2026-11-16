@@ -172,22 +172,26 @@ type Summary struct {
 	LowHardening []string       `json:"low_hardening"`
 	// SSHWaiting: nodes met een SSH-wijziging die op bevestiging wacht.
 	SSHWaiting []string `json:"ssh_waiting"`
+	// Tools: open bevindingen van de tools; Malware: nodes met een
+	// kritieke (ClamAV, chkrootkit, Trivy-kritiek telt niet mee).
+	Tools   map[string]int `json:"tools"`
+	Malware []string       `json:"malware"`
 }
 
 func (s *Service) Summary(ctx context.Context) (Summary, error) {
 	out := Summary{CVE: map[string]int{}, Hardening: map[string]int{}, Network: map[string]int{}, KEVNodes: []string{}, CriticalNet: []string{}, LowHardening: []string{},
-		SSHWaiting: []string{}}
+		SSHWaiting: []string{}, Tools: map[string]int{}, Malware: []string{}}
 	rows, err := s.pool.Query(ctx, `
-SELECT f.kind, f.severity, coalesce((f.detail->>'kev')::int, 0) > 0, coalesce(n.hostname, f.subject), f.title
+SELECT f.kind, f.severity, coalesce((f.detail->>'kev')::int, 0) > 0, coalesce(n.hostname, f.subject), f.key
 FROM security_findings f LEFT JOIN nodes n ON n.id = f.node_id WHERE f.status = 'open'`)
 	if err != nil {
 		return out, err
 	}
-	kev, crit := map[string]bool{}, map[string]bool{}
+	kev, crit, mal := map[string]bool{}, map[string]bool{}, map[string]bool{}
 	for rows.Next() {
-		var kind, sev, host, title string
+		var kind, sev, host, key string
 		var isKEV bool
-		if err := rows.Scan(&kind, &sev, &isKEV, &host, &title); err != nil {
+		if err := rows.Scan(&kind, &sev, &isKEV, &host, &key); err != nil {
 			rows.Close()
 			return out, err
 		}
@@ -201,6 +205,12 @@ FROM security_findings f LEFT JOIN nodes n ON n.id = f.node_id WHERE f.status = 
 			}
 		case KindHardening:
 			out.Hardening[sev]++
+		case KindTools:
+			out.Tools[sev]++
+			if sev == SevCritical && !strings.HasPrefix(key, "image:") && !mal[host] {
+				mal[host] = true
+				out.Malware = append(out.Malware, host)
+			}
 		case KindNetwork:
 			out.Network[sev]++
 			if sev == SevCritical && !crit[host] {

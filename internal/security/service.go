@@ -255,6 +255,9 @@ func (s *Service) Tick(ctx context.Context) error {
 	if err := s.scheduleScans(ctx); err != nil {
 		s.log.Warn("geplande scans starten mislukt", "err", err)
 	}
+	if err := s.tickTools(ctx, nodes); err != nil {
+		s.log.Warn("tools bijwerken mislukt", "err", err)
+	}
 	_, err = s.pool.Exec(ctx, `UPDATE security_findings SET status = 'open', accepted_until = NULL
 WHERE status = 'aanvaard' AND accepted_until IS NOT NULL AND accepted_until < $1`, now)
 	return err

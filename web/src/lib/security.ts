@@ -347,6 +347,66 @@ export function useFinishFix() {
   });
 }
 
+// Tools op de nodes (M7).
+
+export type ToolID = "clamav" | "aide" | "rkhunter" | "chkrootkit" | "lynis" | "auditd" | "trivy";
+export type ToolAction = "install" | "run" | "baseline" | "remove";
+export type ToolInfo = { id: ToolID; name: string; description: string; run: boolean; baseline: boolean; no_lxc: boolean; docker: boolean };
+export type TrivyVuln = { id: string; pkg: string; version: string; fixed?: string; severity: string; title?: string };
+export type TrivyImage = { image: string; counts: Record<string, number>; vulns: TrivyVuln[]; error?: string };
+export type ToolRunState = { started?: string; ended?: string; exit?: number; items?: string[]; tail?: string; images?: TrivyImage[] };
+export type ToolRow = {
+  tool: ToolID;
+  installed: boolean;
+  version: string;
+  running: string;
+  state: { active?: boolean; rules?: number; last?: Partial<Record<ToolAction, ToolRunState>> };
+  schedule: "uit" | "dagelijks" | "wekelijks";
+  weekday: number;
+  hour: number;
+  next_run_at: string | null;
+  updated_at: string;
+};
+export type ToolsNode = {
+  node_id: string;
+  hostname: string;
+  cluster_name: string;
+  online: boolean;
+  protocol: number;
+  virtualization: string;
+  docker: boolean;
+  fetched_at: string | null;
+  error: string;
+  tools: ToolRow[];
+};
+export type ToolsOverview = { protocol: number; tools: ToolInfo[]; nodes: ToolsNode[] };
+
+export function useSecurityTools() {
+  return useQuery({
+    queryKey: [...key, "tools"],
+    queryFn: async () => unwrap(await api.GET("/security/tools")) as unknown as ToolsOverview,
+    refetchInterval: (q) => ((q.state.data as ToolsOverview | undefined)?.nodes.some((n) => n.tools.some((t) => t.running)) ? 10_000 : 60_000),
+  });
+}
+
+export function useToolAction() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ node, tool, action }: { node: string; tool: ToolID; action: ToolAction }) =>
+      unwrap(await api.POST("/security/tools/{nodeId}/{tool}/{action}", { params: { path: { nodeId: node, tool, action } } })),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: [...key, "tools"] }),
+  });
+}
+
+export function useToolSchedule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ node, tool, body }: { node: string; tool: ToolID; body: components["schemas"]["SecurityToolSchedule"] }) =>
+      unwrap(await api.PUT("/security/tools/{nodeId}/{tool}/schedule", { params: { path: { nodeId: node, tool } }, body })),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: [...key, "tools"] }),
+  });
+}
+
 export function scoreTone(score: number | null): Tone {
   if (score === null) return "slate";
   if (score >= 90) return "green";

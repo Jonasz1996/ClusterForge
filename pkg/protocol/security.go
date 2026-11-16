@@ -27,6 +27,11 @@ const SecurityProbeSince = 43
 // uit FixableRules zelf toepast (verzoek fix, fix_confirm, fix_rollback).
 const SecurityFixSince = 44
 
+// SecurityToolsSince is de eerste protocolversie die beveiligingstools op
+// de node installeert en draait (verzoek tools): ClamAV, AIDE, rkhunter,
+// chkrootkit, Lynis, auditd en Trivy.
+const SecurityToolsSince = 45
+
 // SubjectSecurity draagt de beveiligingsverzoeken: cf.node.<id>.security.
 const SubjectSecurity = "security"
 
@@ -62,7 +67,93 @@ const (
 	SecurityOpFixConfirm = "fix_confirm"
 	// SecurityOpFixRollback zet de SSH-wijziging meteen terug.
 	SecurityOpFixRollback = "fix_rollback"
+	// SecurityOpTools geeft de stand van de tools of start een actie
+	// (Tools.Action) op de achtergrond via systemd-run; het antwoord komt
+	// meteen, het resultaat bij een volgende status.
+	SecurityOpTools = "tools"
 )
+
+// Beveiligingstools (M7). De agent kent zelf de pakketten, bronnen en
+// commando's; de server kiest alleen tool en actie.
+const (
+	ToolClamAV     = "clamav"
+	ToolAIDE       = "aide"
+	ToolRkhunter   = "rkhunter"
+	ToolChkrootkit = "chkrootkit"
+	ToolLynis      = "lynis"
+	ToolAuditd     = "auditd"
+	ToolTrivy      = "trivy"
+)
+
+// SecurityTools zijn alle beveiligingstools, in de volgorde van de GUI.
+var SecurityTools = []string{ToolClamAV, ToolAIDE, ToolRkhunter, ToolChkrootkit, ToolLynis, ToolAuditd, ToolTrivy}
+
+// Acties op een tool.
+const (
+	ToolStatus  = "status"
+	ToolInstall = "install"
+	ToolRun     = "run"
+	// ToolBaseline maakt de AIDE-basislijn opnieuw (na een verwachte
+	// wijziging, zoals een update).
+	ToolBaseline = "baseline"
+	ToolRemove   = "remove"
+)
+
+// MaxToolItems begrenst wat een tool per run meldt.
+const MaxToolItems = 200
+
+type ToolsSpec struct {
+	Action string `json:"action"`
+	Tool   string `json:"tool,omitempty"`
+}
+
+// ToolsResult is de stand van alle tools op de node.
+type ToolsResult struct {
+	Tools []ToolState `json:"tools"`
+}
+
+type ToolState struct {
+	Tool      string `json:"tool"`
+	Installed bool   `json:"installed"`
+	Version   string `json:"version,omitempty"`
+	// Running is de actie die nu loopt (leeg: niets).
+	Running string `json:"running,omitempty"`
+	// Active: voor auditd, draait de dienst; Rules is het aantal regels.
+	Active bool `json:"active,omitempty"`
+	Rules  int  `json:"rules,omitempty"`
+	// Last is per actie de laatste uitvoering.
+	Last map[string]ToolRunState `json:"last,omitempty"`
+}
+
+type ToolRunState struct {
+	Started *time.Time `json:"started,omitempty"`
+	Ended   *time.Time `json:"ended,omitempty"`
+	Exit    *int       `json:"exit,omitempty"`
+	// Items zijn de vondsten (bestanden met malware, gewijzigde bestanden,
+	// waarschuwingen), hoogstens MaxToolItems.
+	Items []string `json:"items,omitempty"`
+	// Tail zijn de laatste regels uitvoer, voor als het misliep.
+	Tail string `json:"tail,omitempty"`
+	// Images: Trivy per image.
+	Images []TrivyImage `json:"images,omitempty"`
+}
+
+type TrivyImage struct {
+	Image  string         `json:"image"`
+	Counts map[string]int `json:"counts"`
+	// Vulns zijn de ernstigste, hoogstens 20.
+	Vulns []TrivyVuln `json:"vulns"`
+	Error string      `json:"error,omitempty"`
+}
+
+type TrivyVuln struct {
+	ID       string `json:"id"`
+	Pkg      string `json:"pkg"`
+	Version  string `json:"version"`
+	Fixed    string `json:"fixed,omitempty"`
+	Severity string `json:"severity"`
+	Title    string `json:"title,omitempty"`
+}
 
 // FixableRules zijn de verhardingsregels die de agent met één klik kan
 // oplossen. Bewust niet: IP-doorsturen (Docker, VPN), mounts, accounts,
@@ -230,6 +321,7 @@ type SecurityRequest struct {
 	Scan     *ScanSpec  `json:"scan,omitempty"`
 	Probe    *ProbeSpec `json:"probe,omitempty"`
 	Fix      *FixSpec   `json:"fix,omitempty"`
+	Tools    *ToolsSpec `json:"tools,omitempty"`
 }
 
 type SecurityResponse struct {
@@ -239,6 +331,7 @@ type SecurityResponse struct {
 	Scan      *ScanResult        `json:"scan,omitempty"`
 	Probe     []ProbeResult      `json:"probe,omitempty"`
 	Fix       *FixResult         `json:"fix,omitempty"`
+	Tools     *ToolsResult       `json:"tools,omitempty"`
 }
 
 // SecurityAudit is wat de agent over de verharding van zijn node ziet.

@@ -5048,6 +5048,64 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/security/tools": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Beveiligingstools per node (fase 27 M7) */
+        get: operations["getSecurityTools"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/security/tools/{nodeId}/{tool}/{action}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+                tool: "clamav" | "aide" | "rkhunter" | "chkrootkit" | "lynis" | "auditd" | "trivy";
+                action: "install" | "run" | "baseline" | "remove";
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Een tool installeren, draaien, de basislijn opnieuw maken of verwijderen (admin); loopt op de achtergrond */
+        post: operations["securityToolAction"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/security/tools/{nodeId}/{tool}/schedule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+                tool: "clamav" | "aide" | "rkhunter" | "chkrootkit" | "lynis" | "auditd" | "trivy";
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** De run van een tool plannen (admin) */
+        put: operations["setSecurityToolSchedule"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/security/scanner": {
         parameters: {
             query?: never;
@@ -13943,6 +14001,12 @@ export interface components {
             /** @description SSH: na zoveel minuten terugdraaien tenzij bevestigd (standaard 10). */
             rollback_minutes?: number;
         };
+        SecurityToolSchedule: {
+            /** @enum {string} */
+            schedule: "uit" | "dagelijks" | "wekelijks";
+            weekday?: number;
+            hour?: number;
+        };
         /** @description Een object van de firewall (fase 16); de velden staan in web/src/lib/firewall.ts en internal/firewall. */
         FirewallObject: {
             [key: string]: unknown;
@@ -22153,6 +22217,83 @@ export interface operations {
             403: components["responses"]["Error"];
             404: components["responses"]["Error"];
             409: components["responses"]["Error"];
+        };
+    };
+    getSecurityTools: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SecurityObject"];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    securityToolAction: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+                tool: "clamav" | "aide" | "rkhunter" | "chkrootkit" | "lynis" | "auditd" | "trivy";
+                action: "install" | "run" | "baseline" | "remove";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Gestart */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    setSecurityToolSchedule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+                tool: "clamav" | "aide" | "rkhunter" | "chkrootkit" | "lynis" | "auditd" | "trivy";
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SecurityToolSchedule"];
+            };
+        };
+        responses: {
+            /** @description Bewaard */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
         };
     };
     linkSecurityScanner: {

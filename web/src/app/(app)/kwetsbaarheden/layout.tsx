@@ -5,12 +5,13 @@ import type { ReactNode } from "react";
 import { Tabs } from "@/components/Tabs";
 
 // Kwetsbaarheden is één menu-item met tabbladen: pakketten (CVE's),
-// verharding, netwerkscans, de eigen scopes en het rapport. Elk tabblad heeft een eigen adres, zodat
+// verharding, netwerkscans, tools op de nodes, de eigen scopes en het rapport. Elk tabblad heeft een eigen adres, zodat
 // een link of de terugknop op het juiste tabblad uitkomt.
 const sections = [
   { key: "/kwetsbaarheden", label: "Pakketten" },
   { key: "/kwetsbaarheden/verharding", label: "Verharding" },
   { key: "/kwetsbaarheden/scans", label: "Scans" },
+  { key: "/kwetsbaarheden/tools", label: "Tools" },
   { key: "/kwetsbaarheden/scopes", label: "Eigen scopes" },
   { key: "/kwetsbaarheden/rapport", label: "Rapport" },
 ] as const;

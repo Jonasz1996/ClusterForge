@@ -5395,6 +5395,50 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
+  /security/tools:
+    get:
+      operationId: getSecurityTools
+      summary: Beveiligingstools per node (fase 27 M7)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SecurityObject" }
+        "401": { $ref: "#/components/responses/Error" }
+  /security/tools/{nodeId}/{tool}/{action}:
+    parameters:
+      - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: tool, in: path, required: true, schema: { type: string, enum: [clamav, aide, rkhunter, chkrootkit, lynis, auditd, trivy] } }
+      - { name: action, in: path, required: true, schema: { type: string, enum: [install, run, baseline, remove] } }
+    post:
+      operationId: securityToolAction
+      summary: Een tool installeren, draaien, de basislijn opnieuw maken of verwijderen (admin); loopt op de achtergrond
+      responses:
+        "202": { description: Gestart }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /security/tools/{nodeId}/{tool}/schedule:
+    parameters:
+      - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: tool, in: path, required: true, schema: { type: string, enum: [clamav, aide, rkhunter, chkrootkit, lynis, auditd, trivy] } }
+    put:
+      operationId: setSecurityToolSchedule
+      summary: De run van een tool plannen (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SecurityToolSchedule" }
+      responses:
+        "204": { description: Bewaard }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
   /security/scanner:
     post:
       operationId: linkSecurityScanner
@@ -14576,6 +14620,13 @@ components:
         node_id: { type: string, format: uuid }
         rules: { type: array, items: { type: string }, minItems: 1 }
         rollback_minutes: { type: integer, minimum: 2, maximum: 60, description: "SSH: na zoveel minuten terugdraaien tenzij bevestigd (standaard 10)." }
+    SecurityToolSchedule:
+      type: object
+      required: [schedule]
+      properties:
+        schedule: { type: string, enum: [uit, dagelijks, wekelijks] }
+        weekday: { type: integer, minimum: 0, maximum: 6 }
+        hour: { type: integer, minimum: 0, maximum: 23 }
     FirewallObject:
       type: object
       description: Een object van de firewall (fase 16); de velden staan in web/src/lib/firewall.ts en internal/firewall.

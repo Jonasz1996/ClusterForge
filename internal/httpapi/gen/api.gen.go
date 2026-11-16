@@ -3245,19 +3245,40 @@ func (e SecurityScanInputProfile) Valid() bool {
 
 // Defines values for SecurityScanInputSchedule.
 const (
-	Dagelijks SecurityScanInputSchedule = "dagelijks"
-	Uit       SecurityScanInputSchedule = "uit"
-	Wekelijks SecurityScanInputSchedule = "wekelijks"
+	SecurityScanInputScheduleDagelijks SecurityScanInputSchedule = "dagelijks"
+	SecurityScanInputScheduleUit       SecurityScanInputSchedule = "uit"
+	SecurityScanInputScheduleWekelijks SecurityScanInputSchedule = "wekelijks"
 )
 
 // Valid indicates whether the value is a known member of the SecurityScanInputSchedule enum.
 func (e SecurityScanInputSchedule) Valid() bool {
 	switch e {
-	case Dagelijks:
+	case SecurityScanInputScheduleDagelijks:
 		return true
-	case Uit:
+	case SecurityScanInputScheduleUit:
 		return true
-	case Wekelijks:
+	case SecurityScanInputScheduleWekelijks:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SecurityToolScheduleSchedule.
+const (
+	SecurityToolScheduleScheduleDagelijks SecurityToolScheduleSchedule = "dagelijks"
+	SecurityToolScheduleScheduleUit       SecurityToolScheduleSchedule = "uit"
+	SecurityToolScheduleScheduleWekelijks SecurityToolScheduleSchedule = "wekelijks"
+)
+
+// Valid indicates whether the value is a known member of the SecurityToolScheduleSchedule enum.
+func (e SecurityToolScheduleSchedule) Valid() bool {
+	switch e {
+	case SecurityToolScheduleScheduleDagelijks:
+		return true
+	case SecurityToolScheduleScheduleUit:
+		return true
+	case SecurityToolScheduleScheduleWekelijks:
 		return true
 	default:
 		return false
@@ -12534,6 +12555,16 @@ type SecurityScopeInput struct {
 	PublicNote    *string   `json:"public_note,omitempty"`
 }
 
+// SecurityToolSchedule defines model for SecurityToolSchedule.
+type SecurityToolSchedule struct {
+	Hour     *int                         `json:"hour,omitempty"`
+	Schedule SecurityToolScheduleSchedule `json:"schedule"`
+	Weekday  *int                         `json:"weekday,omitempty"`
+}
+
+// SecurityToolScheduleSchedule defines model for SecurityToolSchedule.Schedule.
+type SecurityToolScheduleSchedule string
+
 // SelfGuest defines model for SelfGuest.
 type SelfGuest struct {
 	Connection   string             `json:"connection"`
@@ -14645,6 +14676,9 @@ type CreateSecurityScopeJSONRequestBody = SecurityScopeInput
 // UpdateSecurityScopeJSONRequestBody defines body for UpdateSecurityScope for application/json ContentType.
 type UpdateSecurityScopeJSONRequestBody = SecurityScopeInput
 
+// SetSecurityToolScheduleJSONRequestBody defines body for SetSecurityToolSchedule for application/json ContentType.
+type SetSecurityToolScheduleJSONRequestBody = SecurityToolSchedule
+
 // SetSelfLocationJSONRequestBody defines body for SetSelfLocation for application/json ContentType.
 type SetSelfLocationJSONRequestBody = SelfLocationInput
 
@@ -15691,6 +15725,15 @@ type ServerInterface interface {
 	// UpdateSecurityScope Scope bijwerken (admin)
 	// (PUT /security/scopes/{scopeId})
 	UpdateSecurityScope(w http.ResponseWriter, r *http.Request, scopeId openapi_types.UUID)
+	// GetSecurityTools Beveiligingstools per node (fase 27 M7)
+	// (GET /security/tools)
+	GetSecurityTools(w http.ResponseWriter, r *http.Request)
+	// SetSecurityToolSchedule De run van een tool plannen (admin)
+	// (PUT /security/tools/{nodeId}/{tool}/schedule)
+	SetSecurityToolSchedule(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID, tool string)
+	// SecurityToolAction Een tool installeren, draaien, de basislijn opnieuw maken of verwijderen (admin); loopt op de achtergrond
+	// (POST /security/tools/{nodeId}/{tool}/{action})
+	SecurityToolAction(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID, tool string, action string)
 	// DeleteSelfLocation De ingevulde VM weghalen, zodat ClusterForge zelf zoekt (admin)
 	// (DELETE /self-location)
 	DeleteSelfLocation(w http.ResponseWriter, r *http.Request)
@@ -17794,6 +17837,24 @@ func (_ Unimplemented) DeleteSecurityScope(w http.ResponseWriter, r *http.Reques
 // UpdateSecurityScope Scope bijwerken (admin)
 // (PUT /security/scopes/{scopeId})
 func (_ Unimplemented) UpdateSecurityScope(w http.ResponseWriter, r *http.Request, scopeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetSecurityTools Beveiligingstools per node (fase 27 M7)
+// (GET /security/tools)
+func (_ Unimplemented) GetSecurityTools(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SetSecurityToolSchedule De run van een tool plannen (admin)
+// (PUT /security/tools/{nodeId}/{tool}/schedule)
+func (_ Unimplemented) SetSecurityToolSchedule(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID, tool string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SecurityToolAction Een tool installeren, draaien, de basislijn opnieuw maken of verwijderen (admin); loopt op de achtergrond
+// (POST /security/tools/{nodeId}/{tool}/{action})
+func (_ Unimplemented) SecurityToolAction(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID, tool string, action string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -27571,6 +27632,99 @@ func (siw *ServerInterfaceWrapper) UpdateSecurityScope(w http.ResponseWriter, r 
 	handler.ServeHTTP(w, r)
 }
 
+// GetSecurityTools operation middleware
+func (siw *ServerInterfaceWrapper) GetSecurityTools(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetSecurityTools(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetSecurityToolSchedule operation middleware
+func (siw *ServerInterfaceWrapper) SetSecurityToolSchedule(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "tool" -------------
+	var tool string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "tool", chi.URLParam(r, "tool"), &tool, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tool", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetSecurityToolSchedule(w, r, nodeId, tool)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SecurityToolAction operation middleware
+func (siw *ServerInterfaceWrapper) SecurityToolAction(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "tool" -------------
+	var tool string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "tool", chi.URLParam(r, "tool"), &tool, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "tool", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "action" -------------
+	var action string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "action", chi.URLParam(r, "action"), &action, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "action", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SecurityToolAction(w, r, nodeId, tool, action)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // DeleteSelfLocation operation middleware
 func (siw *ServerInterfaceWrapper) DeleteSelfLocation(w http.ResponseWriter, r *http.Request) {
 
@@ -29154,6 +29308,15 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/security/fixes/{fixId}/rollback", wrapper.RollbackSecurityFix)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/security/tools", wrapper.GetSecurityTools)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/security/tools/{nodeId}/{tool}/{action}", wrapper.SecurityToolAction)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/security/tools/{nodeId}/{tool}/schedule", wrapper.SetSecurityToolSchedule)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/security/scanner", wrapper.LinkSecurityScanner)
