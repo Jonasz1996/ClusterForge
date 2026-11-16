@@ -301,7 +301,7 @@ var (
 	pveTmplFile = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+-]{0,200}\.tar\.(gz|xz|zst)$`)
 	pveMatch    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._+-]{0,100}$`)
 	pveFeatures = regexp.MustCompile(`^((nesting|keyctl|fuse|mknod)=[01])?(,(nesting|keyctl|fuse|mknod)=[01])*$`)
-	pveToken    = regexp.MustCompile(`^[A-Za-z0-9._~+/=-]{16,512}$`)
+	pveToken    = regexp.MustCompile(`^[A-Za-z0-9._~+/=_-]{16,512}$`)
 	pveSHA      = regexp.MustCompile(`^[0-9a-f]{64}$`)
 	// SSHKeyRe is een publieke OpenSSH-sleutel op één regel.
 	SSHKeyRe = regexp.MustCompile(`^(ssh-(ed25519|rsa|dss)|ecdsa-sha2-nistp(256|384|521)|sk-(ssh-ed25519|ecdsa-sha2-nistp256)@openssh\.com) [A-Za-z0-9+/=]+( [^\r\n]*)?$`)
@@ -453,7 +453,7 @@ func (p PVERun) Validate() error {
 		if !ct || b == nil {
 			return fmt.Errorf("bootstrap vraagt een CT met instellingen")
 		}
-		if !strings.HasPrefix(b.Server, "https://") && !(b.AllowHTTP && strings.HasPrefix(b.Server, "http://")) {
+		if !strings.HasPrefix(b.Server, "https://") && (!b.AllowHTTP || !strings.HasPrefix(b.Server, "http://")) {
 			return fmt.Errorf("ongeldig adres van ClusterForge %q", b.Server)
 		}
 		if strings.ContainsAny(b.Server, " \"'\n") {

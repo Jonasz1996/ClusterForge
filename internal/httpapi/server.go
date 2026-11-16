@@ -45,6 +45,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/live"
 	"github.com/Jonasz1996/clusterforge/internal/metrics"
 	"github.com/Jonasz1996/clusterforge/internal/proxmox"
+	"github.com/Jonasz1996/clusterforge/internal/pvehost"
 	"github.com/Jonasz1996/clusterforge/internal/recipes"
 	"github.com/Jonasz1996/clusterforge/internal/reports"
 	"github.com/Jonasz1996/clusterforge/internal/risk"
@@ -96,6 +97,7 @@ type Server struct {
 	updates      *updates.Service
 	crowdsec     *crowdsec.Service
 	firewall     *firewall.Service
+	pvehosts     *pvehost.Service
 	commands     *commands.Service
 	recipes      *recipes.Service
 	loginLimiter *ipLimiter
@@ -175,6 +177,7 @@ type Deps struct {
 	CrowdSec *crowdsec.Service
 	// Firewall beheert ufw op de nodes (fase 16).
 	Firewall *firewall.Service
+	PVEHosts *pvehost.Service
 	Version  string
 }
 
@@ -212,6 +215,7 @@ func New(d Deps) *Server {
 		commands: d.Commands,
 		crowdsec: d.CrowdSec,
 		firewall: d.Firewall,
+		pvehosts: d.PVEHosts,
 		recipes:  recipes.NewService(d.Pool, ev),
 		// 10 pogingen direct, daarna één per 6 seconden per IP-adres.
 		loginLimiter:   newIPLimiter(6*time.Second, 10),

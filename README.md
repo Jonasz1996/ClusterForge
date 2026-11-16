@@ -112,6 +112,13 @@ Het technisch ontwerp staat in [docs/design/mvp-fase-1.md](docs/design/mvp-fase-
 | 2. Updates | Pagina **[Updates](#updates)**: apt en/of Docker per node of cluster, één node tegelijk met de VIP-houder als laatste, wachten op de diensten en de VIP's, databasepakketten blijven staan op een databasecluster | klaar |
 | 3. Commando's | Pagina **[Commando's](#commandos)**: eigen scripts met revisies, uitvoeren op nodes of een cluster met de uitvoer live in de taak | klaar |
 
+| Fase 17: Proxmox-agent | Inhoud | Status |
+| --- | --- | --- |
+| 1. Agent op de host | cf-agent op een Proxmox-host (agentprotocol 32) herkent de host en leest de containers, VM's, storage, bridges, templates en vrije ID's; acties met `pct` en `qm` als run: starten, afsluiten, herstarten, hard uit, pauzeren, instellingen, schijf vergroten, snapshots, verhuizen en verwijderen | klaar |
+| 2. CT's maken | Een CT maken met CPU, RAM, schijf, CTID, adres en SSH-sleutels, de nieuwste Debian 13-template ophalen, en cf-agent in een CT zetten met een eenmalig token | klaar |
+| 3. Volledig automatisch uitrollen | Cluster uitrollen met **Nieuwe CT's, volledig automatisch**: per node host, storage, CTID, adres, CPU, RAM en schijf; de host maakt de CT's, zet de agent erin en ClusterForge rolt het cluster uit | klaar |
+| 4. Webinterface | Pagina **[Proxmox-hosts](#proxmox-hosts-met-een-agent)** | klaar |
+
 ## Draaien met Docker Compose
 
 Stap voor stap in een Debian-container op Proxmox: [docs/install-proxmox-lxc.md](docs/install-proxmox-lxc.md). Daar staan ook [back-up en herstel van ClusterForge zelf](docs/install-proxmox-lxc.md#back-up-en-herstel-van-clusterforge-zelf) en [bijwerken](docs/install-proxmox-lxc.md#bijwerken). `docker compose ps` toont de server als `healthy` zodra hij antwoordt (`clusterforge-server healthcheck`).
@@ -259,6 +266,16 @@ Elke 10 minuten leest ClusterForge ook het netwerk van elke online host: bridges
 
 **Koppelvoorstellen.** Heeft een VM of container hetzelfde MAC-adres als een node met een agent die nog aan geen VM hangt, dan stelt ClusterForge voor om ze te koppelen. Het voorstel staat bovenaan bij Proxmox en bij de node; een beheerder bevestigt of negeert het. Bevestigen koppelt de node aan de VM, net als Koppelen; een genegeerd voorstel komt niet terug. Templates en de sandbox-pool tellen niet mee.
 
+### Proxmox-hosts met een agent
+
+Zet je cf-agent ook op een Proxmox-host (één keer, als root, via Nodes → Agent installeren), dan herkent ClusterForge de host en kan het hem direct beheren met `pct` en `qm`, zonder API-token. Bij **Proxmox-hosts** kies je een host en zie je zijn containers en VM's, storage en containertemplates. Per container of VM: Starten, Afsluiten, Herstarten, Hard uitzetten, Pauzeren (alleen VM), Instellingen (CPU, RAM, swap, tags, beschrijving, DNS, features, opstarten met de host), Schijf vergroten, Snapshots (maken, terugzetten, weggooien), Verhuizen naar een host in hetzelfde Proxmox-cluster, Agent erin zetten (CT) en Verwijderen. Verwijderen vraagt de naam of het nummer, kan alleen als hij uit staat, en weigert een CT of VM die nog een node van een cluster is. Elke actie is een taak met de uitvoer van `pct` of `qm`; de agent voert alleen deze vaste acties uit, nooit een vrij commando.
+
+**CT maken** maakt een container met CTID, hostname, template, CPU, RAM, swap, storage, schijf, bridge, VLAN, adres en gateway (leeg: het eerste adres van het subnet), DNS, en SSH-sleutels: die van root op de host gaan er standaard in. **Nieuwste Debian 13 ophalen** zet de nieuwste `debian-13-standard` op de storage voor templates; bij Andere template kies je uit `pveam available`.
+
+**Agent erin zetten** zet cf-agent in een draaiende CT met `pct push` (gecontroleerd met de sha256 van de server), met een aanmeldtoken dat één uur geldt en één keer werkt, en start hem; daarna staat de CT bij Nodes. Op de host komt de hostkey van de CT in `/root/.ssh/known_hosts`, zodat SSH van de host naar de CT meteen werkt.
+
+Een agent die ouder is dan protocol 32 toont "Agent te oud": werk hem bij met Nodes → Agents bijwerken.
+
 ## Back-ups
 
 ClusterForge maakt zelf geen back-ups; dat blijven de back-upjobs van Proxmox (vzdump naar een storage of naar Proxmox Backup Server). Wel leest het elk kwartier welke back-ups er zijn en toont bij Back-ups per VM hoe oud de nieuwste is, op welke storage, hoe groot, en of Proxmox Backup Server hem geverifieerd heeft. Een VM is bewaakt als hij aan een node gekoppeld is, of als je hem op de pagina Back-ups bij "Ook bewaken" zet met zijn VMID en een label: zo houd je ook de container van ClusterForge zelf in het oog.
@@ -341,6 +358,8 @@ Wat je nodig hebt:
 
    Het script haalt het cloud-image van Debian, zet er qemu-guest-agent en cf-agent in met `virt-customize` (uit `libguestfs-tools`, dat het zo nodig installeert) en maakt VM-template 9000. Met `--vmid`, `--storage`, `--bridge` en `--name` kies je iets anders, en `--replace` vervangt een eerdere template. Op gedeelde storage (Ceph, NFS) verdeelt ClusterForge de VM's over de hosts; op lokale storage komen ze allemaal op de host van de template.
 3. De nieuwe VM's moeten ClusterForge kunnen bereiken: het webadres om zich aan te melden, en poort 4222 voor NATS. Voor Kubernetes hebben ze ook internet nodig, voor k3s van GitHub en de images van je apps.
+
+**Volledig automatisch met nieuwe CT's.** Staat cf-agent op je Proxmox-hosts (zie [Proxmox-hosts met een agent](#proxmox-hosts-met-een-agent)), dan heb je geen golden image of CT-template nodig. Kies bij Waar **Nieuwe CT's, volledig automatisch**; in het voorbeeld onderaan kies je per node de host, storage, CTID, het adres, CPU, RAM en schijf, of laat je ClusterForge kiezen (de hosts gespreid, het eerste vrije CTID, de storage met de meeste ruimte, de resources van de template). De eerste drie adressen van het subnet (gateway en firewalls) krijgt geen node of VIP. De uitrol haalt zo nodig de template op, maakt en start elke CT op zijn host, zet de SSH-sleutels van de host en die uit het formulier erin, zet cf-agent erin en meldt hem aan, en rolt dan het cluster uit zoals altijd. Elke CT krijgt `nesting`, en templates met Docker ook `keyctl`.
 
 Klik bij Clusters op "Cluster uitrollen", kies de template en vul de naam, de parameters (zoals het VIP), de golden image en het netwerk in. Onderaan zie je meteen welke nodes er komen, met hun adres en Proxmox-host; een fout staat bij het veld. Na "Uitrollen" loopt de taak:
 
@@ -1434,6 +1453,13 @@ Nextcloud, Grafana, Gitea, Vaultwarden, Jellyfin, Immich, Plex en Proxmox. Herke
 (met de mounts voor de logmap), bestanden en het clustertemplate; zo werkt het ook voor Docker-apps die
 ClusterForge niet zelf uitrolde. Per node zet je een profiel uit of bij met Wijzigen. PostgreSQL onder Patroni logt
 via Patroni; die regels herkent de pgsql-parser niet (de kaart zegt dat).
+
+**CrowdSec Console** (Instellingen, agentprotocol 31): plak de enroll-sleutel van app.crowdsec.net (het laatste
+woord van `cscli console enroll <sleutel>`). ClusterForge meldt elke beheerde node aan zodra CrowdSec er draait
+(`cscli console enroll --name <hostnaam> --overwrite`, daarna een herstart van CrowdSec); accepteer de nodes in de
+Console. De sleutel staat versleuteld met de masterkey (CF_MASTER_KEY) en gaat alleen in het verzoek naar de agent,
+niet in een script, taak of event. "Alle nodes opnieuw aanmelden" en "Console aanmelden" op de kaart van een node
+melden opnieuw aan. Een mislukte aanmelding staat op de kaart en wacht een uur.
 
 **Whitelist** (Instellingen): standaard 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, loopback en fc00::/7. CrowdSec
 bant die nooit, zodat de proxy voor een backend, een clusternode of je pc nooit buitengesloten raakt.

@@ -19,6 +19,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/jobs"
 	"github.com/Jonasz1996/clusterforge/internal/noderun"
+	"github.com/Jonasz1996/clusterforge/internal/secrets"
 	"github.com/Jonasz1996/clusterforge/pkg/protocol"
 )
 
@@ -50,6 +51,9 @@ type Service struct {
 	PollEvery   time.Duration
 	StatusEvery time.Duration
 	Now         func() time.Time
+	// Box versleutelt de enroll-sleutel van de CrowdSec Console; nil
+	// zonder masterkey.
+	Box *secrets.Box
 
 	tick      sync.Mutex
 	lastPrune time.Time
@@ -303,7 +307,8 @@ func (s *Service) apply(ctx context.Context, j *jobs.Job) error {
 		return err
 	case p.Remove:
 		_, _ = s.pool.Exec(bg, `UPDATE crowdsec_nodes SET managed = false, applied_hash = '', plan_hash = '', plan = NULL, status = NULL,
-			status_at = NULL, apply_error = '' WHERE node_id = $1`, p.NodeID)
+			status_at = NULL, apply_error = '', console_hash = '', console_enrolled_at = NULL, console_error = '', console_failed_at = NULL
+			WHERE node_id = $1`, p.NodeID)
 		_, _ = s.pool.Exec(bg, `DELETE FROM crowdsec_decisions WHERE node_id = $1`, p.NodeID)
 		s.event(bg, actor, &n, "crowdsec.removed", map[string]any{"job_id": j.ID.String()})
 	default:
@@ -396,6 +401,9 @@ func (s *Service) Tick(ctx context.Context) error {
 	}
 	now := s.Now()
 	var fresh []sharedBan
+	// De enroll-sleutel wordt pas ontsleuteld als een node hem nodig heeft.
+	consoleKey, consoleErr := "", error(nil)
+	consoleTried := false
 	for i, n := range nodes {
 		if !n.Enabled || !n.Managed || !n.Supported || !n.Online {
 			continue
@@ -422,6 +430,17 @@ func (s *Service) Tick(ctx context.Context) error {
 				if _, err := s.Apply(ctx, events.System(), n.NodeID, false); err != nil {
 					s.log.Warn("CrowdSec automatisch toepassen mislukt", "node", n.Hostname, "err", err)
 				}
+			}
+		}
+		if n.wantsConsole(set.consoleKeyHash) && (n.ConsoleFailedAt == nil || now.Sub(*n.ConsoleFailedAt) >= RetryFailed) {
+			if !consoleTried {
+				consoleTried = true
+				consoleKey, consoleErr = s.consoleKey(set)
+			}
+			if consoleErr != nil {
+				_, _ = s.pool.Exec(ctx, `UPDATE crowdsec_nodes SET console_error = $2, console_failed_at = now() WHERE node_id = $1`, n.NodeID, consoleErr.Error())
+			} else if err := s.enroll(ctx, n, consoleKey, set.consoleKeyHash); err != nil {
+				s.log.Warn("CrowdSec Console aanmelden mislukt", "node", n.Hostname, "err", err)
 			}
 		}
 		if n.Status != nil && n.Status.Installed {

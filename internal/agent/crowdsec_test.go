@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -83,6 +84,13 @@ func crowdSecAgent(t *testing.T) (*Agent, *[]string) {
 			return []byte("level=info msg=\"2 decision(s) deleted\"\n"), nil
 		case strings.HasPrefix(cmd, "cscli decisions add"):
 			return []byte("Decision successfully added\n"), nil
+		case strings.HasPrefix(cmd, "cscli console enroll"):
+			if strings.Contains(cmd, "badkey123") {
+				return nil, errors.New("cscli: could not enroll with key badkey123: 403")
+			}
+			return []byte("Watcher successfully enrolled. Visit https://app.crowdsec.net to accept it.\n"), nil
+		case cmd == "systemctl restart crowdsec":
+			return nil, nil
 		}
 		t.Errorf("onverwacht commando %q", cmd)
 		return nil, nil
@@ -192,6 +200,29 @@ func TestCrowdSecDecide(t *testing.T) {
 		res = a.handleCrowdSec(csRequest(t, protocol.CrowdSecRequest{Op: protocol.CrowdSecOpDecide, Decide: &bad}))
 		if res.Error == "" {
 			t.Errorf("%+v moet geweigerd worden", bad)
+		}
+	}
+}
+
+func TestCrowdSecEnroll(t *testing.T) {
+	a, calls := crowdSecAgent(t)
+	res := a.handleCrowdSec(csRequest(t, protocol.CrowdSecRequest{Op: protocol.CrowdSecOpEnroll,
+		Enroll: &protocol.CrowdSecEnroll{Key: "testkey0123456789", Name: "nc1", Overwrite: true}}))
+	if res.Error != "" || res.Count != 1 {
+		t.Fatalf("antwoord %+v", res)
+	}
+	want := []string{"cscli console enroll --name nc1 --overwrite testkey0123456789", "systemctl restart crowdsec"}
+	if !slices.Equal(*calls, want) {
+		t.Errorf("commando's %q", *calls)
+	}
+	res = a.handleCrowdSec(csRequest(t, protocol.CrowdSecRequest{Op: protocol.CrowdSecOpEnroll,
+		Enroll: &protocol.CrowdSecEnroll{Key: "badkey123", Name: "nc1"}}))
+	if res.Error == "" || strings.Contains(res.Error, "badkey123") {
+		t.Errorf("fout %q: moet er zijn, zonder sleutel", res.Error)
+	}
+	for _, e := range []protocol.CrowdSecEnroll{{Key: "kort", Name: "nc1"}, {Key: "testkey0123456789", Name: "-x"}, {Key: "a;rm -rf /x", Name: "nc1"}} {
+		if res := a.handleCrowdSec(csRequest(t, protocol.CrowdSecRequest{Op: protocol.CrowdSecOpEnroll, Enroll: &e})); res.Error == "" {
+			t.Errorf("%+v werd aanvaard", e)
 		}
 	}
 }

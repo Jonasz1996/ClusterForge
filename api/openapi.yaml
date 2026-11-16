@@ -4015,6 +4015,47 @@ paths:
         "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
+  /crowdsec/console:
+    put:
+      operationId: setCrowdSecConsoleKey
+      summary: Enroll-sleutel van de CrowdSec Console bewaren of weghalen (admin)
+      description: |
+        De sleutel uit `cscli console enroll <sleutel>` op app.crowdsec.net. Versleuteld bewaard met de masterkey en
+        nooit teruggegeven. Leeg haalt hem weg. Met een sleutel meldt ClusterForge elke beheerde node aan zodra CrowdSec
+        er draait (agent protocol 31).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CrowdSecConsoleKeyInput" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CrowdSecSettings" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /crowdsec/console/enroll:
+    post:
+      operationId: enrollCrowdSecConsole
+      summary: Nodes opnieuw aanmelden bij de CrowdSec Console (admin)
+      description: Zonder node_id alle beheerde nodes. De aanmelding volgt meteen in een ronde op de achtergrond.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CrowdSecEnrollInput" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CrowdSecEnrollResult" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
   /crowdsec/nodes:
     post:
       operationId: setCrowdSecNodes
@@ -4170,6 +4211,74 @@ paths:
         "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
+  /pve-hosts:
+    get:
+      operationId: listPveHosts
+      summary: Proxmox-hosts met een agent (fase 17), en hosts uit de koppelingen zonder agent
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "401": { $ref: "#/components/responses/Error" }
+  /pve-hosts/{nodeId}/inventory:
+    parameters:
+      - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getPveHostInventory
+      summary: Wat de agent op de host ziet - CT's en VM's met configuratie en snapshots, storages, bridges, containertemplates
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+  /pve-hosts/{nodeId}/available:
+    parameters:
+      - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getPveHostAvailable
+      summary: Containertemplates die de host met pveam kan downloaden
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+  /pve-hosts/{nodeId}/actions:
+    parameters:
+      - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: startPveHostAction
+      summary: Een actie met pct, qm of pveam op de host, als taak pvehost.action (admin)
+      description: |
+        op is een protocol.PVERun (action, vmid, en per actie set, disk/size, snapshot, target, create, template).
+        Verwijderen vraagt confirm (naam of nummer van de gast) en weigert een gast van een node in een cluster.
+        bootstrap (cf-agent in een CT) vraagt server_url.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PveActionInput" }
+      responses:
+        "202":
+          description: Taak aangemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
   /firewall:
     get:
       operationId: getFirewall
@@ -12239,10 +12348,18 @@ components:
         description: { type: string }
     DeployTarget:
       type: object
-      required: [proxmox_id, image_vmid, network]
+      required: [proxmox_id, network]
       properties:
         proxmox_id: { type: string, format: uuid }
-        image_vmid: { type: integer, description: De VM-template (golden image) om uit te klonen }
+        image_vmid: { type: integer, description: De VM-template (golden image) of CT-template om uit te klonen; niet bij create ct }
+        create:
+          type: string
+          enum: [ct]
+          description: >-
+            ct - nieuwe CT's die de agent op de Proxmox-host maakt (fase 17), met cf-agent erin; image_vmid valt dan weg.
+        ostemplate: { type: string, description: "Containertemplate bij create ct, zoals local:vztmpl/debian-13-standard_13.1-2_amd64.tar.zst; leeg is de nieuwste debian-13-standard" }
+        template_storage: { type: string, description: Storage voor de containertemplate als de host hem downloadt; standaard local }
+        privileged: { type: boolean, description: Bevoegde CT's in plaats van onbevoegde }
         storage: { type: string, description: Storage voor de schijven; leeg is die van de template }
         bridge: { type: string, description: Standaard vmbr0 }
         vlan: { type: integer, nullable: true }
@@ -12265,6 +12382,11 @@ components:
         index: { type: integer, description: "Volgnummer binnen de rol, vanaf 1" }
         host: { type: string, description: Proxmox-host; leeg kiest ClusterForge }
         storage: { type: string, description: Storage voor de schijf; leeg is de standaard }
+        vmid: { type: integer, description: Nummer van de nieuwe VM of CT; leeg kiest ClusterForge }
+        address: { type: string, description: Vast IPv4-adres zonder prefix; leeg is het volgende vrije na first_ip }
+        cpu: { type: integer, description: vCPU's; leeg volgt de template }
+        memory_mib: { type: integer, description: Geheugen in MB; leeg volgt de template }
+        disk_gib: { type: integer, description: Schijf in GB; leeg volgt de template }
     DeployInput:
       type: object
       required: [template, cluster, params]
@@ -12302,7 +12424,7 @@ components:
         engine: { type: string, description: "mariadb; postgresql komt later" }
     DeployPlanNode:
       type: object
-      required: [hostname, role, index, address, host, storage, host_chosen, storage_chosen, cpu, memory_mib, disk_gib]
+      required: [hostname, role, index, address, host, storage, host_chosen, storage_chosen, cpu, memory_mib, disk_gib, vmid, vmid_chosen]
       properties:
         hostname: { type: string }
         role: { type: string }
@@ -12315,6 +12437,8 @@ components:
         cpu: { type: integer }
         memory_mib: { type: integer }
         disk_gib: { type: integer }
+        vmid: { type: integer, description: "Nummer van de nieuwe VM of CT; 0 als Proxmox het bij het maken kiest" }
+        vmid_chosen: { type: boolean }
     DeployPlan:
       type: object
       required: [nodes, vip, vrid]
@@ -12618,13 +12742,29 @@ components:
           description: null als er op geen node iets verandert
     CrowdSecSettings:
       type: object
-      required: [auto_apply, bouncer_default, share_bans, whitelist, updated_at]
+      required: [auto_apply, bouncer_default, share_bans, whitelist, updated_at, console_key_set, console_available]
       properties:
         auto_apply: { type: boolean }
         bouncer_default: { type: boolean }
         share_bans: { type: string, enum: [off, cluster, all] }
         whitelist: { type: array, items: { type: string } }
         updated_at: { type: string, format: date-time }
+        console_key_set: { type: boolean, description: Er is een enroll-sleutel voor de CrowdSec Console }
+        console_available: { type: boolean, description: De server heeft een masterkey om de sleutel te bewaren }
+    CrowdSecConsoleKeyInput:
+      type: object
+      required: [key]
+      properties:
+        key: { type: string, description: Leeg haalt de sleutel weg }
+    CrowdSecEnrollInput:
+      type: object
+      properties:
+        node_id: { type: string, format: uuid }
+    CrowdSecEnrollResult:
+      type: object
+      required: [nodes]
+      properties:
+        nodes: { type: integer }
     CrowdSecSettingsInput:
       type: object
       required: [auto_apply, bouncer_default, share_bans, whitelist]
@@ -12750,7 +12890,7 @@ components:
       required: [node_id, hostname, cluster_id, cluster_name, cluster_slug, cluster_environment, cluster_template, online,
         protocol, supported, enabled, managed, bouncer, extra_profiles, disabled_profiles, status, status_at, plan,
         plan_hash, applied_hash, applied_at, apply_job_id, apply_running, apply_error, apply_failed_at, blocklist, poll_at,
-        poll_error]
+        poll_error, console_enrolled, console_enrolled_at, console_error, console_failed_at]
       properties:
         node_id: { type: string, format: uuid }
         hostname: { type: string }
@@ -12784,6 +12924,10 @@ components:
         blocklist: { type: integer, description: Bans van de community-blocklist, -1 als onbekend }
         poll_at: { type: string, format: date-time, nullable: true }
         poll_error: { type: string }
+        console_enrolled: { type: boolean, description: Aangemeld bij de CrowdSec Console met de huidige sleutel }
+        console_enrolled_at: { type: string, format: date-time, nullable: true }
+        console_error: { type: string }
+        console_failed_at: { type: string, format: date-time, nullable: true }
     CrowdSecAlert:
       type: object
       required: [id, node_id, hostname, cluster_id, cluster_name, scenario, message, scope, value, country, as, events,
@@ -12819,6 +12963,17 @@ components:
         until: { type: string, format: date-time }
         nodes: { type: array, items: { type: string } }
         shared: { type: boolean, description: ClusterForge zette deze ban ook op andere nodes }
+    PveObject:
+      type: object
+      description: Een object van de Proxmox-hosts (fase 17); de velden staan in web/src/lib/pvehosts.ts en pkg/protocol/pve.go.
+      additionalProperties: true
+    PveActionInput:
+      type: object
+      required: [op]
+      properties:
+        op: { $ref: "#/components/schemas/PveObject" }
+        confirm: { type: string, description: Bij verwijderen de naam of het nummer van de gast }
+        server_url: { type: string, description: Bij bootstrap het adres waarmee de CT ClusterForge bereikt }
     FirewallObject:
       type: object
       description: Een object van de firewall (fase 16); de velden staan in web/src/lib/firewall.ts en internal/firewall.

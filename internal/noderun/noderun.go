@@ -70,6 +70,12 @@ func (r *Runner) Do(ctx context.Context, st *jobs.Step, nodeID uuid.UUID, spec p
 	return r.do(ctx, st, st, nodeID, spec)
 }
 
+// DoWith is Do met een eigen uitvoer en state, voor een stap die zelf ook
+// state bewaart (zoals het maken van een CT bij een uitrol).
+func (r *Runner) DoWith(ctx context.Context, log Log, ss StepState, nodeID uuid.UUID, spec protocol.RunSpec) (protocol.RunStatus, error) {
+	return r.do(ctx, log, ss, nodeID, spec)
+}
+
 func (r *Runner) do(ctx context.Context, log Log, ss StepState, nodeID uuid.UUID, spec protocol.RunSpec) (protocol.RunStatus, error) {
 	poll := r.Poll
 	if poll <= 0 {
