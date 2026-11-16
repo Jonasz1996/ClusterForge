@@ -4015,6 +4015,47 @@ paths:
         "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
+  /crowdsec/console:
+    put:
+      operationId: setCrowdSecConsoleKey
+      summary: Enroll-sleutel van de CrowdSec Console bewaren of weghalen (admin)
+      description: |
+        De sleutel uit `cscli console enroll <sleutel>` op app.crowdsec.net. Versleuteld bewaard met de masterkey en
+        nooit teruggegeven. Leeg haalt hem weg. Met een sleutel meldt ClusterForge elke beheerde node aan zodra CrowdSec
+        er draait (agent protocol 31).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CrowdSecConsoleKeyInput" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CrowdSecSettings" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /crowdsec/console/enroll:
+    post:
+      operationId: enrollCrowdSecConsole
+      summary: Nodes opnieuw aanmelden bij de CrowdSec Console (admin)
+      description: Zonder node_id alle beheerde nodes. De aanmelding volgt meteen in een ronde op de achtergrond.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/CrowdSecEnrollInput" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/CrowdSecEnrollResult" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
   /crowdsec/nodes:
     post:
       operationId: setCrowdSecNodes
@@ -4170,6 +4211,189 @@ paths:
         "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
+  /firewall:
+    get:
+      operationId: getFirewall
+      summary: Firewall op alle nodes (fase 16)
+      description: |
+        Instellingen, cijfers, geblokkeerd verkeer per uur (24 u), per cluster de tabel poort × node (open voor wie,
+        dicht, via Docker, pogingen naar dichte poorten), waarschuwingen, elke node met een agent met zijn stand, plan
+        en verschil, de eigen regels en de catalogus. Ook voor viewers.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FirewallOverview" }
+        "401": { $ref: "#/components/responses/Error" }
+  /firewall/settings:
+    put:
+      operationId: updateFirewallSettings
+      summary: Firewall-instellingen bewaren (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/FirewallSettingsInput" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FirewallObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /firewall/nodes:
+    post:
+      operationId: setFirewallNodes
+      summary: Stand van nodes zetten (admin)
+      description: |
+        node_ids, cluster_id of all. off: ClusterForge doet niets; preview: plan en verschil zien zonder iets toe te
+        passen; managed: het plan wordt toegepast (met terugdraaitimer), ook vanzelf als er software bijkomt.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/FirewallNodesInput" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [skipped]
+                properties:
+                  skipped: { type: array, items: { type: string } }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /firewall/nodes/{nodeId}:
+    parameters:
+      - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getFirewallNode
+      summary: Firewall van één node, met het verkeer naar dichte poorten (24 u)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FirewallObject" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /firewall/nodes/{nodeId}/refresh:
+    parameters:
+      - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: refreshFirewallNode
+      summary: Voorbeeld - de stand meteen ophalen en het plan en verschil uitrekenen (admin)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FirewallObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /firewall/nodes/{nodeId}/apply:
+    parameters:
+      - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: applyFirewallNode
+      summary: Het plan nu toepassen als taak firewall.apply (admin)
+      responses:
+        "202":
+          description: Taak aangemaakt
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [job_id]
+                properties:
+                  job_id: { type: string, format: uuid }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /firewall/nodes/{nodeId}/rollback:
+    parameters:
+      - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: rollbackFirewallNode
+      summary: Een toepassing die op bevestiging wacht meteen terugdraaien (admin)
+      responses:
+        "204": { description: Teruggedraaid }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /firewall/nodes/{nodeId}/disable:
+    parameters:
+      - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: disableFirewallNode
+      summary: ufw uitschakelen op de node; een beheerde node gaat naar voorbeeld (admin)
+      responses:
+        "204": { description: Uitgeschakeld }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /firewall/traffic:
+    get:
+      operationId: listFirewallTraffic
+      summary: Verkeer naar dichte poorten, per node, bron en poort (meeste pakketten eerst)
+      parameters:
+        - { name: node_id, in: query, schema: { type: string, format: uuid } }
+        - { name: cluster_id, in: query, schema: { type: string, format: uuid } }
+        - { name: port, in: query, schema: { type: integer, minimum: 0, maximum: 65535 } }
+        - { name: hours, in: query, schema: { type: integer, minimum: 1, maximum: 720 } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 1000 } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, hourly]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/FirewallObject" } }
+                  hourly: { type: array, items: { $ref: "#/components/schemas/FirewallObject" } }
+        "401": { $ref: "#/components/responses/Error" }
+  /firewall/rules:
+    post:
+      operationId: addFirewallRule
+      summary: Eigen regel toevoegen - open of dicht, voor een node, een cluster of overal (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/FirewallRuleInput" }
+      responses:
+        "201":
+          description: Toegevoegd
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/FirewallObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /firewall/rules/{ruleId}:
+    parameters:
+      - { name: ruleId, in: path, required: true, schema: { type: string, format: uuid } }
+    delete:
+      operationId: deleteFirewallRule
+      summary: Eigen regel verwijderen (admin)
+      responses:
+        "204": { description: Verwijderd }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
   /commands:
     get:
       operationId: listCommands
@@ -12435,13 +12659,29 @@ components:
           description: null als er op geen node iets verandert
     CrowdSecSettings:
       type: object
-      required: [auto_apply, bouncer_default, share_bans, whitelist, updated_at]
+      required: [auto_apply, bouncer_default, share_bans, whitelist, updated_at, console_key_set, console_available]
       properties:
         auto_apply: { type: boolean }
         bouncer_default: { type: boolean }
         share_bans: { type: string, enum: [off, cluster, all] }
         whitelist: { type: array, items: { type: string } }
         updated_at: { type: string, format: date-time }
+        console_key_set: { type: boolean, description: Er is een enroll-sleutel voor de CrowdSec Console }
+        console_available: { type: boolean, description: De server heeft een masterkey om de sleutel te bewaren }
+    CrowdSecConsoleKeyInput:
+      type: object
+      required: [key]
+      properties:
+        key: { type: string, description: Leeg haalt de sleutel weg }
+    CrowdSecEnrollInput:
+      type: object
+      properties:
+        node_id: { type: string, format: uuid }
+    CrowdSecEnrollResult:
+      type: object
+      required: [nodes]
+      properties:
+        nodes: { type: integer }
     CrowdSecSettingsInput:
       type: object
       required: [auto_apply, bouncer_default, share_bans, whitelist]
@@ -12567,7 +12807,7 @@ components:
       required: [node_id, hostname, cluster_id, cluster_name, cluster_slug, cluster_environment, cluster_template, online,
         protocol, supported, enabled, managed, bouncer, extra_profiles, disabled_profiles, status, status_at, plan,
         plan_hash, applied_hash, applied_at, apply_job_id, apply_running, apply_error, apply_failed_at, blocklist, poll_at,
-        poll_error]
+        poll_error, console_enrolled, console_enrolled_at, console_error, console_failed_at]
       properties:
         node_id: { type: string, format: uuid }
         hostname: { type: string }
@@ -12601,6 +12841,10 @@ components:
         blocklist: { type: integer, description: Bans van de community-blocklist, -1 als onbekend }
         poll_at: { type: string, format: date-time, nullable: true }
         poll_error: { type: string }
+        console_enrolled: { type: boolean, description: Aangemeld bij de CrowdSec Console met de huidige sleutel }
+        console_enrolled_at: { type: string, format: date-time, nullable: true }
+        console_error: { type: string }
+        console_failed_at: { type: string, format: date-time, nullable: true }
     CrowdSecAlert:
       type: object
       required: [id, node_id, hostname, cluster_id, cluster_name, scenario, message, scope, value, country, as, events,
@@ -12636,6 +12880,56 @@ components:
         until: { type: string, format: date-time }
         nodes: { type: array, items: { type: string } }
         shared: { type: boolean, description: ClusterForge zette deze ban ook op andere nodes }
+    FirewallObject:
+      type: object
+      description: Een object van de firewall (fase 16); de velden staan in web/src/lib/firewall.ts en internal/firewall.
+      additionalProperties: true
+    FirewallOverview:
+      type: object
+      required: [protocol, settings, stats, hourly, clusters, warnings, nodes, rules, catalog, classes]
+      properties:
+        protocol: { type: integer }
+        settings: { $ref: "#/components/schemas/FirewallObject" }
+        stats: { $ref: "#/components/schemas/FirewallObject" }
+        hourly: { type: array, items: { $ref: "#/components/schemas/FirewallObject" } }
+        clusters: { type: array, items: { $ref: "#/components/schemas/FirewallObject" } }
+        warnings: { type: array, items: { $ref: "#/components/schemas/FirewallObject" } }
+        nodes: { type: array, items: { $ref: "#/components/schemas/FirewallObject" } }
+        rules: { type: array, items: { $ref: "#/components/schemas/FirewallObject" } }
+        catalog: { type: array, items: { $ref: "#/components/schemas/FirewallObject" } }
+        classes: { type: array, items: { type: string } }
+    FirewallSettingsInput:
+      type: object
+      required: [auto_apply, lan, admin, ssh_from, unknown_ports, strict, confirm_seconds, grace_hours, monitor]
+      properties:
+        auto_apply: { type: boolean }
+        lan: { type: array, items: { type: string } }
+        admin: { type: array, items: { type: string } }
+        ssh_from: { type: string, enum: [lan, admin, any] }
+        unknown_ports: { type: string, enum: [lan, closed] }
+        strict: { type: boolean }
+        confirm_seconds: { type: integer, minimum: 30, maximum: 900 }
+        grace_hours: { type: integer, minimum: 0, maximum: 720 }
+        monitor: { type: boolean }
+    FirewallNodesInput:
+      type: object
+      required: [mode]
+      properties:
+        node_ids: { type: array, items: { type: string, format: uuid } }
+        cluster_id: { type: string, format: uuid }
+        all: { type: boolean }
+        mode: { type: string, enum: ["off", preview, managed] }
+    FirewallRuleInput:
+      type: object
+      required: [action, proto, port]
+      properties:
+        action: { type: string, enum: [open, close] }
+        proto: { type: string, enum: [tcp, udp] }
+        port: { type: string, description: "Poort of reeks, zoals 8443 of 2379:2380" }
+        source: { type: string, description: "any, lan, cluster, admin, containers of een adres/netwerk (bij open)" }
+        comment: { type: string, maxLength: 60 }
+        node_id: { type: string, format: uuid }
+        cluster_id: { type: string, format: uuid }
     CrowdSecTopEntry:
       type: object
       required: [key, country, as, count]

@@ -42,6 +42,8 @@ IMAGE="ghcr.io/goauthentik/server:$VERSION"
 REDIS_IMAGE=docker.io/library/redis:7-alpine
 PARAM_KEY='{{ .params.secret_key }}'
 INDEX='{{ .node.index }}'
+# De andere nodes van het cluster (voor ufw).
+PEERS='{{ range .peers }}{{ .address }} {{ end }}'
 HTTP=9000
 # Tellingen vóór en na een overname.
 TABLES='authentik_core_user authentik_core_group authentik_core_application authentik_core_provider authentik_providers_proxy_proxyprovider authentik_providers_oauth2_oauth2provider authentik_outposts_outpost authentik_flows_flow authentik_crypto_certificatekeypair'
@@ -271,6 +273,37 @@ back() {
   exit 1
 }
 
+# Een actieve ufw (default deny) houdt etcd, Patroni, PostgreSQL en VRRP
+# tussen de nodes tegen: de regels die het cluster nodig heeft. De containers
+# van Authentik bereiken PostgreSQL op hun eigen node vanaf 172.16.0.0/12.
+ufw_active() { command -v ufw >/dev/null 2>&1 && ufw status 2>/dev/null | grep -q '^Status: active'; }
+ufw_rules() {
+  for ip in $PEERS; do
+    echo "allow from $ip to any port 2379:2380 proto tcp"
+    echo "allow from $ip to any port 5432 proto tcp"
+    echo "allow from $ip to any port 8008 proto tcp"
+    echo "allow from $ip proto vrrp"
+  done
+  echo "allow from 172.16.0.0/12 to any port 5432 proto tcp"
+}
+firewall_ok() {
+  ufw_active || return 0
+  added=$(ufw show added 2>/dev/null)
+  # Alleen de tcp-regels: hoe ufw een regel voor vrrp toont, verschilt per
+  # versie; firewall zet ze toch allemaal (bestaande slaat ufw over).
+  ufw_rules | grep -v vrrp | while read -r r; do
+    echo "$added" | grep -qxF "ufw $r" || exit 1
+  done
+}
+firewall() {
+  if ! ufw_active; then echo "ufw staat niet aan; niets te doen."; return 0; fi
+  ufw_rules | while read -r r; do
+    # shellcheck disable=SC2086
+    ufw $r >/dev/null || exit 1
+    echo "ufw $r"
+  done || fail "ufw-regel zetten"
+}
+
 # De PostgreSQL-container van een oude Authentik (zelfde compose-project).
 old_pg() {
   for c in $(project_containers "$1"); do
@@ -396,6 +429,12 @@ case "${1:-}" in
   voorbereid)
     voorbereid
     ;;
+  firewall)
+    firewall
+    ;;
+  firewall-ok)
+    firewall_ok
+    ;;
   vrijgeven)
     meta=$(db_meta) || fail "de database antwoordt niet"
     [ -z "$(metafield "$meta" ready)" ] || fail "de database is al in gebruik ($meta)"
@@ -417,7 +456,7 @@ case "${1:-}" in
     systemctl try-restart cf-authentik
     ;;
   *)
-    echo "gebruik: $0 up|down|check|status|overnemen|voorbereiden|voorbereid|vrijgeven|pull|pulled|unchanged|restart-if-changed" >&2
+    echo "gebruik: $0 up|down|check|status|overnemen|voorbereiden|voorbereid|firewall|firewall-ok|vrijgeven|pull|pulled|unchanged|restart-if-changed" >&2
     exit 2
     ;;
 esac

@@ -1581,6 +1581,102 @@ func (e FailoverScenario) Valid() bool {
 	}
 }
 
+// Defines values for FirewallNodesInputMode.
+const (
+	FirewallNodesInputModeManaged FirewallNodesInputMode = "managed"
+	FirewallNodesInputModeOff     FirewallNodesInputMode = "off"
+	FirewallNodesInputModePreview FirewallNodesInputMode = "preview"
+)
+
+// Valid indicates whether the value is a known member of the FirewallNodesInputMode enum.
+func (e FirewallNodesInputMode) Valid() bool {
+	switch e {
+	case FirewallNodesInputModeManaged:
+		return true
+	case FirewallNodesInputModeOff:
+		return true
+	case FirewallNodesInputModePreview:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for FirewallRuleInputAction.
+const (
+	FirewallRuleInputActionClose FirewallRuleInputAction = "close"
+	FirewallRuleInputActionOpen  FirewallRuleInputAction = "open"
+)
+
+// Valid indicates whether the value is a known member of the FirewallRuleInputAction enum.
+func (e FirewallRuleInputAction) Valid() bool {
+	switch e {
+	case FirewallRuleInputActionClose:
+		return true
+	case FirewallRuleInputActionOpen:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for FirewallRuleInputProto.
+const (
+	Tcp FirewallRuleInputProto = "tcp"
+	Udp FirewallRuleInputProto = "udp"
+)
+
+// Valid indicates whether the value is a known member of the FirewallRuleInputProto enum.
+func (e FirewallRuleInputProto) Valid() bool {
+	switch e {
+	case Tcp:
+		return true
+	case Udp:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for FirewallSettingsInputSshFrom.
+const (
+	FirewallSettingsInputSshFromAdmin FirewallSettingsInputSshFrom = "admin"
+	FirewallSettingsInputSshFromAny   FirewallSettingsInputSshFrom = "any"
+	FirewallSettingsInputSshFromLan   FirewallSettingsInputSshFrom = "lan"
+)
+
+// Valid indicates whether the value is a known member of the FirewallSettingsInputSshFrom enum.
+func (e FirewallSettingsInputSshFrom) Valid() bool {
+	switch e {
+	case FirewallSettingsInputSshFromAdmin:
+		return true
+	case FirewallSettingsInputSshFromAny:
+		return true
+	case FirewallSettingsInputSshFromLan:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for FirewallSettingsInputUnknownPorts.
+const (
+	FirewallSettingsInputUnknownPortsClosed FirewallSettingsInputUnknownPorts = "closed"
+	FirewallSettingsInputUnknownPortsLan    FirewallSettingsInputUnknownPorts = "lan"
+)
+
+// Valid indicates whether the value is a known member of the FirewallSettingsInputUnknownPorts enum.
+func (e FirewallSettingsInputUnknownPorts) Valid() bool {
+	switch e {
+	case FirewallSettingsInputUnknownPortsClosed:
+		return true
+	case FirewallSettingsInputUnknownPortsLan:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for GitChangeKind.
 const (
 	GitChangeKindCreate GitChangeKind = "create"
@@ -5706,6 +5802,12 @@ type CrowdSecBanResult struct {
 	Nodes  []string `json:"nodes"`
 }
 
+// CrowdSecConsoleKeyInput defines model for CrowdSecConsoleKeyInput.
+type CrowdSecConsoleKeyInput struct {
+	// Key Leeg haalt de sleutel weg
+	Key string `json:"key"`
+}
+
 // CrowdSecDecisionInput defines model for CrowdSecDecisionInput.
 type CrowdSecDecisionInput struct {
 	ClusterId *openapi_types.UUID `json:"cluster_id,omitempty"`
@@ -5721,6 +5823,16 @@ type CrowdSecDecisionInput struct {
 
 // CrowdSecDecisionInputScope defines model for CrowdSecDecisionInput.Scope.
 type CrowdSecDecisionInputScope string
+
+// CrowdSecEnrollInput defines model for CrowdSecEnrollInput.
+type CrowdSecEnrollInput struct {
+	NodeId *openapi_types.UUID `json:"node_id,omitempty"`
+}
+
+// CrowdSecEnrollResult defines model for CrowdSecEnrollResult.
+type CrowdSecEnrollResult struct {
+	Nodes int `json:"nodes"`
+}
 
 // CrowdSecNode defines model for CrowdSecNode.
 type CrowdSecNode struct {
@@ -5739,7 +5851,13 @@ type CrowdSecNode struct {
 	ClusterName        string                                `json:"cluster_name"`
 	ClusterSlug        string                                `json:"cluster_slug"`
 	ClusterTemplate    string                                `json:"cluster_template"`
-	DisabledProfiles   []string                              `json:"disabled_profiles"`
+
+	// ConsoleEnrolled Aangemeld bij de CrowdSec Console met de huidige sleutel
+	ConsoleEnrolled   bool                         `json:"console_enrolled"`
+	ConsoleEnrolledAt nullable.Nullable[time.Time] `json:"console_enrolled_at"`
+	ConsoleError      string                       `json:"console_error"`
+	ConsoleFailedAt   nullable.Nullable[time.Time] `json:"console_failed_at"`
+	DisabledProfiles  []string                     `json:"disabled_profiles"`
 
 	// Enabled CrowdSec staat aan in ClusterForge
 	Enabled       bool                              `json:"enabled"`
@@ -5843,11 +5961,17 @@ type CrowdSecProfileOrigin string
 
 // CrowdSecSettings defines model for CrowdSecSettings.
 type CrowdSecSettings struct {
-	AutoApply      bool                      `json:"auto_apply"`
-	BouncerDefault bool                      `json:"bouncer_default"`
-	ShareBans      CrowdSecSettingsShareBans `json:"share_bans"`
-	UpdatedAt      time.Time                 `json:"updated_at"`
-	Whitelist      []string                  `json:"whitelist"`
+	AutoApply      bool `json:"auto_apply"`
+	BouncerDefault bool `json:"bouncer_default"`
+
+	// ConsoleAvailable De server heeft een masterkey om de sleutel te bewaren
+	ConsoleAvailable bool `json:"console_available"`
+
+	// ConsoleKeySet Er is een enroll-sleutel voor de CrowdSec Console
+	ConsoleKeySet bool                      `json:"console_key_set"`
+	ShareBans     CrowdSecSettingsShareBans `json:"share_bans"`
+	UpdatedAt     time.Time                 `json:"updated_at"`
+	Whitelist     []string                  `json:"whitelist"`
 }
 
 // CrowdSecSettingsShareBans defines model for CrowdSecSettings.ShareBans.
@@ -8101,6 +8225,78 @@ type FailoverWrites struct {
 	Title string `json:"title"`
 	Vip   string `json:"vip"`
 }
+
+// FirewallNodesInput defines model for FirewallNodesInput.
+type FirewallNodesInput struct {
+	All       *bool                  `json:"all,omitempty"`
+	ClusterId *openapi_types.UUID    `json:"cluster_id,omitempty"`
+	Mode      FirewallNodesInputMode `json:"mode"`
+	NodeIds   *[]openapi_types.UUID  `json:"node_ids,omitempty"`
+}
+
+// FirewallNodesInputMode defines model for FirewallNodesInput.Mode.
+type FirewallNodesInputMode string
+
+// FirewallObject Een object van de firewall (fase 16); de velden staan in web/src/lib/firewall.ts en internal/firewall.
+type FirewallObject map[string]interface{}
+
+// FirewallOverview defines model for FirewallOverview.
+type FirewallOverview struct {
+	Catalog  []FirewallObject `json:"catalog"`
+	Classes  []string         `json:"classes"`
+	Clusters []FirewallObject `json:"clusters"`
+	Hourly   []FirewallObject `json:"hourly"`
+	Nodes    []FirewallObject `json:"nodes"`
+	Protocol int              `json:"protocol"`
+	Rules    []FirewallObject `json:"rules"`
+
+	// Settings Een object van de firewall (fase 16); de velden staan in web/src/lib/firewall.ts en internal/firewall.
+	Settings FirewallObject `json:"settings"`
+
+	// Stats Een object van de firewall (fase 16); de velden staan in web/src/lib/firewall.ts en internal/firewall.
+	Stats    FirewallObject   `json:"stats"`
+	Warnings []FirewallObject `json:"warnings"`
+}
+
+// FirewallRuleInput defines model for FirewallRuleInput.
+type FirewallRuleInput struct {
+	Action    FirewallRuleInputAction `json:"action"`
+	ClusterId *openapi_types.UUID     `json:"cluster_id,omitempty"`
+	Comment   *string                 `json:"comment,omitempty"`
+	NodeId    *openapi_types.UUID     `json:"node_id,omitempty"`
+
+	// Port Poort of reeks, zoals 8443 of 2379:2380
+	Port  string                 `json:"port"`
+	Proto FirewallRuleInputProto `json:"proto"`
+
+	// Source any, lan, cluster, admin, containers of een adres/netwerk (bij open)
+	Source *string `json:"source,omitempty"`
+}
+
+// FirewallRuleInputAction defines model for FirewallRuleInput.Action.
+type FirewallRuleInputAction string
+
+// FirewallRuleInputProto defines model for FirewallRuleInput.Proto.
+type FirewallRuleInputProto string
+
+// FirewallSettingsInput defines model for FirewallSettingsInput.
+type FirewallSettingsInput struct {
+	Admin          []string                          `json:"admin"`
+	AutoApply      bool                              `json:"auto_apply"`
+	ConfirmSeconds int                               `json:"confirm_seconds"`
+	GraceHours     int                               `json:"grace_hours"`
+	Lan            []string                          `json:"lan"`
+	Monitor        bool                              `json:"monitor"`
+	SshFrom        FirewallSettingsInputSshFrom      `json:"ssh_from"`
+	Strict         bool                              `json:"strict"`
+	UnknownPorts   FirewallSettingsInputUnknownPorts `json:"unknown_ports"`
+}
+
+// FirewallSettingsInputSshFrom defines model for FirewallSettingsInput.SshFrom.
+type FirewallSettingsInputSshFrom string
+
+// FirewallSettingsInputUnknownPorts defines model for FirewallSettingsInput.UnknownPorts.
+type FirewallSettingsInputUnknownPorts string
 
 // GitApproveInput defines model for GitApproveInput.
 type GitApproveInput struct {
@@ -12333,6 +12529,15 @@ type ListEventsParams struct {
 	Limit *int `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// ListFirewallTrafficParams defines parameters for ListFirewallTraffic.
+type ListFirewallTrafficParams struct {
+	NodeId    *openapi_types.UUID `form:"node_id,omitempty" json:"node_id,omitempty"`
+	ClusterId *openapi_types.UUID `form:"cluster_id,omitempty" json:"cluster_id,omitempty"`
+	Port      *int                `form:"port,omitempty" json:"port,omitempty"`
+	Hours     *int                `form:"hours,omitempty" json:"hours,omitempty"`
+	Limit     *int                `form:"limit,omitempty" json:"limit,omitempty"`
+}
+
 // ListGitChangesParams defines parameters for ListGitChanges.
 type ListGitChangesParams struct {
 	Status    *GitChangeStatus    `form:"status,omitempty" json:"status,omitempty"`
@@ -12768,6 +12973,12 @@ type RunCronJobJSONRequestBody RunCronJobJSONBody
 // StopCronRunJSONRequestBody defines body for StopCronRun for application/json ContentType.
 type StopCronRunJSONRequestBody StopCronRunJSONBody
 
+// SetCrowdSecConsoleKeyJSONRequestBody defines body for SetCrowdSecConsoleKey for application/json ContentType.
+type SetCrowdSecConsoleKeyJSONRequestBody = CrowdSecConsoleKeyInput
+
+// EnrollCrowdSecConsoleJSONRequestBody defines body for EnrollCrowdSecConsole for application/json ContentType.
+type EnrollCrowdSecConsoleJSONRequestBody = CrowdSecEnrollInput
+
 // DecideCrowdSecJSONRequestBody defines body for DecideCrowdSec for application/json ContentType.
 type DecideCrowdSecJSONRequestBody = CrowdSecDecisionInput
 
@@ -12833,6 +13044,15 @@ type UpdateFailoverTestJSONRequestBody = FailoverTestInput
 
 // StartFailoverTestJSONRequestBody defines body for StartFailoverTest for application/json ContentType.
 type StartFailoverTestJSONRequestBody = FailoverStartInput
+
+// SetFirewallNodesJSONRequestBody defines body for SetFirewallNodes for application/json ContentType.
+type SetFirewallNodesJSONRequestBody = FirewallNodesInput
+
+// AddFirewallRuleJSONRequestBody defines body for AddFirewallRule for application/json ContentType.
+type AddFirewallRuleJSONRequestBody = FirewallRuleInput
+
+// UpdateFirewallSettingsJSONRequestBody defines body for UpdateFirewallSettings for application/json ContentType.
+type UpdateFirewallSettingsJSONRequestBody = FirewallSettingsInput
 
 // ApproveGitChangeJSONRequestBody defines body for ApproveGitChange for application/json ContentType.
 type ApproveGitChangeJSONRequestBody = GitApproveInput
@@ -13298,6 +13518,12 @@ type ServerInterface interface {
 	// ListCrowdSecAlerts Alerts van de nodes, nieuwste eerst (90 dagen)
 	// (GET /crowdsec/alerts)
 	ListCrowdSecAlerts(w http.ResponseWriter, r *http.Request, params ListCrowdSecAlertsParams)
+	// SetCrowdSecConsoleKey Enroll-sleutel van de CrowdSec Console bewaren of weghalen (admin)
+	// (PUT /crowdsec/console)
+	SetCrowdSecConsoleKey(w http.ResponseWriter, r *http.Request)
+	// EnrollCrowdSecConsole Nodes opnieuw aanmelden bij de CrowdSec Console (admin)
+	// (POST /crowdsec/console/enroll)
+	EnrollCrowdSecConsole(w http.ResponseWriter, r *http.Request)
 	// ListCrowdSecDecisions Actieve bans, samengevoegd per adres (zonder de community-blocklist)
 	// (GET /crowdsec/decisions)
 	ListCrowdSecDecisions(w http.ResponseWriter, r *http.Request)
@@ -13448,6 +13674,39 @@ type ServerInterface interface {
 	// StartFailoverTest Nu testen (admin)
 	// (POST /failover-tests/{testId}/runs)
 	StartFailoverTest(w http.ResponseWriter, r *http.Request, testId openapi_types.UUID)
+	// GetFirewall Firewall op alle nodes (fase 16)
+	// (GET /firewall)
+	GetFirewall(w http.ResponseWriter, r *http.Request)
+	// SetFirewallNodes Stand van nodes zetten (admin)
+	// (POST /firewall/nodes)
+	SetFirewallNodes(w http.ResponseWriter, r *http.Request)
+	// GetFirewallNode Firewall van één node, met het verkeer naar dichte poorten (24 u)
+	// (GET /firewall/nodes/{nodeId})
+	GetFirewallNode(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// ApplyFirewallNode Het plan nu toepassen als taak firewall.apply (admin)
+	// (POST /firewall/nodes/{nodeId}/apply)
+	ApplyFirewallNode(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// DisableFirewallNode ufw uitschakelen op de node; een beheerde node gaat naar voorbeeld (admin)
+	// (POST /firewall/nodes/{nodeId}/disable)
+	DisableFirewallNode(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// RefreshFirewallNode Voorbeeld - de stand meteen ophalen en het plan en verschil uitrekenen (admin)
+	// (POST /firewall/nodes/{nodeId}/refresh)
+	RefreshFirewallNode(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// RollbackFirewallNode Een toepassing die op bevestiging wacht meteen terugdraaien (admin)
+	// (POST /firewall/nodes/{nodeId}/rollback)
+	RollbackFirewallNode(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// AddFirewallRule Eigen regel toevoegen - open of dicht, voor een node, een cluster of overal (admin)
+	// (POST /firewall/rules)
+	AddFirewallRule(w http.ResponseWriter, r *http.Request)
+	// DeleteFirewallRule Eigen regel verwijderen (admin)
+	// (DELETE /firewall/rules/{ruleId})
+	DeleteFirewallRule(w http.ResponseWriter, r *http.Request, ruleId openapi_types.UUID)
+	// UpdateFirewallSettings Firewall-instellingen bewaren (admin)
+	// (PUT /firewall/settings)
+	UpdateFirewallSettings(w http.ResponseWriter, r *http.Request)
+	// ListFirewallTraffic Verkeer naar dichte poorten, per node, bron en poort (meeste pakketten eerst)
+	// (GET /firewall/traffic)
+	ListFirewallTraffic(w http.ResponseWriter, r *http.Request, params ListFirewallTrafficParams)
 	// ListGitChanges Wijzigingen uit Git, eerst wat wacht of loopt
 	// (GET /gitops/changes)
 	ListGitChanges(w http.ResponseWriter, r *http.Request, params ListGitChangesParams)
@@ -14519,6 +14778,18 @@ func (_ Unimplemented) ListCrowdSecAlerts(w http.ResponseWriter, r *http.Request
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// SetCrowdSecConsoleKey Enroll-sleutel van de CrowdSec Console bewaren of weghalen (admin)
+// (PUT /crowdsec/console)
+func (_ Unimplemented) SetCrowdSecConsoleKey(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// EnrollCrowdSecConsole Nodes opnieuw aanmelden bij de CrowdSec Console (admin)
+// (POST /crowdsec/console/enroll)
+func (_ Unimplemented) EnrollCrowdSecConsole(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // ListCrowdSecDecisions Actieve bans, samengevoegd per adres (zonder de community-blocklist)
 // (GET /crowdsec/decisions)
 func (_ Unimplemented) ListCrowdSecDecisions(w http.ResponseWriter, r *http.Request) {
@@ -14816,6 +15087,72 @@ func (_ Unimplemented) ListFailoverTestRuns(w http.ResponseWriter, r *http.Reque
 // StartFailoverTest Nu testen (admin)
 // (POST /failover-tests/{testId}/runs)
 func (_ Unimplemented) StartFailoverTest(w http.ResponseWriter, r *http.Request, testId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetFirewall Firewall op alle nodes (fase 16)
+// (GET /firewall)
+func (_ Unimplemented) GetFirewall(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SetFirewallNodes Stand van nodes zetten (admin)
+// (POST /firewall/nodes)
+func (_ Unimplemented) SetFirewallNodes(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetFirewallNode Firewall van één node, met het verkeer naar dichte poorten (24 u)
+// (GET /firewall/nodes/{nodeId})
+func (_ Unimplemented) GetFirewallNode(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ApplyFirewallNode Het plan nu toepassen als taak firewall.apply (admin)
+// (POST /firewall/nodes/{nodeId}/apply)
+func (_ Unimplemented) ApplyFirewallNode(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// DisableFirewallNode ufw uitschakelen op de node; een beheerde node gaat naar voorbeeld (admin)
+// (POST /firewall/nodes/{nodeId}/disable)
+func (_ Unimplemented) DisableFirewallNode(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RefreshFirewallNode Voorbeeld - de stand meteen ophalen en het plan en verschil uitrekenen (admin)
+// (POST /firewall/nodes/{nodeId}/refresh)
+func (_ Unimplemented) RefreshFirewallNode(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RollbackFirewallNode Een toepassing die op bevestiging wacht meteen terugdraaien (admin)
+// (POST /firewall/nodes/{nodeId}/rollback)
+func (_ Unimplemented) RollbackFirewallNode(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// AddFirewallRule Eigen regel toevoegen - open of dicht, voor een node, een cluster of overal (admin)
+// (POST /firewall/rules)
+func (_ Unimplemented) AddFirewallRule(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// DeleteFirewallRule Eigen regel verwijderen (admin)
+// (DELETE /firewall/rules/{ruleId})
+func (_ Unimplemented) DeleteFirewallRule(w http.ResponseWriter, r *http.Request, ruleId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// UpdateFirewallSettings Firewall-instellingen bewaren (admin)
+// (PUT /firewall/settings)
+func (_ Unimplemented) UpdateFirewallSettings(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListFirewallTraffic Verkeer naar dichte poorten, per node, bron en poort (meeste pakketten eerst)
+// (GET /firewall/traffic)
+func (_ Unimplemented) ListFirewallTraffic(w http.ResponseWriter, r *http.Request, params ListFirewallTrafficParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -18950,6 +19287,34 @@ func (siw *ServerInterfaceWrapper) ListCrowdSecAlerts(w http.ResponseWriter, r *
 	handler.ServeHTTP(w, r)
 }
 
+// SetCrowdSecConsoleKey operation middleware
+func (siw *ServerInterfaceWrapper) SetCrowdSecConsoleKey(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetCrowdSecConsoleKey(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// EnrollCrowdSecConsole operation middleware
+func (siw *ServerInterfaceWrapper) EnrollCrowdSecConsole(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.EnrollCrowdSecConsole(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListCrowdSecDecisions operation middleware
 func (siw *ServerInterfaceWrapper) ListCrowdSecDecisions(w http.ResponseWriter, r *http.Request) {
 
@@ -20229,6 +20594,303 @@ func (siw *ServerInterfaceWrapper) StartFailoverTest(w http.ResponseWriter, r *h
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.StartFailoverTest(w, r, testId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetFirewall operation middleware
+func (siw *ServerInterfaceWrapper) GetFirewall(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetFirewall(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetFirewallNodes operation middleware
+func (siw *ServerInterfaceWrapper) SetFirewallNodes(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetFirewallNodes(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetFirewallNode operation middleware
+func (siw *ServerInterfaceWrapper) GetFirewallNode(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetFirewallNode(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ApplyFirewallNode operation middleware
+func (siw *ServerInterfaceWrapper) ApplyFirewallNode(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ApplyFirewallNode(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DisableFirewallNode operation middleware
+func (siw *ServerInterfaceWrapper) DisableFirewallNode(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DisableFirewallNode(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RefreshFirewallNode operation middleware
+func (siw *ServerInterfaceWrapper) RefreshFirewallNode(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RefreshFirewallNode(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RollbackFirewallNode operation middleware
+func (siw *ServerInterfaceWrapper) RollbackFirewallNode(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RollbackFirewallNode(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// AddFirewallRule operation middleware
+func (siw *ServerInterfaceWrapper) AddFirewallRule(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.AddFirewallRule(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteFirewallRule operation middleware
+func (siw *ServerInterfaceWrapper) DeleteFirewallRule(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "ruleId" -------------
+	var ruleId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "ruleId", chi.URLParam(r, "ruleId"), &ruleId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "ruleId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteFirewallRule(w, r, ruleId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateFirewallSettings operation middleware
+func (siw *ServerInterfaceWrapper) UpdateFirewallSettings(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateFirewallSettings(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListFirewallTraffic operation middleware
+func (siw *ServerInterfaceWrapper) ListFirewallTraffic(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListFirewallTrafficParams
+
+	// ------------- Optional query parameter "node_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "node_id", r.URL.Query(), &params.NodeId, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "node_id"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "node_id", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "cluster_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "cluster_id", r.URL.Query(), &params.ClusterId, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "cluster_id"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "cluster_id", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "port" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "port", r.URL.Query(), &params.Port, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "port"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "port", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "hours" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "hours", r.URL.Query(), &params.Hours, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "hours"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "hours", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListFirewallTraffic(w, r, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -24823,6 +25485,12 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Put(options.BaseURL+"/crowdsec/settings", wrapper.UpdateCrowdSecSettings)
 	})
 	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/crowdsec/console", wrapper.SetCrowdSecConsoleKey)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/crowdsec/console/enroll", wrapper.EnrollCrowdSecConsole)
+	})
+	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/crowdsec/nodes", wrapper.SetCrowdSecNodes)
 	})
 	r.Group(func(r chi.Router) {
@@ -24845,6 +25513,39 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/crowdsec/decisions", wrapper.DecideCrowdSec)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/firewall", wrapper.GetFirewall)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/firewall/settings", wrapper.UpdateFirewallSettings)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/firewall/nodes", wrapper.SetFirewallNodes)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/firewall/nodes/{nodeId}", wrapper.GetFirewallNode)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/firewall/nodes/{nodeId}/refresh", wrapper.RefreshFirewallNode)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/firewall/nodes/{nodeId}/apply", wrapper.ApplyFirewallNode)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/firewall/nodes/{nodeId}/rollback", wrapper.RollbackFirewallNode)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/firewall/nodes/{nodeId}/disable", wrapper.DisableFirewallNode)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/firewall/traffic", wrapper.ListFirewallTraffic)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/firewall/rules", wrapper.AddFirewallRule)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/firewall/rules/{ruleId}", wrapper.DeleteFirewallRule)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/commands", wrapper.ListCommands)

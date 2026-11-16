@@ -3766,6 +3766,48 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/crowdsec/console": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Enroll-sleutel van de CrowdSec Console bewaren of weghalen (admin)
+         * @description De sleutel uit `cscli console enroll <sleutel>` op app.crowdsec.net. Versleuteld bewaard met de masterkey en
+         *     nooit teruggegeven. Leeg haalt hem weg. Met een sleutel meldt ClusterForge elke beheerde node aan zodra CrowdSec
+         *     er draait (agent protocol 31).
+         */
+        put: operations["setCrowdSecConsoleKey"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/crowdsec/console/enroll": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Nodes opnieuw aanmelden bij de CrowdSec Console (admin)
+         * @description Zonder node_id alle beheerde nodes. De aanmelding volgt meteen in een ronde op de achtergrond.
+         */
+        post: operations["enrollCrowdSecConsole"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/crowdsec/nodes": {
         parameters: {
             query?: never;
@@ -3878,6 +3920,214 @@ export interface paths {
          */
         post: operations["decideCrowdSec"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/firewall": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Firewall op alle nodes (fase 16)
+         * @description Instellingen, cijfers, geblokkeerd verkeer per uur (24 u), per cluster de tabel poort × node (open voor wie,
+         *     dicht, via Docker, pogingen naar dichte poorten), waarschuwingen, elke node met een agent met zijn stand, plan
+         *     en verschil, de eigen regels en de catalogus. Ook voor viewers.
+         */
+        get: operations["getFirewall"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/firewall/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /** Firewall-instellingen bewaren (admin) */
+        put: operations["updateFirewallSettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/firewall/nodes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Stand van nodes zetten (admin)
+         * @description node_ids, cluster_id of all. off: ClusterForge doet niets; preview: plan en verschil zien zonder iets toe te
+         *     passen; managed: het plan wordt toegepast (met terugdraaitimer), ook vanzelf als er software bijkomt.
+         */
+        post: operations["setFirewallNodes"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/firewall/nodes/{nodeId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        /** Firewall van één node, met het verkeer naar dichte poorten (24 u) */
+        get: operations["getFirewallNode"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/firewall/nodes/{nodeId}/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Voorbeeld - de stand meteen ophalen en het plan en verschil uitrekenen (admin) */
+        post: operations["refreshFirewallNode"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/firewall/nodes/{nodeId}/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Het plan nu toepassen als taak firewall.apply (admin) */
+        post: operations["applyFirewallNode"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/firewall/nodes/{nodeId}/rollback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Een toepassing die op bevestiging wacht meteen terugdraaien (admin) */
+        post: operations["rollbackFirewallNode"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/firewall/nodes/{nodeId}/disable": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** ufw uitschakelen op de node; een beheerde node gaat naar voorbeeld (admin) */
+        post: operations["disableFirewallNode"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/firewall/traffic": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Verkeer naar dichte poorten, per node, bron en poort (meeste pakketten eerst) */
+        get: operations["listFirewallTraffic"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/firewall/rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Eigen regel toevoegen - open of dicht, voor een node, een cluster of overal (admin) */
+        post: operations["addFirewallRule"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/firewall/rules/{ruleId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ruleId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Eigen regel verwijderen (admin) */
+        delete: operations["deleteFirewallRule"];
         options?: never;
         head?: never;
         patch?: never;
@@ -11879,6 +12129,21 @@ export interface components {
             whitelist: string[];
             /** Format: date-time */
             updated_at: string;
+            /** @description Er is een enroll-sleutel voor de CrowdSec Console */
+            console_key_set: boolean;
+            /** @description De server heeft een masterkey om de sleutel te bewaren */
+            console_available: boolean;
+        };
+        CrowdSecConsoleKeyInput: {
+            /** @description Leeg haalt de sleutel weg */
+            key: string;
+        };
+        CrowdSecEnrollInput: {
+            /** Format: uuid */
+            node_id?: string;
+        };
+        CrowdSecEnrollResult: {
+            nodes: number;
         };
         CrowdSecSettingsInput: {
             auto_apply: boolean;
@@ -12023,6 +12288,13 @@ export interface components {
             /** Format: date-time */
             poll_at: string | null;
             poll_error: string;
+            /** @description Aangemeld bij de CrowdSec Console met de huidige sleutel */
+            console_enrolled: boolean;
+            /** Format: date-time */
+            console_enrolled_at: string | null;
+            console_error: string;
+            /** Format: date-time */
+            console_failed_at: string | null;
         };
         CrowdSecAlert: {
             /** Format: int64 */
@@ -12060,6 +12332,58 @@ export interface components {
             nodes: string[];
             /** @description ClusterForge zette deze ban ook op andere nodes */
             shared: boolean;
+        };
+        /** @description Een object van de firewall (fase 16); de velden staan in web/src/lib/firewall.ts en internal/firewall. */
+        FirewallObject: {
+            [key: string]: unknown;
+        };
+        FirewallOverview: {
+            protocol: number;
+            settings: components["schemas"]["FirewallObject"];
+            stats: components["schemas"]["FirewallObject"];
+            hourly: components["schemas"]["FirewallObject"][];
+            clusters: components["schemas"]["FirewallObject"][];
+            warnings: components["schemas"]["FirewallObject"][];
+            nodes: components["schemas"]["FirewallObject"][];
+            rules: components["schemas"]["FirewallObject"][];
+            catalog: components["schemas"]["FirewallObject"][];
+            classes: string[];
+        };
+        FirewallSettingsInput: {
+            auto_apply: boolean;
+            lan: string[];
+            admin: string[];
+            /** @enum {string} */
+            ssh_from: "lan" | "admin" | "any";
+            /** @enum {string} */
+            unknown_ports: "lan" | "closed";
+            strict: boolean;
+            confirm_seconds: number;
+            grace_hours: number;
+            monitor: boolean;
+        };
+        FirewallNodesInput: {
+            node_ids?: string[];
+            /** Format: uuid */
+            cluster_id?: string;
+            all?: boolean;
+            /** @enum {string} */
+            mode: "off" | "preview" | "managed";
+        };
+        FirewallRuleInput: {
+            /** @enum {string} */
+            action: "open" | "close";
+            /** @enum {string} */
+            proto: "tcp" | "udp";
+            /** @description Poort of reeks, zoals 8443 of 2379:2380 */
+            port: string;
+            /** @description any, lan, cluster, admin, containers of een adres/netwerk (bij open) */
+            source?: string;
+            comment?: string;
+            /** Format: uuid */
+            node_id?: string;
+            /** Format: uuid */
+            cluster_id?: string;
         };
         CrowdSecTopEntry: {
             key: string;
@@ -18037,6 +18361,60 @@ export interface operations {
             403: components["responses"]["Error"];
         };
     };
+    setCrowdSecConsoleKey: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CrowdSecConsoleKeyInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CrowdSecSettings"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+        };
+    };
+    enrollCrowdSecConsole: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CrowdSecEnrollInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CrowdSecEnrollResult"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+        };
+    };
     setCrowdSecNodes: {
         parameters: {
             query?: never;
@@ -18259,6 +18637,290 @@ export interface operations {
             400: components["responses"]["Error"];
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
+        };
+    };
+    getFirewall: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FirewallOverview"];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    updateFirewallSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FirewallSettingsInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FirewallObject"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+        };
+    };
+    setFirewallNodes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FirewallNodesInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        skipped: string[];
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+        };
+    };
+    getFirewallNode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FirewallObject"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    refreshFirewallNode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FirewallObject"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    applyFirewallNode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Taak aangemaakt */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        job_id: string;
+                    };
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    rollbackFirewallNode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Teruggedraaid */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    disableFirewallNode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Uitgeschakeld */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    listFirewallTraffic: {
+        parameters: {
+            query?: {
+                node_id?: string;
+                cluster_id?: string;
+                port?: number;
+                hours?: number;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["FirewallObject"][];
+                        hourly: components["schemas"]["FirewallObject"][];
+                    };
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    addFirewallRule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FirewallRuleInput"];
+            };
+        };
+        responses: {
+            /** @description Toegevoegd */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FirewallObject"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+        };
+    };
+    deleteFirewallRule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                ruleId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Verwijderd */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
         };
     };
     listCommands: {

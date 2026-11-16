@@ -175,6 +175,12 @@ exit 0`
 		"logger":    `exit 0`,
 		"systemctl": `echo "systemctl $*" >> "$CF_TEST_DIR/log"; exit 0`,
 		"hostname":  `echo ` + name,
+		"ufw": `case "$1" in
+status) [ -f "$CF_TEST_DIR/ufw-aan" ] && echo "Status: active" || echo "Status: inactive" ;;
+show) cat "$CF_TEST_DIR/ufw-regels" 2>/dev/null ;;
+allow) echo "ufw $*" >> "$CF_TEST_DIR/ufw-regels" ;;
+esac
+exit 0`,
 	}
 	for cmd, body := range stubs {
 		write(t, map[string]string{filepath.Join(n.bin, cmd): "#!/bin/sh\n" + body + "\n"})
@@ -514,6 +520,35 @@ func TestAuthentikNieuwCluster(t *testing.T) {
 var akPrefix = fmt.Sprintf("cf_ak%d_", os.Getpid())
 
 func akn(s string) string { return strings.ReplaceAll(s, "cf_ak_", akPrefix) }
+
+func TestAuthentikFirewall(t *testing.T) {
+	tpl, c := akContext(t, nil)
+	files, _ := npmFiles(t, tpl, c)
+	n := newAKNode(t, files["/usr/local/lib/clusterforge/authentik-ctl.sh"], "ak-01", "")
+	if out, err := n.run(nil, "firewall-ok"); err != nil {
+		t.Fatalf("zonder ufw: %v %s", err, out)
+	}
+	write(t, map[string]string{n.dir + "/ufw-aan": "", n.dir + "/ufw-regels": "ufw allow 22/tcp\n"})
+	if _, err := n.run(nil, "firewall-ok"); err == nil {
+		t.Fatal("firewall-ok met ufw zonder regels")
+	}
+	if out, err := n.run(nil, "firewall"); err != nil {
+		t.Fatalf("firewall: %v %s", err, out)
+	}
+	rules, _ := os.ReadFile(n.dir + "/ufw-regels")
+	for _, w := range []string{"ufw allow from 192.0.2.52 to any port 2379:2380 proto tcp", "ufw allow from 192.0.2.53 proto vrrp",
+		"ufw allow from 192.0.2.53 to any port 8008 proto tcp", "ufw allow from 172.16.0.0/12 to any port 5432 proto tcp"} {
+		if !strings.Contains(string(rules), w+"\n") {
+			t.Errorf("regels missen %q:\n%s", w, rules)
+		}
+	}
+	if strings.Contains(string(rules), "192.0.2.51") {
+		t.Error("een regel voor de node zelf")
+	}
+	if out, err := n.run(nil, "firewall-ok"); err != nil {
+		t.Errorf("firewall-ok na firewall: %v %s", err, out)
+	}
+}
 
 func fileExists(p string) bool {
 	_, err := os.Stat(p)

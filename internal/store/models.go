@@ -673,25 +673,29 @@ type CrowdsecDecision struct {
 }
 
 type CrowdsecNode struct {
-	NodeID           uuid.UUID
-	Managed          bool
-	Bouncer          bool
-	ExtraProfiles    []string
-	DisabledProfiles []string
-	Status           []byte
-	StatusAt         *time.Time
-	Plan             []byte
-	PlanHash         string
-	AppliedHash      string
-	AppliedAt        *time.Time
-	ApplyJobID       *uuid.UUID
-	ApplyError       string
-	ApplyFailedAt    *time.Time
-	Blocklist        int32
-	PollAt           *time.Time
-	PollError        string
-	LastAlertAt      *time.Time
-	CreatedAt        time.Time
+	NodeID            uuid.UUID
+	Managed           bool
+	Bouncer           bool
+	ExtraProfiles     []string
+	DisabledProfiles  []string
+	Status            []byte
+	StatusAt          *time.Time
+	Plan              []byte
+	PlanHash          string
+	AppliedHash       string
+	AppliedAt         *time.Time
+	ApplyJobID        *uuid.UUID
+	ApplyError        string
+	ApplyFailedAt     *time.Time
+	Blocklist         int32
+	PollAt            *time.Time
+	PollError         string
+	LastAlertAt       *time.Time
+	CreatedAt         time.Time
+	ConsoleHash       string
+	ConsoleEnrolledAt *time.Time
+	ConsoleError      string
+	ConsoleFailedAt   *time.Time
 }
 
 type CrowdsecSetting struct {
@@ -702,6 +706,9 @@ type CrowdsecSetting struct {
 	Whitelist      []string
 	UpdatedAt      time.Time
 	UpdatedBy      *uuid.UUID
+	ConsoleKeyEnc  []byte
+	ConsoleKeyID   string
+	ConsoleKeyHash string
 }
 
 type CrowdsecShared struct {
@@ -952,6 +959,76 @@ type FailoverTest struct {
 	UpdatedAt          time.Time
 	Scheduled          bool
 	NextRunAt          *time.Time
+}
+
+type FirewallBlocked struct {
+	NodeID    uuid.UUID
+	Hour      time.Time
+	Src       string
+	Proto     string
+	Port      int32
+	Count     int64
+	FirstSeen time.Time
+	LastSeen  time.Time
+}
+
+type FirewallNode struct {
+	NodeID        uuid.UUID
+	Mode          string
+	Status        []byte
+	StatusAt      *time.Time
+	StatusError   string
+	Plan          []byte
+	PlanHash      string
+	AppliedHash   string
+	AppliedAt     *time.Time
+	ApplyJobID    *uuid.UUID
+	ApplyError    string
+	ApplyFailedAt *time.Time
+	BlockedAt     *time.Time
+	BlockedSource string
+	CreatedAt     time.Time
+}
+
+type FirewallPort struct {
+	NodeID    uuid.UUID
+	Proto     string
+	Port      int32
+	Addr      string
+	Process   string
+	Unit      string
+	Container string
+	Image     string
+	FirstSeen time.Time
+	LastSeen  time.Time
+}
+
+type FirewallRule struct {
+	ID        uuid.UUID
+	ClusterID *uuid.UUID
+	NodeID    *uuid.UUID
+	Action    string
+	Proto     string
+	Port      string
+	Source    string
+	Comment   string
+	CreatedAt time.Time
+	CreatedBy *uuid.UUID
+}
+
+type FirewallSetting struct {
+	ID             bool
+	AutoApply      bool
+	Lan            []string
+	Admin          []string
+	SshFrom        string
+	UnknownPorts   string
+	Strict         bool
+	ConfirmSeconds int32
+	GraceHours     int32
+	Monitor        bool
+	UpdatedAt      time.Time
+	UpdatedBy      *uuid.UUID
 }
 
 type GitChange struct {

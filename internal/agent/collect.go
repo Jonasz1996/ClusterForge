@@ -36,6 +36,10 @@ var WatchedServices = []string{
 	// CrowdSec (fase 14) en software waarvoor ClusterForge een
 	// CrowdSec-profiel heeft.
 	"crowdsec", "crowdsec-firewall-bouncer", "caddy", "traefik", "grafana-server", "plexmediaserver", "pvedaemon",
+	// Firewall (fase 16): ufw zelf en units waarvan de poorten open moeten
+	// staan, ook als ze even niet luisteren.
+	"ufw", "cf-npm", "cf-authentik", "cf-homeassistant", "cf-seaweedfs", "zabbix-server", "zabbix-agent", "zabbix-agent2",
+	"mosquitto", "smbd", "nfs-server",
 }
 
 // WatchedPatterns zijn units met een variabel deel. postgresql.service is op

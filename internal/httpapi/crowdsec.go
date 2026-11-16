@@ -254,3 +254,40 @@ func (s *Server) DecideCrowdSec(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, res)
 }
+
+func (s *Server) SetCrowdSecConsoleKey(w http.ResponseWriter, r *http.Request) {
+	p, ok := requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	var in gen.CrowdSecConsoleKeyInput
+	if !decode(w, r, &in) {
+		return
+	}
+	uid := p.User.ID
+	set, err := s.crowdsec.SetConsoleKey(r.Context(), events.User(p.User.ID), &uid, in.Key)
+	if err != nil {
+		s.crowdSecError(w, r, err)
+		return
+	}
+	s.kickCrowdSec()
+	writeJSON(w, http.StatusOK, set)
+}
+
+func (s *Server) EnrollCrowdSecConsole(w http.ResponseWriter, r *http.Request) {
+	p, ok := requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	var in gen.CrowdSecEnrollInput
+	if !decode(w, r, &in) {
+		return
+	}
+	n, err := s.crowdsec.ConsoleEnroll(r.Context(), events.User(p.User.ID), in.NodeId)
+	if err != nil {
+		s.crowdSecError(w, r, err)
+		return
+	}
+	s.kickCrowdSec()
+	writeJSON(w, http.StatusOK, gen.CrowdSecEnrollResult{Nodes: n})
+}
