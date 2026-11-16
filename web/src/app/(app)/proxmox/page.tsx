@@ -37,8 +37,8 @@ export default function ProxmoxPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Proxmox"
-        description="Hosts, VM's en containers uit je Proxmox-omgeving, met start, stop, snapshot en migratie."
+        title="Proxmox via de API-koppeling"
+        description="Hosts, VM's en containers via een API-token, met start, stop, snapshot en migratie. Voor volledig beheer via de agents op de hosts: Datacenter en Hosts en gasten."
         actions={
           <div className="flex items-center gap-3">
             <Link href="/proxmox/hosts" className="text-sm text-brand-700 hover:underline dark:text-brand-300">

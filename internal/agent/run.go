@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -32,6 +33,13 @@ type Agent struct {
 	Version   string
 	Log       *slog.Logger
 	Collector *Collector
+
+	// consoles telt de open consolesessies (fase 26 M7).
+	consoles atomic.Int32
+	// ConsoleCommand maakt het programma van een consolesessie; nil
+	// gebruikt qm, pct en login. Tests vervangen het.
+	ConsoleCommand func(req protocol.ConsoleRequest, password string) *exec.Cmd
+
 	// Intervallen; nul gebruikt de standaard uit protocol. Tests maken ze kort.
 	HeartbeatInterval time.Duration
 	MetricsInterval   time.Duration
@@ -236,7 +244,10 @@ func (a *Agent) Connect() error {
 	if _, err = a.nc.Subscribe(protocol.Subject(a.Config.NodeID, protocol.SubjectPVE), a.onPVE); err != nil {
 		return err
 	}
-	_, err = a.nc.Subscribe(protocol.Subject(a.Config.NodeID, protocol.SubjectLogs), a.onLogs)
+	if _, err = a.nc.Subscribe(protocol.Subject(a.Config.NodeID, protocol.SubjectLogs), a.onLogs); err != nil {
+		return err
+	}
+	_, err = a.nc.Subscribe(protocol.Subject(a.Config.NodeID, protocol.SubjectConsole), a.onConsole)
 	return err
 }
 

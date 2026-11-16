@@ -22,6 +22,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/jobs"
 	"github.com/Jonasz1996/clusterforge/internal/noderun"
+	"github.com/Jonasz1996/clusterforge/internal/secrets"
 	"github.com/Jonasz1996/clusterforge/internal/status"
 	"github.com/Jonasz1996/clusterforge/internal/store"
 	"github.com/Jonasz1996/clusterforge/pkg/protocol"
@@ -63,6 +64,16 @@ type Service struct {
 	// AgentSHA256 geeft de sha256 van de cf-agent die de server aanbiedt,
 	// per architectuur.
 	AgentSHA256 func() map[string]string
+	// Box versleutelt geheimen (wachtwoorden, sleutels) in de taken van
+	// fase 26; nil zonder masterkey.
+	Box   *secrets.Box
+	cache getCache
+	// consoles zijn de open consolesessies (M7).
+	consoles consoleHub
+	// RestorePoll is hoe vaak een terugzettest kijkt of de gast draait (tests korter).
+	RestorePoll time.Duration
+	// HostWait vervangt de wachttijden van host-updates (tests).
+	HostWait time.Duration
 }
 
 func NewService(pool *pgxpool.Pool, ev *events.Writer, log *slog.Logger, runner *jobs.Runner, bus Bus, ag *agents.Service) *Service {
@@ -284,6 +295,25 @@ func Describe(op protocol.PVERun) string {
 		return "containertemplate " + strings.TrimSuffix(op.Template.Match, "_")
 	case protocol.PVEBootstrap:
 		return "cf-agent in " + id + " zetten"
+	case protocol.PVEAPI:
+		return op.API.Method + " " + op.API.Path
+	case protocol.PVEPassthrough:
+		if !op.Passthrough.IOMMU && len(op.Passthrough.VFIOIDs) == 0 {
+			return "passthrough uitzetten"
+		}
+		return "passthrough instellen"
+	case protocol.PVEVolumeFree:
+		return op.Volume + " verwijderen"
+	case protocol.PVEZpoolScrub:
+		if op.Scrub.Stop {
+			return "scrub van " + op.Scrub.Pool + " stoppen"
+		}
+		return "scrub van " + op.Scrub.Pool + " starten"
+	case protocol.PVEMaintenance:
+		if op.Enable {
+			return "onderhoudsmodus aan"
+		}
+		return "onderhoudsmodus uit"
 	}
 	return op.Action
 }
@@ -304,6 +334,12 @@ type params struct {
 	PVENode string          `json:"pve_node"`
 	ConnID  *uuid.UUID      `json:"connection_id,omitempty"`
 	Op      protocol.PVERun `json:"op"`
+	// Sealed zijn de versleutelde geheimen van een aanroep (fase 26).
+	Sealed *sealed `json:"sealed,omitempty"`
+	// RestoreTest is een terugzettest (fase 26 M3) in plaats van Op.
+	RestoreTest *RestoreTest `json:"restore_test,omitempty"`
+	// HostUpdate is een ronde host-updates (fase 26 M4).
+	HostUpdate *HostUpdate `json:"host_update,omitempty"`
 }
 
 // Start zet een actie in de wachtrij.
@@ -317,6 +353,18 @@ func (s *Service) Start(ctx context.Context, actor events.Actor, req Request) (s
 	}
 	op := req.Op
 	switch op.Action {
+	case protocol.PVEAPI:
+		return store.Job{}, ValidationError{"een API-aanroep gaat via het datacenter (StartCall)"}
+	case protocol.PVEPassthrough, protocol.PVEVolumeFree, protocol.PVEZpoolScrub, protocol.PVEMaintenance:
+		if why := h.APIReady(); why != "" {
+			return store.Job{}, ValidationError{why}
+		}
+		if op.Action == protocol.PVEVolumeFree && strings.TrimSpace(req.Confirm) != op.Volume {
+			return store.Job{}, ValidationError{"tik het volume over om het te verwijderen"}
+		}
+		if op.Action == protocol.PVEPassthrough && strings.TrimSpace(req.Confirm) != h.PVENode {
+			return store.Job{}, ValidationError{fmt.Sprintf("tik %s over: passthrough verandert de kernelregel en vraagt een herstart", h.PVENode)}
+		}
 	case protocol.PVETemplate, protocol.PVECreateCT:
 	default:
 		inv, err := s.Inventory(ctx, req.NodeID)
@@ -344,11 +392,7 @@ func (s *Service) Start(ctx context.Context, actor events.Actor, req Request) (s
 	if err := op.Validate(); err != nil {
 		return store.Job{}, ValidationError{err.Error()}
 	}
-	spec := jobs.Spec{
-		Kind: Kind, Title: Describe(op) + " op " + h.PVENode, Actor: actor, NodeID: &req.NodeID, ProxmoxID: h.ConnectionID,
-		Params: params{NodeID: req.NodeID, PVENode: h.PVENode, ConnID: h.ConnectionID, Op: op},
-	}
-	j, err := s.jobs.Enqueue(ctx, spec)
+	j, err := s.enqueue(ctx, actor, h, op, Describe(op)+" op "+h.PVENode, nil)
 	if err != nil {
 		return store.Job{}, err
 	}
@@ -363,6 +407,15 @@ func (s *Service) Start(ctx context.Context, actor events.Actor, req Request) (s
 	}
 	s.jobs.Kick()
 	return j, nil
+}
+
+func (s *Service) enqueue(ctx context.Context, actor events.Actor, h Host, op protocol.PVERun, title string, seal *sealed) (store.Job, error) {
+	nodeID := h.NodeID
+	spec := jobs.Spec{
+		Kind: Kind, Title: title, Actor: actor, NodeID: &nodeID, ProxmoxID: h.ConnectionID,
+		Params: params{NodeID: nodeID, PVENode: h.PVENode, ConnID: h.ConnectionID, Op: op, Sealed: seal},
+	}
+	return s.jobs.Enqueue(ctx, spec)
 }
 
 // guard houdt gevaarlijke acties tegen: verwijderen vraagt de naam, en een
@@ -455,7 +508,19 @@ func (s *Service) run(ctx context.Context, j *jobs.Job) error {
 	if err := j.Decode(&p); err != nil {
 		return err
 	}
+	if p.RestoreTest != nil {
+		return s.runRestoreTest(ctx, j, p)
+	}
+	if p.HostUpdate != nil {
+		return s.runHostUpdate(ctx, j, p)
+	}
+	if err := s.openSealed(&p); err != nil {
+		return err
+	}
 	title := Describe(p.Op)
+	if p.Op.Action == protocol.PVEAPI {
+		title = j.Title
+	}
 	err := j.Step(ctx, title, func(ctx context.Context, st *jobs.Step) error {
 		res, err := s.Do(ctx, st, st, p.NodeID, p.Op, title+" op "+p.PVENode)
 		if err != nil {

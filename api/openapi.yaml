@@ -4550,6 +4550,195 @@ paths:
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /pve-hosts/{nodeId}/hardware:
+    parameters:
+      - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getPveHostHardware
+      summary: Hardwarescan van een Proxmox-host (fase 26) - PCI met IOMMU-groepen en drivers, USB, vfio, herstart nodig, temperaturen, ECC
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+  /pve/datacenters:
+    get:
+      operationId: listPveDatacenters
+      summary: De Proxmox-clusters (en losse hosts) met hun hosts met een agent (fase 26)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "401": { $ref: "#/components/responses/Error" }
+  /pve/datacenters/{dcId}/overview:
+    parameters:
+      - { name: dcId, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: getPveOverview
+      summary: Overzicht van een Proxmox-cluster - quorum, corosync, hosts, storage, HA, capaciteit en waarschuwingen
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+  /pve/datacenters/{dcId}/api:
+    parameters:
+      - { name: dcId, in: path, required: true, schema: { type: string } }
+    get:
+      operationId: getPveApi
+      summary: Een pad van de Proxmox-API lezen via de agent (pvesh get)
+      description: |
+        Een pad onder /nodes/<host> gaat naar de agent op die host, de rest naar een agent in het cluster.
+        Een kijker kan /access, ACME-plugins en certificaten niet lezen.
+      parameters:
+        - { name: path, in: query, required: true, schema: { type: string } }
+        - { name: params, in: query, required: false, description: "JSON-object met velden, zoals {\"content\":\"backup\"}", schema: { type: string } }
+      responses:
+        "200":
+          description: Het antwoord van Proxmox onder data
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: callPveApi
+      summary: Iets veranderen via de Proxmox-API, als taak pvehost.action (admin)
+      description: |
+        Alleen de aanroepen in internal/pvehost/policy.go. Gevaarlijke aanroepen (terugzetten over een gast, een host
+        herstarten, storage of een back-up verwijderen, netwerk toepassen) vragen confirm. Wachtwoorden en sleutels gaan
+        versleuteld in de taak.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PveCallInput" }
+      responses:
+        "202":
+          description: Taak aangemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /pve/datacenters/{dcId}/restore-test:
+    parameters:
+      - { name: dcId, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: startPveRestoreTest
+      summary: Een back-up op proef terugzetten, starten en weer opruimen (admin)
+      description: |
+        Zet de back-up terug als nieuwe gast met een vrij ID, met de netwerkkaarten los en zonder doorgegeven
+        hardware, start hem, wacht tot hij draait (VM met guest agent: tot die antwoordt) en verwijdert hem daarna.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PveRestoreTestInput" }
+      responses:
+        "202":
+          description: Taak aangemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /pve/datacenters/{dcId}/tokens:
+    parameters:
+      - { name: dcId, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: createPveToken
+      summary: Een API-token van Proxmox maken (admin)
+      description: |
+        Proxmox toont de waarde van een nieuw token maar één keer. ClusterForge geeft hem in dit antwoord terug en
+        bewaart hem nergens (geen taak, geen logboek). Vraagt een agent met protocol 36 op een host.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PveTokenInput" }
+      responses:
+        "201":
+          description: Het token, met zijn waarde
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveTokenCreated" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /pve/datacenters/{dcId}/console:
+    parameters:
+      - { name: dcId, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: openPveConsole
+      summary: Een console openen op een gast of host (admin)
+      description: |
+        Opent via de agent op de Proxmox-host een scherm (vnc, noVNC) of terminal (serial, ct, host; xterm). Daarna
+        opent de browser binnen 30 seconden de websocket GET /api/v1/pve/console/{session}. Het verkeer komt in geen
+        taak of logboek. Vraagt de agent met protocol 37 op die host.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PveConsoleInput" }
+      responses:
+        "201":
+          description: De sessie
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveConsoleOpened" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /pve/datacenters/{dcId}/host-update:
+    parameters:
+      - { name: dcId, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: startPveHostUpdate
+      summary: Proxmox-hosts één voor één bijwerken, clusterbewust (admin)
+      description: |
+        Per host: onderhoudsmodus aan, draaiende gasten verhuizen, wachten tot de host leeg is, apt full-upgrade,
+        herstarten als het moet, wachten tot hij terug is, onderhoudsmodus uit, gasten terug. Met dry_run alleen het plan.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PveHostUpdateInput" }
+      responses:
+        "200":
+          description: Het plan (dry_run)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "202":
+          description: Taak aangemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
   /clusters/{clusterId}/stacks:
     parameters:
       - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -13880,6 +14069,65 @@ components:
         op: { $ref: "#/components/schemas/PveObject" }
         confirm: { type: string, description: Bij verwijderen de naam of het nummer van de gast }
         server_url: { type: string, description: Bij bootstrap het adres waarmee de CT ClusterForge bereikt }
+    PveCallInput:
+      type: object
+      required: [method, path]
+      properties:
+        method: { type: string, enum: [create, set, delete] }
+        path: { type: string }
+        params:
+          type: object
+          additionalProperties: { type: string }
+        confirm: { type: string, description: Wat overgetikt moet worden bij een gevaarlijke aanroep }
+    PveHostUpdateInput:
+      type: object
+      required: [hosts]
+      properties:
+        hosts: { type: array, items: { type: string }, description: Proxmox-namen in volgorde }
+        reboot: { type: string, enum: [needed, always, never], default: needed }
+        shutdown_stuck: { type: boolean, description: Gasten die niet kunnen verhuizen afsluiten en na de update weer starten }
+        dry_run: { type: boolean }
+        confirm: { type: string, description: De naam van het datacenter }
+    PveTokenInput:
+      type: object
+      required: [userid, tokenid]
+      properties:
+        userid: { type: string, description: Bijvoorbeeld homepage@pve }
+        tokenid: { type: string }
+        comment: { type: string }
+        expire: { type: integer, format: int64, description: Unix-tijd; 0 of leeg is nooit }
+        privsep: { type: boolean, description: "Eigen rechten in plaats van die van de gebruiker, standaard aan" }
+    PveTokenCreated:
+      type: object
+      required: [full_tokenid, value]
+      properties:
+        full_tokenid: { type: string }
+        value: { type: string }
+    PveConsoleInput:
+      type: object
+      required: [node, kind]
+      properties:
+        node: { type: string, description: "Proxmox-host waarop de gast draait, of de host zelf" }
+        kind: { type: string, enum: [vnc, serial, ct, host] }
+        vmid: { type: integer, description: "Gast-ID; niet bij host" }
+        cols: { type: integer }
+        rows: { type: integer }
+    PveConsoleOpened:
+      type: object
+      required: [session, kind, title]
+      properties:
+        session: { type: string }
+        kind: { type: string }
+        title: { type: string }
+        password: { type: string, description: "Eenmalig VNC-wachtwoord (alleen vnc), vervalt na 30 seconden" }
+    PveRestoreTestInput:
+      type: object
+      required: [node, archive, type, storage]
+      properties:
+        node: { type: string, description: Proxmox-host waarop de test draait }
+        archive: { type: string, description: Volume van de back-up }
+        type: { type: string, enum: [qemu, lxc] }
+        storage: { type: string, description: Storage voor de schijven van de test }
     FirewallObject:
       type: object
       description: Een object van de firewall (fase 16); de velden staan in web/src/lib/firewall.ts en internal/firewall.

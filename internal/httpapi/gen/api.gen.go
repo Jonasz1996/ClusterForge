@@ -1136,13 +1136,13 @@ func (e DependencyStrength) Valid() bool {
 
 // Defines values for DeployTargetCreate.
 const (
-	Ct DeployTargetCreate = "ct"
+	DeployTargetCreateCt DeployTargetCreate = "ct"
 )
 
 // Valid indicates whether the value is a known member of the DeployTargetCreate enum.
 func (e DeployTargetCreate) Valid() bool {
 	switch e {
-	case Ct:
+	case DeployTargetCreateCt:
 		return true
 	default:
 		return false
@@ -2961,6 +2961,90 @@ func (e NodeLinkGuestType) Valid() bool {
 	case NodeLinkGuestTypeLxc:
 		return true
 	case NodeLinkGuestTypeQemu:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PveCallInputMethod.
+const (
+	PveCallInputMethodCreate PveCallInputMethod = "create"
+	PveCallInputMethodDelete PveCallInputMethod = "delete"
+	PveCallInputMethodSet    PveCallInputMethod = "set"
+)
+
+// Valid indicates whether the value is a known member of the PveCallInputMethod enum.
+func (e PveCallInputMethod) Valid() bool {
+	switch e {
+	case PveCallInputMethodCreate:
+		return true
+	case PveCallInputMethodDelete:
+		return true
+	case PveCallInputMethodSet:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PveConsoleInputKind.
+const (
+	PveConsoleInputKindCt     PveConsoleInputKind = "ct"
+	PveConsoleInputKindHost   PveConsoleInputKind = "host"
+	PveConsoleInputKindSerial PveConsoleInputKind = "serial"
+	PveConsoleInputKindVnc    PveConsoleInputKind = "vnc"
+)
+
+// Valid indicates whether the value is a known member of the PveConsoleInputKind enum.
+func (e PveConsoleInputKind) Valid() bool {
+	switch e {
+	case PveConsoleInputKindCt:
+		return true
+	case PveConsoleInputKindHost:
+		return true
+	case PveConsoleInputKindSerial:
+		return true
+	case PveConsoleInputKindVnc:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PveHostUpdateInputReboot.
+const (
+	Always PveHostUpdateInputReboot = "always"
+	Needed PveHostUpdateInputReboot = "needed"
+	Never  PveHostUpdateInputReboot = "never"
+)
+
+// Valid indicates whether the value is a known member of the PveHostUpdateInputReboot enum.
+func (e PveHostUpdateInputReboot) Valid() bool {
+	switch e {
+	case Always:
+		return true
+	case Needed:
+		return true
+	case Never:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PveRestoreTestInputType.
+const (
+	PveRestoreTestInputTypeLxc  PveRestoreTestInputType = "lxc"
+	PveRestoreTestInputTypeQemu PveRestoreTestInputType = "qemu"
+)
+
+// Valid indicates whether the value is a known member of the PveRestoreTestInputType enum.
+func (e PveRestoreTestInputType) Valid() bool {
+	switch e {
+	case PveRestoreTestInputTypeLxc:
+		return true
+	case PveRestoreTestInputTypeQemu:
 		return true
 	default:
 		return false
@@ -11498,8 +11582,100 @@ type PveActionInput struct {
 	ServerUrl *string `json:"server_url,omitempty"`
 }
 
+// PveCallInput defines model for PveCallInput.
+type PveCallInput struct {
+	// Confirm Wat overgetikt moet worden bij een gevaarlijke aanroep
+	Confirm *string            `json:"confirm,omitempty"`
+	Method  PveCallInputMethod `json:"method"`
+	Params  *map[string]string `json:"params,omitempty"`
+	Path    string             `json:"path"`
+}
+
+// PveCallInputMethod defines model for PveCallInput.Method.
+type PveCallInputMethod string
+
+// PveConsoleInput defines model for PveConsoleInput.
+type PveConsoleInput struct {
+	Cols *int                `json:"cols,omitempty"`
+	Kind PveConsoleInputKind `json:"kind"`
+
+	// Node Proxmox-host waarop de gast draait, of de host zelf
+	Node string `json:"node"`
+	Rows *int   `json:"rows,omitempty"`
+
+	// Vmid Gast-ID; niet bij host
+	Vmid *int `json:"vmid,omitempty"`
+}
+
+// PveConsoleInputKind defines model for PveConsoleInput.Kind.
+type PveConsoleInputKind string
+
+// PveConsoleOpened defines model for PveConsoleOpened.
+type PveConsoleOpened struct {
+	Kind string `json:"kind"`
+
+	// Password Eenmalig VNC-wachtwoord (alleen vnc), vervalt na 30 seconden
+	Password *string `json:"password,omitempty"`
+	Session  string  `json:"session"`
+	Title    string  `json:"title"`
+}
+
+// PveHostUpdateInput defines model for PveHostUpdateInput.
+type PveHostUpdateInput struct {
+	// Confirm De naam van het datacenter
+	Confirm *string `json:"confirm,omitempty"`
+	DryRun  *bool   `json:"dry_run,omitempty"`
+
+	// Hosts Proxmox-namen in volgorde
+	Hosts  []string                  `json:"hosts"`
+	Reboot *PveHostUpdateInputReboot `json:"reboot,omitempty"`
+
+	// ShutdownStuck Gasten die niet kunnen verhuizen afsluiten en na de update weer starten
+	ShutdownStuck *bool `json:"shutdown_stuck,omitempty"`
+}
+
+// PveHostUpdateInputReboot defines model for PveHostUpdateInput.Reboot.
+type PveHostUpdateInputReboot string
+
 // PveObject Een object van de Proxmox-hosts (fase 17); de velden staan in web/src/lib/pvehosts.ts en pkg/protocol/pve.go.
 type PveObject map[string]interface{}
+
+// PveRestoreTestInput defines model for PveRestoreTestInput.
+type PveRestoreTestInput struct {
+	// Archive Volume van de back-up
+	Archive string `json:"archive"`
+
+	// Node Proxmox-host waarop de test draait
+	Node string `json:"node"`
+
+	// Storage Storage voor de schijven van de test
+	Storage string                  `json:"storage"`
+	Type    PveRestoreTestInputType `json:"type"`
+}
+
+// PveRestoreTestInputType defines model for PveRestoreTestInput.Type.
+type PveRestoreTestInputType string
+
+// PveTokenCreated defines model for PveTokenCreated.
+type PveTokenCreated struct {
+	FullTokenid string `json:"full_tokenid"`
+	Value       string `json:"value"`
+}
+
+// PveTokenInput defines model for PveTokenInput.
+type PveTokenInput struct {
+	Comment *string `json:"comment,omitempty"`
+
+	// Expire Unix-tijd; 0 of leeg is nooit
+	Expire *int64 `json:"expire,omitempty"`
+
+	// Privsep Eigen rechten in plaats van die van de gebruiker, standaard aan
+	Privsep *bool  `json:"privsep,omitempty"`
+	Tokenid string `json:"tokenid"`
+
+	// Userid Bijvoorbeeld homepage@pve
+	Userid string `json:"userid"`
+}
 
 // RecipeCheck defines model for RecipeCheck.
 type RecipeCheck struct {
@@ -13856,6 +14032,14 @@ type ProbeProxmoxJSONBody struct {
 	ApiUrl string `json:"api_url"`
 }
 
+// GetPveApiParams defines parameters for GetPveApi.
+type GetPveApiParams struct {
+	Path string `form:"path" json:"path"`
+
+	// Params JSON-object met velden, zoals {"content":"backup"}
+	Params *string `form:"params,omitempty" json:"params,omitempty"`
+}
+
 // GetRecoveryReportParams defines parameters for GetRecoveryReport.
 type GetRecoveryReportParams struct {
 	// Month JJJJ-MM; zonder is het deze maand
@@ -14233,6 +14417,21 @@ type VmActionJSONRequestBody = VmActionInput
 
 // StartPveHostActionJSONRequestBody defines body for StartPveHostAction for application/json ContentType.
 type StartPveHostActionJSONRequestBody = PveActionInput
+
+// CallPveApiJSONRequestBody defines body for CallPveApi for application/json ContentType.
+type CallPveApiJSONRequestBody = PveCallInput
+
+// OpenPveConsoleJSONRequestBody defines body for OpenPveConsole for application/json ContentType.
+type OpenPveConsoleJSONRequestBody = PveConsoleInput
+
+// StartPveHostUpdateJSONRequestBody defines body for StartPveHostUpdate for application/json ContentType.
+type StartPveHostUpdateJSONRequestBody = PveHostUpdateInput
+
+// StartPveRestoreTestJSONRequestBody defines body for StartPveRestoreTest for application/json ContentType.
+type StartPveRestoreTestJSONRequestBody = PveRestoreTestInput
+
+// CreatePveTokenJSONRequestBody defines body for CreatePveToken for application/json ContentType.
+type CreatePveTokenJSONRequestBody = PveTokenInput
 
 // SaveRecipeJSONRequestBody defines body for SaveRecipe for application/json ContentType.
 type SaveRecipeJSONRequestBody = RecipeSource
@@ -15145,9 +15344,36 @@ type ServerInterface interface {
 	// GetPveHostAvailable Containertemplates die de host met pveam kan downloaden
 	// (GET /pve-hosts/{nodeId}/available)
 	GetPveHostAvailable(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// GetPveHostHardware Hardwarescan van een Proxmox-host (fase 26) - PCI met IOMMU-groepen en drivers, USB, vfio, herstart nodig, temperaturen, ECC
+	// (GET /pve-hosts/{nodeId}/hardware)
+	GetPveHostHardware(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
 	// GetPveHostInventory Wat de agent op de host ziet - CT's en VM's met configuratie en snapshots, storages, bridges, containertemplates
 	// (GET /pve-hosts/{nodeId}/inventory)
 	GetPveHostInventory(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// ListPveDatacenters De Proxmox-clusters (en losse hosts) met hun hosts met een agent (fase 26)
+	// (GET /pve/datacenters)
+	ListPveDatacenters(w http.ResponseWriter, r *http.Request)
+	// GetPveApi Een pad van de Proxmox-API lezen via de agent (pvesh get)
+	// (GET /pve/datacenters/{dcId}/api)
+	GetPveApi(w http.ResponseWriter, r *http.Request, dcId string, params GetPveApiParams)
+	// CallPveApi Iets veranderen via de Proxmox-API, als taak pvehost.action (admin)
+	// (POST /pve/datacenters/{dcId}/api)
+	CallPveApi(w http.ResponseWriter, r *http.Request, dcId string)
+	// OpenPveConsole Een console openen op een gast of host (admin)
+	// (POST /pve/datacenters/{dcId}/console)
+	OpenPveConsole(w http.ResponseWriter, r *http.Request, dcId string)
+	// StartPveHostUpdate Proxmox-hosts één voor één bijwerken, clusterbewust (admin)
+	// (POST /pve/datacenters/{dcId}/host-update)
+	StartPveHostUpdate(w http.ResponseWriter, r *http.Request, dcId string)
+	// GetPveOverview Overzicht van een Proxmox-cluster - quorum, corosync, hosts, storage, HA, capaciteit en waarschuwingen
+	// (GET /pve/datacenters/{dcId}/overview)
+	GetPveOverview(w http.ResponseWriter, r *http.Request, dcId string)
+	// StartPveRestoreTest Een back-up op proef terugzetten, starten en weer opruimen (admin)
+	// (POST /pve/datacenters/{dcId}/restore-test)
+	StartPveRestoreTest(w http.ResponseWriter, r *http.Request, dcId string)
+	// CreatePveToken Een API-token van Proxmox maken (admin)
+	// (POST /pve/datacenters/{dcId}/tokens)
+	CreatePveToken(w http.ResponseWriter, r *http.Request, dcId string)
 	// ListRecipes Alle recepten met hun versies (fase 9)
 	// (GET /recipes)
 	ListRecipes(w http.ResponseWriter, r *http.Request)
@@ -17005,9 +17231,63 @@ func (_ Unimplemented) GetPveHostAvailable(w http.ResponseWriter, r *http.Reques
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// GetPveHostHardware Hardwarescan van een Proxmox-host (fase 26) - PCI met IOMMU-groepen en drivers, USB, vfio, herstart nodig, temperaturen, ECC
+// (GET /pve-hosts/{nodeId}/hardware)
+func (_ Unimplemented) GetPveHostHardware(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // GetPveHostInventory Wat de agent op de host ziet - CT's en VM's met configuratie en snapshots, storages, bridges, containertemplates
 // (GET /pve-hosts/{nodeId}/inventory)
 func (_ Unimplemented) GetPveHostInventory(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListPveDatacenters De Proxmox-clusters (en losse hosts) met hun hosts met een agent (fase 26)
+// (GET /pve/datacenters)
+func (_ Unimplemented) ListPveDatacenters(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetPveApi Een pad van de Proxmox-API lezen via de agent (pvesh get)
+// (GET /pve/datacenters/{dcId}/api)
+func (_ Unimplemented) GetPveApi(w http.ResponseWriter, r *http.Request, dcId string, params GetPveApiParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CallPveApi Iets veranderen via de Proxmox-API, als taak pvehost.action (admin)
+// (POST /pve/datacenters/{dcId}/api)
+func (_ Unimplemented) CallPveApi(w http.ResponseWriter, r *http.Request, dcId string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// OpenPveConsole Een console openen op een gast of host (admin)
+// (POST /pve/datacenters/{dcId}/console)
+func (_ Unimplemented) OpenPveConsole(w http.ResponseWriter, r *http.Request, dcId string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// StartPveHostUpdate Proxmox-hosts één voor één bijwerken, clusterbewust (admin)
+// (POST /pve/datacenters/{dcId}/host-update)
+func (_ Unimplemented) StartPveHostUpdate(w http.ResponseWriter, r *http.Request, dcId string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetPveOverview Overzicht van een Proxmox-cluster - quorum, corosync, hosts, storage, HA, capaciteit en waarschuwingen
+// (GET /pve/datacenters/{dcId}/overview)
+func (_ Unimplemented) GetPveOverview(w http.ResponseWriter, r *http.Request, dcId string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// StartPveRestoreTest Een back-up op proef terugzetten, starten en weer opruimen (admin)
+// (POST /pve/datacenters/{dcId}/restore-test)
+func (_ Unimplemented) StartPveRestoreTest(w http.ResponseWriter, r *http.Request, dcId string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CreatePveToken Een API-token van Proxmox maken (admin)
+// (POST /pve/datacenters/{dcId}/tokens)
+func (_ Unimplemented) CreatePveToken(w http.ResponseWriter, r *http.Request, dcId string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -25751,6 +26031,32 @@ func (siw *ServerInterfaceWrapper) GetPveHostAvailable(w http.ResponseWriter, r 
 	handler.ServeHTTP(w, r)
 }
 
+// GetPveHostHardware operation middleware
+func (siw *ServerInterfaceWrapper) GetPveHostHardware(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetPveHostHardware(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetPveHostInventory operation middleware
 func (siw *ServerInterfaceWrapper) GetPveHostInventory(w http.ResponseWriter, r *http.Request) {
 
@@ -25768,6 +26074,231 @@ func (siw *ServerInterfaceWrapper) GetPveHostInventory(w http.ResponseWriter, r 
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetPveHostInventory(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListPveDatacenters operation middleware
+func (siw *ServerInterfaceWrapper) ListPveDatacenters(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListPveDatacenters(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetPveApi operation middleware
+func (siw *ServerInterfaceWrapper) GetPveApi(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "dcId" -------------
+	var dcId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "dcId", chi.URLParam(r, "dcId"), &dcId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "dcId", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetPveApiParams
+
+	// ------------- Required query parameter "path" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "path", r.URL.Query(), &params.Path, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "path"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "path", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "params" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "params", r.URL.Query(), &params.Params, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "params"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "params", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetPveApi(w, r, dcId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CallPveApi operation middleware
+func (siw *ServerInterfaceWrapper) CallPveApi(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "dcId" -------------
+	var dcId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "dcId", chi.URLParam(r, "dcId"), &dcId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "dcId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CallPveApi(w, r, dcId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// OpenPveConsole operation middleware
+func (siw *ServerInterfaceWrapper) OpenPveConsole(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "dcId" -------------
+	var dcId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "dcId", chi.URLParam(r, "dcId"), &dcId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "dcId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.OpenPveConsole(w, r, dcId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// StartPveHostUpdate operation middleware
+func (siw *ServerInterfaceWrapper) StartPveHostUpdate(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "dcId" -------------
+	var dcId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "dcId", chi.URLParam(r, "dcId"), &dcId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "dcId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StartPveHostUpdate(w, r, dcId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetPveOverview operation middleware
+func (siw *ServerInterfaceWrapper) GetPveOverview(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "dcId" -------------
+	var dcId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "dcId", chi.URLParam(r, "dcId"), &dcId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "dcId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetPveOverview(w, r, dcId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// StartPveRestoreTest operation middleware
+func (siw *ServerInterfaceWrapper) StartPveRestoreTest(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "dcId" -------------
+	var dcId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "dcId", chi.URLParam(r, "dcId"), &dcId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "dcId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StartPveRestoreTest(w, r, dcId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreatePveToken operation middleware
+func (siw *ServerInterfaceWrapper) CreatePveToken(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "dcId" -------------
+	var dcId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "dcId", chi.URLParam(r, "dcId"), &dcId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "dcId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreatePveToken(w, r, dcId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -27543,6 +28074,33 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/pve-hosts/{nodeId}/actions", wrapper.StartPveHostAction)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/pve-hosts/{nodeId}/hardware", wrapper.GetPveHostHardware)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/pve/datacenters", wrapper.ListPveDatacenters)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/pve/datacenters/{dcId}/overview", wrapper.GetPveOverview)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/pve/datacenters/{dcId}/api", wrapper.GetPveApi)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/pve/datacenters/{dcId}/api", wrapper.CallPveApi)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/pve/datacenters/{dcId}/restore-test", wrapper.StartPveRestoreTest)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/pve/datacenters/{dcId}/tokens", wrapper.CreatePveToken)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/pve/datacenters/{dcId}/console", wrapper.OpenPveConsole)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/pve/datacenters/{dcId}/host-update", wrapper.StartPveHostUpdate)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/clusters/{clusterId}/stacks", wrapper.GetClusterStacks)

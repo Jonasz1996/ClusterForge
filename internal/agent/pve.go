@@ -507,6 +507,21 @@ func (a *Agent) handlePVE(data []byte) protocol.PVEResponse {
 			return protocol.PVEResponse{Error: err.Error()}
 		}
 		return protocol.PVEResponse{Available: list}
+	case protocol.PVEOpGet:
+		if err := req.ValidateGet(); err != nil {
+			return protocol.PVEResponse{Error: err.Error()}
+		}
+		data, err := h.get(ctx, req.Path, req.Params)
+		if err != nil {
+			return protocol.PVEResponse{Error: err.Error()}
+		}
+		return protocol.PVEResponse{Data: data}
+	case protocol.PVEOpHardware:
+		hw, err := h.hardware(ctx)
+		if err != nil {
+			return protocol.PVEResponse{Error: err.Error()}
+		}
+		return protocol.PVEResponse{Hardware: &hw}
 	}
 	return protocol.PVEResponse{Error: "onbekend Proxmox-verzoek " + req.Op}
 }

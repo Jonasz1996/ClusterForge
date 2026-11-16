@@ -1,6 +1,7 @@
 package protocol
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/netip"
 	"regexp"
@@ -54,12 +55,19 @@ type PVERequest struct {
 	ID       string    `json:"id"`
 	Op       string    `json:"op"`
 	Deadline time.Time `json:"deadline"`
+	// Path en Params bij PVEOpGet (vanaf PVEAPISince).
+	Path   string            `json:"path,omitempty"`
+	Params map[string]string `json:"params,omitempty"`
 }
 
 type PVEResponse struct {
 	Error     string         `json:"error,omitempty"`
 	Inventory *PVEInventory  `json:"inventory,omitempty"`
 	Available []PVEAppliance `json:"available,omitempty"`
+	// Data is het JSON-antwoord van pvesh get (PVEOpGet).
+	Data json.RawMessage `json:"data,omitempty"`
+	// Hardware is de hardwarescan (PVEOpHardware).
+	Hardware *PVEHardware `json:"hardware,omitempty"`
 }
 
 // PVEInventory is wat de agent op een Proxmox-host ziet.
@@ -204,6 +212,15 @@ type PVERun struct {
 	Create    *PVECreate        `json:"create,omitempty"`
 	Template  *PVETemplateSpec  `json:"template,omitempty"`
 	Bootstrap *PVEBootstrapSpec `json:"bootstrap,omitempty"`
+
+	// Vanaf PVEAPISince.
+	API         *PVEAPICall         `json:"api,omitempty"`
+	Passthrough *PVEPassthroughSpec `json:"passthrough,omitempty"`
+	// Volume bij volume_free, zoals local:backup/vzdump-lxc-101-….tar.zst.
+	Volume string    `json:"volume,omitempty"`
+	Scrub  *PVEScrub `json:"scrub,omitempty"`
+	// Enable bij maintenance: true zet de host in onderhoud.
+	Enable bool `json:"enable,omitempty"`
 }
 
 // PVESetting zijn de instellingen van set; nil laat staan.
@@ -287,6 +304,14 @@ type PVERunResult struct {
 	// Existed: de CT bestond al met deze hostname (create_ct), of de
 	// template stond er al.
 	Existed bool `json:"existed,omitempty"`
+	// Data is het JSON-antwoord van een aanroep (api), zoals het geheim
+	// van een nieuw API-token; hoogstens 256 kB.
+	Data json.RawMessage `json:"data,omitempty"`
+	// UPID is de Proxmox-taak die de aanroep startte.
+	UPID string `json:"upid,omitempty"`
+	// RebootRequired: de host moet herstarten voor de wijziging geldt
+	// (passthrough).
+	RebootRequired bool `json:"reboot_required,omitempty"`
 }
 
 var (
@@ -352,7 +377,7 @@ func (p PVERun) Validate() error {
 	if !slices.Contains(PVEActions, p.Action) {
 		return fmt.Errorf("onbekende Proxmox-actie %q", p.Action)
 	}
-	if p.Action != PVETemplate {
+	if !isHostAction(p.Action) {
 		if p.Type != "lxc" && p.Type != "qemu" {
 			return fmt.Errorf("soort gast %q is geen lxc of qemu", p.Type)
 		}
@@ -448,6 +473,8 @@ func (p PVERun) Validate() error {
 		if t.Match != "" && !pveMatch.MatchString(t.Match) {
 			return fmt.Errorf("ongeldig begin van een naam %q", t.Match)
 		}
+	case PVEAPI, PVEPassthrough, PVEVolumeFree, PVEZpoolScrub, PVEMaintenance:
+		return p.validateHost()
 	case PVEBootstrap:
 		b := p.Bootstrap
 		if !ct || b == nil {
@@ -534,8 +561,11 @@ func (c *PVECreate) validate() error {
 // PVETimeout is de tijdslimiet van een run pve.
 func (p PVERun) Timeout() time.Duration {
 	switch p.Action {
-	case PVEMigrate, PVETemplate:
-		return 2 * time.Hour
+	case PVEMigrate, PVETemplate, PVEAPI:
+		// Een aanroep kan een back-up, terugzetten of verhuizen zijn.
+		return 4 * time.Hour
+	case PVEPassthrough:
+		return 30 * time.Minute
 	case PVECreateCT, PVEBootstrap, PVESnapshot, PVERollback, PVEDelSnapshot, PVEDestroy:
 		return 30 * time.Minute
 	}

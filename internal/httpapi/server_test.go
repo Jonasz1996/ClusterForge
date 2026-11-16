@@ -290,7 +290,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	stk := stacks.NewService(pool, ev, runner, bus, log)
 	stk.Box, stk.Syncs, stk.Run.Poll = box, crons, 20*time.Millisecond
 	pvh := pvehost.NewService(pool, ev, log, runner, bus, agents.NewService(pool, ev, bus))
-	pvh.Sync, pvh.Run.Poll = pve, 20*time.Millisecond
+	pvh.Sync, pvh.Run.Poll, pvh.Box, pvh.RestorePoll = pve, 20*time.Millisecond, box, 20*time.Millisecond
 	pvh.AgentSHA256 = func() map[string]string { return upg.Offer().SHA256 }
 	dep.Hosts = pvh
 	var wg sync.WaitGroup

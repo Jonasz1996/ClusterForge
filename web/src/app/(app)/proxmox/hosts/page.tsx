@@ -3,6 +3,7 @@
 import { askConfirm } from "@/components/Confirm";
 import Link from "next/link";
 import { useMemo, useState } from "react";
+import { ActionMenu as Menu } from "@/components/pve/bits";
 import { JobList } from "@/components/jobs/JobList";
 import { Modal } from "@/components/Modal";
 import { ago, Empty, formatBytes, formatDuration, QueryState, Tags, tableClass, tdClass, thClass } from "@/components/inventory/bits";
@@ -304,35 +305,6 @@ function GuestTable({
       {open?.dialog === "bootstrap" && <BootstrapDialog guest={open.guest} pending={pending} submit={submit} onClose={() => setOpen(null)} />}
       {open?.dialog === "destroy" && <DestroyDialog guest={open.guest} pending={pending} submit={submit} onClose={() => setOpen(null)} />}
     </Card>
-  );
-}
-
-function Menu({ items, disabled }: { items: { label: string; onClick: () => void; danger?: boolean }[]; disabled: boolean }) {
-  return (
-    <details className="relative inline-block text-left [&[open]>summary]:bg-slate-100 dark:[&[open]>summary]:bg-slate-800">
-      <summary className="cursor-pointer list-none rounded-md px-2 py-1 text-sm font-medium text-slate-600 select-none hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800">
-        Acties ▾
-      </summary>
-      <div className="absolute right-0 z-20 mt-1 w-48 rounded-md border border-slate-200 bg-white py-1 shadow-lg dark:border-slate-700 dark:bg-slate-900">
-        {items.map((it) => (
-          <button
-            key={it.label}
-            type="button"
-            disabled={disabled}
-            onClick={(e) => {
-              (e.currentTarget.closest("details") as HTMLDetailsElement | null)?.removeAttribute("open");
-              it.onClick();
-            }}
-            className={cx(
-              "block w-full px-3 py-1.5 text-left text-sm hover:bg-slate-50 disabled:opacity-60 dark:hover:bg-slate-800",
-              it.danger && "text-red-700 dark:text-red-300",
-            )}
-          >
-            {it.label}
-          </button>
-        ))}
-      </div>
-    </details>
   );
 }
 

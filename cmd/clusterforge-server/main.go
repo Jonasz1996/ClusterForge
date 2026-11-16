@@ -237,6 +237,7 @@ func serve() error {
 	pvh := pvehost.NewService(pool, ev, log, runner, bus, agents.NewService(pool, ev, bus))
 	pvh.Sync = pve
 	pvh.AgentSHA256 = func() map[string]string { return upg.Offer().SHA256 }
+	pvh.Box = box
 	dep.Hosts = pvh
 	// Een database als onderdeel van een cluster: MariaDB Galera op de
 	// nodes die er al zijn, met het geheugengebruik uit VictoriaMetrics in

@@ -132,8 +132,8 @@ func requestLogger(log *slog.Logger) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
 			start := time.Now()
-			// Streams (live-updates, assistent) blijven bewust lang open.
-			if !strings.Contains(r.Header.Get("Accept"), "text/event-stream") {
+			// Streams (live-updates, assistent, console) blijven bewust lang open.
+			if !strings.Contains(r.Header.Get("Accept"), "text/event-stream") && !strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
 				method, path, ip := r.Method, r.URL.Path, clientIP(r)
 				slow := time.AfterFunc(slowRequest, func() {
 					log.LogAttrs(context.Background(), slog.LevelWarn, "request loopt nog na 30 s",

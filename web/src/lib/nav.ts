@@ -20,11 +20,31 @@ export const navGroups: NavGroup[] = [
     items: [
       { href: "/clusters", label: "Clusters", keywords: "vip keepalived uitrollen" },
       { href: "/nodes", label: "Nodes", keywords: "servers agents machines ct lxc vm" },
-      { href: "/proxmox", label: "Proxmox", keywords: "vm ct snapshot pve" },
-      { href: "/proxmox/hosts", label: "Proxmox-hosts", keywords: "hypervisor pve host" },
       { href: "/kubernetes", label: "Kubernetes", keywords: "k3s pods" },
       { href: "/kaart", label: "Kaart", keywords: "netwerk vlan map" },
       { href: "/afhankelijkheden", label: "Afhankelijkheden", keywords: "graaf dependencies" },
+    ],
+  },
+  {
+    id: "proxmox",
+    label: "Proxmox",
+    items: [
+      { href: "/proxmox/datacenter", label: "Datacenter", keywords: "pve proxmox quorum corosync capaciteit overcommit onderhoudsmodus host herstarten" },
+      { href: "/proxmox/gasten", label: "Gasten", keywords: "pve vm ct lxc qemu aanmaken klonen tags cloud-init template snapshot verhuizen" },
+      { href: "/proxmox/backups", label: "Back-ups", keywords: "pve vzdump pbs proxmox backup server terugzetten restore terugzettest retentie" },
+      { href: "/proxmox/opslag", label: "Opslag", keywords: "pve storage nfs smb cifs pbs zfs lvm schijf smart slijtage iso template opruimen wees" },
+      { href: "/proxmox/ha", label: "HA", keywords: "pve high availability ha-groep regel affiniteit fencing herstart" },
+      { href: "/proxmox/replicatie", label: "Replicatie", keywords: "pve zfs replicatie storage replication schema" },
+      { href: "/proxmox/host-updates", label: "Host-updates", keywords: "pve apt upgrade bijwerken kernel herstart onderhoudsmodus rolling" },
+      { href: "/proxmox/netwerk", label: "Netwerk", keywords: "pve bridge vmbr vlan bond sdn zone vnet subnet interfaces" },
+      { href: "/proxmox/firewall", label: "Proxmox-firewall", keywords: "pve firewall regels ipset alias beveiligingsgroep" },
+      { href: "/proxmox/certificaten", label: "Certificaten", keywords: "pve acme lets encrypt ssl tls certificaat dns plugin" },
+      { href: "/proxmox/toegang", label: "Gebruikers en tokens", keywords: "pve gebruiker groep rechten acl rol api token realm wachtwoord" },
+      { href: "/proxmox/syslog", label: "Syslog", keywords: "pve journal syslog logboek host" },
+      { href: "/proxmox/hardware", label: "Hardware", keywords: "pve passthrough gpu pci usb iommu vfio temperatuur ecc herstart" },
+      { href: "/proxmox/hosts", label: "Hosts en gasten", keywords: "pve hypervisor vm ct lxc qemu pct qm snapshot verhuizen migreren" },
+      { href: "/proxmox/taken", label: "Proxmox-taken", keywords: "pve task log upid vzdump" },
+      { href: "/proxmox", label: "Via de API-koppeling", keywords: "pve proxmox token api koppeling" },
     ],
   },
   {
@@ -85,6 +105,9 @@ export const navGroups: NavGroup[] = [
 // Pagina's die niet in de zijbalk staan maar wel een eigen titel hebben.
 const extraTitles: { href: string; label: string }[] = [{ href: "/tijdlijn", label: "Tijdlijn" }];
 
+// Detailpagina's die bij een menu-item horen maar niet onder zijn pad staan.
+const parentOf: Record<string, string> = { "/proxmox/gast": "/proxmox/gasten" };
+
 export function allNavItems(isAdmin: boolean): (NavItem & { group: string })[] {
   const out: (NavItem & { group: string })[] = [{ ...navHome, group: "" }];
   for (const g of navGroups) {
@@ -100,6 +123,8 @@ export function allNavItems(isAdmin: boolean): (NavItem & { group: string })[] {
 // /clusters/detail bij Clusters hoort.
 export function activeHref(pathname: string): string | null {
   if (pathname === "/" || pathname === "") return "/";
+  const parent = parentOf[pathname.replace(/\/$/, "")];
+  if (parent) return parent;
   let best: string | null = null;
   const all = [...navGroups.flatMap((g) => g.items), ...extraTitles];
   for (const i of all) {

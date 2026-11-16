@@ -268,6 +268,8 @@ func (s *Server) Handler() http.Handler {
 
 	r.Route("/api/v1", func(api chi.Router) {
 		api.Use(middleware.NoCache)
+		// De console (fase 26 M7) is een websocket, buiten de OpenAPI.
+		api.With(s.requireSession).Get("/pve/console/{session}", s.pveConsoleSocket)
 		gen.HandlerWithOptions(s, gen.ChiServerOptions{
 			BaseRouter:  api,
 			Middlewares: []gen.MiddlewareFunc{s.requireSession},
