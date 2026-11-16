@@ -363,12 +363,24 @@ func TestVaultXOvernemen(t *testing.T) {
 	oudLokaal := "VAULTX_DATABASE_URL=postgresql+psycopg://vaultx:oud@127.0.0.1:5433/vaultx\nVAULTX_SECRET_KEY=" + vxSecret + "\n"
 	write(t, map[string]string{oudUnit: "[Service]\n", filepath.Join(n.dir, "state", "oud", "vaultx.env"): oudLokaal,
 		filepath.Join(n.dir, "vxetc", "vaultx.env"): "door voorstart overschreven\n"})
-	n.env = append(n.env, "CF_VX_OUD_UNIT="+oudUnit)
+	uc := filepath.Join(n.dir, "user_clusters")
+	n.env = append(n.env, "CF_VX_OUD_UNIT="+oudUnit, "CF_VX_USER_CLUSTERS="+uc)
 	if out, err := n.run("overnemen"); err == nil || !strings.Contains(out, "oude VaultX draait weer") {
 		t.Fatalf("lokale overname zonder gezonde VaultX: %v\n%s", err, out)
 	}
 	if b, _ := os.ReadFile(filepath.Join(n.dir, "vxetc", "vaultx.env")); string(b) != oudLokaal {
 		t.Errorf("vaultx.env van de oude VaultX niet teruggezet:\n%s", b)
+	}
+	// Klaargezet door een oudere versie (zonder user_clusters): voorbereid
+	// faalt, voorbereiden zet alleen de regel voor psql.
+	if out, err := n.run("voorbereid"); err == nil {
+		t.Errorf("voorbereid zonder user_clusters: %s", out)
+	}
+	if out, err := n.run("voorbereiden"); err != nil || !strings.Contains(out, "5432 (Patroni)") {
+		t.Errorf("voorbereiden na een oudere versie: %v %s", err, out)
+	}
+	if b, _ := os.ReadFile(uc); !strings.Contains(string(b), "* * 17 /var/run/postgresql:5432 *") {
+		t.Errorf("user_clusters:\n%s", b)
 	}
 	if out, err := n.run("voorbereid"); err != nil {
 		t.Errorf("voorbereid met vaultxoud: %v %s", err, out)

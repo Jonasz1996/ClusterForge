@@ -165,10 +165,28 @@ restore_oud_env() {
   return 0
 }
 
+# Met alleen het cluster vaultxoud kiest psql zonder poort (pg_wrapper) dat
+# cluster; de agent van ClusterForge moet zonder poort bij Patroni op 5432
+# uitkomen (gebruikers, status, dumps). Daarom een regel in user_clusters.
+UC=${CF_VX_USER_CLUSTERS:-/etc/postgresql-common/user_clusters}
+UC_MARK="# cf-vaultx: standaard Patroni op 5432, niet $OUD_NAME"
+uc_ok() { grep -qF "$UC_MARK" "$UC" 2>/dev/null; }
+uc_set() {
+  v=$1
+  uc_ok && return 0
+  mkdir -p "$(dirname "$UC")" || return 1
+  printf '%s\n* * %s /var/run/postgresql:5432 *\n' "$UC_MARK" "$v" >> "$UC"
+}
+uc_unset() {
+  [ -f "$UC" ] || return 0
+  awk -v m="$UC_MARK" '$0 == m {skip = 1; next} skip {skip = 0; next} {print}' "$UC" > "$UC.cf" && mv -f "$UC.cf" "$UC"
+}
+
 voorbereid() {
   has_oud || return 0
   [ -s "$OUD_ENV" ] || return 1
-  ! pg_lsclusters -h 2>/dev/null | awk '{print $2}' | grep -qx main
+  ! pg_lsclusters -h 2>/dev/null | awk '{print $2}' | grep -qx main || return 1
+  uc_ok
 }
 
 # Vóór Patroni (tijdens de uitrol): de PostgreSQL van de oude VaultX houdt
@@ -179,6 +197,14 @@ voorbereid() {
 voorbereiden() {
   if ! has_oud; then echo "Geen oude VaultX op deze node."; return 0; fi
   if voorbereid; then echo "De oude VaultX is al klaargezet (PostgreSQL $OUD_NAME op $(oud_port))."; return 0; fi
+  # Al klaargezet door een eerdere versie van dit script: alleen de regel
+  # voor psql nog.
+  done_v=$(pg_lsclusters -h 2>/dev/null | awk -v n="$OUD_NAME" '$2 == n {print $1}' | head -n 1)
+  if [ -s "$OUD_ENV" ] && [ -n "$done_v" ] && ! pg_lsclusters -h 2>/dev/null | awk '{print $2}' | grep -qx main; then
+    uc_set "$done_v" || fail "$UC"
+    echo "De oude VaultX was al klaargezet (PostgreSQL $OUD_NAME op $(oud_port)); psql zonder poort gaat nu naar 5432 (Patroni)."
+    return 0
+  fi
   # Een cluster vaultx-oud van een eerdere versie van dit script (systemd
   # start het niet): eerst terug naar main.
   bad=$(pg_lsclusters -h | awk '$2 == "vaultx-oud" {print $1}' | head -n 1)
@@ -217,6 +243,7 @@ voorbereiden() {
     pg_ctlcluster "$v" main start >&2
     install -m 0640 "/var/backups/vaultx/cf-voorbereiden-$t.env" "$VXETC/vaultx.env" && chgrp vaultx "$VXETC/vaultx.env" 2>/dev/null
     rm -f "$OUD_ENV" /etc/systemd/system/vaultx-backup.service.d/cf-poort.conf
+    uc_unset
     sysctl_ daemon-reload
     sysctl_ start vaultx
     exit 1
@@ -230,6 +257,7 @@ voorbereiden() {
   { grep -v '^VAULTX_DATABASE_URL=' "$VXETC/vaultx.env"; echo "VAULTX_DATABASE_URL=$newurl"; } > "$tmp" &&
     chmod 0640 "$tmp" && chgrp vaultx "$tmp" 2>/dev/null; mv -f "$tmp" "$VXETC/vaultx.env" || undo_prep "$VXETC/vaultx.env"
   (umask 077 && cp "$VXETC/vaultx.env" "$OUD_ENV") || undo_prep "$OUD_ENV"
+  uc_set "$v" || undo_prep "$UC"
   # De nachtelijke back-up van de oude VaultX: ook naar 5433.
   mkdir -p /etc/systemd/system/vaultx-backup.service.d &&
     printf '[Service]\nEnvironment=PGPORT=5433\n' > /etc/systemd/system/vaultx-backup.service.d/cf-poort.conf
