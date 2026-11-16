@@ -240,3 +240,108 @@ func TestDockerHAScript(t *testing.T) {
 		t.Fatal("old-sync-ok na uitzetten")
 	}
 }
+
+// TestDockerInstallKeepsExisting: de stap Docker van docker en docker-ha
+// installeert nooit Docker op een node die al Docker heeft. docker.io naast
+// Docker CE zou Docker CE verwijderen (en alle containers stoppen).
+func TestDockerInstallKeepsExisting(t *testing.T) {
+	for _, name := range []string{"docker", "docker-ha"} {
+		tpl, _ := Latest(name)
+		in := map[string]any{}
+		if name == "docker-ha" {
+			in["auth_pass"] = "geheim12"
+		}
+		params, err := tpl.Validate(in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		c := Context{Params: params, Cluster: ClusterInfo{Name: "D", Slug: "d", Environment: "lab"},
+			Nodes: []NodeInfo{{Hostname: "d1", Role: tpl.Roles[0].Name, Index: 1, Address: "192.0.2.10", Prefix: 24, Interface: "eth0"}}}
+		c.Node = &c.Nodes[0]
+		steps, err := tpl.Steps(c.Node.Role, c)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var run, unless string
+		for _, s := range steps {
+			if s.Command != nil && strings.Contains(s.Command.Run, "apt-get install -y docker.io") {
+				run, unless = s.Command.Run, s.Command.Unless
+			}
+		}
+		if run == "" {
+			t.Fatalf("%s: geen stap Docker", name)
+		}
+		for _, tc := range []struct {
+			what                         string
+			ce, dockerd, compose, active bool
+			skip                         bool
+			apt, marker                  string
+		}{
+			{what: "Docker CE draait", ce: true, dockerd: true, compose: true, active: true, skip: true},
+			{what: "Docker CE gestopt", ce: true, dockerd: true, compose: true},
+			{what: "Docker CE zonder compose", ce: true, dockerd: true, active: true, apt: "install -y docker-compose-plugin"},
+			{what: "docker.io zonder compose", dockerd: true, active: true, apt: "install -y docker-compose"},
+			{what: "geen Docker", apt: "install -y docker.io docker-compose", marker: "ja"},
+		} {
+			dir := t.TempDir()
+			bin := filepath.Join(dir, "bin")
+			if err := os.MkdirAll(bin, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			for _, tool := range []string{"grep", "mkdir", "touch"} {
+				p, err := exec.LookPath(tool)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(p, filepath.Join(bin, tool)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			stub := func(cmd, body string) {
+				if err := os.WriteFile(filepath.Join(bin, cmd), []byte("#!/bin/sh\n"+body+"\n"), 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			b := func(v bool) string {
+				if v {
+					return "exit 0"
+				}
+				return "exit 1"
+			}
+			stub("dpkg-query", map[bool]string{true: "printf 'install ok installed'", false: "exit 1"}[tc.ce])
+			if tc.dockerd {
+				stub("dockerd", "exit 0")
+			}
+			stub("docker", b(tc.compose))
+			stub("apt-get", `echo "$*" >> "`+dir+`/apt"`)
+			stub("systemctl", `case "$1" in is-active) `+b(tc.active)+`;; esac; echo "$*" >> "`+dir+`/systemctl"`)
+			sh := func(script string) error {
+				script = strings.ReplaceAll(script, "/etc/clusterforge", dir+"/etc")
+				cmd := exec.Command("/bin/sh", "-c", script)
+				cmd.Env = []string{"PATH=" + bin}
+				out, err := cmd.CombinedOutput()
+				if err != nil {
+					t.Logf("%s %s: %s", name, tc.what, out)
+				}
+				return err
+			}
+			if skipped := sh(unless) == nil; skipped != tc.skip {
+				t.Fatalf("%s, %s: unless %v", name, tc.what, skipped)
+			}
+			if tc.skip {
+				continue
+			}
+			if err := sh(run); err != nil {
+				t.Fatalf("%s, %s: %v", name, tc.what, err)
+			}
+			apt, _ := os.ReadFile(filepath.Join(dir, "apt"))
+			if strings.TrimSpace(string(apt)) != tc.apt {
+				t.Fatalf("%s, %s: apt-get %q, wil %q", name, tc.what, apt, tc.apt)
+			}
+			_, err := os.Stat(filepath.Join(dir, "etc/docker-door-clusterforge"))
+			if (err == nil) != (tc.marker != "") {
+				t.Fatalf("%s, %s: merkteken %v", name, tc.what, err)
+			}
+		}
+	}
+}

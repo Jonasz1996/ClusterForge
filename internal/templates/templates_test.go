@@ -246,9 +246,10 @@ func TestBuiltinList(t *testing.T) {
 func TestRenderDocker(t *testing.T) {
 	tpl, _ := Latest("docker")
 	steps, c := render(t, tpl, map[string]any{"log_max_size": "100M", "node_count": 1})
-	if got := titles(steps); got != "pakketten: docker.io, docker-compose; bestand /etc/docker/daemon.json; service docker; map /opt/stacks" {
+	if got := titles(steps); got != "map /usr/local/lib/clusterforge; Docker; bestand /usr/local/lib/clusterforge/docker-daemon.json; daemon.json van Docker; map /opt/stacks" {
 		t.Fatalf("stappen: %s", got)
 	}
+	steps = steps[1:]
 	var daemon struct {
 		LogDriver   string            `json:"log-driver"`
 		LogOpts     map[string]string `json:"log-opts"`
@@ -260,8 +261,8 @@ func TestRenderDocker(t *testing.T) {
 	if daemon.LogDriver != "json-file" || daemon.LogOpts["max-size"] != "100M" || daemon.LogOpts["max-file"] != "3" || !daemon.LiveRestore {
 		t.Fatalf("daemon.json: %+v", daemon)
 	}
-	if len(steps[1].Notify) != 1 || steps[1].Notify[0] != (protocol.ServiceStep{Name: "docker", State: "restarted"}) {
-		t.Fatalf("notify: %+v", steps[1].Notify)
+	if d := steps[2].Command; d == nil || !strings.Contains(d.Run, "systemctl restart docker") || !strings.Contains(d.Unless, "/etc/clusterforge/docker-door-clusterforge") {
+		t.Fatalf("daemon.json alleen bij Docker van ClusterForge: %+v", d)
 	}
 	if counts, _ := tpl.Counts(c); counts[0] != 1 || tpl.Failback {
 		t.Fatalf("één node zonder VIP: %v %v", counts, tpl.Failback)
