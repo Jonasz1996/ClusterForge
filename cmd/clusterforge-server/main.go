@@ -59,6 +59,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/kubenodes"
 	"github.com/Jonasz1996/clusterforge/internal/lifecycle"
 	"github.com/Jonasz1996/clusterforge/internal/live"
+	"github.com/Jonasz1996/clusterforge/internal/logs"
 	"github.com/Jonasz1996/clusterforge/internal/metrics"
 	"github.com/Jonasz1996/clusterforge/internal/planner"
 	"github.com/Jonasz1996/clusterforge/internal/proxmox"
@@ -222,6 +223,8 @@ func serve() error {
 	stk := stacks.NewService(pool, ev, runner, bus, log)
 	stk.Box = box
 	stk.Syncs = crons
+	// Fase 23: logs lezen via agentprotocol 34.
+	lgs := logs.NewService(pool, ev, bus, log)
 	// Fase 16: ufw op de nodes, via agentprotocol 30.
 	fw := firewall.NewService(pool, ev, runner, bus, log)
 	// Fase 17: de agent op de Proxmox-hosts (pct, qm, pveam), via
@@ -431,7 +434,7 @@ func serve() error {
 			Config: cfg, Log: log, Pool: pool, Auth: authSvc, Bus: bus, Hub: hub, Proxmox: pve, Jobs: runner,
 			Lifecycle: life, Deploy: dep, Backups: bk, Drift: drf, Failover: fo, Disaster: dis, Deps: dps, Rollout: ro,
 			GitOps: git, Assistant: asst, Risk: rsk, Topo: tp, Docs: dcs, Reports: rep, Kube: kub, KubeNodes: kn, Databases: dbs, Cronjobs: crons, Heal: hl,
-			Components: cmps, Upgrades: upg, Updates: upd, Commands: cmds, CrowdSec: csec, Stacks: stk, Firewall: fw, PVEHosts: pvh, Version: version,
+			Components: cmps, Upgrades: upg, Updates: upd, Commands: cmds, CrowdSec: csec, Stacks: stk, Logs: lgs, Firewall: fw, PVEHosts: pvh, Version: version,
 		}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
