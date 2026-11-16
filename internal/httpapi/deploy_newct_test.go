@@ -9,6 +9,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -20,6 +21,7 @@ import (
 
 	"github.com/Jonasz1996/clusterforge/internal/agent"
 	"github.com/Jonasz1996/clusterforge/internal/proxmox/pvefake"
+	"github.com/Jonasz1996/clusterforge/pkg/protocol"
 )
 
 // pveSim speelt pct, pveam en pvesh na op Proxmox-host pve1, bovenop de
@@ -33,6 +35,9 @@ type pveSim struct {
 	// extra beantwoordt commando's voor de rest (fase 26); ok false laat
 	// ze aan de gewone naspeling.
 	extra func(c string, out io.Writer) (code int, ok bool)
+	// console maakt het programma van een console (M7); nil laat de agent
+	// het echte maken.
+	console func(req protocol.ConsoleRequest, pw string) *exec.Cmd
 
 	mu    sync.Mutex
 	calls []string
@@ -194,6 +199,7 @@ func startPVEHost(t *testing.T, e *testEnv, c *client, sim *pveSim, bin []byte) 
 		ag.Root = root
 		ag.Exec = sim.exec
 		ag.Collector.Run = sim.exec
+		ag.ConsoleCommand = sim.console
 		ex := &agent.RunExecutor{Root: root, Cmd: sim.cmd, Stderr: io.Discard,
 			Sleep: func(context.Context, time.Duration) error { return nil },
 			Download: func(_ context.Context, _ string, w io.Writer) error {

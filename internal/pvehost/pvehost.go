@@ -68,6 +68,8 @@ type Service struct {
 	// fase 26; nil zonder masterkey.
 	Box   *secrets.Box
 	cache getCache
+	// consoles zijn de open consolesessies (M7).
+	consoles consoleHub
 	// RestorePoll is hoe vaak een terugzettest kijkt of de gast draait (tests korter).
 	RestorePoll time.Duration
 	// HostWait vervangt de wachttijden van host-updates (tests).

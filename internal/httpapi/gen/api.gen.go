@@ -1136,13 +1136,13 @@ func (e DependencyStrength) Valid() bool {
 
 // Defines values for DeployTargetCreate.
 const (
-	Ct DeployTargetCreate = "ct"
+	DeployTargetCreateCt DeployTargetCreate = "ct"
 )
 
 // Valid indicates whether the value is a known member of the DeployTargetCreate enum.
 func (e DeployTargetCreate) Valid() bool {
 	switch e {
-	case Ct:
+	case DeployTargetCreateCt:
 		return true
 	default:
 		return false
@@ -2982,6 +2982,30 @@ func (e PveCallInputMethod) Valid() bool {
 	case PveCallInputMethodDelete:
 		return true
 	case PveCallInputMethodSet:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PveConsoleInputKind.
+const (
+	PveConsoleInputKindCt     PveConsoleInputKind = "ct"
+	PveConsoleInputKindHost   PveConsoleInputKind = "host"
+	PveConsoleInputKindSerial PveConsoleInputKind = "serial"
+	PveConsoleInputKindVnc    PveConsoleInputKind = "vnc"
+)
+
+// Valid indicates whether the value is a known member of the PveConsoleInputKind enum.
+func (e PveConsoleInputKind) Valid() bool {
+	switch e {
+	case PveConsoleInputKindCt:
+		return true
+	case PveConsoleInputKindHost:
+		return true
+	case PveConsoleInputKindSerial:
+		return true
+	case PveConsoleInputKindVnc:
 		return true
 	default:
 		return false
@@ -11570,6 +11594,32 @@ type PveCallInput struct {
 // PveCallInputMethod defines model for PveCallInput.Method.
 type PveCallInputMethod string
 
+// PveConsoleInput defines model for PveConsoleInput.
+type PveConsoleInput struct {
+	Cols *int                `json:"cols,omitempty"`
+	Kind PveConsoleInputKind `json:"kind"`
+
+	// Node Proxmox-host waarop de gast draait, of de host zelf
+	Node string `json:"node"`
+	Rows *int   `json:"rows,omitempty"`
+
+	// Vmid Gast-ID; niet bij host
+	Vmid *int `json:"vmid,omitempty"`
+}
+
+// PveConsoleInputKind defines model for PveConsoleInput.Kind.
+type PveConsoleInputKind string
+
+// PveConsoleOpened defines model for PveConsoleOpened.
+type PveConsoleOpened struct {
+	Kind string `json:"kind"`
+
+	// Password Eenmalig VNC-wachtwoord (alleen vnc), vervalt na 30 seconden
+	Password *string `json:"password,omitempty"`
+	Session  string  `json:"session"`
+	Title    string  `json:"title"`
+}
+
 // PveHostUpdateInput defines model for PveHostUpdateInput.
 type PveHostUpdateInput struct {
 	// Confirm De naam van het datacenter
@@ -11619,7 +11669,7 @@ type PveTokenInput struct {
 	// Expire Unix-tijd; 0 of leeg is nooit
 	Expire *int64 `json:"expire,omitempty"`
 
-	// Privsep Eigen rechten in plaats van die van de gebruiker
+	// Privsep Eigen rechten in plaats van die van de gebruiker, standaard aan
 	Privsep *bool  `json:"privsep,omitempty"`
 	Tokenid string `json:"tokenid"`
 
@@ -14371,6 +14421,9 @@ type StartPveHostActionJSONRequestBody = PveActionInput
 // CallPveApiJSONRequestBody defines body for CallPveApi for application/json ContentType.
 type CallPveApiJSONRequestBody = PveCallInput
 
+// OpenPveConsoleJSONRequestBody defines body for OpenPveConsole for application/json ContentType.
+type OpenPveConsoleJSONRequestBody = PveConsoleInput
+
 // StartPveHostUpdateJSONRequestBody defines body for StartPveHostUpdate for application/json ContentType.
 type StartPveHostUpdateJSONRequestBody = PveHostUpdateInput
 
@@ -15306,6 +15359,9 @@ type ServerInterface interface {
 	// CallPveApi Iets veranderen via de Proxmox-API, als taak pvehost.action (admin)
 	// (POST /pve/datacenters/{dcId}/api)
 	CallPveApi(w http.ResponseWriter, r *http.Request, dcId string)
+	// OpenPveConsole Een console openen op een gast of host (admin)
+	// (POST /pve/datacenters/{dcId}/console)
+	OpenPveConsole(w http.ResponseWriter, r *http.Request, dcId string)
 	// StartPveHostUpdate Proxmox-hosts één voor één bijwerken, clusterbewust (admin)
 	// (POST /pve/datacenters/{dcId}/host-update)
 	StartPveHostUpdate(w http.ResponseWriter, r *http.Request, dcId string)
@@ -17202,6 +17258,12 @@ func (_ Unimplemented) GetPveApi(w http.ResponseWriter, r *http.Request, dcId st
 // CallPveApi Iets veranderen via de Proxmox-API, als taak pvehost.action (admin)
 // (POST /pve/datacenters/{dcId}/api)
 func (_ Unimplemented) CallPveApi(w http.ResponseWriter, r *http.Request, dcId string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// OpenPveConsole Een console openen op een gast of host (admin)
+// (POST /pve/datacenters/{dcId}/console)
+func (_ Unimplemented) OpenPveConsole(w http.ResponseWriter, r *http.Request, dcId string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -26116,6 +26178,32 @@ func (siw *ServerInterfaceWrapper) CallPveApi(w http.ResponseWriter, r *http.Req
 	handler.ServeHTTP(w, r)
 }
 
+// OpenPveConsole operation middleware
+func (siw *ServerInterfaceWrapper) OpenPveConsole(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "dcId" -------------
+	var dcId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "dcId", chi.URLParam(r, "dcId"), &dcId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "dcId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.OpenPveConsole(w, r, dcId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // StartPveHostUpdate operation middleware
 func (siw *ServerInterfaceWrapper) StartPveHostUpdate(w http.ResponseWriter, r *http.Request) {
 
@@ -28007,6 +28095,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/pve/datacenters/{dcId}/tokens", wrapper.CreatePveToken)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/pve/datacenters/{dcId}/console", wrapper.OpenPveConsole)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/pve/datacenters/{dcId}/host-update", wrapper.StartPveHostUpdate)

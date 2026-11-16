@@ -4387,6 +4387,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/pve/datacenters/{dcId}/console": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                dcId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Een console openen op een gast of host (admin)
+         * @description Opent via de agent op de Proxmox-host een scherm (vnc, noVNC) of terminal (serial, ct, host; xterm). Daarna
+         *     opent de browser binnen 30 seconden de websocket GET /api/v1/pve/console/{session}. Het verkeer komt in geen
+         *     taak of logboek. Vraagt de agent met protocol 37 op die host.
+         */
+        post: operations["openPveConsole"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/pve/datacenters/{dcId}/host-update": {
         parameters: {
             query?: never;
@@ -13452,12 +13476,29 @@ export interface components {
              * @description Unix-tijd; 0 of leeg is nooit
              */
             expire?: number;
-            /** @description Eigen rechten in plaats van die van de gebruiker */
+            /** @description Eigen rechten in plaats van die van de gebruiker, standaard aan */
             privsep?: boolean;
         };
         PveTokenCreated: {
             full_tokenid: string;
             value: string;
+        };
+        PveConsoleInput: {
+            /** @description Proxmox-host waarop de gast draait, of de host zelf */
+            node: string;
+            /** @enum {string} */
+            kind: "vnc" | "serial" | "ct" | "host";
+            /** @description Gast-ID; niet bij host */
+            vmid?: number;
+            cols?: number;
+            rows?: number;
+        };
+        PveConsoleOpened: {
+            session: string;
+            kind: string;
+            title: string;
+            /** @description Eenmalig VNC-wachtwoord (alleen vnc), vervalt na 30 seconden */
+            password?: string;
         };
         PveRestoreTestInput: {
             /** @description Proxmox-host waarop de test draait */
@@ -20581,6 +20622,36 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PveTokenCreated"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    openPveConsole: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                dcId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PveConsoleInput"];
+            };
+        };
+        responses: {
+            /** @description De sessie */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PveConsoleOpened"];
                 };
             };
             400: components["responses"]["Error"];

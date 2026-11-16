@@ -16,7 +16,7 @@ import { TagChips, useTagColors } from "@/components/pve/TagChips";
 import { Tabs } from "@/components/Tabs";
 import { Alert, Badge, Button, Card, PageHeader } from "@/components/ui";
 import { useIsAdmin } from "@/lib/inventory";
-import { guestLabel, guestPath, pct, pveHostAction, splitTags, usePveGet, type Datacenter, type GuestConfig, type GuestType, type PveResource, type PveTask } from "@/lib/pve";
+import { consoleHref, guestLabel, guestPath, pct, pveHostAction, splitTags, usePveGet, type Datacenter, type GuestConfig, type GuestType, type PveResource, type PveTask } from "@/lib/pve";
 import { vmStatusInfo } from "@/lib/proxmox";
 
 export default function GuestPage() {
@@ -131,6 +131,12 @@ function GuestInner({ dc }: { dc: Datacenter }) {
                 </Button>
               ) : (
                 <>
+                  <Button onClick={() => window.open(consoleHref(dc.id, { node, kind: type === "lxc" ? "ct" : "vnc", vmid }), "_blank")}>Console</Button>
+                  {type === "qemu" && "serial0" in cfg && (
+                    <Button variant="secondary" onClick={() => window.open(consoleHref(dc.id, { node, kind: "serial", vmid }), "_blank")}>
+                      Seriële console
+                    </Button>
+                  )}
                   <Button variant="secondary" disabled={pending} onClick={() => void power("shutdown", `${name || vmid} netjes afsluiten?`)}>
                     Afsluiten
                   </Button>

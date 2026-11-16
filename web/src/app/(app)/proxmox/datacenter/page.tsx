@@ -9,7 +9,7 @@ import { ActionMenu, DatacenterGate, gb, Meter, TypedConfirm, uptime, useCallRun
 import { PveTaskTable } from "@/components/pve/Tasks";
 import { Alert, Badge, Card, cx, PageHeader } from "@/components/ui";
 import { useIsAdmin } from "@/lib/inventory";
-import { pct, pveHostAction, usePveGet, usePveOverview, type Datacenter, type Overview, type OverviewNode, type PveTask } from "@/lib/pve";
+import { consoleHref, pct, pveHostAction, usePveGet, usePveOverview, type Datacenter, type Overview, type OverviewNode, type PveTask } from "@/lib/pve";
 import { useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 
@@ -224,6 +224,7 @@ function HostsCard({ dc, o }: { dc: Datacenter; o: Overview }) {
                         disabled={pending}
                         items={[
                           { label: "Hardware en passthrough", onClick: () => router.push(`/proxmox/hardware?dc=${encodeURIComponent(dc.id)}&node=${encodeURIComponent(n.name)}`) },
+                          ...(n.agent_node_id ? [{ label: "Shell", onClick: () => void window.open(consoleHref(dc.id, { node: n.name, kind: "host" }), "_blank") }] : []),
                           ...(n.agent_node_id
                             ? [
                                 {

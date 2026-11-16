@@ -110,3 +110,12 @@ voor de GUI verboden, net als `args` en `hookscript`.
 - **API-token maken**: `POST /pve/datacenters/{dc}/tokens` loopt synchroon zonder taak. De agent krijgt `PVEAPICall.Quiet` (protocol 36): het antwoord van Proxmox komt niet in de uitvoer, alleen in `RunStatus.PVE.Data`; de server gebruikt een run in het geheugen (geen taak, geen stap in de database) en geeft de waarde één keer terug. Een token via de gewone aanroep kan niet (geen policyregel). Vraagt minstens één host met agentprotocol 36.
 - **Syslog** (`/proxmox/syslog`): `journal` van een host, filter op tekst of fouten/waarschuwingen, live volgen.
 - Agentprotocol 36 (alleen voor tokens); geen migratie.
+
+## Console (M7)
+
+- Knop **Console** op een draaiende gast (VM: noVNC-scherm, CT: rootshell met `pct enter`), **Seriële console** bij een VM met `serial0` (`qm terminal`, Ctrl+O verlaat), en **Shell** per host op de Datacenter-pagina (`login -f root`). De console opent in een eigen tabblad (`/proxmox/console`), met Ctrl+Alt+Del, volledig scherm en opnieuw verbinden.
+- Weg: browser → websocket `/api/v1/pve/console/{sessie}` → server → NATS → agent op de host waar de gast draait → programma. Openen is eerst een gewone aanroep (`POST /pve/datacenters/{dc}/console`), zodat "VM draait niet" een gewone foutmelding is; de browser heeft daarna 30 seconden voor de websocket.
+- VNC: de agent start `qm vncproxy` met een eenmalig wachtwoord van 8 tekens (`LC_PVE_TICKET`); QEMU laat het na 30 seconden vervallen. Terminals lopen in een pseudo-terminal die meegroeit met het venster.
+- Protocol 37 (`ConsoleSince`): subject `cf.node.<id>.console` om te openen, daarna frames op `…console.<sessie>.in` en `.out` (data, resize, ping, close). De agent sluit een sessie na 60 seconden zonder bericht en houdt er hoogstens 8 tegelijk open.
+- Veiligheid: alleen admins; alleen wie de sessie opende, en maar één venster; de websocket weigert een andere Origin (geen misbruik van de cookie door een vreemde site). Het openen staat in het auditlog (`pvehost.console_opened`), het verkeer en het wachtwoord nergens.
+- Achter een reverse proxy moet websocket-ondersteuning aan staan (in NPM: "Websockets Support").

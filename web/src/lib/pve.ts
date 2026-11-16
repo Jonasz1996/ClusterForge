@@ -735,3 +735,24 @@ export type PveTokenCreated = { full_tokenid: string; value: string };
 export async function createPveToken(dc: string, body: { userid: string; tokenid: string; comment?: string; expire?: number; privsep?: boolean }): Promise<PveTokenCreated> {
   return unwrap(await api.POST("/pve/datacenters/{dcId}/tokens", { params: { path: { dcId: dc } }, body })) as PveTokenCreated;
 }
+
+// Console (M7): openen geeft een sessie; daarna opent de browser binnen 30
+// seconden de websocket. Het VNC-wachtwoord is eenmalig.
+export type ConsoleKind = "vnc" | "serial" | "ct" | "host";
+export type PveConsoleOpened = { session: string; kind: ConsoleKind; title: string; password?: string };
+
+export async function openPveConsole(dc: string, body: { node: string; kind: ConsoleKind; vmid?: number; cols?: number; rows?: number }): Promise<PveConsoleOpened> {
+  return unwrap(await api.POST("/pve/datacenters/{dcId}/console", { params: { path: { dcId: dc } }, body })) as PveConsoleOpened;
+}
+
+export function consoleSocketURL(session: string): string {
+  const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return `${proto}//${window.location.host}/api/v1/pve/console/${encodeURIComponent(session)}`;
+}
+
+/** De link naar de consolepagina; die opent in een eigen tabblad. */
+export function consoleHref(dc: string, c: { node: string; kind: ConsoleKind; vmid?: number }): string {
+  const q = new URLSearchParams({ dc, node: c.node, kind: c.kind });
+  if (c.vmid) q.set("vmid", String(c.vmid));
+  return `/proxmox/console?${q}`;
+}

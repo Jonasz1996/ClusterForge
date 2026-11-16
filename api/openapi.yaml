@@ -4685,6 +4685,31 @@ paths:
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /pve/datacenters/{dcId}/console:
+    parameters:
+      - { name: dcId, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: openPveConsole
+      summary: Een console openen op een gast of host (admin)
+      description: |
+        Opent via de agent op de Proxmox-host een scherm (vnc, noVNC) of terminal (serial, ct, host; xterm). Daarna
+        opent de browser binnen 30 seconden de websocket GET /api/v1/pve/console/{session}. Het verkeer komt in geen
+        taak of logboek. Vraagt de agent met protocol 37 op die host.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PveConsoleInput" }
+      responses:
+        "201":
+          description: De sessie
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveConsoleOpened" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
   /pve/datacenters/{dcId}/host-update:
     parameters:
       - { name: dcId, in: path, required: true, schema: { type: string } }
@@ -14071,13 +14096,30 @@ components:
         tokenid: { type: string }
         comment: { type: string }
         expire: { type: integer, format: int64, description: Unix-tijd; 0 of leeg is nooit }
-        privsep: { type: boolean, description: Eigen rechten in plaats van die van de gebruiker, standaard aan }
+        privsep: { type: boolean, description: "Eigen rechten in plaats van die van de gebruiker, standaard aan" }
     PveTokenCreated:
       type: object
       required: [full_tokenid, value]
       properties:
         full_tokenid: { type: string }
         value: { type: string }
+    PveConsoleInput:
+      type: object
+      required: [node, kind]
+      properties:
+        node: { type: string, description: "Proxmox-host waarop de gast draait, of de host zelf" }
+        kind: { type: string, enum: [vnc, serial, ct, host] }
+        vmid: { type: integer, description: "Gast-ID; niet bij host" }
+        cols: { type: integer }
+        rows: { type: integer }
+    PveConsoleOpened:
+      type: object
+      required: [session, kind, title]
+      properties:
+        session: { type: string }
+        kind: { type: string }
+        title: { type: string }
+        password: { type: string, description: "Eenmalig VNC-wachtwoord (alleen vnc), vervalt na 30 seconden" }
     PveRestoreTestInput:
       type: object
       required: [node, archive, type, storage]
