@@ -1,12 +1,13 @@
 "use client";
 
+import { Tabs } from "@/components/Tabs";
 import { useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useState } from "react";
 import { Answer, LiveAnswer, useStream } from "@/components/assistant/parts";
 import { Modal } from "@/components/Modal";
 import { ProdConfirm, prodConfirmed, useProdTotp } from "@/components/ProdConfirm";
-import { Alert, Badge, Button, Card, cx, Input, PageHeader, Select, Textarea } from "@/components/ui";
+import { Alert, Badge, Button, Card, Input, PageHeader, Select, Textarea } from "@/components/ui";
 import { ApiError } from "@/lib/api/client";
 import { proposeDockerFix, useAssistantSettings } from "@/lib/assistant";
 import { useIsAdmin } from "@/lib/inventory";
@@ -50,28 +51,14 @@ export default function UpdatesPage() {
         title="Updates"
         description="Pakketten (apt) en Docker Compose-projecten bijwerken via de agents. Per cluster eerst de back-upnodes, dan de VIP naar een bijgewerkte node en als laatste de master; na elke node wacht ClusterForge tot alles weer draait, en bij een fout stopt het."
       />
-      <div className="flex gap-1 border-b border-slate-200 dark:border-slate-800">
-        {(
-          [
-            ["now", "Bijwerken"],
-            ["auto", "Automatisch"],
-          ] as const
-        ).map(([key, label]) => (
-          <button
-            key={key}
-            type="button"
-            onClick={() => setTab(key)}
-            className={cx(
-              "-mb-px border-b-2 px-3 py-2 text-sm font-medium",
-              tab === key
-                ? "border-brand-600 text-brand-700 dark:border-sky-400 dark:text-sky-300"
-                : "border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200",
-            )}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
+      <Tabs
+        tabs={[
+          { key: "now", label: "Bijwerken" },
+          { key: "auto", label: "Automatisch" },
+        ]}
+        value={tab}
+        onChange={setTab}
+      />
       {tab === "now" ? <NowTab /> : <AutoTab />}
     </div>
   );

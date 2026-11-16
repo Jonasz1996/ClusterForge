@@ -1,5 +1,6 @@
 "use client";
 
+import { Tabs } from "@/components/Tabs";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useMemo, useState, type ReactNode } from "react";
@@ -71,25 +72,7 @@ function RiskInner() {
         title="Risico"
         description="Wat de health score drukt, welke onderdelen alleen al productie down leggen, en wat er gebeurt als iets uitvalt."
       />
-      <div className="flex gap-1 overflow-x-auto border-b border-slate-200 dark:border-slate-800" role="tablist">
-        {tabs.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            role="tab"
-            aria-selected={tab === t.id}
-            onClick={() => go(t.id)}
-            className={cx(
-              "-mb-px border-b-2 px-3 py-2 text-sm font-medium whitespace-nowrap",
-              tab === t.id
-                ? "border-brand-600 text-brand-700 dark:text-sky-300"
-                : "border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300",
-            )}
-          >
-            {t.label}
-          </button>
-        ))}
-      </div>
+      <Tabs tabs={tabs.map((t) => ({ key: t.id, label: t.label }))} value={tab} onChange={(k) => go(k)} />
       {tab === "bevindingen" && <Findings isAdmin={isAdmin} />}
       {tab === "spof" && <SPOFs onOpen={(key) => go("wat-als", [key])} />}
       {tab === "wat-als" && <WhatIf chosen={chosen} onChange={(keys) => go("wat-als", keys)} />}

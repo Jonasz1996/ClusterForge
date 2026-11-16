@@ -94,12 +94,19 @@ export function CommandPalette({ onClose, isAdmin }: { onClose: () => void; isAd
       })),
     ];
     if (!nq) return all.filter((h) => h.kind === "Pagina" || h.kind === "Actie").slice(0, 40);
-    return all
+    const hits = all
       .map((h) => ({ h, s: score(nq, h.hay) + (norm(h.label) === nq ? 5 : 0) }))
       .filter((x) => x.s > 0)
       .sort((a, b) => b.s - a.s)
       .slice(0, 40)
       .map((x) => x.h);
+    // Een volledig IP-adres: ook opzoeken in het beveiligingsoverzicht (wat
+    // CrowdSec, de firewall en de login van dit adres zagen).
+    const ip = q.trim();
+    if (/^(\d{1,3}\.){3}\d{1,3}$/.test(ip) || (/^[0-9a-f:]+$/i.test(ip) && ip.includes(":") && ip.length > 2)) {
+      hits.push({ key: `soc-${ip}`, label: `Adres ${ip} in het SOC`, sub: "Aanvallen, bans en firewallverkeer", href: `/soc?ip=${encodeURIComponent(ip)}`, kind: "Actie", hay: ip });
+    }
+    return hits;
   }, [q, isAdmin, clusters.data, nodes.data]);
 
   useEffect(() => {

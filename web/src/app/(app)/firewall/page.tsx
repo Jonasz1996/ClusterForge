@@ -1,5 +1,6 @@
 "use client";
 
+import { Tabs } from "@/components/Tabs";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
@@ -56,20 +57,7 @@ function Firewall() {
         title="Firewall"
         description="ClusterForge beheert ufw op de nodes die je aanzet: open wat de software gebruikt, voor wie het nodig is, de rest dicht. Clusterpoorten gaan alleen open voor de andere clusterleden, SSH blijft altijd open en een toepassing die de node onbereikbaar maakt, draait zichzelf terug."
       />
-      <nav className="flex flex-wrap gap-1 border-b border-slate-200 dark:border-slate-800" aria-label="Tabbladen">
-        {tabs.map((t) => (
-          <button
-            key={t.key}
-            onClick={() => setTab(t.key)}
-            className={cx(
-              "-mb-px border-b-2 px-3 py-2 text-sm font-medium",
-              tab === t.key ? "border-brand-600 text-brand-700 dark:text-sky-300" : "border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200",
-            )}
-          >
-            {t.label}
-          </button>
-        ))}
-      </nav>
+      <Tabs tabs={tabs} value={tab} onChange={setTab} />
       {data.isError && <Alert>Firewall laden mislukte.</Alert>}
       {data.data && tab === "overzicht" && <OverviewTab o={data.data} isAdmin={isAdmin} goNodes={() => setTab("nodes")} />}
       {data.data && tab === "verkeer" && <TrafficTab o={data.data} isAdmin={isAdmin} />}

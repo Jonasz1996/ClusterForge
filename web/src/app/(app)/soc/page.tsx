@@ -9,6 +9,7 @@ import { Modal } from "@/components/Modal";
 import { toast } from "@/components/Toast";
 import { ago, tableClass, tdClass, thClass } from "@/components/inventory/bits";
 import { Alert, Badge, Button, Card, PageHeader, Select, cx } from "@/components/ui";
+import { levelStyle } from "@/components/soc/SocStrip";
 import { ApiError } from "@/lib/api/client";
 import { useAuditRecent } from "@/lib/audit";
 import { copyText } from "@/lib/clipboard";
@@ -22,7 +23,6 @@ import {
   type SocCount,
   type SocCoverage,
   type SocItem,
-  type SocLevel,
   type SocOverview,
   type SocWindow,
 } from "@/lib/soc";
@@ -108,27 +108,6 @@ function Soc() {
 
 // --- niveau -------------------------------------------------------------------
 
-const levelStyle: Record<SocLevel, { ring: string; dot: string; text: string; bg: string }> = {
-  kritiek: { ring: "border-red-300 dark:border-red-900", dot: "bg-red-500", text: "text-red-700 dark:text-red-300", bg: "bg-red-50 dark:bg-red-950/40" },
-  verhoogd: {
-    ring: "border-amber-300 dark:border-amber-900",
-    dot: "bg-amber-500",
-    text: "text-amber-800 dark:text-amber-300",
-    bg: "bg-amber-50 dark:bg-amber-950/40",
-  },
-  waakzaam: {
-    ring: "border-yellow-200 dark:border-yellow-900/60",
-    dot: "bg-yellow-400",
-    text: "text-yellow-800 dark:text-yellow-200",
-    bg: "bg-yellow-50/60 dark:bg-yellow-950/20",
-  },
-  normaal: {
-    ring: "border-emerald-200 dark:border-emerald-900",
-    dot: "bg-emerald-500",
-    text: "text-emerald-700 dark:text-emerald-300",
-    bg: "bg-emerald-50/60 dark:bg-emerald-950/30",
-  },
-};
 
 function LevelBand({ o }: { o: SocOverview }) {
   const l = o.level.level;

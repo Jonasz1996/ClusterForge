@@ -1,5 +1,6 @@
 "use client";
 
+import { Tabs } from "@/components/Tabs";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -187,28 +188,14 @@ function MapInner() {
         )}
       </div>
 
-      <div className="flex gap-1 border-b border-slate-200 dark:border-slate-800" role="tablist">
-        {lagen.map((l) => (
-          <button
-            key={l.id}
-            type="button"
-            role="tab"
-            aria-selected={laag === l.id}
-            onClick={() => {
-              select(null);
-              go({ laag: l.id });
-            }}
-            className={cx(
-              "-mb-px border-b-2 px-3 py-2 text-sm font-medium",
-              laag === l.id
-                ? "border-brand-600 text-brand-700 dark:text-sky-300"
-                : "border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300",
-            )}
-          >
-            {l.label}
-          </button>
-        ))}
-      </div>
+      <Tabs
+        tabs={lagen.map((l) => ({ key: l.id, label: l.label, title: l.hint }))}
+        value={laag}
+        onChange={(k) => {
+          select(null);
+          go({ laag: k });
+        }}
+      />
 
       {laag === "diensten" ? (
         <QueryState q={deps}>

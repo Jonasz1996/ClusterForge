@@ -1,5 +1,6 @@
 "use client";
 
+import { Tabs } from "@/components/Tabs";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
@@ -64,20 +65,7 @@ function CrowdSec() {
         title="CrowdSec"
         description="ClusterForge installeert CrowdSec en de nftables-bouncer op de nodes die je aanzet, herkent de software die er draait en zet daar de juiste collections en logbronnen voor. Een ban op één node geldt meteen op de andere."
       />
-      <nav className="flex flex-wrap gap-1 border-b border-slate-200 dark:border-slate-800" aria-label="Tabbladen">
-        {tabs.map((t) => (
-          <button
-            key={t.key}
-            onClick={() => setTab(t.key)}
-            className={cx(
-              "-mb-px border-b-2 px-3 py-2 text-sm font-medium",
-              tab === t.key ? "border-brand-600 text-brand-700 dark:text-sky-300" : "border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200",
-            )}
-          >
-            {t.label}
-          </button>
-        ))}
-      </nav>
+      <Tabs tabs={tabs} value={tab} onChange={setTab} />
       {data.isError && <Alert>CrowdSec laden mislukte.</Alert>}
       {data.data && tab === "overzicht" && <OverviewTab o={data.data} isAdmin={isAdmin} goNodes={() => setTab("nodes")} />}
       {data.data && tab === "alerts" && <AlertsTab o={data.data} isAdmin={isAdmin} />}

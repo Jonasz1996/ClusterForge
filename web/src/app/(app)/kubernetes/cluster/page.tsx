@@ -1,5 +1,6 @@
 "use client";
 
+import { Tabs } from "@/components/Tabs";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
@@ -165,32 +166,13 @@ function KubeClusterInner() {
         }
       />
 
-      {/* Op een smal scherm schuiven de tabbladen, op een breed lopen ze door
-          op een tweede regel. */}
-      <nav
-        className="flex gap-1 overflow-x-auto border-b border-slate-200 sm:flex-wrap dark:border-slate-800"
-        aria-label="Onderdelen"
-      >
-        {shown.map((t) => (
-          <button
-            key={t.id}
-            type="button"
-            aria-current={p.tab === t.id ? "page" : undefined}
-            // Past niet elk tabblad op het scherm, dan schuift het gekozen
-            // tabblad in beeld.
-            ref={p.tab === t.id ? (el) => el?.scrollIntoView({ block: "nearest", inline: "nearest" }) : undefined}
-            onClick={() => p.set({ tab: t.id === "overzicht" ? undefined : t.id, mode: undefined })}
-            className={cx(
-              "-mb-px border-b-2 px-3 py-2 text-sm font-medium whitespace-nowrap",
-              p.tab === t.id
-                ? "border-brand-600 text-brand-700 dark:border-sky-400 dark:text-sky-300"
-                : "border-transparent text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100",
-            )}
-          >
-            {t.label}
-          </button>
-        ))}
-      </nav>
+      <Tabs
+        label="Onderdelen"
+        className="sm:flex-wrap"
+        tabs={shown.map((t) => ({ key: t.id, label: t.label }))}
+        value={p.tab}
+        onChange={(k) => p.set({ tab: k === "overzicht" ? undefined : k, mode: undefined })}
+      />
 
       {overview.isLoading ? (
         <p className="text-sm text-slate-500">Laden…</p>

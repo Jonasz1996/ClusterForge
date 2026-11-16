@@ -1,5 +1,6 @@
 "use client";
 
+import { Tabs } from "@/components/Tabs";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
@@ -160,23 +161,14 @@ function DependenciesInner() {
         )}
       </div>
 
-      <div className="flex gap-1 border-b border-slate-200 dark:border-slate-800" role="tablist">
-        {(["graaf", "voorstellen"] as const).map((t) => (
-          <button
-            key={t}
-            type="button"
-            role="tab"
-            aria-selected={tab === t}
-            onClick={() => setTab(t)}
-            className={cx(
-              "-mb-px border-b-2 px-3 py-2 text-sm font-medium",
-              tab === t ? "border-brand-600 text-brand-700 dark:text-sky-300" : "border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300",
-            )}
-          >
-            {t === "graaf" ? (wide ? "Graaf" : "Lijst") : "Voorstellen"}
-          </button>
-        ))}
-      </div>
+      <Tabs
+        tabs={[
+          { key: "graaf", label: wide ? "Graaf" : "Lijst" },
+          { key: "voorstellen", label: "Voorstellen" },
+        ]}
+        value={tab}
+        onChange={setTab}
+      />
 
       {tab === "voorstellen" ? (
         <Suggestions environment={environment} clusterId={clusterId} isAdmin={isAdmin} />
