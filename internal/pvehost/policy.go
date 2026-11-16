@@ -130,7 +130,9 @@ var rules = []*rule{
 	r("set", guestPath+`/snapshot/`+segID+`/config`, `description`,
 		func(m, _ map[string]string) string { return guestName(m) + " snapshot " + m["id"] + " beschrijven" }),
 	r("set", guestPath+`/resize`, `disk|size`,
-		func(m, p map[string]string) string { return guestName(m) + " schijf " + p["disk"] + " naar " + p["size"] }),
+		func(m, p map[string]string) string {
+			return guestName(m) + " schijf " + p["disk"] + " naar " + p["size"]
+		}),
 	r("create", `/nodes/`+segNode+`/qemu/`+segVMID+`/agent/(?P<cmd>fsfreeze-thaw|fstrim|ping)`, ``,
 		func(m, _ map[string]string) string { return "VM " + m["vmid"] + " guest agent " + m["cmd"] }),
 	r("create", `/nodes/`+segNode+`/qemu/`+segVMID+`/cloudinit`, ``,
