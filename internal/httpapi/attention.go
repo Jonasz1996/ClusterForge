@@ -148,6 +148,18 @@ func (s *Server) attention(ctx context.Context, p auth.Principal) (gen.Attention
 		}
 	}
 
+	// Kwetsbaarheden (fase 27): actief misbruikt en kritieke netwerkbevindingen.
+	if s.security != nil {
+		sm, err := s.security.Summary(ctx)
+		if err != nil {
+			return gen.Attention{}, err
+		}
+		add("security-network", red, plural(len(sm.CriticalNet), "adres heeft", "adressen hebben")+" een kritieke netwerkbevinding",
+			names(sm.CriticalNet), "/kwetsbaarheden/scans?tab=bevindingen", len(sm.CriticalNet))
+		add("security-kev", red, plural(len(sm.KEVNodes), "node heeft", "nodes hebben")+" een actief misbruikte kwetsbaarheid",
+			names(sm.KEVNodes), "/kwetsbaarheden", len(sm.KEVNodes))
+	}
+
 	if p.User.TotpEnabledAt == nil {
 		add("totp-off", amber, "Tweestapsverificatie staat uit voor je account", "Nodig voor acties op prod", "/instellingen#tweestap", 1)
 	}
@@ -165,6 +177,11 @@ func (s *Server) attention(ctx context.Context, p auth.Principal) (gen.Attention
 	badges := map[string]gen.AttentionBadge{}
 	for _, it := range items {
 		href, _, _ := strings.Cut(it.Href, "#")
+		href, _, _ = strings.Cut(href, "?")
+		// Kwetsbaarheden is één menu-item met tabbladen.
+		if strings.HasPrefix(href, "/kwetsbaarheden/") {
+			href = "/kwetsbaarheden"
+		}
 		b := badges[href]
 		b.Count += it.Count
 		if b.Tone != gen.AttentionBadgeToneRed {

@@ -14215,6 +14215,11 @@ type ListSecurityFindingsParams struct {
 // ListSecurityFindingsParamsStatus defines parameters for ListSecurityFindings.
 type ListSecurityFindingsParamsStatus string
 
+// GetSecurityReportParams defines parameters for GetSecurityReport.
+type GetSecurityReportParams struct {
+	ScopeId openapi_types.UUID `form:"scope_id" json:"scope_id"`
+}
+
 // GetSocParams defines parameters for GetSoc.
 type GetSocParams struct {
 	Window *GetSocParamsWindow `form:"window,omitempty" json:"window,omitempty"`
@@ -15626,6 +15631,9 @@ type ServerInterface interface {
 	// RefreshSecurity Feeds en/of pakketlijsten nu verversen (admin)
 	// (POST /security/refresh)
 	RefreshSecurity(w http.ResponseWriter, r *http.Request)
+	// GetSecurityReport Rapport van één eigen scope (fase 27 M5)
+	// (GET /security/report)
+	GetSecurityReport(w http.ResponseWriter, r *http.Request, params GetSecurityReportParams)
 	// GetSecurityScanRun Eén uitvoering van een netwerkscan met de gevonden hosts
 	// (GET /security/scan-runs/{runId})
 	GetSecurityScanRun(w http.ResponseWriter, r *http.Request, runId openapi_types.UUID)
@@ -17666,6 +17674,12 @@ func (_ Unimplemented) GetSecurityHardening(w http.ResponseWriter, r *http.Reque
 // RefreshSecurity Feeds en/of pakketlijsten nu verversen (admin)
 // (POST /security/refresh)
 func (_ Unimplemented) RefreshSecurity(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetSecurityReport Rapport van één eigen scope (fase 27 M5)
+// (GET /security/report)
+func (_ Unimplemented) GetSecurityReport(w http.ResponseWriter, r *http.Request, params GetSecurityReportParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -27170,6 +27184,39 @@ func (siw *ServerInterfaceWrapper) RefreshSecurity(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
+// GetSecurityReport operation middleware
+func (siw *ServerInterfaceWrapper) GetSecurityReport(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetSecurityReportParams
+
+	// ------------- Required query parameter "scope_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "scope_id", r.URL.Query(), &params.ScopeId, runtime.BindQueryParameterOptions{Type: "string", Format: "uuid"})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "scope_id"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "scope_id", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetSecurityReport(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // GetSecurityScanRun operation middleware
 func (siw *ServerInterfaceWrapper) GetSecurityScanRun(w http.ResponseWriter, r *http.Request) {
 
@@ -28964,6 +29011,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/security/scan-runs/{runId}", wrapper.GetSecurityScanRun)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/security/report", wrapper.GetSecurityReport)
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/security/scanner", wrapper.LinkSecurityScanner)

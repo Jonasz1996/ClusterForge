@@ -386,3 +386,15 @@ func (s *Server) LinkSecurityScanner(w http.ResponseWriter, r *http.Request) {
 	s.security.LinkedScanner(ctx, events.User(p.User.ID), nodeID)
 	writeJSON(w, http.StatusOK, map[string]any{"node_id": nodeID, "hostname": security.ScannerHostname, "linked": false})
 }
+
+func (s *Server) GetSecurityReport(w http.ResponseWriter, r *http.Request, params gen.GetSecurityReportParams) {
+	if !s.securityReady(w) {
+		return
+	}
+	rep, err := s.security.Report(r.Context(), params.ScopeId)
+	if err != nil {
+		s.securityError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, rep)
+}

@@ -458,3 +458,42 @@ export const knownLabel: Record<string, { label: string; tone: Tone }> = {
   onbekend: { label: "onbekend", tone: "amber" },
   "": { label: "geen node", tone: "slate" },
 };
+
+// Rapport per scope (M5).
+
+export type ReportNode = {
+  node_id: string;
+  hostname: string;
+  address: string;
+  cluster_name: string;
+  os: string;
+  counts: Record<string, number>;
+  kev: number;
+  hardening_score: number | null;
+};
+
+export type SecurityReport = {
+  scope: SecurityScope;
+  generated_at: string;
+  summary: {
+    counts: Record<string, number>;
+    open: number;
+    accepted: number;
+    kev: number;
+    hardening_avg: number | null;
+    hosts_up: number;
+    open_ports: number;
+    unknown_hosts: number;
+  };
+  last_run: ScanRunDetail | null;
+  nodes: ReportNode[];
+  findings: SecurityFinding[];
+};
+
+export function useSecurityReport(scopeId: string) {
+  return useQuery({
+    queryKey: [...key, "report", scopeId],
+    enabled: !!scopeId,
+    queryFn: async () => unwrap(await api.GET("/security/report", { params: { query: { scope_id: scopeId } } })) as unknown as SecurityReport,
+  });
+}

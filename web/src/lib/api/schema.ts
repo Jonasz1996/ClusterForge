@@ -4975,6 +4975,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/security/report": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Rapport van één eigen scope (fase 27 M5) */
+        get: operations["getSecurityReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/security/scanner": {
         parameters: {
             query?: never;
@@ -21930,6 +21947,30 @@ export interface operations {
             path: {
                 runId: string;
             };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SecurityObject"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    getSecurityReport: {
+        parameters: {
+            query: {
+                scope_id: string;
+            };
+            header?: never;
+            path?: never;
             cookie?: never;
         };
         requestBody?: never;

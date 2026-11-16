@@ -207,6 +207,32 @@ func TestSecurityEndToEnd(t *testing.T) {
 		t.Fatalf("netwerkbevindingen = %v", sev)
 	}
 
+	var rep struct {
+		Summary struct {
+			Open    int `json:"open"`
+			HostsUp int `json:"hosts_up"`
+			Unknown int `json:"unknown_hosts"`
+		} `json:"summary"`
+		Nodes []struct {
+			Hostname string `json:"hostname"`
+		} `json:"nodes"`
+	}
+	if s := c.do("GET", "/api/v1/security/report?scope_id="+sc.ID, nil, &rep); s != 200 || rep.Summary.HostsUp != 2 || rep.Summary.Unknown != 1 ||
+		len(rep.Nodes) != 1 || rep.Nodes[0].Hostname != "web01" || rep.Summary.Open < 3 {
+		t.Fatalf("rapport: %d %+v", s, rep)
+	}
+	var att struct {
+		Items []struct {
+			ID string `json:"id"`
+		} `json:"items"`
+		Badges map[string]struct {
+			Count int `json:"count"`
+		} `json:"badges"`
+	}
+	c.do("GET", "/api/v1/attention", nil, &att)
+	if att.Badges["/kwetsbaarheden"].Count == 0 {
+		t.Errorf("aandacht: %+v", att)
+	}
 	e.api.security.Wait()
 	if s := c.do("DELETE", "/api/v1/security/scopes/"+sc.ID, nil, nil); s != 204 {
 		t.Fatalf("verwijderen: %d", s)

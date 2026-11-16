@@ -37,6 +37,10 @@ type Service struct {
 	log  *slog.Logger
 	Now  func() time.Time
 
+	// Vulns geeft de kwetsbaarheden en verharding (fase 27); nil: niet
+	// meetellen.
+	Vulns func(ctx context.Context) (Vulns, error)
+
 	mu    sync.Mutex
 	cache map[Window]cached
 }
@@ -125,6 +129,14 @@ func (s *Service) build(ctx context.Context, w Window, now time.Time) (Overview,
 		if a.Kind == KindExternal {
 			in.ExternalLoginFailures += a.Logins
 		}
+	}
+
+	if s.Vulns != nil {
+		v, err := s.Vulns(ctx)
+		if err != nil {
+			return Overview{}, fmt.Errorf("kwetsbaarheden: %w", err)
+		}
+		in.Vulns = &v
 	}
 
 	r := evaluate(in)

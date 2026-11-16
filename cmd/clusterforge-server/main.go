@@ -242,6 +242,8 @@ func serve() error {
 	if u := os.Getenv("CF_SECURITY_KEV_URL"); u != "" {
 		secs.KEVURL = u
 	}
+	// Het SOC telt de kwetsbaarheden en de verharding mee.
+	socs.Vulns = secs.SOCVulns
 	// Fase 17: de agent op de Proxmox-hosts (pct, qm, pveam), via
 	// agentprotocol 32; een uitrol maakt er nieuwe CT's mee.
 	pvh := pvehost.NewService(pool, ev, log, runner, bus, agents.NewService(pool, ev, bus))
