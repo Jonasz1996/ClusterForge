@@ -324,11 +324,11 @@ func (s *Service) fetch(ctx context.Context, url, etag string) (io.ReadCloser, s
 		return nil, "", fmt.Errorf("%s niet bereikbaar (mag de server naar buiten via HTTPS?): %w", url, err)
 	}
 	if res.StatusCode == http.StatusNotModified {
-		res.Body.Close()
+		_ = res.Body.Close()
 		return nil, etag, nil
 	}
 	if res.StatusCode != http.StatusOK {
-		res.Body.Close()
+		_ = res.Body.Close()
 		return nil, "", fmt.Errorf("%s antwoordde %s", url, res.Status)
 	}
 	return res.Body, res.Header.Get("ETag"), nil
@@ -340,7 +340,7 @@ func (s *Service) refreshKEV(ctx context.Context, etag string) (int, string, err
 	if err != nil || body == nil {
 		return -1, etag, err
 	}
-	defer body.Close()
+	defer func() { _ = body.Close() }()
 	list, err := ParseKEV(io.LimitReader(body, 64<<20))
 	if err != nil {
 		return 0, "", err
@@ -375,7 +375,7 @@ func (s *Service) refreshDebian(ctx context.Context, releases []string, etag str
 	if err != nil || body == nil {
 		return -1, etag, err
 	}
-	defer body.Close()
+	defer func() { _ = body.Close() }()
 	var entries, cves [][]any
 	err = ParseDebian(io.LimitReader(body, 512<<20), releases,
 		func(e DebianEntry) error {
