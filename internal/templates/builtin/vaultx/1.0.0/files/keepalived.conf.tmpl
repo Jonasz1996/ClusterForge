@@ -1,0 +1,47 @@
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}). Wijzigingen hier
+# worden bij de volgende uitrol overschreven.
+
+global_defs {
+    router_id {{ .node.hostname }}
+    enable_script_security
+    script_user root
+}
+
+# VaultX draait op elke node. Een node waar VaultX gezond antwoordt,
+# krijgt 50 punten erbij: het VIP staat dus altijd op een gezonde node, en
+# bij gelijke gezondheid op de node met de laagste index.
+vrrp_script chk_vaultx {
+    script "/usr/local/lib/clusterforge/vaultx-ctl.sh check"
+    interval 3
+    timeout 8
+    fall 2
+    rise 2
+    weight 50
+}
+
+vrrp_instance VI_{{ .params.vrid }} {
+    state BACKUP
+    interface {{ .node.interface }}
+    virtual_router_id {{ .params.vrid }}
+    priority {{ sub 160 (mul .node.index 10) }}
+    advert_int 1
+    unicast_src_ip {{ .node.address }}
+    unicast_peer {
+{{- range .peers }}
+        {{ .address }}
+{{- end }}
+    }
+    authentication {
+        auth_type PASS
+        auth_pass {{ .params.auth_pass }}
+    }
+    virtual_ipaddress {
+        {{ .params.vip }}/{{ .node.prefix }} dev {{ .node.interface }}
+    }
+    track_script {
+        chk_vaultx
+    }
+}
+
+# Het eigen VIP van PostgreSQL (ClusterForge, Database).
+include /etc/keepalived/conf.d/*.conf

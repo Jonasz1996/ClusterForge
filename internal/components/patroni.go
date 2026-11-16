@@ -42,6 +42,13 @@ func checkExistingPG(pn *PlanNode, n *Node, st dbStatus, slug string, add func(s
 		}
 	}
 	switch {
+	case srv != nil && srv.Unit != "patroni" && asideCluster(srv.Unit) != "":
+		// De oude PostgreSQL van een node die een template zelf opzij zette
+		// (vaultx: cluster vaultxoud op 5433). Patroni krijgt 5432 en een eigen
+		// datamap; het oude cluster blijft staan als terugweg.
+		pn.Existing = strings.Join(strings.Fields("PostgreSQL "+srv.Version+" "+asideCluster(srv.Unit)), " ") + " (opzij gezet, blijft staan)"
+		add(Warning, "postgresql_aside", n, fmt.Sprintf("op %s blijft het oude PostgreSQL-cluster %s staan op een andere poort; "+
+			"Patroni komt ernaast op 5432", n.Hostname, asideCluster(srv.Unit)), "")
 	case st.err != nil:
 		add(Blocked, "no_answer", n, fmt.Sprintf("de agent op %s zei niet welke PostgreSQL er draait: %v", n.Hostname, st.err), "")
 	case srv == nil:
@@ -87,6 +94,26 @@ func checkExistingPG(pn *PlanNode, n *Node, st dbStatus, slug string, add func(s
 			"databases erin staan en zet er geen cluster overheen. Start hem eerst; kijk op de pagina Databases bij Zelfherstel als hij niet start",
 			n.Hostname, srv.Unit), "systemctl start "+srv.Unit)
 	}
+}
+
+// asideClusters zijn de namen van PostgreSQL-clusters die een template
+// vóór Patroni opzij zet: hernoemd van main, op een andere poort, en psql
+// zonder poort wijst via user_clusters naar 5432. Alleen die mogen blijven
+// staan naast Patroni.
+var asideClusters = []string{"vaultxoud"}
+
+// asideCluster geeft de naam van het opzijgezette cluster van een unit als
+// postgresql@17-vaultxoud, anders "".
+func asideCluster(unit string) string {
+	rest, ok := strings.CutPrefix(unit, "postgresql@")
+	if !ok {
+		return ""
+	}
+	_, name, ok := strings.Cut(rest, "-")
+	if ok && slices.Contains(asideClusters, name) {
+		return name
+	}
+	return ""
 }
 
 // runPatroni is de uitrol van PostgreSQL met Patroni.

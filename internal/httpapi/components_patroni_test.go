@@ -752,4 +752,19 @@ func TestComponentPlanStoppedDatabase(t *testing.T) {
 	if f := find(p, "postgresql_stopped"); !p.Blocked || !strings.HasPrefix(f, "nc3: op nc3 staat PostgreSQL (postgresql@17-main) maar die draait niet") {
 		t.Fatalf("stilstaande PostgreSQL: %v %q", p.codes(), f)
 	}
+
+	// Het cluster dat de template vaultx opzij zette (vaultxoud op 5433):
+	// psql zonder poort wijst naar 5432, dus de agent leest het niet, maar
+	// het blijft gewoon staan naast Patroni.
+	h.SetUnit("postgresql@17-main", agenttest.Unit{})
+	h.SetUnit("postgresql@17-vaultxoud", agenttest.Unit{Enabled: true, Active: true})
+	p = plan("postgresql")
+	for _, code := range []string{"postgresql_stopped", "postgresql_unreadable", "postgresql_other", "postgresql_in_use"} {
+		if f := find(p, code); f != "" {
+			t.Fatalf("opzijgezet cluster vaultxoud: %s", f)
+		}
+	}
+	if f := find(p, "postgresql_aside"); !strings.HasPrefix(f, "nc3: op nc3 blijft het oude PostgreSQL-cluster vaultxoud staan") {
+		t.Fatalf("opzijgezet cluster vaultxoud: %v %q", p.codes(), f)
+	}
 }
