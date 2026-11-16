@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
@@ -509,9 +510,9 @@ func TestHomepageOvernemen(t *testing.T) {
 	}
 
 	// Het slot van de checks: de tweede worker wacht tot de eerste stopt.
-	startWorker := func(name string) (*exec.Cmd, *bytes.Buffer) {
+	startWorker := func(name string) (*exec.Cmd, *lockedBuffer) {
 		t.Helper()
-		var buf bytes.Buffer
+		var buf lockedBuffer
 		cmd := n.cmd(append(appVars, "RUNTIME_DIRECTORY="+filepath.Join(n.dir, "run-"+name)), "worker")
 		cmd.Stdout, cmd.Stderr = &buf, &buf
 		if err := cmd.Start(); err != nil {
@@ -520,7 +521,7 @@ func TestHomepageOvernemen(t *testing.T) {
 		t.Cleanup(func() { _ = cmd.Process.Kill(); _, _ = cmd.Process.Wait() })
 		return cmd, &buf
 	}
-	waitFor := func(buf *bytes.Buffer, s string) bool {
+	waitFor := func(buf *lockedBuffer, s string) bool {
 		for range 100 {
 			if strings.Contains(buf.String(), s) {
 				return true
@@ -579,4 +580,23 @@ func TestHomepageOvernemen(t *testing.T) {
 	if out, err := n.run("voorstart"); err == nil || !strings.Contains(out, "nog niet overgenomen") {
 		t.Fatalf("voorstart na terug: %v\n%s", err, out)
 	}
+}
+
+// lockedBuffer is een buffer die exec vanuit zijn eigen goroutine vult terwijl
+// de test hem leest.
+type lockedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }
