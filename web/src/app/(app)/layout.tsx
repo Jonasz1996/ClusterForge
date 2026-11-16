@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import { ConfirmHost } from "@/components/Confirm";
 import { CommandPalette } from "@/components/shell/CommandPalette";
+import { SectionTabs } from "@/components/shell/SectionTabs";
 import { MenuIcon, MoonIcon, SearchIcon, SunIcon, SystemIcon } from "@/components/shell/icons";
 import { Sidebar } from "@/components/shell/Sidebar";
 import { ToastHost } from "@/components/Toast";
@@ -192,6 +193,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
                 : "max-w-5xl"
           }`}
         >
+          <SectionTabs pathname={pathname} isAdmin={isAdmin} />
           {children}
         </main>
       </div>
