@@ -106,7 +106,9 @@ func (r *CronRunner) runSync(ctx context.Context, job protocol.ManagedCron, out 
 			_, _ = runCronArgv(ctx, "", syncArgv(spec, t, sshCmd), out)
 			_, _ = fmt.Fprintln(out)
 		}
-		dockerRun := func(ctx context.Context, argv []string, out io.Writer) (int, error) { return runCronArgv(ctx, "", argv, out) }
+		dockerRun := func(ctx context.Context, argv []string, out io.Writer) (int, error) {
+			return runCronArgv(ctx, "", argv, out)
+		}
 		ids, err := pauseProjects(ctx, dockerRun, projects, out)
 		defer unpause(dockerRun, ids, out)
 		if err != nil {

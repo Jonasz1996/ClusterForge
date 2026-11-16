@@ -276,7 +276,6 @@ func (r *RunExecutor) stackStates(ctx context.Context, project string) map[strin
 	return out
 }
 
-
 // stackRestarts geeft per dienst het aantal herstarts nu, zodat de test
 // alleen nieuwe herstarts telt (een container die niet opnieuw gemaakt
 // wordt, houdt zijn teller).
