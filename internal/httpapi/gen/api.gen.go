@@ -2988,6 +2988,24 @@ func (e PveCallInputMethod) Valid() bool {
 	}
 }
 
+// Defines values for PveRestoreTestInputType.
+const (
+	PveRestoreTestInputTypeLxc  PveRestoreTestInputType = "lxc"
+	PveRestoreTestInputTypeQemu PveRestoreTestInputType = "qemu"
+)
+
+// Valid indicates whether the value is a known member of the PveRestoreTestInputType enum.
+func (e PveRestoreTestInputType) Valid() bool {
+	switch e {
+	case PveRestoreTestInputTypeLxc:
+		return true
+	case PveRestoreTestInputTypeQemu:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for RiskCardId.
 const (
 	RiskCardIdAvailability  RiskCardId = "availability"
@@ -11534,6 +11552,22 @@ type PveCallInputMethod string
 // PveObject Een object van de Proxmox-hosts (fase 17); de velden staan in web/src/lib/pvehosts.ts en pkg/protocol/pve.go.
 type PveObject map[string]interface{}
 
+// PveRestoreTestInput defines model for PveRestoreTestInput.
+type PveRestoreTestInput struct {
+	// Archive Volume van de back-up
+	Archive string `json:"archive"`
+
+	// Node Proxmox-host waarop de test draait
+	Node string `json:"node"`
+
+	// Storage Storage voor de schijven van de test
+	Storage string                  `json:"storage"`
+	Type    PveRestoreTestInputType `json:"type"`
+}
+
+// PveRestoreTestInputType defines model for PveRestoreTestInput.Type.
+type PveRestoreTestInputType string
+
 // RecipeCheck defines model for RecipeCheck.
 type RecipeCheck struct {
 	Diagnostics []RecipeDiag `json:"diagnostics"`
@@ -14278,6 +14312,9 @@ type StartPveHostActionJSONRequestBody = PveActionInput
 // CallPveApiJSONRequestBody defines body for CallPveApi for application/json ContentType.
 type CallPveApiJSONRequestBody = PveCallInput
 
+// StartPveRestoreTestJSONRequestBody defines body for StartPveRestoreTest for application/json ContentType.
+type StartPveRestoreTestJSONRequestBody = PveRestoreTestInput
+
 // SaveRecipeJSONRequestBody defines body for SaveRecipe for application/json ContentType.
 type SaveRecipeJSONRequestBody = RecipeSource
 
@@ -15207,6 +15244,9 @@ type ServerInterface interface {
 	// GetPveOverview Overzicht van een Proxmox-cluster - quorum, corosync, hosts, storage, HA, capaciteit en waarschuwingen
 	// (GET /pve/datacenters/{dcId}/overview)
 	GetPveOverview(w http.ResponseWriter, r *http.Request, dcId string)
+	// StartPveRestoreTest Een back-up op proef terugzetten, starten en weer opruimen (admin)
+	// (POST /pve/datacenters/{dcId}/restore-test)
+	StartPveRestoreTest(w http.ResponseWriter, r *http.Request, dcId string)
 	// ListRecipes Alle recepten met hun versies (fase 9)
 	// (GET /recipes)
 	ListRecipes(w http.ResponseWriter, r *http.Request)
@@ -17097,6 +17137,12 @@ func (_ Unimplemented) CallPveApi(w http.ResponseWriter, r *http.Request, dcId s
 // GetPveOverview Overzicht van een Proxmox-cluster - quorum, corosync, hosts, storage, HA, capaciteit en waarschuwingen
 // (GET /pve/datacenters/{dcId}/overview)
 func (_ Unimplemented) GetPveOverview(w http.ResponseWriter, r *http.Request, dcId string) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// StartPveRestoreTest Een back-up op proef terugzetten, starten en weer opruimen (admin)
+// (POST /pve/datacenters/{dcId}/restore-test)
+func (_ Unimplemented) StartPveRestoreTest(w http.ResponseWriter, r *http.Request, dcId string) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -26013,6 +26059,32 @@ func (siw *ServerInterfaceWrapper) GetPveOverview(w http.ResponseWriter, r *http
 	handler.ServeHTTP(w, r)
 }
 
+// StartPveRestoreTest operation middleware
+func (siw *ServerInterfaceWrapper) StartPveRestoreTest(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "dcId" -------------
+	var dcId string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "dcId", chi.URLParam(r, "dcId"), &dcId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "dcId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.StartPveRestoreTest(w, r, dcId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListRecipes operation middleware
 func (siw *ServerInterfaceWrapper) ListRecipes(w http.ResponseWriter, r *http.Request) {
 
@@ -27794,6 +27866,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Post(options.BaseURL+"/pve/datacenters/{dcId}/api", wrapper.CallPveApi)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/pve/datacenters/{dcId}/restore-test", wrapper.StartPveRestoreTest)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/clusters/{clusterId}/stacks", wrapper.GetClusterStacks)

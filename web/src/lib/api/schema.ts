@@ -4341,6 +4341,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/pve/datacenters/{dcId}/restore-test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                dcId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Een back-up op proef terugzetten, starten en weer opruimen (admin)
+         * @description Zet de back-up terug als nieuwe gast met een vrij ID, met de netwerkkaarten los en zonder doorgegeven
+         *     hardware, start hem, wacht tot hij draait (VM met guest agent: tot die antwoordt) en verwijdert hem daarna.
+         */
+        post: operations["startPveRestoreTest"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/clusters/{clusterId}/stacks": {
         parameters: {
             query?: never;
@@ -13359,6 +13382,16 @@ export interface components {
             /** @description Wat overgetikt moet worden bij een gevaarlijke aanroep */
             confirm?: string;
         };
+        PveRestoreTestInput: {
+            /** @description Proxmox-host waarop de test draait */
+            node: string;
+            /** @description Volume van de back-up */
+            archive: string;
+            /** @enum {string} */
+            type: "qemu" | "lxc";
+            /** @description Storage voor de schijven van de test */
+            storage: string;
+        };
         /** @description Een object van de firewall (fase 16); de velden staan in web/src/lib/firewall.ts en internal/firewall. */
         FirewallObject: {
             [key: string]: unknown;
@@ -20401,6 +20434,36 @@ export interface operations {
         requestBody: {
             content: {
                 "application/json": components["schemas"]["PveCallInput"];
+            };
+        };
+        responses: {
+            /** @description Taak aangemaakt */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Job"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    startPveRestoreTest: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                dcId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PveRestoreTestInput"];
             };
         };
         responses: {

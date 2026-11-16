@@ -68,6 +68,8 @@ type Service struct {
 	// fase 26; nil zonder masterkey.
 	Box   *secrets.Box
 	cache getCache
+	// RestorePoll is hoe vaak een terugzettest kijkt of de gast draait (tests korter).
+	RestorePoll time.Duration
 }
 
 func NewService(pool *pgxpool.Pool, ev *events.Writer, log *slog.Logger, runner *jobs.Runner, bus Bus, ag *agents.Service) *Service {
@@ -330,6 +332,8 @@ type params struct {
 	Op      protocol.PVERun `json:"op"`
 	// Sealed zijn de versleutelde geheimen van een aanroep (fase 26).
 	Sealed *sealed `json:"sealed,omitempty"`
+	// RestoreTest is een terugzettest (fase 26 M3) in plaats van Op.
+	RestoreTest *RestoreTest `json:"restore_test,omitempty"`
 }
 
 // Start zet een actie in de wachtrij.
@@ -497,6 +501,9 @@ func (s *Service) run(ctx context.Context, j *jobs.Job) error {
 	var p params
 	if err := j.Decode(&p); err != nil {
 		return err
+	}
+	if p.RestoreTest != nil {
+		return s.runRestoreTest(ctx, j, p)
 	}
 	if err := s.openSealed(&p); err != nil {
 		return err

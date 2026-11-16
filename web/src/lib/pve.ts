@@ -1,6 +1,6 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useEffect } from "react";
 import { api, unwrap } from "./api/client";
@@ -406,4 +406,89 @@ export function tagColors(tagStyle?: string): Record<string, string> {
     if (tag && bg && /^[0-9a-fA-F]{6}$/.test(bg)) out[tag] = "#" + bg;
   }
   return out;
+}
+
+// --- Back-ups (fase 26 M3) ---
+
+// Een back-up op een storage (/nodes/<n>/storage/<s>/content?content=backup).
+export type PveBackup = {
+  volid: string;
+  ctime: number;
+  size: number;
+  vmid?: number;
+  format?: string;
+  subtype?: string;
+  notes?: string;
+  protected?: number | boolean;
+  encrypted?: string;
+  verification?: { state?: string; upid?: string };
+  // Waar ClusterForge hem las.
+  node: string;
+  storage: string;
+};
+
+// Een back-upjob (/cluster/backup).
+export type PveBackupJob = {
+  id: string;
+  schedule?: string;
+  storage?: string;
+  all?: number;
+  vmid?: string;
+  pool?: string;
+  exclude?: string;
+  node?: string;
+  mode?: string;
+  compress?: string;
+  enabled?: number;
+  comment?: string;
+  "notes-template"?: string;
+  "prune-backups"?: string | Record<string, string | number>;
+  "next-run"?: number;
+};
+
+export const backupKind = (b: Pick<PveBackup, "volid" | "subtype">) =>
+  b.subtype === "lxc" || /\/ct\/|vzdump-lxc-/.test(b.volid) ? ("lxc" as const) : ("qemu" as const);
+
+// Back-upopslag: elke storage met content backup, een gedeelde maar één keer.
+export function backupStores(res: PveResource[] | undefined): { node: string; storage: string; shared: boolean; type?: string }[] {
+  const out: { node: string; storage: string; shared: boolean; type?: string }[] = [];
+  const seen = new Set<string>();
+  for (const r of res ?? []) {
+    if (r.type !== "storage" || r.status !== "available" || !(r.content ?? "").split(",").includes("backup")) continue;
+    const key = r.shared ? r.storage! : `${r.node}/${r.storage}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({ node: r.node, storage: r.storage!, shared: !!r.shared, type: r.plugintype });
+  }
+  return out.sort((a, b) => a.storage.localeCompare(b.storage) || a.node.localeCompare(b.node));
+}
+
+// useBackups leest de back-ups van alle back-upopslag, eventueel van één gast.
+export function useBackups(dc: string, stores: { node: string; storage: string }[], vmid?: number) {
+  const qs = useQueries({
+    queries: stores.map((s) => {
+      const path = `/nodes/${s.node}/storage/${s.storage}/content`;
+      const params: Record<string, string> = { content: "backup", ...(vmid ? { vmid: String(vmid) } : {}) };
+      return {
+        queryKey: keys.get(dc, path, params),
+        queryFn: async () => (await pveGet<Omit<PveBackup, "node" | "storage">[]>(dc, path, params)).map((b) => ({ ...b, node: s.node, storage: s.storage })),
+        refetchInterval: 30_000,
+        retry: false,
+      };
+    }),
+  });
+  const items = qs.flatMap((q) => q.data ?? []).sort((a, b) => b.ctime - a.ctime);
+  const errors = qs.map((q, i) => (q.error ? `${stores[i].storage}: ${q.error instanceof Error ? q.error.message : "fout"}` : "")).filter(Boolean);
+  return { items, loading: qs.some((q) => q.isLoading), errors };
+}
+
+export type RestoreTestInput = { node: string; archive: string; type: GuestType; storage: string };
+
+export function useRestoreTest(dc: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (body: RestoreTestInput) =>
+      unwrap(await api.POST("/pve/datacenters/{dcId}/restore-test", { params: { path: { dcId: dc } }, body })) as unknown as Job,
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ["jobs"] }),
+  });
 }

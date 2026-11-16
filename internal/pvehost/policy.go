@@ -27,9 +27,9 @@ const (
 // anyKey zijn alle gewone velden.
 const anyKey = `[a-z][a-z0-9_-]{0,63}`
 
-// deniedKeys mag de GUI nooit zetten: ruwe QEMU-argumenten en hookscripts
+// deniedKeys mag de GUI nooit zetten: ruwe QEMU-argumenten, hookscripts en het vzdump-script
 // voeren code uit op de host, skiplock omzeilt een slot.
-var deniedKeys = []string{"args", "hookscript", "skiplock"}
+var deniedKeys = []string{"args", "hookscript", "skiplock", "script"}
 
 type rule struct {
 	method string
@@ -144,7 +144,12 @@ var rules = []*rule{
 		confirmWith(part("vmid")),
 
 	// --- Back-ups ---------------------------------------------------
-	r("create", `/cluster/backup`, anyKey, func(_, p map[string]string) string { return "back-upjob " + p["id"] + " maken" }),
+	r("create", `/cluster/backup`, anyKey, func(_, p map[string]string) string {
+		if p["comment"] != "" {
+			return "back-upjob " + p["comment"] + " maken"
+		}
+		return "back-upjob maken"
+	}),
 	r("set", `/cluster/backup/`+segID, anyKey, func(m, _ map[string]string) string { return "back-upjob " + m["id"] + " wijzigen" }),
 	r("delete", `/cluster/backup/`+segID, ``, func(m, _ map[string]string) string { return "back-upjob " + m["id"] + " verwijderen" }),
 	r("create", `/nodes/`+segNode+`/vzdump`, anyKey, func(m, p map[string]string) string {

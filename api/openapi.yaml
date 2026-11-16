@@ -4637,6 +4637,30 @@ paths:
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /pve/datacenters/{dcId}/restore-test:
+    parameters:
+      - { name: dcId, in: path, required: true, schema: { type: string } }
+    post:
+      operationId: startPveRestoreTest
+      summary: Een back-up op proef terugzetten, starten en weer opruimen (admin)
+      description: |
+        Zet de back-up terug als nieuwe gast met een vrij ID, met de netwerkkaarten los en zonder doorgegeven
+        hardware, start hem, wacht tot hij draait (VM met guest agent: tot die antwoordt) en verwijdert hem daarna.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PveRestoreTestInput" }
+      responses:
+        "202":
+          description: Taak aangemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
   /clusters/{clusterId}/stacks:
     parameters:
       - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -13977,6 +14001,14 @@ components:
           type: object
           additionalProperties: { type: string }
         confirm: { type: string, description: Wat overgetikt moet worden bij een gevaarlijke aanroep }
+    PveRestoreTestInput:
+      type: object
+      required: [node, archive, type, storage]
+      properties:
+        node: { type: string, description: Proxmox-host waarop de test draait }
+        archive: { type: string, description: Volume van de back-up }
+        type: { type: string, enum: [qemu, lxc] }
+        storage: { type: string, description: Storage voor de schijven van de test }
     FirewallObject:
       type: object
       description: Een object van de firewall (fase 16); de velden staan in web/src/lib/firewall.ts en internal/firewall.

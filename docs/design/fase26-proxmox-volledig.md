@@ -73,3 +73,14 @@ host `/nodes/<host>/status`, en rekent uit:
 5. Storage, ISO's en templates, opruimen, hardwarebewaking.
 6. Netwerk en SDN, Proxmox-firewall, ACME, gebruikers en tokens, syslog.
 7. Console (noVNC/xterm) via de agent.
+
+## Terugzettest (M3)
+
+`POST /pve/datacenters/{dc}/restore-test` zet een back-up terug als nieuwe gast
+met een vrij ID (`unique=1`), zet de netwerkkaarten los (VM: `link_down=1`, CT:
+weg), haalt doorgegeven hardware weg (`hostpciN`, `usbN`, `devN`), start hem en
+wacht tot hij draait; een VM met guest agent tot `agent/info` antwoordt. Daarna
+stopt en verwijdert ClusterForge hem altijd, maar alleen als de beschrijving de
+markering `clusterforge-terugzettest` draagt. De stappen staan in de taak; de
+pagina Back-ups → Terugzettests toont de uitkomsten. `script` (vzdump-hook) is
+voor de GUI verboden, net als `args` en `hookscript`.

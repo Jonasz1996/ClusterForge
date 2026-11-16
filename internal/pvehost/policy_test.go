@@ -21,6 +21,8 @@ func TestPolicy(t *testing.T) {
 		{method: "create", path: "/nodes/pve1/qemu", params: map[string]string{"vmid": "120", "archive": "pbs:backup/vm/120/x", "force": "1"},
 			title: "VM 120 terugzetten uit back-up op pve1", confirm: "120"},
 		{method: "create", path: "/nodes/pve1/qemu", params: map[string]string{"vmid": "120", "cores": "2", "args": "-x"}, err: "voert code uit"},
+		{method: "create", path: "/nodes/pve1/vzdump", params: map[string]string{"vmid": "120", "script": "/tmp/x.sh"}, err: "voert code uit"},
+		{method: "create", path: "/cluster/backup", params: map[string]string{"all": "1", "schedule": "02:00", "storage": "pbs", "prune-backups": "keep-daily=7"}, title: "back-upjob maken"},
 		{method: "set", path: "/nodes/pve1/qemu/101/config", params: map[string]string{"hostpci0": "0000:01:00,pcie=1", "cipassword": "x"},
 			title: "VM 101 configuratie wijzigen", secret: []string{"cipassword"}},
 		{method: "delete", path: "/nodes/pve1/storage/pbs/content/pbs:backup/vm/101/2026-11-16T01:00:00Z", title: "pbs:backup/vm/101/2026-11-16T01:00:00Z verwijderen",

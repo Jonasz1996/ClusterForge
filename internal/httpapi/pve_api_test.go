@@ -25,6 +25,15 @@ func TestPVEAPI(t *testing.T) {
 			_, _ = io.WriteString(out, `[{"type":"cluster","name":"thuislab","quorate":1,"version":3},{"type":"node","name":"pve1","online":1,"ip":"10.0.0.11"}]`)
 		case strings.HasPrefix(cmd, "pvesh get /cluster/ha/resources "):
 			_, _ = io.WriteString(out, `[{"sid":"ct:101","state":"started"}]`)
+		case strings.HasPrefix(cmd, "pvesh get /cluster/nextid "):
+			_, _ = io.WriteString(out, `"105"`)
+		case strings.HasPrefix(cmd, "pvesh get /nodes/pve1/qemu/105/config "):
+			_, _ = io.WriteString(out, `{"name":"web1","net0":"virtio=BC:24:11:00:00:01,bridge=vmbr0","hostpci0":"0000:01:00","description":"clusterforge-terugzettest van pbs:backup/vm/100/x"}`)
+		case strings.HasPrefix(cmd, "pvesh get /nodes/pve1/qemu/105/status/current "):
+			_, _ = io.WriteString(out, `{"status":"running","agent":0}`)
+		case strings.HasPrefix(cmd, "pvesh create /nodes/pve1/qemu"), strings.HasPrefix(cmd, "pvesh set /nodes/pve1/qemu/105/config "),
+			strings.HasPrefix(cmd, "pvesh delete /nodes/pve1/qemu/105 "):
+			_, _ = io.WriteString(out, "null\n")
 		case strings.HasPrefix(cmd, "pvesh get /cluster/"), strings.HasPrefix(cmd, "pvesh get /nodes/pve1/status "):
 			_, _ = io.WriteString(out, `[]`)
 		case strings.HasPrefix(cmd, "pvesh create /nodes/pve1/status "), strings.HasPrefix(cmd, "pvesh create /storage "):
@@ -116,5 +125,33 @@ func TestPVEAPI(t *testing.T) {
 		"method": "set", "path": "/nodes/pve1/qemu/101/config", "params": map[string]string{"args": "-device x"},
 	}, &de); s != http.StatusBadRequest || !strings.Contains(de.Message, "args") {
 		t.Errorf("args: %d %+v", s, de)
+	}
+
+	// Terugzettest: terugzetten met een vrij ID, los van het netwerk en
+	// zonder passthrough, starten, controleren en weer opruimen.
+	if s := c.do("POST", "/api/v1/pve/datacenters/thuislab/restore-test", map[string]any{
+		"node": "pve1", "archive": "pbs:backup/vm/100/2026-11-16T01:00:00Z", "type": "qemu", "storage": "local-zfs",
+	}, &j); s != http.StatusAccepted || !strings.HasPrefix(j.Title, "Terugzettest van vm/100/") {
+		t.Fatalf("terugzettest: %d %+v", s, j)
+	}
+	if j = waitJob(t, c, j.ID); j.Status != "succeeded" {
+		t.Fatalf("terugzettest: %s %s %v", j.Status, j.Error, sim.called("pvesh"))
+	}
+	for _, want := range []string{
+		"pvesh create /nodes/pve1/qemu --output-format json --archive=pbs:backup/vm/100/2026-11-16T01:00:00Z --storage=local-zfs --unique=1 --vmid=105",
+		"--delete=hostpci0",
+		"--net0=virtio=BC:24:11:00:00:01,bridge=vmbr0,link_down=1",
+		"pvesh create /nodes/pve1/qemu/105/status/start",
+		"pvesh create /nodes/pve1/qemu/105/status/stop",
+		"pvesh delete /nodes/pve1/qemu/105 --output-format json --destroy-unreferenced-disks=1 --purge=1",
+	} {
+		if len(sim.called(want)) == 0 && !strings.Contains(strings.Join(sim.called("pvesh"), "\n"), want) {
+			t.Errorf("niet aangeroepen: %s\n%s", want, strings.Join(sim.called("pvesh"), "\n"))
+		}
+	}
+	if s := c.do("POST", "/api/v1/pve/datacenters/thuislab/restore-test", map[string]any{
+		"node": "pve1", "archive": "pbs:../../etc", "type": "qemu", "storage": "local-zfs",
+	}, &de); s != http.StatusBadRequest {
+		t.Errorf("rare back-up: %d", s)
 	}
 }

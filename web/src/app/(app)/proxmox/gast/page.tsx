@@ -11,11 +11,12 @@ import { CloudInitTab, HardwareTab, OptionsTab } from "@/components/pve/guest/Co
 import { PassthroughTab } from "@/components/pve/guest/Passthrough";
 import { SnapshotsTab } from "@/components/pve/guest/Snapshots";
 import { PveTaskTable } from "@/components/pve/Tasks";
+import { BackupList } from "@/components/pve/Backups";
 import { TagChips, useTagColors } from "@/components/pve/TagChips";
 import { Tabs } from "@/components/Tabs";
 import { Alert, Badge, Button, Card, PageHeader } from "@/components/ui";
 import { useIsAdmin } from "@/lib/inventory";
-import { guestLabel, guestPath, pct, pveHostAction, splitTags, usePveGet, type Datacenter, type GuestConfig, type GuestType, type PveTask } from "@/lib/pve";
+import { guestLabel, guestPath, pct, pveHostAction, splitTags, usePveGet, type Datacenter, type GuestConfig, type GuestType, type PveResource, type PveTask } from "@/lib/pve";
 import { vmStatusInfo } from "@/lib/proxmox";
 
 export default function GuestPage() {
@@ -61,7 +62,7 @@ export type GuestCtx = {
   pending: boolean;
 };
 
-type Tab = "overview" | "hardware" | "cloudinit" | "options" | "snapshots" | "passthrough" | "tasks";
+type Tab = "overview" | "hardware" | "cloudinit" | "options" | "snapshots" | "backups" | "passthrough" | "tasks";
 
 function GuestInner({ dc }: { dc: Datacenter }) {
   const sp = useSearchParams();
@@ -99,6 +100,7 @@ function GuestInner({ dc }: { dc: Datacenter }) {
     ...(hasCloudInit ? [{ key: "cloudinit" as const, label: "Cloud-init" }] : []),
     { key: "options" as const, label: "Opties" },
     { key: "snapshots" as const, label: "Snapshots" },
+    { key: "backups" as const, label: "Back-ups" },
     { key: "passthrough" as const, label: "Passthrough" },
     { key: "tasks" as const, label: "Taken" },
   ];
@@ -187,6 +189,7 @@ function GuestInner({ dc }: { dc: Datacenter }) {
         {tab === "cloudinit" && <CloudInitTab ctx={ctx} />}
         {tab === "options" && <OptionsTab ctx={ctx} />}
         {tab === "snapshots" && <SnapshotsTab ctx={ctx} />}
+        {tab === "backups" && <GuestBackups dc={dc} vmid={vmid} />}
         {tab === "passthrough" && <PassthroughTab ctx={ctx} />}
         {tab === "tasks" && <GuestTasks ctx={ctx} />}
       </QueryState>
@@ -337,5 +340,14 @@ function GuestTasks({ ctx }: { ctx: GuestCtx }) {
     <Card>
       <QueryState q={tasks}>{tasks.data && <PveTaskTable dc={ctx.dc.id} tasks={tasks.data} />}</QueryState>
     </Card>
+  );
+}
+
+function GuestBackups({ dc, vmid }: { dc: Datacenter; vmid: number }) {
+  const res = usePveGet<PveResource[]>(dc.id, "/cluster/resources", { refetch: 30_000 });
+  return (
+    <QueryState q={res}>
+      <BackupList dc={dc} res={res.data ?? []} vmid={vmid} />
+    </QueryState>
   );
 }

@@ -154,3 +154,23 @@ func (s *Server) CallPveApi(w http.ResponseWriter, r *http.Request, dcId string)
 	}
 	writeJSON(w, http.StatusAccepted, toAPIJob(j, &p.User.Username))
 }
+
+// StartPveRestoreTest zet een back-up op proef terug (fase 26 M3).
+func (s *Server) StartPveRestoreTest(w http.ResponseWriter, r *http.Request, dcId string) {
+	p, ok := requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	var in gen.PveRestoreTestInput
+	if !decode(w, r, &in) {
+		return
+	}
+	j, err := s.pvehosts.StartRestoreTest(r.Context(), events.User(p.User.ID), pvehost.RestoreTest{
+		Datacenter: dcId, Node: in.Node, Archive: in.Archive, Type: string(in.Type), Storage: in.Storage,
+	})
+	if err != nil {
+		s.pveHostError(w, r, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, toAPIJob(j, &p.User.Username))
+}
