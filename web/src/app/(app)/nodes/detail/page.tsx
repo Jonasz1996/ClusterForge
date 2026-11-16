@@ -109,6 +109,12 @@ function NodeDetailInner() {
                   <AskButton subject="node" id={id} />
                   {isAdmin && (
                     <>
+                      <Link
+                        href={`/logs?node=${id}&kind=file&name=${encodeURIComponent("/var/log/syslog")}`}
+                        className="inline-flex items-center rounded-md border border-slate-300 px-3.5 py-2 text-sm font-medium hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800"
+                      >
+                        Logs
+                      </Link>
                       <Button variant="secondary" onClick={() => setEditing(true)}>
                         Bewerken
                       </Button>

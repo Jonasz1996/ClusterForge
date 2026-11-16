@@ -2129,6 +2129,34 @@ wijziging; in de editor staan wachtwoorden als «geheim-N».
 Agents met protocol 33 of hoger. Ontwerp:
 [docs/design/fase21-docker-stacks.md](docs/design/fase21-docker-stacks.md).
 
+## Logs
+
+**Logs** (alleen beheerders, fase 23) toont de logs van de nodes zonder dat je
+iets op de node hoeft te doen: de agent (protocol 34) leest op vraag een
+bestand onder `/var/log` (ook geroteerde `.gz`), het systemd-journaal (alles of
+één unit) of de log van een container. ClusterForge bewaart de logs niet; de
+agent maskeert wachtwoorden en tokens voor hij antwoordt.
+
+- **Bronnen**: vink nodes aan (of "Heel het cluster"), kies Bestand, Journaal
+  of Container en een naam uit de lijst die de agents geven (met op hoeveel
+  nodes hij staat). Hoogstens 12 bronnen tegelijk.
+- **Filter**: tijdvak, zoekterm (tekst of reguliere expressie), weglaten,
+  niveau (fout, waarschuwing, info, debug, zonder) en regels per bron. De agent
+  filtert, zodat ook een fout van uren geleden in een groot bestand gevonden
+  wordt. **Live volgen** vernieuwt elke 10 seconden.
+- **Ontleden**: de agent haalt tijd, niveau en programma uit syslog (klassiek
+  en RFC 3339), nginx/apache, Python/Go-logs en JSON-regels; vervolgregels
+  (stacktraces) blijven bij hun regel. key=value en JSON-velden worden velden;
+  een eigen expressie met benoemde groepen geeft extra kolommen.
+- **Vergelijken**: *Tijdlijn* legt alle bronnen samen op tijd (kleur per
+  node), *Naast elkaar* zet elke bron in een kolom, *Patronen* telt gelijke
+  regels per node ("alleen op nc2"), *Velden* toont de waarden per node. Het
+  histogram zoomt in met een klik; bij een regel toont "± 1 minuut op alle
+  bronnen" wat de andere nodes op dat moment deden.
+- **Weergaven** bewaren bronnen en filter onder een naam. Knoppen **Logs** op
+  een node en "Filteren en vergelijken" bij de logs van een container openen
+  de pagina met die bron.
+
 ## Ontwikkelen
 
 Nodig: Go 1.26, Node 22 met pnpm, Docker.

@@ -336,8 +336,6 @@ func (c *collector) add(e protocol.LogEntry) {
 	c.next = (c.next + 1) % c.limit
 }
 
-func (c *collector) full() bool { return c.matched >= c.limit }
-
 // entries geeft de regels van oud naar nieuw.
 func (c *collector) entries() []protocol.LogEntry {
 	if len(c.ring) < c.limit {
