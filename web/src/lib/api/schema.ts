@@ -13856,6 +13856,8 @@ export interface components {
             /** @enum {string} */
             profile: "snel" | "standaard" | "volledig";
             max_rate?: number;
+            /** @description Per dienst één aanmeldpoging met het standaardwachtwoord (opt-in). */
+            default_passwords?: boolean;
             /** @enum {string} */
             schedule: "uit" | "dagelijks" | "wekelijks";
             weekday?: number;

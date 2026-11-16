@@ -12497,14 +12497,16 @@ type SecurityRefreshInput struct {
 
 // SecurityScanInput defines model for SecurityScanInput.
 type SecurityScanInput struct {
-	Hour      *int                                  `json:"hour,omitempty"`
-	MaxRate   *int                                  `json:"max_rate,omitempty"`
-	Name      string                                `json:"name"`
-	Profile   SecurityScanInputProfile              `json:"profile"`
-	ScannerId nullable.Nullable[openapi_types.UUID] `json:"scanner_id,omitempty"`
-	Schedule  SecurityScanInputSchedule             `json:"schedule"`
-	ScopeId   openapi_types.UUID                    `json:"scope_id"`
-	Weekday   *int                                  `json:"weekday,omitempty"`
+	// DefaultPasswords Per dienst één aanmeldpoging met het standaardwachtwoord (opt-in).
+	DefaultPasswords *bool                                 `json:"default_passwords,omitempty"`
+	Hour             *int                                  `json:"hour,omitempty"`
+	MaxRate          *int                                  `json:"max_rate,omitempty"`
+	Name             string                                `json:"name"`
+	Profile          SecurityScanInputProfile              `json:"profile"`
+	ScannerId        nullable.Nullable[openapi_types.UUID] `json:"scanner_id,omitempty"`
+	Schedule         SecurityScanInputSchedule             `json:"schedule"`
+	ScopeId          openapi_types.UUID                    `json:"scope_id"`
+	Weekday          *int                                  `json:"weekday,omitempty"`
 }
 
 // SecurityScanInputProfile defines model for SecurityScanInput.Profile.

@@ -197,7 +197,11 @@ func expectedPort(kn *knownNode, proto string, port int) RunPort {
 }
 
 // analyzeHosts legt het resultaat naast wat ClusterForge weet.
-func analyzeHosts(res *protocol.ScanResult, known map[string]*knownNode, now time.Time) ([]RunHost, map[string][]Draft, int) {
+func analyzeHosts(res *protocol.ScanResult, known map[string]*knownNode, probes []protocol.ProbeResult, now time.Time) ([]RunHost, map[string][]Draft, int) {
+	byPort := map[string]protocol.ProbeResult{}
+	for _, p := range probes {
+		byPort[p.Addr+"|"+strconv.Itoa(p.Port)] = p
+	}
 	hosts := []RunHost{}
 	drafts := map[string][]Draft{}
 	open := 0
@@ -212,6 +216,10 @@ func analyzeHosts(res *protocol.ScanResult, known map[string]*knownNode, now tim
 		for _, p := range h.Ports {
 			open++
 			ep := expectedPort(kn, p.Proto, p.Port)
+			if pr, ok := byPort[h.Addr+"|"+strconv.Itoa(p.Port)]; ok && p.Proto == "tcp" {
+				ep.Title, ep.Hits = pr.Title, pr.Hits
+				ds = append(ds, probeDrafts(p, pr)...)
+			}
 			rh.Expected = append(rh.Expected, ep)
 			ds = append(ds, portDrafts(p, kn, ep.Known, now)...)
 		}
@@ -290,12 +298,12 @@ FROM firewall_nodes WHERE mode <> 'off' AND plan IS NOT NULL`)
 // analyzeScan verwerkt een scan: de hosts met wat er verwacht werd, en de
 // bevindingen per adres. Adressen in de scope die niet meer opduiken,
 // krijgen hun netwerkbevindingen opgelost.
-func (s *Service) analyzeScan(ctx context.Context, scope Scope, res *protocol.ScanResult) (*RunResult, int, int, error) {
+func (s *Service) analyzeScan(ctx context.Context, scope Scope, res *protocol.ScanResult, probes []protocol.ProbeResult) (*RunResult, int, int, error) {
 	known, err := s.knownNodes(ctx)
 	if err != nil {
 		return nil, 0, 0, err
 	}
-	hosts, drafts, open := analyzeHosts(res, known, s.Now())
+	hosts, drafts, open := analyzeHosts(res, known, probes, s.Now())
 	out := &RunResult{Nmap: res.Nmap, Args: res.Args, Truncated: res.Truncated, Hosts: hosts, Notes: []string{}}
 	if res.Truncated {
 		out.Notes = append(out.Notes, fmt.Sprintf("Het resultaat is ingekort tot %d hosts en %d poorten per host.", protocol.MaxScanHosts, protocol.MaxScanPortsPerHost))
@@ -341,4 +349,64 @@ WHERE kind = $1 AND subject = ANY($2) AND status <> 'opgelost'`, KindNetwork, go
 		}
 	}
 	return out, open, found, nil
+}
+
+// probeHits zijn de vaste uitkomsten van het aanspreken van een dienst.
+var probeHits = map[string]riskyPort{
+	"haproxy-admin":      {SevHigh, "HAProxy-statistiek met beheeracties zonder login", "Zet stats auth <gebruiker>:<wachtwoord> en bind de statistiek aan 127.0.0.1 of het beheernetwerk: zonder login kan iedereen servers uit de pool halen."},
+	"haproxy-stats":      {SevMedium, "HAProxy-statistiek zonder login", "Zet stats auth <gebruiker>:<wachtwoord> of beperk de poort tot het beheernetwerk."},
+	"dirlist":            {SevLow, "Mappenlijst van een webserver", "Zet autoindex of Indexes uit voor deze map."},
+	"phpmyadmin-open":    {SevHigh, "phpMyAdmin zonder aanmeldscherm", "Zet auth_type op cookie en beperk phpMyAdmin tot het beheernetwerk."},
+	"docker-api":         {SevCritical, "Docker-API zonder TLS-clientcertificaat", "Wie deze API bereikt, is root op de host. Zet de tcp-socket uit of gebruik --tlsverify."},
+	"elasticsearch-open": {SevHigh, "Elasticsearch zonder login", "Zet xpack.security.enabled: true en beperk poort 9200."},
+	"etcd-open":          {SevMedium, "etcd zonder clientcertificaat", "Zet client-cert-auth aan of beperk 2379 tot de clusterleden."},
+	"prometheus-open":    {SevLow, "Prometheus-API zonder login", "Beperk Prometheus tot het beheernetwerk of zet er een proxy met login voor."},
+	"grafana-anon":       {SevMedium, "Grafana laat anoniem dashboards zien", "Zet [auth.anonymous] enabled = false in grafana.ini."},
+	"grafana-default":    {SevCritical, "Grafana met het standaardwachtwoord admin/admin", "Wijzig meteen het wachtwoord van admin in Grafana."},
+	"traefik-api":        {SevMedium, "Traefik-API zonder login", "Zet api.insecure op false en bescherm het dashboard met een middleware met login."},
+	"basic-default":      {SevCritical, "Login met het standaardwachtwoord admin/admin", "Wijzig meteen het wachtwoord van dit toestel of deze dienst."},
+	"redis-noauth":       {SevHigh, "Redis zonder wachtwoord", "Zet requirepass (of ACL's) en bind Redis aan 127.0.0.1 of het clusternetwerk."},
+	"memcached-open":     {SevMedium, "Memcached open over het netwerk", "Bind memcached aan 127.0.0.1 (-l 127.0.0.1)."},
+}
+
+func probeDrafts(p protocol.ScanPort, pr protocol.ProbeResult) []Draft {
+	var out []Draft
+	pp := fmt.Sprintf("%d/%s", p.Port, p.Proto)
+	for _, h := range pr.Hits {
+		r, ok := probeHits[h.ID]
+		if !ok {
+			continue
+		}
+		out = append(out, Draft{Kind: KindNetwork, Key: "dienst:" + h.ID + ":" + pp, Severity: r.Severity, Title: r.Title + " (" + pp + ")",
+			Summary: h.Detail + ".", Fix: r.Fix, Detail: map[string]any{"port": p.Port, "proto": p.Proto, "check": h.ID, "title": pr.Title}})
+	}
+	return out
+}
+
+// probeTargets kiest uit een scan de diensten die de scanner aanspreekt.
+func probeTargets(res *protocol.ScanResult) []protocol.ProbeTarget {
+	var out []protocol.ProbeTarget
+	for _, h := range res.Hosts {
+		for _, p := range h.Ports {
+			if p.Proto != "tcp" {
+				continue
+			}
+			kind := ""
+			svc := strings.ToLower(p.Service)
+			switch {
+			case p.Port == 6379 || svc == "redis":
+				kind = protocol.ProbeRedis
+			case p.Port == 11211 || strings.HasPrefix(svc, "memcache"):
+				kind = protocol.ProbeMemcached
+			case p.Tunnel == "ssl" && (strings.HasPrefix(svc, "http") || svc == "" || svc == "ssl"), svc == "https", svc == "https-alt":
+				kind = protocol.ProbeHTTPS
+			case strings.HasPrefix(svc, "http"), slices.Contains([]int{2375, 2379, 9090, 9200}, p.Port):
+				kind = protocol.ProbeHTTP
+			}
+			if kind != "" && len(out) < protocol.MaxProbeTargets {
+				out = append(out, protocol.ProbeTarget{Addr: h.Addr, Port: p.Port, Kind: kind})
+			}
+		}
+	}
+	return out
 }

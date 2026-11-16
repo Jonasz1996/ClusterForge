@@ -14487,6 +14487,7 @@ components:
         scanner_id: { type: string, format: uuid, nullable: true }
         profile: { type: string, enum: [snel, standaard, volledig] }
         max_rate: { type: integer, minimum: 10, maximum: 5000 }
+        default_passwords: { type: boolean, description: "Per dienst één aanmeldpoging met het standaardwachtwoord (opt-in)." }
         schedule: { type: string, enum: [uit, dagelijks, wekelijks] }
         weekday: { type: integer, minimum: 0, maximum: 6 }
         hour: { type: integer, minimum: 0, maximum: 23 }

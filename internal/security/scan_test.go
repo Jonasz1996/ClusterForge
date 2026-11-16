@@ -38,7 +38,7 @@ func TestAnalyzeHosts(t *testing.T) {
 		}},
 		{Addr: "192.168.10.9", Ports: []protocol.ScanPort{{Proto: "tcp", Port: 6379}}},
 	}}
-	hosts, drafts, open := analyzeHosts(res, map[string]*knownNode{"192.168.10.5": kn}, now)
+	hosts, drafts, open := analyzeHosts(res, map[string]*knownNode{"192.168.10.5": kn}, nil, now)
 	if open != 5 || len(hosts) != 2 || hosts[0].Node != "web01" || hosts[1].NodeID != nil {
 		t.Fatalf("hosts = %+v", hosts)
 	}
@@ -60,5 +60,33 @@ func TestAnalyzeHosts(t *testing.T) {
 	}
 	if d := drafts["192.168.10.9"]; len(d) != 1 || d[0].Key != "poort:6379/tcp" {
 		t.Errorf("onbekende host = %+v", d)
+	}
+}
+
+func TestProbeTargetsAndDrafts(t *testing.T) {
+	res := &protocol.ScanResult{Hosts: []protocol.ScanHost{{Addr: "192.168.10.180", Ports: []protocol.ScanPort{
+		{Proto: "tcp", Port: 22, Service: "ssh"},
+		{Proto: "tcp", Port: 7000, Service: "http"},
+		{Proto: "tcp", Port: 443, Service: "http", Tunnel: "ssl"},
+		{Proto: "tcp", Port: 6379, Service: "redis"},
+	}}}}
+	got := probeTargets(res)
+	if len(got) != 3 || got[0].Kind != "http" || got[1].Kind != "https" || got[2].Kind != "redis" {
+		t.Fatalf("doelen = %+v", got)
+	}
+	probes := []protocol.ProbeResult{{Addr: "192.168.10.180", Port: 7000, Kind: "http", Title: "Statistics Report for HAProxy",
+		Hits: []protocol.ProbeHit{{ID: "haproxy-admin", Detail: "statistiekpagina met beheeracties, zonder login"}}}}
+	hosts, drafts, _ := analyzeHosts(res, nil, probes, time.Now())
+	if hosts[0].Expected[1].Title == "" || len(hosts[0].Expected[1].Hits) != 1 {
+		t.Errorf("verwacht = %+v", hosts[0].Expected[1])
+	}
+	found := false
+	for _, d := range drafts["192.168.10.180"] {
+		if d.Key == "dienst:haproxy-admin:7000/tcp" && d.Severity == SevHigh {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("geen HAProxy-bevinding in %+v", drafts)
 	}
 }

@@ -326,6 +326,7 @@ export type SecurityScan = {
   scanner_name: string;
   profile: "snel" | "standaard" | "volledig";
   max_rate: number;
+  default_passwords: boolean;
   schedule: "uit" | "dagelijks" | "wekelijks";
   weekday: number;
   hour: number;
@@ -361,7 +362,14 @@ export type ScanPort = {
   scripts?: Record<string, string>;
 };
 
-export type RunPort = { proto: string; port: number; known: "" | "luistert" | "firewall" | "dicht" | "onbekend"; process?: string };
+export type RunPort = {
+  proto: string;
+  port: number;
+  known: "" | "luistert" | "firewall" | "dicht" | "onbekend";
+  process?: string;
+  title?: string;
+  hits?: { id: string; detail?: string }[];
+};
 
 export type RunHost = {
   addr: string;
@@ -376,7 +384,7 @@ export type RunHost = {
 };
 
 export type ScanRunDetail = ScanRun & {
-  result: { nmap: string; args: string[]; truncated: boolean; notes: string[]; hosts: RunHost[] } | null;
+  result: { nmap: string; args: string[]; truncated: boolean; notes: string[]; hosts: RunHost[]; probed: boolean } | null;
 };
 
 export function useScans() {

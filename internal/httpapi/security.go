@@ -228,7 +228,7 @@ func (s *Server) GetSecurityHardening(w http.ResponseWriter, r *http.Request) {
 
 func scanInput(in gen.SecurityScanInput) security.ScanInput {
 	out := security.ScanInput{Name: in.Name, ScopeID: in.ScopeId, Profile: string(in.Profile), Schedule: string(in.Schedule),
-		MaxRate: deref(in.MaxRate), Weekday: deref(in.Weekday), Hour: 2}
+		MaxRate: deref(in.MaxRate), Weekday: deref(in.Weekday), Hour: 2, DefaultPasswords: deref(in.DefaultPasswords)}
 	if in.Hour != nil {
 		out.Hour = *in.Hour
 	}

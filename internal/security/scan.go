@@ -52,23 +52,27 @@ type Scan struct {
 	ScannerName string     `json:"scanner_name"`
 	Profile     string     `json:"profile"`
 	MaxRate     int        `json:"max_rate"`
-	Schedule    string     `json:"schedule"`
-	Weekday     int        `json:"weekday"`
-	Hour        int        `json:"hour"`
-	NextRun     *time.Time `json:"next_run"`
-	Running     bool       `json:"running"`
-	LastRun     *ScanRun   `json:"last_run"`
+	// DefaultPasswords: één aanmeldpoging met het standaardwachtwoord per
+	// dienst (opt-in).
+	DefaultPasswords bool       `json:"default_passwords"`
+	Schedule         string     `json:"schedule"`
+	Weekday          int        `json:"weekday"`
+	Hour             int        `json:"hour"`
+	NextRun          *time.Time `json:"next_run"`
+	Running          bool       `json:"running"`
+	LastRun          *ScanRun   `json:"last_run"`
 }
 
 type ScanInput struct {
-	Name      string
-	ScopeID   uuid.UUID
-	ScannerID *uuid.UUID
-	Profile   string
-	MaxRate   int
-	Schedule  string
-	Weekday   int
-	Hour      int
+	Name             string
+	ScopeID          uuid.UUID
+	ScannerID        *uuid.UUID
+	Profile          string
+	MaxRate          int
+	DefaultPasswords bool
+	Schedule         string
+	Weekday          int
+	Hour             int
 }
 
 type ScanRun struct {
@@ -106,6 +110,9 @@ type RunPort struct {
 	// onbekend (niets bij ClusterForge bekend), of leeg (geen node).
 	Known   string `json:"known"`
 	Process string `json:"process,omitempty"`
+	// Title en Hits komen van het aanspreken van de dienst (M4).
+	Title string              `json:"title,omitempty"`
+	Hits  []protocol.ProbeHit `json:"hits,omitempty"`
 }
 
 type RunResult struct {
@@ -114,6 +121,8 @@ type RunResult struct {
 	Truncated bool      `json:"truncated"`
 	Notes     []string  `json:"notes"`
 	Hosts     []RunHost `json:"hosts"`
+	// Probed: de diensten werden ook aangesproken (scanner met protocol 43).
+	Probed bool `json:"probed"`
 }
 
 type ScanRunDetail struct {
@@ -176,7 +185,8 @@ func (s *Service) Scanners(ctx context.Context) ([]Scanner, error) {
 }
 
 const scansSQL = `
-SELECT s.id, s.name, s.scope_id, sc.name, s.scanner_id, coalesce(n.hostname, ''), s.profile, s.max_rate, s.schedule, s.weekday, s.hour, s.next_run
+SELECT s.id, s.name, s.scope_id, sc.name, s.scanner_id, coalesce(n.hostname, ''), s.profile, s.max_rate, s.default_passwords,
+       s.schedule, s.weekday, s.hour, s.next_run
 FROM security_scans s
 JOIN security_scopes sc ON sc.id = s.scope_id
 LEFT JOIN nodes n ON n.id = s.scanner_id
@@ -199,7 +209,7 @@ func (s *Service) scans(ctx context.Context, where string, args ...any) ([]Scan,
 	for rows.Next() {
 		var sc Scan
 		if err := rows.Scan(&sc.ID, &sc.Name, &sc.ScopeID, &sc.ScopeName, &sc.ScannerID, &sc.ScannerName, &sc.Profile, &sc.MaxRate,
-			&sc.Schedule, &sc.Weekday, &sc.Hour, &sc.NextRun); err != nil {
+			&sc.DefaultPasswords, &sc.Schedule, &sc.Weekday, &sc.Hour, &sc.NextRun); err != nil {
 			return nil, err
 		}
 		out = append(out, sc)
@@ -330,13 +340,13 @@ func (s *Service) SaveScan(ctx context.Context, actor events.Actor, userID *uuid
 	var sid uuid.UUID
 	var err error
 	if id == nil {
-		err = s.pool.QueryRow(ctx, `INSERT INTO security_scans (name, scope_id, scanner_id, profile, max_rate, schedule, weekday, hour, next_run, updated_by)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`, name, in.ScopeID, in.ScannerID, in.Profile, in.MaxRate, in.Schedule,
-			in.Weekday, in.Hour, next, userID).Scan(&sid)
+		err = s.pool.QueryRow(ctx, `INSERT INTO security_scans (name, scope_id, scanner_id, profile, max_rate, schedule, weekday, hour, next_run, updated_by, default_passwords)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) RETURNING id`, name, in.ScopeID, in.ScannerID, in.Profile, in.MaxRate, in.Schedule,
+			in.Weekday, in.Hour, next, userID, in.DefaultPasswords).Scan(&sid)
 	} else {
 		err = s.pool.QueryRow(ctx, `UPDATE security_scans SET name = $2, scope_id = $3, scanner_id = $4, profile = $5, max_rate = $6,
-    schedule = $7, weekday = $8, hour = $9, next_run = $10, updated_by = $11, updated_at = now() WHERE id = $1 RETURNING id`,
-			*id, name, in.ScopeID, in.ScannerID, in.Profile, in.MaxRate, in.Schedule, in.Weekday, in.Hour, next, userID).Scan(&sid)
+    schedule = $7, weekday = $8, hour = $9, next_run = $10, updated_by = $11, default_passwords = $12, updated_at = now() WHERE id = $1 RETURNING id`,
+			*id, name, in.ScopeID, in.ScannerID, in.Profile, in.MaxRate, in.Schedule, in.Weekday, in.Hour, next, userID, in.DefaultPasswords).Scan(&sid)
 	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Scan{}, ErrNotFound
@@ -351,7 +361,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) RETURNING id`, name, in.ScopeID
 		return Scan{}, err
 	}
 	s.event(ctx, actor, "security_scan", sid.String(), nil, "security.scan_saved",
-		map[string]any{"name": name, "profile": in.Profile, "schedule": in.Schedule})
+		map[string]any{"name": name, "profile": in.Profile, "schedule": in.Schedule, "default_passwords": in.DefaultPasswords})
 	list, err := s.scans(ctx, "WHERE s.id = $1", sid)
 	if err != nil {
 		return Scan{}, err
@@ -536,7 +546,25 @@ func (s *Service) runScan(ctx context.Context, sc Scan, scope Scope, scanner Sca
 			map[string]any{"name": sc.Name, "scanner": scanner.Hostname, "error": err.Error()})
 		return
 	}
-	result, open, found, err := s.analyzeScan(dctx, scope, res.Scan)
+	var probes []protocol.ProbeResult
+	probed := false
+	if targets := probeTargets(res.Scan); len(targets) > 0 && scanner.Protocol >= protocol.SecurityProbeSince {
+		pctx, pcancel := context.WithTimeout(ctx, 15*time.Minute)
+		pres, perr := s.bus.Security(pctx, scanner.NodeID, protocol.SecurityRequest{Op: protocol.SecurityOpProbe,
+			Probe: &protocol.ProbeSpec{Allowed: scope.CIDRs, Targets: targets, DefaultPasswords: sc.DefaultPasswords}})
+		pcancel()
+		switch {
+		case perr != nil:
+			notes = append(notes, "Diensten aanspreken mislukt: "+perr.Error())
+		case pres.Error != "":
+			notes = append(notes, "Diensten aanspreken mislukt: "+pres.Error)
+		default:
+			probes, probed = pres.Probe, true
+		}
+	} else if len(targets) > 0 {
+		notes = append(notes, fmt.Sprintf("Panelen zonder login zijn niet gecontroleerd: de scanner heeft protocol %d nodig.", protocol.SecurityProbeSince))
+	}
+	result, open, found, err := s.analyzeScan(dctx, scope, res.Scan, probes)
 	if err != nil {
 		s.log.Warn("scan verwerken mislukt", "err", err)
 		_, _ = s.pool.Exec(dctx, `UPDATE security_scan_runs SET status = 'mislukt', error = $2, finished_at = $3 WHERE id = $1`,
@@ -544,6 +572,7 @@ func (s *Service) runScan(ctx context.Context, sc Scan, scope Scope, scanner Sca
 		return
 	}
 	result.Notes = append(notes, result.Notes...)
+	result.Probed = probed
 	raw, err := json.Marshal(result)
 	if err != nil {
 		return

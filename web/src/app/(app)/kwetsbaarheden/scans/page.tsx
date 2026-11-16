@@ -367,6 +367,12 @@ function HostCard({ h }: { h: RunHost }) {
                         {[p.service, p.product, p.version].filter(Boolean).join(" ") || "–"}
                       </div>
                       {p.extra && <div className="text-xs text-slate-500">{p.extra}</div>}
+                      {e?.title && <div className="text-xs text-slate-500">“{e.title}”</div>}
+                      {e?.hits?.map((x) => (
+                        <div key={x.id} className="mt-1">
+                          <Badge tone="red">{x.detail || x.id}</Badge>
+                        </div>
+                      ))}
                       {scripts.length > 0 && (
                         <button className="text-xs text-blue-600 hover:underline dark:text-blue-400" onClick={() => setOpen(open === i ? null : i)}>
                           {open === i ? "verberg details" : `${scripts.length} details`}
@@ -405,6 +411,7 @@ function ScanForm({ scan, scopes, o, onClose }: { scan: SecurityScan | null; sco
   const [weekday, setWeekday] = useState(String(scan?.weekday ?? 0));
   const [hour, setHour] = useState(String(scan?.hour ?? 2));
   const [rate, setRate] = useState(String(scan?.max_rate ?? 300));
+  const [defaults, setDefaults] = useState(scan?.default_passwords ?? false);
   const submit = () =>
     save.mutate(
       {
@@ -418,6 +425,7 @@ function ScanForm({ scan, scopes, o, onClose }: { scan: SecurityScan | null; sco
           weekday: Number(weekday),
           hour: Number(hour),
           max_rate: Number(rate),
+          default_passwords: defaults,
         },
       },
       { onSuccess: onClose },
@@ -493,7 +501,20 @@ function ScanForm({ scan, scopes, o, onClose }: { scan: SecurityScan | null; sco
             <Input id="scan-rate" type="number" min={10} max={5000} value={rate} onChange={(e) => setRate(e.target.value)} />
           </Field>
         </div>
-        <p className="text-xs text-slate-500">Scripts die meelopen: {o.scripts.join(", ")}. Alleen lezen wat een dienst zelf vertelt.</p>
+        <label className="flex items-start gap-2 rounded-md border border-slate-200 p-3 text-sm dark:border-slate-700">
+          <input type="checkbox" className="mt-1" checked={defaults} onChange={(e) => setDefaults(e.target.checked)} />
+          <span>
+            <span className="font-medium">Standaardwachtwoorden controleren</span>
+            <span className="block text-slate-500">
+              Per dienst één aanmeldpoging met het bekende standaardwachtwoord (admin/admin bij Grafana en bij een login van de browser). Nooit meer
+              dan één poging, dus geen risico op een vergrendeld account.
+            </span>
+          </span>
+        </label>
+        <p className="text-xs text-slate-500">
+          Scripts die meelopen: {o.scripts.join(", ")}. Daarna spreekt de scanner elke webdienst, Redis en Memcached één keer anoniem aan om panelen
+          en API&apos;s zonder login te vinden.
+        </p>
         {save.isError && <Alert>{save.error instanceof Error ? save.error.message : String(save.error)}</Alert>}
         <div className="flex justify-end gap-2">
           <Button variant="secondary" onClick={onClose}>

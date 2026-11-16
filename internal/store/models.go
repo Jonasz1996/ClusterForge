@@ -1714,19 +1714,20 @@ type SecurityKev struct {
 }
 
 type SecurityScan struct {
-	ID        uuid.UUID
-	Name      string
-	ScopeID   uuid.UUID
-	ScannerID *uuid.UUID
-	Profile   string
-	MaxRate   int32
-	Schedule  string
-	Weekday   int32
-	Hour      int32
-	NextRun   *time.Time
-	CreatedAt time.Time
-	UpdatedAt time.Time
-	UpdatedBy *uuid.UUID
+	ID               uuid.UUID
+	Name             string
+	ScopeID          uuid.UUID
+	ScannerID        *uuid.UUID
+	Profile          string
+	MaxRate          int32
+	Schedule         string
+	Weekday          int32
+	Hour             int32
+	NextRun          *time.Time
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+	UpdatedBy        *uuid.UUID
+	DefaultPasswords bool
 }
 
 type SecurityScanRun struct {

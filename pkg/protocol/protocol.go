@@ -10,7 +10,7 @@ import (
 
 // Version is de protocolversie. Een agent meldt die bij elke heartbeat, zodat
 // de server geen berichten stuurt die de agent niet kent.
-const Version = 42
+const Version = 43
 
 // RecipeStepsSince is de eerste protocolversie die de stappen van recepten
 // kent: repo_deb, repo en ini_set (fase 9).

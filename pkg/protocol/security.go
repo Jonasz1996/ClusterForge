@@ -18,6 +18,11 @@ const SecurityAuditSince = 41
 // binnen de eigen scopes kan draaien (verzoek scan).
 const SecurityScanSince = 42
 
+// SecurityProbeSince is de eerste protocolversie die na een scan de
+// gevonden diensten aanspreekt (verzoek probe): panelen zonder login en,
+// als de beheerder het aanzet, één standaardwachtwoord per dienst.
+const SecurityProbeSince = 43
+
 // SubjectSecurity draagt de beveiligingsverzoeken: cf.node.<id>.security.
 const SubjectSecurity = "security"
 
@@ -40,7 +45,54 @@ const (
 	// met nmap (de scannercontainer of een eigen scanner-VM) kan dit; de
 	// agent controleert zelf nog eens dat elk doel binnen Allowed valt.
 	SecurityOpScan = "scan"
+	// SecurityOpProbe spreekt de diensten uit Probe aan met één anonieme
+	// aanvraag (en hoogstens één aanmeldpoging met een standaardwachtwoord
+	// als DefaultPasswords aanstaat). Ook hier alleen binnen Allowed.
+	SecurityOpProbe = "probe"
 )
+
+// Soorten diensten voor een probe.
+const (
+	ProbeHTTP      = "http"
+	ProbeHTTPS     = "https"
+	ProbeRedis     = "redis"
+	ProbeMemcached = "memcached"
+)
+
+// MaxProbeTargets begrenst een probe.
+const MaxProbeTargets = 512
+
+type ProbeSpec struct {
+	Allowed []string      `json:"allowed"`
+	Targets []ProbeTarget `json:"targets"`
+	// DefaultPasswords: per dienst één aanmeldpoging met het bekende
+	// standaardwachtwoord (opt-in; nooit meer dan één poging).
+	DefaultPasswords bool `json:"default_passwords,omitempty"`
+}
+
+type ProbeTarget struct {
+	Addr string `json:"addr"`
+	Port int    `json:"port"`
+	Kind string `json:"kind"`
+}
+
+// ProbeResult is wat een probe zag. Hits zijn vaste id's (zie
+// internal/security), geen vrije tekst van de dienst.
+type ProbeResult struct {
+	Addr   string     `json:"addr"`
+	Port   int        `json:"port"`
+	Kind   string     `json:"kind"`
+	Status int        `json:"status,omitempty"`
+	Title  string     `json:"title,omitempty"`
+	Server string     `json:"server,omitempty"`
+	Hits   []ProbeHit `json:"hits,omitempty"`
+	Error  string     `json:"error,omitempty"`
+}
+
+type ProbeHit struct {
+	ID     string `json:"id"`
+	Detail string `json:"detail,omitempty"`
+}
 
 // MaxScanDuration is hoe lang één netwerkscan hoogstens mag duren.
 const MaxScanDuration = 3 * time.Hour
@@ -117,10 +169,11 @@ const SecurityRequestTimeout = 90 * time.Second
 const MaxSecurityPackages = 20000
 
 type SecurityRequest struct {
-	ID       string    `json:"id"`
-	Op       string    `json:"op"`
-	Deadline time.Time `json:"deadline"`
-	Scan     *ScanSpec `json:"scan,omitempty"`
+	ID       string     `json:"id"`
+	Op       string     `json:"op"`
+	Deadline time.Time  `json:"deadline"`
+	Scan     *ScanSpec  `json:"scan,omitempty"`
+	Probe    *ProbeSpec `json:"probe,omitempty"`
 }
 
 type SecurityResponse struct {
@@ -128,6 +181,7 @@ type SecurityResponse struct {
 	Inventory *SecurityInventory `json:"inventory,omitempty"`
 	Audit     *SecurityAudit     `json:"audit,omitempty"`
 	Scan      *ScanResult        `json:"scan,omitempty"`
+	Probe     []ProbeResult      `json:"probe,omitempty"`
 }
 
 // SecurityAudit is wat de agent over de verharding van zijn node ziet.

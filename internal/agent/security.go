@@ -44,7 +44,7 @@ func (a *Agent) handleSecurity(data []byte) protocol.SecurityResponse {
 		return protocol.SecurityResponse{Error: "beveiligingsverzoek verlopen; klopt de klok van deze node?"}
 	}
 	timeout := protocol.SecurityRequestTimeout - 5*time.Second
-	if req.Op == protocol.SecurityOpScan {
+	if req.Op == protocol.SecurityOpScan || req.Op == protocol.SecurityOpProbe {
 		timeout = protocol.MaxScanDuration
 	}
 	if !req.Deadline.IsZero() {
@@ -69,6 +69,12 @@ func (a *Agent) handleSecurity(data []byte) protocol.SecurityResponse {
 			return protocol.SecurityResponse{Error: err.Error()}
 		}
 		return protocol.SecurityResponse{Scan: res}
+	case protocol.SecurityOpProbe:
+		res, err := a.probeServices(ctx, req.Probe)
+		if err != nil {
+			return protocol.SecurityResponse{Error: err.Error()}
+		}
+		return protocol.SecurityResponse{Probe: res}
 	default:
 		return protocol.SecurityResponse{Error: "onbekend beveiligingsverzoek: " + req.Op}
 	}
