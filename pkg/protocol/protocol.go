@@ -10,7 +10,7 @@ import (
 
 // Version is de protocolversie. Een agent meldt die bij elke heartbeat, zodat
 // de server geen berichten stuurt die de agent niet kent.
-const Version = 31
+const Version = 32
 
 // RecipeStepsSince is de eerste protocolversie die de stappen van recepten
 // kent: repo_deb, repo en ini_set (fase 9).
@@ -199,6 +199,12 @@ type Facts struct {
 
 	// Seaweed beschrijft SeaweedFS op de node; nil zonder.
 	Seaweed *SeaweedFacts `json:"seaweed,omitempty"`
+
+	// Vanaf PVESince.
+
+	// Proxmox beschrijft de Proxmox-host als de agent op een host draait;
+	// nil op elke andere machine.
+	Proxmox *PVEFacts `json:"proxmox,omitempty"`
 }
 
 // Tools zijn de gereedschappen die storingsinjectie nodig heeft: nft voor

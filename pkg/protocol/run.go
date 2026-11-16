@@ -87,6 +87,8 @@ type RunSpec struct {
 	User   string     `json:"user,omitempty"`
 	Apt    *AptRun    `json:"apt,omitempty"`
 	Docker *DockerRun `json:"docker,omitempty"`
+	// PVE hoort bij RunPVE (vanaf PVESince).
+	PVE *PVERun `json:"pve,omitempty"`
 }
 
 // AptRun zegt hoe apt bijwerkt.
@@ -183,6 +185,8 @@ type RunStatus struct {
 	Docker []DockerReport `json:"docker,omitempty"`
 	// Files zijn de bestanden van een Read-run.
 	Files []ComposeFile `json:"files,omitempty"`
+	// PVE is het resultaat van een run pve.
+	PVE *PVERunResult `json:"pve,omitempty"`
 }
 
 type RunResponse struct {
@@ -219,13 +223,13 @@ func (s RunSpec) Validate() error {
 		return fmt.Errorf("de tijdslimiet moet tussen 0 en %s liggen", RunTimeoutMax)
 	}
 	set := 0
-	for _, b := range []bool{s.Script != "", s.Apt != nil, s.Docker != nil} {
+	for _, b := range []bool{s.Script != "", s.Apt != nil, s.Docker != nil, s.PVE != nil} {
 		if b {
 			set++
 		}
 	}
 	if set > 1 {
-		return fmt.Errorf("een run is een script, apt of docker, niet meer tegelijk")
+		return fmt.Errorf("een run is een script, apt, docker of pve, niet meer tegelijk")
 	}
 	switch s.Kind {
 	case RunScript:
@@ -260,6 +264,13 @@ func (s RunSpec) Validate() error {
 			return fmt.Errorf("lege projectnaam")
 		}
 		if err := s.Docker.validate(); err != nil {
+			return err
+		}
+	case RunPVE:
+		if s.PVE == nil {
+			return fmt.Errorf("pve-run zonder actie")
+		}
+		if err := s.PVE.Validate(); err != nil {
 			return err
 		}
 	default:

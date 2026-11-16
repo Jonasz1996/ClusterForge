@@ -29,6 +29,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/Jonasz1996/clusterforge/internal/agentbus"
+	"github.com/Jonasz1996/clusterforge/internal/agents"
 	"github.com/Jonasz1996/clusterforge/internal/agentupgrade"
 	"github.com/Jonasz1996/clusterforge/internal/assistant"
 	"github.com/Jonasz1996/clusterforge/internal/auth"
@@ -61,6 +62,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/metrics"
 	"github.com/Jonasz1996/clusterforge/internal/planner"
 	"github.com/Jonasz1996/clusterforge/internal/proxmox"
+	"github.com/Jonasz1996/clusterforge/internal/pvehost"
 	"github.com/Jonasz1996/clusterforge/internal/recipes"
 	"github.com/Jonasz1996/clusterforge/internal/reports"
 	"github.com/Jonasz1996/clusterforge/internal/risk"
@@ -217,6 +219,12 @@ func serve() error {
 	csec.Box = box
 	// Fase 16: ufw op de nodes, via agentprotocol 30.
 	fw := firewall.NewService(pool, ev, runner, bus, log)
+	// Fase 17: de agent op de Proxmox-hosts (pct, qm, pveam), via
+	// agentprotocol 32; een uitrol maakt er nieuwe CT's mee.
+	pvh := pvehost.NewService(pool, ev, log, runner, bus, agents.NewService(pool, ev, bus))
+	pvh.Sync = pve
+	pvh.AgentSHA256 = func() map[string]string { return upg.Offer().SHA256 }
+	dep.Hosts = pvh
 	// Een database als onderdeel van een cluster: MariaDB Galera op de
 	// nodes die er al zijn, met het geheugengebruik uit VictoriaMetrics in
 	// het plan.
@@ -418,7 +426,7 @@ func serve() error {
 			Config: cfg, Log: log, Pool: pool, Auth: authSvc, Bus: bus, Hub: hub, Proxmox: pve, Jobs: runner,
 			Lifecycle: life, Deploy: dep, Backups: bk, Drift: drf, Failover: fo, Disaster: dis, Deps: dps, Rollout: ro,
 			GitOps: git, Assistant: asst, Risk: rsk, Topo: tp, Docs: dcs, Reports: rep, Kube: kub, KubeNodes: kn, Databases: dbs, Cronjobs: crons, Heal: hl,
-			Components: cmps, Upgrades: upg, Updates: upd, Commands: cmds, CrowdSec: csec, Firewall: fw, Version: version,
+			Components: cmps, Upgrades: upg, Updates: upd, Commands: cmds, CrowdSec: csec, Firewall: fw, PVEHosts: pvh, Version: version,
 		}).Handler(),
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,

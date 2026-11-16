@@ -85,6 +85,12 @@ func (s *Service) Grow(ctx context.Context, j *jobs.Job, clusterID uuid.UUID, sp
 	if j.RequestedBy != nil {
 		r.actor = events.User(*j.RequestedBy)
 	}
+	if spec.Target.NewCT() {
+		r.p.ImageName, r.p.ImageShared, r.p.Target.ImageType = "nieuwe CT", true, "lxc"
+		if tpl, ok := s.Templates.Get(spec.Template.Name, spec.Template.Version); ok {
+			r.docker = usesDocker(tpl, &r.p)
+		}
+	}
 	for _, n := range nodes {
 		r.p.Nodes = append(r.p.Nodes, plannedNode{
 			ID: n.NodeID, Hostname: n.Hostname, Role: n.Role, Index: n.Index, Address: n.Address, Prefix: n.Prefix, VM: n.VM,
@@ -98,14 +104,17 @@ func (s *Service) Grow(ctx context.Context, j *jobs.Job, clusterID uuid.UUID, sp
 func (g *Grow) placeAll(ctx context.Context) error {
 	g.once.Do(func() {
 		r := g.r
-		img, err := r.s.pve.Image(ctx, r.p.Target.ProxmoxID, r.p.Target.ImageVMID)
-		if err != nil {
-			g.place = fmt.Errorf("de golden image (VM %d): %w", r.p.Target.ImageVMID, err)
-			return
+		p := &params{Target: r.p.Target, ImageShared: true}
+		if !r.p.Target.NewCT() {
+			img, err := r.s.pve.Image(ctx, r.p.Target.ProxmoxID, r.p.Target.ImageVMID)
+			if err != nil {
+				g.place = fmt.Errorf("de golden image (VM %d): %w", r.p.Target.ImageVMID, err)
+				return
+			}
+			r.p.ImageName, r.p.ImageShared, r.p.Target.ImageType = img.Name, img.Shared, img.Type
+			r.p.ImageStorage, r.p.ImageSizeGiB = img.Storage, img.SizeGiB
+			p = &params{Target: r.p.Target, ImageShared: img.Shared, ImageStorage: img.Storage, ImageSizeGiB: img.SizeGiB}
 		}
-		r.p.ImageName, r.p.ImageShared, r.p.Target.ImageType = img.Name, img.Shared, img.Type
-		r.p.ImageStorage, r.p.ImageSizeGiB = img.Storage, img.SizeGiB
-		p := &params{Target: r.p.Target, ImageShared: img.Shared, ImageStorage: img.Storage, ImageSizeGiB: img.SizeGiB}
 		var idx []int
 		for i, n := range r.p.Nodes {
 			row, err := r.s.q.GetNode(ctx, n.ID)
@@ -147,6 +156,9 @@ func (g *Grow) CreateVM(ctx context.Context, st *jobs.Step, i int) error {
 	if err := g.placeAll(ctx); err != nil {
 		return err
 	}
+	if g.r.p.Target.NewCT() {
+		return g.r.createCT(ctx, st, n)
+	}
 	return g.r.createVM(ctx, st, n)
 }
 
@@ -156,7 +168,7 @@ func (g *Grow) Enroll(ctx context.Context, st *jobs.Step) error {
 	if g.r.p.ServerURL == "" {
 		return errors.New("het adres van ClusterForge ontbreekt, dus de nieuwe nodes kunnen zich niet aanmelden")
 	}
-	if g.r.p.Target.ImageType == "" {
+	if g.r.p.Target.ImageType == "" && !g.r.p.Target.NewCT() {
 		// Een gewenste staat uit Git noemt het soort template niet.
 		if img, err := g.r.s.pve.Image(ctx, g.r.p.Target.ProxmoxID, g.r.p.Target.ImageVMID); err == nil {
 			g.r.p.Target.ImageType = img.Type

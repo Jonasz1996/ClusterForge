@@ -23,6 +23,7 @@ import (
 	"github.com/pquerna/otp/totp"
 
 	"github.com/Jonasz1996/clusterforge/internal/agentbus"
+	"github.com/Jonasz1996/clusterforge/internal/agents"
 	"github.com/Jonasz1996/clusterforge/internal/agentupgrade"
 	"github.com/Jonasz1996/clusterforge/internal/assistant"
 	"github.com/Jonasz1996/clusterforge/internal/auth"
@@ -52,6 +53,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/live"
 	"github.com/Jonasz1996/clusterforge/internal/metrics"
 	"github.com/Jonasz1996/clusterforge/internal/proxmox"
+	"github.com/Jonasz1996/clusterforge/internal/pvehost"
 	"github.com/Jonasz1996/clusterforge/internal/reports"
 	"github.com/Jonasz1996/clusterforge/internal/risk"
 	"github.com/Jonasz1996/clusterforge/internal/rollout"
@@ -94,6 +96,7 @@ type testEnv struct {
 	conns     *testConns
 	asst      *assistant.Service
 	upd       *updates.Service
+	pvh       *pvehost.Service
 	risk      *risk.Service
 	topo      *topo.Service
 	docs      *docs.Service
@@ -281,6 +284,10 @@ func newTestEnv(t *testing.T) *testEnv {
 	csec := crowdsec.NewService(pool, ev, runner, bus, log)
 	fw := firewall.NewService(pool, ev, runner, bus, log)
 	csec.Run.Poll = 20 * time.Millisecond
+	pvh := pvehost.NewService(pool, ev, log, runner, bus, agents.NewService(pool, ev, bus))
+	pvh.Sync, pvh.Run.Poll = pve, 20*time.Millisecond
+	pvh.AgentSHA256 = func() map[string]string { return upg.Offer().SHA256 }
+	dep.Hosts = pvh
 	var wg sync.WaitGroup
 	wg.Add(3)
 	go func() { defer wg.Done(); hub.Run(runCtx) }()
@@ -293,12 +300,12 @@ func newTestEnv(t *testing.T) *testEnv {
 	api := New(Deps{
 		Config: cfg, Log: log, Pool: pool, Auth: a, Bus: bus, Hub: hub, Proxmox: pve, Jobs: runner, Lifecycle: life,
 		Deploy: dep, Backups: bk, Drift: drf, Failover: fo, Disaster: dis, Deps: dps, Rollout: ro, GitOps: git, Assistant: asst,
-		Risk: rsk, Topo: tp, Docs: dcs, Reports: rep, Kube: kub, KubeNodes: kn, Databases: dbs, Cronjobs: crons, Heal: hl, Components: cmps, Upgrades: upg, Updates: upd, Commands: cmds, CrowdSec: csec, Firewall: fw, Version: "test",
+		Risk: rsk, Topo: tp, Docs: dcs, Reports: rep, Kube: kub, KubeNodes: kn, Databases: dbs, Cronjobs: crons, Heal: hl, Components: cmps, Upgrades: upg, Updates: upd, Commands: cmds, CrowdSec: csec, Firewall: fw, PVEHosts: pvh, Version: "test",
 	})
 	srv := httptest.NewServer(api.Handler())
 	t.Cleanup(srv.Close)
 	e := &testEnv{t: t, srv: srv, auth: a, pool: pool, api: api, bus: bus, eval: eval, vm: vm, pve: pve, jobs: runner, life: life, deploy: dep,
-		backups: bk, drift: drf, fo: fo, dis: dis, evalClock: evalClock, deps: dps, ro: ro, git: git, det: det, ana: ana, conns: conns, asst: asst, risk: rsk, topo: tp, docs: dcs, reports: rep, kube: kub, dbs: dbs, crons: crons, heal: hl, cmps: cmps, upg: upg, upd: upd, ingest: ingest, runCtx: runCtx}
+		backups: bk, drift: drf, fo: fo, dis: dis, evalClock: evalClock, deps: dps, ro: ro, git: git, det: det, ana: ana, conns: conns, asst: asst, risk: rsk, topo: tp, docs: dcs, reports: rep, kube: kub, dbs: dbs, crons: crons, heal: hl, cmps: cmps, upg: upg, upd: upd, pvh: pvh, ingest: ingest, runCtx: runCtx}
 	e.startRunner()
 	t.Cleanup(func() {
 		stop()

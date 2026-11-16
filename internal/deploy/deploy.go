@@ -80,6 +80,9 @@ type Service struct {
 	Changed func()
 	// Templates zijn de templates die de server kent; tests zetten er andere.
 	Templates *templates.Registry
+	// Hosts zijn de agents op de Proxmox-hosts (fase 17); nodig voor een
+	// uitrol met nieuwe CT's (Target.Create "ct").
+	Hosts HostAgents
 	// Kube vraagt voor de controle kube_ready de nodes op in Kubernetes.
 	// Zonder Kube faalt die controle.
 	Kube KubeNodes
@@ -172,7 +175,24 @@ type Target struct {
 	// Placement kiest per node de Proxmox-host en de storage; wat er niet
 	// in staat, kiest ClusterForge zelf.
 	Placement []Placement `json:"placement,omitempty"`
+
+	// Create is "ct" voor nieuwe CT's die de agent op de Proxmox-host maakt
+	// (fase 17); ImageVMID valt dan weg. Leeg kloont uit ImageVMID.
+	Create string `json:"create,omitempty"`
+	// OSTemplate is de containertemplate van een nieuwe CT, zoals
+	// local:vztmpl/debian-13-standard_13.1-2_amd64.tar.zst; leeg is de
+	// nieuwste debian-13-standard, op TemplateStorage (standaard local).
+	OSTemplate      string `json:"ostemplate,omitempty"`
+	TemplateStorage string `json:"template_storage,omitempty"`
+	// Privileged maakt bevoegde CT's; standaard onbevoegd.
+	Privileged bool `json:"privileged,omitempty"`
 }
+
+// CreateCT is Target.Create voor nieuwe CT's via de agent op de host.
+const CreateCT = "ct"
+
+// NewCT zegt of de uitrol nieuwe CT's maakt via de agent op de host.
+func (t Target) NewCT() bool { return t.Create == CreateCT }
 
 // Placement zegt waar één node komt: de node met deze rol en dit
 // volgnummer (1, 2, …). Een lege host of storage kiest ClusterForge.
@@ -181,6 +201,15 @@ type Placement struct {
 	Index   int    `json:"index"`
 	Host    string `json:"host,omitempty"`
 	Storage string `json:"storage,omitempty"`
+	// VMID is het nummer van de nieuwe VM of CT; 0 kiest ClusterForge.
+	VMID int `json:"vmid,omitempty"`
+	// Address is het vaste adres zonder prefix; leeg is het volgende vrije
+	// na FirstIP.
+	Address string `json:"address,omitempty"`
+	// CPU, MemoryMiB en DiskGiB vervangen die van de template; 0 laat ze.
+	CPU       int `json:"cpu,omitempty"`
+	MemoryMiB int `json:"memory_mib,omitempty"`
+	DiskGiB   int `json:"disk_gib,omitempty"`
 }
 
 // plannedNode is een node zoals de aanvraag hem plant.
@@ -196,6 +225,10 @@ type plannedNode struct {
 	// Storage is de storage voor de schijf; leeg is die van de template.
 	Storage string            `json:"storage,omitempty"`
 	VM      templates.VMShape `json:"vm"`
+	// VMID is het gekozen of voorgestelde nummer; VMIDChosen zegt of het
+	// gekozen is (dan precies dit nummer, anders het eerste vrije vanaf).
+	VMID       int  `json:"vmid,omitempty"`
+	VMIDChosen bool `json:"vmid_chosen,omitempty"`
 }
 
 // params gaan met de taak mee. Geheimen staan er niet in; die staan
@@ -245,6 +278,10 @@ type PlannedNode struct {
 	// Fixed zegt of host en storage gekozen zijn of door ClusterForge.
 	HostChosen, StorageChosen bool
 	VM                        templates.VMShape
+	// VMID is het nummer van de nieuwe VM of CT; 0 als Proxmox het bij het
+	// maken kiest.
+	VMID       int
+	VMIDChosen bool
 }
 
 // Plan controleert een aanvraag en zegt wat een uitrol zou maken, zonder
@@ -262,6 +299,7 @@ func (s *Service) Plan(ctx context.Context, req Request) (Plan, error) {
 		out.Nodes = append(out.Nodes, PlannedNode{
 			Hostname: n.Hostname, Role: n.Role, Index: n.Index, Address: n.Address, Prefix: n.Prefix, Host: n.Host,
 			Storage: or(n.Storage, p.ImageStorage), HostChosen: pl.Host != "", StorageChosen: pl.Storage != "", VM: n.VM,
+			VMID: n.VMID, VMIDChosen: n.VMIDChosen,
 		})
 	}
 	return out, nil
@@ -319,7 +357,11 @@ func (s *Service) planVersion(ctx context.Context, req Request, version string, 
 			return nil, nil, err
 		}
 		if req.Target.ImageType == "lxc" && tpl.ClusterType == "kubernetes" {
-			return nil, nil, invalid("target.image_vmid", "Kubernetes kan alleen op VM's; kies een golden image (VM-template)")
+			field := "target.image_vmid"
+			if req.Target.NewCT() {
+				field = "target.create"
+			}
+			return nil, nil, invalid(field, "Kubernetes kan alleen op VM's; kies een golden image (VM-template)")
 		}
 		p.Target = req.Target
 		if err := s.planNodes(ctx, tpl, p, used); err != nil {
@@ -595,6 +637,13 @@ func (s *Service) checkTarget(ctx context.Context, t *Target, p *params) error {
 	if err := checkNetwork(t); err != nil {
 		return err
 	}
+	switch t.Create {
+	case "":
+	case CreateCT:
+		return s.checkNewCT(ctx, t, p)
+	default:
+		return invalid("target.create", "onbekende keuze %q; leeg (klonen) of ct (nieuwe CT's)", t.Create)
+	}
 
 	img, err := s.pve.Image(ctx, t.ProxmoxID, t.ImageVMID)
 	switch {
@@ -654,6 +703,14 @@ func checkNetwork(t *Target) error {
 		return invalid("target.first_ip", "geef het eerste adres met prefix, zoals 10.0.20.11/24")
 	}
 	t.FirstIP = pf.String()
+	if reserved(pf.Masked(), pf.Addr()) {
+		return invalid("target.first_ip", "%s is een van de eerste drie adressen van %s; die zijn voor de gateway (CARP-VIP) en de twee firewalls. Begin bij .%d of hoger",
+			pf.Addr(), pf.Masked(), firstFree(pf.Masked()))
+	}
+	if strings.TrimSpace(t.Gateway) == "" {
+		// De gateway staat altijd op het eerste adres van het VLAN.
+		t.Gateway = pf.Masked().Addr().Next().String()
+	}
 	gw, err := netip.ParseAddr(strings.TrimSpace(t.Gateway))
 	if err != nil || !gw.Is4() || !pf.Masked().Contains(gw) {
 		return invalid("target.gateway", "de gateway moet een adres in %s zijn", pf.Masked())
@@ -704,6 +761,32 @@ func (s *Service) planNodes(ctx context.Context, tpl *templates.Template, p *par
 		pf := netip.MustParsePrefix(p.Target.FirstIP)
 		next, subnet = pf.Addr(), pf.Masked()
 	}
+	chosen := placementIndex(p.Target.Placement)
+	// Gekozen adressen en nummers: de rest slaat ze over.
+	taken := map[string]bool{}
+	for _, pl := range p.Target.Placement {
+		if pl.Address != "" {
+			if p.Target.Network != "static" {
+				return invalid("target.placement", "een adres per node kan alleen met vaste adressen")
+			}
+			a, err := netip.ParseAddr(pl.Address)
+			switch {
+			case err != nil || !a.Is4():
+				return invalid("target.placement", "%s/%d: %q is geen IPv4-adres", pl.Role, pl.Index, pl.Address)
+			case !subnet.Contains(a) || a == lastAddr(subnet) || a == subnet.Addr():
+				return invalid("target.placement", "%s ligt niet in %s", a, subnet)
+			case reserved(subnet, a):
+				return invalid("target.placement", "%s is een van de eerste drie adressen van %s (gateway en firewalls)", a, subnet)
+			case a.String() == p.Target.Gateway:
+				return invalid("target.placement", "%s is de gateway", a)
+			case used[a.String()]:
+				return invalid("target.placement", "%s is al in gebruik bij een node of VIP", a)
+			case taken[a.String()]:
+				return invalid("target.placement", "%s staat bij twee nodes", a)
+			}
+			taken[a.String()] = true
+		}
+	}
 	for i, r := range tpl.Roles {
 		vm, err := tpl.VM(r.Name, c)
 		if err != nil {
@@ -714,8 +797,27 @@ func (s *Service) planNodes(ctx context.Context, tpl *templates.Template, p *par
 			if len(tpl.Roles) > 1 {
 				host = fmt.Sprintf("%s-%s-%02d", p.Cluster.Slug, r.Name, n)
 			}
+			pl := chosen[placementKey(r.Name, n)]
 			node := plannedNode{Hostname: host, Role: r.Name, Index: n, VM: vm}
-			if next.IsValid() {
+			if pl.CPU > 0 {
+				node.VM.CPU = pl.CPU
+			}
+			if pl.MemoryMiB > 0 {
+				node.VM.MemoryMiB = pl.MemoryMiB
+			}
+			if pl.DiskGiB > 0 {
+				node.VM.DiskGiB = pl.DiskGiB
+			}
+			if pl.VMID > 0 {
+				node.VMID, node.VMIDChosen = pl.VMID, true
+			}
+			switch {
+			case pl.Address != "":
+				node.Address, node.Prefix = pl.Address, subnet.Bits()
+			case next.IsValid():
+				for taken[next.String()] {
+					next = next.Next()
+				}
 				broadcast := lastAddr(subnet)
 				if !subnet.Contains(next) || next == broadcast || next == subnet.Addr() {
 					return invalid("target.first_ip", "er passen niet genoeg adressen in %s na %s", subnet, p.Target.FirstIP)
@@ -731,6 +833,9 @@ func (s *Service) planNodes(ctx context.Context, tpl *templates.Template, p *par
 			}
 			p.Nodes = append(p.Nodes, node)
 		}
+	}
+	if err := s.planVMIDs(ctx, p); err != nil {
+		return err
 	}
 	return s.placeNodes(ctx, p)
 }
@@ -768,6 +873,9 @@ func (s *Service) checkVIP(ctx context.Context, tpl *templates.Template, p *para
 		subnet := netip.MustParsePrefix(p.Target.FirstIP).Masked()
 		if !subnet.Contains(a) || a.String() == p.Target.Gateway {
 			return invalid("params.vip", "het VIP moet een vrij adres in %s zijn", subnet)
+		}
+		if reserved(subnet, a) {
+			return invalid("params.vip", "%s is een van de eerste drie adressen van %s; die zijn voor de gateway en de firewalls", a, subnet)
 		}
 	}
 	p.VIP = vip

@@ -3925,6 +3925,85 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/pve-hosts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Proxmox-hosts met een agent (fase 17), en hosts uit de koppelingen zonder agent */
+        get: operations["listPveHosts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/pve-hosts/{nodeId}/inventory": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        /** Wat de agent op de host ziet - CT's en VM's met configuratie en snapshots, storages, bridges, containertemplates */
+        get: operations["getPveHostInventory"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/pve-hosts/{nodeId}/available": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        /** Containertemplates die de host met pveam kan downloaden */
+        get: operations["getPveHostAvailable"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/pve-hosts/{nodeId}/actions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Een actie met pct, qm of pveam op de host, als taak pvehost.action (admin)
+         * @description op is een protocol.PVERun (action, vmid, en per actie set, disk/size, snapshot, target, create, template).
+         *     Verwijderen vraagt confirm (naam of nummer van de gast) en weigert een gast van een node in een cluster.
+         *     bootstrap (cf-agent in een CT) vraagt server_url.
+         */
+        post: operations["startPveHostAction"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/firewall": {
         parameters: {
             query?: never;
@@ -11751,8 +11830,19 @@ export interface components {
         DeployTarget: {
             /** Format: uuid */
             proxmox_id: string;
-            /** @description De VM-template (golden image) om uit te klonen */
-            image_vmid: number;
+            /** @description De VM-template (golden image) of CT-template om uit te klonen; niet bij create ct */
+            image_vmid?: number;
+            /**
+             * @description ct - nieuwe CT's die de agent op de Proxmox-host maakt (fase 17), met cf-agent erin; image_vmid valt dan weg.
+             * @enum {string}
+             */
+            create?: "ct";
+            /** @description Containertemplate bij create ct, zoals local:vztmpl/debian-13-standard_13.1-2_amd64.tar.zst; leeg is de nieuwste debian-13-standard */
+            ostemplate?: string;
+            /** @description Storage voor de containertemplate als de host hem downloadt; standaard local */
+            template_storage?: string;
+            /** @description Bevoegde CT's in plaats van onbevoegde */
+            privileged?: boolean;
             /** @description Storage voor de schijven; leeg is die van de template */
             storage?: string;
             /** @description Standaard vmbr0 */
@@ -11777,6 +11867,16 @@ export interface components {
             host?: string;
             /** @description Storage voor de schijf; leeg is de standaard */
             storage?: string;
+            /** @description Nummer van de nieuwe VM of CT; leeg kiest ClusterForge */
+            vmid?: number;
+            /** @description Vast IPv4-adres zonder prefix; leeg is het volgende vrije na first_ip */
+            address?: string;
+            /** @description vCPU's; leeg volgt de template */
+            cpu?: number;
+            /** @description Geheugen in MB; leeg volgt de template */
+            memory_mib?: number;
+            /** @description Schijf in GB; leeg volgt de template */
+            disk_gib?: number;
         };
         DeployInput: {
             template: string;
@@ -11824,6 +11924,9 @@ export interface components {
             cpu: number;
             memory_mib: number;
             disk_gib: number;
+            /** @description Nummer van de nieuwe VM of CT; 0 als Proxmox het bij het maken kiest */
+            vmid: number;
+            vmid_chosen: boolean;
         };
         DeployPlan: {
             nodes: components["schemas"]["DeployPlanNode"][];
@@ -12332,6 +12435,17 @@ export interface components {
             nodes: string[];
             /** @description ClusterForge zette deze ban ook op andere nodes */
             shared: boolean;
+        };
+        /** @description Een object van de Proxmox-hosts (fase 17); de velden staan in web/src/lib/pvehosts.ts en pkg/protocol/pve.go. */
+        PveObject: {
+            [key: string]: unknown;
+        };
+        PveActionInput: {
+            op: components["schemas"]["PveObject"];
+            /** @description Bij verwijderen de naam of het nummer van de gast */
+            confirm?: string;
+            /** @description Bij bootstrap het adres waarmee de CT ClusterForge bereikt */
+            server_url?: string;
         };
         /** @description Een object van de firewall (fase 16); de velden staan in web/src/lib/firewall.ts en internal/firewall. */
         FirewallObject: {
@@ -18637,6 +18751,109 @@ export interface operations {
             400: components["responses"]["Error"];
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
+        };
+    };
+    listPveHosts: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PveObject"];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    getPveHostInventory: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PveObject"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+        };
+    };
+    getPveHostAvailable: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PveObject"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+        };
+    };
+    startPveHostAction: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PveActionInput"];
+            };
+        };
+        responses: {
+            /** @description Taak aangemaakt */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Job"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
         };
     };
     getFirewall: {

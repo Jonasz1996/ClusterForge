@@ -39,9 +39,12 @@ export default function ProxmoxPage() {
         title="Proxmox"
         description="Hosts, VM's en containers uit je Proxmox-omgeving, met start, stop, snapshot en migratie."
         actions={
-          isAdmin &&
-          enabled &&
-          !adding && <Button onClick={() => setAdding(true)}>Proxmox koppelen</Button>
+          <div className="flex items-center gap-3">
+            <Link href="/proxmox/hosts" className="text-sm text-brand-700 hover:underline dark:text-brand-300">
+              Hosts met agent (pct/qm) →
+            </Link>
+            {isAdmin && enabled && !adding && <Button onClick={() => setAdding(true)}>Proxmox koppelen</Button>}
+          </div>
         }
       />
       {!enabled && (

@@ -200,6 +200,7 @@ func (c *Collector) Facts(ctx context.Context) protocol.Facts {
 	f.Certificates = c.certificates()
 	f.Tools = c.tools()
 	f.Seaweed = c.seaweed(ctx)
+	f.Proxmox = c.proxmox(ctx)
 	return f
 }
 

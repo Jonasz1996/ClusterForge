@@ -33,8 +33,19 @@ func checkPlacement(t *Target) error {
 	var keep []Placement
 	for _, pl := range t.Placement {
 		pl.Role, pl.Host, pl.Storage = strings.TrimSpace(pl.Role), strings.TrimSpace(pl.Host), strings.TrimSpace(pl.Storage)
-		if pl.Host == "" && pl.Storage == "" {
+		if pl.Host == "" && pl.Storage == "" && pl.VMID == 0 && strings.TrimSpace(pl.Address) == "" && pl.CPU == 0 && pl.MemoryMiB == 0 && pl.DiskGiB == 0 {
 			continue
+		}
+		pl.Address = strings.TrimSpace(pl.Address)
+		switch {
+		case pl.CPU < 0 || pl.CPU > 512:
+			return invalid("target.placement", "%s/%d: CPU moet tussen 1 en 512 liggen", pl.Role, pl.Index)
+		case pl.MemoryMiB != 0 && (pl.MemoryMiB < 256 || pl.MemoryMiB > 16<<20):
+			return invalid("target.placement", "%s/%d: geheugen moet minstens 256 MB zijn", pl.Role, pl.Index)
+		case pl.DiskGiB < 0 || pl.DiskGiB > 65536:
+			return invalid("target.placement", "%s/%d: ongeldige schijf %d GB", pl.Role, pl.Index, pl.DiskGiB)
+		case pl.VMID < 0:
+			return invalid("target.placement", "%s/%d: ongeldig nummer %d", pl.Role, pl.Index, pl.VMID)
 		}
 		if pl.Role == "" || pl.Index < 1 {
 			return invalid("target.placement", "elke keuze per node noemt een rol en een volgnummer")
@@ -70,9 +81,23 @@ func (s *Service) placeNodes(ctx context.Context, p *params) error {
 	if err != nil {
 		return err
 	}
-	img, err := s.q.GetProxmoxGuest(ctx, store.GetProxmoxGuestParams{ConnectionID: p.Target.ProxmoxID, Vmid: int32p(p.Target.ImageVMID)})
-	if err != nil {
-		return err
+	var img store.ProxmoxResource
+	agentHosts := map[string]bool{}
+	if p.Target.NewCT() {
+		// Nieuwe CT's kunnen alleen op een host met een agent.
+		ready, err := s.readyHosts(ctx, p.Target.ProxmoxID)
+		if err != nil {
+			return err
+		}
+		for name := range ready {
+			agentHosts[name] = true
+		}
+	} else {
+		var err error
+		img, err = s.q.GetProxmoxGuest(ctx, store.GetProxmoxGuestParams{ConnectionID: p.Target.ProxmoxID, Vmid: int32p(p.Target.ImageVMID)})
+		if err != nil {
+			return err
+		}
 	}
 	guestType := p.Target.ImageType
 	if guestType == "" {
@@ -85,13 +110,16 @@ func (s *Service) placeNodes(ctx context.Context, p *params) error {
 	online := map[string]proxmox.HostInfo{}
 	var names []string
 	for _, h := range hosts {
-		if h.Online {
+		if h.Online && (!p.Target.NewCT() || agentHosts[h.Name]) {
 			online[h.Name] = h
 			names = append(names, h.Name)
 		}
 	}
 	sort.Strings(names)
 	if len(names) == 0 {
+		if p.Target.NewCT() {
+			return invalid("target.placement", "er is geen Proxmox-host online met een agent die CT's kan maken")
+		}
 		return invalid("target.placement", "er is geen Proxmox-host online")
 	}
 	find := func(name, host string) (proxmox.StorageInfo, bool) {
@@ -105,6 +133,12 @@ func (s *Service) placeNodes(ctx context.Context, p *params) error {
 	// fits zegt waarom een node niet op host kan, of leeg als het kan.
 	fits := func(n *plannedNode, host string) string {
 		name := or(n.Storage, p.ImageStorage)
+		if name == "" && p.Target.NewCT() {
+			if _, ok := bestStorage(storages, host); !ok {
+				return fmt.Sprintf("op %s is geen actieve storage waar containers op mogen", host)
+			}
+			return ""
+		}
 		if name == "" {
 			return ""
 		}
@@ -137,6 +171,9 @@ func (s *Service) placeNodes(ctx context.Context, p *params) error {
 			continue
 		}
 		if _, ok := online[pl.Host]; !ok {
+			if p.Target.NewCT() {
+				return invalid("target.placement", "%s: Proxmox-host %s is offline of heeft geen agent (Nodes → Agent installeren)", n.Hostname, pl.Host)
+			}
 			return invalid("target.placement", "%s: Proxmox-host %s bestaat niet of is offline", n.Hostname, pl.Host)
 		}
 		if why := fits(n, pl.Host); why != "" {
@@ -187,6 +224,15 @@ func (s *Service) placeNodes(ctx context.Context, p *params) error {
 		place(n, best)
 	}
 
+	if p.Target.NewCT() {
+		// De storage per CT: gekozen, of de beste op zijn host.
+		for i := range p.Nodes {
+			n := &p.Nodes[i]
+			if n.Storage == "" {
+				n.Storage, _ = bestStorage(storages, n.Host)
+			}
+		}
+	}
 	for _, h := range names {
 		if needMem[h] > online[h].FreeMem {
 			// Het veld met het geheugen van de eerste rol, zoals memory of
