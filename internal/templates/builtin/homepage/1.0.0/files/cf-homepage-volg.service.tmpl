@@ -1,0 +1,9 @@
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}).
+# Vangnet naast keepalived: de checks (worker) alleen op de VIP-node, de
+# syslog-ontvanger na de overname.
+[Unit]
+Description=homepage: checks volgen het VIP ({{ .cluster.slug }})
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/clusterforge/homepage-ctl.sh volg

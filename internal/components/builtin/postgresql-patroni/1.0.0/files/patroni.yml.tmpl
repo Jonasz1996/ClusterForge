@@ -69,6 +69,9 @@ postgresql:
   parameters:
     unix_socket_directories: /var/run/postgresql
     shared_buffers: {{ pgsize .params.shared_buffers }}
+{{- with .params.shared_preload_libraries }}
+    shared_preload_libraries: {{ . }}
+{{- end }}
   # De nodes van het cluster en het VIP; een app op een node die het VIP
   # zelf heeft, verbindt vanaf het VIP.
   pg_hba:

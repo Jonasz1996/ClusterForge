@@ -1,0 +1,1014 @@
+#!/bin/sh
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}).
+#
+# De homepage (github.com/Jonasz1996/homepage) als cluster. De api en de
+# syslog-ontvanger draaien op elke node tegen één PostgreSQL (Patroni, VIP
+# {{ .params.db_vip }}, met TimescaleDB); keepalived zet het VIP
+# ({{ .params.vip }}) op een gezonde node. De worker, die alle checks doet
+# (pings, http, push, back-ups, meldingen), draait op precies één node: de
+# node met het VIP, en alleen met het slot in de database (een advisory
+# lock). Twee nodes die allebei denken dat ze het VIP hebben, doen dus nooit
+# samen de checks. Na een overname gaan de instellingen van de oude node
+# ($FILES/.cf, 0600) met de sync homepage-instellingen naar de andere nodes.
+# Code, venv en frontend staan waar install.sh van de homepage ze zet
+# (/opt/homepage).
+#
+#   homepage-ctl.sh voorstart          (cf-homepage-api, als root) markering en
+#                                      sleutel nakijken, configuratie schrijven
+#   homepage-ctl.sh migreren           (cf-homepage-api) alembic onder een slot
+#   homepage-ctl.sh worker             (cf-homepage-worker) slot nemen, dan de checks
+#   homepage-ctl.sh check              keepalived: antwoordt de homepage hier?
+#   homepage-ctl.sh master | vip-weg   keepalived: worker starten / stoppen
+#   homepage-ctl.sh volg               (elke 30 s) worker alleen op de VIP-node
+#   homepage-ctl.sh status             wat er op deze node staat, en wie de checks doet
+#   homepage-ctl.sh voorbereiden | voorbereid
+#                                      (uitrol) de oude homepage op deze node: zijn
+#                                      PostgreSQL wordt cluster homepageoud op
+#                                      poort 5433, zodat Patroni 5432 krijgt
+#   homepage-ctl.sh overnemen [--andere-versie]
+#                                      de database van de oude homepage (op deze
+#                                      node) naar het cluster
+#   homepage-ctl.sh afronden           de oude PostgreSQL stoppen (data blijft)
+#   homepage-ctl.sh terug              terug naar de oude homepage op deze node
+#   homepage-ctl.sh bouwen | gebouwd   homepage ophalen en bouwen / is het gebouwd?
+#   homepage-ctl.sh timescaledb | timescaledb-ok
+#   homepage-ctl.sh nginx | nginx-ok   nginx-site van de homepage
+#   homepage-ctl.sh mappen | mappen-ok
+#   homepage-ctl.sh firewall | firewall-ok
+#   homepage-ctl.sh unchanged | restart-if-changed
+#
+# Markering: COMMENT ON DATABASE homepage = "cf-homepage key=<vingerafdruk>
+# ready=<tijd> ...". De homepage start alleen met een markering en dezelfde
+# sleutel (secret.key). Geheimen komen nooit in de uitvoer: alleen de
+# vingerafdruk.
+set -u
+umask 022
+# CF_HP_* zijn er alleen voor de tests van ClusterForge.
+BASE=${CF_HP_BASE:-/opt/cf-homepage}
+FILES=$BASE/files
+CF=$FILES/.cf
+STATE=${CF_HP_STATE:-/var/lib/cf-homepage}
+ETC=${CF_HP_ETC:-/etc/cf-homepage}
+APPENV=$ETC/homepage.env
+CODE=${CF_HP_CODE:-/opt/homepage}
+VENV=$CODE/.venv
+# Dezelfde map als install.sh: de worker kijkt daar de dagelijkse dump na.
+BACKUPS=${CF_HP_BACKUPS:-/var/backups/homepage}
+OUD_BACKUPS=${CF_HP_OUD_BACKUPS:-/var/backups/cf-homepage-overname}
+RUN=${CF_HP_RUN:-/run/cf-homepage}
+HASH=$RUN/hash
+NGINX=${CF_HP_NGINX:-/etc/nginx}
+REPO=https://github.com/Jonasz1996/homepage.git
+VIP='{{ .params.vip }}'
+DB_VIP='{{ .params.db_vip }}'
+VERSION='{{ .params.version }}'
+INDEX='{{ .node.index }}'
+ME='{{ .node.hostname }}'
+# De andere nodes van het cluster (voor ufw).
+PEERS='{{ range .peers }}{{ .address }} {{ end }}'
+API=cf-homepage-api
+WORKER=cf-homepage-worker
+SYSLOG=cf-homepage-syslog
+# Advisory locks in de database: migraties en de worker (de checks).
+LOCK_MIGRATIES=7316221
+LOCK_WORKER=7316222
+# Patroni op deze node, als postgres via de socket (alleen voor de overname).
+SU_PORT=${CF_HP_SU_PORT:-5432}
+
+say() { echo "== $*"; }
+fail() { echo "FOUT: $*" >&2; exit 1; }
+envval() { sed -n "s/^$1=//p" "$2" 2>/dev/null | tail -n 1; }
+has_ip() { [ -n "${CF_HP_TEST:-}" ] && return 0; ip -o addr show 2>/dev/null | grep -q " $1/"; }
+sysctl_() { ${CF_HP_SYSTEMCTL:-systemctl} "$@"; }
+runpg() { if [ -n "${CF_HP_TEST:-}" ]; then "$@"; else runuser -u postgres -- "$@"; fi; }
+
+# De database van het cluster, uit base.env (als de app-gebruiker).
+b() { envval "$1" "$ETC/base.env"; }
+pg() {
+  PGPASSWORD=$(b POSTGRES_PASSWORD) PGCONNECT_TIMEOUT=5 \
+    psql -X -q -At -v ON_ERROR_STOP=1 -h "$(b POSTGRES_HOST)" -p "$(b POSTGRES_PORT)" -U "$(b POSTGRES_USER)" -d "$(b POSTGRES_DB)" "$@"
+}
+pgtool() {
+  tool=$1
+  shift
+  PGPASSWORD=$(b POSTGRES_PASSWORD) "$tool" -h "$(b POSTGRES_HOST)" -p "$(b POSTGRES_PORT)" -U "$(b POSTGRES_USER)" -d "$(b POSTGRES_DB)" "$@"
+}
+# Als superuser op de Patroni van deze node (alleen op de primary zinvol).
+supg() { runpg psql -X -q -At -v ON_ERROR_STOP=1 -p "$SU_PORT" "$@"; }
+db_meta() { pg -c "SELECT coalesce(shobj_description(oid, 'pg_database'), '') FROM pg_database WHERE datname = current_database()"; }
+db_tables() { pg -c "SELECT count(*) FROM pg_tables WHERE schemaname = 'public'"; }
+db_mark() { printf "SELECT format('COMMENT ON DATABASE %%I IS %%L', current_database(), '%s')\n\\\\gexec\n" "$1" | pg -f -; }
+metafield() { echo "$1" | tr ' ' '\n' | sed -n "s/^$2=//p" | head -n 1; }
+ready() { [ -n "$(metafield "$(db_meta 2>/dev/null)" ready)" ]; }
+
+keyhash() { sha256sum < "$CF/secret.key" | cut -c1-16; }
+urlenc() { python3 -I -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.stdin.read(), safe=""))'; }
+
+# Wat de homepage niet van de oude node overneemt: de database, de paden
+# van de sleutels en de versie, het syslog-doel (dat wordt het VIP) en de
+# verbindingen per proces (drie nodes delen één PostgreSQL).
+NOT_TAKEN='^(HOMEPAGE_DATABASE_URL|HOMEPAGE_SECRET_KEY_FILE|HOMEPAGE_SETUP_TOKEN_FILE|HOMEPAGE_VERSION_FILE|HOMEPAGE_NGINX_FILE|HOMEPAGE_SYSLOG_TARGET|HOMEPAGE_BACKUP_DIR|HOMEPAGE_DB_POOL_[A-Z]*|PG[A-Z]*)='
+# De instellingen zoals de homepage ze krijgt: die van de oude node, met
+# daarover de database van het cluster. PG* is voor psql, pg_dump en het
+# slot van de worker.
+settings() {
+  [ -s "$CF/homepage.env" ] && grep -E '^[A-Z][A-Z0-9_]*=' "$CF/homepage.env" | grep -Ev "$NOT_TAKEN"
+  pw=$(b POSTGRES_PASSWORD | tr -d '\n' | urlenc) || return 1
+  echo "HOMEPAGE_DATABASE_URL=postgresql+asyncpg://$(b POSTGRES_USER):$pw@$(b POSTGRES_HOST):$(b POSTGRES_PORT)/$(b POSTGRES_DB)"
+  echo "HOMEPAGE_SECRET_KEY_FILE=$ETC/secret.key"
+  echo "HOMEPAGE_SETUP_TOKEN_FILE=$ETC/setup-token"
+  echo "HOMEPAGE_VERSION_FILE=$ETC/versie"
+  echo "HOMEPAGE_NGINX_FILE=$ETC/nginx"
+  echo "HOMEPAGE_SYSLOG_TARGET=$VIP"
+  echo "HOMEPAGE_BACKUP_DIR=$BACKUPS"
+  echo "HOMEPAGE_DB_POOL_API=15"
+  echo "HOMEPAGE_DB_POOL_WORKER=40"
+  echo "HOMEPAGE_DB_POOL_SYSLOG=5"
+  for v in HOST PORT USER PASSWORD; do
+    echo "PG$v=$(b "POSTGRES_$v")"
+  done
+  echo "PGDATABASE=$(b POSTGRES_DB)"
+}
+
+# Antwoordt de api hier (via nginx)? 200 en 503 komen van de homepage zelf
+# (503 = de worker of de checks lopen achter, en die draaien maar op één
+# node); 502 en niets = de api draait hier niet.
+api_up() {
+  code=$(curl -s -m 4 -o /dev/null -w '%{http_code}' "http://127.0.0.1/api/healthz" 2>/dev/null)
+  [ "$code" = 200 ] || [ "$code" = 503 ]
+}
+healthy() { curl -fsS -m 4 -o /dev/null "http://127.0.0.1/api/healthz" 2>/dev/null; }
+fingerprint() {
+  { settings; cat "$STATE/gebouwd" "$CF/secret.key" 2>/dev/null; } | sha256sum | cut -d' ' -f1
+}
+pg_major() {
+  v=$(sed -n 's/^VERSION_ID="\{0,1\}\([0-9]*\).*/\1/p' /etc/os-release 2>/dev/null | head -n 1)
+  if [ "$v" = 12 ]; then echo 15; else echo 17; fi
+}
+
+# ------------------------------------------------ de oude homepage op deze node
+OUD_ETC=${CF_HP_OUD_ETC:-/etc/homepage}
+OUD_ENV=$OUD_ETC/homepage.env
+OUD_UNIT=${CF_HP_OUD_UNIT:-/etc/systemd/system/homepage-api.service}
+OUD_UNITS="homepage-api homepage-worker homepage-syslog"
+OUD_TIMERS="homepage-backup.timer homepage-backuptest.timer"
+# Zonder streepje: systemd leest postgresql@17-homepage-oud als 17/homepage/oud.
+OUD_NAME=homepageoud
+OUD_DB=${CF_HP_OUD_DB:-homepage}
+OUD_PORT_NEW=${CF_HP_OUD_PORT_NEW:-5433}
+has_oud() { [ -e "$OUD_UNIT" ]; }
+oud_enabled() { sysctl_ is-enabled --quiet homepage-api; }
+oud_url() { envval HOMEPAGE_DATABASE_URL "$OUD_ENV"; }
+# De poort uit HOMEPAGE_DATABASE_URL: ?port=..., anders :poort/ voor de
+# database, anders 5432 (install.sh: de socket zonder poort).
+url_port() {
+  p=$(echo "$1" | sed -n 's/.*[?&]port=\([0-9][0-9]*\).*/\1/p')
+  [ -n "$p" ] || p=$(echo "$1" | sed -n 's#^[^/]*//[^/]*:\([0-9][0-9]*\)/.*#\1#p')
+  echo "${p:-5432}"
+}
+oud_port() { url_port "$(oud_url)"; }
+oud_pg() { runpg psql -X -q -At -v ON_ERROR_STOP=1 -p "$(oud_port)" -d "$OUD_DB" "$@"; }
+# De oude homepage gebruikt een lokale PostgreSQL: de socket of localhost.
+oud_lokaal() {
+  u=$(oud_url)
+  h=$(echo "$u" | sed -n 's#^[^/]*//\([^/?]*\).*#\1#p' | sed 's/^.*@//; s/:[0-9]*$//')
+  q=$(echo "$u" | sed -n 's/.*[?&]host=\([^&]*\).*/\1/p')
+  case "$h" in "" | localhost | 127.0.0.1) ;; *) return 1 ;; esac
+  case "$q" in "" | /var/run/postgresql | /run/postgresql | localhost | 127.0.0.1) ;; *) return 1 ;; esac
+}
+# HOMEPAGE_DATABASE_URL met een andere poort ($1).
+url_met_poort() {
+  u=$(echo "$1" | sed -E 's/([?&])port=[0-9]+&?/\1/; s/[?&]$//')
+  case "$u" in *'?'*) echo "$u&port=$2" ;; *) echo "$u?port=$2" ;; esac
+}
+zet_oud_url() {
+  tmp=$OUD_ENV.cf.$$
+  { grep -v '^HOMEPAGE_DATABASE_URL=' "$OUD_ENV"; echo "HOMEPAGE_DATABASE_URL=$1"; } > "$tmp" &&
+    chmod 0640 "$tmp" && { chgrp homepage "$tmp" 2>/dev/null || true; } && mv -f "$tmp" "$OUD_ENV"
+}
+oud_commit() {
+  c=$(envval commit "$OUD_ETC/versie")
+  [ -n "$c" ] || c=$(git -C "$CODE" rev-parse HEAD 2>/dev/null)
+  echo "${c:-onbekend}"
+}
+
+# Met alleen het cluster homepageoud kiest psql zonder poort (pg_wrapper)
+# dat cluster; de agent van ClusterForge moet zonder poort bij Patroni op
+# 5432 uitkomen. Daarom een regel in user_clusters.
+UC=${CF_HP_USER_CLUSTERS:-/etc/postgresql-common/user_clusters}
+UC_MARK="# cf-homepage: standaard Patroni op 5432, niet $OUD_NAME"
+uc_ok() { grep -qF "$UC_MARK" "$UC" 2>/dev/null; }
+uc_set() {
+  uc_ok && return 0
+  mkdir -p "$(dirname "$UC")" || return 1
+  printf '%s\n* * %s /var/run/postgresql:5432 *\n' "$UC_MARK" "$1" >> "$UC"
+}
+uc_unset() {
+  [ -f "$UC" ] || return 0
+  awk -v m="$UC_MARK" '$0 == m {skip = 1; next} skip {skip = 0; next} {print}' "$UC" > "$UC.cf" && mv -f "$UC.cf" "$UC"
+}
+DROPIN_DIRS="homepage-backup.service.d homepage-backuptest.service.d"
+
+voorbereid() {
+  has_oud || return 0
+  [ "$(oud_port)" = "$OUD_PORT_NEW" ] || return 1
+  ! pg_lsclusters -h 2>/dev/null | awk '{print $2}' | grep -qx main || return 1
+  uc_ok
+}
+
+# Vóór Patroni (tijdens de uitrol): de PostgreSQL van de oude homepage
+# houdt het cluster main op poort 5432 vast. Hij wordt cluster homepageoud
+# op 5433 (pg_renamecluster; de data en TimescaleDB blijven), de homepage
+# krijgt de nieuwe poort en blijft het VIP bedienen tot de overname. Eerst
+# een gecontroleerde back-up; bij een fout gaat alles terug zoals het was.
+voorbereiden() {
+  if ! has_oud; then echo "Geen oude homepage op deze node."; return 0; fi
+  if voorbereid; then echo "De oude homepage is al klaargezet (PostgreSQL $OUD_NAME op 5433)."; return 0; fi
+  [ -s "$OUD_ENV" ] || fail "$OUD_ENV ontbreekt"
+  line=$(pg_lsclusters -h | awk '$2 == "main"' | head -n 1)
+  [ -n "$line" ] || fail "geen PostgreSQL-cluster main gevonden voor de oude homepage (pg_lsclusters)"
+  v=$(echo "$line" | awk '{print $1}')
+  port=$(echo "$line" | awk '{print $3}')
+  conf=/etc/postgresql/$v
+  oud_lokaal || fail "de oude homepage gebruikt geen lokale PostgreSQL (HOMEPAGE_DATABASE_URL)"
+  [ "$(oud_port)" = "$port" ] || fail "de oude homepage gebruikt poort $(oud_port), cluster main staat op $port"
+  url=$(oud_url)
+
+  say "Back-up van de oude homepage"
+  mkdir -p "$OUD_BACKUPS" && chmod 0700 "$OUD_BACKUPS" || fail "map $OUD_BACKUPS"
+  t=$(date +%Y%m%d-%H%M%S)
+  f=$OUD_BACKUPS/cf-voorbereiden-$t.dump
+  (umask 077 && runuser -u postgres -- pg_dump -p "$port" -Fc "$OUD_DB" > "$f") && [ -s "$f" ] && pg_restore --list "$f" > /dev/null ||
+    fail "back-up (pg_dump) mislukte; er is niets veranderd"
+  install -m 0600 "$OUD_ENV" "$OUD_BACKUPS/cf-voorbereiden-$t.env"
+  echo "  $f"
+
+  say "PostgreSQL $v/main wordt $v/$OUD_NAME op poort 5433 (de data blijft)"
+  # shellcheck disable=SC2086
+  sysctl_ stop $OUD_UNITS $OUD_TIMERS
+  undo_prep() {
+    echo "FOUT: $1" >&2
+    echo "== Terugzetten zoals het was" >&2
+    pg_ctlcluster "$v" "$OUD_NAME" stop 2>/dev/null
+    if [ -d "$conf/$OUD_NAME" ]; then
+      pg_renamecluster "$v" "$OUD_NAME" main >&2
+      sed -i -E "s/^port = 5433.*/port = $port/" "$conf/main/postgresql.conf"
+    fi
+    pg_ctlcluster "$v" main start >&2
+    install -m 0640 "$OUD_BACKUPS/cf-voorbereiden-$t.env" "$OUD_ENV" && chgrp homepage "$OUD_ENV" 2>/dev/null
+    for d in $DROPIN_DIRS; do rm -f "/etc/systemd/system/$d/cf-poort.conf"; done
+    uc_unset
+    sysctl_ daemon-reload
+    # shellcheck disable=SC2086
+    sysctl_ start $OUD_UNITS $OUD_TIMERS
+    exit 1
+  }
+  pg_ctlcluster "$v" main stop || undo_prep "PostgreSQL $v/main stoppen"
+  pg_renamecluster "$v" main "$OUD_NAME" || undo_prep "pg_renamecluster"
+  sed -i -E 's/^#?port = [0-9]+/port = 5433/' "$conf/$OUD_NAME/postgresql.conf" || undo_prep "poort zetten"
+  pg_ctlcluster "$v" "$OUD_NAME" start || undo_prep "PostgreSQL $v/$OUD_NAME starten"
+  zet_oud_url "$(url_met_poort "$url" 5433)" || undo_prep "$OUD_ENV"
+  uc_set "$v" || undo_prep "$UC"
+  # De nachtelijke back-up en de maandelijkse hersteltest van de oude
+  # homepage (psql en pg_dump zonder poort): ook naar 5433.
+  for d in $DROPIN_DIRS; do
+    mkdir -p "/etc/systemd/system/$d" && printf '[Service]\nEnvironment=PGPORT=5433\n' > "/etc/systemd/system/$d/cf-poort.conf" ||
+      undo_prep "drop-in $d"
+  done
+  sysctl_ daemon-reload
+  # shellcheck disable=SC2086
+  sysctl_ start $OUD_UNITS $OUD_TIMERS || undo_prep "de homepage starten"
+  i=0
+  while ! api_up; do
+    i=$((i + 1))
+    [ $i -le 60 ] || undo_prep "de oude homepage antwoordt niet na de verhuizing van PostgreSQL (journalctl -u homepage-api)"
+    sleep 2
+  done
+  echo "De oude homepage draait weer, met PostgreSQL $OUD_NAME op 5433. Ze bedient het VIP tot de overname."
+  echo "Draai op deze node nooit meer deploy/install.sh of bootstrap.sh van de homepage: bijwerken gaat via ClusterForge (Wijzigen → Versie)."
+}
+
+# ---------------------------------------------------------------- configuratie
+# nginx zoals install.sh het schrijft (deploy/nginx.conf en nginx-map.conf),
+# met de instellingen van het cluster. Alleen http op poort 80: Nginx Proxy
+# Manager wijst naar http://VIP:80.
+nginx_settings() {
+  if [ -s "$CF/homepage.env" ]; then
+    grep -E '^HOMEPAGE_(NPM_IP|LAN_OPEN|LAN_NETS)=' "$CF/homepage.env"
+  fi
+}
+# De site, de map en de headers in een map ($1), plus de staat voor de
+# homepage ($1/staat, zoals /etc/homepage/nginx).
+nginx_render() {
+  s=$(nginx_settings)
+  npm=$(echo "$s" | sed -n 's/^HOMEPAGE_NPM_IP=//p' | tail -n 1 | tr -d '"')
+  open=$(echo "$s" | sed -n 's/^HOMEPAGE_LAN_OPEN=//p' | tail -n 1 | tr -d '"')
+  nets=$(echo "$s" | sed -n 's/^HOMEPAGE_LAN_NETS=//p' | tail -n 1 | tr -d "\"'" | tr ',' ' ')
+  dicht=1 staat=dicht reden=
+  case "$open" in 1 | true | yes | ja | aan) dicht=0 staat=open reden=lan-open ;; esac
+  if ! echo "$npm" | grep -Eq '^[0-9]{1,3}(\.[0-9]{1,3}){3}$'; then
+    npm=127.0.0.1 dicht=0 staat=open reden=npm-onbekend
+  fi
+  geo='' goed=''
+  for n in $nets; do
+    if echo "$n" | grep -Eq '^[0-9A-Fa-f.:]+/[0-9]+$'; then
+      geo="$geo$n lan; " goed="$goed${goed:+ }$n"
+    fi
+  done
+  re=$(echo "$npm" | sed 's/\./\\\\./g')
+  sed "s/__NPM_IP__/$npm/" "$CODE/deploy/nginx.conf" > "$1/site" || return 1
+  [ -e /proc/net/if_inet6 ] || sed -i '/listen \[::\]/d' "$1/site"
+  sed "s/__NPM_IP_RE__/$re/; s/__LAN_DICHT__/$dicht/; s#__LAN_NETS__#$geo#" "$CODE/deploy/nginx-map.conf" > "$1/map" || return 1
+  cp "$CODE/deploy/nginx-headers.conf" "$1/headers" || return 1
+  : > "$1/tls"
+  printf 'lan=%s\nreden=%s\nnpm=%s\nnetten=%s\n' "$staat" "$reden" "$npm" "$goed" > "$1/staat"
+}
+NGINX_FILES="site:sites-available/homepage map:conf.d/homepage-map.conf headers:snippets/homepage-headers.conf tls:snippets/homepage-tls.conf"
+# Vóór de overname op de node met de oude homepage: diens nginx blijft.
+nginx_oud_blijft() { has_oud && [ ! -s "$CF/homepage.env" ]; }
+# nginx_sync: bijwerken als het anders is; 0 als er iets veranderde.
+nginx_sync() {
+  [ -s "$CODE/deploy/nginx.conf" ] || return 1
+  tmp=$(mktemp -d) || return 1
+  nginx_render "$tmp" || { rm -rf "$tmp"; return 1; }
+  # Eén keer de nginx van de oude homepage bewaren (homepage-ctl.sh terug).
+  if has_oud && [ ! -d "$STATE/nginx-oud" ]; then
+    mkdir -p "$STATE/nginx-oud"
+    for pair in $NGINX_FILES; do
+      [ -e "$NGINX/${pair#*:}" ] && cp -a "$NGINX/${pair#*:}" "$STATE/nginx-oud/${pair%%:*}"
+    done
+  fi
+  changed=1
+  for pair in $NGINX_FILES; do
+    dst=$NGINX/${pair#*:}
+    if ! cmp -s "$tmp/${pair%%:*}" "$dst"; then
+      mkdir -p "$(dirname "$dst")" && install -m 0644 "$tmp/${pair%%:*}" "$dst" && changed=0
+    fi
+  done
+  mkdir -p "$NGINX/sites-enabled" && ln -sf "$NGINX/sites-available/homepage" "$NGINX/sites-enabled/homepage"
+  rm -f "$NGINX/sites-enabled/default"
+  if [ $changed = 0 ] || [ ! -s "$ETC/nginx" ]; then
+    { cat "$tmp/staat"; echo "datum=$(date -Iseconds)"; } > "$ETC/nginx" && chgrp homepage "$ETC/nginx" 2>/dev/null
+    chmod 0640 "$ETC/nginx"
+  fi
+  rm -rf "$tmp"
+  return $changed
+}
+nginx_ok() {
+  nginx_oud_blijft && return 0
+  tmp=$(mktemp -d) || return 1
+  nginx_render "$tmp" > /dev/null 2>&1 || { rm -rf "$tmp"; return 1; }
+  r=0
+  for pair in $NGINX_FILES; do cmp -s "$tmp/${pair%%:*}" "$NGINX/${pair#*:}" || r=1; done
+  rm -rf "$tmp"
+  [ $r = 0 ] && [ -L "$NGINX/sites-enabled/homepage" ] && [ ! -e "$NGINX/sites-enabled/default" ] && sysctl_ is-active --quiet nginx
+}
+nginx_() {
+  if nginx_oud_blijft; then echo "De nginx van de oude homepage blijft tot de overname."; return 0; fi
+  [ -s "$CODE/deploy/nginx.conf" ] || fail "de homepage is nog niet opgehaald"
+  for pattern in __NPM_IP__ 'proxy_pass http://127.0.0.1:8000;' 'root /opt/homepage/frontend/dist;'; do
+    grep -qF "$pattern" "$CODE/deploy/nginx.conf" || fail "nginx-config van de homepage veranderd: '$pattern' niet gevonden"
+  done
+  mkdir -p "$ETC" "$NGINX/sites-enabled"
+  nginx_sync
+  if ! nginx -t; then
+    fail "nginx -t weigert de site van de homepage"
+  fi
+  sysctl_ enable nginx >/dev/null 2>&1
+  sysctl_ reload-or-restart nginx || fail "nginx herladen"
+}
+
+# TimescaleDB: dezelfde versie als de oude database ($CF/timescaledb, na de
+# overname) moet op elke node staan, anders kan PostgreSQL na een failover
+# de extensie niet laden.
+ts_want() { cat "$CF/timescaledb" 2>/dev/null; }
+ts_have() { [ -f "/usr/lib/postgresql/$(pg_major)/lib/timescaledb-$1.so" ]; }
+timescaledb_ok() {
+  [ -n "${CF_HP_TEST:-}" ] && return 0
+  dpkg -s "timescaledb-2-loader-postgresql-$(pg_major)" > /dev/null 2>&1 || return 1
+  want=$(ts_want)
+  [ -z "$want" ] || ts_have "$want"
+}
+timescaledb() {
+  timescaledb_ok && { echo "TimescaleDB staat er."; return 0; }
+  pgv=$(pg_major)
+  # shellcheck source=/dev/null
+  codename=$(. /etc/os-release && echo "$VERSION_CODENAME")
+  if [ ! -s /etc/apt/sources.list.d/timescaledb.list ]; then
+    say "Pakketbron van TimescaleDB"
+    curl -fsSL https://packagecloud.io/timescale/timescaledb/gpgkey | gpg --dearmor --yes -o /usr/share/keyrings/timescaledb.gpg ||
+      fail "sleutel van TimescaleDB ophalen"
+    echo "deb [signed-by=/usr/share/keyrings/timescaledb.gpg] https://packagecloud.io/timescale/timescaledb/debian/ $codename main" \
+      > /etc/apt/sources.list.d/timescaledb.list
+  fi
+  DEBIAN_FRONTEND=noninteractive apt-get update -q > /dev/null || fail "apt-get update"
+  if ! dpkg -s "timescaledb-2-loader-postgresql-$pgv" > /dev/null 2>&1; then
+    # Een node met de oude homepage heeft TimescaleDB al; daar verandert
+    # niets (een update zou de versie van de oude database kunnen weghalen).
+    say "TimescaleDB voor PostgreSQL $pgv"
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -q "timescaledb-2-postgresql-$pgv" || fail "TimescaleDB installeren"
+  fi
+  want=$(ts_want)
+  if [ -n "$want" ] && ! ts_have "$want"; then
+    say "TimescaleDB $want (de versie van de database)"
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -q "timescaledb-2-$want-postgresql-$pgv" ||
+      DEBIAN_FRONTEND=noninteractive apt-get install -y -q "timescaledb-2-postgresql-$pgv=$want*" ||
+      fail "TimescaleDB $want installeren (apt-get install timescaledb-2-$want-postgresql-$pgv)"
+  fi
+  return 0
+}
+
+voorstart() {
+  [ -s "$ETC/base.env" ] || fail "$ETC/base.env ontbreekt (uitrol niet af)"
+  [ -x "$VENV/bin/python" ] || fail "de homepage is nog niet gebouwd ($VENV)"
+  if has_oud && oud_enabled; then
+    fail "de oude homepage draait nog op deze node; cf-homepage-api start pas na homepage-ctl.sh overnemen"
+  fi
+  meta=$(db_meta) || fail "de database op $DB_VIP antwoordt niet (nog niet toegevoegd, of Patroni zonder primary); cf-homepage-api probeert het over 15 s opnieuw"
+  [ -n "$(metafield "$meta" ready)" ] ||
+    fail "de homepage is nog niet overgenomen (geen markering). Commando op de node met de oude homepage: homepage-ctl.sh overnemen; cf-homepage-api wacht"
+  [ -s "$CF/secret.key" ] || fail "geen secret.key op deze node; na een overname komt hij met de sync homepage-instellingen van de VIP-node"
+  want=$(metafield "$meta" key)
+  if [ "$want" != "$(keyhash)" ]; then
+    fail "de sleutel hier ($(keyhash)) is niet die van het cluster ($want); hij komt met de sync homepage-instellingen (Cronjobs); cf-homepage-api wacht erop"
+  fi
+  timescaledb_ok || timescaledb || fail "TimescaleDB $(ts_want) ontbreekt op deze node"
+  mkdir -p "$ETC" "$RUN" && chmod 0700 "$RUN" || fail "mappen"
+  for f in secret.key setup-token; do
+    [ -s "$CF/$f" ] || continue
+    cmp -s "$CF/$f" "$ETC/$f" && continue
+    install -m 0640 -g homepage "$CF/$f" "$ETC/$f" 2>/dev/null || install -m 0640 "$CF/$f" "$ETC/$f" || fail "$ETC/$f"
+  done
+  tmp=$ETC/.homepage.env.$$
+  (umask 077 && settings > "$tmp") || { rm -f "$tmp"; fail "$APPENV schrijven"; }
+  chgrp homepage "$tmp" 2>/dev/null
+  chmod 0640 "$tmp" && mv -f "$tmp" "$APPENV" || fail "$APPENV"
+  if nginx_sync; then
+    nginx -t > /dev/null 2>&1 && sysctl_ reload nginx > /dev/null 2>&1
+  fi
+  fingerprint > "$HASH"
+  # De syslog-ontvanger start na de overname mee (ExecCondition: syslog-mag).
+  sysctl_ is-active --quiet "$SYSLOG" || sysctl_ start --no-block "$SYSLOG" > /dev/null 2>&1
+  return 0
+}
+
+# De syslog-ontvanger luistert op elke node (het VIP krijgt de berichten),
+# maar pas na de overname: tot dan houdt de oude homepage poort 514 vast.
+syslog_mag() {
+  [ -s "$APPENV" ] || return 1
+  if has_oud && oud_enabled; then return 1; fi
+  ready
+}
+
+# Migraties onder een slot in de database: nooit twee nodes tegelijk
+# (de migraties van de homepage nemen zelf geen slot). Als de gebruiker
+# homepage, met de omgeving van cf-homepage-api.
+migreren() {
+  out=$(psql -X -q -At -v ON_ERROR_STOP=1 "connect_timeout=10 application_name=cf-homepage-migraties" 2>&1 <<EOF
+SELECT pg_advisory_lock($LOCK_MIGRATIES);
+\! cd "$CODE/backend" && "$VENV/bin/alembic" upgrade head
+\if :SHELL_ERROR
+\echo cf-migratie-fout
+\else
+\echo cf-migratie-ok
+\endif
+EOF
+)
+  echo "$out" | grep -v '^cf-migratie-' | grep -v '^$'
+  echo "$out" | grep -qx cf-migratie-ok || fail "alembic upgrade head mislukte"
+}
+
+# De worker doet alle checks. Hij start pas met het slot in de database
+# (pg_advisory_lock in een eigen sessie): staat het slot al elders, dan
+# wacht hij. Valt de verbinding weg (failover van PostgreSQL, netwerk),
+# dan stopt de worker meteen en probeert systemd het opnieuw.
+worker() {
+  d=${RUNTIME_DIRECTORY:-$RUN-worker}
+  mkdir -p "$d" || fail "map $d"
+  rm -f "$d/slot" "$d/uit"
+  mkfifo "$d/slot" || fail "fifo $d/slot"
+  psql -X -q -At -v ON_ERROR_STOP=1 \
+    "connect_timeout=10 keepalives=1 keepalives_idle=10 keepalives_interval=5 keepalives_count=3 application_name=cf-homepage-checks-$ME" \
+    < "$d/slot" > "$d/uit" 2>&1 &
+  slot=$!
+  exec 3> "$d/slot"
+  printf 'SELECT pg_advisory_lock(%s);\n\\echo cf-slot-ok\n' "$LOCK_WORKER" >&3
+  echo "Wacht op het slot van de checks in de database"
+  while ! grep -qx cf-slot-ok "$d/uit" 2>/dev/null; do
+    if ! kill -0 "$slot" 2>/dev/null; then
+      cat "$d/uit" >&2
+      fail "geen verbinding met de database voor het slot van de checks"
+    fi
+    sleep 1
+  done
+  echo "Slot genomen: de checks draaien op $ME"
+  "$VENV/bin/python" -m app.monitoring.worker &
+  w=$!
+  trap 'kill -TERM "$w" 2>/dev/null; wait "$w"; kill "$slot" 2>/dev/null; exit 0' TERM INT
+  while :; do
+    if ! kill -0 "$w" 2>/dev/null; then
+      wait "$w"
+      rc=$?
+      kill "$slot" 2>/dev/null
+      exit "$rc"
+    fi
+    if ! kill -0 "$slot" 2>/dev/null; then
+      echo "De verbinding met het slot is weg: de checks stoppen hier" >&2
+      kill -TERM "$w" 2>/dev/null
+      wait "$w"
+      exit 1
+    fi
+    sleep 2 &
+    wait $!
+  done
+}
+
+# De worker volgt het VIP, en pas na de overname.
+worker_mag() {
+  has_ip "$VIP" || return 1
+  [ -s "$APPENV" ] || return 1
+  if has_oud && oud_enabled; then return 1; fi
+  ready
+}
+master() {
+  worker_mag || return 0
+  sysctl_ start --no-block "$WORKER"
+  return 0
+}
+# Vangnet naast keepalived (elke 30 s): een gemiste melding van keepalived
+# laat de checks nooit op twee nodes of op geen enkele node staan.
+volg() {
+  if syslog_mag && ! sysctl_ is-active --quiet "$SYSLOG"; then sysctl_ start --no-block "$SYSLOG"; fi
+  if worker_mag; then
+    sysctl_ is-active --quiet "$WORKER" || sysctl_ start --no-block "$WORKER"
+  elif ! has_ip "$VIP"; then
+    if sysctl_ is-active --quiet "$WORKER"; then sysctl_ stop --no-block "$WORKER"; fi
+  fi
+  return 0
+}
+
+# ---------------------------------------------------------------- overname
+# Dezelfde telling op beide kanten: vaste sessie-instellingen zodat de tekst
+# van een rij gelijk is. Tabellen tot MD5_MAX bytes krijgen een md5; voor een
+# hypertable van TimescaleDB telt de grootte van al zijn chunks.
+MD5_MAX=${CF_HP_MD5_MAX:-67108864}
+SESSION="SET TimeZone='UTC'; SET DateStyle='ISO, YMD'; SET IntervalStyle='postgres'; SET extra_float_digits=3; SET bytea_output='hex';"
+grootte_sql() {
+  if [ -n "$TS" ]; then
+    echo "SELECT CASE WHEN EXISTS (SELECT 1 FROM timescaledb_information.hypertables WHERE hypertable_schema = 'public' AND hypertable_name = '$1')
+      THEN hypertable_size(format('public.%I', '$1')::regclass) ELSE pg_total_relation_size(format('public.%I', '$1')) END"
+  else
+    echo "SELECT pg_total_relation_size(format('public.%I', '$1'))"
+  fi
+}
+telling_oud() {
+  for tb in $(oud_pg -c "SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename"); do
+    size=$(oud_pg -c "$(grootte_sql "$tb")") || return 1
+    if [ "${size:-0}" -lt "$MD5_MAX" ]; then
+      r=$(oud_pg -c "$SESSION" -c "SELECT count(*) || ' ' || md5(coalesce(string_agg(md5(t::text), '' ORDER BY md5(t::text)), '')) FROM public.\"$tb\" t") || return 1
+    else
+      r="$(oud_pg -c "SELECT count(*) FROM public.\"$tb\"") -" || return 1
+    fi
+    echo "$tb $r"
+  done
+}
+telling_cluster() {
+  while read -r tb n sum; do
+    if [ "$(pg -c "SELECT to_regclass(format('public.%I', '$tb')) IS NULL")" = t ]; then echo "$tb ontbreekt -"; continue; fi
+    if [ "$sum" = - ]; then
+      r="$(pg -c "SELECT count(*) FROM public.\"$tb\"") -" || return 1
+    else
+      r=$(pg -c "$SESSION" -c "SELECT count(*) || ' ' || md5(coalesce(string_agg(md5(t::text), '' ORDER BY md5(t::text)), '')) FROM public.\"$tb\" t") || return 1
+    fi
+    echo "$tb $r"
+  done < "$1"
+}
+# De taken van TimescaleDB (compressie, bewaartermijn) liggen stil tijdens
+# de overname, zodat de telling en de dump hetzelfde zien.
+ts_jobs() { "$@" -c "SELECT job_id FROM timescaledb_information.jobs WHERE scheduled AND job_id >= 1000 ORDER BY 1"; }
+ts_jobs_set() {
+  how=$1
+  file=$2
+  shift 2
+  [ -s "$file" ] || return 0
+  while read -r id; do
+    [ -n "$id" ] && { "$@" -c "SELECT alter_job($id, scheduled => $how)" > /dev/null || return 1; }
+  done < "$file"
+}
+primary_hier() { [ "$(supg -d postgres -c 'SELECT pg_is_in_recovery()' 2>/dev/null)" = f ]; }
+
+overnemen() {
+  force=
+  [ "${1:-}" = --andere-versie ] && force=1
+  has_oud || fail "hier draait geen oude homepage ($OUD_UNIT); doe de overname op de node waar de oude homepage draait"
+  voorbereid || fail "de oude homepage is nog niet klaargezet (homepage-ctl.sh voorbereiden, normaal een stap van de uitrol)"
+  has_ip "$VIP" || fail "het VIP $VIP staat niet op deze node; de oude homepage hoort het VIP te bedienen tot de overname (keepalived?)"
+  [ -s "$STATE/gebouwd" ] || fail "de homepage is op deze node nog niet gebouwd"
+  built=$(cut -d' ' -f2 "$STATE/gebouwd")
+  db=$(b POSTGRES_DB)
+  user=$(b POSTGRES_USER)
+
+  say "Database van het cluster nakijken"
+  meta=$(db_meta) || fail "de database van het cluster antwoordt niet; is ze er al (Databases → Database toevoegen)?"
+  [ -z "$(metafield "$meta" ready)" ] || fail "de database van het cluster is al in gebruik ($meta); een tweede overname zou haar overschrijven"
+  tables=$(db_tables) || fail "tabellen tellen"
+  [ "$tables" = 0 ] || fail "de database van het cluster is niet leeg ($tables tabellen)"
+  primary_hier || fail "PostgreSQL van het cluster is op deze node geen primary. Maak $ME eerst primary: Databases → PostgreSQL van dit cluster → $ME → Primary maken; daarna opnieuw"
+
+  say "Oude homepage op deze node"
+  commit=$(oud_commit)
+  alembic=$(oud_pg -c 'SELECT version_num FROM alembic_version' 2>/dev/null | head -n 1)
+  TS=$(oud_pg -c "SELECT extversion FROM pg_extension WHERE extname = 'timescaledb'" 2>/dev/null)
+  echo "  commit $commit, migratie ${alembic:-?}, TimescaleDB ${TS:-geen}, PostgreSQL $OUD_NAME op 5433"
+  [ -n "$alembic" ] || fail "de oude database gaf geen alembic-versie; is dat wel de homepage?"
+  owners=$(oud_pg -c "SELECT string_agg(DISTINCT tableowner, ' ') FROM pg_tables WHERE schemaname = 'public'")
+  [ "$owners" = "$user" ] || fail "de tabellen van de oude homepage zijn van '$owners'; het cluster verwacht '$user'"
+  if [ "$commit" != "$built" ] && [ -z "$force" ]; then
+    fail "de oude homepage is commit $commit en het cluster $built. Zet Versie van de homepage op $commit (Wijzigen) en rol uit, of: overnemen --andere-versie (de code van het cluster moet dan nieuwer zijn)"
+  fi
+  grep -lqsE "^revision[^=]*= *['\"]${alembic}['\"]" "$CODE"/backend/alembic/versions/*.py ||
+    fail "de oude database staat op migratie $alembic, die de code van het cluster ($built) niet kent"
+  if [ -n "$TS" ]; then
+    case ",$(supg -d postgres -c 'SHOW shared_preload_libraries' | tr -d ' ')," in
+      *,timescaledb,*) ;;
+      *) fail "PostgreSQL van het cluster laadt TimescaleDB niet. Databases → PostgreSQL van dit cluster → Instellingen → Vooraf geladen bibliotheken: timescaledb; daarna opnieuw" ;;
+    esac
+    [ "$(supg -d postgres -c "SELECT count(*) FROM pg_available_extension_versions WHERE name = 'timescaledb' AND version = '$TS'")" = 1 ] ||
+      fail "TimescaleDB $TS (de versie van de oude database) ontbreekt in PostgreSQL van het cluster op deze node"
+  fi
+
+  mkdir -p "$STATE/overname" && chmod 0700 "$STATE/overname" || fail "map $STATE/overname"
+  t=$(date +%Y%m%d-%H%M%S)
+  dir=$STATE/overname/$t-$$
+  mkdir -m 0700 "$dir" || fail "map $dir"
+  DIR=$dir
+
+  say "Oude homepage stoppen (nginx en PostgreSQL blijven draaien; er wordt niets gewist)"
+  # shellcheck disable=SC2086
+  sysctl_ disable --now $OUD_UNITS $OUD_TIMERS > /dev/null 2>&1
+  # shellcheck disable=SC2086
+  sysctl_ is-active --quiet $OUD_UNITS && back "de oude homepage stoppen"
+  if [ -n "$TS" ]; then
+    ts_jobs oud_pg > "$dir/ts-jobs" || back "taken van TimescaleDB lezen"
+    ts_jobs_set false "$dir/ts-jobs" oud_pg || back "taken van TimescaleDB stilleggen"
+    echo "  $(grep -c . "$dir/ts-jobs") taken van TimescaleDB liggen stil tijdens de overname"
+  fi
+
+  say "Tellen in de oude database"
+  telling_oud > "$dir/telling-oud" || back "tellen in de oude database"
+  [ -s "$dir/telling-oud" ] || back "de oude database heeft geen tabellen"
+  echo "  $(wc -l < "$dir/telling-oud") tabellen"
+
+  say "Back-up van de oude database"
+  mkdir -p "$OUD_BACKUPS" && chmod 0700 "$OUD_BACKUPS" || back "map $OUD_BACKUPS"
+  f=$OUD_BACKUPS/cf-overname-$t.dump
+  (umask 077 && runpg pg_dump -p "$(oud_port)" -Fc -d "$OUD_DB" > "$f" 2> "$dir/pg_dump.log") && [ -s "$f" ] ||
+    { cat "$dir/pg_dump.log" >&2; back "back-up (pg_dump)"; }
+  pg_restore --list "$f" > "$dir/lijst" || back "pg_restore leest de back-up niet"
+  (umask 077 && cp "$OUD_ENV" "$OUD_BACKUPS/cf-overname-$t.env")
+  echo "  $f ($(du -h "$f" | cut -f1)), sha256 $(sha256sum "$f" | cut -c1-16)"
+
+  say "Terugzetten in de database van het cluster"
+  if [ -n "$TS" ]; then
+    # Zoals homepage-terugzetten: eerst de extensie in dezelfde versie en
+    # timescaledb_pre_restore(), dan pg_restore, dan post_restore(). Welke
+    # fouten tellen, zegt deploy/herstelfouten.sh van de homepage.
+    supg -d "$db" -c "CREATE EXTENSION IF NOT EXISTS timescaledb VERSION '$TS'" -c "SELECT timescaledb_pre_restore()" > /dev/null ||
+      back "TimescaleDB $TS in de database van het cluster"
+    runpg pg_restore -p "$SU_PORT" -d "$db" --no-tablespaces "$f" 2> "$dir/pg_restore.log"
+    if ! sh "$CODE/deploy/herstelfouten.sh" "$dir/pg_restore.log" > "$dir/fouten" 2>&1; then
+      sed 's/^/  /' "$dir/fouten" >&2
+      back "terugzetten (pg_restore, zie $dir/pg_restore.log)"
+    fi
+    supg -d "$db" -c "SELECT timescaledb_post_restore()" > /dev/null || back "timescaledb_post_restore()"
+  else
+    runpg pg_restore -p "$SU_PORT" -d "$db" --no-tablespaces --single-transaction --exit-on-error "$f" 2> "$dir/pg_restore.log" ||
+      { sed 's/^/  /' "$dir/pg_restore.log" >&2; back "terugzetten (pg_restore)"; }
+  fi
+  supg -d "$db" -c "ANALYZE" > /dev/null 2>&1
+
+  say "Tellen in de database van het cluster"
+  telling_cluster "$dir/telling-oud" > "$dir/telling-cluster" || back "tellen in het cluster"
+  bad=
+  while read -r tb n sum; do
+    line=$(grep "^$tb " "$dir/telling-cluster")
+    m=$(echo "$line" | cut -d' ' -f2)
+    s=$(echo "$line" | cut -d' ' -f3)
+    ok=ja
+    [ "$m" = "$n" ] || ok=NEE
+    [ "$sum" = - ] || [ "$s" = "$sum" ] || ok=NEE
+    printf '  %-32s %10s -> %-10s %s\n' "$tb" "$n" "$m" "$([ "$sum" = - ] && echo 'aantal' || echo 'aantal+md5') $ok"
+    [ "$ok" = ja ] || bad="$bad $tb"
+  done < "$dir/telling-oud"
+  [ -z "$bad" ] || back "verschil in:$bad"
+  if [ -n "$TS" ]; then
+    ts_jobs_set true "$dir/ts-jobs" supg -d "$db" || back "taken van TimescaleDB in het cluster aanzetten"
+  fi
+
+  say "Instellingen overnemen en de database in gebruik nemen"
+  [ -s "$OUD_ETC/secret.key" ] || back "de oude homepage heeft geen $OUD_ETC/secret.key"
+  (umask 077 && mkdir -p "$CF" && chmod 0700 "$CF" &&
+    grep -E '^[A-Z][A-Z0-9_]*=' "$OUD_ENV" | grep -Ev "$NOT_TAKEN" > "$CF/homepage.env" &&
+    cp "$OUD_ETC/secret.key" "$CF/secret.key" && chmod 0600 "$CF/secret.key") || back "$CF"
+  [ -s "$OUD_ETC/setup-token" ] && (umask 077 && cp "$OUD_ETC/setup-token" "$CF/setup-token")
+  if [ -n "$TS" ]; then echo "$TS" > "$CF/timescaledb"; else rm -f "$CF/timescaledb"; fi
+  echo "$commit" > "$CF/commit"
+  [ -s "$dir/ts-jobs" ] && cp "$dir/ts-jobs" "$STATE/ts-jobs-oud"
+  echo "  $(wc -l < "$CF/homepage.env") instellingen, sleutel $(keyhash)"
+  db_mark "cf-homepage key=$(keyhash) ready=$(date +%s) from=$(hostname) commit=$commit ts=${TS:-geen}" || back "markering zetten"
+
+  say "De homepage van het cluster starten"
+  sysctl_ restart "$API" || back "systemctl restart $API (journalctl -u $API)"
+  i=0
+  while ! api_up; do
+    i=$((i + 1))
+    [ $i -le "${CF_HP_WAIT:-90}" ] || back "de homepage van het cluster antwoordt niet (journalctl -u $API)"
+    sleep "${CF_HP_SLEEP:-2}"
+  done
+  sysctl_ start "$SYSLOG"
+  sysctl_ start "$WORKER"
+  i=0
+  while ! healthy && [ $i -lt "${CF_HP_WAIT_CHECKS:-45}" ]; do
+    i=$((i + 1))
+    sleep "${CF_HP_SLEEP:-2}"
+  done
+  if healthy; then
+    echo "  /api/healthz: gezond (database, worker en checks)"
+  else
+    echo "  /api/healthz zegt nog niet gezond; de checks hebben even nodig (homepage-ctl.sh status)"
+  fi
+  echo
+  echo "Overgenomen: de homepage draait op het cluster met de database van $(hostname)."
+  echo "- De checks draaien op één node: de node met het VIP en het slot in de database (nu $ME)."
+  echo "- De andere nodes starten zodra de sync homepage-instellingen ze bereikte (binnen een paar minuten; Cronjobs)."
+  echo "- Zet nu in Nginx Proxy Manager de host van de homepage naar http://$VIP poort 80 (Websockets Support aan)."
+  echo "- Syslog van je machines: naar $VIP (poort 514), niet meer naar het IP van deze node."
+  echo "- Back-up van de oude database: $f"
+  echo "- De oude homepage staat gestopt en uitgeschakeld; PostgreSQL $OUD_NAME met de data draait nog op 5433. Terugweg: homepage-ctl.sh terug"
+  echo "- Alles goed? homepage-ctl.sh afronden stopt PostgreSQL $OUD_NAME (de data blijft staan)."
+  return 0
+}
+
+# Iets ging mis tijdens de overname: database van het cluster weer leeg,
+# overgenomen instellingen weg, oude homepage weer aan.
+back() {
+  echo "FOUT: $1" >&2
+  echo "== Terugdraaien: database van het cluster leegmaken, oude homepage weer starten" >&2
+  sysctl_ stop "$WORKER" "$SYSLOG" "$API" > /dev/null 2>&1
+  if [ "$(db_tables 2>/dev/null)" != 0 ] || [ -n "$(metafield "$(db_meta 2>/dev/null)" ready)" ] ||
+    [ -n "$(supg -d "$db" -c "SELECT 1 FROM pg_extension WHERE extname = 'timescaledb'" 2>/dev/null)" ]; then
+    printf "SELECT format('DROP DATABASE IF EXISTS %%I WITH (FORCE)', '%s')\n\\\\gexec\nSELECT format('CREATE DATABASE %%I OWNER %%I', '%s', '%s')\n\\\\gexec\n" \
+      "$db" "$db" "$user" | supg -d postgres -f - > /dev/null 2>&1 ||
+      echo "WAARSCHUWING: de database van het cluster leegmaken mislukte" >&2
+  fi
+  rm -f "$CF/homepage.env" "$CF/secret.key" "$CF/setup-token" "$CF/timescaledb" "$CF/commit" "$APPENV"
+  [ -n "${DIR:-}" ] && ts_jobs_set true "$DIR/ts-jobs" oud_pg 2> /dev/null
+  # shellcheck disable=SC2086
+  if sysctl_ enable --now $OUD_UNITS $OUD_TIMERS >&2; then
+    echo "De oude homepage draait weer; aan de oude database is niets veranderd." >&2
+  else
+    echo "WAARSCHUWING: de oude homepage starten mislukte: systemctl enable --now $OUD_UNITS" >&2
+  fi
+  exit 1
+}
+
+oud_version() { pg_lsclusters -h 2>/dev/null | awk -v n="$OUD_NAME" '$2 == n {print $1}' | head -n 1; }
+
+afronden() {
+  meta=$(db_meta) || fail "de database antwoordt niet"
+  [ -n "$(metafield "$meta" ready)" ] || fail "er is nog niets overgenomen"
+  if has_oud && oud_enabled; then fail "de oude homepage draait nog"; fi
+  v=$(oud_version)
+  [ -n "$v" ] || { echo "Geen PostgreSQL $OUD_NAME op deze node."; return 0; }
+  pg_ctlcluster "$v" "$OUD_NAME" stop 2>/dev/null
+  [ -d "/etc/postgresql/$v/$OUD_NAME" ] && echo manual > "/etc/postgresql/$v/$OUD_NAME/start.conf"
+  echo "PostgreSQL $v/$OUD_NAME is gestopt en start niet meer vanzelf; de data blijft staan als terugweg (homepage-ctl.sh terug start hem weer)."
+}
+
+terug() {
+  has_oud || fail "hier staat geen oude homepage ($OUD_UNIT)"
+  meta=$(db_meta) || fail "de database van het cluster antwoordt niet; start de oude dan met de hand: systemctl enable --now $OUD_UNITS"
+  mkdir -p "$STATE/overname" && chmod 0700 "$STATE/overname"
+  f=$STATE/overname/cluster-$(date +%Y%m%d-%H%M%S).dump
+  say "Eerst een dump van de homepage zoals ze nu op het cluster staat"
+  (umask 077 && pgtool pg_dump -Fc > "$f" 2> "$f.log") && [ -s "$f" ] || { cat "$f.log" >&2; fail "dump van het cluster (er is niets veranderd)"; }
+  echo "  $f"
+  say "Markering weghalen: geen node van het cluster start de homepage nog"
+  db_mark "cf-homepage terug=$(date +%s) was:$(echo "$meta" | tr ' ' ',')" || fail "markering"
+  sysctl_ stop "$WORKER" "$SYSLOG" "$API"
+  sysctl_ disable "$API" "$SYSLOG" > /dev/null 2>&1
+  v=$(oud_version)
+  if [ -n "$v" ]; then
+    [ -d "/etc/postgresql/$v/$OUD_NAME" ] && echo auto > "/etc/postgresql/$v/$OUD_NAME/start.conf"
+    pg_ctlcluster "$v" "$OUD_NAME" start 2>/dev/null
+  fi
+  ts_jobs_set true "$STATE/ts-jobs-oud" oud_pg 2> /dev/null
+  if [ -d "$STATE/nginx-oud" ]; then
+    for pair in $NGINX_FILES; do
+      [ -e "$STATE/nginx-oud/${pair%%:*}" ] && cp -a "$STATE/nginx-oud/${pair%%:*}" "$NGINX/${pair#*:}"
+    done
+    nginx -t > /dev/null 2>&1 && sysctl_ reload nginx > /dev/null 2>&1
+  fi
+  say "Oude homepage starten"
+  # shellcheck disable=SC2086
+  sysctl_ enable --now $OUD_UNITS $OUD_TIMERS || fail "de oude homepage starten: systemctl enable --now $OUD_UNITS"
+  echo
+  echo "Terug op de oude homepage van $(hostname). Nog te doen:"
+  echo "- op de andere nodes van het cluster: systemctl stop $API $SYSLOG (Commando's); ze starten niet meer zonder markering"
+  echo "- Nginx Proxy Manager: het VIP wijst naar deze node zolang ze gezond is; anders terug naar haar eigen IP"
+  echo "- wijzigingen in de database sinds de overname staan alleen in $f"
+}
+
+# ---------------------------------------------------------------- installatie
+mappen_ok() {
+  [ -d "$BACKUPS" ] && [ "$(stat -c %G "$BACKUPS")" = homepage ] && [ -s /etc/sysctl.d/60-homepage-ping.conf ]
+}
+mappen() {
+  if id postgres > /dev/null 2>&1; then
+    install -d -m 0750 -o postgres -g homepage "$BACKUPS" || fail "$BACKUPS"
+  else
+    install -d -m 0750 -o root -g homepage "$BACKUPS" || fail "$BACKUPS"
+  fi
+  # Ping-checks draaien als gewone gebruiker (zoals install.sh).
+  echo 'net.ipv4.ping_group_range = 0 2147483647' > /etc/sysctl.d/60-homepage-ping.conf
+  sysctl -q -w net.ipv4.ping_group_range="0 2147483647" 2>/dev/null || echo "ping_group_range niet gezet; ping-checks kunnen falen" >&2
+  return 0
+}
+
+bouwen() {
+  if [ ! -d "$CODE/.git" ]; then
+    say "homepage ophalen ($REPO)"
+    git clone -q "$REPO" "$CODE" || fail "git clone"
+  fi
+  git config --global --add safe.directory "$CODE" 2>/dev/null
+  git -C "$CODE" fetch -q --tags --force origin || fail "git fetch"
+  commit=$(git -C "$CODE" rev-parse -q --verify "origin/$VERSION^{commit}" 2>/dev/null ||
+    git -C "$CODE" rev-parse -q --verify "$VERSION^{commit}" 2>/dev/null) || fail "versie $VERSION bestaat niet in $REPO"
+  prev=$(git -C "$CODE" rev-parse -q HEAD 2>/dev/null)
+  mkdir -p "$STATE" "$ETC"
+  # De oude homepage die hier nog draait, krijgt geen andere code onder zich;
+  # met dezelfde code is ze al gebouwd (install.sh).
+  if has_oud && oud_enabled; then
+    [ -n "$prev" ] && [ "$prev" != "$commit" ] &&
+      fail "de oude homepage draait hier op $prev; zet Versie van de homepage op die commit (andere code komt na de overname)"
+    if [ -x "$VENV/bin/python" ] && [ -s "$CODE/frontend/dist/index.html" ]; then
+      echo "$VERSION $commit" > "$STATE/gebouwd"
+      versie_schrijven "$commit"
+      echo "De oude homepage draait hier al op $commit; niets te bouwen."
+      return 0
+    fi
+    fail "de oude homepage op $commit heeft geen venv of frontend in $CODE"
+  fi
+  say "Versie $VERSION = $commit"
+  git -C "$CODE" checkout -q -f --detach "$commit" || fail "git checkout $commit"
+  undo() { [ -n "$prev" ] && git -C "$CODE" checkout -q -f --detach "$prev"; rm -rf "$CODE/frontend/dist.new"; fail "$1 (vorige code teruggezet)"; }
+  # Zoals bouw_venv in install.sh: één venv per requirements.lock en
+  # Python-versie, .venv wijst naar de actieve.
+  lock=$CODE/backend/requirements.lock
+  name=.venv-$({ cat "$lock"; python3 --version; } | sha256sum | cut -c1-12)
+  if [ ! -f "$CODE/$name/.klaar" ]; then
+    say "Python-bibliotheken ($name)"
+    rm -rf "${CODE:?}/$name"
+    python3 -m venv "$CODE/$name" && "$CODE/$name/bin/pip" install -q --upgrade pip &&
+      "$CODE/$name/bin/pip" install -q --no-deps -r "$lock" && "$CODE/$name/bin/pip" check > /dev/null || undo "pip install"
+    touch "$CODE/$name/.klaar"
+  fi
+  say "Frontend bouwen"
+  (cd "$CODE/frontend" && npm ci --no-audit --no-fund --loglevel=error > /dev/null &&
+    npm run build --silent -- --outDir dist.new --emptyOutDir > /dev/null) || undo "frontend bouwen"
+  [ -s "$CODE/frontend/dist.new/index.html" ] || undo "de frontend-build gaf geen index.html"
+  ln -sfn "$name" "$CODE/.venv.tmp" && mv -Tf "$CODE/.venv.tmp" "$CODE/.venv" || undo ".venv"
+  rm -rf "$CODE/frontend/dist.vorige"
+  [ -d "$CODE/frontend/dist" ] && mv "$CODE/frontend/dist" "$CODE/frontend/dist.vorige"
+  mv "$CODE/frontend/dist.new" "$CODE/frontend/dist" || fail "dist"
+  for d in "$CODE"/.venv-*; do
+    [ -d "$d" ] || continue
+    [ "${d##*/}" = "$name" ] || rm -rf "$d"
+  done
+  chown -R root:root "$CODE"
+  echo "$VERSION $commit" > "$STATE/gebouwd"
+  versie_schrijven "$commit"
+  echo "Gebouwd: $commit"
+}
+# Wat er draait, voor "wat is er nieuw" in de homepage (zoals install.sh).
+versie_schrijven() {
+  v=$(git -C "$CODE" describe --tags --always "$1" 2>/dev/null || echo "$1")
+  printf 'versie=%s\ncommit=%s\nkanaal=cluster\ndatum=%s\n' "$v" "$1" "$(date -Iseconds)" > "$ETC/versie"
+  chgrp homepage "$ETC/versie" 2>/dev/null
+  chmod 0640 "$ETC/versie"
+}
+gebouwd() {
+  [ "$(cut -d' ' -f1 "$STATE/gebouwd" 2>/dev/null)" = "$VERSION" ] &&
+    [ "$(git -C "$CODE" rev-parse -q HEAD 2>/dev/null)" = "$(cut -d' ' -f2 "$STATE/gebouwd")" ] &&
+    [ -x "$VENV/bin/python" ] && [ -s "$CODE/frontend/dist/index.html" ] && [ -s "$ETC/versie" ]
+}
+
+# Met een actieve ufw (default deny): etcd, Patroni, PostgreSQL, SSH (de
+# syncs) en VRRP tussen de nodes.
+ufw_active() { command -v ufw > /dev/null 2>&1 && ufw status 2>/dev/null | grep -q '^Status: active'; }
+ufw_rules() {
+  for ip in $PEERS; do
+    echo "allow from $ip to any port 2379:2380 proto tcp"
+    echo "allow from $ip to any port 5432 proto tcp"
+    echo "allow from $ip to any port 8008 proto tcp"
+    echo "allow from $ip to any port 22 proto tcp"
+    echo "allow from $ip proto vrrp"
+  done
+}
+firewall_ok() {
+  ufw_active || return 0
+  added=$(ufw show added 2>/dev/null)
+  ufw_rules | grep -v vrrp | while read -r r; do
+    echo "$added" | grep -qxF "ufw $r" || exit 1
+  done
+}
+firewall() {
+  if ! ufw_active; then echo "ufw staat niet aan; niets te doen."; return 0; fi
+  ufw_rules | while read -r r; do
+    # shellcheck disable=SC2086
+    ufw $r > /dev/null || exit 1
+    echo "ufw $r"
+  done || fail "ufw-regel zetten"
+}
+
+# Wie heeft het slot van de checks (de worker)? Hostname uit de naam van de
+# sessie, en het adres.
+slot_houder() {
+  pg -c "SELECT coalesce(a.application_name, '?') || ' (' || coalesce(host(a.client_addr), 'lokaal') || ')'
+    FROM pg_locks l JOIN pg_stat_activity a ON a.pid = l.pid
+    WHERE l.locktype = 'advisory' AND l.granted AND l.classid = 0 AND l.objid = $LOCK_WORKER" 2>/dev/null | sed 's/^cf-homepage-checks-//'
+}
+
+status() {
+  echo "node:        $ME (index $INDEX)"
+  if has_ip "$VIP"; then echo "VIP:         $VIP staat hier"; else echo "VIP:         $VIP staat elders"; fi
+  if has_ip "$DB_VIP"; then echo "db-VIP:      $DB_VIP staat hier (primary)"; else echo "db-VIP:      $DB_VIP staat elders"; fi
+  echo "api:         $(sysctl_ is-active "$API" 2>/dev/null)"
+  echo "syslog:      $(sysctl_ is-active "$SYSLOG" 2>/dev/null)"
+  echo "worker:      $(sysctl_ is-active "$WORKER" 2>/dev/null)"
+  h=$(slot_houder)
+  if [ -n "$h" ]; then echo "checks:      draaien op $h"; else echo "checks:      niemand heeft het slot (de worker draait nergens)"; fi
+  if has_oud; then
+    echo "oude:        homepage-api $(sysctl_ is-active homepage-api 2>/dev/null), commit $(oud_commit), PostgreSQL-poort $(oud_port)"
+  fi
+  if healthy; then echo "homepage:    gezond (/api/healthz)"; elif api_up; then echo "homepage:    api antwoordt, /api/healthz nog niet gezond"; else echo "homepage:    api antwoordt NIET op http://127.0.0.1/api/healthz"; fi
+  if meta=$(db_meta 2>/dev/null); then
+    echo "database:    ${meta:-geen markering} ($(db_tables) tabellen)"
+  else
+    echo "database:    antwoordt niet"
+  fi
+  if [ -s "$CF/secret.key" ]; then echo "sleutel:     overgenomen ($(keyhash))"; else echo "sleutel:     nog geen (wacht op de overname)"; fi
+  echo "TimescaleDB: $(ts_want || true)"
+  echo "versie:      $VERSION ($(cut -d' ' -f2 "$STATE/gebouwd" 2>/dev/null || echo nog niet gebouwd))"
+  # shellcheck disable=SC2012
+  echo "back-up:     $(ls -1t "$BACKUPS"/homepage-*.dump 2>/dev/null | head -n 1)"
+  return 0
+}
+
+case "${1:-}" in
+  voorstart) voorstart ;;
+  migreren) migreren ;;
+  worker) worker ;;
+  check)
+    sysctl_ is-active --quiet nginx || exit 1
+    api_up
+    ;;
+  master) master ;;
+  vip-weg)
+    sysctl_ stop --no-block "$WORKER"
+    exit 0
+    ;;
+  volg) volg ;;
+  worker-mag) worker_mag ;;
+  syslog-mag) syslog_mag ;;
+  backup-mag) worker_mag ;;
+  status) status ;;
+  overnemen) overnemen "${2:-}" ;;
+  voorbereiden) voorbereiden ;;
+  voorbereid) voorbereid ;;
+  afronden) afronden ;;
+  terug) terug ;;
+  bouwen) bouwen ;;
+  gebouwd) gebouwd ;;
+  timescaledb) timescaledb ;;
+  timescaledb-ok) timescaledb_ok ;;
+  nginx) nginx_ ;;
+  nginx-ok) nginx_ok ;;
+  mappen) mappen ;;
+  mappen-ok) mappen_ok ;;
+  firewall) firewall ;;
+  firewall-ok) firewall_ok ;;
+  unchanged)
+    sysctl_ is-active --quiet "$API" || exit 0
+    [ "$(cat "$HASH" 2>/dev/null)" = "$(fingerprint)" ]
+    ;;
+  restart-if-changed)
+    sysctl_ try-restart "$API" "$SYSLOG"
+    worker_mag && sysctl_ try-restart "$WORKER"
+    exit 0
+    ;;
+  *)
+    echo "gebruik: $0 voorstart|migreren|worker|check|master|vip-weg|volg|worker-mag|syslog-mag|backup-mag|status|voorbereiden|voorbereid|overnemen|afronden|terug|bouwen|gebouwd|timescaledb|timescaledb-ok|nginx|nginx-ok|mappen|mappen-ok|firewall|firewall-ok|unchanged|restart-if-changed" >&2
+    exit 2
+    ;;
+esac
