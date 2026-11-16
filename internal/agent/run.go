@@ -247,6 +247,9 @@ func (a *Agent) Connect() error {
 	if _, err = a.nc.Subscribe(protocol.Subject(a.Config.NodeID, protocol.SubjectLogs), a.onLogs); err != nil {
 		return err
 	}
+	if _, err = a.nc.Subscribe(protocol.Subject(a.Config.NodeID, protocol.SubjectSecurity), a.onSecurity); err != nil {
+		return err
+	}
 	_, err = a.nc.Subscribe(protocol.Subject(a.Config.NodeID, protocol.SubjectConsole), a.onConsole)
 	return err
 }

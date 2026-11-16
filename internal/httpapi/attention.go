@@ -148,6 +148,22 @@ func (s *Server) attention(ctx context.Context, p auth.Principal) (gen.Attention
 		}
 	}
 
+	// Kwetsbaarheden (fase 27): actief misbruikt en kritieke netwerkbevindingen.
+	if s.security != nil {
+		sm, err := s.security.Summary(ctx)
+		if err != nil {
+			return gen.Attention{}, err
+		}
+		add("security-network", red, plural(len(sm.CriticalNet), "adres heeft", "adressen hebben")+" een kritieke netwerkbevinding",
+			names(sm.CriticalNet), "/kwetsbaarheden/scans?tab=bevindingen", len(sm.CriticalNet))
+		add("security-kev", red, plural(len(sm.KEVNodes), "node heeft", "nodes hebben")+" een actief misbruikte kwetsbaarheid",
+			names(sm.KEVNodes), "/kwetsbaarheden", len(sm.KEVNodes))
+		add("security-malware", red, plural(len(sm.Malware), "node heeft", "nodes hebben")+" malware of een rootkit volgens ClamAV of chkrootkit",
+			names(sm.Malware), "/kwetsbaarheden/tools", len(sm.Malware))
+		add("security-ssh-waiting", amber, plural(len(sm.SSHWaiting), "node wacht", "nodes wachten")+" op bevestiging van een SSH-wijziging",
+			names(sm.SSHWaiting)+". Kun je nog inloggen? Bevestig, anders zet de node de oude instellingen terug.", "/kwetsbaarheden/verharding", len(sm.SSHWaiting))
+	}
+
 	if p.User.TotpEnabledAt == nil {
 		add("totp-off", amber, "Tweestapsverificatie staat uit voor je account", "Nodig voor acties op prod", "/instellingen#tweestap", 1)
 	}
@@ -165,6 +181,11 @@ func (s *Server) attention(ctx context.Context, p auth.Principal) (gen.Attention
 	badges := map[string]gen.AttentionBadge{}
 	for _, it := range items {
 		href, _, _ := strings.Cut(it.Href, "#")
+		href, _, _ = strings.Cut(href, "?")
+		// Kwetsbaarheden is één menu-item met tabbladen.
+		if strings.HasPrefix(href, "/kwetsbaarheden/") {
+			href = "/kwetsbaarheden"
+		}
 		b := badges[href]
 		b.Count += it.Count
 		if b.Tone != gen.AttentionBadgeToneRed {

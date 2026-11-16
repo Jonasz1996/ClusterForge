@@ -4747,6 +4747,382 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/security": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Kwetsbaarheden en verharding (fase 27)
+         * @description Stand van de feeds (Debian Security Tracker, CISA KEV), cijfers, elke node met een agent met zijn pakketlijst en
+         *     aantallen bevindingen, en het aantal eigen scopes. Ook voor viewers.
+         */
+        get: operations["getSecurity"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/security/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Feeds en/of pakketlijsten nu verversen (admin) */
+        post: operations["refreshSecurity"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/security/hardening": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Verharding per node (fase 27 M2)
+         * @description De verhardingsregels en per node met een agent de score, de uitkomst van elke regel en het Lynis-rapport. Ook
+         *     voor viewers.
+         */
+        get: operations["getSecurityHardening"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/security/findings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Bevindingen, ernstigste eerst */
+        get: operations["listSecurityFindings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/security/findings/{findingId}/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                findingId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Bevinding aanvaarden met een reden (admin) */
+        post: operations["acceptSecurityFinding"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/security/findings/{findingId}/reopen": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                findingId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Aanvaarde bevinding heropenen (admin) */
+        post: operations["reopenSecurityFinding"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/security/scopes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Eigen scopes (netwerken die van jou zijn) */
+        get: operations["listSecurityScopes"];
+        put?: never;
+        /** Scope aanmaken (admin) */
+        post: operations["createSecurityScope"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/security/scopes/{scopeId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scopeId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** Scope bijwerken (admin) */
+        put: operations["updateSecurityScope"];
+        post?: never;
+        /** Scope verwijderen (admin) */
+        delete: operations["deleteSecurityScope"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/security/scans": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Netwerkscans, scanners en de laatste uitvoeringen (fase 27 M3) */
+        get: operations["getSecurityScans"];
+        put?: never;
+        /** Netwerkscan aanmaken (admin) */
+        post: operations["createSecurityScan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/security/scans/{scanId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scanId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** Netwerkscan bijwerken (admin) */
+        put: operations["updateSecurityScan"];
+        post?: never;
+        /** Netwerkscan verwijderen (admin) */
+        delete: operations["deleteSecurityScan"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/security/scans/{scanId}/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scanId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Netwerkscan nu starten (admin) */
+        post: operations["runSecurityScan"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/security/scan-runs/{runId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                runId: string;
+            };
+            cookie?: never;
+        };
+        /** Eén uitvoering van een netwerkscan met de gevonden hosts */
+        get: operations["getSecurityScanRun"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/security/report": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Rapport van één eigen scope (fase 27 M5) */
+        get: operations["getSecurityReport"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/security/fixes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** De laatste 50 toegepaste oplossingen (fase 27 M6) */
+        get: operations["listSecurityFixes"];
+        put?: never;
+        /** Veilige oplossingen toepassen op één node (admin); SSH wordt teruggedraaid tenzij bevestigd */
+        post: operations["applySecurityFixes"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/security/fixes/{fixId}/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                fixId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** SSH-wijziging houden; de terugdraaitimer stopt (admin) */
+        post: operations["confirmSecurityFix"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/security/fixes/{fixId}/rollback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                fixId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** SSH-wijziging meteen terugdraaien (admin) */
+        post: operations["rollbackSecurityFix"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/security/tools": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Beveiligingstools per node (fase 27 M7) */
+        get: operations["getSecurityTools"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/security/tools/{nodeId}/{tool}/{action}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+                tool: "clamav" | "aide" | "rkhunter" | "chkrootkit" | "lynis" | "auditd" | "trivy";
+                action: "install" | "run" | "baseline" | "remove";
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Een tool installeren, draaien, de basislijn opnieuw maken of verwijderen (admin); loopt op de achtergrond */
+        post: operations["securityToolAction"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/security/tools/{nodeId}/{tool}/schedule": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+                tool: "clamav" | "aide" | "rkhunter" | "chkrootkit" | "lynis" | "auditd" | "trivy";
+            };
+            cookie?: never;
+        };
+        get?: never;
+        /** De run van een tool plannen (admin) */
+        put: operations["setSecurityToolSchedule"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/security/scanner": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** De scannercontainer koppelen (admin); maakt de node cf-scanner en zijn aanmeldbestand */
+        post: operations["linkSecurityScanner"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/commands": {
         parameters: {
             query?: never;
@@ -4828,10 +5204,12 @@ export interface paths {
         /**
          * Agents bijwerken (admin); één taak agents.upgrade per cluster, één node tegelijk
          * @description node_ids werkt die nodes bij, cluster_id elke verouderde agent van dat cluster, all elke verouderde agent buiten
-         *     prod. Per cluster één node tegelijk: de volgende pas als de vorige met de nieuwe agent terug is. Komt een node niet
-         *     terug of zet hij de oude agent terug, dan stopt de taak van dat cluster. Op prod vraagt het tweestapsverificatie en
-         *     de slug van het cluster in confirm; nodes uit meer dan één prodcluster tegelijk kan niet (400). Een cluster waar al
-         *     een taak loopt, staat in skipped; is er niets gestart, dan 409.
+         *     prod; all met include_prod ook die op prod. Per cluster één node tegelijk: de volgende pas als de vorige met de
+         *     nieuwe agent terug is. Komt een node niet terug of zet hij de oude agent terug, dan stopt de taak van dat cluster.
+         *     Op prod vraagt het tweestapsverificatie en één code in totp_code voor de hele klik (of, voor één prodcluster, de
+         *     slug in confirm). Met include_prod starten de clusters buiten prod meteen; de prodclusters komen in een rij
+         *     (queued_prod) en gaan één voor één: het volgende pas als het vorige gelukt is, bij een fout stopt de rij. Een
+         *     cluster waar al een taak loopt, staat in skipped; is er niets gestart of in de rij gezet, dan 409.
          */
         post: operations["startAgentUpgrades"];
         delete?: never;
@@ -4861,6 +5239,48 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/agent-upgrades/prod-auto": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Agents op prod ook vanzelf bijwerken aan- of uitzetten (admin)
+         * @description Aan werkt ClusterForge verouderde agents op prod ook vanzelf bij, één prodcluster tegelijk en één node tegelijk.
+         *     Mislukt een update op prod, dan staat het op prod stil tot die node met de knop bijgewerkt is. Aanzetten vraagt
+         *     tweestapsverificatie en een code in totp_code; uitzetten niet. Geldt alleen als vanzelf bijwerken (auto) aan staat.
+         */
+        put: operations["setAgentUpgradeProdAuto"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agent-upgrades/prod-queue": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * De rij prodclusters van "ook productie" stoppen (admin)
+         * @description Haalt de prodclusters die nog niet begonnen zijn uit de rij. Een taak die al loopt, annuleer je bij Taken.
+         */
+        delete: operations["clearAgentUpgradeProdQueue"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/clusters/{clusterId}/agent-upgrade-auto": {
         parameters: {
             query?: never;
@@ -4873,7 +5293,7 @@ export interface paths {
         get?: never;
         /**
          * Agents vanzelf bijwerken op één cluster aan- of uitzetten (admin)
-         * @description Uit werkt ClusterForge de agents van dit cluster alleen met de knop bij. Prod gaat nooit vanzelf.
+         * @description Uit werkt ClusterForge de agents van dit cluster alleen met de knop bij. Prod gaat alleen vanzelf met prod_auto.
          */
         put: operations["setClusterAgentUpgradeAuto"];
         post?: never;
@@ -11967,6 +12387,20 @@ export interface components {
             archs: string[];
             /** @description Agents vanzelf bijwerken staat aan */
             auto: boolean;
+            /** @description Ook agents op prod vanzelf bijwerken */
+            prod_auto: boolean;
+            /** @description Een update op prod mislukte; vanzelf bijwerken op prod staat stil */
+            prod_halted: boolean;
+            /** @description De node waar de update op prod mislukte */
+            halted_by: string;
+            /** @description Prodclusters van een klik "ook productie" die nog aan de beurt komen, in volgorde */
+            prod_queue: {
+                /** Format: uuid */
+                cluster_id: string;
+                cluster_name: string;
+                /** Format: uuid */
+                job_id: string | null;
+            }[];
             /** @description Clusters waar vanzelf bijwerken uitstaat */
             off_cluster_ids: string[];
             agents: components["schemas"]["AgentUpgradeAgent"][];
@@ -12244,12 +12678,18 @@ export interface components {
             /** Format: uuid */
             cluster_id?: string;
             all?: boolean;
+            /** @description Met all: ook de agents op prod, één prodcluster na het andere */
+            include_prod?: boolean;
+            /** @description Code van tweestapsverificatie; één code bevestigt alle prodnodes van deze klik */
+            totp_code?: string;
             /** @description De slug van het prodcluster */
             confirm?: string;
         };
         AgentUpgradeStarted: {
             jobs: components["schemas"]["Job"][];
             skipped: string[];
+            /** @description Prodclusters in de rij, één voor één */
+            queued_prod: string[];
         };
         Job: {
             /** Format: uuid */
@@ -13509,6 +13949,63 @@ export interface components {
             type: "qemu" | "lxc";
             /** @description Storage voor de schijven van de test */
             storage: string;
+        };
+        /** @description Een object van de beveiligingsmodule (fase 27); de velden staan in web/src/lib/security.ts en internal/security. */
+        SecurityObject: {
+            [key: string]: unknown;
+        };
+        SecurityRefreshInput: {
+            /** @description Feeds opnieuw ophalen */
+            feeds?: boolean;
+            /** @description Pakketlijsten opnieuw ophalen */
+            nodes?: boolean;
+            /**
+             * Format: uuid
+             * @description Alleen deze node (met nodes)
+             */
+            node_id?: string;
+        };
+        SecurityAcceptInput: {
+            note: string;
+            /** @description Na zoveel dagen weer open; leeg is voor altijd */
+            days?: number;
+        };
+        SecurityScopeInput: {
+            name: string;
+            description?: string;
+            cidrs: string[];
+            exclude?: string[];
+            public_confirm?: string;
+            public_note?: string;
+        };
+        SecurityScanInput: {
+            name: string;
+            /** Format: uuid */
+            scope_id: string;
+            /** Format: uuid */
+            scanner_id?: string | null;
+            /** @enum {string} */
+            profile: "snel" | "standaard" | "volledig";
+            max_rate?: number;
+            /** @description Per dienst één aanmeldpoging met het standaardwachtwoord (opt-in). */
+            default_passwords?: boolean;
+            /** @enum {string} */
+            schedule: "uit" | "dagelijks" | "wekelijks";
+            weekday?: number;
+            hour?: number;
+        };
+        SecurityFixInput: {
+            /** Format: uuid */
+            node_id: string;
+            rules: string[];
+            /** @description SSH: na zoveel minuten terugdraaien tenzij bevestigd (standaard 10). */
+            rollback_minutes?: number;
+        };
+        SecurityToolSchedule: {
+            /** @enum {string} */
+            schedule: "uit" | "dagelijks" | "wekelijks";
+            weekday?: number;
+            hour?: number;
         };
         /** @description Een object van de firewall (fase 16); de velden staan in web/src/lib/firewall.ts en internal/firewall. */
         FirewallObject: {
@@ -21188,6 +21685,640 @@ export interface operations {
             404: components["responses"]["Error"];
         };
     };
+    getSecurity: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SecurityObject"];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    refreshSecurity: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SecurityRefreshInput"];
+            };
+        };
+        responses: {
+            /** @description Gestart */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+        };
+    };
+    getSecurityHardening: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SecurityObject"];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    listSecurityFindings: {
+        parameters: {
+            query?: {
+                status?: "open" | "aanvaard" | "opgelost" | "alle" | "actueel";
+                node_id?: string;
+                kind?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["SecurityObject"][];
+                    };
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    acceptSecurityFinding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                findingId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SecurityAcceptInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SecurityObject"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    reopenSecurityFinding: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                findingId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SecurityObject"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    listSecurityScopes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        items: components["schemas"]["SecurityObject"][];
+                        confirm_text: string;
+                    };
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    createSecurityScope: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SecurityScopeInput"];
+            };
+        };
+        responses: {
+            /** @description Aangemaakt */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SecurityObject"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+        };
+    };
+    updateSecurityScope: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scopeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SecurityScopeInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SecurityObject"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    deleteSecurityScope: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scopeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Verwijderd */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    getSecurityScans: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SecurityObject"];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    createSecurityScan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SecurityScanInput"];
+            };
+        };
+        responses: {
+            /** @description Aangemaakt */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SecurityObject"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+        };
+    };
+    updateSecurityScan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scanId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SecurityScanInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SecurityObject"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    deleteSecurityScan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scanId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Verwijderd */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    runSecurityScan: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                scanId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Gestart */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        /** Format: uuid */
+                        run_id: string;
+                    };
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    getSecurityScanRun: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                runId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SecurityObject"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    getSecurityReport: {
+        parameters: {
+            query: {
+                scope_id: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SecurityObject"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    listSecurityFixes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SecurityObject"][];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    applySecurityFixes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SecurityFixInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SecurityObject"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    confirmSecurityFix: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                fixId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SecurityObject"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    rollbackSecurityFix: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                fixId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SecurityObject"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    getSecurityTools: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SecurityObject"];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    securityToolAction: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+                tool: "clamav" | "aide" | "rkhunter" | "chkrootkit" | "lynis" | "auditd" | "trivy";
+                action: "install" | "run" | "baseline" | "remove";
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Gestart */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
+    setSecurityToolSchedule: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+                tool: "clamav" | "aide" | "rkhunter" | "chkrootkit" | "lynis" | "auditd" | "trivy";
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SecurityToolSchedule"];
+            };
+        };
+        responses: {
+            /** @description Bewaard */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    linkSecurityScanner: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SecurityObject"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
     listCommands: {
         parameters: {
             query?: never;
@@ -21422,6 +22553,60 @@ export interface operations {
                 };
             };
             400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+        };
+    };
+    setAgentUpgradeProdAuto: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    enabled: boolean;
+                    totp_code?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentUpgradeOverview"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            429: components["responses"]["Error"];
+        };
+    };
+    clearAgentUpgradeProdQueue: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentUpgradeOverview"];
+                };
+            };
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
         };

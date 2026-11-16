@@ -51,6 +51,7 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/reports"
 	"github.com/Jonasz1996/clusterforge/internal/risk"
 	"github.com/Jonasz1996/clusterforge/internal/rollout"
+	"github.com/Jonasz1996/clusterforge/internal/security"
 	"github.com/Jonasz1996/clusterforge/internal/soc"
 	"github.com/Jonasz1996/clusterforge/internal/stacks"
 	"github.com/Jonasz1996/clusterforge/internal/store"
@@ -100,6 +101,7 @@ type Server struct {
 	updates      *updates.Service
 	crowdsec     *crowdsec.Service
 	soc          *soc.Service
+	security     *security.Service
 	stacks       *stacks.Service
 	logs         *logs.Service
 	firewall     *firewall.Service
@@ -185,6 +187,8 @@ type Deps struct {
 	CrowdSec *crowdsec.Service
 	// SOC is het beveiligingsoverzicht (fase 25).
 	SOC *soc.Service
+	// Security is de kwetsbaarheids- en verhardingsmodule (fase 27).
+	Security *security.Service
 	// Stacks beheert de Docker-stacks van de clusters (fase 21).
 	Stacks *stacks.Service
 	// Logs leest de logs op de nodes (fase 23).
@@ -232,6 +236,7 @@ func New(d Deps) *Server {
 		stacks:   d.Stacks,
 		logs:     d.Logs,
 		firewall: d.Firewall,
+		security: d.Security,
 		pvehosts: d.PVEHosts,
 		recipes:  recipes.NewService(d.Pool, ev),
 		// 10 pogingen direct, daarna één per 6 seconden per IP-adres.

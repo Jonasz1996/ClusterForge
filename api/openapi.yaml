@@ -5066,6 +5066,392 @@ paths:
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /security:
+    get:
+      operationId: getSecurity
+      summary: Kwetsbaarheden en verharding (fase 27)
+      description: |
+        Stand van de feeds (Debian Security Tracker, CISA KEV), cijfers, elke node met een agent met zijn pakketlijst en
+        aantallen bevindingen, en het aantal eigen scopes. Ook voor viewers.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SecurityObject" }
+        "401": { $ref: "#/components/responses/Error" }
+  /security/refresh:
+    post:
+      operationId: refreshSecurity
+      summary: Feeds en/of pakketlijsten nu verversen (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SecurityRefreshInput" }
+      responses:
+        "202": { description: Gestart }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /security/hardening:
+    get:
+      operationId: getSecurityHardening
+      summary: Verharding per node (fase 27 M2)
+      description: |
+        De verhardingsregels en per node met een agent de score, de uitkomst van elke regel en het Lynis-rapport. Ook
+        voor viewers.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SecurityObject" }
+        "401": { $ref: "#/components/responses/Error" }
+  /security/findings:
+    get:
+      operationId: listSecurityFindings
+      summary: Bevindingen, ernstigste eerst
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [open, aanvaard, opgelost, alle, actueel] }
+        - { name: node_id, in: query, schema: { type: string, format: uuid } }
+        - { name: kind, in: query, schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/SecurityObject" } }
+        "401": { $ref: "#/components/responses/Error" }
+  /security/findings/{findingId}/accept:
+    parameters:
+      - { name: findingId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: acceptSecurityFinding
+      summary: Bevinding aanvaarden met een reden (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SecurityAcceptInput" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SecurityObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /security/findings/{findingId}/reopen:
+    parameters:
+      - { name: findingId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: reopenSecurityFinding
+      summary: Aanvaarde bevinding heropenen (admin)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SecurityObject" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /security/scopes:
+    get:
+      operationId: listSecurityScopes
+      summary: Eigen scopes (netwerken die van jou zijn)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items, confirm_text]
+                properties:
+                  items: { type: array, items: { $ref: "#/components/schemas/SecurityObject" } }
+                  confirm_text: { type: string }
+        "401": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createSecurityScope
+      summary: Scope aanmaken (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SecurityScopeInput" }
+      responses:
+        "201":
+          description: Aangemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SecurityObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /security/scopes/{scopeId}:
+    parameters:
+      - { name: scopeId, in: path, required: true, schema: { type: string, format: uuid } }
+    put:
+      operationId: updateSecurityScope
+      summary: Scope bijwerken (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SecurityScopeInput" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SecurityObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteSecurityScope
+      summary: Scope verwijderen (admin)
+      responses:
+        "204": { description: Verwijderd }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /security/scans:
+    get:
+      operationId: getSecurityScans
+      summary: Netwerkscans, scanners en de laatste uitvoeringen (fase 27 M3)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SecurityObject" }
+        "401": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createSecurityScan
+      summary: Netwerkscan aanmaken (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SecurityScanInput" }
+      responses:
+        "201":
+          description: Aangemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SecurityObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /security/scans/{scanId}:
+    parameters:
+      - { name: scanId, in: path, required: true, schema: { type: string, format: uuid } }
+    put:
+      operationId: updateSecurityScan
+      summary: Netwerkscan bijwerken (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SecurityScanInput" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SecurityObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteSecurityScan
+      summary: Netwerkscan verwijderen (admin)
+      responses:
+        "204": { description: Verwijderd }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /security/scans/{scanId}/run:
+    parameters:
+      - { name: scanId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: runSecurityScan
+      summary: Netwerkscan nu starten (admin)
+      responses:
+        "202":
+          description: Gestart
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [run_id]
+                properties:
+                  run_id: { type: string, format: uuid }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /security/scan-runs/{runId}:
+    parameters:
+      - { name: runId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getSecurityScanRun
+      summary: Eén uitvoering van een netwerkscan met de gevonden hosts
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SecurityObject" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /security/report:
+    get:
+      operationId: getSecurityReport
+      summary: Rapport van één eigen scope (fase 27 M5)
+      parameters:
+        - { name: scope_id, in: query, required: true, schema: { type: string, format: uuid } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SecurityObject" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /security/fixes:
+    get:
+      operationId: listSecurityFixes
+      summary: De laatste 50 toegepaste oplossingen (fase 27 M6)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: "#/components/schemas/SecurityObject" } }
+        "401": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: applySecurityFixes
+      summary: Veilige oplossingen toepassen op één node (admin); SSH wordt teruggedraaid tenzij bevestigd
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SecurityFixInput" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SecurityObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /security/fixes/{fixId}/confirm:
+    parameters:
+      - { name: fixId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: confirmSecurityFix
+      summary: SSH-wijziging houden; de terugdraaitimer stopt (admin)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SecurityObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /security/fixes/{fixId}/rollback:
+    parameters:
+      - { name: fixId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: rollbackSecurityFix
+      summary: SSH-wijziging meteen terugdraaien (admin)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SecurityObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /security/tools:
+    get:
+      operationId: getSecurityTools
+      summary: Beveiligingstools per node (fase 27 M7)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SecurityObject" }
+        "401": { $ref: "#/components/responses/Error" }
+  /security/tools/{nodeId}/{tool}/{action}:
+    parameters:
+      - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: tool, in: path, required: true, schema: { type: string, enum: [clamav, aide, rkhunter, chkrootkit, lynis, auditd, trivy] } }
+      - { name: action, in: path, required: true, schema: { type: string, enum: [install, run, baseline, remove] } }
+    post:
+      operationId: securityToolAction
+      summary: Een tool installeren, draaien, de basislijn opnieuw maken of verwijderen (admin); loopt op de achtergrond
+      responses:
+        "202": { description: Gestart }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /security/tools/{nodeId}/{tool}/schedule:
+    parameters:
+      - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+      - { name: tool, in: path, required: true, schema: { type: string, enum: [clamav, aide, rkhunter, chkrootkit, lynis, auditd, trivy] } }
+    put:
+      operationId: setSecurityToolSchedule
+      summary: De run van een tool plannen (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SecurityToolSchedule" }
+      responses:
+        "204": { description: Bewaard }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /security/scanner:
+    post:
+      operationId: linkSecurityScanner
+      summary: De scannercontainer koppelen (admin); maakt de node cf-scanner en zijn aanmeldbestand
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SecurityObject" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
   /commands:
     get:
       operationId: listCommands
@@ -5186,10 +5572,12 @@ paths:
       summary: Agents bijwerken (admin); één taak agents.upgrade per cluster, één node tegelijk
       description: |
         node_ids werkt die nodes bij, cluster_id elke verouderde agent van dat cluster, all elke verouderde agent buiten
-        prod. Per cluster één node tegelijk: de volgende pas als de vorige met de nieuwe agent terug is. Komt een node niet
-        terug of zet hij de oude agent terug, dan stopt de taak van dat cluster. Op prod vraagt het tweestapsverificatie en
-        de slug van het cluster in confirm; nodes uit meer dan één prodcluster tegelijk kan niet (400). Een cluster waar al
-        een taak loopt, staat in skipped; is er niets gestart, dan 409.
+        prod; all met include_prod ook die op prod. Per cluster één node tegelijk: de volgende pas als de vorige met de
+        nieuwe agent terug is. Komt een node niet terug of zet hij de oude agent terug, dan stopt de taak van dat cluster.
+        Op prod vraagt het tweestapsverificatie en één code in totp_code voor de hele klik (of, voor één prodcluster, de
+        slug in confirm). Met include_prod starten de clusters buiten prod meteen; de prodclusters komen in een rij
+        (queued_prod) en gaan één voor één: het volgende pas als het vorige gelukt is, bij een fout stopt de rij. Een
+        cluster waar al een taak loopt, staat in skipped; is er niets gestart of in de rij gezet, dan 409.
       requestBody:
         required: true
         content:
@@ -5230,13 +5618,55 @@ paths:
         "400": { $ref: "#/components/responses/Error" }
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
+  /agent-upgrades/prod-auto:
+    put:
+      operationId: setAgentUpgradeProdAuto
+      summary: Agents op prod ook vanzelf bijwerken aan- of uitzetten (admin)
+      description: |
+        Aan werkt ClusterForge verouderde agents op prod ook vanzelf bij, één prodcluster tegelijk en één node tegelijk.
+        Mislukt een update op prod, dan staat het op prod stil tot die node met de knop bijgewerkt is. Aanzetten vraagt
+        tweestapsverificatie en een code in totp_code; uitzetten niet. Geldt alleen als vanzelf bijwerken (auto) aan staat.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled]
+              properties:
+                enabled: { type: boolean }
+                totp_code: { type: string }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentUpgradeOverview" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+  /agent-upgrades/prod-queue:
+    delete:
+      operationId: clearAgentUpgradeProdQueue
+      summary: De rij prodclusters van "ook productie" stoppen (admin)
+      description: Haalt de prodclusters die nog niet begonnen zijn uit de rij. Een taak die al loopt, annuleer je bij Taken.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentUpgradeOverview" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
   /clusters/{clusterId}/agent-upgrade-auto:
     parameters:
       - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
     put:
       operationId: setClusterAgentUpgradeAuto
       summary: Agents vanzelf bijwerken op één cluster aan- of uitzetten (admin)
-      description: Uit werkt ClusterForge de agents van dit cluster alleen met de knop bij. Prod gaat nooit vanzelf.
+      description: Uit werkt ClusterForge de agents van dit cluster alleen met de knop bij. Prod gaat alleen vanzelf met prod_auto.
       requestBody:
         required: true
         content:
@@ -12595,12 +13025,25 @@ components:
       enum: [queued, running, succeeded, failed, canceled]
     AgentUpgradeOverview:
       type: object
-      required: [version, protocol, archs, auto, off_cluster_ids, agents, running]
+      required: [version, protocol, archs, auto, prod_auto, prod_halted, halted_by, prod_queue, off_cluster_ids, agents, running]
       properties:
         version: { type: string, description: De versie van de agent die deze server aanbiedt }
         protocol: { type: integer }
         archs: { type: array, items: { type: string }, description: "Architecturen waarvoor de server een agent heeft" }
         auto: { type: boolean, description: Agents vanzelf bijwerken staat aan }
+        prod_auto: { type: boolean, description: Ook agents op prod vanzelf bijwerken, één prodcluster tegelijk }
+        prod_halted: { type: boolean, description: Een update op prod mislukte; vanzelf bijwerken op prod staat stil }
+        halted_by: { type: string, description: De node waar de update op prod mislukte }
+        prod_queue:
+          type: array
+          description: Prodclusters van een klik "ook productie" die nog aan de beurt komen, in volgorde
+          items:
+            type: object
+            required: [cluster_id, cluster_name, job_id]
+            properties:
+              cluster_id: { type: string, format: uuid }
+              cluster_name: { type: string }
+              job_id: { type: string, format: uuid, nullable: true }
         off_cluster_ids: { type: array, items: { type: string, format: uuid }, description: Clusters waar vanzelf bijwerken uitstaat }
         agents: { type: array, items: { $ref: "#/components/schemas/AgentUpgradeAgent" } }
         running:
@@ -12898,13 +13341,16 @@ components:
         node_ids: { type: array, items: { type: string, format: uuid } }
         cluster_id: { type: string, format: uuid }
         all: { type: boolean }
-        confirm: { type: string, description: De slug van het prodcluster, ter bevestiging }
+        include_prod: { type: boolean, description: "Met all: ook de agents op prod, één prodcluster na het andere" }
+        totp_code: { type: string, description: "Code van tweestapsverificatie; één code bevestigt alle prodnodes van deze klik" }
+        confirm: { type: string, description: De slug van het prodcluster, ter bevestiging (alleen voor één prodcluster) }
     AgentUpgradeStarted:
       type: object
-      required: [jobs, skipped]
+      required: [jobs, skipped, queued_prod]
       properties:
         jobs: { type: array, items: { $ref: "#/components/schemas/Job" } }
         skipped: { type: array, items: { type: string } }
+        queued_prod: { type: array, items: { type: string }, description: "Prodclusters in de rij, één voor één" }
     Job:
       type: object
       required: [id, kind, title, status, error, cluster_id, node_id, proxmox_id, requested_by, attempts, cancel_requested, retryable, created_at, started_at, finished_at]
@@ -14128,6 +14574,59 @@ components:
         archive: { type: string, description: Volume van de back-up }
         type: { type: string, enum: [qemu, lxc] }
         storage: { type: string, description: Storage voor de schijven van de test }
+    SecurityObject:
+      type: object
+      description: Een object van de beveiligingsmodule (fase 27); de velden staan in web/src/lib/security.ts en internal/security.
+      additionalProperties: true
+    SecurityRefreshInput:
+      type: object
+      properties:
+        feeds: { type: boolean, description: Feeds opnieuw ophalen }
+        nodes: { type: boolean, description: Pakketlijsten opnieuw ophalen }
+        node_id: { type: string, format: uuid, description: Alleen deze node (met nodes) }
+    SecurityAcceptInput:
+      type: object
+      required: [note]
+      properties:
+        note: { type: string, maxLength: 500 }
+        days: { type: integer, minimum: 1, maximum: 365, description: Na zoveel dagen weer open; leeg is voor altijd }
+    SecurityScopeInput:
+      type: object
+      required: [name, cidrs]
+      properties:
+        name: { type: string, maxLength: 60 }
+        description: { type: string, maxLength: 300 }
+        cidrs: { type: array, items: { type: string } }
+        exclude: { type: array, items: { type: string } }
+        public_confirm: { type: string }
+        public_note: { type: string, maxLength: 300 }
+    SecurityScanInput:
+      type: object
+      required: [name, scope_id, profile, schedule]
+      properties:
+        name: { type: string, maxLength: 60 }
+        scope_id: { type: string, format: uuid }
+        scanner_id: { type: string, format: uuid, nullable: true }
+        profile: { type: string, enum: [snel, standaard, volledig] }
+        max_rate: { type: integer, minimum: 10, maximum: 5000 }
+        default_passwords: { type: boolean, description: "Per dienst één aanmeldpoging met het standaardwachtwoord (opt-in)." }
+        schedule: { type: string, enum: [uit, dagelijks, wekelijks] }
+        weekday: { type: integer, minimum: 0, maximum: 6 }
+        hour: { type: integer, minimum: 0, maximum: 23 }
+    SecurityFixInput:
+      type: object
+      required: [node_id, rules]
+      properties:
+        node_id: { type: string, format: uuid }
+        rules: { type: array, items: { type: string }, minItems: 1 }
+        rollback_minutes: { type: integer, minimum: 2, maximum: 60, description: "SSH: na zoveel minuten terugdraaien tenzij bevestigd (standaard 10)." }
+    SecurityToolSchedule:
+      type: object
+      required: [schedule]
+      properties:
+        schedule: { type: string, enum: [uit, dagelijks, wekelijks] }
+        weekday: { type: integer, minimum: 0, maximum: 6 }
+        hour: { type: integer, minimum: 0, maximum: 23 }
     FirewallObject:
       type: object
       description: Een object van de firewall (fase 16); de velden staan in web/src/lib/firewall.ts en internal/firewall.

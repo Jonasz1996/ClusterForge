@@ -179,6 +179,12 @@ jobs:
             echo "$image:$short"
             if [ -n "$PR" ]; then echo "$image:pr-$PR"; else echo "$image:$REF"; fi
             echo "EOF"
+            # De scannercontainer (fase 27) staat in hetzelfde pakket met
+            # -scanner achter de tag, zodat compose hem vindt als ${CF_IMAGE}-scanner.
+            echo "scanner<<EOF"
+            echo "$image:$short-scanner"
+            if [ -n "$PR" ]; then echo "$image:pr-$PR-scanner"; else echo "$image:$REF-scanner"; fi
+            echo "EOF"
           } >> "$GITHUB_OUTPUT"
       - uses: docker/build-push-action@v6
         with:
@@ -188,6 +194,17 @@ jobs:
           load: true
           build-args: VERSION=${{ steps.tags.outputs.version }}
           tags: ${{ steps.tags.outputs.list }}
+          labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/Dockerfile
+          target: scanner
+          push: ${{ env.PUSH == 'true' }}
+          build-args: VERSION=${{ steps.tags.outputs.version }}
+          tags: ${{ steps.tags.outputs.scanner }}
           labels: org.opencontainers.image.source=https://github.com/${{ github.repository }}
           cache-from: type=gha
           cache-to: type=gha,mode=max

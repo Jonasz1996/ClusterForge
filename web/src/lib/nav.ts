@@ -29,7 +29,11 @@ export const navGroups: NavGroup[] = [
     id: "proxmox",
     label: "Proxmox",
     items: [
-      { href: "/proxmox/datacenter", label: "Datacenter", keywords: "pve proxmox quorum corosync capaciteit overcommit onderhoudsmodus host herstarten" },
+      {
+        href: "/proxmox/datacenter",
+        label: "Datacenter",
+        keywords: "pve proxmox quorum corosync capaciteit overcommit onderhoudsmodus host herstarten",
+      },
       { href: "/proxmox/gasten", label: "Gasten", keywords: "pve vm ct lxc qemu aanmaken klonen tags cloud-init template snapshot verhuizen" },
       { href: "/proxmox/backups", label: "Back-ups", keywords: "pve vzdump pbs proxmox backup server terugzetten restore terugzettest retentie" },
       { href: "/proxmox/opslag", label: "Opslag", keywords: "pve storage nfs smb cifs pbs zfs lvm schijf smart slijtage iso template opruimen wees" },
@@ -67,6 +71,12 @@ export const navGroups: NavGroup[] = [
       { href: "/soc", label: "SOC", keywords: "beveiliging dreiging aanvallers security dashboard score" },
       { href: "/firewall", label: "Firewall", keywords: "ufw poorten" },
       { href: "/crowdsec", label: "CrowdSec", keywords: "bans bouncer alerts" },
+      {
+        href: "/kwetsbaarheden",
+        label: "Kwetsbaarheden",
+        keywords:
+          "cve kev exploit debian security tracker pakketten lek patch verharding hardening cis lynis ssh sysctl suid scopes scan nmap subnet vlan pentest",
+      },
     ],
   },
   {

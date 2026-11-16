@@ -161,3 +161,34 @@ func TestNamesAndKinds(t *testing.T) {
 		}
 	}
 }
+
+func TestEvaluateVulns(t *testing.T) {
+	avg := 80
+	r := evaluate(Inputs{Vulns: &Vulns{KEVNodes: []string{"nc1"}, CriticalNet: []string{"192.168.10.50"}, HighCVE: 2, HardeningAvg: &avg}})
+	if r.Level.Level != LevelCritical {
+		t.Errorf("niveau %+v", r.Level)
+	}
+	var vul *ScorePart
+	for i := range r.Score.Parts {
+		if r.Score.Parts[i].Key == "kwetsbaarheden" {
+			vul = &r.Score.Parts[i]
+		}
+		if r.Score.Parts[i].Key == "patches" && r.Score.Parts[i].Max != 15 {
+			t.Errorf("patches max %d", r.Score.Parts[i].Max)
+		}
+	}
+	// 4 (netwerk) + 3 (KEV) + 1 (2 hoog) + 2 (verharding 80%) = 10
+	if vul == nil || vul.Points != 0 || len(vul.Deductions) != 4 {
+		t.Fatalf("deel kwetsbaarheden %+v", vul)
+	}
+	keys := map[string]bool{}
+	for _, it := range r.Now {
+		keys[it.Key] = true
+	}
+	if !keys["vuln-network"] || !keys["vuln-kev"] || !keys["vuln-high"] {
+		t.Errorf("punten %v", keys)
+	}
+	if r := evaluate(Inputs{}); len(r.Score.Parts) != 4 {
+		t.Errorf("zonder module: %d delen", len(r.Score.Parts))
+	}
+}

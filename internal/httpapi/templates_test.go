@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"errors"
+	"github.com/Jonasz1996/clusterforge/internal/agent/agenttest"
 	"net/http"
 	"net/url"
 	"os"
@@ -70,6 +71,14 @@ func TestTemplatesFleet(t *testing.T) {
 		"taken-01": "10.0.40.21", "taken-02": "10.0.40.22",
 		"app-01": "10.0.40.31", "app-02": "10.0.40.32",
 	})
+	// De simulator voert geen scripts uit: de stap Docker (een script dat
+	// alleen zonder Docker installeert) slaat hij over. Docker staat er
+	// daarom al, zoals op een bestaande Docker-host.
+	f.setup = func(name string, h *agenttest.Host) {
+		if strings.HasPrefix(name, "docker-") {
+			_, _ = h.Exec(context.Background(), "apt-get", "install", "-y", "docker.io", "docker-compose")
+		}
+	}
 	pve.OnFileWrite(f.boot)
 	var conn pveConn
 	if s := c.do("POST", "/api/v1/proxmox", map[string]any{
@@ -98,14 +107,18 @@ func TestTemplatesFleet(t *testing.T) {
 		template, name, slug, first string
 		params                      map[string]any
 		vip                         string
+		unchecked                   int
 		services                    []string
 		logs                        []string
 	}{
 		{
 			template: "docker", name: "Docker", slug: "docker", first: "10.0.40.11/24",
-			params:   map[string]any{"memory": "2G"},
-			services: []string{"docker container docker -"},
-			logs:     []string{"pakketten: docker.io, docker-compose: aangepast", "map /opt/stacks: aangepast"},
+			params: map[string]any{"memory": "2G"},
+			// Docker installeren en daemon.json zijn scripts met unless:
+			// alleen zonder bestaande Docker doen ze iets.
+			unchecked: 2,
+			services:  []string{"docker container docker -"},
+			logs:      []string{"map /usr/local/lib/clusterforge: aangepast", "Docker: ongewijzigd", "map /opt/stacks: aangepast"},
 		},
 		{
 			template: "cron", name: "Taken", slug: "taken", first: "10.0.40.21/24",
@@ -224,7 +237,7 @@ func TestTemplatesFleet(t *testing.T) {
 				t.Fatalf("driftcontrole: %d %+v", s, rep)
 			}
 			for _, n := range rep.Nodes {
-				if n.Status != "in_sync" || len(n.Findings) != 0 || len(n.Unchecked) != 0 || n.Error != "" {
+				if n.Status != "in_sync" || len(n.Findings) != 0 || len(n.Unchecked) != tc.unchecked || n.Error != "" {
 					t.Fatalf("%s na de uitrol: %+v", n.Hostname, n)
 				}
 			}

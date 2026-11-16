@@ -53,6 +53,21 @@ type Inputs struct {
 	ExternalLoginFailures int
 	AdminsWithoutTOTP     []string
 	SSHFromAny            bool
+	// Vulns: de beveiligingsmodule (fase 27); nil als die er niet is.
+	Vulns *Vulns
+}
+
+// Vulns zijn de open bevindingen van Kwetsbaarheden.
+type Vulns struct {
+	// KEVNodes: nodes met een actief misbruikte kwetsbaarheid.
+	KEVNodes []string
+	// CriticalNet: adressen met een kritieke bevinding uit een netwerkscan
+	// (Docker-API open, standaardwachtwoord, ...).
+	CriticalNet []string
+	// HighCVE en HighNet: aantal open bevindingen met ernst hoog.
+	HighCVE, HighNet int
+	HardeningAvg     *int
+	LowHardening     []string
 }
 
 // result is wat evaluate teruggeeft.
@@ -265,6 +280,34 @@ func evaluate(in Inputs) result {
 			Href:   "/crowdsec?tab=nodes", Action: "CrowdSec openen"})
 	}
 
+	// Kwetsbaarheden en verharding (fase 27).
+	if v := in.Vulns; v != nil {
+		if len(v.CriticalNet) > 0 {
+			item(LevelCritical, Item{Key: "vuln-network", Tone: ToneRed, Prio: 8.8,
+				Title:  "Kritieke netwerkbevinding op " + names(v.CriticalNet),
+				Detail: "Een netwerkscan vond een dienst die iedereen op je netwerk volledige toegang geeft, zoals een open Docker-API of een standaardwachtwoord.",
+				Href:   "/kwetsbaarheden/scans?tab=bevindingen", Action: "Bevindingen openen"})
+		}
+		if len(v.KEVNodes) > 0 {
+			item(LevelElevated, Item{Key: "vuln-kev", Tone: ToneRed, Prio: 7.5,
+				Title:  "Actief misbruikte kwetsbaarheid op " + names(v.KEVNodes),
+				Detail: "CISA ziet aanvallers deze kwetsbaarheid nu gebruiken. Werk de pakketten bij.",
+				Href:   "/kwetsbaarheden", Action: "Kwetsbaarheden openen"})
+		}
+		if n := v.HighCVE + v.HighNet; n > 0 {
+			item(LevelWatch, Item{Key: "vuln-high", Tone: ToneAmber, Prio: 3.2,
+				Title:  plural(n, "ernstige kwetsbaarheid", "ernstige kwetsbaarheden") + " open",
+				Detail: "Bekende kwetsbaarheden met ernst hoog in pakketten of open diensten.",
+				Href:   "/kwetsbaarheden", Action: "Kwetsbaarheden openen"})
+		}
+		if len(v.LowHardening) > 0 {
+			items = append(items, Item{Key: "hardening-low", Tone: ToneInfo, Prio: 2.5,
+				Title:  "Zwakke verharding op " + names(v.LowHardening),
+				Detail: "Deze nodes halen minder dan 70% op de verhardingscontroles.",
+				Href:   "/kwetsbaarheden/verharding", Action: "Verharding openen"})
+		}
+	}
+
 	slices.SortStableFunc(items, func(a, b Item) int {
 		switch {
 		case a.Prio > b.Prio:
@@ -347,6 +390,11 @@ func score(in Inputs, items []Item) Score {
 
 	cov := part("dekking", "Dekking", 35)
 	pat := part("patches", "Patches", 25)
+	vul := part("kwetsbaarheden", "Kwetsbaarheden", 10)
+	if in.Vulns != nil {
+		// Met de beveiligingsmodule telt Patches 15 en Kwetsbaarheden 10.
+		pat = part("patches", "Patches", 15)
+	}
 	if n > 0 {
 		per := float64(cov.Max) / n
 		lost := map[string]float64{}
@@ -399,6 +447,15 @@ func score(in Inputs, items []Item) Score {
 			fmt.Sprintf("%s met beveiligingsupdates (%s)", plural(updNodes, "node", "nodes"), plural(updPkgs, "pakket", "pakketten")), "/updates")
 	}
 
+	if v := in.Vulns; v != nil {
+		deduct(&vul, 4*float64(len(v.CriticalNet)), plural(len(v.CriticalNet), "adres", "adressen")+" met een kritieke netwerkbevinding", "/kwetsbaarheden/scans?tab=bevindingen")
+		deduct(&vul, 3*float64(len(v.KEVNodes)), plural(len(v.KEVNodes), "node", "nodes")+" met een actief misbruikte kwetsbaarheid", "/kwetsbaarheden")
+		deduct(&vul, 0.5*float64(v.HighCVE+v.HighNet), plural(v.HighCVE+v.HighNet, "ernstige kwetsbaarheid", "ernstige kwetsbaarheden"), "/kwetsbaarheden")
+		if v.HardeningAvg != nil && *v.HardeningAvg < 90 {
+			deduct(&vul, float64(90-*v.HardeningAvg)/5, fmt.Sprintf("Gemiddelde verharding %d%%", *v.HardeningAvg), "/kwetsbaarheden/verharding")
+		}
+	}
+
 	acc := part("toegang", "Toegang", 15)
 	if k := len(in.AdminsWithoutTOTP); k > 0 {
 		deduct(&acc, math.Min(10, 5*float64(k)), "Tweestap uit voor "+names(in.AdminsWithoutTOTP), "/instellingen#tweestap")
@@ -432,6 +489,9 @@ func score(in Inputs, items []Item) Score {
 	}
 
 	parts := []ScorePart{cov, pat, acc, thr}
+	if in.Vulns != nil {
+		parts = []ScorePart{cov, pat, vul, acc, thr}
+	}
 	total := 0.0
 	for i := range parts {
 		parts[i].Points = round1(parts[i].Points)

@@ -12,6 +12,34 @@ import (
 	"github.com/google/uuid"
 )
 
+const addAgentUpgradeProdQueue = `-- name: AddAgentUpgradeProdQueue :exec
+INSERT INTO agent_upgrade_prod_queue (cluster_id, position, requested_by)
+VALUES ($1, (SELECT coalesce(max(position), 0) + 1 FROM agent_upgrade_prod_queue), $2)
+ON CONFLICT (cluster_id) DO NOTHING
+`
+
+type AddAgentUpgradeProdQueueParams struct {
+	ClusterID   uuid.UUID
+	RequestedBy *uuid.UUID
+}
+
+func (q *Queries) AddAgentUpgradeProdQueue(ctx context.Context, arg AddAgentUpgradeProdQueueParams) error {
+	_, err := q.db.Exec(ctx, addAgentUpgradeProdQueue, arg.ClusterID, arg.RequestedBy)
+	return err
+}
+
+const clearAgentUpgradeProdQueue = `-- name: ClearAgentUpgradeProdQueue :execrows
+DELETE FROM agent_upgrade_prod_queue
+`
+
+func (q *Queries) ClearAgentUpgradeProdQueue(ctx context.Context) (int64, error) {
+	result, err := q.db.Exec(ctx, clearAgentUpgradeProdQueue)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deleteAgentUpgradeOff = `-- name: DeleteAgentUpgradeOff :exec
 DELETE FROM agent_upgrade_off WHERE cluster_id = $1
 `
@@ -21,15 +49,30 @@ func (q *Queries) DeleteAgentUpgradeOff(ctx context.Context, clusterID uuid.UUID
 	return err
 }
 
-const getAgentUpgradeSettings = `-- name: GetAgentUpgradeSettings :one
-SELECT coalesce((SELECT auto FROM agent_upgrade_settings LIMIT 1), true)::boolean AS auto
+const deleteAgentUpgradeProdQueue = `-- name: DeleteAgentUpgradeProdQueue :exec
+DELETE FROM agent_upgrade_prod_queue WHERE cluster_id = $1
 `
 
-func (q *Queries) GetAgentUpgradeSettings(ctx context.Context) (bool, error) {
+func (q *Queries) DeleteAgentUpgradeProdQueue(ctx context.Context, clusterID uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deleteAgentUpgradeProdQueue, clusterID)
+	return err
+}
+
+const getAgentUpgradeSettings = `-- name: GetAgentUpgradeSettings :one
+SELECT coalesce((SELECT auto FROM agent_upgrade_settings LIMIT 1), true)::boolean AS auto,
+       coalesce((SELECT prod_auto FROM agent_upgrade_settings LIMIT 1), false)::boolean AS prod_auto
+`
+
+type GetAgentUpgradeSettingsRow struct {
+	Auto     bool
+	ProdAuto bool
+}
+
+func (q *Queries) GetAgentUpgradeSettings(ctx context.Context) (GetAgentUpgradeSettingsRow, error) {
 	row := q.db.QueryRow(ctx, getAgentUpgradeSettings)
-	var auto bool
-	err := row.Scan(&auto)
-	return auto, err
+	var i GetAgentUpgradeSettingsRow
+	err := row.Scan(&i.Auto, &i.ProdAuto)
+	return i, err
 }
 
 const getUpgradeAgent = `-- name: GetUpgradeAgent :one
@@ -109,6 +152,47 @@ func (q *Queries) ListAgentUpgradeOff(ctx context.Context) ([]uuid.UUID, error) 
 			return nil, err
 		}
 		items = append(items, cluster_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAgentUpgradeProdQueue = `-- name: ListAgentUpgradeProdQueue :many
+SELECT q.cluster_id, q.job_id, q.requested_by, c.name AS cluster_name
+FROM agent_upgrade_prod_queue q
+JOIN clusters c ON c.id = q.cluster_id
+ORDER BY q.position, c.name
+`
+
+type ListAgentUpgradeProdQueueRow struct {
+	ClusterID   uuid.UUID
+	JobID       *uuid.UUID
+	RequestedBy *uuid.UUID
+	ClusterName string
+}
+
+// De prodclusters die na een klik "ook productie" nog aan de beurt komen,
+// in volgorde.
+func (q *Queries) ListAgentUpgradeProdQueue(ctx context.Context) ([]ListAgentUpgradeProdQueueRow, error) {
+	rows, err := q.db.Query(ctx, listAgentUpgradeProdQueue)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAgentUpgradeProdQueueRow{}
+	for rows.Next() {
+		var i ListAgentUpgradeProdQueueRow
+		if err := rows.Scan(
+			&i.ClusterID,
+			&i.JobID,
+			&i.RequestedBy,
+			&i.ClusterName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -208,5 +292,34 @@ type SetAgentUpgradeOffParams struct {
 
 func (q *Queries) SetAgentUpgradeOff(ctx context.Context, arg SetAgentUpgradeOffParams) error {
 	_, err := q.db.Exec(ctx, setAgentUpgradeOff, arg.ClusterID, arg.UpdatedBy)
+	return err
+}
+
+const setAgentUpgradeProdAuto = `-- name: SetAgentUpgradeProdAuto :exec
+INSERT INTO agent_upgrade_settings (prod_auto, updated_by) VALUES ($1, $2)
+ON CONFLICT ((true)) DO UPDATE SET prod_auto = EXCLUDED.prod_auto, updated_by = EXCLUDED.updated_by, updated_at = now()
+`
+
+type SetAgentUpgradeProdAutoParams struct {
+	ProdAuto  bool
+	UpdatedBy *uuid.UUID
+}
+
+func (q *Queries) SetAgentUpgradeProdAuto(ctx context.Context, arg SetAgentUpgradeProdAutoParams) error {
+	_, err := q.db.Exec(ctx, setAgentUpgradeProdAuto, arg.ProdAuto, arg.UpdatedBy)
+	return err
+}
+
+const setAgentUpgradeProdQueueJob = `-- name: SetAgentUpgradeProdQueueJob :exec
+UPDATE agent_upgrade_prod_queue SET job_id = $1 WHERE cluster_id = $2
+`
+
+type SetAgentUpgradeProdQueueJobParams struct {
+	JobID     *uuid.UUID
+	ClusterID uuid.UUID
+}
+
+func (q *Queries) SetAgentUpgradeProdQueueJob(ctx context.Context, arg SetAgentUpgradeProdQueueJobParams) error {
+	_, err := q.db.Exec(ctx, setAgentUpgradeProdQueueJob, arg.JobID, arg.ClusterID)
 	return err
 }
