@@ -1,0 +1,9 @@
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}).
+# Nachtelijke back-up van cssthema; alleen de node met het VIP van de
+# database ({{ .params.db_vip }}) maakt hem.
+[Unit]
+Description=Back-up van cssthema ({{ .cluster.slug }})
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/lib/clusterforge/cssthema-ctl.sh backup
