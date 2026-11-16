@@ -272,7 +272,10 @@ func (a *Agent) runProbe(ctx context.Context, p *writeProbe, limit time.Duration
 		at := time.Since(p.start)
 		q, err := dbsql.ProbeInsert(p.engine, p.run, seq)
 		if err == nil {
-			wctx, cancel := context.WithTimeout(ctx, protocol.DBProbeTimeout)
+			// Een lopende schrijfpoging loopt af (hoogstens DBProbeTimeout),
+			// ook als de test stopt: anders breekt psql af terwijl de server
+			// de rij nog vastlegt, en blijft die na het opruimen staan.
+			wctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), protocol.DBProbeTimeout)
 			_, err = p.write(wctx, q)
 			cancel()
 		}

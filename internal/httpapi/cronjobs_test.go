@@ -135,21 +135,26 @@ func TestCronjobs(t *testing.T) {
 	}
 
 	// Een agent met protocol 15 krijgt een melding; zijn jobs blijven staan.
+	// Een laatste heartbeat van de gestopte agent kan protocol_version nog
+	// terugzetten na de UPDATE; herhaal tot de oude versie blijft staan.
 	stops["nc3"]()
-	if _, err := e.pool.Exec(ctx, "UPDATE agents SET protocol_version = 15 WHERE node_id = $1", ids["nc3"]); err != nil {
-		t.Fatal(err)
-	}
-	if err := e.crons.SyncAll(ctx); err != nil {
-		t.Fatal(err)
-	}
-	if s := c.do("GET", "/api/v1/cronjobs", nil, &groups); s != http.StatusOK {
-		t.Fatal(s)
-	}
-	for _, nr := range groups.Items[0].Nodes {
-		if nr.Hostname == "nc3" && (nr.ErrorKind != "old_agent" || !strings.Contains(nr.Error, "protocol 16")) {
-			t.Errorf("nc3: %+v", nr)
+	eventually(t, "nc3 als oude agent", func() bool {
+		if _, err := e.pool.Exec(ctx, "UPDATE agents SET protocol_version = 15 WHERE node_id = $1", ids["nc3"]); err != nil {
+			t.Fatal(err)
 		}
-	}
+		if err := e.crons.SyncAll(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if s := c.do("GET", "/api/v1/cronjobs", nil, &groups); s != http.StatusOK {
+			t.Fatal(s)
+		}
+		for _, nr := range groups.Items[0].Nodes {
+			if nr.Hostname == "nc3" {
+				return nr.ErrorKind == "old_agent" && strings.Contains(nr.Error, "protocol 16")
+			}
+		}
+		return false
+	})
 	if len(groups.Items[0].Jobs) != 4 {
 		t.Errorf("%d jobs na een te oude agent", len(groups.Items[0].Jobs))
 	}
