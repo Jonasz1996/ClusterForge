@@ -79,6 +79,9 @@ const (
 	PlaceVIP = "vip"
 	// PlaceNode: alleen op de gekozen nodes.
 	PlaceNode = "node"
+	// PlaceOff staat alleen in StackListFile: de stack hoort gestopt, dus
+	// keepalived start hem niet en controleert hem niet.
+	PlaceOff = "uit"
 )
 
 // Wat een run met een stack doet.

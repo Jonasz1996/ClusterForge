@@ -190,8 +190,11 @@ func (s *Service) plans(ctx context.Context, clusterID uuid.UUID, p Params) (Clu
 }
 
 // placementFor is de plaatsing in de lijst van keepalived: zonder VIP is vip
-// hetzelfde als alle.
+// hetzelfde als alle, en een gestopte stack staat er als uit.
 func placementFor(st Stack, c Cluster, nodeCount int) string {
+	if st.Desired != "running" {
+		return protocol.PlaceOff
+	}
 	if st.Placement == protocol.PlaceVIP && (c.VIP == "" || nodeCount <= 1) {
 		return protocol.PlaceAll
 	}

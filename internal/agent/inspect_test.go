@@ -295,6 +295,7 @@ var sampleParams = map[string]map[string]any{
 	"authentik":           {"vip": "10.0.20.100", "db_vip": "10.0.20.101", "vrid": 59, "auth_pass": "geheim12", "db_password": "Wachtwoord-123"},
 	"vaultx":              {"vip": "10.0.20.110", "db_vip": "10.0.20.111", "vrid": 60, "auth_pass": "geheim12", "db_password": "Wachtwoord-123"},
 	"cssthema":            {"vip": "10.0.20.120", "db_vip": "10.0.20.121", "vrid": 61, "auth_pass": "geheim12", "db_password": "Wachtwoord-123"},
+	"docker-ha":           {"vip": "10.0.20.130", "vrid": 62, "auth_pass": "geheim12"},
 }
 
 func renderBuiltin(t *testing.T, tpl *templates.Template, role string) []templates.Step {
