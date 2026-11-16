@@ -52,7 +52,13 @@ type Finding struct {
 // nieuwe erbij, bestaande bijgewerkt (een opgeloste die terugkomt gaat
 // weer open), wat ontbreekt is opgelost.
 func (s *Service) sync(ctx context.Context, n Node, kind string, drafts []Draft) error {
-	subject := n.NodeID.String()
+	id := n.NodeID
+	return s.syncSubject(ctx, kind, n.NodeID.String(), &id, n.ClusterID, n.Hostname, drafts)
+}
+
+// syncSubject is sync voor een willekeurig subject; nodeID mag nil zijn
+// (een adres uit een netwerkscan dat geen node is).
+func (s *Service) syncSubject(ctx context.Context, kind, subject string, nodeID, clusterID *uuid.UUID, hostname string, drafts []Draft) error {
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -91,7 +97,7 @@ ON CONFLICT (kind, subject, key) DO UPDATE SET node_id = $4, severity = $5, titl
     first_seen = CASE WHEN security_findings.status = 'opgelost' THEN $10 ELSE security_findings.first_seen END,
     status = CASE WHEN security_findings.status = 'opgelost' THEN 'open' ELSE security_findings.status END,
     resolved_at = NULL`,
-			kind, subject, d.Key, n.NodeID, d.Severity, d.Title, d.Summary, d.Fix, detail, now); err != nil {
+			kind, subject, d.Key, nodeID, d.Severity, d.Title, d.Summary, d.Fix, detail, now); err != nil {
 			return err
 		}
 		if d.KEV && !prev[d.Key] {
@@ -106,8 +112,8 @@ WHERE kind = $1 AND subject = $2 AND status <> 'opgelost' AND NOT (key = ANY($3)
 		return err
 	}
 	for _, k := range newKEV {
-		s.event(ctx, events.System(), "node", subject, n.ClusterID, "security.kev_found",
-			map[string]any{"hostname": n.Hostname, "package": k})
+		s.event(ctx, events.System(), "node", subject, clusterID, "security.kev_found",
+			map[string]any{"hostname": hostname, "package": k})
 	}
 	return nil
 }

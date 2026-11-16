@@ -6,7 +6,9 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -14,7 +16,15 @@ import (
 	"github.com/Jonasz1996/clusterforge/internal/store"
 )
 
+const scanXML = `<nmaprun><host><status state="up"/><address addr="192.168.10.191" addrtype="ipv4"/><ports>
+<port protocol="tcp" portid="22"><state state="open"/><service name="ssh" product="OpenSSH"/></port>
+<port protocol="tcp" portid="23"><state state="open"/><service name="telnet"/></port>
+</ports></host><host><status state="up"/><address addr="192.168.10.50" addrtype="ipv4"/><ports>
+<port protocol="tcp" portid="2375"><state state="open"/><service name="docker"/></port></ports></host>
+<runstats><hosts up="2" total="254"/></runstats></nmaprun>`
+
 func TestSecurityEndToEnd(t *testing.T) {
+	var nmapArgs string
 	e, c := adminClient(t)
 	feeds := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -28,7 +38,7 @@ func TestSecurityEndToEnd(t *testing.T) {
 	e.api.security.DebianURL, e.api.security.KEVURL = feeds.URL+"/debian", feeds.URL+"/kev"
 
 	var web01 node
-	c.do("POST", "/api/v1/nodes", map[string]any{"hostname": "web01"}, &web01)
+	c.do("POST", "/api/v1/nodes", map[string]any{"hostname": "web01", "primary_ip": "192.168.10.191"}, &web01)
 	var tok newToken
 	if s := c.do("POST", "/api/v1/enrollment-tokens", map[string]any{"node_id": web01.ID}, &tok); s != http.StatusCreated {
 		t.Fatalf("token: %d", s)
@@ -44,7 +54,15 @@ func TestSecurityEndToEnd(t *testing.T) {
 		HeartbeatInterval: 100_000_000, StatePath: filepath.Join(root, "var/lib/clusterforge/agent-state.json"), Root: root,
 		Exec: func(_ context.Context, name string, args ...string) ([]byte, error) {
 			if name == "dpkg-query" {
-				return []byte("ii \topenssl\t3.5.1-1\tamd64\topenssl\t3.5.1-1\nii \tlibssl3t64\t3.5.1-1\tamd64\topenssl\t3.5.1-1\n"), nil
+				return []byte("ii \topenssl\t3.5.1-1\tamd64\topenssl\t3.5.1-1\nii \tlibssl3t64\t3.5.1-1\tamd64\topenssl\t3.5.1-1\n" +
+					"ii \tnmap\t7.95+dfsg-3\tamd64\tnmap\t7.95+dfsg-3\n"), nil
+			}
+			if name == "nmap" && len(args) == 1 {
+				return []byte("Nmap version 7.95 ( https://nmap.org )\n"), nil
+			}
+			if name == "nmap" {
+				nmapArgs = strings.Join(args, " ")
+				return nil, os.WriteFile(args[slices.Index(args, "-oX")+1], []byte(scanXML), 0o600)
 			}
 			if name == "sshd" {
 				return []byte("permitrootlogin yes\npermitemptypasswords no\n"), nil
@@ -134,6 +152,62 @@ func TestSecurityEndToEnd(t *testing.T) {
 	if s := v.do("GET", "/api/v1/security/scopes", nil, nil); s != 200 {
 		t.Fatalf("kijker leest: %d", s)
 	}
+
+	// Netwerkscan: web01 heeft nmap en is dus scanner; de scan blijft binnen de scope.
+	var scan struct {
+		ID string `json:"id"`
+	}
+	if s := c.do("POST", "/api/v1/security/scans", map[string]any{"name": "Thuis wekelijks", "scope_id": sc.ID, "profile": "snel", "schedule": "wekelijks"}, &scan); s != 201 {
+		t.Fatalf("scan: %d", s)
+	}
+	if s := v.do("POST", "/api/v1/security/scans/"+scan.ID+"/run", nil, nil); s != 403 {
+		t.Fatalf("kijker scant: %d", s)
+	}
+	var run struct {
+		RunID string `json:"run_id"`
+	}
+	eventually(t, "scan gestart", func() bool {
+		return c.do("POST", "/api/v1/security/scans/"+scan.ID+"/run", nil, &run) == http.StatusAccepted
+	})
+	var detail struct {
+		Status    string `json:"status"`
+		Error     string `json:"error"`
+		HostsUp   int    `json:"hosts_up"`
+		OpenPorts int    `json:"open_ports"`
+		Result    *struct {
+			Hosts []struct {
+				Addr     string `json:"addr"`
+				Node     string `json:"node"`
+				Expected []struct {
+					Known string `json:"known"`
+				} `json:"expected"`
+			} `json:"hosts"`
+		} `json:"result"`
+	}
+	eventually(t, "scan klaar", func() bool {
+		c.do("GET", "/api/v1/security/scan-runs/"+run.RunID, nil, &detail)
+		return detail.Status != "bezig"
+	})
+	if detail.Status != "klaar" || detail.HostsUp != 2 || detail.OpenPorts != 3 || detail.Result == nil || detail.Result.Hosts[0].Node != "web01" ||
+		detail.Result.Hosts[0].Expected[0].Known != "onbekend" {
+		t.Fatalf("scan = %+v", detail)
+	}
+	if !strings.Contains(nmapArgs, "192.168.10.0/24") || !strings.Contains(nmapArgs, "192.168.113.0/24") {
+		t.Errorf("nmap kreeg %q", nmapArgs)
+	}
+	var net struct {
+		Items []finding `json:"items"`
+	}
+	c.do("GET", "/api/v1/security/findings?kind=netwerk", nil, &net)
+	sev := map[string]string{}
+	for _, f := range net.Items {
+		sev[f.Key] = f.Severity
+	}
+	if sev["poort:2375/tcp"] != "kritiek" || sev["poort:23/tcp"] != "hoog" || sev["onbekend:22/tcp"] != "middel" {
+		t.Fatalf("netwerkbevindingen = %v", sev)
+	}
+
+	e.api.security.Wait()
 	if s := c.do("DELETE", "/api/v1/security/scopes/"+sc.ID, nil, nil); s != 204 {
 		t.Fatalf("verwijderen: %d", s)
 	}

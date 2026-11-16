@@ -3222,6 +3222,48 @@ func (e Role) Valid() bool {
 	}
 }
 
+// Defines values for SecurityScanInputProfile.
+const (
+	Snel      SecurityScanInputProfile = "snel"
+	Standaard SecurityScanInputProfile = "standaard"
+	Volledig  SecurityScanInputProfile = "volledig"
+)
+
+// Valid indicates whether the value is a known member of the SecurityScanInputProfile enum.
+func (e SecurityScanInputProfile) Valid() bool {
+	switch e {
+	case Snel:
+		return true
+	case Standaard:
+		return true
+	case Volledig:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for SecurityScanInputSchedule.
+const (
+	Dagelijks SecurityScanInputSchedule = "dagelijks"
+	Uit       SecurityScanInputSchedule = "uit"
+	Wekelijks SecurityScanInputSchedule = "wekelijks"
+)
+
+// Valid indicates whether the value is a known member of the SecurityScanInputSchedule enum.
+func (e SecurityScanInputSchedule) Valid() bool {
+	switch e {
+	case Dagelijks:
+		return true
+	case Uit:
+		return true
+	case Wekelijks:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for SelfGuestType.
 const (
 	SelfGuestTypeLxc  SelfGuestType = "lxc"
@@ -12428,6 +12470,24 @@ type SecurityRefreshInput struct {
 	Nodes *bool `json:"nodes,omitempty"`
 }
 
+// SecurityScanInput defines model for SecurityScanInput.
+type SecurityScanInput struct {
+	Hour      *int                                  `json:"hour,omitempty"`
+	MaxRate   *int                                  `json:"max_rate,omitempty"`
+	Name      string                                `json:"name"`
+	Profile   SecurityScanInputProfile              `json:"profile"`
+	ScannerId nullable.Nullable[openapi_types.UUID] `json:"scanner_id,omitempty"`
+	Schedule  SecurityScanInputSchedule             `json:"schedule"`
+	ScopeId   openapi_types.UUID                    `json:"scope_id"`
+	Weekday   *int                                  `json:"weekday,omitempty"`
+}
+
+// SecurityScanInputProfile defines model for SecurityScanInput.Profile.
+type SecurityScanInputProfile string
+
+// SecurityScanInputSchedule defines model for SecurityScanInput.Schedule.
+type SecurityScanInputSchedule string
+
 // SecurityScopeInput defines model for SecurityScopeInput.
 type SecurityScopeInput struct {
 	Cidrs         []string  `json:"cidrs"`
@@ -14520,6 +14580,12 @@ type AcceptSecurityFindingJSONRequestBody = SecurityAcceptInput
 // RefreshSecurityJSONRequestBody defines body for RefreshSecurity for application/json ContentType.
 type RefreshSecurityJSONRequestBody = SecurityRefreshInput
 
+// CreateSecurityScanJSONRequestBody defines body for CreateSecurityScan for application/json ContentType.
+type CreateSecurityScanJSONRequestBody = SecurityScanInput
+
+// UpdateSecurityScanJSONRequestBody defines body for UpdateSecurityScan for application/json ContentType.
+type UpdateSecurityScanJSONRequestBody = SecurityScanInput
+
 // CreateSecurityScopeJSONRequestBody defines body for CreateSecurityScope for application/json ContentType.
 type CreateSecurityScopeJSONRequestBody = SecurityScopeInput
 
@@ -15518,6 +15584,27 @@ type ServerInterface interface {
 	// RefreshSecurity Feeds en/of pakketlijsten nu verversen (admin)
 	// (POST /security/refresh)
 	RefreshSecurity(w http.ResponseWriter, r *http.Request)
+	// GetSecurityScanRun Eén uitvoering van een netwerkscan met de gevonden hosts
+	// (GET /security/scan-runs/{runId})
+	GetSecurityScanRun(w http.ResponseWriter, r *http.Request, runId openapi_types.UUID)
+	// LinkSecurityScanner De scannercontainer koppelen (admin); maakt de node cf-scanner en zijn aanmeldbestand
+	// (POST /security/scanner)
+	LinkSecurityScanner(w http.ResponseWriter, r *http.Request)
+	// GetSecurityScans Netwerkscans, scanners en de laatste uitvoeringen (fase 27 M3)
+	// (GET /security/scans)
+	GetSecurityScans(w http.ResponseWriter, r *http.Request)
+	// CreateSecurityScan Netwerkscan aanmaken (admin)
+	// (POST /security/scans)
+	CreateSecurityScan(w http.ResponseWriter, r *http.Request)
+	// DeleteSecurityScan Netwerkscan verwijderen (admin)
+	// (DELETE /security/scans/{scanId})
+	DeleteSecurityScan(w http.ResponseWriter, r *http.Request, scanId openapi_types.UUID)
+	// UpdateSecurityScan Netwerkscan bijwerken (admin)
+	// (PUT /security/scans/{scanId})
+	UpdateSecurityScan(w http.ResponseWriter, r *http.Request, scanId openapi_types.UUID)
+	// RunSecurityScan Netwerkscan nu starten (admin)
+	// (POST /security/scans/{scanId}/run)
+	RunSecurityScan(w http.ResponseWriter, r *http.Request, scanId openapi_types.UUID)
 	// ListSecurityScopes Eigen scopes (netwerken die van jou zijn)
 	// (GET /security/scopes)
 	ListSecurityScopes(w http.ResponseWriter, r *http.Request)
@@ -17525,6 +17612,48 @@ func (_ Unimplemented) GetSecurityHardening(w http.ResponseWriter, r *http.Reque
 // RefreshSecurity Feeds en/of pakketlijsten nu verversen (admin)
 // (POST /security/refresh)
 func (_ Unimplemented) RefreshSecurity(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetSecurityScanRun Eén uitvoering van een netwerkscan met de gevonden hosts
+// (GET /security/scan-runs/{runId})
+func (_ Unimplemented) GetSecurityScanRun(w http.ResponseWriter, r *http.Request, runId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// LinkSecurityScanner De scannercontainer koppelen (admin); maakt de node cf-scanner en zijn aanmeldbestand
+// (POST /security/scanner)
+func (_ Unimplemented) LinkSecurityScanner(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetSecurityScans Netwerkscans, scanners en de laatste uitvoeringen (fase 27 M3)
+// (GET /security/scans)
+func (_ Unimplemented) GetSecurityScans(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CreateSecurityScan Netwerkscan aanmaken (admin)
+// (POST /security/scans)
+func (_ Unimplemented) CreateSecurityScan(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// DeleteSecurityScan Netwerkscan verwijderen (admin)
+// (DELETE /security/scans/{scanId})
+func (_ Unimplemented) DeleteSecurityScan(w http.ResponseWriter, r *http.Request, scanId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// UpdateSecurityScan Netwerkscan bijwerken (admin)
+// (PUT /security/scans/{scanId})
+func (_ Unimplemented) UpdateSecurityScan(w http.ResponseWriter, r *http.Request, scanId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// RunSecurityScan Netwerkscan nu starten (admin)
+// (POST /security/scans/{scanId}/run)
+func (_ Unimplemented) RunSecurityScan(w http.ResponseWriter, r *http.Request, scanId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -26959,6 +27088,152 @@ func (siw *ServerInterfaceWrapper) RefreshSecurity(w http.ResponseWriter, r *htt
 	handler.ServeHTTP(w, r)
 }
 
+// GetSecurityScanRun operation middleware
+func (siw *ServerInterfaceWrapper) GetSecurityScanRun(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "runId" -------------
+	var runId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "runId", chi.URLParam(r, "runId"), &runId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "runId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetSecurityScanRun(w, r, runId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// LinkSecurityScanner operation middleware
+func (siw *ServerInterfaceWrapper) LinkSecurityScanner(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.LinkSecurityScanner(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetSecurityScans operation middleware
+func (siw *ServerInterfaceWrapper) GetSecurityScans(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetSecurityScans(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateSecurityScan operation middleware
+func (siw *ServerInterfaceWrapper) CreateSecurityScan(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateSecurityScan(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteSecurityScan operation middleware
+func (siw *ServerInterfaceWrapper) DeleteSecurityScan(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "scanId" -------------
+	var scanId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "scanId", chi.URLParam(r, "scanId"), &scanId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "scanId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteSecurityScan(w, r, scanId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateSecurityScan operation middleware
+func (siw *ServerInterfaceWrapper) UpdateSecurityScan(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "scanId" -------------
+	var scanId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "scanId", chi.URLParam(r, "scanId"), &scanId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "scanId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateSecurityScan(w, r, scanId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RunSecurityScan operation middleware
+func (siw *ServerInterfaceWrapper) RunSecurityScan(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "scanId" -------------
+	var scanId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "scanId", chi.URLParam(r, "scanId"), &scanId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "scanId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RunSecurityScan(w, r, scanId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListSecurityScopes operation middleware
 func (siw *ServerInterfaceWrapper) ListSecurityScopes(w http.ResponseWriter, r *http.Request) {
 
@@ -28589,6 +28864,27 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Put(options.BaseURL+"/security/scopes/{scopeId}", wrapper.UpdateSecurityScope)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/security/scans", wrapper.GetSecurityScans)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/security/scans", wrapper.CreateSecurityScan)
+	})
+	r.Group(func(r chi.Router) {
+		r.Delete(options.BaseURL+"/security/scans/{scanId}", wrapper.DeleteSecurityScan)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/security/scans/{scanId}", wrapper.UpdateSecurityScan)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/security/scans/{scanId}/run", wrapper.RunSecurityScan)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/security/scan-runs/{runId}", wrapper.GetSecurityScanRun)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/security/scanner", wrapper.LinkSecurityScanner)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/commands", wrapper.ListCommands)

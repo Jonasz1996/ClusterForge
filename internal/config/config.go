@@ -45,6 +45,12 @@ type Config struct {
 	// AgentDir bevat de cf-agent-binaries die de server aanbiedt om te
 	// downloaden (CF_AGENT_DIR, standaard /usr/share/clusterforge/agents).
 	AgentDir string
+	// ScannerDir is de map die de server met de scannercontainer deelt; daar
+	// zet "Scannercontainer koppelen" het aanmeldbestand (fase 27).
+	ScannerDir string
+	// ScannerServerURL is het adres waarop de scannercontainer (network_mode
+	// host) de server bereikt.
+	ScannerServerURL string
 	// VictoriaMetricsURL is het adres van VictoriaMetrics, bijvoorbeeld
 	// http://victoriametrics:8428 (CF_VICTORIAMETRICS_URL). Leeg zet de
 	// grafieken uit.
@@ -98,6 +104,8 @@ func FromEnv() (Config, error) {
 		NATSListen:         envOr("CF_NATS_LISTEN", ":4222"),
 		NATSAdvertise:      os.Getenv("CF_NATS_ADVERTISE"),
 		AgentDir:           envOr("CF_AGENT_DIR", "/usr/share/clusterforge/agents"),
+		ScannerDir:         envOr("CF_SCANNER_DIR", "/var/lib/clusterforge/scanner"),
+		ScannerServerURL:   envOr("CF_SCANNER_SERVER_URL", "http://127.0.0.1:8080"),
 
 		VictoriaMetricsURL: os.Getenv("CF_VICTORIAMETRICS_URL"),
 		GrafanaNodeURL:     os.Getenv("CF_GRAFANA_NODE_URL"),

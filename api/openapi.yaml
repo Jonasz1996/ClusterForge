@@ -5226,6 +5226,110 @@ paths:
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
+  /security/scans:
+    get:
+      operationId: getSecurityScans
+      summary: Netwerkscans, scanners en de laatste uitvoeringen (fase 27 M3)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SecurityObject" }
+        "401": { $ref: "#/components/responses/Error" }
+    post:
+      operationId: createSecurityScan
+      summary: Netwerkscan aanmaken (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SecurityScanInput" }
+      responses:
+        "201":
+          description: Aangemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SecurityObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /security/scans/{scanId}:
+    parameters:
+      - { name: scanId, in: path, required: true, schema: { type: string, format: uuid } }
+    put:
+      operationId: updateSecurityScan
+      summary: Netwerkscan bijwerken (admin)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/SecurityScanInput" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SecurityObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+    delete:
+      operationId: deleteSecurityScan
+      summary: Netwerkscan verwijderen (admin)
+      responses:
+        "204": { description: Verwijderd }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /security/scans/{scanId}/run:
+    parameters:
+      - { name: scanId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: runSecurityScan
+      summary: Netwerkscan nu starten (admin)
+      responses:
+        "202":
+          description: Gestart
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [run_id]
+                properties:
+                  run_id: { type: string, format: uuid }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /security/scan-runs/{runId}:
+    parameters:
+      - { name: runId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getSecurityScanRun
+      summary: Eén uitvoering van een netwerkscan met de gevonden hosts
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SecurityObject" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /security/scanner:
+    post:
+      operationId: linkSecurityScanner
+      summary: De scannercontainer koppelen (admin); maakt de node cf-scanner en zijn aanmeldbestand
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SecurityObject" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
   /commands:
     get:
       operationId: listCommands
@@ -14314,6 +14418,18 @@ components:
         exclude: { type: array, items: { type: string } }
         public_confirm: { type: string }
         public_note: { type: string, maxLength: 300 }
+    SecurityScanInput:
+      type: object
+      required: [name, scope_id, profile, schedule]
+      properties:
+        name: { type: string, maxLength: 60 }
+        scope_id: { type: string, format: uuid }
+        scanner_id: { type: string, format: uuid, nullable: true }
+        profile: { type: string, enum: [snel, standaard, volledig] }
+        max_rate: { type: integer, minimum: 10, maximum: 5000 }
+        schedule: { type: string, enum: [uit, dagelijks, wekelijks] }
+        weekday: { type: integer, minimum: 0, maximum: 6 }
+        hour: { type: integer, minimum: 0, maximum: 23 }
     FirewallObject:
       type: object
       description: Een object van de firewall (fase 16); de velden staan in web/src/lib/firewall.ts en internal/firewall.

@@ -297,3 +297,156 @@ export function scoreTone(score: number | null): Tone {
   if (score >= 70) return "amber";
   return "red";
 }
+
+// Netwerkscans (M3).
+
+export type ScanRun = {
+  id: string;
+  scan_id: string;
+  scan_name: string;
+  scanner_id: string | null;
+  scanner_name: string;
+  trigger: "schema" | "hand";
+  status: "bezig" | "klaar" | "mislukt";
+  error: string;
+  started_at: string;
+  finished_at: string | null;
+  targets: string[];
+  hosts_up: number;
+  open_ports: number;
+  findings: number;
+};
+
+export type SecurityScan = {
+  id: string;
+  name: string;
+  scope_id: string;
+  scope_name: string;
+  scanner_id: string | null;
+  scanner_name: string;
+  profile: "snel" | "standaard" | "volledig";
+  max_rate: number;
+  schedule: "uit" | "dagelijks" | "wekelijks";
+  weekday: number;
+  hour: number;
+  next_run: string | null;
+  running: boolean;
+  last_run: ScanRun | null;
+};
+
+export type Scanner = {
+  node_id: string;
+  hostname: string;
+  address: string;
+  online: boolean;
+  protocol: number;
+  ready: boolean;
+  nmap: boolean;
+  container: boolean;
+  note: string;
+};
+
+export type ScansOverview = { protocol: number; profiles: string[]; scripts: string[]; scans: SecurityScan[]; scanners: Scanner[]; runs: ScanRun[] };
+
+export type ScanPort = {
+  proto: string;
+  port: number;
+  state: string;
+  service?: string;
+  product?: string;
+  version?: string;
+  extra?: string;
+  tunnel?: string;
+  cpe?: string[];
+  scripts?: Record<string, string>;
+};
+
+export type RunPort = { proto: string; port: number; known: "" | "luistert" | "firewall" | "dicht" | "onbekend"; process?: string };
+
+export type RunHost = {
+  addr: string;
+  mac?: string;
+  vendor?: string;
+  hostname?: string;
+  ports: ScanPort[];
+  node_id: string | null;
+  node: string;
+  cluster: string;
+  expected: RunPort[];
+};
+
+export type ScanRunDetail = ScanRun & {
+  result: { nmap: string; args: string[]; truncated: boolean; notes: string[]; hosts: RunHost[] } | null;
+};
+
+export function useScans() {
+  return useQuery({
+    queryKey: [...key, "scans"],
+    queryFn: async () => unwrap(await api.GET("/security/scans")) as unknown as ScansOverview,
+    refetchInterval: (q) => (q.state.data?.scans.some((s) => s.running) ? 5_000 : 30_000),
+  });
+}
+
+export function useScanRun(id: string | null) {
+  return useQuery({
+    queryKey: [...key, "scan-run", id],
+    enabled: !!id,
+    queryFn: async () => unwrap(await api.GET("/security/scan-runs/{runId}", { params: { path: { runId: id! } } })) as unknown as ScanRunDetail,
+    refetchInterval: (q) => (q.state.data?.status === "bezig" ? 5_000 : false),
+  });
+}
+
+export function useSaveScan() {
+  const done = useInvalidate();
+  return useMutation({
+    mutationFn: async ({ id, body }: { id?: string; body: components["schemas"]["SecurityScanInput"] }) =>
+      unwrap(
+        id ? await api.PUT("/security/scans/{scanId}", { params: { path: { scanId: id } }, body }) : await api.POST("/security/scans", { body }),
+      ) as unknown as SecurityScan,
+    onSuccess: done,
+  });
+}
+
+export function useDeleteScan() {
+  const done = useInvalidate();
+  return useMutation({
+    mutationFn: async (id: string) => unwrap(await api.DELETE("/security/scans/{scanId}", { params: { path: { scanId: id } } })),
+    onSuccess: done,
+  });
+}
+
+export function useRunScan() {
+  const done = useInvalidate();
+  return useMutation({
+    mutationFn: async (id: string) =>
+      unwrap(await api.POST("/security/scans/{scanId}/run", { params: { path: { scanId: id } } })) as unknown as { run_id: string },
+    onSuccess: done,
+  });
+}
+
+export function useLinkScanner() {
+  const done = useInvalidate();
+  return useMutation({
+    mutationFn: async () => unwrap(await api.POST("/security/scanner")) as unknown as { node_id: string; hostname: string; linked: boolean },
+    onSuccess: () => {
+      done();
+      setTimeout(done, 10_000);
+    },
+  });
+}
+
+export const weekdays = ["zondag", "maandag", "dinsdag", "woensdag", "donderdag", "vrijdag", "zaterdag"];
+
+export const profileLabel: Record<string, string> = {
+  snel: "Snel: 100 meest gebruikte poorten",
+  standaard: "Standaard: 1000 poorten, versies en TLS/SSH",
+  volledig: "Volledig: alle 65 535 poorten, versies en TLS/SSH",
+};
+
+export const knownLabel: Record<string, { label: string; tone: Tone }> = {
+  luistert: { label: "verwacht", tone: "green" },
+  firewall: { label: "open volgens firewall", tone: "green" },
+  dicht: { label: "hoort dicht", tone: "red" },
+  onbekend: { label: "onbekend", tone: "amber" },
+  "": { label: "geen node", tone: "slate" },
+};

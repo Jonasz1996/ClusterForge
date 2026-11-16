@@ -14,6 +14,10 @@ const SecuritySince = 40
 // node uitleest (verzoek audit).
 const SecurityAuditSince = 41
 
+// SecurityScanSince is de eerste protocolversie die een netwerkscan (nmap)
+// binnen de eigen scopes kan draaien (verzoek scan).
+const SecurityScanSince = 42
+
 // SubjectSecurity draagt de beveiligingsverzoeken: cf.node.<id>.security.
 const SubjectSecurity = "security"
 
@@ -32,7 +36,78 @@ const (
 	// gevoelige bestanden, mountopties, diensten en het Lynis-rapport. De
 	// agent oordeelt niet; de regels staan op de server.
 	SecurityOpAudit = "audit"
+	// SecurityOpScan draait nmap op de doelen van Scan. Alleen een agent
+	// met nmap (de scannercontainer of een eigen scanner-VM) kan dit; de
+	// agent controleert zelf nog eens dat elk doel binnen Allowed valt.
+	SecurityOpScan = "scan"
 )
+
+// MaxScanDuration is hoe lang één netwerkscan hoogstens mag duren.
+const MaxScanDuration = 3 * time.Hour
+
+// Grenzen op het scanresultaat, zodat het in één NATS-bericht past.
+const (
+	MaxScanHosts        = 1024
+	MaxScanPortsPerHost = 256
+	MaxScanScriptOutput = 4096
+)
+
+// Scanprofielen.
+const (
+	ScanProfileQuick    = "snel"      // top 100 TCP-poorten, geen versies
+	ScanProfileStandard = "standaard" // top 1000, versies, veilige scripts
+	ScanProfileFull     = "volledig"  // alle 65535 TCP-poorten, versies, veilige scripts
+)
+
+// SafeScanScripts zijn de enige NSE-scripts die een scan mag draaien: ze
+// lezen alleen wat een dienst zelf vertelt (categorie safe, geen brute
+// force, geen exploits, geen DoS).
+var SafeScanScripts = []string{"ssl-enum-ciphers", "ssl-cert", "ssh2-enum-algos", "ssh-hostkey", "http-title", "http-server-header"}
+
+// ScanSpec zegt wat een scan doet. Targets en Exclude zijn IP-adressen of
+// CIDR's (geen hostnamen); Allowed zijn de CIDR's van de scope, die de
+// agent zelf nog eens nakijkt.
+type ScanSpec struct {
+	Targets []string `json:"targets"`
+	Exclude []string `json:"exclude,omitempty"`
+	Allowed []string `json:"allowed"`
+	Profile string   `json:"profile"`
+	// MaxRate is het hoogste aantal pakketten per seconde (0 = 300).
+	MaxRate int `json:"max_rate,omitempty"`
+}
+
+// ScanResult is wat nmap vond.
+type ScanResult struct {
+	Nmap      string     `json:"nmap"`
+	Args      []string   `json:"args"`
+	Started   time.Time  `json:"started"`
+	Finished  time.Time  `json:"finished"`
+	HostsUp   int        `json:"hosts_up"`
+	HostsSeen int        `json:"hosts_seen"`
+	Hosts     []ScanHost `json:"hosts"`
+	Truncated bool       `json:"truncated,omitempty"`
+}
+
+type ScanHost struct {
+	Addr     string     `json:"addr"`
+	MAC      string     `json:"mac,omitempty"`
+	Vendor   string     `json:"vendor,omitempty"`
+	Hostname string     `json:"hostname,omitempty"`
+	Ports    []ScanPort `json:"ports"`
+}
+
+type ScanPort struct {
+	Proto   string            `json:"proto"`
+	Port    int               `json:"port"`
+	State   string            `json:"state"`
+	Service string            `json:"service,omitempty"`
+	Product string            `json:"product,omitempty"`
+	Version string            `json:"version,omitempty"`
+	Extra   string            `json:"extra,omitempty"`
+	Tunnel  string            `json:"tunnel,omitempty"`
+	CPE     []string          `json:"cpe,omitempty"`
+	Scripts map[string]string `json:"scripts,omitempty"`
+}
 
 // SecurityRequestTimeout is hoe lang een beveiligingsverzoek mag duren.
 const SecurityRequestTimeout = 90 * time.Second
@@ -45,12 +120,14 @@ type SecurityRequest struct {
 	ID       string    `json:"id"`
 	Op       string    `json:"op"`
 	Deadline time.Time `json:"deadline"`
+	Scan     *ScanSpec `json:"scan,omitempty"`
 }
 
 type SecurityResponse struct {
 	Error     string             `json:"error,omitempty"`
 	Inventory *SecurityInventory `json:"inventory,omitempty"`
 	Audit     *SecurityAudit     `json:"audit,omitempty"`
+	Scan      *ScanResult        `json:"scan,omitempty"`
 }
 
 // SecurityAudit is wat de agent over de verharding van zijn node ziet.

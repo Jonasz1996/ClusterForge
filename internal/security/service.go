@@ -58,6 +58,11 @@ type Service struct {
 	forceFeeds bool
 	forceNodes map[uuid.UUID]bool
 	forceAll   bool
+	// running: scans die nu lopen; base: de context van Loop, waarin
+	// scans verder lopen nadat het verzoek dat ze startte klaar is.
+	running map[uuid.UUID]bool
+	base    context.Context
+	wg      sync.WaitGroup
 }
 
 func NewService(pool *pgxpool.Pool, ev *events.Writer, bus Bus, log *slog.Logger) *Service {
@@ -70,7 +75,7 @@ func NewService(pool *pgxpool.Pool, ev *events.Writer, bus Bus, log *slog.Logger
 		FeedEvery: 24 * time.Hour, FeedRetry: time.Hour,
 		InventoryEvery: 6 * time.Hour, InventoryRetry: time.Hour,
 		TickEvery: time.Minute, Now: time.Now,
-		catalogs: map[string]*Catalog{}, forceNodes: map[uuid.UUID]bool{}}
+		catalogs: map[string]*Catalog{}, forceNodes: map[uuid.UUID]bool{}, running: map[uuid.UUID]bool{}}
 }
 
 func (s *Service) event(ctx context.Context, actor events.Actor, subjectType, subjectID string, cluster *uuid.UUID, action string, payload map[string]any) {
@@ -86,6 +91,12 @@ func (s *Service) event(ctx context.Context, actor events.Actor, subjectType, su
 // Loop draait de ronde elke TickEvery, de eerste na een halve minuut zodat
 // de agents eerst verbinden.
 func (s *Service) Loop(ctx context.Context) {
+	s.mu.Lock()
+	s.base = ctx
+	s.mu.Unlock()
+	if err := s.failStaleRuns(ctx); err != nil && ctx.Err() == nil {
+		s.log.Warn("oude scans afsluiten mislukt", "err", err)
+	}
 	select {
 	case <-ctx.Done():
 		return
@@ -240,6 +251,9 @@ func (s *Service) Tick(ctx context.Context) error {
 				return err
 			}
 		}
+	}
+	if err := s.scheduleScans(ctx); err != nil {
+		s.log.Warn("geplande scans starten mislukt", "err", err)
 	}
 	_, err = s.pool.Exec(ctx, `UPDATE security_findings SET status = 'open', accepted_until = NULL
 WHERE status = 'aanvaard' AND accepted_until IS NOT NULL AND accepted_until < $1`, now)

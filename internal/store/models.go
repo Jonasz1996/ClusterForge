@@ -1704,6 +1704,39 @@ type SecurityKev struct {
 	Ransomware bool
 }
 
+type SecurityScan struct {
+	ID        uuid.UUID
+	Name      string
+	ScopeID   uuid.UUID
+	ScannerID *uuid.UUID
+	Profile   string
+	MaxRate   int32
+	Schedule  string
+	Weekday   int32
+	Hour      int32
+	NextRun   *time.Time
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	UpdatedBy *uuid.UUID
+}
+
+type SecurityScanRun struct {
+	ID          uuid.UUID
+	ScanID      uuid.UUID
+	ScannerID   *uuid.UUID
+	ScannerName string
+	Trigger     string
+	Status      string
+	Error       string
+	StartedAt   time.Time
+	FinishedAt  *time.Time
+	Targets     []string
+	HostsUp     int32
+	OpenPorts   int32
+	Findings    int32
+	Result      []byte
+}
+
 type SecurityScope struct {
 	ID          uuid.UUID
 	Name        string

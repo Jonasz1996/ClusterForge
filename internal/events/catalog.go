@@ -179,6 +179,12 @@ var Known = map[string]Spec{
 	"security.finding_accepted":      {CategorySecurity, "Beveiligingsbevinding aanvaard"},
 	"security.finding_reopened":      {CategorySecurity, "Beveiligingsbevinding heropend"},
 	"security.kev_found":             {CategorySecurity, "Actief misbruikte kwetsbaarheid gevonden"},
+	"security.scan_saved":            {CategorySecurity, "Netwerkscan bewaard"},
+	"security.scan_deleted":          {CategorySecurity, "Netwerkscan verwijderd"},
+	"security.scan_started":          {CategorySecurity, "Netwerkscan gestart"},
+	"security.scan_done":             {CategorySecurity, "Netwerkscan klaar"},
+	"security.scan_failed":           {CategorySecurity, "Netwerkscan mislukt"},
+	"security.scanner_linked":        {CategorySecurity, "Scannercontainer gekoppeld"},
 
 	"job.queued":           {CategoryJobs, "Taak aangevraagd"},
 	"job.succeeded":        {CategoryJobs, "Taak gelukt"},
