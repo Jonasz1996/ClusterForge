@@ -83,6 +83,10 @@ func main() {
 		os.Exit(cronRun(os.Args[2:]))
 	case "run-exec":
 		os.Exit(runExec(os.Args[2:]))
+	case "stack-pause":
+		// Geen commando: als voorbereiding van een sync zegt het de agent
+		// welke stacks hij rond de tweede kopie pauzeert (fase 21).
+		fmt.Println("cf-agent stack-pause werkt alleen als voorbereiding van een sync van ClusterForge")
 	case "sync-receive":
 		os.Exit(syncReceive(os.Args[2:]))
 	case "facts":

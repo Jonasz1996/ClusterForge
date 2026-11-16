@@ -89,6 +89,8 @@ type RunSpec struct {
 	Docker *DockerRun `json:"docker,omitempty"`
 	// PVE hoort bij RunPVE (vanaf PVESince).
 	PVE *PVERun `json:"pve,omitempty"`
+	// Stack hoort bij RunStack (vanaf StacksSince).
+	Stack *StackRun `json:"stack,omitempty"`
 }
 
 // AptRun zegt hoe apt bijwerkt.
@@ -187,6 +189,8 @@ type RunStatus struct {
 	Files []ComposeFile `json:"files,omitempty"`
 	// PVE is het resultaat van een run pve.
 	PVE *PVERunResult `json:"pve,omitempty"`
+	// Stacks is het rapport per stack van een run stack.
+	Stacks []StackReport `json:"stacks,omitempty"`
 }
 
 type RunResponse struct {
@@ -223,7 +227,7 @@ func (s RunSpec) Validate() error {
 		return fmt.Errorf("de tijdslimiet moet tussen 0 en %s liggen", RunTimeoutMax)
 	}
 	set := 0
-	for _, b := range []bool{s.Script != "", s.Apt != nil, s.Docker != nil, s.PVE != nil} {
+	for _, b := range []bool{s.Script != "", s.Apt != nil, s.Docker != nil, s.PVE != nil, s.Stack != nil} {
 		if b {
 			set++
 		}
@@ -264,6 +268,10 @@ func (s RunSpec) Validate() error {
 			return fmt.Errorf("lege projectnaam")
 		}
 		if err := s.Docker.validate(); err != nil {
+			return err
+		}
+	case RunStack:
+		if err := s.Stack.Validate(); err != nil {
 			return err
 		}
 	case RunPVE:

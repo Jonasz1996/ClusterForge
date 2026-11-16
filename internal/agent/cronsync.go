@@ -95,6 +95,28 @@ func (r *CronRunner) runSync(ctx context.Context, job protocol.ManagedCron, out 
 	}
 	var results []protocol.SyncResult
 	exit, refused := 0, 0
+	// Stacks pauzeren (fase 21): eerst een kopie terwijl alles draait, dan
+	// pauzeren en een tweede kopie met alleen wat intussen veranderde.
+	if projects, ok := protocol.PauseProjects(spec.Before); ok {
+		for _, t := range spec.Targets {
+			if ctx.Err() != nil {
+				break
+			}
+			_, _ = fmt.Fprintf(out, "== eerste kopie (alles draait) naar %s (%s) ==\n", t.Hostname, t.Address)
+			_, _ = runCronArgv(ctx, "", syncArgv(spec, t, sshCmd), out)
+			_, _ = fmt.Fprintln(out)
+		}
+		dockerRun := func(ctx context.Context, argv []string, out io.Writer) (int, error) { return runCronArgv(ctx, "", argv, out) }
+		ids, err := pauseProjects(ctx, dockerRun, projects, out)
+		defer unpause(dockerRun, ids, out)
+		if err != nil {
+			_, _ = fmt.Fprintf(out, "%v; de tweede kopie gebeurt niet.\n", err)
+			return 1, nil, nil
+		}
+		pctx, cancel := context.WithTimeout(ctx, protocol.MaxStackPause)
+		defer cancel()
+		ctx = pctx
+	}
 	for _, t := range spec.Targets {
 		if ctx.Err() != nil {
 			break
@@ -134,6 +156,11 @@ func (r *CronRunner) runSync(ctx context.Context, job protocol.ManagedCron, out 
 // zijn.
 func syncBefore(ctx context.Context, spec *protocol.SyncSpec, out io.Writer) (int, bool) {
 	if strings.TrimSpace(spec.Before) == "" {
+		return 0, true
+	}
+	// Een pauze van stacks (fase 21) is geen commando: runSync doet ze rond
+	// de tweede kopie.
+	if _, ok := protocol.PauseProjects(spec.Before); ok {
 		return 0, true
 	}
 	_, _ = fmt.Fprintf(out, "== voorbereiding: %s ==\n", spec.Before)
