@@ -1174,6 +1174,25 @@ type HealAuto struct {
 	UpdatedBy    *uuid.UUID
 }
 
+type HomeApp struct {
+	Key         string
+	Name        string
+	Grp         string
+	Icon        string
+	ClusterName string
+	FirstSeen   time.Time
+	LastSeen    time.Time
+	Override    []byte
+	UpdatedAt   time.Time
+}
+
+type HomeAppDoubt struct {
+	ServiceKey string
+	Decision   string
+	Name       string
+	DecidedAt  time.Time
+}
+
 type Incident struct {
 	ID               uuid.UUID
 	Number           int32
