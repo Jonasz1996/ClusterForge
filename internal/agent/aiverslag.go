@@ -139,7 +139,7 @@ func (h pveHost) aivFacts(ctx context.Context) *protocol.AIVFacts {
 	if req, err := http.NewRequestWithContext(pctx, http.MethodGet, f.URL+"/api/app/ping", nil); err == nil {
 		if res, err := aivHTTP(3 * time.Second).Do(req); err == nil {
 			_, _ = io.Copy(io.Discard, io.LimitReader(res.Body, 64<<10))
-			res.Body.Close()
+			_ = res.Body.Close()
 			f.Reachable = res.StatusCode == http.StatusOK
 		}
 	}
@@ -270,7 +270,7 @@ func (c *aivClient) send(ctx context.Context, method, path string, query url.Val
 	if err != nil {
 		return 0, nil, fmt.Errorf("AI-verslag niet bereikbaar op %s: %w", c.base, err)
 	}
-	defer res.Body.Close()
+	defer func() { _ = res.Body.Close() }()
 	data, err := io.ReadAll(io.LimitReader(res.Body, pveGetMax+1))
 	if err != nil {
 		return res.StatusCode, nil, err
