@@ -4,12 +4,15 @@ import { copyText } from "@/lib/clipboard";
 import { useState, type FormEvent } from "react";
 import { Alert, Button, Field, Input, Select } from "@/components/ui";
 import { useClusters, useCreateEnrollmentToken, type EnrollmentToken } from "@/lib/inventory";
+import { agentServerURL, useAgentEndpoints } from "@/lib/agentEndpoints";
 
 // scriptCommand is de regel die het installatiescript van deze server haalt
-// en uitvoert. Over http weigert het script zonder --allow-http; wie
-// ClusterForge zelf over http opent, koos daar al voor.
+// en uitvoert, op het adres voor agents (Instellingen, standaard het interne
+// adres en niet de naam achter een reverse proxy). Over http weigert het
+// script zonder --allow-http; wie dat adres over http instelde, koos daar al
+// voor.
 export function scriptCommand(args: string) {
-  const origin = typeof window === "undefined" ? "https://clusterforge.example" : window.location.origin;
+  const origin = agentServerURL();
   const http = origin.startsWith("http://") ? " --allow-http" : "";
   return `curl -fsSL ${origin}/install/agent.sh | sudo sh -s -- --server ${origin}${http} ${args}`;
 }
@@ -46,6 +49,7 @@ export function CopyBlock({ text }: { text: string }) {
 // Met nodeId geldt het token alleen voor die node.
 export function InstallAgent({ nodeId, onClose }: { nodeId?: string; onClose: () => void }) {
   const clusters = useClusters();
+  const endpoints = useAgentEndpoints();
   const create = useCreateEnrollmentToken();
   const [description, setDescription] = useState("");
   const [clusterId, setClusterId] = useState("");
@@ -84,8 +88,9 @@ export function InstallAgent({ nodeId, onClose }: { nodeId?: string; onClose: ()
         </p>
         <CopyBlock text={installCommand(result.token)} />
         <p className="text-xs text-slate-500">
-          Het script haalt cf-agent van deze server, controleert de checksum, installeert de systemd-service en meldt de
-          node aan. De node moet poort 4222 van deze server kunnen bereiken.
+          Het script haalt cf-agent van {agentServerURL()}, controleert de checksum, installeert de systemd-service en
+          meldt de node aan. De node moet {endpoints.data?.nats_url.replace("tls://", "") || "poort 4222 van deze server"}{" "}
+          kunnen bereiken. Het adres stel je in bij Instellingen, onder Adres voor agents.
         </p>
         <Button variant="secondary" onClick={onClose}>
           Sluiten

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useSyncExternalStore } from "react";
 import { cx } from "@/components/ui";
-import { activeHref, groupOf, navGroups, navHome, type NavItem } from "@/lib/nav";
+import { activeHref, groupOf, itemHrefs, navGroups, navHome, type NavItem } from "@/lib/nav";
 
 const collapsedKey = "cf-nav-dicht";
 
@@ -68,9 +68,20 @@ export function Sidebar({
     writeCollapsed(collapsed.includes(id) ? collapsed.filter((x) => x !== id) : [...collapsed, id]);
   }
 
+  // Een item met tabbladen telt de meldingen van al zijn tabbladen op.
+  const badgeOf = (i: NavItem): { count: number; tone: "red" | "amber" } | undefined => {
+    let out: { count: number; tone: "red" | "amber" } | undefined;
+    for (const h of itemHrefs(i)) {
+      const b = badges?.[h];
+      if (!b || b.count <= 0) continue;
+      out = { count: (out?.count ?? 0) + b.count, tone: out?.tone === "red" || b.tone === "red" ? "red" : "amber" };
+    }
+    return out;
+  };
+
   const item = (i: NavItem) => {
     const on = active === i.href;
-    const b = badges?.[i.href];
+    const b = badgeOf(i);
     return (
       <Link
         key={i.href}
@@ -106,7 +117,7 @@ export function Sidebar({
         const items = g.items.filter((i) => !i.adminOnly || isAdmin);
         if (items.length === 0) return null;
         const open = g.id === activeGroup || !collapsed.includes(g.id);
-        const groupCount = items.reduce((n, i) => n + (badges?.[i.href]?.count ?? 0), 0);
+        const groupCount = items.reduce((n, i) => n + (badgeOf(i)?.count ?? 0), 0);
         return (
           <div key={g.id} className="pt-2">
             <button

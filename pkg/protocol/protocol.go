@@ -10,7 +10,7 @@ import (
 
 // Version is de protocolversie. Een agent meldt die bij elke heartbeat, zodat
 // de server geen berichten stuurt die de agent niet kent.
-const Version = 45
+const Version = 48
 
 // RecipeStepsSince is de eerste protocolversie die de stappen van recepten
 // kent: repo_deb, repo en ini_set (fase 9).
@@ -116,6 +116,14 @@ type Heartbeat struct {
 	// UpgradeRolledBack is de sha256 van een nieuwe agent die niet goed
 	// startte en teruggezet werd; leeg als de laatste update lukte.
 	UpgradeRolledBack string `json:"upgrade_rolled_back,omitempty"`
+	// ServerURL en NatsURL zijn de adressen in agent.json, zodat de server
+	// ziet welke agents nog naar een oud adres wijzen. Vanaf
+	// ReconfigureSince.
+	ServerURL string `json:"server_url,omitempty"`
+	NatsURL   string `json:"nats_url,omitempty"`
+	// ReconfigureRolledBack is het NATS-adres van een herconfiguratie die
+	// teruggezet werd omdat de agent er de server niet mee bereikte.
+	ReconfigureRolledBack string `json:"reconfigure_rolled_back,omitempty"`
 }
 
 const (
@@ -199,6 +207,11 @@ type Facts struct {
 
 	// Seaweed beschrijft SeaweedFS op de node; nil zonder.
 	Seaweed *SeaweedFacts `json:"seaweed,omitempty"`
+
+	// Vanaf AppsSince.
+
+	// Apps is de stand van apps van templates op de node (fase 29).
+	Apps []AppStatus `json:"apps,omitempty"`
 
 	// Vanaf PVESince.
 
@@ -372,6 +385,8 @@ type Command struct {
 	FaultIDs []string `json:"fault_ids,omitempty"`
 	// Upgrade is de nieuwe agent van CmdAgentUpgrade.
 	Upgrade *AgentUpgrade `json:"upgrade,omitempty"`
+	// Reconfigure is het nieuwe adres van CmdAgentReconfigure.
+	Reconfigure *AgentReconfigure `json:"reconfigure,omitempty"`
 }
 
 // Soorten storing. Er is geen vrije interface, regel of commando: de agent
@@ -695,6 +710,7 @@ func (f Facts) Stable() Facts {
 	}
 	out.AptUpdatedAt = time.Time{}
 	out.Seaweed = f.Seaweed.Stable()
+	out.Apps = StableApps(f.Apps)
 	return out
 }
 

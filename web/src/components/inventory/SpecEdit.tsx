@@ -9,6 +9,7 @@ import { fieldId, ParamInput, paramHint } from "@/components/inventory/ParamInpu
 import { Alert, Button, Label, Select } from "@/components/ui";
 import { ApiError } from "@/lib/api/client";
 import { useApplySpec, useSpecEditForm, useSpecPlan, type SpecEditForm, type SpecEditInput } from "@/lib/deploy";
+import { agentServerURL } from "@/lib/agentEndpoints";
 
 export type SpecCluster = { id: string; name: string; slug: string; environment: string };
 
@@ -300,7 +301,7 @@ function PlanStep({
                 ...edit,
                 hash: p.hash,
                 // Nieuwe nodes melden zich aan op het adres van deze pagina.
-                server_url: pl.new_nodes.length > 0 ? window.location.origin : undefined,
+                server_url: pl.new_nodes.length > 0 ? agentServerURL() : undefined,
                 confirm: prod ? confirm : undefined,
               },
               {

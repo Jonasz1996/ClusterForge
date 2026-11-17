@@ -36,6 +36,75 @@ func (e AgentConnection) Valid() bool {
 	}
 }
 
+// Defines values for AgentEndpointAgentState.
+const (
+	AgentEndpointAgentStateCurrent AgentEndpointAgentState = "current"
+	AgentEndpointAgentStateDiffers AgentEndpointAgentState = "differs"
+	AgentEndpointAgentStateFailed  AgentEndpointAgentState = "failed"
+	AgentEndpointAgentStateManual  AgentEndpointAgentState = "manual"
+	AgentEndpointAgentStateUnknown AgentEndpointAgentState = "unknown"
+)
+
+// Valid indicates whether the value is a known member of the AgentEndpointAgentState enum.
+func (e AgentEndpointAgentState) Valid() bool {
+	switch e {
+	case AgentEndpointAgentStateCurrent:
+		return true
+	case AgentEndpointAgentStateDiffers:
+		return true
+	case AgentEndpointAgentStateFailed:
+		return true
+	case AgentEndpointAgentStateManual:
+		return true
+	case AgentEndpointAgentStateUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AgentEndpointsOverviewNatsSource.
+const (
+	AgentEndpointsOverviewNatsSourceAdvertise AgentEndpointsOverviewNatsSource = "advertise"
+	AgentEndpointsOverviewNatsSourceRequest   AgentEndpointsOverviewNatsSource = "request"
+	AgentEndpointsOverviewNatsSourceSetting   AgentEndpointsOverviewNatsSource = "setting"
+)
+
+// Valid indicates whether the value is a known member of the AgentEndpointsOverviewNatsSource enum.
+func (e AgentEndpointsOverviewNatsSource) Valid() bool {
+	switch e {
+	case AgentEndpointsOverviewNatsSourceAdvertise:
+		return true
+	case AgentEndpointsOverviewNatsSourceRequest:
+		return true
+	case AgentEndpointsOverviewNatsSourceSetting:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AgentEndpointsOverviewServerSource.
+const (
+	AgentEndpointsOverviewServerSourceAdvertise AgentEndpointsOverviewServerSource = "advertise"
+	AgentEndpointsOverviewServerSourceRequest   AgentEndpointsOverviewServerSource = "request"
+	AgentEndpointsOverviewServerSourceSetting   AgentEndpointsOverviewServerSource = "setting"
+)
+
+// Valid indicates whether the value is a known member of the AgentEndpointsOverviewServerSource enum.
+func (e AgentEndpointsOverviewServerSource) Valid() bool {
+	switch e {
+	case AgentEndpointsOverviewServerSourceAdvertise:
+		return true
+	case AgentEndpointsOverviewServerSourceRequest:
+		return true
+	case AgentEndpointsOverviewServerSourceSetting:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AgentUpgradeAgentState.
 const (
 	AgentUpgradeAgentStateCurrent  AgentUpgradeAgentState = "current"
@@ -60,6 +129,24 @@ func (e AgentUpgradeAgentState) Valid() bool {
 	case AgentUpgradeAgentStateOutdated:
 		return true
 	case AgentUpgradeAgentStateUnknown:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for AppIssueTone.
+const (
+	AppIssueToneAmber AppIssueTone = "amber"
+	AppIssueToneRed   AppIssueTone = "red"
+)
+
+// Valid indicates whether the value is a known member of the AppIssueTone enum.
+func (e AppIssueTone) Valid() bool {
+	switch e {
+	case AppIssueToneAmber:
+		return true
+	case AppIssueToneRed:
 		return true
 	default:
 		return false
@@ -1371,6 +1458,27 @@ func (e DocMetaScope) Valid() bool {
 	case DocMetaScopeCluster:
 		return true
 	case DocMetaScopeOverview:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for DockerConsoleInputShell.
+const (
+	DockerConsoleInputShellAuto DockerConsoleInputShell = "auto"
+	DockerConsoleInputShellBash DockerConsoleInputShell = "bash"
+	DockerConsoleInputShellSh   DockerConsoleInputShell = "sh"
+)
+
+// Valid indicates whether the value is a known member of the DockerConsoleInputShell enum.
+func (e DockerConsoleInputShell) Valid() bool {
+	switch e {
+	case DockerConsoleInputShellAuto:
+		return true
+	case DockerConsoleInputShellBash:
+		return true
+	case DockerConsoleInputShellSh:
 		return true
 	default:
 		return false
@@ -4047,6 +4155,30 @@ func (e VmAction) Valid() bool {
 	}
 }
 
+// Defines values for ZabbixAgentNodesInputAction.
+const (
+	ZabbixAgentNodesInputActionApply    ZabbixAgentNodesInputAction = "apply"
+	ZabbixAgentNodesInputActionManage   ZabbixAgentNodesInputAction = "manage"
+	ZabbixAgentNodesInputActionRotate   ZabbixAgentNodesInputAction = "rotate"
+	ZabbixAgentNodesInputActionUnmanage ZabbixAgentNodesInputAction = "unmanage"
+)
+
+// Valid indicates whether the value is a known member of the ZabbixAgentNodesInputAction enum.
+func (e ZabbixAgentNodesInputAction) Valid() bool {
+	switch e {
+	case ZabbixAgentNodesInputActionApply:
+		return true
+	case ZabbixAgentNodesInputActionManage:
+		return true
+	case ZabbixAgentNodesInputActionRotate:
+		return true
+	case ZabbixAgentNodesInputActionUnmanage:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for AuditActorType.
 const (
 	AuditActorTypeAgent  AuditActorType = "agent"
@@ -4212,6 +4344,59 @@ func (e GetSocParamsWindow) Valid() bool {
 // AgentConnection online bij een heartbeat in de laatste 30 s, late tot 90 s, daarna offline
 type AgentConnection string
 
+// AgentEndpointAgent defines model for AgentEndpointAgent.
+type AgentEndpointAgent struct {
+	ClusterEnvironment string                                `json:"cluster_environment"`
+	ClusterId          nullable.Nullable[openapi_types.UUID] `json:"cluster_id"`
+	ClusterName        string                                `json:"cluster_name"`
+	ClusterSlug        string                                `json:"cluster_slug"`
+	Hostname           string                                `json:"hostname"`
+	NatsUrl            string                                `json:"nats_url"`
+	NodeId             openapi_types.UUID                    `json:"node_id"`
+	Online             bool                                  `json:"online"`
+	Protocol           int                                   `json:"protocol"`
+	ServerUrl          string                                `json:"server_url"`
+
+	// State current: wijst naar het adres voor agents. differs: wijst naar een ander adres. failed: de vorige omzetting
+	// werd op de node teruggezet. manual: ouder dan protocol 47, eerst bijwerken. unknown: meldde zijn adressen nog niet.
+	State AgentEndpointAgentState `json:"state"`
+	Why   string                  `json:"why"`
+}
+
+// AgentEndpointAgentState current: wijst naar het adres voor agents. differs: wijst naar een ander adres. failed: de vorige omzetting
+// werd op de node teruggezet. manual: ouder dan protocol 47, eerst bijwerken. unknown: meldde zijn adressen nog niet.
+type AgentEndpointAgentState string
+
+// AgentEndpointsOverview defines model for AgentEndpointsOverview.
+type AgentEndpointsOverview struct {
+	Agents      []AgentEndpointAgent             `json:"agents"`
+	NatsDefault string                           `json:"nats_default"`
+	NatsSetting string                           `json:"nats_setting"`
+	NatsSource  AgentEndpointsOverviewNatsSource `json:"nats_source"`
+	NatsUrl     string                           `json:"nats_url"`
+
+	// Protocol Het agentprotocol vanaf waar agents zich laten omzetten
+	Protocol int `json:"protocol"`
+	Running  []struct {
+		ClusterId nullable.Nullable[openapi_types.UUID] `json:"cluster_id"`
+		JobId     openapi_types.UUID                    `json:"job_id"`
+	} `json:"running"`
+
+	// ServerDefault Het adres zonder instelling (uit CF_NATS_ADVERTISE); leeg als er geen is
+	ServerDefault string                             `json:"server_default"`
+	ServerSetting string                             `json:"server_setting"`
+	ServerSource  AgentEndpointsOverviewServerSource `json:"server_source"`
+
+	// ServerUrl Het adres in het installcommando; leeg is het adres van de webinterface
+	ServerUrl string `json:"server_url"`
+}
+
+// AgentEndpointsOverviewNatsSource defines model for AgentEndpointsOverview.NatsSource.
+type AgentEndpointsOverviewNatsSource string
+
+// AgentEndpointsOverviewServerSource defines model for AgentEndpointsOverview.ServerSource.
+type AgentEndpointsOverviewServerSource string
+
 // AgentSummary defines model for AgentSummary.
 type AgentSummary struct {
 	// Commands De agent kan commando's uitvoeren (herstarten, onderhoud); oudere agents niet
@@ -4260,14 +4445,14 @@ type AgentUpgradeInput struct {
 	All       *bool               `json:"all,omitempty"`
 	ClusterId *openapi_types.UUID `json:"cluster_id,omitempty"`
 
-	// Confirm De slug van het prodcluster
+	// Confirm Wordt genegeerd: agents op prod bijwerken vraagt geen bevestiging meer
 	Confirm *string `json:"confirm,omitempty"`
 
 	// IncludeProd Met all: ook de agents op prod, één prodcluster na het andere
 	IncludeProd *bool                 `json:"include_prod,omitempty"`
 	NodeIds     *[]openapi_types.UUID `json:"node_ids,omitempty"`
 
-	// TotpCode Code van tweestapsverificatie; één code bevestigt alle prodnodes van deze klik
+	// TotpCode Wordt genegeerd: agents op prod bijwerken vraagt geen code meer
 	TotpCode *string `json:"totp_code,omitempty"`
 }
 
@@ -4345,6 +4530,36 @@ type ApiTokenInput struct {
 
 	// TtlDays 0 of weg = verloopt nooit
 	TtlDays *int `json:"ttl_days,omitempty"`
+}
+
+// AppIssue defines model for AppIssue.
+type AppIssue struct {
+	Detail *string      `json:"detail,omitempty"`
+	Title  string       `json:"title"`
+	Tone   AppIssueTone `json:"tone"`
+}
+
+// AppIssueTone defines model for AppIssue.Tone.
+type AppIssueTone string
+
+// AppStorage defines model for AppStorage.
+type AppStorage struct {
+	Issues []AppIssue `json:"issues"`
+	Leader *string    `json:"leader,omitempty"`
+
+	// LogicalBytes Elk volume één keer geteld
+	LogicalBytes int64 `json:"logical_bytes"`
+	Nodes        []struct {
+		Bytes     int64  `json:"bytes"`
+		DiskFree  int64  `json:"disk_free"`
+		DiskTotal int64  `json:"disk_total"`
+		Hostname  string `json:"hostname"`
+		Volumes   int    `json:"volumes"`
+	} `json:"nodes"`
+	Replications       *map[string]int `json:"replications,omitempty"`
+	UnderReplicated    int             `json:"under_replicated"`
+	UnderReplicatedIds *[]int          `json:"under_replicated_ids,omitempty"`
+	VolumeCount        int             `json:"volume_count"`
 }
 
 // AssistantConversation defines model for AssistantConversation.
@@ -4993,6 +5208,20 @@ type Cluster struct {
 	TemplateVersion nullable.Nullable[string] `json:"template_version"`
 	Type            ClusterType               `json:"type"`
 	UpdatedAt       time.Time                 `json:"updated_at"`
+}
+
+// ClusterApp defines model for ClusterApp.
+type ClusterApp struct {
+	App    string          `json:"app"`
+	Issues []AppIssue      `json:"issues"`
+	Nodes  []NodeAppStatus `json:"nodes"`
+	Title  string          `json:"title"`
+}
+
+// ClusterApps defines model for ClusterApps.
+type ClusterApps struct {
+	Apps    []ClusterApp `json:"apps"`
+	Storage *AppStorage  `json:"storage,omitempty"`
 }
 
 // ClusterComponent defines model for ClusterComponent.
@@ -8280,6 +8509,41 @@ type DocVersion struct {
 	Sha256      string    `json:"sha256"`
 }
 
+// DockerCallInput defines model for DockerCallInput.
+type DockerCallInput struct {
+	// Calls Aanroepen {method, path, query, body} die na elkaar lopen
+	Calls []DockerObject `json:"calls"`
+
+	// Confirm Wat overgetikt moet worden bij verwijderen, hard stoppen of opruimen
+	Confirm *string `json:"confirm,omitempty"`
+	Title   *string `json:"title,omitempty"`
+}
+
+// DockerConsoleInput defines model for DockerConsoleInput.
+type DockerConsoleInput struct {
+	Cols *int `json:"cols,omitempty"`
+
+	// Container Id of naam van de container
+	Container string `json:"container"`
+
+	// Password Op prod, als je geen tweestapsverificatie hebt
+	Password *string                  `json:"password,omitempty"`
+	Rows     *int                     `json:"rows,omitempty"`
+	Shell    *DockerConsoleInputShell `json:"shell,omitempty"`
+
+	// TotpCode Op prod: je code van tweestapsverificatie
+	TotpCode *string `json:"totp_code,omitempty"`
+
+	// User Gebruiker in de container; leeg is wat het image zegt
+	User *string `json:"user,omitempty"`
+}
+
+// DockerConsoleInputShell defines model for DockerConsoleInput.Shell.
+type DockerConsoleInputShell string
+
+// DockerObject Een object van Docker zoals Portainer (fase 28); de velden staan in web/src/lib/docker.ts.
+type DockerObject map[string]interface{}
+
 // DockerReport defines model for DockerReport.
 type DockerReport struct {
 	// ConversationId Het gesprek met het voorstel voor een fix
@@ -11362,6 +11626,41 @@ type NodeActionInput struct {
 	Reason *string `json:"reason,omitempty"`
 }
 
+// NodeAppStatus defines model for NodeAppStatus.
+type NodeAppStatus struct {
+	App    string `json:"app"`
+	Checks []struct {
+		Detail   *string `json:"detail,omitempty"`
+		Id       string  `json:"id"`
+		Label    string  `json:"label"`
+		Ok       bool    `json:"ok"`
+		Severity *string `json:"severity,omitempty"`
+	} `json:"checks"`
+	Hostname string             `json:"hostname"`
+	NodeId   openapi_types.UUID `json:"node_id"`
+	Online   bool               `json:"online"`
+
+	// Ref De gekozen versie (branch
+	Ref *string `json:"ref,omitempty"`
+
+	// Role actief, stand-by of voor-overstap
+	Role *string `json:"role,omitempty"`
+
+	// Stale Ouder dan 10 minuten of de agent antwoordt niet
+	Stale     bool      `json:"stale"`
+	Title     *string   `json:"title,omitempty"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Values    []struct {
+		Bytes *int64 `json:"bytes,omitempty"`
+		Id    string `json:"id"`
+		Label string `json:"label"`
+		Value string `json:"value"`
+	} `json:"values"`
+
+	// Version De gebouwde commit
+	Version *string `json:"version,omitempty"`
+}
+
 // NodeBackups defines model for NodeBackups.
 type NodeBackups struct {
 	Backups []BackupVolume                `json:"backups"`
@@ -13612,6 +13911,118 @@ type VmActionInput struct {
 	Vmstate *bool `json:"vmstate,omitempty"`
 }
 
+// ZabbixAgentNode defines model for ZabbixAgentNode.
+type ZabbixAgentNode struct {
+	// AgentService Stand van zabbix-agent2 uit de heartbeat; leeg als hij er niet is
+	AgentService       string                                `json:"agent_service"`
+	AppliedAt          nullable.Nullable[time.Time]          `json:"applied_at"`
+	ApplyError         string                                `json:"apply_error"`
+	ApplyFailedAt      nullable.Nullable[time.Time]          `json:"apply_failed_at"`
+	ApplyJobId         nullable.Nullable[openapi_types.UUID] `json:"apply_job_id"`
+	ApplyRunning       bool                                  `json:"apply_running"`
+	ClusterEnvironment string                                `json:"cluster_environment"`
+	ClusterId          nullable.Nullable[openapi_types.UUID] `json:"cluster_id"`
+	ClusterName        string                                `json:"cluster_name"`
+	Docker             bool                                  `json:"docker"`
+	Enabled            bool                                  `json:"enabled"`
+	Hostname           string                                `json:"hostname"`
+	Ip                 string                                `json:"ip"`
+	Managed            bool                                  `json:"managed"`
+	NodeId             openapi_types.UUID                    `json:"node_id"`
+	Online             bool                                  `json:"online"`
+	Pending            bool                                  `json:"pending"`
+	PskCreatedAt       nullable.Nullable[time.Time]          `json:"psk_created_at"`
+	PskIdentity        string                                `json:"psk_identity"`
+	Supported          bool                                  `json:"supported"`
+	ZabbixHostId       string                                `json:"zabbix_host_id"`
+}
+
+// ZabbixAgentNodesInput defines model for ZabbixAgentNodesInput.
+type ZabbixAgentNodesInput struct {
+	Action ZabbixAgentNodesInputAction `json:"action"`
+
+	// All Alle nodes die nog niet toegepast zijn (apply) of alle nodes
+	All     *bool                 `json:"all,omitempty"`
+	NodeIds *[]openapi_types.UUID `json:"node_ids,omitempty"`
+}
+
+// ZabbixAgentNodesInputAction defines model for ZabbixAgentNodesInput.Action.
+type ZabbixAgentNodesInputAction string
+
+// ZabbixAgentNodesResult defines model for ZabbixAgentNodesResult.
+type ZabbixAgentNodesResult struct {
+	Jobs    []openapi_types.UUID `json:"jobs"`
+	Skipped []string             `json:"skipped"`
+}
+
+// ZabbixAgentSettings defines model for ZabbixAgentSettings.
+type ZabbixAgentSettings struct {
+	// ApiUrl Adres van api_jsonrpc.php
+	ApiUrl string `json:"api_url"`
+
+	// AutoApply Elke node met een agent krijgt vanzelf zabbix-agent2
+	AutoApply bool `json:"auto_apply"`
+
+	// AutoProd Ook nodes van prod-clusters
+	AutoProd bool `json:"auto_prod"`
+
+	// Available De server heeft een masterkey om sleutels te bewaren
+	Available bool `json:"available"`
+
+	// DockerTemplate Extra template voor nodes met Docker
+	DockerTemplate string `json:"docker_template"`
+
+	// HostGroup Groep voor hosts die ClusterForge aanmaakt
+	HostGroup    string `json:"host_group"`
+	HostMetadata string `json:"host_metadata"`
+
+	// Proxy Proxy voor nieuwe hosts; leeg is de server
+	Proxy string `json:"proxy"`
+
+	// Server Server= in zabbix_agent2.conf
+	Server string `json:"server"`
+
+	// ServerActive ServerActive= in zabbix_agent2.conf
+	ServerActive string    `json:"server_active"`
+	Templates    []string  `json:"templates"`
+	TokenSet     bool      `json:"token_set"`
+	UpdatedAt    time.Time `json:"updated_at"`
+
+	// Version Versie van de Zabbix-repository
+	Version string `json:"version"`
+}
+
+// ZabbixAgentSettingsInput defines model for ZabbixAgentSettingsInput.
+type ZabbixAgentSettingsInput struct {
+	ApiUrl         string   `json:"api_url"`
+	AutoApply      bool     `json:"auto_apply"`
+	AutoProd       bool     `json:"auto_prod"`
+	DockerTemplate string   `json:"docker_template"`
+	HostGroup      string   `json:"host_group"`
+	HostMetadata   string   `json:"host_metadata"`
+	Proxy          string   `json:"proxy"`
+	Server         string   `json:"server"`
+	ServerActive   string   `json:"server_active"`
+	Templates      []string `json:"templates"`
+
+	// Token Weglaten laat het token staan; leeg haalt het weg
+	Token   *string `json:"token,omitempty"`
+	Version string  `json:"version"`
+}
+
+// ZabbixAgentTestResult defines model for ZabbixAgentTestResult.
+type ZabbixAgentTestResult struct {
+	Message string `json:"message"`
+	Ok      bool   `json:"ok"`
+	Version string `json:"version"`
+}
+
+// ZabbixAgentsOverview defines model for ZabbixAgentsOverview.
+type ZabbixAgentsOverview struct {
+	Nodes    []ZabbixAgentNode   `json:"nodes"`
+	Settings ZabbixAgentSettings `json:"settings"`
+}
+
 // AuditActorType defines model for AuditActorType.
 type AuditActorType string
 
@@ -13696,6 +14107,23 @@ type TimelineLimit = int
 // TimelineTo defines model for TimelineTo.
 type TimelineTo = time.Time
 
+// SetAgentEndpointsJSONBody defines parameters for SetAgentEndpoints.
+type SetAgentEndpointsJSONBody struct {
+	// NatsUrl host:poort, bijvoorbeeld 192.168.113.153:4222; leeg is de standaard
+	NatsUrl string `json:"nats_url"`
+
+	// ServerUrl Bijvoorbeeld http://192.168.113.153:8080; leeg is de standaard
+	ServerUrl string `json:"server_url"`
+}
+
+// ApplyAgentEndpointsJSONBody defines parameters for ApplyAgentEndpoints.
+type ApplyAgentEndpointsJSONBody struct {
+	All         *bool                 `json:"all,omitempty"`
+	IncludeProd *bool                 `json:"include_prod,omitempty"`
+	NodeIds     *[]openapi_types.UUID `json:"node_ids,omitempty"`
+	TotpCode    *string               `json:"totp_code,omitempty"`
+}
+
 // SetAgentUpgradeAutoJSONBody defines parameters for SetAgentUpgradeAuto.
 type SetAgentUpgradeAutoJSONBody struct {
 	Enabled bool `json:"enabled"`
@@ -13703,7 +14131,9 @@ type SetAgentUpgradeAutoJSONBody struct {
 
 // SetAgentUpgradeProdAutoJSONBody defines parameters for SetAgentUpgradeProdAuto.
 type SetAgentUpgradeProdAutoJSONBody struct {
-	Enabled  bool    `json:"enabled"`
+	Enabled bool `json:"enabled"`
+
+	// TotpCode Wordt genegeerd
 	TotpCode *string `json:"totp_code,omitempty"`
 }
 
@@ -13934,6 +14364,37 @@ type GetDependencyGraphParams struct {
 
 // GetDependencyGraphParamsLevel defines parameters for GetDependencyGraph.
 type GetDependencyGraphParamsLevel string
+
+// GetDockerAllParams defines parameters for GetDockerAll.
+type GetDockerAllParams struct {
+	Path string `form:"path" json:"path"`
+
+	// Query JSON-object met queryvelden
+	Query *string `form:"query,omitempty" json:"query,omitempty"`
+
+	// Nodes Komma-lijst van node-ids; leeg is elke node
+	Nodes *string `form:"nodes,omitempty" json:"nodes,omitempty"`
+}
+
+// ListDockerHostsParams defines parameters for ListDockerHosts.
+type ListDockerHostsParams struct {
+	// Refresh Eerst de samenvattingen opnieuw lezen
+	Refresh *bool `form:"refresh,omitempty" json:"refresh,omitempty"`
+}
+
+// GetDockerApiParams defines parameters for GetDockerApi.
+type GetDockerApiParams struct {
+	Path string `form:"path" json:"path"`
+
+	// Query JSON-object met queryvelden, zoals {"all":"1"}
+	Query *string `form:"query,omitempty" json:"query,omitempty"`
+}
+
+// GetDockerStatsParams defines parameters for GetDockerStats.
+type GetDockerStatsParams struct {
+	// Containers Komma-lijst van ids of namen; leeg is elke draaiende container
+	Containers *string `form:"containers,omitempty" json:"containers,omitempty"`
+}
 
 // DeleteDocSummaryParams defines parameters for DeleteDocSummary.
 type DeleteDocSummaryParams struct {
@@ -14277,6 +14738,12 @@ type ListTestRunsParams struct {
 	Limit     *int                `form:"limit,omitempty" json:"limit,omitempty"`
 }
 
+// SetAgentEndpointsJSONRequestBody defines body for SetAgentEndpoints for application/json ContentType.
+type SetAgentEndpointsJSONRequestBody SetAgentEndpointsJSONBody
+
+// ApplyAgentEndpointsJSONRequestBody defines body for ApplyAgentEndpoints for application/json ContentType.
+type ApplyAgentEndpointsJSONRequestBody ApplyAgentEndpointsJSONBody
+
 // StartAgentUpgradesJSONRequestBody defines body for StartAgentUpgrades for application/json ContentType.
 type StartAgentUpgradesJSONRequestBody = AgentUpgradeInput
 
@@ -14517,6 +14984,12 @@ type UpdateDisasterScenarioJSONRequestBody = DisasterScenarioInput
 // RunDisasterScenarioJSONRequestBody defines body for RunDisasterScenario for application/json ContentType.
 type RunDisasterScenarioJSONRequestBody = DisasterRunInput
 
+// CallDockerApiJSONRequestBody defines body for CallDockerApi for application/json ContentType.
+type CallDockerApiJSONRequestBody = DockerCallInput
+
+// OpenDockerConsoleJSONRequestBody defines body for OpenDockerConsole for application/json ContentType.
+type OpenDockerConsoleJSONRequestBody = DockerConsoleInput
+
 // SaveDocsTargetJSONRequestBody defines body for SaveDocsTarget for application/json ContentType.
 type SaveDocsTargetJSONRequestBody = DocsTargetInput
 
@@ -14712,8 +15185,23 @@ type SetEnvUpdatePolicyJSONRequestBody = UpdatePolicyInput
 // UpdateVipJSONRequestBody defines body for UpdateVip for application/json ContentType.
 type UpdateVipJSONRequestBody = VipPatch
 
+// SetZabbixAgentNodesJSONRequestBody defines body for SetZabbixAgentNodes for application/json ContentType.
+type SetZabbixAgentNodesJSONRequestBody = ZabbixAgentNodesInput
+
+// UpdateZabbixAgentSettingsJSONRequestBody defines body for UpdateZabbixAgentSettings for application/json ContentType.
+type UpdateZabbixAgentSettingsJSONRequestBody = ZabbixAgentSettingsInput
+
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
+	// GetAgentEndpoints Op welk adres agents de server bereiken, en welke agents nog naar een ander adres wijzen
+	// (GET /agent-endpoints)
+	GetAgentEndpoints(w http.ResponseWriter, r *http.Request)
+	// SetAgentEndpoints Het adres voor agents instellen (admin); leeg is de standaard
+	// (PUT /agent-endpoints)
+	SetAgentEndpoints(w http.ResponseWriter, r *http.Request)
+	// ApplyAgentEndpoints Agents omzetten naar het adres voor agents (admin); één taak agents.reconfigure per cluster, één node tegelijk
+	// (POST /agent-endpoints/apply)
+	ApplyAgentEndpoints(w http.ResponseWriter, r *http.Request)
 	// ListAgentUpgrades Welke agents verouderd zijn en of ze vanzelf bijgewerkt worden
 	// (GET /agent-upgrades)
 	ListAgentUpgrades(w http.ResponseWriter, r *http.Request)
@@ -14858,6 +15346,9 @@ type ServerInterface interface {
 	// SetClusterAgentUpgradeAuto Agents vanzelf bijwerken op één cluster aan- of uitzetten (admin)
 	// (PUT /clusters/{clusterId}/agent-upgrade-auto)
 	SetClusterAgentUpgradeAuto(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
+	// GetClusterApps De stand van de apps van de template per node, en de opslag van SeaweedFS (fase 29)
+	// (GET /clusters/{clusterId}/apps)
+	GetClusterApps(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
 	// GetBackupPolicy Back-upbeleid van een cluster, of de standaard als het er nog geen heeft
 	// (GET /clusters/{clusterId}/backup-policy)
 	GetBackupPolicy(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID)
@@ -15188,6 +15679,24 @@ type ServerInterface interface {
 	// RunDisasterScenario Rampoefening starten (admin)
 	// (POST /disaster-scenarios/{scenarioId}/run)
 	RunDisasterScenario(w http.ResponseWriter, r *http.Request, scenarioId openapi_types.UUID)
+	// GetDockerAll Een lijst (containers, images, volumes, netwerken, system df, info) van elke node met Docker tegelijk (fase 28)
+	// (GET /docker/all)
+	GetDockerAll(w http.ResponseWriter, r *http.Request, params GetDockerAllParams)
+	// ListDockerHosts Elke node met Docker, met cluster, agent en de laatste samenvatting (fase 28)
+	// (GET /docker/hosts)
+	ListDockerHosts(w http.ResponseWriter, r *http.Request, params ListDockerHostsParams)
+	// GetDockerApi Een pad van de Docker-API lezen via de agent (fase 28)
+	// (GET /docker/nodes/{nodeId}/api)
+	GetDockerApi(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID, params GetDockerApiParams)
+	// CallDockerApi Iets aan Docker veranderen, als taak docker.action (admin, fase 28)
+	// (POST /docker/nodes/{nodeId}/calls)
+	CallDockerApi(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// OpenDockerConsole Een shell in een draaiende container openen (docker exec, admin, fase 28)
+	// (POST /docker/nodes/{nodeId}/console)
+	OpenDockerConsole(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID)
+	// GetDockerStats CPU, geheugen, netwerk en schijf van de draaiende containers van een node (fase 28)
+	// (GET /docker/nodes/{nodeId}/stats)
+	GetDockerStats(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID, params GetDockerStatsParams)
 	// ListDocs Alle documenten van de documentatie met hun nieuwste versie
 	// (GET /docs)
 	ListDocs(w http.ResponseWriter, r *http.Request)
@@ -15812,11 +16321,41 @@ type ServerInterface interface {
 	// UpdateVip VIP wijzigen (admin)
 	// (PATCH /vips/{vipId})
 	UpdateVip(w http.ResponseWriter, r *http.Request, vipId openapi_types.UUID)
+	// GetZabbixAgents Zabbix-agents op alle nodes
+	// (GET /zabbix-agents)
+	GetZabbixAgents(w http.ResponseWriter, r *http.Request)
+	// SetZabbixAgentNodes Zabbix-agent beheren, uitzetten of toepassen op nodes (admin)
+	// (POST /zabbix-agents/nodes)
+	SetZabbixAgentNodes(w http.ResponseWriter, r *http.Request)
+	// UpdateZabbixAgentSettings Zabbix-agent-instellingen bewaren (admin)
+	// (PUT /zabbix-agents/settings)
+	UpdateZabbixAgentSettings(w http.ResponseWriter, r *http.Request)
+	// TestZabbixAgentAPI De Zabbix API proberen met de bewaarde instellingen (admin)
+	// (POST /zabbix-agents/test)
+	TestZabbixAgentAPI(w http.ResponseWriter, r *http.Request)
 }
 
 // Unimplemented server implementation that returns http.StatusNotImplemented for each endpoint.
 
 type Unimplemented struct{}
+
+// GetAgentEndpoints Op welk adres agents de server bereiken, en welke agents nog naar een ander adres wijzen
+// (GET /agent-endpoints)
+func (_ Unimplemented) GetAgentEndpoints(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SetAgentEndpoints Het adres voor agents instellen (admin); leeg is de standaard
+// (PUT /agent-endpoints)
+func (_ Unimplemented) SetAgentEndpoints(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ApplyAgentEndpoints Agents omzetten naar het adres voor agents (admin); één taak agents.reconfigure per cluster, één node tegelijk
+// (POST /agent-endpoints/apply)
+func (_ Unimplemented) ApplyAgentEndpoints(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
 
 // ListAgentUpgrades Welke agents verouderd zijn en of ze vanzelf bijgewerkt worden
 // (GET /agent-upgrades)
@@ -16103,6 +16642,12 @@ func (_ Unimplemented) UpdateCluster(w http.ResponseWriter, r *http.Request, clu
 // SetClusterAgentUpgradeAuto Agents vanzelf bijwerken op één cluster aan- of uitzetten (admin)
 // (PUT /clusters/{clusterId}/agent-upgrade-auto)
 func (_ Unimplemented) SetClusterAgentUpgradeAuto(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetClusterApps De stand van de apps van de template per node, en de opslag van SeaweedFS (fase 29)
+// (GET /clusters/{clusterId}/apps)
+func (_ Unimplemented) GetClusterApps(w http.ResponseWriter, r *http.Request, clusterId openapi_types.UUID) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -16763,6 +17308,42 @@ func (_ Unimplemented) PreviewDisasterScenario(w http.ResponseWriter, r *http.Re
 // RunDisasterScenario Rampoefening starten (admin)
 // (POST /disaster-scenarios/{scenarioId}/run)
 func (_ Unimplemented) RunDisasterScenario(w http.ResponseWriter, r *http.Request, scenarioId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetDockerAll Een lijst (containers, images, volumes, netwerken, system df, info) van elke node met Docker tegelijk (fase 28)
+// (GET /docker/all)
+func (_ Unimplemented) GetDockerAll(w http.ResponseWriter, r *http.Request, params GetDockerAllParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// ListDockerHosts Elke node met Docker, met cluster, agent en de laatste samenvatting (fase 28)
+// (GET /docker/hosts)
+func (_ Unimplemented) ListDockerHosts(w http.ResponseWriter, r *http.Request, params ListDockerHostsParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetDockerApi Een pad van de Docker-API lezen via de agent (fase 28)
+// (GET /docker/nodes/{nodeId}/api)
+func (_ Unimplemented) GetDockerApi(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID, params GetDockerApiParams) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// CallDockerApi Iets aan Docker veranderen, als taak docker.action (admin, fase 28)
+// (POST /docker/nodes/{nodeId}/calls)
+func (_ Unimplemented) CallDockerApi(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// OpenDockerConsole Een shell in een draaiende container openen (docker exec, admin, fase 28)
+// (POST /docker/nodes/{nodeId}/console)
+func (_ Unimplemented) OpenDockerConsole(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// GetDockerStats CPU, geheugen, netwerk en schijf van de draaiende containers van een node (fase 28)
+// (GET /docker/nodes/{nodeId}/stats)
+func (_ Unimplemented) GetDockerStats(w http.ResponseWriter, r *http.Request, nodeId openapi_types.UUID, params GetDockerStatsParams) {
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
@@ -18014,6 +18595,30 @@ func (_ Unimplemented) UpdateVip(w http.ResponseWriter, r *http.Request, vipId o
 	w.WriteHeader(http.StatusNotImplemented)
 }
 
+// GetZabbixAgents Zabbix-agents op alle nodes
+// (GET /zabbix-agents)
+func (_ Unimplemented) GetZabbixAgents(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// SetZabbixAgentNodes Zabbix-agent beheren, uitzetten of toepassen op nodes (admin)
+// (POST /zabbix-agents/nodes)
+func (_ Unimplemented) SetZabbixAgentNodes(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// UpdateZabbixAgentSettings Zabbix-agent-instellingen bewaren (admin)
+// (PUT /zabbix-agents/settings)
+func (_ Unimplemented) UpdateZabbixAgentSettings(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
+// TestZabbixAgentAPI De Zabbix API proberen met de bewaarde instellingen (admin)
+// (POST /zabbix-agents/test)
+func (_ Unimplemented) TestZabbixAgentAPI(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusNotImplemented)
+}
+
 // ServerInterfaceWrapper converts contexts to parameters.
 type ServerInterfaceWrapper struct {
 	Handler            ServerInterface
@@ -18022,6 +18627,48 @@ type ServerInterfaceWrapper struct {
 }
 
 type MiddlewareFunc func(http.Handler) http.Handler
+
+// GetAgentEndpoints operation middleware
+func (siw *ServerInterfaceWrapper) GetAgentEndpoints(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetAgentEndpoints(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetAgentEndpoints operation middleware
+func (siw *ServerInterfaceWrapper) SetAgentEndpoints(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetAgentEndpoints(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ApplyAgentEndpoints operation middleware
+func (siw *ServerInterfaceWrapper) ApplyAgentEndpoints(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ApplyAgentEndpoints(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
 
 // ListAgentUpgrades operation middleware
 func (siw *ServerInterfaceWrapper) ListAgentUpgrades(w http.ResponseWriter, r *http.Request) {
@@ -19109,6 +19756,32 @@ func (siw *ServerInterfaceWrapper) SetClusterAgentUpgradeAuto(w http.ResponseWri
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.SetClusterAgentUpgradeAuto(w, r, clusterId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetClusterApps operation middleware
+func (siw *ServerInterfaceWrapper) GetClusterApps(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "clusterId" -------------
+	var clusterId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "clusterId", chi.URLParam(r, "clusterId"), &clusterId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "clusterId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetClusterApps(w, r, clusterId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -22399,6 +23072,247 @@ func (siw *ServerInterfaceWrapper) RunDisasterScenario(w http.ResponseWriter, r 
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RunDisasterScenario(w, r, scenarioId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetDockerAll operation middleware
+func (siw *ServerInterfaceWrapper) GetDockerAll(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetDockerAllParams
+
+	// ------------- Required query parameter "path" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "path", r.URL.Query(), &params.Path, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "path"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "path", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "query" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "query", r.URL.Query(), &params.Query, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "query"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "query", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "nodes" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "nodes", r.URL.Query(), &params.Nodes, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "nodes"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodes", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetDockerAll(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListDockerHosts operation middleware
+func (siw *ServerInterfaceWrapper) ListDockerHosts(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListDockerHostsParams
+
+	// ------------- Optional query parameter "refresh" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "refresh", r.URL.Query(), &params.Refresh, runtime.BindQueryParameterOptions{Type: "boolean", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "refresh"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "refresh", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListDockerHosts(w, r, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetDockerApi operation middleware
+func (siw *ServerInterfaceWrapper) GetDockerApi(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetDockerApiParams
+
+	// ------------- Required query parameter "path" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, true, "path", r.URL.Query(), &params.Path, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "path"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "path", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "query" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "query", r.URL.Query(), &params.Query, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "query"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "query", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetDockerApi(w, r, nodeId, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CallDockerApi operation middleware
+func (siw *ServerInterfaceWrapper) CallDockerApi(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CallDockerApi(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// OpenDockerConsole operation middleware
+func (siw *ServerInterfaceWrapper) OpenDockerConsole(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.OpenDockerConsole(w, r, nodeId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetDockerStats operation middleware
+func (siw *ServerInterfaceWrapper) GetDockerStats(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "nodeId" -------------
+	var nodeId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "nodeId", chi.URLParam(r, "nodeId"), &nodeId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: r.URL.RawPath == ""})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "nodeId", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params GetDockerStatsParams
+
+	// ------------- Optional query parameter "containers" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "containers", r.URL.Query(), &params.Containers, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "containers"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "containers", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetDockerStats(w, r, nodeId, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -28311,6 +29225,62 @@ func (siw *ServerInterfaceWrapper) UpdateVip(w http.ResponseWriter, r *http.Requ
 	handler.ServeHTTP(w, r)
 }
 
+// GetZabbixAgents operation middleware
+func (siw *ServerInterfaceWrapper) GetZabbixAgents(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetZabbixAgents(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetZabbixAgentNodes operation middleware
+func (siw *ServerInterfaceWrapper) SetZabbixAgentNodes(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetZabbixAgentNodes(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateZabbixAgentSettings operation middleware
+func (siw *ServerInterfaceWrapper) UpdateZabbixAgentSettings(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateZabbixAgentSettings(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// TestZabbixAgentAPI operation middleware
+func (siw *ServerInterfaceWrapper) TestZabbixAgentAPI(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.TestZabbixAgentAPI(w, r)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 type UnescapedCookieParamError struct {
 	ParamName string
 	Err       error
@@ -28950,6 +29920,9 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Post(options.BaseURL+"/node-links/{linkId}/ignore", wrapper.IgnoreNodeLink)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/clusters/{clusterId}/apps", wrapper.GetClusterApps)
+	})
+	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/clusters/{clusterId}/risk", wrapper.GetClusterRisk)
 	})
 	r.Group(func(r chi.Router) {
@@ -29118,6 +30091,18 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 		r.Get(options.BaseURL+"/soc", wrapper.GetSoc)
 	})
 	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/zabbix-agents", wrapper.GetZabbixAgents)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/zabbix-agents/settings", wrapper.UpdateZabbixAgentSettings)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/zabbix-agents/test", wrapper.TestZabbixAgentAPI)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/zabbix-agents/nodes", wrapper.SetZabbixAgentNodes)
+	})
+	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/crowdsec", wrapper.GetCrowdSec)
 	})
 	r.Group(func(r chi.Router) {
@@ -29167,6 +30152,24 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/pve-hosts/{nodeId}/hardware", wrapper.GetPveHostHardware)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/docker/hosts", wrapper.ListDockerHosts)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/docker/all", wrapper.GetDockerAll)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/docker/nodes/{nodeId}/api", wrapper.GetDockerApi)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/docker/nodes/{nodeId}/stats", wrapper.GetDockerStats)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/docker/nodes/{nodeId}/calls", wrapper.CallDockerApi)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/docker/nodes/{nodeId}/console", wrapper.OpenDockerConsole)
 	})
 	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/pve/datacenters", wrapper.ListPveDatacenters)
@@ -29353,6 +30356,15 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	})
 	r.Group(func(r chi.Router) {
 		r.Delete(options.BaseURL+"/agent-upgrades/prod-queue", wrapper.ClearAgentUpgradeProdQueue)
+	})
+	r.Group(func(r chi.Router) {
+		r.Get(options.BaseURL+"/agent-endpoints", wrapper.GetAgentEndpoints)
+	})
+	r.Group(func(r chi.Router) {
+		r.Put(options.BaseURL+"/agent-endpoints", wrapper.SetAgentEndpoints)
+	})
+	r.Group(func(r chi.Router) {
+		r.Post(options.BaseURL+"/agent-endpoints/apply", wrapper.ApplyAgentEndpoints)
 	})
 	r.Group(func(r chi.Router) {
 		r.Put(options.BaseURL+"/clusters/{clusterId}/agent-upgrade-auto", wrapper.SetClusterAgentUpgradeAuto)

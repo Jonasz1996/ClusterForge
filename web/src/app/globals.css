@@ -63,3 +63,9 @@ html[data-theme="dark"] {
     color: var(--color-slate-400);
   }
 }
+
+/* Een venster zonder inhoud (een kaart die niets te tonen heeft) neemt geen
+   plaats in het raster in. */
+.cf-tile:has(> .cf-tile-body:empty) {
+  display: none;
+}

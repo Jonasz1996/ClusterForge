@@ -5,6 +5,7 @@ import { useState } from "react";
 import { Alert, Card, cx } from "@/components/ui";
 import { ApiError } from "@/lib/api/client";
 import { metricsRanges, useMetrics, type Metrics, type MetricsRange } from "@/lib/inventory";
+import { TileButton, TileReset } from "@/components/Tiles";
 import { TimeChart } from "./TimeChart";
 
 // MetricsPanels toont de grafieken van een node of cluster, met een keuze van
@@ -60,6 +61,7 @@ export function MetricsView({
               ))}
             </div>
           )}
+          <TileButton />
         </div>
       </div>
       {disabled && (
@@ -71,6 +73,7 @@ export function MetricsView({
       {q.isError && !disabled && <Alert>{q.error instanceof Error ? q.error.message : "Grafieken laden mislukt"}</Alert>}
       {q.isLoading && <p className="text-sm text-slate-500">Laden…</p>}
       {q.data && (
+        <TileReset>
         <div className="grid gap-4 lg:grid-cols-2">
           {q.data.panels
             .filter((p) => p.series.length > 0 || p.id !== "temperature")
@@ -84,6 +87,7 @@ export function MetricsView({
               </Card>
             ))}
         </div>
+        </TileReset>
       )}
     </section>
   );

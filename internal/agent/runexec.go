@@ -171,6 +171,11 @@ func (r *RunExecutor) Main(ctx context.Context, id string) int {
 		if err != nil {
 			st.Error = err.Error()
 		}
+	case spec.Kind == protocol.RunDockerAPI:
+		exit, err = r.dockerAPIRun(rctx, spec.DockerAPI, out)
+		if err != nil {
+			st.Error = err.Error()
+		}
 	case spec.Kind == protocol.RunStack:
 		exit, err = r.stackRun(rctx, dir, spec.Stack, out, &st)
 		if err != nil {

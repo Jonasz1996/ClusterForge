@@ -727,6 +727,12 @@ func summary(r store.ListAuditRow, p map[string]any, n names, e Entry, spec even
 			return "Agents vanzelf bijwerken aangezet op cluster " + name
 		}
 		return "Agents vanzelf bijwerken uitgezet op cluster " + name
+	case "settings.agent_endpoints":
+		return "Adres voor agents gewijzigd: server " + or(str(p, "server_url"), "standaard") + ", NATS " + or(str(p, "nats_url"), "standaard")
+	case "node.agent_reconfigured":
+		return "Agent op " + str(p, "hostname") + " omgezet naar " + str(p, "nats_url") + paren(prefixed("server ", str(p, "server_url")))
+	case "node.agent_reconfigure_failed":
+		return "Agent op " + str(p, "hostname") + " omzetten mislukt, het oude adres blijft" + colon(str(p, "error"))
 	case "node.agent_upgrade_failed":
 		return "Agent op " + str(p, "hostname") + " bijwerken mislukt" + colon(str(p, "error"))
 	case "enrollment_token.created":

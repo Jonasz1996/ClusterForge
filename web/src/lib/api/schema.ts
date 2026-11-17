@@ -2901,6 +2901,25 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/clusters/{clusterId}/apps": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        /** De stand van de apps van de template per node, en de opslag van SeaweedFS (fase 29) */
+        get: operations["getClusterApps"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/clusters/{clusterId}/risk": {
         parameters: {
             query?: never;
@@ -3981,6 +4000,86 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/zabbix-agents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Zabbix-agents op alle nodes
+         * @description Instellingen en elke node met een agent met de stand van zabbix-agent2 en zijn PSK. Ook voor viewers.
+         */
+        get: operations["getZabbixAgents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/zabbix-agents/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Zabbix-agent-instellingen bewaren (admin)
+         * @description token weglaten laat het API-token staan; een lege string haalt het weg. Het token wordt versleuteld bewaard en
+         *     nooit teruggegeven. Agentonderhoud op prod vraagt geen TOTP-code.
+         */
+        put: operations["updateZabbixAgentSettings"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/zabbix-agents/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** De Zabbix API proberen met de bewaarde instellingen (admin) */
+        post: operations["testZabbixAgentAPI"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/zabbix-agents/nodes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Zabbix-agent beheren, uitzetten of toepassen op nodes (admin)
+         * @description action manage zet het beheer aan (en geeft een node zonder sleutel er een), unmanage stopt het (zabbix-agent2
+         *     blijft staan), apply zet zabbix-agent2 met de PSK op de node en meteen daarna de PSK bij de host in Zabbix,
+         *     rotate geeft de node een nieuwe sleutel en past toe. Ook op prod zonder TOTP-code (agentonderhoud).
+         */
+        post: operations["setZabbixAgentNodes"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/crowdsec": {
         parameters: {
             query?: never;
@@ -4270,6 +4369,130 @@ export interface paths {
         get: operations["getPveHostHardware"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/docker/hosts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Elke node met Docker, met cluster, agent en de laatste samenvatting (fase 28) */
+        get: operations["listDockerHosts"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/docker/all": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Een lijst (containers, images, volumes, netwerken, system df, info) van elke node met Docker tegelijk (fase 28) */
+        get: operations["getDockerAll"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/docker/nodes/{nodeId}/api": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        /**
+         * Een pad van de Docker-API lezen via de agent (fase 28)
+         * @description Alleen de paden uit pkg/protocol/docker.go. De agent praat met de lokale socket, nooit over TCP. Een kijker ziet
+         *     geen waarden van omgevingsvariabelen.
+         */
+        get: operations["getDockerApi"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/docker/nodes/{nodeId}/stats": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        /** CPU, geheugen, netwerk en schijf van de draaiende containers van een node (fase 28) */
+        get: operations["getDockerStats"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/docker/nodes/{nodeId}/calls": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Iets aan Docker veranderen, als taak docker.action (admin, fase 28)
+         * @description Alleen de aanroepen uit pkg/protocol/docker.go (starten, stoppen, verwijderen, pullen, opruimen, volumes en
+         *     netwerken). Verwijderen, hard stoppen en opruimen vragen confirm: de naam, of verwijderen bij meer dingen, of
+         *     opruimen.
+         */
+        post: operations["callDockerApi"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/docker/nodes/{nodeId}/console": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Een shell in een draaiende container openen (docker exec, admin, fase 28)
+         * @description Geeft een sessie terug; het verkeer loopt daarna over de websocket /api/v1/pve/console/{session}, zoals bij
+         *     Proxmox. Op een prodcluster vraagt het tweestapsverificatie (totp_code) of, zonder, het wachtwoord. Alleen het
+         *     openen komt in het logboek (docker.console_opened), niet wat je typt.
+         */
+        post: operations["openDockerConsole"];
         delete?: never;
         options?: never;
         head?: never;
@@ -5206,8 +5429,7 @@ export interface paths {
          * @description node_ids werkt die nodes bij, cluster_id elke verouderde agent van dat cluster, all elke verouderde agent buiten
          *     prod; all met include_prod ook die op prod. Per cluster één node tegelijk: de volgende pas als de vorige met de
          *     nieuwe agent terug is. Komt een node niet terug of zet hij de oude agent terug, dan stopt de taak van dat cluster.
-         *     Op prod vraagt het tweestapsverificatie en één code in totp_code voor de hele klik (of, voor één prodcluster, de
-         *     slug in confirm). Met include_prod starten de clusters buiten prod meteen; de prodclusters komen in een rij
+         *     Op prod vraagt het geen code of bevestiging meer (totp_code en confirm worden genegeerd). Met include_prod starten de clusters buiten prod meteen; de prodclusters komen in een rij
          *     (queued_prod) en gaan één voor één: het volgende pas als het vorige gelukt is, bij een fout stopt de rij. Een
          *     cluster waar al een taak loopt, staat in skipped; is er niets gestart of in de rij gezet, dan 409.
          */
@@ -5250,8 +5472,8 @@ export interface paths {
         /**
          * Agents op prod ook vanzelf bijwerken aan- of uitzetten (admin)
          * @description Aan werkt ClusterForge verouderde agents op prod ook vanzelf bij, één prodcluster tegelijk en één node tegelijk.
-         *     Mislukt een update op prod, dan staat het op prod stil tot die node met de knop bijgewerkt is. Aanzetten vraagt
-         *     tweestapsverificatie en een code in totp_code; uitzetten niet. Geldt alleen als vanzelf bijwerken (auto) aan staat.
+         *     Mislukt een update op prod, dan staat het op prod stil tot die node met de knop bijgewerkt is. Aan- en uitzetten
+         *     vraagt geen code (totp_code wordt genegeerd). Geldt alleen als vanzelf bijwerken (auto) aan staat.
          */
         put: operations["setAgentUpgradeProdAuto"];
         post?: never;
@@ -5276,6 +5498,57 @@ export interface paths {
          * @description Haalt de prodclusters die nog niet begonnen zijn uit de rij. Een taak die al loopt, annuleer je bij Taken.
          */
         delete: operations["clearAgentUpgradeProdQueue"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agent-endpoints": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Op welk adres agents de server bereiken, en welke agents nog naar een ander adres wijzen
+         * @description server_url is het adres in het installcommando en voor het downloaden van nieuwe agents; nats_url het adres
+         *     waarmee agents verbinden. Zonder instelling is dat het interne adres uit CF_NATS_ADVERTISE (met de poort van de
+         *     webserver), niet de naam achter een reverse proxy. Is ook dat er niet, dan is server_url leeg en gebruikt de
+         *     webinterface zijn eigen adres. Per agent (vanaf protocol 47) de adressen uit zijn agent.json. Ook voor viewers.
+         */
+        get: operations["getAgentEndpoints"];
+        /**
+         * Het adres voor agents instellen (admin); leeg is de standaard
+         * @description Verandert het installcommando en nieuwe aanmeldingen meteen. Bestaande agents blijven op hun adres tot je ze
+         *     omzet (POST /agent-endpoints/apply).
+         */
+        put: operations["setAgentEndpoints"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/agent-endpoints/apply": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Agents omzetten naar het adres voor agents (admin); één taak agents.reconfigure per cluster, één node tegelijk
+         * @description node_ids zet die nodes om, all elke afwijkende agent buiten prod, met include_prod ook die op prod. De agent test
+         *     het nieuwe adres eerst (NATS met zijn eigen sleutel, /api/v1/health over http) en zet zijn oude agent.json terug als
+         *     hij na de herstart de server niet bereikt. Per cluster één node tegelijk; mislukt er een, dan stopt de taak van dat
+         *     cluster en blijven de andere op hun oude adres. Op prod vraagt het tweestapsverificatie en een code in totp_code.
+         */
+        post: operations["applyAgentEndpoints"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -11414,6 +11687,79 @@ export interface components {
             max: number;
             reason: string;
         };
+        ClusterApps: {
+            apps: components["schemas"]["ClusterApp"][];
+            storage?: components["schemas"]["AppStorage"];
+        };
+        AppIssue: {
+            /** @enum {string} */
+            tone: "red" | "amber";
+            title: string;
+            detail?: string;
+        };
+        ClusterApp: {
+            app: string;
+            title: string;
+            nodes: components["schemas"]["NodeAppStatus"][];
+            issues: components["schemas"]["AppIssue"][];
+        };
+        NodeAppStatus: {
+            /** Format: uuid */
+            node_id: string;
+            hostname: string;
+            online: boolean;
+            /** @description Ouder dan 10 minuten of de agent antwoordt niet */
+            stale: boolean;
+            app: string;
+            title?: string;
+            /** @description De gebouwde commit */
+            version?: string;
+            /** @description De gekozen versie (branch */
+            ref?: string;
+            /** @description actief, stand-by of voor-overstap */
+            role?: string;
+            /** Format: date-time */
+            updated_at: string;
+            checks: {
+                id: string;
+                label: string;
+                ok: boolean;
+                severity?: string;
+                detail?: string;
+            }[];
+            values: {
+                id: string;
+                label: string;
+                value: string;
+                /** Format: int64 */
+                bytes?: number;
+            }[];
+        };
+        AppStorage: {
+            leader?: string;
+            volume_count: number;
+            under_replicated: number;
+            under_replicated_ids?: number[];
+            /**
+             * Format: int64
+             * @description Elk volume één keer geteld
+             */
+            logical_bytes: number;
+            replications?: {
+                [key: string]: number;
+            };
+            nodes: {
+                hostname: string;
+                /** Format: int64 */
+                bytes: number;
+                /** Format: int64 */
+                disk_total: number;
+                /** Format: int64 */
+                disk_free: number;
+                volumes: number;
+            }[];
+            issues: components["schemas"]["AppIssue"][];
+        };
         ClusterRisk: {
             score: number | null;
             /** @description A tot F; leeg zonder score */
@@ -12680,10 +13026,54 @@ export interface components {
             all?: boolean;
             /** @description Met all: ook de agents op prod, één prodcluster na het andere */
             include_prod?: boolean;
-            /** @description Code van tweestapsverificatie; één code bevestigt alle prodnodes van deze klik */
+            /** @description Wordt genegeerd: agents op prod bijwerken vraagt geen code meer */
             totp_code?: string;
-            /** @description De slug van het prodcluster */
+            /** @description Wordt genegeerd: agents op prod bijwerken vraagt geen bevestiging meer */
             confirm?: string;
+        };
+        AgentEndpointsOverview: {
+            /** @description Het adres in het installcommando; leeg is het adres van de webinterface */
+            server_url: string;
+            /** @enum {string} */
+            server_source: "setting" | "advertise" | "request";
+            nats_url: string;
+            /** @enum {string} */
+            nats_source: "setting" | "advertise" | "request";
+            server_setting: string;
+            nats_setting: string;
+            /** @description Het adres zonder instelling (uit CF_NATS_ADVERTISE); leeg als er geen is */
+            server_default: string;
+            nats_default: string;
+            /** @description Het agentprotocol vanaf waar agents zich laten omzetten */
+            protocol: number;
+            agents: components["schemas"]["AgentEndpointAgent"][];
+            running: {
+                /** Format: uuid */
+                cluster_id: string | null;
+                /** Format: uuid */
+                job_id: string;
+            }[];
+        };
+        AgentEndpointAgent: {
+            /** Format: uuid */
+            node_id: string;
+            hostname: string;
+            /** Format: uuid */
+            cluster_id: string | null;
+            cluster_name: string;
+            cluster_slug: string;
+            cluster_environment: string;
+            protocol: number;
+            server_url: string;
+            nats_url: string;
+            online: boolean;
+            /**
+             * @description current: wijst naar het adres voor agents. differs: wijst naar een ander adres. failed: de vorige omzetting
+             *     werd op de node teruggezet. manual: ouder dan protocol 47, eerst bijwerken. unknown: meldde zijn adressen nog niet.
+             * @enum {string}
+             */
+            state: "current" | "differs" | "failed" | "manual" | "unknown";
+            why: string;
         };
         AgentUpgradeStarted: {
             jobs: components["schemas"]["Job"][];
@@ -13477,6 +13867,98 @@ export interface components {
             /** @description null als er op geen node iets verandert */
             job: components["schemas"]["Job"] | null;
         };
+        ZabbixAgentSettings: {
+            /** @description Elke node met een agent krijgt vanzelf zabbix-agent2 */
+            auto_apply: boolean;
+            /** @description Ook nodes van prod-clusters */
+            auto_prod: boolean;
+            /** @description Server= in zabbix_agent2.conf */
+            server: string;
+            /** @description ServerActive= in zabbix_agent2.conf */
+            server_active: string;
+            /** @description Versie van de Zabbix-repository */
+            version: string;
+            host_metadata: string;
+            /** @description Adres van api_jsonrpc.php */
+            api_url: string;
+            /** @description Groep voor hosts die ClusterForge aanmaakt */
+            host_group: string;
+            templates: string[];
+            /** @description Extra template voor nodes met Docker */
+            docker_template: string;
+            /** @description Proxy voor nieuwe hosts; leeg is de server */
+            proxy: string;
+            token_set: boolean;
+            /** @description De server heeft een masterkey om sleutels te bewaren */
+            available: boolean;
+            /** Format: date-time */
+            updated_at: string;
+        };
+        ZabbixAgentSettingsInput: {
+            auto_apply: boolean;
+            auto_prod: boolean;
+            server: string;
+            server_active: string;
+            version: string;
+            host_metadata: string;
+            api_url: string;
+            host_group: string;
+            templates: string[];
+            docker_template: string;
+            proxy: string;
+            /** @description Weglaten laat het token staan; leeg haalt het weg */
+            token?: string;
+        };
+        ZabbixAgentNode: {
+            /** Format: uuid */
+            node_id: string;
+            hostname: string;
+            ip: string;
+            /** Format: uuid */
+            cluster_id: string | null;
+            cluster_name: string;
+            cluster_environment: string;
+            online: boolean;
+            supported: boolean;
+            docker: boolean;
+            /** @description Stand van zabbix-agent2 uit de heartbeat; leeg als hij er niet is */
+            agent_service: string;
+            enabled: boolean;
+            managed: boolean;
+            psk_identity: string;
+            /** Format: date-time */
+            psk_created_at: string | null;
+            /** Format: date-time */
+            applied_at: string | null;
+            /** Format: uuid */
+            apply_job_id: string | null;
+            apply_running: boolean;
+            apply_error: string;
+            /** Format: date-time */
+            apply_failed_at: string | null;
+            zabbix_host_id: string;
+            pending: boolean;
+        };
+        ZabbixAgentsOverview: {
+            settings: components["schemas"]["ZabbixAgentSettings"];
+            nodes: components["schemas"]["ZabbixAgentNode"][];
+        };
+        ZabbixAgentTestResult: {
+            ok: boolean;
+            version: string;
+            message: string;
+        };
+        ZabbixAgentNodesInput: {
+            /** @enum {string} */
+            action: "manage" | "unmanage" | "apply" | "rotate";
+            node_ids?: string[];
+            /** @description Alle nodes die nog niet toegepast zijn (apply) of alle nodes */
+            all?: boolean;
+        };
+        ZabbixAgentNodesResult: {
+            jobs: string[];
+            skipped: string[];
+        };
         CrowdSecSettings: {
             auto_apply: boolean;
             bouncer_default: boolean;
@@ -13871,6 +14353,17 @@ export interface components {
             /** @description ClusterForge zette deze ban ook op andere nodes */
             shared: boolean;
         };
+        /** @description Een object van Docker zoals Portainer (fase 28); de velden staan in web/src/lib/docker.ts. */
+        DockerObject: {
+            [key: string]: unknown;
+        };
+        DockerCallInput: {
+            /** @description Aanroepen {method, path, query, body} die na elkaar lopen */
+            calls: components["schemas"]["DockerObject"][];
+            title?: string;
+            /** @description Wat overgetikt moet worden bij verwijderen, hard stoppen of opruimen */
+            confirm?: string;
+        };
         /** @description Een object van de Proxmox-hosts (fase 17); de velden staan in web/src/lib/pvehosts.ts en pkg/protocol/pve.go. */
         PveObject: {
             [key: string]: unknown;
@@ -13932,6 +14425,23 @@ export interface components {
             vmid?: number;
             cols?: number;
             rows?: number;
+        };
+        DockerConsoleInput: {
+            /** @description Id of naam van de container */
+            container: string;
+            /**
+             * @default auto
+             * @enum {string}
+             */
+            shell: "auto" | "sh" | "bash";
+            /** @description Gebruiker in de container; leeg is wat het image zegt */
+            user?: string;
+            cols?: number;
+            rows?: number;
+            /** @description Op prod, als je geen tweestapsverificatie hebt */
+            password?: string;
+            /** @description Op prod: je code van tweestapsverificatie */
+            totp_code?: string;
         };
         PveConsoleOpened: {
             session: string;
@@ -18938,6 +19448,30 @@ export interface operations {
             409: components["responses"]["Error"];
         };
     };
+    getClusterApps: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                clusterId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ClusterApps"];
+                };
+            };
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
     getClusterRisk: {
         parameters: {
             query?: never;
@@ -20505,6 +21039,104 @@ export interface operations {
             401: components["responses"]["Error"];
         };
     };
+    getZabbixAgents: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ZabbixAgentsOverview"];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    updateZabbixAgentSettings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ZabbixAgentSettingsInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ZabbixAgentSettings"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+        };
+    };
+    testZabbixAgentAPI: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ZabbixAgentTestResult"];
+                };
+            };
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+        };
+    };
+    setZabbixAgentNodes: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ZabbixAgentNodesInput"];
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ZabbixAgentNodesResult"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+        };
+    };
     getCrowdSec: {
         parameters: {
             query?: never;
@@ -20958,6 +21590,178 @@ export interface operations {
             401: components["responses"]["Error"];
             404: components["responses"]["Error"];
             502: components["responses"]["Error"];
+        };
+    };
+    listDockerHosts: {
+        parameters: {
+            query?: {
+                /** @description Eerst de samenvattingen opnieuw lezen */
+                refresh?: boolean;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description De nodes; velden in web/src/lib/docker.ts en internal/dockerhost */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DockerObject"];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    getDockerAll: {
+        parameters: {
+            query: {
+                path: string;
+                /** @description JSON-object met queryvelden */
+                query?: string;
+                /** @description Komma-lijst van node-ids; leeg is elke node */
+                nodes?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Per node {node_id, hostname, data, error} onder results */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DockerObject"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+        };
+    };
+    getDockerApi: {
+        parameters: {
+            query: {
+                path: string;
+                /** @description JSON-object met queryvelden, zoals {"all":"1"} */
+                query?: string;
+            };
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Het antwoord van Docker onder data */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DockerObject"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+        };
+    };
+    getDockerStats: {
+        parameters: {
+            query?: {
+                /** @description Komma-lijst van ids of namen; leeg is elke draaiende container */
+                containers?: string;
+            };
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description De metingen onder stats */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DockerObject"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+        };
+    };
+    callDockerApi: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DockerCallInput"];
+            };
+        };
+        responses: {
+            /** @description Taak aangemaakt */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Job"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+        };
+    };
+    openDockerConsole: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DockerConsoleInput"];
+            };
+        };
+        responses: {
+            /** @description Sessie klaar */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PveConsoleOpened"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            409: components["responses"]["Error"];
         };
     };
     listPveDatacenters: {
@@ -22568,6 +23372,7 @@ export interface operations {
             content: {
                 "application/json": {
                     enabled: boolean;
+                    /** @description Wordt genegeerd */
                     totp_code?: string;
                 };
             };
@@ -22609,6 +23414,93 @@ export interface operations {
             };
             401: components["responses"]["Error"];
             403: components["responses"]["Error"];
+        };
+    };
+    getAgentEndpoints: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentEndpointsOverview"];
+                };
+            };
+            401: components["responses"]["Error"];
+        };
+    };
+    setAgentEndpoints: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    /** @description Bijvoorbeeld http://192.168.113.153:8080; leeg is de standaard */
+                    server_url: string;
+                    /** @description host:poort, bijvoorbeeld 192.168.113.153:4222; leeg is de standaard */
+                    nats_url: string;
+                };
+            };
+        };
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentEndpointsOverview"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+        };
+    };
+    applyAgentEndpoints: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": {
+                    node_ids?: string[];
+                    all?: boolean;
+                    include_prod?: boolean;
+                    totp_code?: string;
+                };
+            };
+        };
+        responses: {
+            /** @description Taken aangemaakt */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentUpgradeStarted"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            409: components["responses"]["Error"];
+            429: components["responses"]["Error"];
         };
     };
     setClusterAgentUpgradeAuto: {

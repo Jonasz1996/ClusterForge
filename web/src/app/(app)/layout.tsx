@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState, type ReactNode } from "react";
 import { ConfirmHost } from "@/components/Confirm";
 import { CommandPalette } from "@/components/shell/CommandPalette";
+import { SectionTabs } from "@/components/shell/SectionTabs";
 import { MenuIcon, MoonIcon, SearchIcon, SunIcon, SystemIcon } from "@/components/shell/icons";
 import { Sidebar } from "@/components/shell/Sidebar";
 import { ToastHost } from "@/components/Toast";
@@ -15,6 +16,7 @@ import { useLiveUpdates } from "@/lib/live";
 import { titleFor } from "@/lib/nav";
 import { useTheme, type Theme } from "@/lib/theme";
 import { useReloadOnStaleChunks, useServerUpdated } from "@/lib/version";
+import { useAgentEndpoints } from "@/lib/agentEndpoints";
 
 const themeNext: Record<Theme, Theme> = { system: "light", light: "dark", dark: "system" };
 const themeLabel: Record<Theme, string> = { system: "Thema: zoals het systeem", light: "Thema: licht", dark: "Thema: donker" };
@@ -22,6 +24,8 @@ const themeIcon: Record<Theme, ReactNode> = { system: <SystemIcon />, light: <Su
 
 export default function AppLayout({ children }: { children: ReactNode }) {
   const me = useRequireMe();
+  // Het adres voor agents, voor elk installcommando in de interface.
+  useAgentEndpoints(!!me.data);
   const logout = useLogout();
   const pathname = usePathname();
   useLiveUpdates(!!me.data);
@@ -182,9 +186,10 @@ export default function AppLayout({ children }: { children: ReactNode }) {
             </button>
           </div>
         )}
-        {/* De graaf van Afhankelijkheden krijgt de volle breedte. */}
+        {/* De graaf van Afhankelijkheden krijgt de volle breedte; een pagina
+            met vensters (fase 30) ook bijna. */}
         <main
-          className={`mx-auto w-full flex-1 px-4 py-6 sm:px-6 sm:py-8 print:max-w-none print:p-0 ${
+          className={`mx-auto w-full flex-1 px-4 py-6 sm:px-6 sm:py-8 has-[.cf-tilegrid]:max-w-[110rem] print:max-w-none print:p-0 ${
             pathname.startsWith("/afhankelijkheden")
               ? "max-w-[100rem]"
               : pathname.startsWith("/documentatie") || pathname.startsWith("/rapporten") || pathname.startsWith("/logs")
@@ -192,6 +197,7 @@ export default function AppLayout({ children }: { children: ReactNode }) {
                 : "max-w-5xl"
           }`}
         >
+          <SectionTabs pathname={pathname} isAdmin={isAdmin} />
           {children}
         </main>
       </div>

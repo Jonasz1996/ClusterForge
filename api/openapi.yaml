@@ -3087,6 +3087,20 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "409": { $ref: "#/components/responses/Error" }
+  /clusters/{clusterId}/apps:
+    parameters:
+      - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getClusterApps
+      summary: De stand van de apps van de template per node, en de opslag van SeaweedFS (fase 29)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ClusterApps" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
   /clusters/{clusterId}/risk:
     parameters:
       - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -4254,6 +4268,74 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/SocOverview" }
         "401": { $ref: "#/components/responses/Error" }
+  /zabbix-agents:
+    get:
+      operationId: getZabbixAgents
+      summary: Zabbix-agents op alle nodes
+      description: Instellingen en elke node met een agent met de stand van zabbix-agent2 en zijn PSK. Ook voor viewers.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ZabbixAgentsOverview" }
+        "401": { $ref: "#/components/responses/Error" }
+  /zabbix-agents/settings:
+    put:
+      operationId: updateZabbixAgentSettings
+      summary: Zabbix-agent-instellingen bewaren (admin)
+      description: |
+        token weglaten laat het API-token staan; een lege string haalt het weg. Het token wordt versleuteld bewaard en
+        nooit teruggegeven. Agentonderhoud op prod vraagt geen TOTP-code.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ZabbixAgentSettingsInput" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ZabbixAgentSettings" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /zabbix-agents/test:
+    post:
+      operationId: testZabbixAgentAPI
+      summary: De Zabbix API proberen met de bewaarde instellingen (admin)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ZabbixAgentTestResult" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /zabbix-agents/nodes:
+    post:
+      operationId: setZabbixAgentNodes
+      summary: Zabbix-agent beheren, uitzetten of toepassen op nodes (admin)
+      description: |
+        action manage zet het beheer aan (en geeft een node zonder sleutel er een), unmanage stopt het (zabbix-agent2
+        blijft staan), apply zet zabbix-agent2 met de PSK op de node en meteen daarna de PSK bij de host in Zabbix,
+        rotate geeft de node een nieuwe sleutel en past toe. Ook op prod zonder TOTP-code (agentonderhoud).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ZabbixAgentNodesInput" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ZabbixAgentNodesResult" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
   /crowdsec:
     get:
       operationId: getCrowdSec
@@ -4566,6 +4648,126 @@ paths:
         "401": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "502": { $ref: "#/components/responses/Error" }
+  /docker/hosts:
+    get:
+      operationId: listDockerHosts
+      summary: Elke node met Docker, met cluster, agent en de laatste samenvatting (fase 28)
+      parameters:
+        - { name: refresh, in: query, required: false, description: Eerst de samenvattingen opnieuw lezen, schema: { type: boolean } }
+      responses:
+        "200":
+          description: De nodes; velden in web/src/lib/docker.ts en internal/dockerhost
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DockerObject" }
+        "401": { $ref: "#/components/responses/Error" }
+  /docker/all:
+    get:
+      operationId: getDockerAll
+      summary: Een lijst (containers, images, volumes, netwerken, system df, info) van elke node met Docker tegelijk (fase 28)
+      parameters:
+        - { name: path, in: query, required: true, schema: { type: string } }
+        - { name: query, in: query, required: false, description: JSON-object met queryvelden, schema: { type: string } }
+        - { name: nodes, in: query, required: false, description: Komma-lijst van node-ids; leeg is elke node, schema: { type: string } }
+      responses:
+        "200":
+          description: "Per node {node_id, hostname, data, error} onder results"
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DockerObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+  /docker/nodes/{nodeId}/api:
+    parameters:
+      - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getDockerApi
+      summary: Een pad van de Docker-API lezen via de agent (fase 28)
+      description: |
+        Alleen de paden uit pkg/protocol/docker.go. De agent praat met de lokale socket, nooit over TCP. Een kijker ziet
+        geen waarden van omgevingsvariabelen.
+      parameters:
+        - { name: path, in: query, required: true, schema: { type: string } }
+        - { name: query, in: query, required: false, description: "JSON-object met queryvelden, zoals {\"all\":\"1\"}", schema: { type: string } }
+      responses:
+        "200":
+          description: Het antwoord van Docker onder data
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DockerObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+  /docker/nodes/{nodeId}/stats:
+    parameters:
+      - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+    get:
+      operationId: getDockerStats
+      summary: CPU, geheugen, netwerk en schijf van de draaiende containers van een node (fase 28)
+      parameters:
+        - { name: containers, in: query, required: false, description: Komma-lijst van ids of namen; leeg is elke draaiende container, schema: { type: string } }
+      responses:
+        "200":
+          description: De metingen onder stats
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/DockerObject" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+  /docker/nodes/{nodeId}/calls:
+    parameters:
+      - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: callDockerApi
+      summary: Iets aan Docker veranderen, als taak docker.action (admin, fase 28)
+      description: |
+        Alleen de aanroepen uit pkg/protocol/docker.go (starten, stoppen, verwijderen, pullen, opruimen, volumes en
+        netwerken). Verwijderen, hard stoppen en opruimen vragen confirm: de naam, of verwijderen bij meer dingen, of
+        opruimen.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DockerCallInput" }
+      responses:
+        "202":
+          description: Taak aangemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /docker/nodes/{nodeId}/console:
+    parameters:
+      - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: openDockerConsole
+      summary: Een shell in een draaiende container openen (docker exec, admin, fase 28)
+      description: |
+        Geeft een sessie terug; het verkeer loopt daarna over de websocket /api/v1/pve/console/{session}, zoals bij
+        Proxmox. Op een prodcluster vraagt het tweestapsverificatie (totp_code) of, zonder, het wachtwoord. Alleen het
+        openen komt in het logboek (docker.console_opened), niet wat je typt.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/DockerConsoleInput" }
+      responses:
+        "201":
+          description: Sessie klaar
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveConsoleOpened" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
   /pve/datacenters:
     get:
       operationId: listPveDatacenters
@@ -5574,8 +5776,7 @@ paths:
         node_ids werkt die nodes bij, cluster_id elke verouderde agent van dat cluster, all elke verouderde agent buiten
         prod; all met include_prod ook die op prod. Per cluster één node tegelijk: de volgende pas als de vorige met de
         nieuwe agent terug is. Komt een node niet terug of zet hij de oude agent terug, dan stopt de taak van dat cluster.
-        Op prod vraagt het tweestapsverificatie en één code in totp_code voor de hele klik (of, voor één prodcluster, de
-        slug in confirm). Met include_prod starten de clusters buiten prod meteen; de prodclusters komen in een rij
+        Op prod vraagt het geen code of bevestiging meer (totp_code en confirm worden genegeerd). Met include_prod starten de clusters buiten prod meteen; de prodclusters komen in een rij
         (queued_prod) en gaan één voor één: het volgende pas als het vorige gelukt is, bij een fout stopt de rij. Een
         cluster waar al een taak loopt, staat in skipped; is er niets gestart of in de rij gezet, dan 409.
       requestBody:
@@ -5624,8 +5825,8 @@ paths:
       summary: Agents op prod ook vanzelf bijwerken aan- of uitzetten (admin)
       description: |
         Aan werkt ClusterForge verouderde agents op prod ook vanzelf bij, één prodcluster tegelijk en één node tegelijk.
-        Mislukt een update op prod, dan staat het op prod stil tot die node met de knop bijgewerkt is. Aanzetten vraagt
-        tweestapsverificatie en een code in totp_code; uitzetten niet. Geldt alleen als vanzelf bijwerken (auto) aan staat.
+        Mislukt een update op prod, dan staat het op prod stil tot die node met de knop bijgewerkt is. Aan- en uitzetten
+        vraagt geen code (totp_code wordt genegeerd). Geldt alleen als vanzelf bijwerken (auto) aan staat.
       requestBody:
         required: true
         content:
@@ -5635,7 +5836,7 @@ paths:
               required: [enabled]
               properties:
                 enabled: { type: boolean }
-                totp_code: { type: string }
+                totp_code: { type: string, description: Wordt genegeerd }
       responses:
         "200":
           description: OK
@@ -5660,6 +5861,78 @@ paths:
               schema: { $ref: "#/components/schemas/AgentUpgradeOverview" }
         "401": { $ref: "#/components/responses/Error" }
         "403": { $ref: "#/components/responses/Error" }
+  /agent-endpoints:
+    get:
+      operationId: getAgentEndpoints
+      summary: Op welk adres agents de server bereiken, en welke agents nog naar een ander adres wijzen
+      description: |
+        server_url is het adres in het installcommando en voor het downloaden van nieuwe agents; nats_url het adres
+        waarmee agents verbinden. Zonder instelling is dat het interne adres uit CF_NATS_ADVERTISE (met de poort van de
+        webserver), niet de naam achter een reverse proxy. Is ook dat er niet, dan is server_url leeg en gebruikt de
+        webinterface zijn eigen adres. Per agent (vanaf protocol 47) de adressen uit zijn agent.json. Ook voor viewers.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentEndpointsOverview" }
+        "401": { $ref: "#/components/responses/Error" }
+    put:
+      operationId: setAgentEndpoints
+      summary: Het adres voor agents instellen (admin); leeg is de standaard
+      description: |
+        Verandert het installcommando en nieuwe aanmeldingen meteen. Bestaande agents blijven op hun adres tot je ze
+        omzet (POST /agent-endpoints/apply).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [server_url, nats_url]
+              properties:
+                server_url: { type: string, description: "Bijvoorbeeld http://192.168.113.153:8080; leeg is de standaard" }
+                nats_url: { type: string, description: "host:poort, bijvoorbeeld 192.168.113.153:4222; leeg is de standaard" }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentEndpointsOverview" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+  /agent-endpoints/apply:
+    post:
+      operationId: applyAgentEndpoints
+      summary: Agents omzetten naar het adres voor agents (admin); één taak agents.reconfigure per cluster, één node tegelijk
+      description: |
+        node_ids zet die nodes om, all elke afwijkende agent buiten prod, met include_prod ook die op prod. De agent test
+        het nieuwe adres eerst (NATS met zijn eigen sleutel, /api/v1/health over http) en zet zijn oude agent.json terug als
+        hij na de herstart de server niet bereikt. Per cluster één node tegelijk; mislukt er een, dan stopt de taak van dat
+        cluster en blijven de andere op hun oude adres. Op prod vraagt het tweestapsverificatie en een code in totp_code.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                node_ids: { type: array, items: { type: string, format: uuid } }
+                all: { type: boolean }
+                include_prod: { type: boolean }
+                totp_code: { type: string }
+      responses:
+        "202":
+          description: Taken aangemaakt
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AgentUpgradeStarted" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
   /clusters/{clusterId}/agent-upgrade-auto:
     parameters:
       - { name: clusterId, in: path, required: true, schema: { type: string, format: uuid } }
@@ -11932,6 +12205,96 @@ components:
       properties:
         max: { type: integer }
         reason: { type: string }
+    ClusterApps:
+      type: object
+      required: [apps]
+      properties:
+        apps:
+          type: array
+          items: { $ref: "#/components/schemas/ClusterApp" }
+        storage: { $ref: "#/components/schemas/AppStorage" }
+    AppIssue:
+      type: object
+      required: [tone, title]
+      properties:
+        tone: { type: string, enum: [red, amber] }
+        title: { type: string }
+        detail: { type: string }
+    ClusterApp:
+      type: object
+      required: [app, title, nodes, issues]
+      properties:
+        app: { type: string }
+        title: { type: string }
+        nodes:
+          type: array
+          items: { $ref: "#/components/schemas/NodeAppStatus" }
+        issues:
+          type: array
+          items: { $ref: "#/components/schemas/AppIssue" }
+    NodeAppStatus:
+      type: object
+      required: [node_id, hostname, online, stale, app, updated_at, checks, values]
+      properties:
+        node_id: { type: string, format: uuid }
+        hostname: { type: string }
+        online: { type: boolean }
+        stale: { type: boolean, description: Ouder dan 10 minuten of de agent antwoordt niet }
+        app: { type: string }
+        title: { type: string }
+        version: { type: string, description: De gebouwde commit }
+        ref: { type: string, description: De gekozen versie (branch, tag of commit) }
+        role: { type: string, description: "actief, stand-by of voor-overstap" }
+        updated_at: { type: string, format: date-time }
+        checks:
+          type: array
+          items:
+            type: object
+            required: [id, label, ok]
+            properties:
+              id: { type: string }
+              label: { type: string }
+              ok: { type: boolean }
+              severity: { type: string }
+              detail: { type: string }
+        values:
+          type: array
+          items:
+            type: object
+            required: [id, label, value]
+            properties:
+              id: { type: string }
+              label: { type: string }
+              value: { type: string }
+              bytes: { type: integer, format: int64 }
+    AppStorage:
+      type: object
+      required: [volume_count, under_replicated, logical_bytes, nodes, issues]
+      properties:
+        leader: { type: string }
+        volume_count: { type: integer }
+        under_replicated: { type: integer }
+        under_replicated_ids:
+          type: array
+          items: { type: integer }
+        logical_bytes: { type: integer, format: int64, description: Elk volume één keer geteld }
+        replications:
+          type: object
+          additionalProperties: { type: integer }
+        nodes:
+          type: array
+          items:
+            type: object
+            required: [hostname, bytes, disk_total, disk_free, volumes]
+            properties:
+              hostname: { type: string }
+              bytes: { type: integer, format: int64 }
+              disk_total: { type: integer, format: int64 }
+              disk_free: { type: integer, format: int64 }
+              volumes: { type: integer }
+        issues:
+          type: array
+          items: { $ref: "#/components/schemas/AppIssue" }
     ClusterRisk:
       type: object
       required: [score, grade, cards, computed_at]
@@ -13342,8 +13705,51 @@ components:
         cluster_id: { type: string, format: uuid }
         all: { type: boolean }
         include_prod: { type: boolean, description: "Met all: ook de agents op prod, één prodcluster na het andere" }
-        totp_code: { type: string, description: "Code van tweestapsverificatie; één code bevestigt alle prodnodes van deze klik" }
-        confirm: { type: string, description: De slug van het prodcluster, ter bevestiging (alleen voor één prodcluster) }
+        totp_code: { type: string, description: "Wordt genegeerd: agents op prod bijwerken vraagt geen code meer" }
+        confirm: { type: string, description: "Wordt genegeerd: agents op prod bijwerken vraagt geen bevestiging meer" }
+    AgentEndpointsOverview:
+      type: object
+      required: [server_url, server_source, nats_url, nats_source, server_setting, nats_setting, server_default, nats_default, protocol, agents, running]
+      properties:
+        server_url: { type: string, description: Het adres in het installcommando; leeg is het adres van de webinterface }
+        server_source: { type: string, enum: [setting, advertise, request] }
+        nats_url: { type: string }
+        nats_source: { type: string, enum: [setting, advertise, request] }
+        server_setting: { type: string }
+        nats_setting: { type: string }
+        server_default: { type: string, description: Het adres zonder instelling (uit CF_NATS_ADVERTISE); leeg als er geen is }
+        nats_default: { type: string }
+        protocol: { type: integer, description: Het agentprotocol vanaf waar agents zich laten omzetten }
+        agents: { type: array, items: { $ref: "#/components/schemas/AgentEndpointAgent" } }
+        running:
+          type: array
+          items:
+            type: object
+            required: [cluster_id, job_id]
+            properties:
+              cluster_id: { type: string, format: uuid, nullable: true }
+              job_id: { type: string, format: uuid }
+    AgentEndpointAgent:
+      type: object
+      required: [node_id, hostname, cluster_id, cluster_name, cluster_slug, cluster_environment, protocol, server_url, nats_url, online, state, why]
+      properties:
+        node_id: { type: string, format: uuid }
+        hostname: { type: string }
+        cluster_id: { type: string, format: uuid, nullable: true }
+        cluster_name: { type: string }
+        cluster_slug: { type: string }
+        cluster_environment: { type: string }
+        protocol: { type: integer }
+        server_url: { type: string }
+        nats_url: { type: string }
+        online: { type: boolean }
+        state:
+          type: string
+          enum: [current, differs, failed, manual, unknown]
+          description: |
+            current: wijst naar het adres voor agents. differs: wijst naar een ander adres. failed: de vorige omzetting
+            werd op de node teruggezet. manual: ouder dan protocol 47, eerst bijwerken. unknown: meldde zijn adressen nog niet.
+        why: { type: string }
     AgentUpgradeStarted:
       type: object
       required: [jobs, skipped, queued_prod]
@@ -14087,6 +14493,95 @@ components:
           allOf: [{ $ref: "#/components/schemas/Job" }]
           nullable: true
           description: null als er op geen node iets verandert
+    ZabbixAgentSettings:
+      type: object
+      required: [auto_apply, auto_prod, server, server_active, version, host_metadata, api_url, host_group, templates,
+        docker_template, proxy, token_set, available, updated_at]
+      properties:
+        auto_apply: { type: boolean, description: Elke node met een agent krijgt vanzelf zabbix-agent2 }
+        auto_prod: { type: boolean, description: Ook nodes van prod-clusters }
+        server: { type: string, description: "Server= in zabbix_agent2.conf" }
+        server_active: { type: string, description: "ServerActive= in zabbix_agent2.conf" }
+        version: { type: string, description: Versie van de Zabbix-repository, zoals 8.0 }
+        host_metadata: { type: string }
+        api_url: { type: string, description: Adres van api_jsonrpc.php }
+        host_group: { type: string, description: Groep voor hosts die ClusterForge aanmaakt }
+        templates: { type: array, items: { type: string } }
+        docker_template: { type: string, description: Extra template voor nodes met Docker }
+        proxy: { type: string, description: Proxy voor nieuwe hosts; leeg is de server }
+        token_set: { type: boolean }
+        available: { type: boolean, description: De server heeft een masterkey om sleutels te bewaren }
+        updated_at: { type: string, format: date-time }
+    ZabbixAgentSettingsInput:
+      type: object
+      required: [auto_apply, auto_prod, server, server_active, version, host_metadata, api_url, host_group, templates,
+        docker_template, proxy]
+      properties:
+        auto_apply: { type: boolean }
+        auto_prod: { type: boolean }
+        server: { type: string }
+        server_active: { type: string }
+        version: { type: string }
+        host_metadata: { type: string }
+        api_url: { type: string }
+        host_group: { type: string }
+        templates: { type: array, items: { type: string } }
+        docker_template: { type: string }
+        proxy: { type: string }
+        token: { type: string, description: Weglaten laat het token staan; leeg haalt het weg }
+    ZabbixAgentNode:
+      type: object
+      required: [node_id, hostname, ip, cluster_id, cluster_name, cluster_environment, online, supported, docker,
+        agent_service, enabled, managed, psk_identity, psk_created_at, applied_at, apply_job_id, apply_running,
+        apply_error, apply_failed_at, zabbix_host_id, pending]
+      properties:
+        node_id: { type: string, format: uuid }
+        hostname: { type: string }
+        ip: { type: string }
+        cluster_id: { type: string, format: uuid, nullable: true }
+        cluster_name: { type: string }
+        cluster_environment: { type: string }
+        online: { type: boolean }
+        supported: { type: boolean }
+        docker: { type: boolean }
+        agent_service: { type: string, description: Stand van zabbix-agent2 uit de heartbeat; leeg als hij er niet is }
+        enabled: { type: boolean }
+        managed: { type: boolean }
+        psk_identity: { type: string }
+        psk_created_at: { type: string, format: date-time, nullable: true }
+        applied_at: { type: string, format: date-time, nullable: true }
+        apply_job_id: { type: string, format: uuid, nullable: true }
+        apply_running: { type: boolean }
+        apply_error: { type: string }
+        apply_failed_at: { type: string, format: date-time, nullable: true }
+        zabbix_host_id: { type: string }
+        pending: { type: boolean }
+    ZabbixAgentsOverview:
+      type: object
+      required: [settings, nodes]
+      properties:
+        settings: { $ref: "#/components/schemas/ZabbixAgentSettings" }
+        nodes: { type: array, items: { $ref: "#/components/schemas/ZabbixAgentNode" } }
+    ZabbixAgentTestResult:
+      type: object
+      required: [ok, version, message]
+      properties:
+        ok: { type: boolean }
+        version: { type: string }
+        message: { type: string }
+    ZabbixAgentNodesInput:
+      type: object
+      required: [action]
+      properties:
+        action: { type: string, enum: [manage, unmanage, apply, rotate] }
+        node_ids: { type: array, items: { type: string, format: uuid } }
+        all: { type: boolean, description: Alle nodes die nog niet toegepast zijn (apply) of alle nodes }
+    ZabbixAgentNodesResult:
+      type: object
+      required: [jobs, skipped]
+      properties:
+        jobs: { type: array, items: { type: string, format: uuid } }
+        skipped: { type: array, items: { type: string } }
     CrowdSecSettings:
       type: object
       required: [auto_apply, bouncer_default, share_bans, whitelist, updated_at, console_key_set, console_available]
@@ -14504,6 +14999,20 @@ components:
         until: { type: string, format: date-time }
         nodes: { type: array, items: { type: string } }
         shared: { type: boolean, description: ClusterForge zette deze ban ook op andere nodes }
+    DockerObject:
+      type: object
+      description: Een object van Docker zoals Portainer (fase 28); de velden staan in web/src/lib/docker.ts.
+      additionalProperties: true
+    DockerCallInput:
+      type: object
+      required: [calls]
+      properties:
+        calls:
+          type: array
+          items: { $ref: "#/components/schemas/DockerObject" }
+          description: Aanroepen {method, path, query, body} die na elkaar lopen
+        title: { type: string }
+        confirm: { type: string, description: "Wat overgetikt moet worden bij verwijderen, hard stoppen of opruimen" }
     PveObject:
       type: object
       description: Een object van de Proxmox-hosts (fase 17); de velden staan in web/src/lib/pvehosts.ts en pkg/protocol/pve.go.
@@ -14558,6 +15067,17 @@ components:
         vmid: { type: integer, description: "Gast-ID; niet bij host" }
         cols: { type: integer }
         rows: { type: integer }
+    DockerConsoleInput:
+      type: object
+      required: [container]
+      properties:
+        container: { type: string, description: "Id of naam van de container" }
+        shell: { type: string, enum: [auto, sh, bash], default: auto }
+        user: { type: string, description: "Gebruiker in de container; leeg is wat het image zegt" }
+        cols: { type: integer }
+        rows: { type: integer }
+        password: { type: string, description: "Op prod, als je geen tweestapsverificatie hebt" }
+        totp_code: { type: string, maxLength: 10, description: "Op prod: je code van tweestapsverificatie" }
     PveConsoleOpened:
       type: object
       required: [session, kind, title]

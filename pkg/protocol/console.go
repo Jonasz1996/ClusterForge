@@ -34,6 +34,17 @@ const (
 	ConsoleCT = "ct"
 	// ConsoleHost is een rootshell op de Proxmox-host zelf.
 	ConsoleHost = "host"
+	// ConsoleDocker is een shell of commando in een container: docker exec
+	// (vanaf DockerSince, op elke node met Docker).
+	ConsoleDocker = "docker"
+)
+
+// Shells van ConsoleDocker.
+const (
+	// DockerShellAuto is bash als de container die heeft, anders sh.
+	DockerShellAuto = "auto"
+	DockerShellSh   = "sh"
+	DockerShellBash = "bash"
 )
 
 // Frames. De eerste byte van elk bericht op ConsoleIn en ConsoleOut.
@@ -73,6 +84,11 @@ type ConsoleRequest struct {
 	VMID int `json:"vmid,omitempty"`
 	Cols int `json:"cols,omitempty"`
 	Rows int `json:"rows,omitempty"`
+	// Container en Shell voor docker; User is de gebruiker in de container
+	// (leeg is wat het image zegt).
+	Container string `json:"container,omitempty"`
+	Shell     string `json:"shell,omitempty"`
+	User      string `json:"user,omitempty"`
 }
 
 type ConsoleResponse struct {
@@ -111,6 +127,18 @@ func (r ConsoleRequest) Validate() error {
 	case ConsoleHost:
 		if r.VMID != 0 {
 			return errors.New("een hostconsole heeft geen gast-ID")
+		}
+	case ConsoleDocker:
+		if r.VMID != 0 || !ValidContainerName(r.Container) {
+			return errors.New("ongeldige container")
+		}
+		switch r.Shell {
+		case DockerShellAuto, DockerShellSh, DockerShellBash:
+		default:
+			return errors.New("onbekende shell")
+		}
+		if r.User != "" && !runUser.MatchString(r.User) {
+			return errors.New("ongeldige gebruiker")
 		}
 	default:
 		return errors.New("onbekende soort console")

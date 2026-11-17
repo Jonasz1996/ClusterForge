@@ -83,10 +83,6 @@ type consoleHub struct {
 
 // OpenConsole opent een console op de host in.Node.
 func (s *Service) OpenConsole(ctx context.Context, actor events.Actor, owner uuid.UUID, in ConsoleInput) (ConsoleOpened, error) {
-	bus, ok := s.bus.(ConsoleBus)
-	if !ok {
-		return ConsoleOpened{}, errors.New("deze server kan geen console openen")
-	}
 	dc, err := s.Datacenter(ctx, in.Datacenter)
 	if err != nil {
 		return ConsoleOpened{}, err
@@ -107,27 +103,44 @@ func (s *Service) OpenConsole(ctx context.Context, actor events.Actor, owner uui
 		return ConsoleOpened{}, ValidationError{fmt.Sprintf("een console vraagt de agent met protocol %d op %s (nu %d); werk hem bij via Nodes → Agents bijwerken", protocol.ConsoleSince, h.PVENode, h.Protocol)}
 	}
 	req := protocol.ConsoleRequest{Session: uuid.NewString(), Kind: in.Kind, VMID: in.VMID, Cols: in.Cols, Rows: in.Rows}
-	if err := req.Validate(); err != nil {
-		return ConsoleOpened{}, ValidationError{err.Error()}
-	}
-	c := &Console{
-		ID: req.Session, Owner: owner, Kind: in.Kind, node: h.NodeID, bus: bus, svc: s,
-		frames: make(chan []byte, consoleBuffer), done: make(chan struct{}),
-	}
-	unsub, err := bus.SubscribeConsole(h.NodeID, req.Session, c.onFrame)
+	c, res, err := s.StartConsole(ctx, h.NodeID, owner, req)
 	if err != nil {
 		return ConsoleOpened{}, err
+	}
+	title := consoleTitle(in.Kind, in.VMID, h.PVENode)
+	s.audit(ctx, actor, *h, "pvehost.console_opened", map[string]any{"datacenter": in.Datacenter, "kind": in.Kind, "vmid": in.VMID})
+	return ConsoleOpened{Session: c.ID, Kind: in.Kind, Title: title, Password: res.Password}, nil
+}
+
+// StartConsole opent een sessie op een node met een agent en zet hem klaar
+// voor de websocket van owner. Ook Docker (fase 28) opent zo zijn console,
+// zodat er één plek is voor sessies en hun websocket.
+func (s *Service) StartConsole(ctx context.Context, nodeID, owner uuid.UUID, req protocol.ConsoleRequest) (*Console, protocol.ConsoleResponse, error) {
+	bus, ok := s.bus.(ConsoleBus)
+	if !ok {
+		return nil, protocol.ConsoleResponse{}, errors.New("deze server kan geen console openen")
+	}
+	if err := req.Validate(); err != nil {
+		return nil, protocol.ConsoleResponse{}, ValidationError{err.Error()}
+	}
+	c := &Console{
+		ID: req.Session, Owner: owner, Kind: req.Kind, node: nodeID, bus: bus, svc: s,
+		frames: make(chan []byte, consoleBuffer), done: make(chan struct{}),
+	}
+	unsub, err := bus.SubscribeConsole(nodeID, req.Session, c.onFrame)
+	if err != nil {
+		return nil, protocol.ConsoleResponse{}, err
 	}
 	c.unsub = unsub
 	octx, cancel := context.WithTimeout(ctx, protocol.ConsoleRequestTimeout)
 	defer cancel()
-	res, err := bus.OpenConsole(octx, h.NodeID, req)
+	res, err := bus.OpenConsole(octx, nodeID, req)
 	if err == nil && res.Error != "" {
 		err = ValidationError{res.Error}
 	}
 	if err != nil {
 		unsub()
-		return ConsoleOpened{}, err
+		return nil, res, err
 	}
 	c.timer = time.AfterFunc(consoleAttach, func() {
 		c.mu.Lock()
@@ -143,9 +156,7 @@ func (s *Service) OpenConsole(ctx context.Context, actor events.Actor, owner uui
 	}
 	s.consoles.m[c.ID] = c
 	s.consoles.mu.Unlock()
-	title := consoleTitle(in.Kind, in.VMID, h.PVENode)
-	s.audit(ctx, actor, *h, "pvehost.console_opened", map[string]any{"datacenter": in.Datacenter, "kind": in.Kind, "vmid": in.VMID})
-	return ConsoleOpened{Session: c.ID, Kind: in.Kind, Title: title, Password: res.Password}, nil
+	return c, res, nil
 }
 
 func consoleTitle(kind string, vmid int, node string) string {

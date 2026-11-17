@@ -217,6 +217,10 @@ docker compose up -d --build
 
 Geef de nieuwe LXC hetzelfde IP-adres (of zet `CF_NATS_ADVERTISE` en de DNS-naam goed): de agents verbinden met het adres en het certificaat dat ze bij hun aanmelding kregen, en melden zich dan vanzelf weer.
 
+### Ander adres voor de agents
+
+Krijgt ClusterForge een ander IP-adres, of wijzen agents nog naar een naam achter een reverse proxy, zet ze dan om vanuit de GUI: **Instellingen → Adres voor agents**. Daar staat het adres waarop de nodes de server bereiken (standaard het interne adres uit `CF_NATS_ADVERTISE` met poort 8080, niet de naam achter de proxy) en per agent het adres uit zijn `agent.json`. "Alle afwijkende agents omzetten" stuurt elke agent (vanaf protocol 47) het nieuwe adres: de agent test eerst NATS en `/api/v1/health` op het nieuwe adres, bewaart zijn oude `agent.json` als `agent.json.prev` en herstart. Bereikt hij de server niet binnen 2 minuten, dan zet de timer `cf-agent-reconfig-rollback` het oude `agent.json` terug. Per cluster gaat dat één node tegelijk; prod vraagt een code van tweestapsverificatie. Laat de oude server bereikbaar tot alle agents omgezet zijn. Het installcommando bij "Agent installeren" gebruikt hetzelfde adres.
+
 ## Bijwerken
 
 Maak eerst een back-up zoals hierboven: migraties lopen automatisch bij het starten en een oudere versie terugzetten kan alleen met die back-up.
@@ -275,7 +279,7 @@ Stopt de build toch met `signal: killed`, stop dan eerst de draaiende containers
 
 ### De agents
 
-Agents vanaf protocol 23 werken zichzelf bij: na de update ziet de server dat ze ouder zijn en werkt hij ze binnen een paar minuten bij, één node tegelijk per cluster. Op prod alleen vanzelf als "Ook productie vanzelf bijwerken" aan staat (Instellingen → Agents bijwerken, met een code uit de app); anders vink je bij Nodes "Ook productie" aan en klik je op "Agents bijwerken": één code, de prodclusters één na het andere. Volgen kan bij Nodes (kaart "Agents bijwerken") en bij Taken. Uitzetten, voor alles of per cluster, kan bij Instellingen → Agents bijwerken.
+Agents vanaf protocol 23 werken zichzelf bij: na de update ziet de server dat ze ouder zijn en werkt hij ze binnen een paar minuten bij, één node tegelijk per cluster. Op prod alleen vanzelf als "Ook productie vanzelf bijwerken" aan staat (schakelaar bij Nodes → Agents bijwerken of bij Instellingen, zonder code); anders vink je bij Nodes "Ook productie" aan en klik je op "Agents bijwerken": de prodclusters één na het andere. Volgen kan bij Nodes (kaart "Agents bijwerken") en bij Taken. Uitzetten, voor alles of per cluster, kan bij Instellingen → Agents bijwerken.
 
 Een agent onder protocol 23 kent dat nog niet. Werk die één keer met de hand bij, op elke node, nadat de server "healthy" is:
 

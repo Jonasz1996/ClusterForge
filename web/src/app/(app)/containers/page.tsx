@@ -81,7 +81,7 @@ function Containers() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Containers"
+        title="Stacks"
         description="De Compose-projecten van een cluster als gewenste staat: ClusterForge bewaart de bestanden (versleuteld), zet ze op elke node gelijk, start, stopt en werkt bij vanuit hier en toont de gezondheid per container. Een stack met plaatsing VIP draait alleen op de node met het VIP; zijn mappen gaan met een sync naar de andere nodes."
         actions={
           <Select

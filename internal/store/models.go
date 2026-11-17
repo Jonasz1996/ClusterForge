@@ -362,18 +362,29 @@ func (ns NullUserRole) Value() (driver.Value, error) {
 }
 
 type Agent struct {
-	ID                uuid.UUID
-	NodeID            uuid.UUID
-	NkeyPublic        string
-	MachineID         string
-	Version           string
-	ProtocolVersion   int32
-	EnrolledAt        time.Time
-	LastSeenAt        *time.Time
-	RevokedAt         *time.Time
-	Arch              string
-	BinarySha256      string
-	UpgradeRolledBack string
+	ID                    uuid.UUID
+	NodeID                uuid.UUID
+	NkeyPublic            string
+	MachineID             string
+	Version               string
+	ProtocolVersion       int32
+	EnrolledAt            time.Time
+	LastSeenAt            *time.Time
+	RevokedAt             *time.Time
+	Arch                  string
+	BinarySha256          string
+	UpgradeRolledBack     string
+	ServerUrl             string
+	NatsUrl               string
+	ReconfigureRolledBack string
+}
+
+type AgentEndpointSetting struct {
+	ID        uuid.UUID
+	ServerUrl string
+	NatsUrl   string
+	UpdatedBy *uuid.UUID
+	UpdatedAt time.Time
 }
 
 type AgentUpgradeOff struct {
@@ -880,6 +891,13 @@ type DocSummary struct {
 	CreatedBy      *uuid.UUID
 	CreatedAt      time.Time
 	ConversationID *uuid.UUID
+}
+
+type DockerHost struct {
+	NodeID    uuid.UUID
+	Summary   []byte
+	Error     string
+	CheckedAt time.Time
 }
 
 type DockerStack struct {
@@ -1931,4 +1949,40 @@ type Vip struct {
 	OwnerSince  *time.Time
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
+}
+
+type ZabbixAgentNode struct {
+	NodeID        uuid.UUID
+	Managed       bool
+	PskIdentity   string
+	PskEnc        []byte
+	PskKeyID      string
+	PskHash       string
+	PskCreatedAt  time.Time
+	AppliedHash   string
+	AppliedAt     *time.Time
+	ApplyJobID    *uuid.UUID
+	ApplyError    string
+	ApplyFailedAt *time.Time
+	ZabbixHostID  string
+	CreatedAt     time.Time
+}
+
+type ZabbixAgentSetting struct {
+	ID             bool
+	AutoApply      bool
+	AutoProd       bool
+	Server         string
+	ServerActive   string
+	Version        string
+	HostMetadata   string
+	ApiUrl         string
+	ApiTokenEnc    []byte
+	ApiTokenID     string
+	HostGroup      string
+	Templates      []string
+	DockerTemplate string
+	Proxy          string
+	UpdatedAt      time.Time
+	UpdatedBy      *uuid.UUID
 }

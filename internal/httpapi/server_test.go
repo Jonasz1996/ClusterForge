@@ -23,6 +23,7 @@ import (
 	"github.com/pquerna/otp/totp"
 
 	"github.com/Jonasz1996/clusterforge/internal/agentbus"
+	"github.com/Jonasz1996/clusterforge/internal/agentconf"
 	"github.com/Jonasz1996/clusterforge/internal/agents"
 	"github.com/Jonasz1996/clusterforge/internal/agentupgrade"
 	"github.com/Jonasz1996/clusterforge/internal/assistant"
@@ -279,6 +280,8 @@ func newTestEnv(t *testing.T) *testEnv {
 	upg := agentupgrade.NewService(pool, ev, log, runner, bus, agentDir, "test")
 	upg.Interval, upg.Poll, upg.Back, upg.RollbackAfter = 0, 20*time.Millisecond, 5*time.Second, time.Second
 	upg.Changed = eval.Kick
+	acf := agentconf.NewService(pool, ev, log, runner, bus)
+	acf.NATSPort, acf.Poll, acf.Back, acf.RollbackAfter = bus.Port(), 20*time.Millisecond, 8*time.Second, time.Second
 	upd := updates.NewService(pool, ev, runner, bus)
 	upd.Run.Poll, upd.ReadyTimeout, upd.Gate.Poll = 20*time.Millisecond, 5*time.Second, 20*time.Millisecond
 	upd.MoveTimeout = 5 * time.Second
@@ -306,7 +309,7 @@ func newTestEnv(t *testing.T) *testEnv {
 	api := New(Deps{
 		Config: cfg, Log: log, Pool: pool, Auth: a, Bus: bus, Hub: hub, Proxmox: pve, Jobs: runner, Lifecycle: life,
 		Deploy: dep, Backups: bk, Drift: drf, Failover: fo, Disaster: dis, Deps: dps, Rollout: ro, GitOps: git, Assistant: asst,
-		Risk: rsk, Topo: tp, Docs: dcs, Reports: rep, Kube: kub, KubeNodes: kn, Databases: dbs, Cronjobs: crons, Heal: hl, Components: cmps, Upgrades: upg, Updates: upd, Commands: cmds, CrowdSec: csec, SOC: soc.NewService(pool, log), Security: security.NewService(pool, ev, bus, log), Stacks: stk, Logs: logs.NewService(pool, ev, bus, log), Firewall: fw, PVEHosts: pvh, Version: "test",
+		Risk: rsk, Topo: tp, Docs: dcs, Reports: rep, Kube: kub, KubeNodes: kn, Databases: dbs, Cronjobs: crons, Heal: hl, Components: cmps, Upgrades: upg, AgentConf: acf, Updates: upd, Commands: cmds, CrowdSec: csec, SOC: soc.NewService(pool, log), Security: security.NewService(pool, ev, bus, log), Stacks: stk, Logs: logs.NewService(pool, ev, bus, log), Firewall: fw, PVEHosts: pvh, Version: "test",
 	})
 	srv := httptest.NewServer(api.Handler())
 	t.Cleanup(srv.Close)

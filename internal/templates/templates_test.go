@@ -1,9 +1,12 @@
 package templates
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os/exec"
 	"reflect"
 	"slices"
@@ -481,6 +484,68 @@ func TestRenderZabbix(t *testing.T) {
 	for _, w := range []string{"Hostname=zabbix-proxy-01\n", "Server=10.0.30.11;10.0.30.12;10.0.30.13\n", "ProxyMode=0\n"} {
 		if !strings.Contains(conf, w) {
 			t.Errorf("zabbix_proxy.conf mist %q:\n%s", w, conf)
+		}
+	}
+
+	// Zonder versleuteling (de standaard) geen TLS; de PSK-file staat er
+	// wel, want de unit laadt hem als credential. De controle van de proxy
+	// komt met een timer.
+	if strings.Contains(conf, "TLS") {
+		t.Errorf("TLS zonder psk:\n%s", conf)
+	}
+	proxyFiles := map[string]string{}
+	var proxyCmds []string
+	for _, s := range steps {
+		if s.File != nil {
+			proxyFiles[s.File.Path] = s.File.Content
+		}
+		if s.Command != nil {
+			proxyCmds = append(proxyCmds, s.Command.Run)
+		}
+	}
+	sum := sha256.Sum256([]byte("Abcdefgh23456789Abcdefgh23456789/zabbix-proxy-psk"))
+	psk := hex.EncodeToString(sum[:])
+	if proxyFiles["/etc/zabbix/cf-zabbix_proxy.psk"] != psk+"\n" ||
+		!strings.Contains(proxyFiles["/etc/systemd/system/cf-zabbix-proxy.service"], "LoadCredential=psk:/etc/zabbix/cf-zabbix_proxy.psk\n") ||
+		!strings.Contains(proxyFiles["/etc/systemd/system/cf-zabbix-proxy-check.timer"], "OnUnitActiveSec=1min") ||
+		!slices.ContainsFunc(proxyCmds, func(r string) bool { return strings.Contains(r, "enable --now cf-zabbix-proxy-check.timer") }) {
+		t.Fatalf("proxy: %v %v", proxyCmds, slices.Collect(maps.Keys(proxyFiles)))
+	}
+	for _, path := range []string{"/usr/local/lib/clusterforge/zabbix-proxy-check.sh"} {
+		cmd := exec.Command("sh", "-n")
+		cmd.Stdin = strings.NewReader(proxyFiles[path])
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Errorf("%s: %v %s", path, err, out)
+		}
+	}
+	if !strings.Contains(files["/usr/local/lib/clusterforge/zabbix-db.sh"], "PSK="+psk+"\n") ||
+		!strings.Contains(files["/usr/local/lib/clusterforge/zabbix-db.sh"], `PROXIES="zabbix-proxy-01 "`) {
+		t.Errorf("zabbix-db.sh mist de PSK of de proxy's:\n%s", files["/usr/local/lib/clusterforge/zabbix-db.sh"])
+	}
+	// Met psk: TLS in de proxyconfig met de credential van systemd.
+	ppsk, err := tpl.Validate(map[string]any{"vip": "10.0.30.100", "vrid": 63, "auth_pass": "geheim12", "db_password": "Abcdefgh23456789Abcdefgh23456789",
+		"proxy_encryption": "psk", "proxy_psk_identity": "thuis-proxy"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tpl.Validate(map[string]any{"vip": "10.0.30.100", "proxy_psk_identity": "met spatie"}); err == nil {
+		t.Fatal("identiteit met spatie aanvaard")
+	}
+	cp := c
+	cp.Params = ppsk
+	cp.Node = &c.Nodes[3]
+	steps, err = tpl.Steps("proxy", cp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range steps {
+		if s.File != nil && s.File.Path == "/etc/zabbix/cf-zabbix_proxy.conf" {
+			conf = s.File.Content
+		}
+	}
+	for _, w := range []string{"TLSConnect=psk\n", "TLSAccept=psk\n", "TLSPSKIdentity=thuis-proxy\n", "TLSPSKFile=/run/credentials/cf-zabbix-proxy.service/psk\n"} {
+		if !strings.Contains(conf, w) {
+			t.Errorf("zabbix_proxy.conf met psk mist %q:\n%s", w, conf)
 		}
 	}
 

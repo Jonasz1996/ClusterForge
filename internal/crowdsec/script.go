@@ -31,7 +31,9 @@ func Script(p Plan) string {
 	w("  curl -fsSL https://packagecloud.io/crowdsec/crowdsec/gpgkey | gpg --dearmor --yes -o /etc/apt/keyrings/crowdsec_crowdsec-archive-keyring.gpg")
 	w(`  echo "deb [signed-by=/etc/apt/keyrings/crowdsec_crowdsec-archive-keyring.gpg] https://packagecloud.io/crowdsec/crowdsec/any any main" > /etc/apt/sources.list.d/crowdsec_crowdsec.list`)
 	w("  apt-get update -q")
-	w("  apt-get install -y -q crowdsec")
+	w("  # Botst de standaardpoort 8080 (bv. de ClusterForge-server zelf), dan start")
+	w("  # CrowdSec bij de installatie niet; de poort gaat hieronder om en dan opnieuw.")
+	w("  apt-get install -y -q crowdsec || INSTALL_RETRY=1")
 	w("else")
 	w(`  echo "CrowdSec staat er al: $(cscli version 2>&1 | grep -m1 -o 'v[0-9][0-9.]*' || true)"`)
 	w("fi")
@@ -41,6 +43,9 @@ func Script(p Plan) string {
 		w("  apt-get install -y -q crowdsec-firewall-bouncer-nftables")
 		w("fi")
 	}
+	w("")
+	b.WriteString(lapiPortScript)
+	w("if [ -n \"${INSTALL_RETRY:-}\" ]; then dpkg --configure -a; fi")
 	w("")
 	w(`echo "== Collections"`)
 	w("cscli hub update >/dev/null")
@@ -103,7 +108,9 @@ func Script(p Plan) string {
 	if p.Bouncer {
 		w("systemctl enable crowdsec-firewall-bouncer >/dev/null 2>&1 || true")
 		if bouncerChanged {
-			w("if [ \"$OLD_BOUNCER\" != \"$(cat %s)\" ] || ! systemctl is-active --quiet crowdsec-firewall-bouncer; then systemctl restart crowdsec-firewall-bouncer; fi", bouncerLocal)
+			w("if [ \"$OLD_BOUNCER\" != \"$(cat %s)\" ] || [ -n \"${BOUNCER_PORT_CHANGED:-}\" ] || ! systemctl is-active --quiet crowdsec-firewall-bouncer; then systemctl restart crowdsec-firewall-bouncer; fi", bouncerLocal)
+		} else {
+			w("if [ -n \"${BOUNCER_PORT_CHANGED:-}\" ]; then systemctl restart crowdsec-firewall-bouncer; fi")
 		}
 		w("systemctl is-active --quiet crowdsec-firewall-bouncer || { journalctl -u crowdsec-firewall-bouncer -n 30 --no-pager >&2; exit 1; }")
 	} else {
@@ -119,6 +126,47 @@ func Script(p Plan) string {
 	w(`echo "Klaar: plan %s toegepast."`, p.Hash)
 	return b.String()
 }
+
+// lapiPortScript houdt de lokale API van CrowdSec weg van poorten die iets
+// anders nodig heeft. Standaard luistert die op 127.0.0.1:8080, net als de
+// ClusterForge-server en veel containers; wie dan als laatste start, faalt.
+// De poort gaat om als iets anders dan CrowdSec op die poort luistert, of
+// als een container (ook een gestopte) die poort op de host publiceert. Een
+// eerder gekozen andere poort blijft staan; elke keer toepassen controleert
+// het opnieuw, zodat ClusterForge nooit naar 8080 terugzet.
+const lapiPortScript = `echo "== Poort van de lokale API"
+CFG=/etc/crowdsec/config.yaml
+CRED=/etc/crowdsec/local_api_credentials.yaml
+BCFG=/etc/crowdsec/bouncers/crowdsec-firewall-bouncer.yaml
+cf_port_taken() {
+  local p=$1
+  if ss -ltnpH "sport = :$p" 2>/dev/null | grep -v '"crowdsec"' | grep -q .; then return 0; fi
+  if command -v docker >/dev/null 2>&1; then
+    local ids; ids=$(docker ps -aq 2>/dev/null || true)
+    if [ -n "$ids" ] && docker inspect -f '{{json .HostConfig.PortBindings}}' $ids 2>/dev/null | grep -q "\"HostPort\":\"$p\""; then return 0; fi
+  fi
+  return 1
+}
+if [ -f "$CFG" ]; then
+  CUR=$(sed -n 's/^[[:space:]]*listen_uri:[[:space:]]*["]\{0,1\}[^:"]*:\([0-9]\{1,5\}\).*/\1/p' "$CFG" | head -n1)
+  CUR=${CUR:-8080}
+  NEW=$CUR
+  if cf_port_taken "$CUR"; then
+    NEW=""
+    for p in $(seq 8081 8099); do
+      if ! cf_port_taken "$p" && ! ss -ltnH "sport = :$p" 2>/dev/null | grep -q .; then NEW=$p; break; fi
+    done
+    [ -n "$NEW" ] || { echo "Geen vrije poort tussen 8081 en 8099 voor de lokale API van CrowdSec." >&2; exit 1; }
+    echo "  poort $CUR is bezet door iets anders: de lokale API gaat naar 127.0.0.1:$NEW"
+  else
+    echo "  127.0.0.1:$CUR"
+  fi
+  sed -i "s#^\([[:space:]]*listen_uri:[[:space:]]*\)[\"]\{0,1\}[^\"[:space:]]*[\"]\{0,1\}#\1127.0.0.1:$NEW#" "$CFG"
+  [ -f "$CRED" ] && sed -i "s#^url:.*#url: http://127.0.0.1:$NEW#" "$CRED"
+  [ -f "$BCFG" ] && sed -i "s#^api_url:.*#api_url: http://127.0.0.1:$NEW/#" "$BCFG"
+  if [ "$NEW" != "$CUR" ] && systemctl is-active --quiet crowdsec-firewall-bouncer 2>/dev/null; then BOUNCER_PORT_CHANGED=1; fi
+fi
+`
 
 // RemoveScript haalt CrowdSec en de bouncer van een node.
 func RemoveScript() string {

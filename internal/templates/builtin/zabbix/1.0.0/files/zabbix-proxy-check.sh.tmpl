@@ -1,0 +1,23 @@
+#!/bin/sh
+# Beheerd door ClusterForge (cluster {{ .cluster.slug }}). Wijzigingen hier
+# worden bij de volgende uitrol overschreven.
+#
+# Controleert elke minuut of de proxy zijn gegevens kwijt kan aan een Zabbix
+# server. Lukt dat de laatste 3 minuten niet, dan faalt deze dienst; de agent
+# meldt hem dan en ClusterForge zet het cluster op verminderd (Aandacht
+# nodig). Draait de proxy zelf niet, dan meldt de agent cf-zabbix-proxy al.
+systemctl is-active --quiet cf-zabbix-proxy || exit 0
+# Net gestart: de servers mogen nog opstarten (na een uitrol komt de
+# database er pas na de proxy).
+since=$(systemctl show -p ActiveEnterTimestamp --value cf-zabbix-proxy)
+start=$(date -d "$since" +%s 2>/dev/null || echo 0)
+[ $(($(date +%s) - start)) -ge 300 ] || exit 0
+fail=$(journalctl -u cf-zabbix-proxy --since -3min -o cat 2>/dev/null |
+	grep -E 'cannot send proxy data to server|cannot obtain configuration data from server' | tail -1)
+[ -z "$fail" ] && exit 0
+echo "de proxy bereikt geen Zabbix server: $fail"
+case "$fail" in
+*"connection is not allowed"*)
+	echo "de server weigert de proxy: kijk in Zabbix bij Administration → Proxies → {{ .node.hostname }} naar het adres ({{ .node.address }} of leeg) en de versleuteling; die moet dezelfde zijn als Versleuteling tussen proxy en servers in ClusterForge ({{ .params.proxy_encryption }})" ;;
+esac
+exit 1

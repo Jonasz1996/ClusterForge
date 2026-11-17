@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { ViewToggle, openTileOf } from "@/components/Tiles";
 
 function slug(s: string) {
   return (
@@ -25,12 +26,15 @@ function firstText(el: HTMLElement): string {
 
 // SectionNav zet onder de kop van een lange pagina (node, cluster) een rij
 // sprongen naar de kaarten op die pagina. Het leest de koppen (h2) van de
-// kaarten zelf, zodat een nieuwe kaart vanzelf meekomt.
-export function SectionNav() {
+// kaarten zelf, zodat een nieuwe kaart vanzelf meekomt. Staat de kaart in een
+// venster (fase 30), dan opent een sprong dat venster. views zet rechts de
+// keuze tussen vensters en lijst.
+export function SectionNav({ views = false }: { views?: boolean }) {
   const ref = useRef<HTMLElement>(null);
   const [links, setLinks] = useState<{ id: string; label: string }[]>([]);
   useEffect(() => {
-    const root = ref.current?.parentElement;
+    let root = ref.current?.parentElement;
+    if (root?.hasAttribute("data-section-wrap")) root = root.parentElement;
     if (!root) return;
     const scan = () => {
       const seen = new Set<string>();
@@ -53,17 +57,27 @@ export function SectionNav() {
     mo.observe(root, { childList: true, subtree: true });
     return () => mo.disconnect();
   }, []);
-  return (
-    <nav ref={ref} aria-label="Op deze pagina" className={links.length < 4 ? "hidden" : "-mx-1 flex gap-1 overflow-x-auto pb-1 text-sm print:hidden"}>
+  const nav = (
+    <nav ref={ref} aria-label="Op deze pagina" className={links.length < 4 ? "hidden" : "-mx-1 flex min-w-0 flex-1 gap-1 overflow-x-auto pb-1 text-sm print:hidden"}>
       {links.map((l) => (
         <a
           key={l.id}
           href={`#${l.id}`}
+          onClick={(e) => openTileOf(e, l.id)}
           className="shrink-0 rounded-full border border-slate-200 px-3 py-1 text-slate-600 hover:border-slate-400 hover:text-slate-900 dark:border-slate-700 dark:text-slate-300 dark:hover:text-white"
         >
           {l.label}
         </a>
       ))}
     </nav>
+  );
+  if (!views) return nav;
+  return (
+    <div data-section-wrap="" className="flex items-start gap-3">
+      {nav}
+      <span className="ml-auto">
+        <ViewToggle />
+      </span>
+    </div>
   );
 }

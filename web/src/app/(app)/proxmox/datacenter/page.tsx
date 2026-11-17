@@ -1,6 +1,7 @@
 "use client";
 
 import { DiskHealthSummary } from "@/components/pve/Disks";
+import { Tile as Win, TileGrid } from "@/components/Tiles";
 import Link from "next/link";
 import { Suspense, useState } from "react";
 import { askConfirm } from "@/components/Confirm";
@@ -36,12 +37,20 @@ function DatacenterView({ dc }: { dc: Datacenter }) {
           <Strip o={o.data} />
           {o.data.warnings.length > 0 && <WarningsCard o={o.data} />}
           <DiskHealthSummary dc={dc} />
-          <HostsCard dc={dc} o={o.data} />
-          <div className="grid gap-6 lg:grid-cols-2">
-            <CapacityCard o={o.data} />
-            <StorageCard o={o.data} />
-          </div>
-          <RecentTasks dc={dc} />
+          <TileGrid>
+            <Win wide>
+              <HostsCard dc={dc} o={o.data} />
+            </Win>
+            <Win>
+              <CapacityCard o={o.data} />
+            </Win>
+            <Win>
+              <StorageCard o={o.data} />
+            </Win>
+            <Win wide>
+              <RecentTasks dc={dc} />
+            </Win>
+          </TileGrid>
           {o.data.errors.length > 0 && (
             <p className="text-xs text-slate-500">Niet gelezen: {o.data.errors.join(" · ")}</p>
           )}

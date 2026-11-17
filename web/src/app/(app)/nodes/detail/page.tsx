@@ -1,6 +1,7 @@
 "use client";
 
 import { SectionNav } from "@/components/shell/SectionNav";
+import { Tile, TileGrid } from "@/components/Tiles";
 import { askConfirm } from "@/components/Confirm";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -129,7 +130,7 @@ function NodeDetailInner() {
               )
             }
           />
-          <SectionNav />
+          <SectionNav views />
 
           {deleting && (
             <ConfirmDelete
@@ -150,7 +151,7 @@ function NodeDetailInner() {
 
           <StatusNote status={node.data.status} reason={node.data.status_reason} since={node.data.status_since} />
 
-          {editing ? (
+          {editing && (
             <Card title="Node bewerken">
               <NodeForm
                 initial={node.data}
@@ -162,53 +163,92 @@ function NodeDetailInner() {
                 }}
               />
             </Card>
-          ) : (
-            <div className="grid gap-6 lg:grid-cols-2">
-              <Card title="Inventory">
-                <dl className={dlClass}>
-                  <dt className={dtClass}>Primair IP-adres</dt>
-                  <dd className="font-mono text-xs">{node.data.primary_ip ?? none}</dd>
-                  <dt className={dtClass}>Rol</dt>
-                  <dd>{node.data.role || none}</dd>
-                  <dt className={dtClass}>Beschrijving</dt>
-                  <dd>{node.data.description || none}</dd>
-                  <dt className={dtClass}>Tags</dt>
-                  <dd>{node.data.tags.length ? <Tags tags={node.data.tags} /> : none}</dd>
-                  <dt className={dtClass}>Laatst gewijzigd</dt>
-                  <dd>{fmt.format(new Date(node.data.updated_at))}</dd>
-                </dl>
-              </Card>
+          )}
+
+          <TileGrid>
+            {!editing && (
+              <Tile>
+                <Card title="Inventory">
+                  <dl className={dlClass}>
+                    <dt className={dtClass}>Primair IP-adres</dt>
+                    <dd className="font-mono text-xs">{node.data.primary_ip ?? none}</dd>
+                    <dt className={dtClass}>Rol</dt>
+                    <dd>{node.data.role || none}</dd>
+                    <dt className={dtClass}>Beschrijving</dt>
+                    <dd>{node.data.description || none}</dd>
+                    <dt className={dtClass}>Tags</dt>
+                    <dd>{node.data.tags.length ? <Tags tags={node.data.tags} /> : none}</dd>
+                    <dt className={dtClass}>Laatst gewijzigd</dt>
+                    <dd>{fmt.format(new Date(node.data.updated_at))}</dd>
+                  </dl>
+                </Card>
+              </Tile>
+            )}
+            <Tile>
               <AgentCard node={node.data} runtime={runtime.data} isAdmin={isAdmin} />
+            </Tile>
+            <Tile>
               <NodeLifecycleCard node={node.data} runtime={runtime.data} jobs={jobs.data} isAdmin={isAdmin} />
-              {node.data.cluster_id && <NodeDriftCard nodeId={id} clusterId={node.data.cluster_id} isAdmin={isAdmin} />}
+            </Tile>
+            {node.data.cluster_id && (
+              <Tile>
+                <NodeDriftCard nodeId={id} clusterId={node.data.cluster_id} isAdmin={isAdmin} />
+              </Tile>
+            )}
+            <Tile>
               <NodeProxmoxCard node={node.data} isAdmin={isAdmin} />
-            </div>
-          )}
-
-          {(jobs.data?.length ?? 0) > 0 && (
-            <Card title="Taken">
-              <JobList jobs={jobs.data!} />
-            </Card>
-          )}
-
-          {node.data.proxmox && <NodeBackupsCard nodeId={id} isAdmin={isAdmin} />}
-
-          {node.data.agent && <CrowdSecNodeCard nodeId={id} isAdmin={isAdmin} />}
-          {node.data.agent && <FirewallNodeCard nodeId={id} isAdmin={isAdmin} />}
-
-          {node.data.agent && (
-            <MetricsPanels
-              kind="node"
-              id={id}
-              actions={<GrafanaButton href={grafanaLink(info.data?.grafana_node_url ?? "", nodeLinkValues(node.data))} />}
-            />
-          )}
-
-          {runtime.data?.facts && <FactsView facts={runtime.data.facts} runtime={runtime.data} />}
-          {isAdmin && node.data.agent && <NodeConnectionsCard nodeId={id} />}
-          {node.data.agent && <NodeChangesCard nodeId={id} />}
-          {node.data.agent && <NodeCronCard nodeId={id} />}
-          <HistoryCard filter={{ node: id }} isAdmin={isAdmin} />
+            </Tile>
+            {(jobs.data?.length ?? 0) > 0 && (
+              <Tile wide>
+                <Card title="Taken">
+                  <JobList jobs={jobs.data!} />
+                </Card>
+              </Tile>
+            )}
+            {node.data.proxmox && (
+              <Tile>
+                <NodeBackupsCard nodeId={id} isAdmin={isAdmin} />
+              </Tile>
+            )}
+            {node.data.agent && (
+              <Tile>
+                <CrowdSecNodeCard nodeId={id} isAdmin={isAdmin} />
+              </Tile>
+            )}
+            {node.data.agent && (
+              <Tile>
+                <FirewallNodeCard nodeId={id} isAdmin={isAdmin} />
+              </Tile>
+            )}
+            {runtime.data?.facts && <FactsView facts={runtime.data.facts} runtime={runtime.data} />}
+            {isAdmin && node.data.agent && (
+              <Tile>
+                <NodeConnectionsCard nodeId={id} />
+              </Tile>
+            )}
+            {node.data.agent && (
+              <Tile wide>
+                <NodeChangesCard nodeId={id} />
+              </Tile>
+            )}
+            {node.data.agent && (
+              <Tile>
+                <NodeCronCard nodeId={id} />
+              </Tile>
+            )}
+            <Tile wide>
+              <HistoryCard filter={{ node: id }} isAdmin={isAdmin} />
+            </Tile>
+            {node.data.agent && (
+              <Tile wide tall>
+                <MetricsPanels
+                  kind="node"
+                  id={id}
+                  actions={<GrafanaButton href={grafanaLink(info.data?.grafana_node_url ?? "", nodeLinkValues(node.data))} />}
+                />
+              </Tile>
+            )}
+          </TileGrid>
         </div>
       )}
     </QueryState>
@@ -308,17 +348,14 @@ function AgentCard({ node, runtime, isAdmin }: { node: Node; runtime?: NodeRunti
 function FactsView({ facts: f, runtime }: { facts: Facts; runtime: NodeRuntime }) {
   const hbServices = runtime.heartbeat?.services ?? {};
   return (
-    <div className="space-y-6">
-      <div className="flex items-baseline justify-between gap-4">
-        <h2 className="text-lg font-semibold">Facts</h2>
-        <span className="text-xs text-slate-500">
-          verzameld {ago(runtime.collected_at)}
-          {runtime.changed_at && ` · laatst gewijzigd ${fmt.format(new Date(runtime.changed_at))}`}
-        </span>
-      </div>
+    <>
 
-      <div className="grid gap-6 lg:grid-cols-2">
+        <Tile>
         <Card title="Systeem">
+          <p className="-mt-2 mb-3 text-xs text-slate-500">
+            Facts verzameld {ago(runtime.collected_at)}
+            {runtime.changed_at && ` · laatst gewijzigd ${fmt.format(new Date(runtime.changed_at))}`}
+          </p>
           <dl className={dlClass}>
             <dt className={dtClass}>Besturingssysteem</dt>
             <dd>{f.os.pretty_name || `${f.os.id} ${f.os.version_id}`}</dd>
@@ -353,7 +390,9 @@ function FactsView({ facts: f, runtime }: { facts: Facts; runtime: NodeRuntime }
             <dd className="font-mono text-xs break-all">{f.machine_id || none}</dd>
           </dl>
         </Card>
+        </Tile>
 
+        <Tile>
         <Card title="Updates">
           {f.upgrades ? (
             <div className="space-y-3 text-sm">
@@ -397,8 +436,9 @@ function FactsView({ facts: f, runtime }: { facts: Facts; runtime: NodeRuntime }
             </div>
           )}
         </Card>
-      </div>
+        </Tile>
 
+      <Tile wide>
       <Card title="Services">
         {(f.services?.length ?? 0) === 0 ? (
           <p className="text-sm text-slate-500">Geen van de gevolgde services is geïnstalleerd.</p>
@@ -419,10 +459,15 @@ function FactsView({ facts: f, runtime }: { facts: Facts; runtime: NodeRuntime }
           </div>
         )}
       </Card>
+      </Tile>
 
-      {f.seaweed && <SeaweedCard seaweed={f.seaweed} />}
+      {f.seaweed && (
+        <Tile>
+          <SeaweedCard seaweed={f.seaweed} />
+        </Tile>
+      )}
 
-      <div className="grid gap-6 lg:grid-cols-2">
+        <Tile>
         <Card title="Netwerk">
           <Table head={["Interface", "Adressen", ""]}>
             {(f.interfaces ?? []).map((i) => (
@@ -462,7 +507,9 @@ function FactsView({ facts: f, runtime }: { facts: Facts; runtime: NodeRuntime }
             </p>
           )}
         </Card>
+        </Tile>
 
+        <Tile>
         <Card title="Opslag">
           <Table head={["Mount", "Type", "Gebruik"]}>
             {(f.filesystems ?? []).map((fs) => {
@@ -490,11 +537,12 @@ function FactsView({ facts: f, runtime }: { facts: Facts; runtime: NodeRuntime }
             })}
           </Table>
         </Card>
-      </div>
+        </Tile>
 
       {((f.routes?.length ?? 0) > 0 || (f.listeners?.length ?? 0) > 0) && (
-        <div className="grid gap-6 lg:grid-cols-2">
+        <>
           {(f.routes?.length ?? 0) > 0 && (
+            <Tile>
             <Card title="Routes">
               <Table head={["Bestemming", "Via", "Interface"]}>
                 {f.routes!.map((r, i) => (
@@ -513,8 +561,10 @@ function FactsView({ facts: f, runtime }: { facts: Facts; runtime: NodeRuntime }
                 ))}
               </Table>
             </Card>
+            </Tile>
           )}
           {(f.listeners?.length ?? 0) > 0 && (
+            <Tile>
             <Card title="Luisterende poorten">
               <Table head={["Poort", "Adres", "Unit"]}>
                 {f.listeners!.map((l, i) => (
@@ -535,10 +585,11 @@ function FactsView({ facts: f, runtime }: { facts: Facts; runtime: NodeRuntime }
                 ))}
               </Table>
             </Card>
+            </Tile>
           )}
-        </div>
+        </>
       )}
-    </div>
+    </>
   );
 }
 

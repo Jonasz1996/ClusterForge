@@ -52,7 +52,7 @@ export function useSetAgentUpgradeAuto() {
 export function useSetAgentUpgradeProdAuto() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async (body: { enabled: boolean; totp_code?: string }) =>
+    mutationFn: async (body: { enabled: boolean }) =>
       unwrap(await api.PUT("/agent-upgrades/prod-auto", { body })),
     onSuccess: (data) => qc.setQueryData(key, data),
   });
