@@ -4858,6 +4858,42 @@ paths:
         "403": { $ref: "#/components/responses/Error" }
         "404": { $ref: "#/components/responses/Error" }
         "502": { $ref: "#/components/responses/Error" }
+  /pbs/coverage:
+    get:
+      operationId: getPbsCoverage
+      summary: Back-ups van de nodes die een Proxmox-gast zijn - laatste back-up, verificatie en stand per node (fase 32)
+      parameters:
+        - { name: fresh, in: query, required: false, description: "1 leest alle PBS'en opnieuw in plaats van de laatste ronde", schema: { type: string } }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PveObject" }
+        "401": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+  /pbs/servers/{nodeId}/link:
+    parameters:
+      - { name: nodeId, in: path, required: true, schema: { type: string, format: uuid } }
+    post:
+      operationId: linkPbs
+      summary: De PBS als storage aan een Proxmox-cluster koppelen (admin) - eigen gebruiker en token, rechten op de datastore, storage met fingerprint
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PveObject" }
+      responses:
+        "202":
+          description: De taak die de storage in Proxmox zet
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Job" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
   /pve/datacenters:
     get:
       operationId: listPveDatacenters

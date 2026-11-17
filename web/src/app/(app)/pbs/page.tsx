@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Suspense } from "react";
 import { Empty, formatBytes, QueryState, tableClass, tdClass, thClass } from "@/components/inventory/bits";
 import { PbsGate, when } from "@/components/pbs/bits";
+import { LinkCard } from "@/components/pbs/LinkCard";
 import { PbsTaskTable } from "@/components/pbs/Tasks";
 import { Meter, uptime } from "@/components/pve/bits";
 import { Tile as Win, TileGrid } from "@/components/Tiles";
@@ -66,6 +67,9 @@ function OverviewView({ srv }: { srv: PbsServer }) {
                   </Link>
                 </p>
               </Card>
+            </Win>
+            <Win>
+              <LinkCard srv={srv} fingerprint={o.data.status?.info.fingerprint} />
             </Win>
           </TileGrid>
           {o.data.errors.length > 0 && <p className="text-xs text-slate-500">Niet gelezen: {o.data.errors.join(" · ")}</p>}

@@ -60,6 +60,9 @@ type Service struct {
 	cache getCache
 	// Now is er voor tests.
 	Now func() time.Time
+	// Hosts koppelt een PBS aan een Proxmox-cluster (M5); nil zonder.
+	Hosts StorageAdder
+	watch watchState
 }
 
 func NewService(pool *pgxpool.Pool, ev *events.Writer, log *slog.Logger, runner *jobs.Runner, bus Bus) *Service {
@@ -72,9 +75,12 @@ func NewService(pool *pgxpool.Pool, ev *events.Writer, log *slog.Logger, runner 
 
 // Server is een Proxmox Backup Server met een agent.
 type Server struct {
-	NodeID      uuid.UUID  `json:"node_id"`
-	Hostname    string     `json:"hostname"`
-	Node        string     `json:"node"`
+	NodeID   uuid.UUID `json:"node_id"`
+	Hostname string    `json:"hostname"`
+	Node     string    `json:"node"`
+	// Address is het adres van de node in ClusterForge; Proxmox bereikt de
+	// PBS meestal daarop.
+	Address     string     `json:"address,omitempty"`
 	Version     string     `json:"version,omitempty"`
 	Datastores  []string   `json:"datastores"`
 	Protocol    int        `json:"protocol"`
@@ -107,7 +113,7 @@ func (s *Service) Servers(ctx context.Context) ([]Server, error) {
 		if json.Unmarshal(r.Pbs, &f) != nil {
 			continue
 		}
-		v := Server{NodeID: r.ID, Hostname: r.Hostname, Node: f.Node, Version: f.Version, Datastores: f.Datastores, HeartbeatAt: r.HeartbeatAt}
+		v := Server{NodeID: r.ID, Hostname: r.Hostname, Address: r.Address, Node: f.Node, Version: f.Version, Datastores: f.Datastores, HeartbeatAt: r.HeartbeatAt}
 		if v.Datastores == nil {
 			v.Datastores = []string{}
 		}

@@ -4,12 +4,14 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/google/uuid"
 
 	"github.com/Jonasz1996/clusterforge/internal/events"
 	"github.com/Jonasz1996/clusterforge/internal/httpapi/gen"
 	"github.com/Jonasz1996/clusterforge/internal/pbs"
+	"github.com/Jonasz1996/clusterforge/internal/pvehost"
 	"github.com/Jonasz1996/clusterforge/internal/store"
 	"github.com/Jonasz1996/clusterforge/pkg/protocol"
 )
@@ -103,4 +105,45 @@ func (s *Server) CreatePbsToken(w http.ResponseWriter, r *http.Request, nodeId u
 	}
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusOK, t)
+}
+
+// GetPbsCoverage geeft de back-ups van de nodes (fase 32 M5).
+func (s *Server) GetPbsCoverage(w http.ResponseWriter, r *http.Request, params gen.GetPbsCoverageParams) {
+	maxAge := 15 * time.Minute
+	if params.Fresh != nil && *params.Fresh == "1" {
+		maxAge = 0
+	}
+	c, err := s.pbs.CachedCoverage(r.Context(), maxAge)
+	if err != nil {
+		s.pbsError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, c)
+}
+
+// LinkPbs koppelt een PBS aan een Proxmox-cluster (fase 32 M5).
+func (s *Server) LinkPbs(w http.ResponseWriter, r *http.Request, nodeId uuid.UUID) {
+	p, ok := requireAdmin(w, r)
+	if !ok {
+		return
+	}
+	var in pbs.LinkInput
+	if !decode(w, r, &in) {
+		return
+	}
+	j, err := s.pbs.Link(r.Context(), events.User(p.User.ID), nodeId, in)
+	if err != nil {
+		var ve pvehost.ValidationError
+		switch {
+		case errors.As(err, &ve):
+			writeError(w, http.StatusBadRequest, "invalid", ve.Msg)
+			return
+		case errors.Is(err, pvehost.ErrNotFound):
+			writeError(w, http.StatusNotFound, "not_found", "geen Proxmox-cluster met die naam")
+			return
+		}
+		s.pbsError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, toAPIJob(j, &p.User.Username))
 }

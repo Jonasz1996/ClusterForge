@@ -17,6 +17,7 @@ export type PbsServer = {
   node_id: string;
   hostname: string;
   node: string;
+  address?: string;
   version?: string;
   datastores: string[];
   protocol: number;
@@ -272,4 +273,52 @@ export async function pbsCreateToken(
     full_tokenid: string;
     value: string;
   };
+}
+
+// --- Koppeling en dekking (fase 32 M5) ---
+
+export type NodeCoverage = {
+  node_id: string;
+  hostname: string;
+  vmid: number;
+  guest_type?: string;
+  cluster_id?: string;
+  cluster_name?: string;
+  environment?: string;
+  server?: string;
+  server_id?: string;
+  store?: string;
+  ns?: string;
+  last_backup?: number;
+  count?: number;
+  verify?: string;
+  failed_verify?: number;
+  state: "ok" | "warn" | "crit";
+  why?: string;
+  backup_type?: string;
+};
+
+export type PbsCoverage = { at: string; nodes: NodeCoverage[]; errors: string[] };
+
+export function usePbsCoverage(fresh: boolean) {
+  return useQuery({
+    queryKey: ["pbs", "coverage", fresh],
+    queryFn: async () => unwrap(await api.GET("/pbs/coverage", { params: { query: { fresh: fresh ? "1" : undefined } } })) as unknown as PbsCoverage,
+    refetchInterval: 120_000,
+    retry: false,
+  });
+}
+
+export type PbsLinkInput = {
+  datacenter: string;
+  datacenter_name: string;
+  datastore: string;
+  storage: string;
+  namespace?: string;
+  server: string;
+  role: "DatastoreBackup" | "DatastorePowerUser";
+};
+
+export async function pbsLink(id: string, body: PbsLinkInput): Promise<Job> {
+  return unwrap(await api.POST("/pbs/servers/{nodeId}/link", { params: { path: { nodeId: id } }, body })) as unknown as Job;
 }

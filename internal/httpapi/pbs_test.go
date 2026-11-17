@@ -52,6 +52,10 @@ func (p *pbsSim) cmd(_ context.Context, _ string, argv, _ []string, out io.Write
 		_, _ = io.WriteString(out, `"`+pbsUPID+`"`+"\n")
 	case strings.HasPrefix(c, "proxmox-backup-debug api create /access/users/pve@pbs/token/pve "):
 		_, _ = io.WriteString(out, `{"tokenid":"pve@pbs!pve","value":"7f1c2d3e-geheim"}`+"\n")
+	case strings.HasPrefix(c, "proxmox-backup-debug api create /access/users/pve-thuislab@pbs/token/clusterforge "):
+		_, _ = io.WriteString(out, `{"tokenid":"pve-thuislab@pbs!clusterforge","value":"aaaa-bbbb-link"}`+"\n")
+	case strings.HasPrefix(c, "proxmox-backup-debug api create /access/users "), strings.HasPrefix(c, "proxmox-backup-debug api set /access/acl "):
+		_, _ = io.WriteString(out, "null\n")
 	case strings.HasPrefix(c, "proxmox-backup-debug api create /config/remote "):
 		_, _ = io.WriteString(out, "null\n")
 	default:
@@ -69,12 +73,8 @@ func (p *pbsSim) exec(ctx context.Context, name string, args ...string) ([]byte,
 	return []byte(buf.String()), err
 }
 
-// TestPBS: fase 32. De agent herkent de PBS, het overzicht met
-// waarschuwingen, lezen van de API, een taak die op de UPID wacht, een
-// geheim dat niet in de uitvoer komt en een aanroep die niet mag.
-func TestPBS(t *testing.T) {
-	e, c := adminClient(t)
-	sim := &pbsSim{}
+func startPBS(t *testing.T, e *testEnv, c *client, sim *pbsSim) node {
+	t.Helper()
 	var host node
 	if s := c.do("POST", "/api/v1/nodes", map[string]any{"hostname": "pbs1"}, &host); s != http.StatusCreated {
 		t.Fatalf("node pbs1: %d", s)
@@ -95,6 +95,16 @@ func TestPBS(t *testing.T) {
 		}
 	})
 
+	return host
+}
+
+// TestPBS: fase 32. De agent herkent de PBS, het overzicht met
+// waarschuwingen, lezen van de API, een taak die op de UPID wacht, een
+// geheim dat niet in de uitvoer komt en een aanroep die niet mag.
+func TestPBS(t *testing.T) {
+	e, c := adminClient(t)
+	sim := &pbsSim{}
+	host := startPBS(t, e, c, sim)
 	var list struct {
 		Items []struct {
 			NodeID     string   `json:"node_id"`
@@ -193,5 +203,85 @@ func TestPBS(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("de agent kreeg het wachtwoord niet: %v", sim.calls)
+	}
+}
+
+// TestPBSLink: fase 32 M5. Koppelen aan een Proxmox-cluster maakt een
+// gebruiker en token op de PBS, geeft rechten op de datastore en zet de
+// storage in Proxmox met de fingerprint; het geheim staat nergens leesbaar.
+func TestPBSLink(t *testing.T) {
+	e, c := adminClient(t)
+	pve, _, _ := newPVE(t)
+	psim := &pveSim{t: t, pve: pve}
+	var storageCmd string
+	var mu sync.Mutex
+	psim.extra = func(cmd string, out io.Writer) (int, bool) {
+		switch {
+		case strings.HasPrefix(cmd, "pvesh create /storage "):
+			mu.Lock()
+			storageCmd = cmd
+			mu.Unlock()
+			_, _ = io.WriteString(out, "null\n")
+		case strings.HasPrefix(cmd, "pvesh get /cluster/status "):
+			_, _ = io.WriteString(out, `[{"type":"cluster","name":"thuislab","quorate":1}]`)
+		case strings.HasPrefix(cmd, "pvesh get "):
+			_, _ = io.WriteString(out, `[]`)
+		default:
+			return 0, false
+		}
+		return 0, true
+	}
+	startPVEHost(t, e, c, psim, []byte("x"))
+	sim := &pbsSim{}
+	host := startPBS(t, e, c, sim)
+	eventually(t, "PBS en Proxmox", func() bool {
+		var l struct {
+			Items []struct {
+				Why string `json:"why"`
+			} `json:"items"`
+		}
+		var d struct {
+			Items []struct {
+				Via *string `json:"via"`
+			} `json:"items"`
+		}
+		c.do("GET", "/api/v1/pbs/servers", nil, &l)
+		c.do("GET", "/api/v1/pve/datacenters", nil, &d)
+		return len(l.Items) == 1 && l.Items[0].Why == "" && len(d.Items) == 1 && d.Items[0].Via != nil
+	})
+	in := map[string]any{"datacenter": "thuislab", "datacenter_name": "thuislab", "datastore": "store1", "storage": "pbs-store1", "server": "10.0.0.9", "role": "DatastoreBackup"}
+	if s := c.do("POST", "/api/v1/pbs/servers/"+host.ID+"/link", map[string]any{"datacenter": "thuislab", "datastore": "bestaat-niet", "storage": "x1", "server": "10.0.0.9"}, nil); s != 400 {
+		t.Fatalf("onbekende datastore: %d", s)
+	}
+	var j job
+	if s := c.do("POST", "/api/v1/pbs/servers/"+host.ID+"/link", in, &j); s != 202 {
+		t.Fatalf("koppelen: %d", s)
+	}
+	if j = waitJob(t, c, j.ID); j.Status != "succeeded" {
+		t.Fatalf("storage-taak: %+v", j)
+	}
+	mu.Lock()
+	cmd := storageCmd
+	mu.Unlock()
+	for _, want := range []string{"--type=pbs", "--datastore=store1", "--server=10.0.0.9", "--username=pve-thuislab@pbs!clusterforge", "--password=aaaa-bbbb-link", "--fingerprint=aa:bb", "--storage=pbs-store1"} {
+		if !strings.Contains(cmd, want) {
+			t.Errorf("storage zonder %s: %s", want, cmd)
+		}
+	}
+	sim.mu.Lock()
+	acl := false
+	for _, call := range sim.calls {
+		if strings.HasPrefix(call, "proxmox-backup-debug api set /access/acl ") && strings.Contains(call, "--path=/datastore/store1") && strings.Contains(call, "--role=DatastoreBackup") && strings.Contains(call, "--auth-id=pve-thuislab@pbs!clusterforge") {
+			acl = true
+		}
+	}
+	sim.mu.Unlock()
+	if !acl {
+		t.Error("geen rechten op de datastore gegeven")
+	}
+	var raw map[string]any
+	c.do("GET", "/api/v1/jobs/"+j.ID, nil, &raw)
+	if strings.Contains(fmt.Sprint(raw), "aaaa-bbbb-link") {
+		t.Fatal("het tokengeheim staat in de taak")
 	}
 }

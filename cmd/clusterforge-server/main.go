@@ -266,7 +266,7 @@ func serve() error {
 	pvh.Box = box
 	// Fase 32: Proxmox Backup Server via de agent (protocol 49).
 	pbsSvc := pbs.NewService(pool, ev, log, runner, bus)
-	pbsSvc.Box = box
+	pbsSvc.Box, pbsSvc.Hosts = box, pvh
 	dep.Hosts = pvh
 	// Een database als onderdeel van een cluster: MariaDB Galera op de
 	// nodes die er al zijn, met het geheugengebruik uit VictoriaMetrics in
@@ -456,6 +456,7 @@ func serve() error {
 	goLoop(ctx, log, "security", secs.Loop)
 	goLoop(ctx, log, "soc", socs.Run)
 	goLoop(ctx, log, "docker", dkr.Loop)
+	goLoop(ctx, log, "pbs", pbsSvc.Watch)
 	if git.Enabled() {
 		goLoop(ctx, log, "git", git.Run)
 	}

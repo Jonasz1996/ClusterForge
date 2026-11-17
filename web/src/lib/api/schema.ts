@@ -4581,6 +4581,42 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/pbs/coverage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Back-ups van de nodes die een Proxmox-gast zijn - laatste back-up, verificatie en stand per node (fase 32) */
+        get: operations["getPbsCoverage"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/pbs/servers/{nodeId}/link": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** De PBS als storage aan een Proxmox-cluster koppelen (admin) - eigen gebruiker en token, rechten op de datastore, storage met fingerprint */
+        post: operations["linkPbs"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/pve/datacenters": {
         parameters: {
             query?: never;
@@ -21975,6 +22011,62 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PveObject"];
+                };
+            };
+            400: components["responses"]["Error"];
+            401: components["responses"]["Error"];
+            403: components["responses"]["Error"];
+            404: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+        };
+    };
+    getPbsCoverage: {
+        parameters: {
+            query?: {
+                /** @description 1 leest alle PBS'en opnieuw in plaats van de laatste ronde */
+                fresh?: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description OK */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PveObject"];
+                };
+            };
+            401: components["responses"]["Error"];
+            502: components["responses"]["Error"];
+        };
+    };
+    linkPbs: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                nodeId: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PveObject"];
+            };
+        };
+        responses: {
+            /** @description De taak die de storage in Proxmox zet */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Job"];
                 };
             };
             400: components["responses"]["Error"];

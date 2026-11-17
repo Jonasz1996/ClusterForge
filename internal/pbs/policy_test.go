@@ -79,3 +79,26 @@ func TestWarnings(t *testing.T) {
 		t.Error("ernstige eerst")
 	}
 }
+
+func TestJudge(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	cases := []struct {
+		n     NodeCoverage
+		state string
+		why   string
+	}{
+		{NodeCoverage{}, "crit", "geen back-up"},
+		{NodeCoverage{LastBackup: now.Add(-2 * time.Hour).Unix(), Verify: "ok"}, "ok", ""},
+		{NodeCoverage{LastBackup: now.Add(-2 * time.Hour).Unix()}, "ok", "nog niet geverifieerd"},
+		{NodeCoverage{LastBackup: now.Add(-48 * time.Hour).Unix(), Verify: "ok"}, "warn", "48 uur oud"},
+		{NodeCoverage{LastBackup: now.Add(-10 * 24 * time.Hour).Unix(), Verify: "ok"}, "crit", "10 dagen oud"},
+		{NodeCoverage{LastBackup: now.Add(-2 * time.Hour).Unix(), Verify: "failed"}, "crit", "kapot"},
+		{NodeCoverage{LastBackup: now.Add(-2 * time.Hour).Unix(), Verify: "ok", FailedVerify: 2}, "warn", "2 oudere"},
+	}
+	for i, c := range cases {
+		judge(&c.n, now)
+		if c.n.State != c.state || !strings.Contains(c.n.Why, c.why) {
+			t.Errorf("%d: %s %q, verwacht %s %q", i, c.n.State, c.n.Why, c.state, c.why)
+		}
+	}
+}
